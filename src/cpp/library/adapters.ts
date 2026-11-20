@@ -29,6 +29,7 @@ import {
   requireMoveConstruction,
   requireMoves,
   requireRelocation,
+  type ValueComparison,
 } from './elements';
 import type { Library } from './registry';
 import { SequenceEditor } from './sequenceEdits';
@@ -60,7 +61,7 @@ export function adapterClass(
   cls.isComplete = true;
   const compiler = library.compiler;
   const order = kind === 'priority_queue' ? comparatorOrder(compiler, element, comparator, 0) : undefined;
-  const less = (a: Value, b: Value): boolean => (order as (x: Value, y: Value) => number)(a, b) < 0;
+  const less: ValueComparison<boolean> = (a, b, frame) => (order as ValueComparison<number>)(a, b, frame) < 0;
   let elementOps: ElementOperations | undefined;
   const ops = (): ElementOperations => {
     elementOps ??= elementOperations(compiler, element, 0);
@@ -292,7 +293,7 @@ class Heap {
     private readonly frame: Frame,
     private readonly sequence: SequenceValue,
     private readonly operations: ElementOperations,
-    private readonly less: (a: Value, b: Value) => boolean
+    private readonly order: ValueComparison<boolean>
   ) {
     this.items = sequence.items;
   }
@@ -358,6 +359,11 @@ class Heap {
       }
       this.assign(hole, value);
     });
+  }
+
+  private less(a: Value, b: Value): boolean {
+    this.frame.runtime.spend();
+    return this.order(a, b, this.frame);
   }
 
   private largerChild(parent: number): number {

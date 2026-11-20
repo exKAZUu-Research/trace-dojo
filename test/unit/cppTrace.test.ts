@@ -378,6 +378,36 @@ int main() {
 });
 
 test.each([
+  ['std::set<std::vector<int>> s; std::vector<int> k(512, 1); s.insert(k);', 's.find(k);'],
+  ['std::set<std::vector<int>> s; std::vector<int> k(512, 1); s.insert(k);', 's.contains(k);'],
+  [
+    'std::set<std::vector<int>, std::greater<std::vector<int>>> s; std::vector<int> k(512, 1); s.insert(k);',
+    's.count(k);',
+  ],
+  ['std::map<std::vector<int>, int> s; std::vector<int> k(512, 1); s[k] = 1;', 's[k];'],
+  ['std::unordered_map<int, std::vector<int>> a, b; a[1].resize(512, 1); b[1].resize(512, 1);', 'a == b;'],
+  ['std::priority_queue<std::vector<int>> q; std::vector<int> k(512, 1); q.push(k);', 'q.push(k);'],
+])('meters key comparisons in %s %s', (setup, statement) => {
+  const program = `#include <functional>
+#include <map>
+#include <queue>
+#include <set>
+#include <unordered_map>
+#include <vector>
+int main() {
+  ${setup}
+  for (int i = 0; i < 8; ++i) { ${statement} }
+}`;
+  const previous = LIMITS.maxOperations;
+  LIMITS.maxOperations = 3000;
+  try {
+    expect(executeProgram('cpp', program)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  } finally {
+    LIMITS.maxOperations = previous;
+  }
+});
+
+test.each([
   ['list', '=='],
   ['vector', '!='],
 ])('rejects %s iterator comparison %s across different sequences', (container, operator) => {

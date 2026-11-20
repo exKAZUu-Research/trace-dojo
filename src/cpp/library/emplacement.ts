@@ -24,7 +24,7 @@ export interface EntryTable<T, Position = number> {
   make: () => T;
   keyOf: (entry: Value) => Value;
   /** The position of an entry with the key, or undefined when there is none or the container takes equal keys. */
-  lookup: (self: T, key: Value) => Position | undefined;
+  lookup: (frame: Frame, self: T, key: Value) => Position | undefined;
   insert: (frame: Frame, self: T, entry: Value, hint?: Ptr) => [Position, boolean];
   checkHint?: (self: T, hint: Ptr) => void;
   ops: () => ElementOperations;
@@ -283,7 +283,7 @@ function emplaceEntry<T, Position>(
   { mappedLocation, hint }: { mappedLocation?: (self: T, at: Position) => Ptr; hint?: Ptr } = {}
 ): [Position, boolean] {
   if (hint) table.checkHint?.(self, hint);
-  const existing = key === undefined ? undefined : table.lookup(self, key);
+  const existing = key === undefined ? undefined : table.lookup(frame, self, key);
   if (existing !== undefined) {
     if (mappedLocation) assign?.(mappedLocation(self, existing));
     return [existing, false];

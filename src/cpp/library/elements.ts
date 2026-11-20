@@ -479,7 +479,7 @@ function defaultConstructor(
 /** A comparison of two elements, as `<` or a comparator object or function gives it. */
 export type Compare = (frame: Frame, a: Value, b: Value) => boolean;
 
-export type ValueComparison<T> = (a: Value, b: Value, frame?: Frame) => T;
+export type ValueComparison<T> = (a: Value, b: Value, frame: Frame) => T;
 
 /** Compares two values of a type with `<` as the library's default comparators do, or undefined when `<` does not apply. */
 export function lessThan(type: Type): ValueComparison<number> | undefined {

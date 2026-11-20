@@ -26,6 +26,7 @@ import {
   equalTo,
   requireDefaultConstruction,
   requireElementUse,
+  type ValueComparison,
 } from './elements';
 import {
   addRangeMembers,
@@ -315,7 +316,7 @@ export class HashValue extends MapValue {
   constructor(
     readonly hash: (value: Value) => bigint,
     readonly keyOf: (entry: Value) => Value,
-    readonly equal: (a: Value, b: Value) => boolean,
+    readonly equal: ValueComparison<boolean>,
     entryType: Type
   ) {
     super(entryType);
@@ -400,26 +401,27 @@ export class HashValue extends MapValue {
     for (let node = this.head.next; node; node = node.next) yield node.value;
   }
 
-  findNode(key: Value): HashNode | undefined {
+  findNode(frame: Frame, key: Value): HashNode | undefined {
     // libc++ can link copied nodes before it updates size. Lookup and iteration then see different state.
-    return this.size === 0 ? undefined : this.lookup(key);
+    return this.size === 0 ? undefined : this.lookup(frame, key);
   }
 
-  lookup(key: Value): HashNode | undefined {
+  lookup(frame: Frame, key: Value): HashNode | undefined {
     const hash = this.hash(key);
     const count = this.buckets.length;
     if (count === 0) return;
     const index = constrain(hash, count);
     let node = this.buckets[index]?.next;
     for (; node && (node.hash === hash || constrain(node.hash, count) === index); node = node.next) {
-      if (node.hash === hash && this.equal(this.keyOf(node.value), key)) return node;
+      frame.runtime.spend();
+      if (node.hash === hash && this.equal(this.keyOf(node.value), key, frame)) return node;
     }
   }
 
   /** Inserts an entry as `__emplace_unique_key_args` does, giving its position and whether it was inserted. */
   insert(frame: Frame, entry: Value): [HashNode, boolean] {
     const key = this.keyOf(entry);
-    const existing = this.lookup(key);
+    const existing = this.lookup(frame, key);
     if (existing) return [existing, false];
     frame.runtime.reserve(3);
     const hash = this.hash(key);
@@ -652,7 +654,7 @@ export function unorderedClass(
   const table: EntryTable<HashValue, HashNode> = {
     make,
     keyOf,
-    lookup: (self, key) => self.lookup(key),
+    lookup: (frame, self, key) => self.lookup(frame, key),
     insert: (frame, self, entry) => self.insert(frame, entry),
     ops,
   };
@@ -688,7 +690,7 @@ export function unorderedClass(
               first.size === second.size &&
               first.nodes().every((node) => {
                 frame.runtime.spend();
-                const found = second.findNode(keyOf(node.value));
+                const found = second.findNode(frame, keyOf(node.value));
                 return (
                   found !== undefined &&
                   (!valuesEqual ||
@@ -715,7 +717,7 @@ export function unorderedClass(
         run: compiler_.subscriptObject(left, keyRun, (frame, receiver, key) => {
           const self = receiver as HashValue;
           const keyValue = (key as Ptr).read();
-          let node = self.lookup(keyValue);
+          let node = self.lookup(frame, keyValue);
           if (!node) {
             [node] = self.insert(
               frame,
@@ -807,14 +809,20 @@ export function unorderedClass(
     const it = isConst ? constIterator : iterator;
     method('begin', [], it, (self) => self.first(), isConst);
     method('end', [], it, (self) => self.iterator(undefined), isConst);
-    method('find', [constRef(keyType)], it, (self, [k]) => self.iterator(self.findNode(keyArg(k))), isConst);
+    method(
+      'find',
+      [constRef(keyType)],
+      it,
+      (self, [k], frame) => self.iterator(self.findNode(frame, keyArg(k))),
+      isConst
+    );
     if (isMap) {
       method(
         'at',
         [constRef(keyType)],
         referenceTo(isConst ? withConst(valueType as Type) : (valueType as Type)),
         (self, [k], frame) => {
-          const node = self.findNode(keyArg(k));
+          const node = self.findNode(frame, keyArg(k));
           if (!node) return throwLibrary(frame, library.exception('out_of_range'), 'unordered_map::at: key not found');
           return new Ptr(node.value as CObject, 1);
         },
@@ -824,8 +832,8 @@ export function unorderedClass(
   }
   method('cbegin', [], constIterator, (self) => self.first(), true);
   method('cend', [], constIterator, (self) => self.iterator(undefined), true);
-  method('count', [constRef(keyType)], SIZE_T, (self, [k]) => (self.findNode(keyArg(k)) ? 1n : 0n), true);
-  method('contains', [constRef(keyType)], BOOL, (self, [k]) => (self.findNode(keyArg(k)) ? 1 : 0), true);
+  method('count', [constRef(keyType)], SIZE_T, (self, [k], frame) => (self.findNode(frame, keyArg(k)) ? 1n : 0n), true);
+  method('contains', [constRef(keyType)], BOOL, (self, [k], frame) => (self.findNode(frame, keyArg(k)) ? 1 : 0), true);
   addMethod(
     cls,
     native(
@@ -840,7 +848,7 @@ export function unorderedClass(
     )
   );
   method('erase', [constRef(keyType)], SIZE_T, (self, [k], frame) => {
-    const node = self.findNode(keyArg(k));
+    const node = self.findNode(frame, keyArg(k));
     if (!node) return 0n;
     const removed = self.remove(node);
     ops().destroy?.(frame, removed);

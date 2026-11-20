@@ -487,7 +487,7 @@ export class OrderedValue extends MapValue {
   }
 }
 
-type Order = (a: Value, b: Value) => number;
+type Order = ValueComparison<number>;
 
 const keyWithoutOrder = (keyType: Type): string =>
   `${typeName(keyType)} の値は < で比べられないので、キーにできません。`;
@@ -507,7 +507,7 @@ export function comparatorOrder(
     if (name === 'std::less' || name === 'std::greater') {
       const apply = comparator.cls.library.apply?.(unqualified(keyType), unqualified(keyType));
       if (!apply) return compiler.error(row, `${typeName(comparator)} は ${typeName(keyType)} のキーに使えません。`);
-      return (a, b) => (apply(a, b) ? -1 : apply(b, a) ? 1 : 0);
+      return (a, b, frame) => (apply(a, b, frame) ? -1 : apply(b, a, frame) ? 1 : 0);
     }
   }
   return compiler.unsupported(row, `比べ方に ${typeName(comparator)} を使うこと`);
@@ -609,36 +609,39 @@ export function orderedClass(
   const keyOf = isMap ? (entry: Value): Value => (entry as CObject).values[0] : (entry: Value): Value => entry;
   const make = (): OrderedValue => new OrderedValue(entryType);
   /** The first position whose key is not less than `key` (`upper` false) or greater than it (`upper` true). */
-  const bound = (self: OrderedValue, key: Value, upper: boolean): number => {
+  const bound = (frame: Frame, self: OrderedValue, key: Value, upper: boolean): number => {
     let low = 0;
     let high = self.entries.length;
     while (low < high) {
       const middle = (low + high) >> 1;
-      const comparison = order(keyOf(self.entries[middle]), key);
+      frame.runtime.spend();
+      const comparison = order(keyOf(self.entries[middle]), key, frame);
       if (comparison < 0 || (upper && comparison === 0)) low = middle + 1;
       else high = middle;
     }
     return low;
   };
-  const find = (self: OrderedValue, key: Value): number => {
-    const at = bound(self, key, false);
-    return at < self.entries.length && order(keyOf(self.entries[at]), key) === 0 ? at : -1;
+  const find = (frame: Frame, self: OrderedValue, key: Value): number => {
+    const at = bound(frame, self, key, false);
+    return at < self.entries.length && order(keyOf(self.entries[at]), key, frame) === 0 ? at : -1;
   };
   /** Inserts an entry, giving its position and whether it was inserted, as `insert` does. */
   const insert = (frame: Frame, self: OrderedValue, entry: Value, hint?: Ptr): [number, boolean] => {
     const key = keyOf(entry);
     if (!isMulti) {
-      const existing = find(self, key);
+      const existing = find(frame, self, key);
       if (existing >= 0) return [existing, false];
     }
     frame.runtime.reserve(1);
-    const at = isMulti && hint ? hintedPosition(self, key, positionOf(self, hint)) : bound(self, key, true);
+    const at =
+      isMulti && hint ? hintedPosition(frame, self, key, positionOf(self, hint)) : bound(frame, self, key, true);
     self.splice(at, 0, entry);
     return [at, true];
   };
-  const hintedPosition = (self: OrderedValue, key: Value, hint: number): number => {
-    if (hint < self.entries.length && order(keyOf(self.entries[hint]), key) < 0) return bound(self, key, false);
-    if (hint > 0 && order(key, keyOf(self.entries[hint - 1])) < 0) return bound(self, key, true);
+  const hintedPosition = (frame: Frame, self: OrderedValue, key: Value, hint: number): number => {
+    if (hint < self.entries.length && order(keyOf(self.entries[hint]), key, frame) < 0)
+      return bound(frame, self, key, false);
+    if (hint > 0 && order(key, keyOf(self.entries[hint - 1]), frame) < 0) return bound(frame, self, key, true);
     return hint;
   };
   const destroyAll = (frame: Frame, entries: Value[]): void => {
@@ -647,8 +650,8 @@ export function orderedClass(
   const table: EntryTable<OrderedValue> = {
     make,
     keyOf,
-    lookup: (self, key) => {
-      const at = isMulti ? -1 : find(self, key);
+    lookup: (frame, self, key) => {
+      const at = isMulti ? -1 : find(frame, self, key);
       return at >= 0 ? at : undefined;
     },
     insert,
@@ -688,7 +691,7 @@ export function orderedClass(
           run: compiler_.subscriptObject(left, keyRun, (frame, receiver, key) => {
             const self = receiver as OrderedValue;
             const keyValue = (key as Ptr).read();
-            let at = find(self, keyValue);
+            let at = find(frame, self, keyValue);
             if (at < 0) {
               const keyOps = elementOperations(compiler, unqualified(keyType), row);
               [at] = insert(
@@ -733,7 +736,7 @@ export function orderedClass(
               result = less(x[index], y[index], frame);
             }
             if (result === 0) result = x.length - y.length;
-            return orderTest(operator, () => result)(undefined, undefined);
+            return orderTest(operator, () => result)(undefined, undefined, frame);
           }),
         };
       }
@@ -833,8 +836,8 @@ export function orderedClass(
         return pairResult(
           frame,
           range,
-          self.iteratorLocation(bound(self, value, false)),
-          self.iteratorLocation(bound(self, value, true))
+          self.iteratorLocation(bound(frame, self, value, false)),
+          self.iteratorLocation(bound(frame, self, value, true))
         );
       },
       { isConst }
@@ -845,8 +848,8 @@ export function orderedClass(
       'find',
       [constRef(keyType)],
       it,
-      (self, [k]) => {
-        const at = find(self, keyArg(k));
+      (self, [k], frame) => {
+        const at = find(frame, self, keyArg(k));
         return self.iteratorLocation(at < 0 ? self.entries.length : at);
       },
       { isConst }
@@ -855,21 +858,27 @@ export function orderedClass(
       'lower_bound',
       [constRef(keyType)],
       it,
-      (self, [k]) => self.iteratorLocation(bound(self, keyArg(k), false)),
+      (self, [k], frame) => self.iteratorLocation(bound(frame, self, keyArg(k), false)),
       {
         isConst,
       }
     );
-    method('upper_bound', [constRef(keyType)], it, (self, [k]) => self.iteratorLocation(bound(self, keyArg(k), true)), {
-      isConst,
-    });
+    method(
+      'upper_bound',
+      [constRef(keyType)],
+      it,
+      (self, [k], frame) => self.iteratorLocation(bound(frame, self, keyArg(k), true)),
+      {
+        isConst,
+      }
+    );
     if (isMap && !isMulti) {
       method(
         'at',
         [constRef(keyType)],
         referenceTo(isConst ? withConst(valueType as Type) : (valueType as Type)),
         (self, [k], frame) => {
-          const at = find(self, keyArg(k));
+          const at = find(frame, self, keyArg(k));
           if (at < 0) return throwLibrary(frame, library.exception('out_of_range'), 'map::at:  key not found');
           return new Ptr(self.entries[at] as CObject, 1);
         },
@@ -883,10 +892,12 @@ export function orderedClass(
     'count',
     [constRef(keyType)],
     SIZE_T,
-    (self, [k]) => BigInt(bound(self, keyArg(k), true) - bound(self, keyArg(k), false)),
+    (self, [k], frame) => BigInt(bound(frame, self, keyArg(k), true) - bound(frame, self, keyArg(k), false)),
     { isConst: true }
   );
-  method('contains', [constRef(keyType)], BOOL, (self, [k]) => (find(self, keyArg(k)) >= 0 ? 1 : 0), { isConst: true });
+  method('contains', [constRef(keyType)], BOOL, (self, [k], frame) => (find(frame, self, keyArg(k)) >= 0 ? 1 : 0), {
+    isConst: true,
+  });
   const copyEntry = { uses: (row: number) => requireElementUse(compiler, entryType, row, 'copy') };
   method(
     'insert',
@@ -905,8 +916,8 @@ export function orderedClass(
   );
   method('erase', [constRef(keyType)], SIZE_T, (self, [k], frame) => {
     const keyValue = keyArg(k);
-    const from = bound(self, keyValue, false);
-    const to = bound(self, keyValue, true);
+    const from = bound(frame, self, keyValue, false);
+    const to = bound(frame, self, keyValue, true);
     const removed = self.splice(from, to - from);
     destroyAll(frame, removed);
     return BigInt(removed.length);

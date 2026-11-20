@@ -60,7 +60,7 @@ interface LibraryMembers {
   /** The member functions `memberCall` compiles. */
   constructingMembers?: readonly string[];
   /** The operation of a function object such as `std::greater<int>` on two values of a type, if it applies. */
-  apply?: (left: Type, right: Type) => ((a: Value, b: Value, frame?: Frame) => Value) | undefined;
+  apply?: (left: Type, right: Type) => ((a: Value, b: Value, frame: Frame) => Value) | undefined;
   /** Whether an iterator goes backward, as `std::reverse_iterator` does. */
   isReverse?: boolean;
   /** The category of an iterator, which decides its operators and the algorithms that accept it. */
