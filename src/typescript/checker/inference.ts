@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 705 -- Keeps generic candidate collection, constraint fitting and inference completion together.
+// code-gauge-allow-file fileNcss 743 -- Keeps generic candidate collection, constraint fitting and inference completion together.
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import type { Checker, Mapper } from './checker';
 import { isUnit } from './flow';
@@ -27,6 +27,7 @@ import {
   type Structure,
   type TemplateLiteralType,
   type TupleElement,
+  type TupleInfo,
   type Type,
   typeMembers,
   type TypeParameter,
@@ -56,6 +57,7 @@ export const InferencePriority = {
 
 export interface Inference {
   candidates: Type[];
+  candidateDepths: Map<number, number>;
   contravariant: Type[];
   /** The priority of the candidates so far. */
   priority: number;
@@ -88,6 +90,7 @@ type Recurse = (
 
 interface InferencePath {
   active: Set<string>;
+  argumentDepth: number;
   originalTarget: Type;
   sources: Type[];
   targets: Type[];
@@ -159,7 +162,7 @@ export class TypeInference {
     }
     const shouldWiden =
       widen && inference.topLevel && !parameter.isConst && !this.c.literals.hasPrimitiveConstraint(parameter);
-    const candidates = inference.candidates.map((candidate) =>
+    const candidates = equivalentInferenceCandidates(inference).map((candidate) =>
       shouldWiden ? this.c.widenLiteral(candidate) : regularOf(candidate)
     );
     const covariantType = this.commonSupertype(candidates);
@@ -228,6 +231,7 @@ export class TypeInference {
   inferTypes(run: InferenceRun, source: Type, target: Type, covariant: boolean): void {
     this.inferPair(run, source, target, covariant, {
       active: new Set(),
+      argumentDepth: 0,
       originalTarget: target,
       sources: [],
       targets: [],
@@ -317,7 +321,7 @@ export class TypeInference {
     if (target.noInfer || !couldContainTypeVariables(target)) return;
     const variable = inferenceVariable(target, run);
     if (variable) {
-      this.inferToParameter(run, source, variable, covariant, isTopLevelTypeParameter(path.originalTarget, variable));
+      this.inferToParameter(run, source, variable, covariant, path);
       return;
     }
     const key = `${source.id}/${target.id}/${run.priority}/${covariant}`;
@@ -392,9 +396,9 @@ export class TypeInference {
               new Map([[source.checkType.id, this.c.substitutionOf(source.checkType, source.extendsType)]])
             )
           : source.trueType;
-      recurse(fromTrue, target.trueType);
       recurse(source.checkType, target.checkType);
       recurse(source.extendsType, target.extendsType);
+      recurse(fromTrue, target.trueType);
       recurse(source.falseType, target.falseType);
       return;
     }
@@ -425,7 +429,7 @@ export class TypeInference {
     source: Type,
     target: TypeParameter,
     covariant: boolean,
-    topLevel: boolean
+    path: InferencePath
   ): void {
     const inference = run.inferences.get(target.id);
     if (!inference) return;
@@ -433,16 +437,27 @@ export class TypeInference {
     if (inference.fixed || run.priority > inference.priority) return;
     if (run.priority < inference.priority) {
       inference.candidates.length = 0;
+      inference.candidateDepths.clear();
       inference.contravariant.length = 0;
       inference.topLevel = true;
       inference.priority = run.priority;
     }
-    const candidates = covariant ? inference.candidates : inference.contravariant;
-    const base = inferenceCandidateBase(source);
-    const index = candidates.findIndex((candidate) => inferenceCandidateBase(candidate) === base);
-    if (index === -1) candidates.push(source);
-    else if (source.kind === 'typeParameter' && source.substitution) candidates[index] = source;
-    if (!topLevel && (run.priority & InferencePriority.ReturnType) === 0) inference.topLevel = false;
+    if (covariant) this.recordCovariantCandidate(inference, source, path.argumentDepth);
+    else if (!inference.contravariant.some((candidate) => candidate.id === source.id))
+      inference.contravariant.push(source);
+    if ((run.priority & InferencePriority.ReturnType) === 0 && !isTopLevelTypeParameter(path.originalTarget, target))
+      inference.topLevel = false;
+  }
+
+  private recordCovariantCandidate(inference: Inference, source: Type, depth: number): void {
+    const previous = inference.candidateDepths.get(source.id);
+    if (previous !== undefined) {
+      if (previous >= depth) return;
+      const index = inference.candidates.findIndex((candidate) => candidate.id === source.id);
+      inference.candidates.splice(index, 1);
+    }
+    inference.candidateDepths.set(source.id, depth);
+    inference.candidates.push(source);
   }
 
   private templateCapture(text: string, constraint: Type): Type {
@@ -547,7 +562,7 @@ export class TypeInference {
       this.inferToMapped(run, source, target.mapped, recurse);
       return;
     }
-    if (source.kind === 'object' && this.inferFromElements(run, source, target, recurse)) return;
+    if (source.kind === 'object' && this.inferFromElements(run, source, target, path, recurse)) return;
     if (this.structuresDefinitelyUnrelated(source, target)) return;
     const { sources, targets } = path;
     sources.push(source);
@@ -643,12 +658,19 @@ export class TypeInference {
   }
 
   /** Infers from the type arguments or elements of related references, arrays, and tuples; whether it applied. */
-  private inferFromElements(run: InferenceRun, source: ObjectType, target: ObjectType, recurse: Recurse): boolean {
-    if (source.objectKind === 'reference' && target.objectKind === 'reference' && source.target === target.target) {
-      const sourceArguments = source.typeArguments ?? [];
-      for (const [index, argument] of (target.typeArguments ?? []).entries()) {
-        if (sourceArguments[index]) recurse(sourceArguments[index], argument);
-      }
+  private inferFromElements(
+    run: InferenceRun,
+    source: ObjectType,
+    target: ObjectType,
+    path: InferencePath,
+    recurse: Recurse
+  ): boolean {
+    if (source.aliasId !== undefined && source.aliasId === target.aliasId && target.aliasArguments?.length) {
+      this.inferFromTypeArguments(source.aliasArguments ?? [], target.aliasArguments, path, recurse);
+      return true;
+    }
+    if (this.hasMatchingReferenceTarget(source, target)) {
+      this.inferFromTypeArguments(source.typeArguments ?? [], target.typeArguments ?? [], path, recurse);
       return true;
     }
     if (this.c.isArrayOrTuple(source) && target.objectKind === 'reference' && this.isArrayLike(target)) {
@@ -658,13 +680,27 @@ export class TypeInference {
     if (!target.tuple) return false;
     if (source.tuple) {
       if (!tupleTypesDefinitelyUnrelated(source, target))
-        this.inferFromTupleElements(run, source.tuple.elements, target.tuple.elements, recurse);
+        this.inferFromTupleElements(run, source.tuple, target.tuple, path, recurse);
       return true;
     }
     if (!this.c.isArrayOrTuple(source)) return false;
     if (!this.structuresDefinitelyUnrelated(source, target))
       this.inferFromOpenArray(this.c.elementTypeOf(source), target.tuple.elements, recurse);
     return true;
+  }
+
+  private hasMatchingReferenceTarget(source: ObjectType, target: ObjectType): boolean {
+    if (source.objectKind !== 'reference' || target.objectKind !== 'reference') return false;
+    return source.target === target.target || (this.c.isArrayOrTuple(source) && this.c.isArrayOrTuple(target));
+  }
+
+  private inferFromTypeArguments(source: Type[], target: Type[], path: InferencePath, recurse: Recurse): void {
+    path.argumentDepth++;
+    try {
+      for (const [index, argument] of target.entries()) if (source[index]) recurse(source[index], argument);
+    } finally {
+      path.argumentDepth--;
+    }
   }
 
   private structuresDefinitelyUnrelated(source: Type, target: Type): boolean {
@@ -696,18 +732,27 @@ export class TypeInference {
 
   private inferFromTupleElements(
     run: InferenceRun,
-    sourceElements: TupleElement[],
-    targetElements: TupleElement[],
+    source: TupleInfo,
+    target: TupleInfo,
+    path: InferencePath,
     recurse: Recurse
   ): void {
+    const sourceElements = source.elements;
+    const targetElements = target.elements;
     if (
       sourceElements.length === targetElements.length &&
       sourceElements.every(
         (element, index) => this.tupleElementShape(element) === this.tupleElementShape(targetElements[index])
       )
     ) {
-      for (const [index, element] of sourceElements.entries())
-        recurse(tupleInferenceType(element), tupleInferenceType(targetElements[index]));
+      const sourceTypes = sourceElements.map(tupleInferenceType);
+      const targetTypes = targetElements.map(tupleInferenceType);
+      if (
+        source.readonly === target.readonly &&
+        sourceElements.every((element, index) => element.optional === targetElements[index].optional)
+      )
+        this.inferFromTypeArguments(sourceTypes, targetTypes, path, recurse);
+      else for (const [index, element] of sourceTypes.entries()) recurse(element, targetTypes[index]);
       return;
     }
     const sourceStart = fixedStartLength(sourceElements);
@@ -1015,7 +1060,13 @@ export function newInferenceRun(parameters: TypeParameter[], contextualSignature
     inferences: new Map(
       parameters.map((parameter) => [
         parameter.id,
-        { candidates: [], contravariant: [], priority: Number.POSITIVE_INFINITY, topLevel: false },
+        {
+          candidates: [],
+          candidateDepths: new Map(),
+          contravariant: [],
+          priority: Number.POSITIVE_INFINITY,
+          topLevel: false,
+        },
       ])
     ),
     parameters,
@@ -1041,6 +1092,19 @@ function inferenceVariable(type: Type, run?: InferenceRun): TypeParameter | unde
 
 function inferenceCandidateBase(type: Type): number {
   return type.kind === 'typeParameter' ? (type.substitution?.base.id ?? type.id) : type.id;
+}
+
+function equivalentInferenceCandidates(inference: Inference): Type[] {
+  if (!inference.candidates.some((type) => type.kind === 'typeParameter' && type.substitution))
+    return inference.candidates;
+  const byBase = new Map<number, Type>();
+  const depth = (type: Type): number => inference.candidateDepths.get(type.id) ?? 0;
+  for (const candidate of inference.candidates) {
+    const base = inferenceCandidateBase(candidate);
+    const previous = byBase.get(base);
+    if (!previous || depth(candidate) <= depth(previous)) byBase.set(base, candidate);
+  }
+  return [...byBase.values()];
 }
 
 function templateCaptures(value: string, texts: string[]): string[] | undefined {

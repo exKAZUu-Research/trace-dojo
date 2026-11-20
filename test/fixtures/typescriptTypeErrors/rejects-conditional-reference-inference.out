@@ -1,0 +1,9 @@
+(11,70): error TS2322: Type 'U' is not assignable to type 'string'.
+(12,79): error TS2322: Type 'U' is not assignable to type 'string'.
+(13,76): error TS2322: Type 'U' is not assignable to type 'string'.
+(14,70): error TS2322: Type 'U' is not assignable to type 'string'.
+(15,71): error TS2322: Type 'U' is not assignable to type 'string'.
+(16,75): error TS2322: Type 'U' is not assignable to type 'string'.
+(20,65): error TS2322: Type 'U' is not assignable to type 'number'.
+(22,93): error TS2339: Property 'tag' does not exist on type 'U'.
+(24,91): error TS2322: Type 'U' is not assignable to type '"a"'.
