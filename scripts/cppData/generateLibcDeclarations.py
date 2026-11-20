@@ -13,8 +13,10 @@ USING_SHADOW = re.compile(r" (\w+) 0x\w+ '([^']+)'(?: '([^']+)')?")
 NAMED_TAG = re.compile(r" (?:struct|class|union|enum) ([A-Za-z]\w*)(?: definition)?$")
 SEMANTIC_PARENT = re.compile(r"^0x\w+ parent 0x\w+")
 STD_FUNCTIONS = {"FunctionDecl", "FunctionTemplateDecl"}
-USING_FUNCTIONS = {"Function", "FunctionTemplate"}
-USING_TYPES = {"Typedef", "TypeAlias", "TypeAliasTemplate", "ClassTemplate", "CXXRecord", "Record", "Enum"}
+USING_KINDS = {
+    "Function": "using", "FunctionTemplate": "using", "Var": "var",
+    **dict.fromkeys(("Typedef", "TypeAlias", "TypeAliasTemplate", "ClassTemplate", "CXXRecord", "Record", "Enum"), "type"),
+}
 STD_OTHER_NAMES = {
     "ClassTemplateDecl", "ConceptDecl", "CXXRecordDecl", "EnumDecl", "NamespaceAliasDecl",
     "NamespaceDecl", "TypeAliasDecl", "TypeAliasTemplateDecl", "TypedefDecl", "VarDecl", "VarTemplateDecl",
@@ -72,13 +74,7 @@ def global_symbols(tree):
 
 def other_global_symbol(category, syntax):
     if category == "UsingShadowDecl":
-        shadow = USING_SHADOW.search(syntax)
-        if shadow:
-            target, name, signature = shadow.groups()
-            if target in USING_TYPES:
-                return name, "type", ""
-            if target == "Var" or target in USING_FUNCTIONS:
-                return name, "var" if target == "Var" else "using", signature or ""
+        return using_symbol(syntax)
     if category in {"RecordDecl", "CXXRecordDecl", "EnumDecl"}:
         tag = NAMED_TAG.search(syntax)
         if tag:
@@ -95,21 +91,33 @@ def std_nodes(tree):
         depth = len(prefix) // 2
         del ancestors[depth:]
         name, is_inline = declaration_name(category, syntax)
-        if ancestors and ancestors[0] == ("NamespaceDecl", "std", False) and not SEMANTIC_PARENT.match(syntax):
-            if all(node == "LinkageSpecDecl" or node == "NamespaceDecl" and inline for node, _, inline in ancestors[1:]):
-                if category == "UsingShadowDecl":
-                    shadow = USING_SHADOW.search(syntax)
-                    if shadow:
-                        target, imported, _ = shadow.groups()
-                        if target in USING_FUNCTIONS:
-                            yield imported, "stdFunction"
-                        elif target == "Var" or target in USING_TYPES:
-                            yield imported, "stdOther"
-                elif name and category in STD_FUNCTIONS:
-                    yield name, "stdFunction"
-                elif name and category in STD_OTHER_NAMES:
-                    yield name, "stdOther"
+        in_std = (
+            bool(ancestors)
+            and ancestors[0] == ("NamespaceDecl", "std", False)
+            and not SEMANTIC_PARENT.match(syntax)
+            and all(node == "LinkageSpecDecl" or node == "NamespaceDecl" and inline for node, _, inline in ancestors[1:])
+        )
         ancestors.append((category, name, is_inline))
+        if not in_std:
+            continue
+        if category == "UsingShadowDecl":
+            imported = using_symbol(syntax)
+            if imported:
+                imported_name, kind, _ = imported
+                yield imported_name, "stdFunction" if kind == "using" else "stdOther"
+        elif name and category in STD_FUNCTIONS:
+            yield name, "stdFunction"
+        elif name and category in STD_OTHER_NAMES:
+            yield name, "stdOther"
+
+
+def using_symbol(syntax):
+    shadow = USING_SHADOW.search(syntax)
+    if shadow:
+        target, name, signature = shadow.groups()
+        kind = USING_KINDS.get(target)
+        if kind:
+            return name, kind, "" if kind == "type" else signature or ""
 
 
 def declaration_name(category, syntax):
