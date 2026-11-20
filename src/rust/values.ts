@@ -194,6 +194,8 @@ export class IterValue {
    * a `zip` of two `TrustedLen` iterators folds as many pairs as the shorter has, taking nothing more from the longer.
    */
   foldNext: (() => Next) | undefined;
+  nth?: (n: bigint) => Next;
+  nthBack?: (n: bigint) => Next;
 
   /**
    * `{:?}` of the iterator as std writes it, for iterators whose own state shows (`Windows { v: .., size: 2 }`):

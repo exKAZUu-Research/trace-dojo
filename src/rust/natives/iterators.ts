@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 832 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss 834 -- One native per method of the standard library.
 import { collectedVecCapacity, inPlaceCapacity, setVecCapacity, sizeTable } from '../capacity';
 import type { DebugPart } from '../debugText';
 import { normalize } from '../infer';
@@ -216,10 +216,11 @@ export function extendedValue(target: Type, item: Type): (value: Value) => Value
 }
 
 function nthBack(ctx: NativeContext, iter: IterValue, n: bigint): Next {
-  return nthItem(ctx, n, () => iter.nextBack!());
+  return iter.nthBack ? iter.nthBack(n) : nthItem(ctx, n, () => iter.nextBack!());
 }
 
 function nth(ctx: NativeContext, iter: IterValue, n: bigint): Next {
+  if (iter.nth && !iter.peeked?.length) return iter.nth(n);
   return nthItem(ctx, n, () => nextOf(iter));
 }
 
@@ -450,7 +451,7 @@ function takeInner(state: FlattenState, end: End): Next {
 
 /** The iterator an element of `flatten` (or a result of `flat_map`'s function) makes, as `IntoIterator` does. */
 function innerIter(ctx: NativeContext, value: Value, type: Type): IterValue {
-  return toIterator(value, type) as IterValue;
+  return ctx.interp.toIter(value, type) as IterValue;
 }
 
 define({

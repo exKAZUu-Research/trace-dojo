@@ -3,7 +3,7 @@ import type { Expr } from './ast';
 import { forEachDirect } from './astWalk';
 import { normalize } from './infer';
 import { derefSteps, typeAfter } from './regions';
-import { shallow, type Type } from './types';
+import { ref, shallow, substitute, type Type } from './types';
 
 interface Projection {
   proj: string[];
@@ -38,6 +38,45 @@ export function capturedPlaces(annotations: Annotations, body: Expr, local: Loca
     places.push({ proj: reborrows ? [...proj, '*'] : proj, type: expr.ty ?? local.type });
     if (expr.kind === 'index') visit(expr.index);
   }
+}
+
+export function captureLayout(
+  annotations: Annotations,
+  body: Expr,
+  local: LocalVar,
+  mode: 'ref' | 'mut' | 'value'
+): Type[] {
+  const captures = new Map<string, { path: string[]; type: Type }>();
+  for (const { proj, type } of capturedPlaces(annotations, body, local)) {
+    const boundary = proj.findIndex((part) => part === '[]' || (mode === 'value' && (part === '#' || part === '*')));
+    if (boundary === -1) captures.set(JSON.stringify(proj), { path: proj, type });
+    else {
+      const prefix = proj.slice(0, boundary);
+      captures.set(JSON.stringify(prefix), { path: prefix, type: projectionPrefixType(local.type, prefix) });
+    }
+  }
+  const paths = [...captures.values()];
+  return paths
+    .filter(
+      ({ path }) =>
+        !paths.some(({ path: other }) => other.length < path.length && other.every((part, i) => part === path[i]))
+    )
+    .map(({ type }) => (mode === 'value' ? type : ref(type, mode === 'mut')));
+}
+
+function projectionPrefixType(base: Type, path: string[]): Type {
+  let current = base;
+  for (const part of path) {
+    const type = normalize(shallow(current));
+    if (part === '*' || part === '#') current = typeAfter(type, [part === '*' ? 'ref' : 'own']) ?? type;
+    else if (type.kind === 'tuple') current = type.elems[Number(part)] ?? type;
+    else if (type.kind === 'adt') {
+      const field = type.def.variants[0]?.fields.find(({ name }) => name === part);
+      if (!field) return type;
+      current = substitute(field.type, new Map(type.def.params.map((param, index) => [param, type.args[index]])));
+    }
+  }
+  return current;
 }
 
 function receiverProjection(

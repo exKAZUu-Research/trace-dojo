@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 785 -- The checker core owns body, entry point, and type obligations.
+// code-gauge-allow-file fileNcss 793 -- The checker core owns body, entry point, and type obligations.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ExecutionBudget } from '../interpreter/limits';
 import { Annotations, type Coercion, type FnContext, type LocalVar, type PathRes } from './annotations';
@@ -471,10 +471,20 @@ export class Checker {
     return false;
   }
 
-  // code-gauge-allow functionNcss 31 -- Binds signature types before checking the body and its obligations.
   checkFn(def: FnDef): void {
-    const item = def.ast as FnItem;
-    if (!item.body) return;
+    const item = def.ast;
+    if (!item?.body) return;
+    const bounds = def.extraBounds ?? [];
+    for (const { param, bound } of bounds) param.bounds.push(bound);
+    try {
+      this.checkFnBody(def, item, item.body);
+    } finally {
+      for (const { param } of bounds) param.bounds.pop();
+    }
+  }
+
+  // code-gauge-allow functionNcss 31 -- Binds signature types before checking the body and its obligations.
+  private checkFnBody(def: FnDef, item: FnItem, body: Block): void {
     const module = def.module as Module;
     const typeParams = new Map(def.params.map((param) => [param.name, param]));
     const selfType: Type | undefined = def.trait ? { kind: 'param', param: def.trait.self } : def.impl?.selfType;
@@ -499,12 +509,12 @@ export class Checker {
       checkPattern(this, param.pattern, def.paramTypes[index], 'move');
       this.requireIrrefutable(param.pattern, def.paramTypes[index], 'fn');
     }
-    const bodyType = this.checkBlock(item.body, this.body.retType);
-    if (item.body.tail) {
-      this.coerceReturned(item.body.tail, bodyType, this.body.retType);
-      this.markReborrows(item.body.tail, def.ret);
+    const bodyType = this.checkBlock(body, this.body.retType);
+    if (body.tail) {
+      this.coerceReturned(body.tail, bodyType, this.body.retType);
+      this.markReborrows(body.tail, def.ret);
     }
-    this.coerceTail(item.body, bodyType, this.body.retType, item);
+    this.coerceTail(body, bodyType, this.body.retType, item);
     if (def.ret.kind === 'opaque') {
       def.ret.opaque.hidden = this.body.retType;
       for (const bound of def.ret.opaque.bounds) {
@@ -516,7 +526,7 @@ export class Checker {
     this.checkBorrows(() =>
       new BorrowChecker(this.annotations, this.solver, this.budget).checkFn(item, this.body.fn, this.body.retType)
     );
-    new ConstLint(this.annotations).check(item.body);
+    new ConstLint(this.annotations).check(body);
   }
 
   /** Runs the borrow checker, reporting its first error or a move by a `&` pattern, whichever comes first. */

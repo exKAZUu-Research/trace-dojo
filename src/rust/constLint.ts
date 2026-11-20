@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 598 -- Shares Rust constant propagation between diagnostics and pattern coverage.
+// code-gauge-allow-file fileNcss 608 -- Shares Rust constant propagation between diagnostics and pattern coverage.
 
 import type { ExecutionBudget } from '../interpreter/limits';
 import type { Annotations, LocalVar, PathRes } from './annotations';
@@ -64,8 +64,8 @@ function isConstOperation(expr: Expr, annotations: Annotations): boolean {
     case 'binary':
     case 'compoundAssign': {
       const lhs = expr.kind === 'binary' ? expr.left : expr.target;
-      const lhsType = normalize(shallow(lhs.ty!));
-      return ['int', 'float', 'bool', 'char', 'var', 'never'].includes(lhsType.kind);
+      const type = checkedType(lhs.ty);
+      return !type || ['int', 'float', 'bool', 'char', 'var', 'never'].includes(type.kind);
     }
     default: {
       return true;
@@ -213,7 +213,7 @@ export class ConstLint {
       case 'arrayRepeat': {
         const item = this.annotations.unevaluatedRepeatOperands.has(expr.value) ? undefined : this.expr(expr.value);
         this.expr(expr.count);
-        const type = expr.ty && normalize(shallow(expr.ty));
+        const type = checkedType(expr.ty);
         return this.patternEvaluation && type?.kind === 'array'
           ? { fields: new Map(), repeat: { length: type.len, item } }
           : undefined;
@@ -284,14 +284,15 @@ export class ConstLint {
         this.diverged = true;
         return;
       }
-      case 'while': {
-        const cond = this.condition(expr.cond);
-        if (cond !== false) this.branch(() => this.block(expr.body));
-        return;
-      }
+      case 'while':
       case 'loop':
       case 'for': {
         if (expr.kind === 'for') this.expr(expr.iterable);
+        this.endBlock();
+        if (expr.kind === 'while') {
+          this.condition(expr.cond);
+          this.endBlock();
+        }
         this.branch(() => this.block(expr.body));
         return;
       }
@@ -320,11 +321,15 @@ export class ConstLint {
     const { ast, module } = def;
     if (!ast.value || this.evaluating.has(def) || this.evaluating.size >= 64) return undefined;
     if (!this.patternEvaluation && intTypeOf(def.type)) {
-      return constInteger(ast.value, {
-        module,
-        params: new Map(def.impl?.params.map((param) => [param.name, param])),
-        selfType: def.impl?.selfType,
-      });
+      return constInteger(
+        ast.value,
+        {
+          module,
+          params: new Map(def.impl?.params.map((param) => [param.name, param])),
+          selfType: def.impl?.selfType,
+        },
+        def.type
+      );
     }
     this.evaluating.add(def);
     const result = new ConstLint(this.annotations, this.evaluating, this.patternEvaluation).expr(ast.value);
@@ -365,8 +370,9 @@ export class ConstLint {
 
   private cast(expr: Extract<Expr, { kind: 'cast' }>): Known | undefined {
     const operand = this.expr(expr.operand);
-    if (operand === undefined || typeof operand === 'object' || !intTypeOf(expr.ty)) return undefined;
-    return castValue(operand, resolve(expr.ty!, true)) as Known;
+    const type = checkedType(expr.ty);
+    if (operand === undefined || typeof operand === 'object' || type?.kind !== 'int') return undefined;
+    return castValue(operand, type) as Known;
   }
 
   private tupleOrArray(expr: Extract<Expr, { kind: 'tuple' | 'array' }>): Known | undefined {
@@ -404,9 +410,9 @@ export class ConstLint {
   private index(expr: Extract<Expr, { kind: 'index' }>): Known | undefined {
     const operand = this.expr(expr.operand);
     const index = this.expr(expr.index);
-    const type = normalize(shallow(resolve(expr.operand.ty!, true)));
-    const array = type.kind === 'ref' ? normalize(shallow(type.target)) : type;
-    if (array.kind === 'array' && typeof index === 'bigint' && index >= BigInt(array.len)) {
+    const type = checkedType(expr.operand.ty);
+    const array = type?.kind === 'ref' ? checkedType(type.target) : type;
+    if (array?.kind === 'array' && typeof index === 'bigint' && index >= BigInt(array.len)) {
       compileError(
         expr.span,
         `この添字（${index}）は、長さ ${array.len} の配列の範囲外なので、実行すると必ず panic します。`
@@ -639,9 +645,18 @@ export function writeKnownField(
   if (path.length === 0) return assigned;
   if (typeof value !== 'object') return undefined;
   const [field, ...rest] = path;
+  if (field === '[]') return writeUnknownIndex(value, rest, assigned);
   const replacement = writeKnownField(knownField(value, field), rest, assigned);
   const fields = new Map([...value.fields, [field, replacement]]);
   return { ...value, fields };
+}
+
+function writeUnknownIndex(value: Aggregate, path: string[], assigned: Known | undefined): Known {
+  const possiblyUpdated = (item: Known | undefined): Known | undefined =>
+    intersectKnown(item, writeKnownField(item, path, assigned));
+  const fields = new Map([...value.fields].map(([index, item]) => [index, possiblyUpdated(item)]));
+  const repeat = value.repeat && { ...value.repeat, item: possiblyUpdated(value.repeat.item) };
+  return { ...value, fields, repeat };
 }
 
 export function intersectKnown(a: Known | undefined, b: Known | undefined): Known | undefined {
@@ -730,9 +745,12 @@ function ordinal(value: Known | undefined): number | bigint | undefined {
 }
 
 function intTypeOf(type: Type | undefined): IntName | undefined {
-  if (!type) return undefined;
-  const t = normalize(shallow(resolve(type, true)));
-  return t.kind === 'int' ? t.name : undefined;
+  const checked = checkedType(type);
+  return checked?.kind === 'int' ? checked.name : undefined;
+}
+
+function checkedType(type: Type | undefined): Type | undefined {
+  return type && normalize(shallow(resolve(type, true)));
 }
 
 function isArrayType(type: Type | undefined): boolean {

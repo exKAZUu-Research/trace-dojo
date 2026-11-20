@@ -24,6 +24,7 @@ import {
   type ConstDef,
   type FnDef,
   type ImplDef,
+  mapChildren,
   resolve,
   shallow,
   substitute,
@@ -76,7 +77,7 @@ export class Interpreter implements CallSupport {
     this.formatter = new Formatter({
       userFmt: (trait, type, value, spec, write) => this.userFmt(trait, type, value, spec, write),
       fieldTypes: (def, args, variant) => fieldTypes(def, args, variant),
-      concrete: (type) => this.formatType(type),
+      concrete: (type) => this.revealType(type),
       allocateString: (length, written) => this.runtime.allocateString(length, written),
     });
     this.restoreOperations = setUserImpls({
@@ -139,7 +140,7 @@ export class Interpreter implements CallSupport {
     span: Span,
     frame: Frame
   ): Value {
-    let self = normalize(shallow(typeArgs[0]));
+    let self = this.revealType(typeArgs[0]);
     let receiverArgs = args;
     if (self.kind === 'dyn' && def.selfMode) {
       const unwrapped = unwrapDyn(args[0]);
@@ -154,7 +155,15 @@ export class Interpreter implements CallSupport {
   }
 
   /** The impl method that a trait method runs for a concrete type, or the trait's default method. */
-  private dispatch(trait: TraitDef, self: Type, name: string, traitArgs: Type[] = []): Dispatch | undefined {
+  private dispatch(
+    trait: TraitDef,
+    receiver: Type,
+    name: string,
+    suppliedArgs: Type[] = [],
+    revealing: ReadonlySet<number> = new Set()
+  ): Dispatch | undefined {
+    const self = this.revealType(receiver, revealing);
+    const traitArgs = suppliedArgs.map((type) => this.revealType(type, revealing));
     const argKey = traitArgs.map(typeKey).join(',');
     const key = `${typeIdentity(trait)}|${typeKey(self)}|${name}|${argKey}`;
     if (this.dispatchCache.has(key)) return this.dispatchCache.get(key);
@@ -284,7 +293,7 @@ export class Interpreter implements CallSupport {
   }
 
   toIter(value: Value, from: Type): Value {
-    return toIterator(value, from);
+    return toIterator(value, this.revealType(from));
   }
 
   // -------------------------------------------------------------------------------------------------------------------
@@ -323,30 +332,32 @@ export class Interpreter implements CallSupport {
     }
   }
 
-  private formatType(type: Type): Type {
+  private revealType(type: Type, revealing: ReadonlySet<number> = new Set()): Type {
     const frame = this.runtime.frames.at(-1);
-    let current = shallow(frame ? concreteType(type, frame.typeArgs) : type);
-    while (current.kind === 'opaque') {
-      const { args, hidden, method } = current.opaque;
-      const implementation = method && this.resolveFunctionInstance(method, args);
-      if (implementation && implementation.fn !== method) {
-        const { fn, typeArgs } = implementation;
-        const bindings = new Map(fn.params.map((param, index) => [param, typeArgs[index]]));
-        current = shallow(concreteType(fn.ret, bindings));
-      } else {
-        if (!hidden) break;
-        current = shallow(resolve(hidden, true));
-      }
+    const current = normalize(shallow(frame ? concreteType(type, frame.typeArgs) : type));
+    if (current.kind !== 'opaque') return mapChildren(current, (child) => this.revealType(child, revealing));
+    const { id, args, hidden, method } = current.opaque;
+    if (revealing.has(id)) return current;
+    const next = new Set([...revealing, id]);
+    const implementation = method && this.resolveFunctionInstance(method, args, next);
+    if (implementation && implementation.fn !== method) {
+      const { fn, typeArgs } = implementation;
+      const bindings = new Map(fn.params.map((param, index) => [param, typeArgs[index]]));
+      return this.revealType(concreteType(fn.ret, bindings), next);
     }
-    return current;
+    return hidden ? this.revealType(resolve(hidden, true), next) : current;
   }
 
-  resolveFunctionInstance(fn: FnDef, typeArgs: Type[]): { fn: FnDef; typeArgs: Type[] } {
+  resolveFunctionInstance(
+    fn: FnDef,
+    typeArgs: Type[],
+    revealing: ReadonlySet<number> = new Set()
+  ): { fn: FnDef; typeArgs: Type[] } {
     const trait = fn.trait;
     if (!trait || trait.methods.get(fn.name) !== fn) return { fn, typeArgs };
-    const self = normalize(shallow(typeArgs[0]));
+    const self = this.revealType(typeArgs[0], revealing);
     if (self.kind === 'dyn') return { fn, typeArgs };
-    const dispatched = this.dispatch(trait, self, fn.name, typeArgs.slice(1, 1 + trait.params.length));
+    const dispatched = this.dispatch(trait, self, fn.name, typeArgs.slice(1, 1 + trait.params.length), revealing);
     if (!dispatched?.implArgs) return { fn, typeArgs };
     return { fn: dispatched.fn, typeArgs: [...dispatched.implArgs, ...typeArgs.slice(fn.parentParamCount)] };
   }

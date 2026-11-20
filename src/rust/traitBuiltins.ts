@@ -536,7 +536,7 @@ function iterator({ solver, t, ref, name }: Goal): Answer {
 }
 
 function iteratorWithCapability(goal: Goal, capability: 'back' | 'exact'): Answer {
-  const hasCapability = iteratorCapability(goal.t, capability);
+  const hasCapability = iteratorCapability(goal.t, capability, goal.solver);
   return hasCapability === 'yes' && goal.ref.item ? iterator(goal) : hasCapability;
 }
 

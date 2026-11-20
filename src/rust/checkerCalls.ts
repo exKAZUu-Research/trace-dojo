@@ -2,12 +2,12 @@ import type { PathRes, ReceiverAdjust } from './annotations';
 import type { Expr } from './ast';
 import type { Checker } from './checker';
 import {
+  applyWrittenFnArgs,
   checkMethodVisible,
   checkTraitInScope,
   isStandardType,
   resolveValuePath,
   traitInScope,
-  typeArgsFor,
   typeOfRes,
 } from './checkerPaths';
 import { requireMutablePlace } from './checkerPlaces';
@@ -66,7 +66,6 @@ function callFn(
     );
   }
   checkArgs(c, expr.args, params, expectations(c, sig.ret, params, expected));
-  markReferenceArguments(c, expr.args, writtenCallParams(fn));
   expr.callee.ty = { kind: 'fn', params, ret: sig.ret };
   return sig.ret;
 }
@@ -76,10 +75,6 @@ export function selfParamType(fn: FnDef, subst: Subst): Type {
   const selfType = substitute(self, subst);
   if (fn.selfMode === 'value') return selfType;
   return ref(selfType, fn.selfMode === 'mutRef');
-}
-
-function writtenCallParams(fn: FnDef): Type[] {
-  return fn.selfMode ? [selfParamType(fn, new Map()), ...fn.paramTypes] : fn.paramTypes;
 }
 
 function turtleNew(c: Checker, expr: Extract<Expr, { kind: 'call' }>): Type {
@@ -122,11 +117,6 @@ function callCtor(
     );
   }
   checkArgs(c, expr.args, params, expectations(c, self, params, expected));
-  markReferenceArguments(
-    c,
-    expr.args,
-    variant.fields.map((field) => field.type)
-  );
   c.requireAdtArguments(res.def, res.typeArgs, expr.span);
   expr.callee.ty = { kind: 'fn', params, ret: self };
   return self;
@@ -151,14 +141,13 @@ function checkArgs(c: Checker, args: Expr[], params: Type[], expectations: (Type
   const order = [...args.keys()].toSorted(
     (a, b) => Number(args[a].kind === 'closure') - Number(args[b].kind === 'closure')
   );
-  for (const index of order) checkArgument(c, args[index], params[index], expectations[index]);
+  const inputTypes = params.map((param) => shallow(param));
+  for (const index of order) {
+    checkArgument(c, args[index], params[index], inputTypes[index], expectations[index]);
+  }
 }
 
-function markReferenceArguments(c: Checker, args: Expr[], written: Type[]): void {
-  for (const [index, arg] of args.entries()) c.markReborrows(arg, written[index]);
-}
-
-function checkArgument(c: Checker, arg: Expr, param: Type, expectation: Type | undefined): void {
+function checkArgument(c: Checker, arg: Expr, param: Type, inputType: Type, expectation: Type | undefined): void {
   if (arg.kind === 'closure') {
     const sig = closureSignature(c, param);
     if (sig) {
@@ -181,12 +170,12 @@ function checkArgument(c: Checker, arg: Expr, param: Type, expectation: Type | u
       c.tryCoerce(arg, type, target)
     ) {
       c.unifyOrError(arg.span, param, target);
+      c.markReborrows(arg, target);
       return;
     }
     c.coerce(arg, type, param);
-    return;
-  }
-  c.coerceExpr(arg, param);
+  } else c.coerceExpr(arg, param);
+  if (inputType.kind !== 'var') c.markReborrows(arg, inputType);
 }
 
 function coerceClosure(c: Checker, arg: Expr, type: Type, param: Type): void {
@@ -267,7 +256,6 @@ function callValue(
   }
   if (expected) c.unifier.tryUnify(ret, expected);
   checkArgs(c, expr.args, params);
-  markReferenceArguments(c, expr.args, params);
   c.annotations.callKinds.set(expr, kind);
   return ret;
 }
@@ -322,11 +310,7 @@ export function checkMethodCall(
   checkMethodVisible(c, found.fn, expr.methodSpan);
   checkTraitInScope(c, found.fn, stripped, expr.methodSpan, `メソッド ${expr.method}`);
   const { fn } = found;
-  if (expr.turbofish) {
-    const own = fn.params.slice(fn.parentParamCount);
-    const written = typeArgsFor(c, own, expr.turbofish, expr.methodSpan, expr.method);
-    found.typeArgs.splice(fn.parentParamCount, own.length, ...written);
-  }
+  applyWrittenFnArgs(c, fn, found.typeArgs, expr.turbofish, expr.methodSpan);
   checkReceiverAdjust(c, expr, found.adjust, fn.selfMode);
   const sig = c.instantiate(fn, found.typeArgs, expr.methodSpan);
   if (expr.args.length !== sig.params.length) {
@@ -336,7 +320,6 @@ export function checkMethodCall(
     );
   }
   checkArgs(c, expr.args, sig.params, expectations(c, sig.ret, sig.params, expected));
-  markReferenceArguments(c, expr.args, fn.paramTypes);
   c.annotations.methods.set(expr, { fn, typeArgs: found.typeArgs, receiver: found.adjust });
   if (fn.selfMode === 'value') checkMoveOutOfRef(c, expr, found.adjust, found.selfType);
   if (expr.method === 'map') return arrayMapResult(stripped, found.selfType, sig.ret);

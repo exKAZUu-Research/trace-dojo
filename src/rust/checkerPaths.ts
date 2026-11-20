@@ -101,6 +101,20 @@ export function typeArgsFor(
   return written.map((arg) => c.lowerType(arg));
 }
 
+export function applyWrittenFnArgs(
+  c: Checker,
+  fn: FnDef,
+  typeArgs: Type[],
+  written: TypeAst[] | undefined,
+  span: Span
+): void {
+  if (!written) return;
+  const start = fn.parentParamCount;
+  const count = fn.ast?.generics.params.length ?? fn.params.length - start;
+  const declared = fn.params.slice(start, start + count);
+  typeArgs.splice(start, count, ...typeArgsFor(c, declared, written, span, fn.name));
+}
+
 export function resolveValuePath(c: Checker, path: PathAst, span: Span): PathRes {
   const segments = path.segments;
   if (segments.length === 1) return singleNameRes(c, segments[0], span);
@@ -112,11 +126,8 @@ export function resolveValuePath(c: Checker, path: PathAst, span: Span): PathRes
   if (owner.kind === 'trait') {
     const fn = owner.def.methods.get(last.name);
     if (!fn) compileError(span, `トレイト ${owner.def.name} にメソッド ${last.name} がありません。`);
-    const typeArgs = [
-      freshVar(),
-      ...owner.typeArgs,
-      ...typeArgsFor(c, fn.params.slice(fn.parentParamCount), last.args, span, last.name),
-    ];
+    const typeArgs = [freshVar(), ...owner.typeArgs, ...fn.params.slice(fn.parentParamCount).map(() => freshVar())];
+    applyWrittenFnArgs(c, fn, typeArgs, last.args, span);
     return { kind: 'fn', fn, typeArgs };
   }
   return associatedValueRes(c, normalize(shallow(owner.type)), last, span);
@@ -174,11 +185,7 @@ function associatedValueRes(c: Checker, t: Type, last: PathAst['segments'][numbe
   }
   checkMethodVisible(c, found.fn, span);
   checkTraitInScope(c, found.fn, t, span, `関連関数 ${last.name}`);
-  if (last.args) {
-    const own = found.fn.params.slice(found.fn.parentParamCount);
-    const written = typeArgsFor(c, own, last.args, span, last.name);
-    found.typeArgs.splice(found.fn.parentParamCount, own.length, ...written);
-  }
+  applyWrittenFnArgs(c, found.fn, found.typeArgs, last.args, span);
   return { kind: 'fn', fn: found.fn, typeArgs: found.typeArgs };
 }
 
@@ -336,11 +343,8 @@ function valueBindingRes(
   switch (binding.kind) {
     case 'fn': {
       const fn = binding.def;
-      const own = fn.params.slice(fn.parentParamCount);
-      const typeArgs = [
-        ...fn.params.slice(0, fn.parentParamCount).map(() => freshVar()),
-        ...typeArgsFor(c, own, args, span, name),
-      ];
+      const typeArgs = fn.params.map(() => freshVar());
+      applyWrittenFnArgs(c, fn, typeArgs, args, span);
       return { kind: 'fn', fn, typeArgs };
     }
     case 'ctor': {

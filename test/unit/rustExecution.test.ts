@@ -4462,3 +4462,314 @@ test('replaces Rust HashSet entries and returns ownership of the previous value'
   );
   expect(executeProgram('rust', source)).toMatchObject({ kind: 'executed', stdout: 'None Some("same") 1\n' });
 });
+
+test('keeps assertion operands alive during construction and equality', () => {
+  const program = `struct Holder(Turtle, bool);
+impl PartialEq for Holder {
+    fn eq(&self, right: &Self) -> bool {
+        let observer = Turtle::new(1, 1, "G");
+        println!("{}", observer.can_move_forward());
+        right.1
+    }
+}
+impl std::fmt::Debug for Holder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "Holder") }
+}
+fn rhs(o: &Turtle, equal: bool) -> Holder {
+    println!("{}", o.can_move_forward());
+    Holder(Turtle::new(4, 4, "B"), equal)
+}
+fn main() {
+    let observer = Turtle::new(1, 1, "G");
+    assert_eq!(Holder(Turtle::new(1, 2, "R"), true), rhs(&observer, true));
+    assert_ne!(Holder(Turtle::new(1, 2, "R"), true), rhs(&observer, false));
+    println!("{}", observer.can_move_forward());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'false\nfalse\nfalse\nfalse\ntrue\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('sizes Rust 2024 closures by their captured fields and capture modes', () => {
+  const program = `struct S { a: u8, b: u64 }
+struct Wrapped<T> { inner: (T, u64), unused: u64 }
+fn size<T>(_: T) -> usize { std::mem::size_of::<T>() }
+fn generic<T>(value: T) -> usize {
+    let x = Wrapped { inner: (value, 0), unused: 0 };
+    size(move || x.inner.0)
+}
+fn main() {
+    let s = S { a: 1, b: 2 };
+    let pair = (1u8, 2u64);
+    let copy = move || s.a;
+    let both = || s.a as u64 + s.b;
+    let boxed = Box::new(S { a: 1, b: 2 });
+    println!("{} {} {} {} {}", size(copy), size(move || pair.0), size(both),
+        size(move || boxed.a), generic(1u16));
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '1 1 16 8 2\n' });
+});
+
+test('iterates the hidden type of a trait method called with a generic receiver', () => {
+  const program = `trait Make {
+    fn range(&self) -> impl Iterator<Item=u32>;
+    fn vec(&self) -> impl IntoIterator<Item=i32>;
+}
+struct Source;
+impl Make for Source {
+    fn range(&self) -> impl Iterator<Item=u32> { 0..3 }
+    fn vec(&self) -> impl IntoIterator<Item=i32> { vec![1, 2, 3] }
+}
+fn run<T: Make>(source: &T) {
+    println!("{}", source.range().sum::<u32>());
+    println!("{:?}", source.range().map(|x| x + 1).collect::<Vec<_>>());
+    for x in source.range() { print!("{}", x); }
+    println!();
+    for x in source.vec() { print!("{}", x); }
+    println!();
+}
+fn main() { run(&Source); }`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '3\n[1, 2, 3]\n012\n123\n' });
+});
+
+test('copies the adjusted by-value receiver of a method on a Box', () => {
+  const program = `#[derive(Copy, Clone)] struct S { x: i32 }
+impl S { fn changed(mut self) -> i32 { self.x = 9; self.x } }
+struct Holder { boxed: Box<S> }
+fn main() {
+    let s = Box::new(S { x: 1 });
+    let h = Holder { boxed: Box::new(S { x: 2 }) };
+    let f = || s.changed();
+    println!("{} {} {} {} {}", f(), f(), s.x, h.boxed.changed(), h.boxed.x);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '9 9 1 9 2\n' });
+});
+
+test('follows indexed constant initializers while checking function bodies', () => {
+  const program = `const A: [i32; 2] = [1, 2];
+const B: [i32; 2] = [A[1], 3];
+const C: [i32; 3] = [A[0]; 3];
+const D: i32 = A[1] + 1;
+fn main() { println!("{:?} {:?} {}", B, C, D); }`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '[2, 3] [1, 1, 1] 3\n' });
+  expect(executeProgram('rust', program.replace('A[1], 3', 'A[2], 3'))).toMatchObject({ kind: 'compileError' });
+});
+
+test('preserves untouched fields in constant arrays written through an unknown index', () => {
+  const program = `struct S { x: i32, a: Option<String> }
+const N: S = S { x: 1, a: None };
+const P: (Option<String>, i32) = (None, 1);
+const X: i32 = {
+    let mut a = [N; 2];
+    let mut b = [P, P];
+    let i = 1_usize.wrapping_sub(1);
+    a[i].x = 2;
+    b[i].1 = 3;
+    a[0].x + b[0].1
+};
+fn main() { println!("{}", X); }`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '5\n' });
+});
+
+test('applies clone_from through standard containers according to their storage rules', () => {
+  const program = `use std::collections::{BinaryHeap, VecDeque};
+fn main() {
+    let mut a = [[String::with_capacity(12)]];
+    a.clone_from_slice(&[[String::from("abc")]]);
+    let mut b = [Box::new(Vec::with_capacity(12))];
+    b.clone_from_slice(&[Box::new(vec![1, 2])]);
+    let mut o = Some(String::with_capacity(12));
+    o.clone_from(&Some(String::from("abc")));
+    let mut r: Result<String, ()> = Ok(String::with_capacity(12));
+    r.clone_from(&Ok(String::from("abc")));
+    let mut d = VecDeque::with_capacity(12);
+    d.push_front(String::with_capacity(12));
+    d.clone_from(&VecDeque::from([String::from("abc")]));
+    let mut h = BinaryHeap::with_capacity(12);
+    h.push(String::with_capacity(12));
+    h.clone_from(&BinaryHeap::from([String::from("abc")]));
+    println!("{} {} {} {} {} {} {} {}", a[0][0].capacity(), b[0].capacity(),
+        o.unwrap().capacity(), r.unwrap().capacity(), d.capacity(), d[0].capacity(),
+        h.capacity(), h.peek().unwrap().capacity());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '12 12 12 12 12 3 12 12\n' });
+});
+
+test('checks typed constant array lengths before and after scalar casts', () => {
+  const program = `const YES: bool = 1 < 2;
+fn main() {
+    let a: [i32; (1 < 2) as usize] = [7];
+    let b: [i32; YES as usize] = [7];
+    let c: [i32; (true && false) as usize] = [];
+    let d: [i32; (true || false) as usize] = [7];
+    let e: [i32; f32::NAN as usize] = [];
+    let f: [i32; f64::NAN as usize] = [];
+    let g: [i32; f32::NEG_INFINITY as usize] = [];
+    let h: [i32; f32::MAX as u8 as usize] = [0; 255];
+    let i: [i32; (true || (1 / 0 == 2)) as usize] = [7];
+    let j: [i32; ((-128i8 as u8) - (1 + 2u8)) as usize] = [0; 125];
+    println!("{} {} {} {} {} {} {} {} {} {}", a.len(), b.len(), c.len(), d.len(),
+        e.len(), f.len(), g.len(), h.len(), i.len(), j.len());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '1 1 0 1 0 0 0 255 1 125\n' });
+  for (const [length, count] of [
+    ['(255u8 + 1) as usize', 256],
+    ['256u8 as usize', 256],
+    ['(1u8 + 1u16) as usize', 2],
+    ['(1u8 << 8) as usize', 0],
+    ['1u8', 1],
+  ] as const) {
+    const invalid = rustMain(`let _: [i32; ${length}] = [0; ${count}];`);
+    expect(executeProgram('rust', invalid)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
+test('reborrows explicitly constrained generic reference arguments', () => {
+  const program = `fn id<T>(value: T) -> T { value }
+fn use_it<T>(_: T) {}
+fn main() {
+    let mut n = 0;
+    let r = &mut n;
+    let q: Option<&mut i32> = Some(r);
+    *q.unwrap() += 1;
+    let x: &mut i32 = id(r);
+    *x += 1;
+    use_it::<&mut i32>(r);
+    *r += 1;
+    println!("{}", n);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '3\n' });
+  const inferred = program.replace('q: Option<&mut i32> = Some(r)', 'q = Some(r)');
+  expect(executeProgram('rust', inferred)).toMatchObject({ kind: 'compileError' });
+});
+
+test('binds written generics while inferring associated items and argument impl Traits', () => {
+  const program = `trait M {
+    fn first<I: Iterator>(&self, mut i: I) -> Option<I::Item> { i.next() }
+    fn second<T>(&self, mut i: impl Iterator<Item=T>) -> Option<T> { i.nth(1) }
+}
+struct S;
+impl M for S {}
+fn first<I: Iterator>(mut iter: I) -> Option<I::Item> { iter.next() }
+fn main() {
+    let f = M::first::<std::ops::Range<i32>>;
+    println!("{:?} {:?} {:?} {:?} {:?}",
+        f(&S, 1..3), M::second::<i32>(&S, 1..3), S::second::<i32>(&S, 1..3),
+        S.first::<std::ops::Range<i32>>(1..3), first::<std::ops::Range<i32>>(1..3));
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'Some(1) Some(2) Some(2) Some(1) Some(1)\n',
+  });
+});
+
+test('brings method-local where bounds into generic impl and trait bodies', () => {
+  const program = `use std::fmt::Debug;
+struct Pair<T> { x: T, y: T }
+impl<T> Pair<T> {
+    fn largest(&self) -> &T where T: PartialOrd {
+        if self.x >= self.y { &self.x } else { &self.y }
+    }
+    fn show(&self) -> String where T: Debug { format!("{:?}", self.x) }
+}
+trait DisplaySelf {
+    fn show(&self) -> String where Self: Debug { format!("{:?}", self) }
+}
+#[derive(Debug)]
+struct A;
+impl DisplaySelf for A {}
+fn main() {
+    let p = Pair { x: 3, y: 8 };
+    println!("{} {} {}", p.largest(), p.show(), A.show());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '8 3 A\n' });
+});
+
+test('proves iterator capabilities through nested generic adapters', () => {
+  const program = `fn f<I: DoubleEndedIterator<Item=i32> + ExactSizeIterator>(i: I) -> Vec<i32> {
+    i.enumerate().take(2).rev().map(|(n, v)| n as i32 + v).rev().collect()
+}
+fn main() { println!("{:?}", f(3..7)); }`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '[3, 5]\n' });
+  const missing = program.replace(' + ExactSizeIterator', '');
+  expect(executeProgram('rust', missing)).toMatchObject({ kind: 'compileError' });
+});
+
+test('prints the residual slice of Windows clones across both ends', () => {
+  const program = rustMain(`let v = [1, 2, 3];
+    let mut short = v.windows(4);
+    let mut back = short.clone();
+    println!("{:?} {:?}", short.next(), short);
+    println!("{:?} {:?}", back.next_back(), back);
+    let mut a = v.windows(2);
+    let mut b = a.clone();
+    println!("{:?} {:?} {:?}", a.next(), a.next_back(), a);
+    println!("{:?} {:?}", a.next_back(), a);
+    println!("{:?} {:?}", b.nth(8), b);`);
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'None Windows { v: [1, 2, 3], size: 4 }\nNone Windows { v: [], size: 4 }\n' +
+      'Some([1, 2]) Some([2, 3]) Windows { v: [2], size: 2 }\n' +
+      'None Windows { v: [], size: 2 }\nNone Windows { v: [], size: 2 }\n',
+  });
+});
+
+test('checks explicit and implicit enum discriminants against isize', () => {
+  const body = 'println!("{} {}", E::A as i64, E::B as i64);';
+  const valid = rustMain(body, 'enum E { A = 9223372036854775806, B }');
+  expect(executeProgram('rust', valid)).toMatchObject({
+    kind: 'executed',
+    stdout: '9223372036854775806 9223372036854775807\n',
+  });
+  const invalid = rustMain(body, 'enum E { A = 9223372036854775807, B }');
+  expect(executeProgram('rust', invalid)).toMatchObject({ kind: 'compileError' });
+  const tooWide = rustMain('println!("{}", E::A as i64);', 'enum E { A = 9223372036854775808 }');
+  expect(executeProgram('rust', tooWide)).toMatchObject({ kind: 'compileError' });
+});
+
+test('checks loop bodies with facts valid after the back edge', () => {
+  const loops = [
+    'while x > 0 { x = x * 2; }',
+    'for _ in 0..3 { x += 100; }',
+    'for _ in [1, 2] { x += 100; }',
+    'loop { x += 100; if x > 0 { break; } }',
+  ];
+  for (const loop of loops) {
+    const overflow = rustMain(`println!("start"); let mut x: i8 = 100; ${loop}`);
+    expect(executeProgram('rust', overflow)).toMatchObject({
+      kind: 'executed',
+      stdout: 'start\n',
+      uncaughtException: expect.stringContaining('overflow'),
+    });
+  }
+  const bounds = rustMain(`let mut n = 250u8;
+    while n < 10 { n += 1; let z = [1, 2, 3]; let _w = z[5]; }`);
+  expect(executeProgram('rust', bounds)).toMatchObject({ kind: 'compileError' });
+});
+
+test('rebuilds a partially extended BinaryHeap on iterator panic', () => {
+  const program = `use std::cmp::Ordering;
+use std::collections::BinaryHeap;
+#[derive(Debug, Eq, PartialEq)]
+struct K(i32);
+impl Ord for K {
+    fn cmp(&self, b: &Self) -> Ordering {
+        print!("cmp {} {};", self.0, b.0);
+        self.0.cmp(&b.0)
+    }
+}
+impl PartialOrd for K {
+    fn partial_cmp(&self, b: &Self) -> Option<Ordering> { Some(self.cmp(b)) }
+}
+fn main() {
+    let mut h = BinaryHeap::from([K(1)]);
+    h.extend((0..3).map(|n| {
+        if n == 1 { panic!("stop"); }
+        K(n + 2)
+    }));
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'cmp 2 1;' });
+});

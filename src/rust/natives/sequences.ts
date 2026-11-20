@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 511 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss 529 -- One native per method of the standard library.
 import { keepVecCapacity, setIntoIterBuffer, vecCapacity } from '../capacity';
 import { sliceRange } from '../compiler';
 import { type DebugPart } from '../debugText';
@@ -263,15 +263,7 @@ const sliceNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
     const width = Number(size as bigint);
     if (width === 0) panic(ctx, 'window size must be non-zero');
     const { base, start } = sliceBase(slice);
-    const length = sliceLength(slice);
-    const count = Math.max(0, length - width + 1);
-    const iter = arrayIter(base, 0, count, (index) => new SliceView(base, start + index, start + index + width));
-    // `Windows` drops an element from the end it takes a window from, so once done it keeps `size - 1` of them.
-    const done = (target: IterValue): SliceView => {
-      const front = target.frontIndex!();
-      return new SliceView(base, start + front, start + Math.min(length, front + width - 1));
-    };
-    return chunkDebug(iter, 'Windows', done, () => [['size', numberPart(width)]]);
+    return windows(base, start, start + sliceLength(slice), width);
   },
   split: ([self, predicate], ctx) => {
     const slice = deref(self);
@@ -387,6 +379,40 @@ function splitAt(ctx: NativeContext, slice: Value, mid: number): Value {
   return [sliceRange(slice, rangeTo(mid), ctx.span), sliceRange(slice, rangeFrom(mid), ctx.span)];
 }
 
+function windows(base: Value[], front: number, back: number, width: number): IterValue {
+  const remaining = (): number => Math.max(0, back - front - width + 1);
+  const view = (start: number): SliceView => new SliceView(base, start, start + width);
+  const take = (n: bigint, reverse: boolean): ReturnType<IterValue['next']> => {
+    if (n >= BigInt(remaining())) {
+      back = front;
+      return DONE;
+    }
+    const step = Number(n);
+    if (!reverse) {
+      front += step + 1;
+      return view(front - 1);
+    }
+    back -= step + 1;
+    return view(back + 1 - width);
+  };
+  const iter = new IterValue(
+    () => (remaining() === 0 ? DONE : take(0n, false)),
+    () => take(0n, true),
+    remaining,
+    [base]
+  );
+  iter.nth = (n) => take(n, false);
+  iter.nthBack = (n) => take(n, true);
+  iter.rest = () => Array.from({ length: remaining() }, (_, index) => view(front + index));
+  iter.fork = () => windows(base, front, back, width);
+  return described(iter, (show, item) =>
+    fieldsPart('Windows', [
+      ['v', listPart(base.slice(front, back), sliceElem(item), show)],
+      ['size', numberPart(width)],
+    ])
+  );
+}
+
 function chunks(ctx: NativeContext, slice: Value, size: number, exact: boolean): IterValue {
   if (size === 0) panic(ctx, 'chunk size must be non-zero');
   const { base, start } = sliceBase(slice);
@@ -406,7 +432,7 @@ function chunks(ctx: NativeContext, slice: Value, size: number, exact: boolean):
 }
 
 /**
- * `{:?}` of `Windows`, `Chunks`, `RChunks`, and `ChunksExact`: `v`, the part of the slice their elements left cover
+ * `{:?}` of `Chunks`, `RChunks`, and `ChunksExact`: `v`, the part of the slice their elements left cover
  * (`done` once none is left), then their other fields; `ChunksExact` also shows the remainder `rem`.
  */
 function chunkDebug(
@@ -790,8 +816,14 @@ const heapNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> 
   extend: ([self, iter], ctx) => {
     const items = vec(self);
     const start = items.length;
-    vecNatives.extend([self, iter], ctx);
-    rebuildHeapTail(items, start, elemType(ctx));
+    const type = elemType(ctx);
+    try {
+      vecNatives.extend([self, iter], ctx);
+    } catch (error) {
+      if (error instanceof RustPanic) rebuildHeapTail(items, start, type);
+      throw error;
+    }
+    rebuildHeapTail(items, start, type);
     return UNIT_VALUE;
   },
   into_iter: ([self], ctx) => ownedIter(vec(self), elemType(ctx)),

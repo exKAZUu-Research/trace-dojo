@@ -4,6 +4,8 @@ import { forEachDirect, patternBindingParts } from './astWalk';
 import type { Checker } from './checker';
 import { checkPattern } from './checkerPatterns';
 import { compileError } from './items';
+import { captureLayout } from './loanCaptures';
+import { typeAfter } from './regions';
 import type { TraitSolver } from './traits';
 import { type ClosureType, freshVar, newClosureType, resolve, shallow, type Type, UNIT } from './types';
 
@@ -52,12 +54,10 @@ export function checkClosure(c: Checker, expr: Extract<Expr, { kind: 'closure' }
   } finally {
     c.body = parentBody;
   }
-  const { kind, movedAt, captures } = closureKindOf(fn, expr.body, c.annotations, c.solver);
-  fn.closureKind = kind;
+  const captureInfo = closureKindOf(fn, expr.body, c.annotations, c.solver);
+  fn.closureKind = captureInfo.kind;
   Object.assign((closureType as Type & { kind: 'closure' }).closure, {
-    kind,
-    movedAt,
-    captures,
+    ...captureInfo,
     span: expr.span,
   });
   c.annotations.closures.set(expr, {
@@ -79,7 +79,7 @@ function closureKindOf(
   body: Expr,
   annotations: Annotations,
   solver: TraitSolver
-): Pick<ClosureType, 'kind' | 'movedAt' | 'captures'> {
+): Pick<ClosureType, 'kind' | 'movedAt' | 'captures' | 'layoutCaptures'> {
   const uses = new CaptureUses(new Set(fn.captures), annotations, solver);
   uses.visit(body, true);
   fn.movedCaptures = [...uses.moved];
@@ -93,7 +93,10 @@ function closureKindOf(
           : ('ref' as const),
   }));
   const kind = uses.moved.size > 0 ? 'FnOnce' : uses.mutated.size > 0 ? 'FnMut' : 'Fn';
-  return { kind, movedAt: uses.firstMove, captures };
+  const layoutCaptures = fn.captures.flatMap((local, index) =>
+    captureLayout(annotations, body, local, captures[index].mode)
+  );
+  return { kind, movedAt: uses.firstMove, captures, layoutCaptures };
 }
 
 /** How a closure's body uses the variables it captures: those it moves out and those it modifies. */
@@ -122,8 +125,11 @@ class CaptureUses {
     // Calling a captured `FnOnce` closure moves it.
     if (expr.kind === 'call' && this.annotations.callKinds.get(expr) === 'FnOnce') this.move(expr.callee, expr.span);
     if (consumed && expr.kind !== 'index' && !this.isCopy(expr.ty ?? UNIT)) this.move(expr, expr.span);
-    const consumes = consumedChildren(expr, this.annotations, (pattern) =>
-      bindsByValue(pattern, this.annotations, this.isCopy)
+    const consumes = consumedChildren(
+      expr,
+      this.annotations,
+      (pattern) => bindsByValue(pattern, this.annotations, this.isCopy),
+      this.isCopy
     );
     forEachDirect(expr, (child) => this.visit(child, consumes(child, consumed)));
   }
@@ -201,7 +207,8 @@ function mutatedCapture(
 function consumedChildren(
   expr: Expr,
   annotations: Annotations,
-  movesByPattern: (pattern: Pattern) => boolean
+  movesByPattern: (pattern: Pattern) => boolean,
+  isCopy: (type: Type) => boolean
 ): (child: Expr, consumed: boolean) => boolean {
   switch (expr.kind) {
     case 'ref':
@@ -230,7 +237,10 @@ function consumedChildren(
     }
     case 'methodCall': {
       const method = annotations.methods.get(expr);
-      const byValue = method?.fn.selfMode === 'value' && method.receiver.autoref === 'none';
+      const byValue =
+        method?.fn.selfMode === 'value' &&
+        method.receiver.autoref === 'none' &&
+        !isCopy(typeAfter(expr.receiver.ty, method.receiver.derefs) ?? UNIT);
       return (child) => child !== expr.receiver || byValue;
     }
     case 'call': {

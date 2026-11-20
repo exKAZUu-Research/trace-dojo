@@ -15,6 +15,10 @@ export function dequeHead(items: object): number {
   return heads.get(items) ?? 0;
 }
 
+export function resetDequeHead(items: object): void {
+  heads.delete(items);
+}
+
 /** How long the first of a deque's two slices is: the elements from its head to the end of its buffer. */
 export function firstSliceLength(items: Value[], capacity: number): number {
   return capacity === 0 ? items.length : Math.min(items.length, capacity - dequeHead(items));

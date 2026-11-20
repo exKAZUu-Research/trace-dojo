@@ -17,6 +17,7 @@ import { normalize } from './infer';
 import { compileError } from './items';
 import { LoanBuilder } from './loanBuilder';
 import type { LoanError } from './loanGraph';
+import { typeAfter } from './regions';
 import type { TraitSolver } from './traits';
 import { resolve, shallow, substitute as substituteType, type Type } from './types';
 
@@ -446,10 +447,11 @@ export class BorrowChecker {
       const throughRef = receiver.derefs.some((step) => step === 'ref' || step === 'mutRef');
       if (receiver.autoref === 'mut' || (method.fn.selfMode === 'mutRef' && isMutReference(expr.receiver.ty))) {
         current = this.expr(expr.receiver, current, 'mut');
-      } else if (receiver.autoref === 'ref' || throughRef || receiver.asIter) {
-        current = this.expr(expr.receiver, current, 'read');
-      } else if (method.fn.selfMode === 'value') current = this.expr(expr.receiver, current, 'move');
-      else current = this.expr(expr.receiver, current, 'read');
+      } else {
+        const adjusted = typeAfter(expr.receiver.ty, receiver.derefs);
+        const moves = method.fn.selfMode === 'value' && !throughRef && !receiver.asIter && !this.isCopy(adjusted);
+        current = this.expr(expr.receiver, current, moves ? 'move' : 'read');
+      }
     } else {
       current = this.expr(expr.receiver, current, 'read');
     }
@@ -777,11 +779,7 @@ export class BorrowChecker {
       if (current.kind === 'field') fields.push(current.name);
       else {
         const index = this.constantValue(current.index, state);
-        if (typeof index === 'bigint') fields.push(String(index));
-        else {
-          fields.length = 0;
-          assigned = undefined;
-        }
+        fields.push(typeof index === 'bigint' ? String(index) : '[]');
       }
       current = current.operand;
     }
@@ -807,16 +805,13 @@ export class BorrowChecker {
       case 'path': {
         const res = this.annotations.paths.get(expr);
         if (res?.kind !== 'local' && res?.kind !== 'capture') return undefined;
-        const indirect = res.local.mode !== 'move' || isReference(res.local.type);
-        return { root: res.local, path: '', indirect: res.kind === 'capture' || (indirect && false) };
+        return { root: res.local, path: '', indirect: res.kind === 'capture' };
       }
       case 'field': {
         const base = this.placeOf(expr.operand);
         if (!base) return undefined;
         const field = this.annotations.fields.get(expr);
         const throughRef = field?.derefs.some((step) => step === 'ref' || step === 'mutRef') ?? false;
-        const derefsBox = field?.derefs.includes('own') ?? false;
-        void derefsBox;
         return {
           root: base.root,
           path: `${base.path}.${expr.name}`,

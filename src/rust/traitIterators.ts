@@ -1,9 +1,10 @@
 import { normalize } from './infer';
-import type { Answer } from './traits';
+import type { Answer, TraitSolver } from './traits';
 import { shallow, type Type } from './types';
 
 /** What an iterator's shape gives: taking from the back (`DoubleEndedIterator`) and its length (`ExactSizeIterator`). */
 type Capability = 'back' | 'exact';
+const CAPABILITY_TRAITS = { back: 'DoubleEndedIterator', exact: 'ExactSizeIterator' } as const;
 
 /** The capabilities of std's iterators that take no other iterator. */
 const LEAF_SHAPES: Record<string, Capability[]> = {
@@ -64,14 +65,15 @@ const RANGE_EXACT: Record<string, ReadonlySet<string>> = {
 };
 
 /** Whether an iterator (an `IterImpl`, a `&mut` one, or a shape) has a capability, as std's impls decide. */
-// code-gauge-allow functionCognitiveComplexity 28 -- Follows std's impls of the iterator traits case by case.
-export function iteratorCapability(type: Type, capability: Capability): Answer {
+// code-gauge-allow functionCognitiveComplexity 29 -- Follows std's impls of the iterator traits case by case.
+export function iteratorCapability(type: Type, capability: Capability, solver?: TraitSolver): Answer {
   const t = normalize(shallow(type));
   if (t.kind === 'var') return 'unknown';
-  if (t.kind === 'ref') return t.mutable ? iteratorCapability(t.target, capability) : 'no';
+  if (t.kind === 'ref') return t.mutable ? iteratorCapability(t.target, capability, solver) : 'no';
   if (t.kind !== 'adt') return 'no';
-  if (t.def.builtin === 'Iter') return iteratorCapability(t.args[1], capability);
+  if (t.def.builtin === 'Iter') return iteratorCapability(t.args[1], capability, solver);
   const raw = t.def.builtin;
+  if (raw === 'IntoShape') return abstractCapability(t.args[0], capability, solver);
   const name = raw === 'CaseIter' ? 'CaseMappingShape' : raw && DIRECT_ITERATORS.has(raw) ? `${raw}Shape` : t.def.name;
   const leaf = LEAF_SHAPES[name];
   if (leaf) return leaf.includes(capability) ? 'yes' : 'no';
@@ -83,14 +85,23 @@ export function iteratorCapability(type: Type, capability: Capability): Answer {
     return capability === 'back' ? 'yes' : rangeExact(name, t.args[0]);
   }
   if (name === 'SplitShape') return capability === 'back' ? doubleEndedSearcher(t.args[0]) : 'no';
-  return adapterCapability(name, t.args, capability);
+  return adapterCapability(name, t.args, capability, solver);
+}
+
+function abstractCapability(type: Type, capability: Capability, solver?: TraitSolver): Answer {
+  const concrete = normalize(shallow(type));
+  if (!solver) return iteratorCapability(concrete, capability);
+  const trait = solver.program.traitDef(CAPABILITY_TRAITS[capability]);
+  const iterator = solver.program.traitDef('Iterator');
+  const iterable = solver.implements(concrete, { trait: iterator, args: [] });
+  return iterable === 'yes' ? solver.implements(concrete, { trait, args: [] }) : iterable;
 }
 
 const DIRECT_ITERATORS = new Set(['Range', 'RangeInclusive', 'RangeFrom', 'EscapeDefault']);
 
 /** The capabilities of an adapter, from those of the iterators it adapts. */
-function adapterCapability(name: string, args: Type[], capability: Capability): Answer {
-  const inner = (index: number, cap: Capability = capability): Answer => iteratorCapability(args[index], cap);
+function adapterCapability(name: string, args: Type[], capability: Capability, solver?: TraitSolver): Answer {
+  const inner = (index: number, cap: Capability = capability): Answer => iteratorCapability(args[index], cap, solver);
   if (SAME_AS_INNER.has(name)) return inner(0);
   if (COUNTING.has(name)) return capability === 'exact' ? inner(0) : both(inner(0, 'back'), inner(0, 'exact'));
   switch (name) {

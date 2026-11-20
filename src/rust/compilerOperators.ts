@@ -1,7 +1,7 @@
 import type { Expr, Span } from './ast';
 import { concatStrings, sizeTable } from './capacity';
 import type { Compiler, Eval } from './compiler';
-import { derefAll, evaluateValues, isStringType, stringish, stripRefs } from './compilerCommon';
+import { derefAll, evaluateValues, isStringType, stringish, stripRefs, withEvaluatedValues } from './compilerCommon';
 import { normalize } from './infer';
 import { btreeSetOp, hashSetMembers, type SetOp } from './natives/setOps';
 import { cloneValue, floatArith, intArith, overflow, testPartialOrder, valuesEqual, wrap } from './ops';
@@ -71,17 +71,14 @@ function comparison(expr: ExprOf<'binary'>, left: Eval, right: Eval): Eval {
   const methods = { '<': 'lt', '<=': 'le', '>': 'gt', '>=': 'ge' } as const;
   const ordering = methods[op as keyof typeof methods];
   const operands = [left, right];
-  return (frame) => {
-    const values = evaluateValues(frame, operands);
-    const [a, b] = values;
-    return frame.runtime.withRoots(values, () => {
+  return (frame) =>
+    withEvaluatedValues(frame, operands, ([a, b]) => {
       const type = compareType(frame);
       const rightType = rhs(frame);
       return ordering
         ? testPartialOrder(ordering, type, a, b, rightType)
         : valuesEqual(type, a, b, rightType) === (op === '==');
     });
-  };
 }
 
 function arithmetic(expr: ExprOf<'binary'>, left: Eval, right: Eval, rightCoerced: Eval): Eval {

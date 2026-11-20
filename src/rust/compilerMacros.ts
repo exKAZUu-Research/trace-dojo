@@ -1,7 +1,7 @@
 import type { Expr, FormatArgs, FormatPiece, MacroCall, Span } from './ast';
 import { stringByteLength, stringCapacity, StringGrowth } from './capacity';
 import type { Compiler, Eval } from './compiler';
-import { evaluateValues, stringish } from './compilerCommon';
+import { evaluateValues, stringish, withEvaluatedValues } from './compilerCommon';
 import { compilePatternInput, takesWhole } from './compilerPatterns';
 import type { WriteChunk } from './debugText';
 import type { Spec } from './fmt';
@@ -223,21 +223,21 @@ function assertEqMacro(c: Compiler, macro: Macro<'assertEq'>, span: Span): Eval 
   const eqType = runtimeType(stringish(leftStatic) ?? leftStatic);
   const format = macro.format ? compileFormat(c, macro.format) : undefined;
   const { equal } = macro;
-  return (frame) => {
-    const a = left(frame);
-    const b = right(frame);
-    if (valuesEqual(eqType(frame), a, b, rightType(frame)) !== equal) {
-      const spec = debugSpec(false);
-      const l = c.support.formatter.debug(a, leftType(frame), spec, undefined);
-      const r = c.support.formatter.debug(b, rightType(frame), spec, undefined);
-      const message = format ? `: ${format(frame)}` : '';
-      throw new RustPanic(
-        `assertion \`left ${equal ? '==' : '!='} right\` failed${message}\n  left: ${l}\n right: ${r}`,
-        span
-      );
-    }
-    return UNIT_VALUE;
-  };
+  const operands = [left, right];
+  return (frame) =>
+    withEvaluatedValues(frame, operands, ([a, b]) => {
+      if (valuesEqual(eqType(frame), a, b, rightType(frame)) !== equal) {
+        const spec = debugSpec(false);
+        const l = c.support.formatter.debug(a, leftType(frame), spec, undefined);
+        const r = c.support.formatter.debug(b, rightType(frame), spec, undefined);
+        const message = format ? `: ${format(frame)}` : '';
+        throw new RustPanic(
+          `assertion \`left ${equal ? '==' : '!='} right\` failed${message}\n  left: ${l}\n right: ${r}`,
+          span
+        );
+      }
+      return UNIT_VALUE;
+    });
 }
 
 function vecMacro(c: Compiler, macro: Macro<'vec'>): Eval {

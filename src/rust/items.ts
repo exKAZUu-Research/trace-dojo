@@ -35,6 +35,8 @@ import {
   freshVar,
   type ImplDef,
   INT_NAMES,
+  intMax,
+  intMin,
   intType,
   NEVER,
   newOpaque,
@@ -350,8 +352,8 @@ export class ItemCollector {
     });
   }
 
-  // code-gauge-allow functionCognitiveComplexity 24 -- Resolves enum declarations, variants, and discriminants in order.
-  // code-gauge-allow functionNcss 41 -- Follows Rust's name resolution case by case.
+  // code-gauge-allow functionCognitiveComplexity 27 -- Resolves enum declarations, variants, and discriminants in order.
+  // code-gauge-allow functionNcss 42 -- Follows Rust's name resolution case by case.
   private enumItem(item: EnumItem, module: Module): void {
     const def: AdtDef = {
       name: item.name,
@@ -397,6 +399,9 @@ export class ItemCollector {
           // Explicit discriminants on enums with fields need #[repr], which is an attribute.
           compileError(literal.span, 'フィールドを持つ列挙型の列挙子には、値を書けません。');
         }
+      }
+      if (discriminant < intMin('isize') || discriminant > intMax('isize')) {
+        compileError(variant.discriminant?.span ?? variant.span, `列挙子 ${variant.name} の値が isize の範囲外です。`);
       }
       if (discriminants.has(discriminant)) {
         compileError(item.span, `列挙型 ${item.name} の判別値 ${discriminant} が2回使われています。`);

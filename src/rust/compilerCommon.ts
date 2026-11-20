@@ -7,10 +7,14 @@ import { type AdtDef, shallow, type Type } from './types';
 import { EnumValue, isPlace, type Place, StructValue, type Value } from './values';
 
 export function evaluateValues(frame: Frame, reads: Eval[]): Value[] {
+  return withEvaluatedValues(frame, reads, (values) => values);
+}
+
+export function withEvaluatedValues<T>(frame: Frame, reads: Eval[], use: (values: Value[]) => T): T {
   const values: Value[] = [];
   return frame.runtime.withRoots(values, () => {
     for (const read of reads) values.push(read(frame));
-    return values;
+    return use(values);
   });
 }
 
