@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 738 -- Keeps implicit dispatch and native result ownership together.
+// code-gauge-allow-file fileNcss 743 -- Keeps implicit dispatch and native result ownership together.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { placeOf } from './assignment';
 import type { Arg, Expr, ResolvedName } from './ast';
@@ -24,7 +24,7 @@ import {
 import { canCall, classScopeMessage, lookupMethod, requireClass } from './classes';
 import { debugType, toBool, valueName } from './conversions';
 import { deprecated, notice, probe, ProbeFailure, throwError, warn, withPendingException } from './errors';
-import type { ReleaseMode } from './garbage';
+import { recordPossibleRoot, type ReleaseMode } from './garbage';
 import {
   type Chain,
   ev,
@@ -320,7 +320,7 @@ function callDynamicExpression(runtime: Runtime, e: Extract<Expr, { k: 'call' }>
   if (callee instanceof PhpObject || callee instanceof PhpArray) runtime.frame.temporaries.push(callee);
   runtime.row = e.initRow ?? e.row;
   const target = callTargetOf(callee, 'direct');
-  if (e.fcc) return closureFromCallable(target);
+  if (e.fcc) return callee instanceof PhpArray ? receiverClosure(target) : closureFromCallable(target);
   if ((e.fn as Expr).k === 'lit' && typeof callee === 'string') target.dynamic = false;
   const args = evalArgs(e.args, target.magic ? undefined : target.fn, functionDisplayName(target, true));
   runtime.row = e.row;
@@ -422,7 +422,7 @@ export function methodCallExpression(e: Extract<Expr, { k: 'mcall' }>, discardRe
     const target: CallTarget = method.isStatic
       ? { fn: method.fn, scope: method.scope, staticClass: object.cls, method }
       : { fn: method.fn, thisObj: object, scope: method.scope, staticClass: object.cls, method };
-    if (e.fcc) return closureFromCallable(target);
+    if (e.fcc) return receiverClosure(target);
     const args = evalArgs(e.args, method.fn, classMethodLabel(method.scope, method.name));
     runtime.row = e.row;
     const result =
@@ -715,7 +715,7 @@ export function closureTarget(closure: PhpObject): CallTarget {
     scope: data.scope,
     staticClass: data.calledClass ?? data.thisObj?.cls ?? data.scope,
     method: data.method,
-    closure: data.fn.kind === 'user' && data.fn.decl.isClosure ? closure : undefined,
+    closure,
   };
 }
 
@@ -1109,6 +1109,16 @@ function warnCallbackReferenceArguments(target: CallTarget, args: ArgValue[]): v
       `${functionDisplayName(target)}(): Argument #${position + 1}${label} must be passed by reference, value given`
     );
   }
+}
+
+/**
+ * Creates a first-class callable from a call that holds its receiver, as `$obj->m(...)` does; PHP then releases the
+ * call's reference, which buffers the receiver as a possible root.
+ */
+function receiverClosure(target: CallTarget): PhpObject {
+  const closure = closureFromCallable(target);
+  if (target.thisObj) recordPossibleRoot(rt(), target.thisObj);
+  return closure;
 }
 
 export function closureFromCallable(target: CallTarget): PhpObject {

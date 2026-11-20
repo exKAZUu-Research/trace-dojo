@@ -5405,6 +5405,15 @@ test('a returned local becomes a GC root before the other locals are freed', () 
       '<?php class N { static $c = 0; public $id; public $next; function __construct() { $this->id = ++self::$c; } function __destruct() { echo "-{$this->id} "; } } $f = fn() => true; array_map($f, [1]); $a = new N; $b = new N; $a->next = $b; $b->next = $a; unset($a, $b); echo gc_collect_cycles(); $p = new N; $q = new N; echo " ", spl_object_id($p), spl_object_id($q);'
     )
   ).toMatchObject({ kind: 'executed', stdout: '-2 -1 2 32-4 -3 ' });
+  for (const callable of [
+    'class H { function make() { return function () { return 1; }; } } $h = new H; $f = $h->make();',
+    'class H { function m() { return 1; } } $h = new H; $f = $h->m(...);',
+  ])
+    expect(
+      run(
+        `<?php class N { function __construct(public $n) {} function __destruct() { echo "d{$this->n};"; } } function cyc($n) { $o = new stdClass; $o->s = $o; $o->n = new N($n); } ${callable} cyc(1); $f(); cyc(2); cyc(3); echo gc_collect_cycles();`
+      )
+    ).toMatchObject({ kind: 'executed', stdout: 'd1;d3;d2;3' });
   expect(
     run(
       '<?php class D { function __destruct() { throw new Exception("x"); } } class K { public $s; function __destruct() { echo "k", spl_object_id($this), ";"; } function m() { $d = new D; } } $a = new K; $a->s = $a; $b = new K; $b->s = $b; try { $a->m(); } catch (Exception $e) {} unset($b); unset($a); echo gc_collect_cycles();'

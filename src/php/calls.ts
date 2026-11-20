@@ -931,11 +931,12 @@ function releaseFrame(
  * reference to them after freeing the locals.
  */
 function releaseCallee(runtime: Runtime, frame: Frame): void {
-  if (frame.thisObj) runtime.pendingGcRoots.add(frame.thisObj);
-  // PHP's call holds its own reference to a closure, whose release buffers the closure while a variable still holds it
-  // and it is not buffered yet.
-  else if (frame.closure && !runtime.gcRoots.has(frame.closure) && hasStoredObject(runtime, frame.closure))
+  // A closure call, bound or a first-class callable, holds its own reference to the closure, whose release buffers the
+  // closure while a variable still holds it and it is not buffered yet; only other calls hold `$this`.
+  if (frame.closure) {
+    if (runtime.gcRoots.has(frame.closure) || !hasStoredObject(runtime, frame.closure)) return;
     runtime.pendingGcRoots.add(frame.closure);
+  } else if (frame.thisObj) runtime.pendingGcRoots.add(frame.thisObj);
   else return;
   releaseDropped(runtime, [], true);
 }
