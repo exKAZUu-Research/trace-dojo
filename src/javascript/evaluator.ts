@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 527 -- Evaluates every kind of function call, class, and statement of the language in one evaluator.
+// code-gauge-allow-file fileNcss 529 -- Evaluates every kind of function call, class, and statement of the language in one evaluator.
 import assert from 'node:assert/strict';
 
 import { createArgumentsObject, mapArguments } from './argumentsObject';
@@ -39,6 +39,7 @@ import {
   type ClassField,
   type FunctionBehavior,
   type FunctionFrame,
+  isAccessor,
   isObject,
   JsFunction,
   type JsObject,
@@ -581,7 +582,6 @@ export class Evaluator extends SuspendableStatementEvaluator {
       homeObject: prototype,
       isDerived: cls.superClass !== undefined,
       fields: [],
-      traceConstants: new Map(),
       traceBinding: binding,
     };
     const fn = new JsFunction(constructorParent, behavior);
@@ -681,8 +681,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
           onlyCalls: value !== undefined && isObjectCreation(value),
         };
         if (member.isStatic) {
-          const constants = member.isTraceConstant ? behavior.traceConstants : undefined;
-          staticInitializers.push(() => this.initializeField(fn, field, constants));
+          staticInitializers.push(() => this.initializeField(fn, field, member.isTraceConstant));
         } else behavior.fields.push(field);
         continue;
       }
@@ -760,7 +759,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
     });
   }
 
-  private initializeField(target: JsObject, field: ClassField, constants?: Map<Key, Value>): void {
+  private initializeField(target: JsObject, field: ClassField, traceConstant?: true): void {
     const { runtime } = this;
     if (field.property) {
       mergePrivate(runtime, target, privateIdentity(field.key), field.property);
@@ -768,15 +767,20 @@ export class Evaluator extends SuspendableStatementEvaluator {
     }
     this.runtime.steps.runStatement(field.stepRow, field.onlyCalls, () => {
       const value = field.initialize ? field.initialize(target) : undefined;
+      const hiddenTraceConstant = value !== undefined && value !== null ? traceConstant : undefined;
       if (field.isPrivate)
         runtime.definePrivate(target, privateIdentity(field.key), {
           value,
           writable: true,
           enumerable: false,
           configurable: false,
+          hiddenTraceConstant,
         });
-      else runtime.createDataProperty(target, field.key, value);
-      constants?.set(field.key, value);
+      else {
+        runtime.createDataProperty(target, field.key, value);
+        const property = hiddenTraceConstant && target.properties.get(field.key);
+        if (property && !isAccessor(property)) property.hiddenTraceConstant = true;
+      }
     });
   }
 

@@ -202,6 +202,35 @@ console.log(calls, Fields.one, Fields.two, Fields.ordinary, calls);`;
   });
 });
 
+test('changed static constants stay visible through restoration and redefinition', () => {
+  const source = `class Counter {
+  static readonly count = 1;
+  static readonly title = 'initial';
+  static readonly replaced = 3;
+  static readonly untouched = 4;
+  static readonly #hidden = 2;
+  static resetPrivate() { (this.#hidden as number) = 5; (this.#hidden as number) = 2; }
+}
+const alias = Counter;
+(alias as any).untouched = 4;
+(alias as any).count = 8;
+(alias as any).count = 1;
+Object.assign(alias, { title: 'updated' });
+Object.defineProperty(alias, 'title', { value: 'initial' });
+delete (alias as any).replaced;
+(alias as any).replaced = 3;
+Counter.resetPrivate();
+console.log(Counter.count, Counter.title, Counter.replaced);`;
+  const recording = traceProgram('typescript', source, source);
+  expect(recording.stdout).toBe('1 initial 3\n');
+  expect(recording.traceItems.at(-1)?.vars).toEqual({
+    'Counter.count': 1,
+    'Counter.title': 'initial',
+    'Counter.replaced': 3,
+    'Counter.#hidden': 2,
+  });
+});
+
 test('ordinary object snapshots retain enumerable accessors without reading them', () => {
   const source = `let reads = 0;
 const item = {

@@ -19,6 +19,7 @@ export interface DataProperty {
   writable: boolean;
   enumerable: boolean;
   configurable: boolean;
+  hiddenTraceConstant?: true;
 }
 
 export interface AccessorProperty {
@@ -148,7 +149,6 @@ export type FunctionBehavior =
       isDerived: boolean;
       /** Instance fields, initialized when the constructor starts (or `super()` returns). */
       fields: ClassField[];
-      traceConstants: Map<Key, Value>;
       traceBinding?: Binding;
     };
 

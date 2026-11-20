@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 844 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss 853 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
@@ -379,7 +379,7 @@ export class Runtime {
     } else if (target instanceof JsArray && this.writeArrayData(target, key, value, strict)) {
       return;
     } else if (own) {
-      own.value = value;
+      writeDataValue(own, value);
     } else {
       this.allocate(1);
       target.properties.set(key, { value, writable: true, enumerable: true, configurable: true });
@@ -537,6 +537,7 @@ export class Runtime {
     while (elements.length < length) elements.push(HOLE);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Handles indexed storage before keeping ordinary descriptor and trace state.
   defineProperty(object: JsObject, key: Key, property: Property): void {
     // A String object's indices and length are read-only and never stored: a definition compatible with them changes
     // nothing, and any other, such as a class field of that name, throws.
@@ -564,6 +565,7 @@ export class Runtime {
     }
     const current = object.properties.get(key);
     if (!current) this.allocate(1);
+    else preserveTraceConstant(current, property);
     object.properties.set(key, object.isArguments && current ? redefineArgument(current, property) : property);
   }
 
@@ -729,7 +731,7 @@ export class Runtime {
       return;
     }
     if (!property.writable) this.throwError('TypeError', `Private method '${privateNameOf(name)}' is not writable`);
-    property.value = value;
+    writeDataValue(property, value);
   }
 
   definePrivate(target: JsObject, name: string, property: Property): void {
@@ -1203,6 +1205,21 @@ function receiverClassName(target: JsObject): string {
   if (target.isArguments) return 'Arguments';
   if (target.generator || target.asyncGenerator) return 'Generator';
   return target.collection?.kind ?? iteratorClassOf(target) ?? 'Object';
+}
+
+function writeDataValue(property: DataProperty, value: Value): void {
+  if (property.hiddenTraceConstant && !Object.is(property.value, value)) delete property.hiddenTraceConstant;
+  property.value = value;
+}
+
+function preserveTraceConstant(current: Property, property: Property): void {
+  if (
+    !isAccessor(current) &&
+    current.hiddenTraceConstant &&
+    !isAccessor(property) &&
+    Object.is(current.value, property.value)
+  )
+    property.hiddenTraceConstant = true;
 }
 
 function primitiveClassName(primitive: Value): string {

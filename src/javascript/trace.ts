@@ -12,11 +12,11 @@ import { Runtime } from './runtime';
 import {
   type AccessorProperty,
   type Binding,
+  type DataProperty,
   isAccessor,
   JsArray,
   JsFunction,
   JsObject,
-  type Key,
   privateClassOf,
   privateNameOf,
   type Property,
@@ -76,7 +76,7 @@ class Snapshotter {
     if (!top) return;
     for (const [className, cls] of classBindings(top)) {
       if (cls.behavior.kind !== 'class') continue;
-      for (const [key, property] of displayedProperties(cls, this.runtime, cls.behavior.traceConstants)) {
+      for (const [key, property] of displayedProperties(cls, this.runtime)) {
         const name = `${className}.${key}`;
         if (isAccessor(property)) variables.referenceVars[name] = accessorNode(property);
         else addVariable(variables, name, property.value, this.runtime);
@@ -269,37 +269,25 @@ function privateLabels(keys: string[]): string[] {
 }
 
 /** The fields learners see in an object: its own enumerable properties and private data fields. */
-function displayedProperties(
-  object: JsObject,
-  runtime: Runtime,
-  constants?: ReadonlyMap<Key, Value>
-): [string, Property][] {
+function displayedProperties(object: JsObject, runtime: Runtime): [string, Property][] {
   const entries: [string, Property][] = [];
   // Errors keep their message in a non-enumerable property.
   const message = object.isError ? object.properties.get('message') : undefined;
   if (message && !isAccessor(message) && !runtime.isUnavailableValue(message.value)) entries.push(['message', message]);
   for (const [key, property] of object.properties) {
-    if (
-      typeof key === 'string' &&
-      property.enumerable &&
-      (isAccessor(property) || traceField(runtime, property.value, constants?.get(key)))
-    )
+    if (typeof key === 'string' && property.enumerable && (isAccessor(property) || traceField(runtime, property)))
       entries.push([key, property]);
   }
   const fields = [...(object.privateMembers ?? [])].filter(
-    ([key, property]) => !isAccessor(property) && traceField(runtime, property.value, constants?.get(key))
+    ([, property]) => !isAccessor(property) && traceField(runtime, property)
   );
   const labels = privateLabels(fields.map(([key]) => key));
   for (const [index, [, property]] of fields.entries()) entries.push([labels[index], property]);
   return entries;
 }
 
-function traceField(runtime: Runtime, value: Value, initialConstant: Value): boolean {
-  return (
-    !(value instanceof JsFunction) &&
-    !runtime.isUnavailableValue(value) &&
-    (value === undefined || value === null || !Object.is(value, initialConstant))
-  );
+function traceField(runtime: Runtime, { value, hiddenTraceConstant }: DataProperty): boolean {
+  return !hiddenTraceConstant && !(value instanceof JsFunction) && !runtime.isUnavailableValue(value);
 }
 
 function primitiveNode(value: bigint | symbol): DisplayNode {
