@@ -26,7 +26,7 @@ export function tracePhpProgram(program: string, trace: TraceOptions, input?: Pr
     finalVars = variablesOf(runtime, frame, false).vars;
   });
   if (runtime.hostStackExhausted) {
-    const retried = runTraceOnLargeStack(program, trace, input);
+    const retried = runTraceOnLargeStack(program, trace, runtime.budget.remainingMilliseconds, input);
     if (retried) return retried;
   }
   return { traceItems: recorder.traceItems, finalVars, ...run };

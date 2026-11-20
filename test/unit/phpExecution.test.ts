@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
-import { executeProgram } from '../../src/interpreter/program';
+import { executeProgram, traceProgram } from '../../src/interpreter/program';
 
 // The interpreter's clock stands still in these tests, so that the program, not the load of the host, decides each one.
 beforeEach(() => {
@@ -4896,6 +4896,10 @@ try { f(); } catch (Throwable $e) { while ($e) { echo $e->getMessage(), ";"; $e 
       'exit;drop;inner;destructor',
     ],
     ['try { return [new D, exit("exit;")]; } finally { echo "finally;"; }', 'exit;drop;outer;destructor'],
+    [
+      'try { return [new D, exit("exit;")]; } catch (TypeError $e) { echo "wrong;"; } finally { echo "finally;"; }',
+      'exit;drop;finally;outer;destructor',
+    ],
   ]) {
     expect(
       run(
@@ -4955,4 +4959,23 @@ try { f(); } catch (Throwable $e) { while ($e) { echo $e->getMessage(), ";"; $e 
     expect(result).toMatchObject({ kind: 'executed' });
     expect(result.kind === 'executed' ? result.stdout : '').toContain('Allowed memory size');
   }
+
+  const bigTraceSource = `<?php
+$big = PHP_INT_MAX;
+$inf = INF;
+$nan = NAN;
+function s(int $n): int {
+  return match (true) {
+    $n == 0 => 0,
+    default => $n + s($n - 1),
+  };
+}
+$r = s(450);
+echo $r;
+`;
+  const traced = traceProgram('php', bigTraceSource, bigTraceSource);
+  expect(traced.stdout).toBe('101475');
+  expect(traced.finalVars.$big).toBe(9_223_372_036_854_775_807n);
+  expect(traced.finalVars.$inf).toBe(Number.POSITIVE_INFINITY);
+  expect(Number.isNaN(traced.finalVars.$nan)).toBe(true);
 });

@@ -123,11 +123,20 @@ export class Frame {
 
 const variableNamesByFunction = new WeakMap<FunctionDecl, Set<string>>();
 
+function createBudget(): ExecutionBudget {
+  const remaining = process.env.PHP_REMAINING_MS;
+  if (remaining === undefined) return new ExecutionBudget();
+  const parsed = Number(remaining);
+  return new ExecutionBudget(
+    Number.isFinite(parsed) && parsed >= 0 ? Math.min(parsed, LIMITS.maxMilliseconds) : LIMITS.maxMilliseconds
+  );
+}
+
 export class Runtime {
   // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- PHP returns this canonical encoding name.
   mbEncoding = 'UTF-8';
   readonly activeErrorHandlers = new Set<Value>();
-  readonly budget = new ExecutionBudget();
+  readonly budget = createBudget();
   readonly io: ProgramIO;
   readonly world = new TurtleWorld();
   readonly steps = new StepTracker();

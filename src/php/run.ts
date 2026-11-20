@@ -26,7 +26,7 @@ export function executePhpProgram(source: string, input?: ProgramInput): Program
     const runtime = new Runtime(input);
     const run = runProgram(runtime, parsed);
     if (runtime.hostStackExhausted) {
-      const retried = runExecuteOnLargeStack(source, input);
+      const retried = runExecuteOnLargeStack(source, runtime.budget.remainingMilliseconds, input);
       if (retried) return retried;
     }
     return { kind: 'executed', ...run };

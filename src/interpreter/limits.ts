@@ -34,7 +34,11 @@ export class ExecutionBudget {
   }
 
   private nextClockCheck = OPERATIONS_PER_CLOCK_CHECK;
-  private deadline = performance.now() + LIMITS.maxMilliseconds;
+  private deadline: number;
+
+  constructor(maxMilliseconds = LIMITS.maxMilliseconds) {
+    this.deadline = performance.now() + maxMilliseconds;
+  }
 
   get remainingMilliseconds(): number {
     return Math.max(0, Math.ceil(this.deadline - performance.now()));

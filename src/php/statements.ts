@@ -694,7 +694,7 @@ function handleTryThrow(
     }
   }
   if (top.phase !== 'finally') {
-    if (error instanceof PhpThrow && !fromExit && !runtime.exhausted && top.stmt.fin) {
+    if (error instanceof PhpThrow && (!fromExit || top.stmt.catches.length > 0) && !runtime.exhausted && top.stmt.fin) {
       enterFinallyFrame(stack, top, runtime, frame, undefined, error);
       return { handled: true, error };
     }
