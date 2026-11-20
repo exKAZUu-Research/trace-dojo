@@ -94,8 +94,20 @@ export class ConstLint {
     return new ConstLint(annotations, new Set(), true).constant(def);
   }
 
-  static valueOf(expr: Expr, annotations: Annotations): Known | undefined {
-    return new ConstLint(annotations, new Set(), true).expr(expr);
+  static valueOf(expr: Expr, annotations: Annotations, locals: Iterable<[LocalVar, Known]>): Known | undefined {
+    const evaluator = new ConstLint(annotations, new Set(), true);
+    for (const [local, value] of locals) evaluator.known.set(local, value);
+    return evaluator.expr(expr);
+  }
+
+  static bindingsOf(
+    pattern: Pattern,
+    value: Known | undefined,
+    annotations: Annotations
+  ): ReadonlyMap<LocalVar, Known> {
+    const evaluator = new ConstLint(annotations, new Set(), true);
+    evaluator.bind(pattern, value);
+    return evaluator.known;
   }
 
   check(block: Block): void {
@@ -149,6 +161,9 @@ export class ConstLint {
       for (const { name, pattern: field } of pattern.fields) this.bind(field, knownField(value, name));
     } else if (this.patternEvaluation && pattern.kind === 'ref') {
       this.bind(pattern.pattern, value);
+    } else if (this.patternEvaluation && pattern.kind === 'or') {
+      const matched = pattern.alternatives.find((alt) => this.matchesPattern(alt, value) === true);
+      if (matched) this.bind(matched, value);
     } else {
       for (const local of patternBindings(pattern, this.annotations)) this.setKnown(local, undefined);
     }
@@ -428,14 +443,23 @@ export class ConstLint {
   private condition(cond: Condition): Known | undefined {
     if (cond.kind === 'expr') return this.expr(cond.expr);
     const value = this.expr(cond.value);
-    const matches = patternMatches(cond.pattern, value, this.annotations);
+    const matches = this.matchesPattern(cond.pattern, value);
     this.bind(cond.pattern, matches === true ? value : undefined);
     return this.patternEvaluation ? matches : undefined;
   }
 
+  private matchesPattern(pattern: Pattern, value: Known | undefined): boolean | undefined {
+    return patternMatches(
+      pattern,
+      value,
+      this.annotations,
+      this.patternEvaluation ? (def) => this.constant(def) : undefined
+    );
+  }
+
   private constantMatch(scrutinee: Known | undefined, arms: MatchArm[]): Known | undefined {
     for (const arm of arms) {
-      const matches = patternMatches(arm.pattern, scrutinee, this.annotations);
+      const matches = this.matchesPattern(arm.pattern, scrutinee);
       if (matches === undefined) break;
       if (!matches) continue;
       this.bind(arm.pattern, scrutinee);
@@ -450,7 +474,7 @@ export class ConstLint {
     this.endBlock();
     let allDiverge = true;
     for (const arm of arms) {
-      const matches = patternMatches(arm.pattern, scrutinee, this.annotations);
+      const matches = this.matchesPattern(arm.pattern, scrutinee);
       if (matches === false) continue;
       this.bind(arm.pattern, matches === true ? scrutinee : undefined);
       allDiverge = this.branch(() => this.expr(arm.body)) && allDiverge;
@@ -588,8 +612,37 @@ export class ConstLint {
   }
 }
 
-function knownField(value: Known | undefined, name: string): Known | undefined {
+export function knownField(value: Known | undefined, name: string): Known | undefined {
   return typeof value === 'object' ? value.fields.get(name) : undefined;
+}
+
+export function writeKnownField(
+  value: Known | undefined,
+  path: string[],
+  assigned: Known | undefined
+): Known | undefined {
+  if (path.length === 0) return assigned;
+  if (typeof value !== 'object') return undefined;
+  const [field, ...rest] = path;
+  const fields = new Map(value.fields);
+  fields.set(field, writeKnownField(fields.get(field), rest, assigned));
+  return { ...value, fields };
+}
+
+export function intersectKnown(a: Known | undefined, b: Known | undefined): Known | undefined {
+  if (Object.is(a, b)) return a;
+  if (typeof a !== 'object' || typeof b !== 'object' || a.ctor !== b.ctor) return undefined;
+  return aggregate(
+    [...a.fields].map(([name, value]) => [name, intersectKnown(value, b.fields.get(name))]),
+    a.ctor
+  );
+}
+
+export function sameKnown(a: Known | undefined, b: Known | undefined): boolean {
+  if (Object.is(a, b)) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a.ctor !== b.ctor || a.fields.size !== b.fields.size)
+    return false;
+  return [...a.fields].every(([name, value]) => b.fields.has(name) && sameKnown(value, b.fields.get(name)));
 }
 
 const RUNTIME_DROP_TYPES = new Set([
@@ -681,19 +734,24 @@ function aggregate(fields: Iterable<readonly [string, Known | undefined]>, ctor?
 }
 
 /** Whether a pattern matches a constant: surely, surely not, or unknown. */
-function patternMatches(pattern: Pattern, value: Known | undefined, annotations: Annotations): boolean | undefined {
+function patternMatches(
+  pattern: Pattern,
+  value: Known | undefined,
+  annotations: Annotations,
+  constant: ((def: ConstDef) => Known | undefined) | undefined
+): boolean | undefined {
   const constructor = annotations.paths.get(pattern);
   if (constructor?.kind === 'ctor') {
     if (typeof value !== 'object' || !value.ctor) return undefined;
     if (value.ctor !== `v${constructor.variant}`) return false;
-  } else if (constructor?.kind === 'const') return undefined;
+  } else if (constructor?.kind === 'const') return knownEqual(value, constant?.(constructor.def));
   switch (pattern.kind) {
     case 'path':
     case 'wild': {
       return pattern.kind === 'wild' || constructor?.kind === 'ctor' ? true : undefined;
     }
     case 'binding': {
-      return pattern.sub ? patternMatches(pattern.sub, value, annotations) : true;
+      return pattern.sub ? patternMatches(pattern.sub, value, annotations, constant) : true;
     }
     case 'lit': {
       const literal = pattern.expr;
@@ -704,19 +762,25 @@ function patternMatches(pattern: Pattern, value: Known | undefined, annotations:
     case 'tupleStruct': {
       if (typeof value !== 'object') return undefined;
       return allKnownMatches(
-        pattern.elems.map((child, index) => patternMatches(child, knownField(value, String(index)), annotations))
+        pattern.elems.map((child, index) =>
+          patternMatches(child, knownField(value, String(index)), annotations, constant)
+        )
       );
     }
     case 'struct': {
       return allKnownMatches(
-        pattern.fields.map(({ name, pattern: child }) => patternMatches(child, knownField(value, name), annotations))
+        pattern.fields.map(({ name, pattern: child }) =>
+          patternMatches(child, knownField(value, name), annotations, constant)
+        )
       );
     }
     case 'ref': {
-      return patternMatches(pattern.pattern, value, annotations);
+      return patternMatches(pattern.pattern, value, annotations, constant);
     }
     case 'or': {
-      const results = pattern.alternatives.map((alternative) => patternMatches(alternative, value, annotations));
+      const results = pattern.alternatives.map((alternative) =>
+        patternMatches(alternative, value, annotations, constant)
+      );
       if (results.includes(true)) return true;
       return results.every((result) => result === false) ? false : undefined;
     }
@@ -729,4 +793,11 @@ function patternMatches(pattern: Pattern, value: Known | undefined, annotations:
 function allKnownMatches(results: (boolean | undefined)[]): boolean | undefined {
   if (results.includes(false)) return false;
   return results.every((result) => result === true) ? true : undefined;
+}
+
+function knownEqual(left: Known | undefined, right: Known | undefined): boolean | undefined {
+  if (left === undefined || right === undefined) return undefined;
+  if (typeof left !== 'object' || typeof right !== 'object') return left === right;
+  if (left.ctor !== right.ctor || left.fields.size !== right.fields.size) return false;
+  return allKnownMatches([...left.fields].map(([name, value]) => knownEqual(value, right.fields.get(name))));
 }

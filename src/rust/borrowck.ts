@@ -5,7 +5,15 @@ import type { Annotations, FnContext, LocalVar } from './annotations';
 import type { Block, Condition, Expr, FnItem, FormatArgs, Pattern, Span, Stmt } from './ast';
 import { forEachDirect, patternBindingParts, patternBindings } from './astWalk';
 import { writtenCallParams } from './checkerCalls';
-import { checkConstDrop, ConstLint } from './constLint';
+import {
+  checkConstDrop,
+  ConstLint,
+  intersectKnown,
+  type Known,
+  knownField,
+  sameKnown,
+  writeKnownField,
+} from './constLint';
 import { normalize } from './infer';
 import { compileError } from './items';
 import { LoanBuilder } from './loanBuilder';
@@ -18,6 +26,7 @@ interface VarState {
   init: 'yes' | 'no' | 'maybe';
   /** Where the value moved out, for messages, when it did. */
   movedAt: Span | undefined;
+  known?: Known;
   /** Moved-out parts (`x.f`), whose variable can no longer be used as a whole. */
   partial: Set<string>;
 }
@@ -110,11 +119,7 @@ export class BorrowChecker {
       for (const local of this.bindingsOf(stmt.pattern)) {
         const current = state.get(local);
         if (!current || current.init === 'no') continue;
-        const known =
-          !local.mutable && stmt.init && stmt.pattern.kind === 'binding'
-            ? ConstLint.valueOf(stmt.init, this.annotations)
-            : undefined;
-        checkConstDrop(local.type, known, current.partial, local.span, this.budget);
+        checkConstDrop(local.type, current.known, current.partial, local.span, this.budget);
       }
     }
   }
@@ -125,12 +130,12 @@ export class BorrowChecker {
       case 'let': {
         if (!stmt.init) return state;
         const { pattern, init } = stmt;
-        if (this.constContext && pattern.kind === 'wild' && !this.placeOf(init)) this.checkTemporaryDrop(init);
         if (pattern.kind === 'binding' && !pattern.sub) {
           // `let r2: &mut T = r;` reborrows `*r`; without the type it moves `r`.
           const reborrows = stmt.type?.kind === 'ref' && stmt.type.mutable && isMutReference(init.ty);
+          const known = this.constantValue(init, state);
           let current = this.expr(init, state, reborrows ? 'read' : 'move');
-          for (const local of this.bindingsOf(pattern)) current = setVar(current, local, initState());
+          for (const local of this.bindingsOf(pattern)) current = setVar(current, local, initState(known));
           return current;
         }
         const afterValue = this.patternSource(init, state);
@@ -139,7 +144,7 @@ export class BorrowChecker {
         return this.bindPattern(pattern, init, afterValue);
       }
       case 'expr': {
-        if (this.constContext) this.checkTemporaryDrop(stmt.expr);
+        if (this.constContext) this.checkTemporaryDrop(stmt.expr, state);
         return this.expr(stmt.expr, state, 'move');
       }
       case 'empty': {
@@ -159,7 +164,7 @@ export class BorrowChecker {
   private expr(expr: Expr, state: State, mode: 'move' | 'read' | 'mut'): State {
     this.budget.spend();
     if (state === BOTTOM) return BOTTOM;
-    if (this.constContext && mode !== 'move' && !this.placeOf(expr)) this.checkTemporaryDrop(expr);
+    if (this.constContext && mode !== 'move' && !this.placeOf(expr)) this.checkTemporaryDrop(expr, state);
     switch (expr.kind) {
       case 'path': {
         return this.usePlace(expr, state, mode);
@@ -240,8 +245,16 @@ export class BorrowChecker {
     }
   }
 
-  private checkTemporaryDrop(expr: Expr): void {
-    checkConstDrop(expr.ty, ConstLint.valueOf(expr, this.annotations), new Set(), expr.span, this.budget);
+  private checkTemporaryDrop(expr: Expr, state: State): void {
+    checkConstDrop(expr.ty, this.constantValue(expr, state), new Set(), expr.span, this.budget);
+  }
+
+  private constantValue(expr: Expr, state: State): Known | undefined {
+    if (!this.constContext) return undefined;
+    const values = [...state].flatMap(([local, info]): [LocalVar, Known][] =>
+      info.init === 'yes' && info.known !== undefined ? [[local, info.known]] : []
+    );
+    return ConstLint.valueOf(expr, this.annotations, values);
   }
 
   private unary(expr: Extract<Expr, { kind: 'unary' }>, state: State, mode: 'move' | 'read' | 'mut'): State {
@@ -301,7 +314,13 @@ export class BorrowChecker {
   private assignment(expr: Extract<Expr, { kind: 'assign' | 'compoundAssign' }>, state: State): State {
     const value = this.expr(expr.value, state, 'move');
     if (expr.kind === 'assign')
-      return this.assign(expr.target, this.placeIndexes(expr.target, value), expr.span, expr.value);
+      return this.assign(
+        expr.target,
+        this.placeIndexes(expr.target, value),
+        expr.span,
+        expr.value,
+        this.constantValue(expr.value, state)
+      );
     const read = this.expr(expr.target, value, 'read');
     // A target that is no variable's place (`*map.entry(k).or_insert(0)`) is evaluated once, by the read.
     return this.placeOf(expr.target) ? this.assign(expr.target, read, expr.span, undefined) : read;
@@ -366,16 +385,23 @@ export class BorrowChecker {
 
   private patternSource(scrutinee: Expr, state: State): State {
     const place = this.placeOf(scrutinee);
-    if (!place || place.indirect) return this.expr(scrutinee, state, 'read');
+    if (!place) return this.expr(scrutinee, state, this.constContext ? 'move' : 'read');
+    if (place.indirect) return this.expr(scrutinee, state, 'read');
     return this.placeIndexes(scrutinee, state);
   }
 
   /** Binds a pattern's variables, moving the parts of a place they bind by value. */
   private bindPattern(pattern: Pattern, scrutinee: Expr, state: State): State {
-    if (pattern.kind === 'wild') return state;
+    const place = this.placeOf(scrutinee);
+    if (pattern.kind === 'wild') {
+      if (this.constContext && !place) this.checkTemporaryDrop(scrutinee, state);
+      return state;
+    }
     let current = state;
     const moved = this.movedParts(pattern);
-    const place = this.placeOf(scrutinee);
+    const known = this.constantValue(scrutinee, state);
+    const bindings = this.constContext ? ConstLint.bindingsOf(pattern, known, this.annotations) : undefined;
+    if (this.constContext && !place) checkConstDrop(scrutinee.ty, known, new Set(moved), scrutinee.span, this.budget);
     if (place?.indirect && moved.length > 0 && !this.ownsCapture(scrutinee)) this.cannotMoveOut(scrutinee, '');
     if (place && !place.indirect) {
       const varState = state.get(place.root);
@@ -391,7 +417,7 @@ export class BorrowChecker {
         current = this.markMoved(current, { ...place, path: `${place.path}${path}` }, scrutinee.span, false);
       }
     }
-    for (const local of this.bindingsOf(pattern)) current = setVar(current, local, initState());
+    for (const local of this.bindingsOf(pattern)) current = setVar(current, local, initState(bindings?.get(local)));
     return current;
   }
 
@@ -650,7 +676,7 @@ export class BorrowChecker {
 
   /** Assigns a place; `value` is the assigned expression of a plain assignment (`=`), or undefined for `+=` and kin. */
   // code-gauge-allow functionCognitiveComplexity 23 -- Follows the borrow checking rules case by case.
-  private assign(target: Expr, state: State, span: Span, value: Expr | undefined): State {
+  private assign(target: Expr, state: State, span: Span, value: Expr | undefined, known?: Known): State {
     const whole = value !== undefined;
     const place = this.placeOf(target);
     if (!place) {
@@ -659,6 +685,9 @@ export class BorrowChecker {
       return this.expr(target, state, 'read');
     }
     const varState = state.get(place.root);
+    if (this.constContext && whole && varState && varState.init !== 'no' && !place.indirect) {
+      this.checkReplacedValue(target, place.path, varState);
+    }
     if (place.path === '' && !place.indirect && whole) {
       const local = place.root;
       if (!local.mutable && local.mode === 'move' && varState && varState.init !== 'no') {
@@ -673,7 +702,7 @@ export class BorrowChecker {
           `mut ではない変数 ${local.name} に、もう一度代入できません（let mut ${local.name} と宣言してください）。`
         );
       }
-      return setVar(state, local, initState());
+      return setVar(state, local, initState(known));
     }
     if (varState && !place.indirect) {
       if (varState.init !== 'yes' && !varState.movedAt) {
@@ -691,13 +720,25 @@ export class BorrowChecker {
       const partial = new Set(
         [...varState.partial].filter((moved) => moved !== place.path && !moved.startsWith(`${place.path}.`))
       );
-      if (partial.size !== varState.partial.size) {
-        return setVar(state, place.root, { ...varState, partial });
+      if (this.constContext || partial.size !== varState.partial.size) {
+        const value = writeKnownField(varState.known, place.path.slice(1).split('.'), known);
+        return setVar(state, place.root, { ...varState, partial, known: value });
       }
     } else if (varState) {
       this.checkUsable(place.root, varState, span, 'read');
     }
     return state;
+  }
+
+  private checkReplacedValue(target: Expr, path: string, state: VarState): void {
+    const moves = [...state.partial];
+    if (moves.some((move) => move === path || path.startsWith(`${move}.`))) return;
+    let value = state.known;
+    if (path) for (const field of path.slice(1).split('.')) value = knownField(value, field);
+    const moved = new Set(
+      moves.filter((move) => !path || move.startsWith(`${path}.`)).map((move) => move.slice(path.length))
+    );
+    checkConstDrop(target.ty, value, moved, target.span, this.budget);
   }
 
   /** The place an expression denotes, rooted in a variable of the function, or undefined for other expressions. */
@@ -759,8 +800,8 @@ export class BorrowChecker {
   }
 }
 
-function initState(): VarState {
-  return { init: 'yes', movedAt: undefined, partial: new Set() };
+function initState(known?: Known): VarState {
+  return { init: 'yes', movedAt: undefined, partial: new Set(), known };
 }
 
 function setVar(state: State, local: LocalVar, varState: VarState): State {
@@ -782,6 +823,7 @@ function sameState(a: State, b: State): boolean {
     if (left.init !== right?.init || left.movedAt !== right.movedAt || left.partial.size !== right.partial.size) {
       return false;
     }
+    if (!sameKnown(left.known, right.known)) return false;
     for (const part of left.partial) if (!right.partial.has(part)) return false;
   }
   return true;
@@ -825,7 +867,12 @@ function join(a: State, b: State): State {
       continue;
     }
     const init = x.init === y.init ? x.init : 'maybe';
-    result.set(local, { init, movedAt: x.movedAt ?? y.movedAt, partial: new Set([...x.partial, ...y.partial]) });
+    result.set(local, {
+      init,
+      movedAt: x.movedAt ?? y.movedAt,
+      partial: new Set([...x.partial, ...y.partial]),
+      known: intersectKnown(x.known, y.known),
+    });
   }
   for (const [local, y] of b) if (!a.has(local)) result.set(local, y);
   return result;

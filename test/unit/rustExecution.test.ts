@@ -3106,3 +3106,19 @@ test('keeps Rust callback borrows through nested owners and collection insertion
     });
   }
 });
+
+test('tracks active Rust const variants through declarations and assignment', () => {
+  const program = `const FIRST: () = { let mut value: Option<String> = None; value = None; };
+const SECOND: () = { let (value, n) = (None::<String>, 1); };
+fn main() { println!("ok"); }`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'ok\n' });
+  const assignedOwned = program.replace('value = None; };', 'value = Some(String::new()); };');
+  expect(executeProgram('rust', assignedOwned)).toMatchObject({ kind: 'compileError' });
+});
+
+test('matches constants by path while evaluating Rust structural constants', () => {
+  const program = `const ON: bool = true;
+const CASE: (bool, bool) = match true { ON => (true, false), _ => (false, false) };
+fn main() { match (true, false) { CASE => println!("hit"), (false, _) => (), (true, true) => () } }`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'hit\n' });
+});
