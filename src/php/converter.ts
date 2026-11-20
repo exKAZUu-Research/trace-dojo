@@ -48,7 +48,7 @@ export type { CompileNotice } from './converterBase';
 
 const EQUALITY_OPERATORS = new Set(['==', '!=', '===', '!==', '<>', '<=>']);
 const ORDER_OPERATORS = new Set(['<', '<=', '>', '>=']);
-const COMMUTATIVE_OPCODES = new Set(['*', '&', '|', '^']);
+const COMMUTATIVE_OPCODES = new Set(['*', '&', '|', '^', '==', '!=', '===', '!==']);
 const CALL_EXPRESSIONS = new Set([
   'function_call_expression',
   'member_call_expression',

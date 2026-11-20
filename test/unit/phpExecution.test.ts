@@ -4770,3 +4770,76 @@ test('reaches the shared 512-frame recursion limit under the default host stack'
     stdout: expect.stringContaining('Allowed memory size'),
   });
 });
+
+test('matches PHP retained-empty searches, equality, removals, transforms, iterator spread keys, and class/object rules', () => {
+  const retainedPrefix = `error_reporting(0); function f() { return 4; } $a = []; set_error_handler(function() use (&$a) { unset($a[0]); $a[] = 9; return true; }); $a[] =& f(); restore_error_handler(); unset($a[0]);`;
+
+  // r1466 + r1467: search operand direction and equality specialization
+  expect(
+    run(`<?php ${retainedPrefix}
+echo json_encode([in_array($a, [[]], false), in_array($a, [[]], true), array_search($a, [[]], false), array_keys([[]], $a, true), [] === $a, [] == $a, [] !== $a, ($b = []) === $a]);
+$b = []; echo json_encode([$b === $a, $b == $a]);`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '[false,false,false,[],false,false,true,false][true,true]',
+  });
+
+  // r1468 + r1470: pop/shift and read/transform fast paths on logically empty retained arrays
+  expect(
+    run(`<?php ${retainedPrefix}
+echo json_encode([array_pop($a), array_shift($a), count($a), $a[1], array_values($a), array_keys($a), array_chunk($a, 1), array_combine($a, $a), array_sum($a), array_product($a), array_filter($a), array_reduce($a, fn($x, $y) => $x + $y, 0), array_any($a, fn($x) => true), array_all($a, fn($x) => false), array_find($a, fn($x) => true), array_find_key($a, fn($x) => true)]);
+$n = 0; array_map(function($x) use (&$n) { $n++; return $x; }, $a); echo ":$n:", $a[1];`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '[null,null,0,9,[],[],[],[],0,1,[],0,false,true,null,null]:0:9',
+  });
+
+  // r1469: Traversable unpacking normalizes canonical numeric string keys
+  expect(
+    run(`<?php
+class I implements Iterator { public $i = 0; function rewind(): void { $this->i = 0; } function valid(): bool { return $this->i < 1; } function current(): mixed { return 7; } function key(): mixed { return "0"; } function next(): void { $this->i++; } }
+$a = [...new I]; $a[] = 8; echo json_encode($a);`)
+  ).toMatchObject({ kind: 'executed', stdout: '[7,8]' });
+
+  // r1471: final private constructor cannot be overridden
+  expect(
+    run(
+      '<?php class A { final private function __construct() {} } class B extends A { public function __construct() {} }'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: expect.stringContaining('Cannot override final method A::__construct()'),
+  });
+
+  // r1472: self-bind sets isRef for shutdown order
+  expect(
+    run(
+      String.raw`<?php class D { public $n; function __construct($n) { $this->n = $n; } function __destruct() { echo "d{$this->n} "; } } $z = new D(1); $b = new D(3); $b = &$b; $c = new D(6); echo "END\n";`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'END\nd6 d1 d3 ' });
+
+  // r1473: dynamic properties destroyed before declared properties
+  expect(
+    run(
+      '<?php error_reporting(0); class D { public $o = null; public $n; function __construct($n) { $this->n = $n; } function __destruct() { echo "d{$this->n} "; } } $a = new D(0); $a->o = new D(1); $a->dyn = new D(2); $a = null;'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'd0 d2 d1 ' });
+
+  // r1474: static access to private/protected instance property reports visibility error
+  expect(
+    run(
+      '<?php class A { private $p = 1; protected $q = 2; public $r = 3; } foreach (["p", "q", "r"] as $m) { try { echo A::$$m; } catch (Error $e) { echo $e->getMessage(), ";"; } }'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'Cannot access private property A::$p;Cannot access protected property A::$q;Access to undeclared static property A::$r;',
+  });
+
+  // r1475: helper method called from property hook invokes hook normally
+  expect(
+    run(
+      '<?php class C { public $n = 0; public int $x { get { return $this->read(); } } function read() { return ++$this->n < 2 ? $this->x : 99; } } $c = new C; echo $c->x, ":", $c->n;'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '99:2' });
+});

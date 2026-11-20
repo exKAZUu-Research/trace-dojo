@@ -276,9 +276,9 @@ export class VarPlace implements Place {
   bind(ref: Ref): void {
     this.checkWritableName();
     const old = this.frame.vars.get(this.name);
+    ref.isRef = true;
     if (old === ref) return dropped(old);
     if (old) old.rc--;
-    ref.isRef = true;
     ref.rc++;
     this.frame.vars.set(this.name, ref);
     if (old) dropped(old.v);

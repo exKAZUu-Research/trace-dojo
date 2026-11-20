@@ -191,11 +191,13 @@ defineFunction('array_push(array &$array, mixed ...$values): int', (ctx) => {
 });
 defineFunction('array_pop(array &$array): mixed', (ctx) => {
   checkArrayRef(ctx, 0, 'array_pop', 'array');
-  return writableArray(ctx, 0).pop();
+  const array = writableArray(ctx, 0);
+  return array.size === 0 ? null : array.pop();
 });
 defineFunction('array_shift(array &$array): mixed', (ctx) => {
   checkArrayRef(ctx, 0, 'array_shift', 'array');
   const array = writableArray(ctx, 0);
+  if (array.size === 0) return null;
   const shifted = array.shiftList() ?? array.shiftStringKey();
   if (shifted) return shifted.value;
   const first = array.map.keys().next();
@@ -250,13 +252,14 @@ defineFunction('array_last(array $array): mixed', ({ args }) => arr(args[0]).las
 defineFunction('array_keys(array $array, mixed $filter_value = UNKNOWN, bool $strict = false): array', ({ args }) => {
   const array = arr(args[0]);
   const keys = new PhpArray();
+  if (array.size === 0) return keys;
   if (args.length < 2 && array.map.countsUndefinedSlots && array.hasDensePackedStorage()) {
     for (let key = 0n; key < BigInt(array.size); key++) keys.append(key);
     return keys;
   }
   for (const [key, value] of array.entries()) {
     if (args.length >= 2) {
-      const matches = args[2] === true ? strictEquals(value, args[1]) : looseEquals(value, args[1]);
+      const matches = args[2] === true ? strictEquals(args[1], value) : looseEquals(args[1], value);
       if (!matches) continue;
     }
     keys.append(key);
@@ -265,6 +268,7 @@ defineFunction('array_keys(array $array, mixed $filter_value = UNKNOWN, bool $st
 });
 defineFunction('array_values(array $array): array', ({ args }) => {
   const array = arr(args[0]);
+  if (array.size === 0) return new PhpArray();
   // PHP returns a list as it is, sharing it with its internal pointer.
   if (array.keepsValuesTable()) return share(array);
   return rebuild(
@@ -277,7 +281,7 @@ defineFunction('in_array(mixed $needle, array $haystack, bool $strict = false): 
   const [needle, haystack, strict] = args;
   for (const value of arr(haystack).iterValues()) {
     rt().spend();
-    if (strict === true ? strictEquals(value, needle) : looseEquals(value, needle)) return true;
+    if (strict === true ? strictEquals(needle, value) : looseEquals(needle, value)) return true;
   }
   return false;
 });
@@ -285,7 +289,7 @@ defineFunction('array_search(mixed $needle, array $haystack, bool $strict = fals
   const [needle, haystack, strict] = args;
   for (const [key, value] of arr(haystack).entries()) {
     rt().spend();
-    if (strict === true ? strictEquals(value, needle) : looseEquals(value, needle)) return key;
+    if (strict === true ? strictEquals(needle, value) : looseEquals(needle, value)) return key;
   }
   return false;
 });
@@ -419,6 +423,7 @@ defineFunction('array_combine(array $keys, array $values): array', ({ args }) =>
     );
   }
   const result = new PhpArray();
+  if (keys.size === 0) return result;
   const slots = values.map.values();
   for (const key of keys.iterValues()) {
     const slot = slots.next();
@@ -777,23 +782,15 @@ defineFunction('array_map(?callable $callback, array $array, array ...$arrays): 
   const [callback, first, ...rest] = args;
   if (!(first instanceof PhpArray))
     throwError('TypeError', `array_map(): Argument #2 ($array) must be of type array, ${valueName(first)} given`);
-  if (rest.length === 0) {
-    if (callback === null) return first;
-    const result = new PhpArray();
-    rt().held.push(first);
-    try {
-      for (const [key, value] of first.entries()) result.setSlot(key, callbackSlot(callback, [value]));
-    } finally {
-      rt().held.pop();
-    }
-    return result;
-  }
+  if (rest.length === 0) return mapSingleArray(callback, first);
   for (const [index, value] of rest.entries()) {
     if (!(value instanceof PhpArray)) {
       throwError('TypeError', `array_map(): Argument #${index + 3} must be of type array, ${valueName(value)} given`);
     }
   }
-  const lists = [first, ...rest].map((value) => [...(value as PhpArray).map.values()]);
+  const lists = [first, ...rest].map((value) =>
+    (value as PhpArray).size === 0 ? [] : [...(value as PhpArray).map.values()]
+  );
   const length = Math.max(...lists.map((list) => list.length));
   const result = new PhpArray();
   for (let index = 0; index < length; index++) {
@@ -802,6 +799,19 @@ defineFunction('array_map(?callable $callback, array $array, array ...$arrays): 
   }
   return result;
 });
+
+function mapSingleArray(callback: Value, first: PhpArray): PhpArray {
+  if (first.size === 0) return new PhpArray();
+  if (callback === null) return first;
+  const result = new PhpArray();
+  rt().held.push(first);
+  try {
+    for (const [key, value] of first.entries()) result.setSlot(key, callbackSlot(callback, [value]));
+  } finally {
+    rt().held.pop();
+  }
+  return result;
+}
 function callbackSlot(callback: Value, args: Value[]): Value | Ref {
   const value = callCallback(callback, args);
   const ref = rt().lastReturnRef;
@@ -815,6 +825,7 @@ function callbackSlot(callback: Value, args: Value[]): Value | Ref {
 defineFunction('array_filter(array $array, ?callable $callback = null, int $mode = 0): array', ({ args }) => {
   const [array, callback = null, mode = 0n] = args;
   const result = new PhpArray();
+  if (arr(array).size === 0) return result;
   rt().held.push(array);
   try {
     for (const [key, value] of arr(array).entries()) {
@@ -833,9 +844,10 @@ defineFunction('array_filter(array $array, ?callable $callback = null, int $mode
   }
   return result;
 });
-defineFunction('array_reduce(array $array, callable $callback, mixed $initial = null): mixed', ({ args }) =>
-  reduceArray(arr(args[0]), args[1], args[2] ?? null)
-);
+defineFunction('array_reduce(array $array, callable $callback, mixed $initial = null): mixed', ({ args }) => {
+  const array = arr(args[0]);
+  return array.size === 0 ? (args[2] ?? null) : reduceArray(array, args[1], args[2] ?? null);
+});
 
 function reduceArray(array: PhpArray, callback: Value, initial: Value): Value {
   const runtime = rt();
@@ -1090,14 +1102,17 @@ function removeSortedDuplicates(
   }
 }
 defineFunction('array_sum(array $array): int|float', ({ args }) => {
+  const array = arr(args[0]);
   let sum: Value = 0n;
-  for (const value of arr(args[0]).iterValues()) sum = accumulate('array_sum', '+', 'Addition', sum, value);
+  if (array.size === 0) return sum;
+  for (const value of array.iterValues()) sum = accumulate('array_sum', '+', 'Addition', sum, value);
   return sum;
 });
 defineFunction('array_product(array $array): int|float', ({ args }) => {
+  const array = arr(args[0]);
   let product: Value = 1n;
-  for (const value of arr(args[0]).iterValues())
-    product = accumulate('array_product', '*', 'Multiplication', product, value);
+  if (array.size === 0) return product;
+  for (const value of array.iterValues()) product = accumulate('array_product', '*', 'Multiplication', product, value);
   return product;
 });
 
@@ -1175,6 +1190,7 @@ defineFunction('array_chunk(array $array, int $length, bool $preserve_keys = fal
   const length = Number(args[1]);
   if (length < 1) throwError('ValueError', 'array_chunk(): Argument #2 ($length) must be greater than 0');
   const result = new PhpArray();
+  if (arr(args[0]).size === 0) return result;
   let chunk: PhpArray | undefined;
   for (const key of arr(args[0]).keys()) {
     if (!chunk || chunk.size >= length) {
@@ -1318,22 +1334,30 @@ defineFunction('array_intersect_assoc(array $array, array ...$arrays): array', (
   setOperation('array_intersect_assoc', args, true, sameAssoc)
 );
 defineFunction('array_find(array $array, callable $callback): mixed', ({ args }) => {
-  for (const [key, slot] of arr(args[0]).map)
+  const array = arr(args[0]);
+  if (array.size === 0) return null;
+  for (const [key, slot] of array.map)
     if (consumeCallbackResult(args[1], [valueOf(slot), key], conversionsModule.toBool)) return valueOf(slot);
   return null;
 });
 defineFunction('array_find_key(array $array, callable $callback): mixed', ({ args }) => {
-  for (const [key, value] of arr(args[0]).entries())
+  const array = arr(args[0]);
+  if (array.size === 0) return null;
+  for (const [key, value] of array.entries())
     if (consumeCallbackResult(args[1], [value, key], conversionsModule.toBool)) return key;
   return null;
 });
 defineFunction('array_any(array $array, callable $callback): bool', ({ args }) => {
-  for (const [key, value] of arr(args[0]).entries())
+  const array = arr(args[0]);
+  if (array.size === 0) return false;
+  for (const [key, value] of array.entries())
     if (consumeCallbackResult(args[1], [value, key], conversionsModule.toBool)) return true;
   return false;
 });
 defineFunction('array_all(array $array, callable $callback): bool', ({ args }) => {
-  for (const [key, value] of arr(args[0]).entries())
+  const array = arr(args[0]);
+  if (array.size === 0) return true;
+  for (const [key, value] of array.entries())
     if (!consumeCallbackResult(args[1], [value, key], conversionsModule.toBool)) return false;
   return true;
 });

@@ -806,28 +806,28 @@ function immutableArrayContents(array: PhpArray): boolean {
   return true;
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function spreadInto(array: PhpArray, value: Value): void {
   if (value instanceof PhpArray) {
-    for (const [key, slot] of value.map) {
-      const item = copyValueSlot(slot);
-      if (typeof key === 'string') array.setSlot(key, item);
-      else appendSpreadValue(array, item);
-    }
+    for (const [key, slot] of value.map)
+      if (typeof key === 'string') array.setSlot(key, copyValueSlot(slot));
+      else appendSpreadValue(array, copyValueSlot(slot));
     return;
   }
   if (value instanceof PhpObject && value.cls.isSubclassOf(rt().classes.get('traversable') as PhpClass)) {
-    for (const [key, item] of iterate(value)) {
-      if (typeof key === 'string') array.set(key, share(item));
-      else if (typeof key === 'bigint') appendSpreadValue(array, share(item));
-      else throwError('Error', 'Keys must be of type int|string during array unpacking');
-    }
+    for (const [key, item] of iterate(value)) spreadTraversableEntry(array, key, item);
     return;
   }
   throwError(
     value instanceof PhpObject && !value.isResource ? 'TypeError' : 'Error',
     `Only arrays and Traversables can be unpacked, ${valueName(value)} given`
   );
+}
+
+function spreadTraversableEntry(array: PhpArray, key: Value, item: Value): void {
+  if (typeof key !== 'string' && typeof key !== 'bigint')
+    throwError('Error', 'Keys must be of type int|string during array unpacking');
+  if (typeof key === 'string' && typeof toKey(key) === 'string') array.set(key, share(item));
+  else appendSpreadValue(array, share(item));
 }
 
 function appendSpreadValue(array: PhpArray, value: Value | Ref): void {

@@ -886,7 +886,13 @@ function pushFrame(frame: Frame, pending: unknown[], includeTemporaries = true):
 }
 
 function pushObject(object: PhpObject, pending: unknown[]): void {
-  for (const slot of object.props.values()) if (typeof slot === 'object' && slot !== null) pending.push(slot);
+  const declared: unknown[] = [];
+  for (const [key, slot] of object.props) {
+    if (typeof slot !== 'object' || slot === null) continue;
+    if (isDeclaredPropertyKey(object.cls, key)) declared.push(slot);
+    else pending.push(slot);
+  }
+  appendValues(pending, declared);
   const internal = object.internal;
   if (internal === undefined) return;
   if (isClosure(object)) {
@@ -898,6 +904,10 @@ function pushObject(object: PhpObject, pending: unknown[]): void {
   }
   const held = (internal as { held?: () => unknown[] }).held;
   if (typeof held === 'function') appendValues(pending, [...held.call(internal)]);
+}
+
+function isDeclaredPropertyKey(cls: PhpObject['cls'], key: string): boolean {
+  return key.startsWith('\0') || (cls.propByName.get(key)?.isStatic === false && cls.propByName.get(key)?.key === key);
 }
 
 type CollectionNode = PhpObject | PhpArray | Ref;

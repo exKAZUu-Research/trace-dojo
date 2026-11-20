@@ -710,7 +710,12 @@ function checkParentMethods(cls: PhpClass, inherited: Map<string, Method>): Set<
   const checked = new Set<string>();
   for (const [name, parentMethod] of inherited) {
     const method = cls.methods.get(name);
-    if (!method || parentMethod.visibility === 'private') continue;
+    if (!method) continue;
+    if (parentMethod.visibility === 'private') {
+      if (name === '__construct')
+        checkFinalMethod(method, parentMethod, method.fn.kind === 'user' ? method.fn.decl.row : cls.declaredRow);
+      continue;
+    }
     checkOverride(cls, method, parentMethod);
     checked.add(name);
   }
@@ -1217,9 +1222,7 @@ export function readProp(
     if (decl.hooks?.get && !inHook) {
       const get = decl.hooks.get;
       const target = { fn: get, thisObj: object, scope: decl.hooks.getScope ?? decl.cls, staticClass: object.cls };
-      return guarded(object, `hook:${name}`, () =>
-        mode === 'native' ? asInternal(() => invoke(target, [], undefined)) : invoke(target, [], rt().row)
-      );
+      return mode === 'native' ? asInternal(() => invoke(target, [], undefined)) : invoke(target, [], rt().row);
     }
     requireVirtualPropertyHook(object, decl, 'get');
     const slot = object.props.get(decl.key);
@@ -1326,17 +1329,15 @@ export function writeProp(
     const inHook = isBackingAccess(object, decl, 'write');
     if (decl.hooks?.set && !inHook) {
       if (pending) throw pending;
-      guarded(object, `hook:${name}`, () =>
-        invoke(
-          {
-            fn: decl.hooks?.set as Callable,
-            thisObj: object,
-            scope: decl.hooks?.setScope ?? decl.cls,
-            staticClass: object.cls,
-          },
-          [{ v: value }],
-          rt().row
-        )
+      invoke(
+        {
+          fn: decl.hooks?.set as Callable,
+          thisObj: object,
+          scope: decl.hooks?.setScope ?? decl.cls,
+          staticClass: object.cls,
+        },
+        [{ v: value }],
+        rt().row
       );
       return value;
     }
@@ -1500,7 +1501,7 @@ export function propRef(
     if (decl?.hooks && !(getter?.kind === 'user' && getter.decl.byRefReturn))
       throwError('Error', `Cannot create reference to property ${object.cls.name}::$${name}`);
   }
-  if (decl && getter && !object.guards?.has(`hook:${name}`)) return hookedPropertyReference(object, decl, scope);
+  if (decl && getter && !inPropertyHook(object, decl)) return hookedPropertyReference(object, decl, scope);
   if (mode === 'alias') {
     const indirect = checkIndirectModification(object, name, scope);
     if (indirect) return Ref.temporary(indirect);
@@ -1537,8 +1538,15 @@ export function requireVirtualPropertyHook(object: PhpObject, decl: PropDecl, ho
   }
 }
 
+function inPropertyHook(object: PhpObject, decl: PropDecl): boolean {
+  const frame = rt().frame;
+  return (
+    frame.thisObj === object && decl.hooks !== undefined && (frame.fn === decl.hooks.get || frame.fn === decl.hooks.set)
+  );
+}
+
 function isBackingAccess(object: PhpObject, decl: PropDecl, operation: 'read' | 'write'): boolean {
-  if (!decl.hooks || !object.guards?.has(`hook:${decl.name}`)) return false;
+  if (!inPropertyHook(object, decl)) return false;
   if (decl.isVirtual)
     throwError(
       'Error',
@@ -1863,7 +1871,12 @@ export function staticPropRef(
   warning?: UpdateWarning
 ): Ref {
   const found = cls.findStatic(name);
-  if (!found) throwError('Error', `Access to undeclared static property ${cls.name}::$${name}`);
+  if (!found) {
+    const instance = lookupProp(cls, name, scope);
+    if (instance && !canAccessProp(instance, scope))
+      throwError('Error', `Cannot access ${instance.visibility} property ${cls.name}::$${name}`);
+    throwError('Error', `Access to undeclared static property ${cls.name}::$${name}`);
+  }
   if (!canAccessProp(found.decl, scope)) {
     throwError('Error', `Cannot access ${found.decl.visibility} property ${cls.name}::$${name}`);
   }
