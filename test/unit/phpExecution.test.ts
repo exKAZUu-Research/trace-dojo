@@ -5291,6 +5291,14 @@ test('gc_collect_cycles() defers what destructors of deferred objects attach or 
   }
 });
 
+test('gc_collect_cycles() frees a destructed object whose only holder the rerun destroys', () => {
+  expect(
+    run(
+      String.raw`<?php class N { function __destruct() { echo "dN\n"; } } class M { public $o; function __destruct() { echo "dM\n"; $x = [new N]; $x[] = &$x; } } $a = new M; $a->o = $a; unset($a); var_dump(gc_collect_cycles()); var_dump(spl_object_id(new stdClass)); var_dump(gc_collect_cycles());`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'dM\ndN\nint(2)\nint(2)\nint(0)\n' });
+});
+
 test('a class whose override names a later class is declared when its statement runs', () => {
   expect(
     run(

@@ -153,6 +153,12 @@ function collectAfterDestruction(
     count = result.count;
     finishCollectedObjects(runtime, result.ordered, arrayStorage, nodes, result.passTwoNodes);
     forgetCollectedArrayCycles(runtime, result.freed);
+    // A created object whose only holders this run freed goes by reference counting; one its own cycle holds stays.
+    releaseDropped(
+      runtime,
+      created.filter((object) => runtime.objects.get(object.id) === object),
+      true
+    );
     for (const object of created) if (runtime.objects.get(object.id) === object) runtime.gcRoots.add(object);
   });
   return count;
