@@ -492,10 +492,10 @@ export class ClassChecker {
   /** Records a method's signature or implementation, or an accessor, under its name. */
   private computedMemberType(member: TreeNode, nameNode: TreeNode): Type {
     if (member.type === 'field_definition') return this.fieldType(member, nameNode);
-    const signature = this.methodSignature(member);
+    const signature = this.c.signatures.signatureOf(member);
     if (hasToken(member, 'get')) return signature.returnType();
     if (hasToken(member, 'set')) return signature.parameters[0]?.type ?? anyType;
-    return this.c.overloadedFunction([{ ...signature, isMethod: true }]);
+    return this.c.overloadedFunction([signature]);
   }
 
   private addMethod(members: ClassMembers, name: string, key: string, nameType: Type, member: TreeNode): void {
@@ -530,7 +530,9 @@ export class ClassChecker {
           );
         resolving = true;
         try {
-          return (type = this.c.overloadedFunction(declarations.map((member) => this.methodSignature(member))));
+          return (type = this.c.overloadedFunction(
+            declarations.map((member) => this.c.signatures.signatureOf(member))
+          ));
         } finally {
           resolving = false;
         }
@@ -544,12 +546,6 @@ export class ClassChecker {
       declaration,
       isAbstract: entry.abstract,
     };
-  }
-
-  private methodSignature(node: TreeNode): Signature {
-    const signature = this.c.signatures.signatureOf(node);
-    signature.isMethod = true;
-    return signature;
   }
 
   private accessorProperty(name: string, { getter, nameType, setter }: AccessorEntry, info: ClassInfo): Property {

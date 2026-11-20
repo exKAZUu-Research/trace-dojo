@@ -26,8 +26,7 @@ import {
   unknownType,
 } from './types';
 
-/** The declarations that may be a get or set accessor: in a class, an interface, or an object type. */
-const accessorDeclarationTypes = new Set(['method_definition', 'method_signature', 'abstract_method_signature']);
+const methodDeclarationTypes = new Set(['method_definition', 'method_signature', 'abstract_method_signature']);
 const constructSignatureTypes = new Set(['construct_signature', 'constructor_type']);
 const typeNameDeclarationParents = new Set(['type_parameter', 'mapped_type_clause', 'infer_type']);
 /** The declarations whose return type, without an annotation or a body, is implicitly `any`. */
@@ -40,12 +39,12 @@ const bodilessSignatureTypes = [
 ];
 
 export function hasBivariantParameters(signature: Signature): boolean {
-  if (signature.isMethod) return true;
   const declaration = signature.declaration;
   return (
-    declaration?.parent?.type === 'class_body' &&
-    (declaration.type === 'method_definition' || declaration.type === 'method_signature') &&
-    isConstructorName(declaration.childForFieldName('name'))
+    declaration !== undefined &&
+    methodDeclarationTypes.has(declaration.type) &&
+    !hasToken(declaration, 'get') &&
+    !hasToken(declaration, 'set')
   );
 }
 
@@ -105,7 +104,6 @@ export class Signatures {
       declaration: node,
       typeParameters: this.typeParametersOf(node),
       parameters: this.expandRestTuple(withRequiredPrefix(parameters)),
-      isMethod: true,
       returnType: () =>
         this.c.functions.declaredReturnType(node) ??
         this.c.flow.probe(() =>
@@ -148,7 +146,7 @@ export class Signatures {
   }
 
   private checkAccessorGrammar(node: TreeNode): void {
-    if (!accessorDeclarationTypes.has(node.type)) return;
+    if (!methodDeclarationTypes.has(node.type)) return;
     const getter = hasToken(node, 'get');
     if (!getter && !hasToken(node, 'set')) return;
     const name = node.childForFieldName('name') ?? node;
@@ -232,7 +230,7 @@ export class Signatures {
       this.c.errorWhileResolving(parameterNode, "コンストラクタには 'this' 引数を書けません。");
     if (node.type === 'arrow_function')
       this.c.errorWhileResolving(parameterNode, "アロー関数には 'this' 引数を書けません。");
-    if (accessorDeclarationTypes.has(node.type) && (hasToken(node, 'get') || hasToken(node, 'set')))
+    if (methodDeclarationTypes.has(node.type) && (hasToken(node, 'get') || hasToken(node, 'set')))
       this.c.errorWhileResolving(parameterNode, "get アクセサーや set アクセサーには 'this' 引数を書けません。");
   }
 
@@ -434,7 +432,7 @@ export class Signatures {
 
   /** A setter's parameter without an annotation has the type its getter of the same property returns. */
   private setterParameterType(node: TreeNode): Type | undefined {
-    if (!accessorDeclarationTypes.has(node.type) || !hasToken(node, 'set')) return undefined;
+    if (!methodDeclarationTypes.has(node.type) || !hasToken(node, 'set')) return undefined;
     const getter = this.pairedAccessor(node, 'get');
     return getter ? this.signatureOf(getter).returnType() : undefined;
   }
@@ -445,7 +443,7 @@ export class Signatures {
     return node.parent
       ? named(node.parent).find(
           (member) =>
-            accessorDeclarationTypes.has(member.type) &&
+            methodDeclarationTypes.has(member.type) &&
             hasToken(member, kind) &&
             hasToken(member, 'static') === hasToken(node, 'static') &&
             this.accessorName(member) === name
@@ -478,7 +476,7 @@ export class Signatures {
   }
 
   pairedSetterType(node: TreeNode): Type | undefined {
-    const setter = accessorDeclarationTypes.has(node.type) && hasToken(node, 'get') && this.pairedAccessor(node, 'set');
+    const setter = methodDeclarationTypes.has(node.type) && hasToken(node, 'get') && this.pairedAccessor(node, 'set');
     return setter && firstArgumentParameter(setter)?.childForFieldName('type')
       ? this.signatureOf(setter).parameters[0]?.type
       : undefined;
@@ -493,7 +491,7 @@ export class Signatures {
       this.checkAccessorGrammar(node);
       if (returnTypeNode(node) || node.childForFieldName('body')) continue;
       const name = node.childForFieldName('name');
-      if (accessorDeclarationTypes.has(node.type) && (hasToken(node, 'get') || hasToken(node, 'set'))) {
+      if (methodDeclarationTypes.has(node.type) && (hasToken(node, 'get') || hasToken(node, 'set'))) {
         this.checkImplicitAccessorType(node);
       } else if (node.parent?.type !== 'class_body' || !isConstructorName(name)) {
         this.c.error(name ?? node, `${signatureSubject(node)} の戻り値の型が暗黙に any になります。`);

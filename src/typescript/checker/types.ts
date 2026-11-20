@@ -123,7 +123,6 @@ export interface Signature {
   /** A type predicate `x is T`, by the index of the parameter it narrows (-1 for `this`). */
   predicate?: { index: number; type: Type };
   declaration?: TreeNode;
-  isMethod?: boolean;
   /** Whether it constructs an abstract class. */
   isAbstract?: boolean;
   /** How many arguments a call needs when its parameters do not tell, as a union's signature whose rest covers some. */

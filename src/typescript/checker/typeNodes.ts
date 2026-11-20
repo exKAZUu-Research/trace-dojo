@@ -731,7 +731,7 @@ export class TypeNodes {
             break;
           }
           const signatures = methods.get(name) ?? [];
-          signatures.push({ ...this.c.signatures.signatureOf(member), isMethod: true });
+          signatures.push(this.c.signatures.signatureOf(member));
           methods.set(name, signatures);
           if (!structure.properties.has(name) || methods.get(name)?.length === 1) {
             structure.properties.set(name, {
@@ -802,7 +802,7 @@ export class TypeNodes {
     const signature = this.c.signatures.signatureOf(member);
     if (hasToken(member, 'get')) return signature.returnType();
     if (hasToken(member, 'set')) return signature.parameters[0]?.type ?? anyType;
-    return this.c.overloadedFunction([{ ...signature, isMethod: true }]);
+    return this.c.overloadedFunction([signature]);
   }
 
   /**
