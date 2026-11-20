@@ -1,0 +1,30 @@
+class Base { m() { return 1; } get value() { return 3; } }
+class OnlyDefault extends Base {
+  constructor(
+    x = super()
+  ) {}
+}
+class DefaultAndBody extends Base {
+  constructor(x = super()) { super(); }
+}
+class PropDefault extends Base {
+  constructor(x = super.m()) { super(); }
+}
+class PropIndexDefault extends Base {
+  constructor(x = super["m"]()) { super(); }
+}
+class Before extends Base {
+  constructor() { console.log(super.m()); super(); }
+}
+class Getter extends Base {
+  constructor() { const read = super.value; super(); }
+}
+class Conditional extends Base {
+  constructor(flag: boolean) {
+    if (flag) super();
+    console.log(super["value"]);
+  }
+}
+class CallArgument extends Base {
+  constructor() { super(super.value); }
+}

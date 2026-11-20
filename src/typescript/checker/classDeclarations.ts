@@ -149,7 +149,8 @@ export class ClassDeclarationChecker {
 
   /** Reports a derived class's constructor that lacks a `super` call, or that has one although the class extends `null`. */
   private checkSuperCallPresence(node: TreeNode, ctor: TreeNode): void {
-    const superCall = this.firstSuperCallAnywhere(ctor);
+    const body = ctor.childForFieldName('body');
+    const superCall = body ? this.firstSuperCall(body) : undefined;
     if (this.c.classes.extendsNull(node)) {
       if (superCall)
         this.c.error(
@@ -164,7 +165,7 @@ export class ClassDeclarationChecker {
     }
   }
 
-  private firstSuperCallAnywhere(ctor: TreeNode): TreeNode | undefined {
+  private firstSuperCall(body: TreeNode): TreeNode | undefined {
     let found: TreeNode | undefined;
     const visit = (current: TreeNode): void => {
       if (found) return;
@@ -175,13 +176,12 @@ export class ClassDeclarationChecker {
       if (
         ['function_declaration', 'function_expression', 'arrow_function', 'class', 'method_definition'].includes(
           current.type
-        ) &&
-        current.id !== ctor.id
+        )
       )
         return;
       for (const child of named(current)) visit(child);
     };
-    visit(ctor);
+    visit(body);
     return found;
   }
 

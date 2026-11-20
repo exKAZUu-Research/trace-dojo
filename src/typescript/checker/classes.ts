@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 735 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
+// code-gauge-allow-file fileNcss 749 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { typesAtConstructorExit } from './assignmentFlow';
@@ -823,7 +823,7 @@ export class ClassChecker {
       const classNode = parent.parent as TreeNode;
       const info = this.classInfoOfNode(classNode);
       const isStatic = owner.type === 'class_static_block' || hasToken(owner, 'static');
-      this.checkThisBeforeSuper(node, owner, classNode);
+      this.checkConstructorReceiver(node, owner, classNode, 'this');
       return isStatic ? info.staticType : this.selfType(info);
     }
     if (objectMethod || owner.type === 'function_declaration' || owner.type === 'function_expression') {
@@ -869,14 +869,23 @@ export class ClassChecker {
     return undefined;
   }
 
-  /** Reports `this` in a derived class's constructor before it calls `super(...)`. */
-  private checkThisBeforeSuper(node: TreeNode, owner: TreeNode, classNode: TreeNode): void {
-    if (!isClassConstructor(owner)) return;
-    if (!this.extendsClause(classNode)) return;
+  private checkConstructorReceiver(
+    node: TreeNode,
+    owner: TreeNode,
+    classNode: TreeNode,
+    receiver: 'this' | 'super'
+  ): void {
+    if (!isClassConstructor(owner) || !this.extendsClause(classNode) || this.extendsNull(classNode)) return;
     for (let current = node.parent; current && current.id !== owner.id; current = current.parent)
       if (current.type === 'arrow_function') return;
-    if (this.c.flow.current && !this.c.flow.current.superCalled)
-      this.c.error(node, "派生クラスのコンストラクタでは、'this' を使う前に 'super' を呼び出してください。");
+    const state = this.c.flow.current;
+    if (state && !state.dead && !state.superCalled)
+      this.c.error(
+        node,
+        receiver === 'this'
+          ? "派生クラスのコンストラクタでは、'this' を使う前に 'super' を呼び出してください。"
+          : "派生クラスのコンストラクタでは、'super' のプロパティを使う前に 'super' を呼び出してください。"
+      );
   }
 
   checkThisTypePlacements(root: TreeNode): void {
@@ -962,7 +971,15 @@ export class ClassChecker {
       return errorType;
     }
     const owner = this.thisOwner(node);
-    return owner !== undefined && hasToken(owner, 'static') ? (this.baseStaticType(classNode) ?? anyType) : base;
+    if (!owner) return base;
+    if (isClassConstructor(owner) && this.inConstructorArguments(node, owner)) {
+      this.c.error(node, "コンストラクタの引数では 'super' を参照できません。");
+      return errorType;
+    }
+    this.checkConstructorReceiver(node, owner, classNode, 'super');
+    return owner.type === 'class_static_block' || hasToken(owner, 'static')
+      ? (this.baseStaticType(classNode) ?? anyType)
+      : base;
   }
 
   /** Reports, in a field initializer or a static block, a class member read before it is initialized. */
@@ -978,9 +995,16 @@ export class ClassChecker {
     const classNode = this.enclosingClass(node);
     const baseStatic = classNode ? this.baseStaticType(classNode) : undefined;
     const owner = this.c.functions.contexts.at(-1)?.node;
-    if (!baseStatic || !owner || !isClassConstructor(owner)) {
+    const isConstructor = !!owner && isClassConstructor(owner);
+    const inArguments = isConstructor && this.inConstructorArguments(node, owner);
+    if (!baseStatic || !isConstructor || inArguments) {
       for (const arg of args) this.c.expressions.check(arg);
-      this.c.error(node, "'super' の呼び出しは、派生クラスのコンストラクタの中でしか書けません。");
+      this.c.error(
+        node,
+        inArguments
+          ? "コンストラクタの引数では 'super' を参照できません。"
+          : "'super' の呼び出しは、派生クラスのコンストラクタの中でしか書けません。"
+      );
       return voidType;
     }
     const signatures = (this.baseConstructSignatures(classNode as TreeNode) ?? []).map((signature) => ({
@@ -993,6 +1017,14 @@ export class ClassChecker {
     else for (const arg of args) this.c.expressions.check(arg);
     if (this.c.flow.current) this.c.flow.current.superCalled = true;
     return voidType;
+  }
+
+  private inConstructorArguments(node: TreeNode, constructor: TreeNode): boolean {
+    for (let current = node.parent; current && current.id !== constructor.id; current = current.parent) {
+      if (current.type === 'arrow_function') return false;
+      if (current.type === 'formal_parameters') return current.parent?.id === constructor.id;
+    }
+    return false;
   }
 
   // Accessibility ------------------------------------------------------------------------------------------------
