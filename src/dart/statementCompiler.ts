@@ -10,7 +10,7 @@ import type {
   TypeSyntax,
   VariableDeclaration,
 } from './ast';
-import { assignmentTargets } from './astWalk';
+import { assignmentTargets, localNamesIn } from './astWalk';
 import type { CompiledFunction, FunctionSpec } from './callCompiler';
 import type { ClassInfo } from './classes';
 import { type Compiled, type Eval, typeName } from './compilerBase';
@@ -360,6 +360,7 @@ export abstract class StatementCompiler extends PatternCompiler {
   }
 
   protected compileStatements(statements: Statement[]): Exec {
+    this.reserveLocals(localNamesIn(statements));
     const compiled = statements.map((statement) => this.compileStatement(statement));
     if (compiled.length === 1) return compiled[0];
     return (frame) => {

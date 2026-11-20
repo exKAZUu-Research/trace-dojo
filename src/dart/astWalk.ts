@@ -29,6 +29,22 @@ export function assignmentTargets(root: object, parameters?: FormalParameters): 
   return walker.targets;
 }
 
+export function localNamesIn(statements: readonly Statement[]): Set<string> {
+  const names = new Set<string>();
+  for (let statement of statements) {
+    while (statement.kind === 'labeled') statement = statement.body;
+    if (statement.kind === 'local') {
+      for (const variable of statement.declaration.variables) names.add(variable.name);
+    } else if (statement.kind === 'localFunction') {
+      names.add(statement.declaration.name);
+    } else if (statement.kind === 'patternDeclaration') {
+      visitPattern(statement.pattern, (variable) => names.add(variable.name));
+    }
+  }
+  names.delete('_');
+  return names;
+}
+
 class AssignmentWalker {
   readonly targets: AssignmentTargets = { locals: new Map(), captured: new Map(), free: new Set() };
   private readonly scopes: Map<string, Binding>[] = [new Map()];

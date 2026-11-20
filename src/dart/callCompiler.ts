@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 643 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 647 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type {
   Arguments as ArgumentsSyntax,
   Expression,
@@ -77,6 +77,7 @@ export interface FunctionSpec {
 interface AliasConstructor {
   template: InterfaceType;
   parameters: TypeParam[];
+  nullableResult: boolean;
 }
 
 type ConstructorTypes = DartType[] | AliasConstructor | undefined;
@@ -126,7 +127,7 @@ export abstract class CallCompiler extends OperatorCompiler {
     context: DartType | undefined
   ): Compiled | undefined {
     const { arguments: args, typeArguments } = expression;
-    const resolution = this.resolveName(callee.name);
+    const resolution = this.resolveName(callee.name, callee);
     if (!resolution) return this.undefinedName(callee, callee.name);
     switch (resolution.kind) {
       case 'thisMember':
@@ -196,7 +197,8 @@ export abstract class CallCompiler extends OperatorCompiler {
       const name = callee.name === 'new' ? undefined : callee.name;
       if (target.cls.constructors.has(name ?? '') || target.typeArgs) {
         const types =
-          target.typeArgs ?? (target.alias ? this.aliasConstructor(target.alias, undefined, callee).types : undefined);
+          target.typeArgs ??
+          (target.alias ? this.aliasConstructor(target.alias, undefined, callee, true).types : undefined);
         return this.compileConstructorCall(target.cls, name, types, args, typeArguments, expression, context, false);
       }
       return this.error(
@@ -621,7 +623,8 @@ export abstract class CallCompiler extends OperatorCompiler {
     if (isConst && !this.argumentsAreConst)
       this.error(span, 'const のコンストラクタ呼び出しの引数は、定数でなければなりません。');
     const resolvedArgs = constructorArguments(typeArgs, bound.staticTypeArgs);
-    const type = interfaceType(cls, resolvedArgs);
+    const nullable = typeArgs !== undefined && !Array.isArray(typeArgs) && typeArgs.nullableResult;
+    const type = interfaceType(cls, resolvedArgs, nullable);
     const runtimeArgs = this.runtimeTypes(resolvedArgs);
     const run = this.constructObject(cls, constructor, runtimeArgs, bound.args, span, isConst);
     return { type, run, isConst, creates: true };
@@ -631,13 +634,15 @@ export abstract class CallCompiler extends OperatorCompiler {
   private aliasConstructor(
     alias: TypeAlias,
     written: TypeSyntax[] | undefined,
-    span: Span
+    span: Span,
+    selector = false
   ): { cls: ClassInfo; types: ConstructorTypes } {
     const template = this.resolveAlias(alias, span);
     if (template.kind !== 'interface')
       return this.error(span, alias.name + ' は、コンストラクタを持つクラスの別名ではありません。');
-    if (!written && alias.typeParams.length > 0)
-      return { cls: template.cls, types: { template, parameters: alias.typeParams } };
+    const nullableResult = template.nullable && (selector || alias.typeParams.length > 0);
+    const types = { template, parameters: alias.typeParams, nullableResult };
+    if (!written) return { cls: template.cls, types };
     const args = written
       ? this.typeArgumentsFor(
           alias.typeParams,
@@ -645,7 +650,7 @@ export abstract class CallCompiler extends OperatorCompiler {
           alias.name
         )
       : [];
-    return { cls: template.cls, types: constructorArguments({ template, parameters: alias.typeParams }, args) };
+    return { cls: template.cls, types: constructorArguments(types, args) };
   }
 
   protected argumentsAreConst = true;

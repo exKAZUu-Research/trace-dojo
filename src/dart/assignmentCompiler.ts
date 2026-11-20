@@ -310,7 +310,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
   // code-gauge-allow duplicateLines 29 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   // code-gauge-allow functionNcss 31 -- Locals, members of this, statics, and globals.
   private nameTarget(name: string, span: Span, isPlainAssignment: boolean): AssignableTarget {
-    const resolution = this.resolveName(name);
+    const resolution = this.resolveName(name, span);
     if (!resolution) return this.undefinedName(span, name);
     switch (resolution.kind) {
       case 'local': {

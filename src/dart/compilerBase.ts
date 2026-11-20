@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 418 -- Type and diagnostic resolution share the compiler environment.
+// code-gauge-allow-file fileNcss 427 -- Type and diagnostic resolution share the compiler environment.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ClassDeclaration, Span, TypeAliasDeclaration, TypeParameter, TypeSyntax } from './ast';
 import type { ClassInfo, Member } from './classes';
@@ -491,6 +491,13 @@ export abstract class CompilerBase {
 
   // Locals
 
+  private readonly pendingLocals = new WeakMap<Map<string, LocalVar>, ReadonlySet<string>>();
+
+  protected reserveLocals(names: ReadonlySet<string>): void {
+    const scope = this.fn.scopes.at(-1);
+    if (scope && names.size > 0) this.pendingLocals.set(scope, names);
+  }
+
   protected declareLocal(
     span: Span,
     name: string,
@@ -509,11 +516,16 @@ export abstract class CompilerBase {
   }
 
   /** Finds a local in the function being compiled or an enclosing one. */
-  findLocal(name: string): LocalVar | undefined {
+  findLocal(name: string, span?: Span): LocalVar | undefined {
     for (let context: FunctionContext | undefined = this.fn; context; context = context.parent) {
       for (let index = context.scopes.length - 1; index >= 0; index--) {
-        const found = context.scopes[index].get(name);
+        const scope = context.scopes[index];
+        const found = scope.get(name);
         if (found) return found;
+        if (this.pendingLocals.get(scope)?.has(name)) {
+          if (span) this.error(span, `変数 ${name} は、宣言より前には使えません。`);
+          return undefined;
+        }
       }
     }
     return undefined;

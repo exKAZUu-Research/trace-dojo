@@ -380,7 +380,7 @@ export abstract class PatternCompiler extends CallCompiler {
     pattern: Extract<Pattern, { kind: 'assignedVariable' }>,
     matchedType: DartType
   ): Omit<CompiledPattern, 'variables'> {
-    const variable = this.findLocal(pattern.name);
+    const variable = this.findLocal(pattern.name, pattern);
     if (!variable) return this.error(pattern, `${pattern.name} という変数はありません。`);
     if (variable.unavailable) this.error(pattern, variable.unavailable);
     if (variable.inPatternGuard) this.error(pattern, `パターン変数 ${pattern.name} には、when の中で代入できません。`);

@@ -19,6 +19,7 @@ import { concatenate } from './operators';
 import type { Frame } from './runtime';
 import { type ConditionFlow, Flow, LocalVar, type StoredFlow } from './scope';
 import {
+  closeTypeVariables,
   coreTypes,
   type DartType,
   DYNAMIC,
@@ -449,12 +450,16 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   protected compileChainPart(expression: Expression, context: DartType | undefined): Compiled {
-    const compiled = this.compileChainNode(expression, context);
     const explicitlyConst = 'isConst' in expression && expression.isConst;
-    if (compiled.isConst && (this.inConstContext || explicitlyConst)) {
-      const params = new Set(this.typeScopes.flatMap((scope) => [...scope.values()]));
-      if (mentionsTypeParams(compiled.type, params)) this.error(expression, '定数の型引数には、型変数を使えません。');
-    }
+    const params =
+      this.inConstContext || explicitlyConst
+        ? new Set(this.typeScopes.flatMap((scope) => [...scope.values()]))
+        : undefined;
+    const closed =
+      params?.size && context && mentionsTypeParams(context, params) ? closeTypeVariables(context, params) : context;
+    const compiled = this.compileChainNode(expression, closed);
+    if (params?.size && compiled.isConst && mentionsTypeParams(compiled.type, params))
+      this.error(expression, '定数の型引数には、型変数を使えません。');
     if (!this.inConstContext && explicitlyConst) this.checkConstant(expression, compiled);
     return compiled;
   }
@@ -942,8 +947,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
   /** What a name means: a local, a member of the enclosing class or extension, or a top-level declaration. */
   // code-gauge-allow functionCognitiveComplexity 28 -- Each branch is one of the cases Dart distinguishes for this construct.
   // code-gauge-allow functionNcss 38 -- One case per form of the construct, which reads best together.
-  resolveName(name: string): NameResolution | undefined {
-    const local = this.findLocal(name);
+  resolveName(name: string, span?: Span): NameResolution | undefined {
+    const local = this.findLocal(name, span);
     if (local) return { kind: 'local', variable: local };
     const cls = this.currentClass;
     if (cls) {
@@ -982,7 +987,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   protected compileIdentifier(expression: Extract<Expression, { kind: 'identifier' }>): Compiled {
     const { name } = expression;
     if (name === '_') return this.error(expression, '_ は値として使えません。');
-    const resolution = this.resolveName(name);
+    const resolution = this.resolveName(name, expression);
     if (!resolution) {
       // A type parameter is a value of type Type, its type argument at runtime.
       const param = this.findTypeParam(name);
@@ -1382,7 +1387,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
     if (object.kind === 'member' && object.object.kind === 'identifier' && !object.nullAware) {
       const prefix = object.object.name;
-      if (this.library.hasPrefix(prefix) && !this.resolveNameIsValue(prefix))
+      if (this.library.hasPrefix(prefix) && !this.resolveNameIsValue(prefix, object.object))
         return this.declarationStaticTarget(
           this.library.lookupPrefixed(prefix, object.name),
           object.name,
@@ -1391,7 +1396,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         );
     }
     if (object.kind !== 'identifier') return undefined;
-    const resolution = this.resolveName(object.name);
+    const resolution = this.resolveName(object.name, object);
     if (resolution?.kind === 'prefix') return { kind: 'prefix', prefix: resolution.prefix };
     if (resolution?.kind === 'declaration')
       return this.declarationStaticTarget(resolution.declaration, object.name, undefined, object);
@@ -1427,8 +1432,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return undefined;
   }
 
-  private resolveNameIsValue(name: string): boolean {
-    const resolution = this.resolveName(name);
+  private resolveNameIsValue(name: string, span: Span): boolean {
+    const resolution = this.resolveName(name, span);
     return resolution !== undefined && resolution.kind !== 'prefix';
   }
 

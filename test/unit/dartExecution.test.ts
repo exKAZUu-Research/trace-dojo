@@ -979,6 +979,44 @@ void main() { print('started'); }`;
   }
 });
 
+test('constant inference closes generic contexts while preserving concrete types', () => {
+  const program = `class Box<T> {
+  final List<T> values;
+  const Box({this.values = const []});
+}
+class Value<T> { const Value(); }
+void inspect<T>() {
+  List<T?> list = const [];
+  Set<T> set = const {};
+  List<T Function(T)> callbacks = const [];
+  Value<T> value = const Value();
+  print([list.runtimeType, set.runtimeType, callbacks.runtimeType, value.runtimeType]);
+}
+void main() { print(const Box<int>().values.runtimeType); inspect<int>(); }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'List<Never>\n[List<Never>, _ConstSet<Never>, List<(Object?) => Never>, Value<Never>]\n',
+  });
+});
+
+test('a later local declaration shadows an outer name throughout its block', () => {
+  const declaration = 'int x = 10; void f() {}';
+  for (const body of [
+    'print(x); var x = 2;',
+    'var x = 1; { print(x); var x = 2; }',
+    'x = 3; var x = 2;',
+    'f(); void f() {}',
+    'var (x, y) = (x, 1);',
+    'Iterable<int> values() sync* { yield x; var x = 2; }',
+  ]) {
+    const result = executeProgram('dart', `${declaration} void main() { ${body} }`);
+    expect(result.kind).toBe('compileError');
+    if (result.kind === 'compileError') expect(result.diagnostics[0]?.message).toContain('宣言より前');
+  }
+  const valid = `${declaration} void main() { print(x); { var x = 2; print(x); } }`;
+  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '10\n2\n' });
+});
+
 test('a single switch case shares its binding with closures from the guard', () => {
   const program = `late int Function() saved;
 bool remember(int Function() callback) { saved = callback; return true; }
@@ -1082,14 +1120,16 @@ void main() {
 });
 
 test('generic aliases substitute class arguments for constructor calls and tear-offs', () => {
-  const program = `typedef Alias<T> = Box<int, T>;
+  const declarations = `typedef Alias<T> = Box<int, T>;
 typedef Nullable<T> = Box<int, T>?;
+typedef FixedNullable = Box<int, String>?;
 class Box<X, Y> {
   final X x;
   final Y y;
   const Box(this.x, this.y);
   const Box.named({required this.x, required this.y});
-}
+}`;
+  const program = `${declarations}
 void main() {
   print(new Alias<String>(1, 'new').y);
   print(Alias<int>(1, 2).y);
@@ -1100,11 +1140,20 @@ void main() {
   print(new Nullable<int>(2, 3).y);
   print(Nullable<String>.named(x: 4, y: 'nullable').y);
   print(Nullable<String>.new(4, 'tear-off').runtimeType);
+  print((Nullable.new)(5, 'tear-off').y);
+  print(FixedNullable(5, 'direct').y);
+  print(FixedNullable.new(5, 'selector')?.y);
 }`;
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
-    stdout: 'new\n2\nnamed\nBox<int, String>\nBox<int, String>\n3\nnullable\nBox<int, String>\n',
+    stdout:
+      'new\n2\nnamed\nBox<int, String>\nBox<int, String>\n3\nnullable\nBox<int, String>\ntear-off\ndirect\nselector\n',
   });
+  for (const invocation of ['Nullable(1, 2)', 'Nullable.new(1, 2)', "FixedNullable.named(x: 1, y: '')"]) {
+    expect(executeProgram('dart', `${declarations} void main() { print(${invocation}.y); }`)).toMatchObject({
+      kind: 'compileError',
+    });
+  }
 });
 
 test('list switch cases can partition finite element values and lengths', () => {

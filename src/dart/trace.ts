@@ -1,4 +1,4 @@
-import { LIMITS } from '../interpreter/limits';
+import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import type { ProgramRecording } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
@@ -33,7 +33,16 @@ export function traceDartProgram(program: string, trace: TraceOptions, input?: P
   return { traceItems: recorder.traceItems, finalVars, ...run };
 }
 
+const MAX_SNAPSHOT_NODES = 4096;
+
+interface SnapshotBudget {
+  remaining: number;
+  path: Set<DartObject>;
+}
+
 class Snapshotter {
+  private remainingNodes = LIMITS.maxSlots;
+
   constructor(
     private readonly runtime: Runtime,
     private readonly program: CompiledProgram
@@ -43,8 +52,16 @@ class Snapshotter {
    * The variables a frame shows: its locals that hold values and the variables a closure captured, then, with the
    * context, the program's top-level variables and static fields, and the fields of `this` as `this.x`.
    */
-  // code-gauge-allow functionCognitiveComplexity 23 -- One case per kind of value a trace shows.
   variablesOf(frame: Frame, withContext: boolean): TraceVariables {
+    const budget = { remaining: MAX_SNAPSHOT_NODES, path: new Set<DartObject>() };
+    const variables = this.readVariables(frame, withContext, budget);
+    this.remainingNodes -= MAX_SNAPSHOT_NODES - budget.remaining;
+    if (this.remainingNodes < 0) throw new ExecutionLimitError('trace');
+    return variables;
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 23 -- One case per kind of value a trace shows.
+  private readVariables(frame: Frame, withContext: boolean, budget: SnapshotBudget): TraceVariables {
     const variables: TraceVariables = { vars: {}, referenceVars: {} };
     const shown = new Set<string>();
     const hidesArgs = frame.info.name === 'main' && this.program.mainTakesArguments;
@@ -53,22 +70,22 @@ class Snapshotter {
       if (!cell || local.name.startsWith('\0') || (hidesArgs && slot === 0)) continue;
       if (cell.v === UNASSIGNED || cell.v === UNINITIALIZED || isLateInitializer(cell.v)) continue;
       shown.add(local.name);
-      addVariable(variables, local.name, cell.v, local.type);
+      addVariable(variables, local.name, cell.v, local.type, budget);
     }
     for (const [position, capture] of frame.info.captures.entries()) {
       const cell = frame.captured[position];
       if (!cell || shown.has(capture.name) || cell.v === UNASSIGNED || cell.v === UNINITIALIZED) continue;
       shown.add(capture.name);
-      addVariable(variables, capture.name, cell.v, capture.type);
+      addVariable(variables, capture.name, cell.v, capture.type, budget);
     }
     if (!withContext) return variables;
     for (const global of this.program.programGlobals) {
       if (global.isConst || shown.has(global.displayName)) continue;
       const cell = this.runtime.globals[global.slot];
       if (!cell || cell.v === UNINITIALIZED || typeof cell.v === 'symbol') continue;
-      addVariable(variables, global.displayName, cell.v, global.type);
+      addVariable(variables, global.displayName, cell.v, global.type, budget);
     }
-    if (frame.info.showsThis && frame.receiver instanceof DartObject) addThis(variables, frame.receiver);
+    if (frame.info.showsThis && frame.receiver instanceof DartObject) addThis(variables, frame.receiver, budget);
     return variables;
   }
 }
@@ -80,24 +97,30 @@ function isLateInitializer(value: Value): boolean {
 const NOT_SCALAR = Symbol('notScalar');
 type Scalar = TraceItemVariable[string];
 
-function addVariable(variables: TraceVariables, name: string, value: Value, type: DartType): void {
+function addVariable(
+  variables: TraceVariables,
+  name: string,
+  value: Value,
+  type: DartType,
+  budget: SnapshotBudget
+): void {
   if (value instanceof DartObject && value.cls === coreTypes.function) return;
-  const scalar = scalarOf(value, type);
+  const scalar = scalarOf(value, type, budget);
   if (scalar !== NOT_SCALAR) variables.vars[name] = scalar;
   // Lists also appear as references so that learners can expand their elements.
   if (scalar !== NOT_SCALAR && !(value instanceof DartList)) return;
-  const node = displayNodeOf(value, new Set());
+  const node = displayNodeOf(value, budget);
   if (node) variables.referenceVars[name] = node;
 }
 
-function addThis(variables: TraceVariables, self: DartObject): void {
+function addThis(variables: TraceVariables, self: DartObject, budget: SnapshotBudget): void {
   for (const field of allFields(self.cls)) {
     const value = self.fields[field.slot];
     if (value === UNINITIALIZED) continue;
-    const scalar = scalarOf(value, field.type);
+    const scalar = scalarOf(value, field.type, budget);
     if (scalar !== NOT_SCALAR) variables.vars[`this.${field.name}`] = scalar;
   }
-  const node = displayNodeOf(self, new Set());
+  const node = displayNodeOf(self, budget);
   if (node) variables.referenceVars.this = node;
 }
 
@@ -134,21 +157,26 @@ function primitiveScalar(value: Value): TraceScalar | typeof NOT_SCALAR {
  * The value learners write down for a variable of a type: numbers, booleans, strings, and lists of them. A null of an
  * object type is a reference, as Java shows a null object.
  */
-function scalarOf(value: Value, type: DartType, path?: Set<DartList>): Scalar | typeof NOT_SCALAR {
+function scalarOf(value: Value, type: DartType, budget: SnapshotBudget): Scalar | typeof NOT_SCALAR {
+  if (budget.remaining === 0) return NOT_SCALAR;
+  budget.remaining--;
   if (!isScalarType(type)) return NOT_SCALAR;
   const primitive = primitiveScalar(value);
   if (primitive !== NOT_SCALAR) return primitive;
   if (value instanceof DartList) {
-    const seen = path ?? new Set<DartList>();
+    const seen = budget.path;
     if (seen.has(value) || seen.size >= LIMITS.maxCallDepth) return NOT_SCALAR;
     const elementType = value.typeArgs[0] ?? DYNAMIC;
     seen.add(value);
     try {
-      return value.elements.map((element) => {
-        const scalar = scalarOf(element, elementType, seen);
-        // oxlint-disable-next-line unicorn/no-null -- The trace format shows Dart's null as null.
-        return scalar === NOT_SCALAR ? null : scalar;
-      }) as Scalar;
+      const entries: Scalar[] = [];
+      for (const element of value.elements) {
+        if (budget.remaining === 0) break;
+        const scalar = scalarOf(element, elementType, budget);
+        // oxlint-disable-next-line unicorn/no-null -- The trace format shows a non-scalar list entry as null.
+        entries.push(scalar === NOT_SCALAR ? null : scalar);
+      }
+      return entries;
     } finally {
       seen.delete(value);
     }
@@ -167,9 +195,12 @@ function isScalarType(type: DartType): boolean {
 // oxlint-disable-next-line unicorn/no-null -- The trace format shows Dart's null as null.
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
-// code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of value a trace shows.
-// code-gauge-allow functionNcss 43 -- One case per kind of value a trace shows.
-function displayNodeOf(value: Value, seen: Set<unknown>): DisplayNode | undefined {
+// code-gauge-allow functionCognitiveComplexity 21 -- One case per kind of value a trace shows.
+// code-gauge-allow functionNcss 41 -- One case per kind of value a trace shows.
+function displayNodeOf(value: Value, budget: SnapshotBudget): DisplayNode | undefined {
+  if (budget.remaining === 0) return undefined;
+  budget.remaining--;
+  const seen = budget.path;
   // A late field not yet initialized holds a marker, which shows nothing.
   if (typeof value === 'symbol') return undefined;
   const primitive = primitiveScalar(value);
@@ -192,24 +223,14 @@ function displayNodeOf(value: Value, seen: Set<unknown>): DisplayNode | undefine
   }
   seen.add(object);
   try {
-    if (object instanceof DartList) {
-      const entries: Record<string, DisplayNode> = {};
-      for (const [position, item] of object.elements.entries())
-        entries[position] = displayNodeOf(item, seen) ?? NULL_NODE;
-      return { kind: 'array', entries };
-    }
-    if (object instanceof DartRecord) {
-      const entries: Record<string, DisplayNode> = {};
-      for (const [position, item] of object.positional.entries())
-        entries[`$${position + 1}`] = displayNodeOf(item, seen) ?? NULL_NODE;
-      for (const [name, item] of object.named) entries[name] = displayNodeOf(item, seen) ?? NULL_NODE;
-      return { kind: 'object', entries };
-    }
+    if (object instanceof DartList) return entriesNode('array', object.elements.entries(), budget);
+    if (object instanceof DartRecord) return entriesNode('object', recordFields(object), budget);
     const store = object.native as unknown as HashStore | undefined;
-    if (store && typeof store.positions === 'function') return storeNodeOf(store, seen);
+    if (store && typeof store.positions === 'function') return storeNodeOf(store, budget);
     const entries: Record<string, DisplayNode> = {};
     for (const field of allFields(object.cls)) {
-      const node = displayNodeOf(object.fields[field.slot], seen);
+      if (budget.remaining === 0) break;
+      const node = displayNodeOf(object.fields[field.slot], budget);
       if (node) entries[field.name] = node;
     }
     return { kind: 'object', entries };
@@ -218,20 +239,42 @@ function displayNodeOf(value: Value, seen: Set<unknown>): DisplayNode | undefine
   }
 }
 
+function entriesNode(
+  kind: 'array' | 'object',
+  fields: Iterable<readonly [string | number, Value]>,
+  budget: SnapshotBudget
+): DisplayNode {
+  const entries: Record<string, DisplayNode> = {};
+  for (const [name, item] of fields) {
+    if (budget.remaining === 0) break;
+    entries[name] = displayNodeOf(item, budget) ?? NULL_NODE;
+  }
+  return { kind, entries };
+}
+
+function* recordFields(record: DartRecord): Iterable<readonly [string, Value]> {
+  for (const [position, item] of record.positional.entries()) yield [`$${position + 1}`, item];
+  yield* record.named;
+}
+
 /** Sets show as arrays of their elements, and maps as objects keyed by their keys' text. */
-function storeNodeOf(store: HashStore, seen: Set<unknown>): DisplayNode {
+function storeNodeOf(store: HashStore, budget: SnapshotBudget): DisplayNode {
   if (!store.isMap) {
     const entries: Record<string, DisplayNode> = {};
     let position = 0;
-    for (const key of store.values()) entries[position++] = displayNodeOf(key, seen) ?? NULL_NODE;
+    for (const key of store.values()) {
+      if (budget.remaining === 0) break;
+      entries[position++] = displayNodeOf(key, budget) ?? NULL_NODE;
+    }
     return { kind: 'array', entries };
   }
   const entries = Object.create(null) as Record<string, DisplayNode>;
   for (const position of store.positions()) {
+    if (budget.remaining === 0) break;
     const key = store.keyAt(position);
-    const node = displayNodeOf(key, seen);
+    const node = displayNodeOf(key, budget);
     const label = node?.kind === 'value' ? String(node.value) : `#${(key as DartObject).identity}`;
-    entries[label] = displayNodeOf(store.entryValues[position], seen) ?? NULL_NODE;
+    entries[label] = displayNodeOf(store.entryValues[position], budget) ?? NULL_NODE;
   }
   return { kind: 'object', entries };
 }

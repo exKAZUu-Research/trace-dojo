@@ -208,6 +208,17 @@ test('a cyclic list produces finite snapshots and execution continues', () => {
     // oxlint-disable-next-line unicorn/no-null -- The trace format shows the repeated list reference as null.
     finalVars: { cycle: [null] },
   });
+  const shared = `void main() {
+  dynamic values = [];
+  values.add(values);
+  for (var i = 0; i < 20; i++) {
+    values = [values, values];
+  }
+  print('finished');
+}`;
+  const result = traceProgram('dart', shared, shared);
+  expect(result).toMatchObject({ stdout: 'finished\n', uncaughtException: undefined });
+  expect(JSON.stringify(result.finalVars.values).length).toBeLessThan(20_000);
 });
 
 test('a synchronous generator records the counted-loop header', () => {

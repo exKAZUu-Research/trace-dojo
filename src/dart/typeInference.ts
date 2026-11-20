@@ -24,6 +24,7 @@ export function inferFromContext(
   solution: Map<TypeParam, DartType>
 ): void {
   const base = resolveBound(context);
+  const constraints = new InferenceConstraints(params, solution, undefined, (a) => a, true);
   if (
     formal.kind === 'interface' &&
     base.kind === 'interface' &&
@@ -34,12 +35,12 @@ export function inferFromContext(
     if (path) {
       for (const [index, arg] of path.args.entries()) {
         const given = base.args[index];
-        if (given) inferFromSubtype(given, arg, params, solution, (a) => a);
+        if (given) constraints.infer(given, arg);
       }
       return;
     }
   }
-  inferFromSubtype(context, formal, params, solution, (a) => a);
+  constraints.infer(context, formal);
 }
 
 /** Collects constraints on type parameters that occur in the parameter type of a generic call. */
@@ -87,7 +88,8 @@ class InferenceConstraints {
     private readonly params: ReadonlySet<TypeParam>,
     private readonly lower: Map<TypeParam, DartType>,
     private readonly upper: Map<TypeParam, DartType> | undefined,
-    private readonly join: (a: DartType, b: DartType) => DartType
+    private readonly join: (a: DartType, b: DartType) => DartType,
+    private readonly retainBottom = false
   ) {}
 
   infer(given: DartType, pattern: DartType, reversed = false): void {
@@ -107,7 +109,7 @@ class InferenceConstraints {
     const bounds = reversed ? this.upper : this.lower;
     if (!bounds || (reversed && given.kind === 'dynamic')) return;
     const target = pattern.nullable ? nonNullOf(given) : given;
-    if (!reversed && target.kind === 'never' && !target.nullable) return;
+    if (!this.retainBottom && !reversed && target.kind === 'never' && !target.nullable) return;
     const previous = bounds.get(pattern.param);
     const join = reversed ? lowerBound : this.join;
     bounds.set(pattern.param, previous ? join(previous, target) : target);

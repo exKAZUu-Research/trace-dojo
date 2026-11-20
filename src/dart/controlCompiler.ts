@@ -1,5 +1,6 @@
-// code-gauge-allow-file fileNcss 552 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 554 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type { Block, CatchClause, Pattern, Span, Statement, SwitchCase } from './ast';
+import { localNamesIn } from './astWalk';
 import type { FunctionSpec } from './callCompiler';
 import type { Eval } from './compilerBase';
 import { checkExhaustive } from './exhaustiveness';
@@ -350,6 +351,7 @@ export abstract class ControlCompiler extends StatementCompiler {
 
   private compileGenBlock(block: Block): GenExec {
     const { result, slots } = this.withScope(() => {
+      this.reserveLocals(localNamesIn(block.statements));
       const compiled = block.statements.map((statement) => this.compileGenStatement(statement));
       return function* (frame: Frame): Generator<Value, Completion | undefined, undefined> {
         for (const exec of compiled) {

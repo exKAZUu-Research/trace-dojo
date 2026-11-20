@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 505 -- The operations of Dart's types belong together; each is a short case analysis.
+// code-gauge-allow-file fileNcss 521 -- The operations of Dart's types belong together; each is a short case analysis.
 import type { ClassInfo } from './classes';
 
 /** A type parameter of a class, a function type, or a generic function. */
@@ -601,6 +601,38 @@ function allSupertypes(type: InterfaceType): InterfaceType[] {
   };
   visit({ ...type, nullable: false });
   return result;
+}
+
+export function closeTypeVariables(type: DartType, params: ReadonlySet<TypeParam>, covariant = true): DartType {
+  const close = (part: DartType): DartType => closeTypeVariables(part, params, covariant);
+  switch (type.kind) {
+    case 'typeParam': {
+      if (!params.has(type.param)) return type;
+      return covariant ? NEVER : objectType(true);
+    }
+    case 'interface': {
+      return { ...type, args: type.args.map(close) };
+    }
+    case 'record': {
+      return {
+        ...type,
+        positional: type.positional.map(close),
+        named: type.named.map((field) => ({ ...field, type: close(field.type) })),
+      };
+    }
+    case 'function': {
+      const parameter = (part: DartType): DartType => closeTypeVariables(part, params, !covariant);
+      return {
+        ...type,
+        returnType: close(type.returnType),
+        positional: type.positional.map(parameter),
+        named: type.named.map((field) => ({ ...field, type: parameter(field.type) })),
+      };
+    }
+    default: {
+      return type;
+    }
+  }
 }
 
 /** Whether a type mentions one of the given type parameters. */
