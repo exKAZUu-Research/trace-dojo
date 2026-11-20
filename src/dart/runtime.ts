@@ -17,6 +17,7 @@ import {
   isSubtype,
   mentionsTypeParams,
   objectType,
+  sameType,
   substitute,
   TypeParam,
   typeParamType,
@@ -146,6 +147,7 @@ export class Runtime implements TracedRuntime<Frame> {
   readonly constantTypes = new Map<string, DartType[]>();
   /** The canonical tear-offs of top-level functions and static methods. */
   readonly tearOffs = new Map<unknown, DartClosure>();
+  private readonly constructorTearOffs = new Map<ConstructorInfo, DartClosure[]>();
   /** The value of each constant expression evaluated so far, by the code that builds it. */
   readonly constantSites = new Map<unknown, Value>();
   allocatedSlots = 0;
@@ -363,6 +365,19 @@ export class Runtime implements TracedRuntime<Frame> {
     }
     const closure = this.newTearOff(receiver, member);
     if (member.isStatic) this.tearOffs.set(member, closure);
+    return closure;
+  }
+
+  constructorTearOff(constructor: ConstructorInfo, type: FunctionType, create: () => DartClosure): DartClosure {
+    const closures = this.constructorTearOffs.get(constructor) ?? [];
+    for (const closure of closures) {
+      this.spend();
+      if (sameType(closure.type, type)) return closure;
+    }
+    this.allocate(1);
+    const closure = create();
+    closures.push(closure);
+    this.constructorTearOffs.set(constructor, closures);
     return closure;
   }
 

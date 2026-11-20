@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 799 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 801 -- Keep statement cases together so their flow and compilation state are visible.
 import type {
   Block,
   Expression,
@@ -607,6 +607,7 @@ export abstract class StatementCompiler extends PatternCompiler {
       hasInitializer: true,
     });
     if (!declaration.body) return this.error(declaration, `関数 ${declaration.name} に本体がありません。`);
+    const returnType = declaration.returnType ? type.returnType : undefined;
     const compiled = this.withTypeParams(typeParams, () =>
       this.compileFunction({
         name: declaration.name,
@@ -615,13 +616,13 @@ export abstract class StatementCompiler extends PatternCompiler {
         parameters: declaration.parameters,
         positionalTypes,
         namedTypes,
-        returnType: type.returnType,
+        returnType,
         contextReturnType: undefined,
         body: declaration.body as NonNullable<typeof declaration.body>,
         typeParams,
         kind: {
           ...this.fn.kind,
-          returnType: type.returnType,
+          returnType,
           isGenerator: declaration.body?.modifier === 'sync*',
           isConstructor: false,
         },
@@ -629,6 +630,7 @@ export abstract class StatementCompiler extends PatternCompiler {
         isClosure: true,
       })
     );
+    type.returnType = compiled.returnType;
     const create = this.closureCreator(compiled, type);
     const { slot } = variable;
     return (frame) => {

@@ -696,15 +696,21 @@ define('List.shuffle', (runtime, receiver, [random]) => {
   const target = list(receiver);
   checkModifiable(runtime, target);
   const generator = random ?? runtime.links.construct(runtime, 'Random', '', []);
+  const type = elementTypeOf(target);
   let length = target.elements.length;
   while (length > 1) {
-    const position = index(
-      runtime.invoke(generator, 'nextInt', { positional: [BigInt(length)], named: undefined }, [], undefined) as bigint
+    const position = runtime.invoke(
+      generator,
+      'nextInt',
+      { positional: [BigInt(length)], named: undefined },
+      [],
+      undefined
     );
     length -= 1;
-    const swap = target.elements[length];
-    target.elements[length] = target.elements[position];
-    target.elements[position] = swap;
+    const last = target.elements[checkListIndex(runtime, target, BigInt(length), 'length')];
+    const selected = checkListIndex(runtime, target, position, 'length');
+    writeListItem(runtime, target, length, target.elements[selected], type);
+    writeListItem(runtime, target, selected, last, type);
   }
   return;
 });
@@ -1056,7 +1062,7 @@ define('Set.last', (runtime, receiver) => {
 });
 define('Set.toSet', (runtime, receiver) => copySet(runtime, receiver as DartObject));
 define('Set.toString', (runtime, receiver) =>
-  iterableToFullString(runtime, receiver, store(receiver).values(), '{', '}')
+  iterableToFullString(runtime, receiver, iteratorValues(runtime, receiver, 0n, undefined), '{', '}')
 );
 
 // Maps
@@ -1370,8 +1376,11 @@ define('List.castFrom', (runtime, _receiver, [source], _named, typeArgs) =>
     typeArgs[1] ?? DYNAMIC,
   ])
 );
-define('Set.castFrom', (runtime, _receiver, [source], _named, typeArgs) =>
-  runtime.links.construct(runtime, 'CastSet', '', [source], undefined, [typeArgs[0] ?? DYNAMIC, typeArgs[1] ?? DYNAMIC])
+define('Set.castFrom', (runtime, _receiver, [source], options, typeArgs) =>
+  runtime.links.construct(runtime, 'CastSet', '', [source, named(options, 'newSet', undefined)], undefined, [
+    typeArgs[0] ?? DYNAMIC,
+    typeArgs[1] ?? DYNAMIC,
+  ])
 );
 define('Map.castFrom', (runtime, _receiver, [source], _named, typeArgs) =>
   runtime.links.construct(runtime, 'CastMap', '', [source], undefined, [

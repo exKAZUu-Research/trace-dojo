@@ -96,6 +96,14 @@ export interface CompiledFunction {
 
 export abstract class CallCompiler extends OperatorCompiler {
   abstract compileFunction(spec: FunctionSpec): CompiledFunction;
+  abstract instantiate(
+    runtime: Runtime,
+    cls: ClassInfo,
+    constructor: ConstructorInfo,
+    typeArgs: readonly DartType[],
+    args: Arguments,
+    callRow: number | undefined
+  ): Value;
   abstract constructObject(
     cls: ClassInfo,
     constructor: ConstructorInfo,
@@ -814,10 +822,8 @@ export abstract class CallCompiler extends OperatorCompiler {
     if (count > type.positional.length) {
       this.error(span, `位置で渡す引数が多すぎます。${type.positional.length} 個までですが、${count} 個です。`);
     }
-    const seen = new Set<string>();
+    const seen = new Set(args.named.map((argument) => argument.name));
     for (const argument of args.named) {
-      if (seen.has(argument.name)) this.error(argument, `名前付き引数 ${argument.name} が重複しています。`);
-      seen.add(argument.name);
       if (!type.named.some((named) => named.name === argument.name)) {
         this.error(argument, `名前付き引数 ${argument.name} はありません。`);
       }
@@ -1046,30 +1052,32 @@ export abstract class CallCompiler extends OperatorCompiler {
       this.error(span, `抽象クラス ${cls.name} のコンストラクタは取り出せません。`);
     const signature = constructorSignature(cls, constructor, typeArgs);
     const fixedArgs = Array.isArray(typeArgs) ? this.runtimeTypes(typeArgs) : undefined;
+    const resolveSignature = this.runtimeType(signature);
     return {
       type: signature,
       run: (frame) => {
-        const resolvedFixed = fixedArgs?.(frame);
-        const callable: Callable = (runtime, _receiver, args, callTypeArgs, callRow) => {
-          const construct = this.constructObject(
-            cls,
-            constructor,
-            () => resolvedFixed ?? constructorArguments(typeArgs, callTypeArgs),
-            () => args,
-            span,
-            false
+        const reified = resolveSignature(frame) as FunctionType;
+        return frame.runtime.constructorTearOff(constructor, reified, () => {
+          const resolvedFixed = fixedArgs?.(frame);
+          const callable: Callable = (runtime, _receiver, args, callTypeArgs, callRow) =>
+            this.instantiate(
+              runtime,
+              cls,
+              constructor,
+              resolvedFixed ?? constructorArguments(typeArgs, callTypeArgs),
+              args,
+              callRow
+            );
+          return new DartClosure(
+            coreTypes.function,
+            reified,
+            callable,
+            undefined,
+            [],
+            { name: cls.name, origin: undefined },
+            undefined
           );
-          return construct(new FrameClass(runtime, frame.info, 0, undefined, [], frame.typeEnv, callRow));
-        };
-        return new DartClosure(
-          coreTypes.function,
-          signature,
-          callable,
-          undefined,
-          [],
-          { name: cls.name, origin: undefined },
-          constructor
-        );
+        });
       },
       isConst: true,
     };

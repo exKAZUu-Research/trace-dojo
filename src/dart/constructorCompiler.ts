@@ -12,7 +12,7 @@ import type {
 import type { CompiledFunction, FunctionSpec } from './callCompiler';
 import { type ClassInfo, type ConstructorImpl, type ConstructorInfo, type FieldMember } from './classes';
 import { at, type Compiled, type Eval, typeName } from './compilerBase';
-import { Frame, type Runtime, type TypeEnv } from './runtime';
+import { Frame, type TypeEnv } from './runtime';
 import type { Exec } from './statementCompiler';
 import {
   type DartType,
@@ -25,7 +25,7 @@ import {
   substitute,
   VOID,
 } from './types';
-import { type Arguments, type Callable, type Cell, type DartObject, type Value } from './values';
+import { type Callable, type Cell, type DartObject } from './values';
 
 export const EMPTY_ENV: TypeEnv = new Map();
 
@@ -33,15 +33,6 @@ export const EMPTY_ENV: TypeEnv = new Map();
 export abstract class ConstructorCompiler extends AssignmentCompiler {
   /** The bodies compiled once every declaration of the library is declared. */
   protected readonly deferredBodies: (() => void)[] = [];
-
-  abstract instantiate(
-    runtime: Runtime,
-    cls: ClassInfo,
-    constructor: ConstructorInfo,
-    typeArgs: readonly DartType[],
-    args: Arguments,
-    callRow: number | undefined
-  ): Value;
 
   protected abstract native(key: string): Callable | ConstructorImpl;
 

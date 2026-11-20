@@ -1597,6 +1597,68 @@ void main() { print('started'); }`;
   }
 });
 
+test('enum values and conditional collection elements are evaluated as constants', () => {
+  const program = `enum E { a(3); const E(this.n); final int n; }
+void main() {
+  const a = [if (true) 1 else 1 ~/ 0];
+  const b = {'key': 0, if (true) 'other': 1};
+  print([a, b, E.a.n]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[[1], {key: 0, other: 1}, 3]\n',
+  });
+  for (const declaration of [
+    'int argument() => 1; enum E { a(argument()); const E(this.n); final int n; }',
+    'enum E { a(0); const E(int n) : assert(n > 0); }',
+  ]) {
+    expect(executeProgram('dart', `${declaration} void main() { print('started'); }`)).toMatchObject({
+      kind: 'compileError',
+    });
+  }
+});
+
+test('constructor tear-offs use their reified signature for calls and identity', () => {
+  const program = `extension type Id(int value) {}
+class Box<T> {}
+Object make<T>() => Box<T>.new;
+void main() {
+  final f = make<int>();
+  print(f.runtimeType);
+  print(f is Box<int> Function());
+  print(identical(f, Box<int>.new));
+  print(Box<int>.new == Box<String>.new);
+  print(<Function>{Box<int>.new, Box<String>.new}.length);
+  Object a = List<Id>.empty();
+  Object b = Box<Id>();
+  print([a.runtimeType, b.runtimeType, a is List<int>, b is Box<int>]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '() => Box<int>\ntrue\ntrue\nfalse\n2\n[List<int>, Box<int>, true, true]\n',
+  });
+});
+
+test('local functions expose inferred return types and all calls reject duplicate names', () => {
+  expect(
+    executeProgram(
+      'dart',
+      `void main() {
+    f() => 1;
+    g() { return 'text'; }
+    print([f.runtimeType, g.runtimeType, f is int Function()]);
+  }`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '[() => int, () => String, true]\n' });
+  for (const source of [
+    "void main() { f() => 1; print('started'); String wrong = f(); print(wrong); }",
+    'class C { void f({int n = 0}) {} } void main() { dynamic c = C(); c.f(n: 1, n: 2); }',
+    'void main() { dynamic f = ({int n = 0}) {}; f(n: 1, n: 2); }',
+  ]) {
+    expect(executeProgram('dart', source)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
 test('constant inference closes generic contexts while preserving concrete types', () => {
   const program = `class Box<T> {
   final List<T> values;
@@ -2391,5 +2453,70 @@ void main() {
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
     stdout: '_TypeError\n1\nfalse\n_TypeError\n_TypeError\n1\nstop\n_TypeError\nnull\n',
+  });
+});
+
+test('set results respect hash order and factories and shuffle checks callback indices', () => {
+  const program = `import 'dart:collection';
+import 'dart:math';
+
+class Key {
+  final int value;
+  Key(this.value);
+  int get hashCode => value;
+  String toString() => 'K$value';
+}
+
+class InvalidRandom implements Random {
+  bool nextBool() => false;
+  double nextDouble() => 0;
+  int nextInt(int max) => 99;
+}
+
+Set<R> make<R>() { print('factory'); return SplayTreeSet<R>(); }
+
+void main() {
+  final hash = HashSet.of(List.generate(100, Key.new));
+  final selection = hash.where((key) => [1, 9, 17].contains(key.value)).toSet();
+  print(hash.intersection(selection));
+  print(hash.difference(hash.difference(selection)));
+  var view = Set.castFrom<int, num>({3, 1, 2}, newSet: make);
+  print(view.toSet());
+  print(view.cast<num>().toSet());
+  print(view.union({0}));
+  print(view.intersection({3, 1}));
+  print(view.difference({2}));
+  var values = [1, 2];
+  try { values.shuffle(InvalidRandom()); }
+  catch (error) { print(error is RangeError); }
+  print(values);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '{K17, K9, K1}\n{K17, K9, K1}\nfactory\n{1, 2, 3}\nfactory\n{1, 2, 3}\nfactory\n{0, 1, 2, 3}\nfactory\n{1, 3}\nfactory\n{1, 3}\ntrue\n[1, 2]\n',
+  });
+});
+
+test('set string conversion detects changes made by element formatting', () => {
+  const program = `late Set<Object> contents;
+class Item {
+  final bool removeAll;
+  Item(this.removeAll);
+  String toString() {
+    if (removeAll) { contents.clear(); } else { contents.add(3); }
+    return 'item';
+  }
+}
+void main() {
+  for (final removeAll in [false, true]) {
+    contents = {Item(removeAll), 2};
+    try { print(contents); }
+    catch (error) { print([error.runtimeType, contents.length]); }
+  }
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[ConcurrentModificationError, 3]\n[ConcurrentModificationError, 0]\n',
   });
 });

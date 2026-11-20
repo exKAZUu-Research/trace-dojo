@@ -709,11 +709,9 @@ export abstract class CompilerBase {
   /** Evaluates a list of types at runtime, replacing type parameters in scope. */
   protected runtimeTypes(types: readonly DartType[]): (frame: Frame) => DartType[] {
     if (types.length === 0) return () => [];
-    const resolvers = types.map((type) => this.runtimeType(type));
-    if (!types.some((type) => mentionsTypeParams(type))) {
-      const fixed = [...types];
-      return () => fixed;
-    }
+    const erased = types.map(eraseExtensionTypes);
+    if (!erased.some((type) => mentionsTypeParams(type))) return () => erased;
+    const resolvers = erased.map((type) => this.runtimeType(type));
     return (frame) => resolvers.map((resolve) => resolve(frame));
   }
 

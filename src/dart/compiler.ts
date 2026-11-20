@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 997 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 1000 -- Keep declaration checks alongside the declarations and signatures they use.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import type {
   ClassDeclaration,
@@ -1401,6 +1401,7 @@ export class Compiler extends ConstructorCompiler {
         const bound = this.withConstContext(true, () =>
           this.bindArguments(signature, args, undefined, constant, undefined)
         );
+        if (!this.argumentsAreConst) this.error(constant, '列挙値の引数には定数を渡してください。');
         const resolvedArgs = typeArgs ?? bound.staticTypeArgs;
         const fn = this.fn;
         const { name } = constant;
@@ -1412,6 +1413,7 @@ export class Compiler extends ConstructorCompiler {
           (constructor.impl as ConstructorImpl)(runtime, object, evaluated, resolvedArgs, undefined);
           return object;
         };
+        this.checkConstant(constant, { type: global.type, run: this.readGlobal(global), isConst: true });
       });
     } finally {
       this.currentClass = undefined;

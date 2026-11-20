@@ -512,13 +512,17 @@ export abstract class ExpressionConverter {
   protected convertArguments(node: Node): Arguments {
     const positional: Expression[] = [];
     const named: NamedArgument[] = [];
+    const names = new Set<string>();
     const order: Arguments['order'] = [];
     const children = childrenOf(node).filter((child) => child.type !== '(' && child.type !== ')');
     for (const group of splitByComma(children)) {
       if (group.length === 0) continue;
       if (group[0].type === 'named_argument') {
         if (group.length > 1) return syntaxError(group[1], '書き方に誤りがあります。');
-        named.push(this.convertNamedArgument(group[0]));
+        const argument = this.convertNamedArgument(group[0]);
+        if (names.has(argument.name)) return syntaxError(group[0], `名前付き引数 ${argument.name} が重複しています。`);
+        names.add(argument.name);
+        named.push(argument);
         order.push({ kind: 'named', index: named.length - 1 });
       } else {
         positional.push(this.soleExpression(node, group));

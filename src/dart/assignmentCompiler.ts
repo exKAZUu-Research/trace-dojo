@@ -651,8 +651,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       }
       case 'ifElement': {
         return {
-          run: this.compileIfElement(element, kind, elementContext, valueContext, types),
-          isConst: false,
+          ...this.compileIfElement(element, kind, elementContext, valueContext, types),
           creates: false,
         };
       }
@@ -865,7 +864,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     elementContext: DartType | undefined,
     valueContext: DartType | undefined,
     types: { key: DartType; value?: DartType }[]
-  ): (frame: Frame, add: (key: Value, value?: Value) => void) => void {
+  ): { run: (frame: Frame, add: AddElement) => void; isConst: boolean } {
     if (element.casePattern) {
       const subject = this.compileExpression(element.condition);
       const casePattern = element.casePattern;
@@ -882,17 +881,20 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       this.flow = before;
       types.push(...result.body.types, ...(otherwise?.types ?? []));
       const test = subject.run;
-      return (frame, add) => {
-        const value = test(frame);
-        try {
-          if (result.pattern.match(frame, value) && (!result.guard || result.guard(frame) === true)) {
-            result.body.run(frame, add);
-            return;
+      return {
+        isConst: false,
+        run: (frame, add) => {
+          const value = test(frame);
+          try {
+            if (result.pattern.match(frame, value) && (!result.guard || result.guard(frame) === true)) {
+              result.body.run(frame, add);
+              return;
+            }
+          } finally {
+            for (const slot of slots) frame.locals[slot] = undefined;
           }
-        } finally {
-          for (const slot of slots) frame.locals[slot] = undefined;
-        }
-        otherwise?.run(frame, add);
+          otherwise?.run(frame, add);
+        },
       };
     }
     const { compiled: condition, flow } = this.compileCondition(element.condition);
@@ -906,9 +908,12 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     this.flow = Flow.join(afterThen, this.flow);
     types.push(...consequent.types, ...(otherwise?.types ?? []));
     const test = condition.run;
-    return (frame, add) => {
-      if (test(frame)) consequent.run(frame, add);
-      else otherwise?.run(frame, add);
+    return {
+      isConst: condition.isConst && consequent.isConst && (otherwise?.isConst ?? true),
+      run: (frame, add) => {
+        if (test(frame)) consequent.run(frame, add);
+        else otherwise?.run(frame, add);
+      },
     };
   }
 

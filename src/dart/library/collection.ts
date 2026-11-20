@@ -544,8 +544,9 @@ bool _isEfficientLength(Iterable<Object?> iterable) => iterable is List || itera
 /** The view Set.cast returns, as the SDK's CastSet (internal/cast.dart). */
 class CastSet<S, T> extends SetBase<T> {
   final Set<S> _source;
-  CastSet(this._source);
-  Set<R> cast<R>() => CastSet<S, R>(_source);
+  final Set<R> Function<R>()? _emptySet;
+  CastSet(this._source, [this._emptySet]);
+  Set<R> cast<R>() => CastSet<S, R>(_source, _emptySet);
   bool add(T value) => _source.add(value as S);
   bool contains(Object? element) => _source.contains(element);
   T? lookup(Object? key) => _source.lookup(key) as T?;
@@ -557,9 +558,23 @@ class CastSet<S, T> extends SetBase<T> {
   void clear() {
     _source.clear();
   }
-  Set<T> toSet() {
-    var result = <T>{};
-    for (var element in _source) result.add(element as T);
+  Set<T> toSet() => _newSet()..addAll(this);
+  Set<T> union(Set<T> other) => toSet()..addAll(other);
+  Set<T> intersection(Set<Object?> other) => _filter(other, true);
+  Set<T> difference(Set<Object?> other) => _filter(other, false);
+  Set<T> _newSet() {
+    var factory = _emptySet;
+    return factory == null ? <T>{} : factory<T>();
+  }
+  Set<T> _filter(Set<Object?> other, bool include) {
+    if (_emptySet == null) {
+      var source = include ? _source.intersection(other) : _source.difference(other);
+      return CastSet<S, T>(source);
+    }
+    var result = _newSet();
+    for (var element in this) {
+      if (other.contains(element) == include) result.add(element);
+    }
     return result;
   }
 }
@@ -1433,6 +1448,15 @@ class _HashSet<E> extends SetBase<E> implements HashSet<E> {
     return _CustomHashSet<E>(policy);
   }
   Set<E> toSet() => _newSet()..addAll(this);
+  Set<E> intersection(Set<Object?> other) => _filter(other, true);
+  Set<E> difference(Set<Object?> other) => _filter(other, false);
+  Set<E> _filter(Set<Object?> other, bool include) {
+    var result = _newSet();
+    for (var element in this) {
+      if (other.contains(element) == include) result.add(element);
+    }
+    return result;
+  }
 }
 
 class _IdentityHashSet<E> extends _HashSet<E> {
