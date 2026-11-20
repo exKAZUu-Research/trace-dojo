@@ -578,16 +578,7 @@ export function bindOrAssignPlace(place: VarPlace, ref: Ref, valueFallback: bool
 }
 
 export function storeDimensionRef(array: PhpArray, key: Key | undefined, ref: Ref, valueFallback: boolean): void {
-  if (valueFallback) {
-    if (key !== undefined && !array.map.has(key)) array.set(key, null);
-    notice('Only variables should be assigned by reference');
-    if (key !== undefined && !array.map.has(key)) return;
-    const value = share(ref.v);
-    if (key !== undefined) ref.v = array.set(key, value);
-    else if (!array.append(value))
-      throwError('Error', 'Cannot add element to the array as the next element is already occupied');
-    return;
-  }
+  if (valueFallback) return storeDimensionValueFallback(array, key, ref);
   ref.isRef = true;
   if (key !== undefined && array.map.get(key) === ref) return dropped(ref);
   ref.rc++;
@@ -596,4 +587,20 @@ export function storeDimensionRef(array: PhpArray, key: Key | undefined, ref: Re
     ref.rc--;
     throwError('Error', 'Cannot add element to the array as the next element is already occupied');
   }
+}
+
+function storeDimensionValueFallback(array: PhpArray, key: Key | undefined, ref: Ref): void {
+  if (key === undefined) {
+    notice('Only variables should be assigned by reference');
+    if (!array.append(share(ref.v)))
+      throwError('Error', 'Cannot add element to the array as the next element is already occupied');
+    return;
+  }
+  if (!array.map.has(key)) array.set(key, null);
+  const order = array.ordered();
+  const bucket = order.get(key)?.index;
+  const version = order.storageVersion;
+  notice('Only variables should be assigned by reference');
+  const targetKey = bucket !== undefined && order.storageVersion === version ? order.keyAtBucket(bucket) : undefined;
+  if (targetKey !== undefined) ref.v = array.set(targetKey, share(ref.v));
 }

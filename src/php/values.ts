@@ -265,7 +265,7 @@ export class PhpArray {
       const current = this.map.ownedSlot(key);
       if (current === slot) return slot.writeChecked(assigned);
       if (current instanceof Ref) return current.assign(assigned);
-      if (!this.map.has(key)) return assigned;
+      if (!this.map.has(key)) return slot.writeChecked(assigned);
       this.insert(key, assigned);
       dropped(current);
       return assigned;

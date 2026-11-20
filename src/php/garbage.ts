@@ -189,17 +189,15 @@ function orderCollectedObjects(
     runtime,
     (value) => !(value instanceof PhpArray && reachedArrays.has(value))
   );
-  const cyclic = cyclicObjects(graph, freed, new Set(runtime.collectingArrays));
-  const cyclicRoots = roots.filter((object) => cyclic.has(object));
-  const bufferedOrder = buffered ? new Map(buffered.map((item, index) => [item, index])) : undefined;
-  const bufferedRoots = bufferedOrder
-    ? cyclicRoots.toSorted(
-        (left, right) => (bufferedOrder.get(left) ?? Infinity) - (bufferedOrder.get(right) ?? Infinity)
+  const freedSet = new Set(freed);
+  const cyclicRoots: CollectionNode[] = buffered
+    ? buffered.filter((item) =>
+        item instanceof PhpObject ? freedSet.has(item) : runtime.collectingArrays.has(item) && !reachedArrays.has(item)
       )
-    : cyclicRoots;
+    : roots;
   return deferredHandleOrder<CollectionNode, PhpObject>(
-    bufferedRoots,
-    new Set(freed),
+    cyclicRoots,
+    freedSet,
     (node): node is PhpObject => node instanceof PhpObject,
     (node) => graph.children(node)
   );

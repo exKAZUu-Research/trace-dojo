@@ -4274,4 +4274,59 @@ echo json_encode([$r, $c->x, $a[0] ?? null, $other]);
 `)
     ).toMatchObject({ kind: 'executed', stdout: '["3","old","3","3"]' });
   }
+
+  for (const [container, emptyJson] of [
+    ['[]', '[]'],
+    ['new ArrayObject', '{}'],
+    ['new ArrayIterator', '{}'],
+  ]) {
+    expect(
+      run(`<?php
+error_reporting(0);
+class C { public string $x = 'old'; }
+class S { function __toString() { global $a; unset($a[0]); return '3'; } }
+function f() { return new S; }
+$c = new C; $a = ${container}; $a[0] =& $c->x;
+$r = ($a[0] =& f());
+echo json_encode([$r, $c->x, $a]);
+`)
+    ).toMatchObject({ kind: 'executed', stdout: `["3","3",${emptyJson}]` });
+
+    expect(
+      run(`<?php
+error_reporting(0);
+function f() { return 4; }
+$a = ${container};
+set_error_handler(function () use (&$a) { unset($a['x']); $a['z'] = 9; return true; });
+$r = ($a['x'] =& f());
+restore_error_handler();
+echo json_encode([$r, $a]);
+`)
+    ).toMatchObject({ kind: 'executed', stdout: '[4,{"z":4}]' });
+  }
+
+  expect(
+    run(`<?php
+class P { public $x; }
+$a0 = []; $a0[0] =& $a0; $a0[1] = new P;
+$a1 = []; $a1[0] =& $a1; $a1[1] = new P;
+unset($a1, $a0);
+echo gc_collect_cycles(), '|';
+$v = [];
+for ($i = 0; $i < 2; $i++) { $v[] = new P; echo spl_object_id(end($v)), ','; }
+`)
+  ).toMatchObject({ kind: 'executed', stdout: '4|1,2,' });
+
+  expect(
+    run(`<?php
+class P { public $a; public $b; }
+$n0 = new P; $n1 = new P; $n2 = new P; $n3 = new P;
+$n0->a = [[$n1]]; $n0->b = [$n3]; $n1->a = [[$n2]]; $n1->b = [$n2];
+$n2->a = [$n2]; $n2->b = $n2; $n3->a = [$n0]; $n3->b = $n3;
+unset($n1, $n2, $n0, $n3);
+echo gc_collect_cycles(), '|';
+$v = [];
+for ($i = 0; $i < 4; $i++) { $v[] = new P; echo spl_object_id(end($v)), ','; }
+`)
+  ).toMatchObject({ kind: 'executed', stdout: '12|4,1,3,2,' });
 });

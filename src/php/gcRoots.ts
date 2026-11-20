@@ -39,20 +39,20 @@ interface DeferredState<N extends object, O extends N> {
 }
 
 export function deferredHandleOrder<N extends object, O extends N>(
-  roots: O[],
+  roots: N[],
   protectedObjects: Set<O>,
   isObject: (node: N) => node is O,
   children: (node: N) => N[]
 ): O[] {
   const state: DeferredState<N, O> = {
     protectedObjects,
-    inDegree: countInDegrees(protectedObjects, isObject, children),
+    inDegree: countInDegrees(roots, protectedObjects, isObject, children),
     freed: new Set<N>(),
     order: [],
     isObject,
     children,
   };
-  const queue: O[] = [...roots];
+  const queue: N[] = [...roots];
   drainDeferredQueue(queue, state, 0);
   for (const object of protectedObjects) {
     if (!state.freed.has(object)) {
@@ -64,15 +64,15 @@ export function deferredHandleOrder<N extends object, O extends N>(
   return state.order;
 }
 
-function drainDeferredQueue<N extends object, O extends N>(queue: O[], state: DeferredState<N, O>, from: number): void {
+function drainDeferredQueue<N extends object, O extends N>(queue: N[], state: DeferredState<N, O>, from: number): void {
   for (let head = from; head < queue.length; head++) {
     const start = queue[head];
     if (!state.freed.has(start)) queue.push(...releaseDeferredRoot(start, state));
   }
 }
 
-function releaseDeferredRoot<N extends object, O extends N>(start: O, state: DeferredState<N, O>): O[] {
-  const nested: O[] = [];
+function releaseDeferredRoot<N extends object, O extends N>(start: N, state: DeferredState<N, O>): N[] {
+  const nested: N[] = [];
   state.freed.add(start);
   const stack: { node: N; children: N[]; index: number }[] = [
     { node: start, children: state.children(start), index: 0 },
@@ -94,7 +94,7 @@ function releaseDeferredRoot<N extends object, O extends N>(start: O, state: Def
 function nextDeferredChild<N extends object, O extends N>(
   frame: { node: N; children: N[]; index: number },
   state: DeferredState<N, O>,
-  nested: O[]
+  nested: N[]
 ): N | undefined {
   while (frame.index < frame.children.length) {
     const child = frame.children[frame.index++];
@@ -102,19 +102,20 @@ function nextDeferredChild<N extends object, O extends N>(
     const remaining = (state.inDegree.get(child) ?? 1) - 1;
     state.inDegree.set(child, remaining);
     if (remaining <= 0) return child;
-    if (state.isObject(child)) nested.push(child);
+    nested.push(child);
   }
   return undefined;
 }
 
 function countInDegrees<N extends object, O extends N>(
+  roots: N[],
   protectedObjects: Set<O>,
   isObject: (node: N) => node is O,
   children: (node: N) => N[]
 ): Map<N, number> {
   const inDegree = new Map<N, number>();
   const counted = new Set<N>();
-  const scan: N[] = [...protectedObjects];
+  const scan: N[] = [...protectedObjects, ...roots];
   while (scan.length > 0) {
     const node = scan.pop() as N;
     if (counted.has(node)) continue;
