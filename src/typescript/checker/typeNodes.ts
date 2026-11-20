@@ -13,6 +13,7 @@ import type { Sym } from './scopes';
 import { nameSuggestionHint } from './spelling';
 import { hasToken, isStandaloneTypeReference, named, numberValue, propertyNameText, stringValue } from './syntax';
 import {
+  accessorProperty,
   aliasedDeclaredType,
   anonymousObject,
   anyType,
@@ -36,6 +37,7 @@ import {
   numberType,
   type ObjectType,
   type Signature,
+  simpleProperty,
   stringType,
   type Structure,
   symbolType,
@@ -700,19 +702,11 @@ export class TypeNodes {
     const signature = this.c.signatures.signatureOf(member);
     const type = getter ? signature.returnType : () => signature.parameters[0]?.type ?? anyType;
     const previous = structure.properties.get(name);
-    structure.properties.set(name, {
-      name,
+    const property = simpleProperty(name, anyType, {
       nameType: this.memberKeyType(member.childForFieldName('name') as TreeNode),
-      type: getter ? type : (previous?.type ?? type),
-      writeType: getter ? previous?.writeType : type,
-      optional: false,
-      readonly: getter && !previous?.writeType,
-      getterOnly: getter && !previous?.writeType,
-      setterOnly: !getter && (!previous || previous.setterOnly === true),
-      isMethod: false,
-      visibility: 'public',
       declaration: member,
     });
+    structure.properties.set(name, accessorProperty(property, previous, getter, type));
   }
 
   /** The type a type name stands for: an interface, a class's instance type, an alias, or a type parameter. */

@@ -590,6 +590,23 @@ export const emptyObjectType = anonymousObject(emptyStructure, { nonGeneric: tru
 // TypeScript distinguishes non-null unknown from a written {} for the in operator.
 export const narrowedUnknownObjectType = anonymousObject(emptyStructure, { nonGeneric: true });
 
+export function accessorProperty(
+  property: Property,
+  previous: Property | undefined,
+  getter: boolean,
+  accessorType: () => Type
+): Property {
+  const writeType = getter ? previous?.writeType : accessorType;
+  return {
+    ...(getter ? property : (previous ?? property)),
+    type: getter ? accessorType : (previous?.type ?? accessorType),
+    writeType,
+    readonly: writeType === undefined,
+    getterOnly: getter && writeType === undefined,
+    setterOnly: !getter && (!previous || previous.setterOnly === true),
+  };
+}
+
 export function simpleProperty(name: string, type: Type, options: Partial<Property> = {}): Property {
   return {
     name,

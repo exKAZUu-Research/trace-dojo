@@ -5,3 +5,10 @@ const wrongSpread: number = spread.value;
 const wrongRest: number = rest.value;
 spread.value = 1;
 rest.value = 2;
+const receiver = {
+  set value(next: number) {},
+  spread() { return { ...this }; },
+  rest() { const { ...rest } = this; return rest; },
+};
+const wrongSpreadReceiver: number = receiver.spread().value;
+const wrongRestReceiver: number = receiver.rest().value;

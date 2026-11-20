@@ -1,9 +1,9 @@
-// code-gauge-allow-file fileNcss 402 -- Registers global objects and their standard methods with one realm builder.
+// code-gauge-allow-file fileNcss 405 -- Registers global objects and their standard methods with one realm builder.
 import { TURTLE_METHOD_NAMES } from '../interpreter/turtleWorld';
 import { listFromArrayLike } from './arrayOps';
 import { formatLogArguments } from './consoleFormat';
 import { formatTable } from './consoleTable';
-import { inspect, inspectValue } from './inspect';
+import { inspect, type InspectOptions, inspectValue } from './inspect';
 import { defineFunctionProperties } from './memberProperties';
 import type { ErrorName, RealmBuilder } from './realm';
 import { toInteger } from './realmArrays';
@@ -572,8 +572,6 @@ function defineConsole(builder: RealmBuilder): void {
   for (const property of console.properties.values()) property.enumerable = true;
 }
 
-/** `console.dir`, which prints its value with the `util.inspect` options it is given. */
-// code-gauge-allow functionCognitiveComplexity 20 -- Copies console.dir options once and reads each util.inspect option with its own conversion.
 function defineConsoleDir(
   builder: RealmBuilder,
   console: JsObject,
@@ -590,33 +588,34 @@ function defineConsoleDir(
           runtime.createDataProperty(options, key, runtime.get(source, key))
         );
       }
-      // null means no limit for depth and maxArrayLength, as util.inspect takes them.
-      const limit = (name: string): number | undefined => {
-        const option = runtime.get(options, name);
-        if (option === undefined) return undefined;
-        return option === null ? Number.POSITIVE_INFINITY : runtime.toNumber(option);
-      };
-      const option = (name: string): Value => runtime.get(options, name);
-      const compact = option('compact');
-      const getters = option('getters');
-      write(
-        runtime,
-        'stdout',
-        inspectValue(runtime, value, undefined, limit('depth'), {
-          breakLength: limit('breakLength'),
-          colors: toBoolean(option('colors')),
-          compact: typeof compact === 'boolean' || typeof compact === 'number' ? compact : undefined,
-          maxArrayLength: limit('maxArrayLength'),
-          maxStringLength: limit('maxStringLength'),
-          showHidden: toBoolean(option('showHidden')),
-          sorted: sortedOption(option('sorted')),
-          getters: getters === true || getters === 'get' || getters === 'set' ? getters : false,
-          numericSeparator: toBoolean(option('numericSeparator')),
-        })
-      );
+      const { depth, ...inspectOptions } = consoleInspectOptions(runtime, options);
+      write(runtime, 'stdout', inspectValue(runtime, value, undefined, depth, inspectOptions));
       return;
     });
   });
+}
+
+function consoleInspectOptions(runtime: Runtime, options: JsObject): InspectOptions {
+  const option = (name: string): Value => runtime.get(options, name);
+  const limit = (name: string): number | undefined => {
+    if (!options.properties.has(name)) return undefined;
+    const value = option(name);
+    return value === null && name !== 'breakLength' ? Number.POSITIVE_INFINITY : runtime.toNumber(value);
+  };
+  const compact = option('compact');
+  const getters = option('getters');
+  return {
+    depth: limit('depth'),
+    breakLength: limit('breakLength'),
+    colors: toBoolean(option('colors')),
+    compact: typeof compact === 'number' ? compact : options.properties.has('compact') ? compact === true : undefined,
+    maxArrayLength: limit('maxArrayLength'),
+    maxStringLength: limit('maxStringLength'),
+    showHidden: toBoolean(option('showHidden')),
+    sorted: sortedOption(option('sorted')),
+    getters: getters === true || getters === 'get' || getters === 'set' ? getters : false,
+    numericSeparator: toBoolean(option('numericSeparator')),
+  };
 }
 
 function defineConsoleOutputs(

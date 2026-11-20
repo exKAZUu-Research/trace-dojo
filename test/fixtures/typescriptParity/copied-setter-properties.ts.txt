@@ -18,3 +18,14 @@ const withConst: undefined = ({ ...accessorSource } as const).value;
 const direct: number = accessorSource.value;
 accessorSource.value = 9;
 console.log(fromSpread, fromRest, pair, reversed, other, contractCopy, withConst, direct);
+const receiver = {
+  set value(next: number) {},
+  get paired(): number { return 5; },
+  set paired(next: number) {},
+  spread() { return { ...this }; },
+  rest() { const { ...rest } = this; return rest; },
+};
+const spreadReceiver: undefined = receiver.spread().value;
+const restReceiver: undefined = receiver.rest().value;
+const pairedReceiver: number = receiver.rest().paired;
+console.log(spreadReceiver, restReceiver, pairedReceiver);

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 645 -- Ports Node.js's inspection and error formatting around shared object and stack metadata.
+// code-gauge-allow-file fileNcss 651 -- Ports Node.js's inspection and error formatting around shared object and stack metadata.
 import { inspect as hostInspect, type InspectStyle, stripVTControlCharacters } from 'node:util';
 
 import { eastAsianWidthType } from 'get-east-asian-width';
@@ -632,7 +632,7 @@ function inspectedConstructor(runtime: Runtime, object: JsObject, showsPrototype
       tryOrUndefined(() => runtime.instanceOf(object, constructor))
     )
       return {
-        name: () => runtime.toString(runtime.get(constructor, 'name')),
+        name: () => constructorDisplayName(runtime, constructor),
         owner: current,
         firstPrototype,
         skipPrototype:
@@ -641,6 +641,11 @@ function inspectedConstructor(runtime: Runtime, object: JsObject, showsPrototype
     if (current === object) firstPrototype = current.proto;
   }
   return { name: () => (firstPrototype ? 'Object' : undefined), firstPrototype };
+}
+
+function constructorDisplayName(runtime: Runtime, constructor: JsFunction): string {
+  const name = runtime.get(constructor, 'name');
+  return typeof name === 'symbol' ? name.toString() : runtime.toString(name);
 }
 
 function constructorProperty(object: JsObject): JsFunction | undefined {
@@ -982,10 +987,16 @@ function formatCollection(ctx: Context, value: JsObject, recurseTimes: number): 
     const pair = [formatCharged(ctx, entry.key, recurseTimes), formatCharged(ctx, entry.value, recurseTimes)];
     return reduceToSingleString(ctx, pair, '', ['[', ']'], recurseTimes, value);
   };
+  const limit = Math.min(entries.length, ctx.maxArrayLength);
+  if (iterator && !Number.isInteger(limit)) ctx.runtime.throwError('RangeError', 'Invalid array length');
+  const output: string[] = [];
   ctx.indentationLvl += 2;
-  const output = entries.slice(0, ctx.maxArrayLength).map((entry) => formatEntry(entry));
+  for (const [index, entry] of entries.entries()) {
+    if (index >= limit) break;
+    output.push(formatEntry(entry));
+  }
   ctx.indentationLvl -= 2;
-  const remaining = entries.length - output.length;
+  const remaining = entries.length - limit;
   if (remaining > 0) output.push(remainingArrayItems(remaining));
   return output;
 }

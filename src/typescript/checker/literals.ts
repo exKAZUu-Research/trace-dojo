@@ -15,6 +15,7 @@ import {
   skipParentheses,
 } from './syntax';
 import {
+  accessorProperty,
   anonymousObject,
   anyType,
   emptyStructure,
@@ -465,14 +466,13 @@ export class LiteralChecker {
       );
       return resolved;
     };
-    literal.declarations.set(name, {
-      ...this.literalProperty(name, anyType, literal.isConstContext, member, key),
-      isMethod: !getter && !setter,
-      type: setter ? (previous?.type ?? resolveType) : resolveType,
-      writeType: setter ? resolveType : previous?.writeType,
-      readonly: getter ? !previous?.writeType : false,
-      getterOnly: getter ? !previous?.writeType : false,
-    });
+    const property = this.literalProperty(name, anyType, literal.isConstContext, member, key);
+    literal.declarations.set(
+      name,
+      getter || setter
+        ? accessorProperty(property, previous, getter, resolveType)
+        : { ...property, isMethod: true, type: resolveType, readonly: false }
+    );
   }
 
   private declareObjectValue(literal: ObjectLiteral, member: TreeNode, key: Type, value: TreeNode | null): void {
@@ -680,15 +680,11 @@ export class LiteralChecker {
     const signature = this.c.signaturesOf(methodType, 'call')[0];
     const existing = properties.get(name);
     const accessorType = isGetter ? (signature?.returnType() ?? anyType) : (signature?.parameters[0]?.type ?? anyType);
-    properties.set(name, {
-      ...this.literalProperty(name, existing && !isGetter ? existing.type() : accessorType, false, member, key),
-      writeType: isGetter ? existing?.writeType : () => accessorType,
-      readonly: isGetter && !existing,
-      getterOnly: isGetter && !existing,
-      setterOnly: !isGetter && !existing,
-    });
-    if (existing && hasToken(member, 'set'))
-      properties.set(name, { ...existing, writeType: () => accessorType, readonly: false, getterOnly: false });
+    const property = this.literalProperty(name, accessorType, false, member, key);
+    properties.set(
+      name,
+      accessorProperty(property, existing, isGetter, () => accessorType)
+    );
   }
 
   private spreadOperand(member: TreeNode, contextual: Type | undefined): Type {
