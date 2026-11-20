@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 756 -- Types literals and their spreads, members, and widening in the same literal context.
+// code-gauge-allow-file fileNcss 761 -- Types literals and their spreads, members, and widening in the same literal context.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExpressionListFlow, tupleArgumentContexts } from './callArity';
@@ -148,7 +148,7 @@ export class LiteralChecker {
       spread ? this.spreadElementType(elements[index] as TreeNode, type) : type
     );
     const array = {
-      ...this.c.arrayType(elementTypes.length === 0 ? neverType : unionOf(elementTypes, true)),
+      ...this.c.arrayType(this.subtypeReduced(elementTypes)),
       id: newTypeId(),
     };
     this.arrayLiterals.add(array.id);
@@ -1107,18 +1107,24 @@ export class LiteralChecker {
   subtypeReduced(types: Type[]): Type {
     const union = unionOf(types, true);
     if (union.kind !== 'union') return union;
-    const kept = union.types.filter(
-      (member, index) =>
-        !union.types.some(
-          (other, otherIndex) =>
+    const objects = union.types.filter((type) => type.kind === 'object');
+    if (objects.length < 2) return union;
+    const removed = new Set<Type>(
+      objects.filter((member, index) =>
+        objects.some((other, otherIndex) => {
+          this.c.budget.spend();
+          return (
             otherIndex !== index &&
-            other.kind === 'object' &&
-            member.kind === 'object' &&
             this.c.relations.isRelated(member, other, 'strictSubtype') &&
             !(otherIndex > index && this.c.relations.isRelated(other, member, 'strictSubtype'))
-        )
+          );
+        })
+      )
     );
-    return unionOf(kept, true);
+    return unionOf(
+      union.types.filter((member) => !removed.has(member)),
+      true
+    );
   }
 
   literalProperty(name: string, type: Type, readonly: boolean, declaration: TreeNode, nameType?: Type): Property {

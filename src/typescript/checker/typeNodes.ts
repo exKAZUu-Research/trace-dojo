@@ -53,6 +53,7 @@ import {
   uniqueSymbolType,
   unknownType,
   voidType,
+  writtenIntersectionOf,
 } from './types';
 
 const predefinedTypes: Record<string, Type> = {
@@ -164,7 +165,7 @@ export class TypeNodes {
       for (const child of named(part)) visit(child);
     };
     visit(node);
-    return intersectionOf(members, this.c);
+    return writtenIntersectionOf(members, this.c);
   }
 
   /** The type of a `type_annotation` or of the type node a field holds. */

@@ -1,0 +1,9 @@
+(3,45): error TS2313: Type parameter 'U' has a circular constraint.
+(4,49): error TS2313: Type parameter 'U' has a circular constraint.
+(5,56): error TS2313: Type parameter 'U' has a circular constraint.
+(6,49): error TS2313: Type parameter 'U' has a circular constraint.
+(8,53): error TS2313: Type parameter 'U' has a circular constraint.
+(9,52): error TS2313: Type parameter 'U' has a circular constraint.
+(10,59): error TS2313: Type parameter 'U' has a circular constraint.
+(13,19): error TS2313: Type parameter 'U' has a circular constraint.
+(17,19): error TS2313: Type parameter 'U' has a circular constraint.

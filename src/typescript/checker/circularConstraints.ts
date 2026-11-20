@@ -124,13 +124,23 @@ export class CircularConstraints {
  * runs once every constraint has resolved, since a constraint that needs itself while resolving sees none.
  */
 export function checkCircularConstraints(c: Checker, root: TreeNode): void {
-  const circularConstraints = new CircularConstraints(c);
+  const declarations = new Map<TypeParameter, TreeNode>();
   for (const node of root.descendantsOfType('type_parameter')) {
     const wrapper = node.childForFieldName('constraint');
     const name = node.childForFieldName('name')?.text;
     const symbol = name ? c.scopeOf(node).lookupType(name) : undefined;
     if (!wrapper || symbol?.typeDeclarations[0]?.id !== node.id) continue;
-    if (circularConstraints.has(c.signatures.typeParameterOfSymbol(symbol)))
-      c.error(named(wrapper)[0], `型パラメーター '${name}' の制約が循環しています。`);
+    declarations.set(c.signatures.typeParameterOfSymbol(symbol), named(wrapper)[0]);
+  }
+  for (const node of root.descendantsOfType('infer_type')) {
+    const [name, constraint] = named(node);
+    if (!constraint) continue;
+    const parameter = c.typeOperators.inferParameterFor(node, name.text);
+    if (parameter && !declarations.has(parameter)) declarations.set(parameter, constraint);
+  }
+  const circularConstraints = new CircularConstraints(c);
+  for (const [parameter, constraint] of declarations) {
+    if (circularConstraints.has(parameter))
+      c.error(constraint, `型パラメーター '${parameter.name}' の制約が循環しています。`);
   }
 }
