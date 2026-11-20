@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 660 -- Keeps generic candidate collection, constraint fitting and inference completion together.
+// code-gauge-allow-file fileNcss 662 -- Keeps generic candidate collection, constraint fitting and inference completion together.
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import type { Checker, Mapper } from './checker';
 import { isUnit } from './flow';
@@ -20,6 +20,7 @@ import {
   newTypeId,
   type ObjectType,
   type Parameter,
+  propertyAccessType,
   regularOf,
   type Signature,
   type Structure,
@@ -610,9 +611,9 @@ export class TypeInference {
       const actual = this.c.propertyOf(source, name);
       if (!actual) return true;
       if (!matchDiscriminants) continue;
-      const type = expected.type();
+      const type = propertyAccessType(expected);
       if (!isUnit(type) || type === voidType) continue;
-      const actualType = actual.type();
+      const actualType = propertyAccessType(actual);
       if (!isAnyLike(actualType) && regularOf(actualType) !== regularOf(type)) return true;
     }
     return false;
@@ -622,7 +623,7 @@ export class TypeInference {
     for (const target of targets) {
       if (target.rest && this.c.relations.isGenericRestType(target.type))
         recurse(this.c.arrayType(element), target.type);
-      else recurse(element, target.rest ? this.c.restElementType(target.type) : target.type);
+      else recurse(element, target.rest ? this.c.restElementType(target.type) : tupleInferenceType(target));
     }
   }
 
@@ -638,7 +639,8 @@ export class TypeInference {
         (element, index) => this.tupleElementShape(element) === this.tupleElementShape(targetElements[index])
       )
     ) {
-      for (const [index, element] of sourceElements.entries()) recurse(element.type, targetElements[index].type);
+      for (const [index, element] of sourceElements.entries())
+        recurse(tupleInferenceType(element), tupleInferenceType(targetElements[index]));
       return;
     }
     const sourceStart = fixedStartLength(sourceElements);
@@ -648,7 +650,8 @@ export class TypeInference {
       targetStart === targetElements.length
         ? 0
         : Math.min(fixedEndLength(sourceElements), fixedEndLength(targetElements));
-    for (let index = 0; index < start; index++) recurse(sourceElements[index].type, targetElements[index].type);
+    for (let index = 0; index < start; index++)
+      recurse(tupleInferenceType(sourceElements[index]), tupleInferenceType(targetElements[index]));
     this.inferFromTupleMiddle(
       run,
       sourceElements.slice(start, sourceElements.length - end),
@@ -657,7 +660,10 @@ export class TypeInference {
       recurse
     );
     for (let offset = 1; offset <= end; offset++)
-      recurse(sourceElements[sourceElements.length - offset].type, targetElements[targetElements.length - offset].type);
+      recurse(
+        tupleInferenceType(sourceElements[sourceElements.length - offset]),
+        tupleInferenceType(targetElements[targetElements.length - offset])
+      );
   }
 
   private tupleElementShape(element: TupleElement): 'fixed' | 'variadic' | 'rest' {
@@ -712,7 +718,7 @@ export class TypeInference {
     const sourceStructure = this.c.structureOf(source);
     for (const [name, property] of targetStructure.properties) {
       const sourceProperty = sourceStructure.properties.get(name) ?? this.c.propertyOf(source, name);
-      if (sourceProperty) recurse(sourceProperty.type(), property.type());
+      if (sourceProperty) recurse(propertyAccessType(sourceProperty), propertyAccessType(property));
     }
     const targetSignatures = targetStructure.callSignatures;
     const sourceSignatures = sourceStructure.callSignatures;
@@ -979,6 +985,10 @@ function templateCaptures(value: string, texts: string[]): string[] | undefined 
     position = end + delimiter.length;
   }
   return position === value.length ? captures : undefined;
+}
+
+function tupleInferenceType(element: TupleElement): Type {
+  return element.optional ? unionOf([element.type, undefinedType]) : element.type;
 }
 
 function fixedStartLength(elements: TupleElement[]): number {

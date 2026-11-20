@@ -1,0 +1,20 @@
+const nums: number[] = [1, 2, 3];
+const ro: readonly number[] = [1];
+const withUndefined: (number|undefined)[] = [undefined];
+const prefix: [number?, ...number[]] = [];
+const headRest: [number, ...number[]] = [1];
+const suffix: [...number[], number] = [1];
+const a: [number?,...number[]] = nums;
+const b: readonly [number?,...number[]] = ro;
+const f: [number?,...string[]] = nums;
+const i: [number?, boolean?, ...number[]] = nums;
+const j: [number?, ...number[]] = withUndefined;
+const k: [number?, number?, ...number[]] = headRest;
+const l: [number?, number?, ...number[]] = suffix;
+const m: [number?, number?, ...number[]] = prefix;
+const n: [number?, ...string[]] = [];
+const q: [number, ...number[]] = [1] as const;
+function total(values: [number?, ...number[]]): number { return values.length; }
+console.log(total(nums), a.length, b.length, f.length, i.length, j.length, k.length, l.length, m.length, n.length, q.length);
+function optionalBeforeGeneric<T extends number[]>(values: number[]): [number?, ...T] { return values; }
+console.log(optionalBeforeGeneric<number[]>(nums).length);

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 816 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
+// code-gauge-allow-file fileNcss 824 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
 import { minimumArguments } from './callArity';
 import type { Checker } from './checker';
 import { isUnit } from './flow';
@@ -778,8 +778,10 @@ export class Relations {
         );
       }
     }
-    if (source.objectKind === 'tuple' && target.objectKind === 'tuple')
-      return this.tupleRelated(source, target, relation);
+    if (target.tuple && this.c.isArrayOrTuple(source))
+      return source.tuple
+        ? this.tupleRelated(source, target, relation)
+        : this.arrayRelatedToTuple(source, target.tuple, relation);
     if (
       this.c.isArrayOrTuple(source) &&
       target.objectKind === 'reference' &&
@@ -789,6 +791,17 @@ export class Relations {
       return this.isRelated(this.c.elementTypeOf(source), target.typeArguments?.[0] ?? unknownType, relation);
     }
     return undefined;
+  }
+
+  private arrayRelatedToTuple(source: ObjectType, target: TupleInfo, relation: Relation): boolean {
+    if (this.c.isReadonlyArrayType(source) && !target.readonly) return false;
+    if (!target.elements.some((element) => element.rest)) return false;
+    const [first] = target.elements;
+    // The compiler compares an array as one rest element, aligned from the end when the target starts with a rest.
+    const startsWithRest = first.rest && !this.isGenericRestType(first.type);
+    const expected = startsWithRest ? target.elements.at(-1) : first;
+    if (!expected || (expected.rest && this.isGenericRestType(expected.type))) return false;
+    return this.tupleElementRelated({ rest: true, optional: false, type: source }, expected, relation);
   }
 
   // code-gauge-allow functionCognitiveComplexity 22 -- Checks declared properties, static private members, and same-alias indexes in a single pass.
@@ -975,7 +988,8 @@ export class Relations {
   }
 
   private tupleElementRelated(element: TupleElement, expected: TupleElement, relation: Relation): boolean {
-    if ((element.rest && !expected.rest) || (isRequired(expected) && !isRequired(element))) return false;
+    if (isRequired(expected) && !isRequired(element)) return false;
+    if (element.rest && !expected.rest && this.isGenericRestType(element.type)) return false;
     // A missing optional element reads as `undefined` unless the target's element may be missing too.
     const sourceType = element.rest
       ? this.c.restElementType(element.type)

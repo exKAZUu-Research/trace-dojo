@@ -1,0 +1,13 @@
+const nums: number[] = [1, 2, 3];
+const strings: string[] = ["x"];
+const both: (number|string)[] = [1, "x"];
+const ro: readonly number[] = [1];
+const suffix: [...number[], number] = [1];
+const c: [number?,...number[]] = ro;
+const d: [number, ...number[]] = nums;
+const e: [number?] = nums;
+const g: [number?,...string[]] = strings;
+const h: [number?,...string[]] = both;
+const o: [number, ...number[]] = suffix;
+const p: [number?, ...number[]] = {length:0};
+function genericBeforeOptional<T extends number[]>(values: number[]): [...T, number?] { return values; }
