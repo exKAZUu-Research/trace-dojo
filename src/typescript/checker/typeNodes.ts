@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 660 -- Resolves every kind of type syntax a program writes, each needing its own rule.
+// code-gauge-allow-file fileNcss 685 -- Resolves every kind of type syntax a program writes, each needing its own rule.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
@@ -238,6 +238,28 @@ export class TypeNodes {
       if (child.parent.type === 'conditional_type' && child.parent.childForFieldName('right')?.id === child.id) return;
     }
     this.c.errorWhileResolving(node, 'infer による宣言は、条件型の extends 節の中にしか書けません。');
+  }
+
+  inferConstraintFromReference(node: TreeNode, inferred: TypeParameter): Type | undefined {
+    const list = node.parent;
+    const reference = list?.parent;
+    if (list?.type !== 'type_arguments' || reference?.type !== 'generic_type') return undefined;
+    const name = reference.childForFieldName('name');
+    if (!name || name.type === 'nested_type_identifier') return undefined;
+    const arguments_ = named(list);
+    const target = this.resolveTypeName(reference, name, arguments_.length);
+    if (target === 'stringMapping') return stringType;
+    if (!target || 'local' in target) return undefined;
+    const parameters = target.parameters;
+    const position = arguments_.findIndex((argument) => argument.id === node.id);
+    const parameter = parameters[position];
+    const constraint = parameter && this.c.constraintOf(parameter);
+    if (!constraint) return undefined;
+    const supplied = arguments_.map((argument) => (argument.id === node.id ? inferred : this.typeFromNode(argument)));
+    const filled = this.c.fillTypeArguments(parameters, supplied);
+    const mapper = new Map(parameters.map((type, index) => [type.id, filled[index]]));
+    const bound = this.c.instantiate(constraint, mapper);
+    return bound.id === inferred.id ? undefined : bound;
   }
 
   private lookupType(node: TreeNode): Type {

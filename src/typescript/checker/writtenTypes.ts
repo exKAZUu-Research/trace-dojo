@@ -24,7 +24,10 @@ export function checkWrittenType(c: Checker, node: TreeNode | null): void {
 function checkTypeNode(c: Checker, node: TreeNode): void {
   if (node.type === 'generic_type' || isStandaloneTypeReference(node) || eagerTypeSyntaxes.has(node.type))
     c.typeNodes.checkDeferredReferenceArguments(c.typeNodes.typeFromNode(node));
-  if (node.type === 'infer_type') c.typeNodes.checkInferPlacement(node);
+  if (node.type === 'infer_type') {
+    c.typeNodes.checkInferPlacement(node);
+    c.typeOperators.checkInferConstraints(node);
+  }
   if (node.type !== 'object_type') return;
   checkTypeMemberDuplicates(c, node);
   checkOverloadOptionality(c, node);

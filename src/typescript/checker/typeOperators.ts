@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 532 -- Resolves related type operators sharing generic parameters and type construction.
+// code-gauge-allow-file fileNcss 579 -- Resolves related type operators sharing generic parameters and type construction.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker, Mapper } from './checker';
@@ -64,6 +64,11 @@ const stringMappingParameter: TypeParameter = {
   constraint: () => stringType,
 };
 
+interface InferGroup {
+  parameter: TypeParameter;
+  declarations: TreeNode[];
+}
+
 interface ConditionalInstantiation {
   type: ConditionalType;
   outer: Mapper;
@@ -81,7 +86,8 @@ export class TypeOperators {
   private readonly mappedParameters = new Map<number, TypeParameter>();
   /** The keys and name types of a mapped type that a name type maps to each name, by the structure being built. */
   private readonly mappedKeys = new WeakMap<Structure, Map<string, { keys: Type[]; nameTypes: Type[] }>>();
-  private readonly inferParameters = new Map<number, Map<string, TypeParameter>>();
+  private readonly inferGroups = new Map<number, Map<string, InferGroup>>();
+  private readonly resolvingInferConstraints = new Set<number>();
 
   constructor(private readonly c: Checker) {
     this.indexedAccessKeys = new IndexedAccessKeys(c);
@@ -105,7 +111,7 @@ export class TypeOperators {
       // and each in its own constraint, but not elsewhere in its extends type.
       case 'conditional_type': {
         return this.fieldNameOf(ancestor, child) === 'consequence'
-          ? this.inferParametersOf(ancestor).get(name)
+          ? this.inferGroupsOf(ancestor).get(name)?.parameter
           : undefined;
       }
       case 'infer_type': {
@@ -140,61 +146,108 @@ export class TypeOperators {
     return undefined;
   }
 
-  private inferParametersOf(conditional: TreeNode): Map<string, TypeParameter> {
-    let parameters = this.inferParameters.get(conditional.id);
-    if (parameters) return parameters;
-    parameters = new Map();
-    this.inferParameters.set(conditional.id, parameters);
+  private inferGroupsOf(conditional: TreeNode): Map<string, InferGroup> {
+    let groups = this.inferGroups.get(conditional.id);
+    if (groups) return groups;
+    groups = new Map();
+    this.inferGroups.set(conditional.id, groups);
     const extendsNode = conditional.childForFieldName('right');
-    if (extendsNode) this.collectInferParameters(conditional, extendsNode, parameters);
-    return parameters;
+    if (extendsNode) this.collectInferDeclarations(extendsNode, groups);
+    return groups;
   }
 
-  private collectInferParameters(conditional: TreeNode, node: TreeNode, parameters: Map<string, TypeParameter>): void {
-    if (node.type === 'conditional_type' && node.id !== conditional.id) {
-      // A nested conditional type's own `infer`s in its extends type belong to it.
+  private collectInferDeclarations(node: TreeNode, groups: Map<string, InferGroup>): void {
+    this.c.budget.spend();
+    if (node.type === 'conditional_type') {
+      // A nested conditional type's own extends clause introduces a separate scope.
       for (const fieldName of ['left', 'consequence', 'alternative']) {
         const child = node.childForFieldName(fieldName);
-        if (child) this.collectInferParameters(conditional, child, parameters);
+        if (child) this.collectInferDeclarations(child, groups);
       }
       return;
     }
-    if (node.type === 'infer_type') this.addInferParameter(node, parameters);
-    for (const child of named(node)) this.collectInferParameters(conditional, child, parameters);
+    if (node.type === 'infer_type') this.addInferDeclaration(node, groups);
+    for (const child of named(node)) this.collectInferDeclarations(child, groups);
   }
 
-  private addInferParameter(node: TreeNode, parameters: Map<string, TypeParameter>): void {
-    const name = named(node)[0];
-    if (!name || parameters.has(name.text)) return;
-    const constraintNode = named(node)[1];
-    parameters.set(name.text, {
+  private addInferDeclaration(node: TreeNode, groups: Map<string, InferGroup>): void {
+    const name = named(node)[0]?.text;
+    if (!name) return;
+    const existing = groups.get(name);
+    if (existing) {
+      existing.declarations.push(node);
+      return;
+    }
+    const declarations = [node];
+    const parameter: TypeParameter = {
       kind: 'typeParameter',
       id: newTypeId(),
-      name: name.text,
-      constraint: constraintNode
-        ? () => this.c.typeNodes.typeFromNode(constraintNode)
-        : this.impliedInferConstraint(node),
-    });
+      name,
+      constraint: () => this.inferConstraint(parameter, declarations),
+    };
+    groups.set(name, { parameter, declarations });
   }
 
-  /** The constraint TypeScript implies for an unconstrained `infer` from where it is written. */
-  private impliedInferConstraint(node: TreeNode): (() => Type) | undefined {
-    if (node.parent?.type === 'template_type') return () => stringType;
-    const holder = node.parent?.type === 'type_annotation' ? node.parent.parent : node.parent;
-    // A rest parameter writes its name as `pattern`, a named tuple member as `name`.
+  checkInferConstraints(node: TreeNode): void {
+    const name = named(node)[0]?.text;
+    if (!name) return;
+    const group = this.inferGroupFor(node, name);
+    if (!group || group.declarations.length < 2 || group.declarations[0].id !== node.id) return;
+    const constraints = group.declarations.flatMap((declaration) => named(declaration).slice(1, 2));
+    if (constraints.length === 0) return;
+    const expected = this.c.constraintOf(group.parameter);
+    if (
+      !expected ||
+      !constraints.some(
+        (constraint) => !this.c.relations.identical(this.c.typeNodes.typeFromNode(constraint), expected)
+      )
+    )
+      return;
+    for (const declaration of group.declarations) {
+      this.c.error(named(declaration)[0], `'${name}' の宣言にはすべて同じ制約を指定してください。`);
+    }
+  }
+
+  private inferConstraint(parameter: TypeParameter, declarations: TreeNode[]): Type | undefined {
+    if (this.resolvingInferConstraints.has(parameter.id)) return undefined;
+    this.resolvingInferConstraints.add(parameter.id);
+    try {
+      const explicit = declarations.map((node) => named(node)[1]).find((node) => node !== undefined);
+      if (explicit) {
+        const type = this.c.typeNodes.typeFromNode(explicit);
+        return isAnyLike(type) && type !== errorType ? unknownType : type;
+      }
+      const implied = declarations.flatMap((node) => this.impliedInferConstraint(node, parameter) ?? []);
+      return implied.length > 0 ? intersectionOf(implied, this.c) : undefined;
+    } finally {
+      this.resolvingInferConstraints.delete(parameter.id);
+    }
+  }
+
+  private impliedInferConstraint(node: TreeNode, parameter: TypeParameter): Type | undefined {
+    let current = node;
+    while (current.parent?.type === 'parenthesized_type') current = current.parent;
+    const { parent } = current;
+    if (parent?.type === 'template_type') return stringType;
+    if (parent?.type === 'mapped_type_clause') return propertyKeys;
+    const holder = parent?.type === 'type_annotation' ? parent.parent : parent;
     const isRest =
       holder?.type === 'rest_type' ||
       (holder?.type === 'required_parameter' &&
         (holder.childForFieldName('pattern') ?? holder.childForFieldName('name'))?.type === 'rest_pattern');
-    return isRest ? () => this.c.arrayType(unknownType) : undefined;
+    if (isRest) return this.c.arrayType(unknownType);
+    return this.c.typeNodes.inferConstraintFromReference(current, parameter);
   }
 
-  /** The type parameter that the `infer` declaration `node` declares in the conditional type whose extends type holds it. */
   inferParameterFor(node: TreeNode, name: string): TypeParameter | undefined {
+    return this.inferGroupFor(node, name)?.parameter;
+  }
+
+  private inferGroupFor(node: TreeNode, name: string): InferGroup | undefined {
     let child = node;
     for (let current = node.parent; current; current = current.parent) {
       if (current.type === 'conditional_type' && current.childForFieldName('right')?.id === child.id)
-        return this.inferParametersOf(current).get(name);
+        return this.inferGroupsOf(current).get(name);
       child = current;
     }
     return undefined;
@@ -629,7 +682,7 @@ export class TypeOperators {
       get falseType() {
         return checker.typeNodes.typeFromNode(falseNode);
       },
-      inferTypeParameters: [...this.inferParametersOf(node).values()],
+      inferTypeParameters: [...this.inferGroupsOf(node).values()].map(({ parameter }) => parameter),
       outerTypeParameters: this.typeParametersInScope(node),
       distributive: checkType.kind === 'typeParameter',
     };
@@ -647,7 +700,7 @@ export class TypeOperators {
         ancestor.type === 'conditional_type' &&
         ['right', 'consequence'].includes(this.fieldNameOf(ancestor, child) ?? '')
       )
-        for (const parameter of this.inferParametersOf(ancestor).values()) parameters.push(parameter);
+        for (const { parameter } of this.inferGroupsOf(ancestor).values()) parameters.push(parameter);
       if (ancestor.type === 'index_signature') {
         const clause = named(ancestor).find((member) => member.type === 'mapped_type_clause');
         if (clause?.childForFieldName('name') && child.id !== clause.childForFieldName('type')?.id)

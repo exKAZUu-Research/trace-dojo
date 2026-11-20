@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 864 -- Keeps the relation modes and their recursive comparisons together.
+// code-gauge-allow-file fileNcss 865 -- Keeps the relation modes and their recursive comparisons together.
 import { minimumArguments } from './callArity';
 import type { Checker } from './checker';
 import { isUnit } from './flow';
@@ -777,7 +777,7 @@ export class Relations {
     return (
       this.propertiesRelated(source, sourceStructure, target, targetStructure, relation) &&
       this.signaturesRelated(sourceStructure.callSignatures, targetStructure.callSignatures, relation) &&
-      this.signaturesRelated(sourceStructure.constructSignatures, targetStructure.constructSignatures, relation) &&
+      this.constructorsRelated(sourceStructure.constructSignatures, targetStructure.constructSignatures, relation) &&
       keyedIndexes(targetStructure).every((index) =>
         this.indexRelated(sourceStructure, source, index.type, index.keyType, relation, state)
       )
@@ -1061,6 +1061,11 @@ export class Relations {
         ? unionOf([element.type, undefinedType])
         : element.type;
     return this.isRelated(sourceType, this.tupleElementTargetType(expected), relation);
+  }
+
+  private constructorsRelated(sources: Signature[], targets: Signature[], relation: Relation): boolean {
+    if (!this.c.classes.constructorVisibilitiesCompatible(sources[0], targets[0])) return false;
+    return this.signaturesRelated(sources, targets, relation);
   }
 
   private signaturesRelated(sources: Signature[], targets: Signature[], relation: Relation): boolean {

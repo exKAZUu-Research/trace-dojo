@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 758 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
+// code-gauge-allow-file fileNcss 764 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { typesAtConstructorExit } from './assignmentFlow';
@@ -1167,6 +1167,13 @@ export class ClassChecker {
       node,
       `クラス '${declaring.name}' のコンストラクタは ${ctor.visibility} なので、クラスの宣言の中でしか使えません。`
     );
+  }
+
+  constructorVisibilitiesCompatible(source: Signature | undefined, target: Signature | undefined): boolean {
+    if (!source?.declaration || !target?.declaration) return true;
+    const actual = this.restrictedDeclaration(source.declaration)?.visibility;
+    const expected = this.restrictedDeclaration(target.declaration)?.visibility;
+    return expected === 'private' || (expected === 'protected' ? actual !== 'private' : actual === undefined);
   }
 
   /** The private or protected constructor of the first construct signature of `type`. */

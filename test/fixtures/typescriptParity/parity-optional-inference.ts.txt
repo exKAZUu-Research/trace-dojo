@@ -1,0 +1,15 @@
+type Arg<F> = F extends (value: infer U) => void ? U : never;
+const a: Arg<(value?: string) => void> = undefined;
+const b: Arg<(value?: number) => void> = undefined;
+const c: Arg<(value: string | undefined) => void> = undefined;
+function defaulted(value = 'initialized') {}
+const d: Arg<typeof defaulted> = undefined;
+const e: Arg<(...values: [value?: number]) => void> = undefined;
+type OptionalTarget<F> = F extends (value?: infer U) => void ? U : 'no';
+const f: OptionalTarget<(value: string) => void> = 'no';
+type FirstAndRest<F> = F extends (value: infer U, ...tail: infer R) => void ? [U, R] : never;
+const g: FirstAndRest<(...items: string[]) => void> = ['first', ['next']];
+const h: FirstAndRest<(value: string, later?: number) => void> = ['first', []];
+type ParametersOf<F> = F extends (...args: infer T) => void ? T : never;
+const i: ParametersOf<(...values: boolean[]) => void> = [true, false];
+console.log(a, b, c, d, e, f, g, h, i);

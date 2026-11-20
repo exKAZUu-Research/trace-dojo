@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 772 -- Keeps generic candidate collection, constraint fitting and inference completion together.
+// code-gauge-allow-file fileNcss 802 -- Keeps generic candidate collection, constraint fitting and inference completion together.
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import type { Checker, Mapper } from './checker';
 import { isUnit } from './flow';
@@ -20,6 +20,7 @@ import {
   literalType,
   type MappedInfo,
   newTypeId,
+  nullType,
   type ObjectType,
   type Parameter,
   propertyAccessType,
@@ -473,14 +474,27 @@ export class TypeInference {
   private templateCapture(text: string, constraint: Type): Type {
     const literal = literalType(text);
     if (this.c.relations.isAssignable(literal, constraint)) return literal;
-    const members = constraint.kind === 'union' ? constraint.types : [constraint];
+    const primitive = this.primitiveTemplateCapture(text, constraint);
+    return primitive ?? literal;
+  }
+
+  private primitiveTemplateCapture(text: string, constraint: Type): Type | undefined {
+    const { relations } = this.c;
     const number = Number(text);
     // Only a numeric spelling that round-trips through the primitive can represent a literal type.
-    if (String(number) === text && Number.isFinite(number) && members.some((member) => isIntrinsic(member, 'number')))
-      return literalType(number);
-    if (/^(?:0|-?[1-9]\d*)$/.test(text) && members.some((member) => isIntrinsic(member, 'bigint')))
-      return literalType(BigInt(text));
-    return literal;
+    if (Number.isFinite(number) && String(number) === text) {
+      const candidate = literalType(number);
+      if (relations.isAssignable(candidate, constraint)) return candidate;
+    }
+    const hasBigint = typeMembers(constraint).some(
+      (member) => isIntrinsic(member, 'bigint') || (member.kind === 'literal' && typeof member.value === 'bigint')
+    );
+    if (hasBigint && /^(?:0|-?[1-9]\d*)$/.test(text)) {
+      const candidate = literalType(BigInt(text));
+      if (relations.isAssignable(candidate, constraint)) return candidate;
+    }
+    const candidate = templatePrimitiveWord(text);
+    return candidate && relations.isAssignable(candidate, constraint) ? candidate : undefined;
   }
 
   private inferToUnion(run: InferenceRun, source: Type, target: UnionType, recurse: Recurse): void {
@@ -908,28 +922,28 @@ export class TypeInference {
     const position = target.isMethod ? 'bivariantParameter' : 'parameter';
     if (source.thisType && target.thisType) recurse(source.thisType, target.thisType, position);
     const restIndex = target.parameters.findIndex((parameter) => parameter.rest);
-    const count = Math.min(source.parameters.length, restIndex === -1 ? target.parameters.length : restIndex);
+    const positional = restIndex === -1 ? target.parameters.length : restIndex;
+    const count = source.parameters.at(-1)?.rest ? positional : Math.min(source.parameters.length, positional);
+    const calls = this.c.expressions.calls;
     for (let index = 0; index < count; index++) {
-      recurse(source.parameters[index].type, target.parameters[index].type, position);
+      const from = calls.parameterTypeAt(source, index);
+      const to = calls.parameterTypeAt(target, index);
+      if (from && to) recurse(from, to, position);
     }
-    // A rest parameter such as `(...args: infer P)` takes the source's remaining parameters as a tuple.
     if (restIndex !== -1) {
-      const rest = source.parameters
-        .slice(restIndex)
-        .map((parameter) =>
-          parameter.rest
-            ? { type: parameter.type, optional: false, rest: true, name: parameter.name }
-            : { type: parameter.type, optional: parameter.optional, rest: false, name: parameter.name }
-        );
-      const targetRest = target.parameters.slice(restIndex);
-      recurse(
-        this.c.tupleType(rest),
-        targetRest.length === 1
-          ? targetRest[0].type
-          : this.c.tupleType(targetRest.map(({ type, optional, rest }) => ({ type, optional, rest }))),
-        position
-      );
+      recurse(this.signatureRestType(source, count), this.signatureRestType(target, restIndex), position);
     }
+  }
+
+  private signatureRestType(signature: Signature, start: number): Type {
+    const parameters = signature.parameters;
+    const last = parameters.at(-1);
+    const lastIndex = parameters.length - 1;
+    if (last?.rest && start >= lastIndex)
+      return start === lastIndex ? last.type : this.c.arrayType(this.c.restElementType(last.type));
+    return this.c.tupleType(
+      parameters.slice(start).map(({ type, optional, rest, name }) => ({ type, optional, rest, name }))
+    );
   }
 
   private inferSignatureReturns(source: Signature, target: Signature, recurse: Recurse): void {
@@ -1088,6 +1102,24 @@ export class TypeInference {
       );
     }
     return context;
+  }
+}
+
+function templatePrimitiveWord(text: string): Type | undefined {
+  switch (text) {
+    case 'true':
+    case 'false': {
+      return literalType(text === 'true');
+    }
+    case 'undefined': {
+      return undefinedType;
+    }
+    case 'null': {
+      return nullType;
+    }
+    default: {
+      return undefined;
+    }
   }
 }
 

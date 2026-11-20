@@ -238,6 +238,7 @@ export class UnionSignatures {
     const thisTypes = [left.thisType, right.thisType].filter((type) => type !== undefined);
     return {
       typeParameters: left.typeParameters.length > 0 ? left.typeParameters : right.typeParameters,
+      declaration: left.declaration,
       parameters,
       thisType: thisTypes.length > 0 ? intersectionOf(thisTypes, this.c) : undefined,
       returnType: () => this.c.literals.subtypeReduced([left.returnType(), right.returnType()]),
