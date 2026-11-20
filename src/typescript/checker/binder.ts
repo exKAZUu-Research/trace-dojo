@@ -4,7 +4,7 @@ import type { ExecutionBudget } from '../../interpreter/limits';
 import { Scope, type Sym, type ValueKind } from './scopes';
 import { assignmentKind, named, patternIdentifiers } from './syntax';
 
-const functionLikeTypes = new Set([
+export const functionLikeTypes = new Set([
   'function_declaration',
   'function_expression',
   'arrow_function',

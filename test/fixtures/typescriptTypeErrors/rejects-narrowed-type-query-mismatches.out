@@ -1,0 +1,9 @@
+(3,7): error TS2322: Type 'number' is not assignable to type 'string'.
+(4,7): error TS2322: Type 'number' is not assignable to type 'string'.
+(6,21): error TS2322: Type 'number' is not assignable to type 'string'.
+(8,1): error TS2322: Type 'number' is not assignable to type 'string'.
+(15,9): error TS2345: Argument of type 'number' is not assignable to parameter of type 'string'.
+(16,14): error TS2345: Argument of type 'number' is not assignable to parameter of type 'string'.
+(17,17): error TS2345: Argument of type 'number' is not assignable to parameter of type 'string'.
+(18,22): error TS2345: Argument of type 'number' is not assignable to parameter of type 'string'.
+(23,9): error TS2322: Type 'number' is not assignable to type 'string'.

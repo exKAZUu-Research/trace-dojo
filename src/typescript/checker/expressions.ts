@@ -30,6 +30,7 @@ import {
   isTemplateLiteralContextualType,
   templatePlaceholderConstraint,
 } from './templateContexts';
+import { checkTypeQuery } from './typeQueries';
 import {
   anyType,
   errorType,
@@ -316,23 +317,21 @@ export class ExpressionChecker {
     return rest ? this.c.arrayType(anyType) : anyType;
   }
 
-  /** The type of a `typeof x` type query. */
   typeOfQuery(node: TreeNode): Type {
-    if (node.type === 'identifier') {
-      const symbol = this.c.scopeOf(node).lookupValue(node.text);
-      if (!symbol) return this.implicitArgumentsType(node) ?? this.reportUnknownValue(node, node.text);
-      return this.reportUnavailableValue(node, symbol)
-        ? errorType
-        : this.variableReferenceType(node, symbol, undefined, true);
-    }
-    if (node.type === 'member_expression') {
-      const object = node.childForFieldName('object') as TreeNode;
-      const property = node.childForFieldName('property') as TreeNode;
-      const type = this.c.members.propertyAccess(node, object, property, this.typeOfQuery(object), property.text);
-      const key = this.c.flow.referenceKey(node);
-      return key ? (this.c.flow.entry(key)?.type ?? type) : type;
-    }
-    return this.check(node);
+    return checkTypeQuery(
+      this.c,
+      node,
+      (name) => this.queryIdentifier(name),
+      (expression) => this.check(expression)
+    );
+  }
+
+  private queryIdentifier(node: TreeNode): Type {
+    const symbol = this.c.scopeOf(node).lookupValue(node.text);
+    if (!symbol) return this.implicitArgumentsType(node) ?? this.reportUnknownValue(node, node.text);
+    return this.reportUnavailableValue(node, symbol)
+      ? errorType
+      : this.variableReferenceType(node, symbol, undefined, true);
   }
 
   // Identifiers --------------------------------------------------------------------------------------------------
@@ -525,7 +524,9 @@ export class ExpressionChecker {
     const deferred =
       closure?.type === 'function_declaration' ||
       closure?.type === 'generator_function_declaration' ||
-      (closure?.type === 'method_definition' && closure.parent?.type === 'class_body');
+      (closure?.type === 'method_definition' &&
+        closure.parent?.type === 'class_body' &&
+        closure.parent.parent?.type !== 'class');
     if (
       !evolving &&
       !deferred &&
