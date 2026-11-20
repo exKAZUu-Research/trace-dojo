@@ -1006,6 +1006,22 @@ test('releases an uncaught exception after reporting or handling it, before shut
       /d1;\nFatal error: Uncaught Exception: t1 .*d14;d2;\nFatal error: Uncaught Exception: t2 /s
     ),
   });
+  expect(
+    run(
+      '<?php class D { function __construct(public $id) {} function __destruct() { echo "d{$this->id};"; } } function k($a) { throw new Exception("k"); } set_exception_handler(function ($e) { echo "H;"; k(new D(6)); }); $x = new D(14); throw new Exception("first");'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: expect.stringMatching(/^H;\nFatal error: Uncaught Exception: k .*\nd6;d14;$/s),
+  });
+  expect(
+    run(
+      '<?php class D { function __destruct() { echo "d;"; exit("bye;"); } } class T { function __destruct() { echo "T;"; throw new Exception("shut"); } } function f($o) { throw new Exception("x"); } set_exception_handler(function ($e) { echo "H;"; }); $t = new T; f(new D);'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: expect.stringMatching(/^H;d;bye;T;\nFatal error: Uncaught Exception: shut /),
+  });
 });
 
 test('unrelated array temporaries do not invalidate scalar-grid garbage caches', () => {

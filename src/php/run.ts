@@ -89,7 +89,7 @@ function guard(runtime: Runtime, run: () => void): string | undefined {
 const rejectedRuns = new WeakSet<Runtime>();
 
 // code-gauge-allow functionCognitiveComplexity 24 -- Dispatches uncaught outcomes before runtime shutdown.
-function report(runtime: Runtime, error: unknown, inShutdown = false, release = true): string | undefined {
+function report(runtime: Runtime, error: unknown, inShutdown = false): string | undefined {
   if (error instanceof ExitSignal) {
     if (inShutdown) runtime.shuttingDown = true;
     return undefined;
@@ -101,7 +101,7 @@ function report(runtime: Runtime, error: unknown, inShutdown = false, release = 
   }
   if (error instanceof PhpThrow) {
     restoreStack(runtime);
-    return invokeExceptionHandler(runtime, error.object, inShutdown, release);
+    return invokeExceptionHandler(runtime, error.object, inShutdown);
   }
   if (error instanceof HostStackExhaustion) {
     const trace = traceText(error.record ? [error.record] : []);
@@ -123,22 +123,23 @@ function report(runtime: Runtime, error: unknown, inShutdown = false, release = 
 }
 
 /** Releases an uncaught exception once it is reported or handled, as PHP does before shutdown. */
-function releaseUncaught(runtime: Runtime, object: PhpObject): string | undefined {
+/** Releases an uncaught exception once it is reported or handled, returning whether the release completed. */
+function releaseUncaught(runtime: Runtime, object: PhpObject): { completed: boolean; failure?: string } {
   if (runtime.thrown === object) runtime.thrown = undefined;
-  // A destructor's exception here is a fatal error in PHP, which ends the release; shutdown frees what remains.
-  return guard(runtime, () => runtime.withNativeReleaseMode('shutdown', () => runtime.release([object], false, true)));
+  try {
+    // A destructor's exception here is a fatal error in PHP, which ends the release; shutdown frees what remains.
+    runtime.withNativeReleaseMode('shutdown', () => runtime.release([object], false, true));
+    return { completed: true };
+  } catch (error) {
+    return { completed: false, failure: report(runtime, error) };
+  }
 }
 
-function invokeExceptionHandler(
-  runtime: Runtime,
-  object: PhpObject,
-  inShutdown: boolean,
-  release: boolean
-): string | undefined {
+function invokeExceptionHandler(runtime: Runtime, object: PhpObject, inShutdown: boolean): string | undefined {
   const handler = runtime.exceptionHandler;
   if (handler === null || handler === undefined) {
     const message = printUncaught(runtime, object);
-    return (release ? releaseUncaught(runtime, object) : undefined) ?? message;
+    return releaseUncaught(runtime, object).failure ?? message;
   }
   runtime.replacedExceptionHandlers.push(handler);
   runtime.exceptionHandler = undefined;
@@ -146,13 +147,15 @@ function invokeExceptionHandler(
     // PHP calls the handler after the program's code has unwound, from no line of it.
     asInternal(() => callValue(handler, [{ v: object }], undefined));
     // PHP releases the handled exception before restoring the handler, so its destructors' exceptions go uncaught.
-    const failure = releaseUncaught(runtime, object);
-    if (failure === undefined && runtime.exceptionHandler === undefined)
+    const { completed, failure } = releaseUncaught(runtime, object);
+    if (completed && runtime.exceptionHandler === undefined)
       runtime.exceptionHandler = runtime.replacedExceptionHandlers.pop() ?? null;
     return failure;
   } catch (error_) {
-    // PHP keeps both exceptions when the handler throws, so their objects survive until shutdown.
-    return report(runtime, error_, inShutdown, false);
+    // PHP keeps the handled exception alive until shutdown when the handler throws, and reports and releases the
+    // handler's own exception.
+    runtime.held.push(object);
+    return report(runtime, error_, inShutdown);
   }
 }
 
