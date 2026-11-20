@@ -291,15 +291,23 @@ export function refExpr(c: Checker, expr: Extract<Expr, { kind: 'ref' }>, expect
   return ref(type, expr.mutable);
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Follows the type checking rules of rustc case by case.
 export function checkCast(c: Checker, expr: Extract<Expr, { kind: 'cast' }>): Type {
   const target = c.lowerType(expr.type);
   const sourceType = c.expr(expr.operand, castExpectation(expr.operand, target));
+  const t = normalize(shallow(target));
+  if (t.kind === 'var' && !t.v.literal) {
+    c.deferredChecks.push(() => validateCast(c, expr, sourceType, target));
+    return target;
+  }
+  return validateCast(c, expr, sourceType, target);
+}
+
+// code-gauge-allow functionCognitiveComplexity 20 -- Follows the type checking rules of rustc case by case.
+function validateCast(c: Checker, expr: Extract<Expr, { kind: 'cast' }>, sourceType: Type, target: Type): Type {
   const s = normalize(shallow(sourceType));
   const t = normalize(shallow(target));
   const ok = (): Type => target;
-  // `as _` takes its target from where the value goes, which the rest of the body settles.
-  if (t.kind === 'var' && !t.v.literal) return ok();
+  if (t.kind === 'var' && !t.v.literal) compileError(expr.span, '型が決まらないので、as で変換できません。');
   if (s.kind === 'var' && s.v.literal === 'int' && t.kind === 'int') {
     return ok();
   }
