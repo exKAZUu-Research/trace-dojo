@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 793 -- Runs PHP statements iteratively on a heap block stack with shared loop/try/foreach helpers.
+// code-gauge-allow-file fileNcss 794 -- Runs PHP statements iteratively on a heap block stack with shared loop/try/foreach helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { CompileError } from '../interpreter/diagnostics';
 import type { ArrayCursor } from './arrayOrder';
@@ -661,13 +661,14 @@ function propagateTryCompletion(
     enterFinallyFrame(stack, top, runtime, frame, completion, undefined);
     return undefined;
   }
-  if (top.pending) {
-    runtime.held.pop();
-    if (runtime.thrown === top.pending.object) runtime.thrown = undefined;
-    runtime.release([top.pending.object]);
-    top.pending = undefined;
-  }
+  const pending = top.pending;
+  top.pending = undefined;
   stack.pop();
+  if (pending) {
+    runtime.held.pop();
+    if (runtime.thrown === pending.object) runtime.thrown = undefined;
+    runtime.release([pending.object]);
+  }
   return completion;
 }
 
