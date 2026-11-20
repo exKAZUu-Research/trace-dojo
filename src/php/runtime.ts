@@ -215,6 +215,7 @@ export class Runtime {
     }
   }
   exhausted = false;
+  hostStackExhausted = false;
   private rawOutput?: string;
   private pendingOutput = '';
   /** The classes a program declared, in declaration order, whose static properties the trace shows. */

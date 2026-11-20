@@ -791,8 +791,8 @@ defineFunction('array_map(?callable $callback, array $array, array ...$arrays): 
   if (!(first instanceof PhpArray))
     throwError('TypeError', `array_map(): Argument #2 ($array) must be of type array, ${valueName(first)} given`);
   if (rest.length > 0) return mapMultipleArrays(callback, first, rest);
-  if (first.size === 0) return new PhpArray();
   if (callback === null) return first;
+  if (first.size === 0) return new PhpArray();
   const runtime = rt();
   const result = new PhpArray();
   const target = callTargetOf(callback, 'callback');

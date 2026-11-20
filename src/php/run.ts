@@ -13,6 +13,7 @@ import { holderCounts, releaseDropped, releaseGlobalObject } from './garbage';
 import { type ParsedProgram, parsePhp } from './parse';
 import { releaseBoundedRegexSubject } from './regexExecution';
 import { ExitSignal, FatalError, type Frame, PhpThrow, Runtime, SCRIPT_PATH, withRuntime } from './runtime';
+import { runExecuteOnLargeStack } from './stackFallback';
 import { runStatements } from './statements';
 import { UnsupportedFeatureError } from './unsupported';
 import { PhpObject } from './values';
@@ -22,7 +23,13 @@ import './library';
 export function executePhpProgram(source: string, input?: ProgramInput): ProgramExecution {
   try {
     const parsed = parsePhp(source);
-    return { kind: 'executed', ...runProgram(new Runtime(input), parsed) };
+    const runtime = new Runtime(input);
+    const run = runProgram(runtime, parsed);
+    if (runtime.hostStackExhausted) {
+      const retried = runExecuteOnLargeStack(source, input);
+      if (retried) return retried;
+    }
+    return { kind: 'executed', ...run };
   } catch (error) {
     if (error instanceof CompileError) return { kind: 'compileError', diagnostics: error.diagnostics };
     if (error instanceof ExecutionLimitError) return { kind: 'limitExceeded', limit: error.limit };

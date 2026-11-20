@@ -1872,7 +1872,7 @@ export function staticPropRef(
 ): Ref {
   const found = cls.findStatic(name);
   if (!found) {
-    const instance = lookupProp(cls, name, scope);
+    const instance = cls.propByName.get(name);
     if (instance && !canAccessProp(instance, scope))
       throwError('Error', `Cannot access ${instance.visibility} property ${cls.name}::$${name}`);
     throwError('Error', `Access to undeclared static property ${cls.name}::$${name}`);

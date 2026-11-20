@@ -4825,16 +4825,23 @@ $a = [...new I]; $a[] = 8; echo json_encode($a);`)
     )
   ).toMatchObject({ kind: 'executed', stdout: 'd0 d2 d1 ' });
 
-  // r1474: static access to private/protected instance property reports visibility error
+  // r1474 & r1481: static access to private/protected instance property (own or inherited) reports visibility error
   expect(
     run(
-      '<?php class A { private $p = 1; protected $q = 2; public $r = 3; } foreach (["p", "q", "r"] as $m) { try { echo A::$$m; } catch (Error $e) { echo $e->getMessage(), ";"; } }'
+      '<?php class A { private $p = 1; protected $q = 2; public $r = 3; } class B extends A { private $bp = 7; } class C extends B {} foreach ([["A","p"], ["A","q"], ["A","r"], ["B","p"], ["B","q"], ["C","p"], ["C","bp"], ["C","q"]] as [$c, $m]) { try { echo $c::$$m; } catch (Error $e) { echo $e->getMessage(), ";"; } }'
     )
   ).toMatchObject({
     kind: 'executed',
     stdout:
-      'Cannot access private property A::$p;Cannot access protected property A::$q;Access to undeclared static property A::$r;',
+      'Cannot access private property A::$p;Cannot access protected property A::$q;Access to undeclared static property A::$r;Cannot access private property B::$p;Cannot access protected property B::$q;Cannot access private property C::$p;Cannot access private property C::$bp;Cannot access protected property C::$q;',
   });
+
+  // r1480: array_map(null, $a) preserves single-array identity on retained-empty arrays
+  expect(
+    run(
+      '<?php error_reporting(0); function f() { return 4; } $a = []; set_error_handler(function() use (&$a) { unset($a[0]); $a[] = 9; return true; }); $a[] = &f(); restore_error_handler(); unset($a[0]); $b = array_map(null, $a); $c = array_map(null, $a); $c[] = 8; echo count($b), ":", json_encode($b), ":", $b[1] ?? "missing", "|", json_encode($c);'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '0:[]:9|{"2":8}' });
 
   // r1475 & r1479: helper method called from property hook invokes hook normally while direct hook writes access backing storage
   expect(
@@ -4904,6 +4911,22 @@ try { f(); } catch (Throwable $e) { while ($e) { echo $e->getMessage(), ";"; $e 
     [
       '<?php class A { public $c; function __construct($n) { if ($n > 0) $this->c = new A($n - 1); } } new A(505); echo "ok";',
       'ok',
+    ],
+    [
+      '<?php function s(int $n): int { return match (true) { $n == 0 => 0, default => $n + s($n - 1) }; } echo s(505);',
+      sum505,
+    ],
+    [
+      '<?php class C { public function __get($k) { $n = (int)substr($k, 1); return $n == 0 ? 0 : $n + $this->{"p" . ($n - 1)}; } } echo (new C)->{"p505"};',
+      sum505,
+    ],
+    [
+      '<?php class A { function f($n) { return $n <= 0 ? 0 : array_sum(array_map([$this, "f"], [$n - 1])) + 1; } } echo (new A)->f(505);',
+      '505',
+    ],
+    [
+      '<?php function s(int $n): int { if ($n == 0) return 0; $a = [1, 2]; $r = 0; usort($a, function ($x, $y) use ($n, &$r) { if ($r === 0) $r = $n + s($n - 1); return $x <=> $y; }); return $r; } echo s(250);',
+      String((250 * 251) / 2),
     ],
   ]) {
     expect(run(source)).toMatchObject({ kind: 'executed', stdout: expected });

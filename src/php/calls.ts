@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 836 -- Keeps call binding, completion and frame cleanup together.
+// code-gauge-allow-file fileNcss 839 -- Keeps call binding, completion and frame cleanup together.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl, Stmt } from './ast';
@@ -302,8 +302,13 @@ export function invokeNative(
     target.captureReturn?.(result);
   } catch (error) {
     failed = true;
-    failure =
-      error instanceof RangeError && isHostMemoryError(error.message) ? saved.runtime.memoryExhausted(2 ** 31) : error;
+    if (error instanceof RangeError && isHostMemoryError(error.message)) {
+      if (error.message.toLowerCase().includes('maximum call stack size exceeded'))
+        saved.runtime.hostStackExhausted = true;
+      failure = saved.runtime.memoryExhausted(2 ** 31);
+    } else {
+      failure = error;
+    }
     throw failure;
   } finally {
     if (target.thisObj) nativeOwnershipChanged(target.thisObj);
@@ -646,7 +651,7 @@ interface UserCallState {
 }
 
 // code-gauge-allow functionCognitiveComplexity 17 -- Dispatches ordinary user function bodies directly to execList to avoid an extra host frame.
-// code-gauge-allow functionNcss 33 -- Handles direct body execution and RangeError host-stack translation in one frame.
+// code-gauge-allow functionNcss 34 -- Handles direct body execution and RangeError host-stack translation in one frame.
 export function invokeUser(
   target: CallTarget,
   fn: UserFunction,
@@ -675,6 +680,7 @@ export function invokeUser(
   } catch (error) {
     if (error instanceof RangeError && saved.bound) {
       saved.runtime.exhausted = true;
+      saved.runtime.hostStackExhausted = true;
       hostStackExhaustion.record ??= callStack.at(-1);
       hostStackExhaustion.row ??= saved.runtime.row;
       failure = hostStackExhaustion;

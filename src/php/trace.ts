@@ -8,6 +8,7 @@ import { canAccessProp, declForKey, type LazyRef, lookupProp, propNameOf } from 
 import { parsePhp } from './parse';
 import { runProgram } from './run';
 import { type Frame, Runtime } from './runtime';
+import { runTraceOnLargeStack } from './stackFallback';
 import { isClosure, type Key, PhpArray, PhpObject, Ref, UNDEFINED_RESULT, UNINIT, type Value } from './values';
 
 export function tracePhpProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
@@ -24,6 +25,10 @@ export function tracePhpProgram(program: string, trace: TraceOptions, input?: Pr
   const run = runProgram(runtime, parsed, (frame) => {
     finalVars = variablesOf(runtime, frame, false).vars;
   });
+  if (runtime.hostStackExhausted) {
+    const retried = runTraceOnLargeStack(program, trace, input);
+    if (retried) return retried;
+  }
   return { traceItems: recorder.traceItems, finalVars, ...run };
 }
 
