@@ -404,6 +404,27 @@ void main() {
   });
 });
 
+test('geometry uses SDK dimension normalization and deterministic hashes', () => {
+  const program = `import 'dart:math';
+void main() {
+  print([Point(1, 2).hashCode, Point(1.0, 2.0).hashCode]);
+  print([Rectangle(1, 2, 3, 4).hashCode, MutableRectangle(1, 2, 3, 4).hashCode]);
+  print([Point(-1, 2.5).hashCode, Rectangle(1.5, 2.5, 3.5, 4.5).hashCode]);
+  print(Object.hashAllUnordered([1, 2, 3]));
+  const fixed = Rectangle<double>(0, 0, double.negativeInfinity, -0.0);
+  var mutable = MutableRectangle<double>(0, 0, -0.0, double.nan);
+  print([fixed.width, fixed.height, mutable.width, mutable.height]);
+  mutable.width = -0.0;
+  mutable.height = double.negativeInfinity;
+  print([mutable.width, mutable.height, Rectangle(0, 0, -7, 1).width]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[472247166, 472247166]\n[64923539, 64923539]\n[11525266, 158132701]\n12378480\n[0.0, 0.0, 0.0, NaN]\n[-0.0, 0.0, 0]\n',
+  });
+});
+
 test('extensible SDK classes allow subclasses and implementations', () => {
   const program = `import 'dart:collection';
 import 'dart:math';
@@ -1213,6 +1234,15 @@ test.each([
   { name: 'standard input', program: "import 'dart:io';\n\nvoid main() {\n  print(stdin.readLineSync());\n}\n" },
   { name: 'async functions', program: 'Future<void> main() async {\n  await Future.delayed(Duration.zero);\n}\n' },
   { name: 'files', program: "import 'dart:io';\n\nvoid main() {\n  print(File('a.txt').readAsStringSync());\n}\n" },
+  {
+    name: 'secure random constructors',
+    program: "import 'dart:math'; void main() { print('before'); try { Random.secure(); } catch (_) {} }",
+  },
+  {
+    name: 'secure random constructor tear-offs',
+    program: "import 'dart:math' as m; typedef RandomAlias = m.Random; void main() { print(RandomAlias.secure); }",
+  },
+  { name: 'stack-trace inspection', program: 'void main() { print(StackTrace.current); }' },
 ])('$name are rejected as unavailable before running', ({ program }) => {
   const result = executeProgram('dart', program);
   expect(result.kind).toBe('compileError');
@@ -1948,9 +1978,14 @@ test('numeric parsing applies the SDK whitespace and argument rules', () => {
   print(double.tryParse('\u00851.5'));
   print(num.tryParse('2.5\u0085'));
   print(int.tryParse('\u008542'));
+  print([int.tryParse('K', radix: 21), BigInt.tryParse('K', radix: 21)]);
+  print([int.parse('K', radix: 21), BigInt.parse('K', radix: 21)]);
   print([double.tryParse('9' * 120000 + 'x'), num.tryParse('x' + ' ' * 120000 + 'x')]);
 }`;
-  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '1.5\n2.5\n42\n[null, null]\n' });
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '1.5\n2.5\n42\n[null, null]\n[20, 20]\n[null, null]\n',
+  });
   expect(executeProgram('dart', 'void main() { print(int.parse("42", onError: (s) => 0)); }')).toMatchObject({
     kind: 'compileError',
   });

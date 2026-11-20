@@ -1170,6 +1170,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   protected readStatic(member: Member, span: Span): Compiled {
+    this.checkUnavailableStaticMember(member.owner, member.name, span);
     switch (member.kind) {
       case 'field': {
         const global = this.globals[member.slot];

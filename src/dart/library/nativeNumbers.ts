@@ -100,37 +100,45 @@ function parseDouble(runtime: Runtime, text: string): number | undefined {
   return Number(trimmed);
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Verify the whole digit sequence while capping the accumulator.
 function parseInt(
   runtime: Runtime,
   text: string,
   radix: number | undefined
 ): bigint | 'Negative' | 'Positive' | undefined {
   runtime.spend(1 + text.length / 64);
-  let rest = trimDartWhitespace(text);
-  let negative = false;
-  if (rest.startsWith('-') || rest.startsWith('+')) {
-    negative = rest.startsWith('-');
-    rest = rest.slice(1);
-  }
-  let base = radix ?? 10;
-  if (radix === undefined && /^0[xX]/.test(rest)) {
-    base = 16;
-    rest = rest.slice(2);
-  }
+  const [rest, base, negative] = radixSource(trimDartWhitespace(text), radix);
   if (rest.length === 0) return undefined;
   const unsignedHex = base === 16 && radix === undefined && !negative;
   const bound = unsignedHex ? 0xff_ff_ff_ff_ff_ff_ff_ffn : negative ? MAX_INT + 1n : MAX_INT;
-  const digits = '0123456789abcdefghijklmnopqrstuvwxyz'.slice(0, base);
   const bigBase = BigInt(base);
   let result = 0n;
-  for (const char of rest.toLowerCase()) {
-    const digit = digits.indexOf(char);
+  for (const char of rest) {
+    const digit = radixDigit(char, base);
     if (digit === -1) return undefined;
     if (result <= bound) result = result * bigBase + BigInt(digit);
   }
   if (result > bound) return negative ? 'Negative' : 'Positive';
   return negative ? -result : wrap(result);
+}
+
+export function radixSource(
+  text: string,
+  radix: number | undefined
+): [digits: string, base: number, negative: boolean] {
+  const negative = text.startsWith('-');
+  const digits = negative || text.startsWith('+') ? text.slice(1) : text;
+  if (radix === undefined && /^0[xX]/.test(digits)) return [digits.slice(2), 16, negative];
+  return [digits, radix ?? 10, negative];
+}
+
+export function radixDigit(char: string, radix: number): number {
+  const code = char.codePointAt(0) ?? 0;
+  if (code >= 0x30 && code <= 0x39) {
+    const digit = code - 0x30;
+    return digit < radix ? digit : -1;
+  }
+  const digit = (code | 0x20) - 0x61 + 10;
+  return digit >= 10 && digit < radix ? digit : -1;
 }
 
 function tryParseInt(runtime: Runtime, text: string, radix?: number): bigint | undefined {

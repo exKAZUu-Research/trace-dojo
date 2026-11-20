@@ -603,6 +603,7 @@ export abstract class CallCompiler extends OperatorCompiler {
     isConstSyntax: boolean
   ): Compiled {
     if (methodTypeArguments) this.error(span, 'コンストラクタには、型引数をこの位置には書けません。');
+    this.checkUnavailableStaticMember(cls, name ?? '', span);
     const constructor = cls.constructors.get(name === 'new' ? '' : (name ?? ''));
     if (!constructor) {
       if (cls.kind === 'enum') return this.error(span, '列挙型のオブジェクトは作れません。');
@@ -1035,6 +1036,7 @@ export abstract class CallCompiler extends OperatorCompiler {
           : undefined;
     if (!target) return this.error(span, 'クラス ' + type.name + ' が見つかりません。');
     const { cls, types: typeArgs } = target;
+    this.checkUnavailableStaticMember(cls, name ?? '', span);
     const constructor = cls.constructors.get(name === 'new' ? '' : (name ?? ''));
     if (!constructor)
       return this.error(span, `クラス ${cls.name} に ${name ?? '名前のない'} コンストラクタはありません。`);

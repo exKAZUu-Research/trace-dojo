@@ -299,6 +299,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     }
     const type = this.resolveType(target.type, { allowRaw: true });
     if (type.kind !== 'interface') return this.error(declaration, 'リダイレクト先には、クラスを書いてください。');
+    this.checkUnavailableStaticMember(type.cls, target.name ?? '', declaration);
     const targetConstructor = type.cls.constructors.get(target.name ?? '');
     if (!targetConstructor)
       return this.error(

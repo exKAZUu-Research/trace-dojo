@@ -3,7 +3,7 @@ import { formatDouble } from '../format';
 import { wrap } from '../operators';
 import type { Runtime } from '../runtime';
 import { DartObject, type Value } from '../values';
-import { bitLength, modInverse } from './nativeNumbers';
+import { bitLength, modInverse, radixDigit, radixSource } from './nativeNumbers';
 import { define, defineConstructor, intArg, named, numArg, stringArg } from './nativeSupport';
 
 interface BigIntState {
@@ -43,28 +43,16 @@ function bitsOf(value: bigint): number {
 }
 
 function parseBigInt(runtime: Runtime, text: string, radix: number | undefined): bigint | undefined {
-  let rest = text.trim();
-  let negative = false;
-  if (rest.startsWith('-') || rest.startsWith('+')) {
-    negative = rest.startsWith('-');
-    rest = rest.slice(1);
-  }
-  let base = radix ?? 10;
-  if (radix === undefined && /^0[xX]/.test(rest)) {
-    base = 16;
-    rest = rest.slice(2);
-  }
+  const [rest, base, negative] = radixSource(text.trim(), radix);
   if (rest.length === 0) return undefined;
-  const digits = new Set('0123456789abcdefghijklmnopqrstuvwxyz'.slice(0, base));
-  const lower = rest.toLowerCase();
-  runtime.spend(1 + lower.length / 64);
-  for (const char of lower) if (!digits.has(char)) return undefined;
+  runtime.spend(1 + rest.length / 64);
+  for (const char of rest) if (radixDigit(char, base) < 0) return undefined;
   const bitsPerDigit = Math.log2(base);
-  const bits = Math.ceil(lower.length * bitsPerDigit);
+  const bits = Math.ceil(rest.length * bitsPerDigit);
   reserve(runtime, bits, bits / 128);
   const prefix = HOST_PREFIXES.get(base);
   const result =
-    prefix === undefined ? combineRadixDigits(runtime, lower, base, bitsPerDigit) : BigInt(`${prefix}${lower}`);
+    prefix === undefined ? combineRadixDigits(runtime, rest, base, bitsPerDigit) : BigInt(`${prefix}${rest}`);
   return negative ? -result : result;
 }
 

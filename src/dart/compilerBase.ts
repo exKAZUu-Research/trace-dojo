@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 448 -- Type and diagnostic resolution share the compiler environment.
+// code-gauge-allow-file fileNcss 452 -- Type and diagnostic resolution share the compiler environment.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ClassDeclaration, Span, TypeAliasDeclaration, TypeParameter, TypeSyntax } from './ast';
 import type { ClassInfo, Member } from './classes';
@@ -119,6 +119,7 @@ const UNAVAILABLE_SINK_MEMBERS = new Set([
   'terminalLines',
   'supportsAnsiEscapes',
 ]);
+const UNAVAILABLE_STATIC_MEMBERS = new Set(['dart:math.Random.secure', 'dart:core.StackTrace.current']);
 
 export function typeName(type: DartType): string {
   return `'${typeToString(type)}'`;
@@ -161,6 +162,12 @@ export abstract class CompilerBase {
     if (type.kind !== 'interface' || type.cls.library !== 'dart:io') return;
     if ((type.cls.name === 'Stdout' || type.cls.name === 'IOSink') && UNAVAILABLE_SINK_MEMBERS.has(name))
       this.unsupported(span, type.cls.name + '.' + name);
+  }
+
+  protected checkUnavailableStaticMember(cls: ClassInfo, name: string, span: Span): void {
+    if (UNAVAILABLE_STATIC_MEMBERS.has(`${cls.library}.${cls.name}.${name}`)) {
+      this.unsupported(span, `${cls.name}.${name}`);
+    }
   }
 
   /** Rejects a name the program does not define: as unavailable when the SDK has it outside what the interpreter runs. */
