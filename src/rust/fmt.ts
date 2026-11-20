@@ -124,7 +124,7 @@ export class Formatter {
         return this.display(value, t.target, spec, write);
       }
       case 'int': {
-        return padNumber(String(v as bigint), spec, 0, write);
+        return padNumber(integerText(v as bigint, spec), spec, 0, write);
       }
       case 'float': {
         return padNumber(this.floatText(v as number, t.name === 'f32', spec), spec, 0, write);
@@ -209,7 +209,7 @@ export class Formatter {
       }
       case 'int': {
         if (spec.debugHex) return this.radix(spec.debugHex === 'x' ? 'lowerHex' : 'upperHex', v, t, spec, write);
-        return padNumber(String(v as bigint), spec, 0, write);
+        return padNumber(integerText(v as bigint, spec), spec, 0, write);
       }
       case 'float': {
         if (spec.precision !== undefined)
@@ -415,7 +415,7 @@ export class Formatter {
       const letter = trait === 'lowerExp' ? 'e' : 'E';
       if (t.kind === 'float') {
         let text = expFloat(v as number, t.name === 'f32', spec.precision, letter);
-        if (spec.sign === '+' && !text.startsWith('-')) text = `+${text}`;
+        if (spec.sign === '+' && !text.startsWith('-') && !Number.isNaN(v as number)) text = `+${text}`;
         return padNumber(text, spec, 0, write);
       }
       return padNumber(intExp(v as bigint, spec.precision, letter, spec.sign === '+'), spec, 0, write);
@@ -431,7 +431,8 @@ export class Formatter {
     const prefix = spec.alternate
       ? { lowerHex: '0x', upperHex: '0x', octal: '0o', binary: '0b' }[trait as 'lowerHex']
       : '';
-    return padNumber(prefix + digits, spec, prefix.length, write);
+    const sign = spec.sign === '+' ? '+' : '';
+    return padNumber(sign + prefix + digits, spec, prefix.length, write);
   }
 
   private concrete(type: Type): Type {
@@ -508,18 +509,12 @@ function padString(text: string, spec: Spec, write?: WriteChunk): string {
   return pad(shown, spec, '<', write);
 }
 
+function integerText(value: bigint, spec: Spec): string {
+  return (spec.sign === '+' && value >= 0n ? '+' : '') + value.toString();
+}
+
 /** Pads a number, with `0` padding after its sign and radix prefix. */
-export function padNumber(text: string, spec: Spec, prefixLength = 0, write?: WriteChunk): string {
-  let shown = text;
-  if (
-    spec.sign === '+' &&
-    !shown.startsWith('-') &&
-    !shown.startsWith('+') &&
-    /^[\d]/.test(shown) &&
-    !/[.eE]/.test(shown)
-  ) {
-    shown = `+${shown}`;
-  }
+function padNumber(shown: string, spec: Spec, prefixLength = 0, write?: WriteChunk): string {
   if (spec.zero && spec.width !== undefined) {
     const signLength = shown.startsWith('-') || shown.startsWith('+') ? 1 : 0;
     const head = shown.slice(0, signLength + prefixLength);

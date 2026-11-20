@@ -2979,3 +2979,12 @@ test('reports a Rust three-dot range as a compile error', () => {
     kind: 'compileError',
   });
 });
+
+test('formats a Rust radix sign ahead of prefixes and zero padding', () => {
+  const program = rustMain(`println!("{:+x} {:+#x} {:+#08x} {:+x} {:+x?}", 254, 254, 254, -15i8, 254);
+    println!("{:+e} {:+?} {:+x?} {:+}", f64::NAN, 254, -15i8, -0.0);`);
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '+fe +0xfe +0x000fe +f1 +fe\nNaN +254 +f1 -0\n',
+  });
+});
