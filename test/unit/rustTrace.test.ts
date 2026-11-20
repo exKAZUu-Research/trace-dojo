@@ -237,6 +237,23 @@ test('a stale Rust reference disappears from the trace when its referent moves',
   expect(finalVars).toEqual({ moved: ['a', 'b'] });
 });
 
+test('a shadowing Rust binding replaces the previous trace display', () => {
+  const program = `struct Item { count: i32 }
+fn main() {
+    let value = 7;
+    let value = Item { count: 8 };
+    println!("{}", value.count);
+    let value = value.count + 1;
+    println!("{}", value);
+}`;
+  const { traceItems } = traceProgram('rust', program, program);
+  const aggregate = traceItems.find(({ line }) => line === 5);
+  expect(aggregate?.vars).not.toHaveProperty('value');
+  expect(aggregate?.referenceVars).toHaveProperty('value');
+  expect(traceItems.at(-1)?.vars).toEqual({ value: 9 });
+  expect(traceItems.at(-1)?.referenceVars).not.toHaveProperty('value');
+});
+
 test('ordered collections compare keys during mutation and lookup while trace inspection uses stored order', () => {
   const program = `use std::collections::{BTreeMap, BTreeSet};
 use std::cmp::Ordering;

@@ -60,6 +60,10 @@ function variablesOf(frame: Frame): TraceVariables {
       addSelf(variables, stored, type);
       continue;
     }
+    if (shown.has(local.name)) {
+      delete variables.vars[local.name];
+      delete variables.referenceVars[local.name];
+    }
     shown.add(local.name);
     addVariable(variables, local.name, stored, type);
   }
