@@ -4922,6 +4922,14 @@ try { f(); } catch (Throwable $e) { while ($e) { echo $e->getMessage(), ";"; $e 
     )
   ).toMatchObject({ kind: 'executed', stdout: 'drop;cleanup;null' });
 
+  for (const returned of ['new D', '[new D]']) {
+    expect(
+      run(
+        `<?php class E extends Exception { function __destruct() { echo "E;"; throw new Exception("cleanup"); } } class D { function __destruct() { echo "D;"; } } function f() { try { try { throw new E("discarded"); } finally { return ${returned}; } } catch (Throwable $e) { echo "caught:", $e->getMessage(), ";"; } echo "after;"; } f(); echo "caller;";`
+      )
+    ).toMatchObject({ kind: 'executed', stdout: 'E;D;caught:cleanup;after;caller;' });
+  }
+
   const sum505 = String((505 * 506) / 2);
   for (const [source, expected] of [
     [

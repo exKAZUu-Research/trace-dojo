@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 794 -- Runs PHP statements iteratively on a heap block stack with shared loop/try/foreach helpers.
+// code-gauge-allow-file fileNcss 807 -- Runs PHP statements iteratively on a heap block stack with shared loop/try/foreach helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { CompileError } from '../interpreter/diagnostics';
 import type { ArrayCursor } from './arrayOrder';
@@ -667,9 +667,27 @@ function propagateTryCompletion(
   if (pending) {
     runtime.held.pop();
     if (runtime.thrown === pending.object) runtime.thrown = undefined;
-    runtime.release([pending.object]);
+    try {
+      runtime.release([pending.object]);
+    } catch (error) {
+      cancelPendingReturn(runtime, frame, completion, error);
+      throw error;
+    }
   }
   return completion;
+}
+
+function cancelPendingReturn(
+  runtime: Runtime,
+  frame: Frame,
+  completion: NonNullable<Completion>,
+  error: unknown
+): void {
+  if (completion.t !== 'return') return;
+  frame.returning = undefined;
+  if (completion.slot instanceof Ref) return;
+  if (error instanceof PhpThrow) withPendingException(runtime, error, () => runtime.release([completion.slot]));
+  else runtime.release([completion.slot]);
 }
 
 // code-gauge-allow functionCognitiveComplexity 19 -- Handles catch matching, finally transition, and exception chaining in one unwind step.
