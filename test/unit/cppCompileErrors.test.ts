@@ -1330,3 +1330,17 @@ int main() { std::string s = "hi"; ${body} }`;
     diagnostics: [{ row: 1, message: expect.stringContaining('std::string と') }],
   });
 });
+
+test.each(['S{}.N', 'std::array<S, 1>{}.size()', 'std::size(std::array<S, 1>{})'])(
+  'rejects a constexpr query on a temporary with a user destructor in %s',
+  (query) => {
+    const program = `#include <array>
+#include <iterator>
+struct S { static const int N = 3; ~S() {} };
+int main() { constexpr auto n = ${query}; }`;
+    expect(executeProgram('cpp', program)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [{ row: 3, message: expect.stringContaining('定数式') }],
+    });
+  }
+);
