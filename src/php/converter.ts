@@ -1294,14 +1294,14 @@ export class Converter extends DeclarationConverter {
     const row = node.startPosition.row;
     const raw = this.nameText(node);
     if (node.type === 'name' && lower(raw) === 'default') this.error(node, 'syntax error, unexpected token "default"');
-    const name = this.preserveSyntax ? { name: raw.replace(/^\\/, '') } : this.resolveConstName(raw);
-    const literal = builtinLiteralKey(name.fallback ?? name.name);
-    if (literal) return { k: 'lit', v: literal === 'NULL' ? null : literal === 'TRUE', row };
     const magic = raw.toUpperCase();
     if (this.preserveSyntax) {
       const name = magic.startsWith('__') && reservedIdentifierToken(raw) === magic ? magic : raw;
       return { k: 'const', name: { name }, row };
     }
+    const name = this.resolveConstName(raw);
+    const literal = builtinLiteralKey(name.fallback ?? name.name);
+    if (literal) return { k: 'lit', v: literal === 'NULL' ? null : literal === 'TRUE', row };
     if (magic === '__LINE__') return { k: 'lit', v: BigInt(row + 1), row };
     if (magic === '__FILE__') return { k: 'lit', v: '/main.php', row };
     if (magic === '__DIR__') return { k: 'lit', v: '/', row };

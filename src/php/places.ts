@@ -574,14 +574,14 @@ export function arrayIsShared(array: PhpArray): boolean {
 export function bindOrAssignPlace(place: VarPlace, ref: Ref, valueFallback: boolean): void {
   if (!valueFallback) return place.bind(ref);
   notice('Only variables should be assigned by reference');
-  place.set(share(ref.v));
+  ref.v = place.set(share(ref.v));
 }
 
 export function storeDimensionRef(array: PhpArray, key: Key | undefined, ref: Ref, valueFallback: boolean): void {
   if (valueFallback) {
     notice('Only variables should be assigned by reference');
     const value = share(ref.v);
-    if (key !== undefined) array.set(key, value);
+    if (key !== undefined) ref.v = array.set(key, value);
     else if (!array.append(value))
       throwError('Error', 'Cannot add element to the array as the next element is already occupied');
     return;

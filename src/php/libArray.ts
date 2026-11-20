@@ -292,7 +292,7 @@ defineFunction('array_search(mixed $needle, array $haystack, bool $strict = fals
 defineFunction('array_merge(array ...$arrays): array', ({ args }) => {
   const reused = mergeReuse(args);
   if (reused) return share(reused);
-  const result = new PhpArray(undefined, undefined, args[0] instanceof PhpArray && !args[0].ordered().isPacked);
+  const result = initMergeResult(args);
   for (const [index, value] of args.entries()) {
     if (!(value instanceof PhpArray))
       throwError('TypeError', `array_merge(): Argument #${index + 1} must be of type array, ${valueName(value)} given`);
@@ -307,11 +307,16 @@ defineFunction('array_merge(array ...$arrays): array', ({ args }) => {
 defineFunction('array_merge_recursive(array ...$arrays): array', ({ args }) => {
   const reused = mergeReuse(args);
   if (reused) return share(reused);
-  const result = new PhpArray();
+  const result = initMergeResult(args);
   const combination = new ArrayCombination('merge');
   for (const value of args) combination.run(result, arr(value));
   return result;
 });
+
+function initMergeResult(args: Value[]): PhpArray {
+  const packedFirst = args[0] instanceof PhpArray && args[0].size > 0 && args[0].ordered().isPacked;
+  return new PhpArray(undefined, undefined, args.length > 0 && !packedFirst);
+}
 
 function mergeReuse(args: Value[]): PhpArray | undefined {
   if (args.length !== 2) return;

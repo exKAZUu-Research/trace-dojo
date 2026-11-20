@@ -4084,4 +4084,77 @@ for ($i = 1; $i < 4000; $i++) { $g = new Seg($pts[$i % 8000], $pts[0]); $s += $g
 echo $s;
 `)
   ).toMatchObject({ kind: 'executed', stdout: '0' });
+
+  expect(
+    run(`<?php
+foreach ([
+  array_merge_recursive([5 => 1, 3 => 2, 9 => 3], [4]),
+  array_merge_recursive([5 => 1, 3 => 2, 9 => 3]),
+  array_merge_recursive([], [5 => 1, 3 => 2]),
+  array_merge_recursive([1, 2, 3], [4]),
+  array_merge_recursive([1, 2, 3]),
+  array_merge([], [5 => 1, 3 => 2]),
+] as $m) {
+  end($m);
+  $v = array_values($m);
+  echo json_encode([key($v), current($v)]), '|';
+}
+`)
+  ).toMatchObject({ kind: 'executed', stdout: '[0,1]|[0,1]|[0,1]|[3,4]|[2,3]|[0,1]|' });
+
+  for (const container of ['[]', 'new ArrayObject']) {
+    expect(
+      run(`<?php
+error_reporting(0);
+class C { public int $x = 0; }
+function f() { return '3'; }
+$c = new C;
+$a = ${container};
+$a[0] =& $c->x;
+$r = ($a[0] =& f());
+var_dump($r, $a[0], $c->x);
+`)
+    ).toMatchObject({ kind: 'executed', stdout: 'int(3)\nint(3)\nint(3)\n' });
+  }
+
+  const assertVarInterp = '"{$' + "{'s'}}\"";
+  expect(
+    run(String.raw`<?php
+class Foo { public $x = 1; function x() { return 1; } static function bar() { return 1; } }
+$s = "x"; $u = null; $a = new Foo; $b = "x";
+foreach ([
+  fn() => assert($s === TRUE),
+  fn() => assert(Null === $s),
+  fn() => assert("a" . "b" === $s),
+  fn() => assert("a" . 1 === $s),
+  fn() => assert("a" . true === $s),
+  fn() => assert(isset($s, $u)),
+  fn() => assert(!isset($s, $s)),
+  fn() => assert(!$a instanceof Foo),
+  fn() => assert($a->{$b} === 2),
+  fn() => assert($a?->{$b} === 2),
+  fn() => assert($a->{$b}() === 2),
+  fn() => assert(Foo::{"bar"}() === 2),
+  fn() => assert(${assertVarInterp} === "y"),
+] as $f) {
+  try { $f(); } catch (AssertionError $e) { echo $e->getMessage(), "\n"; }
+}
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: `assert($s === TRUE)
+assert(Null === $s)
+assert('ab' === $s)
+assert('a1' === $s)
+assert('a' . true === $s)
+assert(isset($s) && isset($u))
+assert(!(isset($s) && isset($s)))
+assert(!$a instanceof Foo)
+assert($a->$b === 2)
+assert($a?->$b === 2)
+assert($a->$b() === 2)
+assert(Foo::bar() === 2)
+assert("$s" === 'y')
+`,
+  });
 });

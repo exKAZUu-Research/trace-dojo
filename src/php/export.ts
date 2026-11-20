@@ -10,7 +10,7 @@ import type {
   Stmt,
   TraitRule,
 } from './ast';
-import { formatFloatRepr } from './conversions';
+import { formatFloat, formatFloatRepr, intToString } from './conversions';
 import type { TypeDecl } from './values';
 
 export class UnexportableSyntax extends Error {}
@@ -120,7 +120,7 @@ export function exportExpr(e: Expr, priority = 0, depth = 0): string {
       return e.name.fallback ?? e.name.name;
     }
     case 'cconst': {
-      return `${exportClass(e.cls, depth)}::${typeof e.name === 'string' ? e.name : `{${render(e.name)}}`}`;
+      return `${exportClass(e.cls, depth)}::${typeof e.name === 'string' ? e.name : exportMemberName(e.name, depth)}`;
     }
     case 'array':
     case 'list': {
@@ -131,7 +131,7 @@ export function exportExpr(e: Expr, priority = 0, depth = 0): string {
       return exportNew(e, depth);
     }
     case 'isset': {
-      return `isset(${e.items.map((item) => render(item)).join(', ')})`;
+      return exportIsset(e.items, render, wrap);
     }
     case 'empty': {
       return `empty(${render(e.e)})`;
@@ -164,13 +164,13 @@ function exportAccess(e: Extract<Expr, { k: 'call' | 'mcall' | 'scall' | 'prop' 
       return `${name}(${e.fcc ? '...' : exportArgs(e.args, depth)})`;
     }
     case 'mcall': {
-      return `${render(e.obj, 260)}${e.nullsafe ? '?->' : '->'}${typeof e.name === 'string' ? e.name : `{${render(e.name)}}`}(${e.fcc ? '...' : exportArgs(e.args, depth)})`;
+      return `${render(e.obj, 260)}${e.nullsafe ? '?->' : '->'}${typeof e.name === 'string' ? e.name : exportMemberName(e.name, depth)}(${e.fcc ? '...' : exportArgs(e.args, depth)})`;
     }
     case 'scall': {
-      return `${exportClass(e.cls, depth)}::${typeof e.name === 'string' ? e.name : render(e.name)}(${e.fcc ? '...' : exportArgs(e.args, depth)})`;
+      return `${exportClass(e.cls, depth)}::${typeof e.name === 'string' ? e.name : exportMemberName(e.name, depth)}(${e.fcc ? '...' : exportArgs(e.args, depth)})`;
     }
     case 'prop': {
-      return `${render(e.obj, 260)}${e.nullsafe ? '?->' : '->'}${typeof e.name === 'string' ? e.name : `{${render(e.name)}}`}`;
+      return `${render(e.obj, 260)}${e.nullsafe ? '?->' : '->'}${typeof e.name === 'string' ? e.name : exportMemberName(e.name, depth)}`;
     }
     case 'sprop': {
       return `${exportClass(e.cls, depth)}::$${typeof e.name === 'string' ? e.name : render(e.name)}`;
@@ -178,15 +178,12 @@ function exportAccess(e: Extract<Expr, { k: 'call' | 'mcall' | 'scall' | 'prop' 
   }
 }
 
-// code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 function exportOperator(e: OperatorExpression, priority: number, depth: number): string {
   const render = (expression: Expr, precedence = 0): string => exportExpr(expression, precedence, depth);
   const wrap = (own: number, text: string): string => (priority > own ? `(${text})` : text);
   switch (e.k) {
     case 'bin': {
-      const [own, left, right] = BINARY[e.op] ?? [200, 200, 201];
-      const op = e.op === 'and' ? '&&' : e.op === 'or' ? '||' : e.op;
-      return wrap(own, `${render(e.l, left)} ${op} ${render(e.r, right)}`);
+      return exportBinary(e, render, wrap);
     }
     case 'pipe': {
       return wrap(183, `${render(e.l, 183)} |> ${render(e.r, 184)}`);
@@ -208,7 +205,7 @@ function exportOperator(e: OperatorExpression, priority: number, depth: number):
       return wrap(100, `${render(e.test, 100)}${middle}${render(e.alternate, 101)}`);
     }
     case 'instanceof': {
-      return wrap(230, `${render(e.e, 231)} instanceof ${exportClass(e.cls, depth)}`);
+      return wrap(245, `${render(e.e, 246)} instanceof ${exportClass(e.cls, depth)}`);
     }
     case 'cast': {
       return wrap(240, `(${e.type})${render(e.e, 241)}`);
@@ -239,11 +236,51 @@ function exportArray(e: Extract<Expr, { k: 'array' | 'list' }>, depth: number): 
   return `[${items.join(', ')}]`;
 }
 
+const SIMPLE_IDENT = /^[A-Za-z_\u007F-\u00FF][A-Za-z_0-9\u007F-\u00FF]*$/;
+
+function exportIsset(
+  items: Expr[],
+  render: (expression: Expr, precedence?: number) => string,
+  wrap: (own: number, text: string) => string
+): string {
+  const text = items.map((item) => `isset(${render(item)})`).join(' && ');
+  return items.length > 1 ? wrap(130, text) : text;
+}
+
+function exportBinary(
+  e: Extract<Expr, { k: 'bin' }>,
+  render: (expression: Expr, precedence?: number) => string,
+  wrap: (own: number, text: string) => string
+): string {
+  const folded = e.op === '.' ? tryFoldConcat(e) : undefined;
+  if (folded !== undefined) return exportLiteral(folded);
+  const [own, left, right] = BINARY[e.op] ?? [200, 200, 201];
+  const op = e.op === 'and' ? '&&' : e.op === 'or' ? '||' : e.op;
+  return wrap(own, `${render(e.l, left)} ${op} ${render(e.r, right)}`);
+}
+
+function tryFoldConcat(expr: Expr): string | undefined {
+  if (expr.k === 'lit') {
+    if (typeof expr.v === 'string') return expr.v;
+    if (typeof expr.v === 'bigint') return intToString(expr.v);
+    if (typeof expr.v === 'number') return formatFloat(expr.v);
+    return undefined;
+  }
+  if (expr.k !== 'bin' || expr.op !== '.') return undefined;
+  const left = tryFoldConcat(expr.l);
+  const right = left === undefined ? undefined : tryFoldConcat(expr.r);
+  return left !== undefined && right !== undefined ? left + right : undefined;
+}
+
+function exportMemberName(name: Expr, depth: number): string {
+  if (name.k === 'var' || name.k === 'varvar') return exportExpr(name, 0, depth);
+  if (name.k === 'lit' && typeof name.v === 'string' && SIMPLE_IDENT.test(name.v)) return name.v;
+  return `{${exportExpr(name, 0, depth)}}`;
+}
+
 function exportVariableName(name: Expr, depth: number): string {
   if (name.k === 'var' || name.k === 'varvar') return exportExpr(name, 0, depth);
-  if (name.k === 'lit' && typeof name.v === 'string') {
-    return /^[A-Za-z_\u007F-\u00FF][A-Za-z_0-9\u007F-\u00FF]*$/.test(name.v) ? name.v : `{${name.v}}`;
-  }
+  if (name.k === 'lit' && typeof name.v === 'string') return SIMPLE_IDENT.test(name.v) ? name.v : `{${name.v}}`;
   return `{${exportExpr(name, 0, depth)}}`;
 }
 
@@ -262,7 +299,10 @@ const DOUBLE_QUOTED_ESCAPES: Record<string, string> = {
 function exportEncapsedPart(part: string | Expr, next: string | Expr | undefined, depth: number): string {
   if (typeof part === 'string') return exportDoubleQuoted(part);
   const text = exportExpr(part, 0, depth);
-  if (part.k !== 'var') return `{${text}}`;
+  const simpleVar =
+    part.k === 'var' ||
+    (part.k === 'varvar' && part.name.k === 'lit' && typeof part.name.v === 'string' && SIMPLE_IDENT.test(part.name.v));
+  if (!simpleVar) return `{${text}}`;
   return typeof next === 'string' && needsInterpolationBraces(next) ? `{${text}}` : text;
 }
 
