@@ -5321,6 +5321,7 @@ test('a class whose property hook names a later class is declared when its state
 });
 
 test('native UTF-8 regex scans of long subjects validate the subject once', () => {
+  vi.restoreAllMocks();
   expect(run(`<?php echo preg_match_all('/(あ)+/u', str_repeat('あ ', 40000));`)).toMatchObject({
     kind: 'executed',
     stdout: '40000',
