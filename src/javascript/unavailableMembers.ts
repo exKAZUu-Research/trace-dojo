@@ -81,6 +81,8 @@ export function rejectUnavailableMember(feature: string, row: number | undefined
 }
 
 function defineUnavailableMethods(realm: Realm, math: Value, console: Value): void {
+  const array = realm.globals.lookup('Array')?.value;
+  if (array instanceof JsObject) defineUnavailableMethod(realm, array, 'fromAsync', 'Array.fromAsync', { length: 1 });
   if (math instanceof JsObject) defineUnavailableMethod(realm, math, 'random', 'Math.random');
   if (console instanceof JsObject)
     for (const name of consoleTimers)

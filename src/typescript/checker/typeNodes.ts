@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 532 -- Resolves every kind of type syntax a program writes, each needing its own rule.
+// code-gauge-allow-file fileNcss 534 -- Resolves every kind of type syntax a program writes, each needing its own rule.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
@@ -135,7 +135,7 @@ export class TypeNodes {
     const defers = deferringTypeNodes.has(node.type);
     if (defers) this.deferredDepth++;
     try {
-      let type = this.computeTypeFromNode(node);
+      let type = this.c.checkTypeSyntax(node, () => this.computeTypeFromNode(node));
       // `readonly T[]` is one reference, which the outer node makes.
       if ((defers || node.type === 'generic_type') && node.parent?.type !== 'readonly_type')
         type = this.recursiveAliases.deferred(type);
@@ -413,7 +413,7 @@ export class TypeNodes {
     const declared = this.declaredTypeOf(symbol);
     if (parameters.length === 0) return declared;
     const filled = this.c.fillTypeArguments(parameters, typeArguments);
-    this.interfaceBases.afterResolving(() => this.checkTypeArgumentConstraints(node, parameters, filled));
+    this.checkWrittenTypeArgumentConstraints(node, parameters, filled);
     return this.appliedType(symbol, declared, parameters, filled);
   }
 
@@ -497,6 +497,12 @@ export class TypeNodes {
       symbol?.unsupported ? unsupportedMessage(symbol.unsupported) : `名前空間 ${root.text} が見つかりません。`
     );
     return errorType;
+  }
+
+  checkWrittenTypeArgumentConstraints(node: TreeNode, parameters: TypeParameter[], typeArguments: Type[]): void {
+    this.interfaceBases.afterResolving(() =>
+      this.c.checkTypeSyntax(node, () => this.checkTypeArgumentConstraints(node, parameters, typeArguments))
+    );
   }
 
   checkTypeArgumentConstraints(node: TreeNode, parameters: TypeParameter[], typeArguments: Type[]): void {

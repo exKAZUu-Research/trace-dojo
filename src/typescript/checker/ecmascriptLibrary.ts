@@ -1208,6 +1208,9 @@ interface ReadonlySet<T> {
 interface Math {
     f16round(x: number): number;
 }
+interface ArrayConstructor {
+    fromAsync(...args: any[]): never;
+}
 interface RegExpConstructor {
     escape(string: string): string;
 }

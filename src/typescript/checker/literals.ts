@@ -10,6 +10,7 @@ import {
   hasToken,
   isConstAssertion,
   named,
+  numberValue,
   propertyNameText,
   skipParentheses,
 } from './syntax';
@@ -659,9 +660,9 @@ export class LiteralChecker {
 
   private memberKey(node: TreeNode): Type {
     if (node.type === 'computed_property_name') return this.c.expressions.checkComputedPropertyName(node);
+    if (node.type === 'number') return literalType(numberValue(node.text));
     const name = propertyNameText(node);
-    if (name === undefined) return errorType;
-    return literalType(node.type === 'number' ? Number(name) : name);
+    return name === undefined ? errorType : literalType(name);
   }
 
   private accessorMember(literal: ObjectLiteral, member: TreeNode, key: PropertyKeyType, methodType: Type): void {

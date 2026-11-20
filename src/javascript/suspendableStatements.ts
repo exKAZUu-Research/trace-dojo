@@ -459,30 +459,29 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
 
   /** The keys `for...in` visits, skipping one deleted before its turn, as JavaScript does. */
   protected forInKeys(value: Value): HostIterator {
-    const keys = this.enumerableKeys(value);
-    const object = isObject(value) ? value : undefined;
+    if (value === undefined || value === null) return { next: () => DONE };
+    const { runtime } = this;
+    const object = runtime.toObject(value);
+    const keys = this.enumerableKeys(object);
     let index = 0;
     return {
       next: () => {
         while (index < keys.length) {
           const key = keys[index++];
-          if (!object || this.runtime.hasProperty(object, key)) return key;
+          if (runtime.hasProperty(object, key)) return key;
         }
         return DONE;
       },
-      source: value,
+      source: object,
     };
   }
 
   /** The enumerable string keys of an object and its prototypes, each once. */
-  private enumerableKeys(value: Value): string[] {
+  private enumerableKeys(object: JsObject): string[] {
     const { runtime } = this;
-    if (value === undefined || value === null) return [];
-    if (typeof value === 'string') return Array.from({ length: value.length }, (_, index) => String(index));
-    if (!isObject(value)) return [];
     const keys: string[] = [];
     const seen = new Set<string>();
-    for (let current: JsObject | null = value; current; current = current.proto) {
+    for (let current: JsObject | null = object; current; current = current.proto) {
       // Every own name, enumerable or not, hides the same name further up the chain.
       for (const key of runtime.ownPropertyNames(current)) {
         if (seen.has(key)) continue;

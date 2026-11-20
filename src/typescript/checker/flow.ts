@@ -398,7 +398,7 @@ export class Flow {
             return name === 'object';
           }
           case 'object': {
-            return name === 'object' || name === 'function' ? 'maybe' : false;
+            return name === 'function' ? 'maybe' : name === 'object';
           }
           case 'never': {
             return false;

@@ -1,0 +1,15 @@
+function read(value: object | string): number {
+  if (typeof value === 'object') {
+    const preserved: object = value;
+    return Object.keys(preserved).length;
+  }
+  return value.length;
+}
+function negate(value: object | string | null): number {
+  if (typeof value !== 'object') return value.length;
+  return value === null ? -1 : read(value);
+}
+function call(value: object): unknown {
+  return typeof value === 'function' ? value() : undefined;
+}
+console.log(read('ready'), read({ first: 1, second: 2 }), negate(null), negate('a'), call(() => 5));

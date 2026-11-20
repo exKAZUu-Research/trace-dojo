@@ -1,0 +1,6 @@
+const object = { 2n() { return 'method'; } };
+class Example {
+  0xfn() { return 'class'; }
+}
+console.log(Object.keys(object).join(','), Object.getOwnPropertyNames(Example.prototype).join(','));
+console.log((object as any)[2](), (new Example() as any)[15]());

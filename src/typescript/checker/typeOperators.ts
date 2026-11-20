@@ -670,9 +670,7 @@ export class TypeOperators {
 
   /** `Uppercase<T>` and its kin written at `node`, whose argument must be a string as their declarations constrain it. */
   stringMappingFromNode(node: TreeNode, mapping: StringMapping, argument: Type): Type {
-    this.c.typeNodes.interfaceBases.afterResolving(() =>
-      this.c.typeNodes.checkTypeArgumentConstraints(node, [stringMappingParameter], [argument])
-    );
+    this.c.typeNodes.checkWrittenTypeArgumentConstraints(node, [stringMappingParameter], [argument]);
     return this.stringMapping(mapping, argument);
   }
 

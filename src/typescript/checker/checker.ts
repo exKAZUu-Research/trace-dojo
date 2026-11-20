@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 600 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
+// code-gauge-allow-file fileNcss 612 -- Holds type construction, bounded instantiation, structure lookup, and diagnostics shared by checker components.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { type SourceDiagnostic, sourceDiagnostic } from '../../interpreter/diagnostics';
@@ -35,7 +35,7 @@ import { Relations } from './relations';
 import type { Scope } from './scopes';
 import { Signatures } from './signatures';
 import { StatementChecker } from './statements';
-import { assignmentKind } from './syntax';
+import { assignmentKind, bigIntPropertyNames } from './syntax';
 import { TypeNodes } from './typeNodes';
 import { TypeOperators } from './typeOperators';
 import {
@@ -91,7 +91,7 @@ const nonNullishDiagnosticIntrinsics = new Set(['string', 'number', 'bigint', 's
 
 export class Checker {
   readonly diagnostics: Diagnostic[] = [];
-  /** While positive, errors are not reported, as when inferring a function's return type ahead of checking it. */
+  /** While positive, speculative errors are suppressed, as when inferring a function's return type. */
   silent = 0;
   readonly binder: Binder;
   readonly libraryBinder: Binder;
@@ -123,6 +123,7 @@ export class Checker {
   private readonly aliasUnions = new Map<UnionType, { alias: UnionAlias; mapper: Mapper }>();
   private readonly deferredAliasUnionCache = new Map<string, UnionType>();
   private readonly thisStructures = new Map<string, Structure>();
+  private readonly writtenTypeNodes: TreeNode[] = [];
 
   /**
    * The operations and the time checking may take, as running a program may: a program can make checking slow, and
@@ -148,6 +149,8 @@ export class Checker {
   }
 
   check(): SourceDiagnostic[] {
+    for (const name of bigIntPropertyNames(this.root))
+      this.error(name, 'bigint リテラルはプロパティ名として使えません。');
     this.classes.checkThisTypePlacements(this.root);
     checkDuplicateDeclarations(this, this.binder.allScopes);
     this.signatures.checkTypeParameterDeclarations(this.binder.allScopes);
@@ -168,8 +171,25 @@ export class Checker {
   }
 
   error(node: TreeNode, message: string): void {
-    if (this.silent > 0 || this.isLibrary(node)) return;
+    if (this.isLibrary(node) || (this.silent > 0 && !this.writtenTypeAt(node))) return;
     this.diagnostics.push({ row: node.startPosition.row, index: node.startIndex, message });
+  }
+
+  checkTypeSyntax<T>(node: TreeNode, run: () => T): T {
+    if (this.silent === 0 || this.isLibrary(node)) return run();
+    this.writtenTypeNodes.push(node);
+    try {
+      return run();
+    } finally {
+      this.writtenTypeNodes.pop();
+    }
+  }
+
+  private writtenTypeAt(node: TreeNode): boolean {
+    // Resolving an annotation can infer types from other declarations whose diagnostics still need normal checking.
+    return this.writtenTypeNodes.some(
+      (type) => type.tree === node.tree && type.startIndex <= node.startIndex && node.endIndex <= type.endIndex
+    );
   }
 
   /** Reports an error found while resolving a type on demand, which no check that triggered it may hide. */

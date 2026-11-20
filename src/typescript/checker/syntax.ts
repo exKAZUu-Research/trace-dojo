@@ -27,6 +27,13 @@ export function isStandaloneTypeReference(node: TreeNode): boolean {
   return !typeNameContainers.has(parent.type) || parent.childForFieldName('name')?.id !== node.id;
 }
 
+export function* bigIntPropertyNames(root: TreeNode): Iterable<TreeNode> {
+  for (const property of root.descendantsOfType(['pair', 'field_definition', 'property_signature'])) {
+    const name = property.childForFieldName(property.type === 'pair' ? 'key' : 'name');
+    if (name?.type === 'number' && name.text.endsWith('n')) yield name;
+  }
+}
+
 export function hasToken(node: TreeNode, token: string): boolean {
   return node.children.some((child) => child !== null && !child.isNamed && child.type === token);
 }
@@ -148,12 +155,16 @@ export function propertyNameText(node: TreeNode): string | undefined {
       return stringValue(node);
     }
     case 'number': {
-      return String(Number(node.text.replaceAll('_', '')));
+      const value = numberValue(node.text);
+      return typeof value === 'number' ? String(value) : undefined;
     }
     case 'computed_property_name': {
       const inner = named(node)[0];
       if (inner?.type === 'string') return stringValue(inner);
-      if (inner?.type === 'number') return String(Number(inner.text.replaceAll('_', '')));
+      if (inner?.type === 'number') {
+        const value = numberValue(inner.text);
+        return typeof value === 'number' ? String(value) : undefined;
+      }
       return undefined;
     }
     default: {

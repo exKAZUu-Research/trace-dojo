@@ -3,6 +3,18 @@ import { expect, test } from 'vitest';
 import { executeProgram, traceProgram } from '../../src/interpreter/program';
 
 test.each([
+  'Array.fromAsync([1]);',
+  'const list: any = []; list.constructor.fromAsync(list);',
+  'const fromAsync = Object.getOwnPropertyDescriptor(Array, "fromAsync")!.value; fromAsync.call(Array, [1]);',
+  'const fromAsync = Array.fromAsync.bind(Array); fromAsync([1]);',
+])('Array.fromAsync stays unavailable through %s', (source) => {
+  expect(executeProgram('typescript', source)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message: 'Array.fromAsync は、この採点環境では使えません。' }],
+  });
+});
+
+test.each([
   ['asyncIterator', 'console.log(Symbol.asyncIterator);'],
   ['iterator', 'const iterator = [1][Symbol.iterator](); console.log(iterator.next());'],
   ['iterator', 'const iterator = new Map<string, number>()[Symbol.iterator](); console.log(iterator.next());'],
