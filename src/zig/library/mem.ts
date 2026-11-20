@@ -1003,8 +1003,8 @@ function replacementPlan(
   };
 }
 
-function emptySliceLiteral(sema: SemaApi, type: Type, span: Span): Slice {
-  const literal = known(arrayOf(0, type), newArray([], undefined), span);
+function emptySliceLiteral(sema: SemaApi, type: Type, span: Span, sentinel?: 0n): Slice {
+  const literal = known(arrayOf(0, type, sentinel), newArray([], sentinel), span);
   const array = (sema.addressOf(literal).value as Pointer).load() as ZArray;
   return new Slice(array, array.offset, 0);
 }
@@ -1115,8 +1115,9 @@ function zeroValue(type: Type, sema: SemaApi, span: Span): Value {
     }
     case 'pointer': {
       if (type.size === 'slice') {
-        if (type.sentinel === undefined) return new Slice(newArray([], undefined), 0, 0);
-        if (type.isConst && type.child === U8 && type.sentinel.value === 0n) return new Slice(newArray([], 0n), 0, 0);
+        if (type.sentinel === undefined) return emptySliceLiteral(sema, type.child, span);
+        if (type.isConst && type.child === U8 && type.sentinel.value === 0n)
+          return emptySliceLiteral(sema, U8, span, 0n);
       }
       break;
     }

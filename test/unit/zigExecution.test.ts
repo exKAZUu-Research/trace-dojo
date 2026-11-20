@@ -7046,6 +7046,11 @@ test('zeroes initializes slices and comptime numbers recursively', () => {
   });
 });
 
+test('zeroed slices share their typed empty literal addresses', () => {
+  const source = `const std=@import("std");pub fn main()void{const bytes:[]u8=&[_]u8{};const string:[:0]const u8="";std.debug.print("{} {}",.{std.meta.eql(std.mem.zeroes([]u8),bytes),std.meta.eql(std.mem.zeroes([:0]const u8),string)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: 'true true' });
+});
+
 test.each([
   'enum(u8){a=1}',
   'struct{e:enum(u8){a=1}}',
