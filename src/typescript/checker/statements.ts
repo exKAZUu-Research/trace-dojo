@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 638 -- Follows the flow of control through each kind of statement.
+// code-gauge-allow-file fileNcss 641 -- Follows the flow of control through each kind of statement.
 import assert from 'node:assert/strict';
 
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
@@ -10,11 +10,11 @@ import {
   checkOverloadOptionality,
   checkTypeMemberDuplicates,
 } from './declarations';
-import { FlowState, type State } from './flow';
+import { FlowState, isUnit, type State } from './flow';
 import type { FunctionContext } from './functions';
 import { baseIndexMismatch, checkDuplicateIndexSignatures, checkIndexConformance } from './indexConformance';
 import type { Scope, Sym } from './scopes';
-import { hasToken, isDirectEmptyArray, named, skipParentheses } from './syntax';
+import { hasToken, isDirectEmptyArray, named, skipParentheses, stringValue, templateFragmentText } from './syntax';
 import {
   anyType,
   errorType,
@@ -27,6 +27,7 @@ import {
   stringType,
   type Structure,
   type Type,
+  typeMembers,
   undefinedType,
   unknownType,
 } from './types';
@@ -679,7 +680,7 @@ export class StatementChecker {
     const discriminant = skipParentheses(node.childForFieldName('value') as TreeNode);
     const body = node.childForFieldName('body') as TreeNode;
     const cases = named(body).filter((child) => child.type === 'switch_case' || child.type === 'switch_default');
-    const { caseEntries, noMatch } = this.switchCaseEntries(discriminant, cases);
+    const { caseEntries, noMatch, exhaustive } = this.switchCaseEntries(discriminant, cases);
     const target: JumpTarget = { isLoop: false, breaks: [], continues: [] };
     this.jumpTargets.push(target);
     let fallthrough: State;
@@ -696,13 +697,19 @@ export class StatementChecker {
     } finally {
       this.jumpTargets.pop();
     }
-    const bypass = cases.some((caseNode) => caseNode.type === 'switch_default') ? undefined : noMatch;
-    this.c.flow.current = this.c.flow.merge([fallthrough, ...target.breaks, this.markExhaustive(discriminant, bypass)]);
+    const bypass = cases.some((caseNode) => caseNode.type === 'switch_default') ? undefined : noMatch?.clone();
+    if (bypass && exhaustive) bypass.dead = 'switchEnd';
+    this.c.flow.current = this.c.flow.merge([fallthrough, ...target.breaks, bypass]);
   }
 
   /** The state each case is entered in where its test matches (undefined for the default), and where none does. */
-  private switchCaseEntries(discriminant: TreeNode, cases: TreeNode[]): { caseEntries: State[]; noMatch: State } {
-    const discriminantType = this.c.expressions.check(discriminant);
+  private switchCaseEntries(
+    discriminant: TreeNode,
+    cases: TreeNode[]
+  ): { caseEntries: State[]; noMatch: State; exhaustive: boolean } {
+    const operand = typeofOperand(discriminant);
+    const observed = new Map<number, Type | undefined>(operand ? [[operand.id, undefined]] : []);
+    const discriminantType = this.c.expressions.observeTypes(observed, () => this.c.expressions.check(discriminant));
     const entry = this.c.flow.current;
     const caseTypes: Type[] = [];
     // `switch (true)` enters a case where its test is true, and the default where every test is false.
@@ -724,27 +731,35 @@ export class StatementChecker {
     const noMatch = testsConditions
       ? allFalse
       : this.c.conditions.narrowSwitchCase(discriminant, entry, caseTypes, false);
-    return { caseEntries, noMatch };
+    const exhaustive = operand
+      ? this.exhaustiveTypeofSwitch(operand, observed.get(operand.id), cases)
+      : this.exhaustiveLiteralSwitch(discriminantType, caseTypes);
+    return { caseEntries, noMatch, exhaustive };
   }
 
-  /**
-   * Marks the state past a `switch` without a default as one no path reaches where its cases cover every value of its
-   * discriminant (or of the operand of a `typeof` discriminant), which stays narrowed to `never` there.
-   */
-  private markExhaustive(discriminant: TreeNode, bypass: State): State {
-    const reference =
-      discriminant.type === 'unary_expression' && discriminant.childForFieldName('operator')?.text === 'typeof'
-        ? skipParentheses(discriminant.childForFieldName('argument') as TreeNode)
-        : discriminant;
-    if (!bypass || !this.c.flow.referenceKey(reference)) return bypass;
-    let remaining: Type = neverType;
-    this.c.flow.from(bypass, () => {
-      remaining = this.c.expressions.checkReferenceSilently(reference);
-    });
-    if (!isIntrinsic(remaining, 'never')) return bypass;
-    const exhausted = bypass.clone();
-    exhausted.dead = 'switchEnd';
-    return exhausted;
+  private exhaustiveLiteralSwitch(discriminant: Type, cases: Type[]): boolean {
+    if (cases.length === 0 || !cases.every(isSwitchUnitOrNever)) return false;
+    const covered = new Set(cases.map((type) => regularOf(type).id));
+    return typeMembers(this.c.baseConstraint(discriminant)).every(
+      (type) => isSwitchUnit(type) && covered.has(regularOf(type).id)
+    );
+  }
+
+  private exhaustiveTypeofSwitch(operand: TreeNode, type: Type | undefined, cases: TreeNode[]): boolean {
+    const names = new Set<string>();
+    for (const clause of cases) {
+      const test = clause.childForFieldName('value');
+      if (!test || (test.type !== 'string' && test.type !== 'template_string')) return false;
+      const name = literalTypeofName(test);
+      if (name === undefined) return false;
+      names.add(name);
+    }
+    let remaining = this.c.baseConstraint(
+      type ?? this.c.flow.probe(() => this.c.silently(() => this.c.expressions.check(operand)))
+    );
+    if (isAnyLike(remaining) || isIntrinsic(remaining, 'unknown')) return typeofNames.every((name) => names.has(name));
+    for (const name of names) remaining = this.c.flow.narrowByTypeof(remaining, name, false);
+    return isIntrinsic(remaining, 'never');
   }
 
   /** Checks a `case` test, reporting one that cannot equal the discriminant, and returns its type. */
@@ -919,4 +934,27 @@ function canEnumerateKeys(type: Type): boolean {
     isIntrinsic(type, 'object') ||
     ['object', 'typeParameter', 'indexedAccess', 'conditional'].includes(type.kind)
   );
+}
+
+function typeofOperand(node: TreeNode): TreeNode | undefined {
+  return node.type === 'unary_expression' && node.childForFieldName('operator')?.text === 'typeof'
+    ? (node.childForFieldName('argument') ?? undefined)
+    : undefined;
+}
+
+function isSwitchUnitOrNever(type: Type): boolean {
+  return isSwitchUnit(type) || isIntrinsic(type, 'never');
+}
+
+function isSwitchUnit(type: Type): boolean {
+  return isUnit(type) && !isIntrinsic(type, 'void');
+}
+
+const typeofNames = ['string', 'number', 'bigint', 'boolean', 'symbol', 'undefined', 'object', 'function'];
+
+function literalTypeofName(node: TreeNode): string | undefined {
+  if (node.type === 'string') return stringValue(node);
+  const parts = named(node);
+  if (parts.some((part) => part.type === 'template_substitution')) return undefined;
+  return parts.map((part) => templateFragmentText(part)).join('');
 }

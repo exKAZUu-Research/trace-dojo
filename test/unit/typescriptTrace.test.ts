@@ -101,6 +101,24 @@ const t = new Turtle(x, 0);`,
   expect(stepsOf('typescript', typescript)).toEqual(stepsOf('java', java));
 });
 
+test('records scalar and reference bindings named __proto__', () => {
+  const source = `
+function read() {
+  const __proto__ = { value: 7 };
+  console.log(__proto__.value);
+}
+const __proto__ = 5;
+read();
+console.log(__proto__);`;
+  const recording = traceProgram('typescript', source, source);
+  expect(recording.stdout).toBe('7\n5\n');
+  expect(Object.entries(recording.finalVars)).toEqual([['__proto__', 5]]);
+  expect(recording.traceItems.flatMap((step) => Object.entries(step.referenceVars))).toContainEqual([
+    '__proto__',
+    { kind: 'object', entries: { value: { kind: 'value', value: 7 } } },
+  ]);
+});
+
 test('static compile-time constants stay out of the trace as they do in Java', () => {
   const java = `public class Main {
   public static void main(String[] args) {

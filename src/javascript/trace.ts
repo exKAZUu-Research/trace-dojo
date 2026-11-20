@@ -59,7 +59,7 @@ class Snapshotter {
 
   /** The variables visible from `scope`, followed by static fields and the fields of `this` when `withThis`. */
   variablesOf(scope: Scope, withThis: boolean): Variables {
-    const variables: Variables = { vars: {}, referenceVars: {} };
+    const variables: Variables = { vars: Object.create(null), referenceVars: Object.create(null) };
     for (const [name, value] of this.visibleBindings(scope)) addVariable(variables, name, value, this.runtime);
     if (withThis && this.showsStatics) this.addStatics(variables, scope);
     const frame = scope.nearestFunctionFrame();

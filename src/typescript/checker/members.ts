@@ -10,6 +10,7 @@ import type { Checker } from './checker';
 import type { State } from './flow';
 import { applicableIndex } from './indexInfos';
 import { nonNullableType, nullishConstraint } from './nullishConstraints';
+import { defaultedTarget } from './patterns';
 import { printedPropertyName } from './print';
 import { spellingSuggestion } from './spelling';
 import { assignmentKind, chainObject, isOptionalChain, skipParentheses } from './syntax';
@@ -321,7 +322,7 @@ export class MemberChecker {
     if (owner === 'ArrayConstructor' && name === 'fromAsync') return 'Array.fromAsync';
     if (owner === 'RegExpConstructor' && unavailableRegExpStatics.has(name)) return legacyRegExpStaticsFeature;
     // Node.js shows a function's source as tsx's esbuild printed it, which this interpreter does not reproduce.
-    if (owner === 'Function' && name === 'toString' && !this.isNeverCalled(propertyNode.parent))
+    if (owner === 'Function' && name === 'toString' && !this.isNeverCalled(propertyNode))
       return '関数やクラスの文字列への変換';
     return undefined;
   }
@@ -330,14 +331,16 @@ export class MemberChecker {
    * Whether a value can never be called: it is only compared or discarded, or a variable holds it whose every reference
    * is, which an assignment to it is not. A value passed, stored, or destructured elsewhere may be called there.
    */
-  private isNeverCalled(read: TreeNode | null): boolean {
+  private isNeverCalled(property: TreeNode): boolean {
+    const read = property.parent;
     if (isOnlyCompared(read)) return true;
-    const declarator = read && outermostParentheses(read).parent;
-    const name = declarator?.childForFieldName('name');
+    const binding = propertyBinding(property);
+    const declarator = binding ? binding.pattern.parent : read && outermostParentheses(read).parent;
+    const name = binding?.name ?? declarator?.childForFieldName('name');
     if (
       declarator?.type !== 'variable_declarator' ||
       !['const', 'let'].includes(declarator.parent?.childForFieldName('kind')?.text ?? '') ||
-      name?.type !== 'identifier'
+      (name?.type !== 'identifier' && name?.type !== 'shorthand_property_identifier_pattern')
     )
       return false;
     const symbol = this.c.scopeOf(name).lookupValue(name.text);
@@ -604,11 +607,27 @@ function outermostParentheses(node: TreeNode): TreeNode {
 function identifiersNamed(root: TreeNode, name: string): TreeNode[] {
   const found: TreeNode[] = [];
   const visit = (node: TreeNode): void => {
-    if (node.type === 'identifier' && node.text === name) found.push(node);
+    if (
+      ['identifier', 'shorthand_property_identifier', 'shorthand_property_identifier_pattern'].includes(node.type) &&
+      node.text === name
+    )
+      found.push(node);
     for (const child of node.namedChildren) if (child) visit(child);
   };
   visit(root);
   return found;
+}
+
+function propertyBinding(property: TreeNode): { name: TreeNode; pattern: TreeNode } | undefined {
+  const entry = property.parent;
+  if (property.type === 'shorthand_property_identifier_pattern') {
+    const pattern = entry?.type === 'object_assignment_pattern' ? entry.parent : entry;
+    return pattern?.type === 'object_pattern' ? { name: property, pattern } : undefined;
+  }
+  if (entry?.type !== 'pair_pattern' || entry.childForFieldName('key')?.id !== property.id) return undefined;
+  const value = entry.childForFieldName('value');
+  const name = value && (defaultedTarget(value) ?? value);
+  return name && entry.parent ? { name, pattern: entry.parent } : undefined;
 }
 
 /** The outermost link of the chain a link belongs to, as `a?.b.c()` for `a?.b`. */

@@ -77,6 +77,17 @@ console.log(show("text"), method({ toString() { return "object"; } }));`;
   expect(executeProgram('typescript', source)).toMatchObject({ kind: 'executed', stdout: 'text object\n' });
 });
 
+test.each(['method.call(fn);', 'const escaped = { method }; escaped.method.call(fn);'])(
+  'rejects conversion through a destructured function method: %s',
+  (use) => {
+    const source = `function fn() {} const { toString: method } = fn; ${use}`;
+    expect(executeProgram('typescript', source)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [{ message: '関数やクラスの文字列への変換は、この採点環境では使えません。' }],
+    });
+  }
+);
+
 const caughtFunctionError = `'use strict';
 const fn=()=>{};
 Object.freeze(fn);

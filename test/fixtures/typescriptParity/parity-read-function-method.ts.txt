@@ -1,0 +1,7 @@
+function inspectMethod(value: () => void) {
+  const { toString } = value;
+  const { toString: method = () => '' } = value;
+  const { ['toString']: computed } = value;
+  return [typeof toString, method === Function.prototype.toString, computed === toString];
+}
+console.log(...inspectMethod(() => {}));
