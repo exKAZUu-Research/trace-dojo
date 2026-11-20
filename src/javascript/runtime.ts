@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 867 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss 892 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
@@ -439,7 +439,23 @@ export class Runtime {
     return `[object ${typeof tag === 'string' ? tag : receiverClassName(target)}]`;
   }
 
-  instanceDisplayName(value: JsObject): string | undefined {
+  internalConstructorName(value: JsObject): string {
+    const name = this.allocationName(value);
+    if (name && name !== 'Object') return name;
+    for (let current: JsObject | null = value; current; current = current.proto) {
+      this.spend();
+      const tag = current.properties.get(WELL_KNOWN_SYMBOLS.toStringTag);
+      if (tag && !isAccessor(tag) && typeof tag.value === 'string') return tag.value;
+      if (current === value) continue;
+      const original = prototypeConstructorName(current);
+      if (original && original !== 'Object') return original;
+    }
+    if (value.isError) return 'Error';
+    if (value instanceof JsFunction) return 'Function';
+    return receiverClassName(value);
+  }
+
+  private allocationName(value: JsObject): string | undefined {
     const constructor = value.instanceConstructor;
     if (!constructor) return undefined;
     const name = this.receiverData(constructor, 'name');
@@ -1207,6 +1223,13 @@ function ownElement(value: Value, key: Key): Value | typeof MISSING {
 /** Defines a non-enumerable data property, as builtin methods and `name` are. */
 export function defineHidden(object: JsObject, key: Key, value: Value, writable = true): void {
   object.properties.set(key, { value, writable, enumerable: false, configurable: true });
+}
+
+function prototypeConstructorName(prototype: JsObject): string | undefined {
+  const descriptor = prototype.properties.get('constructor');
+  if (!descriptor || isAccessor(descriptor)) return undefined;
+  const fn = descriptor.value;
+  return fn instanceof JsFunction && !fn.boundTarget ? fn.initialName : undefined;
 }
 
 function receiverClassName(target: JsObject): string {

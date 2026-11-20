@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 654 -- Ports Node.js's inspection and error formatting around shared object and stack metadata.
+// code-gauge-allow-file fileNcss 686 -- Ports Node.js's inspection and error formatting around shared object and stack metadata.
 import { inspect as hostInspect, type InspectStyle, stripVTControlCharacters } from 'node:util';
 
 import { eastAsianWidthType } from 'get-east-asian-width';
@@ -372,21 +372,23 @@ function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string 
   const { runtime } = ctx;
   const showsPrototype = ctx.showHidden && recurseTimes <= ctx.depth;
   const constructor = inspectedConstructor(runtime, value, showsPrototype);
-  const inherited = showsPrototype ? inspectPrototype(ctx, value, constructor, recurseTimes) : [];
-  const name = constructor.name();
+  const inherited = showsPrototype && constructor.name ? inspectPrototype(ctx, value, constructor, recurseTimes) : [];
+  const name = inspectedName(ctx, value, constructor, recurseTimes);
+  const display = { name, nullPrototypeName: name === undefined ? runtime.internalConstructorName(value) : undefined };
   if (value.isError && name !== 'Object') noteErrorStack(ctx, value);
   const keys = enumerableKeys(runtime, value, ctx.showHidden, ctx.errorStacks.get(value));
   const showsLength = ctx.showHidden && value instanceof JsArray;
   const frame = frameOf(
     ctx,
     value,
-    name,
+    display,
     keys.length > 0 || inherited.length > 0 || value.promise !== undefined || showsLength
   );
   if (typeof frame === 'string') return frame;
   if (recurseTimes > ctx.depth) {
-    const prefix = prefixOf(name, value instanceof JsArray ? 'Array' : 'Object').slice(0, -1);
-    return name === undefined ? prefix : stylize(ctx, `[${prefix}]`, 'special');
+    const prefix = value instanceof JsArray ? prefixOf(name, 'Array') : objectPrefix(display, toStringTagOf(value));
+    const label = prefix.slice(0, -1);
+    return name === undefined ? label : stylize(ctx, `[${label}]`, 'special');
   }
   ctx.currentDepth = recurseTimes + 1;
   ctx.seen.add(value);
@@ -520,11 +522,17 @@ function isBuiltinConstructorName(name: Value): boolean {
   return typeof name === 'string' && NODE_BUILTIN_NAMES.has(name);
 }
 
+interface DisplayConstructor {
+  name: string | undefined;
+  nullPrototypeName: string | undefined;
+}
+
 /** What surrounds the entries of an object, or its whole text when it has no entries to list. */
 // code-gauge-allow functionCognitiveComplexity 28 -- Ports Node.js's util.inspect, so the two stay comparable.
 // code-gauge-allow functionNcss 43 -- Ports Node.js's util.inspect, so the two stay comparable.
-function frameOf(ctx: Context, value: JsObject, constructor: string | undefined, hasKeys: boolean): Frame | string {
+function frameOf(ctx: Context, value: JsObject, display: DisplayConstructor, hasKeys: boolean): Frame | string {
   const { runtime } = ctx;
+  const { name: constructor } = display;
   if (value instanceof JsArray) {
     const prefix = constructor === 'Array' ? '' : prefixOf(constructor, 'Array', `(${value.elements.length})`);
     return value.elements.length === 0 && !hasKeys ? `${prefix}[]` : { base: '', braces: [`${prefix}[`, ']'] };
@@ -545,8 +553,8 @@ function frameOf(ctx: Context, value: JsObject, constructor: string | undefined,
   else if (value.isArguments) open = '[Arguments] {';
   else {
     const tag = toStringTagOf(value);
-    if (tag && tag !== constructor) open = `${objectPrefix(runtime, value, constructor, tag)}[${tag}] {`;
-    else if (constructor !== 'Object') open = `${objectPrefix(runtime, value, constructor, tag)}{`;
+    if (tag && tag !== constructor) open = `${objectPrefix(display, tag)}[${tag}] {`;
+    else if (constructor !== 'Object') open = `${objectPrefix(display, tag)}{`;
   }
   if (!hasKeys) {
     if (value instanceof JsFunction) return stylize(ctx, base, 'special');
@@ -556,15 +564,9 @@ function frameOf(ctx: Context, value: JsObject, constructor: string | undefined,
   return { base, braces: [open, '}'] };
 }
 
-function objectPrefix(
-  runtime: Runtime,
-  value: JsObject,
-  constructor: string | undefined,
-  tag: string | undefined
-): string {
-  if (constructor !== undefined) return `${constructor} `;
-  const name = runtime.instanceDisplayName(value);
-  return prefixOf(undefined, name && name !== tag ? name : 'Object');
+function objectPrefix(display: DisplayConstructor, tag: string | undefined): string {
+  const fallback = display.nullPrototypeName;
+  return prefixOf(display.name, fallback && fallback !== tag ? fallback : 'Object');
 }
 
 function isPrimitivePrototype(runtime: Runtime, object: JsObject): boolean {
@@ -622,16 +624,52 @@ function toStringTagOf(object: JsObject): string | undefined {
 }
 
 interface InspectedConstructor {
-  name: () => string | undefined;
+  name?: () => string;
   owner?: JsObject;
   firstPrototype?: JsObject | null;
   skipPrototype?: boolean;
+}
+
+function inspectedName(
+  ctx: Context,
+  value: JsObject,
+  constructor: InspectedConstructor,
+  depth: number
+): string | undefined {
+  if (constructor.name || !constructor.firstPrototype) return constructor.name?.();
+  return constructorChainName(ctx, value, constructor.firstPrototype, depth);
+}
+
+function constructorChainName(ctx: Context, value: JsObject, prototype: JsObject, depth: number): string {
+  const names: string[] = [];
+  let length = ctx.budget.used;
+  while (true) {
+    const name = ctx.runtime.internalConstructorName(value);
+    if (depth > ctx.depth) return formatPrototypeNames(names, `${name} <Complex prototype>`);
+    length += name.length + 3;
+    if (length > LIMITS.maxOutputLength) throw new ExecutionLimitError('output');
+    names.push(name);
+    const next = inspectedConstructor(ctx.runtime, prototype);
+    if (next.name) return formatPrototypeNames(names, next.name());
+    if (!next.firstPrototype) {
+      const preview = inspectValue(ctx.runtime, prototype, ctx.budget, -1, ctx);
+      return formatPrototypeNames(names, preview);
+    }
+    value = prototype;
+    prototype = next.firstPrototype;
+    depth++;
+  }
+}
+
+function formatPrototypeNames(names: string[], tail: string): string {
+  return [...names, tail].join(' <') + '>'.repeat(names.length);
 }
 
 function inspectedConstructor(runtime: Runtime, object: JsObject, showsPrototype = false): InspectedConstructor {
   const known = knownConstructors(runtime.realm);
   let firstPrototype: JsObject | null | undefined;
   for (let current: JsObject | null = object; current; current = current.proto) {
+    runtime.spend();
     const knownName = current === object ? undefined : known.get(current);
     if (knownName)
       return { name: () => knownName, owner: current, firstPrototype, skipPrototype: current === firstPrototype };
@@ -650,7 +688,7 @@ function inspectedConstructor(runtime: Runtime, object: JsObject, showsPrototype
       };
     if (current === object) firstPrototype = current.proto;
   }
-  return { name: () => (firstPrototype ? 'Object' : undefined), firstPrototype };
+  return { firstPrototype };
 }
 
 function constructorDisplayName(runtime: Runtime, constructor: JsFunction): string {
@@ -743,8 +781,11 @@ function plainFunctionBase(fn: JsFunction, name: string, constructor: string | u
 
 /** Node.js formats uncaught errors from the saved stack using the same name rules as util.inspect. */
 export function uncaughtErrorHeadline(runtime: Runtime, error: JsObject): string {
-  const constructor = inspectedConstructor(runtime, error).name();
-  return constructor === 'Object' ? inspect(runtime, error) : errorText(runtime, error, constructor);
+  const { name, firstPrototype } = inspectedConstructor(runtime, error);
+  const constructor = name?.();
+  return constructor === 'Object' || (!name && firstPrototype)
+    ? inspect(runtime, error)
+    : errorText(runtime, error, constructor);
 }
 
 /**

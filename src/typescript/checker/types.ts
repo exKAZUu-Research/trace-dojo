@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 439 -- Keeps type data, cache keys, and canonical type constructors together.
+// code-gauge-allow-file fileNcss 442 -- Keeps type data, cache keys, and canonical type constructors together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { ExecutionBudget } from '../../interpreter/limits';
@@ -562,18 +562,25 @@ function nonNullableIntersectionMember(type: Type): boolean {
 
 function hasDisjointIntersectionDomains(types: Type[]): boolean {
   let domain: string | undefined;
-  let unit: LiteralValue | undefined;
+  let mixedDomains = false;
+  let reducesDomains = false;
+  let unit: number | undefined;
   for (const type of types) {
     const current = primitiveDomain(type);
     if (current === undefined) continue;
-    if (domain !== undefined && current !== domain) return true;
+    mixedDomains ||= domain !== undefined && current !== domain;
     domain = current;
-    if (type.kind === 'literal') {
-      if (unit !== undefined && unit !== type.value) return true;
-      unit = type.value;
+    // TypeScript does not check the Boolean or null domains against other domains on their own.
+    reducesDomains ||= current !== 'boolean' && current !== 'null';
+    if (type.kind === 'literal' || isNullableUnit(type)) {
+      const id = regularOf(type).id;
+      if (unit !== undefined && unit !== id) return true;
+      unit = id;
     }
   }
-  return types.some((type) => type.kind === 'object') && types.some(isNullableUnit);
+  return (
+    (mixedDomains && reducesDomains) || (types.some((type) => type.kind === 'object') && types.some(isNullableUnit))
+  );
 }
 
 function flattenedMembers(
