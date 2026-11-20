@@ -515,6 +515,24 @@ int main() {
   }
 );
 
+test('runs a 700-element bubble sort within the default operations limit, as C and Java do', () => {
+  const program = `#include <iostream>
+int main() {
+  int n = 700;
+  int a[700];
+  for (int i = 0; i < n; i++) a[i] = (i * 7919) % n;
+  for (int i = 0; i < n; i++)
+    for (int j = 0; j + 1 < n - i; j++)
+      if (a[j] > a[j + 1]) {
+        int t = a[j];
+        a[j] = a[j + 1];
+        a[j + 1] = t;
+      }
+  std::cout << a[0] << ' ' << a[n - 1];
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', stdout: '0 699' });
+});
+
 test('charges the storage of the message buffer that what() creates', () => {
   const program = `#include <stdexcept>
 #include <string>

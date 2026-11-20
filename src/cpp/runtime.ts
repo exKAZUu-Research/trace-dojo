@@ -120,10 +120,9 @@ export class Frame implements TracedFrame {
     if (!this.operandAccesses) return;
     const { store, index } = location.byteAddress(size);
     if (!store) return;
-    for (let scope: OperandAccesses | undefined = this.operandAccesses; scope; scope = scope.parent) {
-      this.runtime.spend();
+    // The scopes nest as the source's operands do, so this bookkeeping costs a constant factor per operator.
+    for (let scope: OperandAccesses | undefined = this.operandAccesses; scope; scope = scope.parent)
       scope.access(store, index, size, write);
-    }
   }
 }
 
