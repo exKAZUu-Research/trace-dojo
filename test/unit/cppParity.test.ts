@@ -797,6 +797,56 @@ int main() {
   });
 });
 
+test('returns the appropriate stream view from formatted operations and manipulators', () => {
+  const program = `#include <iomanip>
+#include <iostream>
+#include <sstream>
+int main() {
+  std::stringstream stream;
+  std::ostream* output = &stream;
+  std::istream* input = &stream;
+  std::ostream& formatted = stream << 7;
+  std::ostream& hex = stream << std::hex;
+  std::ostream& padded = stream << std::setw(3);
+  std::ostream& standard = std::cout << std::hex;
+  int number = 0;
+  std::istream& read = stream >> number;
+  std::istream& inputHex = stream >> std::hex;
+  std::cout << (static_cast<void*>(&formatted) == static_cast<void*>(output))
+            << (static_cast<void*>(&hex) == static_cast<void*>(output))
+            << (static_cast<void*>(&padded) == static_cast<void*>(output))
+            << (static_cast<void*>(&standard) == static_cast<void*>(&std::cout))
+            << (&read == input) << (&inputHex == input) << ' '
+            << (std::ostringstream() << std::hex << 31).str();
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '111111 1f',
+    uncaughtException: undefined,
+  });
+});
+
+test('uses the same one-past addresses for stream objects and their terminal bases', () => {
+  const program = `#include <iostream>
+#include <sstream>
+int main() {
+  std::ios* a = &std::cout;
+  std::ios* b = &std::cerr;
+  std::ios* c = &std::clog;
+  std::ostringstream local;
+  std::ios* d = &local;
+  std::cout << (static_cast<void*>(a + 1) == static_cast<void*>(&std::cout + 1))
+            << (static_cast<void*>(b + 1) == static_cast<void*>(&std::cerr + 1))
+            << (static_cast<void*>(c + 1) == static_cast<void*>(&std::clog + 1))
+            << (static_cast<void*>(d + 1) == static_cast<void*>(&local + 1));
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '1111',
+    uncaughtException: undefined,
+  });
+});
+
 test('copies and destroys ordered-map subtrees in libc++ order after erasure', () => {
   const program = `#include <iostream>
 #include <map>

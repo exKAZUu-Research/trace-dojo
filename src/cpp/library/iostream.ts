@@ -133,6 +133,10 @@ export class StreamValue extends Store {
     return 1;
   }
 
+  override projectAddress(index: number, byteOffset: number): Ptr['address'] {
+    return { store: this, index: index * STREAM_SIZES[this.kind] + byteOffset };
+  }
+
   get buffer(): string {
     return this.content.bytes;
   }
@@ -143,11 +147,13 @@ export class StreamValue extends Store {
     this.writePosition = this.mode & (OPEN_MODE.app | OPEN_MODE.ate) ? bytes.length : 0;
   }
 
-  get(): Value {
+  get(index: number): Value {
+    if (index !== 0) throw new CppRuntimeError('outOfBounds');
     return this;
   }
 
-  set(): void {
+  set(index: number): void {
+    if (index !== 0) throw new CppRuntimeError('outOfBounds');
     throw new Error('A stream cannot be assigned');
   }
 
@@ -485,13 +491,18 @@ export class Streams {
     if (left.type.kind !== 'class' || !left.type.cls.isDerivedFrom(cls) || !right) return undefined;
     if (((operator === '<<' && isOutput) || (operator === '>>' && isInput)) && isConstType(left.type))
       return compiler.error(row, `const の ${typeName(left.type)} には演算子 ${operator} を使えません。`);
-    if (operator === '<<' && isOutput)
-      return this.namedManipulator(compiler, left, right, row, true) ?? this.insertion(compiler, left, right, row);
+    if (operator === '<<' && isOutput) {
+      const named = this.namedManipulator(compiler, left, right, row, true);
+      return named ?? this.streamResult(left, this.insertion(compiler, left, right, row), this.ostream);
+    }
     if (operator === '>>' && isInput) {
       const named = this.namedManipulator(compiler, left, right, row, false);
       if (named) return named;
       const isManipulator = right.type.kind === 'class' && right.type.cls === this.manipulator;
-      return isManipulator ? this.applyTo(compiler, left, right, row) : this.extraction(compiler, left, right, row);
+      const result = isManipulator
+        ? this.applyTo(compiler, left, right, row)
+        : this.extraction(compiler, left, right, row);
+      return this.streamResult(left, result, this.istream);
     }
     if (operator === '<<' || operator === '>>') {
       return compiler.error(
@@ -513,8 +524,26 @@ export class Streams {
       (fn) => fn.streamManipulator === 'both' || (output && fn.streamManipulator === 'output')
     );
     if (!candidate) return;
-    const resolved = compiler.resolve(candidate.displayName, [candidate], [stream], undefined, row);
-    return { ...compiler.callExpr(resolved, [stream], undefined, row), type: stream.type };
+    const object = { ...compiler.materialize(stream), isXvalue: false };
+    const resolved = compiler.resolve(candidate.displayName, [candidate], [object], undefined, row);
+    return this.streamResult(
+      stream,
+      compiler.callExpr(resolved, [object], undefined, row),
+      output ? this.ostream : this.istream,
+      candidate.streamManipulator === 'both'
+    );
+  }
+
+  private streamResult(stream: Expr, result: Expr, base: ClassInfo, allowsForwarding = true): Expr {
+    const isXvalue = allowsForwarding && (!stream.isLvalue || stream.isXvalue === true);
+    const cls = isXvalue && stream.type.kind === 'class' ? stream.type.cls : base;
+    return {
+      ...result,
+      type: classType(cls),
+      isLvalue: true,
+      isXvalue,
+      run: (frame) => (result.run(frame) as Ptr).forClass(cls),
+    };
   }
 
   private insertion(compiler: ExpressionCompiler, left: Expr, right: Expr, row: number): Expr {
