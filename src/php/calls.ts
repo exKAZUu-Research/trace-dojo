@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 879 -- Keeps call binding, completion and frame cleanup together.
+// code-gauge-allow-file fileNcss 881 -- Keeps call binding, completion and frame cleanup together.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl, Stmt } from './ast';
@@ -623,11 +623,11 @@ function typeAllowsNull(type: TypeDecl): boolean {
   return type.k === 'union' && type.types.some((part) => typeAllowsNull(part));
 }
 
-/** A native parameter's type as PHP's argument parsing names it, in the order the signature declares. */
 function nativeTypeText(type: TypeDecl): string {
   if (type.k !== 'union') return typeToString(type);
   const text = type.types.map((part) => typeToString(part)).join('|');
-  // Argument parsing that accepts an array or an object (Z_PARAM_ARRAY_OR_OBJECT) asks for an array in its message.
+  // Z_PARAM_ARRAY_HT_OR_STR and Z_PARAM_ARRAY_OR_OBJECT use parser labels that can differ from the stubs.
+  if (text === 'string|array') return 'array|string';
   return text === 'array|object' ? 'array' : text;
 }
 
