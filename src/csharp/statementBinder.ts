@@ -50,6 +50,7 @@ import {
   type TypeSymbol,
   VOID_TYPE,
 } from './types';
+import { isVariable } from './variables';
 
 /** What the earlier labels of a switch have covered. */
 interface SwitchLabelsSeen {
@@ -58,6 +59,24 @@ interface SwitchLabelsSeen {
   /** The values that the earlier unguarded case labels surely match. */
   handled: Space;
 }
+
+/** The built-in types that have literals, which may be constants and which learners write down in a trace. */
+const LITERAL_TYPES = new Set<string>([
+  'bool',
+  'char',
+  'sbyte',
+  'byte',
+  'short',
+  'ushort',
+  'int',
+  'uint',
+  'long',
+  'ulong',
+  'float',
+  'double',
+  'decimal',
+  'string',
+]);
 
 /** Binds statements and the storage that assignments write. */
 export abstract class StatementBinder extends PatternBinder {
@@ -137,7 +156,7 @@ export abstract class StatementBinder extends PatternBinder {
         if (
           target.receiver.type.kind === 'named' &&
           target.receiver.type.symbol.isValueType &&
-          !this.isVariable(target.receiver) &&
+          !isVariable(target.receiver, false) &&
           use !== 'initializer'
         ) {
           this.error(
@@ -236,7 +255,7 @@ export abstract class StatementBinder extends PatternBinder {
       target.receiver &&
       target.receiver.type.kind === 'named' &&
       target.receiver.type.symbol.isValueType &&
-      !this.isVariable(target.receiver) &&
+      !isVariable(target.receiver, false) &&
       use !== 'initializer'
     ) {
       this.error(
@@ -297,28 +316,6 @@ export abstract class StatementBinder extends PatternBinder {
       method.owner === field.owner &&
       context.fn.kind !== 'lambda';
     return inConstructor || context.fn.kind === 'initializer';
-  }
-
-  /** Whether an expression denotes a variable, whose struct value an assignment to a member changes in place. */
-  protected isVariable(expression: BoundExpression): boolean {
-    switch (expression.kind) {
-      case 'local':
-      case 'this':
-      case 'element':
-      case 'staticField':
-      case 'compoundOperand': {
-        return true;
-      }
-      case 'field': {
-        return (
-          !(expression.receiver.type.kind === 'named' && expression.receiver.type.symbol.isValueType) ||
-          this.isVariable(expression.receiver)
-        );
-      }
-      default: {
-        return false;
-      }
-    }
   }
 
   private describeValue(expression: BoundExpression): string {
@@ -474,13 +471,7 @@ export abstract class StatementBinder extends PatternBinder {
       expression.kind === 'unbound'
         ? this.convert(expression, this.naturalTypeOf(expression) ?? ERROR_TYPE, statement)
         : expression;
-    if (!this.isStatementExpression(resolved)) {
-      this.error(
-        statement.expression,
-        'CS0201',
-        '代入、呼び出し、インクリメント、デクリメント、新しいオブジェクトの式のみがステートメントとして使用できます'
-      );
-    }
+    this.requireStatementExpression(resolved, statement.expression);
     return { kind: 'expression', expression: resolved, row: statement.row, step: this.expressionStepKind(resolved) };
   }
 
@@ -690,26 +681,7 @@ export abstract class StatementBinder extends PatternBinder {
   /** Whether a type may be that of a constant. */
   protected isConstantType(type: Type): boolean {
     const special = specialOf(type);
-    if (
-      special &&
-      [
-        'bool',
-        'char',
-        'sbyte',
-        'byte',
-        'short',
-        'ushort',
-        'int',
-        'uint',
-        'long',
-        'ulong',
-        'float',
-        'double',
-        'decimal',
-        'string',
-      ].includes(special)
-    )
-      return true;
+    if (special && LITERAL_TYPES.has(special)) return true;
     if (type.kind === 'named' && type.symbol.kind === 'enum') return true;
     return isReferenceType(type);
   }
@@ -735,24 +707,14 @@ export abstract class StatementBinder extends PatternBinder {
     } else if (statement.initializer) {
       for (const expression of statement.initializer.expressions) {
         const bound = this.bindValue(expression, inner);
-        if (!this.isStatementExpression(bound))
-          this.error(
-            expression,
-            'CS0201',
-            '代入、呼び出し、インクリメント、デクリメント、新しいオブジェクトの式のみがステートメントとして使用できます'
-          );
+        this.requireStatementExpression(bound, expression);
         initializers.push({ kind: 'expression', expression: bound, row: statement.row, step: 'none' });
       }
     }
     const condition = statement.condition ? this.bindAs(statement.condition, this.boolType, inner) : undefined;
     const updates = statement.updates.map((update) => {
       const bound = this.bindValue(update, inner);
-      if (!this.isStatementExpression(bound))
-        this.error(
-          update,
-          'CS0201',
-          '代入、呼び出し、インクリメント、デクリメント、新しいオブジェクトの式のみがステートメントとして使用できます'
-        );
+      this.requireStatementExpression(bound, update);
       return bound;
     });
     const body = this.inLoop(inner, () => this.bindEmbedded(statement.body, inner));
@@ -863,29 +825,20 @@ export abstract class StatementBinder extends PatternBinder {
     };
   }
 
+  /** Reports CS0201 for an expression that stands as a statement but is not one that may. */
+  private requireStatementExpression(expression: BoundExpression, node: Expression): void {
+    if (this.isStatementExpression(expression)) return;
+    this.error(
+      node,
+      'CS0201',
+      '代入、呼び出し、インクリメント、デクリメント、新しいオブジェクトの式のみがステートメントとして使用できます'
+    );
+  }
+
   /** Whether learners write down a variable's value in a trace: numbers, characters, booleans, and strings. */
   protected isAnswered(type: Type): boolean {
     const special = specialOf(nullableUnderlying(type) ?? type);
-    if (
-      special &&
-      [
-        'bool',
-        'char',
-        'sbyte',
-        'byte',
-        'short',
-        'ushort',
-        'int',
-        'uint',
-        'long',
-        'ulong',
-        'float',
-        'double',
-        'decimal',
-        'string',
-      ].includes(special)
-    )
-      return true;
+    if (special && LITERAL_TYPES.has(special)) return true;
     return type.kind === 'named' && type.symbol.kind === 'enum';
   }
 
@@ -1225,31 +1178,15 @@ export abstract class StatementBinder extends PatternBinder {
     try {
       if (returnType.kind === 'void') {
         const value = this.bindValue(body, context);
-        if (!this.isStatementExpression(value))
-          this.error(
-            body,
-            'CS0201',
-            '代入、呼び出し、インクリメント、デクリメント、新しいオブジェクトの式のみがステートメントとして使用できます'
-          );
-        return {
-          kind: 'block',
-          statements: [{ kind: 'expression', expression: value, row: body.row, step: this.expressionStepKind(value) }],
-          capturedLocals: [],
-          locals: [],
-          row: body.row,
-          step: 'none',
-        };
+        this.requireStatementExpression(value, body);
+        return blockOf(
+          { kind: 'expression', expression: value, row: body.row, step: this.expressionStepKind(value) },
+          body.row
+        );
       }
       // A `throw` expression converts to any return type.
       const value = body.kind === 'throw' ? this.bindValue(body, context) : this.bindAs(body, returnType, context);
-      return {
-        kind: 'block',
-        statements: [{ kind: 'return', value, row: body.row, step: 'none' }],
-        capturedLocals: [],
-        locals: [],
-        row: body.row,
-        step: 'none',
-      };
+      return blockOf({ kind: 'return', value, row: body.row, step: 'none' }, body.row);
     } finally {
       this.allowsThrowExpression = saved;
     }
@@ -1281,4 +1218,9 @@ function labelText(value: unknown, type: Type): string {
   if (typeof value === 'boolean') return value ? 'True' : 'False';
   if (specialOf(type) === 'char') return String.fromCodePoint(value as number);
   return constantText(value);
+}
+
+/** A block of one statement, which an expression-bodied member's body becomes. */
+function blockOf(statement: BoundStatement, row: number): BoundBlock {
+  return { kind: 'block', statements: [statement], capturedLocals: [], locals: [], row, step: 'none' };
 }

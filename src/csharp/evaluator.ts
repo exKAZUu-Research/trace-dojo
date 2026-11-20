@@ -58,6 +58,7 @@ import {
   type Value,
   type VariableReference,
 } from './values';
+import { isVariable } from './variables';
 
 type BinaryExpression = Extract<BoundExpression, { kind: 'binary' }>;
 type AccessExpression = Extract<
@@ -726,7 +727,7 @@ export class Evaluator extends StatementExecutor {
     // A nullable value's members run on its missing value too, as `HasValue` and its `ToString` override do.
     if (receiver === undefined && !method.isStatic && !this.runsOnNullable(expression)) throw NULL_REFERENCE();
     // A method of a struct runs on a copy of a value that is not a variable, so it cannot change the original.
-    if (receiver instanceof CsStruct && !this.isVariableExpression(expression.receiver)) receiver = receiver.clone();
+    if (receiver instanceof CsStruct && !isVariable(expression.receiver, true)) receiver = receiver.clone();
     // A value calls a non-virtual method of a reference type, such as `GetType`, through a box of its own type.
     const receiverType = frame.resolve(expression.receiver.type);
     if (
@@ -783,27 +784,6 @@ export class Evaluator extends StatementExecutor {
       expression.receiver !== undefined &&
       nullableUnderlying(expression.receiver.type) !== undefined
     );
-  }
-
-  /** Whether an expression denotes storage, whose struct a method call may change in place. */
-  private isVariableExpression(expression: BoundExpression): boolean {
-    switch (expression.kind) {
-      case 'local':
-      case 'this':
-      case 'element':
-      case 'compoundOperand': {
-        return true;
-      }
-      case 'staticField': {
-        return !expression.field.isReadonly;
-      }
-      case 'field': {
-        return !expression.field.isReadonly && this.isVariableExpression(expression.receiver);
-      }
-      default: {
-        return false;
-      }
-    }
   }
 
   /** Evaluates elements in order, keeping the evaluated ones alive (with their turtles) while the rest run. */
