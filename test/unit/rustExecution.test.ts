@@ -251,6 +251,22 @@ test('Rust UTF-8 conversions and string operations preserve U+FEFF', () => {
   });
 });
 
+test('reverse string searches select the rightmost match and visit predicates from the right', () => {
+  const program = `fn main() {
+    println!("{:?} {:?}", "ababa".rsplit_once("aba"), "aaaa".rsplit_once("aaa"));
+    println!("{:?}", "📚".rsplit_once(""));
+    let split = "a界b".rsplit_once(|c| { print!("{}", c); c == '界' });
+    println!(" {:?}", split);
+    let index = "a界b".rfind(|c| { print!("{}", c); c == '界' });
+    println!(" {:?}", index);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'Some(("ab", "")) Some(("a", ""))\nSome(("📚", ""))\nb界 Some(("a", "b"))\nb界 Some(1)\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

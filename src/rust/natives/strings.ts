@@ -24,6 +24,7 @@ import {
   linesIter,
   matchesIter,
   type PatternKind,
+  searcherOf,
   splitAsciiWhitespaceIter,
   splitIter,
   splitNIter,
@@ -341,23 +342,8 @@ const strNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
   split_terminator: ([s, p], ctx) => splitIter(str(s), patternOf(ctx, p), 'SplitTerminator'),
   splitn: ([s, n, p], ctx) => splitNIter(str(s), patternOf(ctx, p), Number(n as bigint), false),
   rsplitn: ([s, n, p], ctx) => splitNIter(str(s), patternOf(ctx, p), Number(n as bigint), true),
-  split_once: ([s, p], ctx) => {
-    const text = str(s);
-    const found = patternMatcher(ctx, p)(text, 0);
-    if (!found) return none(ctx);
-    return some(ctx, [text.slice(0, found.index), text.slice(found.index + found.length)]);
-  },
-  rsplit_once: ([s, p], ctx) => {
-    const text = str(s);
-    const match = patternMatcher(ctx, p);
-    let last: { index: number; length: number } | undefined;
-    for (let found = match(text, 0); found; found = match(text, found.index + Math.max(found.length, 1))) {
-      ctx.runtime.spend();
-      last = found;
-    }
-    if (!last) return none(ctx);
-    return some(ctx, [text.slice(0, last.index), text.slice(last.index + last.length)]);
-  },
+  split_once: ([s, p], ctx) => splitOnce(ctx, str(s), p, false),
+  rsplit_once: ([s, p], ctx) => splitOnce(ctx, str(s), p, true),
   split_at: ([s, mid], ctx) => {
     const text = str(s);
     const offset = Number(mid as bigint);
@@ -380,14 +366,8 @@ const strNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
     return option(ctx, found && BigInt(byteOffset(text, found.index)), found !== undefined);
   },
   rfind: ([s, p], ctx) => {
-    const text = str(s);
-    const match = patternMatcher(ctx, p);
-    let last: { index: number } | undefined;
-    for (let found = match(text, 0); found; found = match(text, found.index + 1)) {
-      ctx.runtime.spend();
-      last = found;
-    }
-    return option(ctx, last && BigInt(byteOffset(text, last.index)), last !== undefined);
+    const found = searcherOf(str(s), patternOf(ctx, p)).nextMatchBack();
+    return found ? some(ctx, BigInt(found[0])) : none(ctx);
   },
   matches: ([s, p], ctx) => matchesIter(str(s), patternOf(ctx, p), false),
   match_indices: ([s, p], ctx) => matchesIter(str(s), patternOf(ctx, p), true),
@@ -435,6 +415,13 @@ const strNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
   },
   is_ascii: ([s]) => /^[\u0000-\u007F]*$/.test(str(s)),
 };
+
+function splitOnce(ctx: NativeContext, text: string, pattern: Value, reverse: boolean): Value {
+  const searcher = searcherOf(text, patternOf(ctx, pattern));
+  const found = reverse ? searcher.nextMatchBack() : searcher.nextMatch();
+  if (!found) return none(ctx);
+  return some(ctx, [decodeUtf8(searcher.bytes.subarray(0, found[0])), decodeUtf8(searcher.bytes.subarray(found[1]))]);
+}
 
 function replaceN(ctx: NativeContext, text: string, from: Value, to: string, count: number): string {
   const match = patternMatcher(ctx, from);
