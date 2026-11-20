@@ -151,9 +151,10 @@ function collectAfterDestruction(
     ];
     const result = countAfterDestruction(runtime, { owners, remaining, destructible, afterArrays, buffered, nested });
     count = result.count;
+    // A created object whose only holders this run frees goes by reference counting; one its own cycle holds stays.
+    for (const object of created) runtime.collectingObjects.delete(object);
     finishCollectedObjects(runtime, result.ordered, arrayStorage, nodes, result.passTwoNodes);
     forgetCollectedArrayCycles(runtime, result.freed);
-    // A created object whose only holders this run freed goes by reference counting; one its own cycle holds stays.
     releaseDropped(
       runtime,
       created.filter((object) => runtime.objects.get(object.id) === object),
@@ -247,11 +248,20 @@ function finishCollectedObjects(
 ): void {
   const objectChildren = new Map<PhpObject, unknown[]>();
   const allChildren: unknown[] = [];
+  const garbage = new Set<unknown>([...objects, ...(garbageNodes ?? []), ...(passTwoNodes ?? [])]);
   for (const object of objects) {
     const props: unknown[] = [];
     pushObject(object, props);
     objectChildren.set(object, props);
     allChildren.push(...props);
+    // PHP frees what only this object held, by reference counting, before its own handle returns to the free list.
+    const held = props.filter(
+      (value) => (value instanceof PhpObject || value instanceof PhpArray) && !garbage.has(value)
+    );
+    if (held.length > 0 && garbageNodes !== undefined) {
+      runtime.objectCycles.delete(object);
+      releaseDropped(runtime, held, true);
+    }
     runtime.freeObject(object);
   }
   runtime.pendingGcRoots.clear();
@@ -438,12 +448,14 @@ function releaseDroppedNow(
   const arrayStorage = bufferArrayCycles(runtime, dropped, roots, unreachable);
   if (runtime.arrayCycles.size !== cycleCount) unreachable.clear();
   const detached = (value: Ref | PhpArray | PhpObject): boolean => !ownedReachable(value, roots, runtime, unreachable);
-  const garbage = objectsWithin(dropped, detached);
+  // An object already freed (such as a collected cycle whose properties are being released) holds nothing any more.
+  const garbage = objectsWithin(dropped, detached).filter((object) => runtime.objects.get(object.id) === object);
   const freed = new Set<PhpObject>();
   if (garbage.length > 0) {
     runtime.spend();
-    for (const object of freeable(garbage, runtime, detached)) freed.add(object);
-    for (const object of garbage) if (!freed.has(object)) runtime.objectCycles.add(object);
+    const cyclic = new Set<PhpObject>();
+    for (const object of freeable(garbage, runtime, detached, cyclic)) freed.add(object);
+    for (const object of cyclic) runtime.objectCycles.add(object);
   }
   if (freed.size === 0 && activeReleaseObjects.size === 0) {
     retireArrays(runtime, arrayStorage, dropped);
@@ -676,11 +688,12 @@ class Release {
     const detached = (value: Ref | PhpArray | PhpObject): boolean =>
       !ownedReachable(value, this.roots, this.runtime, this.unreachable, this.retainedBefore);
     const garbage = objectsWithin([root], detached);
-    for (const object of freeable(garbage, this.runtime, detached)) {
+    const cyclic = new Set<PhpObject>();
+    for (const object of freeable(garbage, this.runtime, detached, cyclic)) {
       this.freed.add(object);
       this.track(object);
     }
-    for (const object of garbage) if (!this.freed.has(object)) this.runtime.objectCycles.add(object);
+    for (const object of cyclic) this.runtime.objectCycles.add(object);
   }
 
   private track(object: PhpObject): void {
@@ -1048,9 +1061,19 @@ class CollectionGraph {
 }
 
 /** Reference counting leaves objects that are on a cycle or reachable from one. */
-function freeable(garbage: PhpObject[], runtime: Runtime, include?: (value: Ref | PhpArray) => boolean): PhpObject[] {
+/**
+ * The garbage objects reference counting frees: those no cycle keeps. The objects on cycles go into `cycleMembers`, the
+ * roots that keep the rest alive until a collection frees them.
+ */
+function freeable(
+  garbage: PhpObject[],
+  runtime: Runtime,
+  include?: (value: Ref | PhpArray) => boolean,
+  cycleMembers?: Set<PhpObject>
+): PhpObject[] {
   const graph = new CollectionGraph(garbage, runtime, include);
   const cyclic = cyclicObjects(graph, garbage);
+  for (const object of cyclic) cycleMembers?.add(object);
   const kept = new Set<CollectionNode>();
   const pending: CollectionNode[] = [...cyclic];
   while (pending.length > 0) {

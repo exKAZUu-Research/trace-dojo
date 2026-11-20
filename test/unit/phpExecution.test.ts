@@ -5291,6 +5291,14 @@ test('gc_collect_cycles() defers what destructors of deferred objects attach or 
   }
 });
 
+test('gc_collect_cycles() frees a destructed object that only a collected object cycle held', () => {
+  expect(
+    run(
+      `<?php class N { function __destruct() { echo "dN;"; } } class M { public $o; function __destruct() { echo "dM;"; $o = new stdClass; $o->s = $o; $o->n = new N; } } $a = new M; $a->o = $a; unset($a); echo gc_collect_cycles(), ";", spl_object_id(new stdClass), ";", gc_collect_cycles();`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'dM;dN;2;2;0' });
+});
+
 test('gc_collect_cycles() frees a destructed object whose only holder the rerun destroys', () => {
   expect(
     run(
