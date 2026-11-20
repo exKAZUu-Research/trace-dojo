@@ -130,6 +130,7 @@ function formatArgs(c: Checker, format: FormatArgs): void {
     if (typeof piece === 'string') continue;
     const arg = format.args[piece.arg];
     const type = arg.ty ?? c.expr(arg, undefined);
+    c.requireTrait(type, 'Sized', arg.span);
     const trait = {
       display: 'Display',
       debug: 'Debug',
