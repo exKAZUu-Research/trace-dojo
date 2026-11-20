@@ -5,3 +5,23 @@ function inspectMethod(value: () => void) {
   return [typeof toString, method === Function.prototype.toString, computed === toString];
 }
 console.log(...inspectMethod(() => {}));
+function nestedParameter({ holder: [{ toString: method }] }: { holder: [() => void] }) {
+  return typeof method;
+}
+function inspectNested(fn: () => void) {
+  const { holder: { toString: fromObject } } = { holder: fn };
+  const [{ toString: fromArray = () => '' }] = [fn];
+  var [{ toString: fromVar }] = [fn];
+  return [typeof fromObject, fromArray === fromVar, nestedParameter({ holder: [fn] })];
+}
+console.log(...inspectNested(() => {}));
+for (const [{ toString: method }] of [[() => {}]]) console.log(typeof method);
+function inspectVar(fn: () => void) {
+  var direct: () => string;
+  {
+    var direct = fn.toString;
+  }
+  var { toString: extracted } = fn;
+  return [typeof direct, extracted === direct];
+}
+console.log(...inspectVar(() => {}));

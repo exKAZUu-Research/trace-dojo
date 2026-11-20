@@ -285,11 +285,13 @@ export class MemberChecker {
   }
 
   private checkPropertyAvailability(propertyNode: TreeNode, objectType: Type, property: Property): boolean {
-    const unsupported = [property, ...this.propertyOrigins(objectType, property.name)]
-      .map((origin) => this.unsupportedLibraryMember(propertyNode, origin))
-      .find((feature) => feature !== undefined);
-    if (unsupported) this.c.error(propertyNode, unsupportedMessage(unsupported));
-    return unsupported === undefined;
+    for (const origin of new Set([property, ...this.propertyOrigins(objectType, property.name)])) {
+      const unsupported = this.unsupportedLibraryMember(propertyNode, origin);
+      if (!unsupported) continue;
+      this.c.error(propertyNode, unsupportedMessage(unsupported));
+      return false;
+    }
+    return true;
   }
 
   /**
@@ -327,28 +329,34 @@ export class MemberChecker {
     return undefined;
   }
 
-  /**
-   * Whether a value can never be called: it is only compared or discarded, or a variable holds it whose every reference
-   * is, which an assignment to it is not. A value passed, stored, or destructured elsewhere may be called there.
-   */
   private isNeverCalled(property: TreeNode): boolean {
     const read = property.parent;
     if (isOnlyCompared(read)) return true;
-    const binding = propertyBinding(property);
-    const declarator = binding ? binding.pattern.parent : read && outermostParentheses(read).parent;
-    const name = binding?.name ?? declarator?.childForFieldName('name');
-    if (
-      declarator?.type !== 'variable_declarator' ||
-      !['const', 'let'].includes(declarator.parent?.childForFieldName('kind')?.text ?? '') ||
-      (name?.type !== 'identifier' && name?.type !== 'shorthand_property_identifier_pattern')
-    )
-      return false;
-    const symbol = this.c.scopeOf(name).lookupValue(name.text);
-    let root = declarator;
-    while (root.parent) root = root.parent;
-    return identifiersNamed(root, name.text)
-      .filter((reference) => reference.id !== name.id && this.c.scopeOf(reference).lookupValue(name.text) === symbol)
-      .every((reference) => isOnlyCompared(reference));
+    const binding = propertyBinding(property) ?? initializerBinding(read);
+    return !!binding && this.isOnlyComparedBinding(binding);
+  }
+
+  private isOnlyComparedBinding(binding: TreeNode): boolean {
+    const name = binding.text;
+    const symbol = this.c.binder.lookupValue(binding, name);
+    if (!symbol) return false;
+    const declarations = new Set(symbol.valueEntries.map((entry) => entry.name.id));
+    if (!declarations.has(binding.id)) return false;
+    // Redeclaring a simple parameter can expose the value through `arguments` in a non-strict function.
+    if (declarations.size > 1 && symbol.valueKind === 'parameter') return false;
+    const scope = symbol.scope.kind === 'module' ? this.c.root : (symbol.scope.node ?? this.c.root);
+    const visitsOnlyComparisons = (node: TreeNode): boolean => {
+      this.c.budget.spend();
+      if (
+        !declarations.has(node.id) &&
+        isValueName(node, name) &&
+        !isOnlyCompared(node) &&
+        this.c.binder.lookupValue(node, name) === symbol
+      )
+        return false;
+      return node.namedChildren.every((child) => child === null || visitsOnlyComparisons(child));
+    };
+    return visitsOnlyComparisons(scope);
   }
 
   indexSignatureType(type: Type, name: string): Type | undefined {
@@ -604,30 +612,30 @@ function outermostParentheses(node: TreeNode): TreeNode {
   return expression;
 }
 
-function identifiersNamed(root: TreeNode, name: string): TreeNode[] {
-  const found: TreeNode[] = [];
-  const visit = (node: TreeNode): void => {
-    if (
-      ['identifier', 'shorthand_property_identifier', 'shorthand_property_identifier_pattern'].includes(node.type) &&
-      node.text === name
-    )
-      found.push(node);
-    for (const child of node.namedChildren) if (child) visit(child);
-  };
-  visit(root);
-  return found;
+function isValueName(node: TreeNode, name: string): boolean {
+  return (
+    ['identifier', 'shorthand_property_identifier', 'shorthand_property_identifier_pattern'].includes(node.type) &&
+    node.text === name
+  );
 }
 
-function propertyBinding(property: TreeNode): { name: TreeNode; pattern: TreeNode } | undefined {
+function propertyBinding(property: TreeNode): TreeNode | undefined {
   const entry = property.parent;
-  if (property.type === 'shorthand_property_identifier_pattern') {
-    const pattern = entry?.type === 'object_assignment_pattern' ? entry.parent : entry;
-    return pattern?.type === 'object_pattern' ? { name: property, pattern } : undefined;
-  }
+  if (property.type === 'shorthand_property_identifier_pattern') return property;
   if (entry?.type !== 'pair_pattern' || entry.childForFieldName('key')?.id !== property.id) return undefined;
   const value = entry.childForFieldName('value');
   const name = value && (defaultedTarget(value) ?? value);
-  return name && entry.parent ? { name, pattern: entry.parent } : undefined;
+  return name?.type === 'identifier' ? name : undefined;
+}
+
+function initializerBinding(read: TreeNode | null): TreeNode | undefined {
+  if (!read) return undefined;
+  const initializer = outermostParentheses(read);
+  const declarator = initializer.parent;
+  if (declarator?.type !== 'variable_declarator' || declarator.childForFieldName('value')?.id !== initializer.id)
+    return undefined;
+  const name = declarator.childForFieldName('name');
+  return name?.type === 'identifier' ? name : undefined;
 }
 
 /** The outermost link of the chain a link belongs to, as `a?.b.c()` for `a?.b`. */
