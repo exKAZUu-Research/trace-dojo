@@ -29,6 +29,93 @@ export function recordGcRoot(runtime: Runtime, value: PhpArray | PhpObject, coll
   return collected;
 }
 
+interface DeferredState<N extends object, O extends N> {
+  protectedObjects: Set<O>;
+  inDegree: Map<N, number>;
+  freed: Set<N>;
+  order: O[];
+  isObject: (node: N) => node is O;
+  children: (node: N) => N[];
+}
+
+export function deferredHandleOrder<N extends object, O extends N>(
+  roots: O[],
+  protectedObjects: Set<O>,
+  isObject: (node: N) => node is O,
+  children: (node: N) => N[]
+): O[] {
+  const state: DeferredState<N, O> = {
+    protectedObjects,
+    inDegree: countInDegrees(protectedObjects, isObject, children),
+    freed: new Set<N>(),
+    order: [],
+    isObject,
+    children,
+  };
+  const pendingRoots: O[] = [...protectedObjects].toReversed();
+  for (let index = roots.length - 1; index >= 0; index--) pendingRoots.push(roots[index]);
+  while (pendingRoots.length > 0) {
+    const start = pendingRoots.pop() as O;
+    if (!state.freed.has(start)) pendingRoots.push(...releaseDeferredRoot(start, state));
+  }
+  return state.order;
+}
+
+function releaseDeferredRoot<N extends object, O extends N>(start: O, state: DeferredState<N, O>): O[] {
+  const nested: O[] = [];
+  const stack: { node: N; finish: boolean }[] = [{ node: start, finish: false }];
+  while (stack.length > 0) {
+    const { node, finish } = stack.pop() as { node: N; finish: boolean };
+    if (finish) {
+      if (state.isObject(node)) state.order.push(node);
+      continue;
+    }
+    if (state.freed.has(node)) continue;
+    state.freed.add(node);
+    if (state.isObject(node)) stack.push({ node, finish: true });
+    enqueueReleasedChildren(node, state, stack, nested);
+  }
+  return nested;
+}
+
+function countInDegrees<N extends object, O extends N>(
+  protectedObjects: Set<O>,
+  isObject: (node: N) => node is O,
+  children: (node: N) => N[]
+): Map<N, number> {
+  const inDegree = new Map<N, number>();
+  const counted = new Set<N>();
+  const scan: N[] = [...protectedObjects];
+  while (scan.length > 0) {
+    const node = scan.pop() as N;
+    if (counted.has(node)) continue;
+    counted.add(node);
+    for (const child of children(node)) {
+      if (isObject(child) && !protectedObjects.has(child)) continue;
+      inDegree.set(child, (inDegree.get(child) ?? 0) + 1);
+      if (!counted.has(child)) scan.push(child);
+    }
+  }
+  return inDegree;
+}
+
+function enqueueReleasedChildren<N extends object, O extends N>(
+  node: N,
+  state: DeferredState<N, O>,
+  stack: { node: N; finish: boolean }[],
+  nested: O[]
+): void {
+  const next = state.children(node);
+  for (let index = next.length - 1; index >= 0; index--) {
+    const child = next[index];
+    if (state.freed.has(child) || (state.isObject(child) && !state.protectedObjects.has(child))) continue;
+    const remaining = (state.inDegree.get(child) ?? 1) - 1;
+    state.inDegree.set(child, remaining);
+    if (remaining <= 0) stack.push({ node: child, finish: false });
+    else if (state.isObject(child)) nested.push(child);
+  }
+}
+
 export class GcRoots<T extends object> {
   private readonly positions = new Map<T, number>();
   private readonly slots: (T | undefined)[] = [];

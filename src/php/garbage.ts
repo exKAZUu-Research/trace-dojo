@@ -1,7 +1,7 @@
 // code-gauge-allow-file fileNcss 999 -- Holds object ownership, reachability and release with their shared helpers.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { type CleanupException, withCleanupExceptions, withPendingException } from './errors';
-import { recordGcRoot } from './gcRoots';
+import { deferredHandleOrder, recordGcRoot } from './gcRoots';
 import { ExitSignal, type Frame, PhpThrow, type Runtime } from './runtime';
 import {
   arrayHolderCount,
@@ -147,7 +147,7 @@ function collectAfterDestruction(
     const after = mark(runtime, false, afterArrays);
     const remaining = handles.filter((object) => runtime.objects.get(object.id) === object && !after.has(object));
     const allowed = new Set(remaining);
-    count = countAfterDestruction(
+    const { count: collectedCount, ordered } = countAfterDestruction(
       runtime,
       remaining,
       allowed,
@@ -156,11 +156,7 @@ function collectAfterDestruction(
       arrayCandidates,
       afterArrays
     );
-    const deferred = collectibleGraph(destructible, afterArrays, new Set(), allowed).objects;
-    const ordered = [
-      ...remaining.filter((object) => !deferred.has(object)),
-      ...remaining.filter((object) => deferred.has(object)),
-    ];
+    count = collectedCount;
     finishCollectedObjects(runtime, ordered, arrayStorage);
   });
   return count;
@@ -195,7 +191,7 @@ function countAfterDestruction(
   destructedInBuffer: Set<PhpObject>,
   arrayCandidates: PhpArray[],
   afterArrays: Set<PhpArray>
-): number {
+): { count: number; ordered: PhpObject[] } {
   const graph = new CollectionGraph(
     remaining,
     runtime,
@@ -206,15 +202,20 @@ function countAfterDestruction(
   const referenced = referencedGarbage(graph, [...remaining, ...arrayCandidates]);
   // Zend drops the last temporary reference to the current destructor's receiver without freeing it.
   for (const object of destructedInBuffer) if (allowed.has(object) && !referenced.has(object)) cyclic.add(object);
-  const protectedObjects = collectibleGraph(
-    destructible.filter((object) => cyclic.has(object)),
-    afterArrays,
-    new Set(),
-    allowed
-  ).objects;
+  const deferredRoots = destructible.filter((object) => cyclic.has(object));
+  const protectedObjects = collectibleGraph(deferredRoots, afterArrays, new Set(), allowed).objects;
   const excluded = new Set(destructible.filter((object) => !protectedObjects.has(object)));
   const counted = collectibleGraph([...cyclic, ...cyclicArrays], afterArrays, excluded, allowed);
-  return counted.objects.size + counted.arrays.size;
+  const ordered = [
+    ...remaining.filter((object) => !protectedObjects.has(object)),
+    ...deferredHandleOrder<CollectionNode, PhpObject>(
+      deferredRoots,
+      protectedObjects,
+      (node): node is PhpObject => node instanceof PhpObject,
+      (node) => graph.children(node)
+    ),
+  ];
+  return { count: counted.objects.size + counted.arrays.size, ordered };
 }
 
 /**

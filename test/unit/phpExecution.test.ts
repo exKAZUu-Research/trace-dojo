@@ -3942,6 +3942,34 @@ echo spl_object_id($x), spl_object_id($y), spl_object_id($z);
 `);
   expect(destructibleBeforePlainHandles).toMatchObject({ kind: 'executed', stdout: 'D4|123' });
 
+  for (const [body, expected] of [
+    [
+      '$p = new Plain; $p->next = $p; $p->o = new Node(1); $p2 = new Plain; $p2->next = $p2; unset($p, $p2);',
+      '~1 2 3,1,2,4',
+    ],
+    ['$p = new Plain; $p->next = $p; $a = new Node(1); $a->next = $a; $a->o = $p; unset($a, $p);', '~1 2 1,2,3,4'],
+    [
+      '$a = new Node(1); $b = new Plain; $c = new Plain; $a->next = $a; $a->o = $b; $b->next = $b; $b->o = $c; unset($a, $b, $c);',
+      '~1 3 2,3,1,4',
+    ],
+    [
+      '$a = new Node(1); $c = new Plain; $b = new Plain; $a->next = $a; $a->o = $c; $c->o = $b; $b->next = $b; unset($a, $c, $b);',
+      '~1 3 3,1,2,4',
+    ],
+  ] as const) {
+    expect(
+      run(String.raw`<?php
+class Node { public $next; public $o; function __construct(public $n = 0) {} function __destruct() { echo "~{$this->n} "; } }
+class Plain { public $next; public $o; }
+${body}
+echo gc_collect_cycles(), ' ';
+$ids = [];
+for ($i = 0; $i < 4; $i++) { $k[] = new Plain; $ids[] = spl_object_id(end($k)); }
+echo implode(',', $ids);
+`)
+    ).toMatchObject({ kind: 'executed', stdout: expected });
+  }
+
   const arrayMergeStorageLayout = run(String.raw`<?php
 foreach ([
   array_merge([5 => 1, 3 => 2, 9 => 3], [4]),
