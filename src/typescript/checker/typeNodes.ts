@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 657 -- Resolves every kind of type syntax a program writes, each needing its own rule.
+// code-gauge-allow-file fileNcss 660 -- Resolves every kind of type syntax a program writes, each needing its own rule.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
@@ -480,11 +480,13 @@ export class TypeNodes {
   }
 
   checkDeferredReferenceArguments(type: Type, depth = 0): void {
-    if (type.kind !== 'object' || !type.resolveReference || this.checkedReferenceArguments.has(type)) return;
+    if (type.kind !== 'object' || !type.resolveReference) return;
+    const written = type.origin ?? type;
+    if (this.checkedReferenceArguments.has(written)) return;
     this.c.budget.spend();
     if (depth >= LIMITS.maxCallDepth) throw new ExecutionLimitError('operations');
-    this.checkedReferenceArguments.add(type);
-    for (const argument of type.typeArguments ?? []) this.checkDeferredReferenceArguments(argument, depth + 1);
+    this.checkedReferenceArguments.add(written);
+    for (const argument of written.typeArguments ?? []) this.checkDeferredReferenceArguments(argument, depth + 1);
   }
 
   private defersReference(node: TreeNode, arguments_: TreeNode[], parameterCount: number): boolean {
