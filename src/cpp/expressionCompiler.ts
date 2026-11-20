@@ -654,9 +654,9 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
           `演算子 ${operator} は ${typeName(left.type)} と ${typeName(right.type)} には使えません。`
         );
       }
-      if (operand.type.kind === 'void') return this.error(row, '値を返さない関数（void）の結果は使えません。');
       if (operand.functions)
         return this.error(row, `関数 ${operand.functions.name} の後に (...) を書いて呼び出してください。`);
+      if (operand.type.kind === 'void') return this.error(row, '値を返さない関数（void）の結果は使えません。');
     }
     const leftValue = this.rvalue(left);
     const rightValue = this.rvalue(right);
@@ -1474,8 +1474,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       const test = libraryBool.run;
       return (frame) => test(frame) !== 0;
     }
-    if (type.kind === 'void') return this.error(row, '値を返さない関数（void）の結果は条件に使えません。');
     if (expr.functions) return this.error(row, `関数 ${expr.functions.name} の後に (...) を書いて呼び出してください。`);
+    if (type.kind === 'void') return this.error(row, '値を返さない関数（void）の結果は条件に使えません。');
     return this.error(row, `${typeName(type)} 型の値は条件に使えません。`);
   }
 

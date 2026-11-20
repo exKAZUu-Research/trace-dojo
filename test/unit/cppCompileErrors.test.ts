@@ -1344,3 +1344,15 @@ int main() { constexpr auto n = ${query}; }`;
     });
   }
 );
+
+test.each(['if (f) {}', 'while (f) {}', 'bool b = f;', 'int x = f + 1;'])(
+  'asks to call a function named without parentheses in %s',
+  (body) => {
+    const program = `int f() { return 0; }
+int main() { ${body} }`;
+    expect(executeProgram('cpp', program)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [{ row: 1, message: '関数 f の後に (...) を書いて呼び出してください。' }],
+    });
+  }
+);
