@@ -1,16 +1,37 @@
 import { normalize } from './infer';
-import type { TraitSolver } from './traits';
+import type { Answer, TraitSolver } from './traits';
 import { shallow, type Type } from './types';
 
 type AdtType = Type & { kind: 'adt' };
 
 /** The conversions `From` provides in the standard library that learning programs use. */
-export function conversionExists(solver: TraitSolver, source: Type, target: Type): boolean {
+export function conversionExists(solver: TraitSolver, source: Type, target: Type): Answer {
   const t = normalize(shallow(target));
-  if (t.kind === 'adt') return adtConversionExists(solver, source, t);
-  if (t.kind === 'int') return intFrom(source, t.name);
-  if (t.kind === 'float') return floatFrom(source, t.name);
-  return t.kind === 'char' && source.kind === 'int' && source.name === 'u8';
+  if (t.kind === 'adt') {
+    const clone = borrowedSequenceClone(solver, source, t);
+    if (clone !== undefined) return clone;
+    return adtConversionExists(solver, source, t) ? 'yes' : 'no';
+  }
+  if (t.kind === 'int') return intFrom(source, t.name) ? 'yes' : 'no';
+  if (t.kind === 'float') return floatFrom(source, t.name) ? 'yes' : 'no';
+  return t.kind === 'char' && source.kind === 'int' && source.name === 'u8' ? 'yes' : 'no';
+}
+
+function borrowedSequenceClone(solver: TraitSolver, source: Type, target: AdtType): Answer | undefined {
+  if (source.kind !== 'ref') return undefined;
+  const inner = normalize(shallow(source.target));
+  const arg = target.args[0];
+  if (target.def.builtin === 'Vec' && (inner.kind === 'slice' || inner.kind === 'array')) {
+    return cloneSequenceElements(solver, inner.elem, arg);
+  }
+  if (target.def.builtin !== 'Box' || inner.kind !== 'slice') return undefined;
+  const boxed = normalize(shallow(arg));
+  return boxed.kind === 'slice' ? cloneSequenceElements(solver, inner.elem, boxed.elem) : undefined;
+}
+
+function cloneSequenceElements(solver: TraitSolver, elem: Type, expected: Type): Answer {
+  if (!solver.unifier.tryUnify(elem, expected)) return 'no';
+  return solver.implements(elem, { trait: solver.program.traitDef('Clone'), args: [] });
 }
 
 function adtConversionExists(solver: TraitSolver, source: Type, t: AdtType): boolean {
@@ -54,7 +75,6 @@ function vecFrom(solver: TraitSolver, source: Type, elem: Type): boolean {
   if (source.kind === 'array') return solver.unifier.tryUnify(source.elem, elem);
   if (source.kind === 'ref') {
     const inner = shallow(source.target);
-    if (inner.kind === 'slice' || inner.kind === 'array') return solver.unifier.tryUnify(inner.elem, elem);
     if (inner.kind === 'str') return solver.unifier.tryUnify(elem, { kind: 'int', name: 'u8' });
   }
   if (source.kind === 'adt' && source.def.builtin === 'String') {
@@ -93,7 +113,7 @@ function boxedUnsized(solver: TraitSolver, inner: Type & { kind: 'str' | 'slice'
   const target = s.kind === 'ref' ? normalize(shallow(s.target)) : s;
   if (inner.kind === 'str') return target.kind === 'str' || (target.kind === 'adt' && target.def.builtin === 'String');
   const elem =
-    target.kind === 'slice' || (target.kind === 'array' && s.kind !== 'ref')
+    (target.kind === 'slice' || target.kind === 'array') && s.kind !== 'ref'
       ? target.elem
       : target.kind === 'adt' && target.def.builtin === 'Vec' && s.kind !== 'ref'
         ? target.args[0]

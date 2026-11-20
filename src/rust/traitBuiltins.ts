@@ -482,7 +482,7 @@ function fromInto({ solver, t, ref }: Goal): Answer {
   if (source.kind === 'adt' && ['ParseError', 'Unsigned', 'Signed', 'Indexed'].includes(source.def.builtin as string))
     return 'unknown';
   if (solver.unifier.tryUnify(t, source)) return 'yes';
-  return conversionExists(solver, source, t) ? 'yes' : 'no';
+  return conversionExists(solver, source, t);
 }
 
 /** Integers convert to each other, failing out of range; `char`s from `u32`s, and `u8`s from `char`s. */

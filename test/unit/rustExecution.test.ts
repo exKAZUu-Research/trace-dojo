@@ -1752,6 +1752,28 @@ test('rejects Rust float bitwise compound assignments after inference', () => {
   expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: '2 false\n' });
 });
 
+test('requires Rust Clone only for borrowed sequence conversions', () => {
+  for (const convert of ['Vec::from', 'Box::<[Item]>::from']) {
+    const program = `struct Item(i32);
+fn main() {
+    let source = [Item(1)];
+    let _ = ${convert}(&source[..]);
+}`;
+    expect(executeProgram('rust', program)).toMatchObject({ kind: 'compileError' });
+  }
+  const valid = `struct Item(i32);
+impl Clone for Item {
+    fn clone(&self) -> Self { print!("C"); Item(self.0 + 1) }
+}
+fn main() {
+    let owned = Vec::from([Item(1)]);
+    let a = Vec::from(&owned[..]);
+    let b = Box::<[Item]>::from(&owned[..]);
+    println!(" {} {} {}", owned[0].0, a[0].0, b[0].0);
+}`;
+  expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: 'CC 1 2 2\n' });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {
