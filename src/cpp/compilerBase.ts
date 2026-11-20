@@ -1,5 +1,6 @@
 import { compileError, unsupported } from './errors';
 import type { Expr } from './expr';
+import { isSdkMemberDeclared } from './library/libcGlobals';
 import type { Library, LibraryTemplate } from './library/registry';
 import { type Entity, FunctionContext, Scope } from './scopes';
 import { fieldOf, hasToken, type Syntax } from './syntax';
@@ -232,9 +233,7 @@ export abstract class CompilerBase {
   }
 
   protected missingMember(cls: ClassInfo, name: string, row: number): never {
-    for (let current: ClassInfo | undefined = cls; current; current = current.base) {
-      if (current.library && current.name.startsWith('std::')) this.unsupported(row, `${cls.name}::${name}`);
-    }
+    if (isSdkMemberDeclared(cls, name)) this.unsupported(row, `${cls.name}::${name}`);
     return this.error(row, `${cls.name} に ${name} というメンバはありません。`);
   }
 

@@ -54,12 +54,22 @@ int main() { ${body} }`;
   });
 });
 
-test('reports a missing member on a user-defined C++ class', () => {
-  const program = `struct Counter { int length; };
-int main() { Counter value{0}; return value.lenght; }`;
+test.each([
+  ['struct Counter { int length; };', 'Counter value{0}; return value.lenght;', 'Counter', 'lenght'],
+  ['#include <vector>', 'std::vector<int> value; value.lenght();', 'std::vector<int>', 'lenght'],
+  ['#include <vector>', 'std::vector<bool> value; value.data();', 'std::vector<bool>', 'data'],
+  [
+    '#include <stdexcept>\nstruct Error : std::runtime_error { Error() : std::runtime_error("bad") {} int code() const { return 1; } };',
+    'Error value; return value.cod();',
+    'Error',
+    'cod',
+  ],
+])('reports a genuinely missing C++ member in %s', (prefix, body, type, member) => {
+  const program = `${prefix}
+int main() { ${body} }`;
   expect(executeProgram('cpp', program)).toMatchObject({
     kind: 'compileError',
-    diagnostics: [{ row: 1, message: 'Counter に lenght というメンバはありません。' }],
+    diagnostics: [{ row: prefix.split('\n').length, message: `${type} に ${member} というメンバはありません。` }],
   });
 });
 

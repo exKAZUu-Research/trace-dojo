@@ -1,5 +1,6 @@
-import { type FunctionInfo, type Type, typeName, unqualified } from '../types';
+import { type ClassInfo, type FunctionInfo, type Type, typeName, unqualified } from '../types';
 import sdk from './libcGlobalDeclarations.json';
+import members from './libcMembers.json';
 
 const declarations: Readonly<Record<string, (string | number)[][]>> = sdk.declarations;
 const types: Readonly<Record<string, number>> = sdk.types;
@@ -7,6 +8,7 @@ const macros: Readonly<Record<string, number>> = sdk.macros;
 const functionMacros: Readonly<Record<string, number>> = sdk.functionMacros;
 const standard: Readonly<Record<string, (number | string)[][]>> = sdk.standard;
 const stdDefinitions: Readonly<Record<string, number>> = sdk.stdDefinitions;
+const sdkMembers: Readonly<Record<string, readonly string[]>> = members;
 type MathWrapper = 'integer' | 'float' | 'double' | 'ldouble';
 const mathCalls: Readonly<Record<string, Partial<Record<MathWrapper, string>>>> = sdk.mathCalls;
 type FloatingWrapper = Exclude<MathWrapper, 'integer'>;
@@ -87,6 +89,21 @@ export function isSdkStdDeclared(name: string, headers: ReadonlySet<string>, kin
 
 export function isSdkStdForwardOnly(name: string, headers: ReadonlySet<string>): boolean {
   return Object.hasOwn(stdDefinitions, name) && !visibleIn(stdDefinitions[name], headers);
+}
+
+export function isSdkMemberDeclared(cls: ClassInfo, name: string): boolean {
+  const key = sdkClassKey(cls);
+  if (key && Object.hasOwn(sdkMembers, key) && sdkMembers[key].includes(name)) return true;
+  if (cls.base && isSdkMemberDeclared(cls.base, name)) return true;
+  return cls.library?.additionalPublicBases?.some((base) => isSdkMemberDeclared(base, name)) === true;
+}
+
+function sdkClassKey(cls: ClassInfo): string | undefined {
+  if (!cls.library) return;
+  const name = /^std::(\w+)(?:<.*>)?$/.exec(cls.name)?.[1];
+  const element = cls.library.args[0];
+  if (name === 'vector' && element?.kind === 'int' && element.name === 'bool') return 'vector<bool>';
+  return name;
 }
 
 export function mathWrapperCall(name: string, kind: MathWrapper): string | undefined {
