@@ -5178,4 +5178,10 @@ try { range(0.1, null, 1); } catch (ValueError $e) { echo explode("\\n", $e->get
     stdout:
       '\nDeprecated: range(): Passing null to parameter #2 ($end) of type string|int|float is deprecated in /main.php on line 2\narray(1) {\n  [0]=>\n  int(0)\n}\n\nDeprecated: range(): Passing null to parameter #2 ($end) of type string|int|float is deprecated in /main.php on line 3\n#0 /main.php(3): range(0.1, 0, 1)\n',
   });
+
+  expect(
+    run(
+      `<?php $a = range(0, 8); $a["a"] = 3; array_splice($a, 1, 3, [7]); unset($a[4]); $a[-2] = 7; mt_srand(0); var_dump(array_rand($a));`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'int(5)\n' });
 });

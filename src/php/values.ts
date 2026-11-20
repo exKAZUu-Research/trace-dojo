@@ -401,8 +401,9 @@ export class PhpArray {
     keepAppendKey = false
   ): void {
     const previousSize = this.map.size;
-    this.capacityHint = Math.max(this.capacityHint, previousSize);
     this.map = this.table(entries);
+    this.capacityHint =
+      typeof rebuild === 'object' && 'start' in rebuild ? this.size : Math.max(this.capacityHint, previousSize);
     allocationHandler(Math.max(0, this.size - previousSize), this.size);
     (rebuild ? this.ordered() : this.order)?.replace(this.map.physicalKeys(), packed, rebuild);
     this.orderPacked = packed;

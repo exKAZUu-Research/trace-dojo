@@ -354,6 +354,7 @@ export class ArrayOrder {
       this.storageVersion++;
       this.nextIndex = this.entries.size;
     }
+    if (typeof rebuild === 'object' && 'start' in rebuild) this.capacity = 8;
     while (this.capacity < this.nextIndex) this.capacity *= 2;
     this.listLayout = orderedKeys.every((key, index) => key === BigInt(index));
     this.packed = packed && (this.listLayout || positions !== undefined);
