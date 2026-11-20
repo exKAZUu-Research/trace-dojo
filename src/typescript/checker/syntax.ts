@@ -91,6 +91,10 @@ export function arrayLiteralLength(array: TreeNode): number {
   return parts.length === 0 || parts.at(-1)?.type === ',' ? commas : commas + 1;
 }
 
+export function isDirectEmptyArray(node: TreeNode | null | undefined): boolean {
+  return node?.type === 'array' && arrayLiteralLength(node) === 0;
+}
+
 /** The elements of an array literal or pattern with their positions, which holes such as `[, x]` skip. */
 export function arrayPatternElements(pattern: TreeNode): { element: TreeNode; index: number }[] {
   const elements: { element: TreeNode; index: number }[] = [];

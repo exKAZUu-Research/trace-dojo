@@ -14,7 +14,7 @@ import { FlowState, type State } from './flow';
 import type { FunctionContext } from './functions';
 import { baseIndexMismatch, checkDuplicateIndexSignatures, checkIndexConformance } from './indexConformance';
 import type { Scope, Sym } from './scopes';
-import { arrayLiteralLength, hasToken, named, skipParentheses } from './syntax';
+import { hasToken, isDirectEmptyArray, named, skipParentheses } from './syntax';
 import {
   anyType,
   errorType,
@@ -287,7 +287,7 @@ export class StatementChecker {
       this.c.flow.set(key, { type: this.c.flow.assignmentReduced(annotation, regularOf(valueType)), assigned: true });
       return;
     }
-    if (this.isEmptyArrayLiteral(value)) {
+    if (isDirectEmptyArray(value)) {
       // `const a = []` evolves as elements are pushed.
       this.c.expressions.setVariableType(symbol, this.c.arrayType(anyType));
       this.c.flow.set(key, { type: this.c.arrayType(neverType), assigned: true, evolving: true });
@@ -354,11 +354,6 @@ export class StatementChecker {
     );
   }
 
-  private isEmptyArrayLiteral(node: TreeNode): boolean {
-    const expression = skipParentheses(node);
-    return expression.type === 'array' && arrayLiteralLength(expression) === 0;
-  }
-
   /** The type of a variable from its declaration, computed ahead of its statement when used earlier. */
   declaredVariableType(symbol: Sym, declaration: TreeNode): Type {
     if (declaration.type === 'for_in_statement') return this.loopVariableType(declaration, symbol);
@@ -370,7 +365,7 @@ export class StatementChecker {
     if (nameNode.type === 'identifier') {
       if (annotation) return annotation;
       if (!value || this.c.assignments.isAutoTyped(symbol, declaration)) return anyType;
-      if (this.isEmptyArrayLiteral(value)) return this.c.arrayType(anyType);
+      if (isDirectEmptyArray(value)) return this.c.arrayType(anyType);
       const flow = this.c.flow.current;
       this.c.flow.current = new FlowState();
       try {

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 749 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
+// code-gauge-allow-file fileNcss 752 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { typesAtConstructorExit } from './assignmentFlow';
@@ -192,7 +192,10 @@ export class ClassChecker {
         if (structure) return structure;
         structure = emptyStructure();
         const own = this.membersOf(node, info, true);
-        own.properties.set('prototype', simpleProperty('prototype', info.instanceType, { readonly: true }));
+        own.properties.set(
+          'prototype',
+          simpleProperty('prototype', this.prototypeInstanceType(info.instanceType), { readonly: true })
+        );
         const baseStatic = this.baseStaticType(node);
         if (baseStatic) {
           for (const [memberName, property] of this.c.structureOf(baseStatic).properties) {
@@ -210,6 +213,11 @@ export class ClassChecker {
         return structure;
       },
     };
+  }
+
+  private prototypeInstanceType(instance: ObjectType): Type {
+    const parameters = [...(instance.outerTypeParameters ?? []), ...(instance.typeParameters ?? [])];
+    return this.c.instantiate(instance, new Map(parameters.map((parameter) => [parameter.id, anyType])));
   }
 
   private anonymousClassName(node: TreeNode): string {

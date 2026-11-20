@@ -1,0 +1,5 @@
+(1,42): error TS2345: Argument of type '1' is not assignable to parameter of type 'never'.
+(3,12): error TS2345: Argument of type '1' is not assignable to parameter of type 'never'.
+(5,20): error TS2345: Argument of type '"x"' is not assignable to parameter of type 'never'.
+(7,33): error TS2322: Type '1' is not assignable to type 'never'.
+(9,1): error TS2322: Type '1' is not assignable to type 'never'.

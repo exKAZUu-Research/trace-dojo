@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 689 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
+// code-gauge-allow-file fileNcss 692 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
@@ -720,11 +720,13 @@ export class Calls {
   }
 
   /** Checks each argument against its parameter, reporting mismatches when `report`. */
+  // code-gauge-allow functionCognitiveComplexity 16 -- Checks correlated rest alternatives before checking positions independently.
   private checkArguments(signature: Signature, args: TreeNode[], report: boolean, call?: TreeNode): boolean {
     const restIndex = signature.parameters.length - 1;
     const restType = signature.parameters[restIndex]?.rest ? signature.parameters[restIndex].type : undefined;
-    const genericRest = this.c.relations.isGenericRestType(restType);
-    if (genericRest && args.slice(0, restIndex).some((arg) => arg.type === 'spread_element'))
+    const structuredRest = restType?.kind === 'union' || this.c.relations.isGenericRestType(restType);
+    const leadingSpread = args.slice(0, restIndex).some((arg) => arg.type === 'spread_element');
+    if (structuredRest && leadingSpread)
       return this.checkRestTupleArguments(
         this.c.tupleType(
           signature.parameters.map((parameter) => ({
@@ -737,10 +739,7 @@ export class Calls {
         report,
         args[0] ?? call
       );
-    if (
-      (isTrailingRestTuple(signature) || genericRest) &&
-      !args.slice(0, restIndex).some((arg) => arg.type === 'spread_element')
-    ) {
+    if ((isTrailingRestTuple(signature) || structuredRest) && !leadingSpread) {
       const fixedFit = this.checkArguments(
         { ...signature, parameters: signature.parameters.slice(0, -1) },
         args.slice(0, restIndex),
@@ -1055,6 +1054,8 @@ export class Calls {
 
   private spreadElements(arg: TreeNode, type: Type): TupleElement[] {
     if (type.kind === 'object' && type.objectKind === 'tuple') return type.tuple?.elements ?? [];
+    if (type.kind === 'union' && type.types.every((member) => this.c.isArrayOrTuple(member)))
+      return [{ type, rest: true, optional: false }];
     const element = this.c.patterns.iteratedType(arg, type);
     return [{ type: this.c.arrayType(element), rest: true, optional: false }];
   }

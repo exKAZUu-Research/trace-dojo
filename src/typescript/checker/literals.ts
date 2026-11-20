@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 630 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
+// code-gauge-allow-file fileNcss 631 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExpressionListFlow, tupleArgumentContexts } from './callArity';
@@ -174,7 +174,11 @@ export class LiteralChecker {
   ): Type {
     const tupleElements = types.flatMap(({ type, spread }, index) => {
       if (!spread) return [{ type: isConstContext ? regularOf(type) : type, optional: false, rest: false }];
-      if (type.kind === 'object' && type.objectKind === 'tuple') return type.tuple?.elements ?? [];
+      if (
+        (type.kind === 'object' && type.objectKind === 'tuple') ||
+        (type.kind === 'union' && type.types.every((member) => this.c.isArrayOrTuple(member)))
+      )
+        return [{ type, optional: false, rest: true }];
       return [
         {
           type: this.c.arrayType(this.spreadElementType(elements[index] as TreeNode, type)),
@@ -183,9 +187,12 @@ export class LiteralChecker {
         },
       ];
     });
-    const tuple = { ...this.c.tupleType(tupleElements, readonly), id: newTypeId() };
-    this.tupleLiterals.add(tuple.id);
-    return tuple;
+    return mapType(this.c.tupleType(tupleElements, readonly), (type) => {
+      if (type.kind !== 'object') return type;
+      const tuple = { ...type, id: newTypeId() };
+      this.tupleLiterals.add(tuple.id);
+      return tuple;
+    });
   }
 
   /** The elements a spread adds to an array literal; `never` is an array there, as TypeScript's `isArrayLikeType` has it. */

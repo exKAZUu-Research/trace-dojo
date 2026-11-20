@@ -29,6 +29,7 @@ import type { Scope } from './scopes';
 import { Signatures } from './signatures';
 import { StatementChecker } from './statements';
 import { bigIntPropertyNames } from './syntax';
+import { tupleType } from './tupleTypes';
 import { TypeNodes } from './typeNodes';
 import { TypeOperators } from './typeOperators';
 import {
@@ -40,7 +41,6 @@ import {
   type IndexInfo,
   intersectionOf,
   isIntrinsic,
-  literalType,
   type MappedInfo,
   newTypeId,
   numberType,
@@ -50,7 +50,6 @@ import {
   propertyAccessType,
   regularOf,
   type Signature,
-  simpleProperty,
   startTypeCaches,
   stringType,
   type Structure,
@@ -666,35 +665,8 @@ export class Checker {
     };
   }
 
-  tupleType(elements: TupleElement[], readonly = false): ObjectType {
-    const flat = flattenTupleElements(elements);
-    // A tuple of only an array's rest is that array, as TypeScript normalizes `[...values: number[]]`.
-    const [only] = flat;
-    if (flat.length === 1 && only.rest && (this.isArrayType(only.type) || this.isReadonlyArrayType(only.type)))
-      return this.arrayType(this.restElementType(only.type), readonly);
-    let structure: Structure | undefined;
-    const tuple: ObjectType = {
-      kind: 'object',
-      id: newTypeId(),
-      objectKind: 'tuple',
-      tuple: { elements: flat, readonly },
-      resolve: () => {
-        if (structure) return structure;
-        const base = this.arrayType(this.elementTypeOf(tuple), readonly).resolve();
-        const properties = new Map(base.properties);
-        for (const [index, member] of flat.entries()) {
-          if (member.rest) break;
-          properties.set(
-            String(index),
-            simpleProperty(String(index), member.type, { optional: member.optional, readonly })
-          );
-        }
-        properties.set('length', simpleProperty('length', tupleLengthType(flat), { readonly }));
-        structure = { ...base, properties };
-        return structure;
-      },
-    };
-    return tuple;
+  tupleType(elements: TupleElement[], readonly = false): Type {
+    return tupleType(this, elements, readonly);
   }
 
   restElementType(type: Type): Type {
@@ -1088,26 +1060,4 @@ function isLiteralType(type: Type): boolean {
 /** The primitive of a literal other than a unique symbol, which TypeScript's `getBaseTypeOfLiteralType` keeps. */
 function baseTypeOfUnit(type: Type): Type {
   return type.kind === 'literal' && typeof type.value !== 'symbol' ? primitiveOfLiteral(type) : type;
-}
-
-/** Tuple elements with each rest element of a tuple type spread into its own elements. */
-function flattenTupleElements(elements: TupleElement[]): TupleElement[] {
-  const flat = elements.flatMap((element) =>
-    element.rest && element.type.kind === 'object' && element.type.objectKind === 'tuple'
-      ? (element.type.tuple?.elements ?? [])
-      : [element]
-  );
-  const lastRequired = flat.findLastIndex((element) => !element.optional && !element.rest);
-  return flat.map((element, index) =>
-    element.optional && index < lastRequired
-      ? { ...element, optional: false, type: unionOf([element.type, undefinedType]) }
-      : element
-  );
-}
-
-/** The lengths a tuple may have: any with a rest element, else each from its required elements' count to all. */
-function tupleLengthType(elements: TupleElement[]): Type {
-  if (elements.some((element) => element.rest)) return numberType;
-  const required = elements.filter((element) => !element.optional).length;
-  return unionOf(Array.from({ length: elements.length - required + 1 }, (_, offset) => literalType(required + offset)));
 }

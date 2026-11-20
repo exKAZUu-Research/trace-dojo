@@ -14,9 +14,9 @@ import { nonNullableType } from './nullishConstraints';
 import type { Sym } from './scopes';
 import { nameSuggestionHint } from './spelling';
 import {
-  arrayLiteralLength,
   assignmentKind,
   hasToken,
+  isDirectEmptyArray,
   isImmediatelyInvoked,
   named,
   numberValue,
@@ -492,12 +492,10 @@ export class ExpressionChecker {
   /** Whether a variable is declared as `[]` without a type, whose type the pushes to it decide. */
   private isEvolvingArrayDeclaration(symbol: Sym): boolean {
     const declaration = symbol.valueDeclaration;
-    const value = declaration?.type === 'variable_declarator' ? declaration.childForFieldName('value') : undefined;
     return (
       declaration?.type === 'variable_declarator' &&
       !declaration.childForFieldName('type') &&
-      value?.type === 'array' &&
-      arrayLiteralLength(value) === 0
+      isDirectEmptyArray(declaration.childForFieldName('value'))
     );
   }
 

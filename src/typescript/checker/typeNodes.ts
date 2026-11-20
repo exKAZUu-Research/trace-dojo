@@ -28,6 +28,7 @@ import {
   isAnyLike,
   isIntrinsic,
   literalType,
+  mapType,
   neverType,
   newTypeId,
   nonPrimitiveType,
@@ -197,11 +198,12 @@ export class TypeNodes {
     const operand = named(node)[0];
     if (!['array_type', 'tuple_type'].includes(operand.type))
       this.c.errorWhileResolving(node, 'readonly 型修飾子は、配列型かタプル型のリテラルにのみ使えます。');
-    const inner = this.typeFromNode(operand);
-    if (this.c.isArrayType(inner)) return this.c.arrayType(this.c.elementTypeOf(inner as ObjectType), true);
-    if (inner.kind === 'object' && inner.objectKind === 'tuple')
-      return this.c.tupleType(inner.tuple?.elements ?? [], true);
-    return inner;
+    return mapType(this.typeFromNode(operand), (inner) => {
+      if (this.c.isArrayType(inner)) return this.c.arrayType(this.c.elementTypeOf(inner as ObjectType), true);
+      if (inner.kind === 'object' && inner.objectKind === 'tuple')
+        return this.c.tupleType(inner.tuple?.elements ?? [], true);
+      return inner;
+    });
   }
 
   private functionTypeFromNode(node: TreeNode): Type {

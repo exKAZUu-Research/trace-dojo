@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 759 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
+// code-gauge-allow-file fileNcss 761 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
 import { minimumArguments } from './callArity';
 import type { Checker } from './checker';
 import { isUnit } from './flow';
@@ -1053,7 +1053,7 @@ export class Relations {
     return true;
   }
 
-  private parameterTuple(signature: Signature): ObjectType {
+  private parameterTuple(signature: Signature): Type {
     const elements: TupleElement[] = [];
     for (const parameter of signature.parameters) {
       const tuple = parameter.rest && parameter.type.kind === 'object' ? parameter.type.tuple : undefined;
@@ -1158,6 +1158,7 @@ const covariantLibraryTypes = new Set([
 
 function hasRestTupleTail(signature: Signature): boolean {
   const last = signature.parameters.at(-1);
+  if (last?.rest && last.type.kind === 'union') return true;
   const elements = last?.rest && last.type.kind === 'object' ? last.type.tuple?.elements : undefined;
   return elements?.slice(0, -1).some((element) => element.rest) ?? false;
 }

@@ -1,10 +1,11 @@
-// code-gauge-allow-file fileNcss 620 -- Ports Node.js's inspection and error formatting around shared object and stack metadata.
+// code-gauge-allow-file fileNcss 645 -- Ports Node.js's inspection and error formatting around shared object and stack metadata.
 import { inspect as hostInspect, type InspectStyle, stripVTControlCharacters } from 'node:util';
 
 import { eastAsianWidthType } from 'get-east-asian-width';
 
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import type { PromiseState } from './promises';
+import type { Realm } from './realm';
 import { type CollectionEntry, CollectionIterator } from './realmCollections';
 import { dateValueOf, inspectDate } from './realmDate';
 import { objectToString } from './realmGlobals';
@@ -32,6 +33,120 @@ const COMPACT = 3;
 const MAX_ARRAY_LENGTH = 100;
 const MAX_STRING_LENGTH = 10_000;
 const MIN_LINE_LENGTH = 16;
+
+// Names Node.js 26.13.0's util.inspect takes from its original globals before it runs the program.
+const NODE_BUILTIN_NAMES = new Set([
+  'AbortController',
+  'AbortSignal',
+  'AggregateError',
+  'Array',
+  'ArrayBuffer',
+  'AsyncDisposableStack',
+  'Atomics',
+  'BigInt',
+  'BigInt64Array',
+  'BigUint64Array',
+  'Blob',
+  'Boolean',
+  'BroadcastChannel',
+  'Buffer',
+  'ByteLengthQueuingStrategy',
+  'CloseEvent',
+  'CompressionStream',
+  'CountQueuingStrategy',
+  'Crypto',
+  'CryptoKey',
+  'CustomEvent',
+  'DOMException',
+  'DataView',
+  'Date',
+  'DecompressionStream',
+  'DisposableStack',
+  'Error',
+  'ErrorEvent',
+  'EvalError',
+  'Event',
+  'EventTarget',
+  'File',
+  'FinalizationRegistry',
+  'Float16Array',
+  'Float32Array',
+  'Float64Array',
+  'FormData',
+  'Function',
+  'Headers',
+  'Infinity',
+  'Int16Array',
+  'Int32Array',
+  'Int8Array',
+  'Intl',
+  'Iterator',
+  'JSON',
+  'Map',
+  'Math',
+  'MessageChannel',
+  'MessageEvent',
+  'MessagePort',
+  'NaN',
+  'Navigator',
+  'Number',
+  'Object',
+  'Performance',
+  'PerformanceEntry',
+  'PerformanceMark',
+  'PerformanceMeasure',
+  'PerformanceObserver',
+  'PerformanceObserverEntryList',
+  'PerformanceResourceTiming',
+  'Promise',
+  'Proxy',
+  'QuotaExceededError',
+  'RangeError',
+  'ReadableByteStreamController',
+  'ReadableStream',
+  'ReadableStreamBYOBReader',
+  'ReadableStreamBYOBRequest',
+  'ReadableStreamDefaultController',
+  'ReadableStreamDefaultReader',
+  'ReferenceError',
+  'Reflect',
+  'RegExp',
+  'Request',
+  'Response',
+  'Set',
+  'SharedArrayBuffer',
+  'Storage',
+  'String',
+  'SubtleCrypto',
+  'SuppressedError',
+  'Symbol',
+  'SyntaxError',
+  'Temporal',
+  'TextDecoder',
+  'TextDecoderStream',
+  'TextEncoder',
+  'TextEncoderStream',
+  'TransformStream',
+  'TransformStreamDefaultController',
+  'TypeError',
+  'URIError',
+  'URL',
+  'URLPattern',
+  'URLSearchParams',
+  'Uint16Array',
+  'Uint32Array',
+  'Uint8Array',
+  'Uint8ClampedArray',
+  'WeakMap',
+  'WeakRef',
+  'WeakSet',
+  'WebAssembly',
+  'WebSocket',
+  'WritableStream',
+  'WritableStreamDefaultController',
+  'WritableStreamDefaultWriter',
+]);
+const knownConstructorsByRealm = new WeakMap<Realm, Map<JsObject, string>>();
 
 const KEY_PATTERN = /^[A-Z_a-z]\w*$/;
 const ESCAPED_CHARACTER =
@@ -134,7 +249,7 @@ export function inspectValue(
     getters: options.getters ?? false,
     numericSeparator: options.numericSeparator ?? false,
     colors: options.colors ?? false,
-    maxStringLength: Math.max(0, options.maxStringLength ?? MAX_STRING_LENGTH),
+    maxStringLength: options.maxStringLength ?? MAX_STRING_LENGTH,
   };
   return formatCharged(ctx, value, 0);
 }
@@ -255,21 +370,22 @@ interface Frame {
 // code-gauge-allow functionNcss 37 -- Ports Node.js's util.inspect, so the two stay comparable.
 function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string {
   const { runtime } = ctx;
-  const constructor = constructorName(runtime, value);
-  const inherited = ctx.showHidden && recurseTimes <= ctx.depth ? inspectPrototype(ctx, value, recurseTimes) : [];
-  if (value.isError && constructor !== 'Object') noteErrorStack(ctx, value);
+  const constructor = inspectedConstructor(runtime, value);
+  const inherited =
+    ctx.showHidden && recurseTimes <= ctx.depth ? inspectPrototype(ctx, value, constructor, recurseTimes) : [];
+  if (value.isError && constructor.name !== 'Object') noteErrorStack(ctx, value);
   const keys = enumerableKeys(runtime, value, ctx.showHidden, ctx.errorStacks.get(value));
   const showsLength = ctx.showHidden && value instanceof JsArray;
   const frame = frameOf(
     ctx,
     value,
-    constructor,
+    constructor.name,
     keys.length > 0 || inherited.length > 0 || value.promise !== undefined || showsLength
   );
   if (typeof frame === 'string') return frame;
   if (recurseTimes > ctx.depth) {
-    const name = prefixOf(constructor, value instanceof JsArray ? 'Array' : 'Object').slice(0, -1);
-    return constructor === undefined ? name : stylize(ctx, `[${name}]`, 'special');
+    const name = prefixOf(constructor.name, value instanceof JsArray ? 'Array' : 'Object').slice(0, -1);
+    return constructor.name === undefined ? name : stylize(ctx, `[${name}]`, 'special');
   }
   ctx.currentDepth = recurseTimes + 1;
   ctx.seen.add(value);
@@ -344,14 +460,18 @@ function sortOutput(ctx: Context, entries: string[]): void {
  * Node reads inherited descriptors before collecting the object's own keys, but prints them after its own properties.
  */
 // code-gauge-allow functionCognitiveComplexity 17 -- Visits each prototype and reads its eligible descriptors in order.
-function inspectPrototype(ctx: Context, value: JsObject, recurseTimes: number): string[] {
+function inspectPrototype(
+  ctx: Context,
+  value: JsObject,
+  constructor: InspectedConstructor,
+  recurseTimes: number
+): string[] {
   const { runtime } = ctx;
   const seen = new Set<Key>();
   const output: string[] = [];
-  let current = value.proto;
   ctx.seen.add(value);
   try {
-    for (let depth = 0; depth < 3 && current && !isBuiltinPrototype(current); depth++) {
+    for (const current of inspectionPrototypes(runtime, value, constructor)) {
       const keys = inspectionKeys(runtime, current);
       for (const key of keys) {
         if (key === 'constructor' || seen.has(key) || runtime.getOwnProperty(value, key)) continue;
@@ -361,11 +481,24 @@ function inspectPrototype(ctx: Context, value: JsObject, recurseTimes: number): 
         output.push(ctx.colors ? `\u001B[2m${text}\u001B[22m` : text);
       }
       for (const key of keys) seen.add(key);
-      current = current.proto;
     }
     return output;
   } finally {
     ctx.seen.delete(value);
+  }
+}
+
+function* inspectionPrototypes(
+  runtime: Runtime,
+  value: JsObject,
+  constructor: InspectedConstructor
+): Iterable<JsObject> {
+  const first = value.proto;
+  if (!first || (constructor.owner === first && constructor.builtin)) return;
+  let current: JsObject | null = first;
+  for (let depth = 0; depth < 3 && current; depth++, current = current.proto) {
+    if ((depth > 0 || constructor.owner === value) && hasBuiltinConstructor(runtime, current)) return;
+    yield current;
   }
 }
 
@@ -377,14 +510,10 @@ function inspectionKeys(runtime: Runtime, object: JsObject): Key[] {
   return [...strings, ...runtime.ownSymbols(object)];
 }
 
-function isBuiltinPrototype(object: JsObject): boolean {
-  const constructor = object.properties.get('constructor');
-  return (
-    constructor !== undefined &&
-    !isAccessor(constructor) &&
-    constructor.value instanceof JsFunction &&
-    constructor.value.behavior.kind === 'native'
-  );
+function hasBuiltinConstructor(runtime: Runtime, object: JsObject): boolean {
+  const constructor = constructorProperty(object);
+  const name = constructor && runtime.get(constructor, 'name');
+  return typeof name === 'string' && NODE_BUILTIN_NAMES.has(name);
 }
 
 /** What surrounds the entries of an object, or its whole text when it has no entries to list. */
@@ -478,15 +607,53 @@ function toStringTagOf(object: JsObject): string | undefined {
   return undefined;
 }
 
-/** The name of the nearest constructor whose prototype the object inherits, or undefined for a null prototype. */
-function constructorName(runtime: Runtime, object: JsObject): string | undefined {
+interface InspectedConstructor {
+  name: string | undefined;
+  owner?: JsObject;
+  builtin?: boolean;
+}
+
+function inspectedConstructor(runtime: Runtime, object: JsObject): InspectedConstructor {
+  const known = knownConstructors(runtime.realm);
   for (let current: JsObject | null = object; current; current = current.proto) {
-    const property = current.properties.get('constructor');
-    if (!property || isAccessor(property) || !(property.value instanceof JsFunction)) continue;
-    const name = runtime.functionName(property.value);
-    if (name && inheritsPrototypeOf(object, property.value)) return name;
+    const knownName = current === object ? undefined : known.get(current);
+    if (knownName) return { name: knownName, owner: current, builtin: true };
+    const constructor = constructorProperty(current);
+    const name = constructor && runtime.functionName(constructor);
+    if (name && inheritsPrototypeOf(object, constructor))
+      return { name, owner: current, builtin: NODE_BUILTIN_NAMES.has(name) };
   }
-  return object.proto ? 'Object' : undefined;
+  return { name: object.proto ? 'Object' : undefined };
+}
+
+function constructorProperty(object: JsObject): JsFunction | undefined {
+  const property = object.properties.get('constructor');
+  return property && !isAccessor(property) && property.value instanceof JsFunction ? property.value : undefined;
+}
+
+function knownConstructors(realm: Realm): Map<JsObject, string> {
+  let known = knownConstructorsByRealm.get(realm);
+  if (!known) {
+    known = new Map([
+      [realm.arrayPrototype, 'Array'],
+      [realm.booleanPrototype, 'Boolean'],
+      [realm.datePrototype, 'Date'],
+      [realm.errorPrototypes.AggregateError, 'AggregateError'],
+      [realm.errorPrototypes.Error, 'Error'],
+      [realm.errorPrototypes.RangeError, 'RangeError'],
+      [realm.errorPrototypes.TypeError, 'TypeError'],
+      [realm.functionPrototype, 'Function'],
+      [realm.mapPrototype, 'Map'],
+      [realm.numberPrototype, 'Number'],
+      [realm.objectPrototype, 'Object'],
+      [realm.promisePrototype, 'Promise'],
+      [realm.regExpPrototype, 'RegExp'],
+      [realm.setPrototype, 'Set'],
+      [realm.stringPrototype, 'String'],
+    ]);
+    knownConstructorsByRealm.set(realm, known);
+  }
+  return known;
 }
 
 function inheritsPrototypeOf(object: JsObject, fn: JsFunction): boolean {
@@ -551,7 +718,7 @@ function plainFunctionBase(fn: JsFunction, name: string, constructor: string | u
 
 /** Node.js formats uncaught errors from the saved stack using the same name rules as util.inspect. */
 export function uncaughtErrorHeadline(runtime: Runtime, error: JsObject): string {
-  const constructor = constructorName(runtime, error);
+  const { name: constructor } = inspectedConstructor(runtime, error);
   return constructor === 'Object' ? inspect(runtime, error) : errorText(runtime, error, constructor);
 }
 
