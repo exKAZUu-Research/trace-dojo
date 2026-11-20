@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 592 -- The checker core: bodies, obligations, scopes, coercions, and statements.
+// code-gauge-allow-file fileNcss 610 -- The checker core: bodies, obligations, scopes, coercions, and statements.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ExecutionBudget } from '../interpreter/limits';
 import { Annotations, type Coercion, type FnContext, type LocalVar, type PathRes } from './annotations';
@@ -30,6 +30,7 @@ import {
   isSigned,
   isUnit,
   NEVER,
+  newTypeParam,
   ref,
   resolve,
   sameType,
@@ -115,7 +116,7 @@ export class Checker {
   }
 
   checkProgram(): void {
-    this.checkDerivedFields();
+    this.checkDerivedTraits();
     this.checkImplCoherence();
     for (const impl of this.program.impls) this.checkImplSignatures(impl);
     for (const fn of this.program.pendingFns.splice(0)) this.checkFn(fn);
@@ -123,9 +124,8 @@ export class Checker {
     this.checkConstsAndMain();
   }
 
-  /** A derived trait needs every field's type to implement it, as the impl that `#[derive]` writes uses each field. */
-  private checkDerivedFields(): void {
-    for (const def of this.program.adts) {
+  private checkDerivedTraits(first = 0): void {
+    for (const def of this.program.adts.slice(first)) {
       if ((def.module as Module | undefined)?.isStd) continue;
       for (const name of def.derives) this.checkDerivedTrait(def, name);
     }
@@ -193,6 +193,7 @@ export class Checker {
   private checkDerivedTrait(def: AdtDef, name: string): void {
     const trait = this.program.builtinTraits.get(name);
     if (!trait) return;
+    if (trait.supertraits.length > 0) this.checkDerivedSupertraits(def, trait);
     for (const field of def.variants.flatMap((variant) => variant.fields)) {
       // A derive bounds the type parameters by the trait, so fields of parameter types meet it.
       if (hasParams(field.type) || this.solver.implements(field.type, { trait, args: [] }) !== 'no') continue;
@@ -200,6 +201,29 @@ export class Checker {
         name === 'Copy' ? def.span : field.span,
         `${typeToString(field.type)} が ${name} を実装していないので、フィールド ${field.name} を持つ ${def.name} に #[derive(${name})] を付けられません。`
       );
+    }
+  }
+
+  private checkDerivedSupertraits(def: AdtDef, trait: TraitDef): void {
+    const subst: Subst = new Map();
+    const args = def.params.map((original) => {
+      const param = newTypeParam(original.name);
+      const type = { kind: 'param', param } as const;
+      subst.set(original, type);
+      return type;
+    });
+    for (const [index, arg] of args.entries()) {
+      arg.param.bounds.push(...def.params[index].bounds.map((bound) => substituteTraitRef(bound, subst)), {
+        trait,
+        args: [],
+      });
+    }
+    const self: Type = { kind: 'adt', def, args };
+    subst.set(trait.self, self);
+    for (const bound of trait.supertraits) {
+      if (this.solver.implements(self, substituteTraitRef(bound, subst)) === 'no') {
+        compileError(def.span, `#[derive(${trait.name})] には、${bound.trait.name} の実装が必要です。`);
+      }
     }
   }
 
@@ -788,9 +812,11 @@ export class Checker {
     const module = new Module(this.program, '{block}', this.body.module.namedModule, false, this.body.module);
     const collector = new ItemCollector(this.program);
     const pendingBefore = this.program.pendingFns.length;
+    const firstAdt = this.program.adts.length;
     collector.collectItems(block.items, module);
     collector.finish();
     resolveImports(module);
+    this.checkDerivedTraits(firstAdt);
     this.nestedFns.push(...this.program.pendingFns.splice(pendingBefore));
     this.body.module = module;
   }

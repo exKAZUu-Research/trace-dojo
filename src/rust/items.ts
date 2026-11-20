@@ -328,7 +328,6 @@ export class ItemCollector {
     if (item.shape !== 'named') {
       this.declareValue(module, item.name, { kind: 'ctor', def, variant: 0 }, item.vis, item.span);
     }
-    this.checkDerives(item.attrs.derives, def, item.span);
     this.lowering.push(() => {
       const scope = this.adtScope(def, module, item.generics);
       def.variants.push({
@@ -347,8 +346,8 @@ export class ItemCollector {
     });
   }
 
-  // code-gauge-allow functionCognitiveComplexity 23 -- Follows Rust's name resolution case by case.
-  // code-gauge-allow functionNcss 38 -- Follows Rust's name resolution case by case.
+  // code-gauge-allow functionCognitiveComplexity 24 -- Resolves enum declarations, variants, and discriminants in order.
+  // code-gauge-allow functionNcss 41 -- Follows Rust's name resolution case by case.
   private enumItem(item: EnumItem, module: Module): void {
     const def: AdtDef = {
       name: item.name,
@@ -367,7 +366,13 @@ export class ItemCollector {
     }
     this.program.adts.push(def);
     this.declareType(module, item.name, { kind: 'adt', def }, item.vis, item.span);
-    this.checkDerives(item.attrs.derives, def, item.span);
+    const deriveDefault = item.attrs.derives.find((derive) => derive.name === 'Default');
+    if (deriveDefault) {
+      compileError(
+        deriveDefault.span,
+        '列挙型の #[derive(Default)] には #[default] の属性が要るので、この採点環境では使えません。'
+      );
+    }
     const names = new Set<string>();
     for (const variant of item.variants) {
       if (names.has(variant.name)) compileError(variant.span, `列挙子 ${variant.name} が2回宣言されています。`);
@@ -408,32 +413,6 @@ export class ItemCollector {
         checkDuplicateFields(variant.fields);
       }
     });
-  }
-
-  private checkDerives(derives: { name: string; span: Span }[], def: AdtDef, span: Span): void {
-    const names = new Set(derives.map((derive) => derive.name));
-    const requires: Record<string, string> = {
-      Copy: 'Clone',
-      Eq: 'PartialEq',
-      PartialOrd: 'PartialEq',
-      Ord: 'PartialOrd',
-    };
-    for (const derive of derives) {
-      const required = requires[derive.name];
-      // rustc reports a missing supertrait at the type's name, which the derived impl is for.
-      if (required && !names.has(required)) {
-        compileError(span, `#[derive(${derive.name})] には、#[derive(${required})] も必要です。`);
-      }
-      if (derive.name === 'Ord' && !names.has('Eq')) {
-        compileError(span, '#[derive(Ord)] には、#[derive(Eq)] も必要です。');
-      }
-      if (derive.name === 'Default' && def.kind === 'enum') {
-        compileError(
-          derive.span,
-          '列挙型の #[derive(Default)] には #[default] の属性が要るので、この採点環境では使えません。'
-        );
-      }
-    }
   }
 
   private adtScope(def: AdtDef, module: Module, generics: Generics): TypeScope {

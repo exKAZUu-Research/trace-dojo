@@ -532,6 +532,25 @@ test.each([
   });
 });
 
+test('Rust derives can use manually implemented supertraits with generic bounds', () => {
+  const program = `#[derive(Copy)]
+struct Number<T>(T);
+impl<T: Clone> Clone for Number<T> {
+    fn clone(&self) -> Self { Self(self.0.clone()) }
+}
+
+fn main() {
+    let original = Number(3);
+    let copied = original;
+    println!("{} {}", original.0, copied.0);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '3 3\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {
@@ -565,6 +584,7 @@ test.each([
   ['arithmetic that always overflows', '    let x: u32 = 3;\n    let y = x - 5;', 3],
   ['arithmetic on an associated constant that overflows', '    let x = i32::MAX + 1;', 2],
   ['a Unicode escape in a byte literal', String.raw`    let byte = b'\u{41}';`, 2],
+  ['a local Copy derive without Clone', '    #[derive(Copy)]\n    struct Number(i32);', 3],
   [
     'mutation during a live reference cast',
     '    let mut x = 1;\n    let borrowed = &x as &i32;\n    x = 2;\n    println!("{}", borrowed);',
