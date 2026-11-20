@@ -309,11 +309,9 @@ const sliceNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
     copyFrom(ctx, deref(self), deref(src), (item) => cloneValue(elemType(ctx), item)),
   repeat: ([self, n], ctx) => {
     const items = sliceItems(deref(self));
-    const count = Number(n as bigint);
-    ctx.runtime.allocate(items.length * count);
-    const result: Value[] = [];
-    for (let index = 0; index < count; index++) for (const item of items) result.push(copyValue(item));
-    return result;
+    const length = items.length * Number(n as bigint);
+    ctx.runtime.allocate(length);
+    return Array.from({ length }, (_, index) => copyValue(items[index % items.length]));
   },
 };
 
