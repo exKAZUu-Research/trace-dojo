@@ -43,6 +43,10 @@ class SortedIter {
     return this.front < this.back ? this.items[--this.back] : DONE;
   }
 
+  fork(): SortedIter {
+    return new SortedIter(this.items, this.front, this.back);
+  }
+
   get rest(): Value[] {
     return this.items.slice(this.front, this.back);
   }
@@ -65,8 +69,16 @@ export function btreeSetOp(op: SetOp, sets: [SetValue, SetValue], elem: Type, se
     setType,
   };
   const step =
-    op === 'union' || op === 'symmetric_difference' ? merged(op, items, context) : searched(op, sets, items, context);
-  return described(new IterValue(step.next), (show, item) => tuplePart(TUPLE_NAMES[op], [step.debug(show, item)]));
+    op === 'union' || op === 'symmetric_difference'
+      ? merged(op, new SortedIter(items[0]), new SortedIter(items[1]), context.cmp)
+      : searched(op, sets, items, context);
+  return setOpIter(op, step);
+}
+
+function setOpIter(op: SetOp, step: Step): IterValue {
+  const iter = new IterValue(step.next);
+  iter.fork = () => setOpIter(op, step.fork());
+  return described(iter, (show, item) => tuplePart(TUPLE_NAMES[op], [step.debug(show, item)]));
 }
 
 const TUPLE_NAMES: Record<SetOp, string> = {
@@ -79,6 +91,7 @@ const TUPLE_NAMES: Record<SetOp, string> = {
 interface Step {
   next: () => Next;
   debug: (show: DebugValue, item: Type) => DebugPart;
+  fork: () => Step;
 }
 
 function iterPart(iter: SortedIter, show: DebugValue, item: Type): DebugPart {
@@ -88,10 +101,13 @@ function iterPart(iter: SortedIter, show: DebugValue, item: Type): DebugPart {
 /** `MergeIterInner`: both sets in order, keeping the greater of two heads (`peeked`) for the next step. */
 // code-gauge-allow functionCognitiveComplexity 22 -- Follows std's `MergeIterInner::nexts`.
 // code-gauge-allow functionNcss 34 -- Follows std's `MergeIterInner::nexts`.
-function merged(op: SetOp, [aItems, bItems]: [Value[], Value[]], { cmp }: Context): Step {
-  const a = new SortedIter(aItems);
-  const b = new SortedIter(bItems);
-  let peeked: { side: 'A' | 'B'; value: Value } | undefined;
+function merged(
+  op: SetOp,
+  a: SortedIter,
+  b: SortedIter,
+  cmp: Context['cmp'],
+  peeked?: { side: 'A' | 'B'; value: Value }
+): Step {
   const nexts = (): [Next, Next] => {
     let aNext: Next;
     let bNext: Next;
@@ -122,7 +138,7 @@ function merged(op: SetOp, [aItems, bItems]: [Value[], Value[]], { cmp }: Contex
     const peekedPart = optionPart(peeked && tuplePart(peeked.side, [(indent) => show(peeked!.value, item, indent)]));
     return tuplePart('MergeIterInner', [iterPart(a, show, item), iterPart(b, show, item), peekedPart]);
   };
-  return { next, debug };
+  return { next, debug, fork: () => merged(op, a.fork(), b.fork(), cmp, peeked) };
 }
 
 /** `intersection` and `difference`: by their sets' ends, an answer at once, or a search, or a stitch of both. */
@@ -154,7 +170,7 @@ function searched(
   if (op === 'difference') {
     return aSmall
       ? search(self, bSet, false, context, ['self_iter', 'other_iter'])
-      : stitchDifference(self, bItems, cmp);
+      : stitchDifference(self, new SortedIter(bItems), cmp);
   }
   if (aSmall) return search(self, bSet, true, context, ['small_iter', 'large_set']);
   if (bSmall) return search(new SortedIter(bItems), aSet, true, context, ['small_iter', 'large_set']);
@@ -170,11 +186,16 @@ function answer(value: Value | undefined): Step {
       return result ?? DONE;
     },
     debug: (show, item) => tuplePart('Answer', [optionPart(valuePart(left, item, show))]),
+    fork: () => answer(left),
   };
 }
 
 function iterate(iter: SortedIter): Step {
-  return { next: () => iter.next(), debug: (show, item) => tuplePart('Iterate', [iterPart(iter, show, item)]) };
+  return {
+    next: () => iter.next(),
+    debug: (show, item) => tuplePart('Iterate', [iterPart(iter, show, item)]),
+    fork: () => iterate(iter.fork()),
+  };
 }
 
 /** Each element of the small set that the large one has (`intersection`), or does not have (`difference`). */
@@ -182,9 +203,10 @@ function search(
   small: SortedIter,
   large: SetValue,
   wanted: boolean,
-  { contains, setType }: Context,
+  context: Context,
   [iterName, setName]: [string, string]
 ): Step {
+  const { contains, setType } = context;
   return {
     next: () => {
       for (;;) {
@@ -197,6 +219,7 @@ function search(
         [iterName, iterPart(small, show, item)],
         [setName, (indent) => show(large, setType, indent)],
       ]),
+    fork: () => search(small.fork(), large, wanted, context, [iterName, setName]),
   };
 }
 
@@ -221,14 +244,13 @@ function stitchIntersection(a: SortedIter, b: SortedIter, cmp: Context['cmp']): 
         ['a', iterPart(a, show, item)],
         ['b', iterPart(b, show, item)],
       ]),
+    fork: () => stitchIntersection(a.fork(), b.fork(), cmp),
   };
 }
 
 /** `difference` of similar sets: the elements of `self` that `other`, walked alongside with `peek`, does not have. */
 // code-gauge-allow functionCognitiveComplexity 24 -- Follows std's `Difference::next`.
-function stitchDifference(self: SortedIter, otherItems: Value[], cmp: Context['cmp']): Step {
-  const other = new SortedIter(otherItems);
-  let peeked: Next | undefined;
+function stitchDifference(self: SortedIter, other: SortedIter, cmp: Context['cmp'], peeked?: Next): Step {
   const peek = (): Next => (peeked ??= other.next());
   const advance = (): void => void (peeked === undefined ? other.next() : (peeked = undefined));
   return {
@@ -263,6 +285,7 @@ function stitchDifference(self: SortedIter, otherItems: Value[], cmp: Context['c
         ],
       ]);
     },
+    fork: () => stitchDifference(self.fork(), other.fork(), cmp, peeked),
   };
 }
 

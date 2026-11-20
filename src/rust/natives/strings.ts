@@ -315,9 +315,9 @@ const strNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
       offset += byteLength(char);
     }
     const iter = arrayIter(items);
-    // `CharIndices` shows the byte offset of its next `char` and the `Chars` of the rest.
-    return described(iter, (show) => {
-      const rest = (iter.rest?.() ?? []) as [bigint, string][];
+    return described(iter, (show, _item, target) => {
+      const rest = (target.rest?.() ?? []) as [bigint, string][];
+      const front = items[target.frontIndex!()] as [bigint, string] | undefined;
       const chars = tuplePart('Chars', [
         listPart(
           rest.map(([, char]) => char),
@@ -326,7 +326,7 @@ const strNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
         ),
       ]);
       return fieldsPart('CharIndices', [
-        ['front_offset', numberPart(rest[0]?.[0] ?? offset)],
+        ['front_offset', numberPart(front?.[0] ?? offset)],
         ['iter', chars],
       ]);
     });

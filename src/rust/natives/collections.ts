@@ -60,7 +60,7 @@ function resize(collection: MapValue | SetValue, change: (table: TableMap<string
 
 /** `HashSet`'s set operations, which `{:?}` writes as the list of the elements left. */
 function listed(iter: IterValue): IterValue {
-  return described(iter, (show, item) => listPart(iter.rest?.() ?? [], item, show));
+  return described(iter, (show, item, target) => listPart(target.rest?.() ?? [], item, show));
 }
 
 function map(self: Value): MapValue {

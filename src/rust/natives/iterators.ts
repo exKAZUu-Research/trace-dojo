@@ -58,6 +58,7 @@ export function arrayIter(
     [array]
   );
   iter.rest = () => Array.from({ length: Math.max(back - front, 0) }, (_, offset) => map(front + offset));
+  iter.frontIndex = () => front;
   iter.fork = () => arrayIter(array, front, back, map);
   return iter;
 }
@@ -581,7 +582,6 @@ define({
       ['flag', numberPart(!(target.roots[1] as typeof state).skipping)],
     ]);
   },
-  // code-gauge-allow functionCognitiveComplexity 18 -- Follows `StepBy`'s arithmetic from either end.
   'IterImpl<_, _>::step_by': ([self, n], ctx) => {
     const step = n as bigint;
     if (step === 0n) libraryPanic(ctx, 'assertion failed: step != 0', 'core/src/iter/adapters/step_by.rs:36:9');
@@ -635,7 +635,7 @@ define({
   // `&mut I` iterates as `I` does, so the adapters after `by_ref` advance the same iterator.
   'IterImpl<_, _>::by_ref': ([self]) => deref(self),
   'IterImpl<_, _>::into_iter': ([self]) => iterOf(self),
-  'IterImpl<_, PeekableShape<_>>::peek': ([self], ctx) => {
+  'IterImpl<_, PeekableShape<_, _>>::peek': ([self], ctx) => {
     const iter = peekSource(self);
     iter.peekedType = ctx.typeArgs[0];
     iter.peeked ??= [];
@@ -643,7 +643,7 @@ define({
     const item = iter.peeked[0];
     return option(ctx, item === DONE ? undefined : item, item !== DONE);
   },
-  'IterImpl<_, PeekableShape<_>>::next_if': ([self, f], ctx) => {
+  'IterImpl<_, PeekableShape<_, _>>::next_if': ([self, f], ctx) => {
     const iter = peekSource(self);
     const item = nextOf(iter);
     if (item === DONE) return none(ctx);
@@ -687,7 +687,7 @@ define({
     );
     // `Cycle` shows the iterator as it was and the one it takes from now.
     const [item, shape] = ctx.typeArgs;
-    return describedForks(iter, (target) => (show) => {
+    return described(iter, (show, _item, target) => {
       const state = target.roots[1] as { original: IterValue; current: IterValue | undefined };
       const current = state.current ?? (target.roots[0] as IterValue);
       const part =
@@ -733,20 +733,13 @@ function adapterDebug(
   fields: (show: DebugValue, target: IterValue) => [string, DebugPart][] = () => []
 ): IterValue {
   const [item, shape] = ctx.typeArgs;
-  return describedForks(iter, (target) => (show) => {
+  return described(iter, (show, _item, target) => {
     const source = target.roots[0] as IterValue;
     return fieldsPart(name, [
       ['iter', (indent) => iteratorDebug(source, item, shape, show, indent)],
       ...fields(show, target),
     ]);
   });
-}
-
-/** Sets how `{:?}` writes an iterator from its own state, and that of each clone of it from the clone's. */
-function describedForks(iter: IterValue, describe: (target: IterValue) => NonNullable<IterValue['debug']>): IterValue {
-  const { fork } = iter;
-  if (fork) iter.fork = () => describedForks(fork(), describe);
-  return described(iter, describe(iter));
 }
 
 /**
@@ -756,7 +749,7 @@ function describedForks(iter: IterValue, describe: (target: IterValue) => NonNul
 function flattenDebug(ctx: NativeContext, name: string, iter: IterValue, inner: Type): IterValue {
   const [outerItem, outerShape] = ctx.typeArgs;
   const innerShape = intoIterShape(ctx.interp.program, inner) as Type;
-  return describedForks(iter, (target) => (show, item) => {
+  return described(iter, (show, item, target) => {
     const source = target.roots[0] as IterValue;
     const state = target.roots[1] as FlattenState;
     const outer: DebugPart = (indent) => iteratorDebug(source, outerItem, outerShape, show, indent);
@@ -1105,37 +1098,50 @@ define({
     const seconds = items.map((item) => item[1]);
     return [collectInto(ctx, firsts, fromA, typeA), collectInto(ctx, seconds, fromB, typeB)];
   },
-  'std::iter::repeat': ([value], ctx) => repeated(ctx, value, Number.POSITIVE_INFINITY),
-  'std::iter::repeat_n': ([value, n], ctx) => repeated(ctx, value, Number(n as bigint)),
+  'std::iter::repeat': ([value], ctx) => repeated(ctx, value),
+  'std::iter::repeat_n': ([value, n], ctx) => repeatN(ctx, value, n as bigint),
   'std::iter::once': ([value], ctx) => {
     const iter = ownedIter([value], ctx.typeArgs[0]);
-    return describedForks(iter, (target) => (show, item) => {
+    return described(iter, (show, item, target) => {
       const [left] = target.rest?.() ?? [];
       const opt = optionPart(left === undefined ? undefined : (indent) => show(left, item, indent));
       const intoIter = fieldsPart('IntoIter', [['inner', fieldsPart('Item', [['opt', opt]])]]);
       return fieldsPart('Once', [['inner', intoIter]]);
     });
   },
-  'std::iter::empty': (_args, ctx) => describedForks(ownedIter([], ctx.typeArgs[0]), () => () => () => 'Empty'),
+  'std::iter::empty': (_args, ctx) => described(ownedIter([], ctx.typeArgs[0]), () => () => 'Empty'),
   'std::iter::from_fn': ([f], ctx) => fromFunction(ctx, new IteratorCallback(f, ctx.typeArgs[1])),
   'std::iter::successors': ([first, f], ctx) =>
     successors(ctx, deref(first) as EnumValue, new IteratorCallback(f, ctx.typeArgs[1])),
 });
 
-/** `repeat` and `repeat_n`: clones of a value, `count` of them. */
-function repeated(ctx: NativeContext, value: Value, count: number): IterValue {
+function repeated(ctx: NativeContext, value: Value): IterValue {
+  const type = ctx.typeArgs[0];
+  const take = (): Next => cloneValue(type, value);
+  const iter = new IterValue(take, take, undefined, [value]);
+  iter.fork = () => repeated(ctx, cloneValue(type, value));
+  return described(iter, (show, item) => fieldsPart('Repeat', [['element', (indent) => show(value, item, indent)]]));
+}
+
+function repeatN(ctx: NativeContext, value: Value, count: bigint): IterValue {
+  const type = ctx.typeArgs[0];
   let left = count;
-  const take = (): Next => (left-- > 0 ? cloneValue(ctx.typeArgs[0], value) : DONE);
-  const iter = new IterValue(take, take, Number.isFinite(count) ? () => Math.max(left, 0) : undefined, [value]);
-  iter.fork = () => repeated(ctx, cloneValue(ctx.typeArgs[0], value), left);
-  // `RepeatN` drops its element with its last clone.
+  let original = count > 0n ? value : undefined;
+  const take = (): Next => {
+    if (left === 0n) return DONE;
+    if (--left > 0n) return cloneValue(type, original);
+    const result = original;
+    original = undefined;
+    return result;
+  };
+  const iter = new IterValue(take, take, () => left);
+  iter.stateRoots = () => [original];
+  iter.fork = () => repeatN(ctx, left > 0n ? cloneValue(type, original) : undefined, left);
   return described(iter, (show, item) => {
-    const element: DebugPart = (indent) => show(value, item, indent);
-    if (!Number.isFinite(count)) return fieldsPart('Repeat', [['element', element]]);
-    const remaining = Math.max(left, 0);
+    const element: DebugPart = (indent) => show(original, item, indent);
     return fieldsPart('RepeatN', [
-      ['count', numberPart(remaining)],
-      ['element', optionPart(remaining > 0 ? element : undefined)],
+      ['count', numberPart(left)],
+      ['element', optionPart(left > 0n ? element : undefined)],
     ]);
   });
 }

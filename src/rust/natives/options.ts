@@ -201,8 +201,8 @@ function outcomeIter(
   const fields = opt(self).fields;
   const items = present ? [mutable ? new ElementPlace(fields, 0) : fields[0]] : [];
   const iter = owned ? ownedIter(items, owned) : arrayIter(items);
-  return described(iter, (show, item) => {
-    const [value] = iter.rest?.() ?? [];
+  return described(iter, (show, item, target) => {
+    const [value] = target.rest?.() ?? [];
     const inner = optionPart(value === undefined ? undefined : (indent) => show(value, item, indent));
     return fieldsPart(name, [['inner', isOption ? fieldsPart('Item', [['opt', inner]]) : inner]]);
   });

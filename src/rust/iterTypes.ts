@@ -96,29 +96,35 @@ export function intoIterItem(type: Type): Type | undefined {
 }
 
 /** The shape of the iterator that `IntoIterator` makes of a value of this type. */
-// code-gauge-allow functionCognitiveComplexity 28 -- Follows std's `IntoIterator` impls case by case.
 export function intoIterShape(program: Program, type: Type): Type | undefined {
   const t = normalize(shallow(type));
   if (t.kind === 'param' || t.kind === 'opaque') return iterationBound(t) && adt(program.adtDef('IntoShape'), [t]);
-  if (t.kind === 'array') return program.shapeType('ArrayIntoIterShape');
-  if (t.kind === 'ref') {
-    const target = normalize(shallow(t.target));
-    if (target.kind === 'array' || target.kind === 'slice') {
-      return program.shapeType(t.mutable ? 'SliceIterMutShape' : 'SliceIterShape');
-    }
-    if (target.kind !== 'adt') return undefined;
-    if (target.def.builtin === 'Iter') return t.mutable ? program.shapeType('ByRefShape', [target.args[1]]) : undefined;
-    const shapes = COLLECTION_SHAPES[target.def.builtin as string];
-    const name = shapes && (t.mutable ? shapes[1] : shapes[0]);
-    return name ? program.shapeType(name) : undefined;
-  }
+  if (t.kind === 'array') return program.shapeType('ArrayIntoIterShape', [t.elem]);
+  if (t.kind === 'ref') return borrowedIterShape(program, t.target, t.mutable);
   if (t.kind !== 'adt') return undefined;
   if (t.def.builtin === 'Iter') return t.args[1];
   if (t.def.builtin === 'CaseIter') return program.shapeType('CaseMappingShape');
   const range = RANGE_SHAPES[t.def.builtin as string];
   if (range) return program.shapeType(range, [t.args[0]]);
   const shapes = COLLECTION_SHAPES[t.def.builtin as string];
-  return shapes ? program.shapeType(shapes[2]) : undefined;
+  if (!shapes) return;
+  const name = shapes[2];
+  const args = ['Vec', 'VecDeque', 'BinaryHeap', 'Option', 'Result'].includes(t.def.builtin as string)
+    ? [t.args[0]]
+    : [];
+  return program.shapeType(name, args);
+}
+
+function borrowedIterShape(program: Program, type: Type, mutable: boolean): Type | undefined {
+  const target = normalize(shallow(type));
+  if (target.kind === 'array' || target.kind === 'slice') {
+    return program.shapeType(mutable ? 'SliceIterMutShape' : 'SliceIterShape');
+  }
+  if (target.kind !== 'adt') return undefined;
+  if (target.def.builtin === 'Iter') return mutable ? program.shapeType('ByRefShape', [target.args[1]]) : undefined;
+  const name = COLLECTION_SHAPES[target.def.builtin as string]?.[mutable ? 1 : 0];
+  if (!name) return;
+  return program.shapeType(name, name === 'OptionIterShape' ? [ref(target.args[0], mutable)] : []);
 }
 
 /** The `Iterator` or `IntoIterator` bound of a type parameter or an opaque type, by which it iterates. */

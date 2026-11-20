@@ -206,7 +206,7 @@ pub mod string {
     }
 }
 pub mod vec {
-    pub type IntoIter<T> = IterImpl<T, VecIntoIterShape>;
+    pub type IntoIter<T> = IterImpl<T, VecIntoIterShape<T>>;
     pub type Drain<'a, T> = IterImpl<'a, T, VecDrainShape>;
     pub struct Vec<T>;
     impl<T> Vec<T> {
@@ -243,7 +243,7 @@ pub mod vec {
         pub fn len(&self) -> usize;
     }
     impl<T> Vec<T> {
-        pub fn into_iter(self) -> IterImpl<T, VecIntoIterShape>;
+        pub fn into_iter(self) -> IterImpl<T, VecIntoIterShape<T>>;
     }
     impl<T> &Vec<T> {
         pub fn into_iter(self) -> IterImpl<&T, SliceIterShape>;
@@ -303,7 +303,7 @@ pub mod slice {
         pub fn repeat(&self, n: usize) -> Vec<T> where T: Copy;
     }
     impl<T> [T] {
-        pub fn into_iter(self) -> IterImpl<T, ArrayIntoIterShape>;
+        pub fn into_iter(self) -> IterImpl<T, ArrayIntoIterShape<T>>;
         pub fn map<U, F: FnMut(T) -> U>(self, f: F) -> [U];
     }
     impl<T> &[T] {
@@ -752,10 +752,10 @@ pub mod option {
         pub fn get_or_insert_with<F: FnOnce() -> T>(&mut self, f: F) -> &mut T;
         pub const fn as_ref(&self) -> Option<&T>;
         pub const fn as_mut(&mut self) -> Option<&mut T>;
-        pub fn iter(&self) -> IterImpl<&T, OptionIterShape>;
-        pub fn iter_mut(&mut self) -> IterImpl<&mut T, OptionIterShape>;
+        pub fn iter(&self) -> IterImpl<&T, OptionIterShape<&T>>;
+        pub fn iter_mut(&mut self) -> IterImpl<&mut T, OptionIterShape<&mut T>>;
         pub fn zip<U>(self, other: Option<U>) -> Option<(T, U)>;
-        pub fn into_iter(self) -> IterImpl<T, OptionIterShape>;
+        pub fn into_iter(self) -> IterImpl<T, OptionIterShape<T>>;
     }
     impl<T> Option<&T> {
         pub fn copied(self) -> Option<T> where T: Copy;
@@ -800,9 +800,9 @@ pub mod result {
         pub fn err(self) -> Option<E>;
         pub const fn as_ref(&self) -> Result<&T, &E>;
         pub const fn as_mut(&mut self) -> Result<&mut T, &mut E>;
-        pub fn iter(&self) -> IterImpl<&T, OptionIterShape>;
-        pub fn iter_mut(&mut self) -> IterImpl<&mut T, OptionIterShape>;
-        pub fn into_iter(self) -> IterImpl<T, OptionIterShape>;
+        pub fn iter(&self) -> IterImpl<&T, OptionIterShape<&T>>;
+        pub fn iter_mut(&mut self) -> IterImpl<&mut T, OptionIterShape<&mut T>>;
+        pub fn into_iter(self) -> IterImpl<T, OptionIterShape<T>>;
     }
     impl<T, E> Result<&T, E> {
         pub fn copied(self) -> Result<T, E> where T: Copy;
@@ -853,8 +853,8 @@ pub mod iter {
     pub mod shape {
         pub struct SliceIterShape;
         pub struct SliceIterMutShape;
-        pub struct VecIntoIterShape;
-        pub struct ArrayIntoIterShape;
+        pub struct VecIntoIterShape<T>;
+        pub struct ArrayIntoIterShape<T>;
         pub struct VecDrainShape;
         pub struct StringDrainShape;
         pub struct WindowsShape;
@@ -868,7 +868,7 @@ pub mod iter {
         pub struct LinesShape;
         pub struct SplitShape<P>;
         pub struct SplitNShape<P>;
-        pub struct OptionIterShape;
+        pub struct OptionIterShape<T>;
         pub struct HashMapIterShape;
         pub struct HashMapIterMutShape;
         pub struct HashMapKeysShape;
@@ -896,21 +896,21 @@ pub mod iter {
         pub struct SetOpShape;
         pub struct VecDequeIterShape;
         pub struct VecDequeIterMutShape;
-        pub struct VecDequeIntoIterShape;
+        pub struct VecDequeIntoIterShape<T>;
         pub struct VecDequeDrainShape;
         pub struct BinaryHeapIterShape;
-        pub struct BinaryHeapIntoIterShape;
+        pub struct BinaryHeapIntoIterShape<T>;
         pub struct BinaryHeapDrainShape;
         pub struct RangeShape<Idx>;
         pub struct RangeInclusiveShape<Idx>;
         pub struct RangeFromShape<Idx>;
         pub struct CaseMappingShape;
-        pub struct RepeatShape;
-        pub struct RepeatNShape;
-        pub struct OnceShape;
+        pub struct RepeatShape<T>;
+        pub struct RepeatNShape<T>;
+        pub struct OnceShape<T>;
         pub struct EmptyShape;
         pub struct FromFnShape<F>;
-        pub struct SuccessorsShape<F>;
+        pub struct SuccessorsShape<T, F>;
         pub struct MapShape<S, F>;
         pub struct FilterShape<S, P>;
         pub struct FilterMapShape<S, F>;
@@ -926,7 +926,7 @@ pub mod iter {
         pub struct TakeWhileShape<S, P>;
         pub struct SkipWhileShape<S, P>;
         pub struct StepByShape<S>;
-        pub struct PeekableShape<S>;
+        pub struct PeekableShape<S, T>;
         pub struct FuseShape<S>;
         pub struct InspectShape<S, F>;
         pub struct CycleShape<S>;
@@ -939,7 +939,7 @@ pub mod iter {
     pub type Take<I> = IterImpl<IterItem<I>, TakeShape<IterShape<I>>>;
     pub type Skip<I> = IterImpl<IterItem<I>, SkipShape<IterShape<I>>>;
     pub type StepBy<I> = IterImpl<IterItem<I>, StepByShape<IterShape<I>>>;
-    pub type Peekable<I> = IterImpl<IterItem<I>, PeekableShape<IterShape<I>>>;
+    pub type Peekable<I> = IterImpl<IterItem<I>, PeekableShape<IterShape<I>, IterItem<I>>>;
     pub type Fuse<I> = IterImpl<IterItem<I>, FuseShape<IterShape<I>>>;
     pub type Cycle<I> = IterImpl<IterItem<I>, CycleShape<IterShape<I>>>;
     pub type Enumerate<I> = IterImpl<(usize, IterItem<I>), EnumerateShape<IterShape<I>>>;
@@ -947,9 +947,9 @@ pub mod iter {
     pub type Cloned<I> = IterImpl<IterTarget<I>, ClonedShape<IterShape<I>>>;
     pub type Zip<A, B> = IterImpl<(IterItem<A>, IterItem<B>), ZipShape<IterShape<A>, IterShape<B>>>;
     pub type Chain<A, B> = IterImpl<IterItem<A>, ChainShape<IterShape<A>, IterShape<B>>>;
-    pub type Repeat<A> = IterImpl<A, RepeatShape>;
-    pub type RepeatN<A> = IterImpl<A, RepeatNShape>;
-    pub type Once<A> = IterImpl<A, OnceShape>;
+    pub type Repeat<A> = IterImpl<A, RepeatShape<A>>;
+    pub type RepeatN<A> = IterImpl<A, RepeatNShape<A>>;
+    pub type Once<A> = IterImpl<A, OnceShape<A>>;
     pub type Empty<A> = IterImpl<A, EmptyShape>;
     impl<T, S> IterImpl<T, S> {
         pub fn next(&mut self) -> Option<T>;
@@ -969,10 +969,10 @@ pub mod iter {
         pub fn take_while<P: FnMut(&T) -> bool>(self, predicate: P) -> IterImpl<T, TakeWhileShape<S, P>>;
         pub fn skip_while<P: FnMut(&T) -> bool>(self, predicate: P) -> IterImpl<T, SkipWhileShape<S, P>>;
         pub fn step_by(self, step: usize) -> IterImpl<T, StepByShape<S>>;
-        pub fn peekable(self) -> IterImpl<T, PeekableShape<S>>;
+        pub fn peekable(self) -> IterImpl<T, PeekableShape<S, T>>;
         pub fn fuse(self) -> IterImpl<T, FuseShape<S>>;
         pub fn inspect<F: FnMut(&T)>(self, f: F) -> IterImpl<T, InspectShape<S, F>>;
-        pub fn cycle(self) -> IterImpl<T, CycleShape<S>> where T: Clone, S: Clone;
+        pub fn cycle(self) -> IterImpl<T, CycleShape<S>> where S: Clone;
         pub fn scan<St, B, F: FnMut(&mut St, T) -> Option<B>>(self, initial_state: St, f: F) -> IterImpl<B, ScanShape<S, St, F>>;
         pub fn by_ref(&mut self) -> IterImpl<T, ByRefShape<S>>;
         pub fn collect<B: FromIterator<T>>(self) -> B;
@@ -1005,7 +1005,7 @@ pub mod iter {
         pub fn is_sorted(self) -> bool where T: PartialOrd;
         pub fn into_iter(self) -> IterImpl<T, S>;
     }
-    impl<T, S> IterImpl<T, PeekableShape<S>> {
+    impl<T, S> IterImpl<T, PeekableShape<S, T>> {
         pub fn peek(&mut self) -> Option<&T>;
         pub fn next_if<F: FnOnce(&T) -> bool>(&mut self, func: F) -> Option<T>;
     }
@@ -1023,12 +1023,12 @@ pub mod iter {
     impl<A, B, S> IterImpl<(A, B), S> {
         pub fn unzip<FromA: FromIterator<A>, FromB: FromIterator<B>>(self) -> (FromA, FromB);
     }
-    pub fn repeat<T: Clone>(elt: T) -> IterImpl<T, RepeatShape>;
-    pub fn repeat_n<T: Clone>(element: T, count: usize) -> IterImpl<T, RepeatNShape>;
-    pub fn once<T>(value: T) -> IterImpl<T, OnceShape>;
+    pub fn repeat<T: Clone>(elt: T) -> IterImpl<T, RepeatShape<T>>;
+    pub fn repeat_n<T: Clone>(element: T, count: usize) -> IterImpl<T, RepeatNShape<T>>;
+    pub fn once<T>(value: T) -> IterImpl<T, OnceShape<T>>;
     pub fn empty<T>() -> IterImpl<T, EmptyShape>;
     pub fn from_fn<T, F: FnMut() -> Option<T>>(f: F) -> IterImpl<T, FromFnShape<F>>;
-    pub fn successors<T, F: FnMut(&T) -> Option<T>>(first: Option<T>, succ: F) -> IterImpl<T, SuccessorsShape<F>>;
+    pub fn successors<T, F: FnMut(&T) -> Option<T>>(first: Option<T>, succ: F) -> IterImpl<T, SuccessorsShape<T, F>>;
     pub fn zip<A, B, SA, SB>(a: IterImpl<A, SA>, b: IterImpl<B, SB>) -> IterImpl<(A, B), ZipShape<SA, SB>>;
 }
 pub mod collections {
@@ -1234,7 +1234,7 @@ pub mod collections {
         pub fn rotate_right(&mut self, n: usize);
         pub fn make_contiguous(&mut self) -> &mut [T];
         pub fn drain<R: RangeBounds<usize>>(&mut self, range: R) -> IterImpl<T, VecDequeDrainShape>;
-        pub fn into_iter(self) -> IterImpl<T, VecDequeIntoIterShape>;
+        pub fn into_iter(self) -> IterImpl<T, VecDequeIntoIterShape<T>>;
     }
     impl<T> &VecDeque<T> {
         pub fn into_iter(self) -> IterImpl<&T, VecDequeIterShape>;
@@ -1258,7 +1258,7 @@ pub mod collections {
         pub fn into_vec(self) -> Vec<T>;
         pub fn into_sorted_vec(self) -> Vec<T> where T: Ord;
         pub fn extend<A: ExtendInto<T>, S>(&mut self, iter: IterImpl<A, S>) where T: Ord;
-        pub fn into_iter(self) -> IterImpl<T, BinaryHeapIntoIterShape>;
+        pub fn into_iter(self) -> IterImpl<T, BinaryHeapIntoIterShape<T>>;
         pub fn drain(&mut self) -> IterImpl<T, BinaryHeapDrainShape>;
     }
     impl<T> &BinaryHeap<T> {

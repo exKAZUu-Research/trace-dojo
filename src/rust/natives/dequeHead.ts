@@ -99,9 +99,16 @@ export function withDequeHead<C>(
  */
 export function dequeIter(items: Value[], capacity: number, mutable: boolean): IterValue {
   const first = firstSliceLength(items, capacity);
+  return dequeIterFrom(items, mutable, { front: 0, back: first }, { front: first, back: items.length });
+}
+
+function dequeIterFrom(
+  items: Value[],
+  mutable: boolean,
+  i1: { front: number; back: number },
+  i2: { front: number; back: number }
+): IterValue {
   const element = (index: number): Value => (mutable ? new ElementPlace(items, index) : items[index]);
-  let i1 = { front: 0, back: first };
-  let i2 = { front: first, back: items.length };
   const take = (range: { front: number; back: number }, fromBack: boolean): Next => {
     if (range.front >= range.back) return DONE;
     return element(fromBack ? --range.back : range.front++);
@@ -120,8 +127,9 @@ export function dequeIter(items: Value[], capacity: number, mutable: boolean): I
   };
   const values = (range: { front: number; back: number }): Value[] =>
     Array.from({ length: Math.max(0, range.back - range.front) }, (_, offset) => element(range.front + offset));
-  const iter = new IterValue(next, nextBack, () => values(i1).length + values(i2).length, [items]);
+  const iter = new IterValue(next, nextBack, () => i1.back - i1.front + i2.back - i2.front, [items]);
   iter.rest = () => [...values(i1), ...values(i2)];
+  if (!mutable) iter.fork = () => dequeIterFrom(items, mutable, { ...i1 }, { ...i2 });
   return described(iter, (show, item) =>
     tuplePart(mutable ? 'IterMut' : 'Iter', [listPart(values(i1), item, show), listPart(values(i2), item, show)])
   );

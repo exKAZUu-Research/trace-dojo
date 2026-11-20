@@ -200,14 +200,36 @@ function clone(goal: Goal): Answer {
   return goal.t.kind === 'adt' ? cloneAdt(goal, goal.t) : 'no';
 }
 
+const NON_CLONE_ITERATORS = new Set([
+  'ByRefShape',
+  'SliceIterMutShape',
+  'VecDrainShape',
+  'StringDrainShape',
+  'VecDequeIterMutShape',
+  'VecDequeDrainShape',
+  'BinaryHeapDrainShape',
+  'HashMapIterMutShape',
+  'HashMapValuesMutShape',
+  'HashMapIntoKeysShape',
+  'HashMapIntoValuesShape',
+  'HashMapIntoIterShape',
+  'HashMapDrainShape',
+  'HashSetDrainShape',
+  'HashSetIntoIterShape',
+  'BTreeMapIterMutShape',
+  'BTreeMapValuesMutShape',
+  'BTreeMapIntoKeysShape',
+  'BTreeMapIntoValuesShape',
+  'BTreeMapIntoIterShape',
+  'BTreeSetIntoIterShape',
+]);
+
 function cloneAdt(goal: Goal, t: AdtType): Answer {
   const { all } = goal;
   const d = derived(goal);
   if (d) return d;
-  // An iterator clones as what it holds does: the closures of its adapters.
   if (t.def.builtin === 'Iter') return all([t.args[1]]);
-  if (isIteratorShape(t.def))
-    return all(t.args.filter((arg) => normalize(shallow(arg)).kind === 'closure' || isShapeType(arg)));
+  if (isIteratorShape(t.def)) return NON_CLONE_ITERATORS.has(t.def.name) ? 'no' : all(t.args);
   if (CLONE_CONTAINERS.has(t.def.builtin as string)) return all(t.args);
   if (t.def.builtin === 'String' || ERROR_TYPES.has(t.def.builtin as string)) return 'yes';
   if (t.def.builtin === 'Box') {
@@ -633,11 +655,6 @@ function closureCaptures(t: Type & { kind: 'closure' }, all: (types: Type[]) => 
   const captures = t.closure.captures ?? [];
   if (captures.some((capture) => capture.mode === 'mut')) return 'no';
   return all(captures.filter((capture) => capture.mode === 'value').map((capture) => capture.type));
-}
-
-function isShapeType(type: Type): boolean {
-  const t = normalize(shallow(type));
-  return t.kind === 'adt' && isIteratorShape(t.def);
 }
 
 /**

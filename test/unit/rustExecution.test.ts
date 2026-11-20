@@ -3798,3 +3798,93 @@ test('rejects a duplicate or noninitial Rust receiver parameter', () => {
     expect(executeProgram('rust', source)).toMatchObject({ kind: 'compileError' });
   }
 });
+
+test('independently advances and formats cloned Rust leaf iterators', () => {
+  const source = rustMain(`let mut chars = "éabc".char_indices();
+    chars.next();
+    let mut copy = chars.clone();
+    copy.next(); copy.next_back();
+    chars.next_back(); chars.next_back(); chars.next_back();
+    println!("{:?} {:?}", chars, copy);
+    let array = [1, 2, 3];
+    let windows = array.windows(2);
+    let mut copy = windows.clone();
+    copy.next();
+    println!("{:?} {:?}", windows, copy);
+    let some = Some(1);
+    let option = some.iter();
+    let mut copy = option.clone();
+    copy.next();
+    println!("{:?} {:?}", option, copy);`);
+  expect(executeProgram('rust', source)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      "CharIndices { front_offset: 2, iter: Chars([]) } CharIndices { front_offset: 3, iter: Chars(['b']) }\n" +
+      'Windows { v: [1, 2, 3], size: 2 } Windows { v: [2, 3], size: 2 }\n' +
+      'Iter { inner: Item { opt: Some(1) } } Iter { inner: Item { opt: None } }\n',
+  });
+});
+
+test('clones partially consumed Rust BTreeSet operations without sharing progress', () => {
+  const source = rustMain(
+    `let left = BTreeSet::from([1, 2, 4, 6, 7]);
+    let right = BTreeSet::from([2, 3, 4, 8]);
+    let mut union = left.union(&right);
+    union.next();
+    let mut union_clone = union.clone();
+    println!("{:?} {:?} {:?} {:?}", union.next(), union.next(), union_clone.next(), union_clone.next());
+    let mut difference = left.difference(&right);
+    difference.next();
+    let mut difference_clone = difference.clone();
+    println!("{:?} {:?}", difference.next(), difference_clone.next());
+    let mut intersection = left.intersection(&right);
+    intersection.next();
+    let mut intersection_clone = intersection.clone();
+    println!("{:?} {:?}", intersection.next(), intersection_clone.next());
+    let mut symmetric = left.symmetric_difference(&right);
+    symmetric.next();
+    let mut symmetric_clone = symmetric.clone();
+    println!("{:?} {:?}", symmetric.next(), symmetric_clone.next());`,
+    'use std::collections::BTreeSet;'
+  );
+  expect(executeProgram('rust', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'Some(2) Some(3) Some(2) Some(3)\nSome(6) Some(6)\nSome(4) Some(4)\nSome(3) Some(3)\n',
+  });
+});
+
+test('Rust repeat_n moves its last element and does not clone when empty or exhausted', () => {
+  const source = rustMain(
+    `let mut empty = std::iter::repeat_n(Item(0), 0);
+    let _copy = empty.clone();
+    assert!(empty.next().is_none());
+    let mut values = std::iter::repeat_n(Item(7), 3);
+    println!("{} {} {}", values.next_back().unwrap().0, values.next().unwrap().0, values.next_back().unwrap().0);
+    let _copy = values.clone();
+    assert!(values.next().is_none());
+    println!("{}", std::iter::repeat_n(Item(9), 1).next().unwrap().0);`,
+    `struct Item(i32);
+      impl Clone for Item {
+        fn clone(&self) -> Self { print!("clone "); Item(self.0) }
+      }`
+  );
+  expect(executeProgram('rust', source)).toMatchObject({ kind: 'executed', stdout: 'clone clone 7 7 7\n9\n' });
+});
+
+test('cycles a Rust iterator whose state is cloneable and whose output is move-only', () => {
+  const source = rustMain(
+    `let values: Vec<_> = (0..2).map(Item).cycle().take(4).map(|value| value.0).collect();
+    println!("{:?}", values);`,
+    'struct Item(i32);'
+  );
+  expect(executeProgram('rust', source)).toMatchObject({ kind: 'executed', stdout: '[0, 1, 0, 1]\n' });
+  for (const iterator of [
+    '[Item(0)].into_iter()',
+    'vec![Item(0)].into_iter().map(|value| value.0)',
+    '(0..2).map(Item).peekable()',
+    'std::iter::once(Item(0))',
+  ]) {
+    const invalid = rustMain(`let _values = ${iterator}.cycle();`, 'struct Item(i32);');
+    expect(executeProgram('rust', invalid)).toMatchObject({ kind: 'compileError' });
+  }
+});

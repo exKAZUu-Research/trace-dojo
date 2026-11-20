@@ -375,9 +375,9 @@ function chunkDebug(
   done: () => SliceView,
   fields: (part: (values: Value[]) => DebugPart) => [string, DebugPart][]
 ): IterValue {
-  return described(iter, (show, item) => {
+  return described(iter, (show, item, target) => {
     const elem = sliceElem(item);
-    const views = (iter.rest?.() ?? []) as SliceView[];
+    const views = (target.rest?.() ?? []) as SliceView[];
     let from = Number.POSITIVE_INFINITY;
     let to = 0;
     for (const view of views) {

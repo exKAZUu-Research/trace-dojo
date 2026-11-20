@@ -205,6 +205,8 @@ export class IterValue {
   /** The elements left, for iterators over an array (`Chars::as_str` reads them without taking them). */
   rest: (() => Value[]) | undefined;
 
+  frontIndex?: () => number;
+
   /**
    * An independent copy of the iterator at its position, as `Clone` makes it.
    */

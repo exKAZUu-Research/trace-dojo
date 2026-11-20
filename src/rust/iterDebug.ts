@@ -79,8 +79,18 @@ const DESCRIBED_ADAPTERS = new Set([
 ]);
 
 /** Sets how `{:?}` writes an iterator, as std's `Debug` impl of its type does. */
-export function described(iter: IterValue, describe: NonNullable<IterValue['debug']>): IterValue {
-  iter.debug = describe;
+export function described(
+  iter: IterValue,
+  describe: (show: DebugValue, item: Type, target: IterValue) => DebugPart
+): IterValue {
+  iter.debug = (show, item) => describe(show, item, iter);
+  const { fork } = iter;
+  if (fork) {
+    iter.fork = () => {
+      const copy = fork();
+      return copy.debug ? copy : described(copy, describe);
+    };
+  }
   return iter;
 }
 
