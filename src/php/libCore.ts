@@ -653,14 +653,14 @@ defineFunction('restore_error_handler(): true', () => {
 });
 defineFunction('set_exception_handler(?callable $callback)', ({ args }) => {
   const runtime = rt();
-  const previous = runtime.exceptionHandler;
+  const previous = runtime.exceptionHandler ?? null;
   runtime.replacedExceptionHandlers.push(previous);
   runtime.exceptionHandler = args[0];
   return previous;
 });
 defineFunction('restore_exception_handler(): true', () => {
   const runtime = rt();
-  const handler = runtime.exceptionHandler;
+  const handler = runtime.exceptionHandler ?? null;
   const outerRetirement = runtime.retiringExceptionHandler;
   runtime.retiringExceptionHandler = handler;
   try {

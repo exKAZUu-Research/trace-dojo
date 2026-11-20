@@ -108,14 +108,20 @@ function report(runtime: Runtime, error: unknown): string | undefined {
 
 function invokeExceptionHandler(runtime: Runtime, object: PhpObject): string | undefined {
   const handler = runtime.exceptionHandler;
-  if (handler === null) return printUncaught(runtime, object);
-  runtime.exceptionHandler = null;
+  if (handler === null || handler === undefined) return printUncaught(runtime, object);
+  runtime.replacedExceptionHandlers.push(handler);
+  runtime.exceptionHandler = undefined;
   try {
     // PHP calls the handler after the program's code has unwound, from no line of it.
     asInternal(() => callValue(handler, [{ v: object }], undefined));
-    runtime.exceptionHandler ??= handler;
+    if (runtime.exceptionHandler === undefined)
+      runtime.exceptionHandler = runtime.replacedExceptionHandlers.pop() ?? null;
     return undefined;
   } catch (error_) {
+    if (error_ instanceof ExitSignal) {
+      runtime.shuttingDown = true;
+      return undefined;
+    }
     return report(runtime, error_);
   }
 }
@@ -147,38 +153,63 @@ function shutdown(runtime: Runtime): string | undefined {
   runtime.frames.length = 1;
   const staticFailure = guard(runtime, () => releaseMainStatics(runtime));
   if (runtime.shuttingDown || runtime.exhausted) return staticFailure;
-  const objectFailure = guard(runtime, () =>
+  let objectFailure: string | undefined;
+  const outerFailure = guard(runtime, () =>
     runtime.withNativeReleaseMode('shutdown', () => {
-      runtime.releasingGlobalsAtShutdown = true;
-      try {
-        destroyGlobals(runtime);
-      } finally {
-        runtime.releasingGlobalsAtShutdown = false;
-      }
-      for (const object of runtime.objectsInShutdownOrder()) {
-        if (object.destructed) continue;
-        const destructor = object.cls.findMethod('__destruct');
-        object.destructed = true;
-        if (!destructor) continue;
-        runtime.destructibles--;
-        asInternal(() =>
-          invoke(
-            {
-              fn: destructor.fn,
-              thisObj: object,
-              scope: destructor.scope,
-              staticClass: object.cls,
-              method: destructor,
-            },
-            [],
-            undefined
-          )
-        );
-      }
-      runtime.shuttingDown = true;
+      objectFailure = shutdownObjects(runtime);
     })
   );
-  return objectFailure ?? staticFailure;
+  return outerFailure ?? objectFailure ?? staticFailure;
+}
+
+function shutdownObjects(runtime: Runtime): string | undefined {
+  runtime.releasingGlobalsAtShutdown = true;
+  let globalStep: { stop: boolean; failure?: string };
+  try {
+    globalStep = destroyGlobals(runtime);
+  } finally {
+    runtime.releasingGlobalsAtShutdown = false;
+  }
+  if (globalStep.stop) return globalStep.failure;
+  for (const object of runtime.objectsInShutdownOrder()) {
+    if (object.destructed) continue;
+    const destructor = object.cls.findMethod('__destruct');
+    object.destructed = true;
+    if (!destructor) continue;
+    runtime.destructibles--;
+    const step = guardShutdownStep(runtime, () =>
+      asInternal(() =>
+        invoke(
+          {
+            fn: destructor.fn,
+            thisObj: object,
+            scope: destructor.scope,
+            staticClass: object.cls,
+            method: destructor,
+          },
+          [],
+          undefined
+        )
+      )
+    );
+    if (step.stop) return step.failure;
+  }
+  runtime.shuttingDown = true;
+  return undefined;
+}
+
+function guardShutdownStep(runtime: Runtime, run: () => void): { stop: boolean; failure?: string } {
+  try {
+    run();
+    return { stop: runtime.shuttingDown || runtime.exhausted };
+  } catch (error) {
+    if (error instanceof ExitSignal) {
+      runtime.shuttingDown = true;
+      return { stop: true };
+    }
+    const failure = report(runtime, error);
+    return { stop: failure !== undefined || runtime.shuttingDown || runtime.exhausted, failure };
+  }
 }
 
 function releaseMainStatics(runtime: Runtime): void {
@@ -188,30 +219,44 @@ function releaseMainStatics(runtime: Runtime): void {
   releaseDropped(runtime, statics, true, 'shutdown');
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function destroyGlobals(runtime: Runtime): void {
-  if (runtime.destructibles === 0) return;
+function destroyGlobals(runtime: Runtime): { stop: boolean; failure?: string } {
+  if (runtime.destructibles === 0) return { stop: false };
   const order = globalOrder(runtime);
-  let counts: ReturnType<typeof holderCounts> | undefined;
+  const state: { counts?: ReturnType<typeof holderCounts> } = {};
   for (;;) {
     let removed = false;
     for (const name of order) {
-      runtime.spend();
-      const ref = runtime.globalFrame.vars.get(name);
-      if (!ref) continue;
-      const value = ref.v;
-      // A variable that became a reference stays one, which this pass skips even when nothing else holds it.
-      if (!(value instanceof PhpObject) || ref.isRef) continue;
-      counts ??= holderCounts(runtime);
-      if (counts.get(value) !== 1) continue;
-      runtime.globalFrame.vars.delete(name);
-      ref.rc--;
-      removed = true;
-      if (releaseGlobalObject(runtime, value)) counts.delete(value);
-      else counts = undefined;
+      const outcome = destroyGlobalEntry(runtime, name, state);
+      if (outcome.stop) return outcome;
+      if (outcome.removed) removed = true;
     }
-    if (!removed) break;
+    if (!removed) return { stop: false };
   }
+}
+
+function destroyGlobalEntry(
+  runtime: Runtime,
+  name: string,
+  state: { counts?: ReturnType<typeof holderCounts> }
+): { stop: boolean; failure?: string; removed: boolean } {
+  runtime.spend();
+  const ref = runtime.globalFrame.vars.get(name);
+  if (!ref) return { stop: false, removed: false };
+  const value = ref.v;
+  // A variable that became a reference stays one, which this pass skips even when nothing else holds it.
+  if (!(value instanceof PhpObject) || ref.isRef) return { stop: false, removed: false };
+  state.counts ??= holderCounts(runtime);
+  if (state.counts.get(value) !== 1) return { stop: false, removed: false };
+  runtime.globalFrame.vars.delete(name);
+  ref.rc--;
+  let fastRemoved = false;
+  const step = guardShutdownStep(runtime, () => {
+    fastRemoved = releaseGlobalObject(runtime, value);
+  });
+  if (step.stop) return { ...step, removed: true };
+  if (fastRemoved) state.counts.delete(value);
+  else state.counts = undefined;
+  return { stop: false, removed: true };
 }
 
 /** The global variables in the order PHP's symbol table holds them: the program's variables in order of appearance. */

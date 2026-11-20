@@ -517,33 +517,13 @@ function finishBucketWrite(
     if (array.has(target)) {
       runtime.holdForShutdown(array.releaseSlot(target));
       array.setSlot(target, replacement);
-    } else fillPackedHole(array, target, replacement);
+    } else array.restorePackedSlot(target, replacement);
     return;
   }
   const target = order.keyAtBucket(bucket);
   if (target === undefined) return;
   runtime.holdForShutdown(array.releaseSlot(target));
   array.setSlot(target, replacement);
-}
-
-function fillPackedHole(array: PhpArray, key: bigint, replacement: Value): void {
-  const entries: [Key, Value | Ref][] = [];
-  const positions = new Map<Key, number>();
-  let inserted = false;
-  for (const [existingKey, slot] of array.map.physicalEntries()) {
-    if (!inserted && typeof existingKey === 'bigint' && existingKey > key) {
-      entries.push([key, replacement]);
-      positions.set(key, Number(key));
-      inserted = true;
-    }
-    entries.push([existingKey, slot]);
-    positions.set(existingKey, Number(existingKey));
-  }
-  if (!inserted) {
-    entries.push([key, replacement]);
-    positions.set(key, Number(key));
-  }
-  array.replaceTable(entries, true, { positions, keepPositions: true, packed: true }, true);
 }
 
 function keyAt(storage: ArrayStorage): Key | undefined {

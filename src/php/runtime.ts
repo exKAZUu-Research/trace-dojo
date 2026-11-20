@@ -179,7 +179,7 @@ export class Runtime {
   errorReporting = 30_719n;
   nativeStringConversionPending = false;
   errorHandlers: { handler: Value; mask: bigint }[] = [];
-  exceptionHandler: Value = null;
+  exceptionHandler: Value | undefined = null;
   retiringExceptionHandler: Value | undefined;
   readonly nativeShutdownHolders = new Set<PhpArray | PhpObject | Ref>();
   assertionCallback: Value | undefined;

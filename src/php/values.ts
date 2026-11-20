@@ -285,12 +285,24 @@ export class PhpArray {
     return undefined;
   }
 
-  private restorePackedSlot(key: bigint, value: Value): Value {
-    const entries = [...this.map.physicalEntries()];
-    const insertAt = entries.findIndex(([existing]) => typeof existing === 'bigint' && existing > key);
-    if (insertAt === -1) return this.set(key, value);
-    entries.splice(insertAt, 0, [key, value]);
-    this.replaceTable(entries, true, undefined, true);
+  restorePackedSlot(key: bigint, value: Value): Value {
+    const entries: [Key, Value | Ref][] = [];
+    const positions = new Map<Key, number>();
+    let inserted = false;
+    for (const [existingKey, slot] of this.map.physicalEntries()) {
+      if (!inserted && typeof existingKey === 'bigint' && existingKey > key) {
+        entries.push([key, value]);
+        positions.set(key, Number(key));
+        inserted = true;
+      }
+      entries.push([existingKey, slot]);
+      positions.set(existingKey, Number(existingKey));
+    }
+    if (!inserted) {
+      entries.push([key, value]);
+      positions.set(key, Number(key));
+    }
+    this.replaceTable(entries, true, { positions, keepPositions: true, packed: true }, true);
     return value;
   }
 

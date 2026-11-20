@@ -4426,4 +4426,55 @@ set_exception_handler(function($e) { echo "handler: ", $e->getMessage(), "\n"; }
 throw new Exception("first");
 `)
   ).toMatchObject({ kind: 'executed', stdout: 'handler: first\nhandler: from destructor\n' });
+
+  expect(
+    run(`<?php
+class D { function __destruct() { throw new Exception("dd"); } }
+$x = new D;
+set_exception_handler(function($e) { echo "h1: ", $e->getMessage(), "\n"; set_exception_handler(null); });
+throw new Exception("first");
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'h1: first\n\nFatal error: Uncaught Exception: dd in /main.php:2\nStack trace:\n#0 [internal function]: D->__destruct()\n#1 {main}\n  thrown in /main.php on line 2\n',
+  });
+
+  expect(
+    run(`<?php
+class D { function __destruct() { throw new Exception("dd"); } }
+$x = new D;
+set_exception_handler(function($e) { echo "h2: ", $e->getMessage(), "\n"; });
+set_exception_handler(function($e) { echo "h1: ", $e->getMessage(), "\n"; restore_exception_handler(); restore_exception_handler(); });
+throw new Exception("first");
+`)
+  ).toMatchObject({ kind: 'executed', stdout: 'h1: first\nh2: dd\n' });
+
+  expect(
+    run(`<?php
+class D { function __construct(public $n) {} function __destruct() { throw new Exception("dd{$this->n}"); } }
+$x = new D(1); $y = new D(2);
+set_exception_handler(function($e) { echo "h: ", $e->getMessage(), "\n"; });
+throw new Exception("first");
+`)
+  ).toMatchObject({ kind: 'executed', stdout: 'h: first\nh: dd2\nh: dd1\n' });
+
+  for (const [init, expected] of [
+    ['[0=>1,2=>2]', '2,2,4,0,0,4,0,3,|334995689'],
+    ['[0=>1,3=>2]', '0,5,4,4,0,5,4,4,|957418556'],
+  ]) {
+    expect(
+      run(`<?php
+error_reporting(0);
+function f() { return [4]; }
+$a = ${init};
+set_error_handler(function() use (&$a) { unset($a[array_key_last($a)]); $a[] = 9; return true; });
+$a[] =& f();
+restore_error_handler();
+mt_srand(42);
+for ($i = 0; $i < 8; $i++) echo array_rand($a), ",";
+echo "|", mt_rand();
+`)
+    ).toMatchObject({ kind: 'executed', stdout: expected });
+  }
 });
