@@ -253,7 +253,10 @@ export class Runtime implements TracedRuntime<Frame> {
         throw exception;
       }
     }
-    throw this.abort(this.describeUncaught(frame, exception));
+    const description = this.describeUncaught(frame, exception);
+    // The exception object stays live while the program ends, so the final state reaches what it holds.
+    this.unwinding.add(exception);
+    throw this.abort(description);
   }
 
   /** Ends the program at an uncaught exception, which stops without unwinding, after `onAbort` sees that state. */

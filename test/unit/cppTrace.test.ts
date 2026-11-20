@@ -351,7 +351,9 @@ int main() {
 test.each([
   'int fail() { Turtle t(3, 5); throw 1; }\nstruct S { int n = fail(); };\nint main() { S s{}; }',
   'int fail() { throw 1; }\nvoid f(Turtle*, int) {}\nint main() { f(new Turtle(3, 5), fail()); }',
-])('keeps turtles that active initializers and arguments reach at an uncaught throw in %s', (program) => {
+  'int main() { throw new Turtle(3, 5); }',
+  'struct Holder { Turtle* t; };\nint main() { throw Holder{new Turtle(3, 5)}; }',
+])('keeps turtles that active calls, arguments, and the exception reach at an uncaught throw in %s', (program) => {
   const turtle = { x: 3, y: 5, color: '#', dir: 'N' };
   expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', finalTurtles: [turtle] });
   expect(traceProgram('cpp', program, program)).toMatchObject({ finalTurtles: [turtle] });
