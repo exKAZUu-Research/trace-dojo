@@ -75,6 +75,7 @@ export function functorClass(library: Library, name: string, type: Type | undefi
   };
   cls.library = {
     kind: 'functor',
+    sdkMemberClass: name,
     args: argument ? [argument] : [],
     size: 1,
     align: 1,

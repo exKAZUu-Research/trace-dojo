@@ -92,18 +92,10 @@ export function isSdkStdForwardOnly(name: string, headers: ReadonlySet<string>):
 }
 
 export function isSdkMemberDeclared(cls: ClassInfo, name: string): boolean {
-  const key = sdkClassKey(cls);
+  const key = cls.library?.sdkMemberClass ?? cls.library?.kind;
   if (key && Object.hasOwn(sdkMembers, key) && sdkMembers[key].includes(name)) return true;
   if (cls.base && isSdkMemberDeclared(cls.base, name)) return true;
   return cls.library?.additionalPublicBases?.some((base) => isSdkMemberDeclared(base, name)) === true;
-}
-
-function sdkClassKey(cls: ClassInfo): string | undefined {
-  if (!cls.library) return;
-  const name = /^std::(\w+)(?:<.*>)?$/.exec(cls.name)?.[1];
-  const element = cls.library.args[0];
-  if (name === 'vector' && element?.kind === 'int' && element.name === 'bool') return 'vector<bool>';
-  return name;
 }
 
 export function mathWrapperCall(name: string, kind: MathWrapper): string | undefined {

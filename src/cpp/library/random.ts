@@ -229,6 +229,7 @@ export function randomEngines(): Map<string, ClassInfo> {
     const toResult = (value: bigint): Value => (resultType === UINT ? Number(value) : value);
     cls.library = {
       kind: 'engine',
+      sdkMemberClass: name,
       args: [],
       size: parameters ? parameters.n * (parameters.w / 8) + 8 : 4,
       align: parameters ? 8 : 4,

@@ -45,6 +45,7 @@ function makeReference(isConst: boolean): Type {
   cls.isAssignmentDeleted = isConst;
   cls.library = {
     kind: 'bitReference',
+    sdkMemberClass: isConst ? '__bit_const_reference' : '__bit_reference',
     args: [],
     size: 16,
     align: 8,

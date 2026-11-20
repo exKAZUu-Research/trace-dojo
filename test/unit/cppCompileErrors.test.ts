@@ -44,6 +44,9 @@ test.each([
   ['list', 'std::list<int> first{1, 2}, second{3}; first.merge(second);', 'merge'],
   ['list', 'std::list<int> first{1, 2}; first.remove_if(isOdd);', 'remove_if'],
   ['vector', 'std::vector<int>::allocator_type allocator;', 'allocator_type'],
+  ['vector', 'std::vector<int> values{1}; values.rbegin().base();', 'base'],
+  ['list', 'std::list<int> values{1}; values.crbegin().base();', 'base'],
+  ['string', 'std::string value("a"); value.begin().base();', 'base'],
 ])('reports an unavailable member of the standard <%s> library', (header, body, member) => {
   const program = `#include <${header}>
 bool isOdd(int value) { return value % 2 != 0; }
@@ -58,6 +61,7 @@ test.each([
   ['struct Counter { int length; };', 'Counter value{0}; return value.lenght;', 'Counter', 'lenght'],
   ['#include <vector>', 'std::vector<int> value; value.lenght();', 'std::vector<int>', 'lenght'],
   ['#include <vector>', 'std::vector<bool> value; value.data();', 'std::vector<bool>', 'data'],
+  ['#include <vector>', 'std::vector<int> value; value.rbegin().bse();', 'std::vector<int>::reverse_iterator', 'bse'],
   [
     '#include <stdexcept>\nstruct Error : std::runtime_error { Error() : std::runtime_error("bad") {} int code() const { return 1; } };',
     'Error value; return value.cod();',

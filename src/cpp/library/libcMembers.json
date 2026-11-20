@@ -1,4 +1,26 @@
 {
+  "__bit_const_reference": [],
+  "__bit_iterator": ["difference_type", "iterator_category", "pointer", "reference", "value_type"],
+  "__bit_reference": ["flip"],
+  "__deque_iterator": ["difference_type", "iterator_category", "pointer", "reference", "value_type"],
+  "__hash_const_iterator": ["difference_type", "iterator_category", "pointer", "reference", "value_type"],
+  "__hash_map_const_iterator": ["difference_type", "iterator_category", "pointer", "reference", "value_type"],
+  "__hash_map_iterator": ["difference_type", "iterator_category", "pointer", "reference", "value_type"],
+  "__list_const_iterator": ["difference_type", "iterator_category", "pointer", "reference", "value_type"],
+  "__list_iterator": ["difference_type", "iterator_category", "pointer", "reference", "value_type"],
+  "__map_const_iterator": ["difference_type", "iterator_category", "pointer", "reference", "value_type"],
+  "__map_iterator": ["difference_type", "iterator_category", "pointer", "reference", "value_type"],
+  "__tree_const_iterator": ["difference_type", "iterator_category", "pointer", "reference", "value_type"],
+  "__wrap_iter": [
+    "base",
+    "difference_type",
+    "iterator_category",
+    "iterator_concept",
+    "iterator_type",
+    "pointer",
+    "reference",
+    "value_type"
+  ],
   "array": [
     "at",
     "back",

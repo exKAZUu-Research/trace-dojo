@@ -167,6 +167,7 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
   };
   cls.library = {
     kind,
+    sdkMemberClass: bits ? 'vector<bool>' : undefined,
     args: [element],
     ownedTypes: fixedLength === 0 ? [] : [element],
     inlineElementType: kind === 'list' ? element : undefined,

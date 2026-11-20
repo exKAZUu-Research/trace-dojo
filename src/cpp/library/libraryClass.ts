@@ -20,6 +20,7 @@ interface LibraryLayout {
 interface LibraryMembers {
   /** The class template or class, such as `vector` or `string`. */
   readonly kind: string;
+  readonly sdkMemberClass?: string;
   readonly args: readonly Type[];
   readonly ownedTypes?: readonly Type[];
   readonly inlineElementType?: Type;

@@ -40,6 +40,19 @@ interface IteratorRepresentation {
 export const POINTER_ITERATOR = { family: 'pointer' } as const;
 export const WRAPPED_POINTER_ITERATOR = { family: 'wrapped-pointer' } as const;
 
+const SDK_ITERATOR_CLASSES: Readonly<Record<string, readonly [string, string]>> = {
+  'bit-vector': ['__bit_iterator', '__bit_iterator'],
+  deque: ['__deque_iterator', '__deque_iterator'],
+  list: ['__list_iterator', '__list_const_iterator'],
+  'tree-map': ['__map_iterator', '__map_const_iterator'],
+  'tree-set': ['__tree_const_iterator', '__tree_const_iterator'],
+  unordered_map: ['__hash_map_iterator', '__hash_map_const_iterator'],
+  unordered_multimap: ['__hash_map_iterator', '__hash_map_const_iterator'],
+  unordered_multiset: ['__hash_const_iterator', '__hash_const_iterator'],
+  unordered_set: ['__hash_const_iterator', '__hash_const_iterator'],
+  'wrapped-pointer': ['__wrap_iter', '__wrap_iter'],
+};
+
 /**
  * The iterator of a container, whose value is a `Ptr` to an element of the container's store, and whose operators are
  * those of its category. A reverse iterator points one past the element it designates, as `std::reverse_iterator`
@@ -74,6 +87,9 @@ export function randomAccessIterator(
   cache.set(key, cls);
   cls.library = {
     kind: 'iterator',
+    sdkMemberClass: isReverse
+      ? 'reverse_iterator'
+      : SDK_ITERATOR_CLASSES[representation.family]?.[resolvedConst ? 1 : 0],
     args: [elementType],
     isReverse,
     iteratorCategory: category,
