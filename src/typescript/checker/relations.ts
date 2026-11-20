@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 779 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
+// code-gauge-allow-file fileNcss 792 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
 import { minimumArguments } from './callArity';
 import type { Checker } from './checker';
 import { isUnit } from './flow';
@@ -248,14 +248,32 @@ export class Relations {
     return element?.rest && this.isGenericRestType(element.type) ? element.type : undefined;
   }
 
+  private relatedToIndexedAccess(s: Type, t: IndexedAccessType, relation: Relation): boolean {
+    if (t.indexType.kind === 'union')
+      return t.indexType.types.every((key) =>
+        this.isRelated(s, this.c.typeOperators.indexedAccess(t.objectType, key), relation)
+      );
+    if (
+      s.kind === 'indexedAccess' &&
+      this.isRelated(s.objectType, t.objectType, relation) &&
+      this.isRelated(s.indexType, t.indexType, relation)
+    )
+      return true;
+    const mapped = this.c.typeOperators.mappedIndexConstraint(t);
+    if (mapped && mapped !== t) return this.isRelated(s, mapped, relation);
+    if (s.kind === 'indexedAccess') {
+      const mappedSource = this.c.typeOperators.mappedIndexConstraint(s);
+      if (mappedSource && mappedSource !== s && this.isRelated(mappedSource, t, relation)) return true;
+    }
+    return this.relatedToIndexedWritingConstraint(s, t, relation);
+  }
+
   /**
    * Writing `o[k]` must suit the property, or the index signature, of every key the constraint of `k` allows in the
    * constraint of `o`. As in TypeScript, the constraint of `o` offers only its number index signature, since a type
    * argument may lack the others.
    */
-  private relatedToIndexedAccess(s: Type, t: IndexedAccessType, relation: Relation): boolean {
-    const mapped = this.c.typeOperators.mappedIndexConstraint(t);
-    if (mapped && mapped !== t) return this.isRelated(s, mapped, relation);
+  private relatedToIndexedWritingConstraint(s: Type, t: IndexedAccessType, relation: Relation): boolean {
     const object = this.constraintForWriting(t.objectType);
     const keys = this.constraintForWriting(t.indexType);
     if (isGenericObjectOrIndexType(object) || isGenericObjectOrIndexType(keys)) return false;
@@ -309,6 +327,7 @@ export class Relations {
 
   private genericSourceRelated(s: Type, t: Type, relation: Relation): boolean {
     if (t.kind === s.kind && this.sameGeneric(s, t)) return true;
+    if (s.kind === 'indexedAccess' && t.kind === 'indexedAccess') return this.relatedToIndexedAccess(s, t, relation);
     if (s.kind === 'conditional' && t.kind === 'conditional' && this.conditionalsRelated(s, t, relation)) return true;
     // TypeScript tries a conditional type's branches before their constraints, so `Exclude<keyof T, K>` fits `keyof T`.
     if (s.kind === 'conditional' && this.isRelated(unionOf([s.trueType, s.falseType]), t, relation)) return true;

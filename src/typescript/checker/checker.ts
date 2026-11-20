@@ -38,6 +38,7 @@ import {
   booleanType,
   type ConditionalType,
   emptyStructure,
+  errorType,
   type IndexInfo,
   intersectionOf,
   isIntrinsic,
@@ -812,9 +813,10 @@ export class Checker {
         const index = this.baseConstraint(type.indexType);
         const tuple = this.silently(() => this.typeOperators.variadicIndexConstraint(type, index));
         if (tuple !== undefined) return tuple;
-        const object = this.baseConstraint(type.objectType);
+        const object = this.indexedReceiverConstraint(type.objectType);
         if (object === type.objectType && index === type.indexType) return type;
-        return this.silently(() => this.typeOperators.indexedAccess(object, index));
+        const bound = this.silently(() => this.typeOperators.indexedAccess(object, index));
+        return bound === errorType ? type : bound;
       }
       case 'keyof': {
         return unionOf([stringType, numberType, symbolType]);
@@ -826,6 +828,16 @@ export class Checker {
         return type;
       }
     }
+  }
+
+  private indexedReceiverConstraint(type: Type): Type {
+    const bound = this.baseConstraint(type);
+    return bound.kind === 'intersection'
+      ? intersectionOf(
+          bound.types.map((member) => this.indexedReceiverConstraint(member)),
+          this.budget
+        )
+      : bound;
   }
 
   private conditionalConstraint(type: ConditionalType): Type {

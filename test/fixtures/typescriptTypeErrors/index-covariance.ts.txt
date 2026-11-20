@@ -1,0 +1,3 @@
+function select<T extends { x: number; y: string }>(value: T['x']): T['x' | 'y'] { return value; }
+function narrow<T extends { x: number; y: string }>(value: T[keyof T]): T['x'] { return value; }
+function wrong<T extends { x: number; y: string }>(value: T['y']): T['x'] { return value; }

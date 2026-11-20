@@ -1,0 +1,7 @@
+type Values<T> = { [K in keyof T]: T[K] }[keyof T];
+function all<T extends { x: number }>(value: T['x']): T[keyof T] { return value; }
+function mapped<T extends { x: number }>(value: T['x']): Values<T> { return value; }
+function key<T, K extends keyof T>(value: T[K]): T[keyof T] { return value; }
+function indirect<U extends { x: number }, T extends U>(value: T['x']): U[keyof U] { return value; }
+function unrelated<T extends { x: number }, U extends { x: number }>(value: T['x']): U['x'] { return value; }
+console.log(all<{ x: 1 }>(1), mapped<{ x: 2 }>(2), key<{ x: number }, 'x'>(3));
