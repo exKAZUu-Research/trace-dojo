@@ -1268,6 +1268,9 @@ test.each([
   ['S a[2];', 'a[-1].N'],
   ['static S a[2];', 'a[5].N'],
   ['static S a[2];', 'a[-1].N'],
+  ['S a[2][2];', 'a[2][0].N'],
+  ['S a[2][2];', '0[a[2]].N'],
+  ['static S a[2][2];', 'a[2][1].N'],
 ])('rejects a static constant named through out-of-bounds element of %s %s', (declaration, bound) => {
   const program = `struct S { static const int N = 3; };
 int main() { ${declaration} int b[${bound}]; }`;

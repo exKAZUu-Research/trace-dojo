@@ -1409,9 +1409,11 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       staticAddress:
         pointer.staticAddress &&
         offset.constant !== undefined &&
-        (original.type.kind !== 'array' || designatesElement(original.type, offset)),
+        (original.type.kind !== 'array' || designatesElement(original.type, offset, type)),
       constantDesignation:
-        original.type.kind === 'array' && original.constantDesignation && designatesElement(original.type, offset),
+        original.type.kind === 'array' &&
+        original.constantDesignation &&
+        designatesElement(original.type, offset, type),
       constantInitialization: hasConstantObject(constantLocation),
       constantLocation,
       row,
@@ -2274,11 +2276,14 @@ function isInvalidFloating(operator: string, type: ArithmeticType, divisor: numb
   return (operator === '/' && Number(divisor) === 0) || Number.isNaN(Number(result));
 }
 
-/** Whether a constant subscript stays within an array or one past its end, as Apple clang++ accepts in a constant expression. */
-function designatesElement(array: Type & { kind: 'array' }, offset: Expr): boolean {
+/**
+ * Whether a constant subscript designates an element of an array, or one past its end when the element is no array that
+ * a further subscript could enter, as Apple clang++ accepts in a constant expression.
+ */
+function designatesElement(array: Type & { kind: 'array' }, offset: Expr, element: Type): boolean {
   if (offset.constant === undefined || array.length === undefined) return false;
   const index = Number(offset.constant);
-  return index >= 0 && index <= array.length;
+  return index >= 0 && (index < array.length || (index === array.length && element.kind !== 'array'));
 }
 
 /** Whether a static member named through `object` keeps its constant value: the object is absent or a constant designation. */
