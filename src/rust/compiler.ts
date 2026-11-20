@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 565 -- Keeps the compilation that shares a function's context and step state together.
+// code-gauge-allow-file fileNcss 573 -- Keeps the compilation that shares a function's context and step state together.
 import type { Annotations, Coercion, FnContext, LocalVar, PathRes } from './annotations';
 import type { Block, Expr, Pattern, Span, Stmt } from './ast';
 import { forEachDirect, patternBindings } from './astWalk';
@@ -17,7 +17,7 @@ import type { Program } from './items';
 import { castValue, copiedSlots, copyValue, needsCopy } from './ops';
 import { ControlSignal, type Frame, type FunctionInfo, MOVED, UNASSIGNED } from './runtime';
 import { runtimeType } from './runtimeTypes';
-import { type ConstDef, type FnDef, isUnit, resolve, shallow, substitute, type Type } from './types';
+import { type ConstDef, type FnDef, isUnit, resolve, shallow, substitute, type Type, UNIT } from './types';
 import {
   CellPlace,
   DynValue,
@@ -287,12 +287,12 @@ export class Compiler {
     return this.withStep(stmt.span, run, isObjectCreation(stmt.init, this.annotations));
   }
 
-  /** Binds an argument to `self` or to a parameter's pattern; a `String` parameter keeps the argument's capacity. */
   private paramBinder(local: LocalVar | undefined, pattern: Pattern | undefined): (frame: Frame, value: Value) => void {
     if (local) return (frame, value) => void (frame.locals[local.slot] = value);
-    const bind = this.compileBinder(pattern!);
-    const claim = this.claimInLocal(pattern?.kind === 'binding' ? this.annotations.bindings.get(pattern) : undefined);
-    return claim ? (frame, value) => (bind(frame, value), claim(frame)) : bind;
+    const bind = this.compileOwnedBinder(pattern!);
+    return (frame, value) => {
+      frame.temporaries.push(bind(frame, value));
+    };
   }
 
   /** A `String` variable claims the capacity of the `String` in flight that it stores. */
@@ -354,6 +354,17 @@ export class Compiler {
     const matcher = this.compileMatcher(pattern);
     return (frame, value) => {
       matcher(frame, value, undefined);
+    };
+  }
+
+  compileOwnedBinder(pattern: Pattern): (frame: Frame, value: Value) => Place {
+    const matcher = this.compileMatcher(pattern);
+    const type = runtimeType(pattern.ty ?? UNIT);
+    return (frame, value) => {
+      const place = new CellPlace(value);
+      if (isStringType(type(frame))) claimString(place);
+      frame.runtime.withRoots([place], () => matcher(frame, value, () => place));
+      return place;
     };
   }
 
@@ -576,7 +587,7 @@ export class Compiler {
     this.withFn(context, () => {
       // A closure's steps are recorded as its function's are.
       this.recordsSteps = this.tracing && !outer.isAtomic && !context.isAtomic;
-      const binders = expr.params.map((param) => this.compileBinder(param.pattern));
+      const binders = expr.params.map((param) => this.paramBinder(undefined, param.pattern));
       compiled.bind = (frame, args) => {
         for (const [index, binder] of binders.entries()) binder(frame, args[index]);
       };

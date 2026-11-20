@@ -2,7 +2,7 @@ import type { Condition, Expr, Pattern } from './ast';
 import type { Compiler, Eval } from './compiler';
 import { compilePatternInput, takesWhole } from './compilerPatterns';
 import { normalize } from './infer';
-import { ControlSignal, type Frame, UNASSIGNED } from './runtime';
+import { ControlSignal, type Frame } from './runtime';
 import { runtimeType } from './runtimeTypes';
 import { resolve, shallow, type Type } from './types';
 import { DONE, type IterValue, UNIT_VALUE, type Value } from './values';
@@ -99,7 +99,7 @@ export function compileFor(c: Compiler, expr: ExprOf<'for'>): Eval {
   if (!loopInfo) throw new Error('Unchecked for');
   const iterable = c.value(expr.iterable);
   const fromType = runtimeType(loopInfo.from);
-  const bind = c.compileBinder(expr.pattern);
+  const bind = c.compileOwnedBinder(expr.pattern);
   const patternSlots = c.patternSlots(expr.pattern);
   const body = c.compileBlock(expr.body);
   const label = expr.label;
@@ -115,13 +115,17 @@ export function compileFor(c: Compiler, expr: ExprOf<'for'>): Eval {
         frame.runtime.spend();
         const next = iterator.next();
         if (next === DONE) return UNIT_VALUE;
-        bind(frame, next as Value);
-        stepBinding(frame, row, answered);
-        if (runBody(body, frame, label)) return UNIT_VALUE;
+        frame.temporaries.push(bind(frame, next));
+        try {
+          stepBinding(frame, row, answered);
+          if (runBody(body, frame, label)) return UNIT_VALUE;
+        } finally {
+          frame.temporaries.pop();
+          frame.endScope(patternSlots);
+        }
       }
     } finally {
       frame.temporaries.pop();
-      for (const slot of patternSlots) frame.locals[slot] = UNASSIGNED;
     }
   };
 }

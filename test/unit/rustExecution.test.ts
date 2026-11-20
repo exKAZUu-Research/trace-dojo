@@ -1308,6 +1308,34 @@ fn main() {
   });
 });
 
+test('drops bound loop values and retains unused argument parts at Rust scope boundaries', () => {
+  const program = `fn wildcard(_: Turtle, observer: &Turtle) {
+    println!("argument {}", observer.canMoveForward());
+}
+fn partial((taken, _): (Turtle, Turtle), first: &Turtle, second: &Turtle) {
+    drop(taken);
+    println!("partial {} {}", first.canMoveForward(), second.canMoveForward());
+}
+fn main() {
+    let observer = Turtle::new(0, 0);
+    let second_observer = Turtle::new(2, 0);
+    wildcard(Turtle::new(0, 1), &observer);
+    println!("returned {}", observer.canMoveForward());
+    partial((Turtle::new(0, 1), Turtle::new(2, 1)), &observer, &second_observer);
+    println!("returned {}", second_observer.canMoveForward());
+    let values = vec![Turtle::new(0, 1), Turtle::new(4, 4)];
+    for _item in values.into_iter().map(|t| { println!("next {}", observer.canMoveForward()); t }) {
+        continue;
+    }
+    println!("done {}", observer.canMoveForward());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'argument false\nreturned true\npartial true false\nreturned true\nnext false\nnext true\ndone true\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {
