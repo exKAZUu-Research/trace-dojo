@@ -696,10 +696,42 @@ class Followed {
 }
 
 /**
- * libc++'s `list::sort` with a comparator: a recursive merge sort whose merge compares the first remaining element of
- * the right run with that of the left run, as splicing runs of nodes does. Nodes keep their elements, so the elements
- * are compared where they are and the list is reordered once; a comparator that throws leaves the order the splices
- * made so far.
+ * libc++'s `list::sort` with a comparator that a program writes, which may observe the list: a recursive merge sort
+ * that splices each run of right elements before the left one it precedes, so the list shows every splice made.
+ */
+export function listSortInPlace(frame: Frame, self: SequenceValue, less: (a: Ptr, b: Ptr) => boolean): void {
+  const compare = (a: Ptr, b: Ptr): boolean => {
+    frame.runtime.spend();
+    return less(a, b);
+  };
+  const sort = (first: number, last: number): void => {
+    if (last - first < 2) return;
+    const middle = first + Math.floor((last - first) / 2);
+    sort(first, middle);
+    sort(middle, last);
+    let left = first;
+    let right = middle;
+    while (left < right && right < last) {
+      const item = self.location(left);
+      if (!compare(self.location(right), item)) {
+        left++;
+        continue;
+      }
+      let end = right + 1;
+      while (end < last && compare(self.location(end), item)) end++;
+      frame.runtime.spend(Math.ceil((end - left) / 64));
+      self.moveNodesBefore(right, end, left);
+      left += end - right + 1;
+      right = end;
+    }
+  };
+  sort(0, self.length);
+}
+
+/**
+ * libc++'s `list::sort` with a standard function object, which cannot observe the list: the same merge sort and
+ * comparisons as {@link listSortInPlace}, over a permutation of the elements compared where they are, so the list is
+ * reordered once in O(n log n); a comparator that throws leaves the order the splices made so far.
  */
 export function listSort(frame: Frame, self: SequenceValue, less: (a: Ptr, b: Ptr) => boolean): void {
   const locations = Array.from({ length: self.length }, (_, index) => self.location(index));

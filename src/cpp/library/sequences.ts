@@ -65,6 +65,7 @@ import {
 import type { Library } from './registry';
 import {
   listSort,
+  listSortInPlace,
   reserveSequenceStorage as reserve,
   SequenceEditor,
   type Source,
@@ -862,14 +863,15 @@ function listMethods(
   addTemplateMethod(cls, 'sort', (args) => {
     const compare = callable(args);
     if (!compare) return;
+    // A standard function object cannot observe the list, so it can sort without the list showing each splice.
+    const argType = unqualified(args[0].type);
+    const isStandardFunctor = argType.kind === 'class' && argType.cls.library?.kind === 'functor';
+    const sort = isStandardFunctor ? listSort : listSortInPlace;
     return native(
       'sort',
       callableParams(args),
       VOID,
-      (_args, { self, frame }) => {
-        const list = self as SequenceValue;
-        listSort(frame, list, (a, b) => compare(frame, a, b));
-      },
+      (_args, { self, frame }) => sort(frame, self as SequenceValue, (a, b) => compare(frame, a, b)),
       { owner: cls }
     );
   });

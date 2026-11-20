@@ -967,6 +967,22 @@ int main() {
   });
 });
 
+test('shows each splice of a list sort to a comparator that observes the list', () => {
+  const program = `#include <iostream>
+#include <list>
+std::list<int> a{5, 3, 9, 1};
+bool compare(int x, int y) {
+  std::cout << a.front();
+  return x < y;
+}
+int main() { a.sort(compare); }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '53331',
+    uncaughtException: undefined,
+  });
+});
+
 test('sorts a list with a comparator in libc++ comparison order', () => {
   const program = `#include <functional>
 #include <iostream>
