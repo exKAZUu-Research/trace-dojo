@@ -113,7 +113,11 @@ export class Compiler extends StatementCompiler {
   private readonly aggregateDefaults = new WeakMap<FieldInfo, () => Initializer>();
   private readonly implicitDefaults = new WeakMap<ClassInfo, () => FunctionInfo | undefined>();
   private readonly delegatedConstructors = new WeakMap<FunctionInfo, FunctionInfo>();
-  private defaultDependencies?: { functions: Map<FunctionInfo, number>; staticMembers: Map<GlobalInfo, number> };
+  private defaultDependencies?: {
+    functions: Map<FunctionInfo, number>;
+    staticMembers: Map<GlobalInfo, number>;
+    checks: (() => void)[];
+  };
 
   constructor(library: Library, options: CompileOptions = {}) {
     super(library);
@@ -2385,6 +2389,11 @@ export class Compiler extends StatementCompiler {
     if (!functions.has(fn)) functions.set(fn, row);
   }
 
+  protected checkWhenUsed(check: () => void): void {
+    if (this.defaultDependencies) this.defaultDependencies.checks.push(check);
+    else check();
+  }
+
   protected requireStaticDefinition(global: GlobalInfo, row: number): void {
     if (this.isUnevaluated) return;
     const members = this.defaultDependencies?.staticMembers ?? this.usedStaticMembers;
@@ -2428,7 +2437,11 @@ export class Compiler extends StatementCompiler {
   }
 
   private bindDependencies<T>(compile: () => T): () => T {
-    const dependencies = { functions: new Map<FunctionInfo, number>(), staticMembers: new Map<GlobalInfo, number>() };
+    const dependencies = {
+      functions: new Map<FunctionInfo, number>(),
+      staticMembers: new Map<GlobalInfo, number>(),
+      checks: [] as (() => void)[],
+    };
     const previous = this.defaultDependencies;
     this.defaultDependencies = dependencies;
     try {
@@ -2436,6 +2449,7 @@ export class Compiler extends StatementCompiler {
       return () => {
         for (const [fn, row] of dependencies.functions) this.checkDefined(fn, row);
         for (const [member, row] of dependencies.staticMembers) this.requireStaticDefinition(member, row);
+        for (const check of dependencies.checks) this.checkWhenUsed(check);
         return bound;
       };
     } finally {

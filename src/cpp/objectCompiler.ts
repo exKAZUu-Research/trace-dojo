@@ -577,6 +577,8 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
 
   abstract checkDefined(fn: FunctionInfo, row: number): void;
 
+  protected abstract checkWhenUsed(check: () => void): void;
+
   protected requireVirtualDefinitions(cls: ClassInfo, row: number): void {
     for (const fn of cls.virtuals.values()) {
       if (!fn.isPure) this.checkDefined(fn, row);
@@ -1007,7 +1009,13 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     if (type.kind !== 'class') return;
     const { cls } = type;
     const { access, seen, baseObject, requiresComplete } = context;
-    if (requiresComplete && !cls.isComplete) this.error(row, `クラス ${cls.name} はまだ定義されていません。`);
+    if (requiresComplete && !cls.isComplete) {
+      this.checkWhenUsed(() => {
+        if (!cls.isComplete) this.error(row, `クラス ${cls.name} はまだ定義されていません。`);
+        this.checkObjectUse(type, operation, row, { ...context, seen: new Set(seen) });
+      });
+      return;
+    }
     const destructor = cls.destructor;
     if (
       operation === 'destroy' &&

@@ -66,6 +66,17 @@ int main() { ${statement} }`;
   });
 });
 
+test('rejects a still-incomplete element when a containing object is constructed', () => {
+  const program = `#include <set>
+struct Item;
+struct Owner { std::set<Item> items; };
+int main() { Owner owner; }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message: expect.stringContaining('クラス Item はまだ定義されていません') }],
+  });
+});
+
 test.each([
   ['time.h', 'time(0);', '時刻'],
   ['ctime', 'time_t start = 0;', 'time_t'],

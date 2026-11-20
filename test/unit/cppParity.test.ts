@@ -53,6 +53,27 @@ int main() {
   });
 });
 
+test.each(['set', 'multiset'])('defers owned std::%s element completeness until construction', (container) => {
+  const program = `#include <iostream>
+#include <set>
+struct Pending;
+struct Unused { std::${container}<Pending> items; };
+Unused* unused = nullptr;
+struct Item;
+struct Owner { std::${container}<Item> items; };
+struct Outer { Owner owner; };
+struct Item { int value; };
+int main() {
+  Outer outer;
+  std::cout << (unused == nullptr) << outer.owner.items.empty();
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '11',
+    uncaughtException: undefined,
+  });
+});
+
 test.each([
   ['two increments', 'int i = 0;', 'i++ + i++'],
   ['a reference alias', 'int i = 1; int& r = i;', 'i++ + r'],
