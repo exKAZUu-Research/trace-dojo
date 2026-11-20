@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 530 -- Resolves related type operators sharing generic parameters and type construction.
+// code-gauge-allow-file fileNcss 532 -- Resolves related type operators sharing generic parameters and type construction.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker, Mapper } from './checker';
@@ -378,7 +378,7 @@ export class TypeOperators {
     if (type.kind === 'object' && type.mapped && !type.mapped.nameType) return type.mapped.constraint;
     if (isGenericObjectOrIndexType(type) || (type.kind === 'object' && hasVariadicRest(type)))
       return { kind: 'keyof', id: newTypeId(), type };
-    if (isAnyLike(type) || isIntrinsic(type, 'never')) return unionOf([stringType, numberType, symbolType]);
+    if (isAnyLike(type) || isIntrinsic(type, 'never')) return propertyKeys;
     if (type.kind === 'union')
       return intersectionOf(
         type.types.map((member) => this.keyofType(member)),
@@ -397,7 +397,7 @@ export class TypeOperators {
   /** The keys available for every instantiation of the object in a deferred `keyof`. */
   guaranteedKeys(type: Type, visiting = new Set<Type>()): Type {
     this.c.budget.spend();
-    if (isAnyLike(type) || visiting.has(type)) return neverType;
+    if (type === errorType || visiting.has(type)) return neverType;
     visiting.add(type);
     try {
       if (type.kind === 'union')
@@ -409,6 +409,7 @@ export class TypeOperators {
         return unionOf(type.types.map((member) => this.guaranteedKeys(member, visiting)));
       if (type.kind === 'object' && type.tuple) return this.memberKeys(type.resolve());
       const constraint = this.c.baseConstraint(type);
+      if (type.kind === 'typeParameter' && isAnyLike(constraint)) return neverType;
       if (constraint !== type) return this.guaranteedKeys(constraint, visiting);
       const keys = this.keyofType(type);
       return keys.kind === 'keyof' ? this.guaranteedKeys(keys.type, visiting) : keys;

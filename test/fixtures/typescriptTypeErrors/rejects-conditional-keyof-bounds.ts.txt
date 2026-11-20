@@ -1,0 +1,19 @@
+type ReturnsAny = (...args: any[]) => any;
+function notKey<T extends ReturnsAny>(object: ReturnType<T>) {
+  const key: keyof ReturnType<T> = false;
+}
+function unbounded<T>(object: T) {
+  const key: keyof T = 'name';
+}
+function explicitAny<T extends any>(object: T) {
+  const key: keyof T = 'name';
+}
+function unknownIndex<T extends { object: unknown }>(source: T) {
+  const key: keyof T['object'] = 'name';
+}
+function typed<T extends () => { name: string }>(object: ReturnType<T>) {
+  const key: keyof ReturnType<T> = 'different';
+}
+function conditional<T>(object: T extends string ? any : { name: string }) {
+  const key: keyof typeof object = 'different';
+}
