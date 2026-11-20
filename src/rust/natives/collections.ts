@@ -180,9 +180,13 @@ function insertEntry(ctx: NativeContext, m: MapValue, k: Value, v: Value): Value
     existing[1] = v;
     return some(ctx, old);
   }
-  ctx.runtime.allocate(2);
-  m.entries.set(key, [k, v]);
+  storeNewEntry(ctx, m, key, k, v);
   return none(ctx);
+}
+
+function storeNewEntry(ctx: NativeContext, map: MapValue, key: CollectionKey, k: Value, v: Value): void {
+  ctx.runtime.allocate(2);
+  map.entries.set(key, [k, v]);
 }
 
 function mapIterNatives(): Record<string, Native> {
@@ -190,11 +194,11 @@ function mapIterNatives(): Record<string, Native> {
     into_iter: ([self]) => mapIter(map(self), 'value'),
     iter: ([self]) => mapIter(map(self), 'ref'),
     iter_mut: ([self]) => mapIter(map(self), 'mut'),
-    keys: ([self]) => arrayIter(entriesOf(map(self)).map((entry) => entry[0])),
-    values: ([self]) => arrayIter(entriesOf(map(self)).map((entry) => entry[1])),
-    values_mut: ([self]) => arrayIter(entriesOf(map(self)).map((entry) => new ElementPlace(entry, 1))),
-    into_keys: ([self]) => arrayIter(entriesOf(map(self)).map((entry) => entry[0])),
-    into_values: ([self]) => arrayIter(entriesOf(map(self)).map((entry) => entry[1])),
+    keys: ([self]) => mapProjection(map(self), (entry) => entry[0]),
+    values: ([self]) => mapProjection(map(self), (entry) => entry[1]),
+    values_mut: ([self]) => mapProjection(map(self), (entry) => new ElementPlace(entry, 1)),
+    into_keys: ([self]) => mapProjection(map(self), (entry) => entry[0]),
+    into_values: ([self]) => mapProjection(map(self), (entry) => entry[1]),
     drain: ([self]) => {
       const entries = entriesOf(map(self)).map(([k, v]) => [k, v] as Value);
       map(self).entries.clear();
@@ -209,6 +213,11 @@ function mapIterNatives(): Record<string, Native> {
   };
 }
 
+function mapProjection(map: MapValue, project: (entry: [Value, Value]) => Value): IterValue {
+  const entries = map.entries.snapshot();
+  return arrayIter(entries, 0, entries.length, (index) => project(entries[index]));
+}
+
 function extendMap(ctx: NativeContext, m: MapValue, iterator: IterValue): Value {
   for (;;) {
     ctx.runtime.spend();
@@ -218,7 +227,7 @@ function extendMap(ctx: NativeContext, m: MapValue, iterator: IterValue): Value 
     const key = entryKey(ctx, m.entries, k);
     const existing = m.entries.get(key);
     if (existing) existing[1] = v;
-    else m.entries.set(key, [k, v]);
+    else storeNewEntry(ctx, m, key, k, v);
   }
   return UNIT_VALUE;
 }

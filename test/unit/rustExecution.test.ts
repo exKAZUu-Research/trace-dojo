@@ -1496,6 +1496,19 @@ test.each([
   ['nested Vecs', 'let v = vec![vec![0u8; 10_000]; 10_000];'],
   ['nested arrays', 'let a = [[0u8; 10_000]; 10_000];'],
   ['default values for nested arrays', 'let a: [[[[i32; 32]; 32]; 32]; 32] = Default::default();'],
+  [
+    'elements added to a heap',
+    'let _allocated = vec![0; 999_990]; let mut h = std::collections::BinaryHeap::new(); h.extend(0..20);',
+  ],
+  [
+    'entries added to a map',
+    'let _allocated = vec![0; 999_990]; let mut m = std::collections::HashMap::new(); m.extend((0..6).zip(0..6));',
+  ],
+  [
+    'materialized borrowed collection iterators',
+    'let _allocated = vec![0; 999_960]; let s: std::collections::HashSet<_> = (0..15).collect(); let a = s.iter(); let b = s.iter(); println!("{} {}", a.len(), b.len());',
+  ],
+  ['a trailing format literal', `let s = format!("{}{}", "a".repeat(999_000), "${'b'.repeat(1024)}");`],
   ['materialized UTF-8 bytes', 'let s = "é".repeat(300_000); let _a = s.as_bytes(); let _b = s.bytes();'],
   ['a concatenated Vec', 'let mut v = vec![1u8]; for _ in 0..40 { v = [v.clone(), v.clone()].concat(); }'],
   ['clones of a Vec', 'let v = vec![0u8; 900_000]; let mut w = Vec::new(); for _ in 0..100 { w.push(v.clone()); }'],

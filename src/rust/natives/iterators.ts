@@ -151,7 +151,7 @@ function collectionIter(type: Type & { kind: 'adt' }, value: Value, mode: 'value
 
 /** A map's entries as tuples, in key order for a `BTreeMap`; `mut` yields places for the values. */
 export function mapIter(map: MapValue, mode: 'value' | 'ref' | 'mut'): IterValue {
-  const entries = [...map.entries.values()];
+  const entries = map.entries.snapshot();
   const iter = arrayIter(entries, 0, entries.length, (i) => {
     const entry = entries[i];
     return mode === 'mut' ? [entry[0], new ElementPlace(entry, 1)] : [entry[0], entry[1]];
@@ -161,7 +161,7 @@ export function mapIter(map: MapValue, mode: 'value' | 'ref' | 'mut'): IterValue
 }
 
 export function setIter(set: SetValue): IterValue {
-  const values = [...set.entries.values()];
+  const values = set.entries.snapshot();
   const iter = arrayIter(values);
   iter.roots.push(set);
   return iter;

@@ -1,5 +1,5 @@
 import type { Span } from './ast';
-// code-gauge-allow-file fileNcss 480 -- Keeps type-directed arithmetic, comparison, and copying with their shared runtime hooks.
+// code-gauge-allow-file fileNcss 483 -- Keeps type-directed arithmetic, comparison, and copying with their shared runtime hooks.
 import { bigintToF32 } from './floatFormat';
 import { normalize } from './infer';
 import { RustPanic } from './runtime';
@@ -35,6 +35,11 @@ let hooks: UserImpls | undefined;
 
 export function setUserImpls(implementations: UserImpls): void {
   hooks = implementations;
+}
+
+export function allocateCollectionSnapshot(size: number): void {
+  hooks?.allocate(size);
+  spendCollectionWork(size);
 }
 
 export function spendCollectionWork(count: number): void {

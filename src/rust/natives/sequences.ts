@@ -674,8 +674,10 @@ const heapNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> 
     const items = vec(self);
     const iterator = deref(iter) as IterValue;
     for (;;) {
+      ctx.runtime.spend();
       const item = iterator.next();
       if (item === DONE) break;
+      ctx.runtime.allocate(1);
       heapPush(items, item, elemType(ctx));
     }
     return UNIT_VALUE;

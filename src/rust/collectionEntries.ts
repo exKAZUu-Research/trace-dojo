@@ -1,5 +1,5 @@
 import { TableMap } from './capacity';
-import { compareValues, hashKey, spendCollectionWork } from './ops';
+import { allocateCollectionSnapshot, compareValues, hashKey, spendCollectionWork } from './ops';
 import type { Type } from './types';
 import type { Value } from './values';
 
@@ -89,6 +89,11 @@ export class CollectionEntries<V> {
     return this.table?.values() ?? this.ordered.values();
   }
 
+  snapshot(): V[] {
+    allocateCollectionSnapshot(this.size);
+    return [...this.values()];
+  }
+
   appendOrdered(value: V): void {
     this.ordered.push(value);
     this.treeRoot = true;
@@ -96,9 +101,10 @@ export class CollectionEntries<V> {
 
   range(type: Type, start: Value, end: Value, inclusive: boolean): V[] {
     const first = start === undefined ? 0 : this.orderedKey(type, start).index;
-    if (end === undefined) return this.ordered.slice(first);
-    const last = this.orderedKey(type, end, first);
-    return this.ordered.slice(first, last.index + Number(inclusive && last.present));
+    const last = end === undefined ? undefined : this.orderedKey(type, end, first);
+    const after = last ? last.index + Number(inclusive && last.present) : this.size;
+    allocateCollectionSnapshot(after - first);
+    return this.ordered.slice(first, after);
   }
 
   retain(keep: (value: V) => boolean): void {

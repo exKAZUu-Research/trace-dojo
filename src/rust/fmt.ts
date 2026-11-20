@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 420 -- Follows std::fmt's formatting rules case by case.
+// code-gauge-allow-file fileNcss 421 -- Follows std::fmt's formatting rules case by case.
 import type { FormatPiece, FormatSpec } from './ast';
 import { type DebugPart, emit, list, structText, tupleText, type WriteChunk } from './debugText';
 import { debugFloat, displayFloat, expFloat, fixedFloat } from './floatFormat';
@@ -63,6 +63,7 @@ export class Formatter {
     let text = '';
     for (const piece of pieces) {
       if (typeof piece === 'string') {
+        this.hooks.allocateString(text.length + piece.length, piece.length);
         text += emit(piece, write);
         continue;
       }
