@@ -218,3 +218,50 @@ test('a for loop records a step at each binding of its variable, and none after 
     [4, { i: 1 }],
   ]);
 });
+
+test('ordered collections compare keys during mutation and lookup while trace inspection uses stored order', () => {
+  const program = `use std::collections::{BTreeMap, BTreeSet};
+use std::cmp::Ordering;
+#[derive(Debug)]
+struct Key(i32);
+impl PartialEq for Key {
+    fn eq(&self, other: &Self) -> bool { self.0 % 10 == other.0 % 10 }
+}
+impl Eq for Key {}
+impl Ord for Key {
+    fn cmp(&self, other: &Self) -> Ordering {
+        println!("cmp {} {}", self.0, other.0);
+        (self.0 % 10).cmp(&(other.0 % 10))
+    }
+}
+impl PartialOrd for Key {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> { Some(self.cmp(other)) }
+}
+
+fn main() {
+    let mut set = BTreeSet::new();
+    let mut map = BTreeMap::new();
+    set.insert(Key(2));
+    set.insert(Key(1));
+    set.insert(Key(11));
+    println!("set {:?} {}", set, set.contains(&Key(21)));
+    map.insert(Key(1), 1);
+    *map.entry(Key(11)).or_insert(2) += 4;
+    println!("map {:?} {}", map, map[&Key(21)]);
+    println!("removed {:?} {:?}", map.remove(&Key(31)), set.remove(&Key(31)));
+}`;
+  expect(traceProgram('rust', program, program)).toMatchObject({
+    stdout: `cmp 1 2
+cmp 11 1
+cmp 21 1
+set {Key(1), Key(2)} true
+cmp 11 1
+cmp 21 1
+map {Key(1): 5} 5
+cmp 31 1
+cmp 31 1
+removed Some(5) true
+`,
+    uncaughtException: undefined,
+  });
+});

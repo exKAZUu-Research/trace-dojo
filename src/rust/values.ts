@@ -1,5 +1,5 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
-import { TableMap } from './capacity';
+import { CollectionEntries, type CollectionKey } from './collectionEntries';
 import type { DebugPart } from './debugText';
 import type { AdtDef, Type } from './types';
 
@@ -204,16 +204,16 @@ export class IterValue {
 
 /** A `HashMap` or `BTreeMap`: entries keyed by a text that equal keys share. */
 export class MapValue {
-  readonly entries: Map<string, [Value, Value]>;
+  readonly entries: CollectionEntries<[Value, Value]>;
   constructor(readonly sorted: boolean) {
-    this.entries = sorted ? new Map() : new TableMap();
+    this.entries = new CollectionEntries(sorted, ([key]) => key);
   }
 }
 
 export class SetValue {
-  readonly entries: Map<string, Value>;
+  readonly entries: CollectionEntries<Value>;
   constructor(readonly sorted: boolean) {
-    this.entries = sorted ? new Map() : new TableMap();
+    this.entries = new CollectionEntries(sorted, (value) => value);
   }
 }
 
@@ -260,7 +260,7 @@ export class FormatterValue {
 export class EntryValue {
   constructor(
     readonly map: MapValue,
-    readonly hash: string,
+    readonly lookup: CollectionKey,
     readonly key: Value
   ) {}
 }

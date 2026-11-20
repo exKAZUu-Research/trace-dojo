@@ -261,10 +261,8 @@ export class TableMap<K, V> extends Map<K, V> {
 }
 
 /** Gives a new map's or set's table the size of its entries, or the table it copies, when it has one. */
-export function sizeTable(entries: Map<unknown, unknown>, size: number, source?: Map<unknown, unknown>): void {
-  if (!(entries instanceof TableMap)) return;
-  if (source instanceof TableMap) entries.copyTable(source);
-  else entries.entrySize = size;
+export function sizeTable(entries: TableMap<unknown, unknown> | undefined, size: number): void {
+  if (entries) entries.entrySize = size;
 }
 
 /**

@@ -513,6 +513,25 @@ test('Rust owned sequence conversions clone borrowed items and move owned items'
   });
 });
 
+test.each([
+  ['BTreeSet', '    let tree: BTreeSet<i32> = [1, 2].into();', 119, ''],
+  [
+    'BTreeMap',
+    '    let mut tree = BTreeMap::<i32, i32>::new();\n    println!("{}", tree.range(3..1).count());\n    tree.insert(1, 2);\n    tree.remove(&1);',
+    121,
+    '0\n',
+  ],
+])('Rust %s validates reversed ranges when its tree has a root', (name, setup, line, stdout) => {
+  const program = rustMain(`${setup}\n    println!("{}", tree.range(3..1).count());`, `use std::collections::${name};`);
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout,
+    uncaughtException: expect.stringContaining(
+      `library/alloc/src/collections/btree/search.rs:${line}:21:\nrange start is greater than range end in ${name}`
+    ),
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

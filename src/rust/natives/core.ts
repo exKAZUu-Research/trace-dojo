@@ -169,13 +169,13 @@ export function defaultValue(ctx: NativeContext, type: Type): Value {
         case 'HashMap':
         case 'BTreeMap': {
           const map = new MapValue(t.def.builtin === 'BTreeMap');
-          sizeTable(map.entries, sizeOf({ kind: 'tuple', elems: t.args }));
+          sizeTable(map.entries.table, sizeOf({ kind: 'tuple', elems: t.args }));
           return map;
         }
         case 'HashSet':
         case 'BTreeSet': {
           const set = new SetValue(t.def.builtin === 'BTreeSet');
-          sizeTable(set.entries, sizeOf(t.args[0]));
+          sizeTable(set.entries.table, sizeOf(t.args[0]));
           return set;
         }
         case 'Option': {

@@ -1,6 +1,5 @@
 import type { Span } from './ast';
-// code-gauge-allow-file fileNcss 458 -- Keeps type-directed arithmetic, comparison, and copying with their shared runtime hooks.
-import { sizeTable } from './capacity';
+// code-gauge-allow-file fileNcss 470 -- Keeps type-directed arithmetic, comparison, and copying with their shared runtime hooks.
 import { bigintToF32 } from './floatFormat';
 import { normalize } from './infer';
 import { RustPanic } from './runtime';
@@ -23,6 +22,7 @@ import {
 export interface UserImpls {
   /** Counts the elements a clone makes against the run's limit. */
   allocate(count: number): void;
+  spend(count: number): void;
   eq?(type: Type, a: Value, b: Value, rhs: Type): boolean | undefined;
   cmp?(type: Type, a: Value, b: Value): { order: number | undefined } | undefined;
   clone?(type: Type, value: Value): { value: Value } | undefined;
@@ -34,6 +34,10 @@ let hooks: UserImpls | undefined;
 
 export function setUserImpls(implementations: UserImpls): void {
   hooks = implementations;
+}
+
+export function spendCollectionWork(count: number): void {
+  hooks?.spend(count);
 }
 
 function fieldTypes(def: AdtDef, args: Type[], variant: number): Type[] {
@@ -276,17 +280,14 @@ function adtEqual(t: Type & { kind: 'adt' }, x: Value, y: Value): boolean {
       const xm = x as MapValue;
       const ym = y as MapValue;
       if (xm.entries.size !== ym.entries.size) return false;
-      for (const [hash, [, value]] of xm.entries) {
-        const other = ym.entries.get(hash);
-        if (!other || !valuesEqual(t.args[1], value, other[1])) return false;
-      }
-      return true;
+      return mapsEqual(t.args, xm, ym);
     }
     case 'HashSet':
     case 'BTreeSet': {
       const xs = x as SetValue;
       const ys = y as SetValue;
-      return xs.entries.size === ys.entries.size && [...xs.entries.keys()].every((hash) => ys.entries.has(hash));
+      if (xs.entries.size !== ys.entries.size) return false;
+      return setsEqual(t.args[0], xs, ys);
     }
     case 'Range':
     case 'RangeInclusive':
@@ -313,6 +314,30 @@ function adtEqual(t: Type & { kind: 'adt' }, x: Value, y: Value): boolean {
       return x === y;
     }
   }
+}
+
+function mapsEqual([keyType, valueType]: Type[], left: MapValue, right: MapValue): boolean {
+  const items = [...left.entries.values()];
+  if (left.sorted) {
+    const counterparts = [...right.entries.values()];
+    return items.every(([key, value], index) => {
+      const [otherKey, otherValue] = counterparts[index];
+      return valuesEqual(keyType, key, otherKey) && valuesEqual(valueType, value, otherValue);
+    });
+  }
+  return items.every(([key, value]) => {
+    const other = right.entries.get(right.entries.key(keyType, key));
+    return other !== undefined && valuesEqual(valueType, value, other[1]);
+  });
+}
+
+function setsEqual(type: Type, left: SetValue, right: SetValue): boolean {
+  const items = [...left.entries.values()];
+  if (left.sorted) {
+    const other = [...right.entries.values()];
+    return items.every((item, index) => valuesEqual(type, item, other[index]));
+  }
+  return items.every((item) => right.entries.has(right.entries.key(type, item)));
 }
 
 /** Compares two values of a type, as `Ord::cmp` and `PartialOrd::partial_cmp` do; NaN compares as `undefined`. */
@@ -612,16 +637,12 @@ function cloneCollection(args: Type[], source: MapValue | SetValue): MapValue | 
   if (source instanceof MapValue) {
     hooks?.allocate(source.entries.size * 2);
     const copy = new MapValue(source.sorted);
-    for (const [hash, [key, item]] of source.entries) {
-      copy.entries.set(hash, [cloneValue(args[0], key), cloneValue(args[1], item)]);
-    }
-    sizeTable(copy.entries, 0, source.entries);
+    copy.entries.copyFrom(source.entries, ([key, item]) => [cloneValue(args[0], key), cloneValue(args[1], item)]);
     return copy;
   }
   hooks?.allocate(source.entries.size);
   const copy = new SetValue(source.sorted);
-  for (const [hash, item] of source.entries) copy.entries.set(hash, cloneValue(args[0], item));
-  sizeTable(copy.entries, 0, source.entries);
+  copy.entries.copyFrom(source.entries, (item) => cloneValue(args[0], item));
   return copy;
 }
 

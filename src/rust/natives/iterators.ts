@@ -2,10 +2,9 @@
 import { collectedVecCapacity, inPlaceCapacity, setVecCapacity, sizeTable } from '../capacity';
 import type { DebugPart } from '../debugText';
 import { normalize } from '../infer';
-import type { Interpreter } from '../interpreter';
 import { type DebugValue, described, fieldsPart, iteratorDebug, numberPart, optionPart } from '../iterDebug';
 import { intoIterShape } from '../iterTypes';
-import { castValue, cloneValue, compareValues, copyValue, hashKey, needsCopy, valuesEqual, wrap } from '../ops';
+import { castValue, cloneValue, compareValues, copyValue, needsCopy, valuesEqual, wrap } from '../ops';
 import { iteratorCapability } from '../traits';
 import { shallow, type Type } from '../types';
 import {
@@ -73,34 +72,29 @@ export function sliceIter(slice: Value, places: boolean): IterValue {
 
 /** The iterator `for` uses for a value of a type, as `IntoIterator` makes it. */
 // code-gauge-allow functionCognitiveComplexity 21 -- One case per kind of iterable type.
-export function toIterator(interp: Interpreter, value: Value, from: Type): Value {
+export function toIterator(value: Value, from: Type): Value {
   const t = normalize(shallow(from));
   if (value instanceof IterValue) return value;
-  if (t.kind === 'opaque' && t.opaque.hidden) return toIterator(interp, value, t.opaque.hidden);
+  if (t.kind === 'opaque' && t.opaque.hidden) return toIterator(value, t.opaque.hidden);
   if (t.kind === 'array') return ownedIter(sliceItems(value));
   if (t.kind === 'ref') {
     const target = normalize(shallow(t.target));
     const v = t.mutable ? (deref(value) as Value) : value;
     if (target.kind === 'array' || target.kind === 'slice') return sliceIter(v, t.mutable);
     if (target.kind === 'adt') {
-      const iter = collectionIter(interp, target, v, t.mutable ? 'mut' : 'ref');
+      const iter = collectionIter(target, v, t.mutable ? 'mut' : 'ref');
       if (iter) return iter;
     }
   }
   if (t.kind === 'adt') {
-    const iter = collectionIter(interp, t, value, 'value');
+    const iter = collectionIter(t, value, 'value');
     if (iter) return iter;
   }
   throw new Error(`Cannot iterate ${t.kind}`);
 }
 
 /** The iterator of a standard collection, of its elements (`value`) or of references to them (`ref`, `mut`). */
-function collectionIter(
-  interp: Interpreter,
-  type: Type & { kind: 'adt' },
-  value: Value,
-  mode: 'value' | 'ref' | 'mut'
-): Value | undefined {
+function collectionIter(type: Type & { kind: 'adt' }, value: Value, mode: 'value' | 'ref' | 'mut'): Value | undefined {
   switch (type.def.builtin) {
     case 'Vec':
     case 'VecDeque':
@@ -109,11 +103,11 @@ function collectionIter(
     }
     case 'HashMap':
     case 'BTreeMap': {
-      return mapIter(interp, value as MapValue, type.args[0], mode);
+      return mapIter(value as MapValue, mode);
     }
     case 'HashSet':
     case 'BTreeSet': {
-      return setIter(value as SetValue, type.args[0]);
+      return setIter(value as SetValue);
     }
     case 'Range':
     case 'RangeInclusive':
@@ -137,8 +131,8 @@ function collectionIter(
 }
 
 /** A map's entries as tuples, in key order for a `BTreeMap`; `mut` yields places for the values. */
-export function mapIter(interp: Interpreter, map: MapValue, keyType: Type, mode: 'value' | 'ref' | 'mut'): IterValue {
-  const entries = interp.formatter.mapEntries(map, keyType);
+export function mapIter(map: MapValue, mode: 'value' | 'ref' | 'mut'): IterValue {
+  const entries = [...map.entries.values()];
   const iter = arrayIter(entries, 0, entries.length, (i) => {
     const entry = entries[i];
     return mode === 'mut' ? [entry[0], new ElementPlace(entry, 1)] : [entry[0], entry[1]];
@@ -147,9 +141,8 @@ export function mapIter(interp: Interpreter, map: MapValue, keyType: Type, mode:
   return iter;
 }
 
-export function setIter(set: SetValue, elemType: Type): IterValue {
+export function setIter(set: SetValue): IterValue {
   const values = [...set.entries.values()];
-  if (set.sorted) values.sort((a, b) => compareValues(elemType, a, b) ?? 0);
   const iter = arrayIter(values);
   iter.roots.push(set);
   return iter;
@@ -363,7 +356,7 @@ function takeInner(state: FlattenState, end: End): Next {
 
 /** The iterator an element of `flatten` (or a result of `flat_map`'s function) makes, as `IntoIterator` does. */
 function innerIter(ctx: NativeContext, value: Value, type: Type): IterValue {
-  return toIterator(ctx.interp, value, type) as IterValue;
+  return toIterator(value, type) as IterValue;
 }
 
 define({
@@ -1209,9 +1202,9 @@ export function collectInto(ctx: NativeContext, items: Value[], target: Type, it
     case 'HashMap':
     case 'BTreeMap': {
       const map = new MapValue(t.def.builtin === 'BTreeMap');
-      sizeTable(map.entries, sizeOf({ kind: 'tuple', elems: t.args }));
+      sizeTable(map.entries.table, sizeOf({ kind: 'tuple', elems: t.args }));
       for (const entry of items as Value[][]) {
-        const hash = hashKey(t.args[0], entry[0]);
+        const hash = map.entries.key(t.args[0], entry[0]);
         const existing = map.entries.get(hash);
         if (existing) existing[1] = entry[1];
         else map.entries.set(hash, [entry[0], entry[1]]);
@@ -1221,9 +1214,9 @@ export function collectInto(ctx: NativeContext, items: Value[], target: Type, it
     case 'HashSet':
     case 'BTreeSet': {
       const set = new SetValue(t.def.builtin === 'BTreeSet');
-      sizeTable(set.entries, sizeOf(t.args[0]));
+      sizeTable(set.entries.table, sizeOf(t.args[0]));
       for (const element of items) {
-        const hash = hashKey(t.args[0], element);
+        const hash = set.entries.key(t.args[0], element);
         if (!set.entries.has(hash)) set.entries.set(hash, element);
       }
       return set;

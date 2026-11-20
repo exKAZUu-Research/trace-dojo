@@ -10,7 +10,6 @@ import { debugFloat, displayFloat } from './floatFormat';
 import { DEFAULT_SPEC, Formatter } from './fmt';
 import { normalize } from './infer';
 import { fieldTypes } from './interpreter';
-import { compareValues } from './ops';
 import { type Frame, MOVED, Runtime, UNASSIGNED } from './runtime';
 import { concreteType } from './runtimeTypes';
 import { shallow, type Type } from './types';
@@ -234,7 +233,6 @@ function containerNodeOf(v: Value, t: Type, seen: Set<unknown>): DisplayNode | u
   if (v instanceof MapValue) return mapNodeOf(v, t, seen);
   if (v instanceof SetValue) {
     const items = [...v.entries.values()];
-    if (v.sorted) items.sort((a, b) => compareValues(t.args[0], a, b) ?? 0);
     return arrayNodeOf(items, t.args[0], seen);
   }
   return undefined;
@@ -281,7 +279,6 @@ function enumNodeOf(v: EnumValue, t: Type & { kind: 'adt' }, seen: Set<unknown>)
 function mapNodeOf(v: MapValue, t: Type & { kind: 'adt' }, seen: Set<unknown>): DisplayNode {
   const entries = Object.create(null) as Record<string, DisplayNode>;
   const items = [...v.entries.values()];
-  if (v.sorted) items.sort((a, b) => compareValues(t.args[0], a[0], b[0]) ?? 0);
   for (const [key, item] of items)
     entries[keyLabel(key, t.args[0])] = displayNodeOf(item, t.args[1], seen) ?? NULL_NODE;
   return { kind: 'object', entries };

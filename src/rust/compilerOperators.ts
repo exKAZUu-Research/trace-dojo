@@ -1,5 +1,5 @@
 import type { Expr, Span } from './ast';
-import { changeString, concatStrings, sizeTable, TableMap } from './capacity';
+import { changeString, concatStrings, sizeTable } from './capacity';
 import type { Compiler, Eval } from './compiler';
 import { derefAll, stringish, stripRefs } from './compilerCommon';
 import { normalize } from './infer';
@@ -172,14 +172,21 @@ function intBitsOf(name: IntName): number {
 }
 
 /** The set that `|`, `&`, `-`, or `^` makes of two sets, of clones of their elements, in the order they iterate. */
+// code-gauge-allow functionCognitiveComplexity 16 -- Each set operator selects its own members.
 function setOperation(op: string, a: SetValue, b: SetValue, elem: Type): SetValue {
   const result = new SetValue(a.sorted);
-  if (a.entries instanceof TableMap) sizeTable(result.entries, a.entries.entrySize);
-  const add = (hash: string, value: Value): void => void result.entries.set(hash, cloneValue(elem, value));
-  for (const [hash, value] of a.entries) {
-    const inB = b.entries.has(hash);
-    if (op === '|' || (op === '&' && inB) || ((op === '-' || op === '^') && !inB)) add(hash, value);
+  if (a.entries.table) sizeTable(result.entries.table, a.entries.table.entrySize);
+  const add = (value: Value): void => result.entries.set(result.entries.key(elem, value), cloneValue(elem, value));
+  for (const value of a.entries.values()) {
+    if (op === '|') {
+      add(value);
+      continue;
+    }
+    const inB = b.entries.has(b.entries.key(elem, value));
+    if (op === '&' ? inB : !inB) add(value);
   }
-  if (op === '|' || op === '^') for (const [hash, value] of b.entries) if (!a.entries.has(hash)) add(hash, value);
+  if (op === '|' || op === '^') {
+    for (const value of b.entries.values()) if (!a.entries.has(a.entries.key(elem, value))) add(value);
+  }
   return result;
 }

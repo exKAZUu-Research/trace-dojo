@@ -72,6 +72,7 @@ export class Interpreter implements CallSupport {
     });
     setUserImpls({
       allocate: (count) => this.runtime.allocate(count),
+      spend: (count) => this.runtime.spend(count),
       eq: (type, a, b, rhs) => {
         const found = this.userTraitMethod('PartialEq', type, 'eq', rhs);
         if (!found) return;
@@ -246,7 +247,7 @@ export class Interpreter implements CallSupport {
   }
 
   toIter(value: Value, from: Type): Value {
-    return toIterator(this, value, from);
+    return toIterator(value, from);
   }
 
   // -------------------------------------------------------------------------------------------------------------------

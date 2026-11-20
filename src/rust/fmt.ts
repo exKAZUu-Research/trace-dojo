@@ -4,7 +4,7 @@ import { type DebugPart, list, structText, tupleText } from './debugText';
 import { debugFloat, displayFloat, expFloat, fixedFloat } from './floatFormat';
 import { normalize } from './infer';
 import { iteratorDebug } from './iterDebug';
-import { compareValues, wrap } from './ops';
+import { wrap } from './ops';
 import { FmtFailure } from './runtime';
 import { ERROR_TYPES } from './traits';
 import { type AdtDef, type IntName, shallow, type Type } from './types';
@@ -267,7 +267,7 @@ export class Formatter {
       case 'HashMap':
       case 'BTreeMap': {
         const map = v as MapValue;
-        const entries = this.mapEntries(map, t.args[0]);
+        const entries = [...map.entries.values()];
         const items = entries.map(([key, item]) => (inner: number | undefined) => {
           const keyText = this.debug(key, t.args[0], spec, inner);
           return `${keyText}: ${this.debug(item, t.args[1], spec, inner)}`;
@@ -322,14 +322,13 @@ export class Formatter {
 
   private setText(set: SetValue, elem: Type, spec: Spec, indent: number | undefined): string {
     const values = [...set.entries.values()];
-    if (set.sorted) values.sort((a, b) => compareValues(elem, a, b) ?? 0);
     const items = values.map((item) => (inner: number | undefined) => this.debug(item, elem, spec, inner));
     return list('{', '}', items, indent);
   }
 
   /** A map's entry, as `Entry`, `OccupiedEntry`, and `VacantEntry` debug: the key and any value it holds. */
   private entryText(entry: EntryValue, t: Type & { kind: 'adt' }, spec: Spec, indent: number | undefined): string {
-    const held = entry.map.entries.get(entry.hash);
+    const held = entry.map.entries.get(entry.lookup);
     const key: DebugPart = (inner) => this.debug(held ? held[0] : entry.key, t.args[0], spec, inner);
     const inner: DebugPart = held
       ? (depth) => {
@@ -370,13 +369,6 @@ export class Formatter {
       parts.map((part, index) => [variant.fields[index].name, part]),
       indent
     );
-  }
-
-  /** A map's entries in iteration order: insertion order for `HashMap`, key order for `BTreeMap`. */
-  mapEntries(map: MapValue, keyType: Type): [Value, Value][] {
-    const entries = [...map.entries.values()];
-    if (map.sorted) entries.sort((a, b) => compareValues(keyType, a[0], b[0]) ?? 0);
-    return entries;
   }
 
   // code-gauge-allow functionCognitiveComplexity 18 -- Follows std::fmt's formatting rules case by case.

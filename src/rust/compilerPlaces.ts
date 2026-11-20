@@ -2,7 +2,6 @@ import type { Expr, Span } from './ast';
 import type { Compiler, Eval, PlaceEval } from './compiler';
 import { LocalPlace } from './compilerCommon';
 import { normalize } from './infer';
-import { hashKey } from './ops';
 import { RustPanic } from './runtime';
 import { runtimeType } from './runtimeTypes';
 import { shallow } from './types';
@@ -188,7 +187,7 @@ export function compileIndex(c: Compiler, expr: ExprOf<'index'>): Eval {
     return (frame) => {
       const map = base(frame) as MapValue;
       const key = index(frame);
-      const entry = map.entries.get(hashKey(keyType(frame), key));
+      const entry = map.entries.get(map.entries.key(keyType(frame), key));
       if (!entry) throw new RustPanic('no entry found for key', span);
       return entry[1];
     };
