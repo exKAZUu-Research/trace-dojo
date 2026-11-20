@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 579 -- Resolves related type operators sharing generic parameters and type construction.
+// code-gauge-allow-file fileNcss 588 -- Resolves related type operators sharing generic parameters and type construction.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker, Mapper } from './checker';
@@ -88,6 +88,7 @@ export class TypeOperators {
   private readonly mappedKeys = new WeakMap<Structure, Map<string, { keys: Type[]; nameTypes: Type[] }>>();
   private readonly inferGroups = new Map<number, Map<string, InferGroup>>();
   private readonly resolvingInferConstraints = new Set<number>();
+  private readonly resolvedConstraintBranches = new Map<number, readonly TreeNode[]>();
 
   constructor(private readonly c: Checker) {
     this.indexedAccessKeys = new IndexedAccessKeys(c);
@@ -671,22 +672,36 @@ export class TypeOperators {
     const falseNode = node.childForFieldName('alternative') as TreeNode;
     const checkType = this.c.typeNodes.typeFromNode(check);
     const checker = this.c;
+    const evaluated = new Set<TreeNode>();
     const conditional: ConditionalType = {
       kind: 'conditional',
       id: newTypeId(),
       checkType,
       extendsType: this.c.typeNodes.typeFromNode(extendsNode),
       get trueType() {
+        evaluated.add(trueNode);
         return checker.typeNodes.typeFromNode(trueNode);
       },
       get falseType() {
+        evaluated.add(falseNode);
         return checker.typeNodes.typeFromNode(falseNode);
       },
       inferTypeParameters: [...this.inferGroupsOf(node).values()].map(({ parameter }) => parameter),
       outerTypeParameters: this.typeParametersInScope(node),
       distributive: checkType.kind === 'typeParameter',
     };
-    return this.resolveConditional(conditional, new Map());
+    const type = this.resolveConditional(conditional, new Map());
+    this.resolvedConstraintBranches.set(node.id, [
+      check,
+      extendsNode,
+      ...(type === conditional ? [trueNode, falseNode] : evaluated),
+    ]);
+    return type;
+  }
+
+  conditionalConstraintNodes(node: TreeNode): readonly TreeNode[] {
+    this.c.typeNodes.typeFromNode(node);
+    return this.resolvedConstraintBranches.get(node.id) ?? [];
   }
 
   // code-gauge-allow functionCognitiveComplexity 16 -- Each enclosing binding has its own scope rule.

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 771 -- Types literals and their spreads, members, and widening in the same literal context.
+// code-gauge-allow-file fileNcss 782 -- Types literals and their spreads, members, and widening in the same literal context.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExpressionListFlow, tupleArgumentContexts } from './callArity';
@@ -1093,24 +1093,37 @@ export class LiteralChecker {
   /** Whether a type parameter is constrained to primitives, which keeps the literals inferred for it. */
   hasPrimitiveConstraint(parameter: TypeParameter): boolean {
     const constraint = parameter.substitution?.constraint ?? this.c.constraintOf(parameter);
-    if (!constraint) return false;
-    if (constraint.kind !== 'conditional') return this.includesPrimitiveConstraint(constraint);
-    const yes = this.c.conditionalTrueType(constraint);
-    const no = constraint.falseType;
-    const fallback = isAnyLike(yes) ? no : isAnyLike(no) ? yes : unionOf([yes, no]);
-    return this.includesPrimitiveConstraint(fallback);
+    return !!constraint && this.includesPrimitiveConstraint(constraint);
   }
 
   private includesPrimitiveConstraint(constraint: Type): boolean {
-    this.c.budget.spend();
-    if (constraint.kind === 'union' || constraint.kind === 'intersection')
-      return constraint.types.some((member) => this.includesPrimitiveConstraint(member));
-    return (
-      constraint.kind === 'literal' ||
-      constraint.kind === 'keyof' ||
-      isPrimitive(constraint) ||
-      isTemplateOrStringMapping(constraint)
-    );
+    const pending = [constraint];
+    const visited = new Set<Type>();
+    for (let type = pending.pop(); type; type = pending.pop()) {
+      this.c.budget.spend();
+      if (visited.has(type)) continue;
+      visited.add(type);
+      if (type.kind === 'union' || type.kind === 'intersection') {
+        this.c.budget.spend(type.types.length);
+        for (const member of type.types) pending.push(member);
+      } else if (type.kind === 'conditional') {
+        pending.push(this.defaultConditionalBound(type));
+      } else if (
+        type.kind === 'literal' ||
+        type.kind === 'keyof' ||
+        isPrimitive(type) ||
+        isTemplateOrStringMapping(type)
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private defaultConditionalBound(type: Extract<Type, { kind: 'conditional' }>): Type {
+    const yes = this.c.conditionalTrueType(type);
+    const no = type.falseType;
+    return isAnyLike(yes) ? no : isAnyLike(no) ? yes : unionOf([yes, no]);
   }
 
   /** The union of types without those that another of them already includes, as TypeScript's subtype reduction. */

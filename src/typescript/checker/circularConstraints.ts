@@ -7,7 +7,11 @@ import { named } from './syntax';
 import { tupleElementBeyond } from './tupleIndexes';
 import {
   type ConditionalType,
+  emptyObjectType,
   type IndexedAccessType,
+  isIntrinsic,
+  isPatternLiteralType,
+  isPrimitive,
   isPropertyKeyLiteral,
   type Type,
   type TypeParameter,
@@ -25,7 +29,10 @@ export class CircularConstraints {
   /** Whether each type parameter's constraint is circular, or `undefined` while that is being found. */
   private readonly known = new Map<number, boolean | undefined>();
 
-  constructor(private readonly c: Checker) {}
+  constructor(
+    private readonly c: Checker,
+    private readonly declarations?: ReadonlyMap<TypeParameter, TreeNode>
+  ) {}
 
   /**
    * Whether following the base constraint of a type parameter, as TypeScript's `computeBaseConstraint` does through
@@ -34,7 +41,7 @@ export class CircularConstraints {
   has(parameter: TypeParameter): boolean {
     if (this.known.has(parameter.id)) return this.known.get(parameter.id) ?? false;
     this.known.set(parameter.id, undefined);
-    const circular = this.leadsBack(parameter.constraint?.(), { parameters: [parameter.id], conditionals: [] });
+    const circular = this.parameterLeadsBack(parameter, { parameters: [parameter.id], conditionals: [] });
     this.known.set(parameter.id, circular);
     return circular;
   }
@@ -45,7 +52,7 @@ export class CircularConstraints {
     switch (type?.kind) {
       case 'typeParameter': {
         if (path.parameters.includes(type.id)) return type.id === path.parameters[0];
-        return this.leadsBack(type.constraint?.(), { ...path, parameters: [...path.parameters, type.id] });
+        return this.parameterLeadsBack(type, { ...path, parameters: [...path.parameters, type.id] });
       }
       case 'indexedAccess': {
         const selected = this.selectedType(type);
@@ -67,6 +74,53 @@ export class CircularConstraints {
         return false;
       }
     }
+  }
+
+  private parameterLeadsBack(parameter: TypeParameter, path: Path): boolean {
+    if (this.leadsBack(parameter.constraint?.(), path)) return true;
+    const declaration = this.declarations?.get(parameter);
+    return !!declaration && this.eagerIntersectionLeadsBack(declaration, path);
+  }
+
+  private eagerIntersectionLeadsBack(declaration: TreeNode, path: Path): boolean {
+    const pending = [declaration];
+    const visited = new Set<Type>();
+    for (let node = pending.pop(); node; node = pending.pop()) {
+      this.c.budget.spend();
+      // The checker resolves a chain of unparenthesized intersections as one expression.
+      const evaluatesIntersection = node.type === 'intersection_type' && node.parent?.type !== 'intersection_type';
+      if (
+        (evaluatesIntersection || node.type === 'generic_type') &&
+        this.eagerTypeLeadsBack(this.c.typeNodes.typeFromNode(node), path, visited)
+      )
+        return true;
+      const children =
+        node.type === 'conditional_type'
+          ? this.c.typeOperators.conditionalConstraintNodes(node)
+          : eagerBoundSyntax.has(node.type)
+            ? named(node)
+            : [];
+      for (const child of children) pending.push(child);
+    }
+    return false;
+  }
+
+  private eagerTypeLeadsBack(root: Type, path: Path, visited: Set<Type>): boolean {
+    const pending = [root];
+    for (let type = pending.pop(); type; type = pending.pop()) {
+      this.c.budget.spend();
+      if (visited.has(type)) continue;
+      visited.add(type);
+      if (type.kind === 'intersection' && type.types.length === 2) {
+        const [left, right] = type.types;
+        const dependency = intersectionConstraintOperand(left, right) ?? intersectionConstraintOperand(right, left);
+        if (dependency && this.leadsBack(dependency, path)) return true;
+      }
+      const children = eagerTypeChildren(type);
+      this.c.budget.spend(children.length);
+      for (const child of children) pending.push(child);
+    }
+    return false;
   }
 
   /**
@@ -123,11 +177,27 @@ export class CircularConstraints {
   }
 }
 
-/**
- * Reports each type parameter whose constraint leads back to itself, as TypeScript's `checkTypeParameter` does. It
- * runs once every constraint has resolved, since a constraint that needs itself while resolving sees none.
- */
-export function checkCircularConstraints(c: Checker, root: TreeNode): void {
+/** Checks cycles before comparing repeated infer declarations, which share a bound only when it is non-circular. */
+export function checkConstraintDeclarations(c: Checker, root: TreeNode): void {
+  const inferred = root.descendantsOfType('infer_type');
+  const declarations = constraintDeclarations(c, root, inferred);
+  const circularConstraints = new CircularConstraints(c, declarations);
+  for (const [parameter, constraint] of declarations) {
+    if (circularConstraints.has(parameter))
+      c.error(constraint, `型パラメーター '${parameter.name}' の制約が循環しています。`);
+  }
+  for (const node of inferred) {
+    const name = named(node)[0];
+    const parameter = name && c.typeOperators.inferParameterFor(node, name.text);
+    if (parameter && !circularConstraints.has(parameter)) c.typeOperators.checkInferConstraints(node);
+  }
+}
+
+function constraintDeclarations(
+  c: Checker,
+  root: TreeNode,
+  inferred: readonly TreeNode[]
+): Map<TypeParameter, TreeNode> {
   const declarations = new Map<TypeParameter, TreeNode>();
   for (const node of root.descendantsOfType('type_parameter')) {
     const wrapper = node.childForFieldName('constraint');
@@ -136,15 +206,60 @@ export function checkCircularConstraints(c: Checker, root: TreeNode): void {
     if (!wrapper || symbol?.typeDeclarations[0]?.id !== node.id) continue;
     declarations.set(c.signatures.typeParameterOfSymbol(symbol), named(wrapper)[0]);
   }
-  for (const node of root.descendantsOfType('infer_type')) {
+  for (const node of inferred) {
     const [name, constraint] = named(node);
     if (!constraint) continue;
     const parameter = c.typeOperators.inferParameterFor(node, name.text);
     if (parameter && !declarations.has(parameter)) declarations.set(parameter, constraint);
   }
-  const circularConstraints = new CircularConstraints(c);
-  for (const [parameter, constraint] of declarations) {
-    if (circularConstraints.has(parameter))
-      c.error(constraint, `型パラメーター '${parameter.name}' の制約が循環しています。`);
+  return declarations;
+}
+
+const eagerBoundSyntax = new Set([
+  'array_type',
+  'generic_type',
+  'intersection_type',
+  'optional_parameter',
+  'optional_type',
+  'parenthesized_type',
+  'readonly_type',
+  'required_parameter',
+  'rest_type',
+  'template_literal_type',
+  'template_type',
+  'tuple_type',
+  'type_annotation',
+  'type_arguments',
+  'union_type',
+]);
+
+function intersectionConstraintOperand(variable: Type, bound: Type): Type | undefined {
+  if (variable.noInfer || (variable.kind !== 'typeParameter' && variable.kind !== 'indexedAccess')) return undefined;
+  if (variable.kind === 'typeParameter' && variable.substitution) return undefined;
+  return isPrimitive(bound) ||
+    bound.kind === 'literal' ||
+    isIntrinsic(bound, 'object') ||
+    bound.id === emptyObjectType.id ||
+    isPatternLiteralType(bound)
+    ? variable
+    : undefined;
+}
+
+function eagerTypeChildren(type: Type): readonly Type[] {
+  switch (type.kind) {
+    case 'intersection':
+    case 'union':
+    case 'templateLiteral': {
+      return type.types;
+    }
+    case 'stringMapping': {
+      return [type.type];
+    }
+    case 'object': {
+      return type.tuple?.elements.map((element) => element.type) ?? type.typeArguments ?? type.aliasArguments ?? [];
+    }
+    default: {
+      return [];
+    }
   }
 }

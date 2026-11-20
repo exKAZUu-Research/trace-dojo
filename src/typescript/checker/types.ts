@@ -703,7 +703,7 @@ function isNullableUnit(type: Type): boolean {
   return isIntrinsic(type, 'null') || isIntrinsic(type, 'undefined');
 }
 
-function isPatternLiteralType(type: Type): boolean {
+export function isPatternLiteralType(type: Type): boolean {
   if (type.kind === 'templateLiteral') return type.types.every(isPatternLiteralPlaceholder);
   return type.kind === 'stringMapping' && isPatternLiteralPlaceholder(type.type);
 }
