@@ -5,9 +5,10 @@ import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
 import { dec } from './bytes';
 import { canAccessProp, declForKey, type LazyRef, lookupProp, propNameOf } from './classes';
+import { cachedObjectFree } from './gcRoots';
 import { parsePhp } from './parse';
 import { runProgram } from './run';
-import { type Frame, Runtime } from './runtime';
+import { type Frame, rt, Runtime } from './runtime';
 import { runTraceOnLargeStack } from './stackFallback';
 import { isClosure, type Key, PhpArray, PhpObject, Ref, UNDEFINED_RESULT, UNINIT, type Value } from './values';
 
@@ -18,6 +19,8 @@ export function tracePhpProgram(program: string, trace: TraceOptions, input?: Pr
     isAtomic: (frame) => frame.isAtomic,
     variablesOf: (frame) => variablesOf(runtime, frame, true),
     stateVariables,
+    ignoreStateVariable: (value, otherValue) =>
+      value === DISPLAY_ONLY_ARRAY || (otherValue === DISPLAY_ONLY_ARRAY && Array.isArray(value)),
   });
   runtime.steps.recorder = recorder;
   let finalVars: TraceItemVariable = {};
@@ -33,6 +36,7 @@ export function tracePhpProgram(program: string, trace: TraceOptions, input?: Pr
 }
 
 const arraySnapshots = new WeakMap<DisplayNode, unknown>();
+const DISPLAY_ONLY_ARRAY = Symbol('display-only array');
 
 function stateVariables({ vars, referenceVars }: TraceVariables): Record<string, unknown> {
   const snapshots = Object.entries(referenceVars)
@@ -52,7 +56,7 @@ function variablesOf(runtime: Runtime, frame: Frame, withContext: boolean): Trac
   const variables: TraceVariables = { vars: {}, referenceVars: {} };
   for (const [name, ref] of frame.vars) {
     if (name === 'GLOBALS') continue;
-    addVariable(variables, `$${dec(name)}`, ref.v);
+    addVariable(variables, `$${dec(name)}`, ref.v, withContext);
   }
   if (!withContext) return variables;
   contextProperties(variables, frame);
@@ -107,7 +111,7 @@ function define(target: Record<string, unknown>, name: string, value: unknown): 
   else target[name] = value;
 }
 
-function addVariable(variables: TraceVariables, name: string, value: Value): void {
+function addVariable(variables: TraceVariables, name: string, value: Value, compareSteps = true): void {
   if (!isVariableValue(value)) return;
   if (value instanceof PhpArray && !value.composite) {
     const snapshot = primitiveArraySnapshot(value);
@@ -121,7 +125,26 @@ function addVariable(variables: TraceVariables, name: string, value: Value): voi
   // Arrays also appear as references so that learners can expand their elements.
   if (scalar !== NOT_SCALAR && !(value instanceof PhpArray)) return;
   const node = displayNodeOf(value, new Set(), { remaining: MAX_DISPLAY_EXPANSION });
-  if (node) define(variables.referenceVars, name, node);
+  if (!node) return;
+  if (compareSteps && value instanceof PhpArray && scalar === NOT_SCALAR && arrayContainsObjects(value))
+    arraySnapshots.set(node, DISPLAY_ONLY_ARRAY);
+  define(variables.referenceVars, name, node);
+}
+
+// code-gauge-allow functionCognitiveComplexity 18 -- Visits each reachable array once and skips known object-free storage.
+function arrayContainsObjects(array: PhpArray): boolean {
+  const pending = new Set([array]);
+  let scanned = 0;
+  for (const current of pending) {
+    if (!current.composite || cachedObjectFree(current) === true) continue;
+    for (const slot of current.map.ownedSlots()) {
+      if ((++scanned & 255) === 0) rt().budget.checkClock();
+      const value = slot instanceof Ref ? slot.v : slot;
+      if (value instanceof PhpObject) return true;
+      if (value instanceof PhpArray) pending.add(value);
+    }
+  }
+  return false;
 }
 
 function primitiveArraySnapshot(array: PhpArray): PrimitiveArraySnapshot {

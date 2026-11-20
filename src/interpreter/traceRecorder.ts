@@ -6,6 +6,7 @@ import type { StepRecorder } from './stepTracker';
 import type { TurtleWorld } from './turtleWorld';
 
 export type TraceVariables = Pick<TraceItem, 'vars' | 'referenceVars'>;
+type IgnoreStateVariable = (value: unknown, otherValue: unknown) => boolean;
 
 /** What the recorder reads from a language's runtime while it runs a model program. */
 export interface TracedRuntime<F extends TracedFrame> {
@@ -25,6 +26,7 @@ export interface FrameReader<F extends TracedFrame> {
   isAtomic(frame: F): boolean;
   variablesOf(frame: F): TraceVariables;
   stateVariables?(variables: TraceVariables): Record<string, unknown>;
+  ignoreStateVariable?: IgnoreStateVariable;
   scalarVarsOf?(frame: F): TraceVariables['vars'];
   recordItem?(item: TraceItem): TraceItem;
 }
@@ -81,7 +83,7 @@ export class TraceRecorder<F extends TracedFrame> implements StepRecorder {
     return (
       last.board === world.boardText() &&
       isEqual(last.turtles, world.turtleTraces()) &&
-      (shownVars === undefined || sameVariables(shownVars, this.stateOf(frame)))
+      (shownVars === undefined || sameVariables(shownVars, this.stateOf(frame), this.frames.ignoreStateVariable))
     );
   }
 
@@ -94,9 +96,19 @@ export class TraceRecorder<F extends TracedFrame> implements StepRecorder {
   }
 }
 
-function sameVariables(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
-  const names = Object.keys(a);
-  return (
-    names.length === Object.keys(b).length && names.every((name) => Object.hasOwn(b, name) && isEqual(a[name], b[name]))
-  );
+function sameVariables(a: Record<string, unknown>, b: Record<string, unknown>, ignore?: IgnoreStateVariable): boolean {
+  const aNames = comparableNames(a, b, ignore);
+  const bNames = comparableNames(b, a, ignore);
+  return aNames.length === bNames.length && aNames.every((name) => Object.hasOwn(b, name) && isEqual(a[name], b[name]));
+}
+
+function comparableNames(
+  variables: Record<string, unknown>,
+  other: Record<string, unknown>,
+  ignore: IgnoreStateVariable | undefined
+): string[] {
+  const names = Object.keys(variables);
+  return ignore
+    ? names.filter((name) => !ignore(variables[name], Object.hasOwn(other, name) ? other[name] : undefined))
+    : names;
 }

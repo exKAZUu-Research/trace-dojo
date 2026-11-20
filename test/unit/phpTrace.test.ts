@@ -148,6 +148,35 @@ new Counter(21, 42);`;
   expect(items.filter(({ callLines }) => callLines.length > 0).map(({ line }) => line)).toEqual([4, 5]);
 });
 
+test.each(['$grid[$i]', '$grid[]'])('lets constructor steps show an object stored at %s', (destination) => {
+  const php = `<?php
+class Cell { public $value; function __construct($value) { $this->value = $value; } }
+$grid = [];
+for ($i = 0; $i < 2; $i++) {
+    ${destination} = new Cell($i);
+}
+echo count($grid);`;
+  const java = `class Cell { int value; Cell(int value) { this.value = value; } }
+public class Main {
+    public static void main(String[] args) {
+        Cell[] grid = new Cell[2];
+        for (int i = 0; i < 2; i++) {
+            grid[i] = new Cell(i);
+        }
+        System.out.print(grid.length);
+    }
+}`;
+  const steps = phpTrace(php);
+  const afterEachAssignment = steps
+    .slice(0, -1)
+    .map(({ vars: { $grid: _grid, ...vars }, ...step }) => ({ ...step, vars }));
+  expect(asJava(afterEachAssignment)).toEqual(asJava(traceProgram('java', java, java).traceItems.slice(0, -1)));
+  expect(steps.at(-1)?.referenceVars.$grid).toMatchObject({
+    kind: 'array',
+    entries: { 0: { entries: { value: { value: 0 } } }, 1: { entries: { value: { value: 1 } } } },
+  });
+});
+
 test('declared property defaults are visible from the first constructor statement', () => {
   const source = `<?php
 class Counter {
