@@ -848,16 +848,19 @@ int main() {
 
 test('folds floating division by zero outside constant expressions', () => {
   const program = `#include <iostream>
+#include <limits>
 int main() {
   constexpr double overflow = 1e308 * 1e308;
+  constexpr double nan = std::numeric_limits<double>::quiet_NaN();
+  constexpr bool unordered = nan < 1.0;
   const double infinite = 1.0 / 0.0;
   static const double negative = -1.0 / 0.0;
   double runtime = 1.0 / 0.0;
-  std::cout << overflow << ' ' << infinite << ' ' << negative << ' ' << runtime;
+  std::cout << overflow << ' ' << infinite << ' ' << negative << ' ' << runtime << ' ' << nan << unordered;
 }`;
   expect(executeProgram('cpp', program)).toMatchObject({
     kind: 'executed',
-    stdout: 'inf inf -inf inf',
+    stdout: 'inf inf -inf inf nan0',
     uncaughtException: undefined,
   });
 });

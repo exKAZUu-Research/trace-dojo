@@ -1277,13 +1277,16 @@ int main() { ${declaration} int b[${bound}]; }`;
   });
 });
 
-test.each(['1.0 / 0.0', '0.0 / 0.0'])(
-  'rejects the floating division by zero %s in a constexpr initializer',
-  (value) => {
-    const program = `int main() { constexpr double x = ${value}; }`;
-    expect(executeProgram('cpp', program)).toMatchObject({
-      kind: 'compileError',
-      diagnostics: [{ row: 0, message: expect.stringContaining('定数式') }],
-    });
-  }
-);
+test.each([
+  '1.0 / 0.0',
+  '0.0 / 0.0',
+  'std::numeric_limits<double>::infinity() - std::numeric_limits<double>::infinity()',
+  'std::numeric_limits<double>::quiet_NaN() + 1.0',
+])('rejects the invalid floating operation %s in a constexpr initializer', (value) => {
+  const program = `#include <limits>
+int main() { constexpr double x = ${value}; }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 1, message: expect.stringContaining('定数式') }],
+  });
+});
