@@ -134,7 +134,7 @@ const UNSUPPORTED_FUNCTIONS: [string, string[]][] = [
 
 for (const [what, names] of UNSUPPORTED_FUNCTIONS) {
   for (const name of names) {
-    defineFunction(`${name}(mixed ...$args): mixed`, () => {
+    defineFunction(`${name}(mixed &~...$args): mixed`, () => {
       throw new UnsupportedFeatureError(`${what}（${name}）`);
     });
   }
@@ -179,7 +179,7 @@ for (const [what, names] of UNSUPPORTED_CLASSES) {
       name,
       methods: [
         {
-          signature: '__construct(mixed ...$args)',
+          signature: '__construct(mixed &~...$args)',
           impl: () => {
             throw new UnsupportedFeatureError(`${what}（${name}）`);
           },

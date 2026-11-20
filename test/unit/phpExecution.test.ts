@@ -4743,3 +4743,16 @@ var_dump(preg_match('/^(?:a|b)*$/', str_repeat('a', 10000)), preg_last_error_msg
     expect(run(source)).toMatchObject({ kind: 'compileError', diagnostics: [expect.objectContaining({ row: 1 })] });
   }
 });
+
+test('rejects unsupported functions without spurious undefined-variable warnings on out-parameters', () => {
+  expect(run('<?php fscanf(STDIN, "%d", $n); echo $n;')).toMatchObject({
+    kind: 'executed',
+    stdout: '',
+    uncaughtException: '標準入力の読み込み（fscanf）は、この採点環境では使えません。',
+  });
+  expect(run('<?php exec("ls", $out, $rc);')).toMatchObject({
+    kind: 'executed',
+    stdout: '',
+    uncaughtException: '外部コマンドの実行（exec）は、この採点環境では使えません。',
+  });
+});
