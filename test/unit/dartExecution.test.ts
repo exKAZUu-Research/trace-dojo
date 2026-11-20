@@ -3235,3 +3235,43 @@ void main() {
     expect(executeProgram('dart', `${declarations} ${body} void main() {}`)).toMatchObject({ kind: 'compileError' });
   }
 });
+
+test('synchronous generators resume do loops and switch cases after yielding', () => {
+  const program = `Iterable<int> values(List<Object> subjects) sync* {
+  var i = -1;
+  outer: do {
+    i++;
+    switch (subjects[i]) {
+      case int value when value > 0:
+        yield value;
+        if (value == 2) continue outer;
+        continue shared;
+      shared:
+      case 'x':
+        yield* [10, 11];
+        break;
+      default:
+        yield 20;
+        if (i == 3) return;
+    }
+    yield -1;
+  } while (i + 1 < subjects.length);
+}
+Iterable<int> counted() sync* {
+  var i = 0;
+  do {
+    if (i++ == 0) { yield 0; continue; }
+    yield i;
+  } while (i < 3);
+}
+void main() {
+  final sequence = values([1, 2, 'x', 0]);
+  print(sequence.take(2).toList());
+  print(sequence.toList());
+  print(counted().toList());
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[1, 10]\n[1, 10, 11, -1, 2, 10, 11, -1, 20]\n[0, 2, 3]\n',
+  });
+});

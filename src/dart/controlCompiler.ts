@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 572 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 593 -- Switches and loops share flow analysis with their generator forms.
 import type { Block, CatchClause, Pattern, Span, Statement, SwitchCase } from './ast';
 import { localNamesIn } from './astWalk';
 import type { FunctionSpec } from './callCompiler';
@@ -23,6 +23,14 @@ import { Cell, type Value } from './values';
 /** Switch, try, and the bodies of sync* generators. */
 export abstract class ControlCompiler extends StatementCompiler {
   protected compileSwitch(statement: Extract<Statement, { kind: 'switch' }>): Exec {
+    const { groups, select, route } = this.compileSwitchPlan(statement, (body) => this.compileStatements(body));
+    return (frame) => runSwitchFrom(frame, select(frame), groups, route);
+  }
+
+  private compileSwitchPlan<T>(
+    statement: Extract<Statement, { kind: 'switch' }>,
+    compileBody: (body: Statement[]) => T
+  ): { groups: SwitchGroup<T>[]; select: (frame: Frame) => number; route: SwitchRoute } {
     const labels = this.takeLoopLabels();
     const subject = this.compileExpression(statement.subject);
     const before = this.flow;
@@ -31,40 +39,40 @@ export abstract class ControlCompiler extends StatementCompiler {
       groups,
       after: afterCases,
       unmatched,
-    } = this.compileSwitchGroups(statement, this.switchSubject(subject, statement.cases), before, labels);
+    } = this.compileSwitchGroups(statement, this.switchSubject(subject, statement.cases), before, labels, compileBody);
     let after = afterCases;
     const breakFlow = this.fn.jumpTargets.pop()?.breakFlow;
     if (!this.isSwitchExhaustive(statement, subject.type)) after = after ? Flow.join(after, unmatched) : unmatched;
     if (statement.cases.length === 0) after = before;
     this.flow = breakFlow ? Flow.join(after ?? before.unreachable, breakFlow) : (after ?? before);
     const test = subject.run;
-    return (frame) => {
+    const select = (frame: Frame): number => {
       const value = test(frame);
       frame.temporaries.push(value);
-      let index: number;
       try {
-        index = selectSwitchGroup(frame, value, groups);
+        return selectSwitchGroup(frame, value, groups);
       } finally {
         frame.temporaries.pop();
       }
-      return runSwitchFrom(frame, index, groups, labels);
     };
+    return { groups, select, route: (completion) => routeSwitchCompletion(completion, labels, groups) };
   }
 
   /** The groups of cases that share a body, each in a scope of its own, with the labels the switch declares. */
-  private compileSwitchGroups(
+  private compileSwitchGroups<T>(
     statement: Extract<Statement, { kind: 'switch' }>,
     subject: Compiled,
     before: Flow,
-    labels: string[]
-  ): { groups: SwitchGroup[]; after: Flow | undefined; unmatched: Flow } {
+    labels: string[],
+    compileBody: (body: Statement[]) => T
+  ): { groups: SwitchGroup<T>[]; after: Flow | undefined; unmatched: Flow } {
     this.fn.switchDepth++;
     for (const label of labels) this.fn.labels.push({ name: label, isLoop: false, isSwitchCase: false });
     const caseLabels = statement.cases.flatMap((switchCase) => switchCase.labels);
     for (const label of caseLabels) this.fn.labels.push({ name: label, isLoop: false, isSwitchCase: true });
     let after: Flow | undefined;
     let unmatched = before;
-    const groups: SwitchGroup[] = [];
+    const groups: SwitchGroup<T>[] = [];
     try {
       for (const group of groupCases(statement.cases)) {
         this.flow = unmatched;
@@ -72,7 +80,7 @@ export abstract class ControlCompiler extends StatementCompiler {
           const compiled = this.compileSwitchMatchers(group.cases, subject, unmatched, group.labels.length > 0);
           unmatched = compiled.unmatched;
           if (group.labels.length > 0) this.flow = Flow.join(this.flow, before);
-          const body = this.compileStatements(group.statements);
+          const body = compileBody(group.statements);
           return { matchers: compiled.matchers, body };
         });
         after = after ? Flow.join(after, this.flow) : this.flow;
@@ -356,68 +364,83 @@ export abstract class ControlCompiler extends StatementCompiler {
   }
 
   private compileGenBlock(block: Block): GenExec {
-    const { result, slots } = this.withScope(() => {
-      this.reserveLocals(localNamesIn(block.statements));
-      const compiled = block.statements.map((statement) => this.compileGenStatement(statement));
-      return function* (frame: Frame): Generator<Value, Completion | undefined, undefined> {
-        for (const exec of compiled) {
-          const completion = yield* exec(frame);
-          if (completion) return completion;
-        }
-        return undefined;
-      };
-    });
+    const { result, slots } = this.withScope(() => this.compileGenStatements(block.statements));
     return clearingSlots(result, slots);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- One case per statement that may yield, in a sync* body.
-  // code-gauge-allow functionNcss 42 -- One case per form of the construct, which reads best together.
+  private compileGenStatements(statements: Statement[]): GenExec {
+    this.reserveLocals(localNamesIn(statements));
+    const compiled = statements.map((statement) => this.compileGenStatement(statement));
+    return function* (frame) {
+      for (const exec of compiled) {
+        const completion = yield* exec(frame);
+        if (completion) return completion;
+      }
+      return;
+    };
+  }
+
   private compileGenStatement(statement: Statement): GenExec {
+    if (statement.kind === 'block') return this.compileGenBlock(statement);
+    if (!containsYield(statement)) {
+      const exec = this.compileStatement(statement);
+      // oxlint-disable-next-line require-yield -- A statement without yield runs as one step of the generator.
+      return function* (frame) {
+        return exec(frame);
+      };
+    }
     switch (statement.kind) {
       case 'yield': {
         return this.compileYield(statement);
       }
-      case 'block': {
-        return this.compileGenBlock(statement);
-      }
       case 'if': {
-        if (!containsYield(statement)) break;
-        if (statement.casePattern) return this.compileGenIfCase(statement);
-        return this.compileGenIf(statement);
+        return statement.casePattern ? this.compileGenIfCase(statement) : this.compileGenIf(statement);
       }
       case 'while': {
-        if (!containsYield(statement)) break;
         return this.compileGenWhile(statement);
       }
       case 'for': {
-        if (!containsYield(statement)) break;
         return this.compileGenFor(statement);
       }
       case 'forIn': {
-        if (!containsYield(statement)) break;
         return this.compileGenForIn(statement);
       }
       case 'labeled': {
-        if (!containsYield(statement)) break;
         return this.compileGenLabeled(statement);
       }
       case 'try': {
-        if (!containsYield(statement)) break;
         return this.compileGenTry(statement);
       }
-      case 'switch':
+      case 'switch': {
+        return this.compileGenSwitch(statement);
+      }
       case 'do': {
-        if (containsYield(statement)) return this.unsupported(statement, 'sync* の中の、yield を含むこの文');
-        break;
+        return this.compileGenDo(statement);
       }
       default: {
-        break;
+        return this.unsupported(statement, 'sync* の中の、yield を含むこの文');
       }
     }
-    const exec = this.compileStatement(statement);
-    // oxlint-disable-next-line require-yield -- A statement without yield runs as one step of the generator.
+  }
+
+  private compileGenSwitch(statement: Extract<Statement, { kind: 'switch' }>): GenExec {
+    const { groups, select, route } = this.compileSwitchPlan(statement, (body) => this.compileGenStatements(body));
     return function* (frame) {
-      return exec(frame);
+      frame.runtime.spend();
+      let index = select(frame);
+      while (index >= 0) {
+        const group = groups[index];
+        let completion: Completion | void;
+        try {
+          completion = yield* group.body(frame);
+        } finally {
+          for (const slot of group.slots) frame.locals[slot] = undefined;
+        }
+        const next = route(completion);
+        if (typeof next !== 'number') return next;
+        index = next;
+      }
+      return;
     };
   }
 
@@ -549,6 +572,24 @@ export abstract class ControlCompiler extends StatementCompiler {
         }
         frame.runtime.spend();
       }
+      return;
+    };
+  }
+
+  // code-gauge-allow duplicateLines 15 -- The synchronous and yielding loops share flow analysis and differ in how the body resumes.
+  private compileGenDo(statement: Extract<Statement, { kind: 'do' }>): GenExec {
+    const { labels, body, test } = this.compileDoPlan(statement, (body, labels) =>
+      this.compileGenLoopBody(body, labels)
+    );
+    return function* (frame) {
+      do {
+        const completion = yield* body(frame);
+        if (completion) {
+          const outcome = loopCompletion(completion, labels);
+          if (outcome !== 'continue') return outcome;
+        }
+        frame.runtime.spend();
+      } while (test(frame));
       return;
     };
   }
@@ -740,16 +781,18 @@ interface SwitchMatcher {
   bindings: { from: number; to: number }[];
 }
 
-interface SwitchGroup {
+interface SwitchGroup<T> {
   matchers: SwitchMatcher[];
-  body: Exec;
+  body: T;
   slots: number[];
   labels: string[];
 }
 
+type SwitchRoute = (completion: Completion | void) => number | Completion | undefined;
+
 /** The index of the first group with a case that matches, clearing the variables of the groups that do not. */
 // code-gauge-allow functionCognitiveComplexity 17 -- Clear the failed matcher while keeping the selected body bindings live.
-function selectSwitchGroup(frame: Frame, value: Value, groups: readonly SwitchGroup[]): number {
+function selectSwitchGroup(frame: Frame, value: Value, groups: readonly SwitchGroup<unknown>[]): number {
   for (const [index, group] of groups.entries()) {
     for (const { pattern, guard, slots, bindings } of group.matchers) {
       try {
@@ -769,8 +812,8 @@ function selectSwitchGroup(frame: Frame, value: Value, groups: readonly SwitchGr
 function runSwitchFrom(
   frame: Frame,
   start: number,
-  groups: readonly SwitchGroup[],
-  labels: readonly string[]
+  groups: readonly SwitchGroup<Exec>[],
+  route: SwitchRoute
 ): Completion | undefined {
   let index = start;
   while (index >= 0) {
@@ -781,16 +824,25 @@ function runSwitchFrom(
     } finally {
       for (const slot of group.slots) frame.locals[slot] = undefined;
     }
-    if (!completion) return undefined;
-    if (completion.kind === 'break' && (completion.label === undefined || labels.includes(completion.label)))
-      return undefined;
-    if (completion.kind !== 'continue' || completion.label === undefined) return completion;
-    const label = completion.label;
-    const target = groups.findIndex((other) => other.labels.includes(label));
-    if (target === -1) return completion;
-    index = target;
+    const next = route(completion);
+    if (typeof next !== 'number') return next;
+    index = next;
   }
   return undefined;
+}
+
+function routeSwitchCompletion(
+  completion: Completion | void,
+  labels: readonly string[],
+  groups: readonly SwitchGroup<unknown>[]
+): number | Completion | undefined {
+  if (!completion) return undefined;
+  if (completion.kind === 'break' && (completion.label === undefined || labels.includes(completion.label)))
+    return undefined;
+  if (completion.kind !== 'continue' || completion.label === undefined) return completion;
+  const label = completion.label;
+  const target = groups.findIndex((group) => group.labels.includes(label));
+  return target === -1 ? completion : target;
 }
 
 function groupCases(cases: SwitchCase[]): { cases: SwitchCase[]; statements: Statement[]; labels: string[] }[] {

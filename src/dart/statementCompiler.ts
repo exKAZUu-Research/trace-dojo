@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 810 -- Keep statement cases together so their flow and compilation state are visible.
+// code-gauge-allow-file fileNcss 812 -- Keep statement cases together so their flow and compilation state are visible.
 import type {
   Block,
   Expression,
@@ -790,17 +790,9 @@ export abstract class StatementCompiler extends PatternCompiler {
     };
   }
 
-  // code-gauge-allow duplicateLines 18 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
+  // code-gauge-allow duplicateLines 15 -- The synchronous and yielding loops share flow analysis and differ in how the body resumes.
   private compileDo(statement: Extract<Statement, { kind: 'do' }>): Exec {
-    const labels = this.takeLoopLabels();
-    this.enterLoop(statement);
-    const body = this.compileLoopBody(statement.body, labels);
-    const target = this.fn.jumpTargets.pop();
-    const breakFlow = target?.breakFlow;
-    if (target?.continueFlow) this.flow = Flow.join(this.flow, target.continueFlow);
-    const { compiled: condition, flow } = this.compileCondition(statement.condition);
-    this.flow = breakFlow ? Flow.join(flow.whenFalse, breakFlow) : flow.whenFalse;
-    const test = condition.run;
+    const { labels, body, test } = this.compileDoPlan(statement, (body, labels) => this.compileLoopBody(body, labels));
     return (frame) => {
       do {
         const completion = body(frame);
@@ -811,6 +803,21 @@ export abstract class StatementCompiler extends PatternCompiler {
       } while (test(frame));
       return;
     };
+  }
+
+  protected compileDoPlan<T>(
+    statement: Extract<Statement, { kind: 'do' }>,
+    compileBody: (body: Statement, labels: string[]) => T
+  ): { labels: string[]; body: T; test: Eval } {
+    const labels = this.takeLoopLabels();
+    this.enterLoop(statement);
+    const body = compileBody(statement.body, labels);
+    const target = this.fn.jumpTargets.pop();
+    const breakFlow = target?.breakFlow;
+    if (target?.continueFlow) this.flow = Flow.join(this.flow, target.continueFlow);
+    const { compiled: condition, flow } = this.compileCondition(statement.condition);
+    this.flow = breakFlow ? Flow.join(flow.whenFalse, breakFlow) : flow.whenFalse;
+    return { labels, body, test: condition.run };
   }
 
   protected enterJumpTarget(kind: JumpTarget['kind'], labels: string[]): void {
