@@ -1,5 +1,5 @@
 import { normalize } from './infer';
-import { type AdtDef, type ClosureType, shallow, type Type, type TypeParam } from './types';
+import { type AdtDef, childTypes, type ClosureType, shallow, type Type, type TypeParam } from './types';
 
 /** A region: the points where the borrows of a reference (or of a lifetime parameter) must stay valid. */
 export type RVar = number;
@@ -19,31 +19,35 @@ export type Layout =
 
 export const NONE: Layout = { kind: 'none' };
 
-export function layoutOf(type: Type | undefined, fresh: () => RVar): Layout {
+export function layoutOf(type: Type | undefined, fresh: () => RVar, staticRegion = fresh): Layout {
   if (!type) return NONE;
   const t = normalize(shallow(type));
   switch (t.kind) {
     case 'ref': {
-      return { kind: 'ref', region: fresh(), mutable: t.mutable, target: layoutOf(t.target, fresh) };
+      const region = t.lifetime === "'static" ? staticRegion() : fresh();
+      const target = referencedObject(t.target, region) ?? layoutOf(t.target, fresh, staticRegion);
+      return { kind: 'ref', region, mutable: t.mutable, target };
     }
     case 'adt': {
       const own = (t.def.lifetimeParams ?? []).map(() => fresh());
-      const args = t.args.map((arg) => layoutOf(arg, fresh));
-      return own.length === 0 && args.every(isNone) ? NONE : { kind: 'adt', def: t.def, own, args };
+      const args = t.args.map((arg) => layoutOf(arg, fresh, staticRegion));
+      return adtLayout(t.def, own, args);
     }
     case 'tuple': {
-      const elems = t.elems.map((elem) => layoutOf(elem, fresh));
+      const elems = t.elems.map((elem) => layoutOf(elem, fresh, staticRegion));
       return elems.every(isNone) ? NONE : { kind: 'tuple', elems };
     }
     case 'array':
     case 'slice': {
-      const elem = layoutOf(t.elem, fresh);
+      const elem = layoutOf(t.elem, fresh, staticRegion);
       return isNone(elem) ? NONE : { kind: 'seq', elem };
     }
     case 'closure': {
       return { kind: 'opaque', region: fresh(), closure: t.closure };
     }
-    case 'dyn':
+    case 'dyn': {
+      return { kind: 'opaque', region: t.objectLifetime === 'static' ? staticRegion() : fresh() };
+    }
     case 'param':
     case 'opaque': {
       return { kind: 'opaque', region: fresh() };
@@ -52,6 +56,21 @@ export function layoutOf(type: Type | undefined, fresh: () => RVar): Layout {
       return NONE;
     }
   }
+}
+
+function referencedObject(type: Type, region: RVar): Layout | undefined {
+  const target = shallow(type);
+  return target.kind === 'dyn' && target.objectLifetime === 'reference' ? { kind: 'opaque', region } : undefined;
+}
+
+function adtLayout(def: AdtDef, own: RVar[], args: Layout[]): Layout {
+  const declared = def.variants.some((variant) => variant.fields.some((field) => staticObject(field.type)));
+  return own.length === 0 && args.every(isNone) && !declared ? NONE : { kind: 'adt', def, own, args };
+}
+
+function staticObject(type: Type): boolean {
+  const t = shallow(type);
+  return (t.kind === 'dyn' && t.objectLifetime === 'static') || childTypes(t).some(staticObject);
 }
 
 export function isNone(layout: Layout): boolean {
@@ -143,12 +162,12 @@ export function instantiate(declared: Type, subst: Subst, fresh: () => RVar): La
   const t = shallow(declared);
   switch (t.kind) {
     case 'ref': {
-      return {
-        kind: 'ref',
-        region: subst.lifetime(t.lifetime),
-        mutable: t.mutable,
-        target: instantiate(t.target, subst, fresh),
-      };
+      const region = subst.lifetime(t.lifetime);
+      const target = referencedObject(t.target, region) ?? instantiate(t.target, subst, fresh);
+      return { kind: 'ref', region, mutable: t.mutable, target };
+    }
+    case 'dyn': {
+      return { kind: 'opaque', region: t.objectLifetime === 'static' ? subst.lifetime("'static") : fresh() };
     }
     case 'param': {
       return subst.param(t.param) ?? NONE;
@@ -157,7 +176,7 @@ export function instantiate(declared: Type, subst: Subst, fresh: () => RVar): La
       const written = t.lifetimes ?? [];
       const own = (t.def.lifetimeParams ?? []).map((_, index) => subst.lifetime(written[index]));
       const args = t.args.map((arg) => instantiate(arg, subst, fresh));
-      return own.length === 0 && args.every(isNone) ? NONE : { kind: 'adt', def: t.def, own, args };
+      return adtLayout(t.def, own, args);
     }
     case 'tuple': {
       const elems = t.elems.map((elem) => instantiate(elem, subst, fresh));

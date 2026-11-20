@@ -1394,6 +1394,57 @@ test.each([
   });
 });
 
+test.each([
+  [
+    'parameter',
+    `fn receive(callback: Box<dyn Fn() -> i32>) { println!("{}", callback()); }
+fn main() {
+    let local = 5;
+    receive(Box::new(|| local));
+}`,
+  ],
+  [
+    'return',
+    `fn make<'a>(value: &'a i32) -> Box<dyn Fn() -> i32> {
+    Box::new(move || *value)
+}
+fn main() {
+    let local = 5;
+    println!("{}", make(&local)());
+}`,
+  ],
+  [
+    'field',
+    `struct Holder { callback: Box<dyn Fn() -> i32> }
+fn main() {
+    let local = 5;
+    let holder = Holder { callback: Box::new(|| local) };
+    println!("{}", (holder.callback)());
+}`,
+  ],
+])('checks the default object lifetime of a Rust dyn %s type', (_context, program) => {
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ message: expect.stringMatching(/スコープの外|static/) })],
+  });
+});
+
+test('infers Rust object lifetimes inside a function body', () => {
+  const program = `fn keep_static(value: &'static i32) -> Box<dyn Fn() -> i32> { Box::new(move || *value) }
+fn call(callback: &dyn Fn() -> i32) -> i32 { callback() }
+fn main() {
+    let local = 5;
+    let callback: Box<dyn Fn() -> i32> = Box::new(|| local);
+    let borrowed = || local + 1;
+    println!("{} {}", callback(), call(&borrowed));
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '5 6\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

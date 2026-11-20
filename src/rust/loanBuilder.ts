@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 932 -- Lowers each kind of expression to the points and regions rustc's MIR gives it.
+// code-gauge-allow-file fileNcss 951 -- Lowers each kind of expression to the points and regions rustc's MIR gives it.
 import type { ExecutionBudget } from '../interpreter/limits';
 import type { Annotations, FnContext, LocalVar, MethodRes } from './annotations';
 import type { Block, Condition, Expr, FormatArgs, Pattern, Span, Stmt } from './ast';
@@ -145,8 +145,31 @@ export class LoanBuilder {
     if (this.current !== undefined) this.exits.push(this.current);
     this.join(this.exits);
     this.point({ accesses: parameterLocals.map((local) => this.storageDead(local, end)) });
+    this.checkStaticInputs([...defs, ...paramVars], body.span);
     this.graph.check(this.shared.errors);
     return paramVars;
+  }
+
+  private checkStaticInputs(inputs: Var[], span: Span): void {
+    const root = this.staticRegion;
+    if (root === undefined || inputs.length === 0) return;
+    const reachable = new Set([root]);
+    const edges = new Map<RVar, RVar[]>();
+    this.shared.budget.spend(this.graph.outlives.length);
+    for (const [sup, sub] of this.graph.outlives) {
+      const destinations = edges.get(sub);
+      if (destinations) destinations.push(sup);
+      else edges.set(sub, [sup]);
+    }
+    for (const region of reachable) for (const next of edges.get(region) ?? []) reachable.add(next);
+    if (
+      inputs.some((input) => this.graph.varRegions[input].some((region) => region !== root && reachable.has(region)))
+    ) {
+      this.shared.errors.push({
+        span,
+        message: "引数から借りた参照を、この 'static が必要なトレイトオブジェクトには保存できません。",
+      });
+    }
   }
 
   private universalLocal(local: LocalVar): Var {
@@ -210,7 +233,10 @@ export class LoanBuilder {
   }
 
   private newVar(name: string, type: Type | undefined): Var {
-    return this.newVarWithLayout(name, layoutOf(type, this.fresh));
+    return this.newVarWithLayout(
+      name,
+      layoutOf(type, this.fresh, () => this.static())
+    );
   }
 
   private newVarWithLayout(name: string, layout: Layout): Var {
@@ -222,7 +248,7 @@ export class LoanBuilder {
 
   /** A temporary for a value of a type, or undefined when the type holds no borrows. */
   private temp(type: Type | undefined): Value {
-    const layout = layoutOf(type, this.fresh);
+    const layout = layoutOf(type, this.fresh, () => this.static());
     return isNone(layout) ? undefined : this.newVarWithLayout('{temp}', layout);
   }
 
@@ -1030,7 +1056,7 @@ export class LoanBuilder {
       }
       return;
     }
-    const params = closure.params.map((type) => layoutOf(type, this.fresh));
+    const params = closure.params.map((type) => layoutOf(type, this.fresh, () => this.static()));
     const ret = layoutOf(closure.ret, this.fresh);
     for (const [index, arg] of args.entries()) relate(this.outlives, arg, params[index] ?? NONE);
     relate(this.outlives, ret, result);

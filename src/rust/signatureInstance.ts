@@ -29,7 +29,8 @@ export class SignatureInstance {
     private readonly outlives: Outlives,
     private readonly staticRegion: () => RVar
   ) {
-    for (const [index, param] of fn.params.entries()) this.params.set(param, layoutOf(typeArgs[index], fresh));
+    for (const [index, param] of fn.params.entries())
+      this.params.set(param, layoutOf(typeArgs[index], fresh, staticRegion));
     this.subst = {
       lifetime: (name) => (name && name !== "'_" ? this.lifetime(name) : fresh()),
       param: (param) => this.params.get(param),
@@ -103,7 +104,7 @@ export class SignatureInstance {
     this.bindOutputPart(fn.ret, result, false, elided, inputs.flatMap(regionsOf));
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Applies the lifetime elision rules.
+  // code-gauge-allow functionCognitiveComplexity 21 -- Applies the lifetime elision rules.
   private bindOutputPart(
     declared: Type,
     actual: Layout,
@@ -117,6 +118,10 @@ export class SignatureInstance {
       this.outlives(a, b);
       if (invariant) this.outlives(b, a);
     };
+    if (t.kind === 'dyn' && t.objectLifetime === 'static' && actual.kind === 'opaque') {
+      edge(this.staticRegion(), actual.region);
+      return;
+    }
     if (t.kind === 'param' && this.params.has(t.param)) {
       relate(this.outlives, this.params.get(t.param) as Layout, actual, invariant);
       return;

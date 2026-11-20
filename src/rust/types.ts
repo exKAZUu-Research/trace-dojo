@@ -22,7 +22,7 @@ export type Type =
   | { kind: 'var'; v: TypeVar }
   | { kind: 'fn'; params: Type[]; ret: Type }
   | { kind: 'closure'; closure: ClosureType }
-  | { kind: 'dyn'; trait: TraitRef }
+  | { kind: 'dyn'; trait: TraitRef; objectLifetime?: 'static' | 'reference' }
   | { kind: 'opaque'; opaque: OpaqueType };
 
 export interface TypeVar {
@@ -312,7 +312,7 @@ export function mapChildren(t: Type, f: (child: Type) => Type): Type {
       return { kind: 'fn', params: t.params.map(f), ret: f(t.ret) };
     }
     case 'dyn': {
-      return { kind: 'dyn', trait: mapTraitRef(t.trait, f) };
+      return { ...t, trait: mapTraitRef(t.trait, f) };
     }
     default: {
       return t;

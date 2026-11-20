@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 842 -- Follows Rust's name resolution case by case.
+// code-gauge-allow-file fileNcss 850 -- Follows Rust's name resolution case by case.
 import { CompileError } from '../interpreter/diagnostics';
 import type {
   BoundAst,
@@ -1264,6 +1264,8 @@ function traitArguments(def: TraitDef, written: TypeAst[], scope: TypeScope, spa
 // ---------------------------------------------------------------------------------------------------------------------
 // Lowering types
 
+// code-gauge-allow functionCognitiveComplexity 20 -- Each Rust type has its own lowering rules.
+
 // code-gauge-allow functionNcss 52 -- Follows Rust's name resolution case by case.
 export function lowerType(ast: TypeAst, scope: TypeScope): Type {
   switch (ast.kind) {
@@ -1271,7 +1273,9 @@ export function lowerType(ast: TypeAst, scope: TypeScope): Type {
       return lowerPathType(ast.path, scope);
     }
     case 'ref': {
-      return { kind: 'ref', mutable: ast.mutable, target: lowerType(ast.target, scope), lifetime: ast.lifetime };
+      const target = lowerType(ast.target, scope);
+      if (ast.target.kind === 'dyn' && target.kind === 'dyn') target.objectLifetime = 'reference';
+      return { kind: 'ref', mutable: ast.mutable, target, lifetime: ast.lifetime };
     }
     case 'tuple': {
       return { kind: 'tuple', elems: ast.elems.map((elem) => lowerType(elem, scope)) };
@@ -1295,7 +1299,11 @@ export function lowerType(ast: TypeAst, scope: TypeScope): Type {
     }
     case 'dyn': {
       const [bound] = ast.bounds;
-      return { kind: 'dyn', trait: lowerBound(bound, scope, undefined) };
+      return {
+        kind: 'dyn',
+        trait: lowerBound(bound, scope, undefined),
+        objectLifetime: scope.allowInfer ? undefined : 'static',
+      };
     }
     case 'impl': {
       if (scope.implParams) {
