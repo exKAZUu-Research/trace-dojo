@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 870 -- Keeps call binding, completion and frame cleanup together.
+// code-gauge-allow-file fileNcss 876 -- Keeps call binding, completion and frame cleanup together.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl, Stmt } from './ast';
@@ -13,7 +13,8 @@ import {
   withCleanupExceptions,
   withPendingException,
 } from './errors';
-import { releaseDropped } from './garbage';
+import { collectGarbage, releaseDropped } from './garbage';
+import { recordGcRoot } from './gcRoots';
 import { decodeLiteral } from './literals';
 import { share } from './places';
 import {
@@ -908,20 +909,29 @@ function releaseFrame(
   pending?: PhpThrow
 ): void {
   const holders = (fromNative ? runtime.nativeHeld.at(-1) : undefined) ?? caller.temporaries;
-  if (!isComposite(returned)) {
-    releaseFrameValues(runtime, frame, fromNative, pending);
-    releaseThis(runtime, frame);
-    return;
-  }
-  holders.push(returned);
-  // PHP's return of a variable moves its value out and buffers it as a possible root before freeing the other locals.
-  if (frame.returnedLocal?.v === returned) runtime.pendingGcRoots.add(returned);
   try {
-    releaseFrameValues(runtime, frame, fromNative, pending);
-  } catch (error) {
-    throw releaseFailedCallResult(runtime, holders, returned, error);
+    if (!isComposite(returned)) {
+      releaseFrameValues(runtime, frame, fromNative, pending);
+      return;
+    }
+    holders.push(returned);
+    // PHP's return of a variable moves its value out and buffers it as a possible root before freeing the other locals.
+    if (frame.returnedLocal?.v === returned) bufferEarlyRoot(runtime, returned);
+    try {
+      releaseFrameValues(runtime, frame, fromNative, pending);
+    } catch (error) {
+      throw releaseFailedCallResult(runtime, holders, returned, error);
+    }
+  } finally {
+    releaseThis(runtime, frame);
   }
-  releaseThis(runtime, frame);
+}
+
+/** Buffers a moved-out return value as a possible root now, ahead of any root that freeing the locals adds. */
+function bufferEarlyRoot(runtime: Runtime, value: PhpObject | PhpArray): void {
+  if (value instanceof PhpObject && runtime.isCollectableObject(value))
+    recordGcRoot(runtime, value, () => collectGarbage(runtime, true));
+  else runtime.pendingGcRoots.add(value);
 }
 
 /** Buffers `$this` as a possible root after the locals, as PHP's leave helper releases it after freeing them. */

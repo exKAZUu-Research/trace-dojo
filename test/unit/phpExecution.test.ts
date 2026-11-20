@@ -5334,6 +5334,16 @@ test('a returned local becomes a GC root before the other locals are freed', () 
     kind: 'executed',
     stdout: '4;4,5,1,2,6,3,',
   });
+  expect(
+    run(
+      '<?php class A { public $s; function __construct(public $n) {} function __destruct() { echo "d{$this->n};"; } } function f() { $a = new A(1); $a->s = [$a]; $b = new A(2); $b->s = $b; $c = new A(3); $c->s = $c; $r = new A(4); return $r; } $v = f(); unset($v); echo gc_collect_cycles();'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'd4;d3;d1;d2;4' });
+  expect(
+    run(
+      '<?php class D { function __destruct() { throw new Exception("x"); } } class K { public $s; function __destruct() { echo "k", spl_object_id($this), ";"; } function m() { $d = new D; } } $a = new K; $a->s = $a; $b = new K; $b->s = $b; try { $a->m(); } catch (Exception $e) {} unset($b); unset($a); echo gc_collect_cycles();'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'k2;k1;2' });
 });
 
 test('rejecting an unsupported feature ends the run without PHP shutdown replacing the message', () => {
