@@ -1,10 +1,10 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
+import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import type { Checker } from './checker';
 import { isGenericObjectOrIndexType } from './genericTypes';
 import { isNumericName } from './syntax';
 import {
-  intersectionOf,
   isIntrinsic,
   isPropertyKeyLiteral,
   type ObjectType,
@@ -56,54 +56,59 @@ export function numericTupleIndex(c: Checker, type: ObjectType, index: Type): Ty
   return tupleElementBeyond(c, type, String(index.value), undefined) ?? c.elementTypeOf(type);
 }
 
-/** Resolve the sequence bounds of variadic rests. */
-export function constrainedTuple(c: Checker, type: ObjectType, depth = 0): Type {
+/** Substitute array and non-variadic tuple bounds for rests whose complete shape is known. */
+export function constrainedTuple(c: Checker, type: ObjectType): Type {
+  return resolveTupleConstraint(c, type, new Map(), 0);
+}
+
+function resolveTupleConstraint(
+  c: Checker,
+  type: ObjectType,
+  bounds: Map<Type, Type | undefined>,
+  depth: number
+): Type {
   if (!type.tuple || !hasVariadicRest(type)) return type;
   const { elements, readonly } = type.tuple;
   const resolved = elements.map((element) => {
     const bound =
-      element.rest && element.type.kind === 'typeParameter' ? restConstraint(c, element.type, depth + 1) : undefined;
+      element.rest && element.type.kind === 'typeParameter'
+        ? restConstraint(c, element.type, bounds, depth + 1)
+        : undefined;
     return bound ? { ...element, type: bound } : element;
   });
   if (resolved.every((member, position) => member === elements[position])) return type;
-  return expandTupleBounds(c, resolved, readonly);
+  return c.tupleType(resolved, readonly);
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Resolves bounds in order and retains the distinction between unions and intersections.
-function restConstraint(c: Checker, type: Type, depth: number): Type | undefined {
+function restConstraint(c: Checker, type: Type, bounds: Map<Type, Type | undefined>, depth: number): Type | undefined {
+  if (bounds.has(type)) return bounds.get(type);
   c.budget.spend();
-  if (depth >= 50) return undefined;
-  if (type.kind === 'union' || type.kind === 'intersection') {
-    const bounds = type.types
-      .map((member) => restConstraint(c, member, depth + 1))
+  if (depth >= LIMITS.maxCallDepth) throw new ExecutionLimitError('operations');
+  bounds.set(type, undefined);
+  const bound = computeRestConstraint(c, type, bounds, depth);
+  bounds.set(type, bound);
+  return bound;
+}
+
+function computeRestConstraint(
+  c: Checker,
+  type: Type,
+  bounds: Map<Type, Type | undefined>,
+  depth: number
+): Type | undefined {
+  if (type.kind === 'union') {
+    const members = type.types
+      .map((member) => restConstraint(c, member, bounds, depth + 1))
       .filter((bound) => bound !== undefined);
-    if (type.kind === 'union') return bounds.length === type.types.length ? unionOf(bounds) : undefined;
-    return bounds.length > 0 ? intersectionOf(bounds, c.budget) : undefined;
+    return members.length === type.types.length ? unionOf(members) : undefined;
   }
   if (type.kind === 'object' && c.isArrayOrTuple(type)) {
     if (!hasVariadicRest(type)) return type;
-    const bound = constrainedTuple(c, type, depth + 1);
-    return bound === type ? undefined : restConstraint(c, bound, depth + 1);
+    const bound = resolveTupleConstraint(c, type, bounds, depth + 1);
+    return bound === type ? undefined : restConstraint(c, bound, bounds, depth + 1);
   }
   const bound = c.baseConstraint(type);
-  return bound === type ? undefined : restConstraint(c, bound, depth + 1);
-}
-
-function expandTupleBounds(c: Checker, elements: TupleElement[], readonly: boolean, start = 0): Type {
-  const index = elements.findIndex(
-    (e, i) => i >= start && e.rest && (e.type.kind === 'union' || e.type.kind === 'intersection')
-  );
-  if (index === -1) return c.tupleType(elements, readonly);
-  const element = elements[index];
-  const distribute = (bound: Type): Type => {
-    if (bound.kind === 'union') return unionOf(bound.types.map(distribute));
-    if (bound.kind === 'intersection') return intersectionOf(bound.types.map(distribute), c.budget);
-    c.budget.spend(elements.length);
-    const variant = [...elements];
-    variant[index] = { ...element, type: bound };
-    return expandTupleBounds(c, variant, readonly, index + 1);
-  };
-  return distribute(element.type);
+  return bound === type ? undefined : restConstraint(c, bound, bounds, depth + 1);
 }
 
 /**

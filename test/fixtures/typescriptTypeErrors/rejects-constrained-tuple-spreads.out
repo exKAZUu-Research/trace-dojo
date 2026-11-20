@@ -16,3 +16,18 @@
 (23,3): error TS2322: Type '[...T]' is not assignable to type '[boolean]'.
   Type '[...T]' is not assignable to type '[boolean]'.
     Variadic element at position 0 in source does not match element at position 0 in target.
+(26,3): error TS2322: Type '[...T]' is not assignable to type '[number]'.
+  Type '[...T]' is not assignable to type '[number]'.
+    Variadic element at position 0 in source does not match element at position 0 in target.
+(29,3): error TS2322: Type '[...T]' is not assignable to type '[1]'.
+  Type '[...T]' is not assignable to type '[1]'.
+    Variadic element at position 0 in source does not match element at position 0 in target.
+(32,11): error TS2322: Type 'string | U[number]' is not assignable to type 'number'.
+  Type 'string' is not assignable to type 'number'.
+(35,11): error TS2322: Type 'string | U[number]' is not assignable to type 'number'.
+  Type 'string' is not assignable to type 'number'.
+(35,22): error TS2322: Type 'string | U[number]' is not assignable to type 'string'.
+  Type 'U[number]' is not assignable to type 'string'.
+    Type 'number' is not assignable to type 'string'.
+(38,3): error TS2322: Type 'readonly [...U]' is not assignable to type 'readonly [number]'.
+  Variadic element at position 0 in source does not match element at position 0 in target.

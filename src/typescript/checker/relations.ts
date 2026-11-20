@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 851 -- Keeps the relation modes and their recursive comparisons together.
+// code-gauge-allow-file fileNcss 857 -- Keeps the relation modes and their recursive comparisons together.
 import { minimumArguments } from './callArity';
 import type { Checker } from './checker';
 import { isUnit } from './flow';
@@ -210,8 +210,8 @@ export class Relations {
     return this.c.literals.isArrayOrTupleLiteral(type) ? type : recursionIdentity(type);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 28 -- Follows TypeScript's order of checks for each kind of type.
-  // code-gauge-allow functionNcss 38 -- Follows TypeScript's order of checks for each kind of type.
+  // code-gauge-allow functionCognitiveComplexity 29 -- Follows TypeScript's order of checks for each kind of type.
+  // code-gauge-allow functionNcss 40 -- Follows TypeScript's order of checks for each kind of type.
   private structuredRelated(source: Type, target: Type, relation: Relation, state: number): boolean {
     const s = this.c.reducedTypes.of(relation === 'strictSubtype' ? source : regularOf(source));
     const t = this.c.reducedTypes.of(relation === 'strictSubtype' ? target : regularOf(target));
@@ -219,6 +219,7 @@ export class Relations {
     const trivial = this.trivialRelation(s, t, relation);
     if (trivial !== undefined) return trivial;
     if (s.kind === 'union') return this.unionSourceRelated(s, t, relation, state);
+    if (this.relatedViaSingleRest(s, t, relation, state)) return true;
     if (!(state & INTERSECTION_TARGET) && this.lacksWeakTypeProperty(s, t, relation)) return false;
     if (t.kind === 'union') return this.relatedToUnion(s, t, relation);
     // TypeScript checks a weak intersection as a whole, so a member whose properties are all optional need not share one.
@@ -241,6 +242,12 @@ export class Relations {
     if (t.kind === 'conditional') return this.relatedToConditional(s, t, relation, state);
     if (t.kind === 'keyof') return false;
     return this.relatedToConcrete(s, t, relation, state);
+  }
+
+  private relatedViaSingleRest(source: Type, target: Type, relation: Relation, state: number): boolean {
+    if (source.kind !== 'object' || source.tuple?.readonly) return false;
+    const element = this.singleVariadicElement(source.tuple);
+    return !!element && this.isRelated(element, target, relation, state, EXPANDING_SOURCE);
   }
 
   private intersectionSourceRelated(s: IntersectionType, t: Type, relation: Relation, state: number): boolean {
@@ -508,10 +515,7 @@ export class Relations {
   private relatedToGenericTarget(s: Type, t: Type, relation: Relation): boolean {
     if (t.kind === 'object') return this.relatedToHomomorphicMapped(s, t, relation);
     if (t.kind !== 'typeParameter' || s.kind !== 'object') return false;
-    const element = s.tuple?.readonly === false ? this.singleVariadicElement(s.tuple) : undefined;
-    return (
-      (element !== undefined && this.isRelated(element, t, relation)) || this.mappedRelatedToParameter(s, t, relation)
-    );
+    return this.mappedRelatedToParameter(s, t, relation);
   }
 
   /**

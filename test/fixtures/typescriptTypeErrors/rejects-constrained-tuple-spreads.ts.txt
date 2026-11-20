@@ -22,3 +22,18 @@ function nestedChoice<U extends [number] | [string], T extends [...U, boolean]>(
 function conflicting<T extends [number] & [string]>(source: T): [boolean] {
   return [...source];
 }
+function readonlyTagged<T extends readonly [number] & { tag: string }>(source: T): [number] {
+  return [...source];
+}
+function mixed<T extends [number] & readonly [1]>(source: T): [1] {
+  return [...source];
+}
+function opaque<U extends [number] & { tag: string }, T extends [...U, string]>(source: T): [number, string] {
+  return [...source];
+}
+function addedSuffix<U extends [number] & { tag: string }>(source: U): [number, string] {
+  return [...source, 'tail'];
+}
+function readonlySpread<U extends [number] & { tag: string }>(source: readonly [...U]): readonly [number] {
+  return source;
+}
