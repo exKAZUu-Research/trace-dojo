@@ -5333,6 +5333,18 @@ test('native UTF-8 regex scans of long subjects validate the subject once', () =
   });
 });
 
+test('a property hook naming a missing class where object is expected cannot be checked', () => {
+  expect(
+    run(
+      '<?php class P{public object $x{get=>new stdClass;}}class C extends P{public Missing $x{get=>new Missing;}}echo "accepted";'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '\nFatal error: Could not check compatibility between C::$x::get(): Missing and P::$x::get(): object, because class Missing is not available in /main.php on line 1\nStack trace:\n#0 {main}\n',
+  });
+});
+
 test('an override naming a missing class reports that its compatibility cannot be checked', () => {
   for (const [parent, child, expected] of [
     [

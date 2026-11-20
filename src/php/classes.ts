@@ -57,7 +57,7 @@ import {
   type Visibility,
   visibilityRank,
 } from './values';
-import { isSubtype, sameDeclarationType, variance } from './variance';
+import { sameDeclarationType, variance } from './variance';
 
 export function findClass(name: string): PhpClass | undefined {
   return rt().classes.get(lower(name.startsWith('\\') ? name.slice(1) : name));
@@ -411,10 +411,14 @@ function propertyTypeCompatible(
   return acceptsChild && acceptsParent;
 }
 
-/** Whether a property or hook type accepts another; while hoisting, a check only missing classes decide defers. */
+/**
+ * Whether a property or hook type accepts another. A check that only missing classes decide defers a hoisted
+ * declaration, and fails once the declaration runs, as PHP cannot check it.
+ */
 function propertySubtype(sub: TypeDecl, subScope: PhpClass, sup: TypeDecl, supScope: PhpClass): boolean {
-  if (hoisting && typeof variance(sub, subScope, sup, supScope) === 'string') throw new DeferredDeclaration();
-  return isSubtype(sub, subScope, sup, supScope);
+  const result = variance(sub, subScope, sup, supScope);
+  if (hoisting && typeof result === 'string') throw new DeferredDeclaration();
+  return result === true;
 }
 
 function propertyTypeError(parent: PropDecl, child: PhpClass, name: string, row: number): never {
