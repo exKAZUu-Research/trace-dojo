@@ -50,3 +50,19 @@
       Type 'keyof T' is not assignable to type '"x"'.
         Type 'string | number | symbol' is not assignable to type '"x"'.
           Type 'string' is not assignable to type '"x"'.
+(7,109): error TS2322: Type 'T[L]' is not assignable to type 'T["x"] & T["y"]'.
+  Type 'T[K]' is not assignable to type 'T["x"] & T["y"]'.
+    Type 'T[keyof T]' is not assignable to type 'T["x"] & T["y"]'.
+      Type 'T[string] | T[number] | T[symbol]' is not assignable to type 'T["x"] & T["y"]'.
+        Type 'T[string]' is not assignable to type 'T["x"] & T["y"]'.
+          Type 'T[string]' is not assignable to type 'T["x"]'.
+            Type 'T[string]' is not assignable to type 'A'.
+              'A' could be instantiated with an arbitrary type which could be unrelated to 'T[string]'.
+(8,129): error TS2322: Type 'U[L]' is not assignable to type 'T["x"] & T["y"]'.
+  Type 'U[K & keyof U]' is not assignable to type 'T["x"] & T["y"]'.
+    Type 'U[string] | U[number] | U[symbol]' is not assignable to type 'T["x"] & T["y"]'.
+      Type 'U[string]' is not assignable to type 'T["x"] & T["y"]'.
+        Type 'T[string]' is not assignable to type 'T["x"] & T["y"]'.
+          Type 'T[string]' is not assignable to type 'T["x"]'.
+            Type 'T[string]' is not assignable to type 'A'.
+              'A' could be instantiated with an arbitrary type which could be unrelated to 'T[string]'.

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 792 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
+// code-gauge-allow-file fileNcss 797 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
 import { minimumArguments } from './callArity';
 import type { Checker } from './checker';
 import { isUnit } from './flow';
@@ -97,7 +97,13 @@ export class Relations {
    * With `INTERSECTION_TARGET` in `state`, as for a member of an intersection target, skips the check of a weak target
    * type; with `INTERSECTION_SOURCE`, as for a member of an intersection source, infers no index signature.
    */
-  isRelated(source: Type, target: Type, relation: Relation, state = 0): boolean {
+  isRelated(
+    source: Type,
+    target: Type,
+    relation: Relation,
+    state = 0,
+    track = EXPANDING_SOURCE | EXPANDING_TARGET
+  ): boolean {
     if (source === target) return true;
     this.c.budget.spend();
     const key = `${relation}-${state}:${source.id}:${target.id}`;
@@ -106,14 +112,14 @@ export class Relations {
     if (this.assumed.has(key) || this.provisionalKeys.has(key)) return true;
     if (isLeaf(source) && isLeaf(target)) return this.structuredRelated(source, target, relation, state);
     // TypeScript gives up here with "Excessive stack depth comparing types" (TS2321).
-    if (this.sourceStack.length >= MAX_RELATION_DEPTH) return false;
+    if (Math.max(this.sourceStack.length, this.targetStack.length) >= MAX_RELATION_DEPTH) return false;
     // An outermost comparison that an exception ended left its provisional pairs undecided.
     if (this.assumed.size === 0) this.dropProvisional(0);
     const start = this.provisional.length;
     this.assumed.add(key);
     let result: boolean;
     try {
-      result = this.nestedRelated(source, target, relation, state);
+      result = this.nestedRelated(source, target, relation, state, track);
     } finally {
       this.assumed.delete(key);
     }
@@ -141,14 +147,16 @@ export class Relations {
   }
 
   /** Compares structured types on the comparison stacks, as TypeScript's `recursiveTypeRelatedTo` does. */
-  private nestedRelated(source: Type, target: Type, relation: Relation, state: number): boolean {
+  private nestedRelated(source: Type, target: Type, relation: Relation, state: number, track: number): boolean {
     const saved = this.expanding;
-    this.sourceStack.push(source);
-    this.targetStack.push(target);
+    const trackSource = (track & EXPANDING_SOURCE) !== 0;
+    const trackTarget = (track & EXPANDING_TARGET) !== 0;
+    if (trackSource) this.sourceStack.push(source);
+    if (trackTarget) this.targetStack.push(target);
     try {
-      if (!(saved & EXPANDING_SOURCE) && this.isDeeplyNested(source, this.sourceStack))
+      if (trackSource && !(saved & EXPANDING_SOURCE) && this.isDeeplyNested(source, this.sourceStack))
         this.expanding |= EXPANDING_SOURCE;
-      if (!(saved & EXPANDING_TARGET) && this.isDeeplyNested(target, this.targetStack))
+      if (trackTarget && !(saved & EXPANDING_TARGET) && this.isDeeplyNested(target, this.targetStack))
         this.expanding |= EXPANDING_TARGET;
       // Both sides keep expanding the same recursive types, so TypeScript assumes the relation holds.
       return (
@@ -156,8 +164,8 @@ export class Relations {
         this.structuredRelated(source, target, relation, state)
       );
     } finally {
-      this.sourceStack.pop();
-      this.targetStack.pop();
+      if (trackSource) this.sourceStack.pop();
+      if (trackTarget) this.targetStack.pop();
       this.expanding = saved;
     }
   }
@@ -251,7 +259,7 @@ export class Relations {
   private relatedToIndexedAccess(s: Type, t: IndexedAccessType, relation: Relation): boolean {
     if (t.indexType.kind === 'union')
       return t.indexType.types.every((key) =>
-        this.isRelated(s, this.c.typeOperators.indexedAccess(t.objectType, key), relation)
+        this.isRelated(s, this.c.typeOperators.indexedAccess(t.objectType, key), relation, 0, EXPANDING_TARGET)
       );
     if (
       s.kind === 'indexedAccess' &&
@@ -260,10 +268,11 @@ export class Relations {
     )
       return true;
     const mapped = this.c.typeOperators.mappedIndexConstraint(t);
-    if (mapped && mapped !== t) return this.isRelated(s, mapped, relation);
+    if (mapped && mapped !== t) return this.isRelated(s, mapped, relation, 0, EXPANDING_TARGET);
     if (s.kind === 'indexedAccess') {
       const mappedSource = this.c.typeOperators.mappedIndexConstraint(s);
-      if (mappedSource && mappedSource !== s && this.isRelated(mappedSource, t, relation)) return true;
+      if (mappedSource && mappedSource !== s && this.isRelated(mappedSource, t, relation, 0, EXPANDING_SOURCE))
+        return true;
     }
     return this.relatedToIndexedWritingConstraint(s, t, relation);
   }
@@ -281,7 +290,7 @@ export class Relations {
     return (keys.kind === 'union' ? keys.types : [keys]).every((key) => {
       const tuple = this.c.typeOperators.variadicIndexConstraint(t, key);
       const writeType = tuple && tuple !== t ? tuple : this.writeTypeOf(object, key, numberIndexOnly);
-      return writeType !== undefined && this.isRelated(s, writeType, relation);
+      return writeType !== undefined && this.isRelated(s, writeType, relation, 0, EXPANDING_TARGET);
     });
   }
 
@@ -332,7 +341,7 @@ export class Relations {
     // TypeScript tries a conditional type's branches before their constraints, so `Exclude<keyof T, K>` fits `keyof T`.
     if (s.kind === 'conditional' && this.isRelated(unionOf([s.trueType, s.falseType]), t, relation)) return true;
     const constraint = this.c.baseConstraint(s);
-    return constraint !== s && this.isRelated(constraint, t, relation);
+    return constraint !== s && this.isRelated(constraint, t, relation, 0, EXPANDING_SOURCE);
   }
 
   private relatedToKeyof(source: Type, object: Type, relation: Relation, state: number): boolean {

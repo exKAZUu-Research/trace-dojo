@@ -8,3 +8,5 @@ console.log(all<{ x: 1 }>(1), mapped<{ x: 2 }>(2), key<{ x: number }, 'x'>(3));
 function equal<T extends {x: number,y: number}>(value: T['x']):T['x' | 'y'] { return value; }
 function equal2<T extends {x: number,y: number}, K extends 'x' | 'y'>(value: T[K]):T['x' | 'y'] { return value; }
 console.log(equal<{ x: number; y: number }>(4), equal2<{ x: number; y: number }, 'x'>(5));
+function shared<A, T extends {x: A, y: A}, K extends 'x'>(value: T[K]): T['x' | 'y'] { return value; }
+console.log(shared<string, { x: string; y: string }, 'x'>('shared'));
