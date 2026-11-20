@@ -9,7 +9,7 @@ import type {
   TypeSyntax,
 } from './ast';
 import type { ClassInfo, ConstructorInfo, Member } from './classes';
-import { at, type Compiled, type Eval, instantiateToBounds, type ResolvedMember, typeName } from './compilerBase';
+import { at, type Compiled, type Eval, type ResolvedMember, typeName } from './compilerBase';
 import type { ExtensionInfo, TopLevelFunction, TypeAlias } from './environment';
 import { INFERENCE_HOLE, isInferenceHole, SHORTED } from './expressionCompiler';
 import { OperatorCompiler } from './operatorCompiler';
@@ -24,6 +24,7 @@ import {
   type FunctionType,
   functionType,
   instantiateFunction,
+  instantiateToBounds,
   type InterfaceType,
   interfaceType,
   isNullable,

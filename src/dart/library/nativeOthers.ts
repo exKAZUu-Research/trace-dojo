@@ -2,7 +2,7 @@ import type { OutputChannel } from '../../interpreter/programIo';
 import { encodableText, stringOf } from '../format';
 import { ProgramExit, type Runtime } from '../runtime';
 import { DartObject, type Value } from '../values';
-import { compareNumbers, toDouble } from './nativeNumbers';
+import { toDouble } from './nativeNumbers';
 import { characterOf } from './nativeStrings';
 import { define, defineConstructor, forEachValue, intArg, numArg } from './nativeSupport';
 
@@ -11,17 +11,35 @@ import { define, defineConstructor, forEachValue, intArg, numArg } from './nativ
 define('min', (runtime, _receiver, [a, b]) => {
   const x = numArg(runtime, a, 'a');
   const y = numArg(runtime, b, 'b');
-  if (typeof x === 'number' && Number.isNaN(x)) return x;
-  if (typeof y === 'number' && Number.isNaN(y)) return y;
-  return compareNumbers(x, y) <= 0 ? x : y;
+  const order = compareMathOperands(x, y);
+  if (order !== 0) return order < 0 ? x : y;
+  if (typeof y === 'number') {
+    if (typeof x === 'number' && x === 0) return (x + y) * x * y;
+    if (Number.isNaN(y) || (x === 0n && Object.is(y, -0))) return y;
+  }
+  return x;
 });
 define('max', (runtime, _receiver, [a, b]) => {
   const x = numArg(runtime, a, 'a');
   const y = numArg(runtime, b, 'b');
-  if (typeof x === 'number' && Number.isNaN(x)) return x;
-  if (typeof y === 'number' && Number.isNaN(y)) return y;
-  return compareNumbers(x, y) >= 0 ? x : y;
+  const order = compareMathOperands(x, y);
+  if (order !== 0) return order > 0 ? x : y;
+  if (typeof y === 'number') {
+    if (typeof x === 'number' && x === 0) return x + y;
+    if (Number.isNaN(y)) return y;
+  } else if (y === 0n && Object.is(x, -0)) {
+    return y;
+  }
+  return x;
 });
+
+function compareMathOperands(a: bigint | number, b: bigint | number): number {
+  const bothInts = typeof a === 'bigint' && typeof b === 'bigint';
+  const x = bothInts ? a : toDouble(a);
+  const y = bothInts ? b : toDouble(b);
+  return x < y ? -1 : x > y ? 1 : 0;
+}
+
 for (const [name, fn] of [
   ['sin', Math.sin],
   ['cos', Math.cos],

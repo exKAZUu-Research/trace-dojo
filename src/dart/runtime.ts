@@ -6,11 +6,15 @@ import { TurtleWorld } from '../interpreter/turtleWorld';
 import type { ClassInfo, ConstructorInfo, Member } from './classes';
 import {
   asInstanceOf,
+  boundOf,
   coreTypes,
   type DartType,
   type FunctionType,
+  instantiateFunction,
+  instantiateToBounds,
   type InterfaceType,
   interfaceType,
+  isSubtype,
   mentionsTypeParams,
   substitute,
   TypeParam,
@@ -252,16 +256,18 @@ export class Runtime implements TracedRuntime<Frame> {
     typeArgs: readonly DartType[],
     callRow: number | undefined
   ): Value {
-    if (name === 'call' && receiver instanceof DartClosure)
-      return receiver.call(this, receiver.receiver, args, typeArgs, callRow);
+    if (name === 'call' && receiver instanceof DartClosure) return this.callValue(receiver, args, typeArgs, callRow);
     const cls = this.classOf(receiver);
     const member = cls.implementation(name);
     if (member?.kind === 'method') {
-      if (args.isDynamic && !argumentsFit(member.type, args)) {
+      if (args.isDynamic && !argumentsFit(member.type, args, typeArgs)) {
         return this.noSuchMethod(receiver, name, 'method', args, typeArgs, vmSignature(name, member));
       }
-      if (args.isDynamic && member.nativeParameterNames) this.checkNativeArguments(receiver, member, args);
-      return (member.impl as NonNullable<typeof member.impl>)(this, receiver, args, typeArgs, callRow);
+      const supplied = args.isDynamic
+        ? this.dynamicTypeArguments(this.memberTypeFor(receiver, member), typeArgs)
+        : typeArgs;
+      if (args.isDynamic && member.nativeParameterNames) this.checkNativeArguments(receiver, member, args, supplied);
+      return (member.impl as NonNullable<typeof member.impl>)(this, receiver, args, supplied, callRow);
     }
     if (member) {
       const target = this.readMember(receiver, member, callRow);
@@ -379,16 +385,38 @@ export class Runtime implements TracedRuntime<Frame> {
   /** Calls a value as a function: a closure, or an object with a `call` method. */
   callValue(target: Value, args: Arguments, typeArgs: readonly DartType[], callRow: number | undefined): Value {
     if (target instanceof DartClosure) {
-      if (args.isDynamic && !argumentsFit(target.type, args)) this.throwClosureMismatch(target, args);
-      return target.call(this, target.receiver, args, typeArgs, callRow);
+      if (args.isDynamic && !argumentsFit(target.type, args, typeArgs))
+        this.throwClosureMismatch(target, args, typeArgs);
+      const supplied = args.isDynamic ? this.dynamicTypeArguments(target.type, typeArgs) : typeArgs;
+      return target.call(this, target.receiver, args, supplied, callRow);
     }
     if (target === undefined) return this.noSuchMethod(target, 'call', 'method', args);
     return this.invoke(target, 'call', args, typeArgs, callRow);
   }
 
+  private dynamicTypeArguments(type: FunctionType, written: readonly DartType[]): readonly DartType[] {
+    const params = type.typeParams;
+    if (params.length === 0) return written;
+    const args = written.length > 0 ? written : instantiateToBounds(params);
+    const env = new Map(params.map((param, index) => [param, args[index]]));
+    for (const [index, param] of params.entries()) {
+      const bound = substitute(boundOf(param), env);
+      if (!isSubtype(args[index], bound))
+        this.throwTypeError(
+          `type '${vmTypeString(args[index])}' is not a subtype of type '${vmTypeString(bound)}' of '${param.name}'`
+        );
+    }
+    return args;
+  }
+
   /** A dynamic call of a native checks its positional arguments' types as a Dart method's parameters would. */
-  private checkNativeArguments(receiver: Value, member: Member & { kind: 'method' }, args: Arguments): void {
-    const type = this.memberTypeFor(receiver, member);
+  private checkNativeArguments(
+    receiver: Value,
+    member: Member & { kind: 'method' },
+    args: Arguments,
+    typeArgs: readonly DartType[]
+  ): void {
+    const type = instantiateFunction(this.memberTypeFor(receiver, member), typeArgs);
     for (const [index, value] of args.positional.entries()) {
       const expected = type.positional[index];
       if (!expected || this.links.isValueOf(this, value, expected)) continue;
@@ -398,9 +426,10 @@ export class Runtime implements TracedRuntime<Frame> {
     }
   }
 
-  private throwClosureMismatch(closure: DartClosure, args: Arguments): never {
+  private throwClosureMismatch(closure: DartClosure, args: Arguments, typeArgs: readonly DartType[]): never {
     const name = closure.description.qualifiedName ?? closure.description.name ?? '<anonymous closure>';
-    const call = `${name}(${describeArguments(this, args)})`;
+    const types = typeArgs.length > 0 ? `<${typeArgs.map(vmTypeString).join(', ')}>` : '';
+    const call = `${name}${types}(${describeArguments(this, args)})`;
     return this.throwError('NoSuchMethodError', '_withMessage', [
       `NoSuchMethodError: Closure call with mismatched arguments: function '${name}'\nReceiver: ${this.links.stringify(this, closure)}\nTried calling: ${call}\nFound: ${name}${vmTypeString(closure.type)}`,
     ]);
@@ -585,7 +614,8 @@ function substituteFunction(type: FunctionType, map: Map<TypeParam, DartType>): 
 export { Cell, type ConstructorInfo };
 
 /** Whether arguments fit a function's parameters by count and name, which dynamic calls check before calling. */
-function argumentsFit(type: FunctionType, args: Arguments): boolean {
+function argumentsFit(type: FunctionType, args: Arguments, typeArgs: readonly DartType[]): boolean {
+  if (typeArgs.length > 0 && typeArgs.length !== type.typeParams.length) return false;
   const count = args.positional.length;
   if (count < type.requiredCount || count > type.positional.length) return false;
   const names = new Set(type.named.map((named) => named.name));

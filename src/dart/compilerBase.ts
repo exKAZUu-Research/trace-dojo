@@ -15,6 +15,7 @@ import {
   type FunctionType,
   functionType,
   instantiateFunction,
+  instantiateToBounds,
   type InterfaceType,
   interfaceType,
   isNullable,
@@ -717,16 +718,6 @@ function extensionMoreSpecific(
 function extensionTypeAtBounds(extension: ExtensionInfo): DartType {
   const args = instantiateToBounds(extension.typeParams);
   return substitute(extension.onType, new Map(extension.typeParams.map((param, index) => [param, args[index]])));
-}
-
-export function instantiateToBounds(params: readonly TypeParam[]): DartType[] {
-  const args: DartType[] = params.map(() => DYNAMIC);
-  for (const [index, param] of params.entries()) {
-    if (!param.bound) continue;
-    const map = new Map(params.map((other, at) => [other, args[at]]));
-    args[index] = substitute(param.bound, map);
-  }
-  return args;
 }
 
 /** Whether a value is of a type that holds no type parameters, checked against the value's runtime type. */

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 460 -- The compilation of every kind of pattern, which share their type and binding helpers.
+// code-gauge-allow-file fileNcss 482 -- The compilation of every kind of pattern, which share their type and binding helpers.
 import type { Expression, ListPatternElement, Pattern, RecordPatternField, Span } from './ast';
 import { CallCompiler } from './callCompiler';
 import { type Compiled, type ResolvedMember, typeName } from './compilerBase';
@@ -40,6 +40,12 @@ interface PatternOptions {
   shared?: Map<string, LocalVar>;
   /** The names of `shared` this side has declared. */
   sharedUsed?: Set<string>;
+  assignments?: PatternWrite[];
+}
+
+interface PatternWrite {
+  slot: number;
+  target: (frame: Frame) => Cell;
 }
 
 export abstract class PatternCompiler extends CallCompiler {
@@ -52,12 +58,15 @@ export abstract class PatternCompiler extends CallCompiler {
 
   /** The type a pattern expects of the value, which declarations use as the context of their initializer. */
   // code-gauge-allow functionCognitiveComplexity 22 -- One case per part of the pattern, matched in Dart's order.
-  // code-gauge-allow functionNcss 33 -- One case per kind of pattern, each giving its own context type.
+  // code-gauge-allow functionNcss 35 -- One case per kind of pattern, each giving its own context type.
   patternContextType(pattern: Pattern): DartType | undefined {
     switch (pattern.kind) {
       case 'variable':
       case 'wildcard': {
         return pattern.type ? this.resolveType(pattern.type) : undefined;
+      }
+      case 'assignedVariable': {
+        return this.findLocal(pattern.name, pattern)?.type;
       }
       case 'parenthesized': {
         return this.patternContextType(pattern.pattern);
@@ -143,7 +152,7 @@ export abstract class PatternCompiler extends CallCompiler {
         return this.variablePattern(pattern, matchedType, options, variables);
       }
       case 'assignedVariable': {
-        return this.assignedVariablePattern(pattern, matchedType);
+        return this.assignedVariablePattern(pattern, matchedType, options);
       }
       case 'constant': {
         return this.constantPattern(pattern.value, matchedType);
@@ -378,7 +387,8 @@ export abstract class PatternCompiler extends CallCompiler {
 
   private assignedVariablePattern(
     pattern: Extract<Pattern, { kind: 'assignedVariable' }>,
-    matchedType: DartType
+    matchedType: DartType,
+    options: PatternOptions
   ): Omit<CompiledPattern, 'variables'> {
     const variable = this.findLocal(pattern.name, pattern);
     if (!variable) return this.error(pattern, `${pattern.name} という変数はありません。`);
@@ -393,16 +403,15 @@ export abstract class PatternCompiler extends CallCompiler {
         `${typeName(matchedType)} 型の値は、${typeName(variable.type)} 型の変数 ${pattern.name} に代入できません。`
       );
     }
-    const cell = this.cellAccess(variable);
+    const slot = this.fn.allocateSlot();
+    options.assignments?.push({ slot, target: this.cellAccess(variable) });
     if (variable.owner !== this.fn) variable.isWriteCaptured = true;
     this.flow = this.flow.assign(variable).demote(variable);
-    return {
-      match: (frame, value) => {
-        cell(frame).v = value;
-        return true;
-      },
-      irrefutable: true,
+    const save = (frame: Frame, value: Value): boolean => {
+      frame.locals[slot] = new Cell(value);
+      return true;
     };
+    return this.typeTest(variable.type, matchedType, save, true, options.mode);
   }
 
   private constantPattern(value: Expression, matchedType: DartType): Omit<CompiledPattern, 'variables'> {
@@ -697,8 +706,14 @@ export abstract class PatternCompiler extends CallCompiler {
 
   /** Compiles a pattern assignment `(a, b) = (b, a)`. */
   compilePatternAssignment(pattern: Pattern, value: Expression, span: Span): Compiled {
-    const compiled = this.compileExpression(value, this.patternContextType(pattern));
-    const matcher = this.compilePattern(pattern, compiled.type, { mode: 'assign', isFinal: false });
+    const context = this.patternContextType(pattern);
+    const compiled = this.compileExpression(value, context);
+    const options: PatternOptions = { mode: 'assign', isFinal: false, assignments: [] };
+    if (context) this.requireAssignable(context, compiled.type, options, span);
+    const matchedType = compiled.type.kind === 'dynamic' ? (context ?? compiled.type) : compiled.type;
+    const check = this.typeTest(matchedType, compiled.type, () => true, true, 'assign');
+    const matcher = this.compilePattern(pattern, matchedType, options);
+    const writes = options.assignments ?? [];
     if (isRefutableSyntax(pattern)) this.error(span, 'このパターンには合わない値があるので、代入には使えません。');
     const { run } = compiled;
     return {
@@ -706,8 +721,15 @@ export abstract class PatternCompiler extends CallCompiler {
       run: (frame) => {
         const result = run(frame);
         if (result === SHORTED) return;
-        if (!matcher.match(frame, result)) this.throwPatternMismatch(frame, result);
-        return result;
+        frame.temporaries.push(result);
+        try {
+          if (!check.match(frame, result) || !matcher.match(frame, result)) this.throwPatternMismatch(frame, result);
+          for (const { slot, target } of writes) target(frame).v = (frame.locals[slot] as Cell).v;
+          return result;
+        } finally {
+          for (const { slot } of writes) frame.locals[slot] = undefined;
+          frame.temporaries.pop();
+        }
       },
       isConst: false,
     };

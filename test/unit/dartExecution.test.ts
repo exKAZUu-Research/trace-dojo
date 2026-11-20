@@ -378,6 +378,22 @@ test('num.compareTo orders precise integers, signed zeros, and NaN', () => {
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '1\n1\n-1\n1\n' });
 });
 
+test('min and max use Dart mixed comparisons and preserve signed-zero results', () => {
+  const program = `import 'dart:math';
+void main() {
+  int a = 9007199254740993;
+  double b = 9007199254740992.0;
+  print([min(a, b), min(b, a), max(a, b), max(b, a)]);
+  print([min(0, -0.0), max(-0.0, 0), min(0.0, -0.0), max(-0.0, 0.0)]);
+  print([min(1, double.nan), max(double.nan, 1)]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[9007199254740993, 9007199254740992.0, 9007199254740993, 9007199254740992.0]\n[-0.0, 0, -0.0, 0.0]\n[NaN, NaN]\n',
+  });
+});
+
 test('a parameter can only narrow an override when explicitly covariant', () => {
   const invalid = 'class A<T> { void f(T value) {} } class B extends A<num> { void f(int value) {} } void main() {}';
   expect(executeProgram('dart', invalid)).toMatchObject({ kind: 'compileError' });
@@ -461,6 +477,30 @@ void main() {
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
     stdout: ['hi', "Instance of 'B'", '1', "type 'double' is not a subtype of type 'int' of 'value'", ''].join('\n'),
+  });
+});
+
+test('mixin fields use application slots and concrete generic arguments', () => {
+  const program = `class Base { int base = 10; }
+mixin Data<T> {
+  late int value = 20;
+  late final int setOnce;
+  List<T> values = <T>[];
+  late List<T> lazy = <T>[];
+}
+class C<T> extends Base with Data<T> {}
+void main() {
+  final c = C<int>();
+  print([c.base, c.value]);
+  c.value = 30;
+  c.setOnce = 40;
+  c.values.add(1);
+  c.lazy.add(2);
+  print([c.base, c.value, c.setOnce, c.values.runtimeType, c.values, c.lazy]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[10, 20]\n[10, 30, 40, List<int>, [1], [2]]\n',
   });
 });
 
@@ -1036,6 +1076,69 @@ void main() {
   });
 });
 
+test('dynamic generic calls instantiate and check bounds before invoking the body', () => {
+  const program = `T echo<T extends num>(T value) => value;
+class C { T method<T extends num>(T value) => value; }
+void main() {
+  dynamic f = echo;
+  dynamic receiver = C();
+  try { print(f<String>('hello')); } catch (e) { print(e); }
+  try { print(f('hello')); } catch (e) { print(e); }
+  try { print(receiver.method<String>('hello')); } catch (e) { print(e); }
+  print([f(3), receiver.method(4)]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      "type 'String' is not a subtype of type 'num' of 'T'\ntype 'String' is not a subtype of type 'num' of 'value'\ntype 'String' is not a subtype of type 'num' of 'T'\n[3, 4]\n",
+  });
+});
+
+test('nested function types, contextual tear-offs, and raw type literals retain their arguments', () => {
+  const program = `class Box<T extends num> {}
+typedef Alias<T extends num> = Box<T>;
+T choose<T>(T a, T b) => a;
+void main() {
+  int Function() Function() factory = () => () => 1;
+  num Function(int, double) numeric = choose;
+  Object Function(int, String) mixed = choose;
+  print([factory()(), numeric(2, 3.0), mixed(4, 'x')]);
+  print([Box, Box == Box<num>, Alias, Alias == Box<num>, Alias<num>]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[1, 2, 4]\n[Box<num>, true, Box<num>, true, Box<num>]\n',
+  });
+});
+
+test('dynamic pattern assignments validate the input before applying writes', () => {
+  const program = `void main() {
+  int a = 0, b = 0;
+  dynamic pair = (1, 'wrong');
+  try { (a, b) = pair; } catch (e) { print(e); }
+  dynamic list = <Object>[1, 'wrong'];
+  try { [a, b] = list; } catch (e) { print(e); }
+  print([a, b]);
+  pair = (2, 3);
+  (a, b) = pair;
+  print([a, b]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      "type '(int, String)' is not a subtype of type '(int, int)'\ntype 'List<Object>' is not a subtype of type 'List<int>'\n[0, 0]\n[2, 3]\n",
+  });
+});
+
+test('Object.hash accepts twenty arguments and hashes the supplied values in order', () => {
+  const program = `void main() {
+  print(Object.hash(1, 2) == Object.hashAll([1, 2]));
+  print(Object.hash(1, 2, null, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20) ==
+        Object.hashAll([1, 2, null, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]));
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'true\ntrue\n' });
+});
+
 test('construction checks constants before main and only evaluates selected branches', () => {
   const valid = `class Box<T> {
   final T value;
@@ -1439,10 +1542,14 @@ void main() {
   print(items.join());
   var target = [0, 0];
   try { target.setAll(0, source()); } catch (e) { print(target); }
+  items = [1, Marker(false)];
+  try {
+    items.lastIndexWhere((item) { items.clear(); return false; });
+  } catch (e) { print(e.runtimeType); }
 }`;
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
-    stdout: 'ConcurrentModificationError\ntrue\nx,1,2\nx1\n[1, 0]\n',
+    stdout: 'ConcurrentModificationError\ntrue\nx,1,2\nx1\n[1, 0]\nRangeError\n',
   });
 });
 

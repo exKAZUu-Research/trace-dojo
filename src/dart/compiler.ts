@@ -33,6 +33,7 @@ import {
   type TopLevelFunction,
   type TypeAlias,
 } from './environment';
+import { lateFieldGetter, lateFieldSetter } from './lateFields';
 import { type DartThrow, Frame, type FunctionInfo, type Runtime, type TypeEnv } from './runtime';
 import { Flow, FunctionContext } from './scope';
 import { type GenExec, inheritsCovariance } from './statementCompiler';
@@ -54,16 +55,7 @@ import {
   typeToString,
   VOID,
 } from './types';
-import {
-  type Arguments,
-  type Callable,
-  Cell,
-  DartClosure,
-  DartObject,
-  DartTypeValue,
-  UNINITIALIZED,
-  type Value,
-} from './values';
+import { type Arguments, type Callable, Cell, DartClosure, DartObject, UNINITIALIZED, type Value } from './values';
 
 /** The natives that `external` members of the interpreter's own libraries bind to, by `Class.member` or name. */
 export type NativeTable = ReadonlyMap<string, Callable | ConstructorImpl>;
@@ -508,7 +500,7 @@ export class Compiler extends ConstructorCompiler {
    * mixin's fields and passes its arguments on, as Dart's forwarding constructors do.
    */
   // code-gauge-allow functionCognitiveComplexity 29 -- Each branch is one of the cases Dart distinguishes for this construct.
-  // code-gauge-allow functionNcss 36 -- One case per form of the construct, which reads best together.
+  // code-gauge-allow functionNcss 40 -- One case per form of the construct, which reads best together.
   private declareForwardingConstructors(application: ClassInfo, mixin: ClassInfo, slotMap: Map<number, number>): void {
     const superclass = application.superclass as InterfaceType;
     const superMap = new Map(
@@ -545,8 +537,14 @@ export class Compiler extends ConstructorCompiler {
                 }
                 const fn = this.fn;
                 initializeFields = (runtime, instance) => {
-                  const frame = new Frame(runtime, fn.info, fn.slotCount, instance, [], EMPTY_ENV, undefined);
-                  for (const { slot, run } of writes) instance.fields[slot] = run(frame);
+                  const env = this.typeEnvOf(runtime, instance, mixin);
+                  const frame = new Frame(runtime, fn.info, fn.slotCount, instance, [], env, undefined);
+                  runtime.enter(frame);
+                  try {
+                    for (const { slot, run } of writes) instance.fields[slot] = run(frame);
+                  } finally {
+                    runtime.exit(frame);
+                  }
                 };
               },
               true
@@ -594,6 +592,13 @@ export class Compiler extends ConstructorCompiler {
       };
     }
     const copy = { ...member, owner: application, type: substitute(member.type, map) } as Member;
+    const late = this.lateFieldAccessors.get(member);
+    if (late) {
+      const slot = slotMap.get(late.field.slot);
+      const field = application.fields.find((candidate) => candidate.slot === slot) as FieldMember;
+      (copy as MethodMember).impl = late.bind(field);
+      return copy;
+    }
     // The copy runs the mixin's code, which may be compiled after the application is declared.
     if ('impl' in copy) {
       const original = member as MethodMember;
@@ -894,6 +899,7 @@ export class Compiler extends ConstructorCompiler {
   }
 
   /** Compiles a global's initializer, which runs the first time the global is read. */
+  // code-gauge-allow duplicateLines 16 -- Global and late initializers use different receiver environments.
   private compileGlobalInitializer(
     global: GlobalVariable,
     initializer: Expression,
@@ -963,33 +969,14 @@ export class Compiler extends ConstructorCompiler {
     }
   }
 
-  /** A late field reads and writes its slot through accessors that check whether it has been initialized. */
-  // code-gauge-allow duplicateLines 16 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
-  // code-gauge-allow functionNcss 39 -- One case per form of the construct, which reads best together.
+  private readonly lateFieldAccessors = new WeakMap<
+    Member,
+    { field: FieldMember; bind: (field: FieldMember) => Callable }
+  >();
+
+  // code-gauge-allow duplicateLines 16 -- Late and global initializers use different receiver environments.
   private declareLateField(cls: ClassInfo, field: FieldMember, initializer: Expression | undefined): void {
-    const { slot, name } = field;
-    const getter: Member = {
-      kind: 'getter',
-      name,
-      owner: cls,
-      isStatic: false,
-      isAbstract: false,
-      row: field.row,
-      type: field.type,
-      impl: (runtime, receiver) => {
-        const object = receiver as DartObject;
-        const value = object.fields[slot];
-        if (value !== UNINITIALIZED) return value;
-        const initialize = lateInit;
-        if (!initialize) return runtime.throwError('LateError', '', [`Field '${name}' has not been initialized.`]);
-        const computed = initialize(runtime, object);
-        if (field.isFinal && object.fields[slot] !== UNINITIALIZED) {
-          runtime.throwError('LateError', '', [`Field '${name}' has been assigned during initialization.`]);
-        }
-        object.fields[slot] = computed;
-        return computed;
-      },
-    };
+    const { name } = field;
     let lateInit: ((runtime: Runtime, receiver: DartObject) => Value) | undefined;
     if (initializer) {
       this.deferredBodies.push(() => {
@@ -1029,26 +1016,28 @@ export class Compiler extends ConstructorCompiler {
         }
       });
     }
-    cls.members.set(name, getter);
-    if (!field.isFinal || !initializer) {
-      cls.setters.set(name, {
-        kind: 'setter',
-        name,
-        owner: cls,
-        isStatic: false,
-        isAbstract: false,
-        row: field.row,
-        type: field.type,
-        impl: (runtime, receiver, args) => {
-          const object = receiver as DartObject;
-          if (field.isFinal && object.fields[slot] !== UNINITIALIZED) {
-            runtime.throwError('LateError', '', [`Field '${name}' has already been initialized.`]);
-          }
-          object.fields[slot] = args.positional[0];
-          return;
-        },
-      });
-    }
+    this.installLateFieldAccessor(cls, field, 'getter', (mapped) => lateFieldGetter(mapped, () => lateInit));
+    if (!field.isFinal || !initializer) this.installLateFieldAccessor(cls, field, 'setter', lateFieldSetter);
+  }
+
+  private installLateFieldAccessor(
+    cls: ClassInfo,
+    field: FieldMember,
+    kind: 'getter' | 'setter',
+    bind: (field: FieldMember) => Callable
+  ): void {
+    const member: Member = {
+      kind,
+      name: field.name,
+      owner: cls,
+      isStatic: false,
+      isAbstract: false,
+      row: field.row,
+      type: field.type,
+      impl: bind(field),
+    };
+    (kind === 'getter' ? cls.members : cls.setters).set(field.name, member);
+    this.lateFieldAccessors.set(member, { field, bind });
   }
 
   // code-gauge-allow functionCognitiveComplexity 30 -- Methods, accessors, and operators, static or not.
@@ -1787,15 +1776,6 @@ export class Compiler extends ConstructorCompiler {
       tearOffs.set(fn, closure);
       return closure;
     };
-  }
-
-  typeLiteralValue(cls: ClassInfo, span: Span): Compiled {
-    void span;
-    const type = interfaceType(
-      cls,
-      cls.typeParams.map(() => DYNAMIC)
-    );
-    return { type: interfaceType(coreTypes.type), run: () => new DartTypeValue(coreTypes.type, type), isConst: true };
   }
 
   constructSymbol(frame: Frame, name: string): Value {

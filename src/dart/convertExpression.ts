@@ -1228,24 +1228,26 @@ export abstract class ExpressionConverter {
 
   private convertFunctionType(node: Node): TypeSyntax {
     const children = childrenOf(node);
-    const functionIndex = children.findIndex((child) => child.type === 'Function');
-    const returnNode = children.slice(0, functionIndex).find((child) => child.type === 'type');
-    const typeParameters = children.find((child) => child.type === 'type_parameters');
-    const parameterList = children.find((child) => child.type === 'parameter_type_list');
-    // A nested function type, as the result of `int Function(int) Function()`, nests its nodes.
-    const innerFunction = children.slice(functionIndex + 1).find((child) => child.type === 'function_type');
-    const type: TypeSyntax = {
-      kind: 'function',
-      returnType: returnNode ? this.convertType(returnNode) : undefined,
-      typeParameters: this.convertTypeParameters(typeParameters),
-      parameters: parameterList
-        ? this.convertParameterTypes(parameterList)
-        : { positional: [], requiredCount: 0, named: [] },
-      nullable: children.slice(functionIndex).some((child) => child.type === '?'),
-      ...spanOf(node),
-    };
-    if (innerFunction) return syntaxError(node, '型の書き方に誤りがあります。');
-    return type;
+    const starts = children.flatMap((child, index) => (child.type === 'Function' ? [index] : []));
+    const returnNode = children.slice(0, starts[0]).find((child) => child.type === 'type');
+    let type = returnNode ? this.convertType(returnNode) : undefined;
+    for (const [index, start] of starts.entries()) {
+      const suffix = children.slice(start + 1, starts[index + 1]);
+      const typeParameters = suffix.find((child) => child.type === 'type_parameters');
+      const parameterList = requireNode(
+        suffix.find((child) => child.type === 'parameter_type_list'),
+        node
+      );
+      type = {
+        kind: 'function',
+        returnType: type,
+        typeParameters: this.convertTypeParameters(typeParameters),
+        parameters: this.convertParameterTypes(parameterList),
+        nullable: suffix.some((child) => child.type === '?'),
+        ...spanOf(node),
+      };
+    }
+    return type ?? syntaxError(node, '型の書き方に誤りがあります。');
   }
 
   // code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of node in the grammar.

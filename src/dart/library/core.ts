@@ -10,7 +10,26 @@ class Object {
   external String toString();
   external dynamic noSuchMethod(Invocation invocation);
   external Type get runtimeType;
-  static int hash(Object? object1, Object? object2, [Object? object3, Object? object4, Object? object5, Object? object6, Object? object7, Object? object8]) => _hashValues([object1, object2, object3, object4, object5, object6, object7, object8]);
+  static const _hashOmitted = _HashOmitted();
+  static int hash(Object? object1, Object? object2, [
+    Object? object3 = _hashOmitted, Object? object4 = _hashOmitted,
+    Object? object5 = _hashOmitted, Object? object6 = _hashOmitted,
+    Object? object7 = _hashOmitted, Object? object8 = _hashOmitted,
+    Object? object9 = _hashOmitted, Object? object10 = _hashOmitted,
+    Object? object11 = _hashOmitted, Object? object12 = _hashOmitted,
+    Object? object13 = _hashOmitted, Object? object14 = _hashOmitted,
+    Object? object15 = _hashOmitted, Object? object16 = _hashOmitted,
+    Object? object17 = _hashOmitted, Object? object18 = _hashOmitted,
+    Object? object19 = _hashOmitted, Object? object20 = _hashOmitted,
+  ]) {
+    var values = <Object?>[];
+    for (var value in [object1, object2, object3, object4, object5, object6, object7, object8, object9, object10,
+                       object11, object12, object13, object14, object15, object16, object17, object18, object19, object20]) {
+      if (identical(value, _hashOmitted)) break;
+      values.add(value);
+    }
+    return _hashValues(values);
+  }
   static int hashAll(Iterable<Object?> objects) => _hashValues(objects.toList());
   static int hashAllUnordered(Iterable<Object?> objects) {
     int sum = 0;
@@ -61,6 +80,8 @@ abstract final class Invocation {
 
 /** The VM's class of String.codeUnits, which the list of code units shows as its runtimeType. */
 abstract final class CodeUnits implements List<int> {}
+
+class _HashOmitted { const _HashOmitted(); }
 
 class _Invocation implements Invocation {
   final Symbol memberName;

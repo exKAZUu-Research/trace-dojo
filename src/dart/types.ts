@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 521 -- The operations of Dart's types belong together; each is a short case analysis.
+// code-gauge-allow-file fileNcss 529 -- The operations of Dart's types belong together; each is a short case analysis.
 import type { ClassInfo } from './classes';
 
 /** A type parameter of a class, a function type, or a generic function. */
@@ -332,6 +332,16 @@ export function substitute(type: DartType, map: ReadonlyMap<TypeParam, DartType>
       return type;
     }
   }
+}
+
+export function instantiateToBounds(params: readonly TypeParam[]): DartType[] {
+  const args: DartType[] = params.map(() => DYNAMIC);
+  for (const [index, param] of params.entries()) {
+    if (!param.bound) continue;
+    const map = new Map(params.map((other, at) => [other, args[at]]));
+    args[index] = substitute(param.bound, map);
+  }
+  return args;
 }
 
 /** Instantiates a generic function type with type arguments. */

@@ -24,6 +24,7 @@ import {
   type DartType,
   DYNAMIC,
   type FunctionType,
+  instantiateToBounds,
   type InterfaceType,
   interfaceType,
   isNonNullable,
@@ -161,7 +162,6 @@ export abstract class ExpressionCompiler extends CompilerBase {
   abstract constructSymbol(frame: Frame, name: string): Value;
   abstract readGlobal(global: GlobalVariable): Eval;
   abstract tearOffFunction(fn: TopLevelFunction): Eval;
-  abstract typeLiteralValue(cls: ClassInfo, span: Span): Compiled;
 
   /** Compiles an expression whose value is used, ending a null-aware chain. */
   compileExpression(expression: Expression, context?: DartType): Compiled {
@@ -1060,16 +1060,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
         };
       }
       case 'class': {
-        return this.typeLiteralValue(declaration.cls, span);
+        return this.typeLiteralValue(interfaceType(declaration.cls, instantiateToBounds(declaration.cls.typeParams)));
       }
       case 'alias': {
         const { alias } = declaration;
-        const type = alias.aliased ?? DYNAMIC;
-        return {
-          type: interfaceType(coreTypes.type),
-          run: () => new DartTypeValue(coreTypes.type, type) as Value,
-          isConst: true,
-        };
+        const args = instantiateToBounds(alias.typeParams);
+        const map = new Map(alias.typeParams.map((param, index) => [param, args[index]]));
+        return this.typeLiteralValue(substitute(this.resolveAlias(alias, span), map));
       }
       case 'extension': {
         return this.error(span, `拡張 ${declaration.ext.name ?? ''} は値として使えません。`);
@@ -1565,23 +1562,23 @@ export abstract class ExpressionCompiler extends CompilerBase {
   ): Compiled;
 
   private compileInstantiation(expression: Extract<Expression, { kind: 'instantiation' }>): Compiled {
-    const target = this.staticTarget(expression.target);
-    if (target?.kind === 'class') {
-      if (expression.typeArguments.length !== target.cls.typeParams.length) {
-        this.error(expression, `${target.cls.name} の型引数は ${target.cls.typeParams.length} 個です。`);
-      }
-      const type = interfaceType(
-        target.cls,
-        expression.typeArguments.map((argument) => this.resolveType(argument))
+    const target = this.staticTarget(expression);
+    if (target?.kind === 'class' && target.typeArgs) {
+      const alias = target.alias?.aliased;
+      return this.typeLiteralValue(
+        interfaceType(target.cls, target.typeArgs, alias?.kind === 'interface' && alias.nullable)
       );
-      const resolve = this.runtimeType(type);
-      return {
-        type: interfaceType(coreTypes.type),
-        run: (frame) => new DartTypeValue(coreTypes.type, resolve(frame)),
-        isConst: true,
-      };
     }
     return this.unsupported(expression, '型引数を指定した関数の取り出し（f<int> の形）');
+  }
+
+  private typeLiteralValue(type: DartType): Compiled {
+    const resolve = this.runtimeType(type);
+    return {
+      type: interfaceType(coreTypes.type),
+      run: (frame) => new DartTypeValue(coreTypes.type, resolve(frame)),
+      isConst: !mentionsTypeParams(type),
+    };
   }
 
   // Assignment

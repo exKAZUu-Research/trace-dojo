@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 961 -- The native lists, sets, maps, and their iterators share collection helpers.
+// code-gauge-allow-file fileNcss 963 -- The native lists, sets, maps, and their iterators share collection helpers.
 import type { TopLevelFunction } from '../environment';
 import { stringOf } from '../format';
 import { type HashPolicy, HashStore } from '../hashStore';
@@ -627,7 +627,8 @@ define('List.lastIndexOf', (runtime, receiver, [value, start]) => {
   let from = start === undefined ? target.elements.length - 1 : index(intArg(runtime, start, 'start'));
   if (from >= target.elements.length) from = target.elements.length - 1;
   for (let position = from; position >= 0; position--) {
-    if (runtime.equals(target.elements[position], value)) return BigInt(position);
+    const element = target.elements[checkIndex(runtime, target, BigInt(position), 'index')];
+    if (runtime.equals(element, value)) return BigInt(position);
   }
   return -1n;
 });
@@ -645,7 +646,8 @@ define('List.lastIndexWhere', (runtime, receiver, [test, start]) => {
   let from = start === undefined ? target.elements.length - 1 : index(intArg(runtime, start, 'start'));
   if (from >= target.elements.length) from = target.elements.length - 1;
   for (let position = from; position >= 0; position--) {
-    if (callFunction(runtime, test, target.elements[position]) === true) return BigInt(position);
+    const element = target.elements[checkIndex(runtime, target, BigInt(position), 'index')];
+    if (callFunction(runtime, test, element) === true) return BigInt(position);
   }
   return -1n;
 });
