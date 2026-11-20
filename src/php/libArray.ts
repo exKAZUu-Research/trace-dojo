@@ -43,6 +43,7 @@ import {
 import { arrayIsShared, ElementPlace, share, VarPlace } from './places';
 import { ExitSignal, PhpThrow, rt, type Runtime } from './runtime';
 import { shuffle } from './shuffle';
+import { formatPrintf } from './sprintf';
 import { checkedDynamicVariable } from './unsupported';
 import {
   copyValueSlot,
@@ -666,10 +667,7 @@ function numberRange<T extends bigint | number>(
   if (end > start && stepIsNegative) rangeError(3, 'must be greater than 0 for increasing ranges');
   const span = (end > start ? (end as number) - (start as number) : (start as number) - (end as number)) as T;
   if (span < step) rangeBoundaryError();
-  const size =
-    typeof span === 'bigint'
-      ? Number((span as bigint) / (step as bigint)) + 1
-      : Math.round(span / (step as number) + 1);
+  const size = checkRangeSize(start, end, step, span);
   rt().spend(size / 16);
   for (let index = 0; index < size; index++) {
     const offset = (fromIndex(index) as number) * (step as number);
@@ -678,6 +676,42 @@ function numberRange<T extends bigint | number>(
     result.append(value);
   }
   return result;
+}
+
+const RANGE_MAX_SIZE = 1_073_741_824;
+
+function checkRangeSize(
+  start: bigint | number,
+  end: bigint | number,
+  step: bigint | number,
+  span: bigint | number
+): number {
+  const low = start < end ? start : end;
+  const high = start < end ? end : start;
+  if (typeof span === 'bigint') {
+    const calculated = span / (step as bigint);
+    const max = BigInt(RANGE_MAX_SIZE);
+    if (calculated >= max - 1n) {
+      throwError(
+        'ValueError',
+        `The supplied range exceeds the maximum array size by ${calculated - (max - 1n)} elements: start=${low}, end=${high}, step=${step}. Calculated size: ${calculated}. Maximum size: ${max}.`
+      );
+    }
+    return Number(calculated) + 1;
+  }
+  const raw = span / (step as number);
+  if (!Number.isFinite(raw) || raw >= RANGE_MAX_SIZE - 1) {
+    const excess = Number.isFinite(raw) ? raw - (RANGE_MAX_SIZE - 1) : raw;
+    throwError(
+      'ValueError',
+      `The supplied range exceeds the maximum array size by ${formatRangeFloat(excess)} elements: start=${formatRangeFloat(low as number)}, end=${formatRangeFloat(high as number)}, step=${formatRangeFloat(step as number)}. Max size: ${RANGE_MAX_SIZE}`
+    );
+  }
+  return Math.round(raw + 1);
+}
+
+function formatRangeFloat(value: number): string {
+  return formatPrintf('%.1f', [value]).toLowerCase();
 }
 
 function rangeBoundaryError(): never {

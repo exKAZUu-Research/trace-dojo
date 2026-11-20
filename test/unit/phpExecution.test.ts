@@ -5154,4 +5154,16 @@ try { sizeof([], 99); } catch (Error $e) { echo $e->getMessage(), "\\n"; }`
     stdout:
       'key_exists(): Argument #1 ($key) must be a valid array offset type\nsizeof(): Argument #2 ($mode) must be either COUNT_NORMAL or COUNT_RECURSIVE\n',
   });
+
+  expect(
+    run(
+      `<?php
+try { range(1, 1073741824); } catch (ValueError $e) { echo $e->getMessage(), "\\n"; }
+try { range(0.5, 1e16, 2); } catch (ValueError $e) { echo $e->getMessage(), "\\n"; }`
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'The supplied range exceeds the maximum array size by 0 elements: start=1, end=1073741824, step=1. Calculated size: 1073741823. Maximum size: 1073741824.\nThe supplied range exceeds the maximum array size by 4999998926258177.0 elements: start=0.5, end=10000000000000000.0, step=2.0. Max size: 1073741824\n',
+  });
 });
