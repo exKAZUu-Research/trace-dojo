@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 534 -- Resolves every kind of type syntax a program writes, each needing its own rule.
+// code-gauge-allow-file fileNcss 543 -- Resolves every kind of type syntax a program writes, each needing its own rule.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
@@ -72,6 +72,12 @@ const stringMappings = new Set(['Uppercase', 'Lowercase', 'Capitalize', 'Uncapit
 const domInterfaceNames = new Set(BROWSER_INTERFACES.map((entry) => (typeof entry === 'string' ? entry : entry[0])));
 
 type ResolvedTypeName = { symbol: Sym; parameters: TypeParameter[] } | { local: TypeParameter } | 'stringMapping';
+
+export interface TypeArgumentMismatch {
+  index: number;
+  argument: Type;
+  constraint: Type;
+}
 
 /** Resolves the types the program writes: annotations, type references, and type declarations. */
 export class TypeNodes {
@@ -506,15 +512,27 @@ export class TypeNodes {
   }
 
   checkTypeArgumentConstraints(node: TreeNode, parameters: TypeParameter[], typeArguments: Type[]): void {
+    for (const mismatch of this.typeArgumentMismatches(parameters, typeArguments))
+      this.reportTypeArgumentMismatch(node, mismatch);
+  }
+
+  *typeArgumentMismatches(
+    parameters: TypeParameter[],
+    typeArguments: Type[],
+    count = typeArguments.length
+  ): IterableIterator<TypeArgumentMismatch> {
     const mapper: Mapper = new Map(parameters.map((parameter, index) => [parameter.id, typeArguments[index]]));
-    for (const [index, parameter] of parameters.entries()) {
-      const constraint = parameter.constraint?.();
+    for (let index = 0; index < count; index++) {
+      const constraint = parameters[index]?.constraint?.();
       if (!constraint) continue;
       const argument = typeArguments[index];
       const instantiated = this.c.instantiate(constraint, mapper);
-      if (!this.c.relations.isAssignable(argument, instantiated))
-        this.c.error(node, this.c.expressions.elaboration.typeRelationMessage(argument, instantiated, 'constraint'));
+      if (!this.c.relations.isAssignable(argument, instantiated)) yield { index, argument, constraint: instantiated };
     }
+  }
+
+  reportTypeArgumentMismatch(node: TreeNode, { argument, constraint }: TypeArgumentMismatch): void {
+    this.c.error(node, this.c.expressions.elaboration.typeRelationMessage(argument, constraint, 'constraint'));
   }
 
   private objectTypeLiteral(node: TreeNode): Type {

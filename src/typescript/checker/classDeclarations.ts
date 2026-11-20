@@ -513,7 +513,9 @@ export class ClassDeclarationChecker {
     const body = classNode.childForFieldName('body');
     if (!body) return;
     const ownerId = ctor?.id ?? 0;
-    const states = [endState, ...returnStates].filter((state): state is FlowState => state !== undefined);
+    const states = [endState, ...returnStates].filter(
+      (state): state is FlowState => state !== undefined && !state.dead
+    );
     const isAssigned = (nameNode: TreeNode): boolean => {
       const name = this.c.classes.propertyKey(nameNode, nameNode);
       const key = propertyReferenceKey(`this${ownerId}`, name);
