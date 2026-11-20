@@ -647,8 +647,8 @@ const dequeNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
   retain: ([self, f], ctx) => vecNatives.retain([self, f], ctx),
   truncate: ([self, len], ctx) => vecNatives.truncate([self, len], ctx),
   swap: ([self, a, b], ctx) => sliceNatives.swap([self, a, b], ctx),
-  rotate_left: ([self, n], ctx) => rotate(vec(self), Number(n as bigint), ctx),
-  rotate_right: ([self, n], ctx) => rotate(vec(self), vec(self).length - Number(n as bigint), ctx),
+  rotate_left: ([self, n], ctx) => rotateDeque(ctx, vec(self), n as bigint, false),
+  rotate_right: ([self, n], ctx) => rotateDeque(ctx, vec(self), n as bigint, true),
   make_contiguous: ([self]) => self,
   drain: ([self, range], ctx) => {
     const items = vec(self);
@@ -657,6 +657,18 @@ const dequeNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
   },
   into_iter: ([self]) => ownedIter(vec(self)),
 };
+
+function rotateDeque(ctx: NativeContext, items: Value[], amount: bigint, right: boolean): Value {
+  if (amount > BigInt(items.length)) {
+    libraryPanic(
+      ctx,
+      'assertion failed: n <= self.len()',
+      `alloc/src/collections/vec_deque/mod.rs:${right ? 3180 : 3137}:9`
+    );
+  }
+  const count = Number(amount);
+  return rotate(items, right ? items.length - count : count, ctx);
+}
 
 function dequeCapacity(items: Value[], ctx: NativeContext): number {
   return vecCapacity(items, items.length, sizeOf(elemType(ctx)));

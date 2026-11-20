@@ -1165,6 +1165,23 @@ test.each([
   expect(executeProgram('rust', rustMain(`${prefix} x = x ${operator} 4; ${print}`)).kind).toBe('compileError');
 });
 
+test.each([
+  ['left', '[1, 2].into()', 3, 3137],
+  ['right', 'VecDeque::new()', 1, 3180],
+])('VecDeque rotate_%s rejects amounts larger than its length', (direction, initial, amount, line) => {
+  const program = rustMain(
+    `let mut q: VecDeque<i32> = ${initial}; q.rotate_${direction}(${amount}); println!("rotated");`,
+    'use std::collections::VecDeque;'
+  );
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '',
+    uncaughtException: expect.stringContaining(
+      `alloc/src/collections/vec_deque/mod.rs:${line}:9:\nassertion failed: n <= self.len()`
+    ),
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {
