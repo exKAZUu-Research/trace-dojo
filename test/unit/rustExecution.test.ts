@@ -1671,6 +1671,21 @@ fn main() {
   expect(execution.kind === 'executed' && execution.finalTurtles).toHaveLength(2);
 });
 
+test('orders Rust BTreeMap entries lexicographically', () => {
+  const program = `use std::collections::{BTreeMap, BTreeSet};
+fn main() {
+    let a = BTreeMap::from([(1, 2)]);
+    let b = BTreeMap::from([(1, 3)]);
+    let unordered = BTreeMap::from([(1, f64::NAN)]);
+    println!("{} {:?} {:?}", a < b, a.cmp(&b), unordered.partial_cmp(&unordered));
+    println!("{}", BTreeSet::from([a, b]).len());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'true Less None\n2\n',
+  });
+});
+
 test('reads endpoints of bulk-built Rust ordered collections', () => {
   const program = `use std::collections::{BTreeMap, BTreeSet};
 fn main() {

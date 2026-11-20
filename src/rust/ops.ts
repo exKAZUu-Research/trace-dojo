@@ -418,7 +418,7 @@ export function comparePartialValues(type: Type, a: Value, b: Value, rhs = type)
 }
 
 // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of type.
-// code-gauge-allow functionNcss 37 -- One case per kind of type.
+// code-gauge-allow functionNcss 40 -- One case per kind of type.
 function compareAdt(t: Type & { kind: 'adt' }, x: Value, y: Value, partial: boolean): number | undefined {
   const { def } = t;
   switch (def.builtin) {
@@ -437,12 +437,10 @@ function compareAdt(t: Type & { kind: 'adt' }, x: Value, y: Value, partial: bool
       return order === undefined ? undefined : -order;
     }
     case 'BTreeSet': {
-      return compareSequences(
-        t.args[0],
-        [...(x as SetValue).entries.values()],
-        [...(y as SetValue).entries.values()],
-        partial
-      );
+      return compareOrderedEntries(t.args[0], x as SetValue, y as SetValue, partial);
+    }
+    case 'BTreeMap': {
+      return compareOrderedEntries({ kind: 'tuple', elems: t.args }, x as MapValue, y as MapValue, partial);
     }
     case 'Ordering': {
       return Math.sign((x as EnumValue).variant - (y as EnumValue).variant);
@@ -472,6 +470,23 @@ function compareAdt(t: Type & { kind: 'adt' }, x: Value, y: Value, partial: bool
       return 0;
     }
   }
+}
+
+function compareOrderedEntries(
+  type: Type,
+  left: MapValue | SetValue,
+  right: MapValue | SetValue,
+  partial: boolean
+): number | undefined {
+  const a = left.entries.values();
+  const b = right.entries.values();
+  const length = Math.min(left.entries.size, right.entries.size);
+  for (let index = 0; index < length; index++) {
+    spendCollectionWork(1);
+    const order = compareValues(type, a.next().value, b.next().value, partial);
+    if (order !== 0) return order;
+  }
+  return Math.sign(left.entries.size - right.entries.size);
 }
 
 function compareSequences(elem: Type, xs: Value[], ys: Value[], partial: boolean): number | undefined {
