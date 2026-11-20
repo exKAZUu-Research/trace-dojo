@@ -826,6 +826,27 @@ int main() {
   });
 });
 
+test('evaluates transparent functor arguments as call arguments', () => {
+  const program = `#include <functional>
+#include <iostream>
+#include <string>
+int main() {
+  int i = 0;
+  std::cout << std::plus<>()(i++, i++) << ' ' << i << ' ';
+  std::cout << std::less<>()(++i, i) << ' ';
+  std::string a = "x", b(23, 'b');
+  std::string c = std::plus<>()(a, b);
+  std::string d = std::plus<>()(std::string(23, 'y'), b);
+  std::cout << c.size() << ' ' << d.capacity() << ' ' << std::multiplies<>()(3, 4.5) << ' '
+            << (std::plus<>()(1, 2) + std::minus<>()(5, 3)) << ' ' << std::equal_to<>()(a, "x");
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '1 2 0 24 55 13.5 5 1',
+    uncaughtException: undefined,
+  });
+});
+
 test('binds typed functor operands by const reference', () => {
   const program = `#include <functional>
 #include <iostream>

@@ -3,10 +3,10 @@ import { arithmeticOperation, convertNumeric, type NumericValue } from '../arith
 import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import { FloatNaN } from '../floatSign';
-import type { Frame } from '../runtime';
+import { type Frame, holdAll } from '../runtime';
 import { BOOL, ClassInfo, isArithmetic, sameType, type Type, typeName, unqualified } from '../types';
 import { CObject, type Ptr, type Value } from '../values';
-import { equalTo, lessThan, type ValueComparison } from './elements';
+import { type CallbackOperand, callbackOperands, equalTo, lessThan, type ValueComparison } from './elements';
 import type { ClassOperations } from './libraryClass';
 import type { Library } from './registry';
 import { constRef, native, nativeConstructor } from './support';
@@ -81,10 +81,7 @@ export function functorClass(library: Library, name: string, type: Type | undefi
     apply,
     call: (compiler, object, args, row) => {
       if (args.length !== 2) return;
-      if (!argument) {
-        const result = compiler.binary(operator, args[0], args[1], row);
-        return { ...result, run: (frame) => (object.run(frame), result.run(frame)) };
-      }
+      if (!argument) return transparentCall(compiler, operator, object, args, row);
       const type = unqualified(argument);
       if (operator === '+' && type.kind === 'class' && type.cls.library?.kind === 'string') {
         const [left, right] = args.map((arg) => constLvalue(compiler, arg, type, row));
@@ -259,4 +256,37 @@ function statelessOperations(cls: ClassInfo): ClassOperations {
 function constLvalue(compiler: ExpressionCompiler, arg: Expr, type: Type, row: number): Expr {
   const bound = compiler.convert(arg, constRef(type), row);
   return { ...(bound.isLvalue ? bound : compiler.materialize(bound)), isXvalue: false };
+}
+
+/**
+ * A transparent functor's call, such as `std::plus<>()(a, b)`: its arguments are evaluated as a call's arguments
+ * (indeterminately sequenced, not as the operator's unsequenced operands), then the operator applies to them.
+ */
+function transparentCall(
+  compiler: ExpressionCompiler,
+  operator: string,
+  object: Expr,
+  args: Expr[],
+  row: number
+): Expr {
+  const active: unknown[][] = [];
+  const operands = args.map((arg): CallbackOperand => ({
+    type: arg.type,
+    category: arg.isLvalue ? (arg.isXvalue ? 'xvalue' : undefined) : 'prvalue',
+  }));
+  const [left, right] = callbackOperands(operands, row, (_frame, index) => active.at(-1)?.[index] as Value);
+  const result = compiler.binary(operator, left, right, row);
+  const runs = [object.run, ...args.map((arg) => arg.run)];
+  return {
+    ...result,
+    run: (frame) =>
+      holdAll(frame, runs, (values) => {
+        active.push(values.slice(1));
+        try {
+          return result.run(frame);
+        } finally {
+          active.pop();
+        }
+      }),
+  };
 }
