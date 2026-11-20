@@ -3131,6 +3131,11 @@ test.each(['enum{}', 'enum(u8){_}'])('random selection rejects an enum without n
   expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
 });
 
+test('ASCII whitespace can initialize a fixed-size byte array', () => {
+  const source = `const std=@import("std");pub fn main()void{const bytes:[6]u8=std.ascii.whitespace;std.debug.print("{s}",.{&bytes});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: ' \t\n\r\v\f' });
+});
+
 test.each([
   '_=error.Foo;',
   'const e:anyerror=error.Foo;_=e;',

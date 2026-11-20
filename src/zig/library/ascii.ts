@@ -169,7 +169,7 @@ const MEMBERS: Record<string, () => Member> = {
   lowercase: () => stringConstant('abcdefghijklmnopqrstuvwxyz'),
   uppercase: () => stringConstant('ABCDEFGHIJKLMNOPQRSTUVWXYZ'),
   letters: () => stringConstant('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'),
-  whitespace: () => stringConstant(' \t\n\r\v\f'),
+  whitespace: () => ({ type: arrayOf(6, U8), value: new ZArray([32n, 9n, 10n, 13n, 11n, 12n]) }),
 };
 
 /** A string constant such as `std.ascii.lowercase`, typed as a string literal is: `*const [n:0]u8`. */
