@@ -218,6 +218,12 @@ export class InnerIterator extends EngineIteratorOwner {
     nativeOwnershipChanged(this.handle);
     return v;
   }
+
+  close(): void {
+    const slot = this.cached?.v;
+    this.cached = undefined;
+    if (slot instanceof Ref) slot.rc--;
+  }
 }
 
 export function releaseIteratorValues(values: (Value | Ref | undefined)[]): void {

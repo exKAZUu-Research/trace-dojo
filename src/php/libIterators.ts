@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 455 -- Keeps the wrappers with their shared iterator state and retirement phases.
+// code-gauge-allow-file fileNcss 462 -- Keeps the wrappers with their shared iterator state and retirement phases.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { callCallback, callMethod, consumeInvokedResult, discardInvokedResult } from './callables';
 import { createObject, findClass } from './classes';
@@ -199,6 +199,15 @@ export class DualState {
     this.cachingString = undefined;
     if (data || sourceData || key !== undefined) nativeOwnershipChanged(this.owner);
     releaseIteratorValues([current, sourceData?.v, data?.v, key]);
+  }
+
+  close(): void {
+    if (this.data?.v instanceof Ref) this.data.v.rc--;
+    if (this.sourceData?.v instanceof Ref) this.sourceData.v.rc--;
+    this.data = undefined;
+    this.sourceData = undefined;
+    this.inner?.close();
+    this.appended?.close();
   }
 
   rewind(throwing = false): void {

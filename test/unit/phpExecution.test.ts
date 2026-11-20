@@ -5109,4 +5109,21 @@ foreach (new IteratorIterator(new I) as $k => $v) echo 'v:', $v, ';';
 foreach (new CachingIterator(new I, 0) as $k => $v) echo 'v:', $v, ';';`
     )
   ).toMatchObject({ kind: 'executed', stdout: 'current;key;v:2;current;key;v:2;current;key;v:2;' });
+
+  expect(
+    run(
+      `<?php $x = 1;
+class I implements Iterator {
+  public $i = 0;
+  function rewind(): void { $this->i = 0; }
+  function valid(): bool { return $this->i < 1; }
+  function &current(): mixed { global $x; return $x; }
+  function key(): mixed { return 0; }
+  function next(): void { $this->i++; }
+}
+foreach (new I as $v) { break; }
+$it = new IteratorIterator(new I); $it->rewind(); unset($it);
+$a = [&$x]; unset($x); $b = $a; $a[0] = 2; echo json_encode([$a, $b]);`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '[[2],[1]]' });
 });
