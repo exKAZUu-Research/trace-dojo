@@ -1654,6 +1654,20 @@ fn main() {
   expect(execution.kind === 'executed' && execution.finalTurtles).toHaveLength(2);
 });
 
+test('reads endpoints of bulk-built Rust ordered collections', () => {
+  const program = `use std::collections::{BTreeMap, BTreeSet};
+fn main() {
+    let set: BTreeSet<_> = (0..12).collect();
+    println!("{:?} {:?}", set.first(), set.last());
+    let map: BTreeMap<_, _> = (0..12).map(|i| (i, i * 2)).collect();
+    println!("{:?} {:?}", map.first_key_value(), map.last_key_value());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'Some(0) Some(11)\nSome((0, 0)) Some((11, 22))\n',
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

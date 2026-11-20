@@ -95,6 +95,7 @@ export class BTree<V> {
   }
 
   getEdge(first: boolean): V | undefined {
+    this.finishBulk();
     if (!this.root?.size) return undefined;
     return leaf(this.root, first).entries.at(first ? 0 : -1);
   }
