@@ -4,10 +4,12 @@ import { expect, test } from 'vitest';
 import { z } from 'zod';
 
 import { executeProgram, traceProgram } from '../../src/interpreter/program';
-import { runHaskellUnderNode } from '../helpers/haskellUnderNode';
+import { createNodeBundleRunner } from '../helpers/nodeBundleRunner';
+
+const runNodeBundle = createNodeBundleRunner();
 
 test('nested turtle traces retain shared liveness within a bounded Node heap', { timeout: 30_000 }, () => {
-  const output = runHaskellUnderNode('test/helpers/haskellGcLivenessMemory.ts', 256);
+  const output = runNodeBundle('test/helpers/haskellGcLivenessMemory.ts', { heapMb: 256 });
   const results = z
     .array(
       z.object({

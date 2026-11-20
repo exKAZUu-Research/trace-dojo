@@ -1,0 +1,289 @@
+string(9) "$1|\a|\$1"
+int(1)
+int(1)
+int(1)
+int(1)
+int(0)
+int(1)
+int(1)
+int(0)
+int(2)
+int(0)
+int(0)
+int(1)
+array(1) {
+  [0]=>
+  string(2) "aa"
+}
+
+Warning: preg_match(): Compilation failed: missing closing parenthesis at offset 2 in /main.php on line 13
+
+Warning: preg_match(): Compilation failed: range out of order in character class at offset 4 in /main.php on line 13
+
+Warning: preg_match(): Compilation failed: quantifier does not follow a repeatable item at offset 1 in /main.php on line 13
+
+Warning: preg_match(): Compilation failed: reference to non-existent subpattern at offset 5 in /main.php on line 13
+
+Warning: preg_match(): Compilation failed: unknown property after \P or \p at offset 7 in /main.php on line 13
+bool(false)
+bool(false)
+bool(false)
+bool(false)
+bool(false)
+int(1)
+array(3) {
+  [0]=>
+  string(2) "ab"
+  ["b"]=>
+  string(1) "b"
+  [1]=>
+  string(1) "b"
+}
+bool(false)
+string(14) "Internal error"
+bool(false)
+string(74) "The offset did not correspond to the beginning of a valid UTF-8 code point"
+
+Warning: preg_match(): Delimiter must not be alphanumeric, backslash, or NUL byte in /main.php on line 19
+
+Warning: preg_match(): NUL byte is not a valid modifier in /main.php on line 19
+bool(false)
+bool(false)
+preg_match_all(): Argument #4 ($flags) must be a PREG_* constant
+/(a/ => 
+Warning: preg_match(): Compilation failed: missing closing parenthesis at offset 2 in /main.php on line 23
+bool(false)
+/a)/ => 
+Warning: preg_match(): Compilation failed: unmatched closing parenthesis at offset 2 in /main.php on line 23
+bool(false)
+/[a/ => 
+Warning: preg_match(): Compilation failed: missing terminating ] for character class at offset 2 in /main.php on line 23
+bool(false)
+/a{2,1}/ => 
+Warning: preg_match(): Compilation failed: numbers out of order in {} quantifier at offset 5 in /main.php on line 23
+bool(false)
+/[z-a]/ => 
+Warning: preg_match(): Compilation failed: range out of order in character class at offset 4 in /main.php on line 23
+bool(false)
+/(a)\2/ => 
+Warning: preg_match(): Compilation failed: reference to non-existent subpattern at offset 5 in /main.php on line 23
+bool(false)
+/\p{Foo}/u => 
+Warning: preg_match(): Compilation failed: unknown property after \P or \p at offset 7 in /main.php on line 23
+bool(false)
+/*a/ => 
+Warning: preg_match(): Compilation failed: quantifier does not follow a repeatable item at offset 1 in /main.php on line 23
+bool(false)
+/a**/ => 
+Warning: preg_match(): Compilation failed: quantifier does not follow a repeatable item at offset 3 in /main.php on line 23
+bool(false)
+/a{,3}/ => int(1)
+/a{ 1 , 2 }/ => int(1)
+/(?<n>a)\k<m>/ => 
+Warning: preg_match(): Compilation failed: reference to non-existent subpattern at offset 10 in /main.php on line 23
+bool(false)
+/a\/ => 
+Warning: preg_match(): No ending delimiter '/' found in /main.php on line 23
+bool(false)
+/[[:foo:]]/ => 
+Warning: preg_match(): Compilation failed: unknown POSIX class name at offset 8 in /main.php on line 23
+bool(false)
+/(?P=x)/ => 
+Warning: preg_match(): Compilation failed: reference to non-existent subpattern at offset 4 in /main.php on line 23
+bool(false)
+/\c/ => 
+Warning: preg_match(): Compilation failed: \c at end of pattern at offset 2 in /main.php on line 23
+bool(false)
+/a{99999999}/ => 
+Warning: preg_match(): Compilation failed: number too big in {} quantifier at offset 10 in /main.php on line 23
+bool(false)
+/(?<1a>x)/ => 
+Warning: preg_match(): Compilation failed: subpattern name must start with a non-digit at offset 4 in /main.php on line 23
+bool(false)
+/x{2}{3}/ => 
+Warning: preg_match(): Compilation failed: quantifier does not follow a repeatable item at offset 7 in /main.php on line 23
+bool(false)
+/(?:a/ => 
+Warning: preg_match(): Compilation failed: missing closing parenthesis at offset 4 in /main.php on line 23
+bool(false)
+/\x{110000}/u => 
+Warning: preg_match(): Compilation failed: character code point value in \x{} or \o{} is too large at offset 9 in /main.php on line 23
+bool(false)
+/\8/ => 
+Warning: preg_match(): Compilation failed: reference to non-existent subpattern at offset 2 in /main.php on line 23
+bool(false)
+/a|*b/ => 
+Warning: preg_match(): Compilation failed: quantifier does not follow a repeatable item at offset 3 in /main.php on line 23
+bool(false)
+/[\d-z]/ => 
+Warning: preg_match(): Compilation failed: invalid range in character class at offset 4 in /main.php on line 23
+bool(false)
+/ab(c/x => 
+Warning: preg_match(): Compilation failed: missing closing parenthesis at offset 4 in /main.php on line 23
+bool(false)
+/日(本/u => 
+Warning: preg_match(): Compilation failed: missing closing parenthesis at offset 7 in /main.php on line 23
+bool(false)
+/\g{5}/ => 
+Warning: preg_match(): Compilation failed: reference to non-existent subpattern at offset 5 in /main.php on line 23
+bool(false)
+/\k/ => 
+Warning: preg_match(): Compilation failed: \k is not followed by a braced, angle-bracketed, or quoted name at offset 2 in /main.php on line 23
+bool(false)
+/(a)(?<n>b)\g{-3}/ => 
+Warning: preg_match(): Compilation failed: reference to non-existent subpattern at offset 12 in /main.php on line 23
+bool(false)
+alpha   000000000111000
+alnum   010000000111100
+word    111100000111100
+graph   111111000111110
+print   111111001111110
+punct   001100000000000
+cntrl   000000010000001
+space   000000111000001
+blank   000000001000001
+xdigit  000000000111000
+upper   000000000100000
+lower   000000000011000
+\w 111100000111100
+\d 000000000000000
+\s 000000111000001
+\h 000000001000001
+\v 000000110000000
+int(1)
+int(1)
+array(1) {
+  [0]=>
+  string(1) "1"
+}
+int(1)
+array(1) {
+  [0]=>
+  string(1) " "
+}
+int(1)
+array(1) {
+  [0]=>
+  string(2) ",1"
+}
+int(1)
+array(1) {
+  [0]=>
+  string(2) "é"
+}
+/^*a/ => 
+Warning: preg_match(): Compilation failed: quantifier does not follow a repeatable item at offset 2 in /main.php on line 35
+bool(false)
+/\b+a/ => 
+Warning: preg_match(): Compilation failed: quantifier does not follow a repeatable item at offset 3 in /main.php on line 35
+bool(false)
+/a$?/ => 
+Warning: preg_match(): Compilation failed: quantifier does not follow a repeatable item at offset 3 in /main.php on line 35
+bool(false)
+/(?=a)*a/ => int(1)
+/a\i/ => 
+Warning: preg_match(): Compilation failed: unrecognized character follows \ at offset 3 in /main.php on line 35
+bool(false)
+/a\y/ => 
+Warning: preg_match(): Compilation failed: unrecognized character follows \ at offset 3 in /main.php on line 35
+bool(false)
+/a\T/ => 
+Warning: preg_match(): Compilation failed: unrecognized character follows \ at offset 3 in /main.php on line 35
+bool(false)
+/A/ => int(1)
+/\L/ => 
+Warning: preg_match(): Compilation failed: PCRE2 does not support \F, \L, \l, \N{name}, \U, or \u at offset 2 in /main.php on line 35
+bool(false)
+/a\m/ => 
+Warning: preg_match(): Compilation failed: unrecognized character follows \ at offset 3 in /main.php on line 35
+bool(false)
+/\j/ => 
+Warning: preg_match(): Compilation failed: unrecognized character follows \ at offset 2 in /main.php on line 35
+bool(false)
+/[\i]/ => 
+Warning: preg_match(): Compilation failed: unrecognized character follows \ at offset 3 in /main.php on line 35
+bool(false)
+/a{2}*/ => 
+Warning: preg_match(): Compilation failed: quantifier does not follow a repeatable item at offset 5 in /main.php on line 35
+bool(false)
+/\x41\x4/ => int(1)
+/\101\0101/ => int(0)
+/\e\a/ => int(1)
+/[a-\d]/ => 
+Warning: preg_match(): Compilation failed: invalid range in character class at offset 5 in /main.php on line 35
+bool(false)
+/[\w-]/ => int(1)
+/[%--]/ => int(1)
+/(?<n>a)(?<n>b)/ => 
+Warning: preg_match(): Compilation failed: two named subpatterns have the same name (PCRE2_DUPNAMES not set) at offset 12 in /main.php on line 35
+bool(false)
+/\p{han}/u => int(1)
+/\p{Greek}/u => int(0)
+/\p{L&}/u => int(1)
+/[\p{Xan}]/u => int(1)
+/\o{101}/ => int(1)
+/(a)\10/ => int(0)
+/a]b/u => int(0)
+/\#/u => int(1)
+/\N{U+41}/u => int(1)
+/\cA/ => int(1)
+/\xz/ => 
+Warning: preg_match(): Compilation failed: digits missing after \x or in \x{} or \o{} or \N{U+} at offset 2 in /main.php on line 37
+bool(false)
+/a\x/ => 
+Warning: preg_match(): Compilation failed: digits missing after \x or in \x{} or \o{} or \N{U+} at offset 3 in /main.php on line 37
+bool(false)
+/\x{zz}/ => 
+Warning: preg_match(): Compilation failed: non-hex character in \x{} (closing brace missing?) at offset 4 in /main.php on line 37
+bool(false)
+/\x{}/ => 
+Warning: preg_match(): Compilation failed: digits missing after \x or in \x{} or \o{} or \N{U+} at offset 3 in /main.php on line 37
+bool(false)
+/[\xz]/ => 
+Warning: preg_match(): Compilation failed: digits missing after \x or in \x{} or \o{} or \N{U+} at offset 3 in /main.php on line 37
+bool(false)
+/[\x{41}]/ => int(0)
+/\o{}/ => 
+Warning: preg_match(): Compilation failed: digits missing after \x or in \x{} or \o{} or \N{U+} at offset 3 in /main.php on line 37
+bool(false)
+/\o/ => 
+Warning: preg_match(): Compilation failed: missing opening brace after \o at offset 2 in /main.php on line 37
+bool(false)
+/\pZ/u => int(0)
+/\p{/u => 
+Warning: preg_match(): Compilation failed: malformed \P or \p sequence at offset 3 in /main.php on line 37
+bool(false)
+/\p{L/u => 
+Warning: preg_match(): Compilation failed: malformed \P or \p sequence at offset 4 in /main.php on line 37
+bool(false)
+/[\E]]/ => int(1)
+/[\Q\E]]/ => int(1)
+/\ca/ => int(1)
+/\c/ => 
+Warning: preg_match(): Compilation failed: \c at end of pattern at offset 2 in /main.php on line 37
+bool(false)
+/[\c]]/ => int(0)
+/\x{100}/u => int(0)
+/\o{777}/ => 
+Warning: preg_match(): Compilation failed: character code point value in \x{} or \o{} is too large at offset 6 in /main.php on line 37
+bool(false)
+/[\x{100}]/ => 
+Warning: preg_match(): Compilation failed: character code point value in \x{} or \o{} is too large at offset 7 in /main.php on line 37
+bool(false)
+
+Warning: preg_match(): Compilation failed: unknown property after \P or \p at offset 8 in /main.php on line 48
+bool(false)
+
+Warning: preg_match(): Compilation failed: malformed \P or \p sequence at offset 10 in /main.php on line 48
+bool(false)
+
+Warning: preg_match(): Compilation failed: malformed \P or \p sequence at offset 8 in /main.php on line 48
+bool(false)
+
+Warning: preg_match(): Compilation failed: malformed \P or \p sequence at offset 3 in /main.php on line 48
+bool(false)
+
+Warning: preg_match(): Compilation failed: unknown property after \P or \p at offset 4 in /main.php on line 48
+bool(false)
+int(0)
+int(1)

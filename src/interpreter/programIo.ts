@@ -11,6 +11,8 @@ export interface ProgramInput {
 /** What a run leaves besides its turtles. */
 export interface ProgramOutput {
   stdout: string;
+  /** Original stdout when it cannot be recovered from the UTF-8 display text. */
+  stdoutBytes?: Uint8Array;
   stderr: string;
   /** The files that exist when the program ends, by path relative to the working directory, in path order. */
   finalFiles: Record<string, string>;

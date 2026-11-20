@@ -1,0 +1,37 @@
+int(2)
+int(4)
+bool(true)
+int(3)
+bool(true)
+
+Deprecated: Calling static trait method T::f is deprecated, it should only be called on a class using the trait in /main.php on line 24
+argument
+
+Deprecated: Calling static trait method T::f is deprecated, it should only be called on a class using the trait in /main.php on line 25
+argument
+int(4)
+int(5)
+int(4)
+int(3)
+
+Deprecated: Accessing static trait property T::$p is deprecated, it should only be accessed on a class using the trait in /main.php on line 26
+
+Deprecated: Accessing static trait property T::$p is deprecated, it should only be accessed on a class using the trait in /main.php on line 26
+
+Deprecated: Accessing static trait property T::$p is deprecated, it should only be accessed on a class using the trait in /main.php on line 27
+
+Deprecated: Accessing static trait property T::$p is deprecated, it should only be accessed on a class using the trait in /main.php on line 28
+
+Deprecated: Accessing static trait property T::$p is deprecated, it should only be accessed on a class using the trait in /main.php on line 28
+bool(true)
+int(3)
+bool(false)
+int(1)
+Cannot access trait constant T::X directly
+Cannot access trait constant t::X directly
+Cannot access "parent" when no class scope is active
+Broken cannot use Base - it is not a trait
+Cannot declare self-referencing constant self::X
+Cannot declare self-referencing constant CycleRight::Y
+Cannot declare self-referencing constant CycleLeft::X
+Cannot declare self-referencing constant CycleLeft::X

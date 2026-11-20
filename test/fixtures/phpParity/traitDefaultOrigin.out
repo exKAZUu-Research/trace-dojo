@@ -1,0 +1,4 @@
+
+Fatal error: Declaration of Child::alias() must be compatible with UsingTrait::alias($a = <expression>, $b = <expression>, $c = <expression>, $d = <expression>, $e = self::VALUE, $f = 'Defaults::...') in /main.php on line 17
+Stack trace:
+#0 {main}

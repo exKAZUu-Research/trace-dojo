@@ -1,0 +1,73 @@
+
+Deprecated: Constant ASSERT_ACTIVE is deprecated since 8.3, as assert_options() is deprecated in /main.php on line 2
+
+Deprecated: Constant ASSERT_CALLBACK is deprecated since 8.3, as assert_options() is deprecated in /main.php on line 2
+
+Deprecated: Constant ASSERT_BAIL is deprecated since 8.3, as assert_options() is deprecated in /main.php on line 2
+
+Deprecated: Constant ASSERT_WARNING is deprecated since 8.3, as assert_options() is deprecated in /main.php on line 2
+
+Deprecated: Constant ASSERT_EXCEPTION is deprecated since 8.3, as assert_options() is deprecated in /main.php on line 2
+int(1)
+int(2)
+int(3)
+int(4)
+int(5)
+
+Deprecated: Constant ASSERT_ACTIVE is deprecated since 8.3, as assert_options() is deprecated in /main.php on line 3
+
+Deprecated: Function assert_options() is deprecated since 8.3 in /main.php on line 3
+int(1)
+
+Deprecated: Constant ASSERT_WARNING is deprecated since 8.3, as assert_options() is deprecated in /main.php on line 4
+
+Deprecated: Function assert_options() is deprecated since 8.3 in /main.php on line 4
+int(1)
+
+Deprecated: Constant ASSERT_BAIL is deprecated since 8.3, as assert_options() is deprecated in /main.php on line 5
+
+Deprecated: Function assert_options() is deprecated since 8.3 in /main.php on line 5
+int(0)
+
+Deprecated: Constant ASSERT_CALLBACK is deprecated since 8.3, as assert_options() is deprecated in /main.php on line 6
+
+Deprecated: Function assert_options() is deprecated since 8.3 in /main.php on line 6
+NULL
+
+Deprecated: Constant ASSERT_EXCEPTION is deprecated since 8.3, as assert_options() is deprecated in /main.php on line 7
+
+Deprecated: Function assert_options() is deprecated since 8.3 in /main.php on line 7
+int(1)
+
+Deprecated: Constant ASSERT_ACTIVE is deprecated since 8.3, as assert_options() is deprecated in /main.php on line 8
+
+Deprecated: Function assert_options() is deprecated since 8.3 in /main.php on line 8
+int(1)
+
+Deprecated: Constant ASSERT_ACTIVE is deprecated since 8.3, as assert_options() is deprecated in /main.php on line 9
+
+Deprecated: Function assert_options() is deprecated since 8.3 in /main.php on line 9
+int(0)
+
+Deprecated: Constant ASSERT_CALLBACK is deprecated since 8.3, as assert_options() is deprecated in /main.php on line 10
+
+Deprecated: Function assert_options() is deprecated since 8.3 in /main.php on line 10
+NULL
+
+Deprecated: Constant ASSERT_CALLBACK is deprecated since 8.3, as assert_options() is deprecated in /main.php on line 11
+
+Deprecated: Function assert_options() is deprecated since 8.3 in /main.php on line 11
+string(6) "strlen"
+
+Deprecated: Constant ASSERT_WARNING is deprecated since 8.3, as assert_options() is deprecated in /main.php on line 12
+
+Deprecated: Function assert_options() is deprecated since 8.3 in /main.php on line 12
+int(1)
+
+Deprecated: Function assert_options() is deprecated since 8.3 in /main.php on line 13
+ValueError: assert_options(): Argument #1 ($option) must be an ASSERT_* constant
+
+Deprecated: Function assert_options() is deprecated since 8.3 in /main.php on line 14
+ValueError: assert_options(): Argument #1 ($option) must be an ASSERT_* constant
+bool(true)
+end

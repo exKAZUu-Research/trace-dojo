@@ -1,0 +1,22 @@
+int(4)
+int(3)
+string(1) "A"
+int(5)
+int(3)
+string(1) "B"
+int(1)
+int(1)
+int(3)
+array(1) {
+  [0]=>
+  int(1)
+}
+string(1) "q"
+int(3)
+
+Warning: Uncaught Error: Undefined constant self::Y in /main.php:14
+Stack trace:
+#0 {main}
+  thrown in /main.php on line 14
+
+Fatal error: Forward and Later define the same constant (X) in the composition of Forward. However, the definition differs and is considered incompatible. Class was composed in /main.php on line 14

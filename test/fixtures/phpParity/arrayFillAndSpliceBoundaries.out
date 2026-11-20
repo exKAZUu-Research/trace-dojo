@@ -1,0 +1,102 @@
+Error:Cannot add element to the array as the next element is already occupied
+Error:Cannot add element to the array as the next element is already occupied
+array(1) {
+  [9223372036854775807]=>
+  int(1)
+}
+array(0) {
+}
+array(4) {
+  [-2]=>
+  int(1)
+  [-1]=>
+  int(1)
+  [0]=>
+  int(1)
+  [1]=>
+  int(1)
+}
+array(1) {
+  [0]=>
+  int(2)
+}
+array(2) {
+  [0]=>
+  int(1)
+  [1]=>
+  int(3)
+}
+array(1) {
+  [0]=>
+  int(2)
+}
+array(4) {
+  [0]=>
+  int(1)
+  [1]=>
+  int(1)
+  [2]=>
+  int(2)
+  [3]=>
+  int(3)
+}
+array(1) {
+  [0]=>
+  int(2)
+}
+array(2) {
+  [0]=>
+  int(1)
+  [1]=>
+  int(3)
+}
+array(1) {
+  [0]=>
+  int(2)
+}
+array(3) {
+  [0]=>
+  int(1)
+  [1]=>
+  int(7)
+  [2]=>
+  int(3)
+}
+array(1) {
+  [0]=>
+  int(2)
+}
+array(3) {
+  [0]=>
+  int(1)
+  [1]=>
+  string(1) "x"
+  [2]=>
+  int(3)
+}
+array(1) {
+  [0]=>
+  int(2)
+}
+array(3) {
+  [0]=>
+  int(1)
+  [1]=>
+  bool(false)
+  [2]=>
+  int(3)
+}
+array(1) {
+  [0]=>
+  int(2)
+}
+array(4) {
+  [0]=>
+  int(1)
+  [1]=>
+  int(8)
+  [2]=>
+  int(9)
+  [3]=>
+  int(3)
+}

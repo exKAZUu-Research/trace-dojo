@@ -1,0 +1,53 @@
+0=>1 idx=0
+1=>2 idx=0
+a=>3 idx=2
+NULL
+string(13) "ArrayIterator"
+int(3)
+array(3) {
+  [0]=>
+  int(1)
+  [1]=>
+  int(2)
+  [2]=>
+  int(3)
+}
+bool(false)
+NULL
+NULL
+NULL
+1123
+1=>2
+2=>3
+0x 1y 0x 1y 0x 
+1231231
+bool(false)
+BadMethodCallException: Accessing the value of an EmptyIterator
+BadMethodCallException: Accessing the key of an EmptyIterator
+int(0)
+Array
+(
+    [Iterator] => Iterator
+    [Traversable] => Traversable
+)
+Array
+(
+    [Iterator] => Iterator
+    [Traversable] => Traversable
+    [OuterIterator] => OuterIterator
+)
+Array
+(
+    [0] => __construct
+    [1] => append
+    [2] => rewind
+    [3] => valid
+    [4] => current
+    [5] => next
+    [6] => getIteratorIndex
+    [7] => getArrayIterator
+    [8] => getInnerIterator
+    [9] => key
+)
+object(AppendIterator)#1 (0) {
+}

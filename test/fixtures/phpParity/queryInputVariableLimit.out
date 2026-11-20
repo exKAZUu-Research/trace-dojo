@@ -1,0 +1,18 @@
+999
+1000
+
+Warning: parse_str(): Input variables exceeded 1000. To increase the limit change max_input_vars in php.ini. in /main.php on line 2
+1000
+
+Warning: parse_str(): Input variables exceeded 1000. To increase the limit change max_input_vars in php.ini. in /main.php on line 2
+1000
+array(1) {
+  ["a"]=>
+  string(1) "1"
+}
+
+Warning: parse_str(): Input variables exceeded 1000. To increase the limit change max_input_vars in php.ini. in /main.php on line 4
+array(1) {
+  ["a"]=>
+  string(1) "1"
+}

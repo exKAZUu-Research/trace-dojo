@@ -1,0 +1,57 @@
+
+Warning: mapReference(): Argument #1 ($x) must be passed by reference, value given in /main.php on line 3
+1;
+Warning: mapReference(): Argument #1 ($x) must be passed by reference, value given in /main.php on line 3
+2;array(2) {
+  [0]=>
+  int(2)
+  [1]=>
+  int(3)
+}
+
+Warning: compareReferences(): Argument #1 ($a) must be passed by reference, value given in /main.php on line 5
+
+Warning: compareReferences(): Argument #2 ($b) must be passed by reference, value given in /main.php on line 5
+array(2) {
+  [0]=>
+  int(1)
+  [1]=>
+  int(2)
+}
+
+Warning: variadicReferences(): Argument #1 must be passed by reference, value given in /main.php on line 7
+array(1) {
+  ["foo"]=>
+  int(1)
+}
+
+Warning: namedReferences(): Argument #2 ($b) must be passed by reference, value given in /main.php on line 9
+
+Warning: namedReferences(): Argument #1 ($a) must be passed by reference, value given in /main.php on line 9
+int(1)
+int(2)
+
+Warning: sort(): Argument #1 ($array) must be passed by reference, value given in /main.php on line 10
+array(1) {
+  [0]=>
+  bool(true)
+}
+array(1) {
+  [0]=>
+  array(2) {
+    [0]=>
+    int(2)
+    [1]=>
+    int(1)
+  }
+}
+array(1) {
+  [0]=>
+  bool(true)
+}
+
+Warning: walkReferences(): Argument #2 ($key) must be passed by reference, value given in /main.php on line 13
+array(1) {
+  [0]=>
+  int(2)
+}

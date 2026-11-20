@@ -1,0 +1,8 @@
+int(12)
+WeakGetter::$invalid::get(): Return value must be of type int, string returned
+WeakGetter::$missing::get(): Return value must be of type int, null returned
+WeakGetter::$array::get(): Return value must be of type string, array returned
+string(2) "12"
+NULL
+int(12)
+int(12)

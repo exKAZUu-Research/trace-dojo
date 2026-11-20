@@ -1,0 +1,52 @@
+array(2) {
+  [0]=>
+  array(2) {
+    [0]=>
+    int(1)
+    [1]=>
+    int(2)
+  }
+  [1]=>
+  array(1) {
+    [1]=>
+    int(4)
+  }
+}
+Cannot unset string offsets
+Cannot unset string offsets
+Cannot unset string offsets
+
+Warning: String offset cast occurred in /main.php on line 22
+Cannot use string offset as an array
+Cannot use string offset as an array
+
+Warning: String offset cast occurred in /main.php on line 22
+Cannot use string offset as an array
+
+Warning: String offset cast occurred in /main.php on line 22
+Cannot use string offset as an array
+
+Deprecated: Using null as an array offset is deprecated, use an empty string instead in /main.php on line 26
+array(1) {
+  ["key"]=>
+  array(1) {
+    [0]=>
+    int(0)
+  }
+}
+Cannot access offset of type array on array
+Cannot unset offset of type array on array
+
+Notice: Indirect modification of overloaded element of ArrayObject has no effect in /main.php on line 32
+
+Notice: Indirect modification of overloaded element of ArrayObject has no effect in /main.php on line 33
+Cannot unset offset of type array on ArrayObject
+array(0) {
+}
+
+Notice: Indirect modification of overloaded element of ArrayIterator has no effect in /main.php on line 32
+
+Notice: Indirect modification of overloaded element of ArrayIterator has no effect in /main.php on line 33
+Cannot unset offset of type array on ArrayIterator
+array(0) {
+}

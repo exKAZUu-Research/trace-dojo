@@ -1,0 +1,67 @@
+
+Warning: The float 1.0E+20 is not representable as an int, cast occurred in /main.php on line 2
+
+Warning: The float 1.0E+20 is not representable as an int, cast occurred in /main.php on line 2
+
+Warning: The float -1.0E+20 is not representable as an int, cast occurred in /main.php on line 2
+
+Warning: The float NAN is not representable as an int, cast occurred in /main.php on line 2
+
+Warning: The float INF is not representable as an int, cast occurred in /main.php on line 2
+
+Warning: The float -INF is not representable as an int, cast occurred in /main.php on line 2
+
+Warning: The float 1.0E+19 is not representable as an int, cast occurred in /main.php on line 2
+
+Warning: The float 9.223372036854776E+18 is not representable as an int, cast occurred in /main.php on line 2
+int(7766279631452241920)
+int(7766279631452241920)
+int(-7766279631452241920)
+int(0)
+int(0)
+int(0)
+int(-8446744073709551616)
+int(-9223372036854775808)
+
+Warning: The float 1.0E+20 is not representable as an int, cast occurred in /main.php on line 3
+
+Warning: The float 1.0E+20 is not representable as an int, cast occurred in /main.php on line 3
+
+Warning: The float 1.0E+20 is not representable as an int, cast occurred in /main.php on line 3
+
+Warning: The float 1.0E+20 is not representable as an int, cast occurred in /main.php on line 3
+
+Warning: The float NAN is not representable as an int, cast occurred in /main.php on line 3
+
+Deprecated: Implicit conversion from float NAN to int loses precision in /main.php on line 3
+
+Warning: The float INF is not representable as an int, cast occurred in /main.php on line 3
+int(2)
+int(7766279631452241920)
+int(-7766279631452241921)
+int(-2914184810805067776)
+int(0)
+int(0)
+
+Warning: The float 1.0E+20 is not representable as an int, cast occurred in /main.php on line 4
+
+Warning: The float NAN is not representable as an int, cast occurred in /main.php on line 4
+
+Deprecated: Implicit conversion from float NAN to int loses precision in /main.php on line 4
+
+Warning: The float INF is not representable as an int, cast occurred in /main.php on line 4
+array(2) {
+  [7766279631452241920]=>
+  int(1)
+  [0]=>
+  int(3)
+}
+
+Deprecated: Implicit conversion from float 2.5 to int loses precision in /main.php on line 5
+string(2) "aa"
+
+Fatal error: Uncaught TypeError: f(): Argument #1 ($x) must be of type int, float given, called in /main.php on line 6 and defined in /main.php:6
+Stack trace:
+#0 /main.php(6): f(1.0E+20)
+#1 {main}
+  thrown in /main.php on line 6

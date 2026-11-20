@@ -1,10 +1,12 @@
 import { expect, test } from 'vitest';
 import { z } from 'zod';
 
-import { runHaskellUnderNode } from '../helpers/haskellUnderNode';
+import { createNodeBundleRunner } from '../helpers/nodeBundleRunner';
+
+const runNodeBundle = createNodeBundleRunner();
 
 test('deep superclass and instance evidence remains bounded under Node', { timeout: 30_000 }, () => {
-  const output = runHaskellUnderNode('test/helpers/haskellEvidenceMemory.ts', 512);
+  const output = runNodeBundle('test/helpers/haskellEvidenceMemory.ts', { heapMb: 512 });
   const result = z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('executed'), stdout: z.string(), uncaughtException: z.undefined().optional() }),
     z.object({ kind: z.literal('limitExceeded'), limit: z.literal('operations') }),

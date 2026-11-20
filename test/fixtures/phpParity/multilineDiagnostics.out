@@ -1,0 +1,16 @@
+
+Warning: Undefined property: stdClass::$missing in /main.php on line 4
+
+Warning: Undefined array key "missing" in /main.php on line 7
+
+Warning: Undefined array key "also missing" in /main.php on line 9
+13
+19
+#0 /main.php(25): Watcher::trace()
+#1 {main}
+
+Warning: Undefined variable $undefined in /main.php on line 29
+#0 /main.php(32): {closure:/main.php:31}()
+#1 {main}
+#0 /main.php(39): MagicTrace->__get('property')
+#1 {main}

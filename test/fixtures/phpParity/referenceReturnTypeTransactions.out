@@ -1,0 +1,12 @@
+A::f(): Return value must be of type int, float returned
+float(1.5)
+B::f(): Return value must be of type int, float returned
+float(2.5)
+C::f(): Return value must be of type int, string returned
+string(2) "12"
+D::f(): Return value must be of type string, S returned
+object(S)#5 (0) {
+}
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 8
+int(1)

@@ -1,0 +1,8 @@
+Error: Cannot throw objects that do not implement Throwable
+Error: Can only throw objects
+TypeError: strtr(): Argument #2 ($from) must be of type array, string given
+TypeError: get_parent_class(): Argument #1 ($object_or_class) must be an object or a valid class name, string given
+string(4) "Base"
+bool(false)
+Error: Cannot create reference to property Child::$hook
+Error: Attempt to unset static property Child::$value

@@ -1,0 +1,6 @@
+
+Warning: Unsupported declare 'ReviewDirective' in /main.php on line 2
+
+Deprecated: byReferenceVoid(): Returning by reference from a void function is deprecated in /main.php on line 14
+int(3)
+string(5) "given"

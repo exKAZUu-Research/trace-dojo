@@ -1,0 +1,31 @@
+
+Warning: preg_match(): Compilation failed: missing ) after (?# comment at offset 7 in /main.php on line 2
+bool(false)
+
+Warning: preg_match(): Compilation failed: missing ) after (?# comment at offset 8 in /main.php on line 2
+bool(false)
+int(1)
+array(1) {
+  [0]=>
+  string(1) "a"
+}
+array(1) {
+  [1]=>
+  string(1) "b"
+}
+array(1) {
+  [0]=>
+  string(1) "a"
+}
+array(1) {
+  [1]=>
+  string(1) "b"
+}
+array(1) {
+  [1]=>
+  string(1) "b"
+}
+array(1) {
+  [1]=>
+  string(1) "b"
+}

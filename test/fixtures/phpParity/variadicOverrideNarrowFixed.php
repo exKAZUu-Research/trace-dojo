@@ -1,0 +1,1 @@
+<?php echo 'never';class A{function f(int|string ...$xs){}}class B extends A{function f(int $x=0,int|string ...$xs){}}

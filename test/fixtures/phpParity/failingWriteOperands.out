@@ -1,0 +1,21 @@
+
+Warning: Undefined variable $absent in /main.php on line 5
+Attempt to assign property "value" on int
+
+Warning: Undefined variable $absent in /main.php on line 6
+Attempt to assign property "value" on null
+
+Warning: Undefined variable $absent in /main.php on line 7
+Attempt to assign property "value" on null
+
+Warning: Undefined variable $absent in /main.php on line 8
+Cannot use object of type stdClass as array
+Access to undeclared static property stdClass::$missing
+object(UnsetValues)#3 (2) {
+  ["untyped"]=>
+  NULL
+  ["typed"]=>
+  uninitialized(?array)
+  ["object"]=>
+  NULL
+}

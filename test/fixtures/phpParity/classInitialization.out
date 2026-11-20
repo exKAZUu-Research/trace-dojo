@@ -1,0 +1,9 @@
+Undefined constant "ABSENT"
+Undefined constant "ABSENT"
+Undefined constant "ABSENT"
+Cannot declare self-referencing constant self::C
+Cannot access "parent" when current class scope has no parent
+Undefined constant "ABSENT"
+Undefined constant "ABSENT"
+Undefined constant "LATER"
+2

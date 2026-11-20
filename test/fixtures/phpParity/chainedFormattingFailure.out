@@ -1,0 +1,8 @@
+first format
+second format
+
+Fatal error: Uncaught ErrorException: final error in formatted.php:23
+Stack trace:
+#0 [internal function]: SecondFormattingError->__toString()
+#1 {main}
+  thrown in formatted.php on line 23

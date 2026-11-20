@@ -1,0 +1,10 @@
+wantsInt(): Argument #1 ($value) must be of type int, float given, called in /main.php on line 14
+wantsFloat(): Argument #1 ($value) must be of type float, int given, called in /main.php on line 15
+wantsString(): Argument #1 ($value) must be of type string, true given, called in /main.php on line 16
+wantsFloat(): Argument #1 ($value) must be of type float, int given, called in /main.php on line 17
+wantsInt(): Argument #1 ($value) must be of type int, string given, called in /main.php on line 18
+float(1)
+int(2)
+bool(true)
+string(1) "5"
+int(4)

@@ -1,0 +1,373 @@
+Undefined variable $u
+DivisionByZeroError: Division by zero (Undefined variable $u)
+Undefined variable $u
+DivisionByZeroError: Modulo by zero (Undefined variable $u)
+Undefined variable $u
+DivisionByZeroError: Division by zero (Undefined variable $u)
+Undefined variable $u
+DivisionByZeroError: Modulo by zero (Undefined variable $u)
+Undefined variable $u
+ArithmeticError: Bit shift by negative number (Undefined variable $u)
+Undefined variable $u
+DivisionByZeroError: Division by zero (Undefined variable $u)
+Undefined variable $u
+ErrorException: Undefined variable $u ()
+Undefined variable $u
+ErrorException: Undefined variable $u ()
+Undefined variable $u
+NULL
+ErrorException: Undefined variable $u ()
+Undefined variable $u
+NULL
+ErrorException: Undefined variable $u ()
+Undefined variable $u
+NULL
+ErrorException: Undefined variable $u ()
+Undefined variable $u
+NULL
+ErrorException: Undefined variable $u ()
+Undefined variable $u
+NULL
+ErrorException: Undefined variable $u ()
+Undefined variable $u
+NULL
+ErrorException: Undefined variable $u ()
+Undefined variable $lit
+int(1)
+ErrorException: Undefined variable $lit ()
+Undefined variable $ab
+int(1)
+ErrorException: Undefined variable $ab ()
+Undefined variable $cd
+string(1) "x"
+ErrorException: Undefined variable $cd ()
+Undefined variable $u
+NULL
+ErrorException: Undefined variable $u ()
+Creation of dynamic property DynamicObject::$ordinary is deprecated
+ErrorException: Creation of dynamic property DynamicObject::$ordinary is deprecated ()
+Creation of dynamic property DynamicObject::$coalescing is deprecated
+ErrorException: Creation of dynamic property DynamicObject::$coalescing is deprecated ()
+Creation of dynamic property DynamicObject::$append is deprecated
+ErrorException: Creation of dynamic property DynamicObject::$append is deprecated ()
+Creation of dynamic property DynamicObject::$nested is deprecated
+ErrorException: Creation of dynamic property DynamicObject::$nested is deprecated ()
+Creation of dynamic property DynamicObject::$member is deprecated
+ErrorException: Creation of dynamic property DynamicObject::$member is deprecated ()
+Creation of dynamic property DynamicObject::$alias is deprecated
+ErrorException: Creation of dynamic property DynamicObject::$alias is deprecated ()
+Creation of dynamic property DynamicObject::$bound is deprecated
+ErrorException: Creation of dynamic property DynamicObject::$bound is deprecated ()
+Creation of dynamic property DynamicObject::$iteration is deprecated
+ErrorException: Creation of dynamic property DynamicObject::$iteration is deprecated ()
+object(DynamicObject)#15 (8) {
+  ["ordinary"]=>
+  int(1)
+  ["coalescing"]=>
+  int(2)
+  ["append"]=>
+  NULL
+  ["nested"]=>
+  NULL
+  ["member"]=>
+  NULL
+  ["alias"]=>
+  NULL
+  ["bound"]=>
+  int(3)
+  ["iteration"]=>
+  NULL
+}
+Creation of dynamic property DynamicObject::$onlyDeprecation is deprecated
+
+Warning: Undefined property: DynamicObject::$onlyDeprecation in /main.php on line 50
+ErrorException: Creation of dynamic property DynamicObject::$onlyDeprecation is deprecated ()
+int(3)
+
+Warning: Undefined variable $key in /main.php on line 65
+
+Warning: Undefined variable $rhs in /main.php on line 65
+get:NULL
+set:2
+
+Warning: Undefined variable $other in /main.php on line 66
+get:'y'
+set:2
+get:'z'
+set:11
+
+Warning: Undefined variable $stillMissing in /main.php on line 70
+get:'q'
+set:2
+
+Warning: Undefined variable $missingNative in /main.php on line 72
+int(2)
+Undefined variable $unknown
+Error: Cannot use object of type OperatorTarget as array (Undefined variable $unknown)
+Undefined variable $unknown
+ErrorException: Undefined variable $unknown ()
+int(2)
+Undefined variable $unread
+bool(true)
+NULL
+ErrorException: Undefined variable $unread ()
+Undefined variable $unread
+array(1) {
+  ["x"]=>
+  NULL
+}
+ErrorException: Undefined variable $unread ()
+Undefined variable $unread
+array(1) {
+  [0]=>
+  NULL
+}
+ErrorException: Undefined variable $unread ()
+Undefined variable $unread
+ErrorException: Undefined variable $unread ()
+Undefined variable $unread
+ErrorException: Undefined variable $unread ()
+Undefined variable $unread
+ErrorException: Undefined variable $unread ()
+Undefined variable $unread
+ErrorException: Undefined variable $unread ()
+Undefined variable $unread
+ErrorException: Undefined variable $unread ()
+Undefined variable $unread
+ErrorException: Undefined variable $unread ()
+NULL
+int(4)
+NULL
+NULL
+NULL
+Undefined variable $dynamicName
+bool(false)
+ErrorException: Undefined variable $dynamicName ()
+Undefined variable $unread
+TypeError: Cannot perform bitwise not on null (Undefined variable $unread)
+Undefined variable $u
+ErrorException: Undefined variable $u ()
+Undefined variable $u
+ErrorException: Undefined variable $u ()
+Undefined variable $u
+ErrorException: Undefined variable $u ()
+Undefined array key "number"
+ErrorException: Undefined array key "number" ()
+Undefined array key "text"
+ErrorException: Undefined array key "text" ()
+Undefined variable $unknown
+ErrorException: Undefined variable $unknown ()
+Undefined array key "division"
+DivisionByZeroError: Division by zero (Undefined array key "division")
+Undefined array key "inc"
+ErrorException: Undefined array key "inc" ()
+array(4) {
+  ["number"]=>
+  int(1)
+  ["text"]=>
+  string(1) "x"
+  ["undefined"]=>
+  int(0)
+  ["inc"]=>
+  NULL
+}
+Undefined array key "number"
+ErrorException: Undefined array key "number" ()
+array(1) {
+  ["number"]=>
+  int(2)
+}
+Undefined array key "missing"
+ErrorException: Undefined array key "missing" ()
+array(0) {
+}
+
+Warning: Undefined variable $unknown in /main.php on line 130
+Error: Cannot use object of type stdClass as array (Cannot use object of type stdClass as array)
+Error: Cannot use object of type stdClass as array ()
+Error: Cannot use object of type SplObjectStorage as array (Object not found)
+UnexpectedValueException: Object not found ()
+int(5)
+Error: Cannot use object of type SplFixedArray as array (Index invalid or out of range)
+OutOfBoundsException: Index invalid or out of range ()
+Error: Cannot use object of type SplQueue as array (SplDoublyLinkedList::offsetGet(): Argument #1 ($index) is out of range)
+OutOfRangeException: SplDoublyLinkedList::offsetGet(): Argument #1 ($index) is out of range ()
+42
+8
+Undefined variable $unread
+ErrorException: Undefined variable $unread ()
+Undefined variable $unread
+ErrorException: Undefined variable $unread ()
+Undefined variable $unread
+ErrorException: Undefined variable $unread ()
+Undefined variable $unread
+ErrorException: Undefined variable $unread ()
+Undefined variable $unread
+ErrorException: Undefined variable $unread ()
+Undefined variable $unread
+ErrorException: Undefined variable $unread ()
+Undefined variable $unread
+ErrorException: Undefined variable $unread ()
+int(2)
+int(1)
+int(1)
+NULL
+NULL
+NULL
+Undefined variable $unread
+ErrorException: Undefined variable $unread ()
+Undefined variable $unread
+DivisionByZeroError: Division by zero (Undefined variable $unread)
+array(1) {
+  ["k"]=>
+  string(1) "2"
+}
+Undefined variable $unread
+ErrorException: Undefined variable $unread ()
+Undefined variable $unread
+DivisionByZeroError: Division by zero (Undefined variable $unread)
+Undefined variable $unread
+ErrorException: Undefined variable $unread ()
+Implicit conversion from float 4.5 to int loses precision
+ErrorException: Implicit conversion from float 4.5 to int loses precision ()
+Using null as an array offset is deprecated, use an empty string instead
+ErrorException: Using null as an array offset is deprecated, use an empty string instead ()
+array(5) {
+  ["k"]=>
+  int(0)
+  ["read"]=>
+  NULL
+  [0]=>
+  int(1)
+  [4]=>
+  int(2)
+  [5]=>
+  int(3)
+}
+Undefined array key "k"
+ErrorException: Undefined array key "k" ()
+A non-numeric value encountered
+ErrorException: A non-numeric value encountered ()
+Indirect modification of overloaded element of ForwardingOffsets has no effect
+ErrorException: Indirect modification of overloaded element of ForwardingOffsets has no effect ()
+array(1) {
+  ["k"]=>
+  string(4) "1foo"
+}
+RuntimeException: read ()
+DivisionByZeroError: Division by zero (read)
+Error: Cannot use object of type ThrowingQueue as array (queue read)
+RuntimeException: queue read ()
+TypeError: Cannot access offset of type array on ArrayObject (Cannot access offset of type array on ArrayObject)
+Error: Cannot use object of type SplFixedArray as array (Cannot access offset of type array on SplFixedArray)
+Error: Cannot use object of type SplQueue as array (SplDoublyLinkedList::offsetGet(): Argument #1 ($index) must be of type int, string given)
+Error: Cannot use object of type SplObjectStorage as array (SplObjectStorage::offsetGet(): Argument #1 ($object) must be of type object, int given)
+
+Warning: Undefined property: stdClass::$p in /main.php on line 207
+
+Warning: Undefined array key 0 in /main.php on line 207
+
+Warning: Undefined property: stdClass::$q in /main.php on line 208
+
+Warning: Undefined array key 0 in /main.php on line 208
+
+Warning: Undefined property: stdClass::$r in /main.php on line 209
+
+Warning: Undefined array key 0 in /main.php on line 209
+
+Warning: Undefined array key 1 in /main.php on line 209
+
+Warning: Undefined property: stdClass::$a in /main.php on line 212
+Error: Attempt to assign property "b" on null ()
+Error: Typed property NestedTypedSlots::$number must not be accessed before initialization ()
+Error: Typed property NestedTypedSlots::$array must not be accessed before initialization ()
+Error: Typed property NestedTypedSlots::$mixed must not be accessed before initialization ()
+Error: Typed property NestedTypedSlots::$object must not be accessed before initialization ()
+Error: Typed static property NestedTypedSlots::$shared must not be accessed before initialization ()
+array(1) {
+  [0]=>
+  int(3)
+}
+array(1) {
+  [0]=>
+  int(2)
+}
+OutOfBoundsException: Index invalid or out of range (Index invalid or out of range)
+DivisionByZeroError: Division by zero (Index invalid or out of range)
+Error: Cannot use object of type SplFixedArray as array ([] operator not supported for SplFixedArray)
+Error: [] operator not supported for SplFixedArray ()
+TypeError: Cannot access offset of type null on SplFixedArray ()
+ArgumentCountError: ForwardingOffsets::offsetGet(): Argument #1 ($key) not passed ()
+string(7) "default"
+int(1)
+array(1) {
+  [0]=>
+  string(7) "default"
+}
+array(1) {
+  [0]=>
+  int(3)
+}
+Undefined variable $missingKey
+Error: Cannot use object of type OperatorTarget as array (Undefined variable $missingKey)
+Undefined variable $missingKey
+Error: Cannot use object of type OperatorTarget as array (Undefined variable $missingKey)
+Undefined variable $missingKey
+Error: Cannot use object of type SplFixedArray as array (Cannot access offset of type null on SplFixedArray)
+Undefined variable $missingKey
+ErrorException: Undefined variable $missingKey ()
+Implicit conversion from float 5.5 to int loses precision
+ErrorException: Implicit conversion from float 5.5 to int loses precision ()
+Implicit conversion from float 0.5 to int loses precision
+ErrorException: Implicit conversion from float 0.5 to int loses precision ()
+Undefined array key "nested"
+ErrorException: Undefined array key "nested" ()
+Implicit conversion from float 7.5 to int loses precision
+ErrorException: Implicit conversion from float 7.5 to int loses precision ()
+array(5) {
+  [""]=>
+  int(3)
+  [0]=>
+  int(4)
+  [5]=>
+  NULL
+  ["nested"]=>
+  NULL
+  [7]=>
+  NULL
+}
+Using null as an array offset is deprecated, use an empty string instead
+ErrorException: Using null as an array offset is deprecated, use an empty string instead ()
+array(1) {
+  [""]=>
+  NULL
+}
+TypeError: Value of type null returned from BadTypedGetter::__get() must be compatible with unset property BadTypedGetter::$number of type int ()
+
+Notice: Indirect modification of overloaded property BadTypedGetter::$number has no effect in /main.php on line 276
+TypeError: Value of type null returned from BadTypedGetter::__get() must be compatible with unset property BadTypedGetter::$number of type int ()
+
+Notice: Indirect modification of overloaded property BadTypedGetter::$number has no effect in /main.php on line 277
+TypeError: Value of type null returned from BadTypedGetter::__get() must be compatible with unset property BadTypedGetter::$number of type int ()
+
+Notice: Indirect modification of overloaded property BadTypedGetter::$number has no effect in /main.php on line 278
+TypeError: Value of type null returned from BadTypedGetter::__get() must be compatible with unset property BadTypedGetter::$number of type int ()
+
+Notice: Indirect modification of overloaded property BadTypedGetter::$array has no effect in /main.php on line 279
+TypeError: Value of type null returned from BadTypedGetter::__get() must be compatible with unset property BadTypedGetter::$array of type array ()
+
+Notice: Indirect modification of overloaded property BadTypedGetter::$text has no effect in /main.php on line 280
+TypeError: Value of type null returned from BadTypedGetter::__get() must be compatible with unset property BadTypedGetter::$text of type string ()
+
+Notice: Indirect modification of overloaded property BadTypedGetter::$array has no effect in /main.php on line 281
+TypeError: Value of type null returned from BadTypedGetter::__get() must be compatible with unset property BadTypedGetter::$array of type array ()
+
+Notice: Indirect modification of overloaded property BadTypedGetter::$array has no effect in /main.php on line 282
+TypeError: Value of type null returned from BadTypedGetter::__get() must be compatible with unset property BadTypedGetter::$array of type array ()
+
+Notice: Indirect modification of overloaded property BadTypedGetter::$array has no effect in /main.php on line 283
+TypeError: Value of type null returned from BadTypedGetter::__get() must be compatible with unset property BadTypedGetter::$array of type array ()
+ArgumentCountError: VariadicObject::offsetGet(): Argument #1 not passed ()
+ArgumentCountError: VariadicIterator::offsetGet(): Argument #1 not passed ()
+int(1)
+int(1)

@@ -1,0 +1,91 @@
+array(2) {
+  [0]=>
+  int(1)
+  [1]=>
+  int(2)
+}
+3
+array(2) {
+  [0]=>
+  int(1)
+  [1]=>
+  int(2)
+}
+2
+3
+array(1) {
+  [0]=>
+  int(4)
+}
+array(1) {
+  [0]=>
+  int(4)
+}
+5
+5
+4
+int(5)
+array(2) {
+  [0]=>
+  NULL
+  [1]=>
+  NULL
+}
+5
+1:4
+2:4
+stop
+6
+10
+11
+9
+array(2) {
+  [0]=>
+  int(1)
+  [1]=>
+  int(2)
+}
+array(2) {
+  [0]=>
+  int(1)
+  [1]=>
+  int(2)
+}
+9
+10
+9
+11
+10
+array(1) {
+  [0]=>
+  int(3)
+}
+array(1) {
+  [0]=>
+  int(3)
+}
+10
+9
+int(10)
+int(9)
+int(6)
+int(9)
+int(10)
+int(9)
+int(9)
+int(10)
+int(10)
+int(9)
+int(9)
+int(10)
+get;rewind;aggregate;body;iterator;end;
+6
+14
+14
+14
+14
+12
+14
+release:1:next
+[false,true,1];2;3;7;
+[false,true,null];empty;

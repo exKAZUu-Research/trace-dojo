@@ -1,0 +1,21 @@
+call 1
+release 1
+#0 [internal function]: NativeCallbackLocal->__destruct()
+#1 /main.php(14): array_map()
+call 2
+release 2
+#0 [internal function]: NativeCallbackLocal->__destruct()
+#1 /main.php(14): array_map()
+call 3
+release 3
+#0 [internal function]: NativeCallbackLocal->__destruct()
+#1 /main.php(15): array_map()
+call 4
+release 4
+#0 [internal function]: NativeCallbackLocal->__destruct()
+#1 /main.php(15): array_map()
+local exception
+release 6
+#0 [internal function]: NativeCallbackLocal->__destruct()
+#1 /main.php(27): gc_collect_cycles()
+done

@@ -1,0 +1,88 @@
+int(1)
+string(1) "b"
+int(2)
+string(1) "c"
+int(1)
+string(3) "new"
+int(3)
+string(4) "tail"
+array(3) {
+  [2]=>
+  string(1) "c"
+  [1]=>
+  string(3) "new"
+  [3]=>
+  string(4) "tail"
+}
+int(1)
+string(1) "b"
+int(2)
+string(1) "c"
+int(1)
+string(3) "new"
+int(3)
+string(4) "tail"
+array(3) {
+  [2]=>
+  string(1) "c"
+  [1]=>
+  string(3) "new"
+  [3]=>
+  string(4) "tail"
+}
+int(2)
+int(20)
+int(2)
+int(20)
+int(2)
+int(3)
+int(1)
+string(1) "b"
+int(2)
+string(1) "c"
+int(1)
+string(3) "new"
+array(3) {
+  [0]=>
+  string(1) "a"
+  [1]=>
+  string(1) "b"
+  [2]=>
+  string(1) "c"
+}
+int(1)
+string(1) "b"
+int(2)
+string(1) "c"
+int(1)
+string(3) "new"
+array(3) {
+  [0]=>
+  string(1) "a"
+  [1]=>
+  string(1) "b"
+  [2]=>
+  string(1) "c"
+}
+int(1)
+string(1) "y"
+NULL
+NULL
+bool(false)
+NULL
+int(3)
+NULL
+NULL
+bool(false)
+NULL
+int(3)
+NULL
+NULL
+bool(false)
+NULL
+int(3)
+NULL
+NULL
+bool(false)
+NULL
+int(3)

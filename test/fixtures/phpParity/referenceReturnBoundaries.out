@@ -1,0 +1,18 @@
+2
+4
+6
+7
+
+Notice: Only variables should be assigned by reference in /main.php on line 13
+8
+get:value
+get:items
+int(11)
+array(1) {
+  [0]=>
+  int(12)
+}
+copy:value
+
+Notice: Indirect modification of overloaded property MagicPrivateValue::$value has no effect in /main.php on line 28
+int(13)

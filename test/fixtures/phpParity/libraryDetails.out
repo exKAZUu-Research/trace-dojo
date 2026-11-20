@@ -1,0 +1,106 @@
+Array
+(
+    [0] => 1
+    [1] => 5
+)
+Array
+(
+    [0] => A
+)
+Array
+(
+    [0] => 1
+    [1] => 2
+    [2] => 3
+)
+Array
+(
+    [0] => a
+    [1] => b
+    [2] => c
+)
+Array
+(
+    [0] => 2
+    [1] => 1
+    [2] => 1
+)
+Array
+(
+    [0] => 2
+    [1] => 1
+    [2] => 3
+)
+Array
+(
+    [0] => 10
+    [1] => Array
+        (
+            [0] => 20
+            [1] => Array
+                (
+                    [0] => 30
+                )
+
+        )
+
+)
+ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad 352441c2 d41d8cd98f00b204e9800998ecf8427e
+bool(true)
+bool(false)
+Array
+(
+    [0] => m1
+    [1] => vars
+    [2] => s
+)
+Array
+(
+    [a] => 1
+)
+Array
+(
+    [a] => 1
+    [b] => 2
+    [c] => 3
+)
+Array
+(
+    [IteratorAggregate] => IteratorAggregate
+    [Traversable] => Traversable
+    [ArrayAccess] => ArrayAccess
+    [Serializable] => Serializable
+    [Countable] => Countable
+)
+int(123)
+array(1) {
+  [0]=>
+  int(123)
+}
+int(5)
+int(31)
+int(34)
+int(35)
+int(42)
+int(12)
+int(0)
+int(1)
+
+Notice: custom notice in /main.php on line 13
+
+Warning: custom warning in /main.php on line 13
+
+Deprecated: dep in /main.php on line 13
+H[1024]: via handler
+H[2]: Undefined variable $undefined1
+
+Warning: Undefined variable $undefined2 in /main.php on line 14
+30719 silenced
+int(3)
+ababab
+resource resource (stream)
+resource(1) of type (stream)
+Resource id #2
+fmt-5
+puts
+handled: to handler

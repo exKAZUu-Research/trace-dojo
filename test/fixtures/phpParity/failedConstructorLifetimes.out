@@ -1,0 +1,8 @@
+constructor:Exception
+argument:Exception
+type:TypeError
+missing:ArgumentCountError
+Call to private PrivateConstruction::__construct() from global scope
+recovered
+destruct:-1
+destruct:7

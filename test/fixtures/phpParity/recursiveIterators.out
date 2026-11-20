@@ -1,0 +1,129 @@
+a=>1
+c=>2
+e=>3
+f=>4
+--self
+a=1
+b
+  c=2
+  d
+    e=3
+f=4
+--child
+0 a=1
+1 c=2
+2 e=3
+1 d
+0 b
+0 f=4
+--max
+int(0)
+a
+b
+f
+bool(false)
+array(5) {
+  [0]=>
+  int(1)
+  [1]=>
+  int(2)
+  [2]=>
+  int(3)
+  [3]=>
+  int(4)
+  [4]=>
+  int(5)
+}
+beginIteration
+hasChildren false
+nextElement
+0=>1
+hasChildren true
+beginChildren 1
+hasChildren false
+nextElement
+0=>2
+hasChildren false
+nextElement
+1=>3
+endChildren 1
+hasChildren false
+nextElement
+2=>4
+endIteration
+0=>1
+p=>1
+0=>2
+0=>1
+1=>obj
+0=>2
+int(4)
+int(0)
+int(1)
+int(2)
+int(16)
+bool(false)
+bool(true)
+RecursiveArrayIterator Object
+(
+    [storage:ArrayIterator:private] => Array
+        (
+            [0] => 2
+        )
+
+)
+InvalidArgumentException: An instance of RecursiveIterator or IteratorAggregate creating it is required
+InvalidArgumentException: An instance of RecursiveIterator or IteratorAggregate creating it is required
+
+RecursiveArrayIterator RecursiveArrayIterator 0
+RecursiveArrayIterator RecursiveArrayIterator 1
+NULL
+Array
+(
+    [0] => __construct
+    [1] => rewind
+    [2] => valid
+    [3] => key
+    [4] => current
+    [5] => next
+    [6] => getDepth
+    [7] => getSubIterator
+    [8] => getInnerIterator
+    [9] => beginIteration
+    [10] => endIteration
+    [11] => callHasChildren
+    [12] => callGetChildren
+    [13] => beginChildren
+    [14] => endChildren
+    [15] => nextElement
+    [16] => setMaxDepth
+    [17] => getMaxDepth
+)
+Array
+(
+    [OuterIterator] => OuterIterator
+    [Traversable] => Traversable
+    [Iterator] => Iterator
+)
+Array
+(
+    [Countable] => Countable
+    [Serializable] => Serializable
+    [ArrayAccess] => ArrayAccess
+    [Iterator] => Iterator
+    [Traversable] => Traversable
+    [SeekableIterator] => SeekableIterator
+    [RecursiveIterator] => RecursiveIterator
+)
+RecursiveIteratorIterator Object
+(
+)
+
+RecursiveArrayIterator Object
+(
+    [storage:ArrayIterator:private] => Array
+        (
+            [0] => 1
+        )
+
+)

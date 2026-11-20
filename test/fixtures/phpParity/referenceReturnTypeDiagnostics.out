@@ -1,0 +1,8 @@
+invalidReference(): Return value must be of type int, string returned at 3
+missingReference(): Return value must be of type int, none returned at 5
+finally
+ReferenceReturns::badMethod(): Return value must be of type int, string returned at 12
+{closure:/main.php:22}(): Return value must be of type int, string returned at 22
+
+Notice: Only variable references should be returned by reference in /main.php on line 7
+int(7)

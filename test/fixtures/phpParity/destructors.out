@@ -1,0 +1,21 @@
+ctor a
+ctor b
+ctor c1
+ctor c2
+ctor local
+in f
+dtor local
+dtor b
+ctor temp
+dtor temp
+after temp
+ctor d
+ctor o
+
+Deprecated: Creation of dynamic property A::$self is deprecated in /main.php on line 13
+end
+dtor a
+dtor d
+dtor c1
+dtor c2
+dtor o

@@ -1,0 +1,28 @@
+Outer
+xFromFunction
+object
+closure
+array
+1
+2
+Failed to create closure from callable: non-static method HiddenMethods::hidden() cannot be called statically
+Failed to create closure from callable: cannot access private method HiddenMethods::hiddenStatic()
+Failed to create closure from callable: first array member is not a valid class name or object
+Failed to create closure from callable: second array member is not a valid method
+Failed to create closure from callable: array callback has to contain indices 0 and 1
+array(0) {
+}
+finally
+
+Notice: Only variable references should be returned by reference in /main.php on line 46
+
+Notice: Only variable references should be returned by reference in /main.php on line 52
+
+Notice: Only variable references should be returned by reference in /main.php on line 55
+finally
+
+Notice: Only variable references should be returned by reference in /main.php on line 46
+int(42)
+
+Notice: Only variable references should be returned by reference in /main.php on line 55
+NULL

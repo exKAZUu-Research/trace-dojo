@@ -1,0 +1,16 @@
+cloned
+cloned
+cloned
+cloned
+int(1)
+int(1)
+int(2)
+int(3)
+cloned
+int(4)
+cloned
+int(1)
+ArgumentCountError: clone() expects at least 1 argument, 0 given
+TypeError: clone(): Argument #1 ($object) must be of type object, int given
+TypeError: clone(): Argument #2 ($withProperties) must be of type array, int given
+Error: Unknown named parameter $unknown

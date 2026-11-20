@@ -1,0 +1,4 @@
+owner;child;end
+owner;array child;end
+owner;end
+shared child;

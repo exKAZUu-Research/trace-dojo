@@ -1,0 +1,16 @@
+string(3) "ABC"
+string(1) "A"
+string(1) "A"
+string(2) "AB"
+string(2) "A1"
+string(1) "A"
+ABC
+string(2) "AB"
+Cannot use "::class" on string
+Cannot use "::class" on string
+array(2) {
+  [0]=>
+  string(17) "Demo\SpecialNames"
+  [1]=>
+  string(17) "Demo\SpecialNames"
+}

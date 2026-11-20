@@ -1,0 +1,1 @@
+<?php echo 'never';class A{final public int $x=1;}class B extends A{public int $x=2;}

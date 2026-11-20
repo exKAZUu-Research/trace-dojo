@@ -1,0 +1,19 @@
+array(2) {
+  [0]=>
+  string(7) "aXbcdef"
+  [1]=>
+  string(7) "aXbcdef"
+}
+array(2) {
+  [0]=>
+  string(7) "aXbcdef"
+  [1]=>
+  string(2) "aX"
+}
+array(2) {
+  [0]=>
+  string(2) "aX"
+  [1]=>
+  string(2) "aX"
+}
+string(2) "aX"

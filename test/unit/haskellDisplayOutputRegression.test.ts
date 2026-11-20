@@ -1,7 +1,9 @@
 import { expect, test } from 'vitest';
 import { z } from 'zod';
 
-import { runHaskellUnderNode } from '../helpers/haskellUnderNode';
+import { createNodeBundleRunner } from '../helpers/nodeBundleRunner';
+
+const runNodeBundle = createNodeBundleRunner();
 
 test('shared reference views serialize and render within a bounded heap', { timeout: 30_000 }, () => {
   const output = runHelper('test/helpers/haskellDisplayOutput.ts', 512);
@@ -173,5 +175,5 @@ test('trace stops when visible-name metadata exceeds export capacity', { timeout
 });
 
 function runHelper(path: string, heap: number, args: string[] = []): unknown {
-  return JSON.parse(runHaskellUnderNode(path, heap, args, 10_000));
+  return JSON.parse(runNodeBundle(path, { heapMb: heap, timeout: 10_000, args }));
 }

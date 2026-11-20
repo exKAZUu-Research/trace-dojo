@@ -1,0 +1,6 @@
+Error:Cannot indirectly modify readonly property A::$i
+Error:Cannot indirectly modify readonly property A::$i
+Error:Cannot indirectly modify readonly property A::$s
+Error:Cannot indirectly modify readonly property A::$s
+Error:Cannot indirectly modify readonly property A::$a
+Error:Cannot indirectly modify readonly property A::$a

@@ -34,7 +34,7 @@ export interface BuiltProgram {
 export function buildProgram(source: string, atomicRows: ReadonlySet<number> = new Set()): BuiltProgram {
   try {
     // A loan check can visit a loan at each CFG point, so it has a separate budget from the learner's run.
-    return typeCheck(source, atomicRows, new ExecutionBudget(32 * LIMITS.maxOperations));
+    return typeCheck(source, atomicRows, new ExecutionBudget(LIMITS.maxMilliseconds, 32 * LIMITS.maxOperations));
   } catch (error) {
     if (error instanceof ExecutionLimitError) {
       throw new CompileError([{ row: 0, message: 'このプログラムは、Rust のコンパイル処理の上限を超えました。' }]);

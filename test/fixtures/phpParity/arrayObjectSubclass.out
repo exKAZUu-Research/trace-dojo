@@ -1,0 +1,46 @@
+object(Bag)#1 (4) {
+  ["label"]=>
+  string(3) "bag"
+  ["p":protected]=>
+  int(1)
+  ["q":"Bag":private]=>
+  int(2)
+  ["storage":"ArrayObject":private]=>
+  array(1) {
+    ["a"]=>
+    int(1)
+  }
+}
+Bag Object
+(
+    [label] => bag
+    [p:protected] => 1
+    [q:Bag:private] => 2
+    [storage:ArrayObject:private] => Array
+        (
+            [a] => 1
+        )
+
+)
+
+object(It)#2 (2) {
+  ["z"]=>
+  int(0)
+  ["storage":"ArrayIterator":private]=>
+  array(1) {
+    [0]=>
+    int(1)
+  }
+}
+object(RecursiveArrayIterator)#3 (1) {
+  ["storage":"ArrayIterator":private]=>
+  array(1) {
+    [0]=>
+    int(1)
+  }
+}
+int(1)
+array(1) {
+  ["a"]=>
+  int(1)
+}
