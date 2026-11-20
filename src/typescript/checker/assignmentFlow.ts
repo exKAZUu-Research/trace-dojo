@@ -180,6 +180,10 @@ class AssignmentFlow {
     if (!values) return [undefined, undefined];
     const condition = skipParentheses(node);
     const operator = condition.childForFieldName('operator')?.type;
+    if (condition.type === 'unary_expression' && operator === '!') {
+      const [whenTrue, whenFalse] = this.branch(condition.childForFieldName('argument') as TreeNode, values);
+      return [whenFalse, whenTrue];
+    }
     if (condition.type === 'binary_expression' && (operator === '&&' || operator === '||'))
       return this.logicalBranch(condition, operator, values);
     const stops: Values[] = [];

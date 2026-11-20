@@ -380,7 +380,9 @@ export class FunctionChecker {
       if (!value || !symbol) continue;
       const declared = this.c.expressions.valueTypeOf(symbol);
       if (!mayBeUndefined(declared)) continue;
-      if (this.c.patterns.defaultMayBeUndefined(this.c.silently(() => this.parameterInitializerType(value, declared))))
+      if (
+        this.c.patterns.defaultMayBeUndefined(this.c.silently(() => this.c.patterns.initializerType(value, declared)))
+      )
         continue;
       this.c.flow.set(`s${symbol.id}`, { type: this.c.relations.removeUndefined(declared), assigned: true });
     }
@@ -591,16 +593,6 @@ export class FunctionChecker {
     );
   }
 
-  parameterInitializerType(value: TreeNode, contextual?: Type): Type {
-    const skipped = this.c.flow.current;
-    let type: Type = anyType;
-    const initialized = this.c.flow.from(skipped, () => {
-      type = this.c.expressions.check(value, contextual);
-    });
-    this.c.flow.current = this.c.flow.merge([skipped, initialized]);
-    return type;
-  }
-
   private checkParameterDefault(
     parameter: TreeNode,
     contextual: Signature | undefined,
@@ -613,7 +605,7 @@ export class FunctionChecker {
       (contextual && this.c.signatures.contextualParameterType(contextual, index, false));
     const pattern = parameter.childForFieldName('pattern') ?? parameter;
     const implied = expected ? undefined : this.c.patterns.impliedType(pattern);
-    const valueType = this.parameterInitializerType(value, expected ?? implied);
+    const valueType = this.c.patterns.initializerType(value, expected ?? implied);
     if (expected) this.c.expressions.checkAssignable(pattern, valueType, expected, value);
     else this.c.patterns.checkInitializer(pattern, value, valueType, implied);
     return valueType;

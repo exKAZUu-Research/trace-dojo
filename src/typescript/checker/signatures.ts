@@ -353,12 +353,10 @@ export class Signatures {
     value: TreeNode,
     expected: Type | undefined
   ): Type {
-    if (expected) return this.c.silently(() => this.c.functions.parameterInitializerType(value, expected));
+    if (expected) return this.c.silently(() => this.c.patterns.initializerType(value, expected));
     this.inferringParameterDefaults.add(parameter.id);
     try {
-      return this.c.silently(() =>
-        this.c.functions.parameterInitializerType(value, this.c.patterns.impliedType(pattern))
-      );
+      return this.c.silently(() => this.c.patterns.initializerType(value, this.c.patterns.impliedType(pattern)));
     } finally {
       this.inferringParameterDefaults.delete(parameter.id);
     }

@@ -37,11 +37,29 @@ class Immediate {
   value;
   constructor() { (() => { this.value = 10; })?.(); }
 }
+class Negation {
+  value;
+  constructor(receiver: any) { if (!(receiver?.[this.value = 11])) this.value = 12; }
+}
+class DoubleNegation {
+  value;
+  constructor(receiver: any) {
+    if (!!receiver?.[this.value = 13]) {}
+    else this.value = 14;
+  }
+}
+class NegatedLogical {
+  value;
+  constructor(receiver: any) { if (!(receiver?.[this.value = 15] && receiver.ready)) this.value = 16; }
+}
 function controls(receiver: any) {
   return [
     new ChainBreak(receiver).value.toFixed(),
     new Conditional(receiver).value.toFixed(),
     new Coalescing(receiver).value.toFixed(),
     new Immediate().value.toFixed(),
+    new Negation(receiver).value.toFixed(),
+    new DoubleNegation(receiver).value.toFixed(),
+    new NegatedLogical(receiver).value.toFixed(),
   ];
 }

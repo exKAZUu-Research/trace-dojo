@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 640 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
+// code-gauge-allow-file fileNcss 642 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
@@ -7,6 +7,7 @@ import type { Checker, Mapper } from './checker';
 import { contextualSignatureOf } from './contextualSignatures';
 import type { State } from './flow';
 import { InferencePriority, type InferenceRun, newInferenceRun } from './inference';
+import { prioritizeLiteralOverloads } from './overloadCandidates';
 import { isContextSensitiveFunction, parameterNodes } from './signatures';
 import { argumentParameters, isThisParameter, named, skipParentheses, stringValue, withoutAssertions } from './syntax';
 import {
@@ -509,13 +510,14 @@ export class Calls {
     contextual: Type | undefined,
     receiver?: Type
   ): Resolution | undefined {
-    const candidates = typeArguments
+    const eligible = typeArguments
       ? signatures.filter(
           (signature) =>
             signature.typeParameters.length >= typeArguments.length &&
             signature.typeParameters.filter((parameter) => !parameter.default).length <= typeArguments.length
         )
       : signatures;
+    const candidates = prioritizeLiteralOverloads(this.c, eligible);
     if (typeArguments && candidates.length === 0) {
       for (const arg of args) this.c.expressions.check(arg);
       const counts = [...new Set(signatures.map((signature) => signature.typeParameters.length))];

@@ -36,11 +36,13 @@ export class BindingPatterns {
 
   /** The type a binding pattern gives the name `name` when it destructures a value of `type`. */
   patternType(pattern: TreeNode, type: Type, name: string): Type {
-    let result: Type = anyType;
-    this.bindPattern(pattern, type, (identifier, identifierType) => {
-      if (identifier.text === name) result = identifierType;
+    return this.c.flow.probe(() => {
+      let result: Type = anyType;
+      this.bindPattern(pattern, type, (identifier, identifierType) => {
+        if (identifier.text === name) result = identifierType;
+      });
+      return result;
     });
-    return result;
   }
 
   /**
@@ -64,7 +66,7 @@ export class BindingPatterns {
         const left = pattern.childForFieldName('left') as TreeNode;
         const right = pattern.childForFieldName('right') as TreeNode;
         const implied = this.impliedType(left);
-        const defaultType = this.c.expressions.check(right, implied ?? type);
+        const defaultType = this.initializerType(right, implied ?? type);
         this.checkInitializer(left, right, defaultType, implied);
         const withoutUndefined = this.c.relations.removeUndefined(type);
         if (annotated && !isIntrinsic(withoutUndefined, 'never')) {
@@ -88,6 +90,16 @@ export class BindingPatterns {
         return;
       }
     }
+  }
+
+  initializerType(value: TreeNode, contextual?: Type): Type {
+    const skipped = this.c.flow.current;
+    let type: Type = anyType;
+    const initialized = this.c.flow.from(skipped, () => {
+      type = this.c.expressions.check(value, contextual);
+    });
+    this.c.flow.current = this.c.flow.merge([skipped, initialized]);
+    return type;
   }
 
   /**
@@ -191,7 +203,7 @@ export class BindingPatterns {
 
   private bindingLeafType(element: TreeNode): Type {
     const right = defaultedTarget(element) && element.childForFieldName('right');
-    return right ? this.c.silently(() => this.c.widen(this.c.expressions.check(right))) : anyType;
+    return right ? this.c.flow.probe(() => this.c.silently(() => this.c.expressions.checkWidened(right))) : anyType;
   }
 
   private bindObjectPattern(
