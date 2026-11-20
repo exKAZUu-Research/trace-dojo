@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 986 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 996 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import type {
   ClassDeclaration,
@@ -309,7 +309,7 @@ export class Compiler extends ConstructorCompiler {
         cls.representationName = parameter.name;
       }
     });
-    registerSealedSubclass(cls);
+    if (cls.kind !== 'extensionType') registerSealedSubclass(cls);
   }
 
   private resolveSuperclass({ cls, declaration }: ClassWork): void {
@@ -336,7 +336,14 @@ export class Compiler extends ConstructorCompiler {
     if (type.kind !== 'interface' || type.nullable) {
       return this.error(syntax, `${typeToString(type)} は${role}にできません。`);
     }
-    this.checkSubtypeAllowed(cls, type.cls, role, syntax);
+    if (cls.kind === 'extensionType') {
+      if (type.cls === coreTypes.function || type.cls === coreTypes.record)
+        this.error(syntax, `${typeToString(type)} は${role}にできません。`);
+    } else if (type.cls.kind === 'extensionType') {
+      this.error(syntax, `拡張型 ${type.cls.name} は${role}にできません。`);
+    } else {
+      this.checkSubtypeAllowed(cls, type.cls, role, syntax);
+    }
     return type;
   }
 
@@ -416,6 +423,8 @@ export class Compiler extends ConstructorCompiler {
       }
     }
     for (const { cls, declaration } of this.classWork) {
+      if (cls.representationType)
+        this.checkRepresentationInterfaces(cls, cls.representationType, declaration.interfaces);
       const seen = new Set<ClassInfo>();
       let current: ClassInfo | undefined = cls;
       while (current) {

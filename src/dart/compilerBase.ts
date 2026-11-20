@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 402 -- Type and diagnostic resolution share the compiler environment.
+// code-gauge-allow-file fileNcss 418 -- Type and diagnostic resolution share the compiler environment.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ClassDeclaration, Span, TypeAliasDeclaration, TypeParameter, TypeSyntax } from './ast';
 import type { ClassInfo, Member } from './classes';
@@ -378,11 +378,26 @@ export abstract class CompilerBase {
     }
   }
 
+  protected checkRepresentationInterfaces(cls: ClassInfo, representation: DartType, interfaces: TypeSyntax[]): void {
+    for (const [index, type] of cls.interfaces.entries()) {
+      if (type.cls === cls) this.error(interfaces[index], `拡張型 ${cls.name} は自分自身を実装できません。`);
+      const target = type.cls.representationType;
+      if (isSubtype(representation, type)) continue;
+      const args = new Map(type.cls.typeParams.map((param, position) => [param, type.args[position] ?? DYNAMIC]));
+      if (target && isSubtype(representation, substitute(target, args))) continue;
+      this.error(interfaces[index], `${typeToString(type)} は、拡張型 ${cls.name} が表す型と互換性がありません。`);
+    }
+  }
+
   // Members
 
   /** Finds a member through a static type, including Object's members on nullable types and extension members. */
   lookupMember(receiverType: DartType, name: string, setter: boolean): ResolvedMember | undefined {
     const base = resolveBound(receiverType);
+    if (isNullable(base)) {
+      const objectMember = this.interfaceMember(objectType(), name, setter);
+      if (objectMember) return objectMember;
+    }
     const nonNull = base.kind === 'interface' && base.nullable ? { ...base, nullable: false } : base;
     const direct = this.lookupDirect(nonNull, name, setter);
     if (direct) return direct;

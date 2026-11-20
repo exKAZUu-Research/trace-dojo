@@ -745,6 +745,38 @@ void main() {
   }
 });
 
+test('nullable values can use Object members and still dispatch to overrides', () => {
+  const program = `class Marker {
+  String toString() => 'marker';
+  int get hashCode => 42;
+}
+void inspect(int? i, String? s, List<int>? l, Marker? marker) {
+  print([i.toString(), s.toString(), l.toString()]);
+  print(l.hashCode == null.hashCode);
+  final text = i.toString;
+  print(text());
+  print([marker.toString(), marker.hashCode]);
+}
+void main() { inspect(null, null, null, Marker()); }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[null, null, null]\ntrue\nnull\n[marker, 42]\n',
+  });
+});
+
+test('extension types can expose members of compatible representation interfaces', () => {
+  const program = `extension type NumberE(int value) implements int { NumberE get same => this; }
+extension type Measure(double value) implements num {}
+extension type Wrapped(int data) implements NumberE {}
+void main() {
+  int i = NumberE(3);
+  print([i, NumberE(3).same.isOdd, Measure(1.5).floor(), Wrapped(5).value]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[3, true, 1, 5]\n' });
+  const invalid = 'extension type Invalid(String value) implements int {} void main() {}';
+  expect(executeProgram('dart', invalid)).toMatchObject({ kind: 'compileError' });
+});
+
 // Each program is an error before it runs in the SDK, at the line given.
 test.each([
   { name: 'a type mismatch', body: '  int x = "a";', row: 1 },

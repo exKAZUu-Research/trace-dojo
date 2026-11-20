@@ -117,7 +117,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
         value,
         writeType,
         valueSyntax,
-        (from, to) => `${from} 型の値は、${to} 型の${variable ? `変数 ${variable.name}` : '代入先'}に代入できません。`
+        (from, to) => `${from} 型の値は、${to} 型の${variable ? `変数 ${variable.name} ` : '代入先'}に代入できません。`
       );
       this.afterWrite(variable, value.type);
       const run = value.run;
