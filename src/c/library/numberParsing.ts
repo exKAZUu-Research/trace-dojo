@@ -1,4 +1,4 @@
-import { exactParts, roundBinary } from './binaryFloat';
+import { exactParts, roundBinary, roundDecimalToFloat } from './binaryFloat';
 
 export function isSpaceByte(byte: number): boolean {
   return byte === 0x20 || (byte >= 0x09 && byte <= 0x0d);
@@ -62,8 +62,9 @@ export function parseIntegerPrefix(
 // code-gauge-allow functionNcss 35 -- Decimal, hexadecimal, infinity, and NaN prefixes share one consumed-length contract.
 export function parseFloatPrefix(
   bytes: Uint8Array,
-  maxLength = Number.POSITIVE_INFINITY
-): { value: number; length: number; isInfinityText: boolean; isNonzeroText: boolean } {
+  maxLength = Number.POSITIVE_INFINITY,
+  isFloat = false
+): { value: number; length: number; isInfinityText: boolean; isNonzeroText: boolean; isNegativeNaN?: boolean } {
   const limit = Math.min(bytes.length, maxLength);
   let index = 0;
   while (index < limit && isSpaceByte(bytes[index])) index++;
@@ -89,6 +90,7 @@ export function parseFloatPrefix(
       length: index + (paren ? paren[0].length : 3),
       isInfinityText: true,
       isNonzeroText: true,
+      isNegativeNaN: sign < 0,
     };
   }
   const hex = /^0x([\da-f]*)(?:\.([\da-f]*))?(?:p([+-]?\d+))?/.exec(rest);
@@ -97,7 +99,7 @@ export function parseFloatPrefix(
     const fraction = hex[2] ?? '';
     const mantissa = BigInt(`0x${integer + fraction || '0'}`);
     const exponent = Number(hex[3] ?? '0') - fraction.length * 4;
-    const value = sign * roundBinary(mantissa, 1n, exponent);
+    const value = sign * roundBinary(mantissa, 1n, exponent, isFloat);
     const matched = hex[3] === undefined ? `0x${integer}${hex[2] === undefined ? '' : `.${fraction}`}` : hex[0];
     return { value, length: index + matched.length, isInfinityText: false, isNonzeroText: mantissa !== 0n };
   }
@@ -108,16 +110,35 @@ export function parseFloatPrefix(
   let matched = decimal[0];
   if (/e[+-]?$/.test(matched)) matched = matched.replace(/e[+-]?$/, '');
   if (decimal[3] === undefined && /e/.test(matched)) matched = matched.replace(/e.*$/, '');
-  const value = sign * Number(matched.startsWith('.') ? `0${matched}` : matched);
+  const magnitude = isFloat
+    ? roundDecimalToFloat(decimal[1], decimal[2] ?? '', Number(decimal[3] ?? 0))
+    : Number(matched);
   return {
-    value,
+    value: sign * magnitude,
     length: index + matched.length,
     isInfinityText: false,
     isNonzeroText: /[1-9]/.test(matched.replace(/e.*$/, '')),
   };
 }
 
-export function isExactFloatPrefix(bytes: Uint8Array, length: number, value: number): boolean {
+/**
+ * Whether macOS `strtod` (`strtof` when `isFloat`) sets ERANGE for underflow: the text names a nonzero number whose
+ * rounded `value` is below the smallest normal number and differs from it.
+ */
+export function isFloatUnderflow(
+  bytes: Uint8Array,
+  parsed: { length: number; isNonzeroText: boolean },
+  value: number,
+  isFloat: boolean
+): boolean {
+  return (
+    parsed.isNonzeroText &&
+    Math.abs(value) < (isFloat ? 2 ** -126 : 2 ** -1022) &&
+    !isExactFloatPrefix(bytes, parsed.length, value)
+  );
+}
+
+function isExactFloatPrefix(bytes: Uint8Array, length: number, value: number): boolean {
   const text = new TextDecoder().decode(bytes.subarray(0, length)).trim().replace(/^[+-]/, '').toLowerCase();
   const hex = /^0x([\da-f]*)(?:\.([\da-f]*))?(?:p([+-]?\d+))?$/.exec(text);
   const decimal = /^(\d*)(?:\.(\d*))?(?:e([+-]?\d+))?$/.exec(text);

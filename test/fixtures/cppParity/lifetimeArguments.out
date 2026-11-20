@@ -1,0 +1,11 @@
+C1 in f in g D1 
+C2 cp12 in f in g D12 
+C3 C4 in both D4 D3 
+C5 in f C6 in f D6 D5 11
+C7 S D7 
+C8 in method D8 
+C11 D11 caught 9
+C12 in f D12 caught 9
+C13 D13 caught 9
+C14 in failing D14 caught 8
+D2 
