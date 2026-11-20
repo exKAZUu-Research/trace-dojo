@@ -9,6 +9,7 @@ import { INT_NAMES, intMax, intMin, type IntName, resolve, shallow, type Type } 
 
 /** A constant: a number, a bool, a char, or a tuple or struct of constants keyed by field (`0`, `x`). */
 type Known = bigint | number | boolean | string | Aggregate;
+type IntegerOperation = Pick<Extract<Expr, { kind: 'binary' }>, 'op' | 'span'>;
 
 interface Aggregate {
   fields: Map<string, Known | undefined>;
@@ -151,13 +152,17 @@ export class ConstLint {
     }
   }
 
-  // code-gauge-allow functionNcss 38 -- One case per kind of expression.
+  // code-gauge-allow functionNcss 42 -- One case per kind of expression.
   private controlFlow(expr: Expr): void {
     switch (expr.kind) {
       case 'assign': {
         const value = this.expr(expr.value);
         if (expr.target.kind !== 'path') this.expr(expr.target);
         this.assign(expr.target, value);
+        return;
+      }
+      case 'compoundAssign': {
+        this.compoundAssignment(expr);
         return;
       }
       case 'return':
@@ -325,18 +330,36 @@ export class ConstLint {
     if (res?.kind === 'local') this.setKnown(res.local, value);
   }
 
+  private compoundAssignment(expr: Extract<Expr, { kind: 'compoundAssign' }>): void {
+    const right = this.expr(expr.value);
+    const left = this.expr(expr.target);
+    const name = intTypeOf(expr.target.ty);
+    const result = name && this.integerBinary(expr, name, left, right);
+    this.endBlock();
+    this.assign(expr.target, result);
+  }
+
   private constValue(expr: Expr): Known | undefined {
     return new ConstLint(this.annotations, this.module).expr(expr);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of constant expression.
-  // code-gauge-allow functionNcss 39 -- One case per kind of constant expression.
   private binary(expr: Extract<Expr, { kind: 'binary' }>): Known | undefined {
     const left = this.expr(expr.left);
     if (expr.op === '&&' || expr.op === '||') return this.logical(expr, left);
     const right = this.expr(expr.right);
     const name = intTypeOf(expr.left.ty);
-    if (!name || typeof right !== 'bigint') return undefined;
+    return name && this.integerBinary(expr, name, left, right);
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 16 -- One case per integer operator.
+  // code-gauge-allow functionNcss 39 -- One case per integer operator.
+  private integerBinary(
+    expr: IntegerOperation,
+    name: IntName,
+    left: Known | undefined,
+    right: Known | undefined
+  ): bigint | undefined {
+    if (typeof right !== 'bigint') return undefined;
     if ((expr.op === '/' || expr.op === '%') && right === 0n) {
       compileError(expr.span, '0 で割る計算なので、実行すると必ず panic します。');
     }
@@ -420,7 +443,7 @@ export class ConstLint {
     }
   }
 
-  private checked(value: bigint, name: IntName, expr: Expr): bigint {
+  private checked(value: bigint, name: IntName, expr: { span: Expr['span'] }): bigint {
     if (value < intMin(name) || value > intMax(name)) {
       compileError(expr.span, 'この計算は、実行すると必ずあふれます。');
     }

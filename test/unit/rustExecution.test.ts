@@ -297,6 +297,28 @@ fn main() {
   });
 });
 
+test('Rust constant checks follow compound assignments', () => {
+  const program = `fn main() {
+    let mut divisor = 0;
+    divisor += 1;
+    println!("{}", 10 / divisor);
+
+    let values = [1, 2, 3];
+    let mut index = 5;
+    index -= 3;
+    println!("{}", values[index]);
+
+    let mut n: u8 = 250;
+    n -= 100;
+    println!("{}", n + 10);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '10\n3\n160\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {
@@ -329,6 +351,16 @@ test.each([
   ['a non-exhaustive match', '    let n = 3;\n    match n { 1 => {} }', 3],
   ['arithmetic that always overflows', '    let x: u32 = 3;\n    let y = x - 5;', 3],
   ['arithmetic on an associated constant that overflows', '    let x = i32::MAX + 1;', 2],
+  [
+    'index made out of bounds by compound assignment',
+    '    let a = [1, 2, 3];\n    let mut i = 2;\n    i += 1;\n    println!("{}", a[i]);',
+    5,
+  ],
+  [
+    'overflow in compound assignment',
+    '    let mut x = u8::MAX;\n    x += 1;\n    let value = x;\n    println!("{}", value);',
+    3,
+  ],
   ['a literal out of its type', '    let x: u8 = 256;', 2],
   [
     'a borrow through a reference that a later push conflicts with',
