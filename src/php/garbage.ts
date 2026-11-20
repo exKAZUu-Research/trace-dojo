@@ -199,7 +199,8 @@ function destructCreatedGarbage(
   if (created.length === 0) return { after, afterArrays, created };
   const graph = new CollectionGraph([...created, ...objectsCreatedSince(runtime, handles, after)], runtime);
   const deferred = heldNodes(graph, created);
-  const existing = new Set<unknown>([
+  const live = new Set<unknown>([...after, ...afterArrays]);
+  const known = new Set<unknown>([
     ...runtime.objects.values(),
     ...bufferedGarbage(runtime, new Set(), new Set()),
     ...runtime.arrayCycles,
@@ -207,10 +208,10 @@ function destructCreatedGarbage(
   run(created);
   afterArrays = new Set<PhpArray>();
   after = mark(runtime, false, afterArrays);
-  // What those destructors attached to their objects, or created and dropped, stays with them too.
+  // What those destructors made garbage, whether they allocated it or released it, stays with them too.
   const unreached = [...runtime.objects.values()].filter((object) => !after.has(object));
   const dropped = [...bufferedGarbage(runtime, afterArrays, new Set()), ...runtime.arrayCycles];
-  const starts = [...created, ...[...unreached, ...dropped].filter((node) => !existing.has(node))];
+  const starts = [...created, ...[...unreached, ...dropped].filter((node) => live.has(node) || !known.has(node))];
   for (const node of heldNodes(new CollectionGraph(unreached, runtime), starts)) deferred.add(node);
   for (const node of deferred)
     if (node instanceof PhpArray) afterArrays.add(node);

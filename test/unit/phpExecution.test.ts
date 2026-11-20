@@ -5271,10 +5271,11 @@ test('gc_collect_cycles() defers what destructors of deferred objects attach or 
     ['$this->c = new stdClass;', 'E;int(1)\nint(2)\nint(0)\n'],
     ['$g = new G; $g->self = $g; $g->c = [new stdClass];', 'E;G;int(1)\nint(4)\nint(0)\n'],
     ['$a = []; $a["self"] = &$a; unset($a);', 'E;int(1)\nint(2)\nint(0)\n'],
+    ['global $saved; $saved = null;', 'E;int(1)\nint(2)\nint(0)\n'],
   ]) {
     expect(
       run(
-        `<?php class G { public $self; public $c; function __destruct() { echo "G;"; } } class E { public $self; public $c; function __destruct() { echo "E;"; ${make} } } class D { public $self; function __destruct() { $e = new E; $e->self = $e; } } $d = new D; $d->self = $d; unset($d); var_dump(gc_collect_cycles(), gc_collect_cycles(), gc_collect_cycles());`
+        `<?php class G { public $self; public $c; function __destruct() { echo "G;"; } } class E { public $self; public $c; function __destruct() { echo "E;"; ${make} } } class D { public $self; function __destruct() { $e = new E; $e->self = $e; } } $saved = new stdClass; $saved->self = $saved; $d = new D; $d->self = $d; unset($d); var_dump(gc_collect_cycles(), gc_collect_cycles(), gc_collect_cycles());`
       )
     ).toMatchObject({ kind: 'executed', stdout: expected });
   }
