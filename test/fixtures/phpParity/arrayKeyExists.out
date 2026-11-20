@@ -1,0 +1,5 @@
+array_key_exists(): Argument #1 ($key) must be a valid array offset type
+Cannot access offset of type stdClass on array
+
+Deprecated: Using null as the key parameter for array_key_exists() is deprecated, use an empty string instead in /main.php on line 4
+bool(true)

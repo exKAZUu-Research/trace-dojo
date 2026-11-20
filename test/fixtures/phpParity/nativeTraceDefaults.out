@@ -1,0 +1,32 @@
+ValueError: preg_match(): Argument #4 ($flags) must be a PREG_* constant in /main.php:4
+Stack trace:
+#0 /main.php(4): preg_match('/a/', 'a', Array, 2)
+#1 {main}
+ValueError: preg_match_all(): Argument #4 ($flags) must be a PREG_* constant in /main.php:5
+Stack trace:
+#0 /main.php(5): preg_match_all('/a/', 'a', Array, 99)
+#1 {main}
+ValueError: str_pad(): Argument #4 ($pad_type) must be STR_PAD_LEFT, STR_PAD_RIGHT, or STR_PAD_BOTH in /main.php:6
+Stack trace:
+#0 /main.php(6): str_pad('a', 4, ' ', 99)
+#1 {main}
+ArgumentCountError: array_keys(): Argument #2 ($filter_value) must be passed explicitly, because the default value is not known in /main.php:9
+Stack trace:
+#0 /main.php(9): array_keys(Array, NULL, true)
+#1 {main}
+
+Deprecated: str_pad(): Passing null to parameter #3 ($pad_string) of type string is deprecated in /main.php on line 10
+ValueError: str_pad(): Argument #3 ($pad_string) must not be empty in /main.php:10
+Stack trace:
+#0 /main.php(10): str_pad('a', 4, '', 99)
+#1 {main}
+#0 /main.php(11): preg_match('/a/', 'a', Array, '2')
+#1 {main}
+#0 /main.php(12): preg_match('/a/', 'a', Array, '2')
+#1 {main}
+#0 /main.php(13): str_pad('a', '3', '2', '99')
+#1 {main}
+#0 /main.php(14): str_pad('a', '3', ' ', 99.0)
+#1 {main}
+#0 /main.php(15): json_decode('[]', NULL, '0')
+#1 {main}

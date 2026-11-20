@@ -1,0 +1,4 @@
+
+Fatal error: Declaration of B::f($xs = null) must be compatible with A::f(...$xs) in /main.php on line 1
+Stack trace:
+#0 {main}

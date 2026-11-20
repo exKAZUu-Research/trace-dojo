@@ -1,0 +1,91 @@
+
+Warning: Constant lesson\UPPER already defined, this will be an error in PHP 9 in /main.php on line 5
+int(1)
+int(1)
+int(1)
+array(1) {
+  ["value"]=>
+  int(42)
+}
+array(1) {
+  ["value"]=>
+  int(42)
+}
+Cannot call compact() dynamically
+#0 [internal function]: compact('value')
+#1 /main.php(10): call_user_func('compact', 'value')
+#2 /main.php(14): {closure:Lesson\forwards():10}()
+#3 /main.php(23): Lesson\forwards(42)
+#4 {main}
+Cannot call func_get_args() dynamically
+#0 [internal function]: func_get_args()
+#1 /main.php(11): call_user_func_array('func_get_args', Array)
+#2 /main.php(14): {closure:Lesson\forwards():11}()
+#3 /main.php(23): Lesson\forwards(42)
+#4 {main}
+Cannot call compact() dynamically
+#0 /main.php(12): compact('value')
+#1 /main.php(14): {closure:Lesson\forwards():12}()
+#2 /main.php(23): Lesson\forwards(42)
+#3 {main}
+func_get_arg(): Argument #1 ($position) must be greater than or equal to 0
+Cannot call func_get_arg() dynamically
+Cannot call func_get_arg() dynamically
+func_get_arg(): Argument #1 ($position) must be greater than or equal to 0
+bool(true)
+bool(false)
+NULL
+bool(true)
+bool(true)
+bool(false)
+NULL
+int(1)
+int(1)
+Cannot call func_num_args() dynamically
+#0 /main.php(40): func_num_args()
+#1 /main.php(45): Lesson\StaticForwarding::{closure:Lesson\StaticForwarding::run():40}()
+#2 /main.php(50): Lesson\StaticForwarding::run(42)
+#3 {main}
+Cannot call func_num_args() dynamically
+#0 /main.php(41): func_num_args()
+#1 /main.php(45): Lesson\StaticForwarding::{closure:Lesson\StaticForwarding::run():41}()
+#2 /main.php(50): Lesson\StaticForwarding::run(42)
+#3 {main}
+Cannot call func_num_args() dynamically
+#0 /main.php(42): func_num_args()
+#1 /main.php(45): Lesson\StaticForwarding::{closure:Lesson\StaticForwarding::run():42}()
+#2 /main.php(50): Lesson\StaticForwarding::run(42)
+#3 {main}
+Cannot call func_num_args() dynamically
+#0 /main.php(43): func_num_args()
+#1 /main.php(45): Lesson\StaticForwarding::{closure:Lesson\StaticForwarding::run():43}()
+#2 /main.php(50): Lesson\StaticForwarding::run(42)
+#3 {main}
+bool(true)
+bool(true)
+bool(true)
+bool(false)
+bool(true)
+NULL
+bool(true)
+bool(true)
+bool(true)
+bool(false)
+bool(true)
+NULL
+bool(false)
+bool(true)
+int(5)
+bool(true)
+int(7)
+bool(true)
+bool(false)
+int(0)
+string(12) "aliased null"
+NULL
+bool(true)
+int(7)
+int(7)
+int(0)
+string(12) "aliased null"
+namespaced argument

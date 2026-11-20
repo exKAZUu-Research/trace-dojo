@@ -1,0 +1,14 @@
+
+Warning: unexpected NAN value was coerced to string in /main.php on line 3
+
+Warning: unexpected NAN value was coerced to string in /main.php on line 8
+
+Warning: unexpected NAN value was coerced to string in /main.php on line 8
+
+Warning: unexpected NAN value was coerced to string in /main.php on line 10
+before
+%NAN/12/NAN
+
+Warning: unexpected NAN value was coerced to string in /main.php on line 13
+NAN
+after

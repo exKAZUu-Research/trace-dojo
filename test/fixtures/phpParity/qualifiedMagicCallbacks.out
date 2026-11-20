@@ -1,0 +1,7 @@
+
+Deprecated: Callables of the form ["B", "self::missing"] are deprecated in /main.php on line 6
+magic:missing|
+Deprecated: Callables of the form ["B", "parent::missing"] are deprecated in /main.php on line 6
+call_user_func(): Argument #1 ($callback) must be a valid callback, class A does not have a method "missing"|
+Deprecated: Callables of the form ["B", "A::missing"] are deprecated in /main.php on line 6
+call_user_func(): Argument #1 ($callback) must be a valid callback, class A does not have a method "missing"|

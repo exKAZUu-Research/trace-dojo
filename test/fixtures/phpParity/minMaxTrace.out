@@ -1,0 +1,11 @@
+min(): Argument #1 ($value) must contain at least one element
+#0 /main.php(3): min(Array)
+#1 /main.php(8): emptyExtremes(Array)
+#2 {main}
+max(): Argument #1 ($value) must contain at least one element
+#0 /main.php(5): max(Array)
+#1 /main.php(8): emptyExtremes(Array)
+#2 {main}
+min(): Argument #1 ($value) must be of type array, string given
+#0 /main.php(9): min('invalid')
+#1 {main}

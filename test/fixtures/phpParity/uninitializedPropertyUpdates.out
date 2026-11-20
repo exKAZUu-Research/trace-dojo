@@ -1,0 +1,48 @@
+Error:Typed property A::$p must not be accessed before initialization;bool(false)
+bool(false)
+bool(true)
+bool(false)
+Error:Typed property A::$p must not be accessed before initialization;bool(false)
+bool(false)
+bool(true)
+bool(false)
+Error:Typed property A::$p must not be accessed before initialization;bool(false)
+bool(false)
+bool(true)
+bool(false)
+Error:Typed property A::$s must not be accessed before initialization;bool(false)
+bool(false)
+bool(true)
+bool(false)
+Error:Typed property A::$d must not be accessed before initialization;bool(false)
+bool(false)
+bool(false)
+bool(false)
+Error:Typed property A::$r must not be accessed before initialization;bool(false)
+bool(false)
+bool(true)
+bool(false)
+get;int(5)
+array(1) {
+  [0]=>
+  int(1)
+}
+int(2)
+object(B)#2 (1) {
+  ["y"]=>
+  int(2)
+}
+array(1) {
+  ["y"]=>
+  int(2)
+}
+array(1) {
+  ["y"]=>
+  int(2)
+}
+object(B)#2 (2) {
+  ["x"]=>
+  int(3)
+  ["y"]=>
+  int(2)
+}

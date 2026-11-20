@@ -1,0 +1,80 @@
+
+Deprecated: Return type of ResultIterator::rewind() should either be compatible with ArrayIterator::rewind(): void, or the #[\ReturnTypeWillChange] attribute should be used to temporarily suppress the notice in /main.php on line 8
+
+Deprecated: Return type of ResultIterator::next() should either be compatible with ArrayIterator::next(): void, or the #[\ReturnTypeWillChange] attribute should be used to temporarily suppress the notice in /main.php on line 15
+
+Deprecated: Return type of ResultIterator::valid() should either be compatible with ArrayIterator::valid(): bool, or the #[\ReturnTypeWillChange] attribute should be used to temporarily suppress the notice in /main.php on line 12
+
+Deprecated: Return type of ResultIterator::seek($offset) should either be compatible with ArrayIterator::seek(int $offset): void, or the #[\ReturnTypeWillChange] attribute should be used to temporarily suppress the notice in /main.php on line 19
+
+Deprecated: Return type of ResultTraversal::beginIteration() should either be compatible with RecursiveIteratorIterator::beginIteration(): void, or the #[\ReturnTypeWillChange] attribute should be used to temporarily suppress the notice in /main.php on line 38
+
+Deprecated: Return type of ResultTraversal::endIteration() should either be compatible with RecursiveIteratorIterator::endIteration(): void, or the #[\ReturnTypeWillChange] attribute should be used to temporarily suppress the notice in /main.php on line 45
+
+Deprecated: Return type of ResultTraversal::callHasChildren() should either be compatible with RecursiveIteratorIterator::callHasChildren(): bool, or the #[\ReturnTypeWillChange] attribute should be used to temporarily suppress the notice in /main.php on line 39
+
+Deprecated: Return type of ResultTraversal::beginChildren() should either be compatible with RecursiveIteratorIterator::beginChildren(): void, or the #[\ReturnTypeWillChange] attribute should be used to temporarily suppress the notice in /main.php on line 42
+
+Deprecated: Return type of ResultTraversal::endChildren() should either be compatible with RecursiveIteratorIterator::endChildren(): void, or the #[\ReturnTypeWillChange] attribute should be used to temporarily suppress the notice in /main.php on line 44
+
+Deprecated: Return type of ResultTraversal::nextElement() should either be compatible with RecursiveIteratorIterator::nextElement(): void, or the #[\ReturnTypeWillChange] attribute should be used to temporarily suppress the notice in /main.php on line 43
+
+Deprecated: Return type of InterruptedTraversal::callHasChildren() should either be compatible with RecursiveIteratorIterator::callHasChildren(): bool, or the #[\ReturnTypeWillChange] attribute should be used to temporarily suppress the notice in /main.php on line 52
+
+Deprecated: Return type of ResultHeap::compare($left, $right) should either be compatible with SplPriorityQueue::compare(mixed $priority1, mixed $priority2): int, or the #[\ReturnTypeWillChange] attribute should be used to temporarily suppress the notice in /main.php on line 78
+drop rewind
+drop valid
+item 1
+drop next
+drop valid
+item 2
+drop next
+drop rewind
+drop valid
+item 1
+drop next
+drop valid
+item 2
+drop next
+drop rewind
+drop seek
+drop valid
+limited item 2
+drop rewind
+drop rewind
+drop valid
+bool(false)
+drop next
+drop next
+drop valid
+bool(false)
+drop begin iteration
+drop has children
+drop begin children
+drop next element
+item 1
+drop end children
+drop has children
+drop begin children
+drop next element
+item 2
+drop end children
+drop end iteration
+interrupt
+item after interruption 2
+drop exists 1
+drop exists 2
+get 2
+drop set 3
+bool(true)
+int(2)
+int(8)
+drop unset 1
+drop unset 2
+direct return: set 3
+drop set 3
+extracted compare
+drop comparison
+compare
+drop comparison
+7

@@ -1,0 +1,70 @@
+object(ParentValue)#1 (5) {
+  ["child"]=>
+  object(DebugValue)#2 (0) {
+  }
+  ["change"]=>
+  string(3) "new"
+  ["typed"]=>
+  uninitialized(string)
+  ["uninitialized"]=>
+  uninitialized(int)
+  ["dynamic"]=>
+  string(7) "dynamic"
+}
+
+ParentValue Object
+(
+    [child] => DebugValue Object
+        (
+        )
+
+    [change] => new
+    [dynamic] => dynamic
+)
+
+\ParentValue::__set_state(array(
+   'child' => 
+  \ExportValue::__set_state(array(
+     'value' => 1,
+  )),
+   'change' => 'new',
+   'dynamic' => 'dynamic',
+))
+array(3) {
+  ["value"]=>
+  int(1)
+  ["changed"]=>
+  int(2)
+  ["removed"]=>
+  int(3)
+}
+value=1;
+array(1) {
+  ["value"]=>
+  int(1)
+}
+value=1
+int(2)
+Array
+(
+    [0] => MutateArrayReference Object
+        (
+        )
+
+    [1] => new
+)
+object(DebugArrayReference)#2 (2) {
+  [0]=>
+  object(MutateArrayReference)#3 (0) {
+  }
+  [1]=>
+  &string(3) "new"
+}
+DebugArrayReference Object
+(
+    [0] => MutateArrayReference Object
+        (
+        )
+
+    [1] => new
+)

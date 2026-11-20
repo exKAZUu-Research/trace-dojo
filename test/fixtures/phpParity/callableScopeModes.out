@@ -1,0 +1,109 @@
+Error: Class "self" not found
+TypeError: call_user_func(): Argument #1 ($callback) must be a valid callback, cannot access "self" when no class scope is active
+TypeError: array_map(): Argument #1 ($callback) must be a valid callback or null, cannot access "self" when no class scope is active
+Error: Class "self" not found
+TypeError: call_user_func(): Argument #1 ($callback) must be a valid callback, cannot access "self" when no class scope is active
+TypeError: array_map(): Argument #1 ($callback) must be a valid callback or null, cannot access "self" when no class scope is active
+Error: Class "static" not found
+TypeError: call_user_func(): Argument #1 ($callback) must be a valid callback, cannot access "static" when no class scope is active
+TypeError: array_map(): Argument #1 ($callback) must be a valid callback or null, cannot access "static" when no class scope is active
+Error: Class "static" not found
+TypeError: call_user_func(): Argument #1 ($callback) must be a valid callback, cannot access "static" when no class scope is active
+TypeError: array_map(): Argument #1 ($callback) must be a valid callback or null, cannot access "static" when no class scope is active
+Error: Class "parent" not found
+TypeError: call_user_func(): Argument #1 ($callback) must be a valid callback, cannot access "parent" when no class scope is active
+TypeError: array_map(): Argument #1 ($callback) must be a valid callback or null, cannot access "parent" when no class scope is active
+Error: Class "parent" not found
+TypeError: call_user_func(): Argument #1 ($callback) must be a valid callback, cannot access "parent" when no class scope is active
+TypeError: array_map(): Argument #1 ($callback) must be a valid callback or null, cannot access "parent" when no class scope is active
+Class "self" not found
+Class "self" not found
+
+Deprecated: Use of "self" in callables is deprecated in /main.php on line 17
+
+Deprecated: Use of "self" in callables is deprecated in /main.php on line 17
+bool(true)
+bool(false)
+
+Deprecated: Use of "self" in callables is deprecated in /main.php on line 18
+child:1;
+
+Deprecated: Use of "self" in callables is deprecated in /main.php on line 19
+child:2;child:3;array(2) {
+  [0]=>
+  int(2)
+  [1]=>
+  int(3)
+}
+Class "static" not found
+Class "static" not found
+
+Deprecated: Use of "static" in callables is deprecated in /main.php on line 17
+
+Deprecated: Use of "static" in callables is deprecated in /main.php on line 17
+bool(true)
+bool(false)
+
+Deprecated: Use of "static" in callables is deprecated in /main.php on line 18
+child:1;
+
+Deprecated: Use of "static" in callables is deprecated in /main.php on line 19
+child:2;child:3;array(2) {
+  [0]=>
+  int(2)
+  [1]=>
+  int(3)
+}
+Class "parent" not found
+Class "parent" not found
+
+Deprecated: Use of "parent" in callables is deprecated in /main.php on line 17
+
+Deprecated: Use of "parent" in callables is deprecated in /main.php on line 17
+bool(true)
+bool(false)
+
+Deprecated: Use of "parent" in callables is deprecated in /main.php on line 18
+parent:1;
+
+Deprecated: Use of "parent" in callables is deprecated in /main.php on line 19
+parent:2;parent:3;array(2) {
+  [0]=>
+  int(2)
+  [1]=>
+  int(3)
+}
+
+Deprecated: Use of "self" in callables is deprecated in /main.php on line 21
+child:4;
+
+Deprecated: Use of "self" in callables is deprecated in /main.php on line 22
+array(2) {
+  [0]=>
+  int(1)
+  [1]=>
+  int(2)
+}
+Class "self" not found
+
+Deprecated: Use of "self" in callables is deprecated in /main.php on line 32
+CallbackBase:CallbackLeaf
+
+Deprecated: Use of "static" in callables is deprecated in /main.php on line 33
+CallbackBase:CallbackLeaf
+
+Deprecated: Use of "self" in callables is deprecated in /main.php on line 34
+unknownInBase:CallbackBase:CallbackLeaf
+
+Deprecated: Use of "self" in callables is deprecated in /main.php on line 35
+CallbackBase:CallbackLeaf
+
+Deprecated: Use of "parent" in callables is deprecated in /main.php on line 41
+CallbackBase:CallbackLeaf
+
+Deprecated: Use of "parent" in callables is deprecated in /main.php on line 42
+unknownInParent:CallbackBase:CallbackLeaf
+
+Deprecated: Use of "parent" in callables is deprecated in /main.php on line 43
+CallbackBase:CallbackLeaf
+CallbackBase:CallbackBase

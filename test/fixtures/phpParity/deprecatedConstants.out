@@ -1,0 +1,21 @@
+
+Deprecated: Constant MT_RAND_PHP is deprecated since 8.3, as it uses a biased non-standard variant of Mt19937 in /main.php on line 2
+
+Deprecated: The MT_RAND_PHP variant of Mt19937 is deprecated in /main.php on line 2
+
+Deprecated: Constant MT_RAND_PHP is deprecated since 8.3, as it uses a biased non-standard variant of Mt19937 in /main.php on line 2
+int(969637571)
+int(6)
+int(1)
+array(2) {
+  [0]=>
+  int(1)
+  ["a"]=>
+  int(2)
+}
+array(2) {
+  [0]=>
+  int(1)
+  ["a"]=>
+  int(2)
+}

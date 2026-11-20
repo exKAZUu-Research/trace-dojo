@@ -1,0 +1,31 @@
+array(2) {
+  [0]=>
+  int(2)
+  [1]=>
+  int(2)
+}
+before;Cannot use [] for reading
+before;Cannot use [] for reading
+0:A,b
+1:b,A
+2:A,b
+3:b,A
+4:A,b
+5:A,b
+6:A,b
+ValueError: array_multisort(): Argument #2 must be a valid sort flag
+8:A,b
+9:b,A
+10:A,b
+11:A,b
+12:A,b
+13:A,b
+14:A,b
+ValueError: array_multisort(): Argument #2 must be a valid sort flag
+array_multisort(): Argument #3 must be an array or a sort flag that has not already been specified
+-1:0
+0:2
+#0 /main.php(9): innerLimit('x')
+#1 /main.php(11): outerLimit(2)
+1:1
+#0 /main.php(9): innerLimit('x')

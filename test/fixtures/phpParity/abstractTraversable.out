@@ -1,0 +1,5 @@
+child
+
+Fatal error: Class InvalidConcreteChild must implement interface Traversable as part of either Iterator or IteratorAggregate in Unknown on line 0
+Stack trace:
+#0 {main}

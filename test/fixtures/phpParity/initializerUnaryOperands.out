@@ -1,0 +1,8 @@
+Unsupported operand types: int + array
+Unsupported operand types: int * array
+float(-0)
+
+Fatal error: Uncaught TypeError: Unsupported operand types: int * string in /main.php:12
+Stack trace:
+#0 {main}
+  thrown in /main.php on line 12

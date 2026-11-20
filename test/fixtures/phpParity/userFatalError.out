@@ -1,0 +1,9 @@
+a
+
+Deprecated: Passing E_USER_ERROR to trigger_error() is deprecated since 8.4, throw an exception or call exit with a string message instead in /main.php on line 2
+
+Fatal error: fatal! in /main.php on line 2
+Stack trace:
+#0 /main.php(2): trigger_error('fatal!', 256)
+#1 /main.php(4): f()
+#2 {main}

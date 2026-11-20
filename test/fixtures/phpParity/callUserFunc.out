@@ -1,0 +1,19 @@
+#0 /main.php(3): check(1)
+#1 {main}
+#0 /main.php(4): check(5)
+#1 {main}
+#0 /main.php(5): check(7)
+#1 {main}
+#0 [internal function]: check(9)
+#1 [internal function]: call_user_func('check', 9)
+#2 /main.php(6): array_map('call_user_func', Array, Array)
+#3 {main}
+Too few arguments to function need(), 1 passed in /main.php on line 8 and exactly 2 expected
+
+Warning: byref(): Argument #1 ($x) must be passed by reference, value given in /main.php on line 10
+int(1)
+#0 /main.php(12): C->m(3)
+#1 {main}
+#0 /main.php(13): check(2)
+#1 /main.php(13): {closure:/main.php:13}()
+#2 {main}

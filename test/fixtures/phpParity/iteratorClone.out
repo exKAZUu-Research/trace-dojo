@@ -1,0 +1,6 @@
+Error: Trying to clone an uncloneable object of class LimitIterator
+Error: Trying to clone an uncloneable object of class MyLimit
+Error: Trying to clone an uncloneable object of class RecursiveIteratorIterator
+Error: Trying to clone an uncloneable object of class AppendIterator
+cloned EmptyIterator
+int(1)

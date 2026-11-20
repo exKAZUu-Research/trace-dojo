@@ -1,0 +1,10 @@
+Cannot auto-initialize an array inside a reference held by property A::$a of type ?int
+Cannot auto-initialize an array inside a reference held by property A::$a of type ?int
+Cannot auto-initialize an array inside a reference held by property A::$a of type ?int
+Cannot auto-initialize an array inside a reference held by property A::$a of type ?int
+Cannot auto-initialize an array inside a reference held by property A::$a of type ?int
+Cannot auto-initialize an array inside property A::$a of type ?int
+array(1) {
+  [0]=>
+  int(1)
+}

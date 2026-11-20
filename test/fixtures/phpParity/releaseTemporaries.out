@@ -1,0 +1,33 @@
+dtor p1
+2
+dtor p2
+3
+dtor a0
+dtor a1
+2
+dtor s1
+2
+o5
+dtor o
+2
+dtor chain
+chain
+2
+dtor l1
+2
+dtor t2
+dtor t1
+dtor t0
+2
+dtor m2
+dtor m1
+5
+
+Fatal error: Uncaught TypeError: usort(): Argument #1 ($array) must be of type array, null given in /main.php:13
+Stack trace:
+#0 /main.php(13): usort(NULL, Object(Closure))
+#1 {main}
+  thrown in /main.php on line 13
+dtor l2
+dtor s2
+dtor a0b

@@ -1,0 +1,6 @@
+
+Deprecated: Incorrect::process(): Implicitly marking parameter $value as nullable is deprecated, the explicit nullable type must be used instead in /main.php on line 4
+
+Fatal error: Declaration of Incorrect::process(?string $value = null) must be compatible with Contract::process(int $value) in /main.php on line 4
+Stack trace:
+#0 {main}

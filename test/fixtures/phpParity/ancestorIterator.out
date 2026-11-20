@@ -1,0 +1,16 @@
+BaseIteratorFactory:LeafIteratorFactory
+array(1) {
+  [0]=>
+  int(1)
+}
+MiddleIteratorFactory:LeafIteratorFactory
+array(1) {
+  [0]=>
+  int(2)
+}
+MiddleIteratorFactory:LeafIteratorFactory
+array(1) {
+  [0]=>
+  int(2)
+}
+LogicException: Class to downcast to not found or not base class or does not implement Traversable

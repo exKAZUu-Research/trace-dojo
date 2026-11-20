@@ -1,0 +1,5 @@
+x
+Fatal error: Field width 2147483647 is too long in /main.php on line 3
+Stack trace:
+#0 /main.php(3): sprintf('%*d', 2147483647, 1)
+#1 {main}

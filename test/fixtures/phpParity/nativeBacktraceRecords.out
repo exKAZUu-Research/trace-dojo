@@ -1,0 +1,6 @@
+rewind:WrappedIterator:WrappedIterator
+rewind:IteratorIterator:IteratorIterator
+string(8) "original"
+#0 [internal function]: variadicFailure(extra: 'value')
+#1 /main.php(28): call_user_func('variadicFailure', extra: 'value')
+#2 {main}

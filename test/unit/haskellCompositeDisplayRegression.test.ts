@@ -3,12 +3,12 @@ import { z } from 'zod';
 
 import { traceProgram } from '../../src/interpreter/program';
 import type { DisplayNode } from '../../src/problems/trace';
-import { createNodeBundleRunner } from '../helpers/bundledNode';
+import { createNodeBundleRunner } from '../helpers/nodeBundleRunner';
 
-const runBundledNode = createNodeBundleRunner();
+const runNodeBundle = createNodeBundleRunner();
 
 test('immutable composite loops retain cheap answers within bounded transport output', { timeout: 30_000 }, () => {
-  const output = runBundledNode('test/helpers/haskellCompositeTrace.ts', { heap: 256, timeout: 15_000 });
+  const output = runNodeBundle('test/helpers/haskellCompositeTrace.ts', { heapMb: 256, timeout: 15_000 });
   const array = z.object({ kind: z.literal('array'), entries: z.record(z.string(), z.unknown()) });
   const display = z.union([array, z.object({ kind: z.literal('value'), value: z.unknown() })]).optional();
   const result = z

@@ -1,0 +1,74 @@
+
+Deprecated: Using ${var} in strings is deprecated, use {$var} instead in /main.php on line 3
+Hello World! Worlds World val val three prop deep
+single $name \n
+esc: 	|AA😀$name\ [0m|||
+Name: World
+  Indented val
+End|
+Raw $name {$x}
+93語テキABCÄBC
+--x--|........42|left      |3
+Hello World-foo Bar élan aBC
+Array
+(
+    [0] => a
+    [1] => b
+    [2] => 
+    [3] => c
+)
+Array
+(
+    [0] => a
+    [1] => b,c
+)
+Array
+(
+    [0] => a
+    [1] => b
+)
+Array
+(
+    [0] => abcd
+    [1] => ef
+)
+Array
+(
+    [0] => あ
+    [1] => い
+    [2] => う
+)
+x, 1, 2.5, 1, 
+xx|xx|12|abc
+ellllo|b
+int(2)
+bool(false)
+int(3)
+int(2)
+bool(true)
+bool(true)
+1122cc 4
+heLLoHexxo
+Hellocba=====
+a<br />
+b&lt;a href=&#039;x&#039;&gt;T&amp;C&lt;/a&gt;
+1,234,568 1,234,567.89 0.13
+0003.142[   ab][ab   ]007ff 10 101 FF 1.234500e+3
+-11000
+The quick brown
+fox sat over
+the lazy dog
+43R163
+5d41402abc4b2a76b9719d911017c592 a9993e364706816aba3e25717850c26c9cd0d89d 2191738434
+7 John O'reilly
+A97ff2551010101511111111
+@example.comuser/c
+2|Ho ellHello world
+bool(false)
+bool(true)
+bool(true)
+int(-1)
+1 1 2.5 1000 0.3 0.33333333333333
+42421500
+yes
+a

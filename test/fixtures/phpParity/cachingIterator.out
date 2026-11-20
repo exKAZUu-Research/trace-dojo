@@ -1,0 +1,61 @@
+a=>1 more [1]
+b=>2 more [2]
+c=>3 last [3]
+xyz
+Array
+(
+    [0] => x
+    [1] => y
+    [2] => z
+)
+int(3)
+string(1) "y"
+bool(true)
+bool(false)
+Array
+(
+    [1] => y
+    [2] => z
+    [k] => v
+)
+int(256)
+BadMethodCallException: CachingIterator does not fetch string value (see CachingIterator::__construct)
+BadMethodCallException: CachingIterator does not use a full cache (see CachingIterator::__construct)
+InvalidArgumentException: Unsetting flag CALL_TO_STRING is not possible
+CachingIterator::__construct(): Argument #2 ($flags) must contain only one of CachingIterator::CALL_TOSTRING, CachingIterator::TOSTRING_USE_KEY, CachingIterator::TOSTRING_USE_CURRENT, or CachingIterator::TOSTRING_USE_INNER
+k1
+k2
+5
+int(1)
+int(16)
+int(2)
+int(4)
+int(8)
+int(256)
+bool(false)
+bool(true)
+NULL
+bool(true)
+bool(true)
+int(1)
+int(0)
+CachingIterator Object
+(
+)
+
+a, b, c
+Array
+(
+    [Stringable] => Stringable
+    [Iterator] => Iterator
+    [Traversable] => Traversable
+    [OuterIterator] => OuterIterator
+    [ArrayAccess] => ArrayAccess
+    [Countable] => Countable
+)
+drop:a;drop:b;65792:{"fresh":3}:{"fresh":3}
+drop:a;drop:b;b:a;256:[]:[]
+old:1;next:2;{"fresh":3,"next":2}
+["original"]:1
+{"fresh":9}
+inserted value released

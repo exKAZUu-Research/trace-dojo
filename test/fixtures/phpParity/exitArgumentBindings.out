@@ -1,0 +1,4 @@
+Unknown named parameter $unknown
+exit(): Argument #1 ($status) must be of type string|int, array given
+extra;exit() expects at most 1 argument, 2 given
+done;

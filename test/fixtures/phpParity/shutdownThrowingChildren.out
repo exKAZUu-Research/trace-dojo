@@ -1,0 +1,8 @@
+done
+first
+
+Fatal error: Uncaught Exception: first in /main.php:6
+Stack trace:
+#0 [internal function]: ThrowingShutdownChild->__destruct()
+#1 {main}
+  thrown in /main.php on line 6

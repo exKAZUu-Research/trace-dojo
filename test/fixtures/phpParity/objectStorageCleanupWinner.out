@@ -1,0 +1,16 @@
+exit;throw;normal;cleanup;0;NULL
+throw;exit;throw;cleanup;0;NULL
+exit;exit;throw;cleanup;0;NULL
+exit;throw;normal;cleanup;0;NULL
+throw;exit;throw;cleanup;0;NULL
+exit;exit;throw;cleanup;0;NULL
+done
+exit;throw;cleanup;0
+exit;throw;cleanup;0
+body;1;removed;
+exit;throw;removed;cleanup;0;
+body;1;removed;
+exit;throw;removed;cleanup;0;
+exit;throw;OverwrittenInfo->__destruct:internal;SplObjectStorage->offsetSet:82;cleanup
+OverwrittenInfo->__destruct:87;OverwrittenInfo->__destruct:87;overwritten info;NULL
+exit;throw;OverwrittenInfo->__destruct:internal;SplObjectStorage->offsetSet:87;OverwrittenInfo->__destruct:internal;SplObjectStorage->offsetSet:87;overwritten info;NULL

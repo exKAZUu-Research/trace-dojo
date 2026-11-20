@@ -1,0 +1,52 @@
+int(3)
+0 1
+1 B
+2 C
+int(1)
+int(1)
+int(2)
+int(2)
+bool(true)
+int(32)
+int(2)
+int(2)
+bool(true)
+int(1)
+int(2)
+Seek position 5 is out of range
+one got 5
+two got 5
+two got 6
+bool(true)
+bool(true)
+Array
+(
+    [SplSubject] => SplSubject
+)
+Array
+(
+    [0] => attach
+    [1] => detach
+    [2] => contains
+    [3] => addAll
+    [4] => removeAll
+    [5] => removeAllExcept
+    [6] => getInfo
+    [7] => setInfo
+    [8] => count
+    [9] => rewind
+    [10] => valid
+    [11] => key
+    [12] => current
+    [13] => next
+    [14] => seek
+    [15] => unserialize
+    [16] => serialize
+    [17] => offsetExists
+    [18] => offsetGet
+    [19] => offsetSet
+    [20] => offsetUnset
+    [21] => getHash
+    [22] => __serialize
+    [23] => __unserialize
+)

@@ -1,0 +1,2 @@
+<?php foreach(['old_italic','OLD_ITALIC','Old_Italic','olditalic','old italic','Old--__Italic','Ital','ital','ITAL'] as $s){foreach(['','sc=','ScRiPt=','scx=','SCRIPT_EXTENSIONS='] as $p){var_dump(preg_match('/\p{'.$p.$s.'}/u',"\u{10300}"));}}foreach(['signwriting','SIGNWRITING','SignWriting','sgnw'] as $s)var_dump(preg_match('/\p{'.$s.'}/u',"\u{1D800}"));
+foreach(["Lowercase_Letter","LOWERCASELETTER","ll","l_l"] as $s)var_dump(preg_match("/\\p{".$s."}/u","a"));

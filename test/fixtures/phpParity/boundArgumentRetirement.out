@@ -1,0 +1,76 @@
+-1;set;array(1) {
+  [0]=>
+  int(5)
+}
+-2;set;array(1) {
+  [0]=>
+  int(5)
+}
+-3;unset;array(1) {
+  [0]=>
+  NULL
+}
+
+Notice: Only variables should be passed by reference in /main.php on line 10
+-4;reference;array(1) {
+  [0]=>
+  int(5)
+}
+-5;extras;array(2) {
+  [0]=>
+  int(6)
+  [1]=>
+  object(D)#2 (1) {
+    ["n"]=>
+    int(6)
+  }
+}
+-6;variadic;array(1) {
+  [0]=>
+  object(D)#2 (1) {
+    ["n"]=>
+    int(7)
+  }
+}
+-7;named;-8;-9;named-ref;Array
+(
+    [0] => Array
+        (
+            [file] => /main.php
+            [line] => 18
+            [function] => namedRef
+            [args] => Array
+                (
+                    [x] => 9
+                )
+
+        )
+
+)
+-10;positional-ref;array(1) {
+  [0]=>
+  int(10)
+}
+array(1) {
+  [0]=>
+  int(10)
+}
+Array
+(
+    [0] => Array
+        (
+            [file] => /main.php
+            [line] => 22
+            [function] => typed
+            [args] => Array
+                (
+                    [0] => 10
+                    [x] => 11
+                )
+
+        )
+
+)
+-12;default;
+Warning: warned(): Argument #1 must be passed by reference, value given in /main.php on line 26
+warned;-13;

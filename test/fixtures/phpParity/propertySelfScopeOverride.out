@@ -1,0 +1,4 @@
+
+Fatal error: Type of B::$x must be A (as in class A) in /main.php on line 1
+Stack trace:
+#0 {main}

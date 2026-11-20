@@ -1,10 +1,10 @@
+import { platformPower, platformUnary } from '../interpreter/platformMath';
 // code-gauge-allow-file fileNcss 520 -- The primitive table lists every built-in operation the Haskell library calls.
 import { TURTLE_METHOD_NAMES } from '../interpreter/turtleWorld';
 import { CONS_CON, tupleCon, UNIT_CON } from './builtinTypes';
 import type { ConInfo } from './entities';
 import { changeIntegerBit, complementIntegerBit, makeIntegerBit, testIntegerBit } from './integerBits';
 import { cons, NIL, nullary, type PrimResult, unpackString } from './machine';
-import { platformPower, platformUnary } from './platformMath';
 import type { Runtime } from './runtime';
 import {
   ConValue,

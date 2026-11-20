@@ -1,0 +1,73 @@
+
+Notice: Indirect modification of overloaded element of SplObjectStorage has no effect in /main.php on line 2
+array(1) {
+  [0]=>
+  array(1) {
+    [0]=>
+    int(1)
+  }
+}
+
+Notice: Indirect modification of overloaded property ValueGetter::$missing has no effect in /main.php on line 4
+array(1) {
+  [0]=>
+  array(1) {
+    [0]=>
+    int(1)
+  }
+}
+array(1) {
+  [0]=>
+  array(2) {
+    [0]=>
+    int(1)
+    [1]=>
+    int(2)
+  }
+}
+
+Notice: Indirect modification of overloaded element of ValueOffset has no effect in /main.php on line 14
+array(1) {
+  [0]=>
+  array(1) {
+    [0]=>
+    int(1)
+  }
+}
+array(2) {
+  [0]=>
+  &int(4)
+  [1]=>
+  int(3)
+}
+array(2) {
+  [0]=>
+  int(5)
+  [1]=>
+  int(7)
+}
+array(1) {
+  [0]=>
+  int(8)
+}
+Cannot acquire reference to readonly property ReadonlyObject::$x
+Cannot acquire reference to readonly property Random\Randomizer::$engine
+Cannot auto-initialize an array inside property StaticBase::$x of type int
+Cannot auto-initialize an array inside property StaticBase::$x of type int
+Typed static property StaticBase::$x must not be accessed before initialization
+Typed static property StaticBase::$x must not be accessed before initialization
+Cannot auto-initialize an array inside property StaticBase::$i of type ?int
+array(1) {
+  [0]=>
+  int(1)
+}
+
+Notice: Only variables should be assigned by reference in /main.php on line 30
+array(1) {
+  [0]=>
+  array(1) {
+    [0]=>
+    int(1)
+  }
+}
+Cannot auto-initialize an array inside property ArrayInitializationScope::$x of type ArrayInitializationScope

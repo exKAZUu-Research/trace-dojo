@@ -1,0 +1,13 @@
+implode(): If argument #1 ($separator) is of type string, argument #2 ($array) must be of type array, null given
+#0 /main.php(5): implode('abc')
+#1 /main.php(6): {closure:/main.php:5}()
+#2 {main}
+implode(): Argument #1 ($separator) must be of type string, array given
+#0 /main.php(5): implode(Array, Array)
+#1 /main.php(6): {closure:/main.php:5}()
+#2 {main}
+string
+#0 [internal function]: StringFailure->__toString()
+#1 /main.php(5): implode(Array)
+#2 /main.php(6): {closure:/main.php:5}()
+#3 {main}

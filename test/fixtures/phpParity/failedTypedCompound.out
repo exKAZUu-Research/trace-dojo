@@ -1,0 +1,22 @@
+DivisionByZeroError: Division by zero / -
+int(0)
+DivisionByZeroError: Division by zero / -
+int(0)
+DivisionByZeroError: Division by zero / -
+float(0)
+DivisionByZeroError: Division by zero / -
+string(1) "7"
+DivisionByZeroError: Division by zero / -
+int(0)
+DivisionByZeroError: Division by zero / -
+int(0)
+DivisionByZeroError: Division by zero / -
+int(7)
+TypeError: Cannot assign null to reference held by property Typed::$s of type string / Division by zero
+string(1) "7"
+Error: Object of class stdClass could not be converted to string / -
+string(1) "7"
+TypeError: Cannot assign null to reference held by property Typed::$s of type string / Division by zero
+string(1) "7"
+TypeError: Unsupported operand types: int - array / -
+int(0)

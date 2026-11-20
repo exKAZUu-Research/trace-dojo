@@ -1,0 +1,22 @@
+<?php
+var_dump(trim('abc', 'a..'));
+var_dump(trim('abc', '..c'));
+var_dump(trim('abc', 'c..a'));
+var_dump(trim('abc', 'a..b..c'));
+var_dump(trim('abc', '..'));
+var_dump(trim('abc', 'a...c'));
+var_dump(ltrim('xabc', 'x..'));
+var_dump(rtrim('abcx', '..x'));
+var_dump(trim('abc', 'a..c'));
+var_dump(trim('.abc.', '.'));
+var_dump(trim('abc', 'b..'));
+var_dump(bin2hex(chunk_split("", 2)));
+var_dump(chunk_split("", 2, "|"));
+var_dump(chunk_split("abc", 2, "|"));
+var_dump(str_word_count("Hello fri3nd, you're looking good today!", 1, '0..9'));
+var_dump(str_word_count("'hello world- -foo bar-baz 'x' a--b -", 2));
+var_dump(array_map("bin2hex", str_word_count("caf\xc3\xa9 na\xefve", 1)));
+var_dump(str_word_count("a1b2 c3", 1, '0..3'));
+var_dump(str_word_count("a.b c", 1, '.'));
+var_dump(str_word_count("a-b- c'", 2, '-'));
+var_dump(str_word_count("'abc' -x", 1, "'"));

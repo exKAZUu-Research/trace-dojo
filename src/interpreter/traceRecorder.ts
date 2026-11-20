@@ -6,6 +6,7 @@ import type { StepRecorder } from './stepTracker';
 import type { TurtleWorld } from './turtleWorld';
 
 export type TraceVariables = Pick<TraceItem, 'vars' | 'referenceVars'>;
+type IgnoreStateVariable = (value: unknown, otherValue: unknown) => boolean;
 
 /** What the recorder reads from a language's runtime while it runs a model program. */
 export interface TracedRuntime<F extends TracedFrame> {
@@ -24,6 +25,8 @@ export interface TracedFrame {
 export interface FrameReader<F extends TracedFrame> {
   isAtomic(frame: F): boolean;
   variablesOf(frame: F): TraceVariables;
+  stateVariables?(variables: TraceVariables): Record<string, unknown>;
+  ignoreStateVariable?: IgnoreStateVariable;
   scalarVarsOf?(frame: F): TraceVariables['vars'];
   recordItem?(item: TraceItem): TraceItem;
 }
@@ -32,7 +35,7 @@ export interface FrameReader<F extends TracedFrame> {
 export class TraceRecorder<F extends TracedFrame> implements StepRecorder {
   readonly traceItems: TraceItem[];
   /** The variables each frame on the stack showed when the last step was recorded. */
-  private readonly varsAtLastStep = new WeakMap<F, TraceItem['vars']>();
+  private readonly varsAtLastStep = new WeakMap<F, Record<string, unknown>>();
 
   constructor(
     private readonly runtime: TracedRuntime<F>,
@@ -61,7 +64,7 @@ export class TraceRecorder<F extends TracedFrame> implements StepRecorder {
     this.traceItems.push(this.frames.recordItem?.(item) ?? item);
     const reuseCurrent = !this.frames.recordItem || this.frames.scalarVarsOf !== undefined;
     for (const frame of frames) {
-      const vars = frame === current && reuseCurrent ? variables.vars : this.scalarVarsOf(frame);
+      const vars = frame === current && reuseCurrent ? this.stateVariables(variables) : this.stateOf(frame);
       this.varsAtLastStep.set(frame, vars);
     }
     return true;
@@ -80,17 +83,32 @@ export class TraceRecorder<F extends TracedFrame> implements StepRecorder {
     return (
       last.board === world.boardText() &&
       isEqual(last.turtles, world.turtleTraces()) &&
-      (shownVars === undefined || sameVariables(shownVars, this.scalarVarsOf(frame)))
+      (shownVars === undefined || sameVariables(shownVars, this.stateOf(frame), this.frames.ignoreStateVariable))
     );
   }
-  private scalarVarsOf(frame: F): TraceVariables['vars'] {
-    return this.frames.scalarVarsOf?.(frame) ?? this.frames.variablesOf(frame).vars;
+
+  private stateVariables(variables: TraceVariables): Record<string, unknown> {
+    return this.frames.stateVariables?.(variables) ?? variables.vars;
+  }
+
+  private stateOf(frame: F): Record<string, unknown> {
+    return this.frames.scalarVarsOf?.(frame) ?? this.stateVariables(this.frames.variablesOf(frame));
   }
 }
 
-function sameVariables(a: TraceItem['vars'], b: TraceItem['vars']): boolean {
-  const names = Object.keys(a);
-  return (
-    names.length === Object.keys(b).length && names.every((name) => Object.hasOwn(b, name) && isEqual(a[name], b[name]))
-  );
+function sameVariables(a: Record<string, unknown>, b: Record<string, unknown>, ignore?: IgnoreStateVariable): boolean {
+  const aNames = comparableNames(a, b, ignore);
+  const bNames = comparableNames(b, a, ignore);
+  return aNames.length === bNames.length && aNames.every((name) => Object.hasOwn(b, name) && isEqual(a[name], b[name]));
+}
+
+function comparableNames(
+  variables: Record<string, unknown>,
+  other: Record<string, unknown>,
+  ignore: IgnoreStateVariable | undefined
+): string[] {
+  const names = Object.keys(variables);
+  return ignore
+    ? names.filter((name) => !ignore(variables[name], Object.hasOwn(other, name) ? other[name] : undefined))
+    : names;
 }

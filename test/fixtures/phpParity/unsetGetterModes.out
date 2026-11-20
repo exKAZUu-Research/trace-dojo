@@ -1,0 +1,3 @@
+bool(false)
+bool(false)
+Value of type bool returned from UnsetGetterModes::__get() must be compatible with unset property UnsetGetterModes::$items of type array

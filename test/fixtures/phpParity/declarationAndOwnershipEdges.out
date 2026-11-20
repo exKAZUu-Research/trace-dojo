@@ -1,0 +1,35 @@
+
+Deprecated: Return type of NativeOverride::count() should either be compatible with ArrayObject::count(): int, or the #[\ReturnTypeWillChange] attribute should be used to temporarily suppress the notice in /main.php on line 2
+
+Deprecated: Return type of & ReferenceAccess::offsetGet($key) should either be compatible with ArrayAccess::offsetGet(mixed $offset): mixed, or the #[\ReturnTypeWillChange] attribute should be used to temporarily suppress the notice in /main.php on line 6
+quiet
+getIndirect modification of HookedUnset::$items is not alloweddone
+Cannot unset private(set) property NarrowSet::$a from global scope
+Cannot unset protected(set) property NarrowSet::$b from global scope
+Cannot unset private(set) property NarrowSet::$p from global scope
+Cannot unset protected(set) property NarrowSet::$q from global scope
+Cannot unset private(set) property NarrowSet::$a from scope ChildSet
+int(1)
+int(2)
+int(3)
+int(4)
+9.2900754E+15 9.2900754e+15 9.2900754E+15
+1.0E+15 1.0e+15 1.0E+15
+9.2900754E+15 9.2900754e+15 9.2900754E+15
+1.0E+15 1.0e+15 1.0E+15
+9.2900754000000E+14 9.2900754000000e+14 9.2900754000000E+14
+3
+array(2) {
+  [0]=>
+  int(2)
+  [1]=>
+  int(3)
+}
+6
+
+Deprecated: Return type of InheritedCount::count() should either be compatible with Countable::count(): int, or the #[\ReturnTypeWillChange] attribute should be used to temporarily suppress the notice in /main.php on line 50
+3
+refgetrefgetarray(1) {
+  [1]=>
+  int(2)
+}

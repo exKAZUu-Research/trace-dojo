@@ -1,0 +1,43 @@
+Hello, A!Hi, B!Yo, C!
+69
+2
+15
+2
+6
+12
+2432902008176640000
+ABCxxx2
+5
+Array
+(
+    [0] => 100
+    [1] => 2
+)
+1,4,9
+2,4,6
+16
+3
+NULL
+string(2) "15"
+string(2) "2z"
+NULL
+29223372036854775807
+Array
+(
+    [0] => 1
+    [1] => two
+    [2] => 3
+)
+3
+9
+Array
+(
+    [0] => 3
+    [1] => 2
+    [2] => 1
+)
+Too few arguments to function greet(), 0 passed in /main.php on line 26 and at least 1 expected
+greet(): Argument #1 ($name) must be of type string, array given, called in /main.php on line 27
+Unknown named parameter $unknown
+Call to undefined function undefinedFunction()
+cba005
