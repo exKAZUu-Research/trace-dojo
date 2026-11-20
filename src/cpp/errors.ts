@@ -23,7 +23,8 @@ const MESSAGES = {
   formatArgumentMissing: '書式（%d など）に対応する引数が足りません。',
   formatArgumentType: '書式（%d など）と引数の型が合いません。',
   stringLiteralWrite: '文字列リテラルは書き換えられません。',
-  unterminatedString: String.raw`文字列の終わり（\0）がないまま、配列の範囲の外まで読みました。`,
+  // oxlint-disable-next-line unicorn/prefer-string-raw -- Bun's transpiler escapes non-ASCII characters in a raw template.
+  unterminatedString: '文字列の終わり（\\0）がないまま、配列の範囲の外まで読みました。',
   invalidRange: 'アルゴリズムに渡した範囲（先頭と末尾のイテレータ）が正しくありません。',
   invalidComparator: '比較の関数が、狭義の弱順序になっていません（a < a が true など）。',
 } as const;
