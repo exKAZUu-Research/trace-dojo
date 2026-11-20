@@ -343,6 +343,12 @@ export class NodePositions {
 
   invalidateFrom(index: number, until = Infinity): void {
     this.invalidateEnd();
+    // No position lies past the owner's length while its suffix is invalidated, so a short range is visited directly.
+    const last = Math.min(until, this.owner.length + 1);
+    if (last - index < this.positions.size) {
+      for (let position = Math.max(index, 0); position < last; position++) this.invalidate(position);
+      return;
+    }
     for (const [position, node] of this.positions) {
       if (position < index || position >= until) continue;
       node.position = -1;

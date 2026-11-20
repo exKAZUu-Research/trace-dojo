@@ -491,6 +491,21 @@ int main() { ${setup} std::cout << q - p; }`;
   expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', stdout: '', uncaughtException: message });
 });
 
+test('edits the tail of a vector after a traversal without rescanning its positions', () => {
+  const program = `#include <iostream>
+#include <vector>
+int main() {
+  std::vector<int> v(100000);
+  for (int& x : v) x = 1;
+  for (int i = 0; i < 5000; i++) {
+    v.pop_back();
+    v.push_back(i);
+  }
+  std::cout << v.size();
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', stdout: '100000' });
+});
+
 test.each(['std::vector<int> v(100000);', 'std::deque<int> v(100000);'])(
   'tracks no element positions for edits after the counted construction %s',
   (declaration) => {
