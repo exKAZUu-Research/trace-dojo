@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 881 -- Keeps call binding, completion and frame cleanup together.
+// code-gauge-allow-file fileNcss 885 -- Keeps call binding, completion and frame cleanup together.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl, Stmt } from './ast';
@@ -31,6 +31,7 @@ import { coerce, describeType, matches, NO_MATCH, parameterType, typeToString } 
 import {
   type Callable,
   type ClosureData,
+  deref,
   type Method,
   type NativeContext,
   type NativeFunction,
@@ -858,7 +859,7 @@ function completeUserReturn(decl: FunctionDecl, frame: Frame, value: Value, targ
       `${functionDisplayName(target, true)}(): never-returning ${subject} must not implicitly return`
     );
   }
-  const result = decl.returnType ? checkReturn(value, decl.returnType, functionDisplayName(target), frame) : value;
+  const result = decl.returnType ? checkReturn(decl.returnType, functionDisplayName(target), frame) : value;
   if (!decl.byRefReturn) return decl.returnType ? result : share(result);
   if (frame.returning instanceof Ref) {
     if (decl.returnType) frame.returning.assign(result);
@@ -1279,11 +1280,14 @@ function checkParam(
   );
 }
 
-function checkReturn(value: Value, type: TypeDecl, name: string, frame: Frame): Value {
+function checkReturn(type: TypeDecl, name: string, frame: Frame): Value {
   if (type.k === 'named' && type.name === 'void') return null;
+  const slot = frame.returning;
+  if (slot === undefined) return throwReturnTypeError(undefined, type, name, frame);
+  const value = deref(slot);
   if (
-    frame.returning instanceof Ref &&
-    frame.returning.typeOwners().length > 0 &&
+    slot instanceof Ref &&
+    slot.typeOwners().length > 0 &&
     !matches(value, type, { scope: frame.scope, staticClass: frame.staticClass })
   )
     return throwReturnTypeError(value, type, name, frame);
@@ -1297,10 +1301,9 @@ function checkReturn(value: Value, type: TypeDecl, name: string, frame: Frame): 
   return throwReturnTypeError(value, type, name, frame);
 }
 
-function throwReturnTypeError(value: Value, type: TypeDecl, name: string, frame: Frame): never {
+function throwReturnTypeError(value: Value | undefined, type: TypeDecl, name: string, frame: Frame): never {
   const display = describeType(type, frame.scope, frame.staticClass);
-  // A body that ends without `return` returns nothing, which PHP names apart from null.
-  const returned = frame.returning === undefined && !frame.decl?.arrowBody ? 'none' : valueName(value);
+  const returned = value === undefined ? 'none' : valueName(value);
   throwError('TypeError', `${name}(): Return value must be of type ${display}, ${returned} returned`);
 }
 

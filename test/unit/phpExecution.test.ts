@@ -3404,6 +3404,35 @@ test('leaves ordinary call results writable', () => {
   expect(run(program)).toMatchObject({ kind: 'executed', stdout: 'done' });
 });
 
+test('checks missing returns separately from an explicit null', () => {
+  const program = `<?php
+    function optional(): ?int {}
+    function nullableUnion(bool $return): int|null { if ($return) return null; }
+    function anyValue(): mixed { try {} finally { echo 'finally;'; } }
+    function exactNull(): null {}
+    function untyped() {}
+    function nothing(): void {}
+    class Example {
+      public ?int $value { get {} }
+      function optional(): ?string {}
+    }
+    foreach (['optional', fn() => nullableUnion(false), 'anyValue', 'exactNull',
+      (new Example)->optional(...), fn() => (new Example)->value] as $call) {
+      try { $call(); } catch (TypeError $error) { echo $error->getMessage(), "\\n"; }
+    }
+    var_dump(nullableUnion(true), untyped(), nothing(), (fn(): ?int => null)());`;
+  expect(run(program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'optional(): Return value must be of type ?int, none returned\n' +
+      'nullableUnion(): Return value must be of type ?int, none returned\n' +
+      'finally;anyValue(): Return value must be of type mixed, none returned\n' +
+      'exactNull(): Return value must be of type null, none returned\n' +
+      'Example::optional(): Return value must be of type ?string, none returned\n' +
+      'Example::$value::get(): Return value must be of type ?int, none returned\nNULL\nNULL\nNULL\nNULL\n',
+  });
+});
+
 test.each(['static', '?static'])('rejects %s parameter types independently of return types', (type) => {
   expect(run(`<?php class C { function f(${type} $value): static { return $this; } }`)).toMatchObject({
     kind: 'compileError',
