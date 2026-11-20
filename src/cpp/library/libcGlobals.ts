@@ -117,7 +117,10 @@ function matchingReturnType(declared: FunctionInfo, signature: string): boolean 
   return compact(typeName(declared.ret)) === compact(signature.slice(0, signature.indexOf('(')));
 }
 
-/** A type as signatures compare it, without spaces and naming `FILE` as the interpreter does instead of the SDK's tag. */
+/** A type as signatures compare it: without spaces or `struct`, and naming the SDK's `__sFILE` as the interpreter's `FILE`. */
 function compact(type: string): string {
-  return type.replaceAll(/\s+/g, '').replaceAll('struct__sFILE', 'FILE');
+  return type
+    .replaceAll(/\bstruct\s+/g, '')
+    .replaceAll(/\s+/g, '')
+    .replaceAll('__sFILE', 'FILE');
 }
