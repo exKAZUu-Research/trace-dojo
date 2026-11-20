@@ -80,6 +80,92 @@ test('a program formats numbers, strings, records, and collections as Dart does'
   });
 });
 
+test('integer bit-width conversions honor Dart integer limits', () => {
+  const program = `void main() {
+  var value = -129;
+  for (var width in [-9223372036854775808, -1, 0, 8, 63, 64, 65, 9223372036854775807]) {
+    try {
+      print(value.toUnsigned(width));
+    } on ArgumentError catch (error) {
+      print(error);
+    }
+    try {
+      print(value.toSigned(width));
+    } on ArgumentError catch (error) {
+      print(error);
+    }
+  }
+}
+`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: [
+      'Invalid argument(s): -9223372036854775808',
+      '-129',
+      'Invalid argument(s): -1',
+      'Invalid argument(s): -2',
+      '0',
+      'Invalid argument(s): -1',
+      '127',
+      '127',
+      '9223372036854775679',
+      '-129',
+      '-129',
+      '-129',
+      '-129',
+      '-129',
+      '-129',
+      '-129',
+      '',
+    ].join('\n'),
+    uncaughtException: undefined,
+  });
+});
+
+test('BigInt conversions and shifts report invalid shift counts as Dart errors', () => {
+  const program = `void main() {
+  var value = BigInt.from(-129);
+  for (var width in [-1, 0, 8]) {
+    try {
+      print(value.toUnsigned(width));
+    } on ArgumentError catch (error) {
+      print(error);
+    }
+    try {
+      print(value.toSigned(width));
+    } on ArgumentError catch (error) {
+      print(error);
+    }
+  }
+  try {
+    print(value << -1);
+  } on ArgumentError catch (error) {
+    print(error);
+  }
+  try {
+    print(value >> -1);
+  } on ArgumentError catch (error) {
+    print(error);
+  }
+}
+`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: [
+      'Invalid argument(s): shift-amount must be positive -1',
+      'Invalid argument(s): shift-amount must be positive -2',
+      '0',
+      'Invalid argument(s): shift-amount must be positive -1',
+      '127',
+      '127',
+      'Invalid argument(s): shift-amount must be positive -1',
+      'Invalid argument(s): shift-amount must be positive -1',
+      '',
+    ].join('\n'),
+    uncaughtException: undefined,
+  });
+});
+
 test('patterns, generics, and an uncaught error behave as the SDK does', () => {
   const program = `sealed class Shape {}
 

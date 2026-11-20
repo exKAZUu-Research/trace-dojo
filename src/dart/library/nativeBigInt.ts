@@ -1,5 +1,6 @@
 import { LIMITS } from '../../interpreter/limits';
 import { formatDouble } from '../format';
+import { wrap } from '../operators';
 import type { Runtime } from '../runtime';
 import { DartObject, type Value } from '../values';
 import { bitLength, modInverse } from './nativeNumbers';
@@ -193,13 +194,13 @@ define('BigInt.abs', (runtime, receiver) => {
 });
 define('BigInt.<<', (runtime, receiver, [shift]) => {
   const value = valueOf(runtime, receiver);
-  const amount = intArg(runtime, shift, 'shiftAmount');
+  const amount = checkShiftAmount(runtime, intArg(runtime, shift, 'shiftAmount'));
   const bits = bitsOf(value) + Number(amount);
   if (value !== 0n && amount > 0n) reserve(runtime, bits, bits / 2048);
   return newBigInt(runtime, value << amount);
 });
 define('BigInt.>>', (runtime, receiver, [shift]) =>
-  newBigInt(runtime, valueOf(runtime, receiver) >> intArg(runtime, shift, 'shiftAmount'))
+  newBigInt(runtime, valueOf(runtime, receiver) >> checkShiftAmount(runtime, intArg(runtime, shift, 'shiftAmount')))
 );
 for (const [name, compare] of [
   ['<', (a: bigint, b: bigint) => a < b],
@@ -258,15 +259,17 @@ function digitsOf(value: bigint): bigint[] {
   return digits;
 }
 define('BigInt.toUnsigned', (runtime, receiver, [width]) => {
-  const bits = Number(intArg(runtime, width, 'width'));
+  const bits = Number(checkShiftAmount(runtime, intArg(runtime, width, 'width')));
   const value = valueOf(runtime, receiver);
   // A negative value fills every bit of the width.
   if (value < 0n) reserve(runtime, bits, bits / 2048);
-  return newBigInt(runtime, BigInt.asUintN(bits, value));
+  return newBigInt(runtime, bits > MAX_BITS ? value : BigInt.asUintN(bits, value));
 });
-define('BigInt.toSigned', (runtime, receiver, [width]) =>
-  newBigInt(runtime, BigInt.asIntN(Number(intArg(runtime, width, 'width')), valueOf(runtime, receiver)))
-);
+define('BigInt.toSigned', (runtime, receiver, [width]) => {
+  const signBit = checkShiftAmount(runtime, wrap(intArg(runtime, width, 'width') - 1n));
+  const value = valueOf(runtime, receiver);
+  return newBigInt(runtime, signBit >= BigInt(MAX_BITS) ? value : BigInt.asIntN(Number(signBit) + 1, value));
+});
 define('BigInt.bitLength', (runtime, receiver) => BigInt(bitLength(valueOf(runtime, receiver))));
 define('BigInt.sign', (runtime, receiver) => {
   const value = valueOf(runtime, receiver);
@@ -321,4 +324,9 @@ define('BigInt.toRadixString', (runtime, receiver, [radix]) =>
 function digitsText(runtime: Runtime, value: bigint, radix: number): string {
   reserve(runtime, 0, bitsOf(value) / 128);
   return value.toString(radix);
+}
+
+function checkShiftAmount(runtime: Runtime, amount: bigint): bigint {
+  if (amount < 0n) runtime.throwError('ArgumentError', '', [`shift-amount must be positive ${amount}`]);
+  return amount;
 }

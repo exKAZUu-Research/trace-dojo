@@ -1,5 +1,5 @@
 import { formatDouble } from '../format';
-import { doubleModulo, intModulo, intRemainder, numericBinary, truncateToInt, wrap } from '../operators';
+import { doubleModulo, intModulo, intRemainder, numericBinary, shiftLeft, truncateToInt, wrap } from '../operators';
 import type { Runtime } from '../runtime';
 import type { Value } from '../values';
 import { define, defineAll, intArg, named, numArg, stringArg } from './nativeSupport';
@@ -293,12 +293,15 @@ define('int.toRadixString', (runtime, self, [radix]) => {
 define('int.isEven', (_runtime, self) => ((self as bigint) & 1n) === 0n);
 define('int.isOdd', (_runtime, self) => ((self as bigint) & 1n) === 1n);
 define('int.bitLength', (_runtime, self) => BigInt(bitLength(self as bigint)));
-define('int.toUnsigned', (runtime, self, [width]) =>
-  BigInt.asUintN(Number(intArg(runtime, width, 'width')), self as bigint)
+define(
+  'int.toUnsigned',
+  (runtime, self, [width]) => (self as bigint) & wrap(shiftLeft(runtime, 1n, intArg(runtime, width, 'width')) - 1n)
 );
-define('int.toSigned', (runtime, self, [width]) =>
-  BigInt.asIntN(Number(intArg(runtime, width, 'width')), self as bigint)
-);
+define('int.toSigned', (runtime, self, [width]) => {
+  const value = self as bigint;
+  const signMask = shiftLeft(runtime, 1n, wrap(intArg(runtime, width, 'width') - 1n));
+  return wrap((value & wrap(signMask - 1n)) - (value & signMask));
+});
 define('int.gcd', (runtime, self, [other]) => gcd(self as bigint, intArg(runtime, other, 'other')));
 define('int.modPow', (runtime, self, [exponent, modulus]) => {
   const e = intArg(runtime, exponent, 'exponent');
