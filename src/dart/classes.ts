@@ -32,7 +32,15 @@ interface MemberBase {
   isAbstract: boolean;
   /** The row of the declaration, for messages; undefined for library members. */
   row: number | undefined;
+  forwarding?: { bind: ForwardedArgumentBinder | undefined; positionalNames: readonly string[] };
 }
+
+export type ForwardedArgumentBinder = (
+  runtime: Runtime,
+  receiver: Value,
+  args: Arguments,
+  typeArgs: readonly DartType[]
+) => Arguments;
 
 export interface MethodMember extends MemberBase {
   kind: 'method';
@@ -41,6 +49,7 @@ export interface MethodMember extends MemberBase {
   isOperator: boolean;
   /** For a library method a native implements, its positional parameters' names, which a dynamic call's checks name. */
   nativeParameterNames?: readonly string[];
+  covariantPositional?: ReadonlySet<number>;
 }
 
 export interface GetterMember extends MemberBase {
@@ -104,6 +113,8 @@ export type ConstructorImpl = (
 
 /** A class, mixin, enum, or extension type, from the program or from the libraries the interpreter defines. */
 export class ClassInfo {
+  readonly inheritedCovariance = new Map<MethodMember, Set<number>>();
+  private readonly covariantPositions = new Map<MethodMember, ReadonlySet<number>>();
   readonly typeParams: TypeParam[] = [];
   superclass: InterfaceType | undefined;
   interfaces: InterfaceType[] = [];
@@ -248,6 +259,18 @@ export class ClassInfo {
   *superclassChain(): Iterable<ClassInfo> {
     yield this;
     for (let cls = this.superclass?.cls; cls; cls = cls.superclass?.cls) yield cls;
+  }
+
+  checkedPositions(method: MethodMember): ReadonlySet<number> {
+    const cached = this.covariantPositions.get(method);
+    if (cached) return cached;
+    const positions = new Set<number>();
+    for (const cls of this.superclassChain()) {
+      const checks = cls.inheritedCovariance.get(method);
+      if (checks) for (const index of checks) positions.add(index);
+    }
+    this.covariantPositions.set(method, positions);
+    return positions;
   }
 
   /** The member a class's interface has, declared in it or inherited from a supertype, before substitution. */

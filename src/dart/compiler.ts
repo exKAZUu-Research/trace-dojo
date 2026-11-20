@@ -6,7 +6,6 @@ import type {
   ExtensionDeclaration,
   FieldDeclaration,
   FormalParameter,
-  FormalParameters,
   FunctionDeclaration,
   Library,
   MethodDeclaration,
@@ -35,7 +34,7 @@ import {
   type TypeAlias,
 } from './environment';
 import { lateFieldGetter, lateFieldSetter } from './lateFields';
-import { MetadataCompiler } from './metadataCompiler';
+import { MemberCompiler } from './memberCompiler';
 import { type DartThrow, Frame, type FunctionInfo, type Runtime, type TypeEnv } from './runtime';
 import type { FunctionContext } from './scope';
 import { type GenExec, inheritsCovariance } from './statementCompiler';
@@ -88,7 +87,7 @@ interface ClassWork {
 }
 
 /** Compiles the declarations of a library: classes, members, constructors, extensions, and top-level members. */
-export class Compiler extends MetadataCompiler {
+export class Compiler extends MemberCompiler {
   private readonly classWork: ClassWork[] = [];
   private readonly extensionWork: { ext: ExtensionInfo; declaration: ExtensionDeclaration }[] = [];
   private extensionCount = 0;
@@ -1047,48 +1046,7 @@ export class Compiler extends MetadataCompiler {
     this.checkOperatorArity(declaration);
     const nativeKey = `${isExtension ? (owner as ExtensionInfo).name : cls.name}.${methodKind === 'setter' ? `${name}=` : name}`;
     const impl = declaration.isExternal ? this.externalMember(nativeKey, methodKind) : undefined;
-    let member: Member;
-    if (methodKind === 'getter') {
-      member = {
-        kind: 'getter',
-        name,
-        owner: cls,
-        isStatic: declaration.isStatic,
-        isAbstract,
-        row: declaration.row,
-        type: type.returnType,
-        impl,
-      };
-    } else if (methodKind === 'setter') {
-      if (declaration.parameters.positional.length !== 1 || declaration.parameters.named.length > 0) {
-        this.error(declaration, 'setter の引数は 1 つにしてください。');
-      }
-      member = {
-        kind: 'setter',
-        name,
-        owner: cls,
-        isStatic: declaration.isStatic,
-        isAbstract,
-        row: declaration.row,
-        type: positionalTypes[0] ?? DYNAMIC,
-        impl,
-      };
-    } else {
-      member = {
-        kind: 'method',
-        name,
-        owner: cls,
-        isStatic: declaration.isStatic,
-        isAbstract,
-        row: declaration.row,
-        type,
-        impl,
-        isOperator: methodKind === 'operator',
-        nativeParameterNames: declaration.isExternal
-          ? declaration.parameters.positional.map((parameter) => parameter.name)
-          : undefined,
-      };
-    }
+    const member = this.declaredMember(cls, declaration, type, positionalTypes[0], impl, isAbstract);
     const target = isExtension ? (owner as ExtensionInfo) : cls;
     const table =
       methodKind === 'setter'
@@ -1107,10 +1065,14 @@ export class Compiler extends MetadataCompiler {
       this.error(declaration, `${name} という名前は、既に宣言されています。`);
     }
     table.set(name, member);
-    if (declaration.body) {
-      const body = declaration.body;
+    if (!isExtension && !member.isStatic && member.kind !== 'getter')
+      member.forwarding = {
+        bind: undefined,
+        positionalNames: declaration.parameters.positional.map((param) => param.name),
+      };
+    if (declaration.body || member.forwarding) {
       this.deferredBodies.push(() =>
-        this.compileMethodBody(cls, owner, declaration, member, typeParams, positionalTypes, namedTypes, type, body)
+        this.compileMethodBody(cls, owner, declaration, member, typeParams, positionalTypes, namedTypes, type)
       );
     }
   }
@@ -1136,159 +1098,6 @@ export class Compiler extends MetadataCompiler {
         `演算子 ${declaration.name === 'unary-' ? '-' : declaration.name} の引数の数が正しくありません。`
       );
     }
-  }
-
-  /** The function type of a signature, inferring omitted types from the member it overrides. */
-  // code-gauge-allow functionCognitiveComplexity 22 -- Each branch is one of the cases Dart distinguishes for this construct.
-  // code-gauge-allow functionNcss 36 -- One case per form of the construct, which reads best together.
-  signatureOf(
-    parameters: FormalParameters,
-    returnTypeSyntax: TypeSyntax | undefined,
-    typeParams: TypeParam[],
-    cls?: ClassInfo,
-    declaration?: MethodDeclaration
-  ): { type: FunctionType; positionalTypes: DartType[]; namedTypes: Map<string, DartType> } {
-    const overridden =
-      cls && declaration && !declaration.isStatic ? this.overriddenSignature(cls, declaration) : undefined;
-    const positionalTypes = parameters.positional.map((parameter, index) => {
-      if (parameter.type) return this.resolveType(parameter.type);
-      if (overridden?.kind === 'function') return overridden.positional[index] ?? DYNAMIC;
-      if (overridden && declaration?.methodKind === 'setter') return overridden;
-      return DYNAMIC;
-    });
-    const namedTypes = new Map(
-      parameters.named.map((parameter) => {
-        if (parameter.type) return [parameter.name, this.resolveType(parameter.type)];
-        const inherited =
-          overridden?.kind === 'function'
-            ? overridden.named.find((named) => named.name === parameter.name)?.type
-            : undefined;
-        return [parameter.name, inherited ?? DYNAMIC];
-      })
-    );
-    let returnType: DartType;
-    if (returnTypeSyntax) returnType = this.resolveType(returnTypeSyntax);
-    else if (declaration?.methodKind === 'setter') returnType = VOID;
-    else if (overridden?.kind === 'function') returnType = overridden.returnType;
-    else if (overridden && declaration?.methodKind === 'getter') returnType = overridden;
-    else if (declaration?.methodKind === 'operator' && declaration.name === '[]=') returnType = VOID;
-    else returnType = DYNAMIC;
-    const type = functionType(positionalTypes, returnType, {
-      requiredCount: parameters.requiredCount,
-      named: parameters.named.map((parameter) => ({
-        name: parameter.name,
-        type: namedTypes.get(parameter.name) ?? DYNAMIC,
-        isRequired: parameter.isRequired,
-      })),
-      typeParams,
-    });
-    if (parameters.named.length > 1) type.namedOrder = parameters.named.map((parameter) => parameter.name);
-    return { type, positionalTypes, namedTypes };
-  }
-
-  private overriddenSignature(cls: ClassInfo, declaration: MethodDeclaration): DartType | undefined {
-    for (const supertype of cls.directSupertypes) {
-      const resolved = this.interfaceMember(supertype, declaration.name, declaration.methodKind === 'setter');
-      if (resolved) return resolved.type;
-    }
-    return undefined;
-  }
-
-  // code-gauge-allow duplicateLines 16 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
-  // code-gauge-allow functionCognitiveComplexity 18 -- Each branch is one of the cases Dart distinguishes for this construct.
-  // code-gauge-allow functionParameterCount 9 -- The parameters are the parts a caller already holds; grouping them would only rename them.
-  private compileMethodBody(
-    cls: ClassInfo,
-    owner: ClassInfo | ExtensionInfo,
-    declaration: MethodDeclaration,
-    member: Member,
-    typeParams: TypeParam[],
-    positionalTypes: DartType[],
-    namedTypes: Map<string, DartType>,
-    type: FunctionType,
-    body: NonNullable<MethodDeclaration['body']>
-  ): void {
-    const extension = owner instanceof ClassInfo ? undefined : owner;
-    const savedClass = this.currentClass;
-    const savedExtension = this.currentExtension;
-    this.currentClass = extension ? undefined : cls;
-    this.currentExtension = extension;
-    const ownerParams = extension ? extension.typeParams : cls.typeParams;
-    try {
-      const compiled = this.withTypeParams(ownerParams, () =>
-        this.withTypeParams(typeParams, () =>
-          this.compileFunction({
-            name: declaration.name,
-            span: declaration,
-            headerEndRow: declaration.headerEndRow,
-            parameters: declaration.parameters,
-            positionalTypes,
-            namedTypes,
-            isSetter: declaration.methodKind === 'setter',
-            returnType: type.returnType,
-            contextReturnType: undefined,
-            body,
-            typeParams,
-            kind: {
-              returnType: type.returnType,
-              isGenerator: body.modifier === 'sync*',
-              thisClass: extension ? undefined : cls,
-              thisType: extension ? undefined : cls.thisType,
-              hasThis: !declaration.isStatic,
-              extensionOn: extension ? extension.onType : cls.kind === 'extensionType' ? cls.thisType : undefined,
-              isInitializer: false,
-              isConstructor: false,
-            },
-            showsThis: !declaration.isStatic && !this.isLibraryCode,
-            isClosure: false,
-          } as FunctionSpec & { isClosure: boolean })
-        )
-      );
-      const typeEnvFor = this.methodTypeEnv(extension ? undefined : cls, ownerParams, typeParams, declaration.isStatic);
-      const runFunction = this.runFunction.bind(this);
-      (member as MethodMember).impl = (runtime, receiver, args, typeArgs, callRow) =>
-        runFunction(compiled, runtime, receiver, [], typeEnvFor(runtime, receiver, typeArgs), args, callRow);
-    } finally {
-      this.currentClass = savedClass;
-      this.currentExtension = savedExtension;
-    }
-  }
-
-  /**
-   * The type environment a method runs in: an extension's type arguments come first among the call's, and a class's
-   * come from the receiver.
-   */
-  private methodTypeEnv(
-    ownerClass: ClassInfo | undefined,
-    ownerParams: readonly TypeParam[],
-    ownTypeParams: readonly TypeParam[],
-    isStatic: boolean
-  ): (runtime: Runtime, receiver: Value, typeArgs: readonly DartType[]) => TypeEnv {
-    if (!ownerClass) {
-      return (_runtime, _receiver, typeArgs) => {
-        const env = new Map<TypeParam, DartType>();
-        for (const [index, param] of ownerParams.entries()) env.set(param, typeArgs[index] ?? DYNAMIC);
-        for (const [index, param] of ownTypeParams.entries())
-          env.set(param, typeArgs[ownerParams.length + index] ?? DYNAMIC);
-        return env;
-      };
-    }
-    return (runtime, receiver, typeArgs) => {
-      const typeEnv = isStatic ? new Map() : this.typeEnvOf(runtime, receiver, ownerClass);
-      if (ownTypeParams.length === 0) return typeEnv;
-      const env = new Map(typeEnv);
-      for (const [index, param] of ownTypeParams.entries()) env.set(param, typeArgs[index] ?? DYNAMIC);
-      return env;
-    };
-  }
-
-  /** The class type parameters of a receiver, as an instance of the class whose method runs. */
-  typeEnvOf(runtime: Runtime, receiver: Value, cls: ClassInfo): TypeEnv {
-    if (cls.typeParams.length === 0) return EMPTY_ENV;
-    if (cls.kind === 'extensionType') return EMPTY_ENV;
-    const runtimeType = runtime.runtimeTypeOf(receiver);
-    const instance = runtimeType.kind === 'interface' ? asInstanceOf(runtimeType, cls) : undefined;
-    return new Map(cls.typeParams.map((param, index) => [param, instance?.args[index] ?? DYNAMIC]));
   }
 
   // Enums
@@ -1458,12 +1267,13 @@ export class Compiler extends MetadataCompiler {
 
   private checkImplemented(cls: ClassInfo, declaration: ClassDeclaration): void {
     const hasNoSuchMethod = cls.implementation('noSuchMethod')?.owner !== coreTypes.object;
+    const obligations = cls.isAbstract ? cls.interfaces : this.implementationObligations(cls);
     for (const name of cls.interfaceMemberNames()) {
       const isSetter = name.endsWith('=') && name !== '==' && name !== '[]=';
       const memberName = isSetter ? name.slice(0, -1) : name;
       const implementation = isSetter ? cls.setterImplementation(memberName) : cls.implementation(memberName);
-      if (implementation && implementation.owner !== cls && cls.interfaces.length > 0)
-        this.checkOverride(cls, implementation, isSetter, declaration, cls.interfaces);
+      if (implementation && obligations.length > 0)
+        this.checkOverride(cls, implementation, isSetter, declaration, obligations);
       if (implementation || cls.isAbstract || hasNoSuchMethod) continue;
       const declared = cls.interfaceMember(memberName, isSetter);
       if (declared)
@@ -1472,6 +1282,16 @@ export class Compiler extends MetadataCompiler {
           `${cls.name} には、${declared.owner.name}.${sourceMemberName(name)} の実装がありません。`
         );
     }
+  }
+
+  private implementationObligations(cls: ClassInfo): InterfaceType[] {
+    const obligations = [...cls.interfaces];
+    for (const base of cls.superclassChain()) {
+      if (!base.mixinOf) continue;
+      const instantiated = asInstanceOf(cls.thisType, base.mixinOf);
+      if (instantiated) obligations.push(instantiated);
+    }
+    return obligations;
   }
 
   // code-gauge-allow functionCognitiveComplexity 22 -- Each branch is one of the cases Dart distinguishes for this construct.
@@ -1485,8 +1305,8 @@ export class Compiler extends MetadataCompiler {
     if (member.isStatic) return;
     const row = span?.row ?? member.row ?? 0;
     const own = this.memberTypeIn(cls.thisType, member);
+    const library = (member.owner.mixinOf ?? member.owner).library;
     for (const supertype of targets) {
-      const library = (member.owner.mixinOf ?? member.owner).library;
       const inherited = this.interfaceMember(supertype, member.name, setter, library);
       if (!inherited || inherited.member === member) continue;
       if (setter) {
@@ -1531,7 +1351,7 @@ export class Compiler extends MetadataCompiler {
     const covariant =
       (member.kind === 'field' && member.isCovariant) ||
       declaration?.parameters.positional[0]?.isCovariant ||
-      inheritsCovariance(cls, member.name, '', 0, true);
+      inheritsCovariance(member.owner, member.name, '', 0, true);
     if (covariant && member.kind === 'field' && member.owner === cls) member.isCovariant = true;
     if (isSubtype(inherited, own) || (covariant && isSubtype(own, inherited))) return;
     this.error(
@@ -1547,18 +1367,20 @@ export class Compiler extends MetadataCompiler {
       (candidate): candidate is MethodDeclaration =>
         candidate.kind === 'method' && candidate.name === name && candidate.methodKind !== 'setter'
     );
+    const added = new Set<number>();
     const relax = (
       type: DartType,
       other: DartType | undefined,
       parameter: FormalParameter | undefined,
       index?: number
     ): DartType => {
-      if (
-        other &&
-        isSubtype(type, other) &&
-        (parameter?.isCovariant || inheritsCovariance(cls, name, parameter?.name ?? '', index))
-      )
-        return other;
+      if (other && isSubtype(type, other)) {
+        if (parameter?.isCovariant || inheritsCovariance(owner, name, parameter?.name ?? '', index)) return other;
+        if (index !== undefined && owner !== cls && inheritsCovariance(cls, name, '', index)) {
+          added.add(index);
+          return other;
+        }
+      }
       return type;
     };
     const relaxed: FunctionType = {
@@ -1572,7 +1394,10 @@ export class Compiler extends MetadataCompiler {
         return { ...named, type: relax(named.type, other?.type, parameter) };
       }),
     };
-    return isSubtype(relaxed, inherited);
+    if (!isSubtype(relaxed, inherited)) return false;
+    const existing = cls.inheritedCovariance.get(member);
+    if (added.size > 0) cls.inheritedCovariance.set(member, new Set([...(existing ?? []), ...added]));
+    return true;
   }
 
   // Extensions

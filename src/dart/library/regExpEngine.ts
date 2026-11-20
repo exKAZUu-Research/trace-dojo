@@ -33,7 +33,6 @@ export interface RegExpMatchResult {
   groups: (string | undefined)[];
 }
 
-/** Parses a pattern the host has already accepted. */
 export function compileRegExp(source: string, flags: RegExpFlags): CompiledRegExp {
   const pattern = new RegExpParser({ ecmaVersion: 2025 }).parsePattern(source, 0, source.length, {
     unicode: flags.unicode,

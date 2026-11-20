@@ -1,6 +1,5 @@
 // code-gauge-allow-file fileNcss 810 -- Keep statement cases together so their flow and compilation state are visible.
 import type {
-  Annotation,
   Block,
   Expression,
   ForInBinding,
@@ -601,12 +600,11 @@ export abstract class StatementCompiler extends PatternCompiler {
       this.checkAnnotations(parameter.annotations);
   }
 
-  protected abstract checkAnnotations(annotations: Annotation[] | undefined): void;
-
   // code-gauge-allow duplicateLines 18 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   private compileLocalFunction(statement: Extract<Statement, { kind: 'localFunction' }>): Exec {
     const { declaration } = statement;
     this.checkAnnotations(declaration.annotations);
+    this.checkTypeParameterAnnotations(declaration.typeParameters);
     const typeParams = this.declareTypeParams(declaration.typeParameters);
     const { type, positionalTypes, namedTypes } = this.withTypeParams(typeParams, () =>
       this.signatureOf(declaration.parameters, declaration.returnType, typeParams)

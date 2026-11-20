@@ -94,6 +94,7 @@ export interface TypeAliasDeclaration extends Span {
 }
 
 export interface TypeParameter extends Span {
+  annotations?: Annotation[];
   name: string;
   bound: TypeSyntax | undefined;
 }

@@ -2527,7 +2527,7 @@ test('metadata resolves const constructors and references before executing the p
     const Mark.named(this.value);
   }
   @Deprecated.extend()
-  class Subject {
+  class Subject<@Deprecated('parameter') T> {
     static const label = Mark<int>.named(1);
     @label void run(@label int value) {
       const local = Mark<String>.named('marker');
@@ -2543,6 +2543,8 @@ test('metadata resolves const constructors and references before executing the p
     "class Label { Label(int value); } @Label(1) void main() { print('started'); }",
     "class Label { const Label(int value) : assert(value > 0); } @Label(0) void main() { print('started'); }",
     "void marker() {} @marker void main() { print('started'); }",
+    "class C<@Missing() T> {} void main() { print('started'); }",
+    "void generic<@Missing() T>() {} void main() { print('started'); }",
   ]) {
     expect(executeProgram('dart', source)).toMatchObject({ kind: 'compileError' });
   }
@@ -2555,6 +2557,10 @@ test.each([
   'late final int value = 1; void assign() { value = 2; }',
   'class C { static late final int value = 1; } void assign() { C.value = 2; }',
   "class C { int get x => 1; } void match() { if (C() case C(x: _, x: _)) print('matched'); }",
+  'class Base { num f() => 1.5; } mixin M { int f(); } class C extends Base with M {}',
+  'class Base { num get value => 1.5; } mixin M { int get value; } class C extends Base with M {}',
+  'abstract class I { void f({required covariant num n}); } class Base { void f({required int n}) {} } class C extends Base implements I {}',
+  'abstract class I { set value(covariant num n); } class Base { int value = 0; } class C extends Base implements I {}',
 ])('reports invalid Dart declarations before execution: %s', (declaration) => {
   expect(executeProgram('dart', `${declaration} void main() { print('started'); }`)).toMatchObject({
     kind: 'compileError',
@@ -2622,9 +2628,9 @@ test('private fields in different libraries keep distinct dispatch and types', (
   });
 });
 
-test('malformed regular expressions report SDK diagnostics across hosts', () => {
+test('malformed regular expressions report the first SDK diagnostic', () => {
   const program = String.raw`void main() {
-    for (final pattern in ['(?q:a)', r'[\d-a]', r'\u{110000}', r'[\p{not-a-property}]', '(?=a)*']) {
+    for (final pattern in ['(?q:a)', r'[\d-a]', r'\u{110000}', r'[\p{not-a-property}]', '(?=a)*', '*a(?=b)*', r'\q\c!', r'\q\k<']) {
       try { RegExp(pattern, unicode: true); }
       on FormatException catch (error) { print(error.message); }
     }
@@ -2632,7 +2638,7 @@ test('malformed regular expressions report SDK diagnostics across hosts', () => 
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
     stdout:
-      'Invalid group\nInvalid character class\nInvalid Unicode escape\nInvalid property name in character class\nInvalid quantifier\n',
+      'Invalid group\nInvalid character class\nInvalid Unicode escape\nInvalid property name in character class\nInvalid quantifier\nNothing to repeat\nInvalid escape\nInvalid escape\n',
   });
 });
 
@@ -2651,4 +2657,82 @@ test('unsupported SDK exports respect import prefixes and visibility', () => {
   const hidden = executeProgram('dart', "import 'dart:convert' hide ascii; void main() { print(ascii); }");
   expect(hidden.kind).toBe('compileError');
   if (hidden.kind === 'compileError') expect(hidden.diagnostics[0]?.message).toContain('定義されていません');
+});
+
+test('noSuchMethod forwarders bind defaults and check arguments before invoking the handler', () => {
+  const program = `abstract class Contract {
+    int f([int n = 3]);
+    int g({int n = 4});
+  }
+  class Handler implements Contract {
+    dynamic noSuchMethod(Invocation invocation) {
+      print([invocation.isMethod, invocation.positionalArguments, invocation.namedArguments]);
+      return 1;
+    }
+  }
+  void main() {
+    Contract typed = Handler();
+    final f = typed.f;
+    print(f is int Function([int]));
+    print(f());
+    print(typed.g());
+    dynamic target = typed;
+    try { target.f('bad'); } catch (error) { print(error.runtimeType); }
+    try { target.g(n: 'bad'); } catch (error) { print(error.runtimeType); }
+  }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'true\n[true, [3], {}]\n1\n[true, [], {Symbol("n"): 4}]\n1\n_TypeError\n_TypeError\n',
+  });
+});
+
+test('the effective inherited covariance check runs on direct calls and tear-offs', () => {
+  const program = `abstract class Interface { void f(covariant num value); }
+class Parent { void f(int value) { print(value); } }
+class Child extends Parent implements Interface {}
+class Further extends Child {}
+void main() {
+  Interface target = Further();
+  try { target.f(1.5); } catch (error) { print(error.runtimeType); }
+  final f = target.f;
+  print(f.runtimeType);
+  try { f(1.5); } catch (error) { print(error.runtimeType); }
+  f(2);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '_TypeError\n(Object?) => void\n_TypeError\n2\n',
+  });
+});
+
+test('extension inference validates dependent bounds after solving receiver constraints', () => {
+  const declarations = `extension E<T extends U, U> on (U, void Function(T)) {
+  String get types => '$T $U';
+}
+void acceptsInt(int value) {}
+void acceptsNum(num value) {}
+void acceptsString(String value) {}`;
+  const valid = `${declarations} void main() { print((1, acceptsInt).types); }`;
+  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: 'int int\n' });
+  for (const functionName of ['acceptsNum', 'acceptsString']) {
+    const source = `${declarations} void main() { print((1, ${functionName}).types); }`;
+    expect(executeProgram('dart', source)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
+test('environment constructors use declared defaults with no learner environment definitions', () => {
+  const program = `void main() {
+    print([
+      const bool.fromEnvironment('enabled'),
+      const bool.fromEnvironment('enabled', defaultValue: true),
+      bool.fromEnvironment('enabled', defaultValue: true),
+      const bool.hasEnvironment('enabled'),
+      const int.fromEnvironment('count', defaultValue: 4),
+      const String.fromEnvironment('name', defaultValue: 'unknown'),
+    ]);
+  }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[false, true, true, false, 4, unknown]\n',
+  });
 });

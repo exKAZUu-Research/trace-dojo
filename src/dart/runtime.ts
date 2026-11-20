@@ -1,10 +1,10 @@
-// code-gauge-allow-file fileNcss 416 -- Keep runtime dispatch alongside its reified types, call frames, and roots.
+// code-gauge-allow-file fileNcss 457 -- Keep runtime dispatch alongside its reified types, call frames, and roots.
 import { ExecutionBudget, ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import type { TracedFrame, TracedRuntime } from '../interpreter/traceRecorder';
 import { TurtleWorld } from '../interpreter/turtleWorld';
-import { type ClassInfo, type ConstructorInfo, type Member, sourceMemberName } from './classes';
+import { type ClassInfo, type ConstructorInfo, type Member, type MethodMember, sourceMemberName } from './classes';
 import {
   asInstanceOf,
   boundOf,
@@ -26,6 +26,7 @@ import {
 } from './types';
 import {
   type Arguments,
+  type Callable,
   Cell,
   DartClosure,
   DartList,
@@ -149,6 +150,9 @@ export class Runtime implements TracedRuntime<Frame> {
   /** The canonical tear-offs of top-level functions and static methods. */
   readonly tearOffs = new Map<unknown, DartClosure>();
   private readonly constructorTearOffs = new Map<ConstructorInfo, DartClosure[]>();
+  private readonly getterForwarders = new WeakMap<Member, Member>();
+  private readonly setterForwarders = new WeakMap<Member, Member>();
+  private readonly checkedMethods = new WeakMap<ClassInfo, Map<MethodMember, MethodMember>>();
   /** The value of each constant expression evaluated so far, by the code that builds it. */
   readonly constantSites = new Map<unknown, Value>();
   allocatedSlots = 0;
@@ -262,8 +266,7 @@ export class Runtime implements TracedRuntime<Frame> {
     callRow: number | undefined
   ): Value {
     if (name === 'call' && receiver instanceof DartClosure) return this.callValue(receiver, args, typeArgs, callRow);
-    const cls = this.classOf(receiver);
-    const member = cls.implementation(name);
+    const member = this.instanceMember(receiver, name);
     if (member?.kind === 'method') {
       if (args.isDynamic && !argumentsFit(member.type, args, typeArgs)) {
         return this.noSuchMethod(receiver, name, 'method', args, typeArgs, vmSignature(name, member));
@@ -295,8 +298,7 @@ export class Runtime implements TracedRuntime<Frame> {
   getProperty(receiver: Value, name: string, callRow: number | undefined): Value {
     // A function's `call` is the function itself.
     if (name === 'call' && receiver instanceof DartClosure) return receiver;
-    const cls = this.classOf(receiver);
-    const member = cls.implementation(name);
+    const member = this.instanceMember(receiver, name);
     if (member) return this.readMember(receiver, member, callRow);
     const field = receiver instanceof DartRecord ? receiver.field(name) : undefined;
     return field ? field[1] : this.noSuchMethod(receiver, name, 'getter', NO_ARGUMENTS);
@@ -336,8 +338,7 @@ export class Runtime implements TracedRuntime<Frame> {
   }
 
   setProperty(receiver: Value, name: string, value: Value, callRow: number | undefined, isDynamic = false): void {
-    const cls = this.classOf(receiver);
-    const member = cls.setterImplementation(name);
+    const member = this.instanceMember(receiver, name, true);
     if (!member) {
       this.noSuchMethod(receiver, `${name}=`, 'setter', { positional: [value], named: undefined });
       return;
@@ -354,6 +355,88 @@ export class Runtime implements TracedRuntime<Frame> {
       { positional: [value], named: undefined, isDynamic },
       [],
       callRow
+    );
+  }
+
+  instanceMember(receiver: Value, name: string, setter = false): Member | undefined {
+    const cls = this.classOf(receiver);
+    const concrete = setter ? cls.setterImplementation(name) : cls.implementation(name);
+    if (concrete?.kind === 'method') return this.checkedImplementation(cls, concrete);
+    return concrete ?? this.forwardedMember(cls, name, setter);
+  }
+
+  private forwardedMember(cls: ClassInfo, name: string, setter: boolean): Member | undefined {
+    const declared = cls.interfaceMember(name, setter);
+    if (!declared || declared.isStatic) return undefined;
+    const handler = cls.implementation('noSuchMethod');
+    if (handler?.kind !== 'method' || handler.owner === coreTypes.object) return undefined;
+    const cache = setter ? this.setterForwarders : this.getterForwarders;
+    const existing = cache.get(declared);
+    if (existing) return existing;
+    const kind = setter ? 'setter' : declared.kind === 'method' ? 'method' : 'getter';
+    const impl: Callable = (runtime, value, args, types) =>
+      runtime.invokeForwarder(value, name, kind, declared, args, types);
+    const forwarder: Member =
+      kind === 'method' && declared.kind === 'method'
+        ? { ...declared, isAbstract: false, impl }
+        : { ...declared, kind: setter ? 'setter' : 'getter', isAbstract: false, impl };
+    cache.set(declared, forwarder);
+    return forwarder;
+  }
+
+  private checkedImplementation(cls: ClassInfo, member: MethodMember): MethodMember {
+    const positions = cls.checkedPositions(member);
+    if (positions.size === 0) return member;
+    const methods = this.checkedMethods.get(cls) ?? new Map<MethodMember, MethodMember>();
+    const existing = methods.get(member);
+    if (existing) return existing;
+    const impl = member.impl as Callable;
+    const checked: MethodMember = {
+      ...member,
+      covariantPositional: positions,
+      impl: (runtime, receiver, args, types, row) => {
+        const signature = instantiateFunction(runtime.memberTypeFor(receiver, member), types);
+        for (const index of positions) {
+          if (index >= args.positional.length) continue;
+          const name = member.forwarding?.positionalNames[index] ?? '';
+          runtime.checkForwardedType(args.positional[index], signature.positional[index], name);
+        }
+        return impl(runtime, receiver, args, types, row);
+      },
+    };
+    methods.set(member, checked);
+    this.checkedMethods.set(cls, methods);
+    return checked;
+  }
+
+  private invokeForwarder(
+    receiver: Value,
+    name: string,
+    kind: 'method' | 'getter' | 'setter',
+    declared: Member,
+    args: Arguments,
+    typeArgs: readonly DartType[]
+  ): Value {
+    const reifiedType = this.reifyMemberType(receiver, declared);
+    const bound = declared.forwarding?.bind?.(this, receiver, args, typeArgs);
+    if (!bound && kind === 'setter') this.checkForwardedType(args.positional[0], reifiedType, 'value');
+    const invocationName = kind === 'setter' ? `${name}=` : name;
+    const result = this.noSuchMethod(receiver, invocationName, kind, bound ?? args, typeArgs);
+    if (kind !== 'setter') {
+      const resultType =
+        declared.kind === 'method'
+          ? instantiateFunction(reifiedType as FunctionType, typeArgs).returnType
+          : reifiedType;
+      this.checkForwardedType(result, resultType);
+    }
+    return result;
+  }
+
+  private checkForwardedType(value: Value, expected: DartType, parameter?: string): void {
+    if (expected.kind === 'void' || this.links.isValueOf(this, value, expected)) return;
+    const argument = parameter === undefined ? '' : ` of '${parameter}'`;
+    this.throwTypeError(
+      `type '${vmTypeString(this.runtimeTypeOf(value))}' is not a subtype of type '${vmTypeString(expected)}'${argument}`
     );
   }
 
@@ -481,43 +564,16 @@ export class Runtime implements TracedRuntime<Frame> {
     const invocation = this.newInvocation(sourceMemberName(name), kind, args, typeArgs);
     const handler = this.classOf(receiver).implementation('noSuchMethod');
     if (handler?.kind === 'method' && handler.owner !== coreTypes.object) {
-      const expected = found ? undefined : this.forwardedResultType(receiver, name, kind, args, typeArgs);
-      const result = (handler.impl as NonNullable<typeof handler.impl>)(
+      return (handler.impl as NonNullable<typeof handler.impl>)(
         this,
         receiver,
         { positional: [invocation], named: undefined },
         [],
         this.userCallRow
       );
-      if (expected && expected.kind !== 'void' && !this.links.isValueOf(this, result, expected)) {
-        this.throwTypeError(
-          `type '${vmTypeString(this.runtimeTypeOf(result))}' is not a subtype of type '${vmTypeString(expected)}'`
-        );
-      }
-      return result;
     }
     if (found) return this.throwError('NoSuchMethodError', '_withFound', [receiver, invocation, found]);
     return this.throwError('NoSuchMethodError', '_withInvocation', [receiver, invocation]);
-  }
-
-  private forwardedResultType(
-    receiver: Value,
-    name: string,
-    kind: 'method' | 'getter' | 'setter',
-    args: Arguments,
-    typeArgs: readonly DartType[]
-  ): DartType | undefined {
-    if (kind === 'setter') return undefined;
-    const member = this.classOf(receiver).interfaceMember(name);
-    if (!member || member.isStatic) return undefined;
-    if (kind === 'getter' && (member.kind === 'getter' || member.kind === 'field'))
-      return this.reifyMemberType(receiver, member);
-    if (kind === 'method' && member.kind === 'method' && argumentsFit(member.type, args, typeArgs)) {
-      const type = this.memberTypeFor(receiver, member);
-      const supplied = args.isDynamic ? this.dynamicTypeArguments(type, typeArgs) : typeArgs;
-      return instantiateFunction(type, supplied).returnType;
-    }
-    return undefined;
   }
 
   private newInvocation(
@@ -716,13 +772,15 @@ function describeArguments(runtime: Runtime, args: Arguments): string {
  */
 function covariantErased(member: Member & { kind: 'method' }, type: FunctionType): FunctionType {
   const params = new Set(member.owner.typeParams);
-  if (params.size === 0) return type;
+  if (params.size === 0 && !member.covariantPositional?.size) return type;
   const objectQ = interfaceType(coreTypes.object, [], true);
   const erase = (declared: DartType | undefined, actual: DartType): DartType =>
     declared && mentionsCovariantly(declared, params, true) ? objectQ : actual;
   return {
     ...type,
-    positional: type.positional.map((actual, index) => erase(member.type.positional[index], actual)),
+    positional: type.positional.map((actual, index) =>
+      member.covariantPositional?.has(index) ? objectQ : erase(member.type.positional[index], actual)
+    ),
     named: type.named.map((named) => ({
       ...named,
       type: erase(member.type.named.find((other) => other.name === named.name)?.type, named.type),

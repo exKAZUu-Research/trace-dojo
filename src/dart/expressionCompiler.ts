@@ -1,6 +1,7 @@
 import { CompileError } from '../interpreter/diagnostics';
-// code-gauge-allow-file fileNcss 943 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 944 -- Expression kinds share the same scope and evaluation rules.
 import type {
+  Annotation,
   Arguments as ArgumentsSyntax,
   CascadeSelector,
   CollectionElement,
@@ -9,6 +10,7 @@ import type {
   Span,
   StringPart,
   SwitchExpressionCase,
+  TypeParameter,
   TypeSyntax,
 } from './ast';
 import type { ClassInfo, Member } from './classes';
@@ -916,6 +918,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   readonly constantChecks: { span: Span; run: Eval }[] = [];
+
+  protected checkTypeParameterAnnotations(parameters: readonly TypeParameter[]): void {
+    for (const parameter of parameters) this.checkAnnotations(parameter.annotations);
+  }
+
+  protected abstract checkAnnotations(annotations: Annotation[] | undefined): void;
 
   protected checkConstant(span: Span, compiled: Compiled): void {
     if (!this.isLibraryCode && compiled.isConst && !compiled.constValue) {

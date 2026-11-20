@@ -420,6 +420,7 @@ export class Converter extends ExpressionConverter {
         }
         const bound = fieldOf(child, 'bound');
         return {
+          annotations: this.annotationsOf(child),
           name: requireNode(fieldOf(child, 'name'), child).text,
           bound: bound ? this.convertType(bound) : undefined,
           ...spanOf(child),
@@ -539,7 +540,8 @@ export class Converter extends ExpressionConverter {
               ? 'factory'
               : 'generative',
           name,
-          isConst: signature.type === 'constant_constructor_signature' || hasToken(signature, 'const'),
+          isConst:
+            signature.type === 'constant_constructor_signature' || tokens.has('const') || hasToken(signature, 'const'),
           isExternal,
           parameters: this.convertFormalParameters(requireNode(fieldOf(signature, 'parameters'), signature)),
           initializers,

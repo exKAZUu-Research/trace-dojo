@@ -900,6 +900,7 @@ export abstract class CallCompiler extends OperatorCompiler {
     expression: Extract<Expression, { kind: 'function' }>,
     context: DartType | undefined
   ): Compiled {
+    this.checkTypeParameterAnnotations(expression.typeParameters);
     const contextType = context ? resolveBound(context) : undefined;
     const contextFunction =
       contextType?.kind === 'function' && expression.typeParameters.length === 0 ? contextType : undefined;
@@ -1231,7 +1232,7 @@ function virtualMethodCall(
     const cls = runtime.classOf(value);
     if (cls !== cachedClass) {
       cachedClass = cls;
-      cachedMember = cls.implementation(name);
+      cachedMember = runtime.instanceMember(value, name);
     }
     const member = cachedMember;
     if (name === 'call' && value instanceof DartClosure)

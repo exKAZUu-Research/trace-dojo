@@ -126,6 +126,8 @@ final class bool {
   external String toString();
   external static bool parse(String source, {bool caseSensitive = true});
   external static bool? tryParse(String source, {bool caseSensitive = true});
+  external const factory bool.fromEnvironment(String name, {bool defaultValue = false});
+  external const factory bool.hasEnvironment(String name);
 }
 
 abstract interface class Comparable<T> {

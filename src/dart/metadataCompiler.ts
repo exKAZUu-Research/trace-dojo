@@ -15,12 +15,14 @@ export abstract class MetadataCompiler extends ConstructorCompiler {
     this.inTemporaryFunction(true, undefined, () => this.checkTopLevelAnnotations(syntax));
     for (const { cls, declaration } of classes) {
       this.inAnnotationScope(cls, undefined, () => {
+        this.checkTypeParameterAnnotations(declaration.typeParameters);
         for (const member of declaration.members) this.checkMemberAnnotations(member);
         for (const value of declaration.enumConstants) this.checkAnnotations(value.annotations);
       });
     }
     for (const { ext, declaration } of extensions) {
       this.inAnnotationScope(undefined, ext, () => {
+        this.checkTypeParameterAnnotations(declaration.typeParameters);
         for (const member of declaration.members) this.checkMemberAnnotations(member);
       });
     }
@@ -29,22 +31,29 @@ export abstract class MetadataCompiler extends ConstructorCompiler {
   private checkTopLevelAnnotations(syntax: Library): void {
     for (const declaration of syntax.declarations) {
       this.checkAnnotations(declaration.annotations);
+      if (declaration.kind === 'function' || declaration.kind === 'typeAlias')
+        this.checkTypeParameterAnnotations(declaration.typeParameters);
       if (declaration.kind === 'function' && !declaration.body) this.checkParameterAnnotations(declaration.parameters);
     }
   }
 
   private checkMemberAnnotations(member: ClassDeclaration['members'][number]): void {
     this.checkAnnotations(member.annotations);
-    if (member.kind !== 'field' && !member.body) this.checkParameterAnnotations(member.parameters);
+    if (member.kind === 'method') this.checkTypeParameterAnnotations(member.typeParameters);
+    if (member.kind === 'constructor' && !member.body) this.checkParameterAnnotations(member.parameters);
   }
 
   private inAnnotationScope(cls: ClassInfo | undefined, ext: ExtensionInfo | undefined, run: () => void): void {
+    this.inDeclarationScope(cls, ext, () => this.inTemporaryFunction(true, cls, run));
+  }
+
+  protected inDeclarationScope<T>(cls: ClassInfo | undefined, ext: ExtensionInfo | undefined, run: () => T): T {
     const savedClass = this.currentClass;
     const savedExtension = this.currentExtension;
     this.currentClass = cls;
     this.currentExtension = ext;
     try {
-      this.inTemporaryFunction(true, cls, run);
+      return run();
     } finally {
       this.currentClass = savedClass;
       this.currentExtension = savedExtension;

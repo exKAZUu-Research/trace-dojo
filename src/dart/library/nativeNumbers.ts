@@ -389,6 +389,8 @@ function parseBool(text: string, caseSensitive: boolean): boolean | undefined {
   if (value === 'false') return false;
   return undefined;
 }
+define('bool.fromEnvironment', (_runtime, _self, _args, namedArgs) => named(namedArgs, 'defaultValue', false));
+define('bool.hasEnvironment', () => false);
 define('bool.parse', (runtime, _self, [source], namedArgs) => {
   const text = stringArg(runtime, source, 'source');
   const result = parseBool(text, named(namedArgs, 'caseSensitive', true) as boolean);
