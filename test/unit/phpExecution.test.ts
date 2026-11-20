@@ -5266,6 +5266,19 @@ test('gc_collect_cycles() runs the destructors of cyclic objects destructors cre
   }
 });
 
+test('gc_collect_cycles() defers what destructors of deferred objects attach or create', () => {
+  for (const [make, expected] of [
+    ['$this->c = new stdClass;', 'E;int(1)\nint(2)\nint(0)\n'],
+    ['$g = new G; $g->self = $g; $g->c = [new stdClass];', 'E;G;int(1)\nint(4)\nint(0)\n'],
+  ]) {
+    expect(
+      run(
+        `<?php class G { public $self; public $c; function __destruct() { echo "G;"; } } class E { public $self; public $c; function __destruct() { echo "E;"; ${make} } } class D { public $self; function __destruct() { $e = new E; $e->self = $e; } } $d = new D; $d->self = $d; unset($d); var_dump(gc_collect_cycles(), gc_collect_cycles(), gc_collect_cycles());`
+      )
+    ).toMatchObject({ kind: 'executed', stdout: expected });
+  }
+});
+
 test('a class whose override names a later class is declared when its statement runs', () => {
   expect(
     run(

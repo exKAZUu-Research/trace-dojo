@@ -199,9 +199,14 @@ function destructCreatedGarbage(
   if (created.length === 0) return { after, afterArrays, created };
   const graph = new CollectionGraph([...created, ...objectsCreatedSince(runtime, handles, after)], runtime);
   const deferred = heldNodes(graph, created);
+  const existing = new Set(runtime.objects.values());
   run(created);
   afterArrays = new Set<PhpArray>();
   after = mark(runtime, false, afterArrays);
+  // What those destructors attached to their objects, or created and dropped, stays with them too.
+  const unreached = [...runtime.objects.values()].filter((object) => !after.has(object));
+  const starts = [...created, ...unreached.filter((object) => !existing.has(object))];
+  for (const node of heldNodes(new CollectionGraph(unreached, runtime), starts)) deferred.add(node);
   for (const node of deferred)
     if (node instanceof PhpArray) afterArrays.add(node);
     else if (node instanceof PhpObject) after.add(node);
