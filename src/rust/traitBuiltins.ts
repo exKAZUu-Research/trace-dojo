@@ -1,4 +1,5 @@
 // code-gauge-allow-file fileNcss 437 -- One rule per trait of the standard library.
+import { collectionKeyAnswer } from './collectionBounds';
 import { normalize } from './infer';
 import { supportsDebug } from './iterDebug';
 import { intoIterItem } from './iterTypes';
@@ -331,17 +332,21 @@ function stringKind(t: Type): 'String' | 'str' | '&str' | undefined {
 }
 
 function comparisonAdt(goal: Goal, t: AdtType): Answer {
-  const { name, all } = goal;
+  const { name, all, solver } = goal;
   const d = derived(goal);
   if (d) return d;
   const builtin = t.def.builtin as string;
   const equality = name === 'PartialEq' || name === 'Eq';
   if (builtin === 'String' || builtin === 'Ordering') return 'yes';
   if (ERROR_TYPES.has(builtin)) return equality ? 'yes' : 'no';
-  if (['Vec', 'VecDeque', 'Box', 'Option', 'Result', 'BTreeSet', 'BTreeMap', 'Reverse'].includes(builtin)) {
-    return all(t.args);
+  if (['HashMap', 'HashSet'].includes(builtin) && !equality) return 'no';
+  if (['HashMap', 'HashSet', 'BTreeMap', 'BTreeSet'].includes(builtin)) {
+    const keys = name === 'Hash' ? 'yes' : collectionKeyAnswer(solver, t);
+    const values = all(t.args);
+    if (keys === 'no' || values === 'no') return 'no';
+    return keys === 'unknown' || values === 'unknown' ? 'unknown' : 'yes';
   }
-  if (['HashMap', 'HashSet'].includes(builtin)) return equality ? all(t.args) : 'no';
+  if (['Vec', 'VecDeque', 'Box', 'Option', 'Result', 'Reverse'].includes(builtin)) return all(t.args);
   if (RANGE_TYPES.has(builtin)) return equality || name === 'Hash' ? all(t.args) : 'no';
   return 'no';
 }
@@ -503,7 +508,8 @@ function extend({ solver, t, ref }: Goal): Answer {
   const item = shallow(ref.args[0]);
   if (item.kind === 'ref' && t.kind === 'adt' && t.args.length === 1) {
     const snapshot = solver.unifier.snapshot();
-    if (solver.unifier.unify(item.target, t.args[0]) && solver.isCopy(item.target)) return 'yes';
+    if (solver.unifier.unify(item.target, t.args[0]) && solver.isCopy(item.target))
+      return collectionKeyAnswer(solver, t);
     solver.unifier.rollback(snapshot);
   }
   return fromIterator(solver, t, ref.args[0]);
@@ -570,7 +576,7 @@ function fromIterator(solver: TraitSolver, t: Type, item: Type): Answer {
     case 'HashSet':
     case 'BTreeSet':
     case 'BinaryHeap': {
-      return solver.unifier.tryUnify(t.args[0], item) ? 'yes' : 'no';
+      return solver.unifier.tryUnify(t.args[0], item) ? collectionKeyAnswer(solver, t) : 'no';
     }
     case 'Box': {
       return boxFromIterator(solver, shallow(t.args[0]), item, element);
@@ -580,7 +586,7 @@ function fromIterator(solver: TraitSolver, t: Type, item: Type): Answer {
     }
     case 'HashMap':
     case 'BTreeMap': {
-      return solver.unifier.tryUnify({ kind: 'tuple', elems: t.args }, item) ? 'yes' : 'no';
+      return solver.unifier.tryUnify({ kind: 'tuple', elems: t.args }, item) ? collectionKeyAnswer(solver, t) : 'no';
     }
     case 'Result':
     case 'Option': {

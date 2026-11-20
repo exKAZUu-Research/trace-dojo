@@ -3132,3 +3132,99 @@ test('parses Rust loop results that start with operators and closures', () => {
     println!("{} {} {} {}", reference, signed, callback(), branch);`);
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '7 -1 6 3\n' });
 });
+
+test('preserves reference reborrows when classifying Rust closures', () => {
+  const program = rustMain(`let mut values = vec![1];
+    let reference = &mut values;
+    let mut append = || Vec::push(reference, 2);
+    append();
+    append();
+    let mut text = String::new();
+    let reference = &mut text;
+    let mut extend = || String::push_str(reference, "x");
+    extend();
+    extend();
+    println!("{:?} {}", values, text);`);
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '[1, 2, 2] xx\n' });
+
+  const consumesReference = rustMain(
+    'let mut value = 1; let reference = &mut value; let consume = || take(reference); consume(); consume();',
+    'fn take<T>(_: T) {}'
+  );
+  expect(executeProgram('rust', consumesReference).kind).toBe('compileError');
+});
+
+test('preserves visibility for tuple fields and resolves aliases of prelude names', () => {
+  const modules = `mod parent {
+      pub mod child {
+        pub struct Restricted(pub(super) i32);
+        pub struct Private(pub(self) i32);
+        pub fn make() -> Restricted { Restricted(3) }
+      }
+      pub fn read() -> i32 { child::make().0 + child::Restricted(4).0 }
+    }`;
+  const valid = rustMain('let v: V<i32> = vec![parent::read()]; println!("{:?}", v);', `use Vec as V; ${modules}`);
+  expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: '[7]\n' });
+  expect(executeProgram('rust', rustMain('let _ = parent::child::make().0;', modules)).kind).toBe('compileError');
+  expect(executeProgram('rust', rustMain('let _ = parent::child::Private(1);', modules)).kind).toBe('compileError');
+});
+
+test('enforces Rust collection bounds in method signatures and generic conversions', () => {
+  const imports = 'use std::collections::{HashSet, HashMap, BinaryHeap};';
+  for (const body of [
+    'let _: HashSet<f64> = [1.0].into_iter().collect();',
+    'let _ = HashMap::from([(1.0_f64, 2)]);',
+    'let _ = BinaryHeap::from(vec![1.0_f64]);',
+  ]) {
+    expect(executeProgram('rust', rustMain(body, imports)).kind).toBe('compileError');
+  }
+  const valid = rustMain('let m = HashMap::from([(1, 2)]); println!("{:?}", m.get(&1));', imports);
+  expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: 'Some(2)\n' });
+});
+
+test('finds and folds Rust iterator elements in reverse order', () => {
+  const program = rustMain(`let mut values = [1, 2, 3, 4].into_iter().filter(|n| *n < 4);
+    println!("{:?} {:?}", values.rfind(|n| *n % 2 == 0), values.rfind(|n| *n % 2 == 0));
+    println!("{}", [1, 2, 3].into_iter().rfold(0, |acc, n| acc * 10 + n));`);
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'Some(2) None\n321\n' });
+  expect(executeProgram('rust', rustMain('let _ = (0..).rfold(0, |acc, n| acc + n);')).kind).toBe('compileError');
+});
+
+test('returns borrowed Rust slice partitions and preserves mutations through them', () => {
+  const program = rustMain(`let mut values = [1, 2, 3];
+    let (a, b) = values.split_at(1);
+    println!("{:?} {:?}", a, b);
+    println!("{:?} {:?}", values.split_first(), values.split_last());
+    let (a, b) = values.split_at_mut(1);
+    a[0] = 4;
+    b[0] = 5;
+    println!("{:?}", values);`);
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[1] [2, 3]\nSome((1, [2, 3])) Some((3, [1, 2]))\n[4, 5, 3]\n',
+  });
+});
+
+test('rejects initializer panics in unused Rust constants before main runs', () => {
+  for (const declaration of [
+    'const BAD: i8 = 127_i8.pow(2);',
+    'struct S; impl S { const BAD: i32 = i32::abs(i32::MIN); }',
+    'const BAD: i32 = 1_i32.checked_div(0).unwrap();',
+  ]) {
+    expect(executeProgram('rust', rustMain('println!("main");', declaration)).kind).toBe('compileError');
+  }
+  const valid = rustMain('println!("{}", EMPTY.len());', 'const EMPTY: Vec<i32> = Vec::new();');
+  expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: '0\n' });
+});
+
+test('enforces Rust ADT trait bounds wherever a generic type is written', () => {
+  const declaration = 'struct S<T> where T: Copy { value: T }';
+  for (const usage of ['fn read(_: S<String>) {}', 'struct Holder { value: Option<S<String>> }']) {
+    expect(executeProgram('rust', rustMain('', `${declaration} ${usage}`)).kind).toBe('compileError');
+  }
+  const valid = rustMain(
+    'println!("{}", read(S { value: 4 }));',
+    `${declaration} fn read<T: Copy>(s: S<T>) -> T { s.value }`
+  );
+  expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: '4\n' });
+});

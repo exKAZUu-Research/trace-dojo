@@ -4,11 +4,20 @@ import { type CallSupport, type CompiledFn, Compiler } from './compiler';
 import type { WriteChunk } from './debugText';
 import { Formatter, type Spec } from './fmt';
 import { normalize } from './infer';
-import type { Module, Program } from './items';
+import { compileError, type Module, type Program } from './items';
 import { type NativeContext, NATIVES } from './natives';
 import { toIterator } from './natives/iterators';
 import { cloneValue, compareValues, type OrderMethod, setUserImpls, valuesEqual } from './ops';
-import { ControlSignal, FmtFailure, Frame, type FunctionInfo, type Runtime, RustPanic } from './runtime';
+import {
+  ControlSignal,
+  FmtFailure,
+  Frame,
+  type FunctionInfo,
+  OutOfMemory,
+  type Runtime,
+  RustPanic,
+  StackOverflow,
+} from './runtime';
 import { concreteType, matchConcrete, typeKey } from './runtimeTypes';
 import {
   type AdtDef,
@@ -50,6 +59,7 @@ export class Interpreter implements CallSupport {
   runtime!: Runtime;
   readonly formatter: Formatter;
   readonly compiler: Compiler;
+  readonly restoreOperations: () => void;
   private readonly dispatchCache = new Map<string, Dispatch | undefined>();
   private readonly constValues = new Map<ConstDef, Map<string, Value>>();
   private readonly constFns = new Map<ConstDef, CompiledFn>();
@@ -72,7 +82,7 @@ export class Interpreter implements CallSupport {
       },
       allocateString: (length, written) => this.runtime.allocateString(length, written),
     });
-    setUserImpls({
+    this.restoreOperations = setUserImpls({
       allocate: (count) => this.runtime.allocate(count),
       spend: (count) => this.runtime.spend(count),
       eq: (type, a, b, rhs) => {
@@ -297,6 +307,27 @@ export class Interpreter implements CallSupport {
     const value = this.evaluateConst(def, frame, types);
     if (typeof value !== 'object') instances.set(key, value);
     return value;
+  }
+
+  validateConstants(constants: ConstDef[]): void {
+    const frame = new Frame(
+      this.runtime,
+      { name: '{const}', slotCount: 0, locals: [], captures: [], isAtomic: true },
+      undefined,
+      new Map()
+    );
+    for (const def of constants) {
+      try {
+        this.constValue(def, frame, []);
+      } catch (error) {
+        if (error instanceof RustPanic)
+          compileError(error.span, `定数 ${def.name} の計算中にエラーが起きました。 ${error.message}`);
+        if (error instanceof OutOfMemory || error instanceof StackOverflow) {
+          compileError(def.ast.span, `定数 ${def.name} の計算に必要なメモリの上限を超えました。`);
+        }
+        throw error;
+      }
+    }
   }
 
   private evaluateConst(def: ConstDef, frame: Frame, types: Type[]): Value {

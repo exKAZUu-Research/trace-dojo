@@ -2,7 +2,9 @@ import { type Annotations, type FnContext, type LocalVar } from './annotations';
 import type { Expr, MacroCall, Pattern, Span } from './ast';
 import { forEachDirect, patternBindingParts } from './astWalk';
 import type { Checker } from './checker';
+import { writtenCallParams } from './checkerCalls';
 import { checkPattern } from './checkerPatterns';
+import { normalize } from './infer';
 import { compileError } from './items';
 import type { TraitSolver } from './traits';
 import { type ClosureType, freshVar, newClosureType, resolve, shallow, type Type, UNIT } from './types';
@@ -116,10 +118,37 @@ class CaptureUses {
     // Calling a captured `FnOnce` closure moves it.
     if (expr.kind === 'call' && this.annotations.callKinds.get(expr) === 'FnOnce') this.move(expr.callee, expr.span);
     if (consumed && expr.kind !== 'index' && !this.isCopy(expr.ty ?? UNIT)) this.move(expr, expr.span);
-    const consumes = consumedChildren(expr, this.annotations, (pattern) =>
-      bindsByValue(pattern, this.annotations, this.isCopy)
-    );
+    if (expr.kind === 'call' || expr.kind === 'methodCall') {
+      this.visitCall(expr);
+      return;
+    }
+    const consumes = consumedChildren(expr, (pattern) => bindsByValue(pattern, this.annotations, this.isCopy));
     forEachDirect(expr, (child) => this.visit(child, consumes(child, consumed)));
+  }
+
+  private visitCall(expr: Extract<Expr, { kind: 'call' | 'methodCall' }>): void {
+    let params: Type[] | undefined;
+    if (expr.kind === 'methodCall') {
+      const method = this.annotations.methods.get(expr);
+      this.visit(expr.receiver, method?.fn.selfMode === 'value' && method.receiver.autoref === 'none');
+      params = method?.fn.paramTypes;
+    } else {
+      this.visit(expr.callee, false);
+      const res = this.annotations.paths.get(expr.callee);
+      const callee = callableType(expr.callee.ty ?? UNIT);
+      params = res?.kind === 'fn' ? writtenCallParams(res.fn) : callee;
+    }
+    for (const [index, arg] of expr.args.entries()) {
+      const written = params?.[index];
+      const param = written && normalize(shallow(written));
+      const argType = normalize(shallow(arg.ty ?? UNIT));
+      const reborrows = param?.kind === 'ref' && argType.kind === 'ref' && argType.mutable;
+      this.visit(arg, !reborrows);
+      if (reborrows && param.mutable) {
+        const captured = this.capturedLocal(arg);
+        if (captured) this.mutated.add(captured);
+      }
+    }
   }
 
   private move(expr: Expr, span: Span): void {
@@ -145,6 +174,15 @@ class CaptureUses {
     const t = resolve(type);
     return (t.kind === 'var' && !t.v.literal) || this.solver.isCopy(t);
   };
+}
+
+function callableType(type: Type): Type[] | undefined {
+  const t = normalize(shallow(type));
+  if (t.kind === 'ref') return callableType(t.target);
+  if (t.kind === 'adt' && t.def.builtin === 'Box') return callableType(t.args[0]);
+  if (t.kind === 'fn') return t.params;
+  if (t.kind === 'closure') return t.closure.params;
+  return undefined;
 }
 
 /** Whether a pattern takes a part of what it matches by value that is not `Copy`, which moves it. */
@@ -194,7 +232,6 @@ function mutatedCapture(
 // code-gauge-allow functionNcss 36 -- One case per kind of expression.
 function consumedChildren(
   expr: Expr,
-  annotations: Annotations,
   movesByPattern: (pattern: Pattern) => boolean
 ): (child: Expr, consumed: boolean) => boolean {
   switch (expr.kind) {
@@ -221,14 +258,6 @@ function consumedChildren(
     }
     case 'binary': {
       return () => !['==', '!=', '<', '<=', '>', '>='].includes(expr.op);
-    }
-    case 'methodCall': {
-      const method = annotations.methods.get(expr);
-      const byValue = method?.fn.selfMode === 'value' && method.receiver.autoref === 'none';
-      return (child) => child !== expr.receiver || byValue;
-    }
-    case 'call': {
-      return (child) => child !== expr.callee;
     }
     case 'assign':
     case 'compoundAssign': {

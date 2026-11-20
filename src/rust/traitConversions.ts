@@ -1,3 +1,4 @@
+import { collectionKeyAnswer, collectionKeyTraits } from './collectionBounds';
 import { normalize } from './infer';
 import type { Answer, TraitSolver } from './traits';
 import { shallow, type Type } from './types';
@@ -8,6 +9,9 @@ type AdtType = Type & { kind: 'adt' };
 export function conversionExists(solver: TraitSolver, source: Type, target: Type): Answer {
   const t = normalize(shallow(target));
   if (t.kind === 'adt') {
+    if (t.def.builtin === 'VecDeque' || collectionKeyTraits(t.def.builtin).length > 0) {
+      return collectionFrom(solver, source, t);
+    }
     const clone = borrowedSequenceClone(solver, source, t);
     if (clone !== undefined) return clone;
     return adtConversionExists(solver, source, t) ? 'yes' : 'no';
@@ -41,14 +45,6 @@ function adtConversionExists(solver: TraitSolver, source: Type, t: AdtType): boo
     }
     case 'Vec': {
       return vecFrom(solver, source, t.args[0]);
-    }
-    case 'HashMap':
-    case 'BTreeMap':
-    case 'HashSet':
-    case 'BTreeSet':
-    case 'VecDeque':
-    case 'BinaryHeap': {
-      return collectionFrom(solver, source, t);
     }
     case 'Option': {
       return solver.unifier.tryUnify(t.args[0], source);
@@ -87,14 +83,14 @@ function vecFrom(solver: TraitSolver, source: Type, elem: Type): boolean {
 }
 
 /** Maps and sets convert from arrays; `VecDeque` and `BinaryHeap` also from `Vec`s. */
-function collectionFrom(solver: TraitSolver, source: Type, t: AdtType): boolean {
+function collectionFrom(solver: TraitSolver, source: Type, t: AdtType): Answer {
   const builtin = t.def.builtin as string;
   const fromVec = builtin === 'VecDeque' || builtin === 'BinaryHeap';
   const isVec = source.kind === 'adt' && source.def.builtin === 'Vec';
-  if (source.kind !== 'array' && !(fromVec && isVec)) return false;
+  if (source.kind !== 'array' && !(fromVec && isVec)) return 'no';
   const elem = source.kind === 'array' ? source.elem : source.args[0];
   const want: Type = builtin.endsWith('Map') ? { kind: 'tuple', elems: t.args } : t.args[0];
-  return solver.unifier.tryUnify(elem, want);
+  return solver.unifier.tryUnify(elem, want) ? collectionKeyAnswer(solver, t) : 'no';
 }
 
 function boxFrom(solver: TraitSolver, source: Type, inner: Type): boolean {

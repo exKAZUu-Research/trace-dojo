@@ -181,6 +181,10 @@ export class Converter extends ExpressionConverter {
   private visibility(node: Node): Visibility {
     const modifier = node.namedChildren.find((child) => child.type === 'visibility_modifier');
     if (!modifier) return 'private';
+    return this.visibilityModifier(modifier);
+  }
+
+  private visibilityModifier(modifier: Node): Visibility {
     if (modifier.text === 'pub') return 'pub';
     const scope = modifier.namedChildren.find((child) => !isComment(child))?.text;
     if (scope === 'self') return 'private';
@@ -408,7 +412,7 @@ export class Converter extends ExpressionConverter {
     for (const child of body.namedChildren) {
       if (isComment(child)) continue;
       if (child.type === 'visibility_modifier') {
-        vis = 'pub';
+        vis = this.visibilityModifier(child);
         continue;
       }
       if (child.type === 'attribute_item') unavailable(this.span(child), `属性（${child.text}）`);

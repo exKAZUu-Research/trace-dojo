@@ -930,16 +930,22 @@ function each<T>(
   ctx: NativeContext,
   iter: IterValue,
   f: (item: Value, index: number) => T | undefined,
-  fold = false
+  direction: 'next' | 'fold' | 'back' = 'next'
 ): T | undefined {
-  const source = fold ? foldingView(iter) : iter;
+  const source = direction === 'fold' ? foldingView(iter) : iter;
   for (let index = 0; ; index++) {
     ctx.runtime.spend();
-    const item = nextOf(source);
+    const item = direction === 'back' ? source.nextBack!() : nextOf(source);
     if (item === DONE) return undefined;
     const result = f(item, index);
     if (result !== undefined) return result;
   }
+}
+
+function foldItems(ctx: NativeContext, iter: IterValue, init: Value, fn: Value, direction: 'fold' | 'back'): Value {
+  let acc = init;
+  each(ctx, iter, (item) => void (acc = call(ctx, fn, [acc, item])), direction);
+  return acc;
 }
 
 define({
@@ -969,21 +975,18 @@ define({
     const item = nthBack(ctx, iterOf(self), Number(n as bigint));
     return option(ctx, item === DONE ? undefined : item, item !== DONE);
   },
-  'IterImpl<_, _>::fold': ([self, init, f], ctx) => {
-    let acc = init;
-    each(ctx, iterOf(self), (item) => void (acc = call(ctx, f, [acc, item])), true);
-    return acc;
-  },
+  'IterImpl<_, _>::fold': ([self, init, f], ctx) => foldItems(ctx, iterOf(self), init, f, 'fold'),
+  'IterImpl<_, _>::rfold': ([self, init, f], ctx) => foldItems(ctx, iterOf(self), init, f, 'back'),
   'IterImpl<_, _>::reduce': ([self, f], ctx) => {
     const iter = iterOf(self);
     const first = nextOf(iter);
     if (first === DONE) return none(ctx);
     let acc = first;
-    each(ctx, iter, (item) => void (acc = call(ctx, f, [acc, item])), true);
+    each(ctx, iter, (item) => void (acc = call(ctx, f, [acc, item])), 'fold');
     return some(ctx, acc);
   },
   'IterImpl<_, _>::for_each': ([self, f], ctx) => {
-    each(ctx, iterOf(self), (item) => void call(ctx, f, [item]), true);
+    each(ctx, iterOf(self), (item) => void call(ctx, f, [item]), 'fold');
     return [];
   },
   'IterImpl<_, _>::any': ([self, f], ctx) =>
@@ -992,6 +995,9 @@ define({
     each(ctx, iterOf(self), (item) => (truthy(call(ctx, f, [item])) ? undefined : false)) ?? true,
   'IterImpl<_, _>::find': ([self, f], ctx) =>
     each(ctx, iterOf(self), (item) => (truthy(call(ctx, f, [item])) ? some(ctx, item) : undefined)) ?? none(ctx),
+  'IterImpl<_, _>::rfind': ([self, f], ctx) =>
+    each(ctx, iterOf(self), (item) => (truthy(call(ctx, f, [item])) ? some(ctx, item) : undefined), 'back') ??
+    none(ctx),
   'IterImpl<_, _>::find_map': ([self, f], ctx) =>
     each(ctx, iterOf(self), (item) => {
       const result = deref(call(ctx, f, [item])) as EnumValue;

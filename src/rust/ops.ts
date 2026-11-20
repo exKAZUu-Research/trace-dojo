@@ -33,8 +33,12 @@ export interface UserImpls {
 
 let hooks: UserImpls | undefined;
 
-export function setUserImpls(implementations: UserImpls): void {
+export function setUserImpls(implementations: UserImpls): () => void {
+  const previous = hooks;
   hooks = implementations;
+  return () => {
+    hooks = previous;
+  };
 }
 
 export function allocateCollectionSnapshot(size: number): void {

@@ -1,3 +1,5 @@
+import { collectionKeyTraits } from './collectionBounds';
+
 /**
  * The declarations of the standard library that this interpreter implements, in Rust's syntax. Functions without a
  * body run natively (`natives.ts`), keyed by the impl's self type or trait and the function's name. Builtin types are
@@ -982,11 +984,13 @@ pub mod iter {
         pub fn nth(&mut self, n: usize) -> Option<T>;
         pub fn nth_back(&mut self, n: usize) -> Option<T> where S: DoubleEndedIterator;
         pub fn fold<B, F: FnMut(B, T) -> B>(self, init: B, f: F) -> B;
+        pub fn rfold<B, F: FnMut(B, T) -> B>(self, init: B, f: F) -> B where S: DoubleEndedIterator;
         pub fn reduce<F: FnMut(T, T) -> T>(self, f: F) -> Option<T>;
         pub fn for_each<F: FnMut(T)>(self, f: F);
         pub fn any<F: FnMut(T) -> bool>(&mut self, f: F) -> bool;
         pub fn all<F: FnMut(T) -> bool>(&mut self, f: F) -> bool;
         pub fn find<P: FnMut(&T) -> bool>(&mut self, predicate: P) -> Option<T>;
+        pub fn rfind<P: FnMut(&T) -> bool>(&mut self, predicate: P) -> Option<T> where S: DoubleEndedIterator;
         pub fn find_map<B, F: FnMut(T) -> Option<B>>(&mut self, f: F) -> Option<B>;
         pub fn position<P: FnMut(T) -> bool>(&mut self, predicate: P) -> Option<usize>;
         pub fn rposition<P: FnMut(T) -> bool>(&mut self, predicate: P) -> Option<usize> where S: DoubleEndedIterator + ExactSizeIterator;
@@ -1070,7 +1074,7 @@ pub mod collections {
         pub fn capacity(&self) -> usize;
         pub fn into_iter(self) -> IterImpl<(K, V), HashMapIntoIterShape>;
     }
-    impl<K: Eq + Hash, V> HashMap<K, V> {
+    impl<K: ${collectionKeyTraits('HashMap').join(' + ')}, V> HashMap<K, V> {
         pub fn reserve(&mut self, additional: usize);
         pub fn shrink_to_fit(&mut self);
         pub fn shrink_to(&mut self, min_capacity: usize);
@@ -1104,7 +1108,7 @@ pub mod collections {
         pub fn into_values(self) -> IterImpl<V, BTreeMapIntoValuesShape>;
         pub fn into_iter(self) -> IterImpl<(K, V), BTreeMapIntoIterShape>;
     }
-    impl<K: Ord, V> BTreeMap<K, V> {
+    impl<K: ${collectionKeyTraits('BTreeMap').join(' + ')}, V> BTreeMap<K, V> {
         pub fn range<R: RangeBounds<K>>(&self, range: R) -> IterImpl<(&K, &V), BTreeMapRangeShape>;
         pub fn insert(&mut self, k: K, v: V) -> Option<V> ;
         pub fn get<Q>(&self, k: &Q) -> Option<&V> where K: Borrow<Q>, Q: Ord;
@@ -1146,7 +1150,7 @@ pub mod collections {
         pub fn drain(&mut self) -> IterImpl<T, HashSetDrainShape>;
         pub fn into_iter(self) -> IterImpl<T, HashSetIntoIterShape>;
     }
-    impl<T: Eq + Hash> HashSet<T> {
+    impl<T: ${collectionKeyTraits('HashSet').join(' + ')}> HashSet<T> {
         pub fn reserve(&mut self, additional: usize);
         pub fn shrink_to_fit(&mut self);
         pub fn shrink_to(&mut self, min_capacity: usize);
@@ -1175,7 +1179,7 @@ pub mod collections {
         pub fn iter(&self) -> IterImpl<&T, BTreeSetIterShape>;
         pub fn into_iter(self) -> IterImpl<T, BTreeSetIntoIterShape>;
     }
-    impl<T: Ord> BTreeSet<T> {
+    impl<T: ${collectionKeyTraits('BTreeSet').join(' + ')}> BTreeSet<T> {
         pub fn range<R: RangeBounds<T>>(&self, range: R) -> IterImpl<&T, BTreeSetRangeShape>;
         pub fn insert(&mut self, value: T) -> bool ;
         pub fn contains<Q>(&self, value: &Q) -> bool where T: Borrow<Q>, Q: Ord;

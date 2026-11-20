@@ -1,6 +1,7 @@
 import type { Expr, Span } from './ast';
 import type { Checker } from './checker';
 import { isPlaceExpr, requireMutablePlace } from './checkerPlaces';
+import { collectionKeyTraits } from './collectionBounds';
 import { normalize } from './infer';
 import { compileError } from './items';
 import { BOOL, freshVar, intType, ref, REF_STR, resolve, shallow, type Type, typeToString, UNIT } from './types';
@@ -168,6 +169,7 @@ function setOperation(c: Checker, expr: Extract<Expr, { kind: 'binary' }>, left:
   if (set.kind !== 'adt' || (set.def.builtin !== 'HashSet' && set.def.builtin !== 'BTreeSet')) return undefined;
   c.unifyOrError(expr.right.span, l, right);
   c.requireTrait(set.args[0], 'Clone', expr.span);
+  for (const bound of collectionKeyTraits(set.def.builtin)) c.requireTrait(set.args[0], bound, expr.span);
   return set;
 }
 

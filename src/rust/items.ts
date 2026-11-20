@@ -847,39 +847,48 @@ const EXTERN_CRATES = new Set(['std', 'core', 'alloc']);
 
 /** Looks up a name in a scope's type namespace: its items and imports, the scopes around a block, and the prelude. */
 export function lookupType(module: Module, name: string, span: Span): TypeBinding | undefined {
+  return lookupTypeEntry(module, name, span)?.binding;
+}
+
+function lookupTypeEntry(module: Module, name: string, span: Span): Entry<TypeBinding> | undefined {
   for (let scope: Module | undefined = module; scope; scope = scope.lexicalParent) {
     const found = ownType(scope, name, span, new Set());
-    if (found) return found.binding;
+    if (found) return found;
   }
   if (module.isStd) {
     const found = stdIndex(module.program, 'type').get(name);
-    if (found) return found as TypeBinding;
+    if (found) return { binding: found as TypeBinding, visibleWithin: undefined };
   }
   const prim = PRIMITIVES.get(name);
   const preludePath = module.program.prelude.get(name);
   if (preludePath) {
     const found = resolveAbsolute(module.program, preludePath, span, 'type');
-    if (found) return found as TypeBinding;
+    if (found) return { binding: found as TypeBinding, visibleWithin: undefined };
   }
-  if (prim) return { kind: 'prim', type: prim };
-  if (EXTERN_CRATES.has(name)) return { kind: 'mod', module: module.program.std };
+  if (prim) return { binding: { kind: 'prim', type: prim }, visibleWithin: undefined };
+  if (EXTERN_CRATES.has(name))
+    return { binding: { kind: 'mod', module: module.program.std }, visibleWithin: undefined };
   return undefined;
 }
 
-// code-gauge-allow duplicateLines 16 -- Looks up the value namespace as lookupType does the type namespace, whose fallbacks differ.
 export function lookupValue(module: Module, name: string, span: Span): ValueBinding | undefined {
+  return lookupValueEntry(module, name, span)?.binding;
+}
+
+// code-gauge-allow duplicateLines 16 -- Looks up the value namespace as lookupType does the type namespace, whose fallbacks differ.
+function lookupValueEntry(module: Module, name: string, span: Span): Entry<ValueBinding> | undefined {
   for (let scope: Module | undefined = module; scope; scope = scope.lexicalParent) {
     const found = ownValue(scope, name, span, new Set());
-    if (found) return found.binding;
+    if (found) return found;
   }
   if (module.isStd) {
     const found = stdIndex(module.program, 'value').get(name);
-    if (found) return found as ValueBinding;
+    if (found) return { binding: found as ValueBinding, visibleWithin: undefined };
   }
   const preludePath = module.program.prelude.get(name);
   if (preludePath) {
     const found = resolveAbsolute(module.program, preludePath, span, 'value');
-    if (found) return found as ValueBinding;
+    if (found) return { binding: found as ValueBinding, visibleWithin: undefined };
   }
   return undefined;
 }
@@ -1236,7 +1245,7 @@ function resolveImportedName(
   const parent = path.length > 1 ? resolveTypePath(path.slice(0, -1), module, span) : undefined;
   if (!parent) {
     const scope = module.lexicalParent ?? module;
-    return { types: ownType(scope, last, span, new Set()), values: ownValue(scope, last, span, new Set()) };
+    return { types: lookupTypeEntry(scope, last, span), values: lookupValueEntry(scope, last, span) };
   }
   if (parent.kind === 'mod') {
     const typeEntry = ownType(parent.module, last, span, new Set());

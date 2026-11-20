@@ -24,7 +24,7 @@ import {
   ElementPlace,
   type IterValue,
   type Next,
-  type RangeValue,
+  RangeValue,
   sliceBase,
   sliceGet,
   sliceItems,
@@ -356,11 +356,11 @@ function fillSlice(slice: Value, value: Value, type: Type): Value {
 }
 
 function rangeFrom(start: number): RangeValue {
-  return { start: BigInt(start), end: undefined, inclusive: false, exhausted: false } as RangeValue;
+  return new RangeValue(BigInt(start), undefined, false);
 }
 
 function rangeTo(end: number): RangeValue {
-  return { start: undefined, end: BigInt(end), inclusive: false, exhausted: false } as RangeValue;
+  return new RangeValue(undefined, BigInt(end), false);
 }
 
 function splitAt(ctx: NativeContext, slice: Value, mid: number): Value {

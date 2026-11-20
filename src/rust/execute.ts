@@ -51,11 +51,11 @@ export function runProgram(
   onEnd?: (frame: Frame) => void
 ): ProgramRun {
   const { program, checker } = built;
-  const interp = new Interpreter(program, checker, tracing);
-  interp.runtime = runtime;
   const main = (program.root as Module).values.get('main');
   if (main?.binding.kind !== 'fn') throw new Error('No main function');
   const mainFn = main.binding.def;
+  const interp = new Interpreter(program, checker, tracing);
+  interp.runtime = runtime;
   let uncaughtException: string | undefined;
   try {
     const compiled = interp.compiler.compileFn(mainFn);
@@ -69,6 +69,7 @@ export function runProgram(
   } finally {
     // The `String`s in flight are kept by their text, which must not outlive the run.
     settleStrings();
+    interp.restoreOperations();
   }
   runtime.finishOutput();
   return {

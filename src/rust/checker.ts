@@ -927,6 +927,13 @@ export class Checker {
   private checkWrittenType(type: Type, span: Span): void {
     const t = shallow(type);
     if (t.kind === 'dyn') checkDynCompatible(t.trait.trait, span);
+    if (t.kind === 'adt') {
+      for (const [arg, bound] of adtArgumentBounds(t.def, t.args)) {
+        if (this.solver.implements(arg, bound) === 'no') {
+          compileError(span, `${typeToString(arg)} にトレイト ${bound.trait.name} が実装されていません。`);
+        }
+      }
+    }
     if (t.kind === 'adt' && t.def.builtin !== 'Box') {
       for (const arg of t.args) {
         const a = shallow(arg);
@@ -1090,17 +1097,19 @@ export class Checker {
   }
 
   requireAdtArguments(def: AdtDef, args: Type[], span: Span): void {
-    const subst = new Map(def.params.map((param, index) => [param, args[index]]));
-    const sized = !(def.module as Module | undefined)?.isStd;
-    for (const [index, param] of def.params.entries()) {
-      const arg = args[index];
-      if (sized) this.requireTrait(arg, 'Sized', span);
-      for (const bound of param.bounds) this.require(arg, substituteTraitRef(bound, subst), span);
-    }
+    if (!(def.module as Module | undefined)?.isStd) for (const arg of args) this.requireTrait(arg, 'Sized', span);
+    for (const [arg, bound] of adtArgumentBounds(def, args)) this.require(arg, bound, span);
   }
 }
 
 export { hasParams, deepNormalize, allSupertraits, derefOnce };
+
+function* adtArgumentBounds(def: AdtDef, args: Type[]): Iterable<[Type, TraitRef]> {
+  const subst = new Map(def.params.map((param, index) => [param, args[index]]));
+  for (const [index, param] of def.params.entries()) {
+    for (const bound of param.bounds) yield [args[index], substituteTraitRef(bound, subst)];
+  }
+}
 
 function checkFloatLiteral(literal: Extract<Expr, { kind: 'float' }>, name: FloatName): void {
   const value = name === 'f32' ? literal.f32 : literal.value;
