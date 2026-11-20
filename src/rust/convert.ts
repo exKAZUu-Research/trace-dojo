@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 520 -- One method per kind of item, type, and path.
+// code-gauge-allow-file fileNcss 522 -- One method per kind of item, type, and path.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type {
@@ -193,8 +193,8 @@ export class Converter extends ExpressionConverter {
     return unavailable(this.span(modifier), `公開の範囲の指定（${modifier.text}）`);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 23 -- One case per kind of syntax node.
-  // code-gauge-allow functionNcss 39 -- One case per kind of syntax node.
+  // code-gauge-allow functionCognitiveComplexity 27 -- One case per kind of syntax node.
+  // code-gauge-allow functionNcss 41 -- One case per kind of syntax node.
   private fnItem(node: Node, allowMissingBody = false): FnItem {
     const span = this.span(node);
     checkNotReserved(this.field(node, 'name').text, span);
@@ -213,6 +213,7 @@ export class Converter extends ExpressionConverter {
     for (const child of parametersNode.namedChildren) {
       if (isComment(child)) continue;
       if (child.type === 'self_parameter') {
+        if (selfParam || params.length > 0) syntaxError(this.span(child), 'self は、最初の引数に一度だけ書けます。');
         selfParam = this.selfParam(child);
       } else if (child.type === 'parameter') {
         params.push(this.param(child));

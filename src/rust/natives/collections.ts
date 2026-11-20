@@ -16,7 +16,7 @@ import {
 } from '../values';
 import { checkTableCapacity } from './capacityNatives';
 import { defaultValue } from './core';
-import { arrayIter, mapIter, ownedIter, setIter } from './iterators';
+import { arrayIter, mapIter, nextForFold, ownedIter, setIter } from './iterators';
 import { sizeOf } from './layout';
 import { btreeSetOp, hashSetMembers, type SetOp } from './setOps';
 import { call, define, deref, libraryPanic, type Native, type NativeContext, none, option, some } from './support';
@@ -214,7 +214,7 @@ function mapProjection(map: MapValue, project: (entry: [Value, Value]) => Value,
 function extendMap(ctx: NativeContext, m: MapValue, iterator: IterValue): Value {
   for (;;) {
     ctx.runtime.spend();
-    const item = iterator.next();
+    const item = nextForFold(iterator);
     if (item === DONE) break;
     const [k, v] = item as Value[];
     const key = entryKey(ctx, m.entries, k);
@@ -309,7 +309,7 @@ function setNatives(sorted: boolean): Record<string, (args: Value[], ctx: Native
       const iterator = deref(iter) as IterValue;
       for (;;) {
         ctx.runtime.spend();
-        const item = iterator.next();
+        const item = nextForFold(iterator);
         if (item === DONE) break;
         const hash = entryKey(ctx, s.entries, item);
         if (s.entries.has(hash)) continue;

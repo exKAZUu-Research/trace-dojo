@@ -76,13 +76,7 @@ export class Interpreter implements CallSupport {
     this.formatter = new Formatter({
       userFmt: (trait, type, value, spec, write) => this.userFmt(trait, type, value, spec, write),
       fieldTypes: (def, args, variant) => fieldTypes(def, args, variant),
-      concrete: (type) => {
-        const frame = this.runtime.frames.at(-1);
-        let t = shallow(frame ? concreteType(type, frame.typeArgs) : type);
-        // An `impl Trait` value formats as the type it hides.
-        while (t.kind === 'opaque' && t.opaque.hidden) t = shallow(resolve(t.opaque.hidden, true));
-        return t;
-      },
+      concrete: (type) => this.formatType(type),
       allocateString: (length, written) => this.runtime.allocateString(length, written),
     });
     this.restoreOperations = setUserImpls({
@@ -327,6 +321,24 @@ export class Interpreter implements CallSupport {
       }
       throw error;
     }
+  }
+
+  private formatType(type: Type): Type {
+    const frame = this.runtime.frames.at(-1);
+    let current = shallow(frame ? concreteType(type, frame.typeArgs) : type);
+    while (current.kind === 'opaque') {
+      const { args, hidden, method } = current.opaque;
+      const implementation = method && this.resolveFunctionInstance(method, args);
+      if (implementation && implementation.fn !== method) {
+        const { fn, typeArgs } = implementation;
+        const bindings = new Map(fn.params.map((param, index) => [param, typeArgs[index]]));
+        current = shallow(concreteType(fn.ret, bindings));
+      } else {
+        if (!hidden) break;
+        current = shallow(resolve(hidden, true));
+      }
+    }
+    return current;
   }
 
   resolveFunctionInstance(fn: FnDef, typeArgs: Type[]): { fn: FnDef; typeArgs: Type[] } {

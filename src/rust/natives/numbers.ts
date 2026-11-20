@@ -546,7 +546,7 @@ const floating: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
     return round(ctx, r < 0 ? r + Math.abs(float(b)) : r);
   },
   div_euclid: ([a, b], ctx) => {
-    const q = Math.trunc(float(a) / float(b));
+    const q = Math.trunc(round(ctx, float(a) / float(b)));
     if (float(a) % float(b) < 0) return round(ctx, float(b) > 0 ? q - 1 : q + 1);
     return round(ctx, q);
   },

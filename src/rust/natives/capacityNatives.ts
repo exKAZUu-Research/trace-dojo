@@ -14,7 +14,7 @@ import { iteratorCapability } from '../traits';
 import type { Type } from '../types';
 import { utf8Bytes, utf8Length } from '../utf8';
 import { type IterValue, sliceLength, textOf, UNIT_VALUE, type Value } from '../values';
-import { isTrustedLen } from './iterators';
+import { isTrustedLen, lengthOf } from './iterators';
 import { sizeOf } from './layout';
 import { deref, libraryPanic, type NativeContext, placeOf } from './support';
 
@@ -155,15 +155,18 @@ export function withCapacity(
  */
 export function extendRoom(ctx: NativeContext, items: Value[], iterator: IterValue, shape: Type): () => void {
   const size = sizeOf(elemType(ctx));
-  const remaining = (): number => iterator.remaining?.() ?? 0;
+  const reserve = (additional: bigint): void => {
+    checkVecCapacity(ctx, items.length, additional, size);
+    reserveVec(items, items.length, Number(additional), size);
+  };
   if (isTrustedLen(shape)) {
-    reserveVec(items, items.length, remaining(), size);
+    reserve(lengthOf(iterator));
     return () => {};
   }
   const exact = iteratorCapability(shape, 'exact') === 'yes';
   return () => {
     if (vecCapacity(items, items.length, size) === items.length) {
-      reserveVec(items, items.length, (exact ? remaining() : 0) + 1, size);
+      reserve((exact ? lengthOf(iterator) : 0n) + 1n);
     }
   };
 }

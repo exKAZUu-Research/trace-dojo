@@ -311,9 +311,8 @@ export class Formatter {
         const range = v as RangeValue;
         const start = range.start === undefined ? '' : this.debug(range.start, t.args[0], spec, indent, write);
         const separator = emit(range.inclusive ? '..=' : '..', write);
-        return (
-          start + separator + (range.end === undefined ? '' : this.debug(range.end, t.args[0], spec, indent, write))
-        );
+        const end = range.end === undefined ? '' : this.debug(range.end, t.args[0], spec, indent, write);
+        return start + separator + end + (range.exhausted ? emit(' (exhausted)', write) : '');
       }
       case 'ParseIntError':
       case 'ParseFloatError':

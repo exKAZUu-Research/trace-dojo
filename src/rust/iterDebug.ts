@@ -208,7 +208,7 @@ export function iteratorDebug(
   if (name === 'TakeShape') fields.push(['n', number(state.left)]);
   if (name === 'SkipShape') fields.push(['n', number(state.toSkip)]);
   if (name === 'StepByShape') {
-    fields.push(['step_minus_one', number((state.step as number) - 1)], ['first_take', number(state.first)]);
+    fields.push(['step_minus_one', number((state.step as bigint) - 1n)], ['first_take', number(state.first)]);
   }
   if (name === 'PeekableShape') fields.push(['peeked', peekedPart(source, item, debug)]);
   return structText(ADAPTER_NAMES[name], fields, indent);

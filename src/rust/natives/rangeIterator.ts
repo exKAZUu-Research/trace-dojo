@@ -31,20 +31,15 @@ function rangeNext(range: RangeValue, kind: RangeElem): Next {
   const start = toNumber(kind, range.start);
   if (range.end === undefined) return rangeFromNext(range, kind, start);
   const end = toNumber(kind, range.end);
-  if (range.inclusive) {
-    if (start > end) return DONE;
-    if (start === end) {
-      range.exhausted = true;
-      return fromNumber(kind, start);
-    }
-  } else if (start >= end) {
-    return DONE;
-  }
-  range.start = fromNumber(kind, step(kind, start, 1n));
+  if (start > end || (start === end && !range.inclusive)) return DONE;
+  range.start = advanceBound(range, kind, start, 1n);
   return fromNumber(kind, start);
 }
 
 function rangeFromNext(range: RangeValue, kind: RangeElem, start: bigint): Next {
+  if (kind.isChar && start === 0x10_ff_ffn) {
+    throw new RustPanic('overflow in `Step::forward`', { row: 0, col: 0 }, 'core/src/iter/range.rs:118:45');
+  }
   if (
     !kind.isChar &&
     start === wrap(kind.name as never, start) &&
@@ -60,25 +55,30 @@ function rangeNextBack(range: RangeValue, kind: RangeElem): Next {
   if (range.exhausted || range.end === undefined) return DONE;
   const start = toNumber(kind, range.start);
   const end = toNumber(kind, range.end);
-  if (range.inclusive) {
-    if (start > end) return DONE;
-    if (start === end) {
-      range.exhausted = true;
-      return fromNumber(kind, end);
-    }
-    range.end = fromNumber(kind, step(kind, end, -1n));
-    return fromNumber(kind, end);
-  }
-  if (start >= end) return DONE;
-  const last = step(kind, end, -1n);
-  range.end = fromNumber(kind, last);
-  return fromNumber(kind, last);
+  if (start > end || (start === end && !range.inclusive)) return DONE;
+  const next = advanceBound(range, kind, end, -1n);
+  range.end = next;
+  return range.inclusive ? fromNumber(kind, end) : next;
 }
 
-function rangeRemaining(range: RangeValue, kind: RangeElem): number {
-  if (range.exhausted || range.end === undefined) return 0;
-  const count = Number(toNumber(kind, range.end) - toNumber(kind, range.start)) + (range.inclusive ? 1 : 0);
-  return Math.max(0, count);
+function advanceBound(range: RangeValue, kind: RangeElem, value: bigint, delta: bigint): Value {
+  const next = step(kind, value, delta);
+  const result = kind.isChar ? (next < 0n || next > 0x10_ff_ffn ? value : next) : wrap(kind.name as never, next);
+  range.exhausted = next !== result;
+  return fromNumber(kind, result);
+}
+
+function rangeRemaining(range: RangeValue, kind: RangeElem): bigint {
+  if (range.exhausted || range.end === undefined) return 0n;
+  const start = ordinal(kind, range.start);
+  const end = ordinal(kind, range.end);
+  const count = end - start + (range.inclusive ? 1n : 0n);
+  return count > 0n ? count : 0n;
+}
+
+function ordinal(kind: RangeElem, value: Value): bigint {
+  const index = toNumber(kind, value);
+  return kind.isChar && index >= 0xe0_00n ? index - 0x8_00n : index;
 }
 
 function toNumber(kind: RangeElem, value: Value): bigint {

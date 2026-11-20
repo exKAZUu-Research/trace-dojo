@@ -178,7 +178,7 @@ export class IterValue {
     public next: () => Next,
     public nextBack?: () => Next,
     /** The number of elements left, for iterators that know it (ExactSizeIterator). */
-    public remaining?: () => number,
+    public remaining?: () => number | bigint,
     /** What the iterator keeps alive, such as the collection it walks, for garbage collection. */
     readonly roots: unknown[] = []
   ) {}

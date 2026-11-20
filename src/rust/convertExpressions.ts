@@ -45,7 +45,9 @@ export abstract class ExpressionConverter extends MacroConverter {
         const semi = child.text.trimEnd().endsWith(';') && !inner.text.endsWith(';');
         const expression = withoutDocAttributes(inner);
         const expr = this.expr(expression);
-        stmts.push({ kind: 'expr', expr, semi: semi || child.lastChild?.type === ';', span: this.span(expression) });
+        const terminated = semi || child.lastChild?.type === ';';
+        if (isLast && !terminated && (expr.kind === 'macro' || isBlockLike(expr))) tail = expr;
+        else stmts.push({ kind: 'expr', expr, semi: terminated, span: this.span(expression) });
       } else if (child.type === 'empty_statement') {
         stmts.push({ kind: 'empty', span: this.span(child) });
       } else if (isItem(child)) {
@@ -53,21 +55,8 @@ export abstract class ExpressionConverter extends MacroConverter {
         if (item) items.push(item);
       } else if (isLast) {
         tail = this.expr(child);
-      } else if (child.type === 'macro_invocation') {
-        stmts.push({ kind: 'expr', expr: this.expr(child), semi: false, span: this.span(child) });
       } else {
         stmts.push({ kind: 'expr', expr: this.expr(child), semi: false, span: this.span(child) });
-      }
-    }
-    // An expression statement without a semicolon at the end of a block gives the block its value.
-    if (!tail) {
-      const last = stmts.at(-1);
-      if (last?.kind === 'expr' && !last.semi && last.expr.kind === 'macro') {
-        stmts.pop();
-        tail = last.expr;
-      } else if (last?.kind === 'expr' && !last.semi && isBlockLike(last.expr)) {
-        stmts.pop();
-        tail = last.expr;
       }
     }
     return { kind: 'block', stmts, tail, span, endRow: node.endPosition.row, items };

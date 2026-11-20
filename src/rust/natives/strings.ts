@@ -22,7 +22,7 @@ import {
   type Value,
 } from '../values';
 import { checkVecCapacity, intoStringBytes, withStringCapacity } from './capacityNatives';
-import { arrayIter } from './iterators';
+import { arrayIter, nextForFold } from './iterators';
 import { parseFloatText, parseInteger } from './numbers';
 import { checkedRangeBounds } from './ranges';
 import {
@@ -479,7 +479,7 @@ const stringNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
   from_iter: ([iter], ctx) => {
     const iterator = deref(iter) as IterValue;
     let text = '';
-    for (let item = iterator.next(); item !== DONE; item = iterator.next()) {
+    for (let item = nextForFold(iterator); item !== DONE; item = nextForFold(iterator)) {
       ctx.runtime.spend();
       text = appended(ctx, text, textOf(item));
     }
@@ -590,7 +590,7 @@ const stringNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
     const iterator = deref(iter) as IterValue;
     for (;;) {
       ctx.runtime.spend();
-      const item = iterator.next();
+      const item = nextForFold(iterator);
       if (item === DONE) break;
       text = appended(ctx, text, textOf(item));
     }

@@ -191,16 +191,21 @@ export function nextOf(iter: IterValue): Next {
   return iter.next();
 }
 
-function nthBack(ctx: NativeContext, iter: IterValue, n: number): Next {
+export function nextForFold(iter: IterValue): Next {
+  if (iter.peeked?.length) return iter.peeked.shift() as Next;
+  return (iter.foldNext ?? iter.next)();
+}
+
+function nthBack(ctx: NativeContext, iter: IterValue, n: bigint): Next {
   return nthItem(ctx, n, () => iter.nextBack!());
 }
 
-function nth(ctx: NativeContext, iter: IterValue, n: number): Next {
+function nth(ctx: NativeContext, iter: IterValue, n: bigint): Next {
   return nthItem(ctx, n, () => nextOf(iter));
 }
 
-function nthItem(ctx: NativeContext, n: number, next: () => Next): Next {
-  for (let index = 0; index < n; index++) {
+function nthItem(ctx: NativeContext, n: bigint, next: () => Next): Next {
+  for (let index = 0n; index < n; index++) {
     ctx.runtime.spend();
     if (next() === DONE) return DONE;
   }
@@ -208,8 +213,16 @@ function nthItem(ctx: NativeContext, n: number, next: () => Next): Next {
 }
 
 /** The number of elements left, counting those `peek` looked at. */
-function lengthOf(iter: IterValue): number {
-  return (iter.remaining?.() ?? 0) + (iter.peeked?.filter((item) => item !== DONE).length ?? 0);
+export function lengthOf(iter: IterValue): bigint {
+  return BigInt(iter.remaining?.() ?? 0) + BigInt(iter.peeked?.filter((item) => item !== DONE).length ?? 0);
+}
+
+function positiveLength(length: bigint): bigint {
+  return length > 0n ? length : 0n;
+}
+
+function shorterLength(a: bigint, b: bigint): bigint {
+  return a < b ? a : b;
 }
 
 /** Takes the elements left, up to and including one that `stop` picks. */
@@ -230,7 +243,7 @@ function collectAll(ctx: NativeContext, iter: IterValue, stop?: (item: Value) =>
 interface AdapterParts {
   next: () => Next;
   nextBack?: () => Next;
-  remaining?: () => number;
+  remaining?: () => number | bigint;
 }
 
 class IteratorCallback {
@@ -275,9 +288,9 @@ function forkAdapterState<S extends object>(state: S): S {
 /** The iterator as a fold takes it: its pushed-back elements, then its `foldNext`. */
 function foldingView(iter: IterValue): IterValue {
   return new IterValue(
-    () => (iter.peeked && iter.peeked.length > 0 ? (iter.peeked.shift() as Next) : (iter.foldNext ?? iter.next)()),
+    () => nextForFold(iter),
     iter.nextBack,
-    iter.remaining
+    () => lengthOf(iter)
   );
 }
 
@@ -476,16 +489,16 @@ define({
   'IterImpl<_, _>::enumerate': ([self]) =>
     adapter(
       iterOf(self),
-      { index: 0 },
+      { index: 0n },
       (src, state) => ({
         next: () => {
           const item = nextOf(src);
-          return item === DONE ? DONE : [BigInt(state.index++), item];
+          return item === DONE ? DONE : [state.index++, item];
         },
         nextBack: () => {
           const total = state.index + lengthOf(src);
           const item = src.nextBack!();
-          return item === DONE ? DONE : [BigInt(total - 1), item];
+          return item === DONE ? DONE : [total - 1n, item];
         },
         remaining: () => lengthOf(src),
       }),
@@ -523,32 +536,32 @@ define({
       remaining: src.remaining,
     })),
   'IterImpl<_, _>::take': ([self, n], ctx) =>
-    adapter(iterOf(self), { left: Number(n as bigint) }, (src, state) => ({
+    adapter(iterOf(self), { left: n as bigint }, (src, state) => ({
       next: () => {
-        if (state.left <= 0) return DONE;
+        if (state.left <= 0n) return DONE;
         state.left--;
         return nextOf(src);
       },
       // `Take::next_back` drops the elements past its count from the back first.
       nextBack: () => {
-        if (state.left <= 0) return DONE;
+        if (state.left <= 0n) return DONE;
         const left = state.left--;
-        return nthBack(ctx, src, Math.max(lengthOf(src) - left, 0));
+        return nthBack(ctx, src, positiveLength(lengthOf(src) - left));
       },
-      remaining: () => Math.min(state.left, lengthOf(src)),
+      remaining: () => shorterLength(state.left, lengthOf(src)),
     })),
   'IterImpl<_, _>::skip': ([self, n], ctx) =>
-    adapter(iterOf(self), { toSkip: Number(n as bigint) }, (src, state) => ({
+    adapter(iterOf(self), { toSkip: n as bigint }, (src, state) => ({
       next: () => {
-        if (state.toSkip > 0) {
+        if (state.toSkip > 0n) {
           const skip = state.toSkip;
-          state.toSkip = 0;
+          state.toSkip = 0n;
           return nth(ctx, src, skip);
         }
         return nextOf(src);
       },
       nextBack: () => (lengthOf(src) > state.toSkip ? src.nextBack!() : DONE),
-      remaining: () => Math.max(0, lengthOf(src) - state.toSkip),
+      remaining: () => positiveLength(lengthOf(src) - state.toSkip),
     })),
   'IterImpl<_, _>::skip_while': ([self, f], ctx) => {
     const state = { skipping: true, callback: new IteratorCallback(f, ctx.typeArgs[2]) };
@@ -570,24 +583,23 @@ define({
   },
   // code-gauge-allow functionCognitiveComplexity 18 -- Follows `StepBy`'s arithmetic from either end.
   'IterImpl<_, _>::step_by': ([self, n], ctx) => {
-    const step = Number(n as bigint);
-    if (step === 0) libraryPanic(ctx, 'assertion failed: step != 0', 'core/src/iter/adapters/step_by.rs:36:9');
+    const step = n as bigint;
+    if (step === 0n) libraryPanic(ctx, 'assertion failed: step != 0', 'core/src/iter/adapters/step_by.rs:36:9');
     return adapter(iterOf(self), { first: true, step }, (src, state) => ({
       next: () => {
-        const skip = state.first ? 0 : step - 1;
+        const skip = state.first ? 0n : step - 1n;
         state.first = false;
         return nth(ctx, src, skip);
       },
       // `StepBy::next_back_index`: the elements after the last one the steps reach are dropped from the back.
       nextBack: () => {
         const rem = lengthOf(src) % step;
-        const index = state.first ? (rem === 0 ? step - 1 : rem - 1) : rem;
+        const index = state.first ? (rem === 0n ? step - 1n : rem - 1n) : rem;
         return nthBack(ctx, src, index);
       },
       remaining: () => {
         const length = lengthOf(src);
-        if (state.first) return length === 0 ? 0 : 1 + Math.floor((length - 1) / step);
-        return Math.floor(length / step);
+        return (length + (state.first ? step - 1n : 0n)) / step;
       },
     }));
   },
@@ -781,7 +793,7 @@ function zipped(
   const trusted = isTrustedRandomAccess(...shapes);
   const iter = adapter(first, { second }, (src, state) => ({
     next: () => {
-      if (trusted && Math.min(lengthOf(src), lengthOf(state.second)) === 0) return DONE;
+      if (trusted && (lengthOf(src) === 0n || lengthOf(state.second) === 0n)) return DONE;
       const a = nextOf(src);
       if (a === DONE) return DONE;
       const b = nextOf(state.second);
@@ -790,13 +802,13 @@ function zipped(
     nextBack: () => {
       const lengthA = lengthOf(src);
       const lengthB = lengthOf(state.second);
-      for (let index = lengthB; index < lengthA; index++) src.nextBack!();
-      for (let index = lengthA; index < lengthB; index++) state.second.nextBack!();
+      if (lengthA > lengthB) skipBack(ctx, src, lengthA - lengthB);
+      else if (lengthB > lengthA) skipBack(ctx, state.second, lengthB - lengthA);
       const a = src.nextBack!();
       const b = state.second.nextBack!();
       return a === DONE || b === DONE ? DONE : [a, b];
     },
-    remaining: () => Math.min(lengthOf(src), lengthOf(state.second)),
+    remaining: () => shorterLength(lengthOf(src), lengthOf(state.second)),
   }));
   iter.fork = () => zipped(ctx, cloneIterator(first), cloneIterator(second), shapes, items);
   if (isTrustedLen(...shapes)) iter.foldNext = zipFoldNext(first, second);
@@ -816,10 +828,17 @@ function zipped(
   });
 }
 
+function skipBack(ctx: NativeContext, iter: IterValue, count: bigint): void {
+  for (let skipped = 0n; skipped < count; skipped++) {
+    ctx.runtime.spend();
+    iter.nextBack!();
+  }
+}
+
 /** `Zip`'s `fold` of two `TrustedLen` iterators: as many pairs as its size hint, and no more from the longer. */
 function zipFoldNext(first: IterValue, second: IterValue): () => Next {
   return () => {
-    if (Math.min(lengthOf(first), lengthOf(second)) === 0) return DONE;
+    if (lengthOf(first) === 0n || lengthOf(second) === 0n) return DONE;
     const a = nextOf(first);
     const b = nextOf(second);
     return a === DONE || b === DONE ? DONE : [a, b];
@@ -971,17 +990,17 @@ define({
   'IterImpl<_, _>::sum': ([self], ctx) => sumOrProduct(ctx, iterOf(self), ctx.typeArgs[2], '+'),
   'IterImpl<_, _>::product': ([self], ctx) => sumOrProduct(ctx, iterOf(self), ctx.typeArgs[2], '*'),
   'IterImpl<_, _>::count': ([self], ctx) => BigInt(collectAll(ctx, iterOf(self), undefined, true).length),
-  'IterImpl<_, _>::len': ([self]) => BigInt(lengthOf(iterOf(self))),
+  'IterImpl<_, _>::len': ([self]) => lengthOf(iterOf(self)),
   'IterImpl<_, _>::last': ([self], ctx) => {
     const items = collectAll(ctx, iterOf(self), undefined, true);
     return option(ctx, items.at(-1), items.length > 0);
   },
   'IterImpl<_, _>::nth': ([self, n], ctx) => {
-    const item = nth(ctx, iterOf(self), Number(n as bigint));
+    const item = nth(ctx, iterOf(self), n as bigint);
     return option(ctx, item === DONE ? undefined : item, item !== DONE);
   },
   'IterImpl<_, _>::nth_back': ([self, n], ctx) => {
-    const item = nthBack(ctx, iterOf(self), Number(n as bigint));
+    const item = nthBack(ctx, iterOf(self), n as bigint);
     return option(ctx, item === DONE ? undefined : item, item !== DONE);
   },
   'IterImpl<_, _>::fold': ([self, init, f], ctx) => foldItems(ctx, iterOf(self), init, f, 'fold'),
@@ -1024,7 +1043,7 @@ define({
       const item = iter.nextBack!();
       if (item === DONE) return none(ctx);
       index--;
-      if (truthy(call(ctx, f, [item]))) return some(ctx, BigInt(index));
+      if (truthy(call(ctx, f, [item]))) return some(ctx, index);
     }
   },
   'IterImpl<_, _>::max': ([self], ctx) =>
@@ -1270,7 +1289,7 @@ export function collectVec(ctx: NativeContext, iter: IterValue, shape: Type, ele
   const inPlace = source && inPlaceCapacity(source, layoutOf(elem));
   if (inPlace !== undefined) setVecCapacity(items, inPlace);
   else if (!isTrustedLen(shape)) {
-    const lowerAfter = (taken: number): number => (exact === undefined ? 0 : exact - taken);
+    const lowerAfter = (taken: number): number => (exact === undefined ? 0 : Number(exact - BigInt(taken)));
     setVecCapacity(items, collectedVecCapacity(items.length, sizeOf(elem), lowerAfter));
   }
   return items;

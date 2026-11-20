@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 933 -- Follows Rust's name resolution case by case.
+// code-gauge-allow-file fileNcss 935 -- Follows Rust's name resolution case by case.
 import { CompileError } from '../interpreter/diagnostics';
 import type {
   BoundAst,
@@ -193,7 +193,7 @@ export interface TypeScope {
   /** In a function's parameters, `impl Trait` adds an anonymous type parameter here. */
   implParams?: TypeParam[];
   /** In a function's result, `impl Trait` is an opaque type. */
-  allowOpaque?: boolean;
+  returnOf?: FnDef;
   /** Inside a function body, `_` is a type to infer. */
   allowInfer?: boolean;
   /**
@@ -649,7 +649,7 @@ export class ItemCollector {
     const paramScope: TypeScope = { ...scope, implParams };
     def.paramTypes = item.params.map((param) => lowerType(param.type, paramScope));
     def.params.push(...implParams);
-    def.ret = item.ret ? lowerType(item.ret, { ...scope, allowOpaque: true }) : UNIT;
+    def.ret = item.ret ? lowerType(item.ret, { ...scope, returnOf: def }) : UNIT;
     for (const param of own) assocItem(param, scope);
     def.params.push(...assocParams);
     if (item.name === 'main' && module === this.program.root && !impl && !trait) checkMainSignature(item);
@@ -1428,7 +1428,7 @@ function traitArguments(def: TraitDef, written: TypeAst[], scope: TypeScope, spa
 // Lowering types
 
 // code-gauge-allow functionNcss 52 -- Follows Rust's name resolution case by case.
-// code-gauge-allow functionCognitiveComplexity 20 -- Each Rust type form has distinct lowering and diagnostics.
+// code-gauge-allow functionCognitiveComplexity 23 -- Each Rust type form has distinct lowering and diagnostics.
 export function lowerType(ast: TypeAst, scope: TypeScope): Type {
   switch (ast.kind) {
     case 'path': {
@@ -1475,8 +1475,9 @@ export function lowerType(ast: TypeAst, scope: TypeScope): Type {
         scope.implParams.push(param);
         return type;
       }
-      if (scope.allowOpaque) {
-        const opaque = newOpaque([...scope.params.values()].map((param) => ({ kind: 'param', param })));
+      if (scope.returnOf) {
+        const opaque = newOpaque(scope.returnOf.params.map((param) => ({ kind: 'param', param })));
+        if (scope.returnOf.trait) opaque.method = scope.returnOf;
         const type: Type = { kind: 'opaque', opaque };
         opaque.bounds = ast.bounds.map((bound) => lowerBound(bound, scope, type));
         if (opaque.bounds.some((bound) => bound.fnSig)) {

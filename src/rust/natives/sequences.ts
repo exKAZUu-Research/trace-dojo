@@ -26,7 +26,17 @@ import {
 } from '../values';
 import { extendRoom, withCapacity } from './capacityNatives';
 import { dequeDrain, dequeIter, dequeSlices, withDequeHead } from './dequeHead';
-import { arrayIter, collectVec, heapPop, heapPush, ownedIter, sliceIter } from './iterators';
+import {
+  arrayIter,
+  collectVec,
+  heapPop,
+  heapPush,
+  isTrustedLen,
+  nextForFold,
+  nextOf,
+  ownedIter,
+  sliceIter,
+} from './iterators';
 import { layoutOf, sizeOf } from './layout';
 import { checkedRangeBounds } from './ranges';
 import { dedupBy, intoSortedVec, lessByKey, lessByPartialOrd, sortByCachedKey, sortSlice } from './sorting';
@@ -539,12 +549,13 @@ const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
   extend: ([self, iter], ctx) => {
     const items = vec(self);
     const iterator = deref(iter) as IterValue;
+    const next = isTrustedLen(ctx.typeArgs[2]) ? nextForFold : nextOf;
     // Extending from references copies the `Copy` values they refer to.
     const fromRefs = isRefType(ctx.typeArgs[1]);
     const room = extendRoom(ctx, items, iterator, ctx.typeArgs[2]);
     for (;;) {
       ctx.runtime.spend();
-      const item = iterator.next();
+      const item = next(iterator);
       if (item === DONE) break;
       room();
       ctx.runtime.allocate(1);
@@ -738,9 +749,10 @@ const heapNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> 
   extend: ([self, iter], ctx) => {
     const items = vec(self);
     const iterator = deref(iter) as IterValue;
+    const next = isTrustedLen(ctx.typeArgs[2]) ? nextForFold : nextOf;
     for (;;) {
       ctx.runtime.spend();
-      const item = iterator.next();
+      const item = next(iterator);
       if (item === DONE) break;
       ctx.runtime.allocate(1);
       heapPush(items, item, elemType(ctx));

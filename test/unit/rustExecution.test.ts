@@ -3695,3 +3695,106 @@ test('evaluates Rust repeated constants before each owned array element is used'
     stdout: '[[1], []] [Some([2]), Some([])] 0 [0, 0, 0]\n',
   });
 });
+
+test('formats opaque Rust trait results using the dispatched method', () => {
+  const source = rustMain(
+    'show(DefaultName); show(NumberName(4));',
+    `use std::fmt::{Debug, Display};
+     trait Name {
+       fn label(&self) -> impl Display { "default" }
+       fn items(&self) -> impl Debug;
+     }
+     struct DefaultName;
+     impl Name for DefaultName { fn items(&self) -> impl Debug { vec![1, 2] } }
+     struct NumberName<T>(T);
+     impl<T: Display + Debug + Copy> Name for NumberName<T> {
+       fn label(&self) -> impl Display { self.0 }
+       fn items(&self) -> impl Debug { [self.0] }
+     }
+     fn show<T: Name>(name: T) {
+       println!("{} {:?} {:?}", name.label(), name.items(), Some(name.items()));
+     }`
+  );
+  expect(executeProgram('rust', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'default [1, 2] Some([1, 2])\n4 [4] Some([4])\n',
+  });
+});
+
+test('preserves exact Rust iterator lengths and indexes beyond the host safe integer range', () => {
+  const source = rustMain(`let n = usize::MAX;
+    println!("{} {}", (0usize..n).len(), (0isize..isize::MAX).len());
+    println!("{} {} {}", (0usize..n).skip(n - 3).len(), (0usize..n).take(n - 1).len(), (0usize..n).step_by(2).len());
+    println!("{:?}", (0usize..n).enumerate().next_back());`);
+  expect(executeProgram('rust', source)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '18446744073709551615 9223372036854775807\n3 18446744073709551614 9223372036854775808\nSome((18446744073709551614, 18446744073709551614))\n',
+  });
+});
+
+test('matches Rust inclusive range endpoints and reports unbounded char overflow', () => {
+  const source = rustMain(String.raw`let mut forward = 1..=1;
+    let mut backward = 1..=1;
+    println!("{:?} {:?} {} {}", forward.next(), forward, forward.start(), forward.end());
+    println!("{:?} {:?} {} {}", backward.next_back(), backward, backward.start(), backward.end());
+    let mut last = u8::MAX..=u8::MAX;
+    println!("{:?} {:?}", last.next(), last);
+    println!("{:?}", last.next());
+    let mut first = u8::MIN..=u8::MIN;
+    println!("{:?} {:?}", first.next_back(), first);
+    let mut last_char = '\u{10ffff}'..='\u{10ffff}';
+    println!("{:?} {:?}", last_char.next(), last_char);`);
+  expect(executeProgram('rust', source)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      "Some(1) 2..=1 2 1\nSome(1) 1..=0 1 0\nSome(255) 0..=255 (exhausted)\nNone\nSome(0) 0..=255 (exhausted)\nSome('\\u{10ffff}') '\\u{10ffff}'..='\\u{10ffff}' (exhausted)\n",
+  });
+  const overflow = rustMain(String.raw`let mut range = '\u{10fffe}'..;
+    println!("{:?}", range.next()); range.next();`);
+  expect(executeProgram('rust', overflow)).toMatchObject({
+    kind: 'executed',
+    stdout: "Some('\\u{10fffe}')\n",
+    uncaughtException: expect.stringContaining('library/core/src/iter/range.rs:118:45:\noverflow in `Step::forward`'),
+  });
+});
+
+test('rounds Rust f32 division before truncating its Euclidean quotient', () => {
+  const source = rustMain(`println!("{} {} {} {}", 5_f32.div_euclid(0.1), 1_f32.div_euclid(0.1),
+    (-5_f32).div_euclid(0.1), 5_f64.div_euclid(0.1));`);
+  expect(executeProgram('rust', source)).toMatchObject({ kind: 'executed', stdout: '50 10 -51 50\n' });
+});
+
+test('matches Rust zip callback order when extending a vector and a string', () => {
+  const source = rustMain(`let mut values = Vec::new();
+    values.extend((0..3).map(|n| { print!("{}", n); n }).zip(vec![String::from("a"), String::from("b")]));
+    println!(" {:?}", values);
+    let mut text = String::new();
+    text.extend(('a'..'d').map(|c| { print!("{}", c); c })
+      .zip(vec![String::from("a"), String::from("b")]).map(|pair| pair.0));
+    println!(" {}", text);`);
+  expect(executeProgram('rust', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '01 [(0, "a"), (1, "b")]\nab ab\n',
+  });
+});
+
+test('keeps Rust expressions before block items in statement position', () => {
+  for (const expression of ['if true { 1 } else { 2 }', 'match true { true => 1, false => 2 }']) {
+    const source = rustMain(`let _value = { ${expression} fn helper() {} };`);
+    expect(executeProgram('rust', source)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [expect.objectContaining({ message: expect.stringContaining('型が合いません') })],
+    });
+  }
+  const valid = rustMain(`let value = { if true { print!("one "); } fn helper() {} };
+    println!("{:?}", value);`);
+  expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: 'one ()\n' });
+});
+
+test('rejects a duplicate or noninitial Rust receiver parameter', () => {
+  for (const parameters of ['&self, &self', 'value: i32, &self']) {
+    const source = rustMain('', `struct Item; impl Item { fn method(${parameters}) {} }`);
+    expect(executeProgram('rust', source)).toMatchObject({ kind: 'compileError' });
+  }
+});

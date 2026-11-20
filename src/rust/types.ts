@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 407 -- Defines Rust types, their substitutions and their shared structural operations.
+// code-gauge-allow-file fileNcss 408 -- Defines Rust types, their substitutions and their shared structural operations.
 import type { ConstItem, FnItem, Span } from './ast';
 import type { Module } from './items';
 
@@ -62,6 +62,7 @@ export interface OpaqueType {
   args: Type[];
   bounds: TraitRef[];
   hidden: Type | undefined;
+  method?: FnDef;
 }
 
 export interface FieldDef {
@@ -415,6 +416,7 @@ export function substitute(type: Type, subst: Subst): Type {
       opaque: {
         id: opaque.id,
         args,
+        method: opaque.method,
         get bounds() {
           return opaque.bounds.map((bound) => substituteTraitRef(bound, subst));
         },
