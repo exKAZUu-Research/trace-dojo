@@ -24,6 +24,7 @@ import {
   throwError,
   type UpdateWarning,
   warn,
+  withHeldDiagnostics,
   withOperandWarnings,
 } from './errors';
 import { strictEquals } from './operators';
@@ -91,7 +92,10 @@ let hoisting = false;
 export function declareClassEarly(decl: ClassDecl, row: number): PhpClass | undefined {
   hoisting = true;
   try {
-    return declareClass(decl, row);
+    return withHeldDiagnostics(
+      () => declareClass(decl, row),
+      (error) => error instanceof DeferredDeclaration
+    );
   } catch (error) {
     if (error instanceof DeferredDeclaration) return undefined;
     throw error;

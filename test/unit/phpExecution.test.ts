@@ -5277,6 +5277,15 @@ test('a class whose override names a later class is declared when its statement 
       '<?php class P { function f(Dog $d) {} } class C extends P { function f(Animal $a) {} } class Animal {} class Dog extends Animal {} echo "ok";'
     )
   ).toMatchObject({ kind: 'executed', stdout: 'ok' });
+  expect(
+    run(
+      '<?php class P extends ArrayIterator {function f(): X {return new X;}}echo "before;";class C extends P {function current(){}function f(): Y {return new Y;}}class X{}class Y extends X{}echo "done";'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'before;\nDeprecated: Return type of C::current() should either be compatible with ArrayIterator::current(): mixed, or the #[\\ReturnTypeWillChange] attribute should be used to temporarily suppress the notice in /main.php on line 1\ndone',
+  });
 });
 
 test('an override naming a missing class reports that its compatibility cannot be checked', () => {

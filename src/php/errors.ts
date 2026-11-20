@@ -142,8 +142,34 @@ export function clearLastError(): void {
   lastErrors.delete(rt());
 }
 
+let heldDiagnostics: [bigint, string, number, boolean][] | undefined;
+
+/**
+ * Runs `run` holding back the errors it reports, then reports them in order, unless `run` throws an error that
+ * `discardOn` accepts, which takes back what `run` did.
+ */
+export function withHeldDiagnostics<T>(run: () => T, discardOn: (error: unknown) => boolean): T {
+  const outer = heldDiagnostics;
+  const held: [bigint, string, number, boolean][] = [];
+  heldDiagnostics = held;
+  let discard = false;
+  try {
+    return run();
+  } catch (error) {
+    discard = discardOn(error);
+    throw error;
+  } finally {
+    heldDiagnostics = outer;
+    if (!discard) for (const diagnostic of held) emitError(...diagnostic);
+  }
+}
+
 /** Reports a non-fatal error as PHP's CLI does: through a user handler, or printed to standard output. */
 export function emitError(level: bigint, message: string, row = rt().diagnosticRow, skipMatchingHandler = false): void {
+  if (heldDiagnostics) {
+    heldDiagnostics.push([level, message, row, skipMatchingHandler]);
+    return;
+  }
   const runtime = rt();
   runtime.constantEvaluationEpoch++;
   const current = runtime.errorHandlers.at(-1);
