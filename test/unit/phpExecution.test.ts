@@ -5301,6 +5301,15 @@ test('rejecting an unsupported feature ends the run without PHP shutdown replaci
     stdout: 'start\n',
     uncaughtException: '直列化（serialize）は、この採点環境では使えません。',
   });
+  expect(
+    run(
+      '<?php class D { function __destruct() { echo "dtor;"; throw new Exception("late"); } } $d = new D; set_exception_handler(function ($e) { echo "handler;"; serialize(1); }); throw new Exception("first");'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'handler;',
+    uncaughtException: '直列化（serialize）は、この採点環境では使えません。',
+  });
 });
 
 test('gc_collect_cycles() frees a destructed object that only a collected object cycle held', () => {

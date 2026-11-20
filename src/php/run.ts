@@ -50,22 +50,16 @@ export function runProgram(runtime: Runtime, parsed: ParsedProgram, onEnd?: (fra
     runtime.program = parsed.program;
     runtime.notices = parsed.notices;
     let uncaughtException: string | undefined;
-    let rejected = false;
     try {
       uncaughtException = guard(runtime, () => {
-        try {
-          for (const notice of parsed.parseNotices)
-            emitError(notice.level === 'Deprecated' ? E_DEPRECATED : E_WARNING, notice.message, notice.row);
-          runStatements(parsed.program, parsed.conversionError);
-        } catch (error) {
-          rejected = error instanceof UnsupportedFeatureError;
-          throw error;
-        }
+        for (const notice of parsed.parseNotices)
+          emitError(notice.level === 'Deprecated' ? E_DEPRECATED : E_WARNING, notice.message, notice.row);
+        runStatements(parsed.program, parsed.conversionError);
       });
       onEnd?.(runtime.globalFrame);
       runtime.world.recordFinalTurtles();
       // A rejection of an unsupported feature ends the run outside PHP, so PHP's shutdown does not run after it.
-      if (!rejected) uncaughtException = shutdown(runtime) ?? uncaughtException;
+      if (!rejectedRuns.has(runtime)) uncaughtException = shutdown(runtime) ?? uncaughtException;
     } finally {
       releaseBoundedRegexSubject();
       runtime.flush();
@@ -91,6 +85,9 @@ function guard(runtime: Runtime, run: () => void): string | undefined {
   }
 }
 
+/** The runs that rejected an unsupported feature, wherever it was raised (including in an exception handler). */
+const rejectedRuns = new WeakSet<Runtime>();
+
 // code-gauge-allow functionCognitiveComplexity 24 -- Dispatches uncaught outcomes before runtime shutdown.
 function report(runtime: Runtime, error: unknown, inShutdown = false): string | undefined {
   if (error instanceof ExitSignal) {
@@ -99,6 +96,7 @@ function report(runtime: Runtime, error: unknown, inShutdown = false): string | 
   }
   if (error instanceof UnsupportedFeatureError) {
     restoreStack(runtime);
+    rejectedRuns.add(runtime);
     return error.message;
   }
   if (error instanceof PhpThrow) {
