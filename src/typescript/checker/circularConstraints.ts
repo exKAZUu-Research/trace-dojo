@@ -51,6 +51,7 @@ export class CircularConstraints {
         return this.parameterLeadsBack(type, { ...path, parameters: [...path.parameters, type.id] });
       }
       case 'indexedAccess': {
+        if (this.mappedProjectionLeadsBack(type, path)) return true;
         const selected = this.selectedType(type);
         if (selected) return this.leadsBack(selected, path);
         return this.leadsBack(type.objectType, path) || this.leadsBack(type.indexType, path);
@@ -81,6 +82,18 @@ export class CircularConstraints {
   private eagerLeadsBack(node: TreeNode | null | undefined, path: Path): boolean {
     if (!node || !this.declarations) return false;
     for (const operand of this.c.typeNodes.eagerConstraints.operandsOf(node.id, this.c.budget)) {
+      if (this.leadsBack(operand, path)) return true;
+    }
+    return false;
+  }
+
+  private mappedProjectionLeadsBack({ objectType }: IndexedAccessType, path: Path): boolean {
+    if (
+      !this.declarations ||
+      (objectType.kind === 'object' && (objectType.mapped?.optionalModifier === '+' || objectType.mappedOptional))
+    )
+      return false;
+    for (const operand of this.c.typeNodes.eagerConstraints.deferredOperands(objectType, this.c.budget)) {
       if (this.leadsBack(operand, path)) return true;
     }
     return false;

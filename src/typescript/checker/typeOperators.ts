@@ -549,6 +549,12 @@ export class TypeOperators {
       return errorType;
     }
     if (
+      node?.type !== 'subscript_expression' &&
+      mapped.optionalModifier !== '+' &&
+      this.c.typeNodes.eagerConstraints.hasDeferredOperands(object)
+    )
+      return this.deferredAccess(object, index);
+    if (
       node?.type === 'subscript_expression' ||
       (!mapped.source && !this.c.inference.mentions(mapped.template, mapped.typeParameter))
     )

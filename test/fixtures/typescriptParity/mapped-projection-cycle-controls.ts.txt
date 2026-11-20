@@ -1,0 +1,13 @@
+type Keys<T> = { [K in keyof (T & string)]: unknown };
+type Standalone<U extends Keys<U>> = U;
+type KeysOnly<U extends keyof Keys<U>> = U;
+type Wrapped<U extends Array<Keys<U>[keyof Keys<U>]>> = U;
+type Tuple<U extends [Keys<U>[keyof Keys<U>]]> = U;
+type WrappedIndex<U extends Array<Keys<U>['length']>> = U;
+type LazyMember<U extends {value: Keys<U>[keyof Keys<U>]}> = U;
+type OptionalKeys<T> = { [K in keyof (T & string)]?: number };
+type OptionalProjection<U extends OptionalKeys<U>[keyof OptionalKeys<U>]> = U;
+type OptionalRemap<T> = { [K in keyof (T & string) as K]?: unknown };
+type OptionalRemappedProjection<U extends OptionalRemap<U>[keyof OptionalRemap<U>]> = U;
+
+console.log('done');

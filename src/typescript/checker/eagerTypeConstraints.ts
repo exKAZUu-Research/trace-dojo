@@ -9,6 +9,7 @@ interface Evaluation {
 /** Records which base constraints type evaluation actually inspects before normalization can erase them. */
 export class EagerTypeConstraints {
   private readonly byNode = new Map<number, Evaluation>();
+  private readonly byDeferredType = new WeakMap<Type, Evaluation>();
   private current?: Evaluation;
 
   evaluate(node: number, resolve: () => Type): Type {
@@ -27,8 +28,20 @@ export class EagerTypeConstraints {
     if (this.current) (this.current.operands ??= new Set()).add(operand);
   }
 
-  withinDeferredType(resolve: () => Type): Type {
-    return this.collect(undefined, resolve);
+  deferType(resolve: () => Type): Type {
+    const evaluation: Evaluation = {};
+    const type = this.collect(evaluation, resolve);
+    if (type.kind === 'object' && (evaluation.operands || evaluation.children))
+      this.byDeferredType.set(type, evaluation);
+    return type;
+  }
+
+  hasDeferredOperands(type: Type): boolean {
+    return this.byDeferredType.has(type);
+  }
+
+  deferredOperands(type: Type, budget: ExecutionBudget): Iterable<Type> {
+    return this.operandsIn(this.byDeferredType.get(type), budget);
   }
 
   prepareDeferred<T>(resolve: () => T): () => T {
@@ -40,7 +53,7 @@ export class EagerTypeConstraints {
     };
   }
 
-  private collect<T>(evaluation: Evaluation | undefined, resolve: () => T): T {
+  private collect<T>(evaluation: Evaluation, resolve: () => T): T {
     const outer = this.current;
     this.current = evaluation;
     try {
@@ -55,8 +68,11 @@ export class EagerTypeConstraints {
       (this.current.children ??= new Set()).add(evaluation);
   }
 
-  *operandsOf(node: number, budget: ExecutionBudget): Iterable<Type> {
-    const root = this.byNode.get(node);
+  operandsOf(node: number, budget: ExecutionBudget): Iterable<Type> {
+    return this.operandsIn(this.byNode.get(node), budget);
+  }
+
+  private *operandsIn(root: Evaluation | undefined, budget: ExecutionBudget): Iterable<Type> {
     if (!root) return;
     const visited = new Set<Evaluation>();
     const pending = [root];
