@@ -1,0 +1,20 @@
+(5,10): error TS2393: Duplicate function implementation.
+(6,10): error TS2393: Duplicate function implementation.
+(8,7): error TS2322: Type 'undefined' is not assignable to type 'string'.
+(9,7): error TS2322: Type 'undefined' is not assignable to type 'string'.
+(10,7): error TS2322: Type 'undefined' is not assignable to type 'string'.
+(11,7): error TS2322: Type 'undefined[]' is not assignable to type 'string[]'.
+  Type 'undefined' is not assignable to type 'string'.
+(12,7): error TS2322: Type 'undefined[]' is not assignable to type 'string[]'.
+  Type 'undefined' is not assignable to type 'string'.
+(13,7): error TS2322: Type 'undefined[]' is not assignable to type 'number[]'.
+  Type 'undefined' is not assignable to type 'number'.
+(14,7): error TS2322: Type 'string[]' is not assignable to type 'number[]'.
+  Type 'string' is not assignable to type 'number'.
+(15,7): error TS2322: Type '"first"[]' is not assignable to type 'number[]'.
+  Type 'string' is not assignable to type 'number'.
+(17,10): error TS2393: Duplicate function implementation.
+(18,10): error TS2393: Duplicate function implementation.
+(20,7): error TS2322: Type 'string[]' is not assignable to type '"a"[]'.
+  Type 'string' is not assignable to type '"a"'.
+(22,7): error TS2322: Type 'undefined' is not assignable to type 'number'.

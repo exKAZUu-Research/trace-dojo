@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 662 -- Keeps generic candidate collection, constraint fitting and inference completion together.
+// code-gauge-allow-file fileNcss 679 -- Keeps generic candidate collection, constraint fitting and inference completion together.
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import type { Checker, Mapper } from './checker';
 import { isUnit } from './flow';
@@ -86,6 +86,7 @@ type Recurse = (
 
 interface InferencePath {
   active: Set<string>;
+  originalTarget: Type;
   sources: Type[];
   targets: Type[];
 }
@@ -146,10 +147,8 @@ export class TypeInference {
   }
 
   private isTopLevelInReturn(signature: Signature, parameter: TypeParameter): boolean {
-    const returnType = signature.returnType();
-    return (returnType.kind === 'union' ? returnType.types : [returnType]).some(
-      (member) => member.kind === 'typeParameter' && member.id === parameter.id
-    );
+    const returnType = signature.predicate ? signature.predicate.type : signature.returnType();
+    return !!returnType && isTopLevelTypeParameter(returnType, parameter);
   }
 
   private inferredType(parameter: TypeParameter, inference: Inference, widen: boolean): Type {
@@ -225,7 +224,12 @@ export class TypeInference {
 
   /** Collects the types `source` gives the type parameters that `target` mentions. */
   inferTypes(run: InferenceRun, source: Type, target: Type, covariant: boolean): void {
-    this.inferPair(run, source, target, covariant, { active: new Set(), sources: [], targets: [] });
+    this.inferPair(run, source, target, covariant, {
+      active: new Set(),
+      originalTarget: target,
+      sources: [],
+      targets: [],
+    });
   }
 
   inferArgument(run: InferenceRun, source: Type, target: Type): void {
@@ -311,7 +315,7 @@ export class TypeInference {
     if (target.noInfer || !couldContainTypeVariables(target)) return;
     const variable = inferenceVariable(target, run);
     if (variable) {
-      this.inferToParameter(run, source, variable, covariant, active.size === 0);
+      this.inferToParameter(run, source, variable, covariant, isTopLevelTypeParameter(path.originalTarget, variable));
       return;
     }
     const key = `${source.id}/${target.id}/${run.priority}/${covariant}`;
@@ -385,12 +389,12 @@ export class TypeInference {
     if (run.priority < inference.priority) {
       inference.candidates.length = 0;
       inference.contravariant.length = 0;
-      inference.topLevel = false;
+      inference.topLevel = true;
       inference.priority = run.priority;
     }
     const candidates = covariant ? inference.candidates : inference.contravariant;
     if (!candidates.some((candidate) => candidate.id === source.id)) candidates.push(source);
-    if (covariant && topLevel) inference.topLevel = true;
+    if (!topLevel && (run.priority & InferencePriority.ReturnType) === 0) inference.topLevel = false;
   }
 
   private templateCapture(text: string, constraint: Type): Type {
@@ -407,33 +411,54 @@ export class TypeInference {
   }
 
   private inferToUnion(run: InferenceRun, source: Type, target: UnionType, recurse: Recurse): void {
-    const { sourceMembers, targetMembers } = inferFromMatchingMembers(
-      source.kind === 'union' ? source.types : [source],
-      target.types,
-      recurse
+    const original = typeMembers(source);
+    const exact = inferFromMatchingMembers(original, target.types, recurse, (member, other) =>
+      this.isTypeOrBaseIdentical(member, other)
     );
-    if (sourceMembers.length === 0) return;
+    const { sourceMembers, targetMembers } = inferFromMatchingMembers(
+      exact.sourceMembers,
+      exact.targetMembers,
+      recurse,
+      instantiatesSameType
+    );
+    if (targetMembers.length === 0) return;
+    const fallback = run.priority | InferencePriority.NakedTypeVariable;
+    if (sourceMembers.length === 0) {
+      const matched = original.map((member) =>
+        member.kind === 'literal' && target.types.includes(regularOf(member)) ? regularOf(member) : member
+      );
+      const matchedSource = matched.every((member, index) => member === original[index])
+        ? source
+        : unionOf(matched, true);
+      recurse(matchedSource, unionOf(targetMembers, true), undefined, fallback);
+      return;
+    }
+    const remaining = sourceMembers.length === original.length ? source : unionOf(sourceMembers, true);
+    if (targetMembers.length === 1) {
+      recurse(remaining, targetMembers[0]);
+      return;
+    }
     const naked = targetMembers.filter((member) => {
       const variable = inferenceVariable(member, run);
       return variable && run.inferences.has(variable.id);
     });
-    const others = targetMembers.filter((member) => !naked.includes(member));
-    const inferable = others.filter((other) =>
-      run.parameters.some((parameter) => this.mentions(other, parameter, run))
-    );
-    const fixed = others.filter((other) => !inferable.includes(other));
-    const candidates = sourceMembers.filter(
-      (member) => !fixed.some((other) => this.c.relations.isAssignable(member, other))
-    );
-    const matched = this.inferStructuredUnionMembers(run, sourceMembers, inferable, recurse);
-    const unmatched = candidates.filter((member) => !matched.has(member));
+    const structured = targetMembers.filter((member) => !naked.includes(member));
+    const matched = this.inferStructuredUnionMembers(run, sourceMembers, structured, recurse);
+    const unmatched = sourceMembers.filter((member) => !matched.has(member));
     if (naked.length === 1 && unmatched.length > 0) {
       recurse(unionOf(unmatched, true), naked[0]);
       return;
     }
-    if (candidates.length > 0)
-      for (const variable of naked)
-        recurse(unionOf(candidates, true), variable, undefined, run.priority | InferencePriority.NakedTypeVariable);
+    for (const variable of naked) recurse(remaining, variable, undefined, fallback);
+  }
+
+  private isTypeOrBaseIdentical(source: Type, target: Type): boolean {
+    return (
+      this.c.relations.identical(regularOf(source), regularOf(target)) ||
+      (source.kind === 'literal' &&
+        ((typeof source.value === 'string' && isIntrinsic(target, 'string')) ||
+          (typeof source.value === 'number' && isIntrinsic(target, 'number'))))
+    );
   }
 
   private inferStructuredUnionMembers(
@@ -987,6 +1012,18 @@ function templateCaptures(value: string, texts: string[]): string[] | undefined 
   return position === value.length ? captures : undefined;
 }
 
+function isTopLevelTypeParameter(type: Type, parameter: TypeParameter, depth = 0): boolean {
+  if (type.kind === 'typeParameter') return type.id === parameter.id;
+  if (type.kind === 'union' || type.kind === 'intersection')
+    return type.types.some((member) => isTopLevelTypeParameter(member, parameter, depth));
+  return (
+    depth < 3 &&
+    type.kind === 'conditional' &&
+    (isTopLevelTypeParameter(type.trueType, parameter, depth + 1) ||
+      isTopLevelTypeParameter(type.falseType, parameter, depth + 1))
+  );
+}
+
 function tupleInferenceType(element: TupleElement): Type {
   return element.optional ? unionOf([element.type, undefinedType]) : element.type;
 }
@@ -1002,20 +1039,19 @@ function fixedEndLength(elements: TupleElement[]): number {
 }
 
 /**
- * Infers between the members of a source and a target union that instantiate the same generic type, as an
- * `IteratorYieldResult<X>` with an `IteratorYieldResult<T>`, and returns the members left unmatched, as TypeScript's
- * `inferFromMatchingTypes` does, so a member never infers to a differently shaped one.
+ * Pairs matching members before inferring from the union's remaining members.
  */
 function inferFromMatchingMembers(
   sources: readonly Type[],
   targets: readonly Type[],
-  recurse: Recurse
+  recurse: Recurse,
+  matches: (source: Type, target: Type) => boolean
 ): { sourceMembers: Type[]; targetMembers: Type[] } {
   const matchedSources = new Set<Type>();
   const matchedTargets = new Set<Type>();
   for (const target of targets) {
     for (const source of sources) {
-      if (!instantiatesSameType(source, target)) continue;
+      if (!matches(source, target)) continue;
       recurse(source, target);
       matchedSources.add(source);
       matchedTargets.add(target);
