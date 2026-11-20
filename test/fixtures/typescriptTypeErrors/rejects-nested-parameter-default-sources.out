@@ -1,0 +1,5 @@
+(2,32): error TS2339: Property 'value' does not exist on type '{}'.
+(9,17): error TS2353: Object literal may only specify known properties, and 'first' does not exist in type '{ second: number; }'.
+(10,8): error TS2741: Property 'second' is missing in type '{}' but required in type '{ second: number; }'.
+(15,9): error TS2322: Type '[number, string]' is not assignable to type '[]'.
+  Source has 2 element(s) but target allows only 0.

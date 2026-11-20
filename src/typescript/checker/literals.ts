@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 743 -- Types literals and their spreads, members, and widening in the same literal context.
+// code-gauge-allow-file fileNcss 746 -- Types literals and their spreads, members, and widening in the same literal context.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExpressionListFlow, tupleArgumentContexts } from './callArity';
@@ -23,6 +23,7 @@ import {
   emptyStructure,
   errorType,
   filterType,
+  freshObjectLiteral,
   type IndexInfo,
   intersectionOf,
   isAnyLike,
@@ -112,7 +113,6 @@ export class LiteralChecker {
 
   constructor(private readonly c: Checker) {}
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Keeps literal elements, holes, spreads and contextual tuple construction together.
   arrayLiteral(node: TreeNode, contextual?: Type): Type {
     contextual = this.literalContext(node, contextual);
     const elements = arrayElements(node);
@@ -319,7 +319,6 @@ export class LiteralChecker {
     );
   }
 
-  // code-gauge-allow functionNcss 32 -- Builds the common object-literal context before dispatching each member form.
   objectLiteral(node: TreeNode, contextual?: Type): Type {
     contextual = this.literalContext(node, contextual);
     const properties = new Map<string, Property>();
@@ -385,12 +384,12 @@ export class LiteralChecker {
           { isLiteral: true, isUnionSpread: true }
         );
         this.objectLiteralNodes.set(variant.id, node);
-        return { ...variant, id: variant.id, fresh: true, regular: variant } as ObjectType;
+        return freshObjectLiteral(variant);
       });
       return unionOf(variants, true);
     }
     this.objectLiteralNodes.set(object.id, node);
-    return { ...object, id: object.id, fresh: true, regular: object };
+    return freshObjectLiteral(object);
   }
 
   /**
@@ -450,7 +449,6 @@ export class LiteralChecker {
     );
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Builds the complete receiver shape from named members, accessor pairs, and spreads before checking their bodies.
   private declareObjectMember(literal: ObjectLiteral, member: TreeNode): void {
     if (member.type === 'spread_element') {
       for (const [name, property] of this.spreadProperties(this.spreadOperand(member, literal.contextual)))
@@ -1157,50 +1155,65 @@ export class LiteralChecker {
   }
 
   /** The type a variable declared with this initializer type gets. */
-  // code-gauge-allow functionCognitiveComplexity 30 -- Widens each type form and clears array-literal inference provenance when storing a declaration.
-  widenDeclared(type: Type, isConst: boolean): Type {
+  widenDeclared(type: Type, isConst: boolean, keepFresh = false): Type {
     // A constant keeps a fresh literal type, which widens again where a mutable location takes its value.
     // Only a fresh literal widens, which `as const` and annotations make regular.
     if (type.kind === 'literal') return isConst || !type.fresh ? type : this.c.widenLiteral(type);
     if (type.kind === 'union') {
-      const widened = isConst ? type : mapType(type, (member) => this.widenDeclared(member, false));
+      const widened = mapType(type, (member) => this.widenDeclared(member, isConst, keepFresh));
       return widened.kind === 'union'
-        ? unionOf(this.normalizeObjectLiterals(widened.types.map((member) => this.widenDeclared(member, isConst))))
+        ? unionOf(this.normalizeObjectLiterals(widened.types, { keepFresh }), keepFresh)
         : widened;
     }
     if (type.kind === 'object') {
       // Only an array literal holds fresh literals; another array, as one of a recursive alias, is left as it is.
-      if (this.isArrayLiteral(type)) return this.c.arrayType(this.widenDeclared(this.c.elementTypeOf(type), false));
-      if (type.objectKind === 'anonymous' && type.isLiteral && !type.isFunction) {
-        const source = type.regular ?? type;
-        return anonymousObject(
-          () => {
-            const structure = source.resolve();
-            const properties = new Map<string, Property>();
-            for (const [name, property] of structure.properties) {
-              properties.set(name, {
-                ...property,
-                type: () =>
-                  property.readonly && !property.getterOnly
-                    ? regularOf(property.type())
-                    : this.widenDeclared(property.type(), false),
-              });
-            }
-            return { ...structure, properties };
-          },
-          { isLiteral: true, isUnionSpread: type.isUnionSpread }
-        );
-      }
+      if (this.isArrayLiteral(type))
+        return this.c.arrayType(this.widenDeclared(this.c.elementTypeOf(type), false, keepFresh));
+      if (isObjectLiteral(type)) return this.widenObjectLiteral(type, keepFresh);
     }
     return regularOf(type);
+  }
+
+  private widenObjectLiteral(type: ObjectType, keepFresh: boolean): ObjectType {
+    const source = type.regular ?? type;
+    const widened = anonymousObject(
+      () => {
+        const structure = source.resolve();
+        const properties = new Map<string, Property>();
+        for (const [name, property] of structure.properties) {
+          properties.set(name, {
+            ...property,
+            type: () => {
+              const value = property.type();
+              if (property.readonly && !property.getterOnly) return keepFresh ? value : regularOf(value);
+              return this.widenDeclared(value, false, keepFresh);
+            },
+          });
+        }
+        return { ...structure, properties };
+      },
+      { isLiteral: true, isUnionSpread: type.isUnionSpread }
+    );
+    return keepFresh && type.fresh ? freshObjectLiteral(widened) : widened;
+  }
+
+  iteratedBindingType(element: Type, iterable: TreeNode): Type {
+    const source = mapType(element, (member) =>
+      member.kind === 'object' && this.isObjectLiteralWithin(member, iterable)
+        ? freshObjectLiteral(member.regular ?? member)
+        : member
+    );
+    return source.kind === 'union'
+      ? unionOf(this.normalizeObjectLiterals(source.types, { keepFresh: true, freshOnly: true }), true)
+      : source;
   }
 
   /**
    * Gives each object literal type of a union the properties only its siblings have, as optional `undefined`, so that
    * `[{ a: 1 }, { a: 2, b: 3 }]` has elements whose `b` can be read.
    */
-  normalizeObjectLiterals(types: Type[]): Type[] {
-    const literals = types.filter((type) => isObjectLiteral(type) && !type.isUnionSpread);
+  normalizeObjectLiterals(types: Type[], { keepFresh = false, freshOnly = false } = {}): Type[] {
+    const literals = types.filter((type) => isObjectLiteral(type) && !type.isUnionSpread && (!freshOnly || type.fresh));
     if (literals.length < 2) return types;
     const missingProperties = new Map<string, Property>();
     const structures = new Map<Type, Structure>();
@@ -1219,7 +1232,8 @@ export class LiteralChecker {
     return types.map((type) => {
       const structure = structures.get(type);
       if (!structure || structure.properties.size === missingProperties.size) return type;
-      return normalizedLiteral(structure, missingProperties);
+      const normalized = normalizedLiteral(structure, missingProperties);
+      return keepFresh && type.kind === 'object' && type.fresh ? freshObjectLiteral(normalized) : normalized;
     });
   }
 }

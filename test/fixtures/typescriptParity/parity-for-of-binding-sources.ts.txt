@@ -1,0 +1,13 @@
+for (const { level = 1 } of [{ level: 2 }, {}] as const) {
+  const allowed: 1 | 2 = level;
+  console.log(allowed);
+}
+for (const [first] of [[1, 'one']] as const) {
+  const one: 1 = first;
+  console.log(one);
+}
+for (const { level = 1 } of [{}]) {
+  const one: 1 = level;
+  console.log(one);
+}
+for (const { start, stop } of [{ start: 1 }, { stop: 2 }]) console.log(start, stop);

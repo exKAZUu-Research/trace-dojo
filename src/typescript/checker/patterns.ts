@@ -10,6 +10,7 @@ import {
   anyType,
   emptyStructure,
   errorType,
+  freshObjectLiteral,
   isAnyLike,
   isIntrinsic,
   isPropertyKeyLiteral,
@@ -84,7 +85,7 @@ export class BindingPatterns {
           return;
         }
         const combined = unionOf([withoutUndefined, defaultType], true);
-        this.bindPattern(left, options.isConst ? combined : this.c.widen(combined), bind, options);
+        this.bindPattern(left, options.isConst || implied ? combined : this.c.widen(combined), bind, options);
         return;
       }
       case 'object_pattern': {
@@ -181,7 +182,7 @@ export class BindingPatterns {
     for (const [name, property] of this.c.structureOf(implied).properties) {
       if (property.optional) properties.set(name, { ...(properties.get(name) ?? property), optional: true });
     }
-    return anonymousObject(() => ({ ...structure, properties }), { isLiteral: true });
+    return freshObjectLiteral(anonymousObject(() => ({ ...structure, properties }), { isLiteral: true }));
   }
 
   private padParameterTuple(value: ObjectType, implied: ObjectType): Type {
@@ -435,7 +436,7 @@ export class BindingPatterns {
       return errorType;
     }
     this.c.members.checkPropertyUse(node, node, node, type, property);
-    return propertyAccessType(property);
+    return propertyAccessType(property, 'read', true);
   }
 
   /** The union of a property's types when each member of a union has it, or `undefined` when one lacks it. */

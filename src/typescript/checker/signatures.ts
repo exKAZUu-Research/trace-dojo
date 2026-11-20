@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 497 -- Keeps signature resolution and the TypeScript grammar of parameters and accessors together.
+// code-gauge-allow-file fileNcss 504 -- Keeps signature resolution and the TypeScript grammar of parameters and accessors together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { erasedStatementTypes } from '../erasedSyntax';
@@ -247,12 +247,12 @@ export class Signatures {
     const flow = checker.flow.current?.clone();
     let inferred: Parameter[] | undefined;
     let resolving = false;
-    const infer = (index: number): Type => {
-      if (resolving) return anyType;
+    const infer = (index: number): Parameter | undefined => {
+      if (resolving) return undefined;
       resolving = true;
       try {
         inferred ??= checker.flow.probe(() => this.declaredParameters(node, undefined).parameters, flow);
-        return inferred[index].type;
+        return inferred[index];
       } finally {
         resolving = false;
       }
@@ -264,7 +264,10 @@ export class Signatures {
       return {
         ...parameterShape(parameter, index),
         get type() {
-          return infer(index);
+          return declaredParameterType(infer(index)) ?? anyType;
+        },
+        get bindingType() {
+          return infer(index)?.bindingType;
         },
       };
     });
@@ -299,7 +302,8 @@ export class Signatures {
         parameters.push(parameter);
         if (index >= lastDefault) continue;
         const possibleOmission = parameter.optional && !parameterNode.childForFieldName('value');
-        const type = possibleOmission ? unionOf([parameter.type, undefinedType]) : parameter.type;
+        const declared = parameter.bindingType ?? parameter.type;
+        const type = possibleOmission ? unionOf([declared, undefinedType]) : declared;
         this.c.silently(() => this.c.functions.recordParameterInitialization(parameterNode, type, initializer));
       }
     };
@@ -331,18 +335,25 @@ export class Signatures {
       value && (!expected || readsLaterDefault)
         ? this.parameterDefaultType(parameterNode, pattern, value, expected)
         : undefined;
-    const type =
+    const contextualType =
       expected ??
       (immediateArgumentCount !== undefined && !value ? undefinedType : undefined) ??
-      this.setterParameterType(node) ??
+      this.setterParameterType(node);
+    const type =
+      contextualType ??
       (initializer
         ? this.c.literals.widenDeclared(initializer, false)
         : this.c.expressions.implicitParameterType(parameterNode, pattern, rest));
+    const bindingType =
+      !contextualType && initializer && pattern.type !== 'identifier'
+        ? this.c.literals.widenDeclared(initializer, false, true)
+        : undefined;
     return {
       initializer,
       parameter: {
         ...parameterShape(parameterNode, index, omitted && !annotation),
         type,
+        bindingType,
       },
     };
   }
@@ -748,6 +759,9 @@ function withRequiredPrefix(parameters: Parameter[]): Parameter[] {
       optional: false,
       get type() {
         return unionOf([parameter.type, undefinedType]);
+      },
+      get bindingType() {
+        return parameter.bindingType;
       },
     };
     requiredPrefixSources.set(required, parameter);

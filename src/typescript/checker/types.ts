@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 405 -- Keeps type data, cache keys, and canonical type constructors together.
+// code-gauge-allow-file fileNcss 408 -- Keeps type data, cache keys, and canonical type constructors together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { ExecutionBudget } from '../../interpreter/limits';
@@ -106,6 +106,8 @@ export interface Property {
 export interface Parameter {
   name: string;
   type: Type;
+  /** Inferred default source for the declaration's pattern, with object-literal freshness intact. */
+  bindingType?: Type;
   optional: boolean;
   rest: boolean;
 }
@@ -456,7 +458,6 @@ export function typeMapperCacheKey(mapper: ReadonlyMap<number, Type> & Pick<Mapp
 }
 
 /** Flattens and canonicalizes unions, retaining covered literal alternatives in contextual types. */
-// code-gauge-allow functionNcss 42 -- Flattens, deduplicates, and reduces members as TypeScript's unions do.
 // code-gauge-allow functionCognitiveComplexity 30 -- Flattens, deduplicates, and reduces members as TypeScript's unions do.
 export function unionOf(types: Type[], keepFresh = false, preserveLiterals = false): Type {
   const flat = flattenedMembers(types, 'union', keepFresh).filter((type) => !isIntrinsic(type, 'never'));
@@ -477,7 +478,9 @@ export function unionOf(types: Type[], keepFresh = false, preserveLiterals = fal
   if (reduced.length === 0) return neverType;
   if (reduced.length === 1) return reduced[0];
   reduced.sort((a, b) => unionSortKey(a) - unionSortKey(b));
-  const key = reduced.map(typeCacheKey).join('|');
+  const key = reduced
+    .map((type) => `${typeCacheKey(type)}${type.kind === 'object' && type.fresh ? 'f' : ''}`)
+    .join('|');
   let union = unionCache.get(key);
   if (!union) {
     if (key === booleanUnionKey) return booleanType;
@@ -487,7 +490,6 @@ export function unionOf(types: Type[], keepFresh = false, preserveLiterals = fal
   return union;
 }
 
-// code-gauge-allow functionNcss 35 -- Flattens and reduces members as TypeScript's intersections do.
 // code-gauge-allow functionCognitiveComplexity 28 -- Flattens and reduces members as TypeScript's intersections do.
 export function intersectionOf(types: Type[], budget: ExecutionBudget): Type {
   budget.spend(types.length);
@@ -662,6 +664,10 @@ export function anonymousObject(resolve: () => Structure, extra: Partial<ObjectT
   };
 }
 
+export function freshObjectLiteral(regular: ObjectType): ObjectType {
+  return { ...regular, fresh: true, regular };
+}
+
 /** `{}`, which every value but `null` and `undefined` is assignable to. */
 export const emptyObjectType = anonymousObject(emptyStructure, { nonGeneric: true });
 // TypeScript distinguishes non-null unknown from a written {} for the in operator.
@@ -696,9 +702,9 @@ export function simpleProperty(name: string, type: Type, options: Partial<Proper
   };
 }
 
-export function propertyAccessType(property: Property, access: 'read' | 'write' = 'read'): Type {
+export function propertyAccessType(property: Property, access: 'read' | 'write' = 'read', keepFresh = false): Type {
   const type = (access === 'write' ? (property.writeType ?? property.type) : property.type)();
-  return property.optional && !property.exactOptionalType ? unionOf([type, undefinedType]) : type;
+  return property.optional && !property.exactOptionalType ? unionOf([type, undefinedType], keepFresh) : type;
 }
 
 export function functionType(signature: Signature): ObjectType {

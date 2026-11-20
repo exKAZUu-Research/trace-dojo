@@ -388,8 +388,8 @@ export class StatementChecker {
     const left = header.childForFieldName('left') as TreeNode;
     const isOf = header.childForFieldName('operator')?.text === 'of';
     const isConst = header.childForFieldName('kind')?.text === 'const';
-    const rightType = this.c.expressions.check(right, isOf ? this.iterableContext(left, isConst) : undefined);
-    const elementType = isOf ? this.c.patterns.iteratedType(undefined, rightType) : stringType;
+    const rightType = this.c.expressions.check(right);
+    const elementType = isOf ? this.iteratedLoopType(right, rightType, false) : stringType;
     if (left.type === 'identifier') return elementType;
     return this.c.patterns.patternType(left, elementType, symbol.name, { isConst });
   }
@@ -552,7 +552,7 @@ export class StatementChecker {
     const right = header.childForFieldName('right') as TreeNode;
     const isOf = header.childForFieldName('operator')?.text === 'of';
     const kind = header.childForFieldName('kind')?.text;
-    const rightType = this.c.expressions.check(right, isOf ? this.iterableContext(left, kind === 'const') : undefined);
+    const rightType = this.c.expressions.check(right);
     const elementType = this.loopElementType(node, rightType);
     if (!isOf) this.forInObjectTypes.set(node.id, rightType);
     const body = node.childForFieldName('body') as TreeNode;
@@ -570,8 +570,13 @@ export class StatementChecker {
     const header = node.childForFieldName('header') ?? node;
     const right = header.childForFieldName('right') as TreeNode;
     return header.childForFieldName('operator')?.text === 'of'
-      ? this.c.patterns.iteratedType(right, rightType)
+      ? this.iteratedLoopType(right, rightType, true)
       : this.forInKeyType(right, rightType);
+  }
+
+  private iteratedLoopType(right: TreeNode, rightType: Type, reportErrors: boolean): Type {
+    const element = this.c.patterns.iteratedType(reportErrors ? right : undefined, rightType);
+    return this.c.literals.iteratedBindingType(element, right);
   }
 
   /**
@@ -608,12 +613,6 @@ export class StatementChecker {
     const { stringIndex, numberIndex, symbolIndex } =
       apparent.kind === 'union' ? unionStructure(this.c, apparent.types) : this.c.structureOf(apparent);
     return numberIndex !== undefined && !stringIndex && !symbolIndex;
-  }
-
-  /** The array a `for...of` loop's pattern implies for an array literal it iterates. */
-  private iterableContext(left: TreeNode, isConst: boolean): Type | undefined {
-    const implied = this.c.patterns.impliedBindingType(left, isConst);
-    return implied && this.c.arrayType(implied);
   }
 
   /**

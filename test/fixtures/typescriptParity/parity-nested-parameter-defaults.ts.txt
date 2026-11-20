@@ -1,0 +1,25 @@
+function options({ outer: { value = 1 } = {} } = { outer: {} }) {
+  return value;
+}
+
+function pair({ outer: { first = 1, second = 2 } = {} } = { outer: { second: 4 } }) {
+  return first + second;
+}
+
+function tuple({ outer: [one = 1, two = 'ok'] = [] } = { outer: [] }) {
+  return [one, two];
+}
+
+function later({ outer: { value = 1 } } = { outer: {} }, next = value + 1): number {
+  return value + next;
+}
+
+const flag = Boolean(console.log);
+function union({ outer: { chosen, other } } = { outer: flag ? { chosen: 3 } : { other: 4 } }) {
+  return [chosen, other];
+}
+
+let { outer: { seed = 7 } = {} } = {};
+seed += 1;
+console.log(options(), options({ outer: { value: 2 } }), options({ outer: { other: true } }));
+console.log(pair(), pair({ outer: { second: 2 } }), tuple(), later(), later({ outer: {} }, 5), union(), seed);
