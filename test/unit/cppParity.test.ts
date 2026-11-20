@@ -846,6 +846,25 @@ int main() {
   });
 });
 
+test('composes constants from typed arithmetic functors', () => {
+  const program = `#include <functional>
+#include <iostream>
+int main() {
+  constexpr int n = std::plus<int>()(1, 2);
+  constexpr bool less = std::less<int>()(1, 2);
+  constexpr short wrapped = std::plus<short>()(30000, 30000);
+  constexpr double half = std::divides<double>()(1, 2);
+  int a[std::multiplies<int>{}(2, 3)];
+  int x = 4;
+  std::cout << n << less << ' ' << wrapped << ' ' << half << ' ' << sizeof(a) << ' ' << std::minus<int>()(x, 1);
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '31 -5536 0.5 24 3',
+    uncaughtException: undefined,
+  });
+});
+
 test('keeps functor constants and sequences typed string functor arguments', () => {
   const program = `#include <functional>
 #include <iostream>

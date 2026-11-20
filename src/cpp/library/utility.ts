@@ -89,6 +89,11 @@ export function functorClass(library: Library, name: string, type: Type | undefi
       }
       const operation = apply(type, type);
       if (!operation) return compiler.error(row, `${cls.name} は ${typeName(type)} の値に使えません。`);
+      if (isArithmetic(type) && isConstantCall(object, args)) {
+        const operands = args.map((arg) => compiler.convert(arg, type, row));
+        const result = compiler.binary(operator, operands[0], operands[1], row);
+        return withObject(object, isComparison ? result : compiler.convert(result, type, row));
+      }
       const runs = [object.run, ...args.map((arg) => constLvalue(compiler, arg, type, row).run)];
       return {
         type: isComparison ? BOOL : unqualified(type),
@@ -257,11 +262,7 @@ function constLvalue(compiler: ExpressionCompiler, arg: Expr, type: Type, row: n
  * directly so the result stays constant.
  */
 function callOperator(compiler: ExpressionCompiler, operator: string, object: Expr, args: Expr[], row: number): Expr {
-  const isConstantObject = object.constantDesignation === true || object.constantInitialization === true;
-  if (isConstantObject && args.every((arg) => arg.constant !== undefined)) {
-    const result = compiler.binary(operator, args[0], args[1], row);
-    return { ...result, run: (frame) => (object.run(frame), result.run(frame)) };
-  }
+  if (isConstantCall(object, args)) return withObject(object, compiler.binary(operator, args[0], args[1], row));
   const active: unknown[][] = [];
   const operands = args.map((arg): CallbackOperand => ({
     type: arg.type,
@@ -282,4 +283,14 @@ function callOperator(compiler: ExpressionCompiler, operator: string, object: Ex
         }
       }),
   };
+}
+
+/** Whether a functor call is a constant expression: a constant functor object applied to constant arguments. */
+function isConstantCall(object: Expr, args: Expr[]): boolean {
+  const isConstantObject = object.constantDesignation === true || object.constantInitialization === true;
+  return isConstantObject && args.every((arg) => arg.constant !== undefined);
+}
+
+function withObject(object: Expr, result: Expr): Expr {
+  return { ...result, run: (frame) => (object.run(frame), result.run(frame)) };
 }
