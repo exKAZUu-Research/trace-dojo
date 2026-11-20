@@ -226,6 +226,15 @@ export class RangeValue {
     readonly inclusive: boolean,
     public exhausted = false
   ) {}
+
+  sliceStart(): number | undefined {
+    if (this.exhausted && this.inclusive) return this.sliceEnd();
+    return this.start === undefined ? undefined : Number(this.start as bigint);
+  }
+
+  sliceEnd(): number | undefined {
+    return this.end === undefined ? undefined : Number(this.end as bigint) + (this.inclusive ? 1 : 0);
+  }
 }
 
 /** A trait object: a value with the type that decides which implementation its methods run. */

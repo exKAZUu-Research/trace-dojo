@@ -2792,3 +2792,14 @@ test('retains Rust turtles still owned by iterator adapters', () => {
     1, 2, 4,
   ]);
 });
+
+test('uses empty slices after a Rust inclusive range is exhausted', () => {
+  const program = rustMain(`let mut range = 0usize..=1;
+    range.next();
+    range.next();
+    println!("{:?} {:?}", &vec![10, 20, 30][range.clone()], "abc".get(range));
+    let mut within_char = 0usize..=0;
+    within_char.next();
+    println!("{:?}", "é".get(within_char));`);
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '[] Some("")\nNone\n' });
+});

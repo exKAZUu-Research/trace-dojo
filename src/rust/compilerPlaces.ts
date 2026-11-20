@@ -216,7 +216,7 @@ function rangeIndex(c: Compiler, base: Eval, index: Eval, isStr: boolean, span: 
     return frame.runtime.withRoots([container], () => {
       const range = index(frame) as RangeValue | undefined;
       return isStr
-        ? c.support.strSlice(container as string, rangeStart(range), rangeEnd(range), span)
+        ? c.support.strSlice(container as string, range?.sliceStart(), range?.sliceEnd(), span)
         : sliceRange(container, range, span);
     });
   };
@@ -225,8 +225,8 @@ function rangeIndex(c: Compiler, base: Eval, index: Eval, isStr: boolean, span: 
 /** `&v[a..b]`: a window on a slice, panicking as Rust does when the range is out of order or bounds. */
 export function sliceRange(container: Value, range: RangeValue | undefined, span: Span): Value {
   const length = sliceLength(container);
-  const start = rangeStart(range) ?? 0;
-  const end = rangeEnd(range) ?? length;
+  const start = range?.sliceStart() ?? 0;
+  const end = range?.sliceEnd() ?? length;
   if (range?.inclusive && range.end !== undefined && (range.end as bigint) === 0xff_ff_ff_ff_ff_ff_ff_ffn) {
     throw new RustPanic('attempted to index slice up to maximum usize', span);
   }
@@ -240,15 +240,6 @@ export function sliceRange(container: Value, range: RangeValue | undefined, span
   }
   const { base, start: offset } = sliceBase(container);
   return new SliceView(base, offset + start, offset + end);
-}
-
-function rangeStart(range: RangeValue | undefined): number | undefined {
-  return range?.start === undefined ? undefined : Number(range.start as bigint);
-}
-
-function rangeEnd(range: RangeValue | undefined): number | undefined {
-  if (range?.end === undefined) return undefined;
-  return Number(range.end as bigint) + (range.inclusive ? 1 : 0);
 }
 
 /** The message of an index past the end; `VecDeque`'s says less. */

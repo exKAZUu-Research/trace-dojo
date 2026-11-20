@@ -288,11 +288,8 @@ function parse(ctx: NativeContext, text: string): Value {
 }
 
 function rangeBounds(range: Value, length: number): { start: number; end: number } {
-  const r = deref(range) as RangeValue | undefined;
-  if (!r || (r.start === undefined && r.end === undefined)) return { start: 0, end: length };
-  const start = r.start === undefined ? 0 : Number(r.start as bigint);
-  const end = r.end === undefined ? length : Number(r.end as bigint) + (r.inclusive ? 1 : 0);
-  return { start, end };
+  const bounds = deref(range) as RangeValue | undefined;
+  return { start: bounds?.sliceStart() ?? 0, end: bounds?.sliceEnd() ?? length };
 }
 
 const strNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
