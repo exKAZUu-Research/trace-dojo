@@ -1556,6 +1556,21 @@ test('borrows through shared references in Rust closures after their bindings en
   });
 });
 
+test('uses character slices for Rust string boundary patterns', () => {
+  const program = `fn main() {
+    let chars = ['x', 'a', 'é', 'x'];
+    let delimiters = &chars[1..3];
+    let text = "aéhelloéa";
+    println!("{} {} {} {:?} {:?}", text.trim_matches(delimiters), text.starts_with(delimiters),
+      text.ends_with(delimiters), text.strip_prefix(delimiters), text.strip_suffix(delimiters));
+    println!("{}", "xhellox".trim_matches(delimiters));
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'hello true true Some("éhelloéa") Some("aéhelloé")\nxhellox\n',
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

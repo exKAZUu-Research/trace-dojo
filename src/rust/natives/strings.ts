@@ -13,6 +13,7 @@ import {
   type IterValue,
   type RangeValue,
   sliceItems,
+  SliceView,
   StructValue,
   UNIT_VALUE,
   type Value,
@@ -204,7 +205,10 @@ function charTest(ctx: NativeContext, pattern: Value): (char: string) => boolean
   const p = deref(pattern);
   if (p instanceof FnValue) return (char) => call(ctx, p, [char]) as boolean;
   if (typeof p === 'string' && [...p].length === 1) return (char) => char === p;
-  if (Array.isArray(p)) return (char) => (p as string[]).includes(char);
+  if (Array.isArray(p) || p instanceof SliceView) {
+    const chars = sliceItems(p);
+    return (char) => chars.includes(char);
+  }
   return () => false;
 }
 
