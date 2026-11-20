@@ -25,6 +25,7 @@ export interface FrameReader<F extends TracedFrame> {
   isAtomic(frame: F): boolean;
   variablesOf(frame: F): TraceVariables;
   stateVariables?(variables: TraceVariables): Record<string, unknown>;
+  scalarVarsOf?(frame: F): TraceVariables['vars'];
   recordItem?(item: TraceItem): TraceItem;
 }
 
@@ -59,9 +60,10 @@ export class TraceRecorder<F extends TracedFrame> implements StepRecorder {
       board: world.boardText(),
     };
     this.traceItems.push(this.frames.recordItem?.(item) ?? item);
+    const reuseCurrent = !this.frames.recordItem || this.frames.scalarVarsOf !== undefined;
     for (const frame of frames) {
-      const snapshot = frame === current && !this.frames.recordItem ? variables : this.frames.variablesOf(frame);
-      this.varsAtLastStep.set(frame, this.stateVariables(snapshot));
+      const vars = frame === current && reuseCurrent ? this.stateVariables(variables) : this.stateOf(frame);
+      this.varsAtLastStep.set(frame, vars);
     }
     return true;
   }
@@ -79,12 +81,16 @@ export class TraceRecorder<F extends TracedFrame> implements StepRecorder {
     return (
       last.board === world.boardText() &&
       isEqual(last.turtles, world.turtleTraces()) &&
-      (shownVars === undefined || sameVariables(shownVars, this.stateVariables(this.frames.variablesOf(frame))))
+      (shownVars === undefined || sameVariables(shownVars, this.stateOf(frame)))
     );
   }
 
   private stateVariables(variables: TraceVariables): Record<string, unknown> {
     return this.frames.stateVariables?.(variables) ?? variables.vars;
+  }
+
+  private stateOf(frame: F): Record<string, unknown> {
+    return this.frames.scalarVarsOf?.(frame) ?? this.stateVariables(this.frames.variablesOf(frame));
   }
 }
 

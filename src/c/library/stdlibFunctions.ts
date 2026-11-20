@@ -3,7 +3,7 @@ import { CRuntimeError, ProgramAbort, ProgramExit } from '../errors';
 import type { NativeFunction, Runtime } from '../runtime';
 import { type CType, pointerTo, VOID } from '../types';
 import { ERROR_NUMBERS } from './appleErrno';
-import { isExactFloatPrefix, parseFloatPrefix, parseIntegerPrefix } from './numberParsing';
+import { isFloatUnderflow, parseFloatPrefix, parseIntegerPrefix } from './numberParsing';
 import { qsort } from './sorting';
 import { asAddress, asNumber, asSize, readCString, readRaw, writeBytes } from './support';
 
@@ -108,13 +108,7 @@ function strtoFloat(isFloat: boolean): NativeFunction {
     if (parsed.length > 0 && Number.isFinite(value) === false && !parsed.isInfinityText && !Number.isNaN(value)) {
       setErrno(runtime, ERANGE);
     }
-    if (
-      parsed.length > 0 &&
-      parsed.isNonzeroText &&
-      Math.abs(value) < (isFloat ? 2 ** -126 : 2 ** -1022) &&
-      !isExactFloatPrefix(bytes, parsed.length, value)
-    )
-      setErrno(runtime, ERANGE);
+    if (parsed.length > 0 && isFloatUnderflow(bytes, parsed, value, isFloat)) setErrno(runtime, ERANGE);
     if (asAddress(end) !== 0) storePointer(runtime, asAddress(end), asAddress(text) + parsed.length);
     return value;
   };

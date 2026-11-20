@@ -1,0 +1,29 @@
+Animal(rex)
+Dog
+Animal(cat)
+rex says Woof
+cat says Meow
+Animal(fido)
+Dog
+fido says Woof
+~Dog
+~Animal(fido)
+cat says Meow
+rex says Woof
+copy rex'
+rex' says ...
+~Animal(rex')
+Animal(tmp)
+tmp says ...
+2
+34569
+2
+Animal(inner)
+Dog
+~Dog
+~Animal(inner)
+end
+~Animal(tmp)
+~Animal(cat)
+~Dog
+~Animal(rex)

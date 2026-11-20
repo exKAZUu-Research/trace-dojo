@@ -120,9 +120,18 @@ export class TurtleWorld {
     this.finalTurtles = new Set(this.turtles);
   }
 
-  turtleTraces(final = false): TurtleTrace[] {
-    const turtles = final && this.finalTurtles ? this.finalTurtles : this.turtles;
+  finalTurtleTraces(): TurtleTrace[] {
+    return this.turtleTraces(this.finalTurtles);
+  }
+
+  /** The turtles on the board, or the given ones as they stand now. */
+  turtleTraces(turtles: Iterable<TurtleState> = this.turtles): TurtleTrace[] {
     return Array.from(turtles, ({ color, dir, x, y }) => ({ x, y, color, dir }));
+  }
+
+  /** The turtles on the board now, which later moves of theirs still update. */
+  currentTurtles(): readonly TurtleState[] {
+    return [...this.turtles];
   }
 }
 

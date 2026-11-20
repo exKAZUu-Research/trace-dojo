@@ -67,7 +67,7 @@ export function runProgram(runtime: Runtime, parsed: ParsedProgram, onEnd?: (fra
     const stdoutBytes = runtime.stdoutBytes;
     return {
       finalBoard: runtime.world.boardText(),
-      finalTurtles: runtime.world.turtleTraces(true),
+      finalTurtles: runtime.world.finalTurtleTraces(),
       uncaughtException,
       ...runtime.io.output(),
       ...(stdoutBytes === undefined ? {} : { stdoutBytes }),
