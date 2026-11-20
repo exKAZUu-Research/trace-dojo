@@ -125,6 +125,11 @@ export function offsetConstantLocation(
   if (index >= 0 && index <= location.length) return { index, length: location.length };
 }
 
+/** Whether evaluating an lvalue expression in a constant expression only names an object, with no side effects. */
+export function designatesWithoutSideEffects(expr: Expr): boolean {
+  return expr.constantDesignation === true || expr.staticAddress === true;
+}
+
 export function hasConstantObject(location: ConstantLocation | undefined): boolean {
   return location !== undefined && location.index < location.length;
 }

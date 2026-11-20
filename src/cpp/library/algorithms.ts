@@ -2,7 +2,7 @@ import { commonType, promote } from '../../c/types';
 import { CompileError } from '../../interpreter/diagnostics';
 import { arithmeticOperation, convertNumeric, type NumericValue } from '../arithmetic';
 import { CppRuntimeError, overflowError } from '../errors';
-import type { Expr } from '../expr';
+import { designatesWithoutSideEffects, type Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import { constructArray, initializeAt, withTemporaries } from '../objectCompiler';
 import { type Frame, holdAll } from '../runtime';
@@ -1046,7 +1046,12 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
   define('size', [[0]], (args) => {
     if (args.length !== 1) return;
     const type = args[0].type;
-    if (type.kind === 'array') return native('size', [referenceTo(type)], SIZE_T, () => BigInt(type.length ?? 0));
+    if (type.kind === 'array') {
+      const length = BigInt(type.length ?? 0);
+      return native('size', [referenceTo(type)], SIZE_T, () => length, {
+        constantValue: (_, [array]) => (designatesWithoutSideEffects(array) ? length : undefined),
+      });
+    }
     return rangeMemberFunction(compiler(), 'size', args[0]);
   });
   for (const name of ['next', 'prev']) {

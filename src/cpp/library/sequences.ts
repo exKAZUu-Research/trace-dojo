@@ -1,7 +1,14 @@
 import { CompileError } from '../../interpreter/diagnostics';
 import { implicitConversion } from '../conversions';
 import { CppRuntimeError, NarrowingConversionError } from '../errors';
-import { type ConstantLocation, type Expr, hasConstantObject, type Initializer, offsetConstantLocation } from '../expr';
+import {
+  type ConstantLocation,
+  designatesWithoutSideEffects,
+  type Expr,
+  hasConstantObject,
+  type Initializer,
+  offsetConstantLocation,
+} from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import { constructArray, withTemporaries } from '../objectCompiler';
 import { type Eval, type Frame, holdAll } from '../runtime';
@@ -495,7 +502,11 @@ function sequenceMethods(
   const begin = (self: SequenceValue): Ptr => iteratorAt(self, 0);
   const end = (self: SequenceValue): Ptr => iteratorAt(self, self.items.length);
   const endConstant = (object: Expr): ConstantLocation | undefined => constantArrayLocation(object, fixedLength);
-  method('size', [], SIZE_T, (self) => BigInt(self.size), { isConst: true });
+  method('size', [], SIZE_T, (self) => BigInt(self.size), {
+    isConst: true,
+    constantValue: (object) =>
+      kind === 'array' && object && designatesWithoutSideEffects(object) ? BigInt(fixedLength ?? 0) : undefined,
+  });
   method('max_size', [], SIZE_T, () => (kind === 'array' ? BigInt(fixedLength ?? 0) : maxSizeOf(kind, element)), {
     isConst: true,
   });

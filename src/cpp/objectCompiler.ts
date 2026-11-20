@@ -98,6 +98,23 @@ export function invoke(
   }
 }
 
+/** What a member function call's result is known to be at compile time: a location it designates or a constant. */
+function memberCallConstancy(
+  fn: FunctionInfo,
+  object: Expr,
+  converted: Expr[]
+): Pick<Expr, 'staticAddress' | 'constantLocation' | 'constantInitialization' | 'constantPointee' | 'constant'> {
+  const isReference = fn.ret.kind === 'reference';
+  const knownLocation = fn.constantAccess?.(object, converted);
+  return {
+    staticAddress: isReference ? hasConstantObject(knownLocation) : knownLocation !== undefined,
+    constantLocation: isReference ? knownLocation : undefined,
+    constantInitialization: isReference && hasConstantObject(knownLocation),
+    constantPointee: nonReference(fn.ret).kind === 'pointer' ? knownLocation : undefined,
+    constant: fn.constantValue?.(object, converted),
+  };
+}
+
 function parameterLocation(type: Type, value: Value): Ptr | Box {
   if (type.kind === 'reference') return value as Ptr;
   if (type.kind === 'class' && value instanceof CObject) return value.parameterStorage();
@@ -806,20 +823,12 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     };
     const isReference = fn.ret.kind === 'reference';
     const type = nonReference(fn.ret);
-    const knownLocation = object && fn.constantAccess?.(object, converted);
     return {
       type,
       isLvalue: isReference,
       row,
       run,
-      ...(object
-        ? {
-            staticAddress: isReference ? hasConstantObject(knownLocation) : knownLocation !== undefined,
-            constantLocation: isReference ? knownLocation : undefined,
-            constantInitialization: isReference && hasConstantObject(knownLocation),
-            constantPointee: type.kind === 'pointer' ? knownLocation : undefined,
-          }
-        : this.callConstancy(fn, args, converted)),
+      ...(object ? memberCallConstancy(fn, object, converted) : this.callConstancy(fn, args, converted)),
       onlyCalls: true,
       isTemporaryObject: !isReference && type.kind === 'class',
     };
@@ -853,9 +862,11 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     const arithmeticArgs = this.constantCallArguments(fn, args);
     const evaluate = fn.evaluateConstant;
     const allConstant = arithmeticArgs && arithmeticArgs.every((arg) => arg.constant !== undefined);
+    const known = fn.constantValue?.(undefined, args);
     return {
       ...this.libraryConstant(fn, args, converted),
-      constant: allConstant ? evaluate?.(arithmeticArgs.map((arg) => arg.constant as number | bigint)) : undefined,
+      constant:
+        known ?? (allConstant ? evaluate?.(arithmeticArgs.map((arg) => arg.constant as number | bigint)) : undefined),
       memberConstant: arithmeticArgs && evaluate ? mapMemberConstants(arithmeticArgs, evaluate) : undefined,
     };
   }

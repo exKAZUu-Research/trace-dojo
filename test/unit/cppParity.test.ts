@@ -880,6 +880,91 @@ int main() {
   });
 });
 
+test('extracts integers in one pass as libc++ does, detecting the base from the prefix', () => {
+  const program = `#include <iomanip>
+#include <iostream>
+#include <sstream>
+#include <string>
+void checkInt(const char* text, int mode) {
+  std::istringstream s(text);
+  int n = 7;
+  if (mode == 0) s >> std::setbase(0);
+  if (mode == 16) s >> std::hex;
+  if (mode == 8) s >> std::oct;
+  s >> n;
+  std::cout << +n << ',' << s.fail() << s.eof() << ',';
+  s.clear();
+  char c = '?';
+  s >> c;
+  std::cout << c << ' ';
+}
+void checkUnsigned(const char* text, int mode) {
+  std::istringstream s(text);
+  unsigned n = 7;
+  if (mode == 0) s >> std::setbase(0);
+  if (mode == 16) s >> std::hex;
+  if (mode == 8) s >> std::oct;
+  s >> n;
+  std::cout << +n << ',' << s.fail() << s.eof() << ',';
+  s.clear();
+  char c = '?';
+  s >> c;
+  std::cout << c << ' ';
+}
+void checkLong(const char* text, int mode) {
+  std::istringstream s(text);
+  long n = 7;
+  if (mode == 0) s >> std::setbase(0);
+  if (mode == 16) s >> std::hex;
+  if (mode == 8) s >> std::oct;
+  s >> n;
+  std::cout << +n << ',' << s.fail() << s.eof() << ',';
+  s.clear();
+  char c = '?';
+  s >> c;
+  std::cout << c << ' ';
+}
+int main() {
+  const char* inputs[] = {"019x", "12abc", "0x1fz", "0", "0x", "-0x10", "+7", "-", "", "  42", "99999999999", "-2147483648", "-2147483649", "0X1A", "017", "x", "1e5"};
+  for (int mode : {10, 0, 16, 8}) {
+    for (const char* in : inputs) checkInt(in, mode);
+    std::cout << '\\n';
+  }
+  for (const char* in : {"-1", "4294967296", "-4294967295", "18446744073709551616"}) checkUnsigned(in, 10);
+  std::cout << '\\n';
+  for (const char* in : {"9223372036854775808", "-9223372036854775808", "0x7fffffffffffffff"}) checkLong(in, 0);
+  std::cout << '\\n';
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '19,00,x 12,00,a 0,00,x 0,01,? 0,00,x 0,00,x 7,01,? 0,11,? 7,11,? 42,01,? 2147483647,11,? -2147483648,01,? -2147483648,11,? 0,00,X 17,01,? 0,10,x 1,00,e \n1,00,9 12,00,a 31,00,z 0,01,? 0,11,? -16,01,? 7,01,? 0,11,? 7,11,? 42,01,? 2147483647,11,? -2147483648,01,? -2147483648,11,? 26,01,? 15,01,? 0,10,x 1,00,e \n25,00,x 76476,01,? 31,00,z 0,01,? 0,11,? -16,01,? 7,01,? 0,11,? 7,11,? 66,01,? 2147483647,11,? -2147483648,11,? -2147483648,11,? 26,01,? 23,01,? 0,10,x 485,01,? \n1,00,9 10,00,a 0,00,x 0,01,? 0,00,x 0,00,x 7,01,? 0,11,? 7,11,? 34,01,? 0,10,9 -9020,00,8 -9020,00,8 0,00,X 15,01,? 0,10,x 1,00,e \n4294967295,01,? 4294967295,11,? 1,01,? 4294967295,11,? \n9223372036854775807,11,? -9223372036854775808,01,? 9223372036854775807,01,? \n',
+    uncaughtException: undefined,
+  });
+});
+
+test('composes constant sizes of fixed arrays', () => {
+  const program = `#include <array>
+#include <iostream>
+#include <iterator>
+int main() {
+  int a[3]{};
+  constexpr auto n = std::size(a);
+  int b[n]{};
+  std::array<int, 4> c{};
+  constexpr auto m = c.size();
+  int d[m]{};
+  static int s[5];
+  constexpr auto k = std::size(s);
+  std::cout << n << m << k << ' ' << sizeof(b) << ' ' << sizeof(d);
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '345 12 16',
+    uncaughtException: undefined,
+  });
+});
+
 test('evaluates the operands of integer-plus-pointer from left to right', () => {
   const program = `#include <iostream>
 int data[4];

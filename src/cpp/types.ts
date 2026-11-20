@@ -145,6 +145,8 @@ export interface FunctionInfo {
   evaluateConstant?: (args: readonly (number | bigint)[]) => number | bigint | undefined;
   libraryConstant?: (args: readonly Expr[]) => LibraryConstant | undefined;
   constantAccess?: (object: Expr, args: readonly Expr[]) => ConstantLocation | undefined;
+  /** A result known at compile time from the object and argument expressions, such as a fixed array's length. */
+  constantValue?: (object: Expr | undefined, args: readonly Expr[]) => number | bigint | undefined;
   streamManipulator?: 'both' | 'output';
   mathIntrinsic?: boolean;
   libcGlobal?: boolean;
