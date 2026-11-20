@@ -188,7 +188,7 @@ export type TypeAst =
   | { kind: 'slice'; elem: TypeAst; span: Span }
   | { kind: 'infer'; span: Span }
   | { kind: 'never'; span: Span }
-  | { kind: 'dyn'; bounds: BoundAst[]; span: Span }
+  | { kind: 'dyn'; bounds: BoundAst[]; lifetime?: string; span: Span }
   | { kind: 'impl'; bounds: BoundAst[]; span: Span }
   | { kind: 'fnBound'; bound: BoundAst & { kind: 'fn' }; span: Span };
 

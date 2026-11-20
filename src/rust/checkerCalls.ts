@@ -166,7 +166,7 @@ function checkArgument(c: Checker, arg: Expr, param: Type, inputType: Type, expe
       t.kind !== 'dyn' &&
       t.kind !== 'str' &&
       t.kind !== 'slice' &&
-      !hasVars(target) &&
+      (t.kind === 'ref' || !hasVars(target)) &&
       c.tryCoerce(arg, type, target)
     ) {
       c.unifyOrError(arg.span, param, target);

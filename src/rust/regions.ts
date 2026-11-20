@@ -181,7 +181,8 @@ export function instantiate(declared: Type, subst: Subst, fresh: () => RVar): La
       return { kind: 'ref', region, mutable: t.mutable, target };
     }
     case 'dyn': {
-      return { kind: 'opaque', region: t.objectLifetime === 'static' ? subst.lifetime("'static") : fresh() };
+      const lifetime = t.objectLifetime === 'static' ? "'static" : t.lifetime;
+      return { kind: 'opaque', region: lifetime ? subst.lifetime(lifetime) : fresh() };
     }
     case 'param': {
       return subst.param(t.param) ?? NONE;

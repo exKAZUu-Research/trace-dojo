@@ -4791,3 +4791,78 @@ test('collects dropped turtles on panic and process exit', () => {
     expect(traceProgram('rust', program, program)).toMatchObject(expected);
   }
 });
+
+test('checks multiple impl Trait bounds and explicit dyn object lifetimes', () => {
+  const program = `use std::fmt::{Debug, Display};
+fn show(x: &(impl Display + Debug)) -> String { format!("{} {:?}", x, x) }
+fn make() -> impl Display + Clone { 5 }
+fn items<'a>(x: &'a [i32]) -> impl Iterator<Item = &'a i32> + 'a { x.iter() }
+fn boxed<'a>(x: &'a i32) -> Box<dyn Display + 'a> { Box::new(x) }
+fn prefix<'a>(x: &'a i32) -> Box<dyn 'a + Display> { boxed(x) }
+fn main() {
+    let n = 7;
+    let values = [8, 9];
+    println!("{} {} {:?} {} {}", show(&"a"), make().clone(),
+        items(&values).collect::<Vec<_>>(), boxed(&n), prefix(&n));
+    let singleton: (i32,) = (1,);
+    println!("{}", singleton.0);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'a "a" 5 [8, 9] 7 7\n1\n',
+  });
+  const missing = program.replace('impl Display + Clone', 'impl Display');
+  expect(executeProgram('rust', missing)).toMatchObject({ kind: 'compileError' });
+  const ambiguous = program.replace('&(impl Display + Debug)', '&impl Display + Debug');
+  expect(executeProgram('rust', ambiguous)).toMatchObject({ kind: 'compileError' });
+});
+
+test('uses the mode of each captured projection to lay out a closure', () => {
+  const program = `struct S { a: String, b: [u8; 64] }
+struct Texts { a: String, b: String }
+fn size<T>(_: T) -> usize { std::mem::size_of::<T>() }
+fn main() {
+    let s = S { a: String::new(), b: [0; 64] };
+    let t = Texts { a: String::from("a"), b: String::from("b") };
+    let f = || { drop(s.a); println!("{}", s.b[0]); };
+    let g = || { drop(t.a); println!("{}", t.b); };
+    println!("{} {}", size(f), size(g));
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '32 32\n' });
+});
+
+test('uses the outer reference contract even when its referent is inferred', () => {
+  const program = `fn id<T>(x: T) -> T { x }
+fn main() {
+    let mut v = vec![1];
+    let r = &mut v;
+    let a: &mut _ = id(r);
+    a.push(2);
+    let b: &mut Vec<_> = id(r);
+    b.push(3);
+    let c: Option<&mut Vec<_>> = Some(r);
+    c.unwrap().push(4);
+    r.push(5);
+    println!("{:?}", v);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '[1, 2, 3, 4, 5]\n' });
+});
+
+test('skips unreachable while bodies when the condition stays known after the back edge', () => {
+  const source = rustMain(`while false { let a = [1, 2]; let _x = a[3]; }
+    let n = 0;
+    while n > 5 { let a = [1, 2]; let _x = a[3]; }
+    println!("kept");`);
+  expect(executeProgram('rust', source)).toMatchObject({ kind: 'executed', stdout: 'kept\n' });
+});
+
+test('uses the declared precision of mathematical constants in array lengths', () => {
+  const program = `use std::f64::consts::PI;
+fn main() {
+    let a: [i32; std::f64::consts::PI as usize] = [0; 3];
+    let b: [i32; std::f32::consts::E as usize] = [0; 2];
+    let c: [i32; PI as usize] = [0; 3];
+    println!("{} {} {}", a.len(), b.len(), c.len());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '3 2 3\n' });
+});

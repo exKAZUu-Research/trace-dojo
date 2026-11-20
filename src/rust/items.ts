@@ -1368,7 +1368,7 @@ function traitArguments(def: TraitDef, written: TypeAst[], scope: TypeScope, spa
 // Lowering types
 
 // code-gauge-allow functionNcss 52 -- Follows Rust's name resolution case by case.
-// code-gauge-allow functionCognitiveComplexity 23 -- Each Rust type form has distinct lowering and diagnostics.
+// code-gauge-allow functionCognitiveComplexity 27 -- Each Rust type form has distinct lowering and diagnostics.
 export function lowerType(ast: TypeAst, scope: TypeScope): Type {
   switch (ast.kind) {
     case 'path': {
@@ -1376,7 +1376,7 @@ export function lowerType(ast: TypeAst, scope: TypeScope): Type {
     }
     case 'ref': {
       const target = lowerType(ast.target, scope);
-      if (ast.target.kind === 'dyn' && target.kind === 'dyn') target.objectLifetime = 'reference';
+      if (target.kind === 'dyn' && !target.lifetime) target.objectLifetime = 'reference';
       return { kind: 'ref', mutable: ast.mutable, target, lifetime: ast.lifetime };
     }
     case 'tuple': {
@@ -1401,10 +1401,14 @@ export function lowerType(ast: TypeAst, scope: TypeScope): Type {
     }
     case 'dyn': {
       const [bound] = ast.bounds;
+      if (ast.bounds.length !== 1) {
+        compileError(ast.span, 'dyn には、1 個のトレイトを書いてください。');
+      }
       return {
         kind: 'dyn',
         trait: lowerBound(bound, scope, undefined),
-        objectLifetime: scope.allowInfer ? undefined : 'static',
+        objectLifetime: ast.lifetime === "'static" || (!ast.lifetime && !scope.allowInfer) ? 'static' : undefined,
+        lifetime: ast.lifetime,
       };
     }
     case 'impl': {

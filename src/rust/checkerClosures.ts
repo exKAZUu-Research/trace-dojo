@@ -4,7 +4,7 @@ import { forEachDirect, patternBindingParts } from './astWalk';
 import type { Checker } from './checker';
 import { checkPattern } from './checkerPatterns';
 import { compileError } from './items';
-import { captureLayout } from './loanCaptures';
+import { captureLayout, type CaptureMode } from './loanCaptures';
 import { typeAfter } from './regions';
 import type { TraitSolver } from './traits';
 import { type ClosureType, freshVar, newClosureType, resolve, shallow, type Type, UNIT } from './types';
@@ -93,8 +93,9 @@ function closureKindOf(
           : ('ref' as const),
   }));
   const kind = uses.moved.size > 0 ? 'FnOnce' : uses.mutated.size > 0 ? 'FnMut' : 'Fn';
+  const modeOf = (place: Expr): CaptureMode => (fn.isMove ? 'value' : (uses.modes.get(place) ?? 'ref'));
   const layoutCaptures = fn.captures.flatMap((local, index) =>
-    captureLayout(annotations, body, local, captures[index].mode)
+    captureLayout(annotations, body, local, modeOf, captures[index].mode)
   );
   return { kind, movedAt: uses.firstMove, captures, layoutCaptures };
 }
@@ -103,6 +104,7 @@ function closureKindOf(
 class CaptureUses {
   readonly moved = new Set<LocalVar>();
   readonly mutated = new Set<LocalVar>();
+  readonly modes = new Map<Expr, CaptureMode>();
   firstMove: { name: string; span: Span } | undefined;
 
   constructor(
@@ -114,13 +116,12 @@ class CaptureUses {
   /** Visits an expression, whose value the closure moves when `consumed`. */
   visit(expr: Expr | undefined, consumed: boolean): void {
     if (!expr) return;
-    const mutation = mutatedCapture(expr, this.annotations, this.capturedLocal);
-    if (mutation) this.mutated.add(mutation);
+    const mutation = mutatedPlace(expr, this.annotations);
+    if (mutation) this.mutate(mutation);
     const reference = this.annotations.reborrows.get(expr);
     if (reference !== undefined) {
       consumed = false;
-      const captured = reference && this.capturedLocal(expr);
-      if (captured) this.mutated.add(captured);
+      if (reference) this.mutate(expr);
     }
     // Calling a captured `FnOnce` closure moves it.
     if (expr.kind === 'call' && this.annotations.callKinds.get(expr) === 'FnOnce') this.move(expr.callee, expr.span);
@@ -134,10 +135,18 @@ class CaptureUses {
     forEachDirect(expr, (child) => this.visit(child, consumes(child, consumed)));
   }
 
+  private mutate(place: Expr): void {
+    const local = this.capturedLocal(place);
+    if (!local) return;
+    this.mutated.add(local);
+    if (this.modes.get(place) !== 'value') this.modes.set(place, 'mut');
+  }
+
   private move(expr: Expr, span: Span): void {
     const local = this.capturedLocal(expr);
     if (!local) return;
     this.moved.add(local);
+    this.modes.set(expr, 'value');
     this.firstMove ??= { name: local.name, span };
   }
 
@@ -165,35 +174,31 @@ function bindsByValue(pattern: Pattern, annotations: Annotations, isCopy: (type:
 }
 
 /**
- * The captured variable an expression modifies, which the closure must borrow uniquely: an assignment to it or
+ * The place an expression modifies, which the closure must borrow uniquely: an assignment to it or
  * through it, `&mut` of it, a method taking `&mut self` on it or through a `&mut` it holds, `write!` to it, or a call
  * of an `FnMut` closure it holds.
  */
-function mutatedCapture(
-  expr: Expr,
-  annotations: Annotations,
-  capturedLocal: (expr: Expr) => LocalVar | undefined
-): LocalVar | undefined {
+function mutatedPlace(expr: Expr, annotations: Annotations): Expr | undefined {
   switch (expr.kind) {
     case 'assign':
     case 'compoundAssign': {
-      return capturedLocal(expr.target);
+      return expr.target;
     }
     case 'ref': {
-      return expr.mutable ? capturedLocal(expr.operand) : undefined;
+      return expr.mutable ? expr.operand : undefined;
     }
     case 'methodCall': {
       const method = annotations.methods.get(expr);
       const throughMut = method?.fn.selfMode === 'mutRef' && method.receiver.autoref === 'none';
-      return method?.receiver.autoref === 'mut' || throughMut ? capturedLocal(expr.receiver) : undefined;
+      return method?.receiver.autoref === 'mut' || throughMut ? expr.receiver : undefined;
     }
     case 'call': {
-      return annotations.callKinds.get(expr) === 'FnMut' ? capturedLocal(expr.callee) : undefined;
+      return annotations.callKinds.get(expr) === 'FnMut' ? expr.callee : undefined;
     }
     case 'macro': {
       if (expr.macro.kind !== 'write') return undefined;
       const { target } = expr.macro;
-      return capturedLocal(target.kind === 'ref' ? target.operand : target);
+      return target.kind === 'ref' ? target.operand : target;
     }
     default: {
       return undefined;

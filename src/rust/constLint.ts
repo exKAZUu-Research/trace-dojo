@@ -290,8 +290,9 @@ export class ConstLint {
         if (expr.kind === 'for') this.expr(expr.iterable);
         this.endBlock();
         if (expr.kind === 'while') {
-          this.condition(expr.cond);
+          const condition = this.condition(expr.cond);
           this.endBlock();
+          if (condition === false) return;
         }
         this.branch(() => this.block(expr.body));
         return;

@@ -104,7 +104,7 @@ export class SignatureInstance {
     this.bindOutputPart(fn.ret, result, false, elided, inputs.flatMap(regionsOf));
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- Applies the lifetime elision rules.
+  // code-gauge-allow functionCognitiveComplexity 23 -- Applies the lifetime elision rules.
   private bindOutputPart(
     declared: Type,
     actual: Layout,
@@ -134,7 +134,7 @@ export class SignatureInstance {
     }
     const recurse = (type: Type, layout: Layout, inv: boolean): void =>
       this.bindOutputPart(type, layout, inv, elided, inputRegions);
-    if (forEachPart(t, actual, invariant, recurse)) return;
+    if ((t.kind === 'dyn' && t.lifetime) || forEachPart(t, actual, invariant, recurse)) return;
     // An `impl Trait` result: it may borrow from any input.
     for (const a of inputRegions) for (const b of regionsOf(actual)) edge(a, b);
   }
@@ -170,6 +170,7 @@ export class SignatureInstance {
 /** The lifetimes a declared type names at its top level (a reference's, an ADT's) with the matching regions. */
 function ownRegions(t: Type, actual: Layout): [string | undefined, RVar][] {
   if (t.kind === 'ref' && actual.kind === 'ref') return [[t.lifetime, actual.region]];
+  if (t.kind === 'dyn' && t.lifetime && actual.kind === 'opaque') return [[t.lifetime, actual.region]];
   if (t.kind === 'adt' && actual.kind === 'adt' && actual.def === t.def) {
     const written = t.lifetimes ?? [];
     return actual.own.map((region, index) => [written[index], region]);
@@ -209,6 +210,7 @@ function forEachPart(
 /** Whether a declared type holds a reference or a type with lifetimes, which a closure's result may borrow through. */
 function namesLifetime(type: Type): boolean {
   if (type.kind === 'ref') return true;
+  if (type.kind === 'dyn') return type.lifetime !== undefined;
   if (type.kind === 'adt') return (type.lifetimes?.length ?? 0) > 0 || type.args.some(namesLifetime);
   if (type.kind === 'tuple') return type.elems.some(namesLifetime);
   if (type.kind === 'array' || type.kind === 'slice') return namesLifetime(type.elem);

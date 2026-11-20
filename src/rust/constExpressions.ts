@@ -1,5 +1,5 @@
 import type { Expr, PathAst } from './ast';
-import { FLOAT_LIMITS } from './floatLimits';
+import { FLOAT_LIMITS, floatConstant } from './floatLimits';
 import { lookupScalarConstant, lookupType, lowerType, type TypeScope } from './items';
 import { castValue, floatArith, intArith, wrap } from './ops';
 import { RustPanic } from './runtime';
@@ -293,8 +293,9 @@ function evaluateNamedScalar(
   const expected = declaredScalarType(def);
   const value = def.ast.value;
   if (!value) {
-    const limit = FLOAT_LIMITS[def.name];
-    return expected?.kind === 'float' && limit ? { type: expected, value: limit[expected.name] } : undefined;
+    if (expected?.kind !== 'float') return;
+    const constant = floatConstant(def.name, expected.name);
+    return constant === undefined ? undefined : { type: expected, value: constant };
   }
   state.visiting.add(def);
   try {

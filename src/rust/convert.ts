@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 522 -- One method per kind of item, type, and path.
+// code-gauge-allow-file fileNcss 552 -- One method per kind of item, type, and path.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type {
@@ -15,6 +15,7 @@ import type {
   PathAst,
   PathSegment,
   SelfParam,
+  Span,
   StructItem,
   TraitItem,
   TypeAst,
@@ -589,7 +590,8 @@ export class Converter extends ExpressionConverter {
   // -------------------------------------------------------------------------------------------------------------------
   // Types
 
-  // code-gauge-allow functionNcss 49 -- One case per kind of syntax node.
+  // code-gauge-allow functionCognitiveComplexity 16 -- Each syntax form determines which child nodes constitute its type.
+  // code-gauge-allow functionNcss 52 -- One case per kind of syntax node.
   type(node: Node): TypeAst {
     const span = this.span(node);
     switch (node.type) {
@@ -608,7 +610,9 @@ export class Converter extends ExpressionConverter {
         return node.children[0]?.type === '&&' ? { kind: 'ref', mutable: false, target: type, span } : type;
       }
       case 'tuple_type': {
-        return { kind: 'tuple', elems: node.namedChildren.filter((c) => !isComment(c)).map((c) => this.type(c)), span };
+        const elems = node.namedChildren.filter((child) => !isComment(child)).map((child) => this.type(child));
+        if (elems.length === 1 && !node.children.some((child) => child.type === ',')) return elems[0];
+        return { kind: 'tuple', elems, span };
       }
       case 'unit_type': {
         return { kind: 'tuple', elems: [], span };
@@ -620,12 +624,18 @@ export class Converter extends ExpressionConverter {
       }
       case 'dynamic_type': {
         const trait = this.field(node, 'trait');
-        return { kind: 'dyn', bounds: [this.bound(trait)], span };
+        return this.objectBoundType(
+          'dyn',
+          [trait, ...node.namedChildren.filter((child) => child.type === 'lifetime')],
+          span
+        );
       }
       case 'abstract_type': {
         const trait = this.field(node, 'trait');
-        if (trait.type === 'bounded_type') unavailable(span, `複数の境界の impl Trait（${node.text}）`);
-        return { kind: 'impl', bounds: [this.bound(trait)], span };
+        if (node.namedChildren.some((child) => child.type === 'type_parameters')) {
+          return unavailable(span, "for<'a> の境界");
+        }
+        return this.objectBoundType('impl', [trait], span);
       }
       case 'function_type': {
         const bound = this.bound(node);
@@ -640,7 +650,7 @@ export class Converter extends ExpressionConverter {
         return unavailable(span, '生ポインタ（*const T・*mut T）');
       }
       case 'bounded_type': {
-        return unavailable(span, `境界を足した型（${node.text}）`);
+        return this.boundedType(node, span);
       }
       case 'bracketed_type':
       case 'qualified_type': {
@@ -650,6 +660,36 @@ export class Converter extends ExpressionConverter {
         return unavailable(span, `型の書き方（${node.text}）`);
       }
     }
+  }
+
+  private boundedType(node: Node, span: Span): TypeAst {
+    const [head, ...rest] = node.namedChildren.filter((child) => !isComment(child));
+    if (head?.type === 'abstract_type' || head?.type === 'dynamic_type' || head?.type === 'bounded_type') {
+      const base = this.type(head);
+      if (base.kind === 'impl' || base.kind === 'dyn') return this.objectBoundType(base.kind, rest, span, base);
+    }
+    return syntaxError(span, '+ を含む impl や dyn を参照型の内側に書くときは、括弧で囲んでください。');
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 16 -- Flattens bounds while separating trait and lifetime nodes.
+  private objectBoundType(
+    kind: 'impl' | 'dyn',
+    nodes: Node[],
+    span: Span,
+    base?: Extract<TypeAst, { kind: 'impl' | 'dyn' }>
+  ): TypeAst {
+    const bounds = [...(base?.bounds ?? [])];
+    const lifetimes = base?.kind === 'dyn' && base.lifetime ? [base.lifetime] : [];
+    const visit = (node: Node): void => {
+      if (node.type === 'lifetime') lifetimes.push(node.text);
+      else if (node.type === 'bounded_type') {
+        for (const child of node.namedChildren) if (!isComment(child)) visit(child);
+      } else bounds.push(this.bound(node));
+    };
+    for (const node of nodes) visit(node);
+    if (kind === 'impl') return { kind, bounds, span };
+    if (lifetimes.length > 1) syntaxError(span, 'dyn の型のライフタイムは 1 個だけ書いてください。');
+    return { kind, bounds, span, lifetime: lifetimes[0] };
   }
 
   /** A path to a type or trait, with the type arguments of its last segment. */

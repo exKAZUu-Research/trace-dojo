@@ -23,7 +23,7 @@ export type Type =
   | { kind: 'var'; v: TypeVar }
   | { kind: 'fn'; params: Type[]; ret: Type; item?: FnDef | VariantDef }
   | { kind: 'closure'; closure: ClosureType }
-  | { kind: 'dyn'; trait: TraitRef; objectLifetime?: 'static' | 'reference' }
+  | { kind: 'dyn'; trait: TraitRef; objectLifetime?: 'static' | 'reference'; lifetime?: string }
   | { kind: 'opaque'; opaque: OpaqueType };
 
 export interface TypeVar {

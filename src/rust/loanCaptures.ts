@@ -10,21 +10,59 @@ interface Projection {
   type: Type;
 }
 
-// code-gauge-allow functionCognitiveComplexity 27 -- Tracking projections uses the same local and checked call information for the whole walk.
+export type CaptureMode = 'ref' | 'mut' | 'value';
+const CAPTURE_STRENGTH: Record<CaptureMode, number> = { ref: 0, mut: 1, value: 2 };
+
 export function capturedPlaces(annotations: Annotations, body: Expr, local: LocalVar): Projection[] {
   const places: Projection[] = [];
-  visit(body);
+  forEachCapture(annotations, body, local, (_, projection) => places.push(projection));
   if (places.length === 0 || places.some(({ proj }) => proj.length === 0)) return [{ proj: [], type: local.type }];
   return places.filter(
-    ({ proj }) =>
-      !places.some(({ proj: other }) => other.length < proj.length && other.every((part, i) => proj[i] === part))
+    ({ proj }) => !places.some(({ proj: other }) => other.length < proj.length && covers(other, proj))
   );
+}
+
+export function captureLayout(
+  annotations: Annotations,
+  body: Expr,
+  local: LocalVar,
+  modeOf: (place: Expr) => CaptureMode,
+  fallback: CaptureMode
+): Type[] {
+  const observations: (Projection & { mode: CaptureMode })[] = [];
+  forEachCapture(annotations, body, local, (place, { proj, type }) => {
+    const mode = modeOf(place);
+    const boundary = proj.findIndex((part) => part === '[]' || (mode === 'value' && (part === '#' || part === '*')));
+    const path = boundary === -1 ? proj : proj.slice(0, boundary);
+    observations.push({ proj: path, type: boundary === -1 ? type : projectionPrefixType(local.type, path), mode });
+  });
+  if (observations.length === 0) observations.push({ proj: [], type: local.type, mode: fallback });
+  const captures: typeof observations = [];
+  for (const observation of observations.toSorted((a, b) => a.proj.length - b.proj.length)) {
+    const prior = captures.find(({ proj }) => covers(proj, observation.proj));
+    if (!prior) captures.push(observation);
+    else if (CAPTURE_STRENGTH[observation.mode] > CAPTURE_STRENGTH[prior.mode]) prior.mode = observation.mode;
+  }
+  return captures.map(({ mode, type }) => (mode === 'value' ? type : ref(type, mode === 'mut')));
+}
+
+function covers(prefix: string[], path: string[]): boolean {
+  return prefix.length <= path.length && prefix.every((part, index) => path[index] === part);
+}
+
+function forEachCapture(
+  annotations: Annotations,
+  body: Expr,
+  local: LocalVar,
+  capture: (expr: Expr, projection: Projection) => void
+): void {
+  visit(body);
 
   function visit(expr: Expr): void {
     if (expr.kind === 'methodCall') {
       const projection = receiverProjection(annotations, expr, local);
       if (projection) {
-        places.push(projection);
+        capture(expr.receiver, projection);
         for (const arg of expr.args) visit(arg);
         return;
       }
@@ -35,33 +73,9 @@ export function capturedPlaces(annotations: Annotations, body: Expr, local: Loca
       return;
     }
     const reborrows = annotations.reborrows.has(expr);
-    places.push({ proj: reborrows ? [...proj, '*'] : proj, type: expr.ty ?? local.type });
+    capture(expr, { proj: reborrows ? [...proj, '*'] : proj, type: expr.ty ?? local.type });
     if (expr.kind === 'index') visit(expr.index);
   }
-}
-
-export function captureLayout(
-  annotations: Annotations,
-  body: Expr,
-  local: LocalVar,
-  mode: 'ref' | 'mut' | 'value'
-): Type[] {
-  const captures = new Map<string, { path: string[]; type: Type }>();
-  for (const { proj, type } of capturedPlaces(annotations, body, local)) {
-    const boundary = proj.findIndex((part) => part === '[]' || (mode === 'value' && (part === '#' || part === '*')));
-    if (boundary === -1) captures.set(JSON.stringify(proj), { path: proj, type });
-    else {
-      const prefix = proj.slice(0, boundary);
-      captures.set(JSON.stringify(prefix), { path: prefix, type: projectionPrefixType(local.type, prefix) });
-    }
-  }
-  const paths = [...captures.values()];
-  return paths
-    .filter(
-      ({ path }) =>
-        !paths.some(({ path: other }) => other.length < path.length && other.every((part, i) => part === path[i]))
-    )
-    .map(({ type }) => (mode === 'value' ? type : ref(type, mode === 'mut')));
 }
 
 function projectionPrefixType(base: Type, path: string[]): Type {

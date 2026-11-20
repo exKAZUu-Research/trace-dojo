@@ -1,6 +1,6 @@
 // code-gauge-allow-file fileNcss 478 -- One native per method of the standard library.
 import { debugFloat, decimalToF32 } from '../floatFormat';
-import { FLOAT_LIMITS } from '../floatLimits';
+import { F64_CONSTS, FLOAT_LIMITS, floatConstant } from '../floatLimits';
 import { normalize } from '../infer';
 import { bitsOf, intArith, overflow, wrap } from '../ops';
 import { intoConversion } from '../traitConversions';
@@ -735,32 +735,9 @@ for (const name of INT_NAMES) {
 }
 define(natives);
 
-/** `std::f64::consts`, rounded from the literals that std writes for them where `Math` does not round alike. */
-const F64_CONSTS: Record<string, number> = {
-  PI: Math.PI,
-  TAU: 2 * Math.PI,
-  E: Math.E,
-  SQRT_2: Math.SQRT2,
-  LN_2: Math.LN2,
-  LN_10: Math.LN10,
-  FRAC_PI_2: Math.PI / 2,
-  FRAC_PI_3: Number('1.04719755119659774615421446109316763'),
-  FRAC_PI_4: Math.PI / 4,
-  FRAC_PI_6: Number('0.52359877559829887307710723054658381'),
-  FRAC_PI_8: Number('0.39269908169872415480783042290993786'),
-  FRAC_1_PI: Number('0.318309886183790671537767526745028724'),
-  FRAC_2_PI: Number('0.636619772367581343075535053490057448'),
-  FRAC_2_SQRT_PI: Number('1.12837916709551257389615890312154517'),
-  FRAC_1_SQRT_2: Number('0.707106781186547524400844362104849039'),
-  LOG2_E: Number('1.44269504088896340735992468100189214'),
-  LOG10_E: Number('0.434294481903251827651128918916605082'),
-  LOG2_10: Number('3.32192809488736234787031942948939018'),
-  LOG10_2: Number('0.301029995663981195213738894724493027'),
-};
-
 const consts: Record<string, (args: Value[], ctx: NativeContext) => Value> = {};
-for (const [name, value] of Object.entries(F64_CONSTS)) {
-  consts[`const:${name}`] = (_args, ctx) => (isF32Type(ctx.typeArgs[0]) ? Math.fround(value) : value);
+for (const name of Object.keys(F64_CONSTS)) {
+  consts[`const:${name}`] = (_args, ctx) => floatConstant(name, isF32Type(ctx.typeArgs[0]) ? 'f32' : 'f64');
 }
 for (const [name, value] of Object.entries(FLOAT_LIMITS)) {
   // The modules `std::i32` and its kin, which predate the associated constants, keep `MAX` and `MIN` too.
