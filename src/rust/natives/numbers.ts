@@ -121,11 +121,11 @@ export function parseFloatText(ctx: NativeContext, text: string, f32: boolean): 
   const match = /^([+-]?)(?:(inf|infinity|nan)|(\d+\.?\d*(?:[eE][+-]?\d+)?|\.\d+(?:[eE][+-]?\d+)?))$/i.exec(text);
   if (!match) return fail('Invalid');
   const sign = match[1] === '-' ? -1 : 1;
-  let value: number;
-  if (match[2]) value = match[2].toLowerCase() === 'nan' ? Number.NaN : sign * Number.POSITIVE_INFINITY;
-  else if (f32) return ok(ctx, sign * decimalToF32(match[3]));
-  else value = sign * Number(match[3]);
-  return ok(ctx, f32 ? Math.fround(value) : value);
+  if (match[2]) {
+    const special = match[2].toLowerCase() === 'nan' ? Number.NaN : Number.POSITIVE_INFINITY;
+    return ok(ctx, sign < 0 ? -special : special);
+  }
+  return ok(ctx, sign * (f32 ? decimalToF32(match[3]) : Number(match[3])));
 }
 
 function float(value: Value): number {

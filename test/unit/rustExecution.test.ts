@@ -44,6 +44,9 @@ test('values print as rustc prints them', () => {
     let negative32 = f32::NAN.copysign(-1.0);
     println!("{} {} {} {}", positive.is_sign_positive(), negative.is_sign_negative(), 1.0_f64.copysign(negative), 1.0_f32.copysign(negative32));
     println!("{} {} {}", negative32.is_sign_negative(), negative32.copysign(1.0).is_sign_positive(), (-0.0_f64).is_sign_negative());
+    let parsed = "-NaN".parse::<f64>().unwrap();
+    let parsed32 = "-nAn".parse::<f32>().unwrap();
+    println!("{} {} {} {}", parsed.is_sign_negative(), 1.0_f64.copysign(parsed), parsed32.is_sign_negative(), 1.0_f32.copysign(parsed32));
     println!("{:?} {} {}", 0.1f32 + 0.2f32, 0.1 + 0.2, 123456789.0f32);
     println!("[{:>6}] [{:<4}] [{:^7}] [{:05}] [{:+}] [{:#x}] [{:#010b}] [{:e}]", 42, 7, "ab", -42, 5, 255, 5, 1234.5);
     println!("{:?} {:5?} {:?}", (1, "a", 'c', Some(2.5)), Some(1), "q\"\n");
@@ -58,6 +61,7 @@ test('values print as rustc prints them', () => {
 0 inf 1 inf
 true true -1 -1
 true true true
+true -1 true -1
 0.3 0.30000000000000004 123456790
 [    42] [7   ] [  ab   ] [-0042] [+5] [0xff] [0b00000101] [1.2345e3]
 (1, "a", 'c', Some(2.5)) Some(    1) "q\\"\\n"
