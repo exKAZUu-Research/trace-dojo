@@ -1,0 +1,10 @@
+(1,63): error TS2536: Type '"length"' cannot be used to index type 'NonNullable<V[K]>'.
+(2,63): error TS2536: Type '"length"' cannot be used to index type 'V[K] & {}'.
+(3,63): error TS2536: Type '"length"' cannot be used to index type '{ length: number; } | V[K]'.
+(5,3): error TS2536: Type '"length"' cannot be used to index type 'Z extends true ? V[K] : { length: number; }'.
+(6,63): error TS2536: Type '"length"' cannot be used to index type '{ length: number; } | V[K]'.
+(7,63): error TS2536: Type '"length"' cannot be used to index type 'V[K] & { size: number; }'.
+(10,38): error TS2536: Type '"other"' cannot be used to index type 'T[K]'.
+(10,38): error TS2536: Type '"text"' cannot be used to index type 'T[K]["other"]'.
+(12,38): error TS2536: Type '"missing"' cannot be used to index type 'T[K]["a"]'.
+(14,36): error TS2536: Type 'T[P]["selected"]' cannot be used to index type 'V["a"]'.

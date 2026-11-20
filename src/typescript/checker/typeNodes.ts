@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 699 -- Resolves every kind of type syntax a program writes, each needing its own rule.
+// code-gauge-allow-file fileNcss 700 -- Resolves every kind of type syntax a program writes, each needing its own rule.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
@@ -6,7 +6,7 @@ import { unsupportedMessage } from '../unsupported';
 import type { Checker, Mapper, UnionAlias } from './checker';
 import { EagerTypeConstraints } from './eagerTypeConstraints';
 import { isGenericObjectOrIndexType } from './genericTypes';
-import { IndexedAccessKeys } from './indexedAccessKeys';
+import { IndexedAccessKeys, narrowIndexedOperands } from './indexedAccessKeys';
 import { addIndexInfo, isPatternKey } from './indexInfos';
 import { InterfaceBases } from './interfaceBases';
 import { RecursiveAliases } from './recursiveAliases';
@@ -24,7 +24,6 @@ import {
   emptyStructure,
   errorType,
   falseType,
-  type IndexedAccessType,
   type IndexInfo,
   intersectionOf,
   isAnyLike,
@@ -274,8 +273,10 @@ export class TypeNodes {
     const [object, index] = named(node);
     const objectType = this.typeFromNode(object);
     const indexType = this.typeFromNode(index);
+    const result = this.c.typeOperators.indexedAccess(objectType, indexType, index);
     if (
-      (objectType.kind === 'typeParameter' || objectType.kind === 'indexedAccess') &&
+      result !== errorType &&
+      (objectType.kind === 'typeParameter' || result.kind === 'indexedAccess') &&
       this.indexedAccessKeys.isInvalid(objectType, indexType, this.conditionalExtendsTypes(node))
     ) {
       this.c.error(
@@ -284,7 +285,7 @@ export class TypeNodes {
       );
       return errorType;
     }
-    return this.c.typeOperators.indexedAccess(objectType, indexType, index);
+    return result;
   }
 
   /**
@@ -299,24 +300,25 @@ export class TypeNodes {
 
   /** Compute the branch bounds once when checking the keys of a generic indexed access. */
   private conditionalExtendsTypes(node: TreeNode): (type: Type) => Type[] {
-    let mapper: Mapper | undefined;
+    let narrow: ((type: Type) => Type) | undefined;
     return (type) => {
-      mapper ??= this.conditionalMapper(node, false);
-      if (type.kind === 'indexedAccess') return this.indexedAccessNarrowings(node, type, mapper);
-      const bound = mapper.get(type.id);
-      return bound ? [bound] : [];
+      narrow ??= this.conditionalIndexNarrowing(node);
+      const bound = narrow(type);
+      return bound === type ? [] : [bound];
     };
   }
 
-  private indexedAccessNarrowings(node: TreeNode, access: IndexedAccessType, mapper: Mapper): Type[] {
-    const narrowed = this.c.instantiate(access, mapper);
-    const bounds = narrowed === access ? [] : [narrowed];
+  private conditionalIndexNarrowing(node: TreeNode): (type: Type) => Type {
+    const checked: [Type, Type][] = [];
     for (const [check, extendsNode] of this.conditionalTrueChecks(node)) {
-      if (check.kind !== 'indexedAccess' || !this.c.relations.identical(check, access)) continue;
+      if (check.kind !== 'indexedAccess') continue;
       const bound = this.conditionalBound(extendsNode);
-      if (bound) bounds.push(this.c.instantiate(bound, mapper));
+      if (bound) checked.push([check, bound]);
     }
-    return bounds;
+    const parameters = this.conditionalMapper(node, false);
+    return checked.length > 0 || parameters.size > 0
+      ? narrowIndexedOperands(this.c, parameters, checked)
+      : (type) => type;
   }
 
   private *conditionalTrueChecks(node: TreeNode): IterableIterator<[Type, TreeNode]> {

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 588 -- Resolves related type operators sharing generic parameters and type construction.
+// code-gauge-allow-file fileNcss 600 -- Resolves related type operators sharing generic parameters and type construction.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker, Mapper } from './checker';
@@ -464,6 +464,7 @@ export class TypeOperators {
       if (type.kind === 'intersection')
         return unionOf(type.types.map((member) => this.guaranteedKeys(member, visiting)));
       if (type.kind === 'object' && type.tuple) return this.memberKeys(type.resolve());
+      if (type.kind === 'object' && type.mapped) return this.guaranteedMappedKeys(type.mapped, visiting);
       const constraint = this.c.baseConstraint(type);
       if (type.kind === 'typeParameter' && isAnyLike(constraint)) return neverType;
       if (constraint !== type) return this.guaranteedKeys(constraint, visiting);
@@ -472,6 +473,29 @@ export class TypeOperators {
     } finally {
       visiting.delete(type);
     }
+  }
+
+  private guaranteedMappedKeys(info: MappedInfo, visiting: Set<Type>): Type {
+    const lowerBound = this.lowerBoundOfKeyType(info.constraint, visiting);
+    const { nameType, typeParameter } = info;
+    if (!nameType) return lowerBound;
+    return unionOf(
+      [...typeMembers(info.constraint), ...typeMembers(lowerBound)].map((key) =>
+        this.c.instantiate(nameType, new Map([[typeParameter.id, key]]))
+      )
+    );
+  }
+
+  private lowerBoundOfKeyType(type: Type, visiting: Set<Type>): Type {
+    this.c.budget.spend();
+    if (type.kind === 'keyof') return this.guaranteedKeys(type.type, visiting);
+    if (type.kind === 'union') return unionOf(type.types.map((member) => this.lowerBoundOfKeyType(member, visiting)));
+    if (type.kind === 'intersection')
+      return intersectionOf(
+        type.types.map((member) => this.lowerBoundOfKeyType(member, visiting)),
+        this.c
+      );
+    return type;
   }
 
   private memberKeys(structure: Structure): Type {

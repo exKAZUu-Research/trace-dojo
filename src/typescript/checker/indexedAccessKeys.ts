@@ -1,7 +1,8 @@
-import type { Checker } from './checker';
+import type { Checker, Mapper } from './checker';
 import { applicablePatternIndexes, isNumericStringKey } from './indexInfos';
 import {
   type ConditionalType,
+  errorType,
   type IndexedAccessType,
   intersectionOf,
   isAnyLike,
@@ -10,6 +11,7 @@ import {
   type Structure,
   type Type,
   type TypeParameter,
+  unionOf,
   unknownType,
 } from './types';
 
@@ -24,6 +26,60 @@ interface KeyContext {
   visited: Set<number>;
 }
 
+export function narrowIndexedOperands(
+  c: Checker,
+  parameters: Mapper,
+  checked: readonly (readonly [Type, Type])[]
+): (type: Type) => Type {
+  const cache = new Map<Type, Type>();
+  const narrow = (type: Type): Type => {
+    const existing = cache.get(type);
+    if (existing) return existing;
+    c.budget.spend();
+    cache.set(type, type);
+    const selected = narrowOperand(c, type, narrow, parameters);
+    const bounds = checked.flatMap(([test, bound]) =>
+      test.kind === type.kind && c.relations.identical(test, type) ? [c.instantiate(bound, parameters)] : []
+    );
+    if (selected !== type) bounds.push(selected);
+    const narrowed = bounds.length > 0 ? intersectionOf(bounds, c) : type;
+    cache.set(type, narrowed);
+    return narrowed;
+  };
+  return narrow;
+}
+
+function narrowOperand(c: Checker, type: Type, narrow: (type: Type) => Type, parameters: Mapper): Type {
+  switch (type.kind) {
+    case 'typeParameter': {
+      return parameters.get(type.id) ?? type;
+    }
+    case 'indexedAccess': {
+      const object = narrow(type.objectType);
+      const key = narrow(type.indexType);
+      if (object === type.objectType && key === type.indexType) return type;
+      const selected = c.typeOperators.indexedAccess(object, key);
+      return selected === errorType ? type : selected;
+    }
+    case 'conditional': {
+      const trueType = type.trueType;
+      const falseType = type.falseType;
+      const yes = narrow(trueType);
+      const no = narrow(falseType);
+      return yes === trueType && no === falseType ? type : unionOf([yes, no]);
+    }
+    case 'union':
+    case 'intersection': {
+      const members = type.types.map(narrow);
+      if (members.every((member, index) => member === type.types[index])) return type;
+      return type.kind === 'union' ? unionOf(members) : intersectionOf(members, c);
+    }
+    default: {
+      return type;
+    }
+  }
+}
+
 /** Decides which keys may index a type parameter, as TypeScript's TS2536 does for an indexed access type. */
 export class IndexedAccessKeys {
   constructor(private readonly c: Checker) {}
@@ -33,6 +89,12 @@ export class IndexedAccessKeys {
    * is as unconstrained as `T`, and the types conditional types narrow it to.
    */
   isInvalid(object: Type, key: Type, extendsTypes: ExtendsTypes): boolean {
+    if (
+      object.kind === 'object' &&
+      object.mapped &&
+      this.c.relations.isAssignable(key, this.c.typeOperators.keyofType(object))
+    )
+      return false;
     const context = {
       object,
       constraints:
@@ -229,9 +291,7 @@ export class IndexedAccessKeys {
     }
     return (
       this.structureHasKey(type, key, written) ||
-      (!!type.mapped &&
-        !type.mapped.nameType &&
-        this.c.relations.isAssignable(key, this.c.typeOperators.guaranteedKeys(type)))
+      (!!type.mapped && this.c.relations.isAssignable(key, this.c.typeOperators.guaranteedKeys(type)))
     );
   }
 
