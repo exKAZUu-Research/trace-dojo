@@ -1,7 +1,7 @@
 // code-gauge-allow-file fileNcss 999 -- Holds object ownership, reachability and release with their shared helpers.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { type CleanupException, withCleanupExceptions, withPendingException } from './errors';
-import { deferredHandleOrder, recordGcRoot } from './gcRoots';
+import { cachedObjectFree, deferredHandleOrder, objectFree, recordGcRoot } from './gcRoots';
 import { ExitSignal, type Frame, PhpThrow, type Runtime } from './runtime';
 import {
   arrayHolderCount,
@@ -98,7 +98,8 @@ function collectGarbageNow(runtime: Runtime, cycles: boolean, stopOnException: b
   const collected = freed.length + arrayStorage.size;
   const destructible = freed.filter((object) => !object.destructed && object.cls.findMethod('__destruct'));
   if (destructible.length === 0 || runtime.shuttingDown) {
-    finishCollectedObjects(runtime, handles, arrayStorage);
+    const ordered = orderCollectedObjects(runtime, cycles, owners, freed, handles, reachedArrays);
+    finishCollectedObjects(runtime, ordered, arrayStorage);
     return collected;
   }
   return collectAfterDestruction(
@@ -171,6 +172,28 @@ function finishCollectedObjects(runtime: Runtime, objects: PhpObject[], arraySto
   finishArrayCollection(runtime, arrayStorage);
   releaseDropped(runtime, children, true);
   retainTurtles(runtime, mark(runtime));
+}
+
+function orderCollectedObjects(
+  runtime: Runtime,
+  cycles: boolean,
+  roots: PhpObject[],
+  freed: PhpObject[],
+  handles: PhpObject[],
+  reachedArrays: Set<PhpArray>
+): PhpObject[] {
+  if (!cycles || runtime.shuttingDown) return handles;
+  const graph = new CollectionGraph(
+    freed,
+    runtime,
+    (value) => !(value instanceof PhpArray && reachedArrays.has(value))
+  );
+  return deferredHandleOrder<CollectionNode, PhpObject>(
+    roots,
+    new Set(freed),
+    (node): node is PhpObject => node instanceof PhpObject,
+    (node) => graph.children(node)
+  );
 }
 
 function retainCollectionReceiver(runtime: Runtime, object: PhpObject): void {
@@ -730,7 +753,7 @@ class DetachedArrays {
     if (!(node instanceof Ref || node instanceof PhpArray || node instanceof PhpObject)) return;
     if (node instanceof PhpObject && activeReleaseObjects.has(node)) return;
     if (node instanceof PhpArray && !node.composite) return;
-    if (node instanceof PhpArray && objectFreeArrays.get(node) === node.mutationVersion) {
+    if (node instanceof PhpArray && cachedObjectFree(node) === true) {
       if (!ownedReachable(node, this.roots, this.runtime, this.unreachable, releaseSequence)) this.arrays.add(node);
       return;
     }
@@ -1140,30 +1163,6 @@ function persistentNativeRoots(runtime: Runtime): unknown[] {
     ...runtime.replacedExceptionHandlers,
     ...runtime.errorHandlers.map(({ handler }) => handler),
   ];
-}
-
-const objectFreeArrays = new WeakMap<PhpArray, number>();
-
-// code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function objectFree(array: PhpArray, runtime: Runtime): boolean {
-  if (objectFreeArrays.get(array) === array.mutationVersion) return true;
-  const pending = [array];
-  const visited = new Set<PhpArray>();
-  while (pending.length > 0) {
-    const current = pending.pop() as PhpArray;
-    if (visited.has(current) || objectFreeArrays.get(current) === current.mutationVersion) continue;
-    visited.add(current);
-    runtime.spend(Math.ceil(current.size / 64));
-    for (const slot of current.map.ownedSlots()) {
-      if (slot instanceof Ref || slot instanceof PhpObject) return false;
-      if (slot instanceof PhpArray && slot.composite) pending.push(slot);
-    }
-  }
-  for (const item of visited) {
-    objectFreeArrays.set(item, item.mutationVersion);
-    for (const slot of item.map.ownedSlots()) if (slot instanceof PhpArray) slot.trackCachedParent(item);
-  }
-  return true;
 }
 
 // code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.

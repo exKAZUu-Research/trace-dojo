@@ -82,7 +82,7 @@ export function exportExpr(e: Expr, priority = 0, depth = 0): string {
       return `$${exportVariableName(e.name, depth)}`;
     }
     case 'interp': {
-      return `"${e.parts.map((part) => exportEncapsedPart(part, depth)).join('')}"`;
+      return `"${e.parts.map((part, index) => exportEncapsedPart(part, e.parts[index + 1], depth)).join('')}"`;
     }
     case 'arrow': {
       const text = exportFunctionExpression(e, depth);
@@ -247,15 +247,51 @@ function exportVariableName(name: Expr, depth: number): string {
   return `{${exportExpr(name, 0, depth)}}`;
 }
 
-function exportEncapsedPart(part: string | Expr, depth: number): string {
-  if (typeof part === 'string') {
-    return part.replaceAll(/[\r\n\t\v\f"\\$]/g, (character) => {
-      const escapes: Record<string, string> = { '\r': 'r', '\n': 'n', '\t': 't', '\v': 'v', '\f': 'f' };
-      return `\\${escapes[character] ?? character}`;
-    });
-  }
+const DOUBLE_QUOTED_ESCAPES: Record<string, string> = {
+  '\r': 'r',
+  '\n': 'n',
+  '\t': 't',
+  '\v': 'v',
+  '\f': 'f',
+  '\u001B': 'e',
+  '"': '"',
+  '\\': '\\',
+  $: '$',
+};
+
+function exportEncapsedPart(part: string | Expr, next: string | Expr | undefined, depth: number): string {
+  if (typeof part === 'string') return exportDoubleQuoted(part);
   const text = exportExpr(part, 0, depth);
-  return part.k === 'var' ? text : `{${text}}`;
+  if (part.k !== 'var') return `{${text}}`;
+  return typeof next === 'string' && needsInterpolationBraces(next) ? `{${text}}` : text;
+}
+
+function needsInterpolationBraces(next: string): boolean {
+  const code = next.codePointAt(0);
+  if (code === undefined) return false;
+  return code >= 0x7f || /^[A-Za-z0-9_[]/.test(next);
+}
+
+function exportDoubleQuoted(value: string): string {
+  let result = '';
+  for (let index = 0; index < value.length; index++) {
+    const character = value[index];
+    const escaped = DOUBLE_QUOTED_ESCAPES[character];
+    if (escaped !== undefined) {
+      result += `\\${escaped}`;
+    } else {
+      const code = character.codePointAt(0) as number;
+      result += code < 0x20 ? `\\${code.toString(8).padStart(3, '0')}` : character;
+    }
+  }
+  return result;
+}
+
+function hasControlByte(value: string): boolean {
+  for (let index = 0; index < value.length; index++) {
+    if ((value.codePointAt(index) as number) < 0x20) return true;
+  }
+  return false;
 }
 
 function exportFunctionExpression(expression: Extract<Expr, { k: 'arrow' | 'closure' }>, depth: number): string {
@@ -535,5 +571,6 @@ function exportLiteral(value: null | boolean | bigint | number | string): string
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   if (typeof value === 'bigint') return value.toString();
   if (typeof value === 'number') return formatFloatRepr(value, 'E', true);
+  if (hasControlByte(value)) return `"${exportDoubleQuoted(value)}"`;
   return `'${value.replaceAll(/['\\]/g, String.raw`\$&`)}'`;
 }

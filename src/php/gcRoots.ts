@@ -1,5 +1,5 @@
 import type { Runtime } from './runtime';
-import { PhpArray, PhpObject } from './values';
+import { PhpArray, PhpObject, Ref } from './values';
 
 export const GC_THRESHOLD_DEFAULT = 10_001;
 const GC_THRESHOLD_STEP = 10_000;
@@ -56,26 +56,45 @@ export function deferredHandleOrder<N extends object, O extends N>(
   for (let index = roots.length - 1; index >= 0; index--) pendingRoots.push(roots[index]);
   while (pendingRoots.length > 0) {
     const start = pendingRoots.pop() as O;
-    if (!state.freed.has(start)) pendingRoots.push(...releaseDeferredRoot(start, state));
+    if (!state.freed.has(start)) pendingRoots.push(...releaseDeferredRoot(start, state).toReversed());
   }
   return state.order;
 }
 
 function releaseDeferredRoot<N extends object, O extends N>(start: O, state: DeferredState<N, O>): O[] {
   const nested: O[] = [];
-  const stack: { node: N; finish: boolean }[] = [{ node: start, finish: false }];
+  state.freed.add(start);
+  const stack: { node: N; children: N[]; index: number }[] = [
+    { node: start, children: state.children(start), index: 0 },
+  ];
   while (stack.length > 0) {
-    const { node, finish } = stack.pop() as { node: N; finish: boolean };
-    if (finish) {
-      if (state.isObject(node)) state.order.push(node);
+    const frame = stack.at(-1) as { node: N; children: N[]; index: number };
+    const child = nextDeferredChild(frame, state, nested);
+    if (child !== undefined) {
+      state.freed.add(child);
+      stack.push({ node: child, children: state.children(child), index: 0 });
       continue;
     }
-    if (state.freed.has(node)) continue;
-    state.freed.add(node);
-    if (state.isObject(node)) stack.push({ node, finish: true });
-    enqueueReleasedChildren(node, state, stack, nested);
+    stack.pop();
+    if (state.isObject(frame.node)) state.order.push(frame.node);
   }
   return nested;
+}
+
+function nextDeferredChild<N extends object, O extends N>(
+  frame: { node: N; children: N[]; index: number },
+  state: DeferredState<N, O>,
+  nested: O[]
+): N | undefined {
+  while (frame.index < frame.children.length) {
+    const child = frame.children[frame.index++];
+    if (state.freed.has(child) || (state.isObject(child) && !state.protectedObjects.has(child))) continue;
+    const remaining = (state.inDegree.get(child) ?? 1) - 1;
+    state.inDegree.set(child, remaining);
+    if (remaining <= 0) return child;
+    if (state.isObject(child)) nested.push(child);
+  }
+  return undefined;
 }
 
 function countInDegrees<N extends object, O extends N>(
@@ -99,20 +118,59 @@ function countInDegrees<N extends object, O extends N>(
   return inDegree;
 }
 
-function enqueueReleasedChildren<N extends object, O extends N>(
-  node: N,
-  state: DeferredState<N, O>,
-  stack: { node: N; finish: boolean }[],
-  nested: O[]
-): void {
-  const next = state.children(node);
-  for (let index = next.length - 1; index >= 0; index--) {
-    const child = next[index];
-    if (state.freed.has(child) || (state.isObject(child) && !state.protectedObjects.has(child))) continue;
-    const remaining = (state.inDegree.get(child) ?? 1) - 1;
-    state.inDegree.set(child, remaining);
-    if (remaining <= 0) stack.push({ node: child, finish: false });
-    else if (state.isObject(child)) nested.push(child);
+const objectFreeArrays = new WeakMap<PhpArray, { version: number; free: boolean }>();
+
+export function cachedObjectFree(array: PhpArray): boolean | undefined {
+  const entry = objectFreeArrays.get(array);
+  return entry?.version === array.mutationVersion ? entry.free : undefined;
+}
+
+export function objectFree(array: PhpArray, runtime: Runtime): boolean {
+  const cached = cachedObjectFree(array);
+  if (cached !== undefined) return cached;
+  const pending = [array];
+  const visited = new Set<PhpArray>();
+  const counter = { scanned: 0 };
+  while (pending.length > 0) {
+    const current = pending.pop() as PhpArray;
+    if (visited.has(current)) continue;
+    const currentCached = cachedObjectFree(current);
+    if (currentCached === true) continue;
+    if (currentCached === false) return markHasObject(array, current);
+    visited.add(current);
+    if (!scanObjectFreeSlots(current, pending, runtime, counter)) return markHasObject(array, current);
+  }
+  cacheObjectFree(visited);
+  return true;
+}
+
+function scanObjectFreeSlots(
+  current: PhpArray,
+  pending: PhpArray[],
+  runtime: Runtime,
+  counter: { scanned: number }
+): boolean {
+  for (const slot of current.map.ownedSlots()) {
+    if (++counter.scanned % 64 === 0) runtime.spend();
+    if (slot instanceof Ref || slot instanceof PhpObject) return false;
+    if (slot instanceof PhpArray && slot.composite) {
+      slot.trackCachedParent(current);
+      pending.push(slot);
+    }
+  }
+  return true;
+}
+
+function markHasObject(root: PhpArray, current: PhpArray): false {
+  objectFreeArrays.set(current, { version: current.mutationVersion, free: false });
+  objectFreeArrays.set(root, { version: root.mutationVersion, free: false });
+  return false;
+}
+
+function cacheObjectFree(visited: Set<PhpArray>): void {
+  for (const item of visited) {
+    objectFreeArrays.set(item, { version: item.mutationVersion, free: true });
+    for (const slot of item.map.ownedSlots()) if (slot instanceof PhpArray) slot.trackCachedParent(item);
   }
 }
 

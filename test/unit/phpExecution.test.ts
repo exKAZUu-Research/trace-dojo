@@ -4011,4 +4011,77 @@ echo json_encode($x), ':', json_encode($ao->getArrayCopy());
     kind: 'executed',
     stdout: '{"x":[1]}|getter;Cannot assign by reference to an array dimension of an object;[]|[1]:{"k":[1]}',
   });
+
+  for (const [assignment, expected] of [
+    ['$n2->a = [$n1, $n3]; $n2->b = $n2; $n3->next = $n4;', '|D2;5|4,1,2,3,'],
+    ['$n2->a = [$n3, $n1]; $n2->b = $n2; $n3->next = $n4;', '|D2;5|1,4,2,3,'],
+  ]) {
+    expect(
+      run(`<?php
+class D { public $a; public $b; function __construct(public $name) {} function __destruct() { echo "D" . $this->name . ";"; } }
+class P { public $self; public $next; }
+$n1 = new P; $n2 = new D(2); $n3 = new P; $n4 = new P;
+$n1->self = $n1; $n4->self = $n4;
+${assignment}
+unset($n1, $n2, $n3, $n4);
+echo "|", gc_collect_cycles(), "|";
+$out = [];
+for ($i = 0; $i < 4; $i++) { $o = new P; $out[] = $o; echo spl_object_id($o), ","; }
+`)
+    ).toMatchObject({ kind: 'executed', stdout: expected });
+  }
+
+  for (const [wrapped, expected] of [
+    [false, '2|2,1'],
+    [true, '4|2,1'],
+  ] as const) {
+    expect(
+      run(`<?php
+class Node { public $self; public $child; }
+$a = new Node; $b = new Node;
+$a->self = $a;
+$a->child = ${wrapped ? '[$b]' : '$b'};
+$b->self = ${wrapped ? '[$b]' : '$b'};
+unset($a, $b);
+echo gc_collect_cycles(), '|';
+$x = new Node; $y = new Node;
+echo spl_object_id($x), ',', spl_object_id($y);
+`)
+    ).toMatchObject({ kind: 'executed', stdout: expected });
+  }
+
+  expect(
+    run(String.raw`<?php
+$s = "x";
+foreach ([
+  fn() => assert($s === "a\n"),
+  fn() => assert($s === "{$s}1"),
+  fn() => assert($s === "{$s}[0]"),
+  fn() => assert($s === "a\x01"),
+  fn() => assert($s === "a\e"),
+] as $f) {
+  try { $f(); } catch (AssertionError $e) { echo $e->getMessage(), "\n"; }
+}
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: String.raw`assert($s === "a\n")
+assert($s === "{$s}1")
+assert($s === "{$s}[0]")
+assert($s === "a\001")
+assert($s === "a\e")
+`,
+  });
+
+  expect(
+    run(`<?php
+class P { function __construct(public $x) {} }
+class Seg { function __construct(public $a, public $b) {} }
+$pts = [];
+for ($i = 0; $i < 8000; $i++) $pts[] = new P($i);
+$s = 0;
+for ($i = 1; $i < 4000; $i++) { $g = new Seg($pts[$i % 8000], $pts[0]); $s += $g->b->x; }
+echo $s;
+`)
+  ).toMatchObject({ kind: 'executed', stdout: '0' });
 });
