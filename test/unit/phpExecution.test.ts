@@ -4191,4 +4191,83 @@ echo implode(",", $ids);
 `)
     ).toMatchObject({ kind: 'executed', stdout: expected });
   }
+
+  for (const [container, expected] of [
+    ['[]', '[4,[]]'],
+    ['new ArrayObject', '[4,{}]'],
+    ['new ArrayIterator', '[4,{}]'],
+  ]) {
+    expect(
+      run(`<?php
+error_reporting(0);
+function f() { return 4; }
+$a = ${container};
+$a['x'] = 3;
+set_error_handler(function () use (&$a) { unset($a['x']); return true; });
+$r = ($a['x'] =& f());
+restore_error_handler();
+echo json_encode([$r, $a]);
+`)
+    ).toMatchObject({ kind: 'executed', stdout: expected });
+  }
+
+  expect(
+    run(String.raw`<?php
+class Foo {}
+$a = 1;
+foreach ([
+  fn() => assert(-$a instanceof Foo),
+  fn() => assert((int)$a instanceof Foo),
+  fn() => assert(@$a instanceof Foo),
+  fn() => assert(++$a instanceof Foo),
+] as $f) {
+  try { $f(); } catch (AssertionError $e) { echo $e->getMessage(), "\n"; }
+}
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: `assert(-$a instanceof Foo)
+assert((int)$a instanceof Foo)
+assert(@$a instanceof Foo)
+assert(++$a instanceof Foo)
+`,
+  });
+
+  for (const [unsetOrder, expected] of [
+    ['unset($a, $c, $b);', '3|2,3,1'],
+    ['unset($c, $b, $a);', '3|1,2,3'],
+  ]) {
+    expect(
+      run(`<?php
+class P { public $self; public $next; }
+$a = new P; $b = new P; $c = new P;
+$a->self = $a; $b->self = $b; $c->self = $c;
+$a->next = $b; $c->next = $a;
+${unsetOrder}
+echo gc_collect_cycles(), '|';
+$x = new P; $y = new P; $z = new P;
+echo spl_object_id($x), ',', spl_object_id($y), ',', spl_object_id($z);
+`)
+    ).toMatchObject({ kind: 'executed', stdout: expected });
+  }
+
+  for (const [container, assignOp] of [
+    ['[]', '=&'],
+    ['new ArrayObject', '=&'],
+    ['new ArrayIterator', '=&'],
+    ['[]', '='],
+  ]) {
+    expect(
+      run(`<?php
+error_reporting(0);
+class C { public string $x = "old"; }
+class S { function __toString() { global $a, $other; $a[0] =& $other; return "3"; } }
+function f() { return new S; }
+$c = new C; $other = "other"; $a = ${container};
+$a[0] =& $c->x;
+$r = ($a[0] ${assignOp} f());
+echo json_encode([$r, $c->x, $a[0] ?? null, $other]);
+`)
+    ).toMatchObject({ kind: 'executed', stdout: '["3","old","3","3"]' });
+  }
 });

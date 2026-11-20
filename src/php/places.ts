@@ -579,7 +579,9 @@ export function bindOrAssignPlace(place: VarPlace, ref: Ref, valueFallback: bool
 
 export function storeDimensionRef(array: PhpArray, key: Key | undefined, ref: Ref, valueFallback: boolean): void {
   if (valueFallback) {
+    if (key !== undefined && !array.map.has(key)) array.set(key, null);
     notice('Only variables should be assigned by reference');
+    if (key !== undefined && !array.map.has(key)) return;
     const value = share(ref.v);
     if (key !== undefined) ref.v = array.set(key, value);
     else if (!array.append(value))

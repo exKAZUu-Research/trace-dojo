@@ -52,13 +52,23 @@ export function deferredHandleOrder<N extends object, O extends N>(
     isObject,
     children,
   };
-  const pendingRoots: O[] = [...protectedObjects].toReversed();
-  for (let index = roots.length - 1; index >= 0; index--) pendingRoots.push(roots[index]);
-  while (pendingRoots.length > 0) {
-    const start = pendingRoots.pop() as O;
-    if (!state.freed.has(start)) pendingRoots.push(...releaseDeferredRoot(start, state).toReversed());
+  const queue: O[] = [...roots];
+  drainDeferredQueue(queue, state, 0);
+  for (const object of protectedObjects) {
+    if (!state.freed.has(object)) {
+      const start = queue.length;
+      queue.push(object);
+      drainDeferredQueue(queue, state, start);
+    }
   }
   return state.order;
+}
+
+function drainDeferredQueue<N extends object, O extends N>(queue: O[], state: DeferredState<N, O>, from: number): void {
+  for (let head = from; head < queue.length; head++) {
+    const start = queue[head];
+    if (!state.freed.has(start)) queue.push(...releaseDeferredRoot(start, state));
+  }
 }
 
 function releaseDeferredRoot<N extends object, O extends N>(start: O, state: DeferredState<N, O>): O[] {

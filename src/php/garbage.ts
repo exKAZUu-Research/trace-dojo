@@ -98,7 +98,7 @@ function collectGarbageNow(runtime: Runtime, cycles: boolean, stopOnException: b
   const collected = freed.length + arrayStorage.size;
   const destructible = freed.filter((object) => !object.destructed && object.cls.findMethod('__destruct'));
   if (destructible.length === 0 || runtime.shuttingDown) {
-    const ordered = orderCollectedObjects(runtime, cycles, owners, freed, handles, reachedArrays);
+    const ordered = orderCollectedObjects(runtime, cycles, owners, freed, handles, reachedArrays, buffered);
     finishCollectedObjects(runtime, ordered, arrayStorage);
     return collected;
   }
@@ -173,13 +173,15 @@ function finishCollectedObjects(runtime: Runtime, objects: PhpObject[], arraySto
   retainTurtles(runtime, mark(runtime));
 }
 
+// code-gauge-allow functionParameterCount 7 -- Shares the GC cycle collection snapshot with collectGarbageNow.
 function orderCollectedObjects(
   runtime: Runtime,
   cycles: boolean,
   roots: PhpObject[],
   freed: PhpObject[],
   handles: PhpObject[],
-  reachedArrays: Set<PhpArray>
+  reachedArrays: Set<PhpArray>,
+  buffered?: (PhpObject | PhpArray)[]
 ): PhpObject[] {
   if (!cycles || runtime.shuttingDown) return handles;
   const graph = new CollectionGraph(
@@ -188,8 +190,15 @@ function orderCollectedObjects(
     (value) => !(value instanceof PhpArray && reachedArrays.has(value))
   );
   const cyclic = cyclicObjects(graph, freed, new Set(runtime.collectingArrays));
+  const cyclicRoots = roots.filter((object) => cyclic.has(object));
+  const bufferedOrder = buffered ? new Map(buffered.map((item, index) => [item, index])) : undefined;
+  const bufferedRoots = bufferedOrder
+    ? cyclicRoots.toSorted(
+        (left, right) => (bufferedOrder.get(left) ?? Infinity) - (bufferedOrder.get(right) ?? Infinity)
+      )
+    : cyclicRoots;
   return deferredHandleOrder<CollectionNode, PhpObject>(
-    roots.filter((object) => cyclic.has(object)),
+    bufferedRoots,
     new Set(freed),
     (node): node is PhpObject => node instanceof PhpObject,
     (node) => graph.children(node)

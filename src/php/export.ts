@@ -205,7 +205,7 @@ function exportOperator(e: OperatorExpression, priority: number, depth: number):
       return wrap(100, `${render(e.test, 100)}${middle}${render(e.alternate, 101)}`);
     }
     case 'instanceof': {
-      return wrap(245, `${render(e.e, 246)} instanceof ${exportClass(e.cls, depth)}`);
+      return `${render(e.e, 0)} instanceof ${exportClass(e.cls, depth)}`;
     }
     case 'cast': {
       return wrap(240, `(${e.type})${render(e.e, 241)}`);

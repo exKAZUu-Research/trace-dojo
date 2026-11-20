@@ -97,8 +97,11 @@ export class Ref {
 
   /** Writes a value, converting or rejecting it for the type of the property the reference was taken from. */
   assign(value: Value): Value {
+    return this.writeChecked(this.typedBy ? referenceTypeCheck(this, value) : value);
+  }
+
+  writeChecked(assigned: Value): Value {
     const old = this.value;
-    const assigned = this.typedBy ? referenceTypeCheck(this, value) : value;
     replaceWatchedSlot(this, '');
     this.value = assigned;
     trackOwner(assigned, this);
@@ -256,7 +259,17 @@ export class PhpArray {
   set(key: Key, value: Value): Value {
     const slot = this.map.ownedSlot(key);
     if (value !== null && typeof value === 'object') this.composite = true;
-    if (slot instanceof Ref) return slot.assign(value);
+    if (slot instanceof Ref) {
+      if (!slot.typedBy) return slot.assign(value);
+      const assigned = referenceTypeCheck(slot, value);
+      const current = this.map.ownedSlot(key);
+      if (current === slot) return slot.writeChecked(assigned);
+      if (current instanceof Ref) return current.assign(assigned);
+      if (!this.map.has(key)) return assigned;
+      this.insert(key, assigned);
+      dropped(current);
+      return assigned;
+    }
     this.insert(key, value);
     dropped(slot);
     return value;
