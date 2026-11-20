@@ -144,9 +144,11 @@ function invokeExceptionHandler(
   try {
     // PHP calls the handler after the program's code has unwound, from no line of it.
     asInternal(() => callValue(handler, [{ v: object }], undefined));
+    // PHP releases the handled exception before restoring the handler, so its destructors' exceptions go uncaught.
+    const failure = releaseUncaught(runtime, object);
     if (runtime.exceptionHandler === undefined)
       runtime.exceptionHandler = runtime.replacedExceptionHandlers.pop() ?? null;
-    return releaseUncaught(runtime, object);
+    return failure;
   } catch (error_) {
     // PHP keeps both exceptions when the handler throws, so their objects survive until shutdown.
     return report(runtime, error_, inShutdown, false);
