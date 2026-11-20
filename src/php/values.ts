@@ -135,14 +135,13 @@ export function setShutdownHoldHandler(handler: (value: unknown) => void): void 
   shutdownHoldHandler = handler;
 }
 
-/** Reports a value that a holder let go of, if it may hold objects. */
-/** Whether a slot's new reference holds its old value, as making a reference moves the value without releasing it. */
-function movedIntoReference(old: unknown, slot: unknown): boolean {
-  return slot instanceof Ref && old !== undefined && slot.v === old;
-}
-
 export function dropped(value: unknown): void {
   if (value !== null && typeof value === 'object') dropHandler([value]);
+}
+
+/** PHP moves the slot's value into a new reference without releasing it. */
+function movedIntoReference(old: unknown, slot: unknown): boolean {
+  return slot instanceof Ref && old !== undefined && slot.v === old;
 }
 
 /** Converts a value written through a reference to a typed property, which the interpreter provides. */
