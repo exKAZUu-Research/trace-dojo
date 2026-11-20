@@ -236,7 +236,7 @@ export function constructElementFromRvalue(frame: Frame, type: Type, source: Val
   const construction = moveConstruction(type);
   if (construction.kind === 'string') {
     const target = new StringValue('');
-    target.moveFrom(frame, source as StringValue);
+    target.moveFrom(source as StringValue);
     return target;
   }
   if (construction.kind === 'sequence') return (source as SequenceValue).moveStorage();
@@ -432,7 +432,7 @@ export function moveValue(frame: Frame, type: Type, target: Value, source: Value
   if (type.kind !== 'class') return source;
   const { cls } = type;
   if (target instanceof StringValue && source instanceof StringValue) {
-    target.moveFrom(frame, source);
+    target.moveFrom(source);
   } else if (target instanceof SequenceValue && source instanceof SequenceValue && ownsMovableSequence(type)) {
     cls.operations?.destroy?.(frame, target);
     target.takeItems(source);

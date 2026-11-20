@@ -62,8 +62,6 @@ export class StringValue extends Store {
   private stored: string;
   private buffer?: StringBuffer;
   private objectLocation?: Ptr;
-  /** The storage slots the heap buffer reserved, returned when the buffer is replaced or the string is destroyed. */
-  chargedSlots = 0;
 
   constructor(bytes: string) {
     super();
@@ -78,9 +76,7 @@ export class StringValue extends Store {
 
   reallocate(frame: Frame, capacity: number): void {
     if (capacity === this.room) return;
-    const charged = reserveStringBuffer(frame, capacity);
-    this.releaseStorage(frame);
-    this.chargedSlots = charged;
+    reserveStringBuffer(frame, capacity);
     frame.runtime.spend(Math.ceil(this.stored.length / 64));
     this.invalidateBuffer();
     this.room = capacity;
@@ -104,17 +100,8 @@ export class StringValue extends Store {
   }
 
   /** Takes the bytes and the buffer of another string, as the move constructor and assignment do. */
-  /** Returns the storage the heap buffer reserved, as releasing it does. */
-  releaseStorage(frame: Frame): void {
-    frame.runtime.release(this.chargedSlots);
-    this.chargedSlots = 0;
-  }
-
-  moveFrom(frame: Frame, source: StringValue): void {
+  moveFrom(source: StringValue): void {
     if (source === this) return;
-    this.releaseStorage(frame);
-    this.chargedSlots = source.chargedSlots;
-    source.chargedSlots = 0;
     this.invalidateBuffer();
     this.stored = source.stored;
     this.room = source.room;
@@ -377,7 +364,6 @@ export function stringClass(library: Library): ClassInfo {
     assign: (frame, target, source) => {
       (target as StringValue).copyFrom(frame, source as StringValue);
     },
-    destroy: (frame, value) => (value as StringValue).releaseStorage(frame),
   };
   const method = (
     name: string,
@@ -711,12 +697,12 @@ export function stringClass(library: Library): ClassInfo {
     },
     { optional: 1 }
   );
-  method('swap', [{ kind: 'reference', to: type }], VOID, (s, [other], frame) => {
+  method('swap', [{ kind: 'reference', to: type }], VOID, (s, [other]) => {
     const target = (other as Ptr).read() as StringValue;
     const moved = new StringValue('');
-    moved.moveFrom(frame, s);
-    s.moveFrom(frame, target);
-    target.moveFrom(frame, moved);
+    moved.moveFrom(s);
+    s.moveFrom(target);
+    target.moveFrom(moved);
   });
   for (const name of ['c_str', 'data']) {
     method(name, [], CONST_CHAR_PTR, (s) => new Ptr(s.characterBuffer(), 0), { isConst: true });
@@ -748,19 +734,18 @@ export function stringClass(library: Library): ClassInfo {
 
 export function makeString(frame: Frame, bytes: string): StringValue {
   checkStringLength(bytes.length);
-  const charged = reserveStringBuffer(frame, fittingCapacity(bytes.length));
+  reserveStringBuffer(frame, fittingCapacity(bytes.length));
   frame.runtime.spend(Math.ceil(bytes.length / 64));
-  const value = new StringValue(bytes);
-  value.chargedSlots = charged;
-  return value;
+  return new StringValue(bytes);
 }
 
-/** Reserves the storage a heap buffer of a capacity takes, giving the slots reserved (none for the short buffer). */
-function reserveStringBuffer(frame: Frame, capacity: number): number {
-  if (capacity <= SHORT_CAPACITY) return 0;
-  const slots = Math.ceil((capacity + 1) / 8);
-  frame.runtime.reserve(slots);
-  return slots;
+/**
+ * Charges a new heap buffer by operations per 64 bytes, as building strings is charged: `maxStringLength` bounds each
+ * string and the operations limit bounds the bytes built, so string buffers, which temporaries and copies replace and
+ * free throughout a program, are not counted against the storage limit.
+ */
+function reserveStringBuffer(frame: Frame, capacity: number): void {
+  if (capacity > SHORT_CAPACITY) frame.runtime.spend(Math.ceil((capacity + 1) / 64));
 }
 
 function checkStringLength(length: number): void {
@@ -977,7 +962,7 @@ function concatenation(a: TextOperand, b: TextOperand, reused: number): Eval<Str
       const suffix = operandBytes(frame, b, right);
       if (reused < 0) return makeString(frame, prefix + suffix);
       const result = new StringValue('');
-      result.moveFrom(frame, stringObject(reused === 0 ? left : right));
+      result.moveFrom(stringObject(reused === 0 ? left : right));
       result.replaceBytes(frame, prefix + suffix, reused === 0 ? suffix.length : prefix.length + suffix.length);
       return result;
     });
@@ -1046,7 +1031,7 @@ function stringOperator(
             const target = stringObject(place);
             if (moves) {
               const string = stringObject(operand);
-              if (target !== string) target.moveFrom(frame, string);
+              if (target !== string) target.moveFrom(string);
             } else if (!append && source.kind === 'string') {
               target.copyFrom(frame, stringObject(operand));
             } else {

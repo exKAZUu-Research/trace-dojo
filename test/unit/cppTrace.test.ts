@@ -31,57 +31,23 @@ int main() { int sum = fixed + folded + Settings::value; }`;
   expect(trace.traceItems.some(({ vars }) => Object.hasOwn(vars, 'folded'))).toBe(false);
 });
 
-test('charges heap buffers only when a string allocates new capacity', () => {
-  const program = `#include <iostream>
-#include <string>
-int main() {
-  std::string source(8000, 'a'), target;
-  target.reserve(8000);
-  for (int i = 0; i < 20; ++i) {
-    source = source;
-    target = source;
-    target.assign(source);
-  }
-  std::cout << source.size() << ' ' << target.size();
-}`;
-  const previous = LIMITS.maxSlots;
-  LIMITS.maxSlots = 2500;
-  try {
-    expect(executeProgram('cpp', program)).toMatchObject({
-      kind: 'executed',
-      stdout: '8000 8000',
-      uncaughtException: undefined,
-    });
-    const grows = program.replace('target.assign(source);', "target.resize(12000, 'b');");
-    expect(executeProgram('cpp', grows)).toMatchObject({
-      kind: 'executed',
-      uncaughtException: 'メモリを確保しすぎました。',
-    });
-  } finally {
-    LIMITS.maxSlots = previous;
-  }
-});
-
 test.each([
   'std::ostringstream stream(source);',
   'std::istringstream stream(source);',
   'std::stringstream stream; stream.str(source);',
-])('counts storage owned by a string stream in %s', (statement) => {
+])('charges the operations of copying a string into a string stream in %s', (statement) => {
   const program = `#include <sstream>
 #include <string>
 int main() {
   std::string source(16000, 'x');
   ${statement}
 }`;
-  const previous = LIMITS.maxSlots;
-  LIMITS.maxSlots = 3000;
+  const previous = LIMITS.maxOperations;
+  LIMITS.maxOperations = 800;
   try {
-    expect(executeProgram('cpp', program)).toMatchObject({
-      kind: 'executed',
-      uncaughtException: 'メモリを確保しすぎました。',
-    });
+    expect(executeProgram('cpp', program)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
   } finally {
-    LIMITS.maxSlots = previous;
+    LIMITS.maxOperations = previous;
   }
 });
 
@@ -167,21 +133,18 @@ test.each([
   'std::string copy(source.c_str());',
   'std::string copy(source.begin(), source.end());',
   'std::string copy(source);',
-])('charges the storage limit for string construction in %s', (statement) => {
+])('charges the operations of string construction in %s', (statement) => {
   const program = `#include <string>
 int main() {
   std::string source(16000, 'x');
   ${statement}
 }`;
-  const previous = LIMITS.maxSlots;
-  LIMITS.maxSlots = 3000;
+  const previous = LIMITS.maxOperations;
+  LIMITS.maxOperations = 800;
   try {
-    expect(executeProgram('cpp', program)).toMatchObject({
-      kind: 'executed',
-      uncaughtException: 'メモリを確保しすぎました。',
-    });
+    expect(executeProgram('cpp', program)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
   } finally {
-    LIMITS.maxSlots = previous;
+    LIMITS.maxOperations = previous;
   }
 });
 

@@ -300,11 +300,6 @@ export class Runtime implements TracedRuntime<Frame> {
   }
 
   /** Charges `count` values of storage, stopping the program when it allocates too much. */
-  /** Returns storage that a released buffer had reserved, so only live storage counts against the limit. */
-  release(count: number): void {
-    this.allocatedSlots -= count;
-  }
-
   reserve(count: number): void {
     this.allocatedSlots += count;
     if (this.allocatedSlots > LIMITS.maxSlots) throw new CppRuntimeError('custom', 'メモリを確保しすぎました。');
