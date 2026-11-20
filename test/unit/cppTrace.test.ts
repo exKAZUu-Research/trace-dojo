@@ -491,6 +491,30 @@ int main() { ${setup} std::cout << q - p; }`;
   expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', stdout: '', uncaughtException: message });
 });
 
+test.each(['std::vector<int> v(100000);', 'std::deque<int> v(100000);'])(
+  'tracks no element positions for edits after the counted construction %s',
+  (declaration) => {
+    const program = `#include <deque>
+#include <iostream>
+#include <vector>
+int main() {
+  ${declaration}
+  for (int i = 0; i < 5000; i++) {
+    v.pop_back();
+    v.push_back(i);
+  }
+  std::cout << v.size();
+}`;
+    const previous = LIMITS.maxOperations;
+    LIMITS.maxOperations = 200_000;
+    try {
+      expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', stdout: '100000' });
+    } finally {
+      LIMITS.maxOperations = previous;
+    }
+  }
+);
+
 test('charges the storage of the message buffer that what() creates', () => {
   const program = `#include <stdexcept>
 #include <string>
