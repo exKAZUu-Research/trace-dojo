@@ -78,10 +78,6 @@ function checkModifiable(runtime: Runtime, target: DartList): void {
   if (target.unmodifiable) runtime.throwError('UnsupportedError', '', ['Cannot modify an unmodifiable list']);
 }
 
-function changed(target: DartList): void {
-  target.modifications++;
-}
-
 function checkRange(runtime: Runtime, start: Value, end: Value, length: number, namedBounds = true): [number, number] {
   const from = intArg(runtime, start, 'start');
   if (from < 0n || from > BigInt(length)) rangeError(runtime, from, 0, length, namedBounds ? 'start' : undefined);
@@ -198,7 +194,6 @@ define('List.length=', (runtime, receiver, [length]) => {
   } else {
     elements.length = index(count);
   }
-  changed(target);
   return;
 });
 function first(runtime: Runtime, target: DartList): Value {
@@ -358,7 +353,6 @@ define('List.add', (runtime, receiver, [value]) => {
   checkGrowable(runtime, target, 'add');
   runtime.allocate(1);
   target.elements.push(value);
-  changed(target);
   return;
 });
 define('List.addAll', (runtime, receiver, [iterable]) => {
@@ -374,7 +368,6 @@ define('List.addAll', (runtime, receiver, [iterable]) => {
     checkElement(runtime, value, elementType, 'value');
     runtime.allocate(1);
     target.elements.push(value);
-    changed(target);
     length++;
   });
   return;
@@ -388,7 +381,6 @@ define('List.insert', (runtime, receiver, [at, value]) => {
     rangeError(runtime, position, 0, target.elements.length, undefined);
   runtime.allocate(1);
   target.elements.splice(index(position), 0, value);
-  changed(target);
   return;
 });
 define('List.insertAll', (runtime, receiver, [at, iterable]) => {
@@ -407,11 +399,9 @@ define('List.insertAll', (runtime, receiver, [at, iterable]) => {
     target.elements.length = oldLength + values.length;
     target.elements.fill(undefined, oldLength);
     target.elements.copyWithin(start + values.length, start, oldLength);
-    changed(target);
     rangeError(runtime, start + target.elements.length, start, target.elements.length, 'end');
   }
   insertListElements(target.elements, index(position), values);
-  changed(target);
   return;
 });
 define('List.setAll', (runtime, receiver, [at, iterable]) => {
@@ -463,16 +453,13 @@ define('List.removeAt', (runtime, receiver, [at]) => {
 
 function removeListAt(runtime: Runtime, target: DartList, at: Value): Value {
   const position = checkListIndex(runtime, target, at, 'length');
-  const [removed] = target.elements.splice(position, 1);
-  changed(target);
-  return removed;
+  return target.elements.splice(position, 1)[0];
 }
 
 define('List.removeLast', (runtime, receiver) => {
   const target = list(receiver);
   checkGrowable(runtime, target, 'remove');
   if (target.elements.length === 0) rangeError(runtime, -1, 0, -1, 'length');
-  changed(target);
   return target.elements.pop();
 });
 function filterList(runtime: Runtime, receiver: Value, test: Value, keep: boolean): Value {
@@ -480,15 +467,14 @@ function filterList(runtime: Runtime, receiver: Value, test: Value, keep: boolea
   checkGrowable(runtime, target, 'remove');
   const length = target.elements.length;
   const retained: Value[] = [];
-  for (let position = 0; position < length; position++) {
-    const element = target.elements[position];
-    if ((callFunction(runtime, test, element) === true) === keep) retained.push(element);
-    if (length !== target.elements.length) runtime.throwError('ConcurrentModificationError', '', [target]);
-  }
-  if (retained.length !== length) {
-    target.elements = retained;
-    changed(target);
-  }
+  runtime.withCallRoots(target, { positional: retained, named: undefined }, () => {
+    for (let position = 0; position < length; position++) {
+      const element = target.elements[position];
+      if ((callFunction(runtime, test, element) === true) === keep) retained.push(element);
+      if (length !== target.elements.length) runtime.throwError('ConcurrentModificationError', '', [target]);
+    }
+    if (retained.length !== length) target.elements = retained;
+  });
   return undefined;
 }
 define('List.removeWhere', (runtime, receiver, [test]) => filterList(runtime, receiver, test, false));
@@ -496,10 +482,7 @@ define('List.retainWhere', (runtime, receiver, [test]) => filterList(runtime, re
 define('List.clear', (runtime, receiver) => {
   const target = list(receiver);
   checkGrowable(runtime, target, 'clear');
-  if (target.elements.length > 0) {
-    target.elements = [];
-    changed(target);
-  }
+  if (target.elements.length > 0) target.elements = [];
   return;
 });
 define('List.+', (runtime, receiver, [other]) => {
@@ -588,7 +571,6 @@ define('List.removeRange', (runtime, receiver, [start, end]) => {
   checkGrowable(runtime, target, 'remove');
   const [from, to] = checkRange(runtime, start, end, target.elements.length);
   target.elements.splice(from, to - from);
-  changed(target);
   return;
 });
 define('List.fillRange', (runtime, receiver, [start, end, fill]) => {
@@ -1051,15 +1033,8 @@ define('Set.cast', (runtime, receiver, _args, _named, typeArgs) =>
 define('Set.length', (_runtime, receiver) => BigInt(store(receiver).size));
 define('Set.isEmpty', (_runtime, receiver) => store(receiver).size === 0);
 define('Set.isNotEmpty', (_runtime, receiver) => store(receiver).size > 0);
-define('Set.first', (runtime, receiver) => {
-  for (const key of store(receiver).values()) return key;
-  return runtime.throwError('StateError', '', ['No element']);
-});
-define('Set.last', (runtime, receiver) => {
-  const keys = [...store(receiver).values()];
-  if (keys.length === 0) runtime.throwError('StateError', '', ['No element']);
-  return keys.at(-1);
-});
+define('Set.first', (_runtime, receiver) => store(receiver).edgeKey(1));
+define('Set.last', (_runtime, receiver) => store(receiver).edgeKey(-1));
 define('Set.toSet', (runtime, receiver) => copySet(runtime, receiver as DartObject));
 define('Set.toString', (runtime, receiver) =>
   iterableToFullString(runtime, receiver, iteratorValues(runtime, receiver, 0n, undefined), '{', '}')
@@ -1110,16 +1085,12 @@ defineConstructor('Map.fromIterable', (runtime, _instance, args, typeArgs) => {
     const valueOf = named(args.named, 'value', undefined);
     forEachValue(runtime, args.positional[0], (element) => {
       const key = keyOf === undefined ? element : callFunction(runtime, keyOf, element);
-      const frame = runtime.currentFrame;
-      frame?.temporaries.push(key);
-      try {
+      writeComputedEntry(runtime, map, key, () => {
         const value = valueOf === undefined ? element : callFunction(runtime, valueOf, element);
         implicitCast(runtime, key, elementTypeOf(map, 0));
         implicitCast(runtime, value, elementTypeOf(map, 1));
-        store(map).set(key, value);
-      } finally {
-        frame?.temporaries.pop();
-      }
+        return value;
+      });
     });
   });
 });
@@ -1135,15 +1106,9 @@ defineConstructor('Map.fromIterables', (runtime, _instance, args, typeArgs) => {
       runtime.invoke(iterator, 'moveNext', { positional: [], named: undefined }, [], undefined) === true;
     let hasNextKey = moveNext(keys);
     let hasNextValue = moveNext(values);
-    const frame = runtime.currentFrame;
     while (hasNextKey && hasNextValue) {
       const key = runtime.getProperty(keys, 'current', undefined);
-      frame?.temporaries.push(key);
-      try {
-        store(map).set(key, runtime.getProperty(values, 'current', undefined));
-      } finally {
-        frame?.temporaries.pop();
-      }
+      writeComputedEntry(runtime, map, key, () => runtime.getProperty(values, 'current', undefined));
       hasNextKey = moveNext(keys);
       hasNextValue = moveNext(values);
       runtime.spend();
@@ -1155,10 +1120,16 @@ defineConstructor('Map.fromEntries', (runtime, _instance, args, typeArgs) => {
   const map = newMap(runtime, typeArgs[0] ?? DYNAMIC, typeArgs[1] ?? DYNAMIC);
   return populateHashObject(runtime, map, () => {
     forEachValue(runtime, args.positional[0], (entry) => {
-      store(map).set(runtime.getProperty(entry, 'key', undefined), runtime.getProperty(entry, 'value', undefined));
+      const key = runtime.getProperty(entry, 'key', undefined);
+      writeComputedEntry(runtime, map, key, () => runtime.getProperty(entry, 'value', undefined));
     });
   });
 });
+
+function writeComputedEntry(runtime: Runtime, map: DartObject, key: Value, compute: () => Value): void {
+  runtime.withCallRoots(map, { positional: [key], named: undefined }, () => store(map).set(key, compute()));
+}
+
 define('Map.cast', (runtime, receiver, _args, _named, typeArgs) =>
   runtime.links.construct(runtime, 'CastMap', '', [receiver], undefined, [
     elementTypeOf(receiver as DartObject, 0),

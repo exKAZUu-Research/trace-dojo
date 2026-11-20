@@ -36,7 +36,7 @@ import {
 } from './environment';
 import { lateFieldGetter, lateFieldSetter } from './lateFields';
 import { BoundedStringParts } from './library/boundedStringParts';
-import { MemberCompiler } from './memberCompiler';
+import { markCovariantParameters, MemberCompiler } from './memberCompiler';
 import { type DartThrow, Frame, type FunctionInfo, type Runtime, type TypeEnv } from './runtime';
 import type { FunctionContext } from './scope';
 import { type GenExec, inheritsCovariance } from './statementCompiler';
@@ -1064,6 +1064,8 @@ export class Compiler extends MemberCompiler {
     const nativeKey = `${isExtension ? (owner as ExtensionInfo).name : cls.name}.${methodKind === 'setter' ? `${name}=` : name}`;
     const impl = declaration.isExternal ? this.externalMember(nativeKey, methodKind) : undefined;
     const member = this.declaredMember(cls, declaration, type, positionalTypes[0], impl, isAbstract);
+    if (!isExtension && !member.isStatic && member.kind === 'method')
+      markCovariantParameters(cls, member, declaration.parameters);
     const target = isExtension ? (owner as ExtensionInfo) : cls;
     const table =
       methodKind === 'setter'
@@ -1281,7 +1283,7 @@ export class Compiler extends MemberCompiler {
   }
 
   private checkImplemented(cls: ClassInfo, declaration: ClassDeclaration): void {
-    const obligations = cls.isAbstract ? cls.interfaces : this.implementationObligations(cls);
+    const obligations = cls.isAbstract ? cls.interfaces : [...this.implementationObligations(cls), cls.thisType];
     for (const name of cls.interfaceMemberNames()) {
       const isSetter = name.endsWith('=') && name !== '==' && name !== '[]=';
       const memberName = isSetter ? name.slice(0, -1) : name;

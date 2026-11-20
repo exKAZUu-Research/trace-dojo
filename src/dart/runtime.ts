@@ -797,49 +797,14 @@ function appendCallArguments(runtime: Runtime, output: BoundedStringParts, args:
  * so the VM gives them the type Object?, as `[].add` shows `(Object?) => void`.
  */
 function covariantErased(member: Member & { kind: 'method' }, type: FunctionType): FunctionType {
-  const params = new Set(member.owner.typeParams);
-  if (params.size === 0 && !member.covariantPositional?.size && !member.covariantNamed?.size) return type;
+  if (!member.covariantPositional?.size && !member.covariantNamed?.size) return type;
   const objectQ = interfaceType(coreTypes.object, [], true);
-  const erase = (declared: DartType | undefined, actual: DartType): DartType =>
-    declared && mentionsCovariantly(declared, params, true) ? objectQ : actual;
   return {
     ...type,
-    positional: type.positional.map((actual, index) =>
-      member.covariantPositional?.has(index) ? objectQ : erase(member.type.positional[index], actual)
-    ),
+    positional: type.positional.map((actual, index) => (member.covariantPositional?.has(index) ? objectQ : actual)),
     named: type.named.map((named) => ({
       ...named,
-      type: member.covariantNamed?.has(named.name)
-        ? objectQ
-        : erase(member.type.named.find((other) => other.name === named.name)?.type, named.type),
+      type: member.covariantNamed?.has(named.name) ? objectQ : named.type,
     })),
   };
-}
-
-/** Whether a type uses one of the parameters where a value of it flows in, outside the parameters of function types. */
-function mentionsCovariantly(type: DartType, params: ReadonlySet<TypeParam>, positive: boolean): boolean {
-  switch (type.kind) {
-    case 'typeParam': {
-      return positive && params.has(type.param);
-    }
-    case 'interface': {
-      return type.args.some((arg) => mentionsCovariantly(arg, params, positive));
-    }
-    case 'function': {
-      return (
-        mentionsCovariantly(type.returnType, params, positive) ||
-        [...type.positional, ...type.named.map((named) => named.type)].some((parameter) =>
-          mentionsCovariantly(parameter, params, !positive)
-        )
-      );
-    }
-    case 'record': {
-      return [...type.positional, ...type.named.map((field) => field.type)].some((field) =>
-        mentionsCovariantly(field, params, positive)
-      );
-    }
-    default: {
-      return false;
-    }
-  }
 }

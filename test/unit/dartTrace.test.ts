@@ -195,6 +195,31 @@ void square(Turtle t) { // atomic
   expect(actual.finalTurtles).toEqual(expected.finalTurtles);
 });
 
+test('empty statements add no execution steps', () => {
+  const dart = `void main() {
+  ;
+  for (int i = 0; i < 2; i++);
+  if (true);
+  bool looping = false;
+  while (looping);
+  print(3);;
+}`;
+  const java = `class Main {
+  public static void main(String[] args) {
+    ;
+    for (int i = 0; i < 2; i++);
+    if (true);
+    boolean looping = false;
+    while (looping);
+    System.out.println(3);;
+  }
+}`;
+  const actual = traceProgram('dart', dart, dart);
+  const expected = traceProgram('java', java, java);
+  expect(actual.stdout).toBe('3\n');
+  expect(withoutLines(actual.traceItems)).toEqual(withoutLines(expected.traceItems));
+});
+
 test('a cyclic list produces finite snapshots and execution continues', () => {
   const program = `void main() {
   var cycle = <dynamic>[];

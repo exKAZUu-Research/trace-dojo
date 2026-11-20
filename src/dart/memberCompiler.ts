@@ -1,13 +1,21 @@
 import type { FormalParameters, FunctionBody, MethodDeclaration, TypeSyntax } from './ast';
 import type { CompiledFunction } from './callCompiler';
-import { ClassInfo, type ForwardedArgumentBinder, type Member } from './classes';
+import { ClassInfo, type ForwardedArgumentBinder, type Member, type MethodMember, scopedMemberName } from './classes';
 import { at } from './compilerBase';
 import { EMPTY_ENV } from './constructorCompiler';
 import type { ExtensionInfo } from './environment';
 import { MetadataCompiler } from './metadataCompiler';
 import { Frame, type Runtime, type TypeEnv } from './runtime';
-import { inheritsCovariance } from './statementCompiler';
-import { asInstanceOf, type DartType, DYNAMIC, type FunctionType, functionType, type TypeParam, VOID } from './types';
+import {
+  asInstanceOf,
+  type DartType,
+  DYNAMIC,
+  type FunctionType,
+  functionType,
+  mentionsCovariantly,
+  type TypeParam,
+  VOID,
+} from './types';
 import type { Callable, Value } from './values';
 
 export abstract class MemberCompiler extends MetadataCompiler {
@@ -163,9 +171,6 @@ export abstract class MemberCompiler extends MetadataCompiler {
       const typeEnvFor = this.methodTypeEnv(declaredClass, ownerParams, typeParams, declaration.isStatic);
       if (member.forwarding)
         member.forwarding.bind = bindForwardedArguments(compiled, declaration.parameters, typeEnvFor);
-      if (member.kind === 'method' && declaredClass && !member.isStatic) {
-        markCovariantParameters(declaredClass, member, declaration.parameters);
-      }
       if (body && member.kind !== 'field') {
         member.impl = (runtime, receiver, args, typeArgs, callRow) =>
           this.runFunction(compiled, runtime, receiver, [], typeEnvFor(runtime, receiver, typeArgs), args, callRow);
@@ -211,19 +216,30 @@ export abstract class MemberCompiler extends MetadataCompiler {
   }
 }
 
-function markCovariantParameters(
-  cls: ClassInfo,
-  member: Extract<Member, { kind: 'method' }>,
-  params: FormalParameters
-): void {
+export function markCovariantParameters(cls: ClassInfo, member: MethodMember, params: FormalParameters): void {
+  const key = scopedMemberName(member.name, (cls.mixinOf ?? cls).library);
+  const supers = cls.directSupertypes
+    .map(({ cls }) => cls.interfaceMember(key))
+    .filter((inherited) => inherited?.kind === 'method');
+  const ownerParams = new Set(cls.typeParams);
   const positional = new Set<number>();
   for (const [index, parameter] of params.positional.entries()) {
-    if (parameter.isCovariant || inheritsCovariance(cls, member.name, parameter.name, index)) positional.add(index);
+    if (
+      parameter.isCovariant ||
+      mentionsCovariantly(member.type.positional[index], ownerParams) ||
+      supers.some((inherited) => inherited.covariantPositional?.has(index))
+    )
+      positional.add(index);
   }
   const named = new Set<string>();
-  for (const parameter of params.named) {
-    if (parameter.isCovariant || inheritsCovariance(cls, member.name, parameter.name, undefined))
-      named.add(parameter.name);
+  for (const { name, isCovariant } of params.named) {
+    const type = member.type.named.find((parameter) => parameter.name === name)?.type ?? DYNAMIC;
+    if (
+      isCovariant ||
+      mentionsCovariantly(type, ownerParams) ||
+      supers.some((inherited) => inherited.covariantNamed?.has(name))
+    )
+      named.add(name);
   }
   if (positional.size > 0) member.covariantPositional = positional;
   if (named.size > 0) member.covariantNamed = named;

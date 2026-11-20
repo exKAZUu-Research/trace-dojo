@@ -61,8 +61,6 @@ export interface NativeState {
 }
 
 export class DartList extends DartObject {
-  /** Bumped by every change of length, which iterators check to detect concurrent modification. */
-  modifications = 0;
   /** The type the VM's own list class for this list shows, as `CodeUnits` for `'ab'.codeUnits`. */
   vmType: InterfaceType | undefined;
 

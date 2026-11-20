@@ -272,7 +272,7 @@ export class ClassInfo {
       const member = cls.interfaceMember(name, setter);
       if (!member || member.isStatic || member === forwarded) continue;
       const type = cls.thisType;
-      if (!forwarded || !sameType(memberTypeIn(type, forwarded), memberTypeIn(type, member))) forwarded = member;
+      if (!forwarded || !sameForwardingSignature(type, forwarded, member)) forwarded = member;
     }
     return forwarded;
   }
@@ -348,4 +348,18 @@ export function memberTypeIn(type: InterfaceType, member: Member): DartType {
   const owner = asInstanceOf(type, member.owner);
   const env = new Map(member.owner.typeParams.map((param, index) => [param, owner?.args[index] ?? DYNAMIC]));
   return substitute(member.type, env);
+}
+
+function sameForwardingSignature(type: InterfaceType, inherited: Member, declared: Member): boolean {
+  if (!sameType(memberTypeIn(type, inherited), memberTypeIn(type, declared))) return false;
+  if (inherited.kind !== 'method' || declared.kind !== 'method') return true;
+  return (
+    sameSet(inherited.covariantPositional, declared.covariantPositional) &&
+    sameSet(inherited.covariantNamed, declared.covariantNamed)
+  );
+}
+
+function sameSet<T>(left: ReadonlySet<T> | undefined, right: ReadonlySet<T> | undefined): boolean {
+  if (!left || !right) return left === right;
+  return left.size === right.size && left.isSubsetOf(right);
 }

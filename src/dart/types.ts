@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 556 -- The operations of Dart's types belong together; each is a short case analysis.
+// code-gauge-allow-file fileNcss 568 -- The operations of Dart's types belong together; each is a short case analysis.
 import type { ClassInfo } from './classes';
 
 /** A type parameter of a class, a function type, or a generic function. */
@@ -707,6 +707,33 @@ export function mentionsTypeParams(type: DartType, params?: ReadonlySet<TypePara
         mentionsTypeParams(type.returnType, params) ||
         type.positional.some((parameter) => mentionsTypeParams(parameter, params)) ||
         type.named.some((parameter) => mentionsTypeParams(parameter.type, params))
+      );
+    }
+    default: {
+      return false;
+    }
+  }
+}
+
+export function mentionsCovariantly(type: DartType, params: ReadonlySet<TypeParam>, positive = true): boolean {
+  switch (type.kind) {
+    case 'typeParam': {
+      return positive && params.has(type.param);
+    }
+    case 'interface': {
+      return type.args.some((arg) => mentionsCovariantly(arg, params, positive));
+    }
+    case 'function': {
+      return (
+        mentionsCovariantly(type.returnType, params, positive) ||
+        type.positional.some((parameter) => mentionsCovariantly(parameter, params, !positive)) ||
+        type.named.some(({ type }) => mentionsCovariantly(type, params, !positive))
+      );
+    }
+    case 'record': {
+      return (
+        type.positional.some((field) => mentionsCovariantly(field, params, positive)) ||
+        type.named.some(({ type }) => mentionsCovariantly(type, params, positive))
       );
     }
     default: {

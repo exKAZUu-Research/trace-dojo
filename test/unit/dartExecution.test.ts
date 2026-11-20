@@ -2241,6 +2241,63 @@ class Source extends MapBase<Key, Turtle> {
   }
 });
 
+test('map constructors retain their computed values while hashing a key', () => {
+  const declarations = `class Key {
+  int get hashCode { Turtle(3, 3).canMoveForward(); return 1; }
+}
+class Source extends Iterable<Turtle> {
+  Iterator<Turtle> get iterator => Cursor();
+}
+class Cursor implements Iterator<Turtle> {
+  bool started = false;
+  bool moveNext() {
+    if (started) return false;
+    started = true;
+    return true;
+  }
+  Turtle get current => Turtle(1, 1);
+}`;
+  for (const create of [
+    'Map<Key, Turtle>.fromIterables([Key()], Source())',
+    'Map<Key, Turtle>.fromIterable([1], key: (x) => Key(), value: (x) => Turtle(1, 1))',
+  ]) {
+    const program = `${declarations} void main() { final map = ${create}; map.values.first.forward(); }`;
+    expect(executeProgram('dart', program)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: undefined,
+      finalTurtles: [{ x: 1, y: 2 }],
+    });
+  }
+});
+
+test('list filtering retains earlier values across later predicate calls', () => {
+  for (const [method, keep] of [
+    ['retainWhere', 'position != 2'],
+    ['removeWhere', 'position == 2'],
+  ]) {
+    const program = `void main() {
+  var turtles = [Turtle(1, 1), Turtle(2, 2), Turtle(3, 3)];
+  var position = 0;
+  turtles.${method}((turtle) {
+    if (++position == 3) {
+      turtles[0] = Turtle(4, 4);
+      Turtle(5, 5).canMoveForward();
+    }
+    return ${keep};
+  });
+  turtles[0].forward();
+}`;
+    const result = executeProgram('dart', program);
+    expect(result).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+    if (result.kind === 'executed') {
+      expect(result.finalTurtles).toEqual([
+        expect.objectContaining({ x: 1, y: 2 }),
+        expect.objectContaining({ x: 3, y: 3 }),
+      ]);
+    }
+  }
+});
+
 test('set membership keeps its source iterator reachable during hashing', () => {
   const program = `import 'dart:collection';
 late Turtle saved;
@@ -2273,6 +2330,20 @@ void main() {
     stdout: 'true\n',
     finalTurtles: [{ x: 1, y: 2 }],
   });
+});
+
+test('set endpoints skip deleted entries and may return null', () => {
+  const program = `void main() {
+  final set = <int?>{1, 2, null, 3, 4};
+  set.remove(1);
+  set.remove(4);
+  print([set.first, set.last]);
+  set.remove(3);
+  print(set.last);
+  set.clear();
+  try { print(set.last); } catch (error) { print(error.runtimeType); }
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[2, 3]\nnull\nStateError\n' });
 });
 
 test('set union keeps values accumulated before a source callback collects', () => {
@@ -2951,6 +3022,69 @@ void main() { print([Parent().own(), Child().own(), Child().added()]); }`;
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[1, 1, 1]\n' });
   const missingHandler = program.replace('dynamic noSuchMethod(Invocation invocation) => 1;', '');
   expect(executeProgram('dart', missingHandler)).toMatchObject({ kind: 'compileError' });
+  for (const source of [
+    'class A { num f() => 1.5; } class B extends A { int f(); }',
+    'class A { num get value => 1.5; } abstract class B extends A { int get value; } class C extends B {}',
+  ]) {
+    expect(executeProgram('dart', `${source} void main() {}`)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
+test('adding covariance changes the effective forwarder even when types match', () => {
+  const program = `abstract class Contract {
+    void f(num n);
+    void named({num n = 1});
+  }
+  class Parent implements Contract {
+    dynamic noSuchMethod(Invocation invocation) {
+      print([invocation.positionalArguments, invocation.namedArguments]);
+    }
+  }
+  abstract class Middle extends Parent {
+    void f(covariant num n);
+    void named({covariant num n = 2});
+  }
+  class Child extends Middle {}
+  void main() {
+    final child = Child();
+    final f = child.f;
+    final named = child.named;
+    print(f.runtimeType);
+    print(named.runtimeType);
+    f(7);
+    named();
+  }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '(Object?) => void\n({Object? n}) => void\n[[7], {}]\n[[], {Symbol("n"): 2}]\n',
+  });
+});
+
+test('replacement forwarders retain covariance from generic ancestors', () => {
+  const program = `abstract class Contract<T> {
+  T f([T? value]);
+  T named({T? value});
+}
+class Parent<T> implements Contract<T> {
+  dynamic noSuchMethod(Invocation invocation) => 1;
+}
+abstract class Middle extends Parent<num> {
+  int f([num? value = 2]);
+  int named({num? value = 2});
+}
+class Child extends Middle {}
+void main() {
+  final child = Child();
+  final f = child.f;
+  final named = child.named;
+  print([f.runtimeType, f is int Function([Object?])]);
+  print([named.runtimeType, named is int Function({Object? value})]);
+  print([f(), named()]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[([Object?]) => int, true]\n[({Object? value}) => int, true]\n[1, 1]\n',
+  });
 });
 
 test('a static member only sees its own type parameters and local variables', () => {
@@ -3062,4 +3196,42 @@ void main() {
   });
   const bad = "enum E<T extends num> { x<String>('text'); const E(T value); } void main() {}";
   expect(executeProgram('dart', bad)).toMatchObject({ kind: 'compileError' });
+});
+
+test('Function values accept implicit callable tear-offs and expose call', () => {
+  const program = `class Callable { T call<T>(T x) => x; }
+extension type Offset(int offset) { int call(int x) => offset + x; }
+Function returned<T extends Callable>(T object) => object;
+void dispatch(Function f) {
+  print(f.call<int>(2));
+  Function extracted = f.call;
+  print(extracted.call('text'));
+}
+void optional(Function? f) {
+  print(f?.call(3));
+  print(f?.call == null);
+}
+void main() {
+  dispatch(Callable());
+  final functions = <Function>[Callable(), Offset(1)];
+  print(functions[0].call(4));
+  print(functions[1].call(4));
+  print(returned(Callable()).call(5));
+  int Function(int) specialized = Callable();
+  optional(specialized);
+  optional(null);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '2\ntext\n4\n5\n5\n3\nfalse\nnull\ntrue\n',
+  });
+  const declarations = 'class C { int call(int value) => value; }';
+  for (const body of [
+    'Function? f(C? c) => c;',
+    'void f(Function? g) { g.call(1); }',
+    'void f(Function g) { String result = g.call; print(result); }',
+    'void f(Object o) { o.call(); }',
+  ]) {
+    expect(executeProgram('dart', `${declarations} ${body} void main() {}`)).toMatchObject({ kind: 'compileError' });
+  }
 });

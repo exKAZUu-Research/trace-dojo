@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 496 -- Type and diagnostic resolution share the compiler environment.
+// code-gauge-allow-file fileNcss 507 -- Type and diagnostic resolution share the compiler environment.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ClassDeclaration, Span, TypeAliasDeclaration, TypeParameter, TypeSyntax } from './ast';
 import { type ClassInfo, type Member, memberTypeIn, scopedMemberName } from './classes';
@@ -17,6 +17,7 @@ import {
   instantiateToBounds,
   type InterfaceType,
   interfaceType,
+  isFunctionLike,
   isNullable,
   isSubtype,
   isTop,
@@ -503,6 +504,9 @@ export abstract class CompilerBase {
     setter: boolean,
     library = this.library.name
   ): ResolvedMember | undefined {
+    if (type.cls === coreTypes.function && name === 'call' && !setter) {
+      return functionCallProperty({ ...type, nullable: false });
+    }
     let member = type.cls.interfaceMember(scopedMemberName(name, library), setter);
     if (!member) {
       if (type.cls !== coreTypes.object) return this.interfaceMember(objectType(), name, setter, library);
@@ -682,25 +686,28 @@ export abstract class CompilerBase {
       if (isTop(target)) return compiled;
       return { ...compiled, type: target, run: this.runtimeCast(compiled.run, target, false), isConst: false };
     }
-    if (
-      compiled.type.kind === 'interface' &&
-      compiled.type.cls.interfaceMember('call') &&
-      resolveBound(target).kind === 'function'
-    ) {
-      // An object with a `call` method is torn off where a function is expected.
-      const call = this.lookupMember(compiled.type, 'call', false);
-      if (call && call.member.kind === 'method' && isSubtype(call.type, target)) {
-        const { run } = compiled;
-        return {
-          ...compiled,
-          type: call.type,
-          run: (frame) => frame.runtime.getProperty(run(frame), 'call', undefined),
-          isConst: false,
-        };
-      }
-    }
+    const tearOff = this.implicitCallTearOff(compiled, target, span);
+    if (tearOff) return tearOff;
     return this.error(span, describe(typeName(compiled.type), typeName(target)));
   }
+
+  private implicitCallTearOff(compiled: Compiled, target: DartType, span: Span): Compiled | undefined {
+    if (!isFunctionLike(target)) return undefined;
+    const source = resolveBound(compiled.type);
+    if (source.kind !== 'interface' || source.nullable) return undefined;
+    const call = this.lookupDirect(source, 'call', false);
+    if (call?.member.kind !== 'method') return undefined;
+    const tearOff = this.readMember(compiled, call, 'call', span, false);
+    return isSubtype(call.type, target) ? tearOff : this.instantiateGeneric(tearOff, target);
+  }
+
+  protected abstract readMember(
+    receiver: Compiled,
+    resolved: ResolvedMember,
+    name: string,
+    span: Span,
+    nullAware: boolean
+  ): Compiled;
 
   /**
    * A generic function where a non-generic function type is expected, instantiated with the type arguments that make
@@ -869,6 +876,22 @@ function callMember(type: FunctionType): Member {
     callMembers.set(type, member);
   }
   return member;
+}
+
+function functionCallProperty(type: InterfaceType): ResolvedMember {
+  return {
+    member: {
+      kind: 'getter',
+      name: 'call',
+      owner: type.cls,
+      isStatic: false,
+      isAbstract: false,
+      row: undefined,
+      type,
+      impl: undefined,
+    },
+    type,
+  };
 }
 
 function recordFieldMember(name: string): Member {

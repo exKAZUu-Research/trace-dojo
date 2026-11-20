@@ -1041,7 +1041,7 @@ export class Converter extends ExpressionConverter {
         };
       }
       case 'empty_statement': {
-        return unsupported(node, '空の文（; だけの文）');
+        return { kind: 'block', statements: [], ...span };
       }
       default: {
         return syntaxError(node, '書き方に誤りがあります。');
