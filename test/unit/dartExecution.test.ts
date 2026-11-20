@@ -285,9 +285,17 @@ test('large integer inputs distinguish int overflow from exact BigInt values', (
   print(int.tryParse('9' * 600000));
   print(int.tryParse('0xffffffffffffffff'));
   print(BigInt.parse('2' * 150000, radix: 3).bitLength);
+  final padding = '0' * 800000;
+  print(BigInt.parse(padding, radix: 36));
+  print(BigInt.parse('-' + padding + 'z', radix: 36));
+  print(BigInt.parse('  -0x' + padding + 'f  '));
+  print(BigInt.tryParse(padding + 'z', radix: 16));
 }
 `;
-  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'null\n-1\n237745\n' });
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'null\n-1\n237745\n0\n-35\n-15\nnull\n',
+  });
 });
 
 test('setRange follows each list kind and copies overlapping ranges', () => {

@@ -43,16 +43,20 @@ function bitsOf(value: bigint): number {
 }
 
 function parseBigInt(runtime: Runtime, text: string, radix: number | undefined): bigint | undefined {
+  runtime.spend(1 + text.length / 64);
   const [rest, base, negative] = radixSource(text.trim(), radix);
   if (rest.length === 0) return undefined;
-  runtime.spend(1 + rest.length / 64);
-  for (const char of rest) if (radixDigit(char, base) < 0) return undefined;
+  let start = 0;
+  while (rest[start] === '0') start++;
+  if (start === rest.length) return 0n;
+  const digits = rest.slice(start);
+  for (const char of digits) if (radixDigit(char, base) < 0) return undefined;
   const bitsPerDigit = Math.log2(base);
-  const bits = Math.ceil(rest.length * bitsPerDigit);
+  const bits = Math.ceil(digits.length * bitsPerDigit);
   reserve(runtime, bits, bits / 128);
   const prefix = HOST_PREFIXES.get(base);
   const result =
-    prefix === undefined ? combineRadixDigits(runtime, rest, base, bitsPerDigit) : BigInt(`${prefix}${rest}`);
+    prefix === undefined ? combineRadixDigits(runtime, digits, base, bitsPerDigit) : BigInt(`${prefix}${digits}`);
   return negative ? -result : result;
 }
 
