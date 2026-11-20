@@ -2726,3 +2726,38 @@ Hash table capacity overflow
 note: run with \`RUST_BACKTRACE=1\` environment variable to display a backtrace`,
   });
 });
+
+test('requires structural equality for constants used in Rust patterns', () => {
+  const program = `mod cases {
+    pub struct Manual(pub i32);
+    impl PartialEq for Manual { fn eq(&self, other: &Self) -> bool { self.0 == other.0 } }
+    pub const WRAPPED: (Manual,) = (Manual(1),);
+    pub const EMPTY: Option<Manual> = None;
+}
+fn main() {
+    match (cases::Manual(1),) { cases::WRAPPED => (), _ => () }
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'compileError' });
+  expect(
+    executeProgram(
+      'rust',
+      program.replace(
+        'match (cases::Manual(1),) { cases::WRAPPED => (), _ => () }',
+        'match None::<cases::Manual> { cases::EMPTY => println!("empty"), _ => () }'
+      )
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'empty\n' });
+});
+
+test('requires Rust unit enum variant names in patterns to resolve', () => {
+  const program = `enum Direction { Up, Down }
+fn main() {
+    let d = Direction::Down;
+    println!("{}", match &d { Up => 1, Direction::Down => 2, _ => 3 });
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'compileError' });
+  expect(executeProgram('rust', program.replace('Up =>', 'Direction::Up =>'))).toMatchObject({
+    kind: 'executed',
+    stdout: '2\n',
+  });
+});

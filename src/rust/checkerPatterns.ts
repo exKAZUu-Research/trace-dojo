@@ -4,6 +4,7 @@ import { patternBindings } from './astWalk';
 import type { Checker } from './checker';
 import { resolveStructPath, resolveValuePath } from './checkerPaths';
 import { checkFieldVisible } from './checkerPlaces';
+import { ConstLint, type Known } from './constLint';
 import { normalize } from './infer';
 import { compileError, lookupValue } from './items';
 import { adt, freshVar, ref, resolve, shallow, substitute, type Type, typeToString } from './types';
@@ -109,11 +110,13 @@ function bindingPattern(
   mode: LocalVar['mode']
 ): void {
   const binding = patternBindingRes(c, pattern);
+  const matched = derefForMatch(t, mode).t;
   if (binding) {
     c.annotations.paths.set(pattern, binding);
-    checkConstPattern(c, pattern, binding, derefForMatch(t, mode).t);
+    checkConstPattern(c, pattern, binding, matched);
     return;
   }
+  checkVariantBinding(pattern, matched, mode);
   const localType = mode === 'move' ? type : ref(t, mode === 'refMut');
   const existing = c.orBindings?.get(pattern.name);
   if (existing) {
@@ -132,6 +135,16 @@ function bindingPattern(
   }
   c.annotations.bindings.set(pattern, local);
   if (pattern.sub) checkPatternPart(c, pattern.sub, type, mode);
+}
+
+function checkVariantBinding(pattern: Extract<Pattern, { kind: 'binding' }>, type: Type, mode: LocalVar['mode']): void {
+  if (pattern.mutable || pattern.sub || mode !== 'move' || type.kind !== 'adt' || type.def.kind !== 'enum') return;
+  if (type.def.variants.some((variant) => variant.shape === 'unit' && variant.name === pattern.name)) {
+    compileError(
+      pattern.span,
+      `パターンの名前 ${pattern.name} は列挙型の選択肢と同じです。${type.def.name}::${pattern.name} と書いてください。`
+    );
+  }
 }
 
 function litPattern(
@@ -298,7 +311,50 @@ function checkConstPattern(c: Checker, pattern: Pattern, res: PathRes, t: Type):
   } else if (res.kind === 'const') {
     c.unifyOrError(pattern.span, t, res.type);
     c.requireTrait(res.type, 'PartialEq', pattern.span);
+    c.coverageChecks.push(() => {
+      const value = ConstLint.patternValue(res.def, c.annotations);
+      if (!structuralValue(res.type, value)) {
+        compileError(pattern.span, 'パターンに書く定数の型には、#[derive(PartialEq)] が必要です。');
+      }
+    });
   }
+}
+
+const STRUCTURAL_BUILTINS = new Set([
+  'Option',
+  'Result',
+  'Ordering',
+  'Reverse',
+  'Range',
+  'RangeInclusive',
+  'RangeFrom',
+  'RangeTo',
+  'RangeToInclusive',
+  'RangeFull',
+]);
+
+function structuralValue(type: Type, value: Known | undefined, depth = 0): boolean {
+  if (depth >= 64) return false;
+  const t = normalize(shallow(type));
+  const fields = typeof value === 'object' ? value.fields : undefined;
+  if (t.kind === 'ref') return structuralValue(t.target, value, depth + 1);
+  if (t.kind === 'tuple')
+    return t.elems.every((elem, index) => structuralValue(elem, fields?.get(String(index)), depth + 1));
+  if (t.kind === 'array' || t.kind === 'slice') {
+    if (fields) return [...fields.values()].every((item) => structuralValue(t.elem, item, depth + 1));
+    return (t.kind === 'array' && t.len === 0) || structuralValue(t.elem, undefined, depth + 1);
+  }
+  if (t.kind !== 'adt') return t.kind !== 'dyn';
+  if (!t.def.derives.has('PartialEq') && (!t.def.builtin || !STRUCTURAL_BUILTINS.has(t.def.builtin))) return false;
+  const tag = typeof value === 'object' && value.ctor?.startsWith('v') ? Number(value.ctor.slice(1)) : undefined;
+  const subst = new Map(t.def.params.map((param, index) => [param, t.args[index]]));
+  return t.def.variants.every(
+    (variant, index) =>
+      (tag !== undefined && index !== tag) ||
+      variant.fields.every((field) =>
+        structuralValue(substitute(field.type, subst), fields?.get(field.name), depth + 1)
+      )
+  );
 }
 
 // code-gauge-allow functionCognitiveComplexity 27 -- Follows the type checking rules of rustc case by case.
@@ -321,7 +377,7 @@ function adtPattern(
   c.annotations.paths.set(pattern, res);
   if (pattern.kind === 'path') {
     if (res.kind === 'const') {
-      c.unifyOrError(pattern.span, t, res.type);
+      checkConstPattern(c, pattern, res, t);
       return;
     }
     if (res.kind !== 'ctor' || res.def.variants[res.variant].shape !== 'unit') {
