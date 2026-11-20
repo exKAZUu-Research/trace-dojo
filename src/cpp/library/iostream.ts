@@ -150,6 +150,11 @@ export class StreamValue extends Store {
     return this.content.bytes;
   }
 
+  /** Returns the storage the stream's text buffer reserved, as destroying the stream releases it. */
+  releaseStorage(frame: Frame): void {
+    this.content.releaseStorage(frame);
+  }
+
   resetBuffer(frame: Frame, bytes: string): void {
     this.content.replaceBytes(frame, bytes);
     this.position = 0;
@@ -329,6 +334,7 @@ export class Streams {
         throw new Error('A stream cannot be copied');
       },
       assign: () => {},
+      destroy: (frame, value) => (value as StreamValue).releaseStorage(frame),
     };
     if (kind === 'ostream' || kind === 'istream') cls.isDefaultConstructorDeleted = true;
     else {

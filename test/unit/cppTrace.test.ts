@@ -548,6 +548,25 @@ int main() {
   });
 });
 
+test.each(['std::ostringstream copy(source);', 'std::istringstream copy(source);', 'std::stringstream copy(source);'])(
+  'returns the storage of a loop-local string stream %s',
+  (declaration) => {
+    const program = `#include <iostream>
+#include <sstream>
+#include <string>
+int main() {
+  std::string source(5000, 'x');
+  for (int i = 0; i < 5000; i++) { ${declaration} }
+  std::cout << "done";
+}`;
+    expect(executeProgram('cpp', program)).toMatchObject({
+      kind: 'executed',
+      stdout: 'done',
+      uncaughtException: undefined,
+    });
+  }
+);
+
 test('charges the storage of the message buffer that what() creates', () => {
   const program = `#include <stdexcept>
 #include <string>
