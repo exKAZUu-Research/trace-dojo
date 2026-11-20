@@ -468,6 +468,28 @@ int main() {
   }
 });
 
+test.each(['values.erase(std::next(values.begin(), values.size() - 1));'])(
+  'meters the bucket scan of an unordered erase in %s',
+  (erase) => {
+    const program = `#include <iterator>
+#include <unordered_set>
+int main() {
+  std::unordered_set<int> values;
+  for (int i = 0; i < 300; ++i) values.insert(2 * i);
+  values.max_load_factor(300);
+  values.rehash(2);
+  while (!values.empty()) ${erase}
+}`;
+    const previous = LIMITS.maxOperations;
+    LIMITS.maxOperations = 20_000;
+    try {
+      expect(executeProgram('cpp', program)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+    } finally {
+      LIMITS.maxOperations = previous;
+    }
+  }
+);
+
 test.each([
   ['list', '=='],
   ['vector', '!='],

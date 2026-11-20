@@ -455,16 +455,25 @@ export class HashValue extends MapValue {
       if (node.next) this.buckets[constrain(node.next.hash, count)] = node;
     }
     this.size++;
-    this.ordered = undefined;
+    this.invalidateOrder(frame);
     return [node, true];
   }
 
+  /** Drops the cached iteration order, charging the rebuild that a later positional access makes of it. */
+  private invalidateOrder(frame: Frame): void {
+    if (this.ordered) frame.runtime.spend(Math.ceil(this.ordered.length / 64));
+    this.ordered = undefined;
+  }
+
   /** Removes the node at a position, as `erase(iterator)` does. */
-  remove(node: HashNode): Value {
+  remove(frame: Frame, node: HashNode): Value {
     const count = this.buckets.length;
     const index = constrain(node.hash, count);
     let before = this.buckets[index] as HashNode;
-    while (before.next !== node) before = before.next as HashNode;
+    while (before.next !== node) {
+      frame.runtime.spend();
+      before = before.next as HashNode;
+    }
     // The bucket loses its "before" pointer when the node was its only one.
     const next = node.next;
     if (
@@ -479,7 +488,7 @@ export class HashValue extends MapValue {
     before.next = next;
     node.owner = undefined;
     this.size--;
-    this.ordered = undefined;
+    this.invalidateOrder(frame);
     return node.value;
   }
 
@@ -856,7 +865,7 @@ export function unorderedClass(
   method('erase', [constRef(keyType)], SIZE_T, (self, [k], frame) => {
     const node = self.findNode(frame, keyArg(k));
     if (!node) return 0n;
-    const removed = self.remove(node);
+    const removed = self.remove(frame, node);
     ops().destroy?.(frame, removed);
     return 1n;
   });
@@ -864,7 +873,7 @@ export function unorderedClass(
     if (!(position instanceof HashPosition) || position.store !== self) throw new CppRuntimeError('invalidIterator');
     const node = position.entry();
     const next = node.next;
-    const removed = self.remove(node);
+    const removed = self.remove(frame, node);
     ops().destroy?.(frame, removed);
     return self.iterator(next);
   });
