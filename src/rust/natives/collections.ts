@@ -248,7 +248,6 @@ function mapEndNatives(): Record<string, Native> {
   };
 }
 
-// code-gauge-allow functionCognitiveComplexity 28 -- One native per method of std's sets.
 // code-gauge-allow functionNcss 57 -- One native per method of std's sets.
 function setNatives(sorted: boolean): Record<string, (args: Value[], ctx: NativeContext) => Value> {
   return {

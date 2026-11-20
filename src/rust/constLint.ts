@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 416 -- Shares Rust constant propagation between diagnostics and pattern coverage.
+// code-gauge-allow-file fileNcss 573 -- Shares Rust constant propagation between diagnostics and pattern coverage.
 
 import type { ExecutionBudget } from '../interpreter/limits';
 import type { Annotations, LocalVar, PathRes } from './annotations';
@@ -144,6 +144,7 @@ export class ConstLint {
   }
 
   /** Records the constants that a pattern binds. */
+  // code-gauge-allow functionCognitiveComplexity 23 -- Binding mode determines whether the analyzed value is propagated.
   private bind(pattern: Pattern, value: Known | undefined): void {
     if (pattern.kind === 'binding') {
       const local = this.annotations.bindings.get(pattern);
@@ -510,7 +511,6 @@ export class ConstLint {
     return name && this.integerBinary(expr, name, left, right);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- One case per integer operator.
   // code-gauge-allow functionNcss 39 -- One case per integer operator.
   private integerBinary(
     expr: IntegerOperation,
@@ -667,6 +667,7 @@ export function checkConstDrop(
   }
 }
 
+// code-gauge-allow functionCognitiveComplexity 20 -- Destruction depends on active variants and partial moves at each projection.
 function needsConstDrop(
   type: Type,
   value: Known | undefined,
@@ -737,6 +738,8 @@ function aggregate(fields: Iterable<readonly [string, Known | undefined]>, ctor?
 }
 
 /** Whether a pattern matches a constant: surely, surely not, or unknown. */
+// code-gauge-allow functionNcss 37 -- Each Rust pattern has distinct rules for deciding whether it can match.
+// code-gauge-allow functionCognitiveComplexity 22 -- Each Rust pattern has distinct rules for deciding whether it can match.
 function patternMatches(
   pattern: Pattern,
   value: Known | undefined,

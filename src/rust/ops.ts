@@ -1,5 +1,5 @@
 import type { Span } from './ast';
-// code-gauge-allow-file fileNcss 485 -- Keeps type-directed arithmetic, comparison, and copying with their shared runtime hooks.
+// code-gauge-allow-file fileNcss 500 -- Keeps type-directed arithmetic, comparison, and copying with their shared runtime hooks.
 import { bigintToF32 } from './floatFormat';
 import { normalize } from './infer';
 import { RustPanic } from './runtime';
@@ -376,7 +376,7 @@ export function testPartialOrder(method: OrderMethod, type: Type, a: Value, b: V
 
 /** Compares two values of a type, as `Ord::cmp` and `PartialOrd::partial_cmp` do; NaN compares as `undefined`. */
 // code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of type.
-// code-gauge-allow functionNcss 34 -- One case per kind of type.
+// code-gauge-allow functionNcss 35 -- One case per kind of type.
 export function compareValues(type: Type, a: Value, b: Value, partial = false, rhs = type): number | undefined {
   const t = derefType(type);
   const x = deref(a);

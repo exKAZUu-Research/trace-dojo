@@ -6,6 +6,7 @@ import { shallow, type Type } from './types';
 type AdtType = Type & { kind: 'adt' };
 
 /** The conversions `From` provides in the standard library that learning programs use. */
+// code-gauge-allow functionCognitiveComplexity 16 -- Each conversion family has different representation and range constraints.
 export function conversionExists(solver: TraitSolver, source: Type, target: Type): Answer {
   const t = normalize(shallow(target));
   if (t.kind === 'adt') {

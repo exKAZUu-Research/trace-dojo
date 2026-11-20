@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 504 -- One method per kind of item, type, and path.
+// code-gauge-allow-file fileNcss 520 -- One method per kind of item, type, and path.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type {
@@ -193,8 +193,8 @@ export class Converter extends ExpressionConverter {
     return unavailable(this.span(modifier), `公開の範囲の指定（${modifier.text}）`);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- One case per kind of syntax node.
-  // code-gauge-allow functionNcss 38 -- One case per kind of syntax node.
+  // code-gauge-allow functionCognitiveComplexity 23 -- One case per kind of syntax node.
+  // code-gauge-allow functionNcss 39 -- One case per kind of syntax node.
   private fnItem(node: Node, allowMissingBody = false): FnItem {
     const span = this.span(node);
     checkNotReserved(this.field(node, 'name').text, span);
@@ -266,7 +266,6 @@ export class Converter extends ExpressionConverter {
     return { pattern, type: this.type(this.field(node, 'type')), span };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of syntax node.
   // code-gauge-allow functionCognitiveComplexity 28 -- Type and lifetime parameters and where clauses use distinct Rust syntax.
   // code-gauge-allow functionNcss 34 -- One case per kind of syntax node.
   private generics(node: Node): Generics {

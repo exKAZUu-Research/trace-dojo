@@ -34,7 +34,7 @@ export class TraitSolver {
   ) {}
 
   /** Whether `type` implements the trait, binding variables of closure signatures as a side effect. */
-  // code-gauge-allow functionCognitiveComplexity 20 -- One rule per trait or conversion of the standard library.
+  // code-gauge-allow functionCognitiveComplexity 21 -- One rule per trait or conversion of the standard library.
   implements(type: Type, ref: TraitRef): Answer {
     const t = normalize(shallow(type));
     const { trait } = ref;
@@ -64,6 +64,7 @@ export class TraitSolver {
     return ref.trait.builtin ? builtinImplements(this, t, ref) : 'no';
   }
 
+  // code-gauge-allow functionCognitiveComplexity 20 -- Literal defaults and conversions depend on the goal and numeric kind.
   private varImplements(t: Type & { kind: 'var' }, ref: TraitRef): Answer {
     // An untyped number indexing a slice is a `usize`, the only integer type slices take.
     if (t.v.literal === 'int' && ref.trait.builtin === 'SliceIndex')
@@ -184,7 +185,7 @@ export class TraitSolver {
     return bound.item !== undefined && this.unifier.tryUnify(bound.item, ref.item);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- One rule per trait or conversion of the standard library.
+  // code-gauge-allow functionCognitiveComplexity 22 -- One rule per trait or conversion of the standard library.
   private closureImplements(t: Type, ref: TraitRef): Answer {
     const sig = ref.fnSig!;
     if (t.kind === 'closure') {
@@ -226,6 +227,7 @@ export class TraitSolver {
    * Matches an impl's self type (and trait arguments) against a type, binding the impl's parameters to fresh
    * variables; the bindings stay when it matches, so that the caller learns the arguments.
    */
+  // code-gauge-allow functionCognitiveComplexity 17 -- Checks the impl substitutions and their trait obligations as one transaction.
   matchImpl(impl: ImplDef, type: Type, traitArgs: Type[] = []): Subst | undefined {
     const subst: Subst = new Map(impl.params.map((param) => [param, freshVar()]));
     const snapshot = this.unifier.snapshot();

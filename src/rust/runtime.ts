@@ -218,7 +218,8 @@ export class OutOfMemory {
   constructor(readonly bytes: number) {}
 }
 
-// code-gauge-allow functionNcss 31 -- One case per kind of value.
+// code-gauge-allow functionNcss 38 -- One case per kind of value.
+// code-gauge-allow functionCognitiveComplexity 18 -- Each runtime value representation exposes its own reachable objects.
 function pushChildren(item: object, stack: unknown[]): void {
   if (Array.isArray(item)) {
     pushAll(stack, item);

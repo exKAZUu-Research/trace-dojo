@@ -11,7 +11,6 @@ import { ControlSignal, type Frame, OutOfMemory, ProcessExit, Runtime, RustPanic
 import { resolve, shallow, type Type } from './types';
 import { EnumValue, type Value } from './values';
 
-// code-gauge-allow duplicateLines 15 -- Each language reports how its program ended alike.
 export function executeRustProgram(source: string, input?: ProgramInput): ProgramExecution {
   try {
     const built = buildProgram(source);

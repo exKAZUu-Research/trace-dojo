@@ -28,7 +28,7 @@ const UNSUPPORTED_EXPRESSIONS: Record<string, string> = {
 /** Converts statements and expressions. */
 export abstract class ExpressionConverter extends MacroConverter {
   // code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of syntax node.
-  // code-gauge-allow functionNcss 44 -- One case per kind of syntax node.
+  // code-gauge-allow functionNcss 45 -- One case per kind of syntax node.
   block(node: Node): Block {
     const span = this.span(node);
     const stmts: Stmt[] = [];

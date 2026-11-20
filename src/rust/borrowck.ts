@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 560 -- Follows the borrow checking rules case by case.
+// code-gauge-allow-file fileNcss 633 -- Follows the borrow checking rules case by case.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ExecutionBudget } from '../interpreter/limits';
 import type { Annotations, FnContext, LocalVar } from './annotations';
@@ -123,6 +123,7 @@ export class BorrowChecker {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Keep initialization and refutable-binding flow in one pass.
   private stmt(stmt: Stmt, state: State): State {
     this.budget.spend();
     switch (stmt.kind) {
@@ -159,7 +160,7 @@ export class BorrowChecker {
    * Checks an expression. `mode` tells what happens to its value when it is a place: moved (or copied), read without
    * moving (borrowed as `&`), or borrowed mutably.
    */
-  // code-gauge-allow functionNcss 58 -- One case per kind of expression.
+  // code-gauge-allow functionNcss 60 -- One case per kind of expression.
   private expr(expr: Expr, state: State, mode: 'move' | 'read' | 'mut'): State {
     this.budget.spend();
     if (state === BOTTOM) return BOTTOM;
@@ -390,6 +391,7 @@ export class BorrowChecker {
   }
 
   /** Binds a pattern's variables, moving the parts of a place they bind by value. */
+  // code-gauge-allow functionCognitiveComplexity 18 -- Pattern matching coordinates reads, partial moves and new bindings.
   private bindPattern(pattern: Pattern, scrutinee: Expr, state: State): State {
     const place = this.placeOf(scrutinee);
     if (pattern.kind === 'wild') {
@@ -528,6 +530,7 @@ export class BorrowChecker {
     checker.block(body, state);
   }
 
+  // code-gauge-allow functionNcss 32 -- Each macro has its own order of consuming and borrowing operands.
   private macro(expr: Extract<Expr, { kind: 'macro' }>, state: State): State {
     const { macro } = expr;
     const format = (f: FormatArgs | undefined, s: State): State => this.formatArgs(f, s);
@@ -632,6 +635,7 @@ export class BorrowChecker {
   }
 
   /** Requires a variable to hold a value where the program uses it. */
+  // code-gauge-allow functionCognitiveComplexity 16 -- Initialization, full moves and partial moves require distinct diagnostics.
   private checkUsable(
     local: LocalVar,
     varState: VarState,
@@ -675,7 +679,8 @@ export class BorrowChecker {
   }
 
   /** Assigns a place; `value` is the assigned expression of a plain assignment (`=`), or undefined for `+=` and kin. */
-  // code-gauge-allow functionCognitiveComplexity 23 -- Follows the borrow checking rules case by case.
+  // code-gauge-allow functionCognitiveComplexity 29 -- Follows the borrow checking rules case by case.
+  // code-gauge-allow functionNcss 33 -- Assignments update ownership, initialization and immutable-binding state together.
   private assign(target: Expr, state: State, span: Span, value: Expr | undefined, known?: Known): State {
     const whole = value !== undefined;
     const place = this.placeOf(target);

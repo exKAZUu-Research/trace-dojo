@@ -52,7 +52,6 @@ export function requireMutablePlace(
 
 /** What a place expression is rooted in, looking through fields, indexes, and derefs. */
 // code-gauge-allow functionCognitiveComplexity 18 -- Follows the type checking rules of rustc case by case.
-// code-gauge-allow functionNcss 31 -- Follows the type checking rules of rustc case by case.
 function placeRoot(
   c: Checker,
   place: Expr

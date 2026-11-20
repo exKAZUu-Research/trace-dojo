@@ -341,6 +341,7 @@ function containsNaN(value: Known | undefined): boolean {
   return typeof value === 'object' && [...value.fields.values()].some(containsNaN);
 }
 
+// code-gauge-allow functionCognitiveComplexity 18 -- The active constructor and its nested fields decide pattern equality.
 function structuralValue(type: Type, value: Known | undefined, depth = 0): boolean {
   if (depth >= 64) return false;
   const t = normalize(shallow(type));
@@ -365,8 +366,8 @@ function structuralValue(type: Type, value: Known | undefined, depth = 0): boole
   );
 }
 
-// code-gauge-allow functionCognitiveComplexity 27 -- Follows the type checking rules of rustc case by case.
-// code-gauge-allow functionNcss 49 -- Follows the type checking rules of rustc case by case.
+// code-gauge-allow functionCognitiveComplexity 29 -- Follows the type checking rules of rustc case by case.
+// code-gauge-allow functionNcss 51 -- Follows the type checking rules of rustc case by case.
 function adtPattern(
   c: Checker,
   pattern: Extract<Pattern, { kind: 'tupleStruct' | 'struct' | 'path' }>,

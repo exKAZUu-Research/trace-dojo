@@ -215,7 +215,6 @@ function mutatedCapture(
 
 /** Which children of an expression it uses by value (moves), given whether the expression's own value is moved. */
 // code-gauge-allow functionCognitiveComplexity 28 -- One case per kind of expression.
-// code-gauge-allow functionNcss 36 -- One case per kind of expression.
 function consumedChildren(
   expr: Expr,
   movesByPattern: (pattern: Pattern) => boolean

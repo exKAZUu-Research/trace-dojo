@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 450 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss 500 -- One native per method of the standard library.
 import {
   changeString,
   claimString,

@@ -191,7 +191,6 @@ function checkComparison(c: Checker, expr: Extract<Expr, { kind: 'binary' }>): T
   return BOOL;
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Follows the `PartialEq` and `PartialOrd` impls of std case by case.
 export function checkComparisonOperands(c: Checker, left: Expr, right: Expr, op: string, span: Span): [Type, Type] {
   const leftType = c.expr(left, undefined);
   const l = normalize(shallow(leftType));
@@ -238,7 +237,7 @@ export function checkAssign(c: Checker, expr: Extract<Expr, { kind: 'assign' }>)
   return UNIT;
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- Follows the type checking rules of rustc case by case.
+// code-gauge-allow functionCognitiveComplexity 28 -- Follows the type checking rules of rustc case by case.
 export function checkCompoundAssign(c: Checker, expr: Extract<Expr, { kind: 'compoundAssign' }>): Type {
   const targetType = c.expr(expr.target, undefined);
   if (!isPlaceExpr(c, expr.target))

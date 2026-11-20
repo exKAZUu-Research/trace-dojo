@@ -10,6 +10,8 @@ interface Projection {
   type: Type;
 }
 
+// code-gauge-allow functionNcss 34 -- Tracking projections uses the same local and checked call information for the whole walk.
+// code-gauge-allow functionCognitiveComplexity 27 -- Tracking projections uses the same local and checked call information for the whole walk.
 export function capturedPlaces(
   annotations: Annotations,
   body: Expr,

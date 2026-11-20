@@ -146,7 +146,6 @@ function probeAsIter(
   return undefined;
 }
 
-// code-gauge-allow functionCognitiveComplexity 24 -- Follows rustc's method probe step by step.
 function probe(
   program: Program,
   solver: TraitSolver,

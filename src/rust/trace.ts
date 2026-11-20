@@ -27,7 +27,6 @@ import {
   type Value,
 } from './values';
 
-// code-gauge-allow duplicateLines 15 -- Uses Rust's own build, runtime, and trace variable formatter.
 export function traceRustProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
   const built = buildProgram(program, new Set(trace.atomicAnnotations.keys()));
   const runtime = new Runtime(input);

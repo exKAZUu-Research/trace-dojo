@@ -73,6 +73,7 @@ export function parseStringLiteral(text: string): string | undefined {
   return unescape(text.slice(1, -1), 'string');
 }
 
+// code-gauge-allow functionCognitiveComplexity 16 -- Rust escape forms have different widths and allowed values.
 function unescape(body: string, kind: LiteralKind): string | undefined {
   if (body.includes('\r')) {
     body = body.replaceAll('\r\n', '\n');

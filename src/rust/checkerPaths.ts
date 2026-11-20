@@ -194,6 +194,7 @@ function unavailableStd(names: string[], span: Span): never {
 }
 
 /** Whether a trait is in scope in the body: imported, in the prelude, or the trait of the body's impl. */
+// code-gauge-allow functionCognitiveComplexity 16 -- A trait can enter scope from declarations, aliases, globs and the prelude.
 export function traitInScope(c: Checker, trait: TraitDef): boolean {
   if (trait === c.body.currentTrait) return true;
   const isTrait = (binding: TypeBinding | undefined): boolean => binding?.kind === 'trait' && binding.def === trait;
@@ -340,8 +341,8 @@ function checkTupleConstructorVisible(c: Checker, def: AdtDef, span: Span): void
   for (const field of def.variants[0].fields) checkFieldVisible(c, def, field, span);
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Follows the type checking rules of rustc case by case.
-// code-gauge-allow functionNcss 33 -- Follows the type checking rules of rustc case by case.
+// code-gauge-allow functionCognitiveComplexity 19 -- Follows the type checking rules of rustc case by case.
+// code-gauge-allow functionNcss 34 -- Follows the type checking rules of rustc case by case.
 export function structExpr(c: Checker, expr: Extract<Expr, { kind: 'struct' }>, expected: Type | undefined): Type {
   const { def, variant, typeArgs } = resolveStructPath(c, expr.path, expr.span);
   const self = adt(def, typeArgs);

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 951 -- Lowers each kind of expression to the points and regions rustc's MIR gives it.
+// code-gauge-allow-file fileNcss 958 -- Lowers each kind of expression to the points and regions rustc's MIR gives it.
 import type { ExecutionBudget } from '../interpreter/limits';
 import type { Annotations, FnContext, LocalVar, MethodRes } from './annotations';
 import type { Block, Condition, Expr, FormatArgs, Pattern, Span, Stmt } from './ast';
@@ -986,6 +986,7 @@ export class LoanBuilder {
   // -------------------------------------------------------------------------------------------------------------------
   // Calls
 
+  // code-gauge-allow functionCognitiveComplexity 18 -- A call defines the result layout and relates it to its borrowed inputs.
   private call(expr: Extract<Expr, { kind: 'call' }>): Value {
     const res = expr.callee.kind === 'path' ? this.annotations.paths.get(expr.callee) : undefined;
     const fn = res?.kind === 'fn' ? res.fn : undefined;
@@ -1134,6 +1135,7 @@ export class LoanBuilder {
 
   /** A closure borrows, or moves, the places it captures when it is created, and holds them while it lives. */
   // code-gauge-allow functionNcss 44 -- Follows rustc's capture modes case by case.
+  // code-gauge-allow functionCognitiveComplexity 29 -- A closure builds a loan summary from its captures and borrowed results.
   private closure(expr: Extract<Expr, { kind: 'closure' }>): Value {
     const info = this.annotations.closures.get(expr);
     const type = expr.ty && normalize(shallow(expr.ty));
@@ -1228,7 +1230,7 @@ export class LoanBuilder {
     });
   }
 
-  // code-gauge-allow functionNcss 39 -- One case per macro.
+  // code-gauge-allow functionNcss 41 -- One case per macro.
   private macro(expr: Extract<Expr, { kind: 'macro' }>): Value {
     const { macro } = expr;
     switch (macro.kind) {

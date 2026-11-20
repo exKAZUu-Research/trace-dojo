@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 631 -- The checker core owns body, entry point, and type obligations.
+// code-gauge-allow-file fileNcss 752 -- The checker core owns body, entry point, and type obligations.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ExecutionBudget } from '../interpreter/limits';
 import { Annotations, type Coercion, type FnContext, type LocalVar, type PathRes } from './annotations';
@@ -130,6 +130,7 @@ export class Checker {
     this.checkMain();
   }
 
+  // code-gauge-allow functionCognitiveComplexity 22 -- Checks each kind of declared item in its own type scope.
   private checkDeclaredTypes(firstAdt: number, firstFn: number, firstConst: number, firstImpl: number): void {
     for (const def of this.program.adts.slice(firstAdt)) {
       if ((def.module as Module | undefined)?.isStd) continue;
@@ -923,6 +924,7 @@ export class Checker {
    * Rejects what rustc rejects in a written type: a trait object of a trait that methods returning `Self` or taking
    * type parameters make not dyn compatible (E0038), and an unsized type (`dyn T`, `str`) as a type argument (E0277).
    */
+  // code-gauge-allow functionCognitiveComplexity 18 -- Checks type well-formedness at each nested written type.
   private checkWrittenType(type: Type, span: Span): void {
     const t = shallow(type);
     if (t.kind === 'dyn') checkDynCompatible(t.trait.trait, span);
@@ -1161,6 +1163,7 @@ function fundamentalTarget(type: Type): Type {
 
 const NON_DYN_BUILTIN_TRAITS = new Set(['Into', 'TryInto', 'Hash', 'FromIterator', 'Extend', 'Sum', 'Product']);
 
+// code-gauge-allow functionCognitiveComplexity 22 -- Object safety depends on the trait hierarchy and every dispatchable method.
 function checkDynCompatible(trait: TraitDef, span: Span, checked = new Set<TraitDef>()): void {
   if (checked.has(trait)) return;
   checked.add(trait);

@@ -198,7 +198,6 @@ export class Formatter {
     return text;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Follows std::fmt's formatting rules case by case.
   // code-gauge-allow functionNcss 41 -- Follows std::fmt's formatting rules case by case.
   private debugOf(value: Value, type: Type, spec: Spec, indent: number | undefined, write?: WriteChunk): string {
     const t = this.concrete(type);
@@ -401,7 +400,7 @@ export class Formatter {
     );
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Follows std::fmt's formatting rules case by case.
+  // code-gauge-allow functionCognitiveComplexity 19 -- Follows std::fmt's formatting rules case by case.
   private radix(trait: FormatSpec['trait'], value: Value, type: Type, spec: Spec, write?: WriteChunk): string {
     let t = this.concrete(type);
     while (t.kind === 'ref') t = this.concrete(t.target);

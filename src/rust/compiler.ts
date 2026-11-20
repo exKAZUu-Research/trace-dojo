@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 573 -- Keeps the compilation that shares a function's context and step state together.
+// code-gauge-allow-file fileNcss 603 -- Keeps the compilation that shares a function's context and step state together.
 import type { Annotations, Coercion, FnContext, LocalVar, PathRes } from './annotations';
 import type { Block, Expr, Pattern, Span, Stmt } from './ast';
 import { forEachDirect, patternBindings } from './astWalk';
@@ -255,6 +255,7 @@ export class Compiler {
     }
   }
 
+  // code-gauge-allow functionNcss 32 -- Keep evaluation, binding, scope and let-else control flow in order.
   private compileLet(stmt: Extract<Stmt, { kind: 'let' }>): Eval {
     if (!stmt.init) {
       const locals = patternBindings(stmt.pattern, this.annotations);
@@ -391,8 +392,6 @@ export class Compiler {
   // Expressions
 
   /** An expression's value where it is moved or copied: a `Copy` aggregate read from a place is copied. */
-  // code-gauge-allow functionCognitiveComplexity 17 -- One case per way a value leaves its place: copied or moved.
-  // code-gauge-allow functionNcss 31 -- One case per way a value leaves its place: copied or moved.
   value(expr: Expr): Eval {
     const read = this.read(expr);
     const coercion = this.annotations.coercions.get(expr);
@@ -402,6 +401,7 @@ export class Compiler {
     return this.coerce(input, coercion, expr);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- The access mode and resolved type decide how to read a place.
   private valueFromPlace(expr: Expr, read: Eval, type: Type): Eval {
     if (!isPlaceExpr(expr, this.annotations)) return read;
     if (this.isCopy(type)) return needsCopy(type) ? (frame) => copyValue(read(frame)) : read;
@@ -654,6 +654,7 @@ export class Compiler {
    * The fields of a captured variable that a closure's body uses (`p.name`), which it captures on their own as edition
    * 2021 does, or undefined when the body uses the whole variable.
    */
+  // code-gauge-allow functionCognitiveComplexity 16 -- The walk keeps each projected field attached to its capture path.
   private capturedFields(body: Expr, local: LocalVar): number[][] | undefined {
     const fields: number[][] = [];
     const path = (expr: Expr): number[] | undefined => {

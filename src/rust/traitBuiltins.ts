@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 437 -- One rule per trait of the standard library.
+// code-gauge-allow-file fileNcss 495 -- One rule per trait of the standard library.
 import { collectionKeyAnswer } from './collectionBounds';
 import { normalize } from './infer';
 import { supportsDebug } from './iterDebug';
@@ -250,23 +250,9 @@ function dynImplies(solver: TraitSolver, t: Type & { kind: 'dyn' }, trait: strin
 }
 
 function comparison(goal: Goal): Answer {
-  const { solver, t, ref, name, all } = goal;
+  const { t, ref, name, all } = goal;
   const partial = name === 'PartialEq' || name === 'PartialOrd';
-  if (partial && ref.args[0]) {
-    const rhs = normalize(shallow(ref.args[0]));
-    if (t.kind === 'ref' && rhs.kind === 'ref') {
-      if (name === 'PartialOrd' && t.mutable && !rhs.mutable) return 'no';
-      return solver.implements(t.target, { trait: ref.trait, args: [rhs.target] });
-    }
-    if (name === 'PartialEq') {
-      if (stringsCompare(t, rhs)) return 'yes';
-      const sequence = sequenceEquality(solver, ref, t, rhs);
-      if (sequence !== undefined) return sequence;
-    }
-    return solver.unifier.tryUnify(t, ref.args[0])
-      ? builtinImplements(solver, t, { trait: ref.trait, args: [] })
-      : 'no';
-  }
+  if (partial && ref.args[0]) return comparisonWithRhs(goal, ref.args[0]);
   if (t.kind === 'float') return partial ? 'yes' : 'no';
   if (isPrimitive(t) || t.kind === 'str' || t.kind === 'never') return 'yes';
   if (t.kind === 'ref') return all([t.target]);
@@ -274,6 +260,20 @@ function comparison(goal: Goal): Answer {
   if (t.kind === 'array' || t.kind === 'slice') return all([t.elem]);
   if (t.kind === 'adt') return comparisonAdt(goal, t);
   return 'no';
+}
+
+function comparisonWithRhs({ solver, t, ref, name }: Goal, expected: Type): Answer {
+  const rhs = normalize(shallow(expected));
+  if (t.kind === 'ref' && rhs.kind === 'ref') {
+    if (name === 'PartialOrd' && t.mutable && !rhs.mutable) return 'no';
+    return solver.implements(t.target, { trait: ref.trait, args: [rhs.target] });
+  }
+  if (name === 'PartialEq') {
+    if (stringsCompare(t, rhs)) return 'yes';
+    const sequence = sequenceEquality(solver, ref, t, rhs);
+    if (sequence !== undefined) return sequence;
+  }
+  return solver.unifier.tryUnify(t, expected) ? builtinImplements(solver, t, { trait: ref.trait, args: [] }) : 'no';
 }
 
 function sequenceEquality(solver: TraitSolver, ref: TraitRef, left: Type, right: Type): Answer | undefined {
@@ -331,6 +331,7 @@ function stringKind(t: Type): 'String' | 'str' | '&str' | undefined {
   return undefined;
 }
 
+// code-gauge-allow functionCognitiveComplexity 22 -- Each standard collection has its own comparison trait bounds.
 function comparisonAdt(goal: Goal, t: AdtType): Answer {
   const { name, all, solver } = goal;
   const d = derived(goal);
@@ -339,12 +340,12 @@ function comparisonAdt(goal: Goal, t: AdtType): Answer {
   const equality = name === 'PartialEq' || name === 'Eq';
   if (builtin === 'String' || builtin === 'Ordering') return 'yes';
   if (ERROR_TYPES.has(builtin)) return equality ? 'yes' : 'no';
-  if (['HashMap', 'HashSet'].includes(builtin) && !equality) return 'no';
   if (builtin === 'HashMap' || builtin === 'HashSet') {
+    if (!equality) return 'no';
     const keys = collectionKeyAnswer(solver, t);
     const values = all(t.args.slice(1));
-    if (keys === 'no' || values === 'no') return 'no';
-    return keys === 'unknown' || values === 'unknown' ? 'unknown' : 'yes';
+    if (keys === 'yes') return values;
+    return values === 'no' ? 'no' : keys;
   }
   if (builtin === 'BTreeMap' || builtin === 'BTreeSet') return all(t.args);
   if (['Vec', 'VecDeque', 'Box', 'Option', 'Result', 'Reverse'].includes(builtin)) return all(t.args);

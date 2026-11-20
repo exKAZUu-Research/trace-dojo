@@ -128,6 +128,7 @@ export function toIterator(value: Value, from: Type): Value {
 }
 
 /** The iterator of a standard collection, of its elements (`value`) or of references to them (`ref`, `mut`). */
+// code-gauge-allow functionCognitiveComplexity 18 -- Each collection determines its yielded values and borrow mode.
 function collectionIter(type: Type & { kind: 'adt' }, value: Value, mode: 'value' | 'ref' | 'mut'): Value | undefined {
   switch (type.def.builtin) {
     case 'Vec':

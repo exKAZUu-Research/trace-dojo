@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 850 -- Follows Rust's name resolution case by case.
+// code-gauge-allow-file fileNcss 933 -- Follows Rust's name resolution case by case.
 import { CompileError } from '../interpreter/diagnostics';
 import type {
   BoundAst,
@@ -753,7 +753,7 @@ const REQUIRED_STD_METHODS: Record<string, string[]> = {
 };
 
 /** A key for an impl's self type in the standard library, naming the natives of its methods (`Vec<_>::push`). */
-// code-gauge-allow functionCognitiveComplexity 16 -- Follows Rust's name resolution case by case.
+// code-gauge-allow functionCognitiveComplexity 20 -- Follows Rust's name resolution case by case.
 function renderTypeKey(type: TypeAst, generics: Generics): string {
   const render = (t: TypeAst, useBound = true): string => {
     switch (t.kind) {
@@ -875,7 +875,6 @@ export function lookupValue(module: Module, name: string, span: Span): ValueBind
   return lookupValueEntry(module, name, span)?.binding;
 }
 
-// code-gauge-allow duplicateLines 16 -- Looks up the value namespace as lookupType does the type namespace, whose fallbacks differ.
 function lookupValueEntry(
   module: Module,
   name: string,
@@ -903,6 +902,7 @@ function lookupValueEntry(
  * and `MAX`, and arithmetic on them. Undefined for other expressions.
  */
 // code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of constant expression.
+// code-gauge-allow functionNcss 32 -- Each supported expression kind has its own integer evaluation rule.
 export function constInteger(expr: Expr, scope: TypeScope, resolving = new Set<ConstDef>()): bigint | undefined {
   switch (expr.kind) {
     case 'int': {
@@ -1150,7 +1150,6 @@ export function* globAnonymousTraits(module: Module, requester = module, seen = 
 /** The modules resolving their glob imports' paths, which must not look in those same globs. */
 const resolvingGlobs = new Set<Module>();
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Follows Rust's name resolution case by case.
 function fromGlobs(
   module: Module,
   name: string,
@@ -1428,9 +1427,8 @@ function traitArguments(def: TraitDef, written: TypeAst[], scope: TypeScope, spa
 // ---------------------------------------------------------------------------------------------------------------------
 // Lowering types
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Each Rust type has its own lowering rules.
-
 // code-gauge-allow functionNcss 52 -- Follows Rust's name resolution case by case.
+// code-gauge-allow functionCognitiveComplexity 20 -- Each Rust type form has distinct lowering and diagnostics.
 export function lowerType(ast: TypeAst, scope: TypeScope): Type {
   switch (ast.kind) {
     case 'path': {
