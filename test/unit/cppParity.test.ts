@@ -545,6 +545,34 @@ int main() {
   });
 });
 
+test('keeps deque element addresses through front edits and swap', () => {
+  const program = `#include <deque>
+#include <iostream>
+#include <queue>
+int main() {
+  std::deque<int> values, other{7};
+  std::queue<int> queue;
+  for (int i = 0; i < 90; ++i) {
+    values.push_back(i);
+    queue.push(i);
+  }
+  int* saved = &values[73];
+  for (int i = 0; i < 65; ++i) {
+    values.pop_front();
+    queue.pop();
+  }
+  values.swap(other);
+  std::cout << (*saved == other[8]) << ' ' << queue.front() << ' ' << queue.back() << ' ';
+  for (int i = 0; i < 70; ++i) other.push_front(100 + i);
+  std::cout << (saved == &other[78]) << ' ' << other.front() << ' ' << other.back() << ' ' << values.front();
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '1 65 89 1 169 89 7',
+    uncaughtException: undefined,
+  });
+});
+
 test('allows negative movement of bidirectional iterators', () => {
   const program = `#include <iostream>
 #include <iterator>

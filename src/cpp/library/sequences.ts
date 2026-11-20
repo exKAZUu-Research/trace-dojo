@@ -502,7 +502,7 @@ function sequenceMethods(
   const iteratorAt = (self: SequenceValue, index: number): Ptr =>
     fixedLength === 0 ? NULL_PTR : self.iteratorLocation(index);
   const begin = (self: SequenceValue): Ptr => iteratorAt(self, 0);
-  const end = (self: SequenceValue): Ptr => iteratorAt(self, self.items.length);
+  const end = (self: SequenceValue): Ptr => iteratorAt(self, self.length);
   const endConstant = (object: Expr): ConstantLocation | undefined => constantArrayLocation(object, fixedLength);
   method('size', [], SIZE_T, (self) => BigInt(self.size), {
     isConst: true,
@@ -516,7 +516,7 @@ function sequenceMethods(
   const bitProxy = cls.memberTypes.get('reference');
   if (bitProxy) {
     method('flip', [], VOID, (self, _args, frame) => {
-      frame.runtime.spend(Math.ceil(self.items.length / 64));
+      frame.runtime.spend(Math.ceil(self.length / 64));
       for (const [index, bit] of self.items.entries()) self.items[index] = bit === 0 ? 1 : 0;
     });
   }
@@ -531,7 +531,7 @@ function sequenceMethods(
         ref,
         (self, [index], frame) => {
           const at = BigInt(index as bigint);
-          if (at >= BigInt(self.items.length)) return outOfRange(frame);
+          if (at >= BigInt(self.length)) return outOfRange(frame);
           return self.location(Number(at));
         },
         { isConst, constantAccess: (object, [index]) => constantArrayLocation(object, index?.constant) }
@@ -553,7 +553,7 @@ function sequenceMethods(
       ref,
       (self) => {
         nonEmpty(self);
-        return self.location(self.items.length - 1);
+        return self.location(self.length - 1);
       },
       { isConst, constantAccess: (object) => constantArrayLocation(object, (fixedLength ?? 0) - 1) }
     );
@@ -636,7 +636,7 @@ function sequenceMethods(
   });
   method('pop_back', [], VOID, (self, _args, frame) => {
     nonEmpty(self);
-    editor.truncate(frame, self, self.items.length - 1);
+    editor.truncate(frame, self, self.length - 1);
   });
   if (kind === 'deque' || kind === 'list') {
     method('push_front', [constRef(element)], VOID, (self, [value], frame) => {
@@ -678,7 +678,7 @@ function sequenceMethods(
     types.iterator,
     (self, [at, count, value], frame) => {
       const index = positionOf(self, at);
-      checkVectorLength(frame, library, kind, element, BigInt(self.items.length) + BigInt(count as bigint));
+      checkVectorLength(frame, library, kind, element, BigInt(self.length) + BigInt(count as bigint));
       const n = asNumber(count);
       reserve(frame, n);
       editor.insertCopies(frame, self, index, n, value as Ptr);
@@ -729,13 +729,13 @@ function sequenceMethods(
   method('resize', [SIZE_T], VOID, (self, [count], frame) => {
     checkVectorLength(frame, library, kind, element, count);
     const n = asNumber(count);
-    reserve(frame, Math.max(0, n - self.items.length));
+    reserve(frame, Math.max(0, n - self.length));
     editor.resize(frame, self, n, (target) => ops().make(frame, target));
   });
   method('resize', [SIZE_T, constRef(element)], VOID, (self, [count, value], frame) => {
     checkVectorLength(frame, library, kind, element, count);
     const n = asNumber(count);
-    reserve(frame, Math.max(0, n - self.items.length));
+    reserve(frame, Math.max(0, n - self.length));
     editor.resize(frame, self, n, (target) => ops().copy(frame, (value as Ptr).read(), target));
   });
   method(
@@ -808,7 +808,7 @@ export function listElementsOf(
 }
 
 const nonEmpty = (self: SequenceValue): void => {
-  if (self.items.length === 0) throw new CppRuntimeError('emptyContainer');
+  if (self.length === 0) throw new CppRuntimeError('emptyContainer');
 };
 
 function listMethods(
@@ -1041,7 +1041,7 @@ function sequenceOperator(
       run: compiler.subscriptObject(left, index.run, (_frame, receiver, operand) => {
         const target = receiver as SequenceValue;
         const at = Number(operand);
-        if (at < 0 || at >= target.items.length) throw new CppRuntimeError('outOfBounds');
+        if (at < 0 || at >= target.length) throw new CppRuntimeError('outOfBounds');
         return target.location(at);
       }),
     };
@@ -1259,7 +1259,7 @@ function emplacement(
           }
           if (member === 'emplace_back') {
             editor.append(frame, sequence, 1, make);
-            return sequence.location(sequence.items.length - 1);
+            return sequence.location(sequence.length - 1);
           }
           const at = positionOf(sequence, location);
           editor.emplace(frame, sequence, at, make);

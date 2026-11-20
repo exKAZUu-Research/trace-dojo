@@ -143,7 +143,7 @@ export function adapterClass(
             const append = (make: (target?: CObject) => Value): Value => {
               const sequence = (receiver as Ptr).read() as SequenceValue;
               push(frame, sequence, make);
-              if (result.kind !== 'void') return sequence.location(sequence.items.length - 1);
+              if (result.kind !== 'void') return sequence.location(sequence.length - 1);
             };
             if (withElement) return withElement(frame, append);
             return append((target) => constructElementFromRvalue(frame, element, (bound as Ptr).read(), target));
@@ -252,7 +252,7 @@ export function adapterClass(
     if (kind === 'queue') editor.removeFront(frame, self);
     else {
       if (kind === 'priority_queue') new Heap(frame, self, ops(), less).pop();
-      editor.truncate(frame, self, self.items.length - 1);
+      editor.truncate(frame, self, self.length - 1);
     }
   });
   const access = (memberName: string, at: (self: SequenceValue) => number): void => {
@@ -271,9 +271,9 @@ export function adapterClass(
   };
   if (kind === 'queue') {
     access('front', () => 0);
-    access('back', (self) => self.items.length - 1);
+    access('back', (self) => self.length - 1);
   } else {
-    access('top', (self) => (kind === 'stack' ? self.items.length - 1 : 0));
+    access('top', (self) => (kind === 'stack' ? self.length - 1 : 0));
   }
   method('swap', [referenceTo(classType(cls))], VOID, (self, [other]) => {
     const target = (other as Ptr).read() as SequenceValue;
@@ -283,7 +283,7 @@ export function adapterClass(
 }
 
 const nonEmpty = (self: SequenceValue): void => {
-  if (self.items.length === 0) throw new CppRuntimeError('emptyContainer');
+  if (self.length === 0) throw new CppRuntimeError('emptyContainer');
 };
 
 class Heap {

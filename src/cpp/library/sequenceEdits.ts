@@ -147,14 +147,14 @@ export class SequenceEditor {
       self.eraseNodes(frame, from, count, 'per-element', this.ops.destroy);
       return;
     }
-    this.destroy(frame, self.items.slice(from, from + count));
+    this.destroy(frame, self.sliceItems(from, from + count));
     if (this.kind === 'deque') self.removeDequeValues(from, count, deque?.position ?? from, deque?.side ?? 'back');
     else self.splice(from, count);
   }
 
   /** Constructs `count` elements at the end, reallocating a vector first if needed, as `resize` does. */
   append(frame: Frame, self: SequenceValue, count: number, make: ElementFactory): void {
-    const length = self.items.length;
+    const length = self.length;
     if (this.kind === 'vector' && length + count > self.capacity) {
       this.reallocate(frame, self, recommend(self, length + count), {
         at: length,
@@ -187,8 +187,8 @@ export class SequenceEditor {
   }
 
   resize(frame: Frame, self: SequenceValue, length: number, make: ElementFactory): void {
-    if (length < self.items.length) this.truncate(frame, self, length);
-    else this.append(frame, self, length - self.items.length, make);
+    if (length < self.length) this.truncate(frame, self, length);
+    else this.append(frame, self, length - self.length, make);
   }
 
   /** `emplace(position, args...)`, whose element `make` constructs. */
@@ -319,7 +319,7 @@ export class SequenceEditor {
   }
 
   private reserveAssignment(frame: Frame, self: SequenceValue, count: number): void {
-    const reusable = this.kind === 'vector' && count > self.capacity ? 0 : self.items.length;
+    const reusable = this.kind === 'vector' && count > self.capacity ? 0 : self.length;
     reserveSequenceStorage(frame, Math.max(0, count - reusable));
   }
 
@@ -510,11 +510,11 @@ export class SequenceEditor {
   // room for them before the old first element.
 
   private dequeEmplace(frame: Frame, self: SequenceValue, at: number, make: ElementFactory): void {
-    const items = self.items;
-    const length = items.length;
+    const length = self.length;
     if (at === length) this.appendElement(frame, self, make);
     else if (at === 0) self.splice(0, 0, make());
     else {
+      const items = self.items;
       this.withTemporaryElement(frame, make(), (temporary) => {
         if (at < length - at) {
           const first = this.moveConstruct(frame, items[0]);

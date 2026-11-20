@@ -414,17 +414,27 @@ export class SequenceValue extends Store {
 
   private readonly nodes?: NodePositions;
   private deque?: DequeStorage;
+  private head = 0;
   private constructingEnd?: { location: NodePosition; value: Value };
   private pendingListDestructions = 0;
 
   get items(): Value[] {
+    if (this.head) {
+      this.cells = this.cells.slice(this.head);
+      this.head = 0;
+    }
     return this.cells;
   }
 
   set items(values: Value[]) {
     this.cells = values;
+    this.head = 0;
     this.deque?.extend(values.length);
     this.bindElements(0, values.length);
+  }
+
+  sliceItems(from: number, to: number): Value[] {
+    return this.cells.slice(this.head + from, this.head + to);
   }
 
   override location(index: number): Ptr {
@@ -457,7 +467,8 @@ export class SequenceValue extends Store {
   append(value: Value): void {
     if (this.deque) this.deque.all++;
     if (this.storageKind === 'vector') this.nodes?.invalidateEnd();
-    const index = this.items.push(value) - 1;
+    this.cells.push(value);
+    const index = this.length - 1;
     this.deque?.insert(this.length, 1, false);
     this.bindElements(index, index + 1);
   }
@@ -486,6 +497,11 @@ export class SequenceValue extends Store {
     const start = from < 0 ? Math.max(0, this.length + from) : from;
     const dequeMiddle = this.storageKind === 'deque' && start > 0 && start + remove < this.length;
     this.editPositions(start, remove, items.length);
+    if (this.deque && start === 0 && remove === 0 && items.length > 0) {
+      this.prependDequeValues(items);
+      this.bindElements(0, items.length);
+      return [];
+    }
     const removed = this.items.splice(start, remove, ...items);
     if (dequeMiddle) this.bindElements(0, this.length);
     else this.bindElements(start, this.storageKind === 'vector' ? this.length : start + items.length);
@@ -546,7 +562,7 @@ export class SequenceValue extends Store {
   bindElements(from: number, to: number): void {
     if (this.elementType.kind !== 'class' || this.fixedStorage) return;
     for (let index = from; index < to; index++) {
-      const item = this.items[index];
+      const item = this.cells[this.head + index];
       if (item instanceof CObject) item.bindContainerCell(this.location(index));
       else if (item instanceof SequenceValue && item.inlineArray) item.bindInlineStorage(this.location(index));
     }
@@ -570,9 +586,32 @@ export class SequenceValue extends Store {
   removeDequeValues(from: number, count: number, position: number, side: 'front' | 'back' | 'clear'): void {
     const middle = position > 0 && position + count < this.length;
     this.editPositions(position, count, 0);
-    this.items.splice(from, count);
+    if (side === 'front') {
+      this.cells.fill(UNINIT, this.head, this.head + count);
+      this.head += count;
+      // Compact infrequently so front removal can pay for the surviving values it copies.
+      if (this.head >= Math.max(32, this.length * 2)) {
+        this.cells = this.cells.slice(this.head);
+        this.head = 0;
+      }
+    } else if (side === 'clear') {
+      this.cells = [];
+      this.head = 0;
+    } else {
+      this.cells.splice(this.head + from, count);
+    }
     this.deque?.remove(this.length, count, side);
     if (middle) this.bindElements(0, this.length);
+  }
+
+  private prependDequeValues(values: Value[]): void {
+    if (this.head < values.length) {
+      const extra = Math.max(16, this.length, values.length - this.head);
+      this.cells = [...Array.from<Value>({ length: extra }).fill(UNINIT), ...this.cells];
+      this.head += extra;
+    }
+    this.head -= values.length;
+    for (const [offset, value] of values.entries()) this.cells[this.head + offset] = value;
   }
 
   reorder(edit: (items: IndexedValue[]) => IndexedValue[]): void {
@@ -654,6 +693,7 @@ export class SequenceValue extends Store {
     }
     if (this.nodes && other.nodes) this.nodes.swap(other.nodes);
     [this.cells, other.cells] = [other.cells, this.cells];
+    [this.head, other.head] = [other.head, this.head];
     [this.capacity, other.capacity] = [other.capacity, this.capacity];
   }
 
@@ -672,7 +712,7 @@ export class SequenceValue extends Store {
   }
 
   get length(): number {
-    return this.items.length;
+    return this.cells.length - this.head;
   }
 
   get size(): number {
@@ -686,7 +726,7 @@ export class SequenceValue extends Store {
   get(index: number): Value {
     this.checkAlive();
     if (index < 0 || index >= this.pointerLength) throw new CppRuntimeError('outOfBounds');
-    const value = index === this.length ? this.constructingEnd?.value : this.items[index];
+    const value = index === this.length ? this.constructingEnd?.value : this.cells[this.head + index];
     if (value === UNINIT) throw new CppRuntimeError('uninitialized');
     return value;
   }
@@ -695,7 +735,7 @@ export class SequenceValue extends Store {
     this.checkAlive();
     if (index < 0 || index >= this.pointerLength) throw new CppRuntimeError('outOfBounds');
     if (index === this.length && this.constructingEnd) this.constructingEnd.value = value;
-    else this.items[index] = value;
+    else this.cells[this.head + index] = value;
   }
 
   children(): Iterable<Value> {
