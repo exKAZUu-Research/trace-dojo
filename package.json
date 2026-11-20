@@ -77,7 +77,7 @@
     "@willbooster/tree-sitter-haskell": "26.0.0",
     "@willbooster/tree-sitter-java": "35.0.0",
     "@willbooster/tree-sitter-javascript": "26.0.0",
-    "@willbooster/tree-sitter-php": "21.0.0",
+    "@willbooster/tree-sitter-php": "22.0.0",
     "@willbooster/tree-sitter-python": "21.0.0",
     "@willbooster/tree-sitter-ruby": "20.0.0",
     "@willbooster/tree-sitter-zig": "14.0.0",

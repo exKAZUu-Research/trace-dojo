@@ -2337,6 +2337,7 @@ test.each([
 test.each([
   ['public int $x { set => $value * 2; }', 'echo (new A(2))->x;', '4'],
   ['public int $x = 2 { set => $value * 2; }', 'echo (new A)->x;', '4'],
+  ['int $x = 3 { set => $value * 2; }', 'echo (new A)->x;', '6'],
   ['public int $x { get => $this->x + 1; }', 'echo (new A(2))->x;', '3'],
   [
     'public int $x { get => 1; set => throw new Exception("setter"); }',
