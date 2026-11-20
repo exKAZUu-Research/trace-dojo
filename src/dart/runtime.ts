@@ -157,6 +157,7 @@ export class Runtime implements TracedRuntime<Frame> {
   onMainExit: (() => void) | undefined;
   /** Extra roots for garbage collection, such as the iterators of running loops. */
   readonly roots = new Set<() => Iterable<Value>>();
+  private readonly nativeCalls: { receiver: Value; args: Arguments }[] = [];
 
   constructor(input?: ProgramInput) {
     this.io = new ProgramIO(this.budget, input);
@@ -559,9 +560,18 @@ export class Runtime implements TracedRuntime<Frame> {
 
   // Garbage collection
 
+  withNativeCallRoots<T>(receiver: Value, args: Arguments, call: () => T): T {
+    this.nativeCalls.push({ receiver, args });
+    try {
+      return call();
+    } finally {
+      this.nativeCalls.pop();
+    }
+  }
+
   /** Removes the turtles that no variable, field, or value in flight still reaches. */
-  // code-gauge-allow functionCognitiveComplexity 27 -- One case per kind of value garbage collection reaches.
-  // code-gauge-allow functionNcss 35 -- One case per kind of value garbage collection reaches.
+  // code-gauge-allow functionCognitiveComplexity 28 -- One case per kind of value garbage collection reaches.
+  // code-gauge-allow functionNcss 37 -- One case per kind of value garbage collection reaches.
   collectGarbage(): void {
     if (!this.world.hasTurtles) return;
     const reached = new Set<unknown>();
@@ -581,6 +591,7 @@ export class Runtime implements TracedRuntime<Frame> {
     for (const cell of this.globals) if (cell) mark(cell.v);
     for (const value of this.constants.values()) mark(value);
     for (const root of this.roots) for (const value of root()) mark(value);
+    for (const value of this.nativeCallValues()) mark(value);
     while (pending.length > 0) {
       const object = pending.pop() as DartObject;
       for (const child of childrenOf(object)) mark(child);
@@ -588,6 +599,14 @@ export class Runtime implements TracedRuntime<Frame> {
     const turtles = new Set<unknown>();
     for (const object of reached) if ((object as DartObject).turtle) turtles.add((object as DartObject).turtle);
     this.world.retain((turtle) => turtles.has(turtle));
+  }
+
+  private *nativeCallValues(): Iterable<Value> {
+    for (const { receiver, args } of this.nativeCalls) {
+      yield receiver;
+      yield* args.positional;
+      if (args.named) yield* args.named.values();
+    }
   }
 }
 

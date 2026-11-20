@@ -1839,6 +1839,32 @@ void main() {
   });
 });
 
+test('native calls keep temporary receivers and arguments reachable during callbacks', () => {
+  const program = `late Turtle key, second;
+void main() {
+  var map = <Turtle, int>{};
+  map.putIfAbsent(Turtle(1, 1), () {
+    Turtle(3, 3).canMoveForward();
+    return 1;
+  });
+  key = map.keys.first;
+  key.forward();
+  var count = 0;
+  [Turtle(1, 3), Turtle(2, 2)].forEach((turtle) {
+    if (++count == 1) Turtle(3, 3).canMoveForward();
+    else second = turtle;
+  });
+  second.forward();
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    finalTurtles: [
+      { x: 1, y: 2 },
+      { x: 2, y: 3 },
+    ],
+  });
+});
+
 test('JSON revivers keep prior results reachable during callbacks', () => {
   const program = `import 'dart:convert';
 void main() {

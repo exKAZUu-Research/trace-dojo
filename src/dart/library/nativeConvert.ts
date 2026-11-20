@@ -108,6 +108,7 @@ class JsonStringifier {
 
   private writeString(text: string): true {
     this.runtime.spend(Math.ceil(text.length / 1024));
+    // oxlint-disable-next-line eslint/no-control-regex -- JSON escapes control characters.
     if (!/["\\\u0000-\u001F\uD800-\uDFFF]/u.test(text)) {
       this.checkCapacity(text.length + 2);
       return this.append('"' + text + '"');
