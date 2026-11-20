@@ -722,7 +722,6 @@ export class Calls {
   }
 
   /** Checks each argument against its parameter, reporting mismatches when `report`. */
-  // code-gauge-allow functionCognitiveComplexity 16 -- Checks correlated rest alternatives before checking positions independently.
   private checkArguments(signature: Signature, args: TreeNode[], report: boolean, call?: TreeNode): boolean {
     const restIndex = signature.parameters.length - 1;
     const restType = signature.parameters[restIndex]?.rest ? signature.parameters[restIndex].type : undefined;
@@ -755,11 +754,15 @@ export class Calls {
       );
       return fixedFit && restFits;
     }
+    return this.checkAlignedArguments(signature, args, report);
+  }
+
+  private checkAlignedArguments(signature: Signature, args: TreeNode[], report: boolean): boolean {
     let ok = true;
     let index = 0;
     for (const arg of args) {
       if (arg.type === 'spread_element') {
-        const { count, fits } = this.checkSpreadArgument(signature, arg, index, report);
+        const { count, fits } = this.checkSpreadArgument(signature, arg, index, report && ok);
         ok = ok && fits;
         index += count;
         continue;
@@ -778,12 +781,28 @@ export class Calls {
     reportMismatch: boolean
   ): boolean {
     const argType = this.c.expressions.check(arg, parameterType);
+    return this.checkPassedArgument(arg, argType, parameterType, report, reportMismatch);
+  }
+
+  private checkPassedArgument(
+    arg: TreeNode,
+    argType: Type,
+    parameterType: Type | undefined,
+    report: boolean,
+    reportMismatch: boolean
+  ): boolean {
     if (!parameterType) return true;
-    if (!this.c.relations.isAssignable(argType, parameterType)) {
-      if (reportMismatch) this.reportArgument(arg, argType, parameterType);
-      return false;
+    const writtenWithin = arg.type === 'spread_element' ? arg : undefined;
+    if (this.c.relations.isAssignable(argType, parameterType))
+      return this.c.expressions.checkExcessProperties(arg, argType, parameterType, { report, writtenWithin });
+    if (
+      reportMismatch &&
+      this.c.expressions.checkExcessProperties(arg, argType, parameterType, { report, writtenWithin }) &&
+      !this.c.expressions.elaboration.report(arg, argType, parameterType)
+    ) {
+      this.c.error(arg, this.c.expressions.elaboration.typeRelationMessage(argType, parameterType, 'argument'));
     }
-    return this.c.expressions.checkExcessProperties(arg, argType, parameterType, { report });
+    return false;
   }
 
   /**
@@ -863,22 +882,10 @@ export class Calls {
   ): { count: number; fits: boolean } {
     const spreadType = this.c.expressions.check(named(arg)[0]);
     const elements = this.spreadElements(arg, spreadType).map((element) => this.spreadValueType(element));
-    const misfit = elements.findIndex((element, offset) => {
-      const parameterType = this.parameterTypeAt(signature, index + offset);
-      return parameterType && !this.c.relations.isAssignable(element, parameterType);
-    });
-    if (report && misfit !== -1)
-      this.reportArgument(arg, elements[misfit], this.parameterTypeAt(signature, index + misfit) as Type);
-    return { count: elements.length, fits: misfit === -1 };
-  }
-
-  private reportArgument(arg: TreeNode, argType: Type, parameterType: Type): void {
-    // TypeScript reports an object literal's excess property before any other mismatch.
-    const before = this.c.diagnostics.length;
-    this.c.expressions.checkExcessProperties(arg, argType, parameterType);
-    if (this.c.diagnostics.length > before) return;
-    if (this.c.expressions.elaboration.report(arg, argType, parameterType)) return;
-    this.c.error(arg, this.c.expressions.elaboration.typeRelationMessage(argType, parameterType, 'argument'));
+    const fits = elements.every((element, offset) =>
+      this.checkPassedArgument(arg, element, this.parameterTypeAt(signature, index + offset), report, report)
+    );
+    return { count: elements.length, fits };
   }
 
   // Inference ----------------------------------------------------------------------------------------------------

@@ -787,7 +787,6 @@ function isDeclaredTypeName(node: TreeNode): boolean {
   return declared?.id === node.id;
 }
 
-/** The parameter declarations of a function-like node, a `this` parameter included. */
 function signatureSubject(node: TreeNode): string {
   if (node.type === 'call_signature') return '呼び出しシグネチャ';
   if (node.type === 'construct_signature') return 'コンストラクトシグネチャ';
@@ -806,6 +805,7 @@ function firstArgumentParameter(node: TreeNode): TreeNode | undefined {
   return argumentParameters(parameterNodes(node))[0];
 }
 
+/** The parameter declarations of a function-like node, including its `this` parameter. */
 export function parameterNodes(node: TreeNode): TreeNode[] {
   const parametersNode = node.childForFieldName('parameters');
   const nodes = parametersNode ? named(parametersNode) : [];

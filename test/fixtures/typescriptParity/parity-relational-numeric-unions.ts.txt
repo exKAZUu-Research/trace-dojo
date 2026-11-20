@@ -1,0 +1,3 @@
+function ascending(a: number | bigint, b: number) { return a < b; }
+function reverse(a: bigint, b: number | bigint) { return a > b; }
+console.log(ascending(1n, 2), reverse(3n, 2));

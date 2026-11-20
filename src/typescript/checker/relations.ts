@@ -164,7 +164,7 @@ export class Relations {
 
   /** Whether a stack ending in `type` has expanded its recursive type too often, as TypeScript's `isDeeplyNestedType` decides. */
   isDeeplyNested(type: Type, stack: Type[], limit = MAX_RECURSION_IDENTITY_COUNT): boolean {
-    if (stack.length < limit) return false;
+    if (stack.length < limit || isLeaf(type)) return false;
     if (type.kind === 'intersection') return type.types.some((member) => this.isDeeplyNested(member, stack, limit));
     const identity = this.recursionIdentity(type);
     let count = 0;

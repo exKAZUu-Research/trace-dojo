@@ -30,6 +30,7 @@ import {
 } from './types';
 
 const inKeyType = unionOf([stringType, numberType, symbolType]);
+const numericComparisonType = unionOf([numberType, bigintType]);
 
 const typeofResult = unionOf(
   ['string', 'number', 'bigint', 'boolean', 'symbol', 'undefined', 'object', 'function'].map((name) =>
@@ -210,7 +211,6 @@ export class OperatorChecker {
     return { type, leftType, rightType };
   }
 
-  // code-gauge-allow functionNcss 31 -- Routes each nonlogical operator to its operand checks.
   binaryOperatorType(
     node: TreeNode,
     operator: string,
@@ -239,18 +239,7 @@ export class OperatorChecker {
       case '>':
       case '<=':
       case '>=': {
-        const l = this.baseOfLiterals(this.c.members.checkNonNullable(left, leftType));
-        const r = this.baseOfLiterals(this.c.members.checkNonNullable(right, rightType));
-        // Both operands are numbers, or neither is and they are comparable, as `string | number >= 1` is not.
-        const leftNumeric = this.isNumberLike(l) || this.isBigintLike(l);
-        const rightNumeric = this.isNumberLike(r) || this.isBigintLike(r);
-        const ok =
-          isAnyLike(l) ||
-          isAnyLike(r) ||
-          (leftNumeric && rightNumeric) ||
-          (!leftNumeric && !rightNumeric && this.c.relations.isComparable(l, r));
-        if (!ok) this.reportOperator(node, operator, l, r);
-        return booleanType;
+        return this.relational(node, operator, left, right, leftType, rightType);
       }
       case '+': {
         return this.plus(node, left, right, leftType, rightType);
@@ -261,6 +250,28 @@ export class OperatorChecker {
     }
   }
 
+  private relational(
+    node: TreeNode,
+    operator: string,
+    left: TreeNode,
+    right: TreeNode,
+    leftType: Type,
+    rightType: Type
+  ): Type {
+    if (this.reportsSymbolOperand(operator, left, right, leftType, rightType, true)) return booleanType;
+    const l = this.baseOfLiterals(this.c.members.checkNonNullable(left, leftType));
+    const r = this.baseOfLiterals(this.c.members.checkNonNullable(right, rightType));
+    const leftNumeric = this.c.relations.isAssignable(l, numericComparisonType);
+    const rightNumeric = this.c.relations.isAssignable(r, numericComparisonType);
+    const ok =
+      isAnyLike(l) ||
+      isAnyLike(r) ||
+      (leftNumeric && rightNumeric) ||
+      (!leftNumeric && !rightNumeric && this.c.relations.isComparable(l, r));
+    if (!ok) this.reportOperator(node, operator, l, r);
+    return booleanType;
+  }
+
   /** A type with its literals, fresh or not, replaced by their primitives. */
   private baseOfLiterals(type: Type): Type {
     return mapType(type, (member) => (member.kind === 'literal' ? primitiveOfLiteral(member) : member));
@@ -268,7 +279,7 @@ export class OperatorChecker {
 
   private plus(node: TreeNode, left: TreeNode, right: TreeNode, leftType: Type, rightType: Type): Type {
     const concatenates = this.isStringLike(leftType) || this.isStringLike(rightType);
-    if (this.reportsSymbolOperand(left, right, leftType, rightType, concatenates)) return errorType;
+    if (this.reportsSymbolOperand('+', left, right, leftType, rightType, concatenates)) return errorType;
     if (!concatenates && (isAnyLike(leftType) || isAnyLike(rightType))) return anyType;
     const l = concatenates ? leftType : this.c.members.checkNonNullable(left, leftType);
     const r = concatenates ? rightType : this.c.members.checkNonNullable(right, rightType);
@@ -285,17 +296,18 @@ export class OperatorChecker {
   }
 
   private reportsSymbolOperand(
+    operator: string,
     left: TreeNode,
     right: TreeNode,
     leftType: Type,
     rightType: Type,
-    concatenates: boolean
+    includesPossibleSymbol: boolean
   ): boolean {
     const operand = [left, right].find((_, index) => {
       const type = index === 0 ? leftType : rightType;
-      return concatenates ? this.c.expressions.mayBeSymbol(type) : this.c.expressions.isSymbolLike(type);
+      return includesPossibleSymbol ? this.c.expressions.mayBeSymbol(type) : this.c.expressions.isSymbolLike(type);
     });
-    if (operand) this.c.error(operand, "演算子 '+' は 'symbol' 型には使えません。");
+    if (operand) this.c.error(operand, `演算子 '${operator}' は型 'symbol' には使えません。`);
     return operand !== undefined;
   }
 
