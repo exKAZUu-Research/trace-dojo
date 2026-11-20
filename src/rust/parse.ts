@@ -1,6 +1,7 @@
 import type { Node, Tree } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
+import type { ExecutionBudget } from '../interpreter/limits';
 import { type TraceAnnotation, traceAnnotationsIn } from '../interpreter/traceAnnotations';
 import { assertNestingDepth, findSyntaxErrors, loadParser, parseSource } from '../interpreter/treeSitter';
 import type { Crate } from './ast';
@@ -16,8 +17,14 @@ const MISSING_TOKEN_NAMES = {
 };
 
 /** Parses a crate's single source file, throwing a `CompileError` for invalid or unsupported syntax. */
-export function parseRust(source: string): Crate {
-  return parseWith(source, (root, reparseTokens) => new Converter(source, reparseTokens).convertCrate(root));
+export function parseRust(source: string, budget: ExecutionBudget): Crate {
+  return parseWith(source, (root, reparseTokens) => {
+    const reparseMacro: typeof reparse = (text, convert) => {
+      budget.spend(Math.ceil(text.length / 64));
+      return reparseTokens(text, convert);
+    };
+    return new Converter(source, reparseMacro).convertCrate(root);
+  });
 }
 
 /** Parses a source with a converter that may reparse macro arguments. */

@@ -111,7 +111,10 @@ export function resolveValuePath(c: Checker, path: PathAst, span: Span): PathRes
   if (owner.kind === 'trait') {
     const fn = owner.def.methods.get(last.name);
     if (!fn) compileError(span, `トレイト ${owner.def.name} にメソッド ${last.name} がありません。`);
-    const typeArgs = fn.params.map(() => freshVar());
+    const typeArgs = [
+      ...fn.params.slice(0, fn.parentParamCount).map(() => freshVar()),
+      ...typeArgsFor(c, fn.params.slice(fn.parentParamCount), last.args, span, last.name),
+    ];
     return { kind: 'fn', fn, typeArgs };
   }
   return associatedValueRes(c, normalize(shallow(owner.type)), last, span);
@@ -160,12 +163,7 @@ function associatedValueRes(c: Checker, t: Type, last: PathAst['segments'][numbe
   const constant = associatedConst(c, t, last.name, span);
   if (constant) return constant;
   const found = lookupAssociated(c.program, c.solver, t, last.name);
-  if (!found) {
-    if (t.kind === 'adt' && t.def.kind === 'enum') {
-      compileError(span, `${t.def.name} に列挙子 ${last.name} がありません。`);
-    }
-    compileError(span, `${typeToString(t)} に関連関数 ${last.name} がありません。`);
-  }
+  if (!found) missingAssociatedValue(t, last.name, span);
   if (found.ambiguousWith) {
     compileError(
       span,
@@ -180,6 +178,22 @@ function associatedValueRes(c: Checker, t: Type, last: PathAst['segments'][numbe
     found.typeArgs.splice(found.fn.parentParamCount, own.length, ...written);
   }
   return { kind: 'fn', fn: found.fn, typeArgs: found.typeArgs };
+}
+
+function missingAssociatedValue(owner: Type, name: string, span: Span): never {
+  if (isStandardType(owner)) unavailableStd([typeToString(owner), name], span);
+  if (owner.kind === 'adt' && owner.def.kind === 'enum') {
+    compileError(span, `${owner.def.name} に列挙子 ${name} がありません。`);
+  }
+  return compileError(span, `${typeToString(owner)} に関連関数 ${name} がありません。`);
+}
+
+export function isStandardType(type: Type): boolean {
+  const t = normalize(shallow(type));
+  if (t.kind === 'ref') return isStandardType(t.target);
+  if (t.kind === 'adt') return (t.def.module as Module | undefined)?.isStd ?? false;
+  if (t.kind === 'dyn') return (t.trait.trait.module as Module | undefined)?.isStd ?? false;
+  return ['array', 'slice', 'str', 'char', 'int', 'float', 'bool'].includes(t.kind);
 }
 
 function unavailableStd(names: string[], span: Span): never {

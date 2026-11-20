@@ -1,6 +1,6 @@
 // code-gauge-allow-file fileNcss 421 -- Follows std::fmt's formatting rules case by case.
 import type { FormatPiece, FormatSpec } from './ast';
-import { type DebugPart, emit, list, structText, tupleText, type WriteChunk } from './debugText';
+import { type DebugPart, emit, list, rangeText, structText, tupleText, type WriteChunk } from './debugText';
 import { debugFloat, displayFloat, expFloat, fixedFloat } from './floatFormat';
 import { normalize } from './infer';
 import { iteratorDebug } from './iterDebug';
@@ -308,11 +308,7 @@ export class Formatter {
       case 'RangeTo':
       case 'RangeToInclusive':
       case 'RangeFull': {
-        const range = v as RangeValue;
-        const start = range.start === undefined ? '' : this.debug(range.start, t.args[0], spec, indent, write);
-        const separator = emit(range.inclusive ? '..=' : '..', write);
-        const end = range.end === undefined ? '' : this.debug(range.end, t.args[0], spec, indent, write);
-        return start + separator + end + (range.exhausted ? emit(' (exhausted)', write) : '');
+        return rangeText(v as RangeValue, (value) => this.debug(value, t.args[0], spec, indent, write), write);
       }
       case 'ParseIntError':
       case 'ParseFloatError':

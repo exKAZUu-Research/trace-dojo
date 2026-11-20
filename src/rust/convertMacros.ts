@@ -1,5 +1,6 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
+import { CompileError } from '../interpreter/diagnostics';
 import type { Expr, FormatArgs, MacroCall, Pattern, Span } from './ast';
 import { PatternConverter } from './convertPatterns';
 import { isComment, syntaxError, unavailable } from './convertSyntax';
@@ -67,7 +68,7 @@ export abstract class MacroConverter extends PatternConverter {
         return {
           kind: 'dbg',
           args: args.map((arg) => this.expr(arg)),
-          texts: args.map((arg) => arg.text.replaceAll(/\s+/g, ' ')),
+          texts: args.map(macroExpressionText),
         };
       }
       default: {
@@ -107,7 +108,7 @@ export abstract class MacroConverter extends PatternConverter {
     return {
       kind: 'assert',
       cond: this.expr(cond),
-      text: cond.text.replaceAll(/\s+/g, ' '),
+      text: macroExpressionText(cond),
       format: this.optionalFormatArgs(rest, span, name),
     };
   }
@@ -134,8 +135,7 @@ export abstract class MacroConverter extends PatternConverter {
     return this.reparse(
       `${prefix}(${inner}${inner.trim() === '' || inner.trimEnd().endsWith(',') ? '' : ','});`,
       (root) => {
-        const statement = root.namedChildren.find((child) => !isComment(child));
-        const expression = statement?.type === 'expression_statement' ? statement.namedChildren[0] : statement;
+        const expression = firstExpression(root);
         if (!expression) return [];
         if (expression.type === 'unit_expression') return [];
         if (expression.type === 'tuple_expression') return expression.namedChildren.filter((c) => !isComment(c));
@@ -154,8 +154,7 @@ export abstract class MacroConverter extends PatternConverter {
   private vecMacro(tree: Node, span: Span): MacroCall {
     const inner = tree.text.slice(1, -1);
     return this.reparse(`${this.prefixFor(tree)}[${inner}];`, (root) => {
-      const statement = root.namedChildren.find((child) => !isComment(child));
-      const array = statement?.type === 'expression_statement' ? statement.namedChildren[0] : statement;
+      const array = firstExpression(root);
       if (array?.type !== 'array_expression') syntaxError(span, 'vec! の書き方に誤りがあります。');
       const expr = this.expr(array);
       if (expr.kind === 'arrayRepeat') return { kind: 'vecRepeat', value: expr.value, count: expr.count };
@@ -165,18 +164,13 @@ export abstract class MacroConverter extends PatternConverter {
   }
 
   private matchesMacro(tree: Node, span: Span): MacroCall {
-    const inner = tree.text.slice(1, -1);
-    const comma = topLevelComma(inner);
-    if (comma < 0) syntaxError(span, 'matches! には、値とパターンが要ります。');
-    const valueText = inner.slice(0, comma);
-    const patternText = inner.slice(comma + 1).replace(/,\s*$/, '');
-    const value = this.reparse(`${this.prefixFor(tree)} ${valueText};`, (root) => {
-      const statement = root.namedChildren.find((child) => !isComment(child));
-      const expression = statement?.type === 'expression_statement' ? statement.namedChildren[0] : statement;
-      if (!expression) syntaxError(span, 'matches! の書き方に誤りがあります。');
-      return this.expr(expression);
-    }) as Expr;
-    const pattern = this.reparse(`fn f() { match x { ${patternText} => {} } }`, (root) => {
+    const tokens = tree.children.slice(1, -1).filter((child) => !isComment(child));
+    const last = tokens.at(-1);
+    const end = last?.type === ',' ? last.startIndex - tree.startIndex : tree.text.length - 1;
+    const { comma, expression } = this.matchValue(tree, tokens, end, span);
+    const value = this.expr(expression);
+    const patternText = tree.text.slice(comma + 1, end);
+    const pattern = this.reparse(`fn f() { match x { ${patternText}\n => {} } }`, (root) => {
       const arm = root.descendantsOfType('match_arm')[0];
       if (!arm) syntaxError(span, 'matches! の書き方に誤りがあります。');
       const matchPattern = this.field(arm, 'pattern');
@@ -185,6 +179,23 @@ export abstract class MacroConverter extends PatternConverter {
       return patternNode ? this.pattern(patternNode) : ({ kind: 'wild', span } as Pattern);
     }) as Pattern;
     return { kind: 'matches', value, pattern: withSpan(pattern, span) };
+  }
+
+  private matchValue(tree: Node, tokens: Node[], end: number, span: Span): { comma: number; expression: Node } {
+    const text = tree.text;
+    const prefix = this.prefixFor(tree);
+    for (const token of tokens) {
+      const comma = token.startIndex - tree.startIndex;
+      if (token.type !== ',' || comma >= end) continue;
+      try {
+        // A comma can still be inside a turbofish or a closure's parameters, which token trees leave ungrouped.
+        const expression = this.reparse(`${prefix} ${text.slice(1, comma)};`, firstExpression) as Node | undefined;
+        if (expression) return { comma, expression };
+      } catch (error) {
+        if (!(error instanceof CompileError)) throw error;
+      }
+    }
+    return syntaxError(span, 'matches! には、値とパターンが要ります。');
   }
 
   private optionalFormatArgs(args: Node[], span: Span, macroName: string): FormatArgs | undefined {
@@ -228,22 +239,28 @@ export abstract class MacroConverter extends PatternConverter {
   }
 }
 
-function topLevelComma(text: string): number {
-  let depth = 0;
-  let quote: string | undefined;
-  for (let index = 0; index < text.length; index++) {
-    const char = text[index];
-    if (quote) {
-      if (char === '\\') index++;
-      else if (char === quote) quote = undefined;
-      continue;
+function firstExpression(root: Node): Node | undefined {
+  const statement = root.namedChildren.find((child) => !isComment(child));
+  return statement?.type === 'expression_statement'
+    ? statement.namedChildren.find((child) => !isComment(child))
+    : statement;
+}
+
+function macroExpressionText(node: Node): string {
+  let text = '';
+  let end = node.startIndex;
+  const visit = (child: Node): void => {
+    if (isComment(child)) return;
+    if (child.childCount > 0 && !child.type.endsWith('_literal')) {
+      for (const token of child.children) visit(token);
+      return;
     }
-    if (char === '"') quote = char;
-    else if ('([{'.includes(char)) depth++;
-    else if (')]}'.includes(char)) depth--;
-    else if (char === ',' && depth === 0) return index;
-  }
-  return -1;
+    if (text && child.startIndex > end) text += ' ';
+    text += child.text;
+    end = child.endIndex;
+  };
+  visit(node);
+  return text;
 }
 
 function withSpan(pattern: Pattern, span: Span): Pattern {

@@ -1,9 +1,18 @@
+import type { RangeValue, Value } from './values';
+
 export type DebugPart = (indent: number | undefined) => string;
 export type WriteChunk = (text: string) => void;
 
 export function emit(text: string, write?: WriteChunk): string {
   write?.(text);
   return text;
+}
+
+export function rangeText(range: RangeValue, debug: (value: Value) => string, write?: WriteChunk): string {
+  const start = range.start === undefined ? '' : debug(range.start);
+  const separator = emit(range.inclusive ? '..=' : '..', write);
+  const end = range.end === undefined ? '' : debug(range.end);
+  return start + separator + end + (range.exhausted ? emit(' (exhausted)', write) : '');
 }
 
 export function list(

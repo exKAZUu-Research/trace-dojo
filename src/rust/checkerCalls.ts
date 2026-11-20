@@ -5,6 +5,7 @@ import type { Checker } from './checker';
 import {
   checkMethodVisible,
   checkTraitInScope,
+  isStandardType,
   resolveValuePath,
   traitInScope,
   typeArgsFor,
@@ -401,13 +402,6 @@ function noMethod(c: Checker, expr: Extract<Expr, { kind: 'methodCall' }>, recei
     compileError(expr.methodSpan, `${t} のメソッド ${expr.method} は、この採点環境では使えません。`);
   }
   compileError(expr.methodSpan, `${t} にメソッド ${expr.method} がありません${hint ?? ''}。`);
-}
-
-function isStandardType(type: Type): boolean {
-  const t = normalize(shallow(type));
-  if (t.kind === 'adt') return (t.def.module as Module | undefined)?.isStd ?? false;
-  if (t.kind === 'dyn') return (t.trait.trait.module as Module | undefined)?.isStd ?? false;
-  return ['array', 'slice', 'str', 'char', 'int', 'float', 'bool'].includes(t.kind);
 }
 
 function fieldTypeOf(c: Checker, type: Type, name: string): Type | undefined {

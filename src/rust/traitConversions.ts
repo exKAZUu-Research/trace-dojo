@@ -132,15 +132,8 @@ function floatFrom(source: Type, target: string): boolean {
   return target === 'f64' ? bits <= 32 : bits <= 16;
 }
 
-/** Whether `From` converts between two primitive types, which makes `TryFrom` infallible. */
-export function infallibleConversion(source: Type, target: Type): boolean {
-  const s = normalize(shallow(source));
-  const t = normalize(shallow(target));
-  if (s.kind === 'int' && t.kind === 'int') return losslessInt(s.name, t.name);
-  if (s.kind === 'char' && t.kind === 'int') return ['u32', 'u64', 'u128'].includes(t.name);
-  if (s.kind === 'int' && t.kind === 'char') return s.name === 'u8';
-  if (s.kind === 'bool' && t.kind === 'int') return true;
-  return s.kind === t.kind && (s.kind === 'char' || s.kind === 'bool');
+export function intoConversion(solver: TraitSolver, source: Type, target: Type): Answer {
+  return solver.implements(source, { trait: solver.program.traitDef('Into'), args: [target] });
 }
 
 // code-gauge-allow functionCognitiveComplexity 20 -- One rule per trait or conversion of the standard library.

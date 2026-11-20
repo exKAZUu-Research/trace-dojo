@@ -3888,3 +3888,162 @@ test('cycles a Rust iterator whose state is cloneable and whose output is move-o
     expect(executeProgram('rust', invalid)).toMatchObject({ kind: 'compileError' });
   }
 });
+
+test('uses Rust blanket conversions and their correct result error types', () => {
+  const source = rustMain(
+    `let value: Result<f64, Infallible> = f64::try_from(3_i32);
+    let number: f32 = 5_i16.try_into().unwrap();
+    let record: Result<Record, Infallible> = Record::try_from(3_i32);
+    let items = VecDeque::try_from(vec![1, 2]).unwrap();
+    println!("{:?} {:?} {} {:?}", value, number, record.unwrap().0, items);
+    println!("{:?} {:?} {:?}", bool::try_from(0_u8), bool::try_from(1_u32), bool::try_from(-1_i16));`,
+    `use std::collections::VecDeque;
+     use std::convert::Infallible;
+     struct Record(i32);
+     impl From<i32> for Record { fn from(value: i32) -> Self { Record(value + 1) } }`
+  );
+  expect(executeProgram('rust', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'Ok(3.0) 5.0 4 [1, 2]\nOk(false) Ok(true) Err(TryFromIntError(NegOverflow))\n',
+  });
+  const invalid = rustMain('let _: f64 = 3_u64.try_into().unwrap();');
+  expect(executeProgram('rust', invalid)).toMatchObject({ kind: 'compileError' });
+});
+
+test('applies explicit type arguments to Rust trait-qualified methods and function values', () => {
+  const items = `trait Maker { fn make<T: Default>(&self) -> T { T::default() } }
+    struct Source;
+    impl Maker for Source {}`;
+  const source = rustMain(
+    `let make = Maker::make::<i64>;
+    println!("{} {}", Maker::make::<i64>(&Source), make(&Source));`,
+    items
+  );
+  expect(executeProgram('rust', source)).toMatchObject({ kind: 'executed', stdout: '0 0\n' });
+  const invalid = rustMain('let _made: i32 = Maker::make::<String>(&Source);', items);
+  expect(executeProgram('rust', invalid)).toMatchObject({ kind: 'compileError' });
+});
+
+test('uses Rust integer cast widths in direct, named, and repeated array lengths', () => {
+  const source = rustMain(
+    `let empty: [i32; (256_u16 as u8) as usize] = [];
+    let a: [i32; N] = [7, 8];
+    let b = [1; ((-254_i16) as u8) as usize];
+    println!("{} {:?} {:?}", empty.len(), a, b);`,
+    'const N: usize = (258_u16 as u8) as usize;'
+  );
+  expect(executeProgram('rust', source)).toMatchObject({ kind: 'executed', stdout: '0 [7, 8] [1, 1]\n' });
+});
+
+test('checks supertraits and Copy fields of manual Rust trait implementations', () => {
+  for (const items of [
+    '#[derive(Clone)] struct Item(String); impl Copy for Item {}',
+    '#[derive(Clone)] enum Item<T> { Empty, Value(T) } impl<T: Clone> Copy for Item<T> {}',
+    'trait Parent<T> {} trait Child: Parent<i32> {} struct Item; impl Parent<bool> for Item {} impl Child for Item {}',
+    'struct Item; impl Eq for Item {}',
+  ]) {
+    expect(executeProgram('rust', rustMain('', items))).toMatchObject({ kind: 'compileError' });
+  }
+  const valid = rustMain(
+    `let previous = Item::Value(3);
+    let next = previous;
+    println!("{:?} {:?}", previous, next);`,
+    '#[derive(Debug, Clone)] enum Item<T> { Value(T) } impl<T: Copy> Copy for Item<T> {}'
+  );
+  expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: 'Value(3) Value(3)\n' });
+});
+
+test('solves Rust blanket trait implementations for generic forwarding', () => {
+  const source = rustMain(
+    'forward(1); forward_bounded(2);',
+    `use std::fmt::Debug;
+      trait Mark {}
+      trait DebugMark { fn marked(&self) -> i32 { 2 } }
+      impl<T> Mark for T {}
+      impl<T: Debug> DebugMark for T {}
+      fn take<T: Mark>(_: T) { println!("ok"); }
+      fn forward<T>(value: T) { take(value); }
+      fn forward_bounded<T: Debug>(value: T) { println!("{}", value.marked()); }`
+  );
+  expect(executeProgram('rust', source)).toMatchObject({ kind: 'executed', stdout: 'ok\n2\n' });
+});
+
+test('shows exhausted Rust ranges inside iterator Debug output', () => {
+  const source = rustMain(`let mut reverse = (0_u8..=0).rev();
+    reverse.next();
+    println!("{:?}", reverse);
+    let mut fused = (255_u8..=255).fuse();
+    fused.next();
+    println!("{:?}", fused);`);
+  expect(executeProgram('rust', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'Rev { iter: 0..=255 (exhausted) }\nFuse { iter: Some(0..=255 (exhausted)) }\n',
+  });
+});
+
+test('dispatches Rust trait impls by nested trait-object type arguments', () => {
+  const source = rustMain(
+    `let x: Box<dyn P<i32>> = Box::new(Source);
+    let y: Box<dyn P<bool>> = Box::new(Source);
+    println!("{} {}", later(x), later(y));`,
+    `trait P<T> { fn f(&self) -> i32; }
+      struct Source;
+      impl P<i32> for Source { fn f(&self) -> i32 { 1 } }
+      impl P<bool> for Source { fn f(&self) -> i32 { 2 } }
+      trait A { fn a(&self) -> i32; }
+      impl A for Box<dyn P<i32>> { fn a(&self) -> i32 { 10 } }
+      impl A for Box<dyn P<bool>> { fn a(&self) -> i32 { 20 } }
+      fn later<T: A>(value: T) -> i32 { value.a() }`
+  );
+  expect(executeProgram('rust', source)).toMatchObject({ kind: 'executed', stdout: '10 20\n' });
+});
+
+test('uses Rust tokens for matches separators and macro expression diagnostics', () => {
+  const predicates = rustMain(
+    `println!("{} {} {} {}",
+    matches!(',', ','),
+    matches!('(', '('),
+    matches!(/* , */ 1, 1),
+    matches!(pair::<i32, bool>(), (1, true), /* trailing comma */));`,
+    'fn pair<A: From<i32>, B: From<bool>>() -> (A, B) { (A::from(1), B::from(true)) }'
+  );
+  expect(executeProgram('rust', predicates)).toMatchObject({ kind: 'executed', stdout: 'true true true true\n' });
+  const formatted = rustMain(`dbg!("a   b"); dbg!(1/* skip */+2);
+    assert!(false   || "a   b".is_empty());`);
+  const result = executeProgram('rust', formatted);
+  expect(result).toMatchObject({
+    kind: 'executed',
+    stderr: expect.stringContaining('"a   b" = "a   b"'),
+    uncaughtException: expect.stringContaining('assertion failed: false || "a   b".is_empty()'),
+  });
+  expect(result).toMatchObject({ stderr: expect.stringContaining('1 +2 = 3') });
+});
+
+test('reports unavailable Rust standard associated items and preserves user diagnostics', () => {
+  for (const call of ['String::from_utf16(&[104_u16])', 'std::collections::hash_map::Entry::Vacant']) {
+    const source = rustMain(`let _value = ${call};`);
+    expect(executeProgram('rust', source)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [expect.objectContaining({ message: expect.stringContaining('この採点環境では使えません') })],
+    });
+  }
+  const user = rustMain('let _value = User::missing();', 'struct User;');
+  expect(executeProgram('rust', user)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ message: expect.stringContaining('関連関数 missing がありません') })],
+  });
+});
+
+test('formats the residual Rust window slice after a clone exhausts from either end', () => {
+  const source = rustMain(`let array = [1, 2, 3];
+    let windows = array.windows(2);
+    let mut forward = windows.clone();
+    forward.next(); forward.next();
+    let mut mixed = windows.clone();
+    mixed.next(); mixed.next_back();
+    println!("{:?} {:?} {:?}", windows, forward, mixed);`);
+  expect(executeProgram('rust', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'Windows { v: [1, 2, 3], size: 2 } Windows { v: [3], size: 2 } Windows { v: [2], size: 2 }\n',
+  });
+});

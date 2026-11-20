@@ -11,7 +11,6 @@ import {
   DONE,
   ElementPlace,
   type IterValue,
-  type Next,
   RangeValue,
   sliceBase,
   sliceGet,
@@ -269,11 +268,10 @@ const sliceNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
     const count = Math.max(0, length - width + 1);
     const iter = arrayIter(base, 0, count, (index) => new SliceView(base, start + index, start + index + width));
     // `Windows` drops an element from the end it takes a window from, so once done it keeps `size - 1` of them.
-    const taken = { front: 0, back: 0 };
-    const [next, nextBack] = [iter.next, iter.nextBack!];
-    iter.next = () => countTaken(next(), taken, 'front');
-    iter.nextBack = () => countTaken(nextBack(), taken, 'back');
-    const done = (): SliceView => new SliceView(base, start + taken.front, start + length - taken.back);
+    const done = (target: IterValue): SliceView => {
+      const front = target.frontIndex!();
+      return new SliceView(base, start + front, start + Math.min(length, front + width - 1));
+    };
     return chunkDebug(iter, 'Windows', done, () => [['size', numberPart(width)]]);
   },
   chunks: ([self, size], ctx) => chunks(ctx, deref(self), Number(size as bigint), false),
@@ -372,7 +370,7 @@ function chunks(ctx: NativeContext, slice: Value, size: number, exact: boolean):
 function chunkDebug(
   iter: IterValue,
   name: string,
-  done: () => SliceView,
+  done: (target: IterValue) => SliceView,
   fields: (part: (values: Value[]) => DebugPart) => [string, DebugPart][]
 ): IterValue {
   return described(iter, (show, item, target) => {
@@ -384,15 +382,10 @@ function chunkDebug(
       from = Math.min(from, view.start);
       to = Math.max(to, view.end);
     }
-    const covered = views.length > 0 ? sliceItems(new SliceView(views[0].base, from, to)) : sliceItems(done());
+    const covered = views.length > 0 ? sliceItems(new SliceView(views[0].base, from, to)) : sliceItems(done(target));
     const part = (values: Value[]): DebugPart => listPart(values, elem, show);
     return fieldsPart(name, [['v', part(covered)], ...fields(part)]);
   });
-}
-
-function countTaken(item: Next, taken: { front: number; back: number }, end: 'front' | 'back'): Next {
-  if (item !== DONE) taken[end]++;
-  return item;
 }
 
 /** The element type of the slices an iterator yields (`&[T]`). */

@@ -10,6 +10,7 @@ import {
   type ImplDef,
   INT_NAMES,
   intType,
+  sameType,
   shallow,
   type Subst,
   substitute,
@@ -21,20 +22,21 @@ import {
 } from './types';
 
 export { ERROR_TYPES, RANGE_TYPES } from './traitBuiltins';
-export { infallibleConversion } from './traitConversions';
 export { iteratorCapability } from './traitIterators';
 
 export type Answer = 'yes' | 'no' | 'unknown';
 
 /** Decides which types implement which traits: from impls, derives, bounds, and the standard library's rules. */
 export class TraitSolver {
+  private readonly implGoals: { trait: TraitDef; type: Type; args: Type[] }[] = [];
+
   constructor(
     readonly program: Program,
     readonly unifier: Unifier
   ) {}
 
   /** Whether `type` implements the trait, binding variables of closure signatures as a side effect. */
-  // code-gauge-allow functionCognitiveComplexity 21 -- One rule per trait or conversion of the standard library.
+  // code-gauge-allow functionCognitiveComplexity 23 -- One rule per trait or conversion of the standard library.
   implements(type: Type, ref: TraitRef): Answer {
     const t = normalize(shallow(type));
     const { trait } = ref;
@@ -45,6 +47,7 @@ export class TraitSolver {
       if (trait.builtin === 'Sized') return 'yes';
       const answer = this.boundAnswer(t.param.bounds, ref, t);
       if (answer !== 'no') return answer;
+      if (this.userImpl(trait, t, ref.args)) return 'yes';
       return trait.builtin && PARAMETER_BLANKET_TRAITS.has(trait.builtin) ? this.builtinOnly(t, ref) : 'no';
     }
     // A pseudo-type that stays is one whose arguments are not known yet.
@@ -216,6 +219,16 @@ export class TraitSolver {
 
   /** The user's impl of a trait for a type, with the impl's type parameters bound. */
   userImpl(trait: TraitDef, type: Type, args: Type[] = []): { impl: ImplDef; subst: Subst } | undefined {
+    if (this.implGoals.length >= 64 || this.implGoals.some((goal) => matchesImplGoal(goal, trait, type, args))) return;
+    this.implGoals.push({ trait, type, args });
+    try {
+      return this.findImpl(trait, type, args);
+    } finally {
+      this.implGoals.pop();
+    }
+  }
+
+  private findImpl(trait: TraitDef, type: Type, args: Type[]): { impl: ImplDef; subst: Subst } | undefined {
     for (const impl of this.program.impls) {
       if (impl.trait?.trait !== trait) continue;
       const subst = this.matchImpl(impl, type, args);
@@ -269,6 +282,20 @@ export class TraitSolver {
   isCopy(type: Type): boolean {
     return this.implements(type, { trait: this.program.traitDef('Copy'), args: [] }) === 'yes';
   }
+}
+
+function matchesImplGoal(
+  goal: { trait: TraitDef; type: Type; args: Type[] },
+  trait: TraitDef,
+  type: Type,
+  args: Type[]
+): boolean {
+  return (
+    goal.trait === trait &&
+    sameType(goal.type, type) &&
+    goal.args.length === args.length &&
+    goal.args.every((arg, index) => sameType(arg, args[index]))
+  );
 }
 
 /** The std traits with a blanket impl for every type of another trait: `impl<T: Display> ToString for T`. */

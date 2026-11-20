@@ -1,8 +1,9 @@
-// code-gauge-allow-file fileNcss 459 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss 464 -- One native per method of the standard library.
 import { debugFloat, decimalToF32 } from '../floatFormat';
 import { FLOAT_LIMITS } from '../floatLimits';
 import { normalize } from '../infer';
 import { bitsOf, intArith, overflow, wrap } from '../ops';
+import { intoConversion } from '../traitConversions';
 import { INT_NAMES, intMax, intMin, type IntName, shallow, type Type } from '../types';
 import { EnumValue, StructValue, textOf, type Value } from '../values';
 import {
@@ -639,7 +640,12 @@ function roundToDouble(mantissa: bigint, exponent: number): number {
 }
 
 /** `T::try_from(value)` between integer types: the value when it fits, or `TryFromIntError`. */
-function tryConvert(ctx: NativeContext, value: Value, to: Type): Value {
+function tryConvert(ctx: NativeContext, value: Value, from: Type, to: Type): Value {
+  const { interp, span, frame } = ctx;
+  if (intoConversion(interp.checker.solver, from, to) === 'yes') {
+    const into = interp.program.traitDef('Into').methods.get('into')!;
+    return ok(ctx, interp.callFn(into, [from, to], [value], undefined, span, frame));
+  }
   const t = normalize(shallow(to));
   const v = deref(value);
   if (t.kind === 'char') {
@@ -656,7 +662,9 @@ function tryConvert(ctx: NativeContext, value: Value, to: Type): Value {
   }
   const target = t as { name: IntName };
   const number = v as bigint;
-  if (inRange(target.name, number)) return ok(ctx, number);
+  if (t.kind === 'bool') {
+    if (number === 0n || number === 1n) return ok(ctx, number === 1n);
+  } else if (inRange(target.name, number)) return ok(ctx, number);
   const kind = number < 0n ? 'NegOverflow' : 'PosOverflow';
   return err(ctx, new StructValue(ctx.interp.program.adtDef('TryFromIntError'), [kind]));
 }
@@ -688,8 +696,11 @@ const natives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
       []
     );
   },
-  'TryFrom::try_from': ([value], ctx) => tryConvert(ctx, value, ctx.typeArgs[0]),
-  'TryInto::try_into': ([value], ctx) => tryConvert(ctx, value, ctx.typeArgs[1]),
+  'TryFrom::try_from': ([value], ctx) => tryConvert(ctx, value, ctx.typeArgs[1], ctx.typeArgs[0]),
+  'TryInto::try_into': ([value], { interp, typeArgs: [from, to], span, frame }) => {
+    const tryFrom = interp.program.traitDef('TryFrom').methods.get('try_from')!;
+    return interp.callFn(tryFrom, [to, from], [value], undefined, span, frame);
+  },
 };
 for (const [name, native] of Object.entries(integer)) {
   for (const group of ['Integer', 'SignedInteger', 'UnsignedInteger']) natives[`${group}::${name}`] = native;

@@ -1,4 +1,4 @@
-import { type DebugPart, list, structText, tupleText } from './debugText';
+import { type DebugPart, list, rangeText, structText, tupleText } from './debugText';
 import { normalize } from './infer';
 import { ref, shallow, type Type } from './types';
 import { DONE, type IterValue, type RangeValue, type Value } from './values';
@@ -183,9 +183,7 @@ export function iteratorDebug(
     return tupleText('Bytes', [copied], indent);
   }
   if (name === 'RangeShape' || name === 'RangeInclusiveShape' || name === 'RangeFromShape') {
-    const range = iter.roots[0] as RangeValue;
-    const end = range.end === undefined ? '' : debug(range.end, item, indent);
-    return `${debug(range.start, item, indent)}${range.inclusive ? '..=' : '..'}${end}`;
+    return rangeText(iter.roots[0] as RangeValue, (value) => debug(value, item, indent));
   }
   const source = iter.roots[0] as IterValue;
   const state = iter.roots[1] as Record<string, unknown>;

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 753 -- The checker core owns body, entry point, and type obligations.
+// code-gauge-allow-file fileNcss 768 -- The checker core owns body, entry point, and type obligations.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ExecutionBudget } from '../interpreter/limits';
 import { Annotations, type Coercion, type FnContext, type LocalVar, type PathRes } from './annotations';
@@ -257,6 +257,7 @@ export class Checker {
   private checkImplSignatures(impl: ImplDef): void {
     const traitRef = impl.trait;
     if (!traitRef || (impl.module as Module).isStd) return;
+    this.checkImplRequirements(impl, traitRef);
     const { trait } = traitRef;
     for (const fn of impl.methods.values()) {
       const decl = trait.methods.get(fn.name);
@@ -281,6 +282,26 @@ export class Checker {
           span,
           `メソッド ${fn.name} の型が、トレイト ${trait.name} の宣言と違います（${typeToString(expected)} が必要ですが、${typeToString(written)} です）。`
         );
+      }
+    }
+  }
+
+  private checkImplRequirements(impl: ImplDef, trait: TraitRef): void {
+    const self = shallow(impl.selfType);
+    for (const bound of supertraitsOf(trait, self)) {
+      if (this.solver.implements(self, bound) === 'no') {
+        compileError(
+          impl.span,
+          `${typeToString(self)} の ${trait.trait.name} 実装には ${traitRefToString(bound)} が必要です。`
+        );
+      }
+    }
+    if (trait.trait.builtin !== 'Copy' || self.kind !== 'adt') return;
+    const subst = new Map(self.def.params.map((param, index) => [param, self.args[index]]));
+    for (const field of self.def.variants.flatMap((variant) => variant.fields)) {
+      const type = substitute(field.type, subst);
+      if (this.solver.implements(type, trait) === 'no') {
+        compileError(impl.span, `フィールド ${field.name} の型 ${typeToString(type)} は Copy ではありません。`);
       }
     }
   }
@@ -987,6 +1008,7 @@ export class Checker {
     resolveImports(module);
     this.checkDeclaredTypes(firstAdt, firstFn, firstConst, firstImpl);
     this.checkDerivedTraits(firstAdt);
+    for (const impl of this.program.impls.slice(firstImpl)) this.checkImplSignatures(impl);
     this.nestedFns.push(...this.program.pendingFns.splice(pendingBefore));
     this.body.module = module;
   }

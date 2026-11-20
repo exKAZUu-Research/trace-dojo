@@ -3,7 +3,7 @@ import { collectionKeyAnswer } from './collectionBounds';
 import { normalize } from './infer';
 import { supportsDebug } from './iterDebug';
 import { intoIterItem } from './iterTypes';
-import { conversionExists, infallibleConversion } from './traitConversions';
+import { conversionExists, intoConversion } from './traitConversions';
 import { doubleEndedSearcher, iteratorCapability } from './traitIterators';
 import type { Answer, TraitSolver } from './traits';
 import { freshVar, isBuiltin, isIteratorShape, isSigned, shallow, type TraitRef, type Type, USIZE } from './types';
@@ -573,16 +573,16 @@ function fromInto({ solver, t, ref }: Goal): Answer {
   return conversionExists(solver, source, t);
 }
 
-/** Integers convert to each other, failing out of range; `char`s from `u32`s, and `u8`s from `char`s. */
 function tryFrom({ solver, t, ref, name }: Goal): Answer {
   const other = normalize(shallow(ref.args[0]));
   const [source, target] = name === 'TryFrom' ? [other, t] : [t, other];
   if (source.kind === 'var' || target.kind === 'var') return unresolvedTryFrom(source, target);
-  if (solver.unifier.tryUnify(source, target)) return 'yes';
-  if (source.kind === 'int' && target.kind === 'int') return 'yes';
+  if (name === 'TryInto')
+    return solver.implements(target, { trait: solver.program.traitDef('TryFrom'), args: [source] });
+  if (source.kind === 'int' && (target.kind === 'int' || target.kind === 'bool')) return 'yes';
   if (target.kind === 'char' && source.kind === 'int' && source.name === 'u32') return 'yes';
   if (source.kind === 'char' && target.kind === 'int' && target.name === 'u8') return 'yes';
-  return infallibleConversion(source, target) ? 'yes' : 'no';
+  return intoConversion(solver, source, target);
 }
 
 /** A conversion from or to a type not known yet, which no float literal has. */

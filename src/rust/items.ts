@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 935 -- Follows Rust's name resolution case by case.
+// code-gauge-allow-file fileNcss 938 -- Follows Rust's name resolution case by case.
 import { CompileError } from '../interpreter/diagnostics';
 import type {
   BoundAst,
@@ -20,6 +20,7 @@ import type {
 } from './ast';
 import { Unifier } from './infer';
 import { intoIterItem, iterationBound } from './iterTypes';
+import { wrap } from './ops';
 import { TraitSolver } from './traits';
 import {
   adt,
@@ -902,7 +903,7 @@ function lookupValueEntry(
  * and `MAX`, and arithmetic on them. Undefined for other expressions.
  */
 // code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of constant expression.
-// code-gauge-allow functionNcss 32 -- Each supported expression kind has its own integer evaluation rule.
+// code-gauge-allow functionNcss 34 -- Each supported expression kind has its own integer evaluation rule.
 export function constInteger(expr: Expr, scope: TypeScope, resolving = new Set<ConstDef>()): bigint | undefined {
   switch (expr.kind) {
     case 'int': {
@@ -933,7 +934,9 @@ export function constInteger(expr: Expr, scope: TypeScope, resolving = new Set<C
       return result;
     }
     case 'cast': {
-      return constInteger(expr.operand, scope, resolving);
+      const value = constInteger(expr.operand, scope, resolving);
+      const type = lowerType(expr.type, scope);
+      return value !== undefined && type.kind === 'int' ? wrap(type.name, value) : undefined;
     }
     case 'unary': {
       const operand = constInteger(expr.operand, scope, resolving);

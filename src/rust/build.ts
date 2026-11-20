@@ -5,14 +5,15 @@ import type { Item } from './ast';
 import { Checker } from './checker';
 import { evaluateConstants } from './constantEvaluation';
 import { Converter } from './convert';
-import { setPseudoTypes } from './infer';
+import { setPseudoTypes, Unifier } from './infer';
 import { ItemCollector, Program, resolveImports } from './items';
 import { intoIterItem, intoIterShape, iterationBound } from './iterTypes';
 import { turtleImplSource } from './natives/core';
 import { parseRust, parseWith } from './parse';
 import { STD_SOURCE } from './stdSource';
-import { infallibleConversion } from './traits';
-import { shallow, type Type } from './types';
+import { intoConversion } from './traitConversions';
+import { TraitSolver } from './traits';
+import { hasVars, shallow, type Type } from './types';
 
 let stdItems: Item[] | undefined;
 
@@ -53,14 +54,15 @@ function typeCheck(source: string, atomicRows: ReadonlySet<number>, budget: Exec
   collector.collectItems(budget.excludingTime(stdDeclarations), program.std);
   collector.finish();
   setupPrelude(program);
+  const conversionSolver = new TraitSolver(program, new Unifier());
   setPseudoTypes({
     parseError: (target) => parseErrorType(program, target),
     // A type parameter's or an opaque type's item stays `IntoItem<T>` unless its bound sets it.
     intoItem: (type) => (isAbstract(type) ? iterationBound(type)?.item : intoIterItem(type)),
     intoShape: (type) => (isAbstract(type) ? undefined : intoIterShape(program, type)),
-    tryFromError: (source, target) => tryFromErrorType(program, source, target),
+    tryFromError: (source, target) => tryFromErrorType(conversionSolver, source, target),
   });
-  const crate = parseRust(source);
+  const crate = parseRust(source, budget);
   collector.collectCrate(crate, program.root);
   collector.finish();
   resolveImports(program.root);
@@ -102,10 +104,12 @@ function parseErrorType(program: Program, target: Type): Type | undefined {
 }
 
 /** The error of `TryFrom<source>` for `target`: none for a conversion that `From` also makes, else by the types. */
-function tryFromErrorType(program: Program, source: Type, target: Type): Type {
+function tryFromErrorType(solver: TraitSolver, source: Type, target: Type): Type | undefined {
   const s = shallow(source);
   const t = shallow(target);
-  if (infallibleConversion(s, t)) return program.builtinType('Infallible');
+  if (hasVars(s) || hasVars(t)) return undefined;
+  const { program } = solver;
+  if (intoConversion(solver, s, t) === 'yes') return program.builtinType('Infallible');
   if (t.kind === 'char') return program.builtinType('CharTryFromError');
   if (s.kind === 'char') return program.builtinType('TryFromCharError');
   return program.builtinType('TryFromIntError');

@@ -18,7 +18,7 @@ import {
   RustPanic,
   StackOverflow,
 } from './runtime';
-import { concreteType, matchConcrete, typeKey } from './runtimeTypes';
+import { concreteType, matchConcrete, typeIdentity, typeKey } from './runtimeTypes';
 import {
   type AdtDef,
   type ConstDef,
@@ -156,7 +156,7 @@ export class Interpreter implements CallSupport {
   /** The impl method that a trait method runs for a concrete type, or the trait's default method. */
   private dispatch(trait: TraitDef, self: Type, name: string, traitArgs: Type[] = []): Dispatch | undefined {
     const argKey = traitArgs.map(typeKey).join(',');
-    const key = `${trait.path}#${(trait as { id?: number }).id ?? ''}|${typeKey(self)}|${name}|${argKey}`;
+    const key = `${typeIdentity(trait)}|${typeKey(self)}|${name}|${argKey}`;
     if (this.dispatchCache.has(key)) return this.dispatchCache.get(key);
     let result: Dispatch | undefined;
     for (const impl of this.program.impls) {
