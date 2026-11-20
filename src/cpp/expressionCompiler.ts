@@ -1653,8 +1653,10 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const typeNode = fieldOf(node, 'type') as Syntax;
     if (typeNode.type === 'type_descriptor') return this.unsupported(node.row, '複合リテラル（(型){...}）');
     const type = this.resolveTypeSpecifier(typeNode);
-    const value = this.listValue(type, fieldOf(node, 'value') as Syntax, true, node.row);
-    return { ...value, onlyCalls: type.kind === 'class' };
+    const list = fieldOf(node, 'value') as Syntax;
+    const value = this.listValue(type, list, true, node.row);
+    const object = { ...value, onlyCalls: type.kind === 'class' };
+    return list.children.length === 0 ? constantFunctor(type, object) : object;
   }
 
   // Calls -------------------------------------------------------------------------------------------------------------
@@ -1824,6 +1826,12 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   /** A prvalue object of a class made from constructor arguments, or by aggregate initialization when braced. */
   constructObject(cls: ClassInfo, args: Expr[], row: number, isBraced: boolean): Expr {
+    if (args.length === 0 || args[0].braced?.children.length === 0)
+      return constantFunctor(classType(cls), this.constructArguments(cls, args, row, isBraced));
+    return this.constructArguments(cls, args, row, isBraced);
+  }
+
+  private constructArguments(cls: ClassInfo, args: Expr[], row: number, isBraced: boolean): Expr {
     if (!cls.isComplete && cls.library) return this.error(row, `クラス ${cls.name} はまだ定義されていません。`);
     if (args.length === 0 && cls.library?.defaultInitializer) return this.defaultConstructed(cls, row, true);
     const list = args.length === 1 ? args[0].braced : undefined;
@@ -2235,6 +2243,13 @@ function comparePointers(operator: string, a: Ptr, b: Ptr): number {
       return order >= 0 ? 1 : 0;
     }
   }
+}
+
+/** A value-initialized standard function object, which is stateless and whose constructor is constexpr. */
+function constantFunctor(type: Type, object: Expr): Expr {
+  return type.kind === 'class' && type.cls.library?.kind === 'functor'
+    ? { ...object, constantInitialization: true }
+    : object;
 }
 
 /** Whether a static member named through `object` keeps its constant value: the object is absent or a constant designation. */

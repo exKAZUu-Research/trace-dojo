@@ -852,15 +852,18 @@ test('keeps functor constants and sequences typed string functor arguments', () 
 #include <string>
 int main() {
   constexpr int n = std::plus<>()(1, 2);
+  constexpr int braced = std::plus<>{}(1, 2);
+  std::plus<> named;
+  constexpr int fromNamed = named(2, 3);
   int a[std::multiplies<>()(2, 3)];
   constexpr bool less = std::less<>()(1, 2);
   std::string s[] = {"a", "b"};
   int i = 0;
-  std::cout << n << ' ' << sizeof(a) << ' ' << less << ' ' << std::plus<std::string>()(s[i++], s[i++]) << ' ' << i;
+  std::cout << n << braced << fromNamed << ' ' << sizeof(a) << ' ' << less << ' ' << std::plus<std::string>()(s[i++], s[i++]) << ' ' << i;
 }`;
   expect(executeProgram('cpp', program)).toMatchObject({
     kind: 'executed',
-    stdout: '3 24 1 ab 2',
+    stdout: '335 24 1 ab 2',
     uncaughtException: undefined,
   });
 });

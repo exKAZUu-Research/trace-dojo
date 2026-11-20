@@ -1248,3 +1248,17 @@ test('accepts a braced zero-length array new of a class without a default constr
 int main() { X* p = new X[0]{}; delete[] p; }`;
   expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
+
+test.each(['make()', '(std::cout << "x", std::plus<>{})'])(
+  'rejects a constexpr functor call whose callable %s is not a constant expression',
+  (callable) => {
+    const program = `#include <functional>
+#include <iostream>
+std::plus<> make() { std::cout << "called"; return {}; }
+int main() { constexpr int n = ${callable}(1, 2); }`;
+    expect(executeProgram('cpp', program)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [{ row: 3, message: expect.stringContaining('定数式') }],
+    });
+  }
+);

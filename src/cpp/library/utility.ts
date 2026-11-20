@@ -253,10 +253,12 @@ function constLvalue(compiler: ExpressionCompiler, arg: Expr, type: Type, row: n
 /**
  * A functor call that applies an operator, such as `std::plus<>()(a, b)`: its arguments are evaluated as a call's
  * arguments (indeterminately sequenced, not as the operator's unsequenced operands), then the operator applies to them.
- * Constant arguments, which have no side effects, compose into the operator directly so the result stays constant.
+ * A constant functor object with constant arguments, none of which have side effects, composes into the operator
+ * directly so the result stays constant.
  */
 function callOperator(compiler: ExpressionCompiler, operator: string, object: Expr, args: Expr[], row: number): Expr {
-  if (args.every((arg) => arg.constant !== undefined)) {
+  const isConstantObject = object.constantDesignation === true || object.constantInitialization === true;
+  if (isConstantObject && args.every((arg) => arg.constant !== undefined)) {
     const result = compiler.binary(operator, args[0], args[1], row);
     return { ...result, run: (frame) => (object.run(frame), result.run(frame)) };
   }
