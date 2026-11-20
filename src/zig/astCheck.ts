@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 605 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 612 -- The syntax checks share scope, diagnostics, and the compilation budget.
 import type { SourceDiagnostic } from '../interpreter/diagnostics';
 import { ExecutionBudget } from '../interpreter/limits';
 import { isDiscardName } from './ast';
@@ -187,6 +187,7 @@ class AstChecker {
   /** The local of an enclosing function that a declaration in a type inside it would shadow. */
   private outerLocal(name: string): LocalBinding | undefined {
     for (let scope = this.scope; scope; scope = scope.parent) {
+      this.budget.spend();
       if (scope.kind !== 'block') continue;
       const local = scope.locals.get(name);
       if (local) return local;
@@ -264,6 +265,7 @@ class AstChecker {
       this.error(span, `「${name}」は組み込みの型の名前なので、${what}の名前には使えません。`);
     }
     for (let scope = this.scope; scope; scope = scope.parent) {
+      this.budget.spend();
       if (scope.kind === 'block') {
         const outer = scope.locals.get(name);
         if (outer) {
@@ -340,6 +342,7 @@ class AstChecker {
     }
     let crossedNamespace = false;
     for (let scope = this.scope; scope; scope = scope.parent) {
+      this.budget.spend();
       if (scope.kind === 'block') {
         const local = scope.locals.get(name);
         if (!local) continue;
@@ -652,6 +655,7 @@ class AstChecker {
 
   private withLabel(label: Label, target: LabelScope['target'], isLoop: boolean, run: () => void): void {
     for (let scope = this.scope; scope; scope = scope.parent) {
+      this.budget.spend();
       if (scope.kind === 'label' && scope.label.name === label.name) {
         this.error(label, `ラベル「${label.name}」が、外側でも使われています。`);
         break;
@@ -768,6 +772,7 @@ class AstChecker {
   private jump(expression: Extract<Expression, { kind: 'break' | 'continue' }>): void {
     const isBreak = expression.kind === 'break';
     for (let scope = this.scope; scope; scope = scope.parent) {
+      this.budget.spend();
       if (scope.kind === 'defer') {
         this.error(
           expression,
@@ -807,6 +812,7 @@ class AstChecker {
 
   private inFunction(): boolean {
     for (let scope = this.scope; scope; scope = scope.parent) {
+      this.budget.spend();
       if (scope.kind === 'function') return true;
       if (scope.kind === 'namespace') return false;
     }
@@ -815,6 +821,7 @@ class AstChecker {
 
   private inDefer(): boolean {
     for (let scope = this.scope; scope; scope = scope.parent) {
+      this.budget.spend();
       if (scope.kind === 'defer') return true;
       if (scope.kind === 'function' || scope.kind === 'namespace') return false;
     }

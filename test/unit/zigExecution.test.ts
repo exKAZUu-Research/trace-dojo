@@ -5949,6 +5949,15 @@ test('protecting a mutable global aggregate consumes compilation work', () => {
   expect(() => compileSource(source)).toThrow(expect.objectContaining({ limit: 'operations' }));
 });
 
+test('ancestor scope searches share the syntax-checking budget', () => {
+  const declarations = Array.from({ length: 100 }, (_, index) => `const x${index}=0;_=x${index};`).join('');
+  const source = `fn unused()void{${'{'.repeat(32)}${declarations}${'}'.repeat(32)}}pub fn main()void{}`;
+  expect(() => compileSource(source)).not.toThrow();
+  const budget = new ExecutionBudget();
+  budget.spend(LIMITS.maxOperations - 5000);
+  expect(() => compileSource(source, { budget })).toThrow(expect.objectContaining({ limit: 'operations' }));
+});
+
 test('protecting nested constant storage consumes compilation work', () => {
   const source = 'const S=struct{x:u8};const a:[128]S=undefined;pub fn main()void{_=&a;}';
   expect(() => compileSource(source)).not.toThrow();
