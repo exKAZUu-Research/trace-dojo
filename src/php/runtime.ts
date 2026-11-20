@@ -447,14 +447,24 @@ export class Runtime {
     }
   }
 
-  retireObjectFreeArrays(dropped: unknown[]): void {
-    const pending: PhpArray[] = [];
-    for (const value of dropped) if (value instanceof PhpArray && value.composite) pending.push(value);
-    while (pending.length > 0) {
-      const array = pending.pop() as PhpArray;
-      if (arrayHasHolders(this, array, 1)) continue;
+  retireArrayGraph(root: PhpArray, retained: (array: PhpArray) => boolean, released?: unknown[]): void {
+    if (!root.composite || retained(root)) return;
+    const retire = (array: PhpArray): Iterator<Value | Ref> => {
       this.gcRoots.delete(array);
-      for (const slot of array.retire()) if (slot instanceof PhpArray && slot.composite) pending.push(slot);
+      return array.retire().values();
+    };
+    const pending = [retire(root)];
+    while (pending.length > 0) {
+      const next = pending.at(-1)!.next();
+      if (next.done) {
+        pending.pop();
+        continue;
+      }
+      const slot = next.value;
+      const value = slot instanceof Ref ? slot.v : slot;
+      if (value instanceof PhpArray && value.composite && !retained(value)) pending.push(retire(value));
+      else this.pendingGcRoots.add(value);
+      if (slot instanceof Ref || value instanceof PhpObject) released?.push(slot);
     }
   }
 

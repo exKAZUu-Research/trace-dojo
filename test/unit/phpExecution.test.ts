@@ -5374,6 +5374,34 @@ try { range(0.1, null, 1); } catch (ValueError $e) { echo explode("\\n", $e->get
   });
 });
 
+test.each([
+  '$c = [1]; $b = [$c]; unset($b);',
+  '$c = [1]; $b = [[$c]]; $b = null;',
+  '$c = [new stdClass]; $b = [$c]; unset($b);',
+  '$c = [1]; $b = [[$c, new stdClass]]; unset($b);',
+  '$c = [1]; $d = [2]; $b = [[$c], $d]; unset($b);',
+])('dropped arrays preserve subsequent cycle destructor order: %s', (setup) => {
+  expect(
+    run(`<?php
+class N {
+  public $s;
+  function __construct(public $id) {}
+  function __destruct() { echo "d{$this->id};"; }
+}
+function makeCycle($id) {
+  $x = new N($id);
+  $y = new N($id + 1000);
+  $x->s = $y;
+  $y->s = $x;
+  return [$y, new N($id + 2000)];
+}
+${setup}
+$a = makeCycle(4);
+$a = makeCycle(6);
+echo gc_collect_cycles(), ";";`)
+  ).toMatchObject({ kind: 'executed', stdout: 'd2004;d1004;d4;2;d6;d1006;d2006;' });
+});
+
 test("gc_collect_cycles() reruns over what destructors create and leaves out a resurrected receiver's data", () => {
   for (const [action, expected] of [
     ['$x = new stdClass; $x->self = $x; unset($x); $this->a = [];', 'int(2)\nint(0)\nint(2)\n'],

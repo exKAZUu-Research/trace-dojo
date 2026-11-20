@@ -442,7 +442,7 @@ function releaseDroppedNow(
         (runtime.collectingObjects.has(value) || activeReleaseObjects.get(value)?.hasVisited(value))
       )
   );
-  if (!dropped.some((value) => mayHoldObject(value, runtime))) return runtime.retireObjectFreeArrays(dropped);
+  if (!dropped.some((value) => mayHoldObject(value, runtime))) return retireObjectFreeArrays(runtime, dropped);
   const roots = ownershipRoots(runtime);
   const unreachable = new Set<object>();
   dropped = dropped.filter(
@@ -804,44 +804,27 @@ function finishArrayCollection(runtime: Runtime, arrays: Iterable<PhpArray>): vo
   retireArrays(runtime, arrays);
 }
 
+function retireObjectFreeArrays(runtime: Runtime, dropped: unknown[]): void {
+  for (const value of dropped)
+    if (value instanceof PhpArray && value.composite)
+      runtime.retireArrayGraph(value, (array) => arrayHasHolders(runtime, array, 1));
+}
+
 function retireArrays(runtime: Runtime, arrays: Iterable<PhpArray>, dropped: unknown[] = []): void {
   const remaining = new Set(arrays);
   if (remaining.size === 0) return;
   const roots = ownershipRoots(runtime);
-  const seen = new Set<PhpArray>();
   const released: unknown[] = [];
+  const retained = (array: PhpArray): boolean => {
+    remaining.delete(array);
+    return ownedReachable(array, roots, runtime, undefined, undefined, true);
+  };
   for (const item of [...dropped, ...remaining]) {
     const value = item instanceof Ref ? item.v : item;
-    if (value instanceof PhpArray && remaining.has(value))
-      retireArrayGraph(runtime, value, roots, seen, remaining, released);
+    if (value instanceof PhpArray && remaining.has(value)) runtime.retireArrayGraph(value, retained, released);
     else if (value instanceof PhpObject && runtime.isCollectableObject(value)) runtime.gcRoots.add(value);
   }
   if (released.length > 0) runtime.release(released);
-}
-
-// code-gauge-allow functionCognitiveComplexity 16 -- Retires an unreachable array tree and collects its released children.
-function retireArrayGraph(
-  runtime: Runtime,
-  root: PhpArray,
-  roots: Set<unknown>,
-  seen: Set<PhpArray>,
-  remaining: Set<PhpArray>,
-  released: unknown[]
-): void {
-  for (const pending = [root]; pending.length > 0;) {
-    const array = pending.pop() as PhpArray;
-    remaining.delete(array);
-    if (seen.has(array) || !array.composite || ownedReachable(array, roots, runtime, undefined, undefined, true))
-      continue;
-    seen.add(array);
-    runtime.gcRoots.delete(array);
-    for (const slot of array.retire()) {
-      const value = slot instanceof Ref ? slot.v : slot;
-      runtime.pendingGcRoots.add(value);
-      if (value instanceof PhpArray) pending.push(value);
-      if (slot instanceof Ref || value instanceof PhpObject) released.push(slot);
-    }
-  }
 }
 
 function bufferArrayCycles(
