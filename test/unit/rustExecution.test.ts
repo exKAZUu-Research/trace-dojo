@@ -2927,3 +2927,35 @@ fn main() {}`,
   ];
   for (const program of conflicts) expect(executeProgram('rust', program)).toMatchObject({ kind: 'compileError' });
 });
+
+test('keeps Rust trait object captures borrowed until their owner drops', () => {
+  const program = rustMain(`let mut source = 5;
+    let original = &mut source;
+    let saved: (Box<dyn Fn() -> i32>,) = (Box::new(|| *original),);
+    println!("{}", (saved.0)());
+    let next: &mut i32 = original;
+    println!("{}", next);`);
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'compileError' });
+  const released = program.replace('let next:', 'drop(saved.0); let next:');
+  expect(executeProgram('rust', released)).toMatchObject({ kind: 'executed', stdout: '5\n5\n' });
+});
+
+test('reborrows Rust references passed to associated method receivers', () => {
+  const program = rustMain(`let mut values = vec![1];
+    let receiver = &mut values;
+    Vec::push(receiver, 2);
+    Vec::push(receiver, 3);
+    println!("{:?}", values);`);
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '[1, 2, 3]\n' });
+});
+
+test('keeps Rust trait comparison operands borrowed until the comparison', () => {
+  const program = rustMain(`let mut items = vec![1];
+    let equal = items == { items.push(2); vec![1, 2] };
+    println!("{}", equal);`);
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'compileError' });
+  const primitive = rustMain(`let mut value = 1;
+    let equal = value == { value = 2; 1 };
+    println!("{} {}", equal, value);`);
+  expect(executeProgram('rust', primitive)).toMatchObject({ kind: 'executed', stdout: 'true 2\n' });
+});

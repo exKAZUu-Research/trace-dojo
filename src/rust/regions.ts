@@ -77,6 +77,22 @@ export function isNone(layout: Layout): boolean {
   return layout.kind === 'none';
 }
 
+export function dropSlots(type: Type, layout: Layout, proj: string[] = []): { proj: string[]; regions: RVar[] }[] {
+  const t = normalize(shallow(type));
+  if (t.kind === 'tuple' && layout.kind === 'tuple') {
+    return t.elems.flatMap((elem, index) => dropSlots(elem, layout.elems[index], [...proj, String(index)]));
+  }
+  if (
+    t.kind === 'adt' &&
+    layout.kind === 'adt' &&
+    t.def.builtin === 'Box' &&
+    normalize(shallow(t.args[0])).kind === 'dyn'
+  ) {
+    return [{ proj, regions: regionsOf(layout.args[0]) }];
+  }
+  return [];
+}
+
 export function regionsOf(layout: Layout): RVar[] {
   switch (layout.kind) {
     case 'ref': {
@@ -235,4 +251,23 @@ export function ownedDerefLayout(layout: Layout): Layout {
     return isNone(elem) ? NONE : { kind: 'seq', elem };
   }
   return NONE;
+}
+
+/** The projections of derefs: `*` through a reference, `#` through an owner (a `Box`, a collection's slice). */
+export function derefSteps(derefs: readonly ('ref' | 'mutRef' | 'own')[] | undefined): string[] {
+  return (derefs ?? []).map((step) => (step === 'own' ? '#' : '*'));
+}
+
+/** The type of a receiver after the derefs of its method call's adjustment. */
+export function typeAfter(type: Type | undefined, derefs: readonly ('ref' | 'mutRef' | 'own')[]): Type | undefined {
+  let t = type && normalize(shallow(type));
+  for (let index = 0; index < derefs.length && t; index++) {
+    if (t.kind === 'ref') t = normalize(shallow(t.target));
+    else if (t.kind === 'adt' && t.def.builtin === 'Box') t = normalize(shallow(t.args[0]));
+    else if (t.kind === 'adt' && (t.def.builtin === 'Vec' || t.def.builtin === 'VecDeque')) {
+      t = { kind: 'slice', elem: t.args[0] };
+    } else if (t.kind === 'adt' && t.def.builtin === 'String') t = { kind: 'str' };
+    else if (t.kind === 'array') t = { kind: 'slice', elem: t.elem };
+  }
+  return t;
 }

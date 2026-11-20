@@ -62,6 +62,7 @@ export class LoanGraph {
   readonly names: string[] = [];
   /** The regions of the references in each variable's type, which contain the points where the variable is live. */
   readonly varRegions: RVar[][] = [];
+  readonly dropLive = new Map<Var, { proj: string[]; regions: RVar[] }[]>();
   regionCount = 0;
   /** Regions that contain the whole function: those of parameters, captures, the return value, and `'static`. */
   readonly universal = new Set<RVar>();
@@ -116,7 +117,7 @@ export class LoanGraph {
     this.budget.spend(2 * loans.length * this.points.length);
     const preds = this.points.map((): number[] => []);
     for (const [index, point] of this.points.entries()) for (const succ of point.succ) preds[succ].push(index);
-    const regions = this.regions();
+    const regions = this.regions(preds, reachable);
     const loanIndex = new Map(loans.map((loan, index) => [loan, index]));
     const killed = this.points.map((point) => {
       const set = new BitSet(loans.length);
@@ -167,13 +168,20 @@ export class LoanGraph {
   }
 
   /** The points each region contains: where variables of types with it are live, and what it outlives. */
-  private regions(): BitSet[] {
+  private regions(preds: number[][], reachable: boolean[]): BitSet[] {
     const liveIn = this.liveness();
     const words = Math.ceil(this.points.length / 32);
     this.budget.spend(this.regionCount * words + this.points.length * this.names.length);
     const regions = Array.from({ length: this.regionCount }, () => new BitSet(this.points.length));
     for (const [index, live] of liveIn.entries()) {
       for (const v of live.values()) for (const region of this.varRegions[v]) regions[region].add(index);
+    }
+    for (const [root, slots] of this.dropLive) {
+      for (const slot of slots) {
+        for (const index of this.dropLiveness({ root, proj: slot.proj }, preds, reachable)) {
+          for (const region of slot.regions) regions[region].add(index);
+        }
+      }
     }
     for (const region of this.universal) regions[region].fill();
     let changed = true;
@@ -183,6 +191,58 @@ export class LoanGraph {
       for (const [sup, sub] of this.outlives) if (regions[sup].unionWith(regions[sub])) changed = true;
     }
     return regions;
+  }
+
+  private dropLiveness(place: Place, preds: number[][], reachable: boolean[]): Set<number> {
+    const { definitions, deinitializes, drops, pending } = this.dropEvents(place, reachable);
+    const initialized = new Set<number>();
+    while (pending.length > 0) {
+      this.budget.spend();
+      const index = pending.pop()!;
+      if (initialized.has(index)) continue;
+      initialized.add(index);
+      if (!deinitializes.has(index)) pending.push(...this.points[index].succ);
+    }
+    for (const drop of drops) if (initialized.has(drop)) pending.push(drop);
+    const live = new Set<number>();
+    while (pending.length > 0) {
+      this.budget.spend();
+      const index = pending.pop()!;
+      if (live.has(index)) continue;
+      live.add(index);
+      for (const pred of preds[index]) {
+        if (initialized.has(pred) && !definitions.has(pred) && !deinitializes.has(pred)) pending.push(pred);
+      }
+    }
+    return live;
+  }
+
+  private dropEvents(
+    place: Place,
+    reachable: boolean[]
+  ): {
+    definitions: Set<number>;
+    deinitializes: Set<number>;
+    drops: Set<number>;
+    pending: number[];
+  } {
+    const definitions = new Set<number>();
+    const deinitializes = new Set<number>();
+    const drops = new Set<number>();
+    this.budget.spend(this.points.length);
+    for (const [index, point] of this.points.entries()) {
+      if (!reachable[index]) continue;
+      this.budget.spend(point.accesses.length);
+      if (point.defs.includes(place.root)) definitions.add(index);
+      for (const access of point.accesses) {
+        if (access.place.root !== place.root || !isPrefix(access.place.proj, place.proj)) continue;
+        if (access.kind === 'storageDead' || access.kind === 'write') drops.add(index);
+        if (access.kind === 'storageDead' || access.kind === 'move') deinitializes.add(index);
+        if (access.kind === 'write') definitions.add(index);
+      }
+    }
+    const pending = [...definitions].flatMap((index) => this.points[index].succ);
+    return { definitions, deinitializes, drops, pending };
   }
 
   /** The variables live on entry to each point. */

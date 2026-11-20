@@ -76,6 +76,11 @@ export function selfParamType(fn: FnDef, subst: Subst): Type {
   return ref(selfType, fn.selfMode === 'mutRef');
 }
 
+export function writtenCallParams(fn: FnDef | undefined): Type[] {
+  if (!fn) return [];
+  return fn.selfMode ? [selfParamType(fn, new Map()), ...fn.paramTypes] : fn.paramTypes;
+}
+
 function turtleNew(c: Checker, expr: Extract<Expr, { kind: 'call' }>): Type {
   const { args } = expr;
   if (args.length > 0 && args.length !== 2 && args.length !== 3) {
