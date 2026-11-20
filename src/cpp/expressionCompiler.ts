@@ -1981,6 +1981,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   }
 
   private newArray(elementType: Type, lengthNode: Syntax, argsNode: Syntax | undefined, row: number): Expr {
+    this.checkAllocatedElement(elementType, row);
     const lengthExpr = this.rvalue(this.compileExpression(lengthNode));
     if (!isInteger(lengthExpr.type))
       return this.error(row, `new[] の要素の数には整数を書いてください（${typeName(lengthExpr.type)}）。`);
@@ -1995,8 +1996,12 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     if (lengthExpr.constant !== undefined && Number(lengthExpr.constant) < initial.length)
       return this.error(row, 'new[] の要素の数が足りません。');
     const badAlloc = this.library.exception('bad_alloc');
-    // The elements without initializers need a default constructor only when some may exist.
-    const hasRest = lengthExpr.constant === undefined || Number(lengthExpr.constant) > initial.length;
+    // The elements without initializers need a default constructor when some may exist, and an unbraced allocation of
+    // no elements still needs one (clang++ checks `new X[0]` and `new X[0]()` but not `new X[0]{}`).
+    const hasRest =
+      lengthExpr.constant === undefined ||
+      Number(lengthExpr.constant) > initial.length ||
+      (argsNode?.type !== 'initializer_list' && initial.length === 0);
     const valueInitialize =
       hasRest && argsNode?.type === 'argument_list' ? this.valueInitialized(elementType, row).run : undefined;
     const rest: Initializer | undefined = hasRest
@@ -2006,7 +2011,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
           ? (frame, target) => valueInitialize(frame, false, target instanceof CObject ? target : undefined)
           : this.defaultInitializer(elementType, row)
       : undefined;
-    const destroy = this.destroyerOf(elementType);
+    const destroy = this.destroyerOf(elementType, row);
     return {
       type: pointerTo(elementType),
       isLvalue: false,
@@ -2027,6 +2032,16 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         return new Ptr(store, 0);
       },
     };
+  }
+
+  private checkAllocatedElement(elementType: Type, row: number): void {
+    let element = elementType;
+    while (element.kind === 'array') element = element.of;
+    if (element.kind === 'void') this.error(row, 'void のオブジェクトは new で作れません。');
+    if (element.kind !== 'class') return;
+    if (!element.cls.isComplete) this.error(row, `クラス ${element.cls.name} はまだ定義されていません。`);
+    if (element.cls.isAbstract)
+      this.error(row, `${element.cls.name} は抽象クラス（純粋仮想関数があるクラス）なので、オブジェクトを作れません。`);
   }
 
   /** The value of one element of a braced list, which may itself be a braced list. */

@@ -1225,3 +1225,26 @@ int main() { S s; ${body} }`;
     });
   }
 );
+
+test.each([
+  ['int main() { void* p = new void[3]; }', 'void のオブジェクトは new で作れません'],
+  ['struct X; int main() { X* p = new X[0]{}; }', 'クラス X はまだ定義されていません'],
+  ['struct X { virtual void f() = 0; }; int main() { X* p = new X[0]{}; }', 'X は抽象クラス'],
+  ['struct X { X() {} private: ~X() {} }; int main() { X* p = new X[2]; }', 'X のデストラクタは private'],
+  ['struct X { X(int) {} }; int main() { X* p = new X[0]; }', 'X のコンストラクタ に、引数（）に合うものがありません'],
+  [
+    'struct X { X(int) {} }; int main() { X* p = new X[0](); }',
+    'X のコンストラクタ に、引数（）に合うものがありません',
+  ],
+])('rejects the array new expression in %s', (program, message) => {
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 0, message: expect.stringContaining(message) }],
+  });
+});
+
+test('accepts a braced zero-length array new of a class without a default constructor', () => {
+  const program = `struct X { X(int) {} };
+int main() { X* p = new X[0]{}; delete[] p; }`;
+  expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});
