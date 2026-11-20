@@ -23,6 +23,9 @@ import { traceRubyProgram } from '../ruby/trace';
 import { findTypeScriptTraceAnnotations } from '../typescript/parse';
 import { executeTypeScriptProgram } from '../typescript/run';
 import { traceTypeScriptProgram } from '../typescript/trace';
+import { executeZigProgram } from '../zig/execute';
+import { findZigTraceAnnotations } from '../zig/parse';
+import { traceZigProgram } from '../zig/trace';
 import type { SourceDiagnostic } from './diagnostics';
 import type { ExecutionLimitError } from './limits';
 import type { ProgramInput, ProgramOutput } from './programIo';
@@ -88,6 +91,7 @@ const interpreters = {
     record: traceTypeScriptProgram,
     execute: executeTypeScriptProgram,
   },
+  zig: { findTraceAnnotations: findZigTraceAnnotations, record: traceZigProgram, execute: executeZigProgram },
   haskell: {
     findTraceAnnotations: findHaskellTraceAnnotations,
     record: traceHaskellProgram,
