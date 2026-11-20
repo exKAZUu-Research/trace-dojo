@@ -3,12 +3,12 @@ import { changeString, concatStrings, sizeTable } from './capacity';
 import type { Compiler, Eval } from './compiler';
 import { derefAll, evaluateValues, stringish, stripRefs } from './compilerCommon';
 import { normalize } from './infer';
-import { btreeSetOp, type SetOp } from './natives/setOps';
+import { btreeSetOp, hashSetMembers, type SetOp } from './natives/setOps';
 import { cloneValue, floatArith, intArith, overflow, testPartialOrder, valuesEqual, wrap } from './ops';
 import type { Frame } from './runtime';
 import { runtimeType } from './runtimeTypes';
 import { type IntName, resolve, shallow, type Type } from './types';
-import { DONE, type Place, SetValue, UNIT_VALUE, type Value } from './values';
+import { DONE, type Place, SetValue, UNIT_VALUE } from './values';
 
 type ExprOf<K extends Expr['kind']> = Extract<Expr, { kind: K }>;
 
@@ -88,8 +88,7 @@ function arithmetic(expr: ExprOf<'binary'>, left: Eval, right: Eval, rightCoerce
       const merge = BTREE_OPS[op];
       return (frame) => mergeOrderedSets(merge, frame, left, right, elem(frame), setType(frame));
     }
-    return (frame) =>
-      setOperation(op, derefAll(left(frame)) as SetValue, derefAll(right(frame)) as SetValue, elem(frame));
+    return (frame) => mergeHashSets(BTREE_OPS[op], frame, left, right, elem(frame));
   }
   if (type.kind === 'adt') {
     // String + &str
@@ -193,21 +192,15 @@ function mergeOrderedSets(op: SetOp, frame: Frame, left: Eval, right: Eval, elem
 }
 
 /** The set that `|`, `&`, `-`, or `^` makes of two sets, of clones of their elements, in the order they iterate. */
-// code-gauge-allow functionCognitiveComplexity 16 -- Each set operator selects its own members.
-function setOperation(op: string, a: SetValue, b: SetValue, elem: Type): SetValue {
-  const result = new SetValue(a.sorted);
+function mergeHashSets(op: SetOp, frame: Frame, left: Eval, right: Eval, elem: Type): SetValue {
+  const [a, b] = evaluateValues(frame, [left, right]).map((value) => derefAll(value) as SetValue);
+  const result = new SetValue(false);
   if (a.entries.table) sizeTable(result.entries.table, a.entries.table.entrySize);
-  const add = (value: Value): void => result.entries.set(result.entries.key(elem, value), cloneValue(elem, value));
-  for (const value of a.entries.values()) {
-    if (op === '|') {
-      add(value);
-      continue;
+  return frame.runtime.withRoots([a, b, result], () => {
+    for (const value of hashSetMembers(op, a, b, elem)) {
+      frame.runtime.allocate(1);
+      result.entries.set(result.entries.key(elem, value), cloneValue(elem, value));
     }
-    const inB = b.entries.has(b.entries.key(elem, value));
-    if (op === '&' ? inB : !inB) add(value);
-  }
-  if (op === '|' || op === '^') {
-    for (const value of b.entries.values()) if (!a.entries.has(a.entries.key(elem, value))) add(value);
-  }
-  return result;
+    return result;
+  });
 }

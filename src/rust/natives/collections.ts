@@ -18,7 +18,7 @@ import { checkTableCapacity } from './capacityNatives';
 import { defaultValue } from './core';
 import { arrayIter, mapIter, setIter } from './iterators';
 import { sizeOf } from './layout';
-import { btreeSetOp, type SetOp } from './setOps';
+import { btreeSetOp, hashSetMembers, type SetOp } from './setOps';
 import { call, define, deref, libraryPanic, type Native, type NativeContext, none, option, some } from './support';
 
 /** A new `HashMap` or `HashSet` with its entries' size, and with room for `capacity` elements. */
@@ -72,29 +72,12 @@ function set(self: Value): SetValue {
 }
 
 function hashSetOp(ctx: NativeContext, op: SetOp, self: Value, other: Value): Value {
-  const a = set(self).entries;
-  const b = set(other).entries;
   const result: Value[] = [];
-  if (op === 'union') appendSetMembers(ctx, result, a, () => true);
-  else appendSetMembers(ctx, result, a, (value) => b.has(entryKey(ctx, b, value)) === (op === 'intersection'));
-  if (op === 'union' || op === 'symmetric_difference') {
-    appendSetMembers(ctx, result, b, (value) => !a.has(entryKey(ctx, a, value)));
-  }
-  return listed(arrayIter(result));
-}
-
-function appendSetMembers(
-  ctx: NativeContext,
-  result: Value[],
-  entries: CollectionEntries<Value>,
-  keep: (value: Value) => boolean
-): void {
-  ctx.runtime.spend(entries.size);
-  for (const value of entries.values()) {
-    if (!keep(value)) continue;
+  for (const value of hashSetMembers(op, set(self), set(other), keyType(ctx))) {
     ctx.runtime.allocate(1);
     result.push(value);
   }
+  return listed(arrayIter(result));
 }
 
 /** `BTreeSet`'s set operations, which take std's steps. */

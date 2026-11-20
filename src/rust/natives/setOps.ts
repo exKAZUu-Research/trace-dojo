@@ -1,6 +1,6 @@
 import type { DebugPart } from '../debugText';
 import { type DebugValue, described, fieldsPart, listPart, optionPart, tuplePart } from '../iterDebug';
-import { compareValues } from '../ops';
+import { compareValues, spendCollectionWork } from '../ops';
 import type { Type } from '../types';
 import { DONE, IterValue, type Next, type SetValue, type Value } from '../values';
 
@@ -11,6 +11,19 @@ import { DONE, IterValue, type Next, type SetValue, type Value } from '../values
  */
 
 export type SetOp = 'union' | 'intersection' | 'difference' | 'symmetric_difference';
+
+export function* hashSetMembers(op: SetOp, left: SetValue, right: SetValue, type: Type): IterableIterator<Value> {
+  const a = left.entries;
+  const b = right.entries;
+  spendCollectionWork(a.size);
+  for (const value of a.values()) {
+    if (op === 'union' || b.has(b.key(type, value)) === (op === 'intersection')) yield value;
+  }
+  if (op === 'union' || op === 'symmetric_difference') {
+    spendCollectionWork(b.size);
+    for (const value of b.values()) if (!a.has(a.key(type, value))) yield value;
+  }
+}
 
 const ITER_PERFORMANCE_TIPPING_SIZE_DIFF = 16;
 
@@ -45,7 +58,7 @@ interface Context {
 
 /** An iterator of `op` on two `BTreeSet`s, given their elements in order. */
 export function btreeSetOp(op: SetOp, sets: [SetValue, SetValue], elem: Type, setType: Type): IterValue {
-  const items: [Value[], Value[]] = [[...sets[0].entries.values()], [...sets[1].entries.values()]];
+  const items: [Value[], Value[]] = [sets[0].entries.snapshot(), sets[1].entries.snapshot()];
   const context: Context = {
     cmp: orderOf(elem),
     contains: (set, value) => set.entries.has(set.entries.key(elem, value)),

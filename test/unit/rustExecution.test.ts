@@ -2316,6 +2316,10 @@ test.each([
     'materialized hash set operation iterators',
     'let _allocated = vec![0; 999_945]; let a: std::collections::HashSet<_> = (0..15).collect(); let b: std::collections::HashSet<_> = (15..30).collect(); let _union = a.union(&b);',
   ],
+  [
+    'owned hash set operator results',
+    'let _allocated = vec![0; 999_945]; let a: std::collections::HashSet<_> = (0..15).collect(); let b: std::collections::HashSet<_> = (15..30).collect(); let _union = &a | &b;',
+  ],
   ['a trailing format literal', `let s = format!("{}{}", "a".repeat(999_000), "${'b'.repeat(1024)}");`],
   ['materialized UTF-8 bytes', 'let s = "é".repeat(300_000); let _a = s.as_bytes(); let _b = s.bytes();'],
   ['a concatenated Vec', 'let mut v = vec![1u8]; for _ in 0..40 { v = [v.clone(), v.clone()].concat(); }'],
