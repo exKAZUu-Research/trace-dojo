@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 647 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 651 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type { CascadeSelector, CollectionElement, Expression, ForInBinding, Span, SwitchExpressionCase } from './ast';
 import type { ClassInfo, Member } from './classes';
 import { at, type Compiled, type Eval, type ResolvedMember, typeName } from './compilerBase';
@@ -370,6 +370,8 @@ export abstract class AssignmentCompiler extends ControlCompiler {
   // code-gauge-allow functionCognitiveComplexity 21 -- Each branch is one of the cases Dart distinguishes for this construct.
   private localTarget(variable: LocalVar, span: Span, isPlainAssignment: boolean): AssignableTarget {
     const { options, name } = variable;
+    if (variable.unavailable) this.error(span, variable.unavailable);
+    if (variable.inPatternGuard) this.error(span, `パターン変数 ${name} には、when の中で代入できません。`);
     if (options.isConst) this.error(span, `const の変数 ${name} には代入できません。`);
     if (options.isFinal && options.isLate && (options.hasInitializer || this.flow.assigned.has(variable))) {
       this.error(span, `late final の変数 ${name} には、もう値を代入できません。`);

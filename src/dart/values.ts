@@ -56,6 +56,7 @@ export class DartObject {
 /** State that natives keep, which garbage collection walks through `values`. */
 export interface NativeState {
   values(): Iterable<Value>;
+  roots?(): Iterable<Value>;
   [key: string]: unknown;
 }
 

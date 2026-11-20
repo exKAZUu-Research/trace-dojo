@@ -1,11 +1,11 @@
-// code-gauge-allow-file fileNcss 515 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
-import type { Block, CatchClause, Pattern, Statement, SwitchCase } from './ast';
+// code-gauge-allow-file fileNcss 542 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+import type { Block, CatchClause, Pattern, Span, Statement, SwitchCase } from './ast';
 import type { FunctionSpec } from './callCompiler';
 import type { Eval } from './compilerBase';
 import { checkExhaustive } from './exhaustiveness';
 import { type CompiledPattern } from './patternCompiler';
 import { DartThrow, type Frame } from './runtime';
-import { Flow } from './scope';
+import { Flow, type LocalVar } from './scope';
 import {
   advanceCountedLoop,
   type Completion,
@@ -16,7 +16,7 @@ import {
   startCountedLoop,
   StatementCompiler,
 } from './statementCompiler';
-import { coreTypes, type DartType, DYNAMIC, interfaceType, isSubtype, iterableElementOf } from './types';
+import { coreTypes, type DartType, DYNAMIC, interfaceType, isSubtype, iterableElementOf, sameType } from './types';
 import { Cell, type Value } from './values';
 
 /** Switch, try, and the bodies of sync* generators. */
@@ -63,18 +63,28 @@ export abstract class ControlCompiler extends StatementCompiler {
       for (const group of groupCases(statement.cases)) {
         this.flow = before;
         const { result, slots } = this.withScope(() => {
-          const matchers = group.cases.map((switchCase) => this.compileCaseHead(switchCase, subjectType, before));
-          let joined = matchers[0].flow;
-          for (const matcher of matchers.slice(1)) joined = Flow.join(joined, matcher.flow);
+          const heads = group.cases.map((switchCase) =>
+            this.withScope(() => this.compileCaseHead(switchCase, subjectType, before))
+          );
+          let joined = heads[0].result.flow;
+          for (const head of heads.slice(1)) joined = Flow.join(joined, head.result.flow);
           this.flow = joined;
-          if (group.cases.length > 1)
-            this.checkSharedCaseVariables(
-              group.cases,
-              matchers.map((matcher) => matcher.pattern)
-            );
-          // A case body may end without `break`; Dart then leaves the switch.
+          const variables = this.sharedCaseVariables(
+            group.cases[0],
+            heads.map(({ result }) => result.pattern),
+            group.labels.length > 0
+          );
+          const matchers = heads.map(({ result: { pattern, guard }, slots: headSlots }): SwitchMatcher => ({
+            pattern,
+            guard,
+            slots: headSlots,
+            bindings: variables.flatMap((variable) => {
+              const binding = pattern?.variables.get(variable.name);
+              return binding ? [{ from: binding.slot, to: variable.slot }] : [];
+            }),
+          }));
           const body = this.compileStatements(group.statements);
-          return { matchers: matchers.map(({ pattern, guard }) => ({ pattern, guard })), body };
+          return { matchers, body };
         });
         after = after ? Flow.join(after, this.flow) : this.flow;
         groups.push({ ...result, slots, labels: group.labels });
@@ -113,23 +123,39 @@ export abstract class ControlCompiler extends StatementCompiler {
     for (const variable of pattern.variables.values()) this.flow = this.flow.assign(variable);
     let guard: Eval | undefined;
     if (switchCase.guard) {
-      const compiled = this.compileCondition(switchCase.guard);
-      guard = compiled.compiled.run;
-      this.flow = compiled.flow.whenTrue;
+      for (const variable of pattern.variables.values()) variable.inPatternGuard = true;
+      try {
+        const compiled = this.compileCondition(switchCase.guard);
+        guard = compiled.compiled.run;
+        this.flow = compiled.flow.whenTrue;
+      } finally {
+        for (const variable of pattern.variables.values()) variable.inPatternGuard = false;
+      }
     }
     return { pattern, guard, flow: this.flow };
   }
 
-  /** Cases that share a body must declare the same variables, which the body may then use. */
-  private checkSharedCaseVariables(cases: SwitchCase[], patterns: (CompiledPattern | undefined)[]): void {
-    const first = patterns[0]?.variables;
-    for (const [index, pattern] of patterns.entries()) {
-      const names = [...(pattern?.variables.keys() ?? [])].toSorted().join(',');
-      if (names !== [...(first?.keys() ?? [])].toSorted().join(',')) {
-        // Variables not declared by every case are not in scope in the shared body; Dart reports uses of them.
-        void cases[index];
+  private sharedCaseVariables(span: Span, patterns: (CompiledPattern | undefined)[], hasLabel: boolean): LocalVar[] {
+    const known = new Map(patterns.flatMap((pattern) => [...(pattern?.variables ?? [])]));
+    const variables: LocalVar[] = [];
+    for (const [name, example] of known) {
+      const variable = this.declareLocal(span, name, example.type, example.options);
+      if (hasLabel || patterns.some((pattern) => !pattern?.variables.has(name))) {
+        variable.unavailable = `変数 ${name} は、この case の本体のすべての入口で使えるわけではありません。`;
+        continue;
       }
+      const matches = patterns.every((pattern) => {
+        const other = pattern?.variables.get(name);
+        return other && other.options.isFinal === example.options.isFinal && sameType(other.type, example.type);
+      });
+      if (!matches) {
+        variable.unavailable = `変数 ${name} の型と final は、同じ本体を持つすべての case でそろえてください。`;
+        continue;
+      }
+      this.flow = this.flow.assign(variable);
+      variables.push(variable);
     }
+    return variables;
   }
 
   // code-gauge-allow functionCognitiveComplexity 30 -- on/catch clauses, rethrow, and finally.
@@ -664,8 +690,15 @@ function clearingSlots(result: GenExec, slots: number[]): GenExec {
   };
 }
 
+interface SwitchMatcher {
+  pattern: CompiledPattern | undefined;
+  guard: Eval | undefined;
+  slots: number[];
+  bindings: { from: number; to: number }[];
+}
+
 interface SwitchGroup {
-  matchers: { pattern: CompiledPattern | undefined; guard: Eval | undefined }[];
+  matchers: SwitchMatcher[];
   body: Exec;
   slots: number[];
   labels: string[];
@@ -674,12 +707,15 @@ interface SwitchGroup {
 /** The index of the first group with a case that matches, clearing the variables of the groups that do not. */
 function selectSwitchGroup(frame: Frame, value: Value, groups: readonly SwitchGroup[]): number {
   for (const [index, group] of groups.entries()) {
-    const matches = group.matchers.some(
-      (matcher) =>
-        !matcher.pattern || (matcher.pattern.match(frame, value) && (!matcher.guard || matcher.guard(frame) === true))
-    );
-    if (matches) return index;
-    for (const slot of group.slots) frame.locals[slot] = undefined;
+    for (const { pattern, guard, slots, bindings } of group.matchers) {
+      try {
+        if (pattern && (!pattern.match(frame, value) || (guard && guard(frame) !== true))) continue;
+        for (const { from, to } of bindings) frame.locals[to] = new Cell((frame.locals[from] as Cell).v);
+        return index;
+      } finally {
+        for (const slot of slots) frame.locals[slot] = undefined;
+      }
+    }
   }
   return -1;
 }

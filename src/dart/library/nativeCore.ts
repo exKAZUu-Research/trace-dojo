@@ -207,11 +207,13 @@ define('print', (runtime, _receiver, [value]) => {
 });
 define('identical', (_runtime, _receiver, [a, b]) => identical(a, b));
 // The VM gives numbers, strings, booleans, and null their own hash codes as identity hash codes.
-define('identityHashCode', (runtime, _receiver, [value]) =>
-  value === undefined || typeof value !== 'object'
-    ? runtime.getProperty(value, 'hashCode', undefined)
-    : BigInt(identityOf(value))
-);
+define('identityHashCode', (runtime, _receiver, [value]) => identityHashCode(runtime, value));
+
+export function identityHashCode(runtime: Runtime, value: Value): bigint {
+  return value instanceof DartObject
+    ? BigInt(identityOf(value))
+    : (runtime.getProperty(value, 'hashCode', undefined) as bigint);
+}
 define('_isToStringVisiting', (runtime, _receiver, [value]) => runtime.toStringVisiting.includes(value));
 define('_toStringVisitingAdd', (runtime, _receiver, [value]) => {
   runtime.toStringVisiting.push(value);

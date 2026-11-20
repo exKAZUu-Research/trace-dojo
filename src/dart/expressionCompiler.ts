@@ -1097,6 +1097,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   /** Rejects reading a local that flow analysis cannot prove assigned, as Dart does for non-nullable and final ones. */
   protected checkDefinitelyAssigned(variable: LocalVar, span: Span): void {
+    if (variable.unavailable) this.error(span, variable.unavailable);
     const { options } = variable;
     if (options.isLate) {
       this.checkLateAssignable(variable, span);

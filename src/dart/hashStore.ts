@@ -3,6 +3,14 @@ import type { NativeState, Value } from './values';
 
 const DELETED = Symbol('deleted');
 
+export interface HashPolicy {
+  hash?: (key: Value) => bigint;
+  equals?: (left: Value, right: Value) => boolean;
+  valid?: (key: Value) => boolean;
+  callbacks?: Value[];
+  identity?: boolean;
+}
+
 const INITIAL_INDEX_SIZE = 8;
 const UNUSED_PAIR = 0;
 const DELETED_PAIR = 1;
@@ -24,13 +32,15 @@ export class HashStore implements NativeState {
   /** How many entries fit before a rehash: half the index's size, and 0 until the first insertion. */
   private capacity = 0;
   private deletedKeys = 0;
+  private displaced: { keys: (Value | typeof DELETED)[]; values: Value[]; key: Value; value: Value } | undefined;
   /** Bumped by every change to the keys, which iterators check to detect concurrent modification. */
   modifications = 0;
 
   constructor(
     private readonly runtime: Runtime,
     /** Whether the store keeps values, as a map does, or only keys, as a set does. */
-    readonly isMap: boolean
+    readonly isMap: boolean,
+    readonly policy?: HashPolicy
   ) {}
 
   get size(): number {
@@ -45,9 +55,22 @@ export class HashStore implements NativeState {
     }
   }
 
+  *roots(): Iterable<Value> {
+    if (this.policy?.callbacks) yield* this.policy.callbacks;
+    const displaced = this.displaced;
+    if (!displaced) return;
+    yield displaced.key;
+    yield displaced.value;
+    for (const [index, key] of displaced.keys.entries()) {
+      if (key === DELETED) continue;
+      yield key;
+      if (this.isMap) yield displaced.values[index];
+    }
+  }
+
   /** The position of a key's entry, or -1, hashing the key once as the VM's lookups do. */
   find(key: Value): number {
-    return this.probe(key, this.hashOf(key)).found;
+    return this.policy?.valid?.(key) === false ? -1 : this.probe(key, this.hashOf(key)).found;
   }
 
   has(key: Value): boolean {
@@ -77,6 +100,7 @@ export class HashStore implements NativeState {
   }
 
   delete(key: Value): { found: boolean; value: Value } {
+    if (this.policy?.valid?.(key) === false) return { found: false, value: undefined };
     const hash = this.hashOf(key);
     const { found, slot } = this.probe(key, hash);
     if (found < 0) return { found: false, value: undefined };
@@ -110,7 +134,7 @@ export class HashStore implements NativeState {
 
   /** The VM's `_quickCopy`: an empty table takes a copy of one without deleted entries, hashing nothing. */
   quickCopy(other: HashStore): boolean {
-    if (this.capacity > 0) return false;
+    if (this.capacity > 0 || this.policy !== other.policy || this.policy?.valid) return false;
     if (other.keys.length === 0) return true;
     if (other.deletedKeys !== 0) return false;
     this.keys = [...other.keys];
@@ -149,8 +173,13 @@ export class HashStore implements NativeState {
 
   private insert(key: Value, value: Value, hash: bigint, pattern: number, slot: number): void {
     if (this.keys.length === this.capacity) {
-      this.rehash();
-      this.setHashed(key, value, hash);
+      this.displaced = { keys: this.keys, values: this.entryValues, key, value };
+      try {
+        this.rehash();
+        this.setHashed(key, value, hash);
+      } finally {
+        this.displaced = undefined;
+      }
       return;
     }
     this.runtime.allocate(this.isMap ? 2 : 1);
@@ -201,7 +230,7 @@ export class HashStore implements NativeState {
         const entry = (pattern ^ pair) >>> 0;
         if (entry < maxEntries) {
           const candidate = this.keys[entry];
-          if (candidate !== DELETED && this.runtime.equals(candidate, key)) {
+          if (candidate !== DELETED && this.keysEqual(candidate, key)) {
             return { found: entry, insertAt: -1, pattern, slot };
           }
         }
@@ -212,8 +241,12 @@ export class HashStore implements NativeState {
     return { found: -1, insertAt: firstDeleted >= 0 ? firstDeleted : slot, pattern, slot };
   }
 
+  private keysEqual(left: Value, right: Value): boolean {
+    return this.policy?.equals?.(left, right) ?? this.runtime.equals(left, right);
+  }
+
   private hashOf(key: Value): bigint {
-    return this.runtime.getProperty(key, 'hashCode', undefined) as bigint;
+    return this.policy?.hash?.(key) ?? (this.runtime.getProperty(key, 'hashCode', undefined) as bigint);
   }
 }
 

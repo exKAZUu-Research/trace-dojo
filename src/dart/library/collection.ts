@@ -7,11 +7,11 @@ export const COLLECTION_SOURCE = String.raw`
 abstract mixin class IterableMixin<E> implements Iterable<E> {
   Iterator<E> get iterator;
   Iterable<R> cast<R>() => Iterable.castFrom<E, R>(this);
-  Iterable<E> followedBy(Iterable<E> other) => _followedBy(this, other);
-  Iterable<T> map<T>(T Function(E e) toElement) => _mapped<E, T>(this, toElement);
-  Iterable<E> where(bool Function(E element) test) => _whereOf(this, test);
-  Iterable<T> whereType<T>() => _whereTypeOf<T>(this);
-  Iterable<T> expand<T>(Iterable<T> Function(E element) toElements) => _expandOf<E, T>(this, toElements);
+  Iterable<E> followedBy(Iterable<E> other) => FollowedByIterable<E>(this, other);
+  Iterable<T> map<T>(T Function(E e) toElement) => MappedIterable<E, T>(this, toElement);
+  Iterable<E> where(bool Function(E element) test) => WhereIterable<E>(this, test);
+  Iterable<T> whereType<T>() => WhereTypeIterable<T>(this);
+  Iterable<T> expand<T>(Iterable<T> Function(E element) toElements) => ExpandIterable<E, T>(this, toElements);
   bool contains(Object? element) {
     for (E e in this) {
       if (e == element) return true;
@@ -60,10 +60,16 @@ abstract mixin class IterableMixin<E> implements Iterable<E> {
   }
   bool get isEmpty => !iterator.moveNext();
   bool get isNotEmpty => !isEmpty;
-  Iterable<E> take(int count) => _takeOf(this, count);
-  Iterable<E> takeWhile(bool Function(E value) test) => _takeWhileOf(this, test);
-  Iterable<E> skip(int count) => _skipOf(this, count);
-  Iterable<E> skipWhile(bool Function(E value) test) => _skipWhileOf(this, test);
+  Iterable<E> take(int count) {
+    RangeError.checkNotNegative(count, "takeCount");
+    return TakeIterable<E>(this, count);
+  }
+  Iterable<E> takeWhile(bool Function(E value) test) => TakeWhileIterable<E>(this, test);
+  Iterable<E> skip(int count) {
+    RangeError.checkNotNegative(count, "skipCount");
+    return SkipIterable<E>(this, count);
+  }
+  Iterable<E> skipWhile(bool Function(E value) test) => SkipWhileIterable<E>(this, test);
   E get first {
     Iterator<E> it = iterator;
     if (!it.moveNext()) throw StateError("No element");
@@ -138,16 +144,6 @@ abstract class IterableBase<E> extends Iterable<E> {
   static String iterableToFullString(Iterable iterable, [String leftDelimiter = '(', String rightDelimiter = ')']) =>
       Iterable.iterableToFullString(iterable, leftDelimiter, rightDelimiter);
 }
-
-Iterable<E> _followedBy<E>(Iterable<E> first, Iterable<E> second) => [first, second].expand((e) => e);
-Iterable<T> _mapped<E, T>(Iterable<E> source, T Function(E) f) => source.toList(growable: false).map(f);
-Iterable<E> _whereOf<E>(Iterable<E> source, bool Function(E) f) => source.toList(growable: false).where(f);
-Iterable<T> _whereTypeOf<T>(Iterable<Object?> source) => source.toList(growable: false).whereType<T>();
-Iterable<T> _expandOf<E, T>(Iterable<E> source, Iterable<T> Function(E) f) => source.toList(growable: false).expand(f);
-Iterable<E> _takeOf<E>(Iterable<E> source, int count) => source.toList(growable: false).take(count);
-Iterable<E> _takeWhileOf<E>(Iterable<E> source, bool Function(E) f) => source.toList(growable: false).takeWhile(f);
-Iterable<E> _skipOf<E>(Iterable<E> source, int count) => source.toList(growable: false).skip(count);
-Iterable<E> _skipWhileOf<E>(Iterable<E> source, bool Function(E) f) => source.toList(growable: false).skipWhile(f);
 
 // Lists the program implements
 
@@ -848,8 +844,8 @@ abstract mixin class SetMixin<E> implements Set<E> {
   bool get isEmpty => length == 0;
   bool get isNotEmpty => length != 0;
   Set<R> cast<R>() => Set.castFrom<E, R>(this);
-  Iterable<E> followedBy(Iterable<E> other) => _followedBy(this, other);
-  Iterable<T> whereType<T>() => _whereTypeOf<T>(this);
+  Iterable<E> followedBy(Iterable<E> other) => FollowedByIterable<E>(this, other);
+  Iterable<T> whereType<T>() => WhereTypeIterable<T>(this);
   void clear() {
     removeAll(toList());
   }
@@ -900,7 +896,7 @@ abstract mixin class SetMixin<E> implements Set<E> {
     return result;
   }
   List<E> toList({bool growable = true}) => List<E>.of(this, growable: growable);
-  Iterable<T> map<T>(T Function(E e) f) => _mapped<E, T>(this, f);
+  Iterable<T> map<T>(T Function(E e) f) => MappedIterable<E, T>(this, f);
   E get single {
     if (length > 1) throw StateError("Too many elements");
     Iterator<E> it = iterator;
@@ -909,8 +905,8 @@ abstract mixin class SetMixin<E> implements Set<E> {
     return result;
   }
   String toString() => Iterable.iterableToFullString(this, '{', '}');
-  Iterable<E> where(bool Function(E element) f) => _whereOf(this, f);
-  Iterable<T> expand<T>(Iterable<T> Function(E element) f) => _expandOf<E, T>(this, f);
+  Iterable<E> where(bool Function(E element) f) => WhereIterable<E>(this, f);
+  Iterable<T> expand<T>(Iterable<T> Function(E element) f) => ExpandIterable<E, T>(this, f);
   void forEach(void Function(E element) f) {
     for (E element in this) f(element);
   }
@@ -943,10 +939,16 @@ abstract mixin class SetMixin<E> implements Set<E> {
     }
     return false;
   }
-  Iterable<E> take(int n) => _takeOf(this, n);
-  Iterable<E> takeWhile(bool Function(E value) test) => _takeWhileOf(this, test);
-  Iterable<E> skip(int n) => _skipOf(this, n);
-  Iterable<E> skipWhile(bool Function(E value) test) => _skipWhileOf(this, test);
+  Iterable<E> take(int count) {
+    RangeError.checkNotNegative(count, "takeCount");
+    return TakeIterable<E>(this, count);
+  }
+  Iterable<E> takeWhile(bool Function(E value) test) => TakeWhileIterable<E>(this, test);
+  Iterable<E> skip(int count) {
+    RangeError.checkNotNegative(count, "skipCount");
+    return SkipIterable<E>(this, count);
+  }
+  Iterable<E> skipWhile(bool Function(E value) test) => SkipWhileIterable<E>(this, test);
   E get first {
     Iterator<E> it = iterator;
     if (!it.moveNext()) throw StateError("No element");
@@ -1014,9 +1016,38 @@ abstract class SetBase<E> with SetMixin<E> {
 
 // Hash maps and sets, in the VM's bucket order
 
+class _HashKeyPolicy<K> {
+  final bool Function(K, K)? equals;
+  final int Function(K)? hashCodeOf;
+  final bool Function(dynamic)? isValidKey;
+  final bool identity;
+  const _HashKeyPolicy({this.equals, this.hashCodeOf, this.isValidKey, this.identity = false});
+  bool accepts(Object? key) {
+    if (identity) return true;
+    final test = isValidKey;
+    return test == null ? key is K : test(key);
+  }
+  int hash(Object? key) {
+    if (identity) return identityHashCode(key);
+    final hasher = hashCodeOf;
+    return hasher == null ? key.hashCode : hasher(key as K);
+  }
+  bool equal(Object? left, Object? right) {
+    if (identity) return identical(left, right);
+    final compare = equals;
+    return compare == null ? left == right : compare(left as K, right as K);
+  }
+}
+
 abstract final class HashMap<K, V> implements Map<K, V> {
-  factory HashMap({bool Function(K, K)? equals, int Function(K)? hashCode, bool Function(dynamic)? isValidKey}) => _HashMap<K, V>();
-  factory HashMap.identity() => _HashMap<K, V>();
+  factory HashMap({bool Function(K, K)? equals, int Function(K)? hashCode, bool Function(dynamic)? isValidKey}) {
+    if (equals == null && hashCode == null && isValidKey == null) return _HashMap<K, V>();
+    if (isValidKey == null && identical(equals, identical) && identical(hashCode, identityHashCode)) {
+      return _IdentityHashMap<K, V>();
+    }
+    return _CustomHashMap<K, V>(_HashKeyPolicy<K>(equals: equals, hashCodeOf: hashCode, isValidKey: isValidKey));
+  }
+  factory HashMap.identity() => _IdentityHashMap<K, V>();
   factory HashMap.from(Map<dynamic, dynamic> other) {
     HashMap<K, V> result = _HashMap<K, V>();
     other.forEach((dynamic k, dynamic v) {
@@ -1058,6 +1089,12 @@ class _HashMapEntry<K, V> {
 }
 
 class _HashMap<K, V> extends MapBase<K, V> implements HashMap<K, V> {
+  final _HashKeyPolicy<K>? _policy;
+  _HashMap([this._policy]);
+  bool _keysEqual(Object? left, Object? right) {
+    final policy = _policy;
+    return policy == null ? left == right : policy.equal(left, right);
+  }
   int _elementCount = 0;
   List<_HashMapEntry<K, V>?> _buckets = List<_HashMapEntry<K, V>?>.filled(8, null);
   int _modificationCount = 0;
@@ -1067,12 +1104,13 @@ class _HashMap<K, V> extends MapBase<K, V> implements HashMap<K, V> {
   Iterable<K> get keys => _HashMapKeyIterable<K, V>(this);
   Iterable<V> get values => _HashMapValueIterable<K, V>(this);
   bool containsKey(Object? key) {
-    final hashCode = key.hashCode;
+    if (_policy != null && !_policy!.accepts(key)) return false;
+    final hashCode = _policy?.hash(key) ?? key.hashCode;
     final buckets = _buckets;
     final index = hashCode & (buckets.length - 1);
     var entry = buckets[index];
     while (entry != null) {
-      if (hashCode == entry.hashCode && entry.key == key) return true;
+      if (hashCode == entry.hashCode && _keysEqual(entry.key, key)) return true;
       entry = entry.next;
     }
     return false;
@@ -1090,24 +1128,25 @@ class _HashMap<K, V> extends MapBase<K, V> implements HashMap<K, V> {
     return false;
   }
   V? operator [](Object? key) {
-    final hashCode = key.hashCode;
+    if (_policy != null && !_policy!.accepts(key)) return null;
+    final hashCode = _policy?.hash(key) ?? key.hashCode;
     final buckets = _buckets;
     final index = hashCode & (buckets.length - 1);
     var entry = buckets[index];
     while (entry != null) {
-      if (hashCode == entry.hashCode && entry.key == key) return entry.value;
+      if (hashCode == entry.hashCode && _keysEqual(entry.key, key)) return entry.value;
       entry = entry.next;
     }
     return null;
   }
   void operator []=(K key, V value) {
-    final hashCode = key.hashCode;
+    final hashCode = _policy?.hash(key) ?? key.hashCode;
     final buckets = _buckets;
     final length = buckets.length;
     final index = hashCode & (length - 1);
     var entry = buckets[index];
     while (entry != null) {
-      if (hashCode == entry.hashCode && entry.key == key) {
+      if (hashCode == entry.hashCode && _keysEqual(entry.key, key)) {
         entry.value = value;
         return;
       }
@@ -1116,13 +1155,13 @@ class _HashMap<K, V> extends MapBase<K, V> implements HashMap<K, V> {
     _addEntry(buckets, index, length, key, value, hashCode);
   }
   V putIfAbsent(K key, V Function() ifAbsent) {
-    final hashCode = key.hashCode;
+    final hashCode = _policy?.hash(key) ?? key.hashCode;
     final buckets = _buckets;
     final length = buckets.length;
     final index = hashCode & (length - 1);
     var entry = buckets[index];
     while (entry != null) {
-      if (hashCode == entry.hashCode && entry.key == key) return entry.value;
+      if (hashCode == entry.hashCode && _keysEqual(entry.key, key)) return entry.value;
       entry = entry.next;
     }
     final stamp = _modificationCount;
@@ -1153,14 +1192,15 @@ class _HashMap<K, V> extends MapBase<K, V> implements HashMap<K, V> {
     }
   }
   V? remove(Object? key) {
-    final hashCode = key.hashCode;
+    if (_policy != null && !_policy!.accepts(key)) return null;
+    final hashCode = _policy?.hash(key) ?? key.hashCode;
     final buckets = _buckets;
     final index = hashCode & (buckets.length - 1);
     var entry = buckets[index];
     _HashMapEntry<K, V>? previous = null;
     while (entry != null) {
       final next = entry.next;
-      if (hashCode == entry.hashCode && entry.key == key) {
+      if (hashCode == entry.hashCode && _keysEqual(entry.key, key)) {
         _removeEntry(entry, previous, index);
         _elementCount--;
         _modificationCount = (_modificationCount + 1) & 0x3fffffff;
@@ -1211,6 +1251,20 @@ class _HashMap<K, V> extends MapBase<K, V> implements HashMap<K, V> {
     }
     _buckets = newBuckets;
   }
+  Set<K> _newKeySet() {
+    final policy = _policy;
+    if (policy == null) return _HashSet<K>();
+    if (policy.identity) return _IdentityHashSet<K>();
+    return _CustomHashSet<K>(policy);
+  }
+}
+
+class _IdentityHashMap<K, V> extends _HashMap<K, V> {
+  _IdentityHashMap() : super(_HashKeyPolicy<K>(identity: true));
+}
+
+class _CustomHashMap<K, V> extends _HashMap<K, V> {
+  _CustomHashMap(_HashKeyPolicy<K> policy) : super(policy);
 }
 
 class _HashMapKeyIterable<K, V> extends Iterable<K> {
@@ -1219,6 +1273,7 @@ class _HashMapKeyIterable<K, V> extends Iterable<K> {
   int get length => _map.length;
   bool get isEmpty => _map.isEmpty;
   bool contains(Object? key) => _map.containsKey(key);
+  Set<K> toSet() => _map._newKeySet()..addAll(this);
   Iterator<K> get iterator => _HashMapIterator<K, V, K>(_map, 0);
 }
 
@@ -1269,8 +1324,14 @@ class _HashMapIterator<K, V, E> implements Iterator<E> {
 }
 
 abstract final class HashSet<E> implements Set<E> {
-  factory HashSet({bool Function(E, E)? equals, int Function(E)? hashCode, bool Function(dynamic)? isValidKey}) => _HashSet<E>();
-  factory HashSet.identity() => _HashSet<E>();
+  factory HashSet({bool Function(E, E)? equals, int Function(E)? hashCode, bool Function(dynamic)? isValidKey}) {
+    if (equals == null && hashCode == null && isValidKey == null) return _HashSet<E>();
+    if (isValidKey == null && identical(equals, identical) && identical(hashCode, identityHashCode)) {
+      return _IdentityHashSet<E>();
+    }
+    return _CustomHashSet<E>(_HashKeyPolicy<E>(equals: equals, hashCodeOf: hashCode, isValidKey: isValidKey));
+  }
+  factory HashSet.identity() => _IdentityHashSet<E>();
   factory HashSet.from(Iterable<dynamic> elements) {
     HashSet<E> result = _HashSet<E>();
     for (final e in elements) {
@@ -1289,6 +1350,12 @@ class _HashSetEntry<E> {
 }
 
 class _HashSet<E> extends SetBase<E> implements HashSet<E> {
+  final _HashKeyPolicy<E>? _policy;
+  _HashSet([this._policy]);
+  bool _keysEqual(Object? left, Object? right) {
+    final policy = _policy;
+    return policy == null ? left == right : policy.equal(left, right);
+  }
   int _elementCount = 0;
   List<_HashSetEntry<E>?> _buckets = List<_HashSetEntry<E>?>.filled(8, null);
   int _modificationCount = 0;
@@ -1297,30 +1364,32 @@ class _HashSet<E> extends SetBase<E> implements HashSet<E> {
   bool get isEmpty => _elementCount == 0;
   bool get isNotEmpty => _elementCount != 0;
   bool contains(Object? object) {
-    int index = object.hashCode & (_buckets.length - 1);
+    if (_policy != null && !_policy!.accepts(object)) return false;
+    int index = (_policy?.hash(object) ?? object.hashCode) & (_buckets.length - 1);
     var entry = _buckets[index];
     while (entry != null) {
-      if (entry.key == object) return true;
+      if (_keysEqual(entry.key, object)) return true;
       entry = entry.next;
     }
     return false;
   }
   E? lookup(Object? object) {
-    int index = object.hashCode & (_buckets.length - 1);
+    if (_policy != null && !_policy!.accepts(object)) return null;
+    int index = (_policy?.hash(object) ?? object.hashCode) & (_buckets.length - 1);
     var entry = _buckets[index];
     while (entry != null) {
       var key = entry.key;
-      if (key == object) return key;
+      if (_keysEqual(key, object)) return key;
       entry = entry.next;
     }
     return null;
   }
   bool add(E element) {
-    final hashCode = element.hashCode;
+    final hashCode = _policy?.hash(element) ?? element.hashCode;
     final index = hashCode & (_buckets.length - 1);
     var entry = _buckets[index];
     while (entry != null) {
-      if (hashCode == entry.hashCode && entry.key == element) return false;
+      if (hashCode == entry.hashCode && _keysEqual(entry.key, element)) return false;
       entry = entry.next;
     }
     _addEntry(element, hashCode, index);
@@ -1330,12 +1399,13 @@ class _HashSet<E> extends SetBase<E> implements HashSet<E> {
     for (E object in objects) add(object);
   }
   bool remove(Object? object) {
-    final hashCode = object.hashCode;
+    if (_policy != null && !_policy!.accepts(object)) return false;
+    final hashCode = _policy?.hash(object) ?? object.hashCode;
     final index = hashCode & (_buckets.length - 1);
     var entry = _buckets[index];
     _HashSetEntry<E>? previous = null;
     while (entry != null) {
-      if (hashCode == entry.hashCode && entry.key == object) {
+      if (hashCode == entry.hashCode && _keysEqual(entry.key, object)) {
         if (previous == null) {
           _buckets[index] = entry.next;
         } else {
@@ -1382,8 +1452,21 @@ class _HashSet<E> extends SetBase<E> implements HashSet<E> {
     }
     _buckets = newBuckets;
   }
-  HashSet<E> _newSet() => _HashSet<E>();
-  Set<E> toSet() => _HashSet<E>()..addAll(this);
+  HashSet<E> _newSet() {
+    final policy = _policy;
+    if (policy == null) return _HashSet<E>();
+    if (policy.identity) return _IdentityHashSet<E>();
+    return _CustomHashSet<E>(policy);
+  }
+  Set<E> toSet() => _newSet()..addAll(this);
+}
+
+class _IdentityHashSet<E> extends _HashSet<E> {
+  _IdentityHashSet() : super(_HashKeyPolicy<E>(identity: true));
+}
+
+class _CustomHashSet<E> extends _HashSet<E> {
+  _CustomHashSet(_HashKeyPolicy<E> policy) : super(policy);
 }
 
 class _HashSetIterator<E> implements Iterator<E> {

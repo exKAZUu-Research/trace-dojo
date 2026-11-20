@@ -1,6 +1,7 @@
-// code-gauge-allow-file fileNcss 956 -- The natives of List, Set, Map, and their iterators share the helpers of this file.
+// code-gauge-allow-file fileNcss 984 -- The natives of List, Set, Map, and their iterators share the helpers of this file.
+import type { TopLevelFunction } from '../environment';
 import { stringOf } from '../format';
-import { HashStore } from '../hashStore';
+import { type HashPolicy, HashStore } from '../hashStore';
 import { type Frame, Frame as FrameClass, type Runtime } from '../runtime';
 import {
   coreTypes,
@@ -11,7 +12,8 @@ import {
   isSubtype,
   makeNullable,
 } from '../types';
-import { Cell, DartList, DartObject, type Value } from '../values';
+import { Cell, DartClosure, DartList, DartObject, type Value } from '../values';
+import { identical, identityHashCode } from './nativeCore';
 import {
   callFunction,
   castTo,
@@ -820,18 +822,72 @@ function store(value: Value): HashStore {
 }
 
 export function newSet(runtime: Runtime, elementType: DartType, isConst = false): DartObject {
-  const set = new DartObject(runtime.links.classNamed(isConst ? '_ConstSet' : '_Set'), [elementType], []);
-  set.native = new HashStore(runtime, false) as unknown as DartObject['native'];
-  (set as DartObject & { unmodifiable?: boolean }).unmodifiable = isConst;
-  return set;
+  return newHashObject(runtime, 'Set', [elementType], isConst);
 }
 
 export function newMap(runtime: Runtime, keyType: DartType, valueType: DartType, isConst = false): DartObject {
-  const map = new DartObject(runtime.links.classNamed(isConst ? '_ConstMap' : '_Map'), [keyType, valueType], []);
-  map.native = new HashStore(runtime, true) as unknown as DartObject['native'];
-  (map as DartObject & { unmodifiable?: boolean }).unmodifiable = isConst;
-  return map;
+  return newHashObject(runtime, 'Map', [keyType, valueType], isConst);
 }
+
+function newHashObject(
+  runtime: Runtime,
+  kind: 'Map' | 'Set',
+  typeArgs: readonly DartType[],
+  isConst: boolean,
+  policy?: HashPolicy
+): DartObject {
+  const name = policy
+    ? `CompactLinked${policy.identity ? 'Identity' : 'Custom'}Hash${kind}`
+    : `_${isConst ? 'Const' : ''}${kind}`;
+  const result = new DartObject(runtime.links.classNamed(name), typeArgs, []);
+  result.native = new HashStore(runtime, kind === 'Map', policy);
+  (result as DartObject & { unmodifiable?: boolean }).unmodifiable = isConst;
+  return result;
+}
+
+function installHashFactories(kind: 'Map' | 'Set', argumentCount: number): void {
+  const types = (args: readonly DartType[]): DartType[] =>
+    Array.from({ length: argumentCount }, (_, index) => args[index] ?? DYNAMIC);
+  const identity = (runtime: Runtime, typeArgs: readonly DartType[]): Value => {
+    let policy = identityPolicies.get(runtime);
+    if (!policy) {
+      policy = { identity: true, equals: identical, hash: (key) => identityHashCode(runtime, key) };
+      identityPolicies.set(runtime, policy);
+    }
+    return newHashObject(runtime, kind, types(typeArgs), false, policy);
+  };
+  defineConstructor(`${kind}.identity`, (runtime, _instance, _args, typeArgs) => identity(runtime, typeArgs));
+  defineConstructor(`LinkedHash${kind}.identity`, (runtime, _instance, _args, typeArgs) => identity(runtime, typeArgs));
+  defineConstructor(`LinkedHash${kind}.new`, (runtime, _instance, args, typeArgs) => {
+    const normalized = types(typeArgs);
+    const equals = args.named?.get('equals');
+    const hashCode = args.named?.get('hashCode');
+    const isValidKey = args.named?.get('isValidKey');
+    if (isValidKey === undefined && isCoreFunction(equals, 'identical') && isCoreFunction(hashCode, 'identityHashCode'))
+      return identity(runtime, normalized);
+    if (equals === undefined && hashCode === undefined && isValidKey === undefined)
+      return newHashObject(runtime, kind, normalized, false);
+    return newHashObject(runtime, kind, normalized, false, {
+      equals: equals === undefined ? undefined : (left, right) => callFunction(runtime, equals, left, right) === true,
+      hash: hashCode === undefined ? undefined : (key) => callFunction(runtime, hashCode, key) as bigint,
+      valid:
+        isValidKey === undefined
+          ? (key) => runtime.links.isValueOf(runtime, key, normalized[0])
+          : (key) => callFunction(runtime, isValidKey, key) === true,
+      callbacks: [equals, hashCode, isValidKey],
+    });
+  });
+}
+
+function isCoreFunction(value: Value, name: string): boolean {
+  if (!(value instanceof DartClosure)) return false;
+  const fn = value.tearOffKey as TopLevelFunction | undefined;
+  return fn?.library === 'dart:core' && fn.name === name;
+}
+
+const identityPolicies = new WeakMap<Runtime, HashPolicy>();
+installHashFactories('Set', 1);
+installHashFactories('Map', 2);
 
 function checkSetModifiable(runtime: Runtime, set: Value): void {
   if ((set as DartObject & { unmodifiable?: boolean }).unmodifiable)
@@ -844,7 +900,6 @@ function checkMapModifiable(runtime: Runtime, map: Value): void {
 }
 
 defineConstructor('Set.new', (runtime, _instance, _args, typeArgs) => newSet(runtime, typeArgs[0] ?? DYNAMIC));
-defineConstructor('Set.identity', (runtime, _instance, _args, typeArgs) => newSet(runtime, typeArgs[0] ?? DYNAMIC));
 function setFrom(
   runtime: Runtime,
   elements: Value,
@@ -981,8 +1036,9 @@ function addAllToSet(runtime: Runtime, set: DartObject, elements: Value): void {
 function isPlainHashObject(runtime: Runtime, value: Value, className: '_Map' | '_Set'): value is DartObject {
   return (
     value instanceof DartObject &&
-    value.cls === runtime.links.classNamed(className) &&
-    value.native instanceof HashStore
+    value.native instanceof HashStore &&
+    (value.cls === runtime.links.classNamed(className) ||
+      value.cls.name === `CompactLinkedIdentityHash${className.slice(1)}`)
   );
 }
 define('Set.remove', (runtime, receiver, [value]) => {
@@ -1056,7 +1112,7 @@ define('Set.difference', (runtime, receiver, [other]) => {
 
 /** `_Set<E>()..addAll(this)`, the VM's `toSet`. */
 function copySet(runtime: Runtime, set: DartObject): DartObject {
-  const copy = newSet(runtime, elementTypeOf(set));
+  const copy = newHashObject(runtime, 'Set', set.typeArgs, false, store(set).policy);
   addAllToSet(runtime, copy, set);
   return copy;
 }
@@ -1092,9 +1148,6 @@ define('Set.toString', (runtime, receiver) =>
 // Maps
 
 defineConstructor('Map.new', (runtime, _instance, _args, typeArgs) =>
-  newMap(runtime, typeArgs[0] ?? DYNAMIC, typeArgs[1] ?? DYNAMIC)
-);
-defineConstructor('Map.identity', (runtime, _instance, _args, typeArgs) =>
   newMap(runtime, typeArgs[0] ?? DYNAMIC, typeArgs[1] ?? DYNAMIC)
 );
 function mapFrom(

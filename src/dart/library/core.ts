@@ -1864,14 +1864,21 @@ class _Set<E> extends Set<E> implements LinkedHashSet<E> {
   _Set._() : super._base();
 }
 
+class CompactLinkedIdentityHashSet<E> extends _Set<E> {
+  CompactLinkedIdentityHashSet._() : super._();
+}
+
+class CompactLinkedCustomHashSet<E> extends _Set<E> {
+  CompactLinkedCustomHashSet._() : super._();
+}
+
 abstract final class LinkedHashSet<E> implements Set<E> {
-  factory LinkedHashSet({bool Function(E, E)? equals, int Function(E)? hashCode, bool Function(dynamic)? isValidKey}) => _newSet<E>();
-  factory LinkedHashSet.identity() => _newSet<E>();
+  external factory LinkedHashSet({bool Function(E, E)? equals, int Function(E)? hashCode, bool Function(dynamic)? isValidKey});
+  external factory LinkedHashSet.identity();
   factory LinkedHashSet.from(Iterable<dynamic> elements) => Set<E>.from(elements) as LinkedHashSet<E>;
   factory LinkedHashSet.of(Iterable<E> elements) => Set<E>.of(elements) as LinkedHashSet<E>;
 }
 
-LinkedHashSet<E> _newSet<E>() => <E>{} as LinkedHashSet<E>;
 
 class _SetIterator<E> implements Iterator<E> {
   _SetIterator._();
@@ -1962,9 +1969,17 @@ class UnmodifiableSetView<E> extends Set<E> {
   UnmodifiableSetView._() : super._base();
 }
 
+class CompactLinkedIdentityHashMap<K, V> extends _Map<K, V> {
+  CompactLinkedIdentityHashMap._() : super._();
+}
+
+class CompactLinkedCustomHashMap<K, V> extends _Map<K, V> {
+  CompactLinkedCustomHashMap._() : super._();
+}
+
 abstract final class LinkedHashMap<K, V> implements Map<K, V> {
-  factory LinkedHashMap({bool Function(K, K)? equals, int Function(K)? hashCode, bool Function(dynamic)? isValidKey}) => _newMap<K, V>();
-  factory LinkedHashMap.identity() => _newMap<K, V>();
+  external factory LinkedHashMap({bool Function(K, K)? equals, int Function(K)? hashCode, bool Function(dynamic)? isValidKey});
+  external factory LinkedHashMap.identity();
   factory LinkedHashMap.from(Map<dynamic, dynamic> other) => Map<K, V>.from(other) as LinkedHashMap<K, V>;
   factory LinkedHashMap.of(Map<K, V> other) => Map<K, V>.of(other) as LinkedHashMap<K, V>;
   factory LinkedHashMap.fromIterable(Iterable iterable, {K Function(dynamic element)? key, V Function(dynamic element)? value}) =>
@@ -1973,7 +1988,6 @@ abstract final class LinkedHashMap<K, V> implements Map<K, V> {
   factory LinkedHashMap.fromEntries(Iterable<MapEntry<K, V>> entries) => Map<K, V>.fromEntries(entries) as LinkedHashMap<K, V>;
 }
 
-LinkedHashMap<K, V> _newMap<K, V>() => <K, V>{} as LinkedHashMap<K, V>;
 
 String _mapToString(Map<Object?, Object?> m) {
   if (_isToStringVisiting(m)) return '{...}';

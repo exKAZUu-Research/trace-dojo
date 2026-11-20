@@ -554,7 +554,10 @@ function* childrenOf(object: DartObject): Iterable<Value> {
     yield object.receiver;
     for (const cell of object.captured) yield cell.v;
   }
-  if (object.native) yield* object.native.values();
+  if (object.native) {
+    yield* object.native.values();
+    if (object.native.roots) yield* object.native.roots();
+  }
 }
 
 function substituteFunction(type: FunctionType, map: Map<TypeParam, DartType>): FunctionType {

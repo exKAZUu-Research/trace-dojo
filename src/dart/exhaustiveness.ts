@@ -9,7 +9,6 @@ import {
   interfaceType,
   isNullable,
   isSubtype,
-  isTop,
   nonNullable,
   NULL,
   resolveBound,
@@ -18,7 +17,16 @@ import {
 } from './types';
 
 /** One case of the values a switch must cover: a constant, null, or every value of a type. */
+interface ListSpace {
+  kind: 'list';
+  type: DartType;
+  elementType: DartType;
+  length: number;
+  hasLongerLengths: boolean;
+}
+
 type Space =
+  | ListSpace
   | { kind: 'constant'; key: unknown; type: DartType; text: string }
   | { kind: 'null' }
   | { kind: 'type'; type: DartType }
@@ -39,7 +47,8 @@ export function checkExhaustive(
   isStatement: boolean
 ): boolean {
   if (patterns.some((pattern) => coversAll(compiler, pattern, type))) return true;
-  const spaces = expand(type);
+  const cutoff = Math.min(MAX_SPACES - 1, Math.max(0, ...patterns.map(listLengthCutoff)));
+  const spaces = expand(type, cutoff);
   const missing = spaces.find((space) => !patterns.some((pattern) => covers(compiler, pattern, space)));
   if (!missing) return true;
   if (isStatement && !isAlwaysExhaustive(type)) return false;
@@ -59,6 +68,9 @@ function spaceText(space: Space): string {
     }
     case 'type': {
       return `${typeToString(space.type)}()`;
+    }
+    case 'list': {
+      return `List(length ${space.hasLongerLengths ? '>=' : '='} ${space.length})`;
     }
     case 'record': {
       const fields = space.fields.map((field, index) => {
@@ -82,35 +94,38 @@ function isAlwaysExhaustive(type: DartType): boolean {
 }
 
 /** Splits a type into the spaces a switch must cover one by one. */
-// code-gauge-allow functionCognitiveComplexity 27 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
-// code-gauge-allow functionNcss 39 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
-function expand(type: DartType): Space[] {
-  const spaces: Space[] = [];
-  const add = (space: Space): void => {
-    if (spaces.length < MAX_SPACES) spaces.push(space);
-  };
+function expand(type: DartType, listCutoff: number): Space[] {
   if (type.kind === 'null') return [{ kind: 'null' }];
-  if (isNullable(type) && type.kind !== 'dynamic' && !isTop(type)) {
-    for (const space of expand(nonNullable(type))) add(space);
-    add({ kind: 'null' });
-    return spaces;
+  if (type.kind === 'never' && !type.nullable) return [];
+  if (type.kind === 'dynamic') {
+    return [{ kind: 'type', type: interfaceType(coreTypes.object) }, { kind: 'null' }];
+  }
+  if (isNullable(type) && type.kind !== 'void') {
+    const nonNullSpaces = expand(nonNullable(type), listCutoff);
+    return nonNullSpaces.length >= MAX_SPACES ? [{ kind: 'type', type }] : [...nonNullSpaces, { kind: 'null' }];
   }
   const base = resolveBound(type);
-  if (base.kind === 'record') {
-    const fieldTypes = [...base.positional, ...base.named.map((field) => field.type)];
-    const names: (string | undefined)[] = [
-      ...base.positional.map((): string | undefined => undefined),
-      ...base.named.map((field) => field.name),
-    ];
-    let products: Space[][] = [[]];
-    for (const fieldType of fieldTypes) {
-      const options = isAlwaysExhaustive(fieldType) ? expand(fieldType) : [{ kind: 'type' as const, type: fieldType }];
-      products = products.flatMap((product) => options.map((option) => [...product, option]));
-      if (products.length > MAX_SPACES) return [{ kind: 'type', type }];
-    }
-    return products.map((fields) => ({ kind: 'record', fields, names, type: base }));
+  if (base.kind === 'record') return expandRecord(base, listCutoff);
+  if (base.kind === 'interface') return expandInterface(base, listCutoff);
+  return [{ kind: 'type', type }];
+}
+
+function expandRecord(type: DartType & { kind: 'record' }, listCutoff: number): Space[] {
+  const fieldTypes = [...type.positional, ...type.named.map((field) => field.type)];
+  const names: (string | undefined)[] = [
+    ...type.positional.map((): string | undefined => undefined),
+    ...type.named.map((field) => field.name),
+  ];
+  let products: Space[][] = [[]];
+  for (const fieldType of fieldTypes) {
+    const options = expand(fieldType, listCutoff);
+    if (products.length * options.length > MAX_SPACES) return [{ kind: 'type', type }];
+    products = products.flatMap((product) => options.map((option) => [...product, option]));
   }
-  if (base.kind !== 'interface') return [{ kind: 'type', type }];
+  return products.map((fields) => ({ kind: 'record', fields, names, type }));
+}
+
+function expandInterface(base: DartType & { kind: 'interface' }, listCutoff: number): Space[] {
   const { cls } = base;
   if (cls === coreTypes.bool) {
     return [
@@ -119,18 +134,64 @@ function expand(type: DartType): Space[] {
     ];
   }
   if (cls.kind === 'enum') {
-    for (const member of enumConstants(cls))
-      add({ kind: 'constant', key: member, type: base, text: `${cls.name}.${member.name}` });
-    return spaces;
+    const constants = enumConstants(cls);
+    if (constants.length > MAX_SPACES) return [{ kind: 'type', type: base }];
+    return constants.map((member) => ({
+      kind: 'constant',
+      key: member,
+      type: base,
+      text: `${cls.name}.${member.name}`,
+    }));
   }
   if (cls.modifiers.isSealed) {
+    const spaces: Space[] = [];
     for (const subclass of cls.subclasses) {
-      const subtype = subclassType(base, subclass);
-      for (const space of expand(subtype)) add(space);
+      const options = expand(subclassType(base, subclass), listCutoff);
+      if (spaces.length + options.length > MAX_SPACES) return [{ kind: 'type', type: base }];
+      spaces.push(...options);
     }
     return spaces;
   }
+  const list = listCutoff > 0 ? asInstanceOf(base, coreTypes.list) : undefined;
+  if (list) {
+    const [elementType = DYNAMIC] = list.args;
+    return Array.from({ length: listCutoff + 1 }, (_, length) => ({
+      kind: 'list',
+      type: base,
+      elementType,
+      length,
+      hasLongerLengths: length === listCutoff,
+    }));
+  }
   return [{ kind: 'type', type: base }];
+}
+
+function listLengthCutoff(pattern: Pattern): number {
+  switch (pattern.kind) {
+    case 'and':
+    case 'or': {
+      return Math.max(listLengthCutoff(pattern.left), listLengthCutoff(pattern.right));
+    }
+    case 'cast':
+    case 'nullAssert':
+    case 'nullCheck':
+    case 'parenthesized': {
+      return listLengthCutoff(pattern.pattern);
+    }
+    case 'record':
+    case 'object': {
+      return Math.max(0, ...pattern.fields.map((field) => listLengthCutoff(field.pattern)));
+    }
+    case 'list': {
+      const rest = pattern.elements.find((element) => element.kind === 'rest');
+      const fixed = pattern.elements.length - (rest ? 1 : 0);
+      const nested = rest?.pattern ? listLengthCutoff(rest.pattern) : 0;
+      return rest ? fixed + nested : fixed + 1;
+    }
+    default: {
+      return 0;
+    }
+  }
 }
 
 function enumConstants(cls: ClassInfo): Member[] {
@@ -154,7 +215,7 @@ function subclassType(supertype: DartType & { kind: 'interface' }, subclass: Cla
 
 /** Whether a pattern matches every value of a type. */
 // code-gauge-allow functionCognitiveComplexity 27 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
-// code-gauge-allow functionNcss 43 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
+// code-gauge-allow functionNcss 44 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
 function coversAll(compiler: ExpressionCompiler, pattern: Pattern, type: DartType): boolean {
   switch (pattern.kind) {
     case 'wildcard':
@@ -198,11 +259,17 @@ function coversAll(compiler: ExpressionCompiler, pattern: Pattern, type: DartTyp
     }
     case 'list': {
       const base = resolveBound(type);
-      if (base.kind !== 'interface' || isNullable(type) || !asInstanceOf(base, coreTypes.list)) return false;
+      if (base.kind !== 'interface' || isNullable(type)) return false;
+      const list = asInstanceOf(base, coreTypes.list);
       return (
-        pattern.elements.length === 1 &&
-        pattern.elements[0].kind === 'rest' &&
-        (!pattern.elements[0].pattern || coversAll(compiler, pattern.elements[0].pattern, type))
+        !!list &&
+        listCovers(compiler, pattern, {
+          kind: 'list',
+          type,
+          elementType: list.args[0] ?? DYNAMIC,
+          length: 0,
+          hasLongerLengths: true,
+        })
       );
     }
     case 'map': {
@@ -249,7 +316,7 @@ function recordFieldsCover(
   );
 }
 
-// code-gauge-allow functionNcss 33 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
+// code-gauge-allow functionNcss 36 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
 function covers(compiler: ExpressionCompiler, pattern: Pattern, space: Space): boolean {
   switch (pattern.kind) {
     case 'parenthesized': {
@@ -289,7 +356,10 @@ function covers(compiler: ExpressionCompiler, pattern: Pattern, space: Space): b
     case 'record': {
       return recordCovers(compiler, pattern, space);
     }
-    case 'list':
+    case 'list': {
+      if (space.kind === 'list') return listCovers(compiler, pattern, space);
+      return space.kind === 'type' && coversAll(compiler, pattern, space.type);
+    }
     case 'map': {
       return space.kind === 'type' && coversAll(compiler, pattern, space.type);
     }
@@ -297,6 +367,30 @@ function covers(compiler: ExpressionCompiler, pattern: Pattern, space: Space): b
       return false;
     }
   }
+}
+
+function listCovers(
+  compiler: ExpressionCompiler,
+  pattern: Extract<Pattern, { kind: 'list' }>,
+  space: ListSpace
+): boolean {
+  if (pattern.typeArguments?.length === 1) {
+    const requiredElement = compiler.resolveType(pattern.typeArguments[0]);
+    if (!isSubtype(space.elementType, requiredElement)) return false;
+  }
+  const rest = pattern.elements.find((element) => element.kind === 'rest');
+  const fixed = pattern.elements.length - (rest ? 1 : 0);
+  if (rest ? space.length < fixed : space.hasLongerLengths || space.length !== fixed) return false;
+  const restSpace = {
+    ...space,
+    length: space.length - fixed,
+    type: interfaceType(coreTypes.list, [space.elementType]),
+  };
+  return pattern.elements.every((element) =>
+    element.kind === 'rest'
+      ? !element.pattern || covers(compiler, element.pattern, restSpace)
+      : coversAll(compiler, element, space.elementType)
+  );
 }
 
 function constantCovers(compiler: ExpressionCompiler, value: Expression, space: Space): boolean {

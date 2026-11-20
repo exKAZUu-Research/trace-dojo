@@ -814,3 +814,64 @@ void main() {
     stdout: '_TypeError\n_TypeError\nConcurrentModificationError\n[1, 2, 1]\n{1: 2}\n_TypeError\n{1: 2, 2: 4}\n',
   });
 });
+
+test('switches partition nullable record fields and lists by length', () => {
+  const program = `int sum(List<int> xs) => switch (xs) {
+  [] => 0, [var head, ...var tail] => head + sum(tail),
+};
+String shape((int?, dynamic) value) => switch (value) {
+  (null, _) => 'left', (_, null) => 'right', (int(), Object()) => 'both',
+};
+void main() {
+  print(sum([1, 2, 3]));
+  print(shape((1, 'x')));
+  print(shape((1, null)));
+}
+`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '6\nboth\nright\n' });
+});
+
+test('switch guards and shared case bodies each read the matched binding', () => {
+  const program = `void main() {
+  Object value = 3;
+  int Function()? read;
+  switch (value) {
+    case int n when n < 0:
+    case int n when ((read = () => n) != null):
+      print(n);
+      n++;
+      print(read!());
+  }
+}
+`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '3\n3\n' });
+  expect(executeProgram('dart', 'void main() { switch (1) { case 1: case int n: print(n); } }')).toMatchObject({
+    kind: 'compileError',
+  });
+});
+
+test('identity maps and custom hash sets keep their key rules through lookups and copies', () => {
+  const program = `import 'dart:collection';
+class Key {
+  int get hashCode => 0;
+  bool operator ==(Object other) => other is Key;
+}
+void main() {
+  var key = Key();
+  var map = Map<Key, int>.identity()..[key] = 1 ..[Key()] = 2;
+  print([map.length, map[Key()], map.remove(key)]);
+  bool same(String a, String b) => a.toLowerCase() == b.toLowerCase();
+  int hash(String a) => 1;
+  var sets = [HashSet<String>(equals: same, hashCode: hash), LinkedHashSet<String>(equals: same, hashCode: hash)];
+  for (var set in sets) {
+    set.addAll(['abc', 'ABC']);
+    print([set.length, set.lookup('ABC'), set.contains(1), set.toSet().remove('ABC')]);
+  }
+}
+`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '[2, null, 1]\n[1, abc, false, true]\n[1, abc, false, true]\n',
+  });
+});

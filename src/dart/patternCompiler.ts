@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 453 -- The compilation of every kind of pattern, which share their type and binding helpers.
+// code-gauge-allow-file fileNcss 457 -- The compilation of every kind of pattern, which share their type and binding helpers.
 import type { Expression, ListPatternElement, Pattern, RecordPatternField, Span } from './ast';
 import { CallCompiler } from './callCompiler';
 import { type Compiled, type ResolvedMember, typeName } from './compilerBase';
@@ -211,7 +211,13 @@ export abstract class PatternCompiler extends CallCompiler {
   ): Omit<CompiledPattern, 'variables'> {
     const declared = pattern.type ? this.resolveType(pattern.type) : undefined;
     const type = declared ?? matchedType;
-    const variable = this.patternVariable(pattern, pattern.name, type, options, variables);
+    const variable = this.patternVariable(
+      pattern,
+      pattern.name,
+      type,
+      { ...options, isFinal: options.isFinal || pattern.isFinal },
+      variables
+    );
     const { slot } = variable;
     const bind = (frame: Frame, value: Value): boolean => {
       frame.locals[slot] = new Cell(value);
@@ -289,7 +295,8 @@ export abstract class PatternCompiler extends CallCompiler {
     const shared = options.shared?.get(name);
     if (shared) {
       options.sharedUsed?.add(name);
-      if (!sameType(shared.type, type)) this.error(span, `|| の両側で、変数 ${name} の型を同じにしてください。`);
+      if (!sameType(shared.type, type) || shared.options.isFinal !== options.isFinal)
+        this.error(span, `|| の両側で、変数 ${name} の型と final をそろえてください。`);
       variables.set(name, shared);
       return shared;
     }
@@ -375,6 +382,8 @@ export abstract class PatternCompiler extends CallCompiler {
   ): Omit<CompiledPattern, 'variables'> {
     const variable = this.findLocal(pattern.name);
     if (!variable) return this.error(pattern, `${pattern.name} という変数はありません。`);
+    if (variable.unavailable) this.error(pattern, variable.unavailable);
+    if (variable.inPatternGuard) this.error(pattern, `パターン変数 ${pattern.name} には、when の中で代入できません。`);
     if (variable.options.isFinal && (variable.options.hasInitializer || this.flow.maybeAssigned.has(variable))) {
       this.error(pattern, `final の変数 ${pattern.name} には、もう値を代入できません。`);
     }

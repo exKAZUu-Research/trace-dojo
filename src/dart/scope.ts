@@ -13,6 +13,8 @@ export interface StoredFlow {
 
 export class LocalVar {
   readonly id = nextLocalId++;
+  unavailable: string | undefined;
+  inPatternGuard = false;
   /** Assigned inside a closure, which stops Dart from promoting it. */
   isWriteCaptured = false;
   /** Read inside a closure. */
