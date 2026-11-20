@@ -206,8 +206,10 @@ defineFunction('array_shift(array &$array): mixed', (ctx) => {
   checkArrayRef(ctx, 0, 'array_shift', 'array');
   const array = writableArray(ctx, 0);
   if (array.size === 0) return null;
-  const shifted = array.shiftList() ?? array.shiftStringKey();
+  const shifted = array.shiftList();
   if (shifted) return shifted.value;
+  const nextInt = remainingSequentialIntKey(array);
+  if (nextInt !== undefined) return array.shiftFirstKey(nextInt) ?? null;
   const first = array.map.keys().next();
   if (first.done) return null;
   const value = array.get(first.value) as Value;
@@ -216,6 +218,18 @@ defineFunction('array_shift(array &$array): mixed', (ctx) => {
   array.pointer = null;
   return value;
 });
+
+function remainingSequentialIntKey(array: PhpArray): bigint | undefined {
+  const iter = array.map.keys();
+  if (iter.next().done) return undefined;
+  let nextInt = 0n;
+  for (const key of iter) {
+    if (typeof key !== 'bigint') continue;
+    if (key !== nextInt) return undefined;
+    nextInt++;
+  }
+  return nextInt;
+}
 defineFunction('array_unshift(array &$array, mixed ...$values): int', (ctx) => {
   checkArrayRef(ctx, 0, 'array_unshift', 'array');
   const array = writableArray(ctx, 0);
@@ -797,15 +811,19 @@ defineFunction('array_map(?callable $callback, array $array, array ...$arrays): 
   const result = new PhpArray();
   const target = callTargetOf(callback, 'callback');
   const directUser = !target.magic && target.fn.kind === 'user' && !target.fn.params[0]?.byRef ? target.fn : undefined;
-  runtime.held.push(first);
+  runtime.held.push(first, result);
+  const holders = runtime.nativeHeld.at(-1);
   try {
     for (const [key, value] of first.entries()) {
+      const nativeMark = holders?.length ?? 0;
       const mapped = directUser
         ? invokeUser(target, directUser, [{ v: value }], undefined, false)
         : invokeCallbackTarget(target, [{ v: value }], undefined, false);
       result.setSlot(key, retainCallbackSlot(runtime, mapped));
+      if (holders) holders.length = nativeMark;
     }
   } finally {
+    runtime.held.pop();
     runtime.held.pop();
   }
   return result;
@@ -821,10 +839,19 @@ function mapMultipleArrays(callback: Value, first: PhpArray, rest: Value[]): Php
   const length = Math.max(...arrays.map((value) => value.size));
   if (length === 0) return new PhpArray();
   const lists = arrays.map((value) => [...value.map.values()]);
+  const runtime = rt();
   const result = new PhpArray();
-  for (let index = 0; index < length; index++) {
-    const items = lists.map((list) => (index < list.length ? list[index] : null));
-    result.append(callback === null ? PhpArray.copySlots(items) : callbackSlot(callback, items.map(deref)));
+  const holders = runtime.nativeHeld.at(-1);
+  runtime.held.push(result);
+  try {
+    for (let index = 0; index < length; index++) {
+      const items = lists.map((list) => (index < list.length ? list[index] : null));
+      const nativeMark = holders?.length ?? 0;
+      result.append(callback === null ? PhpArray.copySlots(items) : callbackSlot(callback, items.map(deref)));
+      if (holders) holders.length = nativeMark;
+    }
+  } finally {
+    runtime.held.pop();
   }
   return result;
 }

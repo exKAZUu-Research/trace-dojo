@@ -32,6 +32,7 @@ import { ElementPlace, RefPlace, share, ValuePlace, VarPlace, writableContainer 
 import { ExitSignal, FatalError, Frame, PhpThrow, rt, type Runtime } from './runtime';
 import {
   type Callable,
+  deref,
   type Key,
   nativeOwnershipChanged,
   PhpArray,
@@ -1032,13 +1033,13 @@ function foreachIteratorByValue(
   releaseSubject?.();
   while (valid) {
     runtime.spend();
-    const value = iterator.current();
+    const slot = iterator.currentSlot();
     if (statement.key) {
       consumeInvokedResult(
         () => iterator.key(),
-        (key) => bindForeachValue(statement, key, value)
+        (key) => bindForeachValue(statement, key, deref(slot))
       );
-    } else bindForeachValue(statement, null, value);
+    } else bindForeachValue(statement, null, deref(slot));
     const completion = loopBody(statement.body);
     if (completion !== 'next') return completion;
     runtime.row = statement.subjectEndRow;

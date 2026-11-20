@@ -5069,4 +5069,38 @@ $s = null; echo "mid\\n"; $f = null;`
       `<?php $x = 1; function &f(...$v) { global $x; return $x; } $a = array_map('f', [1]); $b = $a; $a[0] = 2; echo json_encode([$a, $b, $x]);`
     )
   ).toMatchObject({ kind: 'executed', stdout: '[[2],[2],2]' });
+
+  expect(
+    run(
+      `<?php class D { function __construct(public $n) {} function __destruct() { echo 'drop:', $this->n, ';'; } }
+$x = null; function &f($n, ...$rest) { global $x; $x = new D($n); echo 'mapped:', $n, ';'; return $x; }
+$a = array_map('f', [1, 2]); echo 'after:', json_encode($a), ';';`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'mapped:1;drop:1;mapped:2;after:[{"n":2},{"n":2}];drop:2;' });
+
+  expect(
+    run(
+      `<?php $a = ['x' => 1, 2, 3, 4]; array_shift($a); mt_srand(42); $out = []; for ($i = 0; $i < 10; $i++) $out[] = array_rand($a); echo json_encode([$out, mt_rand()]);`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '[[1,2,1,1,2,1,0,1,1,1],986229477]' });
+
+  expect(run('<?php echo 2; ?>\n\n')).toMatchObject({ kind: 'executed', stdout: '2\n' });
+  expect(run('<?= 2 ?>\n \n')).toMatchObject({ kind: 'executed', stdout: '2 \n' });
+
+  expect(
+    run(
+      `<?php $x = 1;
+class I implements Iterator {
+  public $i = 0;
+  function rewind(): void { $this->i = 0; }
+  function valid(): bool { return $this->i < 1; }
+  function &current(): mixed { global $x; echo 'current;'; return $x; }
+  function key(): mixed { global $x; $x = 2; echo 'key;'; return 0; }
+  function next(): void { $this->i++; }
+}
+foreach (new I as $k => $v) echo 'v:', $v, ';';
+foreach (new IteratorIterator(new I) as $k => $v) echo 'v:', $v, ';';
+foreach (new CachingIterator(new I, 0) as $k => $v) echo 'v:', $v, ';';`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'current;key;v:2;current;key;v:2;current;key;v:2;' });
 });

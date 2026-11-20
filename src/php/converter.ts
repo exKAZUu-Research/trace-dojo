@@ -361,7 +361,8 @@ export class Converter extends DeclarationConverter {
     const end = node.namedChildren.find((child) => child.type === 'php_end_tag');
     const tag = node.namedChildren.find((child) => child.type === 'php_tag');
     if (!end) return '';
-    let text = this.source.slice(end.endIndex, tag ? tag.startIndex : node.endIndex);
+    const limit = tag ? tag.startIndex : (node.nextSibling?.startIndex ?? this.source.length);
+    let text = this.source.slice(end.endIndex, limit);
     // PHP swallows the single newline that directly follows a closing tag.
     if (text.startsWith('\r\n')) text = text.slice(2);
     else if (text.startsWith('\n') || text.startsWith('\r')) text = text.slice(1);

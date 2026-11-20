@@ -6,7 +6,7 @@ import { defineClass } from './native';
 import { toStr } from './operators';
 import { PatternError, translate } from './pcrePattern';
 import { rt } from './runtime';
-import { type NativeFunction, PhpArray, type PhpObject, Ref, type Value } from './values';
+import { deref, type NativeFunction, PhpArray, type PhpObject, Ref, type Value } from './values';
 
 const USE_KEY = 1n;
 const INVERT_MATCH = 2n;
@@ -95,8 +95,9 @@ function accept(object: PhpObject): boolean {
   let subject: string;
   if (flags & USE_KEY) subject = toStr(state.key ?? null);
   else {
-    if (state.data.v instanceof PhpArray) return false;
-    subject = toStr(state.data.v);
+    const value = deref(state.data.v);
+    if (value instanceof PhpArray) return false;
+    subject = toStr(value);
   }
   const accepted = match(object, state, subject);
   return flags & INVERT_MATCH ? !accepted : accepted;

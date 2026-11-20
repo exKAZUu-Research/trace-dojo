@@ -2,7 +2,7 @@ import { callMethod, consumeInvokedResult, discardInvokedResult } from './callab
 import { toBool } from './conversions';
 import { throwError, withPendingException } from './errors';
 import { PhpThrow, rt } from './runtime';
-import { nativeOwnershipChanged, PhpArray, type PhpClass, PhpObject, type Value } from './values';
+import { deref, nativeOwnershipChanged, PhpArray, type PhpClass, PhpObject, Ref, type Value } from './values';
 
 interface AcquiredIterator {
   iterator: PhpObject;
@@ -128,7 +128,7 @@ export function newEngineIterator(owner: PhpObject): PhpObject {
 export class EngineIteratorOwner {
   constructor(readonly object: PhpObject) {}
 
-  held(): Value[] {
+  held(): (Value | Ref)[] {
     return [this.object];
   }
 
@@ -145,7 +145,7 @@ export class EngineIteratorOwner {
 export class InnerIterator extends EngineIteratorOwner {
   /** The object handle PHP allocates for the iterator, which shifts the numbers var_dump shows for later objects. */
   readonly handle: PhpObject;
-  private cached: { v: Value } | undefined;
+  private cached: { v: Value | Ref } | undefined;
 
   constructor(object: PhpObject, handle = newEngineIterator(object)) {
     super(object);
@@ -153,7 +153,7 @@ export class InnerIterator extends EngineIteratorOwner {
     if (handle !== object) handle.internal = this;
   }
 
-  override held(): Value[] {
+  override held(): (Value | Ref)[] {
     return this.cached ? [this.cached.v, this.object] : [this.object];
   }
 
@@ -172,13 +172,28 @@ export class InnerIterator extends EngineIteratorOwner {
   }
 
   current(): Value {
+    return deref(this.currentSlot());
+  }
+
+  currentSlot(): Value | Ref {
     if (this.cached) return this.cached.v;
+    const runtime = rt();
+    let returnedRef: Ref | undefined;
     return consumeInvokedResult(
-      () => callIteratorMethod(this.object, 'current'),
-      (value) => {
-        this.cached = { v: value };
-        nativeOwnershipChanged(this.handle);
+      () => {
+        const value = callIteratorMethod(this.object, 'current');
+        returnedRef = runtime.lastReturnRef;
+        if (returnedRef) {
+          returnedRef.isRef = true;
+          returnedRef.rc++;
+        }
         return value;
+      },
+      (value) => {
+        const slot = returnedRef ?? value;
+        this.cached = { v: slot };
+        nativeOwnershipChanged(this.handle);
+        return slot;
       }
     );
   }
@@ -196,7 +211,7 @@ export class InnerIterator extends EngineIteratorOwner {
     releaseIteratorValues([this.takeCurrent()]);
   }
 
-  takeCurrent(): Value | undefined {
+  takeCurrent(): Value | Ref | undefined {
     if (!this.cached) return;
     const { v } = this.cached;
     this.cached = undefined;
@@ -205,8 +220,9 @@ export class InnerIterator extends EngineIteratorOwner {
   }
 }
 
-export function releaseIteratorValues(values: (Value | undefined)[]): void {
-  if (!values.some((value) => value instanceof PhpArray || value instanceof PhpObject)) return;
+export function releaseIteratorValues(values: (Value | Ref | undefined)[]): void {
+  for (const value of values) if (value instanceof Ref) value.rc--;
+  if (!values.some((value) => value instanceof PhpArray || value instanceof PhpObject || value instanceof Ref)) return;
   const runtime = rt();
   runtime.release(values, true);
   runtime.flushReleases();

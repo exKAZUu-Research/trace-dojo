@@ -9,7 +9,7 @@ import { arrayIteratorOver } from './libArrayObject';
 import { defineClass, type NativeMethod } from './native';
 import { toKey, toStr } from './operators';
 import { rt } from './runtime';
-import { nativeOwnershipChanged, PhpArray, type PhpClass, PhpObject, Ref, type Value } from './values';
+import { deref, nativeOwnershipChanged, PhpArray, type PhpClass, PhpObject, Ref, type Value } from './values';
 
 /** The engine's iterator for a Traversable object, which asks an IteratorAggregate for its iterator. */
 export function innerIteratorOf(object: PhpObject): InnerIterator {
@@ -97,8 +97,8 @@ export class DualState {
   inner: InnerIterator | undefined;
   private retiringInner: InnerIterator | undefined;
   /** The fetched element, or undefined when there is none. */
-  data: { v: Value } | undefined;
-  private sourceData: { v: Value } | undefined;
+  data: { v: Value | Ref } | undefined;
+  private sourceData: { v: Value | Ref } | undefined;
   key: Value | undefined;
   pos = 0n;
   limitOffset = 0n;
@@ -120,8 +120,8 @@ export class DualState {
   }
 
   /** What the iterator holds, in the order PHP releases it (spl_dual_it_free_storage). */
-  held(): Value[] {
-    const held: Value[] = [];
+  held(): (Value | Ref)[] {
+    const held: (Value | Ref)[] = [];
     if (this.sourceData) held.push(this.sourceData.v);
     if (this.data) held.push(this.data.v);
     if (this.key !== undefined) held.push(this.key);
@@ -234,7 +234,7 @@ export class DualState {
 
   private fetchCurrent(): void {
     const inner = this.engine as InnerIterator;
-    this.data = { v: inner.current() };
+    this.data = { v: inner.currentSlot() };
     inner.takeCurrent();
     nativeOwnershipChanged(this.owner);
   }
@@ -324,7 +324,7 @@ function wrapperConstructor(name: string): NativeMethod {
 const elementMethods: NativeMethod[] = [
   { signature: 'valid(): bool', impl: ({ thisObj }) => dualOf(thisObj).data !== undefined },
   { signature: 'key(): mixed', impl: ({ thisObj }) => dualOf(thisObj).key ?? null },
-  { signature: 'current(): mixed', impl: ({ thisObj }) => dualOf(thisObj).data?.v ?? null },
+  { signature: 'current(): mixed', impl: ({ thisObj }) => deref(dualOf(thisObj).data?.v ?? null) },
 ];
 
 defineClass({
@@ -445,7 +445,7 @@ defineClass({
       impl: ({ thisObj }) => {
         const state = dualOf(thisObj);
         if (state.data === undefined || state.key === undefined) return false;
-        return callCallback(state.callback, [state.data.v, state.key, state.innerObject as PhpObject]);
+        return callCallback(state.callback, [deref(state.data.v), state.key, state.innerObject as PhpObject]);
       },
     },
   ],
@@ -560,9 +560,9 @@ function cachingNext(state: DualState): void {
     return;
   }
   state.cachingFlags |= CIT_VALID;
-  if (state.cachingFlags & CIT_FULL_CACHE) state.cache.set(toKey(state.key as Value), state.data?.v as Value);
+  if (state.cachingFlags & CIT_FULL_CACHE) state.cache.set(toKey(state.key as Value), deref(state.data?.v ?? null));
   if (state.cachingFlags & CIT_TOSTRING_USE_INNER) state.cachingString = toStr(state.innerObject as PhpObject);
-  else if (state.cachingFlags & CIT_CALL_TOSTRING) state.cachingString = toStr(state.data?.v as Value);
+  else if (state.cachingFlags & CIT_CALL_TOSTRING) state.cachingString = toStr(deref(state.data?.v ?? null));
   state.next(false);
 }
 
@@ -630,7 +630,7 @@ defineClass({
             `${thisObj.cls.name} does not fetch string value (see CachingIterator::__construct)`
           );
         if (flags & CIT_TOSTRING_USE_KEY) return toStr(state.key ?? null);
-        if (flags & CIT_TOSTRING_USE_CURRENT) return toStr(state.data?.v ?? null);
+        if (flags & CIT_TOSTRING_USE_CURRENT) return toStr(deref(state.data?.v ?? null));
         return state.cachingString ?? '';
       },
     },
@@ -814,7 +814,7 @@ defineClass({
       impl: ({ thisObj }) => {
         const state = dualOf(thisObj);
         state.fetch(true);
-        return state.data?.v ?? null;
+        return deref(state.data?.v ?? null);
       },
     },
     {

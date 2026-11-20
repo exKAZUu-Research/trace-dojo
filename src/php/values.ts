@@ -444,22 +444,22 @@ export class PhpArray {
     return result;
   }
 
-  shiftStringKey(): { value: Value } | undefined {
-    if (this.map.hasIntegerKeys()) return;
+  shiftFirstKey(nextFree: bigint): Value | undefined {
     const key = this.map.keys().next().value;
     if (key === undefined) return;
-    const slot = this.map.get(key) as Value | Ref;
+    const order = this.ordered();
+    const slot = this.map.ownedSlot(key) as Value | Ref;
     this.map.delete(key);
-    this.order?.delete(key);
+    order.delete(key);
     this.orderPacked = false;
-    this.nextFree = 0n;
+    this.nextFree = nextFree;
     this.pointer = null;
     this.invalidate();
     if (slot instanceof Ref) slot.rc--;
     dropped(slot);
     const value = deref(slot);
     if (value instanceof PhpArray) value.shared = true;
-    return { value };
+    return value;
   }
 
   shiftList(): { value: Value } | undefined {
