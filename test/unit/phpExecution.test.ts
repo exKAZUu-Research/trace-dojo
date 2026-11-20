@@ -5303,6 +5303,23 @@ test('a class whose override names a later class is declared when its statement 
   });
 });
 
+test('a class whose property hook names a later class is declared when its statement runs', () => {
+  expect(
+    run(
+      '<?php class Animal{}class P{public Animal $x{get=>new Animal;}}echo class_exists("C")?"y":"n";class C extends P{public Dog $x{get=>new Dog;}}class Dog extends Animal{}echo get_class((new C)->x);'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'nDog' });
+  expect(
+    run(
+      '<?php class Animal{}class P{public Animal $x{get=>new Animal;}}class C extends P{public int $x{get=>1;}} echo "x";'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '\nFatal error: Declaration of C::$x::get(): int must be compatible with P::$x::get(): Animal in /main.php on line 1\nStack trace:\n#0 {main}\n',
+  });
+});
+
 test('an override naming a missing class reports that its compatibility cannot be checked', () => {
   for (const [parent, child, expected] of [
     [

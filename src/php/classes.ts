@@ -296,6 +296,7 @@ function checkPropertyOverride(
     );
   }
   if (!propertyTypeCompatible(inherited, ast, cls, declarationScope)) {
+    checkHookSignatures(inherited, ast, cls, cls.declaredRow);
     propertyTypeError(inherited, cls, ast.name, cls.declaredRow);
   }
 }
@@ -359,7 +360,7 @@ function linkPropertyHooks(decl: PropDecl, ast: PropertyDeclAst, parent: PropDec
     );
   const cls = decl.cls;
   const parameter = own?.set?.params[0];
-  if (ast.type && parameter?.type && !isSubtype(ast.type, cls, parameter.type, cls))
+  if (ast.type && parameter?.type && !propertySubtype(ast.type, cls, parameter.type, cls))
     throw new FatalError(
       `Type of parameter $${parameter.name} of hook ${cls.name}::$${ast.name}::set must be compatible with property type`,
       ast.row
@@ -401,13 +402,19 @@ function propertyTypeCompatible(
   if (Boolean(parent.type) !== Boolean(child.type)) return false;
   const parentType: TypeDecl = parent.type ?? { k: 'named', name: 'mixed' };
   const childType: TypeDecl = child.type ?? { k: 'named', name: 'mixed' };
-  const acceptsChild = isSubtype(childType, cls, parentType, parent.cls);
-  const acceptsParent = isSubtype(parentType, parent.cls, childType, cls);
+  const acceptsChild = propertySubtype(childType, cls, parentType, parent.cls);
+  const acceptsParent = propertySubtype(parentType, parent.cls, childType, cls);
   if (parent.isVirtual && parent.hooks) {
     if (!parent.hooks.set) return acceptsChild;
     if (!parent.hooks.get) return acceptsParent;
   }
   return acceptsChild && acceptsParent;
+}
+
+/** Whether a property or hook type accepts another; while hoisting, a check only missing classes decide defers. */
+function propertySubtype(sub: TypeDecl, subScope: PhpClass, sup: TypeDecl, supScope: PhpClass): boolean {
+  if (hoisting && typeof variance(sub, subScope, sup, supScope) === 'string') throw new DeferredDeclaration();
+  return isSubtype(sub, subScope, sup, supScope);
 }
 
 function propertyTypeError(parent: PropDecl, child: PhpClass, name: string, row: number): never {
@@ -818,7 +825,7 @@ function missingPropertyHooks(cls: PhpClass, ancestors: PhpClass[], row: number)
           row
         );
       }
-      if (cls.kind === 'interface') checkInterfaceHooks(contract, property, row);
+      if (cls.kind === 'interface') checkHookSignatures(contract, property, property.cls, row);
       if (!propertyTypeCompatible(contract, property, property.cls))
         propertyTypeError(contract, cls, property.name, row);
     }
@@ -831,8 +838,15 @@ function missingPropertyHooks(cls: PhpClass, ancestors: PhpClass[], row: number)
   return [...missing];
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function checkInterfaceHooks(parent: PropDecl, child: PropDecl, row: number): void {
+interface HookedProperty {
+  name: string;
+  type?: TypeDecl;
+  hooks?: { get?: { params: Param[] }; set?: { params: Param[] } };
+}
+
+/** Checks overriding hooks as PHP checks them as methods, before the property types. */
+// code-gauge-allow functionCognitiveComplexity 27 -- Checks each hook in PHP's order and formats both signatures for its diagnostics.
+function checkHookSignatures(parent: PropDecl, child: HookedProperty, childClass: PhpClass, row: number): void {
   for (const kind of ['get', 'set'] as const) {
     const inherited = parent.hooks?.[kind];
     const own = child.hooks?.[kind];
@@ -842,16 +856,21 @@ function checkInterfaceHooks(parent: PropDecl, child: PropDecl, row: number): vo
     const mixed: TypeDecl = { k: 'named', name: 'mixed' };
     const compatible =
       kind === 'get'
-        ? isSubtype(childType ?? mixed, child.cls, parentType ?? mixed, parent.cls)
-        : isSubtype(parentType ?? mixed, parent.cls, childType ?? mixed, child.cls);
-    if (compatible) continue;
-    const signature = (prop: PropDecl, fn: Callable, type: TypeDecl | undefined): string => {
-      const prefix = `${prop.cls.name}::$${prop.name}::${kind}`;
-      if (kind === 'get') return `${prefix}()${type ? `: ${describeType(type, prop.cls)}` : ''}`;
-      return `${prefix}(${type ? `${describeType(type, prop.cls)} ` : ''}$${fn.params[0]?.name ?? 'value'}): void`;
+        ? variance(childType ?? mixed, childClass, parentType ?? mixed, parent.cls)
+        : variance(parentType ?? mixed, parent.cls, childType ?? mixed, childClass);
+    if (compatible === true) continue;
+    if (hoisting && compatible !== false) throw new DeferredDeclaration();
+    const signature = (cls: PhpClass, name: string, fn: { params: Param[] }, type: TypeDecl | undefined): string => {
+      const prefix = `${cls.name}::$${name}::${kind}`;
+      if (kind === 'get') return `${prefix}()${type ? `: ${describeType(type, cls)}` : ''}`;
+      return `${prefix}(${type ? `${describeType(type, cls)} ` : ''}$${fn.params[0]?.name ?? 'value'}): void`;
     };
+    const childText = signature(childClass, child.name, own, childType);
+    const parentText = signature(parent.cls, parent.name, inherited, parentType);
     throw new FatalError(
-      `Declaration of ${signature(child, own, childType)} must be compatible with ${signature(parent, inherited, parentType)}`,
+      compatible === false
+        ? `Declaration of ${childText} must be compatible with ${parentText}`
+        : `Could not check compatibility between ${childText} and ${parentText}, because class ${compatible} is not available`,
       row
     );
   }
