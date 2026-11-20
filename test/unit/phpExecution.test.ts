@@ -4157,4 +4157,38 @@ assert(Foo::bar() === 2)
 assert("$s" === 'y')
 `,
   });
+
+  expect(
+    run(`<?php
+class P { public $o; function __construct(public $x) {} }
+$pts = [];
+for ($i = 0; $i < 3000; $i++) $pts[] = new P($i);
+for ($i = 0; $i + 1 < 3000; $i++) $pts[$i]->o = $pts[$i + 1];
+for ($i = 0; $i < 3000; $i++) { $k = $i % 2999; $pts[$k]->o = $pts[$k + 1]; }
+echo "ok";
+`)
+  ).toMatchObject({ kind: 'executed', stdout: 'ok' });
+
+  for (const [body, expected] of [
+    [
+      '$p = new Plain; $q = new Plain; $p->next = $q; $q->next = $p; $p->o = new Node(1); $q->o = new Node(2); unset($p, $q);',
+      '~1 ~2 2 1,3,2,4,5,6',
+    ],
+    [
+      '$p = new Plain; $p->next = $p; $n = new Node(1); $n->o = new Plain; $n->o->next = $n->o; $p->o = $n; unset($p, $n);',
+      '~1 2 3,1,2,4,5,6',
+    ],
+  ]) {
+    expect(
+      run(`<?php
+class Node { public $next; public $o; function __construct(public $n = 0) {} function __destruct() { echo "~{$this->n} "; } }
+class Plain { public $next; public $o; }
+${body}
+echo gc_collect_cycles(), " ";
+$ids = [];
+for ($i = 0; $i < 6; $i++) { $k[] = new Plain; $ids[] = spl_object_id(end($k)); }
+echo implode(",", $ids);
+`)
+    ).toMatchObject({ kind: 'executed', stdout: expected });
+  }
 });

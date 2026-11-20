@@ -12,7 +12,6 @@ import {
   proofChildrenOf,
   proofRoot,
   rememberOwnership,
-  setOwnershipWorkHandler,
 } from './ownerLinks';
 import { replaceWatchedSlot, replaceWatchedSlots } from './slotWatch';
 
@@ -1224,7 +1223,7 @@ class PropertyMap extends Map<string, Slot> {
   }
 }
 
-export { ownershipProof, rememberOwnership, setOwnershipWorkHandler };
+export { ownershipProof, rememberOwnership };
 
 function rewireOwnership(owner: Owner, key: Key | undefined, value: unknown): void {
   const root = proofRoot(owner);

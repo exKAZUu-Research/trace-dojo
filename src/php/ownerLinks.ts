@@ -55,11 +55,7 @@ export class OwnerLinks<Owner, Key> {
 const reachProofs = new WeakMap<object, object>();
 const proofChildren = new WeakMap<object, Set<object>>();
 const proofParents = new WeakMap<object, object>();
-let ownershipWorkHandler: (cost: number) => void = () => {};
-
-export function setOwnershipWorkHandler(handler: typeof ownershipWorkHandler): void {
-  ownershipWorkHandler = handler;
-}
+const proofDepths = new WeakMap<object, number>();
 
 export function proofRoot(owner: object): object | undefined {
   return reachProofs.get(owner);
@@ -77,6 +73,7 @@ export function invalidateOwner(owner: object): void {
     if (visited.has(value)) continue;
     visited.add(value);
     reachProofs.delete(value);
+    proofDepths.delete(value);
     const parent = proofParents.get(value);
     if (parent) proofChildren.get(parent)?.delete(value);
     proofParents.delete(value);
@@ -93,41 +90,39 @@ export function ownershipProof(value: object, isRoot: (value: object) => boolean
   return root !== undefined && isRoot(root) ? root : undefined;
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function rememberOwnership(path: object[], root: object): void {
-  for (let index = 0; index < path.length; index++) {
-    const value = path[index];
-    reachProofs.set(value, root);
-    if (value === root) {
-      const parent = proofParents.get(value);
-      if (parent) proofChildren.get(parent)?.delete(value);
-      proofParents.delete(value);
-    }
-    const child = path[index + 1];
-    if (child && child !== value) {
-      if (proofChildren.get(child)?.size && wouldProofCycle(value, child)) return;
-      const previous = proofParents.get(child);
-      if (previous) proofChildren.get(previous)?.delete(child);
-      proofParents.set(child, value);
-      let children = proofChildren.get(value);
-      if (!children) {
-        children = new Set();
-        proofChildren.set(value, children);
-      }
-      children.add(child);
-    }
+  if (path.length === 0) return;
+  const first = path[0];
+  if (first === root && reachProofs.get(first) !== root) {
+    if (proofChildren.get(first)?.size) invalidateOwner(first);
+    detachParent(first);
+    reachProofs.set(first, root);
+    proofDepths.set(first, 0);
   }
+  if (reachProofs.get(first) !== root) return;
+  for (let index = 0; index + 1 < path.length; index++) attachProofChild(path[index], path[index + 1], root);
 }
 
-function wouldProofCycle(owner: object, child: object): boolean {
-  let work = 0;
-  for (let parent: object | undefined = owner; parent; parent = proofParents.get(parent)) {
-    if ((++work & 63) === 0) ownershipWorkHandler(8);
-    if (parent === child) {
-      ownershipWorkHandler(Math.ceil((work & 63) / 8));
-      return true;
-    }
+function attachProofChild(value: object, child: object, root: object): void {
+  if (child === value) return;
+  const nextDepth = (proofDepths.get(value) ?? 0) + 1;
+  const sameRoot = reachProofs.get(child) === root;
+  if (sameRoot && (proofDepths.get(child) ?? Infinity) <= nextDepth) return;
+  if (!sameRoot && proofChildren.get(child)?.size) invalidateOwner(child);
+  detachParent(child);
+  proofParents.set(child, value);
+  let children = proofChildren.get(value);
+  if (!children) {
+    children = new Set();
+    proofChildren.set(value, children);
   }
-  ownershipWorkHandler(Math.ceil((work & 63) / 8));
-  return false;
+  children.add(child);
+  reachProofs.set(child, root);
+  proofDepths.set(child, nextDepth);
+}
+
+function detachParent(node: object): void {
+  const parent = proofParents.get(node);
+  if (parent) proofChildren.get(parent)?.delete(node);
+  proofParents.delete(node);
 }

@@ -24,7 +24,6 @@ import {
   Ref,
   setAllocationHandler,
   setDropHandler,
-  setOwnershipWorkHandler,
   setReferenceDropObserver,
   type UserFunction,
   type Value,
@@ -565,8 +564,6 @@ export function rt(): Runtime {
 setReferenceDropObserver((value) => current?.pendingGcRoots.add(value));
 setDropHandler((values) => current?.release(values, true));
 setAllocationHandler((count, size) => current?.allocate(count, size));
-setOwnershipWorkHandler((cost) => current?.spend(cost));
-
 export function withRuntime<T>(runtime: Runtime, run: () => T): T {
   const outer = current;
   current = runtime;

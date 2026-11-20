@@ -147,11 +147,10 @@ function collectAfterDestruction(
     const afterArrays = new Set<PhpArray>();
     const after = mark(runtime, false, afterArrays);
     const remaining = handles.filter((object) => runtime.objects.get(object.id) === object && !after.has(object));
-    const allowed = new Set(remaining);
     const { count: collectedCount, ordered } = countAfterDestruction(
       runtime,
+      owners,
       remaining,
-      allowed,
       destructible,
       destructedInBuffer,
       arrayCandidates,
@@ -188,8 +187,9 @@ function orderCollectedObjects(
     runtime,
     (value) => !(value instanceof PhpArray && reachedArrays.has(value))
   );
+  const cyclic = cyclicObjects(graph, freed, new Set(runtime.collectingArrays));
   return deferredHandleOrder<CollectionNode, PhpObject>(
-    roots,
+    roots.filter((object) => cyclic.has(object)),
     new Set(freed),
     (node): node is PhpObject => node instanceof PhpObject,
     (node) => graph.children(node)
@@ -208,13 +208,14 @@ function retainCollectionReceiver(runtime: Runtime, object: PhpObject): void {
 // code-gauge-allow functionParameterCount 7 -- Shares the post-destructor snapshot with collectAfterDestruction.
 function countAfterDestruction(
   runtime: Runtime,
+  owners: PhpObject[],
   remaining: PhpObject[],
-  allowed: Set<PhpObject>,
   destructible: PhpObject[],
   destructedInBuffer: Set<PhpObject>,
   arrayCandidates: PhpArray[],
   afterArrays: Set<PhpArray>
 ): { count: number; ordered: PhpObject[] } {
+  const allowed = new Set(remaining);
   const graph = new CollectionGraph(
     remaining,
     runtime,
@@ -229,14 +230,13 @@ function countAfterDestruction(
   const protectedObjects = collectibleGraph(deferredRoots, afterArrays, new Set(), allowed).objects;
   const excluded = new Set(destructible.filter((object) => !protectedObjects.has(object)));
   const counted = collectibleGraph([...cyclic, ...cyclicArrays], afterArrays, excluded, allowed);
+  const nonProtected = new Set(remaining.filter((object) => !protectedObjects.has(object)));
+  const passOneRoots = owners.filter((object) => cyclic.has(object) && nonProtected.has(object));
+  const isObject = (node: CollectionNode): node is PhpObject => node instanceof PhpObject;
+  const children = (node: CollectionNode): CollectionNode[] => graph.children(node);
   const ordered = [
-    ...remaining.filter((object) => !protectedObjects.has(object)),
-    ...deferredHandleOrder<CollectionNode, PhpObject>(
-      deferredRoots,
-      protectedObjects,
-      (node): node is PhpObject => node instanceof PhpObject,
-      (node) => graph.children(node)
-    ),
+    ...deferredHandleOrder<CollectionNode, PhpObject>(passOneRoots, nonProtected, isObject, children),
+    ...deferredHandleOrder<CollectionNode, PhpObject>(deferredRoots, protectedObjects, isObject, children),
   ];
   return { count: counted.objects.size + counted.arrays.size, ordered };
 }
@@ -1231,7 +1231,7 @@ function ownedReachable(
     }
     const item = next.value;
     if (visited.has(item) || unreachable?.has(item)) continue;
-    const root = isRoot(item) ? item : retainOwners ? undefined : ownershipProof(item, isRoot);
+    const root = resolveOwnershipRoot(item, isRoot, retainOwners);
     if (root) {
       if (!retainOwners) {
         path.push(item);
@@ -1245,6 +1245,18 @@ function ownedReachable(
   }
   if (unreachable) for (const item of visited) unreachable.add(item);
   return false;
+}
+
+function resolveOwnershipRoot(
+  item: object,
+  isRoot: (value: object) => boolean,
+  retainOwners: boolean
+): object | undefined {
+  if (!retainOwners) {
+    const existing = ownershipProof(item, isRoot);
+    if (existing !== undefined) return existing;
+  }
+  return isRoot(item) ? item : undefined;
 }
 
 // code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
