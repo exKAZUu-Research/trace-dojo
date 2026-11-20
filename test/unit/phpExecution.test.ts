@@ -3064,6 +3064,20 @@ try { throw
   });
 });
 
+test('the array_key_exists opcode uses an empty key for an undefined variable', () => {
+  const program = `<?php
+    $array = ['' => 1];
+    set_error_handler(function ($level, $message) { echo $level === E_DEPRECATED ? 'deprecated;' : "$message;"; });
+    var_dump(array_key_exists($missing, $array), array_key_exists(null, $array), key_exists($indirect, $array));
+    set_error_handler(function () use (&$array) { $array = ['new' => 1]; });
+    var_dump(array_key_exists($replaced, $array));`;
+  expect(run(program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'Undefined variable $missing;deprecated;Undefined variable $indirect;deprecated;bool(true)\nbool(true)\nbool(true)\nbool(true)\n',
+  });
+});
+
 test('warns at the compiled send row when argument binding is deferred', () => {
   const program = `<?php
     set_error_handler(function ($level, $message, $file, $line) { echo $message, ':', $line, "\\n"; });

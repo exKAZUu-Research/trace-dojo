@@ -38,13 +38,14 @@ import {
   evOpcodeOperand,
   isCompiledVariable,
   iterate,
+  missingCompiledOperand,
   prepareOperand,
   readVar,
   resolveStaticClass,
   SHORT,
 } from './interp';
 import { compiledOperandRow } from './opcodeRows';
-import { ElementPlace, share, VarPlace, writableContainer } from './places';
+import { arrayIsShared, ElementPlace, share, VarPlace, writableContainer } from './places';
 import { ExitSignal, type Frame, PhpThrow, rt, type Runtime } from './runtime';
 import { renderSimpleSprintf } from './sprintf';
 import { UnsupportedFeatureError } from './unsupported';
@@ -341,7 +342,7 @@ function callNativeNamed(
   const args = forwards
     ? evalCompiledCallbackArgs(e.args, fn)
     : specialized
-      ? evalDeferredValueArgs(e.args, row)
+      ? evalDeferredValueArgs(e.args, row, builtin)
       : evalArgs(e.args, fn, fn.name);
   runtime.row = row;
   if (fn.acceptsNamed === 'positional-only') checkNamedArgs([], args);
@@ -382,13 +383,44 @@ function compiledLiteralCallback(callback: Expr): boolean {
   return callback.k === 'lit' && typeof callback.v === 'string' && !callback.v.startsWith('\\');
 }
 
-function evalDeferredValueArgs(args: Arg[], row: number): ArgValue[] {
-  const frame = rt().frame;
+function evalDeferredValueArgs(args: Arg[], row: number, builtin?: string): ArgValue[] {
+  const runtime = rt();
+  const frame = runtime.frame;
   const mark = frame.temporaries.length;
   const reads = args.map((arg) => prepareOperand(arg.e));
-  const values = reads.map((read, position): ArgValue => ({ v: share(read(row)), position }));
+  const values =
+    builtin === 'array_key_exists' && missingCompiledOperand(args[0].e)
+      ? readArrayKeyExistsWithMissingKey(runtime, args[1].e, reads, row)
+      : reads.map((read, position): ArgValue => ({ v: share(read(row)), position }));
   claimArgumentTemporaries(frame, values, 0, mark);
   return values;
+}
+
+function readArrayKeyExistsWithMissingKey(
+  runtime: Runtime,
+  subject: Expr,
+  [readKey, readArray]: ReturnType<typeof prepareOperand>[],
+  row: number
+): ArgValue[] {
+  const original =
+    subject.k === 'var' && isCompiledVariable(subject) ? runtime.frame.vars.get(subject.name)?.v : readArray(row);
+  if (original instanceof PhpArray) {
+    // Zend keeps the array for the lookup across the warning without adding to its refcount.
+    arrayIsShared(original);
+    runtime.frame.temporaries.push(original);
+    readKey(row);
+    return [
+      { v: '', position: 0 },
+      { v: original, position: 1 },
+    ];
+  }
+  readKey(row);
+  const current = readArray(row);
+  runtime.row = row;
+  throwError(
+    'TypeError',
+    `array_key_exists(): Argument #2 ($array) must be of type array, ${valueName(current)} given`
+  );
 }
 
 // code-gauge-allow functionCognitiveComplexity 30 -- Resolves each form of call and callable in PHP's order of checks.
