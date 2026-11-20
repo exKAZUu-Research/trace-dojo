@@ -1579,6 +1579,23 @@ test('validates control characters in Rust literal bodies', () => {
   expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: '"a\\nb" "ab" \'\\r\'\n' });
 });
 
+test('dispatches native Default calls using concrete Rust impl arguments', () => {
+  const program = `struct Wrapped<T>(T);
+impl Default for Wrapped<i32> { fn default() -> Self { Wrapped(42) } }
+impl Default for Wrapped<bool> { fn default() -> Self { Wrapped(false) } }
+struct SizedValue<T>(T, usize);
+impl<T> Default for SizedValue<Option<T>> {
+    fn default() -> Self { SizedValue(None, std::mem::size_of::<T>()) }
+}
+fn main() {
+    let mut value = Wrapped(true);
+    println!("{} {}", std::mem::take(&mut value).0, value.0);
+    println!("{}", None::<Wrapped<bool>>.unwrap_or_default().0);
+    println!("{}", None::<SizedValue<Option<u16>>>.unwrap_or_default().1);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'true false\nfalse\n2\n' });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

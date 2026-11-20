@@ -128,8 +128,13 @@ function selfType(ctx: NativeContext): Type {
 }
 
 /** The default value of a type, as `Default::default` gives it. */
-// code-gauge-allow functionNcss 57 -- One branch per type with a built-in default value.
 export function defaultValue(ctx: NativeContext, type: Type): Value {
+  const method = ctx.interp.program.traitDef('Default').methods.get('default')!;
+  return ctx.interp.callFn(method, [type], [], undefined, ctx.span, ctx.frame);
+}
+
+// code-gauge-allow functionNcss 57 -- One branch per type with a built-in default value.
+function builtinDefaultValue(ctx: NativeContext, type: Type): Value {
   ctx.runtime.spend();
   const t = normalize(shallow(type));
   switch (t.kind) {
@@ -187,23 +192,6 @@ export function defaultValue(ctx: NativeContext, type: Type): Value {
         default: {
           break;
         }
-      }
-      const trait = ctx.interp.program.traitDef('Default');
-      const impl = ctx.interp.program.impls.find(
-        (candidate) =>
-          candidate.trait?.trait === trait &&
-          candidate.methods.has('default') &&
-          (shallow(candidate.selfType) as { def?: unknown }).def === t.def
-      );
-      if (impl) {
-        return ctx.interp.callFn(
-          impl.methods.get('default')!,
-          impl.params.map((_, index) => t.args[index]),
-          [],
-          undefined,
-          ctx.span,
-          ctx.frame
-        );
       }
       const subst = new Map(t.def.params.map((param, index) => [param, t.args[index]]));
       const defFields = t.def.variants[0].fields;
@@ -280,7 +268,7 @@ define({
     if ((compareValues(type, self, max) ?? 0) > 0) return max;
     return self;
   },
-  'Default::default': (_args, ctx) => defaultValue(ctx, selfType(ctx)),
+  'Default::default': (_args, ctx) => builtinDefaultValue(ctx, selfType(ctx)),
   'From::from': ([value], ctx) => convert(ctx, value, ctx.typeArgs[1], selfType(ctx)),
   'Into::into': ([value], ctx) => ctx.interp.convertFrom(value, selfType(ctx), ctx.typeArgs[1], ctx.frame),
   'std::cmp::max': ([a, b], ctx) => ((compareValues(ctx.typeArgs[0], a, b) ?? 0) > 0 ? a : b),
