@@ -1,6 +1,6 @@
 import { normalize } from './infer';
 import type { Module, Program } from './items';
-import { adt, CHAR, ref, shallow, type TraitRef, type Type } from './types';
+import { adt, allSupertraits, CHAR, ref, shallow, type TraitRef, type Type } from './types';
 
 /** The shapes of the iterators that `IntoIterator` makes of a collection: by shared reference, by `&mut`, by value. */
 const COLLECTION_SHAPES: Record<string, [string, string | undefined, string]> = {
@@ -130,5 +130,10 @@ function borrowedIterShape(program: Program, type: Type, mutable: boolean): Type
 /** The `Iterator` or `IntoIterator` bound of a type parameter or an opaque type, by which it iterates. */
 export function iterationBound(type: Type): TraitRef | undefined {
   const bounds = type.kind === 'param' ? type.param.bounds : type.kind === 'opaque' ? type.opaque.bounds : undefined;
-  return bounds?.find((bound) => bound.trait.builtin === 'Iterator' || bound.trait.builtin === 'IntoIterator');
+  if (!bounds) return;
+  const inherited = allSupertraits(bounds, type);
+  return (
+    inherited.find((bound) => bound.trait.builtin === 'Iterator') ??
+    inherited.find((bound) => bound.trait.builtin === 'IntoIterator')
+  );
 }

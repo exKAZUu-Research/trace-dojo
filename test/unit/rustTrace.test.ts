@@ -359,3 +359,38 @@ test('traces Rust statements on their own lines after doc comments', () => {
   const trace = traceProgram('rust', program, program);
   expect(trace.traceItems.map((step) => step.line)).toEqual([0, 3, 5, 6]);
 });
+
+test('Rust records value branch assignments once while preserving interior statements', () => {
+  const program = `fn main() {
+    let mut n = 6;
+    let label = if n % 2 == 0 { "even" } else { "odd" };
+    n = if n == 6 { 3 } else { 1 };
+    let result = { let previous = n; previous + 1 };
+    let by_match = match result { 4 => { 5 }, _ => { 6 } };
+}`;
+  const { traceItems } = traceProgram('rust', program, program);
+  expect(traceItems.map(({ line, vars }) => [line, vars])).toEqual([
+    [0, {}],
+    [2, { n: 6 }],
+    [3, { n: 6, label: 'even' }],
+    [4, { n: 3, label: 'even' }],
+    [5, { n: 3, label: 'even', previous: 3 }],
+    [5, { n: 3, label: 'even', result: 4 }],
+    [6, { n: 3, label: 'even', result: 4, by_match: 5 }],
+  ]);
+});
+
+test('Rust traces brace-free statement match arms as Java switch cases', () => {
+  const program = `fn main() {
+    let mut t = Turtle::new();
+    for command in [0, 1, 2] {
+        match command {
+            0 => t.forward(),
+            1 => { t.turn_right(); t.forward(); }
+            _ => t.turn_left(),
+        }
+    }
+}`;
+  const { traceItems } = traceProgram('rust', program, program);
+  expect(traceItems.map(({ line }) => line)).toEqual([0, 2, 3, 5, 3, 6, 6, 3, 7]);
+});

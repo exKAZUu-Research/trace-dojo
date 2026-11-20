@@ -7,9 +7,10 @@ import { checkAssign, checkBinary, checkCast, checkCompoundAssign, checkUnary, r
 import { pathExpr, structExpr } from './checkerPaths';
 import { checkPattern } from './checkerPatterns';
 import { checkField, checkIndex } from './checkerPlaces';
+import { constInteger } from './constExpressions';
 import { lowerPattern, missingPattern } from './exhaustiveness';
 import { isPseudo, normalize } from './infer';
-import { compileError, constInteger } from './items';
+import { compileError } from './items';
 import { intoIterItem } from './iterTypes';
 import { RANGE_TYPES } from './traits';
 import {

@@ -50,8 +50,7 @@ export class TraitSolver {
       if (this.userImpl(trait, t, ref.args)) return 'yes';
       return trait.builtin && PARAMETER_BLANKET_TRAITS.has(trait.builtin) ? this.builtinOnly(t, ref) : 'no';
     }
-    // A pseudo-type that stays is one whose arguments are not known yet.
-    if (t.kind === 'adt' && isPseudo(t.def)) return 'unknown';
+    if (t.kind === 'adt' && isPseudo(t.def)) return this.pseudoImplements(t, ref);
     if (t.kind === 'opaque' || t.kind === 'dyn') {
       const answer = this.boundAnswer(t.kind === 'opaque' ? t.opaque.bounds : [t.trait], ref, t);
       return answer === 'no' ? this.builtinOnly(t, ref) : answer;
@@ -65,6 +64,18 @@ export class TraitSolver {
 
   private builtinOnly(t: Type, ref: TraitRef): Answer {
     return ref.trait.builtin ? builtinImplements(this, t, ref) : 'no';
+  }
+
+  private pseudoImplements(type: Type & { kind: 'adt' }, ref: TraitRef): Answer {
+    if (type.def.builtin === 'TryFromError') {
+      if (ref.trait.builtin === 'Sized') return 'yes';
+      return hasVars(type) ? 'unknown' : 'no';
+    }
+    if (type.def.builtin !== 'IntoShape') return 'unknown';
+    if (!['Clone', 'DoubleEndedIterator', 'ExactSizeIterator'].includes(ref.trait.builtin as string)) return 'unknown';
+    const iterator = type.args[0];
+    if (this.implements(iterator, { trait: this.program.traitDef('Iterator'), args: [] }) !== 'yes') return 'unknown';
+    return this.implements(iterator, ref);
   }
 
   // code-gauge-allow functionCognitiveComplexity 21 -- Literal defaults and conversions depend on the goal and numeric kind.

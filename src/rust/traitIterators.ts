@@ -62,14 +62,15 @@ const RANGE_EXACT: Record<string, ReadonlySet<string>> = {
 };
 
 /** Whether an iterator (an `IterImpl`, a `&mut` one, or a shape) has a capability, as std's impls decide. */
-// code-gauge-allow functionCognitiveComplexity 24 -- Follows std's impls of the iterator traits case by case.
+// code-gauge-allow functionCognitiveComplexity 26 -- Follows std's impls of the iterator traits case by case.
 export function iteratorCapability(type: Type, capability: Capability): Answer {
   const t = normalize(shallow(type));
   if (t.kind === 'var') return 'unknown';
   if (t.kind === 'ref') return t.mutable ? iteratorCapability(t.target, capability) : 'no';
   if (t.kind !== 'adt') return 'no';
   if (t.def.builtin === 'Iter') return iteratorCapability(t.args[1], capability);
-  const name = t.def.name;
+  const raw = t.def.builtin;
+  const name = raw === 'Range' || raw === 'RangeInclusive' || raw === 'RangeFrom' ? `${raw}Shape` : t.def.name;
   const leaf = LEAF_SHAPES[name];
   if (leaf) return leaf.includes(capability) ? 'yes' : 'no';
   if (name.startsWith('HashMap') || name.startsWith('HashSet')) return capability === 'exact' ? 'yes' : 'no';

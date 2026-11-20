@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 411 -- Defines Rust types, their substitutions and their shared structural operations.
+// code-gauge-allow-file fileNcss 413 -- Defines Rust types, their substitutions and their shared structural operations.
 import type { ConstItem, FnItem, Span } from './ast';
 import type { Module } from './items';
 
@@ -466,7 +466,10 @@ export function defaultTraitArguments(trait: TraitDef, written: Type[], self?: T
 export function supertraitsOf(ref: TraitRef, self?: Type): TraitRef[] {
   const subst = new Map(ref.trait.params.map((param, index) => [param, ref.args[index]]));
   if (self) subst.set(ref.trait.self, self);
-  return ref.trait.supertraits.map((bound) => substituteTraitRef(bound, subst));
+  return ref.trait.supertraits.map((bound) => {
+    const parent = substituteTraitRef(bound, subst);
+    return ref.item && parent.trait.builtin === 'Iterator' ? { ...parent, item: ref.item } : parent;
+  });
 }
 
 export function allSupertraits(bounds: TraitRef[], self?: Type): TraitRef[] {

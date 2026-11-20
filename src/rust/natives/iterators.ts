@@ -18,7 +18,7 @@ import {
 } from '../ops';
 import { MOVED } from '../runtime';
 import { iteratorCapability } from '../traits';
-import { shallow, type Type } from '../types';
+import { sameType, shallow, type Type } from '../types';
 import {
   CellPlace,
   DONE,
@@ -196,6 +196,11 @@ export function nextOf(iter: IterValue): Next {
 export function nextForFold(iter: IterValue): Next {
   if (iter.peeked?.length) return iter.peeked.shift() as Next;
   return (iter.foldNext ?? iter.next)();
+}
+
+export function extendedValue(target: Type, item: Type): (value: Value) => Value {
+  const source = normalize(shallow(item));
+  return source.kind === 'ref' && sameType(source.target, target) && needsCopy(target) ? copyValue : (value) => value;
 }
 
 function nthBack(ctx: NativeContext, iter: IterValue, n: bigint): Next {
@@ -1452,6 +1457,17 @@ export function heapify(heap: Value[], type: Type): Value[] {
   const end = heap.length;
   for (let index = Math.floor(end / 2) - 1; index >= 0; index--) siftDownRange(heap, index, end, type);
   return heap;
+}
+
+export function rebuildHeapTail(heap: Value[], start: number, type: Type): void {
+  const tail = heap.length - start;
+  if (tail === 0) return;
+  const levels = heap.length <= 2048 ? Math.floor(Math.log2(start)) : 11;
+  if (start < tail || 2 * heap.length < tail * levels) {
+    heapify(heap, type);
+  } else {
+    for (let index = start; index < heap.length; index++) siftUp(heap, index, type);
+  }
 }
 
 function siftDownRange(heap: Value[], start: number, end: number, type: Type): void {

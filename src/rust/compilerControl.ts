@@ -10,11 +10,11 @@ import { DONE, type IterValue, UNIT_VALUE, type Value } from './values';
 type ExprOf<K extends Expr['kind']> = Extract<Expr, { kind: K }>;
 type ConditionalEval = (frame: Frame, onMatch: () => void) => boolean;
 
-export function compileIf(c: Compiler, expr: ExprOf<'if'>): Eval {
+export function compileIf(c: Compiler, expr: ExprOf<'if'>, asStatement: boolean): Eval {
   const cond = compileCondition(c, expr.cond);
   const condLocals = expr.cond.kind === 'let' ? c.patternSlots(expr.cond.pattern) : [];
-  const then = c.compileBlock(expr.consequent);
-  const otherwise = expr.else ? c.value(expr.else) : undefined;
+  const then = c.compileBlock(expr.consequent, asStatement);
+  const otherwise = expr.else && (asStatement ? c.statement(expr.else) : c.value(expr.else));
   return (frame) => {
     frame.runtime.spend();
     let result: Value = UNIT_VALUE;
@@ -30,11 +30,11 @@ export function compileIf(c: Compiler, expr: ExprOf<'if'>): Eval {
   };
 }
 
-export function compileMatch(c: Compiler, expr: ExprOf<'match'>): Eval {
+export function compileMatch(c: Compiler, expr: ExprOf<'match'>, asStatement: boolean): Eval {
   const scrutinee = compilePatternInput(c, expr.scrutinee);
   const arms = expr.arms.map((arm) => {
     const matcher = c.compileMatcher(arm.pattern);
-    const body = c.value(arm.body);
+    const body = asStatement ? c.statement(arm.body) : c.value(arm.body);
     const slots = c.patternSlots(arm.pattern);
     const takeAll = takesWhole(c, expr.scrutinee, arm.pattern);
     return { matcher, body, slots, takeAll };
@@ -58,7 +58,7 @@ export function compileMatch(c: Compiler, expr: ExprOf<'match'>): Eval {
 }
 
 export function compileLoop(c: Compiler, expr: ExprOf<'loop'>): Eval {
-  const body = c.compileBlock(expr.body);
+  const body = c.compileBlock(expr.body, true);
   const label = expr.label;
   return (frame) => {
     for (;;) {
@@ -73,7 +73,7 @@ export function compileWhile(c: Compiler, expr: ExprOf<'while'>): Eval {
   const cond = compileCondition(c, expr.cond);
   const letPattern = expr.cond.kind === 'let' ? expr.cond.pattern : undefined;
   const condLocals = letPattern ? c.patternSlots(letPattern) : [];
-  const body = c.compileBlock(expr.body);
+  const body = c.compileBlock(expr.body, true);
   const label = expr.label;
   const row = letPattern ? c.stepRow(expr.span) : undefined;
   const answered = bindsAnswer(letPattern);
@@ -101,7 +101,7 @@ export function compileFor(c: Compiler, expr: ExprOf<'for'>): Eval {
   const fromType = runtimeType(loopInfo.from);
   const bind = c.compileOwnedBinder(expr.pattern);
   const patternSlots = c.patternSlots(expr.pattern);
-  const body = c.compileBlock(expr.body);
+  const body = c.compileBlock(expr.body, true);
   const label = expr.label;
   const row = c.stepRow(expr.span);
   const answered = bindsAnswer(expr.pattern);

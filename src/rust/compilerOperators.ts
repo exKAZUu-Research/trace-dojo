@@ -67,15 +67,21 @@ function comparison(expr: ExprOf<'binary'>, left: Eval, right: Eval): Eval {
   const { op } = expr;
   const staticType = resolve(expr.left.ty!, true);
   const compareType = runtimeType(stringish(staticType) ?? staticType);
-  if (op === '==' || op === '!=') {
-    const equal = op === '==';
-    const rhsType = runtimeType(resolve(expr.right.ty!, true));
-    return (frame) => valuesEqual(compareType(frame), left(frame), right(frame), rhsType(frame)) === equal;
-  }
-  const method = { '<': 'lt', '<=': 'le', '>': 'gt', '>=': 'ge' } as const;
-  const relation = method[op as keyof typeof method];
   const rhs = runtimeType(resolve(expr.right.ty!, true));
-  return (frame) => testPartialOrder(relation, compareType(frame), left(frame), right(frame), rhs(frame));
+  const methods = { '<': 'lt', '<=': 'le', '>': 'gt', '>=': 'ge' } as const;
+  const ordering = methods[op as keyof typeof methods];
+  const operands = [left, right];
+  return (frame) => {
+    const values = evaluateValues(frame, operands);
+    const [a, b] = values;
+    return frame.runtime.withRoots(values, () => {
+      const type = compareType(frame);
+      const rightType = rhs(frame);
+      return ordering
+        ? testPartialOrder(ordering, type, a, b, rightType)
+        : valuesEqual(type, a, b, rightType) === (op === '==');
+    });
+  };
 }
 
 function arithmetic(expr: ExprOf<'binary'>, left: Eval, right: Eval, rightCoerced: Eval): Eval {

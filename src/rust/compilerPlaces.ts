@@ -223,11 +223,12 @@ export function sliceRange(container: Value, range: RangeValue | undefined, span
   const length = sliceLength(container);
   const start = range?.sliceStart() ?? 0;
   const end = range?.sliceEnd() ?? length;
+  if (start > length) {
+    const index = range!.exhausted ? (range!.end as bigint) + 1n : (range!.start as bigint);
+    throw new RustPanic(`range start index ${index} out of range for slice of length ${length}`, span);
+  }
   if (range?.inclusive && range.end !== undefined && (range.end as bigint) === 0xff_ff_ff_ff_ff_ff_ff_ffn) {
     throw new RustPanic('attempted to index slice up to maximum usize', span);
-  }
-  if (range?.end === undefined && start > length) {
-    throw new RustPanic(`range start index ${range!.start as bigint} out of range for slice of length ${length}`, span);
   }
   if (start > end) throw new RustPanic(`slice index starts at ${start} but ends at ${end}`, span);
   if (end > length) {

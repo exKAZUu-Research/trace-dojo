@@ -170,8 +170,7 @@ export function floatArith(op: string, a: number, b: number, f32: boolean): numb
 }
 
 /** `value as target`, with Rust's saturating float-to-int conversion and wrapping int conversions. */
-export function castValue(value: Value, from: Type, to: Type): Value {
-  const source = normalize(shallow(from));
+export function castValue(value: Value, to: Type): Value {
   const target = normalize(shallow(to));
   if (target.kind === 'int') {
     const cast = castToInt(value, target.name);
@@ -182,7 +181,6 @@ export function castValue(value: Value, from: Type, to: Type): Value {
     return target.name === 'f32' ? Math.fround(value as number) : (value as number);
   }
   if (target.kind === 'char') return String.fromCodePoint(Number(value as bigint));
-  void source;
   return value;
 }
 

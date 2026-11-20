@@ -1,13 +1,14 @@
-// code-gauge-allow-file fileNcss 597 -- Shares Rust constant propagation between diagnostics and pattern coverage.
+// code-gauge-allow-file fileNcss 598 -- Shares Rust constant propagation between diagnostics and pattern coverage.
 
 import type { ExecutionBudget } from '../interpreter/limits';
 import type { Annotations, LocalVar, PathRes } from './annotations';
 import type { Block, Condition, Expr, MatchArm, Pattern, Stmt } from './ast';
 import { forEachDirect, patternBindings } from './astWalk';
+import { constInteger } from './constExpressions';
 import { type PropagationMode, propagationModes } from './constPropagation';
 import { FLOAT_LIMITS } from './floatLimits';
 import { normalize } from './infer';
-import { compileError, constInteger } from './items';
+import { compileError } from './items';
 import { castValue, floatArith, wrap } from './ops';
 import {
   type ConstDef,
@@ -365,7 +366,7 @@ export class ConstLint {
   private cast(expr: Extract<Expr, { kind: 'cast' }>): Known | undefined {
     const operand = this.expr(expr.operand);
     if (operand === undefined || typeof operand === 'object' || !intTypeOf(expr.ty)) return undefined;
-    return castValue(operand, resolve(expr.operand.ty!, true), resolve(expr.ty!, true)) as Known;
+    return castValue(operand, resolve(expr.ty!, true)) as Known;
   }
 
   private tupleOrArray(expr: Extract<Expr, { kind: 'tuple' | 'array' }>): Known | undefined {

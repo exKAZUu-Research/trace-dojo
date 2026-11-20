@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 495 -- One rule per trait of the standard library.
+// code-gauge-allow-file fileNcss 496 -- One rule per trait of the standard library.
 import { collectionKeyAnswer } from './collectionBounds';
 import { normalize } from './infer';
 import { supportsDebug } from './iterDebug';
@@ -137,8 +137,8 @@ const RULES: Record<string, Rule> = {
   RangeBounds: rangeBounds,
   Borrow: borrow,
   FromIterator: ({ solver, t, ref }) => fromIterator(solver, t, ref.args[0]),
-  DoubleEndedIterator: ({ t }) => iteratorCapability(t, 'back'),
-  ExactSizeIterator: ({ t }) => iteratorCapability(t, 'exact'),
+  DoubleEndedIterator: (goal) => iteratorWithCapability(goal, 'back'),
+  ExactSizeIterator: (goal) => iteratorWithCapability(goal, 'exact'),
   DoubleEndedSearcher: ({ t }) => doubleEndedSearcher(t),
   Iterator: iterator,
   IntoIterator: iterator,
@@ -513,6 +513,11 @@ function iterator({ solver, t, ref, name }: Goal): Answer {
   const item = intoIterItem(t);
   if (!item) return 'no';
   return !ref.item || solver.unifier.tryUnify(item, ref.item) ? 'yes' : 'no';
+}
+
+function iteratorWithCapability(goal: Goal, capability: 'back' | 'exact'): Answer {
+  const hasCapability = iteratorCapability(goal.t, capability);
+  return hasCapability === 'yes' && goal.ref.item ? iterator(goal) : hasCapability;
 }
 
 /** A collection of `T` extends from `T`s, and from `&T`s when `T` is `Copy`. */

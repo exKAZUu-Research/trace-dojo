@@ -16,7 +16,7 @@ import {
 } from '../values';
 import { checkTableCapacity } from './capacityNatives';
 import { defaultValue } from './core';
-import { arrayIter, mapIter, nextForFold, ownedIter, setIter } from './iterators';
+import { arrayIter, extendedValue, mapIter, nextForFold, ownedIter, setIter } from './iterators';
 import { sizeOf } from './layout';
 import { btreeSetOp, hashSetMembers, type SetOp } from './setOps';
 import { call, define, deref, libraryPanic, type Native, type NativeContext, none, option, some } from './support';
@@ -53,7 +53,7 @@ function reserveTable(ctx: NativeContext, collection: MapValue | SetValue, addit
   return resize(collection, (table) => table.reserve(Number(additional as bigint)));
 }
 
-function resize(collection: MapValue | SetValue, change: (table: TableMap<string, unknown>) => void): Value {
+function resize(collection: MapValue | SetValue, change: (table: TableMap<unknown, unknown>) => void): Value {
   if (collection.entries.table) change(collection.entries.table);
   return UNIT_VALUE;
 }
@@ -307,6 +307,7 @@ function setNatives(sorted: boolean): Record<string, (args: Value[], ctx: Native
     extend: ([self, iter], ctx) => {
       const s = set(self);
       const iterator = deref(iter) as IterValue;
+      const convert = extendedValue(ctx.typeArgs[0], ctx.typeArgs[1]);
       for (;;) {
         ctx.runtime.spend();
         const item = nextForFold(iterator);
@@ -314,7 +315,7 @@ function setNatives(sorted: boolean): Record<string, (args: Value[], ctx: Native
         const hash = entryKey(ctx, s.entries, item);
         if (s.entries.has(hash)) continue;
         ctx.runtime.allocate(1);
-        s.entries.set(hash, item);
+        s.entries.set(hash, convert(item));
       }
       return UNIT_VALUE;
     },

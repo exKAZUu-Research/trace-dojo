@@ -113,7 +113,8 @@ export function resolveValuePath(c: Checker, path: PathAst, span: Span): PathRes
     const fn = owner.def.methods.get(last.name);
     if (!fn) compileError(span, `トレイト ${owner.def.name} にメソッド ${last.name} がありません。`);
     const typeArgs = [
-      ...fn.params.slice(0, fn.parentParamCount).map(() => freshVar()),
+      freshVar(),
+      ...owner.typeArgs,
       ...typeArgsFor(c, fn.params.slice(fn.parentParamCount), last.args, span, last.name),
     ];
     return { kind: 'fn', fn, typeArgs };
@@ -288,7 +289,10 @@ function resolvePrefix(
   c: Checker,
   prefix: PathAst['segments'],
   span: Span
-): Exclude<TypeBinding, { kind: 'adt' | 'prim' | 'alias' }> | { kind: 'type'; type: Type } {
+):
+  | Extract<TypeBinding, { kind: 'mod' }>
+  | { kind: 'trait'; def: TraitDef; typeArgs: Type[] }
+  | { kind: 'type'; type: Type } {
   const names = prefix.map((segment) => segment.name);
   const last = prefix.at(-1)!;
   if (names.length === 1 && c.body.typeParams.has(names[0])) {
@@ -312,8 +316,11 @@ function resolvePrefix(
     case 'alias': {
       return { kind: 'type', type: binding.resolve() };
     }
-    case 'mod':
     case 'trait': {
+      const typeArgs = typeArgsFor(c, binding.def.params, last.args, span, binding.def.name);
+      return { ...binding, typeArgs };
+    }
+    case 'mod': {
       return binding;
     }
   }

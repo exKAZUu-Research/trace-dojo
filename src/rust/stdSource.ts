@@ -850,8 +850,8 @@ pub mod iter {
     pub trait Extend<A> {}
     pub trait Sum<A> {}
     pub trait Product<A> {}
-    pub trait DoubleEndedIterator {}
-    pub trait ExactSizeIterator {}
+    pub trait DoubleEndedIterator: Iterator {}
+    pub trait ExactSizeIterator: Iterator {}
     pub trait DoubleEndedSearcher {}
     pub mod shape {
         pub struct SliceIterShape;

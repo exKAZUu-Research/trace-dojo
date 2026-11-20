@@ -5,7 +5,6 @@ import type {
   ConstItem,
   Crate,
   EnumItem,
-  Expr,
   FnItem,
   Generics,
   ImplItem,
@@ -18,9 +17,9 @@ import type {
   UseItem,
   Visibility,
 } from './ast';
+import { constInteger } from './constExpressions';
 import { Unifier } from './infer';
 import { intoIterItem, iterationBound } from './iterTypes';
-import { wrap } from './ops';
 import { TraitSolver } from './traits';
 import {
   adt,
@@ -36,9 +35,6 @@ import {
   freshVar,
   type ImplDef,
   INT_NAMES,
-  intMax,
-  intMin,
-  type IntName,
   intType,
   NEVER,
   newOpaque,
@@ -898,62 +894,10 @@ function lookupValueEntry(
   return undefined;
 }
 
-/**
- * The value of an integer constant expression, as array lengths take them: literals, constants, integer types' `MIN`
- * and `MAX`, and arithmetic on them. Undefined for other expressions.
- */
-// code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of constant expression.
-// code-gauge-allow functionNcss 34 -- Each supported expression kind has its own integer evaluation rule.
-export function constInteger(expr: Expr, scope: TypeScope, resolving = new Set<ConstDef>()): bigint | undefined {
-  switch (expr.kind) {
-    case 'int': {
-      return expr.value;
-    }
-    case 'path': {
-      const { segments } = expr.path;
-      if (segments.length === 2 && (INT_NAMES as string[]).includes(segments[0].name)) {
-        const name = segments[0].name as IntName;
-        if (segments[1].name === 'MAX') return intMax(name);
-        if (segments[1].name === 'MIN') return intMin(name);
-      }
-      const found = integerConstant(expr.path, scope);
-      const value = found?.def.ast.value;
-      if (!found || !value || resolving.has(found.def) || resolving.size >= 64) return undefined;
-      const { def, selfType } = found;
-      resolving.add(def);
-      const result = constInteger(
-        value,
-        {
-          module: def.module,
-          params: new Map(def.impl?.params.map((param) => [param.name, param])),
-          selfType,
-        },
-        resolving
-      );
-      resolving.delete(def);
-      return result;
-    }
-    case 'cast': {
-      const value = constInteger(expr.operand, scope, resolving);
-      const type = lowerType(expr.type, scope);
-      return value !== undefined && type.kind === 'int' ? wrap(type.name, value) : undefined;
-    }
-    case 'unary': {
-      const operand = constInteger(expr.operand, scope, resolving);
-      return expr.op === '-' && operand !== undefined ? -operand : undefined;
-    }
-    case 'binary': {
-      const left = constInteger(expr.left, scope, resolving);
-      const right = constInteger(expr.right, scope, resolving);
-      return left === undefined || right === undefined ? undefined : integerOperation(expr.op, left, right);
-    }
-    default: {
-      return undefined;
-    }
-  }
-}
-
-function integerConstant(path: PathAst, scope: TypeScope): { def: ConstDef; selfType: Type | undefined } | undefined {
+export function lookupScalarConstant(
+  path: PathAst,
+  scope: TypeScope
+): { def: ConstDef; selfType: Type | undefined } | undefined {
   const { module } = scope;
   const prefix = path.segments.slice(0, -1);
   const name = path.segments.at(-1)!.name;
@@ -1007,22 +951,6 @@ export function lookupAssociatedConst(
     return { def, subst };
   }
   return undefined;
-}
-
-function integerOperation(op: string, left: bigint, right: bigint): bigint | undefined {
-  const operations: Record<string, () => bigint | undefined> = {
-    '+': () => left + right,
-    '-': () => left - right,
-    '*': () => left * right,
-    '/': () => (right === 0n ? undefined : left / right),
-    '%': () => (right === 0n ? undefined : left % right),
-    '<<': () => (right >= 0n && right < 128n ? left << right : undefined),
-    '>>': () => (right >= 0n && right < 128n ? left >> right : undefined),
-    '&': () => left & right,
-    '|': () => left | right,
-    '^': () => left ^ right,
-  };
-  return operations[op]?.();
 }
 
 /** Resolves every import of a module and the modules in it, reporting imports that name nothing, as rustc does. */
@@ -1405,7 +1333,9 @@ export function resolveTraitPath(path: PathAst, scope: TypeScope, self?: Type): 
   const args = traitArguments(def, last?.args ?? [], scope, path.span, self);
   let item: Type | undefined;
   for (const assoc of last?.bindings ?? []) {
-    const isIterator = def.builtin === 'Iterator' || def.builtin === 'IntoIterator';
+    const isIterator = ['Iterator', 'IntoIterator', 'DoubleEndedIterator', 'ExactSizeIterator'].includes(
+      def.builtin as string
+    );
     if (!isIterator || assoc.name !== 'Item' || item) {
       compileError(assoc.span, `関連型の指定（${assoc.name} = ...）は、この採点環境では使えません。`);
     }

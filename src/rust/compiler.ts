@@ -57,7 +57,7 @@ export interface CallSupport {
 }
 
 type ExprOf<K extends Expr['kind']> = Extract<Expr, { kind: K }>;
-type Reader<K extends Expr['kind']> = (c: Compiler, expr: ExprOf<K>) => Eval;
+type Reader<K extends Expr['kind']> = (c: Compiler, expr: ExprOf<K>, asStatement: boolean) => Eval;
 
 const READERS: { [K in Expr['kind']]: Reader<K> } = {
   int: readInt,
@@ -81,7 +81,7 @@ const READERS: { [K in Expr['kind']]: Reader<K> } = {
   array: readArray,
   arrayRepeat: readArrayRepeat,
   struct: (c, expr) => c.struct(expr),
-  block: (c, expr) => c.compileBlock(expr),
+  block: (c, expr, asStatement) => c.compileBlock(expr, asStatement),
   if: compileIf,
   match: compileMatch,
   loop: compileLoop,
@@ -136,7 +136,7 @@ export class Compiler {
         for (const [index, binder] of binders.entries()) binder(frame, args[index]);
       };
       const body = item.body!;
-      const run = this.compileBlock(body, false, true, !isUnit(resolve(def.ret, true)));
+      const run = this.compileBlock(body, isUnit(resolve(def.ret, true)), false);
       compiled.body = run;
       this.fillInfo(info, context);
     });
@@ -203,20 +203,9 @@ export class Compiler {
   // -------------------------------------------------------------------------------------------------------------------
   // Blocks and statements
 
-  /**
-   * Compiles a block. A function's own block keeps its variables when it ends, so that the trace can report `main`'s
-   * final variables; a function body's last expression is its result, which records no step unless the function
-   * returns nothing, where it is a statement.
-   */
-  compileBlock(block: Block, clearsLocals = true, isFnBody = false, returnsValue = false): Eval {
+  compileBlock(block: Block, tailAsStatement = false, clearsLocals = true): Eval {
     const stmts = block.stmts.map((stmt) => this.compileStmt(stmt));
-    let tail: Eval | undefined;
-    if (block.tail) {
-      const expr = block.tail;
-      const value = this.value(expr);
-      const isStatementLike = !isBlockLike(expr) && !(isFnBody && returnsValue) && !isDiverging(expr);
-      tail = isStatementLike ? this.withStep(expr.span, value, onlyCalls(expr, this.annotations)) : value;
-    }
+    const tail = block.tail && (tailAsStatement ? this.statement(block.tail) : this.value(block.tail));
     const declared = block.stmts.flatMap((stmt) => (stmt.kind === 'let' ? this.patternSlots(stmt.pattern) : []));
     const count = stmts.length;
     const run: Eval = (frame) => {
@@ -233,20 +222,24 @@ export class Compiler {
     };
   }
 
+  statement(expr: Expr, span = expr.span): Eval {
+    const value = this.value(expr, true);
+    if (isBlockLike(expr) || isDiverging(expr)) return value;
+    return this.withStep(span, value, onlyCalls(expr, this.annotations));
+  }
+
   private compileStmt(stmt: Stmt): Eval {
     switch (stmt.kind) {
       case 'let': {
         return this.compileLet(stmt);
       }
       case 'expr': {
-        const value = this.value(stmt.expr);
-        const run: Eval = (frame) => {
+        const value = this.statement(stmt.expr, stmt.span);
+        return (frame) => {
           frame.runtime.spend();
           value(frame);
           return UNIT_VALUE;
         };
-        if (isBlockLike(stmt.expr) || isDiverging(stmt.expr)) return run;
-        return this.withStep(stmt.span, run, onlyCalls(stmt.expr, this.annotations));
       }
       case 'empty': {
         return () => UNIT_VALUE;
@@ -267,7 +260,7 @@ export class Compiler {
     const init = this.value(stmt.init);
     if (stmt.else) {
       const matcher = this.compileMatcher(stmt.pattern);
-      const elseBlock = this.compileBlock(stmt.else);
+      const elseBlock = this.compileBlock(stmt.else, true);
       const run: Eval = (frame) => {
         frame.runtime.spend();
         const value = init(frame);
@@ -329,7 +322,7 @@ export class Compiler {
     const input = compilePatternInput(this, stmt.init!);
     const matcher = this.compileMatcher(stmt.pattern);
     const takeAll = takesWhole(this, stmt.init!, stmt.pattern);
-    const elseBlock = stmt.else && this.compileBlock(stmt.else);
+    const elseBlock = stmt.else && this.compileBlock(stmt.else, true);
     const run: Eval = (frame) => {
       frame.runtime.spend();
       const { value, place } = input(frame);
@@ -378,8 +371,8 @@ export class Compiler {
   // Expressions
 
   /** An expression's value where it is moved or copied: a `Copy` aggregate read from a place is copied. */
-  value(expr: Expr): Eval {
-    const read = this.read(expr);
+  value(expr: Expr, asStatement = false): Eval {
+    const read = this.read(expr, asStatement);
     const coercion = this.annotations.coercions.get(expr);
     const type = resolve(expr.ty ?? { kind: 'tuple', elems: [] }, true);
     if (this.annotations.referenceArguments.has(expr)) return coercion ? this.coerce(read, coercion, expr) : read;
@@ -456,8 +449,8 @@ export class Compiler {
   }
 
   /** An expression's value as it is: a place's value without copying it, as borrows and reads see it. */
-  read(expr: Expr): Eval {
-    return (READERS[expr.kind] as Reader<Expr['kind']>)(this, expr);
+  read(expr: Expr, asStatement = false): Eval {
+    return (READERS[expr.kind] as Reader<Expr['kind']>)(this, expr, asStatement);
   }
 
   // code-gauge-allow functionNcss 39 -- One case per kind of expression, statement, or pattern.
@@ -574,7 +567,8 @@ export class Compiler {
       compiled.bind = (frame, args) => {
         for (const [index, binder] of binders.entries()) binder(frame, args[index]);
       };
-      compiled.body = this.value(expr.body);
+      const body = expr.body;
+      compiled.body = body.ty && isUnit(resolve(body.ty, true)) ? this.statement(body) : this.value(body);
       this.fillInfo(functionInfo, context);
     });
     // Captures: places of the enclosing function's variables, or copies of them for a `move` closure.
@@ -727,9 +721,8 @@ function readRef(c: Compiler, expr: ExprOf<'ref'>): Eval {
 
 function readCast(c: Compiler, expr: ExprOf<'cast'>): Eval {
   const operand = c.value(expr.operand);
-  const from = resolve(expr.operand.ty!, true);
   const to = resolve(expr.ty!, true);
-  return (frame) => castValue(operand(frame), from, to);
+  return (frame) => castValue(operand(frame), to);
 }
 
 function readRange(c: Compiler, expr: ExprOf<'range'>): Eval {

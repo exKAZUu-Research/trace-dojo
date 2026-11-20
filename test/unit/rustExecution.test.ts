@@ -4158,3 +4158,156 @@ test('uses Rust layouts for function items, coerced pointers, and closure captur
   );
   expect(executeProgram('rust', source)).toMatchObject({ kind: 'executed', stdout: '0 0 8 8 8 2\n' });
 });
+
+test('copies adjusted Rust by-value method receivers reached through references', () => {
+  const source = rustMain(
+    `let shared = Item { value: 1 };
+    let mut mutable = Item { value: 2 };
+    let boxed = Box::new(Item { value: 3 });
+    (&shared).overwrite();
+    (&mut mutable).overwrite();
+    (&boxed).overwrite();
+    println!("{} {} {}", shared.value, mutable.value, boxed.value);`,
+    `#[derive(Clone, Copy)]
+     struct Item { value: i32 }
+     impl Item { fn overwrite(mut self) { self.value = 9; } }`
+  );
+  expect(executeProgram('rust', source)).toMatchObject({ kind: 'executed', stdout: '1 2 3\n' });
+});
+
+test('bulk-rebuilds extended Rust heaps and copies borrowed collection elements', () => {
+  const source = rustMain(
+    `let mut h = BinaryHeap::new();
+    h.extend([1, 2, 3, 4]);
+    println!("{:?}", h.into_vec());
+    let mut source = [Item(1)];
+    let mut h: BinaryHeap<Item> = BinaryHeap::new();
+    let mut t: BTreeSet<Item> = BTreeSet::new();
+    let mut s: HashSet<Item> = HashSet::new();
+    h.extend(source.iter()); t.extend(source.iter()); s.extend(source.iter());
+    source[0].0 = 9;
+    println!("{:?} {:?} {:?}", h, t, s);`,
+    `use std::collections::{BinaryHeap, BTreeSet, HashSet};
+      #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+      struct Item(i32);`
+  );
+  expect(executeProgram('rust', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '[4, 2, 3, 1]\n[Item(1)] {Item(1)} {Item(1)}\n',
+  });
+});
+
+test('keeps Rust comparison operands alive while evaluating the other argument', () => {
+  for (const operator of ['==', '<']) {
+    const source = rustMain(
+      `let observer = Turtle::new(1, 1);
+      let result = Holder(Turtle::new(1, 2)) ${operator} create(&observer);
+      println!("{}", result);`,
+      `struct Holder(Turtle);
+       impl PartialEq for Holder { fn eq(&self, _: &Self) -> bool { true } }
+       impl PartialOrd for Holder {
+         fn partial_cmp(&self, _: &Self) -> Option<std::cmp::Ordering> { Some(std::cmp::Ordering::Less) }
+       }
+       fn create(observer: &Turtle) -> Holder {
+         println!("{}", observer.can_move_forward());
+         Holder(Turtle::new(5, 5))
+       }`
+    );
+    expect(executeProgram('rust', source)).toMatchObject({ kind: 'executed', stdout: 'false\ntrue\n' });
+  }
+});
+
+test('casts Rust scalar constants before using them as array lengths', () => {
+  const source = rustMain(
+    `let a: [i32; true as usize] = [7];
+    let b: [i32; 1.9_f64 as usize] = [8];
+    let c = [0; MARK as usize];
+    let d = [0; (SCALE as u8) as usize];
+    let e = [0; (-1.5_f32) as usize];
+    println!("{} {} {} {} {}", a.len(), b.len(), c.len(), d.len(), e.len());`,
+    "const MARK: char = 'a'; const SCALE: f32 = 1.99999999;"
+  );
+  expect(executeProgram('rust', source)).toMatchObject({ kind: 'executed', stdout: '1 1 97 2 0\n' });
+});
+
+test('checks Rust slice start bounds before subsequent range tests', () => {
+  for (const [range, start] of [
+    ['3..0', '3'],
+    ['2..2', '2'],
+    ['2..=2', '2'],
+    ['usize::MAX..=usize::MAX', '18446744073709551615'],
+  ]) {
+    const source = rustMain(`let arr = [1]; let _ = &arr[${range}];`);
+    expect(executeProgram('rust', source)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: expect.stringContaining(`range start index ${start} out of range for slice of length 1`),
+    });
+  }
+});
+
+test('uses Rust generic iterator bounds for adapter state', () => {
+  const source = rustMain(
+    `println!("{:?} {:?}", cycle(0..2), backwards(0..3));`,
+    `fn cycle<I: Iterator<Item = i32> + Clone>(i: I) -> Vec<i32> { i.cycle().take(4).collect() }
+     fn backwards<I: DoubleEndedIterator<Item = i32>>(i: I) -> Vec<i32> { i.rev().collect() }`
+  );
+  expect(executeProgram('rust', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '[0, 1, 0, 1] [2, 1, 0]\n',
+  });
+  for (const method of ['.rev()', '.cycle()']) {
+    const invalid = rustMain('', `fn adapt<I: Iterator<Item = i32>>(i: I) { let _ = i${method}; }`);
+    expect(executeProgram('rust', invalid)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
+test('uses both trait and method type arguments in Rust qualified paths', () => {
+  const source = rustMain(
+    `let c: char = std::convert::TryFrom::<u32>::try_from(0x41).unwrap();
+    let n = Factory::<i32>::produce::<i64>(&Maker, 1);
+    println!("{} {}", c, n);`,
+    `trait Factory<T> { fn produce<U: Default>(&self, value: T) -> U { U::default() } }
+     struct Maker;
+     impl Factory<i32> for Maker {}`
+  );
+  expect(executeProgram('rust', source)).toMatchObject({ kind: 'executed', stdout: 'A 0\n' });
+});
+
+test('requires Debug on abstract Rust conversion errors before unwrapping', () => {
+  for (const item of [
+    'fn convert<T: TryFrom<i32>>(value: i32) -> T { T::try_from(value).unwrap() }',
+    'fn convert<T: TryInto<f64>>(value: T) -> f64 { value.try_into().unwrap() }',
+  ])
+    expect(executeProgram('rust', rustMain('', item))).toMatchObject({ kind: 'compileError' });
+  const source = rustMain(
+    'println!("{}", convert::<f64>(7));',
+    'fn convert<T: From<i32>>(value: i32) -> T { T::try_from(value).unwrap() }'
+  );
+  expect(executeProgram('rust', source)).toMatchObject({ kind: 'executed', stdout: '7\n' });
+});
+
+test('uses Rust key equality for hash candidates and retains it after deletion or cloning', () => {
+  const source = rustMain(
+    `let mut map = HashMap::new();
+    map.insert(Key(1), 10);
+    println!("{:?}", map.insert(Key(1), 20));
+    let mut copy = map.clone();
+    println!("{:?}", copy.remove(&Key(1)));
+    println!("{:?}", copy.get(&Key(1)));
+    println!("{:?}", map.get(&Key(1)));
+    let mut set = HashSet::new();
+    set.insert(Key(3));
+    println!("{}", set.contains(&Key(3))); set.clear();
+    println!("{}", set.contains(&Key(3)));`,
+    `use std::collections::{HashMap, HashSet};
+     #[derive(Clone, Hash, Eq)]
+     struct Key(i32);
+     impl PartialEq for Key {
+       fn eq(&self, other: &Self) -> bool { print!("eq "); self.0 == other.0 }
+     }`
+  );
+  expect(executeProgram('rust', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'eq Some(10)\neq Some(20)\nNone\neq Some(20)\neq true\nfalse\n',
+  });
+});

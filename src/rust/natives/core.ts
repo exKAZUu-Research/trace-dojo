@@ -414,7 +414,7 @@ export function convert(ctx: NativeContext, value: Value, from: Type, to: Type):
   const target = normalize(shallow(to));
   if (target.kind === 'float' && source.kind === 'bool') return deref(value) ? 1 : 0;
   if (target.kind === 'int' || target.kind === 'float' || target.kind === 'char')
-    return castValue(deref(value), source, target);
+    return castValue(deref(value), target);
   if (target.kind === 'adt') {
     switch (target.def.builtin) {
       case 'String': {

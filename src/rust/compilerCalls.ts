@@ -3,9 +3,9 @@ import type { Expr } from './ast';
 import type { Compiler, Eval } from './compiler';
 import { construct, derefAll, evaluateValues, stripRefs } from './compilerCommon';
 import { placeThrough, valueThrough } from './compilerPlaces';
+import { derefOnce } from './methods';
 import { copyValue, needsCopy } from './ops';
 import { runtimeType } from './runtimeTypes';
-import { resolve } from './types';
 import { CellPlace, DynValue } from './values';
 
 type ExprOf<K extends Expr['kind']> = Extract<Expr, { kind: K }>;
@@ -83,9 +83,15 @@ function compileReceiver(c: Compiler, expr: ExprOf<'methodCall'>, method: Method
   const byValue = adjust.autoref === 'none' && method.fn.selfMode === 'value' && adjust.derefs.length === 0;
   const read = byValue ? c.value(expr.receiver) : valueThrough(c, expr.receiver, adjust.derefs);
   if (iterFrom) return (frame) => c.support.toIter(read(frame), iterFrom(frame));
-  const selfType = resolve(expr.receiver.ty!, true);
-  if (method.fn.selfMode === 'value' && adjust.autoref === 'none' && adjust.derefs.length > 0 && needsCopy(selfType)) {
-    return (frame) => copyValue(read(frame));
+  if (method.fn.selfMode === 'value' && adjust.autoref === 'none' && adjust.derefs.length > 0) {
+    let type = expr.receiver.ty!;
+    for (let index = 0; index < adjust.derefs.length; index++) type = derefOnce(c.program, type)?.type ?? type;
+    const adjusted = runtimeType(type);
+    return (frame) => {
+      const value = read(frame);
+      const self = adjusted(frame);
+      return needsCopy(self) && c.isCopy(self) ? copyValue(value) : value;
+    };
   }
   return read;
 }

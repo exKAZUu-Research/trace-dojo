@@ -110,6 +110,7 @@ function tryFromErrorType(solver: TraitSolver, source: Type, target: Type): Type
   if (hasVars(s) || hasVars(t)) return undefined;
   const { program } = solver;
   if (intoConversion(solver, s, t) === 'yes') return program.builtinType('Infallible');
+  if (isAbstract(s) || isAbstract(t)) return undefined;
   if (t.kind === 'char') return program.builtinType('CharTryFromError');
   if (s.kind === 'char') return program.builtinType('TryFromCharError');
   return program.builtinType('TryFromIntError');

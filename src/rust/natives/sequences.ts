@@ -28,12 +28,14 @@ import { dequeDrain, dequeIter, dequeSlices, withDequeHead } from './dequeHead';
 import {
   arrayIter,
   collectVec,
+  extendedValue,
   heapPop,
   heapPush,
   isTrustedLen,
   nextForFold,
   nextOf,
   ownedIter,
+  rebuildHeapTail,
   sliceIter,
 } from './iterators';
 import { layoutOf, sizeOf } from './layout';
@@ -54,11 +56,6 @@ import {
   placeOf,
   some,
 } from './support';
-
-/** The array a `&mut self` or `&self` receiver of a `Vec` holds. */
-function isRefType(type: Type | undefined): boolean {
-  return type !== undefined && shallow(type).kind === 'ref';
-}
 
 function vec(self: Value): Value[] {
   return deref(self) as Value[];
@@ -542,8 +539,7 @@ const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
     const items = vec(self);
     const iterator = deref(iter) as IterValue;
     const next = isTrustedLen(ctx.typeArgs[2]) ? nextForFold : nextOf;
-    // Extending from references copies the `Copy` values they refer to.
-    const fromRefs = isRefType(ctx.typeArgs[1]);
+    const convert = extendedValue(elemType(ctx), ctx.typeArgs[1]);
     const room = extendRoom(ctx, items, iterator, ctx.typeArgs[2]);
     for (;;) {
       ctx.runtime.spend();
@@ -551,7 +547,7 @@ const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
       if (item === DONE) break;
       room();
       ctx.runtime.allocate(1);
-      items.push(fromRefs ? copyValue(deref(item)) : item);
+      items.push(convert(item));
     }
     return UNIT_VALUE;
   },
@@ -740,15 +736,9 @@ const heapNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> 
   },
   extend: ([self, iter], ctx) => {
     const items = vec(self);
-    const iterator = deref(iter) as IterValue;
-    const next = isTrustedLen(ctx.typeArgs[2]) ? nextForFold : nextOf;
-    for (;;) {
-      ctx.runtime.spend();
-      const item = next(iterator);
-      if (item === DONE) break;
-      ctx.runtime.allocate(1);
-      heapPush(items, item, elemType(ctx));
-    }
+    const start = items.length;
+    vecNatives.extend([self, iter], ctx);
+    rebuildHeapTail(items, start, elemType(ctx));
     return UNIT_VALUE;
   },
   into_iter: ([self], ctx) => ownedIter(vec(self), elemType(ctx)),
