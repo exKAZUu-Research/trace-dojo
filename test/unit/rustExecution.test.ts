@@ -454,6 +454,17 @@ fn main() {
   });
 });
 
+test.each([
+  [`fn main() { let _ = "日本é𐐀🦀́"; dbg!(1); let v = vec![0]; println!("{}", v[5]); }`, '1:31', '1:75'],
+  ['fn main() {\n\tlet _ = "日本語"; let v = vec![0]; dbg!(1); println!("{}", v[5]);\n}', '2:34', '2:65'],
+])('Rust uses scalar columns for dbg! and display columns for panics: %s', (program, dbg, panic) => {
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stderr: `[src/main.rs:${dbg}] 1 = 1\n`,
+    uncaughtException: expect.stringContaining(`panicked at src/main.rs:${panic}:\n`),
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

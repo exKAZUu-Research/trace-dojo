@@ -1,4 +1,5 @@
 import type { Node } from '@willbooster/web-tree-sitter';
+import { eastAsianWidth } from 'get-east-asian-width';
 
 import { CompileError } from '../interpreter/diagnostics';
 import type { Attributes, Block, Expr, Item, PathAst, Pattern, Span, TypeAst } from './ast';
@@ -16,15 +17,17 @@ export function syntaxError(span: Span, message: string): never {
 
 /** The state and the node helpers that every part of the conversion from the syntax tree to the AST shares. */
 export abstract class SyntaxConverter {
-  private readonly lines: string[];
+  private readonly columns = new Map<number, SourceColumns>();
 
   constructor(
-    private readonly source: string,
+    source: string,
     protected readonly reparse: Reparse,
     /** Whether the source is the standard library's declarations, which may leave out bodies and values. */
     protected readonly isStd = false
   ) {
-    this.lines = source.split('\n');
+    for (const [row, line] of source.split('\n').entries()) {
+      if (/[\t\u0080-\uFFFF]/.test(line)) this.columns.set(row, measureColumns(line));
+    }
   }
 
   abstract expr(node: Node): Expr;
@@ -38,8 +41,9 @@ export abstract class SyntaxConverter {
 
   span(node: Node): Span {
     const { row, column } = node.startPosition;
-    const line = this.lines[row] ?? '';
-    return { row, col: line.slice(0, column).length + 1 };
+    const columns = this.columns.get(row);
+    if (!columns) return { row, col: column + 1 };
+    return { row, col: columns.scalars[column] + 1, displayCol: columns.display[column] + 1 };
   }
 
   protected onlyChild(node: Node): Node {
@@ -58,6 +62,40 @@ export abstract class SyntaxConverter {
     if (!child) syntaxError(this.span(node), '書き方に誤りがあります。');
     return child;
   }
+}
+
+interface SourceColumns {
+  scalars: Uint32Array;
+  display: Uint32Array;
+}
+
+function measureColumns(line: string): SourceColumns {
+  const scalars = new Uint32Array(line.length + 1);
+  const display = new Uint32Array(line.length + 1);
+  let offset = 0;
+  let count = 0;
+  let width = 0;
+  for (const char of line) {
+    offset += char.length;
+    scalars[offset] = ++count;
+    width += displayWidth(char);
+    display[offset] = width;
+  }
+  return { scalars, display };
+}
+
+// rustc makes bidi controls visible and counts each scalar using unicode-width's non-CJK rules.
+const VISIBLE_CONTROLS = /[\u202A-\u202E\u2066-\u2069]/u;
+const ZERO_WIDTH =
+  /[\p{Default_Ignorable_Code_Point}\p{Grapheme_Extend}\u0605\u070F\u0890-\u0891\u08E2\u0D4E\u1160-\u11FF\uA8FA\uD7B0-\uD7C6\uD7CB-\uD7FB\u{111C2}-\u{111C3}\u{113D1}\u{1193F}\u{11941}\u{11A84}-\u{11A89}\u{11D46}\u{11F02}]/u;
+
+function displayWidth(char: string): number {
+  if (char === '\t') return 4;
+  if (char === '\u17D8') return 3;
+  if (char === '\u115F' || char === '\u17A4') return 2;
+  if (char === '\u2D7F' || VISIBLE_CONTROLS.test(char)) return 1;
+  if (ZERO_WIDTH.test(char)) return 0;
+  return eastAsianWidth(char.codePointAt(0)!);
 }
 
 /** Words that edition 2024 reserves, which tree-sitter's grammar still reads as names. */

@@ -1,9 +1,10 @@
 import type { Type } from './types';
 
-/** A position in the source: a 0-based row and the 1-based column (in characters) that rustc reports. */
+/** A 0-based source row and the 1-based scalar column used by `dbg!`. Panic locations use the display column. */
 export interface Span {
   row: number;
   col: number;
+  displayCol?: number;
 }
 
 export interface Crate {

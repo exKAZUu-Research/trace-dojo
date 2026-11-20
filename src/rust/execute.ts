@@ -29,13 +29,13 @@ const RUSTC_COMMIT = '58cf8f9c35b355199727627d07ae34a4e2846d67';
 
 /** The text Rust prints when a panic ends the program. */
 export function describePanic(panic: RustPanic): string {
-  const { row, col } = panic.span;
+  const { row, col, displayCol } = panic.span;
   // A location in a dependency of the standard library is a full path (`/rust/deps/...`).
   const location = panic.libraryLocation?.startsWith('/')
     ? panic.libraryLocation
     : panic.libraryLocation
       ? `/rustc/${RUSTC_COMMIT}/library/${panic.libraryLocation}`
-      : `src/main.rs:${row + 1}:${col}`;
+      : `src/main.rs:${row + 1}:${displayCol ?? col}`;
   return `thread 'main' (1) panicked at ${location}:\n${panic.message}\nnote: run with \`RUST_BACKTRACE=1\` environment variable to display a backtrace`;
 }
 
