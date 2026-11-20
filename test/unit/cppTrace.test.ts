@@ -530,6 +530,26 @@ int main() {
   }
 );
 
+test('ends the lifetime of a string temporary inserted into a stream with its full expression', () => {
+  const program = `#include <iostream>
+#include <string>
+const char* saved;
+std::string make() {
+  std::string text = "hello";
+  saved = text.c_str();
+  return text;
+}
+int main() {
+  std::cout << make();
+  std::cout << ':' << saved[0];
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'hello:',
+    uncaughtException: '有効期間が終わった変数（またはオブジェクト）を読み書きしました。',
+  });
+});
+
 test('charges the storage of the message buffer that what() creates', () => {
   const program = `#include <stdexcept>
 #include <string>

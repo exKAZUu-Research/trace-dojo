@@ -582,8 +582,9 @@ export class Streams {
       return (frame, stream) => (run(frame) as ManipulatorValue).apply(stream, frame);
     }
     if (type.kind === 'class' && type.cls === this.library.stringClass) {
-      const run = compiler.rvalue(right).run;
-      return (frame, stream) => stream.writeField(frame, (run(frame) as StringValue).bytes);
+      // A temporary string lives until the end of the full expression, as the reference parameter binding it does.
+      const run = compiler.materialize(right).run;
+      return (frame, stream) => stream.writeField(frame, ((run(frame) as Ptr).read() as StringValue).bytes);
     }
     const value = scalarValue(compiler, right);
     const run = value.run;
