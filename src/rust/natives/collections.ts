@@ -98,7 +98,7 @@ function keyType(ctx: NativeContext): Type {
   return ctx.typeArgs[0];
 }
 
-function entryKey<V>(ctx: NativeContext, entries: CollectionEntries<V>, value: Value): CollectionKey {
+function entryKey<V>(ctx: NativeContext, entries: CollectionEntries<V>, value: Value): CollectionKey<V> {
   return entries.key(keyType(ctx), value);
 }
 
@@ -184,7 +184,13 @@ function insertEntry(ctx: NativeContext, m: MapValue, k: Value, v: Value): Value
   return none(ctx);
 }
 
-function storeNewEntry(ctx: NativeContext, map: MapValue, key: CollectionKey, k: Value, v: Value): void {
+function storeNewEntry(
+  ctx: NativeContext,
+  map: MapValue,
+  key: CollectionKey<[Value, Value]>,
+  k: Value,
+  v: Value
+): void {
   ctx.runtime.allocate(2);
   map.entries.set(key, [k, v]);
 }

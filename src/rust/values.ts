@@ -202,7 +202,6 @@ export class IterValue {
   fork: ((cloneItem: (value: Value) => Value) => IterValue) | undefined;
 }
 
-/** A `HashMap` or `BTreeMap`: entries keyed by a text that equal keys share. */
 export class MapValue {
   readonly entries: CollectionEntries<[Value, Value]>;
   constructor(readonly sorted: boolean) {
@@ -265,7 +264,7 @@ export class FormatterValue {
 export class EntryValue {
   constructor(
     readonly map: MapValue,
-    readonly lookup: CollectionKey,
+    readonly lookup: CollectionKey<[Value, Value]>,
     readonly key: Value
   ) {}
 }

@@ -1071,6 +1071,47 @@ fn main() {
   });
 });
 
+test('preserves Rust tree comparisons across splits, bulk construction and deletion', () => {
+  const program = `use std::cmp::Ordering;
+use std::collections::{BTreeMap, BTreeSet};
+#[derive(Debug, Eq)]
+struct Key(i32, bool);
+impl PartialEq for Key {
+    fn eq(&self, rhs: &Self) -> bool { self.0 == rhs.0 }
+}
+impl PartialOrd for Key {
+    fn partial_cmp(&self, rhs: &Key) -> Option<Ordering> { Some(self.0.cmp(&rhs.0)) }
+}
+impl Ord for Key {
+    fn cmp(&self, rhs: &Key) -> Ordering {
+        if self.1 { print!("{}>{} ", self.0, rhs.0); }
+        self.0.cmp(&rhs.0)
+    }
+}
+fn main() {
+    let mut set = BTreeSet::new();
+    let mut map = BTreeMap::new();
+    for n in 0..12 { set.insert(Key(n, false)); map.insert(Key(n, false), n); }
+    println!("insert");
+    println!("set {}", set.contains(&Key(11, true)));
+    println!("map {:?}", map.get(&Key(11, true)));
+    println!("range {:?}", set.range(Key(4, true)..=Key(8, true)).map(|key| key.0).collect::<Vec<_>>());
+    for n in [6, 2, 11] { set.remove(&Key(n, true)); }
+    println!("remove {:?}", set.iter().map(|key|key.0).collect::<Vec<_>>());
+    println!("look {}", set.contains(&Key(8, true)));
+    let bulk: BTreeSet<_> = (0..30).map(|x| Key(x, false)).collect();
+    println!("bulk {}", bulk.contains(&Key(27, true)));
+    let bulk_map: BTreeMap<_, _> = (0..30).map(|x| (Key(x, false), x)).collect();
+    println!("bulk map {:?}", bulk_map.get(&Key(27, true)));
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'insert\n11>6 11>7 11>8 11>9 11>10 11>11 set true\n11>6 11>7 11>8 11>9 11>10 11>11 map Some(11)\n4>6 8>6 4>0 4>1 4>2 4>3 4>4 8>7 8>8 range [4, 5, 6, 7, 8]\n6>6 2>5 2>0 2>1 2>2 11>0 11>1 11>3 11>4 11>5 11>7 11>8 11>9 11>10 11>11 remove [0, 1, 3, 4, 5, 7, 8, 9, 10]\n8>0 8>1 8>3 8>4 8>5 8>7 8>8 look true\n27>11 27>23 27>24 27>25 27>26 27>27 bulk true\n27>11 27>23 27>24 27>25 27>26 27>27 bulk map Some(27)\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {
