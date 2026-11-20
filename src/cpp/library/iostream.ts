@@ -23,6 +23,7 @@ import {
 } from '../types';
 import { NULL_PTR, type Ptr, Store, type Value } from '../values';
 import { formatFloat, pointerText } from './formatting';
+import type { LibraryClass } from './libraryClass';
 import type { Library } from './registry';
 import { StringValue } from './string';
 import {
@@ -150,6 +151,18 @@ export class StreamValue extends Store {
   }
 }
 
+const STREAM_SIZES = {
+  ios_base: 136,
+  ios: 152,
+  ostream: 160,
+  istream: 168,
+  ostringstream: 264,
+  istringstream: 272,
+  stringstream: 280,
+} as const;
+
+type StreamKind = Exclude<keyof typeof STREAM_SIZES, 'ios_base' | 'ios'>;
+
 /** The streams of `<iostream>` and `<sstream>`, and the manipulators of `<ios>` and `<iomanip>`. */
 export class Streams {
   readonly ostream: ClassInfo;
@@ -157,6 +170,7 @@ export class Streams {
   readonly ostringstream: ClassInfo;
   readonly istringstream: ClassInfo;
   readonly stringstream: ClassInfo;
+  readonly iosBase: ClassInfo;
   readonly ios: ClassInfo;
   /** A manipulator that both `<<` and `>>` apply. */
   readonly manipulator: ClassInfo;
@@ -164,20 +178,25 @@ export class Streams {
   readonly outputManipulator: ClassInfo;
 
   constructor(private readonly library: Library) {
-    this.ios = this.iosClass();
+    this.iosBase = this.iosBaseClass();
+    this.ios = streamInfo('ios', this.iosBase, {
+      operator: (compiler, operator, operands, row) =>
+        this.operator(compiler, this.ios, false, false, operator, operands, row),
+    });
+    this.ios.isDefaultConstructorDeleted = true;
     this.manipulator = manipulatorClass('std::__manipulator');
     this.outputManipulator = manipulatorClass('std::__output_manipulator');
-    this.ostream = this.streamClass('std::ostream', undefined, true, false, [this.ios]);
-    this.istream = this.streamClass('std::istream', undefined, false, true, [this.ios]);
-    this.ostringstream = this.streamClass('std::ostringstream', this.ostream, true, false);
-    this.istringstream = this.streamClass('std::istringstream', this.istream, false, true);
-    this.stringstream = this.streamClass('std::stringstream', this.ostream, true, true, [this.istream]);
+    this.ostream = this.streamClass('ostream', this.ios, true, false);
+    this.istream = this.streamClass('istream', this.ios, false, true);
+    this.ostringstream = this.streamClass('ostringstream', this.ostream, true, false);
+    this.istringstream = this.streamClass('istringstream', this.istream, false, true);
+    this.stringstream = this.streamClass('stringstream', this.ostream, true, true, [this.istream]);
+    this.commonMethods();
   }
 
-  private iosClass(): ClassInfo {
-    const cls = new ClassInfo('std::ios_base', 'class');
-    cls.isComplete = true;
-    cls.library = { kind: 'ios', args: [], size: 136, align: 8 };
+  private iosBaseClass(): ClassInfo {
+    const cls = streamInfo('ios_base');
+    cls.isDefaultConstructorDeleted = true;
     for (const [name, value] of Object.entries({ ...FLAGS, ...OPEN_MODE, ...IO_STATE })) {
       cls.constants.set(name, (row) => ({ type: UINT, isLvalue: false, row, run: () => value, constant: value }));
     }
@@ -202,33 +221,25 @@ export class Streams {
   }
 
   private streamClass(
-    name: string,
-    base: ClassInfo | undefined,
+    kind: StreamKind,
+    base: ClassInfo,
     isOutput: boolean,
     isInput: boolean,
     additionalPublicBases?: readonly ClassInfo[]
   ): ClassInfo {
-    const cls = new ClassInfo(name, 'class');
-    cls.isComplete = true;
-    cls.isNoncopyable = true;
-    cls.isAssignmentDeleted = true;
-    cls.base = base;
-    cls.library = {
-      kind: name.replace('std::', ''),
-      args: [],
+    const cls = streamInfo(kind, base, {
       additionalPublicBases,
-      size: 160,
-      align: 8,
       operator: (compiler, operator, operands, row) =>
         this.operator(compiler, cls, isOutput, isInput, operator, operands, row),
-    };
+    });
     cls.operations = {
       copy: () => {
         throw new Error('A stream cannot be copied');
       },
       assign: () => {},
     };
-    if (name.includes('stringstream')) {
+    if (kind === 'ostream' || kind === 'istream') cls.isDefaultConstructorDeleted = true;
+    else {
       const defaultMode = (isInput ? OPEN_MODE.in : 0) | (isOutput ? OPEN_MODE.out : 0);
       const requiredMode = isInput && isOutput ? 0 : defaultMode;
       const make = (bytes: string, mode = defaultMode): StreamValue => {
@@ -261,38 +272,28 @@ export class Streams {
         })
       );
     }
-    this.commonMethods(cls, isOutput);
+    if (isOutput) this.addOutputMembers(cls);
     return cls;
   }
 
-  private commonMethods(cls: ClassInfo, isOutput: boolean): void {
-    const method = (
-      name: string,
-      params: Type[],
-      ret: Type,
-      run: (stream: StreamValue, args: unknown[], frame: Frame) => unknown,
-      options = {}
-    ): void => {
-      addMethod(
-        cls,
-        native(name, params, ret, (args, { self: object, frame }) => run(self(object), args, frame), options)
-      );
-    };
-    const ostreamPointer = pointerTo(classType(this.ostream ?? cls));
+  private commonMethods(): void {
+    const method = bindStreamMethods(this.ios);
+    const format = bindStreamMethods(this.iosBase);
+    const ostreamPointer = pointerTo(classType(this.ostream));
     method('tie', [], ostreamPointer, (stream) => stream.tied, { isConst: true });
     method('tie', [ostreamPointer], ostreamPointer, (stream, [next]) => {
       const previous = stream.tied;
       stream.tied = next as Ptr;
       return previous;
     });
-    method('width', [], LONG, (stream) => BigInt(stream.width), { isConst: true });
-    method('width', [LONG], LONG, (stream, [width]) => {
+    format('width', [], LONG, (stream) => BigInt(stream.width), { isConst: true });
+    format('width', [LONG], LONG, (stream, [width]) => {
       const old = stream.width;
       stream.width = Number(width);
       return BigInt(old);
     });
-    method('precision', [], LONG, (stream) => BigInt(stream.precision), { isConst: true });
-    method('precision', [LONG], LONG, (stream, [precision]) => {
+    format('precision', [], LONG, (stream) => BigInt(stream.precision), { isConst: true });
+    format('precision', [LONG], LONG, (stream, [precision]) => {
       const old = stream.precision;
       stream.precision = Number(precision);
       return BigInt(old);
@@ -303,23 +304,23 @@ export class Streams {
       stream.fill = String.fromCodePoint(asNumber(char) & 0xff);
       return signedChar(byteAt(old));
     });
-    method('flags', [], UINT, (stream) => stream.flags, { isConst: true });
-    method('flags', [UINT], UINT, (stream, [flags]) => {
+    format('flags', [], UINT, (stream) => stream.flags, { isConst: true });
+    format('flags', [UINT], UINT, (stream, [flags]) => {
       const old = stream.flags;
       stream.flags = asNumber(flags);
       return old;
     });
-    method('setf', [UINT], UINT, (stream, [flags]) => {
+    format('setf', [UINT], UINT, (stream, [flags]) => {
       const old = stream.flags;
       stream.flags |= asNumber(flags);
       return old;
     });
-    method('setf', [UINT, UINT], UINT, (stream, [flags, mask]) => {
+    format('setf', [UINT, UINT], UINT, (stream, [flags, mask]) => {
       const old = stream.flags;
       stream.flags = (stream.flags & ~asNumber(mask)) | (asNumber(flags) & asNumber(mask));
       return old;
     });
-    method('unsetf', [UINT], VOID, (stream, [flags]) => {
+    format('unsetf', [UINT], VOID, (stream, [flags]) => {
       stream.flags &= ~asNumber(flags);
     });
     method('good', [], BOOL, (stream) => (stream.isGood ? 1 : 0), { isConst: true });
@@ -339,7 +340,6 @@ export class Streams {
     method('setstate', [UINT], VOID, (stream, [state]) => {
       stream.state |= asNumber(state);
     });
-    if (isOutput) this.addOutputMembers(cls);
   }
 
   private addOutputMembers(cls: ClassInfo): void {
@@ -576,6 +576,35 @@ export class Streams {
       }),
     ];
   }
+}
+
+function streamInfo(
+  kind: keyof typeof STREAM_SIZES,
+  base?: ClassInfo,
+  members?: Pick<LibraryClass, 'operator' | 'additionalPublicBases'>
+): ClassInfo {
+  const cls = new ClassInfo(`std::${kind}`, 'class');
+  cls.isComplete = true;
+  cls.isNoncopyable = true;
+  cls.isAssignmentDeleted = true;
+  cls.base = base;
+  cls.library = { kind, args: [], size: STREAM_SIZES[kind], align: 8, ...members };
+  return cls;
+}
+
+function bindStreamMethods(cls: ClassInfo) {
+  return (
+    name: string,
+    params: Type[],
+    ret: Type,
+    run: (stream: StreamValue, args: unknown[], frame: Frame) => unknown,
+    options = {}
+  ): void => {
+    addMethod(
+      cls,
+      native(name, params, ret, (args, { self: object, frame }) => run(self(object), args, frame), options)
+    );
+  };
 }
 
 function setStreamBuffer(stream: StreamValue, bytes: string): void {

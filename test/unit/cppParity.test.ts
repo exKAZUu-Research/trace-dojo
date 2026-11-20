@@ -56,6 +56,28 @@ int main() {
   });
 });
 
+test('uses the Apple libc++ layouts of each supported stream class and its bases', () => {
+  const program = `#include <iostream>
+#include <sstream>
+int main() {
+  std::cout << sizeof(std::ios_base) << ' ' << sizeof(std::ios) << ' ' << sizeof(std::ostream) << ' '
+            << sizeof(std::istream) << ' ' << sizeof(std::ostringstream) << ' ' << sizeof(std::istringstream)
+            << ' ' << sizeof(std::stringstream) << ' ';
+  std::ostringstream output;
+  std::ios& status = output;
+  std::ios_base& format = status;
+  format.setf(std::ios::hex, std::ios_base::basefield);
+  std::showbase(format);
+  output << 42;
+  if (status) std::cout << output.str();
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '136 152 160 168 264 272 280 0x2a',
+    uncaughtException: undefined,
+  });
+});
+
 test('selects SDK signbit templates for floating and integer arguments', () => {
   const program = `#include <cmath>
 #include <iostream>

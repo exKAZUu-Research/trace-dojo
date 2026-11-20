@@ -469,7 +469,7 @@ export class Library {
       ['ostringstream', streams.ostringstream],
       ['istringstream', streams.istringstream],
       ['stringstream', streams.stringstream],
-      ['ios_base', streams.ios],
+      ['ios_base', streams.iosBase],
       ['ios', streams.ios],
     ] as const) {
       this.addStd(name, { kind: 'class', cls });
@@ -477,7 +477,7 @@ export class Library {
     this.addStd('streamsize', { kind: 'type', type: LONG });
     for (const [name, apply] of Object.entries(MANIPULATORS)) {
       const isOutputOnly = OUTPUT_MANIPULATORS.has(name);
-      const streamType = referenceTo(classType(isOutputOnly ? streams.ostream : streams.ios));
+      const streamType = referenceTo(classType(isOutputOnly ? streams.ostream : streams.iosBase));
       const fn = native(name, [streamType], streamType, ([location], { frame }) => {
         const stream = location as Ptr;
         apply(stream.read() as StreamValue, frame);
