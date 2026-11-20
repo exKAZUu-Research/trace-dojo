@@ -310,7 +310,8 @@ function displayedProperties(object: JsObject, runtime: Runtime): [string, Prope
   const entries: [string, Property][] = [];
   // Errors keep their message in a non-enumerable property.
   const message = object.isError ? object.properties.get('message') : undefined;
-  if (message && !isAccessor(message) && !runtime.isUnavailableValue(message.value)) entries.push(['message', message]);
+  if (message && !message.enumerable && !isAccessor(message) && traceField(runtime, message))
+    entries.push(['message', message]);
   for (const [key, property] of object.properties) {
     if (typeof key === 'string' && property.enumerable && (isAccessor(property) || traceField(runtime, property)))
       entries.push([key, property]);

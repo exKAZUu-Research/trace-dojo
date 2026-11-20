@@ -503,19 +503,7 @@ export class OperatorChecker {
   assertion(node: TreeNode, contextual?: Type): Type {
     const expression = node.type === 'type_assertion' ? (named(node).at(-1) as TreeNode) : named(node)[0];
     const typeNode = node.type === 'type_assertion' ? named(named(node)[0])[0] : named(node)[1];
-    if (!typeNode || isConstAssertion(node)) {
-      const operand = skipParentheses(expression);
-      const signedLiteral =
-        operand.type === 'unary_expression' &&
-        ['+', '-'].includes(operand.childForFieldName('operator')?.text ?? '') &&
-        named(operand)[0]?.type === 'number';
-      if (
-        !['string', 'number', 'true', 'false', 'object', 'array', 'template_string'].includes(operand.type) &&
-        !signedLiteral
-      )
-        this.c.error(node, 'const アサーションは、リテラル式にのみ使えます。');
-      return regularOf(this.c.expressions.check(expression, contextual));
-    }
+    if (!typeNode || isConstAssertion(node)) return this.constAssertion(node, expression, contextual);
     const target = this.c.typeNodes.typeFromNode(typeNode);
     const source = this.c.expressions.check(expression, target);
     const widened = this.c.widen(source);
@@ -539,6 +527,22 @@ export class OperatorChecker {
       );
     }
     return target;
+  }
+
+  private constAssertion(node: TreeNode, expression: TreeNode, contextual: Type | undefined): Type {
+    const operand = skipParentheses(expression);
+    const signedLiteral =
+      operand.type === 'unary_expression' &&
+      ['+', '-'].includes(operand.childForFieldName('operator')?.text ?? '') &&
+      named(operand)[0]?.type === 'number';
+    if (
+      !['string', 'number', 'true', 'false', 'object', 'array', 'template_string'].includes(operand.type) &&
+      !signedLiteral
+    )
+      this.c.error(node, 'const アサーションは、リテラル式にのみ使えます。');
+    return mapType(this.c.expressions.check(expression, contextual), (type) =>
+      type.kind === 'literal' ? regularOf(type) : type
+    );
   }
 }
 

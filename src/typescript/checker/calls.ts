@@ -783,8 +783,7 @@ export class Calls {
       if (reportMismatch) this.reportArgument(arg, argType, parameterType);
       return false;
     }
-    if (report) this.c.expressions.checkExcessProperties(arg, argType, parameterType);
-    return true;
+    return this.c.expressions.checkExcessProperties(arg, argType, parameterType, { report });
   }
 
   /**

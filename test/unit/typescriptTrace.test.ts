@@ -199,6 +199,30 @@ pattern.label = "done";
   });
 });
 
+test('records an Error message once when its descriptor changes', () => {
+  const source = `
+const error = new Error('bad');
+Object.defineProperty(error, 'message', { enumerable: true });
+let reads = 0;
+Object.defineProperty(error, 'message', { get() { ++reads; return 'changed'; } });
+console.log(reads);
+`;
+  const recording = traceProgram('typescript', source, source);
+  const snapshots = recording.traceItems.flatMap((step) => {
+    const error = step.referenceVars.error;
+    return error ? [error] : [];
+  });
+  expect(recording.stdout).toBe('0\n');
+  expect(snapshots).toContainEqual({ kind: 'object', entries: { message: valueNode('bad') } });
+  expect(snapshots.at(-1)).toEqual({
+    kind: 'object',
+    entries: { message: { kind: 'value', value: '[Getter]', verbatim: true } },
+  });
+  for (const snapshot of snapshots) {
+    expect(snapshot.kind === 'object' && Object.keys(snapshot.entries)).toEqual(['message']);
+  }
+});
+
 test('static compile-time constants stay out of the trace as they do in Java', () => {
   const java = `public class Main {
   public static void main(String[] args) {

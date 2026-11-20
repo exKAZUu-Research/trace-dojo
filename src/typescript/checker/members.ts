@@ -17,7 +17,6 @@ import { spellingSuggestion } from './spelling';
 import { assignmentKind, chainObject, isOptionalChain, skipParentheses } from './syntax';
 import { tupleElementBeyond } from './tupleIndexes';
 import {
-  anyType,
   errorType,
   isAnyLike,
   isIntrinsic,
@@ -497,8 +496,8 @@ export class MemberChecker {
 
   private indexedTypeAt(access: IndexAccess, objectType: Type, indexType: Type): Type {
     if (indexType === errorType || objectType === errorType) return errorType;
-    if (isAnyLike(objectType)) return anyType;
     const index = regularOf(indexType);
+    if (isAnyLike(objectType)) return this.c.typeOperators.indexedAccess(objectType, index, access.indexNode);
     // As TypeScript's `getPropertyTypeForIndexType`, any key reads `never` from `never`.
     if (
       isIntrinsic(objectType, 'never') &&

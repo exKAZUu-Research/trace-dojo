@@ -18,3 +18,4 @@
     Object literal may only specify known properties, and 'z' does not exist in type '{ x: number; }'.
 (12,13): error TS2353: Object literal may only specify known properties, and 'y' does not exist in type '{ x: number; }'.
 (13,33): error TS2353: Object literal may only specify known properties, and 'z' does not exist in type '{ y: string; }'.
+(15,15): error TS2353: Object literal may only specify known properties, and 'z' does not exist in type '{ x: number; }'.

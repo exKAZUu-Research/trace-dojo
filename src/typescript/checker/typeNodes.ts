@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 556 -- Resolves every kind of type syntax a program writes, each needing its own rule.
+// code-gauge-allow-file fileNcss 580 -- Resolves every kind of type syntax a program writes, each needing its own rule.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
@@ -275,6 +275,15 @@ export class TypeNodes {
    */
   private conditionalExtendsTypes(node: TreeNode, parameter: TypeParameter): Type[] {
     const types: Type[] = [];
+    for (const [check, extendsNode] of this.conditionalTrueChecks(node)) {
+      if (check.id !== parameter.id) continue;
+      const bound = this.conditionalBound(extendsNode);
+      if (bound) types.push(bound);
+    }
+    return types;
+  }
+
+  private *conditionalTrueChecks(node: TreeNode): IterableIterator<[Type, TreeNode]> {
     let child = node;
     for (let current = node.parent; current; current = current.parent) {
       if (current.type === 'conditional_type' && current.childForFieldName('consequence')?.id === child.id) {
@@ -282,13 +291,15 @@ export class TypeNodes {
           current.childForFieldName('left') as TreeNode,
           current.childForFieldName('right') as TreeNode
         );
-        const extendsType = this.typeFromNode(check).id === parameter.id ? this.typeFromNode(extendsNode) : undefined;
-        if (extendsType && !isIntrinsic(extendsType, 'any') && !isIntrinsic(extendsType, 'unknown'))
-          types.push(extendsType);
+        yield [this.typeFromNode(check), extendsNode];
       }
       child = current;
     }
-    return types;
+  }
+
+  private conditionalBound(extendsNode: TreeNode): Type | undefined {
+    const bound = this.typeFromNode(extendsNode);
+    return isIntrinsic(bound, 'any') || isIntrinsic(bound, 'unknown') ? undefined : bound;
   }
 
   private literalTypeOf(node: TreeNode): Type {
@@ -522,23 +533,41 @@ export class TypeNodes {
   }
 
   checkTypeArgumentConstraints(node: TreeNode, parameters: TypeParameter[], typeArguments: Type[]): void {
-    for (const mismatch of this.typeArgumentMismatches(parameters, typeArguments))
+    for (const mismatch of this.typeArgumentMismatches(parameters, typeArguments, typeArguments.length, node))
       this.reportTypeArgumentMismatch(node, mismatch);
   }
 
   *typeArgumentMismatches(
     parameters: TypeParameter[],
     typeArguments: Type[],
-    count = typeArguments.length
+    count = typeArguments.length,
+    writtenAt?: TreeNode
   ): IterableIterator<TypeArgumentMismatch> {
     const mapper: Mapper = new Map(parameters.map((parameter, index) => [parameter.id, typeArguments[index]]));
+    let branchMapper: Mapper | undefined;
     for (let index = 0; index < count; index++) {
       const constraint = parameters[index]?.constraint?.();
       if (!constraint) continue;
       const argument = typeArguments[index];
       const instantiated = this.c.instantiate(constraint, mapper);
-      if (!this.c.relations.isAssignable(argument, instantiated)) yield { index, argument, constraint: instantiated };
+      if (this.c.relations.isAssignable(argument, instantiated)) continue;
+      if (writtenAt) {
+        branchMapper ??= this.conditionalArgumentMapper(writtenAt);
+        const narrowed = this.c.instantiate(argument, branchMapper);
+        if (narrowed !== argument && this.c.relations.isAssignable(narrowed, instantiated)) continue;
+      }
+      yield { index, argument, constraint: instantiated };
     }
+  }
+
+  private conditionalArgumentMapper(node: TreeNode): Mapper {
+    const mapper: Mapper = new Map();
+    for (const [check, extendsNode] of this.conditionalTrueChecks(node)) {
+      if (check.kind !== 'typeParameter') continue;
+      const bound = this.conditionalBound(extendsNode);
+      if (bound) mapper.set(check.id, intersectionOf([mapper.get(check.id) ?? check, bound], this.c.budget));
+    }
+    return mapper;
   }
 
   reportTypeArgumentMismatch(node: TreeNode, { argument, constraint }: TypeArgumentMismatch): void {

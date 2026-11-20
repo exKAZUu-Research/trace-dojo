@@ -1,0 +1,13 @@
+type Loud<T> = T extends string ? Uppercase<T> : never;
+type Capitalized<T> = { [K in keyof T as K extends string ? Capitalize<K> : never]: T[K] };
+type BoundedTuple<T extends readonly string[]> = T;
+type BoundedObject<T extends { value: string }> = T;
+type Wrapped<T> = T extends string ? BoundedTuple<[T]> : never;
+type RecordValue<T> = T extends string ? BoundedObject<{value:T}> : never;
+type Parenthesized<T> = (T) extends (string) ? Uppercase<T> : never;
+type Whole<T> = [T] extends [string] ? Uppercase<T> : never;
+type Nested<T> = T extends object ? T extends {name: string} ? BoundedObject<{value:T['name']}> : never : never;
+const loud: Loud<'hi'> = 'HI';
+const keys: Capitalized<{ value: number }> = { Value: 4 };
+const wrapped: Wrapped<'yes'> = ['yes'];
+console.log(loud, keys.Value, wrapped[0]);

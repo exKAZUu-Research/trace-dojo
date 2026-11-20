@@ -11,3 +11,5 @@ padded({ info: { x: 1, z: 3 } } as const);
 function alternate(...args: [{ x: number }] | { y: string }[]): void { console.log(args); }
 alternate({ y: 'a', z: 2 });
 alternate({ y: 'a' }, { y: 'b', z: 2 });
+function fixed(options: { x: number }): void { console.log(options); }
+fixed({ x: 1, z: 2 } as const);

@@ -14,3 +14,10 @@ const selected: 2 = overload('x', { x: 1, z: 2 });
 console.log(selected);
 function alternate(...args: [{ x: number }] | { y: string }[]): void { console.log(args); }
 alternate({ y: 'a' }, { y: 'b' });
+function fixed(options: { x: number }): 1;
+function fixed(options: { x: number; z: number }): 2;
+function fixed(options: { x: number; z?: number }): 1 | 2 { return options.z === undefined ? 1 : 2; }
+const ordinary: 2 = fixed({ x: 1, z: 2 } as const);
+const saved = { x: 1, z: 2 } as const;
+const stored: 1 = fixed(saved);
+console.log(ordinary, stored);
