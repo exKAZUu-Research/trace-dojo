@@ -1,5 +1,7 @@
 // code-gauge-allow-file fileNcss 450 -- One native per method of the standard library.
 import {
+  changeString,
+  claimString,
   insertOwnedElement,
   keepVecCapacity,
   pushOwnedElement,
@@ -15,7 +17,7 @@ import { normalize } from '../infer';
 import { described, fieldsPart, listPart, numberPart } from '../iterDebug';
 import { cloneValue, compareValues, copyValue, testPartialOrder, valuesEqual } from '../ops';
 import { RustPanic } from '../runtime';
-import { shallow, type Type } from '../types';
+import { isBuiltin, shallow, type Type } from '../types';
 import {
   DONE,
   ElementPlace,
@@ -287,11 +289,7 @@ const sliceNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
     return chunkDebug(iter, 'RChunks', done, () => [['chunk_size', numberPart(width)]]);
   },
   chunks_exact: ([self, size], ctx) => chunks(ctx, deref(self), Number(size as bigint), true),
-  fill: ([self, value], ctx) => {
-    const slice = deref(self);
-    for (let index = 0; index < sliceLength(slice); index++) sliceSet(slice, index, cloneValue(elemType(ctx), value));
-    return UNIT_VALUE;
-  },
+  fill: ([self, value], ctx) => fillSlice(deref(self), value, elemType(ctx)),
   to_vec: ([self], ctx) => clonedItems(ctx, sliceItems(deref(self))),
   to_owned: ([self], ctx) => clonedItems(ctx, sliceItems(deref(self))),
   into_vec: ([self]) => sliceItems(deref(self)),
@@ -319,6 +317,23 @@ const sliceNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
     return Array.from({ length }, (_, index) => copyValue(items[index % items.length]));
   },
 };
+
+function fillSlice(slice: Value, value: Value, type: Type): Value {
+  const length = sliceLength(slice);
+  if (length === 0) return UNIT_VALUE;
+  const { base, start } = sliceBase(slice);
+  const last = start + length - 1;
+  const string = isBuiltin(type, 'String');
+  for (let index = start; index < last; index++) {
+    const place = new ElementPlace(base, index);
+    if (string) changeString(place, () => place.set(value));
+    else place.set(cloneValue(type, value));
+  }
+  const place = new ElementPlace(base, last);
+  place.set(value);
+  if (string) claimString(place);
+  return UNIT_VALUE;
+}
 
 function rangeFrom(start: number): RangeValue {
   return { start: BigInt(start), end: undefined, inclusive: false, exhausted: false } as RangeValue;

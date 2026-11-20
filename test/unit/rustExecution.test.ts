@@ -1200,6 +1200,33 @@ fn main() {
   });
 });
 
+test('copies slice fill inputs before moving the original into the final slot', () => {
+  const program = `#[derive(Debug)]
+struct Token(i32);
+impl Clone for Token {
+    fn clone(&self) -> Self {
+        print!("clone ");
+        Token(self.0 + 10)
+    }
+}
+fn main() {
+    let mut one = [Token(0)];
+    one.fill(Token(1));
+    println!("{:?}", one);
+    let mut three = [Token(0), Token(0), Token(0)];
+    three.fill(Token(2));
+    println!("{:?}", three);
+    let mut none: [Token; 0] = [];
+    none.fill(Token(3));
+    println!("{:?}", none);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[Token(1)]\nclone clone [Token(12), Token(12), Token(2)]\n[]\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {
