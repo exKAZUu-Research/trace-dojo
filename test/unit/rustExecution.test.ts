@@ -1571,6 +1571,14 @@ test('uses character slices for Rust string boundary patterns', () => {
   });
 });
 
+test('validates control characters in Rust literal bodies', () => {
+  for (const literal of ['"a\rb"', '"a\\\rb"', "'\r'", "'\n'", "'\t'", "b'\t'"]) {
+    expect(executeProgram('rust', rustMain(`let _ = ${literal};`))).toMatchObject({ kind: 'compileError' });
+  }
+  const valid = rustMain(`println!("{:?} {:?} {:?}", "a\r\nb", "a\\\r\nb", '\\r');`);
+  expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: '"a\\nb" "ab" \'\\r\'\n' });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

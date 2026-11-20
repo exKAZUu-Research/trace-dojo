@@ -74,12 +74,16 @@ export function parseStringLiteral(text: string): string | undefined {
 }
 
 function unescape(body: string, kind: LiteralKind): string | undefined {
+  if (body.includes('\r')) {
+    body = body.replaceAll('\r\n', '\n');
+    if (body.includes('\r')) return undefined;
+  }
   let result = '';
   for (let index = 0; index < body.length; index++) {
     const char = body[index];
-    if (char === '\r' && body[index + 1] === '\n') continue;
     if (char !== '\\') {
-      if (kind === 'byte' && (char.codePointAt(0)! > 0x7f || "\n\r\t'".includes(char))) return undefined;
+      if (kind !== 'string' && "\n\t'".includes(char)) return undefined;
+      if (kind === 'byte' && char.codePointAt(0)! > 0x7f) return undefined;
       result += char;
       continue;
     }
@@ -108,11 +112,10 @@ function readEscape(body: string, index: number, kind: LiteralKind): { text: str
     case 'u': {
       return kind === 'byte' ? undefined : readUnicodeEscape(body, index);
     }
-    case '\n':
-    case '\r': {
+    case '\n': {
       if (kind !== 'string') return undefined;
       let last = index;
-      while (last + 1 < body.length && /[ \t\r\n]/.test(body[last + 1])) last++;
+      while (last + 1 < body.length && /[ \t\n]/.test(body[last + 1])) last++;
       return { text: '', last };
     }
     default: {
