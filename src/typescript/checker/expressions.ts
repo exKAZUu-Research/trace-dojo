@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 558 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
+// code-gauge-allow-file fileNcss 559 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { assertedExpression } from '../erasedSyntax';
@@ -163,7 +163,8 @@ export class ExpressionChecker {
     return members.chainLink(node, () => {
       const type = check(operand, contextual);
       const continued = members.continuedObjectType(operand, type);
-      return continued ? members.chainResult(node, nonNullableType(this.c, continued)) : nonNullableType(this.c, type);
+      const asserted = nonNullableType(this.c, continued ?? type);
+      return continued ? members.chainResult(node, asserted, asserted) : asserted;
     });
   }
 

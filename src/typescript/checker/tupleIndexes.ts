@@ -4,6 +4,7 @@ import type { Checker } from './checker';
 import { isGenericObjectOrIndexType } from './genericTypes';
 import { isNumericName } from './syntax';
 import {
+  intersectionOf,
   isIntrinsic,
   isPropertyKeyLiteral,
   type ObjectType,
@@ -55,47 +56,54 @@ export function numericTupleIndex(c: Checker, type: ObjectType, index: Type): Ty
   return tupleElementBeyond(c, type, String(index.value), undefined) ?? c.elementTypeOf(type);
 }
 
-/** Resolve type-parameter rests only when every alternative is an array or closed tuple. */
-export function constrainedTuple(c: Checker, type: ObjectType): Type {
+/** Resolve the sequence bounds of variadic rests. */
+export function constrainedTuple(c: Checker, type: ObjectType, depth = 0): Type {
   if (!type.tuple || !hasVariadicRest(type)) return type;
   const { elements, readonly } = type.tuple;
-  const options = elements.map((element) => {
-    const bound = element.rest && element.type.kind === 'typeParameter' ? restConstraint(c, element.type) : undefined;
-    return bound ? typeMembers(bound).map((member) => ({ ...element, type: member })) : [element];
+  const resolved = elements.map((element) => {
+    const bound =
+      element.rest && element.type.kind === 'typeParameter' ? restConstraint(c, element.type, depth + 1) : undefined;
+    return bound ? { ...element, type: bound } : element;
   });
-  if (options.every(([member], position) => member === elements[position])) return type;
-  if (options.every((members) => members.length === 1))
-    return c.tupleType(
-      options.map(([member]) => member),
-      readonly
-    );
-  let parts: TupleElement[][] = [[]];
-  for (const alternatives of options) {
-    parts = parts.flatMap((part) =>
-      alternatives.map((alternative) => {
-        c.budget.spend(part.length + 1);
-        return [...part, alternative];
-      })
-    );
-  }
-  return unionOf(parts.map((part) => c.tupleType(part, readonly)));
+  if (resolved.every((member, position) => member === elements[position])) return type;
+  return expandTupleBounds(c, resolved, readonly);
 }
 
-function restConstraint(c: Checker, type: Type): Type | undefined {
-  let bound = type;
-  while (bound.kind === 'typeParameter') {
-    c.budget.spend();
-    const constraint = c.constraintOf(bound);
-    if (!constraint) return undefined;
-    bound = constraint;
+// code-gauge-allow functionCognitiveComplexity 17 -- Resolves bounds in order and retains the distinction between unions and intersections.
+function restConstraint(c: Checker, type: Type, depth: number): Type | undefined {
+  c.budget.spend();
+  if (depth >= 50) return undefined;
+  if (type.kind === 'union' || type.kind === 'intersection') {
+    const bounds = type.types
+      .map((member) => restConstraint(c, member, depth + 1))
+      .filter((bound) => bound !== undefined);
+    if (type.kind === 'union') return bounds.length === type.types.length ? unionOf(bounds) : undefined;
+    return bounds.length > 0 ? intersectionOf(bounds, c.budget) : undefined;
   }
-  if (
-    typeMembers(bound).every(
-      (member) => member.kind === 'object' && c.isArrayOrTuple(member) && !hasVariadicRest(member)
-    )
-  )
-    return bound;
-  return undefined;
+  if (type.kind === 'object' && c.isArrayOrTuple(type)) {
+    if (!hasVariadicRest(type)) return type;
+    const bound = constrainedTuple(c, type, depth + 1);
+    return bound === type ? undefined : restConstraint(c, bound, depth + 1);
+  }
+  const bound = c.baseConstraint(type);
+  return bound === type ? undefined : restConstraint(c, bound, depth + 1);
+}
+
+function expandTupleBounds(c: Checker, elements: TupleElement[], readonly: boolean, start = 0): Type {
+  const index = elements.findIndex(
+    (e, i) => i >= start && e.rest && (e.type.kind === 'union' || e.type.kind === 'intersection')
+  );
+  if (index === -1) return c.tupleType(elements, readonly);
+  const element = elements[index];
+  const distribute = (bound: Type): Type => {
+    if (bound.kind === 'union') return unionOf(bound.types.map(distribute));
+    if (bound.kind === 'intersection') return intersectionOf(bound.types.map(distribute), c.budget);
+    c.budget.spend(elements.length);
+    const variant = [...elements];
+    variant[index] = { ...element, type: bound };
+    return expandTupleBounds(c, variant, readonly, index + 1);
+  };
+  return distribute(element.type);
 }
 
 /**

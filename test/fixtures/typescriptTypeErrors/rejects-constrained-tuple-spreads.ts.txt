@@ -13,3 +13,12 @@ function mismatch<T extends [number] | [string]>(source: T): [number] {
 function target<T extends [number]>(source: [number]): [...T] {
   return [...source];
 }
+function nestedOpen<U extends string[], T extends [...U, boolean]>(source: T): [string, boolean] {
+  return [...source];
+}
+function nestedChoice<U extends [number] | [string], T extends [...U, boolean]>(source: T): [number, boolean] {
+  return [...source];
+}
+function conflicting<T extends [number] & [string]>(source: T): [boolean] {
+  return [...source];
+}

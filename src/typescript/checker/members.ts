@@ -67,7 +67,7 @@ export class MemberChecker {
    * The types of the accesses and calls of optional chains without the `undefined` that stopping early adds, which
    * the rest of the chain continues from.
    */
-  private readonly continuedTypes = new Map<number, Type>();
+  private readonly continuedTypes = new Map<number, { continued: Type; result: Type }>();
 
   /** For each optional chain being checked, its end and the flow states where its `?.` links stop it. */
   private readonly chainFrames: { end: TreeNode; stops: State[] }[] = [];
@@ -120,16 +120,16 @@ export class MemberChecker {
     this.c.flow.current = whenTrue;
   }
 
-  /** Records what an optional chain continues from after `node`, returning `node`'s own type with `undefined`. */
-  chainResult(node: TreeNode, continued: Type): Type {
-    this.continuedTypes.set(node.id, continued);
-    return unionOf([continued, undefinedType]);
+  /** Records the chain's continuation and the type of this expression when it is used on its own. */
+  chainResult(node: TreeNode, continued: Type, result = unionOf([continued, undefinedType])): Type {
+    this.continuedTypes.set(node.id, { continued, result });
+    return result;
   }
 
   /** The type of an object that continues an optional chain, which is never what stopping the chain gave. */
   continuedObjectType(objectNode: TreeNode, checked: Type): Type | undefined {
     const continued = this.continuedTypes.get(objectNode.id);
-    return continued && unionOf([continued, undefinedType]) === checked ? continued : undefined;
+    return continued?.result === checked ? continued.continued : undefined;
   }
 
   checkAccess(node: TreeNode): CheckedAccess {

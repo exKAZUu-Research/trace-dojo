@@ -15,3 +15,30 @@ function wrapped<T extends readonly [number, ...string[]]>(source: T): [bool: bo
 }
 console.log(pair([1, 'ready']), copyOpen(['ready', 1, 2]));
 console.log(readonly([1, 'a', 'b'] as const), both([2]), wrapped([3, 'c']));
+
+function nested<U extends [number], T extends [...U, string]>(source: T): [number, string] {
+  return [...source];
+}
+function nestedReadonly<U extends readonly [number], T extends readonly [...U, string]>(source: T): [number, string] {
+  return [...source];
+}
+function tagged<T extends [number] & { tag: string }>(source: T): [number] {
+  return [...source];
+}
+function zipped<U extends [number], V extends [string], T extends [...U, ...V]>(source: T): [number, string] {
+  return [...source];
+}
+function choice<T extends ([number] & { tag: string }) | ([string] & { tag: string })>(source: T): [number | string] {
+  return [...source];
+}
+function narrower<T extends [number] & [1]>(source: T): [1] {
+  return [...source];
+}
+console.log(
+  nested<[number], [number, string]>([1, 'a']),
+  nestedReadonly<readonly [number], readonly [number, string]>([2, 'b']),
+  tagged(Object.assign([3] as [number], { tag: 'tag' })),
+  zipped<[number], [string], [number, string]>([4, 'd']),
+  choice(Object.assign(['choice'] as [string], { tag: 'tag' })),
+  narrower([1])
+);

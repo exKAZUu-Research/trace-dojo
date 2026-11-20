@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 504 -- Keeps signature resolution and the TypeScript grammar of parameters and accessors together.
+// code-gauge-allow-file fileNcss 506 -- Keeps signature resolution and the TypeScript grammar of parameters and accessors together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { erasedStatementTypes } from '../erasedSyntax';
@@ -345,7 +345,7 @@ export class Signatures {
         ? this.c.literals.widenDeclared(initializer, false)
         : this.c.expressions.implicitParameterType(parameterNode, pattern, rest));
     const bindingType =
-      !contextualType && initializer && pattern.type !== 'identifier'
+      !contextualType && initializer && pattern.type !== 'identifier' && !usesInferredSignatureForBindings(node)
         ? this.c.literals.widenDeclared(initializer, false, true)
         : undefined;
     return {
@@ -740,6 +740,15 @@ export function isContextSensitiveFunction(node: TreeNode): boolean {
   const nodes = parameterNodes(node);
   if (nodes.some((parameterNode) => !parameterNode.childForFieldName('type'))) return true;
   return node.type !== 'arrow_function' && argumentParameters(nodes).length === nodes.length;
+}
+
+function usesInferredSignatureForBindings(node: TreeNode): boolean {
+  return (
+    (node.type === 'arrow_function' ||
+      node.type === 'function_expression' ||
+      (node.type === 'method_definition' && node.parent?.type === 'object')) &&
+    isContextSensitiveFunction(node)
+  );
 }
 
 const requiredPrefixSources = new WeakMap<Parameter, Parameter>();

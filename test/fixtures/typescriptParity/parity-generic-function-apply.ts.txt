@@ -18,3 +18,20 @@ function named(this: { name: string }, n: number) {
   return this.name.repeat(n);
 }
 console.log(named.apply(receiver, [2]));
+
+const itemReceiver = { n: 2 };
+function identity<Item>(this: Item, value: Item) {
+  return this;
+}
+function list<Item>(this: Item, values: Item[]) {
+  return values;
+}
+function structured<Item>(this: { value: Item }, value: Item) {
+  return value;
+}
+function dependent<Item, Value extends Item>(this: Item, value: Value) {
+  return value;
+}
+console.log(identity.apply(itemReceiver, [{ n: 3 }]), identity.call(itemReceiver, { n: 3 }));
+console.log(list.apply(itemReceiver, [[{ n: 4 }]]), structured.apply({ value: 2 }, [3]));
+console.log(dependent.call(itemReceiver, { n: 4, detail: 'extra' }), identity.apply(itemReceiver, [{ n: 'ok' }]));

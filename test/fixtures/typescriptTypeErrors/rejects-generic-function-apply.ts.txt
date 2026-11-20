@@ -12,3 +12,14 @@ const explicit: [number, string] = [1, 'a'];
 pair.apply(null, explicit);
 const direct: (first: number, second: string) => unknown[] = pair;
 const wrongResult: number[] = pair.apply(null, [1, 'a']);
+
+const receiver = { n: 2 };
+function identity<Item>(this: Item, value: Item) {
+  return this;
+}
+identity.call(receiver, { n: 'wrong' });
+const result: { n: number } = identity.call(receiver, { n: 3 });
+function constrained<Item extends { n: number }>(this: Item, values: Item[]) {
+  return values;
+}
+constrained.apply(receiver, [[{ n: 'wrong' }]]);

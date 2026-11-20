@@ -3,3 +3,6 @@
 (10,8): error TS2741: Property 'second' is missing in type '{}' but required in type '{ second: number; }'.
 (15,9): error TS2322: Type '[number, string]' is not assignable to type '[]'.
   Source has 2 element(s) but target allows only 0.
+(17,27): error TS2339: Property 'value' does not exist on type '{}'.
+(18,41): error TS2339: Property 'value' does not exist on type '{}'.
+(22,19): error TS2339: Property 'value' does not exist on type '{}'.

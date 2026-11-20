@@ -9,3 +9,10 @@ function nullableLink(o: { a: H | undefined } | undefined) {
 function parenthesized(o: { a: H } | undefined) {
   console.log((o?.a).f());
 }
+
+function assertThenCall(o: { a: H } | undefined): number {
+  return o?.a.f!();
+}
+function assertThenRead(o: { a: H } | undefined): number {
+  return o?.a!.x;
+}

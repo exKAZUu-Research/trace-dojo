@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 757 -- Keeps generic candidate collection, constraint fitting and inference completion together.
+// code-gauge-allow-file fileNcss 767 -- Keeps generic candidate collection, constraint fitting and inference completion together.
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import type { Checker, Mapper } from './checker';
 import { isUnit } from './flow';
@@ -200,7 +200,7 @@ export class TypeInference {
     if (nullable.length > 0 && defined.length > 0) return unionOf([this.commonSupertype(defined), ...nullable]);
     if (
       candidates.every(
-        (candidate) => candidate.kind === 'object' && (candidate.isLiteral || this.c.literals.isArrayLiteral(candidate))
+        (candidate) => this.c.literals.isWrittenObjectLiteral(candidate) || this.c.literals.isArrayLiteral(candidate)
       )
     )
       return this.widenObjectLiterals(unionOf(candidates));
@@ -941,10 +941,22 @@ export class TypeInference {
       ? generic
       : run.contextualSignatures || generic.predicate
         ? this.instantiateCallback(run, generic, target)
-        : this.c.instantiateSignature(
-            { ...generic, typeParameters: [] },
-            new Map(generic.typeParameters.map((parameter) => [parameter.id, parameter.constraint?.() ?? unknownType]))
-          );
+        : this.baseInferenceSignature(generic);
+  }
+
+  private baseInferenceSignature(signature: Signature): Signature {
+    const parameters = signature.typeParameters;
+    const bounds: Mapper = new Map(
+      parameters.map((parameter) => [parameter.id, parameter.constraint?.() ?? unknownType])
+    );
+    const eraser: Mapper = new Map(parameters.map((parameter) => [parameter.id, anyType]));
+    const mapper: Mapper = new Map();
+    for (const [id, type] of bounds) {
+      let bound = type;
+      for (let index = 1; index < parameters.length; index++) bound = this.c.instantiate(bound, bounds);
+      mapper.set(id, this.c.instantiate(bound, eraser));
+    }
+    return this.c.instantiateSignature({ ...signature, typeParameters: [] }, mapper);
   }
 
   private instantiateCallback(run: InferenceRun, generic: Signature, target: Signature): Signature {

@@ -912,7 +912,8 @@ export class Calls {
       );
     const returnContext = this.c.inference.partialMapper(parameters, run.inferences);
     // A `this` parameter infers from the object the method is called on.
-    if (receiver && signature.thisType) this.c.inference.inferTypes(run, receiver, signature.thisType, true);
+    if (receiver && signature.thisType)
+      this.c.inference.inferTypes({ ...run, contextualSignatures: false }, receiver, signature.thisType, true);
     // Context-insensitive arguments infer first; functions without parameter annotations then see what they inferred.
     const sensitive = arguments_.map(
       (arg) => !arg.spread && this.c.flow.probe(() => this.isContextSensitive(arg.node), arg.before)

@@ -13,3 +13,14 @@ function tuple({ outer: [one = 1, two = 'ok'] = [] } = { outer: [] }) {
   return [one, two];
 }
 tuple({ outer: [1, 'ok'] });
+
+const arrow = ({ outer: { value = 1 } = {} } = { outer: {} }) => value;
+const expression = function ({ outer: { value = 1 } = {} } = { outer: {} }) {
+  return value;
+};
+const method = {
+  read({ outer: { value = 1 } = {} } = { outer: {} }) {
+    return value;
+  },
+};
+console.log(arrow(), expression(), method.read());

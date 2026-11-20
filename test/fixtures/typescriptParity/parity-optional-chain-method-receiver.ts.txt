@@ -26,3 +26,25 @@ viaCall({ g: () => ({ x: 3, f }) });
 viaElement([{ x: 4, f }]);
 viaOptionalLinks({ a: { x: 5, f } });
 viaOptionalLinks({ a: undefined });
+
+type Counter = { value: number; read(this: Counter): number; wrap(this: Counter): { nested: number } };
+const counter: Counter = {
+  value: 6,
+  read() {
+    return this.value;
+  },
+  wrap() {
+    return { nested: this.value };
+  },
+};
+function assertedCalls(candidate?: Counter): number[] {
+  return [(candidate?.read!)(), (candidate?.['read']!)()];
+}
+function assertedValue(candidate?: Counter): number {
+  return candidate?.value!;
+}
+function continuedAssertion(candidate?: Counter) {
+  return [candidate?.read!(), candidate?.wrap!().nested];
+}
+console.log(assertedCalls(counter), assertedValue(counter));
+console.log(continuedAssertion(counter), continuedAssertion());

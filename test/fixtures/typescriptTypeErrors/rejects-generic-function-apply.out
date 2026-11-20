@@ -14,3 +14,10 @@
     Type 'string' is not assignable to type 'number'.
 (14,7): error TS2322: Type 'unknown[]' is not assignable to type 'number[]'.
   Type 'unknown' is not assignable to type 'number'.
+(20,1): error TS2684: The 'this' context of type '<Item>(this: Item, value: Item) => Item' is not assignable to method's 'this' of type '(this: { n: number; }, args_0: { n: string; }) => unknown'.
+  Types of parameters 'value' and 'args_0' are incompatible.
+    Type '{ n: string; }' is not assignable to type '{ n: number; }'.
+      Types of property 'n' are incompatible.
+        Type 'string' is not assignable to type 'number'.
+(21,7): error TS2322: Type 'unknown' is not assignable to type '{ n: number; }'.
+(25,33): error TS2322: Type 'string' is not assignable to type 'number'.
