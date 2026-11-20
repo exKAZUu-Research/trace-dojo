@@ -1,6 +1,4 @@
-// code-gauge-allow-file fileNcss 631 -- Central checker coordinates type inference and compilation passes.
-
-// code-gauge-allow-file fileNcss 628 -- The checker core owns body, entry point, and type obligations.
+// code-gauge-allow-file fileNcss 631 -- The checker core owns body, entry point, and type obligations.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ExecutionBudget } from '../interpreter/limits';
 import { Annotations, type Coercion, type FnContext, type LocalVar, type PathRes } from './annotations';

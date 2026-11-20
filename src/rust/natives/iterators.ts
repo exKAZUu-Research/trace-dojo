@@ -17,6 +17,7 @@ import {
 import { iteratorCapability } from '../traits';
 import { shallow, type Type } from '../types';
 import {
+  CellPlace,
   DONE,
   ElementPlace,
   EnumValue,
@@ -210,6 +211,17 @@ interface AdapterParts {
   remaining?: () => number;
 }
 
+class IteratorCallback {
+  constructor(
+    readonly value: Value,
+    private readonly type: Type
+  ) {}
+
+  clone(): IteratorCallback {
+    return new IteratorCallback(cloneValue(this.type, this.value), this.type);
+  }
+}
+
 /**
  * An adapter of a source iterator whose own state (`state`, copied for clones) and the source decide its elements;
  * `forkState` copies state that holds iterators.
@@ -218,15 +230,25 @@ function adapter<S extends object>(
   source: IterValue,
   state: S,
   parts: (source: IterValue, state: S) => AdapterParts,
-  forkState: (state: S, cloneItem: (value: Value) => Value) => S = (s) => ({ ...s }),
+  forkState: (state: S, cloneItem: (value: Value) => Value) => S = forkAdapterState,
   folds = false
 ): IterValue {
   const { next, nextBack, remaining } = parts(source, state);
-  const iter = new IterValue(next, nextBack, remaining, [source, state]);
+  const roots: unknown[] = [source, state];
+  if ('callback' in state && state.callback instanceof IteratorCallback) roots.push(state.callback.value);
+  if ('place' in state) roots.push(state.place);
+  const iter = new IterValue(next, nextBack, remaining, roots);
   // An adapter whose `fold` folds its source (`Map`, `Filter`, ...) takes its source's elements as it folds.
   if (folds && source.foldNext) iter.foldNext = parts(foldingView(source), state).next;
   iter.fork = (cloneItem) => adapter(forkIter(source, cloneItem), forkState(state, cloneItem), parts, forkState, folds);
   return iter;
+}
+
+function forkAdapterState<S extends object>(state: S): S {
+  if ('callback' in state && state.callback instanceof IteratorCallback) {
+    return { ...state, callback: state.callback.clone() };
+  }
+  return { ...state };
 }
 
 /** The iterator as a fold takes it: its pushed-back elements, then its `foldNext`. */
@@ -247,54 +269,64 @@ function forkIter(iter: IterValue, cloneItem: (value: Value) => Value): IterValu
 }
 
 /** An adapter that maps each element, from either end. */
-function mapped(source: IterValue, map: (item: Value) => Next): IterValue {
-  const take = (item: Next): Next => (item === DONE ? DONE : map(item));
+function mapped(
+  source: IterValue,
+  map: (item: Value, callback: Value) => Next,
+  callback?: IteratorCallback
+): IterValue {
   return adapter(
     source,
-    {},
-    (src) => ({
-      next: () => take(nextOf(src)),
-      nextBack: src.nextBack && (() => take(src.nextBack!())),
-      remaining: src.remaining,
-    }),
+    { callback },
+    (src, state) => {
+      const take = (item: Next): Next => (item === DONE ? DONE : map(item, state.callback?.value));
+      return {
+        next: () => take(nextOf(src)),
+        nextBack: src.nextBack && (() => take(src.nextBack!())),
+        remaining: src.remaining,
+      };
+    },
     undefined,
     true
   );
 }
 
 /** An adapter that finds the next element `pick` keeps (mapped), from either end. */
-function picked(ctx: NativeContext, source: IterValue, pick: (item: Value) => Next): IterValue {
-  const find = (take: () => Next): Next => {
+function picked(
+  ctx: NativeContext,
+  source: IterValue,
+  callback: IteratorCallback,
+  pick: (item: Value, callback: Value) => Next
+): IterValue {
+  const find = (take: () => Next, f: Value): Next => {
     for (;;) {
       ctx.runtime.spend();
       const item = take();
       if (item === DONE) return DONE;
-      const result = pick(item);
+      const result = pick(item, f);
       if (result !== DONE) return result;
     }
   };
   return adapter(
     source,
-    {},
-    (src) => ({
-      next: () => find(() => nextOf(src)),
-      nextBack: src.nextBack && (() => find(src.nextBack!)),
+    { callback },
+    (src, state) => ({
+      next: () => find(() => nextOf(src), state.callback.value),
+      nextBack: src.nextBack && (() => find(src.nextBack!, state.callback.value)),
     }),
     undefined,
     true
   );
 }
 
-/** An adapter that yields the elements until `stop` (given each element) returns DONE for one, then nothing. */
-function until(source: IterValue, map: (item: Value) => Next): IterValue {
-  return adapter(source, { done: false }, (src, state) => ({
+function takeWhile(ctx: NativeContext, source: IterValue, callback: IteratorCallback): IterValue {
+  return adapter(source, { callback, done: false }, (src, state) => ({
     next: () => {
       if (state.done) return DONE;
       const item = nextOf(src);
       if (item === DONE) return DONE;
-      const result = map(item);
-      if (result === DONE) state.done = true;
-      return result;
+      if (truthy(call(ctx, state.callback.value, [item]))) return item;
+      state.done = true;
+      return DONE;
     },
   }));
 }
@@ -313,10 +345,15 @@ function optionValue(value: Value): Next {
  * back, which each end falls back on once the outer iterator runs out.
  */
 // code-gauge-allow functionCognitiveComplexity 23 -- Walks the inner iterators from either end, as `FlattenCompat` does.
-function flattened(ctx: NativeContext, source: IterValue, inner: (item: Value) => IterValue): IterValue {
+function flattened(
+  ctx: NativeContext,
+  source: IterValue,
+  inner: (item: Value, callback: Value) => IterValue,
+  callback?: IteratorCallback
+): IterValue {
   return adapter<FlattenState>(
     source,
-    { front: undefined, back: undefined, outerDone: false },
+    { front: undefined, back: undefined, outerDone: false, callback },
     (src, state) => {
       const take = (end: End): Next => {
         for (;;) {
@@ -329,7 +366,7 @@ function flattened(ctx: NativeContext, source: IterValue, inner: (item: Value) =
             state.outerDone = true;
             return takeInner(state, end === 'front' ? 'back' : 'front');
           }
-          state[end] = inner(next);
+          state[end] = inner(next, state.callback?.value);
         }
       };
       return { next: () => take('front'), nextBack: src.nextBack && (() => take('back')) };
@@ -338,6 +375,7 @@ function flattened(ctx: NativeContext, source: IterValue, inner: (item: Value) =
       front: state.front && forkIter(state.front, cloneItem),
       back: state.back && forkIter(state.back, cloneItem),
       outerDone: state.outerDone,
+      callback: state.callback?.clone(),
     })
   );
 }
@@ -349,6 +387,7 @@ interface FlattenState {
   front: IterValue | undefined;
   back: IterValue | undefined;
   outerDone: boolean;
+  callback: IteratorCallback | undefined;
 }
 
 function fromEnd(iter: IterValue, end: End): Next {
@@ -378,29 +417,43 @@ define({
     const item = iterOf(self).nextBack!();
     return option(ctx, item === DONE ? undefined : item, item !== DONE);
   },
-  'IterImpl<_, _>::map': ([self, f], ctx) => mapped(iterOf(self), (item) => call(ctx, f, [item])),
+  'IterImpl<_, _>::map': ([self, f], ctx) =>
+    mapped(iterOf(self), (item, callback) => call(ctx, callback, [item]), new IteratorCallback(f, ctx.typeArgs[3])),
   'IterImpl<_, _>::filter': ([self, f], ctx) =>
-    picked(ctx, iterOf(self), (item) => (truthy(call(ctx, f, [item])) ? item : DONE)),
+    picked(ctx, iterOf(self), new IteratorCallback(f, ctx.typeArgs[2]), (item, callback) =>
+      truthy(call(ctx, callback, [item])) ? item : DONE
+    ),
   'IterImpl<_, _>::filter_map': ([self, f], ctx) =>
     adapterDebug(
       ctx,
       'FilterMap',
-      picked(ctx, iterOf(self), (item) => optionValue(call(ctx, f, [item])))
+      picked(ctx, iterOf(self), new IteratorCallback(f, ctx.typeArgs[3]), (item, callback) =>
+        optionValue(call(ctx, callback, [item]))
+      )
     ),
   'IterImpl<_, _>::map_while': ([self, f], ctx) =>
     adapterDebug(
       ctx,
       'MapWhile',
-      mapped(iterOf(self), (item) => optionValue(call(ctx, f, [item])))
+      mapped(
+        iterOf(self),
+        (item, callback) => optionValue(call(ctx, callback, [item])),
+        new IteratorCallback(f, ctx.typeArgs[3])
+      )
     ),
   'IterImpl<_, _>::take_while': ([self, f], ctx) => {
-    const iter = until(iterOf(self), (item) => (truthy(call(ctx, f, [item])) ? item : DONE));
+    const iter = takeWhile(ctx, iterOf(self), new IteratorCallback(f, ctx.typeArgs[2]));
     return adapterDebug(ctx, 'TakeWhile', iter, (_show, target) => [
       ['flag', numberPart((target.roots[1] as { done: boolean }).done)],
     ]);
   },
   'IterImpl<_, _>::flat_map': ([self, f], ctx) => {
-    const iter = flattened(ctx, iterOf(self), (item) => innerIter(ctx, call(ctx, f, [item]), ctx.typeArgs[2]));
+    const iter = flattened(
+      ctx,
+      iterOf(self),
+      (item, callback) => innerIter(ctx, call(ctx, callback, [item]), ctx.typeArgs[2]),
+      new IteratorCallback(f, ctx.typeArgs[3])
+    );
     return flattenDebug(ctx, 'FlatMap', iter, ctx.typeArgs[2]);
   },
   'IterImpl<_, _>::flatten': ([self], ctx) => {
@@ -485,14 +538,14 @@ define({
       remaining: () => Math.max(0, lengthOf(src) - state.toSkip),
     })),
   'IterImpl<_, _>::skip_while': ([self, f], ctx) => {
-    const state = { skipping: true };
+    const state = { skipping: true, callback: new IteratorCallback(f, ctx.typeArgs[2]) };
     const iter = adapter(iterOf(self), state, (src, st) => ({
       next: () => {
         for (;;) {
           ctx.runtime.spend();
           const item = nextOf(src);
           if (item === DONE) return DONE;
-          if (st.skipping && truthy(call(ctx, f, [item]))) continue;
+          if (st.skipping && truthy(call(ctx, st.callback.value, [item]))) continue;
           st.skipping = false;
           return item;
         }
@@ -577,10 +630,14 @@ define({
     adapterDebug(
       ctx,
       'Inspect',
-      mapped(iterOf(self), (item) => {
-        call(ctx, f, [item]);
-        return item;
-      })
+      mapped(
+        iterOf(self),
+        (item, callback) => {
+          call(ctx, callback, [item]);
+          return item;
+        },
+        new IteratorCallback(f, ctx.typeArgs[2])
+      )
     ),
   'IterImpl<_, _>::cycle': ([self], ctx) => {
     // `Cycle` keeps a clone of the iterator as it was, which it clones again to go round once more.
@@ -615,16 +672,23 @@ define({
     });
   },
   'IterImpl<_, _>::scan': ([self, initial, f], ctx) => {
-    const state = { value: initial };
-    const place = { isPlace: true as const, get: () => state.value, set: (v: Value) => void (state.value = v) };
-    const iter = adapter(iterOf(self), state, (src) => ({
-      next: () => {
-        const item = nextOf(src);
-        return item === DONE ? DONE : optionValue(call(ctx, f, [place, item]));
-      },
-    }));
+    const state = { place: new CellPlace(initial), callback: new IteratorCallback(f, ctx.typeArgs[4]) };
+    const iter = adapter(
+      iterOf(self),
+      state,
+      (src, current) => ({
+        next: () => {
+          const item = nextOf(src);
+          return item === DONE ? DONE : optionValue(call(ctx, current.callback.value, [current.place, item]));
+        },
+      }),
+      (current) => ({
+        place: new CellPlace(cloneValue(ctx.typeArgs[2], current.place.value)),
+        callback: current.callback.clone(),
+      })
+    );
     return adapterDebug(ctx, 'Scan', iter, (show, target) => [
-      ['state', (indent) => show((target.roots[1] as typeof state).value, ctx.typeArgs[2], indent)],
+      ['state', (indent) => show((target.roots[1] as typeof state).place.value, ctx.typeArgs[2], indent)],
     ]);
   },
 });
@@ -998,12 +1062,9 @@ define({
     });
   },
   'std::iter::empty': () => described(ownedIter([]), () => () => 'Empty'),
-  'std::iter::from_fn': ([f], ctx) => {
-    const iter = new IterValue(() => optionValue(call(ctx, f, [])));
-    iter.fork = () => iter;
-    return described(iter, () => () => 'FromFn');
-  },
-  'std::iter::successors': ([first, f], ctx) => successors(ctx, deref(first) as EnumValue, f),
+  'std::iter::from_fn': ([f], ctx) => fromFunction(ctx, new IteratorCallback(f, ctx.typeArgs[1])),
+  'std::iter::successors': ([first, f], ctx) =>
+    successors(ctx, deref(first) as EnumValue, new IteratorCallback(f, ctx.typeArgs[1])),
 });
 
 /** `repeat` and `repeat_n`: clones of a value, `count` of them. */
@@ -1024,19 +1085,37 @@ function repeated(ctx: NativeContext, value: Value, count: number): IterValue {
   });
 }
 
-function successors(ctx: NativeContext, start: EnumValue, f: Value): IterValue {
-  let current = start;
-  const iter = new IterValue(() => {
-    if (current.variant === 0) return DONE;
-    const value = current.fields[0];
-    current = deref(call(ctx, f, [value])) as EnumValue;
-    return value;
-  });
-  iter.fork = () => successors(ctx, current, f);
+function fromFunction(ctx: NativeContext, callback: IteratorCallback): IterValue {
+  const iter = new IterValue(() => optionValue(call(ctx, callback.value, [])), undefined, undefined, [callback.value]);
+  iter.fork = () => fromFunction(ctx, callback.clone());
+  return described(iter, () => () => 'FromFn');
+}
+
+function successors(ctx: NativeContext, start: EnumValue, callback: IteratorCallback): IterValue {
+  const next = new CellPlace(start);
+  const iter = new IterValue(
+    () => {
+      const current = next.value as EnumValue;
+      if (current.variant === 0) return DONE;
+      const value = current.fields[0];
+      next.value = deref(call(ctx, callback.value, [value])) as EnumValue;
+      return value;
+    },
+    undefined,
+    undefined,
+    [callback.value, next]
+  );
+  iter.fork = (cloneItem) => {
+    const current = next.value as EnumValue;
+    const cloned =
+      current.variant === 0 ? current : new EnumValue(current.def, current.variant, [cloneItem(current.fields[0])]);
+    return successors(ctx, cloned, callback.clone());
+  };
   return described(iter, (show, item) => {
-    const next = current.variant === 0 ? undefined : current.fields[0];
+    const current = next.value as EnumValue;
+    const value = current.variant === 0 ? undefined : current.fields[0];
     return fieldsPart('Successors', [
-      ['next', optionPart(next === undefined ? undefined : (indent) => show(next, item, indent))],
+      ['next', optionPart(value === undefined ? undefined : (indent) => show(value, item, indent))],
     ]);
   });
 }

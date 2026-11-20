@@ -75,7 +75,6 @@ function lowerConstant(def: ConstDef, annotations: Annotations, active: Set<Cons
 }
 
 // code-gauge-allow functionNcss 34 -- One case per structural constant expression.
-
 function lowerConstantExpr(expr: Expr, annotations: Annotations, active: Set<ConstDef>): Pat {
   const lower = (value: Expr): Pat => lowerConstantExpr(value, annotations, active);
   switch (expr.kind) {

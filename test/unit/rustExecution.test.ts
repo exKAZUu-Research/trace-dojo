@@ -681,6 +681,32 @@ fn main() {
   });
 });
 
+test('clones closure captures and adapter state independently at the iterator position', () => {
+  const program = `fn main() {
+    let mut n = 0;
+    let mut a = (0..3).map(move |_| { n += 1; n });
+    let first = a.next();
+    let b = a.clone();
+    println!("{:?} {:?} {:?}", first, a.collect::<Vec<_>>(), b.collect::<Vec<_>>());
+
+    let mut m = 0;
+    let make = move || { m += 1; Some(m) };
+    let a = std::iter::from_fn(make);
+    let b = a.clone();
+    println!("{:?} {:?}", a.take(2).collect::<Vec<_>>(), b.take(2).collect::<Vec<_>>());
+
+    let mut n = 0;
+    let a = (0..3).scan(0, move |state, _| { n += 1; *state += n; Some(*state) });
+    let b = a.clone();
+    println!("{:?} {:?}", a.collect::<Vec<_>>(), b.collect::<Vec<_>>());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'Some(1) [2, 3] [2, 3]\n[1, 2] [1, 2]\n[1, 3, 6] [1, 3, 6]\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

@@ -1,5 +1,5 @@
 import type { Span } from './ast';
-// code-gauge-allow-file fileNcss 470 -- Keeps type-directed arithmetic, comparison, and copying with their shared runtime hooks.
+// code-gauge-allow-file fileNcss 472 -- Keeps type-directed arithmetic, comparison, and copying with their shared runtime hooks.
 import { bigintToF32 } from './floatFormat';
 import { normalize } from './infer';
 import { RustPanic } from './runtime';
