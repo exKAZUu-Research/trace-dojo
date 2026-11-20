@@ -1290,3 +1290,13 @@ int main() { constexpr double x = ${value}; }`;
     diagnostics: [{ row: 1, message: expect.stringContaining('定数式') }],
   });
 });
+
+test.each(['new X[0]{}', 'new X[0]', 'new X[0]()', 'new X[2]{}'])(
+  'accepts %s for a class whose destructor is declared but not defined',
+  (allocation) => {
+    const program = `#include <iostream>
+struct X { ~X(); };
+int main() { ${allocation}; std::cout << "accepted"; }`;
+    expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', stdout: 'accepted' });
+  }
+);

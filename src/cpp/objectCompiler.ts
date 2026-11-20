@@ -340,6 +340,8 @@ interface ObjectUseContext {
   sourceIsConst?: boolean;
   baseObject?: ClassInfo;
   requiresComplete?: boolean;
+  /** Checks a destructor's access without requiring its definition, as a destruction no code may run needs. */
+  accessOnly?: boolean;
 }
 
 /** Making, copying, and destroying objects, converting values, and calling functions. */
@@ -952,6 +954,11 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     else this.checkObjectUse(type, operation, row, context);
   }
 
+  /** Stops when a type's destructor, or one it implies, is inaccessible here; unlike a destruction, needs no definition. */
+  requireDestructorAccess(type: Type, row: number): void {
+    this.checkObjectUse(type, 'destroy', row, { access: this.accessClass, seen: new Set(), accessOnly: true });
+  }
+
   requireLibraryObjectUse(
     type: Type,
     operation: 'copy' | 'assign' | 'destroy' | 'move' | 'move-assign',
@@ -1021,7 +1028,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     }
     if (type.kind !== 'class') return;
     const { cls } = type;
-    const { access, seen, baseObject, requiresComplete } = context;
+    const { access, seen, baseObject, requiresComplete, accessOnly } = context;
     if (requiresComplete && !cls.isComplete) {
       this.checkCompleteWhenUsed(cls, row, () =>
         this.checkObjectUse(type, operation, row, { ...context, seen: new Set(seen) })
@@ -1042,8 +1049,8 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
 
     this.checkLibraryStorage(cls, row);
     if (operation === 'copy' && this.checkCopyOperation(type, row, context)) return;
-    if (operation === 'destroy' && destructor) this.checkDefined(destructor, row);
-    const nested = { access: cls, seen, sourceIsConst: cls.implicitCopyFromConst, requiresComplete };
+    if (operation === 'destroy' && destructor && !accessOnly) this.checkDefined(destructor, row);
+    const nested = { access: cls, seen, sourceIsConst: cls.implicitCopyFromConst, requiresComplete, accessOnly };
     if (cls.base) this.checkObjectUse(classType(cls.base), operation, row, { ...nested, baseObject: cls });
     for (const field of cls.ownFields) this.checkObjectUse(field.type, operation, row, nested);
     for (const owned of cls.library?.ownedTypes ?? []) {

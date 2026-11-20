@@ -2026,7 +2026,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
           ? (frame, target) => valueInitialize(frame, false, target instanceof CObject ? target : undefined)
           : this.defaultInitializer(elementType, row)
       : undefined;
-    const destroy = this.destroyerOf(elementType, row);
+    this.requireDestructorAccess(elementType, row);
+    const destroy = this.destroyerOf(elementType);
     return {
       type: pointerTo(elementType),
       isLvalue: false,
