@@ -1,6 +1,9 @@
 import { executeCProgram } from '../c/execute';
 import { findCTraceAnnotations } from '../c/parse';
 import { traceCProgram } from '../c/trace';
+import { executeCSharpProgram } from '../csharp/execute';
+import { findCSharpTraceAnnotations } from '../csharp/parse';
+import { traceCSharpProgram } from '../csharp/trace';
 import { executeGoProgram } from '../go/execute';
 import { findGoTraceAnnotations } from '../go/parse';
 import { traceGoProgram } from '../go/trace';
@@ -84,6 +87,11 @@ const interpreters = {
     findTraceAnnotations: findHaskellTraceAnnotations,
     record: traceHaskellProgram,
     execute: executeHaskellProgram,
+  },
+  csharp: {
+    findTraceAnnotations: findCSharpTraceAnnotations,
+    record: traceCSharpProgram,
+    execute: executeCSharpProgram,
   },
 } satisfies Record<string, Interpreter>;
 
