@@ -270,7 +270,6 @@ function addDeclaredProperties(cls: PhpClass, properties: PropertyDeclAst[]): vo
   for (const property of properties) addProperty(cls, property);
 }
 
-// code-gauge-allow functionCognitiveComplexity 24 -- Applies PHP property override checks in diagnostic order.
 function checkPropertyOverride(
   cls: PhpClass,
   inherited: PropDecl,
@@ -288,22 +287,15 @@ function checkPropertyOverride(
       cls.declaredRow
     );
   }
-  if (visibilityRank(ast.visibility) < visibilityRank(inherited.visibility)) {
-    throw new FatalError(
-      `Access level to ${cls.name}::$${ast.name} must be ${inherited.visibility === 'public' ? 'public' : 'protected'} (as in class ${inherited.cls.name})${inherited.visibility === 'protected' ? ' or weaker' : ''}`,
-      cls.declaredRow
-    );
-  }
-  if (inherited.isReadonly !== ast.isReadonly)
+  if (inherited.isReadonly !== ast.isReadonly && !inherited.declarationAst?.isAbstract)
     throw new FatalError(
       `Cannot redeclare ${inherited.isReadonly ? 'readonly' : 'non-readonly'} property ${inherited.cls.name}::$${ast.name} as ${ast.isReadonly ? 'readonly' : 'non-readonly'} ${cls.name}::$${ast.name}`,
       cls.declaredRow
     );
-  const setter = effectiveSetVisibility(ast);
-  const parentSetter = effectiveSetVisibility(inherited);
-  if (visibilityRank(setter) < visibilityRank(parentSetter)) {
+  checkSetterOverride(cls, inherited, ast);
+  if (visibilityRank(ast.visibility) < visibilityRank(inherited.visibility)) {
     throw new FatalError(
-      `Set access level of ${cls.name}::$${ast.name} must be ${parentSetter === 'public' ? 'omitted' : `${parentSetter}(set)`} (as in class ${inherited.cls.name})${parentSetter === 'protected' ? ' or weaker' : ''}`,
+      `Access level to ${cls.name}::$${ast.name} must be ${inherited.visibility} (as in class ${inherited.cls.name})${inherited.visibility === 'protected' ? ' or weaker' : ''}`,
       cls.declaredRow
     );
   }
@@ -311,6 +303,18 @@ function checkPropertyOverride(
     checkHookSignatures(inherited, ast, cls, cls.declaredRow);
     propertyTypeError(inherited, cls, ast.name, cls.declaredRow);
   }
+}
+
+function checkSetterOverride(cls: PhpClass, inherited: PropDecl, ast: PropertyDeclAst): void {
+  const setter = effectiveSetVisibility(ast);
+  if (setter === ast.visibility || (inherited.isVirtual && inherited.hooks && !inherited.hooks.set)) return;
+  const parentSetter = effectiveSetVisibility(inherited);
+  if (visibilityRank(setter) >= visibilityRank(parentSetter)) return;
+  const parentAsymmetric = parentSetter !== inherited.visibility;
+  throw new FatalError(
+    `Set access level of ${cls.name}::$${ast.name} must be ${parentAsymmetric ? `${parentSetter}(set)` : 'omitted'} (as in class ${inherited.cls.name})${parentAsymmetric ? ' or weaker' : ''}`,
+    cls.declaredRow
+  );
 }
 
 // code-gauge-allow functionCognitiveComplexity 27 -- Populates property slots, defaults and hooks together.

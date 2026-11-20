@@ -2254,6 +2254,30 @@ test.each([
 });
 
 test.each([
+  ['public static int $x', 'protected readonly int $x', 'Cannot redeclare static A::$x as non static B::$x'],
+  ['public readonly int $x', 'protected int $x', 'Cannot redeclare readonly property A::$x as non-readonly B::$x'],
+  ['public int $x', 'protected readonly int $x', 'Cannot redeclare non-readonly property A::$x as readonly B::$x'],
+  ['public int $x', 'protected private(set) int $x', 'Set access level of B::$x must be omitted (as in class A)'],
+  ['protected int $x', 'public private(set) int $x', 'Set access level of B::$x must be omitted (as in class A)'],
+  ['public readonly int $x', 'private readonly int $x', 'Access level to B::$x must be public (as in class A)'],
+])('reports the first incompatible inherited property modifier: %s to %s', (parent, child, message) => {
+  expect(run(`<?php\nclass A { ${parent}; }\nclass B extends A { ${child}; }\necho "unreachable";`)).toMatchObject({
+    kind: 'executed',
+    stdout: `\nFatal error: ${message} in /main.php on line 3\nStack trace:\n#0 {main}\n`,
+  });
+});
+
+test.each([
+  ['abstract class A { public abstract int $x { get; } }', 'public readonly int $x'],
+  ['class A { public int $x { get => 1; } }', 'public protected(set) int $x'],
+])('allows a storage property to satisfy the inherited get-only property: %s', (parent, child) => {
+  expect(run(`<?php ${parent} class B extends A { ${child}; } echo "accepted";`)).toMatchObject({
+    kind: 'executed',
+    stdout: 'accepted',
+  });
+});
+
+test.each([
   'function f(true $x=![1]){}',
   'class A{public true $x=![1];}',
   'function f(false $x=!![1]){}',
