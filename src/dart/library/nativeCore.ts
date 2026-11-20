@@ -249,40 +249,84 @@ export function safeToStringOf(runtime: Runtime, value: Value): string {
   return safeToString(runtime, value);
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- A transcription of the SDK's algorithm, case by case.
 define('NoSuchMethodError._describe', (runtime, _receiver, [receiver, invocation, found]) => {
   const field = (name: string): Value => runtime.getProperty(invocation, name, undefined);
   const symbolName = scopedMemberName('_name', 'dart:core');
   const member = runtime.getProperty(field('memberName'), symbolName, undefined) as string;
   const kind = field('isGetter') === true ? 'getter' : field('isSetter') === true ? 'setter' : 'method';
-  const parts = (field('positionalArguments') as DartList).elements.map((value) => safeToStringOf(runtime, value));
-  const named = field('namedArguments') as DartObject;
-  const namedParts: [string, string][] = [];
-  for (const key of iterableValues(runtime, runtime.getProperty(named, 'keys', undefined))) {
-    const keyName = runtime.getProperty(key, symbolName, undefined) as string;
-    const value = runtime.invoke(named, '[]', { positional: [key], named: undefined }, [], undefined);
-    namedParts.push([keyName, `${keyName}: ${safeToStringOf(runtime, value)}`]);
-  }
-  // The VM lists named arguments by name.
-  for (const [, part] of namedParts.toSorted(([a], [b]) => (a < b ? -1 : 1))) parts.push(part);
-  const typeArgs = (field('typeArguments') as DartList).elements.map((type) => stringOf(runtime, type));
-  const typeText = typeArgs.length > 0 ? `<${typeArgs.join(', ')}>` : '';
-  const positional = parts.join(', ');
-  const call =
-    kind === 'getter' ? member : kind === 'setter' ? `${member}${positional}` : `${member}${typeText}(${positional})`;
+  const call = describeInvocation(runtime, member, kind, field);
+  const output = new BoundedStringParts(runtime);
   if (receiver === undefined) {
-    const what = kind === 'getter' ? 'getter' : kind === 'setter' ? 'setter' : 'method';
-    return `NoSuchMethodError: The ${what} '${member}' was called on null.\nReceiver: null\nTried calling: ${call}`;
-  }
-  const what = kind === 'getter' ? 'getter' : kind === 'setter' ? 'setter' : 'method';
-  if (typeof found === 'string') {
-    // A member whose parameters the arguments do not fit names the receiver's type with its type arguments.
+    output.append(`NoSuchMethodError: The ${kind} '${member}' was called on null.`);
+  } else {
     const typeName = vmTypeString(runtime.runtimeTypeOf(receiver));
-    return `NoSuchMethodError: Class '${typeName}' has no instance ${what} '${member}' with matching arguments.\nReceiver: ${safeToStringOf(runtime, receiver)}\nTried calling: ${call}\nFound: ${found}`;
+    const className = typeof found === 'string' ? typeName : typeName.replace(/<.*$/, '');
+    output.append(`NoSuchMethodError: Class '${className}' has no instance ${kind} '${member}'`);
+    output.append(typeof found === 'string' ? ' with matching arguments.' : '.');
   }
-  const className = vmTypeString(runtime.runtimeTypeOf(receiver)).replace(/<.*$/, '');
-  return `NoSuchMethodError: Class '${className}' has no instance ${what} '${member}'.\nReceiver: ${safeToStringOf(runtime, receiver)}\nTried calling: ${call}`;
+  output.append('\nReceiver: ');
+  output.append(safeToStringOf(runtime, receiver));
+  output.append('\nTried calling: ');
+  output.append(call);
+  if (receiver !== undefined && typeof found === 'string') {
+    output.append('\nFound: ');
+    output.append(found);
+  }
+  return output.text();
 });
+
+function describeInvocation(
+  runtime: Runtime,
+  member: string,
+  kind: 'method' | 'getter' | 'setter',
+  field: (name: string) => Value
+): string {
+  const call = new BoundedStringParts(runtime);
+  call.append(member);
+  if (kind === 'method') {
+    const types = (field('typeArguments') as DartList).elements;
+    if (types.length > 0) {
+      call.append('<');
+      for (const [index, type] of types.entries()) {
+        if (index > 0) call.append(', ');
+        call.append(stringOf(runtime, type));
+      }
+      call.append('>');
+    }
+    call.append('(');
+  }
+  if (kind !== 'getter') appendInvocationArguments(runtime, call, field);
+  if (kind === 'method') call.append(')');
+  return call.text();
+}
+
+function appendInvocationArguments(runtime: Runtime, output: BoundedStringParts, field: (name: string) => Value): void {
+  let separator = '';
+  for (const value of (field('positionalArguments') as DartList).elements) {
+    output.append(separator);
+    output.append(safeToStringOf(runtime, value));
+    separator = ', ';
+  }
+  const named = field('namedArguments') as DartObject;
+  const symbolName = scopedMemberName('_name', 'dart:core');
+  const namedText = new BoundedStringParts(runtime);
+  const parts: [string, string][] = [];
+  for (const key of iterableValues(runtime, runtime.getProperty(named, 'keys', undefined))) {
+    const name = runtime.getProperty(key, symbolName, undefined) as string;
+    const value = runtime.invoke(named, '[]', { positional: [key], named: undefined }, [], undefined);
+    const text = safeToStringOf(runtime, value);
+    namedText.append(name);
+    namedText.append(text);
+    parts.push([name, text]);
+  }
+  for (const [name, text] of parts.toSorted(([a], [b]) => (a < b ? -1 : 1))) {
+    output.append(separator);
+    output.append(name);
+    output.append(': ');
+    output.append(text);
+    separator = ', ';
+  }
+}
 
 // Top-level functions
 

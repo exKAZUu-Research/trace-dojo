@@ -1,10 +1,11 @@
-// code-gauge-allow-file fileNcss 457 -- Keep runtime dispatch alongside its reified types, call frames, and roots.
+// code-gauge-allow-file fileNcss 477 -- Keep runtime dispatch alongside its reified types, call frames, and roots.
 import { ExecutionBudget, ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import type { TracedFrame, TracedRuntime } from '../interpreter/traceRecorder';
 import { TurtleWorld } from '../interpreter/turtleWorld';
 import { type ClassInfo, type ConstructorInfo, type Member, type MethodMember, sourceMemberName } from './classes';
+import { BoundedStringParts } from './library/boundedStringParts';
 import {
   asInstanceOf,
   boundOf,
@@ -545,11 +546,23 @@ export class Runtime implements TracedRuntime<Frame> {
 
   private throwClosureMismatch(closure: DartClosure, args: Arguments, typeArgs: readonly DartType[]): never {
     const name = closure.description.qualifiedName ?? closure.description.name ?? '<anonymous closure>';
-    const types = typeArgs.length > 0 ? `<${typeArgs.map(vmTypeString).join(', ')}>` : '';
-    const call = `${name}${types}(${describeArguments(this, args)})`;
-    return this.throwError('NoSuchMethodError', '_withMessage', [
-      `NoSuchMethodError: Closure call with mismatched arguments: function '${name}'\nReceiver: ${this.links.stringify(this, closure)}\nTried calling: ${call}\nFound: ${name}${vmTypeString(closure.type)}`,
-    ]);
+    const output = new BoundedStringParts(this);
+    output.append(`NoSuchMethodError: Closure call with mismatched arguments: function '${name}'\nReceiver: `);
+    output.append(this.links.stringify(this, closure));
+    output.append(`\nTried calling: ${name}`);
+    if (typeArgs.length > 0) {
+      output.append('<');
+      for (const [index, type] of typeArgs.entries()) {
+        if (index > 0) output.append(', ');
+        output.append(vmTypeString(type));
+      }
+      output.append('>');
+    }
+    output.append('(');
+    appendCallArguments(this, output, args);
+    output.append(`)\nFound: ${name}`);
+    output.append(vmTypeString(closure.type));
+    return this.throwError('NoSuchMethodError', '_withMessage', [output.text()]);
   }
 
   /**
@@ -762,11 +775,21 @@ function vmSignature(memberName: string, member: Member & { kind: 'method' }): s
 }
 
 /** Arguments as `Tried calling:` lists them: positional ones in order, then named ones by name. */
-function describeArguments(runtime: Runtime, args: Arguments): string {
-  const parts = args.positional.map((value) => runtime.links.stringify(runtime, value));
-  const named = [...(args.named ?? new Map<string, Value>())].toSorted(([a], [b]) => (a < b ? -1 : 1));
-  for (const [key, value] of named) parts.push(`${key}: ${runtime.links.stringify(runtime, value)}`);
-  return parts.join(', ');
+function appendCallArguments(runtime: Runtime, output: BoundedStringParts, args: Arguments): void {
+  let separator = '';
+  for (const value of args.positional) {
+    output.append(separator);
+    output.append(runtime.links.stringify(runtime, value));
+    separator = ', ';
+  }
+  const named = [...(args.named ?? [])].toSorted(([a], [b]) => (a < b ? -1 : 1));
+  for (const [key, value] of named) {
+    output.append(separator);
+    output.append(key);
+    output.append(': ');
+    output.append(runtime.links.stringify(runtime, value));
+    separator = ', ';
+  }
 }
 
 /**

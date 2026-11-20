@@ -34,6 +34,7 @@ import {
   type TypeAlias,
 } from './environment';
 import { lateFieldGetter, lateFieldSetter } from './lateFields';
+import { BoundedStringParts } from './library/boundedStringParts';
 import { MemberCompiler } from './memberCompiler';
 import { type DartThrow, Frame, type FunctionInfo, type Runtime, type TypeEnv } from './runtime';
 import type { FunctionContext } from './scope';
@@ -1714,12 +1715,22 @@ function missingExternal(key: string, kind: 'method' | 'getter' | 'setter'): Cal
   const owner = dot === -1 ? undefined : key.slice(0, dot);
   const name = key.slice(dot + 1);
   return (runtime, _receiver, args) => {
-    const shown = args.positional.map((value) => runtime.links.stringify(runtime, value)).join(', ');
-    const call = kind === 'method' ? `${name}(${shown})` : name;
-    const message = owner
-      ? `NoSuchMethodError: No static ${kind} '${name}' declared in class '${owner}'.\nReceiver: ${owner}\nTried calling: ${call}`
-      : `NoSuchMethodError: No top-level ${kind} '${name}' declared.\nReceiver: top-level\nTried calling: ${call}`;
-    return runtime.throwError('NoSuchMethodError', '_withMessage', [message]);
+    const output = new BoundedStringParts(runtime);
+    output.append(
+      owner
+        ? `NoSuchMethodError: No static ${kind} '${name}' declared in class '${owner}'.\nReceiver: ${owner}`
+        : `NoSuchMethodError: No top-level ${kind} '${name}' declared.\nReceiver: top-level`
+    );
+    output.append(`\nTried calling: ${name}`);
+    if (kind === 'method') {
+      output.append('(');
+      for (const [index, value] of args.positional.entries()) {
+        if (index > 0) output.append(', ');
+        output.append(runtime.links.stringify(runtime, value));
+      }
+      output.append(')');
+    }
+    return runtime.throwError('NoSuchMethodError', '_withMessage', [output.text()]);
   };
 }
 

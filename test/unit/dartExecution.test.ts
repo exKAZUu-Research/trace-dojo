@@ -2696,6 +2696,25 @@ test('escaped error text respects the string limit and includes its delimiters',
   });
 });
 
+test('failed calls bound the complete description of their arguments', () => {
+  const program = `external void missing(String left, String right);
+void main() {
+  final text = 'x' * 600000;
+  dynamic object = Object();
+  try { object.missing(1, z: 3, a: 2); } catch (error) { print(error); }
+  try { object.missing(text, text); } catch (error) { print(error.runtimeType); }
+  try { object.missing(z: text, a: text); } catch (error) { print(error.runtimeType); }
+  dynamic f = () {};
+  try { f(text, text); } catch (error) { print(error.runtimeType); }
+  try { missing(text, text); } catch (error) { print(error.runtimeType); }
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      "NoSuchMethodError: Class 'Object' has no instance method 'missing'.\nReceiver: Instance of 'Object'\nTried calling: missing(1, a: 2, z: 3)\nOutOfMemoryError\nOutOfMemoryError\nOutOfMemoryError\nOutOfMemoryError\n",
+  });
+});
+
 test('unsupported SDK exports respect import prefixes and visibility', () => {
   for (const [declaration, body] of [
     ["import 'dart:convert';", "print(ascii.encode('A'));"],
