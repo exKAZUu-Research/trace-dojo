@@ -51,6 +51,22 @@ int main() { std::${container} elements; }`;
 });
 
 test.each([
+  'std::set<Item> items;',
+  'std::multiset<Item> items;',
+  'auto items = new std::set<Item>;',
+  'auto items = new std::set<Item>{};',
+  'std::set<Item>* items = nullptr; delete items;',
+])('requires a complete element type when constructing or destroying %s', (statement) => {
+  const program = `#include <set>
+struct Item;
+int main() { ${statement} }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 2, message: expect.stringContaining('クラス Item はまだ定義されていません') }],
+  });
+});
+
+test.each([
   ['time.h', 'time(0);', '時刻'],
   ['ctime', 'time_t start = 0;', 'time_t'],
   ['cstdlib', 'double value = atof("1.5");', 'atof'],

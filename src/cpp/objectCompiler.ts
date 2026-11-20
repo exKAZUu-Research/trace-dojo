@@ -336,6 +336,7 @@ interface ObjectUseContext {
   seen: Set<ClassInfo>;
   sourceIsConst?: boolean;
   baseObject?: ClassInfo;
+  requiresComplete?: boolean;
 }
 
 /** Making, copying, and destroying objects, converting values, and calling functions. */
@@ -942,7 +943,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     row: number,
     sourceIsConst = true
   ): void {
-    const context: ObjectUseContext = { seen: new Set(), sourceIsConst };
+    const context: ObjectUseContext = { seen: new Set(), sourceIsConst, requiresComplete: true };
     if (operation === 'assign' || operation === 'move-assign') this.checkLibraryAssignment(type, row);
     if (operation === 'move' || operation === 'move-assign') {
       this.checkMoveOperation(type, operation === 'move' ? 'copy' : 'assign', row, context);
@@ -1005,7 +1006,8 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     }
     if (type.kind !== 'class') return;
     const { cls } = type;
-    const { access, seen, baseObject } = context;
+    const { access, seen, baseObject, requiresComplete } = context;
+    if (requiresComplete && !cls.isComplete) this.error(row, `クラス ${cls.name} はまだ定義されていません。`);
     const destructor = cls.destructor;
     if (
       operation === 'destroy' &&
@@ -1020,11 +1022,11 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
 
     if (operation === 'copy' && this.checkCopyOperation(type, row, context)) return;
     if (operation === 'destroy' && destructor) this.checkDefined(destructor, row);
-    const nested = { access: cls, seen, sourceIsConst: cls.implicitCopyFromConst };
+    const nested = { access: cls, seen, sourceIsConst: cls.implicitCopyFromConst, requiresComplete };
     if (cls.base) this.checkObjectUse(classType(cls.base), operation, row, { ...nested, baseObject: cls });
     for (const field of cls.ownFields) this.checkObjectUse(field.type, operation, row, nested);
     for (const owned of cls.library?.ownedTypes ?? []) {
-      const library = { seen, sourceIsConst: cls.library?.ownedCopyFromConst ?? true };
+      const library = { seen, sourceIsConst: cls.library?.ownedCopyFromConst ?? true, requiresComplete: true };
       if (operation === 'assign' && cls.library?.elementUseOnAssignment === 'assign-and-copy')
         this.checkLibraryAssignment(owned, row);
       this.checkObjectUse(owned, operation, row, library);

@@ -34,6 +34,25 @@ int main() {
   });
 });
 
+test('allows forward-declared set elements until an object needs them', () => {
+  const program = `#include <iostream>
+#include <set>
+struct Pending;
+std::set<Pending>* pending = nullptr;
+struct Item;
+std::set<Item>* forward = nullptr;
+struct Item { int value; };
+int main() {
+  std::set<Item> items{};
+  std::cout << (pending == nullptr) << (forward == nullptr) << items.size();
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '110',
+    uncaughtException: undefined,
+  });
+});
+
 test.each([
   ['two increments', 'int i = 0;', 'i++ + i++'],
   ['a reference alias', 'int i = 1; int& r = i;', 'i++ + r'],

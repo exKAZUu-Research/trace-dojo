@@ -615,6 +615,7 @@ export function orderedClass(
     align: 8,
     listElementType: unqualified(entryType),
     listInitializer: (compiler_, elements, row) => {
+      if (elements.length === 0) return;
       checkOrder(compiler_, row);
       return associativeInitializerList(compiler_, cls, entryType, elements, row, table);
     },
@@ -736,7 +737,11 @@ export function orderedClass(
     },
     destroy: (frame, value) => destroyAll(frame, (value as OrderedValue).entries),
   };
-  cls.constructors = [nativeConstructor(cls, [], () => make([]))];
+  cls.constructors = [
+    nativeConstructor(cls, [], () => make([]), {
+      uses: (row) => compiler.requireLibraryObjectUse(entryType, 'destroy', row),
+    }),
+  ];
   addRangeMembers(compiler, cls, entryType, table);
   const method = (
     memberName: string,
