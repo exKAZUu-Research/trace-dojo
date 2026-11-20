@@ -30,7 +30,7 @@ import {
   isTemplateLiteralContextualType,
   templatePlaceholderConstraint,
 } from './templateContexts';
-import { checkTypeQuery } from './typeQueries';
+import { checkTypeQuery, queryVariableEntry } from './typeQueries';
 import {
   anyType,
   errorType,
@@ -355,7 +355,10 @@ export class ExpressionChecker {
     const declared = this.valueTypeOf(symbol);
     const key = `s${symbol.id}`;
     this.c.flow.declaredTypes.set(key, declared);
-    const entry = this.c.flow.entry(key);
+    const entry =
+      typeQuery && !this.isEvolvingArrayDeclaration(symbol)
+        ? queryVariableEntry(this.c, node, symbol, key)
+        : this.c.flow.entry(key);
     if (this.isOuterVariable(node, symbol)) {
       // A nested function checks the assignment of a variable of an enclosing one only when nothing ever assigns it.
       if (this.isNeverInitialized(symbol))
@@ -367,7 +370,7 @@ export class ExpressionChecker {
           contextual,
           typeQuery
         );
-      return entry?.type ?? this.closureVariableType(node, symbol, declared);
+      return entry?.type ?? this.closureVariableType(node, symbol, declared, typeQuery);
     }
     return entry ? this.flowVariableType(node, symbol, entry, declared, contextual, typeQuery) : declared;
   }
@@ -515,7 +518,7 @@ export class ExpressionChecker {
    * The type a nested function sees for a variable of an enclosing one: narrowed as when the function was created if
    * nothing assigns the variable after that, as TypeScript 5.4 keeps it.
    */
-  private closureVariableType(node: TreeNode, symbol: Sym, declared: Type): Type {
+  private closureVariableType(node: TreeNode, symbol: Sym, declared: Type, typeQuery: boolean): Type {
     const closure = this.c.functions.contexts.at(-1)?.node;
     const evolving = this.isEvolvingArrayDeclaration(symbol);
     if (evolving || this.c.assignments.isAutoTyped(symbol)) symbol.usedInClosure = true;
@@ -528,6 +531,7 @@ export class ExpressionChecker {
         closure.parent?.type === 'class_body' &&
         closure.parent.parent?.type !== 'class');
     if (
+      !typeQuery &&
       !evolving &&
       !deferred &&
       (symbol.valueKind === 'const' || (symbol.scope !== this.c.binder.moduleScope && !assignedLater))

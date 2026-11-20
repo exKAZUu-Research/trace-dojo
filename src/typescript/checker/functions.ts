@@ -50,6 +50,7 @@ export interface FunctionContext {
   /** Whether its body continues the enclosing flow, as that of a function called where it is written does. */
   inlined?: boolean;
   initializer?: boolean;
+  enclosingFlow: State;
 }
 
 /** Checks function expressions and bodies, inferring the types they return. */
@@ -426,6 +427,7 @@ export class FunctionChecker {
       hasReturnWithoutValue: false,
       returnStates: [],
       contextualReturn,
+      enclosingFlow: this.c.flow.current,
     };
   }
 

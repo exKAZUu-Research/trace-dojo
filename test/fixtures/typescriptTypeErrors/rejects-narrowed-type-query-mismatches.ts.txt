@@ -22,3 +22,23 @@ if (typeof record.member === 'string') {
   type Narrow = typeof record.member;
   const property: Narrow = 1;
 }
+let moduleValue: string | number = 'module';
+var moduleVar: string | number = 'module';
+const moduleArrow = (argument: typeof moduleValue, vari: typeof moduleVar) => [argument, vari];
+const moduleExpression = function(argument: typeof moduleValue = 'module') { return argument; };
+const moduleObject = {nested: {method(argument: typeof moduleValue) { return argument; }}};
+const ModuleClass = class {method(argument: typeof moduleValue) { return argument; }};
+const moduleResult = (): typeof moduleValue => 1;
+moduleArrow(1, 1);
+moduleExpression(1);
+moduleObject.nested.method(1);
+new ModuleClass().method(1);
+const outer = () => {
+  const inner = (argument: typeof moduleValue) => argument;
+  inner(1);
+};
+const scopedRecord: {member: string | number} = {member: 'text'};
+if (typeof scopedRecord.member === 'string') {
+  const object = { method(argument: typeof scopedRecord.member) { return argument; } };
+  object.method(1);
+}

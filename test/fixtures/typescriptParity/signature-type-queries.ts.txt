@@ -42,3 +42,29 @@ console.log(declaration(1), numberResult(), arrow(2), expression(3), object.meth
   new Fields().method(5), new Overloads().method(6), afterAssignment('text'));
 callback(7);
 local();
+let stable: string | number = 'module';
+var moduleVar: string | number = 'module';
+const arrowCapture = (argument: typeof stable, vari: typeof moduleVar) => [argument, vari];
+const withDefault = function(argument: typeof stable = 'default') { return argument; };
+const nestedMethod = {nested: {method(argument: typeof stable) { return argument; }}};
+const ClassExpression = class {method(argument: typeof stable) { return argument; }};
+const returnCapture = (): typeof stable => 'result';
+const chained = () => {
+  const inner = (argument: typeof stable) => argument;
+  return inner('inner');
+};
+function declarationBoundary() {
+  const inner = (argument: typeof stable) => argument;
+  return inner(8);
+}
+const arrowBoundary = () => {
+  function inner(argument: typeof stable) { return argument; }
+  return inner(9);
+};
+console.log(...arrowCapture('arrow', 1), withDefault(), nestedMethod.nested.method('method'),
+  new ClassExpression().method('class'), returnCapture(), chained(), declarationBoundary(), arrowBoundary());
+if (typeof record.member === 'string') {
+  const method = {call(argument: typeof record.member) { return argument; }};
+  record.member = 10;
+  console.log(method.call('captured'));
+}
