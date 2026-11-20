@@ -4877,7 +4877,7 @@ $a = [...new I]; $a[] = 8; echo json_encode($a);`)
   }
 });
 
-test('chains return-expression cleanup exceptions and reaches maxCallDepth across recursion shapes', () => {
+test('chains return-expression cleanup exceptions', () => {
   for (const [expression, expected] of [
     ['[new D, throw new Exception("body")]', 'drop;destructor;body;'],
     ['(new D) + (throw new Exception("body"))', 'drop;destructor;body;'],
@@ -4935,7 +4935,9 @@ try { f(); } catch (Throwable $e) { while ($e) { echo $e->getMessage(), ";"; $e 
       )
     ).toMatchObject({ kind: 'executed', stdout: 'E;D;caught:cleanup;after;caller;' });
   }
+});
 
+test('reaches maxCallDepth across recursion shapes', () => {
   const sum505 = String((505 * 506) / 2);
   for (const [source, expected] of [
     [
@@ -4981,13 +4983,17 @@ try { f(); } catch (Throwable $e) { while ($e) { echo $e->getMessage(), ";"; $e 
   ]) {
     expect(run(source)).toMatchObject({ kind: 'executed', stdout: expected });
   }
+});
 
+test('dumping deeply nested arrays ends with the memory limit', () => {
   for (const call of ['print_r($a);', 'var_export($a);', 'json_encode($a, 0, 1000000);', 'http_build_query($a);']) {
     const result = run(`<?php $a = []; for ($i = 0; $i < 4000; $i++) { $a = [$a]; } ${call}`);
     expect(result).toMatchObject({ kind: 'executed' });
     expect(result.kind === 'executed' ? result.stdout : '').toContain('Allowed memory size');
   }
+});
 
+test('traces values beyond JSON across deep recursion', () => {
   const bigTraceSource = `<?php
 $big = PHP_INT_MAX;
 $inf = INF;
@@ -5006,7 +5012,9 @@ echo $r;
   expect(traced.finalVars.$big).toBe(9_223_372_036_854_775_807n);
   expect(traced.finalVars.$inf).toBe(Number.POSITIVE_INFINITY);
   expect(Number.isNaN(traced.finalVars.$nan)).toBe(true);
+});
 
+test('rejects whole-table reads of $GLOBALS and get_defined_vars()', () => {
   for (const snippet of [
     'print_r($GLOBALS);',
     'echo count($GLOBALS);',
@@ -5026,7 +5034,9 @@ echo $r;
     stdout: '6',
     uncaughtException: undefined,
   });
+});
 
+test('keeps PHP results for seeded selection, recursive static initializers, destruction order and returned references', () => {
   expect(
     run(
       '<?php mt_srand(42); $a = range(0, 9999); $sum = 0; for ($i = 0; $i < 7000; $i++) $sum += array_rand($a); echo $sum;'
