@@ -13,6 +13,7 @@ export interface LibraryClass {
   readonly kind: string;
   readonly args: readonly Type[];
   readonly ownedTypes?: readonly Type[];
+  readonly inlineElementType?: Type;
   readonly ownedCopyFromConst?: boolean;
   readonly elementUseOnAssignment?: 'copy' | 'assign-and-copy';
   readonly allowsConstantCopy?: boolean;

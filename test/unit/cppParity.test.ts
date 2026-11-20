@@ -113,6 +113,33 @@ struct Item { int value; };`;
   });
 });
 
+test('allows abstract types as pointer elements and in empty vector and deque storage', () => {
+  const program = `#include <deque>
+#include <iostream>
+#include <set>
+#include <vector>
+struct Item;
+struct Unused { std::set<Item> items; };
+Unused* unused = nullptr;
+struct Item { virtual void f() = 0; };
+struct AlsoUnused { std::set<Item> items; };
+AlsoUnused* alsoUnused = nullptr;
+struct Concrete : Item { void f() override {} };
+int main() {
+  std::set<Item*> pointers;
+  std::set<Concrete> concrete;
+  std::vector<Item> vector;
+  std::deque<Item> deque;
+  std::cout << (unused == nullptr && alsoUnused == nullptr)
+            << pointers.empty() << concrete.empty() << vector.empty() << deque.empty();
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '11111',
+    uncaughtException: undefined,
+  });
+});
+
 test.each([
   ['two increments', 'int i = 0;', 'i++ + i++'],
   ['a reference alias', 'int i = 1; int& r = i;', 'i++ + r'],

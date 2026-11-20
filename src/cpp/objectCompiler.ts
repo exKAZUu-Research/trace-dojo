@@ -1010,10 +1010,9 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     const { cls } = type;
     const { access, seen, baseObject, requiresComplete } = context;
     if (requiresComplete && !cls.isComplete) {
-      this.checkWhenUsed(() => {
-        if (!cls.isComplete) this.error(row, `クラス ${cls.name} はまだ定義されていません。`);
-        this.checkObjectUse(type, operation, row, { ...context, seen: new Set(seen) });
-      });
+      this.checkCompleteWhenUsed(cls, row, () =>
+        this.checkObjectUse(type, operation, row, { ...context, seen: new Set(seen) })
+      );
       return;
     }
     const destructor = cls.destructor;
@@ -1028,6 +1027,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     if (seen.has(cls)) return;
     seen.add(cls);
 
+    this.checkLibraryStorage(cls, row);
     if (operation === 'copy' && this.checkCopyOperation(type, row, context)) return;
     if (operation === 'destroy' && destructor) this.checkDefined(destructor, row);
     const nested = { access: cls, seen, sourceIsConst: cls.implicitCopyFromConst, requiresComplete };
@@ -1041,6 +1041,35 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       if (operation === 'assign' && cls.library?.elementUseOnAssignment)
         this.checkObjectUse(owned, 'copy', row, { ...library, seen: new Set() });
     }
+  }
+
+  protected checkLibraryStorage(cls: ClassInfo, row: number): void {
+    const element = cls.library?.inlineElementType;
+    if (element) this.checkWhenUsed(() => this.checkStoredElement(element, row, new Set()));
+  }
+
+  private checkStoredElement(type: Type, row: number, seen: Set<ClassInfo>): void {
+    if (type.kind === 'array') {
+      this.checkStoredElement(type.of, row, seen);
+      return;
+    }
+    if (type.kind !== 'class') return;
+    const { cls } = type;
+    if (seen.has(cls)) return;
+    if (!cls.isComplete) this.error(row, `クラス ${cls.name} はまだ定義されていません。`);
+    if (cls.isAbstract)
+      this.error(row, `${cls.name} は抽象クラス（純粋仮想関数があるクラス）なので、要素として格納できません。`);
+    seen.add(cls);
+    for (const field of cls.ownFields) this.checkStoredElement(field.type, row, seen);
+    const element = cls.library?.inlineElementType;
+    if (element) this.checkStoredElement(element, row, seen);
+  }
+
+  private checkCompleteWhenUsed(cls: ClassInfo, row: number, check: () => void): void {
+    this.checkWhenUsed(() => {
+      if (!cls.isComplete) this.error(row, `クラス ${cls.name} はまだ定義されていません。`);
+      check();
+    });
   }
 
   private checkCopyOperation(type: ClassType, row: number, context: ObjectUseContext): boolean {

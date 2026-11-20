@@ -162,6 +162,7 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
     kind,
     args: [element],
     ownedTypes: fixedLength === 0 ? [] : [element],
+    inlineElementType: kind === 'list' ? element : undefined,
     ownedCopyFromConst,
     elementUseOnAssignment: kind === 'array' ? undefined : 'assign-and-copy',
     allowsConstantCopy: kind === 'array' && (fixedLength === 0 || allowsConstantCopy(element)),

@@ -103,6 +103,7 @@ export function adapterClass(
     kind,
     args: [element],
     ownedTypes: [element],
+    inlineElementType: storage.cls.library?.inlineElementType,
     ownedCopyFromConst,
     elementUseOnAssignment: storage.cls.library?.elementUseOnAssignment,
     size,

@@ -1969,6 +1969,7 @@ export class Compiler extends StatementCompiler {
     direct: boolean
   ): Initializer {
     const library = type.cls.library;
+    if (!this.isUnevaluated) this.checkLibraryStorage(type.cls, row);
     const isAggregate = this.isAggregate(type.cls);
     const single =
       elements.length === 1 && elements[0].type !== 'initializer_list'
@@ -2386,6 +2387,7 @@ export class Compiler extends StatementCompiler {
   checkDefined(fn: FunctionInfo, row: number): void {
     if (this.isUnevaluated) return;
     if (fn.native) {
+      if (fn.isConstructor && fn.owner) this.checkLibraryStorage(fn.owner, row);
       fn.nativeUses?.(row);
       return;
     }

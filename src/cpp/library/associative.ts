@@ -718,6 +718,7 @@ export function orderedClass(
     constructingMembers:
       isMap && !isMulti ? ['emplace', 'emplace_hint', 'try_emplace', 'insert_or_assign'] : ['emplace', 'emplace_hint'],
     ownedTypes: [entryType],
+    inlineElementType: entryType,
     elementUseOnAssignment: 'copy',
   };
   cls.operations = {

@@ -699,6 +699,7 @@ export function unorderedClass(
       }),
     constructingMembers: isMap ? ['emplace', 'try_emplace'] : ['emplace'],
     ownedTypes: [entryType],
+    inlineElementType: entryType,
     elementUseOnAssignment: 'copy',
   };
   cls.operations = {

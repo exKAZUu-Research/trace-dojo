@@ -100,6 +100,24 @@ int main() { Owner owner; }`;
 });
 
 test.each([
+  ['set', 'set<Item>'],
+  ['set', 'multiset<Item>'],
+  ['map', 'map<int, Item>'],
+  ['unordered_map', 'unordered_map<int, Item>'],
+  ['list', 'list<Item>'],
+])('rejects abstract classes laid out as elements in <%s> std::%s', (header, container) => {
+  const program = `#include <${header}>
+struct Item;
+struct Owner { std::${container} items; };
+int main() { Owner owner; }
+struct Item { virtual void f() = 0; };`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message: expect.stringContaining('Item は抽象クラス') }],
+  });
+});
+
+test.each([
   ['time.h', 'time(0);', '時刻'],
   ['ctime', 'time_t start = 0;', 'time_t'],
   ['cstdlib', 'double value = atof("1.5");', 'atof'],
