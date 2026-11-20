@@ -755,28 +755,28 @@ const REQUIRED_STD_METHODS: Record<string, string[]> = {
 /** A key for an impl's self type in the standard library, naming the natives of its methods (`Vec<_>::push`). */
 // code-gauge-allow functionCognitiveComplexity 16 -- Follows Rust's name resolution case by case.
 function renderTypeKey(type: TypeAst, generics: Generics): string {
-  const render = (t: TypeAst): string => {
+  const render = (t: TypeAst, useBound = true): string => {
     switch (t.kind) {
       case 'path': {
         const last = t.path.segments.at(-1)!;
         const param = generics.params.find((p) => p.name === last.name);
         if (param && t.path.segments.length === 1) {
-          const bound = param.bounds[0];
+          const bound = useBound ? param.bounds[0] : undefined;
           return bound?.kind === 'trait' ? bound.path.segments.at(-1)!.name : '_';
         }
-        return last.args ? `${last.name}<${last.args.map(render).join(', ')}>` : last.name;
+        return last.args ? `${last.name}<${last.args.map((arg) => render(arg, false)).join(', ')}>` : last.name;
       }
       case 'ref': {
-        return `&${t.mutable ? 'mut ' : ''}${render(t.target)}`;
+        return `&${t.mutable ? 'mut ' : ''}${render(t.target, useBound)}`;
       }
       case 'slice': {
-        return `[${render(t.elem)}]`;
+        return `[${render(t.elem, useBound)}]`;
       }
       case 'array': {
-        return `[${render(t.elem)}; N]`;
+        return `[${render(t.elem, useBound)}; N]`;
       }
       case 'tuple': {
-        return `(${t.elems.map(render).join(', ')})`;
+        return `(${t.elems.map((elem) => render(elem, useBound)).join(', ')})`;
       }
       default: {
         return t.kind;

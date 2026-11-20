@@ -3034,3 +3034,18 @@ fn main() {
 fn main() { match (0.0, true) { NAN => (), _ => () } }`;
   expect(executeProgram('rust', nan)).toMatchObject({ kind: 'compileError' });
 });
+
+test('requires Rust collection bounds for keyed methods while leaving construction unbounded', () => {
+  const program = `use std::collections::{BTreeMap, HashSet};
+use std::hash::Hash;
+fn count<T: Ord>(map: &BTreeMap<T, i32>) -> usize { map.range(..).count() }
+fn union<T: Eq + Hash>(set: &HashSet<T>) -> usize { set.union(set).count() }
+fn main() {
+    let empty = BTreeMap::<f64, i32>::new();
+    println!("{} {} {}", empty.len(), count(&BTreeMap::from([(1, 2)])), union(&HashSet::from([1, 2])));
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '0 1 2\n' });
+  for (const bound of ['T: Ord', 'T: Eq + Hash']) {
+    expect(executeProgram('rust', program.replace(bound, 'T'))).toMatchObject({ kind: 'compileError' });
+  }
+});

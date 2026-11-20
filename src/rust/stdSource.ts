@@ -1055,17 +1055,6 @@ pub mod collections {
     impl<K, V> HashMap<K, V> {
         pub fn new() -> HashMap<K, V>;
         pub fn with_capacity(capacity: usize) -> HashMap<K, V>;
-        pub fn reserve(&mut self, additional: usize);
-        pub fn shrink_to_fit(&mut self);
-        pub fn shrink_to(&mut self, min_capacity: usize);
-        pub fn insert(&mut self, k: K, v: V) -> Option<V> where K: Eq + Hash;
-        pub fn get<Q>(&self, k: &Q) -> Option<&V> where K: Borrow<Q> + Eq + Hash, Q: Eq + Hash;
-        pub fn get_mut<Q>(&mut self, k: &Q) -> Option<&mut V> where K: Borrow<Q> + Eq + Hash, Q: Eq + Hash;
-        pub fn get_key_value<Q>(&self, k: &Q) -> Option<(&K, &V)> where K: Borrow<Q> + Eq + Hash, Q: Eq + Hash;
-        pub fn contains_key<Q>(&self, k: &Q) -> bool where K: Borrow<Q> + Eq + Hash, Q: Eq + Hash;
-        pub fn remove<Q>(&mut self, k: &Q) -> Option<V> where K: Borrow<Q> + Eq + Hash, Q: Eq + Hash;
-        pub fn remove_entry<Q>(&mut self, k: &Q) -> Option<(K, V)> where K: Borrow<Q> + Eq + Hash, Q: Eq + Hash;
-        pub fn entry(&mut self, key: K) -> Entry<K, V> where K: Eq + Hash;
         pub fn len(&self) -> usize;
         pub fn is_empty(&self) -> bool;
         pub fn clear(&mut self);
@@ -1078,9 +1067,22 @@ pub mod collections {
         pub fn into_values(self) -> IterImpl<V, HashMapIntoValuesShape>;
         pub fn drain(&mut self) -> IterImpl<(K, V), HashMapDrainShape>;
         pub fn retain<F: FnMut(&K, &mut V) -> bool>(&mut self, f: F);
-        pub fn extend<S>(&mut self, iter: IterImpl<(K, V), S>) where K: Eq + Hash;
         pub fn capacity(&self) -> usize;
         pub fn into_iter(self) -> IterImpl<(K, V), HashMapIntoIterShape>;
+    }
+    impl<K: Eq + Hash, V> HashMap<K, V> {
+        pub fn reserve(&mut self, additional: usize);
+        pub fn shrink_to_fit(&mut self);
+        pub fn shrink_to(&mut self, min_capacity: usize);
+        pub fn insert(&mut self, k: K, v: V) -> Option<V> ;
+        pub fn get<Q>(&self, k: &Q) -> Option<&V> where K: Borrow<Q>, Q: Eq + Hash;
+        pub fn get_mut<Q>(&mut self, k: &Q) -> Option<&mut V> where K: Borrow<Q>, Q: Eq + Hash;
+        pub fn get_key_value<Q>(&self, k: &Q) -> Option<(&K, &V)> where K: Borrow<Q>, Q: Eq + Hash;
+        pub fn contains_key<Q>(&self, k: &Q) -> bool where K: Borrow<Q>, Q: Eq + Hash;
+        pub fn remove<Q>(&mut self, k: &Q) -> Option<V> where K: Borrow<Q>, Q: Eq + Hash;
+        pub fn remove_entry<Q>(&mut self, k: &Q) -> Option<(K, V)> where K: Borrow<Q>, Q: Eq + Hash;
+        pub fn entry(&mut self, key: K) -> Entry<K, V> ;
+        pub fn extend<S>(&mut self, iter: IterImpl<(K, V), S>) ;
     }
     impl<K, V> &HashMap<K, V> {
         pub fn into_iter(self) -> IterImpl<(&K, &V), HashMapIterShape>;
@@ -1089,15 +1091,7 @@ pub mod collections {
         pub fn into_iter(self) -> IterImpl<(&K, &mut V), HashMapIterMutShape>;
     }
     impl<K, V> BTreeMap<K, V> {
-        pub fn range<R: RangeBounds<K>>(&self, range: R) -> IterImpl<(&K, &V), BTreeMapRangeShape>;
         pub const fn new() -> BTreeMap<K, V>;
-        pub fn insert(&mut self, k: K, v: V) -> Option<V> where K: Ord;
-        pub fn get<Q>(&self, k: &Q) -> Option<&V> where K: Borrow<Q> + Ord, Q: Ord;
-        pub fn get_mut<Q>(&mut self, k: &Q) -> Option<&mut V> where K: Borrow<Q> + Ord, Q: Ord;
-        pub fn get_key_value<Q>(&self, k: &Q) -> Option<(&K, &V)> where K: Borrow<Q> + Ord, Q: Ord;
-        pub fn contains_key<Q>(&self, k: &Q) -> bool where K: Borrow<Q> + Ord, Q: Ord;
-        pub fn remove<Q>(&mut self, k: &Q) -> Option<V> where K: Borrow<Q> + Ord, Q: Ord;
-        pub fn entry(&mut self, key: K) -> Entry<K, V> where K: Ord;
         pub fn len(&self) -> usize;
         pub fn is_empty(&self) -> bool;
         pub fn clear(&mut self);
@@ -1108,13 +1102,23 @@ pub mod collections {
         pub fn values_mut(&mut self) -> IterImpl<&mut V, BTreeMapValuesMutShape>;
         pub fn into_keys(self) -> IterImpl<K, BTreeMapIntoKeysShape>;
         pub fn into_values(self) -> IterImpl<V, BTreeMapIntoValuesShape>;
+        pub fn into_iter(self) -> IterImpl<(K, V), BTreeMapIntoIterShape>;
+    }
+    impl<K: Ord, V> BTreeMap<K, V> {
+        pub fn range<R: RangeBounds<K>>(&self, range: R) -> IterImpl<(&K, &V), BTreeMapRangeShape>;
+        pub fn insert(&mut self, k: K, v: V) -> Option<V> ;
+        pub fn get<Q>(&self, k: &Q) -> Option<&V> where K: Borrow<Q>, Q: Ord;
+        pub fn get_mut<Q>(&mut self, k: &Q) -> Option<&mut V> where K: Borrow<Q>, Q: Ord;
+        pub fn get_key_value<Q>(&self, k: &Q) -> Option<(&K, &V)> where K: Borrow<Q>, Q: Ord;
+        pub fn contains_key<Q>(&self, k: &Q) -> bool where K: Borrow<Q>, Q: Ord;
+        pub fn remove<Q>(&mut self, k: &Q) -> Option<V> where K: Borrow<Q>, Q: Ord;
+        pub fn entry(&mut self, key: K) -> Entry<K, V> ;
         pub fn first_key_value(&self) -> Option<(&K, &V)>;
         pub fn last_key_value(&self) -> Option<(&K, &V)>;
         pub fn pop_first(&mut self) -> Option<(K, V)>;
         pub fn pop_last(&mut self) -> Option<(K, V)>;
         pub fn retain<F: FnMut(&K, &mut V) -> bool>(&mut self, f: F);
-        pub fn extend<S>(&mut self, iter: IterImpl<(K, V), S>) where K: Ord;
-        pub fn into_iter(self) -> IterImpl<(K, V), BTreeMapIntoIterShape>;
+        pub fn extend<S>(&mut self, iter: IterImpl<(K, V), S>) ;
     }
     impl<K, V> &BTreeMap<K, V> {
         pub fn into_iter(self) -> IterImpl<(&K, &V), BTreeMapIterShape>;
@@ -1134,18 +1138,23 @@ pub mod collections {
         pub fn new() -> HashSet<T>;
         pub fn with_capacity(capacity: usize) -> HashSet<T>;
         pub fn capacity(&self) -> usize;
-        pub fn reserve(&mut self, additional: usize);
-        pub fn shrink_to_fit(&mut self);
-        pub fn shrink_to(&mut self, min_capacity: usize);
-        pub fn insert(&mut self, value: T) -> bool where T: Eq + Hash;
-        pub fn contains<Q>(&self, value: &Q) -> bool where T: Borrow<Q> + Eq + Hash, Q: Eq + Hash;
-        pub fn remove<Q>(&mut self, value: &Q) -> bool where T: Borrow<Q> + Eq + Hash, Q: Eq + Hash;
-        pub fn take<Q>(&mut self, value: &Q) -> Option<T> where T: Borrow<Q> + Eq + Hash, Q: Eq + Hash;
-        pub fn get<Q>(&self, value: &Q) -> Option<&T> where T: Borrow<Q> + Eq + Hash, Q: Eq + Hash;
         pub fn len(&self) -> usize;
         pub fn is_empty(&self) -> bool;
         pub fn clear(&mut self);
         pub fn iter(&self) -> IterImpl<&T, HashSetIterShape>;
+        pub fn retain<F: FnMut(&T) -> bool>(&mut self, f: F);
+        pub fn drain(&mut self) -> IterImpl<T, HashSetDrainShape>;
+        pub fn into_iter(self) -> IterImpl<T, HashSetIntoIterShape>;
+    }
+    impl<T: Eq + Hash> HashSet<T> {
+        pub fn reserve(&mut self, additional: usize);
+        pub fn shrink_to_fit(&mut self);
+        pub fn shrink_to(&mut self, min_capacity: usize);
+        pub fn insert(&mut self, value: T) -> bool ;
+        pub fn contains<Q>(&self, value: &Q) -> bool where T: Borrow<Q>, Q: Eq + Hash;
+        pub fn remove<Q>(&mut self, value: &Q) -> bool where T: Borrow<Q>, Q: Eq + Hash;
+        pub fn take<Q>(&mut self, value: &Q) -> Option<T> where T: Borrow<Q>, Q: Eq + Hash;
+        pub fn get<Q>(&self, value: &Q) -> Option<&T> where T: Borrow<Q>, Q: Eq + Hash;
         pub fn union<'a>(&'a self, other: &'a HashSet<T>) -> IterImpl<&'a T, SetOpShape>;
         pub fn intersection<'a>(&'a self, other: &'a HashSet<T>) -> IterImpl<&'a T, SetOpShape>;
         pub fn difference<'a>(&'a self, other: &'a HashSet<T>) -> IterImpl<&'a T, SetOpShape>;
@@ -1153,24 +1162,24 @@ pub mod collections {
         pub fn is_subset(&self, other: &HashSet<T>) -> bool;
         pub fn is_superset(&self, other: &HashSet<T>) -> bool;
         pub fn is_disjoint(&self, other: &HashSet<T>) -> bool;
-        pub fn retain<F: FnMut(&T) -> bool>(&mut self, f: F);
-        pub fn extend<A: ExtendInto<T>, S>(&mut self, iter: IterImpl<A, S>) where T: Eq + Hash;
-        pub fn drain(&mut self) -> IterImpl<T, HashSetDrainShape>;
-        pub fn into_iter(self) -> IterImpl<T, HashSetIntoIterShape>;
+        pub fn extend<A: ExtendInto<T>, S>(&mut self, iter: IterImpl<A, S>) ;
     }
     impl<T> &HashSet<T> {
         pub fn into_iter(self) -> IterImpl<&T, HashSetIterShape>;
     }
     impl<T> BTreeSet<T> {
-        pub fn range<R: RangeBounds<T>>(&self, range: R) -> IterImpl<&T, BTreeSetRangeShape>;
         pub const fn new() -> BTreeSet<T>;
-        pub fn insert(&mut self, value: T) -> bool where T: Ord;
-        pub fn contains<Q>(&self, value: &Q) -> bool where T: Borrow<Q> + Ord, Q: Ord;
-        pub fn remove<Q>(&mut self, value: &Q) -> bool where T: Borrow<Q> + Ord, Q: Ord;
         pub fn len(&self) -> usize;
         pub fn is_empty(&self) -> bool;
         pub fn clear(&mut self);
         pub fn iter(&self) -> IterImpl<&T, BTreeSetIterShape>;
+        pub fn into_iter(self) -> IterImpl<T, BTreeSetIntoIterShape>;
+    }
+    impl<T: Ord> BTreeSet<T> {
+        pub fn range<R: RangeBounds<T>>(&self, range: R) -> IterImpl<&T, BTreeSetRangeShape>;
+        pub fn insert(&mut self, value: T) -> bool ;
+        pub fn contains<Q>(&self, value: &Q) -> bool where T: Borrow<Q>, Q: Ord;
+        pub fn remove<Q>(&mut self, value: &Q) -> bool where T: Borrow<Q>, Q: Ord;
         pub fn first(&self) -> Option<&T>;
         pub fn last(&self) -> Option<&T>;
         pub fn pop_first(&mut self) -> Option<T>;
@@ -1182,8 +1191,7 @@ pub mod collections {
         pub fn is_subset(&self, other: &BTreeSet<T>) -> bool;
         pub fn is_superset(&self, other: &BTreeSet<T>) -> bool;
         pub fn retain<F: FnMut(&T) -> bool>(&mut self, f: F);
-        pub fn extend<A: ExtendInto<T>, S>(&mut self, iter: IterImpl<A, S>) where T: Ord;
-        pub fn into_iter(self) -> IterImpl<T, BTreeSetIntoIterShape>;
+        pub fn extend<A: ExtendInto<T>, S>(&mut self, iter: IterImpl<A, S>) ;
     }
     impl<T> &BTreeSet<T> {
         pub fn into_iter(self) -> IterImpl<&T, BTreeSetIterShape>;
