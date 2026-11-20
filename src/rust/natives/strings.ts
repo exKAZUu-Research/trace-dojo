@@ -192,7 +192,7 @@ function strIter(items: string[]): IterValue {
 }
 
 function isWhitespace(char: string): boolean {
-  return /^[\s\u0085]$/u.test(char) && char !== '​';
+  return /^\p{White_Space}$/u.test(char);
 }
 
 function trimWith(text: string, start: boolean, end: boolean, test: (char: string) => boolean): string {

@@ -267,6 +267,20 @@ test('reverse string searches select the rightmost match and visit predicates fr
   });
 });
 
+test('Rust Unicode whitespace preserves U+FEFF and recognizes U+0085', () => {
+  const program = String.raw`fn main() {
+    let text = "\u{85}\u{feff}a\u{feff}b\u{a0}";
+    println!("{} {}", '\u{85}'.is_whitespace(), '\u{feff}'.is_whitespace());
+    println!("{} {}", text.trim() == "\u{feff}a\u{feff}b", text.split_whitespace().count());
+    println!("{}", "a\u{85}b".split_whitespace().count());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'true false\ntrue 1\n2\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {
