@@ -1,0 +1,32 @@
+class Animal {
+  name = 'animal';
+}
+
+class Dog extends Animal {
+  bark() { return 'woof'; }
+}
+
+class AnimalHandler {
+  constructor(animal: Animal);
+  constructor(animal: Animal) { console.log(animal.name); }
+}
+
+class DogHandler {
+  constructor(dog: Dog) { console.log(dog.bark()); }
+}
+
+class InheritedHandler extends AnimalHandler {}
+
+function run(Handler: typeof AnimalHandler) {
+  return new Handler(new Dog());
+}
+
+const Handler: typeof InheritedHandler = DogHandler;
+new Handler(new Dog());
+run(DogHandler);
+
+type DogCallback = { handle(dog: Dog): string };
+const callback: DogCallback['handle'] = (animal: Animal) => animal.name;
+interface AnimalMethods { handle(animal: Animal): string }
+const method: AnimalMethods = { handle(dog: Dog) { return dog.bark(); } };
+console.log(callback(new Dog()), method.handle(new Dog()));

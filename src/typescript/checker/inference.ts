@@ -1,10 +1,11 @@
-// code-gauge-allow-file fileNcss 802 -- Keeps generic candidate collection, constraint fitting and inference completion together.
+// code-gauge-allow-file fileNcss 803 -- Keeps generic candidate collection, constraint fitting and inference completion together.
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import type { Checker, Mapper } from './checker';
 import { isUnit } from './flow';
 import { childTypes, objectMemberTypes } from './genericTypes';
 import { applicableIndex, hasIndexSignature, isIndexKeyOf, isPropertyKeyOf, keyedIndexes } from './indexInfos';
 import { reverseMappedType } from './reverseMappedInference';
+import { hasBivariantParameters } from './signatures';
 import { tupleTypesDefinitelyUnrelated } from './tupleIndexes';
 import {
   anonymousObject,
@@ -919,7 +920,7 @@ export class TypeInference {
   }
 
   private inferSignatureParameters(source: Signature, target: Signature, recurse: Recurse): void {
-    const position = target.isMethod ? 'bivariantParameter' : 'parameter';
+    const position = hasBivariantParameters(target) ? 'bivariantParameter' : 'parameter';
     if (source.thisType && target.thisType) recurse(source.thisType, target.thisType, position);
     const restIndex = target.parameters.findIndex((parameter) => parameter.rest);
     const positional = restIndex === -1 ? target.parameters.length : restIndex;

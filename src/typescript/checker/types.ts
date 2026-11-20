@@ -123,7 +123,6 @@ export interface Signature {
   /** A type predicate `x is T`, by the index of the parameter it narrows (-1 for `this`). */
   predicate?: { index: number; type: Type };
   declaration?: TreeNode;
-  /** Whether it comes from a method, whose parameters compare bivariantly. */
   isMethod?: boolean;
   /** Whether it constructs an abstract class. */
   isAbstract?: boolean;

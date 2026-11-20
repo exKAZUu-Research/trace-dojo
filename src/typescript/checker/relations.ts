@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 865 -- Keeps the relation modes and their recursive comparisons together.
+// code-gauge-allow-file fileNcss 866 -- Keeps the relation modes and their recursive comparisons together.
 import { minimumArguments } from './callArity';
 import type { Checker } from './checker';
 import { isUnit } from './flow';
@@ -17,6 +17,7 @@ import {
   isPropertyKeyOf,
   keyedIndexes,
 } from './indexInfos';
+import { hasBivariantParameters } from './signatures';
 import { isBigintTemplateText, isNumberTemplateText, templateParts } from './templateParts';
 import { hasVariadicRest } from './tupleIndexes';
 import { structurallyIdentical } from './typeIdentity';
@@ -1121,7 +1122,7 @@ export class Relations {
       ? Number.POSITIVE_INFINITY
       : target.parameters.length;
     if (sourceRequired > targetCount) return false;
-    const bivariant = mode === 'signature' && (source.isMethod === true || target.isMethod === true);
+    const bivariant = mode === 'signature' && hasBivariantParameters(target);
     if (
       !this.thisTypesRelated(sourceSignature, target, relation, bivariant) ||
       !this.parametersRelated(sourceSignature, target, relation, bivariant, mode !== 'signature')

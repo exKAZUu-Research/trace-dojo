@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 506 -- Keeps signature resolution and the TypeScript grammar of parameters and accessors together.
+// code-gauge-allow-file fileNcss 511 -- Keeps signature resolution and the TypeScript grammar of parameters and accessors together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { erasedStatementTypes } from '../erasedSyntax';
@@ -38,6 +38,16 @@ const bodilessSignatureTypes = [
   'call_signature',
   'construct_signature',
 ];
+
+export function hasBivariantParameters(signature: Signature): boolean {
+  if (signature.isMethod) return true;
+  const declaration = signature.declaration;
+  return (
+    declaration?.parent?.type === 'class_body' &&
+    (declaration.type === 'method_definition' || declaration.type === 'method_signature') &&
+    isConstructorName(declaration.childForFieldName('name'))
+  );
+}
 
 /** Resolves the signatures and type parameters that function-like and generic declarations declare. */
 export class Signatures {
