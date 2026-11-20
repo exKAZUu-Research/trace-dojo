@@ -1,15 +1,18 @@
-// code-gauge-allow-file fileNcss 999 -- Holds object ownership, reachability and release with their shared helpers.
+// code-gauge-allow-file fileNcss 1000 -- Holds object ownership, reachability and release with their shared helpers.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { type CleanupException, withCleanupExceptions, withPendingException } from './errors';
 import {
+  bufferedArrays,
   cachedObjectFree,
   collectGarbageNodes,
   deferredHandleOrder,
-  heldArrays,
+  forgetCollectedArrayCycles,
   objectFree,
   orderDestructedCollection,
   recordGcRoot,
   retireCollected,
+  survivingRoots,
+  withReachableCached,
 } from './gcRoots';
 import { ExitSignal, type Frame, PhpThrow, type Runtime } from './runtime';
 import {
@@ -132,6 +135,11 @@ function collectAfterDestruction(
 ): number {
   const { owners, handles, destructible, arrayStorage, buffered, nodes } = batch;
   let count = 0;
+  // PHP leaves what objects with destructors hold out of this run as the graph stood before the destructors ran.
+  const nested = withReachableCached<CollectionNode, CollectionGraph>(
+    new CollectionGraph(handles, runtime),
+    destructible
+  );
   withCleanupExceptions(runtime, (capture) => {
     for (const object of owners) {
       if (object.destructed || !object.cls.findMethod('__destruct')) continue;
@@ -153,19 +161,10 @@ function collectAfterDestruction(
     const afterArrays = new Set<PhpArray>();
     const after = mark(runtime, false, afterArrays);
     const remaining = handles.filter((object) => runtime.objects.get(object.id) === object && !after.has(object));
-    const {
-      count: collectedCount,
-      ordered,
-      passTwoNodes,
-    } = countAfterDestruction(runtime, {
-      owners,
-      remaining,
-      destructible,
-      afterArrays,
-      buffered,
-    });
-    count = collectedCount;
-    finishCollectedObjects(runtime, ordered, arrayStorage, nodes, passTwoNodes);
+    const result = countAfterDestruction(runtime, { owners, remaining, destructible, afterArrays, buffered, nested });
+    count = result.count;
+    finishCollectedObjects(runtime, result.ordered, arrayStorage, nodes, result.passTwoNodes);
+    forgetCollectedArrayCycles(runtime, result.freed);
   });
   return count;
 }
@@ -248,9 +247,10 @@ function countAfterDestruction(
     destructible: PhpObject[];
     afterArrays: Set<PhpArray>;
     buffered?: (PhpObject | PhpArray)[];
+    nested: CollectionGraph;
   }
-): { count: number; ordered: PhpObject[]; passTwoNodes: (PhpObject | PhpArray)[] } {
-  const { owners, remaining, destructible, afterArrays, buffered } = state;
+): { count: number; ordered: PhpObject[]; passTwoNodes: (PhpObject | PhpArray)[]; freed: Set<CollectionNode> } {
+  const { owners, remaining, destructible, afterArrays, buffered, nested } = state;
   const allowed = new Set(remaining);
   const graph = new CollectionGraph(
     remaining,
@@ -259,11 +259,8 @@ function countAfterDestruction(
   );
   const isObject = (node: CollectionNode): node is PhpObject => node instanceof PhpObject;
   const children = (node: CollectionNode): CollectionNode[] => graph.children(node);
-  const held = buffered ? heldArrays<CollectionNode>([...remaining, ...buffered], children) : undefined;
   const initialRoots: CollectionNode[] = buffered
-    ? buffered.filter((item) =>
-        item instanceof PhpObject ? allowed.has(item) : !afterArrays.has(item) && held?.has(item) === true
-      )
+    ? buffered.filter((item) => (item instanceof PhpObject ? allowed.has(item) : !afterArrays.has(item)))
     : owners.filter((object) => allowed.has(object));
   const result = orderDestructedCollection<CollectionNode, PhpObject>(
     initialRoots,
@@ -271,12 +268,17 @@ function countAfterDestruction(
     allowed,
     isObject,
     children,
-    (node) => !(node instanceof Ref)
+    (node) => !(node instanceof Ref),
+    {
+      nestedChildren: (node) => nested.children(node),
+      roots: survivingRoots<CollectionNode>(bufferedArrays(runtime, afterArrays), remaining, children),
+    }
   );
   return {
     count: result.count,
     ordered: result.ordered,
     passTwoNodes: result.passTwoNodes.filter((node): node is PhpObject | PhpArray => !(node instanceof Ref)),
+    freed: result.freed,
   };
 }
 

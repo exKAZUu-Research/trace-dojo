@@ -5285,13 +5285,25 @@ test('a non-public destructor runs only where its visibility allows', () => {
   });
 });
 
-test('gc_collect_cycles() does not count an array a destructor released', () => {
+test('gc_collect_cycles() counts what a destructor leaves garbage, not what it frees', () => {
   for (const release of ['$this->a = [];', 'unset($this->a);']) {
     expect(
       run(
         `<?php class D { public $a; function __destruct() { ${release} } } $o = new D; $a = [$o]; $o->a = $a; unset($o, $a); var_dump(gc_collect_cycles(), gc_collect_cycles());`
       )
     ).toMatchObject({ kind: 'executed', stdout: 'int(1)\nint(0)\n' });
+  }
+  for (const [release, assign, expected] of [
+    ['$this->a = [];', '=', 'int(2)\nint(0)\n'],
+    ['$this->a = [];', '= &', 'int(1)\nint(0)\n'],
+    ['unset($this->a);', '=', 'int(2)\nint(0)\n'],
+    ['unset($this->a);', '= &', 'int(2)\nint(0)\n'],
+  ]) {
+    expect(
+      run(
+        `<?php class D { public $a; function __destruct() { ${release} } } $o = new D; $a = [$o]; $a["self"] = &$a; $o->a ${assign} $a; unset($o, $a); var_dump(gc_collect_cycles(), gc_collect_cycles());`
+      )
+    ).toMatchObject({ kind: 'executed', stdout: expected });
   }
 });
 

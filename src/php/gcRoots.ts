@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 458 -- Holds GC root buffer simulation, ordering, and post-collection retirement helpers.
+// code-gauge-allow-file fileNcss 470 -- Holds GC root buffer simulation, ordering, and post-collection retirement helpers.
 import { rt, type Runtime } from './runtime';
 import { PhpArray, PhpObject, Ref, type Value } from './values';
 
@@ -12,10 +12,7 @@ export function separate(array: PhpArray): PhpArray {
   return array.copy();
 }
 
-/**
- * The arrays some node reachable from `starts` still holds. A buffered array that a destructor released has no such
- * holder: reference counting already freed it, so PHP's collection does not count it.
- */
+/** The arrays that some node reachable from `starts` holds, visiting (and so caching) every such node's children. */
 export function heldArrays<N extends object>(starts: N[], children: (node: N) => N[]): Set<N> {
   const held = new Set<N>();
   const seen = new Set(starts);
@@ -30,6 +27,34 @@ export function heldArrays<N extends object>(starts: N[], children: (node: N) =>
     }
   }
   return held;
+}
+
+/** Visits every node reachable from `starts`, so that `graph` keeps their children as they are now. */
+export function withReachableCached<N extends object, G extends { children(node: N): N[] }>(graph: G, starts: N[]): G {
+  heldArrays(starts, (node) => graph.children(node));
+  return graph;
+}
+
+/** The arrays in the root buffer that live code does not reach, such as those destructors released. */
+export function bufferedArrays(runtime: Runtime, live: Set<PhpArray>): PhpArray[] {
+  return Array.from({ length: runtime.gcRoots.length }, (_, index) => runtime.gcRoots.at(index)).filter(
+    (value): value is PhpArray => value instanceof PhpArray && !live.has(value)
+  );
+}
+
+/** Forgets array cycles that a collection freed, as a destructor can leave an array a cycle after PHP counted it. */
+export function forgetCollectedArrayCycles(runtime: Runtime, freed: Iterable<unknown>): void {
+  for (const node of freed) if (node instanceof PhpArray) runtime.arrayCycles.delete(node);
+}
+
+/**
+ * The candidates that are still garbage rather than freed: those on a cycle, and those that `starts` or such a cycle
+ * still holds.
+ */
+export function survivingRoots<N extends object>(candidates: N[], starts: N[], children: (node: N) => N[]): N[] {
+  const cyclic = candidates.filter((candidate) => heldArrays(children(candidate), children).has(candidate));
+  const held = heldArrays([...starts, ...cyclic], children);
+  return candidates.filter((candidate) => cyclic.includes(candidate) || held.has(candidate));
 }
 
 export function recordGcRoot(runtime: Runtime, value: PhpArray | PhpObject, collect: () => number): boolean {
@@ -245,17 +270,19 @@ function recordRetiredSurvivor(value: unknown, state: RetireState): void {
   }
 }
 
+// code-gauge-allow functionParameterCount 7 -- Takes the collection graph's callbacks separately, as each caller supplies its own.
 export function orderDestructedCollection<N extends object, O extends N>(
   bufferedRoots: N[],
   destructible: Set<O>,
   remainingObjects: Set<O>,
   isObject: (node: N) => node is O,
   children: (node: N) => N[],
-  countable: (node: N) => boolean = () => true
-): { count: number; ordered: O[]; passTwoNodes: N[] } {
+  countable: (node: N) => boolean = () => true,
+  rerun: { nestedChildren?: (node: N) => N[]; roots?: N[] } = {}
+): { count: number; ordered: O[]; passTwoNodes: N[]; freed: Set<N> } {
   const buffer = buildSimulationBuffer(bufferedRoots, remainingObjects, isObject, children, countable);
   const end = buffer.length;
-  removeDestructibleNested(buffer, end, destructible, isObject, children, countable);
+  removeDestructibleNested(buffer, end, destructible, isObject, rerun.nestedChildren ?? children, countable);
   const state: DeferredState<N, O> = {
     protectedObjects: remainingObjects,
     inDegree: countInDegrees(bufferedRoots, remainingObjects, isObject, children),
@@ -267,11 +294,13 @@ export function orderDestructedCollection<N extends object, O extends N>(
   const runOneCount = runFirstDestructionPass(buffer, end, state, destructible, countable);
   const freedAfterPassOne = countNodes(state.freed, countable);
   buffer.compact();
+  for (const root of rerun.roots ?? []) if (countable(root) && !state.freed.has(root)) buffer.add(root);
   const passTwoNodes = drainRunTwoBuffer(buffer, state, remainingObjects, countable);
   return {
     count: runOneCount + (countNodes(state.freed, countable) - freedAfterPassOne),
     ordered: state.order,
     passTwoNodes,
+    freed: state.freed,
   };
 }
 
