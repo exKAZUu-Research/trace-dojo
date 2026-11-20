@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 743 -- Keeps implicit dispatch and native result ownership together.
+// code-gauge-allow-file fileNcss 745 -- Keeps implicit dispatch and native result ownership together.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { placeOf } from './assignment';
 import type { Arg, Expr, ResolvedName } from './ast';
@@ -320,7 +320,10 @@ function callDynamicExpression(runtime: Runtime, e: Extract<Expr, { k: 'call' }>
   if (callee instanceof PhpObject || callee instanceof PhpArray) runtime.frame.temporaries.push(callee);
   runtime.row = e.initRow ?? e.row;
   const target = callTargetOf(callee, 'direct');
-  if (e.fcc) return callee instanceof PhpArray ? receiverClosure(target) : closureFromCallable(target);
+  if (e.fcc) {
+    if (callee instanceof PhpObject && isClosure(callee)) return callee;
+    return callee instanceof PhpArray ? receiverClosure(target) : closureFromCallable(target);
+  }
   if ((e.fn as Expr).k === 'lit' && typeof callee === 'string') target.dynamic = false;
   const args = evalArgs(e.args, target.magic ? undefined : target.fn, functionDisplayName(target, true));
   runtime.row = e.row;

@@ -1024,6 +1024,14 @@ test('releases an uncaught exception after reporting or handling it, before shut
   });
 });
 
+test('a first-class callable of a closure is the closure itself', () => {
+  expect(
+    run(
+      '<?php class H { function m() {} } function uf() {} $c = fn() => 1; $f = uf(...); $m = (new H)->m(...); var_dump($c(...) === $c, $f(...) === $f, $m(...) === $m); echo spl_object_id(new stdClass);'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'bool(true)\nbool(true)\nbool(true)\n5' });
+});
+
 test('unhandled match cases escape strings and name types as PHP does', () => {
   expect(
     run(String.raw`<?php
