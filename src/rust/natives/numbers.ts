@@ -470,9 +470,8 @@ const floating: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
   round_ties_even: ([a], ctx) => {
     const value = float(a);
     const floor = Math.floor(value);
-    const diff = value - floor;
-    if (diff !== 0.5) return round(ctx, Math.round(value) === 0 && value < 0 ? -0 : Math.round(value));
-    return round(ctx, floor % 2 === 0 ? floor : floor + 1);
+    const rounded = value - floor === 0.5 && floor % 2 === 0 ? floor : Math.round(value);
+    return round(ctx, rounded);
   },
   trunc: ([a], ctx) => round(ctx, Math.trunc(float(a))),
   fract: ([a], ctx) => round(ctx, float(a) - Math.trunc(float(a))),

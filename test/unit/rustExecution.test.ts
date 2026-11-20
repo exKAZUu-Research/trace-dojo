@@ -37,6 +37,7 @@ test('a program that draws reports its final board and the turtles still owned',
 test('values print as rustc prints them', () => {
   const program = rustMain(String.raw`    println!("[{:.2}] [{:.2}] [{:.0}] [{:.0}]", 0.125, 0.135, 2.5, 3.5);
     println!("{} {:?} {:?} {:?} {}", -0.0f64, 1e15, 1e16, 1e-5, 1e21);
+    println!("{:?} {:?} {:?}", (-0.5f64).round_ties_even(), (-0.5f32).round_ties_even(), 0.5f64.round_ties_even());
     println!("{:?} {} {}", 0.1f32 + 0.2f32, 0.1 + 0.2, 123456789.0f32);
     println!("[{:>6}] [{:<4}] [{:^7}] [{:05}] [{:+}] [{:#x}] [{:#010b}] [{:e}]", 42, 7, "ab", -42, 5, 255, 5, 1234.5);
     println!("{:?} {:5?} {:?}", (1, "a", 'c', Some(2.5)), Some(1), "q\"\n");
@@ -47,6 +48,7 @@ test('values print as rustc prints them', () => {
     kind: 'executed',
     stdout: `[0.12] [0.14] [2] [4]
 -0 1000000000000000.0 1e16 1e-5 1000000000000000000000
+-0.0 -0.0 0.0
 0.3 0.30000000000000004 123456790
 [    42] [7   ] [  ab   ] [-0042] [+5] [0xff] [0b00000101] [1.2345e3]
 (1, "a", 'c', Some(2.5)) Some(    1) "q\\"\\n"
