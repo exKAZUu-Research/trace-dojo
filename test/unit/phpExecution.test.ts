@@ -5481,6 +5481,11 @@ test('a returned local becomes a GC root before the other locals are freed', () 
       '<?php class N { public $a; function __construct(public $id) {} function __destruct() { echo "d{$this->id};"; } } function cycle() { $p = new N(1); $q = new N(2); $p->a = $q; $q->a = $p; } $stack = []; array_push($stack, 1); array_push($stack, 2); cycle(); echo gc_collect_cycles(), ";"; echo spl_object_id(new stdClass);'
     )
   ).toMatchObject({ kind: 'executed', stdout: 'd1;d2;2;1' });
+  expect(
+    run(
+      '<?php class N { public $a; function __construct(public $id) {} function __destruct() { echo "d{$this->id};"; } } $arr = []; $arr[] = 2; $arr[] = 3; $o = new N(2); $o->a = $o; $o = null; array_pop($arr); foreach ($arr as $e) { $arr[0] = 3; } echo gc_collect_cycles();'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'd2;1' });
   for (const callable of [
     'class H { function make() { return function () { return 1; }; } } $h = new H; $f = $h->make();',
     'class H { function m() { return 1; } } $h = new H; $f = $h->m(...);',
