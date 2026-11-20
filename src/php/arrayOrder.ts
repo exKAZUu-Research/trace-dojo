@@ -336,21 +336,18 @@ export class ArrayOrder {
   replace(keys: Iterable<Key>, packed: boolean, rebuild?: ArrayRebuild): void {
     const orderedKeys = [...keys];
     const cursors = [...this.liveCursors()].map((cursor) => ({ cursor, index: cursor.index }));
-    let positions: ReadonlyMap<Key, number> | undefined;
-    if (rebuild !== undefined) {
-      if (typeof rebuild === 'object' && 'positions' in rebuild) {
-        if (rebuild.keepPositions) positions = rebuild.positions;
-        else if (cursors.length > 0)
-          this.remapShiftedPositions([...rebuild.positions.values()], rebuild.packed, cursors);
-      } else if (cursors.length > 0) this.remapRebuild(rebuild, cursors);
-    }
+    const positions = this.resolveRebuildPositions(rebuild, cursors);
     this.entries.clear();
     this.buckets.clear();
     this.first = undefined;
     this.last = undefined;
     this.keyOffset = 0n;
     this.indexOffset = 0;
-    for (const key of orderedKeys) this.appendEntry(key, positions?.get(key) ?? this.entries.size);
+    for (const key of orderedKeys) {
+      const index = positions?.get(key) ?? this.entries.size;
+      this.appendEntry(key, index);
+      if (positions) this.nextIndex = Math.max(this.nextIndex, index + 1);
+    }
     if (!positions) {
       this.storageVersion++;
       this.nextIndex = this.entries.size;
@@ -359,6 +356,20 @@ export class ArrayOrder {
     this.listLayout = orderedKeys.every((key, index) => key === BigInt(index));
     this.packed = packed && (this.listLayout || positions !== undefined);
     this.restorePositions(cursors, positions !== undefined);
+  }
+
+  private resolveRebuildPositions(
+    rebuild: ArrayRebuild | undefined,
+    cursors: { cursor: ArrayCursor; index: number | undefined }[]
+  ): ReadonlyMap<Key, number> | undefined {
+    if (rebuild === undefined) return undefined;
+    if (typeof rebuild === 'object' && 'positions' in rebuild) {
+      if (rebuild.keepPositions) return rebuild.positions;
+      if (cursors.length > 0) this.remapShiftedPositions([...rebuild.positions.values()], rebuild.packed, cursors);
+      return undefined;
+    }
+    if (cursors.length > 0) this.remapRebuild(rebuild, cursors);
+    return undefined;
   }
 
   private restorePositions(cursors: CursorPosition[], preserve: boolean): void {

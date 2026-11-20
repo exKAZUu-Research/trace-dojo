@@ -362,3 +362,18 @@ function f(&$a) {
     referenceVars: { $a: { kind: 'object', entries: { [entryKey]: { kind: 'value', value: 2 } } } },
   });
 });
+
+test.each(['["b" => 10, "a" => 20]', '[3 => 10, 1 => 20]'])(
+  'records caller step when a call only reorders PHP array entries: %s',
+  (init) => {
+    const program = `<?php
+$a = ${init};
+f($a);
+echo json_encode($a);
+function f(&$a) {
+    $x = 1;
+    return $a = array_reverse($a, true);
+}`;
+    expect(phpTrace(program).map((item) => item.line)).toEqual([0, 2, 6, 3, 4]);
+  }
+);

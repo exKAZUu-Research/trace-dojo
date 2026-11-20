@@ -398,7 +398,7 @@ export class PhpArray {
     this.capacityHint = Math.max(this.capacityHint, previousSize);
     this.map = this.table(entries);
     allocationHandler(Math.max(0, this.size - previousSize), this.size);
-    this.order?.replace(this.map.physicalKeys(), packed, rebuild);
+    (rebuild ? this.ordered() : this.order)?.replace(this.map.physicalKeys(), packed, rebuild);
     this.orderPacked = packed;
     this.composite = false;
     if (!keepAppendKey) this.nextFree = INT_MIN;

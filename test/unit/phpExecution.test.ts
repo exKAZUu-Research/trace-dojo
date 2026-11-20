@@ -4477,4 +4477,46 @@ echo "|", mt_rand();
 `)
     ).toMatchObject({ kind: 'executed', stdout: expected });
   }
+
+  for (const [expr, expected] of [
+    ['array_fill(1, 1, 1)', '1,1,1,1,1,1,1,1,|335047475'],
+    ['array_fill(4, 8, 1)', '6,11,4,10,6,11,4,8,|335047475'],
+    ['array_fill(4, 10, 1)', '8,9,4,12,4,12,12,7,|334995689'],
+  ]) {
+    expect(
+      run(`<?php
+$a = ${expr};
+mt_srand(42);
+for ($i = 0; $i < 8; $i++) echo array_rand($a), ",";
+echo "|", mt_rand();
+`)
+    ).toMatchObject({ kind: 'executed', stdout: expected });
+  }
+
+  for (const [body, expected] of [
+    [
+      '$v0 = new Node(0); $v1 = new Node(1); $v2 = new Node(2); $v3 = new Plain; $v4 = new Plain; $v5 = new Node(5); $v6 = new Plain; $v7 = new Node(7); $v3->b = $v7; $v3->c = $v5; $v4->a = $v6; $v4->c = $v2; $v5->a = ["k" => $v4]; $v5->b = $v6; $v6->a = $v3; $v7->a = ["k" => $v0]; unset($v1, $v3, $v0, $v2, $v6, $v4); echo "[", gc_collect_cycles(), "] "; unset($v5, $v7);',
+      '~1 [0] | ~5 ~7 ~2 ~0 9 0 6,7,4,8,1,5,3,2,9,10,11',
+    ],
+    [
+      '$v0 = new Plain; $v1 = new Plain; $v2 = new Plain; $v3 = new Plain; $v4 = new Node(4); $v5 = new Plain; $v6 = new Node(6); $v7 = new Plain; $v0->c = $v0; $v2->a = $v4; $v2->b = [$v2, [$v7]]; $v3->a = [$v1, [$v5]]; $v3->b = $v3; $v4->c = [$v1, [$v0]]; unset($v6, $v0, $v1, $v3, $v7, $v4); echo "[", gc_collect_cycles(), "] "; $v2->a = null; unset($v2, $v5);',
+      '~6 [3] ~4 | 5 0 1,3,8,6,5,2,4,7,9,10,11',
+    ],
+    [
+      '$v0 = new Plain; $v1 = new Node(1); $v2 = new Plain; $v3 = new Plain; $v4 = new Plain; $v5 = new Plain; $v6 = new Plain; $v7 = new Node(7); $v0->c = [$v1, [$v3]]; $v4->b = [$v6, [$v4]]; $v4->c = [$v1, [$v0]]; $v7->a = [$v7, [$v6]]; $v7->c = $v0; unset($v3, $v2, $v6, $v4, $v5); echo "[", gc_collect_cycles(), "] "; unset($v1, $v0, $v7);',
+      '[5] | ~1 ~7 9 0 8,1,4,2,7,5,6,3,9,10,11',
+    ],
+  ]) {
+    expect(
+      run(`<?php
+class Node { public $a; public $b; public $c; function __construct(public $n = 0) {} function __destruct() { echo "~{$this->n} "; } }
+class Plain { public $a; public $b; public $c; }
+${body}
+echo "| ", gc_collect_cycles(), " ", gc_collect_cycles(), " ";
+$ids = [];
+for ($i = 0; $i < 11; $i++) { $kk[] = new Plain; $ids[] = spl_object_id(end($kk)); }
+echo implode(",", $ids);
+`)
+    ).toMatchObject({ kind: 'executed', stdout: expected });
+  }
 });

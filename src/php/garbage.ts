@@ -1,7 +1,14 @@
 // code-gauge-allow-file fileNcss 999 -- Holds object ownership, reachability and release with their shared helpers.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { type CleanupException, withCleanupExceptions, withPendingException } from './errors';
-import { cachedObjectFree, deferredHandleOrder, objectFree, orderDestructedCollection, recordGcRoot } from './gcRoots';
+import {
+  cachedObjectFree,
+  collectGarbageOrder,
+  deferredHandleOrder,
+  objectFree,
+  orderDestructedCollection,
+  recordGcRoot,
+} from './gcRoots';
 import { ExitSignal, type Frame, PhpThrow, type Runtime } from './runtime';
 import {
   arrayHolderCount,
@@ -99,7 +106,7 @@ function collectGarbageNow(runtime: Runtime, cycles: boolean, stopOnException: b
   const destructible = freed.filter((object) => !object.destructed && object.cls.findMethod('__destruct'));
   if (destructible.length === 0 || runtime.shuttingDown) {
     const ordered = orderCollectedObjects(runtime, cycles, owners, freed, handles, reachedArrays, buffered);
-    finishCollectedObjects(runtime, ordered, arrayStorage);
+    finishCollectedObjects(runtime, ordered, arrayStorage, collected);
     return collected;
   }
   return collectAfterDestruction(runtime, { owners, handles, destructible, arrayStorage, buffered }, stopOnException);
@@ -147,12 +154,19 @@ function collectAfterDestruction(
       buffered,
     });
     count = collectedCount;
-    finishCollectedObjects(runtime, ordered, arrayStorage);
+    finishCollectedObjects(runtime, ordered, arrayStorage, count);
   });
   return count;
 }
 
-function finishCollectedObjects(runtime: Runtime, objects: PhpObject[], arrayStorage: Set<PhpArray>): void {
+function finishCollectedObjects(
+  runtime: Runtime,
+  objects: PhpObject[],
+  arrayStorage: Set<PhpArray>,
+  collected: number
+): void {
+  const reserve = runtime.collectingCycles ? collected : 0;
+  if (reserve > 0) runtime.gcRoots.reserve(reserve);
   const children: unknown[] = [];
   for (const object of objects) {
     pushObject(object, children);
@@ -160,6 +174,7 @@ function finishCollectedObjects(runtime: Runtime, objects: PhpObject[], arraySto
   }
   finishArrayCollection(runtime, arrayStorage);
   releaseDropped(runtime, children, true);
+  if (reserve > 0) runtime.gcRoots.compact();
   retainTurtles(runtime, mark(runtime));
 }
 
@@ -1000,7 +1015,15 @@ function releaseOrder(
   const graph = new CollectionGraph(freed, runtime);
   const referenced = referencedGarbage(graph, freed);
   const owners = new Set(
-    buffered?.filter((node): node is PhpObject => node instanceof PhpObject && graph.accepts(node))
+    buffered
+      ? collectGarbageOrder<CollectionNode, PhpObject>(
+          buffered.filter((node) => graph.accepts(node)),
+          new Set(freed),
+          (node): node is PhpObject => node instanceof PhpObject,
+          (node) => graph.children(node),
+          (node) => !(node instanceof Ref)
+        )
+      : undefined
   );
   const handles: PhpObject[] = [];
   const visited = new Set<CollectionNode>();

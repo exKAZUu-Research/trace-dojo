@@ -454,10 +454,20 @@ defineFunction('array_fill(int $start_index, int $count, mixed $value): array', 
   if (count >= 2n ** 31n) throwError('ValueError', 'array_fill(): Argument #2 ($count) is too large');
   if (count > 0n && start + count - 1n > INT_MAX)
     throwError('Error', 'Cannot add element to the array as the next element is already occupied');
-  rt().ensureRoom(Number(count));
+  const total = Number(count);
+  rt().ensureRoom(total);
   const result = new PhpArray();
-  rt().spend(Number(count) / 16);
-  for (let index = 0n; index < count; index++) result.set(start + index, share(value));
+  if (total === 0) return result;
+  rt().spend(total / 16);
+  const packed = start >= 0n && start < count;
+  const entries: [Key, Value][] = [];
+  const positions = new Map<Key, number>();
+  for (let index = 0; index < total; index++) {
+    const key = start + BigInt(index);
+    entries.push([key, share(value)]);
+    positions.set(key, packed ? Number(key) : index);
+  }
+  result.replaceTable(entries, packed, { positions, keepPositions: packed, packed }, false);
   return result;
 });
 defineFunction('array_fill_keys(array $keys, mixed $value): array', ({ args }) => {

@@ -64,6 +64,22 @@ export function deferredHandleOrder<N extends object, O extends N>(
   return state.order;
 }
 
+export function collectGarbageOrder<N extends object, O extends N>(
+  bufferedRoots: N[],
+  remainingObjects: Set<O>,
+  isObject: (node: N) => node is O,
+  children: (node: N) => N[],
+  countable: (node: N) => boolean = () => true
+): O[] {
+  const buffer = buildSimulationBuffer(bufferedRoots, remainingObjects, isObject, children, countable);
+  const objects: O[] = [];
+  for (let index = 0; index < buffer.length; index++) {
+    const node = buffer.at(index);
+    if (node !== undefined && isObject(node)) objects.push(node);
+  }
+  return objects;
+}
+
 export function orderDestructedCollection<N extends object, O extends N>(
   bufferedRoots: N[],
   destructible: Set<O>,
@@ -473,6 +489,24 @@ export class GcRoots<T extends object> {
     this.positions.clear();
     this.slots.length = 0;
     this.unused.length = 0;
+  }
+
+  reserve(count: number): void {
+    this.positions.clear();
+    this.slots.length = count;
+    this.slots.fill(undefined);
+    this.unused.length = 0;
+  }
+
+  compact(): void {
+    const compacted = compact(this.slots);
+    this.positions.clear();
+    this.slots.length = compacted.length;
+    this.unused.length = 0;
+    for (let index = 0; index < compacted.length; index++) {
+      this.slots[index] = compacted[index];
+      this.positions.set(compacted[index], index);
+    }
   }
 
   garbageOrder(live: (value: T) => boolean): T[] {

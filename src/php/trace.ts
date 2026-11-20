@@ -27,13 +27,13 @@ export function tracePhpProgram(program: string, trace: TraceOptions, input?: Pr
   return { traceItems: recorder.traceItems, finalVars, ...run };
 }
 
-const arrayDisplayNodes = new WeakSet<DisplayNode>();
+const arraySnapshots = new WeakMap<DisplayNode, unknown>();
 
 function stateVariables({ vars, referenceVars }: TraceVariables): Record<string, unknown> {
-  const previews = Object.entries(referenceVars).filter(
-    ([name, node]) => arrayDisplayNodes.has(node) && !Object.hasOwn(vars, name)
-  );
-  return previews.length > 0 ? { ...vars, ...Object.fromEntries(previews) } : vars;
+  const snapshots = Object.entries(referenceVars)
+    .map(([name, node]) => [name, arraySnapshots.get(node)] as const)
+    .filter(([, snapshot]) => snapshot !== undefined);
+  return snapshots.length > 0 ? { ...vars, ...Object.fromEntries(snapshots) } : vars;
 }
 
 /**
@@ -99,10 +99,7 @@ function addVariable(variables: TraceVariables, name: string, value: Value): voi
   // Arrays also appear as references so that learners can expand their elements.
   if (scalar !== NOT_SCALAR && !(value instanceof PhpArray)) return;
   const node = displayNodeOf(value, new Set(), { remaining: MAX_DISPLAY_EXPANSION });
-  if (node) {
-    if (value instanceof PhpArray) arrayDisplayNodes.add(node);
-    define(variables.referenceVars, name, node);
-  }
+  if (node) define(variables.referenceVars, name, node);
 }
 
 const NOT_SCALAR = Symbol('notScalar');
@@ -174,11 +171,17 @@ function displayNodeOf(value: Value, seen: Set<object>, budget: { remaining: num
     const entries: Record<string, DisplayNode> = {};
     if (value instanceof PhpArray) {
       const isList = value.isList();
+      const ordered: [string, unknown][] = [];
       for (const [key, item] of value.entries()) {
-        define(entries, keyLabel(key, isList), displayNodeOf(item, seen, budget) ?? NULL_NODE);
+        const label = keyLabel(key, isList);
+        const child = displayNodeOf(item, seen, budget) ?? NULL_NODE;
+        define(entries, label, child);
+        ordered.push([label, arraySnapshots.get(child) ?? child]);
         if (budget.remaining <= 0) break;
       }
-      return { kind: isList ? 'array' : 'object', entries };
+      const node: DisplayNode = { kind: isList ? 'array' : 'object', entries };
+      arraySnapshots.set(node, ordered);
+      return node;
     }
     return { kind: 'object', entries: objectEntries(value, seen, budget) };
   } finally {
