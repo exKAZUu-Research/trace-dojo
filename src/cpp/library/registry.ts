@@ -2,6 +2,7 @@ import { fma } from '../../c/library/binaryFloat';
 import { BINARY, UNARY } from '../../c/library/mathFunctions';
 import { CppRuntimeError, overflowError, ProgramExit } from '../errors';
 import type { ExpressionCompiler } from '../expressionCompiler';
+import { copyFloatSign, floatSignBit, NEGATIVE_NAN } from '../floatSign';
 import { invoke } from '../objectCompiler';
 import type { Frame } from '../runtime';
 import type { Entity } from '../scopes';
@@ -578,7 +579,7 @@ function mathFunctions(): Map<string, FunctionInfo[]> {
           name,
           Array.from({ length: arity }, () => type),
           type,
-          linkedMath(symbol, calculate)
+          linkedMath(symbol, calculate, name === 'copysign')
         );
         fn.mathIntrinsic = symbol === undefined;
         return fn;
@@ -600,7 +601,7 @@ function mathFunctions(): Map<string, FunctionInfo[]> {
         symbol,
         Array.from({ length: arity }, () => type),
         type,
-        linkedMath(target, calculate)
+        linkedMath(target, calculate, name === 'copysign')
       );
       fn.mathIntrinsic = target === undefined;
       functions.set(symbol, [fn]);
@@ -624,35 +625,26 @@ function mathFunctions(): Map<string, FunctionInfo[]> {
       ),
     ]);
   for (const [name, test] of [
-    ['isnan', (x: number) => Number.isNaN(x)],
-    ['isinf', (x: number) => !Number.isFinite(x) && !Number.isNaN(x)],
-    ['isfinite', (x: number) => Number.isFinite(x)],
+    ['isnan', (x: unknown) => Number.isNaN(asNumber(x))],
+    ['isinf', (x: unknown) => Math.abs(asNumber(x)) === Number.POSITIVE_INFINITY],
+    ['isfinite', (x: unknown) => Number.isFinite(asNumber(x))],
+    ['signbit', floatSignBit],
   ] as const) {
-    functions.set(name, classification(name, test));
+    functions.set(name, classification(name, test, name === 'signbit'));
   }
-  functions.set('signbit', [
-    generic('signbit', (args) => {
-      const type = args.length === 1 ? unqualified(args[0].type) : undefined;
-      if (!type || !isArithmetic(type)) return;
-      return native('signbit', [type], BOOL, ([x]) => {
-        const value = asNumber(x);
-        return value < 0 || Object.is(value, -0) ? 1 : 0;
-      });
-    }),
-  ]);
   return functions;
 }
 
 /** The overloads of a classification function such as `isnan`, which libc++ also has for integers. */
-function classification(name: string, test: (x: number) => boolean): FunctionInfo[] {
-  return [
-    ...[FLOAT, DOUBLE, LDOUBLE].map((type) => native(name, [type], BOOL, ([x]) => (test(x as number) ? 1 : 0))),
-    generic(name, (args) => {
-      const type = args.length === 1 ? unqualified(args[0].type) : undefined;
-      if (type?.kind !== 'int') return;
-      return native(name, [type], BOOL, ([x]) => (test(asNumber(x)) ? 1 : 0));
-    }),
-  ];
+function classification(name: string, test: (x: unknown) => boolean, templateOnly: boolean): FunctionInfo[] {
+  const template = generic(name, (args) => {
+    const type = args.length === 1 ? unqualified(args[0].type) : undefined;
+    if (!type || !isArithmetic(type) || (!templateOnly && type.kind !== 'int')) return;
+    return native(name, [type], BOOL, ([x]) => (test(x) ? 1 : 0));
+  });
+  if (templateOnly) return [template];
+  const ordinary = [FLOAT, DOUBLE, LDOUBLE].map((type) => native(name, [type], BOOL, ([x]) => (test(x) ? 1 : 0)));
+  return [...ordinary, template];
 }
 
 const promotedMath = (name: string, arity: number, run: (args: number[]) => number): FunctionInfo =>
@@ -664,14 +656,21 @@ const promotedMath = (name: string, arity: number, run: (args: number[]) => numb
       return;
     const result = types.some((type) => type.kind === 'float' && type.name === 'ldouble') ? LDOUBLE : DOUBLE;
     const symbol = mathWrapperCall(name, result.name === 'ldouble' ? 'ldouble' : 'integer');
-    return native(name, types, result, linkedMath(symbol, run));
+    return native(name, types, result, linkedMath(symbol, run, name === 'copysign'));
   });
 
-function linkedMath(symbol: string | undefined, run: (values: number[]) => number): NativeFunction {
+function linkedMath(
+  symbol: string | undefined,
+  run: (values: number[]) => number,
+  copiesSign: boolean
+): NativeFunction {
   return (values, { frame, row }) => {
-    const args = values.map(asNumber);
     const override = symbol && frame.runtime.libcOverrides.get(symbol);
-    return override ? invoke(frame, override, args, undefined, row) : run(args);
+    if (override) {
+      const args = values.map((value) => (value === NEGATIVE_NAN ? NEGATIVE_NAN : asNumber(value)));
+      return invoke(frame, override, args, undefined, row);
+    }
+    return copiesSign ? copyFloatSign(values[0], values[1]) : run(values.map(asNumber));
   };
 }
 

@@ -420,7 +420,7 @@ export class Compiler extends StatementCompiler {
       if (declared.type.kind === 'class' && !declared.type.cls.isComplete) {
         this.error(declarator.row, `クラス ${declared.type.cls.name} はまだ定義されていないので、メンバにできません。`);
       }
-      this.checkFixedArrayLayout(declared.type, declarator.row);
+      this.checkLibraryLayout(declared.type, declarator.row);
       if (declared.type.kind === 'void') this.error(declarator.row, `void 型のメンバ ${name} は作れません。`);
       if (declared.type.kind === 'array' && declared.type.length === undefined) {
         this.unsupported(declarator.row, '大きさのない配列のメンバ（柔軟な配列メンバ）');
@@ -1897,7 +1897,7 @@ export class Compiler extends StatementCompiler {
 
   defaultConstructed(cls: ClassInfo, row: number, isValueInitialized: boolean, allowsExplicit = true): Expr {
     if (!cls.isComplete) return this.error(row, `クラス ${cls.name} はまだ定義されていません。`);
-    this.checkFixedArrayLayout(classType(cls), row);
+    this.checkLibraryLayout(classType(cls), row);
     if (cls.isAbstract)
       return this.error(row, `${cls.name} は抽象クラス（純粋仮想関数があるクラス）なので、オブジェクトを作れません。`);
     const libraryDefault = cls.library?.defaultInitializer;
@@ -1965,7 +1965,7 @@ export class Compiler extends StatementCompiler {
     if (!type.cls.isComplete && type.cls.library)
       return this.error(row, `クラス ${type.cls.name} はまだ定義されていません。`);
     const library = type.cls.library;
-    this.checkFixedArrayLayout(type, row);
+    this.checkLibraryLayout(type, row);
     if (!this.isUnevaluated) this.checkLibraryStorage(type.cls, row);
     const isAggregate = this.isAggregate(type.cls);
     const single =

@@ -473,7 +473,7 @@ export class Streams {
       const bits = INTEGER_BITS[valueType.name] ?? 32;
       return (frame, stream) => writeInteger(frame, stream, BigInt(run(frame) as number | bigint), isSigned, bits);
     }
-    if (valueType.kind === 'float') return (frame, stream) => writeFloat(frame, stream, run(frame) as number);
+    if (valueType.kind === 'float') return (frame, stream) => writeFloat(frame, stream, Number(run(frame)));
     if (valueType.kind === 'nullptr') return (frame, stream) => stream.writeField(frame, 'nullptr');
     if (valueType.kind === 'pointer') {
       if (isCharType(valueType.to)) {

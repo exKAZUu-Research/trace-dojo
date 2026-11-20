@@ -193,7 +193,7 @@ class Snapshotter {
         return Number.isSafeInteger(number) ? number : (value as bigint);
       }
       case 'float': {
-        return type.name === 'float' ? shortestFloat(value as number) : (value as number);
+        return type.name === 'float' ? shortestFloat(Number(value)) : Number(value);
       }
       case 'reference': {
         return value instanceof Ptr ? this.scalarOf(readLocation(value), type.to) : undefined;

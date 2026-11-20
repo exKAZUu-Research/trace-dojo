@@ -1,5 +1,6 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { CppRuntimeError } from './errors';
+import type { NegativeNaN } from './floatSign';
 import type { Frame, Temporary } from './runtime';
 import {
   baseSubobjectOffset,
@@ -21,7 +22,16 @@ export class PartialScalar {
   ) {}
 }
 
-export type Value = number | bigint | Ptr | Store | FunctionRef | PartialScalar | typeof UNINIT | undefined;
+export type Value =
+  | number
+  | bigint
+  | NegativeNaN
+  | Ptr
+  | Store
+  | FunctionRef
+  | PartialScalar
+  | typeof UNINIT
+  | undefined;
 
 export function isIndeterminate(value: Value): boolean {
   return value === UNINIT || value instanceof PartialScalar;

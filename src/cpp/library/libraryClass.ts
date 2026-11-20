@@ -8,7 +8,16 @@ import type { ArrayStore, CObject, Value } from '../values';
 export type IteratorCategory = 'forward' | 'bidirectional' | 'randomAccess';
 
 /** What the library provides for a class besides its members: its operators and its layout. */
-export interface LibraryClass {
+export type LibraryClass = LibraryMembers & (LibraryLayout | { readonly layoutFromFields: true });
+
+interface LibraryLayout {
+  readonly layoutFromFields?: false;
+  readonly size: number;
+  readonly align: number;
+  readonly fieldOffsets?: readonly number[];
+}
+
+interface LibraryMembers {
   /** The class template or class, such as `vector` or `string`. */
   readonly kind: string;
   readonly args: readonly Type[];
@@ -20,10 +29,6 @@ export interface LibraryClass {
   readonly scalarValue?: { type: ArithmeticType; read: (value: Value) => number | bigint };
   readonly aggregateArray?: { type: ArrayType; make: (storage: ArrayStore) => Value };
   readonly additionalPublicBases?: readonly ClassInfo[];
-  /** `sizeof` of the class in libc++ on arm64. */
-  readonly size: number;
-  readonly align: number;
-  readonly fieldOffsets?: readonly number[];
   /**
    * Compiles an operator whose operands include an object of this class, such as `s + t`, `*it`, or `cout << x`, or
    * gives undefined when the class has no such operator for these operands. Unary operators get one operand;

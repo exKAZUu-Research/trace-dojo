@@ -1,5 +1,6 @@
 import { convertScalar } from '../c/arith';
 import { type Expr, mapMemberConstants } from './expr';
+import { NEGATIVE_NAN } from './floatSign';
 import { erasePointee } from './pointerCasts';
 import type { Syntax } from './syntax';
 import {
@@ -220,7 +221,11 @@ export function convertArithmetic(expr: Expr, to: Extract<Type, { kind: 'int' | 
     type: to,
     isLvalue: false,
     row: expr.row,
-    run: (frame) => convertScalar(run(frame) as number | bigint, from, to),
+    run: (frame) => {
+      const value = run(frame);
+      if (value === NEGATIVE_NAN) return to.kind === 'float' ? value : convertScalar(Number.NaN, from, to);
+      return convertScalar(value as number | bigint, from, to);
+    },
     memberConstant: mapMemberConstants([expr], ([value]) => convertScalar(value, from, to)),
   };
   const known = expr.constant ?? expr.foldedValue;
@@ -229,7 +234,7 @@ export function convertArithmetic(expr: Expr, to: Extract<Type, { kind: 'int' | 
       const constant = convertScalar(known, from, to);
       if (expr.constant !== undefined) converted.constant = constant;
       else converted.foldedValue = constant;
-      converted.run = () => constant;
+      if (!Number.isNaN(known)) converted.run = () => constant;
     } catch {
       // A conversion that overflows is no constant; it stops the program when it runs.
     }

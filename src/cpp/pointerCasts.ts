@@ -1,4 +1,5 @@
 import { CppRuntimeError } from './errors';
+import { NEGATIVE_NAN } from './floatSign';
 import {
   type ArithmeticType,
   type ClassType,
@@ -262,11 +263,15 @@ function encodeScalar(value: Value, type: ArithmeticType): DataView {
   else if (type.kind === 'int') bits.setBigUint64(0, BigInt.asUintN(64, BigInt(value as number | bigint)), true);
   else if (type.name === 'float') bits.setFloat32(0, value as number, true);
   else bits.setFloat64(0, value as number, true);
+  if (value === NEGATIVE_NAN) bits.setUint8(sizeOf(type) - 1, bits.getUint8(sizeOf(type) - 1) | 0x80);
   return bits;
 }
 
-function decodeScalar(bits: DataView, type: ArithmeticType): number | bigint {
-  if (type.kind === 'float') return type.name === 'float' ? bits.getFloat32(0, true) : bits.getFloat64(0, true);
+function decodeScalar(bits: DataView, type: ArithmeticType): Value {
+  if (type.kind === 'float') {
+    const value = type.name === 'float' ? bits.getFloat32(0, true) : bits.getFloat64(0, true);
+    return Number.isNaN(value) && (bits.getUint8(sizeOf(type) - 1) & 0x80) !== 0 ? NEGATIVE_NAN : value;
+  }
   const width = sizeOf(type) * 8;
   const stored = bits.getBigUint64(0, true);
   const integer = isSigned(type) ? BigInt.asIntN(width, stored) : BigInt.asUintN(width, stored);

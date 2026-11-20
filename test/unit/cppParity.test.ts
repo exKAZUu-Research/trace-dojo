@@ -70,17 +70,43 @@ int main() {
   });
 });
 
-test('lays out a fixed array after its forward-declared element is complete', () => {
-  const program = `#include <array>
+test('preserves negative NaNs across C++ width conversions, sign operations, and byte views', () => {
+  const program = `#include <cmath>
 #include <iostream>
-struct Item;
-std::array<Item, 2>* pointer;
-struct Item { long value; };
-struct Layout { char tag; std::array<Item, 2> values; };
-int main() { std::cout << sizeof(*pointer) << " " << sizeof(Layout); }`;
+int main() {
+  double value = -NAN;
+  float narrow = static_cast<float>(value);
+  long double wide = std::copysign(0.0L, narrow);
+  std::cout << std::signbit(value) << std::signbit(narrow) << std::signbit(wide) << ' '
+            << std::copysign(1.0, value) << ' ' << std::signbit(std::copysign(NAN, value)) << ' '
+            << std::isnan(value) << (value == value) << std::signbit(-value) << ' ';
+  unsigned char* bytes = static_cast<unsigned char*>(static_cast<void*>(&value));
+  auto high = sizeof(value) - 1;
+  std::cout << unsigned(bytes[high] >> 7);
+  bytes[high] &= 127;
+  std::cout << std::signbit(value) << std::isnan(value);
+}`;
   expect(executeProgram('cpp', program)).toMatchObject({
     kind: 'executed',
-    stdout: '16 24',
+    stdout: '111 -1 1 100 101',
+    uncaughtException: undefined,
+  });
+});
+
+test('lays out fixed arrays and enclosing pairs after a forward-declared element is complete', () => {
+  const program = `#include <array>
+#include <iostream>
+#include <utility>
+struct Item;
+std::array<Item, 2>* pointer;
+std::pair<std::array<Item, 2>, char>* pair;
+std::pair<std::array<Item, 0>, char>* empty;
+struct Item { long value; };
+struct Layout { char tag; std::pair<std::array<Item, 2>, char> values; };
+int main() { std::cout << sizeof(*pointer) << ' ' << sizeof(*pair) << ' ' << sizeof(*empty) << ' ' << sizeof(Layout); }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '16 24 16 32',
     uncaughtException: undefined,
   });
 });

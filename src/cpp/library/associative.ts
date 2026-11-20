@@ -15,7 +15,6 @@ import {
   intMax,
   isConstType,
   nonReference,
-  pointerTo,
   referenceTo,
   sameType,
   SIZE_T,
@@ -82,20 +81,13 @@ export function pairClass(library: Library, first: Type, second: Type): ClassInf
     ];
     return operations;
   };
-  const firstStorage = first.kind === 'reference' ? pointerTo(first.to) : first;
-  const secondStorage = second.kind === 'reference' ? pointerTo(second.to) : second;
-  const secondAlign = alignOf(secondStorage);
-  const align = Math.max(alignOf(firstStorage), secondAlign);
-  const secondOffset = Math.ceil(sizeOf(firstStorage) / secondAlign) * secondAlign;
   const constantMembers = allowsConstantCopy(first) && allowsConstantCopy(second);
   cls.library = {
     kind: 'pair',
     allowsConstantCopy: constantMembers,
     valueInitializedMembers: [first, second],
     args: [first, second],
-    size: Math.ceil((secondOffset + sizeOf(secondStorage)) / align) * align,
-    align,
-    fieldOffsets: [0, secondOffset],
+    layoutFromFields: true,
     operator: (compiler, operator, operands, row) => {
       const [left, right] = operands;
       const isSelf = (expr: Expr | undefined): boolean => expr?.type.kind === 'class' && expr.type.cls === cls;

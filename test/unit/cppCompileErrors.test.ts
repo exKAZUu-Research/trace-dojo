@@ -159,6 +159,19 @@ int main() {}`;
   });
 });
 
+test('requires a complete field layout when measuring a pair that embeds a fixed array', () => {
+  const program = `#include <array>
+#include <utility>
+struct Item;
+std::pair<std::array<Item, 2>, char>* pointer;
+int main() { return sizeof(*pointer); }
+struct Item { long value; };`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 4, message: expect.stringContaining('クラス Item はまだ定義されていません') }],
+  });
+});
+
 test.each([
   ['map', 'map<Key, int>'],
   ['set', 'set<Key>'],

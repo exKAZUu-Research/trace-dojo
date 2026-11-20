@@ -212,6 +212,7 @@ export abstract class CompilerBase {
 
   private lookupInClass(cls: ClassInfo, nameNode: Syntax, row: number): Entity {
     if (!cls.isComplete && cls.library) return this.error(row, `クラス ${cls.name} はまだ定義されていません。`);
+    this.checkLibraryLayout(classType(cls), row);
     if (nameNode.type === 'qualified_identifier') {
       const inner = this.lookupInClass(cls, fieldOf(nameNode, 'scope') as Syntax, row);
       if (inner.kind !== 'class' && !(inner.kind === 'type' && inner.type.kind === 'class')) {
@@ -228,6 +229,22 @@ export abstract class CompilerBase {
     }
     if (name === cls.name || name === cls.name.replace(/^std::/, '')) return { kind: 'class', cls };
     return this.error(row, `${cls.name} に ${name} というメンバはありません。`);
+  }
+
+  protected checkLibraryLayout(type: Type, row: number, isElement = false): void {
+    while (type.kind === 'array') type = type.of;
+    if (type.kind !== 'class') return;
+    if (isElement) this.requireConcreteElement(type.cls, row);
+    const library = type.cls.library;
+    if (library?.aggregateArray) this.checkLibraryLayout(library.aggregateArray.type.of, row, true);
+    if (library?.layoutFromFields)
+      for (const { type: field } of type.cls.ownFields) this.checkLibraryLayout(field, row, true);
+  }
+
+  protected requireConcreteElement(cls: ClassInfo, row: number): void {
+    if (!cls.isComplete) this.error(row, `クラス ${cls.name} はまだ定義されていません。`);
+    if (cls.isAbstract)
+      this.error(row, `${cls.name} は抽象クラス（純粋仮想関数があるクラス）なので、要素として格納できません。`);
   }
 
   /** The namespace or class a qualified name's scope names. */

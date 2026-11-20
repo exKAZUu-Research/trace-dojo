@@ -281,7 +281,7 @@ function integerField(
 function floatField(spec: Spec, arg: PrintfArgument): string {
   const expected = spec.length === 'L' ? 'ldouble' : 'double';
   if (arg.type.kind !== 'float' || arg.type.name !== expected) throw new CppRuntimeError('formatArgumentType');
-  const value = arg.value as number;
+  const value = Number(arg.value);
   const lower = spec.conversion.toLowerCase() as FloatFormat['conversion'];
   const text = formatFloat(value, {
     conversion: lower,

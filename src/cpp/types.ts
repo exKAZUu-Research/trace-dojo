@@ -587,7 +587,7 @@ function classLayout(cls: ClassInfo): ClassLayout {
   const cached = completedLayouts.get(cls);
   if (cached) return cached;
   const atOrigin = new Set([cls]);
-  if (cls.library) {
+  if (cls.library && !cls.library.layoutFromFields) {
     const { size, align, fieldOffsets } = cls.library;
     return { size, align, dataSize: size, baseOffset: 0, fieldOffsets, atOrigin };
   }
@@ -625,7 +625,7 @@ function classLayout(cls: ClassInfo): ClassLayout {
   }
   const size = Math.ceil(offset / align) * align;
   const layout = { size: size === 0 ? 1 : size, align, dataSize: offset, baseOffset, fieldOffsets, atOrigin };
-  if (cls.isComplete) completedLayouts.set(cls, layout);
+  if (cls.isComplete && !cls.library) completedLayouts.set(cls, layout);
   return layout;
 }
 

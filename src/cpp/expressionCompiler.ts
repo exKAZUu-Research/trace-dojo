@@ -1,6 +1,6 @@
 import { binaryOperation, complement, convertScalar, negate } from '../c/arith';
 import type { BinaryOperator } from '../c/ast';
-import { fma } from '../c/library/binaryFloat';
+import { fma as binaryFma } from '../c/library/binaryFloat';
 import { commonType, promote } from '../c/types';
 import { CompileError } from '../interpreter/diagnostics';
 import { byteAt } from './bytes';
@@ -28,6 +28,7 @@ import {
   NO_CONSTANT_MEMBERS,
   offsetConstantLocation,
 } from './expr';
+import { type FloatingValue, negateFloat, NEGATIVE_NAN } from './floatSign';
 import { moveValue } from './library/elements';
 import { throwLibrary } from './library/support';
 import { checkLiteralPrefix, literalBytes, numberLiteral } from './literals';
@@ -84,7 +85,7 @@ const RELATIONAL_OPERATORS = ['<', '<=', '>', '>='];
 const COMPARISONS = new Set(['==', '!=', ...RELATIONAL_OPERATORS]);
 const ARITHMETIC_OPERATORS = new Set(['+', '-', '*', '/', '%', '&', '|', '^', '<<', '>>']);
 
-type FloatingFactors = [number, number];
+type FloatingFactors = [FloatingValue, FloatingValue];
 
 /** Compiles expressions to closures that evaluate them. */
 export abstract class ExpressionCompiler extends ObjectCompiler {
@@ -454,6 +455,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     }
     if (!type.cls.isComplete && type.cls.library)
       return this.error(row, `クラス ${type.cls.name} はまだ定義されていません。`);
+    this.checkLibraryLayout(type, row);
     const cls = naming ?? type.cls;
     for (let owner: ClassInfo | undefined = cls; owner; owner = owner.base) {
       const field = owner.ownFields.find((candidate) => candidate.name === name);
@@ -538,7 +540,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       constantPointerValue: !evaluateObject && global.isConstexprPointer,
       constantPointee: evaluateObject ? undefined : global.constantPointee,
       readConstant:
-        evaluateObject && (known !== undefined || foldedValue !== undefined)
+        evaluateObject && (known !== undefined || foldedValue !== undefined) && !Number.isNaN(known ?? foldedValue)
           ? (frame) => {
               evaluateObject(frame);
               return known ?? foldedValue;
@@ -707,6 +709,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const operation = binaryOperation(operator as BinaryOperator, common as never);
     const isComparison = COMPARISONS.has(operator);
     const resultType = isComparison ? BOOL : common;
+    const evaluate = common.kind === 'float' ? floatingOperation(operation) : operation;
     const aRun = a.run;
     const bRun = b.run;
     const expr: Expr = {
@@ -714,7 +717,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       isLvalue: false,
       row,
       run: (frame) =>
-        frame.unsequencedOperands(aRun, bRun, (first, second) => operation(first as number, second as number)),
+        frame.unsequencedOperands(aRun, bRun, (first, second) => evaluate(first as number, second as number)),
       memberConstant: mapMemberConstants([a, b], ([first, second]) => operation(first, second)),
     };
     const knownA = a.constant ?? a.foldedValue;
@@ -724,7 +727,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         const constant = operation(knownA, knownB);
         if (a.constant !== undefined && b.constant !== undefined) expr.constant = constant;
         else expr.foldedValue = constant;
-        expr.run = () => constant;
+        if (!Number.isNaN(knownA) && !Number.isNaN(knownB)) expr.run = () => constant;
       } catch {
         // An operation that fails (such as dividing by zero) is no constant; it stops the program when it runs.
       }
@@ -742,7 +745,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   private contract(operator: string, expr: Expr, a: Expr, b: Expr, isFloat: boolean): void {
     if (operator === '*') {
       this.floatingProducts.set(expr.run, (frame) =>
-        frame.unsequencedOperands(a.run, b.run, (first, second) => [first as number, second as number])
+        frame.unsequencedOperands(a.run, b.run, (first, second) => [first as FloatingValue, second as FloatingValue])
       );
       return;
     }
@@ -751,18 +754,18 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const first = this.floatingProducts.get(a.run);
     const second = this.floatingProducts.get(b.run);
     if (first) {
-      const addend = b.run as Eval<number>;
+      const addend = b.run as Eval<FloatingValue>;
       expr.run = (frame) =>
         frame.unsequencedOperands(first, addend, (factors, value) => {
           const [left, right] = factors as FloatingFactors;
-          return fma(left, right, sign * (value as number), isFloat);
+          return fma(left, right, sign === 1 ? (value as FloatingValue) : negateFloat(value as FloatingValue), isFloat);
         });
     } else if (second) {
-      const addend = a.run as Eval<number>;
+      const addend = a.run as Eval<FloatingValue>;
       expr.run = (frame) =>
         frame.unsequencedOperands(addend, second, (value, factors) => {
           const [left, right] = factors as FloatingFactors;
-          return fma(sign * left, right, value as number, isFloat);
+          return fma(sign === 1 ? left : negateFloat(left), right, value as FloatingValue, isFloat);
         });
     }
   }
@@ -925,7 +928,10 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       type: promoted,
       isLvalue: false,
       row,
-      run: (frame) => operation(run(frame) as number),
+      run:
+        promoted.kind === 'float'
+          ? (frame) => negateFloat(run(frame) as FloatingValue)
+          : (frame) => operation(run(frame) as number),
       memberConstant: mapMemberConstants([converted], ([scalar]) => operation(scalar)),
     };
     // A negated product still fuses into an addition (`-(a * b) + c`).
@@ -933,7 +939,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     if (operator === '-' && factors) {
       this.floatingProducts.set(expr.run, (frame) => {
         const [left, right] = factors(frame);
-        return [-left, right];
+        return [negateFloat(left), right];
       });
     }
     const known = converted.constant ?? converted.foldedValue;
@@ -976,11 +982,13 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       const one = common.kind === 'int' && isWide(common) ? BigInt(delta) : delta;
       const target_ = unqualified(type);
       step = (value) =>
-        convertScalar(
-          add(convertScalar(value as number, target_ as never, common as never), one),
-          common as never,
-          target_ as never
-        );
+        value === NEGATIVE_NAN
+          ? value
+          : convertScalar(
+              add(convertScalar(value as number, target_ as never, common as never), one),
+              common as never,
+              target_ as never
+            );
     } else {
       return this.error(row, `${typeName(type)} には ${operator} を使えません。`);
     }
@@ -1123,7 +1131,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const operand: Expr = { ...right, run: (frame) => frame.pending.at(-2) as Value };
     const factors = right.type.kind === 'float' ? this.floatingProducts.get(right.run) : undefined;
     if (factors && right.type.kind === 'float') {
-      const multiply = binaryOperation('*', right.type);
+      const multiply = floatingOperation(binaryOperation('*', right.type));
       operand.run = (frame) => multiply(...compoundAssignmentFactors(frame));
       this.floatingProducts.set(operand.run, compoundAssignmentFactors);
     }
@@ -1609,7 +1617,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     while (element.kind === 'array') element = element.of;
     if (element.kind === 'class' && !element.cls.isComplete)
       return this.error(node.row, `クラス ${element.cls.name} はまだ定義されていません。`);
-    this.checkFixedArrayLayout(element, node.row);
+    this.checkLibraryLayout(element, node.row);
     return constantExpr(SIZE_T, BigInt(sizeOf(type)), node.row);
   }
 
@@ -2092,6 +2100,21 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   }
 }
 
+function floatingOperation(operation: ReturnType<typeof binaryOperation>) {
+  return (a: FloatingValue, b: FloatingValue): Value => {
+    const left = Number(a);
+    const result = operation(left, Number(b));
+    if (Number.isNaN(result) && (a === NEGATIVE_NAN || (b === NEGATIVE_NAN && !Number.isNaN(left))))
+      return NEGATIVE_NAN;
+    return result;
+  };
+}
+
+function fma(a: FloatingValue, b: FloatingValue, c: FloatingValue, isFloat: boolean): FloatingValue {
+  for (const value of [a, b, c]) if (Number.isNaN(Number(value))) return value;
+  return binaryFma(Number(a), Number(b), Number(c), isFloat);
+}
+
 function arithmeticVariableValue(
   type: Type,
   value: number | bigint | undefined,
@@ -2104,7 +2127,7 @@ function arithmeticVariableValue(
 }
 
 function compoundAssignmentFactors(frame: Frame): FloatingFactors {
-  return [frame.pending.at(-3) as number, frame.pending.at(-2) as number];
+  return [frame.pending.at(-3) as FloatingValue, frame.pending.at(-2) as FloatingValue];
 }
 
 function commonPointerType(left: Expr, right: Expr): Type | undefined {

@@ -2,6 +2,7 @@ import { implicitConversion } from '../conversions';
 import { CppException, CppRuntimeError } from '../errors';
 import type { Expr, FunctionCandidates, InitializerTarget } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
+import { NEGATIVE_NAN } from '../floatSign';
 import {
   constructArray,
   initializeAt,
@@ -485,7 +486,7 @@ export function lessThan(type: Type): ((a: Value, b: Value) => number) | undefin
     return (a, b) => {
       const x = a as number | bigint;
       const y = b as number | bigint;
-      return x === y ? 0 : x < y ? -1 : x > y ? 1 : Number.NaN;
+      return x === y && a !== NEGATIVE_NAN ? 0 : x < y ? -1 : x > y ? 1 : Number.NaN;
     };
   }
   if (type.kind === 'pointer') {
