@@ -1,0 +1,6 @@
+function bare<T>(x: T[never]): never { return x; }
+function chained<T extends U, U>(x: T[never]): never { return x; }
+function explicitIndexAsNever<T extends {[k:string]: number}>(x: T[never]): never { return x; }
+function union<T>(x: (T | {a: 1})[never]): never { return x; }
+function genericKey<T, K extends never>(x: T[K]): never { return x; }
+console.log(bare<any>(123));

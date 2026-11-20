@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 666 -- Holds type construction, bounded instantiation, structure lookup, and diagnostics shared by checker components.
+// code-gauge-allow-file fileNcss 679 -- Holds type construction, bounded instantiation, structure lookup, and diagnostics shared by checker components.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { type SourceDiagnostic, sourceDiagnostic } from '../../interpreter/diagnostics';
@@ -890,11 +890,12 @@ export class Checker {
       case 'indexedAccess': {
         const mapped = this.typeOperators.mappedIndexConstraint(type);
         if (mapped !== undefined) return mapped;
-        const index = this.baseConstraint(type.indexType);
+        const index = this.indexedOperandConstraint(type.indexType);
+        if (!index) return type;
         const tuple = this.silently(() => this.typeOperators.variadicIndexConstraint(type, index));
         if (tuple !== undefined) return tuple;
-        const object = this.indexedReceiverConstraint(type.objectType);
-        if (object === type.objectType && index === type.indexType) return type;
+        const object = this.indexedOperandConstraint(type.objectType);
+        if (!object || (object === type.objectType && index === type.indexType)) return type;
         const bound = this.silently(() => this.typeOperators.indexedAccess(object, index));
         return bound === errorType ? type : bound;
       }
@@ -910,14 +911,20 @@ export class Checker {
     }
   }
 
-  private indexedReceiverConstraint(type: Type): Type {
+  private indexedOperandConstraint(type: Type): Type | undefined {
+    while (type.kind === 'typeParameter') {
+      this.budget.spend();
+      const constraint = this.constraintOf(type);
+      if (!constraint) return undefined;
+      type = constraint;
+    }
     const bound = this.baseConstraint(type);
-    return bound.kind === 'intersection'
-      ? intersectionOf(
-          bound.types.map((member) => this.indexedReceiverConstraint(member)),
-          this.budget
-        )
-      : bound;
+    if (bound.kind !== 'union' && bound.kind !== 'intersection') return bound;
+    const constraints = bound.types
+      .map((member) => this.indexedOperandConstraint(member))
+      .filter((member) => member !== undefined);
+    if (bound.kind === 'union') return constraints.length === bound.types.length ? unionOf(constraints) : undefined;
+    return constraints.length > 0 ? intersectionOf(constraints, this.budget) : undefined;
   }
 
   private conditionalConstraint(type: ConditionalType): Type {

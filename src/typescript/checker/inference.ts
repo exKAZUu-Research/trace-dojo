@@ -1,6 +1,7 @@
-// code-gauge-allow-file fileNcss 606 -- Keeps generic candidate collection, constraint fitting and inference completion together.
+// code-gauge-allow-file fileNcss 660 -- Keeps generic candidate collection, constraint fitting and inference completion together.
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import type { Checker, Mapper } from './checker';
+import { isUnit } from './flow';
 import { childTypes, objectMemberTypes } from './genericTypes';
 import { applicableIndex, hasIndexSignature, isIndexKeyOf, isPropertyKeyOf, keyedIndexes } from './indexInfos';
 import { reverseMappedType } from './reverseMappedInference';
@@ -42,6 +43,7 @@ import { couldContainTypeVariables } from './typeVariables';
 export const InferencePriority = {
   Direct: 0,
   NakedTypeVariable: 1,
+  SpeculativeTuple: 2,
   /** Through a homomorphic mapped type, as `T` in `Partial<T>`. */
   HomomorphicMappedType: 8,
   MappedTypeConstraint: 32,
@@ -478,6 +480,7 @@ export class TypeInference {
       return;
     }
     if (source.kind === 'object' && this.inferFromElements(run, source, target, recurse)) return;
+    if (this.structuresDefinitelyUnrelated(source, target)) return;
     const { sources, targets } = path;
     sources.push(source);
     targets.push(target);
@@ -584,50 +587,106 @@ export class TypeInference {
       recurse(this.c.elementTypeOf(source), (target.typeArguments ?? [])[0] ?? anyType);
       return true;
     }
-    if (source.objectKind !== 'tuple' || target.objectKind !== 'tuple') return false;
-    if (!tupleTypesDefinitelyUnrelated(source, target))
-      this.inferFromTupleElements(run, source.tuple?.elements ?? [], target.tuple?.elements ?? [], recurse);
+    if (!target.tuple) return false;
+    if (source.tuple) {
+      if (!tupleTypesDefinitelyUnrelated(source, target))
+        this.inferFromTupleElements(run, source.tuple.elements, target.tuple.elements, recurse);
+      return true;
+    }
+    if (!this.c.isArrayOrTuple(source)) return false;
+    if (!this.structuresDefinitelyUnrelated(source, target))
+      this.inferFromOpenArray(this.c.elementTypeOf(source), target.tuple.elements, recurse);
     return true;
   }
 
-  /**
-   * Infers from the elements of a tuple as TypeScript matches them: those before the target's rest by position, those
-   * after it from the end, and the source elements between to the rest.
-   */
+  private structuresDefinitelyUnrelated(source: Type, target: Type): boolean {
+    return this.hasUnmatchedProperty(source, target, true) && this.hasUnmatchedProperty(target, source, false);
+  }
+
+  private hasUnmatchedProperty(source: Type, target: Type, matchDiscriminants: boolean): boolean {
+    for (const [name, expected] of this.c.structureOf(target).properties) {
+      this.c.budget.spend();
+      if (expected.optional) continue;
+      const actual = this.c.propertyOf(source, name);
+      if (!actual) return true;
+      if (!matchDiscriminants) continue;
+      const type = expected.type();
+      if (!isUnit(type) || type === voidType) continue;
+      const actualType = actual.type();
+      if (!isAnyLike(actualType) && regularOf(actualType) !== regularOf(type)) return true;
+    }
+    return false;
+  }
+
+  private inferFromOpenArray(element: Type, targets: TupleElement[], recurse: Recurse): void {
+    for (const target of targets) {
+      if (target.rest && this.c.relations.isGenericRestType(target.type))
+        recurse(this.c.arrayType(element), target.type);
+      else recurse(element, target.rest ? this.c.restElementType(target.type) : target.type);
+    }
+  }
+
   private inferFromTupleElements(
     run: InferenceRun,
     sourceElements: TupleElement[],
     targetElements: TupleElement[],
     recurse: Recurse
   ): void {
-    for (const [index, element] of targetElements.entries()) {
-      if (this.inferFromVariadicPair(run, sourceElements.slice(index), element, targetElements[index + 1], recurse))
-        break;
-      if (element.rest) {
-        this.inferFromRestAndEnd(sourceElements, targetElements, index, recurse);
-        break;
-      }
-      if (sourceElements[index]) recurse(sourceElements[index].type, element.type);
-    }
-  }
-
-  private inferFromRestAndEnd(
-    sourceElements: TupleElement[],
-    targetElements: TupleElement[],
-    restIndex: number,
-    recurse: Recurse
-  ): void {
-    const end = targetElements.slice(restIndex + 1);
-    // As TypeScript does, the fixed elements ending both tuples pair up from the end, and the rest takes the middle.
-    const endLength = Math.min(fixedEndLength(sourceElements), end.length);
-    const middleEnd = sourceElements.length - endLength;
-    if (end.some((element) => element.rest) || endLength < end.length || middleEnd < restIndex) {
-      recurse(this.c.tupleType(sourceElements.slice(restIndex)), targetElements[restIndex].type);
+    if (
+      sourceElements.length === targetElements.length &&
+      sourceElements.every(
+        (element, index) => this.tupleElementShape(element) === this.tupleElementShape(targetElements[index])
+      )
+    ) {
+      for (const [index, element] of sourceElements.entries()) recurse(element.type, targetElements[index].type);
       return;
     }
-    for (const [offset, element] of end.slice(end.length - endLength).entries())
-      recurse(sourceElements[middleEnd + offset].type, element.type);
-    recurse(this.c.tupleType(sourceElements.slice(restIndex, middleEnd)), targetElements[restIndex].type);
+    const sourceStart = fixedStartLength(sourceElements);
+    const targetStart = fixedStartLength(targetElements);
+    const start = Math.min(sourceStart, targetStart);
+    const end =
+      targetStart === targetElements.length
+        ? 0
+        : Math.min(fixedEndLength(sourceElements), fixedEndLength(targetElements));
+    for (let index = 0; index < start; index++) recurse(sourceElements[index].type, targetElements[index].type);
+    this.inferFromTupleMiddle(
+      run,
+      sourceElements.slice(start, sourceElements.length - end),
+      targetElements.slice(start, targetElements.length - end),
+      targetElements.at(-1)?.optional ?? false,
+      recurse
+    );
+    for (let offset = 1; offset <= end; offset++)
+      recurse(sourceElements[sourceElements.length - offset].type, targetElements[targetElements.length - offset].type);
+  }
+
+  private tupleElementShape(element: TupleElement): 'fixed' | 'variadic' | 'rest' {
+    if (!element.rest) return 'fixed';
+    return this.c.relations.isGenericRestType(element.type) ? 'variadic' : 'rest';
+  }
+
+  private inferFromTupleMiddle(
+    run: InferenceRun,
+    source: TupleElement[],
+    target: TupleElement[],
+    optionalTail: boolean,
+    recurse: Recurse
+  ): void {
+    const [first] = target;
+    if (!first) return;
+    if (source.length === 1 && this.tupleElementShape(source[0]) === 'rest') {
+      this.inferFromOpenArray(this.c.restElementType(source[0].type), target, recurse);
+      return;
+    }
+    if (target.length === 2 && this.inferFromVariadicPair(run, source, first, target[1], recurse)) return;
+    if (target.length !== 1 || !first.rest) return;
+    const middle = this.c.tupleType(source);
+    if (this.c.relations.isGenericRestType(first.type)) {
+      const priority = optionalTail ? run.priority | InferencePriority.SpeculativeTuple : run.priority;
+      recurse(middle, first.type, undefined, priority);
+    } else if (source.length > 0) {
+      recurse(this.c.restElementType(middle), this.c.restElementType(first.type));
+    }
   }
 
   /** Infers `[...A, ...B]` by splitting the source where the arguments passed to `...args: A` end; whether it applied. */
@@ -922,9 +981,13 @@ function templateCaptures(value: string, texts: string[]): string[] | undefined 
   return position === value.length ? captures : undefined;
 }
 
-/** How many required elements end a tuple after its last rest or optional element. */
+function fixedStartLength(elements: TupleElement[]): number {
+  const first = elements.findIndex((element) => element.rest);
+  return first === -1 ? elements.length : first;
+}
+
 function fixedEndLength(elements: TupleElement[]): number {
-  const last = elements.findLastIndex((element) => element.rest || element.optional);
+  const last = elements.findLastIndex((element) => element.rest);
   return elements.length - last - 1;
 }
 
