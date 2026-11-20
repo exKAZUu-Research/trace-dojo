@@ -1,7 +1,8 @@
-import type { Expr, FormatArgs, MacroCall, Span } from './ast';
-import { claimStrings } from './capacity';
+import type { Expr, FormatArgs, FormatPiece, MacroCall, Span } from './ast';
+import { claimStrings, StringGrowth } from './capacity';
 import type { Compiler, Eval } from './compiler';
 import { evaluateValues, stringish } from './compilerCommon';
+import type { WriteChunk } from './debugText';
 import type { Spec } from './fmt';
 import { normalize } from './infer';
 import type { Program } from './items';
@@ -9,7 +10,10 @@ import { cloneValue, valuesEqual } from './ops';
 import { FmtFailure, type Frame, RustPanic } from './runtime';
 import { runtimeType } from './runtimeTypes';
 import { outputStream, resolve, shallow } from './types';
+import { utf8Length } from './utf8';
 import { EnumValue, type FormatterValue, isPlace, type Place, StructValue, UNIT_VALUE, type Value } from './values';
+
+type FormatEval = (frame: Frame, write?: WriteChunk) => string;
 
 type Macro<K extends MacroCall['kind']> = Extract<MacroCall, { kind: K }>;
 
@@ -25,10 +29,7 @@ const FORMAT_FAILURE = {
 
 const MACROS: { [K in MacroCall['kind']]: (c: Compiler, macro: Macro<K>, span: Span) => Eval } = {
   print: printMacro,
-  format: (c, macro) => {
-    const format = compileFormat(c, macro.format);
-    return (frame) => formatOrPanic(format, frame, FORMAT_FAILURE);
-  },
+  format: formatMacro,
   write: writeMacro,
   panic: panicMacro,
   assert: assertMacro,
@@ -45,6 +46,23 @@ const MACROS: { [K in MacroCall['kind']]: (c: Compiler, macro: Macro<K>, span: S
 
 export function compileMacro(c: Compiler, expr: Expr, macro: MacroCall): Eval {
   return (MACROS[macro.kind] as (c: Compiler, macro: MacroCall, span: Span) => Eval)(c, macro, expr.span);
+}
+
+function formatMacro(c: Compiler, macro: Macro<'format'>): Eval {
+  const pieces = foldFormatPieces(macro.format);
+  const format = compileFormat(c, macro.format, pieces);
+  const literalSize = pieces.reduce((length, piece) => length + (typeof piece === 'string' ? utf8Length(piece) : 0), 0);
+  const placeholders = pieces.some((piece) => typeof piece !== 'string');
+  const estimate = !placeholders
+    ? literalSize
+    : typeof pieces[0] !== 'string' && literalSize < 16
+      ? 0
+      : literalSize * 2;
+  return (frame) => {
+    const growth = new StringGrowth(estimate);
+    const text = formatOrPanic(format, frame, FORMAT_FAILURE, (chunk) => growth.write(chunk));
+    return growth.finish(text);
+  };
 }
 
 function printMacro(c: Compiler, macro: Macro<'print'>): Eval {
@@ -74,10 +92,12 @@ function writeMacro(c: Compiler, macro: Macro<'write'>): Eval {
   return (frame) => {
     let formatter = target(frame);
     while (isPlace(formatter)) formatter = formatter.get();
-    const { text, failed } = formatPartly(format, frame);
+    const value = formatter as FormatterValue;
+    const { text, failed } = formatPartly(format, frame, value.writeChunk);
     const written = text + (failed ? '' : newline);
-    frame.runtime.allocateString((formatter as FormatterValue).text.length + written.length, written.length);
-    (formatter as FormatterValue).text += written;
+    frame.runtime.allocateString(value.text.length + written.length, written.length);
+    if (!failed && newline) value.writeChunk?.(newline);
+    value.text += written;
     return writeResult(program, failed);
   };
 }
@@ -86,7 +106,7 @@ function writeStream(
   c: Compiler,
   macro: Macro<'write'>,
   target: Eval,
-  format: (frame: Frame) => string,
+  format: FormatEval,
   stream: 'stdout' | 'stderr',
   newline: string
 ): Eval {
@@ -105,7 +125,7 @@ function writeString(
   targetExpr: Expr,
   target: Eval,
   throughRef: boolean,
-  format: (frame: Frame) => string,
+  format: FormatEval,
   newline: string
 ): Eval {
   const place = c.place(targetExpr.kind === 'ref' ? targetExpr.operand : targetExpr);
@@ -237,26 +257,58 @@ function debugSpec(alternate: boolean): Spec {
   };
 }
 
-function compileFormat(c: Compiler, format: FormatArgs): (frame: Frame) => string {
+function foldFormatPieces(format: FormatArgs): FormatPiece[] {
+  const pieces: FormatPiece[] = [];
+  for (const part of format.pieces) {
+    const piece = typeof part === 'string' ? part : (plainPlaceholder(part, format.args[part.arg]) ?? part);
+    const previous = pieces.at(-1);
+    if (typeof previous === 'string' && typeof piece === 'string') pieces[pieces.length - 1] = previous + piece;
+    else if (piece !== '') pieces.push(piece);
+  }
+  return pieces;
+}
+
+function plainPlaceholder(part: Exclude<FormatPiece, string>, arg: Expr): string | undefined {
+  if (
+    part.trait !== 'display' ||
+    part.width ||
+    part.precision ||
+    part.align ||
+    part.sign ||
+    part.alternate ||
+    part.zero
+  ) {
+    return undefined;
+  }
+  if (arg.kind === 'str' || arg.kind === 'int') return String(arg.value);
+  return undefined;
+}
+
+function compileFormat(c: Compiler, format: FormatArgs, pieces = foldFormatPieces(format)): FormatEval {
   const args = format.args.map((arg) => c.read(arg));
   const types = format.args.map((arg) => runtimeType(arg.ty!));
-  const { pieces } = format;
-  return (frame) => {
+  return (frame, write) => {
     const values = evaluateValues(frame, args);
     frame.runtime.spend();
     return frame.runtime.withRoots(values, () =>
       c.support.formatter.format(
         pieces,
         values,
-        types.map((type) => type(frame))
+        types.map((type) => type(frame)),
+        write
       )
     );
   };
 }
 
-function formatOrPanic(format: Eval, frame: Frame, failure: { message: string; location: string }): string {
+function formatOrPanic(
+  format: FormatEval,
+  frame: Frame,
+  failure: { message: string; location: string },
+  write?: WriteChunk
+): string {
   try {
-    return format(frame) as string;
+    return format(frame, write);
   } catch (error) {
     if (error instanceof FmtFailure) throw new RustPanic(failure.message, { row: 0, col: 0 }, failure.location);
     throw error;
@@ -264,9 +316,9 @@ function formatOrPanic(format: Eval, frame: Frame, failure: { message: string; l
 }
 
 /** Formats for `write!`, which writes what the formatting wrote before an impl's error and returns the error. */
-function formatPartly(format: Eval, frame: Frame): { text: string; failed: boolean } {
+function formatPartly(format: FormatEval, frame: Frame, write?: WriteChunk): { text: string; failed: boolean } {
   try {
-    return { text: format(frame) as string, failed: false };
+    return { text: format(frame, write), failed: false };
   } catch (error) {
     if (error instanceof FmtFailure) return { text: error.written, failed: true };
     throw error;

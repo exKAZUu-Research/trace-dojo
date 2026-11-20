@@ -133,6 +133,22 @@ export function setStringCapacity(place: Place, capacity: number): void {
  */
 const inFlight = new Map<string, number>();
 
+export class StringGrowth {
+  private length = 0;
+
+  constructor(private capacity = 0) {}
+
+  write(text: string): void {
+    const added = utf8Length(text);
+    if (added > 0) this.capacity = reservedCapacity(this.capacity, this.length, added, 1);
+    this.length += added;
+  }
+
+  finish(text: string): string {
+    return madeString(text, this.capacity);
+  }
+}
+
 export function madeString(text: string, capacity: number): string {
   if (capacity === utf8Length(text)) inFlight.delete(text);
   else inFlight.set(text, capacity);

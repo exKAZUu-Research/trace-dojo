@@ -1,6 +1,6 @@
-// code-gauge-allow-file fileNcss 414 -- Follows std::fmt's formatting rules case by case.
+// code-gauge-allow-file fileNcss 420 -- Follows std::fmt's formatting rules case by case.
 import type { FormatPiece, FormatSpec } from './ast';
-import { type DebugPart, list, structText, tupleText } from './debugText';
+import { type DebugPart, emit, list, structText, tupleText, type WriteChunk } from './debugText';
 import { debugFloat, displayFloat, expFloat, fixedFloat } from './floatFormat';
 import { normalize } from './infer';
 import { iteratorDebug } from './iterDebug';
@@ -47,7 +47,7 @@ export const DEFAULT_SPEC: Spec = {
 /** The program's own `Display` and `Debug` impls, and the formatting of runtime values only the runtime knows. */
 export interface FormatHooks {
   /** Runs the program's `fmt` for a type, returning undefined when the program has no impl of the trait for it. */
-  userFmt(trait: 'Display' | 'Debug', type: Type, value: Value, spec: Spec): string | undefined;
+  userFmt(trait: 'Display' | 'Debug', type: Type, value: Value, spec: Spec, write?: WriteChunk): string | undefined;
   fieldTypes(def: AdtDef, args: Type[], variant: number): Type[];
   /** The concrete type of a type that may mention the running function's type parameters. */
   concrete(type: Type): Type;
@@ -59,16 +59,16 @@ export class Formatter {
   constructor(private readonly hooks: FormatHooks) {}
 
   /** Formats a format string's pieces with the values and types of its arguments. */
-  format(pieces: FormatPiece[], values: Value[], types: Type[]): string {
+  format(pieces: FormatPiece[], values: Value[], types: Type[], write?: WriteChunk): string {
     let text = '';
     for (const piece of pieces) {
       if (typeof piece === 'string') {
-        text += piece;
+        text += emit(piece, write);
         continue;
       }
       const spec = this.resolveSpec(piece, values);
       try {
-        const written = this.formatOne(piece.trait, values[piece.arg], types[piece.arg], spec);
+        const written = this.formatOne(piece.trait, values[piece.arg], types[piece.arg], spec, write);
         this.hooks.allocateString(text.length + written.length, written.length);
         text += written;
       } catch (error) {
@@ -100,65 +100,67 @@ export class Formatter {
     };
   }
 
-  formatOne(trait: FormatSpec['trait'], value: Value, type: Type, spec: Spec): string {
+  formatOne(trait: FormatSpec['trait'], value: Value, type: Type, spec: Spec, write?: WriteChunk): string {
     switch (trait) {
       case 'display': {
-        return this.display(value, type, spec);
+        return this.display(value, type, spec, write);
       }
       case 'debug': {
-        return this.debug(value, type, spec, spec.alternate ? 0 : undefined);
+        return this.debug(value, type, spec, spec.alternate ? 0 : undefined, write);
       }
       default: {
-        return this.radix(trait, value, type, spec);
+        return this.radix(trait, value, type, spec, write);
       }
     }
   }
 
-  // code-gauge-allow functionNcss 37 -- Follows std::fmt's formatting rules case by case.
-  display(value: Value, type: Type, spec: Spec): string {
+  // code-gauge-allow functionNcss 41 -- Follows std::fmt's formatting rules case by case.
+  display(value: Value, type: Type, spec: Spec, write?: WriteChunk): string {
     const t = this.concrete(type);
     const v = deref(value);
     switch (t.kind) {
       case 'ref': {
-        return this.display(value, t.target, spec);
+        return this.display(value, t.target, spec, write);
       }
       case 'int': {
-        return padNumber(String(v as bigint), spec);
+        return padNumber(String(v as bigint), spec, 0, write);
       }
       case 'float': {
-        return padNumber(this.floatText(v as number, t.name === 'f32', spec), spec);
+        return padNumber(this.floatText(v as number, t.name === 'f32', spec), spec, 0, write);
       }
       case 'bool': {
-        return padString(String(v), spec);
+        return padString(String(v), spec, write);
       }
       case 'char':
       case 'str': {
-        return padString(v as string, spec);
+        return padString(v as string, spec, write);
       }
       case 'never': {
         return '';
       }
       case 'dyn': {
         const dynValue = v as DynValue;
-        return this.display(dynValue.value, dynValue.type, spec);
+        return this.display(dynValue.value, dynValue.type, spec, write);
       }
       case 'adt': {
-        const user = this.hooks.userFmt('Display', t, v, spec);
+        const user = this.hooks.userFmt('Display', t, v, spec, write);
         if (user !== undefined) return user;
         switch (t.def.builtin) {
           case 'String': {
-            return padString(v as string, spec);
+            return padString(v as string, spec, write);
           }
           case 'Box': {
-            return this.display(v, t.args[0], spec);
+            return this.display(v, t.args[0], spec, write);
           }
           case 'CaseIter': {
             // `ToUppercase` writes its chars one by one, ignoring the width.
-            return caseIterText(v);
+            const text = caseIterText(v);
+            if (write) for (const char of text) write(char);
+            return text;
           }
           default: {
             if (ERROR_TYPES.has(t.def.builtin as string))
-              return padString(errorDisplay(t.def.builtin as string, v), spec);
+              return padString(errorDisplay(t.def.builtin as string, v), spec, write);
             return '';
           }
         }
@@ -181,61 +183,70 @@ export class Formatter {
    * `{:?}` of a value; `indent` is the nesting depth of `{:#?}`, or undefined for the compact form. Containers pass the
    * placeholder's options on to the values in them, as Rust's builders do.
    */
-  debug(value: Value, type: Type, spec: Spec, indent: number | undefined): string {
-    const text = this.debugOf(value, type, spec, indent);
-    // A container's elements are charged as they are written, before the container joins them.
+  debug(value: Value, type: Type, spec: Spec, indent: number | undefined, write?: WriteChunk): string {
+    let streamed = false;
+    const chunks = write
+      ? (text: string): void => {
+          streamed = true;
+          write(text);
+        }
+      : undefined;
+    const text = this.debugOf(value, type, spec, indent, chunks);
+    if (!streamed) write?.(text);
     this.hooks.allocateString(text.length);
     return text;
   }
 
   // code-gauge-allow functionCognitiveComplexity 16 -- Follows std::fmt's formatting rules case by case.
   // code-gauge-allow functionNcss 41 -- Follows std::fmt's formatting rules case by case.
-  private debugOf(value: Value, type: Type, spec: Spec, indent: number | undefined): string {
+  private debugOf(value: Value, type: Type, spec: Spec, indent: number | undefined, write?: WriteChunk): string {
     const t = this.concrete(type);
     const v = deref(value);
     switch (t.kind) {
       case 'ref': {
-        return this.debugOf(value, t.target, spec, indent);
+        return this.debugOf(value, t.target, spec, indent, write);
       }
       case 'int': {
-        if (spec.debugHex) return this.radix(spec.debugHex === 'x' ? 'lowerHex' : 'upperHex', v, t, spec);
-        return padNumber(String(v as bigint), spec);
+        if (spec.debugHex) return this.radix(spec.debugHex === 'x' ? 'lowerHex' : 'upperHex', v, t, spec, write);
+        return padNumber(String(v as bigint), spec, 0, write);
       }
       case 'float': {
-        if (spec.precision !== undefined) return padNumber(this.floatText(v as number, t.name === 'f32', spec), spec);
+        if (spec.precision !== undefined)
+          return padNumber(this.floatText(v as number, t.name === 'f32', spec), spec, 0, write);
         let text = debugFloat(v as number, t.name === 'f32');
         if (spec.sign === '+' && !text.startsWith('-') && text !== 'NaN') text = `+${text}`;
-        return padNumber(text, spec);
+        return padNumber(text, spec, 0, write);
       }
       case 'bool': {
-        return pad(String(v), spec, '<');
+        return pad(String(v), spec, '<', write);
       }
       case 'char': {
         // `char`'s `Debug` writes its quoted escape directly, ignoring the width.
-        return `'${escapeDebug(v as string, true)}'`;
+        return quotedDebug(v as string, true, write);
       }
       case 'str': {
-        return `"${escapeDebug(v as string, false)}"`;
+        return quotedDebug(v as string, false, write);
       }
       case 'tuple': {
-        if (t.elems.length === 0) return pad('()', spec, '<');
+        if (t.elems.length === 0) return pad('()', spec, '<', write);
         const items = t.elems.map(
-          (elem, index) => (inner: number | undefined) => this.debug((v as Value[])[index], elem, spec, inner)
+          (elem, index) => (inner: number | undefined) => this.debug((v as Value[])[index], elem, spec, inner, write)
         );
-        if (t.elems.length === 1 && indent === undefined) return `(${items[0](undefined)},)`;
-        return list('(', ')', items, indent);
+        return list('(', ')', items, indent, write, t.elems.length === 1);
       }
       case 'array':
       case 'slice': {
-        const items = sliceItems(v).map((item) => (inner: number | undefined) => this.debug(item, t.elem, spec, inner));
-        return list('[', ']', items, indent);
+        const items = sliceItems(v).map(
+          (item) => (inner: number | undefined) => this.debug(item, t.elem, spec, inner, write)
+        );
+        return list('[', ']', items, indent, write);
       }
       case 'dyn': {
         const dynValue = v as DynValue;
-        return this.debug(dynValue.value, dynValue.type, spec, indent);
+        return this.debug(dynValue.value, dynValue.type, spec, indent, write);
       }
       case 'adt': {
-        return this.debugAdt(v, t, spec, indent);
+        return this.debugAdt(v, t, spec, indent, write);
       }
       default: {
         return '';
@@ -244,39 +255,51 @@ export class Formatter {
   }
 
   // code-gauge-allow functionNcss 58 -- Follows std::fmt's formatting rules case by case.
-  private debugAdt(v: Value, t: Type & { kind: 'adt' }, spec: Spec, indent: number | undefined): string {
-    const user = this.hooks.userFmt('Debug', t, v, { ...spec, alternate: indent !== undefined });
+  private debugAdt(
+    v: Value,
+    t: Type & { kind: 'adt' },
+    spec: Spec,
+    indent: number | undefined,
+    write?: WriteChunk
+  ): string {
+    const user = this.hooks.userFmt(
+      'Debug',
+      t,
+      v,
+      { ...spec, alternate: indent !== undefined },
+      indent ? undefined : write
+    );
     // What an impl writes on several lines nests as the containers around it do (std's `PadAdapter`).
     if (user !== undefined) return indent ? user.replaceAll('\n', `\n${'    '.repeat(indent)}`) : user;
     const { def } = t;
     switch (def.builtin) {
       case 'String': {
-        return `"${escapeDebug(v as string, false)}"`;
+        return quotedDebug(v as string, false, write);
       }
       case 'Vec':
       case 'VecDeque':
       case 'BinaryHeap': {
         const items = (v as Value[]).map(
-          (item) => (inner: number | undefined) => this.debug(item, t.args[0], spec, inner)
+          (item) => (inner: number | undefined) => this.debug(item, t.args[0], spec, inner, write)
         );
-        return list('[', ']', items, indent);
+        return list('[', ']', items, indent, write);
       }
       case 'Box': {
-        return this.debug(v, t.args[0], spec, indent);
+        return this.debug(v, t.args[0], spec, indent, write);
       }
       case 'HashMap':
       case 'BTreeMap': {
         const map = v as MapValue;
         const entries = [...map.entries.values()];
         const items = entries.map(([key, item]) => (inner: number | undefined) => {
-          const keyText = this.debug(key, t.args[0], spec, inner);
-          return `${keyText}: ${this.debug(item, t.args[1], spec, inner)}`;
+          const keyText = this.debug(key, t.args[0], spec, inner, write);
+          return keyText + emit(': ', write) + this.debug(item, t.args[1], spec, inner, write);
         });
-        return list('{', '}', items, indent);
+        return list('{', '}', items, indent, write);
       }
       case 'HashSet':
       case 'BTreeSet': {
-        return this.setText(v as SetValue, t.args[0], spec, indent);
+        return this.setText(v as SetValue, t.args[0], spec, indent, write);
       }
       case 'Range':
       case 'RangeInclusive':
@@ -285,12 +308,14 @@ export class Formatter {
       case 'RangeToInclusive':
       case 'RangeFull': {
         const range = v as RangeValue;
-        const start = range.start === undefined ? '' : this.debug(range.start, t.args[0], spec, indent);
-        const end = range.end === undefined ? '' : this.debug(range.end, t.args[0], spec, indent);
-        return `${start}${range.inclusive ? '..=' : '..'}${end}`;
+        const start = range.start === undefined ? '' : this.debug(range.start, t.args[0], spec, indent, write);
+        const separator = emit(range.inclusive ? '..=' : '..', write);
+        return (
+          start + separator + (range.end === undefined ? '' : this.debug(range.end, t.args[0], spec, indent, write))
+        );
       }
       case 'Ordering': {
-        return pad(def.variants[(v as EnumValue).variant].name, spec, '<');
+        return pad(def.variants[(v as EnumValue).variant].name, spec, '<', write);
       }
       case 'ParseIntError':
       case 'ParseFloatError':
@@ -315,15 +340,15 @@ export class Formatter {
         return this.entryText(v as EntryValue, t, spec, indent);
       }
       default: {
-        return this.debugUserAdt(v, t, spec, indent);
+        return this.debugUserAdt(v, t, spec, indent, write);
       }
     }
   }
 
-  private setText(set: SetValue, elem: Type, spec: Spec, indent: number | undefined): string {
+  private setText(set: SetValue, elem: Type, spec: Spec, indent: number | undefined, write?: WriteChunk): string {
     const values = [...set.entries.values()];
-    const items = values.map((item) => (inner: number | undefined) => this.debug(item, elem, spec, inner));
-    return list('{', '}', items, indent);
+    const items = values.map((item) => (inner: number | undefined) => this.debug(item, elem, spec, inner, write));
+    return list('{', '}', items, indent, write);
   }
 
   /** A map's entry, as `Entry`, `OccupiedEntry`, and `VacantEntry` debug: the key and any value it holds. */
@@ -352,27 +377,35 @@ export class Formatter {
     return iteratorDebug(iter, t.args[0], t.args[1], debug, indent);
   }
 
-  private debugUserAdt(v: Value, t: Type & { kind: 'adt' }, spec: Spec, indent: number | undefined): string {
+  private debugUserAdt(
+    v: Value,
+    t: Type & { kind: 'adt' },
+    spec: Spec,
+    indent: number | undefined,
+    write?: WriteChunk
+  ): string {
     const { def } = t;
     const variantIndex = v instanceof EnumValue ? v.variant : 0;
     const variant = def.variants[variantIndex];
     const fields = v instanceof EnumValue || v instanceof StructValue ? v.fields : [];
     const types = this.hooks.fieldTypes(def, t.args, variantIndex);
-    if (variant.shape === 'unit') return pad(variant.name, spec, '<');
-    if (variant.shape === 'tuple' && types.length === 0) return pad(variant.name, spec, '<');
+    if (variant.shape === 'unit') return pad(variant.name, spec, '<', write);
+    if (variant.shape === 'tuple' && types.length === 0) return pad(variant.name, spec, '<', write);
     const parts = types.map(
-      (type, index) => (inner: number | undefined) => this.debug(fields[index], type, spec, inner)
+      (type, index) => (inner: number | undefined) => this.debug(fields[index], type, spec, inner, write)
     );
-    if (variant.shape === 'tuple') return tupleText(variant.name, parts, indent);
+    if (variant.shape === 'tuple') return tupleText(variant.name, parts, indent, write);
     return structText(
       variant.name,
       parts.map((part, index) => [variant.fields[index].name, part]),
-      indent
+      indent,
+      false,
+      write
     );
   }
 
   // code-gauge-allow functionCognitiveComplexity 18 -- Follows std::fmt's formatting rules case by case.
-  private radix(trait: FormatSpec['trait'], value: Value, type: Type, spec: Spec): string {
+  private radix(trait: FormatSpec['trait'], value: Value, type: Type, spec: Spec, write?: WriteChunk): string {
     let t = this.concrete(type);
     while (t.kind === 'ref') t = this.concrete(t.target);
     const v = deref(value);
@@ -382,9 +415,9 @@ export class Formatter {
       if (t.kind === 'float') {
         let text = expFloat(v as number, t.name === 'f32', spec.precision, letter);
         if (spec.sign === '+' && !text.startsWith('-')) text = `+${text}`;
-        return padNumber(text, spec);
+        return padNumber(text, spec, 0, write);
       }
-      return padNumber(intExp(v as bigint, spec.precision, letter, spec.sign === '+'), spec);
+      return padNumber(intExp(v as bigint, spec.precision, letter, spec.sign === '+'), spec, 0, write);
     }
     const base = { lowerHex: 16, upperHex: 16, octal: 8, binary: 2 }[trait as 'lowerHex'];
     const name = t.kind === 'int' ? t.name : ('i32' as IntName);
@@ -397,7 +430,7 @@ export class Formatter {
     const prefix = spec.alternate
       ? { lowerHex: '0x', upperHex: '0x', octal: '0o', binary: '0b' }[trait as 'lowerHex']
       : '';
-    return padNumber(prefix + digits, spec, prefix.length);
+    return padNumber(prefix + digits, spec, prefix.length, write);
   }
 
   private concrete(type: Type): Type {
@@ -454,27 +487,28 @@ function charCount(text: string): number {
   return [...text].length;
 }
 
-export function pad(text: string, spec: Spec, defaultAlign: '<' | '>'): string {
-  if (spec.width === undefined) return text;
-  const length = charCount(text);
-  if (length >= spec.width) return text;
-  const padding = spec.width - length;
+export function pad(text: string, spec: Spec, defaultAlign: '<' | '>', write?: WriteChunk): string {
+  if (spec.width === undefined) return emit(text, write);
+  const padding = spec.width - charCount(text);
+  if (padding <= 0) return emit(text, write);
   const align = spec.align ?? defaultAlign;
-  if (align === '<') return text + spec.fill.repeat(padding);
-  if (align === '>') return spec.fill.repeat(padding) + text;
-  const left = Math.floor(padding / 2);
-  return spec.fill.repeat(left) + text + spec.fill.repeat(padding - left);
+  const left = align === '<' ? 0 : align === '>' ? padding : Math.floor(padding / 2);
+  return repeatFill(spec.fill, left, write) + emit(text, write) + repeatFill(spec.fill, padding - left, write);
 }
 
-/** Pads a string, truncating it first to the precision. */
-function padString(text: string, spec: Spec): string {
+function repeatFill(fill: string, count: number, write?: WriteChunk): string {
+  if (write) for (let index = 0; index < count; index++) write(fill);
+  return fill.repeat(count);
+}
+
+function padString(text: string, spec: Spec, write?: WriteChunk): string {
   let shown = text;
   if (spec.precision !== undefined) shown = [...text].slice(0, spec.precision).join('');
-  return pad(shown, spec, '<');
+  return pad(shown, spec, '<', write);
 }
 
 /** Pads a number, with `0` padding after its sign and radix prefix. */
-export function padNumber(text: string, spec: Spec, prefixLength = 0): string {
+export function padNumber(text: string, spec: Spec, prefixLength = 0, write?: WriteChunk): string {
   let shown = text;
   if (
     spec.sign === '+' &&
@@ -490,53 +524,61 @@ export function padNumber(text: string, spec: Spec, prefixLength = 0): string {
     const head = shown.slice(0, signLength + prefixLength);
     const body = shown.slice(signLength + prefixLength);
     const zeros = Math.max(0, spec.width - charCount(shown));
-    return head + '0'.repeat(zeros) + body;
+    return emit(head, write) + repeatFill('0', zeros, write) + emit(body, write);
   }
-  return pad(shown, spec, '>');
+  return pad(shown, spec, '>', write);
 }
 
-/** Escapes a string or char as Rust's `Debug` does. */
-export function escapeDebug(text: string, isChar: boolean): string {
+function quotedDebug(text: string, isChar: boolean, write?: WriteChunk): string {
+  const quote = isChar ? "'" : '"';
+  return emit(quote, write) + escapeDebug(text, isChar, write) + emit(quote, write);
+}
+
+export function escapeDebug(text: string, isChar: boolean, write?: WriteChunk): string {
   let result = '';
+  let start = 0;
+  let end = 0;
   for (const char of text) {
-    // `Debug` escapes combining marks, which would otherwise join the char before them.
-    const combining = /\p{Grapheme_Extend}/u.test(char);
-    const code = char.codePointAt(0)!;
-    switch (char) {
-      case '\t': {
-        result += String.raw`\t`;
-        break;
-      }
-      case '\r': {
-        result += String.raw`\r`;
-        break;
-      }
-      case '\n': {
-        result += String.raw`\n`;
-        break;
-      }
-      case '\\': {
-        result += String.raw`\\`;
-        break;
-      }
-      case '"': {
-        result += isChar ? '"' : String.raw`\"`;
-        break;
-      }
-      case "'": {
-        result += isChar ? String.raw`\'` : "'";
-        break;
-      }
-      case '\0': {
-        result += String.raw`\0`;
-        break;
-      }
-      default: {
-        result += isPrintable(char) && !combining ? char : `\\u{${code.toString(16)}}`;
-      }
+    const escaped = escapeChar(char, isChar);
+    if (escaped !== char) {
+      result += emit(text.slice(start, end), write) + escaped;
+      if (write) for (const part of escaped) write(part);
+      start = end + char.length;
+    }
+    end += char.length;
+  }
+  return result + emit(text.slice(start), write);
+}
+
+function escapeChar(char: string, isChar: boolean): string {
+  switch (char) {
+    case '\t': {
+      return String.raw`\t`;
+    }
+    case '\r': {
+      return String.raw`\r`;
+    }
+    case '\n': {
+      return String.raw`\n`;
+    }
+    case '\\': {
+      return String.raw`\\`;
+    }
+    case '"': {
+      return isChar ? '"' : String.raw`\"`;
+    }
+    case "'": {
+      return isChar ? String.raw`\'` : "'";
+    }
+    case '\0': {
+      return String.raw`\0`;
+    }
+    default: {
+      return isPrintable(char) && !/\p{Grapheme_Extend}/u.test(char)
+        ? char
+        : `\\u{${char.codePointAt(0)!.toString(16)}}`;
     }
   }
-  return result;
 }
 
 /**

@@ -66,7 +66,7 @@ const BRACKETS: Record<DebugBuilder['kind'], [string, string]> = {
 function finish(nonExhaustive: boolean): (args: Value[], ctx: NativeContext) => Value {
   return ([self], ctx) => {
     const b = builder(self);
-    b.formatter.text += b.name + body(b, nonExhaustive);
+    b.formatter.write(b.name + body(b, nonExhaustive));
     return ok(ctx, UNIT_VALUE);
   };
 }

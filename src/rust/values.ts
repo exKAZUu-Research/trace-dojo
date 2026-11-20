@@ -252,8 +252,13 @@ export class FormatterValue {
       sign: '+' | '-' | undefined;
       zero: boolean;
     },
-    readonly debugIndent = 0
+    readonly writeChunk?: (text: string) => void
   ) {}
+
+  write(text: string): void {
+    this.writeChunk?.(text);
+    this.text += text;
+  }
 }
 
 /** An entry of a map (`map.entry(key)`), which knows its key and whether the map has it. */

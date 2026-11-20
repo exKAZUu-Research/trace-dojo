@@ -1,6 +1,7 @@
 import type { Span } from './ast';
 import type { Checker } from './checker';
 import { type CallSupport, type CompiledFn, Compiler } from './compiler';
+import type { WriteChunk } from './debugText';
 import { Formatter, type Spec } from './fmt';
 import { normalize } from './infer';
 import type { Module, Program } from './items';
@@ -59,7 +60,7 @@ export class Interpreter implements CallSupport {
   ) {
     this.compiler = new Compiler(program, checker, this, tracing);
     this.formatter = new Formatter({
-      userFmt: (trait, type, value, spec) => this.userFmt(trait, type, value, spec),
+      userFmt: (trait, type, value, spec, write) => this.userFmt(trait, type, value, spec, write),
       fieldTypes: (def, args, variant) => fieldTypes(def, args, variant),
       concrete: (type) => {
         const frame = this.runtime.frames.at(-1);
@@ -366,7 +367,13 @@ export class Interpreter implements CallSupport {
   // -------------------------------------------------------------------------------------------------------------------
   // Formatting
 
-  private userFmt(trait: 'Display' | 'Debug', type: Type, value: Value, spec: Spec): string | undefined {
+  private userFmt(
+    trait: 'Display' | 'Debug',
+    type: Type,
+    value: Value,
+    spec: Spec,
+    write?: WriteChunk
+  ): string | undefined {
     const t = normalize(shallow(type));
     if (t.kind !== 'adt') return undefined;
     const module = t.def.module as Module | undefined;
@@ -375,7 +382,7 @@ export class Interpreter implements CallSupport {
     if (!traitDef) return undefined;
     const dispatch = this.dispatch(traitDef, t, 'fmt');
     if (!dispatch) return undefined;
-    const formatter = new FormatterValue(spec);
+    const formatter = new FormatterValue(spec, write);
     const frame = this.runtime.frames.at(-1) as Frame;
     const result = this.callFn(
       dispatch.fn,

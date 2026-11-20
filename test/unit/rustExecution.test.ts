@@ -860,6 +860,41 @@ fn main() {
   });
 });
 
+test('grows the buffer for format and Display-based String conversion as Rust does', () => {
+  const program = `use std::fmt;
+
+#[derive(Debug)]
+struct Pair { left: i32, right: bool }
+struct Custom;
+impl fmt::Display for Custom {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("abcdefghijklmnopqrst")?;
+        write!(f, "{}", 7)
+    }
+}
+fn main() {
+    let text = "x".repeat(26);
+    let left = format!("{}{}", text, 1);
+    let values = vec![1, 2, 3];
+    let list = format!("{:?}", values);
+    let pair = Pair { left: 1, right: true };
+    let shape = format!("{pair:?}!");
+    let float = 1.5f64.to_string();
+    let own = Custom.to_string();
+    let wide = format!("{:>21}", true);
+    let literal = format!("こんにちは");
+    let folded = format!("{}", "literal");
+    let outside = format!("{} {}", "x".repeat(20), 7);
+    println!("{} {} {} {} {} {} {} {} {}", left.capacity(), list.capacity(), shape.capacity(), float.capacity(), own.capacity(), wide.capacity(), literal.capacity(), folded.capacity(), outside.capacity());
+    println!("{} {:?} {}", 12345.to_string().capacity(), &pair, true.to_string().capacity());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '52 16 32 8 40 32 15 7 40\n10 Pair { left: 1, right: true } 4\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

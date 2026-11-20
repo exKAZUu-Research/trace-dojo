@@ -1,5 +1,5 @@
 import { TURTLE_METHOD_NAMES, type TurtleState } from '../../interpreter/turtleWorld';
-import { madeString, sizeTable } from '../capacity';
+import { madeString, sizeTable, StringGrowth } from '../capacity';
 import { DEFAULT_SPEC } from '../fmt';
 import { normalize } from '../infer';
 import { castValue, cloneValue, comparePartialValues, compareValues, valuesEqual } from '../ops';
@@ -225,9 +225,7 @@ define({
   'ToOwned::to_owned': ([self], ctx) => cloneValue(selfType(ctx), deref(self)),
   'ToString::to_string': ([self], ctx) => {
     try {
-      const text = ctx.interp.formatter.display(self, selfType(ctx), DEFAULT_SPEC);
-      const type = normalize(shallow(selfType(ctx)));
-      return type.kind === 'int' ? madeString(text, intTextCapacity(type.name, text)) : text;
+      return toStringValue(ctx, self);
     } catch (error) {
       if (!(error instanceof FmtFailure)) throw error;
       return libraryPanic(
@@ -239,7 +237,12 @@ define({
   },
   'Display::fmt': ([self, f], ctx) => {
     const formatter = deref(f) as FormatterValue;
-    formatter.text += ctx.interp.formatter.display(self, selfType(ctx), { ...DEFAULT_SPEC, ...formatter.spec });
+    formatter.text += ctx.interp.formatter.display(
+      self,
+      selfType(ctx),
+      { ...DEFAULT_SPEC, ...formatter.spec },
+      formatter.writeChunk
+    );
     return ok(ctx, UNIT_VALUE);
   },
   'Debug::fmt': ([self, f], ctx) => {
@@ -248,7 +251,8 @@ define({
       self,
       selfType(ctx),
       { ...DEFAULT_SPEC, ...formatter.spec },
-      formatter.spec.alternate ? 0 : undefined
+      formatter.spec.alternate ? 0 : undefined,
+      formatter.writeChunk
     );
     return ok(ctx, UNIT_VALUE);
   },
@@ -347,7 +351,7 @@ define({
   'Ordering::is_le': ([self]) => (self as EnumValue).variant !== 2,
   'Ordering::is_ge': ([self]) => (self as EnumValue).variant !== 0,
   'Formatter::write_str': ([self, text], ctx) => {
-    (deref(self) as FormatterValue).text += deref(text) as string;
+    (deref(self) as FormatterValue).write(deref(text) as string);
     return ok(ctx, UNIT_VALUE);
   },
   'Formatter::pad': ([self, text], ctx) => {
@@ -355,7 +359,8 @@ define({
     formatter.text += ctx.interp.formatter.display(
       deref(text),
       { kind: 'str' },
-      { ...DEFAULT_SPEC, ...formatter.spec }
+      { ...DEFAULT_SPEC, ...formatter.spec },
+      formatter.writeChunk
     );
     return ok(ctx, UNIT_VALUE);
   },
@@ -385,6 +390,27 @@ define({
     return range.exhausted || !((comparePartialValues(ctx.typeArgs[0], range.start, range.end) ?? 1) <= 0);
   },
 });
+
+function toStringValue(ctx: NativeContext, self: Value): string {
+  const type = normalize(shallow(selfType(ctx)));
+  const { formatter } = ctx.interp;
+  if (type.kind === 'int') {
+    const text = formatter.display(self, type, DEFAULT_SPEC);
+    return madeString(text, intTextCapacity(type.name, text));
+  }
+  let base: Type = type;
+  while (base.kind === 'ref') base = normalize(shallow(base.target));
+  if (
+    type.kind === 'bool' ||
+    type.kind === 'char' ||
+    base.kind === 'str' ||
+    (type.kind === 'adt' && type.def.builtin === 'String')
+  ) {
+    return formatter.display(self, type, DEFAULT_SPEC);
+  }
+  const growth = new StringGrowth();
+  return growth.finish(formatter.display(self, type, DEFAULT_SPEC, (chunk) => growth.write(chunk)));
+}
 
 function rangeContains(ctx: NativeContext, range: RangeValue, item: Value): boolean {
   const type = ctx.typeArgs[0];
