@@ -545,6 +545,31 @@ int main() {
   });
 });
 
+test.each(['vector', 'deque', 'list'])('keeps self pointers of %s elements constructed by assign', (container) => {
+  const program = `#include <${container}>
+#include <iostream>
+struct Item {
+  Item* self;
+  int number;
+  Item(int n) : self(this), number(n) {}
+  Item(const Item& other) : self(this), number(other.number) {}
+};
+int main() {
+  Item prototype(7);
+  std::${container}<Item> values;
+  ${container === 'vector' ? 'values.reserve(4);' : ''}
+  values.assign(2, prototype);
+  std::cout << (values.back().self == &values.back()) << ':' << values.back().self->number << ' ';
+  values.assign(4, prototype);
+  std::cout << (values.back().self == &values.back()) << ':' << values.back().self->number;
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '1:7 1:7',
+    uncaughtException: undefined,
+  });
+});
+
 test('keeps deque element addresses through front edits and swap', () => {
   const program = `#include <deque>
 #include <iostream>

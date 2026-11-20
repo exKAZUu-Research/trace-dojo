@@ -552,11 +552,11 @@ export class SequenceValue extends Store {
     this.bindElements(from, oldLength);
   }
 
-  finishMemberAssign(): void {
+  finishMemberAssign(reused: number): void {
     if (this.storageKind !== 'list') this.nodes?.invalidateEnd();
     if (this.deque) this.deque.all++;
-    this.nodes?.invalidateFrom(0);
-    this.bindElements(0, this.length);
+    this.nodes?.invalidateFrom(0, reused);
+    this.bindElements(0, reused);
   }
 
   bindElements(from: number, to: number): void {

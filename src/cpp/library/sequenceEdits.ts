@@ -294,13 +294,13 @@ export class SequenceEditor {
       this.truncate(frame, self, 0);
       self.replaceAllocation([], length);
     }
-    const assigned = Math.min(length, self.items.length);
-    for (let index = 0; index < assigned; index++) this.assignFrom(frame, self.items, index, source, index);
-    for (let index = assigned; index < length; index++)
+    const reused = Math.min(length, self.length);
+    for (let index = 0; index < reused; index++) this.assignFrom(frame, self.items, index, source, index);
+    for (let index = reused; index < length; index++)
       this.appendElement(frame, self, (target) => source.construct(frame, index, target));
     source.checkEndpoints?.();
     this.truncate(frame, self, length);
-    if (assignment === 'member') self.finishMemberAssign();
+    if (assignment === 'member') self.finishMemberAssign(reused);
   }
 
   /** `assign(count, value)`. */
