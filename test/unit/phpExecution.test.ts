@@ -1097,6 +1097,27 @@ test('match sees changes to a returned reference made while evaluating a conditi
   expect(run(program)).toMatchObject({ kind: 'executed', stdout: 'matched' });
 });
 
+test('releases a completed match subject while preserving its result for the caller', () => {
+  const program = `<?php
+    class Marker {
+      function __construct(public $id) {}
+      function __destruct() { echo "d{$this->id};"; }
+    }
+    function object($id) { return new Marker($id); }
+    function useResult($first, $second) { echo "result{$first->id};"; }
+    useResult(match ([object(1)]) { default => object(2) }, print 'next;');
+    echo match (object(3)) { default => 'left;' } . (print 'right;');
+    try {
+      useResult(object(4), match (object(5)) { 'missing' => 0 });
+    } catch (UnhandledMatchError $error) {
+      echo $error->getMessage();
+    }`;
+  expect(run(program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'd1;next;result2;d2;d3;right;left;1d4;d5;Unhandled match case of type Marker',
+  });
+});
+
 test('unrelated array temporaries do not invalidate scalar-grid garbage caches', () => {
   const execution = run(
     '<?php $data=[]; for($i=0;$i<10000;$i++) $data[]=[$i]; for($i=0;$i<10000;$i++){ $temp=[$i]; $x=new stdClass(); } echo "done";'

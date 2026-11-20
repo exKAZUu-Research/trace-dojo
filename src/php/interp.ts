@@ -381,7 +381,7 @@ export function evChain(e: Expr, discardResult = false): Chain {
       return instanceOfExpression(e);
     }
     case 'match': {
-      return matchExpression(e);
+      return keepResult(runtime.frame.temporaries.length, matchExpression(e), false);
     }
     case 'print': {
       return consumeExpression(e.e, (value) => {
