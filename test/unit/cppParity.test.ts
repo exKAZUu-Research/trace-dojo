@@ -84,6 +84,24 @@ int main() {
   });
 });
 
+test.each(['set', 'multiset'])('accepts a later definition of an owned std::%s element', (container) => {
+  const program = `#include <iostream>
+#include <set>
+struct Item;
+struct Owner { std::${container}<Item> items; };
+Owner global;
+int main() {
+  Owner local;
+  std::cout << global.items.empty() << local.items.empty();
+}
+struct Item { int value; };`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '11',
+    uncaughtException: undefined,
+  });
+});
+
 test.each([
   ['two increments', 'int i = 0;', 'i++ + i++'],
   ['a reference alias', 'int i = 1; int& r = i;', 'i++ + r'],

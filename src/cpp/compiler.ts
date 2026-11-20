@@ -113,6 +113,7 @@ export class Compiler extends StatementCompiler {
   private readonly aggregateDefaults = new WeakMap<FieldInfo, () => Initializer>();
   private readonly implicitDefaults = new WeakMap<ClassInfo, () => FunctionInfo | undefined>();
   private readonly delegatedConstructors = new WeakMap<FunctionInfo, FunctionInfo>();
+  private pendingObjectUses: (() => void)[] | undefined = [];
   private defaultDependencies?: {
     functions: Map<FunctionInfo, number>;
     staticMembers: Map<GlobalInfo, number>;
@@ -128,6 +129,9 @@ export class Compiler extends StatementCompiler {
 
   compile(root: Syntax): CompiledProgram {
     for (const item of root.children) this.topLevel(item);
+    const objectUses = this.pendingObjectUses;
+    this.pendingObjectUses = undefined;
+    for (const check of objectUses ?? []) check();
     this.checkLibraryGlobalDeclarations();
     const main = this.globalScope.names.get('main');
     if (main?.kind !== 'functions')
@@ -2390,7 +2394,8 @@ export class Compiler extends StatementCompiler {
   }
 
   protected checkWhenUsed(check: () => void): void {
-    if (this.defaultDependencies) this.defaultDependencies.checks.push(check);
+    const checks = this.defaultDependencies?.checks ?? this.pendingObjectUses;
+    if (checks) checks.push(check);
     else check();
   }
 
