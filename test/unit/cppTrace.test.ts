@@ -430,6 +430,25 @@ int main() {
 });
 
 test.each([
+  ['std::unordered_set<int> s; for (int i = 0; i < 512; ++i) s.insert(i);'],
+  ['std::unordered_map<int, int> s; for (int i = 0; i < 512; ++i) s[i] = i;'],
+])('meters each entry rehashed in %s', (setup) => {
+  const program = `#include <unordered_map>
+#include <unordered_set>
+int main() {
+  ${setup}
+  for (int i = 0; i < 8; ++i) { s.rehash(2048); s.rehash(1031); }
+}`;
+  const previous = LIMITS.maxOperations;
+  LIMITS.maxOperations = 6000;
+  try {
+    expect(executeProgram('cpp', program)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  } finally {
+    LIMITS.maxOperations = previous;
+  }
+});
+
+test.each([
   ['list', '=='],
   ['vector', '!='],
 ])('rejects %s iterator comparison %s across different sequences', (container, operator) => {

@@ -581,7 +581,7 @@ export class HashValue extends MapValue {
   private redistribute(frame: Frame, count: number): void {
     checkBucketCount(count);
     frame.runtime.reserve(count);
-    frame.runtime.spend(Math.ceil(this.size / 64));
+    frame.runtime.spend(this.size);
     this.iteratorEpoch.generation++;
     const buckets: (HashNode | undefined)[] = Array.from({ length: count });
     this.buckets = buckets;
