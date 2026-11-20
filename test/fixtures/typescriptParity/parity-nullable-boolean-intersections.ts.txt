@@ -9,3 +9,7 @@ const seven: Intersect<null, any, null> = 7;
 const eight: Intersect<boolean, any, true> = 8;
 const nine: Intersect<boolean, any, false> = 9;
 console.log(one, two, three, four, five, six, seven, eight, nine);
+
+const delayed: Intersect<NoInfer<boolean>, any, null> = 10;
+const alsoDelayed: Intersect<NoInfer<true | false>, NoInfer<null>, any> = 11;
+console.log(delayed, alsoDelayed);

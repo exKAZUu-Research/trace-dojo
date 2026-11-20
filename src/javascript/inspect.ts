@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 686 -- Ports Node.js's inspection and error formatting around shared object and stack metadata.
+// code-gauge-allow-file fileNcss 711 -- Ports Node.js's inspection and error formatting around shared object and stack metadata.
 import { inspect as hostInspect, type InspectStyle, stripVTControlCharacters } from 'node:util';
 
 import { eastAsianWidthType } from 'get-east-asian-width';
@@ -360,6 +360,8 @@ function escapeControls(text: string): string {
   });
 }
 
+type EntryFormat = 'array' | 'collection' | undefined;
+
 interface Frame {
   /** The text before the braces, such as a function's name. */
   base: string;
@@ -374,10 +376,15 @@ function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string 
   const constructor = inspectedConstructor(runtime, value, showsPrototype);
   const inherited = showsPrototype && constructor.name ? inspectPrototype(ctx, value, constructor, recurseTimes) : [];
   const name = inspectedName(ctx, value, constructor, recurseTimes);
-  const display = { name, nullPrototypeName: name === undefined ? runtime.internalConstructorName(value) : undefined };
+  const entries = entryFormat(runtime, value, name);
+  const display = {
+    name,
+    entries,
+    nullPrototypeName: name === undefined ? runtime.internalConstructorName(value) : undefined,
+  };
   if (value.isError && name !== 'Object') noteErrorStack(ctx, value);
-  const keys = enumerableKeys(runtime, value, ctx.showHidden, ctx.errorStacks.get(value));
-  const showsLength = ctx.showHidden && value instanceof JsArray;
+  const keys = enumerableKeys(ctx, value, entries === 'array');
+  const showsLength = ctx.showHidden && entries === 'array';
   const frame = frameOf(
     ctx,
     value,
@@ -386,33 +393,45 @@ function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string 
   );
   if (typeof frame === 'string') return frame;
   if (recurseTimes > ctx.depth) {
-    const prefix = value instanceof JsArray ? prefixOf(name, 'Array') : objectPrefix(display, toStringTagOf(value));
+    const prefix = entries === 'array' ? prefixOf(name, 'Array') : objectPrefix(display, toStringTagOf(value));
     const label = prefix.slice(0, -1);
     return name === undefined ? label : stylize(ctx, `[${label}]`, 'special');
   }
   ctx.currentDepth = recurseTimes + 1;
   ctx.seen.add(value);
   try {
-    return formatBody(ctx, value, recurseTimes + 1, frame, keys, inherited);
+    return formatBody(ctx, value, recurseTimes + 1, { frame, keys, inherited, entries });
   } finally {
     ctx.seen.delete(value);
   }
 }
 
-function formatBody(
-  ctx: Context,
-  value: JsObject,
-  recurseTimes: number,
-  frame: Frame,
-  keys: Key[],
-  inherited: string[]
-): string {
-  const output =
-    value instanceof JsArray ? formatArray(ctx, value, recurseTimes) : formatCollection(ctx, value, recurseTimes);
+function entryFormat(runtime: Runtime, value: JsObject, name: string | undefined): EntryFormat {
+  if (value.collection?.isWeak) return 'collection';
+  const array = value instanceof JsArray;
+  if (!array && !value.collection && !(value.hostIterator instanceof CollectionIterator)) return undefined;
+  if (name !== undefined && !runtime.hasProperty(value, WELL_KNOWN_SYMBOLS.iterator)) return undefined;
+  return array ? 'array' : 'collection';
+}
+
+interface Body {
+  frame: Frame;
+  keys: Key[];
+  inherited: string[];
+  entries: EntryFormat;
+}
+
+function formatBody(ctx: Context, value: JsObject, recurseTimes: number, body: Body): string {
+  const { frame, keys, inherited, entries } = body;
+  const array = entries === 'array' && value instanceof JsArray ? value : undefined;
+  const output = array
+    ? formatArray(ctx, array, recurseTimes)
+    : entries === 'collection'
+      ? formatCollection(ctx, value, recurseTimes)
+      : [];
   if (value.promise) output.push(promiseEntry(ctx, value.promise, recurseTimes));
-  if (ctx.showHidden && value instanceof JsArray)
-    output.push(`[length]: ${formatPrimitive(ctx, value.elements.length)}`);
-  const properties = keys.map((key) => formatProperty(ctx, value, recurseTimes, key));
+  if (ctx.showHidden && array) output.push(`[length]: ${formatPrimitive(ctx, array.elements.length)}`);
+  const properties = keys.map((key) => formatProperty(ctx, value, recurseTimes, key, { arrayExtras: !!array }));
   appendProperties(ctx, value, output, [...properties, ...inherited]);
   ctx.runtime.scan(output.length);
   const reference = ctx.circular.get(value);
@@ -424,7 +443,7 @@ function formatBody(
     if (ctx.compact === true) braces[0] = `${label} ${braces[0]}`;
     else base = base === '' ? label : `${label} ${base}`;
   }
-  return reduceToSingleString(ctx, output, base, braces, recurseTimes, value);
+  return reduceToSingleString(ctx, output, base, braces, recurseTimes, array);
 }
 
 /**
@@ -480,7 +499,7 @@ function inspectPrototype(
         if (key === 'constructor' || seen.has(key) || runtime.getOwnProperty(value, key)) continue;
         const property = inspectedProperty(runtime, current, key);
         if (!isAccessor(property) && property.value instanceof JsFunction) continue;
-        const text = formatProperty(ctx, current, recurseTimes, key, value, property);
+        const text = formatProperty(ctx, current, recurseTimes, key, { receiver: value, property });
         output.push(ctx.colors ? `\u001B[2m${text}\u001B[22m` : text);
       }
       for (const key of keys) seen.add(key);
@@ -523,6 +542,7 @@ function isBuiltinConstructorName(name: Value): boolean {
 }
 
 interface DisplayConstructor {
+  entries: EntryFormat;
   name: string | undefined;
   nullPrototypeName: string | undefined;
 }
@@ -533,11 +553,11 @@ interface DisplayConstructor {
 function frameOf(ctx: Context, value: JsObject, display: DisplayConstructor, hasKeys: boolean): Frame | string {
   const { runtime } = ctx;
   const { name: constructor } = display;
-  if (value instanceof JsArray) {
+  if (display.entries === 'array' && value instanceof JsArray) {
     const prefix = constructor === 'Array' ? '' : prefixOf(constructor, 'Array', `(${value.elements.length})`);
     return value.elements.length === 0 && !hasKeys ? `${prefix}[]` : { base: '', braces: [`${prefix}[`, ']'] };
   }
-  if (value.collection || value.hostIterator instanceof CollectionIterator) {
+  if (display.entries === 'collection') {
     return collectionFrameOf(value, constructor, hasKeys);
   }
   if (value.turtle) return `Turtle { x: ${value.turtle.x}, y: ${value.turtle.y} }`;
@@ -734,20 +754,20 @@ function prefixOf(constructor: string | undefined, fallback: string, size = ''):
 const ERROR_KEYS = new Set<Key>(['name', 'message', 'stack']);
 
 // code-gauge-allow functionCognitiveComplexity 17 -- Lists the own keys exposed by each inspected value, including hidden string lengths and error causes.
-function enumerableKeys(runtime: Runtime, object: JsObject, showHidden: boolean, stack?: ErrorStack): Key[] {
-  // An array keeps its elements apart from its other properties.
-  const own =
-    object instanceof JsArray
-      ? [...object.properties.keys()].filter((key) => typeof key === 'string')
-      : showHidden && typeof object.primitive === 'string'
-        ? runtime.ownPropertyNames(object)
-        : runtime.ownKeys(object);
+function enumerableKeys(ctx: Context, object: JsObject, arrayExtras: boolean): Key[] {
+  const { runtime, showHidden } = ctx;
+  const stack = ctx.errorStacks.get(object);
+  const own = arrayExtras
+    ? [...object.properties.keys()].filter((key) => typeof key === 'string')
+    : showHidden
+      ? runtime.ownPropertyNames(object)
+      : runtime.ownKeys(object);
   // A String object's indices, which come first, show as its text instead.
   const strings = typeof object.primitive === 'string' ? own.slice(object.primitive.length) : own;
   const keys: Key[] = [...strings, ...runtime.ownSymbols(object)];
   const listed = keys.filter((key) => {
     if (object.isError && ERROR_KEYS.has(key) && (showHidden || !stack || isInStack(object, key, stack))) return false;
-    return showHidden || object.properties.get(key)?.enumerable;
+    return showHidden || runtime.getOwnProperty(object, key)?.enumerable;
   });
   // An error also shows its own hidden reasons, bracketed, as Node.js does.
   if (object.isError) {
@@ -1036,7 +1056,7 @@ function formatCollection(ctx: Context, value: JsObject, recurseTimes: number): 
       return formatCharged(ctx, iterator.kind === 'keys' ? entry.key : entry.value, recurseTimes);
     }
     const pair = [formatCharged(ctx, entry.key, recurseTimes), formatCharged(ctx, entry.value, recurseTimes)];
-    return reduceToSingleString(ctx, pair, '', ['[', ']'], recurseTimes, value);
+    return reduceToSingleString(ctx, pair, '', ['[', ']'], recurseTimes);
   };
   const limit = Math.min(entries.length, ctx.maxArrayLength);
   if (iterator && !Number.isInteger(limit)) ctx.runtime.throwError('RangeError', 'Invalid array length');
@@ -1059,19 +1079,24 @@ function promiseEntry(ctx: Context, state: PromiseState, recurseTimes: number): 
   return state.status === 'rejected' ? `${stylize(ctx, '<rejected>', 'special')} ${result}` : result;
 }
 
+interface PropertyLayout {
+  receiver?: JsObject;
+  property?: Property;
+  arrayExtras?: boolean;
+}
+
 function formatProperty(
   ctx: Context,
   object: JsObject,
   recurseTimes: number,
   key: Key,
-  receiver = object,
-  property = inspectedProperty(ctx.runtime, object, key)
+  { receiver = object, property = inspectedProperty(ctx.runtime, object, key), arrayExtras }: PropertyLayout = {}
 ): string {
   const name = inspectionPropertyName(ctx, key);
   const label = property.enumerable ? name : `[${name}]`;
   if (isAccessor(property)) return `${label}: ${formatAccessor(ctx, receiver, property, recurseTimes)}`;
   // The compact layout indents an object's values one more and moves a value too wide for a line to the next.
-  const diff = ctx.compact === true && !(object instanceof JsArray) ? 3 : 2;
+  const diff = ctx.compact === true && !arrayExtras ? 3 : 2;
   const text = formatIndented(ctx, ctx.runtime.readPropertyValue(property), recurseTimes, diff);
   const separator =
     diff === 3 && ctx.breakLength < (ctx.colors ? stringWidth(unstyled(ctx, text)) : text.length)
@@ -1109,14 +1134,14 @@ function reduceToSingleString(
   base: string,
   braces: string[],
   recurseTimes: number,
-  value: JsObject
+  array?: JsArray
 ): string {
   const basePrefix = base ? `${base} ` : '';
   const indentation = `\n${' '.repeat(ctx.indentationLvl)}`;
   if (ctx.compact !== true) {
     if (typeof ctx.compact === 'number' && ctx.compact >= 1) {
       const entries = output.length;
-      if (value instanceof JsArray && entries > 6) output = groupArrayElements(ctx, output, value);
+      if (array && entries > 6) output = groupArrayElements(ctx, output, array);
       if (ctx.currentDepth - recurseTimes < ctx.compact && entries === output.length) {
         // Node.js adds 10 to leave room for what may shorten the line in other places.
         const start = output.length + ctx.indentationLvl + braces[0].length + base.length + 10;

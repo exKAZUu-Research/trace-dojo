@@ -1,0 +1,47 @@
+Array <[Object: null prototype] {}> {}
+Array <[Object: null prototype] {}> { '0': 1, '1': 2 }
+Map <[Object: null prototype] {}> {}
+Set <[Object: null prototype] {}> {}
+Array <Object <[Object: null prototype] {}>> {}
+Array <Object <[Object: null prototype] {}>> { '0': 1, '1': 2 }
+Map <Object <[Object: null prototype] {}>> {}
+Set <Object <[Object: null prototype] {}>> {}
+Array <Object <Object <Complex prototype>>> {}
+Array <Object <Object <Complex prototype>>> { '0': 1, '1': 2 }
+Map <Object <Object <Complex prototype>>> {}
+Set <Object <Object <Complex prototype>>> {}
+Array <Object <Object <Complex prototype>>> {}
+Array <Object <Object <Complex prototype>>> { '0': 1, '1': 2 }
+Map <Object <Object <Complex prototype>>> {}
+Set <Object <Object <Complex prototype>>> {}
+Array <[Object: null prototype] {}> {
+  '0': 1,
+  ['1']: 2,
+  '2': 3,
+  '4': [Getter],
+  [length]: 5,
+  note: 'own'
+}
+Array <[Object: null prototype] {}> {
+  '0': 1,
+  '2': 3,
+  '4': [Getter],
+  note: 'own'
+}
+Array <[Object: null prototype] {}> {
+  '0': 1,
+  '1': 2,
+  '2': 3,
+  '3': 4,
+  '4': 5,
+  '5': 6,
+  '6': 7,
+  '7': 8
+}
+[
+  [Array(2): null prototype] [ 1, 2 ],
+  [Map(1): null prototype] { 1 => 2 },
+  [Set(1): null prototype] { 1 }
+]
+{ '0': 7, '1': 8 }
+[ 7, 8 ]

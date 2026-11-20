@@ -619,7 +619,7 @@ export function isTemplateOrStringMapping(type: Type): type is TemplateLiteralTy
 
 function primitiveDomain(type: Type): string | undefined {
   if (type.kind === 'literal') return typeof type.value;
-  if (type === booleanType) return 'boolean';
+  if (type.id === booleanType.id) return 'boolean';
   if (isTemplateOrStringMapping(type)) return 'string';
   if (type.kind !== 'intrinsic' || !(isPrimitive(type) || isIntrinsic(type, 'object'))) return undefined;
   // `void` holds only `undefined`, so the two overlap as TypeScript's `VoidLike` domain.
