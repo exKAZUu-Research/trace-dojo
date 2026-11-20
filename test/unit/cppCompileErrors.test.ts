@@ -11,6 +11,16 @@ int main() { std::FILE* stream = stdout; }`;
   });
 });
 
+test('keeps every pure virtual member in a grouped C++ declaration', () => {
+  const program = `struct Base { virtual int first() = 0, second() = 0; };
+struct Partial : Base { int first() override { return 1; } };
+int main() { Partial value; }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 2, message: expect.stringContaining('Partial は抽象クラス') }],
+  });
+});
+
 test.each([
   ['qualified', '', 'std::remove'],
   ['unqualified', 'using namespace std;', 'remove'],

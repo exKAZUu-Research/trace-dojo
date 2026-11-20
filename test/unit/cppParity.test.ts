@@ -36,6 +36,52 @@ int main() {
   expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', stdout: '1', uncaughtException: undefined });
 });
 
+test('binds every member in mixed C++ class declarations', () => {
+  const program = `#include <iostream>
+struct Record {
+  int first(), second(int x = 2);
+  int left = 4, third();
+  int fourth(), right{5};
+  static int high(), value;
+};
+int Record::first() { return 1; }
+int Record::second(int x) { return x; }
+int Record::third() { return left; }
+int Record::fourth() { return right; }
+int Record::value = 6;
+int Record::high() { return value; }
+int main() {
+  Record record;
+  std::cout << record.first() << record.second() << record.third() << record.fourth() << Record::high();
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '12456',
+    uncaughtException: undefined,
+  });
+});
+
+test('binds every function in mixed C++ file-scope declarations', () => {
+  const program = `#include <iostream>
+int first(int n = 1), second(int n = 2);
+int left = 3, third();
+int fourth(), right = 4;
+int* pointer(), value = 5;
+int main() {
+  std::cout << first() << second() << third() << fourth() << *pointer();
+}
+int first(int n) { return n; }
+int second(int n) { return n; }
+int third() { return left; }
+int fourth() { return right; }
+int* pointer() { return &value; }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '12345',
+    uncaughtException: undefined,
+  });
+});
+
 test('allows const map keys and pointers to const set elements', () => {
   const program = `#include <iostream>
 #include <map>

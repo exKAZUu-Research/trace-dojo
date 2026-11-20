@@ -4,7 +4,7 @@ import { ExecutionLimitError } from '../interpreter/limits';
 import { misplacedAtomicMessage, type TraceOptions } from '../interpreter/traceAnnotations';
 import { isBaseAccessible, isMemberAccessible } from './access';
 import { byteAt } from './bytes';
-import { hasAuto } from './compilerBase';
+import { type Declared, hasAuto } from './compilerBase';
 import { implicitConversion } from './conversions';
 import { CppException, CppRuntimeError, NarrowingConversionError } from './errors';
 import {
@@ -391,17 +391,17 @@ export class Compiler extends StatementCompiler {
     )
       return this.unsupported(type.row, 'クラスの中のクラスの宣言');
     if (declarators.length === 0) return this.error(node.row, 'メンバの名前を書いてください。');
-    const firstDeclared = declarators[0];
-    if (this.isFunctionDeclarator(firstDeclared)) {
-      this.memberFunction(cls, node, access, false);
-      return;
-    }
-    if (hasToken(node, 'virtual')) this.error(node.row, 'virtual はメンバ関数にしか付けられません。');
     const isStatic = this.hasSpecifier(node, 'static');
     const isConstexpr = this.isConstexpr(node);
     const isInline = this.hasSpecifier(node, 'inline') || isConstexpr;
-    const base = this.specifiedType(node);
+    let base: Type | undefined;
     for (const declarator of declarators) {
+      if (this.isFunctionDeclarator(declarator)) {
+        this.memberFunction(cls, node, access, false, declarator);
+        continue;
+      }
+      if (hasToken(node, 'virtual')) this.error(declarator.row, 'virtual はメンバ関数にしか付けられません。');
+      base ??= this.specifiedType(node);
       const declared = this.applyDeclarator(base, declarator);
       const name = declared.name as string;
       if (this.memberEntity(cls, name)) this.error(declarator.row, `メンバ ${name} はすでに宣言されています。`);
@@ -497,8 +497,13 @@ export class Compiler extends StatementCompiler {
   }
 
   /** Declares a member function, constructor, or destructor of a class from its declaration or in-class definition. */
-  private memberFunction(cls: ClassInfo, node: Syntax, access: Access, isDefinition: boolean): FunctionInfo {
-    const declarator = fieldOf(node, 'declarator') as Syntax;
+  private memberFunction(
+    cls: ClassInfo,
+    node: Syntax,
+    access: Access,
+    isDefinition: boolean,
+    declarator = fieldOf(node, 'declarator') as Syntax
+  ): FunctionInfo {
     const typeNode = fieldOf(node, 'type');
     const declared = this.applyDeclarator(typeNode ? this.specifiedType(node, true) : VOID, declarator);
     const functionDeclarator = declared.function as Syntax;
@@ -534,7 +539,7 @@ export class Compiler extends StatementCompiler {
       rest.every((param) => param.defaultValue !== undefined)
     )
       this.error(node.row, 'コピーコンストラクタの引数には参照を使ってください。');
-    const defaultValue = fieldOf(node, 'default_value');
+    const defaultValue = this.defaultValueOf(node, declarator);
     if (defaultValue) {
       if (defaultValue.text !== '0' || !fn.isVirtual)
         this.error(node.row, '= 0 は virtual のメンバ関数にしか付けられません。');
@@ -1220,28 +1225,28 @@ export class Compiler extends StatementCompiler {
 
   private functionDefinition(node: Syntax): void {
     // A function returning a pointer or a reference wraps its function declarator (`int& f()`).
-    const declarator = innermostFunctionDeclarator(fieldOf(node, 'declarator') as Syntax);
+    const written = fieldOf(node, 'declarator') as Syntax;
+    const declarator = innermostFunctionDeclarator(written);
     if (!declarator) return this.error(node.row, '関数の定義には (...) で引数を書いてください。');
     const inner = fieldOf(declarator, 'declarator') as Syntax;
     if (inner.type === 'qualified_identifier') {
       this.outOfClassDefinition(node, inner);
       return;
     }
-    const fn = this.declareFunction(node, declarator, true);
+    if (!fieldOf(node, 'type')) return this.error(node.row, '関数の戻り値の型を書いてください。');
+    const declared = this.applyDeclarator(this.specifiedType(node, true), written);
+    const fn = this.declareFunction(node, declared, true);
     this.compileFunction(fn, node);
   }
 
-  private declareFunction(node: Syntax, declarator: Syntax, isDefinition: boolean): FunctionInfo {
-    const typeNode = fieldOf(node, 'type');
-    if (!typeNode) return this.error(node.row, '関数の戻り値の型を書いてください。');
+  private declareFunction(node: Syntax, declared: Declared, isDefinition: boolean): FunctionInfo {
     if (this.hasSpecifier(node, 'virtual') || hasToken(node, 'virtual'))
       this.error(node.row, 'virtual はメンバ関数にしか付けられません。');
-    const declared = this.applyDeclarator(this.specifiedType(node, true), fieldOf(node, 'declarator') as Syntax);
     const name = declared.name as string;
     if (name === 'main') this.checkMainSpecifiers(node);
     else if (!isDefinition && this.hasSpecifier(node, 'static'))
       this.unsupported(node.row, 'static の関数（内部結合）');
-    const fn = this.functionInfo(name, declared.type, declarator, node, undefined);
+    const fn = this.functionInfo(name, declared.type, declared.function as Syntax, node, undefined);
     if (name === 'main') {
       if (!sameType(fn.ret, INT)) this.error(node.row, 'main 関数の戻り値の型は int にしてください。');
       this.checkMainParameters(fn);
@@ -1501,7 +1506,9 @@ export class Compiler extends StatementCompiler {
       const declarator = this.variableOrFunctionDeclarator(base, written);
       const declared = this.applyDeclarator(base, declarator);
       if (declared.function && declarator.type !== 'init_declarator') {
-        this.functionDeclaration(node, declarator, declared);
+        if (declared.nameNode?.type === 'qualified_identifier')
+          this.error(declarator.row, `${declared.nameNode.text} の宣言はクラスの中に書いてください。`);
+        this.declareFunction(node, declared, false);
         continue;
       }
       if (declared.nameNode?.type === 'qualified_identifier') {
@@ -1516,21 +1523,6 @@ export class Compiler extends StatementCompiler {
         declarator.row
       );
     }
-  }
-
-  private functionDeclaration(node: Syntax, declarator: Syntax, declared: { nameNode?: Syntax }): void {
-    if (declared.nameNode?.type === 'qualified_identifier') {
-      this.error(node.row, `${declared.nameNode.text} の宣言はクラスの中に書いてください。`);
-    }
-    const functionDeclarator = innermostFunctionDeclarator(declarator);
-    this.declareFunction(
-      {
-        ...node,
-        all: node.all.map((child) => (child === declarator ? { ...child, field: 'declarator' } : child)),
-      } as Syntax,
-      functionDeclarator as Syntax,
-      false
-    );
   }
 
   private staticMemberDefinition(nameNode: Syntax, type: Type, declarator: Syntax): void {
