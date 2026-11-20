@@ -834,6 +834,32 @@ fn main() {
   });
 });
 
+test('evaluates computed tuple and enum constants for pattern coverage', () => {
+  const program = `#[derive(PartialEq, Eq)]
+enum Flag { Set(bool), Clear }
+const SET: Flag = {
+    let flag = if 2 > 1 { Flag::Set(true) } else { Flag::Clear };
+    flag
+};
+const YES: (bool, bool) = if true { (true, false) } else { (false, false) };
+fn main() {
+    match Flag::Set(true) {
+        SET => println!("set"),
+        Flag::Set(false) => println!("unset"),
+        Flag::Clear => println!("clear"),
+    }
+    match (true, false) {
+        YES => println!("yes"),
+        (true, true) | (false, _) => println!("no"),
+    }
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'set\nyes\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

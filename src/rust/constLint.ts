@@ -1,4 +1,6 @@
-import type { Annotations, LocalVar } from './annotations';
+// code-gauge-allow-file fileNcss 403 -- Shares Rust constant propagation between diagnostics and pattern coverage.
+
+import type { Annotations, LocalVar, PathRes } from './annotations';
 import type { Block, Condition, Expr, MatchArm, Pattern, Stmt } from './ast';
 import { forEachDirect, patternBindings } from './astWalk';
 import { type PropagationMode, propagationModes } from './constPropagation';
@@ -8,10 +10,11 @@ import { castValue, wrap } from './ops';
 import { type ConstDef, INT_NAMES, intMax, intMin, type IntName, resolve, shallow, type Type } from './types';
 
 /** A constant: a number, a bool, a char, or a tuple or struct of constants keyed by field (`0`, `x`). */
-type Known = bigint | number | boolean | string | Aggregate;
+export type Known = bigint | number | boolean | string | Aggregate;
 type IntegerOperation = Pick<Extract<Expr, { kind: 'binary' }>, 'op' | 'span'>;
 
 interface Aggregate {
+  ctor?: string;
   fields: Map<string, Known | undefined>;
 }
 
@@ -30,12 +33,12 @@ export class ConstLint {
 
   constructor(
     private readonly annotations: Annotations,
-    private readonly evaluating = new Set<ConstDef>()
+    private readonly evaluating = new Set<ConstDef>(),
+    private readonly patternEvaluation = false
   ) {}
 
-  boolean(expr: Expr): boolean | undefined {
-    const value = this.expr(expr);
-    return typeof value === 'boolean' ? value : undefined;
+  static patternValue(def: ConstDef, annotations: Annotations): Known | undefined {
+    return new ConstLint(annotations, new Set(), true).constant(def);
   }
 
   check(block: Block): void {
@@ -140,6 +143,15 @@ export class ConstLint {
 
   private compoundExpr(expr: Expr): Known | undefined {
     switch (expr.kind) {
+      case 'ref': {
+        const operand = this.expr(expr.operand);
+        return this.patternEvaluation ? operand : undefined;
+      }
+      case 'if': {
+        if (this.patternEvaluation) return this.constantBranch(expr);
+        this.ifExpr(expr);
+        return undefined;
+      }
       case 'struct': {
         return this.struct(expr);
       }
@@ -196,10 +208,6 @@ export class ConstLint {
         this.closure(expr);
         return;
       }
-      case 'if': {
-        this.ifExpr(expr);
-        return;
-      }
       default: {
         forEachDirect(expr, (child) => {
           this.expr(child);
@@ -211,18 +219,32 @@ export class ConstLint {
   private path(expr: Extract<Expr, { kind: 'path' }>): Known | undefined {
     const res = this.annotations.paths.get(expr);
     if (res?.kind === 'local') return this.known.get(res.local);
-    if (res?.kind === 'const') {
-      const { ast, module } = res.def;
-      // A constant's initializer may not be checked yet, so its value counts by the constant's type.
-      if (ast.value && intTypeOf(res.def.type)) return constInteger(ast.value, module);
-      if (!ast.value || this.evaluating.has(res.def)) return undefined;
-      this.evaluating.add(res.def);
-      const result = new ConstLint(this.annotations, this.evaluating).expr(ast.value);
-      this.evaluating.delete(res.def);
-      return result;
-    }
+    if (res?.kind === 'const') return this.constant(res.def);
     if (res?.kind === 'builtinConst') return integerConst(res.name);
+    if (this.patternEvaluation && res?.kind === 'ctor') return this.construct(res, []);
     return undefined;
+  }
+
+  private constant(def: ConstDef): Known | undefined {
+    const { ast, module } = def;
+    if (!ast.value || this.evaluating.has(def) || this.evaluating.size >= 64) return undefined;
+    if (!this.patternEvaluation && intTypeOf(def.type)) return constInteger(ast.value, module);
+    this.evaluating.add(def);
+    const result = new ConstLint(this.annotations, this.evaluating, this.patternEvaluation).expr(ast.value);
+    this.evaluating.delete(def);
+    return result;
+  }
+
+  private construct(
+    res: Extract<PathRes, { kind: 'ctor' }>,
+    fields: Iterable<readonly [string, Known | undefined]>
+  ): Aggregate {
+    const map = new Map(fields);
+    const variant = res.def.variants[res.variant];
+    return aggregate(
+      variant.fields.map(({ name }) => [name, map.get(name)]),
+      `v${res.variant}`
+    );
   }
 
   private unary(expr: Extract<Expr, { kind: 'unary' }>): Known | undefined {
@@ -253,13 +275,20 @@ export class ConstLint {
     const elems = expr.elems.map((elem, index) => [String(index), this.expr(elem)] as const);
     // rustc does not follow a tuple that holds an array, whose value is no immediate.
     const holdsArray = expr.kind === 'tuple' && expr.elems.some((elem) => isArrayType(elem.ty));
-    return holdsArray ? undefined : aggregate(elems);
+    return holdsArray ? undefined : aggregate(elems, expr.kind === 'tuple' ? 'tuple' : undefined);
   }
 
   private struct(expr: Extract<Expr, { kind: 'struct' }>): Known | undefined {
     const fields = expr.fields.map(({ name, value }) => [name, this.expr(value)] as const);
-    if (!expr.base) return aggregate(fields);
-    this.expr(expr.base);
+    const res = this.annotations.paths.get(expr);
+    if (!expr.base) {
+      if (this.patternEvaluation && res?.kind === 'ctor') return this.construct(res, fields);
+      return aggregate(fields);
+    }
+    const base = this.expr(expr.base);
+    if (this.patternEvaluation && res?.kind === 'ctor' && typeof base === 'object') {
+      return this.construct(res, [...base.fields, ...fields]);
+    }
     return undefined;
   }
 
@@ -292,7 +321,8 @@ export class ConstLint {
     const res =
       expr.kind === 'call' && expr.callee.kind === 'path' ? this.annotations.paths.get(expr.callee) : undefined;
     if (expr.kind === 'call' && res?.kind === 'ctor') {
-      return aggregate(expr.args.map((arg, index) => [String(index), this.expr(arg)]));
+      const fields = expr.args.map((arg, index) => [String(index), this.expr(arg)] as const);
+      return this.patternEvaluation ? this.construct(res, fields) : aggregate(fields);
     }
     forEachDirect(expr, (child) => {
       this.expr(child);
@@ -310,6 +340,14 @@ export class ConstLint {
     if (cond === true) this.diverged = then!;
     else if (cond === false) this.diverged = otherwise ?? false;
     else this.diverged = then! && (otherwise ?? false);
+  }
+
+  private constantBranch(expr: Extract<Expr, { kind: 'if' }>): Known | undefined {
+    const condition = this.condition(expr.cond);
+    if (condition === true) return this.block(expr.consequent);
+    if (condition === false) return expr.else ? this.expr(expr.else) : aggregate([], 'tuple');
+    this.known.clear();
+    return undefined;
   }
 
   private condition(cond: Condition): Known | undefined {
@@ -480,8 +518,8 @@ function integerConst(name: string): bigint | undefined {
   return undefined;
 }
 
-function aggregate(fields: Iterable<readonly [string, Known | undefined]>): Aggregate {
-  return { fields: new Map(fields) };
+function aggregate(fields: Iterable<readonly [string, Known | undefined]>, ctor?: string): Aggregate {
+  return { fields: new Map(fields), ctor };
 }
 
 /** Whether a pattern matches a constant: surely, surely not, or unknown. */
