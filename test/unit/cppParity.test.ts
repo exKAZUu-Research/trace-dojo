@@ -826,6 +826,25 @@ int main() {
   });
 });
 
+test('reads typed scalar functor operands after binding both', () => {
+  const program = `#include <functional>
+#include <iostream>
+int value = 1;
+int bump() { value = 3; return 2; }
+int main() {
+  std::cout << std::plus<int>()(value, bump()) << ' ';
+  value = 1;
+  std::cout << std::less<int>()(value, bump()) << ' ';
+  value = 1;
+  std::cout << std::plus<long>()(value, bump());
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '5 0 3',
+    uncaughtException: undefined,
+  });
+});
+
 test('evaluates transparent functor arguments as call arguments', () => {
   const program = `#include <functional>
 #include <iostream>

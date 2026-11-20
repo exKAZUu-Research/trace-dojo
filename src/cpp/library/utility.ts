@@ -3,7 +3,7 @@ import { arithmeticOperation, convertNumeric, type NumericValue } from '../arith
 import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import { FloatNaN } from '../floatSign';
-import { type Frame, holdAll } from '../runtime';
+import { holdAll } from '../runtime';
 import { BOOL, ClassInfo, isArithmetic, sameType, type Type, typeName, unqualified } from '../types';
 import { CObject, type Ptr, type Value } from '../values';
 import { type CallbackOperand, callbackOperands, equalTo, lessThan, type ValueComparison } from './elements';
@@ -90,20 +90,13 @@ export function functorClass(library: Library, name: string, type: Type | undefi
       }
       const operation = apply(type, type);
       if (!operation) return compiler.error(row, `${cls.name} は ${typeName(type)} の値に使えません。`);
-      const values = args.map((arg) => {
-        if (type.kind !== 'class') return compiler.convert(arg, type, row).run;
-        const run = constLvalue(compiler, arg, type, row).run;
-        return (frame: Frame) => (run(frame) as Ptr).read();
-      });
-      const objectRun = object.run;
+      const runs = [object.run, ...args.map((arg) => constLvalue(compiler, arg, type, row).run)];
       return {
         type: isComparison ? BOOL : unqualified(type),
         isLvalue: false,
         row,
-        run: (frame) => {
-          objectRun(frame);
-          return operation(values[0](frame) as Value, values[1](frame) as Value, frame);
-        },
+        run: (frame) =>
+          holdAll(frame, runs, ([, left, right]) => operation((left as Ptr).read(), (right as Ptr).read(), frame)),
       };
     },
   };
