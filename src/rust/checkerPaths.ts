@@ -6,6 +6,7 @@ import { checkFieldVisible } from './checkerPlaces';
 import { normalize } from './infer';
 import {
   compileError,
+  globAnonymousTraits,
   globTypeNames,
   lookupType,
   lookupValue,
@@ -195,6 +196,7 @@ export function traitInScope(c: Checker, trait: TraitDef): boolean {
   if (isTrait(lookupType(module, trait.name, span))) return true;
   for (let scope: Module | undefined = module; scope; scope = scope.lexicalParent) {
     if (scope.anonymousImports.some((entry) => isTrait(entry.types?.binding))) return true;
+    for (const visible of globAnonymousTraits(scope)) if (visible === trait) return true;
     for (const name of [...scope.imports.keys(), ...globTypeNames(scope)]) {
       if (isTrait(lookupType(module, name, span))) return true;
     }

@@ -1242,6 +1242,23 @@ test('preserves Unicode whitespace following Rust string continuations', () => {
   });
 });
 
+test('resolves anonymous Rust trait imports through public globs', () => {
+  const program = `mod traits { pub use std::fmt::Write as _; }
+mod reexports { pub use super::traits::*; }
+use reexports::*;
+fn main() {
+    let mut s = String::new();
+    write!(&mut s, "hi").unwrap();
+    s.write_char('!').unwrap();
+    println!("{}", s);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'hi!\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {
