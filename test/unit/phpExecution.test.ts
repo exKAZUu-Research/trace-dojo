@@ -952,15 +952,18 @@ test.each([
   expect(execution.kind === 'executed' && execution.stdout).toMatch(/^\nFatal error: Allowed memory size/);
 });
 
-test.each(['<?php file_put_contents("a.txt","x",FILE_APPEND|LOCK_EX);', '<?php mb_strlen("abc","sjis");'])(
-  'unsupported arguments produce the unsupported-feature message: %s',
-  (source) => {
-    expect(run(source)).toMatchObject({
-      kind: 'executed',
-      uncaughtException: expect.stringContaining('この採点環境では使えません。'),
-    });
-  }
-);
+test.each([
+  '<?php file_put_contents("a.txt","x",FILE_APPEND|LOCK_EX);',
+  '<?php mb_strlen("abc","sjis");',
+  '<?php echo defined("PHP_OS") ? "y" : "n";',
+  '<?php echo defined("SEEK_SET") ? "y" : "n";',
+  '<?php echo constant("PHP_OS");',
+])('unsupported arguments produce the unsupported-feature message: %s', (source) => {
+  expect(run(source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('この採点環境では使えません。'),
+  });
+});
 
 test('unrelated array temporaries do not invalidate scalar-grid garbage caches', () => {
   const execution = run(
@@ -5344,6 +5347,11 @@ test('a returned local becomes a GC root before the other locals are freed', () 
       '<?php class A { public $s; function __destruct() { echo "dA", spl_object_id($this), ";"; } } class Q { public $s; } function f() { $o0 = new Q; $o1 = new A; $o3 = new A; $o3->s = $o3; $o0->s = $o3; $o4 = new A; $o4->s = $o4; return $o1; } $v = f(); unset($v); echo gc_collect_cycles();'
     )
   ).toMatchObject({ kind: 'executed', stdout: 'dA2;dA4;dA3;2' });
+  expect(
+    run(
+      '<?php class A { public $s; function __destruct() { echo "d", spl_object_id($this), ";"; } } function f() { $a = new A; $a->s = [$a]; $b = new A; $b->s = $b; $r = [$b]; return $r; } $v = f(); unset($v); echo gc_collect_cycles();'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'd2;d1;3' });
   expect(
     run(
       '<?php class D { function __destruct() { throw new Exception("x"); } } class K { public $s; function __destruct() { echo "k", spl_object_id($this), ";"; } function m() { $d = new D; } } $a = new K; $a->s = $a; $b = new K; $b->s = $b; try { $a->m(); } catch (Exception $e) {} unset($b); unset($a); echo gc_collect_cycles();'

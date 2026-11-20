@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 596 -- Keeps core built-ins with their shared interpreter helpers.
+// code-gauge-allow-file fileNcss 600 -- Keeps core built-ins with their shared interpreter helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { arrayObjectProperty } from './arrayObjectProperties';
 import { byteAt, lower, untilNul } from './bytes';
@@ -32,7 +32,7 @@ import {
 } from './errors';
 import { traceLine } from './exceptions';
 import { collectGarbage } from './garbage';
-import { cast, cloneObject, deprecatedConstant, iterate } from './interp';
+import { cast, cloneObject, deprecatedConstant, iterate, rejectUnsupportedConstant } from './interp';
 import { isCtypeSpace } from './libLocale';
 import {
   defineAlias,
@@ -284,7 +284,9 @@ defineFunction('defined(string $constant_name): bool', ({ args }) => {
     classConstant(cls, constName, scope);
     return true;
   }
-  return rt().constants.has(constantKey(name));
+  if (rt().constants.has(constantKey(name))) return true;
+  rejectUnsupportedConstant(name);
+  return false;
 });
 defineFunction('constant(string $name): mixed', ({ args }) => {
   const name = (args[0] as string).replace(/^\\/, '');
@@ -296,8 +298,9 @@ defineFunction('constant(string $name): mixed', ({ args }) => {
     return classConstant(cls, name.slice(separator + 2), rt().frame.scope, className);
   }
   const value = rt().constants.get(constantKey(name));
-  if (value === undefined) throwError('Error', `Undefined constant "${name}"`);
-  return deprecatedConstant(name, value);
+  if (value !== undefined) return deprecatedConstant(name, value);
+  rejectUnsupportedConstant(name);
+  throwError('Error', `Undefined constant "${name}"`);
 });
 
 function constantClass(name: string): PhpClass | undefined {

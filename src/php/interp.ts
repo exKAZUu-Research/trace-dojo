@@ -933,20 +933,20 @@ const ENVIRONMENT_CONSTANTS = new Set([
 
 function readConstant(name: string, fallback: string | undefined): Value {
   const runtime = rt();
-  const global = fallback ?? name;
-  if (ENVIRONMENT_CONSTANTS.has(global) && !runtime.constants.has(constantKey(name))) {
-    throw new UnsupportedFeatureError(`実行環境の情報（${global}）`);
-  }
   const value = runtime.constants.get(constantKey(name));
   if (value !== undefined) return deprecatedConstant(name, value);
   if (fallback !== undefined) {
     const global = runtime.constants.get(constantKey(fallback));
     if (global !== undefined) return deprecatedConstant(fallback, global);
   }
-  if (builtinNames.constants.includes(global)) {
-    throw new UnsupportedFeatureError(`実行環境の機能（${global}）`);
-  }
+  rejectUnsupportedConstant(fallback ?? name);
   throwError('Error', `Undefined constant "${name}"`);
+}
+
+/** Rejects a global constant the program has not defined that PHP provides but this environment does not. */
+export function rejectUnsupportedConstant(name: string): void {
+  if (ENVIRONMENT_CONSTANTS.has(name)) throw new UnsupportedFeatureError(`実行環境の情報（${name}）`);
+  if (builtinNames.constants.includes(name)) throw new UnsupportedFeatureError(`実行環境の機能（${name}）`);
 }
 
 /** Returns a constant's value after the deprecation PHP reports when a program reads a deprecated builtin one. */

@@ -13,8 +13,7 @@ import {
   withCleanupExceptions,
   withPendingException,
 } from './errors';
-import { collectGarbage, releaseDropped } from './garbage';
-import { recordGcRoot } from './gcRoots';
+import { recordPossibleRoot, releaseDropped } from './garbage';
 import { decodeLiteral } from './literals';
 import { share } from './places';
 import {
@@ -916,7 +915,7 @@ function releaseFrame(
     }
     holders.push(returned);
     // PHP's return of a variable moves its value out and buffers it as a possible root before freeing the other locals.
-    if (frame.returnedLocal?.v === returned) bufferEarlyRoot(runtime, returned);
+    if (frame.returnedLocal?.v === returned) recordPossibleRoot(runtime, returned);
     try {
       releaseFrameValues(runtime, frame, fromNative, pending);
     } catch (error) {
@@ -925,13 +924,6 @@ function releaseFrame(
   } finally {
     releaseThis(runtime, frame);
   }
-}
-
-/** Buffers a moved-out return value as a possible root now, ahead of any root that freeing the locals adds. */
-function bufferEarlyRoot(runtime: Runtime, value: PhpObject | PhpArray): void {
-  if (value instanceof PhpObject && runtime.isCollectableObject(value))
-    recordGcRoot(runtime, value, () => collectGarbage(runtime, true));
-  else runtime.pendingGcRoots.add(value);
 }
 
 /** Buffers `$this` as a possible root after the locals, as PHP's leave helper releases it after freeing them. */

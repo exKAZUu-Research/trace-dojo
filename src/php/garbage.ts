@@ -377,7 +377,6 @@ function countAfterDestruction(
  * destroyed from the dropped values outward: its destructor runs, then what it holds is released in order, then its
  * handle returns to the free list. Objects on a cycle stay, as reference counting cannot free them.
  */
-// code-gauge-allow functionCognitiveComplexity 22 -- Flushes pending GC root candidates after scoped release.
 export function releaseDropped(
   runtime: Runtime,
   dropped: unknown[],
@@ -398,19 +397,19 @@ export function releaseDropped(
   const candidates = [...runtime.pendingGcRoots];
   runtime.pendingGcRoots.clear();
   let roots: Set<unknown> | undefined;
-  for (const value of candidates) {
-    if (value instanceof PhpObject) {
-      if (!runtime.isCollectableObject(value)) continue;
-    } else if (value instanceof PhpArray) {
-      if (value.uncollectable || runtime.separatedArrays.delete(value)) continue;
-      roots ??= ownershipRoots(runtime);
-      if (!ownedReachable(value, roots, runtime, undefined, undefined, true)) {
-        runtime.gcRoots.delete(value);
-        continue;
-      }
-    } else continue;
-    recordGcRoot(runtime, value, () => collectGarbage(runtime, true));
-  }
+  for (const value of candidates) recordPossibleRoot(runtime, value, () => (roots ??= ownershipRoots(runtime)));
+}
+
+/** Buffers a value as a possible root when it can still take part in a cycle, as PHP's gc_possible_root does. */
+export function recordPossibleRoot(runtime: Runtime, value: unknown, roots = () => ownershipRoots(runtime)): void {
+  if (value instanceof PhpArray) {
+    if (value.uncollectable || runtime.separatedArrays.delete(value)) return;
+    if (!ownedReachable(value, roots(), runtime, undefined, undefined, true)) {
+      runtime.gcRoots.delete(value);
+      return;
+    }
+  } else if (!(value instanceof PhpObject) || !runtime.isCollectableObject(value)) return;
+  recordGcRoot(runtime, value, () => collectGarbage(runtime, true));
 }
 
 function releaseCollectionDescendants(runtime: Runtime, dropped: unknown[]): PhpObject[] {
