@@ -290,11 +290,7 @@ export class PhpArray {
     const insertAt = entries.findIndex(([existing]) => typeof existing === 'bigint' && existing > key);
     if (insertAt === -1) return this.set(key, value);
     entries.splice(insertAt, 0, [key, value]);
-    this.map.clear();
-    for (const [entryKey, entrySlot] of entries) this.map.set(entryKey, entrySlot);
-    if (value !== null && typeof value === 'object') this.composite = true;
-    this.invalidate();
-    this.order?.replace(this.map.physicalKeys(), true);
+    this.replaceTable(entries, true, undefined, true);
     return value;
   }
 

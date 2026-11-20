@@ -4383,4 +4383,31 @@ echo spl_object_id($x), ',', spl_object_id($y);
 `)
     ).toMatchObject({ kind: 'executed', stdout: expected });
   }
+
+  for (const [value, expected] of [
+    ['new D', 'after;[{},9];drop;'],
+    ['[new D]', 'after;[[{}],9];drop;'],
+  ]) {
+    expect(
+      run(`<?php
+error_reporting(0);
+class D { function __destruct() { echo 'drop;'; } }
+function f() { return ${value}; }
+$a = [];
+set_error_handler(function () use (&$a) { unset($a[0]); $a[] = 9; return true; });
+$a[] =& f();
+restore_error_handler();
+echo 'after;', json_encode($a), ';';
+`)
+    ).toMatchObject({ kind: 'executed', stdout: expected });
+  }
+
+  expect(
+    run(`<?php
+class D { function __destruct() { throw new Exception("from destructor"); } }
+$x = new D;
+set_exception_handler(function($e) { echo "handler: ", $e->getMessage(), "\n"; });
+throw new Exception("first");
+`)
+  ).toMatchObject({ kind: 'executed', stdout: 'handler: first\nhandler: from destructor\n' });
 });

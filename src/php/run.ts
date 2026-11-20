@@ -77,7 +77,6 @@ function guard(runtime: Runtime, run: () => void): string | undefined {
 }
 
 // code-gauge-allow functionCognitiveComplexity 24 -- Dispatches uncaught outcomes before runtime shutdown.
-// code-gauge-allow functionNcss 32 -- Dispatches uncaught outcomes before runtime shutdown.
 function report(runtime: Runtime, error: unknown): string | undefined {
   if (error instanceof ExitSignal) return undefined;
   if (error instanceof UnsupportedFeatureError) {
@@ -86,18 +85,7 @@ function report(runtime: Runtime, error: unknown): string | undefined {
   }
   if (error instanceof PhpThrow) {
     restoreStack(runtime);
-    if (runtime.exceptionHandler !== null) {
-      const handler = runtime.exceptionHandler;
-      runtime.exceptionHandler = null;
-      try {
-        // PHP calls the handler after the program's code has unwound, from no line of it.
-        asInternal(() => callValue(handler, [{ v: error.object }], undefined));
-        return undefined;
-      } catch (error_) {
-        return report(runtime, error_);
-      }
-    }
-    return printUncaught(runtime, error.object);
+    return invokeExceptionHandler(runtime, error.object);
   }
   if (error instanceof HostStackExhaustion) {
     const trace = traceText(error.record ? [error.record] : []);
@@ -116,6 +104,20 @@ function report(runtime: Runtime, error: unknown): string | undefined {
     return dec(message);
   }
   throw error;
+}
+
+function invokeExceptionHandler(runtime: Runtime, object: PhpObject): string | undefined {
+  const handler = runtime.exceptionHandler;
+  if (handler === null) return printUncaught(runtime, object);
+  runtime.exceptionHandler = null;
+  try {
+    // PHP calls the handler after the program's code has unwound, from no line of it.
+    asInternal(() => callValue(handler, [{ v: object }], undefined));
+    runtime.exceptionHandler ??= handler;
+    return undefined;
+  } catch (error_) {
+    return report(runtime, error_);
+  }
 }
 
 function restoreStack(runtime: Runtime): void {
