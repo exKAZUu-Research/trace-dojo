@@ -144,6 +144,29 @@ true true
   });
 });
 
+test('composite collection keys preserve delimiters within strings', () => {
+  const program = rustMain(
+    `    let first = ("a,sb", "c");
+    let second = ("a", "b,sc");
+    let mut map = HashMap::new();
+    map.insert(first, 1);
+    map.insert(second, 2);
+    println!("{} {:?}", map.len(), map.get(&first));
+    println!("{:?} {:?}", map.remove(&first), map.get(&second));
+
+    let mut set = BTreeSet::new();
+    set.insert(vec!["a,sb".to_string(), "c".to_string()]);
+    set.insert(vec!["a".to_string(), "b,sc".to_string()]);
+    println!("{}", set.len());`,
+    'use std::collections::{BTreeSet, HashMap};'
+  );
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '2 Some(1)\nSome(1) Some(2)\n2\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('closures, map keys, slices, and Debug builders run as rustc runs them', () => {
   const program = `use std::collections::HashMap;
 use std::fmt;
