@@ -5,6 +5,7 @@ import {
   unavailableRegExpStatics,
   unavailableWellKnownSymbols,
 } from '../../javascript/unavailableMembers';
+import { assertedExpression, assertionTypes, isErasedTypeSyntax } from '../erasedSyntax';
 import { unsupportedMessage } from '../unsupported';
 import type { Checker } from './checker';
 import type { State } from './flow';
@@ -332,6 +333,10 @@ export class MemberChecker {
   private isNeverCalled(property: TreeNode): boolean {
     const read = property.parent;
     if (isOnlyCompared(read)) return true;
+    for (let ancestor = read; ancestor; ancestor = ancestor.parent) {
+      this.c.budget.spend();
+      if (isErasedTypeSyntax(ancestor.type)) return true;
+    }
     const binding = propertyBinding(property) ?? initializerBinding(read);
     return !!binding && this.isOnlyComparedBinding(binding);
   }
@@ -347,6 +352,11 @@ export class MemberChecker {
     const scope = symbol.scope.kind === 'module' ? this.c.root : (symbol.scope.node ?? this.c.root);
     const visitsOnlyComparisons = (node: TreeNode): boolean => {
       this.c.budget.spend();
+      if (isErasedTypeSyntax(node.type)) return true;
+      if (assertionTypes.has(node.type)) {
+        const expression = assertedExpression(node);
+        return !expression || visitsOnlyComparisons(expression);
+      }
       if (
         !declarations.has(node.id) &&
         isValueName(node, name) &&
@@ -596,7 +606,7 @@ function isGenericKey(index: Type): boolean {
  * that it can never be called afterwards.
  */
 function isOnlyCompared(read: TreeNode | null): boolean {
-  const parent = read && outermostParentheses(read).parent;
+  const parent = read && outermostRuntimeExpression(read).parent;
   if (parent?.type === 'unary_expression')
     return ['typeof', 'void'].includes(parent.childForFieldName('operator')?.text ?? '');
   return (
@@ -605,10 +615,16 @@ function isOnlyCompared(read: TreeNode | null): boolean {
   );
 }
 
-/** The outermost parentheses around an expression, or the expression itself. */
-function outermostParentheses(node: TreeNode): TreeNode {
+function outermostRuntimeExpression(node: TreeNode): TreeNode {
   let expression = node;
-  while (expression.parent?.type === 'parenthesized_expression') expression = expression.parent;
+  for (let parent = expression.parent; parent; parent = parent.parent) {
+    if (
+      parent.type !== 'parenthesized_expression' &&
+      (!assertionTypes.has(parent.type) || assertedExpression(parent)?.id !== expression.id)
+    )
+      break;
+    expression = parent;
+  }
   return expression;
 }
 
@@ -630,7 +646,7 @@ function propertyBinding(property: TreeNode): TreeNode | undefined {
 
 function initializerBinding(read: TreeNode | null): TreeNode | undefined {
   if (!read) return undefined;
-  const initializer = outermostParentheses(read);
+  const initializer = outermostRuntimeExpression(read);
   const declarator = initializer.parent;
   if (declarator?.type !== 'variable_declarator' || declarator.childForFieldName('value')?.id !== initializer.id)
     return undefined;

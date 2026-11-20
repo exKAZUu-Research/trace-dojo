@@ -25,3 +25,16 @@ function inspectVar(fn: () => void) {
   return [typeof direct, extracted === direct];
 }
 console.log(...inspectVar(() => {}));
+function inspectQueried(fn: () => void) {
+  type Method = typeof fn.toString;
+  const { toString: method } = fn;
+  var direct = (fn.toString as Method);
+  type Extracted = typeof method;
+  type Direct = typeof direct;
+  interface Info { fromQuery: typeof direct }
+  function compare(arg: Extracted): boolean {
+    return (method as Extracted) === arg;
+  }
+  return [compare(() => ''), typeof method!, typeof (<Info["fromQuery"]>direct)];
+}
+console.log(...inspectQueried(() => {}));

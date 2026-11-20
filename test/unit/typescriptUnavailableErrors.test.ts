@@ -82,6 +82,7 @@ test.each([
   'const [{ toString: method }] = [fn]; const escaped = { method }; escaped.method.call(fn);',
   'function use({ target: { toString: method } }: { target: () => void }) { return method; } use({ target: fn });',
   'function use(method: () => string) { var method: () => string = fn.toString; arguments[0].call(fn); } use(() => "");',
+  'const { toString: method } = fn; type Method = typeof method; (method as Method).call(fn);',
 ])('rejects conversion through a destructured function method: %s', (use) => {
   const source = `function fn() {} ${use}`;
   expect(executeProgram('typescript', source)).toMatchObject({

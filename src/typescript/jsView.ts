@@ -6,7 +6,13 @@ import { isConstructorDefinition } from '../javascript/programConverter';
 import { Binder } from './checker/binder';
 import { Scope } from './checker/scopes';
 import { isParameterProperty } from './checker/syntax';
-import { erasedStatementTypes } from './erasedSyntax';
+import {
+  assertedExpression,
+  assertionTypes,
+  erasedClassMembers,
+  erasedStatementTypes,
+  erasedTypeNodes,
+} from './erasedSyntax';
 
 /**
  * The type of a synthesized statement that copies a constructor's parameter properties to `this`, which the
@@ -54,20 +60,7 @@ interface Part {
 
 /** Fields that hold only types, which running a program ignores. */
 const typeFields = new Set(['type', 'return_type', 'type_parameters', 'type_arguments']);
-/** Children that only declare types or modifiers that running a program ignores. */
-const typeOnlyNodes = new Set([
-  'type_annotation',
-  'type_parameters',
-  'type_arguments',
-  'accessibility_modifier',
-  'override_modifier',
-  'type_predicate_annotation',
-  'asserts_annotation',
-]);
-/** Expressions that only state a type of the expression they wrap. */
-const assertionTypes = new Set(['as_expression', 'satisfies_expression', 'non_null_expression', 'type_assertion']);
-/** Class members without any effect at run time. */
-const typeMembers = new Set(['method_signature', 'abstract_method_signature', 'index_signature']);
+const erasedModifierNodes = new Set(['accessibility_modifier', 'override_modifier']);
 /** Modifier tokens of members, parameters, and declarators that running a program ignores. */
 const memberModifiers = new Set(['readonly', 'abstract', 'declare', '?', '!', 'override']);
 const modifiedTypes = new Set([
@@ -96,7 +89,7 @@ export function javaScriptViewOf(root: TreeNode, budget: ExecutionBudget): Node 
 }
 
 function view(node: TreeNode, binder: Binder): ViewNode {
-  if (assertionTypes.has(node.type)) return view(assertedExpression(node), binder);
+  if (assertionTypes.has(node.type)) return view(assertedExpression(node) as TreeNode, binder);
   switch (node.type) {
     case 'required_parameter':
     case 'optional_parameter': {
@@ -145,12 +138,6 @@ function unwrappedName(node: TreeNode): TreeNode | undefined {
   return inner.type === 'identifier' ? inner : undefined;
 }
 
-/** The expression an assertion wraps, which follows the type in `<T>x` and precedes it otherwise. */
-function assertedExpression(node: TreeNode): TreeNode {
-  const children = node.namedChildren.filter((child) => child !== null);
-  return (node.type === 'type_assertion' ? children.at(-1) : children[0]) as TreeNode;
-}
-
 function generic(node: TreeNode, type: string, binder: Binder): ViewNode {
   const parts: Part[] = [];
   for (const [index, child] of node.children.entries()) {
@@ -165,7 +152,7 @@ function generic(node: TreeNode, type: string, binder: Binder): ViewNode {
 function isErased(node: TreeNode, type: string, child: TreeNode, fieldName: string | undefined): boolean {
   if ((type === 'program' || type === 'statement_block') && erasedStatementTypes.has(child.type)) return true;
   if (fieldName && typeFields.has(fieldName)) return true;
-  if (typeOnlyNodes.has(child.type)) return true;
+  if (erasedTypeNodes.has(child.type) || erasedModifierNodes.has(child.type)) return true;
   if (node.type === 'field_definition' && child.type === 'readonly') return false;
   if (!child.isNamed && modifiedTypes.has(node.type) && memberModifiers.has(child.type)) return true;
   if (type === 'formal_parameters' && isThisParameter(child)) return true;
@@ -229,7 +216,7 @@ function classBody(node: TreeNode, binder: Binder): ViewNode {
   const parts: Part[] = [];
   const parameterProperties: ViewNode[] = [];
   for (const [index, child] of node.children.entries()) {
-    if (!child || typeMembers.has(child.type) || isTypeOnlyField(child)) continue;
+    if (!child || erasedClassMembers.has(child.type) || isTypeOnlyField(child)) continue;
     const viewed = isConstructorDefinition(child)
       ? constructorWithProperties(child, parameterProperties, binder)
       : view(child, binder);
