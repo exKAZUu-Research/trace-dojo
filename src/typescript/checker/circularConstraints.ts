@@ -7,11 +7,7 @@ import { named } from './syntax';
 import { tupleElementBeyond } from './tupleIndexes';
 import {
   type ConditionalType,
-  emptyObjectType,
   type IndexedAccessType,
-  isIntrinsic,
-  isPatternLiteralType,
-  isPrimitive,
   isPropertyKeyLiteral,
   type Type,
   type TypeParameter,
@@ -79,46 +75,13 @@ export class CircularConstraints {
   private parameterLeadsBack(parameter: TypeParameter, path: Path): boolean {
     if (this.leadsBack(parameter.constraint?.(), path)) return true;
     const declaration = this.declarations?.get(parameter);
-    return !!declaration && this.eagerIntersectionLeadsBack(declaration, path);
+    return this.eagerLeadsBack(declaration, path);
   }
 
-  private eagerIntersectionLeadsBack(declaration: TreeNode, path: Path): boolean {
-    const pending = [declaration];
-    const visited = new Set<Type>();
-    for (let node = pending.pop(); node; node = pending.pop()) {
-      this.c.budget.spend();
-      // The checker resolves a chain of unparenthesized intersections as one expression.
-      const evaluatesIntersection = node.type === 'intersection_type' && node.parent?.type !== 'intersection_type';
-      if (
-        (evaluatesIntersection || node.type === 'generic_type') &&
-        this.eagerTypeLeadsBack(this.c.typeNodes.typeFromNode(node), path, visited)
-      )
-        return true;
-      const children =
-        node.type === 'conditional_type'
-          ? this.c.typeOperators.conditionalConstraintNodes(node)
-          : eagerBoundSyntax.has(node.type)
-            ? named(node)
-            : [];
-      for (const child of children) pending.push(child);
-    }
-    return false;
-  }
-
-  private eagerTypeLeadsBack(root: Type, path: Path, visited: Set<Type>): boolean {
-    const pending = [root];
-    for (let type = pending.pop(); type; type = pending.pop()) {
-      this.c.budget.spend();
-      if (visited.has(type)) continue;
-      visited.add(type);
-      if (type.kind === 'intersection' && type.types.length === 2) {
-        const [left, right] = type.types;
-        const dependency = intersectionConstraintOperand(left, right) ?? intersectionConstraintOperand(right, left);
-        if (dependency && this.leadsBack(dependency, path)) return true;
-      }
-      const children = eagerTypeChildren(type);
-      this.c.budget.spend(children.length);
-      for (const child of children) pending.push(child);
+  private eagerLeadsBack(node: TreeNode | null | undefined, path: Path): boolean {
+    if (!node || !this.declarations) return false;
+    for (const operand of this.c.typeNodes.eagerConstraints.operandsOf(node.id, this.c.budget)) {
+      if (this.leadsBack(operand, path)) return true;
     }
     return false;
   }
@@ -172,7 +135,9 @@ export class CircularConstraints {
     return (
       (type.distributive && this.leadsBack(type.checkType, next)) ||
       this.leadsBack(type.trueType, next) ||
-      this.leadsBack(type.falseType, next)
+      this.eagerLeadsBack(declared.declaration?.childForFieldName('consequence'), next) ||
+      this.leadsBack(type.falseType, next) ||
+      this.eagerLeadsBack(declared.declaration?.childForFieldName('alternative'), next)
     );
   }
 }
@@ -212,54 +177,9 @@ function constraintDeclarations(
     const parameter = c.typeOperators.inferParameterFor(node, name.text);
     if (parameter && !declarations.has(parameter)) declarations.set(parameter, constraint);
   }
-  return declarations;
-}
-
-const eagerBoundSyntax = new Set([
-  'array_type',
-  'generic_type',
-  'intersection_type',
-  'optional_parameter',
-  'optional_type',
-  'parenthesized_type',
-  'readonly_type',
-  'required_parameter',
-  'rest_type',
-  'template_literal_type',
-  'template_type',
-  'tuple_type',
-  'type_annotation',
-  'type_arguments',
-  'union_type',
-]);
-
-function intersectionConstraintOperand(variable: Type, bound: Type): Type | undefined {
-  if (variable.noInfer || (variable.kind !== 'typeParameter' && variable.kind !== 'indexedAccess')) return undefined;
-  if (variable.kind === 'typeParameter' && variable.substitution) return undefined;
-  return isPrimitive(bound) ||
-    bound.kind === 'literal' ||
-    isIntrinsic(bound, 'object') ||
-    bound.id === emptyObjectType.id ||
-    isPatternLiteralType(bound)
-    ? variable
-    : undefined;
-}
-
-function eagerTypeChildren(type: Type): readonly Type[] {
-  switch (type.kind) {
-    case 'intersection':
-    case 'union':
-    case 'templateLiteral': {
-      return type.types;
-    }
-    case 'stringMapping': {
-      return [type.type];
-    }
-    case 'object': {
-      return type.tuple?.elements.map((element) => element.type) ?? type.typeArguments ?? type.aliasArguments ?? [];
-    }
-    default: {
-      return [];
-    }
+  for (const clause of root.descendantsOfType('mapped_type_clause')) {
+    const constraint = clause.childForFieldName('type');
+    if (constraint) declarations.set(c.typeOperators.mappedParameterOf(clause), constraint);
   }
+  return declarations;
 }

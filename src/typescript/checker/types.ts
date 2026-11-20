@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 472 -- Keeps type data, cache keys, and canonical type constructors together.
+// code-gauge-allow-file fileNcss 486 -- Keeps type data, cache keys, and canonical type constructors together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { ExecutionBudget } from '../../interpreter/limits';
@@ -280,6 +280,7 @@ export interface KeyofType {
 export interface ConditionalType {
   kind: 'conditional';
   id: number;
+  declaration?: TreeNode;
   checkType: Type;
   extendsType: Type;
   trueType: Type;
@@ -497,7 +498,7 @@ export function writtenIntersectionOf(types: Type[], c: Checker): Type {
     const member = left === emptyObjectType ? right : right === emptyObjectType ? left : undefined;
     if (member && preservesEmptyObjectIntersection(member)) {
       c.budget.spend(types.length);
-      return { kind: 'intersection', id: newTypeId(), types };
+      return newIntersectionType(types, c);
     }
   }
   return intersectionOf(types, c);
@@ -531,7 +532,28 @@ export function intersectionOf(types: Type[], c: Checker): Type {
   if (union?.kind === 'union') return distributeIntersection(members, union, unionIndex, c);
   const reduced = reducedIntersectionMembers(members);
   if (reduced.length === 1) return reduced[0];
-  return { kind: 'intersection', id: newTypeId(), types: reduced };
+  return newIntersectionType(reduced, c);
+}
+
+function newIntersectionType(types: Type[], c: Checker): IntersectionType {
+  if (types.length === 2) {
+    const [left, right] = types;
+    const dependency = intersectionConstraintOperand(left, right) ?? intersectionConstraintOperand(right, left);
+    if (dependency) c.typeNodes.eagerConstraints.record(dependency);
+  }
+  return { kind: 'intersection', id: newTypeId(), types };
+}
+
+function intersectionConstraintOperand(variable: Type, bound: Type): Type | undefined {
+  if (variable.noInfer || (variable.kind !== 'typeParameter' && variable.kind !== 'indexedAccess')) return undefined;
+  if (variable.kind === 'typeParameter' && variable.substitution) return undefined;
+  return isPrimitive(bound) ||
+    bound.kind === 'literal' ||
+    isIntrinsic(bound, 'object') ||
+    bound.id === emptyObjectType.id ||
+    isPatternLiteralType(bound)
+    ? variable
+    : undefined;
 }
 
 function distributeIntersection(
@@ -703,7 +725,7 @@ function isNullableUnit(type: Type): boolean {
   return isIntrinsic(type, 'null') || isIntrinsic(type, 'undefined');
 }
 
-export function isPatternLiteralType(type: Type): boolean {
+function isPatternLiteralType(type: Type): boolean {
   if (type.kind === 'templateLiteral') return type.types.every(isPatternLiteralPlaceholder);
   return type.kind === 'stringMapping' && isPatternLiteralPlaceholder(type.type);
 }

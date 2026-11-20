@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 782 -- Types literals and their spreads, members, and widening in the same literal context.
+// code-gauge-allow-file fileNcss 785 -- Types literals and their spreads, members, and widening in the same literal context.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExpressionListFlow, tupleArgumentContexts } from './callArity';
@@ -1108,6 +1108,8 @@ export class LiteralChecker {
         for (const member of type.types) pending.push(member);
       } else if (type.kind === 'conditional') {
         pending.push(this.defaultConditionalBound(type));
+      } else if (type.kind === 'typeParameter' || type.kind === 'indexedAccess') {
+        pending.push(this.c.baseConstraint(type));
       } else if (
         type.kind === 'literal' ||
         type.kind === 'keyof' ||

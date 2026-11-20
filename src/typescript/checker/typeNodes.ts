@@ -1,9 +1,10 @@
-// code-gauge-allow-file fileNcss 685 -- Resolves every kind of type syntax a program writes, each needing its own rule.
+// code-gauge-allow-file fileNcss 688 -- Resolves every kind of type syntax a program writes, each needing its own rule.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import { unsupportedMessage } from '../unsupported';
 import type { Checker, Mapper, UnionAlias } from './checker';
+import { EagerTypeConstraints } from './eagerTypeConstraints';
 import { isGenericObjectOrIndexType } from './genericTypes';
 import { IndexedAccessKeys } from './indexedAccessKeys';
 import { addIndexInfo, isPatternKey } from './indexInfos';
@@ -119,6 +120,7 @@ export class TypeNodes {
   private readonly indexedAccessKeys: IndexedAccessKeys;
   readonly interfaceBases: InterfaceBases;
   readonly recursiveAliases: RecursiveAliases;
+  readonly eagerConstraints = new EagerTypeConstraints();
 
   constructor(private readonly c: Checker) {
     this.indexedAccessKeys = new IndexedAccessKeys(c);
@@ -134,7 +136,10 @@ export class TypeNodes {
 
   typeFromNode(node: TreeNode): Type {
     const cached = this.typeNodeCache.get(node.id);
-    if (cached) return cached;
+    if (cached) {
+      this.eagerConstraints.reuse(node.id);
+      return cached;
+    }
     this.c.bindDeferredLibraryType(node);
     this.c.budget.spend();
     if (this.resolutionDepth >= LIMITS.maxCallDepth) throw new ExecutionLimitError('operations');
@@ -142,7 +147,9 @@ export class TypeNodes {
     const defers = deferringTypeNodes.has(node.type);
     if (defers) this.deferredDepth++;
     try {
-      let type = this.c.checkTypeSyntax(node, () => this.computeTypeFromNode(node));
+      let type = this.eagerConstraints.evaluate(node.id, () =>
+        this.c.checkTypeSyntax(node, () => this.computeTypeFromNode(node))
+      );
       // `readonly T[]` is one reference, which the outer node makes.
       if ((defers || node.type === 'generic_type') && node.parent?.type !== 'readonly_type')
         type = this.recursiveAliases.deferred(type);
