@@ -602,9 +602,12 @@ export class Compiler {
           : { kind: 'capture', local, index: outer.captures.indexOf(local) };
       return { res, local, fields: this.capturedFields(expr.body, local) };
     });
-    const byValue = context.captures.map((local) => context.isMove || context.movedCaptures?.includes(local) === true);
+    const byValue = context.captures.map(
+      (local) =>
+        context.isMove || context.movedCaptures?.includes(local) || context.copiedReferenceCaptures?.has(local) || false
+    );
     return (frame) => {
-      const places = captures.map((capture) => this.capturePlace(frame, capture, context));
+      const places = captures.map((capture, index) => this.capturePlace(frame, capture, context, byValue[index]));
       return this.support.makeClosure(compiled, frame, places, byValue);
     };
   }
@@ -613,9 +616,9 @@ export class Compiler {
   private capturePlace(
     frame: Frame,
     { res, local, fields }: { res: PathRes; local: LocalVar; fields: Set<string> | undefined },
-    context: FnContext
+    context: FnContext,
+    byValue: boolean
   ): Place {
-    const byValue = context.isMove || context.movedCaptures?.includes(local);
     let place: Place;
     if (res.kind === 'local') {
       const reborrowed = local.mode === 'refMut' && !context.isMove;

@@ -33,6 +33,7 @@ export interface FnContext {
   closureKind: 'Fn' | 'FnMut' | 'FnOnce';
   /** For a closure, the captured variables it moves out, which it captures by value even without `move`. */
   movedCaptures?: LocalVar[];
+  copiedReferenceCaptures?: Set<LocalVar>;
 }
 
 export type PathRes =

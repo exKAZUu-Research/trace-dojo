@@ -1082,8 +1082,8 @@ export class LoanBuilder {
   // Closures and macros
 
   /** A closure borrows, or moves, the places it captures when it is created, and holds them while it lives. */
-  // code-gauge-allow functionCognitiveComplexity 19 -- Follows rustc's capture modes case by case.
-  // code-gauge-allow functionNcss 35 -- Follows rustc's capture modes case by case.
+  // code-gauge-allow functionCognitiveComplexity 22 -- Follows rustc's capture modes case by case.
+  // code-gauge-allow functionNcss 40 -- Follows rustc's capture modes case by case.
   private closure(expr: Extract<Expr, { kind: 'closure' }>): Value {
     const info = this.annotations.closures.get(expr);
     const type = expr.ty && normalize(shallow(expr.ty));
@@ -1100,11 +1100,16 @@ export class LoanBuilder {
     const accesses: Access[] = [];
     const gens: Loan[] = [];
     const captured: Place[] = [];
+    context.copiedReferenceCaptures = new Set();
     for (const local of context.captures) {
       const root = this.varOf(local);
       uses.push(root);
-      const byValue = context.isMove || context.movedCaptures?.includes(local);
-      for (const proj of this.capturedPlaces(expr.body, local)) {
+      const projections = this.capturedPlaces(expr.body, local);
+      const captureType = normalize(shallow(local.type));
+      const copiesRef = captureType.kind === 'ref' && !captureType.mutable && projections.every((p) => p[0] === '*');
+      if (copiesRef) context.copiedReferenceCaptures.add(local);
+      const byValue = copiesRef || context.isMove || context.movedCaptures?.includes(local);
+      for (const proj of projections) {
         // A closure that takes a capture by value takes the reference a deref goes through.
         const cut = proj.indexOf('*');
         const place: Place = { root, proj: byValue && cut !== -1 ? proj.slice(0, cut) : proj };
@@ -1171,12 +1176,36 @@ export class LoanBuilder {
   private capturedPlaces(body: Expr, local: LocalVar): string[][] {
     const places: string[][] = [];
     const visit = (expr: Expr): void => {
+      if (expr.kind === 'methodCall') {
+        const base = this.fieldChain(expr.receiver, local);
+        if (base) {
+          const method = this.annotations.methods.get(expr);
+          const receiver = method?.receiver;
+          const proj = [...base, ...derefSteps(receiver?.derefs)];
+          if (receiver?.autoref === 'none' && method?.fn.selfMode === 'ref') proj.push('*');
+          places.push(proj);
+          for (const [index, arg] of expr.args.entries()) visitArg(arg, method?.fn.paramTypes[index + 1]);
+          return;
+        }
+      } else if (expr.kind === 'call') {
+        const res = this.annotations.paths.get(expr.callee);
+        visit(expr.callee);
+        for (const [index, arg] of expr.args.entries())
+          visitArg(arg, res?.kind === 'fn' ? res.fn.paramTypes[index] : undefined);
+        return;
+      }
       const proj = this.fieldChain(expr, local);
       if (proj) {
         places.push(proj);
+        if (expr.kind === 'index') visit(expr.index);
         return;
       }
       forEachDirect(expr, visit);
+    };
+    const visitArg = (arg: Expr, type: Type | undefined): void => {
+      const base = this.fieldChain(arg, local);
+      if (base && isReference(arg.ty) && isReference(type)) places.push([...base, '*']);
+      else visit(arg);
     };
     visit(body);
     if (places.length === 0 || places.some((proj) => proj.length === 0)) return [[]];
@@ -1189,9 +1218,14 @@ export class LoanBuilder {
       const res = this.annotations.paths.get(expr);
       return res?.kind === 'capture' && res.local === local ? [] : undefined;
     }
-    if (expr.kind !== 'field') return undefined;
+    if (expr.kind === 'unary' && expr.op === '*') {
+      const base = this.fieldChain(expr.operand, local);
+      return base && [...base, isReference(expr.operand.ty) ? '*' : '#'];
+    }
+    if (expr.kind !== 'field' && expr.kind !== 'index') return undefined;
     const base = this.fieldChain(expr.operand, local);
     if (!base) return undefined;
+    if (expr.kind === 'index') return [...base, ...derefSteps(this.annotations.indexes.get(expr)?.derefs), '[]'];
     return [...base, ...derefSteps(this.annotations.fields.get(expr)?.derefs), expr.name];
   }
 

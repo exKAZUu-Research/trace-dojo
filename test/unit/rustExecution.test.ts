@@ -1526,6 +1526,32 @@ fn main() {
   });
 });
 
+test('borrows through shared references in Rust closures after their bindings end', () => {
+  const program = `fn main() {
+    let v = vec![1];
+    let saved: Box<dyn Fn() -> i32>;
+    { let x = &v[0]; saved = Box::new(|| *x); }
+    println!("{}", saved());
+    let text = String::from("hello");
+    let length: Box<dyn Fn() -> usize>;
+    { let x = &text; length = Box::new(|| x.len()); }
+    println!("{}", length());
+    let coords = (1, 2);
+    let x_value: Box<dyn Fn() -> i32>;
+    { let x = &coords; x_value = Box::new(|| x.0); }
+    println!("{}", x_value());
+    let values = [1, 2];
+    let first: Box<dyn Fn() -> i32>;
+    { let x = &values; first = Box::new(|| x[0]); }
+    println!("{}", first());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '1\n5\n1\n1\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {
