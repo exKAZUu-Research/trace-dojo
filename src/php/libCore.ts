@@ -5,7 +5,7 @@ import { byteAt, lower, untilNul } from './bytes';
 import { callableClosureName, callValue, checkCallable, consumeInvokedResult, explainCallable } from './callables';
 import { type ArgValue, backtraceLimit, callStack, frameArguments, setCallableExplainer } from './calls';
 import * as classesModule from './classes';
-import { classConstant, findClass, findMemberClass, requireClassScope } from './classes';
+import { classConstant, findDeclaredClass, findMemberClass, requireClassScope } from './classes';
 import { debugType, getType, isNumericString, normalizeKeyString, toBool, valueName } from './conversions';
 import {
   deprecated,
@@ -498,36 +498,36 @@ function memberQueryClass(target: Value, operation: 'method_exists' | 'property_
 }
 
 defineFunction('class_exists(string $class, bool $autoload = true): bool', ({ args }) => {
-  const cls = findClass(args[0] as string);
+  const cls = findDeclaredClass(args[0] as string);
   return cls?.kind === 'class' || cls?.kind === 'enum';
 });
 defineFunction(
   'interface_exists(string $interface, bool $autoload = true): bool',
-  ({ args }) => findClass(args[0] as string)?.kind === 'interface'
+  ({ args }) => findDeclaredClass(args[0] as string)?.kind === 'interface'
 );
 defineFunction(
   'trait_exists(string $trait, bool $autoload = true): bool',
-  ({ args }) => findClass(args[0] as string)?.kind === 'trait'
+  ({ args }) => findDeclaredClass(args[0] as string)?.kind === 'trait'
 );
 defineFunction(
   'enum_exists(string $enum, bool $autoload = true): bool',
-  ({ args }) => findClass(args[0] as string)?.kind === 'enum'
+  ({ args }) => findDeclaredClass(args[0] as string)?.kind === 'enum'
 );
 defineFunction('is_a(mixed $object_or_class, string $class, bool $allow_string = false): bool', ({ args }) => {
   const [value, className, allowString] = args;
-  const target = findClass(className as string);
+  const target = findDeclaredClass(className as string);
   if (!target) return false;
   if (value instanceof PhpObject) return value.cls.isSubclassOf(target);
-  if (typeof value === 'string' && allowString === true) return findClass(value)?.isSubclassOf(target) ?? false;
+  if (typeof value === 'string' && allowString === true) return findMemberClass(value)?.isSubclassOf(target) ?? false;
   return false;
 });
 defineFunction('is_subclass_of(mixed $object_or_class, string $class, bool $allow_string = true): bool', ({ args }) => {
   const [value, className, allowString = true] = args;
-  const target = findClass(className as string);
+  const target = findDeclaredClass(className as string);
   if (!target) return false;
   let cls;
   if (value instanceof PhpObject) cls = value.cls;
-  else if (typeof value === 'string' && allowString === true) cls = findClass(value);
+  else if (typeof value === 'string' && allowString === true) cls = findMemberClass(value);
   return cls !== undefined && cls !== target && cls.isSubclassOf(target);
 });
 for (const [name, related] of [

@@ -73,8 +73,16 @@ export function requireClass(name: string): PhpClass {
 export function findMemberClass(name: string): PhpClass | undefined {
   const unsupported = unsupportedClasses.get(lower(name.replace(/^\\/, '')));
   if (unsupported) throw new UnsupportedFeatureError(unsupported);
+  return findDeclaredClass(name);
+}
+
+/**
+ * Finds a class, rejecting a builtin class PHP declares but this environment lacks; a stub of an unsupported class is
+ * found, as it is declared.
+ */
+export function findDeclaredClass(name: string): PhpClass | undefined {
   const cls = findClass(name);
-  if (!cls && builtinNames.classes.some((builtin) => lower(builtin) === lower(name)))
+  if (!cls && builtinNames.classes.some((builtin) => lower(builtin) === lower(name.replace(/^\\/, ''))))
     throw new UnsupportedFeatureError(`PHP の組み込みクラス（${name}）`);
   return cls;
 }
