@@ -549,12 +549,10 @@ function plainFunctionBase(fn: JsFunction, name: string, constructor: string | u
     : `${base} ${constructor}`;
 }
 
-/** The stored stack header that Node.js shows for an uncaught error. */
+/** Node.js formats uncaught errors from the saved stack using the same name rules as util.inspect. */
 export function uncaughtErrorHeadline(runtime: Runtime, error: JsObject): string {
   const constructor = constructorName(runtime, error);
-  if (constructor === 'Object') return inspect(runtime, error);
-  if (constructor === undefined) return errorText(runtime, error, constructor);
-  return headlineOf(runtime, error) ?? objectToString(runtime, error);
+  return constructor === 'Object' ? inspect(runtime, error) : errorText(runtime, error, constructor);
 }
 
 /**

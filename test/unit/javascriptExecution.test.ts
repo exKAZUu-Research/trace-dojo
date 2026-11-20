@@ -204,7 +204,32 @@ test.each([
     "throw Object.setPrototypeOf(new Error('x'), null);",
     '[Error: null prototype]: x',
   ],
-  ['a custom error', "class Oops extends Error {}\nthrow new Oops('bad');", 'Error: bad'],
+  ['a custom error', "class Oops extends Error {}\nthrow new Oops('bad');", 'Oops [Error]: bad'],
+  [
+    'a named TypeError subclass',
+    "class MyTypeError extends TypeError {}\nthrow new MyTypeError('special');",
+    'MyTypeError: special',
+  ],
+  [
+    'an error with a custom error name',
+    "const error = new Error('bad');\nerror.name = 'MyError';\nthrow error;",
+    'Error [MyError]: bad',
+  ],
+  [
+    'an error with a name that does not end in Error',
+    "const error = new Error('bad');\nerror.name = 'Zed';\nthrow error;",
+    'Zed: bad',
+  ],
+  [
+    'an error with a numeric name',
+    "const error = new Error('bad');\nerror.name = 42;\nthrow error;",
+    '42 [Error]: bad',
+  ],
+  [
+    'an error renamed after its first inspection',
+    "const error = new Error('bad');\nconsole.log(error);\nerror.name = 'MyError';\nerror.message = 'new';\nthrow error;",
+    'Error: bad',
+  ],
   ['infinite recursion', 'function f() { return f(); }\nf();', 'RangeError: Maximum call stack size exceeded'],
   ['constructing a generator', 'function* f() {}\nnew f();', 'TypeError: f is not a constructor'],
   [
