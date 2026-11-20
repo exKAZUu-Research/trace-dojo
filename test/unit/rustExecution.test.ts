@@ -2803,3 +2803,14 @@ test('uses empty slices after a Rust inclusive range is exhausted', () => {
     println!("{:?}", "é".get(within_char));`);
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '[] Some("")\nNone\n' });
 });
+
+test('uses Rust heterogeneous equality through nested containers and generic bounds', () => {
+  const program = `fn equal<T: PartialEq<U>, U>(a: &T, b: &U) -> bool { a == b }
+fn main() {
+    let values = vec![vec![1, 2], vec![3, 4]];
+    assert_eq!(values, [[1, 2], [3, 4]]);
+    println!("{}", equal(&values, &vec![[1, 2], [3, 4]]));
+    println!("{}", vec![vec![String::from("a")]] == [["a"]]);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'true\ntrue\n' });
+});

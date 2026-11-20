@@ -250,13 +250,17 @@ function dynImplies(solver: TraitSolver, t: Type & { kind: 'dyn' }, trait: strin
 
 function comparison(goal: Goal): Answer {
   const { solver, t, ref, name, all } = goal;
-  // The standard library's types compare with their own type, as the default `Rhs` makes them.
   const partial = name === 'PartialEq' || name === 'PartialOrd';
   if (partial && ref.args[0]) {
     const rhs = normalize(shallow(ref.args[0]));
     if (t.kind === 'ref' && rhs.kind === 'ref') {
       if (name === 'PartialOrd' && t.mutable && !rhs.mutable) return 'no';
       return solver.implements(t.target, { trait: ref.trait, args: [rhs.target] });
+    }
+    if (name === 'PartialEq') {
+      if (stringsCompare(t, rhs)) return 'yes';
+      const sequence = sequenceEquality(solver, ref, t, rhs);
+      if (sequence !== undefined) return sequence;
     }
     return solver.unifier.tryUnify(t, ref.args[0])
       ? builtinImplements(solver, t, { trait: ref.trait, args: [] })
@@ -269,6 +273,61 @@ function comparison(goal: Goal): Answer {
   if (t.kind === 'array' || t.kind === 'slice') return all([t.elem]);
   if (t.kind === 'adt') return comparisonAdt(goal, t);
   return 'no';
+}
+
+function sequenceEquality(solver: TraitSolver, ref: TraitRef, left: Type, right: Type): Answer | undefined {
+  const a = sequenceSide(left);
+  const b = sequenceSide(right);
+  if (!a || !b || !SEQUENCE_EQ.has(`${a.kind}=${b.kind}`)) return undefined;
+  if (a.len !== undefined && b.len !== undefined && a.len !== b.len) return 'no';
+  return solver.implements(a.elem, { trait: ref.trait, args: [b.elem] });
+}
+
+/** The pairs of sequence kinds std implements `PartialEq` between, with `&` for a shared or mutable reference. */
+const SEQUENCE_EQ = new Set([
+  'array=array',
+  'array=slice',
+  'array=&slice',
+  'slice=array',
+  '&slice=array',
+  'slice=slice',
+  'slice=Vec',
+  '&slice=Vec',
+  'Vec=Vec',
+  'Vec=&slice',
+  'Vec=slice',
+  'Vec=array',
+  'Vec=&array',
+  'VecDeque=VecDeque',
+  'VecDeque=Vec',
+  'VecDeque=&slice',
+  'VecDeque=array',
+  'VecDeque=&array',
+]);
+
+/** A side of a sequence comparison: its kind as `SEQUENCE_EQ` names it, its element type, and an array's length. */
+function sequenceSide(type: Type): { kind: string; elem: Type; len?: number } | undefined {
+  const isRef = type.kind === 'ref';
+  const t = isRef ? normalize(shallow(type.target)) : type;
+  const prefix = isRef ? '&' : '';
+  if (t.kind === 'array') return { kind: `${prefix}array`, elem: t.elem, len: isRef ? undefined : t.len };
+  if (t.kind === 'slice') return { kind: `${prefix}slice`, elem: t.elem };
+  if (isRef || t.kind !== 'adt') return undefined;
+  if (t.def.builtin === 'Vec' || t.def.builtin === 'VecDeque') return { kind: t.def.builtin, elem: t.args[0] };
+  return undefined;
+}
+
+function stringsCompare(left: Type, right: Type): boolean {
+  const a = stringKind(left);
+  const b = stringKind(right);
+  return a !== undefined && b !== undefined && a !== b && (a === 'String' || b === 'String');
+}
+
+function stringKind(t: Type): 'String' | 'str' | '&str' | undefined {
+  if (t.kind === 'adt' && t.def.builtin === 'String') return 'String';
+  if (t.kind === 'str') return 'str';
+  if (t.kind === 'ref' && normalize(shallow(t.target)).kind === 'str') return '&str';
+  return undefined;
 }
 
 function comparisonAdt(goal: Goal, t: AdtType): Answer {

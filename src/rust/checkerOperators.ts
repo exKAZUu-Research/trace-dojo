@@ -198,12 +198,10 @@ export function checkComparisonOperands(c: Checker, left: Expr, right: Expr, op:
   const rightType = c.expr(right, guides ? leftType : undefined);
   const r = normalize(shallow(rightType));
   const isEquality = op === '==' || op === '!=';
-  // Strings compare with each other (`String == &str`), and sequences with each other (`Vec == [T; N]`).
-  if (isEquality && (stringsCompare(l, r) || sequencesCompare(c, l, r, span))) return [leftType, rightType];
   const trait = { trait: c.program.traitDef(isEquality ? 'PartialEq' : 'PartialOrd'), args: [rightType] };
   const answer = c.solver.implements(l, trait);
   if (answer === 'yes') return [leftType, rightType];
-  if (answer === 'unknown' && l.kind === 'var' && l.v.literal) {
+  if (answer === 'unknown') {
     c.require(l, trait, span);
     return [leftType, rightType];
   }
@@ -222,28 +220,6 @@ export function checkComparisonOperands(c: Checker, left: Expr, right: Expr, op:
   }
   c.require(leftType, trait, span);
   return [leftType, rightType];
-}
-
-/**
- * Whether two sequence types compare with `==` by std's `PartialEq` impls between `Vec`, `VecDeque`, arrays, and
- * slices, each side under the same number of references or under the one reference an impl names (`Vec<T> == &[U]`).
- */
-function sequencesCompare(c: Checker, left: Type, right: Type, span: Span): boolean {
-  let l = normalize(shallow(left));
-  let r = normalize(shallow(right));
-  while (l.kind === 'ref' && r.kind === 'ref') {
-    l = normalize(shallow(l.target));
-    r = normalize(shallow(r.target));
-  }
-  const a = sequenceSide(l);
-  const b = sequenceSide(r);
-  if (!a || !b || !SEQUENCE_EQ.has(`${a.kind}=${b.kind}`)) return false;
-  if (a.len !== undefined && b.len !== undefined && a.len !== b.len) return false;
-  if (stringsCompare(a.elem, b.elem)) return true;
-  const trait = { trait: c.program.traitDef('PartialEq'), args: [b.elem] };
-  if (c.solver.implements(a.elem, trait) === 'no') return false;
-  c.require(a.elem, trait, span);
-  return true;
 }
 
 export function checkAssign(c: Checker, expr: Extract<Expr, { kind: 'assign' }>): Type {
@@ -366,41 +342,6 @@ function isNumber(t: Type): boolean {
   return t.kind === 'int' || t.kind === 'float' || (t.kind === 'var' && t.v.literal !== undefined);
 }
 
-/** The elements of a sequence type (an array, a slice, or a `Vec`) and the references around it. */
-/** The pairs of sequence kinds std implements `PartialEq` between, with `&` for a shared or mutable reference. */
-const SEQUENCE_EQ = new Set([
-  'array=array',
-  'array=slice',
-  'array=&slice',
-  'slice=array',
-  '&slice=array',
-  'slice=slice',
-  'slice=Vec',
-  '&slice=Vec',
-  'Vec=Vec',
-  'Vec=&slice',
-  'Vec=slice',
-  'Vec=array',
-  'Vec=&array',
-  'VecDeque=VecDeque',
-  'VecDeque=Vec',
-  'VecDeque=&slice',
-  'VecDeque=array',
-  'VecDeque=&array',
-]);
-
-/** A side of a sequence comparison: its kind as `SEQUENCE_EQ` names it, its element type, and an array's length. */
-function sequenceSide(type: Type): { kind: string; elem: Type; len?: number } | undefined {
-  const isRef = type.kind === 'ref';
-  const t = isRef ? normalize(shallow(type.target)) : type;
-  const prefix = isRef ? '&' : '';
-  if (t.kind === 'array') return { kind: `${prefix}array`, elem: t.elem, len: isRef ? undefined : t.len };
-  if (t.kind === 'slice') return { kind: `${prefix}slice`, elem: t.elem };
-  if (isRef || t.kind !== 'adt') return undefined;
-  if (t.def.builtin === 'Vec' || t.def.builtin === 'VecDeque') return { kind: t.def.builtin, elem: t.args[0] };
-  return undefined;
-}
-
 /** Whether the type is a sequence that compares with other sequence types, under any number of references. */
 function isSequence(type: Type): boolean {
   const t = stripAll(type);
@@ -421,29 +362,6 @@ function isStrLike(type: Type): boolean {
   let t = normalize(shallow(type));
   while (t.kind === 'ref') t = normalize(shallow(t.target));
   return t.kind === 'str';
-}
-
-/**
- * Whether `left == right` holds by std's `PartialEq` impls between different string types: `String` with `str` and
- * `&str` both ways, and the same under equal numbers of references (`impl PartialEq<&B> for &A`).
- */
-function stringsCompare(left: Type, right: Type): boolean {
-  let l = normalize(shallow(left));
-  let r = normalize(shallow(right));
-  while (l.kind === 'ref' && r.kind === 'ref') {
-    l = normalize(shallow(l.target));
-    r = normalize(shallow(r.target));
-  }
-  const a = stringKind(l);
-  const b = stringKind(r);
-  return a !== undefined && b !== undefined && a !== b && (a === 'String' || b === 'String');
-}
-
-function stringKind(t: Type): 'String' | 'str' | '&str' | undefined {
-  if (t.kind === 'adt' && t.def.builtin === 'String') return 'String';
-  if (t.kind === 'str') return 'str';
-  if (t.kind === 'ref' && normalize(shallow(t.target)).kind === 'str') return '&str';
-  return undefined;
 }
 
 function isIntegral(type: Type): boolean {
