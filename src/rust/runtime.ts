@@ -236,7 +236,11 @@ function pushChildren(item: object, stack: unknown[]): void {
     pushAll(stack, item.entries.values());
   } else if (item instanceof DynValue) {
     stack.push(item.value);
-  } else if (item instanceof FnValue || item instanceof IterValue) {
+  } else if (item instanceof IterValue) {
+    pushAll(stack, item.roots);
+    if (item.stateRoots) pushAll(stack, item.stateRoots());
+    if (item.peeked) pushAll(stack, item.peeked);
+  } else if (item instanceof FnValue) {
     pushAll(stack, item.roots);
   } else if (item instanceof EntryValue) {
     stack.push(item.map, item.key);

@@ -2778,3 +2778,17 @@ fn main() {
 }`;
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', finalTurtles: [] });
 });
+
+test('retains Rust turtles still owned by iterator adapters', () => {
+  const program = `fn main() {
+    let first = vec![Turtle::new(1, 1)];
+    let second = vec![Turtle::new(2, 2)];
+    let chained = first.into_iter().chain(second);
+    let mut flattened = vec![vec![Turtle::new(3, 3), Turtle::new(4, 4)]].into_iter().flatten();
+    { let drawn = flattened.next(); }
+}`;
+  const result = executeProgram('rust', program);
+  expect(result.kind === 'executed' && result.finalTurtles.map(({ x }) => x).toSorted((a, b) => a - b)).toEqual([
+    1, 2, 4,
+  ]);
+});

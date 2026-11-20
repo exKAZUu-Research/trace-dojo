@@ -256,10 +256,9 @@ function adapter<S extends object>(
   folds = false
 ): IterValue {
   const { next, nextBack, remaining } = parts(source, state);
-  const roots: unknown[] = [source, state];
-  if ('callback' in state && state.callback instanceof IteratorCallback) roots.push(state.callback.value);
-  if ('place' in state) roots.push(state.place);
-  const iter = new IterValue(next, nextBack, remaining, roots);
+  const iter = new IterValue(next, nextBack, remaining, [source]);
+  iter.stateRoots = () =>
+    Object.values(state).map((value: unknown) => (value instanceof IteratorCallback ? value.value : value));
   // An adapter whose `fold` folds its source (`Map`, `Filter`, ...) takes its source's elements as it folds.
   if (folds && source.foldNext) iter.foldNext = parts(foldingView(source), state).next;
   iter.fork = (cloneItem) => adapter(forkIter(source, cloneItem), forkState(state, cloneItem), parts, forkState, folds);

@@ -175,6 +175,8 @@ export class IterValue {
     readonly roots: unknown[] = []
   ) {}
 
+  stateRoots?: () => Iterable<unknown>;
+
   /** Elements pushed back by `peekable`. */
   peeked: Next[] | undefined;
 
