@@ -1,5 +1,6 @@
 import { TURTLE_METHOD_NAMES, type TurtleState } from '../../interpreter/turtleWorld';
 import { byteArray } from '../bytes';
+import { utf8 } from '../literals';
 import type { Frame } from '../runtime';
 import { BOOL, ClassInfo, INT, type Type, VOID } from '../types';
 import { CObject } from '../values';
@@ -20,7 +21,7 @@ export function turtleClass(runtimeError: () => ClassInfo, stringType: () => Typ
   cls.library = { kind: 'Turtle', args: [], size: 8, align: 8 };
   const create = (frame: Frame, x: unknown, y: unknown, color: string | undefined): CObject => {
     const created = frame.runtime.world.create(Number(x ?? 0), Number(y ?? 0), color);
-    if ('error' in created) return throwLibrary(frame, runtimeError(), created.error);
+    if ('error' in created) return throwLibrary(frame, runtimeError(), utf8(created.error));
     const object = new CObject(cls, []);
     object.turtle = created;
     return object;
@@ -29,7 +30,7 @@ export function turtleClass(runtimeError: () => ClassInfo, stringType: () => Typ
     nativeConstructor(cls, [], (_args, { frame }) => create(frame, 0, 0, undefined)),
     nativeConstructor(cls, [INT, INT], ([x, y], { frame }) => create(frame, x, y, undefined)),
     nativeConstructor(cls, [INT, INT, CONST_CHAR_PTR], ([x, y, color], { frame }) =>
-      create(frame, x, y, readCString(color as Ptr, frame.runtime))
+      create(frame, x, y, latin1ToText({ bytes: readCString(color as Ptr, frame.runtime) }))
     ),
     nativeConstructor(cls, [INT, INT, constRef(stringType())], ([x, y, color], { frame }) =>
       create(frame, x, y, latin1ToText((color as Ptr).read() as unknown as { bytes: string }))

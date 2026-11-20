@@ -466,6 +466,19 @@ int main() {
   }
 );
 
+test.each(['"赤"', 'std::string("赤")'])('reports an invalid non-ASCII Turtle color %s readably', (color) => {
+  const program = `#include <iostream>
+#include <string>
+int main() {
+  try {
+    Turtle t(0, 0, ${color});
+  } catch (const std::exception& e) {
+    std::cout << e.what();
+  }
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', stdout: 'Invalid color: 赤' });
+});
+
 test('charges the storage of the message buffer that what() creates', () => {
   const program = `#include <stdexcept>
 #include <string>
