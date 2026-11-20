@@ -218,6 +218,7 @@ export class Runtime implements TracedRuntime<Frame> {
   private tryBoundary = 0;
   /** Describes an exception that no handler catches, as libc++abi does when it terminates the program. */
   describeUncaught: (frame: Frame, exception: CppException) => string = () => 'libc++abi: terminating';
+  onAbort: () => void = () => {};
   /** Receives `main`'s frame when its body completes, before its variables end their lifetime. */
   onMainEnd: ((frame: Frame) => void) | undefined;
 
@@ -252,7 +253,13 @@ export class Runtime implements TracedRuntime<Frame> {
         throw exception;
       }
     }
-    throw new ProgramAbort(this.describeUncaught(frame, exception));
+    throw this.abort(this.describeUncaught(frame, exception));
+  }
+
+  /** Ends the program at an uncaught exception, which stops without unwinding, after `onAbort` sees that state. */
+  abort(message: string): ProgramAbort {
+    this.onAbort();
+    return new ProgramAbort(message);
   }
 
   beginHandler(exception: CppException): void {

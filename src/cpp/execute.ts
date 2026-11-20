@@ -55,10 +55,20 @@ export function runProgram(runtime: Runtime, program: CompiledProgram, onEnd?: (
   };
   // The turtles that main's variables reach when its body completes are the final ones, as in Java, before the
   // variables' lifetimes end and their turtles leave the board.
+  const captureTurtles = (): TurtleTrace[] => {
+    if (!finalTurtles) {
+      runtime.collectGarbage();
+      finalTurtles = runtime.world.turtleTraces();
+    }
+    return finalTurtles;
+  };
   runtime.onMainEnd = (frame) => {
     onEnd?.(frame);
-    runtime.collectGarbage();
-    finalTurtles = runtime.world.turtleTraces();
+    captureTurtles();
+  };
+  // An uncaught exception stops the program at the throw, so the turtles that state reaches are the final ones.
+  runtime.onAbort = () => {
+    captureTurtles();
   };
   try {
     runStartup(runtime, program);
@@ -69,11 +79,12 @@ export function runProgram(runtime: Runtime, program: CompiledProgram, onEnd?: (
     if (error instanceof ProgramExit) uncaughtException = exitWithStatics(runtime);
   }
   runtime.flushOutput();
-  if (!finalTurtles) {
-    runtime.collectGarbage();
-    finalTurtles = runtime.world.turtleTraces();
-  }
-  return { finalBoard: runtime.world.boardText(), finalTurtles, uncaughtException, ...runtime.io.output() };
+  return {
+    finalBoard: runtime.world.boardText(),
+    finalTurtles: captureTurtles(),
+    uncaughtException,
+    ...runtime.io.output(),
+  };
 }
 
 /** Initializes the globals and runs main in the startup frame. */
@@ -84,12 +95,9 @@ function runStartup(runtime: Runtime, program: CompiledProgram): void {
     program.initializeGlobals(startup);
     const args = program.mainTakesArguments ? mainArguments() : [];
     invoke(startup, program.main, args, undefined, undefined as unknown as number);
-  } catch (error) {
-    // An uncaught exception ends the program without unwinding, so its final state still holds the active calls.
-    if (!(error instanceof ProgramAbort)) runtime.popFrame();
-    throw error;
+  } finally {
+    runtime.popFrame();
   }
-  runtime.popFrame();
 }
 
 function mainArguments(): unknown[] {

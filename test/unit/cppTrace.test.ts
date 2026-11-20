@@ -313,6 +313,41 @@ int main() {
   }
 });
 
+test.each([
+  ['int fail() { throw 1; }\nstruct S { Turtle t; int n = fail(); };\nint main() { S s{}; }', [{ x: 0, y: 0 }]],
+  [
+    'struct X { Turtle t; X(int n) : t(n, 0) { if (n == 1) throw 1; } };\nint main() { X a[]{0, 1}; }',
+    [
+      { x: 0, y: 0 },
+      { x: 1, y: 0 },
+    ],
+  ],
+])('keeps the turtles of partially constructed objects at an uncaught throw in %s', (program, turtles) => {
+  const expected = turtles.map((turtle) => ({ ...turtle, color: '#', dir: 'N' }));
+  expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', finalTurtles: expected });
+  expect(traceProgram('cpp', program, program)).toMatchObject({ finalTurtles: expected });
+});
+
+test.each([
+  ['std::unordered_set<int>', 'a.insert(i)'],
+  ['std::unordered_map<int, int>', 'a.emplace(i, i)'],
+])('meters the nodes a %s swap rewrites', (type, insert) => {
+  const program = `#include <unordered_map>
+#include <unordered_set>
+int main() {
+  ${type} a, b;
+  for (int i = 0; i < 2048; ++i) ${insert};
+  for (int i = 0; i < 200; ++i) a.swap(b);
+}`;
+  const previous = LIMITS.maxOperations;
+  LIMITS.maxOperations = 25_000;
+  try {
+    expect(executeProgram('cpp', program)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  } finally {
+    LIMITS.maxOperations = previous;
+  }
+});
+
 test('reads only the required prefix of a C substring search needle', () => {
   const program = `#include <cstring>
 #include <string>

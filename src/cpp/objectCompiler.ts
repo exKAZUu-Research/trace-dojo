@@ -9,7 +9,7 @@ import {
   implicitConversion,
   Rank,
 } from './conversions';
-import { CppException, CppRuntimeError, ProgramAbort } from './errors';
+import { CppException, CppRuntimeError } from './errors';
 import {
   type Expr,
   hasConstantObject,
@@ -89,14 +89,13 @@ export function invoke(
     if (fn.isNoexcept) runtime.withoutOuterHandlers(() => compiled.body(callee));
     else compiled.body(callee);
     if (!isCallerDestroying) destroyParameters(callee, fn, args);
+    return callee.returnValue;
   } catch (error) {
     if (!isCallerDestroying && error instanceof CppException) destroyParameters(callee, fn, args);
-    // An uncaught exception ends the program without unwinding, so its final state still holds this call's locals.
-    if (!(error instanceof ProgramAbort)) runtime.popFrame();
     throw error;
+  } finally {
+    runtime.popFrame();
   }
-  runtime.popFrame();
-  return callee.returnValue;
 }
 
 function parameterLocation(type: Type, value: Value): Ptr | Box {

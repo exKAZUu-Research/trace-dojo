@@ -2,7 +2,7 @@ import { promote } from '../c/types';
 import { isBaseAccessible } from './access';
 import { AUTO, hasAuto } from './compilerBase';
 import { permitsQualificationConversion } from './conversions';
-import { CppException, CppRuntimeError, ProgramAbort } from './errors';
+import { CppException, CppRuntimeError } from './errors';
 import {
   type ConstantLocation,
   constantLocationOf,
@@ -1353,7 +1353,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     if (!valueNode) {
       return (frame) => {
         const current = frame.runtime.handling.at(-1);
-        if (!current) throw new ProgramAbort('libc++abi: terminating');
+        if (!current) throw frame.runtime.abort('libc++abi: terminating');
         return frame.runtime.throwException(frame, current);
       };
     }
