@@ -826,6 +826,26 @@ int main() {
   });
 });
 
+test('casts stream base pointers and references back to the complete stream', () => {
+  const program = `#include <iostream>
+#include <sstream>
+int main() {
+  std::stringstream both;
+  std::ostream* output = &both;
+  std::istream* input = &both;
+  std::ostringstream text;
+  std::ostream& base = text;
+  static_cast<std::ostringstream&>(base) << "ok";
+  std::cout << (static_cast<std::stringstream*>(output) == &both)
+            << (static_cast<std::stringstream*>(input) == &both) << ' ' << text.str();
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '11 ok',
+    uncaughtException: undefined,
+  });
+});
+
 test('uses the same one-past addresses for stream objects and their terminal bases', () => {
   const program = `#include <iostream>
 #include <sstream>

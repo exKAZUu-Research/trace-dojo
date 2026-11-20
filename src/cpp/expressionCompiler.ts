@@ -78,7 +78,7 @@ import {
   Liveness,
   NULL_PTR,
   Ptr,
-  type Store,
+  Store,
   type Value,
 } from './values';
 
@@ -1586,14 +1586,14 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const downcast = to.isDerivedFrom(from);
     if (kind === 'static') this.checkBaseConversion(downcast ? to : from, downcast ? from : to, row);
     if (!downcast) return { ...classLocation(expr, to), type };
+    const virtualBase = virtualBaseBetween(to, from);
+    if (virtualBase)
+      return this.error(
+        row,
+        `${from.name} から ${to.name} へは、仮想基底クラス ${virtualBase.name} を経由するのでキャストできません。`
+      );
     const { run, temporaryBinding } = expr;
-    const checked = (location: Ptr): Ptr => {
-      if (location.isNull) return location;
-      const object = location.read();
-      if (!(object instanceof CObject) || !object.cls.isDerivedFrom(to))
-        throw new CppRuntimeError('custom', `${to.name} 型ではないオブジェクトをキャストしました。`);
-      return location.forClass(to);
-    };
+    const checked = (location: Ptr): Ptr => (location.isNull ? location : downcastLocation(location, to));
     return {
       ...expr,
       type,
@@ -2219,5 +2219,25 @@ function comparePointers(operator: string, a: Ptr, b: Ptr): number {
     default: {
       return order >= 0 ? 1 : 0;
     }
+  }
+}
+
+/** The location of the complete `to` object that `location` designates a base of, stopping when it is no such object. */
+function downcastLocation(location: Ptr, to: ClassInfo): Ptr {
+  const object = location.read();
+  let view: Ptr | undefined;
+  if (object instanceof CObject) view = object.cls.isDerivedFrom(to) ? location.forClass(to) : undefined;
+  else if (object instanceof Store) view = object.classView(location, to);
+  if (!view) throw new CppRuntimeError('custom', `${to.name} 型ではないオブジェクトをキャストしました。`);
+  return view;
+}
+
+/** The virtual base of `derived` that `base` is or belongs to, which makes a downcast from `base` ill-formed. */
+function virtualBaseBetween(derived: ClassInfo, base: ClassInfo): ClassInfo | undefined {
+  for (const parent of [derived.base, ...(derived.library?.additionalPublicBases ?? [])]) {
+    if (!parent?.isDerivedFrom(base)) continue;
+    if (parent.library?.isVirtualBase) return parent;
+    const found = virtualBaseBetween(parent, base);
+    if (found) return found;
   }
 }

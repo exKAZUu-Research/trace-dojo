@@ -1174,3 +1174,18 @@ test.each([
   const execution = executeProgram('cpp', program.includes('int main') ? program : `${program}\nint main() {}`);
   expect(execution).toMatchObject({ kind: 'compileError', diagnostics: [{ row }] });
 });
+
+test.each([
+  'std::ios* p = &std::cout; static_cast<std::ostream*>(p);',
+  'std::ios_base* p = &std::cout; static_cast<std::ostream*>(p);',
+  'std::stringstream s; std::ios& r = s; static_cast<std::stringstream&>(r);',
+  'std::ios* p = &std::cout; (std::ostream*)p;',
+])('rejects a stream downcast through the virtual base std::ios in %s', (body) => {
+  const program = `#include <iostream>
+#include <sstream>
+int main() { ${body} }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 2, message: expect.stringContaining('仮想基底クラス std::ios') }],
+  });
+});

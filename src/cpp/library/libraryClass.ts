@@ -29,6 +29,8 @@ interface LibraryMembers {
   readonly scalarValue?: { type: ArithmeticType; read: (value: Value) => number | bigint };
   readonly aggregateArray?: { type: ArrayType; make: (storage: ArrayStore) => Value };
   readonly additionalPublicBases?: readonly ClassInfo[];
+  /** Whether the classes deriving from this one inherit it virtually, as libc++'s streams inherit `std::ios`. */
+  readonly isVirtualBase?: boolean;
   /**
    * Compiles an operator whose operands include an object of this class, such as `s + t`, `*it`, or `cout << x`, or
    * gives undefined when the class has no such operator for these operands. Unary operators get one operand;

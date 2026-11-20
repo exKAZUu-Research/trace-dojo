@@ -79,6 +79,14 @@ type StreamKind = Exclude<keyof typeof STREAM_SIZES, 'ios_base' | 'ios'>;
 
 type StreamBaseKind = 'ios_base' | 'ios' | 'ostream' | 'istream';
 
+const STREAM_BASES: Record<StreamKind, readonly StreamBaseKind[]> = {
+  ostream: ['ios_base', 'ios'],
+  istream: ['ios_base', 'ios'],
+  ostringstream: ['ios_base', 'ios', 'ostream'],
+  istringstream: ['ios_base', 'ios', 'istream'],
+  stringstream: ['ios_base', 'ios', 'ostream', 'istream'],
+};
+
 const IOS_OFFSETS: Record<StreamKind, number> = {
   ostream: 8,
   istream: 16,
@@ -114,8 +122,9 @@ export class StreamValue extends Store {
     const kind = cls.library?.kind;
     const complete = location.store instanceof StreamBaseStorage ? location.store.complete : location;
     if (kind === this.kind) return complete;
-    if (kind !== 'ios_base' && kind !== 'ios' && kind !== 'ostream' && kind !== 'istream') return;
-    let view = this.bases.get(kind);
+    const base = STREAM_BASES[this.kind].find((candidate) => candidate === kind);
+    if (!base) return;
+    let view = this.bases.get(base);
     if (!view) {
       const offset =
         kind === 'ios' || kind === 'ios_base'
@@ -124,7 +133,7 @@ export class StreamValue extends Store {
             ? 16
             : 0;
       view = new StreamBaseStorage(complete, this, offset, sizeOf(classType(cls))).location(0);
-      this.bases.set(kind, view);
+      this.bases.set(base, view);
     }
     return view;
   }
@@ -262,6 +271,7 @@ export class Streams {
   constructor(private readonly library: Library) {
     this.iosBase = this.iosBaseClass();
     this.ios = streamInfo('ios', this.iosBase, {
+      isVirtualBase: true,
       operator: (compiler, operator, operands, row) =>
         this.operator(compiler, this.ios, false, false, operator, operands, row),
     });
@@ -696,7 +706,7 @@ export class Streams {
 function streamInfo(
   kind: keyof typeof STREAM_SIZES,
   base?: ClassInfo,
-  members?: Pick<LibraryClass, 'operator' | 'additionalPublicBases'>
+  members?: Pick<LibraryClass, 'operator' | 'additionalPublicBases' | 'isVirtualBase'>
 ): ClassInfo {
   const cls = new ClassInfo(`std::${kind}`, 'class');
   cls.isComplete = true;
