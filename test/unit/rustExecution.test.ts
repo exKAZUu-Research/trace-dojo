@@ -2128,6 +2128,32 @@ struct Tuple<'a, T>(&'a T);`;
   expect(executeProgram('rust', `${declarations}\n${valid}`)).toMatchObject({ kind: 'executed', stdout: 'a\nb\n' });
 });
 
+test('validates Rust trait objects in declarations and through supertraits', () => {
+  for (const declarations of [
+    'trait Object { fn generic<T>(&self, value: T); } struct Holder { object: Box<dyn Object> }',
+    'trait Base { fn clone_like(&self) -> Self; } trait Middle: Base {} trait Leaf: Middle {} fn take(_: &dyn Leaf) {}',
+    'trait Object { fn compare(&self, other: &Self); } fn take(_: Box<dyn Object>) {}',
+    'trait Object: Sized { fn get(&self) -> i32; } struct Holder { object: Box<dyn Object> }',
+  ]) {
+    expect(executeProgram('rust', `${declarations}\nfn main() {}`)).toMatchObject({ kind: 'compileError' });
+  }
+  const valid = `trait Object {
+    fn excluded<T>(&self, value: T) where Self: Sized;
+    fn count(&self) -> i32;
+}
+struct Holder { object: Box<dyn Object> }
+struct Counter;
+impl Object for Counter {
+    fn excluded<T>(&self, _: T) {}
+    fn count(&self) -> i32 { 7 }
+}
+fn main() {
+    let value = Holder { object: Box::new(Counter) };
+    println!("{}", value.object.count());
+}`;
+  expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: '7\n' });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

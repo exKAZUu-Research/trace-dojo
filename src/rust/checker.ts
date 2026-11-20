@@ -120,6 +120,7 @@ export class Checker {
   }
 
   checkProgram(): void {
+    this.checkDeclaredTypes(0, 0, 0, 0);
     this.checkDerivedTraits();
     this.checkImplCoherence();
     for (const impl of this.program.impls) this.checkImplSignatures(impl);
@@ -128,6 +129,28 @@ export class Checker {
     this.checkConsts();
     for (const check of this.coverageChecks) check();
     this.checkMain();
+  }
+
+  private checkDeclaredTypes(firstAdt: number, firstFn: number, firstConst: number, firstImpl: number): void {
+    for (const def of this.program.adts.slice(firstAdt)) {
+      if ((def.module as Module | undefined)?.isStd) continue;
+      for (const variant of def.variants) {
+        for (const field of variant.fields) this.checkWrittenType(field.type, field.span);
+      }
+    }
+    for (const fn of this.program.fns.slice(firstFn)) {
+      if ((fn.module as Module).isStd || !fn.ast) continue;
+      for (const [index, type] of fn.paramTypes.entries()) this.checkWrittenType(type, fn.ast.params[index].span);
+      this.checkWrittenType(fn.ret, fn.ast.ret?.span ?? fn.ast.span);
+    }
+    for (const def of this.program.consts.slice(firstConst)) {
+      if (!def.module.isStd) this.checkWrittenType(def.type, def.ast.span);
+    }
+    for (const impl of this.program.impls.slice(firstImpl)) {
+      if ((impl.module as Module).isStd) continue;
+      this.checkWrittenType(impl.selfType, impl.span);
+      for (const type of impl.trait?.args ?? []) this.checkWrittenType(type, impl.span);
+    }
   }
 
   private checkDerivedTraits(first = 0): void {
@@ -914,9 +937,13 @@ export class Checker {
     const collector = new ItemCollector(this.program);
     const pendingBefore = this.program.pendingFns.length;
     const firstAdt = this.program.adts.length;
+    const firstFn = this.program.fns.length;
+    const firstConst = this.program.consts.length;
+    const firstImpl = this.program.impls.length;
     collector.collectItems(block.items, module);
     collector.finish();
     resolveImports(module);
+    this.checkDeclaredTypes(firstAdt, firstFn, firstConst, firstImpl);
     this.checkDerivedTraits(firstAdt);
     this.nestedFns.push(...this.program.pendingFns.splice(pendingBefore));
     this.body.module = module;
@@ -1090,16 +1117,21 @@ function fundamentalTarget(type: Type): Type {
 }
 
 /** A trait of the program can be a trait object unless a method returns `Self` or takes type parameters. */
-function checkDynCompatible(trait: TraitDef, span: Span): void {
+function checkDynCompatible(trait: TraitDef, span: Span, checked = new Set<TraitDef>()): void {
+  if (checked.has(trait)) return;
+  checked.add(trait);
+  if (trait.builtin === 'Sized') compileError(span, 'Sized を必要とするトレイトは、dyn にできません。');
   if ((trait.module as Module | undefined)?.isStd) return;
+  for (const bound of trait.supertraits) checkDynCompatible(bound.trait, span, checked);
   for (const fn of trait.methods.values()) {
-    if (fn.extraBounds?.some(({ param }) => param === trait.self)) continue;
+    if (fn.extraBounds?.some(({ param, bound }) => param === trait.self && bound.trait.builtin === 'Sized')) continue;
     const returnsSelf = mentionsParam(fn.ret, trait.self);
+    const takesSelf = fn.paramTypes.some((param) => mentionsParam(param, trait.self));
     const generic = fn.params.length > fn.parentParamCount;
-    if (returnsSelf || generic || !fn.selfMode) {
+    if (returnsSelf || takesSelf || generic || !fn.selfMode) {
       compileError(
         span,
-        `トレイト ${trait.name} はメソッド ${fn.name} が${returnsSelf ? ' Self を返す' : generic ? '型引数を取る' : ' self を取らない'}ので、dyn ${trait.name} にできません。`
+        `トレイト ${trait.name} はメソッド ${fn.name} が${returnsSelf || takesSelf ? ' Self を使う' : generic ? '型引数を取る' : ' self を取らない'}ので、dyn ${trait.name} にできません。`
       );
     }
   }
