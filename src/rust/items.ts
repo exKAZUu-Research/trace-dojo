@@ -26,6 +26,7 @@ import {
   type BuiltinAdt,
   CHAR,
   type ConstDef,
+  defaultTraitArguments,
   F32,
   F64,
   type FnDef,
@@ -1231,21 +1232,13 @@ export function resolveTraitPath(path: PathAst, scope: TypeScope, self?: Type): 
 }
 
 function traitArguments(def: TraitDef, written: TypeAst[], scope: TypeScope, span: Span, self?: Type): Type[] {
-  const args = written.map((arg) => lowerType(arg, scope));
-  const subst = new Map<TypeParam, Type>();
-  if (self) subst.set(def.self, self);
-  for (const [index, param] of def.params.entries()) {
-    if (index < args.length) {
-      subst.set(param, args[index]);
-      continue;
-    }
-    if (!param.defaultType) break;
-    const arg = substitute(param.defaultType, subst);
-    if (arg.kind === 'param' && arg.param === def.self && !self) return args;
-    args.push(arg);
-    subst.set(param, arg);
-  }
-  if (args.length !== def.params.length) {
+  const args = defaultTraitArguments(
+    def,
+    written.map((arg) => lowerType(arg, scope)),
+    self
+  );
+  const omitted = def.params[args.length]?.defaultType;
+  if (args.length !== def.params.length && (self || omitted?.kind !== 'param' || omitted.param !== def.self)) {
     compileError(span, `トレイト ${def.name} の型引数の数が合いません（${def.params.length} 個です）。`);
   }
   return args;

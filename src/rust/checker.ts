@@ -18,6 +18,7 @@ import {
   type AdtDef,
   childTypes,
   type ConstDef,
+  defaultTraitArguments,
   type FloatName,
   type FnDef,
   freshVar,
@@ -38,6 +39,7 @@ import {
   type Subst,
   substitute,
   substituteTraitRef,
+  supertraitsOf,
   type TraitDef,
   type TraitRef,
   traitRefToString,
@@ -218,13 +220,13 @@ export class Checker {
     for (const [index, arg] of args.entries()) {
       arg.param.bounds.push(...def.params[index].bounds.map((bound) => substituteTraitRef(bound, subst)), {
         trait,
-        args: [],
+        args: defaultTraitArguments(trait, [], arg),
       });
     }
     const self: Type = { kind: 'adt', def, args };
-    subst.set(trait.self, self);
-    for (const bound of trait.supertraits) {
-      if (this.solver.implements(self, substituteTraitRef(bound, subst)) === 'no') {
+    const derived = { trait, args: defaultTraitArguments(trait, [], self) };
+    for (const bound of supertraitsOf(derived, self)) {
+      if (this.solver.implements(self, bound) === 'no') {
         compileError(def.span, `#[derive(${trait.name})] には、${bound.trait.name} の実装が必要です。`);
       }
     }

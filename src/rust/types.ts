@@ -417,6 +417,22 @@ export function substituteTraitRef(ref: TraitRef, subst: Subst): TraitRef {
   return mapTraitRef(ref, (type) => substitute(type, subst));
 }
 
+export function defaultTraitArguments(trait: TraitDef, written: Type[], self?: Type): Type[] {
+  const args = [...written];
+  const subst = new Map<TypeParam, Type>();
+  if (self) subst.set(trait.self, self);
+  for (const [index, param] of trait.params.entries()) {
+    if (index >= args.length) {
+      if (!param.defaultType) break;
+      const type = substitute(param.defaultType, subst);
+      if (!self && type.kind === 'param' && type.param === trait.self) break;
+      args.push(type);
+    }
+    subst.set(param, args[index]);
+  }
+  return args;
+}
+
 export function supertraitsOf(ref: TraitRef, self?: Type): TraitRef[] {
   const subst = new Map(ref.trait.params.map((param, index) => [param, ref.args[index]]));
   if (self) subst.set(ref.trait.self, self);

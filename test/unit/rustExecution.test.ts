@@ -1182,6 +1182,24 @@ test.each([
   });
 });
 
+test('derives PartialOrd and Ord with the default right-hand type', () => {
+  const program = `#[derive(Debug, Clone, PartialEq, PartialOrd)]
+enum Maybe<T> { Value(T), Absent }
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct Key { value: i32 }
+fn main() {
+    println!("{} {}", Maybe::Value(1.0) < Maybe::Value(2.0), Maybe::Value(3) < Maybe::Absent);
+    let mut keys = [Key { value: 3 }, Key { value: 2 }];
+    keys.sort();
+    println!("{:?}", keys);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'true true\n[Key { value: 2 }, Key { value: 3 }]\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {
