@@ -5,7 +5,7 @@ import { byteAt, lower, untilNul } from './bytes';
 import { callableClosureName, callValue, checkCallable, consumeInvokedResult, explainCallable } from './callables';
 import { type ArgValue, backtraceLimit, callStack, frameArguments, setCallableExplainer } from './calls';
 import * as classesModule from './classes';
-import { classConstant, findClass, requireClassScope } from './classes';
+import { classConstant, findClass, findMemberClass, requireClassScope } from './classes';
 import { debugType, getType, isNumericString, normalizeKeyString, toBool, valueName } from './conversions';
 import {
   deprecated,
@@ -313,7 +313,7 @@ function constantClass(name: string): PhpClass | undefined {
     if (!parent) throwError('Error', 'Cannot access "parent" when current class scope has no parent');
     return parent;
   }
-  return findClass(name);
+  return findMemberClass(name);
 }
 
 defineFunction('function_exists(string $function): bool', ({ args }) =>
@@ -489,7 +489,7 @@ defineFunction('property_exists(mixed $object_or_class, string $property): bool'
 });
 
 function memberQueryClass(target: Value, operation: 'method_exists' | 'property_exists'): PhpClass | undefined {
-  if (typeof target === 'string') return findClass(target);
+  if (typeof target === 'string') return findMemberClass(target);
   if (target instanceof PhpObject && !target.isResource) return target.cls;
   throwError(
     'TypeError',
@@ -612,7 +612,7 @@ defineFunction('iterator_apply(Traversable $iterator, callable $callback, ?array
 
 function classOf(value: Value): PhpClass | undefined {
   if (value instanceof PhpObject) return value.cls;
-  if (typeof value === 'string') return findClass(value);
+  if (typeof value === 'string') return findMemberClass(value);
   return undefined;
 }
 

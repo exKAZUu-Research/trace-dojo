@@ -64,14 +64,18 @@ export function findClass(name: string): PhpClass | undefined {
 }
 
 export function requireClass(name: string): PhpClass {
+  const cls = findMemberClass(name);
+  if (!cls) throwError('Error', `Class "${name}" not found`);
+  return cls;
+}
+
+/** Finds a class whose members a program uses, rejecting a builtin class this environment does not implement. */
+export function findMemberClass(name: string): PhpClass | undefined {
   const unsupported = unsupportedClasses.get(lower(name.replace(/^\\/, '')));
   if (unsupported) throw new UnsupportedFeatureError(unsupported);
   const cls = findClass(name);
-  if (!cls) {
-    if (builtinNames.classes.some((builtin) => lower(builtin) === lower(name)))
-      throw new UnsupportedFeatureError(`PHP の組み込みクラス（${name}）`);
-    throwError('Error', `Class "${name}" not found`);
-  }
+  if (!cls && builtinNames.classes.some((builtin) => lower(builtin) === lower(name)))
+    throw new UnsupportedFeatureError(`PHP の組み込みクラス（${name}）`);
   return cls;
 }
 

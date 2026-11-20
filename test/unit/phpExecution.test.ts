@@ -958,6 +958,9 @@ test.each([
   '<?php echo defined("PHP_OS") ? "y" : "n";',
   '<?php echo defined("SEEK_SET") ? "y" : "n";',
   '<?php echo constant("PHP_OS");',
+  '<?php echo defined("DateTimeInterface::ATOM") ? "y" : "n";',
+  '<?php var_dump(method_exists("DateTime", "format"));',
+  '<?php echo constant("DateTime::ATOM");',
 ])('unsupported arguments produce the unsupported-feature message: %s', (source) => {
   expect(run(source)).toMatchObject({
     kind: 'executed',
