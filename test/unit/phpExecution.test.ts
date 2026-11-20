@@ -5088,6 +5088,14 @@ try { array_map('f', [1, 2], [3, 4]); } catch (Throwable $e) { echo 'caught;'; }
 
   expect(
     run(
+      `<?php $x = 1; function &f($n) { global $x; if ($n === 3) throw new Exception('stop'); return $x; }
+try { array_map('f', [1, 2, 3]); } catch (Throwable $e) {}
+$a = [&$x]; $b = $a; $a[0] = 2; echo json_encode([$a, $b, $x]);`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '[[2],[2],2]' });
+
+  expect(
+    run(
       `<?php $a = ['x' => 1, 2, 3, 4]; array_shift($a); mt_srand(42); $out = []; for ($i = 0; $i < 10; $i++) $out[] = array_rand($a); echo json_encode([$out, mt_rand()]);`
     )
   ).toMatchObject({ kind: 'executed', stdout: '[[1,2,1,1,2,1,0,1,1,1],986229477]' });

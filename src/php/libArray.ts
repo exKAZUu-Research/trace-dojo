@@ -862,7 +862,6 @@ function withMappedResult(runtime: Runtime, result: PhpArray, run: (holders: unk
   } finally {
     runtime.held.pop();
     if (failed) {
-      for (const slot of result.map.ownedSlots()) if (slot instanceof Ref) slot.rc--;
       withPendingException(runtime, failure instanceof PhpThrow ? failure : undefined, () =>
         runtime.release([result], true, true)
       );
