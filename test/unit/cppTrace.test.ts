@@ -230,6 +230,24 @@ int main() {
   });
 });
 
+test.each([
+  ['const char* p = nullptr;', 'std::strstr(p, "")', 'nullptr（NULL）のポインタの指す先を読み書きしました。'],
+  [
+    'const char* p; { char a[] = "x"; p = a; }',
+    'std::strstr(p, "")',
+    '有効期間が終わった変数（またはオブジェクト）を読み書きしました。',
+  ],
+  ['const char* p = nullptr;', 'std::strncmp(p, "x", 0)', 'nullptr（NULL）のポインタの指す先を読み書きしました。'],
+  ['char* p = nullptr;', 'std::strncpy(p, "x", 0)', 'nullptr（NULL）のポインタの指す先を読み書きしました。'],
+])('rejects an invalid C string argument before a trivial result in %s %s', (setup, call, message) => {
+  const program = `#include <cstring>
+int main() {
+  ${setup}
+  ${call};
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', uncaughtException: message });
+});
+
 test('reads only the required prefix of a C substring search needle', () => {
   const program = `#include <cstring>
 #include <string>
@@ -387,12 +405,16 @@ test.each([
   ['std::map<std::vector<int>, int> s; std::vector<int> k(512, 1); s[k] = 1;', 's[k];'],
   ['std::unordered_map<int, std::vector<int>> a, b; a[1].resize(512, 1); b[1].resize(512, 1);', 'a == b;'],
   ['std::priority_queue<std::vector<int>> q; std::vector<int> k(512, 1); q.push(k);', 'q.push(k);'],
+  ["std::unordered_set<std::string> a, b; std::string k(8000, 'x'); a.insert(k); b.insert(k);", 'a == b;'],
+  ['std::unordered_set<std::string> a{"y"}; std::string k(24000, \'x\');', 'a.count(k);'],
 ])('meters key comparisons in %s %s', (setup, statement) => {
   const program = `#include <functional>
 #include <map>
 #include <queue>
 #include <set>
+#include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 int main() {
   ${setup}

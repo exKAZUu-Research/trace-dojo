@@ -226,6 +226,8 @@ function copyCString(
   source: Ptr,
   { count, append }: { count?: number; append?: boolean } = {}
 ): Ptr {
+  target.target();
+  source.target();
   if (count === 0) return target;
   const prefix = append ? readCString(target, frame.runtime).length : 0;
   const bytes = readCString(source, frame.runtime, count);
@@ -277,6 +279,8 @@ function characterArgument(input: unknown): number {
 }
 
 function compareCStrings(frame: Frame, a: Ptr, b: Ptr, count: number): number {
+  a.target();
+  b.target();
   if (count === 0) return 0;
   const left = characterReader(frame, a);
   const right = characterReader(frame, b);
@@ -298,14 +302,15 @@ function findCharacter(frame: Frame, text: Ptr, character: number): Ptr {
 }
 
 function findSubstring(frame: Frame, text: Ptr, needle: Ptr): Ptr {
+  const read = characterReader(frame, text);
+  const start = read(0);
   const readNeedle = characterReader(frame, needle);
   const first = readNeedle(0);
   if (first === 0) return text;
   const pattern = [first];
   const fallback = [0];
-  const read = characterReader(frame, text);
   for (let index = 0, matched = 0; ; index++) {
-    const byte = read(index);
+    const byte = index === 0 ? start : read(index);
     if (byte === 0) return NULL_PTR;
     matched = advanceMatch(pattern, fallback, matched, byte);
     if (matched === pattern.length) {

@@ -497,12 +497,7 @@ export function lessThan(type: Type): ValueComparison<number> | undefined {
   if (type.kind !== 'class') return undefined;
   const library = type.cls.library;
   if (library?.kind === 'string') {
-    return (a, b, frame) => {
-      const x = (a as StringValue).bytes;
-      const y = (b as StringValue).bytes;
-      if (frame) return compareBytes(frame, x, y);
-      return x < y ? -1 : x > y ? 1 : 0;
-    };
+    return (a, b, frame) => compareBytes(frame, (a as StringValue).bytes, (b as StringValue).bytes);
   }
   if (library?.kind === 'pair') {
     const [first, second] = type.cls.fields;
@@ -523,7 +518,7 @@ export function lessThan(type: Type): ValueComparison<number> | undefined {
       const x = (a as SequenceValue).items;
       const y = (b as SequenceValue).items;
       for (let index = 0; index < Math.min(x.length, y.length); index++) {
-        frame?.runtime.spend();
+        frame.runtime.spend();
         const order = element(x[index], y[index], frame);
         if (order !== 0) return order;
       }

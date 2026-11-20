@@ -161,8 +161,10 @@ const rotate = (value: bigint, shift: number): bigint =>
 
 const shiftMix = (value: bigint): bigint => value ^ (value >> 47n);
 
+type KeyHash = (value: Value, frame: Frame) => bigint;
+
 /** `std::hash<T>` of a key, as libc++ computes it for the key types it hashes. */
-function hashOf(type: Type): ((value: Value) => bigint) | undefined {
+function hashOf(type: Type): KeyHash | undefined {
   if (type.kind === 'int') return (value) => BigInt.asUintN(64, BigInt(value as number | bigint));
   if (type.kind === 'float') {
     return (value) => {
@@ -178,12 +180,16 @@ function hashOf(type: Type): ((value: Value) => bigint) | undefined {
     };
   }
   if (type.kind === 'class' && type.cls.library?.kind === 'string')
-    return (value) => hashBytes((value as StringValue).bytes);
+    return (value, frame) => {
+      const { bytes } = value as StringValue;
+      frame.runtime.spend(Math.ceil(bytes.length / 64));
+      return hashBytes(bytes);
+    };
   if (type.kind === 'pointer') return pointerHasher();
   return undefined;
 }
 
-function pointerHasher(): (value: Value) => bigint {
+function pointerHasher(): KeyHash {
   const allocations = new WeakMap<Store, bigint>();
   let nextAllocation = 1n;
   return (value) => {
@@ -314,7 +320,7 @@ export class HashValue extends MapValue {
   private iteratorEpoch = { generation: 0 };
 
   constructor(
-    readonly hash: (value: Value) => bigint,
+    readonly hash: KeyHash,
     readonly keyOf: (entry: Value) => Value,
     readonly equal: ValueComparison<boolean>,
     entryType: Type
@@ -407,7 +413,7 @@ export class HashValue extends MapValue {
   }
 
   lookup(frame: Frame, key: Value): HashNode | undefined {
-    const hash = this.hash(key);
+    const hash = this.hash(key, frame);
     const count = this.buckets.length;
     if (count === 0) return;
     const index = constrain(hash, count);
@@ -424,7 +430,7 @@ export class HashValue extends MapValue {
     const existing = this.lookup(frame, key);
     if (existing) return [existing, false];
     frame.runtime.reserve(3);
-    const hash = this.hash(key);
+    const hash = this.hash(key, frame);
     let count = this.buckets.length;
     if (this.size + 1 > count * this.maxLoadFactor || count === 0) {
       this.rehash(
