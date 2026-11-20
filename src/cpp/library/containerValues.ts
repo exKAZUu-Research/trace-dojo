@@ -497,7 +497,7 @@ export class SequenceValue extends Store {
     const start = from < 0 ? Math.max(0, this.length + from) : from;
     const dequeMiddle = this.storageKind === 'deque' && start > 0 && start + remove < this.length;
     if (this.deque && start === 0 && remove === 0 && items.length > 0) {
-      this.insertValues(start, items);
+      this.insertDequeEnd('front', items);
       return [];
     }
     this.editPositions(start, remove, items.length);
@@ -509,17 +509,19 @@ export class SequenceValue extends Store {
 
   insertValues(at: number, values: Value[]): void {
     if (values.length === 0) return;
-    if (this.deque && (at === 0 || at === this.length)) {
-      const atFront = at < this.length;
-      this.editPositions(at, 0, values.length, atFront);
-      if (atFront) this.prependDequeValues(values);
-      else for (const value of values) this.cells.push(value);
-      this.bindElements(at, at + values.length);
-      return;
-    }
     this.editPositions(at, 0, values.length);
     // oxlint-disable-next-line unicorn/prefer-spread -- Bulk insertion concatenates whole arrays directly.
     this.items = this.items.slice(0, at).concat(values, this.items.slice(at));
+  }
+
+  insertDequeEnd(side: 'front' | 'back', values: Value[]): void {
+    if (values.length === 0) return;
+    const atFront = side === 'front';
+    const at = atFront ? 0 : this.length;
+    this.editPositions(at, 0, values.length, atFront);
+    if (atFront) this.prependDequeValues(values);
+    else for (const value of values) this.cells.push(value);
+    this.bindElements(at, at + values.length);
   }
 
   replaceItems(items: Value[]): Value[] {

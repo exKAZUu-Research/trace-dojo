@@ -624,6 +624,23 @@ int main() {
   });
 });
 
+test.each([
+  ['values.push_front(7);', '0'],
+  ['values.emplace_front(7);', '0'],
+  ['values.insert(values.begin(), 7);', '1'],
+])('uses the libc++ deque block boundary after %s on an empty deque', (insert, stdout) => {
+  const program = `#include <deque>
+#include <iostream>
+int main() {
+  std::deque<int> values;
+  ${insert}
+  int* first = &values.front();
+  for (int i = 1; i < 515; ++i) values.push_back(i);
+  std::cout << (first + 513 == &values[513]);
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+});
+
 test('allows negative movement of bidirectional iterators', () => {
   const program = `#include <iostream>
 #include <iterator>

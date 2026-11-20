@@ -652,6 +652,7 @@ export class SequenceEditor {
     { length, construct, checkEndpoints }: Pick<Source, 'length' | 'construct' | 'checkEndpoints'>
   ): void {
     const atFront = at < self.length;
+    const side = atFront ? 'front' : 'back';
     const values = Array.from<Value>({ length }).fill(UNINIT);
     holdValues(frame, [new ArrayStore(values)], () => {
       let made = 0;
@@ -663,10 +664,10 @@ export class SequenceEditor {
         checkEndpoints?.();
       } catch (error) {
         if (error instanceof CppException)
-          self.insertValues(at, atFront ? values.slice(length - made) : values.slice(0, made));
+          self.insertDequeEnd(side, atFront ? values.slice(length - made) : values.slice(0, made));
         throw error;
       }
-      self.insertValues(at, values);
+      self.insertDequeEnd(side, values);
     });
   }
 
