@@ -12,11 +12,11 @@ import {
 import { printedPropertyName } from './print';
 import { hasToken, isWithin, named } from './syntax';
 import {
-  isSymbolName,
   type KeyedIndexInfo,
   type Property,
   stringType,
   type Structure,
+  symbolType,
   type Type,
   undefinedType,
   unionOf,
@@ -63,14 +63,15 @@ function checkPropertyConformance(c: Checker, property: Property, indexes: Keyed
     if (!node) continue;
     c.error(
       node,
-      `型 '${c.print(type)}' のプロパティ '${messagePropertyName(property.name)}' は、'${c.print(index.keyType)}' のインデックスの型 '${c.print(index.type)}' に代入できません。`
+      `型 '${c.print(type)}' のプロパティ '${messagePropertyName(c, property)}' は、'${c.print(index.keyType)}' のインデックスの型 '${c.print(index.type)}' に代入できません。`
     );
   }
 }
 
 /** A property name as TypeScript writes it in this message, a symbol in brackets as `[key]`. */
-function messagePropertyName(name: string): string {
-  return isSymbolName(name) ? printedPropertyName(name) : name;
+function messagePropertyName(c: Checker, property: Property): string {
+  const key = c.typeOperators.propertyKeyType(property);
+  return isIndexKeyOf(c, key, symbolType) ? printedPropertyName(property.name, key) : property.name;
 }
 
 /** Reports an index signature whose value type does not fit another applying to its keys. */

@@ -84,6 +84,10 @@ export class TypeScriptProgramConverter extends ProgramConverter {
     return cls;
   }
 
+  protected override duplicate(node: Node, name: string): never {
+    return super.duplicate(node.childForFieldName('name') ?? node, name);
+  }
+
   protected override arrayDestructuringSource(node: Node): IterationSource | undefined {
     return super.arrayDestructuringSource(unwrapParentheses(node));
   }

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 491 -- Resolves every kind of type syntax a program writes, each needing its own rule.
+// code-gauge-allow-file fileNcss 501 -- Resolves every kind of type syntax a program writes, each needing its own rule.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
@@ -589,9 +589,9 @@ export class TypeNodes {
   }
 
   private memberKeyType(nameNode: TreeNode): Type | undefined {
-    return nameNode.type === 'computed_property_name'
-      ? this.c.silently(() => this.c.expressions.check(named(nameNode)[0]))
-      : undefined;
+    if (nameNode.type !== 'computed_property_name') return undefined;
+    if (this.librarySymbolName(nameNode) !== undefined) return symbolType;
+    return this.c.flow.probe(() => this.c.silently(() => this.c.expressions.check(named(nameNode)[0])));
   }
 
   private computedMethodType(member: TreeNode): Type {
@@ -628,13 +628,18 @@ export class TypeNodes {
   memberName(nameNode: TreeNode): string | undefined {
     const written = propertyNameText(nameNode);
     if (written !== undefined || nameNode.type !== 'computed_property_name') return written;
-    if (this.c.isLibrary(nameNode)) {
-      const symbol = named(nameNode)[0];
-      if (symbol?.type === 'member_expression' && symbol.childForFieldName('object')?.text === 'Symbol')
-        return `__@${symbol.childForFieldName('property')?.text}`;
-    }
+    const librarySymbol = this.librarySymbolName(nameNode);
+    if (librarySymbol !== undefined) return `__@${librarySymbol}`;
     const names = this.c.silently(() => this.c.patterns.capturePropertyNames(nameNode));
     return names?.length === 1 ? names[0] : undefined;
+  }
+
+  private librarySymbolName(node: TreeNode): string | undefined {
+    if (!this.c.isLibrary(node)) return undefined;
+    const symbol = named(node)[0];
+    if (symbol?.type === 'member_expression' && symbol.childForFieldName('object')?.text === 'Symbol')
+      return symbol.childForFieldName('property')?.text;
+    return undefined;
   }
 
   private implicitAnyMember(member: TreeNode, nameNode: TreeNode): Type {
@@ -649,6 +654,7 @@ export class TypeNodes {
     const previous = structure.properties.get(name);
     structure.properties.set(name, {
       name,
+      nameType: this.memberKeyType(member.childForFieldName('name') as TreeNode),
       type: getter ? type : (previous?.type ?? type),
       writeType: getter ? previous?.writeType : type,
       optional: false,

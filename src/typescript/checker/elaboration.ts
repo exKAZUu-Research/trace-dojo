@@ -4,7 +4,7 @@ import { spreadLength, tupleArgumentContexts, tupleTypeAt } from './callArity';
 import type { Checker } from './checker';
 import { printedPropertyName } from './print';
 import { arrayPatternElements, named, propertyNameText, skipParentheses } from './syntax';
-import { booleanType, isAnyLike, type ObjectType, type Type, undefinedType, unionOf } from './types';
+import { booleanType, isAnyLike, type ObjectType, type Property, type Type, undefinedType, unionOf } from './types';
 
 /**
  * Reports an assignment that does not fit at the members of the literal that spells its value, as TypeScript
@@ -101,24 +101,30 @@ export class Elaboration {
     const otherPrivateName = missing.find((property) => property.isPrivateName && sourceNames.has(property.name));
     if (otherPrivateName)
       return `型 '${this.c.print(source)}' のプロパティ '${otherPrivateName.name}' は、型 '${this.c.print(target)}' の中からは使えない別のメンバーです。`;
-    if (missing.length === 1) return `プロパティ '${printedPropertyName(missing[0].name)}' がありません。`;
+    if (missing.length === 1) return `プロパティ '${this.printPropertyName(missing[0])}' がありません。`;
     if (missing.length > 1)
       return `プロパティ ${missing
         .slice(0, 4)
-        .map((property) => `'${printedPropertyName(property.name)}'`)
+        .map((property) => `'${this.printPropertyName(property)}'`)
         .join(', ')} がありません。`;
     return '';
   }
 
+  private printPropertyName(property: Property): string {
+    return printedPropertyName(property.name, this.c.typeOperators.propertyKeyType(property));
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 16 -- Matches each written member to its contextual type before recursively locating its error.
   private reportProperties(node: TreeNode, source: Type, target: Type): boolean {
     let reported = false;
     for (const member of named(node)) {
       const key = memberKey(member);
       const name = key ? propertyNameText(key) : undefined;
-      if (!key || name === undefined) continue;
-      const targetType = this.targetMemberType(target, name);
-      const sourceType = this.c.propertyOf(source, name)?.type();
-      if (!targetType || !sourceType || this.c.relations.isAssignable(sourceType, targetType)) continue;
+      const sourceProperty = name === undefined ? undefined : this.c.propertyOf(source, name);
+      if (!key || !sourceProperty) continue;
+      const targetType = this.targetMemberType(target, sourceProperty);
+      const sourceType = sourceProperty.type();
+      if (!targetType || this.c.relations.isAssignable(sourceType, targetType)) continue;
       reported = true;
       const value = member.type === 'pair' ? member.childForFieldName('value') : undefined;
       if (!value || !this.report(value, sourceType, targetType))
@@ -183,8 +189,9 @@ export class Elaboration {
   }
 
   /** The type a target gives a property of an object literal assigned to it, with `undefined` when it is optional. */
-  private targetMemberType(target: Type, name: string): Type | undefined {
-    const type = this.c.literals.contextualPropertyType(target, name);
+  private targetMemberType(target: Type, property: Property): Type | undefined {
+    const { name } = property;
+    const type = this.c.literals.contextualPropertyType(target, name, this.c.typeOperators.propertyKeyType(property));
     const optional = (target.kind === 'union' ? target.types : [target]).some(
       (member) =>
         (member.kind === 'object' || member.kind === 'intersection') && this.c.propertyOf(member, name)?.optional

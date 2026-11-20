@@ -715,7 +715,7 @@ export class Relations {
       if (!sourceProperty) {
         if (targetProperty.optional) continue;
         const indexed = allowMappedIndex
-          ? applicableIndex(this.c, sourceStructure, targetProperty.nameType ?? literalType(name))
+          ? applicableIndex(this.c, sourceStructure, this.c.typeOperators.propertyKeyType(targetProperty))
           : undefined;
         if (!indexed || !this.isRelated(indexed.type, targetProperty.type(), relation)) return false;
         continue;

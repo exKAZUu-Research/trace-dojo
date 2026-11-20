@@ -196,7 +196,7 @@ export abstract class ConverterBase {
   protected declareLexical(node: Node, name: string, kind?: 'constant' | 'using' | 'await using'): void {
     this.checkContextualName(node, name);
     const scope = this.currentScope;
-    if (scope.names.has(name)) duplicate(node, name);
+    if (scope.names.has(name)) this.duplicate(node, name);
     scope.names.set(name, 'lexical');
     scope.declarations.lexical.push({ name, kind });
     scope.declarations.order.push(name);
@@ -205,7 +205,7 @@ export abstract class ConverterBase {
   protected declareVar(node: Node, name: string): void {
     this.checkContextualName(node, name);
     for (const scope of this.scopes.toReversed()) {
-      if (scope.names.get(name) === 'lexical') duplicate(node, name);
+      if (scope.names.get(name) === 'lexical') this.duplicate(node, name);
       if (!scope.isFunction) {
         // Recorded in each block it passes through, so a later let or const of the name there is a duplicate too.
         scope.names.set(name, 'var');
@@ -225,7 +225,7 @@ export abstract class ConverterBase {
     const scope = this.currentScope;
     const previous = scope.names.get(fn.name);
     // At the top of a function, a function declaration may repeat a `var` or another function.
-    if (previous && (previous === 'lexical' || !scope.isFunction)) duplicate(node, fn.name);
+    if (previous && (previous === 'lexical' || !scope.isFunction)) this.duplicate(node, fn.name);
     scope.names.set(fn.name, scope.isFunction ? 'var' : 'lexical');
     scope.declarations.functions.push(fn);
     if (!previous || previous === 'parameter') scope.declarations.order.push(fn.name);
@@ -234,7 +234,7 @@ export abstract class ConverterBase {
   protected declareParameter(node: Node, name: string): void {
     this.checkContextualName(node, name);
     const scope = this.currentScope;
-    if (scope.names.has(name)) duplicate(node, name);
+    if (scope.names.has(name)) this.duplicate(node, name);
     scope.names.set(name, 'parameter');
   }
 
@@ -247,8 +247,8 @@ export abstract class ConverterBase {
     this.declareLexical(node, name, kind === 'let' ? undefined : kind === 'const' ? 'constant' : kind);
     if (kind === 'using' || kind === 'await using') this.currentScope.declarations.disposes = true;
   }
-}
 
-function duplicate(node: Node, name: string): never {
-  return fail(node, `${name} はすでに宣言されています。`);
+  protected duplicate(node: Node, name: string): never {
+    return fail(node, `${name} はすでに宣言されています。`);
+  }
 }

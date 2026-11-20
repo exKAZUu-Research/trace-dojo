@@ -4,7 +4,6 @@ import {
   type IndexInfo,
   intersectionOf,
   isIntrinsic,
-  isSymbolName,
   type KeyedIndexInfo,
   numberType,
   type Property,
@@ -126,7 +125,6 @@ export function isIndexKeyOf(c: Checker, source: Type, target: Type): boolean {
 
 /** Whether an index signature for `keyType` applies to a property, by the key type that names it. */
 export function isPropertyKeyOf(c: Checker, property: Property, keyType: Type): boolean {
-  if (isSymbolName(property.name)) return isIntrinsic(keyType, 'symbol');
   return isIndexKeyOf(c, c.typeOperators.propertyKeyType(property), keyType);
 }
 

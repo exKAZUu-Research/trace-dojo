@@ -46,3 +46,18 @@ test.each(programsIn(TYPE_ERROR_DIR))('%s is rejected on the rows tsc reports', 
   if (execution.kind !== 'compileError') throw new Error(`${name} was not rejected: ${JSON.stringify(execution)}`);
   expect([...new Set(execution.diagnostics.map((diagnostic) => diagnostic.row + 1))]).toEqual(expectedRows);
 });
+
+test('duplicate declarations report once at each name', () => {
+  const execution = executeProgram(
+    'typescript',
+    `class C {}
+class
+C {}
+let v = 1;
+function
+v(): void {}
+const a = 1; const a = 2;`
+  );
+  if (execution.kind !== 'compileError') throw new Error('Expected duplicate declaration diagnostics');
+  expect(execution.diagnostics.map(({ row }) => row + 1)).toEqual([1, 3, 4, 6, 7, 7]);
+});

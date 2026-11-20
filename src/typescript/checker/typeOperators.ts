@@ -354,7 +354,7 @@ export class TypeOperators {
     // keyof lists the public members only.
     for (const property of structure.properties.values()) {
       if (property.isPrivateName || property.visibility !== 'public') continue;
-      if (property.name.startsWith('__@') && property.declaration && this.c.isLibrary(property.declaration)) continue;
+      if (property.nameType === symbolType && property.declaration && this.c.isLibrary(property.declaration)) continue;
       keys.push(this.propertyKeyType(property));
     }
     return unionOf(keys);
@@ -365,10 +365,10 @@ export class TypeOperators {
     if (property.nameType) return property.nameType;
     const name = property.declaration?.childForFieldName('name') ?? property.declaration?.childForFieldName('key');
     if (name?.type === 'computed_property_name') {
-      const key = this.c.silently(() => this.c.expressions.check(named(name)[0]));
-      if (isPropertyKeyLiteral(key)) return key;
+      const key = this.c.flow.probe(() => this.c.silently(() => this.c.expressions.check(named(name)[0])));
+      if (isPropertyKeyLiteral(key) && String(key.value) === property.name) return key;
     }
-    return this.isNumericKey(property) ? literalType(Number(property.name)) : literalType(property.name);
+    return name?.type === 'number' ? literalType(Number(property.name)) : literalType(property.name);
   }
 
   /**
@@ -376,19 +376,10 @@ export class TypeOperators {
    * type, which `keyof` gives as a number.
    */
   isNumericKey(property: Property): boolean {
-    if (property.nameType)
-      return (property.nameType.kind === 'union' ? property.nameType.types : [property.nameType]).some(
-        (member) => member.kind === 'literal' && typeof member.value === 'number'
-      );
-    const declaration = property.declaration;
-    const name = declaration?.childForFieldName('name') ?? declaration?.childForFieldName('key');
-    if (name?.type !== 'computed_property_name') return name?.type === 'number';
-    let numeric = false;
-    this.c.flow.from(this.c.flow.current, () => {
-      const type = this.c.silently(() => this.c.expressions.check(named(name)[0]));
-      numeric = type.kind === 'literal' && typeof type.value === 'number';
-    });
-    return numeric;
+    const key = this.propertyKeyType(property);
+    return (key.kind === 'union' ? key.types : [key]).some(
+      (member) => member.kind === 'literal' && typeof member.value === 'number'
+    );
   }
 
   /** `object[index]`, reporting a missing property at `node` when given. */
@@ -471,7 +462,10 @@ export class TypeOperators {
         : applicableIndex(this.c, structure, literalType(key));
     if (applicable) return applicable.type;
     if (node)
-      this.c.error(node, `プロパティ '${printedPropertyName(name)}' は型 '${this.c.print(object)}' にありません。`);
+      this.c.error(
+        node,
+        `プロパティ '${printedPropertyName(name, literalType(key))}' は型 '${this.c.print(object)}' にありません。`
+      );
     return errorType;
   }
 

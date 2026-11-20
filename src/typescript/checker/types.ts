@@ -344,11 +344,6 @@ export function uniqueSymbolName(propertyName: string): string | undefined {
   return /^Symbol\((.*)@\d+\)$/.exec(propertyName)?.[1];
 }
 
-/** Whether a property name stands for a symbol: a unique symbol or a well-known one, as `__@iterator`. */
-export function isSymbolName(propertyName: string): boolean {
-  return propertyName.startsWith('__@') || uniqueSymbolName(propertyName) !== undefined;
-}
-
 /** Whether a type is a literal that names a property: a string, a number, or a unique symbol. */
 export function isPropertyKeyLiteral(type: Type): type is LiteralType & { value: string | number | symbol } {
   return type.kind === 'literal' && ['string', 'number', 'symbol'].includes(typeof type.value);

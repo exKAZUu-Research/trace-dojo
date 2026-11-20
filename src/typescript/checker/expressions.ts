@@ -9,7 +9,7 @@ import { arrayTargets, Elaboration, targetElementType } from './elaboration';
 import { Expandos, laterRunningTypes } from './expandos';
 import { ExpressionTypeCache } from './expressionTypeCache';
 import type { FlowEntry } from './flow';
-import { applicableIndex, applicablePatternIndexes } from './indexInfos';
+import { applicableIndex } from './indexInfos';
 import { nonNullableType } from './nullishConstraints';
 import type { Sym } from './scopes';
 import { nameSuggestionHint } from './spelling';
@@ -18,7 +18,6 @@ import {
   assignmentKind,
   hasToken,
   isImmediatelyInvoked,
-  isNumericName,
   named,
   numberValue,
   patternIdentifiers,
@@ -36,7 +35,6 @@ import {
   freshLiteralType,
   isAnyLike,
   isIntrinsic,
-  isSymbolName,
   literalType,
   nullType,
   numberType,
@@ -723,7 +721,7 @@ export class ExpressionChecker {
 
   /** Checks a written property of a fresh object literal against the targets, returning whether it fits them. */
   private checkWrittenProperty(node: TreeNode, property: Property, targets: Type[], target: Type): boolean {
-    if (!this.isKnownProperty(targets, property.name)) {
+    if (!this.isKnownProperty(targets, property)) {
       this.c.error(
         property.declaration?.childForFieldName('key') ?? property.declaration ?? node,
         `オブジェクトリテラルには既知のプロパティしか書けません。'${property.name}' は型 '${this.c.print(target)}' にありません。`
@@ -744,16 +742,23 @@ export class ExpressionChecker {
     );
   }
 
-  private isKnownProperty(targets: Type[], name: string): boolean {
-    return targets.some(
-      (member) =>
+  private isKnownProperty(targets: Type[], property: Property): boolean {
+    const { name } = property;
+    const key = this.propertyIndexKey(property);
+    return targets.some((member) => {
+      const structure = this.c.structureOf(member);
+      return (
         (this.c.propertyOf(member, name) !== undefined && !this.isObjectPrototypeProperty(member, name)) ||
-        this.c.structureOf(member).stringIndex !== undefined ||
-        (isNumericName(name) && this.c.structureOf(member).numberIndex !== undefined) ||
-        (isSymbolName(name)
-          ? this.c.structureOf(member).symbolIndex !== undefined
-          : applicablePatternIndexes(this.c, this.c.structureOf(member), literalType(name)).length > 0)
-    );
+        structure.stringIndex !== undefined ||
+        applicableIndex(this.c, structure, key) !== undefined
+      );
+    });
+  }
+
+  private propertyIndexKey(property: Property): Type {
+    const key = this.c.typeOperators.propertyKeyType(property);
+    // Known-property checks use the name of a numeric property, so a `${number}` index still covers it.
+    return key.kind === 'literal' && typeof key.value === 'number' ? literalType(property.name) : key;
   }
 
   /**
@@ -762,33 +767,40 @@ export class ExpressionChecker {
    * as a whole, yet TypeScript rejects the value.
    */
   private fitsUnionProperty(node: TreeNode, property: Property, targets: Type[], target: Type): boolean {
-    const declared = unionOf(targets.map((member) => this.typeOfPropertyIn(member, property.name)));
+    const key = this.propertyIndexKey(property);
+    const declared = unionOf(targets.map((member) => this.typeOfPropertyIn(member, property.name, key)));
     if (this.c.relations.isAssignable(property.type(), declared)) return true;
     const { declaration } = property;
     const value = declaration?.type === 'pair' ? declaration.childForFieldName('value') : undefined;
     this.reportNotAssignable(
       declaration?.childForFieldName('key') ?? declaration ?? node,
       property.type(),
-      this.c.literals.contextualPropertyType(target, property.name) ?? declared,
+      this.c.literals.contextualPropertyType(target, property.name, key) ?? declared,
       value ?? undefined
     );
     return false;
   }
 
   /** The type a member of a union gives a property, as its own or by an index signature, or `undefined`. */
-  private typeOfPropertyIn(member: Type, name: string): Type {
+  private typeOfPropertyIn(member: Type, name: string, key: Type): Type {
     const property = this.c.propertyOf(member, name);
     if (property) return property.optional ? unionOf([property.type(), undefinedType]) : property.type();
-    const structure = this.c.structureOf(member);
-    const index = isSymbolName(name) ? structure.symbolIndex : applicableIndex(this.c, structure, literalType(name));
-    return index?.type ?? undefinedType;
+    return applicableIndex(this.c, this.c.structureOf(member), key)?.type ?? undefinedType;
   }
 
   /** Checks the object literal a written property's value spells against the target's type of the property. */
   private checkExcessPropertyValue(property: Property, target: Type): void {
     const value = property.declaration?.type === 'pair' ? property.declaration.childForFieldName('value') : undefined;
-    const targetType = this.c.literals.contextualPropertyType(target, property.name);
+    const targetType = this.contextOfWrittenProperty(target, property);
     if (value && targetType) this.checkExcessProperties(value, property.type(), targetType);
+  }
+
+  private contextOfWrittenProperty(target: Type, property: Property): Type | undefined {
+    return this.c.literals.contextualPropertyType(
+      target,
+      property.name,
+      this.c.typeOperators.propertyKeyType(property)
+    );
   }
 
   /** Checks the object literals that computed keys give a literal's string index against the targets' string index. */
@@ -814,10 +826,10 @@ export class ExpressionChecker {
       return;
     }
     if (!source.fresh) return;
-    for (const [name, property] of source.resolve().properties) {
+    for (const property of source.resolve().properties.values()) {
       if (!this.c.literals.isWrittenMember(source, property)) continue;
       const value = property.declaration?.type === 'pair' ? property.declaration.childForFieldName('value') : undefined;
-      const targetType = this.c.literals.contextualPropertyType(target, name);
+      const targetType = this.contextOfWrittenProperty(target, property);
       if (value && targetType) this.checkAssertedArrayLiterals(value, property.type(), targetType);
     }
   }

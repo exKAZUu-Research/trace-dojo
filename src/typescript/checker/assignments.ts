@@ -518,7 +518,7 @@ export class AssignmentChecker {
     if (readonlyKey) {
       this.c.error(
         indexNode,
-        `${printedPropertyName(String(readonlyKey.value))} は読み取り専用のプロパティなので、代入できません。`
+        `${printedPropertyName(String(readonlyKey.value), readonlyKey)} は読み取り専用のプロパティなので、代入できません。`
       );
       return errorType;
     }

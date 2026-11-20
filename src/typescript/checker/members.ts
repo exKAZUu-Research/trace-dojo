@@ -579,7 +579,7 @@ export class MemberChecker {
     if (objectType.kind === 'indexedAccess') return this.c.typeOperators.indexedAccess(objectType, index);
     const missing =
       index.kind === 'literal'
-        ? `プロパティ '${printedPropertyName(String(index.value))}' は型 '${this.c.print(objectType)}' にありません。`
+        ? `プロパティ '${printedPropertyName(String(index.value), index)}' は型 '${this.c.print(objectType)}' にありません。`
         : '';
     this.c.error(
       access.node,
