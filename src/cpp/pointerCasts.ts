@@ -49,8 +49,8 @@ function firstSubobject(pointer: Ptr, source: Type, target: Type): Ptr | undefin
   if (sameType(source, target, false)) return pointer;
   if (source.kind !== 'class' || !isStandardLayout(source.cls)) return;
   if (target.kind === 'class' && source.cls.isDerivedFrom(target.cls)) return pointer.forClass(target.cls);
-  // A one-past pointer keeps its address and designates no member to project.
-  if (pointer.index < 0 || pointer.index >= pointer.target().length) return pointer;
+  if (pointer.index < 0 || pointer.index >= pointer.target().length)
+    return new PastObjectPointer(pointer, source, target);
   const object = pointer.readRaw();
   if (!(object instanceof CObject)) return;
   if (
@@ -134,6 +134,28 @@ class IncompatiblePointer extends ErasedPointer {
       'custom',
       `${typeName(this.pointee)} 型の値を ${typeName(this.requested)} 型のポインタで扱えません。`
     );
+  }
+}
+
+/**
+ * A pointer past an object converted to the type of its first member: it keeps the one-past address, designates no
+ * member, and moving it gives a pointer that cannot be used, since no array of that member type backs it.
+ */
+class PastObjectPointer extends ErasedPointer {
+  constructor(
+    original: Ptr,
+    pointee: Type,
+    readonly requested: Type
+  ) {
+    super(original, pointee);
+  }
+
+  override target(): Store {
+    throw new CppRuntimeError('outOfBounds');
+  }
+
+  override offset(delta: number | bigint): Ptr {
+    return delta === 0 || delta === 0n ? this : new IncompatiblePointer(this, this.requested);
   }
 }
 

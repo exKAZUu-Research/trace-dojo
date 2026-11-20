@@ -265,6 +265,25 @@ int main() {
   }
 );
 
+test.each([
+  'P p{7}; void* end = &p + 1;',
+  'P* p = new P{7}; void* end = p + 1;',
+  'P p[2] = {{1}, {7}}; void* end = p + 2;',
+])('rejects moving a recovered one-past member pointer back after %s', (setup) => {
+  const program = `#include <iostream>
+struct P { int x; };
+int main() {
+  ${setup}
+  int* q = static_cast<int*>(end);
+  std::cout << *(q - 1);
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '',
+    uncaughtException: 'P 型の値を int 型のポインタで扱えません。',
+  });
+});
+
 test('reads only the required prefix of a C substring search needle', () => {
   const program = `#include <cstring>
 #include <string>
