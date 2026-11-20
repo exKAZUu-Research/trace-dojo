@@ -105,7 +105,7 @@ export class BorrowChecker {
           for (const local of this.bindingsOf(pattern)) current = setVar(current, local, initState());
           return current;
         }
-        const afterValue = this.expr(init, state, 'read');
+        const afterValue = this.patternSource(init, state);
         // The `else` of `let ... else` runs when the pattern does not match, which moves nothing.
         if (stmt.else) this.block(stmt.else, afterValue);
         return this.bindPattern(pattern, init, afterValue);
@@ -219,7 +219,7 @@ export class BorrowChecker {
   }
 
   private match(expr: Extract<Expr, { kind: 'match' }>, state: State): State {
-    const afterScrutinee = this.expr(expr.scrutinee, state, 'read');
+    const afterScrutinee = this.patternSource(expr.scrutinee, state);
     let result: State = BOTTOM;
     for (const arm of expr.arms) {
       const armState = this.bindPattern(arm.pattern, expr.scrutinee, afterScrutinee);
@@ -304,15 +304,18 @@ export class BorrowChecker {
     const place = this.placeOf(expr.base);
     const res = this.annotations.paths.get(expr);
     if (!place || res?.kind !== 'ctor') return this.expr(expr.base, current, 'move');
-    current = this.expr(expr.base, current, 'read');
+    current = this.patternSource(expr.base, current);
     const given = new Set(expr.fields.map((field) => field.name));
     const subst = new Map(res.def.params.map((param, index) => [param, res.typeArgs[index]]));
     for (const field of res.def.variants[res.variant].fields) {
       if (given.has(field.name)) continue;
+      const path = `${place.path}.${field.name}`;
+      const varState = current.get(place.root);
+      if (varState) this.checkUsable(place.root, varState, expr.base.span, 'read', path);
       const type = substituteType(field.type, subst);
       if (this.isCopy(type)) continue;
       if (place.indirect) this.cannotMoveOut(expr.base, '');
-      current = this.markMoved(current, { ...place, path: `${place.path}.${field.name}` }, expr.base.span, true);
+      current = this.markMoved(current, { ...place, path }, expr.base.span, true);
     }
     return current;
   }
@@ -323,16 +326,31 @@ export class BorrowChecker {
       const after = this.expr(cond.expr, state, 'move');
       return { matched: after, otherwise: after };
     }
-    const afterValue = this.expr(cond.value, state, 'read');
+    const afterValue = this.patternSource(cond.value, state);
     return { matched: this.bindPattern(cond.pattern, cond.value, afterValue), otherwise: afterValue };
+  }
+
+  private patternSource(scrutinee: Expr, state: State): State {
+    const place = this.placeOf(scrutinee);
+    if (!place || place.indirect) return this.expr(scrutinee, state, 'read');
+    return this.placeIndexes(scrutinee, state);
   }
 
   /** Binds a pattern's variables, moving the parts of a place they bind by value. */
   private bindPattern(pattern: Pattern, scrutinee: Expr, state: State): State {
     let current = state;
     const moved = this.movedParts(pattern);
-    const place = moved.length > 0 ? this.placeOf(scrutinee) : undefined;
-    if (place?.indirect && !this.ownsCapture(scrutinee)) this.cannotMoveOut(scrutinee, '');
+    const place = this.placeOf(scrutinee);
+    if (place?.indirect && moved.length > 0 && !this.ownsCapture(scrutinee)) this.cannotMoveOut(scrutinee, '');
+    if (place && !place.indirect) {
+      const varState = state.get(place.root);
+      if (varState) {
+        this.checkUsable(place.root, varState, scrutinee.span, 'read', place.path, false);
+        patternReads(pattern, place.path, (path, descendants) =>
+          this.checkUsable(place.root, varState, scrutinee.span, 'read', path, descendants)
+        );
+      }
+    }
     if (place && place.root.mode === 'move') {
       for (const path of moved) {
         current = this.markMoved(current, { ...place, path: `${place.path}${path}` }, scrutinee.span, false);
@@ -479,7 +497,9 @@ export class BorrowChecker {
         return this.expr(macro.count, this.expr(macro.value, state, 'move'), 'move');
       }
       case 'matches': {
-        return this.expr(macro.value, state, 'read');
+        const condition = { kind: 'let' as const, pattern: macro.pattern, value: macro.value, span: expr.span };
+        const { matched, otherwise } = this.condition(condition, state);
+        return join(matched, otherwise);
       }
       case 'dbg': {
         let current = state;
@@ -551,7 +571,14 @@ export class BorrowChecker {
   }
 
   /** Requires a variable to hold a value where the program uses it. */
-  private checkUsable(local: LocalVar, varState: VarState, span: Span, mode: 'move' | 'read' | 'mut', path = ''): void {
+  private checkUsable(
+    local: LocalVar,
+    varState: VarState,
+    span: Span,
+    mode: 'move' | 'read' | 'mut',
+    path = '',
+    descendants = true
+  ): void {
     if (varState.init !== 'yes') {
       if (varState.movedAt) {
         const verb = mode === 'move' ? '使えません' : '借りられません';
@@ -568,7 +595,7 @@ export class BorrowChecker {
       );
     }
     for (const moved of varState.partial) {
-      if (path === '' || path === moved || path.startsWith(`${moved}.`) || moved.startsWith(`${path}.`)) {
+      if (path === moved || path.startsWith(`${moved}.`) || (descendants && moved.startsWith(`${path}.`))) {
         compileError(
           span,
           `変数 ${local.name} の一部（${local.name}${moved}）は ${varState.movedAt ? `${varState.movedAt.row + 1} 行目で` : ''}ムーブされたので、${local.name} を使えません。`
@@ -623,9 +650,13 @@ export class BorrowChecker {
           `変数 ${place.root.name} の値は ${varState.movedAt!.row + 1} 行目でムーブされたので、そのフィールドに代入できません。`
         );
       }
-      if (varState.partial.has(place.path)) {
-        const partial = new Set(varState.partial);
-        partial.delete(place.path);
+      if ([...varState.partial].some((moved) => place.path.startsWith(`${moved}.`))) {
+        this.checkUsable(place.root, varState, span, 'read', place.path, false);
+      }
+      const partial = new Set(
+        [...varState.partial].filter((moved) => moved !== place.path && !moved.startsWith(`${place.path}.`))
+      );
+      if (partial.size !== varState.partial.size) {
         return setVar(state, place.root, { ...varState, partial });
       }
     } else if (varState) {
@@ -722,6 +753,32 @@ function sameState(a: State, b: State): boolean {
 }
 
 /** The state after either of two paths: a variable holds a value only if it does on both. */
+function patternReads(pattern: Pattern, path: string, read: (path: string, descendants: boolean) => void): void {
+  switch (pattern.kind) {
+    case 'wild': {
+      return;
+    }
+    case 'tuple':
+    case 'tupleStruct': {
+      read(path, false);
+      for (const [index, child] of pattern.elems.entries()) patternReads(child, `${path}.${index}`, read);
+      return;
+    }
+    case 'struct': {
+      read(path, false);
+      for (const { name, pattern: child } of pattern.fields) patternReads(child, `${path}.${name}`, read);
+      return;
+    }
+    case 'or': {
+      for (const child of pattern.alternatives) patternReads(child, path, read);
+      return;
+    }
+    default: {
+      read(path, true);
+    }
+  }
+}
+
 function join(a: State, b: State): State {
   if (a === BOTTOM) return b;
   if (b === BOTTOM) return a;

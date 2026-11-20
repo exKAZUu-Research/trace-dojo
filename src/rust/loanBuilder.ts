@@ -1286,8 +1286,11 @@ export class LoanBuilder {
         return this.aggregate([value], expr.ty, elementLayout);
       }
       case 'matches': {
-        const source = this.source(macro.value);
-        this.point({ uses: [source.root], accesses: [{ place: source, kind: 'read', span: macro.value.span }] });
+        let unmatched: number | undefined;
+        this.patternScope(macro.pattern, expr, () => {
+          unmatched = this.condition({ kind: 'let', pattern: macro.pattern, value: macro.value, span: expr.span });
+        });
+        this.join([unmatched, this.current]);
         return undefined;
       }
       case 'dbg': {

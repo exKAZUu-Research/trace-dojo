@@ -2019,6 +2019,33 @@ fn main() {
   expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: 'true\n' });
 });
 
+test('tracks Rust moves and reinitialization by the fields an expression touches', () => {
+  const valid = `struct Record { name: String, note: String }
+fn main() {
+    let mut pair = (String::from("a"), (String::from("b"), String::from("c")));
+    let old = pair.1.0;
+    pair.1 = (String::from("d"), String::from("e"));
+    let dropped = pair.1.1;
+    let (keep, _) = pair.1;
+    let record = Record { name: old, note: dropped };
+    let name = record.name;
+    let revised = Record { name: keep, ..record };
+    let value = Some(String::from("f"));
+    println!("{} {} {} {} {:?}", name, revised.name, revised.note, matches!(value, Some(_)), value);
+}`;
+  expect(executeProgram('rust', valid)).toMatchObject({
+    kind: 'executed',
+    stdout: 'b d e true Some("f")\n',
+  });
+  for (const body of [
+    'let value = Some(String::from("a")); matches!(value, Some(x)); println!("{:?}", value);',
+    'let mut value = ((String::from("a"),),); let moved = value.0; value.0.0 = String::from("b");',
+    'let value = (String::from("a"), 1); let moved = value.0; let (bad, _) = value;',
+  ]) {
+    expect(executeProgram('rust', rustMain(body))).toMatchObject({ kind: 'compileError' });
+  }
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {
