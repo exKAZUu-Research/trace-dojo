@@ -28,10 +28,10 @@ const encodeValue = (v) => {
   if (v instanceof Uint8Array) return { __t: 'u', v: Buffer.from(v).toString('base64') };
   if (Array.isArray(v)) return v.map(encodeValue);
   if (v !== null && typeof v === 'object') {
-    const out = {};
-    for (const [k, item] of Object.entries(v)) {
-      if (item !== undefined) out[k] = encodeValue(item);
-    }
+    // fromEntries defines own properties, so a key named __proto__ stays a key instead of setting the prototype.
+    const out = Object.fromEntries(
+      Object.entries(v).filter(([, item]) => item !== undefined).map(([k, item]) => [k, encodeValue(item)])
+    );
     return Object.hasOwn(v, '__t') ? { __t: 'o', v: out } : out;
   }
   return v;
@@ -124,7 +124,5 @@ function decodeValue(value: unknown): unknown {
 }
 
 function decodeObject(value: object): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [key, item] of Object.entries(value)) out[key] = decodeValue(item);
-  return out;
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, decodeValue(item)]));
 }
