@@ -1,3 +1,5 @@
+import { stripVTControlCharacters } from 'node:util';
+
 import { ArrayOps } from './arrayOps';
 import { inspectValue, OutputBudget, stringWidth } from './inspect';
 import { type CollectionEntry, CollectionIterator } from './realmCollections';
@@ -114,35 +116,40 @@ function inspectCell(runtime: Runtime, value: Value, budget: OutputBudget): stri
 
 /** Node.js's `cli_table`, which left-aligns each cell. */
 function renderTable(runtime: Runtime, head: string[], columns: string[][]): string {
-  const widths = head.map((title) => stringWidth(title));
+  const header = head.map(tableCell);
+  const widths = header.map((cell) => cell.width);
   const rowCount = Math.max(...columns.map((column) => column.length));
-  const rows: string[][] = Array.from({ length: rowCount }, () => []);
+  const rows: ReturnType<typeof tableCell>[][] = Array.from({ length: rowCount }, () => []);
   for (const [columnIndex, column] of columns.entries()) {
     for (let row = 0; row < rowCount; row++) {
       runtime.spend();
-      const cell = Object.hasOwn(column, row) ? (column[row] ?? '') : '';
+      const cell = tableCell(Object.hasOwn(column, row) ? (column[row] ?? '') : '');
       rows[row][columnIndex] = cell;
-      widths[columnIndex] = Math.max(widths[columnIndex], stringWidth(cell));
+      widths[columnIndex] = Math.max(widths[columnIndex], cell.width);
     }
   }
   const budget = new OutputBudget();
   const borderLength = widths.reduce((sum, width) => sum + width + 2, 1) + widths.length;
   budget.charge(3 * borderLength + rowCount + 3);
-  const chargeRow = (cells: string[]): void => {
-    budget.charge(cells.reduce((sum, cell, index) => sum + cell.length + widths[index] - stringWidth(cell) + 3, 1));
+  const chargeRow = (cells: ReturnType<typeof tableCell>[]): void => {
+    budget.charge(cells.reduce((sum, cell, index) => sum + cell.text.length + widths[index] - cell.width + 3, 1));
   };
-  chargeRow(head);
+  chargeRow(header);
   for (const row of rows) chargeRow(row);
-  const renderRow = (cells: string[]): string =>
-    `│ ${cells.map((cell, index) => cell + ' '.repeat(widths[index] - stringWidth(cell))).join(' │ ')} │`;
+  const renderRow = (cells: ReturnType<typeof tableCell>[]): string =>
+    `│ ${cells.map((cell, index) => cell.text + ' '.repeat(widths[index] - cell.width)).join(' │ ')} │`;
   const divider = widths.map((width) => '─'.repeat(width + 2));
   return [
     `┌${divider.join('┬')}┐`,
-    renderRow(head),
+    renderRow(header),
     `├${divider.join('┼')}┤`,
     ...rows.map((row) => renderRow(row)),
     `└${divider.join('┴')}┘`,
   ].join('\n');
+}
+
+function tableCell(text: string): { text: string; width: number } {
+  return { text, width: stringWidth(stripVTControlCharacters(text)) };
 }
 
 /** The headers and cells of a table's columns, which Node.js collects as an object's keys and so orders as one. */

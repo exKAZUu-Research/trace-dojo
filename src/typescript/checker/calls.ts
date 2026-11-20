@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 617 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
+// code-gauge-allow-file fileNcss 628 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
@@ -406,17 +406,52 @@ export class Calls {
   }
 
   /** Whether a call ends the flow, calling through a name a function declared to return `never`. */
-  endsFlow(node: TreeNode): boolean {
-    const signature = this.resolved.get(node.id);
+  endsFlow(node: TreeNode, result: Type): boolean {
+    if (!isIntrinsic(result, 'never')) return false;
+    const declaration = this.resolved.get(node.id)?.declaration;
     const callee = node.childForFieldName('function');
-    if (!signature?.declaration?.childForFieldName('return_type') || !callee || !isDottedName(callee)) return false;
-    // A function held by a variable or a field counts only when that declaration has a type annotation.
-    const declaration =
-      callee.type === 'identifier' ? this.c.scopeOf(callee).lookupValue(callee.text)?.valueDeclaration : undefined;
-    if (declaration?.type === 'variable_declarator' && !declaration.childForFieldName('type')) return false;
-    const field = signature.declaration.parent;
-    if (field?.type === 'field_definition' && !field.childForFieldName('type')) return false;
-    return isIntrinsic(signature.returnType(), 'never');
+    if (!declaration || !callee) return false;
+    return this.c.flow.probe(() =>
+      this.c.silently(
+        () =>
+          isIntrinsic(this.c.functions.declaredReturnType(declaration) ?? unknownType, 'never') &&
+          this.explicitPathType(callee) !== undefined
+      )
+    );
+  }
+
+  private explicitPathType(node: TreeNode): Type | undefined {
+    const expression = skipParentheses(node);
+    switch (expression.type) {
+      case 'identifier': {
+        const symbol = this.c.scopeOf(expression).lookupValue(expression.text);
+        if (!symbol) return undefined;
+        const declaration = symbol.valueDeclaration;
+        if (symbol.valueKind === 'class' || symbol.valueKind === 'function' || declaration?.childForFieldName('type'))
+          return this.c.expressions.valueTypeOf(symbol);
+        return undefined;
+      }
+      case 'this': {
+        return this.c.classes.explicitThisType(expression);
+      }
+      case 'super': {
+        return this.c.classes.superType(expression);
+      }
+      case 'member_expression': {
+        const object = expression.childForFieldName('object') as TreeNode;
+        const property = expression.childForFieldName('property') as TreeNode;
+        const receiver = this.explicitPathType(object);
+        if (!receiver) return undefined;
+        const member = this.c.propertyOf(
+          this.c.relations.removeNullish(receiver),
+          this.c.classes.propertyKey(expression, property)
+        );
+        return member?.isMethod || member?.declaration?.childForFieldName('type') ? member.type() : undefined;
+      }
+      default: {
+        return undefined;
+      }
+    }
   }
 
   /** The type predicate a call's resolved signature has, with the expression it narrows. */
@@ -982,13 +1017,6 @@ export class Calls {
     if (expression.type === 'array') return named(expression).some((element) => this.isContextSensitive(element));
     return false;
   }
-}
-
-/** Whether an expression names something by identifiers and properties only, as `a`, `this.b`, or `a.b.c`. */
-function isDottedName(node: TreeNode): boolean {
-  if (node.type === 'identifier' || node.type === 'this') return true;
-  if (node.type !== 'member_expression' || node.childForFieldName('optional_chain')) return false;
-  return isDottedName(node.childForFieldName('object') as TreeNode);
 }
 
 /** The object a call through a property or an element, as `o.f()` or `o["f"]()`, passes as `this`. */

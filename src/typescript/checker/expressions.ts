@@ -571,6 +571,9 @@ export class ExpressionChecker {
   /** The type of a value a symbol declares. */
   valueTypeOf(symbol: Sym): Type {
     if (symbol.valueType) return symbol.valueType;
+    if (symbol.valueKind === 'class') {
+      return (symbol.valueType = this.c.classes.valueTypeOf(this.c.classes.classInfoOf(symbol)));
+    }
     const parameterType = this.c.functions.parameterTypes.get(symbol.id);
     if (parameterType) return parameterType;
     const variableType = this.variableTypes.get(symbol.id);
@@ -587,12 +590,7 @@ export class ExpressionChecker {
     symbol.resolving = true;
     try {
       const type = this.computeValueType(symbol);
-      if (
-        symbol.valueKind === 'function' ||
-        symbol.valueKind === 'class' ||
-        symbol.valueKind === 'declared' ||
-        symbol.valueKind === 'catch'
-      )
+      if (symbol.valueKind === 'function' || symbol.valueKind === 'declared' || symbol.valueKind === 'catch')
         symbol.valueType = type;
       else this.variableTypes.set(symbol.id, type);
       return type;
@@ -612,9 +610,6 @@ export class ExpressionChecker {
     switch (symbol.valueKind) {
       case 'function': {
         return this.functionSymbolType(symbol);
-      }
-      case 'class': {
-        return this.c.classes.valueTypeOf(this.c.classes.classInfoOf(symbol));
       }
       case 'catch': {
         const annotation = this.c.typeNodes.annotationType(declaration.childForFieldName('type'));

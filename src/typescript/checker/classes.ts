@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 675 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
+// code-gauge-allow-file fileNcss 699 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { typesAtConstructorExit } from './assignmentFlow';
@@ -50,6 +50,7 @@ interface RestrictedConstructor {
 }
 
 interface MethodEntry {
+  name: string;
   signatures: TreeNode[];
   implementation?: TreeNode;
   abstract: boolean;
@@ -57,6 +58,7 @@ interface MethodEntry {
 }
 
 interface AccessorEntry {
+  name: string;
   getter?: TreeNode;
   setter?: TreeNode;
 }
@@ -71,9 +73,9 @@ interface ClassMembers {
 
 const classTypes = new Set(['class_declaration', 'abstract_class_declaration', 'class']);
 
-/** The key a class structure stores a member under: a `#name` is a distinct member in each class declaring it. */
-function memberKey(name: string, info: ClassInfo): string {
-  return name.startsWith('#') ? `${name}@${info.declaration.id}` : name;
+/** A private name identifies a distinct member in each class declaring it. */
+function privateMemberKey(name: string, info: ClassInfo): string {
+  return `${name}@${info.declaration.id}`;
 }
 
 /** Classes: their instance and constructor types, `this` and `super`, and the checks of their declarations. */
@@ -82,6 +84,8 @@ export class ClassChecker {
   private readonly objectThis: Type[] = [];
   private readonly fieldTypes = new Map<number, Type>();
   private readonly resolvingFields: { member: TreeNode; nameNode: TreeNode }[] = [];
+  private readonly resolvingBases: TreeNode[] = [];
+  private readonly circularBases = new Set<number>();
   private globalThis?: ObjectType;
 
   constructor(private readonly c: Checker) {}
@@ -242,7 +246,7 @@ export class ClassChecker {
   }
 
   valueTypeOf(info: ClassInfo): Type {
-    const base = this.c.flow.probe(() => this.baseStaticType(info.declaration));
+    const base = this.baseStaticType(info.declaration);
     if (!base) return info.staticType;
     const variable =
       base.kind === 'intersection' ? base.types.find(isBaseTypeVariable) : isBaseTypeVariable(base) ? base : undefined;
@@ -253,7 +257,30 @@ export class ClassChecker {
     const clause = this.extendsClause(node);
     const value = clause?.childForFieldName('value');
     if (!value) return undefined;
-    return this.c.silently(() => this.c.expressions.check(value));
+    if (this.circularBases.has(node.id)) return errorType;
+    const cycle = this.resolvingBases.findIndex((entry) => entry.id === node.id);
+    if (cycle !== -1) {
+      this.reportCircularBases(cycle);
+      return errorType;
+    }
+    this.resolvingBases.push(node);
+    try {
+      const type = this.c.flow.probe(() => this.c.silently(() => this.c.expressions.check(value)));
+      return this.circularBases.has(node.id) ? errorType : type;
+    } finally {
+      this.resolvingBases.pop();
+    }
+  }
+
+  private reportCircularBases(cycle: number): void {
+    for (const entry of this.resolvingBases.slice(cycle)) {
+      this.circularBases.add(entry.id);
+      const name = entry.childForFieldName('name');
+      this.c.errorWhileResolving(
+        name ?? entry,
+        `'${name?.text ?? this.anonymousClassName(entry)}' は、直接または間接的に、それ自身の基底式から参照されています。`
+      );
+    }
   }
 
   /**
@@ -370,10 +397,10 @@ export class ClassChecker {
     for (const member of named(body)) {
       if (hasToken(member, 'static') === isStatic) this.addMember(members, member);
     }
-    for (const [name, entry] of members.methods)
-      structure.properties.set(memberKey(name, info), this.methodProperty(name, entry, info));
-    for (const [name, accessor] of members.accessors) {
-      structure.properties.set(memberKey(name, info), this.accessorProperty(name, accessor, info));
+    for (const [key, entry] of members.methods)
+      structure.properties.set(key, this.methodProperty(entry.name, entry, info));
+    for (const [key, accessor] of members.accessors) {
+      structure.properties.set(key, this.accessorProperty(accessor.name, accessor, info));
     }
     if (!isStatic) {
       const ctor = this.constructorNode(node);
@@ -392,19 +419,21 @@ export class ClassChecker {
       );
       return;
     }
+    const key =
+      nameNode?.type === 'private_property_identifier' && name !== undefined
+        ? privateMemberKey(name, members.info)
+        : name;
     switch (member.type) {
       case 'field_definition': {
-        if (name !== undefined && nameNode)
-          members.structure.properties.set(
-            memberKey(name, members.info),
-            this.fieldProperty(name, nameNode, member, members.info)
-          );
+        if (name !== undefined && key !== undefined && nameNode)
+          members.structure.properties.set(key, this.fieldProperty(name, nameNode, member, members.info));
         break;
       }
       case 'method_definition':
       case 'method_signature':
       case 'abstract_method_signature': {
-        if (name !== undefined && !isConstructorName(nameNode)) this.addMethod(members, name, member);
+        if (name !== undefined && key !== undefined && !isConstructorName(nameNode))
+          this.addMethod(members, name, key, member);
         break;
       }
       case 'index_signature': {
@@ -441,19 +470,19 @@ export class ClassChecker {
     return this.c.overloadedFunction([{ ...signature, isMethod: true }]);
   }
 
-  private addMethod(members: ClassMembers, name: string, member: TreeNode): void {
+  private addMethod(members: ClassMembers, name: string, key: string, member: TreeNode): void {
     if (hasToken(member, 'get') || hasToken(member, 'set')) {
-      const entry = members.accessors.get(name) ?? {};
+      const entry = members.accessors.get(key) ?? { name };
       if (hasToken(member, 'get')) entry.getter = member;
       else entry.setter = member;
-      members.accessors.set(name, entry);
+      members.accessors.set(key, entry);
       return;
     }
-    const entry = members.methods.get(name) ?? { signatures: [], abstract: false, first: member };
+    const entry = members.methods.get(key) ?? { name, signatures: [], abstract: false, first: member };
     if (member.type === 'method_definition' && member.childForFieldName('body')) entry.implementation = member;
     else entry.signatures.push(member);
     if (member.type === 'abstract_method_signature' || hasToken(member, 'abstract')) entry.abstract = true;
-    members.methods.set(name, entry);
+    members.methods.set(key, entry);
   }
 
   private methodProperty(name: string, entry: MethodEntry, info: ClassInfo): Property {
@@ -740,6 +769,15 @@ export class ClassChecker {
 
   thisOwnerId(node: TreeNode): number {
     return this.thisOwner(node)?.id ?? 0;
+  }
+
+  explicitThisType(node: TreeNode): Type | undefined {
+    const owner = this.thisOwner(node);
+    if (!owner) return undefined;
+    return (
+      this.thisParameterType(owner) ??
+      (owner.parent?.type === 'class_body' ? this.thisTypeOfExpression(node) : undefined)
+    );
   }
 
   // code-gauge-allow functionCognitiveComplexity 16 -- Checks explicit, contextual, class, and script receivers in their source scopes.
@@ -1045,8 +1083,7 @@ export class ClassChecker {
       if (visited.has(current.declaration.id)) continue;
       visited.add(current.declaration.id);
       this.c.budget.spend();
-      const declaration = current.declaration;
-      const inherited = this.c.flow.probe(() => this.baseStaticType(declaration));
+      const inherited = this.baseStaticType(current.declaration);
       if (inherited) pending.push(...this.baseClassConstituents(inherited));
     }
     return false;
@@ -1107,10 +1144,10 @@ export class ClassChecker {
   privateProperty(node: TreeNode, propertyNode: TreeNode, objectType: Type): Property | undefined {
     const name = propertyNode.text;
     const declaring = this.privateNameDeclarer(node, name);
-    const property = declaring && this.c.propertyOf(objectType, memberKey(name, declaring));
+    const property = declaring && this.c.propertyOf(objectType, privateMemberKey(name, declaring));
     if (property) return property;
     const declaredElsewhere = [...this.c.structureOf(objectType).properties.values()].some(
-      (member) => member.name === name
+      (member) => member.isPrivateName && member.name === name
     );
     this.c.error(
       propertyNode,
@@ -1130,7 +1167,7 @@ export class ClassChecker {
     }
     if (propertyNode.type !== 'private_property_identifier') return propertyNameText(propertyNode) ?? name;
     const declaring = this.privateNameDeclarer(node, name);
-    return declaring ? memberKey(name, declaring) : name;
+    return declaring ? privateMemberKey(name, declaring) : name;
   }
 
   /** The innermost class enclosing a node that declares a `#name`, which every use of the name in it refers to. */

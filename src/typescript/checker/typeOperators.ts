@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 447 -- Resolves related type operators sharing generic parameters and type construction.
+// code-gauge-allow-file fileNcss 449 -- Resolves related type operators sharing generic parameters and type construction.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker, Mapper } from './checker';
@@ -352,8 +352,9 @@ export class TypeOperators {
   private memberKeys(structure: Structure): Type {
     const keys = indexKeys(structure);
     // keyof lists the public members only.
-    for (const [name, property] of structure.properties) {
-      if (name.startsWith('__@') || name.startsWith('#') || property.visibility !== 'public') continue;
+    for (const property of structure.properties.values()) {
+      if (property.isPrivateName || property.visibility !== 'public') continue;
+      if (property.name.startsWith('__@') && property.declaration && this.c.isLibrary(property.declaration)) continue;
       keys.push(this.propertyKeyType(property));
     }
     return unionOf(keys);

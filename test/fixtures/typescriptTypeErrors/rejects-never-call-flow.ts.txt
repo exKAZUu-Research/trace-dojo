@@ -1,0 +1,24 @@
+const inferred = { fail(): never { throw new Error("missing"); } };
+function useInferred(value?: number) {
+  if (value === undefined) inferred.fail();
+  return value.toFixed();
+}
+class Stop {
+  fail(): never { throw new Error("missing"); }
+}
+const stop = new Stop();
+function useInferredInstance(value?: number) {
+  if (value === undefined) stop.fail();
+  return value.toFixed();
+}
+function optionalCallback(stop?: () => never): number {
+  stop?.();
+}
+function optionalProperty(obj: { fail?: () => never }) {
+  let result: number;
+  obj.fail?.();
+  return result;
+}
+function optionalReceiver(obj?: { fail(): never }): number {
+  obj?.fail();
+}

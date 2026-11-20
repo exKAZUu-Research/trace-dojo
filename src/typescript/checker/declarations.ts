@@ -312,6 +312,7 @@ export function checkDuplicateMembers(c: Checker, body: TreeNode): void {
   }
   reportDuplicateGroups(c, groups.instance, false);
   reportDuplicateGroups(c, groups.static, true);
+  reportDuplicateGroups(c, groups.private, false);
 }
 
 function reportDuplicateGroups(c: Checker, groups: Map<string, TreeNode[]>, isStatic: boolean): void {
@@ -388,7 +389,7 @@ export function checkOverloadOptionality(c: Checker, body: TreeNode): void {
     if (name === undefined) continue;
     addClassMember(groups, member, name);
   }
-  for (const declarations of [...groups.instance.values(), ...groups.static.values()]) {
+  for (const declarations of [...groups.instance.values(), ...groups.static.values(), ...groups.private.values()]) {
     const canonical = declarations.find((declaration) => declaration.childForFieldName('body')) ?? declarations[0];
     for (const declaration of declarations) {
       if (hasToken(declaration, '?') !== hasToken(canonical, '?'))
@@ -400,12 +401,17 @@ export function checkOverloadOptionality(c: Checker, body: TreeNode): void {
   }
 }
 
-function classMemberGroups(): { instance: Map<string, TreeNode[]>; static: Map<string, TreeNode[]> } {
-  return { instance: new Map(), static: new Map() };
+function classMemberGroups(): Record<'instance' | 'static' | 'private', Map<string, TreeNode[]>> {
+  return { instance: new Map(), static: new Map(), private: new Map() };
 }
 
 function addClassMember(groups: ReturnType<typeof classMemberGroups>, member: TreeNode, name: string): void {
-  const byName = hasToken(member, 'static') ? groups.static : groups.instance;
+  const byName =
+    member.childForFieldName('name')?.type === 'private_property_identifier'
+      ? groups.private
+      : hasToken(member, 'static')
+        ? groups.static
+        : groups.instance;
   const group = byName.get(name) ?? [];
   group.push(member);
   byName.set(name, group);

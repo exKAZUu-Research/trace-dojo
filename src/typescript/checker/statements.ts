@@ -128,9 +128,10 @@ export class StatementChecker {
   private expressionStatement(node: TreeNode): void {
     const expression = named(node)[0];
     if (!expression) return;
-    this.c.expressions.check(expression);
+    const type = this.c.expressions.check(expression);
     const call = skipParentheses(expression);
-    if (call.type === 'call_expression' && this.c.expressions.calls.endsFlow(call)) this.c.flow.current = undefined;
+    if (call.type === 'call_expression' && this.c.expressions.calls.endsFlow(call, type))
+      this.c.flow.current = undefined;
   }
 
   private throwStatement(node: TreeNode): void {
