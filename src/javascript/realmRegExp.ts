@@ -32,7 +32,8 @@ export function defineRegExpBuiltins(builder: RealmBuilder): void {
   const constructor = builder.defineClass('RegExp', 2, regExpPrototype, ({ runtime, args, newTarget }) => {
     const [pattern, flags] = args;
     const regexp = pattern instanceof JsObject ? pattern.regexp : undefined;
-    if (regexp && !newTarget && flags === undefined) return pattern;
+    if (regexp && !newTarget && flags === undefined && runtime.get(pattern, 'constructor') === constructor)
+      return pattern;
     const source = regexp ? regexp.source : pattern === undefined ? '' : runtime.toString(pattern);
     const flagText = flags === undefined ? (regexp?.flags ?? '') : runtime.toString(flags);
     const object = newRegExp(runtime, source, flagText);

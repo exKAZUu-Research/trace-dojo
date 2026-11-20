@@ -250,11 +250,11 @@ const errorNames: ErrorName[] = [
 /** The `length` of the error constructors that take more than a message. */
 const errorArgumentCounts: Partial<Record<ErrorName, number>> = { AggregateError: 2, SuppressedError: 3 };
 
-/** Error's own static members, which have nothing to do here past their checks, as programs see no stack. */
 function defineErrorStatics(builder: RealmBuilder, errorConstructor: JsFunction): void {
   builder.method(errorConstructor, 'captureStackTrace', 2, ({ runtime, args }) => {
-    if (!isObject(args[0])) runtime.throwError('TypeError', 'invalid_argument');
-    return;
+    const target = args[0];
+    if (!isObject(target)) return runtime.throwError('TypeError', 'invalid_argument');
+    runtime.captureErrorStack(target);
   });
   builder.method(errorConstructor, 'isError', 1, ({ args }) => args[0] instanceof JsObject && args[0].isError);
   errorConstructor.properties.set('stackTraceLimit', {

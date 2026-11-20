@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 584 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
+// code-gauge-allow-file fileNcss 600 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { type SourceDiagnostic, sourceDiagnostic } from '../../interpreter/diagnostics';
@@ -62,6 +62,7 @@ import {
   stringType,
   type Structure,
   symbolType,
+  thisParameterOf,
   type TupleElement,
   type Type,
   type TypeParameter,
@@ -121,8 +122,7 @@ export class Checker {
   /** The unions that stand for a union alias, with the mapper that instantiates the alias's type into them. */
   private readonly aliasUnions = new Map<UnionType, { alias: UnionAlias; mapper: Mapper }>();
   private readonly deferredAliasUnionCache = new Map<string, UnionType>();
-  /** The members of class instance types with `this` standing for the instance type, by type. */
-  private readonly thisStructures = new Map<number, Structure>();
+  private readonly thisStructures = new Map<string, Structure>();
 
   /**
    * The operations and the time checking may take, as running a program may: a program can make checking slow, and
@@ -153,6 +153,7 @@ export class Checker {
     this.signatures.checkTypeParameterDeclarations(this.binder.allScopes);
     this.signatures.checkImplicitReturnTypes(this.root);
     this.statements.checkProgram(this.root);
+    this.typeNodes.checkWrittenTypeNames(this.root);
     checkParameterRedeclarations(this, this.binder.allScopes);
     const seen = new Set<string>();
     return this.diagnostics
@@ -706,21 +707,48 @@ export class Checker {
   // Structures ---------------------------------------------------------------------------------------------------
 
   /** The members of a type, with those of the interface its primitives box to. */
-  structureOf(type: Type): Structure {
+  structureOf(type: Type, receiver?: Type): Structure {
     const apparent = this.apparentType(type);
     if (apparent.kind === 'object') {
-      const thisType = apparent.thisType ?? apparent.target?.thisType;
-      if (!thisType) return apparent.resolve();
-      let structure = this.thisStructures.get(apparent.id);
-      if (!structure) {
-        structure = this.instantiateStructure(apparent.resolve(), new Map([[thisType.id, apparent]]));
-        this.thisStructures.set(apparent.id, structure);
-      }
-      return structure;
+      return this.objectStructure(apparent, receiver ?? (type.kind === 'typeParameter' ? type : apparent));
     }
-    if (apparent.kind === 'intersection') return this.intersectionStructure(apparent.types);
+    if (apparent.kind === 'intersection') return this.intersectionStructure(apparent.types, receiver ?? type);
     if (apparent.kind === 'union') return unionStructure(this, apparent.types);
     return emptyStructure();
+  }
+
+  private objectStructure(type: ObjectType, receiver: Type): Structure {
+    const parameter = thisParameterOf(type);
+    if (!parameter || parameter === receiver) return type.resolve();
+    const key = `${type.id}:${receiver.id}`;
+    let structure = this.thisStructures.get(key);
+    if (!structure) {
+      structure = this.instantiateStructure(type.resolve(), new Map([[parameter.id, receiver]]));
+      this.thisStructures.set(key, structure);
+    }
+    return structure;
+  }
+
+  /** Applies a class's or interface's polymorphic `this` when comparing heritage declarations. */
+  typeWithThisArgument(type: Type, receiver: Type): Type {
+    if (type.kind === 'intersection') {
+      const members = type.types.map((member) => this.typeWithThisArgument(member, receiver));
+      return members.some((member, index) => member !== type.types[index])
+        ? intersectionOf(members, this.budget)
+        : type;
+    }
+    if (type.kind !== 'object' || !thisParameterOf(type)) return type;
+    const key = `this:${type.id}:${receiver.id}`;
+    let applied = this.instantiationCache.get(key);
+    if (!applied) {
+      applied = anonymousObject(() => this.structureOf(type, receiver), {
+        name: type.name,
+        origin: type.origin ?? type,
+        classInfo: type.classInfo,
+      });
+      this.instantiationCache.set(key, applied);
+    }
+    return applied;
   }
 
   /** The type whose members a value of `type` has: its boxing interface for a primitive, its constraint for a type parameter. */
@@ -832,8 +860,8 @@ export class Checker {
     }
   }
 
-  private intersectionStructure(types: Type[]): Structure {
-    const structures = types.map((member) => this.structureOf(member));
+  private intersectionStructure(types: Type[], receiver: Type): Structure {
+    const structures = types.map((member) => this.structureOf(member, receiver));
     const properties = new Map<string, Property>();
     for (const structure of structures) {
       for (const [name, property] of structure.properties) {
@@ -896,10 +924,10 @@ export class Checker {
    * A property of a type, including those `Object` gives every object and those `CallableFunction` or
    * `NewableFunction` give every function or class, as under `strictBindCallApply`.
    */
-  propertyOf(type: Type, name: string): Property | undefined {
+  propertyOf(type: Type, name: string, receiver?: Type): Property | undefined {
     const mapped = type.kind === 'object' ? this.typeOperators.mappedPropertyOf(type, name) : undefined;
     if (mapped) return mapped;
-    const structure = this.structureOf(type);
+    const structure = this.structureOf(type, receiver);
     const own = structure.properties.get(name);
     if (own) return own;
     const apparent = this.apparentType(type);
@@ -927,7 +955,7 @@ export class Checker {
   }
 
   /** The members of a type with those of its bases that it does not redeclare. */
-  mergeBases(own: Structure, bases: Type[]): Structure {
+  mergeBases(own: Structure, bases: Type[], receiver?: Type): Structure {
     const properties = new Map(own.properties);
     let { stringIndex, numberIndex, symbolIndex } = own;
     const callSignatures = [...own.callSignatures];
@@ -935,7 +963,7 @@ export class Checker {
     const patternIndexLists = [own.patternIndexes];
     for (const base of bases) {
       if (base.kind !== 'object' && base.kind !== 'intersection' && base.kind !== 'typeParameter') continue;
-      const baseStructure = this.structureOf(base);
+      const baseStructure = this.structureOf(base, receiver);
       patternIndexLists.push(baseStructure.patternIndexes);
       for (const [name, property] of baseStructure.properties)
         if (!properties.has(name)) properties.set(name, property);

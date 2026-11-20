@@ -31,6 +31,7 @@ import {
   unknownType,
 } from './types';
 import { unionStructure } from './unionMembers';
+import { checkWrittenType } from './writtenTypes';
 
 interface JumpTarget {
   isLoop: boolean;
@@ -43,15 +44,6 @@ interface JumpTarget {
  * unsettled then reads the references it assigns or narrows with their declared types.
  */
 const MAX_LOOP_PASSES = 10;
-
-/**
- * The type syntaxes that check themselves where they are written, as in a branch of a conditional type no use
- * instantiates: a tuple its elements, and an indexed access its key.
- */
-const eagerTypeSyntaxes = new Set(['tuple_type', 'lookup_type']);
-
-/** The syntaxes whose type identifiers name a type rather than refer to one, or are resolved with their parent. */
-const nameOnlyTypeParents = new Set(['generic_type', 'type_parameter', 'mapped_type_clause', 'infer_type']);
 
 /** Checks statements, following the flow of control through them. */
 export class StatementChecker {
@@ -157,42 +149,7 @@ export class StatementChecker {
     const symbol = name ? this.c.scopeOf(node).lookupType(name) : undefined;
     this.c.signatures.typeParametersOf(node);
     if (symbol) this.c.typeNodes.declaredTypeOf(symbol);
-    this.resolveTypesIn(node.childForFieldName('value'));
-  }
-
-  /** Resolves every type written in a node, so that unknown names report errors. */
-  private resolveTypesIn(node: TreeNode | null): void {
-    if (!node) return;
-    const visit = (current: TreeNode): void => {
-      // A qualified name resolves as a whole, so that its namespace is checked for availability.
-      if (current.type === 'nested_type_identifier') {
-        this.c.typeNodes.typeFromNode(current);
-        return;
-      }
-      this.resolveTypeNode(current);
-      for (const child of named(current)) visit(child);
-    };
-    visit(node);
-  }
-
-  private resolveTypeNode(node: TreeNode): void {
-    if (
-      (node.type === 'type_identifier' || node.type === 'generic_type') &&
-      (!nameOnlyTypeParents.has(node.parent?.type ?? '') ||
-        // The constraint of `infer U extends C` is a sibling of the name.
-        (node.parent?.type === 'infer_type' && named(node.parent)[0]?.id !== node.id))
-    ) {
-      this.c.typeNodes.typeFromNode(node);
-    }
-    if (node.type === 'object_type') {
-      checkTypeMemberDuplicates(this.c, node);
-      checkOverloadOptionality(this.c, node);
-      checkDuplicateIndexSignatures(this.c, named(node));
-      const type = this.c.typeNodes.typeFromNode(node);
-      if (type.kind === 'object') checkIndexConformance(this.c, type.resolve(), { bodies: [node] });
-    }
-    if (eagerTypeSyntaxes.has(node.type)) this.c.typeNodes.typeFromNode(node);
-    if (node.type === 'infer_type') this.c.typeNodes.checkInferPlacement(node);
+    checkWrittenType(this.c, node.childForFieldName('value'));
   }
 
   private interfaceDeclaration(node: TreeNode): void {
@@ -207,8 +164,8 @@ export class StatementChecker {
     this.c.signatures.typeParametersOf(node);
     const type = this.c.typeNodes.declaredTypeOf(symbol);
     if (type.kind === 'object') this.checkInterfaceMembers(node, symbol, type.resolve());
-    for (const child of named(node)) if (child.type === 'extends_type_clause') this.resolveTypesIn(child);
-    this.resolveTypesIn(node.childForFieldName('body'));
+    for (const child of named(node)) if (child.type === 'extends_type_clause') checkWrittenType(this.c, child);
+    checkWrittenType(this.c, node.childForFieldName('body'));
   }
 
   private checkInterfaceMembers(node: TreeNode, symbol: Sym, structure: Structure): void {
@@ -240,11 +197,13 @@ export class StatementChecker {
     const body = node.childForFieldName('body');
     const clause = named(node).find((child) => child.type === 'extends_type_clause');
     if (!body || !clause) return;
+    const type = this.c.typeNodes.declaredTypeOf(symbol);
+    const receiver = type.kind === 'object' ? type.thisType : undefined;
     for (const baseNode of named(clause)) {
       const base = this.c.typeNodes.typeFromNode(baseNode);
       const mismatch = holdsTypeParameter(base)
         ? this.typeParameterBaseMismatch(symbol, base)
-        : this.structuralBaseMismatch(body, structure, base);
+        : this.structuralBaseMismatch(body, structure, base, receiver);
       if (mismatch === undefined) continue;
       const name = node.childForFieldName('name');
       this.c.error(
@@ -265,18 +224,24 @@ export class StatementChecker {
   }
 
   /** Why an interface does not fit a base that holds no type parameter, or `undefined` when it does. */
-  private structuralBaseMismatch(body: TreeNode, structure: Structure, base: Type): string | undefined {
+  private structuralBaseMismatch(
+    body: TreeNode,
+    structure: Structure,
+    base: Type,
+    receiver?: Type
+  ): string | undefined {
     if (isAnyLike(base) || (base.kind !== 'object' && base.kind !== 'intersection')) return undefined;
     return (
-      this.propertyBaseMismatch(body, structure, base) ?? baseIndexMismatch(this.c, structure, this.c.structureOf(base))
+      this.propertyBaseMismatch(body, structure, base, receiver) ??
+      baseIndexMismatch(this.c, structure, this.c.structureOf(base, receiver))
     );
   }
 
   /** Why a property an interface body declares does not fit the same property of a base, or `undefined` if none. */
-  private propertyBaseMismatch(body: TreeNode, structure: Structure, base: Type): string | undefined {
+  private propertyBaseMismatch(body: TreeNode, structure: Structure, base: Type, receiver?: Type): string | undefined {
     for (const property of structure.properties.values()) {
       if (property.declaration?.parent?.id !== body.id) continue;
-      const baseProperty = this.c.propertyOf(base, property.name);
+      const baseProperty = this.c.propertyOf(base, property.name, receiver);
       if (
         baseProperty &&
         ((property.optional && !baseProperty.optional) ||
@@ -293,7 +258,7 @@ export class StatementChecker {
     const kind = node.type === 'variable_declaration' ? 'var' : (node.childForFieldName('kind')?.text ?? 'let');
     for (const declarator of named(node)) {
       if (declarator.type !== 'variable_declarator') continue;
-      this.resolveTypesIn(declarator.childForFieldName('type'));
+      checkWrittenType(this.c, declarator.childForFieldName('type'));
       const nameNode = declarator.childForFieldName('name') as TreeNode;
       if (nameNode.type === 'identifier') this.variableDeclarator(declarator, nameNode, kind);
       else this.patternDeclarator(declarator, nameNode, kind === 'const');

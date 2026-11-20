@@ -1,0 +1,23 @@
+interface Chain {
+  value: number;
+  get(): this;
+}
+interface Named extends Chain { name: string }
+class Item implements Named {
+  value = 2;
+  name = 'item';
+  get(): this { return this; }
+}
+function keep<T extends Chain>(value: T): T { return value.get(); }
+function keepNamed<T extends Chain & { name: string }>(value: T): string {
+  return value.get().name;
+}
+function plain(value: Chain & { name: string }): string { return value.get().name; }
+const value: Named = new Item();
+console.log(value.get().name, keep(value).name, keepNamed(value), plain(value));
+interface Fluent<T> {
+  value: T;
+  map(action: (item: this) => T): this;
+}
+interface FluentChild extends Fluent<number> { multiplier: number }
+function next(item: FluentChild): FluentChild { return item.map(value => value.value * value.multiplier); }

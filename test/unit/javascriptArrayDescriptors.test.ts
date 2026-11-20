@@ -22,10 +22,11 @@ console.log(clonedHole.length, 0 in clonedHole, reads);`;
 
 test('array accessor traces show descriptors without invoking getters or showing ordinary null values', () => {
   const source = `let reads = 0;
-const array = [1, 2, 3];
+const array = [1, 2, 3, 4];
 Object.defineProperty(array, 0, {get() {reads++; return 7;}});
 Object.defineProperty(array, 1, {set(value: number) {reads++;}});
 Object.defineProperty(array, 2, {get() {reads++; return 9;}, set(value: number) {reads++;}});
+Object.defineProperty(array, 3, {get: undefined, set: undefined});
 const value = array[0];
 console.log(reads, value);`;
   const recording = traceProgram('typescript', source, source);
@@ -38,6 +39,8 @@ console.log(reads, value);`;
       0: { kind: 'value', value: '[Getter]', verbatim: true },
       1: { kind: 'value', value: '[Setter]', verbatim: true },
       2: { kind: 'value', value: '[Getter/Setter]', verbatim: true },
+      // oxlint-disable-next-line unicorn/no-null -- The trace represents an undefined array element with null.
+      3: { kind: 'value', value: null },
     },
   });
 });

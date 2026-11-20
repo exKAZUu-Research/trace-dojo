@@ -33,6 +33,7 @@ import {
   type Signature,
   simpleProperty,
   type Structure,
+  thisParameter,
   type Type,
   type TypeParameter,
   undefinedType,
@@ -109,13 +110,7 @@ export class ClassChecker {
     this.infos.set(node.id, info);
     const instanceType = this.instanceTypeOf(node, info, typeParameters);
     const staticType = this.staticTypeOf(node, info);
-    instanceType.thisType = {
-      kind: 'typeParameter',
-      id: newTypeId(),
-      name: 'this',
-      isThisType: true,
-      constraint: () => instanceType,
-    };
+    instanceType.thisType = thisParameter(instanceType);
     info.instanceType = instanceType;
     info.staticType = staticType;
     return info;
@@ -137,7 +132,11 @@ export class ClassChecker {
         const interfaces = this.c.typeNodes.interfaceMembers(this.mergedInterfaces(node));
         const own = this.withInterfaceMembers(this.membersOf(node, info, false), interfaces.own);
         const base = this.baseInstanceType(node);
-        structure = this.c.mergeBases(base ? this.mergeBase(own, base, instanceType) : own, interfaces.bases);
+        structure = this.c.mergeBases(
+          base ? this.mergeBase(own, base, instanceType) : own,
+          interfaces.bases,
+          instanceType.thisType
+        );
         return structure;
       },
     };
@@ -226,12 +225,8 @@ export class ClassChecker {
 
   /** The members of a class with those it inherits, whose `this` type becomes the derived class's. */
   private mergeBase(own: Structure, base: Type, instanceType: ObjectType): Structure {
-    if (base.kind !== 'object') return this.c.mergeBases(own, [base]);
-    const baseThis = base.thisType ?? base.target?.thisType;
-    const inherited =
-      baseThis && instanceType.thisType
-        ? this.c.instantiateStructure(base.resolve(), new Map([[baseThis.id, instanceType.thisType]]))
-        : this.c.structureOf(base);
+    if (base.kind !== 'object') return this.c.mergeBases(own, [base], instanceType.thisType);
+    const inherited = this.c.structureOf(base, instanceType.thisType);
     const properties = new Map(own.properties);
     for (const [name, property] of inherited.properties) if (!properties.has(name)) properties.set(name, property);
     return {
@@ -895,7 +890,8 @@ export class ClassChecker {
     if (container?.type === 'interface_declaration') {
       const name = container.childForFieldName('name')?.text;
       const symbol = name ? this.c.scopeOf(container).lookupType(name) : undefined;
-      return symbol ? this.c.typeNodes.declaredTypeOf(symbol) : anyType;
+      const type = symbol ? this.c.typeNodes.declaredTypeOf(symbol) : anyType;
+      return type.kind === 'object' ? (type.thisType ?? type) : type;
     }
     this.reportInvalidThisType(node);
     return errorType;

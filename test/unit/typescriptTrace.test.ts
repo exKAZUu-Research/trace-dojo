@@ -141,6 +141,28 @@ const value = alias.count;`;
   expect(traceItems.at(-1)?.referenceVars['Counter.empty']).toEqual({ kind: 'value', value: null });
 });
 
+test('a runtime write makes a static readonly constant visible in the trace', () => {
+  const source = `class Counter {
+  static readonly count = 1;
+  static readonly title = 'initial';
+  static readonly #hidden = 2;
+  static bump() { (this as any).count++; (this.#hidden as number)++; }
+}
+Object.assign(Counter, { title: 'updated' });
+Counter.bump();
+console.log(Counter.count, Counter.title);`;
+  const recording = traceProgram('typescript', source, source);
+  expect(recording.stdout).toBe('2 updated\n');
+  const first = recording.traceItems.find(({ vars }) => vars['Counter.title'] === 'updated');
+  expect(first?.vars['Counter.count']).toBeUndefined();
+  expect(first?.vars['Counter.#hidden']).toBeUndefined();
+  expect(recording.traceItems.at(-1)?.vars).toMatchObject({
+    'Counter.count': 2,
+    'Counter.title': 'updated',
+    'Counter.#hidden': 3,
+  });
+});
+
 test('displayed object entries retain own __proto__ keys', () => {
   const source = `const parsed = JSON.parse('{"__proto__":7,"name":"item"}');
 const literal = {["__proto__"]: 8};

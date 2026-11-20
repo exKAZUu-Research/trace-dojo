@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 422 -- Keeps function signatures, body checking, and parameter flow together.
+// code-gauge-allow-file fileNcss 428 -- Keeps function signatures, body checking, and parameter flow together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -6,7 +6,7 @@ import { contextualSignatureOf } from './contextualSignatures';
 import { FlowState, type State } from './flow';
 import { returnedLiteralType } from './returnLiterals';
 import type { Sym } from './scopes';
-import { isContextSensitiveFunction } from './signatures';
+import { isContextSensitiveFunction, parameterNodes } from './signatures';
 import {
   argumentParameters,
   hasToken,
@@ -29,6 +29,7 @@ import {
   unknownType,
   voidType,
 } from './types';
+import { checkWrittenType } from './writtenTypes';
 
 /** What checking a function's body found about how it returns. */
 export interface FunctionContext {
@@ -465,6 +466,7 @@ export class FunctionChecker {
 
   checkOverloadImplementation(node: TreeNode): void {
     if (this.c.isLibrary(node)) return;
+    this.checkSignatureAnnotations(node);
     const siblings = node.parent ? named(node.parent) : [];
     const index = siblings.findIndex((sibling) => sibling.id === node.id);
     // An optional method needs no implementation, unless a later declaration of the method follows.
@@ -533,13 +535,19 @@ export class FunctionChecker {
 
   checkFunctionLike(node: TreeNode, signature: Signature, contextual?: Signature): Type | undefined {
     if (this.c.silent > 0) return undefined;
-    const parameters = node.childForFieldName('parameters');
-    this.withInitializerFlow(node, 'parameters', () =>
-      this.checkParameterInitializers(parameters ? named(parameters) : [], signature, contextual)
-    );
+    this.withInitializerFlow(node, 'parameters', () => {
+      this.checkSignatureAnnotations(node);
+      const parameters = node.childForFieldName('parameters');
+      this.checkParameterInitializers(parameters ? named(parameters) : [], signature, contextual);
+    });
     return node.childForFieldName('body')
       ? this.checkFunctionBody(node, signature, contextual?.returnType(), false)
       : undefined;
+  }
+
+  private checkSignatureAnnotations(node: TreeNode): void {
+    for (const parameter of parameterNodes(node)) checkWrittenType(this.c, parameter.childForFieldName('type'));
+    checkWrittenType(this.c, node.childForFieldName('return_type'));
   }
 
   withInitializerFlow<T>(node: TreeNode, kind: 'field' | 'parameters', run: () => T): T {

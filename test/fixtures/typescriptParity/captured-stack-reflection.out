@@ -1,0 +1,5 @@
+true 0 function function
+false true
+payload true false
+TypeError Cannot define property stack, object is not extensible
+TypeError Cannot redefine property: stack

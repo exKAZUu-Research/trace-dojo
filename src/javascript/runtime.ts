@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 817 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss 831 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
@@ -237,14 +237,27 @@ export class Runtime {
 
   markError(error: JsObject): void {
     error.isError = true;
+    if (this.unavailableMember) this.defineUnavailableStack(error);
+  }
+
+  captureErrorStack(target: JsObject): void {
+    if (!target.extensible) this.throwError('TypeError', 'Cannot define property stack, object is not extensible');
+    if (target.properties.get('stack')?.configurable === false)
+      this.throwError('TypeError', 'Cannot redefine property: stack');
     if (!this.unavailableMember) return;
+    if (!target.properties.has('stack')) this.allocate(1);
+    this.defineUnavailableStack(target);
+    target.stackHeadline = undefined;
+  }
+
+  private defineUnavailableStack(target: JsObject): void {
     this.stackAccessors ??= {
       get: this.newNativeFunction('', 0, rejectStackAccess),
       set: this.newNativeFunction('', 1, rejectStackAccess),
       configurable: true,
       enumerable: false,
     };
-    error.properties.set('stack', { ...this.stackAccessors });
+    target.properties.set('stack', { ...this.stackAccessors });
   }
 
   isUnavailableValue(value: Value): boolean {
@@ -402,12 +415,16 @@ export class Runtime {
    * error on the row that asked for it.
    */
   functionSource(fn: JsFunction): string {
-    const { behavior } = fn;
     if (this.rejectsFunctionText) {
       throw new CompileError([
         { row: this.currentRow ?? 0, message: '関数やクラスの文字列への変換は、この採点環境では使えません。' },
       ]);
     }
+    return this.functionSourceText(fn);
+  }
+
+  private functionSourceText(fn: JsFunction): string {
+    const { behavior } = fn;
     if (behavior.kind === 'native') return `function ${this.functionName(fn)}() { [native code] }`;
     return behavior.node.source;
   }
@@ -429,7 +446,7 @@ export class Runtime {
     if (target.isError) return this.errorReceiverText(target);
     // A builtin iterator has no constructor of its own, so V8 names it by its tag.
     if (target.hostIterator) return `[object ${this.toString(this.get(target, WELL_KNOWN_SYMBOLS.toStringTag))}]`;
-    if (target instanceof JsFunction) return this.functionSource(target);
+    if (target instanceof JsFunction) return this.functionSourceText(target);
     const constructor = this.findProperty(target, 'constructor');
     const name =
       constructor && !isAccessor(constructor) && constructor.value instanceof JsFunction

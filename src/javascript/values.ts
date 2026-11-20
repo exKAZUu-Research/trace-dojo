@@ -148,7 +148,7 @@ export type FunctionBehavior =
       isDerived: boolean;
       /** Instance fields, initialized when the constructor starts (or `super()` returns). */
       fields: ClassField[];
-      traceConstants: Set<Key>;
+      traceConstants: Map<Key, Value>;
       traceBinding?: Binding;
     };
 

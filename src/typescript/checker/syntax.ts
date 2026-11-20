@@ -7,6 +7,26 @@ export function named(node: TreeNode): TreeNode[] {
   return node.namedChildren.filter((child): child is TreeNode => child !== null && child.type !== 'comment');
 }
 
+const typeNameContainers = new Set([
+  'abstract_class_declaration',
+  'class',
+  'class_declaration',
+  'generic_type',
+  'interface_declaration',
+  'mapped_type_clause',
+  'type_alias_declaration',
+  'type_parameter',
+]);
+
+export function isStandaloneTypeReference(node: TreeNode): boolean {
+  if (node.type !== 'type_identifier') return false;
+  const parent = node.parent;
+  if (!parent) return true;
+  if (parent.type === 'nested_type_identifier') return false;
+  if (parent.type === 'infer_type') return named(parent)[0]?.id !== node.id;
+  return !typeNameContainers.has(parent.type) || parent.childForFieldName('name')?.id !== node.id;
+}
+
 export function hasToken(node: TreeNode, token: string): boolean {
   return node.children.some((child) => child !== null && !child.isNamed && child.type === token);
 }

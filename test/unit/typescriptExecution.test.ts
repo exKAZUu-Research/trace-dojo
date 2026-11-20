@@ -474,6 +474,8 @@ test('reflected unavailable methods and error stack accessors reject invocation'
     'Object.getOwnPropertyDescriptor(console, "time")!.value("start");',
     'const e = new Error("bad"); Object.getOwnPropertyDescriptor(e, "stack")!.get!.call(e);',
     'const e = new Error("bad"); Object.getOwnPropertyDescriptors(e).stack!.set!.call(e, "fake");',
+    'const x: any = {}; (Error as any).captureStackTrace(x); console.log(x.stack);',
+    'const x = {}; (Error as any).captureStackTrace(x); Object.getOwnPropertyDescriptor(x, "stack")!.get!.call(x);',
   ]) {
     expect(executeProgram('typescript', source)).toMatchObject({
       kind: 'compileError',

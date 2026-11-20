@@ -1,6 +1,5 @@
 import { expect, test } from 'vitest';
 
-import { CompileError } from '../../src/interpreter/diagnostics';
 import { executeProgram, traceProgram } from '../../src/interpreter/program';
 
 test.each([
@@ -30,26 +29,9 @@ try { (fn as any).name='changed'; } catch(error) { caught=error; }
 `;
 
 test.each([
-  'console.log(caught.message);',
-  "console.log(Object.getOwnPropertyDescriptor(caught,'message')?.value);",
-  'console.log(caught);',
-  'console.dir(caught,{showHidden:true});',
-  "Object.defineProperty(caught,'message',{enumerable:true}); console.table([caught]);",
-  "Object.defineProperty(caught,'message',{enumerable:true}); JSON.stringify(caught);",
-  'Object.freeze(caught); console.log(caught.message);',
-  "Object.defineProperty(caught,'message',{writable:false}); console.log(caught.message);",
-])('observing an unavailable function-source error message stops the program: %s', (observation) => {
-  const result = executeProgram('typescript', caughtFunctionError + observation);
-  expect(result).toMatchObject({
-    kind: 'compileError',
-    diagnostics: [{ message: expect.stringContaining('関数やクラスの文字列への変換') }],
-  });
-});
-
-test.each([
   "Object.defineProperty(caught,'message',{value:'replacement'});",
   "Object.defineProperty(caught,'message',{get:()=> 'replacement'});",
-])('explicitly redefining an unavailable message replaces it: %s', (definition) => {
+])('a caught function-property error allows redefining its message: %s', (definition) => {
   expect(executeProgram('typescript', caughtFunctionError + definition + 'console.log(caught.message);')).toMatchObject(
     {
       kind: 'executed',
@@ -76,20 +58,18 @@ test.each([
 });
 
 test.each([
-  "(fn as any).name='changed'",
-  'delete (fn as any).name',
-  'Object.setPrototypeOf(fn, null)',
-  '(fn as any).__proto__ = null',
-])('a trace can keep a caught error before its message is read: %s', (action) => {
+  ["(fn as any).name='changed'", "Cannot assign to read only property 'name' of function '()=>{}'"],
+  ['delete (fn as any).name', "Cannot delete property 'name' of ()=>{}"],
+  ['Object.setPrototypeOf(fn, null)', '()=>{} is not extensible'],
+  ['(fn as any).__proto__ = null', '()=>{} is not extensible'],
+])('a trace can keep and log a caught function-property error: %s', (action, message) => {
   const source = caughtFunctionError.replace("(fn as any).name='changed'", action);
-  const program = source + 'const handled = caught instanceof TypeError; console.log(handled);';
+  const program = source + 'const handled = caught instanceof TypeError; console.log(handled, caught.message);';
   expect(traceProgram('typescript', program, program)).toMatchObject({
-    stdout: 'true\n',
+    stdout: `true ${message}\n`,
     finalVars: { handled: true },
     uncaughtException: undefined,
   });
-  const observesMessage = source + 'console.log(caught.message);';
-  expect(() => traceProgram('typescript', observesMessage, observesMessage)).toThrow(CompileError);
 });
 
 test('tracing a handled function-property error without retaining its message records the result', () => {

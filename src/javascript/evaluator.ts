@@ -581,7 +581,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
       homeObject: prototype,
       isDerived: cls.superClass !== undefined,
       fields: [],
-      traceConstants: new Set(),
+      traceConstants: new Map(),
       traceBinding: binding,
     };
     const fn = new JsFunction(constructorParent, behavior);
@@ -681,8 +681,8 @@ export class Evaluator extends SuspendableStatementEvaluator {
           onlyCalls: value !== undefined && isObjectCreation(value),
         };
         if (member.isStatic) {
-          if (member.isTraceConstant) behavior.traceConstants.add(key);
-          staticInitializers.push(() => this.initializeField(fn, field));
+          const constants = member.isTraceConstant ? behavior.traceConstants : undefined;
+          staticInitializers.push(() => this.initializeField(fn, field, constants));
         } else behavior.fields.push(field);
         continue;
       }
@@ -760,7 +760,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
     });
   }
 
-  private initializeField(target: JsObject, field: ClassField): void {
+  private initializeField(target: JsObject, field: ClassField, constants?: Map<Key, Value>): void {
     const { runtime } = this;
     if (field.property) {
       mergePrivate(runtime, target, privateIdentity(field.key), field.property);
@@ -776,6 +776,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
           configurable: false,
         });
       else runtime.createDataProperty(target, field.key, value);
+      constants?.set(field.key, value);
     });
   }
 

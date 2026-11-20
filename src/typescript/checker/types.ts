@@ -240,6 +240,14 @@ export interface TypeParameter {
   isThisType?: boolean;
 }
 
+export function thisParameter(type: ObjectType): TypeParameter {
+  return { kind: 'typeParameter', id: newTypeId(), name: 'this', isThisType: true, constraint: () => type };
+}
+
+export function thisParameterOf(type: ObjectType): TypeParameter | undefined {
+  return type.thisType ?? type.target?.thisType;
+}
+
 export interface IndexedAccessType {
   kind: 'indexedAccess';
   id: number;

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 501 -- Resolves every kind of type syntax a program writes, each needing its own rule.
+// code-gauge-allow-file fileNcss 532 -- Resolves every kind of type syntax a program writes, each needing its own rule.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
@@ -13,7 +13,7 @@ import { withDomMembers } from './library';
 import { RecursiveAliases } from './recursiveAliases';
 import type { Sym } from './scopes';
 import { nameSuggestionHint } from './spelling';
-import { hasToken, named, numberValue, propertyNameText, stringValue } from './syntax';
+import { hasToken, isStandaloneTypeReference, named, numberValue, propertyNameText, stringValue } from './syntax';
 import {
   aliasedDeclaredType,
   anonymousObject,
@@ -40,6 +40,7 @@ import {
   stringType,
   type Structure,
   symbolType,
+  thisParameter,
   trueType,
   type TupleElement,
   type Type,
@@ -69,6 +70,8 @@ const predefinedTypes: Record<string, Type> = {
 const stringMappings = new Set(['Uppercase', 'Lowercase', 'Capitalize', 'Uncapitalize']);
 
 const domInterfaceNames = new Set(BROWSER_INTERFACES.map((entry) => (typeof entry === 'string' ? entry : entry[0])));
+
+type ResolvedTypeName = { symbol: Sym; parameters: TypeParameter[] } | { local: TypeParameter } | 'stringMapping';
 
 /** Resolves the types the program writes: annotations, type references, and type declarations. */
 export class TypeNodes {
@@ -191,7 +194,7 @@ export class TypeNodes {
   private readonlyType(node: TreeNode): Type {
     const operand = named(node)[0];
     if (!['array_type', 'tuple_type'].includes(operand.type))
-      this.c.error(node, 'readonly 型修飾子は、配列型かタプル型のリテラルにのみ使えます。');
+      this.c.errorWhileResolving(node, 'readonly 型修飾子は、配列型かタプル型のリテラルにのみ使えます。');
     const inner = this.typeFromNode(operand);
     if (this.c.isArrayType(inner)) return this.c.arrayType(this.c.elementTypeOf(inner as ObjectType), true);
     if (inner.kind === 'object' && inner.objectKind === 'tuple')
@@ -386,48 +389,71 @@ export class TypeNodes {
     }
   }
 
-  /** The type a name refers to in a type position, applied to type arguments. */
-  // code-gauge-allow functionCognitiveComplexity 20 -- Resolves type names, rejects unavailable library types, and checks their type arguments.
+  /** Checks names even in annotations whose types remained lazy or were resolved silently. */
+  checkWrittenTypeNames(root: TreeNode): void {
+    for (const node of root.descendantsOfType(['type_identifier', 'generic_type', 'nested_type_identifier'])) {
+      this.c.budget.spend();
+      if (node.type === 'nested_type_identifier') this.qualifiedType(node);
+      else if (node.type === 'generic_type') {
+        const name = node.childForFieldName('name');
+        const argumentsNode = node.childForFieldName('type_arguments');
+        if (name && name.type !== 'nested_type_identifier')
+          this.resolveTypeName(node, name, argumentsNode ? named(argumentsNode).length : 0);
+      } else if (isStandaloneTypeReference(node)) this.resolveTypeName(node, node, 0);
+    }
+  }
+
   private typeReference(node: TreeNode, nameNode: TreeNode, typeArguments: Type[]): Type {
+    const reference = this.resolveTypeName(node, nameNode, typeArguments.length);
+    if (!reference) return errorType;
+    if (reference === 'stringMapping')
+      return this.c.typeOperators.stringMappingFromNode(node, nameNode.text as 'Uppercase', typeArguments[0]);
+    if ('local' in reference) return reference.local;
+    const { symbol, parameters } = reference;
+    const declared = this.declaredTypeOf(symbol);
+    if (parameters.length === 0) return declared;
+    const filled = this.c.fillTypeArguments(parameters, typeArguments);
+    this.interfaceBases.afterResolving(() => this.checkTypeArgumentConstraints(node, parameters, filled));
+    return this.appliedType(symbol, declared, parameters, filled);
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 20 -- Checks local bindings, intrinsic types, unavailable symbols, and argument counts.
+  private resolveTypeName(node: TreeNode, nameNode: TreeNode, argumentCount: number): ResolvedTypeName | undefined {
     const name = nameNode.text;
-    const symbol = this.c.scopeOf(nameNode).lookupType(name);
+    const scope = this.c.scopeOf(nameNode);
+    const symbol = scope.lookupType(name);
     const local = this.c.typeOperators.mappedOrInferParameter(nameNode, name, symbol?.scope.node);
     if (local) {
-      if (typeArguments.length > 0) this.c.error(node, `型 ${name} は型引数をとりません。`);
-      return local;
+      if (argumentCount > 0) this.c.error(node, `型 ${name} は型引数をとりません。`);
+      return { local };
     }
-    if (stringMappings.has(name) && typeArguments.length === 1 && !symbol?.typeDeclarations.length)
-      return this.c.typeOperators.stringMappingFromNode(node, name as 'Uppercase', typeArguments[0]);
+    if (stringMappings.has(name) && argumentCount === 1 && !symbol?.typeDeclarations.length) return 'stringMapping';
     if (!symbol) {
-      const value = this.c.scopeOf(nameNode).lookupValue(name);
       this.c.error(
         nameNode,
-        value
+        scope.lookupValue(name)
           ? `${name} は値であり、型としては使えません。型を表すには typeof ${name} と書いてください。`
-          : `型 ${name} が見つかりません。${nameSuggestionHint(this.c.scopeOf(nameNode), name, 'type', this.c.budget)}`
+          : `型 ${name} が見つかりません。${nameSuggestionHint(scope, name, 'type', this.c.budget)}`
       );
-      return errorType;
+      return undefined;
     }
-    if (this.reportUnusableSymbol(node, nameNode, symbol)) return errorType;
-    const declared = this.declaredTypeOf(symbol);
+    if (this.reportUnusableSymbol(node, nameNode, symbol)) return undefined;
     const parameters = this.c.signatures.typeParametersOfSymbol(symbol);
     if (parameters.length === 0) {
-      if (typeArguments.length > 0) this.c.error(node, `型 ${name} は型引数をとりません。`);
-      return declared;
+      if (argumentCount > 0) this.c.error(node, `型 ${name} は型引数をとりません。`);
+      return { symbol, parameters };
     }
     const required = parameters.filter((parameter) => !parameter.default).length;
-    if (typeArguments.length < required || typeArguments.length > parameters.length) {
+    if (argumentCount < required || argumentCount > parameters.length) {
       this.c.error(
         node,
         required === parameters.length
           ? `ジェネリック型 ${name} には型引数が ${required} 個必要です。`
           : `ジェネリック型 ${name} には型引数が ${required} 個から ${parameters.length} 個必要です。`
       );
-      return errorType;
+      return undefined;
     }
-    const filled = this.c.fillTypeArguments(parameters, typeArguments);
-    this.interfaceBases.afterResolving(() => this.checkTypeArgumentConstraints(node, parameters, filled));
-    return this.appliedType(symbol, declared, parameters, filled);
+    return { symbol, parameters };
   }
 
   /** Reports a type the name cannot refer to here: an unsupported library type, or a class type parameter in a static member. */
@@ -751,10 +777,11 @@ export class TypeNodes {
         // Resolving its bases may resolve the interface itself, as a base's type arguments or keys may need its members.
         if (structure) return structure;
         structure = emptyStructure();
-        structure = this.c.mergeBases(this.interfaceOwnMembers(symbol.typeDeclarations), bases);
+        structure = this.c.mergeBases(this.interfaceOwnMembers(symbol.typeDeclarations), bases, type.thisType);
         return structure;
       },
     };
+    if (symbol.typeDeclarations.some(interfaceUsesThis)) type.thisType = thisParameter(type);
     this.interfaceBases.register(type, symbol);
     return type;
   }
@@ -778,6 +805,14 @@ export class TypeNodes {
       ...members.flat().filter(isIndexSignature),
     ]);
   }
+}
+
+/** A derived interface can inherit a polymorphic `this` from its bases. */
+function interfaceUsesThis(declaration: TreeNode): boolean {
+  return (
+    declaration.namedChildren.some((child) => child?.type === 'extends_type_clause') ||
+    declaration.descendantsOfType('this_type').length > 0
+  );
 }
 
 const mappedTypeMembersMessage = 'マップ型には、プロパティやメソッドを宣言できません。';

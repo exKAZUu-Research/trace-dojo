@@ -19,6 +19,7 @@ import {
   undefinedType,
   unionOf,
 } from './types';
+import { checkWrittenType } from './writtenTypes';
 
 /** Checks class declarations: their members, constructors, and the types they implement and extend. */
 export class ClassDeclarationChecker {
@@ -188,6 +189,7 @@ export class ClassDeclarationChecker {
     this.checkMemberDeclaration(member, info);
     switch (member.type) {
       case 'field_definition': {
+        checkWrittenType(this.c, member.childForFieldName('type'));
         this.checkFieldInitializer(member);
         break;
       }
@@ -268,31 +270,37 @@ export class ClassDeclarationChecker {
       this.c.error(member, "'static' 修飾子はコンストラクタの宣言には付けられません。");
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Reports an incompatible member at itself and a missing one at the class, as TypeScript does.
   private checkImplements(node: TreeNode, info: ClassInfo): void {
     const heritage = node.namedChildren.find((child) => child?.type === 'class_heritage');
     const clause = heritage?.namedChildren.find((child) => child?.type === 'implements_clause');
     if (!clause) return;
     for (const typeNode of named(clause)) {
       const target = this.validImplementedType(typeNode);
-      if (!target || isAnyLike(target) || this.c.relations.isAssignable(info.instanceType, target)) continue;
-      if (!this.reportIncompatibleMembers(info, target)) {
-        const missing =
-          target.kind === 'object'
-            ? [...target.resolve().properties.values()].filter(
-                (property) => !property.optional && !this.c.propertyOf(info.instanceType, property.name)
-              )
-            : [];
-        const detail =
-          missing.length > 0
-            ? `プロパティ ${missing.map((property) => `'${property.name}'`).join(', ')} がありません。`
-            : '';
-        this.c.error(
-          node.childForFieldName('name') ?? node,
-          `クラス '${info.name}' は、インターフェース '${this.c.print(target)}' を正しく実装していません。${detail}`
-        );
-      }
+      if (!target || isAnyLike(target)) continue;
+      const self = this.c.classes.selfType(info);
+      const base = this.c.typeWithThisArgument(target, self);
+      const instance = base === target ? info.instanceType : this.c.typeWithThisArgument(info.instanceType, self);
+      if (this.c.relations.isAssignable(instance, base)) continue;
+      if (!this.reportIncompatibleMembers(info, target, base === target ? undefined : self))
+        this.reportUnimplementedType(node, info, target);
     }
+  }
+
+  private reportUnimplementedType(node: TreeNode, info: ClassInfo, target: Type): void {
+    const missing =
+      target.kind === 'object'
+        ? [...target.resolve().properties.values()].filter(
+            (property) => !property.optional && !this.c.propertyOf(info.instanceType, property.name)
+          )
+        : [];
+    const detail =
+      missing.length > 0
+        ? `プロパティ ${missing.map((property) => `'${property.name}'`).join(', ')} がありません。`
+        : '';
+    this.c.error(
+      node.childForFieldName('name') ?? node,
+      `クラス '${info.name}' は、インターフェース '${this.c.print(target)}' を正しく実装していません。${detail}`
+    );
   }
 
   /** The type an `implements` clause names, unless it is an error or a type a class cannot implement, which is reported. */
@@ -313,11 +321,11 @@ export class ClassDeclarationChecker {
    * Reports, at each member, the members a class declares in its body with types its interface does not allow, where
    * an optional member's type includes `undefined`.
    */
-  private reportIncompatibleMembers(info: ClassInfo, target: Type): boolean {
+  private reportIncompatibleMembers(info: ClassInfo, target: Type, receiver?: Type): boolean {
     if (target.kind !== 'object') return false;
     let reported = false;
-    for (const property of target.resolve().properties.values()) {
-      const own = this.c.propertyOf(info.instanceType, property.name);
+    for (const property of this.c.structureOf(target, receiver).properties.values()) {
+      const own = this.c.propertyOf(info.instanceType, property.name, receiver);
       if (!own || own.declaringClass !== info || own.declaration?.parent?.type !== 'class_body') continue;
       if (this.c.relations.isAssignable(propertyAccessType(own), propertyAccessType(property))) continue;
       this.c.error(

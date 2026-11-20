@@ -186,6 +186,7 @@ function displayNodeOf(value: Value, seen: Set<JsObject>, runtime: Runtime): Dis
 }
 
 function accessorNode(property: AccessorProperty): DisplayNode {
+  if (!property.get && !property.set) return NULL_NODE;
   const label = property.get ? (property.set ? 'Getter/Setter' : 'Getter') : 'Setter';
   return { kind: 'value', value: `[${label}]`, verbatim: true };
 }
@@ -257,7 +258,7 @@ function privateLabels(keys: string[]): string[] {
 }
 
 /** The fields learners see in an object: its own enumerable data properties and private fields. */
-function displayedEntries(object: JsObject, runtime: Runtime, excluded?: ReadonlySet<Key>): [string, Value][] {
+function displayedEntries(object: JsObject, runtime: Runtime, constants?: ReadonlyMap<Key, Value>): [string, Value][] {
   const entries: [string, Value][] = [];
   // Errors keep their message in a non-enumerable property.
   const message = object.isError ? object.properties.get('message') : undefined;
@@ -268,23 +269,23 @@ function displayedEntries(object: JsObject, runtime: Runtime, excluded?: Readonl
       typeof key === 'string' &&
       property.enumerable &&
       !isAccessor(property) &&
-      traceField(runtime, property.value, excluded?.has(key))
+      traceField(runtime, property.value, constants?.get(key))
     )
       entries.push([key, property.value]);
   }
   const fields = [...(object.privateMembers ?? [])].filter(
-    ([key, property]) => !isAccessor(property) && traceField(runtime, property.value, excluded?.has(key))
+    ([key, property]) => !isAccessor(property) && traceField(runtime, property.value, constants?.get(key))
   );
   const labels = privateLabels(fields.map(([key]) => key));
   for (const [index, [, property]] of fields.entries()) entries.push([labels[index], (property as DataProperty).value]);
   return entries;
 }
 
-function traceField(runtime: Runtime, value: Value, isConstant: boolean | undefined): boolean {
+function traceField(runtime: Runtime, value: Value, initialConstant: Value): boolean {
   return (
     !(value instanceof JsFunction) &&
     !runtime.isUnavailableValue(value) &&
-    (!isConstant || value === undefined || value === null)
+    (value === undefined || value === null || !Object.is(value, initialConstant))
   );
 }
 

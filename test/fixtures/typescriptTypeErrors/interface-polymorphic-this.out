@@ -1,0 +1,10 @@
+(2,11): error TS2430: Interface 'Invalid' incorrectly extends interface 'Chain'.
+  The types returned by 'get()' are incompatible between these types.
+    Type 'Chain' is not assignable to type 'this'.
+      'Chain' is assignable to the constraint of type 'this', but 'this' could be instantiated with a different subtype of constraint 'Invalid'.
+(4,3): error TS2416: Property 'get' in type 'Container' is not assignable to the same property in base type 'Chain'.
+  Type '() => Chain' is not assignable to type '() => this'.
+    Type 'Chain' is not assignable to type 'this'.
+      'Chain' is assignable to the constraint of type 'this', but 'this' could be instantiated with a different subtype of constraint 'Container'.
+(6,68): error TS2322: Type 'number | Chain' is not assignable to type 'T'.
+  'T' could be instantiated with an arbitrary type which could be unrelated to 'number | Chain'.
