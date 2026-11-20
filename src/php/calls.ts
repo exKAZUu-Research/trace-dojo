@@ -1,7 +1,7 @@
-// code-gauge-allow-file fileNcss 808 -- Keeps call binding, completion and frame cleanup together.
+// code-gauge-allow-file fileNcss 836 -- Keeps call binding, completion and frame cleanup together.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
-import type { FunctionDecl } from './ast';
+import type { FunctionDecl, Stmt } from './ast';
 import { lower, untilNul } from './bytes';
 import { valueName } from './conversions';
 import {
@@ -95,11 +95,22 @@ export interface CallRecord {
   row: number | undefined;
 }
 
+export type StatementCompletion =
+  | undefined
+  | { t: 'break' | 'continue'; depth: number }
+  | { t: 'return'; slot: Value | Ref; row: number }
+  | { t: 'goto'; label: string };
+
 /** Runs a user function's body, which the interpreter provides. */
 let runBody: (decl: FunctionDecl, frame: Frame) => Value = () => null;
+let runStatementList: (statements: Stmt[]) => StatementCompletion = () => {};
 
-export function setBodyRunner(run: (decl: FunctionDecl, frame: Frame) => Value): void {
+export function setBodyRunner(
+  run: (decl: FunctionDecl, frame: Frame) => Value,
+  runList: (statements: Stmt[]) => StatementCompletion
+): void {
   runBody = run;
+  runStatementList = runList;
 }
 
 /** The fatal error PHP reports when endless recursion uses up its memory, growing its stack by a 2 MiB page. */
@@ -247,18 +258,73 @@ interface NativeHolders {
   argumentCount: number;
 }
 
-function invokeNative(
+interface NativeCallState {
+  runtime: Runtime;
+  caller: Frame;
+  name: string;
+  inline: boolean;
+  forwardsReference: boolean;
+  strict: boolean;
+  record: CallRecord | undefined;
+  held: NativeHolders;
+  savedRow: number;
+}
+
+function isHostMemoryError(message: string): boolean {
+  const lowerMessage = message.toLowerCase();
+  return (
+    lowerMessage.includes('invalid string length') ||
+    lowerMessage.includes('invalid array length') ||
+    lowerMessage.includes('out of memory') ||
+    lowerMessage.includes('maximum call stack size exceeded')
+  );
+}
+
+export function invokeNative(
   target: CallTarget,
   fn: NativeFunction,
   args: ArgValue[],
   row: number | undefined,
   discardResult: boolean
 ): Value {
+  const saved = enterNativeCall(target, fn, args, row);
+  let result: Value = null;
+  let returnedReference: Ref | undefined;
+  let failed = false;
+  let failure: unknown;
+  try {
+    result = fn.impl(prepareNativeCall(saved, target, fn, args, row, discardResult));
+    if (typeof result === 'string') saved.runtime.ensureStringFits(result.length);
+    if (saved.forwardsReference && !discardResult) {
+      returnedReference = saved.runtime.lastReturnRef;
+      if (returnedReference) saved.runtime.holdTemporaryReference(returnedReference);
+    }
+    target.captureReturn?.(result);
+  } catch (error) {
+    failed = true;
+    failure =
+      error instanceof RangeError && isHostMemoryError(error.message) ? saved.runtime.memoryExhausted(2 ** 31) : error;
+    throw failure;
+  } finally {
+    if (target.thisObj) nativeOwnershipChanged(target.thisObj);
+    exitNativeCall(saved, target, result, failure, failed);
+  }
+  saved.runtime.lastReturnRef = returnedReference;
+  return result;
+}
+
+// code-gauge-allow functionCognitiveComplexity 19 -- Builds the native call record and argument holders in one pass.
+function enterNativeCall(
+  target: CallTarget,
+  fn: NativeFunction,
+  args: ArgValue[],
+  row: number | undefined
+): NativeCallState {
   const runtime = rt();
   runtime.spend();
   const caller = runtime.frame;
   const name = functionDisplayName(target);
-  const inline = target.inline && row !== undefined;
+  const inline = Boolean(target.inline && row !== undefined);
   const forwardsReference = fn.forwardsReference === true || (inline && fn.forwardsReference === 'inlined');
   const strict = callerIsStrict();
   let record: CallRecord | undefined;
@@ -285,72 +351,75 @@ function invokeNative(
   for (const ref of held.references) ref.rc++;
   runtime.nativeHeld.push(held.values);
   handOverArgs(caller, args);
-  const savedRow = runtime.row;
-  let result: Value = null;
-  let returnedReference: Ref | undefined;
-  let failed = false;
-  let failure: unknown;
-  try {
-    const { values, refs, named } = bindNative(
-      fn,
-      args,
-      name,
-      strict,
-      Boolean(inline || target.directOverload),
-      record
-    );
-    if (target.dynamic && fn.directOnly) throwError('Error', `Cannot call ${fn.name}() dynamically`);
-    for (let index = 0; index < values.length; index++) {
-      if (values[index] === undefined && fn.params[index]?.byRef)
-        refs[index] = Ref.temporary(nativeDefault(fn.params[index].nativeDefault));
-    }
-    if (record) record.argumentRefs = refs;
-    for (const ref of refs) {
-      if (!ref || held.references.includes(ref)) continue;
-      ref.rc++;
-      held.references.push(ref);
-      held.values.splice(held.argumentCount++, 0, ref);
-    }
-    if (forwardsReference) runtime.lastReturnRef = undefined;
-    result = runNative(runtime, fn, {
-      args: values,
-      refs,
-      thisObj: target.thisObj,
-      calledClass: target.staticClass,
-      named,
-      directOverload: target.directOverload,
-      compiledCallback: target.compiledCallback,
-      dynamic: target.dynamic,
-      row: inline || target.frameless ? row : undefined,
-      discardResult: Boolean(inline && discardResult),
-    });
-    if (forwardsReference && !discardResult) {
-      returnedReference = runtime.lastReturnRef;
-      if (returnedReference) runtime.holdTemporaryReference(returnedReference);
-    }
-    target.captureReturn?.(result);
-  } catch (error) {
-    failed = true;
-    failure = error;
-    throw error;
-  } finally {
-    if (!inline) {
-      nativeDepth--;
-      callStack.pop();
-    }
-    runtime.nativeCalls--;
-    runtime.nativeHeld.pop();
-    if (target.thisObj) runtime.pendingGcRoots.add(target.thisObj);
-    runtime.row = savedRow;
-    if (!failed || failure instanceof PhpThrow || failure instanceof ExitSignal) {
-      if (result instanceof PhpObject || result instanceof PhpArray) caller.temporaries.push(result);
-      releaseNativeValues(runtime, held, failure instanceof PhpThrow ? failure : undefined);
-    } else {
-      for (const ref of held.references) ref.releaseWithoutGc();
-    }
+  return { runtime, caller, name, inline, forwardsReference, strict, record, held, savedRow: runtime.row };
+}
+
+// code-gauge-allow functionCognitiveComplexity 16 -- Binds native arguments, by-ref defaults, and reference holders before dispatch.
+function prepareNativeCall(
+  saved: NativeCallState,
+  target: CallTarget,
+  fn: NativeFunction,
+  args: ArgValue[],
+  row: number | undefined,
+  discardResult: boolean
+): NativeContext {
+  const { values, refs, named } = bindNative(
+    fn,
+    args,
+    saved.name,
+    saved.strict,
+    Boolean(saved.inline || target.directOverload),
+    saved.record
+  );
+  if (target.dynamic && fn.directOnly) throwError('Error', `Cannot call ${fn.name}() dynamically`);
+  for (let index = 0; index < values.length; index++) {
+    if (values[index] === undefined && fn.params[index]?.byRef)
+      refs[index] = Ref.temporary(nativeDefault(fn.params[index].nativeDefault));
   }
-  runtime.lastReturnRef = returnedReference;
-  return result;
+  if (saved.record) saved.record.argumentRefs = refs;
+  for (const ref of refs) {
+    if (!ref || saved.held.references.includes(ref)) continue;
+    ref.rc++;
+    saved.held.references.push(ref);
+    saved.held.values.splice(saved.held.argumentCount++, 0, ref);
+  }
+  if (saved.forwardsReference) saved.runtime.lastReturnRef = undefined;
+  return {
+    args: values,
+    refs,
+    thisObj: target.thisObj,
+    calledClass: target.staticClass,
+    named,
+    directOverload: target.directOverload,
+    compiledCallback: target.compiledCallback,
+    dynamic: target.dynamic,
+    row: saved.inline || target.frameless ? row : undefined,
+    discardResult: Boolean(saved.inline && discardResult),
+  };
+}
+
+function exitNativeCall(
+  saved: NativeCallState,
+  target: CallTarget,
+  result: Value,
+  failure: unknown,
+  failed: boolean
+): void {
+  const { runtime, caller, inline, held, savedRow } = saved;
+  if (!inline) {
+    nativeDepth--;
+    callStack.pop();
+  }
+  runtime.nativeCalls--;
+  runtime.nativeHeld.pop();
+  if (target.thisObj) runtime.pendingGcRoots.add(target.thisObj);
+  runtime.row = savedRow;
+  if (!failed || failure instanceof PhpThrow || failure instanceof ExitSignal) {
+    if (result instanceof PhpObject || result instanceof PhpArray) caller.temporaries.push(result);
+    releaseNativeValues(runtime, held, failure instanceof PhpThrow ? failure : undefined);
+  } else {
+    for (const ref of held.references) ref.releaseWithoutGc();
+  }
 }
 
 function nativeDefault(defaultText: string | undefined): Value {
@@ -391,25 +460,6 @@ function releaseNativeValues(runtime: Runtime, held: NativeHolders, pending?: Ph
     for (const ref of held.references) ref.releaseWithoutGc();
     if (!failed || failure instanceof PhpThrow || failure instanceof ExitSignal)
       releaseCallValues(runtime, args, failure instanceof PhpThrow ? failure : undefined);
-  }
-}
-
-function runNative(runtime: Runtime, fn: NativeFunction, context: NativeContext): Value {
-  try {
-    const result = fn.impl(context);
-    if (typeof result === 'string') runtime.ensureStringFits(result.length);
-    return result;
-  } catch (error) {
-    // The host refuses a string or an array past its own limit, which only a structure far past ours reaches.
-    if (
-      error instanceof RangeError &&
-      /Invalid (string|array) length|Out of memory|Maximum call stack size exceeded|out of memory/i.test(error.message)
-    ) {
-      throw runtime.memoryExhausted(2 ** 31);
-    }
-    throw error;
-  } finally {
-    if (context.thisObj) nativeOwnershipChanged(context.thisObj);
   }
 }
 
@@ -595,6 +645,8 @@ interface UserCallState {
   bound: boolean;
 }
 
+// code-gauge-allow functionCognitiveComplexity 17 -- Dispatches ordinary user function bodies directly to execList to avoid an extra host frame.
+// code-gauge-allow functionNcss 33 -- Handles direct body execution and RangeError host-stack translation in one frame.
 export function invokeUser(
   target: CallTarget,
   fn: UserFunction,
@@ -609,7 +661,17 @@ export function invokeUser(
   try {
     bindUserCall(saved, fn, args, row);
     saved.bound = true;
-    returned = finishUserReturn(saved, runBody(saved.decl, saved.frame), discardResult);
+    let bodyResult: Value;
+    if (!saved.decl.arrowBody && !saved.frame.thisObj) {
+      const completion = runStatementList(saved.decl.body);
+      if (completion?.t === 'goto') throw new Error(`Unresolved goto ${completion.label}`);
+      saved.frame.returning = completion?.t === 'return' ? completion.slot : undefined;
+      saved.frame.returnRow = completion?.t === 'return' ? completion.row : undefined;
+      bodyResult = saved.frame.returning instanceof Ref ? saved.frame.returning.v : (saved.frame.returning ?? null);
+    } else {
+      bodyResult = runBody(saved.decl, saved.frame);
+    }
+    returned = finishUserReturn(saved, bodyResult, discardResult);
   } catch (error) {
     if (error instanceof RangeError && saved.bound) {
       saved.runtime.exhausted = true;

@@ -198,3 +198,23 @@ export function compareNumbers(a: bigint | number, b: bigint | number): number {
   if (Number.isNaN(x) || Number.isNaN(y)) return 1;
   return x < y ? -1 : x > y ? 1 : 0;
 }
+
+export function matchCaseText(value: Value): string {
+  if (typeof value === 'string') {
+    const escaped = value
+      .slice(0, 15)
+      .replaceAll(/[\\']/g, String.raw`\$&`)
+      .replaceAll('\n', String.raw`\n`)
+      .replaceAll('\r', String.raw`\r`)
+      .replaceAll('\t', String.raw`\t`);
+    return `'${escaped}${value.length > 15 ? '...' : ''}'`;
+  }
+  if (typeof value === 'bigint') return value.toString();
+  if (typeof value === 'number') {
+    const text = formatFloat(value);
+    return Number.isFinite(value) && !/[.E]/.test(text) ? `${text}.0` : text;
+  }
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (value === null) return 'NULL';
+  return `of type ${debugType(value)}`;
+}

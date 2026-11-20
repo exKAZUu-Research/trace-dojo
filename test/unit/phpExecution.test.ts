@@ -4843,3 +4843,49 @@ $a = [...new I]; $a[] = 8; echo json_encode($a);`)
     )
   ).toMatchObject({ kind: 'executed', stdout: '99:2' });
 });
+
+test('chains return-expression cleanup exceptions and reaches maxCallDepth across recursion shapes', () => {
+  for (const [expression, expected] of [
+    ['[new D, throw new Exception("body")]', 'drop;destructor;body;'],
+    ['(new D) + (throw new Exception("body"))', 'drop;destructor;body;'],
+    ['(new D)->bad(throw new Exception("body"))', 'drop;destructor;Call to undefined method D::bad();'],
+  ]) {
+    expect(
+      run(`<?php
+class D { function __destruct() { echo "drop;"; throw new Exception("destructor"); } }
+function f() { return ${expression}; }
+try { f(); } catch (Throwable $e) { while ($e) { echo $e->getMessage(), ";"; $e = $e->getPrevious(); } }
+`)
+    ).toMatchObject({ kind: 'executed', stdout: expected });
+  }
+
+  const sum505 = String((505 * 506) / 2);
+  for (const [source, expected] of [
+    [
+      '<?php class C { public function s(int $n): int { if ($n == 0) return 0; return $n + $this->s($n - 1); } } echo (new C())->s(505);',
+      sum505,
+    ],
+    [
+      '<?php class C { public static function s(int $n): int { if ($n == 0) return 0; return $n + self::s($n - 1); } } echo C::s(505);',
+      sum505,
+    ],
+    ['<?php $s = function (int $n) use (&$s): int { return $n == 0 ? 0 : $n + $s($n - 1); }; echo $s(505);', sum505],
+    [
+      '<?php function s(int $n): int { $t = $n; for ($i = 0; $i < 1; $i++) { if ($n > 0) { $t += s($n - 1); } } return $t; } echo s(505);',
+      sum505,
+    ],
+    [
+      '<?php function s(int $n): int { foreach ([1] as $one) { switch (true) { case $n > 0: return $n + s($n - 1); default: return 0; } } return -1; } echo s(505);',
+      sum505,
+    ],
+    ['<?php function s(int $n): int { try { return $n == 0 ? 0 : $n + s($n - 1); } finally {} } echo s(505);', sum505],
+    ['<?php function f($n) { if ($n <= 0) return 0; return array_map("f", [$n - 1])[0] + 1; } echo f(505);', '505'],
+    ['<?php function f($n) { if ($n <= 0) return 0; return call_user_func("f", $n - 1) + 1; } echo f(505);', '505'],
+    [
+      '<?php class A { public $c; function __construct($n) { if ($n > 0) $this->c = new A($n - 1); } } new A(505); echo "ok";',
+      'ok',
+    ],
+  ]) {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout: expected });
+  }
+});

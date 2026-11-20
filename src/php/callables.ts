@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 704 -- Keeps implicit dispatch and native result ownership together.
+// code-gauge-allow-file fileNcss 738 -- Keeps implicit dispatch and native result ownership together.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { placeOf } from './assignment';
 import type { Arg, Expr, ResolvedName } from './ast';
@@ -15,6 +15,7 @@ import {
   functionDisplayName,
   handOverArgs,
   invoke,
+  invokeNative,
   invokeUser,
   type MagicCall,
   NamedArgumentBindings,
@@ -281,7 +282,29 @@ export function callExpression(e: Extract<Expr, { k: 'call' }>, discardResult = 
     throwError('Error', `Call to undefined function ${e.fn.name}()`);
   }
   if (e.fcc) return closureFromCallable({ fn });
-  if (fn.kind === 'native') return callNativeNamed(runtime, e, e.fn, fn, discardResult);
+  if (fn.kind === 'native') {
+    if (
+      !e.fn.fallback &&
+      fn.name !== 'call_user_func' &&
+      fn.name !== 'call_user_func_array' &&
+      (lower(fn.name) === 'sprintf' || specializedCall(fn, e.args))
+    )
+      return callNativeNamed(runtime, e, e.fn, fn, discardResult);
+    const inline = !e.fn.fallback && specializedCall(fn, e.args) === 'opcode';
+    const args = evalArgs(e.args, fn, fn.name);
+    runtime.row = e.row;
+    if (fn.acceptsNamed === 'positional-only') checkNamedArgs([], args);
+    return pushTemporary(
+      runtime,
+      invokeNative(
+        { fn, inline, compiledCallback: inline && compiledLiteralCallback(fn, e.args[0]?.e) },
+        fn,
+        args,
+        e.row,
+        discardResult
+      )
+    );
+  }
   const args = evalArgs(e.args, fn, fn.name);
   runtime.row = e.row;
   return pushTemporary(runtime, invokeUser({ fn }, fn, args, e.row, discardResult));
@@ -303,7 +326,11 @@ function callDynamicExpression(runtime: Runtime, e: Extract<Expr, { k: 'call' }>
   runtime.row = e.row;
   return pushTemporary(
     runtime,
-    target.magic ? invokeMagic(target.magic, args, e.row, discardResult) : invoke(target, args, e.row, discardResult)
+    target.magic
+      ? invokeMagic(target.magic, args, e.row, discardResult)
+      : target.fn.kind === 'user'
+        ? invokeUser(target, target.fn, args, e.row, discardResult)
+        : invoke(target, args, e.row, discardResult)
   );
 }
 
@@ -332,9 +359,10 @@ function callNativeNamed(
       ? evalDeferredValueArgs(e.args, row)
       : evalArgs(e.args, fn, fn.name);
   runtime.row = row;
+  if (fn.acceptsNamed === 'positional-only') checkNamedArgs([], args);
   return pushTemporary(
     runtime,
-    invoke(
+    invokeNative(
       {
         fn,
         inline,
@@ -342,6 +370,7 @@ function callNativeNamed(
         directOverload: frameless && fn.shortParamsDirectOnly,
         compiledCallback: inline && compiledLiteralCallback(fn, e.args[0]?.e),
       },
+      fn,
       args,
       row,
       discardResult
@@ -396,7 +425,10 @@ export function methodCallExpression(e: Extract<Expr, { k: 'mcall' }>, discardRe
     if (e.fcc) return closureFromCallable(target);
     const args = evalArgs(e.args, method.fn, classMethodLabel(method.scope, method.name));
     runtime.row = e.row;
-    const result = invoke(target, args, e.row, discardResult);
+    const result =
+      method.fn.kind === 'user'
+        ? invokeUser(target, method.fn, args, e.row, discardResult)
+        : invoke(target, args, e.row, discardResult);
     runtime.frame.temporaries.push(result);
     return result;
   }
@@ -411,6 +443,15 @@ export function methodCallExpression(e: Extract<Expr, { k: 'mcall' }>, discardRe
       discardResult
     );
   }
+  throwMethodCallError(object, method, methodName, scope);
+}
+
+function throwMethodCallError(
+  object: PhpObject,
+  method: ReturnType<typeof lookupMethod>,
+  methodName: string,
+  scope: PhpClass | undefined
+): never {
   if (method) {
     if (method.isAbstract) throwError('Error', `Cannot call abstract method ${method.scope.name}::${method.name}()`);
     throwError(
@@ -978,7 +1019,12 @@ export function callValue(
 ): Value {
   const target = callTargetOf(callable, mode);
   if (compiledTarget) target.dynamic = false;
-  return invokeCallbackTarget(target, args, row, discardResult);
+  if (target.magic) return invokeMagic(target.magic, args, row, discardResult);
+  checkNamedArgs(target.fn.params, args);
+  warnCallbackReferenceArguments(target, args);
+  if (target.fn.kind === 'user') return invokeUser(target, target.fn, args, row, discardResult);
+  if (target.fn.acceptsNamed === 'positional-only') checkNamedArgs([], args);
+  return invokeNative(target, target.fn, args, row, discardResult);
 }
 
 export function invokeCallbackTarget(
@@ -990,20 +1036,28 @@ export function invokeCallbackTarget(
   if (target.magic) return invokeMagic(target.magic, args, row, discardResult);
   checkNamedArgs(target.fn.params, args);
   warnCallbackReferenceArguments(target, args);
-  return invoke(target, args, row, discardResult);
+  if (target.fn.kind === 'user') return invokeUser(target, target.fn, args, row, discardResult);
+  if (target.fn.acceptsNamed === 'positional-only') checkNamedArgs([], args);
+  return invokeNative(target, target.fn, args, row, discardResult);
 }
 
 export function callCallback(callable: Value, args: Value[]): Value {
-  return callValue(
-    callable,
-    args.map((v) => ({ v })),
-    undefined
-  );
+  const target = callTargetOf(callable, 'callback');
+  const wrapped: ArgValue[] = args.map((v) => ({ v }));
+  if (target.magic) return invokeMagic(target.magic, wrapped, undefined, false);
+  checkNamedArgs(target.fn.params, wrapped);
+  warnCallbackReferenceArguments(target, wrapped);
+  if (target.fn.kind === 'user') return invokeUser(target, target.fn, wrapped, undefined, false);
+  if (target.fn.acceptsNamed === 'positional-only') checkNamedArgs([], wrapped);
+  return invokeNative(target, target.fn, wrapped, undefined, false);
 }
 
 export function callCallbackRefs(callable: Value, args: ArgValue[], discardResult = false): Value {
-  const call = (): Value => callValue(callable, args, undefined, 'callback', discardResult);
-  return discardResult ? consumeInvokedResult(call, () => null) : call();
+  if (!discardResult) return callValue(callable, args, undefined, 'callback', false);
+  return consumeInvokedResult(
+    () => callValue(callable, args, undefined, 'callback', true),
+    () => null
+  );
 }
 
 export function consumeCallbackResult<T>(callable: Value, args: Value[], consume: (value: Value) => T): T {

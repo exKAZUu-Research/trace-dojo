@@ -3,8 +3,16 @@
 import type { ArrayRebuild } from './arrayOrder';
 import { type Comparisons, type Entry, setEntries, sortedSetEntries, SortedWalk } from './arraySetWalk';
 import { lower, upper } from './bytes';
-import { callCallback, callCallbackRefs, callMethod, consumeCallbackResult, consumeInvokedResult } from './callables';
-import type { ArgValue } from './calls';
+import {
+  callCallback,
+  callCallbackRefs,
+  callMethod,
+  callTargetOf,
+  consumeCallbackResult,
+  consumeInvokedResult,
+  invokeCallbackTarget,
+} from './callables';
+import { type ArgValue, invokeUser } from './calls';
 import { canAccessProp, declForKey, issetProp, lookupProp, readProp } from './classes';
 import * as conversionsModule from './conversions';
 import { compareBytes, compareNumbers, debugType, floatFitsInt, normalizeKeyString, valueName } from './conversions';
@@ -782,7 +790,30 @@ defineFunction('array_map(?callable $callback, array $array, array ...$arrays): 
   const [callback, first, ...rest] = args;
   if (!(first instanceof PhpArray))
     throwError('TypeError', `array_map(): Argument #2 ($array) must be of type array, ${valueName(first)} given`);
-  if (rest.length === 0) return mapSingleArray(callback, first);
+  if (rest.length > 0) return mapMultipleArrays(callback, first, rest);
+  if (first.size === 0) return new PhpArray();
+  if (callback === null) return first;
+  const runtime = rt();
+  const result = new PhpArray();
+  const target = callTargetOf(callback, 'callback');
+  const directUser = !target.magic && target.fn.kind === 'user' && !target.fn.params[0]?.byRef ? target.fn : undefined;
+  runtime.held.push(first);
+  try {
+    for (const [key, value] of first.entries()) {
+      const mapped = directUser
+        ? invokeUser(target, directUser, [{ v: value }], undefined, false)
+        : invokeCallbackTarget(target, [{ v: value }], undefined, false);
+      const ref = runtime.lastReturnRef;
+      runtime.lastReturnRef = undefined;
+      result.setSlot(key, ref ?? share(mapped));
+    }
+  } finally {
+    runtime.held.pop();
+  }
+  return result;
+});
+
+function mapMultipleArrays(callback: Value, first: PhpArray, rest: Value[]): PhpArray {
   for (const [index, value] of rest.entries()) {
     if (!(value instanceof PhpArray)) {
       throwError('TypeError', `array_map(): Argument #${index + 3} must be of type array, ${valueName(value)} given`);
@@ -796,19 +827,6 @@ defineFunction('array_map(?callable $callback, array $array, array ...$arrays): 
   for (let index = 0; index < length; index++) {
     const items = lists.map((list) => (index < list.length ? list[index] : null));
     result.append(callback === null ? PhpArray.copySlots(items) : callbackSlot(callback, items.map(deref)));
-  }
-  return result;
-});
-
-function mapSingleArray(callback: Value, first: PhpArray): PhpArray {
-  if (first.size === 0) return new PhpArray();
-  if (callback === null) return first;
-  const result = new PhpArray();
-  rt().held.push(first);
-  try {
-    for (const [key, value] of first.entries()) result.setSlot(key, callbackSlot(callback, [value]));
-  } finally {
-    rt().held.pop();
   }
   return result;
 }

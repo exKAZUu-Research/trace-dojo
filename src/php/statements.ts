@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 675 -- Keeps statement execution with its binding and unwind scopes.
+// code-gauge-allow-file fileNcss 788 -- Runs PHP statements iteratively on a heap block stack with shared loop/try/foreach helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { CompileError } from '../interpreter/diagnostics';
 import type { ArrayCursor } from './arrayOrder';
@@ -23,7 +23,7 @@ import {
 import { valueName } from './conversions';
 import { E_DEPRECATED, E_WARNING, emitError, setPrevious, throwError, warn, withPendingException } from './errors';
 import { collectBeforeAllocation, setDestructor } from './garbage';
-import { consumeExpression, ev, evBool, evOpcodeOperand, evQuiet, evReturn, prepareOperand } from './interp';
+import { binary, consumeExpression, ev, evBool, evOpcodeOperand, evQuiet, evReturn, prepareOperand } from './interp';
 import { acquireIterator, InnerIterator } from './iteratorAcquisition';
 import { builtinLiteralKey } from './native';
 import { compiledOperandRow } from './opcodeRows';
@@ -135,183 +135,414 @@ function containsLabel(statement: Stmt, label: string): boolean {
   return nestedBodies(statement).some(([body, isLoop]) => !isLoop && body.some((inner) => containsLabel(inner, label)));
 }
 
-/** Runs statements, jumping to a label they hold when `seek` names one or a `goto` targets one. */
-// code-gauge-allow functionCognitiveComplexity 24 -- Handles return statements inline in the list loop to keep recursion within the host stack.
-function execList(statements: Stmt[], seek?: string): Completion {
-  let index = seek === undefined ? 0 : Math.max(labelIndex(statements, seek), 0);
-  let target = seek;
-  while (index < statements.length) {
-    const statement = statements[index];
-    if (target === undefined && statement.k === 'return') {
-      const runtime = rt();
-      const held = runtime.frame.temporaries.length;
+type BlockFrame =
+  | { k: 'list'; stmts: Stmt[]; index: number; seek?: string; stmtHeld?: number }
+  | { k: 'while'; stmt: Extract<Stmt, { k: 'while' }>; held: number; started: boolean }
+  | { k: 'do'; stmt: Extract<Stmt, { k: 'do' }>; held: number; started: boolean }
+  | { k: 'for'; stmt: Extract<Stmt, { k: 'for' }>; held: number; started: boolean }
+  | { k: 'switch'; cases: Extract<Stmt, { k: 'switch' }>['cases']; index: number }
+  | {
+      k: 'foreachArray';
+      stmt: Extract<Stmt, { k: 'foreach' }>;
+      subject: PhpArray;
+      iter: Iterator<[Key, Value | Ref]>;
+    }
+  | {
+      k: 'try';
+      stmt: Extract<Stmt, { k: 'try' }>;
+      phase: 'try' | 'catch' | 'finally';
+      completion?: Completion;
+      pending?: PhpThrow;
+      finMark?: number;
+    };
+
+/** Runs statements iteratively on a heap block stack so nested control flow does not grow the host stack. */
+// code-gauge-allow functionCognitiveComplexity 29 -- Keeps the active list/statement hot path in one JS frame so deep PHP recursion fits the host stack.
+// code-gauge-allow functionNcss 50 -- Keeps return and expr inline in the iterative block loop.
+export function execList(statements: Stmt[], seek?: string): Completion {
+  const runtime = rt();
+  const frame = runtime.frame;
+  const byRefReturn = frame.fn?.kind === 'user' && frame.fn.decl.byRefReturn;
+  const stack: BlockFrame[] = [
+    { k: 'list', stmts: statements, index: seek === undefined ? 0 : Math.max(labelIndex(statements, seek), 0), seek },
+  ];
+  let completion: Completion;
+  while (stack.length > 0) {
+    try {
+      if (completion !== undefined) {
+        completion = propagateCompletion(stack, completion, runtime, frame);
+        continue;
+      }
+      const top = stack.at(-1) as BlockFrame;
+      if (top.k !== 'list') {
+        completion = stepNonListFrame(stack, top, runtime, frame);
+        continue;
+      }
+      releaseListHeld(top, runtime, frame);
+      if (top.index >= top.stmts.length) {
+        stack.pop();
+        continue;
+      }
+      const statement = top.stmts[top.index++];
+      if (top.seek !== undefined) {
+        seekIntoStack(stack, statement, top.seek, frame);
+        top.seek = undefined;
+        continue;
+      }
       runtime.row = statement.row;
       runtime.spend();
-      try {
-        const value = !statement.e
-          ? null
-          : runtime.frame.fn?.kind === 'user' && runtime.frame.fn.decl.byRefReturn
-            ? evReturn(statement.e)
-            : ev(statement.e);
-        runtime.frame.returning = value instanceof Ref ? value : share(value);
-        return { t: 'return', slot: runtime.frame.returning, row: statement.e?.row ?? statement.row };
-      } finally {
-        runtime.dropTemporaries(runtime.frame, held);
-      }
-    }
-    const completion = execStmt(statement, target);
-    target = undefined;
-    if (completion) {
-      const next = completion.t === 'goto' ? labelIndex(statements, completion.label) : -1;
-      if (next === -1) return completion;
-      index = next;
-      target = (completion as { t: 'goto'; label: string }).label;
-      rt().spend();
-      continue;
-    }
-    index++;
-  }
-}
-
-function execStmt(statement: Stmt, seek?: string): Completion {
-  const runtime = rt();
-  if (seek !== undefined) return seekInto(statement, seek);
-  runtime.row = statement.row;
-  runtime.spend();
-  const frame = runtime.frame;
-  const held = frame.temporaries.length;
-  try {
-    switch (statement.k) {
-      case 'expr': {
+      const held = frame.temporaries.length;
+      top.stmtHeld = held;
+      if (statement.k === 'return' && !byRefReturn && statement.e) {
+        const value = statement.e.k === 'bin' ? (statement.e.foldedString ?? binary(statement.e)) : ev(statement.e);
+        frame.returning = share(value);
+        releaseListHeld(top, runtime, frame);
+        completion = { t: 'return', slot: frame.returning, row: statement.e.row };
+      } else if (statement.k === 'expr') {
         const mark = runtime.steps.statementMark();
         if (statement.e.k === 'var') evQuiet(statement.e);
         else ev(statement.e, true);
         runtime.steps.completeStatement(statement.row, statement.onlyCalls, mark);
-        return undefined;
+        releaseListHeld(top, runtime, frame);
+      } else {
+        completion = dispatchOtherStatement(stack, statement, runtime, frame, held);
+        if (stack.at(-1) === top) releaseListHeld(top, runtime, frame);
       }
-      case 'echo': {
-        const mark = runtime.steps.statementMark();
-        for (const arg of statement.args) {
-          runtime.echo(toStr(evOpcodeOperand(arg)));
-          runtime.dropTemporaries(frame, held);
-        }
-        runtime.steps.completeStatement(statement.row, true, mark);
-        return undefined;
-      }
-      case 'inline': {
-        runtime.echo(statement.text);
-        return undefined;
-      }
-      case 'if': {
-        if (evBool(statement.cond)) return execList(statement.consequent);
-        return statement.alternate ? execList(statement.alternate) : undefined;
-      }
-      case 'while': {
-        for (;;) {
-          runtime.dropTemporaries(frame, held);
-          runtime.row = statement.row;
-          if (!evBool(statement.cond)) return undefined;
-          const result = loopBody(statement.body);
-          if (result !== 'next') return result;
-          runtime.spend();
-        }
-      }
-      case 'do': {
-        for (;;) {
-          runtime.dropTemporaries(frame, held);
-          const result = loopBody(statement.body);
-          if (result !== 'next') return result;
-          runtime.row = statement.row;
-          if (!evBool(statement.cond)) return undefined;
-          runtime.spend();
-        }
-      }
-      case 'for': {
-        return forStatement(statement, held);
-      }
-      case 'foreach': {
-        return foreachStatement(statement);
-      }
-      case 'switch': {
-        return switchStatement(statement);
-      }
-      case 'break':
-      case 'continue': {
-        return { t: statement.k, depth: statement.depth };
-      }
-      case 'block': {
-        return execList(statement.body);
-      }
-      case 'try': {
-        return tryStatement(statement);
-      }
-      case 'global': {
-        for (const nameExpr of statement.names) {
-          const name =
-            nameExpr.k === 'var' ? nameExpr.name : toStr(ev((nameExpr as Extract<Expr, { k: 'varvar' }>).name));
-          new VarPlace(frame, name).bind(runtime.globalRef(name));
-        }
-        return undefined;
-      }
-      case 'static': {
-        staticDeclaration(statement, frame);
-        return undefined;
-      }
-      case 'unset': {
-        const mark = runtime.steps.statementMark();
-        for (const target of statement.targets) unsetTarget(target);
-        runtime.steps.completeStatement(statement.row, false, mark);
-        return undefined;
-      }
-      case 'func': {
-        if (!hoisted.has(statement)) declareFunction(statement.decl);
-        return undefined;
-      }
-      case 'class': {
-        if (!hoisted.has(statement)) declareClass(statement.decl, statement.row);
-        return undefined;
-      }
-      case 'const': {
-        for (const item of statement.items) {
-          const value = evaluateInitializer(item.value, frame, item.opcodeRow);
-          runtime.row = item.opcodeRow;
-          defineConstant(item.name, value);
-        }
-        return undefined;
-      }
-      case 'goto': {
-        return { t: 'goto', label: statement.label };
-      }
-      case 'label':
-      case 'nop': {
-        return undefined;
-      }
+    } catch (error) {
+      unwindStackOnThrow(stack, error, runtime, frame);
+      completion = undefined;
     }
-  } catch (error) {
-    releaseTemporariesOnThrow(runtime, frame, held, error);
-  } finally {
-    runtime.dropTemporaries(frame, held);
   }
+  return completion;
 }
-/** Enters the statement that holds a label without running what comes before the label inside it. */
-function seekInto(statement: Stmt, label: string): Completion {
-  switch (statement.k) {
-    case 'label': {
+
+function releaseListHeld(top: Extract<BlockFrame, { k: 'list' }>, runtime: Runtime, frame: Frame): void {
+  if (top.stmtHeld === undefined) return;
+  const held = top.stmtHeld;
+  top.stmtHeld = undefined;
+  runtime.dropTemporaries(frame, held);
+}
+
+function pushListFrame(stack: BlockFrame[], statements: Stmt[], seek?: string): void {
+  stack.push({
+    k: 'list',
+    stmts: statements,
+    index: seek === undefined ? 0 : Math.max(labelIndex(statements, seek), 0),
+    seek,
+  });
+}
+
+// code-gauge-allow functionCognitiveComplexity 23 -- Flat switch over non-list iterative block frame kinds.
+// code-gauge-allow functionNcss 55 -- One case per control-flow frame kind (while, do, for, switch, foreach, try).
+function stepNonListFrame(
+  stack: BlockFrame[],
+  top: Exclude<BlockFrame, { k: 'list' }>,
+  runtime: Runtime,
+  frame: Frame
+): Completion {
+  switch (top.k) {
+    case 'while': {
+      if (top.started) runtime.spend();
+      top.started = true;
+      runtime.dropTemporaries(frame, top.held);
+      runtime.row = top.stmt.row;
+      if (!evBool(top.stmt.cond)) {
+        stack.pop();
+        return undefined;
+      }
+      pushListFrame(stack, top.stmt.body);
       return undefined;
     }
-    case 'if': {
-      if (statement.consequent.some((inner) => containsLabel(inner, label)))
-        return execList(statement.consequent, label);
-      return execList(statement.alternate as Stmt[], label);
+    case 'do': {
+      if (top.started) {
+        runtime.row = top.stmt.row;
+        if (!evBool(top.stmt.cond)) {
+          stack.pop();
+          return undefined;
+        }
+        runtime.spend();
+      }
+      top.started = true;
+      runtime.dropTemporaries(frame, top.held);
+      pushListFrame(stack, top.stmt.body);
+      return undefined;
     }
-    case 'block': {
-      return execList(statement.body, label);
+    case 'for': {
+      if (top.started) {
+        runForClause(top.stmt.update, top.stmt.row, frame, top.held);
+        runtime.spend();
+      }
+      top.started = true;
+      runtime.row = top.stmt.row;
+      for (const [index, e] of top.stmt.cond.entries()) {
+        if (!evaluateForExpression(e, frame, top.held, index === top.stmt.cond.length - 1)) {
+          stack.pop();
+          return undefined;
+        }
+      }
+      pushListFrame(stack, top.stmt.body);
+      return undefined;
+    }
+    case 'switch': {
+      if (top.index >= top.cases.length) {
+        stack.pop();
+        return undefined;
+      }
+      pushListFrame(stack, top.cases[top.index++].body);
+      return undefined;
+    }
+    case 'foreachArray': {
+      const next = top.iter.next();
+      if (next.done) {
+        frame.foreachSubjects.pop();
+        stack.pop();
+        return undefined;
+      }
+      runtime.spend();
+      const [key, slot] = next.value;
+      bindForeachValue(top.stmt, key, slot instanceof Ref ? slot.v : slot);
+      pushListFrame(stack, top.stmt.body);
+      return undefined;
     }
     case 'try': {
-      return tryStatement(statement, label);
+      return finishTryNormal(stack, top, runtime, frame);
+    }
+  }
+}
+
+// code-gauge-allow functionNcss 47 -- Flat dispatch over non-hot PHP statement kinds.
+function dispatchOtherStatement(
+  stack: BlockFrame[],
+  statement: Exclude<Stmt, { k: 'expr' }>,
+  runtime: Runtime,
+  frame: Frame,
+  held: number
+): Completion {
+  switch (statement.k) {
+    case 'if': {
+      if (evBool(statement.cond)) pushListFrame(stack, statement.consequent);
+      else if (statement.alternate) pushListFrame(stack, statement.alternate);
+      return undefined;
+    }
+    case 'return': {
+      const value = statement.e ? evReturn(statement.e) : null;
+      frame.returning = value instanceof Ref ? value : share(value);
+      return { t: 'return', slot: frame.returning, row: statement.e?.row ?? statement.row };
+    }
+    case 'block': {
+      pushListFrame(stack, statement.body);
+      return undefined;
+    }
+    case 'while': {
+      stack.push({ k: 'while', stmt: statement, held, started: false });
+      return undefined;
+    }
+    case 'do': {
+      stack.push({ k: 'do', stmt: statement, held, started: false });
+      return undefined;
+    }
+    case 'for': {
+      runForClause(statement.init, statement.row, frame, held);
+      stack.push({ k: 'for', stmt: statement, held, started: false });
+      return undefined;
+    }
+    case 'foreach': {
+      return enterForeach(stack, statement, runtime, frame);
+    }
+    case 'switch': {
+      const start = resolveSwitchStart(statement);
+      if (start !== -1) stack.push({ k: 'switch', cases: statement.cases, index: start });
+      return undefined;
+    }
+    case 'try': {
+      stack.push({ k: 'try', stmt: statement, phase: 'try' });
+      pushListFrame(stack, statement.body);
+      return undefined;
+    }
+    case 'break':
+    case 'continue': {
+      return { t: statement.k, depth: statement.depth };
+    }
+    case 'goto': {
+      return { t: 'goto', label: statement.label };
+    }
+    case 'label':
+    case 'nop': {
+      return undefined;
     }
     default: {
+      return dispatchSimpleStatement(statement, runtime, frame, held);
+    }
+  }
+}
+
+// code-gauge-allow functionCognitiveComplexity 16 -- Flat dispatch over leaf PHP statement kinds.
+// code-gauge-allow functionNcss 40 -- One case per leaf PHP statement kind.
+function dispatchSimpleStatement(
+  statement: Extract<Stmt, { k: 'echo' | 'inline' | 'global' | 'static' | 'unset' | 'func' | 'class' | 'const' }>,
+  runtime: Runtime,
+  frame: Frame,
+  held: number
+): Completion {
+  switch (statement.k) {
+    case 'echo': {
+      const mark = runtime.steps.statementMark();
+      for (const arg of statement.args) {
+        runtime.echo(toStr(evOpcodeOperand(arg)));
+        runtime.dropTemporaries(frame, held);
+      }
+      runtime.steps.completeStatement(statement.row, true, mark);
       return undefined;
+    }
+    case 'inline': {
+      runtime.echo(statement.text);
+      return undefined;
+    }
+    case 'global': {
+      for (const nameExpr of statement.names) {
+        const name =
+          nameExpr.k === 'var' ? nameExpr.name : toStr(ev((nameExpr as Extract<Expr, { k: 'varvar' }>).name));
+        new VarPlace(frame, name).bind(runtime.globalRef(name));
+      }
+      return undefined;
+    }
+    case 'static': {
+      staticDeclaration(statement, frame);
+      return undefined;
+    }
+    case 'unset': {
+      const mark = runtime.steps.statementMark();
+      for (const target of statement.targets) unsetTarget(target);
+      runtime.steps.completeStatement(statement.row, false, mark);
+      return undefined;
+    }
+    case 'func': {
+      if (!hoisted.has(statement)) declareFunction(statement.decl);
+      return undefined;
+    }
+    case 'class': {
+      if (!hoisted.has(statement)) declareClass(statement.decl, statement.row);
+      return undefined;
+    }
+    case 'const': {
+      for (const item of statement.items) {
+        const value = evaluateInitializer(item.value, frame, item.opcodeRow);
+        runtime.row = item.opcodeRow;
+        defineConstant(item.name, value);
+      }
+      return undefined;
+    }
+  }
+}
+
+function propagateCompletion(
+  stack: BlockFrame[],
+  completion: NonNullable<Completion>,
+  runtime: Runtime,
+  frame: Frame
+): Completion {
+  const top = stack.at(-1) as BlockFrame;
+  if (top.k === 'list') {
+    releaseListHeld(top, runtime, frame);
+    if (completion.t === 'goto') {
+      const next = labelIndex(top.stmts, completion.label);
+      if (next !== -1) {
+        top.index = next;
+        top.seek = completion.label;
+        runtime.spend();
+        return undefined;
+      }
+    }
+    stack.pop();
+    return completion;
+  }
+  if (top.k === 'try') return propagateTryCompletion(stack, top, completion, runtime, frame);
+  if (top.k === 'switch') {
+    stack.pop();
+    return decrementLoopCompletion(completion);
+  }
+  if (completion.t === 'continue' && completion.depth === 1) return undefined;
+  if (top.k === 'foreachArray') frame.foreachSubjects.pop();
+  stack.pop();
+  return decrementLoopCompletion(completion);
+}
+
+function decrementLoopCompletion(completion: NonNullable<Completion>): Completion {
+  if (completion.t === 'break' || completion.t === 'continue')
+    return completion.depth > 1 ? { t: completion.t, depth: completion.depth - 1 } : undefined;
+  return completion;
+}
+
+function unwindStackOnThrow(stack: BlockFrame[], error: unknown, runtime: Runtime, frame: Frame): void {
+  let activeError = error;
+  while (stack.length > 0) {
+    const top = stack.at(-1) as BlockFrame;
+    if (top.k === 'list') {
+      if (top.stmtHeld !== undefined) {
+        const held = top.stmtHeld;
+        top.stmtHeld = undefined;
+        activeError = releaseTemporariesKeepingError(runtime, frame, held, activeError);
+      }
+      stack.pop();
+      continue;
+    }
+    if (top.k === 'foreachArray') {
+      frame.foreachSubjects.pop();
+      stack.pop();
+      continue;
+    }
+    if (top.k === 'try') {
+      const result = handleTryThrow(stack, top, activeError, runtime, frame);
+      if (result.handled) return;
+      activeError = result.error;
+      continue;
+    }
+    stack.pop();
+  }
+  throw activeError;
+}
+
+function releaseTemporariesKeepingError(runtime: Runtime, frame: Frame, mark: number, error: unknown): unknown {
+  if (error instanceof PhpThrow && frame.temporaries.length > mark) {
+    try {
+      withPendingException(runtime, error, () => runtime.dropTemporaries(frame, mark));
+    } catch (destructorError) {
+      return destructorError;
+    }
+  } else {
+    runtime.dropTemporaries(frame, mark);
+  }
+  return error;
+}
+
+/** Enters the statement that holds a label without running what comes before the label inside it. */
+function seekIntoStack(stack: BlockFrame[], statement: Stmt, label: string, frame: Frame): void {
+  switch (statement.k) {
+    case 'if': {
+      if (statement.consequent.some((inner) => containsLabel(inner, label)))
+        pushListFrame(stack, statement.consequent, label);
+      else pushListFrame(stack, statement.alternate as Stmt[], label);
+      return;
+    }
+    case 'block': {
+      pushListFrame(stack, statement.body, label);
+      return;
+    }
+    case 'try': {
+      if (statement.fin?.some((inner) => containsLabel(inner, label))) {
+        stack.push({ k: 'try', stmt: statement, phase: 'finally', finMark: frame.temporaries.length });
+        pushListFrame(stack, statement.fin, label);
+        return;
+      }
+      const inCatch = statement.catches.find((item) => item.body.some((inner) => containsLabel(inner, label)));
+      if (inCatch) {
+        stack.push({ k: 'try', stmt: statement, phase: 'catch' });
+        pushListFrame(stack, inCatch.body, label);
+        return;
+      }
+      stack.push({ k: 'try', stmt: statement, phase: 'try' });
+      pushListFrame(stack, statement.body, label);
+      return;
     }
   }
 }
@@ -346,21 +577,6 @@ function loopBody(body: Stmt[]): 'next' | Completion {
   return completion;
 }
 
-function forStatement(statement: Extract<Stmt, { k: 'for' }>, held: number): Completion {
-  const runtime = rt();
-  const frame = runtime.frame;
-  runForClause(statement.init, statement.row, frame, held);
-  for (;;) {
-    runtime.row = statement.row;
-    for (const [index, e] of statement.cond.entries())
-      if (!evaluateForExpression(e, frame, held, index === statement.cond.length - 1)) return undefined;
-    const result = loopBody(statement.body);
-    if (result !== 'next') return result;
-    runForClause(statement.update, statement.row, frame, held);
-    runtime.spend();
-  }
-}
-
 function runForClause(expressions: Expr[], row: number, frame: Frame, held: number): void {
   if (expressions.length === 0) return;
   const runtime = rt();
@@ -377,37 +593,15 @@ function evaluateForExpression(e: Expr, frame: Frame, held: number, condition = 
   return true;
 }
 
-function releaseTemporariesOnThrow(runtime: Runtime, frame: Frame, mark: number, error: unknown): never {
-  if (error instanceof PhpThrow && frame.temporaries.length > mark)
-    withPendingException(runtime, error, () => runtime.dropTemporaries(frame, mark));
-  throw error;
-}
-
-// code-gauge-allow functionCognitiveComplexity 16 -- One case per statement kind, as PHP runs each kind differently.
-function switchStatement(statement: Extract<Stmt, { k: 'switch' }>): Completion {
+function resolveSwitchStart(statement: Extract<Stmt, { k: 'switch' }>): number {
   const readSubject = prepareOperand(statement.subject);
-  let start = -1;
   for (const [index, item] of statement.cases.entries()) {
     if (item.test === undefined) continue;
     rt().row = item.row;
     const row = item.test.row;
-    if (consumeExpression(item.test, (value) => looseEquals(readSubject(row), value))) {
-      start = index;
-      break;
-    }
+    if (consumeExpression(item.test, (value) => looseEquals(readSubject(row), value))) return index;
   }
-  if (start === -1) start = statement.cases.findIndex((item) => item.test === undefined);
-  if (start === -1) return undefined;
-  for (const item of statement.cases.slice(start)) {
-    const completion = execList(item.body);
-    if (!completion) continue;
-    if (completion.t === 'break' || completion.t === 'continue') {
-      if (completion.depth > 1) return { t: completion.t, depth: completion.depth - 1 };
-      return undefined;
-    }
-    return completion;
-  }
-  return undefined;
+  return statement.cases.findIndex((item) => item.test === undefined);
 }
 
 function staticDeclaration(statement: Extract<Stmt, { k: 'static' }>, frame: Frame): void {
@@ -425,82 +619,132 @@ function staticDeclaration(statement: Extract<Stmt, { k: 'static' }>, frame: Fra
   }
 }
 
-function tryStatement(statement: Extract<Stmt, { k: 'try' }>, seek?: string): Completion {
-  const runtime = rt();
-  let completion: Completion;
-  let pending: PhpThrow | undefined;
-  const inFinally = seek !== undefined && statement.fin?.some((inner) => containsLabel(inner, seek));
-  if (!inFinally) {
-    try {
-      completion = tryCatchStatement(statement, seek);
-    } catch (error) {
-      if (!(error instanceof PhpThrow) || runtime.exhausted || !statement.fin) throw error;
-      pending = error;
+function finishTryNormal(
+  stack: BlockFrame[],
+  top: Extract<BlockFrame, { k: 'try' }>,
+  runtime: Runtime,
+  frame: Frame
+): Completion {
+  if (top.phase !== 'finally') {
+    if (!top.stmt.fin) {
+      stack.pop();
+      return undefined;
     }
+    enterFinallyFrame(stack, top, runtime, frame, undefined, undefined);
+    return undefined;
   }
-  if (!statement.fin) return completion;
-  return runFinally(statement.fin, inFinally ? seek : undefined, completion, pending);
+  if (top.pending) {
+    runtime.held.pop();
+    const pending = top.pending;
+    top.pending = undefined;
+    stack.pop();
+    runtime.thrown = pending.object;
+    throw pending;
+  }
+  if (top.completion?.t === 'return') frame.returning = top.completion.slot;
+  stack.pop();
+  return top.completion;
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- The pending exception and return slot share the same unwind scope.
-// code-gauge-allow functionNcss 35 -- Carries pending control flow across the finally body.
-function runFinally(body: Stmt[], seek: string | undefined, completion: Completion, pending?: PhpThrow): Completion {
-  const runtime = rt();
-  const frame = runtime.frame;
+function propagateTryCompletion(
+  stack: BlockFrame[],
+  top: Extract<BlockFrame, { k: 'try' }>,
+  completion: NonNullable<Completion>,
+  runtime: Runtime,
+  frame: Frame
+): Completion {
+  if (top.phase !== 'finally') {
+    if (!top.stmt.fin) {
+      stack.pop();
+      return completion;
+    }
+    enterFinallyFrame(stack, top, runtime, frame, completion, undefined);
+    return undefined;
+  }
+  if (top.pending) {
+    runtime.held.pop();
+    if (runtime.thrown === top.pending.object) runtime.thrown = undefined;
+    runtime.release([top.pending.object]);
+    top.pending = undefined;
+  }
+  stack.pop();
+  return completion;
+}
+
+// code-gauge-allow functionCognitiveComplexity 16 -- Handles catch matching, finally transition, and exception chaining in one unwind step.
+function handleTryThrow(
+  stack: BlockFrame[],
+  top: Extract<BlockFrame, { k: 'try' }>,
+  error: unknown,
+  runtime: Runtime,
+  frame: Frame
+): { handled: boolean; error: unknown } {
+  if (top.phase === 'try' && error instanceof PhpThrow) {
+    const handler = top.stmt.catches.find((item) => item.types.some((name) => catches(error.object, name)));
+    if (handler) {
+      try {
+        bindCatchVariable(handler, error.object, runtime, frame);
+      } catch (bindError) {
+        top.phase = 'catch';
+        return handleTryThrow(stack, top, bindError, runtime, frame);
+      }
+      top.phase = 'catch';
+      pushListFrame(stack, handler.body);
+      return { handled: true, error };
+    }
+  }
+  if (top.phase !== 'finally') {
+    if (error instanceof PhpThrow && !runtime.exhausted && top.stmt.fin) {
+      enterFinallyFrame(stack, top, runtime, frame, undefined, error);
+      return { handled: true, error };
+    }
+    stack.pop();
+    return { handled: false, error };
+  }
+  if (top.pending) runtime.held.pop();
+  if (top.completion?.t === 'return') frame.returning = undefined;
+  if (error instanceof PhpThrow && top.pending) setPrevious(error.object, top.pending.object);
+  const nextError =
+    top.finMark === undefined ? error : releaseTemporariesKeepingError(runtime, frame, top.finMark, error);
+  stack.pop();
+  return { handled: false, error: nextError };
+}
+
+function bindCatchVariable(
+  handler: Extract<Stmt, { k: 'try' }>['catches'][number],
+  object: PhpObject,
+  runtime: Runtime,
+  frame: Frame
+): void {
+  runtime.row = handler.row;
   const mark = frame.temporaries.length;
+  frame.temporaries.push(object);
+  runtime.thrown = undefined;
+  try {
+    collectBeforeAllocation(runtime);
+    if (handler.varName !== undefined) new VarPlace(frame, handler.varName).set(object);
+  } finally {
+    runtime.dropTemporaries(frame, mark);
+  }
+}
+
+function enterFinallyFrame(
+  stack: BlockFrame[],
+  top: Extract<BlockFrame, { k: 'try' }>,
+  runtime: Runtime,
+  frame: Frame,
+  completion: Completion,
+  pending: PhpThrow | undefined
+): void {
+  top.phase = 'finally';
+  top.completion = completion;
+  top.pending = pending;
+  top.finMark = frame.temporaries.length;
   const returning = completion?.t === 'return' ? completion.slot : undefined;
   if (returning instanceof Ref) runtime.holdTemporaryReference(returning);
   else if (returning !== undefined) frame.temporaries.push(returning);
   if (pending) runtime.held.push(pending.object);
-  let result: Completion;
-  try {
-    result = execList(body, seek);
-  } catch (error) {
-    if (completion?.t === 'return') frame.returning = undefined;
-    if (error instanceof PhpThrow && pending) setPrevious(error.object, pending.object);
-    releaseTemporariesOnThrow(runtime, frame, mark, error);
-  } finally {
-    if (pending) runtime.held.pop();
-  }
-  if (result) {
-    if (pending && runtime.thrown === pending.object) runtime.thrown = undefined;
-    if (pending) runtime.release([pending.object]);
-    return result;
-  }
-  if (pending) {
-    runtime.thrown = pending.object;
-    throw pending;
-  }
-  if (completion?.t === 'return') frame.returning = completion.slot;
-  return completion;
-}
-
-function tryCatchStatement(statement: Extract<Stmt, { k: 'try' }>, seek?: string): Completion {
-  const inCatch =
-    seek === undefined
-      ? undefined
-      : statement.catches.find((item) => item.body.some((inner) => containsLabel(inner, seek)));
-  if (inCatch) return execList(inCatch.body, seek);
-  try {
-    return execList(statement.body, seek);
-  } catch (error) {
-    if (!(error instanceof PhpThrow)) throw error;
-    const handler = statement.catches.find((item) => item.types.some((name) => catches(error.object, name)));
-    if (!handler) throw error;
-    const runtime = rt();
-    runtime.row = handler.row;
-    const frame = runtime.frame;
-    const mark = frame.temporaries.length;
-    frame.temporaries.push(error.object);
-    runtime.thrown = undefined;
-    try {
-      collectBeforeAllocation(runtime);
-      if (handler.varName !== undefined) new VarPlace(frame, handler.varName).set(error.object);
-    } finally {
-      runtime.dropTemporaries(frame, mark);
-    }
-    return execList(handler.body);
-  }
+  pushListFrame(stack, top.stmt.fin as Stmt[]);
 }
 
 function catches(object: PhpObject, name: string): boolean {
@@ -518,9 +762,12 @@ function withForeachSubject<T>(subject: PhpArray | PhpObject | Ref, run: () => T
   }
 }
 
-function foreachStatement(statement: Extract<Stmt, { k: 'foreach' }>): Completion {
-  const runtime = rt();
-  const frame = runtime.frame;
+function enterForeach(
+  stack: BlockFrame[],
+  statement: Extract<Stmt, { k: 'foreach' }>,
+  runtime: Runtime,
+  frame: Frame
+): Completion {
   if (foreachReferences(statement.value, statement.byRef)) return foreachReferenceSubject(statement);
   const subjectMark = frame.temporaries.length;
   const nativeMark = runtime.nativeHeld.at(-1)?.length ?? 0;
@@ -528,20 +775,15 @@ function foreachStatement(statement: Extract<Stmt, { k: 'foreach' }>): Completio
   if (!(subject instanceof PhpArray || (subject instanceof PhpObject && !subject.isResource)))
     return warnForeachSubject(statement, subject);
   frame.temporaries.push(subject);
-  return withForeachSubject(subject, () => {
-    if (subject instanceof PhpObject)
-      return foreachObject(statement, subject, false, () =>
-        runtime.discardNativeResult(subject, nativeMark, subjectMark)
-      );
-    subject.shared = true;
-    for (const [key, slot] of subject.foreachEntries()) {
-      runtime.spend();
-      const value = slot instanceof Ref ? slot.v : slot;
-      const completion = foreachIteration(statement, key, value);
-      if (completion !== 'next') return completion;
-    }
-    return;
-  });
+  if (subject instanceof PhpObject) {
+    return withForeachSubject(subject, () =>
+      foreachObject(statement, subject, false, () => runtime.discardNativeResult(subject, nativeMark, subjectMark))
+    );
+  }
+  subject.shared = true;
+  frame.foreachSubjects.push(subject);
+  stack.push({ k: 'foreachArray', stmt: statement, subject, iter: subject.foreachEntries()[Symbol.iterator]() });
+  return undefined;
 }
 
 const FOREACH_REPLACED = Symbol();
@@ -782,7 +1024,7 @@ function promoteParameters(decl: FunctionDecl, frame: Frame, object: PhpObject):
   }
 }
 
-setBodyRunner(runBody);
+setBodyRunner(runBody, execList);
 setDestructor((object, row) => {
   const destructor = object.cls.findMethod('__destruct');
   if (!destructor) return;

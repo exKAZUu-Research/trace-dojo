@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 997 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 1000 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -113,6 +113,8 @@ export function evReturn(e: Expr): Value | Ref {
   return value;
 }
 
+// code-gauge-allow functionCognitiveComplexity 20 -- Direct expression dispatch keeps hot PHP recursion within the host stack.
+// code-gauge-allow functionNcss 44 -- Direct expression dispatch avoids extra wrapper frames on hot expression kinds.
 export function ev(e: Expr, discardResult = false): Value {
   const runtime = rt();
   if (runtime.frame.constantExpression && runtime.frame.scope && e.k !== 'const')
@@ -130,6 +132,38 @@ export function ev(e: Expr, discardResult = false): Value {
     }
     case 'call': {
       return keepResult(runtime.frame.temporaries.length, callExpression(e, discardResult), !e.fcc) as Value;
+    }
+    case 'mcall': {
+      const result = keepResult(runtime.frame.temporaries.length, methodCallExpression(e, discardResult), !e.fcc);
+      return result === SHORT ? null : result;
+    }
+    case 'scall': {
+      const result = keepResult(runtime.frame.temporaries.length, staticCallExpression(e, discardResult), !e.fcc);
+      return result === SHORT ? null : result;
+    }
+    case 'new': {
+      const mark = runtime.frame.temporaries.length;
+      runtime.row = e.row;
+      const cls = resolveClassRef(e.cls);
+      const callRow = runtime.instructionRow;
+      return keepResult(
+        mark,
+        instantiate(cls, () => constructorArgs(cls, e.args, callRow), callRow, runtime.frame.scope)
+      ) as Value;
+    }
+    case 'assign': {
+      return e.target.k === 'list' ? destructureAssignment(e.target, e.value) : assignExpression(e.target, e.value);
+    }
+    case 'assignOp': {
+      return compoundAssign(e);
+    }
+    case 'idx': {
+      if (e.index === undefined || e.base.k !== 'call') break;
+      const mark = runtime.frame.temporaries.length;
+      const value = keepResult(mark, callExpression(e.base, false), !e.base.fcc) as Value;
+      const key = ev(e.index);
+      runtime.row = e.row;
+      return keepResult(mark, readIndex(value, key, 'read')) as Value;
     }
     case 'cond': {
       if (e.consequent !== undefined)
@@ -261,25 +295,24 @@ export function evChain(e: Expr, discardResult = false): Chain {
       return magicConstant(e.name);
     }
     case 'call': {
-      const mark = runtime.frame.temporaries.length;
-      return keepResult(mark, callExpression(e, discardResult), !e.fcc);
+      return keepResult(runtime.frame.temporaries.length, callExpression(e, discardResult), !e.fcc);
     }
     case 'mcall': {
-      const mark = runtime.frame.temporaries.length;
-      return keepResult(mark, methodCallExpression(e, discardResult), !e.fcc);
+      return keepResult(runtime.frame.temporaries.length, methodCallExpression(e, discardResult), !e.fcc);
     }
     case 'scall': {
-      const mark = runtime.frame.temporaries.length;
-      return keepResult(mark, staticCallExpression(e, discardResult), !e.fcc);
+      return keepResult(runtime.frame.temporaries.length, staticCallExpression(e, discardResult), !e.fcc);
     }
     case 'new':
     case 'newAnon': {
-      return keepingResult(() => {
-        runtime.row = e.row;
-        const cls = e.k === 'new' ? resolveClassRef(e.cls) : anonymousClass(e.decl, e.row);
-        const callRow = runtime.instructionRow;
-        return instantiate(cls, () => constructorArgs(cls, e.args, callRow), callRow, runtime.frame.scope);
-      });
+      const mark = runtime.frame.temporaries.length;
+      runtime.row = e.row;
+      const cls = e.k === 'new' ? resolveClassRef(e.cls) : anonymousClass(e.decl, e.row);
+      const callRow = runtime.instructionRow;
+      return keepResult(
+        mark,
+        instantiate(cls, () => constructorArgs(cls, e.args, callRow), callRow, runtime.frame.scope)
+      );
     }
     case 'assign': {
       if (e.target.k === 'list') return destructureAssignment(e.target, e.value);
@@ -303,20 +336,10 @@ export function evChain(e: Expr, discardResult = false): Chain {
       runtime.row = e.row;
       const lowerConstantUnary =
         runtime.frame.constantExpression && typeof value !== 'bigint' && typeof value !== 'number';
-      switch (e.op) {
-        case '!': {
-          return !toBool(value);
-        }
-        case '-': {
-          return lowerConstantUnary ? arithmetic('*', -1n, value) : negate(value);
-        }
-        case '+': {
-          return lowerConstantUnary ? arithmetic('+', 0n, value) : unaryPlus(value);
-        }
-        default: {
-          return bitwiseNot(value);
-        }
-      }
+      if (e.op === '!') return !toBool(value);
+      if (e.op === '-') return lowerConstantUnary ? arithmetic('*', -1n, value) : negate(value);
+      if (e.op === '+') return lowerConstantUnary ? arithmetic('+', 0n, value) : unaryPlus(value);
+      return bitwiseNot(value);
     }
     case 'incdec': {
       return incDec(e);
@@ -392,11 +415,7 @@ export function evChain(e: Expr, discardResult = false): Chain {
  * Runs a call, then releases the temporaries its arguments held, as PHP frees arguments when a call returns, keeping
  * only the result until the statement stores or drops it.
  */
-function keepingResult(run: () => Chain): Chain {
-  return keepResult(rt().frame.temporaries.length, run());
-}
-
-/** Releases the temporaries held since `mark`, keeping only a call's result, as {@link keepingResult} describes. */
+/** Releases the temporaries held since `mark`, keeping only a call's result. */
 function keepResult(mark: number, result: Chain, allowsReference?: boolean): Chain {
   const runtime = rt();
   const reference = allowsReference && result !== SHORT ? runtime.lastReturnRef : undefined;
@@ -1205,7 +1224,7 @@ function cloneInternal(original: PhpObject, copy: PhpObject): unknown {
 
 // Operators ----------------------------------------------------------------------------------------------------------
 
-function binary(e: Extract<Expr, { k: 'bin' }>): Value {
+export function binary(e: Extract<Expr, { k: 'bin' }>): Value {
   const runtime = rt();
   switch (e.op) {
     case '&&':
@@ -1383,25 +1402,5 @@ function matchExpression(e: Extract<Expr, { k: 'match' }>): Value {
       ? (runtime.frame.vars.get(e.subject.name)?.v ?? null)
       : readSubject();
   runtime.row = (e.jumpTable ? e.subject : (e.arms.at(-1)?.conditions?.at(-1) ?? e.subject)).row;
-  throwError('UnhandledMatchError', `Unhandled match case ${matchCaseText(subject)}`);
-}
-
-function matchCaseText(value: Value): string {
-  if (typeof value === 'string') {
-    const escaped = value
-      .slice(0, 15)
-      .replaceAll(/[\\']/g, String.raw`\$&`)
-      .replaceAll('\n', String.raw`\n`)
-      .replaceAll('\r', String.raw`\r`)
-      .replaceAll('\t', String.raw`\t`);
-    return `'${escaped}${value.length > 15 ? '...' : ''}'`;
-  }
-  if (typeof value === 'bigint') return value.toString();
-  if (typeof value === 'number') {
-    const text = conversionsModule.formatFloat(value);
-    return Number.isFinite(value) && !/[.E]/.test(text) ? `${text}.0` : text;
-  }
-  if (typeof value === 'boolean') return value ? 'true' : 'false';
-  if (value === null) return 'NULL';
-  return `of type ${debugType(value)}`;
+  throwError('UnhandledMatchError', `Unhandled match case ${conversionsModule.matchCaseText(subject)}`);
 }
