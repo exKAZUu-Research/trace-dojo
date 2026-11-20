@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 486 -- Keeps signature resolution and the TypeScript grammar of parameters and accessors together.
+// code-gauge-allow-file fileNcss 494 -- Keeps signature resolution and the TypeScript grammar of parameters and accessors together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { erasedStatementTypes } from '../erasedSyntax';
@@ -727,24 +727,28 @@ export function isContextSensitiveFunction(node: TreeNode): boolean {
   return node.type !== 'arrow_function' && argumentParameters(nodes).length === nodes.length;
 }
 
-/**
- * Parameters where one with a default value, or marked `?`, before a required one is required too, as callers must pass
- * it to reach the later one; its type takes `undefined` instead, which makes the default apply.
- */
+const requiredPrefixSources = new WeakMap<Parameter, Parameter>();
+
+export function declaredParameterType(parameter: Parameter | undefined): Type | undefined {
+  return parameter && (requiredPrefixSources.get(parameter) ?? parameter).type;
+}
+
+/** A caller passes `undefined` for a defaulted parameter before a required parameter. */
 function withRequiredPrefix(parameters: Parameter[]): Parameter[] {
   const minArgumentCount = parameters.findLastIndex((parameter) => !parameter.optional && !parameter.rest) + 1;
-  return parameters.map((parameter, index) =>
-    index < minArgumentCount && parameter.optional
-      ? {
-          name: parameter.name,
-          rest: parameter.rest,
-          optional: false,
-          get type() {
-            return unionOf([parameter.type, undefinedType]);
-          },
-        }
-      : parameter
-  );
+  return parameters.map((parameter, index) => {
+    if (index >= minArgumentCount || !parameter.optional) return parameter;
+    const required: Parameter = {
+      name: parameter.name,
+      rest: parameter.rest,
+      optional: false,
+      get type() {
+        return unionOf([parameter.type, undefinedType]);
+      },
+    };
+    requiredPrefixSources.set(required, parameter);
+    return required;
+  });
 }
 
 function parameterShape(node: TreeNode, index: number, omitted = false): Omit<Parameter, 'type'> {

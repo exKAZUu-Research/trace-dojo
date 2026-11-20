@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 752 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
+// code-gauge-allow-file fileNcss 753 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { typesAtConstructorExit } from './assignmentFlow';
@@ -8,6 +8,7 @@ import { mergedPatternIndexes } from './indexInfos';
 import { isUsedBeforeInitialization } from './initializationOrder';
 import { isBaseTypeVariable } from './mixinConstructors';
 import type { Sym, ValueKind } from './scopes';
+import { declaredParameterType } from './signatures';
 import {
   argumentParameters,
   hasToken,
@@ -597,7 +598,7 @@ export class ClassChecker {
         structure.properties.set(pattern.text, {
           name: pattern.text,
           type: () => {
-            const type = this.c.signatures.signatureOf(ctor).parameters[index]?.type ?? anyType;
+            const type = declaredParameterType(this.c.signatures.signatureOf(ctor).parameters[index]) ?? anyType;
             return parameter.type === 'optional_parameter' ? unionOf([type, undefinedType]) : type;
           },
           optional: parameter.type === 'optional_parameter',
@@ -842,10 +843,7 @@ export class ClassChecker {
     return anyType;
   }
 
-  /**
-   * The type of `this` outside any function or class, which an arrow function must not capture: `typeof globalThis`, as
-   * the reference compiler checks the program as a script, although it runs as a module.
-   */
+  /** TypeScript checks top-level `this` as `typeof globalThis`. CommonJS supplies `module.exports` at runtime. */
   private globalThisType(node: TreeNode): Type {
     for (let current = node.parent; current; current = current.parent) {
       if (current.type !== 'arrow_function') continue;

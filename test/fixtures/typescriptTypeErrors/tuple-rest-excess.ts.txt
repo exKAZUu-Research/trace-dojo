@@ -1,0 +1,13 @@
+function choose(...args: [{ x: number }] | [{ y: string }]): void { console.log(args); }
+function keyed(...args: ['x', { x: number }] | ['y', { y: string }]): void { console.log(args); }
+function padded(...args: [...number[], { info: { x: number } }]): void { console.log(args); }
+choose({ x: 1, z: 2 });
+choose({ x: 1, y: 'two' });
+keyed('x', { x: 1, y: 'two' });
+padded(0, 1, { info: { x: 1, z: 3 } });
+padded(...[0, 1] as const, { info: { x: 1, z: 3 } });
+padded(...[0, 1, { info: { x: 1, z: 3 } }] as const);
+padded({ info: { x: 1, z: 3 } } as const);
+function alternate(...args: [{ x: number }] | { y: string }[]): void { console.log(args); }
+alternate({ y: 'a', z: 2 });
+alternate({ y: 'a' }, { y: 'b', z: 2 });

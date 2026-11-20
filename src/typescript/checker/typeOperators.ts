@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 502 -- Resolves related type operators sharing generic parameters and type construction.
+// code-gauge-allow-file fileNcss 512 -- Resolves related type operators sharing generic parameters and type construction.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker, Mapper } from './checker';
@@ -430,6 +430,7 @@ export class TypeOperators {
 
   /** `object[index]`, reporting a missing property at `node` when given. */
   indexedAccess(object: Type, index: Type, node?: TreeNode): Type {
+    if (isAnyLike(object)) return object === errorType ? errorType : this.indexedAnyAccess(index, node);
     const mapped = this.indexedMappedAccess(object, index, node);
     if (mapped !== undefined) return mapped;
     const variadic = variadicTupleIndex(object, index);
@@ -440,7 +441,6 @@ export class TypeOperators {
     if (isGenericObjectOrIndexType(object) || isGenericObjectOrIndexType(index) || variadic)
       return this.c.relations.stringIndexReadByGenericKey(object, index) ?? this.deferredAccess(object, index);
     if (index.kind === 'union') return unionOf(index.types.map((member) => this.indexedAccess(object, member, node)));
-    if (isAnyLike(object)) return anyType;
     if (object.kind === 'union') return unionOf(object.types.map((member) => this.indexedAccess(member, index, node)));
     if (isPropertyKeyLiteral(index)) return this.propertyAccess(object, index.value, node);
     const applicable =
@@ -449,6 +449,17 @@ export class TypeOperators {
     if (node)
       this.c.error(node, `型 '${this.c.print(index)}' は型 '${this.c.print(object)}' のインデックスに使えません。`);
     return errorType;
+  }
+
+  private indexedAnyAccess(index: Type, node: TreeNode | undefined): Type {
+    if (!node || isGenericObjectOrIndexType(index)) return anyType;
+    let result: Type = anyType;
+    for (const key of typeMembers(index)) {
+      if (this.c.relations.isAssignable(key, propertyKeys)) continue;
+      this.c.error(node, `型 '${this.c.print(key)}' はインデックスに使えません。`);
+      result = errorType;
+    }
+    return result;
   }
 
   private indexedMappedAccess(object: Type, index: Type, node: TreeNode | undefined): Type | undefined {

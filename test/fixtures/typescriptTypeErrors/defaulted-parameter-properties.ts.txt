@@ -1,0 +1,8 @@
+class Required { constructor(public value = 1, label: string) {} }
+class Nullable { constructor(public value: number | undefined = 1, key: string) {} }
+class Optional { constructor(public value?: number) {} }
+const nullable = new Nullable(undefined, 'a');
+const optional = new Optional();
+nullable.value.toFixed();
+optional.value.toFixed();
+new Required(3);

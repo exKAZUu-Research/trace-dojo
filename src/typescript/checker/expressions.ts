@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 522 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
+// code-gauge-allow-file fileNcss 534 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
@@ -49,6 +49,13 @@ import {
   unknownType,
 } from './types';
 import { UniqueSymbols } from './uniqueSymbols';
+
+interface ExcessPropertyOptions {
+  report: boolean;
+  writtenWithin?: TreeNode;
+}
+
+const reportExcessProperties: ExcessPropertyOptions = { report: true };
 
 /** Checks expressions, computing their types and narrowing the references their conditions test. */
 export class ExpressionChecker {
@@ -710,43 +717,64 @@ export class ExpressionChecker {
   }
 
   /** Reports the properties of a fresh object literal that its target does not declare. */
-  checkExcessProperties(node: TreeNode, source: Type, target: Type): void {
+  checkExcessProperties(
+    node: TreeNode,
+    source: Type,
+    target: Type,
+    options: ExcessPropertyOptions = reportExcessProperties
+  ): boolean {
     // Each object literal a union or an array literal holds is checked against where it goes.
     if (source.kind === 'union') {
-      for (const member of source.types) this.checkExcessProperties(node, member, target);
-      return;
+      let fits = true;
+      for (const member of source.types) fits = this.checkExcessProperties(node, member, target, options) && fits;
+      return fits;
     }
-    if (source.kind === 'object' && this.c.literals.isArrayOrTupleLiteral(source)) {
-      this.checkExcessElements(node, source, target);
-      return;
-    }
-    if (source.kind !== 'object' || !source.fresh) return;
+    if (source.kind === 'object' && this.c.literals.isArrayOrTupleLiteral(source))
+      return this.checkExcessElements(node, source, target, options);
+    if (
+      source.kind !== 'object' ||
+      !(source.fresh || (options.writtenWithin && this.c.literals.isObjectLiteralWithin(source, options.writtenWithin)))
+    )
+      return true;
+    return this.checkExcessObjectProperties(node, source, target, options);
+  }
+
+  private checkExcessObjectProperties(
+    node: TreeNode,
+    source: ObjectType,
+    target: Type,
+    options: ExcessPropertyOptions
+  ): boolean {
     const targets = this.discriminatedTargets(source, objectTargets(target));
-    if (targets.length === 0 || this.acceptsAnyProperty(targets)) return;
+    if (targets.length === 0 || this.acceptsAnyProperty(targets)) return true;
     // A discriminated union checks the members its discriminant selects; an index signature takes any key it covers,
     // whose value is still checked against it.
+    let fits = true;
     for (const property of source.resolve().properties.values()) {
-      if (
-        this.c.literals.isWrittenMember(source, property) &&
-        !this.checkWrittenProperty(node, property, targets, target)
-      )
-        return;
+      if (!this.c.literals.isWrittenMember(source, property)) continue;
+      if (!this.checkWrittenProperty(node, property, targets, target, options.report)) return false;
+      fits = this.checkExcessPropertyValue(property, target, options) && fits;
     }
-    this.checkExcessIndexValues(node, source, targets);
+    return this.checkExcessIndexValues(node, source, targets, options) && fits;
   }
 
   /** Checks a written property of a fresh object literal against the targets, returning whether it fits them. */
-  private checkWrittenProperty(node: TreeNode, property: Property, targets: Type[], target: Type): boolean {
+  private checkWrittenProperty(
+    node: TreeNode,
+    property: Property,
+    targets: Type[],
+    target: Type,
+    report: boolean
+  ): boolean {
     if (!this.isKnownProperty(targets, property)) {
-      this.c.error(
-        property.declaration?.childForFieldName('key') ?? property.declaration ?? node,
-        `オブジェクトリテラルには既知のプロパティしか書けません。'${property.name}' は型 '${this.c.print(target)}' にありません。`
-      );
+      if (report)
+        this.c.error(
+          property.declaration?.childForFieldName('key') ?? property.declaration ?? node,
+          `オブジェクトリテラルには既知のプロパティしか書けません。'${property.name}' は型 '${this.c.print(target)}' にありません。`
+        );
       return false;
     }
-    if (target.kind === 'union' && !this.fitsUnionProperty(node, property, targets, target)) return false;
-    this.checkExcessPropertyValue(property, target);
-    return true;
+    return target.kind !== 'union' || this.fitsUnionProperty(node, property, targets, target, report);
   }
 
   private acceptsAnyProperty(targets: Type[]): boolean {
@@ -777,18 +805,26 @@ export class ExpressionChecker {
    * selected members, `undefined` where a member lacks it: a union member without the property may accept the literal
    * as a whole, yet TypeScript rejects the value.
    */
-  private fitsUnionProperty(node: TreeNode, property: Property, targets: Type[], target: Type): boolean {
+  private fitsUnionProperty(
+    node: TreeNode,
+    property: Property,
+    targets: Type[],
+    target: Type,
+    report: boolean
+  ): boolean {
     const key = this.c.typeOperators.propertyKeyType(property);
     const declared = unionOf(targets.map((member) => this.typeOfPropertyIn(member, property.name, key)));
     if (this.c.relations.isAssignable(property.type(), declared)) return true;
-    const { declaration } = property;
-    const value = declaration?.type === 'pair' ? declaration.childForFieldName('value') : undefined;
-    this.reportNotAssignable(
-      declaration?.childForFieldName('key') ?? declaration ?? node,
-      property.type(),
-      this.c.literals.contextualPropertyType(target, property.name, key) ?? declared,
-      value ?? undefined
-    );
+    if (report) {
+      const { declaration } = property;
+      const value = declaration?.type === 'pair' ? declaration.childForFieldName('value') : undefined;
+      this.reportNotAssignable(
+        declaration?.childForFieldName('key') ?? declaration ?? node,
+        property.type(),
+        this.c.literals.contextualPropertyType(target, property.name, key) ?? declared,
+        value ?? undefined
+      );
+    }
     return false;
   }
 
@@ -800,10 +836,10 @@ export class ExpressionChecker {
   }
 
   /** Checks the object literal a written property's value spells against the target's type of the property. */
-  private checkExcessPropertyValue(property: Property, target: Type): void {
+  private checkExcessPropertyValue(property: Property, target: Type, options: ExcessPropertyOptions): boolean {
     const value = property.declaration?.type === 'pair' ? property.declaration.childForFieldName('value') : undefined;
     const targetType = this.contextOfWrittenProperty(target, property);
-    if (value && targetType) this.checkExcessProperties(value, property.type(), targetType);
+    return !value || !targetType || this.checkExcessProperties(value, property.type(), targetType, options);
   }
 
   private contextOfWrittenProperty(target: Type, property: Property): Type | undefined {
@@ -815,11 +851,19 @@ export class ExpressionChecker {
   }
 
   /** Checks the object literals that computed keys give a literal's string index against the targets' string index. */
-  private checkExcessIndexValues(node: TreeNode, source: ObjectType, targets: Type[]): void {
+  private checkExcessIndexValues(
+    node: TreeNode,
+    source: ObjectType,
+    targets: Type[],
+    options: ExcessPropertyOptions
+  ): boolean {
     const sourceIndex = source.resolve().stringIndex;
     const targetIndexes = targets.flatMap((member) => this.c.structureOf(member).stringIndex?.type ?? []);
-    if (sourceIndex && targetIndexes.length > 0)
-      this.checkExcessProperties(node, sourceIndex.type, unionOf(targetIndexes));
+    return (
+      !sourceIndex ||
+      targetIndexes.length === 0 ||
+      this.checkExcessProperties(node, sourceIndex.type, unionOf(targetIndexes), options)
+    );
   }
 
   /**
@@ -846,15 +890,22 @@ export class ExpressionChecker {
   }
 
   /** Checks the object literals among an array's or a tuple's elements against the target's elements. */
-  private checkExcessElements(node: TreeNode, source: ObjectType, target: Type): void {
+  private checkExcessElements(
+    node: TreeNode,
+    source: ObjectType,
+    target: Type,
+    options?: ExcessPropertyOptions
+  ): boolean {
     const targets = arrayTargets(this.c, target);
-    if (targets.length === 0) return;
+    if (targets.length === 0) return true;
     const sourceElements = source.tuple?.elements;
     const elementCount = sourceElements?.length ?? 1;
+    let fits = true;
     for (let index = 0; index < elementCount; index++) {
       const element = sourceElements ? sourceElements[index].type : this.c.elementTypeOf(source);
-      this.checkExcessProperties(node, element, targetElementType(this.c, target, index));
+      fits = this.checkExcessProperties(node, element, targetElementType(this.c, target, index), options) && fits;
     }
+    return fits;
   }
 
   /** The members of a target union that an object literal's discriminant properties select, or all of them. */

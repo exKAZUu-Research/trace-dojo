@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 699 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
+// code-gauge-allow-file fileNcss 722 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
@@ -803,8 +803,39 @@ export class Calls {
       args.length === 1 && args[0].type === 'spread_element'
         ? mapType(this.c.expressions.check(named(args[0])[0]), (type) => this.spreadArgumentType(type, restType))
         : this.argumentTuple(args, contexts);
-    if (this.c.relations.isAssignable(tuple, restType)) return true;
+    if (this.c.relations.isAssignable(tuple, restType)) return !at || this.restExcessFits(at, tuple, restType, report);
     if (report && at) this.c.error(at, this.c.expressions.elaboration.typeRelationMessage(tuple, restType, 'argument'));
+    return false;
+  }
+
+  private restExcessFits(node: TreeNode, source: Type, target: Type, report: boolean): boolean {
+    if (source.kind === 'union')
+      return source.types.every((member) => this.restExcessFits(node, member, target, report));
+    if (source.kind !== 'object' || !source.tuple) return true;
+    const elements = source.tuple.elements;
+    const lengths = elements.map((element) => (element.rest ? undefined : 1));
+    const candidates = typeMembers(target).filter((member) => this.c.relations.isAssignable(source, member));
+    const writtenWithin = node.parent?.type === 'arguments' ? node.parent : node;
+    const fits = (candidate: Type, emit: boolean): boolean => {
+      this.c.budget.spend(elements.length);
+      const contexts = tupleArgumentContexts(this.c, candidate, lengths);
+      const arrayElement =
+        candidate.kind === 'object' && !candidate.tuple && this.c.isArrayOrTuple(candidate)
+          ? this.c.elementTypeOf(candidate)
+          : undefined;
+      return elements.every((element, index) => {
+        const context = contexts[index] ?? arrayElement;
+        return (
+          !context ||
+          this.c.expressions.checkExcessProperties(node, this.c.relations.tupleElementTargetType(element), context, {
+            report: emit,
+            writtenWithin,
+          })
+        );
+      });
+    };
+    if (candidates.length === 0 || candidates.some((candidate) => fits(candidate, false))) return true;
+    if (report) fits(candidates[0], true);
     return false;
   }
 

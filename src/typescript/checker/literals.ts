@@ -214,6 +214,15 @@ export class LiteralChecker {
     return this.arrayLiterals.has(type.id) || this.tupleLiterals.has(type.id);
   }
 
+  isObjectLiteralWithin(type: ObjectType, expression: TreeNode): boolean {
+    const literal = this.objectLiteralNodes.get(type.id);
+    return (
+      literal?.tree === expression.tree &&
+      literal.startIndex >= expression.startIndex &&
+      literal.endIndex <= expression.endIndex
+    );
+  }
+
   /** Whether a property of an object literal type is written in the literal, rather than copied by a spread. */
   isWrittenMember(literal: ObjectType, property: Property): boolean {
     const node = this.objectLiteralNodes.get(literal.id);
