@@ -1611,6 +1611,27 @@ fn main() {
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '9 7 1 2\n' });
 });
 
+test('drops uncaptured Rust fields when a move closure outlives their owner', () => {
+  const program = `struct Pair { keep: Turtle, drop: Turtle }
+struct Outer { inner: Pair, other: Turtle }
+fn main() {
+    let observer = Turtle::new(1, 0);
+    let mut later;
+    {
+        let mut value = Outer {
+            inner: Pair { keep: Turtle::new(3, 3), drop: Turtle::new(1, 1) },
+            other: Turtle::new(4, 4),
+        };
+        later = move || value.inner.keep.turn_left();
+    }
+    println!("{}", observer.canMoveForward());
+    later();
+}`;
+  const execution = executeProgram('rust', program);
+  expect(execution).toMatchObject({ kind: 'executed', stdout: 'true\n' });
+  expect(execution.kind === 'executed' && execution.finalTurtles).toHaveLength(2);
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

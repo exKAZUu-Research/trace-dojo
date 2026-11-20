@@ -615,7 +615,7 @@ export class Compiler {
   /** The place a closure reaches a captured variable through: the variable's own, or a copy that it owns. */
   private capturePlace(
     frame: Frame,
-    { res, local, fields }: { res: PathRes; local: LocalVar; fields: Set<string> | undefined },
+    { res, local, fields }: { res: PathRes; local: LocalVar; fields: number[][] | undefined },
     context: FnContext,
     byValue: boolean
   ): Place {
@@ -629,49 +629,57 @@ export class Compiler {
     if (!byValue) return place;
     const value = place.get();
     if (this.isCopy(local.type)) return new CellPlace(needsCopy(resolve(local.type, true)) ? copyValue(value) : value);
-    if (res.kind !== 'local' || local.mode !== 'move' || isRefType(local.type)) return new CellPlace(value);
-    return new CellPlace(this.moveCaptured(frame, local, value, fields));
+    if (local.mode !== 'move' || isRefType(local.type)) return new CellPlace(value);
+    const type = normalize(shallow(resolve(local.type, true)));
+    if (fields && (value instanceof StructValue || Array.isArray(value))) {
+      return new CellPlace(this.moveCapturedFields(frame, value, type, fields));
+    }
+    if (res.kind === 'local') frame.locals[local.slot] = UNASSIGNED;
+    else place.set(MOVED);
+    return new CellPlace(value);
   }
 
   /**
    * The fields of a captured variable that a closure's body uses (`p.name`), which it captures on their own as edition
    * 2021 does, or undefined when the body uses the whole variable.
    */
-  private capturedFields(body: Expr, local: LocalVar): Set<string> | undefined {
-    const fields = new Set<string>();
-    let whole = false;
-    const isCapture = (expr: Expr): boolean => {
+  private capturedFields(body: Expr, local: LocalVar): number[][] | undefined {
+    const fields: number[][] = [];
+    const path = (expr: Expr): number[] | undefined => {
       const res = expr.kind === 'path' ? this.annotations.paths.get(expr) : undefined;
-      return (res?.kind === 'capture' || res?.kind === 'local') && res.local === local;
+      if ((res?.kind === 'capture' || res?.kind === 'local') && res.local === local) return [];
+      if (expr.kind !== 'field') return undefined;
+      const field = this.annotations.fields.get(expr);
+      const base = field?.derefs.length === 0 && path(expr.operand);
+      return base ? [...base, field.index] : undefined;
     };
     const visit = (expr: Expr): void => {
-      if (expr.kind === 'field' && isCapture(expr.operand) && this.annotations.fields.get(expr)?.derefs.length === 0) {
-        fields.add(expr.name);
-        return;
-      }
-      if (isCapture(expr)) whole = true;
-      forEachDirect(expr, visit);
+      const capture = path(expr);
+      if (capture) fields.push(capture);
+      else forEachDirect(expr, visit);
     };
     visit(body);
-    return whole || fields.size === 0 ? undefined : fields;
+    return fields.length > 0 && fields.every((field) => field.length > 0) ? fields : undefined;
   }
 
-  /**
-   * What a closure that captures by value takes from a variable: all of it, which leaves the variable without a value,
-   * or the fields it uses, which leave the variable's other fields in place.
-   */
-  private moveCaptured(frame: Frame, local: LocalVar, value: Value, fields: Set<string> | undefined): Value {
-    const t = normalize(shallow(resolve(local.type, true)));
-    if (!fields || !(value instanceof StructValue) || t.kind !== 'adt') {
-      frame.locals[local.slot] = UNASSIGNED;
-      return value;
+  private moveCapturedFields(frame: Frame, value: StructValue | Value[], type: Type, paths: number[][]): Value {
+    const source = value instanceof StructValue ? value.fields : value;
+    frame.runtime.allocate(source.length);
+    const fields: Value[] = Array.from({ length: source.length });
+    for (const [index, field] of source.entries()) {
+      const projections = paths.filter((path) => path[0] === index).map((path) => path.slice(1));
+      if (projections.length === 0) continue;
+      const fieldType = captureFieldType(type, index);
+      if (projections.every((path) => path.length) && (field instanceof StructValue || Array.isArray(field))) {
+        fields[index] = this.moveCapturedFields(frame, field, fieldType, projections);
+      } else if (this.isCopy(fieldType)) {
+        fields[index] = needsCopy(fieldType) ? copyValue(field) : field;
+      } else {
+        fields[index] = field;
+        source[index] = MOVED;
+      }
     }
-    const subst = new Map(t.def.params.map((param, index) => [param, t.args[index]]));
-    const shell = new StructValue(value.def, [...value.fields]);
-    for (const [index, field] of t.def.variants[0].fields.entries()) {
-      if (fields.has(field.name) && !this.isCopy(substitute(field.type, subst))) value.fields[index] = MOVED;
-    }
-    return shell;
+    return value instanceof StructValue ? new StructValue(value.def, fields) : fields;
   }
 
   tryExpr(expr: Extract<Expr, { kind: 'try' }>): Eval {
@@ -695,6 +703,14 @@ export class Compiler {
       throw new ControlSignal('return', undefined, new EnumValue(value.def, 1, [error]));
     };
   }
+}
+
+function captureFieldType(type: Type, index: number): Type {
+  const t = normalize(shallow(type));
+  if (t.kind === 'tuple') return t.elems[index];
+  if (t.kind !== 'adt') throw new Error('Expected a struct or tuple capture');
+  const subst = new Map(t.def.params.map((param, i) => [param, t.args[i]]));
+  return substitute(t.def.variants[0].fields[index].type, subst);
 }
 
 function readInt(_c: Compiler, expr: ExprOf<'int'>): Eval {
