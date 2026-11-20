@@ -722,9 +722,7 @@ function traitPropertyCompatible(
   if (
     existing.visibility !== property.visibility ||
     existing.isStatic !== property.isStatic ||
-    existing.isReadonly !== property.isReadonly ||
-    existing.isFinal !== isFinalProperty(property) ||
-    effectiveSetVisibility(existing) !== effectiveSetVisibility(property)
+    existing.isReadonly !== property.isReadonly
   )
     return false;
   if (Boolean(existing.type) !== Boolean(property.type)) return false;

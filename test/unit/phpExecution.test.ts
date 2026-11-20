@@ -2278,6 +2278,34 @@ test.each([
 });
 
 test.each([
+  ['public private(set) int', 'public int', '2'],
+  ['public int', 'public private(set) int', 'blocked;1'],
+  ['public private(set) int', 'public protected(set) int', 'blocked;1'],
+  ['final public int', 'public int', '2'],
+  ['public int', 'final public int', '2'],
+])(
+  'keeps the class setter and finality when composing a compatible trait property: %s and %s',
+  (trait, own, stdout) => {
+    expect(
+      run(`<?php
+trait T { ${trait} $x = 1; }
+class C { use T; ${own} $x = 1; }
+$object = new C;
+try { $object->x = 2; } catch (Error) { echo "blocked;"; }
+echo $object->x;`)
+    ).toMatchObject({ kind: 'executed', stdout });
+  }
+);
+
+test('retains the class property finality after composing a compatible trait property', () => {
+  expect(
+    run(
+      '<?php trait T { public int $x = 1; } class C { use T; final public int $x = 1; } class D extends C { public int $x = 2; }'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: expect.stringContaining('Cannot override final property C::$x') });
+});
+
+test.each([
   ['class A { private private(set) int $x = 1; }', 'ok'],
   ['class A { public function __construct(private private(set) int $x = 1) {} }', 'ok'],
   ['class A { public function __construct(final private int $x = 1) {} }', 'Cannot override final property A::$x'],
