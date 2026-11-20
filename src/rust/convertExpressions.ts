@@ -2,7 +2,7 @@ import type { Node } from '@willbooster/web-tree-sitter';
 
 import type { BinaryOp, Block, Condition, Expr, Item, MatchArm, Pattern, Span, Stmt, TypeAst } from './ast';
 import { MacroConverter } from './convertMacros';
-import { isComment, syntaxError, unavailable } from './convertSyntax';
+import { isComment, syntaxError, unavailable, withoutDocAttributes } from './convertSyntax';
 import {
   parseByteLiteral,
   parseCharLiteral,
@@ -93,7 +93,8 @@ export abstract class ExpressionConverter extends MacroConverter {
   }
 
   // code-gauge-allow functionNcss 46 -- One case per kind of syntax node.
-  expr(node: Node): Expr {
+  expr(syntax: Node): Expr {
+    const node = withoutDocAttributes(syntax);
     const span = this.span(node);
     switch (node.type) {
       case 'integer_literal': {
@@ -539,12 +540,6 @@ export abstract class ExpressionConverter extends MacroConverter {
     const pattern = this.pattern(inner);
     return pattern.kind === 'binding' ? { ...pattern, mutable: true } : pattern;
   }
-}
-
-function withoutDocAttributes(node: Node): Node {
-  if (node.type !== 'attributed_declaration' && node.type !== 'attributed_expression') return node;
-  const [child, other] = node.namedChildren.filter((part) => !isComment(part));
-  return child && !other ? child : node;
 }
 
 function unsupportedExpr(node: Node, span: Span): never {

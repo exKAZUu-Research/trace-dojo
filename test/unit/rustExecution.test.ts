@@ -1514,19 +1514,41 @@ enum Choice {
     /// The supplied point.
     Some(Point),
 }
+trait Paint {
+    /// The default marker.
+    fn marker(&self) -> i32 { 0 }
+}
+impl Paint for Point {
+    /// Use the position as the marker.
+    fn marker(&self) -> i32 { self.row }
+}
+impl Point {
+    /// Shows the marker.
+    fn show(&self) { println!("{}", self.marker()); }
+}
 /** Writes the chosen point. */
 fn main() {
     /// Build an example.
     let point = Point { row: 7 };
     match Choice::Some(point) {
         /// Show the point.
-        Choice::Some(point) => println!("{:?}", point),
+        Choice::Some(point) => {
+            /// Show the marker and the original point.
+            if true { point.show(); }
+            /// Display the debug form.
+            println!("{:?}", point);
+        },
     }
 }`;
   expect(executeProgram('rust', program)).toMatchObject({
     kind: 'executed',
-    stdout: 'Point { row: 7 }\n',
+    stdout: '7\nPoint { row: 7 }\n',
     uncaughtException: undefined,
+  });
+  const attribute = program.replace('/// Use the position as the marker.', '#[inline]');
+  expect(executeProgram('rust', attribute)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ message: expect.stringContaining('#[inline]') })],
   });
 });
 

@@ -23,7 +23,7 @@ import type {
   Visibility,
 } from './ast';
 import { ExpressionConverter } from './convertExpressions';
-import { checkNotReserved, isComment, syntaxError, unavailable } from './convertSyntax';
+import { checkNotReserved, isComment, syntaxError, unavailable, withoutDocAttributes } from './convertSyntax';
 
 export { type Reparse, syntaxError, unavailable } from './convertSyntax';
 
@@ -441,14 +441,15 @@ export class Converter extends ExpressionConverter {
     const span = this.span(node);
     if (node.text.startsWith('unsafe')) unavailable(span, 'unsafe trait');
     const methods: FnItem[] = [];
-    for (const child of this.field(node, 'body').namedChildren) {
-      if (isComment(child)) continue;
+    for (const syntax of this.field(node, 'body').namedChildren) {
+      if (isComment(syntax)) continue;
+      const child = withoutDocAttributes(syntax);
       if (child.type === 'function_item') methods.push(this.fnItem(child));
       else if (child.type === 'function_signature_item') methods.push(this.fnItem(child, true));
       else if (child.type === 'associated_type') unavailable(this.span(child), '関連型（type Item;）');
       else if (child.type === 'const_item') unavailable(this.span(child), 'トレイトの関連定数');
-      else if (child.type === 'attribute_item') unavailable(this.span(child), `属性（${child.text}）`);
       else if (child.type === 'macro_invocation') unavailable(this.span(child), 'トレイトの中のマクロ');
+      else this.unsupportedAssociatedItem(child);
     }
     const bounds = node.childForFieldName('bounds');
     return {
@@ -470,15 +471,16 @@ export class Converter extends ExpressionConverter {
     const trait = node.childForFieldName('trait');
     const methods: FnItem[] = [];
     const consts: ImplItem['consts'] = [];
-    for (const child of node.childForFieldName('body')?.namedChildren ?? []) {
-      if (isComment(child)) continue;
+    for (const syntax of node.childForFieldName('body')?.namedChildren ?? []) {
+      if (isComment(syntax)) continue;
+      const child = withoutDocAttributes(syntax);
       if (child.type === 'function_item') methods.push(this.fnItem(child));
       else if (child.type === 'function_signature_item' && this.isStd) methods.push(this.fnItem(child, true));
       else if (child.type === 'const_item') consts.push(this.item(child) as ImplItem['consts'][number]);
       else if (child.type === 'type_item') unavailable(this.span(child), '関連型（type Item = ...;）');
-      else if (child.type === 'attribute_item') unavailable(this.span(child), `属性（${child.text}）`);
       else if (child.type === 'function_signature_item') syntaxError(this.span(child), '関数の本体が足りません。');
       else if (child.type === 'macro_invocation') unavailable(this.span(child), 'impl の中のマクロ');
+      else this.unsupportedAssociatedItem(child);
     }
     return {
       kind: 'impl',
@@ -489,6 +491,17 @@ export class Converter extends ExpressionConverter {
       methods,
       consts,
     };
+  }
+
+  private unsupportedAssociatedItem(node: Node): never {
+    const attr =
+      node.type === 'attributed_declaration'
+        ? node.namedChildren.find((child) => child.type === 'attribute_item' && !isComment(child))
+        : node.type === 'attribute_item' || node.type === 'inner_attribute_item'
+          ? node
+          : undefined;
+    if (attr) unavailable(this.span(attr), `属性（${attr.text}）`);
+    return unavailable(this.span(node), `この書き方（${node.type}）`);
   }
 
   // code-gauge-allow functionCognitiveComplexity 27 -- One case per kind of syntax node.

@@ -131,3 +131,9 @@ export function isComment(node: Node): boolean {
   const comment = node.firstNamedChild;
   return comment !== null && (comment.type === 'line_comment' || comment.type === 'block_comment');
 }
+
+export function withoutDocAttributes(node: Node): Node {
+  if (node.type !== 'attributed_declaration' && node.type !== 'attributed_expression') return node;
+  const [child, other] = node.namedChildren.filter((part) => !isComment(part));
+  return child && !other ? withoutDocAttributes(child) : node;
+}
