@@ -145,6 +145,8 @@ export abstract class ConverterBase {
     if (raw.startsWith('\\')) return { name: raw.slice(1) };
     if (lower(raw).startsWith('namespace\\')) return { name: this.qualify(raw.slice('namespace\\'.length)) };
     if (raw.includes('\\')) return { name: this.resolveClassName(raw) };
+    // PHP's parser reads an unqualified `readonly(` call as the fully qualified global name.
+    if (lower(raw) === 'readonly') return { name: raw };
     const imported = this.functionImports.get(lower(raw));
     if (imported !== undefined) return { name: imported };
     return this.namespace ? { name: this.qualify(raw), fallback: raw } : { name: raw };

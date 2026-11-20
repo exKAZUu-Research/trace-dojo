@@ -211,8 +211,9 @@ test('accepts qualified names and the readonly function identifier in their PHP 
 namespace Empty;
 use Vendor\\Empty as Ordinary;
 function readonly(?Ordinary $p = null): bool { return $p === null; }
-echo readonly() ? 'ok' : 'fail';`;
-  expect(run(source)).toMatchObject({ kind: 'executed', stdout: 'ok' });
+echo namespace\\readonly() ? 'ok' : 'fail';
+try { readonly(); } catch (\\Error $e) { echo ';', $e->getMessage(); }`;
+  expect(run(source)).toMatchObject({ kind: 'executed', stdout: 'ok;Call to undefined function readonly()' });
 });
 
 test.each([
