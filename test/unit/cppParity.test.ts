@@ -954,13 +954,15 @@ int main() {
   std::array<int, 4> c{};
   constexpr auto m = c.size();
   int d[m]{};
+  constexpr auto j = std::size(c);
+  int e[j]{};
   static int s[5];
   constexpr auto k = std::size(s);
-  std::cout << n << m << k << ' ' << sizeof(b) << ' ' << sizeof(d);
+  std::cout << n << m << k << ' ' << sizeof(b) << ' ' << sizeof(d) << sizeof(e);
 }`;
   expect(executeProgram('cpp', program)).toMatchObject({
     kind: 'executed',
-    stdout: '345 12 16',
+    stdout: '345 12 1616',
     uncaughtException: undefined,
   });
 });

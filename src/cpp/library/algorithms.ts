@@ -1262,8 +1262,14 @@ function rangeMemberFunction(compiler: ExpressionCompiler, name: string, arg: Ex
   if (!fn.isPure) compiler.checkDefined(fn, row);
   const args = compiler.callArguments(fn, [], row);
   const call = compiler.prepareInvocation(fn, row);
-  return native(name, [referenceTo(type)], fn.ret, ([receiver], { frame }) =>
-    withTemporaries(frame, () => holdAll(frame, args, (values) => call(frame, values, receiver as Ptr)))
+  const { constantValue } = fn;
+  return native(
+    name,
+    [referenceTo(type)],
+    fn.ret,
+    ([receiver], { frame }) =>
+      withTemporaries(frame, () => holdAll(frame, args, (values) => call(frame, values, receiver as Ptr))),
+    { constantValue: constantValue && ((_, [range]) => constantValue(range, [])) }
   );
 }
 
