@@ -56,8 +56,12 @@ export class CircularConstraints {
         return this.conditionalLeadsBack(type, path);
       }
       case 'union':
-      case 'intersection': {
+      case 'intersection':
+      case 'templateLiteral': {
         return type.types.some((member) => this.leadsBack(member, path));
+      }
+      case 'stringMapping': {
+        return this.leadsBack(type.type, path);
       }
       default: {
         return false;

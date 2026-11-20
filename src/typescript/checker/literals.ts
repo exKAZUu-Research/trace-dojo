@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 761 -- Types literals and their spreads, members, and widening in the same literal context.
+// code-gauge-allow-file fileNcss 771 -- Types literals and their spreads, members, and widening in the same literal context.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExpressionListFlow, tupleArgumentContexts } from './callArity';
@@ -29,7 +29,9 @@ import {
   isAnyLike,
   isFreshLiteral,
   isIntrinsic,
+  isPrimitive,
   isPropertyKeyLiteral,
+  isTemplateOrStringMapping,
   type LiteralType,
   literalType,
   mapType,
@@ -1090,16 +1092,24 @@ export class LiteralChecker {
 
   /** Whether a type parameter is constrained to primitives, which keeps the literals inferred for it. */
   hasPrimitiveConstraint(parameter: TypeParameter): boolean {
-    const constraint = parameter.substitution?.constraint ?? parameter.constraint?.();
+    const constraint = parameter.substitution?.constraint ?? this.c.constraintOf(parameter);
     if (!constraint) return false;
-    return (constraint.kind === 'union' ? constraint.types : [constraint]).some(
-      (member) =>
-        member.kind === 'literal' ||
-        member.kind === 'keyof' ||
-        member.kind === 'templateLiteral' ||
-        member.kind === 'stringMapping' ||
-        (member.kind === 'intrinsic' && ['string', 'number', 'bigint', 'boolean', 'symbol'].includes(member.name)) ||
-        (member.kind === 'union' && member.types.every((part) => part.kind === 'literal'))
+    if (constraint.kind !== 'conditional') return this.includesPrimitiveConstraint(constraint);
+    const yes = this.c.conditionalTrueType(constraint);
+    const no = constraint.falseType;
+    const fallback = isAnyLike(yes) ? no : isAnyLike(no) ? yes : unionOf([yes, no]);
+    return this.includesPrimitiveConstraint(fallback);
+  }
+
+  private includesPrimitiveConstraint(constraint: Type): boolean {
+    this.c.budget.spend();
+    if (constraint.kind === 'union' || constraint.kind === 'intersection')
+      return constraint.types.some((member) => this.includesPrimitiveConstraint(member));
+    return (
+      constraint.kind === 'literal' ||
+      constraint.kind === 'keyof' ||
+      isPrimitive(constraint) ||
+      isTemplateOrStringMapping(constraint)
     );
   }
 
