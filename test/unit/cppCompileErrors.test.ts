@@ -1307,10 +1307,11 @@ int main() { ${allocation}; std::cout << "accepted"; }`;
 test.each([
   'int a[3]{}; auto& r = a; constexpr auto n = std::size(r);',
   'std::array<int, 3> a{}; std::array<int, 3>& r = a; constexpr auto n = r.size();',
-])('rejects a constant size queried through a reference in %s', (body) => {
+  'constexpr auto n = std::array<int, 3>{f()}.size();',
+])('rejects a constant size queried through a reference or a runtime temporary in %s', (body) => {
   const program = `#include <array>
 #include <iterator>
-int main() { ${body} }`;
+int f() { return 1; } int main() { ${body} }`;
   expect(executeProgram('cpp', program)).toMatchObject({
     kind: 'compileError',
     diagnostics: [{ row: 2, message: expect.stringContaining('定数式') }],

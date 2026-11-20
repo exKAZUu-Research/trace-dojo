@@ -19,7 +19,7 @@ import { CppRuntimeError } from './errors';
 import {
   constantExpr,
   constantLocationOf,
-  designatesWithoutSideEffects,
+  evaluatesWithoutSideEffects,
   type Expr,
   type FunctionCandidates,
   hasConstantObject,
@@ -2295,7 +2295,7 @@ function designatesElement(array: Type & { kind: 'array' }, offset: Expr, elemen
 
 /** Whether a static member named through `object` keeps its constant value: the object is absent or a constant designation. */
 function isConstantObject(object: Expr | undefined): boolean {
-  return !object || designatesWithoutSideEffects(object);
+  return !object || evaluatesWithoutSideEffects(object);
 }
 
 /** The location of the complete `to` object that `location` designates a base of, stopping when it is no such object. */

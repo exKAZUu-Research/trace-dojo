@@ -3,7 +3,7 @@ import { implicitConversion } from '../conversions';
 import { CppRuntimeError, NarrowingConversionError } from '../errors';
 import {
   type ConstantLocation,
-  designatesWithoutSideEffects,
+  evaluatesWithoutSideEffects,
   type Expr,
   hasConstantObject,
   type Initializer,
@@ -505,7 +505,7 @@ function sequenceMethods(
   method('size', [], SIZE_T, (self) => BigInt(self.size), {
     isConst: true,
     constantValue: (object) =>
-      kind === 'array' && object && designatesWithoutSideEffects(object) ? BigInt(fixedLength ?? 0) : undefined,
+      kind === 'array' && object && evaluatesWithoutSideEffects(object) ? BigInt(fixedLength ?? 0) : undefined,
   });
   method('max_size', [], SIZE_T, () => (kind === 'array' ? BigInt(fixedLength ?? 0) : maxSizeOf(kind, element)), {
     isConst: true,
