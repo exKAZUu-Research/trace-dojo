@@ -826,6 +826,25 @@ int main() {
   });
 });
 
+test('binds typed functor operands by const reference', () => {
+  const program = `#include <functional>
+#include <iostream>
+#include <string>
+int main() {
+  std::string a(23, 'a'), b(23, 'b'), c(24, 'c');
+  std::string r1 = std::plus<std::string>()(a, b);
+  std::string r2 = std::plus<std::string>()(a, c);
+  std::string r3 = std::plus<std::string>()(std::string(23, 'x'), b);
+  std::cout << r1.capacity() << ' ' << r2.capacity() << ' ' << r3.capacity() << ' '
+            << std::less<std::string>()(a, b) << std::less<std::string>()(std::string("z"), a) << std::equal_to<std::string>()(a, a) << std::greater<int>()(2, 1);
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '47 47 47 1011',
+    uncaughtException: undefined,
+  });
+});
+
 test('returns the std::istream base from getline', () => {
   const program = `#include <iostream>
 #include <sstream>

@@ -1,13 +1,15 @@
 import { commonType } from '../../c/types';
 import { arithmeticOperation, convertNumeric, type NumericValue } from '../arithmetic';
 import type { Expr } from '../expr';
+import type { ExpressionCompiler } from '../expressionCompiler';
 import { FloatNaN } from '../floatSign';
+import type { Frame } from '../runtime';
 import { BOOL, ClassInfo, isArithmetic, sameType, type Type, typeName, unqualified } from '../types';
-import { CObject, type Value } from '../values';
+import { CObject, type Ptr, type Value } from '../values';
 import { equalTo, lessThan, type ValueComparison } from './elements';
 import type { ClassOperations } from './libraryClass';
 import type { Library } from './registry';
-import { native, nativeConstructor } from './support';
+import { constRef, native, nativeConstructor } from './support';
 import { typeKey } from './templates';
 
 const FUNCTORS: Record<string, { isComparison: boolean; operator: string }> = {
@@ -85,13 +87,17 @@ export function functorClass(library: Library, name: string, type: Type | undefi
       }
       const type = unqualified(argument);
       if (operator === '+' && type.kind === 'class' && type.cls.library?.kind === 'string') {
-        const [left, right] = args.map((arg) => compiler.convert(arg, type, row));
+        const [left, right] = args.map((arg) => constLvalue(compiler, arg, type, row));
         const result = compiler.binary(operator, left, right, row);
         return { ...result, run: (frame) => (object.run(frame), result.run(frame)) };
       }
       const operation = apply(type, type);
       if (!operation) return compiler.error(row, `${cls.name} は ${typeName(type)} の値に使えません。`);
-      const values = args.map((arg) => compiler.convert(arg, unqualified(type), row).run);
+      const values = args.map((arg) => {
+        if (type.kind !== 'class') return compiler.convert(arg, type, row).run;
+        const run = constLvalue(compiler, arg, type, row).run;
+        return (frame: Frame) => (run(frame) as Ptr).read();
+      });
       const objectRun = object.run;
       return {
         type: isComparison ? BOOL : unqualified(type),
@@ -247,4 +253,10 @@ const constant =
 
 function statelessOperations(cls: ClassInfo): ClassOperations {
   return { copyIsNoexcept: true, copy: () => new CObject(cls, []), assign: () => {} };
+}
+
+/** An operand bound to a typed functor's `const T&` parameter, which its body reads as an lvalue. */
+function constLvalue(compiler: ExpressionCompiler, arg: Expr, type: Type, row: number): Expr {
+  const bound = compiler.convert(arg, constRef(type), row);
+  return { ...(bound.isLvalue ? bound : compiler.materialize(bound)), isXvalue: false };
 }
