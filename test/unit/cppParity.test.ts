@@ -826,6 +826,18 @@ int main() {
   });
 });
 
+test('evaluates a nullptr operand before inserting it', () => {
+  const program = `#include <cstddef>
+#include <iostream>
+std::nullptr_t f() { std::cout << 7; return nullptr; }
+int main() { int x = 0; std::cout << f() << ' ' << (++x, nullptr) << x; }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '7nullptr nullptr1',
+    uncaughtException: undefined,
+  });
+});
+
 test('casts stream base pointers and references back to the complete stream', () => {
   const program = `#include <iostream>
 #include <sstream>
