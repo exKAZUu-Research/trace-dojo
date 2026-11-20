@@ -5421,6 +5421,11 @@ test('a returned local becomes a GC root before the other locals are freed', () 
       '<?php class N { static $c = 0; public $id; public $next; function __construct() { $this->id = ++self::$c; } function __destruct() { echo "-{$this->id} "; } } $f = fn() => true; array_map($f, [1]); $a = new N; $b = new N; $a->next = $b; $b->next = $a; unset($a, $b); echo gc_collect_cycles(); $p = new N; $q = new N; echo " ", spl_object_id($p), spl_object_id($q);'
     )
   ).toMatchObject({ kind: 'executed', stdout: '-2 -1 2 32-4 -3 ' });
+  expect(
+    run(
+      '<?php class N { function __construct(public $n) {} function __destruct() { echo "d{$this->n};"; } } function uf() { return 1; } function cyc($n) { $o = new stdClass; $o->s = $o; $o->n = new N($n); } $f = uf(...); cyc(1); $f(); cyc(2); cyc(3); echo gc_collect_cycles(), ";"; $a = []; for ($i = 0; $i < 7; $i++) $a[] = new stdClass; foreach ($a as $x) echo spl_object_id($x), ",";'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'd1;d2;d3;3;6,7,4,5,2,3,8,' });
   for (const callable of [
     'class H { function make() { return function () { return 1; }; } } $h = new H; $f = $h->make();',
     'class H { function m() { return 1; } } $h = new H; $f = $h->m(...);',

@@ -125,6 +125,12 @@ export class Frame {
 
 const variableNamesByFunction = new WeakMap<FunctionDecl, Set<string>>();
 
+/** Whether an object is a first-class callable without a bound object, which PHP never buffers (`GC_NOT_COLLECTABLE`). */
+function isUnboundCallableClosure(value: PhpObject): boolean {
+  const closure = value.internal as Partial<ClosureData> | undefined;
+  return closure?.isCallable === true && closure.thisObj === undefined;
+}
+
 function createBudget(): ExecutionBudget {
   const remaining = process.env.PHP_REMAINING_MS;
   if (remaining === undefined) return new ExecutionBudget();
@@ -486,7 +492,12 @@ export class Runtime {
   }
 
   isCollectableObject(value: PhpObject): boolean {
-    return !value.isResource && !this.collectingObjects.has(value) && this.objects.get(value.id) === value;
+    return (
+      !value.isResource &&
+      !isUnboundCallableClosure(value) &&
+      !this.collectingObjects.has(value) &&
+      this.objects.get(value.id) === value
+    );
   }
 
   /** Writes bytes to standard output, decoding complete UTF-8 sequences as they arrive. */
