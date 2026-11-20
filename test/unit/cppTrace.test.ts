@@ -348,6 +348,44 @@ int main() {
   }
 });
 
+test.each([
+  'int fail() { Turtle t(3, 5); throw 1; }\nstruct S { int n = fail(); };\nint main() { S s{}; }',
+  'int fail() { throw 1; }\nvoid f(Turtle*, int) {}\nint main() { f(new Turtle(3, 5), fail()); }',
+])('keeps turtles that active initializers and arguments reach at an uncaught throw in %s', (program) => {
+  const turtle = { x: 3, y: 5, color: '#', dir: 'N' };
+  expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', finalTurtles: [turtle] });
+  expect(traceProgram('cpp', program, program)).toMatchObject({ finalTurtles: [turtle] });
+});
+
+test.each([
+  'struct Pen { Turtle* t; ~Pen() { t->forward(); } };\nint main() { Turtle t; Pen p{&t}; }',
+  'Turtle* g;\nstruct Mover { ~Mover() { g->forward(); } };\nMover m;\nint main() { g = new Turtle(); }',
+])('reports final turtle positions after destructors move them in %s', (program) => {
+  const turtle = { x: 0, y: 1, color: '#', dir: 'N' };
+  expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', finalTurtles: [turtle] });
+  const recording = traceProgram('cpp', program, program);
+  expect(recording.finalTurtles).toEqual([turtle]);
+  expect(recording.traceItems.at(-1)?.turtles).toEqual([turtle]);
+});
+
+test.each(['std::array<int[512], 1>', 'std::array<int[16][32], 1>'])(
+  'meters the elements copied by assigning %s',
+  (type) => {
+    const program = `#include <array>
+int main() {
+  ${type} a{}, b{};
+  for (int i = 0; i < 8; ++i) a = b;
+}`;
+    const previous = LIMITS.maxOperations;
+    LIMITS.maxOperations = 3000;
+    try {
+      expect(executeProgram('cpp', program)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+    } finally {
+      LIMITS.maxOperations = previous;
+    }
+  }
+);
+
 test('reads only the required prefix of a C substring search needle', () => {
   const program = `#include <cstring>
 #include <string>

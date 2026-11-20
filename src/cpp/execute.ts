@@ -3,7 +3,7 @@ import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionLimitError } from '../interpreter/limits';
 import type { ProgramExecution, ProgramRun } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
-import type { TurtleTrace } from '../problems/trace';
+import type { TurtleState } from '../interpreter/turtleWorld';
 import { byteArray } from './bytes';
 import { type CompiledProgram, type CompileOptions, Compiler } from './compiler';
 import { type CppException, CppRuntimeError, ProgramAbort, ProgramExit } from './errors';
@@ -47,7 +47,7 @@ const PROGRAM_NAME = './main';
  */
 export function runProgram(runtime: Runtime, program: CompiledProgram, onEnd?: (frame: Frame) => void): ProgramRun {
   let uncaughtException: string | undefined;
-  let finalTurtles: TurtleTrace[] | undefined;
+  let finalTurtles: readonly TurtleState[] | undefined;
   runtime.describeUncaught = (frame, exception) => {
     const description = describeException(frame, exception);
     runtime.write('stderr', `${description}\n`);
@@ -55,10 +55,11 @@ export function runProgram(runtime: Runtime, program: CompiledProgram, onEnd?: (
   };
   // The turtles that main's variables reach when its body completes are the final ones, as in Java, before the
   // variables' lifetimes end and their turtles leave the board.
-  const captureTurtles = (): TurtleTrace[] => {
+  // Destructors that run afterward may still move the captured turtles, so their positions are read at the end.
+  const captureTurtles = (): readonly TurtleState[] => {
     if (!finalTurtles) {
       runtime.collectGarbage();
-      finalTurtles = runtime.world.turtleTraces();
+      finalTurtles = runtime.world.currentTurtles();
     }
     return finalTurtles;
   };
@@ -81,7 +82,7 @@ export function runProgram(runtime: Runtime, program: CompiledProgram, onEnd?: (
   runtime.flushOutput();
   return {
     finalBoard: runtime.world.boardText(),
-    finalTurtles: captureTurtles(),
+    finalTurtles: runtime.world.turtleTraces(captureTurtles()),
     uncaughtException,
     ...runtime.io.output(),
   };
