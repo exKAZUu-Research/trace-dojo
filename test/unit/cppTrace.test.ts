@@ -533,6 +533,21 @@ int main() {
   expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', stdout: '0 699' });
 });
 
+test('builds a 5000-character string by repeated concatenation within the default limits', () => {
+  const program = `#include <iostream>
+#include <string>
+int main() {
+  std::string s;
+  for (int i = 0; i < 5000; i++) s = s + 'a';
+  std::cout << s.size();
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '5000',
+    uncaughtException: undefined,
+  });
+});
+
 test('charges the storage of the message buffer that what() creates', () => {
   const program = `#include <stdexcept>
 #include <string>
