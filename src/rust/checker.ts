@@ -1146,13 +1146,21 @@ function fundamentalTarget(type: Type): Type {
   return t;
 }
 
-/** A trait of the program can be a trait object unless a method returns `Self` or takes type parameters. */
+const NON_DYN_BUILTIN_TRAITS = new Set(['Into', 'TryInto', 'Hash', 'FromIterator', 'Extend', 'Sum', 'Product']);
+
 function checkDynCompatible(trait: TraitDef, span: Span, checked = new Set<TraitDef>()): void {
   if (checked.has(trait)) return;
   checked.add(trait);
   if (trait.builtin === 'Sized') compileError(span, 'Sized を必要とするトレイトは、dyn にできません。');
-  if ((trait.module as Module | undefined)?.isStd) return;
-  for (const bound of trait.supertraits) checkDynCompatible(bound.trait, span, checked);
+  if (trait.builtin && NON_DYN_BUILTIN_TRAITS.has(trait.builtin)) {
+    compileError(span, `トレイト ${trait.name} は dyn ${trait.name} にできません。`);
+  }
+  for (const bound of trait.supertraits) {
+    if (bound.args.some((arg) => mentionsParam(arg, trait.self))) {
+      compileError(span, `トレイト ${trait.name} は、上位トレイトの型引数に Self を使うので dyn にできません。`);
+    }
+    checkDynCompatible(bound.trait, span, checked);
+  }
   for (const fn of trait.methods.values()) {
     if (fn.extraBounds?.some(({ param, bound }) => param === trait.self && bound.trait.builtin === 'Sized')) continue;
     const returnsSelf = mentionsParam(fn.ret, trait.self);
