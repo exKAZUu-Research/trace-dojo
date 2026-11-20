@@ -1,5 +1,13 @@
 import type { Checker } from './checker';
-import { anonymousObject, emptyStructure, type MappedInfo, type Property, type TupleInfo, type Type } from './types';
+import {
+  anonymousObject,
+  emptyStructure,
+  type MappedInfo,
+  type Property,
+  propertyAccessType,
+  type TupleInfo,
+  type Type,
+} from './types';
 
 export function reverseMappedType(
   c: Checker,
@@ -52,9 +60,10 @@ function reverseProperty(property: Property, mapping: MappedInfo, inferValue: (i
     declaration: property.declaration,
     isPrivateName: property.isPrivateName,
     optional: property.optional && mapping.optionalModifier !== '+',
+    exactOptionalType: true,
     readonly: property.readonly && mapping.readonlyModifier !== '+',
     isMethod: false,
     visibility: 'public',
-    type: () => (inferred ??= inferValue(property.type())),
+    type: () => (inferred ??= inferValue(propertyAccessType(property))),
   };
 }

@@ -40,6 +40,7 @@ import {
   numberType,
   type ObjectType,
   type Property,
+  propertyAccessType,
   regularOf,
   stringType,
   symbolType,
@@ -831,7 +832,7 @@ export class ExpressionChecker {
   /** The type a member of a union gives a property, as its own or by an index signature, or `undefined`. */
   private typeOfPropertyIn(member: Type, name: string, key: Type): Type {
     const property = this.c.propertyOf(member, name);
-    if (property) return property.optional ? unionOf([property.type(), undefinedType]) : property.type();
+    if (property) return propertyAccessType(property);
     return namedPropertyIndex(this.c, this.c.structureOf(member), name, key)?.type ?? undefinedType;
   }
 

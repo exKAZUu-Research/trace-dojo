@@ -20,6 +20,7 @@ import {
   numberType,
   primitiveOfLiteral,
   type Property,
+  propertyAccessType,
   regularOf,
   stringType,
   symbolType,
@@ -139,10 +140,9 @@ export class OperatorChecker {
     const properties = members
       .map((member) => (name === undefined ? undefined : this.c.propertyOf(member, name)))
       .filter((property): property is Property => property !== undefined);
-    const type = unionOf(properties.map((property) => property.type()));
+    const type = unionOf(properties.map((property) => propertyAccessType(property)));
     if (
       properties.length > 0 &&
-      properties.every((property) => !property.optional) &&
       !isAnyLike(type) &&
       !isIntrinsic(type, 'unknown') &&
       !isIntrinsic(type, 'never') &&

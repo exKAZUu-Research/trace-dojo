@@ -14,12 +14,11 @@ import { hasToken, isWithin, named } from './syntax';
 import {
   type KeyedIndexInfo,
   type Property,
+  propertyAccessType,
   stringType,
   type Structure,
   symbolType,
   type Type,
-  undefinedType,
-  unionOf,
 } from './types';
 
 /** The declarations of a type whose index signatures are checked: its bodies and, for an interface, its name and bases. */
@@ -47,7 +46,7 @@ function checkPropertyConformance(c: Checker, property: Property, indexes: Keyed
   const { declaration } = property;
   const nameNode = declaration?.childForFieldName('name');
   if (!nameNode || !declaration || c.isLibrary(declaration)) return;
-  const type = property.optional ? unionOf([property.type(), undefinedType]) : property.type();
+  const type = propertyAccessType(property);
   const local = !owner || owner.bodies.some((body) => isWithin(declaration, body));
   for (const index of indexes) {
     if (!isPropertyKeyOf(c, property, index.keyType) || c.relations.isAssignable(type, index.type)) continue;

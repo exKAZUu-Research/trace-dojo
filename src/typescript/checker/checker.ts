@@ -993,6 +993,7 @@ export class Checker {
     return {
       ...existing,
       optional: existing.optional && property.optional,
+      exactOptionalType: true,
       readonly: existing.readonly && property.readonly,
       getterOnly: existing.getterOnly === true && property.getterOnly === true,
       type: () => intersectionOf([propertyAccessType(existing), propertyAccessType(property)], this.budget),

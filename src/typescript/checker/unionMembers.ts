@@ -61,6 +61,9 @@ export function unionProperty(c: Checker, types: Type[], name: string): Property
   return {
     ...first,
     optional: properties.some((property) => property.optional),
+    exactOptionalType: properties.every((property) => !property.optional || property.exactOptionalType)
+      ? true
+      : undefined,
     readonly: properties.some((property) => property.readonly),
     isMethod: properties.every((property) => property.isMethod),
     type: () => unionOf(properties.map((property) => property.type())),

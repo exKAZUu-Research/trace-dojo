@@ -39,6 +39,7 @@ import {
   type ObjectType,
   permissiveAnyType,
   type Property,
+  propertyAccessType,
   regularOf,
   type Signature,
   stringType,
@@ -887,9 +888,7 @@ export class Relations {
       return false;
     }
     if (source.optional && !target.optional && relation === 'assignable') return false;
-    const sourceType = source.type();
-    const targetType = target.optional ? unionOf([target.type(), undefinedType]) : target.type();
-    return this.isRelated(sourceType, targetType, relation);
+    return this.isRelated(propertyAccessType(source), propertyAccessType(target), relation);
   }
 
   private indexRelated(
@@ -915,9 +914,8 @@ export class Relations {
   }
 
   private inferredIndexMemberType(property: Property, keyType: Type): Type {
-    const declared = property.type();
-    if (!property.optional) return declared;
-    const type = unionOf([declared, undefinedType]);
+    const type = propertyAccessType(property);
+    if (!property.optional) return type;
     if (keyType === numberType || isIntrinsic(type, 'undefined')) return type;
     return filterType(type, (member) => !isIntrinsic(member, 'undefined') && !isIntrinsic(member, 'void'));
   }

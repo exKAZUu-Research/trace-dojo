@@ -656,8 +656,7 @@ export class Flow {
       if (member.kind !== 'object' && member.kind !== 'intersection') return true;
       const property = this.c.propertyOf(member, name);
       if (!property) return true;
-      const propertyType = property.optional ? unionOf([property.type(), undefinedType]) : property.type();
-      return !isIntrinsic(narrow(propertyType), 'never');
+      return !isIntrinsic(narrow(propertyAccessType(property)), 'never');
     });
   }
 

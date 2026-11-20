@@ -39,6 +39,7 @@ import {
   type ObjectType,
   permissiveAnyType,
   type Property,
+  propertyAccessType,
   stringType,
   type Structure,
   symbolType,
@@ -567,7 +568,7 @@ export class TypeOperators {
   private propertyAccess(object: Type, key: string | number | symbol, node: TreeNode | undefined): Type {
     const name = String(key);
     const property = this.c.propertyOf(object, name);
-    if (property) return property.optional ? unionOf([property.type(), undefinedType]) : property.type();
+    if (property) return propertyAccessType(property);
     const element = tupleElementBeyond(this.c, object, name, node);
     if (element) return element;
     const structure = this.c.structureOf(object);

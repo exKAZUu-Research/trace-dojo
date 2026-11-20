@@ -1,0 +1,22 @@
+type Boxes<T> = { [K in keyof T]: { value: T[K] } };
+type ReadonlyBoxes<T> = { readonly [K in keyof T]: { value: T[K] } };
+type WritableBoxes<T> = { -readonly [K in keyof T]: { value: T[K] } };
+function unbox(input: any): any {
+  const output: any = {};
+  for (const key in input) output[key] = input[key].value;
+  return output;
+}
+function plain<T>(input: Boxes<T>): T { return unbox(input); }
+function readonlyMap<T>(input: ReadonlyBoxes<T>): T { return unbox(input); }
+function writableMap<T>(input: WritableBoxes<T>): T { return unbox(input); }
+const source: { value?: { value: string } } = { value: { value: 'hello' } };
+const readonlySource: { readonly value?: { value: string } } = source;
+const result = plain(source);
+const fromReadonly = plain(readonlySource);
+const readonlyMapped = readonlyMap(readonlySource);
+const writable = writableMap(source);
+const missing: typeof result = {};
+const indexed: typeof result['value'] = result['value'];
+const { value } = result;
+readonlyMapped.value = 'updated';
+console.log(value.toUpperCase(), indexed.toUpperCase(), fromReadonly.value.toUpperCase(), readonlyMapped.value.toUpperCase(), writable.value.toUpperCase(), Object.keys(missing).length);

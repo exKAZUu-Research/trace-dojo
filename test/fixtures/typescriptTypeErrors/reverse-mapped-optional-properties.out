@@ -1,0 +1,15 @@
+(8,7): error TS2322: Type '{ value?: string | undefined; }' is not assignable to type '{ value?: string; }'.
+  Types of property 'value' are incompatible.
+    Type 'string | undefined' is not assignable to type 'string'.
+      Type 'undefined' is not assignable to type 'string'.
+(9,35): error TS2322: Type 'undefined' is not assignable to type 'string'.
+(10,7): error TS2322: Type 'undefined' is not assignable to type 'string'.
+(11,1): error TS2322: Type 'undefined' is not assignable to type 'string'.
+(12,8): error TS2790: The operand of a 'delete' operator must be optional.
+(15,13): error TS18048: 'maybe.value' is possibly 'undefined'.
+(16,25): error TS2345: Argument of type '{ value?: { value: string; } | undefined; }' is not assignable to parameter of type 'RequiredBoxes<{ value?: string; }>'.
+  Types of property 'value' are incompatible.
+    Type '{ value: string; } | undefined' is not assignable to type '{ value: string; }'.
+      Type 'undefined' is not assignable to type '{ value: string; }'.
+(22,7): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.

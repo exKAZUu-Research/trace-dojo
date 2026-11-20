@@ -78,6 +78,7 @@ export interface Property {
   type: () => Type;
   writeType?: () => Type;
   optional: boolean;
+  exactOptionalType?: true;
   readonly: boolean;
   isMethod: boolean;
   /** For a class member, its visibility and the class that declares it. */
@@ -684,7 +685,7 @@ export function simpleProperty(name: string, type: Type, options: Partial<Proper
 
 export function propertyAccessType(property: Property, access: 'read' | 'write' = 'read'): Type {
   const type = (access === 'write' ? (property.writeType ?? property.type) : property.type)();
-  return property.optional ? unionOf([type, undefinedType]) : type;
+  return property.optional && !property.exactOptionalType ? unionOf([type, undefinedType]) : type;
 }
 
 export function functionType(signature: Signature): ObjectType {

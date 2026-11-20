@@ -16,6 +16,7 @@ import {
   literalType,
   neverType,
   type ObjectType,
+  propertyAccessType,
   regularOf,
   simpleProperty,
   stringType,
@@ -395,8 +396,7 @@ export class BindingPatterns {
       return errorType;
     }
     this.c.members.checkPropertyUse(node, node, node, type, property);
-    const propertyType = property.type();
-    return property.optional ? unionOf([propertyType, undefinedType]) : propertyType;
+    return propertyAccessType(property);
   }
 
   /** The union of a property's types when each member of a union has it, or `undefined` when one lacks it. */
