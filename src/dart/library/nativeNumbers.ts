@@ -109,7 +109,6 @@ export function parseDouble(text: string): number | undefined {
 }
 
 /** `int.parse`: an optional sign, then digits of the radix, or `0x` and hexadecimal digits without a radix. */
-// code-gauge-allow duplicateLines 22 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
 export function parseInt(text: string, radix: number | undefined, bounded = true): bigint | undefined {
   const trimmed = text.trim();
   let rest = trimmed;

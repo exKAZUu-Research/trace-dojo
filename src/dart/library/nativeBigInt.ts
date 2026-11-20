@@ -41,7 +41,6 @@ function bitsOf(value: bigint): number {
   return value === 0n ? 0 : (value < 0n ? -value : value).toString(16).length * 4;
 }
 
-// code-gauge-allow duplicateLines 22 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
 function parseBigInt(runtime: Runtime, text: string, radix: number | undefined): bigint | undefined {
   let rest = text.trim();
   let negative = false;

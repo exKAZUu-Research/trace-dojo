@@ -137,7 +137,6 @@ class Compiler {
     for (const element of ordered) this.element(element, context);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of element of the pattern's syntax.
   private element(element: AST.Element, context: Context): void {
     switch (element.type) {
       case 'Character':
@@ -461,7 +460,6 @@ class Machine {
   }
 
   /** Runs one instruction, giving the next pc or -1 to backtrack. */
-  // code-gauge-allow functionCognitiveComplexity 22 -- The machine's dispatch, one case per instruction.
   // code-gauge-allow functionNcss 45 -- The machine's dispatch, one case per instruction.
   private step(instruction: Exclude<Instruction, { op: 'succeed' }>, pc: number, choices: number[]): number {
     const { registers, position } = this;
