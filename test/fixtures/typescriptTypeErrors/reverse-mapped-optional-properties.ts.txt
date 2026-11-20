@@ -20,3 +20,8 @@ function copy<T>(value: Copy<T>): T { return value as T; }
 const copied = copy(fromOrdinary);
 const allowed: typeof copied = { value: undefined };
 const mustBePresent: string = copied.value;
+type OptionalBoxes<T> = { [P in keyof T]?: { value: T[P] } };
+function optionalBoxes<T>(value: OptionalBoxes<T>): T { return {} as T; }
+const nestedUndefined: { count?: { value: number | undefined } } = { count: { value: undefined } };
+const completed = optionalBoxes(nestedUndefined);
+const nestedValue: number = completed.count;

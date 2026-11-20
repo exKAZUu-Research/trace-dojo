@@ -20,3 +20,13 @@ const indexed: typeof result['value'] = result['value'];
 const { value } = result;
 readonlyMapped.value = 'updated';
 console.log(value.toUpperCase(), indexed.toUpperCase(), fromReadonly.value.toUpperCase(), readonlyMapped.value.toUpperCase(), writable.value.toUpperCase(), Object.keys(missing).length);
+function complete<T>(value: Partial<T>): T { return value as T; }
+const partialSource: { count?: number } = { count: 1 };
+const readonlyPartial: { readonly title?: string } = { title: 'ready' };
+const explicitPartial: { count?: number | undefined } = { count: 3 };
+const completed: { count: number } = complete(partialSource);
+const completedReadonly: { readonly title: string } = complete(readonlyPartial);
+const completedExplicit: { count: number } = complete(explicitPartial);
+const optionalTuple: [number?] = [5];
+const requiredTuple: [number] = complete(optionalTuple);
+console.log(completed.count, completedReadonly.title, completedExplicit.count, requiredTuple[0]);

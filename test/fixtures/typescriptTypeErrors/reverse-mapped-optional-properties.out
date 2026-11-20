@@ -13,3 +13,5 @@
       Type 'undefined' is not assignable to type '{ value: string; }'.
 (22,7): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
   Type 'undefined' is not assignable to type 'string'.
+(27,7): error TS2322: Type 'number | undefined' is not assignable to type 'number'.
+  Type 'undefined' is not assignable to type 'number'.

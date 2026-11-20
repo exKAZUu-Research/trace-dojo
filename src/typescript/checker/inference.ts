@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 596 -- Keeps generic candidate collection, constraint fitting and inference completion together.
+// code-gauge-allow-file fileNcss 604 -- Keeps generic candidate collection, constraint fitting and inference completion together.
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import type { Checker, Mapper } from './checker';
 import { childTypes, objectMemberTypes } from './genericTypes';
@@ -26,6 +26,7 @@ import {
   type Type,
   typeMembers,
   type TypeParameter,
+  undefinedType,
   unionOf,
   type UnionType,
   unknownType,
@@ -39,6 +40,7 @@ import { couldContainTypeVariables } from './typeVariables';
  */
 export const InferencePriority = {
   Direct: 0,
+  NakedTypeVariable: 1,
   /** Through a homomorphic mapped type, as `T` in `Partial<T>`. */
   HomomorphicMappedType: 8,
   MappedTypeConstraint: 32,
@@ -64,12 +66,19 @@ export interface InferenceRun {
   inferences: Map<number, Inference>;
   parameters: TypeParameter[];
   priority: number;
+  reportInference?: (priority: number) => void;
   contextualSignatures: boolean;
   higherOrder?: { outer: Signature; parameters: TypeParameter[] };
   reverseMapped?: { source: TypeParameter; key: TypeParameter; value: TypeParameter };
 }
 
-type Recurse = (source: Type, target: Type, covariant?: boolean, priority?: number) => void;
+type Recurse = (
+  source: Type,
+  target: Type,
+  covariant?: boolean,
+  priority?: number,
+  reportInference?: InferenceRun['reportInference']
+) => void;
 
 interface InferencePath {
   active: Set<string>;
@@ -307,8 +316,13 @@ export class TypeInference {
     active.add(key);
     this.depth++;
     try {
-      const recurse: Recurse = (s, t, isCovariant = covariant, priority = run.priority) =>
-        this.inferPair({ ...run, priority }, s, t, isCovariant, path);
+      const recurse: Recurse = (
+        s,
+        t,
+        isCovariant = covariant,
+        priority = run.priority,
+        reportInference = run.reportInference
+      ) => this.inferPair({ ...run, priority, reportInference }, s, t, isCovariant, path);
       this.inferDeeper(run, source, target, path, recurse);
     } finally {
       this.depth--;
@@ -361,8 +375,9 @@ export class TypeInference {
     topLevel: boolean
   ): void {
     const inference = run.inferences.get(target.id);
-    if (!inference || inference.fixed) return;
-    if (run.priority > inference.priority) return;
+    if (!inference) return;
+    run.reportInference?.(run.priority);
+    if (inference.fixed || run.priority > inference.priority) return;
     if (run.priority < inference.priority) {
       inference.candidates.length = 0;
       inference.contravariant.length = 0;
@@ -399,15 +414,40 @@ export class TypeInference {
       return variable && run.inferences.has(variable.id);
     });
     const others = targetMembers.filter((member) => !naked.includes(member));
-    const inferable = (other: Type): boolean =>
-      run.parameters.some((parameter) => this.mentions(other, parameter, run));
-    const remaining = sourceMembers.filter(
-      (member) => !others.some((other) => !inferable(other) && this.c.relations.isAssignable(member, other))
+    const inferable = others.filter((other) =>
+      run.parameters.some((parameter) => this.mentions(other, parameter, run))
     );
-    for (const other of others) {
-      if (inferable(other)) for (const member of sourceMembers) recurse(member, other);
+    const fixed = others.filter((other) => !inferable.includes(other));
+    const candidates = sourceMembers.filter(
+      (member) => !fixed.some((other) => this.c.relations.isAssignable(member, other))
+    );
+    const matched = this.inferStructuredUnionMembers(run, sourceMembers, inferable, recurse);
+    const unmatched = candidates.filter((member) => !matched.has(member));
+    if (naked.length === 1 && unmatched.length > 0) {
+      recurse(unionOf(unmatched, true), naked[0]);
+      return;
     }
-    if (naked.length === 1 && remaining.length > 0) recurse(unionOf(remaining, true), naked[0]);
+    if (candidates.length > 0)
+      for (const variable of naked)
+        recurse(unionOf(candidates, true), variable, undefined, run.priority | InferencePriority.NakedTypeVariable);
+  }
+
+  private inferStructuredUnionMembers(
+    run: InferenceRun,
+    sources: Type[],
+    targets: Type[],
+    recurse: Recurse
+  ): Set<Type> {
+    const matched = new Set<Type>();
+    for (const target of targets) {
+      for (const source of sources) {
+        recurse(source, target, undefined, undefined, (priority) => {
+          run.reportInference?.(priority);
+          if (priority === run.priority) matched.add(source);
+        });
+      }
+    }
+    return matched;
   }
 
   private inferToObject(
@@ -488,13 +528,15 @@ export class TypeInference {
 
   private inferReverseMapping(input: Type, info: MappedInfo, source: TypeParameter): Type | undefined {
     const cache = new Map<Type, Type>();
+    let template: Type | undefined;
     return reverseMappedType(this.c, input, info, (property) => {
       const cached = cache.get(property);
       if (cached) return cached;
       const value: TypeParameter = { kind: 'typeParameter', id: newTypeId(), name: source.name };
       const run = newInferenceRun([value]);
       run.reverseMapped = { source, key: info.typeParameter, value };
-      this.inferTypes(run, property, info.template, true);
+      template ??= info.optionalModifier === '+' ? unionOf([info.template, undefinedType]) : info.template;
+      this.inferTypes(run, property, template, true);
       const inference = run.inferences.get(value.id);
       const type = inference && hasCandidates(inference) ? this.inferredType(value, inference, false) : unknownType;
       cache.set(property, type);
