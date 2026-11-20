@@ -654,12 +654,15 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     const viable = this.matchingOverloads(candidates, args, object, templateArgs, isFunctionPointer);
     const best = this.chooseOverload(description, viable, row);
     if (best) return best;
-    const argTypes = args.map((arg) => (arg.type.kind === 'void' ? 'void' : typeName(arg.type))).join(', ');
+    const argTypes = args.map((arg) => (arg.functions ? `関数 ${arg.functions.name}` : typeName(arg.type))).join(', ');
+    const callNote = args.some((arg) => arg.functions)
+      ? '（関数を呼び出すには、名前の後に (...) を書いてください）'
+      : '';
     const constNote =
       object && isConstType(object.type) && candidates.some((candidate) => !candidate.isConst && !candidate.isStatic)
         ? '（const のオブジェクトからは const のメンバ関数しか呼べません）'
         : '';
-    return this.error(row, `${description} に、引数（${argTypes}）に合うものがありません。${constNote}`);
+    return this.error(row, `${description} に、引数（${argTypes}）に合うものがありません。${callNote}${constNote}`);
   }
 
   protected chooseOverload(description: string, viable: MatchingOverload[], row: number): Resolved | undefined {

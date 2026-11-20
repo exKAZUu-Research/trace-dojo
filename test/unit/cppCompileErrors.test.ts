@@ -1356,3 +1356,17 @@ int main() { ${body} }`;
     });
   }
 );
+
+test.each(['take(f);', 'std::vector<int> v; v.push_back(f);', 'Turtle t(f, 0);'])(
+  'names a function passed without parentheses as an argument in %s',
+  (body) => {
+    const program = `#include <vector>
+int f() { return 0; }
+void take(int) {}
+int main() { ${body} }`;
+    expect(executeProgram('cpp', program)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [{ row: 3, message: expect.stringContaining('関数 f') }],
+    });
+  }
+);
