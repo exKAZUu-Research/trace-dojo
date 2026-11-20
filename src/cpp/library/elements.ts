@@ -358,8 +358,10 @@ export function elementOperations(
       assign: (frame, target, source) => {
         const to = target as ArrayStore;
         const from = source as ArrayStore;
-        for (let index = 0; index < length; index++)
+        for (let index = 0; index < length; index++) {
+          frame.runtime.spend();
           to.values[index] = element.assign(frame, to.values[index], from.values[index]);
+        }
         return to;
       },
       destroy: (frame, value) => {
