@@ -109,9 +109,10 @@ defineFunction(
 );
 
 /** Appends the pairs of an array or an object's visible properties as php_url_encode_hash_ex does. */
-// code-gauge-allow functionCognitiveComplexity 20 -- Keeps cycle tracking and encoded parameter names in one recursive traversal.
+// code-gauge-allow functionCognitiveComplexity 21 -- Keeps cycle tracking and encoded parameter names in one recursive traversal.
 function buildQuery(query: QueryBuild, data: PhpArray | PhpObject, prefix: string | undefined): void {
   if (query.visiting.has(data)) return;
+  if (query.visiting.size >= 2048) throw rt().memoryExhausted(2 ** 31);
   query.visiting.add(data);
   const entries: [string | bigint, Value][] =
     data instanceof PhpArray ? [...data.entries()] : visibleProps(data, rt().frame.scope);

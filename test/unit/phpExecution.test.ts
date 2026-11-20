@@ -4949,4 +4949,10 @@ try { f(); } catch (Throwable $e) { while ($e) { echo $e->getMessage(), ";"; $e 
   ]) {
     expect(run(source)).toMatchObject({ kind: 'executed', stdout: expected });
   }
+
+  for (const call of ['print_r($a);', 'var_export($a);', 'json_encode($a, 0, 1000000);', 'http_build_query($a);']) {
+    const result = run(`<?php $a = []; for ($i = 0; $i < 4000; $i++) { $a = [$a]; } ${call}`);
+    expect(result).toMatchObject({ kind: 'executed' });
+    expect(result.kind === 'executed' ? result.stdout : '').toContain('Allowed memory size');
+  }
 });

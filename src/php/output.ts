@@ -300,7 +300,10 @@ export function printR(value: Value, returnText: boolean): string | true {
   });
 }
 
+const MAX_INSPECTION_DEPTH = 2048;
+
 function printRValue(value: Value, indent: number, state: Inspection): string {
+  if (state.active.size >= MAX_INSPECTION_DEPTH) throw rt().memoryExhausted(2 ** 31);
   if (value instanceof PhpArray) {
     if (state.active.has(value)) return 'Array\n *RECURSION*';
     state.active.add(value);
@@ -364,9 +367,10 @@ export function varDump(values: Value[]): void {
   });
 }
 
-// code-gauge-allow functionNcss 37 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 39 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function dumpValue(value: Value, level: number, state: Inspection, write: (text: string) => void, slot?: Slot): void {
+  if (state.active.size >= MAX_INSPECTION_DEPTH) throw rt().memoryExhausted(2 ** 31);
   const indent = level > 1 ? ' '.repeat(level - 1) : '';
   const reference = slot instanceof Ref && slot.rc > 1 ? '&' : '';
   const pad = indent + reference;
@@ -450,9 +454,10 @@ function quoteExport(text: string): string {
   return `'${text.replaceAll(/['\\]/g, String.raw`\$&`).replaceAll('\0', `' . "\\0" . '`)}'`;
 }
 
-// code-gauge-allow functionCognitiveComplexity 28 -- Preserves depth and recursion state while rendering different value kinds.
-// code-gauge-allow functionNcss 41 -- Preserves depth and recursion state while rendering different value kinds.
+// code-gauge-allow functionCognitiveComplexity 29 -- Preserves depth and recursion state while rendering different value kinds.
+// code-gauge-allow functionNcss 43 -- Preserves depth and recursion state while rendering different value kinds.
 function exportValue(value: Value, level: number, state: Inspection): string {
+  if (state.active.size >= MAX_INSPECTION_DEPTH) throw rt().memoryExhausted(2 ** 31);
   if (value === null || value === UNDEFINED_RESULT || (value instanceof PhpObject && value.isResource)) return 'NULL';
   switch (typeof value) {
     case 'boolean': {
