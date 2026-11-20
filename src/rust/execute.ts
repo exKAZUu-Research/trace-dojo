@@ -8,8 +8,8 @@ import { DEFAULT_SPEC } from './fmt';
 import { Interpreter } from './interpreter';
 import { type Module } from './items';
 import { ControlSignal, type Frame, OutOfMemory, ProcessExit, Runtime, RustPanic, StackOverflow } from './runtime';
-import { resolve, shallow } from './types';
-import { EnumValue } from './values';
+import { resolve, shallow, type Type } from './types';
+import { EnumValue, type Value } from './values';
 
 // code-gauge-allow duplicateLines 15 -- Each language reports how its program ended alike.
 export function executeRustProgram(source: string, input?: ProgramInput): ProgramExecution {
@@ -63,11 +63,7 @@ export function runProgram(
       onEnd?.(frame);
       runtime.collectGarbage();
     });
-    const ret = shallow(resolve(mainFn.ret, true));
-    if (ret.kind === 'adt' && ret.def.builtin === 'Result' && result instanceof EnumValue && result.variant === 1) {
-      const errorType = resolve(ret.args[1], true);
-      uncaughtException = `Error: ${interp.formatter.debug(result.fields[0], errorType, DEFAULT_SPEC, undefined)}`;
-    }
+    uncaughtException = describeMainResult(interp, result, mainFn.ret);
   } catch (error) {
     uncaughtException = describeUncaught(error);
   } finally {
@@ -80,6 +76,13 @@ export function runProgram(
     uncaughtException,
     ...runtime.io.output(),
   };
+}
+
+function describeMainResult(interp: Interpreter, result: Value, type: Type): string | undefined {
+  const ret = shallow(resolve(type, true));
+  if (ret.kind !== 'adt' || ret.def.builtin !== 'Result' || !(result instanceof EnumValue)) return;
+  if (result.variant === 0) return describeMainResult(interp, result.fields[0], ret.args[0]);
+  return `Error: ${interp.formatter.debug(result.fields[0], resolve(ret.args[1], true), DEFAULT_SPEC, undefined)}`;
 }
 
 function describeUncaught(error: unknown): string | undefined {

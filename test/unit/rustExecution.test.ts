@@ -110,6 +110,25 @@ test('main returning an Err reports it with Debug', () => {
   });
 });
 
+test.each([
+  'fn main() -> i32 { 0 }',
+  'fn main() -> Result<i32, String> { Ok(0) }',
+  'struct Error; fn main() -> Result<(), Error> { Err(Error) }',
+])('Rust rejects a main return type without Termination: %s', (program) => {
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ message: expect.stringContaining('Termination') })],
+  });
+});
+
+test('Rust reports an error nested in a successful main Result', () => {
+  const program = 'fn main() -> Result<Result<(), String>, String> { Ok(Err(String::from("nested"))) }';
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: 'Error: "nested"',
+  });
+});
+
 test('programs that learners commonly write run as rustc runs them', () => {
   const program = `use std::collections::HashMap;
 #[derive(Debug)]

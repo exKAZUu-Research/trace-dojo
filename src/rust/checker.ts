@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 610 -- The checker core: bodies, obligations, scopes, coercions, and statements.
+// code-gauge-allow-file fileNcss 628 -- The checker core owns body, entry point, and type obligations.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ExecutionBudget } from '../interpreter/limits';
 import { Annotations, type Coercion, type FnContext, type LocalVar, type PathRes } from './annotations';
@@ -121,7 +121,8 @@ export class Checker {
     for (const impl of this.program.impls) this.checkImplSignatures(impl);
     for (const fn of this.program.pendingFns.splice(0)) this.checkFn(fn);
     while (this.nestedFns.length > 0) this.checkFn(this.nestedFns.shift()!);
-    this.checkConstsAndMain();
+    this.checkConsts();
+    this.checkMain();
   }
 
   private checkDerivedTraits(first = 0): void {
@@ -227,7 +228,7 @@ export class Checker {
     }
   }
 
-  private checkConstsAndMain(): void {
+  private checkConsts(): void {
     for (const def of this.program.consts) {
       const { ast, module, impl } = def;
       if (!ast.value) continue;
@@ -246,10 +247,28 @@ export class Checker {
       // rustc evaluates constants before running, so one whose value overflows or divides by zero is an error.
       new ConstLint(this.annotations).checkExpr(ast.value);
     }
+  }
+
+  private checkMain(): void {
     const main = this.program.root.values.get('main');
     if (main?.binding.kind !== 'fn') {
       compileError({ row: 0, col: 1 }, 'main 関数がありません（fn main() { ... } を書いてください）。');
     }
+    const { ret, ast } = main.binding.def;
+    if (!this.isTerminationType(ret)) {
+      compileError(ast!.span, `main 関数の戻り値の型 ${typeToString(ret)} は Termination を実装していません。`);
+    }
+  }
+
+  private isTerminationType(type: Type): boolean {
+    const t = normalize(shallow(type));
+    if (isUnit(t) || t.kind === 'never') return true;
+    if (t.kind !== 'adt') return false;
+    if (t.def.builtin === 'Infallible') return true;
+    if (t.def.builtin !== 'Result') return false;
+    const [success, error] = t.args;
+    const debug = this.program.traitDef('Debug');
+    return this.isTerminationType(success) && this.solver.implements(error, { trait: debug, args: [] }) === 'yes';
   }
 
   private newBody(options: {
