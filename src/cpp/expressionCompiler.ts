@@ -1425,11 +1425,17 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       holdAll(frame, [receiver, index], ([location, operand]) => locate(frame, (location as Ptr).read(), operand));
   }
 
-  compareObjects(left: Expr, right: Expr, compare: (first: Value, second: Value) => boolean): Eval<number> {
+  compareObjects(
+    left: Expr,
+    right: Expr,
+    compare: (first: Value, second: Value, frame: Frame) => boolean
+  ): Eval<number> {
     const first = this.objectOf(left);
     const second = this.objectOf(right);
     return (frame) =>
-      frame.unsequencedOperands(first, second, (a, b) => (compare((a as Ptr).read(), (b as Ptr).read()) ? 1 : 0));
+      frame.unsequencedOperands(first, second, (a, b) =>
+        compare((a as Ptr).read(), (b as Ptr).read(), frame) ? 1 : 0
+      );
   }
 
   // Conversions -----------------------------------------------------------------------------------------------------

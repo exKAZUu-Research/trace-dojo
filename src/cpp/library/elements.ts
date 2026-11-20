@@ -28,7 +28,7 @@ import {
 import { ArrayStore, CObject, endLifetime, FunctionRef, holdValues, Ptr, Store, UNINIT, type Value } from '../values';
 import { SequenceValue } from './containerValues';
 import type { LibraryClass } from './libraryClass';
-import { StringValue } from './string';
+import { compareBytes, StringValue } from './string';
 
 /** What a container does with its elements: make them, copy them, assign them, and destroy them. */
 export interface ElementOperations {
@@ -479,8 +479,10 @@ function defaultConstructor(
 /** A comparison of two elements, as `<` or a comparator object or function gives it. */
 export type Compare = (frame: Frame, a: Value, b: Value) => boolean;
 
+type ValueComparison<T> = (a: Value, b: Value, frame?: Frame) => T;
+
 /** Compares two values of a type with `<` as the library's default comparators do, or undefined when `<` does not apply. */
-export function lessThan(type: Type): ((a: Value, b: Value) => number) | undefined {
+export function lessThan(type: Type): ValueComparison<number> | undefined {
   if (type.kind === 'reference') return compareReferences(lessThan(type.to));
   if (isArithmetic(type)) {
     return (a, b) => {
@@ -495,9 +497,10 @@ export function lessThan(type: Type): ((a: Value, b: Value) => number) | undefin
   if (type.kind !== 'class') return undefined;
   const library = type.cls.library;
   if (library?.kind === 'string') {
-    return (a, b) => {
+    return (a, b, frame) => {
       const x = (a as StringValue).bytes;
       const y = (b as StringValue).bytes;
+      if (frame) return compareBytes(frame, x, y);
       return x < y ? -1 : x > y ? 1 : 0;
     };
   }
@@ -506,21 +509,22 @@ export function lessThan(type: Type): ((a: Value, b: Value) => number) | undefin
     const compareFirst = lessThan(first.type);
     const compareSecond = lessThan(second.type);
     if (!compareFirst || !compareSecond) return undefined;
-    return (a, b) => {
+    return (a, b, frame) => {
       const x = a as CObject;
       const y = b as CObject;
-      const order = compareFirst(x.values[0], y.values[0]);
-      return order === 0 ? compareSecond(x.values[1], y.values[1]) : order;
+      const order = compareFirst(x.values[0], y.values[0], frame);
+      return order === 0 ? compareSecond(x.values[1], y.values[1], frame) : order;
     };
   }
   if (library && ['vector', 'deque', 'array', 'list'].includes(library.kind)) {
     const element = lessThan(library.args[0]);
     if (!element) return undefined;
-    return (a, b) => {
+    return (a, b, frame) => {
       const x = (a as SequenceValue).items;
       const y = (b as SequenceValue).items;
       for (let index = 0; index < Math.min(x.length, y.length); index++) {
-        const order = element(x[index], y[index]);
+        frame?.runtime.spend();
+        const order = element(x[index], y[index], frame);
         if (order !== 0) return order;
       }
       return x.length - y.length;
@@ -530,7 +534,7 @@ export function lessThan(type: Type): ((a: Value, b: Value) => number) | undefin
 }
 
 /** Whether two values of a type are equal, as `==` says, or undefined when `==` does not apply. */
-export function equalTo(type: Type): ((a: Value, b: Value) => boolean) | undefined {
+export function equalTo(type: Type): ValueComparison<boolean> | undefined {
   if (type.kind === 'reference') return compareReferences(equalTo(type.to));
   if (type.kind === 'pointer') return (a, b) => (a as Ptr).equals(b as Ptr);
   if (type.kind === 'class' && type.cls.library?.kind === 'pair') {
@@ -538,18 +542,17 @@ export function equalTo(type: Type): ((a: Value, b: Value) => boolean) | undefin
     const a1 = equalTo(first.type);
     const a2 = equalTo(second.type);
     if (!a1 || !a2) return undefined;
-    return (a, b) =>
-      a1((a as CObject).values[0], (b as CObject).values[0]) && a2((a as CObject).values[1], (b as CObject).values[1]);
+    return (a, b, frame) =>
+      a1((a as CObject).values[0], (b as CObject).values[0], frame) &&
+      a2((a as CObject).values[1], (b as CObject).values[1], frame);
   }
   const less = lessThan(type);
   if (!less) return undefined;
-  return (a, b) => less(a, b) === 0;
+  return (a, b, frame) => less(a, b, frame) === 0;
 }
 
-function compareReferences<T>(
-  compare: ((a: Value, b: Value) => T) | undefined
-): ((a: Value, b: Value) => T) | undefined {
-  if (compare) return (a, b) => compare((a as Ptr).read(), (b as Ptr).read());
+function compareReferences<T>(compare: ValueComparison<T> | undefined): ValueComparison<T> | undefined {
+  if (compare) return (a, b, frame) => compare((a as Ptr).read(), (b as Ptr).read(), frame);
 }
 
 export interface CallbackOperand {

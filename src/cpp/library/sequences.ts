@@ -206,13 +206,15 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
             frame,
             items.length,
             element,
-            (f, target, index) =>
-              operations.copy(
+            (f, target, index) => {
+              f.runtime.spend();
+              return operations.copy(
                 f,
                 items[index],
                 target instanceof CObject ? target : undefined,
                 ownedCopyFromConst || sourceIsConst === true || isConstType(element)
-              ),
+              );
+            },
             operations.destroy
           )
         );
@@ -227,9 +229,7 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
       const from = source as SequenceValue;
       if (to === from) return;
       if (kind === 'array') {
-        for (let index = 0; index < to.items.length; index++) {
-          to.items[index] = ops().assign(frame, to.items[index], from.items[index]);
-        }
+        assignArray(frame, to, ops(), (index) => from.items[index]);
         return;
       }
       editor.assignRange(
@@ -309,9 +309,7 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
             ([first, last], { frame }) => {
               const source = range.read(first, last);
               reserve(frame, source.length);
-              return editor.construct(frame, make([]), source.length, (index, destination) =>
-                source.construct(frame, index, destination)
-              );
+              return editor.constructRange(frame, make([]), source);
             },
             { uses: (row) => library.compiler.requireLibraryObjectUse(element, 'destroy', row) }
           );
@@ -406,15 +404,38 @@ export function iteratorRange(
       )
         throw new CppRuntimeError('overlappingCopy');
       const length = first.rangeLength(last, isReverse);
-      const locate = (index: number): Ptr => first.offset(isReverse ? -index : index, true).element(isReverse);
+      const checkEndpoints = (): void => {
+        first.checkIterator();
+        last.checkIterator();
+      };
+      const locate = (index: number): Ptr => {
+        checkEndpoints();
+        return first.offset(isReverse ? -index : index, true).element(isReverse);
+      };
       return {
-        length,
+        get length() {
+          checkEndpoints();
+          return length;
+        },
+        checkEndpoints,
         read: (index) => locate(index).read(),
         construct: (frame, index, destination) => construct(frame, locate(index), destination),
         isSameType,
       };
     },
   };
+}
+
+function assignArray(
+  frame: Frame,
+  target: SequenceValue,
+  operations: ElementOperations,
+  source: (index: number) => Value
+): void {
+  for (const [index, item] of target.items.entries()) {
+    frame.runtime.spend();
+    target.items[index] = operations.assign(frame, item, source(index));
+  }
 }
 
 function iteratorElement(type: Type): Type | undefined {
@@ -562,8 +583,10 @@ function sequenceMethods(
       const target = (other as Ptr).read() as SequenceValue;
       if (kind === 'array') {
         const operations = ops();
-        for (let index = 0; index < self.length; index++)
+        for (let index = 0; index < self.length; index++) {
+          frame.runtime.spend();
           swapElements(frame, self.location(index), target.location(index), operations);
+        }
       } else {
         self.swapItems(target);
       }
@@ -582,10 +605,7 @@ function sequenceMethods(
       VOID,
       (self, [value], frame) => {
         const source = (value as Ptr).read();
-        const { assign } = ops();
-        for (const [index, item] of self.items.entries()) {
-          self.items[index] = assign(frame, item, source);
-        }
+        assignArray(frame, self, ops(), () => source);
       },
       {
         uses:
@@ -797,21 +817,28 @@ function listMethods(
   method('remove', [constRef(element)], SIZE_T, (self, [value], frame) => {
     if (!equal) throw new CppRuntimeError('custom', `${typeName(element)} の値は == で比べられません。`);
     return removeListRuns(frame, self, editor, 0, (_first, candidate) =>
-      equal(self.get(candidate), (value as Ptr).read())
+      equal(self.get(candidate), (value as Ptr).read(), frame)
     );
   });
-  method('reverse', [], VOID, (self) => {
+  method('reverse', [], VOID, (self, _args, frame) => {
+    frame.runtime.spend(self.length);
     self.reorder((items) => items.toReversed());
   });
-  method('sort', [], VOID, (self) => {
+  method('sort', [], VOID, (self, _args, frame) => {
     if (!less) throw new CppRuntimeError('custom', `${typeName(element)} の値は < で比べられません。`);
-    self.reorder((items) => items.toSorted((a, b) => less(a.value, b.value)));
+    frame.runtime.spend(self.length);
+    self.reorder((items) =>
+      items.toSorted((a, b) => {
+        frame.runtime.spend();
+        return less(a.value, b.value, frame);
+      })
+    );
   });
   const unique = (self: SequenceValue, frame: Frame, same: (a: Ptr, b: Ptr) => boolean): bigint =>
     removeListRuns(frame, self, editor, 1, (first, candidate) => same(self.location(first), self.location(candidate)));
   method('unique', [], SIZE_T, (self, _args, frame) => {
     if (!equal) throw new CppRuntimeError('custom', `${typeName(element)} の値は == で比べられません。`);
-    return unique(self, frame, (a, b) => equal(a.read(), b.read()));
+    return unique(self, frame, (a, b) => equal(a.read(), b.read(), frame));
   });
   /** A comparator or predicate argument, given as a function's name or a function object. */
   const callable = (args: Expr[]): ((frame: Frame, a: Ptr, b: Ptr) => boolean) | undefined => {
@@ -867,7 +894,11 @@ function removeListRuns(
     for (let first = 0; first < self.length; first++) {
       const start = first + keepFirst;
       let end = start;
-      while (end < self.length && matches(first, end)) end++;
+      while (end < self.length) {
+        frame.runtime.spend();
+        if (!matches(first, end)) break;
+        end++;
+      }
       if (start !== end) self.transferNodesTo(removed, start, end - start);
     }
     return BigInt(removed.length);
@@ -1015,8 +1046,8 @@ function sequenceOperator(
       type: BOOL,
       isLvalue: false,
       row,
-      run: compiler.compareObjects(left, right, (first, second) =>
-        compareSequences(operator, (first as SequenceValue).items, (second as SequenceValue).items, element)
+      run: compiler.compareObjects(left, right, (first, second, frame) =>
+        compareSequences(frame, operator, (first as SequenceValue).items, (second as SequenceValue).items, element)
       ),
     };
   }
@@ -1082,15 +1113,23 @@ function assignment(
   };
 }
 
-function compareSequences(operator: string, a: Value[], b: Value[], element: Type): boolean {
+function compareSequences(frame: Frame, operator: string, a: Value[], b: Value[], element: Type): boolean {
   if (operator === '==' || operator === '!=') {
-    const equal = equalTo(element) as (x: Value, y: Value) => boolean;
-    const same = a.length === b.length && a.every((item, index) => equal(item, b[index]));
+    const equal = equalTo(element) as NonNullable<ReturnType<typeof equalTo>>;
+    const same =
+      a.length === b.length &&
+      a.every((item, index) => {
+        frame.runtime.spend();
+        return equal(item, b[index], frame);
+      });
     return operator === '==' ? same : !same;
   }
-  const less = lessThan(element) as (x: Value, y: Value) => number;
+  const less = lessThan(element) as NonNullable<ReturnType<typeof lessThan>>;
   let order = 0;
-  for (let index = 0; index < Math.min(a.length, b.length) && order === 0; index++) order = less(a[index], b[index]);
+  for (let index = 0; index < Math.min(a.length, b.length) && order === 0; index++) {
+    frame.runtime.spend();
+    order = less(a[index], b[index], frame);
+  }
   if (order === 0) order = a.length - b.length;
   switch (operator) {
     case '<': {

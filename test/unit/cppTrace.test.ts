@@ -117,6 +117,34 @@ int main() {
 });
 
 test.each([
+  ['char', ' '],
+  ['std::string', ' '],
+  ['int', '0'],
+  ['double', '0'],
+])('charges string-stream input scanning for %s', (type, fill) => {
+  const program = `#include <sstream>
+#include <string>
+int main() {
+  std::string source(8000, '${fill}');
+  source[7999] = '1';
+  std::istringstream input(source);
+  for (int i = 0; i < 10; ++i) {
+    input.str(source);
+    input.clear();
+    ${type} value;
+    input >> value;
+  }
+}`;
+  const previous = LIMITS.maxOperations;
+  LIMITS.maxOperations = 2100;
+  try {
+    expect(executeProgram('cpp', program)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  } finally {
+    LIMITS.maxOperations = previous;
+  }
+});
+
+test.each([
   'std::string copy(source.data(), source.size());',
   'std::string copy(source.c_str());',
   'std::string copy(source.begin(), source.end());',
@@ -228,6 +256,57 @@ int main() {
     kind: 'executed',
     uncaughtException: expect.stringContaining('使えなくなったイテレータ'),
   });
+});
+
+test.each([
+  'std::vector<Element> result(values.begin(), values.end());',
+  'std::deque<Element> result(values.begin(), values.end());',
+  'std::vector<Element> result; result.reserve(2); result.insert(result.end(), values.begin(), values.end());',
+])('checks saved end iterators after constructing sequence elements in %s', (statement) => {
+  const program = `#include <deque>
+#include <vector>
+std::vector<int> values;
+struct Element {
+  int value;
+  Element(int n) : value(n) { values.push_back(9); }
+};
+int main() {
+  values.reserve(5);
+  values.push_back(1);
+  ${statement}
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('使えなくなったイテレータ'),
+  });
+});
+
+test.each([
+  ['std::array<int, 512> a{}, b{};', 'a.fill(1);'],
+  ['std::array<int, 512> a{}, b{};', 'a = b;'],
+  ['std::array<int, 512> a{}, b{};', 'a.swap(b);'],
+  ['std::vector<int> a(512, 1), b(512, 1);', 'a == b;'],
+  ['std::vector<int> a(512, 1), b(512, 1);', 'a <= b;'],
+  ['std::list<int> a(512, 1);', 'a.reverse();'],
+  ['std::list<int> a(512, 1);', 'a.sort();'],
+  ['std::list<int> a(512, 1);', 'a.remove(2);'],
+  ['std::vector<int> a(512, 1); a.reserve(514);', 'a.insert(a.begin(), 2); a.erase(a.begin());'],
+  ['std::vector<int> a(512, 1);', 'a.assign(512, 2);'],
+])('meters sequence traversal in %s %s', (setup, statement) => {
+  const program = `#include <array>
+#include <list>
+#include <vector>
+int main() {
+  ${setup}
+  for (int i = 0; i < 8; ++i) { ${statement} }
+}`;
+  const previous = LIMITS.maxOperations;
+  LIMITS.maxOperations = 3000;
+  try {
+    expect(executeProgram('cpp', program)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  } finally {
+    LIMITS.maxOperations = previous;
+  }
 });
 
 test.each([

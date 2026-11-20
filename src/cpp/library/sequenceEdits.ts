@@ -14,6 +14,7 @@ import {
 /** The source elements of a range edit, read or converted when the edit reaches them. */
 export interface Source {
   length: number;
+  checkEndpoints?: () => void;
   read: (index: number) => Value;
   construct: (frame: Frame, index: number, destination?: CObject) => Value;
   /** Whether the values have the element type, which assigns them directly instead of through a temporary. */
@@ -35,6 +36,7 @@ interface VectorInsertion {
   at: number;
   count: number;
   make: (index: number, destination?: CObject) => Value;
+  complete?: () => void;
 }
 
 /**
@@ -56,7 +58,8 @@ export class SequenceEditor {
     frame: Frame,
     self: SequenceValue,
     count: number,
-    make: (index: number, destination?: CObject) => Value
+    make: (index: number, destination?: CObject) => Value,
+    checkEndpoints?: () => void
   ): SequenceValue {
     // Apple's deque constructors release partial allocations without calling element destructors.
     const { destroy } = this.ops;
@@ -72,6 +75,7 @@ export class SequenceEditor {
           self.items,
           this.kind === 'vector' ? 'reverse' : 'forward'
         );
+        checkEndpoints?.();
         self.bindElements(0, count);
         return self;
       } catch (error) {
@@ -81,13 +85,33 @@ export class SequenceEditor {
     });
   }
 
+  constructRange(frame: Frame, self: SequenceValue, source: Source): SequenceValue {
+    return this.construct(
+      frame,
+      self,
+      source.length,
+      (index, destination) => source.construct(frame, index, destination),
+      source.checkEndpoints
+    );
+  }
+
   private build(
     frame: Frame,
     count: number,
     make: (index: number) => Value,
     destroy: ElementOperations['destroy']
   ): Value[] {
-    return makeEach(frame, count, make, () => destroy, undefined, this.kind === 'vector' ? 'reverse' : 'forward');
+    return makeEach(
+      frame,
+      count,
+      (index) => {
+        frame.runtime.spend();
+        return make(index);
+      },
+      () => destroy,
+      undefined,
+      this.kind === 'vector' ? 'reverse' : 'forward'
+    );
   }
 
   /** Destroys elements: a vector from its last, a deque and a list from their first. */
@@ -143,10 +167,14 @@ export class SequenceEditor {
     const { type } = this.ops;
     if (type.kind === 'class' && !type.cls.library)
       self.appendInPlace((location) => this.constructAt(frame, location, make));
-    else self.append(make());
+    else {
+      frame.runtime.spend();
+      self.append(make());
+    }
   }
 
   private constructAt(frame: Frame, location: Ptr, make: ElementFactory): Value {
+    frame.runtime.spend();
     return initializeAt(frame, this.ops.type, location, UNINIT, (target) =>
       make(target instanceof CObject ? target : undefined)
     );
@@ -222,6 +250,7 @@ export class SequenceEditor {
     if (source.length === 0) return;
     if (this.kind === 'list') {
       const values = this.build(frame, source.length, (index) => source.construct(frame, index), this.ops.destroy);
+      source.checkEndpoints?.();
       self.insertValues(at, values);
     } else if (this.kind === 'vector') this.vectorInsertRange(frame, self, at, source);
     else if (isForwardOnly) this.dequeInsertBuffered(frame, self, at, source);
@@ -259,6 +288,7 @@ export class SequenceEditor {
     for (let index = 0; index < assigned; index++) this.assignFrom(frame, self.items, index, source, index);
     for (let index = assigned; index < length; index++)
       this.appendElement(frame, self, (target) => source.construct(frame, index, target));
+    source.checkEndpoints?.();
     this.truncate(frame, self, length);
   }
 
@@ -291,14 +321,17 @@ export class SequenceEditor {
   }
 
   private assignAt(frame: Frame, items: Value[], index: number, value: Value): void {
+    frame.runtime.spend();
     items[index] = this.ops.assign(frame, items[index], value);
   }
 
   private moveAt(frame: Frame, items: Value[], index: number, value: Value): void {
+    frame.runtime.spend();
     items[index] = moveValue(frame, this.ops.type, items[index], value);
   }
 
   private moveConstruct(frame: Frame, value: Value, destination?: CObject): Value {
+    frame.runtime.spend();
     return constructElementFromRvalue(frame, this.ops.type, value, destination);
   }
 
@@ -331,6 +364,8 @@ export class SequenceEditor {
     const count = insertion?.count ?? 0;
     if (type.kind !== 'class') {
       const made = insertion ? this.build(frame, count, insertion.make, destroy) : [];
+      insertion?.complete?.();
+      frame.runtime.spend(old.length);
       self.replaceAllocation([...old.slice(0, at), ...made, ...old.slice(at)], capacity);
       return;
     }
@@ -360,6 +395,7 @@ export class SequenceEditor {
           (index) => this.constructAt(frame, next.location(at + index), (target) => insertion.make(index, target)),
           destroy
         );
+        insertion.complete?.();
       }
       back = makeEach(
         frame,
@@ -433,6 +469,7 @@ export class SequenceEditor {
         at,
         count,
         make: (index, target) => source.construct(frame, index, target),
+        complete: source.checkEndpoints,
       });
       return;
     }
@@ -444,11 +481,13 @@ export class SequenceEditor {
       assigned = after;
     }
     if (assigned === 0) {
+      source.checkEndpoints?.();
       self.finishVectorEdit(at, length);
       return;
     }
     this.moveRange(frame, self, at, length, at + count);
     for (let index = 0; index < assigned; index++) this.assignFrom(frame, items, at + index, source, index);
+    source.checkEndpoints?.();
     self.finishVectorEdit(at, length);
   }
 
@@ -581,6 +620,7 @@ export class SequenceEditor {
       for (let index = moved; index < oldBegin + at; index++) this.moveAt(frame, cells, begin++, cells[index]);
       for (let index = middle; index < count; index++) this.assignFrom(frame, cells, begin++, source, index);
     }
+    source.checkEndpoints?.();
   }
 
   private dequeInsertRangeAtBack(frame: Frame, cells: Value[], at: number, source: Source): void {
@@ -598,6 +638,7 @@ export class SequenceEditor {
       for (let index = moved; index > at;) this.moveAt(frame, cells, --end, cells[--index]);
       for (let index = middle; index > 0;) this.assignFrom(frame, cells, --end, source, --index);
     }
+    source.checkEndpoints?.();
   }
 
   private editDequeInsertion(
@@ -646,6 +687,10 @@ class Followed {
 }
 
 export function listSort(frame: Frame, self: SequenceValue, less: (a: Ptr, b: Ptr) => boolean): void {
+  const compare = (a: Ptr, b: Ptr): boolean => {
+    frame.runtime.spend();
+    return less(a, b);
+  };
   const sort = (first: number, last: number): void => {
     if (last - first < 2) return;
     const middle = first + Math.floor((last - first) / 2);
@@ -655,12 +700,12 @@ export function listSort(frame: Frame, self: SequenceValue, less: (a: Ptr, b: Pt
     let right = middle;
     while (left < right && right < last) {
       const item = self.location(left);
-      if (!less(self.location(right), item)) {
+      if (!compare(self.location(right), item)) {
         left++;
         continue;
       }
       let end = right + 1;
-      while (end < last && less(self.location(end), item)) end++;
+      while (end < last && compare(self.location(end), item)) end++;
       frame.runtime.spend(Math.ceil((end - left) / 64));
       self.moveNodesBefore(right, end, left);
       left += end - right + 1;

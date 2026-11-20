@@ -790,7 +790,7 @@ function matchesAt(frame: Frame, bytes: string, needle: string, suffix: boolean)
   );
 }
 
-const compareBytes = (frame: Frame, a: string, b: string): number =>
+export const compareBytes = (frame: Frame, a: string, b: string): number =>
   compareSpan(frame, a, b, 0, Math.min(a.length, b.length)) || Math.sign(a.length - b.length);
 
 /** `char_traits<char>::compare` returns the difference of the first unequal bytes. */
