@@ -1795,6 +1795,22 @@ fn main() { println!("before {} after", Bad); }`;
   expect(err.kind === 'executed' && err.stderr).toContain('before partial');
 });
 
+test('infers numeric Rust literals through learner From implementations', () => {
+  const program = `#[derive(Debug)]
+struct Id(u32);
+impl From<u32> for Id { fn from(n: u32) -> Self { Id(n) } }
+#[derive(Debug)]
+struct Scale(f32);
+impl From<f32> for Scale { fn from(n: f32) -> Self { Scale(n) } }
+fn show(id: Id) { println!("{:?}", id); }
+fn main() {
+    show(7.into());
+    let scale: Scale = 1.5.into();
+    println!("{:?}", scale);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'Id(7)\nScale(1.5)\n' });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

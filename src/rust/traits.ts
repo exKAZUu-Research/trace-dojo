@@ -1,7 +1,6 @@
 import { isPseudo, normalize, type Unifier } from './infer';
 import type { Module, Program } from './items';
 import { builtinImplements } from './traitBuiltins';
-import { infallibleConversion } from './traitConversions';
 import {
   F32,
   F64,
@@ -79,10 +78,15 @@ export class TraitSolver {
   /** The one number type of a literal's kind that implements a trait, if exactly one does. */
   private onlyNumericImpl(literal: 'int' | 'float', ref: TraitRef): Type | undefined {
     const numbers: Type[] = literal === 'int' ? INT_NAMES.map((name) => intType(name)) : [F32, F64];
-    if (ref.trait.builtin === 'Into') {
+    if (ref.trait.builtin === 'Into' || ref.trait.builtin === 'TryInto') {
       const target = normalize(shallow(ref.args[0]));
-      if (target.kind !== 'int') return undefined;
-      const fitting = numbers.filter((number) => infallibleConversion(number, target));
+      if (target.kind === 'var') return undefined;
+      const snapshot = this.unifier.snapshot();
+      const fitting = numbers.filter((number) => {
+        const answer = this.implements(number, ref);
+        this.unifier.rollback(snapshot);
+        return answer === 'yes';
+      });
       return fitting.length === 1 ? fitting[0] : undefined;
     }
     if (ref.trait.builtin) return undefined;
