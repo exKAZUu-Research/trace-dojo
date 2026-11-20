@@ -4337,6 +4337,28 @@ assert(++$a instanceof Foo)
 `,
   });
 
+  expect(
+    run(String.raw`<?php
+$o = new stdClass;
+$b = 'x';
+foreach ([
+  fn() => assert(false && $o->{'a b'}),
+  fn() => assert(false && A::{'a b'}()),
+  fn() => assert(false && A::{'a'.$b}),
+  fn() => assert(false && A::{1}),
+] as $f) {
+  try { $f(); } catch (AssertionError $e) { echo $e->getMessage(), "\n"; }
+}
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: `assert(false && $o->{a b})
+assert(false && A::{a b}())
+assert(false && A::'a' . $b)
+assert(false && A::1)
+`,
+  });
+
   for (const [unsetOrder, expected] of [
     ['unset($a, $c, $b);', '3|2,3,1'],
     ['unset($c, $b, $a);', '3|1,2,3'],

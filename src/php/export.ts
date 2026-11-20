@@ -120,7 +120,7 @@ export function exportExpr(e: Expr, priority = 0, depth = 0): string {
       return e.name.fallback ?? e.name.name;
     }
     case 'cconst': {
-      return `${exportClass(e.cls, depth)}::${typeof e.name === 'string' ? e.name : exportMemberName(e.name, depth)}`;
+      return `${exportClass(e.cls, depth)}::${typeof e.name === 'string' ? e.name : exportConstantName(e.name, depth)}`;
     }
     case 'array':
     case 'list': {
@@ -164,13 +164,13 @@ function exportAccess(e: Extract<Expr, { k: 'call' | 'mcall' | 'scall' | 'prop' 
       return `${name}(${e.fcc ? '...' : exportArgs(e.args, depth)})`;
     }
     case 'mcall': {
-      return `${render(e.obj, 260)}${e.nullsafe ? '?->' : '->'}${typeof e.name === 'string' ? e.name : exportMemberName(e.name, depth)}(${e.fcc ? '...' : exportArgs(e.args, depth)})`;
+      return `${render(e.obj, 260)}${e.nullsafe ? '?->' : '->'}${typeof e.name === 'string' ? e.name : exportVariableName(e.name, depth)}(${e.fcc ? '...' : exportArgs(e.args, depth)})`;
     }
     case 'scall': {
-      return `${exportClass(e.cls, depth)}::${typeof e.name === 'string' ? e.name : exportMemberName(e.name, depth)}(${e.fcc ? '...' : exportArgs(e.args, depth)})`;
+      return `${exportClass(e.cls, depth)}::${typeof e.name === 'string' ? e.name : exportVariableName(e.name, depth)}(${e.fcc ? '...' : exportArgs(e.args, depth)})`;
     }
     case 'prop': {
-      return `${render(e.obj, 260)}${e.nullsafe ? '?->' : '->'}${typeof e.name === 'string' ? e.name : exportMemberName(e.name, depth)}`;
+      return `${render(e.obj, 260)}${e.nullsafe ? '?->' : '->'}${typeof e.name === 'string' ? e.name : exportVariableName(e.name, depth)}`;
     }
     case 'sprop': {
       return `${exportClass(e.cls, depth)}::$${typeof e.name === 'string' ? e.name : render(e.name)}`;
@@ -272,10 +272,9 @@ function tryFoldConcat(expr: Expr): string | undefined {
   return left !== undefined && right !== undefined ? left + right : undefined;
 }
 
-function exportMemberName(name: Expr, depth: number): string {
-  if (name.k === 'var' || name.k === 'varvar') return exportExpr(name, 0, depth);
-  if (name.k === 'lit' && typeof name.v === 'string' && SIMPLE_IDENT.test(name.v)) return name.v;
-  return `{${exportExpr(name, 0, depth)}}`;
+/** Exports a dynamic class-constant name as PHP's `zend_ast_export_name` does: a string raw, anything else unbraced. */
+function exportConstantName(name: Expr, depth: number): string {
+  return name.k === 'lit' && typeof name.v === 'string' ? name.v : exportExpr(name, 0, depth);
 }
 
 function exportVariableName(name: Expr, depth: number): string {
