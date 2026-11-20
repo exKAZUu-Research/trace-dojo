@@ -533,7 +533,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       type: nonReference(type),
       isLvalue: true,
       row,
-      ...(evaluateObject ? undefined : arithmeticVariableValue(type, known, foldedValue, global.isConstexpr)),
+      ...(isConstantObject(object) ? arithmeticVariableValue(type, known, foldedValue, global.isConstexpr) : undefined),
       staticAddress: !evaluateObject && (!isReference || global.hasStaticReferenceBinding),
       constantInitialization:
         !evaluateObject && (isReference ? hasConstantObject(constantLocation) : global.hasConstantObjectValue),
@@ -2220,6 +2220,11 @@ function comparePointers(operator: string, a: Ptr, b: Ptr): number {
       return order >= 0 ? 1 : 0;
     }
   }
+}
+
+/** Whether a static member named through `object` keeps its constant value: the object is absent or a constant designation. */
+function isConstantObject(object: Expr | undefined): boolean {
+  return !object || object.constantDesignation === true || object.staticAddress === true;
 }
 
 /** The location of the complete `to` object that `location` designates a base of, stopping when it is no such object. */

@@ -826,6 +826,26 @@ int main() {
   });
 });
 
+test('uses a static constant named through an object as a constant expression', () => {
+  const program = `#include <iostream>
+struct S { static const int N = 3; };
+int main() {
+  S s;
+  S objects[2];
+  int a[s.N];
+  int b[objects[1].N];
+  constexpr int k = s.N;
+  switch (3) {
+    case s.N: std::cout << sizeof(a) << ' ' << sizeof(b) << ' ' << k;
+  }
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '12 12 3',
+    uncaughtException: undefined,
+  });
+});
+
 test('reads typed scalar functor operands after binding both', () => {
   const program = `#include <functional>
 #include <iostream>

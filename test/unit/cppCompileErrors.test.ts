@@ -1213,3 +1213,15 @@ int main() {
     diagnostics: [{ row: 5, message: expect.stringContaining('関数 unique に') }],
   });
 });
+
+test.each(['S& r = s; int a[r.N];', 'S* p = &s; int a[p->N];'])(
+  'rejects a static constant named through a non-constant object expression in %s',
+  (body) => {
+    const program = `struct S { static const int N = 3; };
+int main() { S s; ${body} }`;
+    expect(executeProgram('cpp', program)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [{ row: 1, message: expect.stringContaining('可変長配列') }],
+    });
+  }
+);
