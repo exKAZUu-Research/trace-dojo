@@ -1,7 +1,6 @@
 import type { Condition, Expr, Pattern } from './ast';
 import type { Compiler, Eval } from './compiler';
-import { isPlaceExpr } from './compilerCommon';
-import { takesWhole } from './compilerPatterns';
+import { compilePatternInput, takesWhole } from './compilerPatterns';
 import { normalize } from './infer';
 import { ControlSignal, type Frame, UNASSIGNED } from './runtime';
 import { runtimeType } from './runtimeTypes';
@@ -9,6 +8,7 @@ import { resolve, shallow, type Type } from './types';
 import { DONE, type IterValue, UNIT_VALUE, type Value } from './values';
 
 type ExprOf<K extends Expr['kind']> = Extract<Expr, { kind: K }>;
+type ConditionalEval = (frame: Frame, onMatch: () => void) => boolean;
 
 export function compileIf(c: Compiler, expr: ExprOf<'if'>): Eval {
   const cond = compileCondition(c, expr.cond);
@@ -17,20 +17,21 @@ export function compileIf(c: Compiler, expr: ExprOf<'if'>): Eval {
   const otherwise = expr.else ? c.value(expr.else) : undefined;
   return (frame) => {
     frame.runtime.spend();
-    if (cond(frame)) {
+    let result: Value = UNIT_VALUE;
+    const matched = cond(frame, () => {
       try {
-        return then(frame);
+        result = then(frame);
       } finally {
-        for (const slot of condLocals) frame.locals[slot] = UNASSIGNED;
+        frame.endScope(condLocals);
       }
-    }
+    });
+    if (matched) return result;
     return otherwise ? otherwise(frame) : UNIT_VALUE;
   };
 }
 
 export function compileMatch(c: Compiler, expr: ExprOf<'match'>): Eval {
-  const scrutinee = c.read(expr.scrutinee);
-  const placeEval = isPlaceExpr(expr.scrutinee, c.annotations) ? c.place(expr.scrutinee) : undefined;
+  const scrutinee = compilePatternInput(c, expr.scrutinee);
   const arms = expr.arms.map((arm) => {
     const matcher = c.compileMatcher(arm.pattern);
     const body = c.value(arm.body);
@@ -40,25 +41,19 @@ export function compileMatch(c: Compiler, expr: ExprOf<'match'>): Eval {
   });
   return (frame) => {
     frame.runtime.spend();
-    const value = scrutinee(frame);
-    frame.temporaries.push(value);
-    try {
+    const { value, place } = scrutinee(frame);
+    return frame.runtime.withRoots([place], () => {
       for (const { matcher, body, slots, takeAll } of arms) {
-        if (matcher(frame, value, placeEval ? () => placeEval(frame) : undefined)) {
-          takeAll?.(frame);
-          frame.temporaries.pop();
-          try {
-            return body(frame);
-          } finally {
-            for (const slot of slots) frame.locals[slot] = UNASSIGNED;
-            frame.temporaries.push(undefined);
-          }
+        if (!matcher(frame, value, () => place)) continue;
+        takeAll?.(frame);
+        try {
+          return body(frame);
+        } finally {
+          frame.endScope(slots);
         }
       }
-    } finally {
-      frame.temporaries.pop();
-    }
-    throw new Error('No arm matched');
+      throw new Error('No arm matched');
+    });
   };
 }
 
@@ -83,15 +78,18 @@ export function compileWhile(c: Compiler, expr: ExprOf<'while'>): Eval {
   const row = letPattern ? c.stepRow(expr.span) : undefined;
   const answered = bindsAnswer(letPattern);
   return (frame) => {
-    try {
-      for (;;) {
-        frame.runtime.spend();
-        if (!cond(frame)) return UNIT_VALUE;
-        stepBinding(frame, row, answered);
-        if (runBody(body, frame, label)) return UNIT_VALUE;
-      }
-    } finally {
-      for (const slot of condLocals) frame.locals[slot] = UNASSIGNED;
+    for (;;) {
+      frame.runtime.spend();
+      let breaks = false;
+      const matched = cond(frame, () => {
+        try {
+          stepBinding(frame, row, answered);
+          breaks = !!runBody(body, frame, label);
+        } finally {
+          frame.endScope(condLocals);
+        }
+      });
+      if (!matched || breaks) return UNIT_VALUE;
     }
   };
 }
@@ -128,17 +126,26 @@ export function compileFor(c: Compiler, expr: ExprOf<'for'>): Eval {
   };
 }
 
-function compileCondition(c: Compiler, cond: Condition): Eval {
-  if (cond.kind === 'expr') return c.value(cond.expr);
-  const value = c.read(cond.value);
+function compileCondition(c: Compiler, cond: Condition): ConditionalEval {
+  if (cond.kind === 'expr') {
+    const value = c.value(cond.expr);
+    return (frame, onMatch) => {
+      if (!value(frame)) return false;
+      onMatch();
+      return true;
+    };
+  }
+  const input = compilePatternInput(c, cond.value);
   const matcher = c.compileMatcher(cond.pattern);
-  const placeEval = isPlaceExpr(cond.value, c.annotations) ? c.place(cond.value) : undefined;
   const takeAll = takesWhole(c, cond.value, cond.pattern);
-  return (frame) => {
-    const v = value(frame);
-    const matched = matcher(frame, v, placeEval ? () => placeEval(frame) : undefined);
-    if (matched) takeAll?.(frame);
-    return matched;
+  return (frame, onMatch) => {
+    const { value, place } = input(frame);
+    return frame.runtime.withRoots([place], () => {
+      if (!matcher(frame, value, () => place)) return false;
+      takeAll?.(frame);
+      onMatch();
+      return true;
+    });
   };
 }
 

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 564 -- Keeps the compilation that shares a function's context and step state together.
+// code-gauge-allow-file fileNcss 565 -- Keeps the compilation that shares a function's context and step state together.
 import type { Annotations, Coercion, FnContext, LocalVar, PathRes } from './annotations';
 import type { Block, Expr, Pattern, Span, Stmt } from './ast';
 import { forEachDirect, patternBindings } from './astWalk';
@@ -9,7 +9,7 @@ import { construct, evaluateValues, isPlaceExpr, isRefType, isStringType, LocalP
 import { compileFor, compileIf, compileLoop, compileMatch, compileWhile } from './compilerControl';
 import { compileMacro } from './compilerMacros';
 import { compileBinary, compileCompoundAssign, compileUnary } from './compilerOperators';
-import { compileMatcher, type Matcher, takesWhole } from './compilerPatterns';
+import { compileMatcher, compilePatternInput, type Matcher, takesWhole } from './compilerPatterns';
 import { compileField, compileIndex, compilePlace } from './compilerPlaces';
 import type { Formatter } from './fmt';
 import { normalize } from './infer';
@@ -331,14 +331,15 @@ export class Compiler {
   }
 
   private destructure(stmt: Extract<Stmt, { kind: 'let' }>): Eval {
-    const init = this.read(stmt.init!);
-    const place = this.place(stmt.init!);
+    const input = compilePatternInput(this, stmt.init!);
     const matcher = this.compileMatcher(stmt.pattern);
     const takeAll = takesWhole(this, stmt.init!, stmt.pattern);
     const elseBlock = stmt.else && this.compileBlock(stmt.else);
     const run: Eval = (frame) => {
       frame.runtime.spend();
-      if (matcher(frame, init(frame), () => place(frame))) takeAll?.(frame);
+      const { value, place } = input(frame);
+      const matched = frame.runtime.withRoots([place], () => matcher(frame, value, () => place));
+      if (matched) takeAll?.(frame);
       else elseBlock?.(frame);
       return UNIT_VALUE;
     };

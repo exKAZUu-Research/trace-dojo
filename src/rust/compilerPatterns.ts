@@ -1,7 +1,8 @@
 import type { LocalVar, PathRes } from './annotations';
 import type { Expr, Pattern } from './ast';
+import { claimString, moveString } from './capacity';
 import type { Compiler } from './compiler';
-import { derefAll, isRefType } from './compilerCommon';
+import { derefAll, isPlaceExpr, isRefType, LocalPlace } from './compilerCommon';
 import { normalize } from './infer';
 import { copyValue, needsCopy, valuesEqual } from './ops';
 import { type Frame, MOVED, UNASSIGNED } from './runtime';
@@ -14,6 +15,25 @@ export type Matcher = (frame: Frame, value: Value, place: (() => Place) | undefi
 type PatternProbe = (frame: Frame, value: Value, place: (() => Place) | undefined, bindings: (() => void)[]) => boolean;
 
 type PatternOf<K extends Pattern['kind']> = Extract<Pattern, { kind: K }>;
+
+export function compilePatternInput(c: Compiler, expr: Expr): (frame: Frame) => { value: Value; place: Place } {
+  if (expr.kind === 'index' && c.annotations.indexes.get(expr)?.container === 'map') {
+    const read = c.read(expr);
+    return (frame) => {
+      const value = read(frame);
+      return { value, place: new CellPlace(value) };
+    };
+  }
+  const place = c.place(expr);
+  if (expr.kind === 'path' && isPlaceExpr(expr, c.annotations)) {
+    const read = c.read(expr);
+    return (frame) => ({ value: read(frame), place: place(frame) });
+  }
+  return (frame) => {
+    const evaluated = place(frame);
+    return { value: evaluated.get(), place: evaluated };
+  };
+}
 
 /**
  * Matches a value against a pattern, binding its variables when it matches. `place` gives where the value lives, for
@@ -90,10 +110,17 @@ function bindingMatcher(c: Compiler, pattern: PatternOf<'binding'>, type: Type):
     if (sub && !sub(frame, value, place, bindings)) return false;
     bindings.push(() => {
       frame.locals[local.slot] = boundValue(value, place, local.mode, bindsPlace, copies);
-      if (movesOut && place) place().set(MOVED);
+      if (!movesOut || !place) return;
+      moveBinding(frame, local, place());
     });
     return true;
   };
+}
+
+function moveBinding(frame: Frame, local: LocalVar, source: Place): void {
+  moveString(source);
+  source.set(MOVED);
+  claimString(new LocalPlace(frame, local.slot));
 }
 
 function boundValue(

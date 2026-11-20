@@ -124,13 +124,13 @@ function indexPlace(c: Compiler, expr: ExprOf<'index'>): PlaceEval {
   }
   return (frame) => {
     const container = base(frame).get();
-    const position = Number(index(frame) as bigint);
-    const length = sliceLength(container);
-    if (position >= length) {
-      throw new RustPanic(indexPanic(undefined, length, BigInt(position)), span);
-    }
-    const { base: array, start } = sliceBase(container);
-    return new ElementPlace(array, start + position);
+    return frame.runtime.withRoots([container], () => {
+      const position = index(frame) as bigint;
+      const length = sliceLength(container);
+      if (position >= length) throw new RustPanic(indexPanic(res.container, length, position), span);
+      const { base: array, start } = sliceBase(container);
+      return new ElementPlace(array, start + Number(position));
+    });
   };
 }
 
@@ -190,29 +190,35 @@ export function compileIndex(c: Compiler, expr: ExprOf<'index'>): Eval {
     const keyType = runtimeType(expr.index.ty!);
     return (frame) => {
       const map = base(frame) as MapValue;
-      const key = index(frame);
-      const entry = map.entries.get(map.entries.key(keyType(frame), key));
-      if (!entry) throw new RustPanic('no entry found for key', span);
-      return entry[1];
+      return frame.runtime.withRoots([map], () => {
+        const key = index(frame);
+        const entry = map.entries.get(map.entries.key(keyType(frame), key));
+        if (!entry) throw new RustPanic('no entry found for key', span);
+        return entry[1];
+      });
     };
   }
   if (res.range) return rangeIndex(c, base, index, res.container === 'str', span);
   return (frame) => {
     const container = base(frame);
-    const position = index(frame) as bigint;
-    const length = sliceLength(container);
-    if (position >= length) throw new RustPanic(indexPanic(res.container, length, position), span);
-    return sliceGet(container, Number(position));
+    return frame.runtime.withRoots([container], () => {
+      const position = index(frame) as bigint;
+      const length = sliceLength(container);
+      if (position >= length) throw new RustPanic(indexPanic(res.container, length, position), span);
+      return sliceGet(container, Number(position));
+    });
   };
 }
 
 function rangeIndex(c: Compiler, base: Eval, index: Eval, isStr: boolean, span: Span): Eval {
   return (frame) => {
     const container = base(frame);
-    const range = index(frame) as RangeValue | undefined;
-    return isStr
-      ? c.support.strSlice(container as string, rangeStart(range), rangeEnd(range), span)
-      : sliceRange(container, range, span);
+    return frame.runtime.withRoots([container], () => {
+      const range = index(frame) as RangeValue | undefined;
+      return isStr
+        ? c.support.strSlice(container as string, rangeStart(range), rangeEnd(range), span)
+        : sliceRange(container, range, span);
+    });
   };
 }
 

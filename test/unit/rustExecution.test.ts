@@ -924,6 +924,63 @@ fn main() {
   });
 });
 
+test('evaluates each pattern source exactly once', () => {
+  const program = `struct S { value: String }
+fn make() -> S {
+    println!("make");
+    S { value: String::from("hi") }
+}
+fn main() {
+    match make().value {
+        text => println!("match {}", text),
+    }
+    if let text = make().value {
+        println!("if {}", text);
+    }
+    while let text = make().value {
+        println!("while {}", text);
+        break;
+    }
+    let S { value: text } = make();
+    println!("let {}", text);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'make\nmatch hi\nmake\nif hi\nmake\nwhile hi\nmake\nlet hi\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('keeps unbound Turtle temporaries alive through matches and slice bounds', () => {
+  const program = `fn bound(observer: &mut Turtle) -> usize {
+    println!("{}", observer.canMoveForward());
+    0
+}
+fn main() {
+    let mut observer = Turtle::new(0, 0);
+    match Some(Turtle::new(0, 1)) {
+        Some(_) => println!("{}", observer.canMoveForward()),
+        None => (),
+    }
+    println!("{}", observer.canMoveForward());
+    {
+        let slice = &vec![Turtle::new(0, 1)][bound(&mut observer)..];
+        println!("{}", slice.len());
+    }
+    println!("{}", observer.canMoveForward());
+    {
+        let slice = &[Turtle::new(0, 1)][bound(&mut observer)..];
+        println!("{}", slice.len());
+    }
+    println!("{}", observer.canMoveForward());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'false\ntrue\nfalse\n1\ntrue\nfalse\n1\ntrue\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {
