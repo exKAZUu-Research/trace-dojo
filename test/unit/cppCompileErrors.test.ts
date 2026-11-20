@@ -1189,3 +1189,13 @@ int main() { ${body} }`;
     diagnostics: [{ row: 2, message: expect.stringContaining('仮想基底クラス std::ios') }],
   });
 });
+
+test.each([
+  ['class E { ~E() {} public: E() {} }; int main() { throw E(); }', 'のデストラクタは private なので'],
+  ['struct E { ~E(); }; int main() { try { throw E(); } catch (...) {} }', 'は宣言だけで、定義（本体）がありません'],
+])('requires the destructor of a thrown exception object in %s', (program, message) => {
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 0, message: expect.stringContaining(message) }],
+  });
+});

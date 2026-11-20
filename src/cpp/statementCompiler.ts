@@ -1364,6 +1364,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     if (incomplete) this.error(node.row, `まだ定義されていないクラス ${incomplete} は投げられません。`);
     if (type.kind === 'class' && type.cls.isAbstract)
       this.error(node.row, `${type.cls.name} は抽象クラスなので投げられません。`);
+    this.requireObjectUse(type, 'destroy', node.row);
     const source = this.namedAutomaticObject(valueNode, expr, 'try') ? this.implicitMoveSource(expr, type) : expr;
     const initialize = this.copyInitializer(type, source, node.row, false);
     const makeStorage = this.fullExpression((frame) => {
