@@ -64,6 +64,7 @@ function callFn(
       `関数 ${fn.name} の引数の数が合いません（${params.length} 個ですが、${expr.args.length} 個あります）。`
     );
   }
+  c.annotations.callParams.set(expr, writtenCallParams(fn));
   checkArgs(c, expr.args, params, expectations(c, sig.ret, params, expected));
   expr.callee.ty = { kind: 'fn', params, ret: sig.ret };
   return sig.ret;
@@ -76,8 +77,7 @@ export function selfParamType(fn: FnDef, subst: Subst): Type {
   return ref(selfType, fn.selfMode === 'mutRef');
 }
 
-export function writtenCallParams(fn: FnDef | undefined): Type[] {
-  if (!fn) return [];
+function writtenCallParams(fn: FnDef): Type[] {
   return fn.selfMode ? [selfParamType(fn, new Map()), ...fn.paramTypes] : fn.paramTypes;
 }
 
@@ -120,6 +120,10 @@ function callCtor(
       `${variant.name} の引数の数が合いません（${params.length} 個ですが、${expr.args.length} 個あります）。`
     );
   }
+  c.annotations.callParams.set(
+    expr,
+    variant.fields.map((field) => field.type)
+  );
   checkArgs(c, expr.args, params, expectations(c, self, params, expected));
   c.requireAdtArguments(res.def, res.typeArgs, expr.span);
   expr.callee.ty = { kind: 'fn', params, ret: self };
@@ -254,6 +258,7 @@ function callValue(
     compileError(expr.span, `引数の数が合いません（${params.length} 個ですが、${expr.args.length} 個あります）。`);
   }
   if (expected) c.unifier.tryUnify(ret, expected);
+  c.annotations.callParams.set(expr, params);
   checkArgs(c, expr.args, params);
   c.annotations.callKinds.set(expr, kind);
   return ret;
@@ -322,6 +327,7 @@ export function checkMethodCall(
       `メソッド ${expr.method} の引数の数が合いません（${sig.params.length} 個ですが、${expr.args.length} 個あります）。`
     );
   }
+  c.annotations.callParams.set(expr, fn.paramTypes);
   checkArgs(c, expr.args, sig.params, expectations(c, sig.ret, sig.params, expected));
   c.annotations.methods.set(expr, { fn, typeArgs: found.typeArgs, receiver: found.adjust });
   if (fn.selfMode === 'value') checkMoveOutOfRef(c, expr, found.adjust, found.selfType);

@@ -3,7 +3,6 @@ import type { ExecutionBudget } from '../interpreter/limits';
 import type { Annotations, FnContext, LocalVar, MethodRes } from './annotations';
 import type { Block, Condition, Expr, FormatArgs, Pattern, Span, Stmt } from './ast';
 import { patternBindings } from './astWalk';
-import { writtenCallParams } from './checkerCalls';
 import { normalize } from './infer';
 import { capturedPlaces } from './loanCaptures';
 import {
@@ -997,8 +996,8 @@ export class LoanBuilder {
       const access = kind === 'FnMut' ? 'deep' : kind === 'FnOnce' ? this.readKind(expr.callee.ty) : 'read';
       callee = place ? this.read(place, expr.callee.ty, expr.callee.span, access) : this.value(expr.callee);
     }
-    const params = writtenCallParams(fn);
-    const args = expr.args.map((arg, index) => this.argument(arg, params[index]));
+    const params = this.annotations.callParams.get(expr);
+    const args = expr.args.map((arg, index) => this.argument(arg, params?.[index]));
     const result = this.callPoint(expr, [callee, ...args], []);
     const results = this.layout(result);
     const inputs = args.map((arg) => this.layout(arg));
@@ -1037,7 +1036,8 @@ export class LoanBuilder {
   private methodCall(expr: Extract<Expr, { kind: 'methodCall' }>): Value {
     const method = this.annotations.methods.get(expr);
     const { receiver, activation, target } = this.receiver(expr, method);
-    const args = expr.args.map((arg, index) => this.argument(arg, method?.fn.paramTypes[index]));
+    const params = this.annotations.callParams.get(expr);
+    const args = expr.args.map((arg, index) => this.argument(arg, params?.[index]));
     const accesses: Access[] = [];
     if (activation) accesses.push({ place: activation.place, kind: 'deep', span: expr.span, activates: activation });
     const result = this.callPoint(expr, [receiver, ...args], accesses);

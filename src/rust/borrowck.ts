@@ -4,7 +4,6 @@ import type { ExecutionBudget } from '../interpreter/limits';
 import type { Annotations, FnContext, LocalVar } from './annotations';
 import type { Block, Condition, Expr, FnItem, FormatArgs, Pattern, Span, Stmt } from './ast';
 import { forEachDirect, patternBindingParts, patternBindings } from './astWalk';
-import { writtenCallParams } from './checkerCalls';
 import {
   checkConstDrop,
   ConstLint,
@@ -332,9 +331,9 @@ export class BorrowChecker {
     let current = this.expr(expr.callee, state, consumes ? 'move' : 'read');
     const res = expr.callee.kind === 'path' ? this.annotations.paths.get(expr.callee) : undefined;
     const fn = res?.kind === 'fn' ? res.fn : undefined;
-    const params = writtenCallParams(fn);
+    const params = this.annotations.callParams.get(expr);
     for (const [index, arg] of expr.args.entries()) {
-      current = this.expr(arg, current, argumentMode(arg, params[index]));
+      current = this.expr(arg, current, argumentMode(arg, params?.[index]));
     }
     return fn && diverges(fn.ret) ? BOTTOM : current;
   }
@@ -443,8 +442,9 @@ export class BorrowChecker {
     } else {
       current = this.expr(expr.receiver, current, 'read');
     }
+    const params = this.annotations.callParams.get(expr);
     for (const [index, arg] of expr.args.entries()) {
-      current = this.expr(arg, current, argumentMode(arg, method?.fn.paramTypes[index]));
+      current = this.expr(arg, current, argumentMode(arg, params?.[index]));
     }
     return method && diverges(method.fn.ret) ? BOTTOM : current;
   }

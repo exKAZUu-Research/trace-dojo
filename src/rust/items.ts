@@ -118,7 +118,7 @@ export class Module {
 
   /** Whether `other` may see this module's private items: it is this module or one inside it. */
   isAncestorOf(other: Module): boolean {
-    for (let module: Module | undefined = other; module; module = module.parent) {
+    for (let module: Module | undefined = other; module; module = module.lexicalParent ?? module.parent) {
       if (module === this) return true;
     }
     return false;
@@ -850,9 +850,9 @@ export function lookupType(module: Module, name: string, span: Span): TypeBindin
   return lookupTypeEntry(module, name, span)?.binding;
 }
 
-function lookupTypeEntry(module: Module, name: string, span: Span): Entry<TypeBinding> | undefined {
+function lookupTypeEntry(module: Module, name: string, span: Span, excluded?: Import): Entry<TypeBinding> | undefined {
   for (let scope: Module | undefined = module; scope; scope = scope.lexicalParent) {
-    const found = ownType(scope, name, span, new Set());
+    const found = ownType(scope, name, span, new Set(), excluded);
     if (found) return found;
   }
   if (module.isStd) {
@@ -876,9 +876,14 @@ export function lookupValue(module: Module, name: string, span: Span): ValueBind
 }
 
 // code-gauge-allow duplicateLines 16 -- Looks up the value namespace as lookupType does the type namespace, whose fallbacks differ.
-function lookupValueEntry(module: Module, name: string, span: Span): Entry<ValueBinding> | undefined {
+function lookupValueEntry(
+  module: Module,
+  name: string,
+  span: Span,
+  excluded?: Import
+): Entry<ValueBinding> | undefined {
   for (let scope: Module | undefined = module; scope; scope = scope.lexicalParent) {
-    const found = ownValue(scope, name, span, new Set());
+    const found = ownValue(scope, name, span, new Set(), excluded);
     if (found) return found;
   }
   if (module.isStd) {
@@ -1079,22 +1084,34 @@ function resolveAbsolute(
     : ownValue(module, last, span, new Set())?.binding;
 }
 
-function ownType(module: Module, name: string, span: Span, visiting: Set<Module>): Entry<TypeBinding> | undefined {
+function ownType(
+  module: Module,
+  name: string,
+  span: Span,
+  visiting: Set<Module>,
+  excluded?: Import
+): Entry<TypeBinding> | undefined {
   const own = module.types.get(name);
   if (own) return own;
   const imported = module.imports.get(name);
-  if (imported) {
+  if (imported && imported !== excluded) {
     resolveImport(module, imported);
     if (imported.types) return imported.types;
   }
   return fromGlobs(module, name, span, visiting, 'type') as Entry<TypeBinding> | undefined;
 }
 
-function ownValue(module: Module, name: string, span: Span, visiting: Set<Module>): Entry<ValueBinding> | undefined {
+function ownValue(
+  module: Module,
+  name: string,
+  span: Span,
+  visiting: Set<Module>,
+  excluded?: Import
+): Entry<ValueBinding> | undefined {
   const own = module.values.get(name);
   if (own) return own;
   const imported = module.imports.get(name);
-  if (imported) {
+  if (imported && imported !== excluded) {
     resolveImport(module, imported);
     if (imported.values) return imported.values;
   }
@@ -1208,7 +1225,7 @@ function resolveImport(module: Module, entry: Import): void {
     } else if (path.length === 1 && EXTERN_CRATES.has(last)) {
       entry.types = { binding: { kind: 'mod', module: module.program.std }, visibleWithin: entry.visibleWithin };
     } else {
-      const { types, values } = resolveImportedName(path, module, span);
+      const { types, values } = resolveImportedName(module, entry);
       if (!types && !values) {
         compileError(span, `use ${path.join('::')} の ${last} が見つかりません。`);
       }
@@ -1237,15 +1254,14 @@ function builtinStruct(module: Module, name: string): BuiltinAdt | undefined {
 }
 
 function resolveImportedName(
-  path: string[],
   module: Module,
-  span: Span
+  entry: Import
 ): { types?: Entry<TypeBinding>; values?: Entry<ValueBinding> } {
+  const { path, span } = entry;
   const last = path.at(-1) as string;
   const parent = path.length > 1 ? resolveTypePath(path.slice(0, -1), module, span) : undefined;
   if (!parent) {
-    const scope = module.lexicalParent ?? module;
-    return { types: lookupTypeEntry(scope, last, span), values: lookupValueEntry(scope, last, span) };
+    return { types: lookupTypeEntry(module, last, span, entry), values: lookupValueEntry(module, last, span, entry) };
   }
   if (parent.kind === 'mod') {
     const typeEntry = ownType(parent.module, last, span, new Set());

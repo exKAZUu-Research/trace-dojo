@@ -2,7 +2,6 @@ import { type Annotations, type FnContext, type LocalVar } from './annotations';
 import type { Expr, MacroCall, Pattern, Span } from './ast';
 import { forEachDirect, patternBindingParts } from './astWalk';
 import type { Checker } from './checker';
-import { writtenCallParams } from './checkerCalls';
 import { checkPattern } from './checkerPatterns';
 import { normalize } from './infer';
 import { compileError } from './items';
@@ -127,17 +126,13 @@ class CaptureUses {
   }
 
   private visitCall(expr: Extract<Expr, { kind: 'call' | 'methodCall' }>): void {
-    let params: Type[] | undefined;
     if (expr.kind === 'methodCall') {
       const method = this.annotations.methods.get(expr);
       this.visit(expr.receiver, method?.fn.selfMode === 'value' && method.receiver.autoref === 'none');
-      params = method?.fn.paramTypes;
     } else {
       this.visit(expr.callee, false);
-      const res = this.annotations.paths.get(expr.callee);
-      const callee = callableType(expr.callee.ty ?? UNIT);
-      params = res?.kind === 'fn' ? writtenCallParams(res.fn) : callee;
     }
+    const params = this.annotations.callParams.get(expr);
     for (const [index, arg] of expr.args.entries()) {
       const written = params?.[index];
       const param = written && normalize(shallow(written));
@@ -174,15 +169,6 @@ class CaptureUses {
     const t = resolve(type);
     return (t.kind === 'var' && !t.v.literal) || this.solver.isCopy(t);
   };
-}
-
-function callableType(type: Type): Type[] | undefined {
-  const t = normalize(shallow(type));
-  if (t.kind === 'ref') return callableType(t.target);
-  if (t.kind === 'adt' && t.def.builtin === 'Box') return callableType(t.args[0]);
-  if (t.kind === 'fn') return t.params;
-  if (t.kind === 'closure') return t.closure.params;
-  return undefined;
 }
 
 /** Whether a pattern takes a part of what it matches by value that is not `Copy`, which moves it. */

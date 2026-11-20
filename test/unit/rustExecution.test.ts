@@ -3411,3 +3411,35 @@ test('clones owned Rust iterator sources and peeked items with their own types',
       '[(0, 7), (1, 8)] [(0, 7), (1, 8)]\n',
   });
 });
+
+test('reborrows Rust closure captures for generic and boxed callable arguments', () => {
+  const wrap = `let mut value = 0;
+    let reference = &mut value;
+    let mut run = || callback(reference);
+    run();
+    run();
+    println!("{}", value);`;
+  for (const kind of ['Fn', 'FnMut']) {
+    const header = kind === 'FnMut' ? 'mut callback' : 'callback';
+    const program = rustMain('wrap(|value| *value += 1);', `fn wrap<F: ${kind}(&mut i32)>(${header}: F) { ${wrap} }`);
+    expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '2\n' });
+  }
+  const boxed = rustMain(`let callback: Box<dyn Fn(&mut i32)> = Box::new(|value: &mut i32| *value += 1); ${wrap}`);
+  expect(executeProgram('rust', boxed)).toMatchObject({ kind: 'executed', stdout: '2\n' });
+});
+
+test('imports Rust block items and aliases through their lexical scopes', () => {
+  const program = rustMain(`use String as Text;
+    use Text as Label;
+    struct Pair(i32);
+    use Pair as Local;
+    {
+      use Label as Caption;
+      use Local as Counter;
+      let count = Counter(3);
+      println!("{} {}", Caption::from("count"), count.0);
+    }`);
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'count 3\n' });
+  expect(executeProgram('rust', rustMain('struct Local; { pub use Local as Public; }')).kind).toBe('compileError');
+  expect(executeProgram('rust', rustMain('use B as A; use A as B;')).kind).toBe('compileError');
+});

@@ -1,7 +1,6 @@
 import type { Annotations, LocalVar } from './annotations';
 import type { Expr } from './ast';
 import { forEachDirect } from './astWalk';
-import { writtenCallParams } from './checkerCalls';
 import { normalize } from './infer';
 import { derefSteps, typeAfter } from './regions';
 import { shallow, type Type } from './types';
@@ -30,16 +29,15 @@ export function capturedPlaces(
       const projection = receiverProjection(annotations, expr, local);
       if (projection) {
         places.push(projection);
-        const method = annotations.methods.get(expr);
-        for (const [index, arg] of expr.args.entries()) visitArg(arg, method?.fn.paramTypes[index]);
+        const params = annotations.callParams.get(expr);
+        for (const [index, arg] of expr.args.entries()) visitArg(arg, params?.[index]);
         return;
       }
     }
     if (expr.kind === 'call') {
-      const res = annotations.paths.get(expr.callee);
-      const params = writtenCallParams(res?.kind === 'fn' ? res.fn : undefined);
+      const params = annotations.callParams.get(expr);
       visit(expr.callee);
-      for (const [index, arg] of expr.args.entries()) visitArg(arg, params[index]);
+      for (const [index, arg] of expr.args.entries()) visitArg(arg, params?.[index]);
       return;
     }
     const proj = fieldChain(annotations, expr, local);
