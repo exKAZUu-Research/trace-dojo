@@ -2,6 +2,15 @@ import { expect, test } from 'vitest';
 
 import { executeProgram } from '../../src/interpreter/program';
 
+test('a C header does not expose FILE in namespace std', () => {
+  const program = `#include <stdio.h>
+int main() { std::FILE* stream = stdout; }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 1, message: expect.stringContaining('FILE') }],
+  });
+});
+
 test.each([
   ['double value{source};', 'long double'],
   ['std::vector<double> values{source};', 'long double'],

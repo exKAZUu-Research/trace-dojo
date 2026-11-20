@@ -15,6 +15,16 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+test.each([
+  ['iostream', 'int a[] = {1, 2}, b[2]; std::partial_sum(a, a + 2, b); std::cout << b[1];', '3'],
+  ['iterator', 'int a[] = {3, 7, 9}; std::printf("%d", *std::find(a, a + 3, 7));', '7'],
+  ['cstdio', 'std::FILE* stream = stdout; std::fputs("ready", stream);', 'ready'],
+])('uses declarations exposed by the Apple SDK through <%s>', (header, body, stdout) => {
+  const program = `#include <${header}>
+int main() { ${body} }`;
+  expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+});
+
 test('allows const map keys and pointers to const set elements', () => {
   const program = `#include <iostream>
 #include <map>

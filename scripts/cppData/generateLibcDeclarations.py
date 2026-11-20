@@ -9,10 +9,12 @@ from pathlib import Path
 
 TREE_NODE = re.compile(r"^((?:[| ] )*)(?:\|-|`-)(\w+) (.*)")
 TYPE_NAME = re.compile(r"\b\w+\b")
-USING_SHADOW = re.compile(r" (Function|FunctionTemplate|Var) 0x\w+ '([^']+)'(?: '([^']+)')?")
+USING_SHADOW = re.compile(r" (\w+) 0x\w+ '([^']+)'(?: '([^']+)')?")
 NAMED_TAG = re.compile(r" (?:struct|class|union|enum) ([A-Za-z]\w*)(?: definition)?$")
 SEMANTIC_PARENT = re.compile(r"^0x\w+ parent 0x\w+")
 STD_FUNCTIONS = {"FunctionDecl", "FunctionTemplateDecl"}
+USING_FUNCTIONS = {"Function", "FunctionTemplate"}
+USING_TYPES = {"Typedef", "TypeAlias", "TypeAliasTemplate", "ClassTemplate", "CXXRecord", "Record", "Enum"}
 STD_OTHER_NAMES = {
     "ClassTemplateDecl", "ConceptDecl", "CXXRecordDecl", "EnumDecl", "NamespaceAliasDecl",
     "NamespaceDecl", "TypeAliasDecl", "TypeAliasTemplateDecl", "TypedefDecl", "VarDecl", "VarTemplateDecl",
@@ -73,7 +75,10 @@ def other_global_symbol(category, syntax):
         shadow = USING_SHADOW.search(syntax)
         if shadow:
             target, name, signature = shadow.groups()
-            return name, "var" if target == "Var" else "using", signature or ""
+            if target in USING_TYPES:
+                return name, "type", ""
+            if target == "Var" or target in USING_FUNCTIONS:
+                return name, "var" if target == "Var" else "using", signature or ""
     if category in {"RecordDecl", "CXXRecordDecl", "EnumDecl"}:
         tag = NAMED_TAG.search(syntax)
         if tag:
@@ -96,7 +101,10 @@ def std_nodes(tree):
                     shadow = USING_SHADOW.search(syntax)
                     if shadow:
                         target, imported, _ = shadow.groups()
-                        yield imported, "stdOther" if target == "Var" else "stdFunction"
+                        if target in USING_FUNCTIONS:
+                            yield imported, "stdFunction"
+                        elif target == "Var" or target in USING_TYPES:
+                            yield imported, "stdOther"
                 elif name and category in STD_FUNCTIONS:
                     yield name, "stdFunction"
                 elif name and category in STD_OTHER_NAMES:

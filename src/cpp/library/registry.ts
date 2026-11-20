@@ -247,8 +247,8 @@ export class Library {
   }
 
   std(name: string): Entity | undefined {
-    const visible = isVisible(name, this.headers, 'std');
-    const entity = visible ? this.stdNames.get(name) : undefined;
+    if (!isVisible(name, this.headers, 'std')) return undefined;
+    const entity = this.stdNames.get(name);
     const cOverload = this.cOverload(name);
     if (cOverload) {
       return { kind: 'functions', functions: [...(entity?.kind === 'functions' ? entity.functions : []), cOverload] };
@@ -261,7 +261,7 @@ export class Library {
       }
       return { kind: 'functions', functions: [...entity.functions, overload] };
     }
-    const feature = visible && Object.hasOwn(UNSUPPORTED_STD_NAMES, name) ? UNSUPPORTED_STD_NAMES[name] : undefined;
+    const feature = Object.hasOwn(UNSUPPORTED_STD_NAMES, name) ? UNSUPPORTED_STD_NAMES[name] : undefined;
     return entity ?? (feature ? { kind: 'unsupported', feature } : this.unsupportedCName(name));
   }
 
