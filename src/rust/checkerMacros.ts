@@ -67,6 +67,8 @@ function writeMacro(c: Checker, macro: Extract<MacroCall, { kind: 'write' }>): T
     );
   }
   if (isString || stream) checkWriterTrait(c, macro.target, stream ? 'io' : 'fmt');
+  const derefs = target.kind === 'ref' ? ([target.mutable ? 'mutRef' : 'ref'] as const) : [];
+  requireMutablePlace(c, macro.target, 'write! で書き込む', derefs);
   if (macro.format) formatArgs(c, macro.format);
   return c.program.builtinType('Result', [UNIT, c.program.builtinType(stream ? 'IoError' : 'FmtError')]);
 }
@@ -80,7 +82,6 @@ function checkWriterTrait(
   if (write.kind !== 'trait' || !traitInScope(c, write.def)) {
     compileError(target.span, `write! で書き込むには、use std::${module}::Write; を書いてください。`);
   }
-  requireMutablePlace(c, target.kind === 'ref' ? target.operand : target, 'write! で書き込む');
 }
 
 function assertEqMacro(c: Checker, macro: Extract<MacroCall, { kind: 'assertEq' }>): Type {

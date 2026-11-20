@@ -21,8 +21,13 @@ import {
 } from './types';
 
 /** Requires a place to be mutable: rooted in a `mut` variable or behind a `&mut` reference. */
-export function requireMutablePlace(c: Checker, place: Expr, purpose: string): void {
-  const root = placeRoot(c, place);
+export function requireMutablePlace(
+  c: Checker,
+  place: Expr,
+  purpose: string,
+  derefs: readonly ('ref' | 'mutRef' | 'own')[] = []
+): void {
+  const root = throughDerefs(c, place, derefs);
   if (root.kind === 'temporary') return;
   if (root.kind === 'sharedRef') {
     compileError(place.span, `& の参照の先は書き換えられません（${purpose}には &mut の参照が要ります）。`);
@@ -55,11 +60,7 @@ function placeRoot(
   switch (place.kind) {
     case 'path': {
       const res = c.annotations.paths.get(place);
-      if (res?.kind === 'local' || res?.kind === 'capture') {
-        const type = shallow(res.local.type);
-        void type;
-        return { kind: 'local', local: res.local };
-      }
+      if (res?.kind === 'local' || res?.kind === 'capture') return { kind: 'local', local: res.local };
       return { kind: 'temporary' };
     }
     case 'field': {
@@ -74,8 +75,8 @@ function placeRoot(
     case 'unary': {
       if (place.op !== '*') return { kind: 'temporary' };
       const type = normalize(shallow(place.operand.ty ?? UNIT));
-      if (type.kind === 'ref') return type.mutable ? { kind: 'mutRef' } : { kind: 'sharedRef' };
-      return placeRoot(c, place.operand);
+      const deref = type.kind === 'ref' ? (type.mutable ? 'mutRef' : 'ref') : 'own';
+      return throughDerefs(c, place.operand, [deref]);
     }
     case 'methodCall': {
       const type = normalize(shallow(place.ty ?? UNIT));
@@ -88,13 +89,14 @@ function placeRoot(
   }
 }
 
-function throughDerefs(c: Checker, operand: Expr, derefs: ('ref' | 'mutRef' | 'own')[]): ReturnType<typeof placeRoot> {
-  const lastRef = derefs.findLastIndex((step) => step !== 'own');
-  if (lastRef !== -1) {
-    if (derefs.slice(0, lastRef + 1).includes('ref')) return { kind: 'sharedRef' };
-    return { kind: 'mutRef' };
-  }
-  return placeRoot(c, operand);
+function throughDerefs(
+  c: Checker,
+  operand: Expr,
+  derefs: readonly ('ref' | 'mutRef' | 'own')[]
+): ReturnType<typeof placeRoot> {
+  if (derefs.includes('ref')) return { kind: 'sharedRef' };
+  const base = placeRoot(c, operand);
+  return base.kind !== 'sharedRef' && derefs.includes('mutRef') ? { kind: 'mutRef' } : base;
 }
 
 export function isPlaceExpr(c: Checker, expr: Expr): boolean {

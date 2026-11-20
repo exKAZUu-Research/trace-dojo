@@ -247,7 +247,7 @@ function requireCallableMut(c: Checker, expr: Extract<Expr, { kind: 'call' }>, k
     if (adjustment.derefs.includes('ref')) {
       compileError(callee.span, '& の参照を通して FnMut のクロージャは呼び出せません。');
     }
-    if (!adjustment.derefs.includes('mutRef')) requireMutablePlace(c, callee, 'FnMut のクロージャを呼び出す');
+    requireMutablePlace(c, callee, 'FnMut のクロージャを呼び出す', adjustment.derefs);
   });
 }
 
@@ -292,7 +292,7 @@ export function checkMethodCall(
     const written = typeArgsFor(c, own, expr.turbofish, expr.methodSpan, expr.method);
     found.typeArgs.splice(fn.parentParamCount, own.length, ...written);
   }
-  checkReceiverAdjust(c, expr, found.adjust);
+  checkReceiverAdjust(c, expr, found.adjust, fn.selfMode);
   const sig = c.instantiate(fn, found.typeArgs, expr.methodSpan);
   if (expr.args.length !== sig.params.length) {
     compileError(
@@ -389,20 +389,21 @@ function checkMoveOutOfRef(
 }
 
 /** `&mut self` methods need a mutable place: a `mut` variable, or a place reached through `&mut`. */
-function checkReceiverAdjust(c: Checker, expr: Extract<Expr, { kind: 'methodCall' }>, adjust: ReceiverAdjust): void {
-  const needsMut =
-    adjust.autoref === 'mut' || (adjust.autoref === 'none' && adjust.derefs.at(-1) === 'mutRef' && false);
-  if (!needsMut) return;
-  const lastRef = adjust.derefs.lastIndexOf('mutRef');
-  const sharedAfter = adjust.derefs.slice(lastRef + 1).includes('ref');
-  if (adjust.derefs.includes('ref') && (lastRef === -1 || sharedAfter)) {
+function checkReceiverAdjust(
+  c: Checker,
+  expr: Extract<Expr, { kind: 'methodCall' }>,
+  adjust: ReceiverAdjust,
+  mode: FnDef['selfMode']
+): void {
+  if (mode !== 'mutRef') return;
+  const derefs = adjust.autoref === 'none' ? [...adjust.derefs, 'mutRef' as const] : adjust.derefs;
+  if (derefs.includes('ref')) {
     compileError(
       expr.receiver.span,
       `& の参照を通しては、メソッド ${expr.method}（&mut self を受け取る）を呼べません（&mut の参照にしてください）。`
     );
   }
-  if (lastRef !== -1) return;
-  requireMutablePlace(c, expr.receiver, `メソッド ${expr.method} で書き換える`);
+  requireMutablePlace(c, expr.receiver, `メソッド ${expr.method} で書き換える`, derefs);
 }
 
 /** An array's `map` gives an array of its length, which the declaration on `[T]` cannot say. */

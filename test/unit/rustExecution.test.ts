@@ -1668,6 +1668,26 @@ fn main() {
   });
 });
 
+test('checks the entire Rust mutable dereference chain for writes', () => {
+  for (const input of [
+    'let mut x = 0; let r = &&mut x; **r = 1;',
+    'let mut x = 0; let r = &&mut x; let s = &mut **r; *s = 3;',
+    'let mut v = vec![0]; let r = &&mut v; r[0] = 1;',
+    'let mut v = vec![0]; let r = &&mut v; (*r).push(1);',
+    'use std::fmt::Write; let mut s = String::new(); write!(&s, "bad").unwrap();',
+  ])
+    expect(executeProgram('rust', rustMain(input))).toMatchObject({ kind: 'compileError' });
+
+  const valid = `use std::fmt::Write;
+fn write_it(target: &mut String) { writeln!(target, "hello").unwrap(); }
+fn main() {
+    let mut s = String::new();
+    write_it(&mut s);
+    print!("{}", s);
+}`;
+  expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: 'hello\n' });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {
