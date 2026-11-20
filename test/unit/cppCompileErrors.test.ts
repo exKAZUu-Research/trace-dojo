@@ -1263,9 +1263,14 @@ int main() { constexpr int n = ${callable}(1, 2); }`;
   }
 );
 
-test.each(['a[5].N', 'a[-1].N'])('rejects a static constant named through out-of-bounds element %s', (bound) => {
+test.each([
+  ['S a[2];', 'a[5].N'],
+  ['S a[2];', 'a[-1].N'],
+  ['static S a[2];', 'a[5].N'],
+  ['static S a[2];', 'a[-1].N'],
+])('rejects a static constant named through out-of-bounds element of %s %s', (declaration, bound) => {
   const program = `struct S { static const int N = 3; };
-int main() { S a[2]; int b[${bound}]; }`;
+int main() { ${declaration} int b[${bound}]; }`;
   expect(executeProgram('cpp', program)).toMatchObject({
     kind: 'compileError',
     diagnostics: [{ row: 1, message: expect.stringContaining('可変長配列') }],

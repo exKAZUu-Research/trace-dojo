@@ -1402,7 +1402,10 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       type,
       isLvalue: true,
       isXvalue: original.type.kind === 'array' && original.isXvalue,
-      staticAddress: pointer.staticAddress && offset.constant !== undefined,
+      staticAddress:
+        pointer.staticAddress &&
+        offset.constant !== undefined &&
+        (original.type.kind !== 'array' || designatesElement(original.type, offset)),
       constantDesignation:
         original.type.kind === 'array' && original.constantDesignation && designatesElement(original.type, offset),
       constantInitialization: hasConstantObject(constantLocation),
