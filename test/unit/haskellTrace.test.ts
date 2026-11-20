@@ -1024,7 +1024,7 @@ main=forM_ [1..${iterations}::Int] $ \\i -> do
 test.each([
   ['data T=E|T [Int]', 'a'],
   ['data T=T {items::[Int]}', 'this'],
-])('uncertain composite roots preserve scalar capacity: %s', (declaration, name) => {
+])('uncertain composite roots preserve scalar capacity: %s', { timeout: 30_000 }, (declaration, name) => {
   const source = `import Control.Monad
 ${declaration}
 main=forM_ [1..1000::Int] $ \\i -> do

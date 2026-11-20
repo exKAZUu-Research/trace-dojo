@@ -1,0 +1,16 @@
+stod: out of range stof: out of range stold: out of range
+1e-40 stof: out of range 1e-40
+4.94066e-324 stof: out of range 4.94066e-324
+1.4013e-45 1.4013e-45 1.4013e-45
+stod: out of range stof: out of range stold: out of range
+stod: out of range stof: out of range stold: out of range
+1e+39 stof: out of range 1e+39
+0x1.000002p-1 20 0x1.000002p+0
+2 cdcd
+ABBA
+11
+x
+yz
+
+abcdefghijkl
+10 3 10 0 13

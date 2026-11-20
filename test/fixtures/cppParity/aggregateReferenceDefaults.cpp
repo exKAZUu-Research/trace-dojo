@@ -1,0 +1,127 @@
+#include <array>
+#include <iostream>
+#include <stdexcept>
+
+struct DefaultRef { const int& value{7}; };
+
+struct Base {
+  ~Base() { std::cout << 'B'; }
+};
+struct Derived : Base {
+  Derived() {}
+
+  ~Derived() { std::cout << 'D'; }
+};
+struct ProtectedBase {
+protected:
+  ~ProtectedBase() {}
+};
+struct AllowedDestruction : ProtectedBase {};
+struct Ref { const Base& value; };
+struct WrappedArray { std::array<Ref, 2> elements; };
+struct Item {
+  Item(int number) : number(number) {}
+  int number;
+};
+struct ExplicitArrays {
+  std::array<Item, 1> nonempty;
+  std::array<Item, 0> empty;
+};
+class PrivateDefault {
+  PrivateDefault() {}
+public:
+  PrivateDefault(int number) : number(number) {}
+  int number;
+};
+class ProtectedDefault {
+protected:
+  ProtectedDefault() {}
+public:
+  ProtectedDefault(int number) : number(number) {}
+  int number;
+};
+struct AmbiguousDefault {
+  AmbiguousDefault() {}
+  AmbiguousDefault(int number = 0) : number(number) {}
+  int number;
+};
+struct Enclosed {
+  std::array<PrivateDefault, 1> first;
+  std::array<ProtectedDefault, 1> second;
+  AmbiguousDefault third[1];
+};
+struct LibraryArrays {
+  std::array<std::runtime_error, 1> errors;
+  std::array<std::pair<Item, int>, 1> values;
+  std::array<std::runtime_error, 0> empty;
+};
+struct DefaultBase { const Base& value{Derived{}}; };
+struct DefaultDerived { const Derived& value{Derived{}}; };
+
+void take(Ref value) { std::cout << 'T'; }
+
+Ref namedReturn() {
+  Ref result{Derived{}};
+  return result;
+}
+Ref directReturn() { return Ref{Derived{}}; }
+Ref bracedReturn() { return {Derived{}}; }
+Ref conditionalReturn(bool flag) { return flag ? Ref{Derived{}} : Ref{Derived{}}; }
+std::array<Ref, 1> arrayReturn() {
+  std::array<Ref, 1> result{Ref{Derived{}}};
+  return result;
+}
+WrappedArray wrappedReturn() {
+  WrappedArray result{{Ref{Derived{}}, Ref{Derived{}}}};
+  return result;
+}
+
+int main() {
+  AllowedDestruction allowed;
+  DefaultRef first{};
+  DefaultRef second{9};
+  std::cout << first.value << second.value;
+  {
+    Ref direct{Derived{}};
+    Ref braced{{Derived{}}};
+    std::cout << 'X';
+  }
+  std::cout << 'Y';
+  {
+    DefaultBase base{};
+    DefaultDerived derived{};
+    std::cout << 'Z';
+  }
+  {
+    DefaultBase builtIn[2]{};
+    std::array<DefaultDerived, 2> library{};
+    DefaultBase explicitBuiltIn[2]{{}, {}};
+    std::array<DefaultDerived, 2> explicitLibrary{{{}, {}}};
+    std::cout << 'A';
+  }
+  take(Ref{Derived{}});
+  static_cast<void>(Ref{Derived{}});
+  std::cout << 'Q';
+  Ref* heap = new Ref{Derived{}};
+  std::cout << 'H';
+  delete heap;
+  Ref named = namedReturn();
+  std::cout << 'N';
+  Ref direct = directReturn();
+  std::cout << 'R';
+  Ref braced = bracedReturn();
+  std::cout << 'L';
+  Ref branch = conditionalReturn(true);
+  std::cout << 'C';
+  auto array = arrayReturn();
+  std::cout << 'A';
+  auto wrapped = wrappedReturn();
+  std::cout << 'W';
+  ExplicitArrays withItems{{Item(7)}, {}};
+  std::cout << withItems.nonempty[0].number << withItems.empty.size();
+  Enclosed enclosed{{PrivateDefault(7)}, {ProtectedDefault(8)}, {AmbiguousDefault(9)}};
+  std::cout << enclosed.first[0].number << enclosed.second[0].number << enclosed.third[0].number;
+  LibraryArrays library{{std::runtime_error("message")}, {std::pair<Item, int>{Item(7), 8}}, {}};
+  std::cout << library.errors[0].what() << library.values[0].first.number
+            << library.values[0].second << library.empty.size();
+}

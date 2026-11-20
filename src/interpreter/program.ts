@@ -1,6 +1,9 @@
 import { executeCProgram } from '../c/execute';
 import { findCTraceAnnotations } from '../c/parse';
 import { traceCProgram } from '../c/trace';
+import { executeCppProgram } from '../cpp/execute';
+import { findCppTraceAnnotations } from '../cpp/parse';
+import { traceCppProgram } from '../cpp/trace';
 import { executeDartProgram } from '../dart/execute';
 import { findDartTraceAnnotations } from '../dart/parse';
 import { traceDartProgram } from '../dart/trace';
@@ -23,6 +26,9 @@ import { tracePythonProgram } from '../python/trace';
 import { findRubyTraceAnnotations } from '../ruby/parse';
 import { executeRubyProgram } from '../ruby/run';
 import { traceRubyProgram } from '../ruby/trace';
+import { executeZigProgram } from '../zig/execute';
+import { findZigTraceAnnotations } from '../zig/parse';
+import { traceZigProgram } from '../zig/trace';
 import type { SourceDiagnostic } from './diagnostics';
 import type { ExecutionLimitError } from './limits';
 import type { ProgramInput, ProgramOutput } from './programIo';
@@ -83,6 +89,8 @@ const interpreters = {
     execute: executeRubyProgram,
   },
   c: { findTraceAnnotations: findCTraceAnnotations, record: traceCProgram, execute: executeCProgram },
+  cpp: { findTraceAnnotations: findCppTraceAnnotations, record: traceCppProgram, execute: executeCppProgram },
+  zig: { findTraceAnnotations: findZigTraceAnnotations, record: traceZigProgram, execute: executeZigProgram },
   dart: { findTraceAnnotations: findDartTraceAnnotations, record: traceDartProgram, execute: executeDartProgram },
   haskell: {
     findTraceAnnotations: findHaskellTraceAnnotations,

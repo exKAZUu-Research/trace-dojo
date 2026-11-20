@@ -1,0 +1,263 @@
+import type { Node } from '@willbooster/web-tree-sitter';
+
+import { CompileError } from '../interpreter/diagnostics';
+import type { ExecutionBudget } from '../interpreter/limits';
+import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
+import { decodeIdentifierBytes } from './utf8';
+
+function fail(node: Node, message: string): never {
+  throw new CompileError([{ row: node.startPosition.row, message }]);
+}
+
+export function validateCommentText(root: Node, source: string, budget: ExecutionBudget): void {
+  const pending = [root];
+  budget.spend();
+  while (pending.length > 0) {
+    const node = pending.pop() as Node;
+    if (node.type === 'comment' || node.type === 'doc_comment' || node.type === 'container_doc_comment') {
+      const end = node.endIndex;
+      budget.spend(end - node.startIndex);
+      const text = node.text;
+      const content = text.endsWith('\r') && source[end] === '\n' ? text.slice(0, -1) : text;
+      validateRawText(content.replaceAll(/\r?\n/g, ''), node);
+    } else {
+      budget.spend(node.namedChildCount);
+      for (const child of node.namedChildren) pending.push(child);
+    }
+  }
+}
+
+export class LiteralDecoder {
+  private allocated = 0;
+
+  constructor(private readonly budget: ExecutionBudget) {}
+
+  decodeIdentifier(node: Node): string {
+    if (!node.text.startsWith('@')) return node.text;
+    const bytes = this.decodeQuoted(node);
+    if (bytes.length === 0) fail(node, '名前を空にはできません。');
+    this.budget.spend(bytes.length);
+    if (bytes.includes(0)) fail(node, '名前に NUL 文字は使えません。');
+    return decodeIdentifierBytes(bytes, (cost) => this.budget.spend(cost));
+  }
+
+  decodeString(node: Node): number[] {
+    if (node.type !== 'multiline_string') return this.decodeQuoted(node);
+    const bytes: number[] = [];
+    let first = true;
+    this.budget.spend(node.endIndex - node.startIndex);
+    for (const line of node.text.split(/\r?\n/)) {
+      this.budget.spend();
+      const prefix = /^[ \t]*\\\\/.exec(line);
+      if (!prefix) continue;
+      this.budget.spend(prefix[0].length);
+      if (!first) this.appendBytes(bytes, [10]);
+      first = false;
+      this.appendText(bytes, line.slice(prefix[0].length), node);
+    }
+    return bytes;
+  }
+
+  decodeCharacter(node: Node): bigint {
+    this.budget.spend(node.namedChildCount);
+    const content = node.namedChildren.find(
+      (part) => part.type === 'character_content' || part.type === 'escape_sequence'
+    );
+    if (!content) fail(node, '文字のリテラルが空です。');
+    const text = content.text;
+    this.budget.spend(text.length * 2);
+    validateRawText(text, content);
+    return BigInt(content.type === 'escape_sequence' ? escapeValue(text, content) : (text.codePointAt(0) as number));
+  }
+
+  private decodeQuoted(node: Node): number[] {
+    const bytes: number[] = [];
+    this.budget.spend(node.namedChildCount);
+    for (const part of node.namedChildren) {
+      if (part.type === 'string') return this.decodeQuoted(part);
+      if (part.type === 'string_content') this.appendText(bytes, part.text, part);
+      else if (part.type === 'escape_sequence') {
+        const text = part.text;
+        this.budget.spend(text.length * 2);
+        validateRawText(text, part);
+        this.appendBytes(bytes, escapeBytes(text, part, true));
+      }
+    }
+    return bytes;
+  }
+
+  private appendText(bytes: number[], text: string, node: Node): void {
+    if (this.allocated + text.length > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
+    this.budget.spend(text.length);
+    const length = validateRawText(text, node);
+    this.reserve(length);
+    this.budget.spend(text.length + length);
+    for (const byte of new TextEncoder().encode(text)) bytes.push(byte);
+  }
+
+  private appendBytes(bytes: number[], decoded: readonly number[]): void {
+    this.reserve(decoded.length);
+    this.budget.spend(decoded.length);
+    for (const byte of decoded) bytes.push(byte);
+  }
+
+  private reserve(length: number): void {
+    this.allocated += length;
+    if (this.allocated > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
+  }
+}
+
+function validateRawText(text: string, node: Node): number {
+  let length = 0;
+  for (const character of text) {
+    const code = character.codePointAt(0) as number;
+    if (code < 0x20 || code === 0x7f) fail(node, 'そのまま書けない制御文字があります。');
+    length += code <= 0x7f ? 1 : code <= 0x7_ff ? 2 : code <= 0xff_ff ? 3 : 4;
+  }
+  return length;
+}
+
+/** The bytes an escape sequence stands for in a string: `\u{...}` is UTF-8 encoded. */
+function escapeBytes(text: string, node: Node, inString: boolean): number[] {
+  if (text.startsWith(String.raw`\u`)) {
+    const value = escapeValue(text, node);
+    if (inString && value >= 0xd8_00 && value <= 0xdf_ff) {
+      fail(node, String.raw`\u{...} のコードポイントが、Unicode の文字として正しくありません。`);
+    }
+    return [...new TextEncoder().encode(String.fromCodePoint(value))];
+  }
+  return [escapeValue(text, node)];
+}
+
+function escapeValue(text: string, node: Node): number {
+  const kind = text[1];
+  switch (kind) {
+    case 'n': {
+      return 0x0a;
+    }
+    case 'r': {
+      return 0x0d;
+    }
+    case '\\': {
+      return 0x5c;
+    }
+    case 't': {
+      return 0x09;
+    }
+    case "'": {
+      return 0x27;
+    }
+    case '"': {
+      return 0x22;
+    }
+    case 'x': {
+      if (!/^\\x[\da-f]{2}$/i.test(text))
+        fail(node, `エスケープ ${text} が正しくありません（\\x の後には16進数を2桁書きます）。`);
+      return Number.parseInt(text.slice(2), 16);
+    }
+    case 'u': {
+      const match = /^\\u\{([\da-f]{1,6})\}$/i.exec(text);
+      if (!match) fail(node, `エスケープ ${text} が正しくありません（\\u{3042} のように書きます）。`);
+      const value = Number.parseInt(match[1], 16);
+      if (value > 0x10_ff_ff) fail(node, String.raw`\u{...} のコードポイントが大きすぎます。`);
+      return value;
+    }
+    default: {
+      return fail(node, `エスケープ ${text} は使えません。`);
+    }
+  }
+}
+
+/** An integer literal's value, rejecting what `std.zig.number_literal` rejects. */
+export function parseIntegerText(text: string, node: Node, budget: ExecutionBudget): bigint {
+  budget.spend(text.length);
+  checkNumber(text, node);
+  const clean = text.replaceAll('_', '');
+  checkIntegerMagnitude(clean);
+  return BigInt(clean);
+}
+
+/** Checks a float literal as `std.zig.number_literal` does. */
+export function parseFloatText(text: string, node: Node, budget: ExecutionBudget): void {
+  budget.spend(text.length);
+  checkNumber(text, node);
+}
+
+let integerDecimalLimit: string | undefined;
+
+function checkIntegerMagnitude(text: string): void {
+  const base = text.startsWith('0x') ? 16 : text.startsWith('0o') ? 8 : text.startsWith('0b') ? 2 : 10;
+  const digits = (base === 10 ? text : text.slice(2)).replace(/^0+/, '');
+  if (!digits) return;
+  if (base !== 10) {
+    const bits = (digits.length - 1) * Math.log2(base) + Math.floor(Math.log2(Number.parseInt(digits[0], base))) + 1;
+    if (bits > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
+    return;
+  }
+  const boundaryLength = Math.floor(LIMITS.maxSlots * Math.log10(2)) + 1;
+  if (digits.length < boundaryLength) return;
+  if (digits.length > boundaryLength) throw new ExecutionLimitError('storage');
+  integerDecimalLimit ??= (1n << BigInt(LIMITS.maxSlots)).toString();
+  if (digits >= integerDecimalLimit) throw new ExecutionLimitError('storage');
+}
+
+function checkNumber(text: string, node: Node): void {
+  let index = 0;
+  let base = 10;
+  if (text.length >= 2 && text[0] === '0') {
+    const second = text[1];
+    if (second === 'b' || second === 'o' || second === 'x') {
+      base = second === 'b' ? 2 : second === 'o' ? 8 : 16;
+      index = 2;
+    } else if (second === 'B' || second === 'O' || second === 'X') {
+      fail(node, `数 '${text}' の基数の記号は小文字で書いてください。`);
+    } else if (second !== '.' && second !== 'e' && second !== 'E') {
+      fail(node, `数 '${text}' の先頭に 0 があります（8進数は 0o で始めます）。`);
+    }
+  }
+  if (text.length === 2 && base !== 10) fail(node, `数 '${text}' の基数の記号の後に数字がありません。`);
+  let underscore = false;
+  let special = '';
+  let exponent = false;
+  for (; index < text.length; index++) {
+    const char = text[index];
+    if (char === '_') {
+      if (special !== '' || underscore || (index === 2 && base !== 10))
+        fail(node, `数 '${text}' の _ の位置が正しくありません。`);
+      underscore = true;
+      continue;
+    }
+    if ((char === 'e' || char === 'E') && base === 10) {
+      if (exponent || underscore) fail(node, `数 '${text}' の書き方が正しくありません。`);
+      special = char;
+      exponent = true;
+      continue;
+    }
+    if ((char === 'p' || char === 'P') && base === 16) {
+      if (exponent || underscore) fail(node, `数 '${text}' の書き方が正しくありません。`);
+      special = char;
+      exponent = true;
+      continue;
+    }
+    if (char === '.') {
+      if (exponent || underscore) fail(node, `数 '${text}' の書き方が正しくありません。`);
+      if (base !== 10 && base !== 16) fail(node, `数 '${text}' の基数では小数を書けません。`);
+      special = char;
+      continue;
+    }
+    if (char === '+' || char === '-') {
+      if (!(special === 'p' || special === 'P' || ((special === 'e' || special === 'E') && base === 10))) {
+        fail(node, `数 '${text}' の符号の位置が正しくありません。`);
+      }
+      special = char;
+      continue;
+    }
+    const digit = Number.parseInt(char, 36);
+    if (Number.isNaN(digit)) fail(node, `数 '${text}' に使えない文字があります。`);
+    if (digit >= base || (exponent && digit >= 10))
+      fail(node, `数 '${text}' に、基数 ${base} では使えない数字があります。`);
+    underscore = false;
+    special = '';
+  }
+  if (underscore || special !== '') fail(node, `数 '${text}' の終わり方が正しくありません。`);
+}
