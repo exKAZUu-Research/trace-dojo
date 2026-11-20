@@ -5299,6 +5299,15 @@ test('gc_collect_cycles() frees a destructed object whose only holder the rerun 
   ).toMatchObject({ kind: 'executed', stdout: 'dM\ndN\nint(2)\nint(2)\nint(0)\n' });
 });
 
+test('converting "-0" to float keeps the sign of zero, as strtod does', () => {
+  expect(
+    run('<?php var_dump((float)"-0", floatval("-0"), (float)"-0abc", "-0" + 0.0, round("-0")); echo (float)"-0";')
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'float(-0)\nfloat(-0)\nfloat(-0)\nfloat(0)\nfloat(0)\n-0',
+  });
+});
+
 test('a class whose override names a later class is declared when its statement runs', () => {
   expect(
     run(

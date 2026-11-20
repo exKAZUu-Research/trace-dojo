@@ -178,7 +178,10 @@ export function toFloat(value: Value, reportWarning = warn): number {
     }
     case 'string': {
       const prefix = numericPrefix(value);
-      return prefix ? Number(prefix.value) : 0;
+      if (!prefix) return 0;
+      const number = Number(prefix.value);
+      // PHP converts with strtod on the text, which keeps the sign of a zero such as "-0".
+      return number === 0 && /^[ \t\n\r\v\f]*-/.test(value) ? -0 : number;
     }
   }
   if (value instanceof PhpArray) return value.size > 0 ? 1 : 0;
