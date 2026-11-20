@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import fs from 'node:fs';
+import path from 'node:path';
 
 import { z } from 'zod';
 
@@ -56,15 +57,7 @@ export function runExecuteOnLargeStack(
   remainingMs: number,
   input?: ProgramInput
 ): ProgramExecution | undefined {
-  return runOnLargeStack<ProgramExecution>(
-    {
-      mode: 'execute',
-      entryPath: fileURLToPath(new URL('run.ts', import.meta.url)),
-      source,
-      input,
-    },
-    remainingMs
-  );
+  return runOnLargeStack<ProgramExecution>('run.ts', { mode: 'execute', source, input }, remainingMs);
 }
 
 export function runTraceOnLargeStack(
@@ -74,35 +67,37 @@ export function runTraceOnLargeStack(
   input?: ProgramInput
 ): ProgramRecording | undefined {
   return runOnLargeStack<ProgramRecording>(
-    {
-      mode: 'trace',
-      entryPath: fileURLToPath(new URL('trace.ts', import.meta.url)),
-      source: program,
-      atomicAnnotations: [...trace.atomicAnnotations.entries()],
-      input,
-    },
+    'trace.ts',
+    { mode: 'trace', source: program, atomicAnnotations: [...trace.atomicAnnotations.entries()], input },
     remainingMs
   );
 }
 
-function runOnLargeStack<T>(payload: Record<string, unknown>, remainingMs: number): T | undefined {
+function runOnLargeStack<T>(entryFile: string, payload: Record<string, unknown>, remainingMs: number): T | undefined {
   if (process.env[LARGE_STACK_ENV] === '1') return undefined;
   const timeout = Math.floor(remainingMs);
   if (timeout <= 0) throw new ExecutionLimitError('time');
-  const completed = spawnSync('bun', ['-e', HELPER_SOURCE], {
-    input: JSON.stringify(payload),
-    encoding: 'utf8',
-    env: { ...process.env, [LARGE_STACK_ENV]: '1', [REMAINING_MS_ENV]: String(timeout) },
-    timeout,
-    maxBuffer: 64 * 1024 * 1024,
-  });
-  if ((completed.error as NodeJS.ErrnoException | undefined)?.code === 'ETIMEDOUT')
-    throw new ExecutionLimitError('time');
-  if (completed.status !== 0 || !completed.stdout) return undefined;
-  const parsed = serializedResultSchema.safeParse(JSON.parse(completed.stdout));
-  if (!parsed.success) return undefined;
-  if (!parsed.data.ok) throw new ExecutionLimitError(parsed.data.limit);
-  return decodeValue(parsed.data.value) as T;
+  try {
+    const entryPath = path.resolve(process.cwd(), 'src', 'php', entryFile);
+    if (!fs.existsSync(entryPath)) return undefined;
+    const completed = spawnSync('bun', ['-e', HELPER_SOURCE], {
+      input: JSON.stringify({ ...payload, entryPath }),
+      encoding: 'utf8',
+      env: { ...process.env, [LARGE_STACK_ENV]: '1', [REMAINING_MS_ENV]: String(timeout) },
+      timeout,
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    if ((completed.error as NodeJS.ErrnoException | undefined)?.code === 'ETIMEDOUT')
+      throw new ExecutionLimitError('time');
+    if (completed.status !== 0 || !completed.stdout) return undefined;
+    const parsed = serializedResultSchema.safeParse(JSON.parse(completed.stdout));
+    if (!parsed.success) return undefined;
+    if (!parsed.data.ok) throw new ExecutionLimitError(parsed.data.limit);
+    return decodeValue(parsed.data.value) as T;
+  } catch (error) {
+    if (error instanceof ExecutionLimitError) throw error;
+    return undefined;
+  }
 }
 
 function decodeValue(value: unknown): unknown {
