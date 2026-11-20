@@ -16,6 +16,7 @@ import {
   interfaceType,
   isSubtype,
   mentionsTypeParams,
+  objectType,
   substitute,
   TypeParam,
   typeParamType,
@@ -468,7 +469,7 @@ export class Runtime implements TracedRuntime<Frame> {
     args: Arguments,
     typeArgs: readonly DartType[]
   ): DartObject {
-    const named = this.links.newMap(this, interfaceType(this.links.classNamed('Symbol')), { kind: 'dynamic' }, false);
+    const named = this.links.newMap(this, interfaceType(this.links.classNamed('Symbol')), objectType(true), false);
     for (const [key, value] of args.named ?? []) {
       this.invoke(
         named,
@@ -481,7 +482,7 @@ export class Runtime implements TracedRuntime<Frame> {
     return this.links.construct(this, '_InvocationMirror', '_', [
       name,
       BigInt(['method', 'getter', 'setter'].indexOf(kind)),
-      new DartList(coreTypes.list, { kind: 'dynamic' }, [...args.positional], false, true),
+      new DartList(coreTypes.list, objectType(true), [...args.positional], false, true),
       named,
       new DartList(
         coreTypes.list,

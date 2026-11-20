@@ -409,6 +409,17 @@ test('extensible SDK classes allow subclasses and implementations', () => {
 class Location extends Point<int> { Location() : super(1, 2); }
 abstract class Coordinates implements Point<int> {}
 abstract class Call implements Invocation {}
+class LocalCall extends Invocation {
+  Symbol get memberName => #hello;
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+class Handler {
+  dynamic noSuchMethod(Invocation invocation) {
+    print(invocation.namedArguments.runtimeType);
+    print(invocation.namedArguments);
+    try { invocation.namedArguments[#added] = 2; } catch (error) { print(error); }
+  }
+}
 class Wait extends Duration { const Wait() : super(seconds: 5); }
 class Message extends StringBuffer { Message() : super('hello'); }
 void main() {
@@ -417,8 +428,20 @@ void main() {
   StringSink sink = Message();
   sink.write(' world');
   print(sink);
+  print(LocalCall().memberName);
+  dynamic handler = Handler();
+  handler.missing(a: 1);
+  handler.missingGetter;
 }`;
-  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'Point(1, 2)\n5\nhello world\n' });
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'Point(1, 2)\n5\nhello world\nSymbol("hello")\nUnmodifiableMapView<Symbol, Object?>\n{Symbol("a"): 1}\nUnsupported operation: Cannot modify unmodifiable map\n_ConstMap<Symbol, Object?>\n{}\nUnsupported operation: Cannot modify unmodifiable map\n',
+  });
+  for (const name of ['Comparable<int>', 'Type']) {
+    const invalid = `abstract class Invalid extends ${name} {} void main() {}`;
+    expect(executeProgram('dart', invalid)).toMatchObject({ kind: 'compileError' });
+  }
 });
 
 test('a parameter can only narrow an override when explicitly covariant', () => {
@@ -538,7 +561,17 @@ void main() {
   if (view case [var head, ..., var tail]) print(head + tail);
   if (view case [_, ...var middle, _]) print(middle);
   print(utf8.decode(view));
+  print(utf8.encode('aé😀\uD800'));
+  print(utf8.encoder.convert('a😀b', 1, 2));
+  print(utf8.encoder.convert('a😀b', 1, 3));
+  print(utf8.decoder.convert(view, 1, 3));
+  print(Utf8Decoder(allowMalformed: true).convert([65, 255, 66], 1, 2));
+  try { utf8.decoder.convert([65, 255, 66], 1, 2); } catch (error) { print(error); }
+  try { utf8.encoder.convert('a', 0, 2); } catch (error) { print(error); }
   print(base64.encode(view));
+  print(base64.encoder.convert([65]));
+  print(base64Url.encoder.convert([255]));
+  print(base64.decoder.convert('xxQQ==yy', 2, 6));
   for (var illegal in [[256], [65, -1]]) {
     try { print(base64.encode(illegal)); } catch (e) { print(e); }
   }
@@ -555,7 +588,17 @@ void main() {
       '132',
       '[66]',
       'ABC',
+      '[97, 195, 169, 240, 159, 152, 128, 239, 191, 189]',
+      '[239, 191, 189]',
+      '[240, 159, 152, 128]',
+      'BC',
+      '�',
+      'FormatException: Invalid UTF-8 byte (at offset 1)',
+      'RangeError (end): Invalid value: Not in inclusive range 0..1: 2',
       'QUJD',
+      'QQ==',
+      '_w==',
+      '[65]',
       "Invalid argument (Not a byte value at index 0: 0x100): Instance(length:1) of '_GrowableList'",
       "Invalid argument (Not a byte value at index 1: 0x-1): Instance(length:2) of '_GrowableList'",
       'xxSGk=yy',
@@ -568,6 +611,23 @@ void main() {
       '',
       '',
     ].join('\n'),
+  });
+  const oversized = "import 'dart:convert'; void main() { print(utf8.encode('é' * 500000).length); }";
+  expect(executeProgram('dart', oversized)).toMatchObject({ kind: 'limitExceeded', limit: 'storage' });
+});
+
+test('Base64 encoding and normalization apply the full output limit', () => {
+  const program = `import 'dart:convert';
+void main() {
+  var bytes = List<int>.filled(750001, 0);
+  try { print(base64Url.encode(bytes).length); } catch (error) { print(error); }
+  var text = 'AA' + 'x' * 999998;
+  try { print(base64.normalize(text, 0, 2).length); } catch (error) { print(error); }
+  print(base64.normalize(text.substring(0, text.length - 2), 0, 2).length);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'Out of Memory\nOut of Memory\n1000000\n',
   });
 });
 
@@ -912,6 +972,9 @@ extension Generic<T> on T { String get kind => 'generic'; }
 extension Specific on String { String get kind => 'specific'; }
 extension All<T> on List<T> { String get tag => 'all'; }
 extension Numbers<T extends num> on List<T> { String get tag => 'numbers'; int size() => length; }
+extension Defaults<T, U extends T, V extends X, X extends List<T>, Y> on List<T> {
+  (Type, Type, Type) get defaults => (U, V, Y);
+}
 extension ListType<T> on List<T> {
   Type get item => T;
   Type read() => T;
@@ -944,10 +1007,12 @@ void main() {
   final values = [1];
   print([values.firstValue is int Function(), values.echo.runtimeType]);
   print([values.tag, ['x'].tag]);
+  print(values.defaults);
 }`;
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
-    stdout: '[a, b, specific]\nB:direct\nA:a!\n[2, 9]\n[1, 6]\n(int, int)\n[true, (int) => int]\n[numbers, all]\n',
+    stdout:
+      '[a, b, specific]\nB:direct\nA:a!\n[2, 9]\n[1, 6]\n(int, int)\n[true, (int) => int]\n[numbers, all]\n(int, List<int>, dynamic)\n',
   });
 });
 
@@ -988,6 +1053,23 @@ int unlabeledContinue() {
 }
 void main() { print(value()); print(items().first); print(labeledContinue()); print(unlabeledContinue()); }`;
   expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '7\n8\n9\n10\n' });
+  for (const [condition, operator] of [
+    ['answer + 1 < 0', '+'],
+    ['answer < 0', '<'],
+    ['-answer < 0', 'unary-'],
+  ]) {
+    const skipped = `void check(bool skip) {
+  int answer;
+  outer: do { if (skip) continue outer; answer = 7; continue outer; } while (${condition});
+}
+void main() {
+  try { check(true); } catch (error) { print(error); }
+}`;
+    expect(executeProgram('dart', skipped)).toMatchObject({
+      kind: 'executed',
+      stdout: expect.stringContaining(`The method '${operator}' was called on null`),
+    });
+  }
 });
 
 test('patterns promote the subject in guarded cases and later alternatives', () => {
@@ -1008,16 +1090,26 @@ int afterSwitch(String? x) {
   return x.length;
 }
 int relational(int? x) => switch (x) { != null => x + 1, null => 0 };
+int combined(int? x) {
+  if (x case != null && > 0) return x + 1;
+  switch (x) { case 0 || null: return 0; }
+  return x + 1;
+}
+int alternative(int? x) {
+  if (x case null || >= 0) return 0;
+  return x - 1;
+}
 void main() {
   inspect(2);
   name(null);
   name('dart');
   print([length([]), length([42]), length(null)]);
   print([afterSwitch('dart'), afterSwitch(null), relational(2), relational(null)]);
+  print([combined(3), combined(null), combined(-3), alternative(null), alternative(-2)]);
 }`;
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
-    stdout: '3\n[3]\nmissing\nDART\n[0, 1, -1]\n[4, -1, 3, 0]\n',
+    stdout: '3\n[3]\nmissing\nDART\n[0, 1, -1]\n[4, -1, 3, 0]\n[4, 0, -2, 0, -3]\n',
   });
 });
 
@@ -1703,6 +1795,7 @@ class _RegExp implements Pattern {
 void main() {
   print(LineSplitter.split('a\r\n' + 'x' * 999997).first);
   print(LineSplitter.split('abc\r\n\rxy', 1, 7).toList());
+  print(const LineSplitter().convert('a\r\nb'));
   var matches = 'a'.allMatches('a' * 1000000);
   print([matches.first.start, matches.first.end]);
   print(''.allMatches('xy').map((match) => match.start).toList());
@@ -1710,7 +1803,39 @@ void main() {
 }`;
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
-    stdout: 'a\n[bc, , x]\n[0, 1]\n[0, 1, 2]\nba\n',
+    stdout: 'a\n[bc, , x]\n[a, b]\n[0, 1]\n[0, 1, 2]\nba\n',
+  });
+  const declarations = "import 'dart:convert';";
+  const subclass = `${declarations} class Splitter extends LineSplitter {} void main() {}`;
+  const converter = `${declarations} void main() { Converter<String, List<String>> c = LineSplitter(); }`;
+  expect(executeProgram('dart', subclass)).toMatchObject({ kind: 'compileError' });
+  expect(executeProgram('dart', converter)).toMatchObject({ kind: 'compileError' });
+});
+
+test('string pattern operations read the original match in SDK order', () => {
+  const program = `class Located implements Match {
+  int get start { print('start'); return 1; }
+  int get end { print('end'); return 2; }
+  String? operator [](int i) { print('group'); return 'B'; }
+  dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
+}
+class Finder implements Pattern {
+  Match? matchAsPrefix(String input, [int start = 0]) => start == 0 ? Located() : null;
+  Iterable<Match> allMatches(String input, [int start = 0]) => [Located()];
+}
+void main() {
+  final pattern = Finder();
+  print(['abc'.startsWith(pattern), 'abc'.indexOf(pattern), 'abc'.lastIndexOf(pattern), 'abc'.contains(pattern)]);
+  print('abc'.split(pattern));
+  print('abc'.splitMapJoin(pattern));
+  print('abc'.replaceFirstMapped(pattern, (match) { print('replace'); return 'x'; }));
+  print('abc'.replaceAllMapped(pattern, (match) { print('replace'); return 'x'; }));
+  print('a😀'.splitMapJoin('', onMatch: (match) => '|', onNonMatch: (text) => text.length.toString() + ','));
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[true, 0, 0, true]\nstart\nend\nstart\n[a, c]\nstart\ngroup\nend\naBc\nreplace\nstart\nend\naxc\nstart\nreplace\nend\naxc\n0,|1,|2,|0,\n',
   });
 });
 

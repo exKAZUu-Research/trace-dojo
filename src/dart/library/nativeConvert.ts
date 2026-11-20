@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 560 -- dart:convert's JSON, UTF-8, and Base64 codecs, each transcribed from the SDK.
+// code-gauge-allow-file fileNcss 580 -- dart:convert's JSON, UTF-8, and Base64 codecs, each transcribed from the SDK.
 import { LIMITS } from '../../interpreter/limits';
 import { formatDouble } from '../format';
 import { HashStore } from '../hashStore';
@@ -465,18 +465,39 @@ define('_jsonDecode', (runtime, _receiver, [source, reviver]) => {
 
 // UTF-8 and Base64
 
-define('_utf8Encode', (runtime, _receiver, [input]) => {
-  const bytes = new TextEncoder().encode(stringArg(runtime, input, 'input'));
-  return newList(runtime, interfaceType(coreTypes.int), [...bytes].map(BigInt), false);
+define('_utf8Encode', (runtime, _receiver, [input, start = 0n, end]) => {
+  const source = stringArg(runtime, input, 'input');
+  const [from, to] = conversionRange(runtime, BigInt(source.length), start, end);
+  const text = source.slice(from, to);
+  runtime.spend(Math.ceil(text.length / 64));
+  let size = 0;
+  for (const char of text) {
+    const code = char.codePointAt(0) as number;
+    size += code < 0x80 ? 1 : code < 0x8_00 ? 2 : code < 0x1_00_00 ? 3 : 4;
+  }
+  runtime.allocate(size + 1);
+  const bytes = new TextEncoder().encode(text);
+  const elements = Array.from(bytes, BigInt);
+  return new DartList(coreTypes.list, interfaceType(coreTypes.int), elements, false);
 });
-define('_utf8Decode', (runtime, _receiver, [codeUnits, allowMalformed]) => {
+define('_utf8Decode', (runtime, _receiver, [codeUnits, allowMalformed, start = 0n, end]) => {
   // The VM replaces values that are not bytes with 0xFF, which is invalid.
-  const bytes = readByteList(runtime, codeUnits, 'codeUnits', (value) =>
-    value >= 0n && value <= 0xffn ? Number(value) : 0xff
+  const bytes = readByteList(
+    runtime,
+    codeUnits,
+    'codeUnits',
+    (value) => (value >= 0n && value <= 0xffn ? Number(value) : 0xff),
+    [start, end]
   );
   if (allowMalformed === true) return new TextDecoder('utf-8').decode(bytes);
   const error = utf8Error(bytes);
-  if (error) return runtime.throwError('FormatException', '', [error.message, codeUnits, BigInt(error.offset)]);
+  if (error) {
+    return runtime.throwError('FormatException', '', [
+      error.message,
+      codeUnits,
+      BigInt(error.offset) + (start as bigint),
+    ]);
+  }
   return new TextDecoder('utf-8').decode(bytes);
 });
 
@@ -670,6 +691,7 @@ define('_base64Encode', (runtime, _receiver, [bytes, urlSafe]) => {
     return Number(value & 0xffn);
   });
   if (hasInvalid) invalidBase64Byte(runtime, bytes, data.length);
+  checkCodecStringLength(runtime, Math.ceil(data.length / 3) * 4);
   const text = Buffer.from(data).toString('base64');
   return urlSafe === true ? text.replaceAll('+', '-').replaceAll('/', '_') : text;
 });
@@ -678,14 +700,16 @@ function readByteList(
   runtime: Runtime,
   list: Value,
   parameter: string,
-  convert: (value: bigint) => number
+  convert: (value: bigint) => number,
+  range?: readonly [Value, Value]
 ): Uint8Array {
   const length = listLength(runtime, list);
   if (length < 0n) runtime.throwError('RangeError', 'range', [length, 0n, undefined, 'length']);
-  runtime.spend(1 + Number(length));
-  const bytes = new Uint8Array(Number(length));
+  const [start, end] = range ? conversionRange(runtime, length, ...range) : [0, Number(length)];
+  runtime.spend(1 + end - start);
+  const bytes = new Uint8Array(end - start);
   for (let position = 0; position < bytes.length; position++) {
-    bytes[position] = convert(intArg(runtime, listElement(runtime, list, BigInt(position)), parameter));
+    bytes[position] = convert(intArg(runtime, listElement(runtime, list, BigInt(start + position)), parameter));
   }
   return bytes;
 }
@@ -703,26 +727,36 @@ function invalidBase64Byte(runtime: Runtime, bytes: Value, length: number): neve
     `Not a byte value at index ${position}: 0x${offending.toString(16)}`,
   ]);
 }
-define('_base64Decode', (runtime, _receiver, [source]) => {
+define('_base64Decode', (runtime, _receiver, [source, start, end]) => {
   const input = stringArg(runtime, source, 'source');
+  const [from, to] = conversionRange(runtime, BigInt(input.length), start, end);
   const fail = (message: string, offset: number): never =>
-    runtime.throwError('FormatException', '', [message, input, BigInt(offset)]);
-  const bytes = decodeBase64(input, fail);
+    runtime.throwError('FormatException', '', [message, input, BigInt(from + offset)]);
+  runtime.spend(1 + (to - from) / 64);
+  const bytes = decodeBase64(input.slice(from, to), fail);
   return newList(runtime, interfaceType(coreTypes.int), bytes.map(BigInt), false);
 });
 
 define('_base64Normalize', (runtime, _receiver, [source, start, end]) => {
   const input = stringArg(runtime, source, 'source');
-  const length = BigInt(input.length);
+  const [from, to] = conversionRange(runtime, BigInt(input.length), start, end);
+  return normalizeBase64(runtime, input, from, to);
+});
+
+function conversionRange(runtime: Runtime, length: bigint, start: Value, end: Value): [number, number] {
   const from = intArg(runtime, start, 'start');
   const to = end === undefined ? length : intArg(runtime, end, 'end');
   if (from < 0n || from > length) runtime.throwError('RangeError', 'range', [from, 0n, length, 'start']);
   if (to < from || to > length) runtime.throwError('RangeError', 'range', [to, from, length, 'end']);
-  return normalizeBase64(runtime, input, Number(from), Number(to));
-});
+  return [Number(from), Number(to)];
+}
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Preserve the SDK order of Base64 normalization and validation.
-// code-gauge-allow functionNcss 40 -- The selected range and original offsets belong to the same scan.
+function checkCodecStringLength(runtime: Runtime, length: number): void {
+  if (length > LIMITS.maxStringLength) runtime.throwError('OutOfMemoryError', '', []);
+}
+
+// code-gauge-allow functionCognitiveComplexity 26 -- Preserve the SDK order of Base64 normalization and validation.
+// code-gauge-allow functionNcss 41 -- The selected range and original offsets belong to the same scan.
 function normalizeBase64(runtime: Runtime, input: string, start: number, end: number): string {
   const fail = (message: string, offset: number): never =>
     runtime.throwError('FormatException', '', [message, input, BigInt(offset)]);
@@ -760,9 +794,10 @@ function normalizeBase64(runtime: Runtime, input: string, start: number, end: nu
     if (padding > 2) fail("Invalid base64 padding, more than two '=' characters", padOffset);
   } else {
     if (length % 4 === 1) fail('Invalid base64 encoding length ', end);
-    normalized += '='.repeat((4 - (length % 4)) % 4);
   }
-  return input.slice(0, start) + normalized + input.slice(end);
+  const addedPadding = firstPad < 0 ? (4 - (length % 4)) % 4 : 0;
+  checkCodecStringLength(runtime, input.length - (end - start) + length + addedPadding);
+  return input.slice(0, start) + normalized + '='.repeat(addedPadding) + input.slice(end);
 }
 
 /** The inverse of the Base64 alphabets, both the standard and the URL-safe one: -1 for padding, -2 for others. */

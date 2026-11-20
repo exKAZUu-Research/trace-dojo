@@ -334,16 +334,19 @@ export function substitute(type: DartType, map: ReadonlyMap<TypeParam, DartType>
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Acyclic dependencies and recursive references use different substitutions.
-export function instantiateToBounds(params: readonly TypeParam[]): DartType[] {
-  if (params.every((param) => param.bound === undefined)) return params.map(() => DYNAMIC);
+// code-gauge-allow functionCognitiveComplexity 27 -- Acyclic dependencies and recursive references use different substitutions.
+export function instantiateToBounds(
+  params: readonly TypeParam[],
+  inferred?: ReadonlyMap<TypeParam, DartType>
+): DartType[] {
+  if (params.every((param) => param.bound === undefined)) return params.map((param) => inferred?.get(param) ?? DYNAMIC);
   const dependencies = new Map(
     params.map((param) => {
-      const bound = param.bound;
+      const bound = inferred?.has(param) ? undefined : param.bound;
       return [param, bound ? params.filter((other) => mentionsTypeParams(bound, new Set([other]))) : []];
     })
   );
-  const resolved = new Map<TypeParam, DartType>();
+  const resolved = new Map(inferred);
   const resolve = (param: TypeParam): DartType => {
     const existing = resolved.get(param);
     if (existing) return existing;

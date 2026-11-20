@@ -23,8 +23,6 @@ export interface MatchState {
   names: Record<string, string | undefined> | undefined;
   input: string;
   pattern: Value;
-  /** The match object a pattern of the program returned, used as is. */
-  object?: Value;
 }
 
 interface RegExpState {
@@ -125,50 +123,28 @@ export function* allMatchesOf(
   }
 }
 
-/** A match of a pattern at a position (`anchored`) or anywhere after it. */
-// code-gauge-allow functionCognitiveComplexity 17 -- A transcription of the SDK's algorithm, case by case.
-export function matchAt(
-  runtime: Runtime,
-  pattern: Value,
-  input: string,
-  position: number,
-  anchored: boolean
-): MatchState | undefined {
-  if (typeof pattern === 'string') {
-    const found = anchored ? (input.startsWith(pattern, position) ? position : -1) : input.indexOf(pattern, position);
-    return found < 0
-      ? undefined
-      : { start: found, end: found + pattern.length, groups: [pattern], names: undefined, input, pattern };
+export function patternIndex(runtime: Runtime, pattern: Value, input: string, position: number): number {
+  if (typeof pattern === 'string') return input.indexOf(pattern, position);
+  if (isRegExp(runtime, pattern)) return execAt(runtime, stateOf(pattern), input, position, false)?.start ?? -1;
+  for (let at = position; at <= input.length; at++) {
+    if (hasPrefixMatch(runtime, pattern, input, at)) return at;
   }
-  if (isRegExp(runtime, pattern)) {
-    const match = execAt(runtime, stateOf(pattern), input, position, anchored);
-    if (match) match.pattern = pattern;
-    return match;
-  }
-  if (anchored) {
-    const match = runtime.invoke(
+  return -1;
+}
+
+export function hasPrefixMatch(runtime: Runtime, pattern: Value, input: string, position: number): boolean {
+  if (typeof pattern === 'string') return input.startsWith(pattern, position);
+  if (isRegExp(runtime, pattern)) return execAt(runtime, stateOf(pattern), input, position, true) !== undefined;
+  runtime.spend();
+  return (
+    runtime.invoke(
       pattern,
       'matchAsPrefix',
       { positional: [input, BigInt(position)], named: undefined },
       [],
       undefined
-    );
-    if (match === undefined) return undefined;
-    return {
-      start: Number(runtime.getProperty(match, 'start', undefined)),
-      end: Number(runtime.getProperty(match, 'end', undefined)),
-      groups: [],
-      names: undefined,
-      input,
-      pattern,
-      object: match,
-    };
-  }
-  for (let at = position; at <= input.length; at++) {
-    const match = matchAt(runtime, pattern, input, at, true);
-    if (match) return match;
-  }
-  return undefined;
+    ) !== undefined
+  );
 }
 
 export function newMatch(runtime: Runtime, state: MatchState): DartObject {

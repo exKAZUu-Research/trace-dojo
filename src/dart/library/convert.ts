@@ -88,17 +88,17 @@ final class Utf8Codec extends Encoding {
 
 final class Utf8Encoder extends Converter<String, List<int>> {
   const Utf8Encoder();
-  List<int> convert(String string) => _utf8Encode(string);
+  List<int> convert(String string, [int start = 0, int? end]) => _utf8Encode(string, start, end);
 }
 
 final class Utf8Decoder extends Converter<List<int>, String> {
   final bool _allowMalformed;
   const Utf8Decoder({bool allowMalformed = false}) : _allowMalformed = allowMalformed;
-  String convert(List<int> codeUnits) => _utf8Decode(codeUnits, _allowMalformed);
+  String convert(List<int> codeUnits, [int start = 0, int? end]) => _utf8Decode(codeUnits, _allowMalformed, start, end);
 }
 
-external List<int> _utf8Encode(String input);
-external String _utf8Decode(List<int> codeUnits, bool allowMalformed);
+external List<int> _utf8Encode(String input, [int start = 0, int? end]);
+external String _utf8Decode(List<int> codeUnits, bool allowMalformed, [int start = 0, int? end]);
 
 const Base64Codec base64 = Base64Codec();
 const Base64Codec base64Url = Base64Codec.urlSafe();
@@ -108,19 +108,32 @@ String base64UrlEncode(List<int> bytes) => base64Url.encode(bytes);
 List<int> base64Decode(String source) => base64.decode(source);
 
 final class Base64Codec extends Codec<List<int>, String> {
-  final bool _urlSafe;
-  const Base64Codec() : _urlSafe = false;
-  const Base64Codec.urlSafe() : _urlSafe = true;
-  String encode(List<int> input) => _base64Encode(input, _urlSafe);
-  List<int> decode(String encoded) => _base64Decode(encoded);
+  final Base64Encoder encoder;
+  const Base64Codec() : encoder = const Base64Encoder();
+  const Base64Codec.urlSafe() : encoder = const Base64Encoder.urlSafe();
+  Base64Decoder get decoder => const Base64Decoder();
+  String encode(List<int> input) => encoder.convert(input);
+  List<int> decode(String encoded) => decoder.convert(encoded);
   String normalize(String source, [int start = 0, int? end]) => _base64Normalize(source, start, end);
 }
 
+final class Base64Encoder extends Converter<List<int>, String> {
+  final bool _urlSafe;
+  const Base64Encoder() : _urlSafe = false;
+  const Base64Encoder.urlSafe() : _urlSafe = true;
+  String convert(List<int> input) => _base64Encode(input, _urlSafe);
+}
+
+final class Base64Decoder extends Converter<String, List<int>> {
+  const Base64Decoder();
+  List<int> convert(String input, [int start = 0, int? end]) => _base64Decode(input, start, end);
+}
+
 external String _base64Encode(List<int> bytes, bool urlSafe);
-external List<int> _base64Decode(String source);
+external List<int> _base64Decode(String source, int start, int? end);
 external String _base64Normalize(String source, int start, int? end);
 
-class LineSplitter extends Converter<String, List<String>> {
+final class LineSplitter {
   const LineSplitter();
   static Iterable<String> split(String lines, [int start = 0, int? end]) =>
       _LineSplitIterable(lines, start, RangeError.checkValidRange(start, end, lines.length));

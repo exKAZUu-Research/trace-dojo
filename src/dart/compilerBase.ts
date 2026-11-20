@@ -502,7 +502,7 @@ export abstract class CompilerBase {
     if (ext.typeParams.length === 0) return isSubtype(receiverType, ext.onType) ? [] : undefined;
     const solution = new Map<TypeParam, DartType>();
     inferFromSubtype(receiverType, ext.onType, new Set(ext.typeParams), solution);
-    const args = ext.typeParams.map((param) => solution.get(param) ?? boundOf(param));
+    const args = instantiateToBounds(ext.typeParams, solution);
     const map = new Map(ext.typeParams.map((param, index) => [param, args[index]]));
     if (ext.typeParams.some((param, index) => !isSubtype(args[index], substitute(boundOf(param), map)))) return;
     return isSubtype(receiverType, substitute(ext.onType, map)) ? args : undefined;

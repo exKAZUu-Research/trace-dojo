@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 525 -- The compilation of every kind of pattern, which share their type and binding helpers.
+// code-gauge-allow-file fileNcss 536 -- The compilation of every kind of pattern, which share their type and binding helpers.
 import type { Expression, ListPatternElement, Pattern, RecordPatternField, Span } from './ast';
 import { nullPatternComparison } from './astWalk';
 import { CallCompiler } from './callCompiler';
@@ -63,11 +63,11 @@ export abstract class PatternCompiler extends CallCompiler {
     for (const binding of pattern.variables.values()) this.flow = this.flow.assign(binding);
     let whenFalse = before;
     if (variable) {
-      const comparison = nullPatternComparison(syntax);
-      const nonNull = nonNullable(current);
-      const matched = promotionTarget(current, this.narrowedType(syntax, comparison === '!=' ? nonNull : current));
+      const [matchedType, unmatchedType] = this.patternTypes(syntax, current);
+      const matched = promotionTarget(current, matchedType);
+      const unmatched = promotionTarget(current, unmatchedType);
       if (matched) this.flow = this.flow.promote(variable, matched);
-      if (comparison === '==' && !sameType(current, nonNull)) whenFalse = whenFalse.promote(variable, nonNull);
+      if (unmatched) whenFalse = whenFalse.promote(variable, unmatched);
     }
     if (!guardSyntax) return { pattern, guard: undefined, whenFalse };
     for (const binding of pattern.variables.values()) binding.inPatternGuard = true;
@@ -199,7 +199,7 @@ export abstract class PatternCompiler extends CallCompiler {
         // The right operand matches the value as the left one narrowed it, as in `double v && > 3`.
         const right = this.compilePatternInner(
           pattern.right,
-          this.narrowedType(pattern.left, matchedType),
+          this.patternTypes(pattern.left, matchedType)[0],
           options,
           variables
         );
@@ -286,7 +286,7 @@ export abstract class PatternCompiler extends CallCompiler {
     const sharedUsed = new Set<string>();
     const right = this.compilePatternInner(
       pattern.right,
-      matchedType,
+      this.patternTypes(pattern.left, matchedType)[1],
       { ...options, shared: leftVariables, sharedUsed },
       variables
     );
@@ -352,8 +352,25 @@ export abstract class PatternCompiler extends CallCompiler {
     return variable;
   }
 
-  /** The type a value of the matched type has once it matches a pattern. */
-  private narrowedType(pattern: Pattern, matchedType: DartType): DartType {
+  private patternTypes(pattern: Pattern, input: DartType): readonly [matched: DartType, unmatched: DartType] {
+    if (pattern.kind === 'parenthesized') return this.patternTypes(pattern.pattern, input);
+    if (pattern.kind === 'and') {
+      const [leftMatch, leftFail] = this.patternTypes(pattern.left, input);
+      const [rightMatch, rightFail] = this.patternTypes(pattern.right, leftMatch);
+      return [rightMatch, upperBound(leftFail, rightFail)];
+    }
+    if (pattern.kind === 'or') {
+      const [leftMatch, leftFail] = this.patternTypes(pattern.left, input);
+      const [rightMatch, rightFail] = this.patternTypes(pattern.right, leftFail);
+      return [upperBound(leftMatch, rightMatch), rightFail];
+    }
+    const comparison = nullPatternComparison(pattern);
+    if (comparison === '==') return [input, nonNullable(input)];
+    if (comparison === '!=') return [nonNullable(input), input];
+    return [this.patternMatchType(pattern, input), input];
+  }
+
+  private patternMatchType(pattern: Pattern, matchedType: DartType): DartType {
     switch (pattern.kind) {
       case 'variable':
       case 'wildcard':
@@ -365,16 +382,7 @@ export abstract class PatternCompiler extends CallCompiler {
       }
       case 'nullCheck':
       case 'nullAssert': {
-        return this.narrowedType(pattern.pattern, nonNullable(matchedType));
-      }
-      case 'parenthesized': {
-        return this.narrowedType(pattern.pattern, matchedType);
-      }
-      case 'and': {
-        return this.narrowedType(pattern.right, this.narrowedType(pattern.left, matchedType));
-      }
-      case 'or': {
-        return upperBound(this.narrowedType(pattern.left, matchedType), this.narrowedType(pattern.right, matchedType));
+        return this.patternTypes(pattern.pattern, nonNullable(matchedType))[0];
       }
       case 'list': {
         const tested = interfaceType(coreTypes.list, [this.listPatternElementType(pattern, matchedType)]);

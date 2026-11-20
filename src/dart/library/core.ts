@@ -62,6 +62,7 @@ class Object {
 }
 
 abstract class Invocation {
+  Invocation();
   factory Invocation.method(Symbol memberName, Iterable<Object?>? positionalArguments, [Map<Symbol, Object?>? namedArguments]) =>
       _Invocation.method(memberName, null, positionalArguments, namedArguments);
   factory Invocation.genericMethod(Symbol memberName, Iterable<Type>? typeArguments, Iterable<Object?>? positionalArguments, [Map<Symbol, Object?>? namedArguments]) =>
@@ -109,9 +110,10 @@ final class _InvocationMirror implements Invocation {
   final String _name;
   final int _kind;
   final List<dynamic> positionalArguments;
-  final Map<Symbol, dynamic> namedArguments;
+  final Map<Symbol, Object?> namedArguments;
   final List<Type> typeArguments;
-  _InvocationMirror._(this._name, this._kind, this.positionalArguments, this.namedArguments, this.typeArguments);
+  _InvocationMirror._(this._name, this._kind, this.positionalArguments, Map<Symbol, Object?> named, this.typeArguments)
+      : namedArguments = named.isEmpty ? const <Symbol, Object?>{} : Map<Symbol, Object?>.unmodifiable(named);
   Symbol get memberName => Symbol(_name);
   bool get isMethod => _kind == 0;
   bool get isGetter => _kind == 1;
@@ -134,7 +136,7 @@ final class bool {
   external static bool? tryParse(String source, {bool caseSensitive = true});
 }
 
-abstract class Comparable<T> {
+abstract interface class Comparable<T> {
   int compareTo(T other);
   static int compare(Comparable a, Comparable b) => a.compareTo(b);
 }
@@ -447,7 +449,7 @@ abstract final class Record {
   external String toString();
 }
 
-abstract class Type {
+abstract interface class Type {
   external int get hashCode;
   external bool operator ==(Object other);
   external String toString();

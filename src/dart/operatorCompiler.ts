@@ -2,7 +2,6 @@ import type { Arguments as ArgumentsSyntax, CascadeSection, Expression, Span } f
 import { at, type Compiled, type Eval, typeName } from './compilerBase';
 import { ExpressionCompiler, isDoubleContext, promotionTarget, SHORTED, singleArgument } from './expressionCompiler';
 import {
-  concatenate,
   doubleModulo,
   doubleTruncatingDivide,
   dynamicBinary,
@@ -29,7 +28,6 @@ import {
   numericClassOf,
   sameType,
   upperBound,
-  vmTypeString,
 } from './types';
 import { Cell, type Value } from './values';
 
@@ -60,12 +58,14 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
             : interfaceType(
                 numeric === 'int' ? coreTypes.int : numeric === 'double' ? coreTypes.double : coreTypes.num
               ),
-        run: (frame) => negate(run(frame), operator),
+        run: prefixEvaluation(run, operator, methodName, expression.row),
         isConst: value.isConst,
         constValue,
       };
     }
-    if (value.type.kind === 'dynamic') return dynamicPrefix(value.run, operator, methodName, expression.row);
+    if (value.type.kind === 'dynamic') {
+      return { type: DYNAMIC, run: prefixEvaluation(value.run, operator, methodName, expression.row), isConst: false };
+    }
     return this.compileOperatorCall(value, methodName, [], expression);
   }
 
@@ -175,13 +175,8 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
       return {
         type: interfaceType(coreTypes.string),
         run: (frame) => {
-          const a = leftRun(frame) as string;
-          const b = rightRun(frame);
-          if (typeof b !== 'string')
-            return frame.runtime.throwTypeError(
-              `type '${vmTypeString(frame.runtime.runtimeTypeOf(b))}' is not a subtype of type 'String' of 'other'`
-            );
-          return concatenate(frame.runtime, a, b);
+          const a = leftRun(frame);
+          return dynamicBinary(frame.runtime, operator, a, rightRun(frame), span.row);
         },
         isConst: left.isConst && right.isConst,
         constValue,
@@ -263,54 +258,16 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     ) {
       resultType = left.type;
     }
-    const leftRun = left.run;
-    const rightRun = right.run;
+    const leftValue = left.constValue?.value;
+    const rightValue = right.constValue?.value;
     const constValue =
-      left.constValue && right.constValue && isNumber(left.constValue.value) && isNumber(right.constValue.value)
-        ? safeConstant(() =>
-            numericBinaryConstant(
-              operator,
-              left.constValue?.value as bigint | number,
-              right.constValue?.value as bigint | number
-            )
-          )
+      isNumber(leftValue) && isNumber(rightValue)
+        ? safeConstant(() => numericBinaryConstant(operator, leftValue, rightValue))
         : undefined;
-    const isConst = left.isConst && right.isConst;
-    if (leftNumeric === 'int' && rightNumeric === 'int') {
-      const op = intOperation(operator);
-      return {
-        type: resultType,
-        run: (frame) => {
-          const a = leftRun(frame) as bigint;
-          return op(frame, a, rightRun(frame) as bigint);
-        },
-        isConst,
-        constValue,
-      };
-    }
-    if (leftNumeric === 'double' && rightNumeric === 'double') {
-      const op = doubleOperation(operator);
-      return {
-        type: resultType,
-        run: (frame) => {
-          const a = leftRun(frame) as number;
-          return op(frame, a, rightRun(frame) as number);
-        },
-        isConst,
-        constValue,
-      };
-    }
     return {
       type: resultType,
-      run: (frame) => {
-        const a = leftRun(frame) as bigint | number;
-        const b = rightRun(frame);
-        if (typeof b !== 'bigint' && typeof b !== 'number') {
-          return dynamicBinary(frame.runtime, operator, a, b, span.row);
-        }
-        return numericBinary(frame.runtime, operator, a, b);
-      },
-      isConst,
+      run: numericEvaluation(left.run, right.run, operator, span.row, [leftNumeric, rightNumeric]),
+      isConst: left.isConst && right.isConst,
       constValue,
     };
   }
@@ -513,6 +470,24 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
 
 const ARITHMETIC = new Set(['+', '-', '*', '%', 'remainder']);
 
+function numericEvaluation(
+  left: Eval,
+  right: Eval,
+  operator: string,
+  row: number,
+  [leftClass, rightClass]: readonly [ReturnType<typeof numericClassOf>, ReturnType<typeof numericClassOf>]
+): Eval {
+  const ints = leftClass === 'int' && rightClass === 'int' ? intOperation(operator) : undefined;
+  const doubles = leftClass === 'double' && rightClass === 'double' ? doubleOperation(operator) : undefined;
+  return (frame) => {
+    const a = left(frame);
+    const b = right(frame);
+    if (ints && typeof a === 'bigint' && typeof b === 'bigint') return ints(frame, a, b);
+    if (doubles && typeof a === 'number' && typeof b === 'number') return doubles(frame, a, b);
+    return dynamicBinary(frame.runtime, operator, a, b, row);
+  };
+}
+
 // code-gauge-allow duplicateLines 32 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
 function doubleOperation(operator: string): (frame: Frame, a: number, b: number) => Value {
   switch (operator) {
@@ -636,15 +611,11 @@ function isNumber(value: Value): value is bigint | number {
   return typeof value === 'bigint' || typeof value === 'number';
 }
 
-function dynamicPrefix(run: Eval, operator: '-' | '~', methodName: string, row: number): Compiled {
-  return {
-    type: DYNAMIC,
-    run: (frame) => {
-      const operand = run(frame);
-      if (typeof operand === 'bigint' || (operator === '-' && typeof operand === 'number'))
-        return negate(operand, operator);
-      return frame.runtime.invoke(operand, methodName, { positional: [], named: undefined, isDynamic: true }, [], row);
-    },
-    isConst: false,
+function prefixEvaluation(run: Eval, operator: '-' | '~', methodName: string, row: number): Eval {
+  return (frame) => {
+    const operand = run(frame);
+    if (typeof operand === 'bigint' || (operator === '-' && typeof operand === 'number'))
+      return negate(operand, operator);
+    return frame.runtime.invoke(operand, methodName, { positional: [], named: undefined, isDynamic: true }, [], row);
   };
 }
