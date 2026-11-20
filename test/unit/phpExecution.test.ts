@@ -5080,6 +5080,14 @@ $a = array_map('f', [1, 2]); echo 'after:', json_encode($a), ';';`
 
   expect(
     run(
+      `<?php class D { function __construct(public $n) {} function __destruct() { echo 'drop:', $this->n, ';'; } }
+function f($n, ...$rest) { if ($n === 2) throw new Exception('callback'); return [new D($n)]; }
+try { array_map('f', [1, 2], [3, 4]); } catch (Throwable $e) { echo 'caught;'; } echo 'end;';`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'drop:1;caught;end;' });
+
+  expect(
+    run(
       `<?php $a = ['x' => 1, 2, 3, 4]; array_shift($a); mt_srand(42); $out = []; for ($i = 0; $i < 10; $i++) $out[] = array_rand($a); echo json_encode([$out, mt_rand()]);`
     )
   ).toMatchObject({ kind: 'executed', stdout: '[[1,2,1,1,2,1,0,1,1,1],986229477]' });

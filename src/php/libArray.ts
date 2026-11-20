@@ -812,22 +812,21 @@ defineFunction('array_map(?callable $callback, array $array, array ...$arrays): 
   const result = new PhpArray();
   const target = callTargetOf(callback, 'callback');
   const directUser = !target.magic && target.fn.kind === 'user' && !target.fn.params[0]?.byRef ? target.fn : undefined;
-  runtime.held.push(first, result);
-  const holders = runtime.nativeHeld.at(-1);
+  runtime.held.push(first);
   try {
-    for (const [key, value] of first.entries()) {
-      const nativeMark = holders?.length ?? 0;
-      const mapped = directUser
-        ? invokeUser(target, directUser, [{ v: value }], undefined, false)
-        : invokeCallbackTarget(target, [{ v: value }], undefined, false);
-      result.setSlot(key, retainCallbackSlot(runtime, mapped));
-      if (holders) holders.length = nativeMark;
-    }
+    return withMappedResult(runtime, result, (holders) => {
+      for (const [key, value] of first.entries()) {
+        const nativeMark = holders?.length ?? 0;
+        const mapped = directUser
+          ? invokeUser(target, directUser, [{ v: value }], undefined, false)
+          : invokeCallbackTarget(target, [{ v: value }], undefined, false);
+        result.setSlot(key, retainCallbackSlot(runtime, mapped));
+        if (holders) holders.length = nativeMark;
+      }
+    });
   } finally {
     runtime.held.pop();
-    runtime.held.pop();
   }
-  return result;
 });
 
 function mapMultipleArrays(callback: Value, first: PhpArray, rest: Value[]): PhpArray {
@@ -840,21 +839,38 @@ function mapMultipleArrays(callback: Value, first: PhpArray, rest: Value[]): Php
   const length = Math.max(...arrays.map((value) => value.size));
   if (length === 0) return new PhpArray();
   const lists = arrays.map((value) => [...value.map.values()]);
-  const runtime = rt();
   const result = new PhpArray();
-  const holders = runtime.nativeHeld.at(-1);
-  runtime.held.push(result);
-  try {
+  return withMappedResult(rt(), result, (holders) => {
     for (let index = 0; index < length; index++) {
-      const items = lists.map((list) => (index < list.length ? list[index] : null));
+      const items = lists.map((list) => list[index] ?? null);
       const nativeMark = holders?.length ?? 0;
       result.append(callback === null ? PhpArray.copySlots(items) : callbackSlot(callback, items.map(deref)));
       if (holders) holders.length = nativeMark;
     }
+  });
+}
+
+function withMappedResult(runtime: Runtime, result: PhpArray, run: (holders: unknown[] | undefined) => void): PhpArray {
+  const holders = runtime.nativeHeld.at(-1);
+  runtime.held.push(result);
+  let failed = false;
+  let failure: unknown;
+  try {
+    run(holders);
+    return result;
+  } catch (error) {
+    failed = true;
+    failure = error;
+    throw error;
   } finally {
     runtime.held.pop();
+    if (failed) {
+      for (const slot of result.map.ownedSlots()) if (slot instanceof Ref) slot.rc--;
+      withPendingException(runtime, failure instanceof PhpThrow ? failure : undefined, () =>
+        runtime.release([result], true, true)
+      );
+    }
   }
-  return result;
 }
 function callbackSlot(callback: Value, args: Value[]): Value | Ref {
   return retainCallbackSlot(rt(), callCallback(callback, args));
