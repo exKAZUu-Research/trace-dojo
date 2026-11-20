@@ -1538,7 +1538,7 @@ export function requireVirtualPropertyHook(object: PhpObject, decl: PropDecl, ho
   }
 }
 
-function inPropertyHook(object: PhpObject, decl: PropDecl): boolean {
+export function inPropertyHook(object: PhpObject, decl: PropDecl): boolean {
   const frame = rt().frame;
   return (
     frame.thisObj === object && decl.hooks !== undefined && (frame.fn === decl.hooks.get || frame.fn === decl.hooks.set)

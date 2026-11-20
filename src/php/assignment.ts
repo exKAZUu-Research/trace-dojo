@@ -565,7 +565,7 @@ function nestedPropertyPlace(
   if (accessible) classesModule.requireVirtualPropertyHook(object, decl, 'get');
   if (((decl && !accessible) || !issetPropExists(object, name, scope)) && object.cls.findMethod('__get'))
     return new RefPlace(propRef(object, name, scope, 'alias', reportedStaticAccess));
-  if (decl?.hooks?.get && !object.guards?.has(`hook:${name}`))
+  if (decl?.hooks?.get && !classesModule.inPropertyHook(object, decl))
     return new RefPlace(classesModule.hookedPropertyReference(object, decl, scope));
   const indirect = classesModule.checkIndirectModification(object, name, scope, mode);
   if (indirect) return new RefPlace(Ref.temporary(indirect));

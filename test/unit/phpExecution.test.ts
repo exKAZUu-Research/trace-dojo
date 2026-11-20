@@ -4836,12 +4836,32 @@ $a = [...new I]; $a[] = 8; echo json_encode($a);`)
       'Cannot access private property A::$p;Cannot access protected property A::$q;Access to undeclared static property A::$r;',
   });
 
-  // r1475: helper method called from property hook invokes hook normally
+  // r1475 & r1479: helper method called from property hook invokes hook normally while direct hook writes access backing storage
   expect(
     run(
       '<?php class C { public $n = 0; public int $x { get { return $this->read(); } } function read() { return ++$this->n < 2 ? $this->x : 99; } } $c = new C; echo $c->x, ":", $c->n;'
     )
   ).toMatchObject({ kind: 'executed', stdout: '99:2' });
+  for (const [body, expected] of [
+    [
+      'class C { public array $x = [] { get { $this->x[] = 1; return $this->x; } } } $c = new C; echo json_encode($c->x);',
+      '[1]',
+    ],
+    [
+      'class C { public array $x = [] { get { return $this->x; } set { $this->x[] = $value; } } } $c = new C; $c->x = [7]; echo json_encode($c->x);',
+      '[[7]]',
+    ],
+    [
+      'class C { public array $x = [1] { get { $this->x[0]++; return $this->x; } } } $c = new C; echo json_encode($c->x);',
+      '[2]',
+    ],
+    [
+      'class C { public array $x = [1] { get { unset($this->x[0]); return $this->x; } } } $c = new C; echo json_encode($c->x);',
+      '[]',
+    ],
+  ]) {
+    expect(run(`<?php ${body}`)).toMatchObject({ kind: 'executed', stdout: expected });
+  }
 });
 
 test('chains return-expression cleanup exceptions and reaches maxCallDepth across recursion shapes', () => {
