@@ -1,0 +1,84 @@
+#include <array>
+#include <deque>
+#include <iostream>
+#include <list>
+#include <map>
+#include <queue>
+#include <stack>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+struct Cursor {
+  std::deque<int>::iterator place;
+  int value;
+};
+
+struct ArrayOwner {
+  std::array<int, 2> values;
+  int tag;
+};
+
+bool endAddress(std::array<int, 2>* value) {
+  return static_cast<void*>(value + 1) == static_cast<void*>(value->data() + 2);
+}
+
+void inspect(std::array<int, 2> value) {
+  std::cout << (static_cast<void*>(&value) == static_cast<void*>(value.data())) << endAddress(&value);
+}
+
+std::array<int, 2> make() {
+  std::array<int, 2> value{7, 8};
+  return value;
+}
+
+int main() {
+  std::array<int, 2> array{};
+  std::vector<int> vector;
+  std::vector<bool> bits;
+  std::deque<int> deque;
+  std::list<int> list;
+  std::map<int, int> map;
+  std::unordered_map<int, int> hash;
+  std::string string;
+  std::cout << sizeof(array.begin()) << ' ' << sizeof(array.rbegin()) << ' '
+            << sizeof(vector.begin()) << ' ' << sizeof(vector.rbegin()) << '\n';
+  std::cout << sizeof(bits.begin()) << ' ' << sizeof(bits.cbegin()) << ' ' << sizeof(bits.crbegin()) << '\n';
+  std::cout << sizeof(deque.begin()) << ' ' << sizeof(deque.cbegin()) << ' ' << sizeof(deque.rbegin()) << '\n';
+  std::cout << sizeof(list.begin()) << ' ' << sizeof(list.rbegin()) << ' ' << sizeof(map.begin()) << ' '
+            << sizeof(map.rbegin()) << ' ' << sizeof(hash.begin()) << ' ' << sizeof(string.begin()) << ' '
+            << sizeof(string.rbegin()) << '\n';
+  std::cout << sizeof(Cursor) << '\n';
+  ArrayOwner owner{{3, 4}, 5};
+  ArrayOwner copied = owner;
+  std::array<int, 2> standalone{6, 7};
+  std::array<std::array<int, 2>, 1> nested{8, 9};
+  std::array<int, 0> empty{};
+  std::vector<std::array<int, 2>> vectorArrays{{1, 2}, {3, 4}};
+  std::list<std::array<int, 2>> listArrays{{1, 2}, {3, 4}};
+  std::cout << (static_cast<void*>(owner.values.data()) == static_cast<void*>(&owner))
+            << (static_cast<void*>(copied.values.data()) == static_cast<void*>(&copied))
+            << (owner.values.data() != copied.values.data()) << '\n';
+  std::cout << (static_cast<void*>(&standalone) == static_cast<void*>(standalone.data()))
+            << (static_cast<void*>(&standalone + 1) == static_cast<void*>(standalone.data() + standalone.size()))
+            << (static_cast<void*>(&nested) == static_cast<void*>(nested[0].data()))
+            << (static_cast<void*>(&empty) != static_cast<void*>(empty.data())) << '\n';
+  auto* node = &listArrays.front();
+  std::cout << (static_cast<void*>(&vectorArrays.front() + 1) == static_cast<void*>(vectorArrays.front().data() + 2))
+            << (static_cast<void*>(&vectorArrays.back() + 1) == static_cast<void*>(vectorArrays.back().data() + 2))
+            << (static_cast<void*>(node + 1) == static_cast<void*>(node->data() + 2)) << '\n';
+  inspect(standalone);
+  inspect(make());
+  std::cout << '\n';
+
+  std::deque<std::array<int, 2>> dequeArrays(514);
+  auto* boundary = &dequeArrays[511];
+  std::stack<std::array<int, 2>> stack;
+  std::queue<std::array<int, 2>> queue;
+  stack.emplace();
+  queue.emplace();
+  std::cout << endAddress(&dequeArrays.front()) << endAddress(boundary) << endAddress(&dequeArrays.back())
+            << endAddress(&stack.top()) << endAddress(&queue.front()) << '\n';
+  dequeArrays.push_front({1, 2});
+  std::cout << (&dequeArrays[512] == boundary) << endAddress(boundary) << endAddress(&dequeArrays.front()) << '\n';
+}

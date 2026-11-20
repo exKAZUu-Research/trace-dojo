@@ -1,0 +1,4 @@
+default
+caught 6
+default
+[uncaught] libc++abi: terminating due to uncaught exception of type int

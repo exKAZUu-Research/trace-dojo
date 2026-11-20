@@ -1,0 +1,11 @@
+C1 C2 use 7 D2 D1 
+C1 C2 use 1 D2 D1 
+C1 C2 use 2 D2 D1 
+use ~Derived ~Base 
+C5 use 5 D5 
+42 
+C3 C4 x3 x4 D4 D3 after 
+1 2 3 ~Holder after 
+C6 cp16 D6 x16 D16 
+C7 use 72 D7 
+102

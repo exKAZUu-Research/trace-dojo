@@ -98,8 +98,14 @@ export class TurtleWorld {
     return this.board.map((row) => row.join('')).join('\n');
   }
 
-  turtleTraces(): TurtleTrace[] {
-    return this.turtles.map(({ color, dir, x, y }) => ({ x, y, color, dir }));
+  /** The turtles on the board, or the given ones as they stand now. */
+  turtleTraces(turtles: readonly TurtleState[] = this.turtles): TurtleTrace[] {
+    return turtles.map(({ color, dir, x, y }) => ({ x, y, color, dir }));
+  }
+
+  /** The turtles on the board now, which later moves of theirs still update. */
+  currentTurtles(): readonly TurtleState[] {
+    return [...this.turtles];
   }
 }
 
