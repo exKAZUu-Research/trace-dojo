@@ -2942,7 +2942,7 @@ test.each([
   expect(JSON.stringify(result)).toContain('Cannot use string as default value for parameter $x of type int');
 });
 
-test('uses compiled operand rows for diagnostics from specialized calls', () => {
+test('uses compiled operand rows for expression diagnostics', () => {
   const source = `<?php
 set_error_handler(function ($level, $message, $file, $line) { echo $message, ':', $line, "\\n"; });
 try { count(
@@ -2964,12 +2964,24 @@ try { intdiv(
 sprintf('%s-%s',
   $first,
   $second
-);`;
+);
+function receive(...$args) {}
+try { receive(
+  ...$unpack
+); } catch (Throwable $error) { echo $error->getLine(), "\\n"; }
+$object = new stdClass;
+try { [$object,
+  'missing']();
+} catch (Throwable $error) { echo $error->getLine(), "\\n"; }
+try { throw
+  $thrown;
+} catch (Throwable $error) { echo $error->getLine(), "\\n"; }`;
   expect(run(source)).toMatchObject({
     kind: 'executed',
     stdout:
       'Undefined variable $missing:4\n4\nUndefined variable $callback:7\n7\n13\n15\n' +
-      'Undefined variable $first:21\nUndefined variable $second:21\n',
+      'Undefined variable $first:21\nUndefined variable $second:21\n' +
+      'Undefined variable $unpack:25\n25\n29\nUndefined variable $thrown:32\n32\n',
   });
 });
 

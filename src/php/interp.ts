@@ -252,7 +252,7 @@ export function consumeExpression<T>(e: Expr, consume: (value: Value) => T): T {
 
 export function evOpcodeOperand(e: Expr): Value {
   const value = ev(e);
-  rt().row = e.row;
+  rt().row = compiledOperandRow(e);
   return value;
 }
 
@@ -364,8 +364,7 @@ export function evChain(e: Expr, discardResult = false): Chain {
       return cloneExpression(e);
     }
     case 'throw': {
-      const value = ev(e.e);
-      runtime.row = e.row;
+      const value = evOpcodeOperand(e.e);
       if (!(value instanceof PhpObject) || value.isResource) throwError('Error', 'Can only throw objects');
       if (!isThrowableObject(value)) throwError('Error', 'Cannot throw objects that do not implement Throwable');
       throw new PhpThrow(value);

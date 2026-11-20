@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 749 -- Keeps implicit dispatch and native result ownership together.
+// code-gauge-allow-file fileNcss 757 -- Keeps implicit dispatch and native result ownership together.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { placeOf } from './assignment';
 import type { Arg, Expr, ResolvedName } from './ast';
@@ -30,6 +30,7 @@ import {
   type Chain,
   ev,
   evChain,
+  evOpcodeOperand,
   isCompiledVariable,
   iterate,
   prepareOperand,
@@ -92,15 +93,7 @@ export function evalArgs(
       if (arg.spread) {
         const source =
           arg.e.k === 'var' && arg.e.name !== 'GLOBALS' && arg.e.name !== 'this' ? placeOf(arg.e) : undefined;
-        let value = source?.readUnpack
-          ? source.readUnpack((live, previous) =>
-              throwError(
-                'TypeError',
-                `Only arrays and Traversables can be unpacked, ${valueName(live)} given`,
-                previous?.object
-              )
-            )
-          : ev(arg.e);
+        let value = argumentUnpackValue(arg.e, source);
         if (value instanceof PhpArray) frame.temporaries.push(value);
         if (value instanceof PhpArray && source && fn?.params.some((param) => param.byRef))
           value = writableContainer(source);
@@ -192,6 +185,16 @@ export function evalArgs(
     }
   }
   return values;
+}
+
+function argumentUnpackValue(expression: Expr, source: ReturnType<typeof placeOf> | undefined): Value {
+  if (!source?.readUnpack) return evOpcodeOperand(expression);
+  const row = compiledOperandRow(expression);
+  rt().row = row;
+  return source.readUnpack((live, previous) => {
+    rt().row = row;
+    throwError('TypeError', `Only arrays and Traversables can be unpacked, ${valueName(live)} given`, previous?.object);
+  });
 }
 
 function argumentReference(expression: Expr): Ref {

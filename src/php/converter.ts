@@ -170,7 +170,7 @@ export class Converter extends DeclarationConverter {
       case 'echo_statement': {
         const args = node.namedChildren
           .filter((child) => child.type !== 'comment')
-          .flatMap((child) => this.sequence(child));
+          .flatMap((child) => this.sequence(child, true));
         return [{ k: 'echo', args, row }];
       }
       case 'empty_statement': {
@@ -790,11 +790,20 @@ export class Converter extends DeclarationConverter {
     symbols.set(key, full);
   }
 
-  private sequence(node: Node): Expr[] {
+  private sequence(node: Node, opcodeOperands = false): Expr[] {
     if (node.type === 'sequence_expression') {
-      return node.namedChildren.filter((child) => child.type !== 'comment').flatMap((child) => this.sequence(child));
+      return node.namedChildren
+        .filter((child) => child.type !== 'comment')
+        .flatMap((child) => this.sequence(child, opcodeOperands));
     }
-    return [this.expr(node)];
+    return [opcodeOperands ? this.opcodeOperand(node) : this.expr(node)];
+  }
+
+  private opcodeOperand(node: Node): Expr {
+    const expression = this.expr(node);
+    return this.preserveSyntax
+      ? expression
+      : recordOperandRows(expression, operandAstRow(expression), this.resultOpcodeRow(expression, node));
   }
 
   /** Converts an expression that a statement writes to. */
@@ -1119,7 +1128,7 @@ export class Converter extends DeclarationConverter {
           this.error(node, '(unset) のキャストは使えません（The (unset) cast is no longer supported）。');
         if (type === 'real')
           this.error(node, '(real) のキャストは使えません（The (real) cast has been removed, use (float) instead）。');
-        return { k: 'cast', type, e: this.expr(node.childForFieldName('value') as Node), row };
+        return { k: 'cast', type, e: this.opcodeOperand(node.childForFieldName('value') as Node), row };
       }
       case 'error_suppression_expression': {
         return { k: 'silence', e: this.expr(semanticChildren(node)[0]), row };
@@ -1133,7 +1142,7 @@ export class Converter extends DeclarationConverter {
         return { k: 'clone', e: this.expr(node.namedChildren.find((child) => child.type !== 'comment') as Node), row };
       }
       case 'throw_expression': {
-        return { k: 'throw', e: this.expr(semanticChildren(node)[0]), row };
+        return { k: 'throw', e: this.opcodeOperand(semanticChildren(node)[0]), row };
       }
       case 'anonymous_function': {
         return this.closure(node);
@@ -1400,12 +1409,13 @@ export class Converter extends DeclarationConverter {
       }
       return { k: 'call', fn: name, args, fcc, row };
     }
+    const callable = this.opcodeOperand(fnNode);
     return {
       k: 'call',
-      fn: this.foldCallableOperand(this.expr(fnNode)),
+      fn: this.foldCallableOperand(callable),
       args,
       fcc,
-      initRow: row,
+      initRow: compiledOperandRow(callable),
       row: argumentsNode.startPosition.row,
     };
   }
@@ -1526,7 +1536,7 @@ export class Converter extends DeclarationConverter {
             child,
             '名前付き引数の後に ... は書けません（Cannot use argument unpacking after named arguments）。'
           );
-        args.push({ e: this.expr(semanticChildren(valueNode)[0]), spread: true });
+        args.push({ e: this.opcodeOperand(semanticChildren(valueNode)[0]), spread: true });
         continue;
       }
       if (nameNode) {
@@ -1876,7 +1886,7 @@ export class Converter extends DeclarationConverter {
   }
 
   private arrayOpcodeRow(value: Extract<Expr, { k: 'array' }>, node: Node): number {
-    if (this.compiledValue(value, true) !== undefined) return this.arrayValueFoldRow(node);
+    if (this.compiledValue(value, true) !== undefined) return this.initializerContext?.row ?? arrayFoldRow(node);
     const item = value.items.at(-1);
     const element = node.namedChildren.findLast((child) => child.type === 'array_element_initializer');
     const child = element && semanticChildren(element).at(-1);
