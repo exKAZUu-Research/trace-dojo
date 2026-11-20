@@ -31,6 +31,7 @@ const arraySnapshots = new WeakMap<DisplayNode, unknown>();
 
 function stateVariables({ vars, referenceVars }: TraceVariables): Record<string, unknown> {
   const snapshots = Object.entries(referenceVars)
+    .filter(([name]) => !Object.hasOwn(vars, name))
     .map(([name, node]) => [name, arraySnapshots.get(node)] as const)
     .filter(([, snapshot]) => snapshot !== undefined);
   return snapshots.length > 0 ? { ...vars, ...Object.fromEntries(snapshots) } : vars;

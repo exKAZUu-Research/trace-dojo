@@ -120,7 +120,9 @@ function rebuild(
       }
     }
     const packed = mutation === 'shift' ? array.ordered().isPacked : renumber;
+    const countOffset = array.map.removedUndefinedSlots;
     array.replaceTable(renamed(), packed, mutation, !renumber);
+    array.map.removedUndefinedSlots = mutation === undefined ? countOffset : 0;
     return array;
   }
   for (const [key, source] of entries) {

@@ -377,3 +377,15 @@ function f(&$a) {
     expect(phpTrace(program).map((item) => item.line)).toEqual([0, 2, 6, 3, 4]);
   }
 );
+
+test('records caller step for writes beyond the 2000-element display preview on scalar lists', () => {
+  const program = `<?php
+$a = range(1, 3000);
+f($a);
+echo $a[2500];
+function f(&$a) {
+    $x = 1;
+    return $a[2500] = 42;
+}`;
+  expect(phpTrace(program).map((item) => item.line)).toEqual([0, 2, 6, 3, 4]);
+});

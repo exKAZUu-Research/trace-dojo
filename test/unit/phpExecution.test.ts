@@ -4566,4 +4566,32 @@ echo json_encode($a), ':', count($a), ';';
 `)
     ).toMatchObject({ kind: 'executed', stdout: expected });
   }
+
+  expect(
+    run(`<?php
+error_reporting(0);
+class D { function __construct(public $n) {} function __destruct() { echo "drop{$this->n};"; } }
+function f() { return 4; }
+$a = [];
+set_error_handler(function() use (&$a) { unset($a[0]); $a[] = new D("nine"); return true; });
+$a[] =& f();
+restore_error_handler();
+unset($a[0]);
+echo 'after;', count($a), ';', json_encode($a), ';', isset($a[1]) ? $a[1]->n : 'none', ';end;';
+`)
+  ).toMatchObject({ kind: 'executed', stdout: 'after;0;[];nine;end;dropnine;' });
+
+  expect(
+    run(`<?php
+error_reporting(0);
+function f() { return 4; }
+$a = [1];
+set_error_handler(function() use (&$a) { unset($a[array_key_last($a)]); $a[] = 9; return true; });
+$a[] =& f();
+restore_error_handler();
+echo count($a), ';';
+sort($a);
+echo count($a), ':', json_encode($a), ';';
+`)
+  ).toMatchObject({ kind: 'executed', stdout: '2;2:[1,4,9];' });
 });

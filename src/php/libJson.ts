@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 489 -- Keeps PHP's encoder and parser with their shared flag and error definitions.
+// code-gauge-allow-file fileNcss 491 -- Keeps PHP's encoder and parser with their shared flag and error definitions.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { codePointBytes, enc, utf8Length } from './bytes';
@@ -246,11 +246,12 @@ class JsonEncoder {
   }
 
   private encodeArray(value: PhpArray, level: number): string {
-    const list = value.isList() && !has(this.flags, 16n);
+    const list = (value.size === 0 || value.isList()) && !has(this.flags, 16n);
     return wrap(this.arrayMembers(value, level, list), list ? '[' : '{', list ? ']' : '}', this.flags, level);
   }
 
   private *arrayMembers(value: PhpArray, level: number, list: boolean): Generator<string> {
+    if (value.size === 0) return;
     const snapshot = [...value.map];
     for (const [key, slot] of snapshot) {
       const item = slot instanceof Ref ? slot.v : slot;

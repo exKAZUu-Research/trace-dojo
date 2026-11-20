@@ -614,11 +614,6 @@ export class PhpArray {
     if (trim) {
       while (order.last && this.map.get(order.last.key) === UNDEFINED_RESULT) this.removeUndefinedSlot(order.last.key);
     }
-    if (this.size <= 0 && this.map.removedUndefinedSlots < 0) {
-      const leftover = this.map.clearOwned();
-      order.replace([], order.isPacked);
-      for (const slot of leftover) dropped(slot);
-    }
     if (detached !== undefined) this.setDetachedPointer(Math.min(detached, order.endPosition));
     dropped(old);
   }

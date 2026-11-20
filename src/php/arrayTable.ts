@@ -1,5 +1,5 @@
 import { replaceWatchedSlot, replaceWatchedSlots } from './slotWatch';
-import { type Key, type PhpArray, Ref, UNDEFINED_RESULT, type Value } from './values';
+import { type Key, type PhpArray, type Ref, UNDEFINED_RESULT, type Value } from './values';
 
 type Slot = Value | Ref;
 
@@ -107,13 +107,6 @@ export class ArrayTable extends Map<Key, Slot> {
       this.releasedKeys.add(key);
     }
     return slot;
-  }
-
-  clearOwned(): Slot[] {
-    const leftover = [...this.ownedSlots()];
-    for (const slot of leftover) if (slot instanceof Ref) slot.rc--;
-    this.clear();
-    return leftover;
   }
 
   override get size(): number {
