@@ -3583,3 +3583,34 @@ test('coerces Rust collection elements and branch results at the correct sites',
     expect(executeProgram('rust', rustMain(body, items)).kind).toBe('compileError');
   }
 });
+
+test('keeps the capacities of equal Rust strings through aggregate construction and moves', () => {
+  const declarations = `struct Pair { a: String, b: String }
+    fn pair() -> (String, String) { (String::with_capacity(8), String::with_capacity(16)) }
+    fn print(a: String, b: String) { println!("{} {}", a.capacity(), b.capacity()); }`;
+  const program = rustMain(
+    `let fields = Pair { b: String::with_capacity(9), a: String::with_capacity(4) };
+    println!("{} {}", fields.a.capacity(), fields.b.capacity());
+    let mut values = vec![String::new(), String::with_capacity(10)];
+    values.swap(0, 1);
+    println!("{} {}", values[0].capacity(), values[1].capacity());
+    let (a, b) = pair();
+    print(a, b);
+    print(String::with_capacity(2), String::with_capacity(3));
+
+    let mut data = String::with_capacity(12);
+    data.push_str("ab");
+    data.as_mut_str().make_ascii_uppercase();
+    let copy = data.clone();
+    println!("{} {} {} {} {:?}", data, data.capacity(), copy.capacity(), data == "AB", &data[..1]);
+    let bytes = data.into_bytes();
+    println!("{}", bytes.capacity());
+    let restored = String::from_utf8(bytes).unwrap();
+    println!("{} {}", restored, restored.capacity());`,
+    declarations
+  );
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '4 9\n10 0\n8 16\n2 3\nAB 12 2 true "A"\n12\nAB 12\n',
+  });
+});

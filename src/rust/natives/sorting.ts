@@ -1,7 +1,6 @@
-import { hasStringSlots, permuteStringSlots, swapOwnedElements } from '../capacity';
 import { comparePartialValues, testPartialOrder } from '../ops';
 import { type IntName, intType, type Type } from '../types';
-import { ElementPlace, sliceBase, sliceItems, sliceSet, UNIT_VALUE, type Value } from '../values';
+import { ElementPlace, sliceItems, sliceSet, swapOwnedElements, UNIT_VALUE, type Value } from '../values';
 import { sizeOf } from './layout';
 import type { SortElement } from './sort/shared';
 import { stableSort } from './sort/stable';
@@ -16,29 +15,9 @@ export function sortSlice(
   isLess: (a: Value, b: Value) => boolean,
   elementType = ctx.typeArgs[0]
 ): void {
-  const { base, start } = sliceBase(slice);
   const items = sliceItems(slice);
   const sort = stable ? stableSort : unstableSort;
   const layout = sortElement(ctx, elementType);
-  if (hasStringSlots(base)) {
-    ctx.runtime.allocate(items.length * 5);
-    const tracked = items.map((item, index): [Value, bigint] => [item, BigInt(index)]);
-    ctx.runtime.withRoots(tracked, () => {
-      sort(
-        tracked,
-        (a, b) => isLess((a as Value[])[0], (b as Value[])[0]),
-        layout,
-        () => ordViolation(ctx)
-      );
-      permuteStringSlots(
-        base,
-        start,
-        tracked.map((pair) => Number(pair[1]))
-      );
-      for (const [index, pair] of tracked.entries()) sliceSet(slice, index, pair[0]);
-    });
-    return;
-  }
   ctx.runtime.withRoots(items, () => {
     sort(items, isLess, layout, () => ordViolation(ctx));
     for (const [index, item] of items.entries()) sliceSet(slice, index, item);
@@ -138,8 +117,6 @@ export function sortByCachedKey(ctx: NativeContext, slice: Value, f: Value): voi
   } finally {
     ctx.runtime.nativeRoots.pop();
   }
-  const { base, start } = sliceBase(slice);
   const order = pairs.map((pair) => (pair as [Value, number])[1]);
-  permuteStringSlots(base, start, order);
   for (const [position, index] of order.entries()) sliceSet(slice, position, items[index]);
 }

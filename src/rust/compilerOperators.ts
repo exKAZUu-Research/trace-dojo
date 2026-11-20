@@ -8,7 +8,7 @@ import { cloneValue, floatArith, intArith, overflow, testPartialOrder, valuesEqu
 import type { Frame } from './runtime';
 import { runtimeType } from './runtimeTypes';
 import { type IntName, resolve, shallow, type Type } from './types';
-import { DONE, type Place, SetValue, UNIT_VALUE } from './values';
+import { DONE, type Place, SetValue, textOf, UNIT_VALUE } from './values';
 
 type ExprOf<K extends Expr['kind']> = Extract<Expr, { kind: K }>;
 
@@ -94,10 +94,11 @@ function arithmetic(expr: ExprOf<'binary'>, left: Eval, right: Eval, rightCoerce
   if (type.kind === 'adt') {
     // String + &str
     return (frame) => {
-      const text = left(frame) as string;
-      const addition = derefAll(rightCoerced(frame)) as string;
+      const target = left(frame);
+      const text = textOf(target);
+      const addition = textOf(rightCoerced(frame));
       frame.runtime.allocateString(text.length + addition.length, addition.length);
-      return concatStrings(text, addition);
+      return concatStrings(target, addition);
     };
   }
   if (type.kind === 'bool') {
@@ -135,9 +136,9 @@ export function compileCompoundAssign(c: Compiler, expr: ExprOf<'compoundAssign'
   if (type.kind === 'adt') {
     return (frame) => {
       const target = place(frame);
-      const addition = derefAll(value(frame)) as string;
-      frame.runtime.allocateString((target.get() as string).length + addition.length, addition.length);
-      changeString(target, () => target.set((target.get() as string) + addition));
+      const addition = textOf(value(frame));
+      frame.runtime.allocateString(textOf(target).length + addition.length, addition.length);
+      changeString(target, () => target.set(textOf(target) + addition));
       return UNIT_VALUE;
     };
   }

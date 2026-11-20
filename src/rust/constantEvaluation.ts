@@ -2,7 +2,6 @@ import type { ExecutionBudget } from '../interpreter/limits';
 import type { Coercion, LocalVar, PathRes } from './annotations';
 import type { Expr, Pattern } from './ast';
 import { forEachDirect, walkBlock } from './astWalk';
-import { settleStrings } from './capacity';
 import type { Checker } from './checker';
 import type { Known } from './constLint';
 import { Interpreter } from './interpreter';
@@ -39,7 +38,6 @@ export function evaluateConstants(checker: Checker, budget: ExecutionBudget): vo
   try {
     evaluation.run(constants);
   } finally {
-    settleStrings();
     evaluation.interpreter.restoreOperations();
   }
 }

@@ -1,5 +1,5 @@
 import { utf8Length } from './utf8';
-import { ElementPlace, EnumValue, isPlace, type Place, StructValue, type Value } from './values';
+import { isPlace, type Place, StringValue, textOf, type Value } from './values';
 
 /**
  * The capacities of the collections: as `RawVec` grows a `Vec`, a `VecDeque`, and a `BinaryHeap`, whose arrays do not
@@ -90,48 +90,23 @@ function minNonZeroCapacity(elemSize: number): number {
   return elemSize <= 1024 ? 4 : 1;
 }
 
-/**
- * The capacities of `String`s, whose values are JS strings that cannot carry one: by where each is stored, for the
- * text it had when its capacity last changed there. A string stored elsewhere, or changed since by assignment, has as
- * much capacity as length, as a `String` made at its size has (`String::from`).
- */
-const stringCapacities = new WeakMap<object, Map<number, { text: string; capacity: number }>>();
-
-/** The capacity of the `String` a value is, or a place holds. */
 export function stringCapacity(value: Value): number {
-  const text = (isPlace(value) ? value.get() : value) as string;
-  const storage = isPlace(value) ? value.storage?.() : undefined;
-  const entry = storage && stringCapacities.get(storage[0])?.get(storage[1]);
-  return entry?.text === text ? entry.capacity : utf8Length(text);
+  let stored = value;
+  while (isPlace(stored)) stored = stored.get();
+  return stored instanceof StringValue ? stored.capacity : utf8Length(textOf(stored));
 }
 
-/** Changes the `String` in a place, first making room for what the change adds as `RawVec::reserve` does. */
 export function changeString(place: Place, change: () => void): void {
-  const len = utf8Length(place.get() as string);
+  const len = utf8Length(textOf(place));
   const capacity = stringCapacity(place);
   change();
-  const added = utf8Length(place.get() as string) - len;
+  const added = utf8Length(textOf(place)) - len;
   setStringCapacity(place, added > 0 ? reservedCapacity(capacity, len, added, 1) : capacity);
 }
 
-/** Sets the capacity of the `String` a place holds. */
 export function setStringCapacity(place: Place, capacity: number): void {
-  const storage = place.storage?.();
-  if (!storage) return;
-  let entries = stringCapacities.get(storage[0]);
-  if (!entries) {
-    entries = new Map();
-    stringCapacities.set(storage[0], entries);
-  }
-  entries.set(storage[1], { text: place.get() as string, capacity });
+  place.set(madeString(textOf(place), capacity));
 }
-
-/**
- * The `String`s in flight in the current statement with a capacity other than their length, by their text: made by
- * `String::with_capacity`, an integer's `to_string`, or `a + b`, or moved out of where they were stored. The place
- * that stores one next (a variable, a parameter, a field, an element) claims its capacity.
- */
-const inFlight = new Map<string, number>();
 
 export class StringGrowth {
   constructor(
@@ -145,135 +120,23 @@ export class StringGrowth {
     this.length += added;
   }
 
-  finish(text: string): string {
+  finish(text: string): string | StringValue {
     return madeString(text, Math.max(this.capacity, utf8Length(text)));
   }
 
   store(place: Place, text: string): void {
-    place.set(text);
-    setStringCapacity(place, Math.max(this.capacity, utf8Length(text)));
+    place.set(this.finish(text));
   }
 }
 
-export function madeString(text: string, capacity: number): string {
-  if (capacity === utf8Length(text)) inFlight.delete(text);
-  else inFlight.set(text, capacity);
-  return text;
+export function madeString(text: string, capacity: number): string | StringValue {
+  return capacity === utf8Length(text) ? text : new StringValue(text, capacity);
 }
 
-/** A `String` moved out of a place takes its capacity along, as do the `String` fields of a struct or an enum. */
-export function moveString(place: Place): void {
-  const value = place.get();
-  if (typeof value === 'string') madeString(value, stringCapacity(place));
-  else if (value instanceof StructValue || value instanceof EnumValue) {
-    for (let index = 0; index < value.fields.length; index++) {
-      if (typeof value.fields[index] === 'string') moveString(new ElementPlace(value.fields, index));
-    }
-  }
-}
-
-/** At the start of a statement: the strings in flight before it have been stored or dropped. */
-export function settleStrings(): void {
-  if (inFlight.size > 0) inFlight.clear();
-}
-
-/** Replaces the capacity of the string previously stored in the place. */
-export function claimString(place: Place): void {
-  const text = place.get();
-  if (typeof text !== 'string') return;
-  const capacity = inFlight.get(text);
-  if (capacity === undefined) {
-    const storage = place.storage?.();
-    if (storage) stringCapacities.get(storage[0])?.delete(storage[1]);
-    return;
-  }
-  setStringCapacity(place, capacity);
-  inFlight.delete(text);
-}
-
-/** The elements of a new struct, tuple, array, or `Vec` that are `String`s in flight keep their capacities. */
-export function claimStrings(elements: Value[]): Value[] {
-  if (inFlight.size > 0)
-    for (let index = 0; index < elements.length; index++) claimString(new ElementPlace(elements, index));
-  return elements;
-}
-
-export function pushOwnedElement(elements: Value[], value: Value): void {
-  const index = elements.length;
-  elements.push(value);
-  claimString(new ElementPlace(elements, index));
-}
-
-export function insertOwnedElement(elements: Value[], index: number, value: Value): void {
-  relocateStringSlots(elements, elements, index, elements.length, 1);
-  elements.splice(index, 0, value);
-  claimString(new ElementPlace(elements, index));
-}
-
-export function removeOwnedElement(elements: Value[], index: number): Value {
-  moveString(new ElementPlace(elements, index));
-  stringCapacities.get(elements)?.delete(index);
-  relocateStringSlots(elements, elements, index + 1, elements.length, -1);
-  return elements.splice(index, 1)[0];
-}
-
-export function clearStringSlotsFrom(elements: Value[], index: number): void {
-  const entries = stringCapacities.get(elements);
-  if (!entries) return;
-  for (const slot of entries.keys()) if (slot >= index) entries.delete(slot);
-}
-
-export function swapOwnedElements(elements: Value[], a: number, b: number): void {
-  if (a === b) return;
-  [elements[a], elements[b]] = [elements[b], elements[a]];
-  const entries = stringCapacities.get(elements);
-  if (!entries) return;
-  const first = entries.get(a);
-  const second = entries.get(b);
-  if (first) entries.set(b, first);
-  else entries.delete(b);
-  if (second) entries.set(a, second);
-  else entries.delete(a);
-}
-
-export function hasStringSlots(elements: Value[]): boolean {
-  return (stringCapacities.get(elements)?.size ?? 0) > 0;
-}
-
-export function permuteStringSlots(elements: Value[], start: number, order: number[]): void {
-  const entries = stringCapacities.get(elements);
-  if (!entries) return;
-  const capacities = order.map((index) => entries.get(start + index));
-  for (const [offset, entry] of capacities.entries()) {
-    if (entry) entries.set(start + offset, entry);
-    else entries.delete(start + offset);
-  }
-}
-
-export function relocateStringSlots(
-  source: Value[],
-  target: Value[],
-  start: number,
-  end: number,
-  offset: number
-): void {
-  const entries = stringCapacities.get(source);
-  if (!entries) return;
-  const moved = [...entries].filter(([index]) => index >= start && index < end);
-  if (moved.length === 0) return;
-  for (const [index] of moved) entries.delete(index);
-  let targetEntries = stringCapacities.get(target);
-  if (!targetEntries) {
-    targetEntries = new Map();
-    stringCapacities.set(target, targetEntries);
-  }
-  for (const [index, value] of moved) targetEntries.set(index + offset, value);
-}
-
-/** `a + b` of a `String` and a `&str`, which pushes onto `a` and so grows it as `push_str` does. */
-export function concatStrings(left: string, right: string): string {
-  const capacity = inFlight.get(left) ?? utf8Length(left);
-  return madeString(left + right, reservedCapacity(capacity, utf8Length(left), utf8Length(right), 1));
+export function concatStrings(left: Value, right: string): string | StringValue {
+  const text = textOf(left);
+  const capacity = reservedCapacity(stringCapacity(left), utf8Length(text), utf8Length(right), 1);
+  return madeString(text + right, capacity);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

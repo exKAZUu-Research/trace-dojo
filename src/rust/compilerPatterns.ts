@@ -1,8 +1,7 @@
 import type { LocalVar, PathRes } from './annotations';
 import type { Expr, Pattern } from './ast';
-import { claimString, moveString } from './capacity';
 import type { Compiler } from './compiler';
-import { derefAll, isPlaceExpr, isRefType, LocalPlace } from './compilerCommon';
+import { derefAll, isPlaceExpr, isRefType } from './compilerCommon';
 import { normalize } from './infer';
 import { copyValue, needsCopy, valuesEqual } from './ops';
 import { type Frame, MOVED } from './runtime';
@@ -111,16 +110,10 @@ function bindingMatcher(c: Compiler, pattern: PatternOf<'binding'>, type: Type):
     bindings.push(() => {
       frame.locals[local.slot] = boundValue(value, place, local.mode, bindsPlace, copies);
       if (!movesOut || !place) return;
-      moveBinding(frame, local, place());
+      place().set(MOVED);
     });
     return true;
   };
-}
-
-function moveBinding(frame: Frame, local: LocalVar, source: Place): void {
-  moveString(source);
-  source.set(MOVED);
-  claimString(new LocalPlace(frame, local.slot));
 }
 
 function boundValue(

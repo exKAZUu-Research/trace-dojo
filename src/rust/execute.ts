@@ -3,7 +3,6 @@ import { ExecutionLimitError } from '../interpreter/limits';
 import type { ProgramExecution, ProgramRun } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import { buildProgram, type BuiltProgram } from './build';
-import { settleStrings } from './capacity';
 import { DEFAULT_SPEC } from './fmt';
 import { Interpreter } from './interpreter';
 import { type Module } from './items';
@@ -66,8 +65,6 @@ export function runProgram(
   } catch (error) {
     uncaughtException = describeUncaught(error);
   } finally {
-    // The `String`s in flight are kept by their text, which must not outlive the run.
-    settleStrings();
     interp.restoreOperations();
   }
   runtime.finishOutput();

@@ -1,17 +1,5 @@
 // code-gauge-allow-file fileNcss 500 -- One native per method of the standard library.
-import {
-  changeString,
-  claimString,
-  clearStringSlotsFrom,
-  insertOwnedElement,
-  keepVecCapacity,
-  pushOwnedElement,
-  relocateStringSlots,
-  removeOwnedElement,
-  setIntoIterBuffer,
-  swapOwnedElements,
-  vecCapacity,
-} from '../capacity';
+import { changeString, keepVecCapacity, setIntoIterBuffer, vecCapacity } from '../capacity';
 import { sliceRange } from '../compiler';
 import { type DebugPart } from '../debugText';
 import { normalize } from '../infer';
@@ -31,6 +19,8 @@ import {
   sliceLength,
   sliceSet,
   SliceView,
+  swapOwnedElements,
+  textOf,
   UNIT_VALUE,
   type Value,
 } from '../values';
@@ -81,7 +71,6 @@ function retainElements(items: Value[], keep: (item: ElementPlace) => boolean): 
   } finally {
     if (write < read) {
       for (; read < items.length; read++) swapOwnedElements(items, write++, read);
-      clearStringSlotsFrom(items, write);
       items.length = write;
     }
   }
@@ -331,9 +320,7 @@ function fillSlice(slice: Value, value: Value, type: Type): Value {
     if (string) changeString(place, () => place.set(value));
     else place.set(cloneValue(type, value));
   }
-  const place = new ElementPlace(base, last);
-  place.set(value);
-  if (string) claimString(place);
+  base[last] = value;
   return UNIT_VALUE;
 }
 
@@ -493,8 +480,8 @@ function clonedItems(ctx: NativeContext, items: Value[]): Value[] {
 }
 
 function joinStrings(ctx: NativeContext, self: Value, sep: Value): string {
-  const parts = sliceItems(deref(self)).map((item) => deref(item) as string);
-  const separator = deref(sep) as string;
+  const parts = sliceItems(deref(self)).map(textOf);
+  const separator = textOf(sep);
   const length = parts.reduce((sum, part) => sum + part.length, 0) + separator.length * Math.max(0, parts.length - 1);
   ctx.runtime.allocateString(length);
   return parts.join(separator);
@@ -505,26 +492,26 @@ const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
   from_iter: ([iter], ctx) => collectVec(ctx, deref(iter) as IterValue, ctx.typeArgs[1], elemType(ctx)),
   push: ([self, value], ctx) => {
     ctx.runtime.allocate(1);
-    pushOwnedElement(vec(self), value);
+    vec(self).push(value);
     return UNIT_VALUE;
   },
   pop: ([self], ctx) => {
     const items = vec(self);
-    return items.length === 0 ? none(ctx) : some(ctx, removeOwnedElement(items, items.length - 1));
+    return items.length === 0 ? none(ctx) : some(ctx, items.pop());
   },
   insert: ([self, index, element], ctx) => {
     const items = vec(self);
     const position = Number(index as bigint);
     if (position > items.length) panic(ctx, `insertion index (is ${position}) should be <= len (is ${items.length})`);
     ctx.runtime.allocate(1);
-    insertOwnedElement(items, position, element);
+    items.splice(position, 0, element);
     return UNIT_VALUE;
   },
   remove: ([self, index], ctx) => {
     const items = vec(self);
     const position = Number(index as bigint);
     checkIndex(ctx, position, items.length, 'removal');
-    return removeOwnedElement(items, position);
+    return items.splice(position, 1)[0];
   },
   swap_remove: ([self, index], ctx) => {
     const items = vec(self);
@@ -537,7 +524,7 @@ const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
       );
     }
     swapOwnedElements(items, position, items.length - 1);
-    return removeOwnedElement(items, items.length - 1);
+    return items.pop();
   },
   truncate: ([self, len]) => {
     const items = vec(self);
@@ -561,20 +548,19 @@ const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
       if (item === DONE) break;
       room();
       ctx.runtime.allocate(1);
-      pushOwnedElement(items, fromRefs ? copyValue(deref(item)) : item);
+      items.push(fromRefs ? copyValue(deref(item)) : item);
     }
     return UNIT_VALUE;
   },
   extend_from_slice: ([self, other], ctx) => {
     const items = vec(self);
-    for (const item of clonedItems(ctx, sliceItems(deref(other)))) pushOwnedElement(items, item);
+    for (const item of clonedItems(ctx, sliceItems(deref(other)))) items.push(item);
     return UNIT_VALUE;
   },
   append: ([self, other]) => {
     const target = vec(self);
     const source = vec(other);
     keepVecCapacity(source, source.length);
-    relocateStringSlots(source, target, 0, source.length, target.length);
     for (const item of source) target.push(item);
     source.length = 0;
     return UNIT_VALUE;
@@ -605,7 +591,7 @@ const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
       if (items.length === length) return UNIT_VALUE;
       const type = elemType(ctx);
       while (items.length < length - 1) items.push(cloneValue(type, value));
-      pushOwnedElement(items, value);
+      items.push(value);
     }
     return UNIT_VALUE;
   },
@@ -635,21 +621,21 @@ const dequeNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
   with_capacity: () => [],
   push_back: ([self, value], ctx) => {
     ctx.runtime.allocate(1);
-    pushOwnedElement(vec(self), value);
+    vec(self).push(value);
     return UNIT_VALUE;
   },
   push_front: ([self, value], ctx) => {
     ctx.runtime.allocate(1);
-    insertOwnedElement(vec(self), 0, value);
+    vec(self).unshift(value);
     return UNIT_VALUE;
   },
   pop_back: ([self], ctx) => {
     const items = vec(self);
-    return items.length === 0 ? none(ctx) : some(ctx, removeOwnedElement(items, items.length - 1));
+    return items.length === 0 ? none(ctx) : some(ctx, items.pop());
   },
   pop_front: ([self], ctx) => {
     const items = vec(self);
-    return items.length === 0 ? none(ctx) : some(ctx, removeOwnedElement(items, 0));
+    return items.length === 0 ? none(ctx) : some(ctx, items.shift());
   },
   front: ([self], ctx) => option(ctx, vec(self)[0], vec(self).length > 0),
   back: ([self], ctx) => option(ctx, vec(self).at(-1), vec(self).length > 0),
@@ -673,14 +659,14 @@ const dequeNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
     if (position > items.length) {
       libraryPanic(ctx, 'index out of bounds', 'alloc/src/collections/vec_deque/mod.rs:2564:9');
     }
-    insertOwnedElement(items, position, value);
+    items.splice(position, 0, value);
     return UNIT_VALUE;
   },
   remove: ([self, index], ctx) => {
     const items = vec(self);
     const position = Number(index as bigint);
     if (position >= items.length) return none(ctx);
-    return some(ctx, removeOwnedElement(items, position));
+    return some(ctx, items.splice(position, 1)[0]);
   },
   extend: ([self, iter], ctx) => vecNatives.extend([self, iter], ctx),
   retain: ([self, f], ctx) => vecNatives.retain([self, f], ctx),

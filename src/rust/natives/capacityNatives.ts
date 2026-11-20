@@ -1,6 +1,5 @@
 import {
   changeString,
-  clearStringSlotsFrom,
   keepVecCapacity,
   reservedCapacity,
   reserveVec,
@@ -13,19 +12,20 @@ import {
 } from '../capacity';
 import { iteratorCapability } from '../traits';
 import type { Type } from '../types';
-import { utf8Length } from '../utf8';
-import { type IterValue, sliceLength, UNIT_VALUE, type Value } from '../values';
+import { utf8Bytes, utf8Length } from '../utf8';
+import { type IterValue, sliceLength, textOf, UNIT_VALUE, type Value } from '../values';
 import { isTrustedLen } from './iterators';
 import { sizeOf } from './layout';
 import { deref, libraryPanic, type NativeContext, placeOf } from './support';
 
-/**
- * The natives that keep the capacities of `Vec`, `VecDeque`, `BinaryHeap`, and `String`, which their values (arrays
- * and JS strings) do not hold, as `RawVec` grows and keeps them.
- */
-
 const USIZE_MAX = 2n ** 64n - 1n;
 const ISIZE_MAX = 2n ** 63n - 1n;
+
+export function intoStringBytes(value: Value, ctx: NativeContext): bigint[] {
+  const bytes = utf8Bytes(textOf(value), ctx.runtime);
+  setVecCapacity(bytes, stringCapacity(value));
+  return bytes;
+}
 
 /**
  * `RawVec`'s check of a length and the room asked beyond it (`with_capacity`, `reserve`), which panics when they
@@ -136,17 +136,13 @@ export function withCapacity(
         const items = vec(args[0]);
         const length = items.length;
         reserveVec(items, length, additional(args), sizeOf(elemType(ctx)));
-        const result = native(args, ctx);
-        if (items.length < length) clearStringSlotsFrom(items, items.length);
-        return result;
+        return native(args, ctx);
       };
     } else if (VEC_SHRINKING.has(name)) {
       tracked[name] = (args, ctx) => {
         const items = vec(args[0]);
         keepVecCapacity(items, items.length);
-        const result = native(args, ctx);
-        clearStringSlotsFrom(items, items.length);
-        return result;
+        return native(args, ctx);
       };
     }
   }
@@ -194,26 +190,26 @@ const stringCapacityNatives: Record<string, (args: Value[], ctx: NativeContext) 
   capacity: ([self]) => BigInt(stringCapacity(self)),
   reserve: ([self, additional], ctx) => {
     const place = placeOf(self);
-    const len = utf8Length(place.get() as string);
+    const len = utf8Length(textOf(place));
     checkVecCapacity(ctx, len, additional, 1);
     setStringCapacity(place, reservedCapacity(stringCapacity(place), len, Number(additional as bigint), 1));
     return UNIT_VALUE;
   },
   reserve_exact: ([self, additional], ctx) => {
     const place = placeOf(self);
-    checkVecCapacity(ctx, utf8Length(place.get() as string), additional, 1);
-    const needed = utf8Length(place.get() as string) + Number(additional as bigint);
+    checkVecCapacity(ctx, utf8Length(textOf(place)), additional, 1);
+    const needed = utf8Length(textOf(place)) + Number(additional as bigint);
     setStringCapacity(place, Math.max(stringCapacity(place), needed));
     return UNIT_VALUE;
   },
   shrink_to_fit: ([self]) => {
     const place = placeOf(self);
-    setStringCapacity(place, utf8Length(place.get() as string));
+    setStringCapacity(place, utf8Length(textOf(place)));
     return UNIT_VALUE;
   },
   shrink_to: ([self, min]) => {
     const place = placeOf(self);
-    const target = Math.max(utf8Length(place.get() as string), Number(min as bigint));
+    const target = Math.max(utf8Length(textOf(place)), Number(min as bigint));
     setStringCapacity(place, Math.min(stringCapacity(place), target));
     return UNIT_VALUE;
   },

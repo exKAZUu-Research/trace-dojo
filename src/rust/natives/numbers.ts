@@ -4,7 +4,7 @@ import { FLOAT_LIMITS } from '../floatLimits';
 import { normalize } from '../infer';
 import { bitsOf, intArith, overflow, wrap } from '../ops';
 import { INT_NAMES, intMax, intMin, type IntName, shallow, type Type } from '../types';
-import { EnumValue, StructValue, type Value } from '../values';
+import { EnumValue, StructValue, textOf, type Value } from '../values';
 import {
   define,
   deref,
@@ -402,7 +402,7 @@ const integer: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
         `core/src/num/mod.rs:${row}:1`
       );
     }
-    return parseInteger(ctx, deref(text) as string, intName(ctx), base);
+    return parseInteger(ctx, textOf(text), intName(ctx), base);
   },
   max_value: (_args, ctx) => intMax(intName(ctx)),
   min_value: (_args, ctx) => intMin(intName(ctx)),

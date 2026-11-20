@@ -2,7 +2,7 @@ import { DEFAULT_SPEC } from '../fmt';
 import { described, fieldsPart, optionPart } from '../iterDebug';
 import { cloneValue, copyValue } from '../ops';
 import type { Type } from '../types';
-import { ElementPlace, type EnumValue, type IterValue, type Value } from '../values';
+import { ElementPlace, type EnumValue, type IterValue, textOf, type Value } from '../values';
 import { defaultValue } from './core';
 import { arrayIter, ownedIter } from './iterators';
 import { call, define, deref, err, type NativeContext, none, ok, panic, placeOf, some } from './support';
@@ -33,7 +33,7 @@ const optionNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
     return opt(self).fields[0];
   },
   expect: ([self, msg], ctx) => {
-    if (!isSome(self)) panic(ctx, deref(msg) as string);
+    if (!isSome(self)) panic(ctx, textOf(msg));
     return opt(self).fields[0];
   },
   unwrap_or: ([self, fallback]) => (isSome(self) ? opt(self).fields[0] : fallback),
@@ -112,7 +112,7 @@ const resultNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
     return opt(self).fields[0];
   },
   expect: ([self, msg], ctx) => {
-    if (!isOk(self)) panic(ctx, `${deref(msg) as string}: ${debugText(ctx, opt(self).fields[0], ctx.typeArgs[1])}`);
+    if (!isOk(self)) panic(ctx, `${textOf(msg)}: ${debugText(ctx, opt(self).fields[0], ctx.typeArgs[1])}`);
     return opt(self).fields[0];
   },
   unwrap_err: ([self], ctx) => {
@@ -125,7 +125,7 @@ const resultNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
     return opt(self).fields[0];
   },
   expect_err: ([self, msg], ctx) => {
-    if (isOk(self)) panic(ctx, `${deref(msg) as string}: ${debugText(ctx, opt(self).fields[0], ctx.typeArgs[0])}`);
+    if (isOk(self)) panic(ctx, `${textOf(msg)}: ${debugText(ctx, opt(self).fields[0], ctx.typeArgs[0])}`);
     return opt(self).fields[0];
   },
   unwrap_or: ([self, fallback]) => (isOk(self) ? opt(self).fields[0] : fallback),

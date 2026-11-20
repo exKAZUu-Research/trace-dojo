@@ -19,6 +19,7 @@ import {
   type SetValue,
   sliceItems,
   StructValue,
+  textOf,
   type Value,
 } from './values';
 
@@ -134,7 +135,7 @@ export class Formatter {
       }
       case 'char':
       case 'str': {
-        return padString(v as string, spec, write);
+        return padString(textOf(v), spec, write);
       }
       case 'never': {
         return '';
@@ -148,7 +149,7 @@ export class Formatter {
         if (user !== undefined) return user;
         switch (t.def.builtin) {
           case 'String': {
-            return padString(v as string, spec, write);
+            return padString(textOf(v), spec, write);
           }
           case 'Box': {
             return this.display(v, t.args[0], spec, write);
@@ -225,7 +226,7 @@ export class Formatter {
         return quotedDebug(v as string, true, write);
       }
       case 'str': {
-        return quotedDebug(v as string, false, write);
+        return quotedDebug(textOf(v), false, write);
       }
       case 'tuple': {
         if (t.elems.length === 0) return pad('()', spec, '<', write);
@@ -274,7 +275,7 @@ export class Formatter {
     const { def } = t;
     switch (def.builtin) {
       case 'String': {
-        return quotedDebug(v as string, false, write);
+        return quotedDebug(textOf(v), false, write);
       }
       case 'Vec':
       case 'VecDeque':

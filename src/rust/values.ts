@@ -5,7 +5,7 @@ import type { AdtDef, Type } from './types';
 
 /**
  * A value at run time. Types decide how a value reads, so values carry no types: integers are bigints, floats
- * numbers, `char`s and strings JS strings, tuples, arrays, and `Vec`s JS arrays, and a shared reference is the value it
+ * numbers, `char`s and text JS strings, tuples, arrays, and `Vec`s JS arrays, and a shared reference is the value it
  * refers to, since nothing can change that value while the reference lives. A mutable reference is a {@link Place}.
  * `Box<T>` is the boxed value itself.
  */
@@ -14,6 +14,7 @@ export type Value =
   | number
   | boolean
   | string
+  | StringValue
   | Value[]
   | StructValue
   | EnumValue
@@ -31,6 +32,19 @@ export type Value =
   | undefined;
 
 export const UNIT_VALUE: Value[] = Object.freeze([]) as unknown as Value[];
+
+export class StringValue {
+  constructor(
+    readonly text: string,
+    readonly capacity: number
+  ) {}
+}
+
+export function textOf(value: Value): string {
+  let text = value;
+  while (isPlace(text)) text = text.get();
+  return text instanceof StringValue ? text.text : (text as string);
+}
 
 export class StructValue {
   constructor(
@@ -52,8 +66,6 @@ export interface Place {
   readonly isPlace: true;
   get(): Value;
   set(value: Value): void;
-  /** Where the place stores its value, which stays the same however the place is reached. */
-  storage?(): [object, number];
 }
 
 export class CellPlace implements Place {
@@ -67,10 +79,6 @@ export class CellPlace implements Place {
   set(value: Value): void {
     this.value = value;
   }
-
-  storage(): [object, number] {
-    return [this, 0];
-  }
 }
 
 export class ElementPlace implements Place {
@@ -82,10 +90,6 @@ export class ElementPlace implements Place {
 
   get(): Value {
     return this.array[this.index];
-  }
-
-  storage(): [object, number] {
-    return [this.array, this.index];
   }
 
   set(value: Value): void {
@@ -137,6 +141,10 @@ export function sliceGet(value: Value, index: number): Value {
 export function sliceSet(value: Value, index: number, element: Value): void {
   if (value instanceof SliceView) value.base[value.start + index] = element;
   else (value as Value[])[index] = element;
+}
+
+export function swapOwnedElements(items: Value[], first: number, second: number): void {
+  [items[first], items[second]] = [items[second], items[first]];
 }
 
 /** The array and offset a slice's elements live in, for places that refer to them. */

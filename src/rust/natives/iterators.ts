@@ -1,13 +1,5 @@
 // code-gauge-allow-file fileNcss 800 -- One native per method of the standard library.
-import {
-  collectedVecCapacity,
-  inPlaceCapacity,
-  pushOwnedElement,
-  removeOwnedElement,
-  setVecCapacity,
-  sizeTable,
-  swapOwnedElements,
-} from '../capacity';
+import { collectedVecCapacity, inPlaceCapacity, setVecCapacity, sizeTable } from '../capacity';
 import type { DebugPart } from '../debugText';
 import { normalize } from '../infer';
 import { type DebugValue, described, fieldsPart, iteratorDebug, numberPart, optionPart } from '../iterDebug';
@@ -41,6 +33,8 @@ import {
   sliceItems,
   sliceLength,
   SliceView,
+  swapOwnedElements,
+  textOf,
   type Value,
 } from '../values';
 import { layoutOf, sizeOf } from './layout';
@@ -1324,13 +1318,13 @@ export function collectInto(ctx: NativeContext, items: Value[], target: Type, it
     }
     case 'Box': {
       // A `Box<str>` collects text, as `String` does; a `Box<[T]>` the elements.
-      return shallow(t.args[0]).kind === 'str' ? items.map((element) => deref(element) as string).join('') : items;
+      return shallow(t.args[0]).kind === 'str' ? items.map(textOf).join('') : items;
     }
     case 'BinaryHeap': {
       return heapify([...items], t.args[0]);
     }
     case 'String': {
-      return items.map((element) => deref(element) as string).join('');
+      return items.map(textOf).join('');
     }
     case 'BTreeMap': {
       return collectBTreeMap(ctx, items as [Value, Value][], t.args[0], item);
@@ -1445,14 +1439,14 @@ function siftDownRange(heap: Value[], start: number, end: number, type: Type): v
 }
 
 export function heapPush(heap: Value[], value: Value, type: Type): void {
-  pushOwnedElement(heap, value);
+  heap.push(value);
   siftUp(heap, heap.length - 1, type);
 }
 
 export function heapPop(heap: Value[], type: Type): Value | undefined {
   if (heap.length === 0) return undefined;
   swapOwnedElements(heap, 0, heap.length - 1);
-  const top = removeOwnedElement(heap, heap.length - 1);
+  const top = heap.pop();
   let hole = 0;
   let child = 1;
   while (child < heap.length) {

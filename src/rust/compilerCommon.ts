@@ -1,6 +1,5 @@
 import type { Annotations } from './annotations';
 import type { Expr } from './ast';
-import { claimStrings } from './capacity';
 import type { Eval } from './compiler';
 import { normalize } from './infer';
 import { type Frame, UNASSIGNED } from './runtime';
@@ -30,14 +29,9 @@ export class LocalPlace implements Place {
   set(value: Value): void {
     this.frame.locals[this.slot] = value;
   }
-
-  storage(): [object, number] {
-    return [this.frame.locals, this.slot];
-  }
 }
 
 export function construct(def: AdtDef, variant: number, args: Value[]): Value {
-  claimStrings(args);
   return def.kind === 'enum' ? new EnumValue(def, variant, args) : new StructValue(def, args);
 }
 

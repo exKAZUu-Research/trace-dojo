@@ -1,5 +1,4 @@
 import type { Expr, Span } from './ast';
-import { claimString } from './capacity';
 import type { Compiler, Eval, PlaceEval } from './compiler';
 import { LocalPlace } from './compilerCommon';
 import { normalize } from './infer';
@@ -18,6 +17,7 @@ import {
   sliceLength,
   SliceView,
   type StructValue,
+  textOf,
   type Value,
 } from './values';
 
@@ -29,11 +29,7 @@ export function compilePlace(c: Compiler, expr: Expr): PlaceEval {
   const place = directPlace(c, expr);
   if (place) return place;
   const value = c.value(expr);
-  return (frame) => {
-    const temporary = new CellPlace(value(frame));
-    claimString(temporary);
-    return temporary;
-  };
+  return (frame) => new CellPlace(value(frame));
 }
 
 function directPlace(c: Compiler, expr: Expr): PlaceEval | undefined {
@@ -216,7 +212,7 @@ function rangeIndex(c: Compiler, base: Eval, index: Eval, isStr: boolean, span: 
     return frame.runtime.withRoots([container], () => {
       const range = index(frame) as RangeValue | undefined;
       return isStr
-        ? c.support.strSlice(container as string, range?.sliceStart(), range?.sliceEnd(), span)
+        ? c.support.strSlice(textOf(container), range?.sliceStart(), range?.sliceEnd(), span)
         : sliceRange(container, range, span);
     });
   };

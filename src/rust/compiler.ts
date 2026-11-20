@@ -2,10 +2,9 @@
 import type { Annotations, Coercion, FnContext, LocalVar, PathRes } from './annotations';
 import type { Block, Expr, Pattern, Span, Stmt } from './ast';
 import { forEachDirect, patternBindings } from './astWalk';
-import { claimString, claimStrings, moveString, settleStrings } from './capacity';
 import type { Checker } from './checker';
 import { compileCall, compileMethodCall } from './compilerCalls';
-import { construct, evaluateValues, isPlaceExpr, isRefType, isStringType, LocalPlace } from './compilerCommon';
+import { construct, evaluateValues, isPlaceExpr, isRefType, LocalPlace } from './compilerCommon';
 import { compileFor, compileIf, compileLoop, compileMatch, compileWhile } from './compilerControl';
 import { compileMacro } from './compilerMacros';
 import { compileBinary, compileCompoundAssign, compileUnary } from './compilerOperators';
@@ -17,7 +16,7 @@ import type { Program } from './items';
 import { castValue, copyValue, needsCopy } from './ops';
 import { ControlSignal, type Frame, type FunctionInfo, MOVED, UNASSIGNED } from './runtime';
 import { runtimeType } from './runtimeTypes';
-import { type ConstDef, type FnDef, isUnit, resolve, shallow, substitute, type Type, UNIT } from './types';
+import { type ConstDef, type FnDef, isUnit, resolve, shallow, substitute, type Type } from './types';
 import {
   CellPlace,
   DynValue,
@@ -26,6 +25,7 @@ import {
   type Place,
   RangeValue,
   StructValue,
+  textOf,
   UNIT_VALUE,
   type Value,
 } from './values';
@@ -242,7 +242,6 @@ export class Compiler {
         const value = this.value(stmt.expr);
         const run: Eval = (frame) => {
           frame.runtime.spend();
-          settleStrings();
           value(frame);
           return UNIT_VALUE;
         };
@@ -255,7 +254,6 @@ export class Compiler {
     }
   }
 
-  // code-gauge-allow functionNcss 32 -- Keep evaluation, binding, scope and let-else control flow in order.
   private compileLet(stmt: Extract<Stmt, { kind: 'let' }>): Eval {
     if (!stmt.init) {
       const locals = patternBindings(stmt.pattern, this.annotations);
@@ -282,12 +280,9 @@ export class Compiler {
     const local =
       stmt.pattern.kind === 'binding' && !stmt.pattern.sub ? this.annotations.bindings.get(stmt.pattern) : undefined;
     const refer = local && this.referent(stmt.init, local.slot);
-    const claim = this.claimInLocal(local);
     const run: Eval = (frame) => {
       frame.runtime.spend();
-      settleStrings();
       bind(frame, init(frame));
-      claim?.(frame);
       refer?.(frame);
       return UNIT_VALUE;
     };
@@ -300,13 +295,6 @@ export class Compiler {
     return (frame, value) => {
       frame.temporaries.push(bind(frame, value));
     };
-  }
-
-  /** A `String` variable claims the capacity of the `String` in flight that it stores. */
-  private claimInLocal(local: LocalVar | undefined): ((frame: Frame) => void) | undefined {
-    if (!local || !isStringType(local.type)) return undefined;
-    const { slot } = local;
-    return (frame) => claimString(new LocalPlace(frame, slot));
   }
 
   /**
@@ -366,10 +354,8 @@ export class Compiler {
 
   compileOwnedBinder(pattern: Pattern): (frame: Frame, value: Value) => Place {
     const matcher = this.compileMatcher(pattern);
-    const type = runtimeType(pattern.ty ?? UNIT);
     return (frame, value) => {
       const place = new CellPlace(value);
-      if (isStringType(type(frame))) claimString(place);
       frame.runtime.withRoots([place], () => matcher(frame, value, () => place));
       return place;
     };
@@ -402,7 +388,6 @@ export class Compiler {
     return this.coerce(input, coercion, expr);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- The access mode and resolved type decide how to read a place.
   private valueFromPlace(expr: Expr, read: Eval, type: Type): Eval {
     if (!isPlaceExpr(expr, this.annotations)) return read;
     if (this.isCopy(type)) return needsCopy(type) ? (frame) => copyValue(read(frame)) : read;
@@ -411,10 +396,8 @@ export class Compiler {
       const res = this.annotations.paths.get(expr);
       if (res?.kind === 'local' && res.local.mode === 'move' && !isRefType(res.local.type)) {
         const slot = res.local.slot;
-        const movesString = isStringType(type) || normalize(shallow(type)).kind === 'adt';
         return (frame) => {
           const value = read(frame);
-          if (movesString) moveString(new LocalPlace(frame, slot));
           frame.locals[slot] = MOVED;
           return value;
         };
@@ -425,7 +408,6 @@ export class Compiler {
       return (frame) => {
         const target = place(frame);
         const value = target.get();
-        moveString(target);
         target.set(MOVED);
         return value;
       };
@@ -447,26 +429,19 @@ export class Compiler {
     return operand.kind === 'adt' && operand.def.builtin === 'Box' && this.ownedPlace(expr.operand);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of expression, statement, or pattern.
+  // code-gauge-allow functionCognitiveComplexity 17 -- Reference adjustments preserve mutable places and distinguish borrowed text from owned values.
   private coerce(read: Eval, coercion: Coercion, expr: Expr): Eval {
     switch (coercion.kind) {
       case 'deref': {
         const sourceType = normalize(shallow(expr.ty ?? { kind: 'tuple', elems: [] }));
         const sourceMut = sourceType.kind === 'ref' && sourceType.mutable;
-        const { derefs, fromMut } = coercion;
-        if (sourceMut && !fromMut) {
-          // &mut T → &mut U keeps a place.
-          return (frame) => {
-            let place = read(frame) as Place;
-            for (const step of derefs) if (step === 'mutRef') place = place.get() as Place;
-            return place;
-          };
-        }
+        const { derefs, fromMut, toStr } = coercion;
+        const keepsPlace = sourceMut && !fromMut;
         return (frame) => {
           let value = read(frame);
-          if (sourceMut) value = (value as Place).get();
+          if (fromMut) value = (value as Place).get();
           for (const step of derefs) if (step === 'mutRef') value = (value as Place).get();
-          return value;
+          return toStr && !keepsPlace ? textOf(value) : value;
         };
       }
       case 'dyn': {
@@ -558,7 +533,6 @@ export class Compiler {
         for (const { index, value } of values) result[index] = value(frame);
         if (base) takeFromBase(base(frame) as StructValue, result, given, moved);
         frame.runtime.allocate(fields.length);
-        claimStrings(result);
         return def.kind === 'enum' ? new EnumValue(def, variant, result) : new StructValue(def, result);
       });
     };
@@ -571,21 +545,17 @@ export class Compiler {
     if (res?.kind === 'local' && res.local.mode === 'move') {
       const slot = res.local.slot;
       const refer = this.referent(expr.value, slot);
-      const claim = this.claimInLocal(res.local);
       return (frame) => {
         frame.locals[slot] = value(frame);
-        claim?.(frame);
         refer?.(frame);
         return UNIT_VALUE;
       };
     }
     const place = this.place(expr.target);
-    const storesString = isStringType(expr.target.ty!);
     return (frame) => {
       const v = value(frame);
       const target = place(frame);
       target.set(v);
-      if (storesString) claimString(target);
       return UNIT_VALUE;
     };
   }
@@ -772,14 +742,14 @@ function readRange(c: Compiler, expr: ExprOf<'range'>): Eval {
 function readTuple(c: Compiler, expr: ExprOf<'tuple'>): Eval {
   if (expr.elems.length === 0) return () => UNIT_VALUE;
   const elems = expr.elems.map((elem) => c.value(elem));
-  return (frame) => claimStrings(evaluateValues(frame, elems));
+  return (frame) => evaluateValues(frame, elems);
 }
 
 function readArray(c: Compiler, expr: ExprOf<'array'>): Eval {
   const elems = expr.elems.map((elem) => c.value(elem));
   return (frame) => {
     frame.runtime.allocate(elems.length);
-    return claimStrings(evaluateValues(frame, elems));
+    return evaluateValues(frame, elems);
   };
 }
 

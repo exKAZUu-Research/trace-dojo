@@ -14,11 +14,14 @@ import {
   type RangeValue,
   SetValue,
   sliceItems,
+  StringValue,
   StructValue,
+  textOf,
   type TurtleValue,
   UNIT_VALUE,
   type Value,
 } from '../values';
+import { intoStringBytes } from './capacityNatives';
 import { collectInto } from './iterators';
 import { sizeOf } from './layout';
 import {
@@ -281,15 +284,15 @@ define({
     const order = compareValues(ctx.typeArgs[2], call(ctx, f, [a]), call(ctx, f, [b])) ?? 0;
     return order <= 0 ? a : b;
   },
-  // A `String` is its `str`, and a `Vec` its slice, so the reference they lend is the value.
-  // A `Box<[T]>` is its elements and a `Box<str>` its text, as a `Vec<T>` and a `String` are.
   'Box<[_]>::into_vec': ([self]) => deref(self),
-  'Box<str>::into_string': ([self]) => deref(self),
+  'Box<str>::into_string': ([self]) => textOf(self),
   'AsRef::as_ref': ([self], ctx) => {
     const value = deref(self);
     // A string as `[u8]` is its UTF-8 bytes.
-    const isBytes = normalize(shallow(ctx.typeArgs[1])).kind === 'slice' && typeof value === 'string';
-    return isBytes ? utf8Bytes(value, ctx.runtime) : value;
+    const target = normalize(shallow(ctx.typeArgs[1]));
+    if (target.kind === 'str') return textOf(value);
+    const isBytes = target.kind === 'slice' && (typeof value === 'string' || value instanceof StringValue);
+    return isBytes ? utf8Bytes(textOf(value), ctx.runtime) : value;
   },
   'std::mem::size_of': (_args, ctx) => BigInt(sizeOf(ctx.typeArgs[0])),
   'std::mem::swap': ([x, y]) => {
@@ -330,7 +333,7 @@ define({
   'Ordering::is_le': ([self]) => (self as EnumValue).variant !== 2,
   'Ordering::is_ge': ([self]) => (self as EnumValue).variant !== 0,
   'Formatter::write_str': ([self, text], ctx) => {
-    (deref(self) as FormatterValue).write(deref(text) as string);
+    (deref(self) as FormatterValue).write(textOf(text));
     return ok(ctx, UNIT_VALUE);
   },
   'Formatter::pad': ([self, text], ctx) => {
@@ -370,7 +373,7 @@ define({
   },
 });
 
-function toStringValue(ctx: NativeContext, self: Value): string {
+function toStringValue(ctx: NativeContext, self: Value): Value {
   const type = normalize(shallow(selfType(ctx)));
   const { formatter } = ctx.interp;
   if (type.kind === 'int') {
@@ -400,6 +403,7 @@ function rangeContains(ctx: NativeContext, range: RangeValue, item: Value): bool
 }
 
 /** `T::from(value)` for the conversions of the standard library. */
+// code-gauge-allow functionCognitiveComplexity 16 -- Rust conversions select different rules for each destination type.
 export function convert(ctx: NativeContext, value: Value, from: Type, to: Type): Value {
   const source = normalize(shallow(from));
   const target = normalize(shallow(to));
@@ -409,13 +413,10 @@ export function convert(ctx: NativeContext, value: Value, from: Type, to: Type):
   if (target.kind === 'adt') {
     switch (target.def.builtin) {
       case 'String': {
-        return deref(value) as string;
+        return source.kind === 'adt' && source.def.builtin === 'String' ? value : textOf(value);
       }
       case 'Vec': {
-        const input = deref(value);
-        return typeof input === 'string'
-          ? utf8Bytes(input, ctx.runtime)
-          : ownedSequence(ctx, input, source, target.args[0]);
+        return convertToVec(ctx, value, source, target.args[0]);
       }
       case 'Option': {
         return some(ctx, value);
@@ -442,16 +443,23 @@ export function convert(ctx: NativeContext, value: Value, from: Type, to: Type):
   return value;
 }
 
+function convertToVec(ctx: NativeContext, value: Value, source: Type, elem: Type): Value {
+  if (source.kind === 'adt' && source.def.builtin === 'String') return intoStringBytes(value, ctx);
+  const input = deref(value);
+  if (typeof input === 'string' || input instanceof StringValue) return utf8Bytes(textOf(input), ctx.runtime);
+  return ownedSequence(ctx, input, source, elem);
+}
+
 /** `Box<T>::from(value)`: a trait object of the value, or the value itself, which a box holds as it is. */
 function boxValue(ctx: NativeContext, value: Value, source: Type, inner: Type): Value {
   if (inner.kind === 'dyn') {
     if (source.kind === 'ref' || (source.kind === 'adt' && source.def.builtin === 'String')) {
-      return new DynValue(ctx.interp.program.builtinType('String'), deref(value) as string);
+      return new DynValue(ctx.interp.program.builtinType('String'), textOf(value));
     }
     return new DynValue(source, value);
   }
   if (inner.kind === 'slice') return ownedSequence(ctx, deref(value), source, inner.elem);
-  if (inner.kind === 'str') return deref(value) as string;
+  if (inner.kind === 'str') return textOf(value);
   return value;
 }
 

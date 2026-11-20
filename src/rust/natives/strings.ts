@@ -1,4 +1,4 @@
-import { madeString } from '../capacity';
+import { madeString, stringCapacity, vecCapacity } from '../capacity';
 import { normalize } from '../infer';
 import { strSliceBytes } from '../interpreter';
 // code-gauge-allow-file fileNcss 488 -- One native per method of the standard library.
@@ -15,11 +15,13 @@ import {
   type RangeValue,
   sliceItems,
   SliceView,
+  StringValue,
   StructValue,
+  textOf,
   UNIT_VALUE,
   type Value,
 } from '../values';
-import { checkVecCapacity, withStringCapacity } from './capacityNatives';
+import { checkVecCapacity, intoStringBytes, withStringCapacity } from './capacityNatives';
 import { arrayIter } from './iterators';
 import { parseFloatText, parseInteger } from './numbers';
 import { checkedRangeBounds } from './ranges';
@@ -50,8 +52,9 @@ import {
 
 const encoder = new TextEncoder();
 
-function str(value: Value): string {
-  return deref(value) as string;
+function patternValue(value: Value): Value {
+  const pattern = deref(value);
+  return pattern instanceof StringValue ? pattern.text : pattern;
 }
 
 /** The byte offset in UTF-8 of a UTF-16 index. */
@@ -77,7 +80,7 @@ function patternMatcher(
   ctx: NativeContext,
   pattern: Value
 ): (text: string, from: number) => { index: number; length: number } | undefined {
-  const p = deref(pattern);
+  const p = patternValue(pattern);
   if (p instanceof FnValue) {
     return (text, from) => {
       for (let index = from; index < text.length;) {
@@ -116,7 +119,7 @@ function patternMatcher(
 
 /** The searcher std picks for a pattern, by the pattern's type. */
 function patternOf(ctx: NativeContext, pattern: Value): PatternKind {
-  const p = deref(pattern);
+  const p = patternValue(pattern);
   if (p instanceof FnValue) return predicatePattern(ctx, p);
   if (typeof p === 'string') {
     return normalize(shallow(ctx.typeArgs[0])).kind === 'char' ? { kind: 'char', char: p } : { kind: 'str', needle: p };
@@ -216,7 +219,7 @@ function trimWith(text: string, start: boolean, end: boolean, test: (char: strin
 }
 
 function charTest(ctx: NativeContext, pattern: Value): (char: string) => boolean {
-  const p = deref(pattern);
+  const p = patternValue(pattern);
   if (p instanceof FnValue) return (char) => call(ctx, p, [char]) as boolean;
   if (typeof p === 'string' && [...p].length === 1) return (char) => char === p;
   if (Array.isArray(p) || p instanceof SliceView) {
@@ -227,7 +230,7 @@ function charTest(ctx: NativeContext, pattern: Value): (char: string) => boolean
 }
 
 function trimMatches(ctx: NativeContext, text: string, pattern: Value, start: boolean, end: boolean): string {
-  const p = deref(pattern);
+  const p = patternValue(pattern);
   if (typeof p === 'string' && [...p].length !== 1) {
     let result = text;
     if (p === '') return result;
@@ -239,14 +242,14 @@ function trimMatches(ctx: NativeContext, text: string, pattern: Value, start: bo
 }
 
 function startsWith(ctx: NativeContext, text: string, pattern: Value): number | undefined {
-  const p = deref(pattern);
+  const p = patternValue(pattern);
   if (typeof p === 'string') return text.startsWith(p) ? p.length : undefined;
   const first = [...text][0];
   return first !== undefined && charTest(ctx, pattern)(first) ? first.length : undefined;
 }
 
 function endsWith(ctx: NativeContext, text: string, pattern: Value): number | undefined {
-  const p = deref(pattern);
+  const p = patternValue(pattern);
   if (typeof p === 'string') return text.endsWith(p) ? p.length : undefined;
   const last = [...text].at(-1);
   return last !== undefined && charTest(ctx, pattern)(last) ? last.length : undefined;
@@ -298,12 +301,12 @@ function rangeBounds(range: Value, length: number): { start: number; end: number
 }
 
 const strNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
-  len: ([s]) => BigInt(byteLength(str(s))),
-  is_empty: ([s]) => str(s).length === 0,
-  chars: ([s], ctx) => strIter(str(s), ctx),
-  bytes: ([s], ctx) => arrayIter(utf8Bytes(str(s), ctx.runtime)),
+  len: ([s]) => BigInt(byteLength(textOf(s))),
+  is_empty: ([s]) => textOf(s).length === 0,
+  chars: ([s], ctx) => strIter(textOf(s), ctx),
+  bytes: ([s], ctx) => arrayIter(utf8Bytes(textOf(s), ctx.runtime)),
   char_indices: ([s], ctx) => {
-    const text = str(s);
+    const text = textOf(s);
     const items: Value[] = [];
     let offset = 0;
     for (const char of text) {
@@ -328,36 +331,36 @@ const strNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
       ]);
     });
   },
-  as_bytes: ([s], ctx) => utf8Bytes(str(s), ctx.runtime),
-  trim: ([s]) => trimWith(str(s), true, true, isWhitespace),
-  trim_start: ([s]) => trimWith(str(s), true, false, isWhitespace),
-  trim_end: ([s]) => trimWith(str(s), false, true, isWhitespace),
-  trim_matches: ([s, p], ctx) => trimMatches(ctx, str(s), p, true, true),
-  trim_start_matches: ([s, p], ctx) => trimMatches(ctx, str(s), p, true, false),
-  trim_end_matches: ([s, p], ctx) => trimMatches(ctx, str(s), p, false, true),
+  as_bytes: ([s], ctx) => utf8Bytes(textOf(s), ctx.runtime),
+  trim: ([s]) => trimWith(textOf(s), true, true, isWhitespace),
+  trim_start: ([s]) => trimWith(textOf(s), true, false, isWhitespace),
+  trim_end: ([s]) => trimWith(textOf(s), false, true, isWhitespace),
+  trim_matches: ([s, p], ctx) => trimMatches(ctx, textOf(s), p, true, true),
+  trim_start_matches: ([s, p], ctx) => trimMatches(ctx, textOf(s), p, true, false),
+  trim_end_matches: ([s, p], ctx) => trimMatches(ctx, textOf(s), p, false, true),
   strip_prefix: ([s, p], ctx) => {
-    const text = str(s);
+    const text = textOf(s);
     const length = startsWith(ctx, text, p);
     return option(ctx, length === undefined ? undefined : text.slice(length), length !== undefined);
   },
   strip_suffix: ([s, p], ctx) => {
-    const text = str(s);
+    const text = textOf(s);
     const length = endsWith(ctx, text, p);
     return option(ctx, length === undefined ? undefined : text.slice(0, text.length - length), length !== undefined);
   },
-  split_whitespace: ([s]) => splitWhitespaceIter(str(s), isWhitespace),
-  split_ascii_whitespace: ([s]) => splitAsciiWhitespaceIter(str(s)),
-  lines: ([s]) => linesIter(str(s)),
-  split: ([s, p], ctx) => splitIter(str(s), patternOf(ctx, p), 'Split'),
-  rsplit: ([s, p], ctx) => splitIter(str(s), patternOf(ctx, p), 'RSplit'),
-  split_inclusive: ([s, p], ctx) => splitIter(str(s), patternOf(ctx, p), 'SplitInclusive'),
-  split_terminator: ([s, p], ctx) => splitIter(str(s), patternOf(ctx, p), 'SplitTerminator'),
-  splitn: ([s, n, p], ctx) => splitNIter(str(s), patternOf(ctx, p), Number(n as bigint), false),
-  rsplitn: ([s, n, p], ctx) => splitNIter(str(s), patternOf(ctx, p), Number(n as bigint), true),
-  split_once: ([s, p], ctx) => splitOnce(ctx, str(s), p, false),
-  rsplit_once: ([s, p], ctx) => splitOnce(ctx, str(s), p, true),
+  split_whitespace: ([s]) => splitWhitespaceIter(textOf(s), isWhitespace),
+  split_ascii_whitespace: ([s]) => splitAsciiWhitespaceIter(textOf(s)),
+  lines: ([s]) => linesIter(textOf(s)),
+  split: ([s, p], ctx) => splitIter(textOf(s), patternOf(ctx, p), 'Split'),
+  rsplit: ([s, p], ctx) => splitIter(textOf(s), patternOf(ctx, p), 'RSplit'),
+  split_inclusive: ([s, p], ctx) => splitIter(textOf(s), patternOf(ctx, p), 'SplitInclusive'),
+  split_terminator: ([s, p], ctx) => splitIter(textOf(s), patternOf(ctx, p), 'SplitTerminator'),
+  splitn: ([s, n, p], ctx) => splitNIter(textOf(s), patternOf(ctx, p), Number(n as bigint), false),
+  rsplitn: ([s, n, p], ctx) => splitNIter(textOf(s), patternOf(ctx, p), Number(n as bigint), true),
+  split_once: ([s, p], ctx) => splitOnce(ctx, textOf(s), p, false),
+  rsplit_once: ([s, p], ctx) => splitOnce(ctx, textOf(s), p, true),
   split_at: ([s, mid], ctx) => {
-    const text = str(s);
+    const text = textOf(s);
     const offset = Number(mid as bigint);
     // `str::split_at` reports its panics inside the library, unlike slicing with `&s[..mid]`.
     let head: string;
@@ -369,49 +372,59 @@ const strNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
     }
     return [head, text.slice(head.length)];
   },
-  contains: ([s, p], ctx) => patternMatcher(ctx, p)(str(s), 0) !== undefined,
-  starts_with: ([s, p], ctx) => startsWith(ctx, str(s), p) !== undefined,
-  ends_with: ([s, p], ctx) => endsWith(ctx, str(s), p) !== undefined,
+  contains: ([s, p], ctx) => patternMatcher(ctx, p)(textOf(s), 0) !== undefined,
+  starts_with: ([s, p], ctx) => startsWith(ctx, textOf(s), p) !== undefined,
+  ends_with: ([s, p], ctx) => endsWith(ctx, textOf(s), p) !== undefined,
   find: ([s, p], ctx) => {
-    const text = str(s);
+    const text = textOf(s);
     const found = patternMatcher(ctx, p)(text, 0);
     return option(ctx, found && BigInt(byteOffset(text, found.index)), found !== undefined);
   },
   rfind: ([s, p], ctx) => {
-    const found = searcherOf(str(s), patternOf(ctx, p)).nextMatchBack();
+    const found = searcherOf(textOf(s), patternOf(ctx, p)).nextMatchBack();
     return found ? some(ctx, BigInt(found[0])) : none(ctx);
   },
-  matches: ([s, p], ctx) => matchesIter(str(s), patternOf(ctx, p), false),
-  match_indices: ([s, p], ctx) => matchesIter(str(s), patternOf(ctx, p), true),
-  replace: ([s, from, to], ctx) => replaceN(ctx, str(s), from, str(to), Number.POSITIVE_INFINITY),
-  replacen: ([s, from, to, count], ctx) => replaceN(ctx, str(s), from, str(to), Number(count as bigint)),
-  to_uppercase: ([s]) => upper(str(s)),
-  to_lowercase: ([s]) => lower(str(s)),
-  to_ascii_uppercase: ([s]) => str(s).replaceAll(/[a-z]/g, (c) => c.toUpperCase()),
-  to_ascii_lowercase: ([s]) => str(s).replaceAll(/[A-Z]/g, (c) => c.toLowerCase()),
+  matches: ([s, p], ctx) => matchesIter(textOf(s), patternOf(ctx, p), false),
+  match_indices: ([s, p], ctx) => matchesIter(textOf(s), patternOf(ctx, p), true),
+  replace: ([s, from, to], ctx) => replaceN(ctx, textOf(s), from, textOf(to), Number.POSITIVE_INFINITY),
+  replacen: ([s, from, to, count], ctx) => replaceN(ctx, textOf(s), from, textOf(to), Number(count as bigint)),
+  to_uppercase: ([s]) => upper(textOf(s)),
+  to_lowercase: ([s]) => lower(textOf(s)),
+  to_ascii_uppercase: ([s]) => textOf(s).replaceAll(/[a-z]/g, (c) => c.toUpperCase()),
+  to_ascii_lowercase: ([s]) => textOf(s).replaceAll(/[A-Z]/g, (c) => c.toLowerCase()),
   make_ascii_uppercase: ([s]) => {
     const place = placeOf(s);
-    place.set((place.get() as string).replaceAll(/[a-z]/g, (c) => c.toUpperCase()));
+    place.set(
+      madeString(
+        textOf(place).replaceAll(/[a-z]/g, (c) => c.toUpperCase()),
+        stringCapacity(place)
+      )
+    );
     return UNIT_VALUE;
   },
   make_ascii_lowercase: ([s]) => {
     const place = placeOf(s);
-    place.set((place.get() as string).replaceAll(/[A-Z]/g, (c) => c.toLowerCase()));
+    place.set(
+      madeString(
+        textOf(place).replaceAll(/[A-Z]/g, (c) => c.toLowerCase()),
+        stringCapacity(place)
+      )
+    );
     return UNIT_VALUE;
   },
   eq_ignore_ascii_case: ([a, b]) =>
-    str(a).replaceAll(/[A-Z]/g, (c) => c.toLowerCase()) === str(b).replaceAll(/[A-Z]/g, (c) => c.toLowerCase()),
+    textOf(a).replaceAll(/[A-Z]/g, (c) => c.toLowerCase()) === textOf(b).replaceAll(/[A-Z]/g, (c) => c.toLowerCase()),
   repeat: ([s, n], ctx) => {
     const count = Number(n as bigint);
-    ctx.runtime.allocateString(str(s).length * count);
-    return str(s).repeat(count);
+    ctx.runtime.allocateString(textOf(s).length * count);
+    return textOf(s).repeat(count);
   },
-  parse: ([s], ctx) => parse(ctx, str(s)),
-  to_owned: ([s]) => str(s),
-  into_string: ([s]) => str(s),
-  is_char_boundary: ([s, i]) => isCharBoundary(encoder.encode(str(s)), Number(i as bigint)),
+  parse: ([s], ctx) => parse(ctx, textOf(s)),
+  to_owned: ([s]) => textOf(s),
+  into_string: ([s]) => textOf(s),
+  is_char_boundary: ([s, i]) => isCharBoundary(encoder.encode(textOf(s)), Number(i as bigint)),
   get: ([s, range], ctx) => {
-    const text = str(s);
+    const text = textOf(s);
     const { start, end } = rangeBounds(range, byteLength(text));
     try {
       return some(ctx, strSliceBytes(text, start, end, ctx.span));
@@ -419,7 +432,7 @@ const strNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
       return none(ctx);
     }
   },
-  is_ascii: ([s]) => /^[\u0000-\u007F]*$/.test(str(s)),
+  is_ascii: ([s]) => /^[\u0000-\u007F]*$/.test(textOf(s)),
 };
 
 function splitOnce(ctx: NativeContext, text: string, pattern: Value, reverse: boolean): Value {
@@ -468,7 +481,7 @@ const stringNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
     let text = '';
     for (let item = iterator.next(); item !== DONE; item = iterator.next()) {
       ctx.runtime.spend();
-      text = appended(ctx, text, deref(item) as string);
+      text = appended(ctx, text, textOf(item));
     }
     return text;
   },
@@ -477,7 +490,7 @@ const stringNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
     const values = deref(bytes) as bigint[];
     const array = Uint8Array.from(values, Number);
     try {
-      return ok(ctx, decodeUtf8(array, true));
+      return ok(ctx, madeString(decodeUtf8(array, true), vecCapacity(values, values.length, 1)));
     } catch {
       const { validUpTo, errorLen } = utf8Error(array);
       return err(ctx, new StructValue(ctx.interp.program.adtDef('Utf8Error'), [[...values], validUpTo, errorLen]));
@@ -485,38 +498,38 @@ const stringNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
   },
   push_str: ([self, s]) => {
     const place = placeOf(self);
-    place.set((place.get() as string) + str(s));
+    place.set(textOf(place) + textOf(s));
     return UNIT_VALUE;
   },
   push: ([self, c]) => {
     const place = placeOf(self);
-    place.set((place.get() as string) + (c as string));
+    place.set(textOf(place) + (c as string));
     return UNIT_VALUE;
   },
   pop: ([self], ctx) => {
     const place = placeOf(self);
-    const chars = [...(place.get() as string)];
+    const chars = [...textOf(place)];
     const last = chars.pop();
     place.set(chars.join(''));
     return option(ctx, last, last !== undefined);
   },
   insert: ([self, idx, c], ctx) => {
     const place = placeOf(self);
-    const text = place.get() as string;
+    const text = textOf(place);
     const head = headAtBoundary(ctx, text, Number(idx as bigint), 'idx');
     place.set(head + (c as string) + text.slice(head.length));
     return UNIT_VALUE;
   },
   insert_str: ([self, idx, s], ctx) => {
     const place = placeOf(self);
-    const text = place.get() as string;
+    const text = textOf(place);
     const head = headAtBoundary(ctx, text, Number(idx as bigint), 'idx');
-    place.set(head + str(s) + text.slice(head.length));
+    place.set(head + textOf(s) + text.slice(head.length));
     return UNIT_VALUE;
   },
   remove: ([self, idx], ctx) => {
     const place = placeOf(self);
-    const text = place.get() as string;
+    const text = textOf(place);
     const offset = Number(idx as bigint);
     const rest = strSliceBytes(text, offset, undefined, ctx.span);
     if (rest.length === 0) panic(ctx, 'cannot remove a char from the end of a string');
@@ -527,7 +540,7 @@ const stringNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
   },
   truncate: ([self, len], ctx) => {
     const place = placeOf(self);
-    const text = place.get() as string;
+    const text = textOf(place);
     const length = Number(len as bigint);
     if (length < byteLength(text)) place.set(headAtBoundary(ctx, text, length, 'new_len'));
     return UNIT_VALUE;
@@ -536,18 +549,18 @@ const stringNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
     placeOf(self).set('');
     return UNIT_VALUE;
   },
-  as_str: ([self]) => str(self),
+  as_str: ([self]) => textOf(self),
   as_mut_str: ([self]) => self,
-  into_bytes: ([self], ctx) => utf8Bytes(str(self), ctx.runtime),
-  into_boxed_str: ([self]) => str(self),
+  into_bytes: ([self], ctx) => intoStringBytes(self, ctx),
+  into_boxed_str: ([self]) => textOf(self),
   retain: ([self, f], ctx) => {
     const place = placeOf(self);
-    place.set([...(place.get() as string)].filter((char) => call(ctx, f, [char]) as boolean).join(''));
+    place.set([...textOf(place)].filter((char) => call(ctx, f, [char]) as boolean).join(''));
     return UNIT_VALUE;
   },
   drain: ([self, range], ctx) => {
     const place = placeOf(self);
-    const text = place.get() as string;
+    const text = textOf(place);
     const bytes = encoder.encode(text);
     const [start, end] = stringRange(ctx, bytes, range, 'drain');
     const removed = decodeUtf8(bytes.subarray(start, end));
@@ -559,27 +572,27 @@ const stringNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
   },
   split_off: ([self, at], ctx) => {
     const place = placeOf(self);
-    const text = place.get() as string;
+    const text = textOf(place);
     const head = headAtBoundary(ctx, text, Number(at as bigint), 'at');
     place.set(head);
     return text.slice(head.length);
   },
   replace_range: ([self, range, with_], ctx) => {
     const place = placeOf(self);
-    const bytes = encoder.encode(place.get() as string);
+    const bytes = encoder.encode(textOf(place));
     const [start, end] = stringRange(ctx, bytes, range, 'replace');
-    place.set(decodeUtf8(bytes.subarray(0, start)) + str(with_) + decodeUtf8(bytes.subarray(end)));
+    place.set(decodeUtf8(bytes.subarray(0, start)) + textOf(with_) + decodeUtf8(bytes.subarray(end)));
     return UNIT_VALUE;
   },
   extend: ([self, iter], ctx) => {
     const place = placeOf(self);
-    let text = place.get() as string;
+    let text = textOf(place);
     const iterator = deref(iter) as IterValue;
     for (;;) {
       ctx.runtime.spend();
       const item = iterator.next();
       if (item === DONE) break;
-      text = appended(ctx, text, deref(item) as string);
+      text = appended(ctx, text, textOf(item));
     }
     place.set(text);
     return UNIT_VALUE;
@@ -618,54 +631,50 @@ function charCode(value: Value): number {
   return (deref(value) as string).codePointAt(0)!;
 }
 
-function char(value: Value): string {
-  return deref(value) as string;
-}
-
 const charNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
-  is_alphabetic: ([c]) => /^\p{Alphabetic}$/u.test(char(c)),
-  is_numeric: ([c]) => /^[\p{Nd}\p{Nl}\p{No}]$/u.test(char(c)),
-  is_alphanumeric: ([c]) => /^[\p{Alphabetic}\p{Nd}\p{Nl}\p{No}]$/u.test(char(c)),
-  is_whitespace: ([c]) => isWhitespace(char(c)),
-  is_uppercase: ([c]) => /^\p{Uppercase}$/u.test(char(c)),
-  is_lowercase: ([c]) => /^\p{Lowercase}$/u.test(char(c)),
-  is_control: ([c]) => /^\p{Cc}$/u.test(char(c)),
-  is_digit: ([c, radix], ctx) => digitOf(ctx, char(c), Number(radix as bigint)) !== undefined,
+  is_alphabetic: ([c]) => /^\p{Alphabetic}$/u.test(textOf(c)),
+  is_numeric: ([c]) => /^[\p{Nd}\p{Nl}\p{No}]$/u.test(textOf(c)),
+  is_alphanumeric: ([c]) => /^[\p{Alphabetic}\p{Nd}\p{Nl}\p{No}]$/u.test(textOf(c)),
+  is_whitespace: ([c]) => isWhitespace(textOf(c)),
+  is_uppercase: ([c]) => /^\p{Uppercase}$/u.test(textOf(c)),
+  is_lowercase: ([c]) => /^\p{Lowercase}$/u.test(textOf(c)),
+  is_control: ([c]) => /^\p{Cc}$/u.test(textOf(c)),
+  is_digit: ([c, radix], ctx) => digitOf(ctx, textOf(c), Number(radix as bigint)) !== undefined,
   is_ascii: ([c]) => charCode(c) < 0x80,
-  is_ascii_digit: ([c]) => /^[0-9]$/.test(char(c)),
-  is_ascii_hexdigit: ([c]) => /^[0-9a-fA-F]$/.test(char(c)),
-  is_ascii_alphabetic: ([c]) => /^[a-zA-Z]$/.test(char(c)),
-  is_ascii_alphanumeric: ([c]) => /^[a-zA-Z0-9]$/.test(char(c)),
-  is_ascii_uppercase: ([c]) => /^[A-Z]$/.test(char(c)),
-  is_ascii_lowercase: ([c]) => /^[a-z]$/.test(char(c)),
-  is_ascii_punctuation: ([c]) => /^[!-/:-@[-`{-~]$/.test(char(c)),
-  is_ascii_whitespace: ([c]) => /^[ \t\n\f\r]$/.test(char(c)),
+  is_ascii_digit: ([c]) => /^[0-9]$/.test(textOf(c)),
+  is_ascii_hexdigit: ([c]) => /^[0-9a-fA-F]$/.test(textOf(c)),
+  is_ascii_alphabetic: ([c]) => /^[a-zA-Z]$/.test(textOf(c)),
+  is_ascii_alphanumeric: ([c]) => /^[a-zA-Z0-9]$/.test(textOf(c)),
+  is_ascii_uppercase: ([c]) => /^[A-Z]$/.test(textOf(c)),
+  is_ascii_lowercase: ([c]) => /^[a-z]$/.test(textOf(c)),
+  is_ascii_punctuation: ([c]) => /^[!-/:-@[-`{-~]$/.test(textOf(c)),
+  is_ascii_whitespace: ([c]) => /^[ \t\n\f\r]$/.test(textOf(c)),
   is_ascii_graphic: ([c]) => charCode(c) > 0x20 && charCode(c) < 0x7f,
   is_ascii_control: ([c]) => charCode(c) < 0x20 || charCode(c) === 0x7f,
-  to_ascii_uppercase: ([c]) => (/^[a-z]$/.test(char(c)) ? char(c).toUpperCase() : char(c)),
-  to_ascii_lowercase: ([c]) => (/^[A-Z]$/.test(char(c)) ? char(c).toLowerCase() : char(c)),
+  to_ascii_uppercase: ([c]) => (/^[a-z]$/.test(textOf(c)) ? textOf(c).toUpperCase() : textOf(c)),
+  to_ascii_lowercase: ([c]) => (/^[A-Z]$/.test(textOf(c)) ? textOf(c).toLowerCase() : textOf(c)),
   make_ascii_uppercase: ([c]) => {
     const place = placeOf(c);
-    const value = place.get() as string;
+    const value = textOf(place);
     place.set(/^[a-z]$/.test(value) ? value.toUpperCase() : value);
     return UNIT_VALUE;
   },
   make_ascii_lowercase: ([c]) => {
     const place = placeOf(c);
-    const value = place.get() as string;
+    const value = textOf(place);
     place.set(/^[A-Z]$/.test(value) ? value.toLowerCase() : value);
     return UNIT_VALUE;
   },
   eq_ignore_ascii_case: ([a, b]) =>
-    char(a).replace(/[A-Z]/, (x) => x.toLowerCase()) === char(b).replace(/[A-Z]/, (x) => x.toLowerCase()),
-  to_uppercase: ([c]) => caseIter('ToUppercase', char(c).toUpperCase()),
-  to_lowercase: ([c]) => caseIter('ToLowercase', char(c).toLowerCase()),
+    textOf(a).replace(/[A-Z]/, (x) => x.toLowerCase()) === textOf(b).replace(/[A-Z]/, (x) => x.toLowerCase()),
+  to_uppercase: ([c]) => caseIter('ToUppercase', textOf(c).toUpperCase()),
+  to_lowercase: ([c]) => caseIter('ToLowercase', textOf(c).toLowerCase()),
   to_digit: ([c, radix], ctx) => {
-    const digit = digitOf(ctx, char(c), Number(radix as bigint));
+    const digit = digitOf(ctx, textOf(c), Number(radix as bigint));
     return option(ctx, digit === undefined ? undefined : BigInt(digit), digit !== undefined);
   },
-  len_utf8: ([c]) => BigInt(byteLength(char(c))),
-  len_utf16: ([c]) => BigInt(char(c).length),
+  len_utf8: ([c]) => BigInt(byteLength(textOf(c))),
+  len_utf16: ([c]) => BigInt(textOf(c).length),
   from_u32: ([i], ctx) => fromU32(ctx, i),
   from_digit: ([num, radix], ctx) => fromDigit(ctx, num, radix),
 };
@@ -722,14 +731,16 @@ for (const name of Object.keys(charNatives).filter((key) => key.includes('ascii'
   natives[`u8::${name}`] = (args, ctx) => {
     if (name.startsWith('make_')) {
       const place = placeOf(args[0]);
-      place.set(BigInt(char(charNatives[name.replace('make_', 'to_')]([byteChar(place.get())], ctx)).codePointAt(0)!));
+      place.set(
+        BigInt(textOf(charNatives[name.replace('make_', 'to_')]([byteChar(place.get())], ctx)).codePointAt(0)!)
+      );
       return UNIT_VALUE;
     }
     const result = charNatives[name](args.map(byteChar), ctx);
     return typeof result === 'string' ? BigInt(result.codePointAt(0)!) : result;
   };
 }
-natives['FromStr::from_str'] = ([s], ctx) => parse(ctx, str(s));
+natives['FromStr::from_str'] = ([s], ctx) => parse(ctx, textOf(s));
 natives['String::len'] = strNatives.len;
 natives['String::is_empty'] = strNatives.is_empty;
 natives['std::char::from_u32'] = ([i], ctx) => fromU32(ctx, i);

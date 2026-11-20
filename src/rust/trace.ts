@@ -23,6 +23,7 @@ import {
   sliceItems,
   SliceView,
   StructValue,
+  textOf,
   TurtleValue,
   type Value,
 } from './values';
@@ -150,10 +151,10 @@ function scalarOf(value: Value, type: Type): Scalar | typeof NOT_SCALAR {
     }
     case 'char':
     case 'str': {
-      return v as string;
+      return textOf(v);
     }
     case 'adt': {
-      if (t.def.builtin === 'String') return v as string;
+      if (t.def.builtin === 'String') return textOf(v);
       if (t.def.builtin === 'Vec' || t.def.builtin === 'VecDeque') return sequenceScalar(v, t);
       return NOT_SCALAR;
     }

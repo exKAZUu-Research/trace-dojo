@@ -913,6 +913,7 @@ export class Checker {
           kind: 'deref',
           derefs: step.derefs,
           fromMut: a.mutable && !t.mutable,
+          toStr: target.kind === 'str',
         });
       }
       return true;

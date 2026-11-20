@@ -1,11 +1,11 @@
 import type { MethodRes, ReceiverAdjust } from './annotations';
 import type { Expr } from './ast';
 import type { Compiler, Eval } from './compiler';
-import { construct, derefAll, evaluateValues, isStringType, stripRefs } from './compilerCommon';
+import { construct, derefAll, evaluateValues, stripRefs } from './compilerCommon';
 import { placeThrough, valueThrough } from './compilerPlaces';
 import { copyValue, needsCopy } from './ops';
 import { runtimeType } from './runtimeTypes';
-import { type FnDef, resolve } from './types';
+import { resolve } from './types';
 import { CellPlace, DynValue } from './values';
 
 type ExprOf<K extends Expr['kind']> = Extract<Expr, { kind: K }>;
@@ -75,8 +75,7 @@ export function compileMethodCall(c: Compiler, expr: ExprOf<'methodCall'>): Eval
 function compileReceiver(c: Compiler, expr: ExprOf<'methodCall'>, method: MethodRes): Eval {
   const adjust: ReceiverAdjust = method.receiver;
   const iterFrom = adjust.asIter ? runtimeType(stripRefs(expr.receiver.ty!)) : undefined;
-  // `String::capacity` reads where the string is stored, which keeps its capacity (a JS string cannot).
-  if (adjust.autoref === 'mut' || (adjust.autoref === 'ref' && isStringCapacity(method.fn))) {
+  if (adjust.autoref === 'mut') {
     const place = placeThrough(c, expr.receiver, adjust.derefs);
     if (iterFrom) return (frame) => new CellPlace(c.support.toIter(place(frame).get(), iterFrom(frame)));
     return place;
@@ -89,8 +88,4 @@ function compileReceiver(c: Compiler, expr: ExprOf<'methodCall'>, method: Method
     return (frame) => copyValue(read(frame));
   }
   return read;
-}
-
-function isStringCapacity(fn: FnDef): boolean {
-  return fn.name === 'capacity' && fn.impl !== undefined && isStringType(fn.impl.selfType);
 }

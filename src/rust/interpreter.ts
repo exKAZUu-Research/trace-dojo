@@ -42,7 +42,9 @@ import {
   FormatterValue,
   isPlace,
   type Place,
+  StringValue,
   StructValue,
+  textOf,
   TurtleValue,
   UNIT_VALUE,
   type Value,
@@ -252,7 +254,9 @@ export class Interpreter implements CallSupport {
     const before = receiverText(args[0]);
     const result = this.runtime.withRoots(args, () => native(args, context));
     // Library functions build `String`s through these two ways out: a result, and a receiver they write to.
-    if (typeof result === 'string' && shallow(def.ret).kind !== 'ref') this.runtime.allocateString(result.length);
+    if ((typeof result === 'string' || result instanceof StringValue) && shallow(def.ret).kind !== 'ref') {
+      this.runtime.allocateString(textOf(result).length);
+    }
     if (before !== undefined) {
       const after = receiverText(args[0]) ?? '';
       if (after.length > before.length) this.runtime.allocateString(after.length, after.length - before.length);
@@ -383,7 +387,7 @@ export class Interpreter implements CallSupport {
       if (inner.kind === 'dyn') {
         const source = normalize(shallow(from));
         if (source.kind === 'ref' || (source.kind === 'adt' && source.def.builtin === 'String')) {
-          return new DynValue(this.program.builtinType('String'), String(value));
+          return new DynValue(this.program.builtinType('String'), textOf(value));
         }
         return new DynValue(from, value);
       }
@@ -522,6 +526,6 @@ export type { FunctionInfo, ImplDef };
 function receiverText(receiver: Value | undefined): string | undefined {
   let value = receiver;
   while (isPlace(value)) value = value.get();
-  if (typeof value === 'string') return isPlace(receiver) ? value : undefined;
+  if (typeof value === 'string' || value instanceof StringValue) return isPlace(receiver) ? textOf(value) : undefined;
   return value instanceof FormatterValue ? value.text : undefined;
 }

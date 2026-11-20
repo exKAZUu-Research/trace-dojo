@@ -1,5 +1,5 @@
 import type { Expr, FormatArgs, FormatPiece, MacroCall, Span } from './ast';
-import { claimStrings, stringCapacity, StringGrowth } from './capacity';
+import { stringCapacity, StringGrowth } from './capacity';
 import type { Compiler, Eval } from './compiler';
 import { evaluateValues, stringish } from './compilerCommon';
 import { compilePatternInput, takesWhole } from './compilerPatterns';
@@ -12,7 +12,16 @@ import { FmtFailure, type Frame, RustPanic } from './runtime';
 import { runtimeType } from './runtimeTypes';
 import { outputStream, resolve, shallow } from './types';
 import { utf8Length } from './utf8';
-import { EnumValue, type FormatterValue, isPlace, type Place, StructValue, UNIT_VALUE, type Value } from './values';
+import {
+  EnumValue,
+  type FormatterValue,
+  isPlace,
+  type Place,
+  StructValue,
+  textOf,
+  UNIT_VALUE,
+  type Value,
+} from './values';
 
 type FormatEval = (frame: Frame, write?: WriteChunk) => string;
 
@@ -157,7 +166,7 @@ function writeString(
   const { program } = c;
   return (frame) => {
     const p = throughRef ? (target(frame) as Place) : place(frame);
-    const before = p.get() as string;
+    const before = textOf(p);
     const growth = new StringGrowth(stringCapacity(p), utf8Length(before));
     const { text, failed } = formatPartly(format, frame, (chunk) => growth.write(chunk));
     const suffix = failed ? '' : newline;
@@ -235,7 +244,7 @@ function vecMacro(c: Compiler, macro: Macro<'vec'>): Eval {
   const elems = macro.elems.map((elem) => c.value(elem));
   return (frame) => {
     frame.runtime.allocate(elems.length);
-    return claimStrings(evaluateValues(frame, elems));
+    return evaluateValues(frame, elems);
   };
 }
 

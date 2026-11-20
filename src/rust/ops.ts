@@ -1,5 +1,5 @@
 import type { Span } from './ast';
-// code-gauge-allow-file fileNcss 500 -- Keeps type-directed arithmetic, comparison, and copying with their shared runtime hooks.
+// code-gauge-allow-file fileNcss 503 -- Keeps type-directed arithmetic, comparison, and copying with their shared runtime hooks.
 import { bigintToF32 } from './floatFormat';
 import { normalize } from './infer';
 import { RustPanic } from './runtime';
@@ -15,6 +15,7 @@ import {
   SetValue,
   sliceItems,
   StructValue,
+  textOf,
   type Value,
 } from './values';
 
@@ -234,9 +235,11 @@ export function valuesEqual(type: Type, a: Value, b: Value, rhs: Type = type): b
     case 'int':
     case 'float':
     case 'bool':
-    case 'char':
-    case 'str': {
+    case 'char': {
       return x === y;
+    }
+    case 'str': {
+      return textOf(x) === textOf(y);
     }
     case 'tuple': {
       return t.elems.every((elem, index) => valuesEqual(elem, (x as Value[])[index], (y as Value[])[index]));
@@ -263,7 +266,7 @@ function adtEqual(t: Type & { kind: 'adt' }, x: Value, y: Value, rhs: Type): boo
   const { def } = t;
   switch (def.builtin) {
     case 'String': {
-      return x === y;
+      return textOf(x) === textOf(y);
     }
     case 'ParseIntError':
     case 'ParseFloatError':
@@ -401,7 +404,7 @@ export function compareValues(type: Type, a: Value, b: Value, partial = false, r
       return Math.sign((x as string).codePointAt(0)! - (y as string).codePointAt(0)!);
     }
     case 'str': {
-      return compareStrings(x as string, y as string);
+      return compareStrings(textOf(x), textOf(y));
     }
     case 'tuple': {
       for (const [index, elem] of t.elems.entries()) {
@@ -433,7 +436,7 @@ function compareAdt(t: Type & { kind: 'adt' }, x: Value, y: Value, partial: bool
   const { def } = t;
   switch (def.builtin) {
     case 'String': {
-      return compareStrings(x as string, y as string);
+      return compareStrings(textOf(x), textOf(y));
     }
     case 'Vec':
     case 'VecDeque': {
@@ -534,7 +537,7 @@ export function hashKey(type: Type, value: Value): string {
     }
     case 'char':
     case 'str': {
-      return encodeStringKey(x as string);
+      return encodeStringKey(textOf(x));
     }
     case 'float': {
       return `f${String(x)}`;
@@ -550,7 +553,7 @@ export function hashKey(type: Type, value: Value): string {
     }
     case 'adt': {
       const { def } = t;
-      if (def.builtin === 'String') return encodeStringKey(x as string);
+      if (def.builtin === 'String') return encodeStringKey(textOf(x));
       if (def.builtin === 'Vec' || def.builtin === 'VecDeque') {
         // A key looked up by a slice (`Borrow<[T]>`) hashes as the `Vec` it equals.
         return `[${sliceItems(x)
@@ -605,6 +608,9 @@ export function cloneValue(type: Type, value: Value): Value {
     case 'adt': {
       const { def } = t;
       switch (def.builtin) {
+        case 'String': {
+          return textOf(value);
+        }
         case 'Vec':
         case 'VecDeque':
         case 'BinaryHeap': {

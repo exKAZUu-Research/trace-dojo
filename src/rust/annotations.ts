@@ -74,7 +74,7 @@ export interface FieldRes {
 
 export type Coercion =
   /** References that reach the same value: `&String` → `&str`, `&Box<T>` → `&T`, `&&T` → `&T`. */
-  | { kind: 'deref'; derefs: ('ref' | 'mutRef' | 'own')[]; fromMut: boolean }
+  | { kind: 'deref'; derefs: ('ref' | 'mutRef' | 'own')[]; fromMut: boolean; toStr: boolean }
   /** A value becomes a trait object of the type it has. */
   | { kind: 'dyn'; type: Type; mutable: boolean; trait: TraitRef }
   /** A collection becomes an iterator, as `IntoIterator` makes it. */
