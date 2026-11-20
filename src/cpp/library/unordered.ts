@@ -503,6 +503,8 @@ export class HashValue extends MapValue {
   }
 
   clear(frame: Frame): Value[] {
+    // libc++ skips clear when interrupted assignment left size zero, but its destructor walks the linked nodes.
+    if (this.size === 0) return [];
     frame.runtime.spend(Math.ceil((this.buckets.length + this.size) / 64));
     const values = this.nodes().map((node) => {
       node.owner = undefined;

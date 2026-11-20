@@ -31,6 +31,15 @@ void probe(bool reuse) {
     std::cout << " count=" << target.count(3) << ',' << target.count(2)
               << " distance=" << std::distance(target.begin(), target.end());
     std::cout << '|';
+    if (reuse) {
+      target.clear();
+    } else {
+      std::unordered_map<int, Item> empty;
+      target = empty;
+      std::cout << " assigned=" << std::distance(target.begin(), target.end()) << '|';
+      target.clear();
+    }
+    std::cout << " cleared=" << std::distance(target.begin(), target.end()) << '|';
   }
 }
 
