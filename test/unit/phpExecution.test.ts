@@ -3044,6 +3044,27 @@ echo $missing + value(
   ).toMatchObject({ kind: 'executed', stdout: 'Undefined variable $missing:5\nA non-numeric value encountered:5\n12' });
 });
 
+test('casts constant concatenation operands after calls and before deferred reads', () => {
+  expect(
+    run(`<?php
+set_error_handler(function ($level, $message) { echo $message, ';'; });
+function operand() { echo 'call;'; return 'ok'; }
+echo $missing . [] . ';';
+echo [1, 2] . $alsoMissing . ';';
+echo [] . operand() . ';';
+try {
+  set_error_handler(function ($level, $message) { throw new Exception($message); });
+  $result = $neverRead . [];
+} catch (Throwable $error) { echo $error->getMessage(); }`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'Array to string conversion;Undefined variable $missing;Array;' +
+      'Array to string conversion;Undefined variable $alsoMissing;Array;' +
+      'call;Array to string conversion;Arrayok;Array to string conversion',
+  });
+});
+
 test('rounds integer operands before computing an overflowing result', () => {
   const source = `<?php
     class NumberBox { public static float $product = 9007199254740993 * 9007199254740993; }

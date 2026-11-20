@@ -1430,7 +1430,7 @@ export class Converter extends DeclarationConverter {
       if (specifier === '%') continue;
       const arg = args[index++];
       if (specifier !== 's') continue;
-      arg.e = this.compileStringOperand(arg.e, row);
+      arg.e = this.compileStringOperand(arg.e, row).expr;
     }
   }
 
@@ -1653,27 +1653,31 @@ export class Converter extends DeclarationConverter {
 
   private compileConcatenation(expression: Extract<Expr, { k: 'bin' }>): string | undefined {
     const row = this.initializerContext?.row ?? compiledOperandRow(expression.r);
-    const left = this.compileStringOperand(expression.l, row);
-    const right = this.compileStringOperand(expression.r, row);
+    const { expr: left, arrayCast: leftCast } = this.compileStringOperand(expression.l, row);
+    const { expr: right, arrayCast: rightCast } = this.compileStringOperand(expression.r, row);
     if (left.k === 'lit' && right.k === 'lit') {
       const folded = this.compiledValue({ ...expression, l: left, r: right });
       if (typeof folded === 'string') return folded;
     }
     expression.l = left;
     expression.r = right;
+    if (leftCast || rightCast) expression.concatArrayCasts = { left: leftCast, right: rightCast };
     return undefined;
   }
 
-  private compileStringOperand(operand: Expr, row: number): Expr {
-    if (operand.k === 'lit' && typeof operand.v === 'string') return operand;
+  private compileStringOperand(operand: Expr, row: number): { expr: Expr; arrayCast: boolean } {
+    if (operand.k === 'lit' && typeof operand.v === 'string') return { expr: operand, arrayCast: false };
     const value = this.compiledValue(operand);
-    if (value === undefined || value instanceof Map) return operand;
+    if (value === undefined || value instanceof Map) return { expr: operand, arrayCast: value instanceof Map };
     if (Number.isNaN(value)) this.notices.push({ level: 'Warning', message: NAN_STRING_WARNING, row });
-    return recordOperandRows(
-      { k: 'lit', v: scalarString(value), row: operand.row },
-      operandAstRow(operand),
-      compiledOperandRow(operand)
-    );
+    return {
+      expr: recordOperandRows(
+        { k: 'lit', v: scalarString(value), row: operand.row },
+        operandAstRow(operand),
+        compiledOperandRow(operand)
+      ),
+      arrayCast: false,
+    };
   }
 
   private operandRank(operand: Expr): number {

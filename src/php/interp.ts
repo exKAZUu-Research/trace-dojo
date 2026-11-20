@@ -1243,12 +1243,14 @@ export function binary(e: Extract<Expr, { k: 'bin' }>): Value {
   const right = deferRight ? null : ev(e.r);
   if (!deferRight) runtime.frame.temporaries.push(right);
   const row = compiledOperandRow(e.r);
-  if (missingCompiledOperand(e.l) || missingCompiledOperand(e.r)) return binaryWithWarnings(e, left, right, mark, row);
-  const lval = deferLeft ? readCompiledVar(e.l, row, runtime) : left;
-  const rval = deferRight ? readCompiledVar(e.r, row, runtime) : right;
   runtime.row = row;
-  const result = e.swapOperands ? operate(e.op, rval, lval) : operate(e.op, lval, rval);
-  return keepResult(mark, result) as Value;
+  const castLeft = e.concatArrayCasts?.left ? toStr(left) : left;
+  const castRight = e.concatArrayCasts?.right ? toStr(right) : right;
+  if (missingCompiledOperand(e.l) || missingCompiledOperand(e.r))
+    return binaryWithWarnings(e, castLeft, castRight, mark, row);
+  const lval = deferLeft ? readCompiledVar(e.l, row, runtime) : castLeft;
+  const rval = deferRight ? readCompiledVar(e.r, row, runtime) : castRight;
+  return keepResult(mark, e.swapOperands ? operate(e.op, rval, lval) : operate(e.op, lval, rval)) as Value;
 }
 
 function readCompiledVar(e: Expr, row: number, runtime: Runtime): Value {
@@ -1271,8 +1273,10 @@ function binaryWithWarnings(
     const left = readOperandWithWarning(e.l, readLeft, warning, row);
     const right = readOperandWithWarning(e.r, readRight, warning, row);
     runtime.row = row;
-    const result = e.swapOperands ? operate(e.op, right, left, pending()) : operate(e.op, left, right, pending());
-    return keepResult(mark, result) as Value;
+    return keepResult(
+      mark,
+      e.swapOperands ? operate(e.op, right, left, pending()) : operate(e.op, left, right, pending())
+    ) as Value;
   });
 }
 
