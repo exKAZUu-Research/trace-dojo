@@ -1,4 +1,5 @@
-// code-gauge-allow-file fileNcss 497 -- dart:convert's JSON, UTF-8, and Base64 codecs, each transcribed from the SDK.
+// code-gauge-allow-file fileNcss 539 -- dart:convert's JSON, UTF-8, and Base64 codecs, each transcribed from the SDK.
+import { LIMITS } from '../../interpreter/limits';
 import { formatDouble } from '../format';
 import { HashStore } from '../hashStore';
 import { DartThrow, type Runtime } from '../runtime';
@@ -9,31 +10,31 @@ import { define, intArg, listElement, listLength, newList, stringArg } from './n
 
 /** A string as Dart's JSON encoder writes it: quotes, backslashes, control characters, and lone surrogates escaped. */
 // code-gauge-allow functionCognitiveComplexity 16 -- A transcription of the SDK's algorithm, case by case.
-function quoteJson(text: string): string {
-  let result = '"';
+function quoteJson(text: string, append: (text: string) => void): void {
+  append('"');
   for (let position = 0; position < text.length; position++) {
     // oxlint-disable-next-line unicorn/prefer-code-point -- JSON escapes UTF-16 code units.
     const code = text.charCodeAt(position);
     const char = text[position];
-    if (char === '"') result += String.raw`\"`;
-    else if (char === '\\') result += String.raw`\\`;
+    if (char === '"') append(String.raw`\"`);
+    else if (char === '\\') append(String.raw`\\`);
     else if (code < 0x20) {
       const short: Record<number, string> = { 8: 'b', 9: 't', 10: 'n', 12: 'f', 13: 'r' };
-      result += short[code] ? `\\${short[code]}` : `\\u${code.toString(16).padStart(4, '0')}`;
+      append(short[code] ? `\\${short[code]}` : `\\u${code.toString(16).padStart(4, '0')}`);
     } else if (code >= 0xd8_00 && code <= 0xdf_ff) {
       // oxlint-disable-next-line unicorn/prefer-code-point -- JSON escapes UTF-16 code units.
       const next = text.charCodeAt(position + 1);
       if (code <= 0xdb_ff && next >= 0xdc_00 && next <= 0xdf_ff) {
-        result += char + text[position + 1];
+        append(char + text[position + 1]);
         position++;
       } else {
-        result += `\\u${code.toString(16)}`;
+        append(`\\u${code.toString(16)}`);
       }
     } else {
-      result += char;
+      append(char);
     }
   }
-  return `${result}"`;
+  append('"');
 }
 
 function isMap(value: Value): value is DartObject {
@@ -41,12 +42,16 @@ function isMap(value: Value): value is DartObject {
 }
 
 function encodeJson(runtime: Runtime, value: Value, toEncodable: Value, indent: string | undefined): string {
-  return new JsonStringifier(runtime, toEncodable, indent).write(value, 0);
+  return new JsonStringifier(runtime, toEncodable, indent).encode(value);
 }
+
+const JSON_OUTPUT_LIMIT = Symbol('JSON output limit');
 
 /** Writes JSON as Dart's _JsonStringifier does: one case per kind of value, and toEncodable or toJson for the rest. */
 class JsonStringifier {
   private readonly visiting: Value[] = [];
+  private readonly output: string[] = [];
+  private outputLength = 0;
 
   constructor(
     private readonly runtime: Runtime,
@@ -54,21 +59,25 @@ class JsonStringifier {
     private readonly indent: string | undefined
   ) {}
 
-  /**
-   * A value JSON cannot hold (NaN, a map with keys other than strings, an object) goes through toEncodable once, and
-   * any failure in writing what it returns is reported for this value, as the SDK's writeObject does.
-   */
-  write(current: Value, depth: number): string {
-    this.runtime.spend();
-    const direct = this.writeJsonValue(current, depth);
-    if (direct !== undefined) return direct;
+  encode(value: Value): string {
+    try {
+      this.write(value, 0);
+      return this.output.join('');
+    } catch (error) {
+      if (error === JSON_OUTPUT_LIMIT) this.runtime.throwError('OutOfMemoryError', '', []);
+      throw error;
+    }
+  }
+
+  private write(current: Value, depth: number): void {
     const { runtime } = this;
+    runtime.spend();
+    if (this.writeJsonValue(current, depth)) return;
     if (this.visiting.includes(current)) runtime.throwError('JsonCyclicError', '', [current]);
     this.visiting.push(current);
     try {
-      const text = this.writeJsonValue(this.convert(current), depth);
-      if (text === undefined) return runtime.throwError('JsonUnsupportedObjectError', '', [current]);
-      return text;
+      if (!this.writeJsonValue(this.convert(current), depth))
+        runtime.throwError('JsonUnsupportedObjectError', '', [current]);
     } catch (error) {
       if (error instanceof DartThrow)
         runtime.throwError('JsonUnsupportedObjectError', '', [current], { cause: error.value });
@@ -78,17 +87,49 @@ class JsonStringifier {
     }
   }
 
-  private writeJsonValue(current: Value, depth: number): string | undefined {
-    if (current === undefined) return 'null';
-    if (typeof current === 'boolean') return current ? 'true' : 'false';
-    if (typeof current === 'bigint') return current.toString();
-    if (typeof current === 'number') return Number.isFinite(current) ? formatDouble(current) : undefined;
-    if (typeof current === 'string') return quoteJson(current);
+  private writeJsonValue(current: Value, depth: number): boolean {
+    if (current === undefined) return this.append('null');
+    if (typeof current === 'boolean') return this.append(current ? 'true' : 'false');
+    if (typeof current === 'bigint') return this.append(current.toString());
+    if (typeof current === 'number') return Number.isFinite(current) && this.append(formatDouble(current));
+    if (typeof current === 'string') return this.writeString(current);
     if (this.visiting.includes(current)) this.runtime.throwError('JsonCyclicError', '', [current]);
-    // As the SDK's writeJsonValue, any List or Map counts, the program's own included.
-    if (current instanceof DartList || this.isA(current, 'List')) return this.writeList(current, depth);
+    if (current instanceof DartList || this.isA(current, 'List')) {
+      this.writeList(current, depth);
+      return true;
+    }
     if (isMap(current) || this.isA(current, 'Map')) return this.writeMap(current, depth);
-    return undefined;
+    return false;
+  }
+
+  private writeString(text: string): true {
+    this.runtime.spend(Math.ceil(text.length / 1024));
+    if (!/["\\\u0000-\u001F\uD800-\uDFFF]/u.test(text)) {
+      this.checkCapacity(text.length + 2);
+      return this.append('"' + text + '"');
+    }
+    quoteJson(text, (part) => this.append(part));
+    return true;
+  }
+
+  private append(text: string): true {
+    this.checkCapacity(text.length);
+    this.outputLength += text.length;
+    this.output.push(text);
+    return true;
+  }
+
+  private checkCapacity(additionalLength: number): void {
+    if (this.outputLength + additionalLength > LIMITS.maxStringLength) throw JSON_OUTPUT_LIMIT;
+  }
+
+  private lineBreak(depth: number): void {
+    if (this.indent === undefined) return;
+    const count = this.indent.length * depth;
+    this.checkCapacity(count + 1);
+    this.runtime.spend(Math.ceil(count / 1024));
+    this.append('\n');
+    this.append(this.indent.repeat(depth));
   }
 
   private isA(value: Value, className: 'List' | 'Map'): boolean {
@@ -100,48 +141,59 @@ class JsonStringifier {
     return value instanceof DartObject && this.runtime.links.isValueOf(this.runtime, value, type);
   }
 
-  private writeList(list: Value, depth: number): string {
-    const elements = list instanceof DartList ? list.elements : this.elementsOf(list);
-    if (elements.length === 0) return '[]';
+  private writeList(list: Value, depth: number): void {
+    const { runtime } = this;
+    const frame = runtime.currentFrame;
+    const mark = frame?.temporaries.length ?? 0;
+    frame?.temporaries.push(list);
     this.visiting.push(list);
-    const parts = elements.map((element) => this.write(element, depth + 1));
-    this.visiting.pop();
-    return this.wrap('[', parts, ']', depth);
-  }
-
-  /** A program's list read as the SDK's writeList reads it: by index up to its length. */
-  private elementsOf(list: Value): Value[] {
-    const { runtime } = this;
-    const elements: Value[] = [];
-    for (let index = 0n; index < (runtime.getProperty(list, 'length', undefined) as bigint); index++) {
-      elements.push(runtime.invoke(list, '[]', { positional: [index], named: undefined }, [], undefined));
+    try {
+      const empty =
+        this.indent === undefined
+          ? runtime.getProperty(list, 'isNotEmpty', undefined) !== true
+          : runtime.getProperty(list, 'isEmpty', undefined) === true;
+      if (empty) {
+        this.append('[]');
+        return;
+      }
+      this.append('[');
+      this.lineBreak(depth + 1);
+      this.write(listElement(runtime, list, 0n), depth + 1);
+      for (let index = 1n; index < listLength(runtime, list); index++) {
+        this.append(',');
+        this.lineBreak(depth + 1);
+        this.write(listElement(runtime, list, index), depth + 1);
+      }
+      this.lineBreak(depth);
+      this.append(']');
+    } finally {
+      this.visiting.pop();
+      if (frame) frame.temporaries.length = mark;
     }
-    return elements;
   }
 
-  private writeMap(map: Value, depth: number): string | undefined {
+  private writeMap(map: Value, depth: number): boolean {
     const { runtime } = this;
-    // As the SDK's writeMap: isEmpty, then length, then the entries through forEach.
-    if (runtime.getProperty(map, 'isEmpty', undefined) === true) return '{}';
+    if (runtime.getProperty(map, 'isEmpty', undefined) === true) return this.append('{}');
     runtime.getProperty(map, 'length', undefined);
     const entries: [Value, Value][] = [];
     forEachEntry(runtime, map, (key, value) => entries.push([key, value]));
-    if (entries.some(([key]) => typeof key !== 'string')) return undefined;
+    if (entries.some(([key]) => typeof key !== 'string')) return false;
     this.visiting.push(map);
-    const parts: string[] = [];
-    for (const [key, value] of entries) {
-      const separator = this.indent === undefined ? ':' : ': ';
-      parts.push(`${quoteJson(key as string)}${separator}${this.write(value, depth + 1)}`);
+    try {
+      this.append('{');
+      for (const [index, [key, value]] of entries.entries()) {
+        if (index > 0) this.append(',');
+        this.lineBreak(depth + 1);
+        this.writeString(key as string);
+        this.append(this.indent === undefined ? ':' : ': ');
+        this.write(value, depth + 1);
+      }
+      this.lineBreak(depth);
+      return this.append('}');
+    } finally {
+      this.visiting.pop();
     }
-    this.visiting.pop();
-    return this.wrap('{', parts, '}', depth);
-  }
-
-  private wrap(open: string, parts: string[], close: string, depth: number): string {
-    const { indent } = this;
-    const newline = indent === undefined ? '' : `\n${indent.repeat(depth + 1)}`;
-    const end = indent === undefined ? '' : `\n${indent.repeat(depth)}`;
-    return `${open}${newline}${parts.join(`,${newline}`)}${end}${close}`;
   }
 
   /** The encodable value of another object, from toEncodable or the object's toJson. */

@@ -29,7 +29,7 @@ import {
   sameType,
   vmTypeString,
 } from './types';
-import { DartList, DartObject, DartRecord, type Value } from './values';
+import { DartList, DartObject, DartRecord, DartTypeValue, type Value } from './values';
 
 interface LibrarySource {
   uri: string;
@@ -349,7 +349,8 @@ export const LINKS: LibraryLinks = {
   isValueOf: (runtime, value, type) => valueIs(runtime, value, type),
 };
 
-function keyOf(item: Value): string {
+function keyOf(runtime: Runtime, item: Value): string {
+  if (item instanceof DartTypeValue) return JSON.stringify(constantTypeKey(runtime, item.type));
   if (item instanceof DartObject) return `#${item.identity}`;
   if (typeof item === 'number') return `d${Object.is(item, -0) ? '-0' : item}`;
   return `${typeof item}:${String(item)}`;
@@ -358,22 +359,23 @@ function keyOf(item: Value): string {
 /** A key that equal constants share, or undefined for values that are canonical already. */
 function constantKey(runtime: Runtime, value: Value): string | undefined {
   if (!(value instanceof DartObject)) return undefined;
-  const type = constantTypeKey(runtime, value);
+  if (value instanceof DartTypeValue) return undefined;
+  const keyOfValue = (item: Value): string => keyOf(runtime, item);
+  const type = constantTypeKey(runtime, interfaceType(value.cls, value.typeArgs));
   if (value instanceof DartRecord) {
     return JSON.stringify([
       type,
-      value.positional.map(keyOf),
-      value.named.map(([name, field]) => [name, keyOf(field)]),
+      value.positional.map(keyOfValue),
+      value.named.map(([name, field]) => [name, keyOfValue(field)]),
     ]);
   }
-  if (value instanceof DartList) return JSON.stringify([type, value.elements.map(keyOf)]);
-  if (!value.native) return JSON.stringify([type, value.fields.map(keyOf)]);
-  if ('keys' in value.native) return JSON.stringify([type, Array.from(value.native.values(), keyOf)]);
+  if (value instanceof DartList) return JSON.stringify([type, value.elements.map(keyOfValue)]);
+  if (!value.native) return JSON.stringify([type, value.fields.map(keyOfValue)]);
+  if ('keys' in value.native) return JSON.stringify([type, Array.from(value.native.values(), keyOfValue)]);
   return undefined;
 }
 
-function constantTypeKey(runtime: Runtime, value: DartObject): [string, number] {
-  const type = interfaceType(value.cls, value.typeArgs);
+function constantTypeKey(runtime: Runtime, type: DartType): [string, number] {
   const display = vmTypeString(type);
   const collisions = runtime.constantTypes.get(display);
   if (!collisions) {

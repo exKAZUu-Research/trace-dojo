@@ -469,7 +469,6 @@ export abstract class StatementCompiler extends PatternCompiler {
   }
 
   // code-gauge-allow functionCognitiveComplexity 24 -- Bind a declaration, retain its constant or promotion, and emit its step.
-  // code-gauge-allow functionNcss 31 -- Bind a declaration, retain its constant or promotion, and emit its step.
   protected compileLocalDeclaration(declaration: VariableDeclaration, recordStep = true): Exec {
     const declaredType = declaration.type ? this.resolveType(declaration.type) : undefined;
     const parts: { slot: number; run: Eval | undefined; isLate: boolean }[] = [];
@@ -491,8 +490,7 @@ export abstract class StatementCompiler extends PatternCompiler {
           variable.constant = compiled.constValue.value;
           variable.hasConstant = true;
         } else {
-          variable.constantInitializer = this.canonicalized(compiled.run);
-          compiled.run = variable.constantInitializer;
+          variable.constantInitializer = compiled.run;
         }
       }
       if (compiled && !declaration.isLate) this.flowAfterInitializer(variable, compiled, declaredType);

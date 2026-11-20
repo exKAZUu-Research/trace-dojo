@@ -66,7 +66,7 @@ abstract mixin class IterableMixin<E> implements Iterable<E> {
   }
   Iterable<E> takeWhile(bool Function(E value) test) => TakeWhileIterable<E>(this, test);
   Iterable<E> skip(int count) {
-    RangeError.checkNotNegative(count, "skipCount");
+    RangeError.checkNotNegative(count, "count");
     return SkipIterable<E>(this, count);
   }
   Iterable<E> skipWhile(bool Function(E value) test) => SkipWhileIterable<E>(this, test);
@@ -945,7 +945,7 @@ abstract mixin class SetMixin<E> implements Set<E> {
   }
   Iterable<E> takeWhile(bool Function(E value) test) => TakeWhileIterable<E>(this, test);
   Iterable<E> skip(int count) {
-    RangeError.checkNotNegative(count, "skipCount");
+    RangeError.checkNotNegative(count, "count");
     return SkipIterable<E>(this, count);
   }
   Iterable<E> skipWhile(bool Function(E value) test) => SkipWhileIterable<E>(this, test);

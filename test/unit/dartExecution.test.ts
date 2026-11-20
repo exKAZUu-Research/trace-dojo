@@ -888,14 +888,17 @@ test('a closure inherits promotions when assignments target shadowed locals', ()
 
 test('generic function arguments constrain parameters in both directions', () => {
   const program = `R Function(A) memo<A, R>(R Function(A) callback) => callback;
+T identity<T>(T value) => value;
 Type pair<T>(T value, void Function(T) callback) => T;
 Type named<T>(void Function({required T value}) callback) => T;
 void main() {
   print(memo((int n) => n * n)(4));
   print(pair(1, (num x) {}));
   print(named(({required int value}) {}));
+  List<int> mapped = [1, 2].map(identity).toList();
+  print(mapped);
 }`;
-  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '16\nint\nint\n' });
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '16\nint\nint\n[1, 2]\n' });
 });
 
 test('construction checks constants before main and only evaluates selected branches', () => {
@@ -970,8 +973,14 @@ void main() {
   const local = <String>[];
   const sdk = <core.String>[];
   print([identical(local, sdk), local is List<String>, sdk is List<core.String>]);
+  const a = String;
+  const b = core.String;
+  print([a == b, <Type>{a, b}.length, identical(b, 'sdk'.runtimeType)]);
 }`;
-  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[false, true, true]\n' });
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[false, true, true]\n[false, 2, true]\n',
+  });
 });
 
 test('joined branches retain only promotions shared by both paths', () => {
@@ -987,4 +996,96 @@ void main() { show(-2.5); }`;
 void main() { show(-2.5); }`;
     expect(executeProgram('dart', invalid)).toMatchObject({ kind: 'compileError' });
   }
+});
+
+test('JSON encoding interleaves list reads and element callbacks', () => {
+  const program = `import 'dart:collection';
+import 'dart:convert';
+late List<dynamic> source;
+class Element {
+  int toJson() { print('encode'); source.add(2); return 1; }
+}
+class View extends ListBase<dynamic> {
+  int get length { print('length'); return source.length; }
+  set length(int n) => source.length = n;
+  dynamic operator [](int n) { print('read $n'); return source[n]; }
+  void operator []=(int n, dynamic x) { source[n] = x; }
+}
+void main() {
+  source = [Element()];
+  print(jsonEncode(source));
+  source = [Element()];
+  print(jsonEncode(View()));
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: 'encode\n[1,2]\nlength\nread 0\nencode\nlength\nread 1\nlength\n[1,2]\n',
+  });
+});
+
+test('generic aliases substitute class arguments for constructor calls and tear-offs', () => {
+  const program = `typedef Alias<T> = Box<int, T>;
+class Box<X, Y> {
+  final X x;
+  final Y y;
+  const Box(this.x, this.y);
+  const Box.named({required this.x, required this.y});
+}
+void main() {
+  print(new Alias<String>(1, 'new').y);
+  print(Alias<int>(1, 2).y);
+  print(Alias<String>.named(x: 3, y: 'named').y);
+  print(Alias.named(x: 3, y: 'inferred').runtimeType);
+  var make = Alias.new;
+  print(make(4, 'tear-off').runtimeType);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'new\n2\nnamed\nBox<int, String>\nBox<int, String>\n',
+  });
+});
+
+test('list switch cases can partition finite element values and lengths', () => {
+  const program = `String flag(List<bool> list) => switch (list) {
+  [] => 'empty',
+  [true, ...] => 'first',
+  [..., false] => 'last',
+  [false, ..., true] => 'both',
+};
+String nullable(List<int?> list) => switch (list) {
+  [] => 'empty', [null, ...] => 'null', [int(), ...] => 'int',
+};
+void main() {
+  print(flag([]));
+  print(flag([true]));
+  print(flag([false]));
+  print(flag([false, false, true]));
+  print(nullable([null]));
+  print(nullable([3]));
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'empty\nfirst\nlast\nboth\nnull\nint\n',
+  });
+});
+
+test('JSON output and standard sinks honor limits and incomplete iteration', () => {
+  const program = String.raw`import 'dart:convert';
+import 'dart:io';
+Iterable<String> values() sync* {
+  yield 'first';
+  throw 'failure';
+}
+void main() {
+  try { stdout.writeAll(values(), ','); } catch (e) { print(' caught'); }
+  var text = 'x' * 600000;
+  try { jsonEncode([text, text]); } catch (e) { print(e); }
+  try { jsonEncode('\x00' * 200000); } catch (e) { print(e); }
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: 'first caught\nOut of Memory\nOut of Memory\n',
+  });
 });

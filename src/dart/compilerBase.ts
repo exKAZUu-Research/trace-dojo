@@ -1,11 +1,10 @@
-// code-gauge-allow-file fileNcss 462 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ClassDeclaration, Span, TypeAliasDeclaration, TypeParameter, TypeSyntax } from './ast';
 import type { ClassInfo, Member } from './classes';
 import type { ExtensionInfo, GlobalVariable, LibraryEnv, TypeAlias } from './environment';
 import type { Frame, FunctionInfo, Runtime, TypeEnv } from './runtime';
 import { Flow, type FunctionContext, LocalVar } from './scope';
-import { inferFromSubtype } from './typeInference';
+import { inferFromSubtype, inferTearOffTypes } from './typeInference';
 import {
   asInstanceOf,
   boundOf,
@@ -558,25 +557,15 @@ export abstract class CompilerBase {
    * A generic function where a non-generic function type is expected, instantiated with the type arguments that make
    * it fit, as `[1, 2].reduce(max)` instantiates `max<int>`.
    */
-  private instantiateGeneric(compiled: Compiled, target: DartType): Compiled | undefined {
+  protected instantiateGeneric(compiled: Compiled, target: DartType, forInference = false): Compiled | undefined {
     const source = resolveBound(compiled.type);
     const expected = resolveBound(target);
     if (source.kind !== 'function' || source.typeParams.length === 0) return undefined;
     if (expected.kind !== 'function' || expected.typeParams.length > 0) return undefined;
-    const params = new Set(source.typeParams);
-    const solution = new Map<TypeParam, DartType>();
-    for (const [index, parameter] of source.positional.entries()) {
-      const given = expected.positional[index];
-      if (given) inferFromSubtype(given, parameter, params, solution, (a) => a);
-    }
-    for (const named of source.named) {
-      const given = expected.named.find((other) => other.name === named.name);
-      if (given) inferFromSubtype(given.type, named.type, params, solution, (a) => a);
-    }
-    const defaults = instantiateToBounds(source.typeParams);
-    const typeArgs = source.typeParams.map((param, index) => solution.get(param) ?? defaults[index]);
+    const typeArgs = inferTearOffTypes(source, expected, instantiateToBounds(source.typeParams));
+    if (!typeArgs) return undefined;
     const type = instantiateFunction(source, typeArgs);
-    if (!isSubtype(type, target)) return undefined;
+    if (!forInference && !isSubtype(type, target)) return undefined;
     const { run } = compiled;
     const resolveArgs = typeArgs.map((arg) => this.runtimeType(arg));
     return {
@@ -589,8 +578,8 @@ export abstract class CompilerBase {
         return new DartClosureValue(
           coreTypes.function,
           substitute(type, frame.typeEnv) as FunctionType,
-          (runtime, _receiver, args, _typeArgs, callRow) => runtime.callValue(original, args, fixed, callRow),
-          undefined,
+          (runtime, receiver, args, _typeArgs, callRow) => runtime.callValue(receiver, args, fixed, callRow),
+          original,
           [],
           { name: undefined, origin: undefined },
           undefined

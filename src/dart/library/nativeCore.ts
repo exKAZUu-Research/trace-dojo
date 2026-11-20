@@ -2,7 +2,7 @@ import { TURTLE_METHOD_NAMES, type TurtleState } from '../../interpreter/turtleW
 import { encodableText, formatDouble, safeToString, stringOf } from '../format';
 import { HashStore } from '../hashStore';
 import type { Runtime } from '../runtime';
-import { coreTypes, type DartType, vmTypeString } from '../types';
+import { coreTypes, type DartType, sameType, vmTypeString } from '../types';
 import { DartClosure, DartList, DartObject, DartRecord, DartTypeValue, type Value } from '../values';
 import { define, defineConstructor, intArg, iterableValues, stringArg } from './nativeSupport';
 
@@ -59,6 +59,7 @@ function identityOf(value: Value): number {
 }
 
 export function identical(a: Value, b: Value): boolean {
+  if (a instanceof DartTypeValue && b instanceof DartTypeValue) return sameType(a.type, b.type);
   if (typeof a === 'number' && typeof b === 'number') return Object.is(a, b) || (a === b && a !== 0);
   return a === b;
 }
@@ -117,15 +118,20 @@ define('Record.toString', (runtime, receiver) => recordToString(runtime, receive
 
 // Types
 
-define('Type.hashCode', (_runtime, receiver) => BigInt(vmTypeString((receiver as DartTypeValue).type).length));
+define('Type.hashCode', (_runtime, receiver) => BigInt(typeHash((receiver as DartTypeValue).type)));
 define('Type.==', (_runtime, receiver, [other]) => {
   if (!(other instanceof DartTypeValue)) return false;
-  return typeKey((receiver as DartTypeValue).type) === typeKey(other.type);
+  return sameType((receiver as DartTypeValue).type, other.type);
 });
 define('Type.toString', (_runtime, receiver) => vmTypeString((receiver as DartTypeValue).type));
 
-function typeKey(type: DartType): string {
-  return vmTypeString(type);
+function typeHash(type: DartType): number {
+  if (type.kind === 'interface') {
+    let hash = type.cls.name.length;
+    for (const argument of type.args) hash = Math.imul(hash, 31) + typeHash(argument);
+    return hash;
+  }
+  return type.kind.length;
 }
 
 // Enums
@@ -210,6 +216,7 @@ define('identical', (_runtime, _receiver, [a, b]) => identical(a, b));
 define('identityHashCode', (runtime, _receiver, [value]) => identityHashCode(runtime, value));
 
 export function identityHashCode(runtime: Runtime, value: Value): bigint {
+  if (value instanceof DartTypeValue) return BigInt(typeHash(value.type));
   return value instanceof DartObject
     ? BigInt(identityOf(value))
     : (runtime.getProperty(value, 'hashCode', undefined) as bigint);

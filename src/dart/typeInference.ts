@@ -4,10 +4,12 @@ import {
   DYNAMIC,
   type FunctionType,
   type InterfaceType,
+  isSubtype,
   lowerBound,
   NEVER,
   type RecordType,
   resolveBound,
+  substitute,
   type TypeParam,
 } from './types';
 
@@ -50,6 +52,34 @@ export function inferFromSubtype(
   upper?: Map<TypeParam, DartType>
 ): void {
   new InferenceConstraints(params, lower, upper, join).infer(actual, formal);
+}
+
+export function inferTearOffTypes(
+  source: FunctionType,
+  expected: FunctionType,
+  defaults: DartType[]
+): DartType[] | undefined {
+  const params = new Set(source.typeParams);
+  const solution = new Map<TypeParam, DartType>();
+  for (const [index, parameter] of source.positional.entries()) {
+    const given = expected.positional[index];
+    if (given) inferFromSubtype(given, parameter, params, solution, (a) => a);
+  }
+  for (const named of source.named) {
+    const given = expected.named.find((other) => other.name === named.name);
+    if (given) inferFromSubtype(given.type, named.type, params, solution, (a) => a);
+  }
+  const resultContext = new Map<TypeParam, DartType>();
+  if (expected.returnType.kind !== 'dynamic' && expected.returnType.kind !== 'void')
+    inferFromContext(expected.returnType, source.returnType, params, resultContext);
+  const typeArgs = source.typeParams.map(
+    (param, index) => solution.get(param) ?? resultContext.get(param) ?? defaults[index]
+  );
+  const argumentsByParameter = new Map(source.typeParams.map((param, index) => [param, typeArgs[index]]));
+  for (const [param, arg] of argumentsByParameter) {
+    if (param.bound && !isSubtype(arg, substitute(param.bound, argumentsByParameter))) return undefined;
+  }
+  return typeArgs;
 }
 
 class InferenceConstraints {

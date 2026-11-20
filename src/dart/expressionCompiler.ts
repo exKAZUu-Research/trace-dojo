@@ -1,5 +1,5 @@
 import { CompileError } from '../interpreter/diagnostics';
-// code-gauge-allow-file fileNcss 924 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 937 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type {
   Arguments as ArgumentsSyntax,
   CascadeSelector,
@@ -13,7 +13,7 @@ import type {
 } from './ast';
 import type { ClassInfo, Member } from './classes';
 import { at, type Compiled, CompilerBase, type Eval, type ResolvedMember, typeName, valueIs } from './compilerBase';
-import type { Declaration, ExtensionInfo, GlobalVariable, TopLevelFunction } from './environment';
+import type { Declaration, ExtensionInfo, GlobalVariable, TopLevelFunction, TypeAlias } from './environment';
 import { formatDouble, stringOf } from './format';
 import { concatenate } from './operators';
 import type { Frame } from './runtime';
@@ -36,6 +36,7 @@ import {
   objectType,
   resolveBound,
   sameType,
+  substitute,
   typeParamType,
   upperBound,
 } from './types';
@@ -51,6 +52,16 @@ import {
   UNINITIALIZED,
   type Value,
 } from './values';
+
+interface StaticClassTarget {
+  kind: 'class';
+  cls: ClassInfo;
+  typeArgs: DartType[] | undefined;
+  alias?: TypeAlias;
+  syntax: Extract<TypeSyntax, { kind: 'named' }>;
+}
+
+type StaticTarget = StaticClassTarget | { kind: 'prefix'; prefix: string } | { kind: 'extension'; ext: ExtensionInfo };
 
 /** The value a null-aware member access gives when its receiver is null, which the rest of its chain passes on. */
 export const SHORTED = Symbol('shorted') as unknown as Value;
@@ -1357,63 +1368,55 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
-  /** A class, import prefix, or extension that a member access names instead of a value. */
-  // code-gauge-allow functionCognitiveComplexity 28 -- Each branch is one of the cases Dart distinguishes for this construct.
-  // code-gauge-allow functionNcss 31 -- One case per form of the construct, which reads best together.
-  protected staticTarget(
-    object: Expression
-  ):
-    | { kind: 'class'; cls: ClassInfo; typeArgs: DartType[] | undefined }
-    | { kind: 'prefix'; prefix: string }
-    | { kind: 'extension'; ext: ExtensionInfo }
-    | undefined {
-    if (object.kind === 'instantiation' && object.target.kind === 'identifier') {
+  protected staticTarget(object: Expression): StaticTarget | undefined {
+    if (object.kind === 'instantiation') {
       const target = this.staticTarget(object.target);
-      if (target?.kind === 'class') {
-        const typeArgs = this.typeArgumentsFor(
-          target.cls.typeParams,
-          {
-            row: object.row,
-            column: object.column,
-            start: object.start,
-            end: object.end,
-            kind: 'named',
-            prefix: undefined,
-            name: target.cls.name,
-            args: object.typeArguments,
-            nullable: false,
-          },
-          target.cls.name
-        );
-        return { kind: 'class', cls: target.cls, typeArgs };
-      }
-      return undefined;
+      return target?.kind === 'class' ? this.instantiateStaticTarget(target, object.typeArguments) : undefined;
     }
     if (object.kind === 'member' && object.object.kind === 'identifier' && !object.nullAware) {
       const prefix = object.object.name;
-      if (!this.findLocal(prefix) && this.library.hasPrefix(prefix) && !this.resolveNameIsValue(prefix)) {
-        const declaration = this.library.lookupPrefixed(prefix, object.name);
-        if (declaration?.kind === 'class') return { kind: 'class', cls: declaration.cls, typeArgs: undefined };
-        if (declaration?.kind === 'extension') return { kind: 'extension', ext: declaration.ext };
-      }
-      return undefined;
+      if (this.library.hasPrefix(prefix) && !this.resolveNameIsValue(prefix))
+        return this.declarationStaticTarget(
+          this.library.lookupPrefixed(prefix, object.name),
+          object.name,
+          prefix,
+          object
+        );
     }
     if (object.kind !== 'identifier') return undefined;
     const resolution = this.resolveName(object.name);
-    if (resolution?.kind === 'declaration') {
-      const { declaration } = resolution;
-      if (declaration.kind === 'class') return { kind: 'class', cls: declaration.cls, typeArgs: undefined };
-      if (declaration.kind === 'extension') return { kind: 'extension', ext: declaration.ext };
-      if (declaration.kind === 'alias' && declaration.alias.aliased?.kind === 'interface') {
-        const aliased = declaration.alias.aliased;
-        return {
-          kind: 'class',
-          cls: aliased.cls,
-          typeArgs: declaration.alias.typeParams.length === 0 ? [...aliased.args] : undefined,
-        };
+    if (resolution?.kind === 'prefix') return { kind: 'prefix', prefix: resolution.prefix };
+    if (resolution?.kind === 'declaration')
+      return this.declarationStaticTarget(resolution.declaration, object.name, undefined, object);
+    return undefined;
+  }
+
+  private instantiateStaticTarget(target: StaticClassTarget, args: TypeSyntax[]): StaticClassTarget {
+    const syntax = { ...target.syntax, args };
+    const params = target.alias?.typeParams ?? target.cls.typeParams;
+    const resolved = this.typeArgumentsFor(params, syntax, syntax.name);
+    const template = target.alias?.aliased;
+    if (template?.kind !== 'interface') return { ...target, syntax, typeArgs: resolved };
+    const mapping = new Map(params.map((param, index) => [param, resolved[index]]));
+    return { ...target, syntax, typeArgs: template.args.map((type) => substitute(type, mapping)) };
+  }
+
+  private declarationStaticTarget(
+    declaration: Declaration | undefined,
+    name: string,
+    prefix: string | undefined,
+    span: Span
+  ): StaticTarget | undefined {
+    const syntax = { ...at(span), kind: 'named' as const, name, prefix, args: [], nullable: false };
+    if (declaration?.kind === 'class') return { kind: 'class', cls: declaration.cls, typeArgs: undefined, syntax };
+    if (declaration?.kind === 'extension') return { kind: 'extension', ext: declaration.ext };
+    if (declaration?.kind === 'alias') {
+      const { alias } = declaration;
+      const aliased = this.resolveAlias(alias, span);
+      if (aliased.kind === 'interface' && !aliased.nullable) {
+        return { kind: 'class', cls: aliased.cls, alias, typeArgs: undefined, syntax };
       }
     }
-    if (resolution?.kind === 'prefix') return { kind: 'prefix', prefix: resolution.prefix };
     return undefined;
   }
 
@@ -1441,12 +1444,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
     const member = target.cls.staticMembers.get(name);
     if (member) return this.readStatic(member, span);
-    if (target.cls.constructors.has(name))
-      return this.compileConstructorTearoff(
-        { ...at(span), kind: 'named', prefix: undefined, name: target.cls.name, args: [], nullable: false },
-        name,
-        span
-      );
+    if (target.cls.constructors.has(name)) return this.compileConstructorTearoff(target.syntax, name, span);
     if (target.cls.staticSetters.has(name)) return this.error(span, `${name} には getter がないので、値を読めません。`);
     return this.error(span, `クラス ${target.cls.name} に static なメンバー ${name} がありません。`);
   }

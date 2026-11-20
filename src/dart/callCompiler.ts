@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 609 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 642 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type {
   Arguments as ArgumentsSyntax,
   Expression,
@@ -10,7 +10,7 @@ import type {
 } from './ast';
 import type { ClassInfo, ConstructorInfo, Member } from './classes';
 import { at, type Compiled, type Eval, instantiateToBounds, type ResolvedMember, typeName } from './compilerBase';
-import type { ExtensionInfo, TopLevelFunction } from './environment';
+import type { ExtensionInfo, TopLevelFunction, TypeAlias } from './environment';
 import { INFERENCE_HOLE, isInferenceHole, SHORTED } from './expressionCompiler';
 import { OperatorCompiler } from './operatorCompiler';
 import type { Frame, Runtime, TypeEnv } from './runtime';
@@ -73,6 +73,13 @@ export interface FunctionSpec {
   kind: FunctionContext['kind'];
   showsThis: boolean;
 }
+
+interface AliasConstructor {
+  template: InterfaceType;
+  parameters: TypeParam[];
+}
+
+type ConstructorTypes = DartType[] | AliasConstructor | undefined;
 
 export interface CompiledFunction {
   fn: FunctionContext;
@@ -157,19 +164,9 @@ export abstract class CallCompiler extends OperatorCompiler {
             false
           );
         }
-        if (declaration.kind === 'alias' && declaration.alias.aliased?.kind === 'interface') {
-          const aliased = declaration.alias.aliased;
-          const typeArgs = declaration.alias.typeParams.length === 0 ? [...aliased.args] : undefined;
-          return this.compileConstructorCall(
-            aliased.cls,
-            undefined,
-            typeArgs,
-            args,
-            typeArguments,
-            expression,
-            context,
-            false
-          );
+        if (declaration.kind === 'alias') {
+          const { cls, types } = this.aliasConstructor(declaration.alias, typeArguments, callee);
+          return this.compileConstructorCall(cls, undefined, types, args, undefined, expression, context, false);
         }
         break;
       }
@@ -184,7 +181,8 @@ export abstract class CallCompiler extends OperatorCompiler {
   }
 
   /** A call `a.b(...)`: a static member, a named constructor, a prefixed declaration, or a method. */
-  // code-gauge-allow functionCognitiveComplexity 17 -- Each branch is one of the cases Dart distinguishes for this construct.
+  // code-gauge-allow functionCognitiveComplexity 22 -- Static, prefixed, extension and instance calls use distinct dispatch rules.
+  // code-gauge-allow functionNcss 31 -- Static, prefixed, extension and instance calls use distinct dispatch rules.
   private compileMemberCall(
     expression: Extract<Expression, { kind: 'call' }>,
     callee: Extract<Expression, { kind: 'member' }>,
@@ -196,10 +194,12 @@ export abstract class CallCompiler extends OperatorCompiler {
       const member = target.cls.staticMembers.get(callee.name);
       if (member) return this.compileStaticCall(member, args, typeArguments, expression, context);
       if (target.cls.constructors.has(callee.name) || target.typeArgs) {
+        const types =
+          target.typeArgs ?? (target.alias ? this.aliasConstructor(target.alias, undefined, callee).types : undefined);
         return this.compileConstructorCall(
           target.cls,
           callee.name,
-          target.typeArgs,
+          types,
           args,
           typeArguments,
           expression,
@@ -227,6 +227,10 @@ export abstract class CallCompiler extends OperatorCompiler {
           context,
           false
         );
+      }
+      if (declaration?.kind === 'alias') {
+        const { cls, types } = this.aliasConstructor(declaration.alias, typeArguments, callee);
+        return this.compileConstructorCall(cls, undefined, types, args, undefined, expression, context, false);
       }
       if (!declaration) return this.error(callee, `${target.prefix}.${callee.name} は定義されていません。`);
     }
@@ -567,20 +571,18 @@ export abstract class CallCompiler extends OperatorCompiler {
       prefix = undefined;
     }
     const declaration = prefix === undefined ? this.library.lookup(name) : this.library.lookupPrefixed(prefix, name);
-    let cls: ClassInfo | undefined;
-    let aliasArgs: DartType[] | undefined;
-    if (declaration?.kind === 'class') cls = declaration.cls;
-    else if (declaration?.kind === 'alias' && declaration.alias.aliased?.kind === 'interface') {
-      cls = declaration.alias.aliased.cls;
-      if (declaration.alias.typeParams.length === 0) aliasArgs = [...declaration.alias.aliased.args];
-    }
-    if (!cls) return this.error(expression, `クラス ${name} が見つかりません。`);
-    const typeArgs =
-      typeSyntax.args.length > 0 ? this.typeArgumentsFor(cls.typeParams, typeSyntax, cls.name) : aliasArgs;
+    const writtenTypes = typeSyntax.args.length > 0 ? typeSyntax.args : undefined;
+    const target =
+      declaration?.kind === 'alias'
+        ? this.aliasConstructor(declaration.alias, writtenTypes, expression)
+        : declaration?.kind === 'class'
+          ? { cls: declaration.cls, types: this.classTypeArguments(declaration.cls, writtenTypes, expression) }
+          : undefined;
+    if (!target) return this.error(expression, 'クラス ' + name + ' が見つかりません。');
     return this.compileConstructorCall(
-      cls,
+      target.cls,
       constructorName,
-      typeArgs,
+      target.types,
       expression.arguments,
       undefined,
       expression,
@@ -598,7 +600,7 @@ export abstract class CallCompiler extends OperatorCompiler {
   compileConstructorCall(
     cls: ClassInfo,
     name: string | undefined,
-    typeArgs: DartType[] | undefined,
+    typeArgs: ConstructorTypes,
     args: ArgumentsSyntax,
     methodTypeArguments: TypeSyntax[] | undefined,
     span: Span,
@@ -622,18 +624,11 @@ export abstract class CallCompiler extends OperatorCompiler {
     if (isConstSyntax && !constructor.isConst) {
       this.error(span, `${cls.name}${name ? `.${name}` : ''} は const のコンストラクタではありません。`);
     }
-    // The constructor's parameters use the class's type parameters, which the call instantiates.
-    const generic: FunctionType = { ...constructor.type, typeParams: typeArgs ? [] : cls.typeParams };
-    const signature = typeArgs
-      ? (substitute(
-          { ...constructor.type, typeParams: [] },
-          new Map(cls.typeParams.map((param, index) => [param, typeArgs[index]]))
-        ) as FunctionType)
-      : generic;
+    const signature = constructorSignature(cls, constructor, typeArgs);
     const bound = this.withConstContext(isConst, () => this.bindArguments(signature, args, undefined, span, context));
     if (isConst && !this.argumentsAreConst)
       this.error(span, 'const のコンストラクタ呼び出しの引数は、定数でなければなりません。');
-    const resolvedArgs = typeArgs ?? bound.staticTypeArgs;
+    const resolvedArgs = constructorArguments(typeArgs, bound.staticTypeArgs);
     const type = interfaceType(cls, resolvedArgs);
     const runtimeArgs = this.runtimeTypes(resolvedArgs);
     const run = this.constructObject(cls, constructor, runtimeArgs, bound.args, span, isConst);
@@ -641,6 +636,26 @@ export abstract class CallCompiler extends OperatorCompiler {
   }
 
   /** Whether every argument of the call just bound was a constant expression. */
+  private aliasConstructor(
+    alias: TypeAlias,
+    written: TypeSyntax[] | undefined,
+    span: Span
+  ): { cls: ClassInfo; types: ConstructorTypes } {
+    const template = this.resolveAlias(alias, span);
+    if (template.kind !== 'interface' || template.nullable)
+      return this.error(span, alias.name + ' は、コンストラクタを持つクラスの別名ではありません。');
+    if (!written && alias.typeParams.length > 0)
+      return { cls: template.cls, types: { template, parameters: alias.typeParams } };
+    const args = written
+      ? this.typeArgumentsFor(
+          alias.typeParams,
+          { ...at(span), kind: 'named', name: alias.name, prefix: undefined, args: written, nullable: false },
+          alias.name
+        )
+      : [];
+    return { cls: template.cls, types: constructorArguments({ template, parameters: alias.typeParams }, args) };
+  }
+
   protected argumentsAreConst = true;
 
   /** Evaluates a list of types at runtime, replacing type parameters in scope. */
@@ -706,6 +721,8 @@ export abstract class CallCompiler extends OperatorCompiler {
    * other than function literals see only what the context gave; function literals, compiled after them, also see
    * what those arguments gave.
    */
+  // code-gauge-allow functionCognitiveComplexity 21 -- Gather ordinary arguments, contextually typed closures, and generic tear-offs.
+  // code-gauge-allow functionNcss 34 -- Gather ordinary arguments, contextually typed closures, and generic tear-offs.
   private inferTypeArguments(
     type: FunctionType,
     args: ArgumentsSyntax,
@@ -720,16 +737,31 @@ export abstract class CallCompiler extends OperatorCompiler {
     }
     const solution = new Map<TypeParam, DartType>();
     const upper = new Map<TypeParam, DartType>();
+    const tearOffs: { result: Compiled; parameterType: DartType }[] = [];
+    const argumentContext = (parameterType: DartType, closurePass: boolean): DartType => {
+      const map = new Map(
+        type.typeParams.map((param) => [
+          param,
+          argumentContextFor(param, type, fromContext, solution, upper, closurePass),
+        ])
+      );
+      return substitute(parameterType, map);
+    };
     for (const closurePass of [false, true]) {
       const infer = (argument: Expression, parameterType: DartType): Compiled => {
-        const map = new Map(
-          type.typeParams.map((param) => [
-            param,
-            argumentContextFor(param, type, fromContext, solution, upper, closurePass),
-          ])
-        );
-        const result = this.compileExpression(argument, substitute(parameterType, map));
-        inferFromSubtype(result.type, parameterType, params, solution, upperBound, upper);
+        const result = this.compileExpression(argument, argumentContext(parameterType, closurePass));
+        const formal = resolveBound(parameterType);
+        const actual = resolveBound(result.type);
+        if (
+          formal.kind === 'function' &&
+          formal.typeParams.length === 0 &&
+          actual.kind === 'function' &&
+          actual.typeParams.length > 0
+        ) {
+          tearOffs.push({ result, parameterType });
+        } else {
+          inferFromSubtype(result.type, parameterType, params, solution, upperBound, upper);
+        }
         return result;
       };
       for (const [index, argument] of args.positional.entries()) {
@@ -741,6 +773,10 @@ export abstract class CallCompiler extends OperatorCompiler {
         const parameterType = type.named.find((named) => named.name === argument.name)?.type ?? DYNAMIC;
         compiled.named[index] = infer(argument.value, parameterType);
       }
+    }
+    for (const { result, parameterType } of tearOffs) {
+      const instantiated = this.instantiateGeneric(result, argumentContext(parameterType, true), true);
+      if (instantiated) inferFromSubtype(instantiated.type, parameterType, params, solution, upperBound, upper);
     }
     return fitToBounds(type, chooseTypeArguments(type, params, solution, upper, fromContext));
   }
@@ -1004,8 +1040,15 @@ export abstract class CallCompiler extends OperatorCompiler {
     const declaration = type.prefix
       ? this.library.lookupPrefixed(type.prefix, type.name)
       : this.library.lookup(type.name);
-    if (declaration?.kind !== 'class') return this.error(span, `クラス ${type.name} が見つかりません。`);
-    const { cls } = declaration;
+    const writtenTypes = type.args.length > 0 ? type.args : undefined;
+    const target =
+      declaration?.kind === 'alias'
+        ? this.aliasConstructor(declaration.alias, writtenTypes, span)
+        : declaration?.kind === 'class'
+          ? { cls: declaration.cls, types: this.classTypeArguments(declaration.cls, writtenTypes, span) }
+          : undefined;
+    if (!target) return this.error(span, 'クラス ' + type.name + ' が見つかりません。');
+    const { cls, types: typeArgs } = target;
     const constructor = cls.constructors.get(name ?? '');
     if (!constructor)
       return this.error(span, `クラス ${cls.name} に ${name ?? '名前のない'} コンストラクタはありません。`);
@@ -1013,14 +1056,8 @@ export abstract class CallCompiler extends OperatorCompiler {
       this.error(span, '列挙型のコンストラクタは取り出せません。');
     if (constructor.kind === 'generative' && cls.isAbstract)
       this.error(span, `抽象クラス ${cls.name} のコンストラクタは取り出せません。`);
-    const typeArgs = type.args.length > 0 ? this.typeArgumentsFor(cls.typeParams, type, cls.name) : undefined;
-    const signature: FunctionType = typeArgs
-      ? (substitute(
-          { ...constructor.type, typeParams: [] },
-          new Map(cls.typeParams.map((param, index) => [param, typeArgs[index]]))
-        ) as FunctionType)
-      : { ...constructor.type, typeParams: cls.typeParams };
-    const fixedArgs = typeArgs ? this.runtimeTypes(typeArgs) : undefined;
+    const signature = constructorSignature(cls, constructor, typeArgs);
+    const fixedArgs = Array.isArray(typeArgs) ? this.runtimeTypes(typeArgs) : undefined;
     return {
       type: signature,
       run: (frame) => {
@@ -1029,7 +1066,7 @@ export abstract class CallCompiler extends OperatorCompiler {
           const construct = this.constructObject(
             cls,
             constructor,
-            () => resolvedFixed ?? [...callTypeArgs],
+            () => resolvedFixed ?? constructorArguments(typeArgs, callTypeArgs),
             () => args,
             span,
             false
@@ -1143,6 +1180,21 @@ function extensionMethodCall(
 }
 
 /** `super.m(...)`, which runs the superclass's implementation on this. */
+function constructorSignature(cls: ClassInfo, constructor: ConstructorInfo, typeArgs: ConstructorTypes): FunctionType {
+  if (!typeArgs) return { ...constructor.type, typeParams: cls.typeParams };
+  const classArgs = Array.isArray(typeArgs) ? typeArgs : typeArgs.template.args;
+  const substitution = new Map(cls.typeParams.map((param, index) => [param, classArgs[index]]));
+  const instantiated = substitute({ ...constructor.type, typeParams: [] }, substitution) as FunctionType;
+  return { ...instantiated, typeParams: Array.isArray(typeArgs) ? [] : typeArgs.parameters };
+}
+
+function constructorArguments(typeArgs: ConstructorTypes, inferred: readonly DartType[]): DartType[] {
+  if (!typeArgs) return [...inferred];
+  if (Array.isArray(typeArgs)) return typeArgs;
+  const substitution = new Map(typeArgs.parameters.map((param, index) => [param, inferred[index] ?? DYNAMIC]));
+  return typeArgs.template.args.map((arg) => substitute(arg, substitution));
+}
+
 function superMethodCall(
   classAt: (frame: Frame) => ClassInfo,
   name: string,

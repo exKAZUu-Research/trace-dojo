@@ -4,7 +4,7 @@ import { ProgramExit, type Runtime } from '../runtime';
 import { DartObject, type Value } from '../values';
 import { compareNumbers, toDouble } from './nativeNumbers';
 import { characterOf } from './nativeStrings';
-import { define, defineConstructor, intArg, iterableValues, numArg } from './nativeSupport';
+import { define, defineConstructor, forEachValue, intArg, numArg } from './nativeSupport';
 
 // dart:math
 
@@ -162,11 +162,13 @@ define('_StandardSink.writeln', (runtime, receiver, args) => {
   return;
 });
 define('_StandardSink.writeAll', (runtime, receiver, [objects, separator = '']) => {
-  sinkOf(runtime, receiver).write(
-    iterableValues(runtime, objects)
-      .map((value) => stringOf(runtime, value))
-      .join(separator as string)
-  );
+  const sink = sinkOf(runtime, receiver);
+  let first = true;
+  forEachValue(runtime, objects, (value) => {
+    if (!first) sink.write(separator as string);
+    first = false;
+    sink.write(stringOf(runtime, value));
+  });
   return;
 });
 define('_StandardSink.writeCharCode', (runtime, receiver, [code]) => {

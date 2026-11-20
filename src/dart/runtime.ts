@@ -138,7 +138,7 @@ export class Runtime implements TracedRuntime<Frame> {
   /** Canonical constants by their structure, so that equal constants are identical. */
   readonly constants = new Map<string, Value>();
   /** Structurally distinct constant types that share a display name. */
-  readonly constantTypes = new Map<string, InterfaceType[]>();
+  readonly constantTypes = new Map<string, DartType[]>();
   /** The canonical tear-offs of top-level functions and static methods. */
   readonly tearOffs = new Map<unknown, DartClosure>();
   /** The value of each constant expression evaluated so far, by the code that builds it. */

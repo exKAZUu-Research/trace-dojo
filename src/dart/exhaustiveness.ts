@@ -23,6 +23,7 @@ interface ListSpace {
   elementType: DartType;
   length: number;
   hasLongerLengths: boolean;
+  elements?: readonly Space[];
 }
 
 type Space =
@@ -47,7 +48,7 @@ export function checkExhaustive(
   isStatement: boolean
 ): boolean {
   if (patterns.some((pattern) => coversAll(compiler, pattern, type))) return true;
-  const cutoff = Math.min(MAX_SPACES - 1, Math.max(0, ...patterns.map(listLengthCutoff)));
+  const cutoff = Math.min(MAX_SPACES - 1, listLengthCutoff(patterns));
   const spaces = expand(type, cutoff);
   const missing = spaces.find((space) => !patterns.some((pattern) => covers(compiler, pattern, space)));
   if (!missing) return true;
@@ -153,43 +154,73 @@ function expandInterface(base: DartType & { kind: 'interface' }, listCutoff: num
     return spaces;
   }
   const list = listCutoff > 0 ? asInstanceOf(base, coreTypes.list) : undefined;
-  if (list) {
-    const [elementType = DYNAMIC] = list.args;
-    return Array.from({ length: listCutoff + 1 }, (_, length) => ({
-      kind: 'list',
-      type: base,
-      elementType,
-      length,
-      hasLongerLengths: length === listCutoff,
-    }));
-  }
+  if (list) return expandList(base, list.args[0] ?? DYNAMIC, listCutoff);
   return [{ kind: 'type', type: base }];
 }
 
-function listLengthCutoff(pattern: Pattern): number {
+function expandList(type: DartType, elementType: DartType, cutoff: number): Space[] {
+  const options = expand(elementType, 0);
+  const spaces: ListSpace[] = [];
+  for (let length = 0; length <= cutoff; length++) {
+    const space: ListSpace = { kind: 'list', type, elementType, length, hasLongerLengths: length === cutoff };
+    if (options.length === 0 && length > 0) continue;
+    if (options.length <= 1 || options.length ** length > MAX_SPACES - spaces.length - cutoff + length) {
+      spaces.push(space);
+      continue;
+    }
+    let products: Space[][] = [[]];
+    for (let index = 0; index < length; index++) {
+      products = products.flatMap((elements) => options.map((element) => [...elements, element]));
+    }
+    for (const elements of products) spaces.push({ ...space, elements });
+  }
+  return spaces;
+}
+
+function listLengthCutoff(patterns: Pattern[]): number {
+  let cutoff = 0;
+  let prefix = 0;
+  let suffix = 0;
+  const visit = (pattern: Pattern): void => {
+    if (pattern.kind !== 'list') return;
+    const rest = pattern.elements.findIndex((element) => element.kind === 'rest');
+    if (rest === -1) {
+      cutoff = Math.max(cutoff, pattern.elements.length + 1);
+      return;
+    }
+    const after = pattern.elements.length - rest - 1;
+    const part = pattern.elements[rest];
+    const nested = part.kind === 'rest' && part.pattern ? listLengthCutoff([part.pattern]) : 0;
+    prefix = Math.max(prefix, rest + nested);
+    suffix = Math.max(suffix, after);
+  };
+  for (const pattern of patterns) visitNestedPatterns(pattern, visit);
+  return Math.max(prefix + suffix, cutoff);
+}
+
+function visitNestedPatterns(pattern: Pattern, visit: (pattern: Pattern) => void): void {
+  visit(pattern);
   switch (pattern.kind) {
     case 'and':
     case 'or': {
-      return Math.max(listLengthCutoff(pattern.left), listLengthCutoff(pattern.right));
+      visitNestedPatterns(pattern.left, visit);
+      visitNestedPatterns(pattern.right, visit);
+      break;
     }
     case 'cast':
     case 'nullAssert':
     case 'nullCheck':
     case 'parenthesized': {
-      return listLengthCutoff(pattern.pattern);
+      visitNestedPatterns(pattern.pattern, visit);
+      break;
     }
     case 'record':
     case 'object': {
-      return Math.max(0, ...pattern.fields.map((field) => listLengthCutoff(field.pattern)));
-    }
-    case 'list': {
-      const rest = pattern.elements.find((element) => element.kind === 'rest');
-      const fixed = pattern.elements.length - (rest ? 1 : 0);
-      const nested = rest?.pattern ? listLengthCutoff(rest.pattern) : 0;
-      return rest ? fixed + nested : fixed + 1;
+      for (const field of pattern.fields) visitNestedPatterns(field.pattern, visit);
+      break;
     }
     default: {
-      return 0;
+      break;
     }
   }
 }
@@ -369,6 +400,7 @@ function covers(compiler: ExpressionCompiler, pattern: Pattern, space: Space): b
   }
 }
 
+// code-gauge-allow functionCognitiveComplexity 18 -- Keep the prefix, middle and suffix of each list length space together.
 function listCovers(
   compiler: ExpressionCompiler,
   pattern: Extract<Pattern, { kind: 'list' }>,
@@ -378,19 +410,24 @@ function listCovers(
     const requiredElement = compiler.resolveType(pattern.typeArguments[0]);
     if (!isSubtype(space.elementType, requiredElement)) return false;
   }
-  const rest = pattern.elements.find((element) => element.kind === 'rest');
-  const fixed = pattern.elements.length - (rest ? 1 : 0);
-  if (rest ? space.length < fixed : space.hasLongerLengths || space.length !== fixed) return false;
-  const restSpace = {
-    ...space,
-    length: space.length - fixed,
-    type: interfaceType(coreTypes.list, [space.elementType]),
-  };
-  return pattern.elements.every((element) =>
-    element.kind === 'rest'
-      ? !element.pattern || covers(compiler, element.pattern, restSpace)
-      : coversAll(compiler, element, space.elementType)
-  );
+  const rest = pattern.elements.findIndex((element) => element.kind === 'rest');
+  const fixed = pattern.elements.length - (rest !== -1 ? 1 : 0);
+  if (rest !== -1 ? space.length < fixed : space.hasLongerLengths || space.length !== fixed) return false;
+  return pattern.elements.every((element, index) => {
+    if (element.kind === 'rest') {
+      if (!element.pattern) return true;
+      const length = space.length - fixed;
+      return covers(compiler, element.pattern, {
+        ...space,
+        length,
+        type: interfaceType(coreTypes.list, [space.elementType]),
+        elements: space.elements?.slice(rest, rest + length),
+      });
+    }
+    const position = rest !== -1 && index > rest ? space.length + index - pattern.elements.length : index;
+    const elementSpace = space.elements?.[position];
+    return elementSpace ? covers(compiler, element, elementSpace) : coversAll(compiler, element, space.elementType);
+  });
 }
 
 function constantCovers(compiler: ExpressionCompiler, value: Expression, space: Space): boolean {
