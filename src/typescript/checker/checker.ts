@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 729 -- Holds type construction, bounded instantiation, structure lookup, and diagnostics shared by checker components.
+// code-gauge-allow-file fileNcss 738 -- Holds type construction, bounded instantiation, structure lookup, and diagnostics shared by checker components.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { type SourceDiagnostic, sourceDiagnostic } from '../../interpreter/diagnostics';
@@ -494,6 +494,13 @@ export class Checker {
       this.substitutions.set(key, narrowed);
     }
     return narrowed;
+  }
+
+  conditionalTrueType(type: ConditionalType): Type {
+    const { checkType, extendsType, trueType } = type;
+    return checkType.kind === 'typeParameter'
+      ? this.instantiate(trueType, new Map([[checkType.id, this.substitutionOf(checkType, extendsType)]]))
+      : trueType;
   }
 
   private instantiateUnion(type: UnionType, mapper: Mapper): Type {
@@ -1023,13 +1030,15 @@ export class Checker {
     try {
       const knownBranch = this.conditionalBranchFromBounds(type);
       if (knownBranch) return this.baseConstraint(knownBranch);
-      // The true branch sees its check type narrowed to the extends type.
       const trueType = type.trueType;
-      const trueConstraint =
+      const yes =
         trueType === type.checkType
           ? intersectionOf([this.baseConstraint(type.checkType), type.extendsType], this.budget)
-          : this.baseConstraint(trueType);
-      return unionOf([trueConstraint, this.baseConstraint(type.falseType)]);
+          : this.baseConstraint(this.conditionalTrueType(type));
+      const no = this.baseConstraint(type.falseType);
+      if (isAnyLike(yes)) return no;
+      if (isAnyLike(no)) return yes;
+      return unionOf([yes, no]);
     } finally {
       this.conditionalConstraintsInProgress.delete(id);
     }
@@ -1046,7 +1055,10 @@ export class Checker {
     }
     if (!bound || isIntrinsic(bound, 'never')) return undefined;
     const constraint = isIntrinsic(bound, 'any') ? unknownType : bound;
-    if (this.relations.isAssignable(constraint, extendsType)) return type.trueType;
+    if (this.relations.isAssignable(constraint, extendsType)) {
+      const instantiated = this.instantiateContextual(type, new Map([[checkType.id, constraint]]));
+      return instantiated.kind === 'conditional' ? type.trueType : instantiated;
+    }
     if (isIntrinsic(extendsType, 'never')) return type.falseType;
     const overlaps = typeMembers(extendsType).some((member) => this.relations.isAssignable(member, constraint));
     return overlaps ? undefined : type.falseType;

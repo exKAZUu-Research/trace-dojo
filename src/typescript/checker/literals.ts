@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 736 -- Types literals and their spreads, members, and widening in the same literal context.
+// code-gauge-allow-file fileNcss 743 -- Types literals and their spreads, members, and widening in the same literal context.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExpressionListFlow, tupleArgumentContexts } from './callArity';
@@ -114,8 +114,7 @@ export class LiteralChecker {
 
   // code-gauge-allow functionCognitiveComplexity 18 -- Keeps literal elements, holes, spreads and contextual tuple construction together.
   arrayLiteral(node: TreeNode, contextual?: Type): Type {
-    contextual = this.c.expressions.deferredContexts.typeOf(node) ?? contextual;
-    this.literalContexts.set(node.id, contextual);
+    contextual = this.literalContext(node, contextual);
     const elements = arrayElements(node);
     const isConstContext = this.isConstContext(node, contextual);
     const lengths = contextual ? this.arrayElementLengths(elements) : [];
@@ -320,8 +319,7 @@ export class LiteralChecker {
 
   // code-gauge-allow functionNcss 32 -- Builds the common object-literal context before dispatching each member form.
   objectLiteral(node: TreeNode, contextual?: Type): Type {
-    contextual = this.c.expressions.deferredContexts.typeOf(node) ?? contextual;
-    this.literalContexts.set(node.id, contextual);
+    contextual = this.literalContext(node, contextual);
     const properties = new Map<string, Property>();
     const declarations = new Map<string, Property>();
     const discriminated = contextual && this.discriminatedContext(node, contextual);
@@ -361,6 +359,19 @@ export class LiteralChecker {
     if (literal.spreadIndexes && literal.hasPendingMembers) this.spreadWrittenIndexes(literal);
     if (contextual) this.addPatternDefaults(properties, contextual);
     return this.concreteLiteral(literal, node);
+  }
+
+  private literalContext(node: TreeNode, contextual: Type | undefined): Type | undefined {
+    const context = this.c.expressions.deferredContexts.typeOf(node) ?? contextual;
+    this.literalContexts.set(node.id, context);
+    if (!context) return undefined;
+    const members = typeMembers(context);
+    if (!members.some((member) => member.kind === 'conditional')) return context;
+    return unionOf(
+      members.map((member) => (member.kind === 'conditional' ? this.c.baseConstraint(member) : member)),
+      true,
+      true
+    );
   }
 
   private concreteLiteral(literal: ObjectLiteral, node: TreeNode): Type {
@@ -1071,7 +1082,7 @@ export class LiteralChecker {
 
   /** Whether a type parameter is constrained to primitives, which keeps the literals inferred for it. */
   hasPrimitiveConstraint(parameter: TypeParameter): boolean {
-    const constraint = parameter.constraint?.();
+    const constraint = parameter.substitution?.constraint ?? parameter.constraint?.();
     if (!constraint) return false;
     return (constraint.kind === 'union' ? constraint.types : [constraint]).some(
       (member) =>

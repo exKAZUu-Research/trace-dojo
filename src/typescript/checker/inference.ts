@@ -404,16 +404,9 @@ export class TypeInference {
     covariant: boolean
   ): void {
     if (source.kind === 'conditional') {
-      const fromTrue =
-        source.checkType.kind === 'typeParameter'
-          ? this.c.instantiate(
-              source.trueType,
-              new Map([[source.checkType.id, this.c.substitutionOf(source.checkType, source.extendsType)]])
-            )
-          : source.trueType;
       recurse(source.checkType, target.checkType);
       recurse(source.extendsType, target.extendsType);
-      recurse(fromTrue, target.trueType);
+      recurse(this.c.conditionalTrueType(source), target.trueType);
       recurse(source.falseType, target.falseType);
       return;
     }
