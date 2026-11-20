@@ -160,11 +160,16 @@ export class BorrowChecker {
    * Checks an expression. `mode` tells what happens to its value when it is a place: moved (or copied), read without
    * moving (borrowed as `&`), or borrowed mutably.
    */
-  // code-gauge-allow functionNcss 60 -- One case per kind of expression.
   private expr(expr: Expr, state: State, mode: 'move' | 'read' | 'mut'): State {
     this.budget.spend();
     if (state === BOTTOM) return BOTTOM;
+    if (mode === 'move' && this.annotations.referenceArguments.has(expr) && isMutReference(expr.ty)) mode = 'read';
     if (this.constContext && mode !== 'move' && !this.placeOf(expr)) this.checkTemporaryDrop(expr, state);
+    return this.exprInner(expr, state, mode);
+  }
+
+  // code-gauge-allow functionNcss 57 -- Each expression kind defines how evaluation changes move state.
+  private exprInner(expr: Expr, state: State, mode: 'move' | 'read' | 'mut'): State {
     switch (expr.kind) {
       case 'path': {
         return this.usePlace(expr, state, mode);
@@ -332,10 +337,7 @@ export class BorrowChecker {
     let current = this.expr(expr.callee, state, consumes ? 'move' : 'read');
     const res = expr.callee.kind === 'path' ? this.annotations.paths.get(expr.callee) : undefined;
     const fn = res?.kind === 'fn' ? res.fn : undefined;
-    const params = this.annotations.callParams.get(expr);
-    for (const [index, arg] of expr.args.entries()) {
-      current = this.expr(arg, current, argumentMode(arg, params?.[index]));
-    }
+    for (const arg of expr.args) current = this.expr(arg, current, 'move');
     return fn && diverges(fn.ret) ? BOTTOM : current;
   }
 
@@ -444,10 +446,7 @@ export class BorrowChecker {
     } else {
       current = this.expr(expr.receiver, current, 'read');
     }
-    const params = this.annotations.callParams.get(expr);
-    for (const [index, arg] of expr.args.entries()) {
-      current = this.expr(arg, current, argumentMode(arg, params?.[index]));
-    }
+    for (const arg of expr.args) current = this.expr(arg, current, 'move');
     return method && diverges(method.fn.ret) ? BOTTOM : current;
   }
 
@@ -892,15 +891,6 @@ function isMutReference(type: Type | undefined): boolean {
 function isReference(type: Type | undefined): boolean {
   if (!type) return false;
   return normalize(shallow(type)).kind === 'ref';
-}
-
-/**
- * A `&mut` argument for a reference parameter is reborrowed (`&mut *r`) rather than moved, so the reference stays
- * usable after the call; one for a type parameter (`T`) moves.
- */
-function argumentMode(arg: Expr, paramType: Type | undefined): 'move' | 'read' {
-  if (!isMutReference(arg.ty)) return 'move';
-  return paramType && normalize(shallow(paramType)).kind !== 'ref' ? 'move' : 'read';
 }
 
 function diverges(ret: Type): boolean {

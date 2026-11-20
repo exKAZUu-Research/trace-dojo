@@ -607,8 +607,17 @@ export class LoanBuilder {
   // Expressions
 
   /** Evaluates an expression for its value, moving or copying the place it denotes. */
-  // code-gauge-allow functionNcss 60 -- One case per kind of expression.
   private value(expr: Expr): Value {
+    const mutable = this.annotations.referenceArguments.get(expr);
+    if (mutable !== undefined && isMutReference(expr.ty)) {
+      const place = this.place(expr);
+      if (place) return this.borrow(project(place, '*'), mutable, expr.span, refTarget(expr.ty)).value;
+    }
+    return this.valueInner(expr);
+  }
+
+  // code-gauge-allow functionNcss 60 -- One case per kind of expression.
+  private valueInner(expr: Expr): Value {
     switch (expr.kind) {
       case 'path':
       case 'field':
@@ -997,8 +1006,7 @@ export class LoanBuilder {
       const access = kind === 'FnMut' ? 'deep' : kind === 'FnOnce' ? this.readKind(expr.callee.ty) : 'read';
       callee = place ? this.read(place, expr.callee.ty, expr.callee.span, access) : this.value(expr.callee);
     }
-    const params = this.annotations.callParams.get(expr);
-    const args = expr.args.map((arg, index) => this.argument(arg, params?.[index]));
+    const args = expr.args.map((arg) => this.value(arg));
     const result = this.callPoint(expr, [callee, ...args], []);
     const results = this.layout(result);
     const inputs = args.map((arg) => this.layout(arg));
@@ -1024,21 +1032,10 @@ export class LoanBuilder {
     return result;
   }
 
-  /** An argument: a `&mut` passed where the parameter is a reference is reborrowed, so the caller keeps it. */
-  private argument(arg: Expr, paramType: Type | undefined): Value {
-    const isRefParam = !paramType || normalize(shallow(paramType)).kind === 'ref';
-    if (isMutReference(arg.ty) && isRefParam) {
-      const place = this.place(arg);
-      if (place) return this.borrow(project(place, '*'), true, arg.span, refTarget(arg.ty)).value;
-    }
-    return this.value(arg);
-  }
-
   private methodCall(expr: Extract<Expr, { kind: 'methodCall' }>): Value {
     const method = this.annotations.methods.get(expr);
     const { receiver, activation, target } = this.receiver(expr, method);
-    const params = this.annotations.callParams.get(expr);
-    const args = expr.args.map((arg, index) => this.argument(arg, params?.[index]));
+    const args = expr.args.map((arg) => this.value(arg));
     const accesses: Access[] = [];
     if (activation) accesses.push({ place: activation.place, kind: 'deep', span: expr.span, activates: activation });
     const result = this.callPoint(expr, [receiver, ...args], accesses);

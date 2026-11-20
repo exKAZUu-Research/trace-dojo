@@ -1476,7 +1476,7 @@ export function lowerType(ast: TypeAst, scope: TypeScope): Type {
         return type;
       }
       if (scope.allowOpaque) {
-        const opaque = newOpaque([]);
+        const opaque = newOpaque([...scope.params.values()].map((param) => ({ kind: 'param', param })));
         const type: Type = { kind: 'opaque', opaque };
         opaque.bounds = ast.bounds.map((bound) => lowerBound(bound, scope, type));
         if (opaque.bounds.some((bound) => bound.fnSig)) {

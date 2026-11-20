@@ -201,6 +201,7 @@ export class IterValue {
    * An independent copy of the iterator at its position, as `Clone` makes it.
    */
   fork: (() => IterValue) | undefined;
+  ownedItemType?: Type;
   peekedType?: Type;
 }
 

@@ -10,7 +10,6 @@ interface Projection {
   type: Type;
 }
 
-// code-gauge-allow functionNcss 34 -- Tracking projections uses the same local and checked call information for the whole walk.
 // code-gauge-allow functionCognitiveComplexity 27 -- Tracking projections uses the same local and checked call information for the whole walk.
 export function capturedPlaces(
   annotations: Annotations,
@@ -31,30 +30,18 @@ export function capturedPlaces(
       const projection = receiverProjection(annotations, expr, local);
       if (projection) {
         places.push(projection);
-        const params = annotations.callParams.get(expr);
-        for (const [index, arg] of expr.args.entries()) visitArg(arg, params?.[index]);
+        for (const arg of expr.args) visit(arg);
         return;
       }
-    }
-    if (expr.kind === 'call') {
-      const params = annotations.callParams.get(expr);
-      visit(expr.callee);
-      for (const [index, arg] of expr.args.entries()) visitArg(arg, params?.[index]);
-      return;
     }
     const proj = fieldChain(annotations, expr, local);
     if (!proj) {
       forEachDirect(expr, visit);
       return;
     }
-    places.push({ proj: typedReferenceReads.has(expr) ? [...proj, '*'] : proj, type: expr.ty ?? local.type });
+    const reborrows = typedReferenceReads.has(expr) || annotations.referenceArguments.has(expr);
+    places.push({ proj: reborrows ? [...proj, '*'] : proj, type: expr.ty ?? local.type });
     if (expr.kind === 'index') visit(expr.index);
-  }
-
-  function visitArg(arg: Expr, type: Type | undefined): void {
-    const base = fieldChain(annotations, arg, local);
-    if (base && isReference(arg.ty) && isReference(type)) places.push({ proj: [...base, '*'], type: arg.ty! });
-    else visit(arg);
   }
 }
 

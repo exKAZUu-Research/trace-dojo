@@ -3443,3 +3443,103 @@ test('imports Rust block items and aliases through their lexical scopes', () => 
   expect(executeProgram('rust', rustMain('struct Local; { pub use Local as Public; }')).kind).toBe('compileError');
   expect(executeProgram('rust', rustMain('use B as A; use A as B;')).kind).toBe('compileError');
 });
+
+test('instantiates the item type of a Rust generic opaque iterator at each call', () => {
+  const program = `fn main() {
+      let numbers = reversed(vec![1, 2]);
+      println!("{:?}", numbers.collect::<Vec<_>>());
+      for ch in iterable(vec!['a', 'b']) { println!("{}", ch); }
+      let selected = if true { reversed(vec![3]) } else { reversed(vec![4]) };
+      println!("{:?}", selected.collect::<Vec<_>>());
+    }
+    fn reversed<T>(items: Vec<T>) -> impl Iterator<Item = T> { items.into_iter().rev() }
+    fn iterable<T>(items: Vec<T>) -> impl IntoIterator<Item = T> { items }`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '[2, 1]\na\nb\n[3]\n' });
+});
+
+test('uses Rust Zip indexed formatting only when its owned elements are Copy', () => {
+  const program = rustMain(`let mut pairs = vec![1, 2, 3].into_iter().zip(vec!["a", "b", "c"]);
+    pairs.next();
+    println!("{:?} {:?} {}", pairs, [1, 2].into_iter().zip([3, 4]), pairs.clone().count());
+    println!("{:?}", vec![String::from("a")].into_iter().zip(vec![1]));
+    println!("{:?}", vec![1].into_iter().map(|n| n + 1).zip([2]));`);
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'Zip Zip 2\nZip { a: IntoIter(["a"]), b: IntoIter([1]) }\nZip\n',
+  });
+});
+
+test('validates Rust generic constants reached through trait objects', () => {
+  const declarations = `struct S<T>(T);
+    impl<T> S<T> { const BAD: i8 = 127_i8.pow(2); }
+    trait Read { fn read(&self) -> i8; }
+    trait Sub: Read {}
+    impl<T> Read for S<T> { fn read(&self) -> i8 { Self::BAD } }
+    impl<T> Sub for S<T> {}
+    fn bad<T>() -> i8 { S::<T>::BAD }`;
+  for (const body of [
+    'let object: Box<dyn Sub> = Box::new(S(1)); println!("before"); println!("{}", object.read());',
+    'let value = S(1); let object: &dyn Read = &value; println!("{}", object.read());',
+    'let bad = bad::<i32>; println!("{}", bad());',
+  ]) {
+    expect(executeProgram('rust', rustMain(body, declarations)).kind).toBe('compileError');
+  }
+  const unused = rustMain('let _value = S(1); let _function = bad::<i32>;', declarations);
+  expect(executeProgram('rust', unused)).toMatchObject({ kind: 'executed', stdout: '' });
+});
+
+test('validates Rust constant match coverage before evaluating a referenced initializer', () => {
+  const invalid = [
+    'const X: i32 = match true { false => 1 };',
+    'const X: i32 = match false { true => 1 }; const Y: i32 = X;',
+  ];
+  expect(executeProgram('rust', rustMain('println!("main");', invalid[0]))).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ message: expect.stringContaining('match') })],
+  });
+  expect(executeProgram('rust', rustMain('match 1 { Y => (), _ => () }', invalid[1]))).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ message: expect.stringContaining('match') })],
+  });
+  const valid = rustMain(
+    'println!("{}", X);',
+    'const YES: bool = 1_i32.abs() == 1; const X: i32 = match true { false => 0, YES => 2 };'
+  );
+  expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: '2\n' });
+});
+
+test('reborrows Rust references through value-producing argument expressions', () => {
+  for (const [argument, expected] of [
+    ['{ print!("arg "); reference }', 'arg arg 2\n'],
+    ['if choose { reference } else { reference }', '2\n'],
+    ['match choose { true => { reference }, false => reference }', '2\n'],
+  ]) {
+    const program = rustMain(
+      'wrap(true, |value| *value += 1);',
+      `fn wrap<F: Fn(&mut i32)>(choose: bool, callback: F) {
+        let mut value = 0;
+        let reference = &mut value;
+        let mut run = || callback(${argument});
+        run();
+        run();
+        println!("{}", value);
+      }`
+    );
+    expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: expected });
+  }
+  const moved = rustMain(
+    'let mut n = 0; let reference = &mut n; take({ reference }); take(reference);',
+    'fn take<T>(_: T) {}'
+  );
+  expect(executeProgram('rust', moved).kind).toBe('compileError');
+});
+
+test('propagates Rust repeated const elements without inventing destructors', () => {
+  const valid = rustMain(
+    'println!("ok");',
+    'const N: Option<String> = None; const X: () = { let values = ([None::<String>; 1], [N; 2]); };'
+  );
+  expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: 'ok\n' });
+  const invalid = rustMain('', 'const X: () = { let values = [Some(String::new()); 1]; };');
+  expect(executeProgram('rust', invalid).kind).toBe('compileError');
+});

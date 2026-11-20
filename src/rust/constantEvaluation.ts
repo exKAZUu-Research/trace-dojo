@@ -1,6 +1,6 @@
 import type { ExecutionBudget } from '../interpreter/limits';
-import type { PathRes } from './annotations';
-import type { Expr } from './ast';
+import type { Coercion, LocalVar, PathRes } from './annotations';
+import type { Expr, Pattern } from './ast';
 import { forEachDirect, walkBlock } from './astWalk';
 import { settleStrings } from './capacity';
 import type { Checker } from './checker';
@@ -9,7 +9,17 @@ import { Interpreter } from './interpreter';
 import { compileError } from './items';
 import { Runtime } from './runtime';
 import { concreteType, typeKey } from './runtimeTypes';
-import { type ConstDef, type FnDef, hasParams, hasVars, resolve, type Subst, type Type } from './types';
+import {
+  allSupertraits,
+  type ConstDef,
+  type FnDef,
+  hasParams,
+  hasVars,
+  resolve,
+  type Subst,
+  substituteTraitRef,
+  type Type,
+} from './types';
 import { EnumValue, isPlace, RangeValue, sliceItems, SliceView, StructValue, type Value } from './values';
 
 type ConstPath = Extract<PathRes, { kind: 'const' }>;
@@ -21,50 +31,67 @@ interface FunctionInstance {
 export function evaluateConstants(checker: Checker, budget: ExecutionBudget): void {
   const { program } = checker;
   const constants = program.consts.filter((def) => !def.module.isStd && def.ast.value);
-  if (constants.length === 0) return;
-  const interpreter = new Interpreter(program, checker, false);
-  interpreter.runtime = new Runtime(undefined, budget);
+  if (constants.length === 0 && checker.annotations.constPatterns.size === 0) {
+    for (const checks of checker.coverageChecks.values()) for (const check of checks) check.run();
+    return;
+  }
+  const evaluation = new ConstantEvaluation(checker, budget);
   try {
-    const evaluation = new ConstantEvaluation(interpreter, checker, budget);
     evaluation.run(constants);
   } finally {
     settleStrings();
-    interpreter.restoreOperations();
+    evaluation.interpreter.restoreOperations();
   }
 }
 
 class ConstantEvaluation {
+  readonly interpreter: Interpreter;
   private readonly checked = new Map<ConstDef | FnDef, Set<string>>();
   private readonly pending: FunctionInstance[] = [];
+  private readonly usedLocals = new Set<LocalVar>();
+  private readonly coverage = new Map<FnDef | ConstDef, 'checking' | 'checked'>();
 
   constructor(
-    private readonly interpreter: Interpreter,
     private readonly checker: Checker,
     private readonly budget: ExecutionBudget
-  ) {}
+  ) {
+    this.interpreter = new Interpreter(checker.program, checker, false, (def) => this.checkCoverage(def));
+    this.interpreter.runtime = new Runtime(undefined, budget);
+  }
 
   run(constants: ConstDef[]): void {
+    for (const def of this.checker.coverageChecks.keys()) this.checkCoverage(def);
     for (const def of constants) if (!def.impl?.params.length) this.validate(def, []);
-    this.evaluatePatterns();
     if (!constants.some((def) => def.impl?.params.length)) return;
     for (const res of this.checker.annotations.paths.values()) {
       if (res.kind === 'const') this.validate(res.def, instantiations(res.typeArgs));
+      if (res.kind === 'local' || res.kind === 'capture') this.usedLocals.add(res.local);
     }
     const main = this.checker.program.root.values.get('main')?.binding;
     if (main?.kind === 'fn') this.pending.push({ fn: main.def, typeArgs: [] });
     for (const instance of this.pending) this.walkFunction(instance);
   }
 
-  private evaluatePatterns(): void {
-    const { constPatterns, paths } = this.checker.annotations;
-    for (const pattern of constPatterns.keys()) {
-      const res = paths.get(pattern) as ConstPath;
-      if (hasParams(res.type) || this.dependsOnParameters(res, new Set())) {
-        compileError(pattern.span, '定数パターンは総称型の型引数に依存できません。');
-      }
-      const value = this.interpreter.evaluateCheckedConstant(res.def, instantiations(res.typeArgs));
-      constPatterns.set(pattern, patternValue(value, this.budget));
+  private checkCoverage(def: FnDef | ConstDef): void {
+    const checks = this.checker.coverageChecks.get(def);
+    if (!checks?.length || this.coverage.get(def) === 'checked') return;
+    if (this.coverage.get(def) === 'checking') compileError(def.ast!.span, `定数 ${def.name} が循環しています。`);
+    this.coverage.set(def, 'checking');
+    for (const { constantPattern, run } of checks) {
+      if (constantPattern) this.evaluatePattern(constantPattern);
+      run();
     }
+    this.coverage.set(def, 'checked');
+  }
+
+  private evaluatePattern(pattern: Pattern): void {
+    const { constPatterns, paths } = this.checker.annotations;
+    const res = paths.get(pattern) as ConstPath;
+    if (hasParams(res.type) || this.dependsOnParameters(res, new Set())) {
+      compileError(pattern.span, '定数パターンは総称型の型引数に依存できません。');
+    }
+    const value = this.interpreter.evaluateCheckedConstant(res.def, instantiations(res.typeArgs));
+    constPatterns.set(pattern, patternValue(value, this.budget));
   }
 
   private dependsOnParameters(path: ConstPath, visited: Set<ConstDef>): boolean {
@@ -102,12 +129,38 @@ class ConstantEvaluation {
       this.budget.spend();
       const path = annotations.paths.get(expr);
       if (path?.kind === 'const') this.validate(path.def, instantiations(path.typeArgs, subst));
-      if (path?.kind === 'fn') this.enqueue(path, subst);
+      if (path?.kind === 'fn' && this.usedFunctionValue(expr)) this.enqueue(path, subst);
       const method = annotations.methods.get(expr);
       if (method) this.enqueue(method, subst);
+      const coercion = annotations.coercions.get(expr);
+      if (coercion?.kind === 'dyn') this.enqueueVtable(coercion, subst);
       forEachDirect(expr, visit);
     };
     walkBlock(body, visit);
+  }
+
+  private usedFunctionValue(expr: Expr): boolean {
+    const { functionInitializers } = this.checker.annotations;
+    if (!functionInitializers.has(expr)) return true;
+    const local = functionInitializers.get(expr);
+    return local !== undefined && this.usedLocals.has(local);
+  }
+
+  private enqueueVtable(coercion: Extract<Coercion, { kind: 'dyn' }>, subst: Subst): void {
+    const [receiver] = instantiations([coercion.type], subst);
+    if (!concrete(receiver)) return;
+    const trait = substituteTraitRef(coercion.trait, subst);
+    for (const bound of allSupertraits([trait], receiver)) {
+      for (const fn of bound.trait.methods.values()) {
+        if (
+          fn.extraBounds?.some(({ param, bound: goal }) => param === bound.trait.self && goal.trait.builtin === 'Sized')
+        ) {
+          continue;
+        }
+        const typeArgs = instantiations([receiver, ...bound.args]);
+        if (typeArgs.every(concrete)) this.pending.push({ fn, typeArgs });
+      }
+    }
   }
 
   private enqueue(instance: FunctionInstance, subst: Subst): void {

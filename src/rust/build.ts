@@ -67,7 +67,6 @@ function typeCheck(source: string, atomicRows: ReadonlySet<number>, budget: Exec
   const checker = new Checker(program, atomicRows, budget);
   checker.checkProgram();
   evaluateConstants(checker, budget);
-  for (const check of checker.coverageChecks) check();
   budget.spend(0);
   return { program, checker };
 }

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 573 -- Shares Rust constant propagation between diagnostics and pattern coverage.
+// code-gauge-allow-file fileNcss 597 -- Shares Rust constant propagation between diagnostics and pattern coverage.
 
 import type { ExecutionBudget } from '../interpreter/limits';
 import type { Annotations, LocalVar, PathRes } from './annotations';
@@ -28,6 +28,7 @@ type IntegerOperation = Pick<Extract<Expr, { kind: 'binary' }>, 'op' | 'span'>;
 interface Aggregate {
   ctor?: string;
   fields: Map<string, Known | undefined>;
+  repeat?: { length: number; item: Known | undefined };
 }
 
 export function checkConstOperations(expr: Expr, annotations: Annotations): void {
@@ -175,6 +176,7 @@ export class ConstLint {
   }
 
   /** Checks an expression's operations, returning its value when it is a constant. */
+  // code-gauge-allow functionNcss 35 -- Constant propagation follows each expression kind using its checked type.
   private expr(expr: Expr): Known | undefined {
     switch (expr.kind) {
       case 'int': {
@@ -206,6 +208,14 @@ export class ConstLint {
       case 'tuple':
       case 'array': {
         return this.tupleOrArray(expr);
+      }
+      case 'arrayRepeat': {
+        const item = this.expr(expr.value);
+        this.expr(expr.count);
+        const type = normalize(shallow(expr.ty!));
+        return this.patternEvaluation && type.kind === 'array'
+          ? { fields: new Map(), repeat: { length: type.len, item } }
+          : undefined;
       }
       case 'call':
       case 'methodCall':
@@ -402,7 +412,7 @@ export class ConstLint {
       );
     }
     this.endBlock();
-    return typeof operand === 'object' && typeof index === 'bigint' ? operand.fields.get(String(index)) : undefined;
+    return typeof index === 'bigint' ? knownField(operand, String(index)) : undefined;
   }
 
   /** A call ends a basic block; a tuple struct's or a variant's constructor builds its value. */
@@ -611,7 +621,13 @@ export class ConstLint {
 }
 
 export function knownField(value: Known | undefined, name: string): Known | undefined {
-  return typeof value === 'object' ? value.fields.get(name) : undefined;
+  if (typeof value !== 'object') return undefined;
+  if (value.fields.has(name)) return value.fields.get(name);
+  const index = Number(name);
+  if (value.repeat && (name === '[]' || (Number.isSafeInteger(index) && index >= 0 && index < value.repeat.length))) {
+    return value.repeat.item;
+  }
+  return undefined;
 }
 
 export function writeKnownField(
@@ -622,24 +638,31 @@ export function writeKnownField(
   if (path.length === 0) return assigned;
   if (typeof value !== 'object') return undefined;
   const [field, ...rest] = path;
-  const fields = new Map(value.fields);
-  fields.set(field, writeKnownField(fields.get(field), rest, assigned));
+  const replacement = writeKnownField(knownField(value, field), rest, assigned);
+  const fields = new Map([...value.fields, [field, replacement]]);
   return { ...value, fields };
 }
 
 export function intersectKnown(a: Known | undefined, b: Known | undefined): Known | undefined {
   if (Object.is(a, b)) return a;
   if (typeof a !== 'object' || typeof b !== 'object' || a.ctor !== b.ctor) return undefined;
-  return aggregate(
-    [...a.fields].map(([name, value]) => [name, intersectKnown(value, b.fields.get(name))]),
-    a.ctor
-  );
+  const fields = new Set([...a.fields.keys(), ...b.fields.keys()]);
+  const repeat =
+    a.repeat && b.repeat && a.repeat.length === b.repeat.length
+      ? { length: a.repeat.length, item: intersectKnown(a.repeat.item, b.repeat.item) }
+      : undefined;
+  return {
+    ctor: a.ctor,
+    fields: new Map([...fields].map((name) => [name, intersectKnown(knownField(a, name), knownField(b, name))])),
+    repeat,
+  };
 }
 
 export function sameKnown(a: Known | undefined, b: Known | undefined): boolean {
   if (Object.is(a, b)) return true;
   if (typeof a !== 'object' || typeof b !== 'object' || a.ctor !== b.ctor || a.fields.size !== b.fields.size)
     return false;
+  if (a.repeat?.length !== b.repeat?.length || !sameKnown(a.repeat?.item, b.repeat?.item)) return false;
   return [...a.fields].every(([name, value]) => b.fields.has(name) && sameKnown(value, b.fields.get(name)));
 }
 
@@ -804,6 +827,15 @@ function allKnownMatches(results: (boolean | undefined)[]): boolean | undefined 
 function knownEqual(left: Known | undefined, right: Known | undefined): boolean | undefined {
   if (left === undefined || right === undefined) return undefined;
   if (typeof left !== 'object' || typeof right !== 'object') return left === right;
+  if (left.repeat || right.repeat) {
+    if (!left.repeat || !right.repeat) return undefined;
+    if (left.repeat.length !== right.repeat.length) return false;
+    const names = new Set([...left.fields.keys(), ...right.fields.keys()]);
+    return allKnownMatches([
+      knownEqual(left.repeat.item, right.repeat.item),
+      ...[...names].map((name) => knownEqual(knownField(left, name), knownField(right, name))),
+    ]);
+  }
   if (left.ctor !== right.ctor || left.fields.size !== right.fields.size) return false;
   return allKnownMatches([...left.fields].map(([name, value]) => knownEqual(value, right.fields.get(name))));
 }

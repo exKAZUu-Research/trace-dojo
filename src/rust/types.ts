@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 407 -- Defines Rust types, their substitutions and their shared structural operations.
 import type { ConstItem, FnItem, Span } from './ast';
 import type { Module } from './items';
 
@@ -58,6 +59,7 @@ export interface ClosureType {
 /** A return type `impl Trait`, which callers see only through its bounds. */
 export interface OpaqueType {
   id: number;
+  args: Type[];
   bounds: TraitRef[];
   hidden: Type | undefined;
 }
@@ -276,8 +278,8 @@ export function newClosureType(params: Type[], ret: Type): Type {
 }
 
 let nextOpaqueId = 0;
-export function newOpaque(bounds: TraitRef[]): OpaqueType {
-  return { id: nextOpaqueId++, bounds, hidden: undefined };
+export function newOpaque(args: Type[]): OpaqueType {
+  return { id: nextOpaqueId++, args, bounds: [], hidden: undefined };
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -329,7 +331,7 @@ function mapTraitRef(ref: TraitRef, f: (type: Type) => Type): TraitRef {
   };
 }
 
-/** The types directly inside a type, including a closure's signature and an opaque type's hidden type. */
+/** The types directly inside a type, including a closure's signature and an opaque type's captured arguments. */
 export function childTypes(t: Type): Type[] {
   switch (t.kind) {
     case 'tuple': {
@@ -355,7 +357,7 @@ export function childTypes(t: Type): Type[] {
       return [...t.trait.args, ...(t.trait.fnSig?.params ?? [])];
     }
     case 'opaque': {
-      return t.opaque.hidden ? [t.opaque.hidden] : [];
+      return t.opaque.args;
     }
     default: {
       return [];
@@ -380,7 +382,7 @@ export function resolve(type: Type, defaults = false): Type {
     return t;
   }
   if (t.kind === 'opaque') {
-    if (t.opaque.hidden) t.opaque.hidden = resolve(t.opaque.hidden, defaults);
+    for (const arg of t.opaque.args) resolve(arg, defaults);
     return t;
   }
   return mapChildren(t, (child) => resolve(child, defaults));
@@ -394,7 +396,6 @@ export function resolveTraitRef(ref: TraitRef, defaults = false): TraitRef {
 export function hasVars(type: Type): boolean {
   const t = shallow(type);
   if (t.kind === 'var') return true;
-  if (t.kind === 'opaque') return false;
   return childTypes(t).some(hasVars);
 }
 
@@ -406,8 +407,23 @@ export function substitute(type: Type, subst: Subst): Type {
   const t = shallow(type);
   if (t.kind === 'param') return subst.get(t.param) ?? t;
   if (t.kind === 'opaque') {
-    if (!t.opaque.hidden) return t;
-    return { kind: 'opaque', opaque: { ...t.opaque, hidden: substitute(t.opaque.hidden, subst) } };
+    const opaque = t.opaque;
+    const args = opaque.args.map((arg) => substitute(arg, subst));
+    if (sameTypeList(args, opaque.args)) return t;
+    return {
+      kind: 'opaque',
+      opaque: {
+        id: opaque.id,
+        args,
+        get bounds() {
+          return opaque.bounds.map((bound) => substituteTraitRef(bound, subst));
+        },
+        get hidden() {
+          const hidden = opaque.hidden;
+          return hidden && substitute(hidden, subst);
+        },
+      },
+    };
   }
   return mapChildren(t, (child) => substitute(child, subst));
 }
@@ -470,7 +486,7 @@ export function hasParams(type: Type): boolean {
 }
 
 /** Whether two resolved types are the same type. */
-// code-gauge-allow functionNcss 40 -- One case per kind of type.
+// code-gauge-allow functionNcss 41 -- One case per kind of type.
 export function sameType(a: Type, b: Type): boolean {
   const x = shallow(a);
   const y = shallow(b);
@@ -521,7 +537,8 @@ export function sameType(a: Type, b: Type): boolean {
       return sameTraitRef(x.trait, (y as typeof x).trait);
     }
     case 'opaque': {
-      return x.opaque.id === (y as typeof x).opaque.id;
+      const other = (y as typeof x).opaque;
+      return x.opaque.id === other.id && sameTypeList(x.opaque.args, other.args);
     }
     default: {
       return true;

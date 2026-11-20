@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 603 -- Keeps the compilation that shares a function's context and step state together.
+// code-gauge-allow-file fileNcss 605 -- Keeps the compilation that shares a function's context and step state together.
 import type { Annotations, Coercion, FnContext, LocalVar, PathRes } from './annotations';
 import type { Block, Expr, Pattern, Span, Stmt } from './ast';
 import { forEachDirect, patternBindings } from './astWalk';
@@ -396,6 +396,7 @@ export class Compiler {
     const read = this.read(expr);
     const coercion = this.annotations.coercions.get(expr);
     const type = resolve(expr.ty ?? { kind: 'tuple', elems: [] }, true);
+    if (this.annotations.referenceArguments.has(expr)) return coercion ? this.coerce(read, coercion, expr) : read;
     if (!coercion) return this.valueFromPlace(expr, read, type);
     const input = coercion.kind !== 'deref' && !isRefType(type) ? this.valueFromPlace(expr, read, type) : read;
     return this.coerce(input, coercion, expr);

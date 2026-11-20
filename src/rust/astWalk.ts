@@ -13,6 +13,19 @@ export function walkBlock(block: Block, visit: (expr: Expr) => void): void {
   if (block.tail) visit(block.tail);
 }
 
+export function forEachResult(expr: Expr, visit: (expr: Expr) => void): void {
+  if (expr.kind === 'block') {
+    if (expr.tail) forEachResult(expr.tail, visit);
+  } else if (expr.kind === 'if' && expr.else) {
+    forEachResult(expr.consequent, visit);
+    forEachResult(expr.else, visit);
+  } else if (expr.kind === 'match') {
+    for (const arm of expr.arms) forEachResult(arm.body, visit);
+  } else {
+    visit(expr);
+  }
+}
+
 /** Calls `visit` on the expressions directly inside an expression, in evaluation order. */
 export function forEachDirect(expr: Expr, visit: (expr: Expr) => void): void {
   switch (expr.kind) {

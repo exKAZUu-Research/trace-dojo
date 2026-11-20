@@ -87,6 +87,7 @@ export function ownedIter(items: Value[], itemType: Type, project: (item: Value)
     [items]
   );
   iter.rest = () => Array.from({ length: back - front }, (_, offset) => project(items[front + offset]));
+  iter.ownedItemType = itemType;
   iter.fork = () => {
     allocateCollectionSnapshot(back - front);
     const cloned = Array.from({ length: back - front }, (_, offset) =>
@@ -498,9 +499,9 @@ define({
       true
     ),
   'IterImpl<_, _>::zip': ([self, other], ctx) =>
-    zipped(iterOf(self), iterOf(other), [ctx.typeArgs[1], ctx.typeArgs[3]], [ctx.typeArgs[0], ctx.typeArgs[2]]),
+    zipped(ctx, iterOf(self), iterOf(other), [ctx.typeArgs[1], ctx.typeArgs[3]], [ctx.typeArgs[0], ctx.typeArgs[2]]),
   'std::iter::zip': ([a, b], ctx) =>
-    zipped(iterOf(a), iterOf(b), [ctx.typeArgs[2], ctx.typeArgs[3]], [ctx.typeArgs[0], ctx.typeArgs[1]]),
+    zipped(ctx, iterOf(a), iterOf(b), [ctx.typeArgs[2], ctx.typeArgs[3]], [ctx.typeArgs[0], ctx.typeArgs[1]]),
   'IterImpl<_, _>::chain': ([self, other]) =>
     adapter(
       iterOf(self),
@@ -775,9 +776,16 @@ function peekSource(self: Value): IterValue {
  * `next_back` does. When both are `TrustedRandomAccess`, `next` stops at the shorter one's end without taking from the
  * longer one, as `Zip`'s specialization for them reads by index.
  */
-// code-gauge-allow functionCognitiveComplexity 23 -- Follows `Zip`'s `next` and `next_back`.
-function zipped(first: IterValue, second: IterValue, shapes: [Type, Type], items: [Type, Type]): IterValue {
-  const trusted = isTrustedRandomAccess(...shapes);
+// code-gauge-allow functionCognitiveComplexity 24 -- Follows `Zip`'s `next` and `next_back`.
+function zipped(
+  ctx: NativeContext,
+  first: IterValue,
+  second: IterValue,
+  shapes: [Type, Type],
+  items: [Type, Type]
+): IterValue {
+  const isCopy = (type: Type): boolean => ctx.interp.checker.solver.isCopy(type);
+  const trusted = trustedRandomAccess(shapes[0], first, isCopy) && trustedRandomAccess(shapes[1], second, isCopy);
   const iter = adapter(first, { second }, (src, state) => ({
     next: () => {
       if (trusted && Math.min(lengthOf(src), lengthOf(state.second)) === 0) return DONE;
@@ -797,7 +805,7 @@ function zipped(first: IterValue, second: IterValue, shapes: [Type, Type], items
     },
     remaining: () => Math.min(lengthOf(src), lengthOf(state.second)),
   }));
-  iter.fork = () => zipped(cloneIterator(first), cloneIterator(second), shapes, items);
+  iter.fork = () => zipped(ctx, cloneIterator(first), cloneIterator(second), shapes, items);
   if (isTrustedLen(...shapes)) iter.foldNext = zipFoldNext(first, second);
   // `Zip` of two `TrustedRandomAccess` iterators shows nothing of them.
   return described(iter, (show) => {
@@ -907,19 +915,28 @@ export function isTrustedLen(...shapes: Type[]): boolean {
 
 /** Whether iterators of these shapes are all `TrustedRandomAccess`, as std implements it. */
 function isTrustedRandomAccess(...shapes: Type[]): boolean {
-  return shapes.every((shape) => {
-    const t = normalize(shallow(shape));
-    if (t.kind !== 'adt') return false;
-    const { name } = t.def;
-    if (RANDOM_ACCESS_SHAPES.has(name)) return true;
-    // `Range` of every integer type but the 128-bit ones.
-    if (name === 'RangeShape') {
-      const idx = normalize(shallow(t.args[0]));
-      return idx.kind === 'int' && !idx.name.endsWith('128');
-    }
-    if (!RANDOM_ACCESS_ADAPTERS.has(name)) return false;
-    return isTrustedRandomAccess(...(name === 'ZipShape' ? t.args : [t.args[0]]));
-  });
+  return shapes.every((shape) => trustedRandomAccess(shape));
+}
+
+function trustedRandomAccess(shape: Type, source?: IterValue, isCopy?: (type: Type) => boolean): boolean {
+  const t = normalize(shallow(shape));
+  if (t.kind !== 'adt') return false;
+  const { name } = t.def;
+  if (RANDOM_ACCESS_SHAPES.has(name)) return true;
+  if (name === 'RangeShape') {
+    const idx = normalize(shallow(t.args[0]));
+    return idx.kind === 'int' && !idx.name.endsWith('128');
+  }
+  // Zip uses TrustedRandomAccessNoCoerce. The owned iterators implement it only for Copy items.
+  if (name === 'VecIntoIterShape' || name === 'ArrayIntoIterShape') {
+    return Boolean(source?.ownedItemType && isCopy?.(source.ownedItemType));
+  }
+  if (!RANDOM_ACCESS_ADAPTERS.has(name)) return false;
+  const inner = source?.roots[0] as IterValue | undefined;
+  if (!trustedRandomAccess(t.args[0], inner, isCopy)) return false;
+  if (name !== 'ZipShape') return true;
+  const other = (source?.roots[1] as { second: IterValue } | undefined)?.second;
+  return trustedRandomAccess(t.args[1], other, isCopy);
 }
 
 /** Calls `f` on the elements in order until it returns a value, which it returns; undefined at the end. */

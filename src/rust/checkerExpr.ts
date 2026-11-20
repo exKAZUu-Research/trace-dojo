@@ -406,7 +406,7 @@ function matchExpr(c: Checker, expr: Extract<Expr, { kind: 'match' }>, expected:
       hint ??= type;
     });
   }
-  c.coverageChecks.push(() => checkExhaustive(c, expr, scrutinee));
+  c.deferCoverage(() => checkExhaustive(c, expr, scrutinee));
   if (expected) return expr.arms.length === 0 ? NEVER : expected;
   const merged = c.mergeTypes(arms, (body, result, type) => {
     const span = body.kind === 'block' ? (body.tail?.span ?? body.span) : body.span;

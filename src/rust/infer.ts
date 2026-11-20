@@ -40,7 +40,7 @@ export class Unifier {
   }
 
   // code-gauge-allow functionCognitiveComplexity 28 -- One case per kind of type.
-  // code-gauge-allow functionNcss 58 -- One case per kind of type.
+  // code-gauge-allow functionNcss 59 -- One case per kind of type.
   unify(a: Type, b: Type): boolean {
     const x = normalize(shallow(a));
     const y = normalize(shallow(b));
@@ -96,7 +96,8 @@ export class Unifier {
         return x.trait.args.every((arg, i) => this.unify(arg, other.trait.args[i]));
       }
       case 'opaque': {
-        return x.opaque === (y as typeof x).opaque;
+        const other = (y as typeof x).opaque;
+        return x.opaque.id === other.id && x.opaque.args.every((arg, i) => this.unify(arg, other.args[i]));
       }
       default: {
         return true;

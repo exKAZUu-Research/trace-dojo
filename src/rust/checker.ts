@@ -3,6 +3,7 @@ import { CompileError } from '../interpreter/diagnostics';
 import type { ExecutionBudget } from '../interpreter/limits';
 import { Annotations, type Coercion, type FnContext, type LocalVar, type PathRes } from './annotations';
 import type { Block, Expr, FnItem, Pattern, Span, Stmt, TypeAst } from './ast';
+import { forEachResult } from './astWalk';
 import { BorrowChecker } from './borrowck';
 import { exprInner } from './checkerExpr';
 import { settleBinaries } from './checkerOperators';
@@ -73,8 +74,14 @@ export interface BodyContext {
   module: Module;
   typeParams: Map<string, TypeParam>;
   selfType: Type | undefined;
+  coverage: CoverageCheck[];
   /** The trait the body's impl implements or its trait declares, which is in scope in it as rustc puts it. */
   currentTrait?: TraitDef;
+}
+
+interface CoverageCheck {
+  run: () => void;
+  constantPattern?: Pattern;
 }
 
 let nextLocalId = 0;
@@ -102,7 +109,7 @@ export class Checker {
   readonly varBounds = new Map<unknown, TraitRef[]>();
   body!: BodyContext;
   deferredChecks: (() => void)[] = [];
-  readonly coverageChecks: (() => void)[] = [];
+  readonly coverageChecks = new Map<FnDef | ConstDef, CoverageCheck[]>();
   /** The number literals of the body, which rustc's `overflowing_literals` lint checks against their types. */
   literals: Extract<Expr, { kind: 'int' | 'float' }>[] = [];
   /** The integer literals that `-` negates, whose range reaches one further below zero. */
@@ -372,6 +379,7 @@ export class Checker {
         currentTrait: impl?.trait?.trait,
       });
       this.fnContexts.set(def, this.body.fn);
+      this.coverageChecks.set(def, this.body.coverage);
       this.coerceExpr(ast.value, def.type);
       this.finishBody(ast.span);
       checkConstOperations(ast.value, this.annotations);
@@ -432,6 +440,7 @@ export class Checker {
       module: options.module,
       typeParams: options.typeParams ?? new Map(),
       selfType: options.selfType,
+      coverage: [],
       currentTrait: options.currentTrait,
     };
   }
@@ -457,6 +466,7 @@ export class Checker {
       currentTrait: def.trait ?? def.impl?.trait?.trait,
     });
     this.fnContexts.set(def, this.body.fn);
+    this.coverageChecks.set(def, this.body.coverage);
     if (item.selfParam && selfType) {
       const mode = item.selfParam.mode;
       const type = mode === 'value' ? selfType : ref(selfType, mode === 'mutRef');
@@ -784,22 +794,11 @@ export class Checker {
    * branches', which rustc coerces each where it ends.
    */
   private setCoercion(expr: Expr, coercion: Coercion): void {
-    if (expr.kind === 'block') {
-      if (expr.tail) this.setCoercion(expr.tail, coercion);
-      return;
-    }
-    if (expr.kind === 'if' && expr.else) {
-      this.setCoercion(expr.consequent, coercion);
-      this.setCoercion(expr.else, coercion);
-      return;
-    }
-    if (expr.kind === 'match') {
-      for (const arm of expr.arms) this.setCoercion(arm.body, coercion);
-      return;
-    }
-    if (shallow(expr.ty ?? UNIT).kind === 'never') return;
-    this.coercionLog?.push([expr, this.annotations.coercions.get(expr)]);
-    this.annotations.coercions.set(expr, coercion);
+    forEachResult(expr, (result) => {
+      if (shallow(result.ty ?? UNIT).kind === 'never') return;
+      this.coercionLog?.push([result, this.annotations.coercions.get(result)]);
+      this.annotations.coercions.set(result, coercion);
+    });
   }
 
   /** The coercions recorded during a {@link tryCoerce}, with what each expression had before, to undo them. */
@@ -871,7 +870,7 @@ export class Checker {
       if (target.kind === 'slice' && array.kind === 'array' && this.unifier.tryUnify(array.elem, target.elem)) return;
       if (target.kind === 'dyn') {
         this.requireDyn(a.args[0], target.trait, expr.span);
-        this.setCoercion(expr, { kind: 'dyn', type: a.args[0], mutable: false });
+        this.setCoercion(expr, { kind: 'dyn', type: a.args[0], mutable: false, trait: target.trait });
         return;
       }
     }
@@ -916,7 +915,7 @@ export class Checker {
     }
     if (target.kind !== 'dyn') return false;
     this.requireDyn(a.target, target.trait, expr.span);
-    this.setCoercion(expr, { kind: 'dyn', type: a.target, mutable: a.mutable });
+    this.setCoercion(expr, { kind: 'dyn', type: a.target, mutable: a.mutable, trait: target.trait });
     return true;
   }
 
@@ -1015,6 +1014,7 @@ export class Checker {
     // A statement's value is dropped, so its type may stay unknown only if nothing else needs it.
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Keeps initializer, let-else and binding checks in declaration order.
   private checkLet(stmt: Extract<Stmt, { kind: 'let' }>): boolean {
     const declared = stmt.type ? this.lowerType(stmt.type) : undefined;
     let type = declared ?? freshVar();
@@ -1033,6 +1033,9 @@ export class Checker {
       }
     }
     checkPattern(this, stmt.pattern, type, 'move');
+    if (stmt.init && this.annotations.paths.get(stmt.init)?.kind === 'fn') {
+      this.annotations.functionInitializers.set(stmt.init, this.annotations.bindings.get(stmt.pattern));
+    }
     if (!stmt.else) this.requireIrrefutable(stmt.pattern, type, 'let');
     return diverges;
   }
@@ -1040,7 +1043,7 @@ export class Checker {
   requireIrrefutable(pattern: Pattern, type: Type, where: 'let' | 'fn' | 'for'): void {
     if (pattern.kind === 'binding' && !this.annotations.paths.has(pattern)) return;
     if (pattern.kind === 'wild') return;
-    this.coverageChecks.push(() => {
+    this.deferCoverage(() => {
       const lowered = lowerPattern(pattern, this.annotations);
       if (!isIrrefutable(lowered, resolve(type, true))) {
         const name = where === 'let' ? 'let' : where === 'for' ? 'for' : '関数の引数';
@@ -1050,6 +1053,10 @@ export class Checker {
         );
       }
     });
+  }
+
+  deferCoverage(run: () => void, constantPattern?: Pattern): void {
+    this.body.coverage.push({ run, constantPattern });
   }
 
   // -------------------------------------------------------------------------------------------------------------------

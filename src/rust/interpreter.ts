@@ -67,7 +67,8 @@ export class Interpreter implements CallSupport {
   constructor(
     readonly program: Program,
     readonly checker: Checker,
-    tracing: boolean
+    tracing: boolean,
+    private readonly beforeConstant?: (def: ConstDef) => void
   ) {
     this.compiler = new Compiler(program, checker, this, tracing);
     this.formatter = new Formatter({
@@ -292,6 +293,7 @@ export class Interpreter implements CallSupport {
   // Constants and conversions
 
   constValue(def: ConstDef, frame: Frame, types: Type[]): Value {
+    this.beforeConstant?.(def);
     const key = JSON.stringify(types.map(typeKey));
     let instances = this.constValues.get(def);
     if (!instances) {

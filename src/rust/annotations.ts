@@ -1,6 +1,6 @@
 import type { Expr, Pattern, Span } from './ast';
 import type { Known } from './constLint';
-import type { AdtDef, ClosureType, ConstDef, FnDef, TraitDef, Type } from './types';
+import type { AdtDef, ClosureType, ConstDef, FnDef, TraitDef, TraitRef, Type } from './types';
 
 /** A variable of a function or closure: a `let` binding, a parameter, or a binding of a pattern. */
 export interface LocalVar {
@@ -76,7 +76,7 @@ export type Coercion =
   /** References that reach the same value: `&String` → `&str`, `&Box<T>` → `&T`, `&&T` → `&T`. */
   | { kind: 'deref'; derefs: ('ref' | 'mutRef' | 'own')[]; fromMut: boolean }
   /** A value becomes a trait object of the type it has. */
-  | { kind: 'dyn'; type: Type; mutable: boolean }
+  | { kind: 'dyn'; type: Type; mutable: boolean; trait: TraitRef }
   /** A collection becomes an iterator, as `IntoIterator` makes it. */
   | { kind: 'intoIter'; from: Type };
 
@@ -104,6 +104,7 @@ export interface ClosureInfo {
 export class Annotations {
   readonly paths = new Map<Expr | Pattern, PathRes>();
   readonly constPatterns = new Map<Pattern, Known | undefined>();
+  readonly functionInitializers = new Map<Expr, LocalVar | undefined>();
   readonly methods = new Map<Expr, MethodRes>();
   readonly fields = new Map<Expr, FieldRes>();
   readonly coercions = new Map<Expr, Coercion>();
@@ -111,7 +112,7 @@ export class Annotations {
   readonly tries = new Map<Expr, TryRes>();
   readonly closures = new Map<Expr, ClosureInfo>();
   readonly bindings = new Map<Pattern, LocalVar>();
-  readonly callParams = new Map<Expr, readonly Type[]>();
+  readonly referenceArguments = new Map<Expr, boolean>();
   /** For a call through a variable or a field that holds a closure, the closure trait it uses. */
   readonly callKinds = new Map<Expr, ClosureType['kind']>();
   /** `for` loops: the element type and how the iterable becomes an iterator. */
