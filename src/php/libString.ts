@@ -58,14 +58,16 @@ defineFunction('strtolower(string $string): string', ({ args }) => lower(s(args[
 defineFunction('ucfirst(string $string): string', ({ args }) => upper(s(args[0]).slice(0, 1)) + s(args[0]).slice(1));
 defineFunction('lcfirst(string $string): string', ({ args }) => lower(s(args[0]).slice(0, 1)) + s(args[0]).slice(1));
 defineFunction(String.raw`ucwords(string $string, string $separators = " \t\r\n\f\v"): string`, ({ args }) => {
-  const separators = byteMembership(args[1] === undefined ? ' \t\r\n\f\v' : s(args[1]));
   const text = s(args[0]);
+  if (text === '') return text;
+  const separators = charMask(args[1] === undefined ? ' \t\r\n\f\v' : s(args[1]), 'ucwords');
   let result = '';
   let capitalize = true;
   for (let index = 0; index < text.length; index++) {
     spendScan(index);
-    result += capitalize ? upper(text[index]) : text[index];
-    capitalize = separators[text.charCodeAt(index)] === 1;
+    const byte: string = capitalize ? upper(text[index]) : text[index];
+    result += byte;
+    capitalize = separators[byte.charCodeAt(0)] === 1;
   }
   return result;
 });
@@ -73,27 +75,28 @@ defineFunction(String.raw`ucwords(string $string, string $separators = " \t\r\n\
 const DEFAULT_TRIM = ' \n\r\t\v\0';
 
 function trimText(text: string, list: string | undefined, name: string, left: boolean, right: boolean): string {
-  const set = charMask(list ?? DEFAULT_TRIM, name);
+  const mask = charMask(list ?? DEFAULT_TRIM, name);
   let start = 0;
   let end = text.length;
-  if (left) while (start < end && set.has(text[start])) start++;
-  if (right) while (end > start && set.has(text[end - 1])) end--;
+  if (left) while (start < end && mask[text.charCodeAt(start)]) start++;
+  if (right) while (end > start && mask[text.charCodeAt(end - 1)]) end--;
   return text.slice(start, end);
 }
 
 /** The characters a character list names, expanding ranges such as `a..z`, as PHP's php_charmask does. */
-function charMask(list: string, name: string): Set<string> {
-  const set = new Set<string>();
+function charMask(list: string, name: string): Uint8Array {
+  rt().spend(4 * Math.ceil(list.length / 256));
+  const mask = new Uint8Array(256);
   for (let index = 0; index < list.length; index++) {
     const from = list.charCodeAt(index);
     if (index + 3 < list.length && list.startsWith('..', index + 1) && list.charCodeAt(index + 3) >= from) {
-      for (let code = from; code <= list.charCodeAt(index + 3); code++) set.add(String.fromCharCode(code));
+      mask.fill(1, from, list.charCodeAt(index + 3) + 1);
       index += 3;
     } else if (index + 1 < list.length && list.startsWith('..', index)) {
       warn(`${name}(): Invalid '..'-range${rangeProblem(list, index)}`);
-    } else set.add(list[index]);
+    } else mask[from] = 1;
   }
-  return set;
+  return mask;
 }
 
 function rangeProblem(list: string, index: number): string {
@@ -730,7 +733,7 @@ defineFunction('str_word_count(string $string, int $format = 0, ?string $charact
   if (format < 0 || format > 2) {
     throwError('ValueError', 'str_word_count(): Argument #2 ($format) must be a valid format value');
   }
-  const extra = typeof args[2] === 'string' ? charMask(args[2], 'str_word_count') : new Set<string>();
+  const extra = typeof args[2] === 'string' ? charMask(args[2], 'str_word_count') : new Uint8Array();
   const words = text === '' ? [] : findWords(text, extra);
   if (format === 0) return BigInt(words.length);
   const array = new PhpArray();
@@ -742,9 +745,9 @@ defineFunction('str_word_count(string $string, int $format = 0, ?string $charact
 });
 
 /** The words of a non-empty string with their offsets, as PHP's php_str_word_count finds them. */
-function findWords(text: string, extra: Set<string>): [number, string][] {
-  let index = (text[0] === "'" || text[0] === '-') && !extra.has(text[0]) ? 1 : 0;
-  const end = text.endsWith('-') && !extra.has('-') ? text.length - 1 : text.length;
+function findWords(text: string, extra: Uint8Array): [number, string][] {
+  let index = (text[0] === "'" || text[0] === '-') && !extra[text.charCodeAt(0)] ? 1 : 0;
+  const end = text.endsWith('-') && !extra['-'.charCodeAt(0)] ? text.length - 1 : text.length;
   const words: [number, string][] = [];
   while (index < end) {
     const start = index;
@@ -755,8 +758,9 @@ function findWords(text: string, extra: Set<string>): [number, string][] {
   return words;
 }
 
-function isWordChar(char: string, extra: Set<string>): boolean {
-  return isCtypeAlpha(char.charCodeAt(0)) || extra.has(char) || char === "'" || char === '-';
+function isWordChar(char: string, extra: Uint8Array): boolean {
+  const byte = char.charCodeAt(0);
+  return isCtypeAlpha(byte) || extra[byte] === 1 || char === "'" || char === '-';
 }
 
 defineFunction('nl2br(string $string, bool $use_xhtml = true): string', ({ args }) => {
@@ -852,12 +856,12 @@ const C_ESCAPES = new Map([
 defineFunction('addcslashes(string $string, string $characters): string', ({ args }) => {
   const text = s(args[0]);
   if (text === '' || s(args[1]) === '') return text;
-  const set = charMask(s(args[1]), 'addcslashes');
+  const mask = charMask(s(args[1]), 'addcslashes');
   let result = '';
   for (const char of text) {
-    if (!set.has(char)) result += char;
+    const code = char.charCodeAt(0);
+    if (!mask[code]) result += char;
     else {
-      const code = char.charCodeAt(0);
       result +=
         code >= 32 && code <= 126 ? `\\${char}` : `\\${C_ESCAPES.get(char) ?? code.toString(8).padStart(3, '0')}`;
     }

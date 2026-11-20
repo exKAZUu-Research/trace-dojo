@@ -3444,6 +3444,20 @@ test.each([
   expect(run(`<?php ${source}`)).toMatchObject({ kind: 'executed', stdout });
 });
 
+test('ucwords uses its emitted bytes and PHP character ranges to find the next word', () => {
+  const program = `<?php
+    set_error_handler(function ($level, $message) { echo $message; });
+    echo json_encode([
+      ucwords('hello', 'l'), ucwords('xaab', 'aA'), ucwords('xbcd', 'b..d'),
+      ucwords('a-b--c', '-'), ucwords('', '..'),
+    ]);
+    ucwords('hello', 'z..a');`;
+  expect(run(program)).toMatchObject({
+    kind: 'executed',
+    stdout: `["HelLo","XaAB","XbCd","A-B--C",""]ucwords(): Invalid '..'-range, '..'-range needs to be incrementing`,
+  });
+});
+
 test('bounds combined allowed tags before strip_tags builds the list', () => {
   const result = run(`<?php $tag = str_repeat('a', 600000); strip_tags('hello', [$tag, $tag]); echo 'unreachable';`);
   expect(result).toMatchObject({
