@@ -1,3 +1,5 @@
+import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
+
 import type { ExecutionBudget } from '../../interpreter/limits';
 import type { Checker, Mapper } from './checker';
 import { keyedIndexes } from './indexInfos';
@@ -91,20 +93,74 @@ export function conditionalDependsOnDistribution(c: Checker, root: ConditionalTy
 function checkConditionalDistributionDependency(c: Checker, root: ConditionalType): boolean {
   const { checkType, declaration } = root;
   if (declaration && checkType.kind === 'typeParameter') {
-    const nameNode = checkType.isThisType ? 'this_type' : 'type_identifier';
-    const fields = ['right', 'consequence', 'alternative'];
-    const mentionsCheck = fields.some((field) => {
-      const branch = declaration.childForFieldName(field);
-      if (!branch) return false;
-      return [branch, ...branch.descendantsOfType([nameNode, 'type_query'])].some(
-        (node) => node.type === 'type_query' || (node.type === nameNode && node.text === checkType.name)
-      );
-    });
-    if (!mentionsCheck) return false;
+    const depends = conditionalReferencesParameter(c, declaration, checkType);
+    if (depends !== undefined) return depends;
   }
   return [root.trueType, root.falseType].some((branch) =>
     typeParametersIn(branch, [], c.budget).some((parameter) => parameter.id === checkType.id)
   );
+}
+
+function conditionalReferencesParameter(
+  c: Checker,
+  declaration: TreeNode,
+  parameter: TypeParameter
+): boolean | undefined {
+  const symbol = c.scopeOf(declaration).lookupType(parameter.name);
+  const scope =
+    symbol?.typeKind === 'typeParameter' && c.signatures.typeParameterOfSymbol(symbol).id === parameter.id
+      ? symbol.scope.node
+      : undefined;
+  let unresolved = false;
+  for (const node of conditionalReferenceNodes(declaration)) {
+    c.budget.spend();
+    const refers =
+      node.type === 'type_query' ? queryCapturesScope(c, node, scope) : referencesTypeParameter(c, node, parameter);
+    if (refers) return true;
+    if (refers === undefined) unresolved = true;
+  }
+  return unresolved ? undefined : false;
+}
+
+function* conditionalReferenceNodes(declaration: TreeNode): IterableIterator<TreeNode> {
+  for (const field of ['right', 'consequence', 'alternative']) {
+    const branch = declaration.childForFieldName(field);
+    if (!branch) continue;
+    yield branch;
+    yield* branch.descendantsOfType(['type_identifier', 'this_type', 'type_query']);
+  }
+}
+
+function queryCapturesScope(c: Checker, query: TreeNode, scope: TreeNode | undefined): boolean | undefined {
+  if (!scope) return undefined;
+  let name = query.namedChild(0);
+  while (name?.type === 'member_expression') name = name.childForFieldName('object');
+  if (name?.type !== 'identifier') return undefined;
+  const value = c.scopeOf(name).lookupValue(name.text, c.budget);
+  return value?.valueDeclarations.some(
+    (declaration) =>
+      declaration.tree === scope.tree &&
+      declaration.startIndex >= scope.startIndex &&
+      declaration.endIndex <= scope.endIndex
+  );
+}
+
+function referencesTypeParameter(c: Checker, node: TreeNode, parameter: TypeParameter): boolean {
+  if (node.type === 'this_type')
+    return parameter.isThisType === true && c.classes.thisTypeInScope(node)?.id === parameter.id;
+  if (node.type !== 'type_identifier' || node.text !== parameter.name) return false;
+  const owner = node.parent;
+  if (owner?.type === 'infer_type' && owner.namedChild(0)?.id === node.id) return false;
+  if (
+    owner &&
+    (owner.type === 'type_parameter' || owner.type === 'mapped_type_clause') &&
+    owner.childForFieldName('name')?.id === node.id
+  )
+    return false;
+  const symbol = c.scopeOf(node).lookupType(parameter.name);
+  const local = c.typeOperators.mappedOrInferParameter(node, parameter.name, symbol?.scope.node);
+  if (local) return local.id === parameter.id;
+  return symbol?.typeKind === 'typeParameter' && c.signatures.typeParameterOfSymbol(symbol).id === parameter.id;
 }
 
 /**
