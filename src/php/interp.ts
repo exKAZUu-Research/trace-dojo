@@ -1327,8 +1327,8 @@ function operate(op: string, left: Value, right: Value, pending?: PhpThrow): Val
   return BINARY_OPS[op]?.(left, right) ?? applyOperator(op, left, right, pending);
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- One case per expression kind, as PHP evaluates each kind differently.
-// code-gauge-allow functionNcss 33 -- One case per expression kind, as PHP evaluates each kind differently.
+// code-gauge-allow functionCognitiveComplexity 21 -- Keeps conversion, warning and allocation order visible for each PHP cast.
+// code-gauge-allow functionNcss 35 -- Keeps conversion, warning and allocation order visible for each PHP cast.
 export function cast(type: string, value: Value): Value {
   switch (type) {
     case 'int': {
@@ -1353,6 +1353,7 @@ export function cast(type: string, value: Value): Value {
     case 'object': {
       if (value instanceof PhpObject && !value.isResource) return value;
       const object = createObject(rt().classes.get('stdclass') as PhpClass);
+      if (Number.isNaN(value)) warn('unexpected NAN value was coerced to object');
       if (value instanceof PhpArray) {
         for (const [key, slot] of value.map) {
           object.props.set(String(key), copyValueSlot(slot));

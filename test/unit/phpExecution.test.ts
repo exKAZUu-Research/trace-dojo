@@ -5125,6 +5125,30 @@ test('dumping deeply nested arrays ends with the memory limit', () => {
   }
 });
 
+test('casts NAN to an object with the PHP warning and allocation order', () => {
+  expect(run('<?php\nvar_dump((object)NAN);')).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '\nWarning: unexpected NAN value was coerced to object in /main.php on line 2\nobject(stdClass)#1 (1) {\n  ["scalar"]=>\n  float(NAN)\n}\n',
+  });
+  expect(
+    run(`<?php
+$n = NAN;
+set_error_handler(function ($errno, $message) {
+  global $fromHandler;
+  $fromHandler = new stdClass;
+  echo $message, ";";
+  return true;
+});
+$converted = (object)$n;
+var_dump(is_nan($converted->scalar), spl_object_id($converted) < spl_object_id($fromHandler));
+var_dump(is_infinite(((object)INF)->scalar), ((object)1.5)->scalar);`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'unexpected NAN value was coerced to object;bool(true)\nbool(true)\nbool(true)\nfloat(1.5)\n',
+  });
+});
+
 test('traces values beyond JSON across deep recursion', () => {
   const bigTraceSource = `<?php
 $big = PHP_INT_MAX;
