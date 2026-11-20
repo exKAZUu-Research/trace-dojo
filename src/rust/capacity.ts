@@ -154,14 +154,18 @@ export function settleStrings(): void {
   if (inFlight.size > 0) inFlight.clear();
 }
 
-/** A place that stores a `String` in flight keeps the capacity it had. */
+/** Replaces the capacity of the string previously stored in the place. */
 export function claimString(place: Place): void {
-  if (inFlight.size === 0) return;
   const text = place.get();
-  const capacity = typeof text === 'string' ? inFlight.get(text) : undefined;
-  if (capacity === undefined) return;
+  if (typeof text !== 'string') return;
+  const capacity = inFlight.get(text);
+  if (capacity === undefined) {
+    const storage = place.storage?.();
+    if (storage) stringCapacities.get(storage[0])?.delete(storage[1]);
+    return;
+  }
   setStringCapacity(place, capacity);
-  inFlight.delete(text as string);
+  inFlight.delete(text);
 }
 
 /** The elements of a new struct, tuple, array, or `Vec` that are `String`s in flight keep their capacities. */

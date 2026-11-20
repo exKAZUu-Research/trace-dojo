@@ -319,6 +319,27 @@ test('Rust constant checks follow compound assignments', () => {
   });
 });
 
+test('assigning a Rust String replaces capacity even when its text is unchanged', () => {
+  const program = `fn replace(target: &mut String) { *target = String::new(); }
+fn main() {
+    let mut empty = String::with_capacity(10);
+    empty = String::new();
+    let mut text = String::from("abc");
+    text.reserve(32);
+    text = String::from("abc");
+    let mut values = vec![String::with_capacity(20)];
+    replace(&mut values[0]);
+    println!("{} {} {}", empty.capacity(), text.capacity(), values[0].capacity());
+    empty = String::with_capacity(12);
+    println!("{}", empty.capacity());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '0 3 0\n12\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {
