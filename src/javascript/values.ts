@@ -73,8 +73,8 @@ export class JsObject {
   promise?: PromiseState;
   /** Set on a Map, Set, WeakMap, or WeakSet. */
   collection?: CollectionState;
-  /** The class `new` made the object with, which names it once its prototype no longer does. */
-  className?: string;
+  /** Constructor used by inspection after an instance loses its prototype. */
+  instanceConstructor?: JsFunction;
   /** Set on what `JSON.rawJSON` returns, whose text `JSON.stringify` writes as it is. */
   isRawJson = false;
   /** Set on a function's `arguments` object, which shows and is tagged as `Arguments`. */
@@ -82,7 +82,21 @@ export class JsObject {
   /** Set on a primitive boxed by `Object(value)`, whose prototype methods read it; a string's are its own indices. */
   primitive?: string | number | boolean | bigint | symbol;
 
-  constructor(public proto: JsObject | null) {}
+  proto: JsObject | null;
+
+  constructor(proto: JsObject | null) {
+    this.proto = asPrototype(proto);
+  }
+
+  setPrototype(proto: JsObject | null): void {
+    this.proto = asPrototype(proto);
+  }
+}
+
+function asPrototype(proto: JsObject | null): JsObject | null {
+  // V8 drops the allocation constructor when it uses an object as a prototype.
+  if (proto) proto.instanceConstructor = undefined;
+  return proto;
 }
 
 /** The primitive a boxed primitive holds, or the value itself otherwise. */

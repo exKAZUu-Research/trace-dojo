@@ -802,7 +802,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
     callRow: number | undefined
   ): JsObject {
     const { runtime } = this;
-    const thisValue = behavior.isDerived ? UNINITIALIZED : runtime.newInstance(newTarget);
+    const thisValue = behavior.isDerived ? UNINITIALIZED : runtime.newInstance(fn, newTarget);
     const functionFrame: FunctionFrame = {
       thisValue,
       homeObject: behavior.homeObject,

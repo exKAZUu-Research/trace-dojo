@@ -217,7 +217,7 @@ function changePrototype(runtime: Runtime, object: JsObject, proto: JsObject | n
   for (let current = proto; current; current = current.proto) {
     if (current === object) runtime.throwError('TypeError', 'Cyclic __proto__ value');
   }
-  object.proto = proto;
+  object.setPrototype(proto);
 }
 
 /** The spec's ObjectDefineProperties, which reads every descriptor before defining any. */

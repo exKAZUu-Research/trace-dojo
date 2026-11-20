@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 860 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss 867 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
@@ -439,6 +439,13 @@ export class Runtime {
     return `[object ${typeof tag === 'string' ? tag : receiverClassName(target)}]`;
   }
 
+  instanceDisplayName(value: JsObject): string | undefined {
+    const constructor = value.instanceConstructor;
+    if (!constructor) return undefined;
+    const name = this.receiverData(constructor, 'name');
+    return typeof name === 'string' ? name : constructor.initialName;
+  }
+
   private receiverData(target: JsObject, key: Key): Value {
     const property = this.findProperty(target, key);
     return property && !isAccessor(property) ? property.value : undefined;
@@ -852,7 +859,7 @@ export class Runtime {
     if (behavior.kind === 'class') {
       return this.returnedToBuiltin(frame, this.evaluator.constructClass(fn, behavior, args, target, callRow));
     }
-    const thisValue = this.newInstance(target);
+    const thisValue = this.newInstance(fn, target);
     const result = this.evaluator.callFunction(fn, behavior, thisValue, args, callRow, target);
     return this.returnedToBuiltin(frame, isObject(result) ? result : thisValue);
   }
@@ -866,14 +873,14 @@ export class Runtime {
   primitiveOrBox(value: string | number | boolean, newTarget: JsFunction | undefined): Value {
     if (!newTarget) return value;
     const box = this.toObject(value);
-    box.proto = this.prototypeFor(newTarget, box.proto ?? this.realm.objectPrototype);
+    box.setPrototype(this.prototypeFor(newTarget, box.proto ?? this.realm.objectPrototype));
     return box;
   }
 
   /** The object `new` creates for `newTarget` before its constructor runs. */
-  newInstance(newTarget: JsFunction): JsObject {
+  newInstance(constructor: JsFunction, newTarget: JsFunction): JsObject {
     const instance = this.newObject(this.prototypeFor(newTarget, this.realm.objectPrototype));
-    instance.className = this.functionName(newTarget) || undefined;
+    if (constructor === newTarget) instance.instanceConstructor = constructor;
     return instance;
   }
 

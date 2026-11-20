@@ -616,6 +616,16 @@ test.each([
     'class instances and functions',
     'class A { x = 1; } class B extends A {} console.log(new B(), B, Object.create(null), () => 1);',
   ],
+  [
+    'instances after prototype changes',
+    `function Example() { this.value = 1; }
+const value = new Example();
+Object.setPrototypeOf(value, null);
+Object.defineProperty(Example, 'name', { value: 'Renamed' });
+console.log(value);
+const other = { __proto__: value };
+console.log(value, Object.getPrototypeOf(other) === value);`,
+  ],
   ['quoted strings and keys', String.raw`console.log(["it's", 'say "hi"\n', '\x01'], { 'a-b': 1, 2: 'two', $c: 3 });`],
   ['circular references', 'const a = { b: {} }; a.b.a = a; a.self = a; console.log(a);'],
   ['format specifiers', "console.log('%s is %d%% %j', 'x', 50, { a: [1] }, 'rest', { b: 2 });"],

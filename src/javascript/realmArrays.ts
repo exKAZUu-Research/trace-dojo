@@ -27,7 +27,7 @@ export function defineArrayBuiltins(builder: RealmBuilder): void {
     const array = runtime.newArray(args.length === 1 && typeof args[0] === 'number' ? [] : [...args]);
     if (args.length === 1 && typeof args[0] === 'number') runtime.setLength(array, args[0]);
     // A subclass such as `class Path extends Array` gets its own prototype.
-    array.proto = runtime.prototypeFor(newTarget, arrayPrototype);
+    array.setPrototype(runtime.prototypeFor(newTarget, arrayPrototype));
     return array;
   });
   builder.getter(arrayConstructor, WELL_KNOWN_SYMBOLS.species, ({ thisValue }) => thisValue);

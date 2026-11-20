@@ -37,7 +37,7 @@ export function defineRegExpBuiltins(builder: RealmBuilder): void {
     const source = regexp ? regexp.source : pattern === undefined ? '' : runtime.toString(pattern);
     const flagText = flags === undefined ? (regexp?.flags ?? '') : runtime.toString(flags);
     const object = newRegExp(runtime, source, flagText);
-    object.proto = runtime.prototypeFor(newTarget, regExpPrototype);
+    object.setPrototype(runtime.prototypeFor(newTarget, regExpPrototype));
     return object;
   });
   builder.method(constructor, 'escape', 1, ({ runtime, args }) => {

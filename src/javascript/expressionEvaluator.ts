@@ -256,7 +256,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     }
     if (member.kind === 'prototype') {
       const prototype = this.evaluate(member.value);
-      if (prototype === null || isObject(prototype)) object.proto = prototype;
+      if (prototype === null || isObject(prototype)) object.setPrototype(prototype);
       return;
     }
     const key = this.propertyKey(member.key);

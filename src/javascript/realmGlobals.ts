@@ -217,7 +217,7 @@ function bindFunction({ runtime, thisValue, args }: NativeCall): JsFunction {
         : runtime.call(target, boundThis, [...boundArgs, ...call.args], call.callRow),
     target.isConstructor
   );
-  bound.proto = prototype;
+  bound.setPrototype(prototype);
   bound.boundTarget = target;
   bound.captured = [target, boundThis, ...boundArgs];
   return bound;
@@ -280,7 +280,7 @@ function defineErrors(builder: RealmBuilder): void {
           ? createSuppressedError(call, prototype)
           : createError(call, prototype)
     );
-    if (errorConstructor) fn.proto = errorConstructor;
+    if (errorConstructor) fn.setPrototype(errorConstructor);
     else errorConstructor = fn;
     defineHidden(prototype, 'name', name);
     defineHidden(prototype, 'message', '');

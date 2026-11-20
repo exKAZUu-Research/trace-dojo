@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 651 -- Ports Node.js's inspection and error formatting around shared object and stack metadata.
+// code-gauge-allow-file fileNcss 654 -- Ports Node.js's inspection and error formatting around shared object and stack metadata.
 import { inspect as hostInspect, type InspectStyle, stripVTControlCharacters } from 'node:util';
 
 import { eastAsianWidthType } from 'get-east-asian-width';
@@ -545,9 +545,8 @@ function frameOf(ctx: Context, value: JsObject, constructor: string | undefined,
   else if (value.isArguments) open = '[Arguments] {';
   else {
     const tag = toStringTagOf(value);
-    const fallback = value.className ?? 'Object';
-    if (tag && tag !== constructor) open = `${prefixOf(constructor, fallback)}[${tag}] {`;
-    else if (constructor !== 'Object') open = `${prefixOf(constructor, fallback)}{`;
+    if (tag && tag !== constructor) open = `${objectPrefix(runtime, value, constructor, tag)}[${tag}] {`;
+    else if (constructor !== 'Object') open = `${objectPrefix(runtime, value, constructor, tag)}{`;
   }
   if (!hasKeys) {
     if (value instanceof JsFunction) return stylize(ctx, base, 'special');
@@ -555,6 +554,17 @@ function frameOf(ctx: Context, value: JsObject, constructor: string | undefined,
     return base || `${open}}`;
   }
   return { base, braces: [open, '}'] };
+}
+
+function objectPrefix(
+  runtime: Runtime,
+  value: JsObject,
+  constructor: string | undefined,
+  tag: string | undefined
+): string {
+  if (constructor !== undefined) return `${constructor} `;
+  const name = runtime.instanceDisplayName(value);
+  return prefixOf(undefined, name && name !== tag ? name : 'Object');
 }
 
 function isPrimitivePrototype(runtime: Runtime, object: JsObject): boolean {

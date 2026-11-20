@@ -252,7 +252,7 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
         this.copyDataProperties(object, yield* this.evaluateSteps(member.argument));
       } else if (member.kind === 'prototype') {
         const prototype = yield* this.evaluateSteps(member.value);
-        if (prototype === null || isObject(prototype)) object.proto = prototype;
+        if (prototype === null || isObject(prototype)) object.setPrototype(prototype);
       } else {
         yield* this.keyedMemberSteps(object, member);
       }
