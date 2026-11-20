@@ -571,6 +571,58 @@ int* pointer() { return &value; }`;
   });
 });
 
+test('allows explicit outer names and unexecuted self-references during initialization', () => {
+  const program = `#include <iostream>
+int value = 7;
+int main() {
+  auto value = ::value;
+  int& reference = false ? reference : value;
+  static int& saved = false ? saved : ::value;
+  reference = 9;
+  std::cout << value << saved;
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '97',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['int& value = value;', 'static int& value = value;'])(
+  'stops when a reference initializer uses the unbound %s',
+  (declaration) => {
+    const program = `int value = 7;
+int main() { ${declaration} return value; }`;
+    expect(executeProgram('cpp', program)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: expect.stringContaining('値を入れていない変数'),
+    });
+  }
+);
+
+test('projects covariant pointer and reference results through the base subobject', () => {
+  const program = `#include <iostream>
+struct Base {
+  virtual Base* address(bool present) { return present ? this : nullptr; }
+  virtual Base& self() { return *this; }
+};
+struct Derived : Base {
+  Derived* address(bool present) override { return present ? this : nullptr; }
+  Derived& self() override { return *this; }
+};
+int main() {
+  Derived object;
+  Base* base = &object;
+  std::cout << base->address(true) - base << ' ' << &base->self() - base << ' '
+            << (base->address(false) == nullptr) << ' ' << (object.address(true) == &object);
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '0 0 1 1',
+    uncaughtException: undefined,
+  });
+});
+
 test('allows const map keys and pointers to const set elements', () => {
   const program = `#include <iostream>
 #include <map>

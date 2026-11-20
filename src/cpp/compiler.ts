@@ -1563,7 +1563,12 @@ export class Compiler extends StatementCompiler {
     if (hasAuto(type))
       type = this.deduceAuto(
         type,
-        this.compileExpression(this.autoInitializer(declarator, value, name)),
+        this.withInitializingName(
+          name,
+          type,
+          () => this.compileExpression(this.autoInitializer(declarator, value, name)),
+          this.globalScope.names
+        ),
         declarator.row
       );
     if (type.kind === 'array' && type.length === undefined && value) type = this.completeArrayType(type, value);
@@ -1576,9 +1581,9 @@ export class Compiler extends StatementCompiler {
     global.isConstexpr = isConstexpr;
     global.isConstexprPointer = isConstexpr && type.kind === 'pointer';
     const direct = !hasToken(declarator, '=');
-    const constant = isConstexpr ? this.requireConstantInitializer(type, value, declarator.row, direct) : undefined;
-    const entity: Extract<Entity, { kind: 'global' }> = { kind: 'global', global, isReference: false, constant };
+    const entity: Extract<Entity, { kind: 'global' }> = { kind: 'global', global, isReference: false };
     this.globalScope.names.set(name, entity);
+    if (isConstexpr) entity.constant = this.requireConstantInitializer(type, value, declarator.row, direct);
     const initializedConstant = this.initializeGlobal(global, type, value, declarator.row, direct);
     entity.constant ??= initializedConstant;
     return type;
@@ -1591,7 +1596,7 @@ export class Compiler extends StatementCompiler {
     isConstexpr: boolean
   ): Type {
     const { row } = declarator;
-    const binding = this.bindReference(name, declared, declarator);
+    const binding = this.bindReference(name, declared, declarator, this.globalScope.names);
     const global = this.declareStaticStorage(name, binding.type, row, true);
     global.isDefined = true;
     this.globalScope.names.set(name, { kind: 'global', global, isReference: true });

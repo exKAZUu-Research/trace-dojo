@@ -36,6 +36,7 @@ import {
   nonReference,
   pointerTo,
   sameParameters,
+  sameType,
   sizeOf,
   type Type,
   typeName,
@@ -822,6 +823,10 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
 
   prepareInvocation(fn: FunctionInfo, row: number, isQualified = false) {
     const key = fn.isVirtual && !isQualified ? virtualKey(fn) : undefined;
+    const resultClass =
+      (fn.ret.kind === 'pointer' || fn.ret.kind === 'reference') && fn.ret.to.kind === 'class'
+        ? fn.ret.to.cls
+        : undefined;
     return (frame: Frame, args: unknown[], receiver?: Ptr): Value | Ptr => {
       const location = fn.isStatic ? undefined : receiver;
       let callee = fn;
@@ -830,7 +835,9 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
         if (target instanceof CObject) callee = target.cls.virtuals.get(key) ?? fn;
         if (callee.isPure) throw new CppRuntimeError('custom', `純粋仮想関数 ${callee.displayName} を呼び出しました。`);
       }
-      return invoke(frame, callee, args, location, row, true);
+      const result = invoke(frame, callee, args, location, row, true);
+      if (resultClass && callee !== fn && !sameType(callee.ret, fn.ret)) return (result as Ptr).forClass(resultClass);
+      return result;
     };
   }
 

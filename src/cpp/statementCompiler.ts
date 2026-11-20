@@ -2,7 +2,7 @@ import { promote } from '../c/types';
 import { isBaseAccessible } from './access';
 import { AUTO, hasAuto } from './compilerBase';
 import { permitsQualificationConversion } from './conversions';
-import { CppException, ProgramAbort } from './errors';
+import { CppException, CppRuntimeError, ProgramAbort } from './errors';
 import {
   type ConstantLocation,
   constantLocationOf,
@@ -285,7 +285,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     let deduced: AutoDeduction | undefined;
     if (hasAuto(type)) {
       const source = this.autoInitializer(declarator, value, name);
-      const expr = this.compileExpression(source);
+      const expr = this.withInitializingName(name, type, () => this.compileExpression(source));
       type = this.deduceAuto(type, expr, declarator.row);
       createsObject =
         type.kind === 'class' &&
@@ -558,10 +558,39 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   protected bindReference(
     name: string,
     declared: Extract<Type, { kind: 'reference' }>,
-    declarator: Syntax
+    declarator: Syntax,
+    names = this.context.scope.names
   ): ReferenceBinding {
     const value = declarator.type === 'init_declarator' ? fieldOf(declarator, 'value') : undefined;
-    return this.bindReferenceValue(name, declared, value, declarator.row, !hasToken(declarator, '='));
+    return this.withInitializingName(
+      name,
+      declared,
+      () => this.bindReferenceValue(name, declared, value, declarator.row, !hasToken(declarator, '=')),
+      names
+    );
+  }
+
+  protected withInitializingName<T>(name: string, type: Type, compile: () => T, names = this.context.scope.names): T {
+    const referent = hasAuto(type) ? undefined : nonReference(type);
+    names.set(name, {
+      kind: 'value',
+      make: (row) => {
+        if (!referent) return this.error(row, `auto で宣言した ${name} は、型が決まる前には使えません。`);
+        return {
+          type: referent,
+          isLvalue: true,
+          row,
+          run: () => {
+            throw new CppRuntimeError('uninitialized');
+          },
+        };
+      },
+    });
+    try {
+      return compile();
+    } finally {
+      names.delete(name);
+    }
   }
 
   protected bindReferenceValue(
@@ -663,7 +692,12 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const reference = type.kind === 'reference' ? this.bindReference(name, type, declarator) : undefined;
     if (reference) type = reference.type;
     else if (hasAuto(type)) {
-      type = this.deduceAuto(type, this.compileExpression(this.autoInitializer(declarator, value, name)), row);
+      const source = this.autoInitializer(declarator, value, name);
+      type = this.deduceAuto(
+        type,
+        this.withInitializingName(name, type, () => this.compileExpression(source)),
+        row
+      );
     }
     const deduced = hasAuto(declared.type) ? { name, type: deducedType(declared.type, type) } : undefined;
     if (type.kind === 'array' && type.length === undefined && value) type = this.completeArrayType(type, value);
@@ -674,17 +708,15 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     global.isConstexpr = this.isConstexpr(declaration);
     const local = this.context.declareLocal(name, type, false);
     const direct = !hasToken(declarator, '=');
-    const constant =
-      !reference && global.isConstexpr ? this.requireConstantInitializer(type, value, row, direct) : undefined;
     const entity: Extract<Entity, { kind: 'local' }> = {
       kind: 'local',
       local,
       isReference: reference !== undefined,
-      constant,
       constantReference: reference && this.constantReference(reference, true),
       staticStorage: reference ? undefined : global,
     };
     this.context.scope.names.set(name, entity);
+    if (!reference && global.isConstexpr) entity.constant = this.requireConstantInitializer(type, value, row, direct);
     const { slot } = local;
     const { index } = global;
     const {

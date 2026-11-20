@@ -2,6 +2,18 @@ import { expect, test } from 'vitest';
 
 import { executeProgram } from '../../src/interpreter/program';
 
+test.each(['auto value = value;', 'static auto value = value;', 'auto& value = value;', 'static auto& value = value;'])(
+  'rejects a self-reference before deduction in %s',
+  (declaration) => {
+    const program = `int value = 7;
+int main() { ${declaration} }`;
+    expect(executeProgram('cpp', program)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [{ row: 1, message: expect.stringContaining('型が決まる前には使えません') }],
+    });
+  }
+);
+
 test.each([
   'std::string value;',
   'std::stringstream value{};',
