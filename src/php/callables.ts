@@ -435,7 +435,10 @@ export function methodCallExpression(e: Extract<Expr, { k: 'mcall' }>, discardRe
   const magic = object.cls.findMethod('__call');
   if (magic) {
     const args = evalArgs(e.args, undefined, undefined);
-    if (e.fcc) return magicClosure(object, object.cls, magic, methodName);
+    if (e.fcc)
+      return receiverClosure(
+        magicClosureTarget({ method: magic, name: methodName, receiver: object, calledClass: object.cls })
+      );
     return invoke(
       { fn: magic.fn, thisObj: object, scope: magic.scope, staticClass: object.cls, method: magic },
       [{ v: methodName }, packMagicArguments(args)],

@@ -5470,6 +5470,8 @@ test('a returned local becomes a GC root before the other locals are freed', () 
   for (const callable of [
     'class H { function make() { return function () { return 1; }; } } $h = new H; $f = $h->make();',
     'class H { function m() { return 1; } } $h = new H; $f = $h->m(...);',
+    'class H { function __call($n, $a) { return 5; } function get() { return self::zz(...); } } $h = new H; $f = $h->get();',
+    'class H { function __call($n, $a) { return 5; } } $h = new H; $f = $h->zz(...);',
   ])
     expect(
       run(

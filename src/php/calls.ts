@@ -430,7 +430,8 @@ function exitNativeCall(
   }
   runtime.nativeCalls--;
   runtime.nativeHeld.pop();
-  if (target.thisObj) runtime.pendingGcRoots.add(target.thisObj);
+  const released = calleeRoot(runtime, target.closure, target.thisObj);
+  if (released) runtime.pendingGcRoots.add(released);
   runtime.row = savedRow;
   if (!failed || failure instanceof PhpThrow || failure instanceof ExitSignal) {
     if (result instanceof PhpObject || result instanceof PhpArray) caller.temporaries.push(result);
@@ -931,14 +932,24 @@ function releaseFrame(
  * reference to them after freeing the locals.
  */
 function releaseCallee(runtime: Runtime, frame: Frame): void {
-  // A closure call, bound or a first-class callable, holds its own reference to the closure, whose release buffers the
-  // closure while a variable still holds it and it is not buffered yet; only other calls hold `$this`.
-  if (frame.closure) {
-    if (runtime.gcRoots.has(frame.closure) || !hasStoredObject(runtime, frame.closure)) return;
-    runtime.pendingGcRoots.add(frame.closure);
-  } else if (frame.thisObj) runtime.pendingGcRoots.add(frame.thisObj);
-  else return;
+  const released = calleeRoot(runtime, frame.closure, frame.thisObj);
+  if (!released) return;
+  runtime.pendingGcRoots.add(released);
   releaseDropped(runtime, [], true);
+}
+
+/**
+ * The object whose release a call's exit buffers as a possible root: a closure call, bound or a first-class callable,
+ * holds its own reference to the closure, which is buffered while a variable still holds it and it is not buffered
+ * yet; only other calls hold `$this`.
+ */
+function calleeRoot(
+  runtime: Runtime,
+  closure: PhpObject | undefined,
+  thisObj: PhpObject | undefined
+): PhpObject | undefined {
+  if (!closure) return thisObj;
+  return runtime.gcRoots.has(closure) || !hasStoredObject(runtime, closure) ? undefined : closure;
 }
 
 /** Frees a call's result when its frame cleanup throws, as PHP frees the call's result before choosing a handler. */
