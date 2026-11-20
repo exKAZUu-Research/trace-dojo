@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 403 -- Shares Rust constant propagation between diagnostics and pattern coverage.
+// code-gauge-allow-file fileNcss 405 -- Shares Rust constant propagation between diagnostics and pattern coverage.
 
 import type { Annotations, LocalVar, PathRes } from './annotations';
 import type { Block, Condition, Expr, MatchArm, Pattern, Stmt } from './ast';
@@ -380,6 +380,8 @@ export class ConstLint {
 
   private compoundAssignment(expr: Extract<Expr, { kind: 'compoundAssign' }>): void {
     const right = this.expr(expr.value);
+    const readsAfterCheck = ['/', '%', '<<', '>>'].includes(expr.op);
+    if (readsAfterCheck) this.endBlock();
     const left = this.expr(expr.target);
     const name = intTypeOf(expr.target.ty);
     const result = name && this.integerBinary(expr, name, left, right);

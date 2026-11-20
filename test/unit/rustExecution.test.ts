@@ -1150,6 +1150,21 @@ fn main() {
   });
 });
 
+test.each([
+  ['/', 'x - 2'],
+  ['%', 'x'],
+  ['<<', 'x - 128'],
+  ['>>', 'x'],
+])('checked compound %s reloads the left operand after its assertion', (operator, divisor) => {
+  const prefix = 'let mut x: i32 = 8;';
+  const print = `println!("{}", 8 / (${divisor}));`;
+  expect(executeProgram('rust', rustMain(`${prefix} x ${operator}= 4; ${print}`))).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('attempt to divide by zero'),
+  });
+  expect(executeProgram('rust', rustMain(`${prefix} x = x ${operator} 4; ${print}`)).kind).toBe('compileError');
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {
