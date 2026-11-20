@@ -184,6 +184,12 @@ export class ArrayOrder {
     return copy;
   }
 
+  staysPacked(key: Key): boolean {
+    return (
+      this.packed === true && typeof key === 'bigint' && key >= BigInt(this.nextIndex) && key < BigInt(this.capacity)
+    );
+  }
+
   // code-gauge-allow functionCognitiveComplexity 26 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   insert(key: Key, count = this.entries.size): number | undefined {
     if (this.get(key)) return undefined;

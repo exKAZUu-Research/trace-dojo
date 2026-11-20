@@ -105,30 +105,48 @@ function locatePhpErrors(root: Node, diagnostics: SourceDiagnostic[]): SourceDia
   if (diagnostics.length === 0) return diagnostics;
   for (const error of root.descendantsOfType('ERROR')) {
     if (diagnostics[0].row !== error.startPosition.row) continue;
-    const classDiagnostic = reservedClassSyntax(error) ?? recoveredTraitModifier(root, error);
-    if (classDiagnostic) return [classDiagnostic];
-    const next = error.nextNamedSibling;
-    if (
-      error.parent?.type === 'match_block' &&
-      next?.type === 'match_default_expression' &&
-      error.namedChildCount === 1 &&
-      error.firstNamedChild?.type === 'match_condition_list'
-    ) {
-      return [{ row: next.startPosition.row, message: 'syntax error, unexpected token "default", expecting "=>"' }];
-    }
-    const children = error.children;
-    const open = children.findIndex((node) => node.type === '{');
-    if (
-      open < 2 ||
-      children[open - 2].text.toLowerCase() !== 'match' ||
-      children[open - 1].type !== 'parenthesized_expression'
-    )
-      continue;
-    const token = children.slice(open + 1).find((node) => node.type !== 'comment');
-    if (token?.type === ',')
-      return [{ row: token.startPosition.row, message: 'syntax error, unexpected token ",", expecting "}"' }];
+    const diagnostic = reservedClassSyntax(error) ?? recoveredTraitModifier(root, error) ?? recoveredMatchError(error);
+    if (diagnostic) return [diagnostic];
+    const shifted = shiftPhpTagError(error, diagnostics);
+    if (shifted) return shifted;
   }
   return diagnostics;
+}
+
+function recoveredMatchError(error: Node): SourceDiagnostic | undefined {
+  const next = error.nextNamedSibling;
+  if (
+    error.parent?.type === 'match_block' &&
+    next?.type === 'match_default_expression' &&
+    error.namedChildCount === 1 &&
+    error.firstNamedChild?.type === 'match_condition_list'
+  ) {
+    return { row: next.startPosition.row, message: 'syntax error, unexpected token "default", expecting "=>"' };
+  }
+  const children = error.children;
+  const open = children.findIndex((node) => node.type === '{');
+  if (
+    open < 2 ||
+    children[open - 2].text.toLowerCase() !== 'match' ||
+    children[open - 1].type !== 'parenthesized_expression'
+  )
+    return undefined;
+  const token = children.slice(open + 1).find((node) => node.type !== 'comment');
+  if (token?.type === ',')
+    return { row: token.startPosition.row, message: 'syntax error, unexpected token ",", expecting "}"' };
+  return undefined;
+}
+
+function shiftPhpTagError(error: Node, diagnostics: SourceDiagnostic[]): SourceDiagnostic[] | undefined {
+  const children = error.children;
+  let index = 0;
+  while (index < children.length && children[index].type === 'text') index++;
+  if (children[index]?.type !== 'php_tag') return undefined;
+  index++;
+  while (index < children.length && children[index].type === 'comment') index++;
+  const first = children[index];
+  if (!first || first.startPosition.row === error.startPosition.row) return undefined;
+  return [{ ...diagnostics[0], row: first.startPosition.row }, ...diagnostics.slice(1)];
 }
 
 function recoveredTraitModifier(root: Node, error: Node): SourceDiagnostic | undefined {

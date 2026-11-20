@@ -121,8 +121,9 @@ function rebuild(
     }
     const packed = mutation === 'shift' ? array.ordered().isPacked : renumber;
     const countOffset = array.map.removedUndefinedSlots;
+    const previousPhysical = array.map.size - countOffset;
     array.replaceTable(renamed(), packed, mutation, !renumber);
-    array.map.removedUndefinedSlots = mutation === undefined ? countOffset : 0;
+    array.map.removedUndefinedSlots = mutation === undefined && entries.length === previousPhysical ? countOffset : 0;
     return array;
   }
   for (const [key, source] of entries) {

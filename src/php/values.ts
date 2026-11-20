@@ -287,22 +287,10 @@ export class PhpArray {
 
   restorePackedSlot(key: bigint, value: Value, preserveCount = false): Value {
     const previousSize = this.size;
-    const entries: [Key, Value | Ref][] = [];
-    const positions = new Map<Key, number>();
-    let inserted = false;
-    for (const [existingKey, slot] of this.map.physicalEntries()) {
-      if (!inserted && typeof existingKey === 'bigint' && existingKey > key) {
-        entries.push([key, value]);
-        positions.set(key, Number(key));
-        inserted = true;
-      }
-      entries.push([existingKey, slot]);
-      positions.set(existingKey, Number(existingKey));
-    }
-    if (!inserted) {
-      entries.push([key, value]);
-      positions.set(key, Number(key));
-    }
+    const entries: [Key, Value | Ref][] = [...this.map.physicalEntries()];
+    const insertAt = entries.findIndex(([existingKey]) => typeof existingKey === 'bigint' && existingKey > key);
+    entries.splice(insertAt === -1 ? entries.length : insertAt, 0, [key, value]);
+    const positions = new Map<Key, number>(entries.map(([entryKey]) => [entryKey, Number(entryKey)]));
     this.replaceTable(entries, true, { positions, keepPositions: true, packed: true }, true);
     if (preserveCount) this.map.removedUndefinedSlots = previousSize - entries.length;
     return value;
@@ -335,6 +323,7 @@ export class PhpArray {
    * there.
    */
   private insert(key: Key, slot: Value | Ref): void {
+    const stale = this.resetEmptyRetained(key);
     const order = slot === UNDEFINED_RESULT || this.map.countsUndefinedSlots ? this.ordered() : this.order;
     const count = this.map.countsUndefinedSlots ? this.size : undefined;
     const wasPacked = order?.isPacked;
@@ -354,6 +343,17 @@ export class PhpArray {
         if (oldSlot === UNDEFINED_RESULT) this.removeUndefinedSlot(oldKey);
       order.compact();
     }
+    for (const old of stale ?? []) dropped(old);
+  }
+
+  private resetEmptyRetained(key: Key): (Value | Ref)[] | undefined {
+    if (this.size !== 0 || this.map.removedUndefinedSlots >= 0 || this.map.has(key) || this.ordered().staysPacked(key))
+      return;
+    const stale = this.detachSlots();
+    this.order = undefined;
+    this.orderPacked = key === 0n;
+    this.pointer = null;
+    return stale;
   }
 
   private finishInsert(key: Key, existed: boolean, order: ArrayOrder | undefined, count: number | undefined): void {
@@ -690,6 +690,8 @@ export class PhpArray {
    * array become plain values, as PHP's copy does.
    */
   copy(): PhpArray {
+    if (this.size === 0 && this.map.removedUndefinedSlots < 0)
+      return Object.assign(new PhpArray(), { nextFree: this.nextFree });
     const map = new Map<Key, Value | Ref>();
     const order = this.map.countsUndefinedSlots ? this.ordered() : this.order;
     const dense = order?.endPosition === this.size;
@@ -702,13 +704,17 @@ export class PhpArray {
     copy.orderPacked = this.orderPacked;
     copy.nextFree = this.nextFree;
     copy.composite = this.composite;
-    if (this.currentKey() === undefined) copy.pointer = null;
-    else if (this.pointerKey === undefined && order?.detachedPointer !== undefined) {
-      const target = copy.order?.keyAtBucket(order.detachedPointer);
-      if (target !== undefined && copy.map.get(target) !== UNDEFINED_RESULT) copy.pointer = target;
-      else copy.setDetachedPointer(order.detachedPointer);
-    } else copy.pointer = this.pointerKey;
+    copy.copyPointerFrom(this, order);
     return copy;
+  }
+
+  private copyPointerFrom(source: PhpArray, order: ArrayOrder | undefined): void {
+    if (source.currentKey() === undefined) this.pointer = null;
+    else if (source.pointerKey === undefined && order?.detachedPointer !== undefined) {
+      const target = this.order?.keyAtBucket(order.detachedPointer);
+      if (target !== undefined && this.map.get(target) !== UNDEFINED_RESULT) this.pointer = target;
+      else this.setDetachedPointer(order.detachedPointer);
+    } else this.pointer = source.pointerKey;
   }
 
   isList(): boolean {

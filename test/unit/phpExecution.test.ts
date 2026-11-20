@@ -4628,3 +4628,66 @@ echo implode(",", $ids);
     ).toMatchObject({ kind: 'executed', stdout: expected });
   }
 });
+
+test('normalizes retained undefined-slot storage across array_multisort, copy, and insertion', () => {
+  for (const op of ['array_multisort($a);', '$b = range(1, count($a)); array_multisort($a, $b);']) {
+    expect(
+      run(`<?php
+error_reporting(0);
+function f() { return 4; }
+$a = [1, 2];
+set_error_handler(function() use (&$a) { unset($a[array_key_last($a)]); $a[] = 9; return true; });
+$a[] =& f();
+restore_error_handler();
+echo count($a), ';';
+${op}
+echo count($a), ':', json_encode($a), ';';
+`)
+    ).toMatchObject({ kind: 'executed', stdout: '3;3:[1,2,4];' });
+  }
+
+  for (const [op, expected] of [
+    ['$b = $a; $b[1] = 7;', '0:[]:9;1:{"1":7}:7'],
+    ['$b = $a; unset($b[1]);', '0:[]:9;0:[]:null'],
+    ['$b = $a; $b[] = 7;', '0:[]:9;1:{"2":7}:null'],
+    ['$a[1] = 7;', '0:[]:7;'],
+    ['$a[0] = 7;', '1:[7]:null;'],
+    ['$a["x"] = 7;', '1:{"x":7}:null;'],
+    ['$a[2] = 7;', '1:{"1":9,"2":7}:9;'],
+  ]) {
+    expect(
+      run(`<?php
+error_reporting(0);
+function f() { return 4; }
+$a = [];
+set_error_handler(function() use (&$a) { unset($a[0]); $a[] = 9; return true; });
+$a[] =& f();
+restore_error_handler();
+unset($a[0]);
+${op}
+echo count($a), ':', json_encode($a), ':', json_encode($a[1] ?? null), ';';
+if (isset($b)) echo count($b), ':', json_encode($b), ':', json_encode($b[1] ?? null);
+`)
+    ).toMatchObject({ kind: 'executed', stdout: expected });
+  }
+});
+
+test('reports JIT stack limit exhaustion on long subjects with quantified groups and accurate rows for first-statement syntax errors', () => {
+  expect(
+    run(`<?php
+var_dump(preg_match('/^(?:a|b)*$/', str_repeat('a', 5000)), preg_last_error_msg());
+var_dump(preg_match('/^(?:a|b)*$/', str_repeat('a', 10000)), preg_last_error_msg());
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'int(1)\nstring(8) "No error"\nbool(false)\nstring(25) "JIT stack limit exhausted"\n',
+  });
+
+  for (const source of [
+    '<?php\nfor ($i = 0; $i < 3 $i++) {}\necho 1;\necho 2;\n',
+    '<?php\ntry { } catch { }\necho 1;\necho 2;\n',
+    '<?php\n$f = fn($x) => { return $x; };\necho 1;\necho 2;\n',
+  ]) {
+    expect(run(source)).toMatchObject({ kind: 'compileError', diagnostics: [expect.objectContaining({ row: 1 })] });
+  }
+});

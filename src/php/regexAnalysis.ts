@@ -15,7 +15,7 @@ export function analyzeRegex(
   ignoreCase: boolean,
   invalidLookbehind: (start: number, reason: string) => never,
   emptyMarkers: ReadonlyMap<string, string>
-): { emptySource?: string; needsNative: boolean } {
+): { emptySource?: string; needsNative: boolean; hasQuantifiedGroup: boolean } {
   const parser = new RegExpParser({ ecmaVersion: 2025 });
   let tree: AST.Pattern;
   try {
@@ -31,6 +31,7 @@ export function analyzeRegex(
   const lookbehinds: AST.LookaroundAssertion[] = [];
   const lengths = new Map<AST.Element, Length>();
   let needsNative = false;
+  let hasQuantifiedGroup = false;
   visitRegExpAST(tree, {
     onGroupEnter(node) {
       contexts.push(ignoreCase);
@@ -64,6 +65,7 @@ export function analyzeRegex(
     },
     onQuantifierLeave(node) {
       needsNative ||= nullableRepeatNeedsNative(node, lengths);
+      hasQuantifiedGroup ||= node.max > 1 && (node.element.type === 'Group' || node.element.type === 'CapturingGroup');
     },
     onCapturingGroupEnter() {
       captureCount++;
@@ -72,6 +74,7 @@ export function analyzeRegex(
   return {
     emptySource: emptyMarkers.size === 0 ? undefined : specializeForEmptySubject(tree, emptyMarkers),
     needsNative: needsNative || hasAmbiguousRepetition(tree, unicode, ignoreCase),
+    hasQuantifiedGroup,
   };
 }
 

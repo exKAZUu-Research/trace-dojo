@@ -28,6 +28,10 @@ export class ArrayTable extends Map<Key, Slot> {
     return this.packed ? this.packed.length > 0 : this.integerKeys > 0;
   }
 
+  packedSlots(): readonly Slot[] | undefined {
+    return this.packed;
+  }
+
   get countsUndefinedSlots(): boolean {
     return this.mayHaveUndefinedSlots || this.removedUndefinedSlots > 0;
   }

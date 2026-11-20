@@ -88,12 +88,28 @@ function isVariableValue(value: Value): boolean {
 const MAX_SCALAR_EXPANSION = 10_000;
 const MAX_DISPLAY_EXPANSION = 2000;
 
+interface PrimitiveArraySnapshot {
+  version: number;
+  scalar: Scalar | typeof NOT_SCALAR;
+  node: DisplayNode;
+}
+
+const primitiveArrayCache = new WeakMap<PhpArray, PrimitiveArraySnapshot>();
+
 function define(target: Record<string, unknown>, name: string, value: unknown): void {
-  Object.defineProperty(target, name, { value, enumerable: true, configurable: true, writable: true });
+  if (name === '__proto__')
+    Object.defineProperty(target, name, { value, enumerable: true, configurable: true, writable: true });
+  else target[name] = value;
 }
 
 function addVariable(variables: TraceVariables, name: string, value: Value): void {
   if (!isVariableValue(value)) return;
+  if (value instanceof PhpArray && !value.composite) {
+    const snapshot = primitiveArraySnapshot(value);
+    if (snapshot.scalar !== NOT_SCALAR) define(variables.vars, name, snapshot.scalar);
+    define(variables.referenceVars, name, snapshot.node);
+    return;
+  }
   // As JavaScript's trace does, null is a reference that refers to nothing, which only the references show.
   const scalar = value === null ? NOT_SCALAR : scalarOf(value, new Set(), { remaining: MAX_SCALAR_EXPANSION });
   if (scalar !== NOT_SCALAR) define(variables.vars, name, scalar);
@@ -101,6 +117,83 @@ function addVariable(variables: TraceVariables, name: string, value: Value): voi
   if (scalar !== NOT_SCALAR && !(value instanceof PhpArray)) return;
   const node = displayNodeOf(value, new Set(), { remaining: MAX_DISPLAY_EXPANSION });
   if (node) define(variables.referenceVars, name, node);
+}
+
+function primitiveArraySnapshot(array: PhpArray): PrimitiveArraySnapshot {
+  const cached = primitiveArrayCache.get(array);
+  if (cached?.version === array.mutationVersion) return cached;
+  const packed = array.map.packedSlots();
+  const isList = packed !== undefined || array.isList();
+  const collectScalar = isList && array.size < MAX_SCALAR_EXPANSION;
+  const scalarItems: Scalar[] | undefined = collectScalar ? [] : undefined;
+  const entries: Record<string, DisplayNode> = {};
+  const ordered: [string, unknown][] | undefined = collectScalar ? undefined : [];
+  if (packed) fillPackedPrimitives(packed, scalarItems, entries, ordered);
+  else fillMapPrimitives(array, isList, scalarItems, entries, ordered);
+  const node: DisplayNode = { kind: isList ? 'array' : 'object', entries };
+  if (ordered) arraySnapshots.set(node, ordered);
+  const snapshot: PrimitiveArraySnapshot = {
+    version: array.mutationVersion,
+    scalar: scalarItems ? (scalarItems as Scalar) : NOT_SCALAR,
+    node,
+  };
+  primitiveArrayCache.set(array, snapshot);
+  return snapshot;
+}
+
+function fillPackedPrimitives(
+  packed: readonly (Value | Ref)[],
+  scalarItems: Scalar[] | undefined,
+  entries: Record<string, DisplayNode>,
+  ordered: [string, unknown][] | undefined
+): void {
+  const limit = scalarItems ? packed.length : Math.min(packed.length, MAX_DISPLAY_EXPANSION - 1);
+  for (let index = 0; index < limit; index++) {
+    const scalar = primitiveScalar(packed[index] as Value);
+    scalarItems?.push(scalar);
+    if (index < MAX_DISPLAY_EXPANSION - 1) {
+      const label = String(index);
+      const child = primitiveNode(scalar);
+      entries[label] = child;
+      ordered?.push([label, child]);
+    }
+  }
+}
+
+function fillMapPrimitives(
+  array: PhpArray,
+  isList: boolean,
+  scalarItems: Scalar[] | undefined,
+  entries: Record<string, DisplayNode>,
+  ordered: [string, unknown][] | undefined
+): void {
+  let count = 0;
+  for (const [key, slot] of array.map.entries()) {
+    const scalar = primitiveScalar(slot as Value);
+    scalarItems?.push(scalar);
+    if (count < MAX_DISPLAY_EXPANSION - 1) {
+      const label = keyLabel(key, isList);
+      const child = primitiveNode(scalar);
+      define(entries, label, child);
+      ordered?.push([label, child]);
+      count++;
+    } else if (!scalarItems) break;
+  }
+}
+
+function primitiveScalar(value: Value): Scalar {
+  // oxlint-disable-next-line unicorn/no-null -- The trace format shows null as null.
+  if (value === null || value === UNDEFINED_RESULT) return null;
+  if (typeof value === 'bigint') return traceInt(value);
+  if (typeof value === 'string') return dec(value);
+  return value as number | boolean;
+}
+
+function primitiveNode(scalar: Scalar): DisplayNode {
+  if (scalar === null) return NULL_NODE;
+  if (scalar === true) return TRUE_NODE;
+  if (scalar === false) return FALSE_NODE;
+  return { kind: 'value', value: scalar as string | number | bigint };
 }
 
 const NOT_SCALAR = Symbol('notScalar');
@@ -132,8 +225,8 @@ function scalarOf(value: Value, seen: Set<object>, budget: { remaining: number }
     return NOT_SCALAR;
   seen.add(value);
   const items: Scalar[] = [];
-  for (const item of value.iterValues()) {
-    const scalar = scalarOf(item, seen, budget);
+  for (const [, slot] of value.map.entries()) {
+    const scalar = scalarOf(slot instanceof Ref ? slot.v : slot, seen, budget);
     if (scalar === NOT_SCALAR) return NOT_SCALAR;
     items.push(scalar);
   }
@@ -148,16 +241,15 @@ function traceInt(value: bigint): number | bigint {
 
 // oxlint-disable-next-line unicorn/no-null -- The trace format shows null as null.
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
+const TRUE_NODE: DisplayNode = { kind: 'value', value: true };
+const FALSE_NODE: DisplayNode = { kind: 'value', value: false };
 
 // code-gauge-allow functionCognitiveComplexity 29 -- Each branch maps a PHP value shape to the shared trace display tree.
 // code-gauge-allow functionNcss 40 -- Each branch maps a PHP value shape to the shared trace display tree.
 function displayNodeOf(value: Value, seen: Set<object>, budget: { remaining: number }): DisplayNode | undefined {
   if (budget.remaining-- <= 0) return { kind: 'value', value: '…' };
   if (value === UNDEFINED_RESULT) return undefined;
-  if (value === null) return NULL_NODE;
-  if (typeof value === 'bigint') return { kind: 'value', value: traceInt(value) };
-  if (typeof value === 'string') return { kind: 'value', value: dec(value) };
-  if (typeof value !== 'object') return { kind: 'value', value };
+  if (value === null || typeof value !== 'object') return primitiveNode(primitiveScalar(value));
   if (!isVariableValue(value) || seen.has(value)) return undefined;
   if (seen.size >= 256) return { kind: 'value', value: '…' };
   if (value instanceof PhpObject && value.turtle) {
@@ -173,9 +265,9 @@ function displayNodeOf(value: Value, seen: Set<object>, budget: { remaining: num
     if (value instanceof PhpArray) {
       const isList = value.isList();
       const ordered: [string, unknown][] = [];
-      for (const [key, item] of value.entries()) {
+      for (const [key, slot] of value.map.entries()) {
         const label = keyLabel(key, isList);
-        const child = displayNodeOf(item, seen, budget) ?? NULL_NODE;
+        const child = displayNodeOf(slot instanceof Ref ? slot.v : slot, seen, budget) ?? NULL_NODE;
         define(entries, label, child);
         ordered.push([label, arraySnapshots.get(child) ?? child]);
         if (budget.remaining <= 0) break;

@@ -23,6 +23,7 @@ export interface Compiled {
   /** The capture names of the `\K` points, the last passed of which starts the reported match. */
   keeps: string[];
   boundedPattern?: PcrePattern;
+  jitStackPattern?: PcrePattern;
 }
 
 export class PatternError extends Error {}
@@ -100,7 +101,7 @@ export function translate(pattern: string): Compiled {
   const converted = converter.convert();
   if (converted.length > 65_536) throw new UnsupportedFeatureError('大きすぎる正規表現');
   const flags = `d${options.caseless ? 'i' : ''}${converter.unicode ? 'u' : ''}`;
-  const { emptySource, needsNative } = analyzeRegex(
+  const { emptySource, needsNative, hasQuantifiedGroup } = analyzeRegex(
     converted,
     converter.unicode,
     options.utf8,
@@ -117,8 +118,22 @@ export function translate(pattern: string): Compiled {
     names: options.utf8 ? converter.names.map((name) => (name === undefined ? undefined : enc(name))) : converter.names,
     groupCount: converter.names.length - 1,
     keeps: converter.keeps,
-    boundedPattern: converter.needsNative || needsNative || matchLimit ? pcrePattern(body, modifiers) : undefined,
+    ...nativePatterns(body, modifiers, converter.needsNative || needsNative || Boolean(matchLimit), hasQuantifiedGroup),
   };
+}
+
+export function nativePatternFor(compiled: Compiled, subjectLength: number): PcrePattern | undefined {
+  return compiled.boundedPattern ?? (subjectLength >= 1024 ? compiled.jitStackPattern : undefined);
+}
+
+function nativePatterns(
+  body: string,
+  modifiers: string,
+  alwaysNative: boolean,
+  hasQuantifiedGroup: boolean
+): { boundedPattern?: PcrePattern; jitStackPattern?: PcrePattern } {
+  if (alwaysNative) return { boundedPattern: pcrePattern(body, modifiers) };
+  return hasQuantifiedGroup ? { jitStackPattern: pcrePattern(body, modifiers) } : {};
 }
 
 const PCRE_COMPILE_OPTIONS: Record<string, number> = {

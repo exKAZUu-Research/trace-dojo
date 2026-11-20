@@ -6,7 +6,7 @@ import { type CleanupException, throwError, warn, withCleanupExceptions } from '
 import { isCallable } from './libCore';
 import { defineConstant, defineFunction } from './native';
 import { toStr } from './operators';
-import { type Compiled, groupName, PatternError, translate } from './pcrePattern';
+import { type Compiled, groupName, nativePatternFor, PatternError, translate } from './pcrePattern';
 import { createBoundedRegexScanner, type MatchOffsets } from './regexExecution';
 import { ExitSignal, PhpThrow, rt } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
@@ -172,7 +172,7 @@ function scanPlan<T>(
   project: ProjectMatch<T>,
   options?: MatchScanOptions
 ): ScanPlan<T> {
-  const native = compiled.boundedPattern;
+  const native = nativePatternFor(compiled, subject.length);
   if (native) {
     const projection = { ...compiled, utf8: false };
     const startPosition = prepared.byteOffset(prepared.position);
