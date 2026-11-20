@@ -1,5 +1,5 @@
 import type { Span } from './ast';
-// code-gauge-allow-file fileNcss 472 -- Keeps type-directed arithmetic, comparison, and copying with their shared runtime hooks.
+// code-gauge-allow-file fileNcss 480 -- Keeps type-directed arithmetic, comparison, and copying with their shared runtime hooks.
 import { bigintToF32 } from './floatFormat';
 import { normalize } from './infer';
 import { RustPanic } from './runtime';
@@ -24,6 +24,7 @@ export interface UserImpls {
   allocate(count: number): void;
   spend(count: number): void;
   eq?(type: Type, a: Value, b: Value, rhs: Type): boolean | undefined;
+  gt?(type: Type, a: Value, b: Value): boolean | undefined;
   cmp?(type: Type, a: Value, b: Value, partial: boolean): { order: number | undefined } | undefined;
   clone?(type: Type, value: Value): { value: Value } | undefined;
   /** Substitutes a generic type's parameters with its arguments in a field's type. */
@@ -338,6 +339,15 @@ function setsEqual(type: Type, left: SetValue, right: SetValue): boolean {
     return items.every((item, index) => valuesEqual(type, item, other[index]));
   }
   return items.every((item) => right.entries.has(right.entries.key(type, item)));
+}
+
+export function isGreater(type: Type, a: Value, b: Value): boolean {
+  const t = derefType(type);
+  if (t.kind === 'adt') {
+    const user = hooks?.gt?.(t, deref(a), deref(b));
+    if (user !== undefined) return user;
+  }
+  return (comparePartialValues(t, a, b) ?? 0) > 0;
 }
 
 /** Compares two values of a type, as `Ord::cmp` and `PartialOrd::partial_cmp` do; NaN compares as `undefined`. */

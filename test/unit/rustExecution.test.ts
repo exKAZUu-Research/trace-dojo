@@ -768,6 +768,44 @@ fn main() {
   });
 });
 
+test('uses partial order for range boundaries and total order for endpoint search', () => {
+  const program = `use std::cmp::Ordering;
+use std::collections::{BTreeMap, BTreeSet};
+#[derive(PartialEq, Eq)]
+struct Key(i32);
+impl PartialOrd for Key {
+    fn partial_cmp(&self, rhs: &Self) -> Option<Ordering> {
+        print!("P{}{}", self.0, rhs.0);
+        Some(self.0.cmp(&rhs.0))
+    }
+    fn gt(&self, rhs: &Self) -> bool {
+        print!("G{}{}", self.0, rhs.0);
+        self.0 > rhs.0
+    }
+}
+impl Ord for Key {
+    fn cmp(&self, rhs: &Self) -> Ordering {
+        print!("O{}{}", self.0, rhs.0);
+        self.0.cmp(&rhs.0)
+    }
+}
+fn main() {
+    let map = BTreeMap::from([(Key(1), 1), (Key(2), 2), (Key(3), 3)]);
+    println!(" map");
+    let tail = map.range(Key(2)..=Key(3)).count();
+    println!(" = {}", tail);
+    let set = BTreeSet::from([Key(1), Key(2), Key(3)]);
+    println!(" set");
+    let tail = set.range(Key(2)..Key(3)).count();
+    println!(" = {}", tail);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'O21O32 map\nG23O21O22O32O33 = 2\nP21P32 set\nG23O21O22O32O33 = 1\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

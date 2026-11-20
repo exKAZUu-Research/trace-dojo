@@ -78,6 +78,7 @@ export class Interpreter implements CallSupport {
         if (!found) return;
         return this.callDispatched(found, type, [a, b]) as boolean;
       },
+      gt: (type, a, b) => this.userIsGreater(type, a, b),
       cmp: (type, a, b, partial) => this.userCompare(type, a, b, partial),
       clone: (type, value) => {
         const found = this.userTraitMethod('Clone', type, 'clone');
@@ -86,6 +87,11 @@ export class Interpreter implements CallSupport {
       },
       fieldTypes,
     });
+  }
+
+  private userIsGreater(type: Type, a: Value, b: Value): boolean | undefined {
+    const found = this.userTraitMethod('PartialOrd', type, 'gt');
+    return found ? (this.callDispatched(found, type, [a, b]) as boolean) : undefined;
   }
 
   private userCompare(type: Type, a: Value, b: Value, partial: boolean): { order: number | undefined } | undefined {

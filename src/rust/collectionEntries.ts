@@ -29,16 +29,16 @@ export class CollectionEntries<V> {
     return this.table ? hashKey(type, value) : this.orderedKey(type, value);
   }
 
-  private orderedKey(type: Type, value: Value): Exclude<CollectionKey, string> {
+  private orderedKey(type: Type, value: Value, start = 0): Exclude<CollectionKey, string> {
     const compare = (index: number): number => compareValues(type, value, this.keyOf(this.ordered[index])) ?? 0;
     if (this.ordered.length <= 11) {
-      for (let index = 0; index < this.ordered.length; index++) {
+      for (let index = start; index < this.ordered.length; index++) {
         const order = compare(index);
         if (order <= 0) return { index, present: order === 0 };
       }
       return { index: this.ordered.length, present: false };
     }
-    let first = 0;
+    let first = start;
     let last = this.ordered.length;
     while (first < last) {
       const index = first + Math.floor((last - first) / 2);
@@ -97,7 +97,7 @@ export class CollectionEntries<V> {
   range(type: Type, start: Value, end: Value, inclusive: boolean): V[] {
     const first = start === undefined ? 0 : this.orderedKey(type, start).index;
     if (end === undefined) return this.ordered.slice(first);
-    const last = this.orderedKey(type, end);
+    const last = this.orderedKey(type, end, first);
     return this.ordered.slice(first, last.index + Number(inclusive && last.present));
   }
 

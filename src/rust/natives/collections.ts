@@ -1,7 +1,7 @@
 import type { TableMap } from '../capacity';
 import type { CollectionEntries, CollectionKey } from '../collectionEntries';
 import { described, listPart } from '../iterDebug';
-import { cloneValue, compareValues } from '../ops';
+import { cloneValue, isGreater } from '../ops';
 import type { Type } from '../types';
 import {
   DONE,
@@ -409,7 +409,7 @@ function treeRange<V extends Value>(
   const type = keyType(ctx);
   const start = bounds?.start;
   const end = bounds?.end;
-  if (start !== undefined && end !== undefined && (compareValues(type, start, end) ?? 0) > 0) {
+  if (start !== undefined && end !== undefined && isGreater(type, start, end)) {
     libraryPanic(
       ctx,
       `range start is greater than range end in ${name}`,
