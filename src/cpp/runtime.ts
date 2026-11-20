@@ -78,6 +78,17 @@ export class Frame implements TracedFrame {
     return value instanceof CObject ? value : undefined;
   }
 
+  /** Runs a function body that executes in this frame, which is sequenced apart from the caller's operands. */
+  callBody<T>(run: () => T): T {
+    const saved = this.operandAccesses;
+    this.operandAccesses = undefined;
+    try {
+      return run();
+    } finally {
+      this.operandAccesses = saved;
+    }
+  }
+
   unsequencedOperands<T>(
     first: Eval<unknown>,
     second: Eval<unknown>,

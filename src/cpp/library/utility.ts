@@ -277,7 +277,7 @@ function callOperator(compiler: ExpressionCompiler, operator: string, object: Ex
       holdAll(frame, runs, (values) => {
         active.push(values.slice(1));
         try {
-          return result.run(frame);
+          return frame.callBody(() => result.run(frame));
         } finally {
           active.pop();
         }

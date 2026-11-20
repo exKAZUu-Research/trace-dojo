@@ -1116,6 +1116,23 @@ int main() {
   });
 });
 
+test('sequences a transparent functor body apart from sibling operands', () => {
+  const program = `#include <functional>
+#include <iostream>
+int main() {
+  int i = 0;
+  int a = i++ + std::plus<>()(i, 1);
+  int j = 0;
+  int b = j++ + std::minus<>()(j, 1);
+  std::cout << a << ':' << i << ' ' << b << ':' << j;
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '2:1 0:1',
+    uncaughtException: undefined,
+  });
+});
+
 test('evaluates transparent functor arguments as call arguments', () => {
   const program = `#include <functional>
 #include <iostream>
