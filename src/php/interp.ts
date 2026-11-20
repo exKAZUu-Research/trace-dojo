@@ -1242,7 +1242,7 @@ export function binary(e: Extract<Expr, { k: 'bin' }>): Value {
   if (!deferLeft) runtime.frame.temporaries.push(left);
   const right = deferRight ? null : ev(e.r);
   if (!deferRight) runtime.frame.temporaries.push(right);
-  const row = e.opcodeRow ?? e.r.row;
+  const row = compiledOperandRow(e.r);
   if (missingCompiledOperand(e.l) || missingCompiledOperand(e.r)) return binaryWithWarnings(e, left, right, mark, row);
   const lval = deferLeft ? readCompiledVar(e.l, row, runtime) : left;
   const rval = deferRight ? readCompiledVar(e.r, row, runtime) : right;

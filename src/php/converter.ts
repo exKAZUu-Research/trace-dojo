@@ -1458,7 +1458,7 @@ export class Converter extends DeclarationConverter {
       .filter((child) => child.type === 'argument')
       .map((child) => {
         const inner = child.namedChildren.at(-1) as Node;
-        return this.expr(inner);
+        return this.opcodeOperand(inner);
       });
     if (word === 'empty') {
       if (items.length !== 1) this.error(node, 'empty() には1つの式を書いてください。');
@@ -1533,7 +1533,7 @@ export class Converter extends DeclarationConverter {
       if (nameNode) {
         named = true;
         const name = this.nameText(nameNode);
-        args.push({ e: this.expr(valueNode), spread: false, name });
+        args.push({ e: this.opcodeOperand(valueNode), spread: false, name });
       } else {
         if (named)
           this.error(
@@ -1547,7 +1547,7 @@ export class Converter extends DeclarationConverter {
           );
         }
         args.push({
-          e: this.expr(valueNode),
+          e: this.opcodeOperand(valueNode),
           spread: false,
         });
       }
@@ -1590,14 +1590,13 @@ export class Converter extends DeclarationConverter {
     if (!this.preserveSyntax && (op === '&&' || op === 'and' || op === '||' || op === 'or')) {
       return this.shortCircuit(op, l, rightNode, row);
     }
-    const r = this.expr(rightNode);
+    const r = this.opcodeOperand(rightNode);
     if (op === '|>') {
       if (rightNode.type === 'arrow_function')
         this.error(rightNode, 'Arrow functions on the right hand side of |> must be parenthesized');
       return { k: 'pipe', l, r, row };
     }
     const expression: Extract<Expr, { k: 'bin' }> = { k: 'bin', op: op === '<>' ? '!=' : op, l, r, row };
-    if (this.initializerContext?.kind === 'array') expression.opcodeRow = this.resultOpcodeRow(r, rightNode);
     const compiled =
       this.preserveSyntax || this.initializerContext?.kind === 'deferred' ? expression : this.compileBinary(expression);
     return op === '.' && directiveLiteral(node, expression)
@@ -1766,14 +1765,17 @@ export class Converter extends DeclarationConverter {
         const list = arm.childForFieldName('conditional_expressions') as Node;
         arms.push({
           conditions: list.namedChildren.filter((child) => child.type !== 'comment').map((child) => this.expr(child)),
-          body: this.expr(arm.childForFieldName('return_expression') as Node),
+          body: this.opcodeOperand(arm.childForFieldName('return_expression') as Node),
           row: arm.startPosition.row,
         });
       } else if (arm.type === 'match_default_expression') {
         defaults++;
         if (defaults > 1)
           this.error(arm, 'match に default が2つあります（Match expressions may only contain one default arm）。');
-        arms.push({ body: this.expr(arm.childForFieldName('return_expression') as Node), row: arm.startPosition.row });
+        arms.push({
+          body: this.opcodeOperand(arm.childForFieldName('return_expression') as Node),
+          row: arm.startPosition.row,
+        });
       }
     }
     const conditions = arms.flatMap((arm) => arm.conditions ?? []);
@@ -1852,7 +1854,6 @@ export class Converter extends DeclarationConverter {
     return { key, keyOpcodeRow, value, byRef, spread: false };
   }
 
-  // code-gauge-allow functionNcss 36 -- Dispatches by the PHP expression that produced the current compiler row.
   private resultOpcodeRow(value: Expr, node: Node): number {
     node = unparenthesizedNode(node);
     if (node.type === 'heredoc' || node.type === 'nowdoc') return node.startPosition.row + 1;
@@ -1863,24 +1864,8 @@ export class Converter extends DeclarationConverter {
       case 'closure': {
         return node.endPosition.row;
       }
-      case 'bin': {
-        return this.binaryOpcodeRow(value, node);
-      }
-      case 'lit': {
-        if (node.type === 'binary_expression' && !directiveLiteral(node, value)) return this.arrayValueFoldRow(node);
-        break;
-      }
       case 'array': {
         return this.arrayOpcodeRow(value, node);
-      }
-      case 'const':
-      case 'unary':
-      case 'idx': {
-        if (this.compiledValue(value, true) !== undefined) return this.arrayValueFoldRow(node);
-        break;
-      }
-      case 'cond': {
-        return this.conditionalOpcodeRow(value, node);
       }
       case 'assign': {
         if (value.target.k === 'list') return listAssignmentRow(value.target, compiledOperandRow(value.value));
@@ -1894,17 +1879,43 @@ export class Converter extends DeclarationConverter {
         return compiledOperandRow(value.op === '??' ? value.target : value.value);
       }
     }
+    return this.initializerContext?.kind === 'array'
+      ? this.arrayInitializerOpcodeRow(value, node)
+      : compiledOperandRow(value);
+  }
+
+  private arrayInitializerOpcodeRow(value: Expr, node: Node): number {
+    switch (value.k) {
+      case 'bin': {
+        return this.binaryOpcodeRow(value, node);
+      }
+      case 'cond': {
+        return this.conditionalOpcodeRow(value, node);
+      }
+      case 'lit': {
+        if (node.type === 'binary_expression' && !directiveLiteral(node, value)) return this.arrayValueFoldRow(node);
+        break;
+      }
+      case 'const':
+      case 'unary':
+      case 'idx': {
+        if (this.compiledValue(value, true) !== undefined) return this.arrayValueFoldRow(node);
+        break;
+      }
+    }
     return compiledOperandRow(value);
   }
 
   private arrayOpcodeRow(value: Extract<Expr, { k: 'array' }>, node: Node): number {
-    if (this.compiledValue(value, true) !== undefined) return this.initializerContext?.row ?? arrayFoldRow(node);
+    const foldedRow = this.initializerContext?.row ?? arrayFoldRow(node);
     const item = value.items.at(-1);
+    if (!item) return foldedRow;
     const element = node.namedChildren.findLast((child) => child.type === 'array_element_initializer');
     const child = element && semanticChildren(element).at(-1);
-    if (!item || !child) return compiledOperandRow(value);
+    if (!child) return compiledOperandRow(value);
     const operand = item.spread || item.byRef ? semanticChildren(child)[0] : child;
-    return operand ? this.resultOpcodeRow(item.value, operand) : compiledOperandRow(value);
+    const dynamicRow = operand ? this.resultOpcodeRow(item.value, operand) : compiledOperandRow(value);
+    return dynamicRow === foldedRow || this.compiledValue(value, true) === undefined ? dynamicRow : foldedRow;
   }
 
   private conditionalOpcodeRow(value: Extract<Expr, { k: 'cond' }>, node: Node): number {
@@ -1922,7 +1933,7 @@ export class Converter extends DeclarationConverter {
       const selected = branch === 'right' ? value.r : value.l;
       return this.resultOpcodeRow(selected, node.childForFieldName(branch) ?? node);
     }
-    if (this.compiledValue(value, true) === undefined) return value.opcodeRow ?? compiledOperandRow(value);
+    if (this.compiledValue(value, true) === undefined) return compiledOperandRow(value);
     if (value.op !== '.') return this.arrayValueFoldRow(node);
     if (directiveLiteral(node, value)) return followingTokenRow(node);
     return this.arrayValueFoldRow(node);

@@ -64,7 +64,7 @@ export type Expr = { row: number } & (
   | { k: 'assign'; target: Expr; value: Expr }
   | { k: 'assignRef'; target: Expr; source: Expr }
   | { k: 'assignOp'; op: string; target: Expr; value: Expr }
-  | { k: 'bin'; op: string; l: Expr; r: Expr; foldedString?: string; swapOperands?: boolean; opcodeRow?: number }
+  | { k: 'bin'; op: string; l: Expr; r: Expr; foldedString?: string; swapOperands?: boolean }
   | { k: 'unary'; op: string; e: Expr }
   | { k: 'incdec'; inc: boolean; prefix: boolean; target: Expr }
   | { k: 'cond'; test: Expr; consequent?: Expr; alternate: Expr }

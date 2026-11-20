@@ -3018,6 +3018,32 @@ try { throw
   });
 });
 
+test.each([
+  ['zero(\n  b: 5,\n  a: 5\n)', '6'],
+  ['[\n  1,\n  2\n]', '5'],
+  ['[\n  $value,\n  2\n]', '6'],
+  ['Example::\n  VALUE', '4'],
+  ['match ($value) {\n  default => 0,\n  1 => 4\n}', '6'],
+])('reports an enclosing binary error at the compiled operand line for %s', (operand, stdout) => {
+  expect(
+    run(`<?php
+function zero($a, $b) { return $a - $b; } class Example { const VALUE = 0; }
+$value = 5;
+try { 5 % ${operand}; } catch (Throwable $error) { echo $error->getLine(); }`)
+  ).toMatchObject({ kind: 'executed', stdout });
+});
+
+test('uses the same compiled line for both warnings from a binary operator', () => {
+  expect(
+    run(`<?php
+function value($number) { return $number; }
+set_error_handler(function ($level, $message, $file, $line) { echo $message, ':', $line, "\\n"; });
+echo $missing + value(
+  '12x'
+);`)
+  ).toMatchObject({ kind: 'executed', stdout: 'Undefined variable $missing:5\nA non-numeric value encountered:5\n12' });
+});
+
 test('rounds integer operands before computing an overflowing result', () => {
   const source = `<?php
     class NumberBox { public static float $product = 9007199254740993 * 9007199254740993; }

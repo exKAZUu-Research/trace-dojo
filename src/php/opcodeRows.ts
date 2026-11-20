@@ -49,6 +49,8 @@ export function compiledOperandRow(expression: Expr): number {
   for (;;) {
     const rows = operandRows.get(expression);
     if (rows) return rows.completed;
+    if (expression.k === 'cconst' && typeof expression.name === 'string' && expression.cls.k !== 'expr')
+      return expression.scopeRow ?? expression.row;
     const last = lastCompiledOperand(expression);
     if (!last) return expression.row;
     expression = last;
@@ -59,7 +61,7 @@ export function dimensionWriteRow(dimension: Extract<Expr, { k: 'idx' }>): numbe
   return compiledOperandRow(dimension.index ?? dimension.base);
 }
 
-// code-gauge-allow functionNcss 31 -- Keeps the compiler operand order in one dispatch over AST expressions.
+// code-gauge-allow functionNcss 35 -- Keeps the compiler operand order in one dispatch over AST expressions.
 function lastCompiledOperand(expression: Expr): Expr | undefined {
   switch (expression.k) {
     case 'array': {
@@ -95,6 +97,12 @@ function lastCompiledOperand(expression: Expr): Expr | undefined {
     }
     case 'cond': {
       return expression.alternate;
+    }
+    case 'isset': {
+      return expression.items.at(-1);
+    }
+    case 'match': {
+      return expression.arms.at(-1)?.body ?? expression.subject;
     }
     default: {
       return undefined;
