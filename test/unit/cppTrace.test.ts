@@ -373,6 +373,8 @@ test.each([
 test.each([
   ['struct R { Turtle* t; ~R() { t->remove(); } };\nint main() { Turtle t; R r{&t}; }', []],
   ['struct D { Turtle* t; ~D() { delete t; } };\nint main() { Turtle* t = new Turtle(); D d{t}; }', []],
+  ['struct D { ~D() { new Turtle(3, 5); } };\nint main() { D d; }', []],
+  ['struct S { ~S() { new Turtle(3, 5); } };\nS s;\nint main() {}', []],
   [
     'Turtle* g;\nstruct M { ~M() { g = new Turtle(3, 5); } };\nM m;\nint main() {}',
     [{ x: 3, y: 5, color: '#', dir: 'N' }],

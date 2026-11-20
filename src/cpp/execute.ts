@@ -103,10 +103,11 @@ function runStartup(runtime: Runtime, program: CompiledProgram): void {
 
 /**
  * The turtles captured when main ended, as destructors that ran afterward left them: without the ones they removed and
- * with the ones they put on the board.
+ * with the ones they put on the board that are still reachable.
  */
 function finalTurtleStates(runtime: Runtime, captured: readonly TurtleState[]): TurtleState[] {
   const kept = captured.filter((turtle) => !runtime.removedTurtles.has(turtle));
+  runtime.collectGarbage();
   const added = runtime.world.currentTurtles().filter((turtle) => !captured.includes(turtle));
   return [...kept, ...added];
 }
