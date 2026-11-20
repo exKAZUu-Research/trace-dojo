@@ -4,7 +4,7 @@ import type { ProgramExecution, ProgramRun } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import type { Program } from './ast';
 import { boundedHostWork } from './boundedHostWork';
-import { errorHeadline, inspect } from './inspect';
+import { inspect, uncaughtErrorHeadline } from './inspect';
 import { parseJavaScript } from './parse';
 import { Runtime } from './runtime';
 import { unavailableMemberCheck } from './unavailableMembers';
@@ -86,7 +86,7 @@ function describeUncaught(runtime: Runtime, error: unknown): string {
     const { value } = error;
     if (typeof value === 'symbol') return '';
     if (!(value instanceof JsObject)) return runtime.toString(value);
-    return value.isError ? errorHeadline(runtime, value) : inspect(runtime, value);
+    return value.isError ? uncaughtErrorHeadline(runtime, value) : inspect(runtime, value);
   } catch (formattingError) {
     // A value too deep to inspect leaves only a generic description.
     if (formattingError instanceof JsThrow || isHostStackOverflow(formattingError)) return 'Error';

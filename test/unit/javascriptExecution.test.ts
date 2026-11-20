@@ -204,7 +204,7 @@ test.each([
     "throw Object.setPrototypeOf(new Error('x'), null);",
     '[Error: null prototype]: x',
   ],
-  ['a custom error', "class Oops extends Error {}\nthrow new Oops('bad');", 'Oops [Error]: bad'],
+  ['a custom error', "class Oops extends Error {}\nthrow new Oops('bad');", 'Error: bad'],
   ['infinite recursion', 'function f() { return f(); }\nf();', 'RangeError: Maximum call stack size exceeded'],
   ['constructing a generator', 'function* f() {}\nnew f();', 'TypeError: f is not a constructor'],
   [

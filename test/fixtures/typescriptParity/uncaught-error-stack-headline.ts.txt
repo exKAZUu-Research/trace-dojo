@@ -1,0 +1,7 @@
+const error = new Error('original');
+error.name = 'CustomError';
+console.log(error);
+error.name = 'RenamedError';
+error.message = 'updated';
+error.toString = () => 'manual string';
+throw error;

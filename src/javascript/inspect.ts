@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 617 -- One port of Node.js's util.inspect, whose formatters share its context.
+// code-gauge-allow-file fileNcss 620 -- Ports Node.js's inspection and error formatting around shared object and stack metadata.
 import { inspect as hostInspect, type InspectStyle, stripVTControlCharacters } from 'node:util';
 
 import { eastAsianWidthType } from 'get-east-asian-width';
@@ -549,14 +549,12 @@ function plainFunctionBase(fn: JsFunction, name: string, constructor: string | u
     : `${base} ${constructor}`;
 }
 
-/**
- * The first line Node.js prints for an error, such as `MyError: missing`; the stack lines that follow it, with the
- * error's own properties, name places on the host, which a program here does not have.
- */
-export function errorHeadline(runtime: Runtime, error: JsObject): string {
+/** The stored stack header that Node.js shows for an uncaught error. */
+export function uncaughtErrorHeadline(runtime: Runtime, error: JsObject): string {
   const constructor = constructorName(runtime, error);
-  // An error whose prototype no longer leads to an Error class prints as the plain object `console.log` shows.
-  return constructor === 'Object' ? inspect(runtime, error) : errorText(runtime, error, constructor);
+  if (constructor === 'Object') return inspect(runtime, error);
+  if (constructor === undefined) return errorText(runtime, error, constructor);
+  return headlineOf(runtime, error) ?? objectToString(runtime, error);
 }
 
 /**
