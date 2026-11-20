@@ -44,6 +44,7 @@ export function describePanic(panic: RustPanic): string {
  *
  * @param onEnd Receives `main`'s frame when it returns, while the frame still holds its variables.
  */
+// code-gauge-allow duplicateLines 17 -- Each language reports how its program ended alike.
 export function runProgram(
   runtime: Runtime,
   built: BuiltProgram,
@@ -70,6 +71,7 @@ export function runProgram(
     // The `String`s in flight are kept by their text, which must not outlive the run.
     settleStrings();
   }
+  runtime.finishOutput();
   return {
     finalBoard: runtime.world.boardText(),
     finalTurtles: runtime.world.turtleTraces(),

@@ -113,6 +113,11 @@ export type BuiltinAdt =
   | 'IntoShape'
   | 'Formatter'
   | 'FmtError'
+  | 'IoError'
+  | 'Stdout'
+  | 'StdoutLock'
+  | 'Stderr'
+  | 'StderrLock'
   | 'ParseIntError'
   | 'IntErrorKind'
   | 'ParseFloatError'
@@ -554,6 +559,25 @@ export function traitRefToString(ref: TraitRef): string {
 export function isUnit(type: Type): boolean {
   const t = shallow(type);
   return t.kind === 'tuple' && t.elems.length === 0;
+}
+
+export function outputStream(type: Type): 'stdout' | 'stderr' | undefined {
+  const t = shallow(type);
+  if (t.kind === 'ref') return outputStream(t.target);
+  if (t.kind !== 'adt') return undefined;
+  switch (t.def.builtin) {
+    case 'Stdout':
+    case 'StdoutLock': {
+      return 'stdout';
+    }
+    case 'Stderr':
+    case 'StderrLock': {
+      return 'stderr';
+    }
+    default: {
+      return undefined;
+    }
+  }
 }
 
 export function isBuiltin(type: Type, name: BuiltinAdt): boolean {

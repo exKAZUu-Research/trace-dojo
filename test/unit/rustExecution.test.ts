@@ -707,6 +707,31 @@ test('clones closure captures and adapter state independently at the iterator po
   });
 });
 
+test('routes Rust Write trait output to the corresponding captured stream', () => {
+  const program = String.raw`use std::io::{self, Write};
+fn main() -> io::Result<()> {
+    print!("prompt> ");
+    io::stdout().flush()?;
+    let stdout = io::stdout();
+    let mut out = stdout.lock();
+    writeln!(out, "{}", 42)?;
+    out.write_all(&[0xe3, 0x81])?;
+    out.write_all(&[0x82])?;
+    assert_eq!(out.write(&[b'!'])?, 1);
+    out.write_all(&[b'\n'])?;
+    let mut err = io::stderr().lock();
+    writeln!(&mut err, "error: {}", 1)?;
+    err.flush()?;
+    Ok(())
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'prompt> 42\nあ!\n',
+    uncaughtException: undefined,
+    stderr: 'error: 1\n',
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

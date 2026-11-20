@@ -137,7 +137,7 @@ function moduleValueRes(
 ): PathRes {
   const binding = module.values.get(last.name) ?? lookupValueIn(module, last.name, span);
   if (!binding) {
-    if (module.isStd) unavailableStd(names, span);
+    if (module.isStd) unavailableStd([...module.path.split('::'), last.name], span);
     compileError(span, `${names.join('::')} が見つかりません。`);
   }
   const entry = module.values.get(last.name);
@@ -219,7 +219,8 @@ export function checkMethodVisible(c: Checker, fn: FnDef, span: Span): void {
 export function checkTraitInScope(c: Checker, fn: FnDef, selfType: Type, span: Span, what: string): void {
   const isStd = (fn.trait?.module as Module | undefined)?.isStd;
   const trait = isStd ? fn.trait : fn.impl?.trait?.trait;
-  if (!trait || (!isStd && (trait.module as Module).isStd) || boundsOf(selfType) || traitInScope(c, trait)) return;
+  if (!trait || boundsOf(selfType) || traitInScope(c, trait)) return;
+  if (!isStd && (trait.module as Module).isStd && (trait.module as Module).path !== 'std::io') return;
   compileError(span, `${what} はトレイト ${trait.name} のものなので、use でトレイトを取り込んでください。`);
 }
 

@@ -1260,11 +1260,25 @@ pub mod mem {
 }
 pub mod io {
     #[derive(Debug)]
-    pub struct Error;
+    pub struct Error { inner: () }
     pub type Result<T> = core::result::Result<T, Error>;
-    pub trait Write {}
-    pub trait Read {}
-    pub trait BufRead {}
+    pub trait Write {
+        fn write(&mut self, buf: &[u8]) -> Result<usize>;
+        fn write_all(&mut self, buf: &[u8]) -> Result<()>;
+        fn flush(&mut self) -> Result<()>;
+    }
+    pub struct Stdout { inner: () }
+    pub struct StdoutLock { inner: () }
+    pub struct Stderr { inner: () }
+    pub struct StderrLock { inner: () }
+    pub fn stdout() -> Stdout;
+    pub fn stderr() -> Stderr;
+    impl Stdout { pub fn lock(&self) -> StdoutLock; }
+    impl Stderr { pub fn lock(&self) -> StderrLock; }
+    impl Write for Stdout {}
+    impl Write for StdoutLock {}
+    impl Write for Stderr {}
+    impl Write for StderrLock {}
 }
 pub mod process {
     pub fn exit(code: i32) -> !;

@@ -115,6 +115,10 @@ export class Runtime implements TracedRuntime<Frame> {
   readonly steps = new StepTracker();
   readonly io: ProgramIO;
   private slots = 0;
+  private readonly outputDecoders = {
+    stdout: new TextDecoder('utf-8', { ignoreBOM: true }),
+    stderr: new TextDecoder('utf-8', { ignoreBOM: true }),
+  };
   /** Values in use outside frame storage, such as arguments under evaluation and elements being sorted. */
   readonly nativeRoots: Value[][] = [];
 
@@ -155,7 +159,16 @@ export class Runtime implements TracedRuntime<Frame> {
   }
 
   write(stream: 'stdout' | 'stderr', text: string): void {
-    this.io[stream].write(text);
+    this.io[stream].write(this.outputDecoders[stream].decode() + text);
+  }
+
+  writeBytes(stream: 'stdout' | 'stderr', bytes: Uint8Array): void {
+    this.io[stream].write(this.outputDecoders[stream].decode(bytes, { stream: true }));
+  }
+
+  finishOutput(): void {
+    this.write('stdout', '');
+    this.write('stderr', '');
   }
 
   pushFrame(frame: Frame): void {

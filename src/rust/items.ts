@@ -315,9 +315,7 @@ export class ItemCollector {
       lifetimeParams: item.generics.lifetimes,
       module,
     };
-    // `Error` is a builtin only as `fmt::Error`; `io::Error` is a plain declaration.
-    const builtin =
-      module.isStd && (item.name !== 'Error' || module.name === 'fmt') ? BUILTIN_STRUCTS[item.name] : undefined;
+    const builtin = module.isStd ? builtinStruct(module, item.name) : undefined;
     if (builtin) {
       def.builtin = builtin;
       this.program.builtinAdts.set(builtin, def);
@@ -437,14 +435,14 @@ export class ItemCollector {
     const self = newTypeParam('Self', true);
     const def: TraitDef = {
       name: item.name,
-      path: module.isStd ? item.name : `${module.path}::${item.name}`,
+      path: module.isStd && module.path !== 'std::io' ? item.name : `${module.path}::${item.name}`,
       params: item.generics.params.map((param) => newTypeParam(param.name)),
       self,
       methods: new Map(),
       supertraits: [],
       module,
     };
-    if (module.isStd) {
+    if (module.isStd && module.path !== 'std::io') {
       def.builtin = item.name;
       this.program.builtinTraits.set(item.name, def);
     }
@@ -456,7 +454,7 @@ export class ItemCollector {
       if (def.methods.has(method.name)) compileError(method.span, `メソッド ${method.name} が2回宣言されています。`);
       const fn = this.fnDef(method, module, undefined, def);
       fn.isDefault = true;
-      if (module.isStd) fn.nativeKey = `${item.name}::${method.name}`;
+      if (module.isStd) fn.nativeKey = `${def.path}::${method.name}`;
       def.methods.set(method.name, fn);
     }
     this.lowering.unshift(() => {
@@ -789,7 +787,10 @@ const BUILTIN_STRUCTS: Record<string, BuiltinAdt> = {
   RangeToInclusive: 'RangeToInclusive',
   RangeFull: 'RangeFull',
   Formatter: 'Formatter',
-  Error: 'FmtError',
+  Stdout: 'Stdout',
+  StdoutLock: 'StdoutLock',
+  Stderr: 'Stderr',
+  StderrLock: 'StderrLock',
   ParseIntError: 'ParseIntError',
   ParseFloatError: 'ParseFloatError',
   TryFromIntError: 'TryFromIntError',
@@ -1069,6 +1070,12 @@ function resolveImport(module: Module, entry: Import): void {
   }
 }
 
+function builtinStruct(module: Module, name: string): BuiltinAdt | undefined {
+  if (name !== 'Error') return BUILTIN_STRUCTS[name];
+  if (module.name === 'fmt') return 'FmtError';
+  return module.path === 'std::io' ? 'IoError' : undefined;
+}
+
 function resolveImportedName(
   path: string[],
   module: Module,
@@ -1084,7 +1091,7 @@ function resolveImportedName(
     const typeEntry = ownType(parent.module, last, span, new Set());
     const valueEntry = ownValue(parent.module, last, span, new Set());
     if (!typeEntry && !valueEntry && parent.module.isStd)
-      checkUnavailableStd(path[0] === 'std' || path[0] === 'core' ? path : ['std', ...path], span);
+      checkUnavailableStd([...parent.module.path.split('::'), last], span);
     checkVisible<TypeBinding | ValueBinding>(typeEntry ?? valueEntry, parent.module, module, last, span);
     return { types: typeEntry?.binding, values: valueEntry?.binding };
   }
@@ -1148,7 +1155,6 @@ export function resolveTypePath(segments: string[], module: Module, span: Span):
 export function checkUnavailableStd(segments: string[], span: Span): void {
   const [, module, name] = segments;
   const unavailable: Record<string, string> = {
-    io: '標準入力・ファイルの入出力（std::io）',
     fs: 'ファイルの読み書き（std::fs）',
     net: 'ネットワーク（std::net）',
     thread: 'スレッド（std::thread）',
@@ -1171,6 +1177,9 @@ export function checkUnavailableStd(segments: string[], span: Span): void {
     panic: 'std::panic',
     hint: 'std::hint',
   };
+  if (module === 'io' && name) {
+    compileError(span, '標準入力・ファイルの入出力は、この採点環境では使えません。');
+  }
   if (module && unavailable[module]) compileError(span, `${unavailable[module]}は、この採点環境では使えません。`);
   if (module === 'process' && name && name !== 'exit') {
     compileError(span, `外部のプロセス（std::process::${name}）は、この採点環境では使えません。`);

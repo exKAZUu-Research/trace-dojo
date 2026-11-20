@@ -8,7 +8,7 @@ import type { Program } from './items';
 import { cloneValue, valuesEqual } from './ops';
 import { FmtFailure, type Frame, RustPanic } from './runtime';
 import { runtimeType } from './runtimeTypes';
-import { resolve, shallow } from './types';
+import { outputStream, resolve, shallow } from './types';
 import { EnumValue, type FormatterValue, isPlace, type Place, StructValue, UNIT_VALUE, type Value } from './values';
 
 type Macro<K extends MacroCall['kind']> = Extract<MacroCall, { kind: K }>;
@@ -68,6 +68,8 @@ function writeMacro(c: Compiler, macro: Macro<'write'>): Eval {
     const throughRef = targetType.kind === 'ref' && macro.target.kind !== 'ref';
     return writeString(c, macro.target, target, throughRef, format, newline);
   }
+  const stream = outputStream(inner);
+  if (stream) return writeStream(c, macro, target, format, stream, newline);
   const { program } = c;
   return (frame) => {
     let formatter = target(frame);
@@ -77,6 +79,23 @@ function writeMacro(c: Compiler, macro: Macro<'write'>): Eval {
     frame.runtime.allocateString((formatter as FormatterValue).text.length + written.length, written.length);
     (formatter as FormatterValue).text += written;
     return writeResult(program, failed);
+  };
+}
+
+function writeStream(
+  c: Compiler,
+  macro: Macro<'write'>,
+  target: Eval,
+  format: (frame: Frame) => string,
+  stream: 'stdout' | 'stderr',
+  newline: string
+): Eval {
+  return (frame) => {
+    target(frame);
+    const { text, failed } = formatPartly(format, frame);
+    frame.runtime.write(stream, text + (failed ? '' : newline));
+    if (failed) throw new RustPanic(IO_WRITE_FAILURE.message, macro.target.span, IO_WRITE_FAILURE.location);
+    return writeResult(c.program, false);
   };
 }
 

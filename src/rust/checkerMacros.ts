@@ -7,7 +7,7 @@ import { checkPattern } from './checkerPatterns';
 import { requireMutablePlace } from './checkerPlaces';
 import { normalize } from './infer';
 import { compileError, resolveTypePath } from './items';
-import { BOOL, freshVar, NEVER, resolve, shallow, type Type, typeToString, UNIT, USIZE } from './types';
+import { BOOL, freshVar, NEVER, outputStream, resolve, shallow, type Type, typeToString, UNIT, USIZE } from './types';
 
 // code-gauge-allow functionNcss 34 -- One case per kind of macro.
 export function checkMacro(c: Checker, macro: MacroCall, expected: Type | undefined): Type {
@@ -59,21 +59,28 @@ function writeMacro(c: Checker, macro: Extract<MacroCall, { kind: 'write' }>): T
   const inner = target.kind === 'ref' ? normalize(shallow(target.target)) : target;
   const isFormatter = inner.kind === 'adt' && inner.def.builtin === 'Formatter';
   const isString = inner.kind === 'adt' && inner.def.builtin === 'String';
-  if (!isFormatter && !isString) {
+  const stream = outputStream(inner);
+  if (!isFormatter && !isString && !stream) {
     compileError(
       macro.target.span,
-      `write! の書き込み先は、fmt::Formatter か String にしてください（${typeToString(resolve(target))} です）。`
+      `write! の書き込み先は、fmt::Formatter、String、標準出力、標準エラー出力のいずれかにしてください（${typeToString(resolve(target))} です）。`
     );
   }
-  if (isString) {
-    const write = resolveTypePath(['fmt', 'Write'], c.program.std, macro.target.span);
-    if (write.kind !== 'trait' || !traitInScope(c, write.def)) {
-      compileError(macro.target.span, 'String に write! で書き込むには、use std::fmt::Write; を書いてください。');
-    }
-    requireMutablePlace(c, macro.target.kind === 'ref' ? macro.target.operand : macro.target, 'write! で書き込む');
-  }
+  if (isString || stream) checkWriterTrait(c, macro.target, stream ? 'io' : 'fmt');
   if (macro.format) formatArgs(c, macro.format);
-  return c.program.builtinType('Result', [UNIT, c.program.builtinType('FmtError')]);
+  return c.program.builtinType('Result', [UNIT, c.program.builtinType(stream ? 'IoError' : 'FmtError')]);
+}
+
+function checkWriterTrait(
+  c: Checker,
+  target: Extract<MacroCall, { kind: 'write' }>['target'],
+  module: 'io' | 'fmt'
+): void {
+  const write = resolveTypePath([module, 'Write'], c.program.std, target.span);
+  if (write.kind !== 'trait' || !traitInScope(c, write.def)) {
+    compileError(target.span, `write! で書き込むには、use std::${module}::Write; を書いてください。`);
+  }
+  requireMutablePlace(c, target.kind === 'ref' ? target.operand : target, 'write! で書き込む');
 }
 
 function assertEqMacro(c: Checker, macro: Extract<MacroCall, { kind: 'assertEq' }>): Type {
