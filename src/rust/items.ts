@@ -437,6 +437,7 @@ export class ItemCollector {
         lowerBound(bound, scope, { kind: 'param', param: def.params[index] })
       );
     }
+    addWherePredicates(generics, scope);
     return scope;
   }
 
