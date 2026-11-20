@@ -1,5 +1,6 @@
-// code-gauge-allow-file fileNcss 523 -- The compilation of every kind of pattern, which share their type and binding helpers.
+// code-gauge-allow-file fileNcss 525 -- The compilation of every kind of pattern, which share their type and binding helpers.
 import type { Expression, ListPatternElement, Pattern, RecordPatternField, Span } from './ast';
+import { nullPatternComparison } from './astWalk';
 import { CallCompiler } from './callCompiler';
 import { type Compiled, type Eval, type ResolvedMember, typeName } from './compilerBase';
 import { promotionTarget, SHORTED } from './expressionCompiler';
@@ -41,7 +42,7 @@ interface PatternOptions {
   shared?: Map<string, LocalVar>;
   /** The names of `shared` this side has declared. */
   sharedUsed?: Set<string>;
-  assignments?: PatternWrite[];
+  assignments?: Map<LocalVar, PatternWrite>;
 }
 
 interface PatternWrite {
@@ -62,10 +63,11 @@ export abstract class PatternCompiler extends CallCompiler {
     for (const binding of pattern.variables.values()) this.flow = this.flow.assign(binding);
     let whenFalse = before;
     if (variable) {
-      const matched = promotionTarget(current, this.narrowedType(syntax, current));
+      const comparison = nullPatternComparison(syntax);
+      const nonNull = nonNullable(current);
+      const matched = promotionTarget(current, this.narrowedType(syntax, comparison === '!=' ? nonNull : current));
       if (matched) this.flow = this.flow.promote(variable, matched);
-      if (isNullCase(syntax) && !sameType(current, nonNullable(current)))
-        whenFalse = whenFalse.promote(variable, nonNullable(current));
+      if (comparison === '==' && !sameType(current, nonNull)) whenFalse = whenFalse.promote(variable, nonNull);
     }
     if (!guardSyntax) return { pattern, guard: undefined, whenFalse };
     for (const binding of pattern.variables.values()) binding.inPatternGuard = true;
@@ -436,6 +438,9 @@ export abstract class PatternCompiler extends CallCompiler {
   ): Omit<CompiledPattern, 'variables'> {
     const variable = this.findLocal(pattern.name, pattern);
     if (!variable) return this.error(pattern, `${pattern.name} という変数はありません。`);
+    if (options.assignments?.has(variable)) {
+      this.error(pattern, `${pattern.name} はこのパターンですでに代入先として使われています。`);
+    }
     if (variable.unavailable) this.error(pattern, variable.unavailable);
     if (variable.inPatternGuard) this.error(pattern, `パターン変数 ${pattern.name} には、when の中で代入できません。`);
     if (variable.options.isFinal && (variable.options.hasInitializer || this.flow.maybeAssigned.has(variable))) {
@@ -448,7 +453,7 @@ export abstract class PatternCompiler extends CallCompiler {
       );
     }
     const slot = this.fn.allocateSlot();
-    options.assignments?.push({ slot, target: this.cellAccess(variable) });
+    options.assignments?.set(variable, { slot, target: this.cellAccess(variable) });
     if (variable.owner !== this.fn) variable.isWriteCaptured = true;
     this.flow = this.flow.assign(variable).demote(variable);
     const save = (frame: Frame, value: Value): boolean => {
@@ -746,12 +751,13 @@ export abstract class PatternCompiler extends CallCompiler {
   compilePatternAssignment(pattern: Pattern, value: Expression, span: Span): Compiled {
     const context = this.patternContextType(pattern);
     const compiled = this.compileExpression(value, context);
-    const options: PatternOptions = { mode: 'assign', isFinal: false, assignments: [] };
+    const assignments = new Map<LocalVar, PatternWrite>();
+    const options: PatternOptions = { mode: 'assign', isFinal: false, assignments };
     if (context) this.requireAssignable(context, compiled.type, options, span);
     const matchedType = compiled.type.kind === 'dynamic' ? (context ?? compiled.type) : compiled.type;
     const check = this.typeTest(matchedType, compiled.type, () => true, true, 'assign');
-    const matcher = this.compilePattern(pattern, matchedType, options);
-    const writes = options.assignments ?? [];
+    const matcher = this.compilePattern(pattern, compiled.type, options);
+    const writes = [...assignments.values()];
     if (isRefutableSyntax(pattern)) this.error(span, 'このパターンには合わない値があるので、代入には使えません。');
     const { run } = compiled;
     return {
@@ -772,11 +778,6 @@ export abstract class PatternCompiler extends CallCompiler {
       isConst: false,
     };
   }
-}
-
-function isNullCase(pattern: Pattern): boolean {
-  while (pattern.kind === 'parenthesized') pattern = pattern.pattern;
-  return pattern.kind === 'constant' && pattern.value.kind === 'null';
 }
 
 function recordShape(fields: readonly RecordPatternField[]): DartType {

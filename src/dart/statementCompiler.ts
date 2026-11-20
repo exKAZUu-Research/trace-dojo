@@ -1018,7 +1018,8 @@ export abstract class StatementCompiler extends PatternCompiler {
   private compileJump(statement: Extract<Statement, { kind: 'break' | 'continue' }>): Exec {
     const { kind, label } = statement;
     const target = kind === 'break' ? this.breakTarget(statement) : this.continueTarget(statement);
-    if (target) {
+    // The Dart VM attaches labeled continues to the label wrapper instead of the loop's flow context.
+    if (target && (kind === 'break' || label === undefined)) {
       const flow = kind === 'break' ? 'breakFlow' : 'continueFlow';
       target[flow] = target[flow] ? Flow.join(target[flow], this.flow) : this.flow;
     }

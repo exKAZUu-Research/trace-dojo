@@ -27,7 +27,7 @@ export function compareNumbers(a: bigint | number, b: bigint | number): number {
  */
 export function numberHash(value: bigint | number): bigint {
   if (typeof value === 'number') {
-    if (Number.isInteger(value) && Math.abs(value) < 2 ** 63) return intHash(BigInt(value));
+    if (Number.isInteger(value) && value >= -(2 ** 63) && value < 2 ** 63) return intHash(BigInt(value));
     // The VM folds the bits of a double that is not an int and keeps them in its small-integer range.
     const view = new DataView(new ArrayBuffer(8));
     view.setFloat64(0, value);
@@ -193,7 +193,6 @@ function clamp(runtime: Runtime, value: bigint | number, lower: Value, upper: Va
   const low = numArg(runtime, lower, 'lowerLimit');
   const high = numArg(runtime, upper, 'upperLimit');
   if (compareNumbers(low, high) > 0) runtime.throwError('ArgumentError', '', [lower]);
-  if (typeof value === 'number' && Number.isNaN(value)) return value;
   if (compareNumbers(value, low) < 0) return low;
   if (compareNumbers(value, high) > 0) return high;
   return value;
@@ -294,6 +293,25 @@ define('int.toRadixString', (runtime, self, [radix]) => {
 define('int.isEven', (_runtime, self) => ((self as bigint) & 1n) === 0n);
 define('int.isOdd', (_runtime, self) => ((self as bigint) & 1n) === 1n);
 define('int.bitLength', (_runtime, self) => BigInt(bitLength(self as bigint)));
+define('int.trailingZeroBitCount', (_runtime, self) => {
+  let bits = BigInt.asUintN(64, self as bigint);
+  if (bits === 0n) return 64n;
+  let count = 0n;
+  while ((bits & 1n) === 0n) {
+    count++;
+    bits >>= 1n;
+  }
+  return count;
+});
+define('int.oneBitCount', (_runtime, self) => {
+  let bits = BigInt.asUintN(64, self as bigint);
+  let count = 0n;
+  while (bits !== 0n) {
+    bits &= bits - 1n;
+    count++;
+  }
+  return count;
+});
 define(
   'int.toUnsigned',
   (runtime, self, [width]) => (self as bigint) & wrap(shiftLeft(runtime, 1n, intArg(runtime, width, 'width')) - 1n)
@@ -303,13 +321,13 @@ define('int.toSigned', (runtime, self, [width]) => {
   const signMask = shiftLeft(runtime, 1n, wrap(intArg(runtime, width, 'width') - 1n));
   return wrap((value & wrap(signMask - 1n)) - (value & signMask));
 });
-define('int.gcd', (runtime, self, [other]) => gcd(self as bigint, intArg(runtime, other, 'other')));
+define('int.gcd', (runtime, self, [other]) => wrap(gcd(self as bigint, intArg(runtime, other, 'other'))));
 define('int.modPow', (runtime, self, [exponent, modulus]) => {
   const e = intArg(runtime, exponent, 'exponent');
   const m = intArg(runtime, modulus, 'modulus');
   if (e < 0n) runtime.throwError('RangeError', 'range', [exponent, 0n, undefined, 'exponent']);
   if (m <= 0n) runtime.throwError('RangeError', 'range', [modulus, 1n, undefined, 'modulus']);
-  return modPow(self as bigint, e, m);
+  return e === 0n ? 1n : modPow(self as bigint, e, m);
 });
 define('int.modInverse', (runtime, self, [modulus]) =>
   modInverse(runtime, self as bigint, intArg(runtime, modulus, 'modulus'))

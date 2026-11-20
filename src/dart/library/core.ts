@@ -30,7 +30,7 @@ class Object {
     }
     return _hashValues(values);
   }
-  static int hashAll(Iterable<Object?> objects) => _hashValues(objects.toList());
+  static int hashAll(Iterable<Object?> objects) => _hashValues(objects);
   static int hashAllUnordered(Iterable<Object?> objects) {
     int sum = 0;
     int count = 0;
@@ -58,10 +58,10 @@ class Object {
     hash = hash ^ (hash >> 11);
     return 0x1fffffff & (hash + ((0x00003fff & hash) << 15));
   }
-  external static int _hashValues(List<Object?> values);
+  external static int _hashValues(Iterable<Object?> values);
 }
 
-abstract final class Invocation {
+abstract class Invocation {
   factory Invocation.method(Symbol memberName, Iterable<Object?>? positionalArguments, [Map<Symbol, Object?>? namedArguments]) =>
       _Invocation.method(memberName, null, positionalArguments, namedArguments);
   factory Invocation.genericMethod(Symbol memberName, Iterable<Type>? typeArguments, Iterable<Object?>? positionalArguments, [Map<Symbol, Object?>? namedArguments]) =>
@@ -197,6 +197,8 @@ abstract final class int extends num {
   external bool get isEven;
   external bool get isOdd;
   external int get bitLength;
+  external int get trailingZeroBitCount;
+  external int get oneBitCount;
   external int toUnsigned(int width);
   external int toSigned(int width);
   external int operator -();
@@ -405,7 +407,7 @@ abstract interface class StringSink {
   void writeCharCode(int charCode);
 }
 
-final class StringBuffer implements StringSink {
+class StringBuffer implements StringSink {
   external StringBuffer([Object content = ""]);
   external int get length;
   external bool get isEmpty;
@@ -497,7 +499,7 @@ extension EnumByName<T extends Enum> on Iterable<T> {
   Map<String, T> asNameMap() => <String, T>{for (var value in this) value._name: value};
 }
 
-final class Duration implements Comparable<Duration> {
+class Duration implements Comparable<Duration> {
   static const int microsecondsPerMillisecond = 1000;
   static const int millisecondsPerSecond = 1000;
   static const int secondsPerMinute = 60;

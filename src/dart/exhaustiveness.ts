@@ -1,4 +1,5 @@
 import type { Expression, Pattern, Span } from './ast';
+import { nullPatternComparison } from './astWalk';
 import type { ClassInfo, Member } from './classes';
 import type { ExpressionCompiler } from './expressionCompiler';
 import {
@@ -263,9 +264,11 @@ function subclassType(supertype: DartType & { kind: 'interface' }, subclass: Cla
 }
 
 /** Whether a pattern matches every value of a type. */
-// code-gauge-allow functionCognitiveComplexity 27 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
-// code-gauge-allow functionNcss 44 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
+// code-gauge-allow functionCognitiveComplexity 29 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
+// code-gauge-allow functionNcss 47 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
 function coversAll(compiler: ExpressionCompiler, pattern: Pattern, type: DartType): boolean {
+  const comparison = nullPatternComparison(pattern);
+  if (comparison) return comparison === '==' ? isSubtype(type, NULL) : !isNullable(type);
   switch (pattern.kind) {
     case 'wildcard':
     case 'variable': {
@@ -365,8 +368,11 @@ function recordFieldsCover(
   );
 }
 
-// code-gauge-allow functionNcss 36 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
+// code-gauge-allow functionCognitiveComplexity 18 -- Match every supported kind of pattern against a value space.
+// code-gauge-allow functionNcss 39 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
 function covers(compiler: ExpressionCompiler, pattern: Pattern, space: Space): boolean {
+  const comparison = nullPatternComparison(pattern);
+  if (comparison) return comparison === '==' ? space.kind === 'null' : space.kind !== 'null' && !isNullable(space.type);
   switch (pattern.kind) {
     case 'parenthesized': {
       return covers(compiler, pattern.pattern, space);

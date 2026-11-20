@@ -342,8 +342,15 @@ define('BigInt.toRadixString', (runtime, receiver, [radix]) =>
 );
 
 function digitsText(runtime: Runtime, value: bigint, radix: number): string {
-  reserve(runtime, 0, bitsOf(value) / 128);
-  return value.toString(radix);
+  const bits = bitsOf(value);
+  reserve(runtime, 0, bits / 128);
+  const signLength = value < 0n ? 1 : 0;
+  if (bits - 4 >= (LIMITS.maxStringLength - signLength) * Math.log2(radix)) {
+    runtime.throwError('OutOfMemoryError', '', []);
+  }
+  const text = value.toString(radix);
+  if (text.length > LIMITS.maxStringLength) runtime.throwError('OutOfMemoryError', '', []);
+  return text;
 }
 
 function checkShiftAmount(runtime: Runtime, amount: bigint): bigint {

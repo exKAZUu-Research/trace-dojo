@@ -45,6 +45,16 @@ export function localNamesIn(statements: readonly Statement[]): Set<string> {
   return names;
 }
 
+export function nullPatternComparison(pattern: Pattern): '==' | '!=' | undefined {
+  while (pattern.kind === 'parenthesized') pattern = pattern.pattern;
+  if (pattern.kind !== 'constant' && pattern.kind !== 'relational') return undefined;
+  const operator = pattern.kind === 'constant' ? '==' : pattern.operator;
+  if (operator !== '==' && operator !== '!=') return undefined;
+  let value = pattern.value;
+  while (value.kind === 'parenthesized') value = value.expression;
+  return value.kind === 'null' ? operator : undefined;
+}
+
 class AssignmentWalker {
   readonly targets: AssignmentTargets = { locals: new Map(), captured: new Map(), free: new Set() };
   private readonly scopes: Map<string, Binding>[] = [new Map()];

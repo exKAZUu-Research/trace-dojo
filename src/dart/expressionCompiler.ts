@@ -1139,7 +1139,6 @@ export abstract class ExpressionCompiler extends CompilerBase {
       return;
     }
     if (options.hasInitializer || options.isParameter || this.flow.assigned.has(variable)) return;
-    if (!this.flow.reachable) return;
     if (options.isFinal) {
       this.error(span, `final の変数 ${variable.name} は、値を代入する前には使えません。`);
     }
@@ -1299,26 +1298,27 @@ export abstract class ExpressionCompiler extends CompilerBase {
   ): Compiled {
     const receiverRun = receiver.run;
     const { member } = resolved;
-    let type = resolved.type;
+    const type = resolved.type;
     // Inside a null-shorting chain the value is not null; the end of the chain (compileExpression) makes it nullable.
     if (resolved.extension) {
-      const extensionMember = member;
       const resolveTypes = this.runtimeTypes(resolved.extension.typeArgs);
+      const signature = this.runtimeType(type);
       return {
         type,
         run: (frame) => {
           const value = receiverRun(frame);
           if (value === SHORTED || (nullAware && value === undefined)) return SHORTED;
           const typeArgs = resolveTypes(frame);
-          if (extensionMember.kind === 'method') {
-            const impl = extensionMember.impl as NonNullable<typeof extensionMember.impl>;
+          if (member.kind === 'method') {
+            const impl = member.impl as NonNullable<typeof member.impl>;
             return frame.runtime.tearOff(value, {
-              ...extensionMember,
+              ...member,
+              type: signature(frame) as FunctionType,
               impl: (runtime, _receiver, args, methodTypeArgs, callRow) =>
                 impl(runtime, value, args, [...typeArgs, ...methodTypeArgs], callRow),
             });
           }
-          return (extensionMember.impl as unknown as Callable)(
+          return (member.impl as unknown as Callable)(
             frame.runtime,
             value,
             { positional: [], named: undefined },

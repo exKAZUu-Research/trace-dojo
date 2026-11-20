@@ -4,7 +4,17 @@ import { HashStore } from '../hashStore';
 import type { Runtime } from '../runtime';
 import { coreTypes, type DartType, DYNAMIC, sameType, vmTypeString } from '../types';
 import { DartClosure, DartList, DartObject, DartRecord, DartTypeValue, type Value } from '../values';
-import { define, defineConstructor, intArg, iterableValues, listElement, listLength, stringArg } from './nativeSupport';
+import { BoundedStringParts } from './boundedStringParts';
+import {
+  define,
+  defineConstructor,
+  forEachValue,
+  intArg,
+  iterableValues,
+  listElement,
+  listLength,
+  stringArg,
+} from './nativeSupport';
 
 // Object
 
@@ -17,10 +27,10 @@ define('Object.noSuchMethod', (runtime, receiver, [invocation]) =>
 );
 define('Object._hashValues', (runtime, _receiver, [values]) => {
   let hash = 0;
-  for (const value of (values as DartList).elements) {
+  forEachValue(runtime, values, (value) => {
     const code = Number(BigInt.asIntN(32, runtime.getProperty(value, 'hashCode', undefined) as bigint));
     hash = Math.trunc(Math.imul(hash, 31) + code) % 0x1_00_00_00_00;
-  }
+  });
   return BigInt(hash & 0x3f_ff_ff_ff);
 });
 
@@ -37,9 +47,22 @@ function closureToString(closure: DartClosure): string {
 
 function recordToString(runtime: Runtime, record: DartRecord): string {
   if (runtime.toStringVisiting.includes(record)) return '(...)';
-  const parts = record.positional.map((value) => stringOf(runtime, value));
-  for (const [name, value] of record.named) parts.push(`${name}: ${stringOf(runtime, value)}`);
-  return `(${parts.join(', ')})`;
+  const output = new BoundedStringParts(runtime);
+  output.append('(');
+  let separator = '';
+  const append = (value: Value, name?: string): void => {
+    output.append(separator);
+    if (name !== undefined) {
+      output.append(name);
+      output.append(': ');
+    }
+    output.append(stringOf(runtime, value));
+    separator = ', ';
+  };
+  for (const value of record.positional) append(value);
+  for (const [name, value] of record.named) append(value, name);
+  output.append(')');
+  return output.text();
 }
 
 let nextIdentity = 1;

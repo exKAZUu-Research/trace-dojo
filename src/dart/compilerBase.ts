@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 446 -- Type and diagnostic resolution share the compiler environment.
+// code-gauge-allow-file fileNcss 448 -- Type and diagnostic resolution share the compiler environment.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ClassDeclaration, Span, TypeAliasDeclaration, TypeParameter, TypeSyntax } from './ast';
 import type { ClassInfo, Member } from './classes';
@@ -504,6 +504,7 @@ export abstract class CompilerBase {
     inferFromSubtype(receiverType, ext.onType, new Set(ext.typeParams), solution);
     const args = ext.typeParams.map((param) => solution.get(param) ?? boundOf(param));
     const map = new Map(ext.typeParams.map((param, index) => [param, args[index]]));
+    if (ext.typeParams.some((param, index) => !isSubtype(args[index], substitute(boundOf(param), map)))) return;
     return isSubtype(receiverType, substitute(ext.onType, map)) ? args : undefined;
   }
 

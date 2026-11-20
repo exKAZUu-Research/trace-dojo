@@ -27,15 +27,14 @@ export abstract class ControlCompiler extends StatementCompiler {
     const subject = this.compileExpression(statement.subject);
     const before = this.flow;
     this.enterJumpTarget('switch', labels);
-    const { groups, after: afterCases } = this.compileSwitchGroups(
-      statement,
-      this.switchSubject(subject, statement.cases),
-      before,
-      labels
-    );
+    const {
+      groups,
+      after: afterCases,
+      unmatched,
+    } = this.compileSwitchGroups(statement, this.switchSubject(subject, statement.cases), before, labels);
     let after = afterCases;
     const breakFlow = this.fn.jumpTargets.pop()?.breakFlow;
-    if (!this.isSwitchExhaustive(statement, subject.type)) after = after ? Flow.join(after, before) : before;
+    if (!this.isSwitchExhaustive(statement, subject.type)) after = after ? Flow.join(after, unmatched) : unmatched;
     if (statement.cases.length === 0) after = before;
     this.flow = breakFlow ? Flow.join(after ?? before.unreachable, breakFlow) : (after ?? before);
     const test = subject.run;
@@ -58,7 +57,7 @@ export abstract class ControlCompiler extends StatementCompiler {
     subject: Compiled,
     before: Flow,
     labels: string[]
-  ): { groups: SwitchGroup[]; after: Flow | undefined } {
+  ): { groups: SwitchGroup[]; after: Flow | undefined; unmatched: Flow } {
     this.fn.switchDepth++;
     for (const label of labels) this.fn.labels.push({ name: label, isLoop: false, isSwitchCase: false });
     const caseLabels = statement.cases.flatMap((switchCase) => switchCase.labels);
@@ -86,7 +85,7 @@ export abstract class ControlCompiler extends StatementCompiler {
         labels.length + caseLabels.length
       );
     }
-    return { groups, after };
+    return { groups, after, unmatched };
   }
 
   private compileSwitchMatchers(

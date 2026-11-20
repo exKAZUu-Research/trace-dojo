@@ -373,9 +373,19 @@ test('num.compareTo orders precise integers, signed zeros, and NaN', () => {
   print(9223372036854775808.0.compareTo(9223372036854775807));
   print((-0.0).compareTo(0));
   print(double.nan.compareTo(double.infinity));
+  print([double.nan.clamp(0, 1), double.nan.clamp(-5.0, double.infinity)]);
+  int a = -9223372036854775808;
+  double b = -9223372036854775808.0;
+  print([a == b, a.hashCode == b.hashCode, {a, b}.length, {a: 'yes'}[b]]);
+  print([7.oneBitCount, (-1).oneBitCount, 8.trailingZeroBitCount, 0.trailingZeroBitCount]);
+  print([2.modPow(0, 1), 2.modPow(1, 1), a.gcd(0), 0.gcd(a), a.gcd(14)]);
 }
 `;
-  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '1\n1\n-1\n1\n' });
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '1\n1\n-1\n1\n[1, Infinity]\n[true, true, 1, yes]\n[3, 64, 3, 64]\n[1, 0, -9223372036854775808, -9223372036854775808, 2]\n',
+  });
 });
 
 test('min and max use Dart mixed comparisons and preserve signed-zero results', () => {
@@ -394,12 +404,21 @@ void main() {
   });
 });
 
-test('dart:math Point allows subclasses and implementations', () => {
+test('extensible SDK classes allow subclasses and implementations', () => {
   const program = `import 'dart:math';
 class Location extends Point<int> { Location() : super(1, 2); }
 abstract class Coordinates implements Point<int> {}
-void main() { print(Location()); }`;
-  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'Point(1, 2)\n' });
+abstract class Call implements Invocation {}
+class Wait extends Duration { const Wait() : super(seconds: 5); }
+class Message extends StringBuffer { Message() : super('hello'); }
+void main() {
+  print(Location());
+  print(const Wait().inSeconds);
+  StringSink sink = Message();
+  sink.write(' world');
+  print(sink);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'Point(1, 2)\n5\nhello world\n' });
 });
 
 test('a parameter can only narrow an override when explicitly covariant', () => {
@@ -791,9 +810,16 @@ test('a BigInt too large to compute runs out of memory before it is computed', (
     print(e);
   }
   print(x.bitLength);
+  try { print((BigInt.one << 3500000).toString().length); } catch (e) { print(e); }
+  try { print((BigInt.one << 2000000).toRadixString(3).length); } catch (e) { print(e); }
+  print((BigInt.one << 999999).toRadixString(2).length);
+  try { print(((-BigInt.one) << 999999).toRadixString(2).length); } catch (e) { print(e); }
 }
 `;
-  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'Out of Memory\n3323908\n' });
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'Out of Memory\n3323908\nOut of Memory\nOut of Memory\n1000000\nOut of Memory\n',
+  });
 });
 
 test('stdout is shown, stderr is accepted without being shown, and exit stops the program', () => {
@@ -884,15 +910,22 @@ test('implicit extension calls require a unique most-specific declaration', () =
 extension B on int { String get label => 'b'; set label(String s) { print('B:$s'); } }
 extension Generic<T> on T { String get kind => 'generic'; }
 extension Specific on String { String get kind => 'specific'; }
+extension All<T> on List<T> { String get tag => 'all'; }
+extension Numbers<T extends num> on List<T> { String get tag => 'numbers'; int size() => length; }
 extension ListType<T> on List<T> {
   Type get item => T;
   Type read() => T;
+  T firstValue() => this[0];
+  T echo(T value) => value;
 }
 extension Indices on int {
   int operator [](int index) => this + index;
   void operator []=(int index, int value) { print([index, value]); }
 }`;
   expect(executeProgram('dart', `${declarations} void main() { print(1.label); }`)).toMatchObject({
+    kind: 'compileError',
+  });
+  expect(executeProgram('dart', `${declarations} void main() { print(['x'].size()); }`)).toMatchObject({
     kind: 'compileError',
   });
   const program = `${declarations}
@@ -908,10 +941,13 @@ void main() {
   x[2] += 4;
   Indices(x)[1] = 6;
   print(readTypes<int>([1]));
+  final values = [1];
+  print([values.firstValue is int Function(), values.echo.runtimeType]);
+  print([values.tag, ['x'].tag]);
 }`;
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
-    stdout: '[a, b, specific]\nB:direct\nA:a!\n[2, 9]\n[1, 6]\n(int, int)\n',
+    stdout: '[a, b, specific]\nB:direct\nA:a!\n[2, 9]\n[1, 6]\n(int, int)\n[true, (int) => int]\n[numbers, all]\n',
   });
 });
 
@@ -921,6 +957,13 @@ test('labeled exits join the flow of their own target', () => {
 }
 void main() { print(value()); }`;
   expect(executeProgram('dart', missing)).toMatchObject({ kind: 'compileError' });
+  const unassigned = `int value() {
+  int answer;
+  outer: do { while (true) { answer = 7; continue outer; } } while (false);
+  return answer;
+}
+void main() { print(value()); }`;
+  expect(executeProgram('dart', unassigned)).toMatchObject({ kind: 'compileError' });
   const valid = `int value() {
   int answer;
   done: {
@@ -933,8 +976,18 @@ Iterable<int> items() sync* {
   outer: while (true) { while (true) { answer = 8; break outer; } }
   yield answer;
 }
-void main() { print(value()); print(items().first); }`;
-  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '7\n8\n' });
+int labeledContinue() {
+  int answer;
+  outer: do { do { answer = 9; continue outer; } while (false); } while (false);
+  return answer;
+}
+int unlabeledContinue() {
+  int answer;
+  do { answer = 10; continue; } while (false);
+  return answer;
+}
+void main() { print(value()); print(items().first); print(labeledContinue()); print(unlabeledContinue()); }`;
+  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '7\n8\n9\n10\n' });
 });
 
 test('patterns promote the subject in guarded cases and later alternatives', () => {
@@ -950,10 +1003,21 @@ int length(List<Object?>? x) => switch (x) {
 void name(String? x) {
   switch (x) { case null: print('missing'); default: print(x.toUpperCase()); }
 }
-void main() { inspect(2); name(null); name('dart'); print([length([]), length([42]), length(null)]); }`;
+int afterSwitch(String? x) {
+  switch (x) { case == null: return -1; }
+  return x.length;
+}
+int relational(int? x) => switch (x) { != null => x + 1, null => 0 };
+void main() {
+  inspect(2);
+  name(null);
+  name('dart');
+  print([length([]), length([42]), length(null)]);
+  print([afterSwitch('dart'), afterSwitch(null), relational(2), relational(null)]);
+}`;
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
-    stdout: '3\n[3]\nmissing\nDART\n[0, 1, -1]\n',
+    stdout: '3\n[3]\nmissing\nDART\n[0, 1, -1]\n[4, -1, 3, 0]\n',
   });
 });
 
@@ -1218,21 +1282,41 @@ test('dynamic pattern assignments validate the input before applying writes', ()
   pair = (2, 3);
   (a, b) = pair;
   print([a, b]);
+  List<int> tail = [];
+  list = <int>[4, 5];
+  <int>[a, ...tail] = list;
+  print([a, tail]);
 }`;
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
     stdout:
-      "type '(int, String)' is not a subtype of type '(int, int)'\ntype 'List<Object>' is not a subtype of type 'List<int>'\n[0, 0]\n[2, 3]\n",
+      "type '(int, String)' is not a subtype of type '(int, int)'\ntype 'List<Object>' is not a subtype of type 'List<int>'\n[0, 0]\n[2, 3]\n[4, [5]]\n",
   });
+  const invalid = 'void main() { int a = 0; List<int> tail = []; dynamic x = <int>[1, 2]; [a, ...tail] = x; }';
+  expect(executeProgram('dart', invalid)).toMatchObject({ kind: 'compileError' });
+  const duplicate = 'void main() { int a = 0; ([a], a) = ([4], 5); }';
+  expect(executeProgram('dart', duplicate)).toMatchObject({ kind: 'compileError' });
 });
 
 test('Object.hash accepts twenty arguments and hashes the supplied values in order', () => {
-  const program = `void main() {
+  const program = `class Item {
+  int get hashCode { print('hash'); return 1; }
+}
+Iterable<Item> items() sync* {
+  print('yield');
+  yield Item();
+  throw 'stop';
+}
+void main() {
   print(Object.hash(1, 2) == Object.hashAll([1, 2]));
   print(Object.hash(1, 2, null, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20) ==
         Object.hashAll([1, 2, null, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]));
+  try { Object.hashAll(items()); } catch (error) { print(error); }
 }`;
-  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'true\ntrue\n' });
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'true\ntrue\nyield\nhash\nstop\n',
+  });
 });
 
 test('construction checks constants before main and only evaluates selected branches', () => {
@@ -1509,12 +1593,13 @@ void main() {
   try { 'xx'.splitMapJoin('x', onMatch: (m) => text); } catch (e) { print(e); }
   try { [text, text].join(); } catch (e) { print(e); }
   try { [text, text].toString(); } catch (e) { print(e); }
+  try { (text, name: text).toString(); } catch (e) { print(e); }
 }`;
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
     uncaughtException: undefined,
     stdout:
-      'first caught\nOut of Memory\nOut of Memory\nOut of Memory\nOut of Memory\nOut of Memory\nOut of Memory\nOut of Memory\n',
+      'first caught\nOut of Memory\nOut of Memory\nOut of Memory\nOut of Memory\nOut of Memory\nOut of Memory\nOut of Memory\nOut of Memory\n',
   });
 });
 
@@ -1590,11 +1675,22 @@ void main() {
   iterator.moveNext();
   queue.retainWhere((_) => true);
   print(iterator.moveNext());
+  final linked = DoubleLinkedQueue<int>.of([1, 2]);
+  linked.removeWhere((value) {
+    print(value);
+    if (value == 1) linked.add(3);
+    if (value == 2) return true;
+    return false;
+  });
+  print(linked);
+  try {
+    linked.retainWhere((value) { linked.remove(value); return true; });
+  } catch (error) { print(error.runtimeType); }
 }`;
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
     stdout:
-      '[3, 1, 2]\n[1, 3, 2]\n[1, 3, 3]\n[1, 2, 3]\n1\nConcurrentModificationError\n{1: 11, 2: 20, 3: 30}\nUnsupported operation: Cannot modify unmodifiable map\nUnsupported operation: Cannot modify an unmodifiable list\n{1, 2, 3}\n{2, 3}\n{2, 3}\ntrue\n',
+      '[3, 1, 2]\n[1, 3, 2]\n[1, 3, 3]\n[1, 2, 3]\n1\nConcurrentModificationError\n{1: 11, 2: 20, 3: 30}\nUnsupported operation: Cannot modify unmodifiable map\nUnsupported operation: Cannot modify an unmodifiable list\n{1, 2, 3}\n{2, 3}\n{2, 3}\ntrue\n1\n2\n3\n{1, 3}\nConcurrentModificationError\n',
   });
 });
 

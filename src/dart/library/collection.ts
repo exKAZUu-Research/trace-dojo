@@ -2228,16 +2228,130 @@ class ListQueue<E> extends Iterable<E> implements Queue<E> {
   }
 }
 
-class DoubleLinkedQueue<E> extends ListQueue<E> {
-  DoubleLinkedQueue() : super();
+class DoubleLinkedQueue<E> extends Iterable<E> implements Queue<E> {
+  final _LinkedQueueEntry<E> _anchor = _LinkedQueueEntry<E>(null);
+  int _count = 0;
+
+  DoubleLinkedQueue() {
+    _anchor._next = _anchor;
+    _anchor._previous = _anchor;
+  }
+
   factory DoubleLinkedQueue.from(Iterable<dynamic> elements) {
-    DoubleLinkedQueue<E> queue = DoubleLinkedQueue<E>();
-    for (final element in elements) {
-      queue.addLast(element as E);
-    }
+    var queue = DoubleLinkedQueue<E>();
+    for (var element in elements) queue.addLast(element as E);
     return queue;
   }
   factory DoubleLinkedQueue.of(Iterable<E> elements) => DoubleLinkedQueue<E>()..addAll(elements);
+
+  int get length => _count;
+  bool get isEmpty => _count == 0;
+  Iterator<E> get iterator => _LinkedQueueIterator<E>(this);
+
+  E get first => _value(_anchor._next!);
+  E get last => _value(_anchor._previous!);
+  E get single {
+    if (_count > 1) throw StateError("Too many elements");
+    return first;
+  }
+
+  E _value(_LinkedQueueEntry<E> entry) {
+    if (identical(entry, _anchor)) throw StateError("No element");
+    return entry._value as E;
+  }
+
+  void add(E value) => addLast(value);
+  void addFirst(E value) => _insert(_anchor._next!, value);
+  void addLast(E value) => _insert(_anchor, value);
+  void addAll(Iterable<E> iterable) {
+    for (var value in iterable) addLast(value);
+  }
+  void _insert(_LinkedQueueEntry<E> next, E value) {
+    final previous = next._previous!;
+    final entry = _LinkedQueueEntry<E>(value);
+    entry._previous = previous;
+    entry._next = next;
+    previous._next = entry;
+    next._previous = entry;
+    _count++;
+  }
+
+  E removeFirst() => _unlink(_anchor._next!);
+  E removeLast() => _unlink(_anchor._previous!);
+  E _unlink(_LinkedQueueEntry<E> entry) {
+    final value = _value(entry);
+    entry._previous!._next = entry._next;
+    entry._next!._previous = entry._previous;
+    entry._next = null;
+    entry._previous = null;
+    _count--;
+    return value;
+  }
+
+  bool remove(Object? value) {
+    var entry = _anchor._next!;
+    while (!identical(entry, _anchor)) {
+      final equal = entry._value == value;
+      final next = _nextOf(entry);
+      if (equal) {
+        _unlink(entry);
+        return true;
+      }
+      entry = next;
+    }
+    return false;
+  }
+
+  void removeWhere(bool Function(E element) test) => _filter(test, true);
+  void retainWhere(bool Function(E element) test) => _filter(test, false);
+  void _filter(bool Function(E) test, bool removeMatching) {
+    var entry = _anchor._next!;
+    while (!identical(entry, _anchor)) {
+      final matches = test(entry._value as E);
+      final next = _nextOf(entry);
+      if (matches == removeMatching) _unlink(entry);
+      entry = next;
+    }
+  }
+
+  _LinkedQueueEntry<E> _nextOf(_LinkedQueueEntry<E> entry) {
+    final next = entry._next;
+    if (next == null) throw ConcurrentModificationError(this);
+    return next;
+  }
+
+  void clear() {
+    while (!isEmpty) removeFirst();
+  }
+  String toString() => Iterable.iterableToFullString(this, "{", "}");
+}
+
+class _LinkedQueueEntry<E> {
+  final E? _value;
+  _LinkedQueueEntry<E>? _previous;
+  _LinkedQueueEntry<E>? _next;
+  _LinkedQueueEntry(this._value);
+}
+
+class _LinkedQueueIterator<E> implements Iterator<E> {
+  DoubleLinkedQueue<E>? _queue;
+  _LinkedQueueEntry<E>? _next;
+  E? _current;
+  _LinkedQueueIterator(DoubleLinkedQueue<E> queue) : _queue = queue, _next = queue._anchor._next;
+  E get current => _current as E;
+  bool moveNext() {
+    final queue = _queue;
+    final next = _next;
+    if (queue == null || next == null || identical(next, queue._anchor)) {
+      _queue = null;
+      _next = null;
+      _current = null;
+      return false;
+    }
+    _next = queue._nextOf(next);
+    _current = next._value;
+    return true;
+  }
 }
 
 class _QueueIterator<E> implements Iterator<E> {
