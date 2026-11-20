@@ -2278,6 +2278,50 @@ test.each([
 });
 
 test.each([
+  ['class A { private private(set) int $x = 1; }', 'ok'],
+  ['class A { public function __construct(private private(set) int $x = 1) {} }', 'ok'],
+  ['class A { public function __construct(final private int $x = 1) {} }', 'Cannot override final property A::$x'],
+  ['class A { protected private(set) int $x = 1; }', 'Cannot override final property A::$x'],
+])('derives property finality from actual asymmetric visibility: %s', (parent, expected) => {
+  const result = run(`<?php ${parent} class B extends A { public int $x = 2; } echo "ok";`);
+  expect(result).toMatchObject({
+    kind: 'executed',
+    stdout: expected === 'ok' ? expected : expect.stringContaining(expected),
+  });
+});
+
+test.each([
+  ['get => 1;', 'Read-only'],
+  ['set { echo $value; }', 'Write-only'],
+])('rejects asymmetric visibility on a single virtual hook: %s', (hook, mode) => {
+  expect(run(`<?php\necho "unreachable";\nclass A { public private(set) int $x { ${hook} } }`)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 2, message: `${mode} virtual property A::$x must not specify asymmetric visibility` }],
+  });
+});
+
+test.each([
+  'class A { public public(set) int $x { get => 1; } }',
+  'class A { public private(set) int $x { get => $this->x; } }',
+  'class A { public private(set) int $x { get => 1; set { echo $value; } } }',
+  'class Base { protected int $x = 1; } class A extends Base { public protected(set) int $x { get => 1; } }',
+  'class Base { public protected(set) int $x { get => 1; set { echo $value; } } } class A extends Base { public protected(set) int $x { get => 1; } }',
+  'trait T { private private(set) int $x; } class A { use T; private int $x; }',
+])('accepts backed properties and effective hook visibility: %s', (source) => {
+  expect(run(`<?php ${source} echo "accepted";`)).toMatchObject({ kind: 'executed', stdout: 'accepted' });
+});
+
+test('checks single-hook visibility after inherited hooks are linked', () => {
+  expect(
+    run('<?php\nclass Base {}\nclass A extends Base { public protected(set) int $x { get => 1; } }')
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '\nFatal error: Read-only virtual property A::$x must not specify asymmetric visibility in /main.php on line 3\nStack trace:\n#0 {main}\n',
+  });
+});
+
+test.each([
   ['get; set;', 'protected private(set) int $p', 'Set access level of B::$p must be omitted (as in class A)'],
   ['set;', 'protected private(set) string $p', 'Set access level of B::$p must be omitted (as in class A)'],
   ['get; set;', 'protected private(set) readonly int $p', 'Set access level of B::$p must be omitted (as in class A)'],

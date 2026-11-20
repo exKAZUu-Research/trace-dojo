@@ -1,5 +1,17 @@
 import { ExitSignal, FatalError, type Frame, PhpThrow, rt, type Runtime, SCRIPT_PATH } from './runtime';
-import { PhpObject, Ref, type Value } from './values';
+import { PhpObject, type PropDecl, Ref, type Value } from './values';
+
+export function virtualPropertyVisibilityError(
+  className: string,
+  property: Pick<PropDecl, 'name' | 'isVirtual' | 'setVisibility' | 'visibility'> & {
+    hooks?: { get?: unknown; set?: unknown };
+  }
+): string | undefined {
+  const { hooks, isVirtual, name, setVisibility, visibility } = property;
+  if (!isVirtual || !hooks || !setVisibility || setVisibility === visibility) return undefined;
+  if (Boolean(hooks.get) === Boolean(hooks.set)) return undefined;
+  return `${hooks.get ? 'Read-only' : 'Write-only'} virtual property ${className}::$${name} must not specify asymmetric visibility`;
+}
 
 let formatThrowable: (object: PhpObject) => string;
 

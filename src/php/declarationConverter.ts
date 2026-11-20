@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 938 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 940 -- Keeps declaration conversion with its shared parsing and validation rules.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -33,6 +33,7 @@ import {
   relativeClassName,
   semanticChildren,
 } from './converterBase';
+import { virtualPropertyVisibilityError } from './errors';
 import { decodeLiteral, decodeSingleQuoted } from './literals';
 import { compiledOperandRow } from './opcodeRows';
 import { SCRIPT_PATH } from './runtime';
@@ -1342,6 +1343,10 @@ export abstract class DeclarationConverter extends ConverterBase {
     prop.isVirtual = !hooks.getBacking && !hooks.setBacking;
     if (prop.isVirtual && prop.defaultExpr && !this.currentClassHasParent)
       this.error(list, `Cannot specify default value for virtual hooked property ${className}::$${prop.name}`);
+    if (!this.currentClassHasParent) {
+      const visibilityError = virtualPropertyVisibilityError(className, prop);
+      if (visibilityError) this.error(prop.row, visibilityError);
+    }
   }
 
   // code-gauge-allow functionCognitiveComplexity 24 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.

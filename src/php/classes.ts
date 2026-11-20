@@ -23,6 +23,7 @@ import {
   notice,
   throwError,
   type UpdateWarning,
+  virtualPropertyVisibilityError,
   warn,
   withHeldDiagnostics,
   withOperandWarnings,
@@ -340,7 +341,7 @@ function addProperty(cls: PhpClass, ast: PropertyDeclAst, declarationScope = cls
     setVisibility: ast.setVisibility ?? (ast.isReadonly && ast.visibility === 'public' ? 'protected' : undefined),
     isStatic: ast.isStatic,
     isReadonly: ast.isReadonly,
-    isFinal: ast.isFinal || ast.setVisibility === 'private',
+    isFinal: isFinalProperty(ast),
     type: ast.type,
     hasDefault: ast.defaultExpr !== undefined,
     isVirtual: ast.isVirtual,
@@ -367,7 +368,11 @@ function addProperty(cls: PhpClass, ast: PropertyDeclAst, declarationScope = cls
   if (decl.visibility === 'private') cls.privateProps.set(ast.name, decl);
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+function isFinalProperty({ isFinal, setVisibility, visibility }: PropertyDeclAst): boolean {
+  return isFinal || (setVisibility === 'private' && visibility !== 'private');
+}
+
+// code-gauge-allow functionCognitiveComplexity 27 -- Links inherited hooks before validating the effective property.
 function linkPropertyHooks(decl: PropDecl, ast: PropertyDeclAst, parent: PropDecl | undefined): void {
   const own = ast.hooks;
   const inherited = parent?.hooks;
@@ -404,9 +409,11 @@ function linkPropertyHooks(decl: PropDecl, ast: PropertyDeclAst, parent: PropDec
     abstractGet: own?.abstractGet,
     abstractSet: own?.abstractSet,
   };
-  decl.isVirtual = ast.isVirtual && !decl.hooks.getBacking && !decl.hooks.setBacking;
+  decl.isVirtual = ast.isVirtual && (!parent || parent.isVirtual) && !decl.hooks.getBacking && !decl.hooks.setBacking;
   if (decl.isVirtual && ast.defaultExpr)
     throw new FatalError(`Cannot specify default value for virtual hooked property ${cls.name}::$${ast.name}`, ast.row);
+  const visibilityError = virtualPropertyVisibilityError(cls.name, decl);
+  if (visibilityError) throw new FatalError(visibilityError, ast.row);
 }
 
 function propertyTypeCompatible(
@@ -716,9 +723,8 @@ function traitPropertyCompatible(
     existing.visibility !== property.visibility ||
     existing.isStatic !== property.isStatic ||
     existing.isReadonly !== property.isReadonly ||
-    existing.isFinal !== (property.isFinal || property.setVisibility === 'private') ||
-    existing.setVisibility !==
-      (property.setVisibility ?? (property.isReadonly && property.visibility === 'public' ? 'protected' : undefined))
+    existing.isFinal !== isFinalProperty(property) ||
+    effectiveSetVisibility(existing) !== effectiveSetVisibility(property)
   )
     return false;
   if (Boolean(existing.type) !== Boolean(property.type)) return false;
