@@ -2,6 +2,7 @@ import { fma } from '../../c/library/binaryFloat';
 import { CppRuntimeError } from '../errors';
 import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
+import type { Frame } from '../runtime';
 import {
   alignOf,
   ClassInfo,
@@ -79,12 +80,8 @@ export class EngineValue extends Store {
   private state: bigint[] = [];
   private index = 0;
 
-  constructor(
-    readonly parameters: EngineParameters | undefined,
-    seed = 5489n
-  ) {
+  constructor(readonly parameters: EngineParameters | undefined) {
     super();
-    if (parameters) this.seed(seed);
   }
 
   get length(): number {
@@ -103,8 +100,9 @@ export class EngineValue extends Store {
     return this.parameters?.w ?? 32;
   }
 
-  seed(value: bigint): void {
+  seed(frame: Frame, value = 5489n): void {
     const { w, n, f } = this.parameters as EngineParameters;
+    frame.runtime.spend(n);
     const mask = (1n << BigInt(w)) - 1n;
     this.state = [BigInt.asUintN(w, value)];
     for (let i = 1; i < n; i++) {
@@ -114,7 +112,8 @@ export class EngineValue extends Store {
     this.index = 0;
   }
 
-  copyFrom(other: EngineValue): void {
+  copyFrom(frame: Frame, other: EngineValue): void {
+    frame.runtime.spend(other.state.length);
     this.state = [...other.state];
     this.index = other.index;
   }
@@ -247,19 +246,22 @@ export function randomEngines(): Map<string, ClassInfo> {
     };
     cls.operations = {
       copyIsNoexcept: parameters !== undefined,
-      copy: (_frame, source) => {
+      copy: (frame, source) => {
         const engine = new EngineValue(parameters);
-        engine.copyFrom(source as EngineValue);
+        engine.copyFrom(frame, source as EngineValue);
         return engine;
       },
-      assign: (_frame, target, source) => (target as EngineValue).copyFrom(source as EngineValue),
+      assign: (frame, target, source) => (target as EngineValue).copyFrom(frame, source as EngineValue),
     };
     if (parameters) {
       cls.constructors = [
-        nativeConstructor(cls, [], () => new EngineValue(parameters)),
-        nativeConstructor(cls, [resultType], ([seed]) => new EngineValue(parameters, BigInt(seed as number | bigint)), {
-          isExplicit: true,
-        }),
+        nativeConstructor(cls, [], (_, { frame }) => seededEngine(frame, parameters)),
+        nativeConstructor(
+          cls,
+          [resultType],
+          ([seed], { frame }) => seededEngine(frame, parameters, BigInt(seed as number | bigint)),
+          { isExplicit: true }
+        ),
       ];
       addMethod(
         cls,
@@ -267,8 +269,8 @@ export function randomEngines(): Map<string, ClassInfo> {
           'seed',
           [resultType],
           VOID,
-          ([seed], { self }) =>
-            (self as EngineValue).seed(seed === undefined ? 5489n : BigInt(seed as number | bigint)),
+          ([seed], { frame, self }) =>
+            (self as EngineValue).seed(frame, seed === undefined ? undefined : BigInt(seed as number | bigint)),
           { optional: 1 }
         )
       );
@@ -437,4 +439,10 @@ export function randomClasses(library: Library): LibraryTemplate[] {
       return distribution(name, args[0] ?? (name === 'uniform_int_distribution' ? INT : DOUBLE), row);
     },
   }));
+}
+
+function seededEngine(frame: Frame, parameters: EngineParameters, seed?: bigint): EngineValue {
+  const engine = new EngineValue(parameters);
+  engine.seed(frame, seed);
+  return engine;
 }

@@ -449,6 +449,26 @@ int main() {
 });
 
 test.each([
+  ['std::mt19937 g;', 'g.seed(i);'],
+  ['', 'std::mt19937 g(i);'],
+  ['std::mt19937_64 g;', 'g.seed(i); g.seed(i + 1);'],
+  ['std::mt19937 g;', 'std::mt19937 copy = g;'],
+])('meters random engine state work in %s %s', (setup, statement) => {
+  const program = `#include <random>
+int main() {
+  ${setup}
+  for (int i = 0; i < 8; ++i) { ${statement} }
+}`;
+  const previous = LIMITS.maxOperations;
+  LIMITS.maxOperations = 3000;
+  try {
+    expect(executeProgram('cpp', program)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  } finally {
+    LIMITS.maxOperations = previous;
+  }
+});
+
+test.each([
   ['list', '=='],
   ['vector', '!='],
 ])('rejects %s iterator comparison %s across different sequences', (container, operator) => {
