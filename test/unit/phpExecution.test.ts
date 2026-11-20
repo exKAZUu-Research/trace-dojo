@@ -5318,6 +5318,11 @@ test('a returned local becomes a GC root before the other locals are freed', () 
       '<?php class N { public $p; public $q; function __destruct() { echo "dN", spl_object_id($this), ";"; } } function mk() { $a = new N; $a->p = $a; $c = new N; $a->q = $c; $x = new stdClass; $x->a = $a; return $x; } $x = mk(); unset($x); echo gc_collect_cycles();'
     )
   ).toMatchObject({ kind: 'executed', stdout: 'dN2;dN1;2' });
+  expect(
+    run(
+      '<?php class N { public $p; public $q; function __destruct() { echo "dN", spl_object_id($this), ";"; } } function mk() { $a = new N; $a->p = $a; $c = new N; $a->q = $c; $x = new stdClass; $x->a = $a; return $x ?? null; } $x = mk(); unset($x); echo gc_collect_cycles();'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'dN1;dN2;2' });
 });
 
 test('rejecting an unsupported feature ends the run without PHP shutdown replacing the message', () => {

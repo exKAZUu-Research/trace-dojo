@@ -914,7 +914,7 @@ function releaseFrame(
   }
   holders.push(returned);
   // PHP's return of a variable moves its value out and buffers it as a possible root before freeing the other locals.
-  if ([...frame.vars.values()].some((ref) => ref.v === returned)) runtime.pendingGcRoots.add(returned);
+  if (frame.returnedLocal?.v === returned) runtime.pendingGcRoots.add(returned);
   try {
     releaseFrameValues(runtime, frame, fromNative, pending);
   } catch (error) {

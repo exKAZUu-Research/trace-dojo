@@ -101,6 +101,8 @@ export class Frame {
    */
   returning: Value | Ref | undefined;
   returnRow?: number;
+  /** The local a `return $var;` moved out, which PHP buffers as a possible root before freeing the other locals. */
+  returnedLocal?: Ref;
 
   // code-gauge-allow functionParameterCount 8 -- A frame takes the parts of a call that stay fixed while it runs.
   constructor(

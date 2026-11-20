@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 869 -- Runs PHP statements iteratively on a heap block stack with shared loop/try/foreach helpers.
+// code-gauge-allow-file fileNcss 873 -- Runs PHP statements iteratively on a heap block stack with shared loop/try/foreach helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { CompileError } from '../interpreter/diagnostics';
 import type { ArrayCursor } from './arrayOrder';
@@ -200,6 +200,7 @@ export function execList(statements: Stmt[], seek?: string): Completion {
       top.stmtHeld = held;
       if (statement.k === 'return' && !byRefReturn && statement.e) {
         const value = statement.e.k === 'bin' ? (statement.e.foldedString ?? binary(statement.e)) : ev(statement.e);
+        frame.returnedLocal = movedLocal(statement.e, frame);
         frame.returning = share(value);
         completion = { t: 'return', slot: frame.returning, row: statement.e.row };
         releaseListHeld(top, runtime, frame);
@@ -438,6 +439,12 @@ function dispatchSimpleStatement(
       return undefined;
     }
   }
+}
+
+/** The local a `return $var;` moves out, as PHP's return of a non-reference variable does. */
+function movedLocal(expression: Expr, frame: Frame): Ref | undefined {
+  const local = expression.k === 'var' ? frame.vars.get(expression.name) : undefined;
+  return local && !local.isRef ? local : undefined;
 }
 
 function propagateCompletion(
