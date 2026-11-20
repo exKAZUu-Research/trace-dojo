@@ -71,21 +71,32 @@ function set(self: Value): SetValue {
   return deref(self) as SetValue;
 }
 
-const others = (
-  ctx: NativeContext,
-  a: SetValue,
-  b: SetValue,
-  keep: (inA: boolean, inB: boolean) => boolean,
-  order: 'a' | 'ab'
-): Value => {
+function hashSetOp(ctx: NativeContext, op: SetOp, self: Value, other: Value): Value {
+  const a = set(self).entries;
+  const b = set(other).entries;
   const result: Value[] = [];
-  for (const value of setValues(a)) if (keep(true, b.entries.has(entryKey(ctx, b.entries, value)))) result.push(value);
-  if (order === 'ab') {
-    for (const value of setValues(b))
-      if (!a.entries.has(entryKey(ctx, a.entries, value)) && keep(false, true)) result.push(value);
+  if (op === 'union') appendSetMembers(ctx, result, a, () => true);
+  else appendSetMembers(ctx, result, a, (value) => b.has(entryKey(ctx, b, value)) === (op === 'intersection'));
+  if (op === 'union' || op === 'symmetric_difference') {
+    appendSetMembers(ctx, result, b, (value) => !a.has(entryKey(ctx, a, value)));
   }
   return listed(arrayIter(result));
-};
+}
+
+function appendSetMembers(
+  ctx: NativeContext,
+  result: Value[],
+  entries: CollectionEntries<Value>,
+  keep: (value: Value) => boolean
+): void {
+  ctx.runtime.spend(entries.size);
+  for (const value of entries.values()) {
+    if (!keep(value)) continue;
+    ctx.runtime.allocate(1);
+    result.push(value);
+  }
+}
+
 /** `BTreeSet`'s set operations, which take std's steps. */
 const btree = (ctx: NativeContext, op: SetOp, self: Value, other: Value): Value => {
   const sets: [SetValue, SetValue] = [set(self), set(other)];
@@ -100,14 +111,6 @@ function keyType(ctx: NativeContext): Type {
 
 function entryKey<V>(ctx: NativeContext, entries: CollectionEntries<V>, value: Value): CollectionKey<V> {
   return entries.key(keyType(ctx), value);
-}
-
-function entriesOf(m: MapValue): [Value, Value][] {
-  return [...m.entries.values()];
-}
-
-function setValues(s: SetValue): Value[] {
-  return [...s.entries.values()];
 }
 
 function mapNatives(sorted: boolean): Record<string, Native> {
@@ -206,7 +209,7 @@ function mapIterNatives(): Record<string, Native> {
     into_keys: ([self]) => mapProjection(map(self), (entry) => entry[0]),
     into_values: ([self]) => mapProjection(map(self), (entry) => entry[1]),
     drain: ([self]) => {
-      const entries = entriesOf(map(self)).map(([k, v]) => [k, v] as Value);
+      const entries = map(self).entries.snapshot();
       map(self).entries.clear();
       return arrayIter(entries);
     },
@@ -241,12 +244,11 @@ function extendMap(ctx: NativeContext, m: MapValue, iterator: IterValue): Value 
 function mapEndNatives(): Record<string, Native> {
   return {
     first_key_value: ([self], ctx) => {
-      const entries = entriesOf(map(self));
-      return option(ctx, entries[0] && [entries[0][0], entries[0][1]], entries.length > 0);
+      const first = map(self).entries.getEdge(true);
+      return option(ctx, first && [first[0], first[1]], first !== undefined);
     },
     last_key_value: ([self], ctx) => {
-      const entries = entriesOf(map(self));
-      const last = entries.at(-1);
+      const last = map(self).entries.getEdge(false);
       return option(ctx, last && [last[0], last[1]], last !== undefined);
     },
     pop_first: ([self], ctx) => {
@@ -307,23 +309,10 @@ function setNatives(sorted: boolean): Record<string, (args: Value[], ctx: Native
       return UNIT_VALUE;
     },
     iter: ([self]) => setIter(set(self)),
-    union: ([self, other], ctx) =>
-      sorted ? btree(ctx, 'union', self, other) : others(ctx, set(self), set(other), () => true, 'ab'),
-    intersection: ([self, other], ctx) =>
-      sorted ? btree(ctx, 'intersection', self, other) : others(ctx, set(self), set(other), (_a, b) => b, 'a'),
-    difference: ([self, other], ctx) =>
-      sorted ? btree(ctx, 'difference', self, other) : others(ctx, set(self), set(other), (_a, b) => !b, 'a'),
-    symmetric_difference: ([self, other], ctx) => {
-      if (sorted) return btree(ctx, 'symmetric_difference', self, other);
-      const a = set(self);
-      const b = set(other);
-      return listed(
-        arrayIter([
-          ...setValues(a).filter((value) => !b.entries.has(entryKey(ctx, b.entries, value))),
-          ...setValues(b).filter((value) => !a.entries.has(entryKey(ctx, a.entries, value))),
-        ])
-      );
-    },
+    union: ([self, other], ctx) => setOp(ctx, sorted, 'union', self, other),
+    intersection: ([self, other], ctx) => setOp(ctx, sorted, 'intersection', self, other),
+    difference: ([self, other], ctx) => setOp(ctx, sorted, 'difference', self, other),
+    symmetric_difference: ([self, other], ctx) => setOp(ctx, sorted, 'symmetric_difference', self, other),
     is_subset: ([self, other], ctx) => everySetMember(ctx, set(self), set(other), true),
     is_superset: ([self, other], ctx) => everySetMember(ctx, set(other), set(self), true),
     is_disjoint: ([self, other], ctx) => everySetMember(ctx, set(self), set(other), false),
@@ -340,23 +329,25 @@ function setNatives(sorted: boolean): Record<string, (args: Value[], ctx: Native
         const item = iterator.next();
         if (item === DONE) break;
         const hash = entryKey(ctx, s.entries, item);
-        if (!s.entries.has(hash)) s.entries.set(hash, item);
+        if (s.entries.has(hash)) continue;
+        ctx.runtime.allocate(1);
+        s.entries.set(hash, item);
       }
       return UNIT_VALUE;
     },
     drain: ([self]) => {
-      const values = setValues(set(self));
+      const values = set(self).entries.snapshot();
       set(self).entries.clear();
       return arrayIter(values);
     },
     into_iter: ([self]) => setIter(set(self)),
     first: ([self], ctx) => {
-      const values = setValues(set(self));
-      return option(ctx, values[0], values.length > 0);
+      const first = set(self).entries.getEdge(true);
+      return option(ctx, first, first !== undefined);
     },
     last: ([self], ctx) => {
-      const values = setValues(set(self));
-      return option(ctx, values.at(-1), values.length > 0);
+      const last = set(self).entries.getEdge(false);
+      return option(ctx, last, last !== undefined);
     },
     pop_first: ([self], ctx) => {
       const value = set(self).entries.takeEdge(true);
@@ -372,9 +363,14 @@ function setNatives(sorted: boolean): Record<string, (args: Value[], ctx: Native
 function everySetMember(ctx: NativeContext, a: SetValue, b: SetValue, present: boolean): boolean {
   const type = keyType(ctx);
   for (const value of a.entries.values()) {
+    ctx.runtime.spend();
     if (b.entries.has(b.entries.key(type, value)) !== present) return false;
   }
   return true;
+}
+
+function setOp(ctx: NativeContext, sorted: boolean, op: SetOp, self: Value, other: Value): Value {
+  return sorted ? btree(ctx, op, self, other) : hashSetOp(ctx, op, self, other);
 }
 
 function entryValue(entry: Value): EntryValue {

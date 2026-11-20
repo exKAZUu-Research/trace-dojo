@@ -94,6 +94,11 @@ export class BTree<V> {
     if (this.root) yield* walk(this.root, 0, this.root.size);
   }
 
+  getEdge(first: boolean): V | undefined {
+    if (!this.root?.size) return undefined;
+    return leaf(this.root, first).entries.at(first ? 0 : -1);
+  }
+
   takeEdge(first: boolean): V | undefined {
     this.finishBulk();
     if (!this.root?.size) return undefined;

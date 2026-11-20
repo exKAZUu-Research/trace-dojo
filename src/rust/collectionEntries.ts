@@ -73,6 +73,10 @@ export class CollectionEntries<V> {
     } else this.tree!.retain(keep);
   }
 
+  getEdge(first: boolean): V | undefined {
+    return this.tree!.getEdge(first);
+  }
+
   takeEdge(first: boolean): V | undefined {
     return this.tree!.takeEdge(first);
   }
