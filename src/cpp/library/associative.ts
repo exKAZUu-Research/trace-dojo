@@ -395,10 +395,9 @@ function orderTest(
 export class OrderedValue extends MapValue {
   constructor(
     public entries: Value[],
-    readonly keyOf: (entry: Value) => Value,
-    readonly isMap: boolean,
-    readonly keyType: Type,
-    readonly valueType: Type | undefined,
+    private readonly isMulti: boolean,
+    private readonly keyType: Type,
+    private readonly valueType: Type | undefined,
     private readonly entryType: Type
   ) {
     super();
@@ -455,17 +454,21 @@ export class OrderedValue extends MapValue {
   }
 
   displayNode(nodeOf: (value: Value, type: Type) => DisplayNode): DisplayNode {
-    if (!this.isMap) {
+    const { valueType } = this;
+    if (this.isMulti || !valueType) {
       const entries: Record<string, DisplayNode> = {};
-      for (const [index, entry] of this.entries.entries()) entries[index] = nodeOf(entry, this.keyType);
+      for (const [index, entry] of this.entries.entries()) entries[index] = nodeOf(entry, this.entryType);
       return { kind: 'array', entries };
     }
-    const entries: Record<string, DisplayNode> = {};
-    for (const entry of this.entries) {
-      const [key, value] = (entry as CObject).values;
-      entries[keyText(key, this.keyType)] = nodeOf(value, this.valueType as Type);
-    }
-    return { kind: 'object', entries };
+    return {
+      kind: 'object',
+      entries: Object.fromEntries(
+        this.entries.map((entry) => {
+          const [key, value] = (entry as CObject).values;
+          return [keyText(key, this.keyType), nodeOf(value, valueType)];
+        })
+      ),
+    };
   }
 }
 
@@ -585,8 +588,7 @@ export function orderedClass(
     return mappedOps;
   };
   const keyOf = isMap ? (entry: Value): Value => (entry as CObject).values[0] : (entry: Value): Value => entry;
-  const make = (entries: Value[]): OrderedValue =>
-    new OrderedValue(entries, keyOf, isMap, keyType, valueType, entryType);
+  const make = (entries: Value[]): OrderedValue => new OrderedValue(entries, isMulti, keyType, valueType, entryType);
   /** The first position whose key is not less than `key` (`upper` false) or greater than it (`upper` true). */
   const bound = (self: OrderedValue, key: Value, upper: boolean): number => {
     let low = 0;

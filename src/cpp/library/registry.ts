@@ -579,7 +579,7 @@ function mathFunctions(): Map<string, FunctionInfo[]> {
     }
   };
   for (const [name, fn] of Object.entries(UNARY)) add(name, 1, ([x]) => fn(x));
-  for (const [name, fn] of Object.entries(BINARY)) add(name, 2, ([x, y]) => fn(x, y));
+  for (const [name, fn] of Object.entries(BINARY)) add(name, 2, ([x, y], isFloat) => fn(x, y, isFloat));
   add('fma', 3, ([x, y, z], isFloat) => fma(x, y, z, isFloat));
   functions.set('abs', [
     native('abs', [INT], INT, ([x]) => integerAbs(x, INT)),

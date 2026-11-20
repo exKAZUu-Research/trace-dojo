@@ -19,4 +19,6 @@ int main() {
   float f = sqrt(2.0f); cout << f << " " << sqrt(2.0f) * 2 << endl;
   int big = INT_MAX; cout << (long long)big + 1 << endl;
   cout << 17 / 5 << " " << 17 % -5 << " " << abs(-17) % 5 << endl;
+  cout << hexfloat << std::nextafter(1.0f, 2.0f) << ' ' << std::nextafterf(0.0f, -1.0f) << ' '
+       << std::nextafter(1.0, 2.0) << ' ' << std::nextafter(1.0f, 2.0) << '\n';
 }

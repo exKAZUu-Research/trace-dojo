@@ -820,6 +820,28 @@ test('character arrays show elements beyond the C string terminator', () => {
   });
 });
 
+test('a multimap trace preserves all duplicate keys in traversal order', () => {
+  const program = `#include <map>
+#include <string>
+int main() {
+  std::multimap<std::string, int> entries;
+  entries.emplace("b", 10);
+  entries.emplace("a", 20);
+  entries.emplace("b", 30);
+  entries.emplace("b", 40);
+}`;
+  const { traceItems } = traceProgram('cpp', program, program);
+  expect(traceItems.at(-1)?.referenceVars.entries).toEqual({
+    kind: 'array',
+    entries: {
+      0: { kind: 'object', entries: { first: { kind: 'value', value: 'a' }, second: { kind: 'value', value: 20 } } },
+      1: { kind: 'object', entries: { first: { kind: 'value', value: 'b' }, second: { kind: 'value', value: 10 } } },
+      2: { kind: 'object', entries: { first: { kind: 'value', value: 'b' }, second: { kind: 'value', value: 30 } } },
+      3: { kind: 'object', entries: { first: { kind: 'value', value: 'b' }, second: { kind: 'value', value: 40 } } },
+    },
+  });
+});
+
 test('inner bindings hide outer trace values even before assignment', () => {
   const program = `int global = 1;
 int main() {
