@@ -846,6 +846,25 @@ int main() {
   });
 });
 
+test('keeps functor constants and sequences typed string functor arguments', () => {
+  const program = `#include <functional>
+#include <iostream>
+#include <string>
+int main() {
+  constexpr int n = std::plus<>()(1, 2);
+  int a[std::multiplies<>()(2, 3)];
+  constexpr bool less = std::less<>()(1, 2);
+  std::string s[] = {"a", "b"};
+  int i = 0;
+  std::cout << n << ' ' << sizeof(a) << ' ' << less << ' ' << std::plus<std::string>()(s[i++], s[i++]) << ' ' << i;
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '3 24 1 ab 2',
+    uncaughtException: undefined,
+  });
+});
+
 test('reads typed scalar functor operands after binding both', () => {
   const program = `#include <functional>
 #include <iostream>

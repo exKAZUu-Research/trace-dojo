@@ -81,12 +81,11 @@ export function functorClass(library: Library, name: string, type: Type | undefi
     apply,
     call: (compiler, object, args, row) => {
       if (args.length !== 2) return;
-      if (!argument) return transparentCall(compiler, operator, object, args, row);
+      if (!argument) return callOperator(compiler, operator, object, args, row);
       const type = unqualified(argument);
       if (operator === '+' && type.kind === 'class' && type.cls.library?.kind === 'string') {
-        const [left, right] = args.map((arg) => constLvalue(compiler, arg, type, row));
-        const result = compiler.binary(operator, left, right, row);
-        return { ...result, run: (frame) => (object.run(frame), result.run(frame)) };
+        const operands = args.map((arg) => constLvalue(compiler, arg, type, row));
+        return callOperator(compiler, operator, object, operands, row);
       }
       const operation = apply(type, type);
       if (!operation) return compiler.error(row, `${cls.name} は ${typeName(type)} の値に使えません。`);
@@ -252,16 +251,15 @@ function constLvalue(compiler: ExpressionCompiler, arg: Expr, type: Type, row: n
 }
 
 /**
- * A transparent functor's call, such as `std::plus<>()(a, b)`: its arguments are evaluated as a call's arguments
- * (indeterminately sequenced, not as the operator's unsequenced operands), then the operator applies to them.
+ * A functor call that applies an operator, such as `std::plus<>()(a, b)`: its arguments are evaluated as a call's
+ * arguments (indeterminately sequenced, not as the operator's unsequenced operands), then the operator applies to them.
+ * Constant arguments, which have no side effects, compose into the operator directly so the result stays constant.
  */
-function transparentCall(
-  compiler: ExpressionCompiler,
-  operator: string,
-  object: Expr,
-  args: Expr[],
-  row: number
-): Expr {
+function callOperator(compiler: ExpressionCompiler, operator: string, object: Expr, args: Expr[], row: number): Expr {
+  if (args.every((arg) => arg.constant !== undefined)) {
+    const result = compiler.binary(operator, args[0], args[1], row);
+    return { ...result, run: (frame) => (object.run(frame), result.run(frame)) };
+  }
   const active: unknown[][] = [];
   const operands = args.map((arg): CallbackOperand => ({
     type: arg.type,
