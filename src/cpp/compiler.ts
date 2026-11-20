@@ -2579,8 +2579,10 @@ function assignValue(frame: Frame, type: Type, target: Value, source: Value): Va
   if (type.kind === 'array') {
     const targetArray = target as ArrayStore;
     const sourceArray = source as ArrayStore;
-    for (const [index, item] of sourceArray.values.entries())
+    for (const [index, item] of sourceArray.values.entries()) {
+      frame.runtime.spend();
       targetArray.values[index] = assignValue(frame, type.of, targetArray.values[index], item);
+    }
     return targetArray;
   }
   return source;
