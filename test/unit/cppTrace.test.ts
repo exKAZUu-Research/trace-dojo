@@ -756,6 +756,45 @@ test('a character pointer can refer to one character without representing a C st
   );
 });
 
+test('character arrays show elements beyond the C string terminator', () => {
+  const program = `int main() {
+  char bytes[4] = "ab";
+  char* text = bytes;
+  bytes[3] = 'X';
+}`;
+  const { traceItems } = traceProgram('cpp', program, program);
+  expect(traceItems.find(({ line }) => line === 4)).toMatchObject({
+    vars: { bytes: ['a', 'b', '\0', 'X'], text: 'ab' },
+    referenceVars: {
+      bytes: { kind: 'array', entries: { 3: { kind: 'value', value: 'X' } } },
+    },
+  });
+});
+
+test('inner bindings hide outer trace values even before assignment', () => {
+  const program = `int global = 1;
+int main() {
+  int local[] = {2};
+  {
+    int global, local;
+    int marker = 3;
+    local = 4;
+  }
+  int marker = 5;
+}`;
+  const { traceItems } = traceProgram('cpp', program, program);
+  const beforeAssignment = traceItems.find(({ line }) => line === 6);
+  const afterAssignment = traceItems.find(({ line }) => line === 7);
+  expect(beforeAssignment?.vars).toEqual({ marker: 3 });
+  expect(beforeAssignment?.referenceVars).toEqual({});
+  expect(afterAssignment?.vars).toEqual({ local: 4, marker: 3 });
+  expect(afterAssignment?.referenceVars).toEqual({});
+  expect(traceItems.find(({ line }) => line === 9)).toMatchObject({
+    vars: { global: 1, local: [2], marker: 5 },
+    referenceVars: { local: { kind: 'array' } },
+  });
+});
+
 test.each(['std::cout.width(100001)', 'std::cout << std::fixed << std::setprecision(100001)'])(
   'oversized formatted output is charged before padding: %s',
   (setup) => {

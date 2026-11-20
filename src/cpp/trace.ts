@@ -43,16 +43,11 @@ class Snapshotter {
   /** The variables a frame shows: its locals in scope, then the members of `this` and the static variables. */
   variablesOf(frame: Frame, withContext: boolean): TraceVariables {
     const variables: TraceVariables = { vars: {}, referenceVars: {} };
-    const locals = frame.compiled?.locals ?? [];
     const hidesArgs = frame.fn === this.program.main && this.program.mainTakesArguments;
-    for (const local of locals) {
-      if (local.name.startsWith('\0') || (hidesArgs && local.isParameter)) continue;
-      const slot = frame.slots[local.slot];
-      if (slot === undefined) continue;
-      const value =
-        local.type.kind === 'reference' || slot instanceof Ptr ? readLocation(slot as Ptr) : (slot as Box).value;
-      const type = local.type.kind === 'reference' ? local.type.to : local.type;
-      addVariable(variables, local.name, value, type);
+    const locals = activeLocals(frame, hidesArgs);
+    for (const [name, { slot, type }] of locals) {
+      const value = slot instanceof Ptr ? readLocation(slot) : (slot as Box).value;
+      addVariable(variables, name, value, type.kind === 'reference' ? type.to : type);
     }
     if (!withContext) return variables;
     const self = frame.thisObject;
@@ -67,7 +62,7 @@ class Snapshotter {
     }
     const runtime = frame.runtime;
     for (const global of this.program.shownGlobals) {
-      if (global.name in variables.vars || global.name in variables.referenceVars) continue;
+      if (locals.has(global.name)) continue;
       const store = runtime.globals[global.index] as Box | undefined;
       if (!store) continue;
       if (global.type.kind === 'reference') {
@@ -79,6 +74,16 @@ class Snapshotter {
     }
     return variables;
   }
+}
+
+function activeLocals(frame: Frame, hidesArgs: boolean): Map<string, { slot: Store | Ptr; type: Type }> {
+  const locals = new Map<string, { slot: Store | Ptr; type: Type }>();
+  for (const local of frame.compiled?.locals ?? []) {
+    if (local.name.startsWith('\0') || (hidesArgs && local.isParameter)) continue;
+    const slot = frame.slots[local.slot];
+    if (slot !== undefined) locals.set(local.name, { slot, type: local.type });
+  }
+  return locals;
 }
 
 function readLocation(pointer: Ptr): Value {
@@ -128,7 +133,6 @@ function scalarOf(value: Value, type: Type): Scalar | typeof NOT_SCALAR | undefi
     }
     case 'array': {
       if (!(value instanceof ArrayStore)) return NOT_SCALAR;
-      if (isCharType(type.of)) return cStringOf(new Ptr(value, 0)) ?? NOT_SCALAR;
       if (!hasScalarElements(type.of)) return NOT_SCALAR;
       return value.values.map((item) => {
         const scalar = scalarOf(item, type.of);
