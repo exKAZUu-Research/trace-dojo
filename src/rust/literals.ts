@@ -112,7 +112,7 @@ function readEscape(body: string, index: number, kind: LiteralKind): { text: str
     case '\r': {
       if (kind !== 'string') return undefined;
       let last = index;
-      while (last + 1 < body.length && /\s/.test(body[last + 1])) last++;
+      while (last + 1 < body.length && /[ \t\r\n]/.test(body[last + 1])) last++;
       return { text: '', last };
     }
     default: {

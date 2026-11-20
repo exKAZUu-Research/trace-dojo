@@ -1227,6 +1227,21 @@ fn main() {
   });
 });
 
+test('preserves Unicode whitespace following Rust string continuations', () => {
+  const program = String.raw`fn main() {
+    println!("{:?}", "left\
+         right");
+    println!("{:?}", "left\
+
+        right");
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '"left\\u{a0}right"\n"leftright"\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {
