@@ -2988,3 +2988,49 @@ test('formats a Rust radix sign ahead of prefixes and zero padding', () => {
     stdout: '+fe +0xfe +0x000fe +f1 +fe\nNaN +254 +f1 -0\n',
   });
 });
+
+test('uses computed Rust constants to check exhaustive structural patterns', () => {
+  const branches = [
+    'if let Some(true) = Some(true) { (true, false) } else { (false, false) }',
+    "if true == true && 'a' < 'b' { (true, false) } else { (false, false) }",
+    'match Some(true) { Some(value) => (value, false), None => (false, false) }',
+  ];
+  for (const branch of branches) {
+    const program = `const CASE: (bool, bool) = ${branch};
+fn main() {
+    match (true, false) { CASE => println!("hit"), (false, _) => (), (true, true) => () }
+}`;
+    expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'hit\n' });
+  }
+});
+
+test('accepts Rust const numeric methods and rejects destruction of values in const scopes', () => {
+  const program = `const VALUE: i32 = 2_i32.pow(3) + i32::abs(-3);
+const EMPTY: Vec<u16> = { let result = Vec::new(); result };
+const NO_DROP: () = { let _value: Option<String> = None; };
+fn main() { println!("{} {}", VALUE, EMPTY.len()); }`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '11 0\n' });
+  for (const invalid of [
+    'const INVALID: usize = Vec::<u16>::new().as_slice().len();',
+    'const INVALID: () = { let _value = Vec::<i32>::new(); };',
+    'const INVALID: () = { let _ = String::new(); };',
+  ]) {
+    expect(executeProgram('rust', invalid + '\n' + program)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
+test('validates Rust match ergonomics, wildcard reads, and floating constants', () => {
+  const program = `#[derive(Debug)] enum Direction { Up, Down }
+fn main() {
+    let item = Some(Direction::Down);
+    match &item { Some(Down) => println!("{:?}", Down), None => () }
+    let moved = String::from("a");
+    drop(moved);
+    let _ = moved;
+    match moved { _ => println!("discarded") }
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'Down\ndiscarded\n' });
+  const nan = `const NAN: (f64, bool) = (0.0 / 0.0, true);
+fn main() { match (0.0, true) { NAN => (), _ => () } }`;
+  expect(executeProgram('rust', nan)).toMatchObject({ kind: 'compileError' });
+});

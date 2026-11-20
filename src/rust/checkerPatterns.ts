@@ -62,7 +62,7 @@ function checkPatternPart(c: Checker, pattern: Pattern, type: Type, mode: LocalV
       return;
     }
     case 'binding': {
-      bindingPattern(c, pattern, type, t, mode);
+      bindingPattern(c, pattern, type, t, mode, inherited);
       return;
     }
     case 'lit': {
@@ -107,7 +107,8 @@ function bindingPattern(
   pattern: Extract<Pattern, { kind: 'binding' }>,
   type: Type,
   t: Type,
-  mode: LocalVar['mode']
+  mode: LocalVar['mode'],
+  inherited: boolean
 ): void {
   const binding = patternBindingRes(c, pattern);
   const matched = derefForMatch(t, mode).t;
@@ -116,7 +117,7 @@ function bindingPattern(
     checkConstPattern(c, pattern, binding, matched);
     return;
   }
-  checkVariantBinding(pattern, matched, mode);
+  if (!inherited) checkVariantBinding(pattern, matched, mode);
   const localType = mode === 'move' ? type : ref(t, mode === 'refMut');
   const existing = c.orBindings?.get(pattern.name);
   if (existing) {
@@ -313,6 +314,7 @@ function checkConstPattern(c: Checker, pattern: Pattern, res: PathRes, t: Type):
     c.requireTrait(res.type, 'PartialEq', pattern.span);
     c.coverageChecks.push(() => {
       const value = ConstLint.patternValue(res.def, c.annotations);
+      if (containsNaN(value)) compileError(pattern.span, 'NaN を含む定数はパターンに書けません。');
       if (!structuralValue(res.type, value)) {
         compileError(pattern.span, 'パターンに書く定数の型には、#[derive(PartialEq)] が必要です。');
       }
@@ -332,6 +334,11 @@ const STRUCTURAL_BUILTINS = new Set([
   'RangeToInclusive',
   'RangeFull',
 ]);
+
+function containsNaN(value: Known | undefined): boolean {
+  if (typeof value === 'number') return Number.isNaN(value);
+  return typeof value === 'object' && [...value.fields.values()].some(containsNaN);
+}
 
 function structuralValue(type: Type, value: Known | undefined, depth = 0): boolean {
   if (depth >= 64) return false;

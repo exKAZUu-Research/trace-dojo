@@ -5,6 +5,7 @@ import type { Annotations, FnContext, LocalVar } from './annotations';
 import type { Block, Condition, Expr, FnItem, FormatArgs, Pattern, Span, Stmt } from './ast';
 import { forEachDirect, patternBindingParts, patternBindings } from './astWalk';
 import { writtenCallParams } from './checkerCalls';
+import { checkConstDrop, ConstLint } from './constLint';
 import { normalize } from './infer';
 import { compileError } from './items';
 import { LoanBuilder } from './loanBuilder';
@@ -45,8 +46,17 @@ export class BorrowChecker {
   constructor(
     private readonly annotations: Annotations,
     private readonly solver: TraitSolver,
-    private readonly budget: ExecutionBudget
+    private readonly budget: ExecutionBudget,
+    private readonly constContext = false
   ) {}
+
+  checkConst(expr: Expr, context: FnContext): void {
+    this.expr(
+      expr,
+      new Map(context.locals.map((local) => [local, { init: 'no', movedAt: undefined, partial: new Set() }])),
+      'move'
+    );
+  }
 
   checkFn(item: FnItem, context: FnContext, ret: Type): void {
     if (!item.body) return;
@@ -90,7 +100,23 @@ export class BorrowChecker {
     let current = state;
     for (const stmt of block.stmts) current = this.stmt(stmt, current);
     if (block.tail) current = this.expr(block.tail, current, 'move');
+    if (this.constContext && current !== BOTTOM) this.checkScopeDrops(block, current);
     return current;
+  }
+
+  private checkScopeDrops(block: Block, state: State): void {
+    for (const stmt of block.stmts) {
+      if (stmt.kind !== 'let') continue;
+      for (const local of this.bindingsOf(stmt.pattern)) {
+        const current = state.get(local);
+        if (!current || current.init === 'no') continue;
+        const known =
+          !local.mutable && stmt.init && stmt.pattern.kind === 'binding'
+            ? ConstLint.valueOf(stmt.init, this.annotations)
+            : undefined;
+        checkConstDrop(local.type, known, current.partial, local.span, this.budget);
+      }
+    }
   }
 
   private stmt(stmt: Stmt, state: State): State {
@@ -99,6 +125,7 @@ export class BorrowChecker {
       case 'let': {
         if (!stmt.init) return state;
         const { pattern, init } = stmt;
+        if (this.constContext && pattern.kind === 'wild' && !this.placeOf(init)) this.checkTemporaryDrop(init);
         if (pattern.kind === 'binding' && !pattern.sub) {
           // `let r2: &mut T = r;` reborrows `*r`; without the type it moves `r`.
           const reborrows = stmt.type?.kind === 'ref' && stmt.type.mutable && isMutReference(init.ty);
@@ -112,6 +139,7 @@ export class BorrowChecker {
         return this.bindPattern(pattern, init, afterValue);
       }
       case 'expr': {
+        if (this.constContext) this.checkTemporaryDrop(stmt.expr);
         return this.expr(stmt.expr, state, 'move');
       }
       case 'empty': {
@@ -131,6 +159,7 @@ export class BorrowChecker {
   private expr(expr: Expr, state: State, mode: 'move' | 'read' | 'mut'): State {
     this.budget.spend();
     if (state === BOTTOM) return BOTTOM;
+    if (this.constContext && mode !== 'move' && !this.placeOf(expr)) this.checkTemporaryDrop(expr);
     switch (expr.kind) {
       case 'path': {
         return this.usePlace(expr, state, mode);
@@ -209,6 +238,10 @@ export class BorrowChecker {
         return state;
       }
     }
+  }
+
+  private checkTemporaryDrop(expr: Expr): void {
+    checkConstDrop(expr.ty, ConstLint.valueOf(expr, this.annotations), new Set(), expr.span, this.budget);
   }
 
   private unary(expr: Extract<Expr, { kind: 'unary' }>, state: State, mode: 'move' | 'read' | 'mut'): State {
@@ -339,6 +372,7 @@ export class BorrowChecker {
 
   /** Binds a pattern's variables, moving the parts of a place they bind by value. */
   private bindPattern(pattern: Pattern, scrutinee: Expr, state: State): State {
+    if (pattern.kind === 'wild') return state;
     let current = state;
     const moved = this.movedParts(pattern);
     const place = this.placeOf(scrutinee);

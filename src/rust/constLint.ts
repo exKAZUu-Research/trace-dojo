@@ -1,13 +1,25 @@
 // code-gauge-allow-file fileNcss 416 -- Shares Rust constant propagation between diagnostics and pattern coverage.
 
+import type { ExecutionBudget } from '../interpreter/limits';
 import type { Annotations, LocalVar, PathRes } from './annotations';
 import type { Block, Condition, Expr, MatchArm, Pattern, Stmt } from './ast';
 import { forEachDirect, patternBindings } from './astWalk';
 import { type PropagationMode, propagationModes } from './constPropagation';
+import { FLOAT_LIMITS } from './floatLimits';
 import { normalize } from './infer';
 import { compileError, constInteger } from './items';
-import { castValue, wrap } from './ops';
-import { type ConstDef, INT_NAMES, intMax, intMin, type IntName, resolve, shallow, type Type } from './types';
+import { castValue, floatArith, wrap } from './ops';
+import {
+  type ConstDef,
+  INT_NAMES,
+  intMax,
+  intMin,
+  type IntName,
+  resolve,
+  shallow,
+  substitute,
+  type Type,
+} from './types';
 
 /** A constant: a number, a bool, a char, or a tuple or struct of constants keyed by field (`0`, `x`). */
 export type Known = bigint | number | boolean | string | Aggregate;
@@ -80,6 +92,10 @@ export class ConstLint {
 
   static patternValue(def: ConstDef, annotations: Annotations): Known | undefined {
     return new ConstLint(annotations, new Set(), true).constant(def);
+  }
+
+  static valueOf(expr: Expr, annotations: Annotations): Known | undefined {
+    return new ConstLint(annotations, new Set(), true).expr(expr);
   }
 
   check(block: Block): void {
@@ -156,6 +172,10 @@ export class ConstLint {
       case 'char': {
         return expr.value;
       }
+      case 'float': {
+        const type = expr.ty && normalize(shallow(resolve(expr.ty, true)));
+        return type?.kind === 'float' && type.name === 'f32' ? expr.f32 : expr.value;
+      }
       case 'path': {
         return this.path(expr);
       }
@@ -196,6 +216,12 @@ export class ConstLint {
       case 'if': {
         if (this.patternEvaluation) return this.constantBranch(expr);
         this.ifExpr(expr);
+        return undefined;
+      }
+      case 'match': {
+        const scrutinee = this.expr(expr.scrutinee);
+        if (this.patternEvaluation) return this.constantMatch(scrutinee, expr.arms);
+        this.match(scrutinee, expr.arms);
         return undefined;
       }
       case 'struct': {
@@ -246,10 +272,6 @@ export class ConstLint {
         this.branch(() => this.block(expr.body));
         return;
       }
-      case 'match': {
-        this.match(this.expr(expr.scrutinee), expr.arms);
-        return;
-      }
       case 'closure': {
         this.closure(expr);
         return;
@@ -266,7 +288,7 @@ export class ConstLint {
     const res = this.annotations.paths.get(expr);
     if (res?.kind === 'local') return this.known.get(res.local);
     if (res?.kind === 'const') return this.constant(res.def);
-    if (res?.kind === 'builtinConst') return integerConst(res.name);
+    if (res?.kind === 'builtinConst') return integerConst(res.name) ?? floatLimit(res.name);
     if (this.patternEvaluation && res?.kind === 'ctor') return this.construct(res, []);
     return undefined;
   }
@@ -302,6 +324,7 @@ export class ConstLint {
   private unary(expr: Extract<Expr, { kind: 'unary' }>): Known | undefined {
     const operand = this.expr(expr.operand);
     if (expr.op === '!' && typeof operand === 'boolean') return !operand;
+    if (expr.op === '-' && typeof operand === 'number') return -operand;
     if (expr.op !== '-' || typeof operand !== 'bigint') return undefined;
     const name = intTypeOf(expr.ty);
     if (!name) return undefined;
@@ -405,8 +428,20 @@ export class ConstLint {
   private condition(cond: Condition): Known | undefined {
     if (cond.kind === 'expr') return this.expr(cond.expr);
     const value = this.expr(cond.value);
-    if (patternMatches(cond.pattern, value, this.annotations) === true) this.bind(cond.pattern, value);
-    else this.bind(cond.pattern, undefined);
+    const matches = patternMatches(cond.pattern, value, this.annotations);
+    this.bind(cond.pattern, matches === true ? value : undefined);
+    return this.patternEvaluation ? matches : undefined;
+  }
+
+  private constantMatch(scrutinee: Known | undefined, arms: MatchArm[]): Known | undefined {
+    for (const arm of arms) {
+      const matches = patternMatches(arm.pattern, scrutinee, this.annotations);
+      if (matches === undefined) break;
+      if (!matches) continue;
+      this.bind(arm.pattern, scrutinee);
+      return this.expr(arm.body);
+    }
+    this.known.clear();
     return undefined;
   }
 
@@ -445,6 +480,10 @@ export class ConstLint {
     const left = this.expr(expr.left);
     if (expr.op === '&&' || expr.op === '||') return this.logical(expr, left);
     const right = this.expr(expr.right);
+    if (typeof left === 'number' && typeof right === 'number') {
+      const type = expr.ty && normalize(shallow(resolve(expr.ty, true)));
+      if (type?.kind === 'float') return floatArith(expr.op, left, right, type.name === 'f32');
+    }
     const name = intTypeOf(expr.left.ty);
     return name && this.integerBinary(expr, name, left, right);
   }
@@ -516,9 +555,9 @@ export class ConstLint {
 
   // code-gauge-allow duplicateLines 21 -- Each language compares its own constants, as its operators define.
   private comparison(expr: Extract<Expr, { kind: 'binary' }>): Known | undefined {
-    const left = this.expr(expr.left);
-    const right = this.expr(expr.right);
-    if (typeof left !== 'bigint' || typeof right !== 'bigint') return undefined;
+    const left = ordinal(this.expr(expr.left));
+    const right = ordinal(this.expr(expr.right));
+    if (left === undefined || right === undefined) return undefined;
     switch (expr.op) {
       case '==': {
         return left === right;
@@ -553,6 +592,62 @@ function knownField(value: Known | undefined, name: string): Known | undefined {
   return typeof value === 'object' ? value.fields.get(name) : undefined;
 }
 
+const RUNTIME_DROP_TYPES = new Set([
+  'String',
+  'Vec',
+  'Box',
+  'VecDeque',
+  'BinaryHeap',
+  'HashMap',
+  'HashSet',
+  'BTreeMap',
+  'BTreeSet',
+]);
+
+export function checkConstDrop(
+  type: Type | undefined,
+  value: Known | undefined,
+  moved: ReadonlySet<string>,
+  span: Expr['span'],
+  budget: ExecutionBudget
+): void {
+  if (type && needsConstDrop(type, value, moved, '', 0, budget)) {
+    compileError(span, 'この値の破棄は定数の初期化中にはできません。');
+  }
+}
+
+function needsConstDrop(
+  type: Type,
+  value: Known | undefined,
+  moved: ReadonlySet<string>,
+  path: string,
+  depth: number,
+  budget: ExecutionBudget
+): boolean {
+  budget.spend();
+  if (depth >= 64 || moved.has(path)) return false;
+  const t = normalize(shallow(type));
+  const fieldNeedsDrop = (name: string, field: Type): boolean =>
+    needsConstDrop(field, knownField(value, name), moved, `${path}.${name}`, depth + 1, budget);
+  if (t.kind === 'tuple') return t.elems.some((elem, index) => fieldNeedsDrop(String(index), elem));
+  if (t.kind === 'array') return t.len > 0 && fieldNeedsDrop('[]', t.elem);
+  if (t.kind !== 'adt') return false;
+  if (t.def.builtin && RUNTIME_DROP_TYPES.has(t.def.builtin)) return true;
+  const tag = typeof value === 'object' ? value.ctor : undefined;
+  const subst = new Map(t.def.params.map((param, index) => [param, t.args[index]]));
+  return t.def.variants.some(
+    (variant, index) =>
+      (!tag || tag === `v${index}`) &&
+      variant.fields.some((field) => fieldNeedsDrop(field.name, substitute(field.type, subst)))
+  );
+}
+
+function ordinal(value: Known | undefined): number | bigint | undefined {
+  if (typeof value === 'number' || typeof value === 'bigint') return value;
+  if (typeof value === 'string') return value.codePointAt(0);
+  return typeof value === 'boolean' ? Number(value) : undefined;
+}
+
 function intTypeOf(type: Type | undefined): IntName | undefined {
   if (!type) return undefined;
   const t = normalize(shallow(resolve(type, true)));
@@ -568,6 +663,11 @@ function bits(name: IntName): number {
 }
 
 /** The value of an integer type's associated constant (`i32::MAX`), which rustc's lints know. */
+function floatLimit(name: string): number | undefined {
+  const [ty, key] = name.split('::');
+  return ty === 'f32' || ty === 'f64' ? FLOAT_LIMITS[key]?.[ty] : undefined;
+}
+
 function integerConst(name: string): bigint | undefined {
   const [type, constant] = name.split('::') as [IntName, string];
   if (!INT_NAMES.includes(type)) return undefined;
@@ -582,18 +682,38 @@ function aggregate(fields: Iterable<readonly [string, Known | undefined]>, ctor?
 
 /** Whether a pattern matches a constant: surely, surely not, or unknown. */
 function patternMatches(pattern: Pattern, value: Known | undefined, annotations: Annotations): boolean | undefined {
+  const constructor = annotations.paths.get(pattern);
+  if (constructor?.kind === 'ctor') {
+    if (typeof value !== 'object' || !value.ctor) return undefined;
+    if (value.ctor !== `v${constructor.variant}`) return false;
+  } else if (constructor?.kind === 'const') return undefined;
   switch (pattern.kind) {
+    case 'path':
     case 'wild': {
-      return true;
+      return pattern.kind === 'wild' || constructor?.kind === 'ctor' ? true : undefined;
     }
     case 'binding': {
-      // A name that resolves to a constant or a unit variant compares rather than binds.
-      return pattern.sub || annotations.paths.has(pattern) ? undefined : true;
+      return pattern.sub ? patternMatches(pattern.sub, value, annotations) : true;
     }
     case 'lit': {
       const literal = pattern.expr;
-      if (value === undefined || (literal.kind !== 'int' && literal.kind !== 'bool')) return undefined;
+      if (value === undefined || !('value' in literal) || typeof literal.value === 'object') return undefined;
       return literal.value === value;
+    }
+    case 'tuple':
+    case 'tupleStruct': {
+      if (typeof value !== 'object') return undefined;
+      return allKnownMatches(
+        pattern.elems.map((child, index) => patternMatches(child, knownField(value, String(index)), annotations))
+      );
+    }
+    case 'struct': {
+      return allKnownMatches(
+        pattern.fields.map(({ name, pattern: child }) => patternMatches(child, knownField(value, name), annotations))
+      );
+    }
+    case 'ref': {
+      return patternMatches(pattern.pattern, value, annotations);
     }
     case 'or': {
       const results = pattern.alternatives.map((alternative) => patternMatches(alternative, value, annotations));
@@ -604,4 +724,9 @@ function patternMatches(pattern: Pattern, value: Known | undefined, annotations:
       return undefined;
     }
   }
+}
+
+function allKnownMatches(results: (boolean | undefined)[]): boolean | undefined {
+  if (results.includes(false)) return false;
+  return results.every((result) => result === true) ? true : undefined;
 }

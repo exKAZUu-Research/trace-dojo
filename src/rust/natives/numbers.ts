@@ -1,5 +1,6 @@
 // code-gauge-allow-file fileNcss 459 -- One native per method of the standard library.
 import { debugFloat, decimalToF32 } from '../floatFormat';
+import { FLOAT_LIMITS } from '../floatLimits';
 import { normalize } from '../infer';
 import { bitsOf, intArith, overflow, wrap } from '../ops';
 import { INT_NAMES, intMax, intMin, type IntName, shallow, type Type } from '../types';
@@ -726,16 +727,6 @@ const F64_CONSTS: Record<string, number> = {
   LOG10_E: Number('0.434294481903251827651128918916605082'),
   LOG2_10: Number('3.32192809488736234787031942948939018'),
   LOG10_2: Number('0.301029995663981195213738894724493027'),
-};
-
-const FLOAT_LIMITS: Record<string, { f64: number; f32: number }> = {
-  MAX: { f64: Number.MAX_VALUE, f32: 3.4028234663852886e38 },
-  MIN: { f64: -Number.MAX_VALUE, f32: -3.4028234663852886e38 },
-  INFINITY: { f64: Number.POSITIVE_INFINITY, f32: Number.POSITIVE_INFINITY },
-  NEG_INFINITY: { f64: Number.NEGATIVE_INFINITY, f32: Number.NEGATIVE_INFINITY },
-  NAN: { f64: Number.NaN, f32: Number.NaN },
-  EPSILON: { f64: Number.EPSILON, f32: 1.1920928955078125e-7 },
-  MIN_POSITIVE: { f64: 2.2250738585072014e-308, f32: 1.1754943508222875e-38 },
 };
 
 const consts: Record<string, (args: Value[], ctx: NativeContext) => Value> = {};

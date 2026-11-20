@@ -375,6 +375,7 @@ export class Checker {
       this.coerceExpr(ast.value, def.type);
       this.finishBody(ast.span);
       checkConstOperations(ast.value, this.annotations);
+      new BorrowChecker(this.annotations, this.solver, this.budget, true).checkConst(ast.value, this.body.fn);
       // rustc evaluates constants before running, so one whose value overflows or divides by zero is an error.
       new ConstLint(this.annotations).checkExpr(ast.value);
     }

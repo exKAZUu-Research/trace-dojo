@@ -1,0 +1,9 @@
+export const FLOAT_LIMITS: Record<string, { f64: number; f32: number }> = {
+  MAX: { f64: Number.MAX_VALUE, f32: 3.4028234663852886e38 },
+  MIN: { f64: -Number.MAX_VALUE, f32: -3.4028234663852886e38 },
+  INFINITY: { f64: Number.POSITIVE_INFINITY, f32: Number.POSITIVE_INFINITY },
+  NEG_INFINITY: { f64: Number.NEGATIVE_INFINITY, f32: Number.NEGATIVE_INFINITY },
+  NAN: { f64: Number.NaN, f32: Number.NaN },
+  EPSILON: { f64: Number.EPSILON, f32: 1.1920928955078125e-7 },
+  MIN_POSITIVE: { f64: 2.2250738585072014e-308, f32: 1.1754943508222875e-38 },
+};
