@@ -1,5 +1,6 @@
 import type { LocalVar, PathRes } from './annotations';
 import type { Pattern } from './ast';
+import { patternBindings } from './astWalk';
 import type { Checker } from './checker';
 import { resolveStructPath, resolveValuePath } from './checkerPaths';
 import { checkFieldVisible } from './checkerPlaces';
@@ -7,18 +8,52 @@ import { normalize } from './infer';
 import { compileError, lookupValue } from './items';
 import { adt, freshVar, ref, resolve, shallow, substitute, type Type, typeToString } from './types';
 
+export function checkPattern(c: Checker, pattern: Pattern, type: Type, mode: LocalVar['mode']): void {
+  checkPatternPart(c, pattern, type, mode);
+  distinctBindings(c, pattern);
+}
+
+function distinctBindings(c: Checker, pattern: Pattern): Set<string> {
+  switch (pattern.kind) {
+    case 'binding': {
+      const names = pattern.sub ? distinctBindings(c, pattern.sub) : new Set<string>();
+      if (c.annotations.bindings.has(pattern)) addBinding(names, pattern.name, pattern);
+      return names;
+    }
+    case 'or': {
+      const [first] = pattern.alternatives.map((part) => distinctBindings(c, part));
+      return first ?? new Set();
+    }
+    case 'ref': {
+      return distinctBindings(c, pattern.pattern);
+    }
+    case 'tuple':
+    case 'tupleStruct':
+    case 'struct': {
+      const children = pattern.kind === 'struct' ? pattern.fields.map((field) => field.pattern) : pattern.elems;
+      const names = new Set<string>();
+      for (const child of children) {
+        for (const name of distinctBindings(c, child)) addBinding(names, name, child);
+      }
+      return names;
+    }
+    default: {
+      return new Set();
+    }
+  }
+}
+
+function addBinding(names: Set<string>, name: string, pattern: Pattern): void {
+  if (names.has(name)) compileError(pattern.span, `パターンで ${name} が2回束縛されています。`);
+  names.add(name);
+}
+
 /**
  * Checks a pattern against the type of the value it matches, declaring its bindings. Matching a reference with a
  * pattern that is not a reference pattern looks through it and binds by reference, as Rust's match ergonomics do.
  */
 /** `inherited`: the outer reference of `type` is the one a default binding mode gives the field (`ref`). */
-export function checkPattern(
-  c: Checker,
-  pattern: Pattern,
-  type: Type,
-  mode: LocalVar['mode'],
-  inherited = false
-): void {
+function checkPatternPart(c: Checker, pattern: Pattern, type: Type, mode: LocalVar['mode'], inherited = false): void {
   pattern.ty = type;
   const t = normalize(shallow(type));
   switch (pattern.kind) {
@@ -82,9 +117,13 @@ function bindingPattern(
   const localType = mode === 'move' ? type : ref(t, mode === 'refMut');
   const existing = c.orBindings?.get(pattern.name);
   if (existing) {
+    if (existing.mode !== mode || existing.mutable !== pattern.mutable) {
+      compileError(pattern.span, `| の各パターンで、${pattern.name} を同じ方法で束縛してください。`);
+    }
     c.unifyOrError(pattern.span, existing.type, localType);
     c.annotations.bindings.set(pattern, existing);
     (c.body.scopes.at(-1) as Map<string, LocalVar>).set(pattern.name, existing);
+    if (pattern.sub) checkPatternPart(c, pattern.sub, type, mode);
     return;
   }
   const local = c.declareLocal(pattern.name, localType, pattern.mutable, pattern.span, mode);
@@ -92,7 +131,7 @@ function bindingPattern(
     compileError(pattern.span, '参照に合わせたパターンの名前には、mut を付けられません。');
   }
   c.annotations.bindings.set(pattern, local);
-  if (pattern.sub) checkPattern(c, pattern.sub, type, mode);
+  if (pattern.sub) checkPatternPart(c, pattern.sub, type, mode);
 }
 
 function litPattern(
@@ -140,7 +179,7 @@ function tuplePattern(
     );
   }
   for (const [index, elem] of pattern.elems.entries()) {
-    checkPattern(
+    checkPatternPart(
       c,
       elem,
       bindingMode === 'move' ? t.elems[index] : ref(t.elems[index], bindingMode === 'refMut'),
@@ -180,16 +219,13 @@ function refPattern(
     compileError(pattern.span, '参照に合わせたパターンの中には、& のパターンを書けません。');
   }
   const target = t.target;
-  checkPattern(c, pattern.pattern, target, 'move');
+  checkPatternPart(c, pattern.pattern, target, 'move');
   c.deferredChecks.push(() => {
-    if (
-      pattern.pattern.kind === 'binding' &&
-      !c.annotations.paths.has(pattern.pattern) &&
-      !c.solver.isCopy(resolve(target, true))
-    ) {
+    for (const local of patternBindings(pattern.pattern, c.annotations)) {
+      if (local.mode !== 'move' || c.solver.isCopy(resolve(local.type, true))) continue;
       c.patternMoves.push({
-        span: pattern.span,
-        message: `& のパターンで取り出すと値が動くので、${typeToString(resolve(target))} には使えません（& を外してください）。`,
+        span: local.span,
+        message: `& のパターンで取り出すと値が動くので、${typeToString(resolve(local.type))} には使えません（& を外してください）。`,
       });
     }
   });
@@ -201,12 +237,12 @@ function orPattern(c: Checker, pattern: Extract<Pattern, { kind: 'or' }>, type: 
   c.orBindings = bindings;
   try {
     for (const [index, alternative] of pattern.alternatives.entries()) {
-      const before = new Set(c.body.fn.locals);
-      checkPattern(c, alternative, type, mode);
+      checkPatternPart(c, alternative, type, mode);
+      const locals = patternBindings(alternative, c.annotations);
       if (index === 0) {
-        for (const local of c.body.fn.locals) if (!before.has(local)) bindings.set(local.name, local);
+        for (const local of locals) bindings.set(local.name, local);
       } else {
-        requireSameBindings(alternative, bindings);
+        requireSameBindings(alternative, bindings, locals);
       }
     }
   } finally {
@@ -214,10 +250,13 @@ function orPattern(c: Checker, pattern: Extract<Pattern, { kind: 'or' }>, type: 
   }
 }
 
-function requireSameBindings(alternative: Pattern, bindings: Map<string, LocalVar>): void {
-  const names = new Set(collectBindingNames(alternative));
+function requireSameBindings(alternative: Pattern, bindings: Map<string, LocalVar>, locals: LocalVar[]): void {
+  const names = new Set(locals.map((local) => local.name));
   for (const name of bindings.keys()) {
     if (!names.has(name)) compileError(alternative.span, `| のどちらのパターンにも、${name} を書いてください。`);
+  }
+  for (const name of names) {
+    if (!bindings.has(name)) compileError(alternative.span, `| のどちらのパターンにも、${name} を書いてください。`);
   }
 }
 
@@ -321,7 +360,7 @@ function adtPattern(
       );
     }
     for (const [index, elem] of pattern.elems.entries()) {
-      checkPattern(c, elem, fieldType(index), subMode, bindingMode !== 'move');
+      checkPatternPart(c, elem, fieldType(index), subMode, bindingMode !== 'move');
     }
     return;
   }
@@ -331,36 +370,13 @@ function adtPattern(
   for (const field of pattern.fields) {
     const index = variant.fields.findIndex((f) => f.name === field.name);
     if (index === -1) compileError(field.span, `${variant.name} にフィールド ${field.name} がありません。`);
+    if (seen.has(field.name)) compileError(field.span, `フィールド ${field.name} が2回あります。`);
     seen.add(field.name);
     if (res.def.kind === 'struct') checkFieldVisible(c, res.def, variant.fields[index], field.span);
-    checkPattern(c, field.pattern, fieldType(index), subMode, bindingMode !== 'move');
+    checkPatternPart(c, field.pattern, fieldType(index), subMode, bindingMode !== 'move');
   }
   const missing = variant.fields.filter((f) => !seen.has(f.name));
   if (missing.length > 0) {
     compileError(pattern.span, `パターンにフィールド ${missing.map((f) => f.name).join(', ')} が足りません。`);
-  }
-}
-
-function collectBindingNames(pattern: Pattern): string[] {
-  switch (pattern.kind) {
-    case 'binding': {
-      return [pattern.name, ...(pattern.sub ? collectBindingNames(pattern.sub) : [])];
-    }
-    case 'tuple':
-    case 'tupleStruct': {
-      return pattern.elems.flatMap(collectBindingNames);
-    }
-    case 'struct': {
-      return pattern.fields.flatMap((field) => collectBindingNames(field.pattern));
-    }
-    case 'ref': {
-      return collectBindingNames(pattern.pattern);
-    }
-    case 'or': {
-      return collectBindingNames(pattern.alternatives[0]);
-    }
-    default: {
-      return [];
-    }
   }
 }

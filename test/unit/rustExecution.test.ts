@@ -1961,6 +1961,24 @@ test('enforces Rust visibility for updates, constructors and associated constant
   expect(executeProgram('rust', `${declarations}\n${visible}`)).toMatchObject({ kind: 'executed', stdout: '12 5 7\n' });
 });
 
+test('validates all bindings in Rust reference and or patterns', () => {
+  for (const body of [
+    'let source = (String::from("x"), 1); let &(moved, _) = &source; drop(moved);',
+    'let source = Some(String::from("x")); let &Some(moved) = &source else { return }; drop(moved);',
+    'match (true, 4) { (true, _) | (false, extra) => (), };',
+    'let (same, same) = (String::from("a"), String::from("b"));',
+    'struct Pair { x: String } let Pair { x: a, x: b } = Pair { x: String::new() };',
+  ]) {
+    expect(executeProgram('rust', rustMain(body))).toMatchObject({ kind: 'compileError' });
+  }
+  const valid = rustMain(`let value = (false, 4);
+    let &(flag, _) = &value;
+    let n = match value { (true, n) | (false, n) => n };
+    let n = n + 1;
+    println!("{} {}", flag, n);`);
+  expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: 'false 5\n' });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {
