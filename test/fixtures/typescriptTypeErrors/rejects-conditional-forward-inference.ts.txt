@@ -1,0 +1,21 @@
+function same<T>(value:T extends string ? T : never):T { return value; }
+function alt<T>(value:T extends string ? T : number):T { return value as T; }
+function boxed<T>(value:T extends string ? { value: T } : T):T { return (typeof value==='object' ? (value as any).value : value) as T; }
+function callback<T>(value:T extends string ? (()=>T) : T):T { return (typeof value==='function' ? (value as any)() : value) as T; }
+function sameForward<U>(value:U extends string ? U : never): string { return same(value); }
+function sameExplicit<U>(value:U extends string ? U : never): string { return same<string>(value); }
+function altForward<U>(value:U extends string ? U : number): string { return alt(value); }
+function altExplicit<U>(value:U extends string ? U : number): string { return alt<string>(value); }
+function boxedForward<U>(value:U extends string ? {value: U} : U): string { return boxed(value); }
+function boxedExplicit<U>(value:U extends string ? {value: U} : U): string { return boxed<string>(value); }
+function callbackForward<U>(value:U extends string ? (()=>U) : U): string { return callback(value); }
+function callbackExplicit<U>(value:U extends string ? (()=>U) : U): string { return callback<string>(value); }
+function noContext<U>(value:U extends string ? U : never) { return same(value); }
+function noContextAlt<U>(value:U extends string ? U : number) { return alt(value); }
+function badNumber<U>(value:U extends string ? U : never): number { return same(value); }
+function badTwo<U>(value:U extends string ? U : number): boolean { return alt(value); }
+function narrower<U>(value:U extends string ? U : never): "a" { return same(value); }
+function f<T>(a:T extends string?T:never,b:T extends number?T:never):T {return a;}
+function r<T>(b:T extends number?T:never,a:T extends string?T:never):T {return a;}
+function stringResult<U>(a:U extends string?U:never,b:U extends number?U:never):string{return f(a,b);}
+function numberResultReversed<U>(a:U extends string?U:never,b:U extends number?U:never):number{return r(b,a);}

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 697 -- Keeps generic candidate collection, constraint fitting and inference completion together.
+// code-gauge-allow-file fileNcss 705 -- Keeps generic candidate collection, constraint fitting and inference completion together.
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import type { Checker, Mapper } from './checker';
 import { isUnit } from './flow';
@@ -385,9 +385,16 @@ export class TypeInference {
     covariant: boolean
   ): void {
     if (source.kind === 'conditional') {
+      const fromTrue =
+        source.checkType.kind === 'typeParameter'
+          ? this.c.instantiate(
+              source.trueType,
+              new Map([[source.checkType.id, this.c.substitutionOf(source.checkType, source.extendsType)]])
+            )
+          : source.trueType;
+      recurse(fromTrue, target.trueType);
       recurse(source.checkType, target.checkType);
       recurse(source.extendsType, target.extendsType);
-      recurse(source.trueType, target.trueType);
       recurse(source.falseType, target.falseType);
       return;
     }
@@ -431,7 +438,10 @@ export class TypeInference {
       inference.priority = run.priority;
     }
     const candidates = covariant ? inference.candidates : inference.contravariant;
-    if (!candidates.some((candidate) => candidate.id === source.id)) candidates.push(source);
+    const base = inferenceCandidateBase(source);
+    const index = candidates.findIndex((candidate) => inferenceCandidateBase(candidate) === base);
+    if (index === -1) candidates.push(source);
+    else if (source.kind === 'typeParameter' && source.substitution) candidates[index] = source;
     if (!topLevel && (run.priority & InferencePriority.ReturnType) === 0) inference.topLevel = false;
   }
 
@@ -1019,7 +1029,7 @@ function hasCandidates(inference: Inference | undefined): boolean {
 }
 
 function inferenceVariable(type: Type, run?: InferenceRun): TypeParameter | undefined {
-  if (type.kind === 'typeParameter') return type;
+  if (type.kind === 'typeParameter') return type.substitution?.base ?? type;
   const reverse = run?.reverseMapped;
   return reverse &&
     type.kind === 'indexedAccess' &&
@@ -1027,6 +1037,10 @@ function inferenceVariable(type: Type, run?: InferenceRun): TypeParameter | unde
     type.indexType.id === reverse.key.id
     ? reverse.value
     : undefined;
+}
+
+function inferenceCandidateBase(type: Type): number {
+  return type.kind === 'typeParameter' ? (type.substitution?.base.id ?? type.id) : type.id;
 }
 
 function templateCaptures(value: string, texts: string[]): string[] | undefined {
@@ -1045,7 +1059,7 @@ function templateCaptures(value: string, texts: string[]): string[] | undefined 
 }
 
 function isTopLevelTypeParameter(type: Type, parameter: TypeParameter, depth = 0): boolean {
-  if (type.kind === 'typeParameter') return type.id === parameter.id;
+  if (type.kind === 'typeParameter') return inferenceCandidateBase(type) === parameter.id;
   if (type.kind === 'union' || type.kind === 'intersection')
     return type.types.some((member) => isTopLevelTypeParameter(member, parameter, depth));
   return (

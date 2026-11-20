@@ -21,6 +21,11 @@ import {
 export function isGenericObjectOrIndexType(type: Type, except: readonly TypeParameter[] = []): boolean {
   switch (type.kind) {
     case 'typeParameter': {
+      if (type.substitution)
+        return (
+          isGenericObjectOrIndexType(type.substitution.base, except) ||
+          isGenericObjectOrIndexType(type.substitution.constraint, except)
+        );
       return !except.some((parameter) => parameter.id === type.id);
     }
     case 'indexedAccess':
@@ -91,7 +96,7 @@ export function typeParametersIn(
     if (seen.has(current)) continue;
     seen.add(current);
     for (const child of parameterChildren(current, declared)) pending.push(child);
-    if (current.kind === 'typeParameter') found.set(current.id, current);
+    if (current.kind === 'typeParameter' && !current.substitution) found.set(current.id, current);
   }
   return [...found.values()].filter((parameter) => !declared.has(parameter.id));
 }
@@ -152,6 +157,9 @@ export function childTypes(type: Type): readonly Type[] {
     }
     case 'indexedAccess': {
       return [type.objectType, type.indexType];
+    }
+    case 'typeParameter': {
+      return type.substitution ? [type.substitution.base, type.substitution.constraint] : [];
     }
     case 'keyof':
     case 'stringMapping': {

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 824 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
+// code-gauge-allow-file fileNcss 826 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
 import { minimumArguments } from './callArity';
 import type { Checker } from './checker';
 import { isUnit } from './flow';
@@ -101,6 +101,7 @@ export class Relations {
    * With `INTERSECTION_TARGET` in `state`, as for a member of an intersection target, skips the check of a weak target
    * type; with `INTERSECTION_SOURCE`, as for a member of an intersection source, infers no index signature.
    */
+  // code-gauge-allow functionNcss 32 -- Keeps target normalization and the bounded relation-cache entry point together.
   isRelated(
     source: Type,
     target: Type,
@@ -108,6 +109,7 @@ export class Relations {
     state = 0,
     track = EXPANDING_SOURCE | EXPANDING_TARGET
   ): boolean {
+    if (relation !== 'identical' && target.kind === 'typeParameter') target = target.substitution?.base ?? target;
     if (source === target) return true;
     if (relation === 'assignable' && source.kind === 'object' && isPrimitiveComparisonTarget(target)) return false;
     source = referencesForComparison(source);

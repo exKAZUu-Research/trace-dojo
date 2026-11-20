@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 710 -- Holds type construction, bounded instantiation, structure lookup, and diagnostics shared by checker components.
+// code-gauge-allow-file fileNcss 729 -- Holds type construction, bounded instantiation, structure lookup, and diagnostics shared by checker components.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { type SourceDiagnostic, sourceDiagnostic } from '../../interpreter/diagnostics';
@@ -44,6 +44,7 @@ import {
   type IndexedAccessType,
   type IndexInfo,
   intersectionOf,
+  isAnyLike,
   isIntrinsic,
   type MappedInfo,
   type Mapper,
@@ -400,6 +401,7 @@ export class Checker {
   }
 
   private instantiationDepth = 0;
+  private readonly substitutions = new Map<string, TypeParameter>();
 
   instantiateContextual(type: Type, mapper: Mapper): Type {
     return this.instantiate(type, createMapper(mapper, true));
@@ -421,7 +423,15 @@ export class Checker {
   private instantiateType(type: Type, mapper: Mapper): Type {
     switch (type.kind) {
       case 'typeParameter': {
-        return mapper.get(type.id) ?? type;
+        const argument = mapper.get(type.id);
+        if (argument) return argument;
+        const substitution = type.substitution;
+        return substitution
+          ? this.substitutionOf(
+              this.instantiate(substitution.base, mapper),
+              this.instantiate(substitution.constraint, mapper)
+            )
+          : type;
       }
       case 'union': {
         return this.instantiateUnion(type, mapper);
@@ -460,6 +470,30 @@ export class Checker {
         return type;
       }
     }
+  }
+
+  substitutionOf(base: Type, constraint: Type): Type {
+    if (isAnyLike(base) || isAnyLike(constraint) || isIntrinsic(constraint, 'unknown') || base === constraint)
+      return base;
+    if (base.kind !== 'typeParameter') return intersectionOf([base, constraint], this.budget);
+    if (base.substitution)
+      return this.substitutionOf(
+        base.substitution.base,
+        intersectionOf([base.substitution.constraint, constraint], this.budget)
+      );
+    const key = `${typeCacheKey(base)}/${typeCacheKey(constraint)}`;
+    let narrowed = this.substitutions.get(key);
+    if (!narrowed) {
+      const bound = intersectionOf([base, constraint], this.budget);
+      narrowed = {
+        ...base,
+        id: newTypeId(),
+        substitution: { base, constraint },
+        constraint: () => bound,
+      };
+      this.substitutions.set(key, narrowed);
+    }
+    return narrowed;
   }
 
   private instantiateUnion(type: UnionType, mapper: Mapper): Type {

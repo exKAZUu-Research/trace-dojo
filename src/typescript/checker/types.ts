@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 403 -- Keeps type data, cache keys, and canonical type constructors together.
+// code-gauge-allow-file fileNcss 404 -- Keeps type data, cache keys, and canonical type constructors together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { ExecutionBudget } from '../../interpreter/limits';
@@ -248,6 +248,8 @@ export interface TypeParameter {
   isConst?: boolean;
   constraint?: () => Type | undefined;
   default?: () => Type | undefined;
+  /** A conditional true-branch occurrence keeps its original parameter as the assignment target. */
+  substitution?: { base: TypeParameter; constraint: Type };
   /** A `this` type, whose constraint is the class or interface it belongs to. */
   isThisType?: boolean;
 }
