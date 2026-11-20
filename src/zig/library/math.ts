@@ -41,6 +41,7 @@ import { spendMemory } from '../memoryAccounting';
 import { isArithmeticType, isIntegerType } from '../operands';
 import { referenceBinary, referenceUnary } from '../referenceMath';
 import type { BinaryOperation, UnaryOperation } from '../referenceMathOperations';
+import { ZigPanic } from '../runtime';
 import { known, type NativeCall, runtime, type SemaApi, staticResultOf, type TExpr } from '../semaBase';
 import {
   BOOL,
@@ -345,8 +346,6 @@ function floatConstant(name: string, exponent: (format: (typeof FORMATS)[FloatBi
   });
 }
 
-class UnexpectedRemainder extends Error {}
-
 const DIVISION_ERRORS = errorSetOf(['DivisionByZero', 'Overflow']);
 const MOD_ERRORS = errorSetOf(['DivisionByZero', 'NegativeDenominator']);
 
@@ -372,7 +371,8 @@ function intDivision(
           spendIntegerOperation(x as bigint, y as bigint, 'read', nativeBudget(sema, frame));
           result = compute(x as bigint, y as bigint);
         } catch (error) {
-          if (error instanceof UnexpectedRemainder) return ErrorValue.of('UnexpectedRemainder');
+          if (error instanceof ZigPanic && error.text === PANIC.exactRemainder)
+            return ErrorValue.of('UnexpectedRemainder');
           throw error;
         }
         if (type.kind === 'int' && !fitsInt(result, type)) return ErrorValue.of('Overflow');
@@ -756,10 +756,7 @@ const MEMBERS: Record<string, () => Member> = {
   divExact: intDivision(
     'std.math.divExact',
     errorSetOf(['DivisionByZero', 'Overflow', 'UnexpectedRemainder']),
-    (a, b) => {
-      if (a % b !== 0n) throw new UnexpectedRemainder();
-      return divExact(a, b, undefined);
-    }
+    (a, b) => divExact(a, b, undefined)
   ),
   mod: intDivision('std.math.mod', MOD_ERRORS, (a, b) => mod(a, b)),
   rem: intDivision('std.math.rem', MOD_ERRORS, (a, b) => rem(a, b)),

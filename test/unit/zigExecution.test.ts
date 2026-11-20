@@ -9273,6 +9273,14 @@ test.each([
   expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
 });
 
+test.each(['@divFloor(x,3)', '@divCeil(x,-3)', '@divExact(x,2)', 'std.math.divExact(i65528,x,2) catch unreachable'])(
+  'wide rounded or exact division accounts for its remainder check: %s',
+  (operation) => {
+    const source = `const std=@import("std");pub fn main()void{var x:i65528=-(1<<65520);_=&x;for(0..500)|_|{_=${operation};}}`;
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  }
+);
+
 test.each([0, 1])('gcd checks proven negative values in argument position %s', (position) => {
   const args = position === 0 ? 'blk:{break :blk -1;},3' : '3,blk:{break :blk -1;}';
   expect(executeProgram('zig', `const std=@import("std");pub fn main()void{_=std.math.gcd(${args});}`)).toMatchObject({

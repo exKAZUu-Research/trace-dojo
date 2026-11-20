@@ -72,7 +72,7 @@ export function divTrunc(a: bigint, b: bigint, type: IntType | undefined): bigin
 export function divFloor(a: bigint, b: bigint, type: IntType | undefined): bigint {
   if (b === 0n) panic(PANIC.divisionByZero);
   let result = a / b;
-  if (a % b !== 0n && a < 0n !== b < 0n) result -= 1n;
+  if (a < 0n !== b < 0n && divisionRemainder(a, b) !== 0n) result -= 1n;
   if (type && !fitsInt(result, type)) panic(PANIC.overflow);
   return result;
 }
@@ -80,17 +80,22 @@ export function divFloor(a: bigint, b: bigint, type: IntType | undefined): bigin
 export function divCeil(a: bigint, b: bigint, type: IntType | undefined): bigint {
   if (b === 0n) panic(PANIC.divisionByZero);
   let result = a / b;
-  if (a % b !== 0n && a < 0n === b < 0n) result += 1n;
+  if (a < 0n === b < 0n && divisionRemainder(a, b) !== 0n) result += 1n;
   if (type && !fitsInt(result, type)) panic(PANIC.overflow);
   return result;
 }
 
 export function divExact(a: bigint, b: bigint, type: IntType | undefined): bigint {
   if (b === 0n) panic(PANIC.divisionByZero);
-  if (a % b !== 0n) panic(PANIC.exactRemainder);
+  if (divisionRemainder(a, b) !== 0n) panic(PANIC.exactRemainder);
   const result = a / b;
   if (type && !fitsInt(result, type)) panic(PANIC.overflow);
   return result;
+}
+
+function divisionRemainder(a: bigint, b: bigint): bigint {
+  spendIntegerOperation(a, b, 'read', spendMemory);
+  return a % b;
 }
 
 /** `@rem`: the remainder with the sign of the dividend; Zig checks the divisor at run time only for zero. */
