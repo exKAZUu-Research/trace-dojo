@@ -6050,6 +6050,31 @@ test('rejecting an unsupported feature ends the run without PHP shutdown replaci
   });
 });
 
+test.each([
+  ['a literal array', '$arr = [];', 'd1;d2;2;[[],[10]]'],
+  ['an array emptied by unset', '$arr = [42]; unset($arr[0]);', 'd2;d1;2;[[],{"1":10}]'],
+])('array_map retains append keys and GC behavior for %s', (_description, setup, stdout) => {
+  const program = `<?php
+    class N {
+      public $next;
+      function __construct(public $id) {}
+      function __destruct() { echo "d{$this->id};"; }
+    }
+    ${setup}
+    $mapped = array_map(fn($x) => $x, $arr);
+    unset($arr);
+    $other = null;
+    $capture = function () use (&$mapped) {};
+    $capture = function () use (&$other) {};
+    $node = new N(1); $node->next = $node; $node = null;
+    $node = new N(2); $node->next = $node; $node = null;
+    echo gc_collect_cycles(), ';';
+    $copy = $mapped;
+    $copy[] = 10;
+    echo json_encode([$mapped, $copy]);`;
+  expect(run(program)).toMatchObject({ kind: 'executed', stdout });
+});
+
 test('gc_collect_cycles() frees a destructed object that only a collected object cycle held', () => {
   expect(
     run(
