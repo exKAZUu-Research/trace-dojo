@@ -79,6 +79,27 @@ export function canDeclareEarly(decl: ClassDecl, declared: Set<string>): boolean
   return canBindClass(decl, (parent) => declared.has(parent) || findClass(parent)?.isUser === false);
 }
 
+/** Raised while hoisting a class whose override checks name a class not declared yet. */
+class DeferredDeclaration extends Error {}
+
+let hoisting = false;
+
+/**
+ * Declares a class while hoisting, as PHP's early binding does, or returns undefined when an override check names a
+ * class not declared yet: PHP then declares the class when its statement runs.
+ */
+export function declareClassEarly(decl: ClassDecl, row: number): PhpClass | undefined {
+  hoisting = true;
+  try {
+    return declareClass(decl, row);
+  } catch (error) {
+    if (error instanceof DeferredDeclaration) return undefined;
+    throw error;
+  } finally {
+    hoisting = false;
+  }
+}
+
 // Declaration ----------------------------------------------------------------------------------------------------------
 
 export function declareClass(decl: ClassDecl, row: number): PhpClass {
@@ -873,13 +894,17 @@ function checkOverride(cls: PhpClass, method: Method, parent: Method, reportTent
   }
 }
 
-/** The fatal error for an override PHP rejects, or cannot check because `compatibility` names a missing class. */
+/**
+ * The fatal error for an override PHP rejects, or cannot check because `compatibility` names a missing class; while
+ * hoisting, the latter defers the declaration instead.
+ */
 function incompatibleMethod(
   method: Method,
   parentText: string,
   compatibility: false | string,
   row: number
-): FatalError {
+): FatalError | DeferredDeclaration {
+  if (hoisting && compatibility !== false) return new DeferredDeclaration();
   return new FatalError(
     compatibility === false
       ? `Declaration of ${signatureText(method)} must be compatible with ${parentText}`

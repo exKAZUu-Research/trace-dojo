@@ -5232,6 +5232,19 @@ try { range(0.1, null, 1); } catch (ValueError $e) { echo explode("\\n", $e->get
   });
 });
 
+test('a class whose override names a later class is declared when its statement runs', () => {
+  expect(
+    run(
+      '<?php class Animal {} class Zoo { function get(): Animal { return new Animal; } } echo class_exists("DogZoo") ? "y" : "n"; class DogZoo extends Zoo { function get(): Dog { return new Dog; } } class Dog extends Animal {} echo get_class((new DogZoo)->get());'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'nDog' });
+  expect(
+    run(
+      '<?php class P { function f(Dog $d) {} } class C extends P { function f(Animal $a) {} } class Animal {} class Dog extends Animal {} echo "ok";'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'ok' });
+});
+
 test('an override naming a missing class reports that its compatibility cannot be checked', () => {
   for (const [parent, child, expected] of [
     [

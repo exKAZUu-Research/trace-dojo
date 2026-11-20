@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 868 -- Runs PHP statements iteratively on a heap block stack with shared loop/try/foreach helpers.
+// code-gauge-allow-file fileNcss 869 -- Runs PHP statements iteratively on a heap block stack with shared loop/try/foreach helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { CompileError } from '../interpreter/diagnostics';
 import type { ArrayCursor } from './arrayOrder';
@@ -13,6 +13,7 @@ import {
   canCall,
   canDeclareEarly,
   declareClass,
+  declareClassEarly,
   findClass,
   propNameOf,
   propRef,
@@ -66,6 +67,7 @@ export function runStatements(program: Program, conversionError?: CompileError):
 
 const hoisted = new WeakSet<Stmt>();
 
+// code-gauge-allow functionCognitiveComplexity 16 -- Hoists functions and classes in source order, as PHP's early binding declares them.
 function hoist(body: Stmt[], conversionError?: CompileError): void {
   const runtime = rt();
   const declared = new Set<string>();
@@ -87,7 +89,7 @@ function hoist(body: Stmt[], conversionError?: CompileError): void {
     publishNotices(statement.decl.endRow);
     if (runtime.classes.has(lower(statement.decl.name)) || !canDeclareEarly(statement.decl, declared)) continue;
     runtime.row = statement.row;
-    declareClass(statement.decl, statement.row);
+    if (!declareClassEarly(statement.decl, statement.row)) continue;
     declared.add(lower(statement.decl.name));
     hoisted.add(statement);
   }
