@@ -952,6 +952,9 @@ interface String {
 interface Symbol {
     readonly description: string | undefined;
 }
+interface Number {
+    toLocaleString(locales?: Intl.LocalesArgument, options?: Intl.NumberFormatOptions): string;
+}
 interface BigIntToLocaleStringOptions {
     localeMatcher?: string;
     style?: string;

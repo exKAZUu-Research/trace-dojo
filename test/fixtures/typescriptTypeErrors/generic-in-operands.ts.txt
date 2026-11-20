@@ -8,3 +8,13 @@ function unknownNonNull(value: unknown) { if (value != null) return "id" in valu
 function genericTruthy<T>(value: T) { if (value) return "id" in value; }
 function weakKey<T extends any>(name: T, value: object) { return name in value; }
 function nullableKey<T extends string | null>(name: T, value: object) { return name in value; }
+function negativeObjectGuard(value: unknown) {
+  if (!value || typeof value === "object") return false;
+  return "id" in value;
+}
+function nonNullAssertion(value: unknown) {
+  return "id" in value!;
+}
+function onlyDefined(value: unknown) {
+  if (value !== undefined && typeof value === "object") return "id" in value;
+}

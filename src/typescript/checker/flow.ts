@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 418 -- Keeps flow state, joins, and reference narrowing together.
+// code-gauge-allow-file fileNcss 425 -- Keeps flow state, joins, and reference narrowing together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -12,6 +12,7 @@ import {
   anonymousObject,
   bigintType,
   booleanType,
+  emptyObjectType,
   emptyStructure,
   falseType,
   filterType,
@@ -33,6 +34,7 @@ import {
   symbolType,
   trueType,
   type Type,
+  typeMembers,
   undefinedType,
   unionOf,
   unknownType,
@@ -340,22 +342,20 @@ export class Flow {
   // code-gauge-allow functionCognitiveComplexity 22 -- Follows TypeScript's narrowing of each kind of type by a `typeof` result.
   /** The part of a type that `typeof value === name` keeps (or, with `assumeTrue` false, that the opposite keeps). */
   narrowByTypeof(type: Type, name: string, assumeTrue: boolean): Type {
-    if (assumeTrue) {
-      if (isAnyLike(type) || isIntrinsic(type, 'unknown')) {
-        const narrowed = typeofTypes[name];
-        if (narrowed) return narrowed();
-        if (isAnyLike(type)) return type;
-        if (name === 'object') return unionOf([nonPrimitiveType, nullType]);
-        if (name === 'function') return this.c.globalType('Function');
-        return type;
-      }
-      const kept = filterType(type, (member) => this.typeofMatches(member, name) !== false);
-      return mapType(kept, (member) =>
-        this.typeofMatches(member, name) === 'maybe' ? this.narrowMaybe(member, name) : member
-      );
+    if (isAnyLike(type) || isIntrinsic(type, 'unknown')) {
+      if (!assumeTrue) return type;
+      const narrowed = typeofTypes[name];
+      if (narrowed) return narrowed();
+      if (isAnyLike(type)) return type;
+      if (name === 'object') return unionOf([nonPrimitiveType, nullType]);
+      return name === 'function' ? this.c.globalType('Function') : type;
     }
-    if (isAnyLike(type) || isIntrinsic(type, 'unknown')) return type;
-    return filterType(type, (member) => this.typeofMatches(member, name) !== true);
+    if (!assumeTrue) return filterType(type, (member) => this.typeofMatches(member, name) !== true);
+    return mapType(type, (member) => {
+      const matches = this.typeofMatches(member, name);
+      if (matches === 'maybe') return this.narrowMaybe(member, name);
+      return matches ? member : neverType;
+    });
   }
 
   private narrowMaybe(member: Type, name: string): Type {
@@ -364,12 +364,19 @@ export class Flow {
       (name === 'function'
         ? this.c.globalType('Function')
         : name === 'object'
-          ? unionOf([nonPrimitiveType, nullType])
+          ? this.typeofObjectType(member)
           : undefined);
     if (!narrowed) return member;
     return member.kind === 'typeParameter' || member.kind === 'intersection'
       ? intersectionOf([member, narrowed], this.c.budget)
       : narrowed;
+  }
+
+  private typeofObjectType(type: Type): Type {
+    const bound = nullishConstraint(this.c, type);
+    return isIntrinsic(bound, 'unknown') || typeMembers(bound).some((member) => isIntrinsic(member, 'null'))
+      ? unionOf([nonPrimitiveType, nullType])
+      : nonPrimitiveType;
   }
 
   // code-gauge-allow functionNcss 36 -- One case per `typeof` result.
@@ -447,6 +454,8 @@ export class Flow {
   }
 
   private objectTypeofMatches(type: Type, name: string): boolean | 'maybe' {
+    const bound = type.kind === 'intersection' ? nullishConstraint(this.c, type) : type;
+    if (bound === emptyObjectType || bound === narrowedUnknownObjectType) return name === 'undefined' ? false : 'maybe';
     const isFunction =
       this.c.signaturesOf(type, 'call').length > 0 ||
       this.c.signaturesOf(type, 'construct').length > 0 ||
@@ -456,19 +465,18 @@ export class Flow {
     return name === 'object' && !isFunction;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Follows TypeScript's narrowing of each kind of type by truthiness.
+  // code-gauge-allow functionCognitiveComplexity 17 -- Follows TypeScript's narrowing of each kind of type by truthiness.
   /** The part of a type that a truthy (or falsy) value has. */
   narrowByTruthiness(type: Type, assumeTrue: boolean): Type {
-    if (assumeTrue) {
-      if (isIntrinsic(type, 'unknown')) return narrowedUnknownObjectType;
+    if (assumeTrue)
       return nonNullableType(
         this.c,
         filterType(type, (member) => member.kind !== 'literal' || Boolean(member.value))
       );
-    }
     if (isAnyLike(type) || isIntrinsic(type, 'unknown')) return type;
     return mapType(type, (member) => {
       if (member.kind === 'literal') return member.value ? neverType : member;
+      if (member === narrowedUnknownObjectType || member === emptyObjectType) return member;
       if (member.kind === 'object' || isIntrinsic(member, 'object') || isIntrinsic(member, 'symbol')) return neverType;
       if (member === booleanType) return falseType;
       return member;

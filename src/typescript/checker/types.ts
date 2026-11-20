@@ -586,6 +586,7 @@ export function anonymousObject(resolve: () => Structure, extra: Partial<ObjectT
 
 /** `{}`, which every value but `null` and `undefined` is assignable to. */
 export const emptyObjectType = anonymousObject(emptyStructure, { nonGeneric: true });
+// TypeScript distinguishes non-null unknown from a written {} for the in operator.
 export const narrowedUnknownObjectType = anonymousObject(emptyStructure, { nonGeneric: true });
 
 export function simpleProperty(name: string, type: Type, options: Partial<Property> = {}): Property {
