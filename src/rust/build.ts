@@ -1,5 +1,6 @@
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget, ExecutionLimitError, LIMITS } from '../interpreter/limits';
+import { NESTING_TOO_DEEP } from '../interpreter/treeSitter';
 import type { Item } from './ast';
 import { Checker } from './checker';
 import { Converter } from './convert';
@@ -34,8 +35,13 @@ export function buildProgram(source: string, atomicRows: ReadonlySet<number> = n
     // A loan check can visit a loan at each CFG point, so it has a separate budget from the learner's run.
     return typeCheck(source, atomicRows, new ExecutionBudget(32 * LIMITS.maxOperations));
   } catch (error) {
-    if (!(error instanceof ExecutionLimitError)) throw error;
-    throw new CompileError([{ row: 0, message: 'このプログラムは、Rust のコンパイル処理の上限を超えました。' }]);
+    if (error instanceof ExecutionLimitError) {
+      throw new CompileError([{ row: 0, message: 'このプログラムは、Rust のコンパイル処理の上限を超えました。' }]);
+    }
+    if (error instanceof RangeError && /maximum call stack/i.test(error.message)) {
+      throw new CompileError([{ row: 0, message: NESTING_TOO_DEEP }]);
+    }
+    throw error;
   }
 }
 

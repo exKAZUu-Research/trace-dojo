@@ -2,7 +2,7 @@ import type { Node, Tree } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
 import { type TraceAnnotation, traceAnnotationsIn } from '../interpreter/traceAnnotations';
-import { findSyntaxErrors, loadParser, parseSource } from '../interpreter/treeSitter';
+import { assertNestingDepth, findSyntaxErrors, loadParser, parseSource } from '../interpreter/treeSitter';
 import type { Crate } from './ast';
 import { Converter } from './convert';
 
@@ -40,6 +40,7 @@ function reparse(text: string, convert: (root: Node) => unknown): unknown {
   const tree = parser.parse(text);
   if (!tree) throw new Error('The parser returned no tree');
   reparsedTrees.push(tree);
+  assertNestingDepth(tree.rootNode);
   const errors = findSyntaxErrors(parser, text, MISSING_TOKEN_NAMES);
   if (errors.length > 0) throw new CompileError(errors);
   return convert(tree.rootNode);

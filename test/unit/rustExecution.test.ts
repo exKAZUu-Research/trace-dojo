@@ -1710,6 +1710,16 @@ test('nested loops with stable ownership states compile and run within the opera
   });
 });
 
+test.each(['println!', 'vec!'])('bounds the depth of reparsed Rust %s arguments', (macro) => {
+  const expression = Array.from({ length: 9500 }, () => '1').join('+');
+  const args = macro === 'println!' ? `"{}", ${expression}` : expression;
+  const program = rustMain(`${macro}(${args});`);
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 1, message: expect.stringContaining('入れ子が深すぎます') }],
+  });
+});
+
 test('loan analysis leaves the execution budget available to straight-line programs', () => {
   const statements = Array.from(
     { length: 140 },
