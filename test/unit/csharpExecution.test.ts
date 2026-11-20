@@ -156,6 +156,14 @@ test.each([
     expected: { row: 2, message: 'CS1513: } が必要です' },
   },
   { program: 'int x = 3 +;\n', expected: { row: 0, message: "CS1525: ';' は無効です" } },
+  ...['x + y;', 'x > 1 ? 1 : 2;', 'x switch { _ => 1 };', 'if (x > 0) x * 2;', 'x.ToString;'].map((statement) => ({
+    program: `int x = 1, y = 2;\n${statement}\n`,
+    expected: {
+      row: 1,
+      message:
+        'CS0201: 代入、呼び出し、インクリメント、デクリメント、新しいオブジェクトの式のみがステートメントとして使用できます',
+    },
+  })),
 ])('a syntax error is reported as Roslyn reports it: $expected.message', ({ program, expected }) => {
   expect(executeProgram('csharp', program)).toEqual({ kind: 'compileError', diagnostics: [expected] });
 });

@@ -825,9 +825,12 @@ export abstract class StatementBinder extends PatternBinder {
     };
   }
 
-  /** Reports CS0201 for an expression that stands as a statement but is not one that may. */
+  /**
+   * Reports CS0201 for an expression that stands as a statement but is not one that may. An expression that failed to
+   * bind is judged by its syntax, as Roslyn does, so that `x.Missing;` reports both errors and `Missing();` one.
+   */
   private requireStatementExpression(expression: BoundExpression, node: Expression): void {
-    if (this.isStatementExpression(expression)) return;
+    if (expression.type.kind === 'error' ? isStatementSyntax(node) : this.isStatementExpression(expression)) return;
     this.error(
       node,
       'CS0201',
@@ -1223,4 +1226,10 @@ function labelText(value: unknown, type: Type): string {
 /** A block of one statement, which an expression-bodied member's body becomes. */
 function blockOf(statement: BoundStatement, row: number): BoundBlock {
   return { kind: 'block', statements: [statement], capturedLocals: [], locals: [], row, step: 'none' };
+}
+
+/** Whether an expression's syntax may stand as a statement: a call, `new`, an increment, or an assignment. */
+function isStatementSyntax(node: Expression): boolean {
+  if (node.kind === 'conditionalAccess') return isStatementSyntax(node.access);
+  return ['invocation', 'new', 'implicitNew', 'increment', 'assign', 'throw'].includes(node.kind);
 }

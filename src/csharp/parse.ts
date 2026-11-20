@@ -304,44 +304,136 @@ function ancestorOfType(node: Node, type: string): Node | undefined {
  * Parenthesizes expressions that stand as statements, such as `1 + 2;`, which C#'s grammar accepts (the compiler
  * then rejects them as CS0201) but tree-sitter's cannot parse; a parenthesized expression parses, keeping the rows.
  */
-// code-gauge-allow functionNcss 35 -- One case per kind of syntax or value that the function handles.
-// code-gauge-allow functionCognitiveComplexity 25 -- Each branch handles one case of the C# rule that the function applies.
 function parenthesizeExpressionStatements(source: string): string {
   const tree = parser.parse(source);
   if (!tree) return source;
   try {
-    const edits: { index: number; text: string }[] = [];
-    for (const error of tree.rootNode.descendantsOfType('ERROR')) {
-      const next = error?.nextNamedSibling;
-      if (
-        !error ||
-        next?.type !== 'expression_statement' ||
-        next.startPosition.row !== error.endPosition.row ||
-        error.parent?.type !== 'block'
-      )
-        continue;
-      const semicolon = next.lastChild;
-      if (semicolon?.type !== ';') continue;
-      edits.push({ index: error.startIndex, text: '(' }, { index: semicolon.startIndex, text: ')' });
-    }
-    // `1 + 2;` may also parse as `1` without its `;` and then `+2;`.
-    for (const statement of tree.rootNode.descendantsOfType('expression_statement')) {
-      const missing = statement?.lastChild;
-      if (!statement || !missing?.isMissing || missing.type !== ';') continue;
-      const holder = statement.parent?.type === 'global_statement' ? statement.parent : statement;
-      const nextHolder = holder.nextNamedSibling;
-      const next = nextHolder?.type === 'global_statement' ? nextHolder.firstNamedChild : nextHolder;
-      const operator = next?.firstChild?.firstChild;
-      if (next?.type !== 'expression_statement' || next.startPosition.row !== statement.endPosition.row) continue;
-      if (!operator || !['+', '-', '*', '/', '%', '==', '!=', '<', '>'].includes(operator.type)) continue;
-      const semicolon = next.lastChild;
-      if (semicolon?.type !== ';' || semicolon.isMissing) continue;
-      edits.push({ index: statement.startIndex, text: '(' }, { index: semicolon.startIndex, text: ')' });
-    }
+    const joined = [...parenthesizedErrors(tree.rootNode), ...parenthesizedSplitStatements(tree.rootNode)];
+    const edits = [...joined, ...parenthesizedStatements(tree.rootNode, source, joined)];
     let result = source;
     for (const edit of edits.toSorted((a, b) => b.index - a.index))
       result = result.slice(0, edit.index) + edit.text + result.slice(edit.index);
     return result;
+  } finally {
+    tree.delete();
+  }
+}
+
+interface Edit {
+  index: number;
+  text: string;
+}
+
+/** `x + 1;` read as an error `x` and the statement `+ 1;` on the same row, which the edits join as one expression. */
+function parenthesizedErrors(root: Node): Edit[] {
+  const edits: Edit[] = [];
+  for (const error of root.descendantsOfType('ERROR')) {
+    const sibling = error?.nextNamedSibling;
+    // A top-level statement is wrapped in a global statement.
+    const next = sibling?.type === 'global_statement' ? sibling.firstNamedChild : sibling;
+    if (
+      !error ||
+      next?.type !== 'expression_statement' ||
+      next.startPosition.row !== error.endPosition.row ||
+      !isStatementHolder(error.parent)
+    )
+      continue;
+    const semicolon = next.lastChild;
+    if (semicolon?.type !== ';') continue;
+    edits.push({ index: error.startIndex, text: '(' }, { index: semicolon.startIndex, text: ')' });
+  }
+  return edits;
+}
+
+/** The statement after one, looking through the global statements that wrap top-level ones. */
+function statementAfter(statement: Node): Node | null {
+  const holder = statement.parent?.type === 'global_statement' ? statement.parent : statement;
+  const next = holder.nextNamedSibling;
+  return next?.type === 'global_statement' ? next.firstNamedChild : next;
+}
+
+/** `1 + 2;` read as `1` without its `;` and then `+2;`, which the edits join as one expression. */
+function parenthesizedSplitStatements(root: Node): Edit[] {
+  const edits: Edit[] = [];
+  for (const statement of root.descendantsOfType('expression_statement')) {
+    const missing = statement?.lastChild;
+    if (!statement || !missing?.isMissing || missing.type !== ';') continue;
+    const next = statementAfter(statement);
+    const operator = next?.firstChild?.firstChild;
+    if (next?.type !== 'expression_statement' || next.startPosition.row !== statement.endPosition.row) continue;
+    if (!operator || !['+', '-', '*', '/', '%', '==', '!=', '<', '>'].includes(operator.type)) continue;
+    const semicolon = next.lastChild;
+    if (semicolon?.type !== ';' || semicolon.isMissing) continue;
+    edits.push({ index: statement.startIndex, text: '(' }, { index: semicolon.startIndex, text: ')' });
+  }
+  return edits;
+}
+
+/**
+ * The edits that parenthesize the other statements with an error inside, such as `x + y;`, `x ? 1 : 2;`, or a `switch`
+ * expression, which tree-sitter reads as broken declarations, labels, or blocks: from such a statement to the first
+ * `;` of it or of the statements after it whose text parses as an expression once parenthesized.
+ */
+function parenthesizedStatements(root: Node, source: string, edits: Edit[]): Edit[] {
+  const added: Edit[] = [];
+  let covered = -1;
+  for (const statement of root.descendantsOfType([
+    'expression_statement',
+    'local_declaration_statement',
+    'labeled_statement',
+  ])) {
+    if (!statement?.hasError || statement.startIndex < covered) continue;
+    const holder = statement.parent?.type === 'global_statement' ? statement.parent : statement;
+    if (holder === statement && !isStatementHolder(statement.parent)) continue;
+    if (edits.some((edit) => edit.index >= statement.startIndex && edit.index < statement.endIndex)) continue;
+    const end = expressionEnd(holder, statement.startIndex, source);
+    if (end === undefined) continue;
+    added.push({ index: statement.startIndex, text: '(' }, { index: end, text: ')' });
+    covered = end;
+  }
+  return added;
+}
+
+/** Whether a node holds statements: a block, the compilation unit, or a statement that embeds one, as `if` does. */
+function isStatementHolder(node: Node | null): boolean {
+  return node !== null && STATEMENT_HOLDERS.has(node.type);
+}
+
+const STATEMENT_HOLDERS = new Set([
+  'block',
+  'compilation_unit',
+  'if_statement',
+  'while_statement',
+  'do_statement',
+  'for_statement',
+  'foreach_statement',
+]);
+
+/** The position of the first `;`, of a statement or of a few after it, up to which the text from `start` parses. */
+function expressionEnd(holder: Node, start: number, source: string): number | undefined {
+  // Roslyn reads `a ? b` as a declaration of a nullable type, so `a ? b : c;` is not an expression to it.
+  if (/^[A-Z_a-z]\w*\s*\?\s*[@A-Z_a-z]/u.test(source.slice(start))) return undefined;
+  let current: Node | null = holder;
+  for (let count = 0; current && count < 8; count++, current = current.nextNamedSibling) {
+    const semicolon = lastToken(current);
+    if (semicolon.type !== ';' || semicolon.isMissing) continue;
+    if (parsesAsExpression(source.slice(start, semicolon.startIndex))) return semicolon.startIndex;
+  }
+  return undefined;
+}
+
+function lastToken(node: Node): Node {
+  let current = node;
+  while (current.lastChild) current = current.lastChild;
+  return current;
+}
+
+/** Whether a text parses without errors as a parenthesized expression statement. */
+function parsesAsExpression(text: string): boolean {
+  const tree = parser.parse(`class C { void M() { (${text}); } }`);
+  if (!tree) return false;
+  try {
+    return !tree.rootNode.hasError;
   } finally {
     tree.delete();
   }
