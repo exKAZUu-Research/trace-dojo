@@ -70,7 +70,8 @@ export class SequenceEditor {
         makeEach(
           frame,
           count,
-          (index) => this.constructAt(frame, self.location(index), (destination) => make(index, destination)),
+          (index) =>
+            this.constructAt(frame, this.elementLocation(self, index), (destination) => make(index, destination)),
           () => (this.kind === 'deque' ? undefined : destroy),
           self.items,
           this.kind === 'vector' ? 'reverse' : 'forward'
@@ -171,6 +172,11 @@ export class SequenceEditor {
       frame.runtime.spend();
       self.append(make());
     }
+  }
+
+  /** Where an element is constructed: a class object binds its tracked position, while a scalar needs none retained. */
+  private elementLocation(self: SequenceValue, index: number): Ptr {
+    return this.ops.type.kind === 'class' ? self.location(index) : new Ptr(self, index);
   }
 
   private constructAt(frame: Frame, location: Ptr, make: ElementFactory): Value {
