@@ -1,0 +1,38 @@
+function show(write: () => void) {
+  try { write(); }
+  catch (error) { if (error instanceof Error) console.log(error.message); }
+}
+const key = Symbol('key');
+Object.defineProperties(Number.prototype, {
+  getterOnly: { get() { throw new Error('getter called'); }, configurable: true },
+  readOnly: { value: 1, configurable: true },
+  writableData: { value: 1, writable: true, configurable: true },
+  setter: {
+    set(value: number) { 'use strict'; console.log('setter', typeof this, this, value); },
+    configurable: true,
+  },
+});
+for (const prototype of [String.prototype, Boolean.prototype, BigInt.prototype, Symbol.prototype]) {
+  Object.defineProperty(prototype, key, { get() { throw new Error('getter called'); }, configurable: true });
+}
+const symbol: any = Symbol('x');
+const number: any = 3;
+const text: any = 'text';
+const flag: any = false;
+const large: any = 42n;
+const nil: any = null;
+show(() => { 'use strict'; symbol.description = 'a'; });
+show(() => { 'use strict'; number.getterOnly = 1; });
+show(() => { 'use strict'; text[key] = 1; });
+show(() => { 'use strict'; flag[key] = 1; });
+show(() => { 'use strict'; large[key] = 1; });
+show(() => { 'use strict'; symbol[key] = 1; });
+show(() => { 'use strict'; text[0] = 1; });
+show(() => { 'use strict'; text.length = 1; });
+show(() => { 'use strict'; number.readOnly = 1; });
+show(() => { 'use strict'; number.writableData = 1; });
+show(() => { 'use strict'; number.missing = 1; });
+show(() => { 'use strict'; number.setter = 1; });
+number.getterOnly = 1;
+console.log('loose assignment survived');
+show(() => { nil.x = 1; });

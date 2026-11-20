@@ -342,42 +342,25 @@ export class Runtime {
    */
   set(target: Value, key: Key, value: Value, lookupStart?: JsObject, strict = true): void {
     const start = lookupStart ?? target;
-    if (!(start instanceof JsObject)) {
-      this.setOnPrimitive(start, key, value, strict);
-      return;
+    if (start === undefined || start === null) {
+      this.throwError('TypeError', `Cannot set properties of ${String(start)} (setting '${String(key)}')`);
     }
-    const property = this.findProperty(start, key);
+    const base = this.toObject(start);
+    const property = this.findProperty(base, key);
     if (property && isAccessor(property)) {
       if (property.set) this.call(property.set, target, [value], this.currentRow);
       else
         this.refuse(
           strict,
-          () => `Cannot set property ${String(key)} of ${this.receiverText(start)} which has only a getter`
+          () => `Cannot set property ${String(key)} of ${this.receiverText(base)} which has only a getter`
         );
-      return;
-    }
-    if (!(target instanceof JsObject) || (property && !property.writable)) {
+    } else if (property?.writable === false || (lookupStart && !(target instanceof JsObject))) {
       this.refuse(strict, () => this.readOnlyMessage(key, target));
-      return;
+    } else if (target instanceof JsObject) {
+      this.writeOwnData(target, key, value, strict);
+    } else {
+      this.refuse(strict, `Cannot create property '${String(key)}' on ${typeof target} '${String(target)}'`);
     }
-    this.writeOwnData(target, key, value, strict);
-  }
-
-  /** Assigns a property of a primitive, which only a setter of its prototype accepts. */
-  private setOnPrimitive(target: Primitive, key: Key, value: Value, strict: boolean): void {
-    if (target === undefined || target === null) {
-      this.throwError('TypeError', `Cannot set properties of ${String(target)} (setting '${String(key)}')`);
-    }
-    const property = this.findProperty(this.toObject(target), key);
-    if (property && !isAccessor(property) && !property.writable) {
-      this.refuse(strict, () => this.readOnlyMessage(key, target));
-      return;
-    }
-    if (property && isAccessor(property) && property.set) {
-      this.call(property.set, target, [value], this.currentRow);
-      return;
-    }
-    this.refuse(strict, `Cannot create property '${String(key)}' on ${typeof target} '${String(target)}'`);
   }
 
   /** Stores a data property of the object assigned to, which an own accessor or a read-only property refuses. */
