@@ -231,7 +231,7 @@ function traitCandidates(
     if (!impl.trait) continue;
     const { trait } = impl.trait;
     const declared = trait.methods.get(name);
-    if (!declared?.selfMode || (trait.builtin && !inScope(trait))) continue;
+    if (!declared?.selfMode || !inScope(trait)) continue;
     const fn = impl.methods.get(name) ?? declared;
     candidates.push({
       trait,

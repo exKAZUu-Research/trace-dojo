@@ -325,6 +325,16 @@ function numberReceiver(c: Checker, expr: Extract<Expr, { kind: 'methodCall' }>,
 }
 
 function noMethod(c: Checker, expr: Extract<Expr, { kind: 'methodCall' }>, receiverType: Type): never {
+  const snapshot = c.unifier.snapshot();
+  const candidate = lookupMethod(c.program, c.solver, receiverType, expr.method);
+  c.unifier.rollback(snapshot);
+  const trait = candidate && candidate !== 'ambiguous' && (candidate.fn.trait ?? candidate.fn.impl?.trait?.trait);
+  if (trait && !traitInScope(c, trait)) {
+    compileError(
+      expr.methodSpan,
+      `メソッド ${expr.method} はトレイト ${trait.name} のものなので、use でトレイトを取り込んでください。`
+    );
+  }
   const t = typeToString(resolve(receiverType));
   const fieldType = fieldTypeOf(c, receiverType, expr.method);
   if (fieldType) {

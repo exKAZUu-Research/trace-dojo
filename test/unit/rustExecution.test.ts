@@ -1916,6 +1916,21 @@ test('clones Rust string iterator search positions and predicate state', () => {
   });
 });
 
+test('uses in-scope Rust trait methods before resolving ambiguity', () => {
+  const program = `mod first {
+    pub trait Extension { fn choose(&self) -> i32; }
+    impl Extension for i32 { fn choose(&self) -> i32 { 1 } }
+}
+mod second {
+    pub trait Extension { fn choose(&self) -> i32 { 2 } }
+    impl Extension for i32 {}
+}
+use second::Extension;
+fn bounded<T: Extension>(value: T) -> i32 { value.choose() }
+fn main() { println!("{} {}", 1_i32.choose(), bounded(2_i32)); }`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '2 2\n' });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {
