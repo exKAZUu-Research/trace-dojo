@@ -1,10 +1,10 @@
-// code-gauge-allow-file fileNcss 449 -- Resolves related type operators sharing generic parameters and type construction.
+// code-gauge-allow-file fileNcss 477 -- Resolves related type operators sharing generic parameters and type construction.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker, Mapper } from './checker';
 import { conditionalBranch, isGenericObjectOrIndexType, mappedOptionality } from './genericTypes';
 import { IndexedAccessKeys } from './indexedAccessKeys';
-import { applicableIndex, isPatternKey } from './indexInfos';
+import { addIndexInfo, applicableIndex, isPatternKey } from './indexInfos';
 import { applyModifier, mappedArrayOrTuple, type WithMappedSource } from './mappedArrays';
 import { printedPropertyName } from './print';
 import { named, templateFragmentText } from './syntax';
@@ -18,6 +18,7 @@ import {
   type ConditionalType,
   emptyStructure,
   errorType,
+  type IndexedAccessType,
   type IndexInfo,
   intersectionOf,
   isAnyLike,
@@ -56,6 +57,7 @@ const stringMappingParameter: TypeParameter = {
 /** Resolves the type operators: `keyof`, indexed access, conditional, mapped, and template literal types. */
 export class TypeOperators {
   private readonly indexedAccessKeys: IndexedAccessKeys;
+  private readonly deferredAccesses = new WeakMap<Type, WeakMap<Type, IndexedAccessType>>();
   private readonly mappedParameters = new Map<number, TypeParameter>();
   /** The keys and name types of a mapped type that a name type maps to each name, by the structure being built. */
   private readonly mappedKeys = new WeakMap<Structure, Map<string, { keys: Type[]; nameTypes: Type[] }>>();
@@ -290,16 +292,20 @@ export class TypeOperators {
       structure.properties.set(name, this.mappedProperty(info, keys, name, unionOf(nameTypes)));
       return;
     }
-    const indexInfo = (): IndexInfo => ({
-      type: this.c.instantiate(info.template, mapper),
-      readonly: info.readonlyModifier === '+',
-    });
-    // A key of `any` maps every string key, as TypeScript gives `{ [K in any]: T }` a string index signature.
-    if (isIntrinsic(nameMember, 'string') || isAnyLike(nameMember)) structure.stringIndex = indexInfo();
-    else if (isIntrinsic(nameMember, 'number')) structure.numberIndex = indexInfo();
-    else if (isIntrinsic(nameMember, 'symbol')) structure.symbolIndex = indexInfo();
-    else if (isPatternKey(nameMember))
-      structure.patternIndexes = [...(structure.patternIndexes ?? []), { ...indexInfo(), keyType: nameMember }];
+    const key = isAnyLike(nameMember) ? stringType : nameMember;
+    if (key !== stringType && key !== numberType && key !== symbolType && !isPatternKey(key)) return;
+    const source =
+      !info.readonlyModifier && info.source ? applicableIndex(this.c, this.c.structureOf(info.source), key) : undefined;
+    const type = this.c.instantiate(info.template, mapper);
+    addIndexInfo(
+      structure,
+      key,
+      {
+        type: info.optionalModifier === '+' ? unionOf([type, undefinedType]) : type,
+        readonly: applyModifier(info.readonlyModifier, source?.readonly ?? false),
+      },
+      true
+    );
   }
 
   /** The property that `keys` map to, which takes the modifiers of the source property the first key names. */
@@ -332,7 +338,12 @@ export class TypeOperators {
   keyofType(type: Type): Type {
     // As TypeScript's `getIndexTypeForMappedType`, `keyof { [P in K]: X }` is `K`.
     if (type.kind === 'object' && type.mapped && !type.mapped.nameType) return type.mapped.constraint;
-    if (this.c.relations.isGeneric(type)) return { kind: 'keyof', id: newTypeId(), type };
+    if (
+      isGenericObjectOrIndexType(type) ||
+      (type.kind === 'object' &&
+        type.tuple?.elements.some((element) => element.rest && isGenericObjectOrIndexType(element.type)))
+    )
+      return { kind: 'keyof', id: newTypeId(), type };
     if (isAnyLike(type) || isIntrinsic(type, 'never')) return unionOf([stringType, numberType, symbolType]);
     if (type.kind === 'union')
       return intersectionOf(
@@ -347,6 +358,29 @@ export class TypeOperators {
     }
     // TypeScript's `getIndexTypeForMappedType` gives a mapped type's constraint, as `string` for `Record<string, T>`.
     return type.mappedKeys ?? this.memberKeys(type.resolve());
+  }
+
+  /** The keys available for every instantiation of the object in a deferred `keyof`. */
+  guaranteedKeys(type: Type, visiting = new Set<Type>()): Type {
+    this.c.budget.spend();
+    if (isAnyLike(type) || visiting.has(type)) return neverType;
+    visiting.add(type);
+    try {
+      if (type.kind === 'union')
+        return intersectionOf(
+          type.types.map((member) => this.guaranteedKeys(member, visiting)),
+          this.c.budget
+        );
+      if (type.kind === 'intersection')
+        return unionOf(type.types.map((member) => this.guaranteedKeys(member, visiting)));
+      if (type.kind === 'object' && type.tuple) return this.memberKeys(type.resolve());
+      const constraint = this.c.baseConstraint(type);
+      if (constraint !== type) return this.guaranteedKeys(constraint, visiting);
+      const keys = this.keyofType(type);
+      return keys.kind === 'keyof' ? this.guaranteedKeys(keys.type, visiting) : keys;
+    } finally {
+      visiting.delete(type);
+    }
   }
 
   private memberKeys(structure: Structure): Type {
@@ -392,16 +426,8 @@ export class TypeOperators {
         return errorType;
       }
     }
-    if (this.c.relations.isGeneric(object) || this.c.relations.isGeneric(index)) {
-      return (
-        this.c.relations.stringIndexReadByGenericKey(object, index) ?? {
-          kind: 'indexedAccess',
-          id: newTypeId(),
-          objectType: object,
-          indexType: index,
-        }
-      );
-    }
+    if (isGenericObjectOrIndexType(object) || isGenericObjectOrIndexType(index) || genericTupleIndex(object, index))
+      return this.c.relations.stringIndexReadByGenericKey(object, index) ?? this.deferredAccess(object, index);
     if (index.kind === 'union') return unionOf(index.types.map((member) => this.indexedAccess(object, member, node)));
     if (isAnyLike(object)) return anyType;
     if (object.kind === 'union') return unionOf(object.types.map((member) => this.indexedAccess(member, index, node)));
@@ -412,6 +438,19 @@ export class TypeOperators {
     if (node)
       this.c.error(node, `型 '${this.c.print(index)}' は型 '${this.c.print(object)}' のインデックスに使えません。`);
     return errorType;
+  }
+
+  private deferredAccess(object: Type, index: Type): IndexedAccessType {
+    let indexes = this.deferredAccesses.get(object);
+    if (!indexes) {
+      indexes = new WeakMap();
+      this.deferredAccesses.set(object, indexes);
+    }
+    const existing = indexes.get(index);
+    if (existing) return existing;
+    const access: IndexedAccessType = { kind: 'indexedAccess', id: newTypeId(), objectType: object, indexType: index };
+    indexes.set(index, access);
+    return access;
   }
 
   mappedPropertyOf(object: ObjectType, name: string): Property | undefined {
@@ -723,4 +762,17 @@ function indexKeys(structure: Structure): Type[] {
   if (structure.symbolIndex) keys.push(symbolType);
   keys.push(...(structure.patternIndexes ?? []).map((info) => info.keyType));
   return keys;
+}
+
+function genericTupleIndex(object: Type, index: Type): boolean {
+  if (object.kind !== 'object' || !object.tuple) return false;
+  const elements = object.tuple.elements;
+  if (!elements.some((element) => element.rest && isGenericObjectOrIndexType(element.type))) return false;
+  const fixed = elements.filter((element) => !element.rest).length;
+  const keys = index.kind === 'union' ? index.types : [index];
+  return keys.some((key) => {
+    if (!isPropertyKeyLiteral(key) || typeof key.value === 'symbol') return true;
+    const position = Number(key.value);
+    return String(position) !== String(key.value) || position < 0 || position >= fixed;
+  });
 }

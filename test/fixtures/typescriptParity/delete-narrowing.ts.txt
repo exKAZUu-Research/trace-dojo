@@ -1,0 +1,31 @@
+function erase(item: { value?: { name?: string } }) {
+  if (item.value?.name) {
+    delete item.value;
+    const result: undefined = item.value;
+    console.log(result, "value" in item);
+  }
+}
+function eraseOptional(item?: { value?: string }) {
+  delete item?.value;
+  if (item) {
+    const result: undefined = item.value;
+    console.log(result);
+  }
+}
+function eraseComputed(item: { value?: string }) {
+  if (item.value) {
+    delete item["value"];
+    if ("value" in item) console.log(item.value.toUpperCase());
+  }
+}
+function eraseThenAssign(item: { value?: string }) {
+  if (!item.value) return;
+  delete item.value;
+  item.value = "new";
+  console.log(item.value.toUpperCase());
+}
+erase({ value: { name: "entry" } });
+eraseOptional({ value: "entry" });
+eraseOptional();
+eraseComputed({ value: "entry" });
+eraseThenAssign({ value: "entry" });

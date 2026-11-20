@@ -184,6 +184,37 @@ console.log(calls, Fields.one, Fields.two, Fields.ordinary, calls);`;
   });
 });
 
+test('ordinary object snapshots retain enumerable accessors without reading them', () => {
+  const source = `let reads = 0;
+const item = {
+  value: 1,
+  get original() { reads++; return 2; },
+  set input(value: number) { reads++; }
+};
+Object.defineProperty(item, 'value', {
+  get() { reads++; return 3; },
+  set(value: number) { reads++; }
+});
+Object.defineProperty(item, 'empty', { enumerable: true, get: undefined, set: undefined });
+Object.defineProperty(item, 'hidden', { get() { reads++; return 4; } });
+console.log(reads);`;
+  const recording = traceProgram('typescript', source, source);
+  expect(recording.stdout).toBe('0\n');
+  expect(recording.traceItems.map((step) => step.referenceVars.item)).toContainEqual(
+    expect.objectContaining({ entries: expect.objectContaining({ value: { kind: 'value', value: 1 } }) })
+  );
+  expect(recording.traceItems.at(-1)?.referenceVars.item).toEqual({
+    kind: 'object',
+    entries: {
+      value: { kind: 'value', value: '[Getter/Setter]', verbatim: true },
+      original: { kind: 'value', value: '[Getter]', verbatim: true },
+      input: { kind: 'value', value: '[Setter]', verbatim: true },
+      // oxlint-disable-next-line unicorn/no-null -- An accessor with no getter reads as undefined.
+      empty: { kind: 'value', value: null },
+    },
+  });
+});
+
 test('displayed object entries retain own __proto__ keys', () => {
   const source = `const parsed = JSON.parse('{"__proto__":7,"name":"item"}');
 const literal = {["__proto__"]: 8};

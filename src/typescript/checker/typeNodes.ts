@@ -7,7 +7,7 @@ import type { Checker, Mapper, UnionAlias } from './checker';
 import { BROWSER_INTERFACES } from './domGlobals';
 import { isGenericObjectOrIndexType } from './genericTypes';
 import { IndexedAccessKeys } from './indexedAccessKeys';
-import { isPatternKey, isSameKeyType } from './indexInfos';
+import { addIndexInfo, isPatternKey } from './indexInfos';
 import { InterfaceBases } from './interfaceBases';
 import { withDomMembers } from './library';
 import { RecursiveAliases } from './recursiveAliases';
@@ -840,24 +840,6 @@ function interfaceUsesThis(declaration: TreeNode): boolean {
 }
 
 const mappedTypeMembersMessage = 'マップ型には、プロパティやメソッドを宣言できません。';
-
-function addIndexInfo(structure: Structure, key: Type, info: IndexInfo): void {
-  if (isIntrinsic(key, 'number')) structure.numberIndex = combinedIndexInfo(structure.numberIndex, info);
-  else if (isIntrinsic(key, 'symbol')) structure.symbolIndex = combinedIndexInfo(structure.symbolIndex, info);
-  else if (!isPatternKey(key)) structure.stringIndex = combinedIndexInfo(structure.stringIndex, info);
-  else {
-    const existing = structure.patternIndexes?.find((index) => isSameKeyType(index.keyType, key));
-    structure.patternIndexes = existing
-      ? structure.patternIndexes?.map((index) =>
-          index === existing ? { ...index, ...combinedIndexInfo(index, info) } : index
-        )
-      : [...(structure.patternIndexes ?? []), { ...info, keyType: key }];
-  }
-}
-
-function combinedIndexInfo(previous: IndexInfo | undefined, info: IndexInfo): IndexInfo {
-  return previous ? { type: unionOf([previous.type, info.type]), readonly: previous.readonly && info.readonly } : info;
-}
 
 /** The grammar error TypeScript reports on an index signature's key type, which only valid key types escape. */
 function indexKeyTypeError(keyType: Type): string | undefined {

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 725 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
+// code-gauge-allow-file fileNcss 735 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { typesAtConstructorExit } from './assignmentFlow';
@@ -1049,22 +1049,24 @@ export class ClassChecker {
    * `hasBaseType` decides: a type parameter by its constraint, an intersection by any member, and never a union.
    */
   private isReceiverDerivedFrom(type: Type, enclosing: ClassInfo): boolean {
-    switch (type.kind) {
-      case 'typeParameter': {
-        const constraint = this.c.constraintOf(type);
-        return constraint !== undefined && this.isReceiverDerivedFrom(constraint, enclosing);
-      }
-      case 'intersection': {
-        return type.types.some((member) => this.isReceiverDerivedFrom(member, enclosing));
-      }
-      case 'union': {
-        return false;
-      }
-      default: {
-        const info = this.classInfoOfType(type);
-        return !info || this.derivesFrom(info, enclosing);
+    const pending = [type];
+    const visited = new Set<number>();
+    while (pending.length > 0) {
+      const current = pending.pop() as Type;
+      if (visited.has(current.id)) continue;
+      visited.add(current.id);
+      this.c.budget.spend();
+      if (current.kind === 'intersection') pending.push(...current.types);
+      else if (current.kind === 'typeParameter') {
+        const constraint = this.c.constraintOf(current);
+        if (constraint) pending.push(constraint);
+      } else if (current.kind === 'object') {
+        const info = this.classInfoOfType(current);
+        if (!info) pending.push(...this.c.typeNodes.interfaceBases.ofType(current));
+        else if (this.derivesFrom(info, enclosing)) return true;
       }
     }
+    return false;
   }
 
   /** Reports, through `super`, an abstract member or an instance field, which lives on the instance instead of the prototype. */

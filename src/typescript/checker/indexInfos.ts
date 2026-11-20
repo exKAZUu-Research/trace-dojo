@@ -12,6 +12,7 @@ import {
   type Structure,
   symbolType,
   type Type,
+  unionOf,
 } from './types';
 
 /** Whether a key type declares a pattern index signature, as `` `a${string}` `` and `Uppercase<string>` do. */
@@ -90,6 +91,29 @@ export function mergedPatternIndexes(
     keyType: group[0].keyType,
     ...(intersect ? (combinedIndex(c, group) ?? group[0]) : group[0]),
   }));
+}
+
+export function addIndexInfo(structure: Structure, key: Type, info: IndexInfo, mapped = false): void {
+  if (isIntrinsic(key, 'number')) structure.numberIndex = combineIndexedValues(structure.numberIndex, info, mapped);
+  else if (isIntrinsic(key, 'symbol'))
+    structure.symbolIndex = combineIndexedValues(structure.symbolIndex, info, mapped);
+  else if (!isPatternKey(key)) structure.stringIndex = combineIndexedValues(structure.stringIndex, info, mapped);
+  else {
+    const existing = structure.patternIndexes?.find((index) => isSameKeyType(index.keyType, key));
+    structure.patternIndexes = existing
+      ? structure.patternIndexes?.map((index) =>
+          index === existing ? { ...index, ...combineIndexedValues(index, info, mapped) } : index
+        )
+      : [...(structure.patternIndexes ?? []), { ...info, keyType: key }];
+  }
+}
+
+function combineIndexedValues(previous: IndexInfo | undefined, info: IndexInfo, mapped: boolean): IndexInfo {
+  if (!previous) return info;
+  return {
+    type: unionOf([previous.type, info.type]),
+    readonly: mapped ? previous.readonly || info.readonly : previous.readonly && info.readonly,
+  };
 }
 
 /** Whether two index signature key types are the same type, as TypeScript keeps one index signature for each. */

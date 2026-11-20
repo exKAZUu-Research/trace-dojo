@@ -31,6 +31,11 @@ export class InterfaceBases {
     this.symbols.set(type, symbol);
   }
 
+  ofType(type: ObjectType): Type[] {
+    const symbol = this.symbols.get(type.target ?? type.origin ?? type);
+    return symbol ? this.baseTypesOf(symbol) : [];
+  }
+
   /**
    * The types an interface extends: an interface whose bases need its own bases, directly or through other interfaces,
    * is reported as each interface in the cycle is, and loses those bases.

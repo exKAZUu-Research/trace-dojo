@@ -1,8 +1,14 @@
-// code-gauge-allow-file fileNcss 738 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
+// code-gauge-allow-file fileNcss 758 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
 import { minimumArguments } from './callArity';
 import type { Checker } from './checker';
 import { isUnit } from './flow';
-import { childTypes, isGenericObjectOrIndexType, mappedOptionality } from './genericTypes';
+import {
+  childTypes,
+  conditionalBranch,
+  isGenericObjectOrIndexType,
+  mappedOptionality,
+  typeParametersIn,
+} from './genericTypes';
 import {
   applicableIndex,
   hasIndexSignature,
@@ -183,8 +189,8 @@ export class Relations {
     return this.c.literals.isArrayOrTupleLiteral(type) ? type : recursionIdentity(type);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 24 -- Follows TypeScript's order of checks for each kind of type.
-  // code-gauge-allow functionNcss 34 -- Follows TypeScript's order of checks for each kind of type.
+  // code-gauge-allow functionCognitiveComplexity 26 -- Follows TypeScript's order of checks for each kind of type.
+  // code-gauge-allow functionNcss 38 -- Follows TypeScript's order of checks for each kind of type.
   private structuredRelated(source: Type, target: Type, relation: Relation, state: number): boolean {
     const s = this.c.reducedTypes.of(regularOf(source));
     const t = this.c.reducedTypes.of(regularOf(target));
@@ -198,15 +204,21 @@ export class Relations {
     if (t.kind === 'intersection')
       return t.types.every((member) => this.isRelated(s, member, relation, state | INTERSECTION_TARGET));
     if (this.relatedToGenericTarget(s, t, relation)) return true;
+    if (t.kind === 'keyof' && this.relatedToKeyof(s, t.type, relation, state)) return true;
     if (s.kind === 'intersection') return this.intersectionSourceRelated(s, t, relation, state);
-    if (s.kind === 'typeParameter') return this.typeParameterRelated(s, t, relation);
+    if (s.kind === 'typeParameter')
+      return (
+        this.typeParameterRelated(s, t, relation) ||
+        (t.kind === 'conditional' && this.relatedToConditional(s, t, relation, state))
+      );
     if (s.kind === 'indexedAccess' || s.kind === 'keyof' || s.kind === 'conditional') {
       if (this.genericSourceRelated(s, t, relation)) return true;
-      if (t.kind !== 'typeParameter') return false;
+      if (t.kind !== 'typeParameter' && t.kind !== 'conditional') return false;
     }
     if (t.kind === 'typeParameter') return relation === 'comparable' && this.constraintAdmits(s, t);
     if (t.kind === 'indexedAccess') return this.relatedToIndexedAccess(s, t, relation);
-    if (t.kind === 'keyof' || t.kind === 'conditional') return false;
+    if (t.kind === 'conditional') return this.relatedToConditional(s, t, relation, state);
+    if (t.kind === 'keyof') return false;
     return this.relatedToConcrete(s, t, relation, state);
   }
 
@@ -285,6 +297,37 @@ export class Relations {
     if (s.kind === 'conditional' && this.isRelated(unionOf([s.trueType, s.falseType]), t, relation)) return true;
     const constraint = this.c.baseConstraint(s);
     return constraint !== s && this.isRelated(constraint, t, relation);
+  }
+
+  private relatedToKeyof(source: Type, object: Type, relation: Relation, state: number): boolean {
+    if (source.kind === 'keyof' && this.isRelated(object, source.type, relation, state)) return true;
+    const keys = this.c.typeOperators.guaranteedKeys(object);
+    return !isIntrinsic(keys, 'never') && this.isRelated(source, keys, relation, state);
+  }
+
+  private relatedToConditional(source: Type, target: ConditionalType, relation: Relation, state: number): boolean {
+    const root = target.root ?? target;
+    const universal = isAnyLike(target.extendsType) || isIntrinsic(target.extendsType, 'unknown');
+    if (universal && target.trueType === target.checkType && isIntrinsic(target.falseType, 'never'))
+      return this.isRelated(source, target.trueType, relation, state);
+    if (
+      root.inferTypeParameters.length > 0 ||
+      (source.kind === 'conditional' && (source.root ?? source) === root) ||
+      this.branchesDependOnDistribution(root)
+    )
+      return false;
+    const branch = conditionalBranch(this.c, target.checkType, target.extendsType);
+    return (
+      (branch === 'false' || this.isRelated(source, target.trueType, relation, state)) &&
+      (branch === 'true' || this.isRelated(source, target.falseType, relation, state))
+    );
+  }
+
+  private branchesDependOnDistribution(root: ConditionalType): boolean {
+    if (!root.distributive) return false;
+    const containsCheck = (type: Type): boolean =>
+      typeParametersIn(type, [], this.c.budget).some((parameter) => parameter.id === root.checkType.id);
+    return containsCheck(root.trueType) || containsCheck(root.falseType);
   }
 
   /**

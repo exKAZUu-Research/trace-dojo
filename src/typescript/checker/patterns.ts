@@ -422,7 +422,7 @@ export class BindingPatterns {
     for (const { element, index } of arrayPatternElements(pattern)) {
       if (element.type === 'rest_pattern') {
         const target = named(element)[0];
-        if (target) this.bindPattern(target, this.restOfIterable(pattern, type, index), bind, annotated);
+        if (target) this.bindPattern(target, this.restOfIterable(pattern, type, index, true), bind, annotated);
         break;
       }
       this.bindPattern(element, this.elementAt(element, type, index), bind, annotated);
@@ -430,6 +430,7 @@ export class BindingPatterns {
   }
 
   elementAt(node: TreeNode, type: Type, index: number): Type {
+    type = this.arrayPatternSource(type);
     if (isAnyLike(type)) return anyType;
     if (isTuple(type)) return this.tupleElementAt(node, type, index);
     if (type.kind === 'union' && type.types.some(isTuple)) return this.unionElementAt(node, type, index);
@@ -472,17 +473,25 @@ export class BindingPatterns {
     return errorType;
   }
 
-  restOfIterable(pattern: TreeNode, type: Type, from: number): Type {
-    if (type.kind === 'union' && type.types.some(isTuple))
-      return unionOf(type.types.map((member) => this.restOfIterable(pattern, member, from)));
-    if (isTuple(type)) {
-      const elements = type.tuple?.elements ?? [];
-      const restIndex = elements.findIndex((member) => member.rest);
-      // Past a rest element, the remaining values are no longer at known positions.
-      if (restIndex !== -1 && from > restIndex) return this.c.arrayType(this.valuesFrom(elements, restIndex));
-      return this.c.tupleType(elements.slice(from));
-    }
-    return this.c.arrayType(this.iteratedType(pattern, type));
+  restOfIterable(pattern: TreeNode, type: Type, from: number, binding = false): Type {
+    const source = binding ? this.arrayPatternSource(type) : type;
+    if (source.kind === 'union' && source.types.every(isTuple))
+      return unionOf(source.types.map((member) => this.sliceTuple(member, from)));
+    return isTuple(source) ? this.sliceTuple(source, from) : this.c.arrayType(this.iteratedType(pattern, type));
+  }
+
+  private sliceTuple(type: ObjectType, from: number): Type {
+    const elements = type.tuple?.elements ?? [];
+    const restIndex = elements.findIndex((member) => member.rest);
+    if (restIndex !== -1 && from > restIndex) return this.c.arrayType(this.valuesFrom(elements, restIndex));
+    return this.c.tupleType(elements.slice(from));
+  }
+
+  private arrayPatternSource(type: Type): Type {
+    if (type.kind === 'union') return unionOf(type.types.map((member) => this.arrayPatternSource(member)));
+    if (type.kind !== 'typeParameter') return type;
+    const constraint = this.c.constraintOf(type);
+    return constraint ? this.arrayPatternSource(constraint) : type;
   }
 
   /** The values a tuple's rest element and the elements after it hold. */

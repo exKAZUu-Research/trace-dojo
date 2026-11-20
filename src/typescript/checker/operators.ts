@@ -115,6 +115,7 @@ export class OperatorChecker {
       return;
     }
     const { receiver: objectType, index: indexType } = this.c.members.checkAccess(expression);
+    if (argument.type === 'member_expression') this.recordDeletion(argument);
     const name =
       expression.type === 'member_expression'
         ? expression.childForFieldName('property')?.text
@@ -140,6 +141,13 @@ export class OperatorChecker {
       !includesUndefined(type)
     )
       this.c.error(argument, 'delete 演算子のオペランドは、省略できるプロパティでなければいけません。');
+  }
+
+  private recordDeletion(expression: TreeNode): void {
+    const key = this.c.flow.referenceKey(expression);
+    if (!key) return;
+    this.c.flow.invalidate(key);
+    this.c.flow.set(key, { type: undefinedType, assigned: true }, expression);
   }
 
   private readonlyDeleteTarget(objectType: Type, name: string | undefined, indexType: Type | undefined): boolean {

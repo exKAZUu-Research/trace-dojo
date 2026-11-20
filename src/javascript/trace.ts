@@ -12,7 +12,6 @@ import { Runtime } from './runtime';
 import {
   type AccessorProperty,
   type Binding,
-  type DataProperty,
   isAccessor,
   JsArray,
   JsFunction,
@@ -20,6 +19,7 @@ import {
   type Key,
   privateClassOf,
   privateNameOf,
+  type Property,
   type Scope,
   UNINITIALIZED,
   type Value,
@@ -76,11 +76,11 @@ class Snapshotter {
     if (!top) return;
     for (const [className, cls] of classBindings(top)) {
       if (cls.behavior.kind !== 'class') continue;
-      for (const [key, value] of displayedEntries(cls, this.runtime, cls.behavior.traceConstants))
-        addVariable(variables, `${className}.${key}`, value, this.runtime);
-      for (const [key, property] of cls.properties)
-        if (typeof key === 'string' && property.enumerable && isAccessor(property))
-          variables.referenceVars[`${className}.${key}`] = accessorNode(property);
+      for (const [key, property] of displayedProperties(cls, this.runtime, cls.behavior.traceConstants)) {
+        const name = `${className}.${key}`;
+        if (isAccessor(property)) variables.referenceVars[name] = accessorNode(property);
+        else addVariable(variables, name, property.value, this.runtime);
+      }
     }
   }
 
@@ -135,8 +135,9 @@ function addVariable(variables: Variables, name: string, value: Value, runtime: 
 }
 
 function addThis(variables: Variables, self: JsObject, runtime: Runtime): void {
-  for (const [key, value] of displayedEntries(self, runtime)) {
-    const scalar = scalarOf(value, new Set());
+  for (const [key, property] of displayedProperties(self, runtime)) {
+    if (isAccessor(property)) continue;
+    const scalar = scalarOf(property.value, new Set());
     if (scalar !== NOT_SCALAR) variables.vars[`this.${key}`] = scalar;
   }
   const node = displayNodeOf(self, new Set(), runtime);
@@ -158,7 +159,6 @@ function scalarOf(value: Value, seen: Set<JsArray>): Scalar | typeof NOT_SCALAR 
 // oxlint-disable-next-line unicorn/no-null -- The trace format shows null and undefined as null.
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
-// code-gauge-allow functionCognitiveComplexity 24 -- One check per displayed value kind, including array accessor descriptors without getter evaluation.
 function displayNodeOf(value: Value, seen: Set<JsObject>, runtime: Runtime): DisplayNode | undefined {
   if (value === undefined || value === null) return NULL_NODE;
   if (typeof value === 'number' || typeof value === 'string' || typeof value === 'boolean')
@@ -175,17 +175,25 @@ function displayNodeOf(value: Value, seen: Set<JsObject>, runtime: Runtime): Dis
   const builtin = builtinNodeOf(value, seen, runtime);
   if (builtin) return builtin;
   seen.add(value);
-  const entries: [string | number, DisplayNode][] = [];
-  for (const [key, item] of value instanceof JsArray
-    ? value.elements.map(valueOfElement).entries()
-    : displayedEntries(value, runtime)) {
-    const property = value instanceof JsArray ? value.definedElements?.get(Number(key)) : undefined;
-    const node = property && isAccessor(property) ? accessorNode(property) : displayNodeOf(item, seen, runtime);
-    if (node) entries.push([key, node]);
-    else if (value instanceof JsArray) entries.push([key, NULL_NODE]);
-  }
+  const entries = Object.fromEntries(displayNodesOf(value, seen, runtime));
   seen.delete(value);
-  return { kind: value instanceof JsArray ? 'array' : 'object', entries: Object.fromEntries(entries) };
+  return { kind: value instanceof JsArray ? 'array' : 'object', entries };
+}
+
+function displayNodesOf(value: JsObject, seen: Set<JsObject>, runtime: Runtime): [string | number, DisplayNode][] {
+  if (value instanceof JsArray)
+    return Array.from(value.elements.entries(), ([key, item]) => {
+      const property = value.definedElements?.get(key);
+      const node =
+        property && isAccessor(property) ? accessorNode(property) : displayNodeOf(valueOfElement(item), seen, runtime);
+      return [key, node ?? NULL_NODE];
+    });
+  const entries: [string | number, DisplayNode][] = [];
+  for (const [key, property] of displayedProperties(value, runtime)) {
+    const node = isAccessor(property) ? accessorNode(property) : displayNodeOf(property.value, seen, runtime);
+    if (node) entries.push([key, node]);
+  }
+  return entries;
 }
 
 function accessorNode(property: AccessorProperty): DisplayNode {
@@ -260,27 +268,29 @@ function privateLabels(keys: string[]): string[] {
   });
 }
 
-/** The fields learners see in an object: its own enumerable data properties and private fields. */
-function displayedEntries(object: JsObject, runtime: Runtime, constants?: ReadonlyMap<Key, Value>): [string, Value][] {
-  const entries: [string, Value][] = [];
+/** The fields learners see in an object: its own enumerable properties and private data fields. */
+function displayedProperties(
+  object: JsObject,
+  runtime: Runtime,
+  constants?: ReadonlyMap<Key, Value>
+): [string, Property][] {
+  const entries: [string, Property][] = [];
   // Errors keep their message in a non-enumerable property.
   const message = object.isError ? object.properties.get('message') : undefined;
-  if (message && !isAccessor(message) && !runtime.isUnavailableValue(message.value))
-    entries.push(['message', message.value]);
+  if (message && !isAccessor(message) && !runtime.isUnavailableValue(message.value)) entries.push(['message', message]);
   for (const [key, property] of object.properties) {
     if (
       typeof key === 'string' &&
       property.enumerable &&
-      !isAccessor(property) &&
-      traceField(runtime, property.value, constants?.get(key))
+      (isAccessor(property) || traceField(runtime, property.value, constants?.get(key)))
     )
-      entries.push([key, property.value]);
+      entries.push([key, property]);
   }
   const fields = [...(object.privateMembers ?? [])].filter(
     ([key, property]) => !isAccessor(property) && traceField(runtime, property.value, constants?.get(key))
   );
   const labels = privateLabels(fields.map(([key]) => key));
-  for (const [index, [, property]] of fields.entries()) entries.push([labels[index], (property as DataProperty).value]);
+  for (const [index, [, property]] of fields.entries()) entries.push([labels[index], property]);
   return entries;
 }
 

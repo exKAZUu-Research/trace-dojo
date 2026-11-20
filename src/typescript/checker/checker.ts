@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 612 -- Holds type construction, bounded instantiation, structure lookup, and diagnostics shared by checker components.
+// code-gauge-allow-file fileNcss 614 -- Holds type construction, bounded instantiation, structure lookup, and diagnostics shared by checker components.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { type SourceDiagnostic, sourceDiagnostic } from '../../interpreter/diagnostics';
@@ -721,6 +721,7 @@ export class Checker {
   restElementType(type: Type): Type {
     if (type.kind === 'union') return unionOf(type.types.map((member) => this.restElementType(member)));
     if (type.kind === 'object' && this.isArrayOrTuple(type)) return this.elementTypeOf(type);
+    if (this.relations.isGenericRestType(type)) return this.typeOperators.indexedAccess(type, numberType);
     return anyType;
   }
 
