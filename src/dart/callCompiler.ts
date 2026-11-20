@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 647 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 650 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type {
   Arguments as ArgumentsSyntax,
   Expression,
@@ -689,10 +689,9 @@ export abstract class CallCompiler extends OperatorCompiler {
     };
     let staticTypeArgs: DartType[] = [];
     let signature = type;
+    if (typeArguments) staticTypeArgs = this.explicitTypeArguments(type, typeArguments, span);
     if (type.typeParams.length > 0) {
-      staticTypeArgs = typeArguments
-        ? this.explicitTypeArguments(type, typeArguments, span)
-        : this.inferTypeArguments(type, args, context, compiled);
+      if (!typeArguments) staticTypeArgs = this.inferTypeArguments(type, args, context, compiled);
       signature = instantiateFunction(type, staticTypeArgs);
     }
     const { positionalRuns, namedRuns } = this.compileArgumentRuns(signature, args, compiled);

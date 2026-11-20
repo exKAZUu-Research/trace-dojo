@@ -436,10 +436,16 @@ export abstract class CompilerBase {
   }
 
   /** Finds a member for a receiver, honoring an explicit extension application (`E(x).m`). */
-  memberFor(receiver: Compiled, lookupType: DartType, name: string, span: Span): ResolvedMember | undefined {
+  memberFor(
+    receiver: Compiled,
+    lookupType: DartType,
+    name: string,
+    span: Span | undefined,
+    setter = false
+  ): ResolvedMember | undefined {
     const override = receiver.extensionOverride;
-    if (!override) return this.lookupMember(lookupType, name, false, span);
-    const member = override.ext.members.get(name);
+    if (!override) return this.lookupMember(lookupType, name, setter, span);
+    const member = (setter ? override.ext.setters : override.ext.members).get(name);
     if (!member) return undefined;
     const map = new Map(override.ext.typeParams.map((param, index) => [param, override.typeArgs[index]]));
     return {

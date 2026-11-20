@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 655 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 668 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type { CascadeSelector, CollectionElement, Expression, ForInBinding, Span, SwitchExpressionCase } from './ast';
 import type { ClassInfo, Member } from './classes';
 import { at, type Compiled, type Eval, type ResolvedMember, typeName } from './compilerBase';
@@ -483,30 +483,37 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       };
     }
     const lookupType = nullAware ? nonNullable(receiverType) : receiverType;
-    const setter = this.lookupMember(lookupType, name, true, span);
+    const setter = this.memberFor(receiver, lookupType, name, span, true);
     if (!setter) {
       this.checkUnavailableIoMember(lookupType, name, span);
-      const getter = this.lookupMember(lookupType, name, false);
+      const getter = this.memberFor(receiver, lookupType, name, span);
       if (getter) return this.error(span, `${name} は final か getter だけなので、代入できません。`);
       return this.error(span, `${typeName(nonNullable(receiverType))} 型には ${name} というメンバーがありません。`);
     }
-    if (!nullAware && isNullable(receiverType)) {
+    if (!nullAware && isNullable(receiverType) && !this.acceptsNull(setter)) {
       this.error(span, `${typeName(receiverType)} 型の値は null かもしれないので、${name} に直接は代入できません。`);
     }
-    const getter = this.lookupMember(lookupType, name, false);
+    const getter = this.memberFor(receiver, lookupType, name, undefined);
     const target = { writeType: setter.type, readType: getter?.type, prepare, shorting: nullAware || shorting };
-    if (setter.extension) return { ...target, ...extensionAccessors(setter, getter, span.row) };
     const isSuper = (receiver as { isSuper?: boolean }).isSuper === true;
     if (isSuper) return { ...target, ...superAccessors(this.superclassOf(span).classAt, name, span.row) };
+    const extensionRead = this.extensionTargetCall(getter, span.row);
+    const extensionWrite = this.extensionTargetCall(setter, span.row);
     return {
       ...target,
-      read: (frame, prepared) => frame.runtime.getProperty(prepared as Value, name, span.row),
-      write: (frame, prepared, value) => frame.runtime.setProperty(prepared as Value, name, value, span.row),
+      read: (frame, prepared) =>
+        extensionRead
+          ? extensionRead(frame, prepared as Value, [])
+          : frame.runtime.getProperty(prepared as Value, name, span.row),
+      write: (frame, prepared, value) => {
+        if (extensionWrite) extensionWrite(frame, prepared as Value, [value]);
+        else frame.runtime.setProperty(prepared as Value, name, value, span.row);
+      },
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Each branch is one of the cases Dart distinguishes for this construct.
-  // code-gauge-allow functionNcss 34 -- One case per form of the construct, which reads best together.
+  // code-gauge-allow functionCognitiveComplexity 20 -- Each branch is one of the cases Dart distinguishes for this construct.
+  // code-gauge-allow functionNcss 43 -- One case per form of the construct, which reads best together.
   private indexTarget(
     receiver: Compiled,
     indexSyntax: Expression,
@@ -519,16 +526,18 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     let indexContext: DartType | undefined;
     let writeType: DartType = DYNAMIC;
     let readType: DartType | undefined = DYNAMIC;
+    let setter: ResolvedMember | undefined;
+    let getter: ResolvedMember | undefined;
     if (receiverType.kind !== 'dynamic') {
-      const setter = this.lookupMember(lookupType, '[]=', false, span);
+      setter = this.memberFor(receiver, lookupType, '[]=', span);
       if (!setter || setter.member.kind !== 'method')
         return this.error(span, `${typeName(nonNullable(receiverType))} 型には演算子 []= がありません。`);
-      if (!nullAware && isNullable(receiverType))
+      if (!nullAware && isNullable(receiverType) && !this.acceptsNull(setter))
         this.error(span, `${typeName(receiverType)} 型の値は null かもしれないので、[ ] に直接は代入できません。`);
       const signature = setter.type as FunctionType;
       indexContext = signature.positional[0];
       writeType = signature.positional[1] ?? DYNAMIC;
-      const getter = this.lookupMember(lookupType, '[]', false);
+      getter = this.memberFor(receiver, lookupType, '[]', undefined);
       readType = getter?.member.kind === 'method' ? (getter.type as FunctionType).returnType : undefined;
     }
     let index = this.compileExpression(indexSyntax, indexContext);
@@ -541,6 +550,8 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       );
     const receiverRun = receiver.run;
     const indexRun = index.run;
+    const extensionRead = this.extensionTargetCall(getter, span.row);
+    const extensionWrite = this.extensionTargetCall(setter, span.row);
     return {
       writeType,
       readType,
@@ -554,10 +565,15 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       },
       read: (frame, prepared) => {
         const [object, key] = prepared as [Value, Value];
+        if (extensionRead) return extensionRead(frame, object, [key]);
         return frame.runtime.invoke(object, '[]', { positional: [key], named: undefined }, [], span.row);
       },
       write: (frame, prepared, value) => {
         const [object, key] = prepared as [Value, Value];
+        if (extensionWrite) {
+          extensionWrite(frame, object, [key, value]);
+          return;
+        }
         frame.runtime.invoke(
           object,
           '[]=',
@@ -568,6 +584,17 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       },
       shorting: nullAware || shorting,
     };
+  }
+
+  private extensionTargetCall(
+    resolved: ResolvedMember | undefined,
+    row: number
+  ): ((frame: Frame, receiver: Value, args: Value[]) => Value) | undefined {
+    if (!resolved?.extension) return undefined;
+    const { member } = resolved;
+    const typeArgs = this.runtimeTypes(resolved.extension.typeArgs);
+    return (frame, receiver, args) =>
+      (member.impl as Callable)(frame.runtime, receiver, { positional: args, named: undefined }, typeArgs(frame), row);
   }
 
   // Collections
@@ -1126,36 +1153,6 @@ function preparingReceiver(run: Eval, nullAware: boolean): AssignableTarget['pre
     if (value === SHORTED || (nullAware && value === undefined)) return SHORTED;
     frame.temporaries.push(value);
     return value;
-  };
-}
-
-/** The accessors of an extension's setter and getter, which run on the receiver without dispatch. */
-function extensionAccessors(
-  setter: ResolvedMember,
-  getter: ResolvedMember | undefined,
-  row: number
-): Pick<AssignableTarget, 'read' | 'write'> {
-  const setterMember = setter.member;
-  const getterMember = getter?.member;
-  const typeArgs = setter.extension?.typeArgs ?? [];
-  return {
-    read: (frame, prepared) =>
-      (getterMember?.impl as unknown as Callable | undefined)?.(
-        frame.runtime,
-        prepared as Value,
-        { positional: [], named: undefined },
-        typeArgs,
-        row
-      ),
-    write: (frame, prepared, value) => {
-      (setterMember.impl as unknown as Callable)(
-        frame.runtime,
-        prepared as Value,
-        { positional: [value], named: undefined },
-        typeArgs,
-        row
-      );
-    },
   };
 }
 

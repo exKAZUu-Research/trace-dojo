@@ -636,13 +636,13 @@ function isNumber(value: Value): value is bigint | number {
   return typeof value === 'bigint' || typeof value === 'number';
 }
 
-/** `-d` or `~d` of a dynamic value: arithmetic for numbers, and otherwise a dynamic call of the operator method. */
 function dynamicPrefix(run: Eval, operator: '-' | '~', methodName: string, row: number): Compiled {
   return {
     type: DYNAMIC,
     run: (frame) => {
       const operand = run(frame);
-      if (typeof operand === 'bigint' || typeof operand === 'number') return negate(operand, operator);
+      if (typeof operand === 'bigint' || (operator === '-' && typeof operand === 'number'))
+        return negate(operand, operator);
       return frame.runtime.invoke(operand, methodName, { positional: [], named: undefined, isDynamic: true }, [], row);
     },
     isConst: false,

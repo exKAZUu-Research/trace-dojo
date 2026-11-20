@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 956 -- The native lists, sets, maps, and their iterators share collection helpers.
+// code-gauge-allow-file fileNcss 961 -- The native lists, sets, maps, and their iterators share collection helpers.
 import type { TopLevelFunction } from '../environment';
 import { stringOf } from '../format';
 import { type HashPolicy, HashStore } from '../hashStore';
@@ -1109,11 +1109,15 @@ defineConstructor('Map.fromIterables', (runtime, _instance, args, typeArgs) => {
       runtime.invoke(iterator, 'moveNext', { positional: [], named: undefined }, [], undefined) === true;
     let hasNextKey = moveNext(keys);
     let hasNextValue = moveNext(values);
+    const frame = runtime.currentFrame;
     while (hasNextKey && hasNextValue) {
-      store(map).set(
-        runtime.getProperty(keys, 'current', undefined),
-        runtime.getProperty(values, 'current', undefined)
-      );
+      const key = runtime.getProperty(keys, 'current', undefined);
+      frame?.temporaries.push(key);
+      try {
+        store(map).set(key, runtime.getProperty(values, 'current', undefined));
+      } finally {
+        frame?.temporaries.pop();
+      }
       hasNextKey = moveNext(keys);
       hasNextValue = moveNext(values);
       runtime.spend();

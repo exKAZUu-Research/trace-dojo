@@ -48,6 +48,13 @@ export class LocalVar {
   ) {}
 }
 
+export interface JumpTarget {
+  kind: 'loop' | 'switch' | 'label';
+  labels: readonly string[];
+  breakFlow?: Flow;
+  continueFlow?: Flow;
+}
+
 /** A function being compiled: its slots, the variables it captures, and what `return` and `this` mean in it. */
 export class FunctionContext {
   slotCount = 0;
@@ -56,6 +63,7 @@ export class FunctionContext {
   readonly scopes: Map<string, LocalVar>[] = [new Map()];
   /** The labels in scope, innermost last, with whether each names a loop or switch that `continue` may target. */
   readonly labels: { name: string; isLoop: boolean; isSwitchCase: boolean }[] = [];
+  readonly jumpTargets: JumpTarget[] = [];
   loopDepth = 0;
   switchDepth = 0;
   assignments: ReadonlyMap<Span, ReadonlySet<string>> = new Map();

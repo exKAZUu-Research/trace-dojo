@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 794 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 797 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type {
   Block,
   Expression,
@@ -6,6 +6,7 @@ import type {
   FormalParameter,
   FormalParameters,
   MethodDeclaration,
+  Span,
   Statement,
   TypeSyntax,
   VariableDeclaration,
@@ -16,7 +17,7 @@ import type { ClassInfo } from './classes';
 import { type Compiled, type Eval, typeName } from './compilerBase';
 import { type CompiledPattern, isRefutableSyntax, PatternCompiler } from './patternCompiler';
 import { type DartThrow, type Frame } from './runtime';
-import { Flow, FunctionContext, type LocalVar, type StoredFlow } from './scope';
+import { Flow, FunctionContext, type JumpTarget, type LocalVar, type StoredFlow } from './scope';
 import {
   coreTypes,
   type DartType,
@@ -758,7 +759,7 @@ export abstract class StatementCompiler extends PatternCompiler {
     const { compiled: condition, flow } = this.compileCondition(statement.condition);
     this.flow = flow.whenTrue;
     const body = this.compileLoopBody(statement.body, labels);
-    this.flow = Flow.join(flow.whenFalse, this.breakFlows.pop() ?? flow.whenFalse.unreachable);
+    this.flow = Flow.join(flow.whenFalse, this.fn.jumpTargets.pop()?.breakFlow ?? flow.whenFalse.unreachable);
     const test = condition.run;
     return (frame) => {
       while (test(frame)) {
@@ -772,13 +773,14 @@ export abstract class StatementCompiler extends PatternCompiler {
     };
   }
 
-  // code-gauge-allow duplicateLines 16 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
+  // code-gauge-allow duplicateLines 18 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   private compileDo(statement: Extract<Statement, { kind: 'do' }>): Exec {
     const labels = this.takeLoopLabels();
     this.enterLoop(statement);
     const body = this.compileLoopBody(statement.body, labels);
-    const breakFlow = this.breakFlows.pop();
-    this.flow = Flow.join(this.flow, this.continueFlow ?? this.flow.unreachable);
+    const target = this.fn.jumpTargets.pop();
+    const breakFlow = target?.breakFlow;
+    if (target?.continueFlow) this.flow = Flow.join(this.flow, target.continueFlow);
     const { compiled: condition, flow } = this.compileCondition(statement.condition);
     this.flow = breakFlow ? Flow.join(flow.whenFalse, breakFlow) : flow.whenFalse;
     const test = condition.run;
@@ -794,9 +796,10 @@ export abstract class StatementCompiler extends PatternCompiler {
     };
   }
 
-  /** The flow at the `break`s of the loops being compiled, which joins the flow after each loop. */
-  protected readonly breakFlows: (Flow | undefined)[] = [];
-  protected continueFlow: Flow | undefined;
+  protected enterJumpTarget(kind: JumpTarget['kind'], labels: string[]): void {
+    this.fn.jumpTargets.push({ kind, labels });
+  }
+
   /** The labels written directly before the loop being compiled. */
   protected pendingLabels: string[] = [];
 
@@ -809,20 +812,16 @@ export abstract class StatementCompiler extends PatternCompiler {
   protected compileLoopBody(body: Statement, labels: string[]): Exec {
     this.fn.loopDepth++;
     for (const label of labels) this.fn.labels.push({ name: label, isLoop: true, isSwitchCase: false });
-    this.breakFlows.push(undefined);
-    const savedContinue = this.continueFlow;
-    this.continueFlow = undefined;
+    this.enterJumpTarget('loop', labels);
     try {
-      const exec = this.compileScoped(body);
-      this.continueFlow = this.continueFlow ? Flow.join(this.continueFlow, this.flow) : this.flow;
-      return exec;
+      return this.compileScoped(body);
     } finally {
       this.fn.loopDepth--;
       this.fn.labels.splice(this.fn.labels.length - labels.length, labels.length);
-      void savedContinue;
     }
   }
 
+  // code-gauge-allow duplicateLines 20 -- The counted loop shares its header operations with the generator form.
   private compileFor(statement: Extract<Statement, { kind: 'for' }>): Exec {
     const labels = this.takeLoopLabels();
     const { result, slots } = this.withScope(() => {
@@ -833,8 +832,9 @@ export abstract class StatementCompiler extends PatternCompiler {
         : { compiled: undefined, flow: { whenTrue: this.flow, whenFalse: this.flow.unreachable } };
       this.flow = flow.whenTrue;
       const body = this.compileLoopBody(statement.body, labels);
-      const breakFlow = this.breakFlows.pop();
-      this.flow = this.continueFlow ? Flow.join(this.flow, this.continueFlow) : this.flow;
+      const target = this.fn.jumpTargets.pop();
+      const breakFlow = target?.breakFlow;
+      if (target?.continueFlow) this.flow = Flow.join(this.flow, target.continueFlow);
       const updates = statement.updates.map((update) => this.compileExpression(update).run);
       const updateRow = updates.length > 0 ? this.stepRowOf(statement) : undefined;
       this.flow = breakFlow ? Flow.join(flow.whenFalse, breakFlow) : flow.whenFalse;
@@ -895,7 +895,7 @@ export abstract class StatementCompiler extends PatternCompiler {
       const before = this.flow;
       const bind = this.compileForInBinding(statement.binding, elementType, statement);
       const body = this.compileLoopBody(statement.body, labels);
-      const breakFlow = this.breakFlows.pop();
+      const breakFlow = this.fn.jumpTargets.pop()?.breakFlow;
       this.flow = breakFlow ? Flow.join(before, breakFlow) : before;
       return this.forInLoop(iterable.run, bind, body, labels);
     });
@@ -1011,37 +1011,44 @@ export abstract class StatementCompiler extends PatternCompiler {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Each branch is one of the cases Dart distinguishes for this construct.
   private compileJump(statement: Extract<Statement, { kind: 'break' | 'continue' }>): Exec {
-    const { label } = statement;
-    if (statement.kind === 'break') {
-      if (label === undefined && this.fn.loopDepth === 0 && this.fn.switchDepth === 0) {
-        this.error(statement, 'break はループや switch の中にしか書けません。');
-      }
-      if (label !== undefined && !this.fn.labels.some((entry) => entry.name === label && !entry.isSwitchCase)) {
-        this.error(statement, `ラベル ${label} が見つかりません。`);
-      }
-      const index = this.breakFlows.length - 1;
-      if (index >= 0)
-        this.breakFlows[index] = this.breakFlows[index]
-          ? Flow.join(this.breakFlows[index] as Flow, this.flow)
-          : this.flow;
-      this.flow = this.flow.unreachable;
-      const completion: Completion = label === undefined ? BREAK : { kind: 'break', label };
-      return () => completion;
+    const { kind, label } = statement;
+    const target = kind === 'break' ? this.breakTarget(statement) : this.continueTarget(statement);
+    if (target) {
+      const flow = kind === 'break' ? 'breakFlow' : 'continueFlow';
+      target[flow] = target[flow] ? Flow.join(target[flow], this.flow) : this.flow;
     }
+    this.flow = this.flow.unreachable;
+    const completion: Completion = label === undefined ? (kind === 'break' ? BREAK : CONTINUE) : { kind, label };
+    return () => completion;
+  }
+
+  private breakTarget(statement: Span & { label: string | undefined }): JumpTarget | undefined {
+    const { label } = statement;
+    if (label === undefined && this.fn.loopDepth === 0 && this.fn.switchDepth === 0) {
+      this.error(statement, 'break はループや switch の中にしか書けません。');
+    }
+    if (label !== undefined && !this.fn.labels.some((entry) => entry.name === label && !entry.isSwitchCase)) {
+      this.error(statement, `ラベル ${label} が見つかりません。`);
+    }
+    return this.fn.jumpTargets.findLast((entry) =>
+      label === undefined ? entry.kind !== 'label' : entry.labels.includes(label)
+    );
+  }
+
+  private continueTarget(statement: Span & { label: string | undefined }): JumpTarget | undefined {
+    const { label } = statement;
     if (label === undefined && this.fn.loopDepth === 0)
       this.error(statement, 'continue はループの中にしか書けません。');
     if (label !== undefined) {
       const entry = this.fn.labels.findLast((candidate) => candidate.name === label);
       if (!entry) this.error(statement, `ラベル ${label} が見つかりません。`);
-      if (!entry.isLoop && !entry.isSwitchCase)
-        this.error(statement, `ラベル ${label} はループに付いていないので、continue では使えません。`);
+      if (entry.isSwitchCase) return undefined;
+      if (!entry.isLoop) this.error(statement, `ラベル ${label} はループに付いていないので、continue では使えません。`);
     }
-    this.continueFlow = this.continueFlow ? Flow.join(this.continueFlow, this.flow) : this.flow;
-    this.flow = this.flow.unreachable;
-    const completion: Completion = label === undefined ? CONTINUE : { kind: 'continue', label };
-    return () => completion;
+    return this.fn.jumpTargets.findLast(
+      (entry) => entry.kind === 'loop' && (label === undefined || entry.labels.includes(label))
+    );
   }
 
   private compileReturn(statement: Extract<Statement, { kind: 'return' }>): Exec {
@@ -1102,7 +1109,7 @@ export abstract class StatementCompiler extends PatternCompiler {
     const isLoop = ['for', 'forIn', 'while', 'do', 'switch'].includes(body.kind);
     if (isLoop) this.pendingLabels = labels;
     for (const label of labels) if (!isLoop) this.fn.labels.push({ name: label, isLoop: false, isSwitchCase: false });
-    this.breakFlows.push(undefined);
+    this.enterJumpTarget('label', labels);
     let exec: Exec;
     try {
       exec = this.compileStatement(body);
@@ -1110,7 +1117,7 @@ export abstract class StatementCompiler extends PatternCompiler {
       if (!isLoop) this.fn.labels.splice(this.fn.labels.length - labels.length, labels.length);
       this.pendingLabels = [];
     }
-    const breakFlow = this.breakFlows.pop();
+    const breakFlow = this.fn.jumpTargets.pop()?.breakFlow;
     if (breakFlow) this.flow = Flow.join(this.flow, breakFlow);
     return (frame) => {
       const completion = exec(frame);

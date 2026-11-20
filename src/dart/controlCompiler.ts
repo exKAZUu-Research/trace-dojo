@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 554 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 558 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type { Block, CatchClause, Pattern, Span, Statement, SwitchCase } from './ast';
 import { localNamesIn } from './astWalk';
 import type { FunctionSpec } from './callCompiler';
@@ -26,10 +26,10 @@ export abstract class ControlCompiler extends StatementCompiler {
     const labels = this.takeLoopLabels();
     const subject = this.compileExpression(statement.subject);
     const before = this.flow;
-    this.breakFlows.push(undefined);
+    this.enterJumpTarget('switch', labels);
     const { groups, after: afterCases } = this.compileSwitchGroups(statement, subject.type, before, labels);
     let after = afterCases;
-    const breakFlow = this.breakFlows.pop();
+    const breakFlow = this.fn.jumpTargets.pop()?.breakFlow;
     if (!this.isSwitchExhaustive(statement, subject.type)) after = after ? Flow.join(after, before) : before;
     if (statement.cases.length === 0) after = before;
     this.flow = breakFlow ? Flow.join(after ?? before.unreachable, breakFlow) : (after ?? before);
@@ -469,7 +469,7 @@ export abstract class ControlCompiler extends StatementCompiler {
     const isLoop = ['for', 'forIn', 'while', 'do', 'switch'].includes(body.kind);
     if (isLoop) this.pendingLabels = labels;
     for (const label of labels) if (!isLoop) this.fn.labels.push({ name: label, isLoop: false, isSwitchCase: false });
-    this.breakFlows.push(undefined);
+    this.enterJumpTarget('label', labels);
     let exec: GenExec;
     try {
       exec = this.compileGenStatement(body);
@@ -477,7 +477,7 @@ export abstract class ControlCompiler extends StatementCompiler {
       if (!isLoop) this.fn.labels.splice(this.fn.labels.length - labels.length, labels.length);
       this.pendingLabels = [];
     }
-    const breakFlow = this.breakFlows.pop();
+    const breakFlow = this.fn.jumpTargets.pop()?.breakFlow;
     if (breakFlow) this.flow = Flow.join(this.flow, breakFlow);
     return function* (frame) {
       const completion = yield* exec(frame);
@@ -525,7 +525,8 @@ export abstract class ControlCompiler extends StatementCompiler {
     const { compiled: condition, flow } = this.compileCondition(statement.condition);
     this.flow = flow.whenTrue;
     const body = this.compileGenLoopBody(statement.body, labels);
-    this.flow = flow.whenFalse;
+    const breakFlow = this.fn.jumpTargets.pop()?.breakFlow;
+    this.flow = breakFlow ? Flow.join(flow.whenFalse, breakFlow) : flow.whenFalse;
     const test = condition.run;
     return function* (frame) {
       while (test(frame)) {
@@ -546,16 +547,20 @@ export abstract class ControlCompiler extends StatementCompiler {
     return clearingSlots(result, slots);
   }
 
+  // code-gauge-allow duplicateLines 21 -- A generator shares the loop header and suspends around the body.
   private compileGenFor(statement: Extract<Statement, { kind: 'for' }>): GenExec {
     const labels = this.takeLoopLabels();
     const { result, slots } = this.withScope(() => {
       const { initExec, initRow, loopVariables } = this.compileForInit(statement);
       this.enterLoop(statement);
       const condition = statement.condition ? this.compileCondition(statement.condition) : undefined;
+      const exit = condition?.flow.whenFalse ?? this.flow.unreachable;
       if (condition) this.flow = condition.flow.whenTrue;
       const body = this.compileGenLoopBody(statement.body, labels);
+      const target = this.fn.jumpTargets.pop();
+      if (target?.continueFlow) this.flow = Flow.join(this.flow, target.continueFlow);
       const updates = statement.updates.map((update) => this.compileExpression(update).run);
-      if (condition) this.flow = condition.flow.whenFalse;
+      this.flow = target?.breakFlow ? Flow.join(exit, target.breakFlow) : exit;
       return genForLoop({
         initExec,
         initRow,
@@ -571,7 +576,8 @@ export abstract class ControlCompiler extends StatementCompiler {
   }
 
   // code-gauge-allow duplicateLines 15 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
-  // code-gauge-allow functionCognitiveComplexity 19 -- Each branch is one of the cases Dart distinguishes for this construct.
+  // code-gauge-allow functionCognitiveComplexity 21 -- Each branch is one of the cases Dart distinguishes for this construct.
+  // code-gauge-allow functionNcss 31 -- Iteration retains source state while its body suspends.
   private compileGenForIn(statement: Extract<Statement, { kind: 'forIn' }>): GenExec {
     const labels = this.takeLoopLabels();
     const iterable = this.compileExpression(statement.iterable);
@@ -581,7 +587,8 @@ export abstract class ControlCompiler extends StatementCompiler {
       const before = this.flow;
       const bind = this.compileForInBinding(statement.binding, elementType, statement);
       const body = this.compileGenLoopBody(statement.body, labels);
-      this.flow = before;
+      const breakFlow = this.fn.jumpTargets.pop()?.breakFlow;
+      this.flow = breakFlow ? Flow.join(before, breakFlow) : before;
       const source = iterable.run;
       return function* (frame: Frame): Generator<Value, Completion | undefined, undefined> {
         const { runtime } = frame;
@@ -611,13 +618,12 @@ export abstract class ControlCompiler extends StatementCompiler {
   private compileGenLoopBody(body: Statement, labels: string[]): GenExec {
     this.fn.loopDepth++;
     for (const label of labels) this.fn.labels.push({ name: label, isLoop: true, isSwitchCase: false });
-    this.breakFlows.push(undefined);
+    this.enterJumpTarget('loop', labels);
     try {
       return this.compileGenScoped(body);
     } finally {
       this.fn.loopDepth--;
       this.fn.labels.splice(this.fn.labels.length - labels.length, labels.length);
-      this.breakFlows.pop();
     }
   }
 

@@ -586,6 +586,25 @@ void main() {
       { x: 3, y: 3 },
     ],
   });
+  const iterables = `late Turtle saved;
+class KeyIterator implements Iterator<Turtle> {
+  bool _ready = true;
+  bool moveNext() { final result = _ready; _ready = false; return result; }
+  Turtle get current => Turtle(1, 1);
+}
+class ValueIterator implements Iterator<int> {
+  bool _ready = true;
+  bool moveNext() { final result = _ready; _ready = false; return result; }
+  int get current { Turtle(3, 3).canMoveForward(); return 1; }
+}
+class Keys extends Iterable<Turtle> { Iterator<Turtle> get iterator => KeyIterator(); }
+class Values extends Iterable<int> { Iterator<int> get iterator => ValueIterator(); }
+void main() {
+  final map = Map<Turtle, int>.fromIterables(Keys(), Values());
+  saved = map.keys.first;
+  saved.forward();
+}`;
+  expect(executeProgram('dart', iterables)).toMatchObject({ kind: 'executed', finalTurtles: [{ x: 1, y: 2 }] });
 });
 
 test('patterns, generics, and an uncaught error behave as the SDK does', () => {
@@ -784,15 +803,64 @@ void main() {
 });
 
 test('implicit extension calls require a unique most-specific declaration', () => {
-  const declarations = `extension A on int { String get label => 'a'; }
-extension B on int { String get label => 'b'; }
+  const declarations = `extension A on int { String get label => 'a'; set label(String s) { print('A:$s'); } }
+extension B on int { String get label => 'b'; set label(String s) { print('B:$s'); } }
 extension Generic<T> on T { String get kind => 'generic'; }
-extension Specific on String { String get kind => 'specific'; }`;
+extension Specific on String { String get kind => 'specific'; }
+extension Indices on int {
+  int operator [](int index) => this + index;
+  void operator []=(int index, int value) { print([index, value]); }
+}`;
   expect(executeProgram('dart', `${declarations} void main() { print(1.label); }`)).toMatchObject({
     kind: 'compileError',
   });
-  const program = `${declarations} void main() { print([A(1).label, B(1).label, 'x'.kind]); }`;
-  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[a, b, specific]\n' });
+  const program = `${declarations}
+void main() {
+  print([A(1).label, B(1).label, 'x'.kind]);
+  B(1).label = 'direct';
+  A(1).label += '!';
+  var x = 3;
+  x[2] += 4;
+  Indices(x)[1] = 6;
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[a, b, specific]\nB:direct\nA:a!\n[2, 9]\n[1, 6]\n',
+  });
+});
+
+test('labeled exits join the flow of their own target', () => {
+  const missing = `int value() {
+  outer: while (true) { while (true) { break outer; } }
+}
+void main() { print(value()); }`;
+  expect(executeProgram('dart', missing)).toMatchObject({ kind: 'compileError' });
+  const valid = `int value() {
+  int answer;
+  done: {
+    while (true) { answer = 7; break done; }
+  }
+  return answer;
+}
+Iterable<int> items() sync* {
+  int answer;
+  outer: while (true) { while (true) { answer = 8; break outer; } }
+  yield answer;
+}
+void main() { print(value()); print(items().first); }`;
+  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '7\n8\n' });
+});
+
+test('dynamic complement preserves int semantics and rejects doubles', () => {
+  const program = `void inspect(dynamic value) {
+  try { print(~value); } catch (e) { print(e.runtimeType); }
+  print(-value);
+}
+void main() { inspect(3); inspect(3.5); }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '-4\n-3\nNoSuchMethodError\n-3.5\n',
+  });
 });
 
 // Each program is an error before it runs in the SDK, at the line given.
@@ -963,6 +1031,9 @@ void main() {
   print(mapped);
 }`;
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '16\nint\nint\n[1, 2]\n' });
+  expect(executeProgram('dart', 'int answer() => 42; void main() { print(answer<String>()); }')).toMatchObject({
+    kind: 'compileError',
+  });
 });
 
 test('construction checks constants before main and only evaluates selected branches', () => {
