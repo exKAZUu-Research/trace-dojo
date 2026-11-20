@@ -3,7 +3,6 @@ import type { Expr, MacroCall, Pattern, Span } from './ast';
 import { forEachDirect, patternBindingParts } from './astWalk';
 import type { Checker } from './checker';
 import { checkPattern } from './checkerPatterns';
-import { normalize } from './infer';
 import { compileError } from './items';
 import type { TraitSolver } from './traits';
 import { type ClosureType, freshVar, newClosureType, resolve, shallow, type Type, UNIT } from './types';
@@ -115,7 +114,7 @@ class CaptureUses {
     const mutation = mutatedCapture(expr, this.annotations, this.capturedLocal);
     if (mutation) this.mutated.add(mutation);
     // Calling a captured `FnOnce` closure moves it.
-    if (expr.kind === 'call' && closureKindOfType(expr.callee.ty) === 'FnOnce') this.move(expr.callee, expr.span);
+    if (expr.kind === 'call' && this.annotations.callKinds.get(expr) === 'FnOnce') this.move(expr.callee, expr.span);
     if (consumed && expr.kind !== 'index' && !this.isCopy(expr.ty ?? UNIT)) this.move(expr, expr.span);
     const consumes = consumedChildren(expr, this.annotations, (pattern) =>
       bindsByValue(pattern, this.annotations, this.isCopy)
@@ -148,14 +147,6 @@ class CaptureUses {
   };
 }
 
-/** The closure trait that calling a value of a type uses: its own for a closure, `Fn` through a shared reference. */
-function closureKindOfType(type: Type | undefined): 'Fn' | 'FnMut' | 'FnOnce' | undefined {
-  const t = type && normalize(shallow(type));
-  if (t?.kind === 'closure') return t.closure.kind;
-  if (t?.kind === 'ref') return t.mutable ? closureKindOfType(t.target) : 'Fn';
-  return undefined;
-}
-
 /** Whether a pattern takes a part of what it matches by value that is not `Copy`, which moves it. */
 function bindsByValue(pattern: Pattern, annotations: Annotations, isCopy: (type: Type) => boolean): boolean {
   return patternBindingParts(pattern, annotations).some((part) => !part.throughRef && !isCopy(part.local.type));
@@ -185,7 +176,7 @@ function mutatedCapture(
       return method?.receiver.autoref === 'mut' || throughMut ? capturedLocal(expr.receiver) : undefined;
     }
     case 'call': {
-      return closureKindOfType(expr.callee.ty) === 'FnMut' ? capturedLocal(expr.callee) : undefined;
+      return annotations.callKinds.get(expr) === 'FnMut' ? capturedLocal(expr.callee) : undefined;
     }
     case 'macro': {
       if (expr.macro.kind !== 'write') return undefined;

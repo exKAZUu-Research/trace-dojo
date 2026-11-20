@@ -2814,3 +2814,21 @@ fn main() {
 }`;
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'true\ntrue\n' });
 });
+
+test('forwards Rust callable trait bounds through captures, references, and boxes', () => {
+  const program = `fn once<F: FnOnce()>(callback: F) {
+    let wrapper = || callback();
+    wrapper();
+}
+fn shared<F: Fn()>(callback: F) { callback(); }
+fn by_ref<F: Fn()>(callback: &F) { shared(callback); }
+fn main() {
+    once(|| println!("once"));
+    by_ref(&|| println!("shared"));
+    let boxed: Box<dyn Fn()> = Box::new(|| println!("boxed"));
+    shared(boxed);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'once\nshared\nboxed\n' });
+  const mutable = program.replace('F: FnOnce()>(callback: F)', 'F: FnMut()>(mut callback: F)');
+  expect(executeProgram('rust', mutable)).toMatchObject({ kind: 'compileError' });
+});

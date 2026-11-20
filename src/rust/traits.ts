@@ -208,14 +208,12 @@ export class TraitSolver {
         this.unifier.tryUnify(t.ret, sig.ret);
       return ok ? 'yes' : 'no';
     }
-    // `&F` calls `F` through a shared reference, which needs `F: Fn`; `&mut F` calls it as `F` does.
     if (t.kind === 'ref') {
-      if (!t.mutable && ref.trait.name !== 'Fn') {
-        return this.closureImplements(normalize(shallow(t.target)), { ...ref, trait: this.program.traitDef('Fn') });
-      }
-      return this.closureImplements(normalize(shallow(t.target)), ref);
+      if (t.mutable && ref.trait.name === 'Fn') return 'no';
+      const trait = this.program.traitDef(t.mutable ? 'FnMut' : 'Fn');
+      return this.implements(t.target, { ...ref, trait });
     }
-    if (t.kind === 'adt' && t.def.builtin === 'Box') return this.closureImplements(normalize(shallow(t.args[0])), ref);
+    if (t.kind === 'adt' && t.def.builtin === 'Box') return this.implements(t.args[0], ref);
     return 'no';
   }
 
