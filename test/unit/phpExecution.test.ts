@@ -5195,6 +5195,11 @@ try { range(0.1, null, 1); } catch (ValueError $e) { echo explode("\\n", $e->get
       `<?php $a = [0, 1, 2, 3, 4, 5, 6, 7, 8]; array_splice($a, 1, 3, [7]); $a["a"] = 3; unset($a[4]); $a[8] = 7; mt_srand(0); var_dump(array_rand($a));`
     )
   ).toMatchObject({ kind: 'executed', stdout: 'int(5)\n' });
+  expect(
+    run(
+      `<?php $a = [5 => 1, 2, 3]; $a[] = 30; $a[] = 12; $a[] = 23; $a[3] = 27; $a[] = 66; unset($a[7]); $a["k4"] = 82; for ($s = 0; $s < 14; $s++) { mt_srand($s); echo array_rand($a), " "; }`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'k4 9 5 9 9 k4 k4 5 5 6 10 5 3 9 ' });
   for (const sort of ['ksort', 'asort']) {
     expect(
       run(`<?php $a = range(0, 7); ${sort}($a); unset($a[4]); $a["a"] = 3; mt_srand(0); var_dump(array_rand($a));`)

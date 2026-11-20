@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 466 -- Keeps array bucket layout, mutations and their cursor positions together.
+// code-gauge-allow-file fileNcss 468 -- Keeps array bucket layout, mutations and their cursor positions together.
 import type { Key } from './values';
 
 class ArrayEntry {
@@ -186,21 +186,13 @@ export class ArrayOrder {
     );
   }
 
-  // code-gauge-allow functionCognitiveComplexity 26 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   insert(key: Key, count = this.entries.size): number | undefined {
     if (this.get(key)) return undefined;
     const numeric = typeof key === 'bigint' && key >= 0n && key < BigInt(Number.MAX_SAFE_INTEGER);
     const position = numeric ? Number(key) : -1;
     this.packed ??= numeric && position < this.capacity;
-    if (this.packed) {
-      if (!numeric || position < this.nextIndex) this.toMixed();
-      else if (position >= this.capacity) {
-        if (position < this.capacity * 2 && count > this.capacity / 2) {
-          this.capacity *= 2;
-          this.storageVersion++;
-        } else this.toMixed();
-      }
-    }
+    if (this.packed) this.preparePackedInsert(numeric, position, count);
     if (!this.packed && this.nextIndex >= this.capacity) {
       if (this.nextIndex > count + (count >> 5)) this.compact();
       else {
@@ -216,6 +208,23 @@ export class ArrayOrder {
         cursor.setPosition(entry, cursor.index);
     }
     return entry.index;
+  }
+
+  /** Grows a packed table for an insertion or converts it to a hash, as _zend_hash_index_add_or_update_i does. */
+  private preparePackedInsert(numeric: boolean, position: number, count: number): void {
+    if (!numeric || position < this.nextIndex) {
+      this.toMixed();
+      return;
+    }
+    if (position < this.capacity) return;
+    if (position < this.capacity * 2 && count > this.capacity / 2) {
+      this.capacity *= 2;
+      this.storageVersion++;
+      return;
+    }
+    // PHP doubles a full table only on this path, before converting it to a hash.
+    if (this.nextIndex >= this.capacity) this.capacity *= 2;
+    this.toMixed();
   }
 
   unpack(preservePositions = false): void {
