@@ -17,6 +17,16 @@ int main() { ${body} }`;
   });
 });
 
+test('keeps a transparent comparator distinct from the ordered container default', () => {
+  const program = `#include <functional>
+#include <map>
+int main() {
+  std::map<int, int, std::less<>> source;
+  std::map<int, int>* pointer = &source;
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({ kind: 'compileError', diagnostics: [{ row: 4 }] });
+});
+
 test('a C header does not expose FILE in namespace std', () => {
   const program = `#include <stdio.h>
 int main() { std::FILE* stream = stdout; }`;

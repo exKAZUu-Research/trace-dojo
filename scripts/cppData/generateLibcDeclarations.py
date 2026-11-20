@@ -237,43 +237,63 @@ def math_wrapper_calls(families):
     return calls
 
 
-def math_nan_signs(families):
-    probe = """#include <cmath>
+def math_nan_results(families):
+    probe = """#include <bit>
+#include <cmath>
 #include <cstdio>
-#include <limits>
-template<class T> T operand(unsigned digit) {
-  static volatile T values[] = {1.25, std::numeric_limits<T>::quiet_NaN(), -std::numeric_limits<T>::quiet_NaN()};
-  return values[digit];
+#include <cstdint>
+#include <type_traits>
+template<class T> using Word = std::conditional_t<sizeof(T) == 4, std::uint32_t, std::uint64_t>;
+template<class T> constexpr Word<T> sign = Word<T>(1) << (sizeof(T) * 8 - 1);
+template<class T> constexpr Word<T> quiet = Word<T>(1) << (sizeof(T) == 4 ? 22 : 51);
+template<class T> constexpr Word<T> exponent = sign<T> - 2 * quiet<T>;
+
+template<class T> T operand(unsigned digit, unsigned position) {
+  if (digit == 0) return 1.25;
+  Word<T> bits = exponent<T> | (0x40 + position);
+  if (digit <= 2) bits |= quiet<T>;
+  if (digit % 2 == 0) bits |= sign<T>;
+  return std::bit_cast<T>(bits);
 }
-template<class Function> void probe(const char* name, const char* width, unsigned patterns, Function call) {
-  unsigned negativeNaNs = 0;
-  for (unsigned pattern = 1; pattern < patterns; ++pattern) {
-    auto result = call(pattern);
-    if (std::isnan(result) && std::signbit(result)) negativeNaNs |= 1u << pattern;
-  }
-  std::printf("%s %s %u\\n", name, width, negativeNaNs);
+
+template<class T> char nan_result(T result, unsigned arity) {
+  Word<T> bits = std::bit_cast<Word<T>>(result);
+  Word<T> payload = bits & (quiet<T> - 1);
+  bool is_quiet = bool(bits & quiet<T>);
+  if ((bits & exponent<T>) != exponent<T> || (!is_quiet && !payload)) return '0';
+  bool is_negative = bool(bits & sign<T>);
+  if (payload < 0x40 || payload >= 0x40 + arity) return is_negative ? '1' : '0';
+  return char('A' + (payload - 0x40) * 4 + is_negative * 2 + is_quiet);
+}
+
+template<class Function>
+void probe(const char* name, const char* width, unsigned arity, unsigned patterns, Function call) {
+  std::printf("%s %s 0", name, width);
+  for (unsigned pattern = 1; pattern < patterns; ++pattern)
+    std::putchar(nan_result(call(pattern), arity));
+  std::puts("");
 }
 int main() {
 """
     for name, arity in families:
-        if name == "copysign":
+        if name in {"copysign", "fma"}:
             continue
         for width, c_type, _ in MATH_WIDTHS:
-            arguments = ", ".join(f"operand<{c_type}>(p / {3**i} % 3)" for i in range(arity))
-            probe += f'  probe("{name}", "{width}", {3**arity}, [](unsigned p) {{ return std::{name}({arguments}); }});\n'
+            arguments = ", ".join(f"operand<{c_type}>(p / {5**i} % 5, {i})" for i in range(arity))
+            probe += f'  probe("{name}", "{width}", {arity}, {5**arity}, [](unsigned p) {{ return std::{name}({arguments}); }});\n'
     probe += "}\n"
     root = Path(".tmp")
     root.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(dir=root) as directory:
-        executable = str(Path(directory) / "mathNaNSigns")
+        executable = str(Path(directory) / "mathNaNResults")
         subprocess.run(["clang++", "-std=c++20", "-O0", "-x", "c++", "-o", executable, "-"], input=probe, text=True, check=True)
         measured = subprocess.check_output([executable], text=True)
-    signs = defaultdict(dict)
+    results = defaultdict(dict)
     for row in measured.splitlines():
-        name, width, bits = row.split()
-        if int(bits):
-            signs[name][width] = int(bits)
-    return signs
+        name, width, rules = row.split()
+        if rules.strip("0"):
+            results[name][width] = rules
+    return results
 
 
 def math_wrapper_symbol(request):
@@ -334,7 +354,7 @@ def main():
         "standard": standard,
         "stdDefinitions": std_definitions,
         "mathCalls": math_wrapper_calls(families),
-        "mathNaNSigns": math_nan_signs(families),
+        "mathNaNResults": math_nan_results(families),
     }, indent=2) + "\n")
     subprocess.run(["bun", "fmt", "--no-script", "--no-config", str(output)], check=True)
 

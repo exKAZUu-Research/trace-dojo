@@ -10,7 +10,7 @@ const stdDefinitions: Readonly<Record<string, number>> = sdk.stdDefinitions;
 type MathWrapper = 'integer' | 'float' | 'double' | 'ldouble';
 const mathCalls: Readonly<Record<string, Partial<Record<MathWrapper, string>>>> = sdk.mathCalls;
 type FloatingWrapper = Exclude<MathWrapper, 'integer'>;
-const mathNaNSigns: Readonly<Record<string, Partial<Record<FloatingWrapper, number>>>> = sdk.mathNaNSigns;
+const mathNaNResults: Readonly<Record<string, Partial<Record<FloatingWrapper, string>>>> = sdk.mathNaNResults;
 const headerGroups = sdk.headers.map((group) => new Set(group));
 
 export function conflictsWithLibcGlobal(
@@ -93,8 +93,8 @@ export function mathWrapperCall(name: string, kind: MathWrapper): string | undef
   return Object.hasOwn(mathCalls, name) ? mathCalls[name][kind] : undefined;
 }
 
-export function mathWrapperNaNSigns(name: string, kind: FloatingWrapper): number {
-  return Object.hasOwn(mathNaNSigns, name) ? (mathNaNSigns[name][kind] ?? 0) : 0;
+export function mathWrapperNaNResults(name: string, kind: FloatingWrapper): string | undefined {
+  return Object.hasOwn(mathNaNResults, name) ? mathNaNResults[name][kind] : undefined;
 }
 
 function visibleIn(group: number, headers: ReadonlySet<string>): boolean {

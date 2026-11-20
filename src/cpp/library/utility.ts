@@ -30,7 +30,8 @@ export const FUNCTOR_NAMES = Object.keys(FUNCTORS);
  * A function object of `<functional>`, such as `std::greater<int>`, which compares or combines two values. Without a
  * template argument (`std::greater<>`), it takes values of any type.
  */
-export function functorClass(library: Library, name: string, argument: Type | undefined): ClassInfo {
+export function functorClass(library: Library, name: string, type: Type | undefined): ClassInfo {
+  const argument = type?.kind === 'void' ? undefined : type;
   const key = `${name}<${argument ? typeKey(argument) : ''}>`;
   const cached = library.instances.get(key);
   if (cached) return cached;

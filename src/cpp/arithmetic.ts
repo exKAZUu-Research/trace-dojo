@@ -1,7 +1,7 @@
 import { binaryOperation, convertScalar, type Scalar } from '../c/arith';
 import type { BinaryOperator } from '../c/ast';
 import type { CType, FloatType, IntType } from '../c/types';
-import { FloatNaN } from './floatSign';
+import { arithmeticNaN, FloatNaN } from './floatSign';
 
 export type NumericValue = Scalar | FloatNaN;
 
@@ -10,13 +10,8 @@ export function arithmeticOperation(operator: BinaryOperator, type: IntType | Fl
   if (type.kind === 'int')
     return (a: NumericValue, b: NumericValue): NumericValue => operation(a as Scalar, b as Scalar);
   return (a: NumericValue, b: NumericValue): NumericValue => {
-    const left = Number(a);
-    const result = operation(left, Number(b));
-    if (Number.isNaN(result)) {
-      if (a instanceof FloatNaN) return a;
-      if (b instanceof FloatNaN && !Number.isNaN(left)) return b;
-    }
-    return result;
+    const result = operation(Number(a), Number(b));
+    return Number.isNaN(result) ? (arithmeticNaN(a, b) ?? result) : result;
   };
 }
 

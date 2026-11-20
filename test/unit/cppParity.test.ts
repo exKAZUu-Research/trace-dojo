@@ -164,6 +164,65 @@ int main() {
   });
 });
 
+test('preserves the selected NaN payload through unary and binary libm calls', () => {
+  const program = `#include <cmath>
+#include <iostream>
+unsigned char* bytes(double& value) {
+  return static_cast<unsigned char*>(static_cast<void*>(&value));
+}
+int main() {
+  unsigned char first[8] = {0x42, 0, 0, 0, 0, 0, 0xf8, 0x7f};
+  double positive;
+  for (int i = 0; i < 8; ++i) bytes(positive)[i] = first[i];
+  double negative = positive;
+  bytes(negative)[0] = 0x53;
+  bytes(negative)[7] = 0xff;
+  double root = std::sqrt(positive);
+  double sine = std::sin(negative);
+  double power = std::pow(positive, negative);
+  double angle = std::atan2(positive, negative);
+  double magnitude = std::fabs(negative);
+  std::cout << int(bytes(root)[0]) << ' ' << int(bytes(sine)[0]) << ' '
+            << int(bytes(power)[0]) << ' ' << int(bytes(angle)[0]) << ' '
+            << int(bytes(magnitude)[0]) << ' ' << std::signbit(magnitude);
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '66 83 83 66 83 0',
+    uncaughtException: undefined,
+  });
+});
+
+test('quiets signaling NaNs during floating arithmetic and retains the chosen payload', () => {
+  const program = `#include <cmath>
+#include <functional>
+#include <iostream>
+void show(double& value) {
+  auto bytes = static_cast<unsigned char*>(static_cast<void*>(&value));
+  std::cout << int(bytes[0]) << ':' << int(bytes[6]) << ':' << int(bytes[7]) << ' ';
+}
+int main() {
+  unsigned char source[8] = {0x42, 0, 0, 0, 0, 0, 0xf0, 0xff};
+  double value;
+  auto bytes = static_cast<unsigned char*>(static_cast<void*>(&value));
+  for (int i = 0; i < 8; ++i) bytes[i] = source[i];
+  double added = NAN + value;
+  double product = std::multiplies<double>()(value, 1.0);
+  double fused = std::fma(1.0, value, NAN);
+  double contracted = value * 2.0 + 1.0;
+  show(value);
+  show(added);
+  show(product);
+  show(fused);
+  show(contracted);
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '66:240:255 66:248:255 66:248:255 66:248:255 66:248:255 ',
+    uncaughtException: undefined,
+  });
+});
+
 test('reads the signed representation of constant NaNs from storage', () => {
   const program = `#include <cmath>
 #include <iostream>
@@ -357,6 +416,58 @@ int main() {
   std::cout << *it;
 }`;
   expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', stdout: '2', uncaughtException: undefined });
+});
+
+test('shares ordered container and iterator types with an explicitly spelled default comparator', () => {
+  const program = `#include <functional>
+#include <iostream>
+#include <map>
+#include <set>
+void inspect(const std::map<int, int>& values, std::map<int, int>::const_iterator first) {
+  std::cout << values.size() << first->second;
+}
+int main() {
+  std::map<int, int, std::less<int>> map{{1, 2}};
+  std::multimap<int, int, std::less<int>> multiMap{{1, 3}};
+  std::set<int, std::less<int>> set{4};
+  std::multiset<int, std::less<int>> multiSet{5, 5};
+  const std::multimap<int, int>& a = multiMap;
+  const std::set<int>& b = set;
+  const std::multiset<int>& c = multiSet;
+  std::less<void> transparent;
+  const std::less<>& compare = transparent;
+  inspect(map, map.cbegin());
+  std::cout << a.begin()->second << *b.begin() << c.size() << compare(1, 2) << std::plus<void>()(2, 3);
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '1234215',
+    uncaughtException: undefined,
+  });
+});
+
+test('uses the libc++ iterator aliases for immutable set keys', () => {
+  const program = `#include <iostream>
+#include <set>
+#include <unordered_set>
+int main() {
+  std::set<int> set{1, 2};
+  std::multiset<int> multi{3, 4};
+  std::unordered_set<int> unordered{5};
+  const std::set<int>& readSet = set;
+  const std::multiset<int>& readMulti = multi;
+  std::set<int>::iterator a = set.cbegin();
+  std::set<int>::reverse_iterator b = readSet.rbegin();
+  std::multiset<int>::iterator c = multi.cbegin();
+  std::multiset<int>::reverse_iterator d = readMulti.rbegin();
+  std::unordered_set<int>::iterator e = unordered.cbegin();
+  std::cout << *a << *b << *c << *d << *e;
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '12345',
+    uncaughtException: undefined,
+  });
 });
 
 test('uses pointer addresses as unordered keys across aliasing conversions and copies', () => {

@@ -54,6 +54,7 @@ import type { Library } from './registry';
 import { elementConstruction } from './sequences';
 import { addMethod, constRef, generic, native, nativeConstructor, type NativeOptions, throwLibrary } from './support';
 import { typeKey } from './templates';
+import { functorClass } from './utility';
 
 /** `std::pair<T1, T2>`, an object with the members `first` and `second`. */
 export function pairClass(library: Library, first: Type, second: Type): ClassInfo {
@@ -496,8 +497,11 @@ export function orderedClass(
   comparator: Type | undefined
 ): ClassInfo {
   const args = valueType ? [keyType, valueType] : [keyType];
-  const name = `std::${kind}<${args.map((arg) => typeName(arg)).join(', ')}${comparator ? `, ${typeName(comparator)}` : ''}>`;
-  const key = `${kind}<${args.map((arg) => typeKey(arg)).join(',')},${comparator ? typeKey(comparator) : ''}>`;
+  const defaultComparator = classType(functorClass(library, 'less', keyType));
+  const compare = comparator ?? defaultComparator;
+  const custom = sameType(compare, defaultComparator) ? undefined : compare;
+  const name = `std::${kind}<${args.map((arg) => typeName(arg)).join(', ')}${custom ? `, ${typeName(custom)}` : ''}>`;
+  const key = `${kind}<${[...args, compare].map(typeKey).join(',')}>`;
   const cached = library.instances.get(key);
   if (cached) return cached;
   const cls = new ClassInfo(name, 'class');
@@ -510,7 +514,7 @@ export function orderedClass(
     if (!hasOrder) compiler_.error(row, keyWithoutOrder(keyType));
   };
   const order: Order = hasOrder
-    ? comparatorOrder(compiler, keyType, comparator, 0)
+    ? comparatorOrder(compiler, keyType, custom, 0)
     : () => {
         throw new CppRuntimeError('custom', keyWithoutOrder(keyType));
       };
@@ -519,10 +523,14 @@ export function orderedClass(
   const isSelf = (expr: Expr | undefined): boolean => expr?.type.kind === 'class' && expr.type.cls === cls;
   const entryType: Type = isMap ? classType(pairClass(library, withConst(keyType), valueType)) : keyType;
   const elementType: Type = isMap ? entryType : withConst(keyType);
-  const iterator = randomAccessIterator(library.iterators, name, elementType, false, false, 'bidirectional');
   const constIterator = randomAccessIterator(library.iterators, name, elementType, true, false, 'bidirectional');
-  const reverseIterator = randomAccessIterator(library.iterators, name, elementType, false, true, 'bidirectional');
   const constReverseIterator = randomAccessIterator(library.iterators, name, elementType, true, true, 'bidirectional');
+  const iterator = isMap
+    ? randomAccessIterator(library.iterators, name, elementType, false, false, 'bidirectional')
+    : constIterator;
+  const reverseIterator = isMap
+    ? randomAccessIterator(library.iterators, name, elementType, false, true, 'bidirectional')
+    : constReverseIterator;
   const types = {
     iterator: classType(iterator),
     constIterator: classType(constIterator),

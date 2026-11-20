@@ -1,9 +1,11 @@
 import { fma } from '../../c/library/binaryFloat';
 import { BINARY, UNARY } from '../../c/library/mathFunctions';
+import { convertNumeric, type NumericValue } from '../arithmetic';
 import { overflowError } from '../errors';
-import { copyFloatSign, FloatNaN, floatSignBit, NEGATIVE_NAN } from '../floatSign';
+import { arithmeticNaN, copyFloatSign, type FloatingValue, FloatNaN, floatSignBit, NEGATIVE_NAN } from '../floatSign';
 import { invoke } from '../objectCompiler';
 import {
+  type ArithmeticType,
   BOOL,
   DOUBLE,
   FLOAT,
@@ -21,7 +23,7 @@ import {
   typeName,
   unqualified,
 } from '../types';
-import { mathWrapperCall, mathWrapperNaNSigns } from './libcGlobals';
+import { mathWrapperCall, mathWrapperNaNResults } from './libcGlobals';
 import { asNumber, generic, native } from './support';
 
 type MathOperation = (args: number[], isFloat: boolean) => number;
@@ -52,9 +54,7 @@ export function mathFunctions(): Map<string, FunctionInfo[]> {
     native('abs', [INT], INT, ([x]) => integerAbs(x, INT)),
     native('abs', [LONG], LONG, ([x]) => integerAbs(x, LONG)),
     native('abs', [LLONG], LLONG, ([x]) => integerAbs(x, LLONG)),
-    native('abs', [FLOAT], FLOAT, ([x]) => Math.abs(x as number)),
-    native('abs', [DOUBLE], DOUBLE, ([x]) => Math.abs(x as number)),
-    native('abs', [LDOUBLE], LDOUBLE, ([x]) => Math.abs(x as number)),
+    ...FLOAT_TYPES.map((type) => native('abs', [type], type, ([x]) => copyFloatSign(x, 0))),
   ]);
   for (const name of ['labs', 'llabs'])
     functions.set(name, [
@@ -108,36 +108,56 @@ function promotedMath(name: string, arity: number, run: MathOperation): Function
       return;
     const result = types.some((type) => type.kind === 'float' && type.name === 'ldouble') ? LDOUBLE : DOUBLE;
     const symbol = mathWrapperCall(name, result.name === 'ldouble' ? 'ldouble' : 'integer');
-    return native(name, types, result, linkedMath(name, symbol, result, run));
+    return native(name, types, result, linkedMath(name, symbol, result, run, types));
   });
 }
 
-function linkedMath(name: string, symbol: string | undefined, type: FloatType, run: MathOperation): NativeFunction {
+function linkedMath(
+  name: string,
+  symbol: string | undefined,
+  type: FloatType,
+  run: MathOperation,
+  promotedFrom?: ArithmeticType[]
+): NativeFunction {
   const isFloat = type.name === 'float';
-  const signs = mathWrapperNaNSigns(name, type.name);
+  const nanResults = mathWrapperNaNResults(name, type.name);
   return (values, { frame, row }) => {
+    const operands = promotedFrom
+      ? values.map((value, index) => convertNumeric(value as NumericValue, promotedFrom[index], type))
+      : values;
     const override = symbol && frame.runtime.libcOverrides.get(symbol);
     if (override) {
-      const args = values.map((value) => (value instanceof FloatNaN ? value : asNumber(value)));
+      const args = operands.map((value) => (value instanceof FloatNaN ? value : asNumber(value)));
       return invoke(frame, override, args, undefined, row);
     }
-    if (name === 'copysign') return copyFloatSign(values[0], values[1]);
-    const numbers = values.map(asNumber);
+    if (name === 'copysign') return copyFloatSign(operands[0], operands[1]);
+    if (name === 'fma') {
+      const nan = arithmeticNaN(operands[2], operands[0], operands[1]);
+      if (nan !== undefined) return nan;
+    }
+    const numbers = operands.map(asNumber);
     const result = run(numbers, isFloat);
-    if (Number.isNaN(result) && signs && hasNegativeNaNResult(signs, values, numbers)) return NEGATIVE_NAN;
+    if (Number.isNaN(result) && nanResults) return restoreMathNaN(nanResults, operands, numbers);
     return isFloat ? Math.fround(result) : result;
   };
 }
 
-// The SDK probe encodes each argument as finite (0), positive NaN (1), or negative NaN (2).
-function hasNegativeNaNResult(signs: number, values: unknown[], numbers: number[]): boolean {
+// The SDK probe uses base five for the input pattern and encodes the result's source, sign and quiet bit.
+function restoreMathNaN(results: string, values: unknown[], numbers: number[]): FloatingValue {
   let pattern = 0;
   for (let index = numbers.length - 1; index >= 0; index--) {
     const raw = values[index];
-    const digit = raw instanceof FloatNaN && raw.negative ? 2 : Number.isNaN(numbers[index]) ? 1 : 0;
-    pattern = pattern * 3 + digit;
+    const digit =
+      raw instanceof FloatNaN ? (raw.isSignaling ? 3 : 1) + Number(raw.negative) : Number.isNaN(numbers[index]) ? 1 : 0;
+    pattern = pattern * 5 + digit;
   }
-  return (signs & (1 << pattern)) !== 0;
+  const rule = (results.codePointAt(pattern) ?? 0) - 65;
+  if (rule < 0) return results[pattern] === '1' ? NEGATIVE_NAN : Number.NaN;
+  const source = values[rule >> 2];
+  const negative = (rule & 2) !== 0;
+  if (!(source instanceof FloatNaN)) return negative ? NEGATIVE_NAN : Number.NaN;
+  const result = source.withSign(negative);
+  return (rule & 1) !== 0 ? result.quiet() : result;
 }
 
 function integerAbs(value: unknown, type: IntType): number | bigint {

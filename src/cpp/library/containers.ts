@@ -1,4 +1,4 @@
-import { classType, type Type, typeName, unqualified } from '../types';
+import { classType, type Type, typeName } from '../types';
 import { adapterClass } from './adapters';
 import { orderedClass, pairClass } from './associative';
 import { checkContainerElement } from './elements';
@@ -112,7 +112,7 @@ export function containerTemplates(library: Library): LibraryTemplate[] {
       name,
       instantiate: (args, row) => {
         arity(name, args, 0, 1, row);
-        return classType(functorClass(library, name, args[0] ? unqualified(args[0]) : undefined));
+        return classType(functorClass(library, name, args[0]));
       },
     });
   }

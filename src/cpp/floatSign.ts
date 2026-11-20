@@ -31,6 +31,14 @@ export class FloatNaN {
     return this.negative === negative ? this : new FloatNaN(negative, this.payload);
   }
 
+  get isSignaling(): boolean {
+    return (this.payload & QUIET_BIT) === 0n;
+  }
+
+  quiet(): FloatNaN {
+    return this.isSignaling ? new FloatNaN(this.negative, this.payload | QUIET_BIT) : this;
+  }
+
   convertWidth(single: boolean): FloatNaN {
     const payload = single ? (this.payload >> PAYLOAD_SHIFT) << PAYLOAD_SHIFT : this.payload;
     return new FloatNaN(this.negative, payload | QUIET_BIT);
@@ -55,4 +63,15 @@ export function copyFloatSign(value: unknown, sign: unknown): FloatingValue {
   if (value instanceof FloatNaN) return value.withSign(isNegative);
   const number = Math.abs(Number(value));
   return isNegative ? negateFloat(number) : number;
+}
+
+export function arithmeticNaN(...values: unknown[]): FloatingValue | undefined {
+  let first: FloatingValue | undefined;
+  for (const value of values) {
+    if (value instanceof FloatNaN) {
+      if (value.isSignaling) return value.quiet();
+      first ??= value;
+    } else if (typeof value === 'number' && Number.isNaN(value)) first ??= value;
+  }
+  return first;
 }
