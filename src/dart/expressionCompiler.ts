@@ -1,5 +1,5 @@
 import { CompileError } from '../interpreter/diagnostics';
-// code-gauge-allow-file fileNcss 921 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 924 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type {
   Arguments as ArgumentsSyntax,
   CascadeSelector,
@@ -216,7 +216,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
   private applyStoredFlow(stored: StoredFlow): Flow {
     if (!stored.reachable) return this.flow.unreachable;
     let flow = this.flow;
-    for (const [local, type] of stored.promotions) flow = flow.promote(local, type);
+    for (const [local, chain] of stored.promotions) {
+      for (const type of chain) {
+        const current = flow.promotions.get(local)?.at(-1) ?? local.type;
+        if (isSubtype(type, current)) flow = flow.promote(local, type);
+      }
+    }
     return flow;
   }
 

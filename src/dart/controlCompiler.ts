@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 550 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 552 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type { Block, CatchClause, Pattern, Span, Statement, SwitchCase } from './ast';
 import type { FunctionSpec } from './callCompiler';
 import type { Eval } from './compilerBase';
@@ -234,9 +234,11 @@ export abstract class ControlCompiler extends StatementCompiler {
     const run = compile(block);
     const afterFinally = this.flow;
     const promotions = new Map(afterTry.forget(this.writtenLocals(block)).promotions);
-    for (const [variable, type] of afterFinally.promotions) {
-      const promoted = promotions.get(variable);
-      if (!promoted || isSubtype(type, promoted)) promotions.set(variable, type);
+    for (const [variable, chain] of afterFinally.promotions) {
+      const existing = promotions.get(variable) ?? [];
+      const current = existing.at(-1);
+      const narrowed = current ? chain.filter((type) => isSubtype(type, current) && !sameType(type, current)) : chain;
+      if (narrowed.length > 0) promotions.set(variable, [...existing, ...narrowed]);
     }
     this.flow = new Flow(
       afterTry.reachable && afterFinally.reachable,

@@ -509,7 +509,7 @@ export abstract class CompilerBase {
 
   /** The type flow analysis gives a local where it is read. */
   promotedType(variable: LocalVar): DartType {
-    return this.flow.promotions.get(variable) ?? variable.type;
+    return this.flow.promotions.get(variable)?.at(-1) ?? variable.type;
   }
 
   /** Whether a local can be promoted: not write-captured and not a late variable read in a closure. */

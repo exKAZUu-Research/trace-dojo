@@ -973,3 +973,18 @@ void main() {
 }`;
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[false, true, true]\n' });
 });
+
+test('joined branches retain only promotions shared by both paths', () => {
+  const shared = `void show(Object x) {
+  if (x is num) {
+    if (x is int || x is double) print(x.abs());
+  }
+}
+void main() { show(-2.5); }`;
+  expect(executeProgram('dart', shared)).toMatchObject({ kind: 'executed', stdout: '2.5\n' });
+  for (const secondType of ['double', 'num']) {
+    const invalid = `void show(Object x) { if (x is int || x is ${secondType}) print(x.abs()); }
+void main() { show(-2.5); }`;
+    expect(executeProgram('dart', invalid)).toMatchObject({ kind: 'compileError' });
+  }
+});

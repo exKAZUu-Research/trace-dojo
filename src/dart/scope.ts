@@ -2,7 +2,7 @@ import type { Span } from './ast';
 import type { ClassInfo } from './classes';
 import type { Eval } from './compilerBase';
 import type { FunctionInfo, TypeEnv } from './runtime';
-import type { DartType, FunctionType, InterfaceType, TypeParam } from './types';
+import { type DartType, type FunctionType, type InterfaceType, isSubtype, sameType, type TypeParam } from './types';
 import type { Value } from './values';
 
 let nextLocalId = 0;
@@ -10,7 +10,7 @@ let nextLocalId = 0;
 /** What a condition told flow analysis: whether its branch is reachable and the variables it promoted. */
 export interface StoredFlow {
   reachable: boolean;
-  promotions: readonly (readonly [LocalVar, DartType])[];
+  promotions: readonly (readonly [LocalVar, readonly DartType[]])[];
 }
 
 export class LocalVar {
@@ -108,7 +108,7 @@ export class FunctionContext {
 export class Flow {
   constructor(
     readonly reachable: boolean,
-    readonly promotions: ReadonlyMap<LocalVar, DartType>,
+    readonly promotions: ReadonlyMap<LocalVar, readonly DartType[]>,
     /** Variables definitely assigned. */
     readonly assigned: ReadonlySet<LocalVar>,
     /** Variables possibly assigned, for `final` and `late final` checks. */
@@ -124,7 +124,17 @@ export class Flow {
   }
 
   promote(variable: LocalVar, type: DartType): Flow {
-    return new Flow(this.reachable, new Map([...this.promotions, [variable, type]]), this.assigned, this.maybeAssigned);
+    const existing = this.promotions.get(variable) ?? [];
+    const current = existing.at(-1);
+    if (current && sameType(type, current)) return this;
+    const chain = existing.filter((earlier) => !sameType(type, earlier) && isSubtype(type, earlier));
+    chain.push(type);
+    return new Flow(
+      this.reachable,
+      new Map([...this.promotions, [variable, chain]]),
+      this.assigned,
+      this.maybeAssigned
+    );
   }
 
   demote(variable: LocalVar): Flow {
@@ -161,21 +171,15 @@ export class Flow {
         ? b
         : new Flow(false, b.promotions, intersect(a.assigned, b.assigned), union(a.maybeAssigned, b.maybeAssigned));
     if (!b.reachable) return a;
-    const promotions = new Map<LocalVar, DartType>();
-    for (const [variable, type] of a.promotions) {
+    const promotions = new Map<LocalVar, readonly DartType[]>();
+    for (const [variable, chain] of a.promotions) {
       const other = b.promotions.get(variable);
       if (!other) continue;
-      promotions.set(variable, joinPromotion(type, other));
+      const shared = chain.filter((type) => other.some((candidate) => sameType(type, candidate)));
+      if (shared.length > 0) promotions.set(variable, shared);
     }
     return new Flow(true, promotions, intersect(a.assigned, b.assigned), union(a.maybeAssigned, b.maybeAssigned));
   }
-}
-
-let joinPromotion: (a: DartType, b: DartType) => DartType = (a) => a;
-
-/** Sets how two promotions of a variable join, which needs the subtype rules (set by the compiler to avoid a cycle). */
-export function setPromotionJoin(join: (a: DartType, b: DartType) => DartType): void {
-  joinPromotion = join;
 }
 
 function intersect<T>(a: ReadonlySet<T>, b: ReadonlySet<T>): Set<T> {
