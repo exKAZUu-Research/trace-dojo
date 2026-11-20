@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 772 -- The checker core owns body, entry point, and type obligations.
+// code-gauge-allow-file fileNcss 785 -- The checker core owns body, entry point, and type obligations.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ExecutionBudget } from '../interpreter/limits';
 import { Annotations, type Coercion, type FnContext, type LocalVar, type PathRes } from './annotations';
@@ -471,6 +471,8 @@ export class Checker {
     return false;
   }
 
+  // code-gauge-allow functionNcss 31 -- Binds signature types before checking the body and its obligations.
+
   checkFn(def: FnDef): void {
     const item = def.ast as FnItem;
     if (!item.body) return;
@@ -499,7 +501,10 @@ export class Checker {
       this.requireIrrefutable(param.pattern, def.paramTypes[index], 'fn');
     }
     const bodyType = this.checkBlock(item.body, this.body.retType);
-    if (item.body.tail) this.coerceReturned(item.body.tail, bodyType, this.body.retType);
+    if (item.body.tail) {
+      this.coerceReturned(item.body.tail, bodyType, this.body.retType);
+      this.markReborrows(item.body.tail, def.ret);
+    }
     this.coerceTail(item.body, bodyType, this.body.retType, item);
     if (def.ret.kind === 'opaque') {
       def.ret.opaque.hidden = this.body.retType;
@@ -810,6 +815,20 @@ export class Checker {
     this.coerce(expr, actual, target);
   }
 
+  coerceAtReferenceSite(expr: Expr, target: Type): void {
+    const written = normalize(shallow(target));
+    this.coerceExpr(expr, target);
+    if (written.kind === 'ref') this.markReborrows(expr, written);
+  }
+
+  markReborrows(expr: Expr, target: Type): void {
+    const type = normalize(shallow(target));
+    if (type.kind !== 'ref') return;
+    forEachResult(expr, (result) => {
+      if (normalize(shallow(result.ty ?? UNIT)).kind === 'ref') this.annotations.reborrows.set(result, type.mutable);
+    });
+  }
+
   /**
    * Records a coercion of an expression's value. A block's value is its tail's, and an `if`'s or a `match`'s are its
    * branches', which rustc coerces each where it ends.
@@ -1053,7 +1072,7 @@ export class Checker {
     let type = declared ?? freshVar();
     let diverges = false;
     if (stmt.init) {
-      if (declared) this.coerceExpr(stmt.init, declared);
+      if (declared) this.coerceAtReferenceSite(stmt.init, declared);
       else type = this.expr(stmt.init, undefined);
       diverges = shallow(type).kind === 'never' && !declared;
       if (shallow(type).kind === 'never') type = declared ?? freshVar();

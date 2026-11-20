@@ -131,10 +131,8 @@ export class BorrowChecker {
         if (!stmt.init) return state;
         const { pattern, init } = stmt;
         if (pattern.kind === 'binding' && !pattern.sub) {
-          // `let r2: &mut T = r;` reborrows `*r`; without the type it moves `r`.
-          const reborrows = stmt.type?.kind === 'ref' && stmt.type.mutable && isMutReference(init.ty);
           const known = this.constantValue(init, state);
-          let current = this.expr(init, state, reborrows ? 'read' : 'move');
+          let current = this.expr(init, state, 'move');
           for (const local of this.bindingsOf(pattern)) current = setVar(current, local, initState(known));
           return current;
         }
@@ -163,7 +161,7 @@ export class BorrowChecker {
   private expr(expr: Expr, state: State, mode: 'move' | 'read' | 'mut'): State {
     this.budget.spend();
     if (state === BOTTOM) return BOTTOM;
-    if (mode === 'move' && this.annotations.referenceArguments.has(expr) && isMutReference(expr.ty)) mode = 'read';
+    if (mode === 'move' && this.annotations.reborrows.has(expr) && isMutReference(expr.ty)) mode = 'read';
     if (this.constContext && mode !== 'move' && !this.placeOf(expr)) this.checkTemporaryDrop(expr, state);
     return this.exprInner(expr, state, mode);
   }

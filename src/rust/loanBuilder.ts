@@ -96,7 +96,6 @@ export class LoanBuilder {
   private readonly exits: number[] = [];
   /** For a closure's body, the captures it modifies, which the closure captures by `&mut`. */
   private readonly mutatedCaptures = new Set<LocalVar>();
-  private readonly typedReferenceReads = new Set<Expr>();
   private returnVar: Var = -1;
   private staticRegion: RVar | undefined;
 
@@ -290,7 +289,7 @@ export class LoanBuilder {
   // Places
 
   /** The place an expression denotes, evaluating the indexes in it, or undefined for an expression that is no place. */
-  private place(expr: Expr): Place | undefined {
+  private place(expr: Expr, mutable = false): Place | undefined {
     switch (expr.kind) {
       case 'path': {
         const res = this.annotations.paths.get(expr);
@@ -298,19 +297,16 @@ export class LoanBuilder {
         return { root: this.varOf(res.local), proj: [] };
       }
       case 'field': {
-        const base = this.placeOrTemp(expr.operand);
+        const base = this.placeOrTemp(expr.operand, mutable);
         const derefs = derefSteps(this.annotations.fields.get(expr)?.derefs);
         return { root: base.root, proj: [...base.proj, ...derefs, expr.name] };
       }
       case 'index': {
-        const base = this.placeOrTemp(expr.operand);
-        this.value(expr.index);
-        const derefs = derefSteps(this.annotations.indexes.get(expr)?.derefs);
-        return { root: base.root, proj: [...base.proj, ...derefs, '[]'] };
+        return this.indexPlace(expr, mutable);
       }
       case 'unary': {
         if (expr.op !== '*') return undefined;
-        const base = this.placeOrTemp(expr.operand);
+        const base = this.placeOrTemp(expr.operand, mutable);
         return { root: base.root, proj: [...base.proj, isReference(expr.operand.ty) ? '*' : '#'] };
       }
       default: {
@@ -319,9 +315,27 @@ export class LoanBuilder {
     }
   }
 
+  private indexPlace(expr: Extract<Expr, { kind: 'index' }>, mutable: boolean): Place {
+    const base = this.placeOrTemp(expr.operand, mutable);
+    const index = this.annotations.indexes.get(expr);
+    const derefs = index?.derefs;
+    const container = { root: base.root, proj: [...base.proj, ...derefSteps(derefs)] };
+    const place =
+      mutable && index?.overloaded
+        ? project(
+            this.valuePlace(
+              this.borrow(container, true, expr.operand.span, typeAfter(expr.operand.ty, derefs ?? [])).value
+            ),
+            '*'
+          )
+        : container;
+    this.value(expr.index);
+    return project(place, '[]');
+  }
+
   /** The place an expression denotes, or a temporary that holds its value. */
-  private placeOrTemp(expr: Expr): Place {
-    return this.place(expr) ?? this.valuePlace(this.value(expr));
+  private placeOrTemp(expr: Expr, mutable = false): Place {
+    return this.place(expr, mutable) ?? this.valuePlace(this.value(expr));
   }
 
   private valuePlace(value: Value): Place {
@@ -472,14 +486,13 @@ export class LoanBuilder {
     }
     if (stmt.kind !== 'let' || !stmt.init) return;
     const { pattern, init } = stmt;
-    if (stmt.type?.kind === 'ref' && isReference(init.ty)) this.typedReferenceReads.add(init);
     // `let (a, b) = (x, y);` binds each element from its own expression.
     if (pattern.kind === 'tuple' && init.kind === 'tuple' && pattern.elems.length === init.elems.length) {
       const values = init.elems.map((elem) => this.value(elem));
       for (const [index, elem] of pattern.elems.entries()) this.bind(elem, this.valuePlace(values[index]));
       return;
     }
-    const source = this.annotatedReborrow(stmt) ?? this.source(init);
+    const source = this.source(init);
     if (stmt.else) {
       const before = this.current;
       this.block(stmt.else);
@@ -488,18 +501,10 @@ export class LoanBuilder {
     this.bind(pattern, source);
   }
 
-  /** `let r2: &mut T = r;` reborrows `*r` where a plain `let r2 = r;` would move `r`. */
-  private annotatedReborrow(stmt: Extract<Stmt, { kind: 'let' }>): Place | undefined {
-    if (stmt.type?.kind !== 'ref' || !stmt.type.mutable || !stmt.init || !isMutReference(stmt.init.ty))
-      return undefined;
-    const place = this.place(stmt.init);
-    if (!place) return undefined;
-    return this.valuePlace(this.borrow(project(place, '*'), true, stmt.init.span, refTarget(stmt.init.ty)).value);
-  }
-
   /** What a pattern matching an expression matches: the place it denotes, or a temporary with its value. */
   private source(expr: Expr): Place {
-    return this.place(expr) ?? this.valuePlace(this.value(expr));
+    const place = this.annotations.reborrows.has(expr) ? undefined : this.place(expr);
+    return place ?? this.valuePlace(this.value(expr));
   }
 
   // -------------------------------------------------------------------------------------------------------------------
@@ -608,9 +613,9 @@ export class LoanBuilder {
 
   /** Evaluates an expression for its value, moving or copying the place it denotes. */
   private value(expr: Expr): Value {
-    const mutable = this.annotations.referenceArguments.get(expr);
+    const mutable = this.annotations.reborrows.get(expr);
     if (mutable !== undefined && isMutReference(expr.ty)) {
-      const place = this.place(expr);
+      const place = this.place(expr, mutable);
       if (place) return this.borrow(project(place, '*'), mutable, expr.span, refTarget(expr.ty)).value;
     }
     return this.valueInner(expr);
@@ -631,7 +636,7 @@ export class LoanBuilder {
         return undefined;
       }
       case 'ref': {
-        const place = this.place(expr.operand);
+        const place = this.place(expr.operand, expr.mutable);
         if (!place) return this.borrowTemporary(expr);
         return this.borrow(place, expr.mutable, expr.span, expr.operand.ty).value;
       }
@@ -832,7 +837,7 @@ export class LoanBuilder {
       this.point({ uses: values });
       return;
     }
-    const place = this.place(expr.target);
+    const place = this.place(expr.target, true);
     if (!place) {
       const target = this.value(expr.target);
       this.point({ uses: target === undefined ? values : [...values, target] });
@@ -840,12 +845,10 @@ export class LoanBuilder {
     }
     const whole = place.proj.length === 0;
     const throughRef = place.proj.includes('*');
-    // `v[i] = x` on a `Vec` borrows it mutably for `IndexMut`.
-    const overloaded = expr.target.kind === 'index' && this.annotations.indexes.get(expr.target)?.overloaded === true;
     const at = this.point({
-      uses: whole || !(throughRef || overloaded) ? values : [...values, place.root],
+      uses: throughRef ? [...values, place.root] : values,
       defs: whole ? [place.root] : [],
-      accesses: [{ place, kind: overloaded ? 'deep' : 'write', span: expr.span }],
+      accesses: [{ place, kind: 'write', span: expr.span }],
       kills: [place],
     });
     if (value !== undefined) this.storeDrop(at, place, { root: value, proj: [] });
@@ -855,7 +858,7 @@ export class LoanBuilder {
   private compoundAssign(expr: Extract<Expr, { kind: 'compoundAssign' }>): void {
     const value = this.value(expr.value);
     const values = value === undefined ? [] : [value];
-    const place = this.place(expr.target);
+    const place = this.place(expr.target, true);
     if (!place) {
       const target = this.value(expr.target);
       this.point({ uses: target === undefined ? values : [...values, target] });
@@ -1062,7 +1065,7 @@ export class LoanBuilder {
     method: MethodRes | undefined
   ): { receiver: Value; activation?: Loan; target?: Place } {
     const { receiver } = expr;
-    const place = method && this.place(receiver);
+    const place = method && this.place(receiver, method.fn.selfMode === 'mutRef');
     if (!method || !place) return { receiver: this.value(receiver) };
     const { derefs, autoref } = method.receiver;
     const target: Place = { root: place.root, proj: [...place.proj, ...derefSteps(derefs)] };
@@ -1153,7 +1156,7 @@ export class LoanBuilder {
     for (const local of context.captures) {
       const root = this.varOf(local);
       uses.push(root);
-      const projections = capturedPlaces(this.annotations, expr.body, local, body.typedReferenceReads);
+      const projections = capturedPlaces(this.annotations, expr.body, local);
       const captureType = normalize(shallow(local.type));
       const byValue = context.isMove || context.movedCaptures?.includes(local);
       const reborrow = !byValue && captureType.kind === 'ref' && projections.every(({ proj }) => proj[0] === '*');

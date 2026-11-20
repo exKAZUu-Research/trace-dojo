@@ -113,7 +113,7 @@ export class Annotations {
   readonly tries = new Map<Expr, TryRes>();
   readonly closures = new Map<Expr, ClosureInfo>();
   readonly bindings = new Map<Pattern, LocalVar>();
-  readonly referenceArguments = new Map<Expr, boolean>();
+  readonly reborrows = new Map<Expr, boolean>();
   /** For a call through a variable or a field that holds a closure, the closure trait it uses. */
   readonly callKinds = new Map<Expr, ClosureType['kind']>();
   /** `for` loops: the element type and how the iterable becomes an iterator. */

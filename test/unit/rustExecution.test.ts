@@ -4311,3 +4311,75 @@ test('uses Rust key equality for hash candidates and retains it after deletion o
     stdout: 'eq Some(10)\neq Some(20)\nNone\neq Some(20)\neq true\nfalse\n',
   });
 });
+
+test('keeps Rust IndexMut borrows active through index and receiver argument evaluation', () => {
+  const invalid = [
+    'let mut v = vec![0, 1]; v[v.len() - 1] = 2;',
+    'let mut v = vec![0, 1]; v[v.iter().count() - 1] += 2;',
+    'let mut v = vec![0, 1]; let x = &mut v[v[1] as usize]; *x = 7;',
+    'let mut v = vec![0, 1]; let r = &mut v; r[r.len() - 1] = 2;',
+    'let mut g = vec![vec![1], vec![2]]; g[0].push(g[1][0]);',
+    'let mut g = vec![vec![1], vec![2]]; g[0][g[0].len() - 1] = 2;',
+    'let mut q = std::collections::VecDeque::from([1, 2]); q[q.len() - 1] = 3;',
+  ];
+  for (const statements of invalid) {
+    expect(executeProgram('rust', rustMain(statements))).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [expect.objectContaining({ message: expect.stringContaining('借りられて') })],
+    });
+  }
+  const valid = rustMain(`let mut array = [1, 2];
+    array[array.len() - 1] = 9;
+    let mut v = vec![0, 1]; v[0] += v[1];
+    v[0] = v[v.len() - 1];
+    let mut g = vec![vec![1], vec![2]];
+    let value = g[1][0]; g[0].push(value);
+    println!("{:?} {:?} {:?}", array, v, g);`);
+  expect(executeProgram('rust', valid)).toMatchObject({
+    kind: 'executed',
+    stdout: '[1, 9] [1, 1] [[1, 2], [2]]\n',
+  });
+});
+
+test('reborrows mutable Rust references throughout typed value positions', () => {
+  for (const value of ['{ r }', 'if true { r } else { r }', 'match true { true => r, false => r }']) {
+    const source = rustMain(`let mut n = 0; let r = &mut n;
+      let q: &mut i32 = ${value}; *q += 1; *r += 1; println!("{}", n);`);
+    expect(executeProgram('rust', source)).toMatchObject({ kind: 'executed', stdout: '2\n' });
+  }
+  const source = rustMain(
+    `let mut n = 0; let mut m = 0; let r = &mut n;
+    let mut q = &mut m; q = r; *q += 1;
+    let saved = Holder { r }; *saved.r += 1;
+    let tuple: (&mut i32,) = (r,); *tuple.0 += 1;
+    *r += 1; println!("{}", n);`,
+    "struct Holder<'a> { r: &'a mut i32 }"
+  );
+  expect(executeProgram('rust', source)).toMatchObject({ kind: 'executed', stdout: '4\n' });
+  for (const value of ['{ r }', 'identity(r)']) {
+    const moved = rustMain(
+      `let mut n = 0; let r = &mut n; let q = ${value}; *q += 1; *r += 1;`,
+      'fn identity<T>(x: T) -> T { x }'
+    );
+    expect(executeProgram('rust', moved)).toMatchObject({ kind: 'compileError' });
+  }
+  const overlapping = rustMain('let mut n = 0; let r = &mut n; let q: &mut i32 = { r }; *r += 1; *q += 1;');
+  expect(executeProgram('rust', overlapping)).toMatchObject({ kind: 'compileError' });
+});
+
+test('allows Rust mutable cursors to advance through a matched reference in a loop', () => {
+  for (const walk of [
+    'while let Some(next) = &mut cursor.next { cursor = next; }',
+    'loop { match &mut cursor.next { Some(next) => cursor = next, None => break } }',
+  ]) {
+    const source = rustMain(
+      `let mut head = Node { value: 1, next: Some(Box::new(Node { value: 2, next: None })) };
+      let mut cursor = &mut head;
+      ${walk}
+      cursor.value += 10;
+      println!("{}", head.next.unwrap().value);`,
+      'struct Node { value: i32, next: Option<Box<Node>> }'
+    );
+    expect(executeProgram('rust', source)).toMatchObject({ kind: 'executed', stdout: '12\n' });
+  }
+});

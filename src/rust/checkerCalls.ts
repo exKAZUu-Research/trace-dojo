@@ -1,6 +1,5 @@
 import type { PathRes, ReceiverAdjust } from './annotations';
 import type { Expr } from './ast';
-import { forEachResult } from './astWalk';
 import type { Checker } from './checker';
 import {
   checkMethodVisible,
@@ -156,14 +155,7 @@ function checkArgs(c: Checker, args: Expr[], params: Type[], expectations: (Type
 }
 
 function markReferenceArguments(c: Checker, args: Expr[], written: Type[]): void {
-  for (const [index, arg] of args.entries()) {
-    const param = normalize(shallow(written[index]));
-    if (param.kind !== 'ref') continue;
-    forEachResult(arg, (result) => {
-      const actual = normalize(shallow(result.ty ?? UNIT));
-      if (actual.kind === 'ref') c.annotations.referenceArguments.set(result, param.mutable);
-    });
-  }
+  for (const [index, arg] of args.entries()) c.markReborrows(arg, written[index]);
 }
 
 function checkArgument(c: Checker, arg: Expr, param: Type, expectation: Type | undefined): void {

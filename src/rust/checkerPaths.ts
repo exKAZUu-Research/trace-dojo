@@ -381,7 +381,7 @@ export function structExpr(c: Checker, expr: Extract<Expr, { kind: 'struct' }>, 
     if (seen.has(field.name)) compileError(field.span, `フィールド ${field.name} が2回あります。`);
     seen.add(field.name);
     if (def.kind === 'struct') checkFieldVisible(c, def, variantDef.fields[index], field.span);
-    c.coerceExpr(field.value, substitute(variantDef.fields[index].type, subst));
+    c.coerceAtReferenceSite(field.value, substitute(variantDef.fields[index].type, subst));
   }
   c.annotations.paths.set(expr, { kind: 'ctor', def, variant, typeArgs });
   c.requireAdtArguments(def, typeArgs, expr.span);

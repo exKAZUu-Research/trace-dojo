@@ -203,7 +203,7 @@ function tupleExpr(c: Checker, expr: Extract<Expr, { kind: 'tuple' }>, expected:
   const elems = expr.elems.map((elem, index) => {
     const want = e?.kind === 'tuple' && e.elems.length === expr.elems.length ? e.elems[index] : undefined;
     if (want) {
-      c.coerceExpr(elem, want);
+      c.coerceAtReferenceSite(elem, want);
       return want;
     }
     return c.expr(elem, undefined);
@@ -268,7 +268,7 @@ function breakExpr(c: Checker, expr: Extract<Expr, { kind: 'break' }>): Type {
 }
 
 function returnExpr(c: Checker, expr: Extract<Expr, { kind: 'return' }>): Type {
-  if (expr.value) c.coerceExpr(expr.value, c.body.retType);
+  if (expr.value) c.coerceAtReferenceSite(expr.value, c.body.retType);
   else if (!c.unifier.tryUnify(c.body.retType, UNIT)) {
     compileError(expr.span, `return に値が要ります（${typeToString(c.body.retType)} を返してください）。`);
   }
@@ -278,7 +278,7 @@ function returnExpr(c: Checker, expr: Extract<Expr, { kind: 'return' }>): Type {
 /** Checks the elements of an array or a `vec!`: each coerces to `elem` when it is known, or else they merge. */
 export function checkElements(c: Checker, elems: Expr[], elem: Type): void {
   if (shallow(elem).kind !== 'var') {
-    for (const item of elems) c.coerceExpr(item, elem);
+    for (const item of elems) c.coerceAtReferenceSite(item, elem);
     return;
   }
   const values = elems.map((item): [Expr, (expected: Type | undefined) => Type] => [

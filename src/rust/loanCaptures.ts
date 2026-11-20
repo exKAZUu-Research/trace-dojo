@@ -11,12 +11,7 @@ interface Projection {
 }
 
 // code-gauge-allow functionCognitiveComplexity 27 -- Tracking projections uses the same local and checked call information for the whole walk.
-export function capturedPlaces(
-  annotations: Annotations,
-  body: Expr,
-  local: LocalVar,
-  typedReferenceReads: Set<Expr>
-): Projection[] {
+export function capturedPlaces(annotations: Annotations, body: Expr, local: LocalVar): Projection[] {
   const places: Projection[] = [];
   visit(body);
   if (places.length === 0 || places.some(({ proj }) => proj.length === 0)) return [{ proj: [], type: local.type }];
@@ -39,7 +34,7 @@ export function capturedPlaces(
       forEachDirect(expr, visit);
       return;
     }
-    const reborrows = typedReferenceReads.has(expr) || annotations.referenceArguments.has(expr);
+    const reborrows = annotations.reborrows.has(expr);
     places.push({ proj: reborrows ? [...proj, '*'] : proj, type: expr.ty ?? local.type });
     if (expr.kind === 'index') visit(expr.index);
   }

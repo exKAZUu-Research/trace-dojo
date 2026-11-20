@@ -272,7 +272,8 @@ export class LoanGraph {
   }
 
   private conflictError(loan: Loan, access: Access): LoanError {
-    const name = this.names[loan.place.root];
+    const label = this.names[loan.place.root];
+    const name = label === '{temp}' ? 'この値' : label;
     const row = loan.span.row + 1;
     switch (access.kind) {
       case 'storageDead': {
@@ -313,6 +314,7 @@ export class LoanGraph {
 }
 
 function killsLoan(point: Point, loan: Loan): boolean {
+  if (point.defs.includes(loan.place.root)) return true;
   for (const place of point.kills)
     if (place.root === loan.place.root && isPrefix(place.proj, loan.place.proj)) return true;
   for (const access of point.accesses) {

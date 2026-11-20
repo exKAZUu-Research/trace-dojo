@@ -113,7 +113,7 @@ class CaptureUses {
     if (!expr) return;
     const mutation = mutatedCapture(expr, this.annotations, this.capturedLocal);
     if (mutation) this.mutated.add(mutation);
-    const reference = this.annotations.referenceArguments.get(expr);
+    const reference = this.annotations.reborrows.get(expr);
     if (reference !== undefined) {
       consumed = false;
       const captured = reference && this.capturedLocal(expr);

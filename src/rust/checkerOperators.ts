@@ -232,7 +232,7 @@ export function checkAssign(c: Checker, expr: Extract<Expr, { kind: 'assign' }>)
   }
   const targetType = c.expr(target, undefined);
   if (!isPlaceExpr(c, target)) compileError(target.span, '代入の左辺には、変数やフィールドなどを書いてください。');
-  c.coerceExpr(expr.value, targetType);
+  c.coerceAtReferenceSite(expr.value, targetType);
   requireMutablePlace(c, target, '代入する');
   return UNIT;
 }

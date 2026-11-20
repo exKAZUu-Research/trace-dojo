@@ -375,7 +375,7 @@ export class Compiler {
     const read = this.read(expr, asStatement);
     const coercion = this.annotations.coercions.get(expr);
     const type = resolve(expr.ty ?? { kind: 'tuple', elems: [] }, true);
-    if (this.annotations.referenceArguments.has(expr)) return coercion ? this.coerce(read, coercion, expr) : read;
+    if (this.annotations.reborrows.has(expr)) return coercion ? this.coerce(read, coercion, expr) : read;
     if (!coercion) return this.valueFromPlace(expr, read, type);
     const input = coercion.kind !== 'deref' && !isRefType(type) ? this.valueFromPlace(expr, read, type) : read;
     return this.coerce(input, coercion, expr);
