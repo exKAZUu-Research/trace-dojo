@@ -93,6 +93,116 @@ int main() {
   });
 });
 
+test('matches Apple libm NaN signs across unary, mixed-width, and fused operations', () => {
+  const program = `#include <cmath>
+#include <iostream>
+int main() {
+  double negative = -NAN;
+  float single = -NAN;
+  long double extended = -NAN;
+  double positive = NAN;
+  std::cout << std::signbit(std::sqrt(negative)) << std::signbit(std::sin(single))
+            << std::signbit(std::fma(extended, 1.0L, 1.0L)) << ' '
+            << std::signbit(std::atan2(positive, single)) << std::signbit(std::atan2(negative, positive))
+            << std::signbit(std::pow(negative, positive)) << ' '
+            << std::signbit(std::fabs(negative)) << std::isnan(std::pow(negative, 0))
+            << std::fmin(negative, 2.0);
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '111 010 002',
+    uncaughtException: undefined,
+  });
+});
+
+test('retains floating object bytes written through unsigned char views', () => {
+  const program = `#include <cmath>
+#include <iostream>
+int main() {
+  unsigned char source[8] = {0x42, 0, 0, 0, 0, 0, 0xf8, 0x7f};
+  double value;
+  auto bytes = static_cast<unsigned char*>(static_cast<void*>(&value));
+  for (int i = 0; i < 8; ++i) bytes[i] = source[i];
+  std::cout << int(bytes[0]) << ' ' << int(bytes[6]) << ' ' << std::isnan(value) << std::signbit(value) << ' ';
+  double copy = std::copysign(value, -1.0);
+  auto copied = static_cast<unsigned char*>(static_cast<void*>(&copy));
+  std::cout << int(copied[0]) << ' ' << int(copied[7]) << ' ' << std::signbit(copy) << ' ';
+  float narrow;
+  auto single = static_cast<unsigned char*>(static_cast<void*>(&narrow));
+  single[0] = 0x51;
+  single[1] = 0;
+  single[2] = 0xc0;
+  single[3] = 0xff;
+  std::cout << int(single[0]) << ' ' << std::signbit(narrow);
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '66 248 10 66 255 1 81 1',
+    uncaughtException: undefined,
+  });
+});
+
+test('reads the signed representation of constant NaNs from storage', () => {
+  const program = `#include <cmath>
+#include <iostream>
+const double global = -NAN;
+struct Constants { static constexpr double value = -NAN; };
+int main() {
+  const double local = -NAN;
+  constexpr double value = -NAN;
+  constexpr double copy = value;
+  const double& bound = local;
+  std::cout << std::signbit(global) << std::signbit(local) << std::signbit(value)
+            << std::signbit(copy) << std::signbit(Constants::value) << std::signbit(bound);
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '111111',
+    uncaughtException: undefined,
+  });
+});
+
+test('shares signed NaN arithmetic with numeric algorithms and typed function objects', () => {
+  const program = `#include <algorithm>
+#include <cmath>
+#include <functional>
+#include <iostream>
+#include <numeric>
+int main() {
+  double start = -NAN;
+  float values[2];
+  std::iota(values, values + 2, start);
+  std::cout << std::signbit(values[0]) << std::signbit(values[1])
+            << std::signbit(std::plus<double>()(start, 1.0))
+            << std::signbit(std::multiplies<float>()(values[0], 2.0f))
+            << (std::find(values, values + 2, start) == values + 2);
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '11111',
+    uncaughtException: undefined,
+  });
+});
+
+test('preserves signed NaN prefixes in all C++ string conversions', () => {
+  const program = `#include <cmath>
+#include <iostream>
+#include <string>
+int main() {
+  std::size_t used = 0;
+  double value = std::stod(" -nan.tail", &used);
+  float single = std::stof("-nan(payload)");
+  long double extended = std::stold("-NaN");
+  std::cout << std::signbit(value) << std::signbit(single) << std::signbit(extended)
+            << std::signbit(std::stod("+nan")) << ' ' << std::copysign(1.0, value) << ' ' << used;
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '1110 -1 5',
+    uncaughtException: undefined,
+  });
+});
+
 test('lays out fixed arrays and enclosing pairs after a forward-declared element is complete', () => {
   const program = `#include <array>
 #include <iostream>

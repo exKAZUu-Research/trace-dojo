@@ -3,6 +3,7 @@
 import json
 import re
 import subprocess
+import tempfile
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -202,21 +203,30 @@ def normalize_type(signature, aliases):
     return re.sub(r"\b_(?:Nonnull|Nullable|Null_unspecified)\b", "", signature).strip()
 
 
-def math_wrapper_calls():
+MATH_WIDTHS = (
+    ("double", "double", ""),
+    ("float", "float", "f"),
+    ("ldouble", "long double", "l"),
+)
+
+
+def math_families():
     source = Path("src/c/library/mathFunctions.ts").read_text()
     families = {"fma": 3}
     for family, arity in (("UNARY", 1), ("BINARY", 2)):
         block = source.split(f"export const {family}:", 1)[1].split("\n};", 1)[0]
         for name in re.findall(r"^  ([a-z]\w*)(?:,|:)", block, re.M):
             families[name] = arity
+    return sorted(families.items())
+
+
+def math_wrapper_calls(families):
     requests = [
         (name, arity, kind, argument, result, suffix)
-        for name, arity in sorted(families.items())
+        for name, arity in families
         for kind, argument, result, suffix in (
             ("integer", "int", "double", ""),
-            ("double", "double", "double", ""),
-            ("float", "float", "float", "f"),
-            ("ldouble", "long double", "long double", "l"),
+            *((kind, c_type, c_type, suffix) for kind, c_type, suffix in MATH_WIDTHS),
         )
     ]
     calls = defaultdict(dict)
@@ -225,6 +235,45 @@ def math_wrapper_calls():
             if symbol:
                 calls[name][kind] = symbol
     return calls
+
+
+def math_nan_signs(families):
+    probe = """#include <cmath>
+#include <cstdio>
+#include <limits>
+template<class T> T operand(unsigned digit) {
+  static volatile T values[] = {1.25, std::numeric_limits<T>::quiet_NaN(), -std::numeric_limits<T>::quiet_NaN()};
+  return values[digit];
+}
+template<class Function> void probe(const char* name, const char* width, unsigned patterns, Function call) {
+  unsigned negativeNaNs = 0;
+  for (unsigned pattern = 1; pattern < patterns; ++pattern) {
+    auto result = call(pattern);
+    if (std::isnan(result) && std::signbit(result)) negativeNaNs |= 1u << pattern;
+  }
+  std::printf("%s %s %u\\n", name, width, negativeNaNs);
+}
+int main() {
+"""
+    for name, arity in families:
+        if name == "copysign":
+            continue
+        for width, c_type, _ in MATH_WIDTHS:
+            arguments = ", ".join(f"operand<{c_type}>(p / {3**i} % 3)" for i in range(arity))
+            probe += f'  probe("{name}", "{width}", {3**arity}, [](unsigned p) {{ return std::{name}({arguments}); }});\n'
+    probe += "}\n"
+    root = Path(".tmp")
+    root.mkdir(exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=root) as directory:
+        executable = str(Path(directory) / "mathNaNSigns")
+        subprocess.run(["clang++", "-std=c++20", "-O0", "-x", "c++", "-o", executable, "-"], input=probe, text=True, check=True)
+        measured = subprocess.check_output([executable], text=True)
+    signs = defaultdict(dict)
+    for row in measured.splitlines():
+        name, width, bits = row.split()
+        if int(bits):
+            signs[name][width] = int(bits)
+    return signs
 
 
 def math_wrapper_symbol(request):
@@ -275,6 +324,7 @@ def main():
         else:
             names[name].append([group, kind, signature])
     output = Path("src/cpp/library/libcGlobalDeclarations.json")
+    families = math_families()
     output.write_text(json.dumps({
         "headers": groups,
         "declarations": names,
@@ -283,7 +333,8 @@ def main():
         "functionMacros": function_macros,
         "standard": standard,
         "stdDefinitions": std_definitions,
-        "mathCalls": math_wrapper_calls(),
+        "mathCalls": math_wrapper_calls(families),
+        "mathNaNSigns": math_nan_signs(families),
     }, indent=2) + "\n")
     subprocess.run(["bun", "fmt", "--no-script", "--no-config", str(output)], check=True)
 

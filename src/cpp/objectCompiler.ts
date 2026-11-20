@@ -361,7 +361,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
   rvalue(expr: Expr): Expr {
     if (!expr.isLvalue) return expr;
     const known = expr.constant ?? expr.foldedValue;
-    if (known !== undefined || expr.readConstant) {
+    if ((known !== undefined && !Number.isNaN(known)) || expr.readConstant) {
       return {
         type: unqualified(expr.type),
         isLvalue: false,
@@ -406,6 +406,8 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       constantInitialization: expr.constantInitialization,
       constantStringLength: expr.constantStringLength,
       memberConstant: expr.memberConstant,
+      constant: expr.constant,
+      foldedValue: expr.foldedValue,
       row: expr.row,
       run: size === 0 ? (frame) => (run(frame) as Ptr).read() : (frame) => frame.readScalar(run(frame) as Ptr, size),
       onlyCalls: expr.onlyCalls,

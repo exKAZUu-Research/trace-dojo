@@ -64,7 +64,7 @@ export function parseFloatPrefix(
   bytes: Uint8Array,
   maxLength = Number.POSITIVE_INFINITY,
   isFloat = false
-): { value: number; length: number; isInfinityText: boolean; isNonzeroText: boolean } {
+): { value: number; length: number; isInfinityText: boolean; isNonzeroText: boolean; isNegativeNaN?: boolean } {
   const limit = Math.min(bytes.length, maxLength);
   let index = 0;
   while (index < limit && isSpaceByte(bytes[index])) index++;
@@ -90,6 +90,7 @@ export function parseFloatPrefix(
       length: index + (paren ? paren[0].length : 3),
       isInfinityText: true,
       isNonzeroText: true,
+      isNegativeNaN: sign < 0,
     };
   }
   const hex = /^0x([\da-f]*)(?:\.([\da-f]*))?(?:p([+-]?\d+))?/.exec(rest);

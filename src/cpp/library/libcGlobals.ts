@@ -9,6 +9,8 @@ const standard: Readonly<Record<string, (number | string)[][]>> = sdk.standard;
 const stdDefinitions: Readonly<Record<string, number>> = sdk.stdDefinitions;
 type MathWrapper = 'integer' | 'float' | 'double' | 'ldouble';
 const mathCalls: Readonly<Record<string, Partial<Record<MathWrapper, string>>>> = sdk.mathCalls;
+type FloatingWrapper = Exclude<MathWrapper, 'integer'>;
+const mathNaNSigns: Readonly<Record<string, Partial<Record<FloatingWrapper, number>>>> = sdk.mathNaNSigns;
 const headerGroups = sdk.headers.map((group) => new Set(group));
 
 export function conflictsWithLibcGlobal(
@@ -89,6 +91,10 @@ export function isSdkStdForwardOnly(name: string, headers: ReadonlySet<string>):
 
 export function mathWrapperCall(name: string, kind: MathWrapper): string | undefined {
   return Object.hasOwn(mathCalls, name) ? mathCalls[name][kind] : undefined;
+}
+
+export function mathWrapperNaNSigns(name: string, kind: FloatingWrapper): number {
+  return Object.hasOwn(mathNaNSigns, name) ? (mathNaNSigns[name][kind] ?? 0) : 0;
 }
 
 function visibleIn(group: number, headers: ReadonlySet<string>): boolean {

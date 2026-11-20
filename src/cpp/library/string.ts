@@ -1,11 +1,12 @@
-import { convertScalar, type Scalar } from '../../c/arith';
 import { isFloatUnderflow, isSpaceByte, parseFloatPrefix, parseIntegerPrefix } from '../../c/library/numberParsing';
 import { LIMITS } from '../../interpreter/limits';
+import { convertNumeric, type NumericValue } from '../arithmetic';
 import { byteArray, byteAt } from '../bytes';
 import { scalarValue } from '../conversions';
 import { CppRuntimeError } from '../errors';
 import { type Expr, type Initializer, initializerWithConstancy, type LibraryConstant } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
+import { NEGATIVE_NAN } from '../floatSign';
 import { type Eval, type Frame, holdAll } from '../runtime';
 import type { Syntax } from '../syntax';
 import {
@@ -771,8 +772,8 @@ function rangeBytes(frame: Frame, first: Ptr, last: Ptr, { element, isReverse }:
   const start = first.index;
   let bytes = '';
   for (let offset = 0; offset < length; offset++) {
-    const value = store.get(isReverse ? start - 1 - offset : start + offset) as Scalar;
-    bytes += charOf(convertScalar(value, element, CHAR));
+    const value = store.get(isReverse ? start - 1 - offset : start + offset) as NumericValue;
+    bytes += charOf(convertNumeric(value, element, CHAR));
   }
   return bytes;
 }
@@ -1085,7 +1086,7 @@ export function stringFunctions(library: Library, cls: ClassInfo): Map<string, R
           if (overflow || isFloatUnderflow(bytes, parsed, value, isFloat))
             return throwLibrary(frame, library.exception('out_of_range'), `${name}: out of range`);
           if (index instanceof Ptr && !index.isNull) index.write(BigInt(parsed.length));
-          return value;
+          return parsed.isNegativeNaN ? NEGATIVE_NAN : value;
         },
         { optional: 1 }
       )

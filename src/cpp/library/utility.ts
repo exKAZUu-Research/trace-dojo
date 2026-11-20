@@ -1,5 +1,5 @@
-import { binaryOperation, convertScalar, type Scalar } from '../../c/arith';
 import { commonType } from '../../c/types';
+import { arithmeticOperation, convertNumeric, type NumericValue } from '../arithmetic';
 import type { Expr } from '../expr';
 import { BOOL, ClassInfo, isArithmetic, sameType, type Type, typeName, unqualified } from '../types';
 import { CObject, type Value } from '../values';
@@ -41,14 +41,14 @@ export function functorClass(library: Library, name: string, argument: Type | un
   const apply = (left: Type, right: Type): ((a: Value, b: Value) => Value) | undefined => {
     if (isArithmetic(left) && isArithmetic(right) && (!argument || isArithmetic(argument))) {
       const operand = commonType(argument ?? left, argument ?? right);
-      const operation = binaryOperation(operator as never, operand);
-      const convert = (value: Scalar, type: typeof left): Scalar =>
+      const operation = arithmeticOperation(operator as never, operand);
+      const convert = (value: NumericValue, type: typeof left): NumericValue =>
         argument
-          ? convertScalar(convertScalar(value, type, argument), argument, operand)
-          : convertScalar(value, type, operand);
+          ? convertNumeric(convertNumeric(value, type, argument), argument, operand)
+          : convertNumeric(value, type, operand);
       return (a, b) => {
-        const result = operation(convert(a as Scalar, left), convert(b as Scalar, right));
-        return argument && !isComparison ? convertScalar(result, operand, argument) : result;
+        const result = operation(convert(a as NumericValue, left), convert(b as NumericValue, right));
+        return argument && !isComparison ? convertNumeric(result, operand, argument) : result;
       };
     }
     const operand = unqualified(argument ?? left);

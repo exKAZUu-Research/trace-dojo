@@ -1,6 +1,6 @@
-import { binaryOperation, convertScalar, type Scalar } from '../../c/arith';
 import { commonType, promote } from '../../c/types';
 import { CompileError } from '../../interpreter/diagnostics';
+import { arithmeticOperation, convertNumeric, type NumericValue } from '../arithmetic';
 import { CppRuntimeError, overflowError } from '../errors';
 import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
@@ -605,14 +605,14 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     const source = unqualified(args[2].type);
     if (!isArithmetic(element) || !isArithmetic(source) || source.name === 'bool') return;
     const incrementType = source.kind === 'int' ? promote(source) : source;
-    const add = binaryOperation('+', incrementType);
-    const one = convertScalar(1, { kind: 'int', name: 'int' }, incrementType);
+    const add = arithmeticOperation('+', incrementType);
+    const one = convertNumeric(1, { kind: 'int', name: 'int' }, incrementType);
     return native('iota', params(args), VOID, ([first, last, start]) => {
       const values = range(first, last, info);
-      let current = start as Scalar;
+      let current = start as NumericValue;
       for (let index = 0; index < values.length; index++) {
-        values.set(index, convertScalar(current, source, element));
-        current = convertScalar(add(convertScalar(current, source, incrementType), one), incrementType, source);
+        values.set(index, convertNumeric(current, source, element));
+        current = convertNumeric(add(convertNumeric(current, source, incrementType), one), incrementType, source);
       }
       return;
     });
@@ -1324,10 +1324,16 @@ function valueEquality(
   const argType = unqualified(compared);
   if (isArithmetic(type) && isArithmetic(argType)) {
     const promoted = commonType(type, argType);
+    const compare = arithmeticOperation('==', promoted);
     return {
       test: (frame, a, b) => {
         frame.runtime.spend();
-        return convertScalar(a as Scalar, type, promoted) === convertScalar(b as Scalar, argType, promoted);
+        return (
+          compare(
+            convertNumeric(a as NumericValue, type, promoted),
+            convertNumeric(b as NumericValue, argType, promoted)
+          ) === 1
+        );
       },
     };
   }

@@ -1,39 +1,24 @@
-import { fma } from '../../c/library/binaryFloat';
-import { BINARY, UNARY } from '../../c/library/mathFunctions';
-import { CppRuntimeError, overflowError, ProgramExit } from '../errors';
+import { CppRuntimeError, ProgramExit } from '../errors';
 import type { ExpressionCompiler } from '../expressionCompiler';
-import { copyFloatSign, floatSignBit, NEGATIVE_NAN } from '../floatSign';
-import { invoke } from '../objectCompiler';
 import type { Frame } from '../runtime';
 import type { Entity } from '../scopes';
 import {
-  BOOL,
   CHAR,
   ClassInfo,
   classType,
-  DOUBLE,
-  FLOAT,
   type FunctionInfo,
   INT,
-  intMin,
-  type IntType,
-  isArithmetic,
-  LDOUBLE,
   LLONG,
   LONG,
-  type NativeFunction,
-  nonReference,
   referenceTo,
   sameParameters,
   SCHAR,
   SHORT,
   type Type,
-  typeName,
   UCHAR,
   UINT,
   ULLONG,
   ULONG,
-  unqualified,
   USHORT,
   VOID,
 } from '../types';
@@ -54,9 +39,9 @@ import {
   isSdkGlobalType,
   isSdkStdDeclared,
   isSdkStdForwardOnly,
-  mathWrapperCall,
   redeclaresLibcFunction,
 } from './libcGlobals';
+import { mathFunctions } from './math';
 import { randomEngines } from './random';
 import { stringClass, stringFunctions } from './string';
 import { asNumber, CONST_CHAR_PTR, generic, native } from './support';
@@ -563,120 +548,3 @@ const MANIPULATORS: Record<string, (stream: StreamValue, frame: Frame) => void> 
   skipws: (stream) => (stream.flags |= FLAGS.skipws),
   noskipws: (stream) => (stream.flags &= ~FLAGS.skipws),
 };
-
-/** The functions of `<cmath>`, with the overloads for `float`, `double`, `long double`, and integers. */
-function mathFunctions(): Map<string, FunctionInfo[]> {
-  const functions = new Map<string, FunctionInfo[]>();
-  const add = (name: string, arity: number, run: (args: number[], isFloat?: boolean) => number): void => {
-    functions.set(name, [
-      ...[FLOAT, DOUBLE, LDOUBLE].map((type) => {
-        const symbol = mathWrapperCall(name, type.name);
-        const calculate = (values: number[]): number => {
-          const result = run(values, type.name === 'float');
-          return type.name === 'float' ? Math.fround(result) : result;
-        };
-        const fn = native(
-          name,
-          Array.from({ length: arity }, () => type),
-          type,
-          linkedMath(symbol, calculate, name === 'copysign')
-        );
-        fn.mathIntrinsic = symbol === undefined;
-        return fn;
-      }),
-      promotedMath(name, arity, run),
-    ]);
-    if (name === 'fma') return;
-    for (const [suffix, type] of [
-      ['f', FLOAT],
-      ['l', LDOUBLE],
-    ] as const) {
-      const symbol = name + suffix;
-      const calculate = (values: number[]): number => {
-        const result = run(values, suffix === 'f');
-        return suffix === 'f' ? Math.fround(result) : result;
-      };
-      const target = mathWrapperCall(name, type.name);
-      const fn = native(
-        symbol,
-        Array.from({ length: arity }, () => type),
-        type,
-        linkedMath(target, calculate, name === 'copysign')
-      );
-      fn.mathIntrinsic = target === undefined;
-      functions.set(symbol, [fn]);
-    }
-  };
-  for (const [name, fn] of Object.entries(UNARY)) add(name, 1, ([x]) => fn(x));
-  for (const [name, fn] of Object.entries(BINARY)) add(name, 2, ([x, y], isFloat) => fn(x, y, isFloat));
-  add('fma', 3, ([x, y, z], isFloat) => fma(x, y, z, isFloat));
-  functions.set('abs', [
-    native('abs', [INT], INT, ([x]) => integerAbs(x, INT)),
-    native('abs', [LONG], LONG, ([x]) => integerAbs(x, LONG)),
-    native('abs', [LLONG], LLONG, ([x]) => integerAbs(x, LLONG)),
-    native('abs', [FLOAT], FLOAT, ([x]) => Math.abs(x as number)),
-    native('abs', [DOUBLE], DOUBLE, ([x]) => Math.abs(x as number)),
-    native('abs', [LDOUBLE], LDOUBLE, ([x]) => Math.abs(x as number)),
-  ]);
-  for (const name of ['labs', 'llabs'])
-    functions.set(name, [
-      native(name, [name === 'labs' ? LONG : LLONG], name === 'labs' ? LONG : LLONG, ([x]) =>
-        integerAbs(x, name === 'labs' ? LONG : LLONG)
-      ),
-    ]);
-  for (const [name, test] of [
-    ['isnan', (x: unknown) => Number.isNaN(asNumber(x))],
-    ['isinf', (x: unknown) => Math.abs(asNumber(x)) === Number.POSITIVE_INFINITY],
-    ['isfinite', (x: unknown) => Number.isFinite(asNumber(x))],
-    ['signbit', floatSignBit],
-  ] as const) {
-    functions.set(name, classification(name, test, name === 'signbit'));
-  }
-  return functions;
-}
-
-/** The overloads of a classification function such as `isnan`, which libc++ also has for integers. */
-function classification(name: string, test: (x: unknown) => boolean, templateOnly: boolean): FunctionInfo[] {
-  const template = generic(name, (args) => {
-    const type = args.length === 1 ? unqualified(args[0].type) : undefined;
-    if (!type || !isArithmetic(type) || (!templateOnly && type.kind !== 'int')) return;
-    return native(name, [type], BOOL, ([x]) => (test(x) ? 1 : 0));
-  });
-  if (templateOnly) return [template];
-  const ordinary = [FLOAT, DOUBLE, LDOUBLE].map((type) => native(name, [type], BOOL, ([x]) => (test(x) ? 1 : 0)));
-  return [...ordinary, template];
-}
-
-const promotedMath = (name: string, arity: number, run: (args: number[]) => number): FunctionInfo =>
-  generic(name, (args) => {
-    if (args.length !== arity) return;
-    const types = args.map((arg) => unqualified(nonReference(arg.type)));
-    if (!types.every(isArithmetic)) return;
-    if (types[0].kind === 'float' && types.every((type) => type.kind === 'float' && type.name === types[0].name))
-      return;
-    const result = types.some((type) => type.kind === 'float' && type.name === 'ldouble') ? LDOUBLE : DOUBLE;
-    const symbol = mathWrapperCall(name, result.name === 'ldouble' ? 'ldouble' : 'integer');
-    return native(name, types, result, linkedMath(symbol, run, name === 'copysign'));
-  });
-
-function linkedMath(
-  symbol: string | undefined,
-  run: (values: number[]) => number,
-  copiesSign: boolean
-): NativeFunction {
-  return (values, { frame, row }) => {
-    const override = symbol && frame.runtime.libcOverrides.get(symbol);
-    if (override) {
-      const args = values.map((value) => (value === NEGATIVE_NAN ? NEGATIVE_NAN : asNumber(value)));
-      return invoke(frame, override, args, undefined, row);
-    }
-    return copiesSign ? copyFloatSign(values[0], values[1]) : run(values.map(asNumber));
-  };
-}
-
-function integerAbs(value: unknown, type: IntType): number | bigint {
-  const numeric = BigInt(value as number | bigint);
-  if (numeric === intMin(type.name)) throw overflowError(typeName(type));
-  const magnitude = numeric < 0n ? -numeric : numeric;
-  return typeof value === 'bigint' ? magnitude : Number(magnitude);
-}

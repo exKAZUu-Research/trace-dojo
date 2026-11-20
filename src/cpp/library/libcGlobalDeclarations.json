@@ -12198,5 +12198,185 @@
       "float": "tanhf",
       "ldouble": "tanh"
     }
+  },
+  "mathNaNSigns": {
+    "acos": {
+      "double": 2,
+      "float": 4,
+      "ldouble": 2
+    },
+    "acosh": {
+      "double": 4,
+      "float": 4,
+      "ldouble": 4
+    },
+    "asin": {
+      "double": 4,
+      "float": 4,
+      "ldouble": 4
+    },
+    "asinh": {
+      "double": 4,
+      "float": 4,
+      "ldouble": 4
+    },
+    "atan": {
+      "double": 4,
+      "float": 4,
+      "ldouble": 4
+    },
+    "atan2": {
+      "double": 356,
+      "float": 356,
+      "ldouble": 356
+    },
+    "atanh": {
+      "double": 4,
+      "float": 4,
+      "ldouble": 4
+    },
+    "cbrt": {
+      "double": 4,
+      "float": 4,
+      "ldouble": 4
+    },
+    "ceil": {
+      "double": 4,
+      "float": 4,
+      "ldouble": 4
+    },
+    "exp": {
+      "double": 4,
+      "float": 4,
+      "ldouble": 4
+    },
+    "exp2": {
+      "double": 4,
+      "float": 4,
+      "ldouble": 4
+    },
+    "expm1": {
+      "double": 4,
+      "float": 4,
+      "ldouble": 4
+    },
+    "fdim": {
+      "double": 356,
+      "float": 356,
+      "ldouble": 356
+    },
+    "floor": {
+      "double": 4,
+      "float": 4,
+      "ldouble": 4
+    },
+    "fma": {
+      "double": 133955940,
+      "float": 133955940,
+      "ldouble": 133955940
+    },
+    "fmax": {
+      "double": 288,
+      "float": 288,
+      "ldouble": 288
+    },
+    "fmin": {
+      "double": 288,
+      "float": 288,
+      "ldouble": 288
+    },
+    "fmod": {
+      "double": 356,
+      "float": 356,
+      "ldouble": 356
+    },
+    "hypot": {
+      "float": 356
+    },
+    "log": {
+      "double": 4,
+      "float": 4,
+      "ldouble": 4
+    },
+    "log10": {
+      "double": 4,
+      "float": 4,
+      "ldouble": 4
+    },
+    "log1p": {
+      "double": 4,
+      "float": 4,
+      "ldouble": 4
+    },
+    "log2": {
+      "double": 4,
+      "float": 4,
+      "ldouble": 4
+    },
+    "logb": {
+      "double": 4,
+      "float": 4,
+      "ldouble": 4
+    },
+    "nearbyint": {
+      "double": 4,
+      "float": 4,
+      "ldouble": 4
+    },
+    "nextafter": {
+      "double": 356,
+      "float": 356,
+      "ldouble": 356
+    },
+    "pow": {
+      "double": 452,
+      "float": 452,
+      "ldouble": 452
+    },
+    "remainder": {
+      "double": 356,
+      "float": 356,
+      "ldouble": 356
+    },
+    "rint": {
+      "double": 4,
+      "float": 4,
+      "ldouble": 4
+    },
+    "round": {
+      "double": 4,
+      "float": 4,
+      "ldouble": 4
+    },
+    "sin": {
+      "double": 4,
+      "float": 4,
+      "ldouble": 4
+    },
+    "sinh": {
+      "double": 4,
+      "float": 4,
+      "ldouble": 4
+    },
+    "sqrt": {
+      "double": 4,
+      "float": 4,
+      "ldouble": 4
+    },
+    "tan": {
+      "double": 4,
+      "float": 4,
+      "ldouble": 4
+    },
+    "tanh": {
+      "double": 4,
+      "float": 4,
+      "ldouble": 4
+    },
+    "trunc": {
+      "double": 4,
+      "float": 4,
+      "ldouble": 4
+    }
   }
 }

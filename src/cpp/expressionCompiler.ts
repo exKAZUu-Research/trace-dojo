@@ -1,8 +1,9 @@
-import { binaryOperation, complement, convertScalar, negate } from '../c/arith';
+import { binaryOperation, complement, negate } from '../c/arith';
 import type { BinaryOperator } from '../c/ast';
 import { fma as binaryFma } from '../c/library/binaryFloat';
 import { commonType, promote } from '../c/types';
 import { CompileError } from '../interpreter/diagnostics';
+import { arithmeticOperation, convertNumeric, type NumericValue } from './arithmetic';
 import { byteAt } from './bytes';
 import { hasAuto, isAuto } from './compilerBase';
 import {
@@ -28,7 +29,7 @@ import {
   NO_CONSTANT_MEMBERS,
   offsetConstantLocation,
 } from './expr';
-import { type FloatingValue, negateFloat, NEGATIVE_NAN } from './floatSign';
+import { type FloatingValue, negateFloat } from './floatSign';
 import { moveValue } from './library/elements';
 import { throwLibrary } from './library/support';
 import { checkLiteralPrefix, literalBytes, numberLiteral } from './literals';
@@ -709,7 +710,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const operation = binaryOperation(operator as BinaryOperator, common as never);
     const isComparison = COMPARISONS.has(operator);
     const resultType = isComparison ? BOOL : common;
-    const evaluate = common.kind === 'float' ? floatingOperation(operation) : operation;
+    const evaluate = arithmeticOperation(operator as BinaryOperator, common);
     const aRun = a.run;
     const bRun = b.run;
     const expr: Expr = {
@@ -717,7 +718,9 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       isLvalue: false,
       row,
       run: (frame) =>
-        frame.unsequencedOperands(aRun, bRun, (first, second) => evaluate(first as number, second as number)),
+        frame.unsequencedOperands(aRun, bRun, (first, second) =>
+          evaluate(first as NumericValue, second as NumericValue)
+        ),
       memberConstant: mapMemberConstants([a, b], ([first, second]) => operation(first, second)),
     };
     const knownA = a.constant ?? a.foldedValue;
@@ -978,17 +981,11 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       if (type.kind === 'int' && type.name === 'bool')
         return this.error(row, `bool の変数には ${operator} を使えません（C++17 から）。`);
       const common = commonType(unqualified(type) as never, INT as never) as ArithmeticType;
-      const add = binaryOperation('+', common as never);
+      const add = arithmeticOperation('+', common);
       const one = common.kind === 'int' && isWide(common) ? BigInt(delta) : delta;
       const target_ = unqualified(type);
       step = (value) =>
-        value === NEGATIVE_NAN
-          ? value
-          : convertScalar(
-              add(convertScalar(value as number, target_ as never, common as never), one),
-              common as never,
-              target_ as never
-            );
+        convertNumeric(add(convertNumeric(value as NumericValue, target_, common), one), common, target_);
     } else {
       return this.error(row, `${typeName(type)} には ${operator} を使えません。`);
     }
@@ -1131,7 +1128,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const operand: Expr = { ...right, run: (frame) => frame.pending.at(-2) as Value };
     const factors = right.type.kind === 'float' ? this.floatingProducts.get(right.run) : undefined;
     if (factors && right.type.kind === 'float') {
-      const multiply = floatingOperation(binaryOperation('*', right.type));
+      const multiply = arithmeticOperation('*', right.type);
       operand.run = (frame) => multiply(...compoundAssignmentFactors(frame));
       this.floatingProducts.set(operand.run, compoundAssignmentFactors);
     }
@@ -2098,16 +2095,6 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       return this.error(row, `auto* の初期値にポインタを書いてください（${typeName(actual)}）。`);
     return pointerTo(this.deduceAutoPattern(declared.to, actual.to, row), isConst);
   }
-}
-
-function floatingOperation(operation: ReturnType<typeof binaryOperation>) {
-  return (a: FloatingValue, b: FloatingValue): Value => {
-    const left = Number(a);
-    const result = operation(left, Number(b));
-    if (Number.isNaN(result) && (a === NEGATIVE_NAN || (b === NEGATIVE_NAN && !Number.isNaN(left))))
-      return NEGATIVE_NAN;
-    return result;
-  };
 }
 
 function fma(a: FloatingValue, b: FloatingValue, c: FloatingValue, isFloat: boolean): FloatingValue {
