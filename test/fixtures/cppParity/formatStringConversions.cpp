@@ -22,6 +22,12 @@ int main() {
     }
   }
 
+  size_t consumed = 0;
+  float midpoint = stof("  0.5000000298023224 trailing", &consumed);
+  printf("%a %zu %a\n", midpoint, consumed, stof("0x1.0000010000000001p0"));
+  string copied = "abcd";
+  cout << copied.copy(copied.data(), 10, 2) << ' ' << copied << '\n';
+
   string s = "abc";
   const char* before = s.c_str();
   cout << (s.c_str() == s.data()) << (before == s.c_str()) << '\n';

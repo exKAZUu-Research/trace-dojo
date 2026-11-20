@@ -26,12 +26,12 @@ int main() {
   std::cout << first[1023] << '\n';
 
   std::deque<int> front{4, 7, 9};
-  int* next = &front[0] + 1;
+  int* next = &front[0] + 1LL;
   front.pop_front();
   std::cout << *next << ' ' << (next - &front.front()) << '\n';
 
   std::deque<int> back{4, 7, 9};
-  int* previous = &back[2] - 1;
+  int* previous = &back[2] - 1LL;
   back.pop_back();
   std::cout << *previous << ' ' << *(previous - 1) << '\n';
 }

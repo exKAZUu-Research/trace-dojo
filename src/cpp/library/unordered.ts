@@ -216,8 +216,8 @@ class HashPosition extends Ptr {
     return super.equals(other);
   }
 
-  override offset(delta: number, asIterator = false): Ptr {
-    if (delta === 1) return this.store.iterator(this.entry().next);
+  override offset(delta: number | bigint, asIterator = false): Ptr {
+    if (delta === 1 || delta === 1n) return this.store.iterator(this.entry().next);
     return super.offset(delta, asIterator);
   }
 

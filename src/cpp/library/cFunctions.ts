@@ -20,7 +20,7 @@ import type { Ptr } from '../values';
 import { NULL_PTR } from '../values';
 import { formatPrintf, type PrintfArgument } from './formatting';
 import type { Library } from './registry';
-import { asNumber, CONST_CHAR_PTR, native, readCString, signedChar } from './support';
+import { asNumber, CONST_CHAR_PTR, native, readCString, rejectOverlappingBytes, signedChar } from './support';
 
 const CHARACTER_CLASSES: Record<string, (c: number) => boolean> = {
   isalnum: (c) => /[\dA-Za-z]/.test(String.fromCodePoint(c)),
@@ -238,10 +238,7 @@ function copyCString(
   const readLength = Math.min(bytes.length + 1, count ?? Number.POSITIVE_INFINITY);
   const writeLength = count ?? readLength;
   const targetLength = prefix + writeLength;
-  const from = source.address;
-  const to = target.address;
-  if (from.store === to.store && to.index < from.index + readLength && from.index < to.index + targetLength)
-    throw new CppRuntimeError('overlappingCopy');
+  rejectOverlappingBytes(target, targetLength, source, readLength);
   target.offset(targetLength);
   frame.runtime.spend(Math.ceil(writeLength / 64));
   writeBytes(target.offset(prefix), bytes.padEnd(writeLength, '\0'));

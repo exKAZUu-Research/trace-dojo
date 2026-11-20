@@ -1,3 +1,5 @@
+#include <cstdio>
+#include <cstring>
 #include <iostream>
 #include <map>
 #include <utility>
@@ -28,6 +30,13 @@ int main() {
   std::cout << std::hex << *static_cast<int*>(erasedAgain) << '\n';
   const void* nil = nullptr;
   std::cout << (static_cast<const int*>(nil) == nullptr) << '\n';
+  unsigned int word = 0x61;
+  char* wordBytes = static_cast<char*>(static_cast<void*>(&word));
+  std::strcpy(wordBytes + 2LL, wordBytes);
+  std::printf("%s %x\n", wordBytes + 2, word);
+  word = 0x1242;
+  std::strncpy(wordBytes + 2, wordBytes, 2);
+  std::printf("%x\n", word);
   Hidden hidden;
   std::cout << ((Base&)hidden).value << '\n';
   Nested nested{{8}, 2};

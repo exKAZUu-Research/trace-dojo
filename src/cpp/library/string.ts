@@ -44,6 +44,7 @@ import {
   native,
   nativeConstructor,
   readCString,
+  rejectOverlappingBytes,
   signedChar,
   throwLibrary,
 } from './support';
@@ -568,8 +569,8 @@ export function stringClass(library: Library): ClassInfo {
       name: 'replace',
       params: [constIteratorType, constIteratorType],
       span: (s, [first, last]) => {
-        const from = iteratorIndex(s, first);
-        return [BigInt(from), BigInt(iteratorIndex(s, last) - from)];
+        const [from, to] = iteratorSpan(s, first, last);
+        return [BigInt(from), BigInt(to - from)];
       },
     },
   ];
@@ -611,9 +612,7 @@ export function stringClass(library: Library): ClassInfo {
     return s.characterBuffer().location(index);
   });
   method('erase', [constIteratorType, constIteratorType], iteratorType, (s, [first, last]) => {
-    const from = iteratorIndex(s, first);
-    const to = iteratorIndex(s, last);
-    if (from > to) throw new CppRuntimeError('invalidRange');
+    const [from, to] = iteratorSpan(s, first, last);
     s.bytes = s.bytes.slice(0, from) + s.bytes.slice(to);
     return s.characterBuffer().location(from);
   });
@@ -649,8 +648,11 @@ export function stringClass(library: Library): ClassInfo {
     (s, [destination, count, start], frame) => {
       const begin = position(start, 0n);
       if (begin > BigInt(s.bytes.length)) return outOfRange(frame);
-      const bytes = s.bytes.slice(Number(begin), Number(begin) + clampedLength(count, s.bytes.length - Number(begin)));
+      const from = Number(begin);
+      const length = clampedLength(count, s.bytes.length - from);
       const target = destination as Ptr;
+      rejectOverlappingBytes(target, length, s.characterBuffer().location(from), length);
+      const bytes = s.bytes.slice(from, from + length);
       for (let index = 0; index < bytes.length; index++) target.offset(index).write(signedChar(byteAt(bytes, index)));
       return BigInt(bytes.length);
     },
@@ -768,6 +770,13 @@ function iteratorIndex(s: StringValue, iterator: unknown): number {
   if (pointer.store !== s.characterBuffer() || pointer.index > s.bytes.length)
     throw new CppRuntimeError('invalidIterator');
   return pointer.index;
+}
+
+function iteratorSpan(s: StringValue, first: unknown, last: unknown): [number, number] {
+  const from = iteratorIndex(s, first);
+  const to = iteratorIndex(s, last);
+  if (from > to) throw new CppRuntimeError('invalidRange');
+  return [from, to];
 }
 
 /**
@@ -1054,11 +1063,11 @@ export function stringFunctions(library: Library, cls: ClassInfo): Map<string, R
         resultType,
         ([text, index], { frame }) => {
           const bytes = byteArray(textOf(text));
-          const parsed = parseFloatPrefix(bytes);
+          const isFloat = resultType === FLOAT;
+          const parsed = parseFloatPrefix(bytes, undefined, isFloat);
           if (parsed.length === 0)
             return throwLibrary(frame, library.exception('invalid_argument'), `${name}: no conversion`);
-          const isFloat = resultType === FLOAT;
-          const value = isFloat ? Math.fround(parsed.value) : parsed.value;
+          const { value } = parsed;
           const overflow = !Number.isFinite(value) && !parsed.isInfinityText;
           if (overflow || isFloatUnderflow(bytes, parsed, value, isFloat))
             return throwLibrary(frame, library.exception('out_of_range'), `${name}: out of range`);

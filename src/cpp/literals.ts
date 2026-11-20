@@ -1,4 +1,4 @@
-import { roundBinary } from '../c/library/binaryFloat';
+import { roundBinary, roundDecimalToFloat } from '../c/library/binaryFloat';
 import { compileError, unsupported } from './errors';
 import type { Syntax } from './syntax';
 import { type FloatType, intMax, type IntName, type IntType } from './types';
@@ -80,17 +80,7 @@ function hexFloat(text: string, isFloat: boolean): number {
 function decimalFloat(text: string): number {
   const match = /^(\d*)(?:\.(\d*))?(?:e([+-]?\d+))?$/.exec(text);
   if (!match || !(match[1] || match[2])) return Number.NaN;
-  const fraction = match[2] ?? '';
-  const digits = (match[1] + fraction).replace(/^0+/, '');
-  if (!digits) return 0;
-  const power = Number(match[3] ?? 0) - fraction.length;
-  const decimalExponent = power + digits.length - 1;
-  if (decimalExponent > 38) return Number.POSITIVE_INFINITY;
-  if (decimalExponent < -46) return 0;
-  const coefficient = BigInt(digits);
-  return power < 0
-    ? roundBinary(coefficient, 10n ** BigInt(-power), 0, true)
-    : roundBinary(coefficient * 10n ** BigInt(power), 1n, 0, true);
+  return roundDecimalToFloat(match[1], match[2] ?? '', Number(match[3] ?? 0));
 }
 
 /** The bytes a character or string literal's content stands for, in UTF-8, with its escapes resolved. */

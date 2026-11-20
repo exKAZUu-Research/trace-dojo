@@ -134,14 +134,16 @@ class DequeElementPointer extends Ptr {
     return other instanceof DequeElementPointer && this.address.store === other.address.store;
   }
 
-  override offset(delta: number): Ptr {
+  override offset(delta: number | bigint): Ptr {
     const store = this.target();
-    const index = this.index + delta;
-    const address = this.embeddedAddress(delta * this.storage.elementSize);
+    const start = this.index;
+    if (delta < -start || delta > store.pointerLength - start) throw new CppRuntimeError('pointerOutOfRange');
+    const offset = Number(delta);
+    const index = start + offset;
+    const address = this.embeddedAddress(offset * this.storage.elementSize);
     const { blockBytes } = this.storage;
-    if (index < 0 || index > store.pointerLength || address.index < 0 || address.index > blockBytes)
-      throw new CppRuntimeError('pointerOutOfRange');
-    if (delta === 0) return this;
+    if (address.index < 0 || address.index > blockBytes) throw new CppRuntimeError('pointerOutOfRange');
+    if (offset === 0) return this;
     if (address.index === blockBytes || index === store.pointerLength)
       return new DequeElementPointer(this.storage, address);
     const target = store.location(index);

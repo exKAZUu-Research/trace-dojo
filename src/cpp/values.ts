@@ -562,6 +562,10 @@ export class Ptr {
     return this.store?.projectAddress(this.index, offset);
   }
 
+  byteAddress(elementSize: number): Address {
+    return this.embeddedAddress(0) ?? { store: this.store, index: this.index * elementSize };
+  }
+
   get storageAddress(): { store: Store | undefined; index: number } {
     const { store, index } = this;
     return store instanceof MemberStorage ? { store: store.owner, index: store.field + index } : { store, index };

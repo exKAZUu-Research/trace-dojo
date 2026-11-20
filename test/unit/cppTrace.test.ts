@@ -1117,6 +1117,43 @@ int main() { char bytes[16] = "abcd"; std::${call}; }`;
   }
 );
 
+test('C string copies still reject overlapping character views of scalar storage', () => {
+  const program = `#include <cstring>
+int main() {
+  unsigned int word = 0x61;
+  char* bytes = static_cast<char*>(static_cast<void*>(&word));
+  std::strcpy(bytes + 1, bytes);
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('領域が重なっています'),
+  });
+});
+
+test.each(['text.copy(text.data() + 1, 10)', 'text.copy(text.data(), 2, 1)'])(
+  'std::string::copy rejects overlap after clamping its count: %s',
+  (call) => {
+    const program = `#include <string>
+int main() { std::string text = "abcd"; ${call}; }`;
+    expect(executeProgram('cpp', program)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: expect.stringContaining('領域が重なっています'),
+    });
+  }
+);
+
+test('string replacement rejects reversed destination iterators', () => {
+  const program = `#include <string>
+int main() {
+  std::string text = "abcd";
+  text.replace(text.begin() + 2, text.begin() + 1, "X");
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('範囲（先頭と末尾のイテレータ）が正しくありません'),
+  });
+});
+
 test('an exception message ends its lifetime with the exception object', () => {
   const program = `#include <stdexcept>
 int main() {

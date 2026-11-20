@@ -128,6 +128,14 @@ export function readCString(pointer: Ptr, limit = Number.POSITIVE_INFINITY, runt
   return bytes;
 }
 
+export function rejectOverlappingBytes(target: Ptr, targetLength: number, source: Ptr, sourceLength: number): void {
+  if (targetLength === 0 || sourceLength === 0) return;
+  const from = source.byteAddress(1);
+  const to = target.byteAddress(1);
+  if (from.store === to.store && to.index < from.index + sourceLength && from.index < to.index + targetLength)
+    throw new CppRuntimeError('overlappingCopy');
+}
+
 /** A new null-terminated array of `char` holding bytes, as `c_str()` and `what()` return. */
 export function cStringStore(bytes: string): ArrayStore {
   const values: Value[] = [];

@@ -201,7 +201,7 @@ class ScalarAliasPointer extends Ptr {
     super(alias, index);
   }
 
-  override offset(delta: number, asIterator = false): Ptr {
+  override offset(delta: number | bigint, asIterator = false): Ptr {
     if (!this.alias.byteView) throw new CppRuntimeError('pointerOutOfRange');
     return super.offset(delta, asIterator);
   }
@@ -213,6 +213,12 @@ class ScalarAliasPointer extends Ptr {
   override get address(): Ptr['address'] {
     const address = this.alias.place(this.index).address;
     return { ...address, index: address.index + this.alias.byteOffset(this.index) / sizeOf(this.alias.source) };
+  }
+
+  override byteAddress(): Ptr['address'] {
+    const place = this.alias.place(this.index);
+    const { store, index } = place.byteAddress(sizeOf(this.alias.source));
+    return { store, index: index + this.alias.byteOffset(this.index) };
   }
 
   override get storageAddress(): Ptr['storageAddress'] {
