@@ -249,6 +249,59 @@ int main() {
   });
 });
 
+test.each(['float', 'double', 'long double'])(
+  'uses the Apple invalid-product result for fused %s expressions',
+  (type) => {
+    const program = `#include <cmath>
+#include <iostream>
+#include <limits>
+void check(${type} zero, ${type} infinity, ${type} quiet, ${type} signaling) {
+  std::cout << std::signbit(std::fma(zero, infinity, quiet))
+            << std::signbit(std::fma(infinity, zero, quiet))
+            << std::signbit(zero * infinity + quiet)
+            << std::signbit(std::fma(zero, infinity, signaling))
+            << std::signbit(zero * infinity + signaling)
+            << std::signbit(std::fma(zero, static_cast<${type}>(3), quiet));
+}
+int main() {
+  check(0, std::numeric_limits<${type}>::infinity(), -std::numeric_limits<${type}>::quiet_NaN(),
+        -std::numeric_limits<${type}>::signaling_NaN());
+}`;
+    expect(executeProgram('cpp', program)).toMatchObject({
+      kind: 'executed',
+      stdout: '000111',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test('keeps the ordered container size visible to mapped destructors', () => {
+  const program = `#include <iostream>
+#include <map>
+struct Item;
+std::map<int, Item>* active;
+struct Item {
+  int key;
+  Item(int value) : key(value) {}
+  ~Item() { std::cout << key << ':' << active->size() << ' '; }
+};
+int main() {
+  std::map<int, Item> values;
+  active = &values;
+  values.try_emplace(2, 2);
+  values.try_emplace(1, 1);
+  values.clear();
+  std::cout << values.size() << ' ';
+  values.try_emplace(4, 4);
+  values.try_emplace(3, 3);
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '1:2 2:2 0 3:2 4:2 ',
+    uncaughtException: undefined,
+  });
+});
+
 test('reads the signed representation of constant NaNs from storage', () => {
   const program = `#include <cmath>
 #include <iostream>
@@ -488,6 +541,49 @@ int main() {
     kind: 'executed',
     stdout: '1234215',
     uncaughtException: undefined,
+  });
+});
+
+test('shares libc++ iterator types across compatible container specializations', () => {
+  const program = `#include <array>
+#include <functional>
+#include <iostream>
+#include <iterator>
+#include <map>
+#include <set>
+#include <string>
+#include <vector>
+int main() {
+  std::array<int, 3> values{3, 4, 5};
+  int plain[] = {6, 7};
+  std::array<int, 2>::reverse_iterator array = values.rbegin();
+  std::cout << *array;
+  array = std::rbegin(plain);
+  std::multimap<int, int, std::greater<int>> map{{1, 2}};
+  std::map<int, int>::iterator mapped = map.begin();
+  std::multiset<int, std::greater<int>> set{8};
+  std::set<int>::iterator key = set.begin();
+  std::vector<char> letters{'x'};
+  std::string::iterator letter = letters.begin();
+  std::cout << *array << mapped->second << *key << *letter;
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '5728x',
+    uncaughtException: undefined,
+  });
+});
+
+test('checks container ownership even for a shared iterator type', () => {
+  const program = `#include <map>
+int main() {
+  std::map<int, int> target{{1, 2}};
+  std::multimap<int, int> source{{1, 3}};
+  target.erase(source.begin());
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('使えなくなったイテレータ'),
   });
 });
 

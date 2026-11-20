@@ -7,7 +7,6 @@ import { CObject, type Value } from '../values';
 import { equalTo, lessThan } from './elements';
 import type { ClassOperations } from './libraryClass';
 import type { Library } from './registry';
-import { StringValue } from './string';
 import { native, nativeConstructor } from './support';
 import { typeKey } from './templates';
 
@@ -70,9 +69,6 @@ export function functorClass(library: Library, name: string, type: Type | undefi
         return result ? 1 : 0;
       };
     }
-    if (operator === '+' && operand.kind === 'class' && operand.cls.library?.kind === 'string') {
-      return (a, b) => new StringValue((a as StringValue).bytes + (b as StringValue).bytes);
-    }
     return undefined;
   };
   cls.library = {
@@ -88,6 +84,11 @@ export function functorClass(library: Library, name: string, type: Type | undefi
         return { ...result, run: (frame) => (object.run(frame), result.run(frame)) };
       }
       const type = unqualified(argument);
+      if (operator === '+' && type.kind === 'class' && type.cls.library?.kind === 'string') {
+        const [left, right] = args.map((arg) => compiler.convert(arg, type, row));
+        const result = compiler.binary(operator, left, right, row);
+        return { ...result, run: (frame) => (object.run(frame), result.run(frame)) };
+      }
       const operation = apply(type, type);
       if (!operation) return compiler.error(row, `${cls.name} は ${typeName(type)} の値に使えません。`);
       const values = args.map((arg) => compiler.convert(arg, unqualified(type), row).run);
@@ -228,7 +229,7 @@ export function numericLimitsClass(library: Library, type: Type): ClassInfo {
     is_bounded: true,
     is_modulo: !signed && target.name !== 'bool',
     traps: false,
-    tinyness_before: false,
+    tinyness_before: floating,
   }))
     cls.constants.set(name, constant(Number(value), BOOL));
   return cls;

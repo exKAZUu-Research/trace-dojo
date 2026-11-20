@@ -40,12 +40,10 @@ export class OrderedTree {
     this.entries[index] = value;
   }
 
-  takeAll(): Value[] {
-    const values = this.entries;
+  clear(): void {
     this.root = undefined;
     this.order = [];
     this.entries = [];
-    return values;
   }
 
   assignFrom(

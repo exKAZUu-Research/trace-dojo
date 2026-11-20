@@ -25,7 +25,8 @@ import { NULL_PTR, type Ptr, Store, type Value } from '../values';
 import { formatFloat, pointerText } from './formatting';
 import type { LibraryClass } from './libraryClass';
 import type { Library } from './registry';
-import { StringValue } from './string';
+import type { StringValue } from './string';
+import { makeString } from './string';
 import {
   addMethod,
   asNumber,
@@ -260,9 +261,15 @@ export class Streams {
       ];
       addMethod(
         cls,
-        native('str', [], this.library.stringType, (_args, { self }) => new StringValue((self as StreamValue).buffer), {
-          isConst: true,
-        })
+        native(
+          'str',
+          [],
+          this.library.stringType,
+          (_args, { self, frame }) => makeString(frame, (self as StreamValue).buffer),
+          {
+            isConst: true,
+          }
+        )
       );
       addMethod(
         cls,

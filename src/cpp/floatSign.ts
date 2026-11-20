@@ -75,3 +75,11 @@ export function arithmeticNaN(...values: unknown[]): FloatingValue | undefined {
   }
   return first;
 }
+
+export function fusedNaN(a: unknown, b: unknown, addend: unknown): FloatingValue | undefined {
+  if (addend instanceof FloatNaN && addend.isSignaling) return addend.quiet();
+  const left = Number(a);
+  const right = Number(b);
+  if ((left === 0 && Math.abs(right) === Infinity) || (right === 0 && Math.abs(left) === Infinity)) return Number.NaN;
+  return arithmeticNaN(addend, a, b);
+}

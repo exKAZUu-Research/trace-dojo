@@ -2,7 +2,7 @@ import { fma } from '../../c/library/binaryFloat';
 import { BINARY, UNARY } from '../../c/library/mathFunctions';
 import { convertNumeric, type NumericValue } from '../arithmetic';
 import { overflowError } from '../errors';
-import { arithmeticNaN, copyFloatSign, type FloatingValue, FloatNaN, floatSignBit, NEGATIVE_NAN } from '../floatSign';
+import { copyFloatSign, type FloatingValue, FloatNaN, floatSignBit, fusedNaN, NEGATIVE_NAN } from '../floatSign';
 import { invoke } from '../objectCompiler';
 import {
   type ArithmeticType,
@@ -132,7 +132,7 @@ function linkedMath(
     }
     if (name === 'copysign') return copyFloatSign(operands[0], operands[1]);
     if (name === 'fma') {
-      const nan = arithmeticNaN(operands[2], operands[0], operands[1]);
+      const nan = fusedNaN(operands[0], operands[1], operands[2]);
       if (nan !== undefined) return nan;
     }
     const numbers = operands.map(asNumber);

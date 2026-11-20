@@ -29,7 +29,7 @@ import {
   NO_CONSTANT_MEMBERS,
   offsetConstantLocation,
 } from './expr';
-import { arithmeticNaN, type FloatingValue, negateFloat } from './floatSign';
+import { type FloatingValue, fusedNaN, negateFloat } from './floatSign';
 import { moveValue } from './library/elements';
 import { throwLibrary } from './library/support';
 import { checkLiteralPrefix, literalBytes, numberLiteral } from './literals';
@@ -2098,7 +2098,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 }
 
 function fma(a: FloatingValue, b: FloatingValue, c: FloatingValue, isFloat: boolean): FloatingValue {
-  return arithmeticNaN(c, a, b) ?? binaryFma(Number(a), Number(b), Number(c), isFloat);
+  return fusedNaN(a, b, c) ?? binaryFma(Number(a), Number(b), Number(c), isFloat);
 }
 
 function arithmeticVariableValue(

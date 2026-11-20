@@ -25,7 +25,7 @@ import {
   VOID,
   withConst,
 } from '../types';
-import { CObject, Ptr, type Value } from '../values';
+import { CObject, holdValues, Ptr, type Value } from '../values';
 import { MapValue, NodePositions } from './containerValues';
 import {
   assignElement,
@@ -390,6 +390,7 @@ export class OrderedValue extends MapValue {
 
   private tree = new OrderedTree();
   private readonly nodes = new NodePositions(this);
+  private clearedPrefix = 0;
 
   get entries(): readonly Value[] {
     return this.tree.values;
@@ -397,13 +398,14 @@ export class OrderedValue extends MapValue {
 
   override location(index: number): Ptr {
     if (index === this.length) throw new CppRuntimeError('invalidIterator');
-    const location = this.nodes.at(index).cellLocation(this.entryType);
+    const location = this.iteratorLocation(index).cellLocation(this.entryType);
     const value = this.entries[index];
     if (value instanceof CObject) value.bindContainerCell(location);
     return location;
   }
 
-  override iteratorLocation(index: number): Ptr {
+  override iteratorLocation(index: number): ReturnType<NodePositions['at']> {
+    if (index < this.clearedPrefix) throw new CppRuntimeError('invalidIterator');
     return this.nodes.at(index);
   }
 
@@ -412,9 +414,21 @@ export class OrderedValue extends MapValue {
     return this.tree.splice(from, remove, entries);
   }
 
-  clear(): Value[] {
-    this.nodes.splice(0, this.length, 0);
-    return this.tree.takeAll();
+  clear(frame: Frame, destroy: ElementOperations['destroy']): void {
+    try {
+      if (destroy)
+        holdValues(frame, this.entries, () => {
+          for (const [index, value] of this.entries.entries()) {
+            destroy(frame, value);
+            this.nodes.invalidate(index);
+            this.clearedPrefix = index + 1;
+          }
+        });
+    } finally {
+      this.nodes.splice(0, this.length, 0);
+      this.tree.clear();
+      this.clearedPrefix = 0;
+    }
   }
 
   assignFrom(frame: Frame, source: OrderedValue, operations: ElementOperations): void {
@@ -452,17 +466,18 @@ export class OrderedValue extends MapValue {
 
   get(index: number): Value {
     this.checkAlive();
-    if (index < 0 || index >= this.entries.length) throw new CppRuntimeError('invalidIterator');
+    if (index < this.clearedPrefix || index >= this.entries.length) throw new CppRuntimeError('invalidIterator');
     return this.entries[index];
   }
 
   set(index: number, value: Value): void {
     this.checkAlive();
+    if (index < this.clearedPrefix || index >= this.entries.length) throw new CppRuntimeError('invalidIterator');
     this.tree.set(index, value);
   }
 
   children(): Iterable<Value> {
-    return this.entries;
+    return this.clearedPrefix === 0 ? this.entries : this.entries.slice(this.clearedPrefix);
   }
 }
 
@@ -547,13 +562,19 @@ export function orderedClass(
   const isSelf = (expr: Expr | undefined): boolean => expr?.type.kind === 'class' && expr.type.cls === cls;
   const entryType: Type = isMap ? classType(pairClass(library, withConst(keyType), valueType)) : keyType;
   const elementType: Type = isMap ? entryType : withConst(keyType);
-  const constIterator = randomAccessIterator(library.iterators, name, elementType, true, false, 'bidirectional');
-  const constReverseIterator = randomAccessIterator(library.iterators, name, elementType, true, true, 'bidirectional');
+  const representation = {
+    family: isMap ? 'tree-map' : 'tree-set',
+    category: 'bidirectional',
+    typeArguments: args,
+    constOnly: !isMap,
+  } as const;
+  const constIterator = randomAccessIterator(library.iterators, name, elementType, true, false, representation);
+  const constReverseIterator = randomAccessIterator(library.iterators, name, elementType, true, true, representation);
   const iterator = isMap
-    ? randomAccessIterator(library.iterators, name, elementType, false, false, 'bidirectional')
+    ? randomAccessIterator(library.iterators, name, elementType, false, false, representation)
     : constIterator;
   const reverseIterator = isMap
-    ? randomAccessIterator(library.iterators, name, elementType, false, true, 'bidirectional')
+    ? randomAccessIterator(library.iterators, name, elementType, false, true, representation)
     : constReverseIterator;
   const types = {
     iterator: classType(iterator),
@@ -755,7 +776,7 @@ export function orderedClass(
     assign: (frame, target, source) => {
       (target as OrderedValue).assignFrom(frame, source as OrderedValue, ops());
     },
-    destroy: (frame, value) => destroyAll(frame, (value as OrderedValue).clear()),
+    destroy: (frame, value) => (value as OrderedValue).clear(frame, ops().destroy),
   };
   cls.constructors = [
     nativeConstructor(cls, [], make, {
@@ -784,10 +805,7 @@ export function orderedClass(
   method('size', [], SIZE_T, (self) => BigInt(self.entries.length), { isConst: true });
   method('max_size', [], SIZE_T, () => treeMaxSize(entryType), { isConst: true });
   method('empty', [], BOOL, (self) => (self.entries.length === 0 ? 1 : 0), { isConst: true });
-  method('clear', [], VOID, (self, _args, frame) => {
-    const old = self.clear();
-    destroyAll(frame, old);
-  });
+  method('clear', [], VOID, (self, _args, frame) => self.clear(frame, ops().destroy));
   for (const isConst of [false, true]) {
     const it = isConst ? types.constIterator : types.iterator;
     const rit = isConst ? types.constReverseIterator : types.reverseIterator;

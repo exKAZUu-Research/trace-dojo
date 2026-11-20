@@ -6,12 +6,14 @@ import {
   BOOL,
   ClassInfo,
   classType,
+  isConstType,
   isInteger,
   LONG,
   pointerTo,
   PTRDIFF_T,
   type Type,
   typeName,
+  unqualified,
   withConst,
 } from '../types';
 import { NULL_PTR, Ptr, type Store } from '../values';
@@ -26,6 +28,18 @@ const RANDOM_ACCESS_OPERATORS = new Set(['+', '-', '+=', '-=', '[]', '<', '<=', 
 const BIDIRECTIONAL_OPERATORS = new Set(['--', 'x--']);
 const MUTATING_OPERATORS = new Set(['++', '--', 'x++', 'x--', '+=', '-=']);
 
+interface IteratorRepresentation {
+  family: string;
+  category?: IteratorCategory;
+  typeArguments?: readonly Type[];
+  constOnly?: boolean;
+  bits?: BitReferences;
+  underlyingSize?: 8 | 16;
+}
+
+export const POINTER_ITERATOR = { family: 'pointer' } as const;
+export const WRAPPED_POINTER_ITERATOR = { family: 'wrapped-pointer' } as const;
+
 /**
  * The iterator of a container, whose value is a `Ptr` to an element of the container's store, and whose operators are
  * those of its category. A reverse iterator points one past the element it designates, as `std::reverse_iterator`
@@ -37,29 +51,34 @@ export function randomAccessIterator(
   element: Type,
   isConst: boolean,
   isReverse: boolean,
-  category: IteratorCategory = 'randomAccess',
-  representation?: { bits?: BitReferences; underlyingSize: 8 | 16 }
+  representation: IteratorRepresentation
 ): ClassInfo {
-  const elementType = isConst ? withConst(element) : element;
+  const resolvedConst = isConst || isConstType(element);
+  const elementType = resolvedConst ? withConst(element) : element;
+  const {
+    category = 'randomAccess',
+    bits,
+    underlyingSize = 8,
+    typeArguments = [unqualified(element)],
+  } = representation;
+  const family = `${representation.family}<${typeArguments.map(typeKey).join(',')}>`;
   const name =
     container === undefined
       ? `std::reverse_iterator<${typeName(pointerTo(elementType))}>`
-      : `${container}::${isReverse ? (isConst ? 'const_reverse_iterator' : 'reverse_iterator') : isConst ? 'const_iterator' : 'iterator'}`;
-  const key = container === undefined ? `reverse_iterator<${typeKey(elementType)}*>` : name;
+      : `${container}::${isReverse ? (resolvedConst ? 'const_reverse_iterator' : 'reverse_iterator') : resolvedConst ? 'const_iterator' : 'iterator'}`;
+  const key = `${family}:${isReverse}:${typeKey(elementType)}`;
   const cached = cache.get(key);
   if (cached) return cached;
   const cls = new ClassInfo(name, 'class');
   cls.isComplete = true;
   cache.set(key, cls);
-  const bits = representation?.bits;
-  const underlyingSize = representation?.underlyingSize ?? 8;
   cls.library = {
     kind: 'iterator',
     args: [elementType],
     isReverse,
     iteratorCategory: category,
-    iteratorFamily: container ?? `pointer<${typeKey(element)}>`,
-    iteratorReference: isConst ? bits?.constant : bits?.mutable,
+    iteratorFamily: family,
+    iteratorReference: resolvedConst ? bits?.constant : bits?.mutable,
     // Apple's libc++ reverse_iterator stores two underlying iterators.
     size: isReverse ? 2 * underlyingSize : underlyingSize,
     align: 8,
@@ -70,6 +89,7 @@ export function randomAccessIterator(
             cls,
             elementType,
             isReverse,
+            representation.family === POINTER_ITERATOR.family,
             operator,
             withTemporaryTarget(compiler, operator, operands),
             row
@@ -82,8 +102,8 @@ export function randomAccessIterator(
     assign: (_frame, _target, source) => source,
   };
   cls.constructors = [nativeConstructor(cls, [], () => NULL_PTR)];
-  if (isConst) {
-    const mutable = randomAccessIterator(cache, container, element, false, isReverse, category, representation);
+  if (resolvedConst && !representation.constOnly) {
+    const mutable = randomAccessIterator(cache, container, unqualified(element), false, isReverse, representation);
     cls.constructors.push(nativeConstructor(cls, [classType(mutable)], ([value]) => value));
   }
   return cls;
@@ -144,6 +164,7 @@ function iteratorOperator(
   cls: ClassInfo,
   element: Type,
   isReverse: boolean,
+  wrapsRawPointer: boolean,
   operator: string,
   operands: Expr[],
   row: number
@@ -279,7 +300,9 @@ function iteratorOperator(
         isLvalue: false,
         row,
         run: (frame) =>
-          frame.unsequencedOperands(a, b, (p, q) => compareIterators(operator, p as Ptr, q as Ptr, isReverse)),
+          frame.unsequencedOperands(a, b, (p, q) =>
+            compareIterators(operator, p as Ptr, q as Ptr, isReverse, wrapsRawPointer)
+          ),
       };
     }
     default: {
@@ -297,11 +320,13 @@ function sameIteratorFamily(a: ClassInfo, b: ClassInfo): boolean {
   );
 }
 
-function compareIterators(operator: string, a: Ptr, b: Ptr, isReverse: boolean): number {
+function compareIterators(operator: string, a: Ptr, b: Ptr, isReverse: boolean, wrapsRawPointer: boolean): number {
   a.checkIterator();
   b.checkIterator();
-  if (operator === '==') return a.store === b.store && a.equals(b) ? 1 : 0;
-  if (operator === '!=') return a.store === b.store && a.equals(b) ? 0 : 1;
+  if (operator === '==' || operator === '!=') {
+    if (!wrapsRawPointer && a.store !== b.store) throw new CppRuntimeError('invalidIterator');
+    return Number(a.equals(b) === (operator === '=='));
+  }
   if (a.store !== b.store) throw new CppRuntimeError('invalidIterator');
   const difference = isReverse ? b.index - a.index : a.index - b.index;
   switch (operator) {

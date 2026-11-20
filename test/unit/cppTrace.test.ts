@@ -18,6 +18,105 @@ function steps(language: 'cpp' | 'java', program: string): { vars: Record<string
   }));
 }
 
+test.each([
+  'std::string copy(source.data(), source.size());',
+  'std::string copy(source.c_str());',
+  'std::string copy(source.begin(), source.end());',
+  'std::string copy(source);',
+])('charges the storage limit for string construction in %s', (statement) => {
+  const program = `#include <string>
+int main() {
+  std::string source(16000, 'x');
+  ${statement}
+}`;
+  const previous = LIMITS.maxSlots;
+  LIMITS.maxSlots = 3000;
+  try {
+    expect(executeProgram('cpp', program)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: 'メモリを確保しすぎました。',
+    });
+  } finally {
+    LIMITS.maxSlots = previous;
+  }
+});
+
+test.each(['std::iota(a, a + 512, 0)', 'std::fill(a, a + 512, 2)', 'std::reverse(a, a + 512)'])(
+  'charges the operations limit during repeated %s',
+  (operation) => {
+    const program = `#include <algorithm>
+#include <numeric>
+int main() {
+  static int a[512] = {};
+  for (int i = 0; i < 8; ++i) { ${operation}; }
+}`;
+    const previous = LIMITS.maxOperations;
+    LIMITS.maxOperations = 2048;
+    try {
+      expect(executeProgram('cpp', program)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+    } finally {
+      LIMITS.maxOperations = previous;
+    }
+  }
+);
+
+test.each([
+  'std::copy(v.begin(), v.end(), std::back_inserter(v));',
+  'std::transform(v.begin(), v.end(), std::back_inserter(v), twice);',
+])('diagnoses past-the-end iterator invalidation in %s', (statement) => {
+  const program = `#include <algorithm>
+#include <iterator>
+#include <vector>
+int twice(int value) { return value * 2; }
+int main() {
+  std::vector<int> v{1};
+  v.reserve(10);
+  ${statement}
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('使えなくなったイテレータ'),
+  });
+});
+
+test.each([
+  ['list', '=='],
+  ['vector', '!='],
+])('rejects %s iterator comparison %s across different sequences', (container, operator) => {
+  const program = `#include <${container}>
+#include <iostream>
+int main() {
+  std::${container}<int> a{1}, b{2};
+  std::${container}<int>::iterator first{}, second{};
+  std::cout << (first == second) << (&a == &b);
+  std::cout << (a.begin() ${operator} b.begin());
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '10',
+    uncaughtException: expect.stringContaining('使えなくなったイテレータ'),
+  });
+});
+
+test.each([
+  'std::string copy(source.data(), source.size());',
+  'std::string copy(source.c_str());',
+  'source.compare(source);',
+])('charges the operations limit during repeated string scans in %s', (statement) => {
+  const program = `#include <string>
+int main() {
+  std::string source(16384, 'x');
+  for (int i = 0; i < 24; ++i) { ${statement} }
+}`;
+  const previous = LIMITS.maxOperations;
+  LIMITS.maxOperations = 2048;
+  try {
+    expect(executeProgram('cpp', program)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  } finally {
+    LIMITS.maxOperations = previous;
+  }
+});
+
 test('hides a C++ scalar until every byte is initialized', () => {
   const program = `int main() {
   int values[1];

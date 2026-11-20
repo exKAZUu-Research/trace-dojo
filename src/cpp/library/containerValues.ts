@@ -296,6 +296,12 @@ export class NodePositions {
     this.end = new NodePosition(this.owner, undefined);
   }
 
+  invalidate(index: number): void {
+    const node = this.positions.get(index);
+    if (node) node.position = -1;
+    this.positions.delete(index);
+  }
+
   install(node: NodePosition): void {
     this.positions.set(node.index, node);
   }

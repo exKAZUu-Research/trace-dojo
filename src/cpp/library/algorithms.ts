@@ -64,7 +64,7 @@ import {
   truthy,
 } from './elements';
 import { constructPair, pairResult } from './emplacement';
-import { elementLocation, randomAccessIterator } from './iterators';
+import { elementLocation, POINTER_ITERATOR, randomAccessIterator } from './iterators';
 import type { IteratorCategory } from './libraryClass';
 import type { EngineValue } from './random';
 import { uniformInteger } from './random';
@@ -112,19 +112,40 @@ function iteratorOperand(info: IteratorInfo): CallbackOperand {
 
 /** The elements between two iterators, addressed by their positions from the first. */
 class Range {
-  readonly length: number;
+  private readonly count: number;
+  private readonly last?: Ptr;
 
   constructor(
     readonly first: Ptr,
-    last: Ptr,
+    end: Ptr | number,
     private readonly info: IteratorInfo,
-    private readonly write?: { frame: Frame; ops: ElementOperations; move: boolean }
+    private readonly frame: Frame,
+    private readonly write?: { ops: ElementOperations; move: boolean }
   ) {
-    this.length = first.rangeLength(last, info.isReverse);
+    if (typeof end === 'number') {
+      first.offset(info.isReverse ? -end : end, true);
+      this.count = end;
+    } else {
+      this.last = end;
+      this.count = first.rangeLength(end, info.isReverse);
+    }
+    this.checkEndpoints();
+  }
+
+  get length(): number {
+    this.checkEndpoints();
+    return this.count;
+  }
+
+  private checkEndpoints(): void {
+    this.first.checkIterator();
+    this.last?.checkIterator();
   }
 
   private index(position: number): number {
-    if (position < 0 || position >= this.length) throw new CppRuntimeError('invalidComparator');
+    this.checkEndpoints();
+    if (position < 0 || position >= this.count) throw new CppRuntimeError('invalidComparator');
+    this.frame.runtime.spend();
     return this.info.isReverse ? this.first.index - 1 - position : this.first.index + position;
   }
 
@@ -144,7 +165,8 @@ class Range {
       this.first.target().set(index, value);
       return;
     }
-    const { frame, ops, move } = this.write;
+    const { ops, move } = this.write;
+    const frame = this.frame;
     const location = this.location(position);
     if (move) moveAssignElement(frame, location, ops.type, value);
     else assignElement(frame, location, ops, value);
@@ -153,15 +175,16 @@ class Range {
   take(position: number): Value {
     const value = this.get(position);
     if (!this.write) return value;
-    const { frame, ops, move } = this.write;
+    const { ops, move } = this.write;
+    const frame = this.frame;
     const object = move ? constructElementFromRvalue(frame, ops.type, value) : ops.copy(frame, value);
     if (ops.destroy) frame.temporaries.push({ object, destroy: ops.destroy });
     return object;
   }
 
   withTemporary<T>(position: number, use: (location: Ptr) => T): T {
-    const frame = this.write?.frame;
-    if (!frame) throw new Error('Sorting requires a writable range');
+    if (!this.write) throw new Error('Sorting requires a writable range');
+    const frame = this.frame;
     return withTemporaries(frame, () => {
       frame.runtime.reserve(1);
       const object = new Box(this.take(position), false);
@@ -173,7 +196,7 @@ class Range {
   swap(a: number, b: number): void {
     if (a === b) return;
     if (this.write) {
-      swapElements(this.write.frame, this.location(a), this.location(b), this.write.ops);
+      swapElements(this.frame, this.location(a), this.location(b), this.write.ops);
     } else {
       const value = this.get(a);
       this.set(a, this.get(b));
@@ -183,6 +206,8 @@ class Range {
 
   /** The iterator at a position, which may be one past the last element. */
   iterator(position: number): Ptr {
+    this.checkEndpoints();
+    if (position === this.count && this.last) return this.last;
     if (position === 0) return this.first;
     return this.first.offset(this.info.isReverse ? -position : position, true);
   }
@@ -341,7 +366,6 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       const ops = elementOperations(compiler(), type, args[0].row);
       return native(name, params(args), VOID, ([first, last], { frame }) => {
         const values = mutableRange(first, last, info, frame, ops, true);
-        frame.runtime.spend(values.length);
         if (name === 'sort') introsort(values, less(frame));
         else stableSort(values, less(frame), frame, ops);
         return;
@@ -390,6 +414,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       for (let at = 0, remaining = values.length - 1; at < values.length - 1; at++, remaining--) {
         const offset = Number(uniformInteger(generator, 0n, BigInt(remaining), 64));
         if (offset !== 0) values.swap(at, at + offset);
+        else frame.runtime.spend();
       }
       return;
     });
@@ -403,7 +428,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       const less = lessOf(args, 2, info);
       if (!less) return;
       return native(name, params(args), unqualified(args[0].type), ([first, last], { frame }) => {
-        const values = range(first, last, info);
+        const values = range(first, last, info, frame);
         const compare = less(frame);
         let best = 0;
         for (let index = 1; index < values.length; index++) {
@@ -425,7 +450,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     if (!equal) return;
     const types = params(args);
     return native('find', types, unqualified(args[0].type), ([first, last, value], { frame }) => {
-      const values = range(first, last, info);
+      const values = range(first, last, info, frame);
       const matches = bindEquality(equal, frame, readArg(value, types[2]));
       for (let index = 0; index < values.length; index++) if (matches(values.get(index))) return values.iterator(index);
       return values.iterator(values.length);
@@ -438,7 +463,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       const predicate = predicateOf(args[2], iteratorOperand(info));
       if (!predicate) return;
       return native(name, params(args), unqualified(args[0].type), ([first, last], { frame }) => {
-        const values = range(first, last, info);
+        const values = range(first, last, info, frame);
         for (let index = 0; index < values.length; index++) {
           if (truthy(predicate(frame, values.location(index))) === (name === 'find_if')) return values.iterator(index);
         }
@@ -453,7 +478,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     if (!equal) return;
     const types = params(args);
     return native('count', types, PTRDIFF_T, ([first, last, value], { frame }) => {
-      const values = range(first, last, info);
+      const values = range(first, last, info, frame);
       const matches = bindEquality(equal, frame, readArg(value, types[2]));
       let count = 0;
       for (let index = 0; index < values.length; index++) if (matches(values.get(index))) count++;
@@ -466,7 +491,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     const predicate = predicateOf(args[2], iteratorOperand(info));
     if (!predicate) return;
     return native('count_if', params(args), PTRDIFF_T, ([first, last], { frame }) => {
-      const values = range(first, last, info);
+      const values = range(first, last, info, frame);
       let count = 0;
       for (let index = 0; index < values.length; index++) if (truthy(predicate(frame, values.location(index)))) count++;
       return BigInt(count);
@@ -479,7 +504,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       const predicate = predicateOf(args[2], iteratorOperand(info));
       if (!predicate) return;
       return native(name, params(args), BOOL, ([first, last], { frame }) => {
-        const values = range(first, last, info);
+        const values = range(first, last, info, frame);
         for (let index = 0; index < values.length; index++) {
           const test = truthy(predicate(frame, values.location(index)));
           if (name === 'all_of' && !test) return 0;
@@ -514,7 +539,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
         types,
         name === 'binary_search' ? BOOL : unqualified(args[0].type),
         ([first, last, value], { frame }) => {
-          const values = range(first, last, info);
+          const values = range(first, last, info, frame);
           const elementLess = elementFirst?.(frame) as Less;
           const valueLess = valueFirst?.(frame) as Less;
           const target = value as Ptr;
@@ -554,11 +579,12 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     // libc++ compares the lengths first only when both ranges are random access.
     const random = isRandomAccess(decayed(args[0].type)) && isRandomAccess(decayed(args[2].type));
     return native('equal', params(args), BOOL, ([first, last, start, end], { frame }) => {
-      const values = range(first, last, info);
-      const otherLength = hasEnd ? range(start, end, other).length : values.length;
+      const values = range(first, last, info, frame);
+      const boundedOther = hasEnd ? range(start, end, other, frame) : undefined;
+      const otherLength = boundedOther?.length ?? values.length;
       if (random && otherLength !== values.length) return 0;
       const length = Math.min(values.length, otherLength);
-      const others = rangeWithLength(start, length, other);
+      const others = boundedOther ?? rangeWithLength(start, length, other, frame);
       for (let index = 0; index < length; index++) {
         const matches = predicate
           ? truthy(predicate(frame, values.location(index), others.location(index)))
@@ -585,7 +611,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     if (!convert) return;
     const ops = elementOperations(compiler(), unqualified(info.element), args[0].row, 'assign');
     return native('fill', [...params(args).slice(0, 2), itemType], VOID, ([first, last, item], { frame }) => {
-      const values = range(first, last, info);
+      const values = range(first, last, info, frame);
       source.push(item as Ptr);
       try {
         for (let index = 0; index < values.length; index++) {
@@ -607,8 +633,8 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     const incrementType = source.kind === 'int' ? promote(source) : source;
     const add = arithmeticOperation('+', incrementType);
     const one = convertNumeric(1, { kind: 'int', name: 'int' }, incrementType);
-    return native('iota', params(args), VOID, ([first, last, start]) => {
-      const values = range(first, last, info);
+    return native('iota', params(args), VOID, ([first, last, start], { frame }) => {
+      const values = range(first, last, info, frame);
       let current = start as NumericValue;
       for (let index = 0; index < values.length; index++) {
         values.set(index, convertNumeric(current, source, element));
@@ -636,7 +662,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
         args[3].row
       );
       return native(name, types, VOID, ([first, last, old, replacement], { frame }) => {
-        const values = range(first, last, info);
+        const values = range(first, last, info, frame);
         const value = replacement as Ptr;
         for (let index = 0; index < values.length; index++) {
           if (
@@ -680,7 +706,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       const element = unqualified(info.element);
       compiler().requireLibraryObjectUse(element, 'move-assign', args[0].row);
       return native(name, types, unqualified(args[0].type), ([first, last, value], { frame }) => {
-        const values = range(first, last, info);
+        const values = range(first, last, info, frame);
         frame.pending.push(value as Value);
         try {
           // The kept elements move forward, leaving moved-from elements behind them.
@@ -708,9 +734,8 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     const trivialAssignment = hasTrivialCopyAssignment(type);
     return native('rotate', params(args), iterator, ([first, middle, last], { frame }) => {
       const values = mutableRange(first, last, info, frame, ops, true);
-      const split = range(first, middle, info).length;
+      const split = range(first, middle, info, frame).length;
       if (split > values.length) throw new CppRuntimeError('invalidRange');
-      frame.runtime.spend(values.length);
       rotateRange(values, split, info.category, trivialAssignment);
       return values.iterator(values.length - split);
     });
@@ -753,7 +778,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       if (name === 'copy_if' && !predicate) return;
       const assign = outputAssignment(compiler(), iteratorOperand(info), output, args[2].row);
       return native(name, params(args), unqualified(args[2].type), ([first, last, start], { frame }) => {
-        const values = range(first, last, info);
+        const values = range(first, last, info, frame);
         values.checkCopyDestination(start as Ptr, output, predicate !== undefined);
         const out = new Output(start as Ptr, output, frame, assign);
         for (let index = 0; index < values.length; index++) {
@@ -780,8 +805,8 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     const assign = outputAssignment(compiler(), operation, output, args[0].row);
     return native('transform', params(args), unqualified(args[isBinary ? 3 : 2].type), (values, { frame }) => {
       const [first, last] = values;
-      const source = range(first, last, info);
-      const others = second ? rangeWithLength(values[2], source.length, second) : undefined;
+      const source = range(first, last, info, frame);
+      const others = second ? rangeWithLength(values[2], source.length, second, frame) : undefined;
       const out = new Output(values[isBinary ? 3 : 2] as Ptr, output, frame, assign);
       for (let index = 0; index < source.length; index++) {
         withTemporaries(frame, () => {
@@ -800,7 +825,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     if (!info || args.length !== 3 || !callback.functions) return;
     const action = functionCallback(compiler(), callback.functions, [iteratorOperand(info)], callback.row);
     return native('for_each', params(args), VOID, ([first, last], { frame }) => {
-      const values = range(first, last, info);
+      const values = range(first, last, info, frame);
       for (let index = 0; index < values.length; index++) action(frame, values.location(index));
       return;
     });
@@ -826,7 +851,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       [...params(args).slice(0, 2), sumType, ...params(args).slice(3)],
       sumType,
       ([first, last, start], { frame }) => {
-        const values = range(first, last, info);
+        const values = range(first, last, info, frame);
         return foldValues(frame, accumulator, start as Value, values.length, (index) => values.location(index));
       }
     );
@@ -853,8 +878,8 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       [...params(args).slice(0, 3), sumType, ...params(args).slice(4)],
       sumType,
       ([first, last, start, initial], { frame }) => {
-        const values = range(first, last, info);
-        const others = rangeWithLength(start, values.length, other);
+        const values = range(first, last, info, frame);
+        const others = rangeWithLength(start, values.length, other, frame);
         return foldValues(
           frame,
           accumulator,
@@ -879,7 +904,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     const makeInitial = accumulatorInitializer(compiler(), accumulator.ops, iteratorOperand(info), args[0].row);
     const assign = outputAssignment(compiler(), { type: sumType }, output, args[2].row);
     return native('partial_sum', params(args), unqualified(args[2].type), ([first, last, start], { frame }) => {
-      const values = range(first, last, info);
+      const values = range(first, last, info, frame);
       const out = new Output(start as Ptr, output, frame, assign);
       if (values.length === 0) return out.end;
       return withTemporaries(frame, () => {
@@ -1187,9 +1212,7 @@ function arrayRangeFunction(library: Library, name: string, type: Extract<Type, 
   const reverse = name.startsWith('r');
   const element = name.startsWith('c') ? withConst(type.of) : type.of;
   const result = reverse
-    ? classType(
-        randomAccessIterator(library.iterators, undefined, withConst(element, false), isConstType(element), true)
-      )
+    ? classType(randomAccessIterator(library.iterators, undefined, element, false, true, POINTER_ITERATOR))
     : pointerTo(element);
   const index = name.endsWith('end') === reverse ? 0 : (type.length ?? 0);
   return native(name, [referenceTo(type)], result, ([array]) => new Ptr((array as Ptr).read() as Store, index));
@@ -1246,11 +1269,11 @@ const params = (args: Expr[]): Type[] =>
       : type;
   });
 
-const range = (first: unknown, last: unknown, info: IteratorInfo): Range => new Range(first as Ptr, last as Ptr, info);
+const range = (first: unknown, last: unknown, info: IteratorInfo, frame: Frame): Range =>
+  new Range(first as Ptr, last as Ptr, info, frame);
 
-function rangeWithLength(begin: unknown, length: number, info: IteratorInfo): Range {
-  const first = begin as Ptr;
-  return range(first, first.offset(info.isReverse ? -length : length, true), info);
+function rangeWithLength(begin: unknown, length: number, info: IteratorInfo, frame: Frame): Range {
+  return new Range(begin as Ptr, length, info, frame);
 }
 
 function mutableRange(
@@ -1261,8 +1284,8 @@ function mutableRange(
   ops: ElementOperations,
   move = false
 ): Range {
-  const write = move || info.element.kind === 'class' ? { frame, ops, move } : undefined;
-  return new Range(first as Ptr, last as Ptr, info, write);
+  const write = move || info.element.kind === 'class' ? { ops, move } : undefined;
+  return new Range(first as Ptr, last as Ptr, info, frame, write);
 }
 
 const readArg = (arg: unknown, type: Type): Value => (type.kind === 'reference' ? (arg as Ptr).read() : (arg as Value));

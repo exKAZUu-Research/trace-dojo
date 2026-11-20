@@ -625,9 +625,12 @@ export function unorderedClass(
   const isMap = valueType !== undefined;
   const entryType: Type = isMap ? classType(pairClass(library, withConst(keyType), valueType)) : keyType;
   const elementType: Type = isMap ? entryType : withConst(keyType);
-  const constIterator = classType(randomAccessIterator(library.iterators, name, elementType, true, false, 'forward'));
+  const representation = { family: kind, category: 'forward', typeArguments: args, constOnly: !isMap } as const;
+  const constIterator = classType(
+    randomAccessIterator(library.iterators, name, elementType, true, false, representation)
+  );
   const iterator = isMap
-    ? classType(randomAccessIterator(library.iterators, name, elementType, false, false, 'forward'))
+    ? classType(randomAccessIterator(library.iterators, name, elementType, false, false, representation))
     : constIterator;
   cls.memberTypes.set('iterator', iterator);
   cls.memberTypes.set('const_iterator', constIterator);

@@ -37,7 +37,7 @@ import {
 } from '../types';
 import { endLifetime, NULL_PTR, Ptr, Store, type Value } from '../values';
 import { formatFloat } from './formatting';
-import { randomAccessIterator } from './iterators';
+import { randomAccessIterator, WRAPPED_POINTER_ITERATOR } from './iterators';
 import type { Library } from './registry';
 import {
   addMethod,
@@ -194,11 +194,11 @@ const MAX_SIZE = 0x7f_ff_ff_ff_ff_ff_ff_f6n;
 const MAX_LENGTH = LIMITS.maxStringLength;
 
 /** Reads the bytes of an argument that is a `std::string` (by reference) or a `const char*`. */
-function textOf(value: unknown): string {
+function textOf(frame: Frame, value: unknown): string {
   if (value instanceof Ptr) {
     const target = value.store instanceof StringValue && value.index === 0 ? value.store : value.read();
     if (target instanceof StringValue) return target.bytes;
-    return readCString(value);
+    return readCString(value, undefined, frame.runtime);
   }
   return (value as StringValue).bytes;
 }
@@ -229,10 +229,31 @@ export function stringClass(library: Library): ClassInfo {
   const ref = constRef(type);
   const outOfRange = (frame: Frame): never => throwLibrary(frame, library.exception('out_of_range'), 'basic_string');
   const lengthError = (frame: Frame): never => throwLibrary(frame, library.exception('length_error'), 'basic_string');
-  const iterator = randomAccessIterator(library.iterators, 'std::string', CHAR, false, false);
-  const constIterator = randomAccessIterator(library.iterators, 'std::string', CHAR, true, false);
-  const reverseIterator = randomAccessIterator(library.iterators, 'std::string', CHAR, false, true);
-  const constReverseIterator = randomAccessIterator(library.iterators, 'std::string', CHAR, true, true);
+  const iterator = randomAccessIterator(library.iterators, 'std::string', CHAR, false, false, WRAPPED_POINTER_ITERATOR);
+  const constIterator = randomAccessIterator(
+    library.iterators,
+    'std::string',
+    CHAR,
+    true,
+    false,
+    WRAPPED_POINTER_ITERATOR
+  );
+  const reverseIterator = randomAccessIterator(
+    library.iterators,
+    'std::string',
+    CHAR,
+    false,
+    true,
+    WRAPPED_POINTER_ITERATOR
+  );
+  const constReverseIterator = randomAccessIterator(
+    library.iterators,
+    'std::string',
+    CHAR,
+    true,
+    true,
+    WRAPPED_POINTER_ITERATOR
+  );
   cls.memberTypes.set('iterator', classType(iterator));
   cls.memberTypes.set('const_iterator', classType(constIterator));
   cls.memberTypes.set('reverse_iterator', classType(reverseIterator));
@@ -272,27 +293,42 @@ export function stringClass(library: Library): ClassInfo {
     return Number(length);
   };
   const repeated = (frame: Frame, count: unknown, char: unknown, kept = 0): string =>
-    checkLength(frame, charOf(char).repeat(requestedLength(frame, count, kept)));
+    charOf(char).repeat(requestedLength(frame, count, kept));
   cls.constructors = [
-    nativeConstructor(cls, [], () => make(''), { libraryConstant: () => ({ stringLength: 0 }) }),
-    nativeConstructor(cls, [CONST_CHAR_PTR], ([pointer]) => make(readCString(pointer as Ptr)), {
-      libraryConstant: ([source]) => shortString(literalStringLength(source?.literalBytes)),
-    }),
-    nativeConstructor(cls, [SIZE_T, CHAR], ([count, char], { frame }) => make(repeated(frame, count, char)), {
-      libraryConstant: ([count]) => shortString(count?.constant),
-    }),
+    nativeConstructor(cls, [], () => new StringValue(''), { libraryConstant: () => ({ stringLength: 0 }) }),
+    nativeConstructor(
+      cls,
+      [CONST_CHAR_PTR],
+      ([pointer], { frame }) => makeString(frame, readCString(pointer as Ptr, undefined, frame.runtime)),
+      {
+        libraryConstant: ([source]) => shortString(literalStringLength(source?.literalBytes)),
+      }
+    ),
+    nativeConstructor(
+      cls,
+      [SIZE_T, CHAR],
+      ([count, char], { frame }) => makeString(frame, repeated(frame, count, char)),
+      {
+        libraryConstant: ([count]) => shortString(count?.constant),
+      }
+    ),
     nativeConstructor(
       cls,
       [ref, SIZE_T, SIZE_T],
-      ([source, start, count], { frame }) => make(substring(frame, textOf(source), start, count)),
+      ([source, start, count], { frame }) => makeString(frame, substring(frame, textOf(frame, source), start, count)),
       { optional: 1 }
     ),
-    nativeConstructor(cls, [CONST_CHAR_PTR, SIZE_T], ([pointer, count]) => make(pointerBytes(pointer as Ptr, count)), {
-      libraryConstant: ([source, count]) => {
-        if (source?.literalBytes !== undefined && Number(count?.constant) <= source.literalBytes.length + 1)
-          return shortString(count?.constant);
-      },
-    }),
+    nativeConstructor(
+      cls,
+      [CONST_CHAR_PTR, SIZE_T],
+      ([pointer, count], { frame }) => makeString(frame, pointerBytes(frame, pointer as Ptr, count)),
+      {
+        libraryConstant: ([source, count]) => {
+          if (source?.literalBytes !== undefined && Number(count?.constant) <= source.literalBytes.length + 1)
+            return shortString(count?.constant);
+        },
+      }
+    ),
     {
       ...nativeConstructor(cls, [], () => {}),
       instantiate: (args) => {
@@ -300,7 +336,7 @@ export function stringClass(library: Library): ClassInfo {
         if (!iterator) return;
         return {
           ...nativeConstructor(cls, [iterator.type, iterator.type], ([first, last], { frame }) =>
-            make(rangeBytes(frame, first as Ptr, last as Ptr, iterator))
+            makeString(frame, rangeBytes(frame, first as Ptr, last as Ptr, iterator))
           ),
           isTemplate: true,
         };
@@ -309,9 +345,9 @@ export function stringClass(library: Library): ClassInfo {
     },
   ];
   cls.operations = {
-    copy: (_frame, source) => make((source as StringValue).bytes),
-    assign: (_frame, target, source) => {
-      (target as StringValue).bytes = (source as StringValue).bytes;
+    copy: (frame, source) => makeString(frame, (source as StringValue).bytes),
+    assign: (frame, target, source) => {
+      (target as StringValue).bytes = checkLength(frame, (source as StringValue).bytes);
     },
   };
   const method = (
@@ -451,7 +487,7 @@ export function stringClass(library: Library): ClassInfo {
     'substr',
     [SIZE_T, SIZE_T],
     type,
-    (s, [start, count], frame) => make(substring(frame, s.bytes, start, count)),
+    (s, [start, count], frame) => makeString(frame, substring(frame, s.bytes, start, count)),
     { isConst: true, optional: 2 }
   );
   const search = (
@@ -464,7 +500,8 @@ export function stringClass(library: Library): ClassInfo {
         name,
         [needleType, SIZE_T],
         SIZE_T,
-        (s, [needle, start], frame) => found(find(s.bytes, textOf(needle), position(start, defaultStart), frame)),
+        (s, [needle, start], frame) =>
+          found(find(s.bytes, textOf(frame, needle), position(start, defaultStart), frame)),
         { isConst: true, optional: 1 }
       );
     }
@@ -480,7 +517,7 @@ export function stringClass(library: Library): ClassInfo {
       [CONST_CHAR_PTR, SIZE_T, SIZE_T],
       SIZE_T,
       (s, [needle, start, count], frame) => {
-        const bytes = pointerBytes(needle as Ptr, count);
+        const bytes = pointerBytes(frame, needle as Ptr, count);
         return found(find(s.bytes, bytes, position(start, defaultStart), frame));
       },
       { isConst: true }
@@ -506,19 +543,25 @@ export function stringClass(library: Library): ClassInfo {
   const compareMethod = (params: Type[], run: (s: StringValue, args: unknown[], frame: Frame) => number): void =>
     method('compare', params, INT, run, { isConst: true });
   for (const otherType of [ref, CONST_CHAR_PTR]) {
-    compareMethod([otherType], (s, [other]) => compareBytes(s.bytes, textOf(other)));
+    compareMethod([otherType], (s, [other], frame) => compareBytes(frame, s.bytes, textOf(frame, other)));
     compareMethod([SIZE_T, SIZE_T, otherType], (s, [start, count, other], frame) =>
-      compareBytes(substring(frame, s.bytes, start, count), textOf(other))
+      compareBytes(frame, substring(frame, s.bytes, start, count), textOf(frame, other))
     );
-    method('starts_with', [otherType], BOOL, (s, [other]) => (s.bytes.startsWith(textOf(other)) ? 1 : 0), {
-      isConst: true,
-    });
-    method('ends_with', [otherType], BOOL, (s, [other]) => (s.bytes.endsWith(textOf(other)) ? 1 : 0), {
+    method(
+      'starts_with',
+      [otherType],
+      BOOL,
+      (s, [other], frame) => (s.bytes.startsWith(textOf(frame, other)) ? 1 : 0),
+      {
+        isConst: true,
+      }
+    );
+    method('ends_with', [otherType], BOOL, (s, [other], frame) => (s.bytes.endsWith(textOf(frame, other)) ? 1 : 0), {
       isConst: true,
     });
   }
   compareMethod([SIZE_T, SIZE_T, CONST_CHAR_PTR, SIZE_T], (s, [start, count, other, n], frame) =>
-    compareBytes(substring(frame, s.bytes, start, count), pointerBytes(other as Ptr, n))
+    compareBytes(frame, substring(frame, s.bytes, start, count), pointerBytes(frame, other as Ptr, n))
   );
   method(
     'compare',
@@ -529,7 +572,11 @@ export function stringClass(library: Library): ClassInfo {
         position(from, 0n) > BigInt(bytes.length)
           ? throwLibrary(frame, library.exception('out_of_range'), 'string_view::substr')
           : substring(frame, bytes, from, length);
-      return compareBytes(viewSubstring(s.bytes, start, count), viewSubstring(textOf(other), otherStart, otherCount));
+      return compareBytes(
+        frame,
+        viewSubstring(s.bytes, start, count),
+        viewSubstring(textOf(frame, other), otherStart, otherCount)
+      );
     },
     { isConst: true, optional: 1 }
   );
@@ -552,15 +599,18 @@ export function stringClass(library: Library): ClassInfo {
     optional?: number;
     bytes: (args: unknown[], frame: Frame, kept: number) => string;
   }[] = [
-    { params: [ref], bytes: ([text]) => textOf(text) },
-    { params: [CONST_CHAR_PTR], bytes: ([text]) => textOf(text) },
-    { params: [CONST_CHAR_PTR, SIZE_T], bytes: ([pointer, count]) => pointerBytes(pointer as Ptr, count) },
+    { params: [ref], bytes: ([text], frame) => textOf(frame, text) },
+    { params: [CONST_CHAR_PTR], bytes: ([text], frame) => textOf(frame, text) },
+    {
+      params: [CONST_CHAR_PTR, SIZE_T],
+      bytes: ([pointer, count], frame) => pointerBytes(frame, pointer as Ptr, count),
+    },
     { params: [SIZE_T, CHAR], bytes: ([count, char], frame, kept) => repeated(frame, count, char, kept) },
   ];
   const substringSource = {
     params: [ref, SIZE_T, SIZE_T],
     optional: 1,
-    bytes: ([text, start, count]: unknown[], frame: Frame) => substring(frame, textOf(text), start, count),
+    bytes: ([text, start, count]: unknown[], frame: Frame) => substring(frame, textOf(frame, text), start, count),
   };
   /** Where each function puts the characters, as the span of the string they replace. */
   const targets: { name: string; params: Type[]; span: (s: StringValue, args: unknown[]) => [unknown, unknown] }[] = [
@@ -665,7 +715,9 @@ export function stringClass(library: Library): ClassInfo {
   return cls;
 }
 
-const make = (bytes: string): StringValue => new StringValue(bytes);
+export function makeString(frame: Frame, bytes: string): StringValue {
+  return new StringValue(checkLength(frame, bytes));
+}
 
 const checkLength = (frame: Frame, bytes: string): string => {
   checkStringLength(bytes.length);
@@ -716,9 +768,10 @@ const searchCharacterSet =
   };
 
 /** Compares as `char_traits<char>::compare` does with `memcmp`, which returns the difference of the unequal bytes. */
-const compareBytes = (a: string, b: string): number => {
+const compareBytes = (frame: Frame, a: string, b: string): number => {
   const length = Math.min(a.length, b.length);
   for (let index = 0; index < length; index++) {
+    if (index % 64 === 0) frame.runtime.spend();
     const difference = byteAt(a, index) - byteAt(b, index);
     if (difference !== 0) return difference;
   }
@@ -736,9 +789,17 @@ function fittingCapacity(length: number): number {
   return (room === SHORT_CAPACITY + 2 ? room + 1 : room) - 1;
 }
 
-function pointerBytes(pointer: Ptr, count: unknown): string {
+function pointerBytes(frame: Frame, pointer: Ptr, count: unknown): string {
+  return copyCharacters(frame, asNumber(count), (index) => pointer.offset(index).read());
+}
+
+function copyCharacters(frame: Frame, length: number, read: (index: number) => Value): string {
+  checkStringLength(length);
   let bytes = '';
-  for (let index = 0; index < asNumber(count); index++) bytes += charOf(pointer.offset(index).read());
+  for (let index = 0; index < length; index++) {
+    if (index % 64 === 0) frame.runtime.spend();
+    bytes += charOf(read(index));
+  }
   return bytes;
 }
 
@@ -765,17 +826,13 @@ const decay = (type: Type): Type => (type.kind === 'array' ? pointerTo(type.of) 
 
 function rangeBytes(frame: Frame, first: Ptr, last: Ptr, { element, isReverse }: CharacterInputIterator): string {
   const length = first.rangeLength(last, isReverse);
-  checkStringLength(length);
-  frame.runtime.spend(Math.ceil(length / 64));
   if (length === 0) return '';
   const store = first.target();
   const start = first.index;
-  let bytes = '';
-  for (let offset = 0; offset < length; offset++) {
+  return copyCharacters(frame, length, (offset) => {
     const value = store.get(isReverse ? start - 1 - offset : start + offset) as NumericValue;
-    bytes += charOf(convertNumeric(value, element, CHAR));
-  }
-  return bytes;
+    return convertNumeric(value, element, CHAR);
+  });
 }
 
 /** The position of an iterator into the string it belongs to. */
@@ -815,7 +872,7 @@ function charList(compiler: ExpressionCompiler, elements: readonly Syntax[], row
       ? elements.length
       : undefined;
   return initializerWithConstancy(
-    (frame) => new StringValue(runs.map((run) => charOf(run(frame))).join('')),
+    (frame) => makeString(frame, runs.map((run) => charOf(run(frame))).join('')),
     constantStringLength !== undefined,
     { constantStringLength }
   );
@@ -1019,15 +1076,12 @@ export function stringFunctions(library: Library, cls: ClassInfo): Map<string, R
     functions.set(fn.name, [...(functions.get(fn.name) ?? []), fn]);
   };
   for (const argType of [INT, LONG, LLONG, UINT, ULONG, ULLONG]) {
-    add(native('to_string', [argType], type, ([value]) => new StringValue(String(value))));
+    add(native('to_string', [argType], type, ([value], { frame }) => makeString(frame, String(value))));
   }
   for (const argType of [FLOAT, DOUBLE, LDOUBLE]) {
     add(
-      native(
-        'to_string',
-        [argType],
-        type,
-        ([value]) => new StringValue(formatFloat(value as number, { conversion: 'f', precision: 6 }))
+      native('to_string', [argType], type, ([value], { frame }) =>
+        makeString(frame, formatFloat(Number(value), { conversion: 'f', precision: 6 }))
       )
     );
   }
@@ -1045,7 +1099,7 @@ export function stringFunctions(library: Library, cls: ClassInfo): Map<string, R
         [ref, pointerTo(SIZE_T), INT],
         resultType,
         ([text, index, base], { frame }) => {
-          const bytes = textOf(text);
+          const bytes = textOf(frame, text);
           const parsed = parseIntegerPrefix(byteArray(bytes), base === undefined ? 10 : asNumber(base));
           if (parsed.length === 0)
             return throwLibrary(frame, library.exception('invalid_argument'), `${name}: no conversion`);
@@ -1076,7 +1130,7 @@ export function stringFunctions(library: Library, cls: ClassInfo): Map<string, R
         [ref, pointerTo(SIZE_T)],
         resultType,
         ([text, index], { frame }) => {
-          const bytes = byteArray(textOf(text));
+          const bytes = byteArray(textOf(frame, text));
           const isFloat = resultType === FLOAT;
           const parsed = parseFloatPrefix(bytes, undefined, isFloat);
           if (parsed.length === 0)
