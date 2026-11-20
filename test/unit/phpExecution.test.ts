@@ -4506,6 +4506,14 @@ echo "|", mt_rand();
       '$v0 = new Plain; $v1 = new Node(1); $v2 = new Plain; $v3 = new Plain; $v4 = new Plain; $v5 = new Plain; $v6 = new Plain; $v7 = new Node(7); $v0->c = [$v1, [$v3]]; $v4->b = [$v6, [$v4]]; $v4->c = [$v1, [$v0]]; $v7->a = [$v7, [$v6]]; $v7->c = $v0; unset($v3, $v2, $v6, $v4, $v5); echo "[", gc_collect_cycles(), "] "; unset($v1, $v0, $v7);',
       '[5] | ~1 ~7 9 0 8,1,4,2,7,5,6,3,9,10,11',
     ],
+    [
+      '$p = new Plain; $a = new Node(2); $b = new Node(3); $q = new Plain; $p->a = ["k" => $b]; $p->b = $q; $p->c = $p; $a->b = $b; $b->c = $a; unset($b, $p); echo "[", gc_collect_cycles(), "] "; unset($q, $a);',
+      '[2] | ~2 ~3 2 0 2,3,4,1,5,6,7,8,9,10,11',
+    ],
+    [
+      '$v0 = new Node(0); $v1 = new Plain; $v2 = new Node(2); $v3 = new Plain; $v4 = new Plain; $v5 = new Plain; $v0->b = $v1; $v1->a = $v2; $v2->a = $v0; $v2->b = ["k" => $v2]; $v3->c = $v1; $v4->b = ["k" => $v5]; $v4->c = [$v4, [$v1]]; $v5->a = $v3; $v5->c = [$v1, [$v2]]; unset($v4, $v1, $v5); echo "[", gc_collect_cycles(), "] "; unset($v3, $v0, $v2);',
+      '[7] | ~0 ~2 4 0 3,1,2,4,5,6,7,8,9,10,11',
+    ],
   ]) {
     expect(
       run(`<?php

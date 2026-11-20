@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 458 -- Holds GC root buffer simulation, ordering, and post-collection retirement helpers.
 import type { Runtime } from './runtime';
 import { PhpArray, PhpObject, Ref } from './values';
 
@@ -64,20 +65,144 @@ export function deferredHandleOrder<N extends object, O extends N>(
   return state.order;
 }
 
-export function collectGarbageOrder<N extends object, O extends N>(
+export function collectGarbageNodes<N extends object, O extends N>(
   bufferedRoots: N[],
   remainingObjects: Set<O>,
   isObject: (node: N) => node is O,
   children: (node: N) => N[],
   countable: (node: N) => boolean = () => true
-): O[] {
+): N[] {
   const buffer = buildSimulationBuffer(bufferedRoots, remainingObjects, isObject, children, countable);
-  const objects: O[] = [];
+  const nodes: N[] = [];
   for (let index = 0; index < buffer.length; index++) {
     const node = buffer.at(index);
-    if (node !== undefined && isObject(node)) objects.push(node);
+    if (node !== undefined) nodes.push(node);
   }
-  return objects;
+  return nodes;
+}
+
+export interface RetireCollectedContext {
+  runtime: Runtime;
+  objectChildren: Map<PhpObject, unknown[]>;
+  allChildren: unknown[];
+  arrayStorage: Set<PhpArray>;
+  isLiveArray: (array: PhpArray) => boolean;
+  garbageNodes?: (PhpObject | PhpArray)[];
+  passTwoNodes?: (PhpObject | PhpArray)[];
+}
+
+export function retireCollected(context: RetireCollectedContext): void {
+  const { runtime, objectChildren, allChildren, arrayStorage, isLiveArray, garbageNodes, passTwoNodes } = context;
+  const remaining = new Set(arrayStorage);
+  const freedObjects = new Set<PhpObject>();
+  const seen = new Set<PhpArray>();
+  const released: unknown[] = [];
+  const compactRoots = runtime.collectingCycles && garbageNodes !== undefined;
+  const state: RetireState = {
+    runtime,
+    objectChildren,
+    remaining,
+    freedObjects,
+    seen,
+    released,
+    isLiveArray,
+    compactRoots,
+  };
+  if (compactRoots) retireBufferNodes(garbageNodes, passTwoNodes, state);
+  else for (const item of allChildren) visitRetiredNode(item, state);
+  for (const array of remaining) visitRetiredNode(array, state);
+  if (released.length > 0) runtime.release(released);
+}
+
+function retireBufferNodes(
+  garbageNodes: (PhpObject | PhpArray)[],
+  passTwoNodes: (PhpObject | PhpArray)[] | undefined,
+  state: RetireState
+): void {
+  state.runtime.gcRoots.load(garbageNodes);
+  const passTwoSet = passTwoNodes ? new Set<PhpObject | PhpArray>(passTwoNodes) : undefined;
+  for (const node of garbageNodes) if (!passTwoSet?.has(node)) visitRetiredNode(node, state);
+  if (passTwoNodes) {
+    state.runtime.gcRoots.load(passTwoNodes);
+    for (const node of passTwoNodes) visitRetiredNode(node, state);
+  }
+  for (const object of state.objectChildren.keys()) visitRetiredNode(object, state);
+}
+
+interface RetireState {
+  runtime: Runtime;
+  objectChildren: Map<PhpObject, unknown[]>;
+  remaining: Set<PhpArray>;
+  freedObjects: Set<PhpObject>;
+  seen: Set<PhpArray>;
+  released: unknown[];
+  isLiveArray: (array: PhpArray) => boolean;
+  compactRoots: boolean;
+}
+
+function visitRetiredNode(root: unknown, state: RetireState): void {
+  const stack: { items: unknown[]; index: number; finish?: PhpObject }[] = [{ items: [root], index: 0 }];
+  while (stack.length > 0) {
+    const frame = stack.at(-1) as { items: unknown[]; index: number; finish?: PhpObject };
+    if (frame.index >= frame.items.length) {
+      stack.pop();
+      if (frame.finish) state.runtime.gcRoots.delete(frame.finish);
+      continue;
+    }
+    const item = frame.items[frame.index++];
+    const next = stepRetiredItem(item, state);
+    if (next) stack.push(next);
+  }
+}
+
+function stepRetiredItem(
+  item: unknown,
+  state: RetireState
+): { items: unknown[]; index: number; finish?: PhpObject } | undefined {
+  const value = item instanceof Ref ? item.v : item;
+  if (value instanceof PhpArray && state.remaining.has(value)) return retireArrayNode(value, state);
+  if (value instanceof PhpObject && state.compactRoots && state.objectChildren.has(value))
+    return retireObjectNode(value, state);
+  recordRetiredSurvivor(value, state);
+  return undefined;
+}
+
+function retireArrayNode(
+  array: PhpArray,
+  state: RetireState
+): { items: unknown[]; index: number; finish?: PhpObject } | undefined {
+  state.remaining.delete(array);
+  if (state.seen.has(array) || !array.composite || state.isLiveArray(array)) return undefined;
+  state.seen.add(array);
+  state.runtime.gcRoots.delete(array);
+  const slots = array.retire();
+  for (const slot of slots) {
+    const target = slot instanceof Ref ? slot.v : slot;
+    if (slot instanceof Ref || target instanceof PhpObject) state.released.push(slot);
+  }
+  return { items: slots, index: 0 };
+}
+
+function retireObjectNode(
+  object: PhpObject,
+  state: RetireState
+): { items: unknown[]; index: number; finish?: PhpObject } | undefined {
+  if (state.freedObjects.has(object)) return undefined;
+  state.freedObjects.add(object);
+  return { items: state.objectChildren.get(object) ?? [], index: 0, finish: object };
+}
+
+function recordRetiredSurvivor(value: unknown, state: RetireState): void {
+  if (!(value instanceof PhpObject || value instanceof PhpArray)) return;
+  if (!state.compactRoots) {
+    state.runtime.pendingGcRoots.add(value);
+    return;
+  }
+  if (value instanceof PhpObject) {
+    if (state.runtime.isCollectableObject(value)) state.runtime.gcRoots.add(value);
+  } else if (!value.uncollectable && state.isLiveArray(value)) {
+    state.runtime.gcRoots.add(value);
+  }
 }
 
 export function orderDestructedCollection<N extends object, O extends N>(
@@ -87,7 +212,7 @@ export function orderDestructedCollection<N extends object, O extends N>(
   isObject: (node: N) => node is O,
   children: (node: N) => N[],
   countable: (node: N) => boolean = () => true
-): { count: number; ordered: O[] } {
+): { count: number; ordered: O[]; passTwoNodes: N[] } {
   const buffer = buildSimulationBuffer(bufferedRoots, remainingObjects, isObject, children, countable);
   const end = buffer.length;
   removeDestructibleNested(buffer, end, destructible, isObject, children, countable);
@@ -102,8 +227,12 @@ export function orderDestructedCollection<N extends object, O extends N>(
   const runOneCount = runFirstDestructionPass(buffer, end, state, destructible, countable);
   const freedAfterPassOne = countNodes(state.freed, countable);
   buffer.compact();
-  drainRunTwoBuffer(buffer, state, remainingObjects, countable);
-  return { count: runOneCount + (countNodes(state.freed, countable) - freedAfterPassOne), ordered: state.order };
+  const passTwoNodes = drainRunTwoBuffer(buffer, state, remainingObjects, countable);
+  return {
+    count: runOneCount + (countNodes(state.freed, countable) - freedAfterPassOne),
+    ordered: state.order,
+    passTwoNodes,
+  };
 }
 
 function countNodes<N extends object>(nodes: Iterable<N>, predicate: (node: N) => boolean): number {
@@ -187,13 +316,14 @@ function drainRunTwoBuffer<N extends object, O extends N>(
   state: DeferredState<N, O>,
   remainingObjects: Set<O>,
   countable: (node: N) => boolean
-): void {
+): N[] {
   collectWhiteIntoBuffer(buffer, state.freed, remainingObjects, state.isObject, state.children, countable);
   const runTwoQueue: N[] = [];
   for (let index = 0; index < buffer.length; index++) {
     const node = buffer.at(index);
     if (node !== undefined) runTwoQueue.push(node);
   }
+  const passTwoNodes = [...runTwoQueue];
   drainDeferredQueue(runTwoQueue, state, 0);
   for (const object of remainingObjects) {
     if (!state.freed.has(object)) {
@@ -202,6 +332,7 @@ function drainRunTwoBuffer<N extends object, O extends N>(
       drainDeferredQueue(runTwoQueue, state, start);
     }
   }
+  return passTwoNodes;
 }
 
 class SimulationBuffer<N extends object> {
@@ -328,7 +459,12 @@ function releaseWithBuffer<N extends object, O extends N>(
       if (countable(item)) buffer.add(item);
       else for (const target of state.children(item)) if (countable(target)) buffer.add(target);
     },
-    (node) => buffer.remove(node)
+    (node) => {
+      if (state.isObject(node)) buffer.remove(node);
+    },
+    (node) => {
+      if (!state.isObject(node)) buffer.remove(node);
+    }
   );
 }
 
@@ -343,9 +479,11 @@ function releaseDeferredRoot<N extends object, O extends N>(
   start: N,
   state: DeferredState<N, O>,
   onNested: (item: N) => void,
-  onFinish?: (node: N) => void
+  onFinish?: (node: N) => void,
+  onEnter?: (node: N) => void
 ): void {
   state.freed.add(start);
+  onEnter?.(start);
   const stack: { node: N; children: N[]; index: number }[] = [
     { node: start, children: state.children(start), index: 0 },
   ];
@@ -354,6 +492,7 @@ function releaseDeferredRoot<N extends object, O extends N>(
     const child = nextDeferredChild(frame, state, onNested);
     if (child !== undefined) {
       state.freed.add(child);
+      onEnter?.(child);
       stack.push({ node: child, children: state.children(child), index: 0 });
       continue;
     }
@@ -491,11 +630,9 @@ export class GcRoots<T extends object> {
     this.unused.length = 0;
   }
 
-  reserve(count: number): void {
-    this.positions.clear();
-    this.slots.length = count;
-    this.slots.fill(undefined);
-    this.unused.length = 0;
+  load(values: Iterable<T>): void {
+    this.clear();
+    for (const value of values) this.add(value);
   }
 
   compact(): void {

@@ -3,11 +3,12 @@ import type { TurtleState } from '../interpreter/turtleWorld';
 import { type CleanupException, withCleanupExceptions, withPendingException } from './errors';
 import {
   cachedObjectFree,
-  collectGarbageOrder,
+  collectGarbageNodes,
   deferredHandleOrder,
   objectFree,
   orderDestructedCollection,
   recordGcRoot,
+  retireCollected,
 } from './gcRoots';
 import { ExitSignal, type Frame, PhpThrow, type Runtime } from './runtime';
 import {
@@ -100,16 +101,20 @@ function collectGarbageNow(runtime: Runtime, cycles: boolean, stopOnException: b
     return arrayCount;
   }
   for (const object of freed) runtime.collectingObjects.add(object);
-  const { owners, handles } = releaseOrder(freed, previousOrder, runtime, buffered);
+  const { owners, handles, nodes } = releaseOrder(freed, previousOrder, runtime, buffered);
   const arrayStorage = collectibleGraph([...freed, ...arrayCandidates], reachedArrays).arrays;
   const collected = freed.length + arrayStorage.size;
   const destructible = freed.filter((object) => !object.destructed && object.cls.findMethod('__destruct'));
   if (destructible.length === 0 || runtime.shuttingDown) {
     const ordered = orderCollectedObjects(runtime, cycles, owners, freed, handles, reachedArrays, buffered);
-    finishCollectedObjects(runtime, ordered, arrayStorage, collected);
+    finishCollectedObjects(runtime, ordered, arrayStorage, nodes);
     return collected;
   }
-  return collectAfterDestruction(runtime, { owners, handles, destructible, arrayStorage, buffered }, stopOnException);
+  return collectAfterDestruction(
+    runtime,
+    { owners, handles, destructible, arrayStorage, buffered, nodes },
+    stopOnException
+  );
 }
 
 function collectAfterDestruction(
@@ -120,10 +125,11 @@ function collectAfterDestruction(
     destructible: PhpObject[];
     arrayStorage: Set<PhpArray>;
     buffered?: (PhpObject | PhpArray)[];
+    nodes?: (PhpObject | PhpArray)[];
   },
   stopOnException: boolean
 ): number {
-  const { owners, handles, destructible, arrayStorage, buffered } = batch;
+  const { owners, handles, destructible, arrayStorage, buffered, nodes } = batch;
   let count = 0;
   withCleanupExceptions(runtime, (capture) => {
     for (const object of owners) {
@@ -146,7 +152,11 @@ function collectAfterDestruction(
     const afterArrays = new Set<PhpArray>();
     const after = mark(runtime, false, afterArrays);
     const remaining = handles.filter((object) => runtime.objects.get(object.id) === object && !after.has(object));
-    const { count: collectedCount, ordered } = countAfterDestruction(runtime, {
+    const {
+      count: collectedCount,
+      ordered,
+      passTwoNodes,
+    } = countAfterDestruction(runtime, {
       owners,
       remaining,
       destructible,
@@ -154,7 +164,7 @@ function collectAfterDestruction(
       buffered,
     });
     count = collectedCount;
-    finishCollectedObjects(runtime, ordered, arrayStorage, count);
+    finishCollectedObjects(runtime, ordered, arrayStorage, nodes, passTwoNodes);
   });
   return count;
 }
@@ -163,18 +173,32 @@ function finishCollectedObjects(
   runtime: Runtime,
   objects: PhpObject[],
   arrayStorage: Set<PhpArray>,
-  collected: number
+  garbageNodes?: (PhpObject | PhpArray)[],
+  passTwoNodes?: (PhpObject | PhpArray)[]
 ): void {
-  const reserve = runtime.collectingCycles ? collected : 0;
-  if (reserve > 0) runtime.gcRoots.reserve(reserve);
-  const children: unknown[] = [];
+  const objectChildren = new Map<PhpObject, unknown[]>();
+  const allChildren: unknown[] = [];
   for (const object of objects) {
-    pushObject(object, children);
+    const props: unknown[] = [];
+    pushObject(object, props);
+    objectChildren.set(object, props);
+    allChildren.push(...props);
     runtime.freeObject(object);
   }
-  finishArrayCollection(runtime, arrayStorage);
-  releaseDropped(runtime, children, true);
-  if (reserve > 0) runtime.gcRoots.compact();
+  runtime.pendingGcRoots.clear();
+  runtime.collectingArrays.clear();
+  const roots = ownershipRoots(runtime);
+  retireCollected({
+    runtime,
+    objectChildren,
+    allChildren,
+    arrayStorage,
+    isLiveArray: (array) => ownedReachable(array, roots, runtime, undefined, undefined, true),
+    garbageNodes,
+    passTwoNodes,
+  });
+  releaseDropped(runtime, allChildren, true);
+  if (runtime.collectingCycles && garbageNodes !== undefined) runtime.gcRoots.compact();
   retainTurtles(runtime, mark(runtime));
 }
 
@@ -224,7 +248,7 @@ function countAfterDestruction(
     afterArrays: Set<PhpArray>;
     buffered?: (PhpObject | PhpArray)[];
   }
-): { count: number; ordered: PhpObject[] } {
+): { count: number; ordered: PhpObject[]; passTwoNodes: (PhpObject | PhpArray)[] } {
   const { owners, remaining, destructible, afterArrays, buffered } = state;
   const allowed = new Set(remaining);
   const graph = new CollectionGraph(
@@ -237,7 +261,7 @@ function countAfterDestruction(
   const initialRoots: CollectionNode[] = buffered
     ? buffered.filter((item) => (item instanceof PhpObject ? allowed.has(item) : !afterArrays.has(item)))
     : owners.filter((object) => allowed.has(object));
-  return orderDestructedCollection<CollectionNode, PhpObject>(
+  const result = orderDestructedCollection<CollectionNode, PhpObject>(
     initialRoots,
     new Set(destructible.filter((object) => allowed.has(object))),
     allowed,
@@ -245,6 +269,11 @@ function countAfterDestruction(
     children,
     (node) => !(node instanceof Ref)
   );
+  return {
+    count: result.count,
+    ordered: result.ordered,
+    passTwoNodes: result.passTwoNodes.filter((node): node is PhpObject | PhpArray => !(node instanceof Ref)),
+  };
 }
 
 /**
@@ -1011,20 +1040,10 @@ function releaseOrder(
   previousOrder: Map<PhpObject, number>,
   runtime: Runtime,
   buffered?: (PhpArray | PhpObject)[]
-): { owners: PhpObject[]; handles: PhpObject[] } {
+): { owners: PhpObject[]; handles: PhpObject[]; nodes?: (PhpArray | PhpObject)[] } {
   const graph = new CollectionGraph(freed, runtime);
   const referenced = referencedGarbage(graph, freed);
-  const owners = new Set(
-    buffered
-      ? collectGarbageOrder<CollectionNode, PhpObject>(
-          buffered.filter((node) => graph.accepts(node)),
-          new Set(freed),
-          (node): node is PhpObject => node instanceof PhpObject,
-          (node) => graph.children(node),
-          (node) => !(node instanceof Ref)
-        )
-      : undefined
-  );
+  const { nodes, owners } = collectBufferedNodes(buffered, graph, freed);
   const handles: PhpObject[] = [];
   const visited = new Set<CollectionNode>();
   const visit = (root: CollectionNode): void => {
@@ -1055,7 +1074,23 @@ function releaseOrder(
     .toSorted((a, b) => position(a) - position(b) || a.id - b.id);
   for (const root of roots) visit(root);
   for (const object of freed) visit(object);
-  return { owners: [...owners], handles };
+  return { owners: [...owners], handles, nodes };
+}
+
+function collectBufferedNodes(
+  buffered: (PhpArray | PhpObject)[] | undefined,
+  graph: CollectionGraph,
+  freed: PhpObject[]
+): { nodes?: (PhpArray | PhpObject)[]; owners: Set<PhpObject> } {
+  if (!buffered) return { owners: new Set() };
+  const nodes = collectGarbageNodes<CollectionNode, PhpObject>(
+    buffered.filter((node) => graph.accepts(node)),
+    new Set(freed),
+    (node): node is PhpObject => node instanceof PhpObject,
+    (node) => graph.children(node),
+    (node) => !(node instanceof Ref)
+  ) as (PhpArray | PhpObject)[];
+  return { nodes, owners: new Set(nodes.filter((node): node is PhpObject => node instanceof PhpObject)) };
 }
 
 function referencedGarbage(graph: CollectionGraph, roots: CollectionNode[]): Set<PhpObject> {
