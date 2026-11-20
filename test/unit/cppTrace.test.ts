@@ -447,6 +447,25 @@ int main() {
   }
 );
 
+test.each(['int* a[20000] = {};', 'std::vector<int*> a(20000);'])(
+  'meters the pointers that turtle reachability scans in %s',
+  (declaration) => {
+    const program = `#include <vector>
+int main() {
+  Turtle t;
+  ${declaration}
+  for (int i = 0; i < 1000; i++) t.canMoveForward();
+}`;
+    const previous = LIMITS.maxOperations;
+    LIMITS.maxOperations = 100_000;
+    try {
+      expect(executeProgram('cpp', program)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+    } finally {
+      LIMITS.maxOperations = previous;
+    }
+  }
+);
+
 test('charges the storage of the message buffer that what() creates', () => {
   const program = `#include <stdexcept>
 #include <string>

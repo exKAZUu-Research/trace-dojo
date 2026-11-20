@@ -352,6 +352,7 @@ export class Runtime implements TracedRuntime<Frame> {
     const pending: Store[] = [];
     let scanned = 0;
     const visit = (value: Value | Ptr | Store | undefined): void => {
+      scanned++;
       if (value instanceof Ptr) value = value.store;
       if (!(value instanceof Store) || reached.has(value)) return;
       reached.add(value);
@@ -370,7 +371,6 @@ export class Runtime implements TracedRuntime<Frame> {
     for (const global of this.globals) visit(global);
     while (pending.length > 0) {
       const store = pending.pop() as Store;
-      scanned++;
       if (store.liveness !== Liveness.Alive) continue;
       if (store instanceof CObject && store.turtle) turtles.add(store.turtle);
       visit(store.containingLocation);
