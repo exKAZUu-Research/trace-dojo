@@ -2278,6 +2278,41 @@ test.each([
 });
 
 test.each([
+  [
+    'public function m() {}',
+    'abstract protected function M(int $x);',
+    'Cannot make non abstract method A::M() abstract in class B',
+  ],
+  [
+    'public static function m() {}',
+    'abstract protected function m();',
+    'Cannot make static method A::m() non static in class B',
+  ],
+  [
+    'public function __construct() {}',
+    'abstract public function __construct();',
+    'Cannot make non abstract method A::__construct() abstract in class B',
+  ],
+])('checks inherited methods before abstract redeclarations can take effect: %s', (parent, child, message) => {
+  expect(
+    run(`<?php\nclass A { ${parent} }\nabstract class B extends A { ${child} }\necho "unreachable";`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: `\nFatal error: ${message} in /main.php on line 3\nStack trace:\n#0 {main}\n`,
+  });
+});
+
+test('an abstract method can reuse the name of a private inherited method', () => {
+  expect(
+    run(`<?php
+class A { private function m() {} }
+abstract class B extends A { abstract public function m(); }
+class C extends B { public function m() { return 2; } }
+echo (new C)->m();`)
+  ).toMatchObject({ kind: 'executed', stdout: '2' });
+});
+
+test.each([
   'function f(true $x=![1]){}',
   'class A{public true $x=![1];}',
   'function f(false $x=!![1]){}',

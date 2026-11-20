@@ -907,6 +907,11 @@ function checkOverride(cls: PhpClass, method: Method, parent: Method, reportTent
   const row = method.fn.kind === 'user' ? method.fn.decl.row : 0;
   if (method.cls === cls && !parent.cls.decl?.isAnonymous) checkFinalMethod(method, parent, row);
   checkMethodStaticness(method, parent, row);
+  if (method.isAbstract && !parent.isAbstract)
+    throw new FatalError(
+      `Cannot make non abstract method ${parent.cls.name}::${method.name}() abstract in class ${method.cls.name}`,
+      row
+    );
   if (visibilityRank(method.visibility) < visibilityRank(parent.visibility)) {
     throw new FatalError(
       `Access level to ${method.cls.name}::${method.name}() must be ${parent.visibility}${parent.visibility === 'protected' ? ' (as in class ' + parent.cls.name + ') or weaker' : ` (as in class ${parent.cls.name})`}`,
