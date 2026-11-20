@@ -125,7 +125,8 @@ function report(runtime: Runtime, error: unknown, inShutdown = false, release = 
 /** Releases an uncaught exception once it is reported or handled, as PHP does before shutdown. */
 function releaseUncaught(runtime: Runtime, object: PhpObject): string | undefined {
   if (runtime.thrown === object) runtime.thrown = undefined;
-  return guard(runtime, () => runtime.release([object], false, true));
+  // A destructor's exception here is a fatal error in PHP, which ends the release; shutdown frees what remains.
+  return guard(runtime, () => runtime.withNativeReleaseMode('shutdown', () => runtime.release([object], false, true)));
 }
 
 function invokeExceptionHandler(
@@ -146,7 +147,7 @@ function invokeExceptionHandler(
     asInternal(() => callValue(handler, [{ v: object }], undefined));
     // PHP releases the handled exception before restoring the handler, so its destructors' exceptions go uncaught.
     const failure = releaseUncaught(runtime, object);
-    if (runtime.exceptionHandler === undefined)
+    if (failure === undefined && runtime.exceptionHandler === undefined)
       runtime.exceptionHandler = runtime.replacedExceptionHandlers.pop() ?? null;
     return failure;
   } catch (error_) {
