@@ -10,7 +10,7 @@ import type {
   Stmt,
   TraitRule,
 } from './ast';
-import { formatFloat, formatFloatRepr, intToString } from './conversions';
+import { formatFloat, formatFloatRepr } from './conversions';
 import type { TypeDecl } from './values';
 
 export class UnexportableSyntax extends Error {}
@@ -262,7 +262,7 @@ function exportBinary(
 function tryFoldConcat(expr: Expr): string | undefined {
   if (expr.k === 'lit') {
     if (typeof expr.v === 'string') return expr.v;
-    if (typeof expr.v === 'bigint') return intToString(expr.v);
+    if (typeof expr.v === 'bigint') return expr.v.toString();
     if (typeof expr.v === 'number') return formatFloat(expr.v);
     return undefined;
   }

@@ -8,7 +8,7 @@ export function formatFloat(value: number, precision = 14): string {
   if (!Number.isFinite(value)) return value > 0 ? 'INF' : '-INF';
   if (value === 0) return Object.is(value, -0) ? '-0' : '0';
   const { digits, exponent } = trimmedSignificantDigits(value, precision);
-  return layoutDigits(value < 0, digits, exponent + 1, precision, 'E', false);
+  return layoutDigits(value < 0, digits, exponent + 1, precision, 'E');
 }
 
 /** Formats a float as `var_dump` and `json_encode` do, with the shortest digits that read back (`serialize_precision=-1`). */
@@ -17,7 +17,7 @@ export function formatFloatRepr(value: number, exponentChar = 'E', zeroFraction 
   if (!Number.isFinite(value)) return value > 0 ? 'INF' : '-INF';
   if (value === 0) return `${Object.is(value, -0) ? '-0' : '0'}${zeroFraction ? '.0' : ''}`;
   const [digits, exponent] = shortestDigits(value);
-  const text = layoutDigits(value < 0, digits, exponent + 1, 17, exponentChar, true);
+  const text = layoutDigits(value < 0, digits, exponent + 1, 17, exponentChar);
   if (zeroFraction && !/[.eEN]/.test(text)) return `${text}.0`;
   return text;
 }
@@ -35,8 +35,7 @@ function layoutDigits(
   digits: string,
   decpt: number,
   precision: number,
-  exponentChar: string,
-  _shortest: boolean
+  exponentChar: string
 ): string {
   const sign = negative ? '-' : '';
   if (decpt < -3 || decpt > precision) {
@@ -134,11 +133,6 @@ export function boolValue(value: Value): boolean {
   }
   if (value instanceof PhpArray) return value.size > 0;
   return true;
-}
-
-/** Converts an integer to its decimal text. */
-export function intToString(value: bigint): string {
-  return value.toString();
 }
 
 /** The names of the scalar types, as `gettype` and error messages write them. */
