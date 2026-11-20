@@ -206,7 +206,7 @@ function iteratorOperator(
           isLvalue: false,
           row,
           run: (frame) =>
-            holdAll(frame, [a, b], ([first, second]) => {
+            frame.unsequencedOperands(a, b, (first, second) => {
               const p = first as Ptr;
               const q = second as Ptr;
               if (p.store !== q.store) throw new CppRuntimeError('invalidIterator');
@@ -224,7 +224,7 @@ function iteratorOperator(
         isLvalue: false,
         row,
         run: (frame) =>
-          holdAll(frame, [it, n], ([location, distance]) =>
+          frame.unsequencedOperands(it, n, (location, distance) =>
             moveIterator(location as Ptr, sign * Number(distance), isReverse)
           ),
       };
@@ -278,7 +278,8 @@ function iteratorOperator(
         type: BOOL,
         isLvalue: false,
         row,
-        run: (frame) => holdAll(frame, [a, b], ([p, q]) => compareIterators(operator, p as Ptr, q as Ptr, isReverse)),
+        run: (frame) =>
+          frame.unsequencedOperands(a, b, (p, q) => compareIterators(operator, p as Ptr, q as Ptr, isReverse)),
       };
     }
     default: {

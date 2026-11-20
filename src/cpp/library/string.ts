@@ -863,7 +863,7 @@ function operandBytes(frame: Frame, operand: TextOperand, value: unknown): strin
 
 function concatenation(a: TextOperand, b: TextOperand, reused: number): Eval<StringValue> {
   return (frame) =>
-    holdAll(frame, [a.run, b.run], ([left, right]) => {
+    frame.unsequencedOperands(a.run, b.run, (left, right) => {
       const bytes = appendBytes(frame, operandBytes(frame, a, left), operandBytes(frame, b, right));
       const result = new StringValue(reused < 0 ? bytes : '');
       if (reused >= 0) {
@@ -962,7 +962,7 @@ function stringOperator(
         isLvalue: false,
         row,
         run: (frame) =>
-          holdAll(frame, [a.run, b.run], ([left, right]) =>
+          frame.unsequencedOperands(a.run, b.run, (left, right) =>
             test(operandBytes(frame, a, left), operandBytes(frame, b, right)) ? 1 : 0
           ),
       };

@@ -51,6 +51,8 @@ export class Frame implements TracedFrame {
   /** Values the frame holds outside its variables, such as an exception a handler runs for. */
   readonly pending: (Value | Ptr)[] = [];
   readonly evaluationRoots: Value[] = [];
+  // A called function's body is indeterminately sequenced with the caller's other operand evaluations.
+  private operandAccesses?: OperandAccesses;
   /** The slot of the local variable that a `return` returned without copying (the named return value). */
   nrvoSlot: number | undefined;
 
@@ -75,6 +77,54 @@ export class Frame implements TracedFrame {
     const value = store instanceof Box ? store.value : (store as Store).get(this.self?.index ?? 0);
     return value instanceof CObject ? value : undefined;
   }
+
+  unsequencedOperands<T>(
+    first: Eval<unknown>,
+    second: Eval<unknown>,
+    use: (firstValue: unknown, secondValue: unknown) => T
+  ): T {
+    const parent = this.operandAccesses;
+    const scope = new OperandAccesses(parent);
+    this.operandAccesses = scope;
+    try {
+      return holdAll(
+        this,
+        [
+          first,
+          (frame) => {
+            scope.inSecondOperand = true;
+            return second(frame);
+          },
+        ],
+        ([a, b]) => {
+          this.operandAccesses = parent;
+          return use(a, b);
+        }
+      );
+    } finally {
+      this.operandAccesses = parent;
+    }
+  }
+
+  readScalar(location: Ptr, size: number): Value {
+    this.trackScalar(location, size, false);
+    return location.read();
+  }
+
+  writeScalar(location: Ptr, size: number, value: Value): void {
+    this.trackScalar(location, size, true);
+    location.write(value);
+  }
+
+  private trackScalar(location: Ptr, size: number, write: boolean): void {
+    if (!this.operandAccesses) return;
+    const { store, index } = location.byteAddress(size);
+    if (!store) return;
+    for (let scope: OperandAccesses | undefined = this.operandAccesses; scope; scope = scope.parent) {
+      this.runtime.spend();
+      scope.access(store, index, write);
+    }
+  }
 }
 
 /**
@@ -94,6 +144,25 @@ export function holdAll<T>(frame: Frame, runs: readonly Eval<unknown>[], use: (v
     return use(values);
   } finally {
     roots.length = mark;
+  }
+}
+
+class OperandAccesses {
+  inSecondOperand = false;
+  private readonly first = new Map<Store, Map<number, boolean>>();
+
+  constructor(readonly parent: OperandAccesses | undefined) {}
+
+  access(store: Store, index: number, write: boolean): void {
+    const locations = this.first.get(store);
+    const earlier = locations?.get(index);
+    if (this.inSecondOperand) {
+      if (earlier !== undefined && (earlier || write)) throw new CppRuntimeError('unsequencedAccess');
+    } else if (locations) {
+      if (write || earlier === undefined) locations.set(index, write);
+    } else {
+      this.first.set(store, new Map([[index, write]]));
+    }
   }
 }
 

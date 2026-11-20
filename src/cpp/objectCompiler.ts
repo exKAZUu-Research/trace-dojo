@@ -36,6 +36,7 @@ import {
   nonReference,
   pointerTo,
   sameParameters,
+  sizeOf,
   type Type,
   typeName,
   unqualified,
@@ -395,6 +396,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
         run: (frame) => new Ptr((run(frame) as Ptr).read() as ArrayStore, 0),
       };
     }
+    const size = type.kind === 'class' ? 0 : sizeOf(type);
     return {
       type: type.kind === 'class' ? type : unqualified(type),
       isLvalue: false,
@@ -404,7 +406,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       constantStringLength: expr.constantStringLength,
       memberConstant: expr.memberConstant,
       row: expr.row,
-      run: (frame) => (run(frame) as Ptr).read(),
+      run: size === 0 ? (frame) => (run(frame) as Ptr).read() : (frame) => frame.readScalar(run(frame) as Ptr, size),
       onlyCalls: expr.onlyCalls,
     };
   }

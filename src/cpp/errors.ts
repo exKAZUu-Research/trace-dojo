@@ -8,6 +8,7 @@ const MESSAGES = {
   deadVariable: '有効期間が終わった変数（またはオブジェクト）を読み書きしました。',
   useAfterDelete: 'delete で解放したオブジェクトを読み書きしました。',
   uninitialized: '値を入れていない変数（または要素）の値を読みました。',
+  unsequencedAccess: '実行順序が決まっていない式で、同じ場所の値を書き換え、読み書きしました。',
   divisionByZero: '0 で割りました。',
   shiftCount: 'シフトする量が、負の数か、型のビット数以上です。',
   floatToInt: '浮動小数点数を整数にした値が、整数の型の範囲を超えています。',

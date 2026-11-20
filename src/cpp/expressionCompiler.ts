@@ -711,7 +711,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       type: resultType,
       isLvalue: false,
       row,
-      run: (frame) => operation(aRun(frame) as number, bRun(frame) as number),
+      run: (frame) =>
+        frame.unsequencedOperands(aRun, bRun, (first, second) => operation(first as number, second as number)),
       memberConstant: mapMemberConstants([a, b], ([first, second]) => operation(first, second)),
     };
     const knownA = a.constant ?? a.foldedValue;
@@ -738,7 +739,9 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
    */
   private contract(operator: string, expr: Expr, a: Expr, b: Expr, isFloat: boolean): void {
     if (operator === '*') {
-      this.floatingProducts.set(expr.run, (frame) => [a.run(frame) as number, b.run(frame) as number]);
+      this.floatingProducts.set(expr.run, (frame) =>
+        frame.unsequencedOperands(a.run, b.run, (first, second) => [first as number, second as number])
+      );
       return;
     }
     if (operator !== '+' && operator !== '-') return;
@@ -747,17 +750,18 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const second = this.floatingProducts.get(b.run);
     if (first) {
       const addend = b.run as Eval<number>;
-      expr.run = (frame) => {
-        const [left, right] = first(frame);
-        return fma(left, right, sign * addend(frame), isFloat);
-      };
+      expr.run = (frame) =>
+        frame.unsequencedOperands(first, addend, (factors, value) => {
+          const [left, right] = factors as FloatingFactors;
+          return fma(left, right, sign * (value as number), isFloat);
+        });
     } else if (second) {
       const addend = a.run as Eval<number>;
-      expr.run = (frame) => {
-        const value = addend(frame);
-        const [left, right] = second(frame);
-        return fma(sign * left, right, value, isFloat);
-      };
+      expr.run = (frame) =>
+        frame.unsequencedOperands(addend, second, (value, factors) => {
+          const [left, right] = factors as FloatingFactors;
+          return fma(sign * left, right, value as number, isFloat);
+        });
     }
   }
 
@@ -819,7 +823,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         isLvalue: false,
         row,
         run: (frame) =>
-          holdAll(frame, [a, b], ([first, second]) => {
+          frame.unsequencedOperands(a, b, (first, second) => {
             const p = first as Ptr;
             const q = second as Ptr;
             if (!p.sharesRange(q)) throw new CppRuntimeError('pointerDifference');
@@ -827,24 +831,28 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
           }),
       };
     }
-    if (COMPARISONS.has(operator) && (isPointerLike(lt) || isPointerLike(rt))) {
-      const lnull = lt.kind === 'nullptr' || left.isNullConstant;
-      const rnull = rt.kind === 'nullptr' || right.isNullConstant;
-      const common = commonPointerType(left, right);
-      if (!common && !(lnull && rnull)) return this.error(row, `${typeName(lt)} と ${typeName(rt)} は比べられません。`);
-      if (operator !== '==' && operator !== '!=' && (lnull || rnull)) {
-        return this.error(row, `ポインタと nullptr の大小は比べられません。`);
-      }
-      const a = (common ? this.convert(left, common, row) : left).run;
-      const b = (common ? this.convert(right, common, row) : right).run;
-      return {
-        type: BOOL,
-        isLvalue: false,
-        row,
-        run: (frame) => holdAll(frame, [a, b], ([p, q]) => comparePointers(operator, asPointer(p), asPointer(q))),
-      };
-    }
+    if (COMPARISONS.has(operator) && (isPointerLike(lt) || isPointerLike(rt)))
+      return this.pointerComparison(operator, left, right, row);
     return this.error(row, `演算子 ${operator} は ${typeName(lt)} と ${typeName(rt)} には使えません。`);
+  }
+
+  private pointerComparison(operator: string, left: Expr, right: Expr, row: number): Expr {
+    const leftNull = left.type.kind === 'nullptr' || left.isNullConstant;
+    const rightNull = right.type.kind === 'nullptr' || right.isNullConstant;
+    const common = commonPointerType(left, right);
+    if (!common && !(leftNull && rightNull))
+      return this.error(row, `${typeName(left.type)} と ${typeName(right.type)} は比べられません。`);
+    if (operator !== '==' && operator !== '!=' && (leftNull || rightNull)) {
+      return this.error(row, `ポインタと nullptr の大小は比べられません。`);
+    }
+    const a = (common ? this.convert(left, common, row) : left).run;
+    const b = (common ? this.convert(right, common, row) : right).run;
+    return {
+      type: BOOL,
+      isLvalue: false,
+      row,
+      run: (frame) => frame.unsequencedOperands(a, b, (p, q) => comparePointers(operator, asPointer(p), asPointer(q))),
+    };
   }
 
   /** A pointer moved by a number of elements, which must stay within its array or one past its end. */
@@ -861,7 +869,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       constantPointee: offsetConstantLocation(pointer.constantPointee, displacement.constant, sign),
       row,
       run: (frame) =>
-        holdAll(frame, [p, n], ([location, distance]) => {
+        frame.unsequencedOperands(p, n, (location, distance) => {
           const delta = distance as number | bigint;
           return (location as Ptr).offset(sign === 1 ? delta : -delta);
         }),
@@ -947,6 +955,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     return this.increment(target, operator, isPrefix, node.row);
   }
 
+  // code-gauge-allow functionNcss 34 -- The result category and shared update depend on the same operand.
   increment(target: Expr, operator: '++' | '--', isPrefix: boolean, row: number): Expr {
     const libraryResult = this.libraryOperator(isPrefix ? operator : `x${operator}`, [target], row);
     if (libraryResult) return libraryResult;
@@ -974,6 +983,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       return this.error(row, `${typeName(type)} には ${operator} を使えません。`);
     }
     const location = target.run;
+    const size = sizeOf(type);
     if (isPrefix) {
       return {
         type,
@@ -981,7 +991,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         row,
         run: (frame) => {
           const place = location(frame) as Ptr;
-          place.write(step(place.read()));
+          frame.writeScalar(place, size, step(frame.readScalar(place, size)));
           return place;
         },
       };
@@ -992,8 +1002,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       row,
       run: (frame) => {
         const place = location(frame) as Ptr;
-        const old = place.read();
-        place.write(step(old));
+        const old = frame.readScalar(place, size);
+        frame.writeScalar(place, size, step(old));
         return old;
       },
     };
@@ -1073,6 +1083,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   }
 
   /** Compiles `target = source` or a compound assignment. */
+  // code-gauge-allow functionNcss 36 -- Both assignments share storage tracking and preserve C++ operand order.
   assign(operator: string, target: Expr, source: Expr, row: number): Expr {
     if (target.type.kind === 'class') {
       const libraryResult = this.libraryOperator(operator, [target, source], row);
@@ -1082,6 +1093,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     }
     this.checkAssignable(target, row, operator);
     const location = target.run;
+    const size = sizeOf(target.type);
     if (operator === '=') {
       if (target.type.kind === 'array') return this.error(row, '配列にはまとめて代入できません。');
       const value = this.convert(source, unqualified(target.type), row).run;
@@ -1093,7 +1105,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         run: (frame) =>
           holdAll(frame, [value, location], ([result, destination]) => {
             const place = destination as Ptr;
-            place.write(result as Value);
+            frame.writeScalar(place, size, result as Value);
             return place;
           }),
       };
@@ -1123,7 +1135,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         const evaluated = factors?.(frame).map((factor) => () => factor) ?? [right.run];
         return holdAll(frame, [...evaluated, location], (values) => {
           const place = values.at(-1) as Ptr;
-          holdValues(frame, values as Value[], () => place.write(value(frame) as Value));
+          holdValues(frame, values as Value[], () => frame.writeScalar(place, size, value(frame) as Value));
           return place;
         });
       },
@@ -1407,9 +1419,10 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   }
 
   compareObjects(left: Expr, right: Expr, compare: (first: Value, second: Value) => boolean): Eval<number> {
-    const operands = [this.objectOf(left), this.objectOf(right)];
+    const first = this.objectOf(left);
+    const second = this.objectOf(right);
     return (frame) =>
-      holdAll(frame, operands, ([first, second]) => (compare((first as Ptr).read(), (second as Ptr).read()) ? 1 : 0));
+      frame.unsequencedOperands(first, second, (a, b) => (compare((a as Ptr).read(), (b as Ptr).read()) ? 1 : 0));
   }
 
   // Conversions -----------------------------------------------------------------------------------------------------
