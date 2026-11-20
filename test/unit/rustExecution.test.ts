@@ -851,6 +851,11 @@ const SET: Flag = {
     flag
 };
 const YES: (bool, bool) = if true { (true, false) } else { (false, false) };
+struct S { pair: (bool, bool) }
+const STRUCT_VALUE: (bool, bool) = {
+    let S { pair: (first, second) } = S { pair: (false, true) };
+    (first, second)
+};
 fn main() {
     match Flag::Set(true) {
         SET => println!("set"),
@@ -861,10 +866,14 @@ fn main() {
         YES => println!("yes"),
         (true, true) | (false, _) => println!("no"),
     }
+    match (false, true) {
+        STRUCT_VALUE => println!("struct"),
+        (false, false) | (true, _) => println!("no"),
+    }
 }`;
   expect(executeProgram('rust', program)).toMatchObject({
     kind: 'executed',
-    stdout: 'set\nyes\n',
+    stdout: 'set\nyes\nstruct\n',
     uncaughtException: undefined,
   });
 });

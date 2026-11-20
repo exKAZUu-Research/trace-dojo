@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 405 -- Shares Rust constant propagation between diagnostics and pattern coverage.
+// code-gauge-allow-file fileNcss 416 -- Shares Rust constant propagation between diagnostics and pattern coverage.
 
 import type { Annotations, LocalVar, PathRes } from './annotations';
 import type { Block, Condition, Expr, MatchArm, Pattern, Stmt } from './ast';
@@ -83,10 +83,15 @@ export class ConstLint {
     if (pattern.kind === 'binding') {
       const local = this.annotations.bindings.get(pattern);
       if (local) this.setKnown(local, value);
+      if (this.patternEvaluation && pattern.sub) this.bind(pattern.sub, value);
     } else if (pattern.kind === 'tuple' || pattern.kind === 'tupleStruct') {
       for (const [index, elem] of pattern.elems.entries()) {
-        this.bind(elem, typeof value === 'object' ? value.fields.get(String(index)) : undefined);
+        this.bind(elem, knownField(value, String(index)));
       }
+    } else if (this.patternEvaluation && pattern.kind === 'struct') {
+      for (const { name, pattern: field } of pattern.fields) this.bind(field, knownField(value, name));
+    } else if (this.patternEvaluation && pattern.kind === 'ref') {
+      this.bind(pattern.pattern, value);
     } else {
       for (const local of patternBindings(pattern, this.annotations)) this.setKnown(local, undefined);
     }
@@ -157,7 +162,7 @@ export class ConstLint {
       }
       case 'field': {
         const operand = this.expr(expr.operand);
-        return typeof operand === 'object' ? operand.fields.get(expr.name) : undefined;
+        return knownField(operand, expr.name);
       }
       case 'block': {
         return this.block(expr);
@@ -495,6 +500,10 @@ export class ConstLint {
     }
     return value;
   }
+}
+
+function knownField(value: Known | undefined, name: string): Known | undefined {
+  return typeof value === 'object' ? value.fields.get(name) : undefined;
 }
 
 function intTypeOf(type: Type | undefined): IntName | undefined {
