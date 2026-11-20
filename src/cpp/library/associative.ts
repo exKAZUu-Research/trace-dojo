@@ -42,7 +42,6 @@ import {
   addRangeMembers,
   associativeInitializerList,
   constructPair,
-  copyEntries,
   emplacementCall,
   type EntryTable,
   insertCopy,
@@ -50,6 +49,7 @@ import {
   pairResult,
 } from './emplacement';
 import { positionOf, randomAccessIterator, rangePositions } from './iterators';
+import { OrderedTree } from './orderedTree';
 import type { Library } from './registry';
 import { elementConstruction } from './sequences';
 import { addMethod, constRef, generic, native, nativeConstructor, type NativeOptions, throwLibrary } from './support';
@@ -384,14 +384,16 @@ function orderTest(
 
 /** The entries of `std::map`, `std::multimap`, `std::set`, or `std::multiset`, kept in key order. */
 export class OrderedValue extends MapValue {
-  constructor(
-    public entries: Value[],
-    entryType: Type
-  ) {
+  constructor(entryType: Type) {
     super(entryType);
   }
 
+  private tree = new OrderedTree();
   private readonly nodes = new NodePositions(this);
+
+  get entries(): readonly Value[] {
+    return this.tree.values;
+  }
 
   override location(index: number): Ptr {
     if (index === this.length) throw new CppRuntimeError('invalidIterator');
@@ -407,19 +409,41 @@ export class OrderedValue extends MapValue {
 
   splice(from: number, remove: number, ...entries: Value[]): Value[] {
     this.nodes.splice(from, remove, entries.length);
-    return this.entries.splice(from, remove, ...entries);
+    return this.tree.splice(from, remove, entries);
   }
 
-  replace(entries: Value[]): Value[] {
-    const previous = this.entries;
-    this.nodes.splice(0, previous.length, entries.length);
-    this.entries = entries;
-    return previous;
+  clear(): Value[] {
+    this.nodes.splice(0, this.length, 0);
+    return this.tree.takeAll();
+  }
+
+  assignFrom(frame: Frame, source: OrderedValue, operations: ElementOperations): void {
+    if (this === source) return;
+    frame.runtime.spend(Math.ceil((this.length + source.length) / 64));
+    const mark = frame.pending.length;
+    try {
+      this.tree.assignFrom(
+        source.tree,
+        {
+          copy: (value) => {
+            frame.runtime.reserve(1);
+            const entry = operations.copy(frame, value);
+            frame.pending.push(entry);
+            return entry;
+          },
+          assign: (target, value) => operations.assign(frame, target, value),
+          destroy: (value) => operations.destroy?.(frame, value),
+        },
+        (order) => this.nodes.reorder(order)
+      );
+    } finally {
+      frame.pending.length = mark;
+    }
   }
 
   swap(other: OrderedValue): void {
     this.nodes.swap(other.nodes);
-    [this.entries, other.entries] = [other.entries, this.entries];
+    [this.tree, other.tree] = [other.tree, this.tree];
   }
 
   get length(): number {
@@ -434,7 +458,7 @@ export class OrderedValue extends MapValue {
 
   set(index: number, value: Value): void {
     this.checkAlive();
-    this.entries[index] = value;
+    this.tree.set(index, value);
   }
 
   children(): Iterable<Value> {
@@ -556,7 +580,7 @@ export function orderedClass(
     return mappedOps;
   };
   const keyOf = isMap ? (entry: Value): Value => (entry as CObject).values[0] : (entry: Value): Value => entry;
-  const make = (entries: Value[]): OrderedValue => new OrderedValue(entries, entryType);
+  const make = (): OrderedValue => new OrderedValue(entryType);
   /** The first position whose key is not less than `key` (`upper` false) or greater than it (`upper` true). */
   const bound = (self: OrderedValue, key: Value, upper: boolean): number => {
     let low = 0;
@@ -594,7 +618,7 @@ export function orderedClass(
     destroyElements(frame, entries, ops().destroy);
   };
   const table: EntryTable<OrderedValue> = {
-    make: () => make([]),
+    make,
     keyOf,
     lookup: (self, key) => {
       const at = isMulti ? -1 : find(self, key);
@@ -718,29 +742,23 @@ export function orderedClass(
     },
     constructingMembers:
       isMap && !isMulti ? ['emplace', 'emplace_hint', 'try_emplace', 'insert_or_assign'] : ['emplace', 'emplace_hint'],
-    ownedTypes: [entryType],
+    ownedTypes: valueType ? [unqualified(keyType), valueType] : [keyType],
     inlineElementType: entryType,
-    elementUseOnAssignment: 'copy',
+    elementUseOnAssignment: 'assign-and-copy',
   };
   cls.operations = {
     copy: (frame, source) => {
-      const { entries } = source as OrderedValue;
-      frame.runtime.reserve(entries.length);
-      return make(copyEntries(frame, entries, ops()));
+      const target = make();
+      target.assignFrom(frame, source as OrderedValue, ops());
+      return target;
     },
     assign: (frame, target, source) => {
-      const to = target as OrderedValue;
-      const from = source as OrderedValue;
-      if (to === from) return;
-      const old = to.entries;
-      frame.runtime.reserve(from.entries.length);
-      to.replace(copyEntries(frame, from.entries, ops()));
-      destroyAll(frame, old);
+      (target as OrderedValue).assignFrom(frame, source as OrderedValue, ops());
     },
-    destroy: (frame, value) => destroyAll(frame, (value as OrderedValue).entries),
+    destroy: (frame, value) => destroyAll(frame, (value as OrderedValue).clear()),
   };
   cls.constructors = [
-    nativeConstructor(cls, [], () => make([]), {
+    nativeConstructor(cls, [], make, {
       uses: (row) => compiler.requireLibraryObjectUse(entryType, 'destroy', row),
     }),
   ];
@@ -767,7 +785,7 @@ export function orderedClass(
   method('max_size', [], SIZE_T, () => treeMaxSize(entryType), { isConst: true });
   method('empty', [], BOOL, (self) => (self.entries.length === 0 ? 1 : 0), { isConst: true });
   method('clear', [], VOID, (self, _args, frame) => {
-    const old = self.replace([]);
+    const old = self.clear();
     destroyAll(frame, old);
   });
   for (const isConst of [false, true]) {

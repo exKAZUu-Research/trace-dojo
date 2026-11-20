@@ -136,28 +136,42 @@ function linkedMath(
       if (nan !== undefined) return nan;
     }
     const numbers = operands.map(asNumber);
+    if (nanResults && numbers.some(Number.isNaN)) {
+      const measured = measuredNaN(nanResults, operands, numbers);
+      if (measured !== undefined) return measured;
+    }
     const result = run(numbers, isFloat);
-    if (Number.isNaN(result) && nanResults) return restoreMathNaN(nanResults, operands, numbers);
     return isFloat ? Math.fround(result) : result;
   };
 }
 
-// The SDK probe uses base five for the input pattern and encodes the result's source, sign and quiet bit.
-function restoreMathNaN(results: string, values: unknown[], numbers: number[]): FloatingValue {
+// Each decimal digit is the input's NaN or special-number category in the SDK probe.
+function measuredNaN(results: string, values: unknown[], numbers: number[]): FloatingValue | undefined {
   let pattern = 0;
   for (let index = numbers.length - 1; index >= 0; index--) {
-    const raw = values[index];
-    const digit =
-      raw instanceof FloatNaN ? (raw.isSignaling ? 3 : 1) + Number(raw.negative) : Number.isNaN(numbers[index]) ? 1 : 0;
-    pattern = pattern * 5 + digit;
+    pattern = pattern * 10 + mathOperandCategory(values[index], numbers[index]);
   }
-  const rule = (results.codePointAt(pattern) ?? 0) - 65;
-  if (rule < 0) return results[pattern] === '1' ? NEGATIVE_NAN : Number.NaN;
+  const measured = results[pattern];
+  if (!measured || measured === '0') return;
+  if (measured === '1') return NEGATIVE_NAN;
+  if (measured === 'N') return Number.NaN;
+  const rule = (measured.codePointAt(0) ?? 0) - 65;
   const source = values[rule >> 2];
   const negative = (rule & 2) !== 0;
   if (!(source instanceof FloatNaN)) return negative ? NEGATIVE_NAN : Number.NaN;
   const result = source.withSign(negative);
   return (rule & 1) !== 0 ? result.quiet() : result;
+}
+
+function mathOperandCategory(raw: unknown, value: number): number {
+  if (raw instanceof FloatNaN) return (raw.isSignaling ? 3 : 1) + Number(raw.negative);
+  if (Number.isNaN(value)) return 1;
+  if (value === 0) return 5;
+  if (value === 1) return 6;
+  if (value === -1) return 7;
+  if (value === Number.POSITIVE_INFINITY) return 8;
+  if (value === Number.NEGATIVE_INFINITY) return 9;
+  return 0;
 }
 
 function integerAbs(value: unknown, type: IntType): number | bigint {

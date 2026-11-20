@@ -12201,194 +12201,194 @@
   },
   "mathNaNResults": {
     "acos": {
-      "double": "0DBDB",
-      "float": "0BDBD",
-      "ldouble": "0DBDB"
+      "double": "0DBDB00000",
+      "float": "0BDBD00000",
+      "ldouble": "0DBDB00000"
     },
     "acosh": {
-      "double": "0BDBD",
-      "float": "0BDBD",
-      "ldouble": "0BDBD"
+      "double": "0BDBD00000",
+      "float": "0BDBD00000",
+      "ldouble": "0BDBD00000"
     },
     "asin": {
-      "double": "0BDBD",
-      "float": "0BDBD",
-      "ldouble": "0BDBD"
+      "double": "0BDBD00000",
+      "float": "0BDBD00000",
+      "ldouble": "0BDBD00000"
     },
     "asinh": {
-      "double": "0BDBD",
-      "float": "0BDBD",
-      "ldouble": "0BDBD"
+      "double": "0BDBD00000",
+      "float": "0BDBD00000",
+      "ldouble": "0BDBD00000"
     },
     "atan": {
-      "double": "0BDBD",
-      "float": "0BDBD",
-      "ldouble": "0BDBD"
+      "double": "0BDBD00000",
+      "float": "0BDBD00000",
+      "ldouble": "0BDBD00000"
     },
     "atan2": {
-      "double": "0BDBDFBDBDHBDBDFFFBDHHHBD",
-      "float": "0BDBDFBDBDHBDBDFFFBDHHHBD",
-      "ldouble": "0BDBDFBDBDHBDBDFFFBDHHHBD"
+      "double": "0BDBD00000FBDBDFFFFFHBDBDHHHHHFFFBDFFFFFHHHBDHHHHH0BDBD000000BDBD000000BDBD000000BDBD000000BDBD00000",
+      "float": "0BDBD00000FBDBDFFFFFHBDBDHHHHHFFFBDFFFFFHHHBDHHHHH0BDBD000000BDBD000000BDBD000000BDBD000000BDBD00000",
+      "ldouble": "0BDBD00000FBDBDFFFFFHBDBDHHHHHFFFBDFFFFFHHHBDHHHHH0BDBD000000BDBD000000BDBD000000BDBD000000BDBD00000"
     },
     "atanh": {
-      "double": "0BDBD",
-      "float": "0BDBD",
-      "ldouble": "0BDBD"
+      "double": "0BDBD00000",
+      "float": "0BDBD00000",
+      "ldouble": "0BDBD00000"
     },
     "cbrt": {
-      "double": "0BDAC",
-      "float": "0BDBD",
-      "ldouble": "0BDAC"
+      "double": "0BDAC00000",
+      "float": "0BDBD00000",
+      "ldouble": "0BDAC00000"
     },
     "ceil": {
-      "double": "0BDBD",
-      "float": "0BDBD",
-      "ldouble": "0BDBD"
+      "double": "0BDBD00000",
+      "float": "0BDBD00000",
+      "ldouble": "0BDBD00000"
     },
     "cos": {
-      "double": "0BBBB",
-      "float": "0BBBB",
-      "ldouble": "0BBBB"
+      "double": "0BBBB00000",
+      "float": "0BBBB00000",
+      "ldouble": "0BBBB00000"
     },
     "cosh": {
-      "double": "0BBBB",
-      "float": "0BBBB",
-      "ldouble": "0BBBB"
+      "double": "0BBBB00000",
+      "float": "0BBBB00000",
+      "ldouble": "0BBBB00000"
     },
     "exp": {
-      "double": "0BDBD",
-      "float": "0BDBD",
-      "ldouble": "0BDBD"
+      "double": "0BDBD00000",
+      "float": "0BDBD00000",
+      "ldouble": "0BDBD00000"
     },
     "exp2": {
-      "double": "0BDBD",
-      "float": "0BDBD",
-      "ldouble": "0BDBD"
+      "double": "0BDBD00000",
+      "float": "0BDBD00000",
+      "ldouble": "0BDBD00000"
     },
     "expm1": {
-      "double": "0BDBD",
-      "float": "0BDBD",
-      "ldouble": "0BDBD"
+      "double": "0BDBD00000",
+      "float": "0BDBD00000",
+      "ldouble": "0BDBD00000"
     },
     "fabs": {
-      "double": "0BBAA",
-      "float": "0BBAA",
-      "ldouble": "0BBAA"
+      "double": "0BBAA00000",
+      "float": "0BBAA00000",
+      "ldouble": "0BBAA00000"
     },
     "fdim": {
-      "double": "0BDBDFBDBDHBDBDFFFBDHHHBD",
-      "float": "0BDBDFBDBDHBDBDFFFBDHHHBD",
-      "ldouble": "0BDBDFBDBDHBDBDFFFBDHHHBD"
+      "double": "0BDBD00000FBDBDFFFFFHBDBDHHHHHFFFBDFFFFFHHHBDHHHHH0BDBD000000BDBD000000BDBD000000BDBD000000BDBD00000",
+      "float": "0BDBD00000FBDBDFFFFFHBDBDHHHHHFFFBDFFFFFHHHBDHHHHH0BDBD000000BDBD000000BDBD000000BDBD000000BDBD00000",
+      "ldouble": "0BDBD00000FBDBDFFFFFHBDBDHHHHHFFFBDFFFFFHHHBDHHHHH0BDBD000000BDBD000000BDBD000000BDBD000000BDBD00000"
     },
     "floor": {
-      "double": "0BDBD",
-      "float": "0BDBD",
-      "ldouble": "0BDBD"
+      "double": "0BDBD00000",
+      "float": "0BDBD00000",
+      "ldouble": "0BDBD00000"
     },
     "fmax": {
-      "double": "000BD0BDBD0BDBDFFFBDHHHBD",
-      "float": "000BD0BDBD0BDBDFFFBDHHHBD",
-      "ldouble": "000BD0BDBD0BDBDFFFBDHHHBD"
+      "double": "000BD000000BDBD000000BDBD00000FFFBDFFFFFHHHBDHHHHH000BD00000000BD00000000BD00000000BD00000000BD00000",
+      "float": "000BD000000BDBD000000BDBD00000FFFBDFFFFFHHHBDHHHHH000BD00000000BD00000000BD00000000BD00000000BD00000",
+      "ldouble": "000BD000000BDBD000000BDBD00000FFFBDFFFFFHHHBDHHHHH000BD00000000BD00000000BD00000000BD00000000BD00000"
     },
     "fmin": {
-      "double": "000BD0BDBD0BDBDFFFBDHHHBD",
-      "float": "000BD0BDBD0BDBDFFFBDHHHBD",
-      "ldouble": "000BD0BDBD0BDBDFFFBDHHHBD"
+      "double": "000BD000000BDBD000000BDBD00000FFFBDFFFFFHHHBDHHHHH000BD00000000BD00000000BD00000000BD00000000BD00000",
+      "float": "000BD000000BDBD000000BDBD00000FFFBDFFFFFHHHBDHHHHH000BD00000000BD00000000BD00000000BD00000000BD00000",
+      "ldouble": "000BD000000BDBD000000BDBD00000FFFBDFFFFFHHHBDHHHHH000BD00000000BD00000000BD00000000BD00000000BD00000"
     },
     "fmod": {
-      "double": "0BDBDFBDBDHBDBDFFFBDHHHBD",
-      "float": "0BDBDFBDBDHBDBDFFFBDHHHBD",
-      "ldouble": "0BDBDFBDBDHBDBDFFFBDHHHBD"
+      "double": "0BDBD00000FBDBDFFFFFHBDBDHHHHHFFFBDFFFFFHHHBDHHHHH0BDBD000000BDBD000000BDBD000000BDBD000000BDBD00000",
+      "float": "0BDBD00000FBDBDFFFFFHBDBDHHHHHFFFBDFFFFFHHHBDHHHHH0BDBD000000BDBD000000BDBD000000BDBD000000BDBD00000",
+      "ldouble": "0BDBD00000FBDBDFFFFFHBDBDHHHHHFFFBDFFFFFHHHBDHHHHH0BDBD000000BDBD000000BDBD000000BDBD000000BDBD00000"
     },
     "hypot": {
-      "double": "0BBBBFBBBBFBBBBFFFBBFFFBB",
-      "float": "0BDBDFBDBDHBDBDFBDBDHBDBD",
-      "ldouble": "0BBBBFBBBBFBBBBFFFBBFFFBB"
+      "double": "0BBBB00000FBBBBFFF00FBBBBFFF00FFFBBFFFFFFFFBBFFFFF0BBBB000000BBBB000000BBBB00000000BB00000000BB00000",
+      "float": "0BDBD00000FBDBDFFF00HBDBDHHH00FBDBDFFF00HBDBDHHH000BDBD000000BDBD000000BDBD0000000000000000000000000",
+      "ldouble": "0BBBB00000FBBBBFFF00FBBBBFFF00FFFBBFFFFFFFFBBFFFFF0BBBB000000BBBB000000BBBB00000000BB00000000BB00000"
     },
     "log": {
-      "double": "0BDAC",
-      "float": "0BDAC",
-      "ldouble": "0BDAC"
+      "double": "0BDAC00000",
+      "float": "0BDAC00000",
+      "ldouble": "0BDAC00000"
     },
     "log10": {
-      "double": "0BDAC",
-      "float": "0BDAC",
-      "ldouble": "0BDAC"
+      "double": "0BDAC00000",
+      "float": "0BDAC00000",
+      "ldouble": "0BDAC00000"
     },
     "log1p": {
-      "double": "0BDAC",
-      "float": "0BDAC",
-      "ldouble": "0BDAC"
+      "double": "0BDAC00000",
+      "float": "0BDAC00000",
+      "ldouble": "0BDAC00000"
     },
     "log2": {
-      "double": "0BDAC",
-      "float": "0BDAC",
-      "ldouble": "0BDAC"
+      "double": "0BDAC00000",
+      "float": "0BDAC00000",
+      "ldouble": "0BDAC00000"
     },
     "logb": {
-      "double": "0BDBD",
-      "float": "0BDBD",
-      "ldouble": "0BDBD"
+      "double": "0BDBD00000",
+      "float": "0BDBD00000",
+      "ldouble": "0BDBD00000"
     },
     "nearbyint": {
-      "double": "0BDBD",
-      "float": "0BDBD",
-      "ldouble": "0BDBD"
+      "double": "0BDBD00000",
+      "float": "0BDBD00000",
+      "ldouble": "0BDBD00000"
     },
     "nextafter": {
-      "double": "0BDBDFBDBDHBDBDFFFBDHHHBD",
-      "float": "0BDBDFBDBDHBDBDFFFBDHHHBD",
-      "ldouble": "0BDBDFBDBDHBDBDFFFBDHHHBD"
+      "double": "0BDBD00000FBDBDFFFFFHBDBDHHHHHFFFBDFFFFFHHHBDHHHHH0BDBD000000BDBD000000BDBD000000BDBD000000BDBD00000",
+      "float": "0BDBD00000FBDBDFFFFFHBDBDHHHHHFFFBDFFFFFHHHBDHHHHH0BDBD000000BDBD000000BDBD000000BDBD000000BDBD00000",
+      "ldouble": "0BDBD00000FBDBDFFFFFHBDBDHHHHHFFFBDFFFFFHHHBDHHHHH0BDBD000000BDBD000000BDBD000000BDBD000000BDBD00000"
     },
     "pow": {
-      "double": "0BDBDFFFFFHHHHHFFFFFHHHHH",
-      "float": "0BDBDFFFFFHHHHHFFFFFHHHHH",
-      "ldouble": "0BDBDFFFFFHHHHHFFFFFHHHHH"
+      "double": "0BDBD00000FFFFFF0FFFHHHHHH0HHHFFFFFF0FFFHHHHHH0HHH00000000000BDBD000000BDBD000000BDBD000000BDBD00000",
+      "float": "0BDBD00000FFFFFF0FFFHHHHHH0HHHFFFFFF0FFFHHHHHH0HHH00000000000BDBD000000BDBD000000BDBD000000BDBD00000",
+      "ldouble": "0BDBD00000FFFFFF0FFFHHHHHH0HHHFFFFFF0FFFHHHHHH0HHH00000000000BDBD000000BDBD000000BDBD000000BDBD00000"
     },
     "remainder": {
-      "double": "0BDBDFBDBDHBDBDFFFBDHHHBD",
-      "float": "0BDACFBDACHBDACEBDACGBDAC",
-      "ldouble": "0BDBDFBDBDHBDBDFFFBDHHHBD"
+      "double": "0BDBD00000FBDBDFFFFFHBDBDHHHHHFFFBDFFFFFHHHBDHHHHH0BDBD000000BDBD000000BDBD000000BDBD000000BDBD00000",
+      "float": "0BDAC00000FBDACFFFFFHBDACHHHHHEBDACEEEEEGBDACGGGGG0BDAC000000BDAC000000BDAC000000BDAC000000BDAC00000",
+      "ldouble": "0BDBD00000FBDBDFFFFFHBDBDHHHHHFFFBDFFFFFHHHBDHHHHH0BDBD000000BDBD000000BDBD000000BDBD000000BDBD00000"
     },
     "rint": {
-      "double": "0BDBD",
-      "float": "0BDBD",
-      "ldouble": "0BDBD"
+      "double": "0BDBD00000",
+      "float": "0BDBD00000",
+      "ldouble": "0BDBD00000"
     },
     "round": {
-      "double": "0BDBD",
-      "float": "0BDBD",
-      "ldouble": "0BDBD"
+      "double": "0BDBD00000",
+      "float": "0BDBD00000",
+      "ldouble": "0BDBD00000"
     },
     "sin": {
-      "double": "0BDBD",
-      "float": "0BDBD",
-      "ldouble": "0BDBD"
+      "double": "0BDBD00000",
+      "float": "0BDBD00000",
+      "ldouble": "0BDBD00000"
     },
     "sinh": {
-      "double": "0BDBD",
-      "float": "0BDBD",
-      "ldouble": "0BDBD"
+      "double": "0BDBD00000",
+      "float": "0BDBD00000",
+      "ldouble": "0BDBD00000"
     },
     "sqrt": {
-      "double": "0BDBD",
-      "float": "0BDBD",
-      "ldouble": "0BDBD"
+      "double": "0BDBD00000",
+      "float": "0BDBD00000",
+      "ldouble": "0BDBD00000"
     },
     "tan": {
-      "double": "0BDBD",
-      "float": "0BDBD",
-      "ldouble": "0BDBD"
+      "double": "0BDBD00000",
+      "float": "0BDBD00000",
+      "ldouble": "0BDBD00000"
     },
     "tanh": {
-      "double": "0BDBD",
-      "float": "0BDBD",
-      "ldouble": "0BDBD"
+      "double": "0BDBD00000",
+      "float": "0BDBD00000",
+      "ldouble": "0BDBD00000"
     },
     "trunc": {
-      "double": "0BDBD",
-      "float": "0BDBD",
-      "ldouble": "0BDBD"
+      "double": "0BDBD00000",
+      "float": "0BDBD00000",
+      "ldouble": "0BDBD00000"
     }
   }
 }

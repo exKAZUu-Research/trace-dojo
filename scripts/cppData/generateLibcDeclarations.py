@@ -250,6 +250,10 @@ template<class T> constexpr Word<T> exponent = sign<T> - 2 * quiet<T>;
 
 template<class T> T operand(unsigned digit, unsigned position) {
   if (digit == 0) return 1.25;
+  if (digit == 5) return 0;
+  if (digit == 6) return 1;
+  if (digit == 7) return -1;
+  if (digit >= 8) return std::bit_cast<T>(Word<T>(exponent<T> | (digit == 9 ? sign<T> : 0)));
   Word<T> bits = exponent<T> | (0x40 + position);
   if (digit <= 2) bits |= quiet<T>;
   if (digit % 2 == 0) bits |= sign<T>;
@@ -262,15 +266,24 @@ template<class T> char nan_result(T result, unsigned arity) {
   bool is_quiet = bool(bits & quiet<T>);
   if ((bits & exponent<T>) != exponent<T> || (!is_quiet && !payload)) return '0';
   bool is_negative = bool(bits & sign<T>);
-  if (payload < 0x40 || payload >= 0x40 + arity) return is_negative ? '1' : '0';
+  if (payload < 0x40 || payload >= 0x40 + arity) return is_negative ? '1' : 'N';
   return char('A' + (payload - 0x40) * 4 + is_negative * 2 + is_quiet);
+}
+
+bool has_nan_operand(unsigned pattern) {
+  while (pattern != 0) {
+    const unsigned digit = pattern % 10;
+    if (digit >= 1 && digit <= 4) return true;
+    pattern /= 10;
+  }
+  return false;
 }
 
 template<class Function>
 void probe(const char* name, const char* width, unsigned arity, unsigned patterns, Function call) {
   std::printf("%s %s 0", name, width);
   for (unsigned pattern = 1; pattern < patterns; ++pattern)
-    std::putchar(nan_result(call(pattern), arity));
+    std::putchar(has_nan_operand(pattern) ? nan_result(call(pattern), arity) : '0');
   std::puts("");
 }
 int main() {
@@ -279,8 +292,8 @@ int main() {
         if name in {"copysign", "fma"}:
             continue
         for width, c_type, _ in MATH_WIDTHS:
-            arguments = ", ".join(f"operand<{c_type}>(p / {5**i} % 5, {i})" for i in range(arity))
-            probe += f'  probe("{name}", "{width}", {arity}, {5**arity}, [](unsigned p) {{ return std::{name}({arguments}); }});\n'
+            arguments = ", ".join(f"operand<{c_type}>(p / {10**i} % 10, {i})" for i in range(arity))
+            probe += f'  probe("{name}", "{width}", {arity}, {10**arity}, [](unsigned p) {{ return std::{name}({arguments}); }});\n'
     probe += "}\n"
     root = Path(".tmp")
     root.mkdir(exist_ok=True)

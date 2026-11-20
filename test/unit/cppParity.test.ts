@@ -215,10 +215,13 @@ int main() {
   show(product);
   show(fused);
   show(contracted);
+  std::cout << std::isnan(std::fmin(value, 1.0)) << std::isnan(std::fmin(1.0, value))
+            << std::isnan(std::fmax(value, 1.0)) << std::isnan(std::fmax(1.0, value)) << ' '
+            << std::fmax(added, 4.0) << ' ' << std::fmin(1.0, added);
 }`;
   expect(executeProgram('cpp', program)).toMatchObject({
     kind: 'executed',
-    stdout: '66:240:255 66:248:255 66:248:255 66:248:255 66:248:255 ',
+    stdout: '66:240:255 66:248:255 66:248:255 66:248:255 66:248:255 1111 4 1',
     uncaughtException: undefined,
   });
 });
@@ -466,6 +469,85 @@ int main() {
   expect(executeProgram('cpp', program)).toMatchObject({
     kind: 'executed',
     stdout: '12345',
+    uncaughtException: undefined,
+  });
+});
+
+test('reuses already constructed mapped values during ordered-map assignment', () => {
+  const program = `#include <iostream>
+#include <map>
+int copies = 0;
+struct Value {
+  int number;
+  Value(int n) : number(n) {}
+  Value(const Value& source) : number(source.number) { ++copies; }
+};
+int main() {
+  std::map<int, Value> target{{1, 1}, {2, 2}}, source{{3, 3}, {4, 4}};
+  copies = 0;
+  target = source;
+  std::cout << copies << ' ' << target.begin()->first << ' ' << target.size();
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '0 3 2',
+    uncaughtException: undefined,
+  });
+});
+
+test('retains reused ordered-map nodes when construction of a new subtree throws', () => {
+  const program = `#include <iostream>
+#include <map>
+bool armed = false;
+struct Value {
+  int number;
+  Value(int n) : number(n) {}
+  Value(const Value& source) : number(source.number) { if (armed && number == 4) throw 4; }
+};
+int main() {
+  std::map<int, Value> target{{1, 1}}, source{{3, 3}, {4, 4}};
+  armed = true;
+  try { target = source; } catch (int error) { std::cout << error << ' '; }
+  std::cout << target.size() << ' ' << target.begin()->first << ':' << target.begin()->second.number;
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '4 1 3:3',
+    uncaughtException: undefined,
+  });
+});
+
+test('copies and destroys ordered-map subtrees in libc++ order after erasure', () => {
+  const program = `#include <iostream>
+#include <map>
+bool observed = false;
+struct Value {
+  int number;
+  Value(int n) : number(n) {}
+  Value(const Value& source) : number(source.number) { if (observed) std::cout << 'C' << number << ' '; }
+  ~Value() { if (observed) std::cout << 'D' << number << ' '; }
+};
+int main() {
+  std::map<int, Value> source, target;
+  int sourceOrder[] = {6, 4, 2, 8, 7, 3, 5, 1, 9};
+  int targetOrder[] = {4, 2, 6, 1, 3, 5, 7};
+  for (int key : sourceOrder) source.try_emplace(key, key);
+  for (int key : targetOrder) target.try_emplace(key, 10 + key);
+  source.erase(6);
+  observed = true;
+  target = source;
+  std::cout << '|';
+  auto copy = target;
+  std::map<int, Value> smaller;
+  smaller.try_emplace(10, 10);
+  std::cout << '|';
+  target = smaller;
+  observed = false;
+  for (const auto& entry : copy) std::cout << entry.first;
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'C9 |C4 C2 C1 C3 C7 C5 C8 C9 |D1 D2 D3 D5 D7 D8 D9 12345789',
     uncaughtException: undefined,
   });
 });
