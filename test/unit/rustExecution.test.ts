@@ -1998,6 +1998,23 @@ fn main() { println!("{}", Selector.size(1_u16)); }`;
   expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: '2\n' });
 });
 
+test('checks concrete fields of generic Rust derives under their inferred bounds', () => {
+  for (const source of [
+    '#[derive(Copy, Clone)] struct Packet<T> { data: Vec<T> }',
+    '#[derive(PartialEq, Eq)] struct Packet<T> { data: (f32, T) }',
+  ]) {
+    expect(executeProgram('rust', `${source}\nfn main() {}`)).toMatchObject({ kind: 'compileError' });
+  }
+  const valid = `#[derive(Copy, Clone, PartialEq, Eq)]
+struct Packet<T> { data: (i32, T) }
+fn main() {
+    let packet = Packet { data: (1, 2) };
+    let copy = packet;
+    println!("{}", packet == copy);
+}`;
+  expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: 'true\n' });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

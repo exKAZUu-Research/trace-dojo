@@ -265,10 +265,10 @@ export class Checker {
   private checkDerivedTrait(def: AdtDef, name: string): void {
     const trait = this.program.builtinTraits.get(name);
     if (!trait) return;
-    if (trait.supertraits.length > 0) this.checkDerivedSupertraits(def, trait);
+    const subst = this.derivedBounds(def, trait);
+    if (trait.supertraits.length > 0) this.checkDerivedSupertraits(def, trait, subst);
     for (const field of def.variants.flatMap((variant) => variant.fields)) {
-      // A derive bounds the type parameters by the trait, so fields of parameter types meet it.
-      if (hasParams(field.type) || this.solver.implements(field.type, { trait, args: [] }) !== 'no') continue;
+      if (this.solver.implements(substitute(field.type, subst), { trait, args: [] }) !== 'no') continue;
       compileError(
         name === 'Copy' ? def.span : field.span,
         `${typeToString(field.type)} が ${name} を実装していないので、フィールド ${field.name} を持つ ${def.name} に #[derive(${name})] を付けられません。`
@@ -276,7 +276,7 @@ export class Checker {
     }
   }
 
-  private checkDerivedSupertraits(def: AdtDef, trait: TraitDef): void {
+  private derivedBounds(def: AdtDef, trait: TraitDef): Subst {
     const subst: Subst = new Map();
     const args = def.params.map((original) => {
       const param = newTypeParam(original.name);
@@ -290,6 +290,11 @@ export class Checker {
         args: defaultTraitArguments(trait, [], arg),
       });
     }
+    return subst;
+  }
+
+  private checkDerivedSupertraits(def: AdtDef, trait: TraitDef, subst: Subst): void {
+    const args = def.params.map((param) => subst.get(param)!);
     const self: Type = { kind: 'adt', def, args };
     const derived = { trait, args: defaultTraitArguments(trait, [], self) };
     for (const bound of supertraitsOf(derived, self)) {
