@@ -846,6 +846,21 @@ int main() {
   });
 });
 
+test('treats FILE prototypes as redeclarations of the C library functions', () => {
+  const program = `#include <cstdio>
+int fputs(const char*, FILE*);
+int fflush(FILE*);
+int main() {
+  fputs("hello", stdout);
+  fflush(stdout);
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'hello',
+    uncaughtException: undefined,
+  });
+});
+
 test('folds floating division by zero outside constant expressions', () => {
   const program = `#include <iostream>
 #include <limits>
