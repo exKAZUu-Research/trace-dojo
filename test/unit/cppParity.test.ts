@@ -1036,6 +1036,24 @@ int main() {
   });
 });
 
+test('composes constants from initializer-list std::min and std::max', () => {
+  const program = `#include <algorithm>
+#include <iostream>
+int main() {
+  constexpr int n = std::max({2, 3, 5});
+  constexpr int m = std::min({4, 1, 7});
+  constexpr double d = std::max({1.5, 2.5});
+  int a[std::max({2, 4})];
+  int x = 9;
+  std::cout << n << m << ' ' << d << ' ' << sizeof(a) << ' ' << std::max({x, 3});
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '51 2.5 16 9',
+    uncaughtException: undefined,
+  });
+});
+
 test('composes constants from std::gcd, std::lcm, and std::clamp', () => {
   const program = `#include <algorithm>
 #include <iostream>

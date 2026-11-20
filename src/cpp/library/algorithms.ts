@@ -1754,8 +1754,28 @@ function listExtremum(
       }
       return ops.copy(frame, items.get(best));
     },
-    { libraryConstant: () => (isConstant ? true : undefined) }
+    {
+      libraryConstant: () => (isConstant ? true : undefined),
+      constantValue: () => constantExtremum(compiler, name, elements, type, comparatorParams.length > 0 || !!result),
+    }
   );
+}
+
+/** The constant result of `std::min` or `std::max` on a list of constant arithmetic values, chosen as the call does. */
+function constantExtremum(
+  compiler: ExpressionCompiler,
+  name: string,
+  elements: Expr[],
+  type: Type,
+  hasComparatorOrPair: boolean
+): number | bigint | undefined {
+  if (hasComparatorOrPair || !isArithmetic(type)) return;
+  const constants = elements.map((element) => compiler.convert(element, type, element.row).constant);
+  if (constants.some((constant) => constant === undefined)) return;
+  let best = constants[0] as number | bigint;
+  for (const value of constants.slice(1) as (number | bigint)[])
+    if (name === 'min' ? value < best : best < value) best = value;
+  return best;
 }
 
 /** libc++'s `__minmax_element_impl`: the first least and the last greatest, comparing the values in pairs. */
