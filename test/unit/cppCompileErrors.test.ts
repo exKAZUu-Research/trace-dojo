@@ -3,6 +3,23 @@ import { expect, test } from 'vitest';
 import { executeProgram } from '../../src/interpreter/program';
 
 test.each([
+  ['set', 'set<const int>', '要素を const 型にはできません'],
+  ['set', 'multiset<const int>', '要素を const 型にはできません'],
+  ['unordered_set', 'unordered_set<const int>', '要素を const 型にはできません'],
+  ['set', 'set<int&>', '要素を参照にはできません'],
+  ['unordered_set', 'unordered_set<int&>', '要素を参照にはできません'],
+  ['set', 'set<void>', '要素を void にはできません'],
+  ['set', 'set<int[]>', '要素には大きさが決まるオブジェクト型'],
+])('rejects a non-allocatable element in <%s> std::%s', (header, container, message) => {
+  const program = `#include <${header}>
+int main() { std::${container} elements; }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 1, message: expect.stringContaining(message) }],
+  });
+});
+
+test.each([
   ['time.h', 'time(0);', '時刻'],
   ['ctime', 'time_t start = 0;', 'time_t'],
   ['cstdlib', 'double value = atof("1.5");', 'atof'],

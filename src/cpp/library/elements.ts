@@ -49,6 +49,21 @@ type MoveConstruction =
   | { kind: 'copy' | 'string' | 'sequence' | 'members' }
   | { kind: 'array'; array: NonNullable<LibraryClass['aggregateArray']> };
 
+export function checkContainerElement(
+  compiler: ExpressionCompiler,
+  name: string,
+  element: Type,
+  row: number,
+  allowsConst = false
+): void {
+  if (element.kind === 'reference') compiler.error(row, `${name} の要素を参照にはできません。`);
+  if (element.kind === 'void') compiler.error(row, `${name} の要素を void にはできません。`);
+  if (element.kind === 'function' || (element.kind === 'array' && element.length === undefined)) {
+    compiler.error(row, `${name} の要素には大きさが決まるオブジェクト型を書いてください。`);
+  }
+  if (!allowsConst && isConstType(element)) compiler.error(row, `${name} の要素を const 型にはできません。`);
+}
+
 export function destroyElements(
   frame: Frame,
   values: readonly Value[],

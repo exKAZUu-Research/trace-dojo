@@ -15,6 +15,25 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+test('allows const map keys and pointers to const set elements', () => {
+  const program = `#include <iostream>
+#include <map>
+#include <set>
+int main() {
+  const int n = 2;
+  std::map<const int, int> counts;
+  std::set<const int*> addresses;
+  counts[1] = 3;
+  addresses.insert(&n);
+  std::cout << counts[1] << ' ' << **addresses.begin();
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '3 2',
+    uncaughtException: undefined,
+  });
+});
+
 test.each([
   ['two increments', 'int i = 0;', 'i++ + i++'],
   ['a reference alias', 'int i = 1; int& r = i;', 'i++ + r'],

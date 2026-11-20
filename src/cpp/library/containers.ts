@@ -1,6 +1,7 @@
 import { classType, type Type, typeName, unqualified } from '../types';
 import { adapterClass } from './adapters';
 import { orderedClass, pairClass } from './associative';
+import { checkContainerElement } from './elements';
 import { randomClasses } from './random';
 import type { Library, LibraryTemplate } from './registry';
 import { sequenceClass } from './sequences';
@@ -79,6 +80,7 @@ export function containerTemplates(library: Library): LibraryTemplate[] {
       name: kind,
       instantiate: (args, row) => {
         arity(kind, args, 1, 2, row);
+        checkContainerElement(compiler(), `std::${kind}<${typeName(args[0])}>`, args[0], row);
         return classType(orderedClass(library, kind, args[0], undefined, args[1]));
       },
     });
@@ -94,6 +96,7 @@ export function containerTemplates(library: Library): LibraryTemplate[] {
     name: 'unordered_set',
     instantiate: (args, row) => {
       arity('unordered_set', args, 1, 1, row);
+      checkContainerElement(compiler(), `std::unordered_set<${typeName(args[0])}>`, args[0], row);
       return classType(unorderedClass(library, 'unordered_set', args[0], undefined));
     },
   });

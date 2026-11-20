@@ -32,6 +32,7 @@ import { bitReferences } from './bitReference';
 import { SequenceValue } from './containerValues';
 import {
   callbackOperands,
+  checkContainerElement,
   constructElementFromRvalue,
   type ElementOperations,
   elementOperations,
@@ -78,9 +79,7 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
   const key = `${kind}<${typeKey(element)}${kind === 'array' ? `,${fixedLength}` : ''}>`;
   const cached = library.instances.get(key);
   if (cached) return cached;
-  if (element.kind === 'reference') library.compiler.error(0, `${name} の要素を参照にはできません。`);
-  if (element.kind === 'void') library.compiler.error(0, `${name} の要素を void にはできません。`);
-  if (kind !== 'array' && isConstType(element)) library.compiler.error(0, `${name} の要素を const 型にはできません。`);
+  checkContainerElement(library.compiler, name, element, 0, kind === 'array');
   const cls = new ClassInfo(name, 'class');
   cls.isComplete = true;
   cls.isAssignmentDeleted = kind === 'array' && fixedLength !== 0 && !allowsMemberAssignment(element);
