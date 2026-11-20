@@ -629,7 +629,7 @@ export function cloneValue(type: Type, value: Value): Value {
           return new RangeValue(range.start, range.end, range.inclusive, range.exhausted);
         }
         case 'Iter': {
-          return cloneIterator(t.args[0], value as IterValue);
+          return cloneIterator(value as IterValue);
         }
         default: {
           if (value instanceof StructValue) {
@@ -660,10 +660,14 @@ export function cloneValue(type: Type, value: Value): Value {
 }
 
 /** A clone of an iterator, which goes on from where the iterator is, on its own. */
-function cloneIterator(item: Type, iter: IterValue): IterValue {
-  const cloneItem = (value: Value): Value => cloneValue(item, value);
-  const copy = iter.fork?.(cloneItem) ?? iter;
-  if (iter.peeked) copy.peeked = iter.peeked.map((next) => (next === DONE ? DONE : cloneItem(next)));
+export function cloneIterator(iter: IterValue): IterValue {
+  if (!iter.fork) return iter;
+  const copy = iter.fork();
+  const type = iter.peekedType;
+  if (type && iter.peeked) {
+    copy.peekedType = type;
+    copy.peeked = iter.peeked.map((next) => (next === DONE ? DONE : cloneValue(type, next)));
+  }
   return copy;
 }
 

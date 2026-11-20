@@ -582,7 +582,7 @@ const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
   drain: ([self, range], ctx) => {
     const items = vec(self);
     const [start, end] = checkedRangeBounds(ctx, range, items.length);
-    return ownedIter(items.splice(start, end - start));
+    return ownedIter(items.splice(start, end - start), elemType(ctx));
   },
   retain: ([self, f], ctx) => retainElements(vec(self), (item) => deref(call(ctx, f, [item.get()])) as boolean),
   retain_mut: ([self, f], ctx) => retainElements(vec(self), (item) => deref(call(ctx, f, [item])) as boolean),
@@ -623,7 +623,7 @@ const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
   len: ([self]) => BigInt(vec(self).length),
   into_iter: ([self], ctx) => {
     const items = vec(self);
-    const iter = ownedIter(items);
+    const iter = ownedIter(items, elemType(ctx));
     const elem = layoutOf(elemType(ctx));
     setIntoIterBuffer(iter, vecCapacity(items, items.length, elem.size), elem);
     return iter;
@@ -701,9 +701,9 @@ const dequeNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
   drain: ([self, range], ctx) => {
     const items = vec(self);
     const [start, end] = checkedRangeBounds(ctx, range, items.length);
-    return dequeDrain(items, start, end, dequeCapacity(items, ctx));
+    return dequeDrain(items, start, end, dequeCapacity(items, ctx), elemType(ctx));
   },
-  into_iter: ([self]) => ownedIter(vec(self)),
+  into_iter: ([self], ctx) => ownedIter(vec(self), elemType(ctx)),
 };
 
 function rotateDeque(ctx: NativeContext, items: Value[], amount: bigint, right: boolean): Value {
@@ -724,7 +724,7 @@ function dequeCapacity(items: Value[], ctx: NativeContext): number {
 
 const heapNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
   new: () => [],
-  drain: ([self]) => ownedIter(vec(self).splice(0)),
+  drain: ([self], ctx) => ownedIter(vec(self).splice(0), elemType(ctx)),
   with_capacity: () => [],
   push: ([self, item], ctx) => {
     ctx.runtime.allocate(1);
@@ -761,7 +761,7 @@ const heapNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> 
     }
     return UNIT_VALUE;
   },
-  into_iter: ([self]) => ownedIter(vec(self)),
+  into_iter: ([self], ctx) => ownedIter(vec(self), elemType(ctx)),
 };
 
 const natives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {};
@@ -770,7 +770,7 @@ for (const [name, native] of Object.entries(withCapacity(vecNatives))) natives[`
 const dequeTracked = withDequeHead(withCapacity(dequeNatives), dequeCapacity);
 for (const [name, native] of Object.entries(dequeTracked)) natives[`VecDeque<_>::${name}`] = native;
 for (const [name, native] of Object.entries(withCapacity(heapNatives))) natives[`BinaryHeap<_>::${name}`] = native;
-natives['[_]::into_iter'] = ([self]) => ownedIter(sliceItems(deref(self)));
+natives['[_]::into_iter'] = ([self], ctx) => ownedIter(sliceItems(deref(self)), elemType(ctx));
 natives['[_]::map'] = ([self, f], ctx) => sliceItems(deref(self)).map((item) => call(ctx, f, [item]));
 natives['&[_]::into_iter'] = ([self]) => sliceIter(deref(self), false);
 natives['&mut [_]::into_iter'] = ([self]) => sliceIter(deref(self), true);

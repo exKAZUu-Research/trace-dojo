@@ -3389,3 +3389,25 @@ test('iterates borrowed Rust collections of boxed trait objects', () => {
   );
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '7\n7\n' });
 });
+
+test('clones owned Rust iterator sources and peeked items with their own types', () => {
+  const program = rustMain(`let mut pairs = vec![(1, "a"), (2, "b")].into_iter().enumerate().peekable();
+    println!("{:?}", pairs.peek());
+    let copy: Vec<_> = pairs.clone().collect();
+    let original: Vec<_> = pairs.collect();
+    println!("{:?} {:?}", copy, original);
+
+    let zipped = (0..2).zip(vec!["x", "y"]);
+    println!("{:?} {:?}", zipped.clone().collect::<Vec<_>>(), zipped.collect::<Vec<_>>());
+
+    let flat = std::iter::once(vec![7]).chain(std::iter::once(vec![8])).flatten().enumerate();
+    println!("{:?} {:?}", flat.clone().collect::<Vec<_>>(), flat.collect::<Vec<_>>());`);
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'Some((0, (1, "a")))\n' +
+      '[(0, (1, "a")), (1, (2, "b"))] [(0, (1, "a")), (1, (2, "b"))]\n' +
+      '[(0, "x"), (1, "y")] [(0, "x"), (1, "y")]\n' +
+      '[(0, 7), (1, 8)] [(0, 7), (1, 8)]\n',
+  });
+});

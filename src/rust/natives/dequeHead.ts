@@ -1,4 +1,5 @@
 import { described, listPart, numberPart, tuplePart } from '../iterDebug';
+import type { Type } from '../types';
 import { DONE, ElementPlace, IterValue, type Next, SliceView, type Value } from '../values';
 import { ownedIter } from './iterators';
 
@@ -130,14 +131,14 @@ export function dequeIter(items: Value[], capacity: number, mutable: boolean): I
  * `VecDeque::drain`: the elements it takes, and the head std leaves once the drain is dropped (the shorter of the parts
  * before and after it moves); `{:?}` shows std's counters `Drain(drain_len, idx, tail_len, remaining)`.
  */
-export function dequeDrain(items: Value[], start: number, end: number, capacity: number): IterValue {
+export function dequeDrain(items: Value[], start: number, end: number, capacity: number, element: Type): IterValue {
   const len = items.length;
   const drainLen = end - start;
   const tailLen = len - end;
   const head = dequeHead(items);
   if (len - drainLen === 0) heads.set(items, 0);
   else if (start < tailLen && capacity > 0) heads.set(items, wrapAdd(head, drainLen, capacity));
-  const iter = ownedIter(items.splice(start, drainLen));
+  const iter = ownedIter(items.splice(start, drainLen), element);
   let taken = 0;
   const next = iter.next;
   iter.next = () => {

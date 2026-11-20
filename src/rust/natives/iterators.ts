@@ -15,6 +15,7 @@ import { intoIterShape } from '../iterTypes';
 import {
   allocateCollectionSnapshot,
   castValue,
+  cloneIterator,
   cloneValue,
   compareValues,
   copyValue,
@@ -71,7 +72,7 @@ export function arrayIter(
  * An iterator that owns its elements (`into_iter`, `drain`, `for x in v`): it holds only those it has not yielded,
  * so each one it hands out belongs to its receiver alone and disappears when that receiver drops it.
  */
-export function ownedIter(items: Value[], project: (item: Value) => Value = (item) => item): IterValue {
+export function ownedIter(items: Value[], itemType: Type, project: (item: Value) => Value = (item) => item): IterValue {
   let front = 0;
   let back = items.length;
   const take = (index: number): Value => {
@@ -86,9 +87,12 @@ export function ownedIter(items: Value[], project: (item: Value) => Value = (ite
     [items]
   );
   iter.rest = () => Array.from({ length: back - front }, (_, offset) => project(items[front + offset]));
-  iter.fork = (cloneItem) => {
+  iter.fork = () => {
     allocateCollectionSnapshot(back - front);
-    return ownedIter(Array.from({ length: back - front }, (_, offset) => cloneItem(project(items[front + offset]))));
+    const cloned = Array.from({ length: back - front }, (_, offset) =>
+      cloneValue(itemType, project(items[front + offset]))
+    );
+    return ownedIter(cloned, itemType);
   };
   return iter;
 }
@@ -106,7 +110,7 @@ export function toIterator(value: Value, from: Type): Value {
   const t = normalize(shallow(from));
   if (value instanceof IterValue) return value;
   if (t.kind === 'opaque' && t.opaque.hidden) return toIterator(value, t.opaque.hidden);
-  if (t.kind === 'array') return ownedIter(sliceItems(value));
+  if (t.kind === 'array') return ownedIter(sliceItems(value), t.elem);
   if (t.kind === 'ref') {
     const target = normalize(shallow(t.target));
     const v = t.mutable ? (deref(value) as Value) : value;
@@ -129,15 +133,15 @@ function collectionIter(type: Type & { kind: 'adt' }, value: Value, mode: 'value
     case 'Vec':
     case 'VecDeque':
     case 'BinaryHeap': {
-      return mode === 'value' ? ownedIter(value as Value[]) : sliceIter(value, mode === 'mut');
+      return mode === 'value' ? ownedIter(value as Value[], type.args[0]) : sliceIter(value, mode === 'mut');
     }
     case 'HashMap':
     case 'BTreeMap': {
-      return mapIter(value as MapValue, mode);
+      return mapIter(value as MapValue, mode, type.args);
     }
     case 'HashSet':
     case 'BTreeSet': {
-      return setIter(value as SetValue, mode === 'value');
+      return setIter(value as SetValue, mode === 'value' ? type.args[0] : undefined);
     }
     case 'Range':
     case 'RangeInclusive':
@@ -150,7 +154,7 @@ function collectionIter(type: Type & { kind: 'adt' }, value: Value, mode: 'value
       const option = value as EnumValue;
       if (option.variant !== (type.def.builtin === 'Option' ? 1 : 0)) return arrayIter([]);
       const items = [mode === 'mut' ? new ElementPlace(option.fields, 0) : option.fields[0]];
-      return mode === 'value' ? ownedIter(items) : arrayIter(items);
+      return mode === 'value' ? ownedIter(items, type.args[0]) : arrayIter(items);
     }
     case 'Iter': {
       return mode === 'value' ? undefined : value;
@@ -162,9 +166,9 @@ function collectionIter(type: Type & { kind: 'adt' }, value: Value, mode: 'value
 }
 
 /** A map's entries as tuples, in key order for a `BTreeMap`; `mut` yields places for the values. */
-export function mapIter(map: MapValue, mode: 'value' | 'ref' | 'mut'): IterValue {
+export function mapIter(map: MapValue, mode: 'value' | 'ref' | 'mut', types: Type[]): IterValue {
   const entries = map.entries.snapshot();
-  if (mode === 'value') return ownedIter(entries);
+  if (mode === 'value') return ownedIter(entries, { kind: 'tuple', elems: types });
   const iter = arrayIter(entries, 0, entries.length, (i) => {
     const entry = entries[i];
     return mode === 'mut' ? [entry[0], new ElementPlace(entry, 1)] : [entry[0], entry[1]];
@@ -173,9 +177,9 @@ export function mapIter(map: MapValue, mode: 'value' | 'ref' | 'mut'): IterValue
   return iter;
 }
 
-export function setIter(set: SetValue, owned = false): IterValue {
+export function setIter(set: SetValue, owned?: Type): IterValue {
   const values = set.entries.snapshot();
-  if (owned) return ownedIter(values);
+  if (owned) return ownedIter(values, owned);
   const iter = arrayIter(values);
   iter.roots.push(set);
   return iter;
@@ -252,7 +256,7 @@ function adapter<S extends object>(
   source: IterValue,
   state: S,
   parts: (source: IterValue, state: S) => AdapterParts,
-  forkState: (state: S, cloneItem: (value: Value) => Value) => S = forkAdapterState,
+  forkState: (state: S) => S = forkAdapterState,
   folds = false
 ): IterValue {
   const { next, nextBack, remaining } = parts(source, state);
@@ -261,7 +265,7 @@ function adapter<S extends object>(
     Object.values(state).map((value: unknown) => (value instanceof IteratorCallback ? value.value : value));
   // An adapter whose `fold` folds its source (`Map`, `Filter`, ...) takes its source's elements as it folds.
   if (folds && source.foldNext) iter.foldNext = parts(foldingView(source), state).next;
-  iter.fork = (cloneItem) => adapter(forkIter(source, cloneItem), forkState(state, cloneItem), parts, forkState, folds);
+  iter.fork = () => adapter(cloneIterator(source), forkState(state), parts, forkState, folds);
   return iter;
 }
 
@@ -279,14 +283,6 @@ function foldingView(iter: IterValue): IterValue {
     iter.nextBack,
     iter.remaining
   );
-}
-
-/** An independent copy of an iterator, with the elements `peek` looked at. */
-function forkIter(iter: IterValue, cloneItem: (value: Value) => Value): IterValue {
-  if (!iter.fork) throw new Error('This iterator cannot be cloned');
-  const copy = iter.fork(cloneItem);
-  if (iter.peeked) copy.peeked = iter.peeked.map((item) => (item === DONE ? DONE : cloneItem(item)));
-  return copy;
 }
 
 /** An adapter that maps each element, from either end. */
@@ -392,9 +388,9 @@ function flattened(
       };
       return { next: () => take('front'), nextBack: src.nextBack && (() => take('back')) };
     },
-    (state, cloneItem) => ({
-      front: state.front && forkIter(state.front, cloneItem),
-      back: state.back && forkIter(state.back, cloneItem),
+    (state) => ({
+      front: state.front && cloneIterator(state.front),
+      back: state.back && cloneIterator(state.back),
       outerDone: state.outerDone,
       callback: state.callback?.clone(),
     })
@@ -522,7 +518,7 @@ define({
           return item === DONE ? src.nextBack!() : item;
         },
       }),
-      (state, cloneItem) => ({ ...state, second: forkIter(state.second, cloneItem) })
+      (state) => ({ ...state, second: cloneIterator(state.second) })
     ),
   'IterImpl<_, _>::rev': ([self]) =>
     adapter(iterOf(self), {}, (src) => ({
@@ -633,6 +629,7 @@ define({
   'IterImpl<_, _>::into_iter': ([self]) => iterOf(self),
   'IterImpl<_, PeekableShape<_>>::peek': ([self], ctx) => {
     const iter = peekSource(self);
+    iter.peekedType = ctx.typeArgs[0];
     iter.peeked ??= [];
     if (iter.peeked.length === 0) iter.peeked.push(iter.next());
     const item = iter.peeked[0];
@@ -643,6 +640,7 @@ define({
     const item = nextOf(iter);
     if (item === DONE) return none(ctx);
     if (truthy(call(ctx, f, [item]))) return some(ctx, item);
+    iter.peekedType = ctx.typeArgs[0];
     iter.peeked ??= [];
     iter.peeked.unshift(item);
     return none(ctx);
@@ -662,32 +660,34 @@ define({
     ),
   'IterImpl<_, _>::cycle': ([self], ctx) => {
     // `Cycle` keeps a clone of the iterator as it was, which it clones again to go round once more.
-    const clone = (value: Value): Value => cloneValue(ctx.typeArgs[0], value);
-    const original = forkIter(iterOf(self), clone);
     const iter = adapter(
       iterOf(self),
-      { current: undefined as IterValue | undefined },
+      { original: cloneIterator(iterOf(self)), current: undefined as IterValue | undefined },
       (src, state) => ({
         next: () => {
           ctx.runtime.spend();
           const item = nextOf(state.current ?? src);
           if (item !== DONE) return item;
-          state.current = forkIter(original, clone);
+          state.current = cloneIterator(state.original);
           return nextOf(state.current);
         },
       }),
-      (state, cloneItem) => ({ current: state.current && forkIter(state.current, cloneItem) })
+      (state) => ({
+        original: cloneIterator(state.original),
+        current: state.current && cloneIterator(state.current),
+      })
     );
     // `Cycle` shows the iterator as it was and the one it takes from now.
     const [item, shape] = ctx.typeArgs;
     return describedForks(iter, (target) => (show) => {
-      const current = (target.roots[1] as { current: IterValue | undefined }).current ?? (target.roots[0] as IterValue);
+      const state = target.roots[1] as { original: IterValue; current: IterValue | undefined };
+      const current = state.current ?? (target.roots[0] as IterValue);
       const part =
         (from: IterValue): DebugPart =>
         (indent) =>
           iteratorDebug(from, item, shape, show, indent);
       return fieldsPart('Cycle', [
-        ['orig', part(original)],
+        ['orig', part(state.original)],
         ['iter', part(current)],
       ]);
     });
@@ -737,7 +737,7 @@ function adapterDebug(
 /** Sets how `{:?}` writes an iterator from its own state, and that of each clone of it from the clone's. */
 function describedForks(iter: IterValue, describe: (target: IterValue) => NonNullable<IterValue['debug']>): IterValue {
   const { fork } = iter;
-  if (fork) iter.fork = (cloneItem) => describedForks(fork(cloneItem), describe);
+  if (fork) iter.fork = () => describedForks(fork(), describe);
   return described(iter, describe(iter));
 }
 
@@ -777,30 +777,26 @@ function peekSource(self: Value): IterValue {
 // code-gauge-allow functionCognitiveComplexity 23 -- Follows `Zip`'s `next` and `next_back`.
 function zipped(first: IterValue, second: IterValue, shapes: [Type, Type], items: [Type, Type]): IterValue {
   const trusted = isTrustedRandomAccess(...shapes);
-  const iter = adapter(
-    first,
-    { second },
-    (src, state) => ({
-      next: () => {
-        if (trusted && Math.min(lengthOf(src), lengthOf(state.second)) === 0) return DONE;
-        const a = nextOf(src);
-        if (a === DONE) return DONE;
-        const b = nextOf(state.second);
-        return b === DONE ? DONE : [a, b];
-      },
-      nextBack: () => {
-        const lengthA = lengthOf(src);
-        const lengthB = lengthOf(state.second);
-        for (let index = lengthB; index < lengthA; index++) src.nextBack!();
-        for (let index = lengthA; index < lengthB; index++) state.second.nextBack!();
-        const a = src.nextBack!();
-        const b = state.second.nextBack!();
-        return a === DONE || b === DONE ? DONE : [a, b];
-      },
-      remaining: () => Math.min(lengthOf(src), lengthOf(state.second)),
-    }),
-    (state, cloneItem) => ({ second: forkIter(state.second, cloneItem) })
-  );
+  const iter = adapter(first, { second }, (src, state) => ({
+    next: () => {
+      if (trusted && Math.min(lengthOf(src), lengthOf(state.second)) === 0) return DONE;
+      const a = nextOf(src);
+      if (a === DONE) return DONE;
+      const b = nextOf(state.second);
+      return b === DONE ? DONE : [a, b];
+    },
+    nextBack: () => {
+      const lengthA = lengthOf(src);
+      const lengthB = lengthOf(state.second);
+      for (let index = lengthB; index < lengthA; index++) src.nextBack!();
+      for (let index = lengthA; index < lengthB; index++) state.second.nextBack!();
+      const a = src.nextBack!();
+      const b = state.second.nextBack!();
+      return a === DONE || b === DONE ? DONE : [a, b];
+    },
+    remaining: () => Math.min(lengthOf(src), lengthOf(state.second)),
+  }));
+  iter.fork = () => zipped(cloneIterator(first), cloneIterator(second), shapes, items);
   if (isTrustedLen(...shapes)) iter.foldNext = zipFoldNext(first, second);
   // `Zip` of two `TrustedRandomAccess` iterators shows nothing of them.
   return described(iter, (show) => {
@@ -1079,16 +1075,16 @@ define({
   },
   'std::iter::repeat': ([value], ctx) => repeated(ctx, value, Number.POSITIVE_INFINITY),
   'std::iter::repeat_n': ([value, n], ctx) => repeated(ctx, value, Number(n as bigint)),
-  'std::iter::once': ([value]) => {
-    const iter = ownedIter([value]);
-    return described(iter, (show, item) => {
-      const [left] = iter.rest?.() ?? [];
+  'std::iter::once': ([value], ctx) => {
+    const iter = ownedIter([value], ctx.typeArgs[0]);
+    return describedForks(iter, (target) => (show, item) => {
+      const [left] = target.rest?.() ?? [];
       const opt = optionPart(left === undefined ? undefined : (indent) => show(left, item, indent));
       const intoIter = fieldsPart('IntoIter', [['inner', fieldsPart('Item', [['opt', opt]])]]);
       return fieldsPart('Once', [['inner', intoIter]]);
     });
   },
-  'std::iter::empty': () => described(ownedIter([]), () => () => 'Empty'),
+  'std::iter::empty': (_args, ctx) => describedForks(ownedIter([], ctx.typeArgs[0]), () => () => () => 'Empty'),
   'std::iter::from_fn': ([f], ctx) => fromFunction(ctx, new IteratorCallback(f, ctx.typeArgs[1])),
   'std::iter::successors': ([first, f], ctx) =>
     successors(ctx, deref(first) as EnumValue, new IteratorCallback(f, ctx.typeArgs[1])),
@@ -1098,8 +1094,8 @@ define({
 function repeated(ctx: NativeContext, value: Value, count: number): IterValue {
   let left = count;
   const take = (): Next => (left-- > 0 ? cloneValue(ctx.typeArgs[0], value) : DONE);
-  const iter = new IterValue(take, take, Number.isFinite(count) ? () => Math.max(left, 0) : undefined);
-  iter.fork = () => repeated(ctx, value, left);
+  const iter = new IterValue(take, take, Number.isFinite(count) ? () => Math.max(left, 0) : undefined, [value]);
+  iter.fork = () => repeated(ctx, cloneValue(ctx.typeArgs[0], value), left);
   // `RepeatN` drops its element with its last clone.
   return described(iter, (show, item) => {
     const element: DebugPart = (indent) => show(value, item, indent);
@@ -1132,10 +1128,12 @@ function successors(ctx: NativeContext, start: EnumValue, callback: IteratorCall
     undefined,
     [callback.value, next]
   );
-  iter.fork = (cloneItem) => {
+  iter.fork = () => {
     const current = next.value as EnumValue;
     const cloned =
-      current.variant === 0 ? current : new EnumValue(current.def, current.variant, [cloneItem(current.fields[0])]);
+      current.variant === 0
+        ? current
+        : new EnumValue(current.def, current.variant, [cloneValue(ctx.typeArgs[0], current.fields[0])]);
     return successors(ctx, cloned, callback.clone());
   };
   return described(iter, (show, item) => {

@@ -183,18 +183,18 @@ function storeNewEntry(
 
 function mapIterNatives(): Record<string, Native> {
   return {
-    into_iter: ([self]) => mapIter(map(self), 'value'),
-    iter: ([self]) => mapIter(map(self), 'ref'),
-    iter_mut: ([self]) => mapIter(map(self), 'mut'),
+    into_iter: ([self], ctx) => mapIter(map(self), 'value', ctx.typeArgs),
+    iter: ([self], ctx) => mapIter(map(self), 'ref', ctx.typeArgs),
+    iter_mut: ([self], ctx) => mapIter(map(self), 'mut', ctx.typeArgs),
     keys: ([self]) => mapProjection(map(self), (entry) => entry[0]),
     values: ([self]) => mapProjection(map(self), (entry) => entry[1]),
     values_mut: ([self]) => mapProjection(map(self), (entry) => new ElementPlace(entry, 1)),
-    into_keys: ([self]) => mapProjection(map(self), (entry) => entry[0], true),
-    into_values: ([self]) => mapProjection(map(self), (entry) => entry[1], true),
-    drain: ([self]) => {
+    into_keys: ([self], ctx) => mapProjection(map(self), (entry) => entry[0], ctx.typeArgs[0]),
+    into_values: ([self], ctx) => mapProjection(map(self), (entry) => entry[1], ctx.typeArgs[1]),
+    drain: ([self], ctx) => {
       const entries = map(self).entries.snapshot();
       map(self).entries.clear();
-      return ownedIter(entries);
+      return ownedIter(entries, { kind: 'tuple', elems: ctx.typeArgs });
     },
     retain: ([self, f], ctx) => {
       const m = map(self);
@@ -205,9 +205,9 @@ function mapIterNatives(): Record<string, Native> {
   };
 }
 
-function mapProjection(map: MapValue, project: (entry: [Value, Value]) => Value, owned = false): IterValue {
+function mapProjection(map: MapValue, project: (entry: [Value, Value]) => Value, owned?: Type): IterValue {
   const entries = map.entries.snapshot();
-  if (owned) return ownedIter(entries, (entry) => project(entry as [Value, Value]));
+  if (owned) return ownedIter(entries, owned, (entry) => project(entry as [Value, Value]));
   return arrayIter(entries, 0, entries.length, (index) => project(entries[index]));
 }
 
@@ -319,12 +319,12 @@ function setNatives(sorted: boolean): Record<string, (args: Value[], ctx: Native
       }
       return UNIT_VALUE;
     },
-    drain: ([self]) => {
+    drain: ([self], ctx) => {
       const values = set(self).entries.snapshot();
       set(self).entries.clear();
-      return ownedIter(values);
+      return ownedIter(values, ctx.typeArgs[0]);
     },
-    into_iter: ([self]) => setIter(set(self), true),
+    into_iter: ([self], ctx) => setIter(set(self), ctx.typeArgs[0]),
     first: ([self], ctx) => {
       const first = set(self).entries.getEdge(true);
       return option(ctx, first, first !== undefined);
@@ -421,10 +421,10 @@ for (const [name, native] of Object.entries(mapNatives(true))) natives[`BTreeMap
 for (const [name, native] of Object.entries(setNatives(false))) natives[`HashSet<_>::${name}`] = native;
 for (const [name, native] of Object.entries(setNatives(true))) natives[`BTreeSet<_>::${name}`] = native;
 for (const [name, native] of Object.entries(entryNatives)) natives[`Entry<_, _>::${name}`] = native;
-natives['&HashMap<_, _>::into_iter'] = ([self]) => mapIter(map(self), 'ref');
-natives['&mut HashMap<_, _>::into_iter'] = ([self]) => mapIter(map(self), 'mut');
-natives['&BTreeMap<_, _>::into_iter'] = ([self]) => mapIter(map(self), 'ref');
-natives['&mut BTreeMap<_, _>::into_iter'] = ([self]) => mapIter(map(self), 'mut');
+natives['&HashMap<_, _>::into_iter'] = ([self], ctx) => mapIter(map(self), 'ref', ctx.typeArgs);
+natives['&mut HashMap<_, _>::into_iter'] = ([self], ctx) => mapIter(map(self), 'mut', ctx.typeArgs);
+natives['&BTreeMap<_, _>::into_iter'] = ([self], ctx) => mapIter(map(self), 'ref', ctx.typeArgs);
+natives['&mut BTreeMap<_, _>::into_iter'] = ([self], ctx) => mapIter(map(self), 'mut', ctx.typeArgs);
 natives['&HashSet<_>::into_iter'] = ([self]) => setIter(set(self));
 natives['&BTreeSet<_>::into_iter'] = ([self]) => setIter(set(self));
 void cloneValue;

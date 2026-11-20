@@ -92,7 +92,7 @@ const optionNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
   as_mut: ([self], ctx) => (isSome(self) ? some(ctx, new ElementPlace(opt(self).fields, 0)) : none(ctx)),
   iter: ([self]) => outcomeIter(self, isSome(self), 'Iter', true),
   iter_mut: ([self]) => outcomeIter(self, isSome(self), 'IterMut', true, true),
-  into_iter: ([self]) => outcomeIter(self, isSome(self), 'IntoIter', true),
+  into_iter: ([self], ctx) => outcomeIter(self, isSome(self), 'IntoIter', true, false, ctx.typeArgs[0]),
   zip: ([self, other], ctx) =>
     isSome(self) && isSome(other) ? some(ctx, [opt(self).fields[0], opt(other).fields[0]]) : none(ctx),
 };
@@ -152,7 +152,7 @@ const resultNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
   },
   iter: ([self]) => outcomeIter(self, isOk(self), 'Iter', false),
   iter_mut: ([self]) => outcomeIter(self, isOk(self), 'IterMut', false, true),
-  into_iter: ([self]) => outcomeIter(self, isOk(self), 'IntoIter', false),
+  into_iter: ([self], ctx) => outcomeIter(self, isOk(self), 'IntoIter', false, false, ctx.typeArgs[0]),
 };
 
 const natives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {};
@@ -190,10 +190,17 @@ define(natives);
  * The iterator of the value in `Some` or `Ok`, if there is one, which `{:?}` writes as std's `option::Iter` (an
  * `Item { opt }` inside) or `result::Iter` does.
  */
-function outcomeIter(self: Value, present: boolean, name: string, isOption: boolean, mutable = false): IterValue {
+function outcomeIter(
+  self: Value,
+  present: boolean,
+  name: string,
+  isOption: boolean,
+  mutable = false,
+  owned?: Type
+): IterValue {
   const fields = opt(self).fields;
   const items = present ? [mutable ? new ElementPlace(fields, 0) : fields[0]] : [];
-  const iter = name === 'IntoIter' ? ownedIter(items) : arrayIter(items);
+  const iter = owned ? ownedIter(items, owned) : arrayIter(items);
   return described(iter, (show, item) => {
     const [value] = iter.rest?.() ?? [];
     const inner = optionPart(value === undefined ? undefined : (indent) => show(value, item, indent));

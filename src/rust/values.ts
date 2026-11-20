@@ -198,10 +198,10 @@ export class IterValue {
   rest: (() => Value[]) | undefined;
 
   /**
-   * An independent copy of the iterator at its position, as `Clone` makes it; `cloneItem` clones the elements an
-   * iterator owns. Undefined for an iterator whose position cannot be copied.
+   * An independent copy of the iterator at its position, as `Clone` makes it.
    */
-  fork: ((cloneItem: (value: Value) => Value) => IterValue) | undefined;
+  fork: (() => IterValue) | undefined;
+  peekedType?: Type;
 }
 
 export class MapValue {
