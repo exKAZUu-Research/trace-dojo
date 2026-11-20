@@ -18,6 +18,7 @@ int main() {
   printf("%f %.2f %10.3f %-10.1f| %e %.3E %g %g %g\n", 3.14159, 3.14159, 2.5, 2.5, 12345.678, 0.00012, 0.0001, 1e-5, 123456789.0);
   printf("%s %10s %-10s| %.2s %c %% %ld %lld %lu\n", "hi", "right", "left", "abcdef", 'Z', 123456789012L, -9LL, 18446744073709551615UL);
   string s = "world"; printf("hello %s %zu\n", s.c_str(), s.size());
+  printf("[%*.*d] %hhu %hu %.1Lf\n", -5, 3, 7, (unsigned char)255, (unsigned short)65535, 1.5L);
   char buf[32]; sprintf(buf, "%03d-%s", 7, "x"); puts(buf);
   putchar('!'); putchar('\n');
   cout << 1.0 / 0 << " " << -1.0 / 0 << " " << 0.0 / 0 << endl;

@@ -1,6 +1,6 @@
 import { formatFixed, formatGeneral, formatHex, formatScientific } from '../../c/library/floatFormat';
 import { CppRuntimeError } from '../errors';
-import { type IntName, isCharType, isWide, type Type } from '../types';
+import { intMax, type IntName, intRank, isCharType, isWide, type Type } from '../types';
 import { Ptr, type Value } from '../values';
 import { readCString } from './support';
 
@@ -61,6 +61,8 @@ export interface PrintfArgument {
 }
 
 /** Formats `printf`'s format string and arguments into bytes, as macOS's libc does. */
+// code-gauge-allow functionCognitiveComplexity 28 -- The parser advances a single cursor through flags, width, precision, and the conversion.
+// code-gauge-allow functionNcss 48 -- The parser and argument cursor share the loop that emits each formatted field.
 export function formatPrintf(format: string, args: PrintfArgument[], spend: (cost: number) => void): string {
   let out = '';
   let next = 0;
@@ -70,6 +72,16 @@ export function formatPrintf(format: string, args: PrintfArgument[], spend: (cos
     return arg;
   };
   let index = 0;
+  const readFieldSize = (): number | undefined => {
+    if (format[index] === '*') {
+      index++;
+      return Number(integerOf(take(), 'int'));
+    }
+    const digits = /^\d+/.exec(format.slice(index))?.[0];
+    if (digits === undefined) return undefined;
+    index += digits.length;
+    return Number(digits);
+  };
   while (index < format.length) {
     const char = format[index++];
     if (char !== '%') {
@@ -78,29 +90,15 @@ export function formatPrintf(format: string, args: PrintfArgument[], spend: (cos
     }
     const spec: Spec = { flags: '', length: '', conversion: '' };
     while (index < format.length && '-+ #0'.includes(format[index])) spec.flags += format[index++];
-    if (format[index] === '*') {
-      index++;
-      const width = Number(integerOf(take(), false));
-      if (width < 0) {
-        spec.flags += '-';
-        spec.width = -width;
-      } else spec.width = width;
-    } else {
-      const digits = /^\d*/.exec(format.slice(index))?.[0] ?? '';
-      index += digits.length;
-      if (digits) spec.width = Number(digits);
+    const width = readFieldSize();
+    if (width !== undefined) {
+      if (width < 0) spec.flags += '-';
+      spec.width = Math.abs(width);
     }
     if (format[index] === '.') {
       index++;
-      if (format[index] === '*') {
-        index++;
-        const precision = Number(integerOf(take(), false));
-        if (precision >= 0) spec.precision = precision;
-      } else {
-        const digits = /^\d*/.exec(format.slice(index))?.[0] ?? '';
-        index += digits.length;
-        spec.precision = Number(digits || '0');
-      }
+      const precision = readFieldSize() ?? 0;
+      if (precision >= 0) spec.precision = precision;
     }
     const modifier = ['hh', 'h', 'll', 'l', 'j', 'z', 't', 'L', 'q'].find((candidate) =>
       format.startsWith(candidate, index)
@@ -118,35 +116,34 @@ export function formatPrintf(format: string, args: PrintfArgument[], spend: (cos
   return out;
 }
 
-function integerOf(arg: PrintfArgument, wide: boolean): bigint {
+function integerOf(arg: PrintfArgument, expected: IntName, allowCorresponding = false): bigint {
   if (arg.type.kind !== 'int') throw new CppRuntimeError('formatArgumentType');
-  const size = ['long', 'ulong', 'llong', 'ullong'].includes(arg.type.name) ? 8 : 4;
-  if (wide && size < 8) throw new CppRuntimeError('formatArgumentType');
-  return BigInt(arg.value as number | bigint);
+  const actual = arg.type.name;
+  const value = BigInt(arg.value as number | bigint);
+  if (actual === expected) return value;
+  if (allowCorresponding && intRank(actual) === intRank(expected) && value >= 0n && value <= intMax(expected))
+    return value;
+  throw new CppRuntimeError('formatArgumentType');
 }
 
-// code-gauge-allow functionNcss 40 -- One case per printf conversion.
+// code-gauge-allow functionNcss 44 -- A single dispatch shares conversion logic across specifiers with the same argument type.
 function convert(spec: Spec, take: () => PrintfArgument, count: number): string | undefined {
   const { conversion, length } = spec;
-  const wide = ['l', 'll', 'j', 'z', 't', 'q'].includes(length);
   switch (conversion) {
     case 'd':
     case 'i': {
-      const value = narrow(integerOf(take(), wide), length, true, wide);
+      const value = readFormattedInteger(take(), length, true);
       return integerField(spec, value < 0n ? -value : value, value < 0n ? '-' : signOf(spec), 10, '');
     }
     case 'u':
     case 'o':
     case 'x':
     case 'X': {
-      const value = narrow(integerOf(take(), wide), length, false, wide);
-      const base = conversion === 'o' ? 8 : conversion === 'u' ? 10 : 16;
-      const prefix = spec.flags.includes('#') && value !== 0n && base === 16 ? (conversion === 'X' ? '0X' : '0x') : '';
-      return integerField(spec, value, '', base, prefix, conversion === 'X');
+      return unsignedIntegerField(spec, readFormattedInteger(take(), length, false));
     }
     case 'c': {
       if (length === 'l') throw new CppRuntimeError('custom', 'ワイド文字（%lc）は、この採点環境では使えません。');
-      return String.fromCodePoint(Number(BigInt.asUintN(8, integerOf(take(), false))));
+      return String.fromCodePoint(Number(BigInt.asUintN(8, integerOf(take(), 'int'))));
     }
     case 's': {
       if (length === 'l') throw new CppRuntimeError('custom', 'ワイド文字列（%ls）は、この採点環境では使えません。');
@@ -168,9 +165,7 @@ function convert(spec: Spec, take: () => PrintfArgument, count: number): string 
     case 'G':
     case 'a':
     case 'A': {
-      const arg = take();
-      if (arg.type.kind !== 'float') throw new CppRuntimeError('formatArgumentType');
-      return floatField(spec, arg.value as number);
+      return floatField(spec, take());
     }
     case '%': {
       return '%';
@@ -186,21 +181,34 @@ function convert(spec: Spec, take: () => PrintfArgument, count: number): string 
   }
 }
 
-const COUNT_TYPES: Record<string, IntName> = {
-  '': 'int',
-  hh: 'schar',
-  h: 'short',
-  l: 'long',
-  ll: 'llong',
-  j: 'long',
-  z: 'long',
-  t: 'long',
-  q: 'llong',
-};
+const INTEGER_FORMAT_TYPES = new Map<string, readonly [IntName, IntName]>([
+  ['', ['int', 'uint']],
+  ['hh', ['schar', 'uchar']],
+  ['h', ['short', 'ushort']],
+  ['l', ['long', 'ulong']],
+  ['ll', ['llong', 'ullong']],
+  ['j', ['long', 'ulong']],
+  ['z', ['long', 'ulong']],
+  ['t', ['long', 'ulong']],
+  ['q', ['llong', 'ullong']],
+]);
+
+function readFormattedInteger(arg: PrintfArgument, length: string, signed: boolean): bigint {
+  const types = INTEGER_FORMAT_TYPES.get(length);
+  if (!types) throw new CppRuntimeError('formatArgumentType');
+  const name = types[signed ? 0 : 1];
+  const promoted = intRank(name) < intRank('int') ? 'int' : name;
+  return narrow(integerOf(arg, promoted, true), length, signed, isWide({ kind: 'int', name }));
+}
 
 function writeCount(arg: PrintfArgument, length: string, count: number): void {
   const type = arg.type.kind === 'pointer' ? arg.type.to : undefined;
-  if (type?.kind !== 'int' || type.name !== COUNT_TYPES[length] || type.isConst || !(arg.value instanceof Ptr))
+  if (
+    type?.kind !== 'int' ||
+    type.name !== INTEGER_FORMAT_TYPES.get(length)?.[0] ||
+    type.isConst ||
+    !(arg.value instanceof Ptr)
+  )
     throw new CppRuntimeError('formatArgumentType');
   const wide = isWide(type);
   const value = narrow(BigInt(count), length, true, wide);
@@ -231,6 +239,14 @@ function narrow(value: bigint, length: string, signed: boolean, wide: boolean): 
   return signed ? BigInt.asIntN(bits, value) : BigInt.asUintN(bits, value);
 }
 
+function unsignedIntegerField(spec: Spec, value: bigint): string {
+  const { conversion } = spec;
+  const base = conversion === 'o' ? 8 : conversion === 'u' ? 10 : 16;
+  const upper = conversion === 'X';
+  const prefix = spec.flags.includes('#') && value !== 0n && base === 16 ? (upper ? '0X' : '0x') : '';
+  return integerField(spec, value, '', base, prefix, upper);
+}
+
 function integerField(
   spec: Spec,
   magnitude: bigint,
@@ -252,7 +268,10 @@ function integerField(
   return lead + digits;
 }
 
-function floatField(spec: Spec, value: number): string {
+function floatField(spec: Spec, arg: PrintfArgument): string {
+  const expected = spec.length === 'L' ? 'ldouble' : 'double';
+  if (arg.type.kind !== 'float' || arg.type.name !== expected) throw new CppRuntimeError('formatArgumentType');
+  const value = arg.value as number;
   const lower = spec.conversion.toLowerCase() as FloatFormat['conversion'];
   const text = formatFloat(value, {
     conversion: lower,

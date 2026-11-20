@@ -931,6 +931,13 @@ test.each([
   ['std::atol("-9223372036854775809")', 'オーバーフロー'],
   ['std::printf("%s", text)', 'nullptr'],
   ['std::printf("%.*s", 0, text)', 'nullptr'],
+  ['std::printf("%d", 4294967297L)', '引数の型が合いません'],
+  ['std::printf("%ld", 1LL)', '引数の型が合いません'],
+  ['std::printf("%u", -1)', '引数の型が合いません'],
+  ['std::printf("%*d", 3L, 1)', '引数の型が合いません'],
+  ['std::printf("%.*d", 3L, 1)', '引数の型が合いません'],
+  ['std::printf("%c", 65L)', '引数の型が合いません'],
+  ['std::printf("%Lf", 1.0)', '引数の型が合いません'],
 ])('reports undefined library behavior for %s', (call, diagnostic) => {
   const program = `#include <climits>
 #include <cstdio>
