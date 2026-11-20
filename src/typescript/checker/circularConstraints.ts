@@ -113,7 +113,8 @@ export class CircularConstraints {
         return receiver.types;
       }
       case 'indexedAccess': {
-        return [receiver.objectType];
+        const selected = this.c.baseConstraint(receiver);
+        return selected === receiver ? [receiver.objectType] : [receiver.objectType, selected];
       }
       case 'conditional': {
         const branch = this.c.conditionalBranchFromBounds(receiver);
