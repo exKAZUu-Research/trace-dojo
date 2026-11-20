@@ -361,8 +361,8 @@ export class HashValue extends MapValue {
     node.value = value;
   }
 
-  children(): Iterable<Value> {
-    return this.nodes().map((node) => node.value);
+  *children(): Iterable<Value> {
+    for (let node = this.head.next; node; node = node.next) yield node.value;
   }
 
   findNode(key: Value): HashNode | undefined {

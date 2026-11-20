@@ -39,6 +39,33 @@ int main() {
   }
 });
 
+test.each([
+  ['vector<int>', 'std::vector<int> values(24);'],
+  ['vector<pair<int, int>>', 'std::vector<std::pair<int, int>> values(24);'],
+  ['string', "std::string values(1500, 'x');"],
+])('bounds the cumulative snapshots of a C++ %s', (_type, declaration) => {
+  const program = `#include <string>
+#include <utility>
+#include <vector>
+int main() {
+  ${declaration}
+  for (int i = 0; i < COUNT; ++i) {
+    values.size();
+  }
+}`;
+  const previousLimit = LIMITS.maxCppTraceSize;
+  LIMITS.maxCppTraceSize = 16_000;
+  try {
+    const short = program.replace('COUNT', '1');
+    const long = program.replace('COUNT', '20');
+    expect(traceProgram('cpp', short, short).traceItems.length).toBeGreaterThan(1);
+    expect(() => traceProgram('cpp', long, long)).toThrow('Execution limit exceeded: trace');
+    expect(executeProgram('cpp', long)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+  } finally {
+    LIMITS.maxCppTraceSize = previousLimit;
+  }
+});
+
 test('charges initializer-list storage and newly constructed vector elements', () => {
   const prefix = `#include <cstdio>
 #include <vector>

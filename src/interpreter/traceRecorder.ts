@@ -24,6 +24,7 @@ export interface TracedFrame {
 export interface FrameReader<F extends TracedFrame> {
   isAtomic(frame: F): boolean;
   variablesOf(frame: F): TraceVariables;
+  scalarVarsOf?(frame: F): TraceVariables['vars'];
   recordItem?(item: TraceItem): TraceItem;
 }
 
@@ -48,15 +49,19 @@ export class TraceRecorder<F extends TracedFrame> implements StepRecorder {
     if (frames.some((frame) => this.frames.isAtomic(frame))) return false;
     if (this.traceItems.length >= MAX_TRACE_ITEMS) throw new ExecutionLimitError('trace');
     this.runtime.collectGarbage();
+    const current = frames.at(-1) as F;
     const item: TraceItem = {
       line: row + 1,
       callLines: frames.slice(1).flatMap(({ callRow }) => (callRow === undefined ? [] : [callRow + 1])),
-      ...this.frames.variablesOf(frames.at(-1) as F),
+      ...this.frames.variablesOf(current),
       turtles: world.turtleTraces(),
       board: world.boardText(),
     };
     this.traceItems.push(this.frames.recordItem?.(item) ?? item);
-    for (const frame of frames) this.varsAtLastStep.set(frame, this.frames.variablesOf(frame).vars);
+    for (const frame of frames) {
+      const vars = this.frames.scalarVarsOf && frame === current ? item.vars : this.scalarVarsOf(frame);
+      this.varsAtLastStep.set(frame, vars);
+    }
     return true;
   }
 
@@ -73,8 +78,11 @@ export class TraceRecorder<F extends TracedFrame> implements StepRecorder {
     return (
       last.board === world.boardText() &&
       fastDeepEqual(last.turtles, world.turtleTraces()) &&
-      (shownVars === undefined || sameVariables(shownVars, this.frames.variablesOf(frame).vars))
+      (shownVars === undefined || sameVariables(shownVars, this.scalarVarsOf(frame)))
     );
+  }
+  private scalarVarsOf(frame: F): TraceVariables['vars'] {
+    return this.frames.scalarVarsOf?.(frame) ?? this.frames.variablesOf(frame).vars;
   }
 }
 
