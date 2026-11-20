@@ -86,7 +86,7 @@ function defineRegExpPrototype(builder: RealmBuilder): void {
     if (!isObject(thisValue))
       return runtime.throwError(
         'TypeError',
-        `Method RegExp.prototype.test called on incompatible receiver ${runtime.describePlain(thisValue)}`
+        () => `Method RegExp.prototype.test called on incompatible receiver ${runtime.describePlain(thisValue)}`
       );
     return regExpExec(runtime, thisValue, runtime.toString(args[0])) !== null;
   });
@@ -121,8 +121,7 @@ export type RegExpObject = JsObject & { regexp: RegExp };
 
 function thisRegExp(runtime: Runtime, value: Value, name: string, isGetter = false): RegExpObject {
   if (value instanceof JsObject && value.regexp) return value as RegExpObject;
-  return runtime.throwError(
-    'TypeError',
+  return runtime.throwError('TypeError', () =>
     isGetter
       ? `RegExp.prototype.${name} getter called on non-RegExp object`
       : `Method RegExp.prototype.${name} called on incompatible receiver ${runtime.describePlain(value)}`

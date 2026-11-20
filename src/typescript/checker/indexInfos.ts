@@ -5,6 +5,7 @@ import {
   intersectionOf,
   isIntrinsic,
   type KeyedIndexInfo,
+  literalType,
   numberType,
   type Property,
   stringType,
@@ -31,6 +32,15 @@ export function applicableIndex(c: Checker, structure: Structure, key: Type): In
   ];
   if (applicable.length > 0) return combinedIndex(c, applicable);
   return isIndexKeyOf(c, key, stringType) ? structure.stringIndex : undefined;
+}
+
+/** The index reached by a declared name, which uses the string spelling of a numeric key. */
+export function namedPropertyIndex(c: Checker, structure: Structure, name: string, key: Type): IndexInfo | undefined {
+  return applicableIndex(
+    c,
+    structure,
+    key.kind === 'literal' && typeof key.value === 'number' ? literalType(name) : key
+  );
 }
 
 /** The pattern index signatures whose patterns hold a key, which a number key never fits. */
@@ -125,7 +135,7 @@ export function isIndexKeyOf(c: Checker, source: Type, target: Type): boolean {
 
 /** Whether an index signature for `keyType` applies to a property, by the key type that names it. */
 export function isPropertyKeyOf(c: Checker, property: Property, keyType: Type): boolean {
-  return isIndexKeyOf(c, c.typeOperators.propertyKeyType(property), keyType);
+  return !property.isPrivateName && isIndexKeyOf(c, c.typeOperators.propertyKeyType(property), keyType);
 }
 
 /** Whether a key is a numeric string, as `"1"` and `` `${number}` `` are. */

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 581 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
+// code-gauge-allow-file fileNcss 584 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { type SourceDiagnostic, sourceDiagnostic } from '../../interpreter/diagnostics';
@@ -641,7 +641,18 @@ export class Checker {
       ...signature,
       typeParameters,
       parameters: this.signatures.expandRestTuple(
-        signature.parameters.map((parameter) => ({ ...parameter, type: this.instantiate(parameter.type, mapper) }))
+        signature.parameters.map((parameter) => {
+          const instantiate = (): Type => this.instantiate(parameter.type, mapper);
+          let instantiated: Type | undefined;
+          return {
+            name: parameter.name,
+            optional: parameter.optional,
+            rest: parameter.rest,
+            get type() {
+              return (instantiated ??= instantiate());
+            },
+          };
+        })
       ),
       thisType: signature.thisType && this.instantiate(signature.thisType, mapper),
       returnType: () => {

@@ -277,7 +277,7 @@ function requireCollection(runtime: Runtime, value: Value, kind: CollectionKind,
   if (value instanceof JsObject && value.collection?.kind === kind) return value.collection;
   return runtime.throwError(
     'TypeError',
-    `Method ${method} called on incompatible receiver ${receiverText(runtime, value)}`
+    () => `Method ${method} called on incompatible receiver ${receiverText(runtime, value)}`
   );
 }
 

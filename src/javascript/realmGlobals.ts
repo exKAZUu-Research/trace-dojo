@@ -230,7 +230,8 @@ function throwNotApplicable(runtime: Runtime, receiver: Value): never {
         : `a ${typeof receiver}`;
   return runtime.throwError(
     'TypeError',
-    `Function.prototype.apply was called on ${runtime.describePlain(receiver)}, which is ${kind} and not a function`
+    () =>
+      `Function.prototype.apply was called on ${runtime.describePlain(receiver)}, which is ${kind} and not a function`
   );
 }
 

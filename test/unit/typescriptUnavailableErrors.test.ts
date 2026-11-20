@@ -75,8 +75,21 @@ test.each([
   });
 });
 
-test('tracing never exposes an internal marker as an error message', () => {
-  expect(() => traceProgram('typescript', caughtFunctionError, caughtFunctionError)).toThrow(CompileError);
+test.each([
+  "(fn as any).name='changed'",
+  'delete (fn as any).name',
+  'Object.setPrototypeOf(fn, null)',
+  '(fn as any).__proto__ = null',
+])('a trace can keep a caught error before its message is read: %s', (action) => {
+  const source = caughtFunctionError.replace("(fn as any).name='changed'", action);
+  const program = source + 'const handled = caught instanceof TypeError; console.log(handled);';
+  expect(traceProgram('typescript', program, program)).toMatchObject({
+    stdout: 'true\n',
+    finalVars: { handled: true },
+    uncaughtException: undefined,
+  });
+  const observesMessage = source + 'console.log(caught.message);';
+  expect(() => traceProgram('typescript', observesMessage, observesMessage)).toThrow(CompileError);
 });
 
 test('tracing a handled function-property error without retaining its message records the result', () => {

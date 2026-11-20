@@ -158,6 +158,7 @@ export class MemberChecker {
   }
 
   private readReceiver(node: TreeNode, object: TreeNode): { type: Type; shortCircuits: boolean } {
+    if (object.type === 'super') return { type: this.c.classes.superType(node), shortCircuits: false };
     const checked = this.c.expressions.check(object);
     const optional = node.childForFieldName('optional_chain') !== null;
     if (optional) this.continueChain(object);
@@ -428,7 +429,14 @@ export class MemberChecker {
     const result = this.narrowedReference(node, () =>
       this.indexedType(node, objectNode, indexNode, objectType, indexType)
     );
-    return this.checkedAccess(node, result, objectType, shortCircuits, indexType);
+    const receiver = objectNode.type === 'super' ? this.c.classes.thisTypeOfExpression(objectNode) : objectType;
+    return this.checkedAccess(node, result, receiver, shortCircuits, indexType);
+  }
+
+  targetReceiverType(node: TreeNode, object: TreeNode): Type {
+    return object.type === 'super'
+      ? this.c.classes.superType(node)
+      : this.checkNonNullable(object, this.c.expressions.check(object));
   }
 
   /** The type an element access's index selects by, which is `number` for a `for...in` variable over an array. */

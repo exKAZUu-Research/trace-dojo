@@ -54,12 +54,11 @@ function receivedArgument(runtime: Runtime, value: Value): string {
   if (value === null) return 'null';
   if (value instanceof JsFunction) return `function ${functionName(runtime, value)}`;
   if (value instanceof JsObject) {
-    for (let prototype = value.proto; prototype; prototype = prototype.proto) {
-      const constructor = prototype.properties.get('constructor');
-      if (constructor && 'value' in constructor && constructor.value instanceof JsFunction)
-        return `an instance of ${functionName(runtime, constructor.value)}`;
-    }
-    return inspectValue(runtime, value);
+    const constructor = runtime.get(value, 'constructor');
+    const name = constructor === null || constructor === undefined ? undefined : runtime.get(constructor, 'name');
+    return typeof name === 'string' && name.length > 0
+      ? `an instance of ${name}`
+      : inspectValue(runtime, value, undefined, -1);
   }
   return `type ${typeof value} (${inspectValue(runtime, value)})`;
 }

@@ -261,27 +261,31 @@ function displayedEntries(object: JsObject, runtime: Runtime, excluded?: Readonl
   const entries: [string, Value][] = [];
   // Errors keep their message in a non-enumerable property.
   const message = object.isError ? object.properties.get('message') : undefined;
-  if (message && !isAccessor(message)) entries.push(['message', runtime.readPropertyValue(message)]);
+  if (message && !isAccessor(message) && !runtime.isUnavailableValue(message.value))
+    entries.push(['message', message.value]);
   for (const [key, property] of object.properties) {
     if (
       typeof key === 'string' &&
       property.enumerable &&
       !isAccessor(property) &&
-      traceField(property.value, excluded?.has(key))
+      traceField(runtime, property.value, excluded?.has(key))
     )
-      entries.push([key, runtime.readPropertyValue(property)]);
+      entries.push([key, property.value]);
   }
   const fields = [...(object.privateMembers ?? [])].filter(
-    ([key, property]) => !isAccessor(property) && traceField(property.value, excluded?.has(key))
+    ([key, property]) => !isAccessor(property) && traceField(runtime, property.value, excluded?.has(key))
   );
   const labels = privateLabels(fields.map(([key]) => key));
-  for (const [index, [, property]] of fields.entries())
-    entries.push([labels[index], runtime.readPropertyValue(property as DataProperty)]);
+  for (const [index, [, property]] of fields.entries()) entries.push([labels[index], (property as DataProperty).value]);
   return entries;
 }
 
-function traceField(value: Value, isConstant: boolean | undefined): boolean {
-  return !(value instanceof JsFunction) && (!isConstant || value === undefined || value === null);
+function traceField(runtime: Runtime, value: Value, isConstant: boolean | undefined): boolean {
+  return (
+    !(value instanceof JsFunction) &&
+    !runtime.isUnavailableValue(value) &&
+    (!isConstant || value === undefined || value === null)
+  );
 }
 
 function primitiveNode(value: bigint | symbol): DisplayNode {

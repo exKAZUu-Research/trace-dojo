@@ -9,7 +9,7 @@ import { arrayTargets, Elaboration, targetElementType } from './elaboration';
 import { Expandos, laterRunningTypes } from './expandos';
 import { ExpressionTypeCache } from './expressionTypeCache';
 import type { FlowEntry } from './flow';
-import { applicableIndex } from './indexInfos';
+import { namedPropertyIndex } from './indexInfos';
 import { nonNullableType } from './nullishConstraints';
 import type { Sym } from './scopes';
 import { nameSuggestionHint } from './spelling';
@@ -35,7 +35,6 @@ import {
   freshLiteralType,
   isAnyLike,
   isIntrinsic,
-  literalType,
   nullType,
   numberType,
   type ObjectType,
@@ -744,21 +743,15 @@ export class ExpressionChecker {
 
   private isKnownProperty(targets: Type[], property: Property): boolean {
     const { name } = property;
-    const key = this.propertyIndexKey(property);
+    const key = this.c.typeOperators.propertyKeyType(property);
     return targets.some((member) => {
       const structure = this.c.structureOf(member);
       return (
         (this.c.propertyOf(member, name) !== undefined && !this.isObjectPrototypeProperty(member, name)) ||
         structure.stringIndex !== undefined ||
-        applicableIndex(this.c, structure, key) !== undefined
+        namedPropertyIndex(this.c, structure, name, key) !== undefined
       );
     });
-  }
-
-  private propertyIndexKey(property: Property): Type {
-    const key = this.c.typeOperators.propertyKeyType(property);
-    // Known-property checks use the name of a numeric property, so a `${number}` index still covers it.
-    return key.kind === 'literal' && typeof key.value === 'number' ? literalType(property.name) : key;
   }
 
   /**
@@ -767,7 +760,7 @@ export class ExpressionChecker {
    * as a whole, yet TypeScript rejects the value.
    */
   private fitsUnionProperty(node: TreeNode, property: Property, targets: Type[], target: Type): boolean {
-    const key = this.propertyIndexKey(property);
+    const key = this.c.typeOperators.propertyKeyType(property);
     const declared = unionOf(targets.map((member) => this.typeOfPropertyIn(member, property.name, key)));
     if (this.c.relations.isAssignable(property.type(), declared)) return true;
     const { declaration } = property;
@@ -785,7 +778,7 @@ export class ExpressionChecker {
   private typeOfPropertyIn(member: Type, name: string, key: Type): Type {
     const property = this.c.propertyOf(member, name);
     if (property) return property.optional ? unionOf([property.type(), undefinedType]) : property.type();
-    return applicableIndex(this.c, this.c.structureOf(member), key)?.type ?? undefinedType;
+    return namedPropertyIndex(this.c, this.c.structureOf(member), name, key)?.type ?? undefinedType;
   }
 
   /** Checks the object literal a written property's value spells against the target's type of the property. */

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 732 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
+// code-gauge-allow-file fileNcss 737 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
 import { minimumArguments } from './callArity';
 import type { Checker } from './checker';
 import { isUnit } from './flow';
@@ -12,6 +12,7 @@ import {
   keyedIndexes,
 } from './indexInfos';
 import { isBigintTemplateText, isNumberTemplateText, templateParts } from './templateParts';
+import { structurallyIdentical } from './typeIdentity';
 import {
   anonymousObject,
   anyType,
@@ -47,7 +48,7 @@ import {
   voidType,
 } from './types';
 
-type Relation = 'assignable' | 'comparable';
+type Relation = 'assignable' | 'comparable' | 'identical';
 type SignatureMode = 'signature' | 'strictCallback' | 'bivariantCallback';
 
 const MAX_RELATION_DEPTH = 100;
@@ -183,10 +184,11 @@ export class Relations {
   }
 
   // code-gauge-allow functionCognitiveComplexity 24 -- Follows TypeScript's order of checks for each kind of type.
-  // code-gauge-allow functionNcss 32 -- Follows TypeScript's order of checks for each kind of type.
+  // code-gauge-allow functionNcss 34 -- Follows TypeScript's order of checks for each kind of type.
   private structuredRelated(source: Type, target: Type, relation: Relation, state: number): boolean {
     const s = this.c.reducedTypes.of(regularOf(source));
     const t = this.c.reducedTypes.of(regularOf(target));
+    if (relation === 'identical') return structurallyIdentical(this.c, s, t);
     const trivial = this.trivialRelation(s, t);
     if (trivial !== undefined) return trivial;
     if (s.kind === 'union') return this.unionSourceRelated(s, t, relation, state);
@@ -468,8 +470,7 @@ export class Relations {
   }
 
   identical(a: Type, b: Type): boolean {
-    if (a === b) return true;
-    return this.isAssignable(a, b) && this.isAssignable(b, a);
+    return this.isRelated(a, b, 'identical');
   }
 
   private intrinsicTarget(s: Type, name: string, relation: Relation): boolean {

@@ -59,9 +59,9 @@ export class CallArity {
    * decide, where `x: T | void` stays omittable even when `T` is inferred as `unknown`.
    */
   instanceArityMatches(instance: Signature, declaration: Signature, args: ExpressionListFlow): boolean {
-    const hasNonArrayRest = declaration.parameters.some(
-      ({ rest, type }) => rest && !isAnyLike(type) && !this.c.isArrayType(type) && !this.c.isReadonlyArrayType(type)
-    );
+    const rest = declaration.parameters.find((parameter) => parameter.rest);
+    const hasNonArrayRest =
+      rest && !isAnyLike(rest.type) && !this.c.isArrayType(rest.type) && !this.c.isReadonlyArrayType(rest.type);
     return !hasNonArrayRest || this.arityMatches(instance, args);
   }
 

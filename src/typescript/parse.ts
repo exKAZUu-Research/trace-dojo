@@ -144,7 +144,7 @@ function typeScriptSyntaxErrors(root: Node, source: string, errors: SourceDiagno
     const message =
       numericEscapeError(node, source) ??
       characterEscapeError(node) ??
-      optionalAccessorError(node) ??
+      methodModifierError(node) ??
       strictIdentifierError(node);
     if (message) errors.push({ row: node.startPosition.row, message });
     checkMixedLogicalOperators(node, errors);
@@ -254,9 +254,11 @@ function optionalIndexSignatureError(node: Node): SourceDiagnostic | undefined {
 }
 
 /** A `?` after an accessor's name, which tsc's parser rejects wherever an accessor may appear. */
-function optionalAccessorError(node: Node): string | undefined {
+function methodModifierError(node: Node): string | undefined {
   const member = node.parent;
-  if (node.type !== '?' || !member || !accessorTypes.has(member.type)) return undefined;
+  if (!member || !accessorTypes.has(member.type)) return undefined;
+  if (node.type === 'readonly') return "'readonly' 修飾子はプロパティ宣言かインデックス シグネチャにしか書けません。";
+  if (node.type !== '?') return undefined;
   const tokens = new Set(member.children.map((child) => child?.type));
   return tokens.has('get') || tokens.has('set') ? 'アクセサーに ? は付けられません。' : undefined;
 }

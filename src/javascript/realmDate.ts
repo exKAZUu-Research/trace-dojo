@@ -178,6 +178,8 @@ export function hostOptions(runtime: Runtime, value: Value): unknown {
   );
 }
 
+// code-gauge-allow functionCognitiveComplexity 18 -- Keeps the three Date-to-primitive conversion methods together.
+// code-gauge-allow functionNcss 34 -- Keeps the three Date-to-primitive conversion methods together.
 function defineConversions(builder: RealmBuilder, prototype: JsObject): void {
   for (const name of ['toString', 'toDateString', 'toTimeString', 'toUTCString'] as const) {
     builder.method(prototype, name, 0, ({ runtime, thisValue }) => new Date(thisTime(runtime, thisValue))[name]());
@@ -214,7 +216,7 @@ function defineConversions(builder: RealmBuilder, prototype: JsObject): void {
     }
     const [hint] = args;
     if (hint !== 'string' && hint !== 'default' && hint !== 'number') {
-      return runtime.throwError('TypeError', `Invalid hint: ${receiverText(runtime, hint)}`);
+      return runtime.throwError('TypeError', () => `Invalid hint: ${receiverText(runtime, hint)}`);
     }
     return ordinaryToPrimitive(
       runtime,

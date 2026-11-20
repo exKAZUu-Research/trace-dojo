@@ -36,11 +36,11 @@ export class ReducedTypes {
     if (objects.length < 2) return type;
     const properties = new Map<string, Property[]>();
     for (const object of objects) {
-      for (const property of object.resolve().properties.values()) {
+      for (const [key, property] of object.resolve().properties) {
         this.c.budget.spend();
-        const group = properties.get(property.name);
+        const group = properties.get(key);
         if (group) group.push(property);
-        else properties.set(property.name, [property]);
+        else properties.set(key, [property]);
       }
     }
     for (const group of properties.values()) {

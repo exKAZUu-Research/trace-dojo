@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 454 -- Keeps signature resolution and the TypeScript grammar of parameters and accessors together.
+// code-gauge-allow-file fileNcss 486 -- Keeps signature resolution and the TypeScript grammar of parameters and accessors together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { erasedStatementTypes } from '../erasedSyntax';
@@ -51,7 +51,7 @@ export class Signatures {
 
   constructor(private readonly c: Checker) {}
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Builds lazy annotation or body signatures and caches only context-free complete signatures.
+  // code-gauge-allow functionCognitiveComplexity 18 -- Builds lazy annotation or body signatures and caches only context-free complete signatures.
   signatureOf(node: TreeNode, contextual?: Signature, inferPredicate = true): Signature {
     if (!contextual && inferPredicate) {
       const cached = this.signatureCache.get(node.id);
@@ -59,8 +59,11 @@ export class Signatures {
     }
     this.checkParameterGrammar(node);
     const typeParameters = this.functionTypeParameters(node, contextual);
-    const { parameters, thisType } = this.declaredParameters(node, contextual);
     const returnNode = returnTypeNode(node);
+    const { parameters, thisType } =
+      returnNode && !contextual && node.childForFieldName('name')
+        ? this.annotatedSignatureParameters(node)
+        : this.declaredParameters(node, contextual);
     let returnType: Type | undefined;
     const signature: Signature = {
       typeParameters,
@@ -84,15 +87,10 @@ export class Signatures {
   }
 
   methodSignatureWhileResolving(node: TreeNode): Signature {
-    const parameters = argumentParameters(parameterNodes(node)).map((parameter, index): Parameter => {
-      const pattern = patternOf(parameter);
-      return {
-        name: pattern.type === 'identifier' ? pattern.text : `__${index}`,
-        type: this.c.typeNodes.annotationType(parameter.childForFieldName('type')) ?? anyType,
-        optional: parameter.type === 'optional_parameter' || parameter.childForFieldName('value') !== null,
-        rest: pattern.type === 'rest_pattern',
-      };
-    });
+    const parameters = argumentParameters(parameterNodes(node)).map((parameter, index): Parameter => ({
+      ...parameterShape(parameter, index),
+      type: this.c.typeNodes.annotationType(parameter.childForFieldName('type')) ?? anyType,
+    }));
     const signature: Signature = {
       declaration: node,
       typeParameters: this.typeParametersOf(node),
@@ -241,6 +239,40 @@ export class Signatures {
     return contextual && isContextSensitiveFunction(node) ? contextual.typeParameters : this.typeParametersOf(node);
   }
 
+  private annotatedSignatureParameters(node: TreeNode): { parameters: Parameter[]; thisType: Type | undefined } {
+    const nodes = parameterNodes(node);
+    const args = argumentParameters(nodes);
+    if (!args.some(hasInferredDefault)) return this.declaredParameters(node, undefined);
+    const checker = this.c;
+    const flow = checker.flow.current?.clone();
+    let inferred: Parameter[] | undefined;
+    let resolving = false;
+    const infer = (index: number): Type => {
+      if (resolving) return anyType;
+      resolving = true;
+      try {
+        inferred ??= checker.flow.probe(() => this.declaredParameters(node, undefined).parameters, flow);
+        return inferred[index].type;
+      } finally {
+        resolving = false;
+      }
+    };
+    // Calls can read the annotated return and omit a defaulted parameter without asking for its type.
+    const parameters = args.map((parameter, index): Parameter => {
+      if (!hasInferredDefault(parameter))
+        return this.declaredParameter(node, parameter, undefined, index, false).parameter;
+      return {
+        ...parameterShape(parameter, index),
+        get type() {
+          return infer(index);
+        },
+      };
+    });
+    const thisType =
+      args.length < nodes.length ? checker.typeNodes.annotationType(nodes[0].childForFieldName('type')) : undefined;
+    return { parameters: withRequiredPrefix(parameters), thisType };
+  }
+
   private declaredParameters(
     node: TreeNode,
     contextual: Signature | undefined
@@ -309,14 +341,8 @@ export class Signatures {
     return {
       initializer,
       parameter: {
-        name: rest
-          ? (named(pattern)[0]?.text ?? 'args')
-          : ['identifier', 'this'].includes(pattern.type)
-            ? pattern.text
-            : `__${index}`,
+        ...parameterShape(parameterNode, index, omitted && !annotation),
         type,
-        optional: parameterNode.type === 'optional_parameter' || value !== null || (omitted && !annotation && !rest),
-        rest,
       },
     };
   }
@@ -711,9 +737,35 @@ function withRequiredPrefix(parameters: Parameter[]): Parameter[] {
   const minArgumentCount = parameters.findLastIndex((parameter) => !parameter.optional && !parameter.rest) + 1;
   return parameters.map((parameter, index) =>
     index < minArgumentCount && parameter.optional
-      ? { ...parameter, optional: false, type: unionOf([parameter.type, undefinedType]) }
+      ? {
+          name: parameter.name,
+          rest: parameter.rest,
+          optional: false,
+          get type() {
+            return unionOf([parameter.type, undefinedType]);
+          },
+        }
       : parameter
   );
+}
+
+function parameterShape(node: TreeNode, index: number, omitted = false): Omit<Parameter, 'type'> {
+  const pattern = patternOf(node);
+  const rest = pattern.type === 'rest_pattern';
+  const name = rest
+    ? (named(pattern)[0]?.text ?? 'args')
+    : ['identifier', 'this'].includes(pattern.type)
+      ? pattern.text
+      : `__${index}`;
+  return {
+    name,
+    rest,
+    optional: node.type === 'optional_parameter' || node.childForFieldName('value') !== null || (omitted && !rest),
+  };
+}
+
+function hasInferredDefault(parameter: TreeNode): boolean {
+  return parameter.childForFieldName('type') === null && parameter.childForFieldName('value') !== null;
 }
 
 /** The names that a type node refers to, without the names it declares, as `U` in `<U>(u: U) => U` or `infer U`. */

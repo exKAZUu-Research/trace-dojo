@@ -30,7 +30,7 @@ function checkBuiltinUndefinedDeclaration(c: Checker): void {
 
 const blockScopedKinds = new Set(['let', 'const', 'class']);
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Distinguishes block-scoped conflicts, mixed function/var declarations, repeated implementations, and compatible var redeclarations.
+// code-gauge-allow functionCognitiveComplexity 21 -- Distinguishes block-scoped conflicts, mixed function/var declarations, repeated implementations, and compatible var redeclarations.
 function checkValueDuplicates(c: Checker, symbol: Sym): void {
   const entries = symbol.valueEntries;
   if (entries.length < 2) return;
@@ -40,6 +40,11 @@ function checkValueDuplicates(c: Checker, symbol: Sym): void {
       ? `ブロックスコープの変数 ${name} はすでに宣言されています。`
       : `${name} はすでに宣言されています。`;
     for (const entry of entries) c.error(entry.name, message);
+    return;
+  }
+  const parameters = entries.filter((entry) => entry.kind === 'parameter');
+  if (parameters.length > 1) {
+    for (const parameter of parameters) c.error(parameter.name, `${name} はすでに宣言されています。`);
     return;
   }
   if (entries.some((entry) => entry.kind === 'function') && entries.some(isFunctionScopedVariable)) {

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 433 -- Builds and checks conditional flow for each expression form.
+// code-gauge-allow-file fileNcss 445 -- Builds and checks conditional flow for each expression form.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -132,15 +132,21 @@ export class ConditionChecker {
       );
       return { whenTrue: this.chainEvaluated(whenTrue, left), whenFalse, type };
     }
-    if (operator === 'in') {
-      return {
-        ...(isPropertyKeyLiteral(leftType)
-          ? this.narrowed(right, (current, assumeTrue) => this.c.flow.narrowByIn(current, leftType, assumeTrue))
-          : this.truthiness(expression)),
-        type,
-      };
-    }
+    if (operator === 'in') return { ...this.inCondition(expression, left, right, leftType), type };
     return { ...this.narrowEquality(left, right, operator, leftType, rightType), type };
+  }
+
+  private inCondition(expression: TreeNode, left: TreeNode, right: TreeNode, key: Type): Omit<Condition, 'type'> {
+    if (left.type === 'private_property_identifier') {
+      const brand = this.c.classes.privateNameBrand(left);
+      if (brand)
+        return this.narrowed(right, (current, assumeTrue) =>
+          this.c.flow.narrowByInstanceof(current, brand, assumeTrue)
+        );
+    }
+    return isPropertyKeyLiteral(key)
+      ? this.narrowed(right, (current, assumeTrue) => this.c.flow.narrowByIn(current, key, assumeTrue))
+      : this.truthiness(expression);
   }
 
   private logicalCondition(operator: '&&' | '||', left: TreeNode, right: TreeNode): Condition {
@@ -565,16 +571,16 @@ export class ConditionChecker {
     const rightExpression = rightOperand.reference;
     // `typeof x === "string"`
     for (const [typeofSide, other] of [
-      [leftExpression, rightExpression],
-      [rightExpression, leftExpression],
+      [leftExpression, rightOperand],
+      [rightExpression, leftOperand],
     ] as const) {
+      const name = typeofTag(other.reference, other.type);
       if (
         typeofSide.type === 'unary_expression' &&
         typeofSide.childForFieldName('operator')?.text === 'typeof' &&
-        other.type === 'string'
+        name !== undefined
       ) {
         const target = typeofSide.childForFieldName('argument') as TreeNode;
-        const name = stringValue(other);
         const { whenTrue, whenFalse } = this.narrowed(target, (current, assumeTrue) =>
           this.c.flow.narrowByTypeof(current, name, assumeTrue === equal)
         );
@@ -699,4 +705,11 @@ function destructuringPattern(symbol: Sym): TreeNode | undefined {
   // A rest parameter destructures the tuple of the arguments it takes, as `...[kind, value]` does.
   const pattern = declared?.type === 'rest_pattern' ? named(declared)[0] : declared;
   return pattern?.type === 'object_pattern' || pattern?.type === 'array_pattern' ? pattern : undefined;
+}
+
+function typeofTag(node: TreeNode, type: Type): string | undefined {
+  if (node.type === 'string') return stringValue(node);
+  if (node.type !== 'template_string' || named(node).some((child) => child.type === 'template_substitution'))
+    return undefined;
+  return type.kind === 'literal' && typeof type.value === 'string' ? type.value : undefined;
 }

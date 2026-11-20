@@ -87,7 +87,7 @@ export interface Property {
   /** A `#name` field, which only the declaring class sees. */
   isPrivateName?: boolean;
   declaration?: TreeNode;
-  /** For a property a mapped type made, the literal types that name it, which `keyof` gives. */
+  /** The checked key type of a member, captured where it is declared or produced by a mapped type. */
   nameType?: Type;
   /** Whether the property is a get accessor without a setter. */
   getterOnly?: boolean;

@@ -6,9 +6,9 @@ function useInferred(value?: number) {
 class Stop {
   fail(): never { throw new Error("missing"); }
 }
-const stop = new Stop();
+const stopper = new Stop();
 function useInferredInstance(value?: number) {
-  if (value === undefined) stop.fail();
+  if (value === undefined) stopper.fail();
   return value.toFixed();
 }
 function optionalCallback(stop?: () => never): number {

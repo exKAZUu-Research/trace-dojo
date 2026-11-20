@@ -1,0 +1,10 @@
+class ReadOnly {
+  readonly count = 3;
+  readonly() { return this.count; }
+}
+interface Dictionary {
+  readonly [name: string]: number;
+  readonly total: number;
+}
+const dictionary: Dictionary = { total: 2 };
+console.log(new ReadOnly().readonly(), dictionary.total);

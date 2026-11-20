@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 813 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss 817 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
@@ -163,8 +163,18 @@ export class Runtime {
     return fn;
   }
 
-  throwError(name: ErrorName, message: string): never {
-    throw new JsThrow(this.newError(name, message));
+  throwError(name: ErrorName, message: string | (() => string)): never {
+    let detail: string | symbol;
+    try {
+      detail = typeof message === 'string' ? message : message();
+    } catch (error) {
+      if (!(error instanceof CompileError)) throw error;
+      detail = Symbol('unavailable error message');
+      this.unavailableValues.set(detail, error);
+    }
+    const exception = this.newError(name, typeof detail === 'string' ? detail : '');
+    if (typeof detail === 'symbol') defineHidden(exception, 'message', detail);
+    throw new JsThrow(exception);
   }
 
   newError(name: ErrorName, message: string): JsObject {
@@ -235,6 +245,10 @@ export class Runtime {
       enumerable: false,
     };
     error.properties.set('stack', { ...this.stackAccessors });
+  }
+
+  isUnavailableValue(value: Value): boolean {
+    return typeof value === 'symbol' && this.unavailableValues.has(value);
   }
 
   readPropertyValue(property: DataProperty): Value {
@@ -314,21 +328,22 @@ export class Runtime {
    * @param strict Whether an assignment the property refuses throws, as it does in strict mode code and in builtins.
    */
   set(target: Value, key: Key, value: Value, lookupStart?: JsObject, strict = true): void {
-    if (!(target instanceof JsObject)) {
-      this.setOnPrimitive(target, key, value, strict);
+    const start = lookupStart ?? target;
+    if (!(start instanceof JsObject)) {
+      this.setOnPrimitive(start, key, value, strict);
       return;
     }
-    const property = this.findProperty(lookupStart ?? target, key);
+    const property = this.findProperty(start, key);
     if (property && isAccessor(property)) {
       if (property.set) this.call(property.set, target, [value], this.currentRow);
       else
         this.refuse(
           strict,
-          () => `Cannot set property ${String(key)} of ${this.receiverText(target)} which has only a getter`
+          () => `Cannot set property ${String(key)} of ${this.receiverText(start)} which has only a getter`
         );
       return;
     }
-    if (property && !property.writable) {
+    if (!(target instanceof JsObject) || (property && !property.writable)) {
       this.refuse(strict, () => this.readOnlyMessage(key, target));
       return;
     }
@@ -438,17 +453,7 @@ export class Runtime {
 
   /** Throws the TypeError of a refused assignment or deletion in strict mode code, which other code ignores. */
   private refuse(strict: boolean, message: string | (() => string)): void {
-    if (!strict) return;
-    try {
-      this.throwError('TypeError', typeof message === 'string' ? message : message());
-    } catch (error) {
-      if (!(error instanceof CompileError)) throw error;
-      const pending = Symbol('unavailable error message');
-      this.unavailableValues.set(pending, error);
-      const exception = this.newError('TypeError', '');
-      defineHidden(exception, 'message', pending);
-      throw new JsThrow(exception);
-    }
+    if (strict) this.throwError('TypeError', message);
   }
 
   private writeArrayData(array: JsArray, key: Key, value: Value, strict: boolean): boolean {

@@ -61,3 +61,18 @@ const a = 1; const a = 2;`
   if (execution.kind !== 'compileError') throw new Error('Expected duplicate declaration diagnostics');
   expect(execution.diagnostics.map(({ row }) => row + 1)).toEqual([1, 3, 4, 6, 7, 7]);
 });
+
+test('duplicate parameter names are reported in signatures and implementations', () => {
+  const execution = executeProgram(
+    'typescript',
+    `interface Options { method(value: number, value: number): void; }
+function repeat(
+  value: number,
+  value: number
+): number { return value; }
+const read = ({ value }: { value: number }, [value]: number[]) => value;
+class Box { constructor(value: number, value: number) {} }`
+  );
+  if (execution.kind !== 'compileError') throw new Error('Expected duplicate parameter diagnostics');
+  expect(execution.diagnostics.map(({ row }) => row + 1)).toEqual([1, 1, 3, 4, 6, 6, 7, 7]);
+});

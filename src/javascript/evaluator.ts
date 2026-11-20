@@ -638,7 +638,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
     if (!(superClass instanceof JsFunction) || !superClass.isConstructor) {
       return runtime.throwError(
         'TypeError',
-        `Class extends value ${runtime.describePlain(superClass)} is not a constructor or null`
+        () => `Class extends value ${runtime.describePlain(superClass)} is not a constructor or null`
       );
     }
     const parentPrototype = runtime.get(superClass, 'prototype');

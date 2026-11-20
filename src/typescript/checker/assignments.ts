@@ -477,10 +477,7 @@ export class AssignmentChecker {
       this.c.error(expression, 'オプショナルチェーン ?. を含む式には代入できません。');
       return errorType;
     }
-    const objectType =
-      objectNode.type === 'super'
-        ? this.c.classes.superType(expression)
-        : this.c.members.checkNonNullable(objectNode, this.c.expressions.check(objectNode));
+    const objectType = this.c.members.targetReceiverType(expression, objectNode);
     const key = this.c.classes.propertyKey(expression, propertyNode);
     const properties = (objectType.kind === 'union' ? objectType.types : [objectType])
       .map((member) => this.c.propertyOf(member, key))
@@ -509,7 +506,7 @@ export class AssignmentChecker {
   private elementTargetType(expression: TreeNode, compound: boolean): Type {
     const objectNode = expression.childForFieldName('object') as TreeNode;
     const indexNode = expression.childForFieldName('index') as TreeNode;
-    const objectType = this.c.members.checkNonNullable(objectNode, this.c.expressions.check(objectNode));
+    const objectType = this.c.members.targetReceiverType(expression, objectNode);
     const indexType = this.c.members.indexTypeOf(indexNode);
     const keys = literalKeys(indexType);
     const readonlyKey = keys

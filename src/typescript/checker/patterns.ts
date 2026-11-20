@@ -256,12 +256,14 @@ export class BindingPatterns {
   }
 
   capturePropertyNames(key: TreeNode): string[] | undefined {
-    let names: string[] | undefined;
-    this.c.flow.from(this.c.flow.current, () => {
-      names = this.patternKey(key).names;
-    });
-    this.selectedKeys.set(key.id, names);
-    return names;
+    const selection = this.capturePropertyKey(key);
+    return selection.names;
+  }
+
+  capturePropertyKey(key: TreeNode): { type: Type; names?: string[] } {
+    const selection = this.c.flow.probe(() => this.patternKey(key));
+    this.selectedKeys.set(key.id, selection.names);
+    return selection;
   }
 
   private patternKey(key: TreeNode, computedType?: Type): { node: TreeNode; type: Type; names?: string[] } {

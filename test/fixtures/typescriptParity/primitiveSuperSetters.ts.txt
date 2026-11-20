@@ -1,0 +1,11 @@
+class Base {
+  set value(value: number) { console.log(typeof this, value); }
+}
+class Derived extends Base {
+  write() { super.value = 1; }
+  writeIndex() { super["value"] = 2; }
+}
+Derived.prototype.write.call(3);
+Derived.prototype.writeIndex.call("s");
+Derived.prototype.write.call(undefined);
+Derived.prototype.writeIndex.call(null);

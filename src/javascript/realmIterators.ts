@@ -67,7 +67,7 @@ export function defineHostIteratorPrototype(builder: RealmBuilder, tag: string):
     if (!iterator) {
       return runtime.throwError(
         'TypeError',
-        `Method ${tag}.prototype.next called on incompatible receiver ${receiverText(runtime, thisValue)}`
+        () => `Method ${tag}.prototype.next called on incompatible receiver ${receiverText(runtime, thisValue)}`
       );
     }
     const value = stepHostIterator(iterator);
@@ -138,7 +138,7 @@ function defineSymbol(builder: RealmBuilder): void {
   builder.method(symbolConstructor, 'keyFor', 1, ({ runtime, args }) => {
     const [symbol] = args;
     if (typeof symbol !== 'symbol')
-      return runtime.throwError('TypeError', `${runtime.describePlain(symbol)} is not a symbol`);
+      return runtime.throwError('TypeError', () => `${runtime.describePlain(symbol)} is not a symbol`);
     return registeredKeyOf(runtime, symbol);
   });
   builder.method(symbolPrototype, 'toString', 0, ({ runtime, thisValue }) =>

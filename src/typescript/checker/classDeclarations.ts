@@ -86,9 +86,10 @@ export class ClassDeclarationChecker {
       return;
     }
     this.checkBaseTypeArguments(node, baseValue, baseType);
-    if (isBaseTypeVariable(baseType)) this.checkMixinConstructor(node, info, baseType);
-    const restricted = this.c.classes.restrictedConstructor(baseType);
     const baseInfo = baseType.kind === 'object' ? baseType.classInfo : undefined;
+    if (isBaseTypeVariable(baseType)) this.checkMixinConstructor(node, info, baseType);
+    else if (!baseInfo) this.checkBaseConstructorReturns(node, baseValue);
+    const restricted = this.c.classes.restrictedConstructor(baseType);
     // A class may extend a class with a private constructor only inside the class it extends.
     if (restricted?.visibility === 'private' && baseInfo && !isWithin(baseValue, baseInfo.declaration)) {
       this.c.error(
@@ -96,6 +97,14 @@ export class ClassDeclarationChecker {
         `クラス '${baseInfo.name}' は継承できません。クラスのコンストラクタが private になっています。`
       );
     }
+  }
+
+  private checkBaseConstructorReturns(node: TreeNode, baseValue: TreeNode): void {
+    const signatures = this.c.classes.baseConstructSignatures(node);
+    if (!signatures || signatures.length < 2) return;
+    const base = signatures[0].returnType();
+    if (signatures.slice(1).some((signature) => !this.c.relations.identical(signature.returnType(), base)))
+      this.c.error(baseValue, '基底のコンストラクタは、すべて同じ戻り値の型でなければいけません。');
   }
 
   private checkMixinConstructor(node: TreeNode, info: ClassInfo, baseType: Type): void {
@@ -415,7 +424,12 @@ export class ClassDeclarationChecker {
         ? `クラス '${baseName}' で定義されたインスタンス メンバー アクセサー '${name}' が、拡張されたクラス '${info.name}' ではインスタンス メンバー関数として定義されています。`
         : `基底クラスはメンバー '${name}' をプロパティとして定義していますが、クラス '${info.name}' はメソッドとして定義しています。`;
     }
-    if (baseProperty.isAbstract || baseProperty.nameType || isInterfaceMember(baseProperty)) return undefined;
+    if (
+      baseProperty.isAbstract ||
+      (baseProperty.nameType && !baseProperty.declaringClass) ||
+      isInterfaceMember(baseProperty)
+    )
+      return undefined;
     if (kind !== baseKind) {
       return kind === 'field'
         ? `'${name}' はクラス '${baseName}' でアクセサーとして定義されていますが、ここではインスタンス プロパティとして '${info.name}' でオーバーライドされています。`

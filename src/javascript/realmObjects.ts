@@ -213,7 +213,7 @@ function changePrototype(runtime: Runtime, object: JsObject, proto: JsObject | n
   if (object === runtime.realm.objectPrototype) {
     runtime.throwError('TypeError', "Immutable prototype object 'Object.prototype' cannot have their prototype set");
   }
-  if (!object.extensible) runtime.throwError('TypeError', `${runtime.describePlain(object)} is not extensible`);
+  if (!object.extensible) runtime.throwError('TypeError', () => `${runtime.describePlain(object)} is not extensible`);
   for (let current = proto; current; current = current.proto) {
     if (current === object) runtime.throwError('TypeError', 'Cyclic __proto__ value');
   }

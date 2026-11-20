@@ -3,7 +3,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExpressionListFlow, tupleArgumentContexts } from './callArity';
 import type { Checker } from './checker';
-import { applicableIndex, isIndexKeyOf, isSamePattern } from './indexInfos';
+import { applicableIndex, isIndexKeyOf, isSamePattern, namedPropertyIndex } from './indexInfos';
 import {
   arrayLiteralLength,
   arrayPatternElements,
@@ -1011,7 +1011,7 @@ export class LiteralChecker {
         types.push(property.type());
         continue;
       }
-      const index = applicableIndex(this.c, this.c.structureOf(apparent), key);
+      const index = namedPropertyIndex(this.c, this.c.structureOf(apparent), name, key);
       if (index) types.push(index.type);
     }
     return types.length > 0 ? unionOf(types, true) : undefined;

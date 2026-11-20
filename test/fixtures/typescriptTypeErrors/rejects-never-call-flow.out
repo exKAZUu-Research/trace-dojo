@@ -1,6 +1,4 @@
 (4,10): error TS18048: 'value' is possibly 'undefined'.
-(9,7): error TS2451: Cannot redeclare block-scoped variable 'stop'.
-(11,33): error TS2339: Property 'fail' does not exist on type '() => void'.
 (12,10): error TS18048: 'value' is possibly 'undefined'.
 (14,48): error TS2355: A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.
 (20,10): error TS2454: Variable 'result' is used before being assigned.
