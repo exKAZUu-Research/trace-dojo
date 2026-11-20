@@ -119,14 +119,22 @@ function retireBufferNodes(
   passTwoNodes: (PhpObject | PhpArray)[] | undefined,
   state: RetireState
 ): void {
-  state.runtime.gcRoots.load(garbageNodes);
   const passTwoSet = passTwoNodes ? new Set<PhpObject | PhpArray>(passTwoNodes) : undefined;
-  for (const node of garbageNodes) if (!passTwoSet?.has(node)) visitRetiredNode(node, state);
-  if (passTwoNodes) {
-    state.runtime.gcRoots.load(passTwoNodes);
-    for (const node of passTwoNodes) visitRetiredNode(node, state);
-  }
-  for (const object of state.objectChildren.keys()) visitRetiredNode(object, state);
+  state.deferredPassTwo = passTwoSet;
+  retirePass(garbageNodes, state, passTwoSet);
+  state.deferredPassTwo = undefined;
+  if (passTwoNodes) retirePass(passTwoNodes, state);
+  const extraObjects: PhpObject[] = [];
+  for (const object of state.objectChildren.keys()) visitRetiredNode(object, state, extraObjects);
+  for (const object of extraObjects) state.runtime.gcRoots.delete(object);
+}
+
+function retirePass(nodes: (PhpObject | PhpArray)[], state: RetireState, skip?: Set<PhpObject | PhpArray>): void {
+  state.runtime.gcRoots.load(nodes);
+  const deferredObjects: PhpObject[] = [];
+  for (const node of nodes) if (!skip?.has(node)) visitRetiredNode(node, state, deferredObjects);
+  for (const object of deferredObjects) state.runtime.gcRoots.delete(object);
+  for (const node of nodes) if (!skip?.has(node)) state.runtime.gcRoots.delete(node);
 }
 
 interface RetireState {
@@ -138,39 +146,38 @@ interface RetireState {
   released: unknown[];
   isLiveArray: (array: PhpArray) => boolean;
   compactRoots: boolean;
+  deferredPassTwo?: Set<PhpObject | PhpArray>;
 }
 
-function visitRetiredNode(root: unknown, state: RetireState): void {
-  const stack: { items: unknown[]; index: number; finish?: PhpObject }[] = [{ items: [root], index: 0 }];
+function visitRetiredNode(root: unknown, state: RetireState, deferredDeletes?: PhpObject[]): void {
+  const stack: { items: unknown[]; index: number }[] = [{ items: [root], index: 0 }];
   while (stack.length > 0) {
-    const frame = stack.at(-1) as { items: unknown[]; index: number; finish?: PhpObject };
+    const frame = stack.at(-1) as { items: unknown[]; index: number };
     if (frame.index >= frame.items.length) {
       stack.pop();
-      if (frame.finish) state.runtime.gcRoots.delete(frame.finish);
       continue;
     }
     const item = frame.items[frame.index++];
-    const next = stepRetiredItem(item, state);
+    const next = stepRetiredItem(item, state, deferredDeletes);
     if (next) stack.push(next);
   }
 }
 
 function stepRetiredItem(
   item: unknown,
-  state: RetireState
-): { items: unknown[]; index: number; finish?: PhpObject } | undefined {
+  state: RetireState,
+  deferredDeletes?: PhpObject[]
+): { items: unknown[]; index: number } | undefined {
   const value = item instanceof Ref ? item.v : item;
+  if ((value instanceof PhpArray || value instanceof PhpObject) && state.deferredPassTwo?.has(value)) return undefined;
   if (value instanceof PhpArray && state.remaining.has(value)) return retireArrayNode(value, state);
   if (value instanceof PhpObject && state.compactRoots && state.objectChildren.has(value))
-    return retireObjectNode(value, state);
+    return retireObjectNode(value, state, deferredDeletes);
   recordRetiredSurvivor(value, state);
   return undefined;
 }
 
-function retireArrayNode(
-  array: PhpArray,
-  state: RetireState
-): { items: unknown[]; index: number; finish?: PhpObject } | undefined {
+function retireArrayNode(array: PhpArray, state: RetireState): { items: unknown[]; index: number } | undefined {
   state.remaining.delete(array);
   if (state.seen.has(array) || !array.composite || state.isLiveArray(array)) return undefined;
   state.seen.add(array);
@@ -185,11 +192,13 @@ function retireArrayNode(
 
 function retireObjectNode(
   object: PhpObject,
-  state: RetireState
-): { items: unknown[]; index: number; finish?: PhpObject } | undefined {
+  state: RetireState,
+  deferredDeletes?: PhpObject[]
+): { items: unknown[]; index: number } | undefined {
   if (state.freedObjects.has(object)) return undefined;
   state.freedObjects.add(object);
-  return { items: state.objectChildren.get(object) ?? [], index: 0, finish: object };
+  deferredDeletes?.push(object);
+  return { items: state.objectChildren.get(object) ?? [], index: 0 };
 }
 
 function recordRetiredSurvivor(value: unknown, state: RetireState): void {
@@ -247,8 +256,8 @@ function buildSimulationBuffer<N extends object, O extends N>(
   isObject: (node: N) => node is O,
   children: (node: N) => N[],
   countable: (node: N) => boolean
-): SimulationBuffer<N> {
-  const buffer = new SimulationBuffer<N>();
+): GcRoots<N> {
+  const buffer = new GcRoots<N>();
   for (const root of bufferedRoots) if (countable(root)) buffer.add(root);
   buffer.compact();
   collectWhiteIntoBuffer(buffer, new Set(), remainingObjects, isObject, children, countable);
@@ -256,7 +265,7 @@ function buildSimulationBuffer<N extends object, O extends N>(
 }
 
 function collectWhiteIntoBuffer<N extends object, O extends N>(
-  buffer: SimulationBuffer<N>,
+  buffer: GcRoots<N>,
   freed: Set<N>,
   remainingObjects: Set<O>,
   isObject: (node: N) => node is O,
@@ -277,7 +286,7 @@ function collectWhiteIntoBuffer<N extends object, O extends N>(
 }
 
 function removeDestructibleNested<N extends object, O extends N>(
-  buffer: SimulationBuffer<N>,
+  buffer: GcRoots<N>,
   end: number,
   destructible: Set<O>,
   isObject: (node: N) => node is O,
@@ -292,7 +301,7 @@ function removeDestructibleNested<N extends object, O extends N>(
 }
 
 function runFirstDestructionPass<N extends object, O extends N>(
-  buffer: SimulationBuffer<N>,
+  buffer: GcRoots<N>,
   end: number,
   state: DeferredState<N, O>,
   destructible: Set<O>,
@@ -312,7 +321,7 @@ function runFirstDestructionPass<N extends object, O extends N>(
 }
 
 function drainRunTwoBuffer<N extends object, O extends N>(
-  buffer: SimulationBuffer<N>,
+  buffer: GcRoots<N>,
   state: DeferredState<N, O>,
   remainingObjects: Set<O>,
   countable: (node: N) => boolean
@@ -333,60 +342,6 @@ function drainRunTwoBuffer<N extends object, O extends N>(
     }
   }
   return passTwoNodes;
-}
-
-class SimulationBuffer<N extends object> {
-  private readonly slots: (N | undefined)[] = [];
-  private readonly positions = new Map<N, number>();
-  private readonly unused: number[] = [];
-
-  get length(): number {
-    return this.slots.length;
-  }
-
-  at(index: number): N | undefined {
-    return this.slots[index];
-  }
-
-  has(node: N): boolean {
-    return this.positions.has(node);
-  }
-
-  add(node: N): void {
-    if (this.positions.has(node)) return;
-    const index = this.unused.pop() ?? this.slots.length;
-    this.slots[index] = node;
-    this.positions.set(node, index);
-  }
-
-  remove(node: N): void {
-    const index = this.positions.get(node);
-    if (index === undefined) return;
-    this.positions.delete(node);
-    this.slots[index] = undefined;
-    this.unused.push(index);
-  }
-
-  compact(): void {
-    const count = this.positions.size;
-    if (count === this.slots.length) return;
-    let free = 0;
-    let scan = this.slots.length - 1;
-    while (free < scan) {
-      while (free < scan && this.slots[free] !== undefined) free++;
-      while (free < scan && this.slots[scan] === undefined) scan--;
-      if (free < scan) {
-        const node = this.slots[scan] as N;
-        this.slots[free] = node;
-        this.slots[scan] = undefined;
-        this.positions.set(node, free);
-        free++;
-        scan--;
-      }
-    }
-    this.slots.length = count;
-    this.unused.length = 0;
-  }
 }
 
 function walkZendStack<N extends object>(
@@ -418,7 +373,7 @@ function pushUnseenTail<N extends object>(next: N[], seen: Set<N>, stack: N[]): 
 
 function removeNestedFromBuffer<N extends object, O extends N>(
   root: O,
-  buffer: SimulationBuffer<N>,
+  buffer: GcRoots<N>,
   destructible: Set<O>,
   isObject: (node: N) => node is O,
   children: (node: N) => N[],
@@ -429,7 +384,7 @@ function removeNestedFromBuffer<N extends object, O extends N>(
   while (current !== undefined) {
     const transparent = !countable(current);
     if (transparent || (buffer.has(current) && !(isObject(current) && destructible.has(current)))) {
-      if (!transparent) buffer.remove(current);
+      if (!transparent) buffer.delete(current);
       const tail = pushZendTail(children(current), stack);
       if (tail !== undefined) {
         current = tail;
@@ -449,7 +404,7 @@ function pushZendTail<N extends object>(next: N[], stack: N[]): N | undefined {
 function releaseWithBuffer<N extends object, O extends N>(
   start: N,
   state: DeferredState<N, O>,
-  buffer: SimulationBuffer<N>,
+  buffer: GcRoots<N>,
   countable: (node: N) => boolean
 ): void {
   releaseDeferredRoot(
@@ -460,10 +415,10 @@ function releaseWithBuffer<N extends object, O extends N>(
       else for (const target of state.children(item)) if (countable(target)) buffer.add(target);
     },
     (node) => {
-      if (state.isObject(node)) buffer.remove(node);
+      if (state.isObject(node)) buffer.delete(node);
     },
     (node) => {
-      if (!state.isObject(node)) buffer.remove(node);
+      if (!state.isObject(node)) buffer.delete(node);
     }
   );
 }
@@ -603,6 +558,14 @@ export class GcRoots<T extends object> {
 
   get size(): number {
     return this.positions.size;
+  }
+
+  get length(): number {
+    return this.slots.length;
+  }
+
+  at(index: number): T | undefined {
+    return this.slots[index];
   }
 
   has(value: T): boolean {

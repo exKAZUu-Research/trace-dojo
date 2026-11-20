@@ -4595,3 +4595,36 @@ echo count($a), ':', json_encode($a), ';';
 `)
   ).toMatchObject({ kind: 'executed', stdout: '2;2:[1,4,9];' });
 });
+
+test('preserves GC root buffer order and count across multiple gc_collect_cycles() calls', () => {
+  for (const [body, expected] of [
+    [
+      '$v0 = new Plain; $v1 = new Node(1); $v2 = new Plain; $v3 = new Plain; $v4 = new Node(4); $v5 = new Plain; $v6 = new Node(6); $v0->c = $v0; $v2->a = $v6; $v2->c = [$v4, [$v2]]; $v5->a = $v6; $v5->b = $v4; $v5->c = $v5; unset($v5, $v1, $v0); echo "[", gc_collect_cycles(), "] "; unset($v6, $v4, $v3, $v2);',
+      '~1 [2] | ~4 ~6 3 0 3,5,7,4,6,1,2,8,9',
+    ],
+    [
+      '$v0 = new Plain; $v1 = new Node(1); $v2 = new Plain; $v3 = new Plain; $v4 = new Plain; $v5 = new Plain; $v6 = new Node(6); $v7 = new Plain; $v0->c = $v1; $v1->b = $v3; $v2->a = $v6; $v2->c = $v2; $v3->b = $v1; $v6->b = ["k" => $v7]; $v7->c = [$v7, [$v5]]; unset($v3); unset($v1, $v5, $v6, $v2, $v7, $v4); echo "[", gc_collect_cycles(), "] "; $w1 = new Plain; unset($v0);',
+      '[~6 5] | ~1 2 0 2,4,1,6,3,7,5,9,10',
+    ],
+    [
+      '$v0 = new Plain; $v1 = new Node(1); $v2 = new Plain; $v3 = new Plain; $v4 = new Plain; $v2->c = $v4; $v3->a = $v2; $v3->b = $v4; $v3->c = $v3; $v4->a = $v2; unset($v3, $v0, $v2); unset($v1); $t1 = new Plain; $t1->a = $t1; unset($t1); echo "[", gc_collect_cycles(), "] "; $w1 = new Plain; unset($v4);',
+      '~1 [2] | 2 0 5,3,2,1,6,7,8,9,10',
+    ],
+    [
+      '$p = new Plain; $a = new Node(2); $b = new Node(3); $q = new Plain; $p->a = ["k" => $b]; $p->b = $q; $p->c = $p; $a->b = $b; $b->c = $a; unset($b, $p); echo "[", gc_collect_cycles(), "] "; unset($q, $a);',
+      '[2] | ~2 ~3 2 0 2,3,4,1,5,6,7,8,9',
+    ],
+  ]) {
+    expect(
+      run(`<?php
+class Node { public $a; public $b; public $c; function __construct(public $n = 0) {} function __destruct() { echo "~{$this->n} "; } }
+class Plain { public $a; public $b; public $c; }
+${body}
+echo "| ", gc_collect_cycles(), " ", gc_collect_cycles(), " ";
+$ids = [];
+for ($i = 0; $i < 9; $i++) { $kk[] = new Plain; $ids[] = spl_object_id(end($kk)); }
+echo implode(",", $ids);
+`)
+    ).toMatchObject({ kind: 'executed', stdout: expected });
+  }
+});
