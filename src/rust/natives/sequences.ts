@@ -77,8 +77,8 @@ function cmpWith(ctx: NativeContext, f: Value): (a: Value, b: Value) => number {
 /** The bounds of a `drain`'s range, which panics as slicing does outside the elements. */
 function drainBounds(ctx: NativeContext, items: Value[], range: Value): [number, number] {
   const r = deref(range) as RangeValue | undefined;
-  const start = r?.start === undefined ? 0 : Number(r.start as bigint);
-  const end = r?.end === undefined ? items.length : Number(r.end as bigint) + (r.inclusive ? 1 : 0);
+  const start = r?.sliceStart() ?? 0;
+  const end = r?.sliceEnd() ?? items.length;
   if (start > end) {
     libraryPanic(ctx, `slice index starts at ${start} but ends at ${end}`, 'core/src/slice/index.rs:1020:55');
   }
