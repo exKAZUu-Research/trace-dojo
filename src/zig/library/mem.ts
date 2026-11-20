@@ -582,13 +582,9 @@ const MEMBERS: Record<string, () => Member> = {
   minMax: generic('std.mem.minMax', 2, (sema, call, type, [sliceArg]) => {
     checkOrdering(sema, type, call.span);
     const slice = constSlice(sema, sliceArg, type);
-    return computed(tupleOf(sema, [type, type]), [slice], call.span, ([value], frame) => {
-      const items = value as Slice;
-      return new ZStruct([
-        extreme(items, -1, type, nativeBudget(sema, frame)),
-        extreme(items, 1, type, nativeBudget(sema, frame)),
-      ]);
-    });
+    return computed(tupleOf(sema, [type, type]), [slice], call.span, ([value], frame) =>
+      sliceExtrema(value as Slice, type, nativeBudget(sema, frame))
+    );
   }),
   indexOfMinMax: () => minMaxIndexes('std.mem.indexOfMinMax'),
   findMinMax: () => minMaxIndexes('std.mem.findMinMax'),
@@ -907,12 +903,28 @@ function extreme(values: Slice, direction: number, type: Type, spend: () => void
   let best = readSlice(values, 0, spend);
   for (let index = 1n; index < values.lengthValue; index++) {
     spend();
-    const value = readSlice(values, index, spend);
-    if (type.kind === 'float' || type.kind === 'comptime_float')
-      best = minMaxFloat(best as AnyFloat, value as AnyFloat, direction > 0);
-    else if (compareScalars(value, best) * direction > 0) best = value;
+    best = selectExtreme(best, readSlice(values, index, spend), direction, type);
   }
   return best;
+}
+
+function sliceExtrema(values: Slice, type: Type, spend: (cost?: number) => void): ZStruct {
+  if (values.lengthValue === 0n) panic(PANIC.unreachable);
+  let minimum = readSlice(values, 0, spend);
+  let maximum = minimum;
+  for (let index = 1n; index < values.lengthValue; index++) {
+    spend(2);
+    const value = readSlice(values, index, spend);
+    minimum = selectExtreme(minimum, value, -1, type);
+    maximum = selectExtreme(maximum, value, 1, type);
+  }
+  return new ZStruct([minimum, maximum]);
+}
+
+function selectExtreme(best: Value, value: Value, direction: number, type: Type): Value {
+  if (type.kind === 'float' || type.kind === 'comptime_float')
+    return minMaxFloat(best as AnyFloat, value as AnyFloat, direction > 0);
+  return compareScalars(value, best) * direction > 0 ? value : best;
 }
 
 function extremeIndex(name: string, direction: number): () => Member {

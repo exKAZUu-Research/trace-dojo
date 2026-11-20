@@ -3187,6 +3187,14 @@ test.each(['f64', 'f128'])('slice extrema select numeric values around NaN in %s
   }
 });
 
+test.each([
+  ['u8', 150_000],
+  ['f32', 200_000],
+])('slice minimum and maximum fit one bounded traversal for %s', (type, length) => {
+  const source = `const std=@import("std");pub fn main()void{var data:[${length}]${type}=@splat(7);data[0]=2;data[data.len-1]=9;const low,const high=std.mem.minMax(${type},&data);std.debug.print("{d} {d}",.{low,high});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '2 9' });
+});
+
 test.each(['0.0,-0.0', '-0.0,0.0'])('slice extrema preserve signed-zero ordering: %s', (items) => {
   const source = `const std=@import("std");pub fn main()void{const a=[_]f64{${items}};std.debug.print("{d} {d}",.{std.mem.min(f64,&a),std.mem.max(f64,&a)});}`;
   expect(executeProgram('zig', source)).toMatchObject({
