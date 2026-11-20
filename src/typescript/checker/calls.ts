@@ -253,6 +253,7 @@ export class Calls {
     seen.add(type.id);
     try {
       const apparent = this.c.apparentType(type);
+      if (isAnyLike(apparent)) return { signatures: [], untyped: true, blocked: false };
       if (apparent.kind === 'union') return this.unionCallShape(apparent.types, seen);
       if (apparent.kind === 'intersection') {
         const shapes = apparent.types.map((member) => this.callShape(member, seen));
@@ -321,10 +322,9 @@ export class Calls {
     const args = argumentsNode ? named(argumentsNode) : [];
     const typeArguments = this.typeArguments.written(node);
     const calleeType = this.c.expressions.check(callee);
-    if (calleeType === errorType || isAnyLike(calleeType)) {
-      for (const arg of args) this.c.expressions.check(arg);
-      return calleeType === errorType ? errorType : this.untypedCall(node, [], typeArguments);
-    }
+    const apparent = this.c.apparentType(calleeType);
+    if (apparent === errorType) return this.checkArgumentsOnly(args, errorType);
+    if (isAnyLike(apparent)) return this.untypedCall(node, args, typeArguments);
     const signatures = this.constructSignatures(calleeType);
     if (signatures.length === 0) {
       for (const arg of args) this.c.expressions.check(arg);

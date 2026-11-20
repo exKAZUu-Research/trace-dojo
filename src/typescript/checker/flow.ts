@@ -347,8 +347,8 @@ export class Flow {
   narrowByTypeof(type: Type, name: string, assumeTrue: boolean): Type {
     if (isAnyLike(type) || isIntrinsic(type, 'unknown')) {
       if (!assumeTrue) return type;
-      const narrowed = typeofTypes[name];
-      if (narrowed) return narrowed();
+      const narrowed = typeofTypes.get(name);
+      if (narrowed) return narrowed;
       if (isAnyLike(type)) return type;
       if (name === 'object') return unionOf([nonPrimitiveType, nullType]);
       return name === 'function' ? this.c.globalType('Function') : type;
@@ -369,7 +369,7 @@ export class Flow {
     }
     const shape = this.typeofStructuralShape(member);
     if (shape.kind !== 'object' && !isIntrinsic(shape, 'object')) return neverType;
-    const implied = typeofTypes[name]?.() ?? (name === 'function' ? this.c.globalType('Function') : undefined);
+    const implied = typeofTypes.get(name) ?? (name === 'function' ? this.c.globalType('Function') : undefined);
     return implied && this.c.relations.isAssignable(implied, shape) ? implied : neverType;
   }
 
@@ -386,7 +386,7 @@ export class Flow {
 
   private narrowMaybe(member: Type, name: string): Type {
     const narrowed =
-      typeofTypes[name]?.() ??
+      typeofTypes.get(name) ??
       (name === 'function'
         ? this.c.globalType('Function')
         : name === 'object'
@@ -708,14 +708,14 @@ export class Flow {
   }
 }
 
-const typeofTypes: Record<string, () => Type> = {
-  string: () => stringType,
-  number: () => numberType,
-  bigint: () => bigintType,
-  boolean: () => booleanType,
-  symbol: () => symbolType,
-  undefined: () => undefinedType,
-};
+const typeofTypes = new Map<string, Type>([
+  ['string', stringType],
+  ['number', numberType],
+  ['bigint', bigintType],
+  ['boolean', booleanType],
+  ['symbol', symbolType],
+  ['undefined', undefinedType],
+]);
 
 export function isUnit(type: Type): boolean {
   return type.kind === 'literal' || isUnitIntrinsic(type);

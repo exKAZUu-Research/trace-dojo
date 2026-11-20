@@ -202,7 +202,9 @@ export class LiteralChecker {
 
   /** The elements a spread adds to an array literal; `never` is an array there, as TypeScript's `isArrayLikeType` has it. */
   private spreadElementType(spread: TreeNode, type: Type): Type {
-    return isIntrinsic(type, 'never') ? neverType : this.c.patterns.iteratedType(named(spread)[0], type);
+    if (isIntrinsic(type, 'never')) return neverType;
+    const apparent = this.c.apparentType(type);
+    return isAnyLike(apparent) ? apparent : this.c.patterns.iteratedType(named(spread)[0], type);
   }
 
   isArrayLiteral(type: Type): boolean {

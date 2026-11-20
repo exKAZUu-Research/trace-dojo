@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 401 -- Shares member and element resolution across reads, writes, and optional chains.
+// code-gauge-allow-file fileNcss 405 -- Shares member and element resolution across reads, writes, and optional chains.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import {
@@ -245,6 +245,8 @@ export class MemberChecker {
     this.c.conditions.recordPropertyDeclaration(node, property?.declaration);
     if (!property) {
       if (isPrivate) return errorType;
+      const apparent = this.c.apparentType(objectType);
+      if (isAnyLike(apparent)) return apparent;
       const index = this.indexSignatureType(objectType, name);
       if (index) return index;
       this.reportMissingProperty(propertyNode, name, objectType);
@@ -516,7 +518,8 @@ export class MemberChecker {
   private indexedTypeAt(access: IndexAccess, objectType: Type, indexType: Type): Type {
     if (indexType === errorType || objectType === errorType) return errorType;
     const index = regularOf(indexType);
-    if (isAnyLike(objectType)) return this.c.typeOperators.indexedAccess(objectType, index, access.indexNode);
+    const receiver = this.c.apparentType(objectType);
+    if (isAnyLike(receiver)) return this.c.typeOperators.indexedAccess(receiver, index, access.indexNode);
     // As TypeScript's `getPropertyTypeForIndexType`, any key reads `never` from `never`.
     if (
       isIntrinsic(objectType, 'never') &&
@@ -532,8 +535,7 @@ export class MemberChecker {
     if (objectType.kind === 'object' && objectType.objectKind === 'mapped' && !objectType.mapped?.nameType)
       return this.c.typeOperators.indexedAccess(objectType, index, access.node);
     // A key that is not generic reads the object a type parameter stands for through its constraint.
-    if (objectType.kind === 'typeParameter')
-      return this.indexedTypeAt(access, this.c.apparentType(objectType), indexType);
+    if (objectType.kind === 'typeParameter') return this.indexedTypeAt(access, receiver, indexType);
     if (isPropertyKeyLiteral(index)) {
       const type = this.literalIndexedType(access, objectType, index.value);
       if (type) return type;

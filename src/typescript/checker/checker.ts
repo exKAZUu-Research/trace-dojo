@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 738 -- Holds type construction, bounded instantiation, structure lookup, and diagnostics shared by checker components.
+// code-gauge-allow-file fileNcss 743 -- Holds type construction, bounded instantiation, structure lookup, and diagnostics shared by checker components.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { type SourceDiagnostic, sourceDiagnostic } from '../../interpreter/diagnostics';
@@ -1046,8 +1046,7 @@ export class Checker {
 
   private conditionalBranchFromBounds(type: ConditionalType): Type | undefined {
     const { checkType, extendsType } = type;
-    if (!type.distributive || checkType.kind !== 'typeParameter' || this.relations.isGeneric(extendsType))
-      return undefined;
+    if (!type.distributive || checkType.kind !== 'typeParameter') return undefined;
     let bound = this.constraintOf(checkType);
     while (bound?.kind === 'typeParameter') {
       this.budget.spend();
@@ -1055,6 +1054,11 @@ export class Checker {
     }
     if (!bound || isIntrinsic(bound, 'never')) return undefined;
     const constraint = isIntrinsic(bound, 'any') ? unknownType : bound;
+    if (type.inferTypeParameters.length > 0) {
+      const inferred = this.typeOperators.resolveConditional(type, new Map([[checkType.id, constraint]]), true);
+      return typeMembers(inferred).some((member) => member.kind === 'conditional') ? undefined : inferred;
+    }
+    if (this.relations.isGeneric(extendsType)) return undefined;
     if (this.relations.isAssignable(constraint, extendsType)) {
       const instantiated = this.instantiateContextual(type, new Map([[checkType.id, constraint]]));
       return instantiated.kind === 'conditional' ? type.trueType : instantiated;

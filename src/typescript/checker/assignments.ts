@@ -563,6 +563,8 @@ export class AssignmentChecker {
     if (isAnyLike(type)) return type;
     const property = this.c.propertyOf(type, String(key.value));
     if (property) return propertyAccessType(property, 'write');
+    const apparent = this.c.apparentType(type);
+    if (isAnyLike(apparent)) return apparent;
     return applicableIndex(this.c, this.c.structureOf(type), key)?.type ?? errorType;
   }
 

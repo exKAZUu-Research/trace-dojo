@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 516 -- Resolves related type operators sharing generic parameters and type construction.
+// code-gauge-allow-file fileNcss 530 -- Resolves related type operators sharing generic parameters and type construction.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker, Mapper } from './checker';
@@ -62,6 +62,15 @@ const stringMappingParameter: TypeParameter = {
   name: 'S',
   constraint: () => stringType,
 };
+
+interface ConditionalInstantiation {
+  type: ConditionalType;
+  outer: Mapper;
+  mapper: Mapper;
+  checkType: Type;
+  extendsType: Type;
+  inferTypeParameters: TypeParameter[];
+}
 
 /** Resolves the type operators: `keyof`, indexed access, conditional, mapped, and template literal types. */
 export class TypeOperators {
@@ -501,14 +510,19 @@ export class TypeOperators {
     if (indexType.kind === 'union') return unionOf(indexType.types.map((key) => this.indexedAccess(objectType, key)));
     const numeric = numericTupleIndex(this.c, objectType, indexType);
     if (numeric) return numeric;
-    let bound = this.constrainedTuples.get(objectType);
-    if (!bound) {
-      this.constrainedTuples.set(objectType, objectType);
-      bound = constrainedTuple(this.c, objectType);
-      this.constrainedTuples.set(objectType, bound);
-    }
+    const bound = this.tupleConstraint(objectType);
     if (bound === objectType && indexType === access.indexType) return undefined;
     return this.indexedAccess(bound, indexType);
+  }
+
+  tupleConstraint(type: ObjectType): Type {
+    let bound = this.constrainedTuples.get(type);
+    if (!bound) {
+      this.constrainedTuples.set(type, type);
+      bound = constrainedTuple(this.c, type);
+      this.constrainedTuples.set(type, bound);
+    }
+    return bound;
   }
 
   private deferredAccess(object: Type, index: Type): IndexedAccessType {
@@ -650,16 +664,18 @@ export class TypeOperators {
     return composed;
   }
 
-  resolveConditional(type: ConditionalType, outer: Mapper): Type {
+  resolveConditional(type: ConditionalType, outer: Mapper, forConstraint = false): Type {
     // An instantiated copy resolves from its declaration, so that it still distributes over its check type parameter.
-    if (type.root && type.mapper) return this.resolveConditional(type.root, this.compose(type.mapper, outer));
+    if (type.root && type.mapper)
+      return this.resolveConditional(type.root, this.compose(type.mapper, outer), forConstraint);
     const checkType = this.c.instantiate(type.checkType, outer);
     if (type.distributive && checkType.kind === 'union') {
       return unionOf(
         checkType.types.map((member) =>
           this.resolveConditional(
             type,
-            createMapper([...outer, [(type.checkType as TypeParameter).id, member]], outer.preserveLiterals)
+            createMapper([...outer, [(type.checkType as TypeParameter).id, member]], outer.preserveLiterals),
+            forConstraint
           )
         ),
         false,
@@ -677,17 +693,36 @@ export class TypeOperators {
       mapper.set(parameter.id, inferTypeParameters[index]);
     const extendsType = this.c.instantiate(type.extendsType, mapper);
     if (checkType === permissiveAnyType || extendsType === permissiveAnyType) return permissiveAnyType;
-    const deferred = { type, outer, mapper, checkType, extendsType, inferTypeParameters };
+    return this.resolveConditionalBranch(
+      { type, outer, mapper, checkType, extendsType, inferTypeParameters },
+      forConstraint
+    );
+  }
+
+  private resolveConditionalBranch(deferred: ConditionalInstantiation, forConstraint: boolean): Type {
+    const { type, outer, mapper, checkType, extendsType, inferTypeParameters } = deferred;
     if (isGenericObjectOrIndexType(checkType) || isGenericObjectOrIndexType(extendsType, inferTypeParameters))
       return this.deferredConditional(deferred);
-    const inferred = this.inferredMapper(mapper, inferTypeParameters, checkType, extendsType);
+    const inferred = this.inferredMapper(deferred, forConstraint);
     const falseType = (): Type => this.c.instantiate(type.falseType, outer);
-    if (!inferred) return falseType();
+    if (!inferred) return forConstraint ? this.deferredConditional(deferred) : falseType();
     const trueType = (): Type => this.c.instantiate(this.c.instantiate(type.trueType, mapper), inferred);
-    const branch = conditionalBranch(this.c, checkType, this.c.instantiate(extendsType, inferred));
-    if (branch === undefined) return this.deferredConditional(deferred);
+    const inferredExtends = this.c.instantiate(extendsType, inferred);
+    const branch = conditionalBranch(this.c, checkType, inferredExtends);
+    if (branch === undefined || (forConstraint && this.isInconclusiveConstraint(branch, checkType, inferredExtends)))
+      return this.deferredConditional(deferred);
     if (branch === 'false') return falseType();
     return branch === 'true' ? trueType() : unionOf([trueType(), falseType()], false, outer.preserveLiterals);
+  }
+
+  private isInconclusiveConstraint(branch: 'true' | 'false' | 'both', bound: Type, extendsType: Type): boolean {
+    return (
+      branch === 'both' ||
+      extendsType === errorType ||
+      (branch === 'false' &&
+        !isIntrinsic(extendsType, 'never') &&
+        typeMembers(extendsType).some((member) => this.c.relations.isAssignable(member, bound)))
+    );
   }
 
   /**
@@ -695,17 +730,15 @@ export class TypeOperators {
    * literal fails to match a template literal, which takes the false branch.
    */
   private inferredMapper(
-    mapper: Mapper,
-    inferTypeParameters: TypeParameter[],
-    checkType: Type,
-    extendsType: Type
+    { mapper, inferTypeParameters, checkType, extendsType }: ConditionalInstantiation,
+    forConstraint: boolean
   ): Mapper | undefined {
     const inferred = createMapper(mapper, mapper.preserveLiterals);
     if (inferTypeParameters.length === 0) return inferred;
     const inferences = this.c.inference.inferFromTypes(inferTypeParameters, checkType, extendsType, mapper);
     if (
       extendsType.kind === 'templateLiteral' &&
-      checkType.kind === 'literal' &&
+      (forConstraint || checkType.kind === 'literal') &&
       inferTypeParameters.some((parameter) => !inferences.has(parameter.id))
     )
       return undefined;
@@ -722,14 +755,7 @@ export class TypeOperators {
     checkType,
     extendsType,
     inferTypeParameters,
-  }: {
-    type: ConditionalType;
-    outer: Mapper;
-    mapper: Mapper;
-    checkType: Type;
-    extendsType: Type;
-    inferTypeParameters: TypeParameter[];
-  }): Type {
+  }: ConditionalInstantiation): Type {
     if (outer.size === 0) return type;
     const checker = this.c;
     return {

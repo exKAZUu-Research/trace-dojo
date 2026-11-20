@@ -1,0 +1,15 @@
+function copyOpen<T extends number[]>(source: T): [number, number?] {
+  return [...source];
+}
+function optional<T extends [number?]>(source: T): [number] {
+  return [...source];
+}
+function wrong<T extends [string, ...number[]]>(source: T): [string, ...string[]] {
+  return [...source];
+}
+function mismatch<T extends [number] | [string]>(source: T): [number] {
+  return [...source];
+}
+function target<T extends [number]>(source: [number]): [...T] {
+  return [...source];
+}

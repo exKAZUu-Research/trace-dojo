@@ -551,6 +551,8 @@ export class BindingPatterns {
     if (isAnyLike(type)) return anyType;
     if (type.kind === 'union') return unionOf(type.types.map((member) => this.iteratedType(node, member)));
     if (type.kind === 'object' && this.c.isArrayOrTuple(type)) return this.c.elementTypeOf(type);
+    const bound = this.iterableConstraint(type);
+    if (bound) return this.iteratedType(node, bound);
     if (
       isIntrinsic(type, 'string') ||
       (type.kind === 'literal' && typeof type.value === 'string') ||
@@ -558,11 +560,8 @@ export class BindingPatterns {
     )
       return stringType;
     const iterator = this.c.propertyOf(type, this.c.typeNodes.librarySymbolKey('iterator'));
-    if (iterator) {
-      const signature = this.c.signaturesOf(iterator.type(), 'call')[0];
-      const iteratorType = signature?.returnType();
-      if (iteratorType?.kind === 'object' && iteratorType.typeArguments?.[0]) return iteratorType.typeArguments[0];
-    }
+    const iteratorType = iterator && this.c.signaturesOf(iterator.type(), 'call')[0]?.returnType();
+    if (iteratorType?.kind === 'object' && iteratorType.typeArguments?.[0]) return iteratorType.typeArguments[0];
     if (type.kind === 'typeParameter') {
       const constraint = this.c.constraintOf(type);
       if (constraint) return this.iteratedType(node, constraint);
@@ -570,6 +569,12 @@ export class BindingPatterns {
     if (node)
       this.c.error(node, `型 '${this.c.print(type)}' には、反復処理に使う [Symbol.iterator]() メソッドがありません。`);
     return errorType;
+  }
+
+  private iterableConstraint(type: Type): Type | undefined {
+    if (type.kind !== 'conditional' && type.kind !== 'indexedAccess') return undefined;
+    const bound = this.c.apparentType(type);
+    return bound.kind === 'union' || (bound.kind === 'object' && this.c.isArrayOrTuple(bound)) ? bound : undefined;
   }
 }
 

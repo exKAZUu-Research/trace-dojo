@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 830 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
+// code-gauge-allow-file fileNcss 834 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
 import { minimumArguments } from './callArity';
 import type { Checker } from './checker';
 import { isUnit } from './flow';
@@ -18,6 +18,7 @@ import {
   keyedIndexes,
 } from './indexInfos';
 import { isBigintTemplateText, isNumberTemplateText, templateParts } from './templateParts';
+import { hasVariadicRest } from './tupleIndexes';
 import { structurallyIdentical } from './typeIdentity';
 import {
   anonymousObject,
@@ -352,7 +353,8 @@ export class Relations {
     if (s.kind === 'indexedAccess' && t.kind === 'indexedAccess') return this.relatedToIndexedAccess(s, t, relation);
     if (s.kind === 'conditional' && t.kind === 'conditional' && this.conditionalsRelated(s, t, relation)) return true;
     // TypeScript tries a conditional type's branches before their constraints, so `Exclude<keyof T, K>` fits `keyof T`.
-    if (s.kind === 'conditional' && this.isRelated(unionOf([s.trueType, s.falseType]), t, relation)) return true;
+    if (s.kind === 'conditional' && this.isRelated(s.trueType, t, relation) && this.isRelated(s.falseType, t, relation))
+      return true;
     const constraint = this.c.baseConstraint(s);
     return constraint !== s && this.isRelated(constraint, t, relation, 0, EXPANDING_SOURCE);
   }
@@ -955,8 +957,15 @@ export class Relations {
    * Whether a tuple is related to another as TypeScript relates them: each source element is compared with the
    * target element at the same position from the start, or from the end, or else with the target's rest element.
    */
-  // code-gauge-allow functionCognitiveComplexity 24 -- Aligns fixed prefixes and suffixes while comparing the whole generic variadic middle.
   private tupleRelated(source: ObjectType, target: ObjectType, relation: Relation): boolean {
+    const constraint = hasVariadicRest(target) ? source : this.c.typeOperators.tupleConstraint(source);
+    return constraint === source
+      ? this.tupleElementsRelated(source, target, relation)
+      : this.isRelated(constraint, target, relation, 0, EXPANDING_SOURCE);
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 24 -- Aligns fixed prefixes and suffixes while comparing the whole generic variadic middle.
+  private tupleElementsRelated(source: ObjectType, target: ObjectType, relation: Relation): boolean {
     const sourceElements = source.tuple?.elements ?? [];
     const targetElements = target.tuple?.elements ?? [];
     if (source.tuple?.readonly && !target.tuple?.readonly) return false;

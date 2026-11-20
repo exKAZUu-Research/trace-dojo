@@ -1,0 +1,28 @@
+function anyTrue<T>(x: T extends string ? any : { a: number }) { const wrong: { a: string } = x; }
+function anyFalse<T>(x: T extends string ? { a: number } : any) { const wrong: { a: string } = x; }
+function anyUnknown<T>(x: T extends string ? any : unknown) { const wrong: { a: string } = x; }
+function exact<T>(x: T extends string ? any : { a: number }) {
+  x.a = 'wrong';
+  x.missing = 1;
+  const items = [...x];
+  return new x();
+}
+function unknown<T extends (...args: any[]) => unknown>(value: ReturnType<T>) {
+  console.log(value.message);
+  for (const item of value) console.log(item);
+  return new value();
+}
+function untypedConstructor<T extends (...args: any[]) => any>(value: ReturnType<T>) {
+  return new value<string>();
+}
+function directAnyIteration<T>(inputs: T extends string ? any : any) {
+  for (const value of inputs) console.log(value);
+  const [first] = inputs;
+  return first;
+}
+function typedBounds<T extends (...args: any[]) => { text: string }>(value: ReturnType<T>) {
+  const invalid: number = value;
+  value.text = 7;
+  value.missing;
+  return new value();
+}

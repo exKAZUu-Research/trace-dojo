@@ -1,0 +1,17 @@
+function pair<T extends [number, string?]>(source: T): [number, string?] {
+  return [...source];
+}
+function copyOpen<T extends [string, ...number[]]>(source: T): [string, ...number[]] {
+  return [...source];
+}
+function readonly<T extends readonly [a: number, ...rest: string[]]>(source: T): [number, ...string[]] {
+  return [...source];
+}
+function both<T extends [number] | [number, string]>(source: T): [number, string?] {
+  return [...source];
+}
+function wrapped<T extends readonly [number, ...string[]]>(source: T): [bool: boolean, number, ...string[]] {
+  return [false, ...source];
+}
+console.log(pair([1, 'ready']), copyOpen(['ready', 1, 2]));
+console.log(readonly([1, 'a', 'b'] as const), both([2]), wrapped([3, 'c']));
