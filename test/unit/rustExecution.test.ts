@@ -732,6 +732,42 @@ fn main() -> io::Result<()> {
   });
 });
 
+test('preserves String capacity when growing vectors, deques and heaps', () => {
+  const program = `use std::collections::{BinaryHeap, VecDeque};
+
+fn main() {
+    let mut values = vec![String::with_capacity(20)];
+    values.push(String::with_capacity(10));
+    values.insert(1, String::with_capacity(15));
+    let mut different = String::with_capacity(31);
+    different.push_str("text");
+    values.push(different);
+    println!("{} {} {} {}", values[0].capacity(), values[1].capacity(), values[2].capacity(), values[3].capacity());
+    let removed = values.remove(1);
+    let mut suffix = vec![String::with_capacity(50)];
+    values.append(&mut suffix);
+    values.resize(6, String::with_capacity(40));
+    println!("{} {} {} {} {}", removed.capacity(), values[1].capacity(), values[3].capacity(), values[4].capacity(), values[5].capacity());
+
+    let mut deque = VecDeque::new();
+    deque.push_back(String::with_capacity(25));
+    deque.push_front(String::with_capacity(30));
+    println!("{} {}", deque[0].capacity(), deque[1].capacity());
+
+    let mut heap = BinaryHeap::new();
+    heap.push(String::with_capacity(12));
+    let mut top = String::with_capacity(35);
+    top.push_str("top");
+    heap.push(top);
+    println!("{} {}", heap.pop().unwrap().capacity(), heap.pop().unwrap().capacity());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '20 15 10 31\n15 10 50 0 40\n30 25\n35 12\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

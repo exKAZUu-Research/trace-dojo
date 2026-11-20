@@ -1,4 +1,5 @@
 import type { Expr, Span } from './ast';
+import { claimString } from './capacity';
 import type { Compiler, Eval, PlaceEval } from './compiler';
 import { LocalPlace } from './compilerCommon';
 import { normalize } from './infer';
@@ -27,9 +28,12 @@ type Derefs = ('ref' | 'mutRef' | 'own')[];
 export function compilePlace(c: Compiler, expr: Expr): PlaceEval {
   const place = directPlace(c, expr);
   if (place) return place;
-  // A temporary: the place holds the expression's value.
   const value = c.value(expr);
-  return (frame) => new CellPlace(value(frame));
+  return (frame) => {
+    const temporary = new CellPlace(value(frame));
+    claimString(temporary);
+    return temporary;
+  };
 }
 
 function directPlace(c: Compiler, expr: Expr): PlaceEval | undefined {

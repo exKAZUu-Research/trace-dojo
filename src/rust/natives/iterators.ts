@@ -1,5 +1,13 @@
 // code-gauge-allow-file fileNcss 800 -- One native per method of the standard library.
-import { collectedVecCapacity, inPlaceCapacity, setVecCapacity, sizeTable } from '../capacity';
+import {
+  collectedVecCapacity,
+  inPlaceCapacity,
+  pushOwnedElement,
+  removeOwnedElement,
+  setVecCapacity,
+  sizeTable,
+  swapOwnedElements,
+} from '../capacity';
 import type { DebugPart } from '../debugText';
 import { normalize } from '../infer';
 import { type DebugValue, described, fieldsPart, iteratorDebug, numberPart, optionPart } from '../iterDebug';
@@ -1389,68 +1397,46 @@ export function heapify(heap: Value[], type: Type): Value[] {
 }
 
 function siftDownRange(heap: Value[], start: number, end: number, type: Type): void {
-  const element = heap[start];
   let hole = start;
   let child = 2 * hole + 1;
-  while (child <= end - 2) {
-    if ((compareValues(type, heap[child], heap[child + 1]) ?? 0) <= 0) child++;
-    if ((compareValues(type, element, heap[child]) ?? 0) >= 0) {
-      heap[hole] = element;
-      return;
-    }
-    heap[hole] = heap[child];
+  while (child < end) {
+    if (child + 1 < end && (compareValues(type, heap[child], heap[child + 1]) ?? 0) <= 0) child++;
+    if ((compareValues(type, heap[hole], heap[child]) ?? 0) >= 0) return;
+    swapOwnedElements(heap, hole, child);
     hole = child;
     child = 2 * hole + 1;
   }
-  if (child === end - 1 && (compareValues(type, element, heap[child]) ?? 0) < 0) {
-    heap[hole] = heap[child];
-    hole = child;
-  }
-  heap[hole] = element;
 }
 
-/** Pushes onto a binary max-heap as `BinaryHeap::push` does (sift up), so that its order matches Rust's. */
 export function heapPush(heap: Value[], value: Value, type: Type): void {
-  heap.push(value);
-  let index = heap.length - 1;
-  while (index > 0) {
-    const parent = (index - 1) >> 1;
-    if ((compareValues(type, heap[index], heap[parent]) ?? 0) <= 0) break;
-    [heap[index], heap[parent]] = [heap[parent], heap[index]];
-    index = parent;
-  }
+  pushOwnedElement(heap, value);
+  siftUp(heap, heap.length - 1, type);
 }
 
-/** Pops a binary max-heap's top as `BinaryHeap::pop` does: swap with the last, sift down to the bottom, then up. */
 export function heapPop(heap: Value[], type: Type): Value | undefined {
   if (heap.length === 0) return undefined;
-  const last = heap.pop() as Value;
-  if (heap.length === 0) return last;
-  const top = heap[0];
-  heap[0] = last;
-  // sift_down_to_bottom: move the hole to the bottom, then sift up.
-  const end = heap.length;
+  swapOwnedElements(heap, 0, heap.length - 1);
+  const top = removeOwnedElement(heap, heap.length - 1);
   let hole = 0;
   let child = 1;
-  while (child <= end - 2) {
-    if ((compareValues(type, heap[child], heap[child + 1]) ?? 0) <= 0) child++;
-    heap[hole] = heap[child];
+  while (child < heap.length) {
+    if (child + 1 < heap.length && (compareValues(type, heap[child], heap[child + 1]) ?? 0) <= 0) child++;
+    swapOwnedElements(heap, hole, child);
     hole = child;
     child = 2 * hole + 1;
   }
-  if (child === end - 1) {
-    heap[hole] = heap[child];
-    hole = child;
-  }
-  heap[hole] = last;
-  let index = hole;
+  siftUp(heap, hole, type);
+  return top;
+}
+
+function siftUp(heap: Value[], start: number, type: Type): void {
+  let index = start;
   while (index > 0) {
     const parent = (index - 1) >> 1;
     if ((compareValues(type, heap[index], heap[parent]) ?? 0) <= 0) break;
-    [heap[index], heap[parent]] = [heap[parent], heap[index]];
+    swapOwnedElements(heap, index, parent);
     index = parent;
   }
-  return top;
 }
 
 export { castValue, needsCopy, placeOf, SliceView };

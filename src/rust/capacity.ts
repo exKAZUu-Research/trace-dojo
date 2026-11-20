@@ -93,7 +93,7 @@ function minNonZeroCapacity(elemSize: number): number {
 /**
  * The capacities of `String`s, whose values are JS strings that cannot carry one: by where each is stored, for the
  * text it had when its capacity last changed there. A string stored elsewhere, or changed since by assignment, has as
- * much capacity as length, as a `String` made at its size has (`String::from`, `to_string`, `format!`).
+ * much capacity as length, as a `String` made at its size has (`String::from`).
  */
 const stringCapacities = new WeakMap<object, Map<number, { text: string; capacity: number }>>();
 
@@ -174,6 +174,64 @@ export function claimStrings(elements: Value[]): Value[] {
   if (inFlight.size > 0)
     for (let index = 0; index < elements.length; index++) claimString(new ElementPlace(elements, index));
   return elements;
+}
+
+export function pushOwnedElement(elements: Value[], value: Value): void {
+  const index = elements.length;
+  elements.push(value);
+  claimString(new ElementPlace(elements, index));
+}
+
+export function insertOwnedElement(elements: Value[], index: number, value: Value): void {
+  relocateStringSlots(elements, elements, index, elements.length, 1);
+  elements.splice(index, 0, value);
+  claimString(new ElementPlace(elements, index));
+}
+
+export function removeOwnedElement(elements: Value[], index: number): Value {
+  moveString(new ElementPlace(elements, index));
+  stringCapacities.get(elements)?.delete(index);
+  relocateStringSlots(elements, elements, index + 1, elements.length, -1);
+  return elements.splice(index, 1)[0];
+}
+
+export function clearStringSlotsFrom(elements: Value[], index: number): void {
+  const entries = stringCapacities.get(elements);
+  if (!entries) return;
+  for (const slot of entries.keys()) if (slot >= index) entries.delete(slot);
+}
+
+export function swapOwnedElements(elements: Value[], a: number, b: number): void {
+  if (a === b) return;
+  [elements[a], elements[b]] = [elements[b], elements[a]];
+  const entries = stringCapacities.get(elements);
+  if (!entries) return;
+  const first = entries.get(a);
+  const second = entries.get(b);
+  if (first) entries.set(b, first);
+  else entries.delete(b);
+  if (second) entries.set(a, second);
+  else entries.delete(a);
+}
+
+export function relocateStringSlots(
+  source: Value[],
+  target: Value[],
+  start: number,
+  end: number,
+  offset: number
+): void {
+  const entries = stringCapacities.get(source);
+  if (!entries) return;
+  const moved = [...entries].filter(([index]) => index >= start && index < end);
+  if (moved.length === 0) return;
+  for (const [index] of moved) entries.delete(index);
+  let targetEntries = stringCapacities.get(target);
+  if (!targetEntries) {
+    targetEntries = new Map();
+    stringCapacities.set(target, targetEntries);
+  }
+  for (const [index, value] of moved) targetEntries.set(index + offset, value);
 }
 
 /** `a + b` of a `String` and a `&str`, which pushes onto `a` and so grows it as `push_str` does. */
