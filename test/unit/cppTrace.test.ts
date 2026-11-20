@@ -386,6 +386,24 @@ test.each([
   expect(recording.traceItems.at(-1)?.turtles).toEqual(turtles);
 });
 
+test.each(['int a[512] = {}, b[512] = {};', 'int a[16][32] = {}, b[16][32] = {};'])(
+  'meters the elements swapped by std::swap of built-in arrays %s',
+  (declaration) => {
+    const program = `#include <utility>
+int main() {
+  ${declaration}
+  for (int i = 0; i < 8; ++i) std::swap(a, b);
+}`;
+    const previous = LIMITS.maxOperations;
+    LIMITS.maxOperations = 3000;
+    try {
+      expect(executeProgram('cpp', program)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+    } finally {
+      LIMITS.maxOperations = previous;
+    }
+  }
+);
+
 test.each(['std::array<int[512], 1>', 'std::array<int[16][32], 1>'])(
   'meters the elements copied by assigning %s',
   (type) => {

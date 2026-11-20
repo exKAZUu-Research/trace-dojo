@@ -84,6 +84,7 @@ export function swapElements(frame: Frame, a: Ptr, b: Ptr, ops: ElementOperation
     const left = a.read() as ArrayStore;
     const right = b.read() as ArrayStore;
     for (let index = 0; index < left.length; index++) {
+      frame.runtime.spend();
       swapElements(frame, left.location(index), right.location(index), ops.arrayElement);
     }
     return;
