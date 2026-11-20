@@ -25,7 +25,8 @@ export interface EntryTable<T, Position = number> {
   keyOf: (entry: Value) => Value;
   /** The position of an entry with the key, or undefined when there is none or the container takes equal keys. */
   lookup: (self: T, key: Value) => Position | undefined;
-  insert: (frame: Frame, self: T, entry: Value) => [Position, boolean];
+  insert: (frame: Frame, self: T, entry: Value, hint?: Ptr) => [Position, boolean];
+  checkHint?: (self: T, hint: Ptr) => void;
   ops: () => ElementOperations;
 }
 
@@ -35,6 +36,7 @@ export interface EmplacementCall<T, Position> {
   table: EntryTable<T, Position>;
   resultType: Type;
   isTemporaryObject: boolean;
+  hint?: Eval<unknown>;
   mappedLocation?: (self: T, at: Position) => Ptr;
   /** The call's result for the entry at a position, which it inserted or found. */
   result: (frame: Frame, self: T, at: Position, inserted: boolean) => Value;
@@ -84,13 +86,16 @@ export function emplacementCall<T, Position>(
     row,
     isTemporaryObject: call.isTemporaryObject,
     run: (frame) =>
-      holdAll(frame, [self], ([receiver]) => {
-        const target = (receiver as Ptr).read() as T;
-        return emplace(frame, (emplacing) => {
-          const [at, inserted] = emplaceEntry(call.table, frame, target, emplacing, mappedLocation);
+      holdAll(frame, call.hint ? [self, call.hint] : [self], ([receiver, position]) =>
+        emplace(frame, (emplacing) => {
+          const target = (receiver as Ptr).read() as T;
+          const [at, inserted] = emplaceEntry(call.table, frame, target, emplacing, {
+            mappedLocation,
+            hint: position as Ptr | undefined,
+          });
           return call.result(frame, target, at, inserted);
-        });
-      }),
+        })
+      ),
   };
 }
 
@@ -218,12 +223,16 @@ export function insertCopy<T, Position>(
   table: EntryTable<T, Position>,
   frame: Frame,
   self: T,
-  entry: Value
+  entry: Value,
+  hint?: Ptr
 ): [Position, boolean] {
-  return emplaceEntry(table, frame, self, {
-    key: table.keyOf(entry),
-    make: () => table.ops().copy(frame, entry),
-  });
+  return emplaceEntry(
+    table,
+    frame,
+    self,
+    { key: table.keyOf(entry), make: () => table.ops().copy(frame, entry) },
+    { hint }
+  );
 }
 
 /** Inserts the elements of an iterator range, as the range constructor and `insert(first, last)` do. */
@@ -271,15 +280,16 @@ function emplaceEntry<T, Position>(
   frame: Frame,
   self: T,
   { key, make, assign }: Emplacing,
-  mappedLocation?: (self: T, at: Position) => Ptr
+  { mappedLocation, hint }: { mappedLocation?: (self: T, at: Position) => Ptr; hint?: Ptr } = {}
 ): [Position, boolean] {
+  if (hint) table.checkHint?.(self, hint);
   const existing = key === undefined ? undefined : table.lookup(self, key);
   if (existing !== undefined) {
     if (mappedLocation) assign?.(mappedLocation(self, existing));
     return [existing, false];
   }
   const entry = make();
-  const [at, inserted] = table.insert(frame, self, entry);
+  const [at, inserted] = table.insert(frame, self, entry, hint);
   if (!inserted) table.ops().destroy?.(frame, entry);
   return [at, inserted];
 }

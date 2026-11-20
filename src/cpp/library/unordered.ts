@@ -1,5 +1,4 @@
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
-import type { DisplayNode } from '../../problems/trace';
 import { byteAt } from '../bytes';
 import { CppRuntimeError } from '../errors';
 import type { Frame } from '../runtime';
@@ -18,7 +17,7 @@ import {
   withConst,
 } from '../types';
 import { CObject, Ptr, Store, type Value } from '../values';
-import { keyText, mappedNotDefaultConstructible, pairClass } from './associative';
+import { mappedNotDefaultConstructible, pairClass } from './associative';
 import { MapValue, NodeCell } from './containerValues';
 import {
   destroyElements,
@@ -291,12 +290,9 @@ export class HashValue extends MapValue {
     readonly hash: (value: Value) => bigint,
     readonly keyOf: (entry: Value) => Value,
     readonly equal: (a: Value, b: Value) => boolean,
-    readonly isMap: boolean,
-    readonly keyType: Type,
-    readonly valueType: Type | undefined,
-    private readonly entryType: Type
+    entryType: Type
   ) {
-    super();
+    super(entryType);
   }
 
   get bucketCount(): number {
@@ -560,21 +556,6 @@ export class HashValue extends MapValue {
     }
     this.ordered = undefined;
   }
-
-  displayNode(nodeOf: (value: Value, type: Type) => DisplayNode): DisplayNode {
-    const values = this.nodes().map((node) => node.value);
-    if (!this.isMap) {
-      const entries: Record<string, DisplayNode> = {};
-      for (const [index, value] of values.entries()) entries[index] = nodeOf(value, this.keyType);
-      return { kind: 'array', entries };
-    }
-    const entries: Record<string, DisplayNode> = {};
-    for (const value of values) {
-      const [key, mapped] = (value as CObject).values;
-      entries[keyText(key, this.keyType)] = nodeOf(mapped, this.valueType as Type);
-    }
-    return { kind: 'object', entries };
-  }
 }
 
 /** `std::unordered_map<K, V>` or `std::unordered_set<K>`. */
@@ -615,7 +596,7 @@ export function unorderedClass(
     return entryOps;
   };
   const keyOf = isMap ? (entry: Value): Value => (entry as CObject).values[0] : (entry: Value): Value => entry;
-  const make = (): HashValue => new HashValue(hash, keyOf, equal, isMap, keyType, valueType, entryType);
+  const make = (): HashValue => new HashValue(hash, keyOf, equal, entryType);
   const destroyAll = (frame: Frame, entries: Value[]): void => {
     destroyElements(frame, entries, ops().destroy);
   };

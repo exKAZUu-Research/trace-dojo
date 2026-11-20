@@ -1,5 +1,4 @@
 import { CompileError } from '../../interpreter/diagnostics';
-import type { DisplayNode } from '../../problems/trace';
 import { implicitConversion } from '../conversions';
 import { CppRuntimeError } from '../errors';
 import type { Expr } from '../expr';
@@ -54,7 +53,6 @@ import {
 import { positionOf, randomAccessIterator, rangePositions } from './iterators';
 import type { Library } from './registry';
 import { elementConstruction } from './sequences';
-import { StringValue } from './string';
 import { addMethod, constRef, generic, native, nativeConstructor, type NativeOptions, throwLibrary } from './support';
 import { typeKey } from './templates';
 
@@ -395,12 +393,9 @@ function orderTest(
 export class OrderedValue extends MapValue {
   constructor(
     public entries: Value[],
-    private readonly isMulti: boolean,
-    private readonly keyType: Type,
-    private readonly valueType: Type | undefined,
-    private readonly entryType: Type
+    entryType: Type
   ) {
-    super();
+    super(entryType);
   }
 
   private readonly nodes = new NodePositions(this);
@@ -452,35 +447,6 @@ export class OrderedValue extends MapValue {
   children(): Iterable<Value> {
     return this.entries;
   }
-
-  displayNode(nodeOf: (value: Value, type: Type) => DisplayNode): DisplayNode {
-    const { valueType } = this;
-    if (this.isMulti || !valueType) {
-      const entries: Record<string, DisplayNode> = {};
-      for (const [index, entry] of this.entries.entries()) entries[index] = nodeOf(entry, this.entryType);
-      return { kind: 'array', entries };
-    }
-    return {
-      kind: 'object',
-      entries: Object.fromEntries(
-        this.entries.map((entry) => {
-          const [key, value] = (entry as CObject).values;
-          return [keyText(key, this.keyType), nodeOf(value, valueType)];
-        })
-      ),
-    };
-  }
-}
-
-/** The text a key shows as in the trace, which is how learners write it. */
-export function keyText(key: Value, type: Type): string {
-  if (key instanceof StringValue) return key.text;
-  if (type.kind === 'int' && type.name === 'bool') return key === 0 ? 'false' : 'true';
-  if (type.kind === 'int' && (type.name === 'char' || type.name === 'schar' || type.name === 'uchar')) {
-    return String.fromCodePoint(Number(key) & 0xff);
-  }
-  if (typeof key === 'number' || typeof key === 'bigint') return String(key);
-  return String(key);
 }
 
 type Order = (a: Value, b: Value) => number;
@@ -513,6 +479,7 @@ export function comparatorOrder(
 const COMPARING_MEMBERS = new Set([
   'insert',
   'emplace',
+  'emplace_hint',
   'try_emplace',
   'insert_or_assign',
   'find',
@@ -588,7 +555,7 @@ export function orderedClass(
     return mappedOps;
   };
   const keyOf = isMap ? (entry: Value): Value => (entry as CObject).values[0] : (entry: Value): Value => entry;
-  const make = (entries: Value[]): OrderedValue => new OrderedValue(entries, isMulti, keyType, valueType, entryType);
+  const make = (entries: Value[]): OrderedValue => new OrderedValue(entries, entryType);
   /** The first position whose key is not less than `key` (`upper` false) or greater than it (`upper` true). */
   const bound = (self: OrderedValue, key: Value, upper: boolean): number => {
     let low = 0;
@@ -606,17 +573,21 @@ export function orderedClass(
     return at < self.entries.length && order(keyOf(self.entries[at]), key) === 0 ? at : -1;
   };
   /** Inserts an entry, giving its position and whether it was inserted, as `insert` does. */
-  const insert = (frame: Frame, self: OrderedValue, entry: Value): [number, boolean] => {
+  const insert = (frame: Frame, self: OrderedValue, entry: Value, hint?: Ptr): [number, boolean] => {
     const key = keyOf(entry);
     if (!isMulti) {
       const existing = find(self, key);
       if (existing >= 0) return [existing, false];
     }
     frame.runtime.reserve(1);
-    // A multimap inserts after the entries with an equal key, keeping the order of insertion among them.
-    const at = bound(self, key, true);
+    const at = isMulti && hint ? hintedPosition(self, key, positionOf(self, hint)) : bound(self, key, true);
     self.splice(at, 0, entry);
     return [at, true];
+  };
+  const hintedPosition = (self: OrderedValue, key: Value, hint: number): number => {
+    if (hint < self.entries.length && order(keyOf(self.entries[hint]), key) < 0) return bound(self, key, false);
+    if (hint > 0 && order(key, keyOf(self.entries[hint - 1])) < 0) return bound(self, key, true);
+    return hint;
   };
   const destroyAll = (frame: Frame, entries: Value[]): void => {
     destroyElements(frame, entries, ops().destroy);
@@ -629,6 +600,7 @@ export function orderedClass(
       return at >= 0 ? at : undefined;
     },
     insert,
+    checkHint: positionOf,
     ops,
   };
   const insertResult = pairClass(library, types.iterator, BOOL);
@@ -710,22 +682,40 @@ export function orderedClass(
       return;
     },
     memberCall: (compiler_, object, member, callArgs, row) => {
-      const [first] = callArgs;
+      const [first, second] = callArgs;
       const isKeyErase =
         member === 'erase' &&
         callArgs.length === 1 &&
         (first.type.kind !== 'class' || first.type.cls.library?.kind !== 'iterator');
       if (COMPARING_MEMBERS.has(member) || isKeyErase) checkOrder(compiler_, row);
-      return emplacementCall(compiler_, object, member, callArgs, row, {
-        types: { keyType, entryType, valueType },
-        table,
-        resultType: isMulti ? types.iterator : classType(insertResult),
-        isTemporaryObject: !isMulti,
-        mappedLocation: valueType && !isMulti ? (self, at) => new Ptr(self.entries[at] as CObject, 1) : undefined,
-        result: insertionResult,
-      });
+      const isHinted =
+        member === 'emplace_hint' ||
+        (member === 'insert' &&
+          callArgs.length === 2 &&
+          second?.type.kind === 'class' &&
+          second.type.cls.library?.kind === 'pair');
+      if (isHinted && !first) return compiler_.error(row, 'emplace_hint には挿入位置を書いてください。');
+      const hint = isHinted ? compiler_.convert(first, types.constIterator, row).run : undefined;
+      const returnsIterator = isHinted || isMulti;
+      return emplacementCall(
+        compiler_,
+        object,
+        member === 'emplace_hint' ? 'emplace' : member,
+        isHinted ? callArgs.slice(1) : callArgs,
+        row,
+        {
+          types: { keyType, entryType, valueType },
+          table,
+          hint,
+          resultType: returnsIterator ? types.iterator : classType(insertResult),
+          isTemporaryObject: !returnsIterator,
+          mappedLocation: valueType && !isMulti ? (self, at) => new Ptr(self.entries[at] as CObject, 1) : undefined,
+          result: isHinted ? (_frame, self, at) => self.iteratorLocation(at) : insertionResult,
+        }
+      );
     },
-    constructingMembers: isMap && !isMulti ? ['emplace', 'try_emplace', 'insert_or_assign'] : ['emplace'],
+    constructingMembers:
+      isMap && !isMulti ? ['emplace', 'emplace_hint', 'try_emplace', 'insert_or_assign'] : ['emplace', 'emplace_hint'],
     ownedTypes: [entryType],
     elementUseOnAssignment: 'copy',
   };
@@ -854,10 +844,8 @@ export function orderedClass(
     'insert',
     [types.constIterator, constRef(unqualified(entryType))],
     types.iterator,
-    (self, [hint, entry], frame) => {
-      positionOf(self, hint);
-      return self.iteratorLocation(insertCopy(table, frame, self, (entry as Ptr).read())[0]);
-    },
+    (self, [hint, entry], frame) =>
+      self.iteratorLocation(insertCopy(table, frame, self, (entry as Ptr).read(), hint as Ptr)[0]),
     copyEntry
   );
   method('erase', [constRef(keyType)], SIZE_T, (self, [k], frame) => {

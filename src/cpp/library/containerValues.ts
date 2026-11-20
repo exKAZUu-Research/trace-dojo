@@ -670,7 +670,17 @@ export class SequenceValue extends Store {
   }
 }
 
-/** The entries of an associative container, which shows as an object keyed by its keys. */
 export abstract class MapValue extends Store {
-  abstract displayNode(nodeOf: (value: Value, type: Type) => DisplayNode): DisplayNode;
+  constructor(protected readonly entryType: Type) {
+    super();
+  }
+
+  abstract children(): Iterable<Value>;
+
+  displayNode(nodeOf: (value: Value, type: Type) => DisplayNode): DisplayNode {
+    const entries: Record<string, DisplayNode> = {};
+    let index = 0;
+    for (const entry of this.children()) entries[index++] = nodeOf(entry, this.entryType);
+    return { kind: 'array', entries };
+  }
 }

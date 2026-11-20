@@ -842,6 +842,32 @@ int main() {
   });
 });
 
+test.each([
+  ['map<std::string, int>', '{{"2", 2}, {"10", 10}}', false],
+  ['map<int, int, std::greater<int>>', '{{2, 2}, {10, 10}}', true],
+  ['unordered_map<int, int>', '{{2, 2}, {10, 10}, {4, 4}}', true],
+])('a %s trace follows its iteration order', (type, values, numeric) => {
+  const program = `#include <functional>
+#include <iostream>
+#include <map>
+#include <string>
+#include <unordered_map>
+int main() {
+  std::${type} entries${values};
+  for (const auto& entry : entries) std::cout << entry.first << ' ';
+}`;
+  const recording = traceProgram('cpp', program, program);
+  const node = recording.traceItems.at(-1)?.referenceVars.entries;
+  if (node?.kind !== 'array') throw new Error('Expected an ordered snapshot of entries');
+  const keys = Object.values(node.entries).map((entry) => (entry.kind === 'object' ? entry.entries.first : undefined));
+  expect(keys).toEqual(
+    recording.stdout
+      .trim()
+      .split(' ')
+      .map((key) => ({ kind: 'value', value: numeric ? Number(key) : key }))
+  );
+});
+
 test('inner bindings hide outer trace values even before assignment', () => {
   const program = `int global = 1;
 int main() {
