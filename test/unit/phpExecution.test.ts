@@ -5299,6 +5299,19 @@ test('gc_collect_cycles() returns the handles of what collected garbage held bef
   ).toMatchObject({ kind: 'executed', stdout: 'dM;dN;dN;3;243;0' });
 });
 
+test('gc_collect_cycles() counts the arrays without objects that a destructible cycle holds', () => {
+  for (const [setup, expected] of [
+    ['$x->a[] = 1;', 'd;int(2)\n'],
+    ['$x->a[0][] = 3;', 'd;int(3)\n'],
+  ]) {
+    expect(
+      run(
+        `<?php class A { public $s; public $a = []; function __destruct() { echo "d;"; } } $x = new A; $x->s = $x; ${setup} unset($x); var_dump(gc_collect_cycles());`
+      )
+    ).toMatchObject({ kind: 'executed', stdout: expected });
+  }
+});
+
 test('a returned local becomes a GC root before the other locals are freed', () => {
   expect(
     run(

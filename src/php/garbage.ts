@@ -10,6 +10,7 @@ import {
   objectFree,
   objectsCreatedSince,
   orderDestructedCollection,
+  plainArraysHeld,
   recordGcRoot,
   retireCollected,
   survivingRoots,
@@ -151,7 +152,7 @@ function collectAfterDestruction(
       ...objectsCreatedSince(runtime, handles, after),
     ];
     const result = countAfterDestruction(runtime, { owners, remaining, destructible, afterArrays, buffered, nested });
-    count = result.count;
+    count = result.count + plainArraysHeld(result.counted, arrayStorage, afterArrays);
     // A created object whose only holders this run frees goes by reference counting; one its own cycle holds stays.
     for (const object of created) runtime.collectingObjects.delete(object);
     withCollectedArrayCyclesForgotten(runtime, result.freed, () =>
@@ -329,7 +330,13 @@ function countAfterDestruction(
     buffered?: (PhpObject | PhpArray)[];
     nested: CollectionGraph;
   }
-): { count: number; ordered: PhpObject[]; passTwoNodes: (PhpObject | PhpArray)[]; freed: Set<CollectionNode> } {
+): {
+  count: number;
+  ordered: PhpObject[];
+  passTwoNodes: (PhpObject | PhpArray)[];
+  freed: Set<CollectionNode>;
+  counted: Set<CollectionNode>;
+} {
   const { owners, remaining, destructible, afterArrays, buffered, nested } = state;
   const allowed = new Set(remaining);
   const graph = new CollectionGraph(
@@ -360,6 +367,7 @@ function countAfterDestruction(
     ordered: result.ordered,
     passTwoNodes: result.passTwoNodes.filter((node): node is PhpObject | PhpArray => !(node instanceof Ref)),
     freed: result.freed,
+    counted: result.counted,
   };
 }
 

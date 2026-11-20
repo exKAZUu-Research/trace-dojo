@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 495 -- Holds GC root buffer simulation, ordering, and post-collection retirement helpers.
+// code-gauge-allow-file fileNcss 506 -- Holds GC root buffer simulation, ordering, and post-collection retirement helpers.
 import { rt, type Runtime } from './runtime';
 import { PhpArray, PhpObject, Ref, type Value } from './values';
 
@@ -122,6 +122,27 @@ export function heldByGarbage(
     result.set(object, held);
   }
   return result;
+}
+
+/**
+ * How many arrays without objects or references the counted garbage still holds: the collection graph leaves them out,
+ * but PHP counts them, unless live code reaches them or they are immutable literals.
+ */
+export function plainArraysHeld(freed: Iterable<unknown>, storage: Set<PhpArray>, live: Set<PhpArray>): number {
+  const seen = new Set<PhpArray>();
+  const pending: unknown[] = [];
+  for (const node of freed) if (node instanceof PhpObject) pending.push(...node.props.values());
+  while (pending.length > 0) {
+    const item = pending.pop();
+    const value = item instanceof Ref ? item.v : item;
+    if (value instanceof PhpArray && !seen.has(value)) {
+      seen.add(value);
+      pending.push(...value.map.ownedSlots());
+    }
+  }
+  const countable = (array: PhpArray): boolean =>
+    storage.has(array) || (!array.persistentHolder && !array.uncollectable);
+  return [...seen].filter((array) => countable(array) && !array.composite && !live.has(array)).length;
 }
 
 export function recordGcRoot(runtime: Runtime, value: PhpArray | PhpObject, collect: () => number): boolean {
@@ -346,7 +367,7 @@ export function orderDestructedCollection<N extends object, O extends N>(
   children: (node: N) => N[],
   countable: (node: N) => boolean = () => true,
   rerun: { nestedChildren?: (node: N) => N[]; roots?: N[]; destructed?: O[] } = {}
-): { count: number; ordered: O[]; passTwoNodes: N[]; freed: Set<N> } {
+): { count: number; ordered: O[]; passTwoNodes: N[]; freed: Set<N>; counted: Set<N> } {
   const buffer = buildSimulationBuffer(bufferedRoots, remainingObjects, isObject, children, countable);
   const end = buffer.length;
   // PHP removes what each object whose destructor this run invokes holds, whether or not the object survives.
@@ -362,23 +383,13 @@ export function orderDestructedCollection<N extends object, O extends N>(
     isObject,
     children,
   };
-  const runOneCount = runFirstDestructionPass(buffer, end, state, destructible, countable);
-  const freedAfterPassOne = countNodes(state.freed, countable);
+  const counted = runFirstDestructionPass(buffer, end, state, destructible, countable);
+  const freedAfterPassOne = new Set(state.freed);
   buffer.compact();
   for (const root of rerun.roots ?? []) if (countable(root) && !state.freed.has(root)) buffer.add(root);
   const passTwoNodes = drainRunTwoBuffer(buffer, state, remainingObjects, countable);
-  return {
-    count: runOneCount + (countNodes(state.freed, countable) - freedAfterPassOne),
-    ordered: state.order,
-    passTwoNodes,
-    freed: state.freed,
-  };
-}
-
-function countNodes<N extends object>(nodes: Iterable<N>, predicate: (node: N) => boolean): number {
-  let count = 0;
-  for (const node of nodes) if (predicate(node)) count++;
-  return count;
+  for (const node of state.freed) if (countable(node) && !freedAfterPassOne.has(node)) counted.add(node);
+  return { count: counted.size, ordered: state.order, passTwoNodes, freed: state.freed, counted };
 }
 
 function buildSimulationBuffer<N extends object, O extends N>(
@@ -422,7 +433,7 @@ function runFirstDestructionPass<N extends object, O extends N>(
   state: DeferredState<N, O>,
   destructible: Set<O>,
   countable: (node: N) => boolean
-): number {
+): Set<N> {
   const runOneGarbage = new Set<N>();
   for (let index = 0; index < end; index++) {
     const item = buffer.at(index);
@@ -433,7 +444,7 @@ function runFirstDestructionPass<N extends object, O extends N>(
     if (start === undefined || !runOneGarbage.has(start) || state.freed.has(start)) continue;
     releaseWithBuffer(start, state, buffer, countable);
   }
-  return runOneGarbage.size;
+  return runOneGarbage;
 }
 
 function drainRunTwoBuffer<N extends object, O extends N>(
