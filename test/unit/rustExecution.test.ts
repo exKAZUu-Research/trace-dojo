@@ -3122,3 +3122,13 @@ const CASE: (bool, bool) = match true { ON => (true, false), _ => (false, false)
 fn main() { match (true, false) { CASE => println!("hit"), (false, _) => (), (true, true) => () } }`;
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'hit\n' });
 });
+
+test('parses Rust loop results that start with operators and closures', () => {
+  const program = rustMain(`let n = 7;
+    let reference = loop { break &n; };
+    let signed = loop { break -(2 - 1); };
+    let callback = loop { break || 6; };
+    let branch = if loop { break true; } { 3 } else { 4 };
+    println!("{} {} {} {}", reference, signed, callback(), branch);`);
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '7 -1 6 3\n' });
+});

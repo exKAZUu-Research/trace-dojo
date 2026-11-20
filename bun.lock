@@ -37,7 +37,7 @@
         "@willbooster/tree-sitter-javascript": "26.0.0",
         "@willbooster/tree-sitter-python": "21.0.0",
         "@willbooster/tree-sitter-ruby": "20.0.0",
-        "@willbooster/tree-sitter-rust": "20.0.2",
+        "@willbooster/tree-sitter-rust": "21.0.0",
         "@willbooster/tree-sitter-zig": "14.0.0",
         "@willbooster/wb": "23.3.4",
         "@willbooster/web-tree-sitter": "23.0.0",
@@ -766,7 +766,7 @@
 
     "@willbooster/tree-sitter-ruby": ["@willbooster/tree-sitter-ruby@20.0.0", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-Vm4MpD5HIZDvemrKLogDnt2JG84PqbMHn46wo32MzBtVUxzUZwX0XqxtIBHUFxUOwoUdz4sC3Gq/cNf/IpdAwQ=="],
 
-    "@willbooster/tree-sitter-rust": ["@willbooster/tree-sitter-rust@20.0.2", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-Wkk0EVK/KS8UG6Xosp1VSSSN9BdzfTiFvrAswnnBGMhkDQMY7LkIYdSxPmSFRRAwSY1+qSXjhpNGMfmC7y6ZbQ=="],
+    "@willbooster/tree-sitter-rust": ["@willbooster/tree-sitter-rust@21.0.0", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-l5+pCGBCUD7zlD3QhwZbt1e9n5UyYAniMlZ3lRCWY6jlEiIdEH6uyJjUKswGoAvUT5/306MFQVxpwjXCJyJQGA=="],
 
     "@willbooster/tree-sitter-zig": ["@willbooster/tree-sitter-zig@14.0.0", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-si+lGf8/Gj3EsMC47Uk31n0BQpSdWkJdNJSaQLcymB7TQlQrqLQ4mGfvV2UOk+jQRLn1gqQuW31QkaZxjqw5ug=="],
 
