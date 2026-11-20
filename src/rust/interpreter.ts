@@ -50,7 +50,7 @@ export class Interpreter implements CallSupport {
   readonly formatter: Formatter;
   readonly compiler: Compiler;
   private readonly dispatchCache = new Map<string, Dispatch | undefined>();
-  private readonly constValues = new Map<ConstDef, Value>();
+  private readonly constValues = new Map<ConstDef, Map<string, Value>>();
   private readonly constFns = new Map<ConstDef, CompiledFn>();
 
   constructor(
@@ -263,8 +263,20 @@ export class Interpreter implements CallSupport {
   // -------------------------------------------------------------------------------------------------------------------
   // Constants and conversions
 
-  constValue(def: ConstDef, frame: Frame): Value {
-    if (this.constValues.has(def)) return this.constValues.get(def);
+  constValue(def: ConstDef, frame: Frame, types: Type[]): Value {
+    const key = JSON.stringify(types.map(typeKey));
+    let instances = this.constValues.get(def);
+    if (!instances) {
+      instances = new Map();
+      this.constValues.set(def, instances);
+    }
+    if (instances.has(key)) return instances.get(key);
+    const value = this.evaluateConst(def, frame, types);
+    instances.set(key, value);
+    return value;
+  }
+
+  private evaluateConst(def: ConstDef, frame: Frame, types: Type[]): Value {
     const native = NATIVES[`const:${def.name}`];
     let value: Value;
     if (!def.ast.value) {
@@ -285,9 +297,10 @@ export class Interpreter implements CallSupport {
         compiled = this.compiler.compileConst(def.ast.value, context);
         this.constFns.set(def, compiled);
       }
-      value = this.invoke(compiled, new Map(), [], undefined, []);
+      const params = def.impl?.params ?? [];
+      const typeArgs = new Map(params.map((param, index) => [param, types[index]]));
+      value = this.invoke(compiled, typeArgs, [], undefined, []);
     }
-    this.constValues.set(def, value);
     return value;
   }
 

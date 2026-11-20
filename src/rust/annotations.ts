@@ -41,7 +41,7 @@ export type PathRes =
   | { kind: 'capture'; local: LocalVar; index: number }
   | { kind: 'fn'; fn: FnDef; typeArgs: Type[] }
   | { kind: 'ctor'; def: AdtDef; variant: number; typeArgs: Type[] }
-  | { kind: 'const'; def: ConstDef }
+  | { kind: 'const'; def: ConstDef; type: Type; typeArgs: Type[] }
   /** A constant of a primitive type, such as `i32::MAX` or `f64::consts::PI`. */
   | { kind: 'builtinConst'; type: Type; name: string }
   /** `_` on the left of an assignment. */

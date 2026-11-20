@@ -249,7 +249,7 @@ function patternBindingRes(c: Checker, pattern: Extract<Pattern, { kind: 'bindin
       typeArgs: binding.def.params.map(() => freshVar()),
     };
   }
-  if (binding.kind === 'const') return { kind: 'const', def: binding.def };
+  if (binding.kind === 'const') return { kind: 'const', def: binding.def, type: binding.def.type, typeArgs: [] };
   return undefined;
 }
 
@@ -257,8 +257,8 @@ function checkConstPattern(c: Checker, pattern: Pattern, res: PathRes, t: Type):
   if (res.kind === 'ctor') {
     c.unifyOrError(pattern.span, t, adt(res.def, res.typeArgs));
   } else if (res.kind === 'const') {
-    c.unifyOrError(pattern.span, t, res.def.type);
-    c.requireTrait(res.def.type, 'PartialEq', pattern.span);
+    c.unifyOrError(pattern.span, t, res.type);
+    c.requireTrait(res.type, 'PartialEq', pattern.span);
   }
 }
 
@@ -282,7 +282,7 @@ function adtPattern(
   c.annotations.paths.set(pattern, res);
   if (pattern.kind === 'path') {
     if (res.kind === 'const') {
-      c.unifyOrError(pattern.span, t, res.def.type);
+      c.unifyOrError(pattern.span, t, res.type);
       return;
     }
     if (res.kind !== 'ctor' || res.def.variants[res.variant].shape !== 'unit') {

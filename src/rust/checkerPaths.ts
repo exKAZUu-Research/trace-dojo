@@ -69,7 +69,7 @@ export function typeOfRes(c: Checker, res: PathRes, span: Span, expected: Type |
       };
     }
     case 'const': {
-      return res.def.type;
+      return res.type;
     }
     case 'builtinConst': {
       return res.type;
@@ -156,7 +156,7 @@ function associatedValueRes(c: Checker, t: Type, last: PathAst['segments'][numbe
       return { kind: 'ctor', def: t.def, variant: variant.index, typeArgs };
     }
   }
-  const constant = associatedConst(c, t, last.name, span);
+  const constant = associatedConst(c, t, last.name);
   if (constant) return constant;
   const found = lookupAssociated(c.program, c.solver, t, last.name);
   if (!found) {
@@ -225,7 +225,7 @@ export function checkTraitInScope(c: Checker, fn: FnDef, selfType: Type, span: S
   compileError(span, `${what} はトレイト ${trait.name} のものなので、use でトレイトを取り込んでください。`);
 }
 
-function associatedConst(c: Checker, t: Type, name: string, span: Span): PathRes | undefined {
+function associatedConst(c: Checker, t: Type, name: string): PathRes | undefined {
   if (t.kind === 'int' && ['MAX', 'MIN', 'BITS'].includes(name)) {
     return {
       kind: 'builtinConst',
@@ -243,9 +243,15 @@ function associatedConst(c: Checker, t: Type, name: string, span: Span): PathRes
   for (const impl of c.program.impls) {
     const constant = impl.consts.get(name);
     if (!constant) continue;
-    if (c.solver.matchImpl(impl, t)) return { kind: 'const', def: constant };
+    const subst = c.solver.matchImpl(impl, t);
+    if (!subst) continue;
+    return {
+      kind: 'const',
+      def: constant,
+      type: substitute(constant.type, subst),
+      typeArgs: impl.params.map((param) => subst.get(param) ?? { kind: 'param', param }),
+    };
   }
-  void span;
   return undefined;
 }
 
@@ -318,7 +324,7 @@ function valueBindingRes(
       };
     }
     case 'const': {
-      return { kind: 'const', def: binding.def };
+      return { kind: 'const', def: binding.def, type: binding.def.type, typeArgs: [] };
     }
   }
 }

@@ -9,7 +9,7 @@ import { construct, evaluateValues, isPlaceExpr, isRefType, isStringType, LocalP
 import { compileFor, compileIf, compileLoop, compileMatch, compileWhile } from './compilerControl';
 import { compileMacro } from './compilerMacros';
 import { compileBinary, compileCompoundAssign, compileUnary } from './compilerOperators';
-import { compileMatcher, compilePatternInput, type Matcher, takesWhole } from './compilerPatterns';
+import { compileConstant, compileMatcher, compilePatternInput, type Matcher, takesWhole } from './compilerPatterns';
 import { compileField, compileIndex, compilePlace } from './compilerPlaces';
 import type { Formatter } from './fmt';
 import { normalize } from './infer';
@@ -48,7 +48,7 @@ export interface CallSupport {
   callValue(callee: Value, args: Value[], callRow: number | undefined): Value;
   makeClosure(compiled: CompiledFn, frame: Frame, captures: Place[], byValue: boolean[]): Value;
   toIter(value: Value, from: Type): Value;
-  constValue(def: ConstDef, frame: Frame): Value;
+  constValue(def: ConstDef, frame: Frame, typeArgs: Type[]): Value;
   builtinConst(name: string): Value;
   formatter: Formatter;
   turtleNew(args: Value[], span: Span, frame: Frame): Value;
@@ -498,8 +498,7 @@ export class Compiler {
         return () => new FnValue((args) => construct(def, variant, args), def.variants[variant].name);
       }
       case 'const': {
-        const def = res.def;
-        return (frame) => this.support.constValue(def, frame);
+        return compileConstant(this, res);
       }
       case 'builtinConst': {
         const value = this.support.builtinConst(res.name);

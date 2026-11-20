@@ -981,6 +981,28 @@ fn main() {
   });
 });
 
+test('instantiates associated constants with concrete impl arguments', () => {
+  const program = `use std::mem::size_of;
+struct Wrapper<T>(T);
+impl<T> Wrapper<T> {
+    const SIZE: usize = size_of::<T>();
+    const NEXT: usize = Self::SIZE + 1;
+    const SELF_SIZE: usize = size_of::<Self>();
+}
+fn sizes<T>() -> (usize, usize) {
+    (Wrapper::<T>::SIZE, Wrapper::<T>::NEXT)
+}
+fn main() {
+    println!("{:?} {:?}", sizes::<i32>(), sizes::<i64>());
+    println!("{} {}", Wrapper::<i32>::SELF_SIZE, Wrapper::<i64>::SELF_SIZE);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '(4, 5) (8, 9)\n4 8\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

@@ -189,9 +189,20 @@ function constMatcher(c: Compiler, res: PathRes, type: Type): (frame: Frame, val
     return (_frame, value) => (derefAll(value) as EnumValue).variant === variant;
   }
   if (res.kind === 'const') {
-    return (frame, value) => valuesEqual(type, derefAll(value), c.support.constValue(res.def, frame));
+    const read = compileConstant(c, res);
+    return (frame, value) => valuesEqual(type, derefAll(value), read(frame));
   }
   return () => true;
+}
+
+export function compileConstant(c: Compiler, res: Extract<PathRes, { kind: 'const' }>): (frame: Frame) => Value {
+  const typeArgs = res.typeArgs.map(runtimeType);
+  return (frame) =>
+    c.support.constValue(
+      res.def,
+      frame,
+      typeArgs.map((type) => type(frame))
+    );
 }
 
 /**
