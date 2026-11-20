@@ -128,7 +128,7 @@ export class LiteralChecker {
       const context = contexts.length > 0 ? unionOf(contexts) : undefined;
       const type = this.c.expressions.check(element, context);
       const literalContext = contexts.find((candidate) => this.expectsLiteral(candidate, type)) ?? context;
-      return { type: isConstContext ? type : this.widenForMutableLocation(type, literalContext), spread: false };
+      return { type: this.literalValueType(type, literalContext, isConstContext), spread: false };
     });
     if (isConstContext || this.isInTupleContext(node, contextual)) {
       return this.tupleOfElements(
@@ -571,7 +571,7 @@ export class LiteralChecker {
 
   private memberValue(literal: ObjectLiteral, value: TreeNode, context: Type | undefined): Type {
     const checked = this.c.expressions.check(value, context);
-    return literal.isConstContext ? checked : this.widenForMutableLocation(checked, context);
+    return this.literalValueType(checked, context, literal.isConstContext);
   }
 
   /**
@@ -633,7 +633,7 @@ export class LiteralChecker {
 
   private shorthandType(literal: ObjectLiteral, member: TreeNode, context: Type | undefined): Type {
     const type = this.c.expressions.identifier(member);
-    return literal.isConstContext ? type : this.widenForMutableLocation(type, context);
+    return this.literalValueType(type, context, literal.isConstContext);
   }
 
   private methodMember(literal: ObjectLiteral, member: TreeNode): void {
@@ -1028,11 +1028,12 @@ export class LiteralChecker {
     return name === undefined ? undefined : { name, value, isShorthand };
   }
 
-  /** A literal's type in an array element or a property, widened unless the contextual type expects literals. */
-  widenForMutableLocation(type: Type, contextual: Type | undefined): Type {
-    // A nested object literal stays fresh, so that its own properties are checked against the target too.
-    if (type.kind === 'object' || (contextual && this.expectsLiteral(contextual, type))) return type;
-    return this.c.widenLiteral(type);
+  private literalValueType(type: Type, contextual: Type | undefined, isConst: boolean): Type {
+    const preservesLiteral = isConst || (contextual && this.expectsLiteral(contextual, type));
+    // Regular primitive literals survive later inference widening. Nested objects still need excess-property checks.
+    return mapType(type, (member) =>
+      member.kind !== 'literal' ? member : preservesLiteral ? regularOf(member) : this.c.widenLiteral(member)
+    );
   }
 
   private expectsLiteral(contextual: Type, type: Type): boolean {

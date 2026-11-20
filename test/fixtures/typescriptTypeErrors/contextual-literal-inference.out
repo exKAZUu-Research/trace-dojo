@@ -1,0 +1,15 @@
+(3,7): error TS2322: Type '{ x: 2; }' is not assignable to type '{ x: 1; }'.
+  Types of property 'x' are incompatible.
+    Type '2' is not assignable to type '1'.
+(4,7): error TS2322: Type '{ x: "c"; }' is not assignable to type '{ x: "a" | "b"; }'.
+  Types of property 'x' are incompatible.
+    Type '"c"' is not assignable to type '"a" | "b"'.
+(5,7): error TS2322: Type '{ readonly x: { readonly y: 2; }; }' is not assignable to type '{ readonly x: { readonly y: 1; }; }'.
+  The types of 'x.y' are incompatible between these types.
+    Type '2' is not assignable to type '1'.
+(6,7): error TS2322: Type '[2, "hello"]' is not assignable to type '[1, "hello"]'.
+  Type at position 0 in source is not compatible with type at position 0 in target.
+    Type '2' is not assignable to type '1'.
+(8,5): error TS2540: Cannot assign to 'y' because it is a read-only property.
+(9,57): error TS2353: Object literal may only specify known properties, and 'unknown' does not exist in type '{ tag: "a"; }'.
+(12,1): error TS2322: Type 'false' is not assignable to type 'true'.
