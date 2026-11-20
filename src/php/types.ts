@@ -197,9 +197,9 @@ function coerceScalar(value: Value, type: TypeDecl): Value | typeof NO_MATCH {
     return NO_MATCH;
   }
   if (value === null) {
-    if (wantsString) return '';
     if (wantsInt) return 0n;
     if (wantsFloat) return 0;
+    if (wantsString) return '';
     if (wantsBool) return false;
     return NO_MATCH;
   }

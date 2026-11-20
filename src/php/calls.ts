@@ -488,7 +488,13 @@ function bindNative(
     const index = values.length;
     values.push(value as Value);
     refs.push(ref);
-    if (record && index < record.args.length && typeof value === 'string') record.args[index] = value;
+    if (
+      record &&
+      index < record.args.length &&
+      (typeof value === 'string' ||
+        (record.args[index] === null && value !== undefined && params[index]?.type?.k === 'union'))
+    )
+      record.args[index] = value;
   };
   const named = checkNamedArgs(params, args);
   if (record && named) record.named = [...named];

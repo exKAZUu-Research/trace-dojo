@@ -5166,4 +5166,16 @@ try { range(0.5, 1e16, 2); } catch (ValueError $e) { echo $e->getMessage(), "\\n
     stdout:
       'The supplied range exceeds the maximum array size by 0 elements: start=1, end=1073741824, step=1. Calculated size: 1073741823. Maximum size: 1073741824.\nThe supplied range exceeds the maximum array size by 4999998926258177.0 elements: start=0.5, end=10000000000000000.0, step=2.0. Max size: 1073741824\n',
   });
+
+  expect(
+    run(
+      `<?php
+var_dump(range(0, null));
+try { range(0.1, null, 1); } catch (ValueError $e) { echo explode("\\n", $e->getTraceAsString())[0], "\\n"; }`
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '\nDeprecated: range(): Passing null to parameter #2 ($end) of type string|int|float is deprecated in /main.php on line 2\narray(1) {\n  [0]=>\n  int(0)\n}\n\nDeprecated: range(): Passing null to parameter #2 ($end) of type string|int|float is deprecated in /main.php on line 3\n#0 /main.php(3): range(0.1, 0, 1)\n',
+  });
 });
