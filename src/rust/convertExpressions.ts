@@ -34,7 +34,7 @@ export abstract class ExpressionConverter extends MacroConverter {
     const stmts: Stmt[] = [];
     const items: Item[] = [];
     let tail: Expr | undefined;
-    const children = node.namedChildren.filter((child) => !isComment(child));
+    const children = node.namedChildren.filter((child) => !isComment(child)).map(withoutDocAttributes);
     for (const [index, child] of children.entries()) {
       const isLast = index === children.length - 1;
       if (child.type === 'label') unavailable(this.span(child), "ラベル付きのブロック（'a: { ... }）");
@@ -492,6 +492,7 @@ export abstract class ExpressionConverter extends MacroConverter {
     const arms: MatchArm[] = [];
     const body = this.field(node, 'body');
     for (const arm of body.namedChildren) {
+      if (isComment(arm)) continue;
       if (arm.type !== 'match_arm') {
         if (arm.type === 'attribute_item') unavailable(this.span(arm), '腕に付けた属性');
         continue;
@@ -538,6 +539,12 @@ export abstract class ExpressionConverter extends MacroConverter {
     const pattern = this.pattern(inner);
     return pattern.kind === 'binding' ? { ...pattern, mutable: true } : pattern;
   }
+}
+
+function withoutDocAttributes(node: Node): Node {
+  if (node.type !== 'attributed_declaration' && node.type !== 'attributed_expression') return node;
+  const [child, other] = node.namedChildren.filter((part) => !isComment(part));
+  return child && !other ? child : node;
 }
 
 function unsupportedExpr(node: Node, span: Span): never {

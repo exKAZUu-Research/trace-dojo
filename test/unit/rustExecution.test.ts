@@ -1480,6 +1480,33 @@ fn main() {
   });
 });
 
+test('accepts Rust doc comments alongside real attributes', () => {
+  const program = `/// The point to show.
+#[derive(Debug)]
+struct Point {
+    /// Its row.
+    row: i32,
+}
+enum Choice {
+    /// The supplied point.
+    Some(Point),
+}
+/** Writes the chosen point. */
+fn main() {
+    /// Build an example.
+    let point = Point { row: 7 };
+    match Choice::Some(point) {
+        /// Show the point.
+        Choice::Some(point) => println!("{:?}", point),
+    }
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'Point { row: 7 }\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

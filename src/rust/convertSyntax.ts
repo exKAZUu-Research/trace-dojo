@@ -125,5 +125,9 @@ export function checkNotReserved(name: string, span: Span): void {
 }
 
 export function isComment(node: Node): boolean {
-  return node.type === 'line_comment' || node.type === 'block_comment';
+  const type = node.type;
+  if (type === 'line_comment' || type === 'block_comment') return true;
+  if (type !== 'attribute_item' && type !== 'inner_attribute_item') return false;
+  const comment = node.firstNamedChild;
+  return comment !== null && (comment.type === 'line_comment' || comment.type === 'block_comment');
 }

@@ -146,8 +146,9 @@ export class Converter extends ExpressionConverter {
     const attrs: Attributes = { derives: [] };
     let declaration: Node | undefined;
     for (const child of node.namedChildren) {
+      if (isComment(child)) continue;
       if (child.type === 'attribute_item') this.attribute(child, attrs);
-      else if (!isComment(child)) declaration = child;
+      else declaration = child;
     }
     if (!declaration) return undefined;
     if (attrs.derives.length > 0 && declaration.type !== 'struct_item' && declaration.type !== 'enum_item') {
