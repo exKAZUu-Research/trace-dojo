@@ -1,6 +1,7 @@
+import { hasStringSlots, permuteStringSlots, swapOwnedElements } from '../capacity';
 import { comparePartialValues, testPartialOrder } from '../ops';
 import { type IntName, intType, type Type } from '../types';
-import { ElementPlace, sliceItems, sliceSet, UNIT_VALUE, type Value } from '../values';
+import { ElementPlace, sliceBase, sliceItems, sliceSet, UNIT_VALUE, type Value } from '../values';
 import { sizeOf } from './layout';
 import type { SortElement } from './sort/shared';
 import { stableSort } from './sort/stable';
@@ -15,14 +16,33 @@ export function sortSlice(
   isLess: (a: Value, b: Value) => boolean,
   elementType = ctx.typeArgs[0]
 ): void {
+  const { base, start } = sliceBase(slice);
   const items = sliceItems(slice);
-  ctx.runtime.nativeRoots.push(items);
-  try {
-    (stable ? stableSort : unstableSort)(items, isLess, sortElement(ctx, elementType), () => ordViolation(ctx));
-    for (const [index, item] of items.entries()) sliceSet(slice, index, item);
-  } finally {
-    ctx.runtime.nativeRoots.pop();
+  const sort = stable ? stableSort : unstableSort;
+  const layout = sortElement(ctx, elementType);
+  if (hasStringSlots(base)) {
+    ctx.runtime.allocate(items.length * 5);
+    const tracked = items.map((item, index): [Value, bigint] => [item, BigInt(index)]);
+    ctx.runtime.withRoots(tracked, () => {
+      sort(
+        tracked,
+        (a, b) => isLess((a as Value[])[0], (b as Value[])[0]),
+        layout,
+        () => ordViolation(ctx)
+      );
+      permuteStringSlots(
+        base,
+        start,
+        tracked.map((pair) => Number(pair[1]))
+      );
+      for (const [index, pair] of tracked.entries()) sliceSet(slice, index, pair[0]);
+    });
+    return;
   }
+  ctx.runtime.withRoots(items, () => {
+    sort(items, isLess, layout, () => ordViolation(ctx));
+    for (const [index, item] of items.entries()) sliceSet(slice, index, item);
+  });
 }
 
 function sortElement(ctx: NativeContext, type: Type): SortElement {
@@ -54,31 +74,22 @@ export function lessByKey(ctx: NativeContext, f: Value): (a: Value, b: Value) =>
 /** `BinaryHeap::into_sorted_vec`: swaps the greatest to the end and sifts the rest down, as std's heap does. */
 export function intoSortedVec(data: Value[], compare: (a: Value, b: Value) => number): Value[] {
   for (let end = data.length - 1; end > 0; end--) {
-    [data[0], data[end]] = [data[end], data[0]];
+    swapOwnedElements(data, 0, end);
     siftDownRange(data, end, compare);
   }
   return data;
 }
 
 function siftDownRange(data: Value[], end: number, compare: (a: Value, b: Value) => number): void {
-  const element = data[0];
   let hole = 0;
   let child = 1;
-  while (child <= Math.max(end - 2, 0)) {
-    if (compare(data[child], data[child + 1]) <= 0) child++;
-    if (compare(element, data[child]) >= 0) {
-      data[hole] = element;
-      return;
-    }
-    data[hole] = data[child];
+  while (child < end) {
+    if (child + 1 < end && compare(data[child], data[child + 1]) <= 0) child++;
+    if (compare(data[hole], data[child]) >= 0) return;
+    swapOwnedElements(data, hole, child);
     hole = child;
     child = 2 * hole + 1;
   }
-  if (child === end - 1 && compare(element, data[child]) < 0) {
-    data[hole] = data[child];
-    hole = child;
-  }
-  data[hole] = element;
 }
 
 /**
@@ -127,5 +138,8 @@ export function sortByCachedKey(ctx: NativeContext, slice: Value, f: Value): voi
   } finally {
     ctx.runtime.nativeRoots.pop();
   }
-  for (const [position, pair] of pairs.entries()) sliceSet(slice, position, items[(pair as [Value, number])[1]]);
+  const { base, start } = sliceBase(slice);
+  const order = pairs.map((pair) => (pair as [Value, number])[1]);
+  permuteStringSlots(base, start, order);
+  for (const [position, index] of order.entries()) sliceSet(slice, position, items[index]);
 }

@@ -1112,6 +1112,44 @@ fn main() {
   });
 });
 
+test('keeps String capacity with elements through slice reordering', () => {
+  const program = `fn make(text: &str, reserve: usize) -> String {
+    let mut s = String::with_capacity(reserve);
+    s.push_str(text);
+    s
+}
+fn capacities(v: &[String]) {
+    let mut out = Vec::new();
+    for i in 0..v.len() { out.push(v[i].capacity()); }
+    println!("{:?}", out);
+}
+fn main() {
+    let mut v = vec![make("bb", 22)];
+    v.push(make("cc", 33));
+    v.push(make("a", 11));
+    capacities(&v);
+    v[..2].swap(0, 1);
+    capacities(&v);
+    v.reverse();
+    capacities(&v);
+    v.rotate_left(1);
+    capacities(&v);
+    v.sort_unstable();
+    capacities(&v);
+    v.sort_by_cached_key(|s| 9 - s.len());
+    capacities(&v);
+    let mut equal = vec![make("a", 10)];
+    equal.push(make("a", 30));
+    equal.reverse();
+    capacities(&equal);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[22, 33, 11]\n[33, 22, 11]\n[11, 22, 33]\n[22, 33, 11]\n[11, 22, 33]\n[22, 33, 11]\n[30, 10]\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

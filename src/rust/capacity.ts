@@ -236,6 +236,20 @@ export function swapOwnedElements(elements: Value[], a: number, b: number): void
   else entries.delete(a);
 }
 
+export function hasStringSlots(elements: Value[]): boolean {
+  return (stringCapacities.get(elements)?.size ?? 0) > 0;
+}
+
+export function permuteStringSlots(elements: Value[], start: number, order: number[]): void {
+  const entries = stringCapacities.get(elements);
+  if (!entries) return;
+  const capacities = order.map((index) => entries.get(start + index));
+  for (const [offset, entry] of capacities.entries()) {
+    if (entry) entries.set(start + offset, entry);
+    else entries.delete(start + offset);
+  }
+}
+
 export function relocateStringSlots(
   source: Value[],
   target: Value[],

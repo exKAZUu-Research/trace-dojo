@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 444 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss 450 -- One native per method of the standard library.
 import {
   insertOwnedElement,
   keepVecCapacity,
@@ -201,10 +201,12 @@ const sliceNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
     return UNIT_VALUE;
   },
   is_sorted: ([self], ctx) => sliceIsSorted(sliceItems(deref(self)), elemType(ctx)),
-  reverse: ([self]) => {
+  reverse: ([self], ctx) => {
     const slice = deref(self);
-    const items = sliceItems(slice).toReversed();
-    for (const [index, item] of items.entries()) sliceSet(slice, index, item);
+    const length = sliceLength(slice);
+    ctx.runtime.spend(Math.ceil(length / 64));
+    const { base, start } = sliceBase(slice);
+    reverseElements(base, start, start + length);
     return UNIT_VALUE;
   },
   binary_search: ([self, x], ctx) => {
@@ -231,9 +233,8 @@ const sliceNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
     for (const index of [i, j]) {
       if (index >= length) panic(ctx, `index out of bounds: the len is ${length} but the index is ${index}`);
     }
-    const item = sliceGet(slice, i);
-    sliceSet(slice, i, sliceGet(slice, j));
-    sliceSet(slice, j, item);
+    const { base, start } = sliceBase(slice);
+    swapOwnedElements(base, start + i, start + j);
     return UNIT_VALUE;
   },
   split_at: ([self, mid], ctx) => splitAt(ctx, deref(self), Number(mid as bigint)),
@@ -299,14 +300,14 @@ const sliceNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
     if (Number(mid as bigint) > sliceLength(slice)) {
       libraryPanic(ctx, 'assertion failed: mid <= self.len()', 'core/src/slice/mod.rs:3904:9');
     }
-    return rotate(slice, Number(mid as bigint));
+    return rotate(slice, Number(mid as bigint), ctx);
   },
   rotate_right: ([self, k], ctx) => {
     const slice = deref(self);
     if (Number(k as bigint) > sliceLength(slice)) {
       libraryPanic(ctx, 'assertion failed: k <= self.len()', 'core/src/slice/mod.rs:3950:9');
     }
-    return rotate(slice, sliceLength(slice) - Number(k as bigint));
+    return rotate(slice, sliceLength(slice) - Number(k as bigint), ctx);
   },
   copy_from_slice: ([self, src], ctx) => copyFrom(ctx, deref(self), deref(src), (item) => copyValue(item)),
   clone_from_slice: ([self, src], ctx) =>
@@ -403,14 +404,21 @@ function sliceIsSorted(items: Value[], type: Type): boolean {
   return true;
 }
 
-function rotate(slice: Value, mid: number): Value {
-  const items = sliceItems(slice);
-  const length = items.length;
+function rotate(slice: Value, mid: number, ctx: NativeContext): Value {
+  const length = sliceLength(slice);
   if (length === 0) return UNIT_VALUE;
   const shift = ((mid % length) + length) % length;
-  const rotated = [...items.slice(shift), ...items.slice(0, shift)];
-  for (const [index, item] of rotated.entries()) sliceSet(slice, index, item);
+  if (shift === 0) return UNIT_VALUE;
+  ctx.runtime.spend(Math.ceil(length / 64));
+  const { base, start } = sliceBase(slice);
+  reverseElements(base, start, start + shift);
+  reverseElements(base, start + shift, start + length);
+  reverseElements(base, start, start + length);
   return UNIT_VALUE;
+}
+
+function reverseElements(items: Value[], start: number, end: number): void {
+  for (let left = start, right = end - 1; left < right; left++, right--) swapOwnedElements(items, left, right);
 }
 
 function copyFrom(ctx: NativeContext, target: Value, source: Value, copy: (item: Value) => Value): Value {
@@ -639,8 +647,8 @@ const dequeNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
   retain: ([self, f], ctx) => vecNatives.retain([self, f], ctx),
   truncate: ([self, len], ctx) => vecNatives.truncate([self, len], ctx),
   swap: ([self, a, b], ctx) => sliceNatives.swap([self, a, b], ctx),
-  rotate_left: ([self, n]) => rotate(vec(self), Number(n as bigint)),
-  rotate_right: ([self, n]) => rotate(vec(self), vec(self).length - Number(n as bigint)),
+  rotate_left: ([self, n], ctx) => rotate(vec(self), Number(n as bigint), ctx),
+  rotate_right: ([self, n], ctx) => rotate(vec(self), vec(self).length - Number(n as bigint), ctx),
   make_contiguous: ([self]) => self,
   drain: ([self, range], ctx) => {
     const items = vec(self);
@@ -678,7 +686,7 @@ const heapNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> 
   iter: ([self]) => sliceIter(vec(self), false),
   into_vec: ([self]) => vec(self),
   into_sorted_vec: ([self], ctx) => {
-    const items = [...vec(self)];
+    const items = vec(self);
     return intoSortedVec(items, (a, b) => compareValues(elemType(ctx), a, b) ?? 0);
   },
   extend: ([self, iter], ctx) => {
