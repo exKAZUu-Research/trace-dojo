@@ -38,6 +38,8 @@ export class ExecutionBudget {
   private nextClockCheck = OPERATIONS_PER_CLOCK_CHECK;
   private deadline = performance.now() + LIMITS.maxMilliseconds;
 
+  constructor(private readonly maxOperations = LIMITS.maxOperations) {}
+
   get remainingMilliseconds(): number {
     return Math.max(0, Math.ceil(this.deadline - performance.now()));
   }
@@ -46,7 +48,7 @@ export class ExecutionBudget {
     if (!Number.isFinite(cost)) throw new ExecutionLimitError('operations');
     // A negative charge (such as a scan over an empty range computed backward) must never refill the budget.
     this.operations += Math.max(cost, 0);
-    if (this.operations > LIMITS.maxOperations) throw new ExecutionLimitError('operations');
+    if (this.operations > this.maxOperations) throw new ExecutionLimitError('operations');
     // A charge for many operations at once (e.g., scanning a long string) may stand for slow native work, so it
     // checks the clock at once; single operations check it periodically.
     if (cost === 1 && this.operations < this.nextClockCheck) return;

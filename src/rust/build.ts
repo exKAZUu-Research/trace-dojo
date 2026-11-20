@@ -1,4 +1,5 @@
-import { ExecutionBudget } from '../interpreter/limits';
+import { CompileError } from '../interpreter/diagnostics';
+import { ExecutionBudget, ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import type { Item } from './ast';
 import { Checker } from './checker';
 import { Converter } from './convert';
@@ -28,11 +29,17 @@ export interface BuiltProgram {
 }
 
 /** Parses, resolves, and type-checks a program with the standard library, throwing a `CompileError` for errors. */
-export function buildProgram(
-  source: string,
-  atomicRows: ReadonlySet<number> = new Set(),
-  budget = new ExecutionBudget()
-): BuiltProgram {
+export function buildProgram(source: string, atomicRows: ReadonlySet<number> = new Set()): BuiltProgram {
+  try {
+    // A loan check can visit a loan at each CFG point, so it has a separate budget from the learner's run.
+    return typeCheck(source, atomicRows, new ExecutionBudget(32 * LIMITS.maxOperations));
+  } catch (error) {
+    if (!(error instanceof ExecutionLimitError)) throw error;
+    throw new CompileError([{ row: 0, message: 'このプログラムは、Rust のコンパイル処理の上限を超えました。' }]);
+  }
+}
+
+function typeCheck(source: string, atomicRows: ReadonlySet<number>, budget: ExecutionBudget): BuiltProgram {
   budget.spend(Math.ceil(source.length / 64));
   const program = new Program();
   const collector = new ItemCollector(program);

@@ -1447,6 +1447,17 @@ test('nested loops with stable ownership states compile and run within the opera
   });
 });
 
+test('loan analysis leaves the execution budget available to straight-line programs', () => {
+  const statements = Array.from(
+    { length: 140 },
+    (_, index) => `v.push(${index}); let n${index} = v.len(); total += n${index};`
+  );
+  const program = rustMain(`let mut v = Vec::new(); let mut total = 0;
+${statements.join('\n')}
+println!("{}", total);`);
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '9870\n' });
+});
+
 test('an endless loop stops at the operation limit', () => {
   expect(executeProgram('rust', rustMain('    let mut i: u64 = 0;\n    loop { i = i.wrapping_add(1); }'))).toEqual({
     kind: 'limitExceeded',

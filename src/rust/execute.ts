@@ -1,5 +1,5 @@
 import { CompileError } from '../interpreter/diagnostics';
-import { ExecutionBudget, ExecutionLimitError } from '../interpreter/limits';
+import { ExecutionLimitError } from '../interpreter/limits';
 import type { ProgramExecution, ProgramRun } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import { buildProgram, type BuiltProgram } from './build';
@@ -13,10 +13,9 @@ import { EnumValue, type Value } from './values';
 
 // code-gauge-allow duplicateLines 15 -- Each language reports how its program ended alike.
 export function executeRustProgram(source: string, input?: ProgramInput): ProgramExecution {
-  const budget = new ExecutionBudget();
   try {
-    const built = buildProgram(source, undefined, budget);
-    return { kind: 'executed', ...runProgram(new Runtime(input, budget), built, false) };
+    const built = buildProgram(source);
+    return { kind: 'executed', ...runProgram(new Runtime(input), built, false) };
   } catch (error) {
     if (error instanceof CompileError) return { kind: 'compileError', diagnostics: error.diagnostics };
     if (error instanceof ExecutionLimitError) return { kind: 'limitExceeded', limit: error.limit };
