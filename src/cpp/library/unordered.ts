@@ -534,7 +534,9 @@ export class HashValue extends MapValue {
     this.size = other.size;
   }
 
-  swap(other: HashValue): void {
+  swap(frame: Frame, other: HashValue): void {
+    // Rewriting each node's owner and each bucket head is bookkeeping, charged per 64 like other bookkeeping.
+    frame.runtime.spend(Math.ceil((this.size + other.size + this.buckets.length + other.buckets.length) / 64));
     const headsOf = (value: HashValue): number[] =>
       value.buckets.flatMap((before, index) => (before === value.head ? [index] : []));
     const ownHeads = headsOf(this);
@@ -877,7 +879,9 @@ export function unorderedClass(
     ops().destroy?.(frame, removed);
     return self.iterator(next);
   });
-  method('swap', [referenceTo(classType(cls))], VOID, (self, [other]) => self.swap((other as Ptr).read() as HashValue));
+  method('swap', [referenceTo(classType(cls))], VOID, (self, [other], frame) =>
+    self.swap(frame, (other as Ptr).read() as HashValue)
+  );
   return cls;
 }
 
