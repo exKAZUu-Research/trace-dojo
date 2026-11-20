@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 895 -- Lowers each kind of expression to the points and regions rustc's MIR gives it.
+// code-gauge-allow-file fileNcss 899 -- Lowers each kind of expression to the points and regions rustc's MIR gives it.
 import type { ExecutionBudget } from '../interpreter/limits';
 import type { Annotations, FnContext, LocalVar, MethodRes } from './annotations';
 import type { Block, Condition, Expr, FormatArgs, Pattern, Span, Stmt } from './ast';
@@ -540,8 +540,7 @@ export class LoanBuilder {
         return undefined;
       }
       case 'cast': {
-        this.value(expr.operand);
-        return undefined;
+        return this.cast(expr);
       }
       case 'try': {
         return this.tryExpr(expr);
@@ -591,6 +590,13 @@ export class LoanBuilder {
         return undefined;
       }
     }
+  }
+
+  private cast(expr: Extract<Expr, { kind: 'cast' }>): Value {
+    const operand = this.value(expr.operand);
+    const result = this.temp(expr.ty);
+    this.store(operand, result);
+    return result;
   }
 
   private aggregateExpr(expr: Extract<Expr, { kind: 'tuple' | 'array' | 'arrayRepeat' | 'range' }>): Value {

@@ -460,6 +460,16 @@ test.each([
   ['arithmetic that always overflows', '    let x: u32 = 3;\n    let y = x - 5;', 3],
   ['arithmetic on an associated constant that overflows', '    let x = i32::MAX + 1;', 2],
   ['a Unicode escape in a byte literal', String.raw`    let byte = b'\u{41}';`, 2],
+  [
+    'mutation during a live reference cast',
+    '    let mut x = 1;\n    let borrowed = &x as &i32;\n    x = 2;\n    println!("{}", borrowed);',
+    4,
+  ],
+  [
+    'mutation during a live array-to-slice cast',
+    '    let mut values = [1, 2];\n    let slice = &values as &[i32];\n    values[0] = 2;\n    println!("{}", slice[0]);',
+    4,
+  ],
   ['a non-ASCII byte literal', "    let byte = b'é';", 2],
   ['an out-of-range hex escape in a character literal', String.raw`    let char = '\xFF';`, 2],
   [
