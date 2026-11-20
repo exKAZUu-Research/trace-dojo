@@ -129,6 +129,12 @@ export function setAllocationHandler(handler: (count: number, size: number) => v
   allocationHandler = handler;
 }
 
+let shutdownHoldHandler: (value: unknown) => void = () => {};
+
+export function setShutdownHoldHandler(handler: (value: unknown) => void): void {
+  shutdownHoldHandler = handler;
+}
+
 /** Reports a value that a holder let go of, if it may hold objects. */
 export function dropped(value: unknown): void {
   if (value !== null && typeof value === 'object') dropHandler([value]);
@@ -323,7 +329,7 @@ export class PhpArray {
    * there.
    */
   private insert(key: Key, slot: Value | Ref): void {
-    const stale = this.resetEmptyRetained(key);
+    this.resetEmptyRetained(key);
     const order = slot === UNDEFINED_RESULT || this.map.countsUndefinedSlots ? this.ordered() : this.order;
     const count = this.map.countsUndefinedSlots ? this.size : undefined;
     const wasPacked = order?.isPacked;
@@ -343,17 +349,15 @@ export class PhpArray {
         if (oldSlot === UNDEFINED_RESULT) this.removeUndefinedSlot(oldKey);
       order.compact();
     }
-    for (const old of stale ?? []) dropped(old);
   }
 
-  private resetEmptyRetained(key: Key): (Value | Ref)[] | undefined {
+  private resetEmptyRetained(key: Key): void {
     if (this.size !== 0 || this.map.removedUndefinedSlots >= 0 || this.map.has(key) || this.ordered().staysPacked(key))
       return;
-    const stale = this.detachSlots();
+    for (const old of this.detachSlots()) shutdownHoldHandler(old);
     this.order = undefined;
     this.orderPacked = key === 0n;
     this.pointer = null;
-    return stale;
   }
 
   private finishInsert(key: Key, existed: boolean, order: ArrayOrder | undefined, count: number | undefined): void {

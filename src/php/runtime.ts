@@ -25,6 +25,7 @@ import {
   setAllocationHandler,
   setDropHandler,
   setReferenceDropObserver,
+  setShutdownHoldHandler,
   type UserFunction,
   type Value,
 } from './values';
@@ -563,6 +564,7 @@ export function rt(): Runtime {
 
 setReferenceDropObserver((value) => current?.pendingGcRoots.add(value));
 setDropHandler((values) => current?.release(values, true));
+setShutdownHoldHandler((value) => current?.holdForShutdown(value));
 setAllocationHandler((count, size) => current?.allocate(count, size));
 export function withRuntime<T>(runtime: Runtime, run: () => T): T {
   const outer = current;

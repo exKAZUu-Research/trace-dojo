@@ -4674,6 +4674,30 @@ if (isset($b)) echo count($b), ':', json_encode($b), ':', json_encode($b[1] ?? n
 `)
     ).toMatchObject({ kind: 'executed', stdout: expected });
   }
+
+  for (const value of ['new D', '[new D]']) {
+    for (const [op, expected] of [
+      ['$a[0] = 7;', 'before;after;1:[7];end;drop;'],
+      ['$a["x"] = 7;', 'before;after;1:{"x":7};end;drop;'],
+      ['$a[8] = 7;', 'before;after;1:{"8":7};end;drop;'],
+    ]) {
+      expect(
+        run(`<?php
+error_reporting(0);
+class D { function __destruct() { echo 'drop;'; } }
+function f() { return 4; }
+$a = [];
+set_error_handler(function() use (&$a) { unset($a[0]); $a[] = ${value}; return true; });
+$a[] =& f();
+restore_error_handler();
+unset($a[0]);
+echo 'before;';
+${op}
+echo 'after;', count($a), ':', json_encode($a), ';end;';
+`)
+      ).toMatchObject({ kind: 'executed', stdout: expected });
+    }
+  }
 });
 
 test('reports JIT stack limit exhaustion on long subjects with quantified groups and accurate rows for first-statement syntax errors', () => {

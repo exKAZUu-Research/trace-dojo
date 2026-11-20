@@ -201,20 +201,7 @@ type Scalar = TraceItemVariable[string];
 
 function scalarOf(value: Value, seen: Set<object>, budget: { remaining: number }): Scalar | typeof NOT_SCALAR {
   if (budget.remaining-- <= 0) return NOT_SCALAR;
-  // oxlint-disable-next-line unicorn/no-null -- The trace format shows null as null.
-  if (value === null) return null;
-  switch (typeof value) {
-    case 'bigint': {
-      return traceInt(value);
-    }
-    case 'number':
-    case 'boolean': {
-      return value;
-    }
-    case 'string': {
-      return dec(value);
-    }
-  }
+  if (value === null || typeof value !== 'object') return primitiveScalar(value);
   if (
     !(value instanceof PhpArray) ||
     value.size > budget.remaining ||
@@ -223,6 +210,11 @@ function scalarOf(value: Value, seen: Set<object>, budget: { remaining: number }
     !value.isList()
   )
     return NOT_SCALAR;
+  if (!value.composite) {
+    const scalar = primitiveArraySnapshot(value).scalar;
+    if (scalar !== NOT_SCALAR) budget.remaining -= value.size;
+    return scalar;
+  }
   seen.add(value);
   const items: Scalar[] = [];
   for (const [, slot] of value.map.entries()) {
@@ -258,6 +250,13 @@ function displayNodeOf(value: Value, seen: Set<object>, budget: { remaining: num
       kind: 'object',
       entries: { x: { kind: 'value', value: value.turtle.x }, y: { kind: 'value', value: value.turtle.y } },
     };
+  }
+  if (value instanceof PhpArray && !value.composite) {
+    const cost = Math.min(value.size, MAX_DISPLAY_EXPANSION - 1);
+    if (budget.remaining >= cost) {
+      budget.remaining -= cost;
+      return primitiveArraySnapshot(value).node;
+    }
   }
   seen.add(value);
   try {
