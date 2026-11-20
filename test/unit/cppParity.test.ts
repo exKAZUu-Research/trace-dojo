@@ -967,6 +967,38 @@ int main() {
   });
 });
 
+test('sorts a list with a comparator in libc++ comparison order', () => {
+  const program = `#include <functional>
+#include <iostream>
+#include <list>
+int calls = 0;
+bool by(int a, int b) { if (++calls < 40) std::cout << a << '<' << b << ' '; return a % 5 < b % 5; }
+int left = 6;
+bool thrower(int a, int b) { if (--left == 0) throw 1; return a < b; }
+int main() {
+  std::list<int> a;
+  for (int i = 0; i < 20; ++i) a.push_back((i * 7) % 20);
+  auto first = a.begin();
+  int& anchor = *first;
+  a.sort(by);
+  std::cout << '\\n' << calls << ' ' << anchor << ' ';
+  for (int v : a) std::cout << v << ',';
+  std::list<int> b{5, 3, 9, 1, 7, 2, 8};
+  try { b.sort(thrower); } catch (int) {}
+  std::cout << '\\n';
+  for (int v : b) std::cout << v << ',';
+  std::list<int> c{3, 1, 2};
+  c.sort(std::greater<int>());
+  for (int v : c) std::cout << v;
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '7<0 8<1 1<14 8<14 1<0 1<7 8<7 2<15 3<16 16<9 3<9 16<15 16<2 3<2 15<0 15<1 16<1 16<7 2<7 2<8 3<8 3<14 9<14 17<10 18<11 11<4 18<4 11<10 11<17 18<17 12<5 13<6 6<19 13<19 6<5 6<12 13<12 5<10 5<11 \n64 0 0,15,10,5,1,16,11,6,7,2,17,12,8,3,18,13,14,9,4,19,\n3,5,9,1,7,2,8,321',
+    uncaughtException: undefined,
+  });
+});
+
 test('evaluates the operands of integer-plus-pointer from left to right', () => {
   const program = `#include <iostream>
 int data[4];

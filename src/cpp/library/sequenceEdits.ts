@@ -695,33 +695,63 @@ class Followed {
   }
 }
 
+/**
+ * libc++'s `list::sort` with a comparator: a recursive merge sort whose merge compares the first remaining element of
+ * the right run with that of the left run, as splicing runs of nodes does. Nodes keep their elements, so the elements
+ * are compared where they are and the list is reordered once; a comparator that throws leaves the order the splices
+ * made so far.
+ */
 export function listSort(frame: Frame, self: SequenceValue, less: (a: Ptr, b: Ptr) => boolean): void {
-  const compare = (a: Ptr, b: Ptr): boolean => {
+  const locations = Array.from({ length: self.length }, (_, index) => self.location(index));
+  const order = locations.map((_, index) => index);
+  const compare = (a: number, b: number): boolean => {
     frame.runtime.spend();
-    return less(a, b);
+    return less(locations[a], locations[b]);
   };
   const sort = (first: number, last: number): void => {
     if (last - first < 2) return;
     const middle = first + Math.floor((last - first) / 2);
     sort(first, middle);
     sort(middle, last);
-    let left = first;
-    let right = middle;
-    while (left < right && right < last) {
-      const item = self.location(left);
-      if (!compare(self.location(right), item)) {
-        left++;
+    mergeRuns(order, first, middle, last, compare);
+  };
+  try {
+    sort(0, order.length);
+  } finally {
+    frame.runtime.spend(Math.ceil(order.length / 64));
+    self.reorder((items) => order.map((index) => items[index]));
+  }
+}
+
+/**
+ * Merges two adjacent sorted runs of `order` as libc++'s list merge splices them: it finds the whole run of right
+ * elements that go before the current left one, then moves it there; a comparator that throws leaves the moves made.
+ */
+function mergeRuns(
+  order: number[],
+  first: number,
+  middle: number,
+  last: number,
+  compare: (a: number, b: number) => boolean
+): void {
+  const merged: number[] = [];
+  let left = first;
+  let right = middle;
+  try {
+    while (left < middle && right < last) {
+      if (!compare(order[right], order[left])) {
+        merged.push(order[left++]);
         continue;
       }
       let end = right + 1;
-      while (end < last && compare(self.location(end), item)) end++;
-      frame.runtime.spend(Math.ceil((end - left) / 64));
-      self.moveNodesBefore(right, end, left);
-      left += end - right + 1;
-      right = end;
+      while (end < last && compare(order[end], order[left])) end++;
+      for (; right < end; right++) merged.push(order[right]);
+      merged.push(order[left++]);
     }
-  };
-  sort(0, self.length);
+  } finally {
+    const result = [...merged, ...order.slice(left, middle), ...order.slice(right, last)];
+    for (const [offset, index] of result.entries()) order[first + offset] = index;
+  }
 }
 
 /** `__recommend`: the capacity a vector grows to, twice the old one or the needed size if larger. */

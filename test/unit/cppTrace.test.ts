@@ -466,6 +466,19 @@ int main() {
   }
 );
 
+test('sorts a long list with a comparator within the default limits', () => {
+  const program = `#include <functional>
+#include <iostream>
+#include <list>
+int main() {
+  std::list<int> a;
+  for (int i = 0; i < 15000; i++) a.push_back((i * 7919) % 15000);
+  a.sort(std::greater<int>());
+  std::cout << a.front() << ' ' << a.back();
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', stdout: '14999 0' });
+});
+
 test('charges the storage of the message buffer that what() creates', () => {
   const program = `#include <stdexcept>
 #include <string>
