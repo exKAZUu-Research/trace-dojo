@@ -42,7 +42,8 @@ export function deferredHandleOrder<N extends object, O extends N>(
   roots: N[],
   protectedObjects: Set<O>,
   isObject: (node: N) => node is O,
-  children: (node: N) => N[]
+  children: (node: N) => N[],
+  reverseNested = false
 ): O[] {
   const state: DeferredState<N, O> = {
     protectedObjects,
@@ -53,21 +54,29 @@ export function deferredHandleOrder<N extends object, O extends N>(
     children,
   };
   const queue: N[] = [...roots];
-  drainDeferredQueue(queue, state, 0);
+  drainDeferredQueue(queue, state, 0, reverseNested);
   for (const object of protectedObjects) {
     if (!state.freed.has(object)) {
       const start = queue.length;
       queue.push(object);
-      drainDeferredQueue(queue, state, start);
+      drainDeferredQueue(queue, state, start, reverseNested);
     }
   }
   return state.order;
 }
 
-function drainDeferredQueue<N extends object, O extends N>(queue: N[], state: DeferredState<N, O>, from: number): void {
+function drainDeferredQueue<N extends object, O extends N>(
+  queue: N[],
+  state: DeferredState<N, O>,
+  from: number,
+  reverseNested: boolean
+): void {
   for (let head = from; head < queue.length; head++) {
     const start = queue[head];
-    if (!state.freed.has(start)) queue.push(...releaseDeferredRoot(start, state));
+    if (!state.freed.has(start)) {
+      const nested = releaseDeferredRoot(start, state);
+      queue.push(...(reverseNested ? nested.toReversed() : nested));
+    }
   }
 }
 
@@ -134,8 +143,9 @@ export function countAfterDestructionPass<O extends object, A extends object>(
   cyclicArrays: Set<A>,
   excluded: Set<O>,
   collect: (roots: (O | A)[], skip: Set<O>) => { arrays: Set<A>; objects: Set<O> }
-): number {
+): { count: number; runTwoObjects: Set<O> } {
   const counted = collect([...cyclic, ...cyclicArrays], excluded);
+  const runTwoObjects = new Set<O>();
   if (excluded.size > 0) {
     const beneathExcluded = collect([...excluded], new Set());
     const runTwoRoots: (O | A)[] = [
@@ -144,11 +154,14 @@ export function countAfterDestructionPass<O extends object, A extends object>(
     ];
     if (runTwoRoots.length > 0) {
       const runTwo = collect(runTwoRoots, new Set());
-      for (const object of runTwo.objects) counted.objects.add(object);
+      for (const object of runTwo.objects) {
+        counted.objects.add(object);
+        runTwoObjects.add(object);
+      }
       for (const array of runTwo.arrays) counted.arrays.add(array);
     }
   }
-  return counted.objects.size + counted.arrays.size;
+  return { count: counted.objects.size + counted.arrays.size, runTwoObjects };
 }
 
 const objectFreeArrays = new WeakMap<PhpArray, { version: number; free: boolean }>();

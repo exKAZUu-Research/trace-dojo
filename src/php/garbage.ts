@@ -236,15 +236,17 @@ function countAfterDestruction(
   const deferredRoots = destructible.filter((object) => cyclic.has(object));
   const protectedObjects = collectibleGraph(deferredRoots, afterArrays, new Set(), allowed).objects;
   const excluded = new Set(destructible.filter((object) => !protectedObjects.has(object)));
-  const count = countAfterDestructionPass(cyclic, cyclicArrays, excluded, (roots, skip) =>
+  const { count, runTwoObjects } = countAfterDestructionPass(cyclic, cyclicArrays, excluded, (roots, skip) =>
     collectibleGraph(roots, afterArrays, skip, allowed)
   );
   const nonProtected = new Set(remaining.filter((object) => !protectedObjects.has(object)));
-  const passOneRoots = owners.filter((object) => cyclic.has(object) && nonProtected.has(object));
+  const passOneRoots = owners.filter(
+    (object) => cyclic.has(object) && nonProtected.has(object) && !runTwoObjects.has(object)
+  );
   const isObject = (node: CollectionNode): node is PhpObject => node instanceof PhpObject;
   const children = (node: CollectionNode): CollectionNode[] => graph.children(node);
   const ordered = [
-    ...deferredHandleOrder<CollectionNode, PhpObject>(passOneRoots, nonProtected, isObject, children),
+    ...deferredHandleOrder<CollectionNode, PhpObject>(passOneRoots, nonProtected, isObject, children, true),
     ...deferredHandleOrder<CollectionNode, PhpObject>(deferredRoots, protectedObjects, isObject, children),
   ];
   return { count, ordered };

@@ -4182,11 +4182,15 @@ echo "ok";
       '$p = new Plain; $p->next = $p; $n = new Node(1); $c = new Plain; $c->next = $c; $c->o = new Node(2); $n->o = $c; $p->o = $n; unset($p, $n, $c);',
       '~1 ~2 3 3,4,1,2,5,6',
     ],
+    [
+      '$p = new Plain; $p->next = $p; $n = new Node(1); $c = new Plain; $c->next = $c; $c->o = new Node(2); $n->o = $c; $n2 = new Node(3); $e = new Plain; $e->next = $e; $n2->o = $e; $p->o = $n; $p->p = $n2; unset($p, $n, $c, $n2, $e);',
+      '~1 ~2 ~3 4 3,4,6,1,5,2',
+    ],
   ]) {
     expect(
       run(`<?php
-class Node { public $next; public $o; function __construct(public $n = 0) {} function __destruct() { echo "~{$this->n} "; } }
-class Plain { public $next; public $o; }
+class Node { public $next; public $o; public $p; function __construct(public $n = 0) {} function __destruct() { echo "~{$this->n} "; } }
+class Plain { public $next; public $o; public $p; }
 ${body}
 echo gc_collect_cycles(), " ";
 $ids = [];
