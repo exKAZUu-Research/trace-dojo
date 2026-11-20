@@ -176,8 +176,8 @@ export class Interpreter implements CallSupport {
     const trait = this.program.builtinTraits.get(traitName);
     if (!trait) return undefined;
     const t = normalize(shallow(type));
-    if (t.kind !== 'adt' || (t.def.module as Module | undefined)?.isStd) return undefined;
-    return this.dispatch(trait, t, method, traitArg);
+    const candidate = this.dispatch(trait, t, method, traitArg);
+    return candidate && !(candidate.fn.module as Module).isStd ? candidate : undefined;
   }
 
   private callDispatched(dispatch: Dispatch, self: Type, args: Value[]): Value {

@@ -221,8 +221,9 @@ export function valuesEqual(type: Type, a: Value, b: Value, rhs: Type = type): b
   const t = derefType(type);
   const x = deref(a);
   const y = deref(b);
-  if (t.kind === 'adt') {
-    const user = hooks?.eq?.(t, x, y, derefType(rhs));
+  const right = derefType(rhs);
+  if (t.kind === 'adt' || right.kind === 'adt') {
+    const user = hooks?.eq?.(t, x, y, right);
     if (user !== undefined) return user;
   }
   switch (t.kind) {
@@ -238,10 +239,10 @@ export function valuesEqual(type: Type, a: Value, b: Value, rhs: Type = type): b
     }
     case 'array':
     case 'slice': {
-      return equalSequence(t.elem, x, y, derefType(rhs));
+      return equalSequence(t.elem, x, y, right);
     }
     case 'adt': {
-      return adtEqual(t, x, y, derefType(rhs));
+      return adtEqual(t, x, y, right);
     }
     case 'dyn': {
       return x === y;
@@ -360,8 +361,9 @@ const orderTests: Record<OrderMethod, (order: number) => boolean> = {
 
 export function testPartialOrder(method: OrderMethod, type: Type, a: Value, b: Value, rhs = type): boolean {
   const t = derefType(type);
-  if (t.kind === 'adt') {
-    const user = hooks?.order?.(method, t, deref(a), deref(b), derefType(rhs));
+  const right = derefType(rhs);
+  if (t.kind === 'adt' || right.kind === 'adt') {
+    const user = hooks?.order?.(method, t, deref(a), deref(b), right);
     if (user !== undefined) return user;
   }
   const order = comparePartialValues(t, a, b, rhs);
@@ -375,8 +377,9 @@ export function compareValues(type: Type, a: Value, b: Value, partial = false, r
   const t = derefType(type);
   const x = deref(a);
   const y = deref(b);
-  if (t.kind === 'adt') {
-    const user = hooks?.cmp?.(t, x, y, partial, partial ? derefType(rhs) : undefined);
+  const right = partial ? derefType(rhs) : undefined;
+  if (t.kind === 'adt' || right?.kind === 'adt') {
+    const user = hooks?.cmp?.(t, x, y, partial, right);
     if (user) return user.order;
   }
   switch (t.kind) {

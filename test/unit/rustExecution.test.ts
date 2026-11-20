@@ -1811,6 +1811,33 @@ fn main() {
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'Id(7)\nScale(1.5)\n' });
 });
 
+test('enforces Rust trait implementation overlap and orphan rules', () => {
+  for (const overlap of ['impl P for W<i32> {}', 'impl<U> P for W<U> {}']) {
+    const source = `trait P {}
+struct W<T>(T);
+impl<T> P for W<T> {}
+${overlap}
+fn main() {}`;
+    expect(executeProgram('rust', source)).toMatchObject({ kind: 'compileError' });
+  }
+  const orphan = `struct Local;
+impl<T> PartialEq<Local> for T { fn eq(&self, _: &Local) -> bool { true } }
+fn main() {}`;
+  expect(executeProgram('rust', orphan)).toMatchObject({ kind: 'compileError' });
+
+  const valid = `trait P {}
+trait Marker {}
+struct W<T>(T);
+impl<T: Marker> P for W<T> {}
+impl P for W<i32> {}
+struct Local(i64);
+impl PartialEq<Local> for i64 { fn eq(&self, rhs: &Local) -> bool { *self == rhs.0 } }
+fn main() {
+    println!("{} {}", 2 == Local(2), 4_i64 == Local(3));
+}`;
+  expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: 'true false\n' });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

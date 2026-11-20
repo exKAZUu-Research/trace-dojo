@@ -141,26 +141,54 @@ export class Checker {
    * the program does not declare (E0117, the orphan rule).
    */
   private checkImplCoherence(): void {
-    const seen = new Set<string>();
+    const impls = new Map<TraitDef, ImplDef[]>();
     for (const impl of this.program.impls) {
       const traitRef = impl.trait;
       if (!traitRef || (impl.module as Module).isStd) continue;
       const span = impl.span as Span;
-      const key = `${traitRef.trait.path}<${traitRef.args.map(typeToString).join(',')}> for ${typeToString(impl.selfType)}`;
-      if (impl.params.length === 0 && seen.has(key)) {
+      const previous = impls.get(traitRef.trait) ?? [];
+      if (previous.some((other) => this.implsOverlap(impl, other))) {
         compileError(
           span,
           `トレイト ${traitRef.trait.name} は、型 ${typeToString(impl.selfType)} に2回実装されています。`
         );
       }
-      seen.add(key);
-      if ((traitRef.trait.module as Module).isStd && !isLocalType(impl.selfType)) {
+      previous.push(impl);
+      impls.set(traitRef.trait, previous);
+      if ((traitRef.trait.module as Module).isStd && !validForeignImplHead([impl.selfType, ...traitRef.args])) {
         compileError(
           span,
           `標準ライブラリのトレイト ${traitRef.trait.name} は、自分で宣言した型にだけ実装できます（${typeToString(impl.selfType)} には実装できません）。`
         );
       }
     }
+  }
+
+  private implsOverlap(a: ImplDef, b: ImplDef): boolean {
+    this.budget.spend();
+    const aSubst: Subst = new Map(a.params.map((param) => [param, freshVar()]));
+    const bSubst: Subst = new Map(b.params.map((param) => [param, freshVar()]));
+    const aHead = substituteTraitRef(a.trait!, aSubst);
+    const bHead = substituteTraitRef(b.trait!, bSubst);
+    const snapshot = this.unifier.snapshot();
+    try {
+      return (
+        this.unifier.unify(substitute(a.selfType, aSubst), substitute(b.selfType, bSubst)) &&
+        aHead.args.every((arg, index) => this.unifier.unify(arg, bHead.args[index])) &&
+        this.implBoundsCanHold(aSubst) &&
+        this.implBoundsCanHold(bSubst)
+      );
+    } finally {
+      this.unifier.rollback(snapshot);
+    }
+  }
+
+  private implBoundsCanHold(subst: Subst): boolean {
+    for (const [param, type] of subst) {
+      if (param.bounds.some((bound) => this.solver.implements(type, substituteTraitRef(bound, subst)) === 'no'))
+        return false;
+    }
+    return true;
   }
 
   /** Requires the methods of a trait impl to take `self`, their parameters, and return as the trait declares them. */
@@ -988,11 +1016,21 @@ function implSubst(impl: ImplDef, traitRef: TraitRef, decl: FnDef, fn: FnDef): M
 }
 
 /** Whether an impl's self type is one the program declares, which the orphan rule lets it implement std's traits for. */
-function isLocalType(type: Type): boolean {
-  const t = shallow(type);
-  if (t.kind === 'ref') return isLocalType(t.target);
-  if (t.kind === 'param') return true;
-  return t.kind === 'adt' && !(t.def.module as Module | undefined)?.isStd;
+function validForeignImplHead(types: Type[]): boolean {
+  for (const type of types) {
+    const root = fundamentalTarget(type);
+    if (root.kind === 'param') return false;
+    if (root.kind === 'adt' && !(root.def.module as Module | undefined)?.isStd) return true;
+    if (root.kind === 'dyn' && !(root.trait.trait.module as Module).isStd) return true;
+  }
+  return false;
+}
+
+function fundamentalTarget(type: Type): Type {
+  const t = normalize(shallow(type));
+  if (t.kind === 'ref') return fundamentalTarget(t.target);
+  if (t.kind === 'adt' && t.def.builtin === 'Box') return fundamentalTarget(t.args[0]);
+  return t;
 }
 
 /** A trait of the program can be a trait object unless a method returns `Self` or takes type parameters. */

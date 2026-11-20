@@ -66,7 +66,11 @@ export class TraitSolver {
     if (!t.v.literal) return 'unknown';
     const rhs = ref.args[0];
     if (rhs && (ref.trait.builtin === 'PartialEq' || ref.trait.builtin === 'PartialOrd')) {
-      return this.unifier.tryUnify(t, rhs) ? 'yes' : 'no';
+      if (this.unifier.tryUnify(t, rhs)) return 'yes';
+      const fitting = this.fittingNumbers(t.v.literal, ref);
+      if (fitting.length === 0) return 'no';
+      if (fitting.length > 1) return 'unknown';
+      return this.unifier.tryUnify(t, fitting[0]) ? 'yes' : 'no';
     }
     // rustc takes a number's type from the one impl that fits it, among the impls for numbers of its kind.
     const only = this.onlyNumericImpl(t.v.literal, ref);
@@ -77,16 +81,10 @@ export class TraitSolver {
 
   /** The one number type of a literal's kind that implements a trait, if exactly one does. */
   private onlyNumericImpl(literal: 'int' | 'float', ref: TraitRef): Type | undefined {
-    const numbers: Type[] = literal === 'int' ? INT_NAMES.map((name) => intType(name)) : [F32, F64];
     if (ref.trait.builtin === 'Into' || ref.trait.builtin === 'TryInto') {
       const target = normalize(shallow(ref.args[0]));
       if (target.kind === 'var') return undefined;
-      const snapshot = this.unifier.snapshot();
-      const fitting = numbers.filter((number) => {
-        const answer = this.implements(number, ref);
-        this.unifier.rollback(snapshot);
-        return answer === 'yes';
-      });
+      const fitting = this.fittingNumbers(literal, ref);
       return fitting.length === 1 ? fitting[0] : undefined;
     }
     if (ref.trait.builtin) return undefined;
@@ -96,6 +94,16 @@ export class TraitSolver {
       .map((impl) => normalize(shallow(impl.selfType)))
       .filter((self) => self.kind === (literal === 'int' ? 'int' : 'float'));
     return fitting.length === 1 ? fitting[0] : undefined;
+  }
+
+  private fittingNumbers(literal: 'int' | 'float', ref: TraitRef): Type[] {
+    const numbers = literal === 'int' ? INT_NAMES.map((name) => intType(name)) : [F32, F64];
+    const snapshot = this.unifier.snapshot();
+    return numbers.filter((number) => {
+      const answer = this.implements(number, ref);
+      this.unifier.rollback(snapshot);
+      return answer === 'yes';
+    });
   }
 
   private literalImplements(literal: 'int' | 'float', ref: TraitRef): Answer {

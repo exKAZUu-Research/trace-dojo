@@ -201,8 +201,10 @@ export function checkComparisonOperands(c: Checker, left: Expr, right: Expr, op:
   // Strings compare with each other (`String == &str`), and sequences with each other (`Vec == [T; N]`).
   if (isEquality && (stringsCompare(l, r) || sequencesCompare(c, l, r, span))) return [leftType, rightType];
   const trait = { trait: c.program.traitDef(isEquality ? 'PartialEq' : 'PartialOrd'), args: [rightType] };
-  const customOrReference = l.kind === 'adt' || l.kind === 'param' || l.kind === 'opaque' || l.kind === 'ref';
-  if (customOrReference && c.solver.implements(l, trait) === 'yes') {
+  const answer = c.solver.implements(l, trait);
+  if (answer === 'yes') return [leftType, rightType];
+  if (answer === 'unknown' && l.kind === 'var' && l.v.literal) {
+    c.require(l, trait, span);
     return [leftType, rightType];
   }
   if (!c.unifier.tryUnify(leftType, rightType)) {
