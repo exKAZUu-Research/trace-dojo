@@ -1336,6 +1336,64 @@ fn main() {
   });
 });
 
+test.each([
+  [
+    'for',
+    `fn main() {
+    let mut last = None;
+    for i in 0..3 {
+        last = Some(&i);
+    }
+    println!("{:?}", last);
+}`,
+  ],
+  [
+    'while',
+    `fn main() {
+    let mut option = Some(1);
+    let mut last = &0;
+    while let Some(value) = option {
+        last = &value;
+        option = None;
+    }
+    println!("{}", last);
+}`,
+  ],
+  [
+    'if',
+    `fn main() {
+    let last;
+    if let Some(value) = Some(1) {
+        last = &value;
+    } else { return; }
+    println!("{}", last);
+}`,
+  ],
+  [
+    'arm',
+    `fn main() {
+    let last = match Some(1) {
+        Some(value) => &value,
+        None => return,
+    };
+    println!("{}", last);
+}`,
+  ],
+  [
+    'break',
+    `fn main() {
+    let mut last = &0;
+    for value in 0..3 { last = &value; break; }
+    println!("{}", last);
+  }`,
+  ],
+])('rejects a Rust borrow that escapes its %s pattern scope', (_scope, program) => {
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ message: expect.stringMatching(/スコープの外|参照を外へ持ち出せません/) })],
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

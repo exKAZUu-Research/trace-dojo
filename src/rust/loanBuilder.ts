@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 900 -- Lowers each kind of expression to the points and regions rustc's MIR gives it.
+// code-gauge-allow-file fileNcss 932 -- Lowers each kind of expression to the points and regions rustc's MIR gives it.
 import type { ExecutionBudget } from '../interpreter/limits';
 import type { Annotations, FnContext, LocalVar, MethodRes } from './annotations';
 import type { Block, Condition, Expr, FormatArgs, Pattern, Span, Stmt } from './ast';
@@ -73,6 +73,7 @@ interface LoopFrame {
   head: number;
   breaks: number[];
   result: Value;
+  scopeDepth: number;
 }
 
 /**
@@ -86,6 +87,7 @@ export class LoanBuilder {
   private readonly vars = new Map<LocalVar, Var>();
   private readonly locals = new Map<Var, LocalVar>();
   private readonly loops: LoopFrame[] = [];
+  private readonly scopes: { locals: LocalVar[]; end: Span }[] = [];
   private readonly exits: number[] = [];
   /** For a closure's body, the captures it modifies, which the closure captures by `&mut`. */
   private readonly mutatedCaptures = new Set<LocalVar>();
@@ -122,8 +124,12 @@ export class LoanBuilder {
     this.current = this.graph.newPoint();
     this.returnVar = this.newVar('{return}', ret);
     this.makeUniversal(this.returnVar);
-    const defs: Var[] = [];
-    for (const local of this.context.locals.filter((l) => l.isSelf)) defs.push(this.universalLocal(local));
+    const receiver = this.context.locals.filter((local) => local.isSelf);
+    const defs = receiver.map((local) => this.universalLocal(local));
+    const parameterLocals = [
+      ...receiver,
+      ...params.flatMap(({ pattern }) => patternBindings(pattern, this.annotations)),
+    ];
     const destructured: [Pattern, Var][] = [];
     const paramVars = params.map(({ pattern, type }) => {
       const local = pattern.kind === 'binding' && !pattern.sub ? this.annotations.bindings.get(pattern) : undefined;
@@ -138,7 +144,7 @@ export class LoanBuilder {
     this.store(this.value(body), this.returnVar);
     if (this.current !== undefined) this.exits.push(this.current);
     this.join(this.exits);
-    this.point({ accesses: this.context.locals.map((local) => this.storageDead(local, end)) });
+    this.point({ accesses: parameterLocals.map((local) => this.storageDead(local, end)) });
     this.graph.check(this.shared.errors);
     return paramVars;
   }
@@ -376,17 +382,42 @@ export class LoanBuilder {
   // Statements
 
   private block(block: Block): Value {
-    const declared: LocalVar[] = [];
-    for (const stmt of block.stmts) {
-      this.stmt(stmt);
-      if (stmt.kind === 'let') declared.push(...patternBindings(stmt.pattern, this.annotations));
+    const locals: LocalVar[] = [];
+    return this.withinScope(locals, { row: block.endRow, col: 0 }, () => {
+      for (const stmt of block.stmts) {
+        this.stmt(stmt);
+        if (stmt.kind === 'let') locals.push(...patternBindings(stmt.pattern, this.annotations));
+      }
+      return block.tail ? this.value(block.tail) : undefined;
+    });
+  }
+
+  private withinScope<T>(locals: LocalVar[], end: Span, body: () => T): T {
+    this.scopes.push({ locals, end });
+    try {
+      const result = body();
+      this.endScopes(this.scopes.length - 1);
+      return result;
+    } finally {
+      this.scopes.pop();
     }
-    const value = block.tail ? this.value(block.tail) : undefined;
-    if (declared.length > 0) {
-      const end = { row: block.endRow, col: 0 };
-      this.point({ accesses: declared.toReversed().map((local) => this.storageDead(local, end)) });
+  }
+
+  private endScopes(first: number): void {
+    if (this.current === undefined) return;
+    for (let index = this.scopes.length - 1; index >= first; index--) {
+      const { locals, end } = this.scopes[index];
+      if (locals.length > 0) {
+        this.point({ accesses: locals.toReversed().map((local) => this.storageDead(local, end)) });
+      }
     }
-    return value;
+  }
+
+  private patternScope<T>(pattern: Pattern | undefined, body: Expr, visit: () => T): T {
+    if (!pattern) return visit();
+    const locals = patternBindings(pattern, this.annotations);
+    const end = body.kind === 'block' ? { row: body.endRow, col: 0 } : body.span;
+    return this.withinScope(locals, end, visit);
   }
 
   private stmt(stmt: Stmt): void {
@@ -634,10 +665,13 @@ export class LoanBuilder {
         return this.loop(expr.label, expr.ty, () => this.block(expr.body));
       }
       case 'while': {
+        const pattern = expr.cond.kind === 'let' ? expr.cond.pattern : undefined;
         return this.loop(expr.label, undefined, () => {
-          const exit = this.condition(expr.cond);
-          if (exit !== undefined) this.loops.at(-1)?.breaks.push(exit);
-          this.block(expr.body);
+          this.patternScope(pattern, expr.body, () => {
+            const exit = this.condition(expr.cond);
+            if (exit !== undefined) this.loops.at(-1)?.breaks.push(exit);
+            this.block(expr.body);
+          });
         });
       }
       case 'for': {
@@ -647,15 +681,17 @@ export class LoanBuilder {
   }
 
   /** `break`, `continue`, and `return` go on elsewhere, after which nothing runs. */
-  // code-gauge-allow functionCognitiveComplexity 16 -- Each kind of jump goes on at its own point.
+  // code-gauge-allow functionCognitiveComplexity 18 -- Each kind of jump goes on at its own point.
   private jump(expr: Extract<Expr, { kind: 'break' | 'continue' | 'return' }>): void {
     const value = expr.kind !== 'continue' && expr.value ? this.value(expr.value) : undefined;
     if (expr.kind === 'return') {
       this.store(value, this.returnVar);
+      this.endScopes(0);
       if (this.current !== undefined) this.exits.push(this.current);
     } else {
       const loop = this.findLoop(expr.label);
       if (expr.kind === 'break' && loop?.result !== undefined) this.store(value, loop.result);
+      if (loop) this.endScopes(loop.scopeDepth);
       if (loop && this.current !== undefined) {
         if (expr.kind === 'break') loop.breaks.push(this.current);
         else this.graph.points[this.current].succ.push(loop.head);
@@ -680,7 +716,9 @@ export class LoanBuilder {
     const operand = this.value(expr.operand);
     // The error leaves the function.
     const at = this.point({ uses: operand === undefined ? [] : [operand] });
-    this.exits.push(at);
+    this.endScopes(0);
+    if (this.current !== undefined) this.exits.push(this.current);
+    this.current = at;
     const result = this.temp(expr.ty);
     if (result === undefined) return undefined;
     this.point({ uses: operand === undefined ? [] : [operand], defs: [result] });
@@ -801,16 +839,20 @@ export class LoanBuilder {
   }
 
   private ifExpr(expr: Extract<Expr, { kind: 'if' }>): Value {
-    const otherwise = this.condition(expr.cond);
     const result = this.temp(expr.ty);
-    const branch = (value: Value): number | undefined => {
+    const branch = (value: Value): void => {
       if (this.current !== undefined) this.store(value, result);
-      return this.current;
     };
-    const consequent = branch(this.block(expr.consequent));
+    let otherwise: number | undefined;
+    const pattern = expr.cond.kind === 'let' ? expr.cond.pattern : undefined;
+    this.patternScope(pattern, expr.consequent, () => {
+      otherwise = this.condition(expr.cond);
+      branch(this.block(expr.consequent));
+    });
+    const consequent = this.current;
     this.current = otherwise;
-    const alternative = branch(expr.else ? this.value(expr.else) : undefined);
-    this.join([consequent, alternative]);
+    branch(expr.else ? this.value(expr.else) : undefined);
+    this.join([consequent, this.current]);
     return result;
   }
 
@@ -822,9 +864,11 @@ export class LoanBuilder {
     const ends: (number | undefined)[] = [];
     for (const arm of expr.arms) {
       this.current = start;
-      this.bind(arm.pattern, source);
-      const value = this.value(arm.body);
-      if (this.current !== undefined) this.store(value, result);
+      this.patternScope(arm.pattern, arm.body, () => {
+        this.bind(arm.pattern, source);
+        const value = this.value(arm.body);
+        if (this.current !== undefined) this.store(value, result);
+      });
       ends.push(this.current);
     }
     this.join(expr.arms.length === 0 ? [] : ends);
@@ -836,7 +880,7 @@ export class LoanBuilder {
     const head = this.graph.newPoint();
     if (this.current !== undefined) this.graph.points[this.current].succ.push(head);
     this.current = head;
-    const frame: LoopFrame = { label, head, breaks: [], result: this.temp(type) };
+    const frame: LoopFrame = { label, head, breaks: [], result: this.temp(type), scopeDepth: this.scopes.length };
     this.loops.push(frame);
     body();
     if (this.current !== undefined) this.graph.points[this.current].succ.push(head);
@@ -858,8 +902,10 @@ export class LoanBuilder {
         for (const b of regionsOf(this.layout(item))) this.outlives(a, b);
       }
       if (this.current !== undefined) this.loops.at(-1)?.breaks.push(this.current);
-      this.bind(expr.pattern, this.valuePlace(item));
-      this.block(expr.body);
+      this.patternScope(expr.pattern, expr.body, () => {
+        this.bind(expr.pattern, this.valuePlace(item));
+        this.block(expr.body);
+      });
     });
   }
 
