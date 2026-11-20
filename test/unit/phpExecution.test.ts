@@ -2464,6 +2464,46 @@ test.each([
 
 test.each([
   [
+    'int $x { get; }',
+    'string $x { get; }',
+    'interface K extends I, J {}',
+    'Declaration of I::$x::get(): int must be compatible with J::$x::get(): string',
+  ],
+  [
+    'int $x { get; }',
+    'int|string $x { get; }',
+    'class C implements I, J {}',
+    'Class C contains 1 abstract method and must therefore be declared abstract or implement the remaining method (I::$x::get)',
+  ],
+  [
+    'int $x { get; }',
+    'int $x { set; }',
+    'interface K extends I, J {} class C implements K { public int $x { get => 1; } }',
+    'Class C contains 1 abstract method and must therefore be declared abstract or implement the remaining method (J::$x::set)',
+  ],
+])('binds inherited interface property hooks for %s and %s', (first, second, declaration, message) => {
+  const source = `<?php\ninterface I { public ${first} }\ninterface J { public ${second} }\n${declaration}`;
+  expect(run(source)).toMatchObject({
+    kind: 'executed',
+    stdout: `\nFatal error: ${message} in /main.php on line 4\nStack trace:\n#0 {main}\n`,
+  });
+});
+
+test('allows one property to satisfy independent interface getter types', () => {
+  expect(
+    run(`<?php
+      interface X {}
+      interface Y {}
+      class XY implements X, Y {}
+      interface I { public X $x { get; } }
+      interface J { public Y $x { get; } }
+      class C implements I, J { public XY $x; }
+      echo 'ok';`)
+  ).toMatchObject({ kind: 'executed', stdout: 'ok' });
+});
+
+test.each([
+  [
     'public function m() {}',
     'abstract protected function M(int $x);',
     'Cannot make non abstract method A::M() abstract in class B',

@@ -753,7 +753,7 @@ function checkInheritance(cls: PhpClass, row: number): void {
     for (const [name, method] of interfaceMethods.get(parent) ?? []) inherited.set(name, method);
   }
   const contracts = bindInterfaceMethods(cls, inherited, checkParentMethods(cls, inherited));
-  const hooks = missingPropertyHooks(cls, ancestors, row);
+  const hooks = bindPropertyHooks(cls, row);
   if (cls.kind !== 'class' || cls.isAbstract) return;
   const missing = unimplementedMethods(cls, inherited, contracts);
   const allNames = [...missing.map((method) => `${method.cls.name}::${method.name}`), ...hooks];
@@ -828,48 +828,97 @@ function effectiveInterfaceMethods(iface: PhpClass): Map<string, Method> {
   return methods;
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- Checks each property contract before tracking its missing hooks.
-function missingPropertyHooks(cls: PhpClass, ancestors: PhpClass[], row: number): string[] {
-  const missing = new Set<string>();
-  const contracts = [...ancestors, ...cls.interfaces, cls].flatMap((parent) => [...parent.propByName.values()]);
-  for (const contract of contracts) {
-    if (!contract.hooks?.abstractGet && !contract.hooks?.abstractSet) continue;
-    const property = cls.propByName.get(contract.name);
-    if (property && property !== contract) {
-      checkPropertyModifiers(cls, contract, property, row);
-      checkHookSignatures(contract, property, property.cls, row);
-      if (!propertyTypeCompatible(contract, property, property.cls))
-        propertyTypeError(contract, property.cls, property.name, row);
-    }
-    for (const kind of ['get', 'set'] as const) {
-      const required = kind === 'get' ? contract.hooks.abstractGet : contract.hooks.abstractSet;
-      if (required && !implementsPropertyHook(property, kind))
-        missing.add(`${contract.cls.name}::$${contract.name}::${kind}`);
+const abstractProperties = new WeakMap<PhpClass, Map<string, PropDecl>>();
+
+function bindPropertyHooks(cls: PhpClass, row: number): string[] {
+  const properties = new Map(cls.propByName);
+  if (cls.parent) {
+    for (const contract of abstractProperties.get(cls.parent)?.values() ?? []) {
+      const property = properties.get(contract.name);
+      if (!property || property.cls !== cls) properties.set(contract.name, contract);
+      else inheritAbstractProperty(cls, properties, contract, row);
     }
   }
-  return [...missing];
+  for (const iface of cls.ownInterfaces) {
+    if (cls.parent?.interfaces.includes(iface)) continue;
+    for (const contract of abstractProperties.get(iface)?.values() ?? [])
+      inheritAbstractProperty(cls, properties, contract, row);
+  }
+  const abstract = new Map<string, PropDecl>();
+  const missing: string[] = [];
+  for (const [name, property] of properties) {
+    const hooks = property.hooks;
+    if (hooks?.abstractGet) missing.push(`${(hooks.getScope ?? property.cls).name}::$${name}::get`);
+    if (hooks?.abstractSet) missing.push(`${(hooks.setScope ?? property.cls).name}::$${name}::set`);
+    if (hooks?.abstractGet || hooks?.abstractSet) abstract.set(name, property);
+  }
+  abstractProperties.set(cls, abstract);
+  return missing;
+}
+
+function inheritAbstractProperty(
+  cls: PhpClass,
+  properties: Map<string, PropDecl>,
+  contract: PropDecl,
+  row: number
+): void {
+  const property = properties.get(contract.name);
+  if (!property) {
+    properties.set(contract.name, contract);
+    return;
+  }
+  if (property === contract) return;
+  checkPropertyModifiers(cls, contract, property, row);
+  checkHookSignatures(contract, property, property.cls, row);
+  if (!propertyTypeCompatible(contract, property, property.cls))
+    propertyTypeError(contract, property.cls, property.name, row);
+
+  const inherited = contract.hooks;
+  const hooks = property.hooks;
+  const inheritGet = inherited?.abstractGet && !hooks?.get && !implementsPropertyHook(property, 'get');
+  const inheritSet = inherited?.abstractSet && !hooks?.set && !implementsPropertyHook(property, 'set');
+  if (!inheritGet && !inheritSet) return;
+  properties.set(property.name, {
+    ...property,
+    hooks: {
+      ...hooks,
+      get: inheritGet ? inherited?.get : hooks?.get,
+      set: inheritSet ? inherited?.set : hooks?.set,
+      getScope: inheritGet ? (inherited?.getScope ?? contract.cls) : hooks?.getScope,
+      setScope: inheritSet ? (inherited?.setScope ?? contract.cls) : hooks?.setScope,
+      abstractGet: inheritGet || hooks?.abstractGet,
+      abstractSet: inheritSet || hooks?.abstractSet,
+    },
+  });
+}
+
+interface HookSignature {
+  params: Param[];
+  returnType?: TypeDecl;
+  decl?: { returnType?: TypeDecl };
 }
 
 interface HookedProperty {
   name: string;
-  type?: TypeDecl;
-  hooks?: { get?: { params: Param[] }; set?: { params: Param[] } };
+  hooks?: { get?: HookSignature; set?: HookSignature; getScope?: PhpClass; setScope?: PhpClass };
 }
 
 /** Checks overriding hooks as PHP checks them as methods, before the property types. */
-// code-gauge-allow functionCognitiveComplexity 27 -- Checks each hook in PHP's order and formats both signatures for its diagnostics.
 function checkHookSignatures(parent: PropDecl, child: HookedProperty, childClass: PhpClass, row: number): void {
   for (const kind of ['get', 'set'] as const) {
     const inherited = parent.hooks?.[kind];
     const own = child.hooks?.[kind];
     if (!inherited || !own) continue;
-    const parentType = kind === 'set' ? (inherited.params[0]?.type ?? parent.type) : parent.type;
-    const childType = kind === 'set' ? (own.params[0]?.type ?? child.type) : child.type;
+    const scope = kind === 'get' ? 'getScope' : 'setScope';
+    const parentClass = parent.hooks?.[scope] ?? parent.cls;
+    const ownClass = child.hooks?.[scope] ?? childClass;
+    const parentType = hookType(inherited, kind);
+    const childType = hookType(own, kind);
     const mixed: TypeDecl = { k: 'named', name: 'mixed' };
     const compatible =
       kind === 'get'
-        ? variance(childType ?? mixed, childClass, parentType ?? mixed, parent.cls)
-        : variance(parentType ?? mixed, parent.cls, childType ?? mixed, childClass);
+        ? variance(childType ?? mixed, ownClass, parentType ?? mixed, parentClass)
+        : variance(parentType ?? mixed, parentClass, childType ?? mixed, ownClass);
     if (compatible === true) continue;
     if (hoisting && compatible !== false) throw new DeferredDeclaration();
     const signature = (cls: PhpClass, name: string, fn: { params: Param[] }, type: TypeDecl | undefined): string => {
@@ -877,8 +926,8 @@ function checkHookSignatures(parent: PropDecl, child: HookedProperty, childClass
       if (kind === 'get') return `${prefix}()${type ? `: ${describeType(type, cls)}` : ''}`;
       return `${prefix}(${type ? `${describeType(type, cls)} ` : ''}$${fn.params[0]?.name ?? 'value'}): void`;
     };
-    const childText = signature(childClass, child.name, own, childType);
-    const parentText = signature(parent.cls, parent.name, inherited, parentType);
+    const childText = signature(ownClass, child.name, own, childType);
+    const parentText = signature(parentClass, parent.name, inherited, parentType);
     throw new FatalError(
       compatible === false
         ? `Declaration of ${childText} must be compatible with ${parentText}`
@@ -888,8 +937,12 @@ function checkHookSignatures(parent: PropDecl, child: HookedProperty, childClass
   }
 }
 
-function implementsPropertyHook(property: PropDecl | undefined, kind: 'get' | 'set'): boolean {
-  if (!property || (kind === 'set' && property.isReadonly)) return false;
+function hookType(hook: HookSignature, kind: 'get' | 'set'): TypeDecl | undefined {
+  return kind === 'get' ? (hook.decl?.returnType ?? hook.returnType) : hook.params[0]?.type;
+}
+
+function implementsPropertyHook(property: PropDecl, kind: 'get' | 'set'): boolean {
+  if (kind === 'set' && property.isReadonly) return false;
   if (property.isVirtual && !property.hooks?.[kind]) return false;
   return !(kind === 'get' ? property.hooks?.abstractGet : property.hooks?.abstractSet);
 }
