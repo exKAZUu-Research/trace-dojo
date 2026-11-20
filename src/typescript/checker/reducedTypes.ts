@@ -34,7 +34,7 @@ export class ReducedTypes {
 
   private reduceIntersection(type: IntersectionType): Type {
     const objects = type.types.filter((member) => member.kind === 'object');
-    if (objects.length < 2) return type;
+    if (objects.length === 0) return type;
     const properties = new Map<string, Property[]>();
     for (const object of objects) {
       for (const [key, property] of object.resolve().properties) {

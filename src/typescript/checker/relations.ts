@@ -826,7 +826,7 @@ export class Relations {
       source.aliasId === target.aliasId &&
       source.mappedKeys !== undefined &&
       target.mappedKeys !== undefined &&
-      this.isAssignable(target.mappedKeys, source.mappedKeys)
+      this.isAssignable(target.mappedKeys(), source.mappedKeys())
     );
   }
 
@@ -835,7 +835,8 @@ export class Relations {
    * the source has properties but shares none of them.
    */
   private lacksWeakTypeProperty(source: Type, target: Type, relation: Relation): boolean {
-    if (relation !== 'assignable' || !isWeakCheckedSource(source)) return false;
+    if (relation !== 'assignable' || !isWeakCheckedSource(source) || this.c.isLibraryType(source, 'Object'))
+      return false;
     // An intersection drops its empty object literal members, as `Config & {}` is `Config`, but not an empty interface
     // such as `ThisType<any>`, which keeps `PropertyDescriptor & ThisType<any>` from being weak.
     const members =
@@ -930,7 +931,7 @@ export class Relations {
     if (source.kind === 'intersection')
       return source.types.every((member) => this.hasInferableIndex(member, this.c.structureOf(member)));
     if (structure.callSignatures.length > 0 || structure.constructSignatures.length > 0) return false;
-    if (source.kind !== 'object') return false;
+    if (source.kind !== 'object' || source.objectKind === 'tuple') return false;
     return (source.objectKind !== 'interface' && source.objectKind !== 'reference') || !!source.isLiteral;
   }
 

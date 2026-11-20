@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 662 -- Holds type construction, bounded instantiation, structure lookup, and diagnostics shared by checker components.
+// code-gauge-allow-file fileNcss 666 -- Holds type construction, bounded instantiation, structure lookup, and diagnostics shared by checker components.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { type SourceDiagnostic, sourceDiagnostic } from '../../interpreter/diagnostics';
@@ -148,6 +148,7 @@ export class Checker {
     this.signatures.checkImplicitReturnTypes(this.root);
     this.statements.checkProgram(this.root);
     this.typeNodes.checkWrittenTypeNames(this.root);
+    this.typeNodes.checkPendingArgumentConstraints();
     checkParameterRedeclarations(this, this.binder.allScopes);
     const seen = new Set<string>();
     return this.diagnostics
@@ -587,11 +588,12 @@ export class Checker {
 
   private instantiateMapped(type: ObjectType, mapper: Mapper): Type {
     const mapped = type.mapped as MappedInfo;
-    const constraint = this.instantiate(mapped.constraint, mapper);
+    let constraint: Type | undefined;
+    const getConstraint = (): Type => (constraint ??= this.instantiate(mapped.constraint, mapper));
     const typeParameter: TypeParameter = {
       ...mapped.typeParameter,
       id: newTypeId(),
-      constraint: () => constraint,
+      constraint: getConstraint,
     };
     const localMapper = new Map<number, Type>([...mapper, [mapped.typeParameter.id, typeParameter]]);
     const getTemplate = (): Type => this.instantiate(mapped.template, localMapper);
@@ -605,7 +607,9 @@ export class Checker {
         readonlyModifier: mapped.readonlyModifier,
         optionalModifier: mapped.optionalModifier,
         homomorphic: mapped.homomorphic,
-        constraint,
+        get constraint() {
+          return getConstraint();
+        },
         nameType: mapped.nameType && this.instantiate(mapped.nameType, localMapper),
         source: mapped.source && this.instantiate(mapped.source, mapper),
         get template() {

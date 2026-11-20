@@ -175,7 +175,7 @@ export interface ObjectType {
   isResolvedMappedType?: true;
   mappedOptional?: true;
   /** For an object a mapped type without `as` resolved to, its constraint, which `keyof` gives instead of its members. */
-  mappedKeys?: Type;
+  mappedKeys?: () => Type;
   /** For a function or object literal whose type was inferred from an expression. */
   isLiteral?: boolean;
   /** For an object literal typed by one alternative of a union it spreads, which TypeScript leaves unnormalized. */
@@ -512,10 +512,21 @@ export function intersectionOf(types: Type[], budget: ExecutionBudget): Type {
 }
 
 function reducedIntersectionMembers(members: Type[], units: Type[]): Type[] {
+  const hasNonNullableMember =
+    units.some((unit) => !isIntrinsic(unit, 'void')) || members.some(nonNullableIntersectionMember);
   return members.filter(
     (type) =>
       (!isIntrinsic(type, 'void') || !units.some((unit) => isIntrinsic(unit, 'undefined'))) &&
-      (type !== emptyObjectType || !units.some((unit) => !isIntrinsic(unit, 'void')))
+      (type.id !== emptyObjectType.id || !hasNonNullableMember)
+  );
+}
+
+function nonNullableIntersectionMember(type: Type): boolean {
+  return (
+    (type.kind === 'object' && type.id !== emptyObjectType.id) ||
+    type.kind === 'templateLiteral' ||
+    type.kind === 'stringMapping' ||
+    isIntrinsic(type, 'object')
   );
 }
 

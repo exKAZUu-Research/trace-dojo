@@ -22,3 +22,25 @@ type NestedArray = Box<NestedArrayLink>;
 type NestedArrayLink = Box<NestedArray>['value'][] extends object[] ? Box<NestedArray>['value'] : never;
 type NestedObject = Box<NestedObjectLink>;
 type NestedObjectLink = { item: Box<NestedObject>['value'] } extends { item: object } ? Box<NestedObject>['value'] : never;
+interface EmptyInterface {}
+type NonEmpty = Box<NonEmptyLink>;
+type NonEmptyLink = Box<NonEmpty>['value'] & { extra: number } extends object ? Box<NonEmpty>['value'] : never;
+type WithInterface = Box<WithInterfaceLink>;
+type WithInterfaceLink = Box<WithInterface>['value'] & EmptyInterface extends object ? Box<WithInterface>['value'] : never;
+type NonNull<T> = T & {};
+const invalid: NonNull<string | null> = null;
+type PrimitiveCheck = Box<PrimitiveCheckLink>;
+type PrimitiveCheckLink = Box<PrimitiveCheck>['value'] & object extends number ? Box<PrimitiveCheck>['value'] : never;
+type ReversePrimitive = Box<ReversePrimitiveLink>;
+type ReversePrimitiveLink = object & Box<ReversePrimitive>['value'] extends string ? never : Box<ReversePrimitive>['value'];
+type ObjectCheck = Box<ObjectCheckLink>;
+type ObjectCheckLink = Box<ObjectCheck>['value'] & object extends object ? Box<ObjectCheck>['value'] : never;
+interface RequiredBox<T extends { value: any }> { value: T }
+type InvalidConstraint = RequiredBox<InvalidLink>;
+type InvalidLink = RequiredBox<InvalidConstraint>['value'] | number;
+type KeysMapped = Box<KeysMappedLink>;
+type KeysMappedLink = keyof Readonly<Box<KeysMapped>['value']>;
+type IndexedMapped = Box<IndexedMappedLink>;
+type IndexedMappedLink = Readonly<Box<IndexedMapped>['value']>['value'];
+type ComparedMapped = Box<ComparedMappedLink>;
+type ComparedMappedLink = Readonly<Box<ComparedMapped>['value']> extends {value?: unknown} ? Box<ComparedMapped>['value'] : never;

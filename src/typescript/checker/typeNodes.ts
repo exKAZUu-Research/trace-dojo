@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 645 -- Resolves every kind of type syntax a program writes, each needing its own rule.
+// code-gauge-allow-file fileNcss 657 -- Resolves every kind of type syntax a program writes, each needing its own rule.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
@@ -86,6 +86,7 @@ export class TypeNodes {
   private readonly librarySymbols = new Map<string, LiteralType>();
   private readonly restConstraintsInValidation = new Set<number>();
   private readonly checkedReferenceArguments = new WeakSet<Type>();
+  private readonly pendingArgumentChecks: (() => void)[] = [];
   /** The type each kind of type syntax denotes; the others are `any`. */
   private readonly typeSyntaxes = new Map<string, (node: TreeNode) => Type>([
     ['predefined_type', (node) => predefinedTypes[node.text] ?? anyType],
@@ -583,9 +584,21 @@ export class TypeNodes {
   }
 
   checkWrittenTypeArgumentConstraints(node: TreeNode, parameters: TypeParameter[], typeArguments: Type[]): void {
-    this.interfaceBases.afterResolving(() =>
-      this.c.checkTypeSyntax(node, () => this.checkTypeArgumentConstraints(node, parameters, typeArguments))
-    );
+    if (!parameters.some((parameter) => parameter.constraint)) return;
+    const check = (): void =>
+      this.interfaceBases.afterResolving(() =>
+        this.c.checkTypeSyntax(node, () => this.checkTypeArgumentConstraints(node, parameters, typeArguments))
+      );
+    if (this.resolvingReference || this.resolvingAliases.length > 0) this.pendingArgumentChecks.push(check);
+    else check();
+  }
+
+  checkPendingArgumentConstraints(): void {
+    for (const check of this.pendingArgumentChecks) {
+      this.c.budget.spend();
+      check();
+    }
+    this.pendingArgumentChecks.length = 0;
   }
 
   checkTypeArgumentConstraints(node: TreeNode, parameters: TypeParameter[], typeArguments: Type[]): void {

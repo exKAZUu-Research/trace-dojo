@@ -25,3 +25,22 @@
 (22,6): error TS2456: Type alias 'NestedArrayLink' circularly references itself.
 (23,21): error TS4109: Type arguments for 'Box' circularly reference themselves.
 (24,6): error TS2456: Type alias 'NestedObjectLink' circularly references itself.
+(26,17): error TS4109: Type arguments for 'Box' circularly reference themselves.
+(27,6): error TS2456: Type alias 'NonEmptyLink' circularly references itself.
+(28,22): error TS4109: Type arguments for 'Box' circularly reference themselves.
+(29,6): error TS2456: Type alias 'WithInterfaceLink' circularly references itself.
+(31,7): error TS2322: Type 'null' is not assignable to type 'string'.
+(32,23): error TS4109: Type arguments for 'Box' circularly reference themselves.
+(33,6): error TS2456: Type alias 'PrimitiveCheckLink' circularly references itself.
+(34,25): error TS4109: Type arguments for 'Box' circularly reference themselves.
+(35,6): error TS2456: Type alias 'ReversePrimitiveLink' circularly references itself.
+(36,20): error TS4109: Type arguments for 'Box' circularly reference themselves.
+(37,6): error TS2456: Type alias 'ObjectCheckLink' circularly references itself.
+(39,38): error TS2344: Type 'InvalidLink' does not satisfy the constraint '{ value: any; }'.
+  Type 'number' is not assignable to type '{ value: any; }'.
+(41,19): error TS4109: Type arguments for 'Box' circularly reference themselves.
+(42,6): error TS2456: Type alias 'KeysMappedLink' circularly references itself.
+(43,22): error TS4109: Type arguments for 'Box' circularly reference themselves.
+(44,6): error TS2456: Type alias 'IndexedMappedLink' circularly references itself.
+(45,23): error TS4109: Type arguments for 'Box' circularly reference themselves.
+(46,6): error TS2456: Type alias 'ComparedMappedLink' circularly references itself.

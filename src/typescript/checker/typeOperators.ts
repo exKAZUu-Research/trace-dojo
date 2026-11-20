@@ -262,7 +262,7 @@ export class TypeOperators {
       !isIntrinsic(source, 'unknown')
     )
       return source;
-    if (this.c.relations.isGeneric(info.constraint)) {
+    if (!this.hasDeferredMappedKeys(info) && this.c.relations.isGeneric(info.constraint)) {
       return {
         kind: 'object',
         id: newTypeId(),
@@ -277,8 +277,18 @@ export class TypeOperators {
     return anonymousObject(() => this.mappedStructure(info), {
       isResolvedMappedType: true,
       mappedOptional: info.optionalModifier === '+' ? true : undefined,
-      mappedKeys: info.nameType ? undefined : info.constraint,
+      mappedKeys: info.nameType ? undefined : () => info.constraint,
     });
+  }
+
+  private hasDeferredMappedKeys(info: MappedInfo): boolean {
+    const { source } = info;
+    return !!(
+      info.homomorphic &&
+      source?.kind === 'object' &&
+      source.resolveReference &&
+      !this.c.isArrayOrTuple(source)
+    );
   }
 
   private mappedStructure(info: MappedInfo): Structure {
@@ -370,7 +380,7 @@ export class TypeOperators {
       return this.keyofType(this.c.apparentType(type));
     }
     // TypeScript's `getIndexTypeForMappedType` gives a mapped type's constraint, as `string` for `Record<string, T>`.
-    return type.mappedKeys ?? this.memberKeys(type.resolve());
+    return type.mappedKeys?.() ?? this.memberKeys(type.resolve());
   }
 
   /** The keys available for every instantiation of the object in a deferred `keyof`. */
