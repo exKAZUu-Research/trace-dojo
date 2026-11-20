@@ -2117,6 +2117,17 @@ fn main() {
   });
 });
 
+test('requires Sized for inferred Rust generic arguments', () => {
+  const declarations = `fn show<T: std::fmt::Display>(value: &T) { println!("{}", value); }
+struct Named<'a, T> { value: &'a T }
+struct Tuple<'a, T>(&'a T);`;
+  for (const body of ['show("a");', 'let _ = Named { value: "a" };', 'let _ = Tuple("a");']) {
+    expect(executeProgram('rust', `${declarations}\n${rustMain(body)}`)).toMatchObject({ kind: 'compileError' });
+  }
+  const valid = rustMain('show(&"a"); let named = Named { value: &"b" }; println!("{}", named.value);');
+  expect(executeProgram('rust', `${declarations}\n${valid}`)).toMatchObject({ kind: 'executed', stdout: 'a\nb\n' });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

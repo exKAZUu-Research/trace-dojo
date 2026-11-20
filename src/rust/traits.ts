@@ -252,6 +252,13 @@ export class TraitSolver {
     }
     for (const param of impl.params) {
       const bound = subst.get(param) as Type;
+      if (
+        !(impl.module as Module).isStd &&
+        this.implements(bound, { trait: this.program.traitDef('Sized'), args: [] }) === 'no'
+      ) {
+        this.unifier.rollback(snapshot);
+        return undefined;
+      }
       for (const ref of param.bounds) {
         const answer = this.implements(bound, substituteTraitRef(ref, subst));
         if (answer === 'no') {

@@ -185,7 +185,9 @@ export class Checker {
   }
 
   private implBoundsCanHold(subst: Subst): boolean {
+    const sized = { trait: this.program.traitDef('Sized'), args: [] };
     for (const [param, type] of subst) {
+      if (this.solver.implements(type, sized) === 'no') return false;
       if (param.bounds.some((bound) => this.solver.implements(type, substituteTraitRef(bound, subst)) === 'no'))
         return false;
     }
@@ -1011,6 +1013,7 @@ export class Checker {
         for (const bound of bounds) {
           this.obligations.push({ type: arg, ref: bound, span });
         }
+        if (!(fn.module as Module).isStd && !param.isSelf) this.requireTrait(arg, 'Sized', span);
       }
     }
     if (span) {
@@ -1027,6 +1030,11 @@ export class Checker {
       ret: substitute(fn.ret, subst),
       subst,
     };
+  }
+
+  requireSizedAdtArguments(def: AdtDef, args: Type[], span: Span): void {
+    if ((def.module as Module | undefined)?.isStd) return;
+    for (const arg of args) this.requireTrait(arg, 'Sized', span);
   }
 }
 

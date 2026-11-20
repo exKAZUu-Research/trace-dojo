@@ -53,6 +53,7 @@ export function typeOfRes(c: Checker, res: PathRes, span: Span, expected: Type |
     case 'ctor': {
       const variant = res.def.variants[res.variant];
       const self = adt(res.def, res.typeArgs);
+      c.requireSizedAdtArguments(res.def, res.typeArgs, span);
       if (variant.shape === 'unit') {
         if (expected) c.unifier.tryUnify(self, expected);
         return self;
@@ -356,6 +357,7 @@ export function structExpr(c: Checker, expr: Extract<Expr, { kind: 'struct' }>, 
     c.coerceExpr(field.value, substitute(variantDef.fields[index].type, subst));
   }
   c.annotations.paths.set(expr, { kind: 'ctor', def, variant, typeArgs });
+  c.requireSizedAdtArguments(def, typeArgs, expr.span);
   // A struct's bounds on its type parameters hold for every value of it (`struct Labeled<T: Display>`).
   for (const [index, param] of def.params.entries()) {
     for (const bound of param.bounds) c.require(typeArgs[index], substituteTraitRef(bound, subst), expr.span);
