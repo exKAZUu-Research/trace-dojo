@@ -2068,6 +2068,17 @@ fn main() {
   });
 });
 
+test('defaults Rust literals in trait arguments before the final solve', () => {
+  const program = rustMain(`let int = i64::from(3);
+    let float = f64::from(2);
+    let values: Vec<_> = vec![1, 2].into_iter().map(i64::from).collect();
+    println!("{} {} {:?} {:?}", int, float, Some(3).map(i64::from), values);`);
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '3 2 Some(3) [1, 2]\n',
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

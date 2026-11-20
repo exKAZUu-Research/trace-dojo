@@ -34,6 +34,7 @@ import {
   newTypeParam,
   ref,
   resolve,
+  resolveTraitRef,
   sameType,
   shallow,
   type Subst,
@@ -542,7 +543,10 @@ export class Checker {
     if (!final) return;
     settleBinaries(this, true);
     // Literal variables take their defaults, which may settle what remains.
-    for (const obligation of this.obligations) resolve(obligation.type, true);
+    for (const { type, ref: trait } of this.obligations) {
+      resolve(type, true);
+      resolveTraitRef(trait, true);
+    }
     const remaining = this.obligations;
     this.obligations = [];
     for (const obligation of remaining) {
