@@ -2942,6 +2942,37 @@ test.each([
   expect(JSON.stringify(result)).toContain('Cannot use string as default value for parameter $x of type int');
 });
 
+test('uses compiled operand rows for diagnostics from specialized calls', () => {
+  const source = `<?php
+set_error_handler(function ($level, $message, $file, $line) { echo $message, ':', $line, "\\n"; });
+try { count(
+  $missing
+); } catch (Throwable $error) { echo $error->getLine(), "\\n"; }
+try { call_user_func(
+  $callback,
+  $skipped
+); } catch (Throwable $error) { echo $error->getLine(), "\\n"; }
+try { call_user_func(
+  'intdiv',
+  1,
+  0
+); } catch (Throwable $error) { echo $error->getLine(), "\\n"; }
+try { intdiv(
+  1,
+  0
+); } catch (Throwable $error) { echo $error->getLine(), "\\n"; }
+sprintf('%s-%s',
+  $first,
+  $second
+);`;
+  expect(run(source)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'Undefined variable $missing:4\n4\nUndefined variable $callback:7\n7\n13\n15\n' +
+      'Undefined variable $first:21\nUndefined variable $second:21\n',
+  });
+});
+
 test('rounds integer operands before computing an overflowing result', () => {
   const source = `<?php
     class NumberBox { public static float $product = 9007199254740993 * 9007199254740993; }

@@ -1443,7 +1443,13 @@ export class Converter extends DeclarationConverter {
           budget: this.compileBudget,
         })
       : this.compiledValue(expression);
-    return typeof value === 'string' ? { k: 'lit', v: value, row: expression.row } : expression;
+    return typeof value === 'string'
+      ? recordOperandRows(
+          { k: 'lit', v: value, row: expression.row },
+          operandAstRow(expression),
+          compiledOperandRow(expression)
+        )
+      : expression;
   }
 
   private quietCheck(node: Node, argumentsNode: Node, word: 'isset' | 'empty', row: number): Expr {

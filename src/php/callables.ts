@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 745 -- Keeps implicit dispatch and native result ownership together.
+// code-gauge-allow-file fileNcss 749 -- Keeps implicit dispatch and native result ownership together.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { placeOf } from './assignment';
 import type { Arg, Expr, ResolvedName } from './ast';
@@ -20,6 +20,7 @@ import {
   type MagicCall,
   NamedArgumentBindings,
   paramIsByRef,
+  validateNativeCallback,
 } from './calls';
 import { canCall, classScopeMessage, lookupMethod, requireClass } from './classes';
 import { debugType, toBool, valueName } from './conversions';
@@ -282,29 +283,7 @@ export function callExpression(e: Extract<Expr, { k: 'call' }>, discardResult = 
     throwError('Error', `Call to undefined function ${e.fn.name}()`);
   }
   if (e.fcc) return closureFromCallable({ fn });
-  if (fn.kind === 'native') {
-    if (
-      !e.fn.fallback &&
-      fn.name !== 'call_user_func' &&
-      fn.name !== 'call_user_func_array' &&
-      (lower(fn.name) === 'sprintf' || specializedCall(fn, e.args))
-    )
-      return callNativeNamed(runtime, e, e.fn, fn, discardResult);
-    const inline = !e.fn.fallback && specializedCall(fn, e.args) === 'opcode';
-    const args = evalArgs(e.args, fn, fn.name);
-    runtime.row = e.row;
-    if (fn.acceptsNamed === 'positional-only') checkNamedArgs([], args);
-    return pushTemporary(
-      runtime,
-      invokeNative(
-        { fn, inline, compiledCallback: inline && compiledLiteralCallback(fn, e.args[0]?.e) },
-        fn,
-        args,
-        e.row,
-        discardResult
-      )
-    );
-  }
+  if (fn.kind === 'native') return callNativeNamed(runtime, e, e.fn, fn, discardResult);
   const args = evalArgs(e.args, fn, fn.name);
   runtime.row = e.row;
   return pushTemporary(runtime, invokeUser({ fn }, fn, args, e.row, discardResult));
@@ -350,15 +329,17 @@ function callNativeNamed(
     return renderSimpleSprintf(
       format,
       e.args.slice(1).map((arg) => prepareOperand(arg.e)),
-      e.row
+      callOperandRow(e)
     );
   }
   const specialized = name.fallback ? undefined : specializedCall(fn, e.args);
   const frameless = specialized === 'frameless';
   const inline = specialized === 'opcode' || (frameless && fn.name === 'strtr');
-  const row = inline && fn.name === 'strlen' ? e.args[0].e.row : e.row;
-  const args =
-    specialized && fn.name !== 'call_user_func' && fn.name !== 'call_user_func_array'
+  const row = specialized === 'opcode' ? callOperandRow(e) : e.row;
+  const forwards = specialized === 'opcode' && (fn.name === 'call_user_func' || fn.name === 'call_user_func_array');
+  const args = forwards
+    ? evalCompiledCallbackArgs(e.args, fn)
+    : specialized
       ? evalDeferredValueArgs(e.args, row)
       : evalArgs(e.args, fn, fn.name);
   runtime.row = row;
@@ -371,7 +352,7 @@ function callNativeNamed(
         inline,
         frameless,
         directOverload: frameless && fn.shortParamsDirectOnly,
-        compiledCallback: inline && compiledLiteralCallback(fn, e.args[0]?.e),
+        compiledCallback: forwards && compiledLiteralCallback(e.args[0].e),
       },
       fn,
       args,
@@ -381,9 +362,23 @@ function callNativeNamed(
   );
 }
 
-function compiledLiteralCallback(fn: Callable, callback: Expr | undefined): boolean {
-  if (fn.name !== 'call_user_func' && fn.name !== 'call_user_func_array') return false;
-  return callback?.k === 'lit' && typeof callback.v === 'string' && !callback.v.startsWith('\\');
+function callOperandRow(call: Extract<Expr, { k: 'call' }>): number {
+  const argument = call.args.at(-1);
+  return argument ? compiledOperandRow(argument.e) : call.row;
+}
+
+function evalCompiledCallbackArgs(args: Arg[], fn: NativeFunction): ArgValue[] {
+  const [callback, ...remaining] = args;
+  const [target] = evalArgs([callback], fn, fn.name);
+  rt().row = compiledOperandRow(callback.e);
+  validateNativeCallback(fn, target);
+  const forwarded = evalArgs(remaining, undefined, undefined);
+  for (const [index, argument] of forwarded.entries()) argument.position = index + 1;
+  return [target, ...forwarded];
+}
+
+function compiledLiteralCallback(callback: Expr): boolean {
+  return callback.k === 'lit' && typeof callback.v === 'string' && !callback.v.startsWith('\\');
 }
 
 function evalDeferredValueArgs(args: Arg[], row: number): ArgValue[] {
@@ -1253,8 +1248,8 @@ const OPCODE_ARITIES: Readonly<Partial<Record<string, readonly number[]>>> = {
   strval: [1],
 };
 
-function specializedCall(fn: Callable, args: Arg[]): 'opcode' | 'frameless' | undefined {
-  if (fn.kind !== 'native' || args.some((arg) => arg.spread || arg.name !== undefined)) return undefined;
+function specializedCall(fn: NativeFunction, args: Arg[]): 'opcode' | 'frameless' | undefined {
+  if (args.some((arg) => arg.spread || arg.name !== undefined)) return undefined;
   const name = lower(fn.name);
   if ((name === 'func_get_args' || name === 'func_num_args') && !rt().frame.decl) return undefined;
   if (FRAMELESS_ARITIES[name]?.includes(args.length)) return 'frameless';

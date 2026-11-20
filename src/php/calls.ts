@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 876 -- Keeps call binding, completion and frame cleanup together.
+// code-gauge-allow-file fileNcss 879 -- Keeps call binding, completion and frame cleanup together.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl, Stmt } from './ast';
@@ -49,6 +49,7 @@ import {
 export interface ArgValue {
   temporaryCount?: number;
   heldReference?: boolean;
+  validatedCallback?: Value;
   nativeTransfer?: { values: unknown[]; count: number; container?: PhpArray };
   v: Value;
   ref?: Ref;
@@ -567,7 +568,7 @@ function bindNative(
       coerceArg(param, index, value, true, name);
       append(value, arg.ref ?? Ref.temporary(value));
     } else {
-      append(coerceArg(param, index, arg.v, strict, name));
+      append(arg.validatedCallback ?? coerceArg(param, index, arg.v, strict, name));
     }
   }
   // Trailing parameters left out stay undefined, so natives can tell them from an explicit null.
@@ -584,6 +585,10 @@ function nativeOverloadParams(fn: NativeFunction, args: ArgValue[], positional: 
   if (!short || positional > short.length || (fn.shortParamsDirectOnly && !direct)) return fn.params;
   const extraNames = new Set(fn.params.slice(short.length).map((param) => param.name));
   return args.some((arg) => arg.name !== undefined && extraNames.has(arg.name)) ? fn.params : short;
+}
+
+export function validateNativeCallback(fn: NativeFunction, arg: ArgValue): void {
+  arg.validatedCallback = coerceArg(fn.params[0], 0, arg.v, callerIsStrict(), fn.name);
 }
 
 function coerceArg(param: Param, index: number, value: Value, strict: boolean, name: string): Value {
