@@ -416,10 +416,10 @@ export class BorrowChecker {
     for (const local of info.context.captures) {
       const varState = current.get(local);
       if (!varState) continue;
-      this.checkUsable(local, varState, expr.span, 'read');
       const byValue = info.context.isMove || info.context.movedCaptures?.includes(local);
-      if (byValue && !this.isCopy(local.type) && local.mode === 'move') {
-        for (const path of this.capturedPaths(expr.body, local)) {
+      for (const [path, type] of this.capturedPaths(expr.body, local)) {
+        this.checkUsable(local, varState, expr.span, 'read', path);
+        if (byValue && local.mode === 'move' && !this.isCopy(type)) {
           current = this.markMoved(current, { root: local, path, indirect: false }, expr.span, false);
         }
       }
@@ -515,21 +515,21 @@ export class BorrowChecker {
    * The places of a captured variable that a closure's body uses, which it captures each on its own as edition 2021
    * does: `p.a` alone when the body uses only that field, or the whole variable (`''`).
    */
-  private capturedPaths(body: Expr, local: LocalVar): string[] {
-    const paths = new Set<string>();
+  private capturedPaths(body: Expr, local: LocalVar): [string, Type][] {
+    const paths = new Map<string, Type>();
     const visit = (expr: Expr): void => {
       const place = this.placeOf(expr);
       const fieldsOnly = expr.kind === 'path' || (expr.kind === 'field' && isFieldChain(expr));
       if (fieldsOnly && place?.root === local) {
-        paths.add(place.path);
+        paths.set(place.path, expr.ty ?? local.type);
         return;
       }
       forEachDirect(expr, visit);
     };
     visit(body);
-    if (paths.has('') || paths.size === 0) return [''];
+    if (paths.has('') || paths.size === 0) return [['', local.type]];
     // A field whose parent is captured too goes with the parent.
-    return [...paths].filter((path) => ![...paths].some((other) => path.startsWith(`${other}.`)));
+    return [...paths].filter(([path]) => ![...paths.keys()].some((other) => path.startsWith(`${other}.`)));
   }
 
   /** Whether an expression is a capture, or a field of one, that the closure being checked owns. */

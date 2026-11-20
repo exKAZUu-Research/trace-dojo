@@ -604,7 +604,7 @@ export class Compiler {
     });
     const byValue = context.captures.map(
       (local) =>
-        context.isMove || context.movedCaptures?.includes(local) || context.copiedReferenceCaptures?.has(local) || false
+        context.isMove || context.movedCaptures?.includes(local) || context.reborrowedCaptures?.has(local) || false
     );
     return (frame) => {
       const places = captures.map((capture, index) => this.capturePlace(frame, capture, context, byValue[index]));

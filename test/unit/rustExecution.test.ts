@@ -1569,12 +1569,19 @@ fn main() { println!("{}", value()); }`;
   expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: '3\n' });
 });
 
-test('borrows through shared references in Rust closures after their bindings end', () => {
+test('reborrows Rust closure referents after their original bindings end', () => {
   const program = `fn main() {
     let v = vec![1];
     let saved: Box<dyn Fn() -> i32>;
     { let x = &v[0]; saved = Box::new(|| *x); }
     println!("{}", saved());
+    let typed: Box<dyn Fn() -> i32>;
+    { let x = &v[0]; typed = Box::new(|| { let alias: &i32 = x; *alias }); }
+    println!("{}", typed());
+    let mut counter = 5;
+    let mut update: Box<dyn FnMut() -> i32>;
+    { let m = &mut counter; update = Box::new(|| { *m += 1; *m }); }
+    println!("{}", update());
     let text = String::from("hello");
     let length: Box<dyn Fn() -> usize>;
     { let x = &text; length = Box::new(|| x.len()); }
@@ -1590,9 +1597,20 @@ test('borrows through shared references in Rust closures after their bindings en
 }`;
   expect(executeProgram('rust', program)).toMatchObject({
     kind: 'executed',
-    stdout: '1\n5\n1\n1\n',
+    stdout: '1\n1\n6\n5\n1\n1\n',
     uncaughtException: undefined,
   });
+});
+
+test('copies only Copy projections in owned Rust closure captures', () => {
+  const program = `struct Outer { inner: (String, i32) }
+fn main() {
+    let value = Outer { inner: (String::from("retained"), 7) };
+    let reference = &value.inner.1;
+    let closure = move || value.inner.1;
+    println!("{} {} {} {}", closure(), value.inner.1, reference, value.inner.0);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '7 7 7 retained\n' });
 });
 
 test('uses character slices for Rust string boundary patterns', () => {

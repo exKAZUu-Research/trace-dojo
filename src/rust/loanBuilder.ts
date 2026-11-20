@@ -91,6 +91,7 @@ export class LoanBuilder {
   private readonly exits: number[] = [];
   /** For a closure's body, the captures it modifies, which the closure captures by `&mut`. */
   private readonly mutatedCaptures = new Set<LocalVar>();
+  private readonly typedReferenceReads = new Set<Expr>();
   private returnVar: Var = -1;
   private staticRegion: RVar | undefined;
 
@@ -453,6 +454,7 @@ export class LoanBuilder {
     }
     if (stmt.kind !== 'let' || !stmt.init) return;
     const { pattern, init } = stmt;
+    if (stmt.type?.kind === 'ref' && isReference(init.ty)) this.typedReferenceReads.add(init);
     // `let (a, b) = (x, y);` binds each element from its own expression.
     if (pattern.kind === 'tuple' && init.kind === 'tuple' && pattern.elems.length === init.elems.length) {
       const values = init.elems.map((elem) => this.value(elem));
@@ -1100,22 +1102,22 @@ export class LoanBuilder {
     const accesses: Access[] = [];
     const gens: Loan[] = [];
     const captured: Place[] = [];
-    context.copiedReferenceCaptures = new Set();
+    context.reborrowedCaptures = new Set();
     for (const local of context.captures) {
       const root = this.varOf(local);
       uses.push(root);
-      const projections = this.capturedPlaces(expr.body, local);
+      const projections = this.capturedPlaces(expr.body, local, body.typedReferenceReads);
       const captureType = normalize(shallow(local.type));
-      const copiesRef = captureType.kind === 'ref' && !captureType.mutable && projections.every((p) => p[0] === '*');
-      if (copiesRef) context.copiedReferenceCaptures.add(local);
-      const byValue = copiesRef || context.isMove || context.movedCaptures?.includes(local);
-      for (const proj of projections) {
+      const reborrow = captureType.kind === 'ref' && projections.every(({ proj }) => proj[0] === '*');
+      const byValue = context.isMove || context.movedCaptures?.includes(local);
+      if (reborrow && !byValue) context.reborrowedCaptures.add(local);
+      for (const { proj, type: projectionType } of projections) {
         // A closure that takes a capture by value takes the reference a deref goes through.
         const cut = proj.indexOf('*');
         const place: Place = { root, proj: byValue && cut !== -1 ? proj.slice(0, cut) : proj };
-        captured.push(place);
+        captured.push(reborrow && !byValue ? { root, proj: [] } : place);
         if (byValue) {
-          accesses.push({ place, kind: this.readKind(local.type), span: expr.span });
+          accesses.push({ place, kind: this.readKind(cut === -1 ? projectionType : captureType), span: expr.span });
           continue;
         }
         const mutable = body.mutatedCaptures.has(local);
@@ -1173,8 +1175,12 @@ export class LoanBuilder {
    * The places of a captured variable that a closure's body uses, which it captures each on its own as edition 2021
    * does: `p.a` alone when the body uses only that field, or the whole variable.
    */
-  private capturedPlaces(body: Expr, local: LocalVar): string[][] {
-    const places: string[][] = [];
+  private capturedPlaces(
+    body: Expr,
+    local: LocalVar,
+    typedReferenceReads: Set<Expr>
+  ): { proj: string[]; type: Type }[] {
+    const places: { proj: string[]; type: Type }[] = [];
     const visit = (expr: Expr): void => {
       if (expr.kind === 'methodCall') {
         const base = this.fieldChain(expr.receiver, local);
@@ -1182,8 +1188,9 @@ export class LoanBuilder {
           const method = this.annotations.methods.get(expr);
           const receiver = method?.receiver;
           const proj = [...base, ...derefSteps(receiver?.derefs)];
-          if (receiver?.autoref === 'none' && method?.fn.selfMode === 'ref') proj.push('*');
-          places.push(proj);
+          if (receiver?.autoref === 'none' && (method?.fn.selfMode === 'ref' || method?.fn.selfMode === 'mutRef'))
+            proj.push('*');
+          places.push({ proj, type: typeAfter(expr.receiver.ty, receiver?.derefs ?? []) ?? local.type });
           for (const [index, arg] of expr.args.entries()) visitArg(arg, method?.fn.paramTypes[index + 1]);
           return;
         }
@@ -1196,7 +1203,7 @@ export class LoanBuilder {
       }
       const proj = this.fieldChain(expr, local);
       if (proj) {
-        places.push(proj);
+        places.push({ proj: typedReferenceReads.has(expr) ? [...proj, '*'] : proj, type: expr.ty ?? local.type });
         if (expr.kind === 'index') visit(expr.index);
         return;
       }
@@ -1204,12 +1211,14 @@ export class LoanBuilder {
     };
     const visitArg = (arg: Expr, type: Type | undefined): void => {
       const base = this.fieldChain(arg, local);
-      if (base && isReference(arg.ty) && isReference(type)) places.push([...base, '*']);
+      if (base && isReference(arg.ty) && isReference(type)) places.push({ proj: [...base, '*'], type: arg.ty! });
       else visit(arg);
     };
     visit(body);
-    if (places.length === 0 || places.some((proj) => proj.length === 0)) return [[]];
-    return places.filter((proj) => !places.some((other) => other.length < proj.length && isPrefix(other, proj)));
+    if (places.length === 0 || places.some(({ proj }) => proj.length === 0)) return [{ proj: [], type: local.type }];
+    return places.filter(
+      ({ proj }) => !places.some(({ proj: other }) => other.length < proj.length && isPrefix(other, proj))
+    );
   }
 
   /** The projections of a field chain (`v`, `p.a.b`) rooted in a captured variable. */
