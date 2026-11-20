@@ -2,12 +2,13 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { type CleanupException, withCleanupExceptions, withPendingException } from './errors';
 import {
-  bufferedArrays,
+  bufferedGarbage,
   cachedObjectFree,
   collectGarbageNodes,
   deferredHandleOrder,
   forgetCollectedArrayCycles,
   objectFree,
+  objectsCreatedSince,
   orderDestructedCollection,
   recordGcRoot,
   retireCollected,
@@ -160,7 +161,10 @@ function collectAfterDestruction(
     }
     const afterArrays = new Set<PhpArray>();
     const after = mark(runtime, false, afterArrays);
-    const remaining = handles.filter((object) => runtime.objects.get(object.id) === object && !after.has(object));
+    const remaining = [
+      ...handles.filter((object) => runtime.objects.get(object.id) === object && !after.has(object)),
+      ...objectsCreatedSince(runtime, handles, after),
+    ];
     const result = countAfterDestruction(runtime, { owners, remaining, destructible, afterArrays, buffered, nested });
     count = result.count;
     finishCollectedObjects(runtime, result.ordered, arrayStorage, nodes, result.passTwoNodes);
@@ -271,7 +275,8 @@ function countAfterDestruction(
     (node) => !(node instanceof Ref),
     {
       nestedChildren: (node) => nested.children(node),
-      roots: survivingRoots<CollectionNode>(bufferedArrays(runtime, afterArrays), remaining, children),
+      destructed: destructible,
+      roots: survivingRoots<CollectionNode>(bufferedGarbage(runtime, afterArrays, allowed), remaining, children),
     }
   );
   return {

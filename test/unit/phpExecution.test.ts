@@ -5232,6 +5232,26 @@ try { range(0.1, null, 1); } catch (ValueError $e) { echo explode("\\n", $e->get
   });
 });
 
+test("gc_collect_cycles() reruns over what destructors create and leaves out a resurrected receiver's data", () => {
+  for (const [action, expected] of [
+    ['$x = new stdClass; $x->self = $x; unset($x); $this->a = [];', 'int(2)\nint(0)\nint(2)\n'],
+    ['$this->a["tail"] = new stdClass;', 'int(3)\nint(0)\nint(1)\n'],
+  ]) {
+    expect(
+      run(
+        `<?php class D { public $a; function __destruct() { ${action} } } $o = new D; $a = [$o]; $o->a = $a; unset($o, $a); var_dump(gc_collect_cycles(), gc_collect_cycles(), spl_object_id(new stdClass));`
+      )
+    ).toMatchObject({ kind: 'executed', stdout: expected });
+  }
+  for (const shape of ['[$o]', '[[$o]]']) {
+    expect(
+      run(
+        `<?php class D { public $a; function __destruct() { global $saved; $saved = $this; $this->a = []; } } $o = new D; $a = ${shape}; $o->a = $a; unset($o, $a); var_dump(gc_collect_cycles(), gc_collect_cycles());`
+      )
+    ).toMatchObject({ kind: 'executed', stdout: 'int(0)\nint(0)\n' });
+  }
+});
+
 test('a class whose override names a later class is declared when its statement runs', () => {
   expect(
     run(

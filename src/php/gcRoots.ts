@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 470 -- Holds GC root buffer simulation, ordering, and post-collection retirement helpers.
+// code-gauge-allow-file fileNcss 471 -- Holds GC root buffer simulation, ordering, and post-collection retirement helpers.
 import { rt, type Runtime } from './runtime';
 import { PhpArray, PhpObject, Ref, type Value } from './values';
 
@@ -35,10 +35,28 @@ export function withReachableCached<N extends object, G extends { children(node:
   return graph;
 }
 
-/** The arrays in the root buffer that live code does not reach, such as those destructors released. */
-export function bufferedArrays(runtime: Runtime, live: Set<PhpArray>): PhpArray[] {
+/** What the root buffer holds that is garbage, such as the values destructors released: in PHP's rerun after them. */
+export function bufferedGarbage(
+  runtime: Runtime,
+  liveArrays: Set<PhpArray>,
+  garbageObjects: Set<PhpObject>
+): (PhpArray | PhpObject)[] {
   return Array.from({ length: runtime.gcRoots.length }, (_, index) => runtime.gcRoots.at(index)).filter(
-    (value): value is PhpArray => value instanceof PhpArray && !live.has(value)
+    (value): value is PhpArray | PhpObject =>
+      value instanceof PhpArray ? !liveArrays.has(value) : value instanceof PhpObject && garbageObjects.has(value)
+  );
+}
+
+/**
+ * The objects destructors created that nothing live reaches and that have no destructor left to run, which PHP's
+ * rerun after the destructors collects too; one with a destructor is left to reference counting, as PHP runs no
+ * further rerun for it.
+ */
+export function objectsCreatedSince(runtime: Runtime, known: PhpObject[], reached: Set<unknown>): PhpObject[] {
+  const existing = new Set(known);
+  return [...runtime.objects.values()].filter(
+    (object) =>
+      !existing.has(object) && !reached.has(object) && (object.destructed || !object.cls.findMethod('__destruct'))
   );
 }
 
@@ -54,7 +72,9 @@ export function forgetCollectedArrayCycles(runtime: Runtime, freed: Iterable<unk
 export function survivingRoots<N extends object>(candidates: N[], starts: N[], children: (node: N) => N[]): N[] {
   const cyclic = candidates.filter((candidate) => heldArrays(children(candidate), children).has(candidate));
   const held = heldArrays([...starts, ...cyclic], children);
-  return candidates.filter((candidate) => cyclic.includes(candidate) || held.has(candidate));
+  return candidates.filter(
+    (candidate) => !(candidate instanceof PhpArray) || cyclic.includes(candidate) || held.has(candidate)
+  );
 }
 
 export function recordGcRoot(runtime: Runtime, value: PhpArray | PhpObject, collect: () => number): boolean {
@@ -278,11 +298,15 @@ export function orderDestructedCollection<N extends object, O extends N>(
   isObject: (node: N) => node is O,
   children: (node: N) => N[],
   countable: (node: N) => boolean = () => true,
-  rerun: { nestedChildren?: (node: N) => N[]; roots?: N[] } = {}
+  rerun: { nestedChildren?: (node: N) => N[]; roots?: N[]; destructed?: O[] } = {}
 ): { count: number; ordered: O[]; passTwoNodes: N[]; freed: Set<N> } {
   const buffer = buildSimulationBuffer(bufferedRoots, remainingObjects, isObject, children, countable);
   const end = buffer.length;
-  removeDestructibleNested(buffer, end, destructible, isObject, rerun.nestedChildren ?? children, countable);
+  // PHP removes what each object whose destructor this run invokes holds, whether or not the object survives.
+  const destructed = rerun.destructed ?? [...destructible];
+  const invoked = new Set([...destructible, ...destructed]);
+  for (const root of destructed)
+    removeNestedFromBuffer(root, buffer, invoked, isObject, rerun.nestedChildren ?? children, countable);
   const state: DeferredState<N, O> = {
     protectedObjects: remainingObjects,
     inDegree: countInDegrees(bufferedRoots, remainingObjects, isObject, children),
@@ -342,21 +366,6 @@ function collectWhiteIntoBuffer<N extends object, O extends N>(
       if (countable(node)) buffer.add(node);
       return true;
     });
-  }
-}
-
-function removeDestructibleNested<N extends object, O extends N>(
-  buffer: GcRoots<N>,
-  end: number,
-  destructible: Set<O>,
-  isObject: (node: N) => node is O,
-  children: (node: N) => N[],
-  countable: (node: N) => boolean
-): void {
-  for (let index = 0; index < end; index++) {
-    const start = buffer.at(index);
-    if (start !== undefined && isObject(start) && destructible.has(start))
-      removeNestedFromBuffer(start, buffer, destructible, isObject, children, countable);
   }
 }
 
