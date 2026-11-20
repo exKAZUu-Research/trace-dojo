@@ -42,8 +42,7 @@ export function deferredHandleOrder<N extends object, O extends N>(
   roots: N[],
   protectedObjects: Set<O>,
   isObject: (node: N) => node is O,
-  children: (node: N) => N[],
-  reverseNested = false
+  children: (node: N) => N[]
 ): O[] {
   const state: DeferredState<N, O> = {
     protectedObjects,
@@ -54,29 +53,249 @@ export function deferredHandleOrder<N extends object, O extends N>(
     children,
   };
   const queue: N[] = [...roots];
-  drainDeferredQueue(queue, state, 0, reverseNested);
+  drainDeferredQueue(queue, state, 0);
   for (const object of protectedObjects) {
     if (!state.freed.has(object)) {
       const start = queue.length;
       queue.push(object);
-      drainDeferredQueue(queue, state, start, reverseNested);
+      drainDeferredQueue(queue, state, start);
     }
   }
   return state.order;
 }
 
-function drainDeferredQueue<N extends object, O extends N>(
-  queue: N[],
-  state: DeferredState<N, O>,
-  from: number,
-  reverseNested: boolean
+export function orderDestructedCollection<N extends object, O extends N>(
+  bufferedRoots: N[],
+  destructible: Set<O>,
+  remainingObjects: Set<O>,
+  isObject: (node: N) => node is O,
+  children: (node: N) => N[]
+): O[] {
+  const buffer = buildSimulationBuffer(bufferedRoots, remainingObjects, isObject, children);
+  const end = buffer.length;
+  removeDestructibleNested(buffer, end, destructible, isObject, children);
+  const state: DeferredState<N, O> = {
+    protectedObjects: remainingObjects,
+    inDegree: countInDegrees(bufferedRoots, remainingObjects, isObject, children),
+    freed: new Set<N>(),
+    order: [],
+    isObject,
+    children,
+  };
+  runFirstDestructionPass(buffer, end, state, destructible);
+  buffer.compact();
+  drainRunTwoBuffer(buffer, state, remainingObjects);
+  return state.order;
+}
+
+function buildSimulationBuffer<N extends object, O extends N>(
+  bufferedRoots: N[],
+  remainingObjects: Set<O>,
+  isObject: (node: N) => node is O,
+  children: (node: N) => N[]
+): SimulationBuffer<N> {
+  const buffer = new SimulationBuffer<N>();
+  for (const root of bufferedRoots) buffer.add(root);
+  buffer.compact();
+  const initialEnd = buffer.length;
+  for (let index = 0; index < initialEnd; index++) {
+    const start = buffer.at(index);
+    if (start !== undefined)
+      walkZendStack(start, children, (node) => {
+        if (node !== start && (!isObject(node) || remainingObjects.has(node))) buffer.add(node);
+      });
+  }
+  return buffer;
+}
+
+function removeDestructibleNested<N extends object, O extends N>(
+  buffer: SimulationBuffer<N>,
+  end: number,
+  destructible: Set<O>,
+  isObject: (node: N) => node is O,
+  children: (node: N) => N[]
 ): void {
+  for (let index = 0; index < end; index++) {
+    const start = buffer.at(index);
+    if (start !== undefined && isObject(start) && destructible.has(start))
+      removeNestedFromBuffer(start, buffer, destructible, isObject, children);
+  }
+}
+
+function runFirstDestructionPass<N extends object, O extends N>(
+  buffer: SimulationBuffer<N>,
+  end: number,
+  state: DeferredState<N, O>,
+  destructible: Set<O>
+): void {
+  const runOneGarbage = new Set<N>();
+  for (let index = 0; index < end; index++) {
+    const item = buffer.at(index);
+    if (item !== undefined && !(state.isObject(item) && destructible.has(item))) runOneGarbage.add(item);
+  }
+  const runOneFreed: N[] = [];
+  for (let index = 0; index < end; index++) {
+    const start = buffer.at(index);
+    if (start === undefined || !runOneGarbage.has(start) || state.freed.has(start)) continue;
+    runOneFreed.push(start);
+    releaseWithBuffer(start, state, buffer, destructible);
+  }
+  for (const node of runOneFreed) buffer.remove(node);
+}
+
+function drainRunTwoBuffer<N extends object, O extends N>(
+  buffer: SimulationBuffer<N>,
+  state: DeferredState<N, O>,
+  remainingObjects: Set<O>
+): void {
+  const runTwoQueue: N[] = [];
+  for (let index = 0; index < buffer.length; index++) {
+    const node = buffer.at(index);
+    if (node !== undefined) runTwoQueue.push(node);
+  }
+  drainDeferredQueue(runTwoQueue, state, 0);
+  for (const object of remainingObjects) {
+    if (!state.freed.has(object)) {
+      const start = runTwoQueue.length;
+      runTwoQueue.push(object);
+      drainDeferredQueue(runTwoQueue, state, start);
+    }
+  }
+}
+
+class SimulationBuffer<N extends object> {
+  private readonly slots: (N | undefined)[] = [];
+  private readonly positions = new Map<N, number>();
+  private readonly unused: number[] = [];
+
+  get length(): number {
+    return this.slots.length;
+  }
+
+  at(index: number): N | undefined {
+    return this.slots[index];
+  }
+
+  has(node: N): boolean {
+    return this.positions.has(node);
+  }
+
+  add(node: N): void {
+    if (this.positions.has(node)) return;
+    const index = this.unused.pop() ?? this.slots.length;
+    this.slots[index] = node;
+    this.positions.set(node, index);
+  }
+
+  remove(node: N): void {
+    const index = this.positions.get(node);
+    if (index === undefined) return;
+    this.positions.delete(node);
+    this.slots[index] = undefined;
+    this.unused.push(index);
+  }
+
+  compact(): void {
+    const count = this.positions.size;
+    if (count === this.slots.length) return;
+    let free = 0;
+    let scan = this.slots.length - 1;
+    while (free < scan) {
+      while (free < scan && this.slots[free] !== undefined) free++;
+      while (free < scan && this.slots[scan] === undefined) scan--;
+      if (free < scan) {
+        const node = this.slots[scan] as N;
+        this.slots[free] = node;
+        this.slots[scan] = undefined;
+        this.positions.set(node, free);
+        free++;
+        scan--;
+      }
+    }
+    this.slots.length = count;
+    this.unused.length = 0;
+  }
+}
+
+function walkZendStack<N extends object>(start: N, children: (node: N) => N[], visit: (node: N) => void): void {
+  const seen = new Set<N>();
+  const stack: N[] = [];
+  let current: N | undefined = start;
+  while (current !== undefined) {
+    if (!seen.has(current)) {
+      seen.add(current);
+      visit(current);
+      const next = children(current);
+      if (next.length > 0) {
+        for (let index = 1; index < next.length; index++) stack.push(next[index]);
+        current = next[0];
+        continue;
+      }
+    }
+    current = stack.pop();
+  }
+}
+
+function removeNestedFromBuffer<N extends object, O extends N>(
+  root: O,
+  buffer: SimulationBuffer<N>,
+  destructible: Set<O>,
+  isObject: (node: N) => node is O,
+  children: (node: N) => N[]
+): void {
+  const stack: N[] = [];
+  let current: N | undefined = pushZendTail(children(root), stack);
+  while (current !== undefined) {
+    if (buffer.has(current) && !(isObject(current) && destructible.has(current))) {
+      buffer.remove(current);
+      const tail = pushZendTail(children(current), stack);
+      if (tail !== undefined) {
+        current = tail;
+        continue;
+      }
+    }
+    current = stack.pop();
+  }
+}
+
+function pushZendTail<N extends object>(next: N[], stack: N[]): N | undefined {
+  if (next.length === 0) return undefined;
+  for (let index = 1; index < next.length; index++) stack.push(next[index]);
+  return next[0];
+}
+
+function releaseWithBuffer<N extends object, O extends N>(
+  start: N,
+  state: DeferredState<N, O>,
+  buffer: SimulationBuffer<N>,
+  destructible: Set<O>
+): void {
+  state.freed.add(start);
+  const stack: { node: N; children: N[]; index: number }[] = [
+    { node: start, children: state.children(start), index: 0 },
+  ];
+  while (stack.length > 0) {
+    const frame = stack.at(-1) as { node: N; children: N[]; index: number };
+    const nested: N[] = [];
+    const child = nextDeferredChild(frame, state, nested);
+    for (const item of nested) buffer.add(item);
+    if (child !== undefined) {
+      state.freed.add(child);
+      stack.push({ node: child, children: state.children(child), index: 0 });
+      continue;
+    }
+    stack.pop();
+    if (state.isObject(frame.node)) {
+      state.order.push(frame.node);
+      if (destructible.has(frame.node)) buffer.remove(frame.node);
+    }
+  }
+}
+
+function drainDeferredQueue<N extends object, O extends N>(queue: N[], state: DeferredState<N, O>, from: number): void {
   for (let head = from; head < queue.length; head++) {
     const start = queue[head];
-    if (!state.freed.has(start)) {
-      const nested = releaseDeferredRoot(start, state);
-      queue.push(...(reverseNested ? nested.toReversed() : nested));
-    }
+    if (!state.freed.has(start)) queue.push(...releaseDeferredRoot(start, state));
   }
 }
 

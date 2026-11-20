@@ -1,7 +1,14 @@
 // code-gauge-allow-file fileNcss 999 -- Holds object ownership, reachability and release with their shared helpers.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { type CleanupException, withCleanupExceptions, withPendingException } from './errors';
-import { cachedObjectFree, countAfterDestructionPass, deferredHandleOrder, objectFree, recordGcRoot } from './gcRoots';
+import {
+  cachedObjectFree,
+  countAfterDestructionPass,
+  deferredHandleOrder,
+  objectFree,
+  orderDestructedCollection,
+  recordGcRoot,
+} from './gcRoots';
 import { ExitSignal, type Frame, PhpThrow, type Runtime } from './runtime';
 import {
   arrayHolderCount,
@@ -104,25 +111,24 @@ function collectGarbageNow(runtime: Runtime, cycles: boolean, stopOnException: b
   }
   return collectAfterDestruction(
     runtime,
-    owners,
-    handles,
-    destructible,
-    arrayCandidates,
-    arrayStorage,
+    { owners, handles, destructible, arrayCandidates, arrayStorage, buffered },
     stopOnException
   );
 }
 
-// code-gauge-allow functionParameterCount 7 -- Uses the mark results, destructor order and shutdown policy for one collection batch.
 function collectAfterDestruction(
   runtime: Runtime,
-  owners: PhpObject[],
-  handles: PhpObject[],
-  destructible: PhpObject[],
-  arrayCandidates: PhpArray[],
-  arrayStorage: Set<PhpArray>,
+  batch: {
+    owners: PhpObject[];
+    handles: PhpObject[];
+    destructible: PhpObject[];
+    arrayCandidates: PhpArray[];
+    arrayStorage: Set<PhpArray>;
+    buffered?: (PhpObject | PhpArray)[];
+  },
   stopOnException: boolean
 ): number {
+  const { owners, handles, destructible, arrayCandidates, arrayStorage, buffered } = batch;
   let count = 0;
   const destructedInBuffer = new Set<PhpObject>();
   withCleanupExceptions(runtime, (capture) => {
@@ -147,15 +153,15 @@ function collectAfterDestruction(
     const afterArrays = new Set<PhpArray>();
     const after = mark(runtime, false, afterArrays);
     const remaining = handles.filter((object) => runtime.objects.get(object.id) === object && !after.has(object));
-    const { count: collectedCount, ordered } = countAfterDestruction(
-      runtime,
+    const { count: collectedCount, ordered } = countAfterDestruction(runtime, {
       owners,
       remaining,
       destructible,
       destructedInBuffer,
       arrayCandidates,
-      afterArrays
-    );
+      afterArrays,
+      buffered,
+    });
     count = collectedCount;
     finishCollectedObjects(runtime, ordered, arrayStorage);
   });
@@ -210,16 +216,19 @@ function retainCollectionReceiver(runtime: Runtime, object: PhpObject): void {
   }
 }
 
-// code-gauge-allow functionParameterCount 7 -- Shares the post-destructor snapshot with collectAfterDestruction.
 function countAfterDestruction(
   runtime: Runtime,
-  owners: PhpObject[],
-  remaining: PhpObject[],
-  destructible: PhpObject[],
-  destructedInBuffer: Set<PhpObject>,
-  arrayCandidates: PhpArray[],
-  afterArrays: Set<PhpArray>
+  state: {
+    owners: PhpObject[];
+    remaining: PhpObject[];
+    destructible: PhpObject[];
+    destructedInBuffer: Set<PhpObject>;
+    arrayCandidates: PhpArray[];
+    afterArrays: Set<PhpArray>;
+    buffered?: (PhpObject | PhpArray)[];
+  }
 ): { count: number; ordered: PhpObject[] } {
+  const { owners, remaining, destructible, destructedInBuffer, arrayCandidates, afterArrays, buffered } = state;
   const allowed = new Set(remaining);
   const graph = new CollectionGraph(
     remaining,
@@ -234,19 +243,21 @@ function countAfterDestruction(
   const deferredRoots = destructible.filter((object) => cyclic.has(object));
   const protectedObjects = collectibleGraph(deferredRoots, afterArrays, new Set(), allowed).objects;
   const excluded = new Set(destructible.filter((object) => !protectedObjects.has(object)));
-  const { count, runTwoObjects } = countAfterDestructionPass(cyclic, cyclicArrays, excluded, (roots, skip) =>
+  const { count } = countAfterDestructionPass(cyclic, cyclicArrays, excluded, (roots, skip) =>
     collectibleGraph(roots, afterArrays, skip, allowed)
-  );
-  const nonProtected = new Set(remaining.filter((object) => !protectedObjects.has(object)));
-  const passOneRoots = owners.filter(
-    (object) => cyclic.has(object) && nonProtected.has(object) && !runTwoObjects.has(object)
   );
   const isObject = (node: CollectionNode): node is PhpObject => node instanceof PhpObject;
   const children = (node: CollectionNode): CollectionNode[] => graph.children(node);
-  const ordered = [
-    ...deferredHandleOrder<CollectionNode, PhpObject>(passOneRoots, nonProtected, isObject, children, true),
-    ...deferredHandleOrder<CollectionNode, PhpObject>(deferredRoots, protectedObjects, isObject, children),
-  ];
+  const initialRoots: CollectionNode[] = buffered
+    ? buffered.filter((item) => (item instanceof PhpObject ? allowed.has(item) : !afterArrays.has(item)))
+    : owners.filter((object) => allowed.has(object));
+  const ordered = orderDestructedCollection<CollectionNode, PhpObject>(
+    initialRoots,
+    new Set(destructible.filter((object) => allowed.has(object))),
+    allowed,
+    isObject,
+    children
+  );
   return { count, ordered };
 }
 

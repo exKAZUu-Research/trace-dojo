@@ -4186,11 +4186,23 @@ echo "ok";
       '$p = new Plain; $p->next = $p; $n = new Node(1); $c = new Plain; $c->next = $c; $c->o = new Node(2); $n->o = $c; $n2 = new Node(3); $e = new Plain; $e->next = $e; $n2->o = $e; $p->o = $n; $p->p = $n2; unset($p, $n, $c, $n2, $e);',
       '~1 ~2 ~3 4 3,4,6,1,5,2',
     ],
+    [
+      '$p = new Plain; $p->next = $p; $n = new Node(1); $n->o = new Plain; $n->o->next = $n->o; $n->p = new Plain; $n->p->next = $n->p; $p->o = $n; unset($p, $n);',
+      '~1 3 4,3,1,2,5,6',
+    ],
+    [
+      '$p = new Plain; $p->next = $p; $n = new Node(1); $a = new Plain; $a->next = $a; $b = new Plain; $b->next = $b; $c = new Plain; $c->next = $c; $n->o = $a; $n->p = $b; $n->q = $c; $p->o = $n; unset($p, $n, $a, $b, $c);',
+      '~1 4 5,3,4,1,2,6',
+    ],
+    [
+      '$p = new Plain; $p->next = $p; $n = new Node(1); $a = new Plain; $a->next = $a; $b = new Plain; $b->next = $b; $n->o = $a; $n->p = $b; $m = new Node(2); $c = new Plain; $c->next = $c; $m->o = $c; $p->o = $n; $p->p = $m; unset($p, $n, $a, $b, $m, $c);',
+      '~1 ~2 4 4,3,6,1,5,2',
+    ],
   ]) {
     expect(
       run(`<?php
-class Node { public $next; public $o; public $p; function __construct(public $n = 0) {} function __destruct() { echo "~{$this->n} "; } }
-class Plain { public $next; public $o; public $p; }
+class Node { public $next; public $o; public $p; public $q; function __construct(public $n = 0) {} function __destruct() { echo "~{$this->n} "; } }
+class Plain { public $next; public $o; public $p; public $q; }
 ${body}
 echo gc_collect_cycles(), " ";
 $ids = [];
