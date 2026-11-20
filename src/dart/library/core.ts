@@ -1740,7 +1740,10 @@ abstract interface class List<E> extends Iterable<E> {
   external void setRange(int start, int end, Iterable<E> iterable, [int skipCount = 0]);
   external void removeRange(int start, int end);
   external void fillRange(int start, int end, [E? fillValue]);
-  external void replaceRange(int start, int end, Iterable<E> replacements);
+  void replaceRange(int start, int end, Iterable<E> newContents) {
+    _checkListCanRemove(this);
+    replaceListRange<E>(this, start, end, newContents, removeRange);
+  }
   external Map<int, E> asMap();
   external bool contains(Object? element);
   external void forEach(dynamic Function(E element) action);
@@ -1840,6 +1843,50 @@ class _ListIterator<E> implements ListIterator<E> {
   _ListIterator._();
   external bool moveNext();
   external E get current;
+}
+
+external void _checkListCanRemove(List<Object?> list);
+
+void replaceListRange<E>(
+    List<E> list, int start, int end, Iterable<E> newContents, void Function(int, int) closeGap) {
+  RangeError.checkValidRange(start, end, list.length);
+  if (start == list.length) {
+    list.addAll(newContents);
+    return;
+  }
+  if (!_hasEfficientLength(newContents)) {
+    newContents = newContents.toList();
+  }
+  int removeLength = end - start;
+  int insertLength = newContents.length;
+  if (removeLength >= insertLength) {
+    int insertEnd = start + insertLength;
+    list.setRange(start, insertEnd, newContents);
+    if (removeLength > insertLength) {
+      closeGap(insertEnd, end);
+    }
+  } else if (end == list.length) {
+    int i = start;
+    for (E element in newContents) {
+      if (i < end) {
+        list[i] = element;
+      } else {
+        list.add(element);
+      }
+      i++;
+    }
+  } else {
+    int delta = insertLength - removeLength;
+    int oldLength = list.length;
+    int insertEnd = start + insertLength;
+    for (int i = oldLength - delta; i < oldLength; ++i) {
+      list.add(list[i > 0 ? i : 0]);
+    }
+    if (insertEnd < oldLength) {
+      list.setRange(insertEnd, oldLength, list, end);
+    }
+    list.setRange(start, insertEnd, newContents);
+  }
 }
 
 // Sets and maps

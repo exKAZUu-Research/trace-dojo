@@ -20,6 +20,7 @@ import {
   callFunction,
   castTo,
   checkElement,
+  checkListIndex,
   define,
   defineConstructor,
   elementTypeOf,
@@ -29,6 +30,7 @@ import {
   index,
   intArg,
   iterableValues,
+  iteratorValues,
   listLength,
   named,
   nativeFunction,
@@ -49,13 +51,6 @@ function rangeError(
   name: string | undefined
 ): never {
   runtime.throwError('RangeError', 'range', [BigInt(value), BigInt(min), BigInt(max), name]);
-}
-
-function checkIndex(runtime: Runtime, target: DartList, at: Value, name: string): number {
-  const position = intArg(runtime, at, 'index');
-  if (position < 0n || position >= BigInt(target.elements.length))
-    rangeError(runtime, position, 0, target.elements.length - 1, name);
-  return index(position);
 }
 
 function checkGrowable(runtime: Runtime, target: DartList, action: 'add' | 'remove' | 'clear' | 'length'): void {
@@ -178,13 +173,13 @@ defineConstructor('List.generate', (runtime, _instance, args, typeArgs) => {
 
 define('List.[]', (runtime, receiver, [at]) => {
   const target = list(receiver);
-  return target.elements[checkIndex(runtime, target, at, 'length')];
+  return target.elements[checkListIndex(runtime, target, at, 'length')];
 });
 define('List.[]=', (runtime, receiver, [at, value]) => {
   const target = list(receiver);
   checkElement(runtime, value, elementTypeOf(target), 'value');
   checkModifiable(runtime, target);
-  const position = checkIndex(runtime, target, at, 'index');
+  const position = checkListIndex(runtime, target, at, 'index');
   target.elements[position] = value;
   return;
 });
@@ -242,7 +237,7 @@ define('List.isEmpty', (_runtime, receiver) => list(receiver).elements.length ==
 define('List.isNotEmpty', (_runtime, receiver) => list(receiver).elements.length > 0);
 define('List.elementAt', (runtime, receiver, [at]) => {
   const target = list(receiver);
-  return target.elements[checkIndex(runtime, target, at, 'length')];
+  return target.elements[checkListIndex(runtime, target, at, 'length')];
 });
 
 // Iteration
@@ -316,13 +311,13 @@ define('List.join', (runtime, receiver, [separator = '']) => {
   for (let position = 0; position < (liveLength ? target.elements.length : length); position++) {
     runtime.spend();
     if (position > 0) result.append(delimiter);
-    const element = target.elements[checkIndex(runtime, target, BigInt(position), 'length')];
+    const element = target.elements[checkListIndex(runtime, target, BigInt(position), 'length')];
     result.append(stringOf(runtime, element));
   }
   return result.text();
 });
 define('List.toString', (runtime, receiver) =>
-  iterableToFullString(runtime, receiver, list(receiver).elements, '[', ']')
+  iterableToFullString(runtime, receiver, iteratorValues(runtime, receiver, 0n, undefined), '[', ']')
 );
 
 /** `Iterable.iterableToFullString`: the elements' strings between delimiters, `[...]` for a list inside itself. */
@@ -415,7 +410,7 @@ define('List.insertAll', (runtime, receiver, [at, iterable]) => {
     changed(target);
     rangeError(runtime, start + target.elements.length, start, target.elements.length, 'end');
   }
-  replaceListElements(target.elements, index(position), index(position), values);
+  insertListElements(target.elements, index(position), values);
   changed(target);
   return;
 });
@@ -446,20 +441,33 @@ define('List.setAll', (runtime, receiver, [at, iterable]) => {
 define('List.remove', (runtime, receiver, [value]) => {
   const target = list(receiver);
   checkGrowable(runtime, target, 'remove');
-  const position = target.elements.findIndex((element) => runtime.equals(element, value));
+  const position = findListElement(runtime, target, value, 0);
   if (position === -1) return false;
-  target.elements.splice(position, 1);
-  changed(target);
+  removeListAt(runtime, target, BigInt(position));
   return true;
 });
+
+function findListElement(runtime: Runtime, target: DartList, value: Value, start: number): number {
+  for (let position = start; position < target.elements.length; position++) {
+    runtime.spend();
+    if (runtime.equals(target.elements[position], value)) return position;
+  }
+  return -1;
+}
+
 define('List.removeAt', (runtime, receiver, [at]) => {
   const target = list(receiver);
   checkGrowable(runtime, target, 'remove');
-  const position = checkIndex(runtime, target, at, 'length');
+  return removeListAt(runtime, target, at);
+});
+
+function removeListAt(runtime: Runtime, target: DartList, at: Value): Value {
+  const position = checkListIndex(runtime, target, at, 'length');
   const [removed] = target.elements.splice(position, 1);
   changed(target);
   return removed;
-});
+}
+
 define('List.removeLast', (runtime, receiver) => {
   const target = list(receiver);
   checkGrowable(runtime, target, 'remove');
@@ -552,7 +560,7 @@ function writeListItem(
   value: Value,
   elementType: DartType
 ): void {
-  checkIndex(runtime, target, BigInt(position), 'index');
+  checkListIndex(runtime, target, BigInt(position), 'index');
   checkElement(runtime, value, elementType, 'value');
   target.elements[position] = value;
   runtime.spend();
@@ -593,41 +601,27 @@ define('List.fillRange', (runtime, receiver, [start, end, fill]) => {
   for (let position = from; position < to; position++) target.elements[position] = fill;
   return;
 });
-define('List.replaceRange', (runtime, receiver, [start, end, iterable]) => {
-  const target = list(receiver);
-  checkElement(runtime, iterable, interfaceType(coreTypes.iterable, [elementTypeOf(target)]), 'newContents');
-  checkGrowable(runtime, target, 'remove');
-  const [from, to] = checkRange(runtime, start, end, target.elements.length);
-  const values = iterableValues(runtime, iterable);
-  runtime.allocate(Math.max(0, values.length - (to - from)));
-  replaceListElements(target.elements, from, to, values);
-  changed(target);
+define('_checkListCanRemove', (runtime, _receiver, [target]) => {
+  checkGrowable(runtime, list(target), 'remove');
   return;
 });
-function replaceListElements(elements: Value[], start: number, end: number, values: Value[]): void {
+function insertListElements(elements: Value[], start: number, values: Value[]): void {
   const oldLength = elements.length;
-  const newLength = oldLength - (end - start) + values.length;
-  if (elements.length < newLength) elements.length = newLength;
-  elements.copyWithin(start + values.length, end, oldLength);
-  elements.length = newLength;
+  elements.length += values.length;
+  elements.copyWithin(start + values.length, start, oldLength);
   for (let offset = 0; offset < values.length; offset++) elements[start + offset] = values[offset];
 }
 
 define('List.indexOf', (runtime, receiver, [value, start = 0n]) => {
-  const target = list(receiver);
-  let from = index(intArg(runtime, start, 'start'));
-  if (from < 0) from = 0;
-  for (let position = from; position < target.elements.length; position++) {
-    if (runtime.equals(target.elements[position], value)) return BigInt(position);
-  }
-  return -1n;
+  const from = Math.max(0, index(intArg(runtime, start, 'start')));
+  return BigInt(findListElement(runtime, list(receiver), value, from));
 });
 define('List.lastIndexOf', (runtime, receiver, [value, start]) => {
   const target = list(receiver);
   let from = start === undefined ? target.elements.length - 1 : index(intArg(runtime, start, 'start'));
   if (from >= target.elements.length) from = target.elements.length - 1;
   for (let position = from; position >= 0; position--) {
-    const element = target.elements[checkIndex(runtime, target, BigInt(position), 'index')];
+    const element = target.elements[checkListIndex(runtime, target, BigInt(position), 'index')];
     if (runtime.equals(element, value)) return BigInt(position);
   }
   return -1n;
@@ -646,7 +640,7 @@ define('List.lastIndexWhere', (runtime, receiver, [test, start]) => {
   let from = start === undefined ? target.elements.length - 1 : index(intArg(runtime, start, 'start'));
   if (from >= target.elements.length) from = target.elements.length - 1;
   for (let position = from; position >= 0; position--) {
-    const element = target.elements[checkIndex(runtime, target, BigInt(position), 'index')];
+    const element = target.elements[checkListIndex(runtime, target, BigInt(position), 'index')];
     if (callFunction(runtime, test, element) === true) return BigInt(position);
   }
   return -1n;
@@ -671,23 +665,31 @@ function sortList(runtime: Runtime, receiver: Value, [compare]: readonly Value[]
         : callFunction(runtime, compare, a, b);
     return Number(result as bigint);
   };
-  dartSort(
-    {
-      length: index(listLength(runtime, receiver)),
-      read: (position) => {
-        const at = BigInt(position);
-        return native
-          ? native.elements[checkIndex(runtime, native, at, 'index')]
-          : runtime.invoke(receiver, '[]', { positional: [at], named: undefined }, [], undefined);
+  const held: Value[] = [];
+  const roots = (): Iterable<Value> => held;
+  runtime.roots.add(roots);
+  try {
+    dartSort(
+      {
+        length: index(listLength(runtime, receiver)),
+        roots: held,
+        read: (position) => {
+          const at = BigInt(position);
+          return native
+            ? native.elements[checkListIndex(runtime, native, at, 'index')]
+            : runtime.invoke(receiver, '[]', { positional: [at], named: undefined }, [], undefined);
+        },
+        write: (position, value) => {
+          if (native) writeListItem(runtime, native, position, value, elementTypeOf(native));
+          else
+            runtime.invoke(receiver, '[]=', { positional: [BigInt(position), value], named: undefined }, [], undefined);
+        },
       },
-      write: (position, value) => {
-        if (native) writeListItem(runtime, native, position, value, elementTypeOf(native));
-        else
-          runtime.invoke(receiver, '[]=', { positional: [BigInt(position), value], named: undefined }, [], undefined);
-      },
-    },
-    comparator
-  );
+      comparator
+    );
+  } finally {
+    runtime.roots.delete(roots);
+  }
   return undefined;
 }
 define('List.shuffle', (runtime, receiver, [random]) => {
@@ -999,9 +1001,8 @@ define('Set.removeWhere', (runtime, receiver, [test]) => filterSet(runtime, rece
 define('Set.retainWhere', (runtime, receiver, [test]) => filterSet(runtime, receiver, test, true));
 define('Set.containsAll', (runtime, receiver, [other]) => {
   // SetMixin.containsAll stops at the first element the set lacks.
-  const iterator = runtime.getProperty(other, 'iterator', undefined);
-  while (runtime.invoke(iterator, 'moveNext', { positional: [], named: undefined }, [], undefined) === true) {
-    if (!store(receiver).has(runtime.getProperty(iterator, 'current', undefined))) return false;
+  for (const value of iteratorValues(runtime, other, 0n, undefined)) {
+    if (!store(receiver).has(value)) return false;
   }
   return true;
 });
@@ -1360,7 +1361,7 @@ define('_SyncStarIterator.current', (runtime, receiver) => {
   return state.current;
 });
 
-export { checkIndex, store };
+export { store };
 
 // As internal/cast.dart, castFrom wraps any list, set, or map, the program's own included, in a casting view.
 define('List.castFrom', (runtime, _receiver, [source], _named, typeArgs) =>

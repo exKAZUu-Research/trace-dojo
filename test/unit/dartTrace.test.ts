@@ -258,6 +258,38 @@ test('large scalar list snapshots show omitted entries for each variable', () =>
   expect(actual.traceItems.at(-1)?.vars).toMatchObject({ first, second, label: 42 });
 });
 
+test('finally keeps returns and suspended throws reachable', () => {
+  const dart = `Turtle result() {
+  try { return Turtle(1, 1); }
+  finally { print('cleanup'); }
+}
+Iterable<int> interrupted() sync* {
+  try { throw Turtle(2, 1); }
+  finally { yield 7; }
+}
+void main() {
+  var first = result();
+  first.forward();
+  var iterator = interrupted().iterator;
+  iterator.moveNext();
+  print(iterator.current);
+  Turtle(3, 3).canMoveForward();
+  Turtle? retained;
+  try { iterator.moveNext(); }
+  on Turtle catch (turtle) { retained = turtle; }
+  retained?.forward();
+}`;
+  const actual = traceProgram('dart', dart, dart);
+  expect(actual).toMatchObject({
+    stdout: 'cleanup\n7\n',
+    uncaughtException: undefined,
+    finalTurtles: [
+      { x: 1, y: 2 },
+      { x: 2, y: 2 },
+    ],
+  });
+});
+
 test('nested grid updates complete with the Java trace length', () => {
   const dart = `void main() {
   var grid = List.generate(30, (_) => List.filled(30, 0));

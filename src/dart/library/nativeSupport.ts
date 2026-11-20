@@ -92,8 +92,16 @@ export function listLength(runtime: Runtime, list: Value): bigint {
 
 export function listElement(runtime: Runtime, list: Value, position: bigint): Value {
   return list instanceof DartList
-    ? list.elements[Number(position)]
+    ? list.elements[checkListIndex(runtime, list, position, 'length')]
     : runtime.invoke(list, '[]', { positional: [position], named: undefined }, [], undefined);
+}
+
+export function checkListIndex(runtime: Runtime, list: DartList, value: Value, name: string): number {
+  const position = intArg(runtime, value, 'index');
+  if (position < 0n || position >= BigInt(list.elements.length)) {
+    runtime.throwError('RangeError', 'range', [position, 0n, BigInt(list.elements.length - 1), name]);
+  }
+  return index(position);
 }
 
 /** Calls a Dart function value with positional arguments. */

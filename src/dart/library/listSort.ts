@@ -2,6 +2,7 @@ import type { Value } from '../values';
 
 export interface ListSortAccess {
   length: number;
+  roots: Value[];
   read(position: number): Value;
   write(position: number, value: Value): void;
 }
@@ -17,19 +18,27 @@ export function dartSort(values: ListSortAccess, compare: (a: Value, b: Value) =
 const INSERTION_SORT_THRESHOLD = 32;
 
 function doSort(a: ListSortAccess, left: number, right: number, compare: (a: Value, b: Value) => number): void {
-  if (right - left <= INSERTION_SORT_THRESHOLD) insertionSort(a, left, right, compare);
-  else dualPivotQuicksort(a, left, right, compare);
+  const mark = a.roots.length;
+  try {
+    if (right - left <= INSERTION_SORT_THRESHOLD) insertionSort(a, left, right, compare);
+    else dualPivotQuicksort(a, left, right, compare);
+  } finally {
+    a.roots.length = mark;
+  }
 }
 
 function insertionSort(a: ListSortAccess, left: number, right: number, compare: (a: Value, b: Value) => number): void {
+  const mark = a.roots.length;
   for (let i = left + 1; i <= right; i++) {
     const element = a.read(i);
+    a.roots.push(element);
     let j = i;
     while (j > left && compare(a.read(j - 1), element) > 0) {
       a.write(j, a.read(j - 1));
       j--;
     }
     a.write(j, element);
+    a.roots.length = mark;
   }
 }
 
@@ -88,7 +97,12 @@ function choosePivots(
   const index3 = Math.trunc((left + right) / 2);
   const index2 = index3 - sixth;
   const index4 = index3 + sixth;
-  const el = [a.read(index1), a.read(index2), a.read(index3), a.read(index4), a.read(index5)];
+  const mark = a.roots.length;
+  const el = [index1, index2, index3, index4, index5].map((position) => {
+    const value = a.read(position);
+    a.roots.push(value);
+    return value;
+  });
   for (const [x, y] of [
     [0, 1],
     [3, 4],
@@ -107,11 +121,15 @@ function choosePivots(
   a.write(index5, el[4]);
   a.write(index2, a.read(left));
   a.write(index4, a.read(right));
-  return { pivot1: el[1], pivot2: el[3], index1, index5 };
+  const [, pivot1, , pivot2] = el;
+  a.roots.length = mark;
+  a.roots.push(pivot1, pivot2);
+  return { pivot1, pivot2, index1, index5 };
 }
 
 /** Moves the elements less than the pivot to the left and the greater ones to the right, keeping equal ones between. */
 // code-gauge-allow functionCognitiveComplexity 17 -- A transcription of dart:_internal's dual-pivot quicksort, whose comparisons programs see.
+// code-gauge-allow functionNcss 31 -- Each move also preserves the displaced element during callbacks.
 function partitionAroundPivot(
   a: ListSortAccess,
   start: number,
@@ -121,8 +139,11 @@ function partitionAroundPivot(
 ): { less: number; great: number } {
   let less = start;
   let great = end;
+  const mark = a.roots.length;
   for (let k = less; k <= great; k++) {
+    a.roots.length = mark;
     const ak = a.read(k);
+    a.roots.push(ak);
     const comp = compare(ak, pivot);
     if (comp === 0) continue;
     if (comp < 0) {
@@ -149,11 +170,13 @@ function partitionAroundPivot(
       break;
     }
   }
+  a.roots.length = mark;
   return { less, great };
 }
 
 /** Moves the elements that belong left to the left and those that belong right to the right. */
 // code-gauge-allow functionCognitiveComplexity 21 -- A transcription of dart:_internal's dual-pivot quicksort, whose comparisons programs see.
+// code-gauge-allow functionNcss 31 -- Each move also preserves the displaced element during callbacks.
 // code-gauge-allow functionParameterCount 7 -- The parameters are the parts a caller already holds; grouping them would only rename them.
 function partitionThree(
   a: ListSortAccess,
@@ -166,8 +189,11 @@ function partitionThree(
 ): { less: number; great: number } {
   let less = start;
   let great = end;
+  const mark = a.roots.length;
   for (let k = less; k <= great; k++) {
+    a.roots.length = mark;
     const ak = a.read(k);
+    a.roots.push(ak);
     if (belongsLeft(ak)) {
       if (k !== less) {
         a.write(k, a.read(less));
@@ -193,5 +219,6 @@ function partitionThree(
       break;
     }
   }
+  a.roots.length = mark;
   return { less, great };
 }

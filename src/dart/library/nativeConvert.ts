@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 580 -- dart:convert's JSON, UTF-8, and Base64 codecs, each transcribed from the SDK.
+// code-gauge-allow-file fileNcss 582 -- dart:convert's JSON, UTF-8, and Base64 codecs, each transcribed from the SDK.
 import { LIMITS } from '../../interpreter/limits';
 import { formatDouble } from '../format';
 import { HashStore } from '../hashStore';
@@ -80,15 +80,20 @@ class JsonStringifier {
     if (this.visiting.includes(current)) runtime.throwError('JsonCyclicError', '', [current]);
     this.visiting.push(current);
     try {
-      if (!this.writeJsonValue(this.convert(current), depth))
-        runtime.throwError('JsonUnsupportedObjectError', '', [current]);
+      if (!this.writeJsonValue(this.convert(current), depth)) this.throwUnsupported(current);
     } catch (error) {
-      if (error instanceof DartThrow)
-        runtime.throwError('JsonUnsupportedObjectError', '', [current], { cause: error.value });
+      if (error instanceof DartThrow) this.throwUnsupported(current, error.value);
       throw error;
     } finally {
       this.visiting.pop();
     }
+  }
+
+  private throwUnsupported(current: Value, cause?: Value): never {
+    return this.runtime.throwError('JsonUnsupportedObjectError', '', [current], {
+      cause,
+      partialResult: this.output.join(''),
+    });
   }
 
   private writeJsonValue(current: Value, depth: number): boolean {

@@ -143,6 +143,7 @@ function arrangeVisibility(envs: ReadonlyMap<string, LibraryEnv>): void {
     'LateError',
     'CodeUnits',
     'EmptyIterable',
+    'replaceListRange',
     'EfficientLengthMappedIterable',
     'EfficientLengthTakeIterable',
     'EfficientLengthSkipIterable',
@@ -204,7 +205,9 @@ export function compileProgram(syntax: Library, options: { atomicRows?: Readonly
   const { libraries: envs, globals: libraryGlobals } = libraries();
   const globals = [...libraryGlobals];
   const env = new LibraryEnv('');
-  env.addImport(envs.get('dart:core') as LibraryEnv, undefined, undefined, []);
+  if (!syntax.imports.some(({ uri }) => uri === 'dart:core')) {
+    env.addImport(envs.get('dart:core') as LibraryEnv, undefined, undefined, []);
+  }
   for (const directive of syntax.imports) {
     const unavailable = UNAVAILABLE_LIBRARIES[directive.uri];
     if (unavailable)

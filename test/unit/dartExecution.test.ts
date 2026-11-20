@@ -1138,6 +1138,22 @@ void main() {
   });
 });
 
+test('list patterns check the live bounds after matching a mutating getter', () => {
+  const program = `late List<Object?> values;
+class Clearer {
+  int get flag { values.clear(); return 1; }
+}
+void main() {
+  values = [Clearer(), 2];
+  try { if (values case [Clearer(flag: 1), var x]) print(x); }
+  catch (error) { print(error.runtimeType); }
+  values = [Clearer(), 2, 3];
+  try { if (values case [Clearer(flag: 1), ..., var x]) print(x); }
+  catch (error) { print(error.runtimeType); }
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'RangeError\nRangeError\n' });
+});
+
 test('patterns promote the subject in guarded cases and later alternatives', () => {
   const program = `void inspect(Object? x) {
   if (x case int() when x.isEven) print(x + 1);
@@ -1608,15 +1624,20 @@ class String { const String(); }
 void main() {
   const local = <String>[];
   const sdk = <core.String>[];
-  print([identical(local, sdk), local is List<String>, sdk is List<core.String>]);
+  core.print([core.identical(local, sdk), local is core.List<String>, sdk is core.List<core.String>]);
   const a = String;
   const b = core.String;
-  print([a == b, <Type>{a, b}.length, identical(b, 'sdk'.runtimeType)]);
+  core.print([a == b, <core.Type>{a, b}.length, core.identical(b, 'sdk'.runtimeType)]);
 }`;
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
     stdout: '[false, true, true]\n[false, 2, true]\n',
   });
+  for (const directive of ["import 'dart:core' as core;", "import 'dart:core' show String;"]) {
+    expect(executeProgram('dart', `${directive} void main() { print('hidden'); }`)).toMatchObject({
+      kind: 'compileError',
+    });
+  }
 });
 
 test('generic function Type equality includes bounds and ignores parameter names', () => {
@@ -1954,6 +1975,140 @@ void main() {
       { x: 3, y: 2 },
       { x: 4, y: 2 },
     ],
+  });
+});
+
+test('list removal follows the live length and checks the matched index again', () => {
+  const program = `late List<dynamic> values;
+class Appending {
+  bool operator ==(Object other) { values.add(9); return false; }
+  int get hashCode => 0;
+}
+class Clearing {
+  bool operator ==(Object other) { values.clear(); return true; }
+  int get hashCode => 0;
+}
+void main() {
+  values = [Appending()];
+  print([values.remove(9), values.length]);
+  values = [Appending()];
+  print(values.indexOf(9));
+  values = [Clearing()];
+  try { values.remove(9); } catch (error) { print(error.runtimeType); }
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[true, 1]\n1\nRangeError\n' });
+});
+
+test('list formatting and replacement observe learner callbacks in SDK order', () => {
+  const program = `late List<Object> contents;
+class Item {
+  final bool clear;
+  Item(this.clear);
+  String toString() {
+    if (clear) { contents.clear(); } else { contents.add(3); }
+    return 'item';
+  }
+}
+void main() {
+  for (final clear in [false, true]) {
+    contents = [Item(clear), 2];
+    try { print(contents); } catch (error) { print([error.runtimeType, contents.length]); }
+  }
+  var target = [0, 0];
+  try {
+    target.replaceRange(1, 2, [1, 2].map((value) {
+      print(target);
+      if (value == 2) throw 'stop';
+      return value;
+    }));
+  } catch (error) { print(target); }
+  var middle = [0, 1, 2, 3];
+  middle.replaceRange(1, 3, [5, 6, 7]);
+  print(middle);
+  middle.replaceRange(1, 4, [8]);
+  print(middle);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[ConcurrentModificationError, 3]\n[ConcurrentModificationError, 0]\n[0, 0]\n[0, 1]\n[0, 1]\n[0, 5, 6, 7, 3]\n[0, 8, 3]\n',
+  });
+});
+
+test('list sorting keeps displaced values reachable during comparisons', () => {
+  const program = `class Item {
+  final int number;
+  final Turtle turtle = Turtle(1, 1);
+  Item(this.number);
+}
+void main() {
+  var items = List.generate(34, (index) => Item(index));
+  var calls = 0;
+  items.sort((left, right) {
+    if (++calls == 11) Turtle(3, 3).canMoveForward();
+    return left.number.compareTo(right.number);
+  });
+  items[21].turtle.forward();
+}`;
+  const result = executeProgram('dart', program);
+  expect(result.kind).toBe('executed');
+  if (result.kind === 'executed') {
+    expect(result.finalTurtles).toHaveLength(34);
+    expect(result.finalTurtles.filter(({ x, y }) => x === 1 && y === 2)).toHaveLength(1);
+  }
+});
+
+test('set membership keeps its source iterator reachable during hashing', () => {
+  const program = `import 'dart:collection';
+late Turtle saved;
+class Source extends Iterable<int> {
+  Iterator<int> get iterator => Cursor();
+}
+class Cursor implements Iterator<int> {
+  final Turtle turtle = Turtle(1, 1);
+  bool started = false;
+  int get current => 1;
+  bool moveNext() {
+    if (!started) { started = true; return true; }
+    saved = turtle;
+    return false;
+  }
+}
+void main() {
+  var collect = false;
+  var set = LinkedHashSet<int>(hashCode: (key) {
+    if (collect) Turtle(3, 3).canMoveForward();
+    return key;
+  });
+  set.add(1);
+  collect = true;
+  print(set.containsAll(Source()));
+  saved.forward();
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'true\n',
+    finalTurtles: [{ x: 1, y: 2 }],
+  });
+});
+
+test('JSON encoding errors include partial output and the conversion cause', () => {
+  const program = `import 'dart:convert';
+void main() {
+  try { jsonEncode({'a': Object()}); }
+  on JsonUnsupportedObjectError catch (error) {
+    print(error.partialResult);
+    print(error.cause is NoSuchMethodError);
+  }
+  try { jsonEncode([1, Object()], toEncodable: (value) => Object()); }
+  on JsonUnsupportedObjectError catch (error) {
+    print(error.partialResult);
+    print((error.cause as JsonUnsupportedObjectError).partialResult);
+  }
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '{"a":\ntrue\n[1,\n[1,\n',
   });
 });
 

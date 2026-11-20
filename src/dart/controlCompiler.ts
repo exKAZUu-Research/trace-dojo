@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 558 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 572 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type { Block, CatchClause, Pattern, Span, Statement, SwitchCase } from './ast';
 import { localNamesIn } from './astWalk';
 import type { FunctionSpec } from './callCompiler';
@@ -175,6 +175,7 @@ export abstract class ControlCompiler extends StatementCompiler {
 
   // code-gauge-allow functionCognitiveComplexity 30 -- on/catch clauses, rethrow, and finally.
   // code-gauge-allow functionNcss 43 -- on/catch clauses, rethrow, and finally.
+  // code-gauge-allow duplicateLines 18 -- A synchronous finally and a yielding finally preserve the same pending completions.
   protected compileTry(statement: Extract<Statement, { kind: 'try' }>): Exec {
     const before = this.flow;
     const body = this.compileBlock(statement.body);
@@ -206,17 +207,22 @@ export abstract class ControlCompiler extends StatementCompiler {
     if (!finallyExec) return tryCatch;
     const runFinally = finallyExec;
     return (frame) => {
-      let completion: Completion | undefined;
+      let completion: Completion | DartThrow | undefined;
       try {
         completion = tryCatch(frame);
       } catch (error) {
         if (!(error instanceof DartThrow)) throw error;
+        completion = error;
+      }
+      const mark = rootCompletion(frame, completion);
+      try {
         const finallyCompletion = runFinally(frame);
         if (finallyCompletion) return finallyCompletion;
-        throw error;
+        if (completion instanceof DartThrow) throw completion;
+        return completion;
+      } finally {
+        frame.temporaries.length = mark;
       }
-      const finallyCompletion = runFinally(frame);
-      return finallyCompletion ?? completion;
     };
   }
 
@@ -418,6 +424,7 @@ export abstract class ControlCompiler extends StatementCompiler {
   /** try in a sync* body: a body that yields runs in the generator, and an abandoned iterator skips `finally`. */
   // code-gauge-allow functionNcss 46 -- A try statement in a generator: its body, catch clauses, and finally, as compileTry.
   // code-gauge-allow functionCognitiveComplexity 21 -- A try statement in a generator: its body, catch clauses, and finally, as compileTry.
+  // code-gauge-allow duplicateLines 18 -- A synchronous finally and a yielding finally preserve the same pending completions.
   private compileGenTry(statement: Extract<Statement, { kind: 'try' }>): GenExec {
     const before = this.flow;
     const body = this.compileGenBlock(statement.body);
@@ -450,17 +457,22 @@ export abstract class ControlCompiler extends StatementCompiler {
     if (!finallyBody) return tryCatch;
     const runFinally = finallyBody;
     return function* (frame) {
-      let completion: Completion | undefined | void;
+      let completion: Completion | DartThrow | undefined | void;
       try {
         completion = yield* tryCatch(frame);
       } catch (error) {
         if (!(error instanceof DartThrow)) throw error;
+        completion = error;
+      }
+      const mark = rootCompletion(frame, completion ?? undefined);
+      try {
         const finallyCompletion = yield* runFinally(frame);
         if (finallyCompletion) return finallyCompletion;
-        throw error;
+        if (completion instanceof DartThrow) throw completion;
+        return completion;
+      } finally {
+        frame.temporaries.length = mark;
       }
-      const finallyCompletion = yield* runFinally(frame);
-      return finallyCompletion ?? completion;
     };
   }
 
@@ -684,6 +696,13 @@ export abstract class ControlCompiler extends StatementCompiler {
       return;
     };
   }
+}
+
+function rootCompletion(frame: Frame, completion: Completion | DartThrow | undefined): number {
+  const mark = frame.temporaries.length;
+  if (completion instanceof DartThrow) frame.temporaries.push(completion.value, completion.stackTrace);
+  else if (completion?.kind === 'return') frame.temporaries.push(completion.value);
+  return mark;
 }
 
 function genForLoop(loop: CountedLoop<GenExec>): GenExec {

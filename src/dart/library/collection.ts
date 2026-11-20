@@ -454,46 +454,8 @@ abstract mixin class ListBase<E> implements List<E> {
       }
     }
   }
-  void replaceRange(int start, int end, Iterable<E> newContents) {
-    RangeError.checkValidRange(start, end, this.length);
-    if (start == this.length) {
-      addAll(newContents);
-      return;
-    }
-    if (!_isEfficientLength(newContents)) {
-      newContents = newContents.toList();
-    }
-    int removeLength = end - start;
-    int insertLength = newContents.length;
-    if (removeLength >= insertLength) {
-      int insertEnd = start + insertLength;
-      this.setRange(start, insertEnd, newContents);
-      if (removeLength > insertLength) {
-        _closeGap(insertEnd, end);
-      }
-    } else if (end == this.length) {
-      int i = start;
-      for (E element in newContents) {
-        if (i < end) {
-          this[i] = element;
-        } else {
-          add(element);
-        }
-        i++;
-      }
-    } else {
-      int delta = insertLength - removeLength;
-      int oldLength = this.length;
-      int insertEnd = start + insertLength; // aka. end + delta.
-      for (int i = oldLength - delta; i < oldLength; ++i) {
-        add(this[i > 0 ? i : 0]);
-      }
-      if (insertEnd < oldLength) {
-        this.setRange(insertEnd, oldLength, this, end);
-      }
-      this.setRange(start, insertEnd, newContents);
-    }
-  }
+  void replaceRange(int start, int end, Iterable<E> newContents) =>
+      replaceListRange<E>(this, start, end, newContents, _closeGap);
   int indexOf(Object? element, [int start = 0]) {
     if (start < 0) start = 0;
     for (int i = start; i < this.length; i++) {
