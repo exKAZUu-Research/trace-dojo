@@ -655,6 +655,88 @@ int main() {
   });
 });
 
+test('keeps the previous ordered-map size and begin when a later subtree copy throws', () => {
+  const program = `#include <iostream>
+#include <map>
+bool armed = false;
+struct Value {
+  int number;
+  Value(int n) : number(n) {}
+  Value(const Value& source) : number(source.number) { if (armed && number == 3) throw 3; }
+};
+int main() {
+  std::map<int, Value> target{{9, 9}}, source{{2, 2}, {1, 1}, {3, 3}};
+  armed = true;
+  try { target = source; } catch (int error) { std::cout << error << ' '; }
+  std::cout << target.size() << ' ' << target.begin()->first << ' ' << target.count(1) << ' ';
+  armed = false;
+  target = source;
+  std::cout << target.size() << ' ' << target.begin()->first;
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '3 1 2 1 3 1',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['find_if', 'true'],
+  ['find_if_not', 'false'],
+])('returns an early %s match when only the end iterator is invalidated', (algorithm, accepted) => {
+  const program = `#include <algorithm>
+#include <iostream>
+#include <vector>
+std::vector<int> values;
+bool matches(int x) {
+  values.push_back(9);
+  return x == 1 ? ${accepted} : !${accepted};
+}
+int main() {
+  values.reserve(5);
+  values.push_back(1);
+  auto found = std::${algorithm}(values.begin(), values.end(), matches);
+  std::cout << *found << ' ' << values.size();
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '1 2',
+    uncaughtException: undefined,
+  });
+});
+
+test('uses consistent printed addresses, byte offsets and pointer order', () => {
+  const program = `#include <cstdio>
+#include <functional>
+#include <iostream>
+struct Pair { int first, second; };
+int main() {
+  int a[512]{};
+  int b = 0;
+  auto bytes = static_cast<unsigned char*>(static_cast<void*>(&b));
+  Pair pair{};
+  int* heap = new int;
+  std::printf("%p %p %p %p %p %p ", (void*)&a[32], (void*)&a[33], (void*)&b, (void*)(&b + 1),
+              (void*)(bytes + 1), (void*)&pair.first);
+  std::cout << (void*)&a[32] << ' ' << (void*)&pair.second << ' '
+            << (&a[32] == &b) << ((&a[32] < &b) == std::less<int*>()(&a[32], &b))
+            << (&pair.first < &pair.second) << ((heap < &b) != (heap >= &b));
+  delete heap;
+}`;
+  const result = executeProgram('cpp', program);
+  expect(result).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+  if (result.kind !== 'executed') return;
+  const [item, nextItem, scalar, scalarEnd, nextByte, firstField, streamedItem, secondField, comparisons] =
+    result.stdout.split(' ');
+  expect(item).toBe(streamedItem);
+  expect(item).not.toBe(scalar);
+  expect(BigInt(nextItem) - BigInt(item)).toBe(4n);
+  expect(BigInt(scalarEnd) - BigInt(scalar)).toBe(4n);
+  expect(BigInt(nextByte) - BigInt(scalar)).toBe(1n);
+  expect(BigInt(secondField) - BigInt(firstField)).toBe(4n);
+  expect(comparisons).toBe('0111');
+});
+
 test('copies and destroys ordered-map subtrees in libc++ order after erasure', () => {
   const program = `#include <iostream>
 #include <map>

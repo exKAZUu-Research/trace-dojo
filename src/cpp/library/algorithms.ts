@@ -206,8 +206,11 @@ class Range {
 
   /** The iterator at a position, which may be one past the last element. */
   iterator(position: number): Ptr {
-    this.checkEndpoints();
-    if (position === this.count && this.last) return this.last;
+    if (position === this.count && this.last) {
+      this.last.checkIterator();
+      return this.last;
+    }
+    this.first.checkIterator();
     if (position === 0) return this.first;
     return this.first.offset(this.info.isReverse ? -position : position, true);
   }
@@ -1363,16 +1366,11 @@ function valueEquality(
   if (type.kind === 'class' && type.cls.library?.kind === 'string') {
     if (argType.kind === 'pointer' && argType.to.kind === 'int' && argType.to.name === 'char') {
       return {
-        test: (frame, a, b) =>
-          compareStringBytes(frame, stringValueBytes(a), readCString(b as Ptr, undefined, frame.runtime)),
+        test: (frame, a, b) => compareStringBytes(frame, stringValueBytes(a), readCString(b as Ptr, frame.runtime)),
         bindStable: (frame, b) => {
           let target: string | undefined;
           return (a) =>
-            compareStringBytes(
-              frame,
-              stringValueBytes(a),
-              (target ??= readCString(b as Ptr, undefined, frame.runtime))
-            );
+            compareStringBytes(frame, stringValueBytes(a), (target ??= readCString(b as Ptr, frame.runtime)));
         },
       };
     }

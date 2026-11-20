@@ -2199,21 +2199,19 @@ function thisLocation(frame: Frame): Ptr {
 function comparePointers(operator: string, a: Ptr, b: Ptr): number {
   if (operator === '==') return a.equals(b) ? 1 : 0;
   if (operator === '!=') return a.equals(b) ? 0 : 1;
-  const left = a.storageAddress;
-  const right = b.storageAddress;
-  if (left.store !== right.store) throw new CppRuntimeError('pointerComparison');
+  const order = a.compareAddress(b);
   switch (operator) {
     case '<': {
-      return left.index < right.index ? 1 : 0;
+      return order < 0 ? 1 : 0;
     }
     case '<=': {
-      return left.index <= right.index ? 1 : 0;
+      return order <= 0 ? 1 : 0;
     }
     case '>': {
-      return left.index > right.index ? 1 : 0;
+      return order > 0 ? 1 : 0;
     }
     default: {
-      return left.index >= right.index ? 1 : 0;
+      return order >= 0 ? 1 : 0;
     }
   }
 }

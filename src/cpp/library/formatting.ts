@@ -1,5 +1,6 @@
 import { formatFixed, formatGeneral, formatHex, formatScientific } from '../../c/library/floatFormat';
 import { CppRuntimeError } from '../errors';
+import type { Runtime } from '../runtime';
 import { intMax, type IntName, intRank, isCharType, isWide, type Type } from '../types';
 import { Ptr, type Value } from '../values';
 import { type CStringReadObserver, readCString } from './support';
@@ -66,7 +67,7 @@ export interface PrintfArgument {
 export function formatPrintf(
   format: string,
   args: PrintfArgument[],
-  spend: (cost: number) => void,
+  runtime: Runtime,
   observeRead?: CStringReadObserver
 ): string {
   let out = '';
@@ -114,8 +115,8 @@ export function formatPrintf(
     }
     if (index >= format.length) break;
     spec.conversion = format[index++];
-    spend(Math.max(spec.width ?? 0, spec.precision ?? 0));
-    const field = convert(spec, take, out.length, observeRead);
+    runtime.spend(Math.max(spec.width ?? 0, spec.precision ?? 0));
+    const field = convert(spec, take, out.length, runtime, observeRead);
     if (field !== undefined) out += pad(spec, field);
   }
   return out;
@@ -136,6 +137,7 @@ function convert(
   spec: Spec,
   take: () => PrintfArgument,
   count: number,
+  runtime: Runtime,
   observeRead?: CStringReadObserver
 ): string | undefined {
   const { conversion, length } = spec;
@@ -160,7 +162,7 @@ function convert(
       const arg = take();
       if (!(arg.value instanceof Ptr) || arg.type.kind !== 'pointer' || !isCharType(arg.type.to))
         throw new CppRuntimeError('formatArgumentType');
-      return readCString(arg.value, spec.precision, undefined, observeRead);
+      return readCString(arg.value, runtime, spec.precision, observeRead);
     }
     case 'p': {
       const arg = take();
@@ -230,10 +232,7 @@ function writeCount(arg: PrintfArgument, length: string, count: number): void {
  * interpreter cannot reproduce, so a pointer shows a made-up address that tells apart the objects it points to.
  */
 export function pointerText(pointer: Ptr | undefined): string {
-  if (!pointer || pointer.isNull) return '0x0';
-  const { store, index } = pointer.address;
-  const base = 0x6_00_00_00_00 + (store?.id ?? 0) * 0x1_00;
-  return `0x${(base + index * 4).toString(16)}`;
+  return `0x${(pointer?.modeledAddress() ?? 0n).toString(16)}`;
 }
 
 function signOf(spec: Spec): string {

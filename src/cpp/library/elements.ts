@@ -490,12 +490,7 @@ export function lessThan(type: Type): ((a: Value, b: Value) => number) | undefin
     };
   }
   if (type.kind === 'pointer') {
-    return (a, b) => {
-      const p = (a as Ptr).address;
-      const q = (b as Ptr).address;
-      if (p.store !== q.store) return (p.store?.id ?? -1) - (q.store?.id ?? -1);
-      return p.index - q.index;
-    };
+    return (a, b) => (a as Ptr).compareAddress(b as Ptr);
   }
   if (type.kind !== 'class') return undefined;
   const library = type.cls.library;

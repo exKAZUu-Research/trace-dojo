@@ -14,6 +14,7 @@ import {
   isCharType,
   isConstType,
   LONG,
+  type NativeFunction,
   pointerTo,
   referenceTo,
   type Type,
@@ -487,7 +488,7 @@ export class Streams {
         return (frame, stream) => {
           const pointer = run(frame) as Ptr;
           if (pointer.isNull) throw new CppRuntimeError('nullAccess');
-          stream.writeField(frame, readCString(pointer));
+          stream.writeField(frame, readCString(pointer, frame.runtime));
         };
       }
       return (frame, stream) => writePointer(frame, stream, run(frame) as Ptr);
@@ -502,8 +503,8 @@ export class Streams {
     const type = right.type;
     let read: (stream: StreamValue) => Value | undefined;
     if (type.kind === 'class' && type.cls === this.library.stringClass) {
-      return this.extractWith(compiler, left, right, row, (stream, target) => {
-        (target.read() as StringValue).bytes = readWord(stream);
+      return this.extractWith(compiler, left, right, row, (stream, target, frame) => {
+        (target.read() as StringValue).replaceBytes(frame, readWord(stream));
       });
     }
     if (type.kind === 'int' && isCharType(type)) {
@@ -552,7 +553,7 @@ export class Streams {
     left: Expr,
     right: Expr,
     row: number,
-    extract: (stream: StreamValue, target: Ptr) => void
+    extract: (stream: StreamValue, target: Ptr, frame: Frame) => void
   ): Expr {
     const location = left.isLvalue ? left.run : compiler.materialize(left).run;
     return {
@@ -563,7 +564,7 @@ export class Streams {
         holdAll(frame, [location, right.run], ([receiver, destination]) => {
           const place = receiver as Ptr;
           const stream = place.read() as StreamValue;
-          if (inputSentry(stream)) extract(stream, destination as Ptr);
+          if (inputSentry(stream)) extract(stream, destination as Ptr, frame);
           return place;
         }),
     };
@@ -620,7 +621,7 @@ function setStreamBuffer(stream: StreamValue, bytes: string): void {
   stream.writePosition = stream.mode & (OPEN_MODE.app | OPEN_MODE.ate) ? bytes.length : 0;
 }
 
-const readLine = ([stream, text, delimiter]: unknown[]): Ptr => {
+const readLine: NativeFunction = ([stream, text, delimiter], { frame }) => {
   const place = stream as Ptr;
   const source = place.read() as StreamValue;
   if (!source.isGood || !(source.mode & OPEN_MODE.in)) {
@@ -632,11 +633,11 @@ const readLine = ([stream, text, delimiter]: unknown[]): Ptr => {
   const end = source.buffer.indexOf(separator, source.position);
   if (end === -1) {
     if (source.position >= source.buffer.length) source.state |= IO_STATE.failbit;
-    target.bytes = source.buffer.slice(source.position);
+    target.replaceBytes(frame, source.buffer.slice(source.position));
     source.position = source.buffer.length;
     source.state |= IO_STATE.eofbit;
   } else {
-    target.bytes = source.buffer.slice(source.position, end);
+    target.replaceBytes(frame, source.buffer.slice(source.position, end));
     source.position = end + 1;
   }
   return place;

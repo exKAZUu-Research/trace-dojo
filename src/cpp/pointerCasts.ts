@@ -231,8 +231,8 @@ class ScalarAliasPointer extends Ptr {
   }
 
   override get address(): Ptr['address'] {
-    const address = this.alias.place(this.index).address;
-    return { ...address, index: address.index + this.alias.byteOffset(this.index) / sizeOf(this.alias.source) };
+    const { store, index } = this.alias.place(this.index).address;
+    return { store, index: index + this.alias.byteOffset(this.index) };
   }
 
   override byteAddress(): Ptr['address'] {

@@ -62,6 +62,7 @@ import {
   type ParamInfo,
   sameParameters,
   sameType,
+  sizeOf,
   type Type,
   typeName,
   unqualified,
@@ -159,6 +160,7 @@ export class Compiler extends StatementCompiler {
       createGlobals: (runtime) =>
         types.map((type) => {
           const box = new Box();
+          box.elementSize = sizeOf(type);
           box.value = staticZero(runtime, type, box.location(0));
           return box;
         }),
@@ -1688,6 +1690,7 @@ export class Compiler extends StatementCompiler {
       }
       const init = this.staticInitialization(type, value, row, direct);
       if (!init) return;
+      if (isConstType(type) && isArithmetic(type)) global.isShown = !init.isConstant;
       global.foldedValue = this.initializerFoldedValue(type, init.run);
       if ((type.kind === 'class' || type.kind === 'array') && isConstType(type))
         global.hasConstantObjectValue = init.isConstant;

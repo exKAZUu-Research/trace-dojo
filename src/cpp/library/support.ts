@@ -116,8 +116,8 @@ export type CStringReadObserver = (pointer: Ptr, length: number) => void;
 /** Reads up to `limit` bytes from a character buffer, stopping at a null byte. */
 export function readCString(
   pointer: Ptr,
+  runtime: Runtime,
   limit = Number.POSITIVE_INFINITY,
-  runtime?: Runtime,
   observeRead?: CStringReadObserver
 ): string {
   const store = pointer.target();
@@ -126,7 +126,7 @@ export function readCString(
   let bytes = '';
   const end = start + limit;
   for (let index = start; index < end; index++) {
-    if ((index - start) % 64 === 0) runtime?.spend();
+    if ((index - start) % 64 === 0) runtime.spend();
     if (index >= store.length) throw new CppRuntimeError('unterminatedString');
     const value = store.get(index) as number;
     if (value === 0) {

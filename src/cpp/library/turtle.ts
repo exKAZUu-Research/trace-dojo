@@ -29,7 +29,7 @@ export function turtleClass(runtimeError: () => ClassInfo, stringType: () => Typ
     nativeConstructor(cls, [], (_args, { frame }) => create(frame, 0, 0, undefined)),
     nativeConstructor(cls, [INT, INT], ([x, y], { frame }) => create(frame, x, y, undefined)),
     nativeConstructor(cls, [INT, INT, CONST_CHAR_PTR], ([x, y, color], { frame }) =>
-      create(frame, x, y, readCString(color as Ptr))
+      create(frame, x, y, readCString(color as Ptr, frame.runtime))
     ),
     nativeConstructor(cls, [INT, INT, constRef(stringType())], ([x, y, color], { frame }) =>
       create(frame, x, y, latin1ToText((color as Ptr).read() as unknown as { bytes: string }))

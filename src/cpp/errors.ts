@@ -18,7 +18,6 @@ const MESSAGES = {
   missingReturn: '値を返す関数が、return で値を返さずに終わりました。',
   pointerDifference: '別々の配列を指す2つのポインタの差を求めました。',
   pointerOutOfRange: 'ポインタの足し算・引き算の結果が、配列の範囲の外を指しました。',
-  pointerComparison: '別々の配列を指す2つのポインタの大小を比べました。',
   invalidIterator: '使えなくなったイテレータ（または範囲の外を指すイテレータ）を使いました。',
   emptyContainer: '空のコンテナの要素を読み書きしました。',
   formatArgumentMissing: '書式（%d など）に対応する引数が足りません。',

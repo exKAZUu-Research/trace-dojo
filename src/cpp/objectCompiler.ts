@@ -102,6 +102,7 @@ function parameterLocation(type: Type, value: Value): Ptr | Box {
   if (type.kind === 'reference') return value as Ptr;
   if (type.kind === 'class' && value instanceof CObject) return value.parameterStorage();
   const storage = new Box(value, type.kind !== 'class');
+  storage.elementSize = sizeOf(type);
   bindPlacedValue(type, value, storage.location(0));
   return storage;
 }
@@ -287,6 +288,7 @@ export function initializeAt(
   previous: Value,
   initialize: (target: InitializerTarget | undefined) => Value
 ): Value {
+  if (location.store instanceof Box && location.index === 0) location.store.elementSize = sizeOf(type);
   let target = previous instanceof CObject || previous instanceof ArrayStore ? previous : undefined;
   if (type.kind === 'class' && !type.cls.library) {
     const object =

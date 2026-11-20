@@ -23,14 +23,24 @@ export class OrderedTree {
   private root?: Node;
   private order: Node[] = [];
   private entries: Value[] = [];
+  private begin?: Node;
+  size = 0;
 
   get values(): readonly Value[] {
     return this.entries;
   }
 
+  get beginIndex(): number {
+    if (!this.begin) return this.order.length;
+    return this.begin === this.order[0] ? 0 : this.order.indexOf(this.begin);
+  }
+
   splice(index: number, count: number, inserted: Value[]): Value[] {
+    const begin = this.beginIndex;
+    if (index <= begin && begin < index + count) this.begin = this.order[index + count];
     for (let offset = 0; offset < count; offset++) this.remove(this.order[index + offset]);
     this.order.splice(index, count);
+    this.size -= count;
     for (const [offset, value] of inserted.entries()) this.insert(index + offset, value);
     return this.entries.splice(index, count, ...inserted);
   }
@@ -44,6 +54,8 @@ export class OrderedTree {
     this.root = undefined;
     this.order = [];
     this.entries = [];
+    this.begin = undefined;
+    this.size = 0;
   }
 
   assignFrom(
@@ -54,6 +66,9 @@ export class OrderedTree {
     const previous = new Map(this.order.map((node, index) => [node, index]));
     try {
       this.root = assignSubtree(this.root, source.root, operations);
+      this.begin = this.root;
+      while (this.begin?.children[0]) this.begin = this.begin.children[0];
+      this.size = source.size;
     } finally {
       const order: Node[] = [];
       inorder(this.root, order);
@@ -71,7 +86,9 @@ export class OrderedTree {
     if (successor && !successor.children[0]) setChild(successor, 0, node);
     else if (predecessor) setChild(predecessor, 1, node);
     else this.root = node;
+    this.begin = this.begin ? (this.begin.children[0] ?? this.begin) : this.root;
     this.balanceInsertion(node);
+    this.size++;
   }
 
   private balanceInsertion(node: Node): void {

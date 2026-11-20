@@ -105,7 +105,7 @@ export function cFunctions(library: Library): Map<string, FunctionInfo[]> {
   );
   add(
     native('puts', [CONST_CHAR_PTR], INT, ([text], { frame }) => {
-      frame.runtime.write('stdout', `${readCString(text as Ptr)}\n`);
+      frame.runtime.write('stdout', `${readCString(text as Ptr, frame.runtime)}\n`);
       // macOS returns the newline it wrote.
       return 10;
     })
@@ -118,7 +118,7 @@ export function cFunctions(library: Library): Map<string, FunctionInfo[]> {
   );
   add(
     native('fputs', [CONST_CHAR_PTR, streamType], INT, ([text, stream], { frame }) => {
-      const bytes = readCString(text as Ptr);
+      const bytes = readCString(text as Ptr, frame.runtime);
       frame.runtime.write(library.fileTarget(stream as Ptr), bytes);
       // macOS returns the number of bytes written.
       return bytes.length;
@@ -173,10 +173,14 @@ export function cFunctions(library: Library): Map<string, FunctionInfo[]> {
       return value >= 0x61 && value <= 0x7a ? value - 32 : value;
     })
   );
-  add(native('strlen', [CONST_CHAR_PTR], SIZE_T, ([text]) => BigInt(readCString(text as Ptr).length)));
   add(
-    native('strcmp', [CONST_CHAR_PTR, CONST_CHAR_PTR], INT, ([a, b]) =>
-      compareBytes(readCString(a as Ptr), readCString(b as Ptr))
+    native('strlen', [CONST_CHAR_PTR], SIZE_T, ([text], { frame }) =>
+      BigInt(readCString(text as Ptr, frame.runtime).length)
+    )
+  );
+  add(
+    native('strcmp', [CONST_CHAR_PTR, CONST_CHAR_PTR], INT, ([a, b], { frame }) =>
+      compareBytes(frame, readCString(a as Ptr, frame.runtime), readCString(b as Ptr, frame.runtime))
     )
   );
   add(
@@ -208,22 +212,26 @@ export function cFunctions(library: Library): Map<string, FunctionInfo[]> {
   );
   for (const pointer of [CHAR_POINTER, CONST_CHAR_PTR]) {
     add(
-      native('strchr', [pointer, INT], pointer, ([text, char]) => {
-        const bytes = readCString(text as Ptr);
+      native('strchr', [pointer, INT], pointer, ([text, char], { frame }) => {
+        const bytes = readCString(text as Ptr, frame.runtime);
         const code = asNumber(char) & 0xff;
+        if (code !== 0) frame.runtime.spend(Math.ceil(bytes.length / 64));
         const index = code === 0 ? bytes.length : bytes.indexOf(String.fromCodePoint(code));
         return index < 0 ? NULL_PTR : (text as Ptr).offset(index);
       })
     );
     add(
-      native('strstr', [pointer, CONST_CHAR_PTR], pointer, ([text, needle]) => {
-        const index = readCString(text as Ptr).indexOf(readCString(needle as Ptr));
+      native('strstr', [pointer, CONST_CHAR_PTR], pointer, ([text, needle], { frame }) => {
+        const haystack = readCString(text as Ptr, frame.runtime);
+        const substring = readCString(needle as Ptr, frame.runtime);
+        frame.runtime.spend(Math.ceil(haystack.length / 64));
+        const index = haystack.indexOf(substring);
         return index === -1 ? NULL_PTR : (text as Ptr).offset(index);
       })
     );
   }
-  add(native('atoi', [CONST_CHAR_PTR], INT, ([text]) => Number(parseDecimal(text as Ptr, INT))));
-  add(native('atol', [CONST_CHAR_PTR], LONG, ([text]) => parseDecimal(text as Ptr, LONG)));
+  add(native('atoi', [CONST_CHAR_PTR], INT, ([text], { frame }) => Number(parseDecimal(frame, text as Ptr, INT))));
+  add(native('atol', [CONST_CHAR_PTR], LONG, ([text], { frame }) => parseDecimal(frame, text as Ptr, LONG)));
   return functions;
 }
 
@@ -234,8 +242,8 @@ function copyCString(
   { count, append }: { count?: number; append?: boolean } = {}
 ): Ptr {
   if (count === 0) return target;
-  const prefix = append ? readCString(target, undefined, frame.runtime).length : 0;
-  const bytes = readCString(source, count, frame.runtime);
+  const prefix = append ? readCString(target, frame.runtime).length : 0;
+  const bytes = readCString(source, frame.runtime, count);
   const readLength = Math.min(bytes.length + 1, count ?? Number.POSITIVE_INFINITY);
   const writeLength = count ?? readLength;
   const targetLength = prefix + writeLength;
@@ -259,17 +267,18 @@ function printfToBuffer(
   const written = `${text.slice(0, limit - 1)}\0`;
   for (const { pointer, length } of reads) rejectOverlappingBytes(target, written.length, pointer, length);
   checkByteWrite(target, written.length);
+  frame.runtime.spend(Math.ceil(written.length / 64));
   writeBytes(target, written);
   return text.length;
 }
 
 function printf(frame: Frame, format: Ptr, args: unknown[], observeRead?: CStringReadObserver): string {
-  const bytes = readCString(format, undefined, frame.runtime, observeRead);
-  return formatPrintf(bytes, args as PrintfArgument[], (cost) => frame.runtime.spend(cost), observeRead);
+  const bytes = readCString(format, frame.runtime, undefined, observeRead);
+  return formatPrintf(bytes, args as PrintfArgument[], frame.runtime, observeRead);
 }
 
-function parseDecimal(text: Ptr, type: IntType): bigint {
-  const match = /^[\t\n\v\f\r ]*([+-]?\d+)/.exec(readCString(text));
+function parseDecimal(frame: Frame, text: Ptr, type: IntType): bigint {
+  const match = /^[\t\n\v\f\r ]*([+-]?\d+)/.exec(readCString(text, frame.runtime));
   const value = match ? BigInt(match[1]) : 0n;
   if (value < intMin(type.name) || value > intMax(type.name)) throw overflowError(typeName(type));
   return value;
@@ -282,9 +291,10 @@ function characterArgument(input: unknown): number {
   return value;
 }
 
-function compareBytes(a: string, b: string): number {
+function compareBytes(frame: Frame, a: string, b: string): number {
   const length = Math.min(a.length, b.length);
   for (let index = 0; index < length; index++) {
+    if (index % 64 === 0) frame.runtime.spend();
     const difference = byteAt(a, index) - byteAt(b, index);
     if (difference !== 0) return difference;
   }

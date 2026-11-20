@@ -75,8 +75,10 @@ export class StringValue extends Store {
     return this.room;
   }
 
-  set capacity(capacity: number) {
+  reallocate(frame: Frame, capacity: number): void {
     if (capacity === this.room) return;
+    reserveStringBuffer(frame, capacity);
+    frame.runtime.spend(Math.ceil(this.stored.length / 64));
     this.invalidateBuffer();
     this.room = capacity;
   }
@@ -86,10 +88,16 @@ export class StringValue extends Store {
   }
 
   /** Replaces the bytes, growing the capacity to at least twice the old one when they do not fit, as libc++ does. */
-  set bytes(bytes: string) {
+  replaceBytes(frame: Frame, bytes: string, copied = bytes.length): void {
     checkStringLength(bytes.length);
-    if (bytes.length > this.capacity) this.capacity = fittingCapacity(Math.max(bytes.length, 2 * this.capacity));
+    frame.runtime.spend(Math.ceil(copied / 64));
+    if (bytes.length > this.capacity)
+      this.reallocate(frame, fittingCapacity(Math.max(bytes.length, 2 * this.capacity)));
     this.stored = bytes;
+  }
+
+  copyFrom(frame: Frame, source: StringValue): void {
+    if (source !== this) this.replaceBytes(frame, source.bytes);
   }
 
   /** Takes the bytes and the buffer of another string, as the move constructor and assignment do. */
@@ -143,7 +151,8 @@ export class StringValue extends Store {
   set(index: number, value: Value): void {
     this.checkAlive();
     if (index < 0 || index >= this.bytes.length) throw new CppRuntimeError('outOfBounds');
-    this.bytes = this.bytes.slice(0, index) + String.fromCodePoint(Number(value) & 0xff) + this.bytes.slice(index + 1);
+    this.stored =
+      this.stored.slice(0, index) + String.fromCodePoint(Number(value) & 0xff) + this.stored.slice(index + 1);
   }
 
   /** The text the bytes encode in UTF-8, for the trace. */
@@ -198,7 +207,7 @@ function textOf(frame: Frame, value: unknown): string {
   if (value instanceof Ptr) {
     const target = value.store instanceof StringValue && value.index === 0 ? value.store : value.read();
     if (target instanceof StringValue) return target.bytes;
-    return readCString(value, undefined, frame.runtime);
+    return readCString(value, frame.runtime);
   }
   return (value as StringValue).bytes;
 }
@@ -299,7 +308,7 @@ export function stringClass(library: Library): ClassInfo {
     nativeConstructor(
       cls,
       [CONST_CHAR_PTR],
-      ([pointer], { frame }) => makeString(frame, readCString(pointer as Ptr, undefined, frame.runtime)),
+      ([pointer], { frame }) => makeString(frame, readCString(pointer as Ptr, frame.runtime)),
       {
         libraryConstant: ([source]) => shortString(literalStringLength(source?.literalBytes)),
       }
@@ -347,7 +356,7 @@ export function stringClass(library: Library): ClassInfo {
   cls.operations = {
     copy: (frame, source) => makeString(frame, (source as StringValue).bytes),
     assign: (frame, target, source) => {
-      (target as StringValue).bytes = checkLength(frame, (source as StringValue).bytes);
+      (target as StringValue).copyFrom(frame, source as StringValue);
     },
   };
   const method = (
@@ -404,14 +413,14 @@ export function stringClass(library: Library): ClassInfo {
   method('capacity', [], SIZE_T, (s) => BigInt(s.capacity), { isConst: true });
   method('reserve', [SIZE_T], VOID, (s, [count], frame) => {
     const length = requestedLength(frame, count);
-    if (length > s.capacity) s.capacity = fittingCapacity(length);
+    if (length > s.capacity) s.reallocate(frame, fittingCapacity(length));
   });
-  method('shrink_to_fit', [], VOID, (s) => {
-    s.capacity = fittingCapacity(s.bytes.length);
+  method('shrink_to_fit', [], VOID, (s, _args, frame) => {
+    s.reallocate(frame, fittingCapacity(s.bytes.length));
   });
   method('empty', [], BOOL, (s) => (s.bytes.length === 0 ? 1 : 0), { isConst: true });
-  method('clear', [], VOID, (s) => {
-    s.bytes = '';
+  method('clear', [], VOID, (s, _args, frame) => {
+    s.replaceBytes(frame, '', 0);
   });
   const element = (s: StringValue, index: unknown, frame: Frame, checked: boolean): Ptr => {
     const at = BigInt(index as bigint);
@@ -477,11 +486,11 @@ export function stringClass(library: Library): ClassInfo {
   });
   method('crend', [], classType(constReverseIterator), (s) => s.characterBuffer().location(0), { isConst: true });
   method('push_back', [CHAR], VOID, (s, [char], frame) => {
-    s.bytes = checkLength(frame, s.bytes + charOf(char));
+    s.replaceBytes(frame, s.bytes + charOf(char), 1);
   });
-  method('pop_back', [], VOID, (s) => {
+  method('pop_back', [], VOID, (s, _args, frame) => {
     if (s.bytes.length === 0) throw new CppRuntimeError('emptyContainer');
-    s.bytes = s.bytes.slice(0, -1);
+    s.replaceBytes(frame, s.bytes.slice(0, -1), 0);
   });
   method(
     'substr',
@@ -590,7 +599,11 @@ export function stringClass(library: Library): ClassInfo {
     if (begin > BigInt(s.bytes.length)) return outOfRange(frame);
     const from = Number(begin);
     const length = clampedLength(count, s.bytes.length - from);
-    s.bytes = checkLength(frame, s.bytes.slice(0, from) + replacement + s.bytes.slice(from + length));
+    s.replaceBytes(
+      frame,
+      s.bytes.slice(0, from) + replacement + s.bytes.slice(from + length),
+      replacement.length + (replacement.length === length ? 0 : s.bytes.length - from - length)
+    );
     return s;
   };
   /** The forms of the characters `append`, `assign`, `insert`, and `replace` put in: `(str)`, `(s, n)`, `(n, c)`, ... */
@@ -658,15 +671,15 @@ export function stringClass(library: Library): ClassInfo {
   method('erase', [SIZE_T, SIZE_T], refType, (s, [start, count], frame) => edit(s, start ?? 0n, count, '', frame), {
     optional: 2,
   });
-  method('erase', [constIteratorType], iteratorType, (s, [at]) => {
+  method('erase', [constIteratorType], iteratorType, (s, [at], frame) => {
     const index = iteratorIndex(s, at);
     if (index >= s.bytes.length) throw new CppRuntimeError('invalidIterator');
-    s.bytes = s.bytes.slice(0, index) + s.bytes.slice(index + 1);
+    s.replaceBytes(frame, s.bytes.slice(0, index) + s.bytes.slice(index + 1), s.length - index - 1);
     return s.characterBuffer().location(index);
   });
-  method('erase', [constIteratorType, constIteratorType], iteratorType, (s, [first, last]) => {
+  method('erase', [constIteratorType, constIteratorType], iteratorType, (s, [first, last], frame) => {
     const [from, to] = iteratorSpan(s, first, last);
-    s.bytes = s.bytes.slice(0, from) + s.bytes.slice(to);
+    s.replaceBytes(frame, s.bytes.slice(0, from) + s.bytes.slice(to), s.length - to);
     return s.characterBuffer().location(from);
   });
   method(
@@ -676,9 +689,11 @@ export function stringClass(library: Library): ClassInfo {
     (s, [count, char], frame) => {
       const length = requestedLength(frame, count);
       const fill = char === undefined ? '\0' : charOf(char);
-      s.bytes = checkLength(
+      const additional = Math.max(0, length - s.length);
+      s.replaceBytes(
         frame,
-        length <= s.bytes.length ? s.bytes.slice(0, length) : s.bytes + fill.repeat(length - s.bytes.length)
+        additional === 0 ? s.bytes.slice(0, length) : s.bytes + fill.repeat(additional),
+        additional
       );
     },
     { optional: 1 }
@@ -716,30 +731,25 @@ export function stringClass(library: Library): ClassInfo {
 }
 
 export function makeString(frame: Frame, bytes: string): StringValue {
-  return new StringValue(checkLength(frame, bytes));
+  checkStringLength(bytes.length);
+  reserveStringBuffer(frame, fittingCapacity(bytes.length));
+  frame.runtime.spend(Math.ceil(bytes.length / 64));
+  return new StringValue(bytes);
 }
 
-const checkLength = (frame: Frame, bytes: string): string => {
-  checkStringLength(bytes.length);
-  frame.runtime.reserve(Math.ceil(bytes.length / 8));
-  return bytes;
-};
+function reserveStringBuffer(frame: Frame, capacity: number): void {
+  if (capacity > SHORT_CAPACITY) frame.runtime.reserve(Math.ceil((capacity + 1) / 8));
+}
 
 function checkStringLength(length: number): void {
   if (length > MAX_LENGTH) throw new CppRuntimeError('custom', '文字列が長すぎます。');
-}
-
-function appendBytes(frame: Frame, left: string, right: string): string {
-  checkStringLength(left.length + right.length);
-  frame.runtime.reserve(Math.ceil((left.length + right.length) / 8));
-  return left + right;
 }
 
 const isPlainChar = (type: Type): boolean => type.kind === 'int' && type.name === 'char';
 
 const insertAt = (s: StringValue, at: unknown, bytes: string, frame: Frame): Ptr => {
   const index = iteratorIndex(s, at);
-  s.bytes = checkLength(frame, s.bytes.slice(0, index) + bytes + s.bytes.slice(index));
+  s.replaceBytes(frame, s.bytes.slice(0, index) + bytes + s.bytes.slice(index), bytes.length + s.length - index);
   return s.characterBuffer().location(index);
 };
 
@@ -911,7 +921,7 @@ function operandBytes(frame: Frame, operand: TextOperand, value: unknown): strin
       return stringObject(value).bytes;
     }
     case 'pointer': {
-      return readCString(value as Ptr, undefined, frame.runtime);
+      return readCString(value as Ptr, frame.runtime);
     }
     case 'character': {
       return charOf(value);
@@ -922,12 +932,12 @@ function operandBytes(frame: Frame, operand: TextOperand, value: unknown): strin
 function concatenation(a: TextOperand, b: TextOperand, reused: number): Eval<StringValue> {
   return (frame) =>
     frame.unsequencedOperands(a.run, b.run, (left, right) => {
-      const bytes = appendBytes(frame, operandBytes(frame, a, left), operandBytes(frame, b, right));
-      const result = new StringValue(reused < 0 ? bytes : '');
-      if (reused >= 0) {
-        result.moveFrom(stringObject(reused === 0 ? left : right));
-        result.bytes = bytes;
-      }
+      const prefix = operandBytes(frame, a, left);
+      const suffix = operandBytes(frame, b, right);
+      if (reused < 0) return makeString(frame, prefix + suffix);
+      const result = new StringValue('');
+      result.moveFrom(stringObject(reused === 0 ? left : right));
+      result.replaceBytes(frame, prefix + suffix, reused === 0 ? suffix.length : prefix.length + suffix.length);
       return result;
     });
 }
@@ -996,9 +1006,11 @@ function stringOperator(
             if (moves) {
               const string = stringObject(operand);
               if (target !== string) target.moveFrom(string);
+            } else if (!append && source.kind === 'string') {
+              target.copyFrom(frame, stringObject(operand));
             } else {
               const bytes = operandBytes(frame, source, operand);
-              target.bytes = append ? appendBytes(frame, target.bytes, bytes) : checkLength(frame, bytes);
+              target.replaceBytes(frame, append ? target.bytes + bytes : bytes, bytes.length);
             }
             return place;
           }),

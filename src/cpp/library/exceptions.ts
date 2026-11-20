@@ -35,7 +35,7 @@ export function exceptionClasses(stringType: () => Type): Map<string, ClassInfo>
             construct(((args[0] as Ptr).read() as unknown as { bytes: string }).bytes)(args, context)
           ),
           nativeConstructor(cls, [CONST_CHAR_PTR], (args, context) =>
-            construct(readCString(args[0] as Ptr))(args, context)
+            construct(readCString(args[0] as Ptr, context.frame.runtime))(args, context)
           ),
         ]
       : [nativeConstructor(cls, [], (args, context) => construct(undefined)(args, context))];

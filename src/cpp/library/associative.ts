@@ -396,6 +396,14 @@ export class OrderedValue extends MapValue {
     return this.tree.values;
   }
 
+  get size(): number {
+    return this.tree.size;
+  }
+
+  begin(): Ptr {
+    return this.iteratorLocation(this.tree.beginIndex);
+  }
+
   override location(index: number): Ptr {
     if (index === this.length) throw new CppRuntimeError('invalidIterator');
     const location = this.iteratorLocation(index).cellLocation(this.entryType);
@@ -802,14 +810,14 @@ export function orderedClass(
       )
     );
   };
-  method('size', [], SIZE_T, (self) => BigInt(self.entries.length), { isConst: true });
+  method('size', [], SIZE_T, (self) => BigInt(self.size), { isConst: true });
   method('max_size', [], SIZE_T, () => treeMaxSize(entryType), { isConst: true });
-  method('empty', [], BOOL, (self) => (self.entries.length === 0 ? 1 : 0), { isConst: true });
+  method('empty', [], BOOL, (self) => (self.size === 0 ? 1 : 0), { isConst: true });
   method('clear', [], VOID, (self, _args, frame) => self.clear(frame, ops().destroy));
   for (const isConst of [false, true]) {
     const it = isConst ? types.constIterator : types.iterator;
     const rit = isConst ? types.constReverseIterator : types.reverseIterator;
-    method('begin', [], it, (self) => self.iteratorLocation(0), { isConst });
+    method('begin', [], it, (self) => self.begin(), { isConst });
     method('end', [], it, (self) => self.iteratorLocation(self.entries.length), { isConst });
     const range = pairClass(library, it, it);
     method(
@@ -828,7 +836,7 @@ export function orderedClass(
       { isConst }
     );
     method('rbegin', [], rit, (self) => self.iteratorLocation(self.entries.length), { isConst });
-    method('rend', [], rit, (self) => self.iteratorLocation(0), { isConst });
+    method('rend', [], rit, (self) => self.begin(), { isConst });
     method(
       'find',
       [constRef(keyType)],
@@ -865,7 +873,7 @@ export function orderedClass(
       );
     }
   }
-  method('cbegin', [], types.constIterator, (self) => self.iteratorLocation(0), { isConst: true });
+  method('cbegin', [], types.constIterator, (self) => self.begin(), { isConst: true });
   method('cend', [], types.constIterator, (self) => self.iteratorLocation(self.entries.length), { isConst: true });
   method(
     'count',

@@ -106,6 +106,8 @@ export abstract class Store {
 
 /** A variable of a type that is not an array, or an object that `new` created. */
 export class Box extends Store {
+  elementSize?: number;
+
   constructor(
     public value: Value = UNINIT,
     readonly ownsValue = true
@@ -119,7 +121,8 @@ export class Box extends Store {
 
   override projectAddress(index: number, byteOffset: number): Address | undefined {
     const array = inlineArrayOf(this.value);
-    if (array?.elementSize) return { store: this, index: index * array.length * array.elementSize + byteOffset };
+    const size = array?.elementSize === undefined ? this.elementSize : array.length * array.elementSize;
+    if (size !== undefined) return { store: this, index: index * size + byteOffset };
   }
 
   get(index: number): Value {
@@ -557,6 +560,18 @@ export class Ptr {
     const a = this.address;
     const b = other.address;
     return a.store === b.store && a.index === b.index;
+  }
+
+  compareAddress(other: Ptr): number {
+    const a = this.address;
+    const b = other.address;
+    return a.store === b.store ? a.index - b.index : (a.store?.id ?? -1) - (b.store?.id ?? -1);
+  }
+
+  modeledAddress(): bigint {
+    const { store, index } = this.address;
+    // Each store has enough space for every byte offset representable as a safe integer.
+    return store ? (BigInt(store.id + 1) << 53n) + BigInt(index) : 0n;
   }
 
   get address(): Address {

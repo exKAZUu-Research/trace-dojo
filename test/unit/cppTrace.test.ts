@@ -18,6 +18,50 @@ function steps(language: 'cpp' | 'java', program: string): { vars: Record<string
   }));
 }
 
+test('shows runtime-initialized const arithmetic globals in the trace', () => {
+  const program = `int read() { int seed = 7; return seed; }
+const int folded = 3;
+const int fixed = read();
+const double fraction = read() / 2.0;
+struct Settings { inline static const int value = read(); };
+int main() { int sum = fixed + folded + Settings::value; }`;
+  const trace = traceProgram('cpp', program, program);
+  expect(trace.traceItems.map(({ vars }) => vars.fixed)).toEqual(expect.arrayContaining([0, 7]));
+  expect(trace.traceItems.at(-1)?.vars).toMatchObject({ fixed: 7, fraction: 3.5, 'Settings::value': 7, sum: 17 });
+  expect(trace.traceItems.some(({ vars }) => Object.hasOwn(vars, 'folded'))).toBe(false);
+});
+
+test('charges heap buffers only when a string allocates new capacity', () => {
+  const program = `#include <iostream>
+#include <string>
+int main() {
+  std::string source(8000, 'a'), target;
+  target.reserve(8000);
+  for (int i = 0; i < 20; ++i) {
+    source = source;
+    target = source;
+    target.assign(source);
+  }
+  std::cout << source.size() << ' ' << target.size();
+}`;
+  const previous = LIMITS.maxSlots;
+  LIMITS.maxSlots = 2500;
+  try {
+    expect(executeProgram('cpp', program)).toMatchObject({
+      kind: 'executed',
+      stdout: '8000 8000',
+      uncaughtException: undefined,
+    });
+    const grows = program.replace('target.assign(source);', "target.resize(12000, 'b');");
+    expect(executeProgram('cpp', grows)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: 'メモリを確保しすぎました。',
+    });
+  } finally {
+    LIMITS.maxSlots = previous;
+  }
+});
+
 test.each([
   'std::string copy(source.data(), source.size());',
   'std::string copy(source.c_str());',
@@ -102,8 +146,13 @@ test.each([
   'std::string copy(source.data(), source.size());',
   'std::string copy(source.c_str());',
   'source.compare(source);',
+  'std::strlen(source.c_str());',
+  'std::strcmp(source.c_str(), source.c_str());',
+  'std::snprintf(nullptr, 0, "%s", source.c_str());',
 ])('charges the operations limit during repeated string scans in %s', (statement) => {
   const program = `#include <string>
+#include <cstring>
+#include <cstdio>
 int main() {
   std::string source(16384, 'x');
   for (int i = 0; i < 24; ++i) { ${statement} }
