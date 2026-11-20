@@ -12,7 +12,7 @@ export function createArgumentsObject(runtime: Runtime, fn: JsFunction, args: Va
   const hidden = { writable: true, enumerable: false, configurable: true };
   object.properties.set('length', { value: args.length, ...hidden });
   object.properties.set(WELL_KNOWN_SYMBOLS.iterator, {
-    value: runtime.get(runtime.realm.arrayPrototype, 'values'),
+    value: runtime.realm.arrayValuesIterator,
     ...hidden,
   });
   if (mapped) {

@@ -1,0 +1,24 @@
+const originalValues = Array.prototype.values;
+function collect(...values: number[]) {
+  console.log([...arguments]);
+}
+function bump(first: number, second: number) {
+  first++;
+  console.log([...arguments]);
+}
+collect(0);
+Array.prototype.values = function () {
+  return originalValues.call([9]);
+};
+console.log(Array.prototype.values.call([3]).next().value);
+collect(1, 2);
+Object.defineProperty(Array.prototype, 'values', {
+  configurable: true,
+  get() {
+    console.log('values getter');
+    return undefined;
+  },
+});
+bump(4, 5);
+delete (Array.prototype as { values?: typeof originalValues }).values;
+collect(6, 7);

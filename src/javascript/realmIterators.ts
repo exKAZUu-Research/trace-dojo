@@ -3,7 +3,7 @@ import { DONE, type HostIterator, stepHostIterator } from './iteration';
 import type { RealmBuilder } from './realm';
 import { receiverText } from './realmCollections';
 import type { Runtime } from './runtime';
-import { JsArray, JsObject, unboxed, type Value } from './values';
+import { JsArray, type JsFunction, JsObject, unboxed, type Value } from './values';
 
 /** The well-known symbols the interpreter's builtins look up, which the program reads as `Symbol.iterator` and so on. */
 export const WELL_KNOWN_SYMBOLS = {
@@ -25,7 +25,7 @@ export function iteratorClassOf(iterator: JsObject): string | undefined {
 }
 
 /** Defines Symbol and the iterators of arrays and strings, which `%IteratorPrototype%` makes iterable themselves. */
-export function defineIteratorBuiltins(builder: RealmBuilder): void {
+export function defineIteratorBuiltins(builder: RealmBuilder): JsFunction {
   defineSymbol(builder);
   const { realm } = builder;
   builder.method(realm.iteratorPrototype, WELL_KNOWN_SYMBOLS.iterator, 0, ({ thisValue }) => thisValue);
@@ -59,6 +59,7 @@ export function defineIteratorBuiltins(builder: RealmBuilder): void {
       next: () => (index < codePoints.length ? codePoints[index++] : DONE),
     });
   });
+  return values;
 }
 
 /**

@@ -37,6 +37,7 @@ export interface Realm {
   functionPrototype: JsObject;
   argumentsCalleeThrower?: JsFunction;
   arrayPrototype: JsObject;
+  arrayValuesIterator: JsFunction;
   stringPrototype: JsObject;
   numberPrototype: JsObject;
   booleanPrototype: JsObject;
@@ -73,7 +74,7 @@ export interface Realm {
 
 /** Creates builtins without charging the run, since a program cannot avoid them. */
 export class RealmBuilder {
-  readonly realm: Realm;
+  readonly realm: Omit<Realm, 'arrayValuesIterator'>;
 
   constructor(readonly runtime: Runtime) {
     // oxlint-disable-next-line unicorn/no-null -- Object.prototype ends every prototype chain.
@@ -201,7 +202,7 @@ export function createRealm(runtime: Runtime): Realm {
   defineNodeBuiltins(builder);
   defineArrayBuiltins(builder);
   defineStringBuiltins(builder);
-  defineIteratorBuiltins(builder);
+  const arrayValuesIterator = defineIteratorBuiltins(builder);
   defineRegExpBuiltins(builder);
   defineGeneratorBuiltins(builder);
   definePromiseBuiltins(builder);
@@ -213,6 +214,7 @@ export function createRealm(runtime: Runtime): Realm {
   defineIteratorHelpers(builder);
   defineAsyncBuiltins(builder);
   defineDateBuiltins(builder);
-  orderBuiltinMembers(builder.realm);
-  return builder.realm;
+  const realm = Object.assign(builder.realm, { arrayValuesIterator });
+  orderBuiltinMembers(realm);
+  return realm;
 }
