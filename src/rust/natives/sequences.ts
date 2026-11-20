@@ -737,7 +737,7 @@ for (const [name, native] of Object.entries(withCapacity(vecNatives))) natives[`
 const dequeTracked = withDequeHead(withCapacity(dequeNatives), dequeCapacity);
 for (const [name, native] of Object.entries(dequeTracked)) natives[`VecDeque<_>::${name}`] = native;
 for (const [name, native] of Object.entries(withCapacity(heapNatives))) natives[`BinaryHeap<_>::${name}`] = native;
-natives['[_]::into_iter'] = ([self]) => arrayIter(sliceItems(deref(self)));
+natives['[_]::into_iter'] = ([self]) => ownedIter(sliceItems(deref(self)));
 natives['[_]::map'] = ([self, f], ctx) => sliceItems(deref(self)).map((item) => call(ctx, f, [item]));
 natives['&[_]::into_iter'] = ([self]) => sliceIter(deref(self), false);
 natives['&mut [_]::into_iter'] = ([self]) => sliceIter(deref(self), true);

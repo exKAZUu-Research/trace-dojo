@@ -1873,8 +1873,12 @@ fn main() {
         drop(turtle);
         println!("{}", observer.canMoveForward());
     }
+    for turtle in [Turtle::new(2, 2), Turtle::new(1, 1)].into_iter().rev() {
+        drop(turtle);
+        println!("{}", observer.canMoveForward());
+    }
 }`;
-  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'true\ntrue\ntrue\ntrue\n' });
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'true\n'.repeat(6) });
 });
 
 test('accumulates Rust outcomes before pulling the next iterator item', () => {
