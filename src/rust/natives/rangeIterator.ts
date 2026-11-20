@@ -50,9 +50,7 @@ function rangeFromNext(range: RangeValue, kind: RangeElem, start: bigint): Next 
     start === wrap(kind.name as never, start) &&
     start + 1n !== wrap(kind.name as never, start + 1n)
   ) {
-    // `RangeFrom` overflows past the type's maximum, as a debug build panics.
-    range.start = fromNumber(kind, start);
-    throw new RustPanic('attempt to add with overflow', { row: 0, col: 0 });
+    throw new RustPanic('attempt to add with overflow', { row: 0, col: 0 }, 'core/src/iter/range.rs:548:1');
   }
   range.start = fromNumber(kind, step(kind, start, 1n));
   return fromNumber(kind, start);

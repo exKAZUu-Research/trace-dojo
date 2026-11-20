@@ -553,6 +553,17 @@ fn main() {
   });
 });
 
+test('overflow in an open-ended Rust range reports the library location', () => {
+  const program = rustMain(`    let mut values = (u64::MAX - 1)..;
+    println!("{:?}", values.next());
+    println!("{:?}", values.next());`);
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'Some(18446744073709551614)\n',
+    uncaughtException: expect.stringContaining('library/core/src/iter/range.rs:548:1:\nattempt to add with overflow'),
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {
