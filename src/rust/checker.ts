@@ -211,6 +211,7 @@ export class Checker {
         );
       }
       const subst = implSubst(impl, traitRef, decl, fn);
+      this.checkImplMethodGenerics(fn, decl, subst, span);
       const pairs = [...decl.paramTypes.map((type, index) => [type, fn.paramTypes[index]]), [decl.ret, fn.ret]];
       for (const [declared, written] of pairs) {
         const expected = substitute(declared, subst);
@@ -220,6 +221,44 @@ export class Checker {
           `メソッド ${fn.name} の型が、トレイト ${trait.name} の宣言と違います（${typeToString(expected)} が必要ですが、${typeToString(written)} です）。`
         );
       }
+    }
+  }
+
+  private checkImplMethodGenerics(fn: FnDef, decl: FnDef, subst: Subst, span: Span): void {
+    const actual = fn.params.slice(fn.parentParamCount);
+    const expected = decl.params.slice(decl.parentParamCount);
+    if (actual.length !== expected.length || fn.ast?.generics.params.length !== decl.ast?.generics.params.length) {
+      compileError(span, `メソッド ${fn.name} の型引数の数が、トレイトの宣言と違います。`);
+    }
+    for (const [index, param] of actual.entries()) {
+      const bounds = expected[index].bounds.map((bound) => substituteTraitRef(bound, subst));
+      this.checkImplMethodBounds(fn, param, bounds, param.bounds, span);
+    }
+    for (const { param, bound } of fn.extraBounds ?? []) {
+      const bounds = [
+        ...param.bounds,
+        ...(decl.extraBounds ?? [])
+          .filter((item) => sameType(substitute({ kind: 'param', param: item.param }, subst), { kind: 'param', param }))
+          .map((item) => substituteTraitRef(item.bound, subst)),
+      ];
+      this.checkImplMethodBounds(fn, param, bounds, [bound], span);
+    }
+  }
+
+  private checkImplMethodBounds(
+    fn: FnDef,
+    param: TypeParam,
+    allowed: TraitRef[],
+    written: TraitRef[],
+    span: Span
+  ): void {
+    const type: Type = { kind: 'param', param };
+    for (const bound of written) {
+      if (bound.trait.builtin === 'Sized' || this.solver.boundsImply(allowed, bound, type)) continue;
+      compileError(
+        span,
+        `メソッド ${fn.name} の型引数 ${param.name} には、トレイトの宣言より厳しい制約を付けられません。`
+      );
     }
   }
 
@@ -1015,7 +1054,7 @@ function implSubst(impl: ImplDef, traitRef: TraitRef, decl: FnDef, fn: FnDef): M
   return subst;
 }
 
-/** Whether an impl's self type is one the program declares, which the orphan rule lets it implement std's traits for. */
+/** A foreign-trait head needs a local type before its first uncovered parameter. */
 function validForeignImplHead(types: Type[]): boolean {
   for (const type of types) {
     const root = fundamentalTarget(type);

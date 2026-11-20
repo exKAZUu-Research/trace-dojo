@@ -1979,6 +1979,25 @@ test('validates all bindings in Rust reference and or patterns', () => {
   expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: 'false 5\n' });
 });
 
+test('checks generic Rust impl methods against the trait signature', () => {
+  const base = `trait Pick { fn size<T>(&self, x: T) -> usize; }
+struct Selector;`;
+  for (const method of [
+    'fn size<T, Extra>(&self, _: T) -> usize { 0 }',
+    'fn size<T: std::fmt::Display>(&self, _: T) -> usize { 0 }',
+  ]) {
+    const source = `${base}\nimpl Pick for Selector { ${method} }\nfn main() {}`;
+    expect(executeProgram('rust', source)).toMatchObject({ kind: 'compileError' });
+  }
+  const valid = `trait Pick { fn size<T: std::fmt::Display>(&self, x: T) -> usize; }
+struct Selector;
+impl Pick for Selector {
+    fn size<Value: std::fmt::Display>(&self, _: Value) -> usize { std::mem::size_of::<Value>() }
+}
+fn main() { println!("{}", Selector.size(1_u16)); }`;
+  expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: '2\n' });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {
