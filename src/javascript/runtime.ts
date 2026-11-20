@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 853 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss 856 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
@@ -352,7 +352,8 @@ export class Runtime {
     const base = this.toObject(start);
     const property = this.findProperty(base, key);
     if (property && isAccessor(property)) {
-      if (property.set) this.call(property.set, target, [value], this.currentRow);
+      if (property.readonlyAssignment) this.refuse(strict, () => this.readOnlyMessage(key, target));
+      else if (property.set) this.call(property.set, target, [value], this.currentRow);
       else
         this.refuse(
           strict,

@@ -1,10 +1,8 @@
-import type { FunctionNode } from './ast';
 import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Runtime } from './runtime';
-import { type Binding, isAccessor, type JsFunction, type JsObject, type Property, type Value } from './values';
+import { type Binding, freeze, isAccessor, type JsFunction, type JsObject, type Property, type Value } from './values';
 
-/** The `arguments` object of a call, whose `callee` a strict mode function refuses to give. */
-export function createArgumentsObject(runtime: Runtime, fn: JsFunction, node: FunctionNode, args: Value[]): JsObject {
+export function createArgumentsObject(runtime: Runtime, fn: JsFunction, args: Value[], mapped: boolean): JsObject {
   const object = runtime.newObject();
   object.isArguments = true;
   runtime.allocate(args.length + 3);
@@ -17,18 +15,30 @@ export function createArgumentsObject(runtime: Runtime, fn: JsFunction, node: Fu
     value: runtime.get(runtime.realm.arrayPrototype, 'values'),
     ...hidden,
   });
-  if (node.isStrict) {
-    const thrower = runtime.newNativeFunction('', 0, () =>
-      runtime.throwError(
-        'TypeError',
-        "'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them"
-      )
-    );
-    object.properties.set('callee', { get: thrower, set: thrower, enumerable: false, configurable: false });
-  } else {
+  if (mapped) {
     object.properties.set('callee', { value: fn, ...hidden });
+  } else {
+    const thrower = (runtime.realm.argumentsCalleeThrower ??= restrictedCallee(runtime));
+    object.properties.set('callee', {
+      get: thrower,
+      set: thrower,
+      enumerable: false,
+      configurable: false,
+      readonlyAssignment: true,
+    });
   }
   return object;
+}
+
+function restrictedCallee(runtime: Runtime): JsFunction {
+  const thrower = runtime.newNativeFunction('', 0, () =>
+    runtime.throwError(
+      'TypeError',
+      "'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them"
+    )
+  );
+  freeze(thrower);
+  return thrower;
 }
 
 /**
@@ -63,6 +73,8 @@ export function mapArguments(bindings: Map<string, Binding>, names: string[], ar
 }
 
 export function redefineArgument(current: Property, property: Property): Property {
+  if (isAccessor(current) && current.readonlyAssignment && isAccessor(property))
+    return { ...property, readonlyAssignment: true };
   if (isAccessor(current) || isAccessor(property)) return property;
   // V8 disconnects arguments with custom attributes before a read-only definition updates their value.
   if (property.writable || (current.enumerable && current.configurable)) current.value = property.value;

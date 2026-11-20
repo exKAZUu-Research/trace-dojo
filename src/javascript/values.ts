@@ -27,6 +27,7 @@ export interface AccessorProperty {
   set: JsFunction | undefined;
   enumerable: boolean;
   configurable: boolean;
+  readonlyAssignment?: true;
 }
 
 export type Property = DataProperty | AccessorProperty;

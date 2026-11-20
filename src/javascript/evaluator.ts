@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 529 -- Evaluates every kind of function call, class, and statement of the language in one evaluator.
+// code-gauge-allow-file fileNcss 530 -- Evaluates every kind of function call, class, and statement of the language in one evaluator.
 import assert from 'node:assert/strict';
 
 import { createArgumentsObject, mapArguments } from './argumentsObject';
@@ -545,11 +545,10 @@ export class Evaluator extends SuspendableStatementEvaluator {
     runtime.allocate(names.length);
     for (const name of names) bindings.set(name, { value: UNINITIALIZED, isMutable: true });
     if (node.usesArguments) {
-      const argumentsObject = createArgumentsObject(runtime, fn, node, args);
+      const mapped = !node.isStrict && !node.rest && params.every((param) => param.kind === 'identifier');
+      const argumentsObject = createArgumentsObject(runtime, fn, args, mapped);
       bindings.set('arguments', { value: argumentsObject, isMutable: false });
-      if (!node.isStrict && !node.rest && params.every((param) => param.kind === 'identifier')) {
-        mapArguments(bindings, names, argumentsObject);
-      }
+      if (mapped) mapArguments(bindings, names, argumentsObject);
     }
     for (const [index, param] of node.params.entries()) this.bindPattern(param, args[index], 'initialize');
     if (node.rest) this.bindPattern(node.rest, runtime.newArray(args.slice(node.params.length)), 'initialize');

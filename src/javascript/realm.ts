@@ -35,6 +35,7 @@ export type ErrorName =
 export interface Realm {
   objectPrototype: JsObject;
   functionPrototype: JsObject;
+  argumentsCalleeThrower?: JsFunction;
   arrayPrototype: JsObject;
   stringPrototype: JsObject;
   numberPrototype: JsObject;
