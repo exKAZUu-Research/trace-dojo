@@ -2109,7 +2109,7 @@ _SplayTreeSetNode<E> _copyNode<E>(_SplayTreeNode<E> source) {
 
 // Queues
 
-abstract interface class Queue<E> implements Iterable<E> {
+abstract interface class Queue<E> implements EfficientLengthIterable<E> {
   factory Queue() => ListQueue<E>();
   factory Queue.from(Iterable elements) => ListQueue<E>.from(elements);
   factory Queue.of(Iterable<E> elements) => ListQueue<E>.of(elements);
@@ -2125,7 +2125,7 @@ abstract interface class Queue<E> implements Iterable<E> {
   void clear();
 }
 
-final class ListQueue<E> extends Iterable<E> implements Queue<E> {
+final class ListQueue<E> extends ListIterable<E> implements Queue<E> {
   final List<E> _elements = <E>[];
   int _modificationCount = 0;
   ListQueue([int? initialCapacity]);

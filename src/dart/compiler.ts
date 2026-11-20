@@ -1029,8 +1029,7 @@ export class Compiler extends MemberCompiler {
     kind: 'getter' | 'setter',
     bind: (field: FieldMember) => Callable
   ): void {
-    const member: Member = {
-      kind,
+    const accessor = {
       name: field.name,
       owner: cls,
       isStatic: false,
@@ -1039,6 +1038,8 @@ export class Compiler extends MemberCompiler {
       type: field.type,
       impl: bind(field),
     };
+    const member: Member =
+      kind === 'setter' ? { ...accessor, kind, isCovariant: field.isCovariant } : { ...accessor, kind };
     (kind === 'getter' ? cls.members : cls.setters).set(field.name, member);
     this.lateFieldAccessors.set(member, { field, bind });
   }
@@ -1064,7 +1065,7 @@ export class Compiler extends MemberCompiler {
     const nativeKey = `${isExtension ? (owner as ExtensionInfo).name : cls.name}.${methodKind === 'setter' ? `${name}=` : name}`;
     const impl = declaration.isExternal ? this.externalMember(nativeKey, methodKind) : undefined;
     const member = this.declaredMember(cls, declaration, type, positionalTypes[0], impl, isAbstract);
-    if (!isExtension && !member.isStatic && member.kind === 'method')
+    if (!isExtension && !member.isStatic && (member.kind === 'method' || member.kind === 'setter'))
       markCovariantParameters(cls, member, declaration.parameters);
     const target = isExtension ? (owner as ExtensionInfo) : cls;
     const table =
@@ -1284,19 +1285,27 @@ export class Compiler extends MemberCompiler {
 
   private checkImplemented(cls: ClassInfo, declaration: ClassDeclaration): void {
     const obligations = cls.isAbstract ? cls.interfaces : [...this.implementationObligations(cls), cls.thisType];
-    for (const name of cls.interfaceMemberNames()) {
-      const isSetter = name.endsWith('=') && name !== '==' && name !== '[]=';
-      const memberName = isSetter ? name.slice(0, -1) : name;
-      const implementation = isSetter ? cls.setterImplementation(memberName) : cls.implementation(memberName);
+    this.checkImplementedMembers(cls, declaration, obligations, false);
+    this.checkImplementedMembers(cls, declaration, obligations, true);
+  }
+
+  private checkImplementedMembers(
+    cls: ClassInfo,
+    declaration: ClassDeclaration,
+    obligations: InterfaceType[],
+    setter: boolean
+  ): void {
+    for (const name of cls.interfaceMemberNames(setter)) {
+      const declared = cls.interfaceMember(name, setter);
+      const shown = sourceMemberName(name) + (setter ? '=' : '');
+      if (!declared) {
+        this.error(declaration, `${cls.name} には ${shown} の継承したシグネチャが複数あり、型が一致しません。`);
+      }
+      const implementation = setter ? cls.setterImplementation(name) : cls.implementation(name);
       if (implementation && obligations.length > 0)
-        this.checkOverride(cls, implementation, isSetter, declaration, obligations);
-      if (implementation || cls.isAbstract || cls.forwardingDeclaration(memberName, isSetter)) continue;
-      const declared = cls.interfaceMember(memberName, isSetter);
-      if (declared)
-        this.error(
-          declaration,
-          `${cls.name} には、${declared.owner.name}.${sourceMemberName(name)} の実装がありません。`
-        );
+        this.checkOverride(cls, implementation, setter, declaration, obligations);
+      if (!implementation && !cls.isAbstract && !cls.forwardingDeclaration(name, setter))
+        this.error(declaration, `${cls.name} には、${declared.owner.name}.${shown} の実装がありません。`);
     }
   }
 

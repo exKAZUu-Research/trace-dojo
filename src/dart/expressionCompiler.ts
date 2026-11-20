@@ -1373,7 +1373,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   private readSuperMember(name: string, span: Span): Compiled {
     this.requireThis(span, name);
     const { type: superclass, classAt } = this.superclassOf(span);
-    const resolved = this.lookupMember(superclass, name, false);
+    const resolved = this.lookupSuperMember(superclass, name);
     if (!resolved) return this.error(span, `スーパークラスに ${name} というメンバーがありません。`);
     this.requireSuperImplementation(name, span);
     const memberName = this.runtimeMemberName(name);
@@ -1501,7 +1501,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   protected superReceiver(span: Span): Compiled {
     this.requireThis(span, 'super');
     const { type } = this.superclassOf(span);
-    return { type, run: (frame) => frame.receiver, isConst: false, ...({ isSuper: true } as object) };
+    return { type, run: (frame) => frame.receiver, isConst: false, isSuper: true };
   }
 
   /**

@@ -10,6 +10,7 @@ import {
   type InterfaceType,
   interfaceType,
   isSubtype,
+  mentionsCovariantly,
   sameType,
   substitute,
   type TypeParam,
@@ -54,6 +55,7 @@ export interface MethodMember extends MemberBase {
   nativeParameterNames?: readonly string[];
   covariantPositional?: ReadonlySet<number>;
   covariantNamed?: ReadonlySet<string>;
+  combinedFrom?: MethodMember;
 }
 
 export interface CovariantContract {
@@ -72,6 +74,7 @@ export interface SetterMember extends MemberBase {
   /** The type of the value the setter takes. */
   type: DartType;
   impl: Callable | undefined;
+  isCovariant?: boolean;
 }
 
 export interface FieldMember extends MemberBase {
@@ -153,6 +156,7 @@ export class ClassInfo {
   private supertypePaths = new WeakMap<ClassInfo, InterfaceType | undefined>();
   private readonly implementations = new Map<string, Member | undefined>();
   private readonly setterImplementations = new Map<string, Member | undefined>();
+  private readonly combinedMethods = new WeakMap<MethodMember, MethodMember>();
   private cachedDepth: number | undefined;
   /** Natives attach their state to instances of some library classes. */
   isNativeBacked = false;
@@ -297,19 +301,60 @@ export class ClassInfo {
 
   /** The member a class's interface has, declared in it or inherited from a supertype, before substitution. */
   interfaceMember(name: string, setter = false): Member | undefined {
-    return this.findInterfaceMember(name, setter, new Set());
+    return this.findInterfaceMember(name, setter, new Map());
   }
 
-  private findInterfaceMember(name: string, setter: boolean, visited: Set<ClassInfo>): Member | undefined {
-    if (visited.has(this)) return undefined;
-    visited.add(this);
+  private findInterfaceMember(
+    name: string,
+    setter: boolean,
+    visited: Map<ClassInfo, Member | undefined>
+  ): Member | undefined {
+    if (visited.has(this)) return visited.get(this);
     const own = this.ownInstanceMember(name, setter);
     if (own) return own;
+    visited.set(this, undefined);
+    const candidates = new Set<Member>();
     for (const supertype of this.directSupertypes) {
       const found = supertype.cls.findInterfaceMember(name, setter, visited);
-      if (found) return found;
+      if (found) candidates.add(found);
     }
-    return undefined;
+    const resolved = this.combineInterfaceMembers([...candidates], setter);
+    visited.set(this, resolved);
+    return resolved;
+  }
+
+  private combineInterfaceMembers(candidates: Member[], setter: boolean): Member | undefined {
+    if (candidates.length <= 1) return candidates[0];
+    const context = this.thisType;
+    const signatures = candidates.map((member) => ({ member, type: memberTypeIn(context, member) }));
+    const winner = signatures.find(({ member, type }) =>
+      signatures.every(({ member: other, type: expected }) => {
+        if ((member.kind === 'method') !== (other.kind === 'method')) return false;
+        return setter ? isSubtype(expected, type) : isSubtype(type, expected);
+      })
+    )?.member;
+    if (winner?.kind !== 'method') return winner;
+    return this.mergeMethodCovariance(winner, candidates);
+  }
+
+  private mergeMethodCovariance(member: MethodMember, candidates: Member[]): MethodMember {
+    const methods = candidates.filter((candidate) => candidate.kind === 'method');
+    const positions = new Set(methods.flatMap((method) => [...(method.covariantPositional ?? [])]));
+    const names = new Set(methods.flatMap((method) => [...(method.covariantNamed ?? [])]));
+    const covariantPositional = positions.size > 0 ? positions : undefined;
+    const covariantNamed = names.size > 0 ? names : undefined;
+    if (sameSet(covariantPositional, member.covariantPositional) && sameSet(covariantNamed, member.covariantNamed))
+      return member;
+    const existing = this.combinedMethods.get(member);
+    if (
+      existing &&
+      sameSet(covariantPositional, existing.covariantPositional) &&
+      sameSet(covariantNamed, existing.covariantNamed)
+    )
+      return existing;
+    const merged = { ...member, combinedFrom: member.combinedFrom ?? member, covariantPositional, covariantNamed };
+    this.combinedMethods.set(member, merged);
+    return merged;
   }
 
   private ownInstanceMember(key: string, setter: boolean): Member | undefined {
@@ -320,14 +365,14 @@ export class ClassInfo {
   }
 
   /** The names of every instance member the interface has, for checks such as missing implementations. */
-  interfaceMemberNames(): Set<string> {
+  interfaceMemberNames(setter: boolean): Set<string> {
     const names = new Set<string>();
     const visit = (cls: ClassInfo, seen: Set<ClassInfo>): void => {
       if (seen.has(cls)) return;
       seen.add(cls);
       const library = (cls.mixinOf ?? cls).library;
-      for (const name of cls.members.keys()) names.add(scopedMemberName(name, library));
-      for (const name of cls.setters.keys()) names.add(scopedMemberName(`${name}=`, library));
+      const members = setter ? cls.setters : cls.members;
+      for (const name of members.keys()) names.add(scopedMemberName(name, library));
       for (const supertype of cls.directSupertypes) visit(supertype.cls, seen);
     };
     visit(this, new Set());
@@ -350,9 +395,22 @@ export function memberTypeIn(type: InterfaceType, member: Member): DartType {
   return substitute(member.type, env);
 }
 
+export function covariantSetter(cls: ClassInfo, name: string, type: DartType, explicit: boolean): boolean {
+  if (explicit || mentionsCovariantly(type, new Set(cls.typeParams))) return true;
+  const key = scopedMemberName(name, (cls.mixinOf ?? cls).library);
+  return cls.directSupertypes.some(({ cls: parent }) => {
+    const inherited = parent.interfaceMember(key, true);
+    if (inherited?.kind === 'setter') {
+      return inherited.isCovariant === true || mentionsCovariantly(inherited.type, new Set(inherited.owner.typeParams));
+    }
+    return inherited?.kind === 'field' && covariantSetter(inherited.owner, name, inherited.type, inherited.isCovariant);
+  });
+}
+
 function sameForwardingSignature(type: InterfaceType, inherited: Member, declared: Member): boolean {
   if (!sameType(memberTypeIn(type, inherited), memberTypeIn(type, declared))) return false;
   if (inherited.kind !== 'method' || declared.kind !== 'method') return true;
+  if ((inherited.combinedFrom ?? inherited) === (declared.combinedFrom ?? declared)) return true;
   return (
     sameSet(inherited.covariantPositional, declared.covariantPositional) &&
     sameSet(inherited.covariantNamed, declared.covariantNamed)

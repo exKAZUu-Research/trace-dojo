@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 507 -- Type and diagnostic resolution share the compiler environment.
+// code-gauge-allow-file fileNcss 518 -- Type and diagnostic resolution share the compiler environment.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ClassDeclaration, Span, TypeAliasDeclaration, TypeParameter, TypeSyntax } from './ast';
 import { type ClassInfo, type Member, memberTypeIn, scopedMemberName } from './classes';
@@ -49,6 +49,7 @@ export interface Compiled {
   /** The local or promoted field path an expression reads. */
   variable?: LocalVar;
   thisReference?: true;
+  isSuper?: true;
   /** Whether evaluating the expression can complete normally (false for `throw` and calls returning `Never`). */
   completes?: boolean;
   /** Whether the expression creates an object, whose constructor's steps show what it did. */
@@ -522,6 +523,20 @@ export abstract class CompilerBase {
     return scopedMemberName(name, this.library.name);
   }
 
+  protected lookupSuperMember(type: DartType, name: string, setter = false): ResolvedMember | undefined {
+    if (type.kind === 'interface') {
+      const { cls } = type;
+      const key = this.runtimeMemberName(name);
+      const implementation = setter ? cls.setterImplementation(key) : cls.implementation(key);
+      const member =
+        implementation?.kind === 'method'
+          ? (cls.covarianceFor(implementation)?.obligation ?? implementation)
+          : (implementation ?? cls.forwardingDeclaration(key, setter));
+      if (member) return { member, type: memberTypeIn(type, member) };
+    }
+    return this.lookupMember(type, name, setter);
+  }
+
   /** Finds a member for a receiver, honoring an explicit extension application (`E(x).m`). */
   memberFor(
     receiver: Compiled,
@@ -530,6 +545,7 @@ export abstract class CompilerBase {
     span: Span | undefined,
     setter = false
   ): ResolvedMember | undefined {
+    if (receiver.isSuper) return this.lookupSuperMember(lookupType, name, setter);
     const override = receiver.extensionOverride;
     if (!override) return this.lookupMember(lookupType, name, setter, span);
     const member = (setter ? override.ext.setters : override.ext.members).get(name);

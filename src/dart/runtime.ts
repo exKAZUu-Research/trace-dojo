@@ -4,7 +4,15 @@ import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import type { TracedFrame, TracedRuntime } from '../interpreter/traceRecorder';
 import { TurtleWorld } from '../interpreter/turtleWorld';
-import { type ClassInfo, type ConstructorInfo, type Member, type MethodMember, sourceMemberName } from './classes';
+import {
+  type ClassInfo,
+  type ConstructorInfo,
+  covariantSetter,
+  type FieldMember,
+  type Member,
+  type MethodMember,
+  sourceMemberName,
+} from './classes';
 import { BoundedStringParts } from './library/boundedStringParts';
 import {
   asInstanceOf,
@@ -17,7 +25,6 @@ import {
   type InterfaceType,
   interfaceType,
   isSubtype,
-  mentionsTypeParams,
   objectType,
   sameType,
   substitute,
@@ -154,6 +161,7 @@ export class Runtime implements TracedRuntime<Frame> {
   private readonly getterForwarders = new WeakMap<Member, Member>();
   private readonly setterForwarders = new WeakMap<Member, Member>();
   private readonly checkedMethods = new WeakMap<ClassInfo, Map<MethodMember, MethodMember>>();
+  private readonly covariantFields = new WeakMap<FieldMember, boolean>();
   /** The value of each constant expression evaluated so far, by the code that builds it. */
   readonly constantSites = new Map<unknown, Value>();
   allocatedSlots = 0;
@@ -326,7 +334,15 @@ export class Runtime implements TracedRuntime<Frame> {
   /**
    * A dynamic or covariant field write is checked against the type of the actual object.
    */
-  private checkCovariantField(receiver: DartObject, field: Member & { kind: 'field' }, value: Value): void {
+  checkFieldWrite(receiver: DartObject, field: FieldMember, value: Value, isDynamic = false): void {
+    if (!isDynamic) {
+      let check = this.covariantFields.get(field);
+      if (check === undefined) {
+        check = covariantSetter(field.owner, field.name, field.type, field.isCovariant);
+        this.covariantFields.set(field, check);
+      }
+      if (!check) return;
+    }
     const owner = asInstanceOf(interfaceType(receiver.cls, receiver.typeArgs), field.owner);
     const env = new Map(
       field.owner.typeParams.map((param, index) => [param, owner?.args[index] ?? ({ kind: 'dynamic' } as const)])
@@ -345,9 +361,9 @@ export class Runtime implements TracedRuntime<Frame> {
       return;
     }
     if (member.kind === 'field') {
-      if (isDynamic || member.isCovariant || mentionsTypeParams(member.type))
-        this.checkCovariantField(receiver as DartObject, member, value);
-      (receiver as DartObject).fields[member.slot] = value;
+      const object = receiver as DartObject;
+      this.checkFieldWrite(object, member, value, isDynamic);
+      object.fields[member.slot] = value;
       return;
     }
     (member.impl as NonNullable<typeof member.impl>)(
@@ -377,7 +393,9 @@ export class Runtime implements TracedRuntime<Frame> {
     const forwarder: Member =
       kind === 'method' && declared.kind === 'method'
         ? { ...declared, isAbstract: false, impl }
-        : { ...declared, kind: setter ? 'setter' : 'getter', isAbstract: false, impl };
+        : setter
+          ? { ...declared, kind: 'setter', isAbstract: false, impl }
+          : { ...declared, kind: 'getter', isAbstract: false, impl };
     cache.set(declared, forwarder);
     return forwarder;
   }

@@ -30,7 +30,6 @@ import {
   isTop,
   iterableElementOf,
   makeNullable,
-  mentionsTypeParams,
   NEVER,
   nonNullable,
   NULL,
@@ -217,19 +216,13 @@ export abstract class StatementCompiler extends PatternCompiler {
   }
 
   // code-gauge-allow functionCognitiveComplexity 19 -- Positional and named parameters bind alike, each with its covariance check.
-  // code-gauge-allow duplicateLines 16 -- Positional and named arguments differ in how presence is checked.
+  // code-gauge-allow duplicateLines 17 -- Positional and named arguments differ in how presence is checked.
   private compileParameters(spec: FunctionSpec): (frame: Frame, args: Arguments) => void {
     const { parameters } = spec;
     const binders: ((frame: Frame, args: Arguments) => void)[] = [];
     // A covariant parameter, or one typed by its class's type parameter, may receive what a reference of a
     // supertype lets through (`A c = Cat(); c.chase(Animal())`), so it is checked on every call.
-    const classParams =
-      spec.kind.hasThis && !spec.kind.isConstructor ? new Set(spec.kind.thisClass?.typeParams) : undefined;
-    const thisClass = spec.kind.hasThis && !spec.kind.isConstructor ? spec.kind.thisClass : undefined;
-    const isCovariant = (parameter: FormalParameter, type: DartType, index?: number): boolean =>
-      parameter.isCovariant ||
-      (classParams !== undefined && classParams.size > 0 && mentionsTypeParams(type, classParams)) ||
-      (thisClass !== undefined && inheritsCovariance(thisClass, spec.name, parameter.name, index, spec.isSetter));
+    const member = spec.parameterMember;
     for (const [index, parameter] of parameters.positional.entries()) {
       const type = spec.positionalTypes[index] ?? DYNAMIC;
       const { variable, defaultValue } = this.declareParameter(
@@ -243,7 +236,8 @@ export abstract class StatementCompiler extends PatternCompiler {
           variable.slot,
           defaultValue,
           this.parameterCheck(type, parameter.name),
-          isCovariant(parameter, type, index),
+          parameter.isCovariant ||
+            (member?.kind === 'setter' ? member.isCovariant : member?.covariantPositional?.has(index)) === true,
           (args) => (index < args.positional.length ? { value: args.positional[index] } : undefined)
         )
       );
@@ -257,7 +251,7 @@ export abstract class StatementCompiler extends PatternCompiler {
           variable.slot,
           defaultValue,
           this.parameterCheck(type, name),
-          isCovariant(parameter, type),
+          parameter.isCovariant || (member?.kind === 'method' && member.covariantNamed?.has(name) === true),
           (args) => (args.named?.has(name) ? { value: args.named.get(name) } : undefined)
         )
       );

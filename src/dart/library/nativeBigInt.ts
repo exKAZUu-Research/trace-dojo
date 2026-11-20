@@ -52,11 +52,13 @@ function parseBigInt(runtime: Runtime, text: string, radix: number | undefined):
   const digits = rest.slice(start);
   for (const char of digits) if (radixDigit(char, base) < 0) return undefined;
   const bitsPerDigit = Math.log2(base);
-  const bits = Math.ceil(digits.length * bitsPerDigit);
-  reserve(runtime, bits, bits / 128);
+  const minimumBits = Math.floor((digits.length - 1) * bitsPerDigit);
+  const maximumBits = Math.ceil(digits.length * bitsPerDigit) + 1;
+  reserve(runtime, minimumBits, maximumBits / 128);
   const prefix = HOST_PREFIXES.get(base);
   const result =
     prefix === undefined ? combineRadixDigits(runtime, digits, base, bitsPerDigit) : BigInt(`${prefix}${digits}`);
+  if (maximumBits > MAX_BITS && bitLength(result) > MAX_BITS) runtime.throwError('OutOfMemoryError', '', []);
   return negative ? -result : result;
 }
 

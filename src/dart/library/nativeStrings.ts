@@ -2,7 +2,7 @@ import { LIMITS } from '../../interpreter/limits';
 import { stringOf } from '../format';
 import { concatenate } from '../operators';
 import type { Runtime } from '../runtime';
-import { coreTypes, interfaceType } from '../types';
+import { asInstanceOf, coreTypes, interfaceType } from '../types';
 import { DartList, DartObject, type Value } from '../values';
 import { BoundedStringParts } from './boundedStringParts';
 import { allMatchesOf, hasPrefixMatch, isRegExp, type MatchState, newMatch, patternIndex } from './nativeRegExp';
@@ -387,10 +387,25 @@ define('String.fromCharCodes', (runtime, _receiver, [codes, start = 0n, end]) =>
   const to = end === undefined ? undefined : intArg(runtime, end, 'end');
   if (to !== undefined && to < from) runtime.throwError('RangeError', 'range', [to, from, undefined, 'end']);
   if (to === from) return '';
-  return stringFromCharCodes(runtime, codes, from, to);
+  const length = efficientCharacterCount(runtime, codes);
+  if (length !== undefined && from >= length) return '';
+  return stringFromCharCodes(
+    runtime,
+    codes,
+    from,
+    length !== undefined && (to === undefined || to > length) ? length : to
+  );
 });
 define('String.fromCharCode', (runtime, _receiver, [code]) => characterOf(runtime, intArg(runtime, code, 'charCode')));
 define('String.fromEnvironment', (_runtime, _receiver, _args, namedArgs) => named(namedArgs, 'defaultValue', ''));
+
+function efficientCharacterCount(runtime: Runtime, codes: Value): bigint | undefined {
+  if (codes instanceof DartList) return BigInt(codes.elements.length);
+  const type = runtime.runtimeTypeOf(codes);
+  if (type.kind === 'interface' && asInstanceOf(type, runtime.links.classNamed('EfficientLengthIterable')))
+    return intArg(runtime, runtime.getProperty(codes, 'length', undefined), 'length');
+  return undefined;
+}
 
 // code-gauge-allow functionCognitiveComplexity 16 -- The VM distinguishes invalid codes in lists and iterators.
 function stringFromCharCodes(runtime: Runtime, codes: Value, from: bigint, to: bigint | undefined): string {

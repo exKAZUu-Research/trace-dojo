@@ -8,7 +8,7 @@ import type {
   Span,
   TypeSyntax,
 } from './ast';
-import type { ClassInfo, ConstructorInfo, Member } from './classes';
+import type { ClassInfo, ConstructorInfo, Member, MethodMember, SetterMember } from './classes';
 import { at, type Compiled, type Eval, type ResolvedMember, typeName } from './compilerBase';
 import type { ExtensionInfo, TopLevelFunction, TypeAlias } from './environment';
 import { INFERENCE_HOLE, isInferenceHole, SHORTED } from './expressionCompiler';
@@ -64,7 +64,7 @@ export interface FunctionSpec {
   positionalTypes: DartType[];
   namedTypes: Map<string, DartType>;
   defaults?: Map<FormalParameter, Compiled>;
-  isSetter?: boolean;
+  parameterMember?: MethodMember | SetterMember;
   /** Undefined to infer the return type from the body, as closures do. */
   returnType: DartType | undefined;
   /** For closures, the return type the context expects, which return expressions are checked against. */
@@ -387,7 +387,6 @@ export abstract class CallCompiler extends OperatorCompiler {
     const bound = this.bindArguments(signature, args, typeArguments, span, context, resolved);
     const receiverRun = receiver.run;
     const row = this.callRow(span);
-    const isSuper = (receiver as { isSuper?: boolean }).isSuper === true;
     const specialType = this.specialNumericReturn(receiverType, name, args);
     const returnType = specialType ?? bound.returnType;
     const completes = !isNeverType(bound.returnType);
@@ -402,7 +401,7 @@ export abstract class CallCompiler extends OperatorCompiler {
       );
       return { type: returnType, run, isConst: false, completes };
     }
-    if (isSuper) {
+    if (receiver.isSuper) {
       this.requireSuperImplementation(name, span);
       const run = superMethodCall(this.superclassOf(span).classAt, this.runtimeMemberName(name), bound, row);
       return { type: returnType, run, isConst: false, completes };

@@ -1,6 +1,14 @@
 import type { FormalParameters, FunctionBody, MethodDeclaration, TypeSyntax } from './ast';
 import type { CompiledFunction } from './callCompiler';
-import { ClassInfo, type ForwardedArgumentBinder, type Member, type MethodMember, scopedMemberName } from './classes';
+import {
+  ClassInfo,
+  covariantSetter,
+  type ForwardedArgumentBinder,
+  type Member,
+  type MethodMember,
+  scopedMemberName,
+  type SetterMember,
+} from './classes';
 import { at } from './compilerBase';
 import { EMPTY_ENV } from './constructorCompiler';
 import type { ExtensionInfo } from './environment';
@@ -147,7 +155,7 @@ export abstract class MemberCompiler extends MetadataCompiler {
               parameters: declaration.parameters,
               positionalTypes,
               namedTypes,
-              isSetter: declaration.methodKind === 'setter',
+              parameterMember: member.kind === 'method' || member.kind === 'setter' ? member : undefined,
               returnType,
               contextReturnType: undefined,
               body: compiledBody,
@@ -216,12 +224,20 @@ export abstract class MemberCompiler extends MetadataCompiler {
   }
 }
 
-export function markCovariantParameters(cls: ClassInfo, member: MethodMember, params: FormalParameters): void {
+export function markCovariantParameters(
+  cls: ClassInfo,
+  member: MethodMember | SetterMember,
+  params: FormalParameters
+): void {
+  if (member.kind === 'setter') {
+    member.isCovariant = covariantSetter(cls, member.name, member.type, params.positional[0]?.isCovariant === true);
+    return;
+  }
   const key = scopedMemberName(member.name, (cls.mixinOf ?? cls).library);
+  const ownerParams = new Set(cls.typeParams);
   const supers = cls.directSupertypes
     .map(({ cls }) => cls.interfaceMember(key))
     .filter((inherited) => inherited?.kind === 'method');
-  const ownerParams = new Set(cls.typeParams);
   const positional = new Set<number>();
   for (const [index, parameter] of params.positional.entries()) {
     if (

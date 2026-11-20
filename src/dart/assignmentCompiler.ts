@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 668 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 669 -- Assignment targets share read and write dispatch.
 import type { CascadeSelector, CollectionElement, Expression, ForInBinding, Span, SwitchExpressionCase } from './ast';
 import type { ClassInfo, Member } from './classes';
 import { at, type Compiled, type Eval, type ResolvedMember, typeName } from './compilerBase';
@@ -504,8 +504,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     }
     const getter = this.memberFor(receiver, lookupType, name, undefined);
     const target = { writeType: setter.type, readType: getter?.type, prepare, shorting: nullAware || shorting };
-    const isSuper = (receiver as { isSuper?: boolean }).isSuper === true;
-    if (isSuper) {
+    if (receiver.isSuper) {
       this.requireSuperImplementation(name, span, true);
       return { ...target, ...superAccessors(this.superclassOf(span).classAt, memberName, span.row) };
     }
@@ -1184,8 +1183,11 @@ function superAccessors(
     },
     write: (frame, prepared, value) => {
       const member = frame.runtime.instanceMember(superclassAt(frame), name, true);
-      if (member?.kind === 'field') (prepared as DartObject).fields[member.slot] = value;
-      else if (member)
+      if (member?.kind === 'field') {
+        const object = prepared as DartObject;
+        frame.runtime.checkFieldWrite(object, member, value);
+        object.fields[member.slot] = value;
+      } else if (member)
         (member.impl as Callable)(frame.runtime, prepared as Value, { positional: [value], named: undefined }, [], row);
     },
   };

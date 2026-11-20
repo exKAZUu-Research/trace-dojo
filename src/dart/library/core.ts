@@ -1210,7 +1210,7 @@ void _iterablePartsToStrings(Iterable<Object?> iterable, List<Object> parts) {
   parts.add(ultimateString);
 }
 
-class EmptyIterable<E> extends Iterable<E> {
+class EmptyIterable<E> extends EfficientLengthIterable<E> {
   const EmptyIterable();
   Iterator<E> get iterator => _EmptyIterator<E>();
   int get length => 0;
@@ -1434,14 +1434,7 @@ class FollowedByIterable<E> extends Iterable<E> {
  * map's keys), which give their length the same way.
  */
 bool _hasEfficientLength(Iterable<Object?> iterable) =>
-    iterable is EfficientLengthIterable ||
-    iterable is List ||
-    iterable is Set ||
-    iterable is ListIterable ||
-    iterable is EmptyIterable ||
-    iterable is _CompactKeysIterable ||
-    iterable is _CompactValuesIterable ||
-    iterable is _CompactEntriesIterable;
+    iterable is EfficientLengthIterable || iterable is List;
 
 /** The VM's marker of iterables whose length is known without iterating them, as dart:collection's views use it. */
 abstract class EfficientLengthIterable<E> extends Iterable<E> {
@@ -1525,7 +1518,7 @@ class _SyncStarIterator<E> implements Iterator<E> {
 }
 
 /** An iterable with an efficient length and indexed elements, as the VM's ListIterable. */
-abstract class ListIterable<E> extends Iterable<E> {
+abstract class ListIterable<E> extends EfficientLengthIterable<E> {
   ListIterable();
   int get length;
   E elementAt(int index);
@@ -1902,7 +1895,7 @@ void replaceListRange<E>(
 
 // Sets and maps
 
-abstract interface class Set<E> extends Iterable<E> {
+abstract interface class Set<E> extends EfficientLengthIterable<E> {
   Set._base();
   external factory Set();
   external factory Set.identity();
@@ -2087,20 +2080,20 @@ String _mapToString(Map<Object?, Object?> m) {
   return result.toString();
 }
 
-class _CompactKeysIterable<K> extends Iterable<K> {
+class _CompactKeysIterable<K> extends EfficientLengthIterable<K> {
   _CompactKeysIterable._();
   external Iterator<K> get iterator;
   external int get length;
   external bool contains(Object? element);
 }
 
-class _CompactValuesIterable<V> extends Iterable<V> {
+class _CompactValuesIterable<V> extends EfficientLengthIterable<V> {
   _CompactValuesIterable._();
   external Iterator<V> get iterator;
   external int get length;
 }
 
-class _CompactEntriesIterable<K, V> extends Iterable<MapEntry<K, V>> {
+class _CompactEntriesIterable<K, V> extends EfficientLengthIterable<MapEntry<K, V>> {
   _CompactEntriesIterable._();
   external Iterator<MapEntry<K, V>> get iterator;
   external int get length;

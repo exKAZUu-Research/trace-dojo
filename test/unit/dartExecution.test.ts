@@ -239,14 +239,26 @@ void main() {
 });
 
 test('String.fromCharCodes stops at the end of the requested slice', () => {
-  const program = `void main() {
+  const program = `import 'dart:collection';
+Iterable<int> streamed() sync* { print('start'); yield 65; }
+int visit(int code) { print(code); return code; }
+void main() {
   var codes = [65, 66];
   print(String.fromCharCodes(codes, 0, 5));
   print(String.fromCharCodes(codes, 5));
-  print(String.fromCharCodes(codes.map((code) { print(code); return code; }), 0, 1));
+  print(String.fromCharCodes(codes.map(visit), 0, 1));
+  for (final source in <Iterable<int>>[codes, {65, 66}, {1: 65, 2: 66}.values, Queue<int>.of(codes)]) {
+    final mapped = source.map(visit);
+    print('equal=' + String.fromCharCodes(mapped, 2));
+    print('past=' + String.fromCharCodes(mapped, 5, 10));
+  }
+  print('stream=' + String.fromCharCodes(streamed().map(visit), 5));
 }
 `;
-  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'AB\n\n65\nA\n' });
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'AB\n\n65\nA\nequal=\npast=\nequal=\npast=\nequal=\npast=\nequal=\npast=\nstart\n65\nstream=\n',
+  });
 });
 
 test('conditions cast dynamic operands to bool and preserve short-circuiting', () => {
@@ -296,6 +308,21 @@ test('large integer inputs distinguish int overflow from exact BigInt values', (
     kind: 'executed',
     stdout: 'null\n-1\n237745\n0\n-35\n-15\nnull\n',
   });
+});
+
+test('large BigInt inputs are checked by their exact size at the boundary', () => {
+  for (const [radix, zeros] of [
+    [36, 773_705],
+    [20, 925_512],
+  ]) {
+    const program = `void main() { print(BigInt.parse('0001' + '0' * ${zeros}, radix: ${radix}).bitLength); }`;
+    expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '3999997\n' });
+  }
+  const oversized = `void main() {
+    try { print(BigInt.parse('000z' + 'z' * 773705, radix: 36).bitLength); }
+    catch (error) { print(error.runtimeType); }
+  }`;
+  expect(executeProgram('dart', oversized)).toMatchObject({ kind: 'executed', stdout: 'OutOfMemoryError\n' });
 });
 
 test('setRange follows each list kind and copies overlapping ranges', () => {
@@ -3085,6 +3112,78 @@ void main() {
     kind: 'executed',
     stdout: '[([Object?]) => int, true]\n[({Object? value}) => int, true]\n[1, 1]\n',
   });
+});
+
+test('concrete overrides check arguments passed through a generic supertype', () => {
+  const program = `class Base<T> {
+  void take(T n) {}
+  void named({required T n}) {}
+  set value(T n) {}
+  T? field;
+  late T lateField;
+}
+class Child extends Base<int> {
+  void take(int n) { print(n); }
+  void named({required int n}) { print(n); }
+  set value(int n) { print(n); }
+  int? field;
+  late int lateField;
+}
+void main() {
+  Base<num> target = Child();
+  try { target.take(1.5); } catch (error) { print(error.runtimeType); }
+  try { target.named(n: 1.5); } catch (error) { print(error.runtimeType); }
+  try { target.value = 1.5; } catch (error) { print(error.runtimeType); }
+  try { target.field = 1.5; } catch (error) { print(error.runtimeType); }
+  try { target.lateField = 1.5; } catch (error) { print(error.runtimeType); }
+  target.take(1);
+  target.named(n: 2);
+  target.value = 3;
+  target.field = 4;
+  target.lateField = 5;
+  print([target.field, target.lateField]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '_TypeError\n_TypeError\n_TypeError\n_TypeError\n_TypeError\n1\n2\n3\n[4, 5]\n',
+  });
+});
+
+test('combined interface signatures select inherited noSuchMethod binders and types', () => {
+  const program = `abstract class General<T> {
+  T f([T? value]);
+  T get number;
+}
+class Parent<T> implements General<T> {
+  dynamic noSuchMethod(Invocation invocation) {
+    print(invocation.positionalArguments);
+    return 1.5;
+  }
+}
+abstract class Narrow {
+  int f([num? value = 2]);
+  int get number;
+}
+abstract class Middle extends Parent<num> implements Narrow {}
+class Child extends Middle {
+  num previous() => super.f();
+}
+void main() {
+  final child = Child();
+  print(child.previous());
+  final f = child.f;
+  print(f.runtimeType);
+  try { int value = f(); print(value); } catch (error) { print(error.runtimeType); }
+  try { int value = child.number; print(value); } catch (error) { print(error.runtimeType); }
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[null]\n1.5\n([Object?]) => int\n[2]\n_TypeError\n[]\n_TypeError\n',
+  });
+  const badSuper = program.replace('num previous()', 'int previous()');
+  expect(executeProgram('dart', badSuper)).toMatchObject({ kind: 'compileError' });
+  const conflicting = program.replace('int get number;', 'String get number;');
+  expect(executeProgram('dart', conflicting)).toMatchObject({ kind: 'compileError' });
 });
 
 test('a static member only sees its own type parameters and local variables', () => {
