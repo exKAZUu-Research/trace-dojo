@@ -5324,6 +5324,16 @@ test('a returned local becomes a GC root before the other locals are freed', () 
       '<?php class N { public $p; public $q; function __destruct() { echo "dN", spl_object_id($this), ";"; } } function mk() { $a = new N; $a->p = $a; $c = new N; $a->q = $c; $x = new stdClass; $x->a = $a; return $x ?? null; } $x = mk(); unset($x); echo gc_collect_cycles();'
     )
   ).toMatchObject({ kind: 'executed', stdout: 'dN1;dN2;2' });
+  const cycle = '$a = new stdClass; $a->p = $a; $c = new stdClass; $a->q = $c; $x = new stdClass; $x->a = $a;';
+  const ids =
+    ' $x1 = mk(); $x2 = mk(); unset($x1, $x2); echo gc_collect_cycles(), ";"; $k = []; for ($i = 0; $i < 6; $i++) $k[] = new stdClass; foreach ($k as $o) echo spl_object_id($o), ",";';
+  expect(
+    run(`<?php class F { function make() { ${cycle} return $x; } } function mk() { return (new F)->make(); }${ids}`)
+  ).toMatchObject({ kind: 'executed', stdout: '4;5,2,3,6,7,4,' });
+  expect(run(`<?php function mk() { ${cycle} try { return $x; } finally { echo ''; } }${ids}`)).toMatchObject({
+    kind: 'executed',
+    stdout: '4;4,5,1,2,6,3,',
+  });
 });
 
 test('rejecting an unsupported feature ends the run without PHP shutdown replacing the message', () => {

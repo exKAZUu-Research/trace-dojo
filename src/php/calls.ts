@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 864 -- Keeps call binding, completion and frame cleanup together.
+// code-gauge-allow-file fileNcss 870 -- Keeps call binding, completion and frame cleanup together.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl, Stmt } from './ast';
@@ -13,6 +13,7 @@ import {
   withCleanupExceptions,
   withPendingException,
 } from './errors';
+import { releaseDropped } from './garbage';
 import { decodeLiteral } from './literals';
 import { share } from './places';
 import {
@@ -906,10 +907,10 @@ function releaseFrame(
   fromNative: boolean,
   pending?: PhpThrow
 ): void {
-  if (frame.thisObj) runtime.pendingGcRoots.add(frame.thisObj);
   const holders = (fromNative ? runtime.nativeHeld.at(-1) : undefined) ?? caller.temporaries;
   if (!isComposite(returned)) {
     releaseFrameValues(runtime, frame, fromNative, pending);
+    releaseThis(runtime, frame);
     return;
   }
   holders.push(returned);
@@ -920,6 +921,14 @@ function releaseFrame(
   } catch (error) {
     throw releaseFailedCallResult(runtime, holders, returned, error);
   }
+  releaseThis(runtime, frame);
+}
+
+/** Buffers `$this` as a possible root after the locals, as PHP's leave helper releases it after freeing them. */
+function releaseThis(runtime: Runtime, frame: Frame): void {
+  if (!frame.thisObj) return;
+  runtime.pendingGcRoots.add(frame.thisObj);
+  releaseDropped(runtime, [], true);
 }
 
 /** Frees a call's result when its frame cleanup throws, as PHP frees the call's result before choosing a handler. */
