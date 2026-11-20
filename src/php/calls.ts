@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 795 -- Keeps call binding, completion and frame cleanup together.
+// code-gauge-allow-file fileNcss 808 -- Keeps call binding, completion and frame cleanup together.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
@@ -579,21 +579,63 @@ function callerIsStrict(): boolean {
 
 // User functions -----------------------------------------------------------------------------------------------------
 
-// code-gauge-allow functionCognitiveComplexity 29 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
-function invokeUser(
+interface UserCallState {
+  runtime: Runtime;
+  caller: Frame;
+  frame: Frame;
+  decl: UserFunction['decl'];
+  target: CallTarget;
+  received: UserArgumentSlots;
+  record: CallRecord;
+  strict: boolean;
+  savedRow: number;
+  outerNative: number;
+  outerNativeCalls: number;
+  outerReleaseMode: Runtime['nativeReleaseMode'];
+  bound: boolean;
+}
+
+export function invokeUser(
   target: CallTarget,
   fn: UserFunction,
   args: ArgValue[],
   row: number | undefined,
   discardResult: boolean
 ): Value {
+  const saved = enterUserCall(target, fn, args, row);
+  let returned: Value = null;
+  let failure: unknown;
+  let failed = false;
+  try {
+    bindUserCall(saved, fn, args, row);
+    saved.bound = true;
+    returned = finishUserReturn(saved, runBody(saved.decl, saved.frame), discardResult);
+  } catch (error) {
+    if (error instanceof RangeError && saved.bound) {
+      saved.runtime.exhausted = true;
+      hostStackExhaustion.record ??= callStack.at(-1);
+      hostStackExhaustion.row ??= saved.runtime.row;
+      failure = hostStackExhaustion;
+      failed = true;
+      throw hostStackExhaustion;
+    }
+    failure = error;
+    failed = true;
+    throw error;
+  } finally {
+    exitUserCall(saved, returned, failure, failed);
+  }
+  saved.runtime.lastReturnRef =
+    !discardResult && saved.frame.returning instanceof Ref ? saved.frame.returning : undefined;
+  return returned;
+}
+
+function enterUserCall(target: CallTarget, fn: UserFunction, args: ArgValue[], row: number | undefined): UserCallState {
   const runtime = rt();
   const { decl } = fn;
   if (runtime.depth >= LIMITS.maxCallDepth) {
     throw new FatalError(MEMORY_EXHAUSTED, runtime.row, true);
   }
-  const name = functionDisplayName(target);
-  const caller = runtime.frame;
   const frame = new Frame(
     fn,
     row,
@@ -604,87 +646,85 @@ function invokeUser(
     target.method,
     target.closure
   );
-  const closure = target.closure?.internal as ClosureData | undefined;
   const strict = runtime.strictTypes && nativeDepth === 0;
-  const params = fn.params;
-  checkNamedArgs(params, args);
-  const received = userArgumentSlots(params, args);
+  checkNamedArgs(fn.params, args);
+  const received = userArgumentSlots(fn.params, args);
   const record = recordForUserCall(target, received, row);
   frame.args = args.map((arg) => arg.ref?.v ?? arg.v);
   frame.argumentHolders = [...frame.args];
-  const savedRow = runtime.row;
+  const saved = {
+    runtime,
+    caller: runtime.frame,
+    frame,
+    decl,
+    target,
+    received,
+    record,
+    strict,
+    savedRow: runtime.row,
+    outerNative: nativeDepth,
+    outerNativeCalls: runtime.nativeCalls,
+    outerReleaseMode: runtime.nativeReleaseMode,
+    bound: false,
+  };
   runtime.frames.push(frame);
   callStack.push(record);
   runtime.depth++;
-  const outerNative = nativeDepth;
-  const outerNativeCalls = runtime.nativeCalls;
-  const outerReleaseMode = runtime.nativeReleaseMode;
   nativeDepth = 0;
   runtime.nativeCalls = 0;
   runtime.nativeReleaseMode = 'ordinary';
-  let returned: Value = null;
-  let failure: unknown;
-  let failed = false;
-  try {
-    runtime.row = decl.row;
-    handOverArgs(caller, args, frame);
-    if (closure) bindClosureVars(frame, closure);
-    bindParams(frame, fn, args, received, { name, parameter: functionDisplayName(target, true) }, strict, row);
-    bindArgumentHolders(frame, params, record, args);
-    runtime.dropTemporaries(frame, 0);
-    record.boundFrame = frame;
-    let result: Value;
-    try {
-      result = runBody(decl, frame);
-    } catch (error) {
-      // The host's stack may run out before the call depth limit under a smaller stack. Too little stack remains here
-      // to build an error, so a prepared one carries the innermost call out to where reporting it is safe.
-      if (error instanceof RangeError) {
-        runtime.exhausted = true;
-        hostStackExhaustion.record ??= callStack.at(-1);
-        hostStackExhaustion.row ??= runtime.row;
-        throw hostStackExhaustion;
-      }
-      throw error;
-    }
-    result = completeUserReturn(decl, frame, result, target);
-    if (discardResult) {
-      const returning = frame.returning;
-      frame.returning = undefined;
-      runtime.row = frame.returnRow ?? runtime.row;
-      runtime.release([returning, result]);
-    } else {
-      returned = result;
-      target.captureReturn?.(result);
-    }
-  } catch (error) {
-    failure = error;
-    failed = true;
-    throw error;
-  } finally {
-    nativeDepth = outerNative;
-    runtime.nativeCalls = outerNativeCalls;
-    runtime.nativeReleaseMode = outerReleaseMode;
-    runtime.depth--;
-    callStack.pop();
-    runtime.frames.pop();
-    for (const value of frame.argumentHolders) if (value instanceof Ref) value.rc--;
-    for (const value of frame.temporaries) if (value instanceof Ref) value.rc--;
-    runtime.row = savedRow;
-    if (decl.isAtomic) runtime.steps.completeAtomicCall();
-    if (!failed || failure instanceof PhpThrow || failure instanceof ExitSignal)
-      releaseFrame(
-        runtime,
-        caller,
-        frame,
-        returned,
-        outerNative > 0,
-        failure instanceof PhpThrow ? failure : undefined
-      );
-    else for (const ref of frame.vars.values()) ref.rc--;
+  return saved;
+}
+
+function bindUserCall(saved: UserCallState, fn: UserFunction, args: ArgValue[], row: number | undefined): void {
+  const { runtime, caller, frame, decl, target, received, record, strict } = saved;
+  runtime.row = decl.row;
+  handOverArgs(caller, args, frame);
+  const closure = target.closure?.internal as ClosureData | undefined;
+  if (closure) bindClosureVars(frame, closure);
+  bindParams(
+    frame,
+    fn,
+    args,
+    received,
+    { name: functionDisplayName(target), parameter: functionDisplayName(target, true) },
+    strict,
+    row
+  );
+  bindArgumentHolders(frame, fn.params, record, args);
+  runtime.dropTemporaries(frame, 0);
+  record.boundFrame = frame;
+}
+
+function finishUserReturn(saved: UserCallState, bodyResult: Value, discardResult: boolean): Value {
+  const { runtime, decl, frame, target } = saved;
+  const result = completeUserReturn(decl, frame, bodyResult, target);
+  if (discardResult) {
+    const returning = frame.returning;
+    frame.returning = undefined;
+    runtime.row = frame.returnRow ?? runtime.row;
+    runtime.release([returning, result]);
+    return null;
   }
-  runtime.lastReturnRef = !discardResult && frame.returning instanceof Ref ? frame.returning : undefined;
-  return returned;
+  target.captureReturn?.(result);
+  return result;
+}
+
+function exitUserCall(saved: UserCallState, returned: Value, failure: unknown, failed: boolean): void {
+  const { runtime, caller, frame, decl, savedRow, outerNative, outerNativeCalls, outerReleaseMode } = saved;
+  nativeDepth = outerNative;
+  runtime.nativeCalls = outerNativeCalls;
+  runtime.nativeReleaseMode = outerReleaseMode;
+  runtime.depth--;
+  callStack.pop();
+  runtime.frames.pop();
+  for (const value of frame.argumentHolders) if (value instanceof Ref) value.rc--;
+  for (const value of frame.temporaries) if (value instanceof Ref) value.rc--;
+  runtime.row = savedRow;
+  if (decl.isAtomic) runtime.steps.completeAtomicCall();
+  if (!failed || failure instanceof PhpThrow || failure instanceof ExitSignal)
+    releaseFrame(runtime, caller, frame, returned, outerNative > 0, failure instanceof PhpThrow ? failure : undefined);
+  else for (const ref of frame.vars.values()) ref.rc--;
 }
 
 interface UserArgumentSlots {

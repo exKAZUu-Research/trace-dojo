@@ -136,28 +136,41 @@ function containsLabel(statement: Stmt, label: string): boolean {
 }
 
 /** Runs statements, jumping to a label they hold when `seek` names one or a `goto` targets one. */
+// code-gauge-allow functionCognitiveComplexity 24 -- Handles return statements inline in the list loop to keep recursion within the host stack.
 function execList(statements: Stmt[], seek?: string): Completion {
-  let index = 0;
+  let index = seek === undefined ? 0 : Math.max(labelIndex(statements, seek), 0);
   let target = seek;
-  if (target !== undefined) index = Math.max(labelIndex(statements, target), 0);
   while (index < statements.length) {
-    const completion = execStmt(statements[index], target);
+    const statement = statements[index];
+    if (target === undefined && statement.k === 'return') {
+      const runtime = rt();
+      const held = runtime.frame.temporaries.length;
+      runtime.row = statement.row;
+      runtime.spend();
+      try {
+        const value = !statement.e
+          ? null
+          : runtime.frame.fn?.kind === 'user' && runtime.frame.fn.decl.byRefReturn
+            ? evReturn(statement.e)
+            : ev(statement.e);
+        runtime.frame.returning = value instanceof Ref ? value : share(value);
+        return { t: 'return', slot: runtime.frame.returning, row: statement.e?.row ?? statement.row };
+      } finally {
+        runtime.dropTemporaries(runtime.frame, held);
+      }
+    }
+    const completion = execStmt(statement, target);
     target = undefined;
     if (completion) {
-      if (completion.t === 'goto') {
-        const found = labelIndex(statements, completion.label);
-        if (found !== -1) {
-          index = found;
-          target = completion.label;
-          rt().spend();
-          continue;
-        }
-      }
-      return completion;
+      const next = completion.t === 'goto' ? labelIndex(statements, completion.label) : -1;
+      if (next === -1) return completion;
+      index = next;
+      target = (completion as { t: 'goto'; label: string }).label;
+      rt().spend();
+      continue;
     }
     index++;
   }
-  return undefined;
 }
 
 function execStmt(statement: Stmt, seek?: string): Completion {
@@ -225,13 +238,6 @@ function execStmt(statement: Stmt, seek?: string): Completion {
       case 'break':
       case 'continue': {
         return { t: statement.k, depth: statement.depth };
-      }
-      case 'return': {
-        const value = statement.e ? evReturn(statement.e) : null;
-        const slot = value instanceof Ref ? value : share(value);
-        const row = statement.e?.row ?? statement.row;
-        frame.returning = slot;
-        return { t: 'return', slot, row };
       }
       case 'block': {
         return execList(statement.body);

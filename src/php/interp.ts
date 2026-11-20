@@ -115,8 +115,35 @@ export function evReturn(e: Expr): Value | Ref {
 
 export function ev(e: Expr, discardResult = false): Value {
   const runtime = rt();
-  if (!runtime.frame.constantExpression || !runtime.frame.scope || e.k === 'const')
-    return evaluateValue(runtime, e, discardResult);
+  if (runtime.frame.constantExpression && runtime.frame.scope && e.k !== 'const')
+    return evaluateConstantExpression(runtime, e, discardResult);
+  if (compileTimeValue(e)) return evaluateValue(runtime, e, discardResult);
+  switch (e.k) {
+    case 'lit': {
+      return e.v;
+    }
+    case 'var': {
+      return e.name === 'GLOBALS' ? globalsArray() : readVar(e.name, e.row);
+    }
+    case 'bin': {
+      return e.foldedString ?? binary(e);
+    }
+    case 'call': {
+      return keepResult(runtime.frame.temporaries.length, callExpression(e, discardResult), !e.fcc) as Value;
+    }
+    case 'cond': {
+      if (e.consequent !== undefined)
+        return keepResult(
+          runtime.frame.temporaries.length,
+          evBool(e.test) ? ev(e.consequent) : ev(e.alternate)
+        ) as Value;
+      break;
+    }
+  }
+  return evalChainValue(runtime, e, discardResult);
+}
+
+function evaluateConstantExpression(runtime: Runtime, e: Expr, discardResult: boolean): Value {
   const outer = runtime.constantAstRow;
   runtime.constantAstRow = constantAstRow(e);
   try {
@@ -133,18 +160,10 @@ function evaluateValue(runtime: Runtime, e: Expr, discardResult: boolean): Value
   const cached = constant ? literals?.get(scope) : undefined;
   if (cached) return share(cached);
   const epoch = runtime.constantEvaluationEpoch;
-  let value: Value;
-  if (RELEASING_OPERANDS.has(e.k)) {
-    const mark = runtime.frame.temporaries.length;
-    const result = evChain(e, discardResult);
-    value = keepResult(mark, result === SHORT ? null : result) as Value;
-  } else {
-    const result = evChain(e, discardResult);
-    value = result === SHORT ? null : result;
-  }
+  const value = evalChainValue(runtime, e, discardResult);
   if (
-    value instanceof PhpArray &&
     constant &&
+    value instanceof PhpArray &&
     epoch === runtime.constantEvaluationEpoch &&
     immutableArrayContents(value)
   ) {
@@ -152,11 +171,20 @@ function evaluateValue(runtime: Runtime, e: Expr, discardResult: boolean): Value
     scopes.set(scope, value);
     runtime.literalArrays.set(e, scopes);
     runtime.declarationRoots.add(value);
-    value.persistentHolder = true;
-    value.shared = true;
+    value.persistentHolder = value.shared = true;
     value.uncollectable = value.size === 0;
   }
   return value;
+}
+
+function evalChainValue(runtime: Runtime, e: Expr, discardResult: boolean): Value {
+  const mark = runtime.frame.temporaries.length;
+  const result = evChain(e, discardResult);
+  return RELEASING_OPERANDS.has(e.k)
+    ? (keepResult(mark, result === SHORT ? null : result) as Value)
+    : result === SHORT
+      ? null
+      : result;
 }
 
 /** The expressions that consume their operands, which PHP frees right after the expression. */
@@ -1193,19 +1221,43 @@ function binary(e: Extract<Expr, { k: 'bin' }>): Value {
     }
   }
   const mark = runtime.frame.temporaries.length;
-  const readLeft = prepareOperand(e.l);
-  const readRight = prepareOperand(e.r);
+  const deferLeft = isCompiledVariable(e.l);
+  const deferRight = isCompiledVariable(e.r);
+  const left = deferLeft ? null : ev(e.l);
+  if (!deferLeft) runtime.frame.temporaries.push(left);
+  const right = deferRight ? null : ev(e.r);
+  if (!deferRight) runtime.frame.temporaries.push(right);
   const row = e.opcodeRow ?? e.r.row;
-  const run = (left: Value, right: Value, pending?: PhpThrow): Value => {
-    runtime.row = row;
-    const result = e.swapOperands ? operate(e.op, right, left, pending) : operate(e.op, left, right, pending);
-    return keepResult(mark, result) as Value;
-  };
-  if (!missingCompiledOperand(e.l) && !missingCompiledOperand(e.r)) return run(readLeft(row), readRight(row));
+  if (missingCompiledOperand(e.l) || missingCompiledOperand(e.r)) return binaryWithWarnings(e, left, right, mark, row);
+  const lval = deferLeft ? readCompiledVar(e.l, row, runtime) : left;
+  const rval = deferRight ? readCompiledVar(e.r, row, runtime) : right;
+  runtime.row = row;
+  const result = e.swapOperands ? operate(e.op, rval, lval) : operate(e.op, lval, rval);
+  return keepResult(mark, result) as Value;
+}
+
+function readCompiledVar(e: Expr, row: number, runtime: Runtime): Value {
+  const value = readVar((e as Extract<Expr, { k: 'var' }>).name, row);
+  runtime.frame.temporaries.push(value);
+  return value;
+}
+
+function binaryWithWarnings(
+  e: Extract<Expr, { k: 'bin' }>,
+  leftValue: Value,
+  rightValue: Value,
+  mark: number,
+  row: number
+): Value {
+  const runtime = rt();
+  const readLeft = isCompiledVariable(e.l) ? (r = e.l.row) => readCompiledVar(e.l, r, runtime) : () => leftValue;
+  const readRight = isCompiledVariable(e.r) ? (r = e.r.row) => readCompiledVar(e.r, r, runtime) : () => rightValue;
   return withOperandWarnings((warning, pending) => {
     const left = readOperandWithWarning(e.l, readLeft, warning, row);
     const right = readOperandWithWarning(e.r, readRight, warning, row);
-    return run(left, right, pending());
+    runtime.row = row;
+    const result = e.swapOperands ? operate(e.op, right, left, pending()) : operate(e.op, left, right, pending());
+    return keepResult(mark, result) as Value;
   });
 }
 
@@ -1236,63 +1288,27 @@ export function isCompiledVariable(e: Expr): boolean {
 }
 
 export function prepareOperand(e: Expr): (row?: number) => Value {
-  if (e.k === 'var' && isCompiledVariable(e)) {
-    return (row = e.row) => {
-      const value = readVar(e.name, row);
-      rt().frame.temporaries.push(value);
-      return value;
-    };
-  }
-  const value = holdOperand(e);
+  if (e.k === 'var' && isCompiledVariable(e)) return (row = e.row) => readCompiledVar(e, row, rt());
+  const value = ev(e);
+  rt().frame.temporaries.push(value);
   return () => value;
 }
 
-function holdOperand(e: Expr): Value {
-  const value = ev(e);
-  rt().frame.temporaries.push(value);
-  return value;
-}
+const BINARY_OPS: Record<string, (left: Value, right: Value) => Value> = {
+  xor: (left, right) => toBool(left) !== toBool(right),
+  '==': looseEquals,
+  '!=': (left, right) => !looseEquals(left, right),
+  '===': strictEquals,
+  '!==': (left, right) => !strictEquals(left, right),
+  '<': (left, right) => compare(left, right) < 0,
+  '<=': (left, right) => compare(left, right) <= 0,
+  '>': (left, right) => compare(right, left) < 0,
+  '>=': (left, right) => compare(right, left) <= 0,
+  '<=>': (left, right) => BigInt(compare(left, right)),
+};
 
 function operate(op: string, left: Value, right: Value, pending?: PhpThrow): Value {
-  switch (op) {
-    case 'xor': {
-      return toBool(left) !== toBool(right);
-    }
-    case '==': {
-      return looseEquals(left, right);
-    }
-    case '!=': {
-      return !looseEquals(left, right);
-    }
-    case '===': {
-      return strictEquals(left, right);
-    }
-    case '!==': {
-      return !strictEquals(left, right);
-    }
-    case '<': {
-      return compareForOrder(left, right) < 0;
-    }
-    case '<=': {
-      return compareForOrder(left, right) <= 0;
-    }
-    case '>': {
-      return compareForOrder(right, left) < 0;
-    }
-    case '>=': {
-      return compareForOrder(right, left) <= 0;
-    }
-    case '<=>': {
-      return BigInt(compare(left, right));
-    }
-    default: {
-      return applyOperator(op, left, right, pending);
-    }
-  }
-}
-
-function compareForOrder(left: Value, right: Value): number {
-  return compare(left, right);
+  return BINARY_OPS[op]?.(left, right) ?? applyOperator(op, left, right, pending);
 }
 
 // code-gauge-allow functionCognitiveComplexity 19 -- One case per expression kind, as PHP evaluates each kind differently.

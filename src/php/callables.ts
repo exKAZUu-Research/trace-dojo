@@ -15,6 +15,7 @@ import {
   functionDisplayName,
   handOverArgs,
   invoke,
+  invokeUser,
   type MagicCall,
   NamedArgumentBindings,
   paramIsByRef,
@@ -35,7 +36,7 @@ import {
 } from './interp';
 import { compiledOperandRow } from './opcodeRows';
 import { ElementPlace, share, VarPlace, writableContainer } from './places';
-import { ExitSignal, type Frame, PhpThrow, rt } from './runtime';
+import { ExitSignal, type Frame, PhpThrow, rt, type Runtime } from './runtime';
 import { renderSimpleSprintf } from './sprintf';
 import { UnsupportedFeatureError } from './unsupported';
 import {
@@ -270,45 +271,60 @@ function claimArgumentTemporaries(frame: Frame, args: ArgValue[], first: number,
 export function callExpression(e: Extract<Expr, { k: 'call' }>, discardResult = false): Value {
   const runtime = rt();
   runtime.row = e.row;
-  if (!('k' in e.fn)) return callNamedExpression(e, e.fn, discardResult);
-  const callee = ev(e.fn);
+  if ('k' in e.fn) return callDynamicExpression(runtime, e, discardResult);
+  const fn =
+    runtime.functions.get(lower(e.fn.name)) ??
+    (e.fn.fallback ? runtime.functions.get(lower(e.fn.fallback)) : undefined);
+  if (!fn) {
+    if (builtinNames.functions.includes(lower(e.fn.fallback ?? e.fn.name)))
+      throw new UnsupportedFeatureError(`PHP の組み込み関数（${e.fn.fallback ?? e.fn.name}）`);
+    throwError('Error', `Call to undefined function ${e.fn.name}()`);
+  }
+  if (e.fcc) return closureFromCallable({ fn });
+  if (fn.kind === 'native') return callNativeNamed(runtime, e, e.fn, fn, discardResult);
+  const args = evalArgs(e.args, fn, fn.name);
+  runtime.row = e.row;
+  return pushTemporary(runtime, invokeUser({ fn }, fn, args, e.row, discardResult));
+}
+
+function pushTemporary(runtime: Runtime, value: Value): Value {
+  runtime.frame.temporaries.push(value);
+  return value;
+}
+
+function callDynamicExpression(runtime: Runtime, e: Extract<Expr, { k: 'call' }>, discardResult: boolean): Value {
+  const callee = ev(e.fn as Expr);
   if (callee instanceof PhpObject || callee instanceof PhpArray) runtime.frame.temporaries.push(callee);
   runtime.row = e.initRow ?? e.row;
   const target = callTargetOf(callee, 'direct');
   if (e.fcc) return closureFromCallable(target);
-  if (e.fn.k === 'lit' && typeof callee === 'string') target.dynamic = false;
+  if ((e.fn as Expr).k === 'lit' && typeof callee === 'string') target.dynamic = false;
   const args = evalArgs(e.args, target.magic ? undefined : target.fn, functionDisplayName(target, true));
   runtime.row = e.row;
-  const result = target.magic
-    ? invokeMagic(target.magic, args, e.row, discardResult)
-    : invoke(target, args, e.row, discardResult);
-  runtime.frame.temporaries.push(result);
-  return result;
+  return pushTemporary(
+    runtime,
+    target.magic ? invokeMagic(target.magic, args, e.row, discardResult) : invoke(target, args, e.row, discardResult)
+  );
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Resolves the named call before selecting how PHP evaluates its arguments.
-function callNamedExpression(e: Extract<Expr, { k: 'call' }>, name: ResolvedName, discardResult: boolean): Value {
-  const runtime = rt();
-  const fn =
-    runtime.functions.get(lower(name.name)) ??
-    (name.fallback ? runtime.functions.get(lower(name.fallback)) : undefined);
-  if (!fn) {
-    if (builtinNames.functions.includes(lower(name.fallback ?? name.name)))
-      throw new UnsupportedFeatureError(`PHP の組み込み関数（${name.fallback ?? name.name}）`);
-    throwError('Error', `Call to undefined function ${name.name}()`);
-  }
-  if (e.fcc) return closureFromCallable({ fn });
-  const format =
-    fn.kind === 'native' && !name.fallback && lower(fn.name) === 'sprintf' ? simpleSprintfFormat(e.args) : undefined;
+function callNativeNamed(
+  runtime: Runtime,
+  e: Extract<Expr, { k: 'call' }>,
+  name: ResolvedName,
+  fn: Extract<Callable, { kind: 'native' }>,
+  discardResult: boolean
+): Value {
+  const format = !name.fallback && lower(fn.name) === 'sprintf' ? simpleSprintfFormat(e.args) : undefined;
   if (format !== undefined) {
-    const reads = e.args.slice(1).map((arg) => prepareOperand(arg.e));
-    const result = renderSimpleSprintf(format, reads, e.row);
     runtime.lastReturnRef = undefined;
-    return result;
+    return renderSimpleSprintf(
+      format,
+      e.args.slice(1).map((arg) => prepareOperand(arg.e)),
+      e.row
+    );
   }
   const specialized = name.fallback ? undefined : specializedCall(fn, e.args);
   const frameless = specialized === 'frameless';
-  const directOverload = frameless && fn.kind === 'native' && fn.shortParamsDirectOnly;
   const inline = specialized === 'opcode' || (frameless && fn.name === 'strtr');
   const row = inline && fn.name === 'strlen' ? e.args[0].e.row : e.row;
   const args =
@@ -316,10 +332,21 @@ function callNamedExpression(e: Extract<Expr, { k: 'call' }>, name: ResolvedName
       ? evalDeferredValueArgs(e.args, row)
       : evalArgs(e.args, fn, fn.name);
   runtime.row = row;
-  const compiledCallback = inline && compiledLiteralCallback(fn, e.args[0]?.e);
-  const result = invoke({ fn, inline, frameless, directOverload, compiledCallback }, args, row, discardResult);
-  runtime.frame.temporaries.push(result);
-  return result;
+  return pushTemporary(
+    runtime,
+    invoke(
+      {
+        fn,
+        inline,
+        frameless,
+        directOverload: frameless && fn.shortParamsDirectOnly,
+        compiledCallback: inline && compiledLiteralCallback(fn, e.args[0]?.e),
+      },
+      args,
+      row,
+      discardResult
+    )
+  );
 }
 
 function compiledLiteralCallback(fn: Callable, callback: Expr | undefined): boolean {

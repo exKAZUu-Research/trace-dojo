@@ -4756,3 +4756,17 @@ test('rejects unsupported functions without spurious undefined-variable warnings
     uncaughtException: '外部コマンドの実行（exec）は、この採点環境では使えません。',
   });
 });
+
+test('reaches the shared 512-frame recursion limit under the default host stack', () => {
+  expect(
+    run('<?php function s(int $n): int { if ($n == 0) return 0; return $n + s($n - 1); } echo s(510);')
+  ).toMatchObject({ kind: 'executed', stdout: '130305' });
+  expect(run('<?php function s($n) { return $n == 0 ? 0 : $n + s($n - 1); } echo s(510);')).toMatchObject({
+    kind: 'executed',
+    stdout: '130305',
+  });
+  expect(run('<?php function s($n) { return $n == 0 ? 0 : $n + s($n - 1); } echo s(512);')).toMatchObject({
+    kind: 'executed',
+    stdout: expect.stringContaining('Allowed memory size'),
+  });
+});
