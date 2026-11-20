@@ -1,0 +1,8 @@
+interface Box<T> { value: T; independent: number }
+type Direct = Box<Direct>['value'];
+type Independent = Box<Independent>['independent'];
+type Keys = keyof Box<Keys>;
+type Reversed = Indirect['value'];
+type Indirect = Box<Reversed>;
+interface NumericValue<T extends { value: number }> { value: T }
+type BadConstraint = NumericValue<BadConstraint>;

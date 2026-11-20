@@ -23,3 +23,11 @@ const first: Loop = forward;
 const second: Loop = backward;
 const third: Loop = eight;
 console.log(first.next.next.next.next, second.next.next.next.next, third.next.next.next.next.next.next.next.next);
+
+interface GenericBox<T> { next: T }
+type GenericForward<T> = GenericBox<GenericMiddle<T>>;
+type GenericMiddle<T> = GenericBox<GenericInner<T>>;
+type GenericInner<T> = GenericBox<T>;
+const generic: GenericForward<string> = { next: { next: { next: 'generic' } } };
+const genericLoop: Loop = generic;
+console.log(genericLoop.next.next.next);

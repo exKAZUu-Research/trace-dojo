@@ -1,0 +1,21 @@
+interface Box<T> { value: T }
+interface NullableBox<T> { value: T | null }
+type Left = Box<Right>;
+type Right = Box<Left>['value'];
+type Linked = NullableBox<Link>;
+type Link = NullableBox<Linked>['value'];
+type Optional = Box<OptionalLink> | null;
+type OptionalLink = Box<Optional>['value'];
+type Pair<T> = Box<PairLink<T>>;
+type PairLink<T> = Box<Pair<T>>['value'];
+type Keys = Box<Names>;
+type Names = keyof Box<Keys>;
+const node: Linked = { value: { value: null } };
+const optional: Optional = { value: null };
+const pair: Pair<string> | null = null;
+const keys: Keys = { value: 'value' };
+console.log(node.value?.value, optional.value, pair, keys.value);
+interface Container<T extends { value: unknown }> { value: T }
+type Constrained = Container<Constrained>;
+const constrained: Constrained | null = null;
+console.log(constrained);

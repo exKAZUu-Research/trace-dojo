@@ -1,0 +1,11 @@
+(2,6): error TS2456: Type alias 'Direct' circularly references itself.
+(2,15): error TS4109: Type arguments for 'Box' circularly reference themselves.
+(3,6): error TS2456: Type alias 'Independent' circularly references itself.
+(3,20): error TS4109: Type arguments for 'Box' circularly reference themselves.
+(4,6): error TS2456: Type alias 'Keys' circularly references itself.
+(4,19): error TS4109: Type arguments for 'Box' circularly reference themselves.
+(5,6): error TS2456: Type alias 'Reversed' circularly references itself.
+(6,17): error TS4109: Type arguments for 'Box' circularly reference themselves.
+(8,35): error TS2344: Type 'BadConstraint' does not satisfy the constraint '{ value: number; }'.
+  Types of property 'value' are incompatible.
+    Type 'BadConstraint' is not assignable to type 'number'.

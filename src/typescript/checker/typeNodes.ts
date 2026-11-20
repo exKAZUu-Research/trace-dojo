@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 591 -- Resolves every kind of type syntax a program writes, each needing its own rule.
+// code-gauge-allow-file fileNcss 632 -- Resolves every kind of type syntax a program writes, each needing its own rule.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
@@ -85,6 +85,7 @@ export class TypeNodes {
   private readonly typeNodeCache = new Map<number, Type>();
   private readonly librarySymbols = new Map<string, LiteralType>();
   private readonly restConstraintsInValidation = new Set<number>();
+  private readonly checkedReferenceArguments = new WeakSet<Type>();
   /** The type each kind of type syntax denotes; the others are `any`. */
   private readonly typeSyntaxes = new Map<string, (node: TreeNode) => Type>([
     ['predefined_type', (node) => predefinedTypes[node.text] ?? anyType],
@@ -126,6 +127,7 @@ export class TypeNodes {
   /** How many array, tuple, and type argument nodes enclose the type node being resolved. */
   private deferredDepth = 0;
   private resolutionDepth = 0;
+  private resolvingReference?: { circular: boolean };
 
   typeFromNode(node: TreeNode): Type {
     const cached = this.typeNodeCache.get(node.id);
@@ -186,22 +188,16 @@ export class TypeNodes {
   private genericType(node: TreeNode): Type {
     const name = node.childForFieldName('name') as TreeNode;
     const argumentsNode = node.childForFieldName('type_arguments');
-    const typeArguments = argumentsNode ? this.typeArgumentsOf(name, argumentsNode) : [];
     return name.type === 'nested_type_identifier'
       ? this.qualifiedType(name)
-      : this.typeReference(node, name, typeArguments);
+      : this.typeReference(node, name, argumentsNode ? named(argumentsNode) : []);
   }
 
-  /**
-   * The type arguments of a type reference. Those of an interface or a class, as `Array<Tree>`, are deferred like an
-   * array's element type, but an alias's are not, as `type R = Record<string, R>` is circular.
-   */
-  private typeArgumentsOf(name: TreeNode, argumentsNode: TreeNode): Type[] {
-    const kind = name.type === 'type_identifier' ? this.c.scopeOf(name).lookupType(name.text)?.typeKind : undefined;
-    const defers = kind === 'interface' || kind === 'class';
+  /** Eager class or interface arguments may carry a pending alias, as an array element can. */
+  private typeArgumentsOf(arguments_: TreeNode[], defers: boolean): Type[] {
     if (defers) this.deferredDepth++;
     try {
-      return named(argumentsNode).map((argument) => this.typeFromNode(argument));
+      return arguments_.map((argument) => this.typeFromNode(argument));
     } finally {
       if (defers) this.deferredDepth--;
     }
@@ -424,18 +420,84 @@ export class TypeNodes {
     }
   }
 
-  private typeReference(node: TreeNode, nameNode: TreeNode, typeArguments: Type[]): Type {
-    const reference = this.resolveTypeName(node, nameNode, typeArguments.length);
+  private typeReference(node: TreeNode, nameNode: TreeNode, argumentNodes: TreeNode[]): Type {
+    const reference = this.resolveTypeName(node, nameNode, argumentNodes.length);
     if (!reference) return errorType;
     if (reference === 'stringMapping')
-      return this.c.typeOperators.stringMappingFromNode(node, nameNode.text as 'Uppercase', typeArguments[0]);
+      return this.c.typeOperators.stringMappingFromNode(
+        node,
+        nameNode.text as 'Uppercase',
+        this.typeFromNode(argumentNodes[0])
+      );
     if ('local' in reference) return reference.local;
     const { symbol, parameters } = reference;
+    const defers = symbol.typeKind === 'interface' || symbol.typeKind === 'class';
     const declared = this.declaredTypeOf(symbol);
     if (parameters.length === 0) return declared;
-    const filled = this.c.fillTypeArguments(parameters, typeArguments);
+    if (defers && declared.kind === 'object' && this.defersReference(node, argumentNodes, parameters.length))
+      return this.writtenDeferredReference(node, declared, parameters, argumentNodes);
+    const filled = this.c.fillTypeArguments(parameters, this.typeArgumentsOf(argumentNodes, defers));
     this.checkWrittenTypeArgumentConstraints(node, parameters, filled);
-    return this.appliedType(node, symbol, declared, parameters, filled);
+    if (symbol.typeKind === 'alias') return this.aliasReference(symbol, declared, parameters, filled);
+    return declared.kind === 'object' ? this.c.reference(declared, filled) : declared;
+  }
+
+  private writtenDeferredReference(
+    node: TreeNode,
+    target: ObjectType,
+    parameters: TypeParameter[],
+    argumentNodes: TreeNode[]
+  ): ObjectType {
+    const reportCircular = (): void =>
+      this.c.errorWhileResolving(node, `${target.name} の型引数が自分自身を参照しています。`);
+    return this.c.deferredReference(
+      target,
+      () => {
+        const previous = this.resolvingReference;
+        const resolution = { circular: false };
+        this.resolvingReference = resolution;
+        try {
+          const arguments_ = this.c.fillTypeArguments(parameters, this.typeArgumentsOf(argumentNodes, false));
+          if (resolution.circular) reportCircular();
+          return arguments_;
+        } finally {
+          this.resolvingReference = previous;
+        }
+      },
+      {
+        outerTypeParameters: this.c.signatures.outerTypeParametersOf(node),
+        reportCircular,
+        checkArguments: (types) => this.checkWrittenTypeArgumentConstraints(node, parameters, types),
+      }
+    );
+  }
+
+  checkDeferredReferenceArguments(type: Type, depth = 0): void {
+    if (type.kind !== 'object' || !type.resolveReference || this.checkedReferenceArguments.has(type)) return;
+    this.c.budget.spend();
+    if (depth >= LIMITS.maxCallDepth) throw new ExecutionLimitError('operations');
+    this.checkedReferenceArguments.add(type);
+    for (const argument of type.typeArguments ?? []) this.checkDeferredReferenceArguments(argument, depth + 1);
+  }
+
+  private defersReference(node: TreeNode, arguments_: TreeNode[], parameterCount: number): boolean {
+    let child = node;
+    while (child.parent?.type === 'parenthesized_type') child = child.parent;
+    if (child.parent?.type === 'type_alias_declaration') return true;
+    for (let parent = child.parent; parent && eagerAliasContainers.has(parent.type); parent = parent.parent) {
+      if (parent.parent?.type === 'type_alias_declaration')
+        return arguments_.length !== parameterCount || arguments_.some((argument) => this.mayResolveAlias(argument));
+    }
+    return false;
+  }
+
+  private mayResolveAlias(node: TreeNode, depth = 0): boolean {
+    this.c.budget.spend();
+    if (depth >= LIMITS.maxCallDepth) throw new ExecutionLimitError('operations');
+    if (node.type === 'type_query') return true;
+    const name = node.type === 'generic_type' ? node.childForFieldName('name') : node;
+    if (name?.type === 'type_identifier') return this.c.scopeOf(name).lookupType(name.text)?.typeKind === 'alias';
+    return eagerAliasContainers.has(node.type) && named(node).some((child) => this.mayResolveAlias(child, depth + 1));
   }
 
   // code-gauge-allow functionCognitiveComplexity 20 -- Checks local bindings, intrinsic types, unavailable symbols, and argument counts.
@@ -486,17 +548,6 @@ export class TypeNodes {
     if (!this.c.classes.isClassTypeParameterInStaticMember(symbol, nameNode)) return false;
     this.c.error(nameNode, '静的メンバーはクラスの型パラメーターを参照できません。');
     return true;
-  }
-
-  private appliedType(
-    node: TreeNode,
-    symbol: Sym,
-    declared: Type,
-    parameters: TypeParameter[],
-    typeArguments: Type[]
-  ): Type {
-    if (symbol.typeKind === 'alias') return this.aliasReference(symbol, declared, parameters, typeArguments);
-    return declared.kind === 'object' ? this.c.reference(declared, typeArguments, isDirectAliasType(node)) : declared;
   }
 
   private aliasReference(symbol: Sym, declared: Type, parameters: TypeParameter[], typeArguments: Type[]): Type {
@@ -813,6 +864,7 @@ export class TypeNodes {
   private aliasSelfReference(symbol: Sym): Type {
     // An array or a type argument may refer to the alias it is part of, as `type Json = … | Json[]` does.
     if (this.deferredDepth > 0) return symbol.pendingUnion ?? this.recursiveAliases.pendingTypeOf(symbol);
+    if (this.resolvingReference) this.resolvingReference.circular = true;
     this.c.error(symbol.typeDeclarations[0], `型エイリアス ${symbol.name} が自分自身を参照しています。`);
     return errorType;
   }
@@ -936,11 +988,20 @@ function isMappedMember(member: TreeNode): boolean {
 /** The type nodes whose element types TypeScript resolves later, which lets an alias refer to itself inside them. */
 const deferringTypeNodes = new Set(['array_type', 'tuple_type', 'readonly_type']);
 
-function isDirectAliasType(node: TreeNode): boolean {
-  let value = node;
-  while (value.parent?.type === 'parenthesized_type') value = value.parent;
-  return value.parent?.type === 'type_alias_declaration' && value.parent.childForFieldName('value')?.id === value.id;
-}
+const eagerAliasContainers = new Set([
+  ...deferringTypeNodes,
+  'conditional_type',
+  'generic_type',
+  'index_type_query',
+  'intersection_type',
+  'lookup_type',
+  'optional_type',
+  'parenthesized_type',
+  'required_parameter',
+  'rest_type',
+  'type_arguments',
+  'union_type',
+]);
 
 /** The check and extends types of a conditional type inside the one-element tuples both are wrapped in, as `[X] extends [C]`. */
 function unwrapUnaryTuples(check: TreeNode, extendsNode: TreeNode): [TreeNode, TreeNode] {

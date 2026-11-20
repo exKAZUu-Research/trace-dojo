@@ -140,22 +140,22 @@ export class RecursiveAliases {
    */
   deferred(type: Type): Type {
     // A deferred reference is read only when used, which its own instantiation guards.
-    if (this.pendingTypes.size === 0 || type.kind !== 'object' || this.genericReferences.has(type)) return type;
+    if (
+      this.pendingTypes.size === 0 ||
+      type.kind !== 'object' ||
+      this.genericReferences.has(type) ||
+      type.resolveReference
+    )
+      return type;
     const symbols = this.heldAliases(type);
     if (symbols.length === 0) return type;
     const guard = (): void => {
       for (const symbol of symbols) if (this.pendingTypes.has(symbol)) this.circular.add(symbol);
     };
-    const { typeArguments, tuple, resolveReference } = type;
+    const { typeArguments, tuple } = type;
     const guarded: ObjectType = {
       ...type,
       id: newTypeId(),
-      resolveReference:
-        resolveReference &&
-        (() => {
-          guard();
-          return resolveReference();
-        }),
       resolve: () => {
         guard();
         return type.resolve();

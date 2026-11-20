@@ -69,6 +69,7 @@ function ownObjectTypeVariables(type: ObjectType, search: Search): boolean | und
       return !type.nonGeneric;
     }
     case 'reference': {
+      if (type.resolveReference) return outerTypeVariables(type, search);
       return (type.target !== undefined && outerTypeVariables(type.target, search)) || undefined;
     }
     case 'mapped': {

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 650 -- Holds type construction, bounded instantiation, structure lookup, and diagnostics shared by checker components.
+// code-gauge-allow-file fileNcss 662 -- Holds type construction, bounded instantiation, structure lookup, and diagnostics shared by checker components.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { type SourceDiagnostic, sourceDiagnostic } from '../../interpreter/diagnostics';
@@ -310,45 +310,75 @@ export class Checker {
   // References and instantiation ---------------------------------------------------------------------------------
 
   /** A generic interface or class applied to type arguments. */
-  reference(target: ObjectType, typeArguments: Type[], defer = false): ObjectType {
+  reference(target: ObjectType, typeArguments: Type[]): ObjectType {
     const parameters = target.typeParameters ?? [];
     const filled = this.fillTypeArguments(parameters, typeArguments);
     if (filled.every((argument, index) => argument === parameters[index])) return target;
-    if (defer) {
-      let reference: ObjectType | undefined;
-      const resolveReference = (): ObjectType => (reference ??= this.reference(target, filled));
-      return this.referenceObject(target, filled, () => resolveReference().resolve(), resolveReference);
-    }
     const key = `${target.id}<${filled.map(typeCacheKey).join(',')}>`;
     let reference = this.referenceCache.get(key);
     if (!reference) {
-      const mapper: Mapper = new Map(parameters.map((parameter, index) => [parameter.id, filled[index]]));
-      let structure: Structure | undefined;
-      reference = this.referenceObject(target, filled, () => {
-        structure ??= this.instantiateStructure(target.resolve(), mapper);
-        return structure;
-      });
+      reference = this.referenceObject(target, () => filled);
       this.referenceCache.set(key, reference);
     }
     return reference;
   }
 
-  private referenceObject(
+  deferredReference(
     target: ObjectType,
-    typeArguments: Type[],
-    resolve: () => Structure,
-    resolveReference?: () => ObjectType
+    resolveArguments: () => Type[],
+    options: {
+      outerTypeParameters?: TypeParameter[];
+      reportCircular?: () => void;
+      checkArguments?: (types: Type[]) => void;
+    }
   ): ObjectType {
+    let typeArguments: Type[] | undefined;
+    let resolving = false;
+    const argumentsOf = (): Type[] => {
+      if (typeArguments) return typeArguments;
+      if (resolving) {
+        options.reportCircular?.();
+        return (typeArguments = (target.typeParameters ?? []).map(() => errorType));
+      }
+      resolving = true;
+      try {
+        const resolved = resolveArguments();
+        if (typeArguments) return typeArguments;
+        typeArguments = resolved;
+        options.checkArguments?.(resolved);
+        return resolved;
+      } finally {
+        resolving = false;
+      }
+    };
+    let canonical: ObjectType | undefined;
+    const resolveReference = (): ObjectType => (canonical ??= this.reference(target, argumentsOf()));
+    const reference = this.referenceObject(target, argumentsOf);
+    reference.resolveReference = resolveReference;
+    reference.outerTypeParameters = options.outerTypeParameters;
+    return reference;
+  }
+
+  private referenceObject(target: ObjectType, argumentsOf: () => Type[]): ObjectType {
+    let structure: Structure | undefined;
     return {
       kind: 'object',
       id: newTypeId(),
       objectKind: 'reference',
       name: target.name,
       target,
-      typeArguments,
+      get typeArguments() {
+        return argumentsOf();
+      },
       classInfo: target.classInfo,
-      resolve,
-      resolveReference,
+      resolve: () => {
+        if (structure) return structure;
+        const arguments_ = argumentsOf();
+        const mapper: Mapper = new Map(
+          (target.typeParameters ?? []).map((parameter, i) => [parameter.id, arguments_[i]])
+        );
+        return (structure ??= this.instantiateStructure(target.resolve(), mapper));
+      },
     };
   }
 
@@ -473,10 +503,7 @@ export class Checker {
   instantiateAliasedObject(type: ObjectType, mapper: Mapper): Type {
     switch (type.objectKind) {
       case 'reference': {
-        return this.reference(
-          this.instantiateOuterTypeParameters(type.target as ObjectType, mapper),
-          (type.typeArguments ?? []).map((argument) => this.instantiate(argument, mapper))
-        );
+        return this.instantiateReference(type, mapper);
       }
       case 'tuple': {
         const tuple = type.tuple as NonNullable<ObjectType['tuple']>;
@@ -522,6 +549,40 @@ export class Checker {
     });
     this.instantiationCache.set(key, instantiated);
     return instantiated;
+  }
+
+  private instantiateReference(type: ObjectType, mapper: Mapper): Type {
+    if (type.resolveReference) return this.instantiateDeferredReference(type, mapper);
+    const target = this.instantiateOuterTypeParameters(type.target as ObjectType, mapper);
+    return this.reference(
+      target,
+      (type.typeArguments ?? []).map((argument) => this.instantiate(argument, mapper))
+    );
+  }
+
+  private instantiateDeferredReference(type: ObjectType, mapper: Mapper): Type {
+    const original = type.origin ?? type;
+    const parameters = original.outerTypeParameters ?? [];
+    const substitutions: Mapper = new Map(
+      parameters.map((parameter) => [
+        parameter.id,
+        this.instantiate(type.mapper?.get(parameter.id) ?? parameter, mapper),
+      ])
+    );
+    if (parameters.every((parameter) => substitutions.get(parameter.id) === parameter)) return original;
+    const key = `${original.id}[${typeMapperCacheKey(substitutions)}]`;
+    const cached = this.instantiationCache.get(key);
+    if (cached) return cached;
+    const target = this.instantiateOuterTypeParameters(original.target as ObjectType, substitutions);
+    const reference = this.deferredReference(
+      target,
+      () => (original.typeArguments ?? []).map((argument) => this.instantiate(argument, substitutions)),
+      { outerTypeParameters: original.outerTypeParameters }
+    );
+    reference.origin = original;
+    reference.mapper = substitutions;
+    this.instantiationCache.set(key, reference);
+    return reference;
   }
 
   private instantiateMapped(type: ObjectType, mapper: Mapper): Type {
