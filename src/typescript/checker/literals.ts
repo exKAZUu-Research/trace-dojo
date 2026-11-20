@@ -1,9 +1,10 @@
-// code-gauge-allow-file fileNcss 632 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
+// code-gauge-allow-file fileNcss 720 -- Types literals and their spreads, members, and widening in the same literal context.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExpressionListFlow, tupleArgumentContexts } from './callArity';
 import type { Checker } from './checker';
-import { applicableIndex, isIndexKeyOf, isSamePattern, namedPropertyIndex } from './indexInfos';
+import { isGenericObjectOrIndexType } from './genericTypes';
+import { applicableIndex, hasIndexSignature, isIndexKeyOf, isSamePattern, namedPropertyIndex } from './indexInfos';
 import {
   arrayLiteralLength,
   arrayPatternElements,
@@ -18,6 +19,7 @@ import {
   accessorProperty,
   anonymousObject,
   anyType,
+  emptyObjectType,
   emptyStructure,
   errorType,
   filterType,
@@ -39,6 +41,7 @@ import {
   type Structure,
   symbolType,
   type Type,
+  typeMembers,
   type TypeParameter,
   undefinedType,
   unionOf,
@@ -65,8 +68,8 @@ interface ObjectLiteral {
   computedMembers: { key: IndexKey; type: Type }[];
   /** Whether members are written since the last spread, which TypeScript spreads as one object literal. */
   hasPendingMembers?: boolean;
-  /** Spreads of type parameters, which the literal's type intersects. */
-  genericSpreads: Type[];
+  /** The result of the spreads so far once a generic operand requires preserving intersection order. */
+  orderedSpread?: Type;
   /**
    * After a spread of a union, the properties each of its alternatives gives the literal, which `properties` (the
    * members written since) then override.
@@ -322,7 +325,6 @@ export class LiteralChecker {
         discriminated,
         anonymousObject(() => ({ ...emptyStructure(), properties: declarations }))
       ),
-      genericSpreads: [],
       writtenNames: new Set(),
       explicitMembers: new Map(),
       computedMembers: [],
@@ -339,11 +341,19 @@ export class LiteralChecker {
     const members = named(node);
     this.prepareObjectReceiver(literal, members);
     for (const member of members) this.objectMember(literal, member);
-    if (literal.spreadIndexes && literal.hasPendingMembers) this.spreadWrittenIndexes(literal);
-    if (contextual) this.addPatternDefaults(properties, contextual);
-    const { object, genericSpreads, alternatives } = literal;
     if (literal.isTooComplex) return errorType;
     if (literal.spreadsAny) return anyType;
+    if (literal.orderedSpread) {
+      if (contextual) this.addPatternDefaults(literal.properties, contextual);
+      return this.flushOrderedMembers(literal);
+    }
+    if (literal.spreadIndexes && literal.hasPendingMembers) this.spreadWrittenIndexes(literal);
+    if (contextual) this.addPatternDefaults(properties, contextual);
+    return this.concreteLiteral(literal, node);
+  }
+
+  private concreteLiteral(literal: ObjectLiteral, node: TreeNode): Type {
+    const { object, alternatives, properties } = literal;
     if (alternatives) {
       const variants = alternatives.map((alternative, index) => {
         const variant = anonymousObject(
@@ -357,14 +367,10 @@ export class LiteralChecker {
         this.objectLiteralNodes.set(variant.id, node);
         return { ...variant, id: variant.id, fresh: true, regular: variant } as ObjectType;
       });
-      return genericSpreads.length > 0
-        ? intersectionOf([...genericSpreads, unionOf(variants, true)], this.c.budget)
-        : unionOf(variants, true);
+      return unionOf(variants, true);
     }
     this.objectLiteralNodes.set(object.id, node);
-    const fresh: ObjectType = { ...object, id: object.id, fresh: true, regular: object };
-    if (genericSpreads.length > 0) return intersectionOf([...genericSpreads, object], this.c.budget);
-    return fresh;
+    return { ...object, id: object.id, fresh: true, regular: object };
   }
 
   /**
@@ -703,11 +709,11 @@ export class LiteralChecker {
       return;
     }
     this.checkSpreadOverrides(literal, spread);
-    if (spread.kind === 'typeParameter') {
-      literal.genericSpreads.push(spread);
+    if (literal.isTooComplex) return;
+    if (literal.orderedSpread || isGenericSpread(spread)) {
+      this.spreadInOrder(literal, member, spread);
       return;
     }
-    if (literal.isTooComplex) return;
     if (literal.hasPendingMembers) this.spreadWrittenIndexes(literal);
     const objectMembers = members.filter((type) => type.kind === 'object' || type.kind === 'intersection');
     // A spread of `null`, `undefined`, or a falsy primitive adds nothing, which leaves the properties of an object it
@@ -720,6 +726,112 @@ export class LiteralChecker {
       return;
     }
     this.spreadObjectUnion(literal, member, spread, [...objectMembers, ...(mayBeNullish ? [undefined] : [])]);
+  }
+
+  private spreadInOrder(literal: ObjectLiteral, member: TreeNode, spread: Type): void {
+    const left = literal.orderedSpread
+      ? this.flushOrderedMembers(literal)
+      : this.startOrderedSpread(literal, member.parent as TreeNode);
+    const right = this.optionalSpread(literal, spread);
+    if (right.kind === 'union' && !this.countSpreadVariants(literal, member, right.types.length)) return;
+    literal.orderedSpread = this.mergeOrderedSpread(literal, left, right);
+  }
+
+  private startOrderedSpread(literal: ObjectLiteral, node: TreeNode): Type {
+    if (literal.spreadIndexes && literal.hasPendingMembers) this.spreadWrittenIndexes(literal);
+    const before =
+      literal.properties.size > 0 || literal.spreadIndexes || literal.hasPendingMembers
+        ? this.concreteLiteral(literal, node)
+        : emptyObjectType;
+    this.resetWrittenMembers(literal);
+    return before;
+  }
+
+  private flushOrderedMembers(literal: ObjectLiteral): Type {
+    const left = literal.orderedSpread as Type;
+    if (!literal.hasPendingMembers && literal.properties.size === 0) return left;
+    const right = this.spreadObjectType(literal.properties, this.writtenIndexes(literal));
+    this.resetWrittenMembers(literal);
+    return this.mergeOrderedSpread(literal, left, right);
+  }
+
+  private resetWrittenMembers(literal: ObjectLiteral): void {
+    literal.properties = new Map();
+    literal.writtenNames.clear();
+    literal.computedMembers = [];
+    literal.hasPendingMembers = false;
+  }
+
+  private optionalSpread(literal: ObjectLiteral, right: Type): Type {
+    if (right.kind !== 'union') return right;
+    const nonEmpty = right.types.filter((type) => !this.spreadsNothing(type));
+    if (nonEmpty.length === 0) return emptyObjectType;
+    if (nonEmpty.length > 1) return right;
+    const properties = new Map<string, Property>();
+    this.spreadInto(literal, properties, nonEmpty[0], true);
+    if (isGenericSpread(nonEmpty[0])) {
+      for (const [name, property] of this.c.structureOf(nonEmpty[0]).properties)
+        if (isSpreadableProperty(property))
+          properties.set(name, { ...spreadCopy(property, literal.isConstContext), optional: true });
+    }
+    return this.spreadObjectType(properties, this.indexesOf(nonEmpty[0], literal.isConstContext));
+  }
+
+  private mergeOrderedSpread(literal: ObjectLiteral, left: Type, right: Type): Type {
+    this.c.budget.spend();
+    if (left.kind === 'union')
+      return unionOf(
+        left.types.map((part) => this.mergeOrderedSpread(literal, part, right)),
+        true
+      );
+    if (right.kind === 'union')
+      return unionOf(
+        right.types.map((part) => this.mergeOrderedSpread(literal, left, part)),
+        true
+      );
+    if (isDefinitelyFalsy(right) || isIntrinsic(right, 'never') || isIntrinsic(right, 'object')) return left;
+    if (isGenericSpread(left) || isGenericSpread(right)) return this.mergeGenericSpread(literal, left, right);
+    const leftStructure = this.c.structureOf(left);
+    const properties = new Map(this.spreadProperties(left, literal.isConstContext));
+    this.spreadInto(literal, properties, right);
+    const rightIndexes = this.indexesOf(right, literal.isConstContext);
+    const indexes = this.spreadsNothing(left) ? rightIndexes : this.spreadIndexesOnto(leftStructure, rightIndexes);
+    return this.spreadObjectType(properties, indexes);
+  }
+
+  private mergeGenericSpread(literal: ObjectLiteral, left: Type, right: Type): Type {
+    if (this.spreadsNothing(left)) return right;
+    if (left.kind === 'intersection' && right.kind === 'object' && !isGenericSpread(right)) {
+      const tail = left.types.at(-1);
+      if (tail?.kind === 'object' && !isGenericSpread(tail))
+        return intersectionOf(
+          [...left.types.slice(0, -1), this.mergeOrderedSpread(literal, tail, right)],
+          this.c.budget
+        );
+    }
+    return intersectionOf([left, right], this.c.budget);
+  }
+
+  private spreadsNothing(type: Type): boolean {
+    if (
+      type === emptyObjectType ||
+      isDefinitelyFalsy(type) ||
+      isIntrinsic(type, 'never') ||
+      isIntrinsic(type, 'object')
+    )
+      return true;
+    if (type.kind !== 'object' || isGenericSpread(type)) return false;
+    const structure = this.c.structureOf(type);
+    return (
+      structure.properties.size === 0 &&
+      structure.callSignatures.length === 0 &&
+      structure.constructSignatures.length === 0 &&
+      !hasIndexSignature(structure)
+    );
+  }
+
+  private spreadObjectType(properties: Map<string, Property>, indexes: Indexes): ObjectType {
+    return anonymousObject(() => ({ ...emptyStructure(), ...indexes, properties }), { isLiteral: true });
   }
 
   private checkSpreadOverrides(literal: ObjectLiteral, spread: Type): void {
@@ -736,16 +848,20 @@ export class LiteralChecker {
 
   /** Spreads a union of several objects, unless the alternatives it makes are more than TypeScript represents. */
   private spreadObjectUnion(literal: ObjectLiteral, member: TreeNode, spread: Type, parts: (Type | undefined)[]): void {
+    if (this.countSpreadVariants(literal, member, typeMembers(spread).length)) this.spreadUnion(literal, parts);
+  }
+
+  private countSpreadVariants(literal: ObjectLiteral, member: TreeNode, count: number): boolean {
     // TypeScript refuses a cross product of union spreads of 100,000 alternatives or more, counting every member of
     // each union, though the members that spread nothing all leave the same alternative.
-    const complexity = (literal.complexity ?? 1) * (spread.kind === 'union' ? spread.types.length : 1);
+    const complexity = (literal.complexity ?? 1) * count;
     if (complexity >= 100_000) {
       this.c.error(member, 'この式の型は、表せないほど複雑な共用体型になります。');
       literal.isTooComplex = true;
-      return;
+      return false;
     }
     literal.complexity = complexity;
-    this.spreadUnion(literal, parts);
+    return true;
   }
 
   /** Spreads each of `parts`, a union's objects and `undefined` when it may be nullish, into its own alternative. */
@@ -1103,6 +1219,19 @@ export function isDefinitelyFalsy(type: Type): boolean {
     isIntrinsic(type, 'void') ||
     (type.kind === 'literal' && !type.value)
   );
+}
+
+function isGenericSpread(type: Type): boolean {
+  if (type.kind === 'union' || type.kind === 'intersection') return type.types.some(isGenericSpread);
+  if (type.kind === 'object') {
+    if (type.mapped)
+      return (
+        isGenericObjectOrIndexType(type.mapped.constraint) ||
+        (!!type.mapped.nameType && isGenericObjectOrIndexType(type.mapped.nameType, [type.mapped.typeParameter]))
+      );
+    return type.tuple?.elements.some((element) => element.rest && isGenericObjectOrIndexType(element.type)) ?? false;
+  }
+  return type.kind === 'typeParameter' || type.kind === 'conditional' || type.kind === 'indexedAccess';
 }
 
 /**

@@ -1,5 +1,6 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
+import type { ExecutionBudget } from '../interpreter/limits';
 import { nameOf, type Node } from '../javascript/convertNodes';
 import { isConstructorDefinition } from '../javascript/programConverter';
 import { Binder } from './checker/binder';
@@ -83,10 +84,11 @@ const modifiedTypes = new Set([
  * convert it: types, type-only declarations, and type assertions disappear, parameters become their patterns, and
  * parameter properties become fields that the constructor assigns.
  */
-export function javaScriptViewOf(root: TreeNode): Node {
-  const binder = new Binder(root, new Scope('global', undefined, undefined));
+export function javaScriptViewOf(root: TreeNode, budget: ExecutionBudget): Node {
+  const binder = new Binder(root, new Scope('global', undefined, undefined), { budget, skipAssignmentAnalysis: true });
   for (const scope of binder.allScopes)
     for (const symbol of scope.values.values()) {
+      budget.spend();
       const name = symbol.valueEntries[0]?.name;
       if (name) scope.values.set(nameOf(name), symbol);
     }
@@ -119,7 +121,7 @@ function view(node: TreeNode, binder: Binder): ViewNode {
     }
     case 'identifier': {
       // esbuild only lowers the unbound global to void 0; local bindings retain their values and assignment targets.
-      return nameOf(node) === 'undefined' && !binder.scopeOf(node).lookupValue('undefined')
+      return nameOf(node) === 'undefined' && !binder.lookupValue(node, 'undefined')
         ? leaf(node, 'undefined', '(void 0)')
         : generic(node, node.type, binder);
     }

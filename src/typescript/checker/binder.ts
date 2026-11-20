@@ -1,5 +1,6 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
+import type { ExecutionBudget } from '../../interpreter/limits';
 import { Scope, type Sym, type ValueKind } from './scopes';
 import { assignmentKind, named, patternIdentifiers } from './syntax';
 
@@ -47,7 +48,7 @@ export class Binder {
   private readonly scopes = new Map<number, Scope>();
   private readonly deferredTypes = new Map<number, Scope>();
   /** The identifiers that name what an assignment changes, to find the variables a program reassigns. */
-  private readonly assignedIdentifiers: TreeNode[] = [];
+  private readonly assignedIdentifiers: { identifier: TreeNode; scope: Scope }[] = [];
   readonly moduleScope: Scope;
   /** How each kind of node that declares names or opens a scope of its own is bound. */
   private readonly binders = new Map<string, (node: TreeNode, scope: Scope) => void>([
@@ -71,7 +72,12 @@ export class Binder {
   constructor(
     root: TreeNode,
     readonly globalScope: Scope,
-    private readonly options?: { rootScope?: Scope; deferLibraryTypes?: boolean }
+    private readonly options?: {
+      rootScope?: Scope;
+      deferLibraryTypes?: boolean;
+      budget?: ExecutionBudget;
+      skipAssignmentAnalysis?: boolean;
+    }
   ) {
     this.moduleScope = options?.rootScope ?? new Scope('module', globalScope, root);
     this.scopes.set(root.id, this.moduleScope);
@@ -88,15 +94,16 @@ export class Binder {
   }
 
   private markAssignments(): void {
-    for (const identifier of this.assignedIdentifiers) {
-      const scope = this.scopeOf(identifier);
-      const symbol = scope.lookupValue(identifier.text);
+    const budget = this.options?.budget;
+    for (const { identifier, scope } of this.assignedIdentifiers) {
+      budget?.spend();
+      const symbol = scope.lookupValue(identifier.text, budget);
       if (!symbol) continue;
       symbol.isReassigned = true;
       symbol.isDefinitelyAssigned ||= assignmentKind(identifier) !== 'compound';
       const position =
-        assignmentOwner(scope) === assignmentOwner(symbol.scope)
-          ? assignmentEnd(identifier, symbol.valueDeclaration?.startIndex ?? 0)
+        assignmentOwner(scope, budget) === assignmentOwner(symbol.scope, budget)
+          ? assignmentEnd(identifier, symbol.valueDeclaration?.startIndex ?? 0, budget)
           : Number.POSITIVE_INFINITY;
       symbol.lastAssignment = Math.max(symbol.lastAssignment, position);
     }
@@ -105,6 +112,7 @@ export class Binder {
   /** The scope a node sees names in. */
   scopeOf(node: TreeNode): Scope {
     for (let current: TreeNode | null = node; current; current = current.parent) {
+      this.options?.budget?.spend();
       const scope = this.scopes.get(current.id);
       if (scope) return scope;
     }
@@ -114,6 +122,10 @@ export class Binder {
   /** The scope a scope-creating node itself creates. */
   ownScope(node: TreeNode): Scope | undefined {
     return this.scopes.get(node.id);
+  }
+
+  lookupValue(node: TreeNode, name: string): Sym | undefined {
+    return this.scopeOf(node).lookupValue(name, this.options?.budget);
   }
 
   private bindChildren(node: TreeNode, scope: Scope): void {
@@ -128,12 +140,11 @@ export class Binder {
 
   /** Every scope of the program, the module's first. */
   get allScopes(): Scope[] {
-    return [this.moduleScope, ...this.scopes.values()].filter(
-      (scope, index, scopes) => scopes.indexOf(scope) === index
-    );
+    return [...new Set([this.moduleScope, ...this.scopes.values()])];
   }
 
   private bind(node: TreeNode, scope: Scope): void {
+    this.options?.budget?.spend();
     const bindKind = this.binders.get(node.type);
     if (bindKind) bindKind(node, scope);
     else if (functionLikeTypes.has(node.type)) this.bindFunction(node, scope);
@@ -180,7 +191,7 @@ export class Binder {
 
   private bindAssignment(node: TreeNode, scope: Scope, field: 'left' | 'argument'): void {
     const target = node.childForFieldName(field);
-    if (target) this.noteAssigned(target);
+    if (target) this.noteAssigned(target, scope);
     this.bindChildren(node, scope);
   }
 
@@ -193,7 +204,7 @@ export class Binder {
       const target = kind === 'var' ? scope.functionScope : blockScope;
       for (const identifier of patternIdentifiers(left)) target.declareValue(identifier.text, kind, node, identifier);
     } else if (left) {
-      this.noteAssigned(left);
+      this.noteAssigned(left, blockScope);
     }
     this.bindChildren(node, blockScope);
   }
@@ -212,21 +223,23 @@ export class Binder {
     return parent !== null && functionLikeTypes.has(parent.type) && parent.childForFieldName('body')?.id === node.id;
   }
 
-  private noteAssigned(target: TreeNode): void {
+  private noteAssigned(target: TreeNode, scope: Scope): void {
+    if (this.options?.skipAssignmentAnalysis) return;
     let current = target;
     while (current.type === 'parenthesized_expression' || current.type === 'non_null_expression') {
+      this.options?.budget?.spend();
       const inner = current.namedChildren[0];
       if (!inner) return;
       current = inner;
     }
-    if (current.type === 'identifier') this.assignedIdentifiers.push(current);
+    if (current.type === 'identifier') this.assignedIdentifiers.push({ identifier: current, scope });
     else if (
       current.type === 'array_pattern' ||
       current.type === 'object_pattern' ||
       current.type === 'array' ||
       current.type === 'object'
     )
-      for (const identifier of patternIdentifiers(current)) this.assignedIdentifiers.push(identifier);
+      for (const identifier of patternIdentifiers(current)) this.assignedIdentifiers.push({ identifier, scope });
   }
 
   // code-gauge-allow functionCognitiveComplexity 17 -- Declares each form of parameter a function-like node has.
@@ -350,10 +363,11 @@ class SignatureScope extends Scope {
     super('function', declaring.parent, declaring.node);
   }
 
-  override lookupValue(name: string): Sym | undefined {
+  override lookupValue(name: string, budget?: ExecutionBudget): Sym | undefined {
+    budget?.spend();
     const symbol = this.declaring.values.get(name);
     if (symbol && !bodyOnlyValueKinds.has(symbol.valueKind as ValueKind)) return symbol;
-    return this.parent?.lookupValue(name);
+    return this.parent?.lookupValue(name, budget);
   }
 
   override lookupType(name: string): Sym | undefined {
@@ -367,15 +381,20 @@ export function symbolDeclaredBy(scope: Scope, name: string): Sym | undefined {
   return scope.values.get(name);
 }
 
-function assignmentOwner(scope: Scope): number | undefined {
+function assignmentOwner(scope: Scope, budget: ExecutionBudget | undefined): number | undefined {
   let owner = scope.functionScope;
-  while (owner.node?.type === 'class_static_block' && owner.parent) owner = owner.parent.functionScope;
+  while (owner.node?.type === 'class_static_block' && owner.parent) {
+    budget?.spend();
+    owner = owner.parent.functionScope;
+  }
   return owner.node?.id;
 }
 
-function assignmentEnd(identifier: TreeNode, declarationStart: number): number {
+function assignmentEnd(identifier: TreeNode, declarationStart: number, budget: ExecutionBudget | undefined): number {
   let end = identifier.startIndex;
-  for (let node: TreeNode | null = identifier; node && node.startIndex > declarationStart; node = node.parent)
+  for (let node: TreeNode | null = identifier; node && node.startIndex > declarationStart; node = node.parent) {
+    budget?.spend();
     if (assignmentBoundaries.has(node.type)) end = node.endIndex;
+  }
   return end;
 }

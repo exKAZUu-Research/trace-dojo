@@ -1,5 +1,6 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
+import type { ExecutionBudget } from '../../interpreter/limits';
 import type { ClassInfo, Type, TypeParameter, UnionType } from './types';
 
 export type ValueKind = 'let' | 'const' | 'var' | 'parameter' | 'function' | 'class' | 'catch' | 'declared';
@@ -61,6 +62,8 @@ export class Scope {
 
   /** The names a `declare global` block declares, which inside it stand for the global symbols of those names. */
   private readonly augmentedNames = new Set<string>();
+  /** The nearest function or module scope, where `var` and function declarations live. */
+  readonly functionScope: Scope;
 
   /** @param augments For a `declare global` block, the global scope its declarations go to. */
   constructor(
@@ -68,10 +71,13 @@ export class Scope {
     readonly parent: Scope | undefined,
     readonly node: TreeNode | undefined,
     private readonly augments?: Scope
-  ) {}
+  ) {
+    this.functionScope = (kind === 'block' || kind === 'class') && parent ? parent.functionScope : this;
+  }
 
-  lookupValue(name: string): Sym | undefined {
-    return this.values.get(name) ?? this.augmented(name)?.values.get(name) ?? this.parent?.lookupValue(name);
+  lookupValue(name: string, budget?: ExecutionBudget): Sym | undefined {
+    budget?.spend();
+    return this.values.get(name) ?? this.augmented(name)?.values.get(name) ?? this.parent?.lookupValue(name, budget);
   }
 
   lookupType(name: string): Sym | undefined {
@@ -80,11 +86,6 @@ export class Scope {
 
   private augmented(name: string): Scope | undefined {
     return this.augmentedNames.has(name) ? this.augments : undefined;
-  }
-
-  /** The nearest function (or the module) scope, where `var` and function declarations live. */
-  get functionScope(): Scope {
-    return (this.kind === 'block' || this.kind === 'class') && this.parent ? this.parent.functionScope : this;
   }
 
   declareAmbientValue(name: string, kind: 'var' | 'let' | 'const', declaration: TreeNode, nameNode: TreeNode): void {

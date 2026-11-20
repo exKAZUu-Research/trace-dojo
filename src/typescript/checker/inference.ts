@@ -1,15 +1,19 @@
-// code-gauge-allow-file fileNcss 472 -- Keeps generic candidate collection, constraint fitting and inference completion together.
+// code-gauge-allow-file fileNcss 550 -- Keeps generic candidate collection, constraint fitting and inference completion together.
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import type { Checker, Mapper } from './checker';
 import { childTypes, objectMemberTypes } from './genericTypes';
-import { applicableIndex, isIndexKeyOf, isPropertyKeyOf, keyedIndexes } from './indexInfos';
+import { applicableIndex, hasIndexSignature, isIndexKeyOf, isPropertyKeyOf, keyedIndexes } from './indexInfos';
 import {
+  anonymousObject,
   anyType,
+  emptyStructure,
   errorType,
+  functionType,
   intersectionOf,
   isAnyLike,
   isIntrinsic,
   literalType,
+  newTypeId,
   type ObjectType,
   type Parameter,
   regularOf,
@@ -58,6 +62,7 @@ export interface InferenceRun {
   parameters: TypeParameter[];
   priority: number;
   contextualSignatures: boolean;
+  higherOrder?: { outer: Signature; parameters: TypeParameter[] };
 }
 
 type Recurse = (source: Type, target: Type, covariant?: boolean, priority?: number) => void;
@@ -197,6 +202,83 @@ export class TypeInference {
   /** Collects the types `source` gives the type parameters that `target` mentions. */
   inferTypes(run: InferenceRun, source: Type, target: Type, covariant: boolean): void {
     this.inferPair(run, source, target, covariant, { active: new Set(), sources: [], targets: [] });
+  }
+
+  inferArgument(run: InferenceRun, source: Type, target: Type): void {
+    if (!this.inferHigherOrderCallback(run, source, target)) this.inferTypes(run, source, target, true);
+  }
+
+  withInferredCallbackParameters(run: InferenceRun, outer: Signature): Signature {
+    const parameters = run.higherOrder?.parameters;
+    if (!parameters?.length) return outer;
+    const result = this.singleFunctionSignature(outer.returnType());
+    if (!result) return outer;
+    const signature = { ...result.signature, typeParameters: parameters };
+    const returned =
+      result.kind === 'call'
+        ? functionType(signature)
+        : anonymousObject(() => ({ ...emptyStructure(), constructSignatures: [signature] }), { isFunction: true });
+    return { ...outer, returnType: () => returned };
+  }
+
+  private inferHigherOrderCallback(run: InferenceRun, source: Type, target: Type): boolean {
+    const state = run.higherOrder;
+    if (!state || [...run.inferences.values()].every(hasCandidates)) return false;
+    const callback = this.singleFunctionSignature(source, true);
+    if (!callback?.signature.typeParameters.length) return false;
+    const expected = this.singleFunctionSignature(this.c.relations.removeNullish(target));
+    if (!expected || expected.kind !== callback.kind || expected.signature.typeParameters.length > 0) return false;
+    const result = this.singleFunctionSignature(state.outer.returnType());
+    if (!result || result.signature.typeParameters.length > 0) return false;
+    const sourceSignature = this.renameCallbackParameters(callback.signature, state.parameters);
+    const candidate = newInferenceRun(run.parameters, run.contextualSignatures);
+    const infer: Recurse = (from, to, covariant = true) => this.inferTypes(candidate, from, to, covariant);
+    this.inferSignatureParameters(sourceSignature, expected.signature, infer);
+    if (![...candidate.inferences.values()].some(hasCandidates)) return false;
+    this.inferSignatureReturns(sourceSignature, expected.signature, infer);
+    const adopted = [...candidate.inferences].filter(([, inference]) => hasCandidates(inference));
+    if (adopted.some(([id]) => hasCandidates(run.inferences.get(id)))) return false;
+    for (const [id, inference] of adopted)
+      run.inferences.set(id, { ...inference, impliedArity: run.inferences.get(id)?.impliedArity });
+    state.parameters.push(...sourceSignature.typeParameters);
+    return true;
+  }
+
+  private singleFunctionSignature(
+    type: Type,
+    allowMembers = false
+  ): { kind: 'call' | 'construct'; signature: Signature } | undefined {
+    if (type.kind !== 'object') return undefined;
+    const structure = this.c.structureOf(type);
+    if (!allowMembers && (structure.properties.size > 0 || hasIndexSignature(structure))) return undefined;
+    const { callSignatures: calls, constructSignatures: constructors } = structure;
+    if (calls.length === 1 && constructors.length === 0) return { kind: 'call', signature: calls[0] };
+    if (constructors.length === 1 && calls.length === 0) return { kind: 'construct', signature: constructors[0] };
+    return undefined;
+  }
+
+  private renameCallbackParameters(signature: Signature, previous: TypeParameter[]): Signature {
+    const names = new Set(previous.map((parameter) => parameter.name));
+    const mapper: Mapper = new Map();
+    const parameters = signature.typeParameters.map((parameter): TypeParameter => {
+      let name = parameter.name;
+      for (let suffix = 1; names.has(name); suffix++) name = `${parameter.name}${suffix}`;
+      names.add(name);
+      const fresh = { ...parameter, id: newTypeId(), name };
+      mapper.set(parameter.id, fresh);
+      return fresh;
+    });
+    for (const parameter of parameters) {
+      const constraint = parameter.constraint;
+      const defaultType = parameter.default;
+      parameter.constraint = constraint && (() => this.instantiateParameterBound(constraint(), mapper));
+      parameter.default = defaultType && (() => this.instantiateParameterBound(defaultType(), mapper));
+    }
+    return { ...this.c.instantiateSignature(signature, mapper), typeParameters: parameters };
+  }
+
+  private instantiateParameterBound(type: Type | undefined, mapper: Mapper): Type | undefined {
+    return type && this.c.instantiate(type, mapper);
   }
 
   private inferPair(run: InferenceRun, source: Type, target: Type, covariant: boolean, path: InferencePath): void {
@@ -522,9 +604,13 @@ export class TypeInference {
     ];
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Infers callback this, parameters, rests, returns, and predicates, fitting generic guards to their target.
   private inferFromSignatures(run: InferenceRun, generic: Signature, target: Signature, recurse: Recurse): void {
     const source = this.inferenceSignature(run, generic, target);
+    this.inferSignatureParameters(source, target, recurse);
+    this.inferSignatureReturns(source, target, recurse);
+  }
+
+  private inferSignatureParameters(source: Signature, target: Signature, recurse: Recurse): void {
     if (source.thisType && target.thisType) recurse(source.thisType, target.thisType, false);
     const restIndex = target.parameters.findIndex((parameter) => parameter.rest);
     const count = Math.min(source.parameters.length, restIndex === -1 ? target.parameters.length : restIndex);
@@ -549,6 +635,9 @@ export class TypeInference {
         false
       );
     }
+  }
+
+  private inferSignatureReturns(source: Signature, target: Signature, recurse: Recurse): void {
     const targetReturn = target.returnType();
     if (!isIntrinsic(targetReturn, 'void')) recurse(source.returnType(), targetReturn, true);
     else if (isIntrinsic(source.returnType(), 'void')) recurse(voidType, targetReturn, true);
@@ -707,6 +796,10 @@ export function newInferenceRun(parameters: TypeParameter[], contextualSignature
     priority: InferencePriority.Direct,
     contextualSignatures,
   };
+}
+
+function hasCandidates(inference: Inference | undefined): boolean {
+  return !!inference && (inference.candidates.length > 0 || inference.contravariant.length > 0);
 }
 
 function templateCaptures(value: string, texts: string[]): string[] | undefined {

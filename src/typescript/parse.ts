@@ -1,6 +1,7 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError, diagnosticIndex, type SourceDiagnostic, sourceDiagnostic } from '../interpreter/diagnostics';
+import { ExecutionBudget } from '../interpreter/limits';
 import { type TraceAnnotation, traceAnnotationsIn, type TraceOptions } from '../interpreter/traceAnnotations';
 import { commentTokens, loadParser, parseSource } from '../interpreter/treeSitter';
 import type { Program } from '../javascript/ast';
@@ -60,16 +61,17 @@ export function parseTypeScript(source: string, trace?: TraceOptions): Program {
     source,
     { identifier: '名前', type_identifier: '型の名前' },
     (root) => {
+      const budget = new ExecutionBudget();
       rejectUnsupportedSyntax(root);
       let program: Program | undefined;
       let converterErrors: SourceDiagnostic[] = [];
       try {
-        program = new TypeScriptProgramConverter(source, trace).convert(javaScriptViewOf(root));
+        program = new TypeScriptProgramConverter(source, trace).convert(javaScriptViewOf(root, budget));
       } catch (error) {
         if (!(error instanceof CompileError)) throw error;
         converterErrors = error.diagnostics;
       }
-      const diagnostics = checkWithDecodedNames(root, source);
+      const diagnostics = checkWithDecodedNames(root, source, budget);
       const described = new Set(diagnostics.map(diagnosticIndex).filter((index) => index !== undefined));
       const all = [
         ...diagnostics,
@@ -83,13 +85,13 @@ export function parseTypeScript(source: string, trace?: TraceOptions): Program {
 }
 
 /** Type-checks a program with the `\u` escapes of its names decoded, as tsc reads them, which keeps every row. */
-function checkWithDecodedNames(root: Node, source: string): SourceDiagnostic[] {
-  const decoded = decodeNameEscapes(root, source);
-  if (decoded.text === source) return checkTypeScript(root);
+function checkWithDecodedNames(root: Node, source: string, budget: ExecutionBudget): SourceDiagnostic[] {
+  const decoded = decodeNameEscapes(root, source, budget);
+  if (decoded.text === source) return checkTypeScript(root, budget);
   const tree = parser.parse(decoded.text);
   try {
-    if (!tree || tree.rootNode.toString() !== root.toString()) return checkTypeScript(root);
-    return restoreDiagnosticIndices(checkTypeScript(tree.rootNode), decoded.offsets);
+    if (!tree || tree.rootNode.toString() !== root.toString()) return checkTypeScript(root, budget);
+    return restoreDiagnosticIndices(checkTypeScript(tree.rootNode, budget), decoded.offsets);
   } finally {
     tree?.delete();
   }
@@ -100,11 +102,17 @@ interface NameOffset {
   removed: number;
 }
 
-function decodeNameEscapes(root: Node, source: string): { text: string; offsets: NameOffset[] } {
+function decodeNameEscapes(
+  root: Node,
+  source: string,
+  budget: ExecutionBudget
+): { text: string; offsets: NameOffset[] } {
+  if (!source.includes(String.raw`\u`)) return { text: source, offsets: [] };
   let decoded = '';
   let end = 0;
   const offsets: NameOffset[] = [];
   const visit = (node: Node): void => {
+    budget.spend();
     if (node.childCount > 0) {
       for (const child of node.children) if (child) visit(child);
     } else if ((node.type.endsWith('identifier') || strictIdentifierTypes.has(node.type)) && node.text.includes('\\')) {

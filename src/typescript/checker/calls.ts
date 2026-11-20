@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 694 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
+// code-gauge-allow-file fileNcss 699 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
@@ -867,6 +867,7 @@ export class Calls {
     if (typeArguments) return this.typeArguments.instantiate(signature, typeArguments);
     const parameters = signature.typeParameters;
     const run = newInferenceRun(parameters, true);
+    run.higherOrder = { outer: signature, parameters: [] };
     const restIndex = this.genericRestIndex(signature);
     const arguments_ = this.expandedArguments(args);
     const parameterTypes = this.argumentParameterTypes(signature, arguments_);
@@ -924,7 +925,8 @@ export class Calls {
       );
     }
     const mapper = this.c.inference.finalMapper(signature, parameters, run.inferences);
-    return { ...this.c.instantiateSignature(signature, mapper), typeParameters: [] };
+    const instantiated = { ...this.c.instantiateSignature(signature, mapper), typeParameters: [] };
+    return this.c.inference.withInferredCallbackParameters(run, instantiated);
   }
 
   private inferAnnotatedCallback(run: InferenceRun, node: TreeNode, context: Type | undefined): void {
@@ -1047,7 +1049,8 @@ export class Calls {
     if (!parameterType) return;
     const context = mapper ? this.c.instantiate(parameterType, mapper) : parameterType;
     const argType = arg.spread ? this.spreadValueType(arg.spread) : this.probeArgumentType(arg, context);
-    this.c.inference.inferTypes(run, argType, parameterType, true);
+    if (arg.spread) this.c.inference.inferTypes(run, argType, parameterType, true);
+    else this.c.inference.inferArgument(run, argType, parameterType);
   }
 
   private probeArgumentType(arg: ExpandedArgument, contextual: Type | undefined): Type {

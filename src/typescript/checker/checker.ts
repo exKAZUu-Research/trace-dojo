@@ -122,14 +122,18 @@ export class Checker {
    * The operations and the time checking may take, as running a program may: a program can make checking slow, and
    * the server checks it in its own process.
    */
-  readonly budget = new ExecutionBudget();
-
-  constructor(readonly root: TreeNode) {
+  constructor(
+    readonly root: TreeNode,
+    readonly budget = new ExecutionBudget()
+  ) {
     startTypeCaches();
     this.libraryBinder = new Binder(libraryTree.rootNode, libraryScope(), { deferLibraryTypes: true });
     this.localeOptionsBinder = new Binder(localeOptionsTree.rootNode, this.libraryBinder.moduleScope);
     markUnsupported(this.libraryBinder.moduleScope);
-    this.binder = new Binder(root, this.libraryBinder.globalScope, { rootScope: this.libraryBinder.moduleScope });
+    this.binder = new Binder(root, this.libraryBinder.globalScope, {
+      rootScope: this.libraryBinder.moduleScope,
+      budget,
+    });
   }
 
   check(): SourceDiagnostic[] {
@@ -1038,8 +1042,8 @@ export class Checker {
   }
 }
 
-export function checkTypeScript(root: TreeNode): SourceDiagnostic[] {
-  return new Checker(root).check();
+export function checkTypeScript(root: TreeNode, budget: ExecutionBudget): SourceDiagnostic[] {
+  return new Checker(root, budget).check();
 }
 
 export { regularOf };
