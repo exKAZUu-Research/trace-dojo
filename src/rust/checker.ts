@@ -517,11 +517,14 @@ export class Checker {
   }
 
   withScope<T>(run: () => T): T {
-    this.body.scopes.push(new Map());
+    const body = this.body;
+    const module = body.module;
+    body.scopes.push(new Map());
     try {
       return run();
     } finally {
-      this.body.scopes.pop();
+      body.scopes.pop();
+      body.module = module;
     }
   }
 
@@ -766,11 +769,7 @@ export class Checker {
       for (const stmt of block.stmts) {
         if (this.checkStmt(stmt)) diverges = true;
       }
-      if (block.tail) {
-        const type = this.expr(block.tail, expected);
-        if (diverges && shallow(type).kind !== 'never') return type;
-        return type;
-      }
+      if (block.tail) return this.expr(block.tail, expected);
       return diverges ? NEVER : UNIT;
     });
   }

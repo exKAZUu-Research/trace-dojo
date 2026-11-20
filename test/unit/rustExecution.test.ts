@@ -340,6 +340,27 @@ fn main() {
   });
 });
 
+test('Rust block items and imports stop shadowing names when their block ends', () => {
+  const program = `mod first { pub fn value() -> i32 { 1 } }
+mod second { pub fn value() -> i32 { 2 } }
+use first::value as imported;
+
+fn number() -> i32 { 10 }
+fn main() {
+    {
+        use second::value as imported;
+        fn number() -> i32 { 20 }
+        println!("{} {}", number(), imported());
+    }
+    println!("{} {}", number(), imported());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '20 2\n10 1\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {
