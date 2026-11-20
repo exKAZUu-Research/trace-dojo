@@ -2736,3 +2736,32 @@ test('environment constructors use declared defaults with no learner environment
     stdout: '[false, true, true, false, 4, unknown]\n',
   });
 });
+
+test('generic enum constants resolve their own arguments and values uses the enum bound', () => {
+  const program = `const selected = Constants.selected;
+class Constants {
+  static const selected = Op.add;
+  static const seed = 1;
+}
+enum Op<T extends num> {
+  add(Constants.seed), sub<int>(2);
+  const Op(this.code);
+  final T code;
+}
+enum Box<T> {
+  number(1), text<String>('text');
+  const Box(this.value);
+  final T value;
+}
+void main() {
+  int code = selected.code;
+  print([code, Op.add.runtimeType, Op.values.runtimeType, Op.values.map((o) => o.code).toList()]);
+  print([Box.number.value + 1, Box.values.runtimeType, Box.values.map((o) => o.value).toList()]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[1, Op<int>, List<Op<num>>, [1, 2]]\n[2, List<Box<dynamic>>, [1, text]]\n',
+  });
+  const bad = "enum E<T extends num> { x<String>('text'); const E(T value); } void main() {}";
+  expect(executeProgram('dart', bad)).toMatchObject({ kind: 'compileError' });
+});

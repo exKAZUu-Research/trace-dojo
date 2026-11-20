@@ -369,7 +369,7 @@ export abstract class CompilerBase {
     this.withIsolatedTypes(() => this.resolveTypeParamBounds(cls.typeParams, declaration.typeParameters));
   }
 
-  private withIsolatedTypes<T>(run: () => T): T {
+  protected withIsolatedTypes<T>(run: () => T): T {
     const outer = this.typeScopes;
     this.typeScopes = [];
     try {

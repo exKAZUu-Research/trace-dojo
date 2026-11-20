@@ -23,7 +23,7 @@ import {
   type MethodMember,
   sourceMemberName,
 } from './classes';
-import { at, type Compiled, type Eval, typeName } from './compilerBase';
+import { at, type Compiled, eraseExtensionTypes, type Eval, typeName } from './compilerBase';
 import { EMPTY_ENV } from './constructorCompiler';
 import {
   type Declaration,
@@ -45,6 +45,7 @@ import {
   DYNAMIC,
   type FunctionType,
   functionType,
+  instantiateToBounds,
   type InterfaceType,
   interfaceType,
   isNullable,
@@ -691,10 +692,10 @@ export class Compiler extends MemberCompiler {
       if (cls.members.has(name) || cls.staticMembers.has(name))
         this.error(variable, `${name} という名前は、このクラスで既に宣言されています。`);
       const { initializer } = variable;
-      if (!declaredType) {
+      if (!declaredType && !declaration.isStatic) {
         // The initializer may use classes declared later, and the overridden field may itself be inferred, so the
         // type is found once every member is declared, superclasses first.
-        this.fieldInferences.push(() => this.inferFieldType(cls, name, initializer, declaration.isStatic));
+        this.fieldInferences.push(() => this.inferFieldType(cls, name, initializer));
       }
       const type = declaredType ?? DYNAMIC;
       if (declaration.isStatic) {
@@ -757,8 +758,8 @@ export class Compiler extends MemberCompiler {
   /** Infers the types of fields declared without one, once every class's members are declared. */
   private readonly fieldInferences: (() => void)[] = [];
 
-  private inferFieldType(cls: ClassInfo, name: string, initializer: Expression | undefined, isStatic: boolean): void {
-    const inherited = isStatic ? undefined : this.inheritedFieldType(cls, name);
+  private inferFieldType(cls: ClassInfo, name: string, initializer: Expression | undefined): void {
+    const inherited = this.inheritedFieldType(cls, name);
     if (!inherited && !initializer) return;
     const savedClass = this.currentClass;
     this.currentClass = cls;
@@ -766,18 +767,16 @@ export class Compiler extends MemberCompiler {
     try {
       type =
         inherited ??
-        this.withTypeParams(cls.typeParams, () => this.inferInitializerType(initializer as Expression, isStatic, cls));
+        this.withTypeParams(cls.typeParams, () => this.inferInitializerType(initializer as Expression, false, cls));
     } finally {
       this.currentClass = savedClass;
     }
-    for (const table of [cls.members, cls.setters, cls.staticMembers, cls.staticSetters]) {
+    for (const table of [cls.members, cls.setters]) {
       const member = table.get(name);
       if (member && member.kind !== 'method') member.type = type;
     }
     const field = cls.fields.find((candidate) => candidate.name === name);
     if (field) field.type = type;
-    const staticField = cls.staticMembers.get(name);
-    if (staticField?.kind === 'field') this.globals[staticField.slot].type = type;
   }
 
   /** A field without a type takes the type of the member it overrides, as Dart infers. */
@@ -841,13 +840,16 @@ export class Compiler extends MemberCompiler {
     if (!field.isFinal || declaration.isLate) cls.staticSetters.set(variable.name, field);
     const { initializer } = variable;
     if (initializer) {
+      if (!declaration.type) {
+        this.inferTypeOnFirstUse(global, initializer, () => {
+          field.type = this.inferInitializerType(initializer, true, cls);
+          return field.type;
+        });
+      }
       this.deferredBodies.push(() => {
-        this.currentClass = cls;
-        try {
-          this.withTypeParams([], () => this.compileGlobalInitializer(global, initializer, declaration.isConst, cls));
-        } finally {
-          this.currentClass = undefined;
-        }
+        this.inDeclarationScope(cls, undefined, () =>
+          this.withIsolatedTypes(() => this.compileGlobalInitializer(global, initializer, declaration.isConst, cls))
+        );
       });
     }
   }
@@ -1105,6 +1107,7 @@ export class Compiler extends MemberCompiler {
   private declareEnumValues(cls: ClassInfo, declaration: ClassDeclaration): void {
     const names = new Set<string>();
     const values: GlobalVariable[] = [];
+    const enumType = interfaceType(cls, instantiateToBounds(cls.typeParams));
     for (const [index, constant] of declaration.enumConstants.entries()) {
       if (names.has(constant.name)) this.error(constant, `列挙型の値 ${constant.name} が重複しています。`);
       if (constant.name === 'values' || constant.name === 'index')
@@ -1113,7 +1116,7 @@ export class Compiler extends MemberCompiler {
       const global = this.newGlobal(
         constant.name,
         `${cls.name}.${constant.name}`,
-        cls.thisType,
+        enumType,
         { isFinal: true, isConst: true, isLate: false },
         true,
         cls,
@@ -1126,7 +1129,7 @@ export class Compiler extends MemberCompiler {
         isStatic: true,
         isAbstract: false,
         row: constant.row,
-        type: cls.thisType,
+        type: enumType,
         isFinal: true,
         isLate: false,
         isConst: true,
@@ -1137,9 +1140,15 @@ export class Compiler extends MemberCompiler {
       };
       cls.staticMembers.set(constant.name, field);
       values.push(global);
-      this.deferredBodies.push(() => this.compileEnumConstant(cls, constant, index, global));
+      this.inferTypeOnFirstUse(global, constant, () => {
+        field.type = this.compileEnumConstant(cls, constant, index, global);
+        return field.type;
+      });
+      this.deferredBodies.push(() => {
+        void global.type;
+      });
     }
-    const listType = interfaceType(coreTypes.list, [cls.thisType]);
+    const listType = interfaceType(coreTypes.list, [enumType]);
     const valuesGlobal = this.newGlobal(
       'values',
       `${cls.name}.values`,
@@ -1149,9 +1158,10 @@ export class Compiler extends MemberCompiler {
       cls,
       declaration.row
     );
+    const elementType = eraseExtensionTypes(enumType);
     valuesGlobal.initialize = (runtime) => {
       const elements = values.map((global) => readGlobalValue(runtime, global));
-      return runtime.links.newList(runtime, cls.thisType, elements, false, true);
+      return runtime.links.newList(runtime, elementType, elements, false, true);
     };
     cls.staticMembers.set('values', {
       kind: 'field',
@@ -1176,44 +1186,34 @@ export class Compiler extends MemberCompiler {
     constant: NonNullable<ClassDeclaration['enumConstants']>[number],
     index: number,
     global: GlobalVariable
-  ): void {
-    this.currentClass = cls;
-    try {
-      this.inTemporaryFunction(true, cls, () => {
-        const constructor = cls.constructors.get(constant.constructorName ?? '');
-        if (!constructor)
-          this.error(
-            constant,
-            `列挙型 ${cls.name} に${constant.constructorName ? ` ${constant.constructorName} という` : '名前のない'}コンストラクタがありません。`
-          );
-        const args = constant.arguments ?? { ...at(constant), positional: [], named: [], order: [] };
-        const typeArgs = constant.typeArguments?.map((argument) => this.resolveType(argument));
-        const signature = typeArgs
-          ? (substitute(
-              { ...constructor.type, typeParams: [] },
-              new Map(cls.typeParams.map((param, at) => [param, typeArgs[at]]))
-            ) as FunctionType)
-          : { ...constructor.type, typeParams: cls.typeParams };
-        const bound = this.withConstContext(true, () =>
-          this.bindArguments(signature, args, undefined, constant, undefined)
+  ): DartType {
+    return this.inTemporaryFunction(true, cls, () => {
+      const constructor = cls.constructors.get(constant.constructorName ?? '');
+      if (!constructor)
+        this.error(
+          constant,
+          `列挙型 ${cls.name} に${constant.constructorName ? ` ${constant.constructorName} という` : '名前のない'}コンストラクタがありません。`
         );
-        if (!this.argumentsAreConst) this.error(constant, '列挙値の引数には定数を渡してください。');
-        const resolvedArgs = typeArgs ?? bound.staticTypeArgs;
-        const fn = this.fn;
-        const { name } = constant;
-        global.initialize = (runtime) => {
-          const frame = new Frame(runtime, fn.info, fn.slotCount, undefined, [], new Map(), undefined);
-          const object = new DartObject(cls, resolvedArgs, newFields(cls));
-          object.native = { index: BigInt(index), name, values: () => [] };
-          const evaluated = bound.args(frame);
-          (constructor.impl as ConstructorImpl)(runtime, object, evaluated, resolvedArgs, undefined);
-          return object;
-        };
-        this.checkConstant(constant, { type: global.type, run: this.readGlobal(global), isConst: true });
-      });
-    } finally {
-      this.currentClass = undefined;
-    }
+      const args = constant.arguments ?? { ...at(constant), positional: [], named: [], order: [] };
+      const signature = { ...constructor.type, typeParams: cls.typeParams };
+      const bound = this.withConstContext(true, () =>
+        this.bindArguments(signature, args, constant.typeArguments, constant, undefined)
+      );
+      if (!this.argumentsAreConst) this.error(constant, '列挙値の引数には定数を渡してください。');
+      const fn = this.fn;
+      const { name } = constant;
+      global.initialize = (runtime) => {
+        const frame = new Frame(runtime, fn.info, fn.slotCount, undefined, [], new Map(), undefined);
+        const resolvedArgs = bound.typeArgs(frame);
+        const object = new DartObject(cls, resolvedArgs, newFields(cls));
+        object.native = { index: BigInt(index), name, values: () => [] };
+        const evaluated = bound.args(frame);
+        (constructor.impl as ConstructorImpl)(runtime, object, evaluated, resolvedArgs, undefined);
+        return object;
+      };
+      this.checkConstant(constant, { type: bound.returnType, run: this.readGlobal(global), isConst: true });
+      return bound.returnType;
+    });
   }
 
   // Constructors
@@ -1525,7 +1525,8 @@ export class Compiler extends MemberCompiler {
       this.declareName(variable.name, { kind: 'variable', global }, variable);
       const { initializer } = variable;
       if (!initializer) continue;
-      if (!declaredType) this.inferTypeOnFirstUse(global, initializer);
+      if (!declaredType)
+        this.inferTypeOnFirstUse(global, initializer, () => this.inferInitializerType(initializer, true, undefined));
       initializers.push(() => {
         void global.type;
         this.compileGlobalInitializer(global, initializer, declaration.isConst, undefined);
@@ -1534,11 +1535,7 @@ export class Compiler extends MemberCompiler {
     return initializers;
   }
 
-  /**
-   * Infers a top-level variable's type from its initializer when something first needs it, so that initializers may
-   * use variables declared after them, as Dart infers top-level variables in the order they depend on each other.
-   */
-  private inferTypeOnFirstUse(global: GlobalVariable, initializer: Expression): void {
+  private inferTypeOnFirstUse(global: GlobalVariable, initializer: Span, infer: () => DartType): void {
     let state: 'pending' | 'inferring' | 'done' = 'pending';
     let inferred: DartType = DYNAMIC;
     Object.defineProperty(global, 'type', {
@@ -1553,7 +1550,7 @@ export class Compiler extends MemberCompiler {
         }
         if (state === 'pending') {
           state = 'inferring';
-          inferred = this.inferInitializerType(initializer, true, undefined);
+          inferred = this.inDeclarationScope(global.owner, undefined, () => this.withIsolatedTypes(infer));
           state = 'done';
         }
         return inferred;

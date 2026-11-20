@@ -1182,8 +1182,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     switch (member.kind) {
       case 'field': {
         const global = this.globals[member.slot];
-        const constant = global.initialValue && global.isConst ? global.initialValue : undefined;
-        return { type: member.type, run: this.readGlobal(global), isConst: global.isConst, constValue: constant };
+        return this.readDeclaration({ kind: 'variable', global }, span);
       }
       case 'getter': {
         const impl = member;
