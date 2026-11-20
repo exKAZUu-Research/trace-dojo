@@ -83,13 +83,18 @@ namespace System {
     public int IndexOf(string value, StringComparison comparisonType);
     public int IndexOf(char value, StringComparison comparisonType);
     public int IndexOf(string value, int startIndex, StringComparison comparisonType);
+    public int IndexOf(string value, int startIndex, int count, StringComparison comparisonType);
     public int IndexOfAny(char[] anyOf);
     public int IndexOfAny(char[] anyOf, int startIndex);
     public string Insert(int startIndex, string value);
     public int LastIndexOf(char value);
     public int LastIndexOf(char value, int startIndex);
+    public int LastIndexOf(char value, int startIndex, int count);
     public int LastIndexOf(string value);
     public int LastIndexOf(string value, int startIndex);
+    public int LastIndexOf(string value, int startIndex, int count);
+    public int LastIndexOf(string value, int startIndex, int count, StringComparison comparisonType);
+    public int LastIndexOf(string value, int startIndex, StringComparison comparisonType);
     public int LastIndexOf(string value, StringComparison comparisonType);
     public int LastIndexOfAny(char[] anyOf);
     public string PadLeft(int totalWidth);

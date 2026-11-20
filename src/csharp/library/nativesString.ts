@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 626 -- The nativesString module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss 662 -- The nativesString module keeps one stage of the C# interpreter together.
 // oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
 import {
   compareCulture,
@@ -10,11 +10,21 @@ import {
   cultureStartsWith,
   equalsCulture,
 } from '../culture';
-import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
-import { primitiveHash, unboxed } from '../objects';
+import { defineNatives, defineNativesKeepingStrings, type NativeCall, type NativeMethod } from '../natives';
+import { primitiveHash, toStringValue, unboxed } from '../objects';
 import type { NativeState } from '../runtime';
 import { specialOf, type Type } from '../types';
-import { type CsArray, CsBox, CsObject, type Value, type VariableReference } from '../values';
+import {
+  type CsArray,
+  CsBox,
+  CsObject,
+  type CsString,
+  freshString,
+  plainString,
+  stringText,
+  type Value,
+  type VariableReference,
+} from '../values';
 import { BuilderChunks } from './builderChunks';
 import { iterate } from './iteration';
 import { compositeFormat } from './nativesCore';
@@ -127,7 +137,7 @@ function separatorsOf(value: Value, type: Type): string[] | undefined {
   if (type.kind === 'array') {
     if (value === undefined) return [];
     return (value as CsArray).values.map((item) =>
-      typeof item === 'number' ? String.fromCodePoint(item) : (item as string)
+      typeof item === 'number' ? String.fromCodePoint(item) : (plainString(item) as string)
     );
   }
   const special = specialOf(type);
@@ -168,30 +178,59 @@ function splitParts(
 }
 
 function joinValues(call: NativeCall, separator: string, args: Value[], startIndex = 1): string {
-  const parameters = call.method.parameters;
-  const last = args[startIndex];
-  const parameter = parameters[startIndex];
-  const separatorText = separator;
-  let items: string[];
-  if (parameter.type.kind === 'array') {
-    if (args.length > startIndex + 1) {
-      const array = (last as CsArray).values.slice(
-        args[startIndex + 1] as number,
-        (args[startIndex + 1] as number) + (args[startIndex + 2] as number)
-      );
-      items = array.map((item) => (item === undefined ? '' : (item as string)));
-    } else {
-      const elementType = parameter.type.element;
-      items = arrayValues(last).map((item) => textOf(call, item, elementType));
-    }
-  } else {
-    const elementType = call.typeArgs[0] ?? libraryType(call, STRING);
-    items = [];
-    for (const item of iterate(call, last)) items.push(textOf(call, item, elementType));
-  }
-  const text = items.join(separatorText);
+  const text = elementStrings(call, args, startIndex)
+    .map((item) => stringText(item))
+    .join(separator);
   call.frame.runtime.allocateString(text.length);
   return text;
+}
+
+/**
+ * The strings that `Concat`, `Join`, and `AppendJoin` combine from their arguments from an index on, as the objects
+ * that the elements' `ToString()` return: an array or a sequence of elements, or the separate arguments.
+ */
+function elementStrings(call: NativeCall, args: Value[], startIndex: number): (string | CsString)[] {
+  const parameter = call.method.parameters[startIndex];
+  const evaluator = evaluatorOf(call);
+  const toText = (item: Value, type: Type): string | CsString => toStringValue(evaluator, item, type, call.frame);
+  const last = args[startIndex];
+  if (parameter.type.kind === 'array') {
+    const elementType = parameter.type.element;
+    const values = arrayValues(last);
+    const items =
+      args.length > startIndex + 1
+        ? values.slice(
+            args[startIndex + 1] as number,
+            (args[startIndex + 1] as number) + (args[startIndex + 2] as number)
+          )
+        : values;
+    return items.map((item) => toText(item, elementType));
+  }
+  if (
+    parameter.type.kind === 'named' &&
+    specialOf(parameter.type) !== 'object' &&
+    specialOf(parameter.type) !== 'string'
+  ) {
+    const elementType = call.typeArgs[0] ?? libraryType(call, STRING);
+    return [...iterate(call, last)].map((item) => toText(item, elementType));
+  }
+  return args.slice(startIndex).map((arg, index) => toText(arg, parameterType(call, startIndex + index)));
+}
+
+/**
+ * The string `Concat` or `Join` returns: an only element itself, the one non-empty string of `Concat`'s overloads
+ * for two to four strings or objects, or a new string.
+ */
+function combinedString(call: NativeCall, strings: (string | CsString)[], separator: string): string | CsString {
+  if (strings.length === 1) return strings[0];
+  const nonEmpty = strings.filter((item) => stringText(item) !== '');
+  const isSeparateArguments = call.method.parameters.every(
+    (parameter) => !parameter.isParams && ['object', 'string'].includes(specialOf(parameter.type) ?? '')
+  );
+  if (call.method.name === 'Concat' && isSeparateArguments && nonEmpty.length === 1) return nonEmpty[0];
+  const text = strings.map((item) => stringText(item)).join(separator);
+  call.frame.runtime.allocateString(text.length);
+  return freshString(text);
 }
 
 const stringNatives: Record<string, NativeMethod> = {
@@ -248,7 +287,7 @@ const stringNatives: Record<string, NativeMethod> = {
     if (value === undefined) failNull('value');
     return searchWith(receiverText(receiver), value as string, comparison as number, 'ends');
   },
-  [`${STRING}.Equals(object?)`]: (_call, receiver, [other]) => receiver === other,
+  [`${STRING}.Equals(object?)`]: (_call, receiver, [other]) => receiver === plainString(other as Value),
   [`${STRING}.Equals(string?)`]: (_call, receiver, [other]) => receiver === other,
   [`${STRING}.Equals(string?, StringComparison)`]: (_call, receiver, [other, comparison]) =>
     other !== undefined && equalsWith(receiverText(receiver), other as string, comparison as number),
@@ -261,8 +300,8 @@ const stringNatives: Record<string, NativeMethod> = {
     enumerator.native = new CharEnumeratorState(receiverText(receiver));
     return enumerator;
   },
-  [`${STRING}.IndexOf`]: (call, receiver, args) => indexOf(call, receiverText(receiver), args as Value[], false),
-  [`${STRING}.LastIndexOf`]: (call, receiver, args) => indexOf(call, receiverText(receiver), args as Value[], true),
+  [`${STRING}.IndexOf`]: (call, receiver, args) => indexOf(call, receiverText(receiver), args as Value[]),
+  [`${STRING}.LastIndexOf`]: (call, receiver, args) => lastIndexOf(call, receiverText(receiver), args as Value[]),
   [`${STRING}.IndexOfAny`]: (_call, receiver, [chars, start = 0]) => {
     const text = receiverText(receiver);
     const set = charsOf(chars as Value);
@@ -296,8 +335,6 @@ const stringNatives: Record<string, NativeMethod> = {
     if ((start as number) < 0) failOutOfRange(call, 'startIndex', 'StartIndex cannot be less than zero.');
     if ((start as number) > text.length)
       failOutOfRange(call, 'startIndex', 'startIndex cannot be larger than length of string.');
-    if ((start as number) === text.length)
-      failOutOfRange(call, 'startIndex', 'startIndex must be less than length of string.');
     return text.slice(0, start as number);
   },
   [`${STRING}.Remove(int, int)`]: (call, receiver, [start, count]) => {
@@ -415,44 +452,98 @@ const stringNatives: Record<string, NativeMethod> = {
     if (lengthA < 0 || lengthB < 0) failOutOfRange(call, lengthA < 0 ? 'indexA' : 'indexB', message);
     return ordinalDifference(a.slice(indexA, indexA + lengthA), b.slice(indexB, indexB + lengthB));
   },
-  [`${STRING}.Concat`]: (call, _receiver, args) => {
-    const parameters = call.method.parameters;
-    let text = '';
-    if (parameters.length === 1 && (parameters[0].type.kind === 'array' || parameters[0].isParams)) {
-      for (const item of arrayValues(args[0] as Value))
-        text += textOf(
-          call,
-          item,
-          (parameters[0].type as { element?: Type }).element ?? libraryType(call, 'System.Object')
-        );
-    } else if (
-      parameters.length === 1 &&
-      parameters[0].type.kind === 'named' &&
-      specialOf(parameters[0].type) !== 'object'
-    ) {
-      const elementType = call.typeArgs[0] ?? libraryType(call, STRING);
-      for (const item of iterate(call, args[0] as Value)) text += textOf(call, item, elementType);
-    } else {
-      for (const [index, arg] of args.entries()) text += textOf(call, arg as Value, parameterType(call, index));
-    }
-    call.frame.runtime.allocateString(text.length);
-    return text;
-  },
   [`${STRING}.Copy`]: (_call, _receiver, [text]) => text as string,
   [`${STRING}.Format`]: (call, _receiver, args) => formatCall(call, args as Value[]),
   [`${STRING}.IsNullOrEmpty`]: (_call, _receiver, [value]) => value === undefined || value === '',
   [`${STRING}.IsNullOrWhiteSpace`]: (_call, _receiver, [value]) =>
     value === undefined || trimWith(value as string, undefined, true, true) === '',
-  [`${STRING}.Join`]: (call, _receiver, args) => {
-    if (args.length === 2 && args[1] === undefined) failNull('value');
-    const separator =
-      args[0] === undefined ? '' : typeof args[0] === 'number' ? String.fromCodePoint(args[0]) : (args[0] as string);
-    return joinValues(call, separator, args as Value[]);
-  },
   [`${STRING}.op_Equality`]: (_call, _receiver, [a, b]) => a === b,
   [`${STRING}.op_Inequality`]: (_call, _receiver, [a, b]) => a !== b,
 };
 defineNatives(stringNatives);
+
+/** Whether a string has only ASCII characters, whose case mapping .NET returns the string itself from when unchanged. */
+const isAscii = (text: string): boolean => /^[\0-\u007F]*$/u.test(text);
+
+/**
+ * The methods that return the string itself when they leave its text as it is, with what else .NET requires of the
+ * call; `Replace` makes a new string whenever it finds what it replaces, except for one character by another.
+ */
+const RETURNING_RECEIVER: [string, (text: string, args: Value[]) => boolean][] = [
+  ...['Clone', 'ToString', 'PadLeft', 'PadRight', 'Remove(int)', 'Remove(int, int)', 'Replace(char, char)'].map(
+    (name): [string, () => boolean] => [name, () => true]
+  ),
+  ...['Substring(int)', 'Substring(int, int)'].map((name): [string, () => boolean] => [name, () => true]),
+  ...['Trim', 'TrimStart', 'TrimEnd'].flatMap((name) =>
+    ['()', '(char)', '(char[]?)'].map((parameters): [string, () => boolean] => [`${name}${parameters}`, () => true])
+  ),
+  ...['ToLower', 'ToLowerInvariant', 'ToUpper', 'ToUpperInvariant'].map((name): [string, (text: string) => boolean] => [
+    name,
+    isAscii,
+  ]),
+  [
+    'Replace(string, string?)',
+    (text, [from, to]) =>
+      ((from as string).length === 1 && ((to as string | undefined) ?? '').length === 1) ||
+      !text.includes(from as string),
+  ],
+  [
+    'Replace(string, string?, StringComparison)',
+    (text, [from, _to, comparison]) =>
+      (comparison as number) % 2 === 0
+        ? !text.includes(from as string)
+        : !text.toLowerCase().includes((from as string).toLowerCase()),
+  ],
+];
+
+defineNativesKeepingStrings({
+  ...Object.fromEntries(
+    RETURNING_RECEIVER.map(([name, isReceiverKept]) => {
+      const native = stringNatives[`${STRING}.${name}`];
+      const kept: NativeMethod = (call, receiver, args) => {
+        const plainArgs = args.map((arg) => plainString(arg as Value));
+        const text = plainString(receiver);
+        const result = native(call, text, plainArgs) as string;
+        return result === text && isReceiverKept(result, plainArgs) ? receiver : freshString(result);
+      };
+      return [`${STRING}.${name}`, kept];
+    })
+  ),
+  [`${STRING}.Insert`]: (call, receiver, args) => {
+    const [index, value] = args as Value[];
+    const result = stringNatives[`${STRING}.Insert`](call, plainString(receiver), [
+      index,
+      plainString(value),
+    ]) as string;
+    // .NET returns the inserted string itself into an empty one, and the string itself for an empty insertion.
+    if (plainString(receiver) === '') return value;
+    return plainString(value) === '' ? receiver : freshString(result);
+  },
+  [`${STRING}.Split`]: (call, receiver, args) => {
+    const text = plainString(receiver);
+    const parts = stringNatives[`${STRING}.Split`](
+      call,
+      text,
+      args.map((arg) => plainString(arg as Value))
+    ) as CsArray;
+    // A string that the separators do not split is its own only part.
+    for (const [index, part] of parts.values.entries())
+      parts.values[index] = part === text ? receiver : freshString(part as string);
+    return parts;
+  },
+  [`${STRING}.Concat`]: (call, _receiver, args) => combinedString(call, elementStrings(call, args as Value[], 0), ''),
+  [`${STRING}.Join`]: (call, _receiver, args) => {
+    if (args.length === 2 && args[1] === undefined) failNull('value');
+    const separator = plainString(args[0] as Value);
+    const separatorText =
+      separator === undefined
+        ? ''
+        : typeof separator === 'number'
+          ? String.fromCodePoint(separator)
+          : (separator as string);
+    return combinedString(call, elementStrings(call, args as Value[], 1), separatorText);
+  },
+});
 
 function ordinalDifference(a: string, b: string): number {
   const length = Math.min(a.length, b.length);
@@ -482,17 +573,15 @@ export function formatCall(call: NativeCall, args: Value[]): string {
   return text;
 }
 
-/**
- * `IndexOf` and `LastIndexOf`: a char searches ordinally and a string with the current culture, unless a
- * `StringComparison` says otherwise.
- */
-function indexOf(call: NativeCall, text: string, args: Value[], fromEnd: boolean): number {
-  const value = args[0];
-  if (value === undefined) failNull('value');
-  const isChar = typeof value === 'number';
-  const needle = isChar ? String.fromCodePoint(value) : (value as string);
-  const { start, count, comparison } = searchArguments(call, args, fromEnd ? text.length - 1 : 0, isChar ? 4 : 0);
-  if (fromEnd) return lastIndexFrom(call, text, needle, start, count, comparison);
+function lastIndexOf(call: NativeCall, text: string, args: Value[]): number {
+  const { needle, isChar, start, count = start + 1, comparison } = searchOf(call, args, text.length - 1);
+  return isChar
+    ? lastCharIndex(call, text, needle, start, count)
+    : lastStringIndex(call, text, needle, { start, count }, comparison);
+}
+
+function indexOf(call: NativeCall, text: string, args: Value[]): number {
+  const { needle, start, count, comparison } = searchOf(call, args, 0);
   if (start < 0 || start > text.length)
     failOutOfRange(
       call,
@@ -511,6 +600,22 @@ function indexOf(call: NativeCall, text: string, args: Value[], fromEnd: boolean
   const found = haystack.indexOf(target, start);
   if (found === -1 || found + target.length > end) return -1;
   return found;
+}
+
+/**
+ * The value that `IndexOf` and `LastIndexOf` search for, and how: a char ordinally and a string with the current
+ * culture, unless a `StringComparison` says otherwise.
+ */
+function searchOf(
+  call: NativeCall,
+  args: Value[],
+  defaultStart: number
+): { needle: string; isChar: boolean; start: number; count: number | undefined; comparison: number } {
+  const value = args[0];
+  if (value === undefined) failNull('value');
+  const isChar = typeof value === 'number';
+  const needle = isChar ? String.fromCodePoint(value) : (value as string);
+  return { needle, isChar, ...searchArguments(call, args, defaultStart, isChar ? 4 : 0) };
 }
 
 /** The texts an ordinal search compares: as they are, or case-mapped for `OrdinalIgnoreCase`. */
@@ -536,29 +641,57 @@ function searchArguments(
   return { start, count, comparison };
 }
 
-function lastIndexFrom(
+/** `string.LastIndexOf(char, int, int)`: the last occurrence in the `count` characters that end at `start`. */
+function lastCharIndex(call: NativeCall, text: string, char: string, start: number, count: number): number {
+  if (text.length === 0) return -1;
+  if (start < 0 || start >= text.length) failLastStart(call);
+  if (count < 0 || count > start + 1) failLastCount(call);
+  const found = text.slice(start + 1 - count, start + 1).lastIndexOf(char);
+  return found === -1 ? -1 : start + 1 - count + found;
+}
+
+/**
+ * `CompareInfo.LastIndexOf`, which `string.LastIndexOf(string, ...)` calls: the last occurrence in the `count`
+ * characters that end at `start`, which may be the length to search the whole string.
+ */
+function lastStringIndex(
   call: NativeCall,
   text: string,
   needle: string,
-  start: number,
-  count: number | undefined,
+  range: { start: number; count: number },
   comparison: number
 ): number {
-  if (text.length === 0) return needle === '' ? 0 : -1;
-  if (start < 0 || start >= text.length)
-    failOutOfRange(
-      call,
-      'startIndex',
-      'Index was out of range. Must be non-negative and less than the size of the collection.'
-    );
-  const first = count === undefined ? 0 : start - count + 1;
-  if (comparison < 4 && needle !== '')
-    return cultureLastIndexOf(text, needle, Math.max(0, first), start + 1, cultureOf(comparison));
-  const [haystack, target] = ordinalForms(text, needle, comparison);
-  const last = start - target.length + 1;
-  const found =
-    last >= 0 ? haystack.lastIndexOf(target, last) : haystack.lastIndexOf(target, target === '' ? start : -1);
-  return found >= first ? found : -1;
+  let { start, count } = range;
+  if (start === text.length) {
+    start--;
+    if (count > 0) count--;
+  }
+  if (start === -1 && text.length === 0) count = 0;
+  else if (start < 0 || start >= text.length) failLastStart(call);
+  const first = start - count + 1;
+  if (first < 0 || count < 0 || first + count > text.length) failLastCount(call);
+  // An empty value occurs at the end of the part searched.
+  if (needle === '') return first + count;
+  if (comparison < 4) return cultureLastIndexOf(text, needle, first, first + count, cultureOf(comparison));
+  const [haystack, target] = ordinalForms(text.slice(first, first + count), needle, comparison);
+  const found = haystack.lastIndexOf(target);
+  return found === -1 ? -1 : first + found;
+}
+
+function failLastStart(call: NativeCall): never {
+  return failOutOfRange(
+    call,
+    'startIndex',
+    'Index was out of range. Must be non-negative and less than the size of the collection.'
+  );
+}
+
+function failLastCount(call: NativeCall): never {
+  return failOutOfRange(
+    call,
+    'count',
+    'Count must be positive and count must refer to a location within the string/array/collection.'
+  );
 }
 
 /** `CharEnumerator`'s state: the text and the position before the current character. */

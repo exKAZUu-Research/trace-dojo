@@ -1,8 +1,8 @@
-// code-gauge-allow-file fileNcss 717 -- The nativesCore module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss 748 -- The nativesCore module keeps one stage of the C# interpreter together.
 // oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
 import { TURTLE_METHOD_NAMES } from '../../interpreter/turtleWorld';
 import { CsDecimal } from '../decimal';
-import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
+import { defineNatives, defineNativesKeepingStrings, type NativeCall, type NativeMethod } from '../natives';
 import {
   arithmetic,
   convertNumeric,
@@ -27,6 +27,7 @@ import {
   runtimeTypeName,
   structEquals,
   structHash,
+  toStringValue,
   tupleText,
   unboxed,
   valuesEqual,
@@ -47,7 +48,11 @@ import {
   CsBox,
   CsDelegate,
   CsObject,
+  type CsString,
   CsStruct,
+  freshString,
+  isString,
+  stringText,
   type Value,
   type VariableReference,
 } from '../values';
@@ -82,9 +87,27 @@ const INTEGRAL: [string, SpecialType][] = [
 
 // ---- Object ----
 
+defineNativesKeepingStrings({
+  'System.Object.ToString': (call, receiver) => objectString(call, receiver),
+  'System.ValueType.ToString': (call, receiver) => objectString(call, receiver),
+});
+
+/** `Object.ToString()`, which returns the type's name that .NET makes once, unless a library type says otherwise. */
+function objectString(call: NativeCall, receiver: Value): string | CsString {
+  const text = defaultToString(evaluatorOf(call), receiver);
+  const type = call.frame.runtime.runtimeTypeOf(receiver);
+  const linqName = receiver instanceof CsObject ? linqDisplayName(receiver.native) : undefined;
+  const typeName = linqName ?? (type && !(receiver instanceof CsBox) ? runtimeTypeName(type) : undefined);
+  return text === typeName ? typeString(call, 'ToString', text) : freshString(text);
+}
+
+/** A name of a type that `Type`'s properties return, which .NET makes once for each type and property. */
+function typeString(call: NativeCall, property: string, text: string): CsString {
+  return call.frame.runtime.sharedString(`Type.${property}:${text}`, text);
+}
+
 defineNatives({
   'System.Object..ctor': () => {},
-  'System.Object.ToString': (call, receiver) => defaultToString(evaluatorOf(call), receiver),
   'System.Object.Equals(object?)': (call, receiver, [other]) => {
     if (receiver instanceof CsStruct) return structEquals(evaluatorOf(call), receiver, other as Value, call.frame);
     if (receiver instanceof CsBox) return valuesEqual(evaluatorOf(call), receiver, other as Value, call.frame);
@@ -124,26 +147,34 @@ defineNatives({
     const value = unboxed(receiver);
     return value instanceof CsStruct ? structHash(evaluatorOf(call), value, call.frame) : (primitiveHash(value) ?? 0);
   },
-  'System.ValueType.ToString': (call, receiver) => defaultToString(evaluatorOf(call), receiver),
-  'System.Type.get_Name': (_call, receiver) => {
+});
+
+defineNatives({
+  'System.Type.get_Name': (call, receiver) => {
     const type = typeOf(receiver);
-    return typeof type === 'string' ? (/[.+]([^.+[]+)(?:\[|$)/.exec(type)?.[1] ?? type) : runtimeSimpleName(type);
+    const name = typeof type === 'string' ? (/[.+]([^.+[]+)(?:\[|$)/.exec(type)?.[1] ?? type) : runtimeSimpleName(type);
+    return typeString(call, 'Name', name);
   },
   'System.Type.get_FullName': (call, receiver) => {
     const type = typeOf(receiver);
     // .NET qualifies a generic type's arguments with their assemblies, which name the program's own file.
     if (typeof type === 'string' || (type.kind === 'named' && type.args.length > 0))
       unsupportedCall(call, '型引数のある型の FullName');
-    return runtimeTypeName(type);
+    return typeString(call, 'FullName', runtimeTypeName(type));
   },
-  'System.Type.get_Namespace': (_call, receiver) => {
+  'System.Type.get_Namespace': (call, receiver) => {
     const type = typeOf(receiver);
-    if (typeof type === 'string') return type.slice(0, type.lastIndexOf('.', type.search(/[+`]/)));
-    return type.kind === 'named' ? type.symbol.namespace || undefined : 'System';
+    const name =
+      typeof type === 'string'
+        ? type.slice(0, type.lastIndexOf('.', type.search(/[+`]/)))
+        : type.kind === 'named'
+          ? type.symbol.namespace || undefined
+          : 'System';
+    return name === undefined ? undefined : typeString(call, 'Namespace', name);
   },
-  'System.Type.ToString': (_call, receiver) => {
+  'System.Type.ToString': (call, receiver) => {
     const type = typeOf(receiver);
-    return typeof type === 'string' ? type : runtimeTypeName(type);
+    return typeString(call, 'ToString', typeof type === 'string' ? type : runtimeTypeName(type));
   },
 });
 
@@ -177,13 +208,23 @@ function typeOf(receiver: Value): Type | string {
 // ---- Enum ----
 
 defineNatives({
-  'System.Enum.ToString()': (_call, receiver) => {
+  'System.Enum.ToString()': (call, receiver) => {
     const box = receiver as CsBox;
-    return enumText(box.type as NamedType, box.value);
+    return call.frame.runtime.enumString(box.type as NamedType, enumText(box.type as NamedType, box.value));
   },
   'System.Enum.ToString(string?)': (call, receiver, [format]) => {
     const box = receiver as CsBox;
-    return formatValue(evaluatorOf(call), box.value, box.type, (format as string | undefined) ?? undefined, call.frame);
+    const text = formatValue(
+      evaluatorOf(call),
+      box.value,
+      box.type,
+      (format as string | undefined) ?? undefined,
+      call.frame
+    );
+    // The names and the decimal digits come from .NET's caches; the hexadecimal digits are new each time.
+    return /^[xX]$/.test((format as string | undefined) ?? '')
+      ? text
+      : call.frame.runtime.enumString(box.type as NamedType, text);
   },
   'System.Enum.HasFlag': (_call, receiver, [flag]) => {
     const value = BigInt(unboxed(receiver) as number | bigint);
@@ -198,14 +239,14 @@ defineNatives({
   'System.Enum.GetName': (call, _receiver, [value]) => {
     const type = call.typeArgs[0] as NamedType;
     const member = type.symbol.fields.find((field) => field.isConst && field.constantValue === unboxed(value as Value));
-    return member?.name ?? undefined;
+    return member ? call.frame.runtime.enumString(type, member.name) : undefined;
   },
   'System.Enum.GetNames': (call) => {
     const type = call.typeArgs[0] as NamedType;
     return newArray(
       call,
       libraryType(call, 'System.String'),
-      enumMembers(type).map((field) => field.name)
+      enumMembers(type).map((field) => call.frame.runtime.enumString(type, field.name))
     );
   },
   'System.Enum.GetValues': (call) => {
@@ -257,6 +298,16 @@ function parseEnum(call: NativeCall, text: string | undefined, ignoreCase: boole
 // ---- Primitives ----
 
 const parsers: Record<string, NativeMethod> = {};
+/**
+ * An integer's `ToString` with a format: .NET returns its cached text of a small number for the formats that print
+ * the plain digits, which are `G` without a precision and `D` with at most one digit, and a new string for others.
+ */
+function integerString(call: NativeCall, receiver: Value, format: Value, prefix: string): string | CsString {
+  const formatText = (format as string | undefined) ?? undefined;
+  const text = formatValue(evaluatorOf(call), unboxed(receiver), libraryType(call, prefix), formatText, call.frame);
+  return /^(?:[Gg]0*|[Dd]0*1?)?$/.test(formatText ?? '') ? call.frame.runtime.numberString(text) : text;
+}
+
 for (const [name, special] of INTEGRAL) {
   const prefix = `System.${name}`;
   const [min, max] = integerRange(special);
@@ -282,24 +333,14 @@ for (const [name, special] of INTEGRAL) {
       rotated(bitsOf(value), (amount as number) % width, width, fromBits),
     [`${prefix}.RotateRight`]: (_call: NativeCall, _receiver: Value, [value, amount]: Value[]) =>
       rotated(bitsOf(value), (width - ((amount as number) % width)) % width, width, fromBits),
-    [`${prefix}.ToString()`]: (_call: NativeCall, receiver: Value) => String(unboxed(receiver)),
+    [`${prefix}.ToString()`]: (call: NativeCall, receiver: Value) =>
+      call.frame.runtime.numberString(String(unboxed(receiver))),
     [`${prefix}.ToString(string?)`]: (call: NativeCall, receiver: Value, [format]: Value[]) =>
-      formatValue(
-        evaluatorOf(call),
-        unboxed(receiver),
-        libraryType(call, prefix),
-        (format as string | undefined) ?? undefined,
-        call.frame
-      ),
-    [`${prefix}.ToString(IFormatProvider?)`]: (_call: NativeCall, receiver: Value) => String(unboxed(receiver)),
+      integerString(call, receiver, format, prefix),
+    [`${prefix}.ToString(IFormatProvider?)`]: (call: NativeCall, receiver: Value) =>
+      call.frame.runtime.numberString(String(unboxed(receiver))),
     [`${prefix}.ToString(string?, IFormatProvider?)`]: (call: NativeCall, receiver: Value, [format]: Value[]) =>
-      formatValue(
-        evaluatorOf(call),
-        unboxed(receiver),
-        libraryType(call, prefix),
-        (format as string | undefined) ?? undefined,
-        call.frame
-      ),
+      integerString(call, receiver, format, prefix),
     [`${prefix}.Equals`]: (_call: NativeCall, receiver: Value, [other]: Value[]) => {
       if (other instanceof CsBox) return specialOf(other.type) === special && unboxed(receiver) === other.value;
       return unboxed(receiver) === other;
@@ -479,8 +520,12 @@ for (const [name, special] of [
   });
 }
 
-defineNatives({
+defineNativesKeepingStrings({
+  // `bool.TrueString` and `bool.FalseString`, which are literals and so interned.
   'System.Boolean.ToString': (_call, receiver) => (unboxed(receiver) ? 'True' : 'False'),
+});
+
+defineNatives({
   'System.Boolean.Equals': (_call, receiver, [other]) => unboxed(receiver) === unboxed(other as Value),
   'System.Boolean.GetHashCode': (_call, receiver) => (unboxed(receiver) ? 1 : 0),
   'System.Boolean.CompareTo': (_call, receiver, [other]) => {
@@ -614,10 +659,16 @@ defineNatives({
   },
   'System.Nullable`1.GetHashCode': (call, receiver) =>
     receiver === undefined ? 0 : hashOf(evaluatorOf(call), unboxed(receiver), call.frame),
+});
+
+defineNativesKeepingStrings({
   'System.Nullable`1.ToString': (call, receiver) =>
-    receiver === undefined
-      ? ''
-      : textOf(call, unboxed(receiver), call.frame.resolve(call.owner?.args[0] ?? libraryType(call, 'System.Object'))),
+    toStringValue(
+      evaluatorOf(call),
+      unboxed(receiver),
+      call.frame.resolve(call.owner?.args[0] ?? libraryType(call, 'System.Object')),
+      call.frame
+    ),
 });
 
 /** Parses a decimal as `decimal.Parse` does, whose number style allows group separators but no exponent. */
@@ -873,23 +924,28 @@ defineNatives({
       );
     return Number(inner) !== 0;
   },
-  'System.Convert.ToString(int, int)': (_call, _receiver, [value, base]) =>
-    radixText(BigInt(value as number), base as number, 32),
-  'System.Convert.ToString(long, int)': (_call, _receiver, [value, base]) =>
-    radixText(value as bigint, base as number, 64),
-  'System.Convert.ToString(short, int)': (_call, _receiver, [value, base]) =>
-    radixText(BigInt(value as number), base as number, 16),
-  'System.Convert.ToString(byte, int)': (_call, _receiver, [value, base]) =>
-    radixText(BigInt(value as number), base as number, 8),
-  'System.Convert.ToString(string?)': (_call, _receiver, [value]) => value as Value,
-  'System.Convert.ToString': (call, _receiver, [value]) =>
-    value === undefined ? '' : textOf(call, value as Value, parameterType(call, 0)),
 });
 
-function radixText(value: bigint, base: number, bits: number): string {
+defineNativesKeepingStrings({
+  'System.Convert.ToString(string?)': (_call, _receiver, [value]) => value as Value,
+  'System.Convert.ToString(int, int)': (call, _receiver, [value, base]) =>
+    radixText(call, BigInt(value as number), base as number, 32),
+  'System.Convert.ToString(long, int)': (call, _receiver, [value, base]) =>
+    radixText(call, value as bigint, base as number, 64),
+  'System.Convert.ToString(short, int)': (call, _receiver, [value, base]) =>
+    radixText(call, BigInt(value as number), base as number, 16),
+  'System.Convert.ToString(byte, int)': (call, _receiver, [value, base]) =>
+    radixText(call, BigInt(value as number), base as number, 8),
+  // `ToString()` of the value, as the object it returns.
+  'System.Convert.ToString': (call, _receiver, [value]) =>
+    toStringValue(evaluatorOf(call), value as Value, parameterType(call, 0), call.frame),
+});
+
+/** The digits of an integer in a base, of which base 10 is `ToString()` and its cached text of a small number. */
+function radixText(call: NativeCall, value: bigint, base: number, bits: number): string | CsString {
   if (![2, 8, 10, 16].includes(base)) fail('System.ArgumentException', 'Invalid Base.');
-  if (base === 10) return value.toString();
-  return BigInt.asUintN(bits, value).toString(base);
+  if (base === 10) return call.frame.runtime.numberString(value.toString());
+  return freshString(BigInt.asUintN(bits, value).toString(base));
 }
 
 function convertTo(call: NativeCall, args: (Value | VariableReference)[], target: SpecialType): Value {
@@ -941,7 +997,7 @@ function zeroOf(target: SpecialType): Value {
 /** The value inside an `object` argument and its type, which must implement `IConvertible`. */
 function convertibleOf(call: NativeCall, value: Value): { source: SpecialType; inner: Value } {
   if (value instanceof CsBox) return { source: specialOf(value.type) ?? 'int', inner: value.value };
-  if (typeof value === 'string') return { source: 'string', inner: value };
+  if (isString(value)) return { source: 'string', inner: stringText(value) };
   return fail(
     'System.InvalidCastException',
     `Unable to cast object of type '${runtimeTypeName(call.frame.runtime.runtimeTypeOf(value) ?? libraryType(call, 'System.Object'))}' to type 'System.IConvertible'.`
@@ -1114,11 +1170,15 @@ defineNatives({
     writers((receiver as CsObject).native as 'stdout', true)(call, receiver, args),
   'System.IO.TextWriter.Flush': () => {},
   'System.IO.TextWriter.Dispose': () => {},
-  'System.IO.TextWriter.get_NewLine': () => '\n',
-  'System.Environment.get_NewLine': () => '\n',
   'System.Environment.Exit': (_call, _receiver, [code]) => {
     throw new ProgramExit(code as number);
   },
+});
+
+// .NET's new line on Unix is the literal "\n", which is interned.
+defineNativesKeepingStrings({
+  'System.IO.TextWriter.get_NewLine': () => '\n',
+  'System.Environment.get_NewLine': () => '\n',
 });
 
 const textWriters = new WeakMap<object, Record<string, CsObject>>();
@@ -1141,16 +1201,22 @@ function textWriter(call: NativeCall, stream: 'stdout' | 'stderr'): CsObject {
 
 // ---- Exceptions ----
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Each branch handles one case of the C# rule that the function applies.
+// code-gauge-allow functionCognitiveComplexity 18 -- Each branch handles one case of the C# rule that the function applies.
 const exceptionConstructor: NativeMethod = (call, receiver, args) => {
   const exception = receiver as CsObject;
   const parameters = call.method.parameters.map((parameter) => parameter.name);
   const state: ExceptionState = { message: undefined, inner: undefined, wasThrown: false };
   for (const [index, name] of parameters.entries()) {
     const value = args[index] as Value;
-    if (name === 'message') state.message = (value as string | undefined) ?? undefined;
+    if (name === 'message' && isString(value)) {
+      state.message = stringText(value);
+      state.messageString = value;
+    }
     if (name === 'innerException') state.inner = value as CsObject | undefined;
-    if (name === 'paramName') state.paramName = (value as string | undefined) ?? undefined;
+    if (name === 'paramName' && isString(value)) {
+      state.paramName = stringText(value);
+      state.paramNameString = value;
+    }
     if (name === 'actualValue') {
       state.actualObject = value;
       state.actualValue = value === undefined ? undefined : textOf(call, value, libraryType(call, 'System.Object'));
@@ -1167,9 +1233,30 @@ const exceptionConstructor: NativeMethod = (call, receiver, args) => {
   return;
 };
 
-defineNatives({
+/**
+ * `Message`, which returns the stored message itself, and a new string when it makes one from the type's default
+ * message or adds the parameter name or the actual value.
+ */
+function messageString(exception: CsObject): string | CsString {
+  const state = exception.native as ExceptionState;
+  const text = exceptionMessage(exception);
+  if (state.message === undefined || text !== state.message) return freshString(text);
+  state.messageString ??= freshString(text);
+  return state.messageString;
+}
+
+defineNativesKeepingStrings({
   'System.Exception..ctor': exceptionConstructor,
-  'System.Exception.get_Message': (_call, receiver) => exceptionMessage(receiver as CsObject),
+  'System.Exception.get_Message': (_call, receiver) => messageString(receiver as CsObject),
+  'System.ArgumentException.get_Message': (_call, receiver) => messageString(receiver as CsObject),
+  'System.ArgumentOutOfRangeException.get_Message': (_call, receiver) => messageString(receiver as CsObject),
+  'System.ArgumentException.get_ParamName': (_call, receiver) => {
+    const state = (receiver as CsObject).native as ExceptionState;
+    return state.paramNameString ?? state.paramName;
+  },
+});
+
+defineNatives({
   'System.ArgumentOutOfRangeException.get_ActualValue': (_call, receiver) => {
     const state = (receiver as CsObject).native as ExceptionState;
     return state.actualObject ?? state.actualValue;
@@ -1181,10 +1268,6 @@ defineNatives({
     while ((current.native as ExceptionState).inner) current = (current.native as ExceptionState).inner as CsObject;
     return current;
   },
-  'System.ArgumentException.get_Message': (_call, receiver) => exceptionMessage(receiver as CsObject),
-  'System.ArgumentException.get_ParamName': (_call, receiver) =>
-    ((receiver as CsObject).native as ExceptionState).paramName ?? undefined,
-  'System.ArgumentOutOfRangeException.get_Message': (_call, receiver) => exceptionMessage(receiver as CsObject),
   'System.ArgumentNullException.ThrowIfNull': (_call, _receiver, [value, name]) => {
     if (value === undefined) failNull((name as string | undefined) ?? 'argument');
     return;

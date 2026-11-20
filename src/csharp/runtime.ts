@@ -26,7 +26,10 @@ import {
   CsBox,
   CsDelegate,
   CsObject,
+  CsString,
   CsStruct,
+  freshString,
+  isString,
   UNASSIGNED,
   type Value,
   type VariableReference,
@@ -53,8 +56,12 @@ export class ProgramExit {
 /** The state of a library exception object. */
 export interface ExceptionState {
   message: string | undefined;
+  /** The string object of the message, which `Message` returns each time .NET returns the stored message. */
+  messageString?: string | CsString;
   inner: CsObject | undefined;
   paramName?: string | undefined;
+  /** The program's string object of the parameter name; the library's names are literals, so interned. */
+  paramNameString?: string | CsString;
   /** The text of `ArgumentOutOfRangeException`'s actual value, which its message shows. */
   actualValue?: Value;
   /** The actual value itself, which `ActualValue` returns. */
@@ -106,6 +113,10 @@ export class Runtime {
   private readonly statics = new Map<string, StaticStorage>();
   private readonly initializing = new Set<string>();
   private readonly dispatchCache = new Map<MethodSymbol, Map<string, MethodSymbol>>();
+  /** The strings .NET makes once and returns again, such as a small number's text, by what they are the text of. */
+  private readonly sharedStrings = new Map<string, CsString>();
+  /** The texts that `string.Intern` added to the program's literals, which are interned already. */
+  readonly interned = new Set<string>();
   private allocatedSlots = 0;
 
   constructor(
@@ -130,6 +141,31 @@ export class Runtime {
         "Exception of type 'System.OutOfMemoryException' was thrown."
       );
     this.spend(Math.ceil(written / 16));
+  }
+
+  /**
+   * The text of an integer as .NET's number formatting returns it: one cached string for each of 0 to 299, whatever
+   * the integer type, and a new string for others.
+   */
+  numberString(text: string): string | CsString {
+    return /^(?:[12]?\d)?\d$/.test(text) ? this.sharedString(`number:${text}`, text) : freshString(text);
+  }
+
+  /** The name of an enum member, which .NET keeps for each enum type, or a number's text for a value with none. */
+  enumString(type: NamedType, text: string): string | CsString {
+    if (/^-?\d+$/.test(text)) return this.numberString(text);
+    const isMember = type.symbol.fields.some((field) => field.isConst && field.name === text);
+    return isMember ? this.sharedString(`enum:${typeKey(type)}:${text}`, text) : freshString(text);
+  }
+
+  /** A string that .NET makes once for a key, such as the name of a type, and returns again. */
+  sharedString(key: string, text: string): CsString {
+    let shared = this.sharedStrings.get(key);
+    if (!shared) {
+      shared = new CsString(text);
+      this.sharedStrings.set(key, shared);
+    }
+    return shared;
   }
 
   /** Charges for array elements or object fields before they are allocated. */
@@ -357,7 +393,7 @@ export class Runtime {
       value instanceof CsDelegate
     )
       return value.type;
-    if (typeof value === 'string') return namedType(this.library.specials.get('string') as TypeSymbol);
+    if (isString(value)) return namedType(this.library.specials.get('string') as TypeSymbol);
     return undefined;
   }
 

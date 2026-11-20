@@ -5,7 +5,7 @@ import { PendingException } from '../numeric';
 import { stringOf } from '../objects';
 import { CsThrow, type ExceptionState } from '../runtime';
 import { type NamedType, namedType, substitute, type Type, type TypeParameterSymbol } from '../types';
-import { CsArray, CsBox, CsObject, type Value, type VariableReference } from '../values';
+import { CsArray, CsBox, CsObject, plainString, type Value, type VariableReference } from '../values';
 
 /** The evaluator that runs the call. */
 export function evaluatorOf(call: NativeCall): Evaluator {
@@ -41,9 +41,9 @@ export function typeArgument(call: NativeCall, index = 0): Type {
   return call.frame.resolve(args[index] ?? call.typeArgs[index]);
 }
 
-/** A primitive's value, which arrives boxed when the call came through `object`. */
+/** A primitive's value, which arrives boxed when the call came through `object`, with a string as its text. */
 export function primitive<T extends Value>(value: Value): T {
-  return (value instanceof CsBox ? value.value : value) as T;
+  return (value instanceof CsBox ? value.value : plainString(value)) as T;
 }
 
 export function refOf(arg: Value | VariableReference): VariableReference {

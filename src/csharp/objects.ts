@@ -22,7 +22,20 @@ import {
   type TypeParameterSymbol,
   type TypeSymbol,
 } from './types';
-import { CsArray, CsBox, CsDelegate, CsObject, CsStruct, type Value, type VariableReference } from './values';
+import {
+  CsArray,
+  CsBox,
+  CsDelegate,
+  CsObject,
+  type CsString,
+  CsStruct,
+  freshString,
+  isString,
+  plainString,
+  stringText,
+  type Value,
+  type VariableReference,
+} from './values';
 
 /** The name that .NET's `Type.ToString()` gives a type, such as `System.Collections.Generic.List\`1[System.Int32]`. */
 export function runtimeTypeName(type: Type): string {
@@ -58,9 +71,9 @@ export function runtimeSimpleName(type: Type): string {
   return runtimeTypeName(type);
 }
 
-/** The value of a primitive or a box, unwrapped. */
+/** The value of a primitive or a box, unwrapped, with a string as its text. */
 export function unboxed(value: Value): Value {
-  return value instanceof CsBox ? value.value : value;
+  return value instanceof CsBox ? value.value : plainString(value);
 }
 
 /** The member name of an enum value, or its number when no member has it. */
@@ -80,7 +93,31 @@ export function stringOf(evaluator: Evaluator, value: Value, type: Type, frame: 
   const underlying = nullableUnderlying(type) ?? type;
   const primitive = primitiveText(value, underlying);
   if (primitive !== undefined) return primitive;
-  return invokeToString(evaluator, value, frame) ?? '';
+  return stringText(invokeToString(evaluator, value, frame) ?? '');
+}
+
+/**
+ * The string `ToString()` returns for a value of a known type, as the object .NET returns: a string itself, the
+ * interned `True` and `False`, the cached text of a small number or an enum member, or a new string.
+ */
+export function toStringValue(evaluator: Evaluator, value: Value, type: Type, frame: Frame): string | CsString {
+  if (value === undefined) return '';
+  if (isString(value)) return value;
+  const underlying = value instanceof CsBox ? value.type : (nullableUnderlying(type) ?? type);
+  const inner = unboxed(value);
+  const primitive = primitiveText(inner, underlying);
+  if (primitive === undefined) return invokeToString(evaluator, value, frame) ?? '';
+  if (typeof inner === 'boolean') return primitive;
+  const runtime = evaluator.runtime;
+  if (underlying.kind === 'named' && underlying.symbol.kind === 'enum')
+    return runtime.enumString(underlying, primitive);
+  if (typeof inner === 'bigint' || (typeof inner === 'number' && isIntegral(underlying)))
+    return runtime.numberString(primitive);
+  return freshString(primitive);
+}
+
+function isIntegral(type: Type): boolean {
+  return ['sbyte', 'byte', 'short', 'ushort', 'int', 'uint', 'long', 'ulong'].includes(specialOf(type) ?? '');
 }
 
 /** The text of a value whose static type says how its representation reads, for primitives. */
@@ -113,7 +150,7 @@ export function primitiveText(value: Value, type: Type): string | undefined {
       return (value as CsDecimal).toString();
     }
     case 'string': {
-      return value as string;
+      return stringText(value as string | CsString);
     }
     default: {
       return undefined;
@@ -122,9 +159,9 @@ export function primitiveText(value: Value, type: Type): string | undefined {
 }
 
 /** Calls `ToString()` on an object, struct, box, array, or delegate, dispatching to the program's override. */
-export function invokeToString(evaluator: Evaluator, value: Value, frame: Frame): string | undefined {
+export function invokeToString(evaluator: Evaluator, value: Value, frame: Frame): string | CsString | undefined {
   if (value === undefined) return undefined;
-  if (typeof value === 'string') return value;
+  if (isString(value)) return value;
   const objectToString = objectMethod(evaluator, 'ToString', 0);
   const implementation = evaluator.runtime.dispatch(objectToString, value);
   const result = evaluator.invoke(
@@ -135,7 +172,7 @@ export function invokeToString(evaluator: Evaluator, value: Value, frame: Frame)
     undefined,
     environmentOf(evaluator, implementation, value)
   );
-  return (result as string | undefined) ?? '';
+  return (result as string | CsString | undefined) ?? '';
 }
 
 /** The `System.Object` method of a name and parameter count. */
@@ -239,7 +276,9 @@ export function exceptionText(evaluator: Evaluator, exception: CsObject): string
 
 /** Whether two values are equal as `object.Equals` decides, calling the program's overrides. */
 // code-gauge-allow functionCognitiveComplexity 26 -- Each branch handles one case of the C# rule that the function applies.
-export function valuesEqual(evaluator: Evaluator, a: Value, b: Value, frame: Frame): boolean {
+export function valuesEqual(evaluator: Evaluator, first: Value, second: Value, frame: Frame): boolean {
+  const a = plainString(first);
+  const b = plainString(second);
   if (a === b) return typeof a !== 'number' || !Number.isNaN(a) || true;
   if (a === undefined || b === undefined) return false;
   if (typeof a === 'number' && typeof b === 'number') return a === b || (Number.isNaN(a) && Number.isNaN(b));
@@ -294,7 +333,8 @@ export function hashOf(evaluator: Evaluator, value: Value, frame: Frame): number
 }
 
 /** The hash codes of .NET's primitives, which are deterministic except for strings (randomized per process in .NET). */
-export function primitiveHash(value: Value): number | undefined {
+export function primitiveHash(boxed: Value): number | undefined {
+  const value = unboxed(boxed);
   if (typeof value === 'boolean') return value ? 1 : 0;
   if (typeof value === 'number') {
     if (Number.isInteger(value) && value >= -2_147_483_648 && value <= 4_294_967_295) return toInt32(value);
@@ -309,7 +349,6 @@ export function primitiveHash(value: Value): number | undefined {
     return hash;
   }
   if (value instanceof CsDecimal) return primitiveHash(value.toDouble());
-  if (value instanceof CsBox) return primitiveHash(value.value);
   return undefined;
 }
 
@@ -454,7 +493,8 @@ export function recordMember(
   const frame = call.frame;
   switch (name) {
     case 'ToString': {
-      return recordText(evaluator, frame, receiver as CsObject | CsStruct);
+      // .NET builds the text in a StringBuilder, whose ToString() makes a new string each time.
+      return freshString(recordText(evaluator, frame, receiver as CsObject | CsStruct));
     }
     case 'Equals': {
       return recordEquals(evaluator, frame, receiver as CsObject | CsStruct, unboxed(args[0]));

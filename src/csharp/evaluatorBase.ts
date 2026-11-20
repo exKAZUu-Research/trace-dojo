@@ -29,6 +29,7 @@ import {
   CsDelegate,
   CsObject,
   CsStruct,
+  isString,
   UNASSIGNED,
   type Value,
   type VariableReference,
@@ -255,7 +256,7 @@ export abstract class EvaluatorBase {
     if (
       fromSpecial &&
       toSpecial &&
-      typeof value !== 'string' &&
+      !isString(value) &&
       value !== undefined &&
       !(value instanceof CsStruct) &&
       !(value instanceof CsObject) &&
@@ -277,7 +278,7 @@ export abstract class EvaluatorBase {
       value instanceof CsArray ||
       value instanceof CsDelegate ||
       value instanceof CsBox ||
-      typeof value === 'string'
+      isString(value)
     )
       return false;
     return type.kind !== 'typeParameter' || true;

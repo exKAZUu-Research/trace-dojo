@@ -5,7 +5,7 @@ import { PendingException } from './numeric';
 import { PatternMatcher } from './patternMatcher';
 import { CsThrow, type ExceptionState, type Frame, ProgramExit } from './runtime';
 import type { MethodSymbol, Type } from './types';
-import { Cell, copyValue, type CsArray, CsObject, UNASSIGNED, type Value } from './values';
+import { Cell, copyValue, type CsArray, CsObject, type CsString, stringText, UNASSIGNED, type Value } from './values';
 
 const BREAK = Symbol('break');
 const CONTINUE = Symbol('continue');
@@ -198,7 +198,7 @@ export abstract class StatementExecutor extends PatternMatcher {
       return iterateIndexed(values.length, (index) => values[index], runIteration);
     }
     if (iteration.kind === 'string') {
-      const text = collection as string;
+      const text = stringText(collection as string | CsString);
       return iterateIndexed(text.length, (index) => text.charCodeAt(index), runIteration);
     }
     return this.iterateEnumerator(statement, iteration, collection, frame, runIteration);

@@ -5,7 +5,7 @@ import { arithmetic, PendingException } from '../numeric';
 import { runtimeTypeName } from '../objects';
 import type { NativeState } from '../runtime';
 import { type NamedType, nullableUnderlying, specialOf, type SpecialType, type Type } from '../types';
-import { CsArray, CsBox, CsObject, CsStruct, type Value } from '../values';
+import { CsArray, CsBox, CsObject, CsStruct, isString, stringText, type Value } from '../values';
 import { isEnumerableState, iterate, LibraryEnumerator } from './iteration';
 import { comparisonOf, type Equality, equalityOf, HashState, ListState, newList } from './nativesCollections';
 import { stableSort } from './sort';
@@ -226,7 +226,7 @@ function source(call: NativeCall, value: Value, name = 'source'): Iterable<Value
 /** The element count of a collection that knows it without enumerating, as `Count()` reads it. */
 function knownCount(value: Value): number | undefined {
   if (value instanceof CsArray) return value.values.length;
-  if (typeof value === 'string') return value.length;
+  if (isString(value)) return stringText(value).length;
   if (value instanceof CsObject) {
     const native = value.native;
     if (native instanceof ListState) return native.items.length;

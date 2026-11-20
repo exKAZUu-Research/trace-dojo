@@ -1,8 +1,8 @@
-// code-gauge-allow-file fileNcss 474 -- The nativesRegex module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss 495 -- The nativesRegex module keeps one stage of the C# interpreter together.
 // oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
-import { defineNatives, type NativeCall } from '../natives';
+import { defineNatives, defineNativesKeepingStrings, type NativeCall } from '../natives';
 import type { NativeState } from '../runtime';
-import { CsObject, type Value } from '../values';
+import { CsObject, type CsString, freshString, plainString, stringText, type Value } from '../values';
 import { type EnumerableState, LibraryEnumerator } from './iteration';
 import { evaluatorOf, fail, failNull, failOutOfRange, libraryType, newArray, unsupportedCall } from './support';
 
@@ -300,6 +300,8 @@ interface GroupResult {
   index: number;
   length: number;
   value: string;
+  /** The input string itself when the group spans all of it, which .NET's `Value` returns as `Substring` does. */
+  whole?: string | CsString;
 }
 
 class GroupState implements NativeState {
@@ -317,11 +319,16 @@ class MatchState extends GroupState {
     group: GroupResult,
     readonly groups: GroupResult[],
     readonly compiled: CompiledPattern | undefined,
-    readonly input: string,
+    /** The input string, which `NextMatch` searches on with its identity. */
+    readonly source: string | CsString,
     /** Where the next match starts, past an empty match as .NET moves on. */
     readonly nextStart: number
   ) {
     super(group);
+  }
+
+  get input(): string {
+    return stringText(this.source);
   }
 }
 
@@ -411,8 +418,9 @@ function scanQuantifier(quantifier: RegExpExecArray, index: number, scan: Patter
   return index + text.length;
 }
 
-function patternOf(call: NativeCall, pattern: Value, options: Value = 0): CompiledPattern {
-  if (pattern === undefined) failNull('pattern');
+function patternOf(call: NativeCall, patternString: Value, options: Value = 0): CompiledPattern {
+  if (patternString === undefined) failNull('pattern');
+  const pattern = plainString(patternString);
   const key = `${options as number}:${pattern as string}`;
   let compiled = compiledPatterns.get(key);
   if (!compiled) {
@@ -438,12 +446,13 @@ function regexOf(value: Value): CompiledPattern {
   return (value as CsObject).native as CompiledPattern;
 }
 
-function inputOf(value: Value): string {
+function inputOf(value: Value): string | CsString {
   if (value === undefined) failNull('input');
-  return value as string;
+  return value as string | CsString;
 }
 
-function findMatch(call: NativeCall, compiled: CompiledPattern, input: string, start: number): CsObject {
+function findMatch(call: NativeCall, compiled: CompiledPattern, source: string | CsString, start: number): CsObject {
+  const input = stringText(source);
   compiled.regex.lastIndex = start;
   const found = compiled.regex.exec(input);
   if (!found) return emptyMatch(call);
@@ -457,12 +466,13 @@ function findMatch(call: NativeCall, compiled: CompiledPattern, input: string, s
       index: span?.[0] ?? 0,
       length: span ? span[1] - span[0] : 0,
       value: found[jsIndex] ?? '',
+      whole: span?.[0] === 0 && span[1] === input.length ? source : undefined,
     };
   }
   const whole = groups[0];
   const nextStart = whole.length === 0 ? whole.index + 1 : whole.index + whole.length;
   const match = new CsObject(libraryType(call, `${NAMESPACE}.Match`), []);
-  match.native = new MatchState(whole, groups, compiled, input, nextStart);
+  match.native = new MatchState(whole, groups, compiled, source, nextStart);
   return match;
 }
 
@@ -473,9 +483,9 @@ function emptyMatch(call: NativeCall): CsObject {
   return match;
 }
 
-function allMatches(call: NativeCall, compiled: CompiledPattern, input: string, start = 0): CsObject[] {
+function allMatches(call: NativeCall, compiled: CompiledPattern, input: string | CsString, start = 0): CsObject[] {
   const matches: CsObject[] = [];
-  for (let position = start; position <= input.length;) {
+  for (let position = start; position <= stringText(input).length;) {
     const match = findMatch(call, compiled, input, position);
     const state = match.native as MatchState;
     if (!state.group.success) break;
@@ -569,51 +579,62 @@ function substitute(replacement: string, state: MatchState): string {
   return result;
 }
 
+/** `Replace`, which returns the input itself when it replaces nothing. */
 function replaceMatches(
   call: NativeCall,
   compiled: CompiledPattern,
-  input: string,
+  source: string | CsString,
   replace: (match: CsObject, state: MatchState) => string,
   count = -1
-): string {
+): string | CsString {
   if (count < -1) failOutOfRange(call, 'count', 'Count cannot be less than -1.', String(count));
-  if (count === 0) return input;
+  const matches = count === 0 ? [] : allMatches(call, compiled, source);
+  if (matches.length === 0) return source;
+  const input = stringText(source);
   let result = '';
   let position = 0;
   let replaced = 0;
-  for (const match of allMatches(call, compiled, input)) {
+  for (const match of matches) {
     const state = match.native as MatchState;
     result += input.slice(position, state.group.index) + replace(match, state);
     position = state.group.index + state.group.length;
     if (++replaced === count) break;
   }
-  return result + input.slice(position);
+  return freshString(result + input.slice(position));
 }
 
-function split(call: NativeCall, compiled: CompiledPattern, input: string): Value {
+/** `Split`, whose only part is the input itself when nothing matches. */
+function split(call: NativeCall, compiled: CompiledPattern, source: string | CsString): Value {
+  const matches = allMatches(call, compiled, source);
+  if (matches.length === 0) return newArray(call, stringType(call), [source]);
+  const input = stringText(source);
   const parts: string[] = [];
   let position = 0;
-  for (const match of allMatches(call, compiled, input)) {
+  for (const match of matches) {
     const state = match.native as MatchState;
     parts.push(input.slice(position, state.group.index));
     position = state.group.index + state.group.length;
     for (const group of state.groups.slice(1)) if (group.success) parts.push(group.value);
   }
   parts.push(input.slice(position));
-  return newArray(call, stringType(call), parts);
+  return newArray(
+    call,
+    stringType(call),
+    parts.map((part) => freshString(part))
+  );
 }
 
 const stringType = (call: NativeCall): ReturnType<typeof libraryType> => libraryType(call, 'System.String');
 
 function replacementOf(value: Value): string {
   if (value === undefined) failNull('replacement');
-  return value as string;
+  return plainString(value) as string;
 }
 
 function evaluate(call: NativeCall, evaluator: Value, match: CsObject): string {
   if (evaluator === undefined) failNull('evaluator');
   const result = evaluatorOf(call).invokeDelegate(call.frame, evaluator, [match], call.row);
-  return (result as string | undefined) ?? '';
+  return (plainString(result) as string | undefined) ?? '';
 }
 
 function newMatchCollection(call: NativeCall, matches: CsObject[]): CsObject {
@@ -625,24 +646,65 @@ function newMatchCollection(call: NativeCall, matches: CsObject[]): CsObject {
 const REGEX = `${NAMESPACE}.Regex`;
 
 defineNatives({
+  [`${REGEX}.get_Options`]: (_call, receiver) => regexOf(receiver).options,
+  [`${REGEX}.GetGroupNames`]: (call, receiver) => newArray(call, stringType(call), [...regexOf(receiver).names]),
+  [`${REGEX}.IsMatch(string)`]: (call, receiver, [input]) =>
+    groupOf(findMatch(call, regexOf(receiver), inputOf(input as Value), 0)).success,
+  [`${REGEX}.IsMatch(string, string)`]: (call, _receiver, [input, pattern]) =>
+    groupOf(findMatch(call, patternOf(call, pattern as Value), inputOf(input as Value), 0)).success,
+  [`${REGEX}.IsMatch(string, string, RegexOptions)`]: (call, _receiver, [input, pattern, options]) =>
+    groupOf(findMatch(call, patternOf(call, pattern as Value, options as Value), inputOf(input as Value), 0)).success,
+  [`${NAMESPACE}.Capture.get_Index`]: (_call, receiver) => groupOf(receiver).index,
+  [`${NAMESPACE}.Capture.get_Length`]: (_call, receiver) => groupOf(receiver).length,
+  [`${NAMESPACE}.Group.get_Success`]: (_call, receiver) => groupOf(receiver).success,
+  [`${NAMESPACE}.Group.get_Name`]: (_call, receiver) => groupOf(receiver).name,
+  [`${NAMESPACE}.Match.get_Empty`]: (call) => emptyMatch(call),
+  [`${NAMESPACE}.Match.get_Groups`]: (call, receiver) => {
+    const collection = new CsObject(libraryType(call, `${NAMESPACE}.GroupCollection`), []);
+    collection.native = new MatchListState(groupObjectsOf(call, matchStateOf(receiver), receiver as CsObject));
+    return collection;
+  },
+  [`${NAMESPACE}.Match.NextMatch`]: (call, receiver) => {
+    const state = matchStateOf(receiver);
+    if (!state.compiled || state.nextStart > state.input.length) return emptyMatch(call);
+    return findMatch(call, state.compiled, state.source, state.nextStart);
+  },
+  [`${NAMESPACE}.Match.Result`]: (_call, receiver, [replacement]) =>
+    substitute(replacementOf(replacement as Value), matchStateOf(receiver)),
+  [`${NAMESPACE}.MatchCollection.get_Count`]: (_call, receiver) => listOf(receiver).length,
+  [`${NAMESPACE}.MatchCollection.get_IsReadOnly`]: () => true,
+  [`${NAMESPACE}.MatchCollection.get_Item`]: (call, receiver, [index]) =>
+    itemAt(call, listOf(receiver), index as number),
+  [`${NAMESPACE}.MatchCollection.GetEnumerator`]: (call, receiver) =>
+    enumeratorOf(call, `${NAMESPACE}.Match`, receiver),
+  [`${NAMESPACE}.GroupCollection.get_Count`]: (_call, receiver) => listOf(receiver).length,
+  [`${NAMESPACE}.GroupCollection.get_IsReadOnly`]: () => true,
+  [`${NAMESPACE}.GroupCollection.get_Item(int)`]: (call, receiver, [number]) =>
+    listOf(receiver)[number as number] ?? missingGroup(call),
+  [`${NAMESPACE}.GroupCollection.get_Item(string)`]: (call, receiver, [name]) =>
+    listOf(receiver).find((group) => groupOf(group).name === name) ?? missingGroup(call),
+  [`${NAMESPACE}.GroupCollection.GetEnumerator`]: (call, receiver) =>
+    enumeratorOf(call, `${NAMESPACE}.Group`, receiver),
+});
+
+// These take the input string with its identity, which a result that is all of it is, as .NET returns it.
+defineNativesKeepingStrings({
   [`${REGEX}..ctor(string)`]: (call, receiver, [pattern]) => {
     (receiver as CsObject).native = patternOf(call, pattern as Value);
+    patternStrings.set(receiver as CsObject, pattern as string | CsString);
     return;
   },
   [`${REGEX}..ctor(string, RegexOptions)`]: (call, receiver, [pattern, options]) => {
     (receiver as CsObject).native = patternOf(call, pattern as Value, options as Value);
+    patternStrings.set(receiver as CsObject, pattern as string | CsString);
     return;
   },
-  [`${REGEX}.get_Options`]: (_call, receiver) => regexOf(receiver).options,
-  [`${REGEX}.ToString`]: (_call, receiver) => regexOf(receiver).pattern,
-  [`${REGEX}.GetGroupNames`]: (call, receiver) => newArray(call, stringType(call), [...regexOf(receiver).names]),
-  [`${REGEX}.IsMatch(string)`]: (call, receiver, [input]) =>
-    groupOf(findMatch(call, regexOf(receiver), inputOf(input as Value), 0)).success,
+  [`${REGEX}.ToString`]: (_call, receiver) => patternStrings.get(receiver as CsObject) ?? regexOf(receiver).pattern,
   [`${REGEX}.Match(string)`]: (call, receiver, [input]) =>
     findMatch(call, regexOf(receiver), inputOf(input as Value), 0),
   [`${REGEX}.Match(string, int)`]: (call, receiver, [input, start]) => {
     const text = inputOf(input as Value);
-    if ((start as number) < 0 || (start as number) > text.length) {
+    if ((start as number) < 0 || (start as number) > stringText(text).length) {
       failOutOfRange(call, 'startat', 'Start index cannot be less than 0 or greater than input length.', String(start));
     }
     return findMatch(call, regexOf(receiver), text, start as number);
@@ -668,10 +730,6 @@ defineNatives({
       evaluate(call, evaluator as Value, match)
     ),
   [`${REGEX}.Split(string)`]: (call, receiver, [input]) => split(call, regexOf(receiver), inputOf(input as Value)),
-  [`${REGEX}.IsMatch(string, string)`]: (call, _receiver, [input, pattern]) =>
-    groupOf(findMatch(call, patternOf(call, pattern as Value), inputOf(input as Value), 0)).success,
-  [`${REGEX}.IsMatch(string, string, RegexOptions)`]: (call, _receiver, [input, pattern, options]) =>
-    groupOf(findMatch(call, patternOf(call, pattern as Value, options as Value), inputOf(input as Value), 0)).success,
   [`${REGEX}.Match(string, string)`]: (call, _receiver, [input, pattern]) =>
     findMatch(call, patternOf(call, pattern as Value), inputOf(input as Value), 0),
   [`${REGEX}.Match(string, string, RegexOptions)`]: (call, _receiver, [input, pattern, options]) =>
@@ -712,16 +770,18 @@ defineNatives({
     split(call, patternOf(call, pattern as Value, options as Value), inputOf(input as Value)),
   [`${REGEX}.Escape`]: (_call, _receiver, [text]) => {
     if (text === undefined) failNull('str');
-    return (text as string).replaceAll(/[\\*+?|{[()^$.# \t\n\r\f]/g, (char) => {
-      const named: Record<string, string> = {
-        ' ': String.raw`\ `,
-        '\t': String.raw`\t`,
-        '\n': String.raw`\n`,
-        '\r': String.raw`\r`,
-        '\f': String.raw`\f`,
-      };
-      return named[char] ?? `\\${char}`;
-    });
+    return keptUnlessChanged(text as string | CsString, (plain) =>
+      plain.replaceAll(/[\\*+?|{[()^$.# \t\n\r\f]/g, (char) => {
+        const named: Record<string, string> = {
+          ' ': String.raw`\ `,
+          '\t': String.raw`\t`,
+          '\n': String.raw`\n`,
+          '\r': String.raw`\r`,
+          '\f': String.raw`\f`,
+        };
+        return named[char] ?? `\\${char}`;
+      })
+    );
   },
   [`${REGEX}.Unescape`]: (_call, _receiver, [text]) => {
     if (text === undefined) failNull('str');
@@ -735,42 +795,28 @@ defineNatives({
       e: '\u001B',
       b: '\b',
     };
-    return (text as string).replaceAll(/\\(.)/gs, (_match, char: string) => named[char] ?? char);
+    return keptUnlessChanged(text as string | CsString, (plain) =>
+      plain.replaceAll(/\\(.)/gs, (_match, char: string) => named[char] ?? char)
+    );
   },
-  [`${NAMESPACE}.Capture.get_Index`]: (_call, receiver) => groupOf(receiver).index,
-  [`${NAMESPACE}.Capture.get_Length`]: (_call, receiver) => groupOf(receiver).length,
-  [`${NAMESPACE}.Capture.get_Value`]: (_call, receiver) => groupOf(receiver).value,
-  [`${NAMESPACE}.Capture.ToString`]: (_call, receiver) => groupOf(receiver).value,
-  [`${NAMESPACE}.Group.get_Success`]: (_call, receiver) => groupOf(receiver).success,
-  [`${NAMESPACE}.Group.get_Name`]: (_call, receiver) => groupOf(receiver).name,
-  [`${NAMESPACE}.Match.get_Empty`]: (call) => emptyMatch(call),
-  [`${NAMESPACE}.Match.get_Groups`]: (call, receiver) => {
-    const collection = new CsObject(libraryType(call, `${NAMESPACE}.GroupCollection`), []);
-    collection.native = new MatchListState(groupObjectsOf(call, matchStateOf(receiver), receiver as CsObject));
-    return collection;
-  },
-  [`${NAMESPACE}.Match.NextMatch`]: (call, receiver) => {
-    const state = matchStateOf(receiver);
-    if (!state.compiled || state.nextStart > state.input.length) return emptyMatch(call);
-    return findMatch(call, state.compiled, state.input, state.nextStart);
-  },
-  [`${NAMESPACE}.Match.Result`]: (_call, receiver, [replacement]) =>
-    substitute(replacementOf(replacement as Value), matchStateOf(receiver)),
-  [`${NAMESPACE}.MatchCollection.get_Count`]: (_call, receiver) => listOf(receiver).length,
-  [`${NAMESPACE}.MatchCollection.get_IsReadOnly`]: () => true,
-  [`${NAMESPACE}.MatchCollection.get_Item`]: (call, receiver, [index]) =>
-    itemAt(call, listOf(receiver), index as number),
-  [`${NAMESPACE}.MatchCollection.GetEnumerator`]: (call, receiver) =>
-    enumeratorOf(call, `${NAMESPACE}.Match`, receiver),
-  [`${NAMESPACE}.GroupCollection.get_Count`]: (_call, receiver) => listOf(receiver).length,
-  [`${NAMESPACE}.GroupCollection.get_IsReadOnly`]: () => true,
-  [`${NAMESPACE}.GroupCollection.get_Item(int)`]: (call, receiver, [number]) =>
-    listOf(receiver)[number as number] ?? missingGroup(call),
-  [`${NAMESPACE}.GroupCollection.get_Item(string)`]: (call, receiver, [name]) =>
-    listOf(receiver).find((group) => groupOf(group).name === name) ?? missingGroup(call),
-  [`${NAMESPACE}.GroupCollection.GetEnumerator`]: (call, receiver) =>
-    enumeratorOf(call, `${NAMESPACE}.Group`, receiver),
+  [`${NAMESPACE}.Capture.get_Value`]: (_call, receiver) => captureString(receiver),
+  [`${NAMESPACE}.Capture.ToString`]: (_call, receiver) => captureString(receiver),
 });
+
+/** The pattern string that each `Regex` was made from, which its `ToString()` returns. */
+const patternStrings = new WeakMap<CsObject, string | CsString>();
+
+/** A capture's text, which .NET takes with `Substring`: the input itself when it is all of it, or a new string. */
+function captureString(capture: Value): string | CsString {
+  const group = groupOf(capture);
+  return group.whole ?? freshString(group.value);
+}
+
+/** The result of `Escape` or `Unescape`, which is the string itself when there is nothing to change. */
+function keptUnlessChanged(text: string | CsString, change: (plain: string) => string): string | CsString {
+  const changed = change(stringText(text));
+  return changed === stringText(text) ? text : freshString(changed);
+}
 
 function listOf(value: Value): CsObject[] {
   if (value === undefined) failNull('collection');

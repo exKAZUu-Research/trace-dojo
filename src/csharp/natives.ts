@@ -1,6 +1,6 @@
 import type { Frame } from './runtime';
-import { displayType, type MethodSymbol, type NamedType, type Type } from './types';
-import type { Value, VariableReference } from './values';
+import { displayType, type MethodSymbol, type NamedType, specialOf, type Type } from './types';
+import { CsArray, freshString, plainString, type Value, type VariableReference } from './values';
 
 /** What a native method knows of its call besides its receiver and arguments. */
 export interface NativeCall {
@@ -17,6 +17,8 @@ export interface NativeCall {
 export type NativeMethod = (call: NativeCall, receiver: Value, args: (Value | VariableReference)[]) => Value;
 
 const registry = new Map<string, NativeMethod>();
+/** The natives that see and return strings as they are, since .NET returns some of its string arguments themselves. */
+const keepingStrings = new WeakSet<NativeMethod>();
 /** The natives by key without `?`, since a nullable reference type is its type to the compiler. */
 const registryWithoutNullability = new Map<string, NativeMethod>();
 
@@ -32,15 +34,66 @@ export function defineNatives(natives: Record<string, NativeMethod>): void {
   }
 }
 
+/**
+ * Registers natives that take their `string` arguments and receiver with their identity and whose results keep it:
+ * an argument returned is the same object, and a new plain string is an interned one.
+ */
+export function defineNativesKeepingStrings(natives: Record<string, NativeMethod>): void {
+  for (const native of Object.values(natives)) keepingStrings.add(native);
+  defineNatives(natives);
+}
+
 /** The native implementation of a library method, if any, which a constructor may take from its base class's. */
 export function nativeOf(method: MethodSymbol): NativeMethod | undefined {
-  const own = ownNativeOf(method, method.owner.fullName);
-  if (own || method.kind !== 'constructor') return own;
+  const native = ownNativeOf(method, method.owner.fullName) ?? inheritedConstructorOf(method);
+  if (!native || keepingStrings.has(native)) return native;
+  return withPlainStrings(method, native);
+}
+
+function inheritedConstructorOf(method: MethodSymbol): NativeMethod | undefined {
+  if (method.kind !== 'constructor') return undefined;
   for (let base = method.owner.baseType; base; base = base.symbol.baseType) {
     const inherited = ownNativeOf(method, base.symbol.fullName);
     if (inherited) return inherited;
   }
   return undefined;
+}
+
+/**
+ * A native that reads its `string` arguments and receiver as plain text and whose new strings are .NET's new objects,
+ * so that most natives handle strings as JavaScript strings.
+ */
+function withPlainStrings(method: MethodSymbol, native: NativeMethod): NativeMethod {
+  const stringParameters = new Set(
+    method.parameters.flatMap((parameter, index) =>
+      parameter.refKind === undefined && specialOf(parameter.type) === 'string' ? [index] : []
+    )
+  );
+  const hasStringReceiver = !method.isStatic && method.owner.special === 'string';
+  const result = resultStrings(method);
+  if (stringParameters.size === 0 && !hasStringReceiver && result === undefined) return native;
+  return (call, receiver, args) => {
+    const plainArgs = args.map((arg, index) => (stringParameters.has(index) ? plainString(arg as Value) : arg));
+    const value = native(call, hasStringReceiver ? plainString(receiver) : receiver, plainArgs);
+    return result === undefined ? value : withFreshStrings(value, result);
+  };
+}
+
+/** Where a method's result has strings: itself, as a `string` or a new `String`, or the elements of a `string[]`. */
+function resultStrings(method: MethodSymbol): 'string' | 'elements' | undefined {
+  const type = method.returnType;
+  if (specialOf(type) === 'string' || (method.kind === 'constructor' && method.owner.special === 'string'))
+    return 'string';
+  return type.kind === 'array' && specialOf(type.element) === 'string' ? 'elements' : undefined;
+}
+
+function withFreshStrings(value: Value, where: 'string' | 'elements'): Value {
+  if (where === 'string') return typeof value === 'string' ? freshString(value) : value;
+  if (value instanceof CsArray) {
+    for (const [index, element] of value.values.entries())
+      if (typeof element === 'string') value.values[index] = freshString(element);
+  }
+  return value;
 }
 
 function ownNativeOf(method: MethodSymbol, ownerName: string): NativeMethod | undefined {

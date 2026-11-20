@@ -30,7 +30,10 @@ import {
   CsBox,
   CsDelegate,
   CsObject,
+  CsString,
   CsStruct,
+  isString,
+  stringText,
   UNASSIGNED,
   type Value,
   type VariableReference,
@@ -186,7 +189,7 @@ function scalarOf(value: Value, type: Type): TraceScalar | TraceItemVariable[str
       return String.fromCharCode(value as number);
     }
     case 'string': {
-      return value as string;
+      return stringText(value as string | CsString);
     }
     case 'long':
     case 'ulong': {
@@ -210,7 +213,7 @@ function scalarOf(value: Value, type: Type): TraceScalar | TraceItemVariable[str
       return Number.isFinite(number) && number !== 0 ? Number(formatFloat(number, true)) : number;
     }
     case 'object': {
-      return typeof value === 'string' ? value : NOT_SCALAR;
+      return isString(value) ? stringText(value) : NOT_SCALAR;
     }
     default: {
       return NOT_SCALAR;
@@ -248,7 +251,8 @@ function displayNodeOf(value: Value, type: Type, seen: Set<unknown>): DisplayNod
   if (value === undefined) return NULL_NODE;
   const scalar = scalarOf(value, type);
   if (scalar !== NOT_SCALAR && !Array.isArray(scalar)) return { kind: 'value', value: scalar as TraceScalar };
-  if (typeof value !== 'object' || value instanceof CsDecimal) return { kind: 'value', value: String(value) };
+  if (typeof value !== 'object' || value instanceof CsDecimal || value instanceof CsString)
+    return { kind: 'value', value: String(value) };
   if (seen.has(value)) return undefined;
   if (value instanceof CsObject && value.turtle) return turtleNodeOf(value.turtle);
   if (value instanceof CsDelegate) return undefined;

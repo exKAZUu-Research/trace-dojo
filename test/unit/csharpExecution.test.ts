@@ -91,6 +91,28 @@ class Circle : Shape { double r; public Circle(double r) { this.r = r; } public 
   });
 });
 
+// .NET makes a new string for each result, except where it returns one it has: an operand that the others leave as
+// it is, a cached small number or enum name, an interned literal. ja-JP compares ignoring case with the rules that
+// .NET adds to ICU's, and ICU's search matches between grapheme clusters, weighing `ー` after the kana before it.
+test('strings are the same object and compare as in .NET', () => {
+  const program = String.raw`static bool R(object a, object b) => ReferenceEquals(a, b);
+string b = "a"; string e = ""; int i = 1;
+string c = b + "b";
+Console.WriteLine($"{R(c, "ab")} {R(c + e, c)} {R(c + e + e + e + e, c)} {R($"{c}{e}", c)} {R($"{c,0}", c)} {R(c.Trim(), c)} {R(c.ToUpper().ToLower(), c)}");
+Console.WriteLine($"{R(i.ToString(), "" + i)} {R(299.ToString(), 299.ToString())} {R(300.ToString(), 300.ToString())} {R(true.ToString(), "True")} {R(DayOfWeek.Monday.ToString(), DayOfWeek.Monday.ToString())} {R(c.Split(',')[0], c)} {R(string.Join(",", new[] { c }), c)}");
+Console.WriteLine($"{string.Compare("カ", "ガ", true)} {string.Compare("ｱ", "ァ", true)} {string.Compare("Ａ", "ａ", true)} {string.Compare("ー", "ｰ", true)} {string.Equals("ぷー", "ぷう", StringComparison.CurrentCultureIgnoreCase)} {"ルﾟu".IndexOf("ル")} {"ァヽb".IndexOf("ヽb")} {"­カ".IndexOf("カ")} {"abcabc".LastIndexOf("bc", 6)}");
+`;
+  expect(executeProgram('csharp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: [
+      'False True False True False True False',
+      'True True False True True True True',
+      '-1 -1 0 0 True -1 -1 1 4',
+      '',
+    ].join('\n'),
+  });
+});
+
 // Roslyn's Japanese messages, each on the row it reports. Roslyn reports the unassigned local last, as its flow
 // analysis runs after binding, which the sorting by row hides.
 test('compile errors carry Roslyn codes and messages', () => {

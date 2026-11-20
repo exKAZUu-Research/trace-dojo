@@ -5,8 +5,9 @@ import type { ArrayType, MethodSymbol, NamedType, Type } from './types';
 
 /**
  * A C# value. `null` is `null`; `bool` is a boolean; integral types up to 32 bits and `char` are numbers, `long` and
- * `ulong` bigints; `float` and `double` numbers; `decimal` a {@link CsDecimal}; `string` a string; enums their
- * underlying values. Objects, structs, boxes, arrays, and delegates are the classes below.
+ * `ulong` bigints; `float` and `double` numbers; `decimal` a {@link CsDecimal}; `string` a string when .NET interns it
+ * and a {@link CsString} otherwise; enums their underlying values. Objects, structs, boxes, arrays, and delegates are
+ * the classes below.
  */
 export type Value =
   | undefined
@@ -14,6 +15,7 @@ export type Value =
   | number
   | bigint
   | string
+  | CsString
   | CsDecimal
   | CsObject
   | CsStruct
@@ -22,6 +24,38 @@ export type Value =
   | CsDelegate;
 
 let nextIdentity = 1;
+
+/**
+ * A string that the program made at run time, which .NET keeps as an object of its own: `ReferenceEquals` tells two
+ * of them with the same text apart. Literals and the strings .NET interns are plain strings, since each text has one.
+ */
+export class CsString {
+  constructor(readonly text: string) {}
+
+  /** The text, which messages that the library builds from values in template literals show. */
+  toString(): string {
+    return this.text;
+  }
+}
+
+/** Whether a value is a string, interned or not. */
+export function isString(value: unknown): value is string | CsString {
+  return typeof value === 'string' || value instanceof CsString;
+}
+
+export function stringText(value: string | CsString): string {
+  return typeof value === 'string' ? value : value.text;
+}
+
+/** A value with a string as its text, for code that reads strings by their text alone. */
+export function plainString<T extends Value>(value: T): Exclude<T, CsString> | string {
+  return (value instanceof CsString ? value.text : value) as Exclude<T, CsString>;
+}
+
+/** A string that .NET allocates for a result: its own object, except the empty string, which .NET always shares. */
+export function freshString(text: string): string | CsString {
+  return text === '' ? '' : new CsString(text);
+}
 
 /** An instance of a class, whose library classes keep their state in `native`. */
 export class CsObject {

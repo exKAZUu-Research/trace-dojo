@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 719 -- The evaluator module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss 729 -- The evaluator module keeps one stage of the C# interpreter together.
 import type {
   BoundArguments,
   BoundBlock,
@@ -22,7 +22,7 @@ import {
   stepNumeric,
   unaryNumeric,
 } from './numeric';
-import { environmentOf, exceptionMessage, recordMember, stringOf } from './objects';
+import { environmentOf, exceptionMessage, recordMember, stringOf, toStringValue } from './objects';
 import { CsThrow, Frame, type Runtime, type Slot, StackOverflow } from './runtime';
 import { StatementExecutor } from './statementExecutor';
 import {
@@ -48,8 +48,12 @@ import {
   CsBox,
   CsDelegate,
   CsObject,
+  type CsString,
   CsStruct,
   type DelegateEntry,
+  freshString,
+  plainString,
+  stringText,
   UNASSIGNED,
   type Value,
   type VariableReference,
@@ -655,14 +659,26 @@ export class Evaluator extends StatementExecutor {
     );
   }
 
+  /** `+` on strings, which Roslyn compiles to one `string.Concat` of the operands' `ToString()`, without empty constants. */
   private evaluateConcat(expression: Extract<BoundExpression, { kind: 'concat' }>, frame: Frame): Value {
-    let text = '';
-    for (const part of expression.parts) {
-      const value = this.evaluate(part, frame);
-      text += this.stringOf(value, frame.resolve(part.type), frame);
-    }
+    const strings = expression.parts
+      .filter((part) => !(part.kind === 'constant' && (part.value === '' || part.value === undefined)))
+      .map((part) => toStringValue(this, this.evaluate(part, frame), frame.resolve(part.type), frame));
+    return this.concatStrings(strings);
+  }
+
+  /**
+   * `string.Concat` of strings: one string is returned itself, and the overloads for two to four return the one
+   * non-empty string among them; the overload for more always makes a new one.
+   */
+  private concatStrings(strings: (string | CsString)[]): string | CsString {
+    if (strings.length === 1) return strings[0];
+    const nonEmpty = strings.filter((part) => stringText(part) !== '');
+    if (nonEmpty.length === 0) return '';
+    if (nonEmpty.length === 1 && strings.length <= 4) return nonEmpty[0];
+    const text = strings.map((part) => stringText(part)).join('');
     this.runtime.allocateString(text.length);
-    return text;
+    return freshString(text);
   }
 
   protected evaluator(): Evaluator {
@@ -1151,7 +1167,25 @@ export class Evaluator extends StatementExecutor {
     return convertNumeric(result, kind, underlying);
   }
 
+  /**
+   * An interpolated string, which Roslyn compiles to `string.Concat` when every hole is a string without an alignment
+   * or a format, and otherwise to an interpolated string handler, which makes a new string.
+   */
   private evaluateInterpolated(expression: Extract<BoundExpression, { kind: 'interpolated' }>, frame: Frame): Value {
+    const { parts } = expression;
+    if (
+      parts.every(
+        (part) =>
+          typeof part === 'string' ||
+          (part.alignment === undefined && part.format === undefined && specialOf(part.value.type) === 'string')
+      )
+    ) {
+      return this.concatStrings(
+        parts.map((part) =>
+          typeof part === 'string' ? part : ((this.evaluate(part.value, frame) as string | CsString | undefined) ?? '')
+        )
+      );
+    }
     let text = '';
     for (const part of expression.parts) {
       if (typeof part === 'string') {
@@ -1162,7 +1196,7 @@ export class Evaluator extends StatementExecutor {
       text += this.formatHole(value, frame.resolve(part.value.type), part.format, part.alignment, frame);
     }
     this.runtime.allocateString(text.length);
-    return text;
+    return freshString(text);
   }
 
   /** Formats one hole of an interpolated string or a composite format, with its format string and alignment. */
@@ -1261,7 +1295,7 @@ function referenceBinary(
     return operator === '+' ? combineDelegates(left, right) : removeDelegate(left, right);
   const equal =
     operandKind === 'string'
-      ? left === right
+      ? plainString(left) === plainString(right)
       : operandKind === 'delegate'
         ? delegatesEqual(left, right)
         : referenceEquals(left, right);

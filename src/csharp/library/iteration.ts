@@ -4,7 +4,7 @@ import { PendingException } from '../numeric';
 import { environmentOf } from '../objects';
 import type { NativeState } from '../runtime';
 import { type MethodSymbol, substitute, substitutionOf, type Type } from '../types';
-import { CsArray, CsObject, CsStruct, type Value } from '../values';
+import { CsArray, CsObject, CsStruct, isString, stringText, type Value } from '../values';
 import { evaluatorOf, fail, failNull } from './support';
 
 /** The state of a library collection, which natives enumerate without calling the program back. */
@@ -34,8 +34,9 @@ export function* iterate(call: NativeCall, value: Value, parameterName = 'source
     yield* value.values;
     return;
   }
-  if (typeof value === 'string') {
-    for (let index = 0; index < value.length; index++) yield value.charCodeAt(index);
+  if (isString(value)) {
+    const text = stringText(value);
+    for (let index = 0; index < text.length; index++) yield text.charCodeAt(index);
     return;
   }
   if ((value instanceof CsObject || value instanceof CsStruct) && isEnumerableState(value.native)) {
