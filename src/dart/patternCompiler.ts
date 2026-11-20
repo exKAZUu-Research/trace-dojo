@@ -1,11 +1,11 @@
-// code-gauge-allow-file fileNcss 482 -- The compilation of every kind of pattern, which share their type and binding helpers.
+// code-gauge-allow-file fileNcss 523 -- The compilation of every kind of pattern, which share their type and binding helpers.
 import type { Expression, ListPatternElement, Pattern, RecordPatternField, Span } from './ast';
 import { CallCompiler } from './callCompiler';
-import { type Compiled, type ResolvedMember, typeName } from './compilerBase';
-import { SHORTED } from './expressionCompiler';
+import { type Compiled, type Eval, type ResolvedMember, typeName } from './compilerBase';
+import { promotionTarget, SHORTED } from './expressionCompiler';
 import { listElement, listLength } from './library/nativeSupport';
 import { DartThrow, type Frame } from './runtime';
-import type { LocalVar } from './scope';
+import { Flow, type LocalVar } from './scope';
 import {
   asInstanceOf,
   coreTypes,
@@ -18,6 +18,7 @@ import {
   nonNullable,
   resolveBound,
   sameType,
+  upperBound,
   vmTypeString,
 } from './types';
 import { type Arguments, type Callable, Cell, DartRecord, type Value } from './values';
@@ -49,6 +50,34 @@ interface PatternWrite {
 }
 
 export abstract class PatternCompiler extends CallCompiler {
+  protected compileCasePattern(
+    syntax: Pattern,
+    subject: Compiled,
+    guardSyntax: Expression | undefined
+  ): { pattern: CompiledPattern; guard: Eval | undefined; whenFalse: Flow } {
+    const before = this.flow;
+    const variable = subject.variable && this.isPromotable(subject.variable) ? subject.variable : undefined;
+    const current = variable ? this.promotedType(variable) : subject.type;
+    const pattern = this.compilePattern(syntax, current, { mode: 'match', isFinal: false });
+    for (const binding of pattern.variables.values()) this.flow = this.flow.assign(binding);
+    let whenFalse = before;
+    if (variable) {
+      const matched = promotionTarget(current, this.narrowedType(syntax, current));
+      if (matched) this.flow = this.flow.promote(variable, matched);
+      if (isNullCase(syntax) && !sameType(current, nonNullable(current)))
+        whenFalse = whenFalse.promote(variable, nonNullable(current));
+    }
+    if (!guardSyntax) return { pattern, guard: undefined, whenFalse };
+    for (const binding of pattern.variables.values()) binding.inPatternGuard = true;
+    try {
+      const guard = this.compileCondition(guardSyntax);
+      this.flow = guard.flow.whenTrue;
+      return { pattern, guard: guard.compiled.run, whenFalse: Flow.join(whenFalse, guard.flow.whenFalse) };
+    } finally {
+      for (const binding of pattern.variables.values()) binding.inPatternGuard = false;
+    }
+  }
+
   /** Compiles a pattern against a value of `matchedType`. */
   compilePattern(pattern: Pattern, matchedType: DartType, options: PatternOptions): CompiledPattern {
     const variables = new Map<string, LocalVar>();
@@ -342,6 +371,21 @@ export abstract class PatternCompiler extends CallCompiler {
       case 'and': {
         return this.narrowedType(pattern.right, this.narrowedType(pattern.left, matchedType));
       }
+      case 'or': {
+        return upperBound(this.narrowedType(pattern.left, matchedType), this.narrowedType(pattern.right, matchedType));
+      }
+      case 'list': {
+        const tested = interfaceType(coreTypes.list, [this.listPatternElementType(pattern, matchedType)]);
+        return isSubtype(matchedType, tested) ? matchedType : tested;
+      }
+      case 'map': {
+        const tested = interfaceType(coreTypes.map, this.mapPatternTypes(pattern, matchedType));
+        return isSubtype(matchedType, tested) ? matchedType : tested;
+      }
+      case 'record': {
+        const tested = this.patternContextType(pattern) ?? recordShape(pattern.fields);
+        return isSubtype(matchedType, tested) ? matchedType : tested;
+      }
       default: {
         return matchedType;
       }
@@ -522,18 +566,7 @@ export abstract class PatternCompiler extends CallCompiler {
     options: PatternOptions,
     variables: Map<string, LocalVar>
   ): Omit<CompiledPattern, 'variables'> {
-    let keyType: DartType = DYNAMIC;
-    let valueType: DartType = DYNAMIC;
-    if (pattern.typeArguments) {
-      if (pattern.typeArguments.length !== 2) this.error(pattern, 'マップのパターンの型引数は 2 つです。');
-      keyType = this.resolveType(pattern.typeArguments[0]);
-      valueType = this.resolveType(pattern.typeArguments[1]);
-    } else {
-      const base = resolveBound(matchedType);
-      const instance =
-        base.kind === 'interface' ? asInstanceOf({ ...base, nullable: false }, coreTypes.map) : undefined;
-      if (instance) [keyType, valueType] = instance.args;
-    }
+    const [keyType, valueType] = this.mapPatternTypes(pattern, matchedType);
     const mapType = interfaceType(coreTypes.map, [keyType, valueType]);
     const entries = pattern.entries.map((entry) => {
       const key = this.withConstContext(true, () => this.compileExpression(entry.key, keyType));
@@ -558,6 +591,16 @@ export abstract class PatternCompiler extends CallCompiler {
       },
       irrefutable: false,
     };
+  }
+
+  private mapPatternTypes(pattern: Extract<Pattern, { kind: 'map' }>, matchedType: DartType): readonly DartType[] {
+    if (pattern.typeArguments) {
+      if (pattern.typeArguments.length !== 2) this.error(pattern, 'マップのパターンの型引数は 2 つです。');
+      return pattern.typeArguments.map((type) => this.resolveType(type));
+    }
+    const base = resolveBound(matchedType);
+    const instance = base.kind === 'interface' ? asInstanceOf({ ...base, nullable: false }, coreTypes.map) : undefined;
+    return instance?.args ?? [DYNAMIC, DYNAMIC];
   }
 
   private recordPattern(
@@ -598,12 +641,7 @@ export abstract class PatternCompiler extends CallCompiler {
       this.error(pattern, `${typeName(matchedType)} 型の値は、このレコードのパターンと形が合いません。`);
     }
     const sortedNames = [...names].toSorted();
-    const shape: DartType = {
-      kind: 'record',
-      positional: positional.map(() => DYNAMIC),
-      named: sortedNames.map((name) => ({ name, type: DYNAMIC })),
-      nullable: false,
-    };
+    const shape = recordShape(pattern.fields);
     const castsDynamic = options.mode !== 'match' && matchedType.kind === 'dynamic';
     return {
       match: (frame, value) => {
@@ -734,6 +772,18 @@ export abstract class PatternCompiler extends CallCompiler {
       isConst: false,
     };
   }
+}
+
+function isNullCase(pattern: Pattern): boolean {
+  while (pattern.kind === 'parenthesized') pattern = pattern.pattern;
+  return pattern.kind === 'constant' && pattern.value.kind === 'null';
+}
+
+function recordShape(fields: readonly RecordPatternField[]): DartType {
+  const positional = fields.filter((field) => field.name === undefined).map(() => DYNAMIC);
+  const named = fields.flatMap((field) => (field.name === undefined ? [] : [{ name: field.name, type: DYNAMIC }]));
+  named.sort((a, b) => (a.name < b.name ? -1 : 1));
+  return { kind: 'record', positional, named, nullable: false };
 }
 
 /**

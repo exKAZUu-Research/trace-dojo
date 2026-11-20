@@ -17,6 +17,7 @@ export class LocalVar {
   readonly id = nextLocalId++;
   unavailable: string | undefined;
   inPatternGuard = false;
+  fieldReceiver?: LocalVar;
   hasAssignment = false;
   /** Assigned inside a closure, which stops Dart from promoting it. */
   isWriteCaptured = false;
@@ -146,9 +147,9 @@ export class Flow {
   }
 
   demote(variable: LocalVar): Flow {
-    if (!this.promotions.has(variable)) return this;
     const promotions = new Map(this.promotions);
-    promotions.delete(variable);
+    forgetPromotions(promotions, new Set([variable]));
+    if (promotions.size === this.promotions.size) return this;
     return new Flow(this.reachable, promotions, this.assigned, this.maybeAssigned);
   }
 
@@ -164,11 +165,9 @@ export class Flow {
   /** Forgets what `variables` held, as a loop that may assign them does at its start. */
   forget(variables: Iterable<LocalVar>): Flow {
     const promotions = new Map(this.promotions);
-    const maybeAssigned = new Set(this.maybeAssigned);
-    for (const variable of variables) {
-      promotions.delete(variable);
-      maybeAssigned.add(variable);
-    }
+    const names = new Set(variables);
+    forgetPromotions(promotions, names);
+    const maybeAssigned = new Set([...this.maybeAssigned, ...names]);
     return new Flow(this.reachable, promotions, this.assigned, maybeAssigned);
   }
 
@@ -209,3 +208,14 @@ export interface ConditionFlow {
 }
 
 export type { FunctionType, TypeEnv, TypeParam };
+
+function forgetPromotions(promotions: Map<LocalVar, readonly DartType[]>, roots: ReadonlySet<LocalVar>): void {
+  for (const variable of promotions.keys()) {
+    for (let current: LocalVar | undefined = variable; current; current = current.fieldReceiver) {
+      if (roots.has(current)) {
+        promotions.delete(variable);
+        break;
+      }
+    }
+  }
+}

@@ -1,36 +1,42 @@
 import type { Value } from '../values';
 
+export interface ListSortAccess {
+  length: number;
+  read(position: number): Value;
+  write(position: number, value: Value): void;
+}
+
 /**
  * Dart's sort: insertion sort for up to 32 elements, which is stable, and otherwise the dual-pivot quicksort of
  * dart:_internal, whose order of equal elements programs may see.
  */
-export function dartSort(values: Value[], compare: (a: Value, b: Value) => number): void {
+export function dartSort(values: ListSortAccess, compare: (a: Value, b: Value) => number): void {
   doSort(values, 0, values.length - 1, compare);
 }
 
 const INSERTION_SORT_THRESHOLD = 32;
 
-function doSort(a: Value[], left: number, right: number, compare: (a: Value, b: Value) => number): void {
+function doSort(a: ListSortAccess, left: number, right: number, compare: (a: Value, b: Value) => number): void {
   if (right - left <= INSERTION_SORT_THRESHOLD) insertionSort(a, left, right, compare);
   else dualPivotQuicksort(a, left, right, compare);
 }
 
-function insertionSort(a: Value[], left: number, right: number, compare: (a: Value, b: Value) => number): void {
+function insertionSort(a: ListSortAccess, left: number, right: number, compare: (a: Value, b: Value) => number): void {
   for (let i = left + 1; i <= right; i++) {
-    const element = a[i];
+    const element = a.read(i);
     let j = i;
-    while (j > left && compare(a[j - 1], element) > 0) {
-      a[j] = a[j - 1];
+    while (j > left && compare(a.read(j - 1), element) > 0) {
+      a.write(j, a.read(j - 1));
       j--;
     }
-    a[j] = element;
+    a.write(j, element);
   }
 }
 
 type Compare = (a: Value, b: Value) => number;
 
 /** A transcription of dart:_internal's _dualPivotQuicksort, whose order of ties and of comparisons programs see. */
-function dualPivotQuicksort(a: Value[], left: number, right: number, compare: Compare): void {
+function dualPivotQuicksort(a: ListSortAccess, left: number, right: number, compare: Compare): void {
   const { pivot1, pivot2, index1, index5 } = choosePivots(a, left, right, compare);
   let less = left + 1;
   let great = right - 1;
@@ -46,16 +52,16 @@ function dualPivotQuicksort(a: Value[], left: number, right: number, compare: Co
         (value) => compare(value, pivot2) > 0,
         compare
       ));
-  a[left] = a[less - 1];
-  a[less - 1] = pivot1;
-  a[right] = a[great + 1];
-  a[great + 1] = pivot2;
+  a.write(left, a.read(less - 1));
+  a.write(less - 1, pivot1);
+  a.write(right, a.read(great + 1));
+  a.write(great + 1, pivot2);
   doSort(a, left, less - 2, compare);
   doSort(a, great + 2, right, compare);
   if (pivotsAreEqual) return;
   if (less < index1 && great > index5) {
-    while (compare(a[less], pivot1) === 0) less++;
-    while (compare(a[great], pivot2) === 0) great--;
+    while (compare(a.read(less), pivot1) === 0) less++;
+    while (compare(a.read(great), pivot2) === 0) great--;
     ({ less, great } = partitionThree(
       a,
       less,
@@ -71,7 +77,7 @@ function dualPivotQuicksort(a: Value[], left: number, right: number, compare: Co
 
 /** Sorts five sample elements with a sorting network and takes the second and fourth as the pivots. */
 function choosePivots(
-  a: Value[],
+  a: ListSortAccess,
   left: number,
   right: number,
   compare: Compare
@@ -82,7 +88,7 @@ function choosePivots(
   const index3 = Math.trunc((left + right) / 2);
   const index2 = index3 - sixth;
   const index4 = index3 + sixth;
-  const el = [a[index1], a[index2], a[index3], a[index4], a[index5]];
+  const el = [a.read(index1), a.read(index2), a.read(index3), a.read(index4), a.read(index5)];
   for (const [x, y] of [
     [0, 1],
     [3, 4],
@@ -96,18 +102,18 @@ function choosePivots(
   ] as const) {
     if (compare(el[x], el[y]) > 0) [el[x], el[y]] = [el[y], el[x]];
   }
-  a[index1] = el[0];
-  a[index3] = el[2];
-  a[index5] = el[4];
-  a[index2] = a[left];
-  a[index4] = a[right];
+  a.write(index1, el[0]);
+  a.write(index3, el[2]);
+  a.write(index5, el[4]);
+  a.write(index2, a.read(left));
+  a.write(index4, a.read(right));
   return { pivot1: el[1], pivot2: el[3], index1, index5 };
 }
 
 /** Moves the elements less than the pivot to the left and the greater ones to the right, keeping equal ones between. */
 // code-gauge-allow functionCognitiveComplexity 17 -- A transcription of dart:_internal's dual-pivot quicksort, whose comparisons programs see.
 function partitionAroundPivot(
-  a: Value[],
+  a: ListSortAccess,
   start: number,
   end: number,
   pivot: Value,
@@ -116,30 +122,30 @@ function partitionAroundPivot(
   let less = start;
   let great = end;
   for (let k = less; k <= great; k++) {
-    const ak = a[k];
+    const ak = a.read(k);
     const comp = compare(ak, pivot);
     if (comp === 0) continue;
     if (comp < 0) {
       if (k !== less) {
-        a[k] = a[less];
-        a[less] = ak;
+        a.write(k, a.read(less));
+        a.write(less, ak);
       }
       less++;
       continue;
     }
     for (;;) {
-      const greatComp = compare(a[great], pivot);
+      const greatComp = compare(a.read(great), pivot);
       if (greatComp > 0) {
         great--;
         continue;
       }
       if (greatComp < 0) {
-        a[k] = a[less];
-        a[less++] = a[great];
+        a.write(k, a.read(less));
+        a.write(less++, a.read(great));
       } else {
-        a[k] = a[great];
+        a.write(k, a.read(great));
       }
-      a[great--] = ak;
+      a.write(great--, ak);
       break;
     }
   }
@@ -150,7 +156,7 @@ function partitionAroundPivot(
 // code-gauge-allow functionCognitiveComplexity 21 -- A transcription of dart:_internal's dual-pivot quicksort, whose comparisons programs see.
 // code-gauge-allow functionParameterCount 7 -- The parameters are the parts a caller already holds; grouping them would only rename them.
 function partitionThree(
-  a: Value[],
+  a: ListSortAccess,
   start: number,
   end: number,
   pivot1: Value,
@@ -161,29 +167,29 @@ function partitionThree(
   let less = start;
   let great = end;
   for (let k = less; k <= great; k++) {
-    const ak = a[k];
+    const ak = a.read(k);
     if (belongsLeft(ak)) {
       if (k !== less) {
-        a[k] = a[less];
-        a[less] = ak;
+        a.write(k, a.read(less));
+        a.write(less, ak);
       }
       less++;
       continue;
     }
     if (!belongsRight(ak)) continue;
     for (;;) {
-      if (belongsRight(a[great])) {
+      if (belongsRight(a.read(great))) {
         great--;
         if (great < k) break;
         continue;
       }
-      if (compare(a[great], pivot1) < 0) {
-        a[k] = a[less];
-        a[less++] = a[great];
+      if (compare(a.read(great), pivot1) < 0) {
+        a.write(k, a.read(less));
+        a.write(less++, a.read(great));
       } else {
-        a[k] = a[great];
+        a.write(k, a.read(great));
       }
-      a[great--] = ak;
+      a.write(great--, ak);
       break;
     }
   }

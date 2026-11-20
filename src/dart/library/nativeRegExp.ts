@@ -298,9 +298,10 @@ define('RegExpMatch.groups', (runtime, receiver, [indices]) => {
     runtime.allocate(Number(length) + 1);
     const groups: Value[] = Array.from({ length: Number(length) });
     for (let position = 0n; position < listLength(runtime, indices); position++) {
-      if (position >= length) runtime.throwError('RangeError', 'range', [position, 0n, length - 1n, 'index']);
       runtime.spend();
-      groups[Number(position)] = group(runtime, receiver, listElement(runtime, indices, position));
+      const value = group(runtime, receiver, listElement(runtime, indices, position));
+      if (position >= length) runtime.throwError('RangeError', 'range', [position, 0n, length - 1n, 'index']);
+      groups[Number(position)] = value;
     }
     return new DartList(coreTypes.list, makeNullable(interfaceType(coreTypes.string)), groups, false);
   } finally {

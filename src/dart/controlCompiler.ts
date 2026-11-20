@@ -2,7 +2,7 @@
 import type { Block, CatchClause, Pattern, Span, Statement, SwitchCase } from './ast';
 import { localNamesIn } from './astWalk';
 import type { FunctionSpec } from './callCompiler';
-import type { Eval } from './compilerBase';
+import type { Compiled, Eval } from './compilerBase';
 import { checkExhaustive } from './exhaustiveness';
 import { type CompiledPattern } from './patternCompiler';
 import { DartThrow, type Frame } from './runtime';
@@ -27,7 +27,12 @@ export abstract class ControlCompiler extends StatementCompiler {
     const subject = this.compileExpression(statement.subject);
     const before = this.flow;
     this.enterJumpTarget('switch', labels);
-    const { groups, after: afterCases } = this.compileSwitchGroups(statement, subject.type, before, labels);
+    const { groups, after: afterCases } = this.compileSwitchGroups(
+      statement,
+      this.switchSubject(subject, statement.cases),
+      before,
+      labels
+    );
     let after = afterCases;
     const breakFlow = this.fn.jumpTargets.pop()?.breakFlow;
     if (!this.isSwitchExhaustive(statement, subject.type)) after = after ? Flow.join(after, before) : before;
@@ -50,7 +55,7 @@ export abstract class ControlCompiler extends StatementCompiler {
   /** The groups of cases that share a body, each in a scope of its own, with the labels the switch declares. */
   private compileSwitchGroups(
     statement: Extract<Statement, { kind: 'switch' }>,
-    subjectType: DartType,
+    subject: Compiled,
     before: Flow,
     labels: string[]
   ): { groups: SwitchGroup[]; after: Flow | undefined } {
@@ -59,14 +64,17 @@ export abstract class ControlCompiler extends StatementCompiler {
     const caseLabels = statement.cases.flatMap((switchCase) => switchCase.labels);
     for (const label of caseLabels) this.fn.labels.push({ name: label, isLoop: false, isSwitchCase: true });
     let after: Flow | undefined;
+    let unmatched = before;
     const groups: SwitchGroup[] = [];
     try {
       for (const group of groupCases(statement.cases)) {
-        this.flow = before;
+        this.flow = unmatched;
         const { result, slots } = this.withScope(() => {
-          const matchers = this.compileSwitchMatchers(group.cases, subjectType, before, group.labels.length > 0);
+          const compiled = this.compileSwitchMatchers(group.cases, subject, unmatched, group.labels.length > 0);
+          unmatched = compiled.unmatched;
+          if (group.labels.length > 0) this.flow = Flow.join(this.flow, before);
           const body = this.compileStatements(group.statements);
-          return { matchers, body };
+          return { matchers: compiled.matchers, body };
         });
         after = after ? Flow.join(after, this.flow) : this.flow;
         groups.push({ ...result, slots, labels: group.labels });
@@ -83,18 +91,22 @@ export abstract class ControlCompiler extends StatementCompiler {
 
   private compileSwitchMatchers(
     cases: SwitchCase[],
-    subjectType: DartType,
+    subject: Compiled,
     before: Flow,
     hasLabel: boolean
-  ): SwitchMatcher[] {
+  ): { matchers: SwitchMatcher[]; unmatched: Flow } {
+    let unmatched = before;
+    const compileHead = (switchCase: SwitchCase): ReturnType<ControlCompiler['compileCaseHead']> => {
+      const head = this.compileCaseHead(switchCase, subject, unmatched);
+      unmatched = head.whenFalse;
+      return head;
+    };
     if (cases.length === 1 && !hasLabel) {
-      const { pattern, guard, flow } = this.compileCaseHead(cases[0], subjectType, before);
+      const { pattern, guard, flow } = compileHead(cases[0]);
       this.flow = flow;
-      return [{ pattern, guard, slots: [], bindings: [] }];
+      return { matchers: [{ pattern, guard, slots: [], bindings: [] }], unmatched };
     }
-    const heads = cases.map((switchCase) =>
-      this.withScope(() => this.compileCaseHead(switchCase, subjectType, before))
-    );
+    const heads = cases.map((switchCase) => this.withScope(() => compileHead(switchCase)));
     let joined = heads[0].result.flow;
     for (const head of heads.slice(1)) joined = Flow.join(joined, head.result.flow);
     this.flow = joined;
@@ -103,7 +115,7 @@ export abstract class ControlCompiler extends StatementCompiler {
       heads.map(({ result }) => result.pattern),
       hasLabel
     );
-    return heads.map(({ result: { pattern, guard }, slots: headSlots }): SwitchMatcher => ({
+    const matchers = heads.map(({ result: { pattern, guard }, slots: headSlots }): SwitchMatcher => ({
       pattern,
       guard,
       slots: headSlots,
@@ -112,6 +124,7 @@ export abstract class ControlCompiler extends StatementCompiler {
         return binding ? [{ from: binding.slot, to: variable.slot }] : [];
       }),
     }));
+    return { matchers, unmatched };
   }
 
   private isSwitchExhaustive(statement: Extract<Statement, { kind: 'switch' }>, subjectType: DartType): boolean {
@@ -129,25 +142,13 @@ export abstract class ControlCompiler extends StatementCompiler {
 
   private compileCaseHead(
     switchCase: SwitchCase,
-    subjectType: DartType,
+    subject: Compiled,
     before: Flow
-  ): { pattern: CompiledPattern | undefined; guard: Eval | undefined; flow: Flow } {
+  ): { pattern: CompiledPattern | undefined; guard: Eval | undefined; flow: Flow; whenFalse: Flow } {
     this.flow = before;
-    if (!switchCase.pattern) return { pattern: undefined, guard: undefined, flow: before };
-    const pattern = this.compilePattern(switchCase.pattern, subjectType, { mode: 'match', isFinal: false });
-    for (const variable of pattern.variables.values()) this.flow = this.flow.assign(variable);
-    let guard: Eval | undefined;
-    if (switchCase.guard) {
-      for (const variable of pattern.variables.values()) variable.inPatternGuard = true;
-      try {
-        const compiled = this.compileCondition(switchCase.guard);
-        guard = compiled.compiled.run;
-        this.flow = compiled.flow.whenTrue;
-      } finally {
-        for (const variable of pattern.variables.values()) variable.inPatternGuard = false;
-      }
-    }
-    return { pattern, guard, flow: this.flow };
+    if (!switchCase.pattern) return { pattern: undefined, guard: undefined, flow: before, whenFalse: before };
+    const matched = this.compileCasePattern(switchCase.pattern, subject, switchCase.guard);
+    return { ...matched, flow: this.flow };
   }
 
   private sharedCaseVariables(span: Span, patterns: (CompiledPattern | undefined)[], hasLabel: boolean): LocalVar[] {

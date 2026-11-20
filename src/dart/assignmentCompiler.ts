@@ -871,13 +871,11 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       const casePattern = element.casePattern;
       const before = this.flow;
       const { result, slots } = this.withScope(() => {
-        const pattern = this.compilePattern(casePattern.pattern, subject.type, { mode: 'match', isFinal: false });
-        for (const variable of pattern.variables.values()) this.flow = this.flow.assign(variable);
-        const guard = casePattern.guard ? this.compileCondition(casePattern.guard).compiled.run : undefined;
+        const { pattern, guard, whenFalse } = this.compileCasePattern(casePattern.pattern, subject, casePattern.guard);
         const body = this.compileCollectionElements([element.consequent], kind, elementContext, valueContext);
-        return { pattern, guard, body };
+        return { pattern, guard, whenFalse, body };
       });
-      this.flow = before;
+      this.flow = result.whenFalse;
       const otherwise = element.alternative
         ? this.compileCollectionElements([element.alternative], kind, elementContext, valueContext)
         : undefined;
@@ -1075,19 +1073,19 @@ export abstract class AssignmentCompiler extends ControlCompiler {
   ): Compiled {
     const subject = this.compileExpression(subjectSyntax);
     const before = this.flow;
+    const patternSubject = this.switchSubject(subject, cases);
+    let whenFalse = before;
     let after: Flow | undefined;
     let resultType: DartType | undefined;
     const compiledCases = cases.map((switchCase) => {
-      this.flow = before;
+      this.flow = whenFalse;
       const { result, slots } = this.withScope(() => {
-        const pattern = this.compilePattern(switchCase.pattern, subject.type, { mode: 'match', isFinal: false });
-        for (const variable of pattern.variables.values()) this.flow = this.flow.assign(variable);
-        let guard: Eval | undefined;
-        if (switchCase.guard) {
-          const compiled = this.compileCondition(switchCase.guard);
-          guard = compiled.compiled.run;
-          this.flow = compiled.flow.whenTrue;
-        }
+        const {
+          pattern,
+          guard,
+          whenFalse: unmatched,
+        } = this.compileCasePattern(switchCase.pattern, patternSubject, switchCase.guard);
+        whenFalse = unmatched;
         const body = this.compileExpression(switchCase.body, context);
         return { pattern, guard, body };
       });

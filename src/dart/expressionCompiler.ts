@@ -1018,7 +1018,9 @@ export abstract class ExpressionCompiler extends CompilerBase {
         this.requireThis(expression, name);
         const receiver = this.thisReceiver(expression);
         const compiled = this.readMember(receiver, resolution.resolved, name, expression, false);
-        return resolution.kind === 'thisMember' ? this.promotableField(compiled, name) : compiled;
+        return resolution.kind === 'thisMember'
+          ? this.promotableField(compiled, resolution.resolved.member, receiver)
+          : compiled;
       }
       case 'staticMember': {
         return this.readStatic(resolution.member, expression);
@@ -1138,10 +1140,6 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
     if (options.hasInitializer || options.isParameter || this.flow.assigned.has(variable)) return;
     if (!this.flow.reachable) return;
-    // A closure may run after the variable is assigned; Dart still rejects definitely unassigned ones.
-    if (variable.owner !== this.fn && (this.flow.maybeAssigned.has(variable) || variable.hasAssignment)) {
-      return;
-    }
     if (options.isFinal) {
       this.error(span, `final の変数 ${variable.name} は、値を代入する前には使えません。`);
     }
@@ -1169,7 +1167,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       return this.error(span, 'this は、インスタンスのメンバーの中でしか使えません。');
     }
     const type = this.fn.kind.extensionOn ?? this.fn.kind.thisType ?? DYNAMIC;
-    return { type, run: (frame) => frame.receiver, isConst: false };
+    return { type, run: (frame) => frame.receiver, isConst: false, thisReference: true };
   }
 
   protected readStatic(member: Member, span: Span): Compiled {
@@ -1216,45 +1214,45 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (target) return this.readStaticTarget(target, name, expression, context);
     if (object.kind === 'super') return this.readSuperMember(name, expression);
     const receiver = this.compileChainPart(object, undefined);
-    const shorting = this.isShorting(object);
-    const read = this.readMemberOf(receiver, name, expression, expression.nullAware);
-    const compiled = object.kind === 'this' && !expression.nullAware ? this.promotableField(read, name) : read;
-    if (!shorting && !expression.nullAware) return compiled;
-    const { run } = compiled;
-    const receiverRun = receiver.run;
-    void receiverRun;
-    return { ...compiled, run };
+    return this.readMemberOf(receiver, name, expression, expression.nullAware);
   }
 
-  /** The keys under which flow analysis promotes `this._x`, one per field. */
-  private readonly fieldKeys = new Map<Member, LocalVar>();
+  private readonly fieldKeys = new Map<LocalVar | undefined, Map<Member, LocalVar>>();
 
   /** Whether no declaration in the program keeps a private field of this name from being promoted. */
   protected abstract isPromotableFieldName(name: string): boolean;
 
-  /** `this._x` of a private final field, which Dart promotes as it does a local variable. */
-  private promotableField(compiled: Compiled, name: string): Compiled {
-    const cls = this.currentClass;
-    if (!cls || !name.startsWith('_') || this.isLibraryCode || !this.isPromotableFieldName(name)) return compiled;
-    const resolved = this.lookupMember(cls.thisType, name, false);
-    const member = resolved?.member;
-    if (!resolved || member?.kind !== 'field' || !member.isFinal) return compiled;
-    let variable = this.fieldKeys.get(member);
+  private promotableField(compiled: Compiled, member: Member, receiver: Compiled): Compiled {
+    const name = member.name;
+    if (
+      member.kind !== 'field' ||
+      !member.isFinal ||
+      !name.startsWith('_') ||
+      this.isLibraryCode ||
+      !this.isPromotableFieldName(name)
+    )
+      return compiled;
+    const parent = receiver.variable;
+    if (!receiver.thisReference && (!parent || !this.isPromotable(parent))) return compiled;
+    let keys = this.fieldKeys.get(parent);
+    if (!keys) this.fieldKeys.set(parent, (keys = new Map()));
+    let variable = keys.get(member);
     if (!variable) {
-      variable = new LocalVar({ row: member.row ?? 0, column: 0, start: 0, end: 0 }, name, resolved.type, -1, this.fn, {
+      variable = new LocalVar({ row: member.row ?? 0, column: 0, start: 0, end: 0 }, name, compiled.type, -1, this.fn, {
         isFinal: true,
         isLate: false,
         isConst: false,
         isParameter: false,
         hasInitializer: true,
       });
-      this.fieldKeys.set(member, variable);
+      variable.fieldReceiver = parent;
+      keys.set(member, variable);
     }
     return { ...compiled, type: this.promotedType(variable), variable };
   }
 
   /** What a member access on a value of the receiver's static type reads, checking nullability. */
-  // code-gauge-allow functionCognitiveComplexity 19 -- Each branch is one of the cases Dart distinguishes for this construct.
+  // code-gauge-allow functionCognitiveComplexity 20 -- Each branch is one of the cases Dart distinguishes for this construct.
   protected readMemberOf(receiver: Compiled, name: string, span: Span, nullAware: boolean): Compiled {
     const receiverType = receiver.type;
     if (receiverType.kind === 'void') this.error(span, 'void の値のメンバーは使えません。');
@@ -1286,11 +1284,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
       );
     }
     const compiled = this.readMember(receiver, resolved, name, span, nullAware);
-    return compiled;
+    return nullAware ? compiled : this.promotableField(compiled, resolved.member, receiver);
   }
 
   /** Reads a member found statically: a field or getter through dynamic dispatch, a method as a tear-off. */
   // code-gauge-allow functionCognitiveComplexity 27 -- Each branch is one of the cases Dart distinguishes for this construct.
+  // code-gauge-allow functionNcss 31 -- Member reads distinguish extensions, record fields and ordinary members.
   protected readMember(
     receiver: Compiled,
     resolved: ResolvedMember,
@@ -1304,12 +1303,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
     // Inside a null-shorting chain the value is not null; the end of the chain (compileExpression) makes it nullable.
     if (resolved.extension) {
       const extensionMember = member;
-      const typeArgs = resolved.extension.typeArgs;
+      const resolveTypes = this.runtimeTypes(resolved.extension.typeArgs);
       return {
         type,
         run: (frame) => {
           const value = receiverRun(frame);
           if (value === SHORTED || (nullAware && value === undefined)) return SHORTED;
+          const typeArgs = resolveTypes(frame);
           if (extensionMember.kind === 'method') {
             const impl = extensionMember.impl as NonNullable<typeof extensionMember.impl>;
             return frame.runtime.tearOff(value, {
@@ -1365,7 +1365,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const resolved = this.lookupMember(superclass, name, false);
     if (!resolved) return this.error(span, `スーパークラスに ${name} というメンバーがありません。`);
     this.requireSuperImplementation(name, span);
-    return {
+    const compiled: Compiled = {
       type: resolved.type,
       run: (frame) => {
         const member = classAt(frame).implementation(name);
@@ -1375,6 +1375,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       },
       isConst: false,
     };
+    return this.promotableField(compiled, resolved.member, this.thisReceiver(span));
   }
 
   protected staticTarget(object: Expression): StaticTarget | undefined {

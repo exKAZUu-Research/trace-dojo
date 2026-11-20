@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 996 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 997 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import type {
   ClassDeclaration,
@@ -401,7 +401,19 @@ export class Compiler extends ConstructorCompiler {
 
   private readonly pendingApplications: { application: ClassInfo; mixin: InterfaceType; span: Span }[] = [];
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Check subtype cycles before validating mixin and representation edges.
   private checkHierarchy(): void {
+    const visiting = new Set<ClassInfo>();
+    const checked = new Set<ClassInfo>();
+    const visit = (cls: ClassInfo, span: Span): void => {
+      if (checked.has(cls)) return;
+      if (visiting.has(cls)) this.error(span, `クラス ${cls.name} の継承が循環しています。`);
+      visiting.add(cls);
+      for (const parent of cls.directSupertypes) visit(parent.cls, parent.cls.declaration ?? span);
+      visiting.delete(cls);
+      checked.add(cls);
+    };
+    for (const { cls, declaration } of this.classWork) visit(cls, declaration);
     // A mixin with `on` types applies only on a superclass that has them.
     for (const { application, mixin, span } of this.pendingApplications) {
       const base = application.superclass?.cls;
@@ -417,13 +429,6 @@ export class Compiler extends ConstructorCompiler {
     for (const { cls, declaration } of this.classWork) {
       if (cls.representationType)
         this.checkRepresentationInterfaces(cls, cls.representationType, declaration.interfaces);
-      const seen = new Set<ClassInfo>();
-      let current: ClassInfo | undefined = cls;
-      while (current) {
-        if (seen.has(current)) this.error(declaration, `クラス ${cls.name} の継承が循環しています。`);
-        seen.add(current);
-        current = current.superclass?.cls;
-      }
     }
   }
 

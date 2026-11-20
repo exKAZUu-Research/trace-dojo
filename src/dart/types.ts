@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 529 -- The operations of Dart's types belong together; each is a short case analysis.
+// code-gauge-allow-file fileNcss 556 -- The operations of Dart's types belong together; each is a short case analysis.
 import type { ClassInfo } from './classes';
 
 /** A type parameter of a class, a function type, or a generic function. */
@@ -334,14 +334,49 @@ export function substitute(type: DartType, map: ReadonlyMap<TypeParam, DartType>
   }
 }
 
+// code-gauge-allow functionCognitiveComplexity 25 -- Acyclic dependencies and recursive references use different substitutions.
 export function instantiateToBounds(params: readonly TypeParam[]): DartType[] {
-  const args: DartType[] = params.map(() => DYNAMIC);
-  for (const [index, param] of params.entries()) {
-    if (!param.bound) continue;
-    const map = new Map(params.map((other, at) => [other, args[at]]));
-    args[index] = substitute(param.bound, map);
-  }
-  return args;
+  if (params.every((param) => param.bound === undefined)) return params.map(() => DYNAMIC);
+  const dependencies = new Map(
+    params.map((param) => {
+      const bound = param.bound;
+      return [param, bound ? params.filter((other) => mentionsTypeParams(bound, new Set([other]))) : []];
+    })
+  );
+  const resolved = new Map<TypeParam, DartType>();
+  const resolve = (param: TypeParam): DartType => {
+    const existing = resolved.get(param);
+    if (existing) return existing;
+    const map = new Map<TypeParam, DartType>();
+    const cyclic = new Set<TypeParam>();
+    for (const dependency of dependencies.get(param) ?? []) {
+      if (boundReaches(dependencies, dependency, param, new Set())) cyclic.add(dependency);
+      else map.set(dependency, resolve(dependency));
+    }
+    let type = substitute(param.bound ?? DYNAMIC, map);
+    if (cyclic.size > 0) {
+      type = replaceTypeVariables(type, (variable, covariant) => {
+        if (!cyclic.has(variable.param)) return variable;
+        const replacement = covariant ? DYNAMIC : NEVER;
+        return variable.nullable ? makeNullable(replacement) : replacement;
+      });
+    }
+    resolved.set(param, type);
+    return type;
+  };
+  return params.map(resolve);
+}
+
+function boundReaches(
+  dependencies: ReadonlyMap<TypeParam, readonly TypeParam[]>,
+  current: TypeParam,
+  target: TypeParam,
+  seen: Set<TypeParam>
+): boolean {
+  if (current === target) return true;
+  if (seen.has(current)) return false;
+  seen.add(current);
+  return (dependencies.get(current) ?? []).some((next) => boundReaches(dependencies, next, target, seen));
 }
 
 /** Instantiates a generic function type with type arguments. */
@@ -608,12 +643,21 @@ function allSupertypes(type: InterfaceType): InterfaceType[] {
   return result;
 }
 
-export function closeTypeVariables(type: DartType, params: ReadonlySet<TypeParam>, covariant = true): DartType {
-  const close = (part: DartType): DartType => closeTypeVariables(part, params, covariant);
+export function closeTypeVariables(type: DartType, params: ReadonlySet<TypeParam>): DartType {
+  return replaceTypeVariables(type, (variable, covariant) =>
+    params.has(variable.param) ? (covariant ? NEVER : objectType(true)) : variable
+  );
+}
+
+function replaceTypeVariables(
+  type: DartType,
+  replace: (variable: TypeParamType, covariant: boolean) => DartType,
+  covariant = true
+): DartType {
+  const close = (part: DartType): DartType => replaceTypeVariables(part, replace, covariant);
   switch (type.kind) {
     case 'typeParam': {
-      if (!params.has(type.param)) return type;
-      return covariant ? NEVER : objectType(true);
+      return replace(type, covariant);
     }
     case 'interface': {
       return { ...type, args: type.args.map(close) };
@@ -626,7 +670,7 @@ export function closeTypeVariables(type: DartType, params: ReadonlySet<TypeParam
       };
     }
     case 'function': {
-      const parameter = (part: DartType): DartType => closeTypeVariables(part, params, !covariant);
+      const parameter = (part: DartType): DartType => replaceTypeVariables(part, replace, !covariant);
       return {
         ...type,
         returnType: close(type.returnType),

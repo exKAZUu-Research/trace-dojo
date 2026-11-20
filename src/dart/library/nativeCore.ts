@@ -66,7 +66,19 @@ export function identical(a: Value, b: Value): boolean {
 
 define('Null.hashCode', () => 2011n);
 define('Null.toString', () => 'null');
-define('Function.hashCode', (_runtime, receiver) => BigInt(identityOf(receiver)));
+const tearOffHashes = new WeakMap<object, bigint>();
+let nextTearOffHash = 1n;
+
+define('Function.hashCode', (runtime, receiver) => {
+  if (!(receiver instanceof DartClosure) || receiver.tearOffKey === undefined) return BigInt(identityOf(receiver));
+  const key = receiver.tearOffKey;
+  let memberHash = tearOffHashes.get(key);
+  if (memberHash === undefined) {
+    memberHash = nextTearOffHash++;
+    tearOffHashes.set(key, memberHash);
+  }
+  return BigInt.asUintN(30, (memberHash * 31n) ^ identityHashCode(runtime, receiver.receiver));
+});
 define('Function.==', (_runtime, receiver, [other]) => {
   if (receiver === other) return true;
   if (!(receiver instanceof DartClosure) || !(other instanceof DartClosure)) return false;

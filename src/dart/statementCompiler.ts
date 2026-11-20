@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 797 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 799 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type {
   Block,
   Expression,
@@ -691,18 +691,13 @@ export abstract class StatementCompiler extends PatternCompiler {
     const before = this.flow;
     let pattern!: CompiledPattern;
     let guard: Eval | undefined;
+    let whenFalse = before;
     const { result: consequence, slots } = this.withScope(() => {
-      pattern = this.compilePattern(casePattern.pattern, subject.type, { mode: 'match', isFinal: false });
-      for (const variable of pattern.variables.values()) this.flow = this.flow.assign(variable);
-      if (casePattern.guard) {
-        const compiledGuard = this.compileCondition(casePattern.guard);
-        guard = compiledGuard.compiled.run;
-        this.flow = compiledGuard.flow.whenTrue;
-      }
+      ({ pattern, guard, whenFalse } = this.compileCasePattern(casePattern.pattern, subject, casePattern.guard));
       return compileBody(statement.consequence);
     });
     const afterThen = this.flow;
-    this.flow = before;
+    this.flow = whenFalse;
     const otherwise = statement.alternative ? compileBody(statement.alternative) : undefined;
     this.flow = Flow.join(afterThen, this.flow);
     const match = (frame: Frame): boolean => {
@@ -729,6 +724,15 @@ export abstract class StatementCompiler extends PatternCompiler {
         for (const slot of slots) frame.locals[slot] = undefined;
       }
     };
+  }
+
+  protected switchSubject(subject: Compiled, cases: readonly { guard: Expression | undefined }[]): Compiled {
+    const roots = new Set<LocalVar>();
+    for (let variable = subject.variable; variable; variable = variable.fieldReceiver) roots.add(variable);
+    if (roots.size === 0) return subject;
+    return cases.some(({ guard }) => guard && this.writtenLocals(guard).some((variable) => roots.has(variable)))
+      ? { ...subject, variable: undefined }
+      : subject;
   }
 
   /** Forgets what a loop's body may change before compiling it, as flow analysis does at a loop's start. */

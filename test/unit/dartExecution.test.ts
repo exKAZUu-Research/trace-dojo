@@ -842,11 +842,44 @@ void main() {
   expect(executeProgram('dart', invalid)).toMatchObject({ kind: 'compileError' });
 });
 
+test('cyclic subtype edges produce a diagnostic before pattern analysis', () => {
+  for (const declaration of [
+    'class A implements A {}',
+    'sealed class A implements B {} sealed class B implements A {}',
+    'mixin A on B {} class B with A {}',
+  ]) {
+    expect(executeProgram('dart', `${declaration} void main() {}`)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
+test('only assigned non-late locals can be read by a new closure', () => {
+  expect(executeProgram('dart', 'void main() { int x; var read = () => x; x = 1; print(read()); }')).toMatchObject({
+    kind: 'compileError',
+  });
+  const valid = 'void main() { late int x; var read = () => x; x = 1; print(read()); }';
+  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '1\n' });
+});
+
+test('equal method tear-offs work as set and map keys', () => {
+  const program = `class Target { void callback() {} }
+void main() {
+  final target = Target();
+  final first = target.callback;
+  final second = target.callback;
+  print([first == second, first.hashCode == second.hashCode, {first, second}.length, {first: 1}[second]]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[true, true, 1, 1]\n' });
+});
+
 test('implicit extension calls require a unique most-specific declaration', () => {
   const declarations = `extension A on int { String get label => 'a'; set label(String s) { print('A:$s'); } }
 extension B on int { String get label => 'b'; set label(String s) { print('B:$s'); } }
 extension Generic<T> on T { String get kind => 'generic'; }
 extension Specific on String { String get kind => 'specific'; }
+extension ListType<T> on List<T> {
+  Type get item => T;
+  Type read() => T;
+}
 extension Indices on int {
   int operator [](int index) => this + index;
   void operator []=(int index, int value) { print([index, value]); }
@@ -855,6 +888,10 @@ extension Indices on int {
     kind: 'compileError',
   });
   const program = `${declarations}
+(Type, Type) readTypes<U>(List<U> values) {
+  final read = values.read;
+  return (ListType<U>(values).item, read());
+}
 void main() {
   print([A(1).label, B(1).label, 'x'.kind]);
   B(1).label = 'direct';
@@ -862,10 +899,11 @@ void main() {
   var x = 3;
   x[2] += 4;
   Indices(x)[1] = 6;
+  print(readTypes<int>([1]));
 }`;
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
-    stdout: '[a, b, specific]\nB:direct\nA:a!\n[2, 9]\n[1, 6]\n',
+    stdout: '[a, b, specific]\nB:direct\nA:a!\n[2, 9]\n[1, 6]\n(int, int)\n',
   });
 });
 
@@ -889,6 +927,49 @@ Iterable<int> items() sync* {
 }
 void main() { print(value()); print(items().first); }`;
   expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '7\n8\n' });
+});
+
+test('patterns promote the subject in guarded cases and later alternatives', () => {
+  const program = `void inspect(Object? x) {
+  if (x case int() when x.isEven) print(x + 1);
+  print([if (x case int()) x + 1]);
+}
+int length(List<Object?>? x) => switch (x) {
+  null => -1,
+  [] => x.length,
+  _ => x.length,
+};
+void name(String? x) {
+  switch (x) { case null: print('missing'); default: print(x.toUpperCase()); }
+}
+void main() { inspect(2); name(null); name('dart'); print([length([]), length([42]), length(null)]); }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '3\n[3]\nmissing\nDART\n[0, 1, -1]\n',
+  });
+});
+
+test('private field promotions follow an individual receiver and expire on reassignment', () => {
+  const declarations = `class Node {
+  final Node? _next;
+  final int value;
+  Node(this.value, [this._next]);
+}
+class Wrapper { final Node _head; Wrapper(this._head); }`;
+  const valid = `${declarations} void main() {
+  var current = Node(1, Node(2, Node(3)));
+  var sum = 0;
+  while (current._next != null) { current = current._next; sum += current.value; }
+  final wrapper = Wrapper(Node(4, Node(5)));
+  if ((wrapper)._head._next != null) sum += wrapper._head._next.value;
+  print(sum);
+}`;
+  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '10\n' });
+  const invalid = `${declarations} void main() {
+  var current = Node(1, Node(2));
+  if (current._next != null) { current = Node(3); print(current._next.value); }
+}`;
+  expect(executeProgram('dart', invalid)).toMatchObject({ kind: 'compileError' });
 });
 
 test('dynamic complement preserves int semantics and rejects doubles', () => {
@@ -1079,6 +1160,7 @@ void main() {
 test('dynamic generic calls instantiate and check bounds before invoking the body', () => {
   const program = `T echo<T extends num>(T value) => value;
 class C { T method<T extends num>(T value) => value; }
+void show<T extends U, U extends num>() { print([T, U]); }
 void main() {
   dynamic f = echo;
   dynamic receiver = C();
@@ -1086,17 +1168,21 @@ void main() {
   try { print(f('hello')); } catch (e) { print(e); }
   try { print(receiver.method<String>('hello')); } catch (e) { print(e); }
   print([f(3), receiver.method(4)]);
+  dynamic forward = show;
+  forward();
 }`;
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
     stdout:
-      "type 'String' is not a subtype of type 'num' of 'T'\ntype 'String' is not a subtype of type 'num' of 'value'\ntype 'String' is not a subtype of type 'num' of 'T'\n[3, 4]\n",
+      "type 'String' is not a subtype of type 'num' of 'T'\ntype 'String' is not a subtype of type 'num' of 'value'\ntype 'String' is not a subtype of type 'num' of 'T'\n[3, 4]\n[num, num]\n",
   });
 });
 
 test('nested function types, contextual tear-offs, and raw type literals retain their arguments', () => {
   const program = `class Box<T extends num> {}
 typedef Alias<T extends num> = Box<T>;
+class Forward<T extends U, U extends num> {}
+class Recursive<T extends Comparable<T>> {}
 T choose<T>(T a, T b) => a;
 void main() {
   int Function() Function() factory = () => () => 1;
@@ -1104,10 +1190,12 @@ void main() {
   Object Function(int, String) mixed = choose;
   print([factory()(), numeric(2, 3.0), mixed(4, 'x')]);
   print([Box, Box == Box<num>, Alias, Alias == Box<num>, Alias<num>]);
+  print([Forward, Recursive]);
 }`;
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
-    stdout: '[1, 2, 4]\n[Box<num>, true, Box<num>, true, Box<num>]\n',
+    stdout:
+      '[1, 2, 4]\n[Box<num>, true, Box<num>, true, Box<num>]\n[Forward<num, num>, Recursive<Comparable<dynamic>>]\n',
   });
 });
 
@@ -1160,6 +1248,8 @@ void main() {
     'void main() { print("started"); const n = [1 ~/ 0]; }',
     'int f() => 5; class C { final int n; const C() : n = f(); } void main() {}',
     'class C { const C(int n) : assert(n > 0); } void main() { print(const C(0)); }',
+    'void main() { print(const {1, 1}); }',
+    'class C { final Map<int,int> value; const C(this.value); } void main() { print(const C({1: 2, 1: 3})); }',
   ]) {
     expect(executeProgram('dart', invalid)).toMatchObject({ kind: 'compileError' });
   }
@@ -1428,6 +1518,15 @@ class View extends ListBase<int> {
   int operator [](int n) { print('read $n'); return n; }
   void operator []=(int n, int value) {}
 }
+class GrowingIndices extends View {
+  int size = 1;
+  int get length => size;
+  int operator [](int n) {
+    print('group $n');
+    size = 2;
+    return 0;
+  }
+}
 void main() {
   print(Function.apply((int a, int b) => [a, b], View()));
   print(RegExp('(a)').firstMatch('a')!.groups(UnmodifiableListView<int>([0, 1])));
@@ -1435,10 +1534,59 @@ void main() {
   print([mapped.skip(1).length, mapped.take(1).length]);
   var cast = mapped.cast<int>();
   print([cast.skip(1).length, cast.take(1).length]);
+  final map = HashMap<int, int>.of({1: 10, 2: 20});
+  print(map.keys.map((x) { print('key'); return x; }).skip(1).length);
+  print(map.values.map((x) { print('value'); return x; }).take(1).length);
+  try { RegExp('a').firstMatch('a')!.groups(GrowingIndices()); } catch (error) { print(error.runtimeType); }
 }`;
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
-    stdout: 'read 1\nread 0\n[0, 1]\n[a, a]\n[2, 1]\n[2, 1]\n',
+    stdout: 'read 1\nread 0\n[0, 1]\n[a, a]\n[2, 1]\n[2, 1]\n1\n1\ngroup 0\ngroup 1\nRangeError\n',
+  });
+});
+
+test('indexed views, queues, and map views apply mutations in SDK order', () => {
+  const program = `import 'dart:collection';
+class View extends ListBase<int> {
+  final List<int> data = [3, 1, 2];
+  int get length => data.length;
+  set length(int n) { data.length = n; }
+  int operator [](int n) => data[n];
+  void operator []=(int n, int value) { data[n] = value; }
+}
+class Table extends MapBase<int, int> {
+  final Map<int, int> data = {1: 10, 2: 20};
+  int? operator [](Object? key) => data[key];
+  void operator []=(int key, int value) { data[key] = value; }
+  int? remove(Object? key) => data.remove(key);
+  void clear() { data.clear(); }
+  Iterable<int> get keys => data.keys.where((key) => true);
+}
+void main() {
+  final view = View();
+  view.sort((a, b) { print(view); return a.compareTo(b); });
+  print(view);
+  final table = Table();
+  print(table.values.map((value) { print('mapper ran'); return value; }).skip(1).length);
+  try {
+    table.updateAll((key, value) { table[3] = 30; return value + 1; });
+  } catch (error) { print(error.runtimeType); }
+  print(table);
+  final readonly = UnmodifiableMapView<int, int>(table);
+  try { readonly.update(1, (value) { print('update ran'); return value; }); } catch (error) { print(error); }
+  try { UnmodifiableListView<int>(view).fillRange(0, 0); } catch (error) { print(error); }
+  final queue = Queue<int>.of([1, 2, 3]);
+  queue.removeWhere((value) { print(queue); return value.isOdd; });
+  queue.add(4);
+  final iterator = queue.iterator;
+  iterator.moveNext();
+  queue.retainWhere((_) => true);
+  print(iterator.moveNext());
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[3, 1, 2]\n[1, 3, 2]\n[1, 3, 3]\n[1, 2, 3]\n1\nConcurrentModificationError\n{1: 11, 2: 20, 3: 30}\nUnsupported operation: Cannot modify unmodifiable map\nUnsupported operation: Cannot modify an unmodifiable list\n{1, 2, 3}\n{2, 3}\n{2, 3}\ntrue\n',
   });
 });
 

@@ -86,7 +86,12 @@ export class HashStore implements NativeState {
   /** Adds or replaces an entry, telling whether the key was new (`map[key] = value`, `set.add(key)`). */
   set(key: Value, value: Value): boolean {
     if (this.isConst && this.runtime.checkingConstants) this.runtime.requireConstantKey(key);
-    return this.setHashed(key, value, this.hashOf(key));
+    const added = this.setHashed(key, value, this.hashOf(key));
+    if (!added && this.isConst && this.runtime.checkingConstants) {
+      const what = this.isMap ? 'マップのキー' : 'セットの要素';
+      this.runtime.throwError('ArgumentError', '', [`const の${what}が重複しています。`]);
+    }
+    return added;
   }
 
   /** `putIfAbsent`, which computes the value only for a new key and inserts it without hashing the key again. */

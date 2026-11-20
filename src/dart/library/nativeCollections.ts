@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 963 -- The native lists, sets, maps, and their iterators share collection helpers.
+// code-gauge-allow-file fileNcss 972 -- The native lists, sets, maps, and their iterators share collection helpers.
 import type { TopLevelFunction } from '../environment';
 import { stringOf } from '../format';
 import { type HashPolicy, HashStore } from '../hashStore';
@@ -651,9 +651,12 @@ define('List.lastIndexWhere', (runtime, receiver, [test, start]) => {
   }
   return -1n;
 });
-define('List.sort', (runtime, receiver, [compare]) => {
-  const target = list(receiver);
-  checkModifiable(runtime, target);
+define('List.sort', sortList);
+define('ListMixin.sort', sortList);
+
+function sortList(runtime: Runtime, receiver: Value, [compare]: readonly Value[]): undefined {
+  const native = receiver instanceof DartList ? receiver : undefined;
+  if (native) checkModifiable(runtime, native);
   // Without a comparator, the SDK compares as `Comparable.compare(a as Comparable, b as Comparable)`.
   const comparable = interfaceType(runtime.links.classNamed('Comparable'), [DYNAMIC]);
   const comparator = (a: Value, b: Value): number => {
@@ -668,9 +671,25 @@ define('List.sort', (runtime, receiver, [compare]) => {
         : callFunction(runtime, compare, a, b);
     return Number(result as bigint);
   };
-  dartSort(target.elements, comparator);
-  return;
-});
+  dartSort(
+    {
+      length: index(listLength(runtime, receiver)),
+      read: (position) => {
+        const at = BigInt(position);
+        return native
+          ? native.elements[checkIndex(runtime, native, at, 'index')]
+          : runtime.invoke(receiver, '[]', { positional: [at], named: undefined }, [], undefined);
+      },
+      write: (position, value) => {
+        if (native) writeListItem(runtime, native, position, value, elementTypeOf(native));
+        else
+          runtime.invoke(receiver, '[]=', { positional: [BigInt(position), value], named: undefined }, [], undefined);
+      },
+    },
+    comparator
+  );
+  return undefined;
+}
 define('List.shuffle', (runtime, receiver, [random]) => {
   const target = list(receiver);
   checkModifiable(runtime, target);

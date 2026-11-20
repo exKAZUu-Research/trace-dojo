@@ -656,17 +656,6 @@ export abstract class CallCompiler extends OperatorCompiler {
 
   protected argumentsAreConst = true;
 
-  /** Evaluates a list of types at runtime, replacing type parameters in scope. */
-  protected runtimeTypes(types: readonly DartType[]): (frame: Frame) => DartType[] {
-    if (types.length === 0) return () => [];
-    const resolvers = types.map((type) => this.runtimeType(type));
-    if (!types.some((type) => mentionsTypeParams(type))) {
-      const fixed = [...types];
-      return () => fixed;
-    }
-    return (frame) => resolvers.map((resolve) => resolve(frame));
-  }
-
   // Arguments
 
   /**

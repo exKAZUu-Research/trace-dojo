@@ -108,7 +108,7 @@ export class DartClosure extends DartObject {
     /** What `toString` describes: the function's name and, for a tear-off, where it comes from. */
     readonly description: ClosureDescription,
     /** Equal tear-offs (`a.m == a.m`) compare by this key. */
-    readonly tearOffKey: unknown
+    readonly tearOffKey: object | undefined
   ) {
     super(cls, [], []);
   }

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 445 -- Type and diagnostic resolution share the compiler environment.
+// code-gauge-allow-file fileNcss 446 -- Type and diagnostic resolution share the compiler environment.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ClassDeclaration, Span, TypeAliasDeclaration, TypeParameter, TypeSyntax } from './ast';
 import type { ClassInfo, Member } from './classes';
@@ -46,8 +46,9 @@ export interface Compiled {
   isConst: boolean;
   /** The value of a constant of a primitive type, known while compiling. */
   constValue?: { value: Value };
-  /** The variable a bare identifier names, for promotion and definite assignment. */
+  /** The local or promoted field path an expression reads. */
   variable?: LocalVar;
+  thisReference?: true;
   /** Whether evaluating the expression can complete normally (false for `throw` and calls returning `Never`). */
   completes?: boolean;
   /** Whether the expression creates an object, whose constructor's steps show what it did. */
@@ -677,6 +678,17 @@ export abstract class CompilerBase {
     const erased = eraseExtensionTypes(type);
     if (!mentionsTypeParams(erased)) return () => erased;
     return (frame) => eraseExtensionTypes(substitute(erased, frame.typeEnv));
+  }
+
+  /** Evaluates a list of types at runtime, replacing type parameters in scope. */
+  protected runtimeTypes(types: readonly DartType[]): (frame: Frame) => DartType[] {
+    if (types.length === 0) return () => [];
+    const resolvers = types.map((type) => this.runtimeType(type));
+    if (!types.some((type) => mentionsTypeParams(type))) {
+      const fixed = [...types];
+      return () => fixed;
+    }
+    return (frame) => resolvers.map((resolve) => resolve(frame));
   }
 
   protected newFunctionInfo(name: string, row: number | undefined, showsThis: boolean): FunctionInfo {

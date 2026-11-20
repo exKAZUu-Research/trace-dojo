@@ -388,12 +388,7 @@ abstract mixin class ListMixin<E> implements List<E> {
     length--;
     return result;
   }
-  void sort([int Function(E a, E b)? compare]) {
-    // The VM sorts the list itself with the algorithm List.sort runs on a copy, so the order and the calls agree.
-    var copy = toList();
-    copy.sort(compare);
-    for (int i = 0; i < copy.length; i++) this[i] = copy[i];
-  }
+  external void sort([int Function(E a, E b)? compare]);
   void shuffle([Random? random]) {
     random ??= Random();
     int length = this.length;
@@ -706,11 +701,25 @@ class UnmodifiableListView<E> extends ListBase<E> {
   set length(int newLength) => throw UnsupportedError("Cannot change the length of an unmodifiable list");
   E operator [](int index) => _source.elementAt(index);
   void operator []=(int index, E value) => throw UnsupportedError("Cannot modify an unmodifiable list");
+  set first(E value) => throw UnsupportedError("Cannot modify an unmodifiable list");
+  set last(E value) => throw UnsupportedError("Cannot modify an unmodifiable list");
+  void setAll(int index, Iterable<E> values) => throw UnsupportedError("Cannot modify an unmodifiable list");
+  void setRange(int start, int end, Iterable<E> values, [int skipCount = 0]) => throw UnsupportedError("Cannot modify an unmodifiable list");
+  void fillRange(int start, int end, [E? fill]) => throw UnsupportedError("Cannot modify an unmodifiable list");
+  void sort([int Function(E a, E b)? compare]) => throw UnsupportedError("Cannot modify an unmodifiable list");
+  void shuffle([Random? random]) => throw UnsupportedError("Cannot modify an unmodifiable list");
   void add(E value) => throw UnsupportedError("Cannot add to an unmodifiable list");
   void addAll(Iterable<E> iterable) => throw UnsupportedError("Cannot add to an unmodifiable list");
+  void insert(int index, E value) => throw UnsupportedError("Cannot add to an unmodifiable list");
+  void insertAll(int index, Iterable<E> values) => throw UnsupportedError("Cannot add to an unmodifiable list");
   bool remove(Object? element) => throw UnsupportedError("Cannot remove from an unmodifiable list");
+  void removeWhere(bool Function(E) test) => throw UnsupportedError("Cannot remove from an unmodifiable list");
+  void retainWhere(bool Function(E) test) => throw UnsupportedError("Cannot remove from an unmodifiable list");
+  E removeAt(int index) => throw UnsupportedError("Cannot remove from an unmodifiable list");
+  E removeLast() => throw UnsupportedError("Cannot remove from an unmodifiable list");
+  void removeRange(int start, int end) => throw UnsupportedError("Cannot remove from an unmodifiable list");
+  void replaceRange(int start, int end, Iterable<E> values) => throw UnsupportedError("Cannot remove from an unmodifiable list");
   void clear() => throw UnsupportedError("Cannot clear an unmodifiable list");
-  void sort([int Function(E a, E b)? compare]) => throw UnsupportedError("Cannot modify an unmodifiable list");
 }
 
 // Maps the program implements
@@ -746,7 +755,7 @@ abstract mixin class MapMixin<K, V> implements Map<K, V> {
     throw ArgumentError.value(key, "key", "Key not in map.");
   }
   void updateAll(V Function(K key, V value) update) {
-    for (var key in this.keys.toList()) this[key] = update(key, this[key] as V);
+    for (var key in this.keys) this[key] = update(key, this[key] as V);
   }
   Iterable<MapEntry<K, V>> get entries => keys.map((K key) => MapEntry<K, V>(key, this[key] as V));
   Map<K2, V2> map<K2, V2>(MapEntry<K2, V2> Function(K key, V value) transform) {
@@ -771,40 +780,47 @@ abstract mixin class MapMixin<K, V> implements Map<K, V> {
   int get length => keys.length;
   bool get isEmpty => keys.isEmpty;
   bool get isNotEmpty => keys.isNotEmpty;
-  Iterable<V> get values => keys.map((K key) => this[key] as V);
+  Iterable<V> get values => _MapMixinValues<K, V>(this);
   String toString() => MapBase.mapToString(this);
+}
+
+class _MapMixinValues<K, V> extends EfficientLengthIterable<V> {
+  final Map<K, V> _source;
+  _MapMixinValues(this._source);
+  int get length => _source.length;
+  Iterator<V> get iterator => MappedIterable<K, V>(_source.keys, (key) => _source[key] as V).iterator;
 }
 
 abstract class MapBase<K, V> with MapMixin<K, V> {
   static String mapToString(Map<Object?, Object?> m) => _mapToString(m);
 }
 
-class UnmodifiableMapView<K, V> extends MapBase<K, V> {
+abstract class _UnmodifiableMapBase<K, V> extends MapBase<K, V> {
+  void operator []=(K key, V value) => throw UnsupportedError("Cannot modify unmodifiable map");
+  V? remove(Object? key) => throw UnsupportedError("Cannot modify unmodifiable map");
+  void clear() => throw UnsupportedError("Cannot modify unmodifiable map");
+  void addAll(Map<K, V> other) => throw UnsupportedError("Cannot modify unmodifiable map");
+  void addEntries(Iterable<MapEntry<K, V>> entries) => throw UnsupportedError("Cannot modify unmodifiable map");
+  V putIfAbsent(K key, V Function() ifAbsent) => throw UnsupportedError("Cannot modify unmodifiable map");
+  V update(K key, V Function(V value) update, {V Function()? ifAbsent}) => throw UnsupportedError("Cannot modify unmodifiable map");
+  void updateAll(V Function(K key, V value) update) => throw UnsupportedError("Cannot modify unmodifiable map");
+  void removeWhere(bool Function(K key, V value) test) => throw UnsupportedError("Cannot modify unmodifiable map");
+}
+
+class UnmodifiableMapView<K, V> extends _UnmodifiableMapBase<K, V> {
   final Map<K, V> _map;
   UnmodifiableMapView(Map<K, V> map) : _map = map;
   V? operator [](Object? key) => _map[key];
-  void operator []=(K key, V value) => throw UnsupportedError("Cannot modify unmodifiable map");
   Iterable<K> get keys => _map.keys;
-  V? remove(Object? key) => throw UnsupportedError("Cannot modify unmodifiable map");
-  void clear() => throw UnsupportedError("Cannot modify unmodifiable map");
   int get length => _map.length;
   bool containsKey(Object? key) => _map.containsKey(key);
 }
 
 /** The map List.asMap returns: a view of the list, as the VM ListMapView. */
-class ListMapView<E> extends MapBase<int, E> {
+class ListMapView<E> extends _UnmodifiableMapBase<int, E> {
   final List<E> _values;
   ListMapView(this._values);
   E? operator [](Object? key) => containsKey(key) ? _values[key as int] : null;
-  void operator []=(int key, E value) => throw UnsupportedError("Cannot modify unmodifiable map");
-  E? remove(Object? key) => throw UnsupportedError("Cannot modify unmodifiable map");
-  void clear() => throw UnsupportedError("Cannot modify unmodifiable map");
-  void addAll(Map<int, E> other) => throw UnsupportedError("Cannot modify unmodifiable map");
-  void addEntries(Iterable<MapEntry<int, E>> entries) => throw UnsupportedError("Cannot modify unmodifiable map");
-  E putIfAbsent(int key, E Function() ifAbsent) => throw UnsupportedError("Cannot modify unmodifiable map");
-  E update(int key, E Function(E value) update, {E Function()? ifAbsent}) => throw UnsupportedError("Cannot modify unmodifiable map");
-  void updateAll(E Function(int key, E value) update) => throw UnsupportedError("Cannot modify unmodifiable map");
-  void removeWhere(bool Function(int key, E value) test) => throw UnsupportedError("Cannot modify unmodifiable map");
   int get length => _values.length;
   Iterable<E> get values => SubListIterable<E>(_values, 0, null);
   Iterable<int> get keys => _ListIndicesIterable(_values);
@@ -1267,7 +1283,7 @@ class _CustomHashMap<K, V> extends _HashMap<K, V> {
   _CustomHashMap(_HashKeyPolicy<K> policy) : super(policy);
 }
 
-class _HashMapKeyIterable<K, V> extends Iterable<K> {
+class _HashMapKeyIterable<K, V> extends EfficientLengthIterable<K> {
   final _HashMap<K, V> _map;
   _HashMapKeyIterable(this._map);
   int get length => _map.length;
@@ -1277,7 +1293,7 @@ class _HashMapKeyIterable<K, V> extends Iterable<K> {
   Iterator<K> get iterator => _HashMapIterator<K, V, K>(_map, 0);
 }
 
-class _HashMapValueIterable<K, V> extends Iterable<V> {
+class _HashMapValueIterable<K, V> extends EfficientLengthIterable<V> {
   final _HashMap<K, V> _map;
   _HashMapValueIterable(this._map);
   int get length => _map.length;
@@ -2173,15 +2189,24 @@ class ListQueue<E> extends Iterable<E> implements Queue<E> {
     if (removed) _modificationCount++;
     return removed;
   }
-  void removeWhere(bool Function(E element) test) {
-    _elements.removeWhere(test);
-    _modificationCount++;
-  }
-  void retainWhere(bool Function(E element) test) {
-    _elements.retainWhere(test);
-    _modificationCount++;
+  void removeWhere(bool Function(E element) test) => _filterWhere(test, true);
+  void retainWhere(bool Function(E element) test) => _filterWhere(test, false);
+  void _filterWhere(bool Function(E element) test, bool removeMatching) {
+    int stamp = _modificationCount;
+    int index = 0;
+    while (index < _elements.length) {
+      bool matches = test(_elements[index]);
+      if (stamp != _modificationCount) throw ConcurrentModificationError(this);
+      if (matches == removeMatching) {
+        _elements.removeAt(index);
+        stamp = ++_modificationCount;
+      } else {
+        index++;
+      }
+    }
   }
   void clear() {
+    if (_elements.isEmpty) return;
     _elements.clear();
     _modificationCount++;
   }
