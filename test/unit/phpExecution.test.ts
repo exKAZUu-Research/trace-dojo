@@ -5320,6 +5320,19 @@ test('a class whose property hook names a later class is declared when its state
   });
 });
 
+test('native UTF-8 regex scans of long subjects validate the subject once', () => {
+  expect(run(`<?php echo preg_match_all('/(あ)+/u', str_repeat('あ ', 40000));`)).toMatchObject({
+    kind: 'executed',
+    stdout: '40000',
+  });
+  expect(
+    run(`<?php echo var_export(preg_match('/(あ)+/u', "\\xff" . str_repeat('あ', 2000)), true), preg_last_error();`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'false4',
+  });
+});
+
 test('an override naming a missing class reports that its compatibility cannot be checked', () => {
   for (const [parent, child, expected] of [
     [

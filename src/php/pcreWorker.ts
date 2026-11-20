@@ -127,6 +127,9 @@ function matchPcreBatch(pattern, subject, position, retry, utf8, limit, batchBud
   if ('pregError' in entry) {
     return { offsets: new Int32Array(0), nextPosition: position, nextRetry: retry, done: true, noEmptyRemaining, lastEnd, pregError: entry.pregError };
   }
+  // The caller has validated the UTF-8 subject and start offset, as PHP does before passing PCRE2_NO_UTF_CHECK, so
+  // PCRE need not validate the whole subject again on every match.
+  const utfFlags = utf8 ? 0x40000000 : 0;
   const retryFlags = 0x80000008; // PCRE2_ANCHORED | PCRE2_NOTEMPTY_ATSTART
   const deadline = batchBudgetMs > 0 ? performance.now() + batchBudgetMs : Infinity;
   const out = [];
@@ -135,7 +138,7 @@ function matchPcreBatch(pattern, subject, position, retry, utf8, limit, batchBud
   let pregError;
   while (position <= subject.length && matches < limit) {
     if (matches > 0 && batchBudgetMs > 0 && performance.now() >= deadline) break;
-    const count = pcre.match(entry.code, subject, subject.length, position, retry ? retryFlags : 0, entry.data, context);
+    const count = pcre.match(entry.code, subject, subject.length, position, ((retry ? retryFlags : 0) | utfFlags) >>> 0, entry.data, context);
     if (count === -1) {
       if (!retry || position >= subject.length) {
         done = true;
