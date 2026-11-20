@@ -2,7 +2,7 @@
 import { consumeCallbackResult } from './callables';
 import { backtraceLimit, callArguments, callNamedArguments, type CallRecord, callStack } from './calls';
 import * as conversionsModule from './conversions';
-import { clearLastError, lastError, throwError, warn } from './errors';
+import { clearLastError, errorFile, lastError, throwError, warn } from './errors';
 import { defineConstant, defineFunction, markDeprecated } from './native';
 import { toStr } from './operators';
 import { PhpThrow, rt, SCRIPT_PATH } from './runtime';
@@ -17,8 +17,8 @@ defineFunction('error_get_last(): ?array', () => {
   const array = new PhpArray();
   array.set('type', error.level);
   array.set('message', error.message);
-  array.set('file', SCRIPT_PATH);
-  array.set('line', BigInt(error.row + 1));
+  array.set('file', errorFile(error.row));
+  array.set('line', BigInt(Math.max(error.row + 1, 0)));
   return array;
 });
 defineFunction('error_clear_last(): void', () => {

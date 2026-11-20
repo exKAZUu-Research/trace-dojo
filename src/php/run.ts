@@ -14,7 +14,7 @@ import { type ParsedProgram, parsePhp } from './parse';
 import { releaseBoundedRegexSubject } from './regexExecution';
 import { ExitSignal, FatalError, type Frame, PhpThrow, Runtime, SCRIPT_PATH, withRuntime } from './runtime';
 import { runExecuteOnLargeStack } from './stackFallback';
-import { runStatements } from './statements';
+import { mayDestruct, runStatements } from './statements';
 import { UnsupportedFeatureError } from './unsupported';
 import { PhpObject } from './values';
 
@@ -183,6 +183,7 @@ function shutdownObjects(runtime: Runtime): string | undefined {
     object.destructed = true;
     if (!destructor) continue;
     runtime.destructibles--;
+    if (!mayDestruct(destructor, object)) continue;
     const step = guardShutdownStep(runtime, () =>
       asInternal(() =>
         invoke(

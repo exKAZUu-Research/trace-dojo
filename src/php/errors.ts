@@ -166,7 +166,12 @@ export function emitError(level: bigint, message: string, row = rt().diagnosticR
   if (level === E_USER_ERROR) throw new FatalError(reported ? message : '', row);
   if (!reported) return;
   const name = LEVEL_NAMES.get(level) ?? 'Warning';
-  runtime.echo(`\n${name}: ${message} in ${SCRIPT_PATH} on line ${row + 1}\n`);
+  runtime.echo(`\n${name}: ${message} in ${errorFile(row)} on line ${Math.max(row + 1, 0)}\n`);
+}
+
+/** The file PHP names for an error on `row`: none while no script code runs, as at shutdown, which a negative row marks. */
+export function errorFile(row: number): string {
+  return row < 0 ? 'Unknown' : SCRIPT_PATH;
 }
 
 export function warn(message: string, pending = false): void {

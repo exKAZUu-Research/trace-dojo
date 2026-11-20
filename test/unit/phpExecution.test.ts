@@ -5232,6 +5232,27 @@ try { range(0.1, null, 1); } catch (ValueError $e) { echo explode("\\n", $e->get
   });
 });
 
+test('a non-public destructor runs only where its visibility allows', () => {
+  expect(
+    run(
+      '<?php\nclass A { private function __destruct() { echo "d"; } function __construct() {} }\n$a = new A; unset($a); echo "after\\n";'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '\nFatal error: Uncaught Error: Call to private A::__destruct() from global scope in /main.php:3\nStack trace:\n#0 {main}\n  thrown in /main.php on line 3\n',
+  });
+  expect(
+    run(
+      '<?php class A { protected function __destruct() { echo "d"; } } class B extends A { function kill() { $x = new A; echo "k;"; } } $b = new B; $b->kill(); echo "end;";'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'k;\nFatal error: Uncaught Error: Call to protected A::__destruct() from global scope in /main.php:1\nStack trace:\n#0 {main}\n  thrown in /main.php on line 1\n\nWarning: Call to protected B::__destruct() from global scope during shutdown ignored in Unknown on line 0\n',
+  });
+});
+
 test('gc_collect_cycles() does not count an array a destructor released', () => {
   for (const release of ['$this->a = [];', 'unset($this->a);']) {
     expect(

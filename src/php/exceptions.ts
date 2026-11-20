@@ -4,7 +4,7 @@ import { callMethod, callValue, consumeInvokedResult } from './callables';
 import { asInternal, callArguments, callNamedArguments, type CallRecord, callStack } from './calls';
 import { createObject, findClass } from './classes';
 import { formatFloat } from './conversions';
-import { readThrowableSlot, setErrorFactories, setThrowableFormatter, throwableKey } from './errors';
+import { errorFile, readThrowableSlot, setErrorFactories, setThrowableFormatter, throwableKey } from './errors';
 import { type ClassDefinition, defineClass, type NativeMethod } from './native';
 import { toStr } from './operators';
 import { rt, SCRIPT_PATH } from './runtime';
@@ -191,7 +191,12 @@ function callUserHandler(handler: Value, level: bigint, message: string, row: nu
   runtime.activeErrorHandlers.add(handler);
   try {
     return consumeInvokedResult(
-      () => callValue(handler, [{ v: level }, { v: message }, { v: SCRIPT_PATH }, { v: BigInt(row + 1) }], undefined),
+      () =>
+        callValue(
+          handler,
+          [{ v: level }, { v: message }, { v: errorFile(row) }, { v: BigInt(Math.max(row + 1, 0)) }],
+          undefined
+        ),
       (result) => result !== false
     );
   } finally {

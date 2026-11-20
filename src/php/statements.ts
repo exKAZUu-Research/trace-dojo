@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 856 -- Runs PHP statements iteratively on a heap block stack with shared loop/try/foreach helpers.
+// code-gauge-allow-file fileNcss 868 -- Runs PHP statements iteratively on a heap block stack with shared loop/try/foreach helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { CompileError } from '../interpreter/diagnostics';
 import type { ArrayCursor } from './arrayOrder';
@@ -10,6 +10,7 @@ import { consumeInvokedResult, discardInvokedResult } from './callables';
 import { asInternal, invoke, setBodyRunner, setDefaultEvaluator } from './calls';
 import {
   bindPropertyReference,
+  canCall,
   canDeclareEarly,
   declareClass,
   findClass,
@@ -34,6 +35,7 @@ import {
   type Callable,
   deref,
   type Key,
+  type Method,
   nativeOwnershipChanged,
   PhpArray,
   type PhpClass,
@@ -1131,7 +1133,7 @@ function promoteParameters(decl: FunctionDecl, frame: Frame, object: PhpObject):
 setBodyRunner(runBody, execList);
 setDestructor((object, row) => {
   const destructor = object.cls.findMethod('__destruct');
-  if (!destructor) return;
+  if (!destructor || !mayDestruct(destructor, object)) return;
   const run = (): void =>
     discardInvokedResult(() =>
       invoke(
@@ -1150,6 +1152,23 @@ setDestructor((object, row) => {
     runtime.releasingGlobalsAtShutdown = releasingGlobals;
   }
 });
+/**
+ * Whether the releasing code may run an object's destructor, as zend_objects_destroy_object checks for a non-public
+ * one: a release from a scope that cannot call it throws an Error, and one at shutdown warns and skips the call.
+ */
+export function mayDestruct(destructor: Method, object: PhpObject): boolean {
+  if (destructor.visibility === 'public') return true;
+  const runtime = rt();
+  const call = `Call to ${destructor.visibility} ${object.cls.name}::__destruct() from`;
+  if (runtime.nativeReleaseMode === 'shutdown' && runtime.frames.length === 1) {
+    emitError(E_WARNING, `${call} global scope during shutdown ignored`, -1);
+    return false;
+  }
+  const scope = runtime.frame.scope;
+  if (canCall(destructor, scope)) return true;
+  throwError('Error', `${call} ${scope ? `scope ${scope.name}` : 'global scope'}`);
+}
+
 setObjectToString((object) => {
   const method = object.cls.findMethod('__tostring');
   if (!method) throwError('Error', `Object of class ${object.cls.name} could not be converted to string`);
