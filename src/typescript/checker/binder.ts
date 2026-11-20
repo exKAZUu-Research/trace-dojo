@@ -1,7 +1,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { Scope, type Sym, type ValueKind } from './scopes';
-import { named, patternIdentifiers } from './syntax';
+import { assignmentKind, named, patternIdentifiers } from './syntax';
 
 const functionLikeTypes = new Set([
   'function_declaration',
@@ -17,6 +17,22 @@ const functionLikeTypes = new Set([
   'function_type',
   'constructor_type',
 ]);
+const assignmentBoundaries = new Set([
+  'lexical_declaration',
+  'variable_declaration',
+  'expression_statement',
+  'if_statement',
+  'do_statement',
+  'while_statement',
+  'for_statement',
+  'for_in_statement',
+  'with_statement',
+  'switch_statement',
+  'try_statement',
+  'class_declaration',
+  'abstract_class_declaration',
+]);
+
 const blockTypes = new Set(['statement_block', 'for_statement', 'for_in_statement', 'switch_body', 'catch_clause']);
 const typeParameterOwners = new Set([
   'interface_declaration',
@@ -30,7 +46,7 @@ const typeParameterOwners = new Set([
 export class Binder {
   private readonly scopes = new Map<number, Scope>();
   /** The identifiers that name what an assignment changes, to find the variables a program reassigns. */
-  readonly assignedIdentifiers: TreeNode[] = [];
+  private readonly assignedIdentifiers: TreeNode[] = [];
   readonly moduleScope: Scope;
   /** How each kind of node that declares names or opens a scope of its own is bound. */
   private readonly binders = new Map<string, (node: TreeNode, scope: Scope) => void>([
@@ -59,6 +75,22 @@ export class Binder {
     this.moduleScope = rootScope ?? new Scope('module', globalScope, root);
     this.scopes.set(root.id, this.moduleScope);
     this.bindChildren(root, this.moduleScope);
+    this.markAssignments();
+  }
+
+  private markAssignments(): void {
+    for (const identifier of this.assignedIdentifiers) {
+      const scope = this.scopeOf(identifier);
+      const symbol = scope.lookupValue(identifier.text);
+      if (!symbol) continue;
+      symbol.isReassigned = true;
+      symbol.isDefinitelyAssigned ||= assignmentKind(identifier) !== 'compound';
+      const position =
+        assignmentOwner(scope) === assignmentOwner(symbol.scope)
+          ? assignmentEnd(identifier, symbol.valueDeclaration?.startIndex ?? 0)
+          : Number.POSITIVE_INFINITY;
+      symbol.lastAssignment = Math.max(symbol.lastAssignment, position);
+    }
   }
 
   /** The scope a node sees names in. */
@@ -309,4 +341,17 @@ class SignatureScope extends Scope {
 
 export function symbolDeclaredBy(scope: Scope, name: string): Sym | undefined {
   return scope.values.get(name);
+}
+
+function assignmentOwner(scope: Scope): Scope {
+  let owner = scope.functionScope;
+  while (owner.node?.type === 'class_static_block' && owner.parent) owner = owner.parent.functionScope;
+  return owner;
+}
+
+function assignmentEnd(identifier: TreeNode, declarationStart: number): number {
+  let end = identifier.startIndex;
+  for (let node: TreeNode | null = identifier; node && node.startIndex > declarationStart; node = node.parent)
+    if (assignmentBoundaries.has(node.type)) end = node.endIndex;
+  return end;
 }

@@ -1,0 +1,28 @@
+function earlierFunctionWrite() {
+  let value: string | number = "a";
+  function change() { value = 1; }
+  const read = () => value.toUpperCase();
+  change();
+  return read();
+}
+function earlierArrowWrite() {
+  let value: string | undefined = "a";
+  const clear = () => { value = undefined; };
+  const read = () => value.length;
+  clear();
+  return read();
+}
+function inBranch(flag: boolean) {
+  let value: string | number = 0;
+  if (flag) {
+    value = "in";
+    return () => value.toUpperCase();
+  }
+}
+function parameterWrite(value: string | number) {
+  value = "ready";
+  const writer = { change() { [value] = [1]; } };
+  const read = () => value.toUpperCase();
+  writer.change();
+  return read();
+}

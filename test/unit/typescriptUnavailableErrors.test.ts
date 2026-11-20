@@ -33,6 +33,31 @@ test('a later console argument cannot hide an earlier function-to-string convers
   });
 });
 
+test.each([
+  ['() => void', 'return `${value}`;'],
+  ['() => void', 'return String(value);'],
+  ['{ tag: number } & (() => void)', 'return "prefix" + value;'],
+  ['(() => void) | string', 'console.log("%s", value);'],
+  ['() => void', 'return value.toString();'],
+  ['new () => { value: number }', 'return String(value);'],
+])('checks generic function source conversion with %s in %s', (bound, conversion) => {
+  const source = `function show<T extends ${bound}>(value: T) {
+  ${conversion}
+}
+console.log("done");`;
+  expect(executeProgram('typescript', source)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 1, message: '関数やクラスの文字列への変換は、この採点環境では使えません。' }],
+  });
+});
+
+test('generic source conversions allow unknown values and ordinary object string methods', () => {
+  const source = `function show<T>(value: T) { return String(value); }
+function method<T extends { toString(): string }>(value: T) { return value.toString(); }
+console.log(show("text"), method({ toString() { return "object"; } }));`;
+  expect(executeProgram('typescript', source)).toMatchObject({ kind: 'executed', stdout: 'text object\n' });
+});
+
 const caughtFunctionError = `'use strict';
 const fn=()=>{};
 Object.freeze(fn);

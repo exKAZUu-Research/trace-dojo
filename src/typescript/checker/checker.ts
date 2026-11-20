@@ -35,7 +35,7 @@ import { Relations } from './relations';
 import type { Scope } from './scopes';
 import { Signatures } from './signatures';
 import { StatementChecker } from './statements';
-import { assignmentKind, bigIntPropertyNames } from './syntax';
+import { bigIntPropertyNames } from './syntax';
 import { TypeNodes } from './typeNodes';
 import { TypeOperators } from './typeOperators';
 import {
@@ -140,14 +140,6 @@ export class Checker {
     markUnsupported(this.libraryBinder.moduleScope);
     this.nativeOverloadBinder = new Binder(nativeOverloadTree.rootNode, this.libraryBinder.moduleScope);
     this.binder = new Binder(root, this.libraryBinder.globalScope, this.libraryBinder.moduleScope);
-    for (const identifier of this.binder.assignedIdentifiers) {
-      const symbol = this.binder.scopeOf(identifier).lookupValue(identifier.text);
-      if (symbol) {
-        symbol.isReassigned = true;
-        symbol.isDefinitelyAssigned ||= assignmentKind(identifier) !== 'compound';
-        symbol.assignmentOffsets.push(identifier.startIndex);
-      }
-    }
   }
 
   check(): SourceDiagnostic[] {

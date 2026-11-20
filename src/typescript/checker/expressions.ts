@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 516 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
+// code-gauge-allow-file fileNcss 522 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
@@ -145,15 +145,32 @@ export class ExpressionChecker {
    * interpreter does not reproduce.
    */
   checkFunctionText(node: TreeNode, type: Type): void {
-    if (isAnyLike(type)) return;
-    const isFunction = (member: Type): boolean =>
-      member.kind === 'object' &&
-      (this.c.isLibraryType(member, 'Function') ||
-        this.c.signaturesOf(member, 'call').length > 0 ||
-        this.c.signaturesOf(member, 'construct').length > 0);
-    if ((type.kind === 'union' ? type.types : [type]).some(isFunction)) {
-      this.c.error(node, unsupportedMessage('関数やクラスの文字列への変換'));
+    if (this.mayBeFunction(type)) this.c.error(node, unsupportedMessage('関数やクラスの文字列への変換'));
+  }
+
+  private mayBeFunction(type: Type): boolean {
+    const pending = [type];
+    const visited = new Set<number>();
+    while (pending.length > 0) {
+      const current = pending.pop() as Type;
+      if (visited.has(current.id)) continue;
+      visited.add(current.id);
+      this.c.budget.spend();
+      const apparent =
+        current.kind === 'typeParameter' || current.kind === 'indexedAccess' || current.kind === 'conditional'
+          ? this.c.apparentType(current)
+          : current;
+      if (apparent.kind === 'union' || apparent.kind === 'intersection') {
+        pending.push(...apparent.types);
+      } else if (
+        apparent.kind === 'object' &&
+        (this.c.isLibraryType(apparent, 'Function') ||
+          this.c.signaturesOf(apparent, 'call').length > 0 ||
+          this.c.signaturesOf(apparent, 'construct').length > 0)
+      )
+        return true;
     }
+    return false;
   }
 
   isSymbolLike(type: Type): boolean {
@@ -455,8 +472,7 @@ export class ExpressionChecker {
     const evolving = this.isEvolvingArrayDeclaration(symbol);
     if (evolving || this.c.assignments.isAutoTyped(symbol)) symbol.usedInClosure = true;
     if (evolving && this.isEvolvingUse(node)) return declared;
-    const assignedLater =
-      closure !== undefined && symbol.assignmentOffsets.some((offset) => offset > closure.startIndex);
+    const assignedLater = closure !== undefined && symbol.lastAssignment >= closure.startIndex;
     const deferred =
       closure?.type === 'function_declaration' ||
       closure?.type === 'generator_function_declaration' ||

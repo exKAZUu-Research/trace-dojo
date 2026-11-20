@@ -27,8 +27,8 @@ export class Sym {
   isReassigned = false;
   /** Whether the program assigns the variable anywhere with `=`, a logical assignment, or a destructuring or `for` head. */
   isDefinitelyAssigned = false;
-  /** Where the program assigns the variable, by source offset, which decides whether a closure keeps its narrowing. */
-  readonly assignmentOffsets: number[] = [];
+  /** The end of the last ordered write, or infinity when a nested function may write later. */
+  lastAssignment = -1;
   /** Whether a nested function uses this variable, whose type then cannot always be followed. */
   usedInClosure = false;
   /** Whether resolving its type is in progress, to detect a type that depends on itself. */

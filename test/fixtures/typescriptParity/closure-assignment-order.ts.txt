@@ -1,0 +1,23 @@
+function ordered() {
+  let value: string | number = 0;
+  value = "ready";
+  return () => value.toUpperCase();
+}
+function compound(flag: boolean) {
+  let value: string | number = 0;
+  if (flag) value = "branch";
+  else value = "other";
+  return () => value.toUpperCase();
+}
+function staticOrdered() {
+  let value: string | number = 0;
+  class Control { static { value = "static"; } }
+  return () => value.toUpperCase();
+}
+function shadowed() {
+  let value: string | number = "outer";
+  function writer() { let value: number; value = 2; }
+  writer();
+  return () => value.toUpperCase();
+}
+console.log(ordered()(), compound(true)(), staticOrdered()(), shadowed()());
