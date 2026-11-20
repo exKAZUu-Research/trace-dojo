@@ -1,9 +1,14 @@
 // code-gauge-allow-file fileNcss 757 -- Keeps implicit dispatch and native result ownership together.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { placeOf } from './assignment';
-import type { Arg, Expr, ResolvedName } from './ast';
+import type { Arg, Expr } from './ast';
 import { hasNullsafeReceiver, isReferenceArgumentTemporary } from './astAnalysis';
-import { oneArgumentBuiltinOpcodes, simpleSprintfFormat } from './builtinCompiler';
+import {
+  compiledBuiltinName,
+  compiledBuiltinResult,
+  simpleSprintfFormat,
+  specializedBuiltinCall,
+} from './builtinCompiler';
 import builtinNames from './builtinNames.json';
 import { lower } from './bytes';
 import {
@@ -216,9 +221,7 @@ function argumentReference(expression: Expr): Ref {
 
 function temporaryArgumentReceiver(expression: Expr): boolean {
   if (isReferenceArgumentTemporary(expression)) return true;
-  if (expression.k !== 'call' || 'k' in expression.fn || expression.fn.fallback) return false;
-  const fn = rt().functions.get(lower(expression.fn.name));
-  return fn?.kind === 'native' && compiledTemporaryResult(fn, expression.args);
+  return expression.k === 'call' && isTemporaryBuiltinResult(expression);
 }
 
 function referenceParameterIndex(params: Callable['params'] | undefined, position: number, name?: string): number {
@@ -230,25 +233,17 @@ function referenceParameterIndex(params: Callable['params'] | undefined, positio
 function permitsTemporaryReference(e: Expr): boolean {
   if (e.k === 'mcall' || e.k === 'scall') return !e.fcc;
   if (e.k !== 'call') return e.k === 'new' || e.k === 'newAnon';
-  if (e.fcc) return false;
-  if ('k' in e.fn || e.fn.fallback) return true;
-  const fn = rt().functions.get(lower(e.fn.name));
-  return fn?.kind !== 'native' || !compiledTemporaryResult(fn, e.args);
+  return !e.fcc && !isTemporaryBuiltinResult(e);
 }
 
-function compiledTemporaryResult(fn: NativeFunction, args: Arg[]): boolean {
-  const name = lower(fn.name);
-  if (name === 'call_user_func' || name === 'call_user_func_array') return false;
-  if (specializedCall(fn, args)) return true;
-  if (name === 'sprintf') return simpleSprintfFormat(args) !== undefined;
-  if (args.length !== 1 || args[0].spread || args[0].name !== undefined) return false;
-  if (oneArgumentBuiltinOpcodes.has(name)) return true;
-  const literal = args[0].e;
-  if (literal.k !== 'lit') return false;
-  const value = literal.v;
-  if (name === 'chr') return typeof value === 'bigint' && value >= 0n && value <= 255n;
-  if (name === 'ord') return typeof value === 'string' && value.length === 1;
-  return name === 'defined' && (typeof value !== 'string' || !/[\\:]/.test(value));
+function isTemporaryBuiltinResult(call: Extract<Expr, { k: 'call' }>): boolean {
+  const builtin = compiledBuiltinName(call.fn);
+  if (builtin === undefined) return false;
+  const runtime = rt();
+  const fn = runtime.functions.get(builtin);
+  return (
+    fn?.kind === 'native' && compiledBuiltinResult(builtin, call.args, runtime.frame.decl !== undefined) !== undefined
+  );
 }
 
 function keepUnpackedArguments(frame: Frame, args: ArgValue[], mark: number): void {
@@ -286,7 +281,7 @@ export function callExpression(e: Extract<Expr, { k: 'call' }>, discardResult = 
     throwError('Error', `Call to undefined function ${e.fn.name}()`);
   }
   if (e.fcc) return closureFromCallable({ fn });
-  if (fn.kind === 'native') return callNativeNamed(runtime, e, e.fn, fn, discardResult);
+  if (fn.kind === 'native') return callNativeNamed(runtime, e, compiledBuiltinName(e.fn), fn, discardResult);
   const args = evalArgs(e.args, fn, fn.name);
   runtime.row = e.row;
   return pushTemporary(runtime, invokeUser({ fn }, fn, args, e.row, discardResult));
@@ -307,26 +302,25 @@ function callDynamicExpression(runtime: Runtime, e: Extract<Expr, { k: 'call' }>
     return callee instanceof PhpArray ? receiverClosure(target) : closureFromCallable(target);
   }
   if ((e.fn as Expr).k === 'lit' && typeof callee === 'string') target.dynamic = false;
+  const builtin = compiledBuiltinName(e.fn);
+  if (builtin !== undefined && target.fn.kind === 'native')
+    return callNativeNamed(runtime, e, builtin, target.fn, discardResult);
   const args = evalArgs(e.args, target.magic ? undefined : target.fn, functionDisplayName(target, true));
   runtime.row = e.row;
   return pushTemporary(
     runtime,
-    target.magic
-      ? invokeMagic(target.magic, args, e.row, discardResult)
-      : target.fn.kind === 'user'
-        ? invokeUser(target, target.fn, args, e.row, discardResult)
-        : invoke(target, args, e.row, discardResult)
+    target.magic ? invokeMagic(target.magic, args, e.row, discardResult) : invoke(target, args, e.row, discardResult)
   );
 }
 
 function callNativeNamed(
   runtime: Runtime,
   e: Extract<Expr, { k: 'call' }>,
-  name: ResolvedName,
+  builtin: string | undefined,
   fn: Extract<Callable, { kind: 'native' }>,
   discardResult: boolean
 ): Value {
-  const format = !name.fallback && lower(fn.name) === 'sprintf' ? simpleSprintfFormat(e.args) : undefined;
+  const format = builtin === 'sprintf' ? simpleSprintfFormat(e.args) : undefined;
   if (format !== undefined) {
     runtime.lastReturnRef = undefined;
     return renderSimpleSprintf(
@@ -335,11 +329,13 @@ function callNativeNamed(
       callOperandRow(e)
     );
   }
-  const specialized = name.fallback ? undefined : specializedCall(fn, e.args);
+  const specialized =
+    builtin === undefined ? undefined : specializedBuiltinCall(builtin, e.args, runtime.frame.decl !== undefined);
   const frameless = specialized === 'frameless';
-  const inline = specialized === 'opcode' || (frameless && fn.name === 'strtr');
-  const row = specialized === 'opcode' ? callOperandRow(e) : e.row;
-  const forwards = specialized === 'opcode' && (fn.name === 'call_user_func' || fn.name === 'call_user_func_array');
+  const forwards = specialized === 'forwarding';
+  const opcode = specialized === 'opcode' || forwards;
+  const inline = opcode || (frameless && fn.name === 'strtr');
+  const row = opcode ? callOperandRow(e) : e.row;
   const args = forwards
     ? evalCompiledCallbackArgs(e.args, fn)
     : specialized
@@ -1211,57 +1207,4 @@ function newClosure(fn: UserFunction, bound: Map<string, Ref>, isStatic: boolean
   } satisfies ClosureData;
   frame.temporaries.push(object);
   return object;
-}
-
-// Function bodies ----------------------------------------------------------------------------------------------------
-
-const FRAMELESS_ARITIES: Readonly<Partial<Record<string, readonly number[]>>> = {
-  class_exists: [1, 2],
-  dechex: [1],
-  dirname: [1, 2],
-  implode: [1, 2],
-  in_array: [2, 3],
-  is_numeric: [1],
-  max: [2],
-  min: [2],
-  preg_match: [2],
-  preg_replace: [3],
-  property_exists: [2],
-  str_contains: [2],
-  str_replace: [3],
-  str_starts_with: [2],
-  strpos: [2, 3],
-  strstr: [2, 3],
-  strtr: [2, 3],
-  substr: [2, 3],
-  trim: [1, 2],
-};
-
-const OPCODE_ARITIES: Readonly<Partial<Record<string, readonly number[]>>> = {
-  array_key_exists: [2],
-  boolval: [1],
-  call_user_func_array: [2],
-  doubleval: [1],
-  floatval: [1],
-  func_get_args: [0],
-  func_num_args: [0],
-  get_called_class: [0],
-  get_class: [0, 1],
-  intval: [1],
-  strval: [1],
-};
-
-function specializedCall(fn: NativeFunction, args: Arg[]): 'opcode' | 'frameless' | undefined {
-  if (args.some((arg) => arg.spread || arg.name !== undefined)) return undefined;
-  const name = lower(fn.name);
-  if ((name === 'func_get_args' || name === 'func_num_args') && !rt().frame.decl) return undefined;
-  if (FRAMELESS_ARITIES[name]?.includes(args.length)) return 'frameless';
-  const arities = OPCODE_ARITIES[name];
-  if (
-    arities
-      ? arities.includes(args.length)
-      : fn.inlined && (name === 'call_user_func' ? args.length > 0 : args.length === 1)
-  )
-    return 'opcode';
-  return undefined;
 }

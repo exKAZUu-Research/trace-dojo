@@ -29,7 +29,7 @@ import { separate } from './gcRoots';
 import { cast } from './interp';
 import { compareLocaleStrings } from './libLocale';
 import { naturalCompare } from './libString';
-import { defineAlias, defineConstant, defineFunction, markDirectOnly, markInlined } from './native';
+import { defineAlias, defineConstant, defineFunction, markDirectOnly } from './native';
 import {
   arithmetic,
   compare,
@@ -161,8 +161,6 @@ defineFunction('count(Countable|array $value, int $mode = COUNT_NORMAL): int', (
   throwError('TypeError', `${name}(): Argument #1 ($value) must be of type Countable|array, ${valueName(value)} given`);
 });
 defineAlias('sizeof', 'count');
-markInlined('count');
-markInlined('sizeof');
 
 function countRecursive(array: PhpArray): number {
   const active = new Set([array]);
@@ -252,7 +250,6 @@ defineFunction('array_key_exists($key, array $array): bool', ({ args, name = 'ar
     throwError('TypeError', `${name}(): Argument #2 ($array) must be of type array, ${valueName(array)} given`);
   return array.has(arrayKeyOf(key, row !== undefined, name));
 });
-markInlined('array_key_exists');
 defineAlias('key_exists', 'array_key_exists');
 
 /** The key `array_key_exists` looks up; the opcode a direct call compiles to rejects an invalid key as an offset does. */

@@ -40,7 +40,7 @@ import {
   defineFunction,
   defineRuntimeConstant,
   markDirectOnly,
-  markInlined,
+  markReferenceForwarding,
 } from './native';
 import { toFloat, toInt, toKey, toStr } from './operators';
 import { printR, varDump, varExport } from './output';
@@ -362,7 +362,6 @@ function currentArgs(): Value[] {
 defineFunction('clone(object $object, array $withProperties = []): object', ({ args }) => {
   return cloneObject(args[0] as PhpObject, args[1]);
 });
-markInlined('clone');
 
 defineFunction(
   'call_user_func(callable $callback, mixed ...$args): mixed',
@@ -388,8 +387,7 @@ defineFunction(
     return callValue(args[0], forwarded, row, 'callback', discardResult, compiledCallback);
   }
 );
-markInlined('call_user_func', true);
-markInlined('call_user_func_array', true);
+markReferenceForwarding('call_user_func', 'call_user_func_array');
 
 export function isCallable(value: Value): boolean {
   return checkCallable(value);
@@ -411,7 +409,6 @@ defineFunction('get_class(object $object = UNKNOWN): string', ({ args }) => {
   const object = args[0] as PhpObject;
   return object.cls.fullName;
 });
-markInlined('get_class');
 defineFunction('get_parent_class(mixed $object_or_class = UNKNOWN): string|false', ({ args }) => {
   if (args.length === 0) deprecated('Calling get_parent_class() without arguments is deprecated');
   const cls = args.length === 0 ? rt().frame.scope : isStream(args[0]) ? undefined : classOf(args[0]);
@@ -427,7 +424,6 @@ defineFunction('get_called_class(): string', () => {
   if (!cls) throwError('Error', 'get_called_class() must be called from within a class');
   return cls.fullName;
 });
-markInlined('get_called_class');
 defineFunction('get_object_vars(object $object): array', ({ args }) => {
   const object = args[0] as PhpObject;
   const scope = rt().frame.scope;

@@ -54,11 +54,8 @@ export function defineOverloadedFunction(
   });
 }
 
-/** Marks a native function whose direct calls PHP compiles away, as {@link NativeFunction.inlined} says. */
-export function markInlined(name: string, forwardsReference = false): void {
-  const fn = markedFunction(name);
-  fn.inlined = true;
-  if (forwardsReference) fn.forwardsReference = 'inlined';
+export function markReferenceForwarding(...names: string[]): void {
+  for (const name of names) markedFunction(name).forwardsReference = 'inlined';
 }
 
 export function markDeprecated(name: string, deprecation: string): void {

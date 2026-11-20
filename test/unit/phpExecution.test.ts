@@ -2942,6 +2942,39 @@ test.each([
   expect(JSON.stringify(result)).toContain('Cannot use string as default value for parameter $x of type int');
 });
 
+test('orders binary operand diagnostics by the compiled call result', () => {
+  const source = String.raw`<?php
+namespace Example;
+$text = 'x';
+foreach ([
+  fn() => ($text . 'x') * \max(2, 3),
+  fn() => ($text . 'x') * max(2, 3),
+  fn() => ($text . 'x') * ('m' . 'ax')(2, 3),
+  fn() => ($text . 'x') * \strlen(...),
+  fn() => (array) false & \strlen('a'),
+  fn() => (array) false & \count([1]),
+  fn() => (array) false & \count(value: [1]),
+  fn() => (array) false & \abs(3),
+  fn() => (array) false & \call_user_func('abs', 3),
+  fn() => 'abc' * \strlen('a' . 'b'),
+  fn() => 'abc' * \defined('PHP_VERSION_ID'),
+] as $example) {
+  try { $example(); } catch (\TypeError $error) { echo $error->getMessage(), "\n"; }
+}`;
+  expect(run(source)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'Unsupported operand types: string * int\n' +
+      'Unsupported operand types: int * string\n' +
+      'Unsupported operand types: string * int\n' +
+      'Unsupported operand types: string * Closure\n' +
+      'Unsupported operand types: array & int\n'.repeat(2) +
+      'Unsupported operand types: int & array\n'.repeat(3) +
+      'Unsupported operand types: string * int\n' +
+      'Unsupported operand types: string * bool\n',
+  });
+});
+
 test('uses compiled operand rows for expression diagnostics', () => {
   const source = `<?php
 set_error_handler(function ($level, $message, $file, $line) { echo $message, ':', $line, "\\n"; });

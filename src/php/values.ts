@@ -816,11 +816,6 @@ export interface NativeFunction {
   /** Whether the function reads its caller's variables (compact, extract, func_get_args). */
   needsCaller?: boolean;
   directOnly?: boolean;
-  /**
-   * Whether PHP compiles eligible direct calls into an instruction of their own (strlen, count, call_user_func),
-   * so that stack traces show no frame for it and what it calls shows the caller's line.
-   */
-  inlined?: boolean;
   acceptsNamed?: boolean | 'positional-only';
   forwardsReference?: boolean | 'inlined';
 }

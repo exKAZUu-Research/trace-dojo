@@ -11,14 +11,7 @@ import { deprecated, throwError, warn } from './errors';
 import { decodeHtml, escapeHtml, nextChar, translationTable } from './htmlEntities';
 import { writeStream } from './libCore';
 import { ctypeUpper, isCtypeAlpha, isCtypeSpace, isUtf8Ctype } from './libLocale';
-import {
-  defineAlias,
-  defineConstant,
-  defineFunction,
-  defineOverloadedFunction,
-  markDeprecated,
-  markInlined,
-} from './native';
+import { defineAlias, defineConstant, defineFunction, defineOverloadedFunction, markDeprecated } from './native';
 import { toInt, toStr, withStringConversionErrors } from './operators';
 import { rt } from './runtime';
 import { shuffle } from './shuffle';
@@ -54,7 +47,6 @@ function checkLength(text: string): string {
 }
 
 defineFunction('strlen(string $string): int', ({ args }) => BigInt(s(args[0]).length));
-markInlined('strlen');
 defineFunction('str_repeat(string $string, int $times): string', ({ args }) => {
   const times = n(args[1]);
   if (times < 0) throwError('ValueError', 'str_repeat(): Argument #2 ($times) must be greater than or equal to 0');

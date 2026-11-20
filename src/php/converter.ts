@@ -3,18 +3,7 @@ import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
 import type { ExecutionBudget } from '../interpreter/limits';
-import type {
-  Arg,
-  ArrayItem,
-  CatchClause,
-  Expr,
-  ListItem,
-  MatchArm,
-  Program,
-  ResolvedName,
-  Stmt,
-  SwitchCase,
-} from './ast';
+import type { Arg, ArrayItem, CatchClause, Expr, ListItem, MatchArm, Program, Stmt, SwitchCase } from './ast';
 import {
   collectScopeVars,
   collectVariables,
@@ -24,7 +13,13 @@ import {
   isWritableFetchBase,
   onlyCalls,
 } from './astAnalysis';
-import { oneArgumentBuiltinOpcodes, simpleSprintfFormat, simpleSprintfParts } from './builtinCompiler';
+import {
+  compiledBuiltinName,
+  compiledBuiltinResult,
+  simpleSprintfFormat,
+  simpleSprintfParts,
+  specializedBuiltinCall,
+} from './builtinCompiler';
 import { enc, lower } from './bytes';
 import { type Constant, constantTruth, constantTypeName, foldedConstant, scalarString } from './constantDefaults';
 import { formatFloat, isNumericString, NAN_BOOL_WARNING, NAN_STRING_WARNING, normalizeKeyString } from './conversions';
@@ -41,7 +36,7 @@ import {
 import { DeclarationConverter } from './declarationConverter';
 import { exportExpr, UnexportableSyntax } from './export';
 import { decodeLiteral, decodeSingleQuoted, parseIntegerLiteral } from './literals';
-import { builtinLiteralKey } from './native';
+import { builtinLiteralKey, compileConstant } from './native';
 import { compiledOperandRow, operandAstRow, recordOperandRows } from './opcodeRows';
 
 export type { CompileNotice } from './converterBase';
@@ -56,7 +51,7 @@ const CALL_EXPRESSIONS = new Set([
   'scoped_call_expression',
   'exit_expression',
 ]);
-const VARIABLE_OPCODE_RESULTS = new Set<Expr['k']>(['call', 'mcall', 'scall', 'new', 'newAnon', 'assignRef']);
+const VARIABLE_OPCODE_RESULTS = new Set<Expr['k']>(['mcall', 'scall', 'new', 'newAnon', 'assignRef']);
 
 export class Converter extends DeclarationConverter {
   private declaredSymbols = new Map<string, Map<string, string>>();
@@ -873,13 +868,9 @@ export class Converter extends DeclarationConverter {
 
   private builtinWriteResult(call: Extract<Expr, { k: 'call' }>): boolean {
     const { fn, args, fcc } = call;
-    if ('k' in fn || fcc || fn.fallback || args.some((arg) => arg.spread || arg.name !== undefined)) return false;
-    const name = lower(fn.name);
-    if (oneArgumentBuiltinOpcodes.has(name)) return args.length === 1;
-    if (name === 'get_class') return args.length <= 1;
-    if (name === 'get_called_class') return args.length === 0;
-    if (name === 'func_num_args' || name === 'func_get_args') return this.fn.isFunction === true && args.length === 0;
-    if (name === 'array_key_exists') return args.length === 2;
+    const name = compiledBuiltinName(fn);
+    if (name === undefined || fcc || args.some((arg) => arg.spread || arg.name !== undefined)) return false;
+    if (specializedBuiltinCall(name, args, this.fn.name !== undefined) === 'opcode') return true;
     if (name === 'sprintf') return simpleSprintfFormat(args) !== undefined;
     if (name === 'defined') {
       const value = args[0]?.e;
@@ -1403,16 +1394,18 @@ export class Converter extends DeclarationConverter {
       const raw = this.nameText(fnNode);
       if (this.preserveSyntax) return { k: 'call', fn: { name: raw }, args, fcc, row };
       const name = this.resolveFunctionName(raw);
-      this.compileBuiltinArguments(name, args, fcc);
+      this.compileBuiltinArguments(compiledBuiltinName(name), args, fcc);
       if (lower(name.fallback ?? name.name) === 'assert') {
         this.addAssertionDescription(argumentsNode, args, row);
       }
       return { k: 'call', fn: name, args, fcc, row };
     }
     const callable = this.opcodeOperand(fnNode);
+    const fn = this.foldCallableOperand(callable);
+    if (!this.preserveSyntax) this.compileBuiltinArguments(compiledBuiltinName(fn), args, fcc);
     return {
       k: 'call',
-      fn: this.foldCallableOperand(callable),
+      fn,
       args,
       fcc,
       initRow: compiledOperandRow(callable),
@@ -1420,9 +1413,7 @@ export class Converter extends DeclarationConverter {
     };
   }
 
-  private compileBuiltinArguments(name: ResolvedName, args: Arg[], fcc: boolean): void {
-    if (name.fallback) return;
-    const builtin = lower(name.name);
+  private compileBuiltinArguments(builtin: string | undefined, args: Arg[], fcc: boolean): void {
     if (builtin === 'sprintf' && !fcc) this.compileSimpleSprintf(args);
     if ((builtin === 'call_user_func' || builtin === 'call_user_func_array') && args[0])
       args[0].e = this.foldCallableOperand(args[0].e, true);
@@ -1689,8 +1680,29 @@ export class Converter extends DeclarationConverter {
   private operandRank(operand: Expr): number {
     // Zend specializes commutative opcodes in descending CV, VAR, TMP, CONST order.
     if (operand.k === 'var' && operand.name !== 'this' && operand.name !== 'GLOBALS') return 3;
+    if ('fcc' in operand && operand.fcc) return 1;
+    if (operand.k === 'call') return this.callOperandRank(operand);
     if (VARIABLE_OPCODE_RESULTS.has(operand.k)) return 2;
     return this.compiledValue(operand) === undefined ? 1 : 0;
+  }
+
+  private callOperandRank({ fn, args }: Extract<Expr, { k: 'call' }>): number {
+    const builtin = compiledBuiltinName(fn);
+    if (builtin === undefined) return 2;
+    const result = compiledBuiltinResult(builtin, args, this.fn.name !== undefined);
+    if (result === 'temporary') return this.builtinResultIsFolded(builtin, args[0]?.e) ? 0 : 1;
+    return result === 'constant' ? 0 : 2;
+  }
+
+  private builtinResultIsFolded(name: string, argument: Expr | undefined): boolean {
+    if (!argument) return false;
+    if (name === 'strlen') return typeof this.compiledValue(argument) === 'string';
+    return (
+      name === 'defined' &&
+      argument.k === 'lit' &&
+      typeof argument.v === 'string' &&
+      compileConstant(argument.v) !== undefined
+    );
   }
 
   private shortCircuit(op: string, l: Expr, right: Node, row: number): Expr {
