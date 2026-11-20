@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 973 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 984 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import type {
   ClassDeclaration,
@@ -50,7 +50,6 @@ import {
   objectType,
   substitute,
   type TypeParam,
-  TypeParam as TypeParamCtor,
   typeParamType,
   typeToString,
   VOID,
@@ -137,6 +136,7 @@ export class Compiler extends ConstructorCompiler {
             library: this.library.name,
           };
           this.declareName(declaration.name, { kind: 'alias', alias }, declaration);
+          this.aliasWork.set(alias, declaration);
           break;
         }
         case 'extension': {
@@ -211,17 +211,18 @@ export class Compiler extends ConstructorCompiler {
   // code-gauge-allow functionCognitiveComplexity 19 -- Each branch is one of the cases Dart distinguishes for this construct.
   // code-gauge-allow functionNcss 35 -- One case per form of the construct, which reads best together.
   resolveAll(syntax: Library): void {
-    for (const declaration of syntax.declarations) {
-      if (declaration.kind !== 'typeAlias') continue;
-      const entry = this.library.declarations.get(declaration.name);
-      if (entry?.kind !== 'alias') continue;
-      const { alias } = entry;
-      alias.typeParams.push(...this.declareTypeParams(declaration.typeParameters));
-      alias.aliased = this.withTypeParams(alias.typeParams, () => this.resolveType(declaration.aliased));
+    this.pendingBoundChecks = [];
+    for (const { cls, declaration } of this.classWork) {
+      cls.typeParams.push(...this.declareTypeParamNames(declaration.typeParameters));
+      this.pendingClassBounds.set(cls, declaration);
     }
-    for (const work of this.classWork) this.declareTypeParamsOf(work);
+    for (const [alias, declaration] of this.aliasWork) this.resolveAlias(alias, declaration);
+    for (const { cls } of this.classWork) this.resolveClassBounds(cls);
     for (const work of this.classWork) this.resolveHeader(work);
     this.checkHierarchy();
+    const boundChecks = this.pendingBoundChecks;
+    this.pendingBoundChecks = undefined;
+    for (const check of boundChecks) check();
     for (const work of this.orderedClassWork()) this.declareMembers(work);
     for (const { ext, declaration } of this.extensionWork) this.declareExtension(ext, declaration);
     for (const declaration of syntax.declarations) {
@@ -253,10 +254,6 @@ export class Compiler extends ConstructorCompiler {
 
   // Classes
 
-  private declareTypeParamsOf({ cls, declaration }: ClassWork): void {
-    cls.typeParams.push(...declaration.typeParameters.map((parameter) => new TypeParamCtor(parameter.name)));
-  }
-
   /** Classes ordered so that each comes after its superclass, mixins, and `on` types. */
   private orderedClassWork(): ClassWork[] {
     const ordered: ClassWork[] = [];
@@ -285,9 +282,6 @@ export class Compiler extends ConstructorCompiler {
   private resolveHeader(work: ClassWork): void {
     const { cls, declaration } = work;
     this.withTypeParams(cls.typeParams, () => {
-      for (const [index, parameter] of declaration.typeParameters.entries()) {
-        if (parameter.bound) cls.typeParams[index].bound = this.resolveType(parameter.bound);
-      }
       this.resolveSuperclass(work);
       if (declaration.mixins.length > 0) {
         let base = cls.superclass ?? objectType();
@@ -347,8 +341,11 @@ export class Compiler extends ConstructorCompiler {
   }
 
   /** Rejects extending or implementing classes whose modifiers forbid it outside their library. */
+  // code-gauge-allow functionCognitiveComplexity 18 -- Each class modifier restricts different subtype roles.
   private checkSubtypeAllowed(cls: ClassInfo, supercls: ClassInfo, role: string, span: Span): void {
     const name = supercls.name;
+    if (!this.isLibraryCode && (supercls.kind === 'enum' || supercls === coreTypes.enum) && role !== 'mixin の on の型')
+      this.error(span, `列挙型 ${name} は${role}にできません。`);
     // In its own library too, a subtype of a base or final class must keep others from implementing it.
     const { modifiers } = cls;
     if (
@@ -1244,6 +1241,7 @@ export class Compiler extends ConstructorCompiler {
             parameters: declaration.parameters,
             positionalTypes,
             namedTypes,
+            isSetter: declaration.methodKind === 'setter',
             returnType: type.returnType,
             contextReturnType: undefined,
             body,
@@ -1443,12 +1441,22 @@ export class Compiler extends ConstructorCompiler {
   private checkClass({ cls, declaration }: ClassWork): void {
     if (this.isLibraryCode) return;
     if (cls.kind === 'enum') this.checkEnumMembers(cls, declaration);
-    for (const member of [...cls.members.values(), ...cls.setters.values()]) this.checkOverride(cls, member);
+    for (const member of cls.members.values()) this.checkOverride(cls, member, false);
+    for (const member of cls.setters.values()) this.checkOverride(cls, member, true);
     if (!cls.isAbstract && cls.kind !== 'mixin' && cls.kind !== 'extensionType')
       this.checkImplemented(cls, declaration);
   }
 
   private checkEnumMembers(cls: ClassInfo, declaration: ClassDeclaration): void {
+    for (const member of declaration.members) {
+      if (
+        member.kind === 'constructor' &&
+        member.constructorKind === 'generative' &&
+        !member.isConst &&
+        member.name !== '\0primaryBody'
+      )
+        this.error(member, '列挙型のコンストラクタは const にしてください。');
+    }
     for (const name of ['index', 'hashCode', '==', 'values']) {
       const own = cls.members.get(name);
       if (!own) continue;
@@ -1475,12 +1483,16 @@ export class Compiler extends ConstructorCompiler {
   }
 
   // code-gauge-allow functionCognitiveComplexity 22 -- Each branch is one of the cases Dart distinguishes for this construct.
-  private checkOverride(cls: ClassInfo, member: Member): void {
+  private checkOverride(cls: ClassInfo, member: Member, setter: boolean): void {
     if (member.isStatic) return;
     for (const supertype of cls.directSupertypes) {
-      const inherited = this.interfaceMember(supertype, member.name, member.kind === 'setter');
+      const inherited = this.interfaceMember(supertype, member.name, setter);
       if (!inherited || inherited.member === member) continue;
       const own = member.type;
+      if (setter) {
+        this.checkSetterOverride(cls, member, inherited.type);
+        continue;
+      }
       if (member.kind === 'method' && inherited.member.kind !== 'method') {
         this.error(
           { row: member.row ?? 0 },
@@ -1514,6 +1526,23 @@ export class Compiler extends ConstructorCompiler {
         }
       }
     }
+  }
+
+  private checkSetterOverride(cls: ClassInfo, member: Member, inherited: DartType): void {
+    const declaration = cls.declaration?.members.find(
+      (candidate): candidate is MethodDeclaration =>
+        candidate.kind === 'method' && candidate.methodKind === 'setter' && candidate.name === member.name
+    );
+    const covariant =
+      (member.kind === 'field' && member.isCovariant) ||
+      declaration?.parameters.positional[0]?.isCovariant ||
+      inheritsCovariance(cls, member.name, '', 0, true);
+    if (covariant && member.kind === 'field') member.isCovariant = true;
+    if (isSubtype(inherited, member.type) || (covariant && isSubtype(member.type, inherited))) return;
+    this.error(
+      { row: member.row ?? 0 },
+      `${cls.name}.${member.name} の setter の型 ${typeName(member.type)} は、継承した型 ${typeName(inherited)} に合いません。`
+    );
   }
 
   private isValidOverride(member: MethodMember, inherited: FunctionType): boolean {

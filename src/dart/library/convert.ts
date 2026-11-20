@@ -113,15 +113,12 @@ final class Base64Codec extends Codec<List<int>, String> {
   const Base64Codec.urlSafe() : _urlSafe = true;
   String encode(List<int> input) => _base64Encode(input, _urlSafe);
   List<int> decode(String encoded) => _base64Decode(encoded);
-  String normalize(String source, [int start = 0, int? end]) {
-    var text = source.substring(start, end);
-    if (!text.contains('=') && !text.contains('%') && text.length % 4 > 1) text = text + '=' * (4 - text.length % 4);
-    return _base64Encode(_base64Decode(text), _urlSafe);
-  }
+  String normalize(String source, [int start = 0, int? end]) => _base64Normalize(source, start, end);
 }
 
 external String _base64Encode(List<int> bytes, bool urlSafe);
 external List<int> _base64Decode(String source);
+external String _base64Normalize(String source, int start, int? end);
 
 class LineSplitter extends Converter<String, List<String>> {
   const LineSplitter();

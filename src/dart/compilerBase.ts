@@ -1,8 +1,8 @@
-// code-gauge-allow-file fileNcss 441 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 462 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import { CompileError } from '../interpreter/diagnostics';
-import type { Span, TypeParameter, TypeSyntax } from './ast';
+import type { ClassDeclaration, Span, TypeAliasDeclaration, TypeParameter, TypeSyntax } from './ast';
 import type { ClassInfo, Member } from './classes';
-import type { ExtensionInfo, GlobalVariable, LibraryEnv } from './environment';
+import type { ExtensionInfo, GlobalVariable, LibraryEnv, TypeAlias } from './environment';
 import type { Frame, FunctionInfo, Runtime, TypeEnv } from './runtime';
 import { Flow, type FunctionContext, LocalVar } from './scope';
 import {
@@ -118,6 +118,9 @@ export abstract class CompilerBase {
   protected currentExtension: ExtensionInfo | undefined;
   /** Whether the function being compiled records steps when the program is traced. */
   protected recordsSteps = false;
+  protected readonly aliasWork = new Map<TypeAlias, TypeAliasDeclaration>();
+  protected readonly pendingClassBounds = new Map<ClassInfo, ClassDeclaration>();
+  protected pendingBoundChecks: (() => void)[] | undefined;
 
   constructor(
     readonly library: LibraryEnv,
@@ -159,18 +162,27 @@ export abstract class CompilerBase {
 
   /** Creates the type parameters of a declaration and resolves their bounds, which may refer to each other. */
   protected declareTypeParams(syntax: TypeParameter[]): TypeParam[] {
+    const params = this.declareTypeParamNames(syntax);
+    this.resolveTypeParamBounds(params, syntax);
+    return params;
+  }
+
+  protected declareTypeParamNames(syntax: TypeParameter[]): TypeParam[] {
     const params = syntax.map((parameter) => new TypeParam(parameter.name));
     const names = new Set<string>();
     for (const parameter of syntax) {
       if (names.has(parameter.name)) this.error(parameter, `型引数 ${parameter.name} が重複しています。`);
       names.add(parameter.name);
     }
+    return params;
+  }
+
+  protected resolveTypeParamBounds(params: TypeParam[], syntax: TypeParameter[]): void {
     this.withTypeParams(params, () => {
       for (const [index, parameter] of syntax.entries()) {
         if (parameter.bound) params[index].bound = this.resolveType(parameter.bound);
       }
     });
-    return params;
   }
 
   findTypeParam(name: string): TypeParam | undefined {
@@ -261,13 +273,42 @@ export abstract class CompilerBase {
     if (declaration?.kind === 'class') return this.instantiateClass(declaration.cls, syntax, options);
     if (declaration?.kind === 'alias') {
       const { alias } = declaration;
-      if (!alias.aliased) this.error(syntax, `型の別名 ${name} が、自分自身を使って定義されています。`);
+      const type = this.resolveAlias(alias, syntax);
       const args = this.typeArgumentsFor(alias.typeParams, syntax, name);
-      return substitute(alias.aliased, new Map(alias.typeParams.map((param, index) => [param, args[index]])));
+      return substitute(type, new Map(alias.typeParams.map((param, index) => [param, args[index]])));
     }
     if (declaration) return this.error(syntax, `${name} は型ではありません。`);
     if (UNAVAILABLE_NAMES[name]) return this.unsupported(syntax, UNAVAILABLE_NAMES[name]);
     return this.error(syntax, `型 ${name} が見つかりません。`);
+  }
+
+  protected resolveAlias(alias: TypeAlias, span: Span): DartType {
+    if (alias.aliased) return alias.aliased;
+    const declaration = this.aliasWork.get(alias);
+    if (!declaration) this.error(span, `型の別名 ${alias.name} が、自分自身を使って定義されています。`);
+    this.aliasWork.delete(alias);
+    alias.aliased = this.withIsolatedTypes(() => {
+      alias.typeParams.push(...this.declareTypeParams(declaration.typeParameters));
+      return this.withTypeParams(alias.typeParams, () => this.resolveType(declaration.aliased));
+    });
+    return alias.aliased;
+  }
+
+  protected resolveClassBounds(cls: ClassInfo): void {
+    const declaration = this.pendingClassBounds.get(cls);
+    if (!declaration) return;
+    this.pendingClassBounds.delete(cls);
+    this.withIsolatedTypes(() => this.resolveTypeParamBounds(cls.typeParams, declaration.typeParameters));
+  }
+
+  private withIsolatedTypes<T>(run: () => T): T {
+    const outer = this.typeScopes;
+    this.typeScopes = [];
+    try {
+      return run();
+    } finally {
+      this.typeScopes = outer;
+    }
   }
 
   private instantiateClass(
@@ -277,6 +318,7 @@ export abstract class CompilerBase {
   ): DartType {
     if (cls === coreTypes.nullClass) return NULL;
     if (syntax.args.length === 0 && options.allowRaw && cls.typeParams.length > 0) return interfaceType(cls, []);
+    this.resolveClassBounds(cls);
     return interfaceType(cls, this.typeArgumentsFor(cls.typeParams, syntax, cls.name));
   }
 
@@ -296,6 +338,11 @@ export abstract class CompilerBase {
   }
 
   protected checkBounds(params: readonly TypeParam[], args: readonly DartType[], span: Span): void {
+    // A bound may refer to a subclass whose supertypes are declared later.
+    if (this.pendingBoundChecks) {
+      this.pendingBoundChecks.push(() => this.checkBounds(params, args, span));
+      return;
+    }
     const map = new Map(params.map((param, index) => [param, args[index]]));
     for (const [index, param] of params.entries()) {
       if (!param.bound) continue;

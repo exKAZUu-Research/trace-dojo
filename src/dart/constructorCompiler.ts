@@ -325,7 +325,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     return resolution?.kind === 'declaration' && resolution.declaration.kind === 'class';
   }
 
-  // code-gauge-allow functionNcss 31 -- The steps of a generative constructor: checks, its frame, initializers, and body, in order.
+  // code-gauge-allow functionNcss 33 -- The steps of a generative constructor: checks, its frame, initializers, and body, in order.
   private compileGenerative(
     cls: ClassInfo,
     constructor: ConstructorInfo,
@@ -347,6 +347,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
       this.error(redirect, 'this(...) にリダイレクトするコンストラクタには、ほかの初期化子や本体は書けません。');
     }
     const parameters = declaration.parameters;
+    const defaults = this.inheritedDefaults(cls, declaration);
     const spec: FunctionSpec & { isClosure: boolean } = {
       name: cls.name + (constructor.name ? `.${constructor.name}` : ''),
       span: declaration,
@@ -354,6 +355,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
       parameters,
       positionalTypes,
       namedTypes,
+      defaults,
       returnType: VOID,
       contextReturnType: undefined,
       body: declaration.body ?? {
@@ -384,6 +386,10 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     const compiled = this.compileFunctionWithPrologue(spec, () => {
       prologue = this.compileConstructorPrologue(cls, declaration, initializedFields);
     });
+    constructor.defaults = {
+      positional: parameters.positional.map((parameter) => defaults.get(parameter)),
+      named: new Map(parameters.named.map((parameter) => [parameter.name, defaults.get(parameter)])),
+    };
     this.checkFieldsInitialized(cls, declaration, initializedFields, redirect !== undefined);
     const params = cls.typeParams;
     const info = compiled.fn.info;
@@ -402,6 +408,25 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
       }
       return;
     };
+  }
+
+  private inheritedDefaults(cls: ClassInfo, declaration: ConstructorDeclaration): Map<FormalParameter, Compiled> {
+    const defaults = new Map<FormalParameter, Compiled>();
+    const superCall = declaration.initializers.find((initializer) => initializer.kind === 'super');
+    const parent = cls.superclass?.cls.constructors.get(superCall?.name ?? '')?.defaults;
+    if (!parent) return defaults;
+    const positional = declaration.parameters.positional.filter((parameter) => parameter.binding === 'super');
+    for (const [index, parameter] of positional.entries()) {
+      const inherited = parent.positional[index];
+      if (inherited && declaration.parameters.positional.indexOf(parameter) >= declaration.parameters.requiredCount)
+        defaults.set(parameter, inherited);
+    }
+    for (const parameter of declaration.parameters.named) {
+      if (parameter.binding !== 'super' || parameter.isRequired) continue;
+      const inherited = parent.named.get(parameter.name);
+      if (inherited) defaults.set(parameter, inherited);
+    }
+    return defaults;
   }
 
   /**
@@ -445,8 +470,8 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
   }
 
   // code-gauge-allow duplicateLines 15 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
-  // code-gauge-allow functionCognitiveComplexity 17 -- The initializer list's entries and the implicit super().
-  // code-gauge-allow functionNcss 43 -- The initializer list's entries and the implicit super().
+  // code-gauge-allow functionCognitiveComplexity 19 -- The initializer list's entries and the implicit super().
+  // code-gauge-allow functionNcss 45 -- The initializer list's entries and the implicit super().
   private compileConstructorPrologue(
     cls: ClassInfo,
     declaration: ConstructorDeclaration,
@@ -456,14 +481,20 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     const redirect = declaration.initializers.find((initializer) => initializer.kind === 'this');
     if (!redirect) steps.push(...this.compileFieldInitializers(cls, initializedFields));
     steps.push(...this.compileInitializingFormals(cls, declaration, initializedFields));
+    const explicitFields = new Set(
+      [...declaration.parameters.positional, ...declaration.parameters.named]
+        .filter((parameter) => parameter.binding === 'this')
+        .map((parameter) => parameter.name)
+    );
     let superCall = false;
     for (const initializer of declaration.initializers) {
       switch (initializer.kind) {
         case 'field': {
           const field = cls.fields.find((candidate) => candidate.name === initializer.name);
           if (!field) return this.error(initializer, `${initializer.name} は、このクラスのフィールドではありません。`);
-          if (initializedFields.has(field.name))
+          if (explicitFields.has(field.name) || (field.isFinal && initializedFields.has(field.name)))
             this.error(initializer, `フィールド ${field.name} は、もう初期化されています。`);
+          explicitFields.add(field.name);
           initializedFields.add(field.name);
           const value = this.coerce(
             this.compileExpression(initializer.value, field.type),

@@ -1,4 +1,5 @@
 import type { ClassDeclaration, ClassKind, ClassModifiers } from './ast';
+import type { Compiled } from './compilerBase';
 import type { Runtime } from './runtime';
 import {
   type DartType,
@@ -72,6 +73,10 @@ export interface ConstructorInfo {
   kind: 'generative' | 'factory' | 'redirectingFactory';
   isConst: boolean;
   row: number | undefined;
+  defaults?: {
+    positional: (Compiled | undefined)[];
+    named: Map<string, Compiled | undefined>;
+  };
   /** Creates (for a generative constructor, initializes) an instance. */
   impl: ConstructorImpl | undefined;
 }
@@ -117,7 +122,7 @@ export class ClassInfo {
   declaration: ClassDeclaration | undefined;
   /** The classes from the same library that a sealed class's subtypes must come from. */
   readonly subclasses: ClassInfo[] = [];
-  private readonly supertypePaths = new Map<ClassInfo, InterfaceType | undefined>();
+  private supertypePaths = new WeakMap<ClassInfo, InterfaceType | undefined>();
   private readonly implementations = new Map<string, Member | undefined>();
   private readonly setterImplementations = new Map<string, Member | undefined>();
   private cachedDepth: number | undefined;
@@ -255,7 +260,7 @@ export class ClassInfo {
   resetCaches(): void {
     this.implementations.clear();
     this.setterImplementations.clear();
-    this.supertypePaths.clear();
+    this.supertypePaths = new WeakMap();
     this.cachedDepth = undefined;
   }
 }

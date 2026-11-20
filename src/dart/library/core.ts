@@ -454,6 +454,7 @@ class _StackTrace implements StackTrace {
 }
 
 abstract class Enum {
+  const Enum();
   external int get index;
   external String get _name;
   external String toString();
@@ -2111,9 +2112,12 @@ abstract interface class RegExpMatch implements Match {
 
 /** The VM's iterables of allMatches, which print as iterables, not lists. */
 final class _AllMatchesIterable extends Iterable<RegExpMatch> {
-  final List<RegExpMatch> _matches;
-  _AllMatchesIterable._(this._matches);
-  Iterator<RegExpMatch> get iterator => _matches.iterator;
+  external Iterator<RegExpMatch> get iterator;
+}
+
+final class _RegExpMatchIterator implements Iterator<RegExpMatch> {
+  external bool moveNext();
+  external RegExpMatch get current;
 }
 
 final class _StringAllMatchesIterable extends Iterable<Match> {

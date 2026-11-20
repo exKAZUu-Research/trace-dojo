@@ -1,8 +1,9 @@
-// code-gauge-allow-file fileNcss 451 -- The compilation of every kind of pattern, which share their type and binding helpers.
+// code-gauge-allow-file fileNcss 453 -- The compilation of every kind of pattern, which share their type and binding helpers.
 import type { Expression, ListPatternElement, Pattern, RecordPatternField, Span } from './ast';
 import { CallCompiler } from './callCompiler';
 import { type Compiled, type ResolvedMember, typeName } from './compilerBase';
 import { SHORTED } from './expressionCompiler';
+import { listElement, listLength } from './library/nativeSupport';
 import { DartThrow, type Frame } from './runtime';
 import type { LocalVar } from './scope';
 import {
@@ -19,7 +20,7 @@ import {
   sameType,
   vmTypeString,
 } from './types';
-import { type Arguments, type Callable, Cell, DartList, DartRecord, type Value } from './values';
+import { type Arguments, type Callable, Cell, DartRecord, type Value } from './values';
 
 export type PatternMode = 'match' | 'declare' | 'assign';
 
@@ -460,8 +461,12 @@ export abstract class PatternCompiler extends CallCompiler {
     }
     const before = restIndex !== -1 ? pattern.elements.slice(0, restIndex) : pattern.elements;
     const after = restIndex !== -1 ? pattern.elements.slice(restIndex + 1) : [];
-    const compileElements = (elements: ListPatternElement[]): Omit<CompiledPattern, 'variables'>[] =>
-      elements.map((element) => this.compilePatternInner(element as Pattern, elementType, options, variables));
+    const compileElements = (elements: ListPatternElement[]): ListPatternParts['head'] =>
+      elements.map((element) =>
+        element.kind === 'wildcard' && element.type === undefined
+          ? undefined
+          : this.compilePatternInner(element as Pattern, elementType, options, variables)
+      );
     const head = compileElements(before);
     const restElement =
       restIndex !== -1 ? (pattern.elements[restIndex] as Extract<ListPatternElement, { kind: 'rest' }>) : undefined;
@@ -470,7 +475,7 @@ export abstract class PatternCompiler extends CallCompiler {
       : undefined;
     const tail = compileElements(after);
     const hasRest = restIndex !== -1;
-    const parts: ListPatternParts = { head, rest, tail, hasRest, resolveElement: this.runtimeType(elementType) };
+    const parts: ListPatternParts = { head, rest, tail, hasRest };
     this.requireAssignable(listType, matchedType, options, pattern);
     const typeCheck = this.typeTest(listType, matchedType, () => true, true, options.mode);
     return {
@@ -629,7 +634,7 @@ export abstract class PatternCompiler extends CallCompiler {
         return this.error(field, 'オブジェクトのパターンのフィールドには、名前を書いてください。');
       const member = this.lookupMember(type, field.name, false);
       if (!member) this.error(field, `${typeName(type)} 型には ${field.name} というメンバーがありません。`);
-      const fieldType = member.member.kind === 'method' ? member.type : member.type;
+      const fieldType = member.type;
       return {
         name: field.name,
         pattern: this.compilePatternInner(field.pattern, fieldType, options, variables),
@@ -738,32 +743,32 @@ export function isRefutableSyntax(pattern: Pattern): boolean {
 }
 
 interface ListPatternParts {
-  head: Omit<CompiledPattern, 'variables'>[];
+  head: (Omit<CompiledPattern, 'variables'> | undefined)[];
   rest: Omit<CompiledPattern, 'variables'> | undefined;
-  tail: Omit<CompiledPattern, 'variables'>[];
+  tail: ListPatternParts['head'];
   hasRest: boolean;
-  resolveElement: (frame: Frame) => DartType;
 }
 
 /** Matches a list's length, the elements before and after the rest, and the rest as a new list. */
+// code-gauge-allow functionCognitiveComplexity 20 -- The pattern length and three subranges follow the specification.
 function matchListParts(frame: Frame, value: Value, parts: ListPatternParts): boolean {
   const { head, rest, tail, hasRest } = parts;
-  const elements = value instanceof DartList ? value.elements : [];
-  const count = elements.length;
-  const minimum = head.length + tail.length;
-  if (hasRest ? count < minimum : count !== minimum) return false;
-  for (const [index, element] of head.entries()) if (!element.match(frame, elements[index])) return false;
+  const { runtime } = frame;
+  const minimum = BigInt(head.length + tail.length);
+  const count = hasRest && minimum === 0n ? 0n : listLength(runtime, value);
+  if (hasRest ? count < minimum : count !== minimum && (minimum > 0n || count > 0n)) return false;
+  for (const [index, element] of head.entries()) {
+    if (element && !element.match(frame, listElement(runtime, value, BigInt(index)))) return false;
+  }
   if (rest) {
-    const sublist = new DartList(
-      coreTypes.list,
-      parts.resolveElement(frame),
-      elements.slice(head.length, count - tail.length),
-      true
-    );
+    const positional = [BigInt(head.length)];
+    if (tail.length > 0) positional.push(count - BigInt(tail.length));
+    const sublist = runtime.invoke(value, 'sublist', { positional, named: undefined }, [], undefined);
     if (!rest.match(frame, sublist)) return false;
   }
   for (const [index, element] of tail.entries()) {
-    if (!element.match(frame, elements[count - tail.length + index])) return false;
+    if (element && !element.match(frame, listElement(runtime, value, count - BigInt(tail.length - index))))
+      return false;
   }
   return true;
 }

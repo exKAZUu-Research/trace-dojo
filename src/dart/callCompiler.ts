@@ -1,5 +1,13 @@
-// code-gauge-allow-file fileNcss 598 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
-import type { Arguments as ArgumentsSyntax, Expression, FormalParameters, FunctionBody, Span, TypeSyntax } from './ast';
+// code-gauge-allow-file fileNcss 604 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+import type {
+  Arguments as ArgumentsSyntax,
+  Expression,
+  FormalParameter,
+  FormalParameters,
+  FunctionBody,
+  Span,
+  TypeSyntax,
+} from './ast';
 import type { ClassInfo, ConstructorInfo, Member } from './classes';
 import {
   at,
@@ -62,6 +70,8 @@ export interface FunctionSpec {
   /** The parameters' types, resolved by the caller (and inferred from a context for closures). */
   positionalTypes: DartType[];
   namedTypes: Map<string, DartType>;
+  defaults?: Map<FormalParameter, Compiled>;
+  isSetter?: boolean;
   /** Undefined to infer the return type from the body, as closures do. */
   returnType: DartType | undefined;
   /** For closures, the return type the context expects, which return expressions are checked against. */
@@ -591,7 +601,7 @@ export abstract class CallCompiler extends OperatorCompiler {
    * Calls a constructor of a class, inferring the class's type arguments from the context and the arguments when they
    * are not written.
    */
-  // code-gauge-allow functionCognitiveComplexity 19 -- Checks of what may be constructed.
+  // code-gauge-allow functionCognitiveComplexity 21 -- Checks of what may be constructed.
   // code-gauge-allow functionParameterCount 8 -- Checks of what may be constructed.
   compileConstructorCall(
     cls: ClassInfo,
@@ -610,6 +620,8 @@ export abstract class CallCompiler extends OperatorCompiler {
       if (name) return this.error(span, `クラス ${cls.name} に ${name} というコンストラクタはありません。`);
       return this.error(span, `クラス ${cls.name} には、名前のないコンストラクタがありません。`);
     }
+    if (cls.kind === 'enum' && constructor.kind === 'generative')
+      this.error(span, '列挙型のオブジェクトは作れません。');
     if (constructor.kind === 'generative' && cls.isAbstract) {
       this.error(span, `抽象クラス ${cls.name} のオブジェクトは作れません。`);
     }
@@ -931,20 +943,28 @@ export abstract class CallCompiler extends OperatorCompiler {
       );
       const outerEnv = frame.typeEnv;
       const receiver = frame.receiver;
-      const callable: Callable = (runtime, _receiver, args, typeArgs, callRow) => {
+      const callable: Callable = (runtime, boundReceiver, args, typeArgs, callRow) => {
         let typeEnv = outerEnv;
         if (ownParams.length > 0) {
           const env = new Map(outerEnv);
           for (const [index, param] of ownParams.entries()) env.set(param, typeArgs[index] ?? DYNAMIC);
           typeEnv = env;
         }
-        return this.runFunction(compiled, runtime, receiver, captured, typeEnv, args, callRow ?? runtime.userCallRow);
+        return this.runFunction(
+          compiled,
+          runtime,
+          boundReceiver,
+          captured,
+          typeEnv,
+          args,
+          callRow ?? runtime.userCallRow
+        );
       };
       return new DartClosure(
         coreTypes.function,
         resolveType(frame) as FunctionType,
         callable,
-        undefined,
+        receiver,
         captured,
         { name: undefined, origin: undefined, qualifiedName },
         undefined
@@ -993,6 +1013,8 @@ export abstract class CallCompiler extends OperatorCompiler {
     const constructor = cls.constructors.get(name ?? '');
     if (!constructor)
       return this.error(span, `クラス ${cls.name} に ${name ?? '名前のない'} コンストラクタはありません。`);
+    if (cls.kind === 'enum' && constructor.kind === 'generative')
+      this.error(span, '列挙型のコンストラクタは取り出せません。');
     if (constructor.kind === 'generative' && cls.isAbstract)
       this.error(span, `抽象クラス ${cls.name} のコンストラクタは取り出せません。`);
     const typeArgs = type.args.length > 0 ? this.typeArgumentsFor(cls.typeParams, type, cls.name) : undefined;

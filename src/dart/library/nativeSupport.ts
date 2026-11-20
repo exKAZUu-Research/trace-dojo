@@ -82,6 +82,18 @@ export function elementTypeOf(object: DartObject, position = 0): DartType {
   return object.typeArgs[position] ?? DYNAMIC;
 }
 
+export function listLength(runtime: Runtime, list: Value): bigint {
+  return list instanceof DartList
+    ? BigInt(list.elements.length)
+    : intArg(runtime, runtime.getProperty(list, 'length', undefined), 'length');
+}
+
+export function listElement(runtime: Runtime, list: Value, position: bigint): Value {
+  return list instanceof DartList
+    ? list.elements[Number(position)]
+    : runtime.invoke(list, '[]', { positional: [position], named: undefined }, [], undefined);
+}
+
 /** Calls a Dart function value with positional arguments. */
 export function callFunction(runtime: Runtime, fn: Value, ...args: Value[]): Value {
   const evaluated: Arguments = { positional: args, named: undefined };
@@ -92,8 +104,14 @@ export function callFunction(runtime: Runtime, fn: Value, ...args: Value[]): Val
 export function iterableValues(runtime: Runtime, iterable: Value): Value[] {
   if (iterable instanceof DartList) return [...iterable.elements];
   const values: Value[] = [];
-  forEachIteratorValue(runtime, iterable, 0n, undefined, (value) => values.push(value));
-  return values;
+  const frame = runtime.frames.at(-1);
+  frame?.temporaries.push(new DartList(coreTypes.list, DYNAMIC, values, true));
+  try {
+    for (const value of iteratorValues(runtime, iterable, 0n, undefined)) values.push(value);
+    return values;
+  } finally {
+    frame?.temporaries.pop();
+  }
 }
 
 /** Runs `body` on each element as a `for-in` loop reaches it, so that the iterable's code and `body` interleave. */
@@ -116,11 +134,32 @@ export function forEachIteratorValue(
   to: bigint | undefined,
   body: (value: Value) => void
 ): void {
-  const iterator = runtime.getProperty(iterable, 'iterator', undefined);
-  for (let position = 0n; to === undefined || position < to; position++) {
-    if (runtime.invoke(iterator, 'moveNext', NO_ARGUMENTS, [], undefined) !== true) return;
-    if (position >= from) body(runtime.getProperty(iterator, 'current', undefined));
-    runtime.spend();
+  for (const value of iteratorValues(runtime, iterable, from, to)) body(value);
+}
+
+export function* iteratorValues(
+  runtime: Runtime,
+  iterable: Value,
+  from: bigint,
+  to: bigint | undefined
+): IterableIterator<Value> {
+  const frame = runtime.frames.at(-1);
+  const mark = frame?.temporaries.length ?? 0;
+  frame?.temporaries.push(iterable);
+  try {
+    const iterator = runtime.getProperty(iterable, 'iterator', undefined);
+    frame?.temporaries.push(iterator);
+    for (let position = 0n; to === undefined || position < to; position++) {
+      if (runtime.invoke(iterator, 'moveNext', NO_ARGUMENTS, [], undefined) !== true) return;
+      runtime.spend();
+      if (position < from) continue;
+      const value = runtime.getProperty(iterator, 'current', undefined);
+      frame?.temporaries.push(value);
+      yield value;
+      frame?.temporaries.pop();
+    }
+  } finally {
+    if (frame) frame.temporaries.length = mark;
   }
 }
 

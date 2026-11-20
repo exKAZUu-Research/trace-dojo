@@ -408,6 +408,180 @@ literal''');
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'A1\n\nabc\nliteral\n[6, 7]\n' });
 });
 
+test('type aliases, super defaults, and field initializers resolve in their declaration context', () => {
+  const program = String.raw`typedef IntBox = Box<int>;
+typedef Forward = Later;
+typedef Later = int;
+class Box<T extends num> { T value; Box(this.value); }
+class A { static const original = 10; int x; A([this.x = original]); }
+class B extends A { B(int marker, [super.x]); }
+class Named { final int x; const Named.named({this.x = 2}); }
+class Derived extends Named { const Derived({super.x}) : super.named(); }
+class Twice extends Derived { const Twice({super.x = 3}); }
+int write(String label, int value) { print(label); return value; }
+class Fields {
+  int x = write('declaration', 1);
+  Fields() : x = write('list', 2);
+}
+void main() {
+  Forward a = IntBox(8).value;
+  print(a);
+  print(B(1).x);
+  print([const Derived().x, const Derived(x: 4).x, const Twice().x]);
+  print(Fields().x);
+}
+`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: ['8', '10', '[2, 4, 3]', 'declaration', 'list', '2', ''].join('\n'),
+  });
+});
+
+test('enhanced enums, self-bounded generics, and covariant setters compile', () => {
+  const program = String.raw`mixin Greet { String hi() => 'hi'; }
+enum Lang with Greet { en, ja }
+class A<T extends A<T>> { T self() => this as T; }
+class B extends A<B> {}
+class Parent { set x(covariant num value) {} }
+class Child extends Parent { set x(int value) { print(value); } }
+void main() {
+  print(Lang.en.hi());
+  print(B().self());
+  Parent p = Child();
+  p.x = 1;
+  try { p.x = 1.5; } catch (e) { print(e); }
+}
+`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: ['hi', "Instance of 'B'", '1', "type 'double' is not a subtype of type 'int' of 'value'", ''].join('\n'),
+  });
+});
+
+test('list views support patterns and codecs through their public members', () => {
+  const program = String.raw`import 'dart:convert';
+void main() {
+  final view = [65, 66, 67].cast<int>();
+  if (view case [var head, ..., var tail]) print(head + tail);
+  if (view case [_, ...var middle, _]) print(middle);
+  print(utf8.decode(view));
+  print(base64.encode(view));
+  for (var illegal in [[256], [65, -1]]) {
+    try { print(base64.encode(illegal)); } catch (e) { print(e); }
+  }
+  print(base64.normalize('xxSGk=yy', 2, 6));
+  print(base64.normalize('xxSGkyy', 2, 5));
+  print(base64Url.normalize('xx%2D%5Fyy', 2, 8));
+  print(base64.normalize('xxab==yy', 2, 6));
+  try { print(base64.normalize('xxa=yy', 2, 4)); } catch (e) { print(e); }
+}
+`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: [
+      '132',
+      '[66]',
+      'ABC',
+      'QUJD',
+      "Invalid argument (Not a byte value at index 0: 0x100): Instance(length:1) of '_GrowableList'",
+      "Invalid argument (Not a byte value at index 1: 0x-1): Instance(length:2) of '_GrowableList'",
+      'xxSGk=yy',
+      'xxSGk=yy',
+      'xx+/==yy',
+      'xxab==yy',
+      'FormatException: Invalid base64 padding, padded length must be multiple of four, is 2 (at character 5)',
+      'xxa=yy',
+      '    ^',
+      '',
+      '',
+    ].join('\n'),
+  });
+});
+
+test('patterns stop after a requested match and preserve special capture names', () => {
+  const program = String.raw`class P implements Pattern {
+  Iterable<Match> allMatches(String text, [int start = 0]) sync* {
+    yield RegExp('a').firstMatch(text)!;
+    throw 'extra';
+  }
+  Match? matchAsPrefix(String text, [int start = 0]) => RegExp('a').matchAsPrefix(text, start);
+}
+void main() {
+  print('aa'.replaceFirst(P(), 'b'));
+  print('aa'.replaceFirstMapped(P(), (match) => match[0]!.toUpperCase()));
+  final iterable = RegExp('a').allMatches('aba');
+  print(iterable.map((match) => match.start).toList());
+  print(iterable.first.end);
+  print(RegExp('a').allMatches('a' * 1000000).first[0]);
+  final names = RegExp(r'(?<word>a)(?<__proto__>b)').firstMatch('ab')!;
+  print(names.namedGroup('__proto__'));
+  try { print(names.namedGroup('constructor')); } catch (e) { print(e); }
+}
+`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: [
+      'ba',
+      'Aa',
+      '[0, 2]',
+      '1',
+      'a',
+      'b',
+      'Invalid argument(s): Not a capture group name: constructor',
+      '',
+    ].join('\n'),
+  });
+});
+
+test.each([
+  'enum E { a; E(); } void main() {}',
+  'enum E { a } void main() { E(); }',
+  'enum E { a } class Child extends E {} void main() {}',
+  'class A { set x(int value) {} } class B extends A { set x(String value) {} } void main() {}',
+])('rejects invalid enum declarations and setter overrides: %s', (source) => {
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'compileError' });
+});
+
+test('turtles stay live through instance callbacks and generator collection', () => {
+  const closures = `class Actor {
+  final turtle = Turtle(0, 1);
+  void Function() callback() => () => turtle.forward();
+}
+void main() {
+  var move = Actor().callback();
+  var other = Turtle(0, 0);
+  print(other.canMoveForward());
+  move();
+}
+`;
+  const generator = `Iterable<Turtle> turtles() sync* {
+  yield Turtle(1, 1);
+  var second = Turtle(3, 3);
+  second.canMoveForward();
+  yield second;
+}
+void main() {
+  var list = List<Turtle>.from(turtles());
+  list[0].forward();
+}
+`;
+  expect(executeProgram('dart', closures)).toMatchObject({
+    kind: 'executed',
+    stdout: 'false\n',
+    finalTurtles: [
+      { x: 0, y: 2 },
+      { x: 0, y: 0 },
+    ],
+  });
+  expect(executeProgram('dart', generator)).toMatchObject({
+    kind: 'executed',
+    finalTurtles: [
+      { x: 1, y: 2 },
+      { x: 3, y: 3 },
+    ],
+  });
+});
+
 test('patterns, generics, and an uncaught error behave as the SDK does', () => {
   const program = `sealed class Shape {}
 

@@ -81,7 +81,7 @@ function execAt(
   if (!found) return undefined;
   let names: Record<string, string | undefined> | undefined;
   if (state.compiled.names.size > 0) {
-    names = {};
+    names = Object.create(null) as Record<string, string | undefined>;
     for (const [name, numbers] of state.compiled.names) {
       names[name] = numbers.map((number) => found.groups[number]).find((text) => text !== undefined);
     }
@@ -93,23 +93,26 @@ function execAt(
 const STEPS_PER_OPERATION = 8;
 
 /** Every match of a regular expression, after an empty match moving on by one, as Dart does. */
-export function allMatchesOf(runtime: Runtime, pattern: Value, input: string, start: number): MatchState[] {
+export function* allMatchesOf(
+  runtime: Runtime,
+  pattern: Value,
+  input: string,
+  start: number
+): IterableIterator<MatchState> {
   const state = stateOf(pattern);
-  const matches: MatchState[] = [];
   let position = start;
   while (position <= input.length) {
     const match = execAt(runtime, state, input, position, false);
     if (!match) break;
     match.pattern = pattern;
-    matches.push(match);
     runtime.spend();
+    yield match;
     // After an empty match the search moves on by a character, a code point in Unicode mode.
     position =
       match.end === match.start
         ? match.end + (state.unicode && isSurrogatePairAt(input, match.end) ? 2 : 1)
         : match.end;
   }
-  return matches;
 }
 
 /** A match of a pattern at a position (`anchored`) or anywhere after it. */
@@ -182,9 +185,44 @@ define('RegExp.allMatches', (runtime, receiver, [input, start = 0n]) => {
   const at = intArg(runtime, start, 'start');
   if (at < 0n || at > BigInt(text.length))
     runtime.throwError('RangeError', 'range', [at, 0n, BigInt(text.length), 'start']);
-  const matches = allMatchesOf(runtime, receiver, text, index(at)).map((match) => newMatch(runtime, match));
-  const list = newList(runtime, interfaceType(runtime.links.classNamed('RegExpMatch')), matches, false);
-  return runtime.links.construct(runtime, '_AllMatchesIterable', '_', [list]);
+  const iterable = new DartObject(runtime.links.classNamed('_AllMatchesIterable'), [], []);
+  iterable.native = { pattern: receiver, text, start: index(at), values: () => [receiver] };
+  return iterable;
+});
+
+define('_AllMatchesIterable.iterator', (runtime, receiver) => {
+  const { pattern, text, start } = (receiver as DartObject).native as unknown as {
+    pattern: Value;
+    text: string;
+    start: number;
+  };
+  const iterator = new DartObject(runtime.links.classNamed('_RegExpMatchIterator'), [], []);
+  const state: RegExpMatchIterator = {
+    matches: allMatchesOf(runtime, pattern, text, start),
+    current: undefined,
+    values: () => [pattern, state.current],
+  };
+  iterator.native = state;
+  return iterator;
+});
+
+interface RegExpMatchIterator {
+  [key: string]: unknown;
+  matches: IterableIterator<MatchState>;
+  current: DartObject | undefined;
+  values(): Iterable<Value>;
+}
+
+define('_RegExpMatchIterator.moveNext', (runtime, receiver) => {
+  const state = (receiver as DartObject).native as RegExpMatchIterator;
+  const next = state.matches.next();
+  state.current = next.done ? undefined : newMatch(runtime, next.value);
+  return !next.done;
+});
+define('_RegExpMatchIterator.current', (runtime, receiver) => {
+  const { current } = (receiver as DartObject).native as RegExpMatchIterator;
+  if (!current) runtime.throwTypeError('Null check operator used on a null value');
+  return current;
 });
 define('RegExp.matchAsPrefix', (runtime, receiver, [input, start = 0n]) => {
   const text = stringArg(runtime, input, 'string');

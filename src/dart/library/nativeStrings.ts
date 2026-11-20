@@ -11,7 +11,7 @@ import {
   forEachIteratorValue,
   index,
   intArg,
-  iterableValues,
+  iteratorValues,
   named,
   newList,
   stringArg,
@@ -150,29 +150,23 @@ define('String.contains', (runtime, receiver, [pattern, start = 0n]) => {
 });
 
 /** The matches of a pattern in a string, from `start`, as `Pattern.allMatches` gives them. */
-function matchesOf(runtime: Runtime, pattern: Value, text: string, start = 0): MatchState[] {
+function* matchesOf(runtime: Runtime, pattern: Value, text: string, start = 0): IterableIterator<MatchState> {
   if (typeof pattern === 'string') {
-    const result: MatchState[] = [];
-    if (pattern.length === 0) {
-      for (let position = start; position <= text.length; position++)
-        result.push({ start: position, end: position, groups: [''], names: undefined, input: text, pattern });
-      return result;
-    }
     let position = text.indexOf(pattern, start);
-    while (position >= 0) {
-      result.push({
-        start: position,
-        end: position + pattern.length,
-        groups: [pattern],
-        names: undefined,
-        input: text,
-        pattern,
-      });
-      position = text.indexOf(pattern, position + pattern.length);
+    while (position >= 0 && position <= text.length) {
+      const end = position + pattern.length;
+      runtime.spend();
+      yield { start: position, end, groups: [pattern], names: undefined, input: text, pattern };
+      const next = position + Math.max(1, pattern.length);
+      if (next > text.length) break;
+      position = text.indexOf(pattern, next);
     }
-    return result;
+    return;
   }
-  if (isRegExp(pattern)) return allMatchesOf(runtime, pattern, text, start);
+  if (isRegExp(pattern)) {
+    yield* allMatchesOf(runtime, pattern, text, start);
+    return;
+  }
   const iterable = runtime.invoke(
     pattern,
     'allMatches',
@@ -180,21 +174,23 @@ function matchesOf(runtime: Runtime, pattern: Value, text: string, start = 0): M
     [],
     undefined
   );
-  return iterableValues(runtime, iterable).map((match) => ({
-    start: Number(runtime.getProperty(match, 'start', undefined)),
-    end: Number(runtime.getProperty(match, 'end', undefined)),
-    groups: [runtime.invoke(match, 'group', { positional: [0n], named: undefined }, [], undefined) as string],
-    names: undefined,
-    input: text,
-    pattern,
-    object: match,
-  }));
+  for (const match of iteratorValues(runtime, iterable, 0n, undefined)) {
+    yield {
+      start: Number(runtime.getProperty(match, 'start', undefined)),
+      end: Number(runtime.getProperty(match, 'end', undefined)),
+      groups: [],
+      names: undefined,
+      input: text,
+      pattern,
+      object: match,
+    };
+  }
 }
 
 function replaceWith(
   runtime: Runtime,
   text: string,
-  matches: MatchState[],
+  matches: Iterable<MatchState>,
   replace: (match: MatchState) => string
 ): string {
   let result = '';
@@ -331,7 +327,7 @@ define('String.allMatches', (runtime, receiver, [input, start = 0n]) => {
   const text = stringArg(runtime, input, 'string');
   const at = intArg(runtime, start, 'start');
   if (at < 0n || at > BigInt(text.length)) rangeError(runtime, at, 0, text.length, 'start');
-  const matches = matchesOf(runtime, receiver, text, index(at)).map((match) =>
+  const matches = Array.from(matchesOf(runtime, receiver, text, index(at)), (match) =>
     runtime.links.construct(runtime, '_StringMatch', '', [BigInt(match.start), text, receiver])
   );
   const list = newList(runtime, interfaceType(runtime.links.classNamed('Match')), matches, false);

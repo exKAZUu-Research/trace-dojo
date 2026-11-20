@@ -1,11 +1,11 @@
-// code-gauge-allow-file fileNcss 424 -- dart:convert's JSON, UTF-8, and Base64 codecs, each transcribed from the SDK.
+// code-gauge-allow-file fileNcss 497 -- dart:convert's JSON, UTF-8, and Base64 codecs, each transcribed from the SDK.
 import { formatDouble } from '../format';
 import { HashStore } from '../hashStore';
 import { DartThrow, type Runtime } from '../runtime';
 import { coreTypes, DYNAMIC, interfaceType } from '../types';
 import { DartList, DartObject, type Value } from '../values';
 import { forEachEntry, newMap } from './nativeCollections';
-import { define, intArg, newList, stringArg } from './nativeSupport';
+import { define, intArg, listElement, listLength, newList, stringArg } from './nativeSupport';
 
 /** A string as Dart's JSON encoder writes it: quotes, backslashes, control characters, and lone surrogates escaped. */
 // code-gauge-allow functionCognitiveComplexity 16 -- A transcription of the SDK's algorithm, case by case.
@@ -393,11 +393,8 @@ define('_utf8Encode', (runtime, _receiver, [input]) => {
 });
 define('_utf8Decode', (runtime, _receiver, [codeUnits, allowMalformed]) => {
   // The VM replaces values that are not bytes with 0xFF, which is invalid.
-  const bytes = Uint8Array.from(
-    (codeUnits as DartList).elements.map((unit) => {
-      const value = Number(intArg(runtime, unit, 'codeUnits'));
-      return value >= 0 && value <= 0xff ? value : 0xff;
-    })
+  const bytes = readByteList(runtime, codeUnits, 'codeUnits', (value) =>
+    value >= 0n && value <= 0xffn ? Number(value) : 0xff
   );
   if (allowMalformed === true) return new TextDecoder('utf-8').decode(bytes);
   const error = utf8Error(bytes);
@@ -589,12 +586,45 @@ function utf8Error(bytes: Uint8Array): { message: string; offset: number } | und
 /* oxlint-enable unicorn/prefer-code-point */
 
 define('_base64Encode', (runtime, _receiver, [bytes, urlSafe]) => {
-  const data = Uint8Array.from(
-    (bytes as DartList).elements.map((unit) => Number(intArg(runtime, unit, 'bytes')) & 0xff)
-  );
+  let hasInvalid = false;
+  const data = readByteList(runtime, bytes, 'bytes', (value) => {
+    if (value < 0n || value > 0xffn) hasInvalid = true;
+    return Number(value & 0xffn);
+  });
+  if (hasInvalid) invalidBase64Byte(runtime, bytes, data.length);
   const text = Buffer.from(data).toString('base64');
   return urlSafe === true ? text.replaceAll('+', '-').replaceAll('/', '_') : text;
 });
+
+function readByteList(
+  runtime: Runtime,
+  list: Value,
+  parameter: string,
+  convert: (value: bigint) => number
+): Uint8Array {
+  const length = listLength(runtime, list);
+  if (length < 0n) runtime.throwError('RangeError', 'range', [length, 0n, undefined, 'length']);
+  runtime.spend(1 + Number(length));
+  const bytes = new Uint8Array(Number(length));
+  for (let position = 0; position < bytes.length; position++) {
+    bytes[position] = convert(intArg(runtime, listElement(runtime, list, BigInt(position)), parameter));
+  }
+  return bytes;
+}
+
+function invalidBase64Byte(runtime: Runtime, bytes: Value, length: number): never {
+  let position = 0n;
+  for (; position < BigInt(length); position++) {
+    const value = intArg(runtime, listElement(runtime, bytes, position), 'bytes');
+    runtime.spend();
+    if (value < 0n || value > 0xffn) break;
+  }
+  const offending = intArg(runtime, listElement(runtime, bytes, position), 'bytes');
+  runtime.throwError('ArgumentError', 'value', [
+    bytes,
+    `Not a byte value at index ${position}: 0x${offending.toString(16)}`,
+  ]);
+}
 define('_base64Decode', (runtime, _receiver, [source]) => {
   const input = stringArg(runtime, source, 'source');
   const fail = (message: string, offset: number): never =>
@@ -603,13 +633,68 @@ define('_base64Decode', (runtime, _receiver, [source]) => {
   return newList(runtime, interfaceType(coreTypes.int), bytes.map(BigInt), false);
 });
 
+define('_base64Normalize', (runtime, _receiver, [source, start, end]) => {
+  const input = stringArg(runtime, source, 'source');
+  const length = BigInt(input.length);
+  const from = intArg(runtime, start, 'start');
+  const to = end === undefined ? length : intArg(runtime, end, 'end');
+  if (from < 0n || from > length) runtime.throwError('RangeError', 'range', [from, 0n, length, 'start']);
+  if (to < from || to > length) runtime.throwError('RangeError', 'range', [to, from, length, 'end']);
+  return normalizeBase64(runtime, input, Number(from), Number(to));
+});
+
+// code-gauge-allow functionCognitiveComplexity 25 -- Preserve the SDK order of Base64 normalization and validation.
+// code-gauge-allow functionNcss 40 -- The selected range and original offsets belong to the same scan.
+function normalizeBase64(runtime: Runtime, input: string, start: number, end: number): string {
+  const fail = (message: string, offset: number): never =>
+    runtime.throwError('FormatException', '', [message, input, BigInt(offset)]);
+  runtime.spend(1 + (end - start) / 64);
+  let normalized = '';
+  let padOffset = end;
+  let firstPad = -1;
+  let padding = 0;
+  for (let i = start; i < end; i++) {
+    const offset = i;
+    let char = input[i];
+    if (char === '%') {
+      const hex = input.slice(i + 1, Math.min(i + 3, end));
+      if (!/^[\da-f]{2}$/i.test(hex)) fail('Invalid base64 data', offset);
+      char = String.fromCodePoint(Number.parseInt(hex, 16));
+      i += 2;
+    }
+    if (char === '=') {
+      if (firstPad < 0) {
+        padOffset = offset;
+        firstPad = normalized.length;
+      }
+      padding++;
+      normalized += char;
+    } else {
+      const value = BASE64_VALUES[char.codePointAt(0) ?? 128] ?? -2;
+      if (value < 0) fail('Invalid base64 data', offset);
+      normalized += BASE64_ALPHABET[value];
+    }
+  }
+  const length = normalized.length;
+  if (firstPad >= 0) {
+    if (length % 4 !== 0) fail(`Invalid base64 padding, padded length must be multiple of four, is ${length}`, end);
+    if (firstPad + padding !== length) fail("Invalid base64 padding, '=' not at the end", padOffset);
+    if (padding > 2) fail("Invalid base64 padding, more than two '=' characters", padOffset);
+  } else {
+    if (length % 4 === 1) fail('Invalid base64 encoding length ', end);
+    normalized += '='.repeat((4 - (length % 4)) % 4);
+  }
+  return input.slice(0, start) + normalized + input.slice(end);
+}
+
 /** The inverse of the Base64 alphabets, both the standard and the URL-safe one: -1 for padding, -2 for others. */
+const BASE64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 const BASE64_VALUES: readonly number[] = Array.from({ length: 128 }, (_, code) => {
   const char = String.fromCodePoint(code);
   if (char === '=' || char === '%') return -1;
   if (char === '-' || char === '+') return 62;
   if (char === '_' || char === '/') return 63;
-  const index = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'.indexOf(char);
+  const index = BASE64_ALPHABET.indexOf(char);
   return index === -1 ? -2 : index;
 });
 

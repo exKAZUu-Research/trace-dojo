@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 780 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 788 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type {
   Block,
   Expression,
@@ -213,6 +213,7 @@ export abstract class StatementCompiler extends PatternCompiler {
   }
 
   // code-gauge-allow functionCognitiveComplexity 19 -- Positional and named parameters bind alike, each with its covariance check.
+  // code-gauge-allow duplicateLines 16 -- Positional and named arguments differ in how presence is checked.
   private compileParameters(spec: FunctionSpec): (frame: Frame, args: Arguments) => void {
     const { parameters } = spec;
     const binders: ((frame: Frame, args: Arguments) => void)[] = [];
@@ -224,10 +225,15 @@ export abstract class StatementCompiler extends PatternCompiler {
     const isCovariant = (parameter: FormalParameter, type: DartType, index?: number): boolean =>
       parameter.isCovariant ||
       (classParams !== undefined && classParams.size > 0 && mentionsTypeParams(type, classParams)) ||
-      (thisClass !== undefined && inheritsCovariance(thisClass, spec.name, parameter.name, index));
+      (thisClass !== undefined && inheritsCovariance(thisClass, spec.name, parameter.name, index, spec.isSetter));
     for (const [index, parameter] of parameters.positional.entries()) {
       const type = spec.positionalTypes[index] ?? DYNAMIC;
-      const { variable, defaultValue } = this.declareParameter(parameter, type, index >= parameters.requiredCount);
+      const { variable, defaultValue } = this.declareParameter(
+        parameter,
+        type,
+        index >= parameters.requiredCount,
+        spec.defaults
+      );
       binders.push(
         parameterBinder(
           variable.slot,
@@ -240,7 +246,7 @@ export abstract class StatementCompiler extends PatternCompiler {
     }
     for (const parameter of parameters.named) {
       const type = spec.namedTypes.get(parameter.name) ?? DYNAMIC;
-      const { variable, defaultValue } = this.declareParameter(parameter, type, true);
+      const { variable, defaultValue } = this.declareParameter(parameter, type, true, spec.defaults);
       const { name } = parameter;
       binders.push(
         parameterBinder(
@@ -263,20 +269,24 @@ export abstract class StatementCompiler extends PatternCompiler {
   private declareParameter(
     parameter: FormalParameter,
     type: DartType,
-    isOptional: boolean
+    isOptional: boolean,
+    defaults: Map<FormalParameter, Compiled> | undefined
   ): { variable: LocalVar; defaultValue: Eval | undefined } {
     let defaultValue: Eval | undefined;
-    if (parameter.defaultValue) {
-      const compiled = this.withConstContext(true, () =>
-        this.compileExpression(parameter.defaultValue as Expression, type)
-      );
-      if (!compiled.isConst) this.error(parameter.defaultValue, '引数の既定値には、定数を書いてください。');
-      defaultValue = this.coerce(
+    const compiled = parameter.defaultValue
+      ? this.withConstContext(true, () => this.compileExpression(parameter.defaultValue as Expression, type))
+      : defaults?.get(parameter);
+    if (compiled) {
+      const span = parameter.defaultValue ?? parameter;
+      if (!compiled.isConst) this.error(span, '引数の既定値には、定数を書いてください。');
+      const coerced = this.coerce(
         compiled,
         type,
-        parameter.defaultValue,
+        span,
         (from, to) => `${from} 型の既定値は、${to} 型の引数 ${parameter.name} に合いません。`
-      ).run;
+      );
+      defaults?.set(parameter, coerced);
+      defaultValue = coerced.run;
     } else if (
       isOptional &&
       !parameter.isRequired &&
@@ -1126,17 +1136,21 @@ export function inheritsCovariance(
   cls: ClassInfo,
   methodName: string,
   parameterName: string,
-  index: number | undefined
+  index: number | undefined,
+  setter = false
 ): boolean {
   for (const { cls: supertype } of cls.directSupertypes) {
+    const field = setter ? supertype.setters.get(methodName) : undefined;
+    if (field?.kind === 'field' && field.isCovariant) return true;
     const method = supertype.declaration?.members.find(
-      (member): member is MethodDeclaration => member.kind === 'method' && member.name === methodName
+      (member): member is MethodDeclaration =>
+        member.kind === 'method' && member.name === methodName && (member.methodKind === 'setter') === setter
     );
     const parameter =
       index === undefined
         ? method?.parameters.named.find((named) => named.name === parameterName)
         : method?.parameters.positional[index];
-    if (parameter?.isCovariant || inheritsCovariance(supertype, methodName, parameterName, index)) return true;
+    if (parameter?.isCovariant || inheritsCovariance(supertype, methodName, parameterName, index, setter)) return true;
   }
   return false;
 }
