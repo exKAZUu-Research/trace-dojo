@@ -1,0 +1,17 @@
+function wrongPrimitive(value: { length: number }) {
+  if (typeof value === "number") return value.toFixed();
+}
+function wrongBoxedGuard(value: String) {
+  if (typeof value === "number") return value.toFixed();
+}
+function unrelated(value: RegExp) {
+  if (typeof value === "string") return value.toUpperCase();
+}
+function generic<T extends { toString(): string }>(value: T) {
+  if (typeof value === "string") return value.toUpperCase();
+  if (typeof value === "object") return value.toString();
+  return value.toString();
+}
+function boundedUnion<T extends string | number>(value: T) {
+  if (typeof value === "bigint") return value.toString();
+}

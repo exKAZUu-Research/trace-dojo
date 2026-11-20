@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 425 -- Keeps flow state, joins, and reference narrowing together.
+// code-gauge-allow-file fileNcss 432 -- Keeps flow state, joins, and reference narrowing together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -351,11 +351,16 @@ export class Flow {
       return name === 'function' ? this.c.globalType('Function') : type;
     }
     if (!assumeTrue) return filterType(type, (member) => this.typeofMatches(member, name) !== true);
-    return mapType(type, (member) => {
-      const matches = this.typeofMatches(member, name);
-      if (matches === 'maybe') return this.narrowMaybe(member, name);
-      return matches ? member : neverType;
-    });
+    return mapType(type, (member) => this.narrowTypeofMember(member, name));
+  }
+
+  private narrowTypeofMember(member: Type, name: string): Type {
+    const matches = this.typeofMatches(member, name);
+    if (matches === true) return member;
+    if (matches === 'maybe') return this.narrowMaybe(member, name);
+    if (member.kind !== 'object' && member.kind !== 'intersection') return neverType;
+    const implied = typeofTypes[name]?.() ?? (name === 'function' ? this.c.globalType('Function') : undefined);
+    return implied && this.c.relations.isAssignable(implied, member) ? implied : neverType;
   }
 
   private narrowMaybe(member: Type, name: string): Type {
@@ -379,7 +384,7 @@ export class Flow {
       : nonPrimitiveType;
   }
 
-  // code-gauge-allow functionNcss 36 -- One case per `typeof` result.
+  // code-gauge-allow functionNcss 37 -- One case per `typeof` result.
   /** Whether `typeof` a value of the type gives `name`: always, never, or maybe. */
   private typeofMatches(type: Type, name: string): boolean | 'maybe' {
     switch (type.kind) {
@@ -421,8 +426,11 @@ export class Flow {
       }
       case 'typeParameter': {
         const constraint = this.c.constraintOf(type);
-        if (!constraint) return 'maybe';
-        return this.typeofMatches(constraint, name) === false ? false : 'maybe';
+        return constraint ? this.typeofMatches(constraint, name) : 'maybe';
+      }
+      case 'union': {
+        const matches = type.types.map((member) => this.typeofMatches(member, name));
+        return matches.every((result) => result === matches[0]) ? matches[0] : 'maybe';
       }
       case 'intersection': {
         return this.intersectionTypeofMatches(type, name);
