@@ -1024,6 +1024,25 @@ test('releases an uncaught exception after reporting or handling it, before shut
   });
 });
 
+test('unhandled match cases escape strings and name types as PHP does', () => {
+  expect(
+    run(String.raw`<?php
+foreach (["こ", "it's", "a\x01b\\", "\f\v\e\x7F", "abcdefghijklmnopq", STDERR] as $v) {
+  try { echo match($v) { 'z' => 1 }; } catch (UnhandledMatchError $e) { echo $e->getMessage(), "\n"; }
+}
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: String.raw`Unhandled match case '\xE3\x81\x93'
+Unhandled match case 'it's'
+Unhandled match case 'a\x01b\\'
+Unhandled match case '\f\v\e\x7F'
+Unhandled match case 'abcdefghijklmno...'
+Unhandled match case of type resource
+`,
+  });
+});
+
 test('unrelated array temporaries do not invalidate scalar-grid garbage caches', () => {
   const execution = run(
     '<?php $data=[]; for($i=0;$i<10000;$i++) $data[]=[$i]; for($i=0;$i<10000;$i++){ $temp=[$i]; $x=new stdClass(); } echo "done";'

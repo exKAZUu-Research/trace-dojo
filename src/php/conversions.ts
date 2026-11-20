@@ -195,13 +195,7 @@ export function compareNumbers(a: bigint | number, b: bigint | number): number {
 
 export function matchCaseText(value: Value): string {
   if (typeof value === 'string') {
-    const escaped = value
-      .slice(0, 15)
-      .replaceAll(/[\\']/g, String.raw`\$&`)
-      .replaceAll('\n', String.raw`\n`)
-      .replaceAll('\r', String.raw`\r`)
-      .replaceAll('\t', String.raw`\t`);
-    return `'${escaped}${value.length > 15 ? '...' : ''}'`;
+    return `'${escapeTruncated(value.slice(0, 15))}${value.length > 15 ? '...' : ''}'`;
   }
   if (typeof value === 'bigint') return value.toString();
   if (typeof value === 'number') {
@@ -210,5 +204,23 @@ export function matchCaseText(value: Value): string {
   }
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   if (value === null) return 'NULL';
-  return `of type ${debugType(value)}`;
+  return `of type ${valueName(value)}`;
+}
+
+const TRUNCATED_ESCAPES: Record<string, string> = {
+  '\\': '\\',
+  '\n': 'n',
+  '\r': 'r',
+  '\t': 't',
+  '\f': 'f',
+  '\v': 'v',
+  '\u001B': 'e',
+};
+
+/** Escapes bytes as PHP's `smart_str_append_escaped` does for messages. */
+function escapeTruncated(bytes: string): string {
+  return bytes.replaceAll(/[\\\0-\u001F\u007F-\u00FF]/g, (byte) => {
+    const escape = TRUNCATED_ESCAPES[byte];
+    return escape ? `\\${escape}` : `\\x${byte.codePointAt(0)!.toString(16).toUpperCase().padStart(2, '0')}`;
+  });
 }
