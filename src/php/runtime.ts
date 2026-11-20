@@ -431,7 +431,8 @@ export class Runtime {
   dropTemporaries(frame: Frame, mark: number): void {
     if (frame.temporaries.length <= mark) return;
     const values = frame.temporaries.splice(mark);
-    for (const value of values) if (value instanceof Ref) value.rc--;
+    // PHP frees temporaries (FREE, FE_FREE) with zval_ptr_dtor_nogc, so a reference they held buffers no possible root.
+    for (const value of values) if (value instanceof Ref) value.releaseWithoutGc();
     this.release(values);
   }
 

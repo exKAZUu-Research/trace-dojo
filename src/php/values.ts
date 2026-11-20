@@ -136,6 +136,11 @@ export function setShutdownHoldHandler(handler: (value: unknown) => void): void 
 }
 
 /** Reports a value that a holder let go of, if it may hold objects. */
+/** Whether a slot's new reference holds its old value, as making a reference moves the value without releasing it. */
+function movedIntoReference(old: unknown, slot: unknown): boolean {
+  return slot instanceof Ref && old !== undefined && slot.v === old;
+}
+
 export function dropped(value: unknown): void {
   if (value !== null && typeof value === 'object') dropHandler([value]);
 }
@@ -308,7 +313,7 @@ export class PhpArray {
     this.insert(key, slot);
 
     if (slot !== null && typeof slot === 'object') this.composite = true;
-    dropped(old);
+    if (!movedIntoReference(old, slot)) dropped(old);
   }
 
   /** The stored next-free integer key for `$array[] = ...` (retained across `delete`), or 0 before any integer key is assigned. */
@@ -1258,7 +1263,7 @@ class PropertyMap extends Map<string, Slot> {
     super.set(key, value);
     if (value !== UNINIT) this.owner.unsetProperties?.delete(key);
     trackOwner(value, this.owner, key);
-    dropped(old);
+    if (!movedIntoReference(old, value)) dropped(old);
     return this;
   }
   override clear(): void {
