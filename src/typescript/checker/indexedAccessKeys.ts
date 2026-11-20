@@ -10,6 +10,7 @@ import {
   isIntrinsic,
   type LiteralType,
   type MappedInfo,
+  newTypeId,
   type ObjectType,
   type Structure,
   type Type,
@@ -57,16 +58,40 @@ export function narrowKeyConstraints(c: Checker, narrow: (type: Type) => Type): 
   const cache = new Map<Type, Type>();
   const project = (type: Type): Type => {
     if (type.kind === 'keyof' || type.kind === 'templateLiteral') return narrow(type);
-    if (type.kind !== 'union' && type.kind !== 'intersection') return type;
+    if (type.kind !== 'union' && type.kind !== 'intersection' && type.kind !== 'conditional') return type;
     const existing = cache.get(type);
     if (existing) return existing;
     c.budget.spend();
     cache.set(type, type);
-    const bound = narrowComposite(c, type, project);
+    const bound =
+      type.kind === 'conditional' ? projectConditionalConstraint(type, project) : narrowComposite(c, type, project);
     cache.set(type, bound);
     return bound;
   };
   return project;
+}
+
+function projectConditionalConstraint(type: ConditionalType, project: (type: Type) => Type): ConditionalType {
+  return {
+    kind: 'conditional',
+    id: newTypeId(),
+    declaration: type.declaration,
+    checkType: type.checkType,
+    extendsType: type.extendsType,
+    inferTypeParameters: type.inferTypeParameters,
+    outerTypeParameters: type.outerTypeParameters,
+    distributive: type.distributive,
+    root: type.root ?? type,
+    mapper: type.mapper,
+    aliasName: type.aliasName,
+    aliasArguments: type.aliasArguments,
+    get trueType() {
+      return project(type.trueType);
+    },
+    get falseType() {
+      return project(type.falseType);
+    },
+  };
 }
 
 function narrowOperand(c: Checker, type: Type, narrow: (type: Type) => Type, parameters: Mapper): Type {

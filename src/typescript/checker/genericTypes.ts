@@ -2,6 +2,7 @@ import type { ExecutionBudget } from '../../interpreter/limits';
 import type { Checker, Mapper } from './checker';
 import { keyedIndexes } from './indexInfos';
 import {
+  type ConditionalType,
   isAnyLike,
   isIntrinsic,
   type MappedInfo,
@@ -11,6 +12,8 @@ import {
   type Type,
   type TypeParameter,
 } from './types';
+
+const distributionDependencies = new WeakMap<ConditionalType, boolean>();
 
 /**
  * Whether a conditional type with this check or extends type waits for its type arguments, as TypeScript's
@@ -74,6 +77,34 @@ export function conditionalBranch(
   // A type parameter without its constraint, so that `T[] extends string[]` with `T extends string` is deferred.
   if (isAssignableWith((parameter) => ({ ...parameter, id: newTypeId(), constraint: undefined }))) return 'true';
   return undefined;
+}
+
+export function conditionalDependsOnDistribution(c: Checker, root: ConditionalType): boolean {
+  if (!root.distributive) return false;
+  const cached = distributionDependencies.get(root);
+  if (cached !== undefined) return cached;
+  const dependent = checkConditionalDistributionDependency(c, root);
+  distributionDependencies.set(root, dependent);
+  return dependent;
+}
+
+function checkConditionalDistributionDependency(c: Checker, root: ConditionalType): boolean {
+  const { checkType, declaration } = root;
+  if (declaration && checkType.kind === 'typeParameter') {
+    const nameNode = checkType.isThisType ? 'this_type' : 'type_identifier';
+    const fields = ['right', 'consequence', 'alternative'];
+    const mentionsCheck = fields.some((field) => {
+      const branch = declaration.childForFieldName(field);
+      if (!branch) return false;
+      return [branch, ...branch.descendantsOfType([nameNode, 'type_query'])].some(
+        (node) => node.type === 'type_query' || (node.type === nameNode && node.text === checkType.name)
+      );
+    });
+    if (!mentionsCheck) return false;
+  }
+  return [root.trueType, root.falseType].some((branch) =>
+    typeParametersIn(branch, [], c.budget).some((parameter) => parameter.id === checkType.id)
+  );
 }
 
 /**

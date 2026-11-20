@@ -5,9 +5,9 @@ import { isUnit } from './flow';
 import {
   childTypes,
   conditionalBranch,
+  conditionalDependsOnDistribution,
   isGenericObjectOrIndexType,
   mappedOptionality,
-  typeParametersIn,
 } from './genericTypes';
 import {
   applicableIndex,
@@ -385,7 +385,7 @@ export class Relations {
     if (
       root.inferTypeParameters.length > 0 ||
       (source.kind === 'conditional' && (source.root ?? source) === root) ||
-      this.branchesDependOnDistribution(root)
+      conditionalDependsOnDistribution(this.c, root)
     )
       return false;
     const branch = conditionalBranch(this.c, target.checkType, target.extendsType);
@@ -393,13 +393,6 @@ export class Relations {
       (branch === 'false' || this.isRelated(source, target.trueType, relation, state)) &&
       (branch === 'true' || this.isRelated(source, target.falseType, relation, state))
     );
-  }
-
-  private branchesDependOnDistribution(root: ConditionalType): boolean {
-    if (!root.distributive) return false;
-    const containsCheck = (type: Type): boolean =>
-      typeParametersIn(type, [], this.c.budget).some((parameter) => parameter.id === root.checkType.id);
-    return containsCheck(root.trueType) || containsCheck(root.falseType);
   }
 
   /**

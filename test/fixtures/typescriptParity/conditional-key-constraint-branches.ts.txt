@@ -1,0 +1,13 @@
+type Same<O, Z, P extends (Z extends true ? keyof O : keyof O)> = P;
+type WithFallback<O, Z, P extends (Z extends true ? keyof O : keyof O | 'fallback')> = P;
+type Prefixed<O, Z, P extends (Z extends true ? `pre-${keyof O & string}` : `pre-${keyof O & string}`)> = P;
+type TwoLevels<O, Z, Y, P extends (Z extends true ? (Y extends true ? keyof O : keyof O | 'extra') : keyof O)> = P;
+type ResolvedBranch<O, Z, P extends (Z extends true ? keyof O : never)> = P;
+type First<T, K extends keyof T, Z> = T[K] extends {key: 'x'} ? Same<T[K], Z, 'key'> : never;
+type Second<T, K extends keyof T, Z> = T[K] extends {key: 'x'} ? WithFallback<T[K], Z, 'key'> : never;
+type Third<T, K extends keyof T, Z> = T[K] extends {key: 'x'} ? Prefixed<T[K], Z, 'pre-key'> : never;
+type Fourth<T, K extends keyof T, Z, Y> = T[K] extends {key: 'x'} ? TwoLevels<T[K], Z, Y, 'key'> : never;
+type Fifth<T, K extends keyof T> = T[K] extends {key: 'x'} ? ResolvedBranch<T[K], true, 'key'> : never;
+const first: First<{a: {key: 'x'}}, 'a', boolean> = 'key';
+const third: Third<{a: {key: 'x'}}, 'a', boolean> = 'pre-key';
+console.log(first, third);
