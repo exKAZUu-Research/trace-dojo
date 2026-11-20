@@ -5,13 +5,10 @@ import { z } from 'zod';
 
 import { traceProgram } from '../../src/interpreter/program';
 import type { DisplayNode } from '../../src/problems/trace';
+import { buildNodeBundle } from '../helpers/buildNodeBundle';
 
 test('immutable composite loops retain cheap answers within bounded transport output', { timeout: 30_000 }, () => {
-  const bundle = execFileSync(
-    'bun',
-    ['build', 'test/helpers/haskellCompositeTrace.ts', '--target=node', '--packages=external'],
-    { encoding: 'utf8', timeout: 30_000, maxBuffer: 16 * 1024 * 1024 }
-  );
+  const bundle = buildNodeBundle('test/helpers/haskellCompositeTrace.ts');
   const output = execFileSync('node', ['--max-old-space-size=256', '--input-type=module'], {
     input: bundle,
     encoding: 'utf8',
