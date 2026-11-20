@@ -12,7 +12,7 @@ import { MapValue, SequenceValue } from './library/containerValues';
 import { StringValue } from './library/string';
 import { type Frame, Runtime } from './runtime';
 import { type ClassInfo, isCharType, type Type } from './types';
-import { ArrayStore, type Box, CObject, Ptr, type Store, UNINIT, type Value } from './values';
+import { ArrayStore, type Box, CObject, isIndeterminate, Ptr, type Store, UNINIT, type Value } from './values';
 
 // code-gauge-allow duplicateLines 15 -- Each language wires its own runtime into the shared TraceRecorder alike.
 export function traceCppProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
@@ -101,7 +101,7 @@ class Snapshotter {
     type: Type,
     withReferences: boolean
   ): void {
-    if (value === UNINIT || value === undefined) return;
+    if (isIndeterminate(value) || value === undefined) return;
     this.take(NODE_COST + name.length);
     const scalar = this.scalarOf(value, type);
     if (scalar === undefined) return;
@@ -118,7 +118,7 @@ class Snapshotter {
   // code-gauge-allow functionNcss 33 -- Dispatch and cycle detection belong to the same traversal.
   private nodeOf(value: Value, type: Type, seen: Set<unknown>, receiverClass?: ClassInfo): DisplayNode | undefined {
     this.take(NODE_COST);
-    if (value === UNINIT || value === undefined) return undefined;
+    if (isIndeterminate(value) || value === undefined) return undefined;
     if (type.kind === 'reference')
       return value instanceof Ptr ? this.nodeOf(readLocation(value), type.to, seen) : undefined;
     if (type.kind === 'pointer') {
@@ -183,7 +183,7 @@ class Snapshotter {
   // code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of type.
   // code-gauge-allow functionNcss 32 -- One case per kind of type.
   private scalarOf(value: Value, type: Type): Scalar | typeof NOT_SCALAR | undefined {
-    if (value === UNINIT || value === undefined) return undefined;
+    if (isIndeterminate(value) || value === undefined) return undefined;
     switch (type.kind) {
       case 'int': {
         if (type.name === 'bool') return value !== 0;

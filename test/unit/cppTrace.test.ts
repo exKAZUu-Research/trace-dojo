@@ -18,6 +18,19 @@ function steps(language: 'cpp' | 'java', program: string): { vars: Record<string
   }));
 }
 
+test('hides a C++ scalar until every byte is initialized', () => {
+  const program = `int main() {
+  int values[1];
+  unsigned char* bytes = static_cast<unsigned char*>(static_cast<void*>(values));
+  bytes[0] = 7;
+  for (unsigned i = 1; i < sizeof(int); ++i) bytes[i] = 0;
+}`;
+  const trace = traceProgram('cpp', program, program);
+  // oxlint-disable-next-line unicorn/no-null -- The trace protocol represents indeterminate array elements as null.
+  expect(trace.traceItems.find(({ line }) => line === 4)?.vars.values).toEqual([null]);
+  expect(trace.finalVars.values).toEqual([7]);
+});
+
 test('counts nested pair fields toward the C++ storage limit', () => {
   const program = `#include <iostream>
 #include <utility>

@@ -13,7 +13,7 @@ import {
   type Type,
   typeName,
 } from './types';
-import { CObject, Ptr, Store, type Value } from './values';
+import { CObject, PartialScalar, Ptr, Store, UNINIT, type Value } from './values';
 
 export function erasePointee(pointer: Ptr, pointee: Type): Ptr {
   if (pointer instanceof IncompatiblePointer) return pointer.erased;
@@ -170,18 +170,37 @@ class ScalarAliasStorage extends Store {
   }
 
   get(index: number): Value {
-    const original = this.place(index);
-    const bits = encodeScalar(original.read(), this.source);
-    if (!this.byteView) return decodeScalar(bits, this.target);
-    const byte = bits.getUint8(this.byteOffset(index));
+    const original = this.elementPlace(index);
+    if (!this.byteView) return decodeScalar(encodeScalar(original.read(), this.source), this.target);
+    const value = original.readRaw() ?? original.read();
+    const offset = this.byteOffset(index);
+    if (value === UNINIT || (value instanceof PartialScalar && (value.initializedByteMask & (1 << offset)) === 0))
+      throw new CppRuntimeError('uninitialized');
+    const byte = encodeScalar(value, this.source).getUint8(offset);
     return this.target.name === 'char' && byte >= 128 ? byte - 256 : byte;
   }
 
   set(index: number, value: Value): void {
-    const original = this.place(index);
-    const bits = this.byteView ? encodeScalar(original.read(), this.source) : encodeScalar(value, this.target);
-    if (this.byteView) bits.setUint8(this.byteOffset(index), Number(value));
-    original.write(decodeScalar(bits, this.source));
+    const original = this.elementPlace(index);
+    if (!this.byteView) {
+      original.write(decodeScalar(encodeScalar(value, this.target), this.source));
+      return;
+    }
+    const stored = original.readRaw() ?? original.read();
+    const offset = this.byteOffset(index);
+    const fullMask = (1 << this.width) - 1;
+    const initialized = stored instanceof PartialScalar ? stored.initializedByteMask : stored === UNINIT ? 0 : fullMask;
+    const mask = initialized | (1 << offset);
+    const bits = encodeScalar(stored, this.source);
+    bits.setUint8(offset, Number(value));
+    original.write(
+      mask === fullMask ? decodeScalar(bits, this.source) : new PartialScalar(bits.getBigUint64(0, true), mask)
+    );
+  }
+
+  private elementPlace(index: number): Ptr {
+    if (index < 0 || index >= this.length) throw new CppRuntimeError('outOfBounds');
+    return this.place(index);
   }
 
   place(index: number): Ptr {
@@ -238,7 +257,9 @@ class ScalarAliasPointer extends Ptr {
 
 function encodeScalar(value: Value, type: ArithmeticType): DataView {
   const bits = new DataView(new ArrayBuffer(8));
-  if (type.kind === 'int') bits.setBigUint64(0, BigInt.asUintN(64, BigInt(value as number | bigint)), true);
+  if (value === UNINIT) return bits;
+  if (value instanceof PartialScalar) bits.setBigUint64(0, value.bits, true);
+  else if (type.kind === 'int') bits.setBigUint64(0, BigInt.asUintN(64, BigInt(value as number | bigint)), true);
   else if (type.name === 'float') bits.setFloat32(0, value as number, true);
   else bits.setFloat64(0, value as number, true);
   return bits;

@@ -14,7 +14,18 @@ import {
 /** The value of a variable or an element that the program has not written yet. */
 export const UNINIT = Symbol('uninitialized');
 
-export type Value = number | bigint | Ptr | Store | FunctionRef | typeof UNINIT | undefined;
+export class PartialScalar {
+  constructor(
+    readonly bits: bigint,
+    readonly initializedByteMask: number
+  ) {}
+}
+
+export type Value = number | bigint | Ptr | Store | FunctionRef | PartialScalar | typeof UNINIT | undefined;
+
+export function isIndeterminate(value: Value): boolean {
+  return value === UNINIT || value instanceof PartialScalar;
+}
 
 interface Address {
   store: Store | undefined;
@@ -113,9 +124,7 @@ export class Box extends Store {
   get(index: number): Value {
     this.checkAlive();
     if (index !== 0) throw new CppRuntimeError('outOfBounds');
-    const { value } = this;
-    if (value === UNINIT) throw new CppRuntimeError('uninitialized');
-    return value;
+    return initializedValue(this.value);
   }
 
   set(index: number, value: Value): void {
@@ -176,9 +185,7 @@ export class ArrayStore extends Store {
   get(index: number): Value {
     this.checkAlive();
     if (index < 0 || index >= this.values.length) throw new CppRuntimeError('outOfBounds');
-    const value = this.values[index];
-    if (value === UNINIT) throw new CppRuntimeError('uninitialized');
-    return value;
+    return initializedValue(this.values[index]);
   }
 
   set(index: number, value: Value): void {
@@ -331,9 +338,7 @@ export class CObject extends Store {
 
   get(index: number): Value {
     this.checkAlive();
-    const value = this.values[index];
-    if (value === UNINIT) throw new CppRuntimeError('uninitialized');
-    return value;
+    return initializedValue(this.values[index]);
   }
 
   set(index: number, value: Value): void {
@@ -478,7 +483,7 @@ export class Ptr {
   }
 
   read(): Value {
-    const value = this.target().get(this.index);
+    const value = initializedValue(this.target().get(this.index));
     if (value instanceof Store) value.checkAlive();
     return value;
   }
@@ -585,6 +590,11 @@ export class Ptr {
       if (!(error instanceof CppRuntimeError)) throw error;
     }
   }
+}
+
+function initializedValue(value: Value): Value {
+  if (isIndeterminate(value)) throw new CppRuntimeError('uninitialized');
+  return value;
 }
 
 function inlineArrayOf(value: Value): ArrayStore | undefined {

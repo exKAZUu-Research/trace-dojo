@@ -260,6 +260,51 @@ int main() {
   });
 });
 
+test('initializes C++ scalars through independent views of their bytes', () => {
+  const program = `#include <iostream>
+int main() {
+  int x;
+  unsigned char* bytes = static_cast<unsigned char*>(static_cast<void*>(&x));
+  unsigned char* alias = static_cast<unsigned char*>(static_cast<void*>(&x));
+  bytes[1] = 18;
+  std::cout << +alias[1] << ' ';
+  for (unsigned i = 0; i < sizeof(x); ++i) if (i != 1) alias[i] = 0;
+  std::cout << x << ' ';
+  float y;
+  unsigned char* fraction = static_cast<unsigned char*>(static_cast<void*>(&y));
+  for (unsigned i = 0; i < sizeof(y); ++i) fraction[i] = 0;
+  std::cout << y << ' ';
+  fraction[2] = 128;
+  fraction[3] = 63;
+  std::cout << y << ' ';
+  int z;
+  unsigned char* reset = static_cast<unsigned char*>(static_cast<void*>(&z));
+  reset[1] = 255;
+  z = 12;
+  std::cout << z << ' ' << +reset[1];
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '18 4608 0 1 12 0',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['x', '+bytes[0]'])('rejects reading %s after a partial C++ byte initialization', (expression) => {
+  const program = `#include <iostream>
+int main() {
+  int x;
+  unsigned char* bytes = static_cast<unsigned char*>(static_cast<void*>(&x));
+  bytes[1] = 5;
+  std::cout << (${expression});
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '',
+    uncaughtException: '値を入れていない変数（または要素）の値を読みました。',
+  });
+});
+
 // Each `.out` file holds what a program built with Apple clang++ 21 (`-std=c++20`, libc++) printed, followed by the
 // line libc++abi wrote when an uncaught exception ended it, if one did.
 test.each(fs.readdirSync(FIXTURE_DIR).filter((name) => name.endsWith('.cpp')))(
