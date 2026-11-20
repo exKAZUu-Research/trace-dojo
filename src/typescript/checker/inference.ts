@@ -361,7 +361,7 @@ export class TypeInference {
     topLevel: boolean
   ): void {
     const inference = run.inferences.get(target.id);
-    if (!inference || inference.fixed || isIntrinsic(source, 'never')) return;
+    if (!inference || inference.fixed) return;
     if (run.priority > inference.priority) return;
     if (run.priority < inference.priority) {
       inference.candidates.length = 0;

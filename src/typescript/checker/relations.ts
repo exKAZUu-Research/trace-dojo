@@ -1159,15 +1159,18 @@ export class Relations {
 
   /** Whether a type depends on type parameters, other than those in `except`, so that it cannot be resolved yet. */
   isGeneric(type: Type, except: TypeParameter[] = []): boolean {
-    return this.containsTypeParameter(type, except, new Set());
-  }
-
-  private containsTypeParameter(type: Type, except: TypeParameter[], seen: Set<number>): boolean {
-    if (seen.has(type.id)) return false;
-    seen.add(type.id);
-    if (type.kind === 'typeParameter') return !except.some((parameter) => parameter.id === type.id);
-    if (type.kind === 'conditional' || (type.kind === 'object' && type.objectKind === 'mapped')) return true;
-    return childTypes(type).some((child) => this.containsTypeParameter(child, except, seen));
+    const seen = new Set<number>();
+    const pending = [type];
+    while (pending.length > 0) {
+      const current = pending.pop() as Type;
+      if (seen.has(current.id)) continue;
+      this.c.budget.spend();
+      seen.add(current.id);
+      if (current.kind === 'typeParameter' && !except.some((parameter) => parameter.id === current.id)) return true;
+      if (current.kind === 'conditional' || (current.kind === 'object' && current.objectKind === 'mapped')) return true;
+      for (const child of childTypes(current)) pending.push(child);
+    }
+    return false;
   }
 
   removeUndefined(type: Type): Type {

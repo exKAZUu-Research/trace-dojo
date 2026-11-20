@@ -87,6 +87,7 @@ function conditionalsIdentical(c: Checker, source: ConditionalType, target: Cond
 }
 
 function objectsIdentical(c: Checker, source: ObjectType, target: ObjectType): boolean {
+  if (referencesIdentical(c, source, target)) return true;
   if ((source.mapped || target.mapped) && (c.relations.isGeneric(source) || c.relations.isGeneric(target)))
     return !!source.mapped && !!target.mapped && mappedTypesIdentical(c, source.mapped, target.mapped);
   const left = source.resolve();
@@ -111,6 +112,14 @@ function objectsIdentical(c: Checker, source: ObjectType, target: ObjectType): b
     signatureListsIdentical(c, left.callSignatures, right.callSignatures) &&
     signatureListsIdentical(c, left.constructSignatures, right.constructSignatures)
   );
+}
+
+function referencesIdentical(c: Checker, source: ObjectType, target: ObjectType): boolean {
+  if (source.objectKind !== 'reference' || target.objectKind !== 'reference' || source.target !== target.target)
+    return false;
+  const a = source.typeArguments ?? [];
+  const b = target.typeArguments ?? [];
+  return a.length === b.length && a.every((argument, index) => c.relations.identical(argument, b[index]));
 }
 
 function mappedTypesIdentical(c: Checker, left: MappedInfo, right: MappedInfo): boolean {

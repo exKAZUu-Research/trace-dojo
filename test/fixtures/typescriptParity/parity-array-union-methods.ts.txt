@@ -23,3 +23,9 @@ summarize(['a', '', 'b']);
 summarize([0, 1, 2]);
 overlapping([1, 2, 3], ['a', 'b'], [1, 2]);
 overlapping([1, 2], [3, 4], ['x', 'y']);
+function simple(values: number[] | string[]) { return values.flat(); }
+function nested(values: number[][] | string[][]) { return values.flat(); }
+function readonlyFlat(values: readonly number[] | readonly string[]) { return values.flat(); }
+function deep(values: number[][][] | string[][][]) { return values.flat(2); }
+const output: (number | string)[] = simple([1, 2]);
+console.log(output, nested([['text']]), readonlyFlat([3, 4]), deep([[[5]]]));

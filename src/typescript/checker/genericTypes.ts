@@ -103,8 +103,6 @@ function parameterChildren(type: Type, declared: Set<number>): readonly Type[] {
     const outer = type.outerTypeParameters.map((parameter) => type.mapper?.get(parameter.id) ?? parameter);
     return [type.checkType, type.extendsType, ...outer];
   }
-  if (type.kind === 'object' && !type.aliasMapper && type.resolveReference)
-    return (type.outerTypeParameters ?? []).map((parameter) => type.mapper?.get(parameter.id) ?? parameter);
   const children = childTypes(type);
   return type.kind === 'object' ? [...children, ...objectMemberTypes(type, declared)] : children;
 }
@@ -147,6 +145,8 @@ export function childTypes(type: Type): readonly Type[] {
     case 'object': {
       // Reading the members of a deferred alias reference instantiates them, as for a deferred union.
       if (type.aliasMapper) return [...type.aliasMapper.values()];
+      if (type.resolveReference)
+        return (type.outerTypeParameters ?? []).map((parameter) => type.mapper?.get(parameter.id) ?? parameter);
       if (type.objectKind === 'reference') return type.typeArguments ?? [];
       return (type.tuple?.elements ?? []).map((element) => element.type);
     }
