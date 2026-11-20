@@ -3987,4 +3987,28 @@ foreach ([
     kind: 'executed',
     stdout: '[0,1]|[0,1]|[3,4]|[4,2]|[0,1]|',
   });
+
+  const dimensionRefValueFallback = run(String.raw`<?php
+error_reporting(0);
+class BagSet extends ArrayObject {
+  function offsetSet(mixed $key, mixed $value): void { echo 'setter;'; }
+}
+class BagGet extends ArrayObject {
+  function offsetGet(mixed $key): mixed { echo 'getter;'; return 3; }
+}
+function values() { return [1]; }
+$b = new BagSet;
+$b['x'] =& values();
+echo json_encode($b->getArrayCopy()), '|';
+$g = new BagGet;
+try { $g['x'] =& values(); } catch (Throwable $e) { echo $e->getMessage(), ';'; }
+echo json_encode($g->getArrayCopy()), '|';
+$x = 10; $ao = new ArrayObject(); $ao['k'] =& $x;
+$ao['k'] =& values();
+echo json_encode($x), ':', json_encode($ao->getArrayCopy());
+`);
+  expect(dimensionRefValueFallback).toMatchObject({
+    kind: 'executed',
+    stdout: '{"x":[1]}|getter;Cannot assign by reference to an array dimension of an object;[]|[1]:{"k":[1]}',
+  });
 });

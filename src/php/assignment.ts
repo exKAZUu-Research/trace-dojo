@@ -40,6 +40,7 @@ import { arithmetic, bitwise, concat, mergeArrayUnion, toKey, toStr } from './op
 import {
   arrayIsShared,
   type BeforeOffsetGet,
+  bindOrAssignPlace,
   type CompoundRead,
   ElementPlace,
   hasPropertySlot,
@@ -52,6 +53,7 @@ import {
   RefPlace,
   share,
   SKIP_COMPOUND,
+  storeDimensionRef,
   storeIncrement,
   ValuePlace,
   VarPlace,
@@ -64,7 +66,6 @@ import { FatalError, PhpThrow, rt } from './runtime';
 import { incrementString } from './strings';
 import { coerce, describePropertyType, matches, NO_MATCH, typeToString } from './types';
 import {
-  dropped,
   type Key,
   PhpArray,
   type PhpClass,
@@ -955,7 +956,7 @@ export function bindRef(target: Expr, ref: Ref, valueFallback = false): void {
     new VarPlace(rt().frame, name, target.k === 'varvar' ? 'dynamic' : 'compiled').bind(ref);
     return;
   }
-  if (target.k === 'idx') return bindDimensionRef(target, ref);
+  if (target.k === 'idx') return bindDimensionRef(target, ref, valueFallback);
   if (target.k === 'prop') {
     const receiver = nestedPlace(placeOf(target.obj, 'write', true), 'write');
     const object = propertyReceiver(target.obj, receiver, 'write');
@@ -980,8 +981,9 @@ export function bindRef(target: Expr, ref: Ref, valueFallback = false): void {
   throwError('Error', 'Cannot assign reference to this expression');
 }
 
-function bindDimensionRef(target: Extract<Expr, { k: 'idx' }>, ref: Ref): void {
-  if (target.base.k === 'var' && target.base.name === 'GLOBALS') return globalPlace(target.index).bind(ref);
+function bindDimensionRef(target: Extract<Expr, { k: 'idx' }>, ref: Ref, valueFallback = false): void {
+  if (target.base.k === 'var' && target.base.name === 'GLOBALS')
+    return bindOrAssignPlace(globalPlace(target.index), ref, valueFallback);
   const parent = nestedPlace(placeOf(target.base, 'write', true), 'write');
   const rawKey = target.index === undefined ? undefined : ev(target.index);
   const container = writableContainer(parent);
@@ -990,14 +992,7 @@ function bindDimensionRef(target: Extract<Expr, { k: 'idx' }>, ref: Ref): void {
     container instanceof PhpObject
       ? nativeRefDimension(container, rawKey)
       : ([container, rawKey === undefined ? undefined : toKey(rawKey)] as const);
-  ref.isRef = true;
-  if (key !== undefined && array.map.get(key) === ref) return dropped(ref);
-  ref.rc++;
-  if (key !== undefined) array.setSlot(key, ref);
-  else if (!array.append(ref)) {
-    ref.rc--;
-    throwError('Error', 'Cannot add element to the array as the next element is already occupied');
-  }
+  storeDimensionRef(array, key, ref, valueFallback);
 }
 
 function nativeRefDimension(object: PhpObject, rawKey: Value | undefined): readonly [PhpArray, Key] {
@@ -1024,7 +1019,7 @@ export function assignReference(target: Expr, source: Expr): Value {
     runtime.lastReturnRef = undefined;
     if (returned) ref = returned;
     else {
-      if (target.k !== 'prop' && target.k !== 'sprop') {
+      if (target.k !== 'prop' && target.k !== 'sprop' && target.k !== 'idx') {
         notice('Only variables should be assigned by reference');
         runtime.row = target.row;
         return placeOf(target).set(share(value));
