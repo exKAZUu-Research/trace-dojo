@@ -275,8 +275,7 @@ export class BorrowChecker {
 
   private call(expr: Extract<Expr, { kind: 'call' }>, state: State): State {
     // Calling an `FnOnce` closure consumes it.
-    const callee = expr.callee.ty && normalize(shallow(expr.callee.ty));
-    const consumes = callee?.kind === 'closure' && callee.closure.kind === 'FnOnce';
+    const consumes = this.annotations.callKinds.get(expr) === 'FnOnce';
     let current = this.expr(expr.callee, state, consumes ? 'move' : 'read');
     const res = expr.callee.kind === 'path' ? this.annotations.paths.get(expr.callee) : undefined;
     const fn = res?.kind === 'fn' ? res.fn : undefined;
@@ -752,7 +751,6 @@ function sameState(a: State, b: State): boolean {
   return true;
 }
 
-/** The state after either of two paths: a variable holds a value only if it does on both. */
 function patternReads(pattern: Pattern, path: string, read: (path: string, descendants: boolean) => void): void {
   switch (pattern.kind) {
     case 'wild': {
@@ -779,6 +777,7 @@ function patternReads(pattern: Pattern, path: string, read: (path: string, desce
   }
 }
 
+/** The state after either of two paths: a variable holds a value only if it does on both. */
 function join(a: State, b: State): State {
   if (a === BOTTOM) return b;
   if (b === BOTTOM) return a;

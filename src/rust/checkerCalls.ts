@@ -16,6 +16,7 @@ import { compileError } from './items';
 import { autoderefSteps, boundsOf, lookupMethod } from './methods';
 import {
   adt,
+  type ClosureType,
   type FnDef,
   hasVars,
   intType,
@@ -211,29 +212,44 @@ function callValue(
   }
   let params: Type[];
   let ret: Type;
+  let kind: ClosureType['kind'];
   if (t.kind === 'closure') {
     params = t.closure.params;
     ret = t.closure.ret;
-    requireCallableMut(c, expr, t.closure.kind);
+    kind = t.closure.kind;
   } else if (t.kind === 'fn') {
     params = t.params;
     ret = t.ret;
+    kind = 'Fn';
   } else {
     const bounds = boundsOf(t) ?? [];
-    const sig = bounds.find((bound) => bound.fnSig);
+    const sig =
+      bounds.find((bound) => bound.fnSig && bound.trait.builtin === 'Fn') ??
+      bounds.find((bound) => bound.fnSig && bound.trait.builtin === 'FnMut') ??
+      bounds.find((bound) => bound.fnSig);
     if (!sig?.fnSig) {
       compileError(expr.callee.span, `${typeToString(resolve(calleeType))} は関数ではないので、呼び出せません。`);
     }
     params = sig.fnSig.params;
     ret = sig.fnSig.ret;
-    if (sig.trait.name === 'FnMut') requireCallableMut(c, expr, 'FnMut');
+    kind = sig.trait.builtin === 'Fn' || sig.trait.builtin === 'FnMut' ? sig.trait.builtin : 'FnOnce';
+  }
+  if (kind === 'FnMut') requireCallableMut(c, expr, kind);
+  if (
+    kind === 'FnOnce' &&
+    autoderefSteps(c.program, calleeType)
+      .at(-1)
+      ?.derefs.some((step) => step !== 'own') &&
+    !c.solver.isCopy(t)
+  ) {
+    compileError(expr.callee.span, '参照の先の FnOnce クロージャは、値をムーブできないので呼び出せません。');
   }
   if (expr.args.length !== params.length) {
     compileError(expr.span, `引数の数が合いません（${params.length} 個ですが、${expr.args.length} 個あります）。`);
   }
   if (expected) c.unifier.tryUnify(ret, expected);
   checkArgs(c, expr.args, params);
-  c.annotations.calls.set(expr, 'closure');
+  c.annotations.callKinds.set(expr, kind);
   return ret;
 }
 

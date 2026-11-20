@@ -2079,6 +2079,23 @@ test('defaults Rust literals in trait arguments before the final solve', () => {
   });
 });
 
+test('consumes generic and boxed Rust FnOnce callees', () => {
+  const generic = `fn twice<F: FnOnce()>(callback: F) { callback(); callback(); }
+fn main() {}`;
+  const boxed = rustMain(`let callback: Box<dyn FnOnce()> = Box::new(|| {});
+    callback();
+    callback();`);
+  expect(executeProgram('rust', generic)).toMatchObject({ kind: 'compileError' });
+  expect(executeProgram('rust', boxed)).toMatchObject({ kind: 'compileError' });
+  const valid = `fn twice<F: FnOnce() + Copy>(callback: F) { callback(); callback(); }
+fn main() {
+    twice(|| print!("x"));
+    let callback: Box<dyn FnOnce()> = Box::new(|| print!("y"));
+    callback();
+}`;
+  expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: 'xxy' });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

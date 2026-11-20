@@ -954,9 +954,9 @@ export class LoanBuilder {
     let callee: Value;
     if (res?.kind !== 'fn' && res?.kind !== 'ctor') {
       const place = this.place(expr.callee);
-      callee = place
-        ? this.read(place, expr.callee.ty, expr.callee.span, closureAccess(expr.callee.ty))
-        : this.value(expr.callee);
+      const kind = this.annotations.callKinds.get(expr);
+      const access = kind === 'FnMut' ? 'deep' : kind === 'FnOnce' ? this.readKind(expr.callee.ty) : 'read';
+      callee = place ? this.read(place, expr.callee.ty, expr.callee.span, access) : this.value(expr.callee);
     }
     const args = expr.args.map((arg, index) => this.argument(arg, fn?.paramTypes[index]));
     const result = this.callPoint(expr, [callee, ...args], []);
@@ -1371,13 +1371,6 @@ function fieldIndex(layout: Layout & { kind: 'adt' }, elem: string): [number, nu
 
 function isPrefix(prefix: readonly string[], proj: readonly string[]): boolean {
   return prefix.every((elem, index) => elem === proj[index]);
-}
-
-/** How calling a closure stored in a place uses it: `Fn` reads it, `FnMut` borrows it mutably, `FnOnce` moves it. */
-function closureAccess(type: Type | undefined): AccessKind {
-  const t = type && normalize(shallow(type));
-  if (t?.kind === 'closure') return t.closure.kind === 'Fn' ? 'read' : t.closure.kind === 'FnMut' ? 'deep' : 'move';
-  return 'read';
 }
 
 /** The type of a receiver after the derefs of its method call's adjustment. */

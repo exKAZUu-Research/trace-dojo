@@ -41,7 +41,7 @@ export function compileCall(c: Compiler, expr: ExprOf<'call'>): Eval {
       return construct(def, variant, evaluateValues(frame, args));
     };
   }
-  const calleeValue = c.read(callee);
+  const calleeValue = c.annotations.callKinds.get(expr) === 'FnOnce' ? c.value(callee) : c.read(callee);
   const operands: Eval[] = [(frame) => derefAll(calleeValue(frame)), ...args];
   return (frame) => {
     const [fn, ...values] = evaluateValues(frame, operands);
