@@ -9,6 +9,7 @@ import {
   isCallable,
   isObject,
   type JsArray,
+  type JsFunction,
   JsObject,
   type NativeCall,
   throwingHostErrors,
@@ -277,8 +278,9 @@ function advanceLastIndex(runtime: Runtime, object: JsObject, text: string, flag
 }
 
 function matchAllIterator(runtime: Runtime, object: RegExpObject, text: string, prototype: JsObject): JsObject {
+  const constructor = regExpSpeciesConstructor(runtime, object);
   const flags = runtime.toString(runtime.get(object, 'flags'));
-  const { matcher } = cloneRegExp(runtime, object, flags);
+  const { matcher } = cloneRegExp(runtime, object, constructor, flags);
   const index = matchIndex(runtime, object, 'lastIndex');
   runtime.set(matcher, 'lastIndex', index);
   let done = false;
@@ -300,16 +302,26 @@ interface RegExpClone {
   isPrivate: boolean;
 }
 
-function cloneRegExp(runtime: Runtime, object: RegExpObject, flags: string): RegExpClone {
+function regExpSpeciesConstructor(runtime: Runtime, object: JsObject): JsFunction | undefined {
   const constructor = runtime.get(object, 'constructor');
   if (constructor !== undefined && !isObject(constructor))
     return runtime.throwError('TypeError', 'The .constructor property is not an object');
   const species = constructor && runtime.get(constructor, WELL_KNOWN_SYMBOLS.species);
-  if (species === undefined || species === null || species === runtime.realm.regExpConstructor)
-    return { matcher: newRegExp(runtime, object.regexp.source, flags), isPrivate: true };
+  if (species === undefined || species === null || species === runtime.realm.regExpConstructor) return undefined;
   if (!isCallable(species) || !species.isConstructor)
     return runtime.throwError('TypeError', 'object.constructor[Symbol.species] is not a constructor');
-  return { matcher: runtime.construct(species, [object, flags], species, runtime.currentRow), isPrivate: false };
+  return species;
+}
+
+function cloneRegExp(
+  runtime: Runtime,
+  object: RegExpObject,
+  constructor: JsFunction | undefined,
+  flags: string
+): RegExpClone {
+  return constructor
+    ? { matcher: runtime.construct(constructor, [object, flags], constructor, runtime.currentRow), isPrivate: false }
+    : { matcher: newRegExp(runtime, object.regexp.source, flags), isPrivate: true };
 }
 
 /** The regular expression a String method uses: its argument when it is one, else one made from its text. */
@@ -475,8 +487,9 @@ function dollarExpansion(
 }
 
 export function splitWithRegExp(runtime: Runtime, text: string, object: RegExpObject, limitValue: Value): JsArray {
+  const constructor = regExpSpeciesConstructor(runtime, object);
   const flags = runtime.toString(runtime.get(object, 'flags'));
-  const splitter = cloneRegExp(runtime, object, flags.includes('y') ? flags : `${flags}y`);
+  const splitter = cloneRegExp(runtime, object, constructor, flags.includes('y') ? flags : `${flags}y`);
   const limit = limitValue === undefined ? 2 ** 32 - 1 : runtime.toNumber(limitValue) >>> 0;
   const array = runtime.newArray([]);
   const matchAt = splitMatcher(runtime, splitter, text);

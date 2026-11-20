@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 526 -- Evaluates every kind of function call, class, and statement of the language in one evaluator.
+// code-gauge-allow-file fileNcss 527 -- Evaluates every kind of function call, class, and statement of the language in one evaluator.
 import assert from 'node:assert/strict';
 
 import { createArgumentsObject, mapArguments } from './argumentsObject';
@@ -25,7 +25,7 @@ import {
   privateMethodProperty,
 } from './memberProperties';
 import { startAsyncFunction } from './promises';
-import { isObjectCreation, onlyCalls, onlyCreates } from './stepRules';
+import { isObjectCreation, onlyCalls, onlyCreates, withoutParentheses } from './stepRules';
 import {
   type Completion,
   type Outcome,
@@ -697,11 +697,12 @@ export class Evaluator extends SuspendableStatementEvaluator {
     target: JsObject,
     name: Key
   ): (thisValue: JsObject) => Value {
+    const inner = withoutParentheses(value);
     return (thisValue) =>
       this.inScope(this.methodScope(classScope, thisValue, target), () => {
-        const initialized =
-          value.kind === 'classExpression' ? this.evaluateClass(value.cls, name) : this.evaluate(value);
-        if (value.kind === 'functionExpression' && initialized instanceof JsFunction)
+        if (inner.kind === 'classExpression') return this.evaluateClass(inner.cls, name);
+        const initialized = this.evaluate(value);
+        if (inner.kind === 'functionExpression' && initialized instanceof JsFunction)
           nameFunction(this.runtime, initialized, name);
         return initialized;
       });

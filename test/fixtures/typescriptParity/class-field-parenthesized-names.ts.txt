@@ -1,0 +1,16 @@
+const field = Symbol("field");
+
+class Fields {
+  fn = (function () {});
+  arrow = ((() => 1));
+  cls = (class { static recorded = this.name; });
+  explicit = (function Explicit() {});
+  #private = (() => 1);
+  [field] = ((class Inner {}));
+  static ["get"] = ((() => 1));
+  static [field] = (class {});
+  f() { return this.#private.name; }
+}
+const value = new Fields();
+console.log(value.fn.name, value.arrow.name, value.cls.name, value.cls.recorded);
+console.log(value.explicit.name, value.f(), value[field].name, Fields.get.name, Fields[field].name);

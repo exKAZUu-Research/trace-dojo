@@ -263,7 +263,8 @@ function propertyDeclarationsOf(c: Checker, declaration: TreeNode): TreeNode[] {
       (member) =>
         (member.type === 'field_definition' ||
           (member.type === 'method_definition' && !isConstructorName(member.childForFieldName('name')))) &&
-        !hasToken(member, 'static')
+        !hasToken(member, 'static') &&
+        !hasPrivateName(member)
     ),
     ...(parameters ? named(parameters).filter(isParameterProperty) : []),
   ];
@@ -411,15 +412,14 @@ function classMemberGroups(): Record<'instance' | 'static' | 'private', Map<stri
 }
 
 function addClassMember(groups: ReturnType<typeof classMemberGroups>, member: TreeNode, name: string): void {
-  const byName =
-    member.childForFieldName('name')?.type === 'private_property_identifier'
-      ? groups.private
-      : hasToken(member, 'static')
-        ? groups.static
-        : groups.instance;
+  const byName = hasPrivateName(member) ? groups.private : hasToken(member, 'static') ? groups.static : groups.instance;
   const group = byName.get(name) ?? [];
   group.push(member);
   byName.set(name, group);
+}
+
+function hasPrivateName(member: TreeNode): boolean {
+  return member.childForFieldName('name')?.type === 'private_property_identifier';
 }
 
 function isAccessor(member: TreeNode): boolean {

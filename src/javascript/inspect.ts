@@ -256,10 +256,10 @@ interface Frame {
 function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string {
   const { runtime } = ctx;
   const constructor = constructorName(runtime, value);
+  const inherited = ctx.showHidden && recurseTimes <= ctx.depth ? inspectPrototype(ctx, value, recurseTimes) : [];
   if (value.isError && constructor !== 'Object') noteErrorStack(ctx, value);
   const keys = enumerableKeys(runtime, value, ctx.showHidden, ctx.errorStacks.get(value));
   const showsLength = ctx.showHidden && value instanceof JsArray;
-  const inherited = ctx.showHidden ? inheritedKeys(ctx.runtime, value) : [];
   const frame = frameOf(
     ctx,
     value,
@@ -271,21 +271,31 @@ function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string 
     const name = prefixOf(constructor, value instanceof JsArray ? 'Array' : 'Object').slice(0, -1);
     return constructor === undefined ? name : stylize(ctx, `[${name}]`, 'special');
   }
-  recurseTimes++;
+  ctx.currentDepth = recurseTimes + 1;
   ctx.seen.add(value);
-  ctx.currentDepth = recurseTimes;
+  try {
+    return formatBody(ctx, value, recurseTimes + 1, frame, keys, inherited);
+  } finally {
+    ctx.seen.delete(value);
+  }
+}
+
+function formatBody(
+  ctx: Context,
+  value: JsObject,
+  recurseTimes: number,
+  frame: Frame,
+  keys: Key[],
+  inherited: string[]
+): string {
   const output =
     value instanceof JsArray ? formatArray(ctx, value, recurseTimes) : formatCollection(ctx, value, recurseTimes);
   if (value.promise) output.push(promiseEntry(ctx, value.promise, recurseTimes));
-  if (showsLength) output.push(`[length]: ${formatPrimitive(ctx, (value as JsArray).elements.length)}`);
-  appendProperties(
-    ctx,
-    value,
-    output,
-    [...keys.map((key): [JsObject, Key] => [value, key]), ...inherited],
-    recurseTimes
-  );
-  runtime.scan(output.length);
+  if (ctx.showHidden && value instanceof JsArray)
+    output.push(`[length]: ${formatPrimitive(ctx, value.elements.length)}`);
+  const properties = keys.map((key) => formatProperty(ctx, value, recurseTimes, key));
+  appendProperties(ctx, value, output, [...properties, ...inherited]);
+  ctx.runtime.scan(output.length);
   const reference = ctx.circular.get(value);
   let { base } = frame;
   const braces = [...frame.braces];
@@ -295,7 +305,6 @@ function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string 
     if (ctx.compact === true) braces[0] = `${label} ${braces[0]}`;
     else base = base === '' ? label : `${label} ${base}`;
   }
-  ctx.seen.delete(value);
   return reduceToSingleString(ctx, output, base, braces, recurseTimes, value);
 }
 
@@ -303,15 +312,7 @@ function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string 
  * Adds an object's properties after its elements or entries, its own and then the inherited ones `showHidden` lists;
  * `sorted` orders them as text, and a collection's entries with them.
  */
-function appendProperties(
-  ctx: Context,
-  value: JsObject,
-  output: string[],
-  keys: [JsObject, Key][],
-  recurseTimes: number
-): void {
-  // An inherited accessor's getter runs on the inspected object, as Node.js calls it.
-  const properties = keys.map(([owner, key]) => formatProperty(ctx, owner, recurseTimes, key, value));
+function appendProperties(ctx: Context, value: JsObject, output: string[], properties: string[]): void {
   if (ctx.sorted && value.collection) {
     output.push(...properties);
     sortOutput(ctx, output);
@@ -340,26 +341,32 @@ function sortOutput(ctx: Context, entries: string[]): void {
 }
 
 /**
- * The data properties and accessors an object inherits from the prototypes its own class adds, with the prototype
- * holding each, which Node.js's `showHidden` lists after its own: up to three prototypes, stopping at a builtin one,
- * without methods, `constructor`, or keys a nearer object has.
+ * Node reads inherited descriptors before collecting the object's own keys, but prints them after its own properties.
  */
-function inheritedKeys(runtime: Runtime, value: JsObject): [JsObject, Key][] {
-  const seen = new Set<Key>(inspectionKeys(runtime, value));
-  const found: [JsObject, Key][] = [];
-  let current: JsObject | undefined = firstOwnPrototype(value);
-  for (let depth = 0; depth < 3 && current && !isBuiltinPrototype(current); depth++) {
-    const keys = inspectionKeys(runtime, current);
-    for (const key of keys) {
-      const property = runtime.getOwnProperty(current, key) as Property;
-      if (key === 'constructor' || seen.has(key)) continue;
-      if (!isAccessor(property) && property.value instanceof JsFunction) continue;
-      found.push([current, key]);
+// code-gauge-allow functionCognitiveComplexity 17 -- Visits each prototype and reads its eligible descriptors in order.
+function inspectPrototype(ctx: Context, value: JsObject, recurseTimes: number): string[] {
+  const { runtime } = ctx;
+  const seen = new Set<Key>();
+  const output: string[] = [];
+  let current = value.proto;
+  ctx.seen.add(value);
+  try {
+    for (let depth = 0; depth < 3 && current && !isBuiltinPrototype(current); depth++) {
+      const keys = inspectionKeys(runtime, current);
+      for (const key of keys) {
+        if (key === 'constructor' || seen.has(key) || runtime.getOwnProperty(value, key)) continue;
+        const property = inspectedProperty(runtime, current, key);
+        if (!isAccessor(property) && property.value instanceof JsFunction) continue;
+        const text = formatProperty(ctx, current, recurseTimes, key, value, property);
+        output.push(ctx.colors ? `\u001B[2m${text}\u001B[22m` : text);
+      }
+      for (const key of keys) seen.add(key);
+      current = current.proto;
     }
-    for (const key of keys) seen.add(key);
-    current = current.proto ?? undefined;
+    return output;
+  } finally {
+    ctx.seen.delete(value);
   }
-  return found;
 }
 
 function inspectionKeys(runtime: Runtime, object: JsObject): Key[] {
@@ -368,12 +375,6 @@ function inspectionKeys(runtime: Runtime, object: JsObject): Key[] {
       ? runtime.ownPropertyNames(object)
       : runtime.ownKeys(object);
   return [...strings, ...runtime.ownSymbols(object)];
-}
-
-/** The prototype Node.js starts listing inherited properties from: the object's own one, unless that is a builtin's. */
-function firstOwnPrototype(value: JsObject): JsObject | undefined {
-  const first = value.proto;
-  return first && !isBuiltinPrototype(first) ? first : undefined;
 }
 
 function isBuiltinPrototype(object: JsObject): boolean {
@@ -739,8 +740,7 @@ function formatSparseArray(
       index = current;
       if (output.length === limit) break;
     }
-    const property = ctx.runtime.getOwnProperty(array, key);
-    if (!property) return ctx.runtime.throwError('TypeError', "Cannot read properties of undefined (reading 'value')");
+    const property = inspectedProperty(ctx.runtime, array, key);
     output.push(formatArrayProperty(ctx, array, property, recurseTimes));
     index++;
   }
@@ -824,22 +824,32 @@ function promiseEntry(ctx: Context, state: PromiseState, recurseTimes: number): 
   return state.status === 'rejected' ? `${stylize(ctx, '<rejected>', 'special')} ${result}` : result;
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Ports Node.js's util.inspect, so the two stay comparable.
-function formatProperty(ctx: Context, object: JsObject, recurseTimes: number, key: Key, receiver = object): string {
-  const property = ctx.runtime.getOwnProperty(object, key);
-  let text = stylize(ctx, 'undefined', 'undefined');
-  let separator = ' ';
-  if (property && !isAccessor(property)) {
-    // The compact layout indents an object's values one more and moves a value too wide for a line to the next.
-    const diff = ctx.compact === true && !(object instanceof JsArray) ? 3 : 2;
-    text = formatIndented(ctx, ctx.runtime.readPropertyValue(property), recurseTimes, diff);
-    if (diff === 3 && ctx.breakLength < (ctx.colors ? stringWidth(unstyled(ctx, text)) : text.length))
-      separator = `\n${' '.repeat(ctx.indentationLvl + diff)}`;
-  } else if (property && isAccessor(property)) {
-    text = formatAccessor(ctx, receiver, property, recurseTimes);
-  }
+function formatProperty(
+  ctx: Context,
+  object: JsObject,
+  recurseTimes: number,
+  key: Key,
+  receiver = object,
+  property = inspectedProperty(ctx.runtime, object, key)
+): string {
   const name = inspectionPropertyName(ctx, key);
-  return `${property && !property.enumerable ? `[${name}]` : name}:${separator}${text}`;
+  const label = property.enumerable ? name : `[${name}]`;
+  if (isAccessor(property)) return `${label}: ${formatAccessor(ctx, receiver, property, recurseTimes)}`;
+  // The compact layout indents an object's values one more and moves a value too wide for a line to the next.
+  const diff = ctx.compact === true && !(object instanceof JsArray) ? 3 : 2;
+  const text = formatIndented(ctx, ctx.runtime.readPropertyValue(property), recurseTimes, diff);
+  const separator =
+    diff === 3 && ctx.breakLength < (ctx.colors ? stringWidth(unstyled(ctx, text)) : text.length)
+      ? `\n${' '.repeat(ctx.indentationLvl + diff)}`
+      : ' ';
+  return `${label}:${separator}${text}`;
+}
+
+function inspectedProperty(runtime: Runtime, object: JsObject, key: Key): Property {
+  return (
+    runtime.getOwnProperty(object, key) ??
+    runtime.throwError('TypeError', "Cannot read properties of undefined (reading 'value')")
+  );
 }
 
 function inspectionPropertyName(ctx: Context, key: Key): string {
@@ -850,9 +860,11 @@ function inspectionPropertyName(ctx: Context, key: Key): string {
 
 function formatIndented(ctx: Context, value: Value, recurseTimes: number, diff = 2): string {
   ctx.indentationLvl += diff;
-  const text = formatCharged(ctx, value, recurseTimes);
-  ctx.indentationLvl -= diff;
-  return text;
+  try {
+    return formatCharged(ctx, value, recurseTimes);
+  } finally {
+    ctx.indentationLvl -= diff;
+  }
 }
 
 // code-gauge-allow functionCognitiveComplexity 29 -- Ports Node.js's util.inspect, so the two stay comparable.
