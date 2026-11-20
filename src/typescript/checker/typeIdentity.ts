@@ -69,7 +69,13 @@ export function structurallyIdentical(c: Checker, source: Type, target: Type): b
 
 function conditionalsIdentical(c: Checker, source: ConditionalType, target: ConditionalType): boolean {
   const parameters = source.inferTypeParameters;
-  if (parameters.length !== target.inferTypeParameters.length) return false;
+  const sourceDeclarations = (source.root ?? source).inferTypeParameters;
+  const targetDeclarations = (target.root ?? target).inferTypeParameters;
+  if (
+    parameters.length !== target.inferTypeParameters.length ||
+    sourceDeclarations.some((parameter, index) => parameter.id !== targetDeclarations[index]?.id)
+  )
+    return false;
   const mapper = new Map(parameters.map((parameter, index) => [parameter.id, target.inferTypeParameters[index]]));
   const identical = (a: Type, b: Type): boolean => c.relations.identical(c.instantiate(a, mapper), b);
   return (

@@ -141,7 +141,7 @@ export class ConditionChecker {
       const brand = this.c.classes.privateNameBrand(left);
       if (brand)
         return this.narrowed(right, (current, assumeTrue) =>
-          this.c.flow.narrowByInstanceof(current, brand, assumeTrue)
+          this.c.flow.narrowByPrivateBrand(current, brand, assumeTrue)
         );
     }
     return isPropertyKeyLiteral(key)

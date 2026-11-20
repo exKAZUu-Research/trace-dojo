@@ -1,0 +1,5 @@
+(5,18): error TS2339: Property 'other' does not exist on type 'typeof Brand | { other: string; }'.
+  Property 'other' does not exist on type 'typeof Brand'.
+(8,40): error TS2339: Property 'other' does not exist on type 'typeof Brand | { other: number; }'.
+  Property 'other' does not exist on type 'typeof Brand'.
+(12,37): error TS2339: Property '#tag' does not exist on type 'typeof Child'.

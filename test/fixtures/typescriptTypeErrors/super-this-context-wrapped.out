@@ -1,0 +1,3 @@
+(8,23): error TS2741: Property 'need' is missing in type 'Base' but required in type '{ need: string; }'.
+(9,31): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.
+(10,39): error TS2339: Property 'local' does not exist on type 'Base'.

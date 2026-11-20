@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 737 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
+// code-gauge-allow-file fileNcss 738 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
 import { minimumArguments } from './callArity';
 import type { Checker } from './checker';
 import { isUnit } from './flow';
@@ -698,7 +698,7 @@ export class Relations {
     return undefined;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Checks declared properties, optional omissions, and same-alias index compatibility in a single pass.
+  // code-gauge-allow functionCognitiveComplexity 22 -- Checks declared properties, static private members, and same-alias indexes in a single pass.
   private propertiesRelated(
     source: Type,
     sourceStructure: Structure,
@@ -709,6 +709,7 @@ export class Relations {
     const allowMappedIndex = relation === 'assignable' && this.sharesMappedAlias(source, target);
     for (const [name, targetProperty] of targetStructure.properties) {
       this.c.budget.spend();
+      if (target.isClassStatic && targetProperty.isPrivateName) continue;
       const sourceProperty =
         source.kind === 'object' || source.kind === 'intersection'
           ? (sourceStructure.properties.get(name) ?? this.c.propertyOf(source, name))

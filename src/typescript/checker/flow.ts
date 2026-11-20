@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 407 -- Keeps flow state, joins, and reference narrowing together.
+// code-gauge-allow-file fileNcss 416 -- Keeps flow state, joins, and reference narrowing together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -543,6 +543,16 @@ export class Flow {
     return nullish ? withoutNullishUnit(this.c, unequal, other) : unequal;
   }
 
+  /** An instance brand follows inheritance, while a static brand is held only by the declaring constructor. */
+  narrowByPrivateBrand(type: Type, brand: Type, assumeTrue: boolean): Type {
+    if (brand.kind !== 'object' || !brand.isClassStatic) return this.narrowByInstanceof(type, brand, assumeTrue);
+    if (type === brand) return assumeTrue ? type : neverType;
+    if (!assumeTrue) return type;
+    if (isAnyLike(type) || this.c.relations.isAssignable(brand, type)) return brand;
+    if (this.c.relations.isAssignable(type, brand)) return type;
+    return intersectionOf([type, brand], this.c.budget);
+  }
+
   // code-gauge-allow functionCognitiveComplexity 16 -- Preserves generic identity and filters concrete nominal alternatives.
   /** The part of a type that `value instanceof C` keeps, given the instance type of `C`. */
   narrowByInstanceof(type: Type, instance: Type, assumeTrue: boolean): Type {
@@ -568,12 +578,10 @@ export class Flow {
     if (target.kind === 'union') return target.types.some((member) => this.isDerivedFrom(source, member));
     const constraint = this.c.baseConstraint(source);
     if (constraint !== source) return this.isDerivedFrom(constraint, target);
-    const targetClass = target.kind === 'object' ? target.classInfo : undefined;
-    if (!targetClass || target.kind !== 'object') return this.c.relations.isAssignable(source, target);
-    if (source.kind !== 'object' || !source.classInfo || source.isClassStatic !== target.isClassStatic) return false;
-    return target.isClassStatic
-      ? source.classInfo === targetClass
-      : this.c.classes.derivesFrom(source.classInfo, targetClass);
+    const targetClass = target.kind === 'object' && !target.isClassStatic ? target.classInfo : undefined;
+    if (!targetClass) return this.c.relations.isAssignable(source, target);
+    const sourceClass = source.kind === 'object' && !source.isClassStatic ? source.classInfo : undefined;
+    return sourceClass !== undefined && this.c.classes.derivesFrom(sourceClass, targetClass);
   }
 
   /** The part of a type that `name in value` keeps, as TypeScript's `narrowTypeByInKeyword` decides. */

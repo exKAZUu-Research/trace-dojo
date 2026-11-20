@@ -133,12 +133,6 @@ export class MemberChecker {
     if (node.type === 'subscript_expression') return this.elementAccess(node, objectNode);
     const propertyNode = node.childForFieldName('property') as TreeNode;
     const name = propertyNode.text;
-    if (objectNode.type === 'super') {
-      return {
-        type: this.c.classes.superProperty(node, propertyNode),
-        receiver: this.c.classes.thisTypeOfExpression(objectNode),
-      };
-    }
     const { type: receiver, shortCircuits } = this.readReceiver(node, objectNode);
     const declared = this.propertyAccess(node, objectNode, propertyNode, receiver, name);
     const type = this.narrowedReference(node, declared);
@@ -429,8 +423,7 @@ export class MemberChecker {
     const result = this.narrowedReference(node, () =>
       this.indexedType(node, objectNode, indexNode, objectType, indexType)
     );
-    const receiver = objectNode.type === 'super' ? this.c.classes.thisTypeOfExpression(objectNode) : objectType;
-    return this.checkedAccess(node, result, receiver, shortCircuits, indexType);
+    return this.checkedAccess(node, result, objectType, shortCircuits, indexType);
   }
 
   targetReceiverType(node: TreeNode, object: TreeNode): Type {

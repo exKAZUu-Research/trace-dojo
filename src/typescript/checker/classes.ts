@@ -197,7 +197,7 @@ export class ClassChecker {
         const baseStatic = this.baseStaticType(node);
         if (baseStatic) {
           for (const [memberName, property] of this.c.structureOf(baseStatic).properties) {
-            if (!own.properties.has(memberName)) own.properties.set(memberName, property);
+            if (!property.isPrivateName && !own.properties.has(memberName)) own.properties.set(memberName, property);
           }
         }
         const resolveConstructors = (): Signature[] => this.constructSignatures(node, info);
@@ -957,20 +957,7 @@ export class ClassChecker {
     return undefined;
   }
 
-  superProperty(node: TreeNode, propertyNode: TreeNode): Type {
-    const target = this.superType(node);
-    return target === errorType
-      ? errorType
-      : this.c.members.propertyAccess(
-          node,
-          node.childForFieldName('object') as TreeNode,
-          propertyNode,
-          target,
-          propertyNode.text
-        );
-  }
-
-  /** The type `super.<name>` at `node` reads a member of: the base instance type, or the base class in static code. */
+  /** The base type for a `super` property or index access: the base instance type, or the base class in static code. */
   superType(node: TreeNode): Type {
     const classNode = this.enclosingClass(node);
     const base = classNode ? this.baseInstanceType(classNode) : undefined;

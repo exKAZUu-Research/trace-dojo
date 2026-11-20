@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 628 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
+// code-gauge-allow-file fileNcss 633 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
@@ -101,16 +101,23 @@ export class Calls {
       for (const arg of args) this.c.expressions.check(arg);
       return callable.untyped ? this.untypedCall(node, [], typeArguments) : this.uncallableType(callee, calleeType);
     }
+    const receiver = access?.receiver ?? this.assertedSuperReceiver(callee);
     const resolution = this.resolveWithTextConversions(node, callee, signatures, args, {
       typeArguments,
       contextual,
-      receiver: access?.receiver,
+      receiver,
     });
     if (!resolution) return errorType;
     this.resolved.set(node.id, resolution.signature);
-    this.checkThisContext(callee, resolution.signature, access?.receiver);
+    this.checkThisContext(callee, resolution.signature, receiver);
     const result = resolution.returnType;
     return shortCircuits ? this.c.members.chainResult(node, result) : result;
+  }
+
+  private assertedSuperReceiver(callee: TreeNode): Type | undefined {
+    return withoutAssertions(callee).childForFieldName('object')?.type === 'super'
+      ? this.c.classes.superType(callee)
+      : undefined;
   }
 
   private resolveWithTextConversions(
@@ -327,6 +334,7 @@ export class Calls {
 
   /** Reports a call whose `this`, the object it is called on (or `void`), does not fit the `this` parameter. */
   private checkThisContext(callee: TreeNode, signature: Signature, context: Type = voidType): void {
+    if (callee.childForFieldName('object')?.type === 'super') return;
     const { thisType } = signature;
     if (!thisType || isAnyLike(thisType) || isIntrinsic(thisType, 'void')) return;
     if (this.c.relations.isAssignable(context, thisType)) return;
