@@ -14,7 +14,7 @@ export function sortValues(
 ): void {
   const context: Context = {
     lessThan: (a, b) => {
-      frame.runtime.spend();
+      frame.runtime.spend(3);
       return lessThan(items.get(a), items.get(b));
     },
     swap: (a, b) => {

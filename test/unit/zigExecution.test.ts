@@ -9412,6 +9412,14 @@ test.each([
   expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
 });
 
+test.each(['_=std.sort.isSorted(u8,&data,{},std.sort.asc(u8));', 'std.sort.insertion(u8,&data,{},std.sort.asc(u8));'])(
+  'sorting and sortedness checks meter the compared elements: %s',
+  (operation) => {
+    const source = `const std=@import("std");pub fn main()void{var data:[150000]u8=@splat(7);_=&data;${operation}}`;
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  }
+);
+
 test.each(['allocUpperString', 'allocLowerString'])(
   'allocating ASCII %s meters source reads and destination stores',
   (method) => {

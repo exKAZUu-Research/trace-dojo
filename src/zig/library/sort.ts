@@ -74,7 +74,7 @@ function reader(
   elementCount: 1 | 2,
   callbackReturn: Type,
   resultType: (type: Type, sema: SemaApi) => Type,
-  compute: (items: Slice, call: (args: Value[]) => Value, frame: Frame, type: Type) => Value
+  compute: (items: SortInput, call: (args: Value[]) => Value, frame: Frame, type: Type) => Value
 ): () => Member {
   return generic(name, 4, (sema, call, type, [itemsArg, contextArg, fnArg]) => {
     const items = constSlice(sema, itemsArg, type);
@@ -90,7 +90,7 @@ function reader(
     );
     return nativeCall(resultType(type, sema), [items, context], call.span, ([slice, contextValue], frame: Frame) => {
       return compute(
-        slice as Slice,
+        new SortInput(slice as Slice, () => frame.runtime.spend()),
         (args) => {
           frame.runtime.spend();
           return fn.call(frame, [contextValue, ...args]);
@@ -100,6 +100,26 @@ function reader(
       );
     });
   });
+}
+
+class SortInput extends Slice {
+  constructor(
+    source: Slice,
+    private readonly spend: () => void,
+    start = 0n,
+    end = source.lengthValue
+  ) {
+    super(source.target, source.start + Number(start), end - start, source.undefinedHeader);
+  }
+
+  override get(index: number): Value {
+    this.spend();
+    return super.get(index);
+  }
+
+  window(start: bigint, end: bigint): SortInput {
+    return new SortInput(this, this.spend, start, end);
+  }
 }
 
 function binarySearch(items: Slice, order: (item: Value) => bigint): Value {
@@ -126,10 +146,6 @@ function partitionPoint(items: Slice, predicate: (item: Value) => boolean): bigi
   }
   if (position < items.lengthValue && predicate(items.get(Number(position)))) position++;
   return position;
-}
-
-function subSlice(items: Slice, start: bigint, end: bigint): Slice {
-  return new Slice(items.target, items.start + Number(start), end - start);
 }
 
 function extremum(items: Slice, call: (args: Value[]) => Value, frame: Frame, type: Type, maximum: boolean): Value {
@@ -172,8 +188,8 @@ function equalRangeMember(): Member {
         if (comparison === ORDER_GT) low = middle + 1n;
         else if (comparison === ORDER_LT) high = middle;
         else {
-          const lower = low + partitionPoint(subSlice(values, low, middle), (item) => order(item) === ORDER_GT);
-          const upper = middle + partitionPoint(subSlice(values, middle, high), (item) => order(item) !== ORDER_LT);
+          const lower = low + partitionPoint(values.window(low, middle), (item) => order(item) === ORDER_GT);
+          const upper = middle + partitionPoint(values.window(middle, high), (item) => order(item) !== ORDER_LT);
           return new ZStruct([lower, upper]);
         }
       }
