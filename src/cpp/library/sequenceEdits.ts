@@ -191,7 +191,10 @@ export class SequenceEditor {
     const length = items.length;
     if (this.kind === 'list') {
       if (at === length) this.appendElement(frame, self, make);
-      else self.splice(at, 0, make());
+      else {
+        frame.runtime.spend();
+        self.splice(at, 0, make());
+      }
     } else if (this.kind === 'deque') this.dequeEmplace(frame, self, at, make);
     else if (length >= self.capacity)
       this.reallocate(frame, self, recommend(self, length + 1), { at, count: 1, make: (_, target) => make(target) });
@@ -234,10 +237,11 @@ export class SequenceEditor {
   insertCopies(frame: Frame, self: SequenceValue, at: number, count: number, value: Ptr): void {
     if (count === 0) return;
     if (this.kind === 'list') {
+      // libc++ destroys the nodes it made from the last one when a copy throws.
       const made = makeEach(
         frame,
         count,
-        () => this.ops.copy(frame, value.read()),
+        () => this.copyConstruct(frame, value.read()),
         () => this.ops.destroy
       );
       self.insertValues(at, made);
@@ -328,6 +332,11 @@ export class SequenceEditor {
   private moveAt(frame: Frame, items: Value[], index: number, value: Value): void {
     frame.runtime.spend();
     items[index] = moveValue(frame, this.ops.type, items[index], value);
+  }
+
+  private copyConstruct(frame: Frame, value: Value): Value {
+    frame.runtime.spend();
+    return this.ops.copy(frame, value);
   }
 
   private moveConstruct(frame: Frame, value: Value, destination?: CObject): Value {
@@ -540,7 +549,7 @@ export class SequenceEditor {
     let first = oldBegin;
     let remaining = count;
     if (remaining > at) {
-      for (let made = remaining - at; made > 0; made--) cells[--first] = this.ops.copy(frame, followed.read());
+      for (let made = remaining - at; made > 0; made--) cells[--first] = this.copyConstruct(frame, followed.read());
       remaining = at;
     }
     if (remaining > 0) {
@@ -569,7 +578,7 @@ export class SequenceEditor {
     let last = length;
     let remaining = count;
     if (remaining > after) {
-      for (let made = remaining - after; made > 0; made--) cells[last++] = this.ops.copy(frame, followed.read());
+      for (let made = remaining - after; made > 0; made--) cells[last++] = this.copyConstruct(frame, followed.read());
       remaining = after;
     }
     if (remaining > 0) {

@@ -214,6 +214,22 @@ int main() {
   }
 });
 
+test.each([
+  ['std::istringstream stream;', 'std::istream', 'std::stringstream'],
+  ['std::ostringstream stream;', 'std::ostream', 'std::stringstream'],
+])('rejects a stream downcast from %s through %s to %s', (declaration, base, derived) => {
+  const program = `#include <sstream>
+int main() {
+  ${declaration}
+  ${base}* pointer = &stream;
+  static_cast<${derived}*>(pointer);
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: `${derived} 型ではないオブジェクトをキャストしました。`,
+  });
+});
+
 test('reads only the required prefix of a C substring search needle', () => {
   const program = `#include <cstring>
 #include <string>
@@ -337,10 +353,14 @@ test.each([
   ['std::list<int> a(512, 1);', 'a.reverse();'],
   ['std::list<int> a(512, 1);', 'a.sort();'],
   ['std::list<int> a(512, 1);', 'a.remove(2);'],
+  ['std::list<int> a;', 'a.insert(a.end(), 512, 1); a.clear();'],
+  ['std::list<int> a;', 'a.insert(a.end(), 512, 1); a.erase(a.begin(), a.end());'],
+  ['std::deque<int> a;', 'a.insert(a.end(), 512, 1); a.clear();'],
   ['std::vector<int> a(512, 1); a.reserve(514);', 'a.insert(a.begin(), 2); a.erase(a.begin());'],
   ['std::vector<int> a(512, 1);', 'a.assign(512, 2);'],
 ])('meters sequence traversal in %s %s', (setup, statement) => {
   const program = `#include <array>
+#include <deque>
 #include <list>
 #include <utility>
 #include <vector>

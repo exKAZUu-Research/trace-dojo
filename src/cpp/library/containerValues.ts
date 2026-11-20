@@ -593,6 +593,7 @@ export class SequenceValue extends Store {
     try {
       holdValues(frame, removed, () => {
         for (const [index, value] of removed.entries()) {
+          frame.runtime.spend();
           if (publishSize === 'per-element') this.pendingListDestructions--;
           destroy?.(frame, value);
           const node = nodes[index];
