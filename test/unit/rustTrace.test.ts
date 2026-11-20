@@ -330,3 +330,32 @@ test('a moved Rust binding keeps an older binding shadowed', () => {
   expect(traceItems.find(({ vars }) => vars.owned === 'hi')?.vars).toEqual({ owned: 'hi' });
   expect(finalVars).toEqual({});
 });
+
+test('places Rust receiver fields after the method parameters and locals', () => {
+  const program = `struct Walker { speed: i32 }
+impl Walker {
+    fn walk(&self, times: i32) -> i32 {
+        let distance = self.speed * times;
+        distance
+    }
+}
+fn main() {
+    let walker = Walker { speed: 2 };
+    let _ = walker.walk(3);
+}`;
+  const trace = traceProgram('rust', program, program);
+  const method = trace.traceItems.find((step) => step.vars.distance === 6);
+  expect(Object.keys(method?.vars ?? {})).toEqual(['times', 'distance', 'self.speed']);
+});
+
+test('traces Rust statements on their own lines after doc comments', () => {
+  const program = `fn main() {
+    /// turtle
+    let mut t = Turtle::new();
+    /** move */
+    t.forward();
+    println!("ok");
+}`;
+  const trace = traceProgram('rust', program, program);
+  expect(trace.traceItems.map((step) => step.line)).toEqual([0, 3, 5, 6]);
+});

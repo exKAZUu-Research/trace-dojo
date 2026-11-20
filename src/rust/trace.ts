@@ -51,13 +51,14 @@ export function traceRustProgram(program: string, trace: TraceOptions, input?: P
 function variablesOf(frame: Frame): TraceVariables {
   const variables: TraceVariables = { vars: {}, referenceVars: {} };
   const shown = new Set<string>();
+  let receiver: { stored: Value; type: Type } | undefined;
   for (const local of frame.info.locals) {
     const sharedPlace = frame.referents.get(local.slot)?.place;
     const stored = sharedPlace ? (sharedPlace.get() as Value | typeof UNASSIGNED) : frame.locals[local.slot];
     if (stored === UNASSIGNED) continue;
     const type = concreteType(local.type, frame.typeArgs);
     if (local.isSelf) {
-      addSelf(variables, stored, type);
+      receiver = { stored, type };
       continue;
     }
     if (shown.has(local.name)) {
@@ -73,6 +74,7 @@ function variablesOf(frame: Frame): TraceVariables {
     if (!place) continue;
     addVariable(variables, capture.name, place.get(), concreteType(capture.type, frame.typeArgs));
   }
+  if (receiver) addSelf(variables, receiver.stored, receiver.type);
   return variables;
 }
 

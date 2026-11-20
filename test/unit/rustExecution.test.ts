@@ -3326,3 +3326,66 @@ test('formats fieldless Rust derives independently of Debug width', () => {
     stdout: '[Unit] [North] [Less] [None] [  ()] [[East]]\n',
   });
 });
+
+test('uses evaluated Rust constants for pattern validation and coverage', () => {
+  for (const [constant, value] of [
+    ['const N: f32 = f32::NAN.abs();', '0.0_f32'],
+    ['const N: Option<[f64; 2]> = Some([0.0, f64::NAN.copysign(-1.0)]);', 'Some([0.0; 2])'],
+  ]) {
+    const program = rustMain(`match ${value} { N => (), _ => () }`, constant);
+    expect(executeProgram('rust', program)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [expect.objectContaining({ message: expect.stringContaining('NaN') })],
+    });
+  }
+  const valid = rustMain(
+    'match Some(true) { YES => println!("yes"), Some(false) | None => () }',
+    'const YES: Option<bool> = Some((-1_i32).abs() == 1);'
+  );
+  expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: 'yes\n' });
+});
+
+test('validates Rust associated constants at their concrete instantiations', () => {
+  const declarations = `struct S<T>(T);
+    impl<T> S<T> { const BAD: i8 = i8::abs(i8::MIN); const SIZE: usize = std::mem::size_of::<T>(); }
+    fn bad<T>() -> i8 { S::<T>::BAD }`;
+  for (const value of ['S::<i32>::BAD', 'bad::<i32>()']) {
+    expect(executeProgram('rust', rustMain(`println!("before"); println!("{}", ${value});`, declarations)).kind).toBe(
+      'compileError'
+    );
+  }
+  const valid = rustMain('println!("{} {}", S::<i16>::SIZE, S::<u64>::SIZE);', declarations);
+  expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: '2 8\n' });
+});
+
+test('checks destruction of the active variant in each Rust const array element', () => {
+  const valid = rustMain('println!("ok");', 'const X: () = { let unused = ([None::<String>, None],); };');
+  expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: 'ok\n' });
+  const discardedString = rustMain('', 'const X: () = { let unused = [None, Some(String::new())]; };');
+  expect(executeProgram('rust', discardedString).kind).toBe('compileError');
+});
+
+test('uses the comparison trait bounds of the Rust BTree keys', () => {
+  const program = rustMain(
+    `let set = BTreeSet::from([1]);
+    let map = BTreeMap::from([(1, 2)]);
+    println!("{} {} {}", same(&set, &set), precedes(&map, &map), BTreeSet::<f64>::new() == BTreeSet::new());`,
+    `use std::collections::{BTreeMap, BTreeSet};
+      fn same<K: PartialEq>(a: &BTreeSet<K>, b: &BTreeSet<K>) -> bool { a == b }
+      fn precedes<K: PartialOrd, V: PartialOrd>(a: &BTreeMap<K, V>, b: &BTreeMap<K, V>) -> bool { a < b }`
+  );
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'true false true\n' });
+});
+
+test('iterates borrowed Rust collections of boxed trait objects', () => {
+  const program = rustMain(
+    'let values: Vec<Box<dyn ToString>> = vec![Box::new(7)]; print_slice(&values); print_vec(&values);',
+    `fn print_slice(values: &[Box<dyn ToString>]) {
+        for value in values { println!("{}", value.to_string()); }
+      }
+      fn print_vec(values: &Vec<Box<dyn ToString>>) {
+        for value in values { println!("{}", value.to_string()); }
+      }`
+  );
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '7\n7\n' });
+});

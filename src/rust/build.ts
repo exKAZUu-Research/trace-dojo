@@ -2,16 +2,14 @@ import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget, ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { NESTING_TOO_DEEP } from '../interpreter/treeSitter';
 import type { Item } from './ast';
-import { settleStrings } from './capacity';
 import { Checker } from './checker';
+import { evaluateConstants } from './constantEvaluation';
 import { Converter } from './convert';
 import { setPseudoTypes } from './infer';
-import { Interpreter } from './interpreter';
 import { ItemCollector, Program, resolveImports } from './items';
 import { intoIterItem, intoIterShape, iterationBound } from './iterTypes';
 import { turtleImplSource } from './natives/core';
 import { parseRust, parseWith } from './parse';
-import { Runtime } from './runtime';
 import { STD_SOURCE } from './stdSource';
 import { infallibleConversion } from './traits';
 import { shallow, type Type } from './types';
@@ -68,17 +66,8 @@ function typeCheck(source: string, atomicRows: ReadonlySet<number>, budget: Exec
   resolveImports(program.root);
   const checker = new Checker(program, atomicRows, budget);
   checker.checkProgram();
-  const constants = program.consts.filter((def) => !def.module.isStd && def.ast.value && !def.impl?.params.length);
-  if (constants.length > 0) {
-    const interpreter = new Interpreter(program, checker, false);
-    interpreter.runtime = new Runtime(undefined, budget);
-    try {
-      interpreter.validateConstants(constants);
-    } finally {
-      settleStrings();
-      interpreter.restoreOperations();
-    }
-  }
+  evaluateConstants(checker, budget);
+  for (const check of checker.coverageChecks) check();
   budget.spend(0);
   return { program, checker };
 }

@@ -149,14 +149,9 @@ export class Interpreter implements CallSupport {
       self = unwrapped.type;
       receiverArgs = [unwrapped.receiver, ...args.slice(1)];
     }
-    const trait = def.trait as TraitDef;
-    const dispatch = this.dispatch(trait, self, def.name, typeArgs.slice(1, 1 + trait.params.length));
-    if (dispatch) {
-      const own = typeArgs.slice(def.parentParamCount);
-      const fnArgs = dispatch.implArgs ? [...dispatch.implArgs, ...own] : [self, ...typeArgs.slice(1)];
-      return this.callFn(dispatch.fn, fnArgs, receiverArgs, callRow, span, frame);
-    }
     const concrete = [self, ...typeArgs.slice(1)];
+    const resolved = this.resolveFunctionInstance(def, concrete);
+    if (resolved.fn !== def) return this.callFn(resolved.fn, resolved.typeArgs, receiverArgs, callRow, span, frame);
     if (def.ast?.body) return this.callUser(def, concrete, receiverArgs, callRow);
     return this.callNative(def, concrete, receiverArgs, span, frame);
   }
@@ -309,25 +304,33 @@ export class Interpreter implements CallSupport {
     return value;
   }
 
-  validateConstants(constants: ConstDef[]): void {
+  evaluateCheckedConstant(def: ConstDef, typeArgs: Type[]): Value {
     const frame = new Frame(
       this.runtime,
       { name: '{const}', slotCount: 0, locals: [], captures: [], isAtomic: true },
       undefined,
       new Map()
     );
-    for (const def of constants) {
-      try {
-        this.constValue(def, frame, []);
-      } catch (error) {
-        if (error instanceof RustPanic)
-          compileError(error.span, `定数 ${def.name} の計算中にエラーが起きました。 ${error.message}`);
-        if (error instanceof OutOfMemory || error instanceof StackOverflow) {
-          compileError(def.ast.span, `定数 ${def.name} の計算に必要なメモリの上限を超えました。`);
-        }
-        throw error;
+    try {
+      return this.constValue(def, frame, typeArgs);
+    } catch (error) {
+      if (error instanceof RustPanic)
+        compileError(error.span, `定数 ${def.name} の計算中にエラーが起きました。 ${error.message}`);
+      if (error instanceof OutOfMemory || error instanceof StackOverflow) {
+        compileError(def.ast.span, `定数 ${def.name} の計算に必要なメモリの上限を超えました。`);
       }
+      throw error;
     }
+  }
+
+  resolveFunctionInstance(fn: FnDef, typeArgs: Type[]): { fn: FnDef; typeArgs: Type[] } {
+    const trait = fn.trait;
+    if (!trait || trait.methods.get(fn.name) !== fn) return { fn, typeArgs };
+    const self = normalize(shallow(typeArgs[0]));
+    if (self.kind === 'dyn') return { fn, typeArgs };
+    const dispatched = this.dispatch(trait, self, fn.name, typeArgs.slice(1, 1 + trait.params.length));
+    if (!dispatched?.implArgs) return { fn, typeArgs };
+    return { fn: dispatched.fn, typeArgs: [...dispatched.implArgs, ...typeArgs.slice(fn.parentParamCount)] };
   }
 
   private evaluateConst(def: ConstDef, frame: Frame, types: Type[]): Value {

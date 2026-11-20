@@ -127,7 +127,6 @@ export class Checker {
     for (const fn of this.program.pendingFns.splice(0)) this.checkFn(fn);
     while (this.nestedFns.length > 0) this.checkFn(this.nestedFns.shift()!);
     this.checkConsts();
-    for (const check of this.coverageChecks) check();
     this.checkMain();
   }
 

@@ -90,10 +90,6 @@ export class ConstLint {
     private readonly patternEvaluation = false
   ) {}
 
-  static patternValue(def: ConstDef, annotations: Annotations): Known | undefined {
-    return new ConstLint(annotations, new Set(), true).constant(def);
-  }
-
   static valueOf(expr: Expr, annotations: Annotations, locals: Iterable<[LocalVar, Known]>): Known | undefined {
     const evaluator = new ConstLint(annotations, new Set(), true);
     for (const [local, value] of locals) evaluator.known.set(local, value);
@@ -365,7 +361,9 @@ export class ConstLint {
     const elems = expr.elems.map((elem, index) => [String(index), this.expr(elem)] as const);
     // rustc does not follow a tuple that holds an array, whose value is no immediate.
     const holdsArray = expr.kind === 'tuple' && expr.elems.some((elem) => isArrayType(elem.ty));
-    return holdsArray ? undefined : aggregate(elems, expr.kind === 'tuple' ? 'tuple' : undefined);
+    return holdsArray && !this.patternEvaluation
+      ? undefined
+      : aggregate(elems, expr.kind === 'tuple' ? 'tuple' : undefined);
   }
 
   private struct(expr: Extract<Expr, { kind: 'struct' }>): Known | undefined {
@@ -683,7 +681,12 @@ function needsConstDrop(
   const fieldNeedsDrop = (name: string, field: Type): boolean =>
     needsConstDrop(field, knownField(value, name), moved, `${path}.${name}`, depth + 1, budget);
   if (t.kind === 'tuple') return t.elems.some((elem, index) => fieldNeedsDrop(String(index), elem));
-  if (t.kind === 'array') return t.len > 0 && fieldNeedsDrop('[]', t.elem);
+  if (t.kind === 'array') {
+    if (t.len === 0) return false;
+    if (typeof value !== 'object') return fieldNeedsDrop('[]', t.elem);
+    for (const name of value.fields.keys()) if (fieldNeedsDrop(name, t.elem)) return true;
+    return value.fields.size < t.len && fieldNeedsDrop('[]', t.elem);
+  }
   if (t.kind !== 'adt') return false;
   if (t.def.builtin && RUNTIME_DROP_TYPES.has(t.def.builtin)) return true;
   const tag = typeof value === 'object' ? value.ctor : undefined;

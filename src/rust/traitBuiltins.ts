@@ -340,12 +340,13 @@ function comparisonAdt(goal: Goal, t: AdtType): Answer {
   if (builtin === 'String' || builtin === 'Ordering') return 'yes';
   if (ERROR_TYPES.has(builtin)) return equality ? 'yes' : 'no';
   if (['HashMap', 'HashSet'].includes(builtin) && !equality) return 'no';
-  if (['HashMap', 'HashSet', 'BTreeMap', 'BTreeSet'].includes(builtin)) {
-    const keys = name === 'Hash' ? 'yes' : collectionKeyAnswer(solver, t);
-    const values = all(t.args);
+  if (builtin === 'HashMap' || builtin === 'HashSet') {
+    const keys = collectionKeyAnswer(solver, t);
+    const values = all(t.args.slice(1));
     if (keys === 'no' || values === 'no') return 'no';
     return keys === 'unknown' || values === 'unknown' ? 'unknown' : 'yes';
   }
+  if (builtin === 'BTreeMap' || builtin === 'BTreeSet') return all(t.args);
   if (['Vec', 'VecDeque', 'Box', 'Option', 'Result', 'Reverse'].includes(builtin)) return all(t.args);
   if (RANGE_TYPES.has(builtin)) return equality || name === 'Hash' ? all(t.args) : 'no';
   return 'no';

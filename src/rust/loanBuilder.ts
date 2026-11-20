@@ -965,9 +965,8 @@ export class LoanBuilder {
     return this.loop(expr.label, undefined, () => {
       const item = this.temp(itemType);
       this.point({ uses: [iterator], defs: item === undefined ? [] : [item] });
-      // The items borrow from what the iterator borrows.
-      for (const a of regionsOf(this.layouts[iterator])) {
-        for (const b of regionsOf(this.layout(item))) this.outlives(a, b);
+      for (const region of regionsOf(this.layout(item))) {
+        if (!this.graph.universal.has(region)) outlivesAll(this.outlives, this.layouts[iterator], region);
       }
       if (this.current !== undefined) this.loops.at(-1)?.breaks.push(this.current);
       this.patternScope(expr.pattern, expr.body, () => {

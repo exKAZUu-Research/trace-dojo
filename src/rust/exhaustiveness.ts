@@ -1,8 +1,8 @@
 import type { Annotations } from './annotations';
 import type { Pattern } from './ast';
-import { ConstLint, type Known } from './constLint';
+import type { Known } from './constLint';
 import { normalize } from './infer';
-import { type ConstDef, shallow, type Type } from './types';
+import { shallow, type Type } from './types';
 
 /**
  * A pattern reduced to what decides matching: a constructor with subpatterns, or anything (a wildcard or binding).
@@ -23,7 +23,7 @@ export function lowerPattern(pattern: Pattern, annotations: Annotations): Pat {
     case 'binding': {
       const res = annotations.paths.get(pattern);
       if (res?.kind === 'ctor') return { kind: 'ctor', ctor: `v${res.variant}`, args: [] };
-      if (res?.kind === 'const') return lowerConstant(res.def, annotations);
+      if (res?.kind === 'const') return lowerConstantValue(annotations.constPatterns.get(pattern));
       return pattern.sub ? lowerPattern(pattern.sub, annotations) : ANY;
     }
     case 'lit': {
@@ -53,7 +53,7 @@ export function lowerPattern(pattern: Pattern, annotations: Annotations): Pat {
     case 'path': {
       const res = annotations.paths.get(pattern);
       if (res?.kind === 'ctor') return { kind: 'ctor', ctor: `v${res.variant}`, args: [] };
-      if (res?.kind === 'const') return lowerConstant(res.def, annotations);
+      if (res?.kind === 'const') return lowerConstantValue(annotations.constPatterns.get(pattern));
       return ANY;
     }
     case 'ref': {
@@ -64,10 +64,6 @@ export function lowerPattern(pattern: Pattern, annotations: Annotations): Pat {
       return { kind: 'or', alts: pattern.alternatives.map((alt) => lowerPattern(alt, annotations)) };
     }
   }
-}
-
-function lowerConstant(def: ConstDef, annotations: Annotations): Pat {
-  return lowerConstantValue(ConstLint.patternValue(def, annotations));
 }
 
 function lowerConstantValue(value: Known | undefined): Pat {

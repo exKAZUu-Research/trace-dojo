@@ -1,4 +1,5 @@
 import type { Expr, Pattern, Span } from './ast';
+import type { Known } from './constLint';
 import type { AdtDef, ClosureType, ConstDef, FnDef, TraitDef, Type } from './types';
 
 /** A variable of a function or closure: a `let` binding, a parameter, or a binding of a pattern. */
@@ -102,6 +103,7 @@ export interface ClosureInfo {
 /** What the type checker learned about a function body, which the borrow checker and the compiler read. */
 export class Annotations {
   readonly paths = new Map<Expr | Pattern, PathRes>();
+  readonly constPatterns = new Map<Pattern, Known | undefined>();
   readonly methods = new Map<Expr, MethodRes>();
   readonly fields = new Map<Expr, FieldRes>();
   readonly coercions = new Map<Expr, Coercion>();

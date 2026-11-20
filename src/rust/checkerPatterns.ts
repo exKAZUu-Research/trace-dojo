@@ -4,7 +4,7 @@ import { patternBindings } from './astWalk';
 import type { Checker } from './checker';
 import { resolveStructPath, resolveValuePath } from './checkerPaths';
 import { checkFieldVisible } from './checkerPlaces';
-import { ConstLint, type Known } from './constLint';
+import type { Known } from './constLint';
 import { normalize } from './infer';
 import { compileError, lookupValue } from './items';
 import { adt, freshVar, ref, resolve, shallow, substitute, type Type, typeToString } from './types';
@@ -312,8 +312,9 @@ function checkConstPattern(c: Checker, pattern: Pattern, res: PathRes, t: Type):
   } else if (res.kind === 'const') {
     c.unifyOrError(pattern.span, t, res.type);
     c.requireTrait(res.type, 'PartialEq', pattern.span);
+    c.annotations.constPatterns.set(pattern, undefined);
     c.coverageChecks.push(() => {
-      const value = ConstLint.patternValue(res.def, c.annotations);
+      const value = c.annotations.constPatterns.get(pattern);
       if (containsNaN(value)) compileError(pattern.span, 'NaN を含む定数はパターンに書けません。');
       if (!structuralValue(res.type, value)) {
         compileError(pattern.span, 'パターンに書く定数の型には、#[derive(PartialEq)] が必要です。');

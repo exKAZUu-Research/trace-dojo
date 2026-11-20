@@ -43,8 +43,9 @@ export abstract class ExpressionConverter extends MacroConverter {
       } else if (child.type === 'expression_statement') {
         const inner = child.namedChildren.find((c) => !isComment(c)) as Node;
         const semi = child.text.trimEnd().endsWith(';') && !inner.text.endsWith(';');
-        const expr = this.expr(withoutDocAttributes(inner));
-        stmts.push({ kind: 'expr', expr, semi: semi || child.lastChild?.type === ';', span: this.span(child) });
+        const expression = withoutDocAttributes(inner);
+        const expr = this.expr(expression);
+        stmts.push({ kind: 'expr', expr, semi: semi || child.lastChild?.type === ';', span: this.span(expression) });
       } else if (child.type === 'empty_statement') {
         stmts.push({ kind: 'empty', span: this.span(child) });
       } else if (isItem(child)) {
