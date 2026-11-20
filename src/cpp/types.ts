@@ -141,7 +141,8 @@ export interface FunctionInfo {
   /** The library's implementation, which runs instead of a body. */
   native?: NativeFunction;
   nativeUses?: (row: number) => void;
-  evaluateConstant?: (args: readonly (number | bigint)[]) => number | bigint;
+  /** The result of a call with constant arguments, or undefined when the call is no constant expression. */
+  evaluateConstant?: (args: readonly (number | bigint)[]) => number | bigint | undefined;
   libraryConstant?: (args: readonly Expr[]) => LibraryConstant | undefined;
   constantAccess?: (object: Expr, args: readonly Expr[]) => ConstantLocation | undefined;
   streamManipulator?: 'both' | 'output';

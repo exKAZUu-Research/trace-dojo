@@ -131,7 +131,7 @@ export function hasConstantObject(location: ConstantLocation | undefined): boole
 
 export function mapMemberConstants(
   operands: Expr[],
-  operation: (values: (number | bigint)[]) => number | bigint
+  operation: (values: (number | bigint)[]) => number | bigint | undefined
 ): MemberConstant | undefined {
   if (!operands.some((operand) => operand.memberConstant)) return;
   const inputs = operands.map(memberConstantOf);

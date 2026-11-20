@@ -880,6 +880,26 @@ int main() {
   });
 });
 
+test('composes constants from std::gcd, std::lcm, and std::clamp', () => {
+  const program = `#include <algorithm>
+#include <iostream>
+#include <numeric>
+int main() {
+  constexpr int g = std::gcd(12, 8);
+  constexpr int l = std::lcm(3, 4);
+  constexpr int c = std::clamp(5, 1, 3);
+  constexpr double d = std::clamp(0.5, 1.0, 3.0);
+  int a[std::gcd(12, 8)];
+  int x = 7;
+  std::cout << g << ' ' << l << ' ' << c << ' ' << d << ' ' << sizeof(a) << ' ' << std::clamp(x, 1, 3) << ' ' << std::lcm(x, 2);
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '4 12 3 1 16 3 14',
+    uncaughtException: undefined,
+  });
+});
+
 test('composes constants from typed arithmetic functors', () => {
   const program = `#include <functional>
 #include <iostream>

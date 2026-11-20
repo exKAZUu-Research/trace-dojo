@@ -930,17 +930,25 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       const common = sameType(left, right) ? left : commonType(left, right);
       if (!isInteger(common)) return;
       const limit = intMax(common.name);
-      return native(name, [left, right], common, ([a, b]) => {
-        let x = BigInt(a as number | bigint);
-        let y = BigInt(b as number | bigint);
+      /** The result, or undefined when an operand's magnitude or the result does not fit the common type. */
+      const compute = (a: number | bigint, b: number | bigint): number | bigint | undefined => {
+        let x = BigInt(a);
+        let y = BigInt(b);
         if (x < 0n) x = -x;
         if (y < 0n) y = -y;
-        if (x > limit || y > limit) throw overflowError(typeName(common));
+        if (x > limit || y > limit) return;
         const gcd = (p: bigint, q: bigint): bigint => (q === 0n ? p : gcd(q, p % q));
         const result = name === 'gcd' ? gcd(x, y) : x === 0n || y === 0n ? 0n : (x / gcd(x, y)) * y;
-        if (result > limit) throw overflowError(typeName(common));
+        if (result > limit) return;
         return isWide(common) ? result : Number(result);
+      };
+      const fn = native(name, [left, right], common, ([a, b]) => {
+        const result = compute(a as number | bigint, b as number | bigint);
+        if (result === undefined) throw overflowError(typeName(common));
+        return result;
       });
+      fn.evaluateConstant = ([a, b]) => compute(a, b);
+      return fn;
     });
   }
 
@@ -995,7 +1003,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     const less = extremumOrder(args, 3, type);
     if (!less) return;
     const hasUserComparator = args[3]?.functions !== undefined;
-    return native(
+    const fn = native(
       'clamp',
       [constRef(type), constRef(type), constRef(type), ...params(args).slice(3)],
       referenceTo(withConst(type)),
@@ -1016,6 +1024,14 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
         return v;
       }
     );
+    if (args.length === 3 && isArithmetic(type)) {
+      fn.evaluateConstant = ([v, low, high]) => {
+        if (high < low) return;
+        if (v < low) return low;
+        return high < v ? high : v;
+      };
+    }
+    return fn;
   });
 
   // Iterators ---------------------------------------------------------------------------------------------------------
