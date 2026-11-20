@@ -1258,13 +1258,14 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (receiverType.kind === 'void') this.error(span, 'void の値のメンバーは使えません。');
     if (receiverType.kind === 'dynamic' || (receiverType.kind === 'never' && !receiverType.nullable)) {
       const { run } = receiver;
+      const memberName = this.runtimeMemberName(name);
       return {
         type: receiverType.kind === 'never' ? NEVER : DYNAMIC,
         run: (frame) => {
           const value = run(frame);
           if (value === SHORTED) return SHORTED;
           if (nullAware && value === undefined) return SHORTED;
-          return frame.runtime.getProperty(value, name, span.row);
+          return frame.runtime.getProperty(value, memberName, span.row);
         },
         isConst: false,
       };
@@ -1289,7 +1290,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   /** Reads a member found statically: a field or getter through dynamic dispatch, a method as a tear-off. */
   // code-gauge-allow functionCognitiveComplexity 27 -- Each branch is one of the cases Dart distinguishes for this construct.
-  // code-gauge-allow functionNcss 31 -- Member reads distinguish extensions, record fields and ordinary members.
+  // code-gauge-allow functionNcss 32 -- Member reads distinguish extensions, record fields and ordinary members.
   protected readMember(
     receiver: Compiled,
     resolved: ResolvedMember,
@@ -1344,13 +1345,14 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
     const isStringLength =
       name === 'length' && receiver.type.kind === 'interface' && receiver.type.cls === coreTypes.string;
+    const memberName = this.runtimeMemberName(name);
     return {
       type,
       run: (frame) => {
         const value = receiverRun(frame);
         if (value === SHORTED || (nullAware && value === undefined)) return SHORTED;
         if (isStringLength && typeof value === 'string') return BigInt(value.length);
-        return frame.runtime.getProperty(value, name, span.row);
+        return frame.runtime.getProperty(value, memberName, span.row);
       },
       isConst: isStringLength && receiver.isConst,
       constValue:
@@ -1366,12 +1368,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const resolved = this.lookupMember(superclass, name, false);
     if (!resolved) return this.error(span, `スーパークラスに ${name} というメンバーがありません。`);
     this.requireSuperImplementation(name, span);
+    const memberName = this.runtimeMemberName(name);
     const compiled: Compiled = {
       type: resolved.type,
       run: (frame) => {
-        const member = classAt(frame).implementation(name);
+        const member = classAt(frame).implementation(memberName);
         if (!member)
-          return frame.runtime.noSuchMethod(frame.receiver, name, 'getter', { positional: [], named: undefined });
+          return frame.runtime.noSuchMethod(frame.receiver, memberName, 'getter', { positional: [], named: undefined });
         return frame.runtime.readMember(frame.receiver, member, span.row);
       },
       isConst: false,
@@ -1445,7 +1448,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     void context;
     if (target.kind === 'prefix') {
       const declaration = this.library.lookupPrefixed(target.prefix, name);
-      if (!declaration) return this.error(span, `${target.prefix}.${name} は定義されていません。`);
+      if (!declaration) return this.undefinedName(span, name, target.prefix);
       return this.readDeclaration(declaration, span);
     }
     if (target.kind === 'extension') {
@@ -1501,7 +1504,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   protected requireSuperImplementation(name: string, span: Span): void {
     const cls = this.currentClass;
     if (!cls || cls.kind === 'mixin' || this.isLibraryCode) return;
-    const member = cls.superclass?.cls.implementation(name);
+    const member = cls.superclass?.cls.implementation(this.runtimeMemberName(name));
     if (!member || member.isAbstract)
       this.error(span, `スーパークラスには ${name} の本体がないので、super.${name} は使えません。`);
   }

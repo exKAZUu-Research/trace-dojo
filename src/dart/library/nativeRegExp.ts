@@ -63,8 +63,7 @@ defineConstructor('RegExp.new', (runtime, _instance, args) => {
     new RegExp(source, `${multiLine ? 'm' : ''}${caseSensitive ? '' : 'i'}${unicode ? 'u' : ''}${dotAll ? 's' : ''}`);
   } catch (error) {
     if (!(error instanceof SyntaxError)) throw error;
-    const reason = error.message.replace(/^Invalid regular expression: (\/.*\/[a-z]*: )?/, '');
-    return runtime.throwError('FormatException', '', [IRREGEXP_MESSAGES[reason] ?? reason, source]);
+    return runtime.throwError('FormatException', '', [regExpSyntaxMessage(error.message, source), source]);
   }
   const object = new DartObject(runtime.links.classNamed('_RegExp'), [], []);
   const compiled = compileRegExp(source, { multiLine, ignoreCase: !caseSensitive, unicode, dotAll });
@@ -239,14 +238,80 @@ define('RegExp.isDotAll', (_runtime, receiver) => stateOf(receiver).dotAll);
 const IRREGEXP_MESSAGES: Record<string, string> = {
   'missing )': 'Unterminated group',
   'unmatched parentheses': "Unmatched ')'",
-  'nothing to repeat': 'Nothing to repeat',
   'missing terminating ] for character class': 'Unterminated character class',
   'duplicate group specifier name': 'Duplicate capture group name',
   'invalid \\k<> named backreference': 'Invalid named capture referenced',
   'range out of order in character class': 'Range out of order in character class',
   'invalid group specifier name': 'Invalid capture group name',
-  'invalid property expression': 'Invalid property name',
+  'unrecognized character after (?': 'Invalid group',
+  'invalid Unicode \\u escape': 'Invalid Unicode escape',
+  'invalid Unicode code point \\u{} escape': 'Invalid Unicode escape',
+  'invalid \\c escape for Unicode pattern': 'Invalid Unicode escape',
+  'invalid range in character class for Unicode pattern': 'Invalid character class',
+  'invalid octal escape for Unicode pattern': 'Invalid decimal escape',
+  'invalid backreference for Unicode pattern': 'Invalid escape',
+  'incomplete {} quantifier for Unicode pattern': 'Incomplete quantifier',
+  'unmatched ] or } bracket for Unicode pattern': 'Lone quantifier brackets',
 };
+
+function regExpSyntaxMessage(message: string, source: string): string {
+  const reason = message.replace(/^Invalid regular expression: (\/[\s\S]*\/[a-z]*: )?/, '');
+  switch (reason) {
+    case 'invalid property expression': {
+      return propertyEscapeError(source);
+    }
+    case 'invalid escaped character for Unicode pattern': {
+      for (const match of source.matchAll(/\\[\s\S]/g)) {
+        const end = match.index + match[0].length;
+        if (match[0] === String.raw`\c` && !/[a-z]/i.test(source[end] ?? '')) return 'Invalid Unicode escape';
+        if (match[0] === String.raw`\k` && source[end] === '<' && !source.includes('>', end + 1))
+          return 'Invalid capture group name';
+      }
+      return 'Invalid escape';
+    }
+    case 'nothing to repeat': {
+      return hasQuantifiedLookAhead(source) ? 'Invalid quantifier' : 'Nothing to repeat';
+    }
+    default: {
+      return IRREGEXP_MESSAGES[reason] ?? reason;
+    }
+  }
+}
+
+function propertyEscapeError(source: string): string {
+  let inClass = false;
+  for (const [token] of source.matchAll(/\\(?:[pP]\{[^}]*\}|[\s\S])|[[\]]/g)) {
+    if (token === '[') inClass = true;
+    else if (token === ']') inClass = false;
+    else if (token.startsWith(String.raw`\p`) || token.startsWith(String.raw`\P`)) {
+      try {
+        new RegExp(token, 'u');
+      } catch {
+        return inClass ? 'Invalid property name in character class' : 'Invalid property name';
+      }
+    }
+  }
+  return 'Invalid property name';
+}
+
+function hasQuantifiedLookAhead(source: string): boolean {
+  let inClass = false;
+  const groups: boolean[] = [];
+  for (const match of source.matchAll(/\\[\s\S]|\(\?[=!]|[()[\]]/g)) {
+    const [token] = match;
+    if (token === '[') inClass = true;
+    else if (token === ']') inClass = false;
+    else if (!inClass && token.startsWith('(')) groups.push(token.length > 1);
+    else if (
+      !inClass &&
+      token === ')' &&
+      groups.pop() &&
+      /^[*+?]|^\{\d+(?:,\d*)?\}/.test(source.slice(match.index + 1))
+    )
+      return true;
+  }
+  return false;
+}
 
 define(
   'RegExp.toString',

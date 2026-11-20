@@ -339,13 +339,17 @@ function storeNodeOf(store: HashStore, budget: SnapshotBudget): DisplayNode {
   const entries = Object.create(null) as Record<string, DisplayNode>;
   for (const position of store.positions()) {
     if (budget.remaining === 0) {
-      entries['…'] = TRUNCATED_NODE;
+      entries[TRUNCATED] = TRUNCATED_NODE;
       break;
     }
     const key = store.keyAt(position);
     const node = displayNodeOf(key, budget);
     const label = node?.kind === 'value' ? String(node.value) : `#${(key as DartObject).identity}`;
-    entries[label] = displayNodeOf(store.entryValues[position], budget) ?? NULL_NODE;
+    let unique = label;
+    for (let suffix = 2; unique === TRUNCATED || Object.hasOwn(entries, unique); suffix++) {
+      unique = `${label} (${suffix})`;
+    }
+    entries[unique] = displayNodeOf(store.entryValues[position], budget) ?? NULL_NODE;
   }
   return { kind: 'object', entries };
 }

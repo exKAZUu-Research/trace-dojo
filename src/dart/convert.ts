@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 529 -- One converter per file; splitting it further would scatter the cases of one kind of node.
+// code-gauge-allow-file fileNcss 535 -- Keep declarations and their attached metadata conversion together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type {
@@ -180,11 +180,17 @@ export class Converter extends ExpressionConverter {
   }
 
   convertAnnotation(node: Node): Annotation {
-    const name = requireNode(fieldOf(node, 'name'), node).text;
-    const args = namedOf(node).find((child) => child.type === 'arguments' || child.type === 'annotation_arguments');
+    const target = requireNode(fieldOf(node, 'name'), node);
+    const names = target.type === 'qualified' ? namedOf(target).map((part) => part.text) : [target.text];
+    const children = namedOf(node);
+    const selector = children.find((child) => child.type === 'identifier' && child.id !== target.id);
+    if (selector) names.push(selector.text);
+    const types = children.find((child) => child.type === 'type_arguments');
+    const args = children.find((child) => child.type === 'arguments' || child.type === 'annotation_arguments');
     return {
-      name,
-      arguments: args?.type === 'arguments' ? this.convertArguments(args) : undefined,
+      names,
+      typeArguments: types ? this.convertTypeArguments(types) : [],
+      arguments: args ? this.convertArguments(args) : undefined,
       ...spanOf(node),
     };
   }
@@ -316,6 +322,7 @@ export class Converter extends ExpressionConverter {
     const typeArguments = namedOf(node).find((child) => child.type === 'type_arguments');
     const args = namedOf(node).find((child) => child.type === 'arguments');
     return {
+      annotations: this.annotationsOf(node),
       name: requireNode(fieldOf(node, 'name'), node).text,
       typeArguments: typeArguments ? this.convertTypeArguments(typeArguments) : undefined,
       constructorName: dot !== -1 ? children[dot + 1]?.text : undefined,
@@ -332,6 +339,7 @@ export class Converter extends ExpressionConverter {
       typeParameters: this.convertTypeParameters(fieldOf(node, 'type_parameters')),
       onType: this.convertType(requireNode(fieldOf(node, 'class'), node)),
       members: bodyNode ? this.convertMembers(bodyNode) : [],
+      annotations: this.annotationsOf(node),
       ...spanOf(node),
     };
   }
@@ -387,6 +395,7 @@ export class Converter extends ExpressionConverter {
       name: nameNode.text,
       typeParameters: this.convertTypeParameters(named.find((child) => child.type === 'type_parameters')),
       aliased: this.convertType(aliased),
+      annotations: this.annotationsOf(node),
       ...spanOf(node),
     };
   }
@@ -435,7 +444,9 @@ export class Converter extends ExpressionConverter {
     if (inner.type === 'method_declaration') {
       const signatureNode = requireNode(fieldOf(inner, 'signature'), inner);
       const body = this.convertFunctionBody(requireNode(fieldOf(inner, 'body'), inner));
-      return [this.convertSignature(inner, childrenOf(signatureNode), body, annotations)];
+      return [
+        this.convertSignature(inner, childrenOf(signatureNode), body, [...annotations, ...this.annotationsOf(inner)]),
+      ];
     }
     const children = childrenOf(inner);
     const tokens = new Set(children.filter((child) => !child.isNamed).map((child) => child.type));
@@ -873,6 +884,7 @@ export class Converter extends ExpressionConverter {
       }
       const ownTokens = new Set(parts.filter((child) => !child.isNamed).map((child) => child.type));
       return {
+        annotations: this.annotationsOf(node),
         name,
         type: typeNode ? this.convertType(typeNode) : undefined,
         binding: constructorParam.type === 'constructor_param' ? 'this' : 'super',
@@ -890,6 +902,7 @@ export class Converter extends ExpressionConverter {
     const typeNode = children.find((child) => child.type === 'type');
     const nameNode = fieldOf(node, 'name') ?? children.find((child) => child.type === 'identifier');
     return {
+      annotations: this.annotationsOf(node),
       name: requireNode(nameNode, node).text,
       type: typeNode ? this.convertType(typeNode) : undefined,
       binding: 'plain',

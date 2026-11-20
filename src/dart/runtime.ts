@@ -1,9 +1,10 @@
+// code-gauge-allow-file fileNcss 416 -- Keep runtime dispatch alongside its reified types, call frames, and roots.
 import { ExecutionBudget, ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import type { TracedFrame, TracedRuntime } from '../interpreter/traceRecorder';
 import { TurtleWorld } from '../interpreter/turtleWorld';
-import type { ClassInfo, ConstructorInfo, Member } from './classes';
+import { type ClassInfo, type ConstructorInfo, type Member, sourceMemberName } from './classes';
 import {
   asInstanceOf,
   boundOf,
@@ -401,11 +402,15 @@ export class Runtime implements TracedRuntime<Frame> {
 
   /** A member's function type with the receiver's type arguments in place of its class's type parameters. */
   memberTypeFor(receiver: Value, member: Member & { kind: 'method' }): FunctionType {
+    return this.reifyMemberType(receiver, member) as FunctionType;
+  }
+
+  private reifyMemberType(receiver: Value, member: Member): DartType {
     if (member.owner.typeParams.length === 0 || member.isStatic) return member.type;
     const instance = asInstanceOf(this.runtimeTypeOf(receiver) as InterfaceType, member.owner);
     if (!instance) return member.type;
     const map = new Map(member.owner.typeParams.map((param, index) => [param, instance.args[index]]));
-    return substituteFunction(member.type, map);
+    return substitute(member.type, map);
   }
 
   /** Calls a value as a function: a closure, or an object with a `call` method. */
@@ -473,19 +478,46 @@ export class Runtime implements TracedRuntime<Frame> {
     typeArgs: readonly DartType[] = [],
     found?: string
   ): Value {
-    const invocation = this.newInvocation(name, kind, args, typeArgs);
+    const invocation = this.newInvocation(sourceMemberName(name), kind, args, typeArgs);
     const handler = this.classOf(receiver).implementation('noSuchMethod');
     if (handler?.kind === 'method' && handler.owner !== coreTypes.object) {
-      return (handler.impl as NonNullable<typeof handler.impl>)(
+      const expected = found ? undefined : this.forwardedResultType(receiver, name, kind, args, typeArgs);
+      const result = (handler.impl as NonNullable<typeof handler.impl>)(
         this,
         receiver,
         { positional: [invocation], named: undefined },
         [],
         this.userCallRow
       );
+      if (expected && expected.kind !== 'void' && !this.links.isValueOf(this, result, expected)) {
+        this.throwTypeError(
+          `type '${vmTypeString(this.runtimeTypeOf(result))}' is not a subtype of type '${vmTypeString(expected)}'`
+        );
+      }
+      return result;
     }
     if (found) return this.throwError('NoSuchMethodError', '_withFound', [receiver, invocation, found]);
     return this.throwError('NoSuchMethodError', '_withInvocation', [receiver, invocation]);
+  }
+
+  private forwardedResultType(
+    receiver: Value,
+    name: string,
+    kind: 'method' | 'getter' | 'setter',
+    args: Arguments,
+    typeArgs: readonly DartType[]
+  ): DartType | undefined {
+    if (kind === 'setter') return undefined;
+    const member = this.classOf(receiver).interfaceMember(name);
+    if (!member || member.isStatic) return undefined;
+    if (kind === 'getter' && (member.kind === 'getter' || member.kind === 'field'))
+      return this.reifyMemberType(receiver, member);
+    if (kind === 'method' && member.kind === 'method' && argumentsFit(member.type, args, typeArgs)) {
+      const type = this.memberTypeFor(receiver, member);
+      const supplied = args.isDynamic ? this.dynamicTypeArguments(type, typeArgs) : typeArgs;
+      return instantiateFunction(type, supplied).returnType;
+    }
+    return undefined;
   }
 
   private newInvocation(
@@ -649,10 +681,6 @@ function* childrenOf(object: DartObject): Iterable<Value> {
     yield* object.native.values();
     if (object.native.roots) yield* object.native.roots();
   }
-}
-
-function substituteFunction(type: FunctionType, map: Map<TypeParam, DartType>): FunctionType {
-  return substitute(type, map) as FunctionType;
 }
 
 export { Cell, type ConstructorInfo };

@@ -27,8 +27,8 @@ export type TopLevelDeclaration =
   | ExtensionDeclaration;
 
 export interface Annotation extends Span {
-  name: string;
-  /** `@Deprecated('…')` passes arguments; `@override` does not. */
+  names: string[];
+  typeArguments: TypeSyntax[];
   arguments: Arguments | undefined;
 }
 
@@ -69,6 +69,7 @@ export interface PrimaryConstructor extends Span {
 }
 
 export interface EnumConstant extends Span {
+  annotations: Annotation[];
   name: string;
   typeArguments: TypeSyntax[] | undefined;
   constructorName: string | undefined;
@@ -81,6 +82,7 @@ export interface ExtensionDeclaration extends Span {
   typeParameters: TypeParameter[];
   onType: TypeSyntax;
   members: MemberDeclaration[];
+  annotations: Annotation[];
 }
 
 export interface TypeAliasDeclaration extends Span {
@@ -88,6 +90,7 @@ export interface TypeAliasDeclaration extends Span {
   name: string;
   typeParameters: TypeParameter[];
   aliased: TypeSyntax;
+  annotations: Annotation[];
 }
 
 export interface TypeParameter extends Span {
@@ -193,6 +196,7 @@ export interface FormalParameters extends Span {
 }
 
 export interface FormalParameter extends Span {
+  annotations?: Annotation[];
   name: string;
   type: TypeSyntax | undefined;
   /** `this.x` initializes a field, `super.x` passes the argument on to the superclass constructor. */

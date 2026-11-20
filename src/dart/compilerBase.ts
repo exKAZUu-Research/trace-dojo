@@ -1,11 +1,11 @@
-// code-gauge-allow-file fileNcss 462 -- Type and diagnostic resolution share the compiler environment.
+// code-gauge-allow-file fileNcss 479 -- Type and diagnostic resolution share the compiler environment.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ClassDeclaration, Span, TypeAliasDeclaration, TypeParameter, TypeSyntax } from './ast';
-import type { ClassInfo, Member } from './classes';
+import { type ClassInfo, type Member, scopedMemberName } from './classes';
 import type { ExtensionInfo, GlobalVariable, LibraryEnv, TypeAlias } from './environment';
 import type { Frame, FunctionInfo, Runtime, TypeEnv } from './runtime';
 import { Flow, type FunctionContext, LocalVar } from './scope';
-import { inferFromSubtype, inferTearOffTypes } from './typeInference';
+import { inferExtensionReceiver, inferTearOffTypes } from './typeInference';
 import {
   asInstanceOf,
   boundOf,
@@ -165,6 +165,9 @@ export abstract class CompilerBase {
   }
 
   protected checkUnavailableStaticMember(cls: ClassInfo, name: string, span: Span): void {
+    if (name.startsWith('_') && cls.library !== this.library.name) {
+      this.error(span, `${cls.name} の ${name} は、宣言されているライブラリの中だけで使えます。`);
+    }
     if (UNAVAILABLE_STATIC_MEMBERS.has(`${cls.library}.${cls.name}.${name}`)) {
       this.unsupported(span, `${cls.name}.${name}`);
     }
@@ -184,10 +187,16 @@ export abstract class CompilerBase {
   }
 
   /** Rejects a name the program does not define: as unavailable when the SDK has it outside what the interpreter runs. */
-  undefinedName(span: Span | { row: number }, name: string): never {
-    const unavailable = UNAVAILABLE_NAMES[name];
-    if (unavailable) return this.unsupported(span, unavailable);
-    return this.error(span, `${name} という名前は定義されていません。`);
+  undefinedName(span: Span | { row: number }, name: string, prefix?: string): never {
+    this.checkUnavailableName(span, name, prefix);
+    const qualified = prefix ? `${prefix}.${name}` : name;
+    return this.error(span, `${qualified} という名前は定義されていません。`);
+  }
+
+  protected checkUnavailableName(span: Span | { row: number }, name: string, prefix?: string): void {
+    const description = Object.hasOwn(UNAVAILABLE_NAMES, name) ? UNAVAILABLE_NAMES[name] : undefined;
+    if (this.library.hasVisibleSdkExport(name, prefix) || (description && prefix === undefined))
+      this.unsupported(span, description ?? (prefix ? `${prefix}.${name}` : name));
   }
 
   get isTracing(): boolean {
@@ -228,6 +237,21 @@ export abstract class CompilerBase {
         if (parameter.bound) params[index].bound = this.resolveType(parameter.bound);
       }
     });
+    this.checkBoundCycles(params, syntax);
+  }
+
+  private checkBoundCycles(params: TypeParam[], syntax: TypeParameter[]): void {
+    const checked = new Set<TypeParam>();
+    for (const [index, param] of params.entries()) {
+      const chain = new Set<TypeParam>();
+      let current: TypeParam | undefined = param;
+      while (current && !checked.has(current)) {
+        if (chain.has(current)) this.error(syntax[index], `型引数 ${param.name} の境界が循環しています。`);
+        chain.add(current);
+        current = current.bound?.kind === 'typeParam' ? current.bound.param : undefined;
+      }
+      for (const member of chain) checked.add(member);
+    }
   }
 
   findTypeParam(name: string): TypeParam | undefined {
@@ -322,7 +346,7 @@ export abstract class CompilerBase {
       return substitute(type, new Map(alias.typeParams.map((param, index) => [param, args[index]])));
     }
     if (declaration) return this.error(syntax, `${name} は型ではありません。`);
-    if (UNAVAILABLE_NAMES[name]) return this.unsupported(syntax, UNAVAILABLE_NAMES[name]);
+    this.checkUnavailableName(syntax, name, prefix);
     return this.error(syntax, `型 ${name} が見つかりません。`);
   }
 
@@ -444,15 +468,24 @@ export abstract class CompilerBase {
     return this.interfaceMember(interfaceType(objectClass), name, setter);
   }
 
-  interfaceMember(type: InterfaceType, name: string, setter: boolean): ResolvedMember | undefined {
-    const member = type.cls.interfaceMember(name, setter);
+  interfaceMember(
+    type: InterfaceType,
+    name: string,
+    setter: boolean,
+    library = this.library.name
+  ): ResolvedMember | undefined {
+    const member = type.cls.interfaceMember(scopedMemberName(name, library), setter);
     if (!member) {
-      if (type.cls !== coreTypes.object) return this.interfaceMember(objectType(), name, setter);
+      if (type.cls !== coreTypes.object) return this.interfaceMember(objectType(), name, setter, library);
       return undefined;
     }
     // An extension type's members run on its representation, which has no class to dispatch on.
     const extension = member.owner.kind === 'extensionType' ? { ext: undefined, typeArgs: [] } : undefined;
     return { member, type: this.memberTypeIn(type, member), extension };
+  }
+
+  protected runtimeMemberName(name: string): string {
+    return scopedMemberName(name, this.library.name);
   }
 
   protected memberTypeIn(type: InterfaceType, member: Member): DartType {
@@ -525,9 +558,7 @@ export abstract class CompilerBase {
   matchExtension(ext: ExtensionInfo, receiverType: DartType): DartType[] | undefined {
     if (receiverType.kind === 'dynamic') return undefined;
     if (ext.typeParams.length === 0) return isSubtype(receiverType, ext.onType) ? [] : undefined;
-    const solution = new Map<TypeParam, DartType>();
-    inferFromSubtype(receiverType, ext.onType, new Set(ext.typeParams), solution);
-    const args = instantiateToBounds(ext.typeParams, solution);
+    const args = inferExtensionReceiver(receiverType, ext.onType, ext.typeParams);
     const map = new Map(ext.typeParams.map((param, index) => [param, args[index]]));
     if (ext.typeParams.some((param, index) => !isSubtype(args[index], substitute(boundOf(param), map)))) return;
     return isSubtype(receiverType, substitute(ext.onType, map)) ? args : undefined;

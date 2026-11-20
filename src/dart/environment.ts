@@ -1,4 +1,5 @@
 import type { ClassInfo, Member } from './classes';
+import { isSdkExport } from './library/sdkExports';
 import type { Runtime } from './runtime';
 import type { DartType, FunctionType, TypeParam } from './types';
 import type { Callable, Value } from './values';
@@ -94,6 +95,12 @@ export class LibraryEnv {
 
   hasPrefix(prefix: string): boolean {
     return this.imports.some((entry) => entry.prefix === prefix);
+  }
+
+  hasVisibleSdkExport(name: string, prefix: string | undefined): boolean {
+    return this.imports.some(
+      (entry) => entry.prefix === prefix && isVisible(entry, name) && isSdkExport(entry.library.name, name)
+    );
   }
 
   private lookupImported(name: string, prefix: string | undefined): Declaration | undefined {

@@ -514,7 +514,9 @@ export abstract class ExpressionConverter {
     const named: NamedArgument[] = [];
     const names = new Set<string>();
     const order: Arguments['order'] = [];
-    const children = childrenOf(node).filter((child) => child.type !== '(' && child.type !== ')');
+    const children = childrenOf(node).filter(
+      (child) => child.type !== '(' && child.type !== ')' && child.type !== 'annotation_open_paren'
+    );
     for (const group of splitByComma(children)) {
       if (group.length === 0) continue;
       if (group[0].type === 'named_argument') {

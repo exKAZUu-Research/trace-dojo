@@ -1,8 +1,10 @@
 import {
   asInstanceOf,
+  boundOf,
   type DartType,
   DYNAMIC,
   type FunctionType,
+  instantiateToBounds,
   type InterfaceType,
   isSubtype,
   lowerBound,
@@ -54,6 +56,19 @@ export function inferFromSubtype(
   upper?: Map<TypeParam, DartType>
 ): void {
   new InferenceConstraints(params, lower, upper, join).infer(actual, formal);
+}
+
+export function inferExtensionReceiver(actual: DartType, formal: DartType, params: readonly TypeParam[]): DartType[] {
+  const lower = new Map<TypeParam, DartType>();
+  const upper = new Map<TypeParam, DartType>();
+  new InferenceConstraints(new Set(params), lower, upper, upperBound, true).infer(actual, formal);
+  if (upper.size === 0) return instantiateToBounds(params, lower);
+  const initial = instantiateToBounds(params, new Map([...upper, ...lower]));
+  const env = new Map(params.map((param, index) => [param, initial[index]]));
+  for (const [param, limit] of upper) {
+    if (!lower.has(param)) lower.set(param, lowerBound(limit, substitute(boundOf(param), env)));
+  }
+  return instantiateToBounds(params, lower);
 }
 
 export function inferTearOffTypes(

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 536 -- The compilation of every kind of pattern, which share their type and binding helpers.
+// code-gauge-allow-file fileNcss 544 -- Pattern kinds share their type, rooting, and binding helpers.
 import type { Expression, ListPatternElement, Pattern, RecordPatternField, Span } from './ast';
 import { nullPatternComparison } from './astWalk';
 import { CallCompiler } from './callCompiler';
@@ -162,8 +162,28 @@ export abstract class PatternCompiler extends CallCompiler {
     return shared;
   }
 
-  // code-gauge-allow functionNcss 43 -- One case per part of the pattern, matched in Dart's order.
   private compilePatternInner(
+    pattern: Pattern,
+    matchedType: DartType,
+    options: PatternOptions,
+    variables: Map<string, LocalVar>
+  ): Omit<CompiledPattern, 'variables'> {
+    const { match, irrefutable } = this.compilePatternNode(pattern, matchedType, options, variables);
+    return {
+      irrefutable,
+      match: (frame, value) => {
+        frame.temporaries.push(value);
+        try {
+          return match(frame, value);
+        } finally {
+          frame.temporaries.pop();
+        }
+      },
+    };
+  }
+
+  // code-gauge-allow functionNcss 43 -- One case per part of the pattern, matched in Dart's order.
+  private compilePatternNode(
     pattern: Pattern,
     matchedType: DartType,
     options: PatternOptions,
@@ -690,6 +710,7 @@ export abstract class PatternCompiler extends CallCompiler {
     variables: Map<string, LocalVar>
   ): Omit<CompiledPattern, 'variables'> {
     let type = this.resolveType(pattern.type, { allowRaw: true });
+    this.fieldNames(pattern.fields);
     if (type.kind === 'interface' && type.args.length === 0 && type.cls.typeParams.length > 0) {
       // `List()` infers its type arguments from the matched type, or else instantiates to bounds.
       const base = resolveBound(matchedType);
@@ -743,7 +764,7 @@ export abstract class PatternCompiler extends CallCompiler {
       if (position) return value.positional[Number(position[1]) - 1];
       return value.named.find(([field]) => field === name)?.[1];
     }
-    return frame.runtime.getProperty(value, name, undefined);
+    return frame.runtime.getProperty(value, this.runtimeMemberName(name), undefined);
   }
 
   /** Throws the error a refutable pattern in a declaration or an assignment raises when it fails to match. */

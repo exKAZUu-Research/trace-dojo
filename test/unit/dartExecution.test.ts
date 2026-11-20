@@ -2520,3 +2520,135 @@ void main() {
     stdout: '[ConcurrentModificationError, 3]\n[ConcurrentModificationError, 0]\n',
   });
 });
+
+test('metadata resolves const constructors and references before executing the program', () => {
+  const program = `class Mark<T> {
+    final T value;
+    const Mark.named(this.value);
+  }
+  @Deprecated.extend()
+  class Subject {
+    static const label = Mark<int>.named(1);
+    @label void run(@label int value) {
+      const local = Mark<String>.named('marker');
+      @local int result = value + 1;
+      print(result);
+    }
+  }
+  @Mark<int>.named(2)
+  void main() { Subject().run(2); }`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '3\n' });
+  for (const source of [
+    "@NoSuchAnnotation() void main() { print('started'); }",
+    "class Label { Label(int value); } @Label(1) void main() { print('started'); }",
+    "class Label { const Label(int value) : assert(value > 0); } @Label(0) void main() { print('started'); }",
+    "void marker() {} @marker void main() { print('started'); }",
+  ]) {
+    expect(executeProgram('dart', source)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
+test.each([
+  "class Base<T> { T? f() => null; } mixin M { String f() => 'text'; } class C extends Base<int> with M {}",
+  'class A<T> {} class B implements A<int> {} class C extends B implements A<String> {}',
+  'class C<T extends U, U extends T> {}',
+  'late final int value = 1; void assign() { value = 2; }',
+  'class C { static late final int value = 1; } void assign() { C.value = 2; }',
+  "class C { int get x => 1; } void match() { if (C() case C(x: _, x: _)) print('matched'); }",
+])('reports invalid Dart declarations before execution: %s', (declaration) => {
+  expect(executeProgram('dart', `${declaration} void main() { print('started'); }`)).toMatchObject({
+    kind: 'compileError',
+  });
+});
+
+test('generic noSuchMethod forwarders check declared return types', () => {
+  const program = `abstract class Contract<T> {
+    T get value;
+    R convert<R>();
+  }
+  class Handler<U> implements Contract<U> {
+    dynamic noSuchMethod(Invocation invocation) => 'text';
+  }
+  void main() {
+    Contract<int> value = Handler<int>();
+    try { print(value.value); } catch (error) { print(error); }
+    try { print(value.convert<int>()); } catch (error) { print(error); }
+    print(value.convert<String>());
+    dynamic target = value;
+    print(target.unrelated());
+  }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: "type 'String' is not a subtype of type 'int'\ntype 'String' is not a subtype of type 'int'\ntext\ntext\n",
+  });
+});
+
+test('generic extensions infer both covariant and contravariant constraints', () => {
+  const program = `extension RecordKind<T> on (T, T) { Type get kind => T; }
+extension MapKind<T> on Map<T, T> { Type get kind => T; }
+extension Positional<T extends num> on void Function(T) { Type get kind => T; }
+extension Named<T> on void Function({required T value}) { Type get kind => T; }
+void takeObject(Object value) {}
+void takeString(String value) {}
+void takeNamed({required String value}) {}
+void main() {
+  print((1, 'text').kind);
+  print({1: 'text'}.kind);
+  print(takeObject.kind);
+  print(takeString.kind);
+  print(takeNamed.kind);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'Object\nObject\nnum\nNever\nString\n',
+  });
+});
+
+test('private fields in different libraries keep distinct dispatch and types', () => {
+  const program = `class D extends Duration {
+    final String _duration = 'own';
+    D() : super(seconds: 1);
+  }
+  void main() {
+    D value = D();
+    print(value.inSeconds);
+    print(value._duration);
+    dynamic dynamicValue = value;
+    print(dynamicValue._duration);
+  }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '1\nown\nown\n',
+  });
+});
+
+test('malformed regular expressions report SDK diagnostics across hosts', () => {
+  const program = String.raw`void main() {
+    for (final pattern in ['(?q:a)', r'[\d-a]', r'\u{110000}', r'[\p{not-a-property}]', '(?=a)*']) {
+      try { RegExp(pattern, unicode: true); }
+      on FormatException catch (error) { print(error.message); }
+    }
+  }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'Invalid group\nInvalid character class\nInvalid Unicode escape\nInvalid property name in character class\nInvalid quantifier\n',
+  });
+});
+
+test('unsupported SDK exports respect import prefixes and visibility', () => {
+  for (const [declaration, body] of [
+    ["import 'dart:convert';", "print(ascii.encode('A'));"],
+    ["import 'dart:convert' as codec show htmlEscape;", "print(codec.htmlEscape.convert('<'));"],
+    ["import 'dart:collection' as collections;", 'collections.LinkedList<collections.LinkedListEntry>();'],
+    ['', 'Sink? value; print(value);'],
+    ["import 'dart:io' as io;", 'print(io.HttpDate);'],
+  ]) {
+    const result = executeProgram('dart', `${declaration} void main() { ${body} }`);
+    expect(result.kind).toBe('compileError');
+    if (result.kind === 'compileError') expect(result.diagnostics[0]?.message).toContain('この採点環境では使えません');
+  }
+  const hidden = executeProgram('dart', "import 'dart:convert' hide ascii; void main() { print(ascii); }");
+  expect(hidden.kind).toBe('compileError');
+  if (hidden.kind === 'compileError') expect(hidden.diagnostics[0]?.message).toContain('定義されていません');
+});

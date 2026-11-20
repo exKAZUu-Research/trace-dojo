@@ -883,10 +883,19 @@ class IntegerDivisionByZeroException implements Exception, UnsupportedError {
 // Annotations
 
 class Deprecated {
-  final String message;
-  const Deprecated(this.message);
+  final String? message;
+  final _DeprecationKind _kind;
+  const Deprecated(this.message) : _kind = _DeprecationKind.use;
+  const Deprecated.implement([this.message]) : _kind = _DeprecationKind.implement;
+  const Deprecated.extend([this.message]) : _kind = _DeprecationKind.extend;
+  const Deprecated.subclass([this.message]) : _kind = _DeprecationKind.subclass;
+  const Deprecated.instantiate([this.message]) : _kind = _DeprecationKind.instantiate;
+  const Deprecated.mixin([this.message]) : _kind = _DeprecationKind.mixin;
+  const Deprecated.optional([this.message]) : _kind = _DeprecationKind.optional;
   String toString() => "Deprecated feature: $message";
 }
+
+enum _DeprecationKind { use, implement, extend, subclass, instantiate, mixin, optional }
 
 const Deprecated deprecated = Deprecated("next release");
 

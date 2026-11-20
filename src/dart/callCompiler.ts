@@ -235,7 +235,7 @@ export abstract class CallCompiler extends OperatorCompiler {
         const { cls, types } = this.aliasConstructor(declaration.alias, typeArguments, callee);
         return this.compileConstructorCall(cls, undefined, types, args, undefined, expression, context, false);
       }
-      if (!declaration) return this.error(callee, `${target.prefix}.${callee.name} は定義されていません。`);
+      if (!declaration) return this.undefinedName(callee, callee.name, target.prefix);
     }
     if (target?.kind === 'extension') {
       const member = target.ext.staticMembers.get(callee.name);
@@ -404,13 +404,13 @@ export abstract class CallCompiler extends OperatorCompiler {
     }
     if (isSuper) {
       this.requireSuperImplementation(name, span);
-      const run = superMethodCall(this.superclassOf(span).classAt, name, bound, row);
+      const run = superMethodCall(this.superclassOf(span).classAt, this.runtimeMemberName(name), bound, row);
       return { type: returnType, run, isConst: false, completes };
     }
     const constFold = this.foldConstantCall(receiver, name, args);
     return {
       type: returnType,
-      run: virtualMethodCall(receiverRun, name, bound, nullAware, row),
+      run: virtualMethodCall(receiverRun, this.runtimeMemberName(name), bound, nullAware, row),
       isConst: constFold !== undefined,
       constValue: constFold,
       completes,
@@ -475,6 +475,7 @@ export abstract class CallCompiler extends OperatorCompiler {
     );
     const receiverRun = receiver.run;
     const row = this.callRow(span);
+    const member = name === undefined ? undefined : this.runtimeMemberName(name);
     return {
       type: DYNAMIC,
       run: (frame) => {
@@ -488,8 +489,8 @@ export abstract class CallCompiler extends OperatorCompiler {
           frame.temporaries.pop();
         }
         const types = typeArgs.map((resolve) => resolve(frame));
-        if (name === undefined) return frame.runtime.callValue(value, evaluated, types, row);
-        return frame.runtime.invoke(value, name, evaluated, types, row);
+        if (member === undefined) return frame.runtime.callValue(value, evaluated, types, row);
+        return frame.runtime.invoke(value, member, evaluated, types, row);
       },
       isConst: false,
     };
@@ -581,7 +582,10 @@ export abstract class CallCompiler extends OperatorCompiler {
         : declaration?.kind === 'class'
           ? { cls: declaration.cls, types: this.classTypeArguments(declaration.cls, writtenTypes, expression) }
           : undefined;
-    if (!target) return this.error(expression, 'クラス ' + name + ' が見つかりません。');
+    if (!target) {
+      this.checkUnavailableName(expression, name, prefix);
+      return this.error(expression, 'クラス ' + name + ' が見つかりません。');
+    }
     return this.compileConstructorCall(
       target.cls,
       constructorName,
@@ -1040,7 +1044,10 @@ export abstract class CallCompiler extends OperatorCompiler {
         : declaration?.kind === 'class'
           ? { cls: declaration.cls, types: this.classTypeArguments(declaration.cls, writtenTypes, span) }
           : undefined;
-    if (!target) return this.error(span, 'クラス ' + type.name + ' が見つかりません。');
+    if (!target) {
+      this.checkUnavailableName(span, type.name, type.prefix);
+      return this.error(span, 'クラス ' + type.name + ' が見つかりません。');
+    }
     const { cls, types: typeArgs } = target;
     this.checkUnavailableStaticMember(cls, name ?? '', span);
     const constructor = cls.constructors.get(name === 'new' ? '' : (name ?? ''));
@@ -1232,7 +1239,7 @@ function virtualMethodCall(
     if (member?.kind === 'method')
       return (member.impl as Callable)(runtime, value, evaluated, bound.typeArgs(frame), row);
     if (member) return runtime.callGetterValue(value, member, evaluated, bound.typeArgs(frame), row);
-    return runtime.noSuchMethod(value, name, 'method', evaluated);
+    return runtime.noSuchMethod(value, name, 'method', evaluated, bound.typeArgs(frame));
   };
 }
 

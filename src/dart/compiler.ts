@@ -22,9 +22,10 @@ import {
   type FieldMember,
   type Member,
   type MethodMember,
+  sourceMemberName,
 } from './classes';
 import { at, type Compiled, type Eval, typeName } from './compilerBase';
-import { ConstructorCompiler, EMPTY_ENV } from './constructorCompiler';
+import { EMPTY_ENV } from './constructorCompiler';
 import {
   type Declaration,
   type ExtensionInfo,
@@ -34,8 +35,9 @@ import {
   type TypeAlias,
 } from './environment';
 import { lateFieldGetter, lateFieldSetter } from './lateFields';
+import { MetadataCompiler } from './metadataCompiler';
 import { type DartThrow, Frame, type FunctionInfo, type Runtime, type TypeEnv } from './runtime';
-import { Flow, FunctionContext } from './scope';
+import type { FunctionContext } from './scope';
 import { type GenExec, inheritsCovariance } from './statementCompiler';
 import {
   asInstanceOf,
@@ -86,7 +88,7 @@ interface ClassWork {
 }
 
 /** Compiles the declarations of a library: classes, members, constructors, extensions, and top-level members. */
-export class Compiler extends ConstructorCompiler {
+export class Compiler extends MetadataCompiler {
   private readonly classWork: ClassWork[] = [];
   private readonly extensionWork: { ext: ExtensionInfo; declaration: ExtensionDeclaration }[] = [];
   private extensionCount = 0;
@@ -220,6 +222,14 @@ export class Compiler extends ConstructorCompiler {
     for (const declaration of syntax.declarations) {
       if (declaration.kind === 'function') this.resolveTopLevelSignature(declaration);
     }
+    this.compileGlobalInitializers(syntax);
+    for (const work of this.classWork) this.checkClass(work);
+    if (!this.isLibraryCode) {
+      for (const { application, span } of this.pendingApplications) this.checkMemberOverrides(application, span);
+    }
+  }
+
+  private compileGlobalInitializers(syntax: Library): void {
     // Every top-level variable is declared before any initializer compiles, as initializers may use later ones.
     const initializers: (() => void)[] = [];
     for (const declaration of syntax.declarations) {
@@ -228,15 +238,14 @@ export class Compiler extends ConstructorCompiler {
     for (const infer of this.fieldInferences) infer();
     this.fieldInferences.length = 0;
     for (const compile of initializers) compile();
-    for (const work of this.classWork) this.checkClass(work);
   }
 
   /** Compiles every body. */
   compileAll(syntax: Library): void {
+    this.checkDeclarationAnnotations(syntax, this.classWork, this.extensionWork);
     for (const declaration of syntax.declarations) {
       if (declaration.kind === 'function') this.compileTopLevelFunction(declaration);
     }
-    for (const { ext, declaration } of this.extensionWork) this.compileExtension(ext, declaration);
     for (const body of this.deferredBodies) body();
     this.deferredBodies.length = 0;
     if (this.atomicRows && !this.isLibraryCode) {
@@ -401,8 +410,25 @@ export class Compiler extends ConstructorCompiler {
 
   private readonly pendingApplications: { application: ClassInfo; mixin: InterfaceType; span: Span }[] = [];
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Check subtype cycles before validating mixin and representation edges.
   private checkHierarchy(): void {
+    this.checkSuperclassCycles();
+    for (const { application, mixin, span } of this.pendingApplications) {
+      if (application.superclass && !this.isLibraryCode)
+        this.checkMixinConstraints(application.superclass, mixin, span);
+    }
+    for (const { cls, declaration } of this.classWork) {
+      const conflict = this.isLibraryCode ? undefined : cls.conflictingSupertype();
+      if (conflict)
+        this.error(
+          declaration,
+          `${cls.name} は ${typeToString(conflict.first)} と ${typeToString(conflict.second)} の両方を実装できません。`
+        );
+      if (cls.representationType)
+        this.checkRepresentationInterfaces(cls, cls.representationType, declaration.interfaces);
+    }
+  }
+
+  private checkSuperclassCycles(): void {
     const visiting = new Set<ClassInfo>();
     const checked = new Set<ClassInfo>();
     const visit = (cls: ClassInfo, span: Span): void => {
@@ -414,14 +440,6 @@ export class Compiler extends ConstructorCompiler {
       checked.add(cls);
     };
     for (const { cls, declaration } of this.classWork) visit(cls, declaration);
-    for (const { application, mixin, span } of this.pendingApplications) {
-      if (application.superclass && !this.isLibraryCode)
-        this.checkMixinConstraints(application.superclass, mixin, span);
-    }
-    for (const { cls, declaration } of this.classWork) {
-      if (cls.representationType)
-        this.checkRepresentationInterfaces(cls, cls.representationType, declaration.interfaces);
-    }
   }
 
   // code-gauge-allow functionCognitiveComplexity 23 -- Each kind of member declares itself differently.
@@ -777,37 +795,6 @@ export class Compiler extends ConstructorCompiler {
     const compiled = this.inTemporaryFunction(isStatic, cls, () => this.compileExpression(initializer));
     if (compiled.type.kind === 'null') return DYNAMIC;
     return compiled.type;
-  }
-
-  /** Runs `run` in a function context of its own, as initializers compile outside any function. */
-  private inTemporaryFunction<T>(
-    isStatic: boolean,
-    cls: ClassInfo | undefined,
-    run: () => T,
-    isInitializer = false
-  ): T {
-    const savedFn = this.fn;
-    const savedFlow = this.flow;
-    const savedRecords = this.recordsSteps;
-    const info = this.newFunctionInfo('initializer', undefined, false);
-    this.fn = new FunctionContext(undefined, info, {
-      returnType: undefined,
-      isGenerator: false,
-      thisClass: cls,
-      thisType: cls?.thisType,
-      hasThis: !isStatic && !isInitializer && cls !== undefined,
-      extensionOn: undefined,
-      isInitializer,
-      isConstructor: false,
-    });
-    this.flow = Flow.start();
-    try {
-      return run();
-    } finally {
-      this.fn = savedFn;
-      this.flow = savedFlow;
-      this.recordsSteps = savedRecords;
-    }
   }
 
   private declareStaticField(
@@ -1439,9 +1426,13 @@ export class Compiler extends ConstructorCompiler {
   private checkClass({ cls, declaration }: ClassWork): void {
     if (this.isLibraryCode) return;
     if (cls.kind === 'enum') this.checkEnumMembers(cls, declaration);
-    for (const member of cls.members.values()) this.checkOverride(cls, member, false);
-    for (const member of cls.setters.values()) this.checkOverride(cls, member, true);
+    this.checkMemberOverrides(cls);
     if (cls.kind !== 'mixin' && cls.kind !== 'extensionType') this.checkImplemented(cls, declaration);
+  }
+
+  private checkMemberOverrides(cls: ClassInfo, span?: Span): void {
+    for (const member of cls.members.values()) this.checkOverride(cls, member, false, span);
+    for (const member of cls.setters.values()) this.checkOverride(cls, member, true, span);
   }
 
   private checkEnumMembers(cls: ClassInfo, declaration: ClassDeclaration): void {
@@ -1472,21 +1463,31 @@ export class Compiler extends ConstructorCompiler {
       const memberName = isSetter ? name.slice(0, -1) : name;
       const implementation = isSetter ? cls.setterImplementation(memberName) : cls.implementation(memberName);
       if (implementation && implementation.owner !== cls && cls.interfaces.length > 0)
-        this.checkOverride(cls, implementation, isSetter, declaration);
+        this.checkOverride(cls, implementation, isSetter, declaration, cls.interfaces);
       if (implementation || cls.isAbstract || hasNoSuchMethod) continue;
       const declared = cls.interfaceMember(memberName, isSetter);
-      if (declared) this.error(declaration, `${cls.name} には、${declared.owner.name}.${name} の実装がありません。`);
+      if (declared)
+        this.error(
+          declaration,
+          `${cls.name} には、${declared.owner.name}.${sourceMemberName(name)} の実装がありません。`
+        );
     }
   }
 
   // code-gauge-allow functionCognitiveComplexity 22 -- Each branch is one of the cases Dart distinguishes for this construct.
-  private checkOverride(cls: ClassInfo, member: Member, setter: boolean, inheritedAt?: Span): void {
+  private checkOverride(
+    cls: ClassInfo,
+    member: Member,
+    setter: boolean,
+    span?: Span,
+    targets = cls.directSupertypes
+  ): void {
     if (member.isStatic) return;
-    const row = inheritedAt?.row ?? member.row ?? 0;
-    const targets = inheritedAt ? cls.interfaces : cls.directSupertypes;
-    const own = inheritedAt ? this.memberTypeIn(cls.thisType, member) : member.type;
+    const row = span?.row ?? member.row ?? 0;
+    const own = this.memberTypeIn(cls.thisType, member);
     for (const supertype of targets) {
-      const inherited = this.interfaceMember(supertype, member.name, setter);
+      const library = (member.owner.mixinOf ?? member.owner).library;
+      const inherited = this.interfaceMember(supertype, member.name, setter, library);
       if (!inherited || inherited.member === member) continue;
       if (setter) {
         this.checkSetterOverride(cls, member, inherited.type, own, row);
@@ -1523,7 +1524,7 @@ export class Compiler extends ConstructorCompiler {
   }
 
   private checkSetterOverride(cls: ClassInfo, member: Member, inherited: DartType, own: DartType, row: number): void {
-    const declaration = member.owner.declaration?.members.find(
+    const declaration = (member.owner.mixinOf ?? member.owner).declaration?.members.find(
       (candidate): candidate is MethodDeclaration =>
         candidate.kind === 'method' && candidate.methodKind === 'setter' && candidate.name === member.name
     );
@@ -1542,7 +1543,7 @@ export class Compiler extends ConstructorCompiler {
   private isValidOverride(cls: ClassInfo, member: MethodMember, own: FunctionType, inherited: FunctionType): boolean {
     if (isSubtype(own, inherited)) return true;
     const { owner, name } = member;
-    const declaration = owner.declaration?.members.find(
+    const declaration = (owner.mixinOf ?? owner).declaration?.members.find(
       (candidate): candidate is MethodDeclaration =>
         candidate.kind === 'method' && candidate.name === name && candidate.methodKind !== 'setter'
     );
@@ -1594,11 +1595,6 @@ export class Compiler extends ConstructorCompiler {
         if (member.kind === 'method') this.declareMethod(holder, member, ext);
       }
     });
-  }
-
-  private compileExtension(ext: ExtensionInfo, declaration: ExtensionDeclaration): void {
-    void ext;
-    void declaration;
   }
 
   // Top-level functions and variables

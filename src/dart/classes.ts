@@ -7,11 +7,20 @@ import {
   type FunctionType,
   type InterfaceType,
   interfaceType,
+  isSubtype,
   substitute,
   type TypeParam,
   typeParamType,
 } from './types';
 import type { Arguments, Callable, DartObject, Value } from './values';
+
+export function scopedMemberName(name: string, library: string): string {
+  return name.startsWith('_') ? `${library}\0${name}` : name;
+}
+
+export function sourceMemberName(name: string): string {
+  return name.slice(name.indexOf('\0') + 1);
+}
 
 /** A member as the type checker sees it, and as the runtime runs it. */
 export type Member = MethodMember | GetterMember | SetterMember | FieldMember;
@@ -190,12 +199,28 @@ export class ClassInfo {
     return this.supertypePath(target) !== undefined;
   }
 
+  conflictingSupertype(): { first: InterfaceType; second: InterfaceType } | undefined {
+    const encountered = new Map<ClassInfo, InterfaceType>();
+    const pending = [this.thisType];
+    for (const type of pending) {
+      const first = encountered.get(type.cls);
+      if (first) {
+        if (!(isSubtype(first, type) && isSubtype(type, first))) return { first, second: type };
+        continue;
+      }
+      encountered.set(type.cls, type);
+      const env = new Map(type.cls.typeParams.map((param, index) => [param, type.args[index] ?? DYNAMIC]));
+      for (const parent of type.cls.directSupertypes) pending.push(substitute(parent, env) as InterfaceType);
+    }
+    return undefined;
+  }
+
   /** The concrete member that runs for an instance of this class, searching the superclass chain. */
   implementation(name: string): Member | undefined {
     if (this.implementations.has(name)) return this.implementations.get(name);
     let found: Member | undefined;
     for (const cls of this.superclassChain()) {
-      const member = cls.members.get(name);
+      const member = cls.ownInstanceMember(name, false);
       if (member && !member.isAbstract) {
         found = member;
         break;
@@ -209,7 +234,7 @@ export class ClassInfo {
     if (this.setterImplementations.has(name)) return this.setterImplementations.get(name);
     let found: Member | undefined;
     for (const cls of this.superclassChain()) {
-      const member = cls.setters.get(name);
+      const member = cls.ownInstanceMember(name, true);
       if (member && !member.isAbstract) {
         found = member;
         break;
@@ -233,7 +258,7 @@ export class ClassInfo {
   private findInterfaceMember(name: string, setter: boolean, visited: Set<ClassInfo>): Member | undefined {
     if (visited.has(this)) return undefined;
     visited.add(this);
-    const own = (setter ? this.setters : this.members).get(name);
+    const own = this.ownInstanceMember(name, setter);
     if (own) return own;
     for (const supertype of this.directSupertypes) {
       const found = supertype.cls.findInterfaceMember(name, setter, visited);
@@ -242,14 +267,22 @@ export class ClassInfo {
     return undefined;
   }
 
+  private ownInstanceMember(key: string, setter: boolean): Member | undefined {
+    const name = sourceMemberName(key);
+    const library = (this.mixinOf ?? this).library;
+    if (scopedMemberName(name, library) !== key) return undefined;
+    return (setter ? this.setters : this.members).get(name);
+  }
+
   /** The names of every instance member the interface has, for checks such as missing implementations. */
   interfaceMemberNames(): Set<string> {
     const names = new Set<string>();
     const visit = (cls: ClassInfo, seen: Set<ClassInfo>): void => {
       if (seen.has(cls)) return;
       seen.add(cls);
-      for (const name of cls.members.keys()) names.add(name);
-      for (const name of cls.setters.keys()) names.add(`${name}=`);
+      const library = (cls.mixinOf ?? cls).library;
+      for (const name of cls.members.keys()) names.add(scopedMemberName(name, library));
+      for (const name of cls.setters.keys()) names.add(scopedMemberName(`${name}=`, library));
       for (const supertype of cls.directSupertypes) visit(supertype.cls, seen);
     };
     visit(this, new Set());

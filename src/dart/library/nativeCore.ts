@@ -1,4 +1,5 @@
 import { TURTLE_METHOD_NAMES, type TurtleState } from '../../interpreter/turtleWorld';
+import { scopedMemberName } from '../classes';
 import { encodableText, formatDouble, safeToString, stringOf } from '../format';
 import { HashStore } from '../hashStore';
 import type { Runtime } from '../runtime';
@@ -251,13 +252,14 @@ export function safeToStringOf(runtime: Runtime, value: Value): string {
 // code-gauge-allow functionCognitiveComplexity 22 -- A transcription of the SDK's algorithm, case by case.
 define('NoSuchMethodError._describe', (runtime, _receiver, [receiver, invocation, found]) => {
   const field = (name: string): Value => runtime.getProperty(invocation, name, undefined);
-  const member = runtime.getProperty(field('memberName'), '_name', undefined) as string;
+  const symbolName = scopedMemberName('_name', 'dart:core');
+  const member = runtime.getProperty(field('memberName'), symbolName, undefined) as string;
   const kind = field('isGetter') === true ? 'getter' : field('isSetter') === true ? 'setter' : 'method';
   const parts = (field('positionalArguments') as DartList).elements.map((value) => safeToStringOf(runtime, value));
   const named = field('namedArguments') as DartObject;
   const namedParts: [string, string][] = [];
   for (const key of iterableValues(runtime, runtime.getProperty(named, 'keys', undefined))) {
-    const keyName = runtime.getProperty(key, '_name', undefined) as string;
+    const keyName = runtime.getProperty(key, symbolName, undefined) as string;
     const value = runtime.invoke(named, '[]', { positional: [key], named: undefined }, [], undefined);
     namedParts.push([keyName, `${keyName}: ${safeToStringOf(runtime, value)}`]);
   }

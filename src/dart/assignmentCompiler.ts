@@ -272,9 +272,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
           return this.staticTarget2(member, expression);
         }
         if (staticTarget?.kind === 'prefix') {
-          const declaration = this.library.lookupPrefixed(staticTarget.prefix, expression.name);
-          if (declaration?.kind === 'variable') return this.globalTarget(declaration.global, expression);
-          return this.error(expression, `${staticTarget.prefix}.${expression.name} には代入できません。`);
+          return this.prefixedTarget(staticTarget.prefix, expression.name, expression);
         }
         if (expression.object.kind === 'super') {
           return this.memberTarget(this.superReceiver(expression.object), expression.name, false, expression);
@@ -305,6 +303,13 @@ export abstract class AssignmentCompiler extends ControlCompiler {
         return this.error(expression, 'この式には代入できません。');
       }
     }
+  }
+
+  private prefixedTarget(prefix: string, name: string, span: Span): AssignableTarget {
+    const declaration = this.library.lookupPrefixed(prefix, name);
+    if (!declaration) return this.undefinedName(span, name, prefix);
+    if (declaration.kind === 'variable') return this.globalTarget(declaration.global, span);
+    return this.error(span, `${prefix}.${name} には代入できません。`);
   }
 
   // code-gauge-allow duplicateLines 29 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
@@ -413,6 +418,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
 
   // code-gauge-allow duplicateLines 24 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   private staticTarget2(member: Member, span: Span): AssignableTarget {
+    this.checkUnavailableStaticMember(member.owner, member.name, span);
     if (member.kind === 'field') {
       const global = this.globals[member.slot];
       return this.globalTarget(global, span);
@@ -443,7 +449,8 @@ export abstract class AssignmentCompiler extends ControlCompiler {
 
   protected globalTarget(global: GlobalVariable, span: Span): AssignableTarget {
     if (global.isConst) this.error(span, `const の ${global.name} には代入できません。`);
-    if (global.isFinal && !global.isLate) this.error(span, `final の ${global.name} には代入できません。`);
+    if (global.isFinal && (!global.isLate || global.hasInitializer))
+      this.error(span, `final の ${global.name} には代入できません。`);
     const read = this.readGlobal(global);
     const { slot } = global;
     const isLateFinal = global.isLate && global.isFinal;
@@ -472,13 +479,15 @@ export abstract class AssignmentCompiler extends ControlCompiler {
   ): AssignableTarget {
     const receiverType = receiver.type;
     const prepare = preparingReceiver(receiver.run, nullAware);
+    const memberName = this.runtimeMemberName(name);
     if (receiverType.kind === 'dynamic') {
       return {
         writeType: DYNAMIC,
         readType: DYNAMIC,
         prepare,
-        read: (frame, prepared) => frame.runtime.getProperty(prepared as Value, name, span.row),
-        write: (frame, prepared, value) => frame.runtime.setProperty(prepared as Value, name, value, span.row, true),
+        read: (frame, prepared) => frame.runtime.getProperty(prepared as Value, memberName, span.row),
+        write: (frame, prepared, value) =>
+          frame.runtime.setProperty(prepared as Value, memberName, value, span.row, true),
         shorting: true,
       };
     }
@@ -496,7 +505,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     const getter = this.memberFor(receiver, lookupType, name, undefined);
     const target = { writeType: setter.type, readType: getter?.type, prepare, shorting: nullAware || shorting };
     const isSuper = (receiver as { isSuper?: boolean }).isSuper === true;
-    if (isSuper) return { ...target, ...superAccessors(this.superclassOf(span).classAt, name, span.row) };
+    if (isSuper) return { ...target, ...superAccessors(this.superclassOf(span).classAt, memberName, span.row) };
     const extensionRead = this.extensionTargetCall(getter, span.row);
     const extensionWrite = this.extensionTargetCall(setter, span.row);
     return {
@@ -504,10 +513,10 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       read: (frame, prepared) =>
         extensionRead
           ? extensionRead(frame, prepared as Value, [])
-          : frame.runtime.getProperty(prepared as Value, name, span.row),
+          : frame.runtime.getProperty(prepared as Value, memberName, span.row),
       write: (frame, prepared, value) => {
         if (extensionWrite) extensionWrite(frame, prepared as Value, [value]);
-        else frame.runtime.setProperty(prepared as Value, name, value, span.row);
+        else frame.runtime.setProperty(prepared as Value, memberName, value, span.row);
       },
     };
   }

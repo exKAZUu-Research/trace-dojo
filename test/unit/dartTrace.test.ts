@@ -316,3 +316,36 @@ test('nested grid updates complete with the Java trace length', () => {
   expect(actual.traceItems).toHaveLength(expected.traceItems.length);
   expect(actual).toMatchObject({ finalVars: expected.finalVars, stdout: expected.stdout });
 });
+
+test('temporary declaration pattern subjects keep their turtles during matching', () => {
+  const program = `class Trigger {
+    int get value { Turtle(3, 3).canMoveForward(); return 0; }
+  }
+  void main() {
+    var (Trigger(value: n), turtle) = (Trigger(), Turtle(1, 1));
+    turtle.forward();
+  }`;
+  expect(traceProgram('dart', program, program)).toMatchObject({
+    finalTurtles: [{ x: 1, y: 2 }],
+    uncaughtException: undefined,
+  });
+});
+
+test('map snapshots preserve distinct entries with indistinguishable source labels', () => {
+  const program = `void main() {
+    final values = <Object, int>{1: 10, '1': 20, true: 30, 'true': 40, '…': 50};
+    print(values.length);
+  }`;
+  const result = traceProgram('dart', program, program);
+  expect(result.stdout).toBe('5\n');
+  expect(result.traceItems.at(-1)?.referenceVars.values).toMatchObject({
+    kind: 'object',
+    entries: {
+      '1': { kind: 'value', value: 10 },
+      '1 (2)': { kind: 'value', value: 20 },
+      true: { kind: 'value', value: 30 },
+      'true (2)': { kind: 'value', value: 40 },
+      '… (2)': { kind: 'value', value: 50 },
+    },
+  });
+});

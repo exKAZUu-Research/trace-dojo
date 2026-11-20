@@ -1,5 +1,6 @@
-// code-gauge-allow-file fileNcss 801 -- Keep statement cases together so their flow and compilation state are visible.
+// code-gauge-allow-file fileNcss 810 -- Keep statement cases together so their flow and compilation state are visible.
 import type {
+  Annotation,
   Block,
   Expression,
   ForInBinding,
@@ -80,7 +81,7 @@ export abstract class StatementCompiler extends PatternCompiler {
   // Functions
 
   // code-gauge-allow functionCognitiveComplexity 18 -- Parameters, the body, and return-type inference.
-  // code-gauge-allow functionNcss 46 -- Parameters, the body, and return-type inference.
+  // code-gauge-allow functionNcss 47 -- Parameters, the body, and return-type inference share the function context.
   compileFunction(spec: FunctionSpec & { isClosure?: boolean }): CompiledFunction {
     const isClosure = spec.isClosure ?? spec.name === '<anonymous closure>';
     const savedFn = this.fn;
@@ -111,6 +112,7 @@ export abstract class StatementCompiler extends PatternCompiler {
       : Flow.start();
     this.recordsSteps = this.isTracing;
     try {
+      this.checkParameterAnnotations(spec.parameters);
       const binders = this.compileParameters(spec);
       const expectedReturn = spec.returnType ?? spec.contextReturnType;
       let run: (frame: Frame) => Value;
@@ -471,7 +473,9 @@ export abstract class StatementCompiler extends PatternCompiler {
   }
 
   // code-gauge-allow functionCognitiveComplexity 24 -- Bind a declaration, retain its constant or promotion, and emit its step.
+  // code-gauge-allow functionNcss 31 -- Keep declaration checks adjacent to flow and slot initialization.
   protected compileLocalDeclaration(declaration: VariableDeclaration, recordStep = true): Exec {
+    this.checkAnnotations(declaration.annotations);
     const declaredType = declaration.type ? this.resolveType(declaration.type) : undefined;
     const parts: { slot: number; run: Eval | undefined; isLate: boolean }[] = [];
     const initialized: Compiled[] = [];
@@ -592,9 +596,17 @@ export abstract class StatementCompiler extends PatternCompiler {
     return this.withStep(statement, exec, false);
   }
 
+  protected checkParameterAnnotations(parameters: FormalParameters): void {
+    for (const parameter of [...parameters.positional, ...parameters.named])
+      this.checkAnnotations(parameter.annotations);
+  }
+
+  protected abstract checkAnnotations(annotations: Annotation[] | undefined): void;
+
   // code-gauge-allow duplicateLines 18 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   private compileLocalFunction(statement: Extract<Statement, { kind: 'localFunction' }>): Exec {
     const { declaration } = statement;
+    this.checkAnnotations(declaration.annotations);
     const typeParams = this.declareTypeParams(declaration.typeParameters);
     const { type, positionalTypes, namedTypes } = this.withTypeParams(typeParams, () =>
       this.signatureOf(declaration.parameters, declaration.returnType, typeParams)
@@ -1149,17 +1161,21 @@ export abstract class StatementCompiler extends PatternCompiler {
 }
 
 /** Whether a method overrides one whose parameter at the position or of the name is `covariant`, making it so. */
+// code-gauge-allow functionCognitiveComplexity 16 -- Check visibility and variance together during inheritance traversal.
 export function inheritsCovariance(
   cls: ClassInfo,
   methodName: string,
   parameterName: string,
   index: number | undefined,
-  setter = false
+  setter = false,
+  library = (cls.mixinOf ?? cls).library
 ): boolean {
   for (const { cls: supertype } of cls.directSupertypes) {
-    const field = setter ? supertype.setters.get(methodName) : undefined;
+    const source = supertype.mixinOf ?? supertype;
+    const visible = !methodName.startsWith('_') || source.library === library;
+    const field = visible && setter ? supertype.setters.get(methodName) : undefined;
     if (field?.kind === 'field' && field.isCovariant) return true;
-    const method = supertype.declaration?.members.find(
+    const method = (visible ? source.declaration : undefined)?.members.find(
       (member): member is MethodDeclaration =>
         member.kind === 'method' && member.name === methodName && (member.methodKind === 'setter') === setter
     );
@@ -1167,7 +1183,8 @@ export function inheritsCovariance(
       index === undefined
         ? method?.parameters.named.find((named) => named.name === parameterName)
         : method?.parameters.positional[index];
-    if (parameter?.isCovariant || inheritsCovariance(supertype, methodName, parameterName, index, setter)) return true;
+    if (parameter?.isCovariant || inheritsCovariance(supertype, methodName, parameterName, index, setter, library))
+      return true;
   }
   return false;
 }
