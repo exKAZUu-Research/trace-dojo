@@ -507,6 +507,22 @@ int main() {
   }
 );
 
+test.each(['std::stoi(text)', 'std::stod(text)'])('meters the text scanned by %s', (conversion) => {
+  const program = `#include <string>
+int main() {
+  std::string text(8000, '0');
+  text += '1';
+  for (int i = 0; i < 40; ++i) ${conversion};
+}`;
+  const previous = LIMITS.maxOperations;
+  LIMITS.maxOperations = 3000;
+  try {
+    expect(executeProgram('cpp', program)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  } finally {
+    LIMITS.maxOperations = previous;
+  }
+});
+
 test.each([
   ['list', '=='],
   ['vector', '!='],

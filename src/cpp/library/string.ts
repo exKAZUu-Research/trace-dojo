@@ -203,6 +203,13 @@ const MAX_SIZE = 0x7f_ff_ff_ff_ff_ff_ff_f6n;
 const MAX_LENGTH = LIMITS.maxStringLength;
 
 /** Reads the bytes of an argument that is a `std::string` (by reference) or a `const char*`. */
+/** The bytes a numeric conversion copies and scans, charged per 64 bytes like other byte scans. */
+function numberText(frame: Frame, value: unknown): Uint8Array {
+  const text = textOf(frame, value);
+  frame.runtime.spend(Math.ceil(text.length / 64));
+  return byteArray(text);
+}
+
 function textOf(frame: Frame, value: unknown): string {
   if (value instanceof Ptr) {
     const target = value.store instanceof StringValue && value.index === 0 ? value.store : value.read();
@@ -1132,8 +1139,7 @@ export function stringFunctions(library: Library, cls: ClassInfo): Map<string, R
         [ref, pointerTo(SIZE_T), INT],
         resultType,
         ([text, index, base], { frame }) => {
-          const bytes = textOf(frame, text);
-          const parsed = parseIntegerPrefix(byteArray(bytes), base === undefined ? 10 : asNumber(base));
+          const parsed = parseIntegerPrefix(numberText(frame, text), base === undefined ? 10 : asNumber(base));
           if (parsed.length === 0)
             return throwLibrary(frame, library.exception('invalid_argument'), `${name}: no conversion`);
           let value = parsed.value;
@@ -1163,7 +1169,7 @@ export function stringFunctions(library: Library, cls: ClassInfo): Map<string, R
         [ref, pointerTo(SIZE_T)],
         resultType,
         ([text, index], { frame }) => {
-          const bytes = byteArray(textOf(frame, text));
+          const bytes = numberText(frame, text);
           const isFloat = resultType === FLOAT;
           const parsed = parseFloatPrefix(bytes, undefined, isFloat);
           if (parsed.length === 0)
