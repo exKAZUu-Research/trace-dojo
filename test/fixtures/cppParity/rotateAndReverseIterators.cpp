@@ -53,6 +53,8 @@ int main() {
   *std::rbegin(values) = 7;
   for (auto it = std::rbegin(values); it != std::rend(values); ++it) std::cout << *it;
   std::cout << '|' << *std::rbegin(constant) << '\n';
+  std::cout << std::distance(values + 3, values) << ' '
+            << std::distance(std::rbegin(values), std::rend(values)) << '\n';
   char bytes[8] = "a";
   std::strncpy(bytes + 2, bytes, 4);
   std::puts(bytes + 2);

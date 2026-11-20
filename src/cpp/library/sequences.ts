@@ -1161,7 +1161,7 @@ function emplacement(
   const positionArg = member === 'emplace' ? args[0] : undefined;
   if (member === 'emplace' && !positionArg) return compiler.error(row, 'emplace には挿入位置を書いてください。');
   const elementArgs = member === 'emplace' ? args.slice(1) : args;
-  const value = constructElement(compiler, element, elementArgs, row);
+  const withElement = forwardedElementConstruction(compiler, element, elementArgs, row);
   const self = compiler.objectOf(object);
   const position = positionArg
     ? compiler.convert(
@@ -1186,21 +1186,54 @@ function emplacement(
     isLvalue: ret.kind === 'reference',
     row,
     run: (frame) =>
-      holdAll(frame, [self], ([receiver]) => {
-        const sequence = (receiver as Ptr).read() as SequenceValue;
-        frame.runtime.reserve(1);
-        if (member === 'emplace_front') {
-          sequence.splice(0, 0, value(frame));
-          return sequence.location(0);
-        }
-        if (member === 'emplace_back') {
-          editor.append(frame, sequence, 1, (target) => value(frame, target));
-          return sequence.location(sequence.items.length - 1);
-        }
-        const at = positionOf(sequence, (position as Eval)(frame));
-        editor.emplace(frame, sequence, at, (target) => value(frame, target));
-        return sequence.iteratorLocation(at);
-      }),
+      holdAll(frame, position ? [self, position] : [self], ([receiver, location]) =>
+        withElement(frame, (make) => {
+          const sequence = (receiver as Ptr).read() as SequenceValue;
+          frame.runtime.reserve(1);
+          if (member === 'emplace_front') {
+            sequence.splice(0, 0, make());
+            return sequence.location(0);
+          }
+          if (member === 'emplace_back') {
+            editor.append(frame, sequence, 1, make);
+            return sequence.location(sequence.items.length - 1);
+          }
+          const at = positionOf(sequence, location);
+          editor.emplace(frame, sequence, at, make);
+          return sequence.iteratorLocation(at);
+        })
+      ),
+  };
+}
+
+type ElementFactory = (destination?: CObject) => Value;
+
+export function forwardedElementConstruction(
+  compiler: ExpressionCompiler,
+  element: Type,
+  args: Expr[],
+  row: number
+): <T>(frame: Frame, use: (make: ElementFactory) => T) => T {
+  const bases = new WeakMap<Frame, number>();
+  const forwarded = args.map((arg) => compiler.materialize(arg));
+  const runs = forwarded.map(({ run }) => run);
+  const locations = forwarded.map((arg, index): Expr => ({
+    type: arg.type,
+    isLvalue: true,
+    isXvalue: arg.isXvalue,
+    row: arg.row,
+    run: (frame) => frame.evaluationRoots[(bases.get(frame) as number) + index],
+  }));
+  const construct = constructElement(compiler, element, locations, row);
+  return (frame, use) => {
+    const previous = bases.get(frame);
+    bases.set(frame, frame.evaluationRoots.length);
+    try {
+      return holdAll(frame, runs, () => use((destination) => construct(frame, destination)));
+    } finally {
+      if (previous === undefined) bases.delete(frame);
+      else bases.set(frame, previous);
+    }
   };
 }
 

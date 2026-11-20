@@ -1014,7 +1014,9 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     return native('distance', params(args), PTRDIFF_T, ([first, last]) => {
       const a = first as Ptr;
       const b = last as Ptr;
-      if (a.store !== b.store) throw new CppRuntimeError('invalidRange');
+      if (info.category !== 'randomAccess') return BigInt(a.rangeLength(b, info.isReverse));
+      if (!a.sharesRange(b)) throw new CppRuntimeError('invalidRange');
+      if (!a.isNull) a.target();
       return BigInt(info.isReverse ? a.index - b.index : b.index - a.index);
     });
   });

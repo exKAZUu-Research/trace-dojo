@@ -32,7 +32,7 @@ import {
 } from './elements';
 import type { Library } from './registry';
 import { SequenceEditor } from './sequenceEdits';
-import { constructElement, iteratorRange, sequenceClass } from './sequences';
+import { forwardedElementConstruction, iteratorRange, sequenceClass } from './sequences';
 import { addMethod, constRef, native, nativeConstructor } from './support';
 import { typeKey } from './templates';
 import { functorClass } from './utility';
@@ -128,7 +128,7 @@ export function adapterClass(
         return;
       }
       if (isConstType(object.type)) return compiler_.error(row, `const の ${cls.name} には ${member} を使えません。`);
-      const construct = source ? undefined : constructElement(compiler_, element, args, row);
+      const withElement = source ? undefined : forwardedElementConstruction(compiler_, element, args, row);
       if (source && kind !== 'priority_queue') requireMoveConstruction(compiler_, element, row);
       const self = compiler_.objectOf(object);
       const result = member === 'emplace' && kind !== 'priority_queue' ? reference : VOID;
@@ -137,14 +137,14 @@ export function adapterClass(
         isLvalue: result.kind === 'reference',
         row,
         run: (frame) =>
-          holdAll(frame, [self, source ?? (() => {})], ([receiver, bound]) => {
-            const sequence = (receiver as Ptr).read() as SequenceValue;
-            push(frame, sequence, (target) =>
-              construct
-                ? construct(frame, target)
-                : constructElementFromRvalue(frame, element, (bound as Ptr).read(), target)
-            );
-            if (result.kind !== 'void') return sequence.location(sequence.items.length - 1);
+          holdAll(frame, source ? [self, source] : [self], ([receiver, bound]) => {
+            const append = (make: (target?: CObject) => Value): Value => {
+              const sequence = (receiver as Ptr).read() as SequenceValue;
+              push(frame, sequence, make);
+              if (result.kind !== 'void') return sequence.location(sequence.items.length - 1);
+            };
+            if (withElement) return withElement(frame, append);
+            return append((target) => constructElementFromRvalue(frame, element, (bound as Ptr).read(), target));
           }),
       };
     },

@@ -63,9 +63,9 @@ function floatLiteral(node: Syntax, lower: string, isHex: boolean): { type: Floa
       body = body.slice(0, -1);
     }
   }
-  const value = isHex ? hexFloat(body, name === 'float') : Number(body);
+  const value = isHex ? hexFloat(body, name === 'float') : name === 'float' ? decimalFloat(body) : Number(body);
   if (Number.isNaN(value)) return compileError(node.row, `${node.text} は数として読めません。`);
-  return { type: { kind: 'float', name }, value: !isHex && name === 'float' ? Math.fround(value) : value };
+  return { type: { kind: 'float', name }, value };
 }
 
 function hexFloat(text: string, isFloat: boolean): number {
@@ -75,6 +75,22 @@ function hexFloat(text: string, isFloat: boolean): number {
   const digits = whole + fraction;
   if (!digits) return Number.NaN;
   return roundBinary(BigInt(`0x${digits}`), 1n, Number(exponent) - 4 * fraction.length, isFloat);
+}
+
+function decimalFloat(text: string): number {
+  const match = /^(\d*)(?:\.(\d*))?(?:e([+-]?\d+))?$/.exec(text);
+  if (!match || !(match[1] || match[2])) return Number.NaN;
+  const fraction = match[2] ?? '';
+  const digits = (match[1] + fraction).replace(/^0+/, '');
+  if (!digits) return 0;
+  const power = Number(match[3] ?? 0) - fraction.length;
+  const decimalExponent = power + digits.length - 1;
+  if (decimalExponent > 38) return Number.POSITIVE_INFINITY;
+  if (decimalExponent < -46) return 0;
+  const coefficient = BigInt(digits);
+  return power < 0
+    ? roundBinary(coefficient, 10n ** BigInt(-power), 0, true)
+    : roundBinary(coefficient * 10n ** BigInt(power), 1n, 0, true);
 }
 
 /** The bytes a character or string literal's content stands for, in UTF-8, with its escapes resolved. */

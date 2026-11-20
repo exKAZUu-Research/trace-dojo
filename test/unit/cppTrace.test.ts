@@ -896,6 +896,22 @@ int main() {
   });
 });
 
+test.each(['values.end(), values.begin()', 'values.rend(), values.rbegin()'])(
+  'distance requires the end of a list range to be reachable: %s',
+  (endpoints) => {
+    const program = `#include <iterator>
+#include <list>
+int main() {
+  std::list<int> values{1, 2, 3};
+  std::distance(${endpoints});
+}`;
+    expect(executeProgram('cpp', program)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: expect.stringContaining('範囲（先頭と末尾のイテレータ）が正しくありません'),
+    });
+  }
+);
+
 test.each(['std::cout.width(100001)', 'std::cout << std::fixed << std::setprecision(100001)'])(
   'oversized formatted output is charged before padding: %s',
   (setup) => {
