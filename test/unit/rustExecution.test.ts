@@ -1552,6 +1552,23 @@ fn main() {
   });
 });
 
+test('rejects Rust doc comments on operands and initializers', () => {
+  for (const statement of [
+    'let mut n = 1;\n/// description\n n += 1;',
+    'let _ = 1 +\n/// description\n2;',
+    'let _ =\n/// description\n "text".len();',
+    '/// description\n "text".len() as i64;',
+  ]) {
+    expect(executeProgram('rust', rustMain(statement))).toMatchObject({ kind: 'compileError' });
+  }
+  const valid = `fn value() -> i32 {
+    /// An entire tail expression may have a doc comment.
+    (1 + 2)
+}
+fn main() { println!("{}", value()); }`;
+  expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: '3\n' });
+});
+
 test('borrows through shared references in Rust closures after their bindings end', () => {
   const program = `fn main() {
     let v = vec![1];
