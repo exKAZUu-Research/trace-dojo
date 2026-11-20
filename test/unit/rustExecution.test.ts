@@ -2859,3 +2859,30 @@ fn main() {}`;
     expect(executeProgram('rust', invalid)).toMatchObject({ kind: 'compileError' });
   }
 });
+
+test('enforces Rust restricted visibility for paths and imports', () => {
+  const program = `mod parent {
+    pub mod child {
+        pub(super) fn message() { println!("visible"); }
+        pub(self) fn hidden() {}
+    }
+    pub(self) use child::message as alias;
+    pub fn allowed() { alias(); }
+}
+fn main() { parent::allowed(); }`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'visible\n' });
+  for (const call of ['parent::child::message()', 'parent::child::hidden()', 'parent::alias()']) {
+    expect(executeProgram('rust', program.replace('parent::allowed()', call))).toMatchObject({ kind: 'compileError' });
+  }
+});
+
+test('rejects ambiguous Rust glob imports and accepts two routes to one item', () => {
+  const program = `mod a { pub fn show() { println!("a"); } }
+mod b { pub fn show() { println!("b"); } }
+use a::*;
+use b::*;
+fn main() { show(); }`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'compileError' });
+  const reexport = program.replace('pub fn show() { println!("b"); }', 'pub use super::a::show;');
+  expect(executeProgram('rust', reexport)).toMatchObject({ kind: 'executed', stdout: 'a\n' });
+});

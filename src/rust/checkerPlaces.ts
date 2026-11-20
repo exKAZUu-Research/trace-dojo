@@ -2,12 +2,12 @@ import type { LocalVar } from './annotations';
 import type { Expr, Span } from './ast';
 import type { Checker } from './checker';
 import { normalize } from './infer';
-import type { Module } from './items';
-import { compileError } from './items';
+import { compileError, visibleFrom } from './items';
 import { autoderefSteps, lookupMethod } from './methods';
 import { RANGE_TYPES } from './traits';
 import {
   type AdtDef,
+  type FieldDef,
   freshVar,
   ref,
   resolve,
@@ -144,20 +144,9 @@ export function checkField(c: Checker, expr: Extract<Expr, { kind: 'field' }>): 
   return compileError(expr.nameSpan, `${t} にフィールド ${expr.name} がありません。`);
 }
 
-export function checkFieldVisible(
-  c: Checker,
-  def: AdtDef,
-  field: { name: string; isPublic: boolean },
-  span: Span
-): void {
-  if (field.isPublic) return;
-  const module = def.module as Module | undefined;
-  if (!module || module.isStd) {
-    if (module?.isStd) compileError(span, `${def.name} のフィールド ${field.name} は非公開です。`);
-    return;
-  }
-  if (!module.namedModule.isAncestorOf(c.body.module.namedModule)) {
-    compileError(span, `${def.name} のフィールド ${field.name} は非公開です（pub が付いていません）。`);
+export function checkFieldVisible(c: Checker, def: AdtDef, field: FieldDef, span: Span): void {
+  if (!visibleFrom(field.visibleWithin, c.body.module)) {
+    compileError(span, `${def.name} のフィールド ${field.name} は非公開です。`);
   }
 }
 

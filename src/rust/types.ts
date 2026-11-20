@@ -65,7 +65,7 @@ export interface OpaqueType {
 export interface FieldDef {
   name: string;
   type: Type;
-  isPublic: boolean;
+  visibleWithin: Module | undefined;
   span: Span;
 }
 

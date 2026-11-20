@@ -72,14 +72,14 @@ export type ValueBinding =
 
 interface Entry<T> {
   binding: T;
-  isPublic: boolean;
+  visibleWithin: Module | undefined;
 }
 
 /** A use declaration's import of one name, resolved when the name is first looked up. */
 interface Import {
   path: string[];
   span: Span;
-  isPublic: boolean;
+  visibleWithin: Module | undefined;
   resolving: boolean;
   types?: Entry<TypeBinding>;
   values?: Entry<ValueBinding>;
@@ -91,7 +91,7 @@ export class Module {
   readonly values = new Map<string, Entry<ValueBinding>>();
   readonly imports = new Map<string, Import>();
   readonly anonymousImports: Import[] = [];
-  readonly globs: { path: string[]; span: Span; isPublic: boolean }[] = [];
+  readonly globs: { path: string[]; span: Span; visibleWithin: Module | undefined }[] = [];
   readonly children: Module[] = [];
 
   constructor(
@@ -268,7 +268,10 @@ export class ItemCollector {
         case 'mod': {
           if (module.types.has(item.name)) compileError(item.span, `${item.name} という名前が2回宣言されています。`);
           const child = new Module(this.program, item.name, module, module.isStd);
-          module.types.set(item.name, { binding: { kind: 'mod', module: child }, isPublic: item.vis === 'pub' });
+          module.types.set(item.name, {
+            binding: { kind: 'mod', module: child },
+            visibleWithin: visibilityScope(item.vis, module, item.span),
+          });
           this.collectItems(item.items, child);
           break;
         }
@@ -301,12 +304,12 @@ export class ItemCollector {
     if (module.types.has(name) || module.imports.get(name)?.types) {
       compileError(span, `${name} という名前が2回宣言されています。`);
     }
-    module.types.set(name, { binding, isPublic: vis === 'pub' });
+    module.types.set(name, { binding, visibleWithin: visibilityScope(vis, module, span) });
   }
 
   private declareValue(module: Module, name: string, binding: ValueBinding, vis: Visibility, span: Span): void {
     if (module.values.has(name)) compileError(span, `${name} という名前が2回宣言されています。`);
-    module.values.set(name, { binding, isPublic: vis === 'pub' });
+    module.values.set(name, { binding, visibleWithin: visibilityScope(vis, module, span) });
   }
 
   private structItem(item: StructItem, module: Module): void {
@@ -341,7 +344,7 @@ export class ItemCollector {
         fields: item.fields.map((field) => ({
           name: field.name,
           type: lowerType(field.type, scope),
-          isPublic: field.vis === 'pub',
+          visibleWithin: visibilityScope(field.vis, module.namedModule, field.span),
           span: field.span,
         })),
         discriminant: 0n,
@@ -411,7 +414,7 @@ export class ItemCollector {
         def.variants[index].fields = variant.fields.map((field) => ({
           name: field.name,
           type: lowerType(field.type, scope),
-          isPublic: true,
+          visibleWithin: undefined,
           span: field.span,
         }));
         checkDuplicateFields(variant.fields);
@@ -654,7 +657,11 @@ export class ItemCollector {
   private useItem(item: UseItem, module: Module): void {
     for (const entry of item.entries) {
       if (entry.glob) {
-        module.globs.push({ path: entry.path, span: entry.span, isPublic: item.vis === 'pub' });
+        module.globs.push({
+          path: entry.path,
+          span: entry.span,
+          visibleWithin: visibilityScope(item.vis, module, item.span),
+        });
         continue;
       }
       const name = entry.alias ?? entry.path.at(-1) ?? '';
@@ -664,7 +671,7 @@ export class ItemCollector {
       const imported: Import = {
         path: entry.path,
         span: entry.span,
-        isPublic: item.vis === 'pub',
+        visibleWithin: visibilityScope(item.vis, module, item.span),
         resolving: false,
         resolved: false,
       };
@@ -946,7 +953,7 @@ function integerConstant(path: PathAst, scope: TypeScope): { def: ConstDef; self
         );
   if (owner?.kind === 'mod') {
     const entry = ownValue(owner.module, name, path.span, new Set());
-    checkVisible(entry, owner.module, module.namedModule, name, path.span);
+    checkVisible(entry, module.namedModule, name, path.span);
     return entry?.binding.kind === 'const' ? { def: entry.binding.def, selfType: undefined } : undefined;
   }
   const selfType = owner ? lowerPathType({ ...path, segments: prefix }, scope) : scope.selfType;
@@ -973,7 +980,10 @@ export function lookupAssociatedConst(
     if (!def) continue;
     const subst = solver.matchImpl(impl, selfType);
     if (!subst) continue;
-    if (def.ast.vis !== 'pub' && !def.module.isStd && !def.module.namedModule.isAncestorOf(module.namedModule)) {
+    if (
+      !def.module.isStd &&
+      !visibleFrom(visibilityScope(def.ast.vis, def.module.namedModule, def.ast.span), module.namedModule)
+    ) {
       compileError(span, `${name} は非公開です（pub が付いていません）。`);
     }
     return { def, subst };
@@ -1097,11 +1107,11 @@ export function* globAnonymousTraits(module: Module, requester = module, seen = 
   if (seen.has(module)) return;
   seen.add(module);
   for (const glob of module.globs) {
-    if (!glob.isPublic && !module.isAncestorOf(requester)) continue;
+    if (!visibleFrom(glob.visibleWithin, requester)) continue;
     const target = globTarget(module, glob);
     if (target.kind !== 'mod') continue;
     for (const entry of target.module.anonymousImports) {
-      if (!entry.isPublic && !target.module.isAncestorOf(requester)) continue;
+      if (!visibleFrom(entry.visibleWithin, requester)) continue;
       resolveImport(target.module, entry);
       const binding = entry.types?.binding;
       if (binding?.kind === 'trait') yield binding.def;
@@ -1124,23 +1134,46 @@ function fromGlobs(
   if (visiting.has(module) || module.globs.length === 0 || resolvingGlobs.has(module)) return undefined;
   visiting.add(module);
   try {
+    let match: Entry<TypeBinding | ValueBinding> | undefined;
     for (const glob of module.globs) {
-      const target = globTarget(module, glob);
-      if (target.kind === 'mod') {
-        const found =
-          ns === 'type' ? ownType(target.module, name, span, visiting) : ownValue(target.module, name, span, visiting);
-        if (found?.isPublic || (found && target.module.isAncestorOf(module)))
-          return { ...found, isPublic: glob.isPublic };
-      } else if (target.kind === 'adt' && target.def.kind === 'enum' && ns === 'value') {
-        const variant = target.def.variants.find((v) => v.name === name);
-        if (variant)
-          return { binding: { kind: 'ctor', def: target.def, variant: variant.index }, isPublic: glob.isPublic };
+      const found = globBinding(module, glob, name, span, visiting, ns);
+      if (!found) continue;
+      if (match && !sameGlobBinding(match.binding, found.binding)) {
+        compileError(span, `${name} は、複数の use ...::* で取り込まれているので、一つに決まりません。`);
       }
+      if (!match || (match.visibleWithin && visibleFrom(found.visibleWithin, match.visibleWithin))) match = found;
     }
-    return undefined;
+    return match;
   } finally {
     visiting.delete(module);
   }
+}
+
+function globBinding(
+  module: Module,
+  glob: Module['globs'][number],
+  name: string,
+  span: Span,
+  visiting: Set<Module>,
+  ns: 'type' | 'value'
+): Entry<TypeBinding | ValueBinding> | undefined {
+  const target = globTarget(module, glob);
+  if (target.kind === 'mod') {
+    const found =
+      ns === 'type' ? ownType(target.module, name, span, visiting) : ownValue(target.module, name, span, visiting);
+    if (!found || !visibleFrom(found.visibleWithin, module)) return undefined;
+    return { ...found, visibleWithin: narrowerScope(found.visibleWithin, glob.visibleWithin) };
+  }
+  if (target.kind !== 'adt' || target.def.kind !== 'enum' || ns !== 'value') return undefined;
+  const variant = target.def.variants.find((candidate) => candidate.name === name);
+  if (!variant) return undefined;
+  return { binding: { kind: 'ctor', def: target.def, variant: variant.index }, visibleWithin: glob.visibleWithin };
+}
+
+function sameGlobBinding(a: TypeBinding | ValueBinding, b: TypeBinding | ValueBinding): boolean {
+  if (a === b) return true;
+  if (a.kind === 'ctor' && b.kind === 'ctor') return a.def === b.def && a.variant === b.variant;
+  return a.kind === 'mod' && b.kind === 'mod' && a.module === b.module;
 }
 
 function globTarget(module: Module, glob: Module['globs'][number]): TypeBinding {
@@ -1161,21 +1194,30 @@ function resolveImport(module: Module, entry: Import): void {
     const last = path.at(-1) as string;
     if (last === 'self') {
       const target = resolveTypePath(path.slice(0, -1), module, span);
-      entry.types = { binding: target, isPublic: entry.isPublic };
+      entry.types = { binding: target, visibleWithin: entry.visibleWithin };
     } else if (path.length === 1 && EXTERN_CRATES.has(last)) {
-      entry.types = { binding: { kind: 'mod', module: module.program.std }, isPublic: entry.isPublic };
+      entry.types = { binding: { kind: 'mod', module: module.program.std }, visibleWithin: entry.visibleWithin };
     } else {
       const { types, values } = resolveImportedName(path, module, span);
       if (!types && !values) {
         compileError(span, `use ${path.join('::')} の ${last} が見つかりません。`);
       }
-      if (types) entry.types = { binding: types, isPublic: entry.isPublic };
-      if (values) entry.values = { binding: values, isPublic: entry.isPublic };
+      if (types) entry.types = scopedImport(types, entry);
+      if (values) entry.values = scopedImport(values, entry);
     }
     entry.resolved = true;
   } finally {
     entry.resolving = false;
   }
+}
+
+function scopedImport<T>(source: Entry<T>, target: Import): Entry<T> {
+  const { visibleWithin } = target;
+  const sourceScope = source.visibleWithin;
+  if (sourceScope && (!visibleWithin || !visibleFrom(sourceScope, visibleWithin))) {
+    compileError(target.span, 'use では、元の項目より広い範囲に公開できません。');
+  }
+  return { binding: source.binding, visibleWithin };
 }
 
 function builtinStruct(module: Module, name: string): BuiltinAdt | undefined {
@@ -1188,31 +1230,59 @@ function resolveImportedName(
   path: string[],
   module: Module,
   span: Span
-): { types?: TypeBinding; values?: ValueBinding } {
+): { types?: Entry<TypeBinding>; values?: Entry<ValueBinding> } {
   const last = path.at(-1) as string;
   const parent = path.length > 1 ? resolveTypePath(path.slice(0, -1), module, span) : undefined;
   if (!parent) {
     const scope = module.lexicalParent ?? module;
-    return { types: lookupType(scope, last, span), values: lookupValue(scope, last, span) };
+    return { types: ownType(scope, last, span, new Set()), values: ownValue(scope, last, span, new Set()) };
   }
   if (parent.kind === 'mod') {
     const typeEntry = ownType(parent.module, last, span, new Set());
     const valueEntry = ownValue(parent.module, last, span, new Set());
     if (!typeEntry && !valueEntry && parent.module.isStd)
       checkUnavailableStd([...parent.module.path.split('::'), last], span);
-    checkVisible<TypeBinding | ValueBinding>(typeEntry ?? valueEntry, parent.module, module, last, span);
-    return { types: typeEntry?.binding, values: valueEntry?.binding };
+    checkVisible(typeEntry, module, last, span);
+    checkVisible(valueEntry, module, last, span);
+    return { types: typeEntry, values: valueEntry };
   }
   if (parent.kind === 'adt' && parent.def.kind === 'enum') {
     const variant = parent.def.variants.find((v) => v.name === last);
-    if (variant) return { values: { kind: 'ctor', def: parent.def, variant: variant.index } };
+    if (variant) {
+      return {
+        values: { binding: { kind: 'ctor', def: parent.def, variant: variant.index }, visibleWithin: undefined },
+      };
+    }
   }
   return {};
 }
 
-function checkVisible<T>(entry: Entry<T> | undefined, owner: Module, from: Module, name: string, span: Span): void {
-  if (!entry || entry.isPublic || owner.isAncestorOf(from)) return;
+function checkVisible<T>(entry: Entry<T> | undefined, from: Module, name: string, span: Span): void {
+  if (!entry || visibleFrom(entry.visibleWithin, from)) return;
   compileError(span, `${name} は非公開です（pub が付いていません）。`);
+}
+
+export function visibilityScope(vis: Visibility, owner: Module, span: Span): Module | undefined {
+  if (vis === 'pub') return undefined;
+  if (vis === 'private') return owner;
+  const parent = owner.namedModule.parent;
+  if (!parent) compileError(span, 'pub(super) には親モジュールが必要です。');
+  return parent;
+}
+
+export function visibleFrom(scope: Module | undefined, from: Module): boolean {
+  return !scope || scope.isAncestorOf(from);
+}
+
+function narrowerScope(a: Module | undefined, b: Module | undefined): Module | undefined {
+  if (!a) return b;
+  return visibleFrom(b, a) ? a : b;
+}
+
+export function lookupQualifiedValue(module: Module, from: Module, name: string, span: Span): ValueBinding | undefined {
+  const entry = ownValue(module, name, span, new Set());
+  checkVisible(entry, from, name, span);
+  return entry?.binding;
 }
 
 /** Resolves a path in the type namespace: a module, a type, or a trait. */
@@ -1253,7 +1323,7 @@ export function resolveTypePath(segments: string[], module: Module, span: Span):
       if (owner.isStd) checkUnavailableStd([...segments.slice(0, segments.indexOf(segment)), segment], span);
       compileError(span, `${segments.join('::')} が見つかりません。`);
     }
-    checkVisible(entry, owner, module, segment, span);
+    checkVisible(entry, module, segment, span);
     current = entry.binding;
   }
   return current;

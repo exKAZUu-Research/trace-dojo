@@ -11,7 +11,7 @@ export interface Crate {
   items: Item[];
 }
 
-export type Visibility = 'private' | 'pub';
+export type Visibility = 'private' | 'pub' | 'super';
 
 export type Item =
   | FnItem

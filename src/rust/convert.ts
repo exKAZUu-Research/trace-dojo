@@ -175,10 +175,12 @@ export class Converter extends ExpressionConverter {
   private visibility(node: Node): Visibility {
     const modifier = node.namedChildren.find((child) => child.type === 'visibility_modifier');
     if (!modifier) return 'private';
-    if (modifier.text !== 'pub' && !/^pub\s*\(\s*(crate|self|super)\s*\)$/.test(modifier.text)) {
-      unavailable(this.span(modifier), `公開の範囲の指定（${modifier.text}）`);
-    }
-    return 'pub';
+    if (modifier.text === 'pub') return 'pub';
+    const scope = modifier.namedChildren.find((child) => !isComment(child))?.text;
+    if (scope === 'self') return 'private';
+    if (scope === 'super') return 'super';
+    if (scope === 'crate') return 'pub';
+    return unavailable(this.span(modifier), `公開の範囲の指定（${modifier.text}）`);
   }
 
   // code-gauge-allow functionCognitiveComplexity 21 -- One case per kind of syntax node.

@@ -9,12 +9,15 @@ import {
   globAnonymousTraits,
   globTypeNames,
   lookupAssociatedConst,
+  lookupQualifiedValue,
   lookupType,
   lookupValue,
   type Module,
   resolveTypePath,
   type TypeBinding,
   type ValueBinding,
+  visibilityScope,
+  visibleFrom,
 } from './items';
 import { boundsOf, lookupAssociated } from './methods';
 import {
@@ -139,16 +142,12 @@ function moduleValueRes(
   last: PathAst['segments'][number],
   span: Span
 ): PathRes {
-  const binding = module.values.get(last.name) ?? lookupValueIn(module, last.name, span);
+  const binding = lookupQualifiedValue(module, c.body.module, last.name, span);
   if (!binding) {
     if (module.isStd) unavailableStd([...module.path.split('::'), last.name], span);
     compileError(span, `${names.join('::')} が見つかりません。`);
   }
-  const entry = module.values.get(last.name);
-  if (entry && !entry.isPublic && !module.isAncestorOf(c.body.module.namedModule)) {
-    compileError(span, `${last.name} は非公開です（pub が付いていません）。`);
-  }
-  return valueBindingRes(c, 'binding' in binding ? binding.binding : binding, last.args, span, names.join('::'));
+  return valueBindingRes(c, binding, last.args, span, names.join('::'));
 }
 
 function associatedValueRes(c: Checker, t: Type, last: PathAst['segments'][number], span: Span): PathRes {
@@ -211,7 +210,7 @@ export function checkMethodVisible(c: Checker, fn: FnDef, span: Span): void {
   if (!item || item.vis === 'pub' || fn.trait || fn.impl?.trait) return;
   const module = fn.module as Module;
   if (module.isStd) return;
-  if (!module.namedModule.isAncestorOf(c.body.module.namedModule)) {
+  if (!visibleFrom(visibilityScope(item.vis, module.namedModule, item.span), c.body.module.namedModule)) {
     compileError(span, `${fn.name} は非公開です（pub が付いていません）。`);
   }
 }
@@ -416,10 +415,6 @@ export function resolveStructPath(c: Checker, path: PathAst, span: Span): Struct
     };
   }
   return compileError(span, `構造体 ${names.join('::')} が見つかりません。`);
-}
-
-function lookupValueIn(module: Module, name: string, span: Span): ValueBinding | undefined {
-  return lookupValue(module, name, span);
 }
 
 /** The variant of an enum a path names, or undefined when its prefix names no enum or fails to resolve. */
