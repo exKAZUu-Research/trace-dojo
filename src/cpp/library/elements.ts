@@ -423,8 +423,10 @@ export function moveValue(frame: Frame, type: Type, target: Value, source: Value
   if (target === source || target === UNINIT || source === UNINIT) return source;
   if (type.kind === 'array') {
     const to = target as ArrayStore;
-    for (const [index, item] of (source as ArrayStore).values.entries())
+    for (const [index, item] of (source as ArrayStore).values.entries()) {
+      frame.runtime.spend();
       to.values[index] = moveValue(frame, type.of, to.values[index], item);
+    }
     return to;
   }
   if (type.kind !== 'class') return source;
@@ -436,8 +438,10 @@ export function moveValue(frame: Frame, type: Type, target: Value, source: Value
     target.takeItems(source);
   } else if (target instanceof SequenceValue && source instanceof SequenceValue && cls.library?.aggregateArray) {
     const element = cls.library.aggregateArray.type.of;
-    for (const [index, value] of source.items.entries())
+    for (const [index, value] of source.items.entries()) {
+      frame.runtime.spend();
       target.items[index] = moveValue(frame, element, target.items[index], value);
+    }
   } else if (canMoveFields(cls)) {
     const to = target as CObject;
     const from = source as CObject;

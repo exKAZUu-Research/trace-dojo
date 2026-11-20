@@ -386,6 +386,31 @@ test.each([
   expect(recording.traceItems.at(-1)?.turtles).toEqual(turtles);
 });
 
+test.each([
+  ['std::array<int, 256>', 'r[0]'],
+  ['Row', 'r.cells[0]'],
+])('meters the elements moved when std::remove_if compacts %s rows', (type, first) => {
+  const program = `#include <algorithm>
+#include <array>
+struct Row { int cells[256]; };
+bool empty(const ${type}& r) { return ${first} == 0; }
+void number(${type}& r, int n) { ${first} = n; }
+int main() {
+  ${type} rows[8]{};
+  for (int i = 0; i < 4; ++i) {
+    for (int j = 0; j < 8; ++j) number(rows[j], j);
+    std::remove_if(rows, rows + 8, empty);
+  }
+}`;
+  const previous = LIMITS.maxOperations;
+  LIMITS.maxOperations = 3000;
+  try {
+    expect(executeProgram('cpp', program)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  } finally {
+    LIMITS.maxOperations = previous;
+  }
+});
+
 test.each(['int a[512] = {}, b[512] = {};', 'int a[16][32] = {}, b[16][32] = {};'])(
   'meters the elements swapped by std::swap of built-in arrays %s',
   (declaration) => {
