@@ -93,8 +93,7 @@ function defineRegExpPrototype(builder: RealmBuilder): void {
     return regExpExec(runtime, thisValue, runtime.toString(args[0])) !== null;
   });
   builder.method(regExpPrototype, 'toString', 0, ({ runtime, thisValue }) => {
-    const object = runtime.toObject(thisValue);
-    return `/${runtime.toString(runtime.get(object, 'source'))}/${runtime.toString(runtime.get(object, 'flags'))}`;
+    return regExpToString(runtime, runtime.toObject(thisValue));
   });
   builder.getter(regExpPrototype, 'source', ({ runtime, thisValue }) =>
     thisValue === regExpPrototype ? '(?:)' : thisRegExp(runtime, thisValue, 'source', true).regexp.source
@@ -120,6 +119,10 @@ function defineRegExpPrototype(builder: RealmBuilder): void {
 }
 
 export type RegExpObject = JsObject & { regexp: RegExp };
+
+export function regExpToString(runtime: Runtime, object: JsObject): string {
+  return `/${runtime.toString(runtime.get(object, 'source'))}/${runtime.toString(runtime.get(object, 'flags'))}`;
+}
 
 function thisRegExp(runtime: Runtime, value: Value, name: string, isGetter = false): RegExpObject {
   if (value instanceof JsObject && value.regexp) return value as RegExpObject;

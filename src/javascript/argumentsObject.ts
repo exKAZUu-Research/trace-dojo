@@ -1,6 +1,75 @@
+import type { RealmBuilder } from './realm';
 import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Runtime } from './runtime';
-import { type Binding, freeze, isAccessor, type JsFunction, type JsObject, type Property, type Value } from './values';
+import {
+  type Binding,
+  freeze,
+  isAccessor,
+  JsFunction,
+  type JsObject,
+  type NativeCall,
+  type Property,
+  type Value,
+} from './values';
+
+type LegacyFunctionProperty = 'arguments' | 'caller';
+
+// oxlint-disable-next-line unicorn/no-null -- V8 returns null when no legacy function metadata is visible.
+const missingFunctionMetadata = null;
+
+export function defineLegacyFunctionProperties(builder: RealmBuilder): void {
+  for (const key of ['arguments', 'caller'] as const) {
+    builder.getter(
+      builder.realm.functionPrototype,
+      key,
+      (call) => legacyFunctionProperty(call, key),
+      ({ runtime, thisValue }) => {
+        requireLegacyFunction(runtime, thisValue);
+      }
+    );
+  }
+}
+
+export function hasLegacyFunctionProperties(value: Value): value is JsFunction {
+  if (!(value instanceof JsFunction) || value.behavior.kind !== 'user') return false;
+  const { node } = value.behavior;
+  return node.kind === 'normal' && !node.isStrict && !node.isGenerator && !node.isAsync;
+}
+
+function legacyFunctionProperty({ runtime, thisValue }: NativeCall, key: LegacyFunctionProperty): Value {
+  const receiver = requireLegacyFunction(runtime, thisValue);
+  const { frames } = runtime;
+  for (let index = frames.length - 1; index >= 0; index--) {
+    runtime.spend();
+    const frame = frames[index];
+    if (frame.callee !== receiver) continue;
+    if (key === 'caller') return legacyCaller(frames[index - 1]);
+    const args = frame.legacyArguments;
+    if (!args || receiver.behavior.kind !== 'user') return missingFunctionMetadata;
+    const { node } = receiver.behavior;
+    const mapped = !node.rest && node.params.every((parameter) => parameter.kind === 'identifier');
+    return createArgumentsObject(runtime, receiver, args, mapped);
+  }
+  return missingFunctionMetadata;
+}
+
+function legacyCaller(frame: Runtime['frame'] | undefined): JsFunction | null {
+  const caller = frame?.callee;
+  if (frame?.nativeCallerDepth || caller?.behavior.kind !== 'user' || caller.behavior.node.isStrict)
+    return missingFunctionMetadata;
+  return caller;
+}
+
+function requireLegacyFunction(runtime: Runtime, value: Value): JsFunction {
+  return hasLegacyFunctionProperties(value) ? value : throwRestrictedFunctionProperty(runtime);
+}
+
+function throwRestrictedFunctionProperty(runtime: Runtime): never {
+  return runtime.throwError(
+    'TypeError',
+    "'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them"
+  );
+}
 
 export function createArgumentsObject(runtime: Runtime, fn: JsFunction, args: Value[], mapped: boolean): JsObject {
   const object = runtime.newObject();
@@ -31,12 +100,7 @@ export function createArgumentsObject(runtime: Runtime, fn: JsFunction, args: Va
 }
 
 function restrictedCallee(runtime: Runtime): JsFunction {
-  const thrower = runtime.newNativeFunction('', 0, () =>
-    runtime.throwError(
-      'TypeError',
-      "'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them"
-    )
-  );
+  const thrower = runtime.newNativeFunction('', 0, () => throwRestrictedFunctionProperty(runtime));
   freeze(thrower);
   return thrower;
 }

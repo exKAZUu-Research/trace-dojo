@@ -478,7 +478,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
       true
     );
     if (node.kind === 'arrow') scope.arrowIsStrict = node.isStrict;
-    runtime.pushFrame(scope, callRow, node.isAtomic);
+    runtime.pushFrame(scope, callRow, node.isAtomic, fn, args);
     try {
       if (node.isAsync && !node.isGenerator)
         return startAsyncFunction(runtime, runtime.frame, this.asyncBody(fn, node, args));
@@ -812,7 +812,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
     };
     const scope = new Scope(behavior.scope, functionFrame);
     this.constructorScopes.set(functionFrame, scope);
-    runtime.pushFrame(scope, callRow, behavior.ctor?.isAtomic ?? false);
+    runtime.pushFrame(scope, callRow, behavior.ctor?.isAtomic ?? false, fn);
     try {
       if (thisValue !== UNINITIALIZED) {
         for (const field of behavior.fields) this.initializeField(thisValue, field);

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 746 -- Ports Node.js's inspection and error formatting around shared object and stack metadata.
+// code-gauge-allow-file fileNcss 755 -- Keeps the inspection dispatch with the constructor, property, and error metadata it shares.
 import { inspect as hostInspect, type InspectStyle, stripVTControlCharacters } from 'node:util';
 
 import { eastAsianWidthType } from 'get-east-asian-width';
@@ -11,6 +11,7 @@ import { type CollectionEntry, CollectionIterator } from './realmCollections';
 import { dateValueOf, inspectDate } from './realmDate';
 import { objectToString } from './realmGlobals';
 import { WELL_KNOWN_SYMBOLS } from './realmIterators';
+import { regExpToString } from './realmRegExp';
 import type { Runtime } from './runtime';
 import {
   type AccessorProperty,
@@ -375,21 +376,9 @@ function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string 
   const constructor = inspectedConstructor(runtime, value, showsPrototype);
   const inherited = showsPrototype && constructor.name ? inspectPrototype(ctx, value, constructor, recurseTimes) : [];
   const name = inspectedName(ctx, value, constructor, recurseTimes);
-  const entries = entryFormat(runtime, value, name);
-  const display = {
-    name,
-    entries,
-    nullPrototypeName: name === undefined ? runtime.internalConstructorName(value) : undefined,
-  };
-  if (value.isError && name !== 'Object') noteErrorStack(ctx, value);
-  const keys = enumerableKeys(ctx, value, entries === 'array');
-  const showsLength = ctx.showHidden && entries === 'array';
-  const frame = frameOf(
-    ctx,
-    value,
-    display,
-    keys.length > 0 || inherited.length > 0 || value.promise !== undefined || showsLength
-  );
+  const { display, body } = inspectionBody(ctx, value, name, inherited, recurseTimes > ctx.depth);
+  const { entries } = display;
+  const { frame } = body;
   if (typeof frame === 'string') return frame;
   if (recurseTimes > ctx.depth) {
     const prefix = entries === 'array' ? prefixOf(name, 'Array') : objectPrefix(display, toStringTagOf(value));
@@ -399,14 +388,40 @@ function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string 
   ctx.currentDepth = recurseTimes + 1;
   ctx.seen.add(value);
   try {
-    return formatBody(ctx, value, recurseTimes + 1, { frame, keys, inherited, entries });
+    return formatBody(ctx, value, recurseTimes + 1, { ...body, frame });
   } finally {
     ctx.seen.delete(value);
   }
 }
 
+function inspectionBody(
+  ctx: Context,
+  value: JsObject,
+  name: string | undefined,
+  inherited: string[],
+  beyondDepth: boolean
+): { display: DisplayConstructor; body: Omit<Body, 'frame'> & { frame: Frame | string } } {
+  const { runtime } = ctx;
+  const entries = entryFormat(runtime, value, name);
+  const branded = name !== 'Object';
+  const display = {
+    name,
+    entries,
+    nullPrototypeName: name === undefined ? runtime.internalConstructorName(value) : undefined,
+  };
+  if (value.isError && branded) noteErrorStack(ctx, value);
+  const boxed = branded && value.primitive !== undefined && !isPrimitivePrototype(runtime, value);
+  const keys = enumerableKeys(ctx, value, entries === 'array', boxed);
+  const promise = branded ? value.promise : undefined;
+  const hasKeys =
+    keys.length > 0 || inherited.length > 0 || promise !== undefined || (ctx.showHidden && entries === 'array');
+  const cutoff = branded && value.regexp !== undefined && beyondDepth;
+  const frame = frameOf(ctx, value, display, boxed, hasKeys && !cutoff);
+  return { display, body: { frame, keys, inherited, entries, promise } };
+}
+
 function entryFormat(runtime: Runtime, value: JsObject, name: string | undefined): EntryFormat {
-  if (value.collection?.isWeak) return 'intrinsicCollection';
+  if (value.collection?.isWeak) return name === 'Object' ? undefined : 'intrinsicCollection';
   const array = value instanceof JsArray;
   if (!array && !value.collection && !(value.hostIterator instanceof CollectionIterator)) return undefined;
   if (name !== undefined && !runtime.hasProperty(value, WELL_KNOWN_SYMBOLS.iterator)) return undefined;
@@ -419,15 +434,16 @@ interface Body {
   keys: Key[];
   inherited: string[];
   entries: EntryFormat;
+  promise: PromiseState | undefined;
 }
 
 function formatBody(ctx: Context, value: JsObject, recurseTimes: number, body: Body): string {
-  const { frame, keys, inherited, entries } = body;
+  const { frame, keys, inherited, entries, promise } = body;
   const array = entries === 'array' && value instanceof JsArray ? value : undefined;
   let output: string[] = [];
   if (array) output = formatArray(ctx, array, recurseTimes);
   else if (entries) output = formatCollection(ctx, value, recurseTimes, entries === 'collection');
-  if (value.promise) output.push(promiseEntry(ctx, value.promise, recurseTimes));
+  if (promise) output.push(promiseEntry(ctx, promise, recurseTimes));
   if (ctx.showHidden && array) output.push(`[length]: ${formatPrimitive(ctx, array.elements.length)}`);
   const properties = keys.map((key) => formatProperty(ctx, value, recurseTimes, key, { arrayExtras: !!array }));
   appendProperties(ctx, value, output, [...properties, ...inherited]);
@@ -545,41 +561,64 @@ interface DisplayConstructor {
   nullPrototypeName: string | undefined;
 }
 
-/** What surrounds the entries of an object, or its whole text when it has no entries to list. */
-// code-gauge-allow functionCognitiveComplexity 28 -- Ports Node.js's util.inspect, so the two stay comparable.
-// code-gauge-allow functionNcss 43 -- Ports Node.js's util.inspect, so the two stay comparable.
-function frameOf(ctx: Context, value: JsObject, display: DisplayConstructor, hasKeys: boolean): Frame | string {
-  const { runtime } = ctx;
+function frameOf(
+  ctx: Context,
+  value: JsObject,
+  display: DisplayConstructor,
+  boxed: boolean,
+  hasKeys: boolean
+): Frame | string {
   const { name: constructor } = display;
   if (display.entries === 'array' && value instanceof JsArray) {
     const prefix = constructor === 'Array' ? '' : prefixOf(constructor, 'Array', `(${value.elements.length})`);
     return value.elements.length === 0 && !hasKeys ? `${prefix}[]` : { base: '', braces: [`${prefix}[`, ']'] };
   }
-  if (display.entries) {
-    return collectionFrameOf(value, constructor, hasKeys);
-  }
+  if (display.entries) return collectionFrameOf(value, constructor, hasKeys);
   if (value.turtle) return `Turtle { x: ${value.turtle.x}, y: ${value.turtle.y} }`;
-  let base = '';
-  let open = '{';
-  if (value instanceof JsFunction) base = functionBase(runtime, value, constructor);
-  else if (value.regexp) base = stylize(ctx, String(value.regexp), 'regexp');
-  else if (dateValueOf(value) !== undefined) base = dateBase(value, constructor);
-  else if (value.isError && constructor !== 'Object')
-    base = errorText(runtime, value, constructor, ctx.errorStacks.get(value));
-  else if (value.primitive !== undefined && !isPrimitivePrototype(runtime, value))
-    base = boxedBase(ctx, value.primitive, constructor, toStringTagOf(value), hasKeys);
-  else if (value.isArguments) open = '[Arguments] {';
-  else {
-    const tag = toStringTagOf(value);
-    if (tag && tag !== constructor) open = `${objectPrefix(display, tag)}[${tag}] {`;
-    else if (constructor !== 'Object') open = `${objectPrefix(display, tag)}{`;
+  const tag = toStringTagOf(value);
+  const base = specialBase(ctx, value, constructor, tag, boxed, hasKeys);
+  const open = base === undefined ? objectOpening(value, display, tag) : '{';
+  return hasKeys ? { base: base ?? '', braces: [open, '}'] } : (base ?? `${open}}`);
+}
+
+function specialBase(
+  ctx: Context,
+  value: JsObject,
+  constructor: string | undefined,
+  tag: string | undefined,
+  boxed: boolean,
+  hasKeys: boolean
+): string | undefined {
+  if (value instanceof JsFunction) {
+    const text = functionBase(ctx.runtime, value, constructor);
+    return hasKeys ? text : stylize(ctx, text, 'special');
   }
-  if (!hasKeys) {
-    if (value instanceof JsFunction) return stylize(ctx, base, 'special');
-    if (dateValueOf(value) !== undefined) return stylize(ctx, base, 'date');
-    return base || `${open}}`;
+  if (constructor === 'Object') return undefined;
+  const regexp = value.regexp;
+  if (regexp) {
+    const text = constructor === undefined ? String(regexp) : regExpToString(ctx.runtime, value);
+    return stylize(ctx, prefixBuiltin(text, constructor, 'RegExp', tag), 'regexp');
   }
-  return { base, braces: [open, '}'] };
+  const date = dateValueOf(value);
+  if (date !== undefined) {
+    const text = prefixBuiltin(inspectDate(date), constructor, 'Date', tag);
+    return hasKeys ? text : stylize(ctx, text, 'date');
+  }
+  if (value.isError) return errorText(ctx.runtime, value, constructor, ctx.errorStacks.get(value));
+  if (boxed && value.primitive !== undefined) return boxedBase(ctx, value.primitive, constructor, tag, hasKeys);
+  return undefined;
+}
+
+function objectOpening(value: JsObject, display: DisplayConstructor, tag: string | undefined): string {
+  if (value.isArguments) return '[Arguments] {';
+  if (tag && tag !== display.name) return `${objectPrefix(display, tag)}[${tag}] {`;
+  return display.name === 'Object' ? '{' : `${objectPrefix(display, tag)}{`;
+}
+
+function prefixBuiltin(text: string, constructor: string | undefined, name: string, tag: string | undefined): string {
+  if (constructor === name && (!tag || tag === name)) return text;
+  const prefix = prefixOf(constructor, name);
+  return tag && tag !== (constructor ?? name) ? `${prefix}[${tag}] ${text}` : `${prefix}${text}`;
 }
 
 function objectPrefix(display: DisplayConstructor, tag: string | undefined): string {
@@ -749,10 +788,9 @@ function prefixOf(constructor: string | undefined, fallback: string, size = ''):
 }
 
 /** The keys an object shows: its enumerable ones, or with `showHidden` all of its own, as `%o` shows them. */
-const ERROR_KEYS = new Set<Key>(['name', 'message', 'stack']);
+const ERROR_HEADLINE_KEYS = new Set<Key>(['name', 'message']);
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Lists the own keys exposed by each inspected value, including hidden string lengths and error causes.
-function enumerableKeys(ctx: Context, object: JsObject, arrayExtras: boolean): Key[] {
+function enumerableKeys(ctx: Context, object: JsObject, arrayExtras: boolean, boxed: boolean): Key[] {
   const { runtime, showHidden } = ctx;
   const stack = ctx.errorStacks.get(object);
   const own = arrayExtras
@@ -761,19 +799,24 @@ function enumerableKeys(ctx: Context, object: JsObject, arrayExtras: boolean): K
       ? runtime.ownPropertyNames(object)
       : runtime.ownKeys(object);
   // A String object's indices, which come first, show as its text instead.
-  const strings = typeof object.primitive === 'string' ? own.slice(object.primitive.length) : own;
+  const strings = boxed && typeof object.primitive === 'string' ? own.slice(object.primitive.length) : own;
   const keys: Key[] = [...strings, ...runtime.ownSymbols(object)];
-  const listed = keys.filter((key) => {
-    if (object.isError && ERROR_KEYS.has(key) && (showHidden || !stack || isInStack(object, key, stack))) return false;
-    return showHidden || runtime.getOwnProperty(object, key)?.enumerable;
-  });
+  const listed = keys.filter(
+    (key) =>
+      includeErrorKey(object, key, stack, showHidden) && (showHidden || runtime.getOwnProperty(object, key)?.enumerable)
+  );
   // An error also shows its own hidden reasons, bracketed, as Node.js does.
-  if (object.isError) {
+  if (stack) {
     for (const key of ['error', 'suppressed', 'cause', 'errors']) {
       if (object.properties.has(key) && !listed.includes(key)) listed.push(key);
     }
   }
   return listed;
+}
+
+function includeErrorKey(object: JsObject, key: Key, stack: ErrorStack | undefined, showHidden: boolean): boolean {
+  if (object.isError && key === 'stack') return false;
+  return showHidden || !stack || !ERROR_HEADLINE_KEYS.has(key) || !isInStack(object, key, stack);
 }
 
 /**
@@ -831,7 +874,7 @@ function errorText(
 }
 
 /**
- * Whether Node.js leaves out an error's own `name`, `message`, or `stack`: a hidden one, or a data property that is not
+ * Whether ordinary inspection skips an error's `name` or `message`: a hidden one, or a data property that is not
  * a string or that the stack's first line already shows, which a change after the error was first printed does not
  * reach; an accessor stays listed without being called.
  */
@@ -1009,13 +1052,6 @@ function emptyArrayItems(ctx: Context, count: number): string {
 
 function remainingArrayItems(count: number): string {
   return `... ${count} more item${count > 1 ? 's' : ''}`;
-}
-
-/** A Date's ISO string, after the name of its constructor when that is not Date. */
-function dateBase(value: JsObject, constructor: string | undefined): string {
-  const text = inspectDate(dateValueOf(value) as number);
-  const prefix = prefixOf(constructor, 'Date');
-  return prefix === 'Date ' ? text : `${prefix}${text}`;
 }
 
 /** What surrounds the entries of a Map, Set, WeakMap, WeakSet, or an iterator over a Map or Set. */

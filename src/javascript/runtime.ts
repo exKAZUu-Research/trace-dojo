@@ -6,6 +6,7 @@ import { StepTracker } from '../interpreter/stepTracker';
 import { TurtleWorld } from '../interpreter/turtleWorld';
 import { redefineArgument } from './argumentsObject';
 import type { IterationContext, IterationSource } from './ast';
+import { Frame } from './callFrame';
 import { Evaluator } from './evaluator';
 import { findReachableTurtles } from './garbageCollection';
 import { DONE, type HostIterator, stepHostIterator, ValueIterator } from './iteration';
@@ -41,29 +42,7 @@ import {
   type Value,
 } from './values';
 
-export class Frame {
-  /** Values a pending call or allocation holds outside any variable, which must keep their turtles alive. */
-  readonly temporaries: Value[] = [];
-  /** The unfinished iterations the frame runs, which stay reachable as long as the frame can still resume them. */
-  readonly iterations = new Set<ValueIterator>();
-  /** How many builtins run in the frame now, which keep what the program's code returns to them in its temporaries. */
-  builtinsRunning = 0;
-
-  constructor(
-    public scope: Scope,
-    /** The row of the call that created this frame, or undefined for the program and implicit calls. */
-    readonly callRow: number | undefined,
-    /** Whether this frame runs a function marked `// atomic`. */
-    readonly isAtomic: boolean
-  ) {}
-
-  /** What the frame keeps reachable: its scope, its temporaries, and its unfinished iterations' roots. */
-  reachableValues(): unknown[] {
-    const values: unknown[] = [this.scope, ...this.temporaries];
-    for (const iteration of this.iterations) appendAll(values, iteration.roots);
-    return values;
-  }
-}
+export type { Frame };
 
 type Primitive = undefined | null | boolean | number | bigint | string | symbol;
 
@@ -451,6 +430,7 @@ export class Runtime {
       if (original && original !== 'Object') return original;
     }
     if (value.isError) return 'Error';
+    if (value.promise) return 'Promise';
     if (value instanceof JsFunction) return 'Function';
     return receiverClassName(value);
   }
@@ -804,12 +784,12 @@ export class Runtime {
       const held = temporaries.length;
       temporaries.push(fn, thisValue);
       appendAll(temporaries, args);
-      frame.builtinsRunning++;
+      frame.enterBuiltin(fn.forwardsLegacyCaller);
       let result: Value;
       try {
         result = behavior.run({ runtime: this, thisValue, args, newTarget: undefined, callRow });
       } finally {
-        frame.builtinsRunning--;
+        frame.leaveBuiltin(fn.forwardsLegacyCaller);
         temporaries.length = held;
       }
       // A builtin called by another, as a bound function is, hands its result on to the one that called it.
@@ -842,11 +822,11 @@ export class Runtime {
     const { temporaries } = frame;
     const length = temporaries.length;
     appendAll(temporaries, held);
-    frame.builtinsRunning++;
+    frame.enterBuiltin();
     try {
       return run();
     } finally {
-      frame.builtinsRunning--;
+      frame.leaveBuiltin();
       temporaries.length = length;
     }
   }
@@ -907,9 +887,9 @@ export class Runtime {
     return isObject(prototype) ? prototype : fallback;
   }
 
-  pushFrame(scope: Scope, callRow: number | undefined, isAtomic: boolean): Frame {
+  pushFrame(scope: Scope, callRow: number | undefined, isAtomic: boolean, callee?: JsFunction, args?: Value[]): Frame {
     if (this.frames.length >= LIMITS.maxCallDepth) this.throwError('RangeError', 'Maximum call stack size exceeded');
-    const frame = new Frame(scope, callRow, isAtomic);
+    const frame = new Frame(scope, callRow, isAtomic, callee, args);
     this.frames.push(frame);
     return frame;
   }

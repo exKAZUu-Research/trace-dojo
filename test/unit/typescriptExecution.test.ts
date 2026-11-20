@@ -18,6 +18,24 @@ test.each([
   expect(diagnosticsOf(source)).toContain('1: 文字列リテラルが閉じられていません。');
 });
 
+test('hidden error inspection lists own properties alongside the headline', () => {
+  const execution = executeProgram(
+    'typescript',
+    `const error = new TypeError('broken');
+error.name = 'Custom';
+console.log(error);
+console.dir(error, {showHidden: true});
+console.log('%o', error);`
+  );
+  expect(execution).toMatchObject({
+    kind: 'executed',
+    stdout: `Custom: broken
+Custom: broken { [message]: 'broken', name: 'Custom' }
+Custom: broken { [message]: 'broken', name: 'Custom' }
+`,
+  });
+});
+
 test('escaped line continuations and Unicode line separators remain valid in strings', () => {
   const source = "console.log('line\\\r\ncontinuation', 'line\u2028separator');";
   expect(executeProgram('typescript', source)).toMatchObject({

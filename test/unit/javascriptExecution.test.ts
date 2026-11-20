@@ -28,6 +28,37 @@ keep.forward();`
   });
 });
 
+test('inspection uses the prototype of boxed native values', () => {
+  const result = executeProgram(
+    'javascript',
+    `for (const value of [new Date(0), Promise.resolve(7), new WeakSet(), new WeakMap()]) {
+  Object.setPrototypeOf(value, {});
+  console.log(value);
+}
+for (const value of [new Date(0), Promise.resolve(7), new WeakSet(), new WeakMap()]) {
+  Object.setPrototypeOf(value, null);
+  console.log(value);
+}
+const error = new Error('example');
+Object.setPrototypeOf(error, {});
+Object.defineProperty(error, 'message', {enumerable: true});
+console.log(error);`
+  );
+  expect(result).toMatchObject({
+    kind: 'executed',
+    stdout: `{}
+{}
+{}
+{}
+[Date: null prototype] 1970-01-01T00:00:00.000Z
+[Promise: null prototype] { 7 }
+[WeakSet: null prototype] { <items unknown> }
+[WeakMap: null prototype] { <items unknown> }
+{ message: 'example' }
+`,
+  });
+});
+
 test.each([
   ['a duplicate declaration', 'let a = 1;\nlet a = 2;', 1, 'a はすでに宣言されています。'],
   ['a let that redeclares a var in its block', '{\n  var a = 1;\n  let a = 2;\n}', 2, 'a はすでに宣言されています。'],
