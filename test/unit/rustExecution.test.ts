@@ -1445,6 +1445,41 @@ fn main() {
   });
 });
 
+test('inherits private anonymous traits through descendant glob imports', () => {
+  const program = `mod source { pub use std::fmt::Write as _; }
+mod ancestor {
+    use super::source::*;
+    pub mod child {
+        use super::*;
+        pub fn report() {
+            let mut text = String::new();
+            write!(&mut text, "glob").unwrap();
+            println!("{}", text);
+        }
+    }
+}
+mod direct {
+    use std::fmt::Write as _;
+    pub mod child {
+        use super::*;
+        pub fn report() {
+            let mut text = String::new();
+            text.write_str("direct").unwrap();
+            println!("{}", text);
+        }
+    }
+}
+fn main() {
+    ancestor::child::report();
+    direct::child::report();
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'glob\ndirect\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

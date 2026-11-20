@@ -1025,20 +1025,20 @@ export function* globTypeNames(module: Module, seen = new Set<Module>()): Iterab
   }
 }
 
-export function* globAnonymousTraits(module: Module, exported = false, seen = new Set<Module>()): Iterable<TraitDef> {
+export function* globAnonymousTraits(module: Module, requester = module, seen = new Set<Module>()): Iterable<TraitDef> {
   if (seen.has(module)) return;
   seen.add(module);
   for (const glob of module.globs) {
-    if (exported && !glob.isPublic) continue;
+    if (!glob.isPublic && !module.isAncestorOf(requester)) continue;
     const target = globTarget(module, glob);
     if (target.kind !== 'mod') continue;
     for (const entry of target.module.anonymousImports) {
-      if (!entry.isPublic) continue;
+      if (!entry.isPublic && !target.module.isAncestorOf(requester)) continue;
       resolveImport(target.module, entry);
       const binding = entry.types?.binding;
       if (binding?.kind === 'trait') yield binding.def;
     }
-    yield* globAnonymousTraits(target.module, true, seen);
+    yield* globAnonymousTraits(target.module, requester, seen);
   }
 }
 
