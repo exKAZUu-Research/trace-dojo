@@ -1,2 +1,2 @@
-C3C2 size=0 3|D3D3D2D1
-C2C1 size=1 3 2|D3D2D3D2D1
+C3C2 size=0 3 count=0,0 distance=1|D3D3D2D1
+C2C1 size=1 3 2 count=1,1 distance=2|D3D2D3D2D1

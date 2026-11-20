@@ -300,7 +300,7 @@ export class HashValue extends MapValue {
   }
 
   get length(): number {
-    return this.size;
+    return this.nodes().length;
   }
 
   iterator(node: HashNode | undefined): Ptr {
@@ -324,8 +324,9 @@ export class HashValue extends MapValue {
   }
 
   override iteratorLocation(index: number): Ptr {
-    if (index < 0 || index > this.size) throw new CppRuntimeError('invalidIterator');
-    return this.iterator(index === this.size ? undefined : this.nodes()[index]);
+    const nodes = this.nodes();
+    if (index < 0 || index > nodes.length) throw new CppRuntimeError('invalidIterator');
+    return this.iterator(nodes[index]);
   }
 
   positionOf(node: HashNode): number {
@@ -362,6 +363,11 @@ export class HashValue extends MapValue {
 
   children(): Iterable<Value> {
     return this.nodes().map((node) => node.value);
+  }
+
+  findNode(key: Value): HashNode | undefined {
+    // libc++ can link copied nodes before it updates size. Lookup and iteration then see different state.
+    return this.size === 0 ? undefined : this.lookup(key);
   }
 
   lookup(key: Value): HashNode | undefined {
@@ -639,7 +645,7 @@ export function unorderedClass(
             const same =
               first.size === second.size &&
               first.nodes().every((node) => {
-                const found = second.lookup(keyOf(node.value));
+                const found = second.findNode(keyOf(node.value));
                 return (
                   found !== undefined &&
                   (!valuesEqual || valuesEqual((node.value as CObject).values[1], (found.value as CObject).values[1]))
@@ -761,14 +767,14 @@ export function unorderedClass(
     const it = isConst ? constIterator : iterator;
     method('begin', [], it, (self) => self.first(), isConst);
     method('end', [], it, (self) => self.iterator(undefined), isConst);
-    method('find', [constRef(keyType)], it, (self, [k]) => self.iterator(self.lookup(keyArg(k))), isConst);
+    method('find', [constRef(keyType)], it, (self, [k]) => self.iterator(self.findNode(keyArg(k))), isConst);
     if (isMap) {
       method(
         'at',
         [constRef(keyType)],
         referenceTo(isConst ? withConst(valueType as Type) : (valueType as Type)),
         (self, [k], frame) => {
-          const node = self.lookup(keyArg(k));
+          const node = self.findNode(keyArg(k));
           if (!node) return throwLibrary(frame, library.exception('out_of_range'), 'unordered_map::at: key not found');
           return new Ptr(node.value as CObject, 1);
         },
@@ -778,8 +784,8 @@ export function unorderedClass(
   }
   method('cbegin', [], constIterator, (self) => self.first(), true);
   method('cend', [], constIterator, (self) => self.iterator(undefined), true);
-  method('count', [constRef(keyType)], SIZE_T, (self, [k]) => (self.lookup(keyArg(k)) ? 1n : 0n), true);
-  method('contains', [constRef(keyType)], BOOL, (self, [k]) => (self.lookup(keyArg(k)) ? 1 : 0), true);
+  method('count', [constRef(keyType)], SIZE_T, (self, [k]) => (self.findNode(keyArg(k)) ? 1n : 0n), true);
+  method('contains', [constRef(keyType)], BOOL, (self, [k]) => (self.findNode(keyArg(k)) ? 1 : 0), true);
   addMethod(
     cls,
     native(
@@ -794,7 +800,7 @@ export function unorderedClass(
     )
   );
   method('erase', [constRef(keyType)], SIZE_T, (self, [k], frame) => {
-    const node = self.lookup(keyArg(k));
+    const node = self.findNode(keyArg(k));
     if (!node) return 0n;
     const removed = self.remove(node);
     ops().destroy?.(frame, removed);

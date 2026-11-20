@@ -1,4 +1,5 @@
 #include <iostream>
+#include <iterator>
 #include <unordered_map>
 
 int copies;
@@ -27,6 +28,8 @@ void probe(bool reuse) {
   } catch (int) {
     std::cout << " size=" << target.size();
     for (auto it = target.begin(); it != target.end(); ++it) std::cout << ' ' << it->first;
+    std::cout << " count=" << target.count(3) << ',' << target.count(2)
+              << " distance=" << std::distance(target.begin(), target.end());
     std::cout << '|';
   }
 }
