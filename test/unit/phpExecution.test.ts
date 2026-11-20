@@ -2278,6 +2278,20 @@ test.each([
 });
 
 test.each([
+  ['get; set;', 'protected private(set) int $p', 'Set access level of B::$p must be omitted (as in class A)'],
+  ['set;', 'protected private(set) string $p', 'Set access level of B::$p must be omitted (as in class A)'],
+  ['get; set;', 'protected private(set) readonly int $p', 'Set access level of B::$p must be omitted (as in class A)'],
+  ['get;', 'protected private(set) int $p', 'Access level to B::$p must be public (as in class A)'],
+])('reports property modifier precedence for interface hooks %s', (hooks, property, message) => {
+  expect(
+    run(`<?php\ninterface A { public int $p { ${hooks} } }\nclass B implements A { ${property}; }\necho "unreachable";`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: `\nFatal error: ${message} in /main.php on line 3\nStack trace:\n#0 {main}\n`,
+  });
+});
+
+test.each([
   [
     'public function m() {}',
     'abstract protected function M(int $x);',

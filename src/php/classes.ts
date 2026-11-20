@@ -279,42 +279,50 @@ function checkPropertyOverride(
   if (inherited.isFinal)
     throw new FatalError(`Cannot override final property ${inherited.cls.name}::$${ast.name}`, cls.declaredRow);
   if (inherited.visibility === 'private') return;
-  if (inherited.isStatic !== ast.isStatic) {
-    throw new FatalError(
-      ast.isStatic
-        ? `Cannot redeclare non static ${inherited.cls.name}::$${ast.name} as static ${cls.name}::$${ast.name}`
-        : `Cannot redeclare static ${inherited.cls.name}::$${ast.name} as non static ${cls.name}::$${ast.name}`,
-      cls.declaredRow
-    );
-  }
-  if (inherited.isReadonly !== ast.isReadonly && !inherited.declarationAst?.isAbstract)
-    throw new FatalError(
-      `Cannot redeclare ${inherited.isReadonly ? 'readonly' : 'non-readonly'} property ${inherited.cls.name}::$${ast.name} as ${ast.isReadonly ? 'readonly' : 'non-readonly'} ${cls.name}::$${ast.name}`,
-      cls.declaredRow
-    );
-  checkSetterOverride(cls, inherited, ast);
-  if (visibilityRank(ast.visibility) < visibilityRank(inherited.visibility)) {
-    throw new FatalError(
-      `Access level to ${cls.name}::$${ast.name} must be ${inherited.visibility} (as in class ${inherited.cls.name})${inherited.visibility === 'protected' ? ' or weaker' : ''}`,
-      cls.declaredRow
-    );
-  }
+  checkPropertyModifiers(cls, inherited, ast, cls.declaredRow);
   if (!propertyTypeCompatible(inherited, ast, cls, declarationScope)) {
     checkHookSignatures(inherited, ast, cls, cls.declaredRow);
     propertyTypeError(inherited, cls, ast.name, cls.declaredRow);
   }
 }
 
-function checkSetterOverride(cls: PhpClass, inherited: PropDecl, ast: PropertyDeclAst): void {
-  const setter = effectiveSetVisibility(ast);
-  if (setter === ast.visibility || (inherited.isVirtual && inherited.hooks && !inherited.hooks.set)) return;
+// code-gauge-allow functionCognitiveComplexity 20 -- Keeps the shared PHP modifier diagnostics in precedence order.
+function checkPropertyModifiers(
+  cls: PhpClass,
+  inherited: PropDecl,
+  property: Pick<PropDecl, 'name' | 'visibility' | 'setVisibility' | 'isStatic' | 'isReadonly'>,
+  row: number
+): void {
+  const parentName = `${inherited.cls.name}::$${property.name}`;
+  const childName = `${cls.name}::$${property.name}`;
+  if (inherited.isStatic !== property.isStatic)
+    throw new FatalError(
+      property.isStatic
+        ? `Cannot redeclare non static ${parentName} as static ${childName}`
+        : `Cannot redeclare static ${parentName} as non static ${childName}`,
+      row
+    );
+  const abstract = inherited.cls.kind === 'interface' || inherited.declarationAst?.isAbstract;
+  if (inherited.isReadonly !== property.isReadonly && !abstract)
+    throw new FatalError(
+      `Cannot redeclare ${inherited.isReadonly ? 'readonly' : 'non-readonly'} property ${parentName} as ${property.isReadonly ? 'readonly' : 'non-readonly'} ${childName}`,
+      row
+    );
+  const setter = effectiveSetVisibility(property);
   const parentSetter = effectiveSetVisibility(inherited);
-  if (visibilityRank(setter) >= visibilityRank(parentSetter)) return;
-  const parentAsymmetric = parentSetter !== inherited.visibility;
-  throw new FatalError(
-    `Set access level of ${cls.name}::$${ast.name} must be ${parentAsymmetric ? `${parentSetter}(set)` : 'omitted'} (as in class ${inherited.cls.name})${parentAsymmetric ? ' or weaker' : ''}`,
-    cls.declaredRow
-  );
+  const getOnly = inherited.isVirtual && inherited.hooks && !inherited.hooks.set;
+  if (setter !== property.visibility && !getOnly && visibilityRank(setter) < visibilityRank(parentSetter)) {
+    const parentAsymmetric = parentSetter !== inherited.visibility;
+    throw new FatalError(
+      `Set access level of ${childName} must be ${parentAsymmetric ? `${parentSetter}(set)` : 'omitted'} (as in class ${inherited.cls.name})${parentAsymmetric ? ' or weaker' : ''}`,
+      row
+    );
+  }
+  if (visibilityRank(property.visibility) < visibilityRank(inherited.visibility))
+    throw new FatalError(
+      `Access level to ${childName} must be ${inherited.visibility} (as in class ${inherited.cls.name})${inherited.visibility === 'protected' ? ' or weaker' : ''}`,
+      row
+    );
 }
 
 // code-gauge-allow functionCognitiveComplexity 27 -- Populates property slots, defaults and hooks together.
@@ -816,6 +824,7 @@ function effectiveInterfaceMethods(iface: PhpClass): Map<string, Method> {
   return methods;
 }
 
+// code-gauge-allow functionCognitiveComplexity 22 -- Checks each property contract before tracking its missing hooks.
 function missingPropertyHooks(cls: PhpClass, ancestors: PhpClass[], row: number): string[] {
   const missing = new Set<string>();
   const contracts = [...ancestors, ...cls.interfaces, cls].flatMap((parent) => [...parent.propByName.values()]);
@@ -823,28 +832,7 @@ function missingPropertyHooks(cls: PhpClass, ancestors: PhpClass[], row: number)
     if (!contract.hooks?.abstractGet && !contract.hooks?.abstractSet) continue;
     const property = cls.propByName.get(contract.name);
     if (property && property !== contract) {
-      if (property.isStatic !== contract.isStatic)
-        throw new FatalError(
-          property.isStatic
-            ? `Cannot redeclare non static ${contract.cls.name}::$${property.name} as static ${cls.name}::$${property.name}`
-            : `Cannot redeclare static ${contract.cls.name}::$${property.name} as non static ${cls.name}::$${property.name}`,
-          row
-        );
-      if (visibilityRank(property.visibility) < visibilityRank(contract.visibility))
-        throw new FatalError(
-          `Access level to ${cls.name}::$${property.name} must be ${contract.visibility} (as in class ${contract.cls.name})`,
-          row
-        );
-      if (
-        contract.hooks.abstractSet &&
-        visibilityRank(effectiveSetVisibility(property)) < visibilityRank(effectiveSetVisibility(contract))
-      ) {
-        const setter = effectiveSetVisibility(contract);
-        throw new FatalError(
-          `Set access level of ${cls.name}::$${property.name} must be ${setter === 'public' ? 'omitted' : `${setter}(set)`} (as in class ${contract.cls.name})${setter === 'protected' ? ' or weaker' : ''}`,
-          row
-        );
-      }
+      checkPropertyModifiers(cls, contract, property, row);
       if (cls.kind === 'interface') checkHookSignatures(contract, property, property.cls, row);
       if (!propertyTypeCompatible(contract, property, property.cls))
         propertyTypeError(contract, cls, property.name, row);
