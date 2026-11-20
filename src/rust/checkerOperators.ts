@@ -274,7 +274,8 @@ export function checkCompoundAssign(c: Checker, expr: Extract<Expr, { kind: 'com
     const valueType = c.expr(expr.value, t.kind === 'var' && !t.v.literal ? undefined : t);
     const v = numericOperand(valueType);
     const numeric = t.kind === 'int' || t.kind === 'float' || t.kind === 'var';
-    const boolOp = t.kind === 'bool' && ['&', '|', '^'].includes(expr.op);
+    const bitwise = ['&', '|', '^'].includes(expr.op);
+    const boolOp = t.kind === 'bool' && bitwise;
     if ((!numeric && !boolOp) || !c.unifier.tryUnify(t, v)) {
       if (t.kind === 'adt' || t.kind === 'param') {
         compileError(
@@ -286,6 +287,13 @@ export function checkCompoundAssign(c: Checker, expr: Extract<Expr, { kind: 'com
         expr.span,
         `${typeToString(resolve(targetType))} に ${typeToString(resolve(valueType))} を ${expr.op}= で計算できません（型をそろえてください）。`
       );
+    }
+    if (bitwise) {
+      c.deferredChecks.push(() => {
+        if (normalize(shallow(resolve(targetType, true))).kind === 'float') {
+          compileError(expr.span, `${typeToString(resolve(targetType))} に ${expr.op}= は使えません。`);
+        }
+      });
     }
   }
   requireMutablePlace(c, expr.target, '書き換える');

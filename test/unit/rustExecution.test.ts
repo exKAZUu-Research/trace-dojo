@@ -1741,6 +1741,17 @@ fn main() {
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'true true true true\n' });
 });
 
+test('rejects Rust float bitwise compound assignments after inference', () => {
+  for (const op of ['&=', '|=', '^=']) {
+    const source = rustMain(`let mut x = 1.0; x ${op} 2.0;`);
+    expect(executeProgram('rust', source)).toMatchObject({ kind: 'compileError' });
+  }
+  const inferred = rustMain('let op = |mut x| { x ^= x; x }; println!("{}", op(2.0));');
+  expect(executeProgram('rust', inferred)).toMatchObject({ kind: 'compileError' });
+  const valid = rustMain('let mut x = 3; x &= 2; let mut b = true; b ^= true; println!("{} {}", x, b);');
+  expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: '2 false\n' });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {
