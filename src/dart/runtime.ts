@@ -157,7 +157,7 @@ export class Runtime implements TracedRuntime<Frame> {
   onMainExit: (() => void) | undefined;
   /** Extra roots for garbage collection, such as the iterators of running loops. */
   readonly roots = new Set<() => Iterable<Value>>();
-  private readonly nativeCalls: { receiver: Value; args: Arguments }[] = [];
+  private readonly activeCalls: { receiver: Value; args: Arguments }[] = [];
 
   constructor(input?: ProgramInput) {
     this.io = new ProgramIO(this.budget, input);
@@ -271,13 +271,22 @@ export class Runtime implements TracedRuntime<Frame> {
       if (args.isDynamic && member.nativeParameterNames) this.checkNativeArguments(receiver, member, args, supplied);
       return (member.impl as NonNullable<typeof member.impl>)(this, receiver, args, supplied, callRow);
     }
-    if (member) {
-      const target = this.readMember(receiver, member, callRow);
-      return this.callValue(target, args, typeArgs, callRow);
-    }
+    if (member) return this.callGetterValue(receiver, member, args, typeArgs, callRow);
     if (receiver instanceof DartRecord)
       return this.callValue(this.getProperty(receiver, name, callRow), args, typeArgs, callRow);
     return this.noSuchMethod(receiver, name, 'method', args, typeArgs);
+  }
+
+  callGetterValue(
+    receiver: Value,
+    member: Member,
+    args: Arguments,
+    typeArgs: readonly DartType[],
+    callRow: number | undefined
+  ): Value {
+    return this.withCallRoots(receiver, args, () =>
+      this.callValue(this.readMember(receiver, member, callRow), args, typeArgs, callRow)
+    );
   }
 
   getProperty(receiver: Value, name: string, callRow: number | undefined): Value {
@@ -560,12 +569,12 @@ export class Runtime implements TracedRuntime<Frame> {
 
   // Garbage collection
 
-  withNativeCallRoots<T>(receiver: Value, args: Arguments, call: () => T): T {
-    this.nativeCalls.push({ receiver, args });
+  withCallRoots<T>(receiver: Value, args: Arguments, call: () => T): T {
+    this.activeCalls.push({ receiver, args });
     try {
       return call();
     } finally {
-      this.nativeCalls.pop();
+      this.activeCalls.pop();
     }
   }
 
@@ -591,7 +600,7 @@ export class Runtime implements TracedRuntime<Frame> {
     for (const cell of this.globals) if (cell) mark(cell.v);
     for (const value of this.constants.values()) mark(value);
     for (const root of this.roots) for (const value of root()) mark(value);
-    for (const value of this.nativeCallValues()) mark(value);
+    for (const value of this.activeCallValues()) mark(value);
     while (pending.length > 0) {
       const object = pending.pop() as DartObject;
       for (const child of childrenOf(object)) mark(child);
@@ -601,8 +610,8 @@ export class Runtime implements TracedRuntime<Frame> {
     this.world.retain((turtle) => turtles.has(turtle));
   }
 
-  private *nativeCallValues(): Iterable<Value> {
-    for (const { receiver, args } of this.nativeCalls) {
+  private *activeCallValues(): Iterable<Value> {
+    for (const { receiver, args } of this.activeCalls) {
       yield receiver;
       yield* args.positional;
       if (args.named) yield* args.named.values();

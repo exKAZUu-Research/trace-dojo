@@ -1221,7 +1221,7 @@ function virtualMethodCall(
       return value.call(runtime, value.receiver, evaluated, bound.typeArgs(frame), row);
     if (member?.kind === 'method')
       return (member.impl as Callable)(runtime, value, evaluated, bound.typeArgs(frame), row);
-    if (member) return runtime.callValue(runtime.readMember(value, member, row), evaluated, bound.typeArgs(frame), row);
+    if (member) return runtime.callGetterValue(value, member, evaluated, bound.typeArgs(frame), row);
     return runtime.noSuchMethod(value, name, 'method', evaluated);
   };
 }

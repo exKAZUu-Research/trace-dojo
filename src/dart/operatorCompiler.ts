@@ -28,6 +28,7 @@ import {
   numericClassOf,
   sameType,
   upperBound,
+  vmTypeString,
 } from './types';
 import { Cell, type Value } from './values';
 
@@ -166,18 +167,13 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
       if (!isSubtype(right.type, interfaceType(coreTypes.string)) && right.type.kind !== 'dynamic') {
         this.error(expression.right, `${typeName(right.type)} 型の値は、String の + に渡せません。`);
       }
-      const leftRun = left.run;
-      const rightRun = right.run;
       const constValue =
         left.constValue && right.constValue
           ? { value: (left.constValue.value as string) + (right.constValue.value as string) }
           : undefined;
       return {
         type: interfaceType(coreTypes.string),
-        run: (frame) => {
-          const a = leftRun(frame);
-          return dynamicBinary(frame.runtime, operator, a, rightRun(frame), span.row);
-        },
+        run: stringAddition(left.run, right.run, right.type.kind === 'dynamic', span.row),
         isConst: left.isConst && right.isConst,
         constValue,
       };
@@ -229,7 +225,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
   ): Compiled {
     const rightNumeric = numericClassOf(right.type);
     const isComparison = ['<', '<=', '>', '>='].includes(operator);
-    const isBitwise = ['&', '|', '^', '<<', '>>', '>>>'].includes(operator);
+    const isBitwise = BITWISE.has(operator);
     if (!['+', '-', '*', '/', '~/', '%', '<', '<=', '>', '>=', '&', '|', '^', '<<', '>>', '>>>'].includes(operator)) {
       return this.error(span, `${typeName(left.type)} 型には演算子 ${operator} がありません。`);
     }
@@ -469,7 +465,34 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
 }
 
 const ARITHMETIC = new Set(['+', '-', '*', '%', 'remainder']);
+const BITWISE = new Set(['&', '|', '^', '<<', '>>', '>>>']);
+const INTEGER_OPERAND_METHODS = new Map([
+  ['+', '_addFromInteger'],
+  ['-', '_subFromInteger'],
+  ['*', '_mulFromInteger'],
+  ['~/', '_truncDivFromInteger'],
+  ['%', '_moduloFromInteger'],
+  ['>', '_greaterThanFromInteger'],
+  ['>=', '_greaterThanFromInteger'],
+  ['&', '_bitAndFromInteger'],
+  ['|', '_bitOrFromInteger'],
+  ['^', '_bitXorFromInteger'],
+  ['<<', '_shlFromInteger'],
+  ['>>', '_shrFromInteger'],
+  ['>>>', '_ushrFromInteger'],
+]);
 
+function stringAddition(left: Eval, right: Eval, dynamicArgument: boolean, row: number): Eval {
+  return (frame) => {
+    const a = left(frame);
+    const b = right(frame);
+    if (dynamicArgument && typeof b !== 'string') return primitiveCastError(frame.runtime, b, 'String');
+    if (typeof a === 'string' && b === undefined) return frame.runtime.throwError('ArgumentError', '', []);
+    return dynamicBinary(frame.runtime, '+', a, b, row);
+  };
+}
+
+// code-gauge-allow functionCognitiveComplexity 22 -- Typed fast paths, implicit casts and SDK null dispatch have distinct semantics.
 function numericEvaluation(
   left: Eval,
   right: Eval,
@@ -479,13 +502,33 @@ function numericEvaluation(
 ): Eval {
   const ints = leftClass === 'int' && rightClass === 'int' ? intOperation(operator) : undefined;
   const doubles = leftClass === 'double' && rightClass === 'double' ? doubleOperation(operator) : undefined;
+  const argumentType = rightClass === undefined ? (BITWISE.has(operator) ? 'int' : 'num') : undefined;
   return (frame) => {
     const a = left(frame);
     const b = right(frame);
     if (ints && typeof a === 'bigint' && typeof b === 'bigint') return ints(frame, a, b);
     if (doubles && typeof a === 'number' && typeof b === 'number') return doubles(frame, a, b);
+    if (argumentType && (argumentType === 'int' ? typeof b !== 'bigint' : !isNumber(b))) {
+      return primitiveCastError(frame.runtime, b, argumentType);
+    }
+    if (b === undefined && isNumber(a)) return nullNumericArgument(frame.runtime, operator, a);
     return dynamicBinary(frame.runtime, operator, a, b, row);
   };
+}
+
+function nullNumericArgument(runtime: Runtime, operator: string, receiver: bigint | number): Value {
+  const method =
+    operator === '<' || operator === '<='
+      ? '>'
+      : ((typeof receiver === 'bigint' ? INTEGER_OPERAND_METHODS.get(operator) : undefined) ?? 'toDouble');
+  const positional = method === 'toDouble' ? [] : [receiver];
+  return runtime.noSuchMethod(undefined, method, 'method', { positional, named: undefined });
+}
+
+function primitiveCastError(runtime: Runtime, value: Value, type: string): never {
+  return runtime.throwTypeError(
+    `type '${vmTypeString(runtime.runtimeTypeOf(value))}' is not a subtype of type '${type}'`
+  );
 }
 
 // code-gauge-allow duplicateLines 32 -- Each function handles its own construct; the shared shape reads better than a helper with flags.

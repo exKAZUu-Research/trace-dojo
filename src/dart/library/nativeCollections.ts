@@ -652,7 +652,7 @@ define('List.lastIndexWhere', (runtime, receiver, [test, start]) => {
   return -1n;
 });
 define('List.sort', sortList);
-define('ListMixin.sort', sortList);
+define('ListBase.sort', sortList);
 
 function sortList(runtime: Runtime, receiver: Value, [compare]: readonly Value[]): undefined {
   const native = receiver instanceof DartList ? receiver : undefined;

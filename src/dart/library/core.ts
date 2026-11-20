@@ -249,7 +249,7 @@ abstract final class double extends num {
   external static double? tryParse(String source);
 }
 
-abstract class Pattern {
+abstract interface class Pattern {
   Iterable<Match> allMatches(String string, [int start = 0]);
   Match? matchAsPrefix(String string, [int start = 0]);
 }
@@ -478,7 +478,7 @@ class _StackTrace implements StackTrace {
   external String toString();
 }
 
-abstract class Enum {
+abstract interface class Enum {
   const Enum();
   external int get index;
   external String get _name;
@@ -721,13 +721,13 @@ class ConcurrentModificationError extends Error {
   }
 }
 
-class OutOfMemoryError implements Error {
+final class OutOfMemoryError implements Error {
   const OutOfMemoryError();
   String toString() => "Out of Memory";
   StackTrace? get stackTrace => null;
 }
 
-class StackOverflowError implements Error {
+final class StackOverflowError implements Error {
   const StackOverflowError();
   String toString() => "Stack Overflow";
   StackTrace? get stackTrace => null;
@@ -904,7 +904,7 @@ class _Override {
 
 const Object override = _Override();
 
-class pragma {
+final class pragma {
   final String name;
   final Object? options;
   const pragma(this.name, [this.options]);
@@ -925,7 +925,17 @@ abstract interface class Iterator<E> {
 
 abstract mixin class Iterable<E> {
   const Iterable();
-  factory Iterable.generate(int count, [E Function(int index)? generator]) => _GeneratorIterable<E>(count, generator);
+  factory Iterable.generate(int count, [E Function(int index)? generator]) {
+    if (count <= 0) return EmptyIterable<E>();
+    if (generator == null) {
+      Function identity = _GeneratorIterable._identity;
+      if (identity is! E Function(int)) {
+        throw ArgumentError("Generator must be supplied or element type must allow integers", "generator");
+      }
+      generator = identity;
+    }
+    return _GeneratorIterable<E>(count, generator);
+  }
   factory Iterable.empty() => EmptyIterable<E>();
   static Iterable<T> castFrom<S, T>(Iterable<S> source) =>
       _hasEfficientLength(source) ? _EfficientLengthCastIterable<S, T>(source) : CastIterable<S, T>(source);
@@ -1211,19 +1221,13 @@ class _EmptyIterator<E> implements Iterator<E> {
 
 class _GeneratorIterable<E> extends ListIterable<E> {
   final int _count;
-  final E Function(int)? _generator;
-  _GeneratorIterable(this._count, this._generator) {
-    RangeError.checkNotNegative(_count, "count");
-  }
+  final E Function(int) _generator;
+  _GeneratorIterable(this._count, this._generator);
+  static int _identity(int index) => index;
   int get length => _count;
   E elementAt(int index) {
     RangeError.checkValidIndex(index, this, "index", _count);
-    return _generate(index);
-  }
-  E _generate(int index) {
-    var generator = _generator;
-    if (generator == null) return index as E;
-    return generator(index);
+    return _generator(index);
   }
 }
 

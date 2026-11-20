@@ -243,6 +243,21 @@ void main() { print(values().toList()); }
   expect(actual.traceItems.filter((item) => item.line === 2).map((item) => item.vars.i)).toEqual([0, 1, 2]);
 });
 
+test('large scalar list snapshots show omitted entries for each variable', () => {
+  const dart = `void main() {
+  var first = List.filled(3000, 1);
+  var second = List.filled(3000, 2);
+  var label = 42;
+  print(label);
+}`;
+  const actual = traceProgram('dart', dart, dart);
+  expect(actual).toMatchObject({ stdout: '42\n', finalVars: { label: 42 } });
+  const { first, second } = actual.finalVars;
+  expect(first).toEqual([...Array.from({ length: 2046 }, () => 1), '… (954 more)']);
+  expect(second).toEqual([...Array.from({ length: 2046 }, () => 2), '… (954 more)']);
+  expect(actual.traceItems.at(-1)?.vars).toMatchObject({ first, second, label: 42 });
+});
+
 test('nested grid updates complete with the Java trace length', () => {
   const dart = `void main() {
   var grid = List.generate(30, (_) => List.filled(30, 0));

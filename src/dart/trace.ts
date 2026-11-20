@@ -126,6 +126,7 @@ function isLateInitializer(value: Value): boolean {
 }
 
 const NOT_SCALAR = Symbol('notScalar');
+const TRUNCATED = '…';
 type Scalar = TraceItemVariable[string];
 
 function addVariable(
@@ -182,36 +183,48 @@ function primitiveScalar(value: Value): TraceScalar | typeof NOT_SCALAR {
  * The value learners write down for a variable of a type: numbers, booleans, strings, and lists of them. A null of an
  * object type is a reference, as Java shows a null object.
  */
-// code-gauge-allow functionCognitiveComplexity 18 -- Lists share an unchanged snapshot after checking their elements.
 function scalarOf(value: Value, type: DartType, budget: SnapshotBudget): Scalar | typeof NOT_SCALAR {
   if (budget.remaining === 0) return NOT_SCALAR;
   budget.remaining--;
   if (!isScalarType(type)) return NOT_SCALAR;
   const primitive = primitiveScalar(value);
   if (primitive !== NOT_SCALAR) return primitive;
-  if (value instanceof DartList) {
-    const seen = budget.path;
-    if (seen.has(value) || seen.size >= LIMITS.maxCallDepth) return NOT_SCALAR;
-    const elementType = value.typeArgs[0] ?? DYNAMIC;
-    seen.add(value);
-    try {
-      const entries: Scalar[] = [];
-      for (const element of value.elements) {
-        if (budget.remaining === 0) break;
-        const scalar = scalarOf(element, elementType, budget);
-        // oxlint-disable-next-line unicorn/no-null -- The trace format shows a non-scalar list entry as null.
-        entries.push(scalar === NOT_SCALAR ? null : scalar);
+  return value instanceof DartList ? listScalar(value, budget) : NOT_SCALAR;
+}
+
+function listScalar(list: DartList, budget: SnapshotBudget): Scalar | typeof NOT_SCALAR {
+  const seen = budget.path;
+  if (seen.has(list) || seen.size >= LIMITS.maxCallDepth) return NOT_SCALAR;
+  if (list.elements.length > 0 && budget.remaining === 0) return omittedElements(list.elements.length);
+  const elementType = list.typeArgs[0] ?? DYNAMIC;
+  seen.add(list);
+  try {
+    const entries: Scalar[] = [];
+    for (const [index, element] of list.elements.entries()) {
+      const reserveMarker = index + 1 < list.elements.length ? 1 : 0;
+      if (budget.remaining === reserveMarker) {
+        budget.remaining -= reserveMarker;
+        entries.push(omittedElements(list.elements.length - index));
+        break;
       }
-      const previous = budget.lists.scalar.get(value);
-      if (previous?.length === entries.length && entries.every((entry, index) => Object.is(entry, previous[index])))
-        return previous;
-      budget.lists.scalar.set(value, entries);
-      return entries;
-    } finally {
-      seen.delete(value);
+      budget.remaining -= reserveMarker;
+      const scalar = scalarOf(element, elementType, budget);
+      budget.remaining += reserveMarker;
+      // oxlint-disable-next-line unicorn/no-null -- The trace format shows a non-scalar list entry as null.
+      entries.push(scalar === NOT_SCALAR ? null : scalar);
     }
+    const previous = budget.lists.scalar.get(list);
+    if (previous?.length === entries.length && entries.every((entry, index) => Object.is(entry, previous[index])))
+      return previous;
+    budget.lists.scalar.set(list, entries);
+    return entries;
+  } finally {
+    seen.delete(list);
   }
-  return NOT_SCALAR;
+}
+
+function omittedElements(length: number): string {
+  return `${TRUNCATED} (${length} more)`;
 }
 
 function isScalarType(type: DartType): boolean {
@@ -224,7 +237,7 @@ function isScalarType(type: DartType): boolean {
 
 // oxlint-disable-next-line unicorn/no-null -- The trace format shows Dart's null as null.
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
-const TRUNCATED_NODE: DisplayNode = { kind: 'value', value: '…', verbatim: true };
+const TRUNCATED_NODE: DisplayNode = { kind: 'value', value: TRUNCATED, verbatim: true };
 
 // code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of value a trace shows.
 // code-gauge-allow functionNcss 43 -- One case per kind of value a trace shows.

@@ -405,7 +405,8 @@ void main() {
 });
 
 test('extensible SDK classes allow subclasses and implementations', () => {
-  const program = `import 'dart:math';
+  const program = `import 'dart:collection';
+import 'dart:math';
 class Location extends Point<int> { Location() : super(1, 2); }
 abstract class Coordinates implements Point<int> {}
 abstract class Call implements Invocation {}
@@ -422,6 +423,9 @@ class Handler {
 }
 class Wait extends Duration { const Wait() : super(seconds: 5); }
 class Message extends StringBuffer { Message() : super('hello'); }
+abstract class MixedList with ListBase<int> {}
+abstract class MixedMap with MapMixin<String, int> {}
+abstract class MixedSet with SetBase<int> {}
 void main() {
   print(Location());
   print(const Wait().inSeconds);
@@ -438,10 +442,25 @@ void main() {
     stdout:
       'Point(1, 2)\n5\nhello world\nSymbol("hello")\nUnmodifiableMapView<Symbol, Object?>\n{Symbol("a"): 1}\nUnsupported operation: Cannot modify unmodifiable map\n_ConstMap<Symbol, Object?>\n{}\nUnsupported operation: Cannot modify unmodifiable map\n',
   });
-  for (const name of ['Comparable<int>', 'Type']) {
-    const invalid = `abstract class Invalid extends ${name} {} void main() {}`;
+  for (const name of ['Comparable<int>', 'Type', 'Pattern', 'ListQueue<int>', 'SplayTreeSet<int>']) {
+    const invalid = `import 'dart:collection'; abstract class Invalid extends ${name} {} void main() {}`;
     expect(executeProgram('dart', invalid)).toMatchObject({ kind: 'compileError' });
   }
+});
+
+test('Iterable.generate requires a compatible generator only for positive counts', () => {
+  const program = `void main() {
+  print(Iterable<String>.generate(-1).toList());
+  print(Iterable<String>.generate(0).toList());
+  print(Iterable<num>.generate(2).toList());
+  print(Iterable<String>.generate(2, (i) => i.toString()).toList());
+  try { print(Iterable<String>.generate(2)); } catch (error) { print(error); }
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[]\n[]\n[0, 1]\n[0, 1]\nInvalid argument(s) (generator): Generator must be supplied or element type must allow integers\n',
+  });
 });
 
 test('a parameter can only narrow an override when explicitly covariant', () => {
@@ -1070,6 +1089,32 @@ void main() {
       stdout: expect.stringContaining(`The method '${operator}' was called on null`),
     });
   }
+
+  const rightOperand = `bool printOperand(Object? value) { print(value); return false; }
+void integer(bool skip) {
+  int x;
+  outer: do { if (skip) continue outer; x = 7; continue outer; } while (printOperand(1 + x));
+}
+void doubleValue(bool skip) {
+  double x;
+  outer: do { if (skip) continue outer; x = 7.0; continue outer; } while (printOperand(1.0 + x));
+}
+void stringValue(bool skip) {
+  String x;
+  outer: do { if (skip) continue outer; x = 'a'; continue outer; } while (printOperand('b' + x));
+}
+void main() {
+  for (final callback in [integer, doubleValue, stringValue]) {
+    try { callback(true); } catch (error) { print(error); }
+  }
+  dynamic value;
+  try { print(1 + value); } catch (error) { print(error); }
+}`;
+  expect(executeProgram('dart', rightOperand)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      "NoSuchMethodError: The method '_addFromInteger' was called on null.\nReceiver: null\nTried calling: _addFromInteger(1)\nNoSuchMethodError: The method 'toDouble' was called on null.\nReceiver: null\nTried calling: toDouble()\nInvalid argument(s)\ntype 'Null' is not a subtype of type 'num'\n",
+  });
 });
 
 test('patterns promote the subject in guarded cases and later alternatives', () => {
@@ -1839,8 +1884,18 @@ void main() {
   });
 });
 
-test('native calls keep temporary receivers and arguments reachable during callbacks', () => {
-  const program = `late Turtle key, second;
+test('native calls and getters keep evaluated arguments reachable through callbacks', () => {
+  const program = `late Turtle key, second, throughGetter, namedFromGetter;
+class Handler {
+  Function get callback {
+    Turtle(3, 3).canMoveForward();
+    return (Turtle turtle) { throughGetter = turtle; };
+  }
+  Function get namedCallback {
+    Turtle(3, 3).canMoveForward();
+    return ({required Turtle turtle}) { namedFromGetter = turtle; };
+  }
+}
 void main() {
   var map = <Turtle, int>{};
   map.putIfAbsent(Turtle(1, 1), () {
@@ -1855,12 +1910,19 @@ void main() {
     else second = turtle;
   });
   second.forward();
+  dynamic handler = Handler();
+  handler.callback(Turtle(3, 1));
+  throughGetter.forward();
+  handler.namedCallback(turtle: Turtle(4, 1));
+  namedFromGetter.forward();
 }`;
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
     finalTurtles: [
       { x: 1, y: 2 },
       { x: 2, y: 3 },
+      { x: 3, y: 2 },
+      { x: 4, y: 2 },
     ],
   });
 });

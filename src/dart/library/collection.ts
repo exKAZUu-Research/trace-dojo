@@ -147,8 +147,8 @@ abstract class IterableBase<E> extends Iterable<E> {
 
 // Lists the program implements
 
-/** ListMixin as the SDK's ListBase (collection/list.dart) implements it on top of length and the index operators. */
-abstract mixin class ListMixin<E> implements List<E> {
+abstract mixin class ListBase<E> implements List<E> {
+  static String listToString(List list) => Iterable.iterableToFullString(list, '[', ']');
   int get length;
   set length(int newLength);
   E operator [](int index);
@@ -690,9 +690,7 @@ class CastList<S, T> extends ListBase<T> {
   }
 }
 
-abstract class ListBase<E> with ListMixin<E> {
-  static String listToString(List list) => Iterable.iterableToFullString(list, '[', ']');
-}
+typedef ListMixin<E> = ListBase<E>;
 
 class UnmodifiableListView<E> extends ListBase<E> {
   final Iterable<E> _source;
@@ -724,7 +722,8 @@ class UnmodifiableListView<E> extends ListBase<E> {
 
 // Maps the program implements
 
-abstract mixin class MapMixin<K, V> implements Map<K, V> {
+abstract mixin class MapBase<K, V> implements Map<K, V> {
+  static String mapToString(Map<Object?, Object?> m) => _mapToString(m);
   Iterable<K> get keys;
   V? operator [](Object? key);
   void operator []=(K key, V value);
@@ -791,9 +790,7 @@ class _MapMixinValues<K, V> extends EfficientLengthIterable<V> {
   Iterator<V> get iterator => MappedIterable<K, V>(_source.keys, (key) => _source[key] as V).iterator;
 }
 
-abstract class MapBase<K, V> with MapMixin<K, V> {
-  static String mapToString(Map<Object?, Object?> m) => _mapToString(m);
-}
+typedef MapMixin<K, V> = MapBase<K, V>;
 
 abstract class _UnmodifiableMapBase<K, V> extends MapBase<K, V> {
   void operator []=(K key, V value) => throw UnsupportedError("Cannot modify unmodifiable map");
@@ -849,7 +846,8 @@ class _ListIndicesIterable extends ListIterable<int> {
 
 // Sets the program implements
 
-abstract mixin class SetMixin<E> implements Set<E> {
+abstract mixin class SetBase<E> implements Set<E> {
+  static String setToString(Set set) => Iterable.iterableToFullString(set, '{', '}');
   bool add(E value);
   bool contains(Object? element);
   E? lookup(Object? element);
@@ -1024,9 +1022,7 @@ abstract mixin class SetMixin<E> implements Set<E> {
   }
 }
 
-abstract class SetBase<E> with SetMixin<E> {
-  static String setToString(Set set) => Iterable.iterableToFullString(set, '{', '}');
-}
+typedef SetMixin<E> = SetBase<E>;
 
 // LinkedHashMap and LinkedHashSet are dart:core's map and set, which this library exports.
 
@@ -1707,7 +1703,7 @@ class _SplayTree<K> {
   }
 }
 
-class SplayTreeMap<K, V> extends MapBase<K, V> {
+final class SplayTreeMap<K, V> extends MapBase<K, V> {
   late final _SplayTree<K> _tree;
   SplayTreeMap([int Function(K key1, K key2)? compare, bool Function(dynamic potentialKey)? isValidKey]) {
     _tree = _SplayTree<K>(this, compare ?? _defaultCompare, isValidKey);
@@ -1998,7 +1994,7 @@ class _SplayTreeMapEntryIterator<K, V> extends _SplayTreeIterator<K, MapEntry<K,
   }
 }
 
-class SplayTreeSet<E> extends SetBase<E> {
+final class SplayTreeSet<E> extends SetBase<E> {
   late final _SplayTree<E> _tree;
   SplayTreeSet([int Function(E key1, E key2)? compare, bool Function(dynamic potentialKey)? isValidKey]) {
     _tree = _SplayTree<E>(this, compare ?? _defaultCompare, isValidKey);
@@ -2143,7 +2139,7 @@ abstract interface class Queue<E> implements Iterable<E> {
   void clear();
 }
 
-class ListQueue<E> extends Iterable<E> implements Queue<E> {
+final class ListQueue<E> extends Iterable<E> implements Queue<E> {
   final List<E> _elements = <E>[];
   int _modificationCount = 0;
   ListQueue([int? initialCapacity]);
@@ -2228,7 +2224,7 @@ class ListQueue<E> extends Iterable<E> implements Queue<E> {
   }
 }
 
-class DoubleLinkedQueue<E> extends Iterable<E> implements Queue<E> {
+final class DoubleLinkedQueue<E> extends Iterable<E> implements Queue<E> {
   final _LinkedQueueEntry<E> _anchor = _LinkedQueueEntry<E>(null);
   int _count = 0;
 
