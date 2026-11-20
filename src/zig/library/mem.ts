@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 690 -- Groups the related standard library operations that share this module.
+// code-gauge-allow-file fileNcss 698 -- Memory adapters share typed slice access, comparison, and allocation helpers.
 import { transferCost } from '../allocation';
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 import type { Expression, Span } from '../ast';

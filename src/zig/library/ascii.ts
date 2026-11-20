@@ -172,9 +172,8 @@ const MEMBERS: Record<string, () => Member> = {
   whitespace: () => ({ type: arrayOf(6, U8), value: new ZArray([32n, 9n, 10n, 13n, 11n, 12n]) }),
 };
 
-/** A string constant such as `std.ascii.lowercase`, typed as a string literal is: `*const [n:0]u8`. */
 function stringConstant(text: string): Member {
-  const bytes = [...text].map((char) => BigInt(char.codePointAt(0) as number));
+  const bytes = Array.from(new TextEncoder().encode(text), BigInt);
   const storage = new Constant(new ZArray([...bytes, 0n], 0, bytes.length, true));
   const type = arrayOf(bytes.length, U8, 0n);
   markConstantStorage(storage, type);

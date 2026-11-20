@@ -349,7 +349,7 @@ function floatConstant(name: string, exponent: (format: (typeof FORMATS)[FloatBi
 const DIVISION_ERRORS = errorSetOf(['DivisionByZero', 'Overflow']);
 const MOD_ERRORS = errorSetOf(['DivisionByZero', 'NegativeDenominator']);
 
-// code-gauge-allow functionCognitiveComplexity 24 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
+// code-gauge-allow functionCognitiveComplexity 25 -- Shares argument validation and error-union handling across integer division variants.
 function intDivision(
   name: string,
   errors: typeof DIVISION_ERRORS,
