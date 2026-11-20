@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 831 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss 844 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
@@ -14,7 +14,7 @@ import { defineFunctionProperties } from './memberProperties';
 import { EventLoop } from './promises';
 import { createRealm, type ErrorName, type Realm } from './realm';
 import { dateValueOf } from './realmDate';
-import { WELL_KNOWN_SYMBOLS } from './realmIterators';
+import { iteratorClassOf, WELL_KNOWN_SYMBOLS } from './realmIterators';
 import { rejectUnavailableMember, type UnavailableMemberCheck } from './unavailableMembers';
 import {
   type AccessorProperty,
@@ -75,6 +75,8 @@ export class Runtime {
   private readonly functionConstructor: Value;
   private readonly functionToString: Value;
   private readonly functionHasInstance: Value;
+  private readonly objectToString: Value;
+  private readonly errorToString: Value;
   readonly world = new TurtleWorld();
   readonly budget = new ExecutionBudget();
   readonly io: ProgramIO;
@@ -107,6 +109,8 @@ export class Runtime {
     this.functionConstructor = this.realm.globals.lookup('Function')?.value;
     this.functionToString = this.get(this.realm.functionPrototype, 'toString');
     this.functionHasInstance = this.get(this.realm.functionPrototype, WELL_KNOWN_SYMBOLS.hasInstance);
+    this.objectToString = this.get(this.realm.objectPrototype, 'toString');
+    this.errorToString = this.get(this.realm.errorPrototypes.Error, 'toString');
     this.evaluator = new Evaluator(this);
   }
 
@@ -420,34 +424,44 @@ export class Runtime {
     ]);
   }
 
-  /** V8 names refused-write receivers by their source, class, or tag. */
+  /** V8 describes receivers for errors without invoking program code. */
   receiverText(target: JsObject): string {
-    if (target instanceof JsArray) return '[object Array]';
-    if (target.regexp) return '[object RegExp]';
-    if (dateValueOf(target) !== undefined) return '[object Date]';
-    if (target.primitive !== undefined) return `[object ${primitiveClassName(target.primitive)}]`;
-    if (target.isError) return this.errorReceiverText(target);
-    // A builtin iterator has no constructor of its own, so V8 names it by its tag.
-    if (target.hostIterator) return `[object ${this.toString(this.get(target, WELL_KNOWN_SYMBOLS.toStringTag))}]`;
     if (target instanceof JsFunction) return this.functionSourceText(target);
-    const constructor = this.findProperty(target, 'constructor');
-    const name =
-      constructor && !isAccessor(constructor) && constructor.value instanceof JsFunction
-        ? this.functionName(constructor.value)
-        : '';
-    return name ? `#<${name}>` : '[object Object]';
+    const method = this.receiverData(target, 'toString');
+    if (target.isError || method === this.errorToString) return this.errorReceiverText(target);
+    if (method === this.objectToString) {
+      const constructor = this.receiverData(target, 'constructor');
+      const name = constructor instanceof JsFunction ? this.receiverFunctionName(constructor) : '';
+      if (name) return `#<${name}>`;
+    }
+    const tag = this.receiverData(target, WELL_KNOWN_SYMBOLS.toStringTag);
+    return `[object ${typeof tag === 'string' ? tag : receiverClassName(target)}]`;
+  }
+
+  private receiverData(target: JsObject, key: Key): Value {
+    const property = this.findProperty(target, key);
+    return property && !isAccessor(property) ? property.value : undefined;
+  }
+
+  private receiverFunctionName(fn: JsFunction): string {
+    let name = '';
+    let target = fn;
+    while (target.boundTarget) {
+      this.spend();
+      name += 'bound ';
+      target = target.boundTarget;
+    }
+    return name + target.initialName;
   }
 
   /** V8's side-effect-free text of an error: its `name` and `message` when both are plain data, as `Error: x`. */
   private errorReceiverText(error: JsObject): string {
-    const read = (key: string, fallback: string): string => {
-      const property = this.findProperty(error, key);
-      if (!property) return fallback;
-      const value = isAccessor(property) ? undefined : this.readPropertyValue(property);
-      return typeof value === 'string' ? value : fallback;
+    const read = (key: string): string => {
+      const value = this.receiverData(error, key);
+      return typeof value === 'string' ? value : '';
     };
-    const name = read('name', 'Error');
-    const message = read('message', '');
+    const name = read('name');
+    const message = read('message');
     return message === '' ? name : name === '' ? message : `${name}: ${message}`;
   }
 
@@ -1179,6 +1193,16 @@ function ownElement(value: Value, key: Key): Value | typeof MISSING {
 /** Defines a non-enumerable data property, as builtin methods and `name` are. */
 export function defineHidden(object: JsObject, key: Key, value: Value, writable = true): void {
   object.properties.set(key, { value, writable, enumerable: false, configurable: true });
+}
+
+function receiverClassName(target: JsObject): string {
+  if (target instanceof JsArray) return 'Array';
+  if (target.regexp) return 'RegExp';
+  if (dateValueOf(target) !== undefined) return 'Date';
+  if (target.primitive !== undefined) return primitiveClassName(target.primitive);
+  if (target.isArguments) return 'Arguments';
+  if (target.generator || target.asyncGenerator) return 'Generator';
+  return target.collection?.kind ?? iteratorClassOf(target) ?? 'Object';
 }
 
 function primitiveClassName(primitive: Value): string {

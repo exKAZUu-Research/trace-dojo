@@ -1,7 +1,8 @@
-// code-gauge-allow-file fileNcss 465 -- One evaluator of every expression kind, whose cases share its references and calls.
+// code-gauge-allow-file fileNcss 466 -- One evaluator of every expression kind, whose cases share its references and calls.
 import { LIMITS } from '../interpreter/limits';
 import type { Argument, ClassNode, Expression, MemberExpression, ObjectMember } from './ast';
 import { EvaluatorBase, nameFunction, type Reference, referenceBase, SHORT_CIRCUIT } from './evaluatorBase';
+import { defineFunctionName } from './memberProperties';
 import { newRegExp } from './realmRegExp';
 import type { Runtime } from './runtime';
 import {
@@ -710,11 +711,6 @@ export function defineAccessor(
   else accessor.set = fn;
   // An accessor is named after its key with a `get` or `set` prefix, a symbol key by its description in brackets.
   const keyText = typeof key === 'string' ? key : key.description === undefined ? '' : `[${key.description}]`;
-  fn.properties.set('name', {
-    value: `${kind === 'getter' ? 'get' : 'set'} ${keyText}`,
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  });
+  defineFunctionName(fn, `${kind === 'getter' ? 'get' : 'set'} ${keyText}`);
   runtime.defineProperty(object, key, accessor);
 }

@@ -72,6 +72,78 @@ export const BROWSER_ONLY_GLOBALS: Record<string, DomGlobalDeclaration> = {
   ],
   BlobEvent: ['var', '{ prototype: BlobEvent; new(type: string, eventInitDict: BlobEventInit): BlobEvent; }'],
   CDATASection: ['var', '{ prototype: CDATASection; new(): CDATASection; }'],
+  CSS: [
+    'const',
+    `{
+      highlights: HighlightRegistry;
+      Hz(value: number): CSSUnitValue;
+      Q(value: number): CSSUnitValue;
+      cap(value: number): CSSUnitValue;
+      ch(value: number): CSSUnitValue;
+      cm(value: number): CSSUnitValue;
+      cqb(value: number): CSSUnitValue;
+      cqh(value: number): CSSUnitValue;
+      cqi(value: number): CSSUnitValue;
+      cqmax(value: number): CSSUnitValue;
+      cqmin(value: number): CSSUnitValue;
+      cqw(value: number): CSSUnitValue;
+      deg(value: number): CSSUnitValue;
+      dpcm(value: number): CSSUnitValue;
+      dpi(value: number): CSSUnitValue;
+      dppx(value: number): CSSUnitValue;
+      dvb(value: number): CSSUnitValue;
+      dvh(value: number): CSSUnitValue;
+      dvi(value: number): CSSUnitValue;
+      dvmax(value: number): CSSUnitValue;
+      dvmin(value: number): CSSUnitValue;
+      dvw(value: number): CSSUnitValue;
+      em(value: number): CSSUnitValue;
+      escape(ident: string): string;
+      ex(value: number): CSSUnitValue;
+      fr(value: number): CSSUnitValue;
+      grad(value: number): CSSUnitValue;
+      ic(value: number): CSSUnitValue;
+      kHz(value: number): CSSUnitValue;
+      lh(value: number): CSSUnitValue;
+      lvb(value: number): CSSUnitValue;
+      lvh(value: number): CSSUnitValue;
+      lvi(value: number): CSSUnitValue;
+      lvmax(value: number): CSSUnitValue;
+      lvmin(value: number): CSSUnitValue;
+      lvw(value: number): CSSUnitValue;
+      mm(value: number): CSSUnitValue;
+      ms(value: number): CSSUnitValue;
+      number(value: number): CSSUnitValue;
+      pc(value: number): CSSUnitValue;
+      percent(value: number): CSSUnitValue;
+      pt(value: number): CSSUnitValue;
+      px(value: number): CSSUnitValue;
+      rad(value: number): CSSUnitValue;
+      rcap(value: number): CSSUnitValue;
+      rch(value: number): CSSUnitValue;
+      registerProperty(definition: PropertyDefinition): void;
+      rem(value: number): CSSUnitValue;
+      rex(value: number): CSSUnitValue;
+      ric(value: number): CSSUnitValue;
+      rlh(value: number): CSSUnitValue;
+      s(value: number): CSSUnitValue;
+      supports(property: string, value: string): boolean;
+      supports(conditionText: string): boolean;
+      svb(value: number): CSSUnitValue;
+      svh(value: number): CSSUnitValue;
+      svi(value: number): CSSUnitValue;
+      svmax(value: number): CSSUnitValue;
+      svmin(value: number): CSSUnitValue;
+      svw(value: number): CSSUnitValue;
+      turn(value: number): CSSUnitValue;
+      vb(value: number): CSSUnitValue;
+      vh(value: number): CSSUnitValue;
+      vi(value: number): CSSUnitValue;
+      vmax(value: number): CSSUnitValue;
+      vmin(value: number): CSSUnitValue;
+      vw(value: number): CSSUnitValue;
+    }`,
+  ],
   CSSAnimation: ['var', '{ prototype: CSSAnimation; new(): CSSAnimation; }'],
   CSSConditionRule: ['var', '{ prototype: CSSConditionRule; new(): CSSConditionRule; }'],
   CSSContainerRule: ['var', '{ prototype: CSSContainerRule; new(): CSSContainerRule; }'],

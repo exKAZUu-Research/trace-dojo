@@ -17,6 +17,13 @@ export const WELL_KNOWN_SYMBOLS = {
   species: Symbol('Symbol.species'),
 } as const;
 
+const iteratorClasses = new WeakMap<JsObject, string>();
+const v8IteratorClasses = new Set(['Array Iterator', 'Map Iterator', 'Set Iterator']);
+
+export function iteratorClassOf(iterator: JsObject): string | undefined {
+  return iterator.hostIteratorKind && iteratorClasses.get(iterator.hostIteratorKind);
+}
+
 /** Defines Symbol and the iterators of arrays and strings, which `%IteratorPrototype%` makes iterable themselves. */
 export function defineIteratorBuiltins(builder: RealmBuilder): void {
   defineSymbol(builder);
@@ -60,6 +67,7 @@ export function defineIteratorBuiltins(builder: RealmBuilder): void {
  */
 export function defineHostIteratorPrototype(builder: RealmBuilder, tag: string): JsObject {
   const prototype = new JsObject(builder.realm.iteratorPrototype);
+  if (v8IteratorClasses.has(tag)) iteratorClasses.set(prototype, tag);
   const next = builder.method(prototype, 'next', 0, ({ runtime, thisValue }) => {
     // Each kind of iterator steps only its own kind, as V8 checks.
     const iterator =
@@ -74,7 +82,12 @@ export function defineHostIteratorPrototype(builder: RealmBuilder, tag: string):
     return iteratorResult(runtime, value === DONE ? undefined : value, value === DONE);
   });
   builder.realm.hostIteratorMethods.add(next);
-  builder.constant(prototype, WELL_KNOWN_SYMBOLS.toStringTag, tag);
+  prototype.properties.set(WELL_KNOWN_SYMBOLS.toStringTag, {
+    value: tag,
+    writable: false,
+    enumerable: false,
+    configurable: true,
+  });
   return prototype;
 }
 

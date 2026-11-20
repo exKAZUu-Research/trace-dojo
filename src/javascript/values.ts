@@ -167,6 +167,7 @@ export class JsFunction extends JsObject {
   /** Values a native function's closure keeps, such as what `bind` bound, which garbage collection must see. */
   captured: Value[] = [];
   boundTarget?: JsFunction;
+  initialName = '';
 
   constructor(
     proto: JsObject | null,

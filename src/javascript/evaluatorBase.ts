@@ -1,5 +1,6 @@
 import type { Expression, FunctionNode, MemberExpression, Pattern, PropertyName, ScopeDeclarations } from './ast';
 import { DONE } from './iteration';
+import { defineFunctionName } from './memberProperties';
 import type { Runtime } from './runtime';
 import {
   type FunctionFrame,
@@ -341,7 +342,7 @@ export function nameFunction(runtime: Runtime, fn: JsFunction, name: Key): void 
   if (runtime.functionName(fn) !== '' || fn.behavior.kind === 'native') return;
   // A function named by a symbol key takes the symbol's description in brackets.
   const text = typeof name === 'string' ? name : name.description === undefined ? '' : `[${name.description}]`;
-  fn.properties.set('name', { value: text, writable: false, enumerable: false, configurable: true });
+  defineFunctionName(fn, text);
 }
 
 /** The variables a pattern declares, in order. */

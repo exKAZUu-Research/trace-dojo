@@ -1767,6 +1767,43 @@ const m = new Map(); try { Map.prototype.get.call(new Date(0), 1); } catch (e) {
 try { Set.prototype.has.call(new Error("boom"), 1); } catch (e) { console.log(e.message); }`,
   ],
   [
+    'iterator error receivers ignore accessors and retain their built-in identity',
+    `'use strict';
+const tag = Symbol.toStringTag;
+function errors(receiver) {
+  Object.defineProperty(receiver, 'locked', { value: 1 });
+  Object.defineProperty(receiver, 'onlyGet', { get() { return 1; } });
+  for (const operation of [
+    () => { receiver.locked = 2; },
+    () => { delete receiver.locked; },
+    () => { receiver.onlyGet = 2; },
+  ]) {
+    try { operation(); } catch (error) { console.log(error.message); }
+  }
+}
+const array = [1].values();
+const string = 's'[Symbol.iterator]();
+for (const iterator of [array, string, new Set().values()]) {
+  Object.defineProperty(Object.getPrototypeOf(iterator), tag, {
+    get() { console.log('unexpected getter'); throw 'tag'; },
+  });
+  errors(iterator);
+}
+errors(Object.setPrototypeOf(new Map().entries(), {}));
+errors(Object.setPrototypeOf([1].values(), null));
+errors(Object.defineProperty([1].values(), tag, { value: 'Custom' }));
+errors(Object.defineProperty([1].values(), tag, { value: { toString() { throw 'coercion'; } } }));
+const wrapped = Iterator.from({ next() { return { done: true }; } });
+errors(wrapped);
+const descendant = Object.create(Iterator.prototype);
+descendant[tag] = 'Writable tag';
+descendant.constructor = function Replacement() {};
+console.log(descendant[tag], descendant.constructor.name);
+class Stable {}
+Object.defineProperty(Stable, 'name', { get() { throw 'name'; } });
+errors(Object.setPrototypeOf([1].values(), Stable.prototype));`,
+  ],
+  [
     'locale options of objects converted only where the option is a string',
     `const numeric = { toString() { console.log("toString"); return ""; } };
 console.log("2".localeCompare("10", undefined, { numeric }));

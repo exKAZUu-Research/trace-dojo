@@ -9,6 +9,7 @@ import {
   type JsFunction,
   JsObject,
   JsThrow,
+  type Key,
   type NativeCall,
   toBoolean,
   type Value,
@@ -35,9 +36,8 @@ export function defineIteratorHelpers(builder: RealmBuilder): void {
     }
     return runtime.newObject(runtime.prototypeFor(newTarget, iteratorPrototype));
   });
-  // The spec makes `constructor` an accessor, so `util.inspect` names iterators after Object instead of Iterator.
-  builder.getter(iteratorPrototype, 'constructor', () => iteratorConstructor);
-  builder.constant(iteratorPrototype, WELL_KNOWN_SYMBOLS.toStringTag, 'Iterator');
+  defineIteratorAccessor(builder, 'constructor', '.constructor', iteratorConstructor);
+  defineIteratorAccessor(builder, WELL_KNOWN_SYMBOLS.toStringTag, '[Symbol.toStringTag]', 'Iterator');
   const wrapperPrototype = defineWrapperPrototype(builder);
   builder.method(iteratorConstructor, 'from', 1, ({ runtime, args }) => {
     const record = flattenable(runtime, args[0], true, 'Iterator.from');
@@ -55,6 +55,27 @@ export function defineIteratorHelpers(builder: RealmBuilder): void {
   const helperPrototype = defineClosingPrototype(builder, 'Iterator Helper');
   defineLazyHelpers(builder, helperPrototype);
   defineConsumers(builder);
+}
+
+function defineIteratorAccessor(builder: RealmBuilder, key: Key, name: string, value: Value): void {
+  const { iteratorPrototype } = builder.realm;
+  builder.getter(
+    iteratorPrototype,
+    key,
+    () => value,
+    ({ runtime, thisValue, args }) => {
+      if (!isObject(thisValue))
+        return runtime.throwError('TypeError', `set Iterator.prototype${name} called on non-object`);
+      if (thisValue === iteratorPrototype) {
+        runtime.throwError(
+          'TypeError',
+          () => `Cannot assign to read only property '${String(key)}' of object '${runtime.receiverText(thisValue)}'`
+        );
+      }
+      if (runtime.getOwnProperty(thisValue, key)) runtime.set(thisValue, key, args[0]);
+      else runtime.createDataProperty(thisValue, key, args[0]);
+    }
+  );
 }
 
 const wrappedRecords = new WeakMap<JsObject, IteratorRecord>();
