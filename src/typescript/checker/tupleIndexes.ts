@@ -51,9 +51,17 @@ export function numericTupleIndex(c: Checker, type: ObjectType, index: Type): Ty
   if (index.kind !== 'literal' || typeof index.value !== 'number') return undefined;
   const element = type.tuple?.elements[index.value];
   const firstRest = type.tuple?.elements.findIndex((member) => member.rest) ?? -1;
-  if (element && (firstRest === -1 || index.value < firstRest))
-    return element.optional ? unionOf([element.type, undefinedType]) : element.type;
+  if (element && (firstRest === -1 || index.value < firstRest)) return tupleElementReadType(c, element);
   return tupleElementBeyond(c, type, String(index.value), undefined) ?? c.elementTypeOf(type);
+}
+
+export function tupleSliceReadType(c: Checker, elements: TupleElement[], start = 0): Type {
+  return unionOf(elements.slice(start).map((element) => tupleElementReadType(c, element)));
+}
+
+export function tupleElementReadType(c: Checker, element: TupleElement): Type {
+  const type = element.rest ? c.restElementType(element.type) : element.type;
+  return element.optional ? unionOf([type, undefinedType]) : type;
 }
 
 /** Substitute array and non-variadic tuple bounds for rests whose complete shape is known. */
@@ -127,12 +135,7 @@ export function tupleElementBeyond(
   if (object.kind !== 'object' || object.objectKind !== 'tuple') return undefined;
   const elements = object.tuple?.elements ?? [];
   const restIndex = elements.findIndex((element) => element.rest);
-  if (restIndex !== -1)
-    return Number(name) < 0
-      ? undefined
-      : unionOf(
-          elements.slice(restIndex).map((element) => (element.rest ? c.restElementType(element.type) : element.type))
-        );
+  if (restIndex !== -1) return Number(name) < 0 ? undefined : tupleSliceReadType(c, elements, restIndex);
   if (node)
     c.error(
       node,

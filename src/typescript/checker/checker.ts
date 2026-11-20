@@ -30,6 +30,7 @@ import type { Scope } from './scopes';
 import { Signatures } from './signatures';
 import { StatementChecker } from './statements';
 import { bigIntPropertyNames } from './syntax';
+import { tupleSliceReadType } from './tupleIndexes';
 import { tupleType } from './tupleTypes';
 import { TypeNodes } from './typeNodes';
 import { TypeOperators } from './typeOperators';
@@ -68,7 +69,6 @@ import {
   typeMapperCacheKey,
   typeMembers,
   type TypeParameter,
-  undefinedType,
   unionOf,
   type UnionType,
   unknownType,
@@ -303,14 +303,7 @@ export class Checker {
 
   /** The element type of an array, a read-only array, or a tuple. */
   elementTypeOf(type: ObjectType): Type {
-    if (type.objectKind === 'tuple') {
-      return unionOf(
-        (type.tuple?.elements ?? []).map((element) => {
-          if (element.rest) return this.restElementType(element.type);
-          return element.optional ? unionOf([element.type, undefinedType]) : element.type;
-        })
-      );
-    }
+    if (type.objectKind === 'tuple') return tupleSliceReadType(this, type.tuple?.elements ?? []);
     return type.typeArguments?.[0] ?? anyType;
   }
 

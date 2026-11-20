@@ -5,6 +5,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import type { Checker } from './checker';
 import { isDefinitelyFalsy, isSpreadableProperty, spreadCopy } from './literals';
 import { arrayPatternElements, named, numberValue, propertyNameText } from './syntax';
+import { tupleElementReadType, tupleSliceReadType } from './tupleIndexes';
 import {
   anonymousObject,
   anyType,
@@ -514,9 +515,9 @@ export class BindingPatterns {
     const elements = type.tuple?.elements ?? [];
     const restIndex = elements.findIndex((member) => member.rest);
     // At or past a rest element, any of the rest's values or the elements after it may take the position.
-    if (restIndex !== -1 && index >= restIndex) return this.valuesFrom(elements, restIndex);
+    if (restIndex !== -1 && index >= restIndex) return tupleSliceReadType(this.c, elements, restIndex);
     const element = elements[index];
-    if (element) return element.optional ? unionOf([element.type, undefinedType]) : element.type;
+    if (element) return tupleElementReadType(this.c, element);
     // An element with a default, as in `const [a = 1] = []`, takes the default where the tuple ends.
     if (defaultedTarget(node)) return undefinedType;
     this.c.error(
@@ -536,7 +537,7 @@ export class BindingPatterns {
   private sliceTuple(type: ObjectType, from: number): Type {
     const elements = type.tuple?.elements ?? [];
     const restIndex = elements.findIndex((member) => member.rest);
-    if (restIndex !== -1 && from > restIndex) return this.c.arrayType(this.valuesFrom(elements, restIndex));
+    if (restIndex !== -1 && from > restIndex) return this.c.arrayType(tupleSliceReadType(this.c, elements, restIndex));
     return this.c.tupleType(elements.slice(from));
   }
 
@@ -545,13 +546,6 @@ export class BindingPatterns {
     if (type.kind !== 'typeParameter') return type;
     const constraint = this.c.constraintOf(type);
     return constraint ? this.arrayPatternSource(constraint) : type;
-  }
-
-  /** The values a tuple's rest element and the elements after it hold. */
-  private valuesFrom(elements: TupleElement[], restIndex: number): Type {
-    return unionOf(
-      elements.slice(restIndex).map((member) => (member.rest ? this.c.restElementType(member.type) : member.type))
-    );
   }
 
   /** The type of the elements a `for...of` loop or a spread takes from a value. */

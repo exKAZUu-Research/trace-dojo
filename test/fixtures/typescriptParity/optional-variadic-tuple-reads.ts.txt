@@ -1,0 +1,20 @@
+function read<T extends readonly string[]>(values: readonly [boolean, ...T, number?]) {
+  const [flag, first = 'default', ...tail] = values;
+  const head: boolean = flag;
+  const suffix: string | number | undefined = values[1];
+  const sliced: (string | number | undefined)[] = tail;
+  const defaulted: string | number = first;
+  console.log(head, defaulted, suffix, sliced.length, sliced[0]);
+}
+read<[]>([true]);
+read<[]>([false, 4]);
+read<[string]>([true, 'hello']);
+read<[string, string]>([false, 'first', 'second', 5]);
+function required<T extends string[]>(values: [...T, number]) {
+  const [first, ...tail] = values;
+  const head: string | number = first;
+  const sliced: (string | number)[] = tail;
+  console.log(head, sliced.length);
+}
+required<[]>([3]);
+required<[string]>(['text', 3]);
