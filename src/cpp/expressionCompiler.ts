@@ -1479,10 +1479,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     return this.error(row, `${typeName(type)} 型の値は条件に使えません。`);
   }
 
-  /** A library class's conversion to `bool`, such as a stream's `explicit operator bool`, when `to` is `bool`. */
-  private libraryBool(expr: Expr, row: number, to: Type = BOOL): Expr | undefined {
-    if (expr.type.kind !== 'class' || !sameType(to, BOOL, false)) return undefined;
-    return expr.type.cls.library?.operator?.(this, 'bool', [expr], row);
+  private libraryBool(expr: Expr, row: number): Expr | undefined {
+    if (expr.type.kind === 'class') return expr.type.cls.library?.operator?.(this, 'bool', [expr], row);
   }
 
   /** An explicit conversion: `static_cast`, a C-style cast (`kind` 'C'), or a functional cast `T(x)`. */
@@ -1492,10 +1490,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       return { type, isLvalue: false, row, run: (frame) => (run(frame), undefined), onlyCalls: expr.onlyCalls };
     }
     if (type.kind === 'reference') return this.castReference(expr, type, row, kind);
-    const direct = this.directInitializerArgument(type, expr);
+    const direct = this.directInitializerArgument(type, expr, row);
     if (direct !== expr) return direct;
-    const explicitBool = this.libraryBool(expr, row, type);
-    if (explicitBool) return explicitBool;
     const value = this.rvalue(expr);
     if (isArithmetic(type) && isArithmetic(value.type))
       return convertArithmetic(value, unqualified(type) as ArithmeticType);
@@ -1523,8 +1519,9 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     return this.convert(expr, unqualified(type), row);
   }
 
-  directInitializerArgument(type: Type, expr: Expr): Expr {
-    if (type.kind !== 'int' || type.name !== 'bool' || expr.type.kind !== 'nullptr') return expr;
+  directInitializerArgument(type: Type, expr: Expr, row = expr.row): Expr {
+    if (type.kind !== 'int' || type.name !== 'bool') return expr;
+    if (expr.type.kind !== 'nullptr') return this.libraryBool(expr, row) ?? expr;
     const value = this.rvalue(expr);
     return {
       type: BOOL,

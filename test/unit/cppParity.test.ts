@@ -1216,6 +1216,35 @@ int main() {
   });
 });
 
+test('directly initializes bool from string-stream extraction', () => {
+  const program = `#include <iostream>
+#include <sstream>
+struct Result {
+  bool parsed;
+  Result(std::istream& input, int& number) : parsed(input >> number) {}
+};
+int main() {
+  std::istringstream input("42 17 8 3");
+  int number = 0;
+  bool first(input >> number);
+  std::cout << first << ':' << number << ' ';
+  bool second{input >> number};
+  std::cout << second << ':' << number << ' ';
+  Result third(input, number);
+  std::cout << third.parsed << ':' << number << ' ';
+  bool* fourth = new bool(input >> number);
+  std::cout << *fourth << ':' << number << ' ';
+  delete fourth;
+  bool missing{input >> number};
+  std::cout << missing;
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '1:42 1:17 1:8 1:3 0',
+    uncaughtException: undefined,
+  });
+});
+
 test('evaluates a nullptr operand before inserting it', () => {
   const program = `#include <cstddef>
 #include <iostream>

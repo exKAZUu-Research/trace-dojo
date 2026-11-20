@@ -102,6 +102,22 @@ int main() {
   }
 );
 
+test.each(['bool parsed = input >> number;', 'bool parsed = {input >> number};'])(
+  'rejects an explicit stream conversion during copy-initialization in %s',
+  (statement) => {
+    const program = `#include <sstream>
+int main() {
+  std::istringstream input("42");
+  int number = 0;
+  ${statement}
+}`;
+    expect(executeProgram('cpp', program)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [{ row: 4, message: expect.stringContaining('bool 型に変換できません') }],
+    });
+  }
+);
+
 test.each([
   ['set', 'set<const int>', '要素を const 型にはできません'],
   ['set', 'multiset<const int>', '要素を const 型にはできません'],
