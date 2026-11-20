@@ -65,6 +65,7 @@ export type BoundAst =
 
 export interface FnItem {
   kind: 'fn';
+  isConst?: boolean;
   name: string;
   span: Span;
   vis: Visibility;

@@ -187,7 +187,8 @@ export class Converter extends ExpressionConverter {
     const span = this.span(node);
     checkNotReserved(this.field(node, 'name').text, span);
     const modifiers = node.namedChildren.find((child) => child.type === 'function_modifiers');
-    if (modifiers) {
+    const isConst = this.isStd && modifiers?.text.trim() === 'const';
+    if (modifiers && !isConst) {
       const text = modifiers.text;
       if (text.includes('async')) unavailable(span, 'async fn');
       if (text.includes('unsafe')) unavailable(span, 'unsafe fn');
@@ -217,6 +218,7 @@ export class Converter extends ExpressionConverter {
     const body = bodyNode ? this.block(bodyNode) : undefined;
     return {
       kind: 'fn',
+      isConst,
       name: this.field(node, 'name').text,
       span,
       vis: this.visibility(node),

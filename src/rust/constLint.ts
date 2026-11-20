@@ -18,6 +18,47 @@ interface Aggregate {
   fields: Map<string, Known | undefined>;
 }
 
+export function checkConstOperations(expr: Expr, annotations: Annotations): void {
+  if (expr.kind === 'closure') return;
+  if (!isConstOperation(expr, annotations)) {
+    compileError(expr.span, 'この操作は定数の初期値に使えません。');
+  }
+  forEachDirect(expr, (child) => checkConstOperations(child, annotations));
+}
+
+function isConstOperation(expr: Expr, annotations: Annotations): boolean {
+  switch (expr.kind) {
+    case 'call': {
+      const target = annotations.paths.get(expr.callee);
+      return target?.kind === 'ctor' || (target?.kind === 'fn' && target.fn.ast?.isConst === true);
+    }
+    case 'methodCall': {
+      return annotations.methods.get(expr)?.fn.ast?.isConst === true;
+    }
+    case 'macro': {
+      const { macro } = expr;
+      if (macro.kind === 'matches' || (macro.kind === 'vec' && macro.elems.length === 0)) return true;
+      return (macro.kind === 'assert' || macro.kind === 'panic') && (macro.format?.args.length ?? 0) === 0;
+    }
+    case 'for':
+    case 'try': {
+      return false;
+    }
+    case 'index': {
+      return !annotations.indexes.get(expr)?.overloaded;
+    }
+    case 'binary':
+    case 'compoundAssign': {
+      const lhs = expr.kind === 'binary' ? expr.left : expr.target;
+      const lhsType = normalize(shallow(lhs.ty!));
+      return ['int', 'float', 'bool', 'char', 'var', 'never'].includes(lhsType.kind);
+    }
+    default: {
+      return true;
+    }
+  }
+}
+
 /**
  * Rejects operations that rustc's deny-by-default lints find always panic, by propagating constants through
  * literals, `const` items, aggregates, and variables as rustc's `KnownPanicsLint` does: arithmetic that overflows

@@ -2842,3 +2842,20 @@ test('drops Rust turtles moved out of Box storage', () => {
   );
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', finalTurtles: [] });
 });
+
+test('validates Rust constant initializers before normal execution', () => {
+  const valid = `const LENGTH: usize = "hi".len();
+const EMPTY: Vec<u8> = vec![];
+const VALUE: Option<u16> = Some(2);
+fn main() {
+    println!("{} {} {} {}", LENGTH, EMPTY.len(), VALUE.is_some(), std::mem::size_of::<u32>());
+}`;
+  expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: '2 0 true 4\n' });
+  for (const value of ['side_effect()', '{ println!("called"); 2 }']) {
+    const invalid = `fn side_effect() -> i32 { println!("called"); 2 }
+struct Record;
+impl Record { const INITIAL: i32 = ${value}; }
+fn main() {}`;
+    expect(executeProgram('rust', invalid)).toMatchObject({ kind: 'compileError' });
+  }
+});

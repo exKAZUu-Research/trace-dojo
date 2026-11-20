@@ -174,7 +174,7 @@ pub mod string {
     impl String {
         pub fn len(&self) -> usize;
         pub fn is_empty(&self) -> bool;
-        pub fn new() -> String;
+        pub const fn new() -> String;
         pub fn with_capacity(capacity: usize) -> String;
         pub fn from_utf8(vec: Vec<u8>) -> Result<String, Utf8Error>;
         pub fn from_utf8_lossy(v: &[u8]) -> String;
@@ -209,7 +209,7 @@ pub mod vec {
     pub struct Vec<T>;
     impl<T> Vec<T> {
         pub fn from_iter<S>(iter: IterImpl<T, S>) -> Vec<T>;
-        pub fn new() -> Vec<T>;
+        pub const fn new() -> Vec<T>;
         pub fn with_capacity(capacity: usize) -> Vec<T>;
         pub fn push(&mut self, value: T);
         pub fn pop(&mut self) -> Option<T>;
@@ -256,8 +256,8 @@ pub mod slice {
     pub type Windows<'a, T> = IterImpl<'a, &'a [T], WindowsShape>;
     pub type Chunks<'a, T> = IterImpl<'a, &'a [T], ChunksShape>;
     impl<T> [T] {
-        pub fn len(&self) -> usize;
-        pub fn is_empty(&self) -> bool;
+        pub const fn len(&self) -> usize;
+        pub const fn is_empty(&self) -> bool;
         pub fn first(&self) -> Option<&T>;
         pub fn last(&self) -> Option<&T>;
         pub fn first_mut(&mut self) -> Option<&mut T>;
@@ -336,8 +336,8 @@ pub mod str {
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct ParseCharError;
     impl str {
-        pub fn len(&self) -> usize;
-        pub fn is_empty(&self) -> bool;
+        pub const fn len(&self) -> usize;
+        pub const fn is_empty(&self) -> bool;
         pub fn chars(&self) -> IterImpl<char, CharsShape>;
         pub fn bytes(&self) -> IterImpl<u8, BytesShape>;
         pub fn char_indices(&self) -> IterImpl<(usize, char), CharIndicesShape>;
@@ -722,11 +722,11 @@ pub mod option {
         pub fn as_deref(&self) -> Option<&T>;
     }
     impl<T> Option<T> {
-        pub fn is_some(&self) -> bool;
-        pub fn is_none(&self) -> bool;
+        pub const fn is_some(&self) -> bool;
+        pub const fn is_none(&self) -> bool;
         pub fn is_some_and<F: FnOnce(T) -> bool>(self, f: F) -> bool;
         pub fn is_none_or<F: FnOnce(T) -> bool>(self, f: F) -> bool;
-        pub fn unwrap(self) -> T;
+        pub const fn unwrap(self) -> T;
         pub fn expect(self, msg: &str) -> T;
         pub fn unwrap_or(self, default: T) -> T;
         pub fn unwrap_or_else<F: FnOnce() -> T>(self, f: F) -> T;
@@ -748,8 +748,8 @@ pub mod option {
         pub fn insert(&mut self, value: T) -> &mut T;
         pub fn get_or_insert(&mut self, value: T) -> &mut T;
         pub fn get_or_insert_with<F: FnOnce() -> T>(&mut self, f: F) -> &mut T;
-        pub fn as_ref(&self) -> Option<&T>;
-        pub fn as_mut(&mut self) -> Option<&mut T>;
+        pub const fn as_ref(&self) -> Option<&T>;
+        pub const fn as_mut(&mut self) -> Option<&mut T>;
         pub fn iter(&self) -> IterImpl<&T, OptionIterShape>;
         pub fn iter_mut(&mut self) -> IterImpl<&mut T, OptionIterShape>;
         pub fn zip<U>(self, other: Option<U>) -> Option<(T, U)>;
@@ -774,8 +774,8 @@ pub mod result {
     #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
     pub enum Result<T, E> { Ok(T), Err(E) }
     impl<T, E> Result<T, E> {
-        pub fn is_ok(&self) -> bool;
-        pub fn is_err(&self) -> bool;
+        pub const fn is_ok(&self) -> bool;
+        pub const fn is_err(&self) -> bool;
         pub fn is_ok_and<F: FnOnce(T) -> bool>(self, f: F) -> bool;
         pub fn is_err_and<F: FnOnce(E) -> bool>(self, f: F) -> bool;
         pub fn unwrap(self) -> T where E: Debug;
@@ -796,8 +796,8 @@ pub mod result {
         pub fn or_else<F2, O: FnOnce(E) -> Result<T, F2>>(self, op: O) -> Result<T, F2>;
         pub fn ok(self) -> Option<T>;
         pub fn err(self) -> Option<E>;
-        pub fn as_ref(&self) -> Result<&T, &E>;
-        pub fn as_mut(&mut self) -> Result<&mut T, &mut E>;
+        pub const fn as_ref(&self) -> Result<&T, &E>;
+        pub const fn as_mut(&mut self) -> Result<&mut T, &mut E>;
         pub fn iter(&self) -> IterImpl<&T, OptionIterShape>;
         pub fn iter_mut(&mut self) -> IterImpl<&mut T, OptionIterShape>;
         pub fn into_iter(self) -> IterImpl<T, OptionIterShape>;
@@ -1090,7 +1090,7 @@ pub mod collections {
     }
     impl<K, V> BTreeMap<K, V> {
         pub fn range<R: RangeBounds<K>>(&self, range: R) -> IterImpl<(&K, &V), BTreeMapRangeShape>;
-        pub fn new() -> BTreeMap<K, V>;
+        pub const fn new() -> BTreeMap<K, V>;
         pub fn insert(&mut self, k: K, v: V) -> Option<V> where K: Ord;
         pub fn get<Q>(&self, k: &Q) -> Option<&V> where K: Borrow<Q>;
         pub fn get_mut<Q>(&mut self, k: &Q) -> Option<&mut V> where K: Borrow<Q>;
@@ -1163,7 +1163,7 @@ pub mod collections {
     }
     impl<T> BTreeSet<T> {
         pub fn range<R: RangeBounds<T>>(&self, range: R) -> IterImpl<&T, BTreeSetRangeShape>;
-        pub fn new() -> BTreeSet<T>;
+        pub const fn new() -> BTreeSet<T>;
         pub fn insert(&mut self, value: T) -> bool where T: Ord;
         pub fn contains<Q>(&self, value: &Q) -> bool where T: Borrow<Q>;
         pub fn remove<Q>(&mut self, value: &Q) -> bool where T: Borrow<Q>;
@@ -1189,7 +1189,7 @@ pub mod collections {
         pub fn into_iter(self) -> IterImpl<&T, BTreeSetIterShape>;
     }
     impl<T> VecDeque<T> {
-        pub fn new() -> VecDeque<T>;
+        pub const fn new() -> VecDeque<T>;
         pub fn with_capacity(capacity: usize) -> VecDeque<T>;
         pub fn capacity(&self) -> usize;
         pub fn reserve(&mut self, additional: usize);
@@ -1231,7 +1231,7 @@ pub mod collections {
         pub fn into_iter(self) -> IterImpl<&mut T, VecDequeIterMutShape>;
     }
     impl<T> BinaryHeap<T> {
-        pub fn new() -> BinaryHeap<T>;
+        pub const fn new() -> BinaryHeap<T>;
         pub fn with_capacity(capacity: usize) -> BinaryHeap<T>;
         pub fn capacity(&self) -> usize;
         pub fn reserve(&mut self, additional: usize);
@@ -1254,9 +1254,9 @@ pub mod collections {
     }
 }
 pub mod mem {
-    pub fn size_of<T>() -> usize;
-    pub fn swap<T>(x: &mut T, y: &mut T);
-    pub fn replace<T>(dest: &mut T, src: T) -> T;
+    pub const fn size_of<T>() -> usize;
+    pub const fn swap<T>(x: &mut T, y: &mut T);
+    pub const fn replace<T>(dest: &mut T, src: T) -> T;
     pub fn take<T: Default>(dest: &mut T) -> T;
     pub fn drop<T>(x: T);
 }

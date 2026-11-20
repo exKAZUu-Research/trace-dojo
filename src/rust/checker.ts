@@ -7,7 +7,7 @@ import { BorrowChecker } from './borrowck';
 import { exprInner } from './checkerExpr';
 import { settleBinaries } from './checkerOperators';
 import { checkPattern } from './checkerPatterns';
-import { ConstLint } from './constLint';
+import { checkConstOperations, ConstLint } from './constLint';
 import { isIrrefutable, lowerPattern } from './exhaustiveness';
 import { deepNormalize, isPseudo, normalize, Unifier } from './infer';
 import { compileError, ItemCollector, lowerType, Module, type Program, resolveImports, type TypeScope } from './items';
@@ -346,6 +346,7 @@ export class Checker {
       this.fnContexts.set(def, this.body.fn);
       this.coerceExpr(ast.value, def.type);
       this.finishBody(ast.span);
+      checkConstOperations(ast.value, this.annotations);
       // rustc evaluates constants before running, so one whose value overflows or divides by zero is an error.
       new ConstLint(this.annotations).checkExpr(ast.value);
     }
