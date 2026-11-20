@@ -3614,3 +3614,84 @@ test('keeps the capacities of equal Rust strings through aggregate construction 
     stdout: '4 9\n10 0\n8 16\n2 3\nAB 12 2 true "A"\n12\nAB 12\n',
   });
 });
+
+test('preserves Rust Zip callback order for owned Copy sources', () => {
+  const program = rustMain(`let mut zipped = (0..10).map(|n| { println!("n{}", n); n }).zip([1, 2]);
+    for _ in 0..3 { println!("{:?}", zipped.next()); }`);
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'n0\nSome((0, 1))\nn1\nSome((1, 2))\nn2\nNone\n',
+  });
+});
+
+test('preserves Rust String capacity when splicing vectors', () => {
+  const program = rustMain(`let mut a = String::with_capacity(10);
+    a.push('a');
+    let mut b = String::with_capacity(20);
+    b.push('b');
+    let mut values = vec![a, b];
+    let first: Vec<_> = values.drain(..1).collect();
+    println!("{} {}", first[0].capacity(), values[0].capacity());
+    let mut remaining = values.split_off(0);
+    let last = remaining.pop().unwrap();
+    println!("{} {}", last, last.capacity());`);
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '10 20\nb 20\n' });
+});
+
+test('reborrows Rust references in breaks that supply a loop argument', () => {
+  const program = rustMain(
+    'wrap(|value| *value += 1);',
+    `fn wrap<F: Fn(&mut i32)>(callback: F) {
+       let mut value = 0;
+       let reference = &mut value;
+       let mut run = || callback('outer: loop {
+         loop { break; }
+         loop { break 'outer { reference }; }
+       });
+       run();
+       run();
+       println!("{}", value);
+     }`
+  );
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '2\n' });
+});
+
+test('checks Rust const array overwrites and zero-length drops', () => {
+  for (const initializer of [
+    '{ let mut values = [N; 2]; values[0] = Some(String::new()); }',
+    '{ let mut values = ([N; 2],); values.0[1_i32.abs() as usize] = None; }',
+    '{ let values = [Some(String::new()); 0]; }',
+    '{ let values = [String::new(); 0]; }',
+  ]) {
+    const items = `const N: Option<String> = None; const X: () = ${initializer};`;
+    const source = rustMain('', items);
+    expect(executeProgram('rust', source)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [expect.objectContaining({ message: expect.stringContaining('破棄') })],
+    });
+  }
+  const declarations = `const TEXT: String = String::new(); const EMPTY: [String; 0] = [TEXT; 0];
+    struct S<T>(T);
+    impl<T> S<T> { const BAD: i8 = 127_i8.pow(2); }`;
+  const valid = rustMain('let empty = [S::<i32>::BAD; 0]; println!("{} {}", EMPTY.len(), empty.len());', declarations);
+  expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: '0 0\n' });
+});
+
+test('evaluates Rust repeated constants before each owned array element is used', () => {
+  const program = rustMain(
+    `let mut vectors = [EMPTY; 2];
+    vectors[0].push(1);
+    let mut options = [OPTION; 2];
+    options[0].as_mut().unwrap().push(2);
+    let grid = GRID;
+    println!("{:?} {:?} {} {:?}", vectors, options, GRID[1], grid);`,
+    `const SIZE: usize = 3;
+      const GRID: [i32; SIZE] = [0; SIZE];
+      const EMPTY: Vec<i32> = Vec::new();
+      const OPTION: Option<Vec<i32>> = Some(Vec::new());`
+  );
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[[1], []] [Some([2]), Some([])] 0 [0, 0, 0]\n',
+  });
+});

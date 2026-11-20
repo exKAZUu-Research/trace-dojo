@@ -61,8 +61,11 @@ class ConstantEvaluation {
     for (const def of this.checker.coverageChecks.keys()) this.checkCoverage(def);
     for (const def of constants) if (!def.impl?.params.length) this.validate(def, []);
     if (!constants.some((def) => def.impl?.params.length)) return;
-    for (const res of this.checker.annotations.paths.values()) {
-      if (res.kind === 'const') this.validate(res.def, instantiations(res.typeArgs));
+    const { paths, unevaluatedRepeatOperands } = this.checker.annotations;
+    for (const [node, res] of paths) {
+      if (res.kind === 'const' && !unevaluatedRepeatOperands.has(node)) {
+        this.validate(res.def, instantiations(res.typeArgs));
+      }
       if (res.kind === 'local' || res.kind === 'capture') this.usedLocals.add(res.local);
     }
     const main = this.checker.program.root.values.get('main')?.binding;
@@ -102,6 +105,7 @@ class ConstantEvaluation {
       if (dependent) return;
       this.budget.spend();
       const { annotations } = this.checker;
+      if (annotations.unevaluatedRepeatOperands.has(expr)) return;
       const target = annotations.paths.get(expr) ?? annotations.methods.get(expr);
       if (target && 'typeArgs' in target) {
         const typeArgs = instantiations(target.typeArgs, subst);
@@ -125,6 +129,7 @@ class ConstantEvaluation {
     const { annotations } = this.checker;
     const visit = (expr: Expr): void => {
       this.budget.spend();
+      if (annotations.unevaluatedRepeatOperands.has(expr)) return;
       const path = annotations.paths.get(expr);
       if (path?.kind === 'const') this.validate(path.def, instantiations(path.typeArgs, subst));
       if (path?.kind === 'fn' && this.usedFunctionValue(expr)) this.enqueue(path, subst);

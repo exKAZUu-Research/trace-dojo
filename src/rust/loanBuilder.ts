@@ -720,7 +720,7 @@ export class LoanBuilder {
         );
       }
       case 'arrayRepeat': {
-        const value = this.value(expr.value);
+        const value = this.annotations.unevaluatedRepeatOperands.has(expr.value) ? undefined : this.value(expr.value);
         this.value(expr.count);
         return this.aggregate([value], expr.ty, elementLayout);
       }

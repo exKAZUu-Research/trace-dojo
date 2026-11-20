@@ -21,9 +21,33 @@ export function forEachResult(expr: Expr, visit: (expr: Expr) => void): void {
     forEachResult(expr.else, visit);
   } else if (expr.kind === 'match') {
     for (const arm of expr.arms) forEachResult(arm.body, visit);
+  } else if (expr.kind === 'loop') {
+    forEachLoopResult(expr, visit);
   } else {
     visit(expr);
   }
+}
+
+// code-gauge-allow functionCognitiveComplexity 21 -- The traversal keeps the active labels and evaluation order together.
+function forEachLoopResult(loop: Extract<Expr, { kind: 'loop' }>, visit: (expr: Expr) => void): void {
+  const labels = [loop.label];
+  const walk = (expr: Expr): void => {
+    if (expr.kind === 'closure') return;
+    if (expr.kind === 'break' && expr.value) {
+      const target = expr.label === undefined ? labels.length - 1 : labels.lastIndexOf(expr.label);
+      if (target === 0) forEachResult(expr.value, visit);
+    }
+    if (expr.kind !== 'for' && expr.kind !== 'while' && expr.kind !== 'loop') {
+      forEachDirect(expr, walk);
+      return;
+    }
+    if (expr.kind === 'for') walk(expr.iterable);
+    if (expr.kind === 'while') walk(expr.cond.kind === 'expr' ? expr.cond.expr : expr.cond.value);
+    labels.push(expr.label);
+    walkBlock(expr.body, walk);
+    labels.pop();
+  };
+  walkBlock(loop.body, walk);
 }
 
 /** Calls `visit` on the expressions directly inside an expression, in evaluation order. */

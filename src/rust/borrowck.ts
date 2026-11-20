@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 633 -- Follows the borrow checking rules case by case.
+// code-gauge-allow-file fileNcss 671 -- Follows the borrow checking rules case by case.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ExecutionBudget } from '../interpreter/limits';
 import type { Annotations, FnContext, LocalVar } from './annotations';
@@ -206,13 +206,15 @@ export class BorrowChecker {
       }
       case 'range':
       case 'tuple':
-      case 'array':
-      case 'arrayRepeat': {
+      case 'array': {
         let current = state;
         forEachDirect(expr, (child) => {
           current = this.expr(child, current, 'move');
         });
         return current;
+      }
+      case 'arrayRepeat': {
+        return this.arrayRepeat(expr, state);
       }
       case 'block': {
         return this.block(expr, state);
@@ -252,6 +254,14 @@ export class BorrowChecker {
 
   private checkTemporaryDrop(expr: Expr, state: State): void {
     checkConstDrop(expr.ty, this.constantValue(expr, state), new Set(), expr.span, this.budget);
+  }
+
+  private arrayRepeat(expr: Extract<Expr, { kind: 'arrayRepeat' }>, state: State): State {
+    if (this.annotations.unevaluatedRepeatOperands.has(expr.value)) return this.expr(expr.count, state, 'move');
+    const type = shallow(expr.ty!);
+    if (this.constContext && type.kind === 'array' && type.len === 0) this.checkTemporaryDrop(expr.value, state);
+    const afterValue = this.expr(expr.value, state, 'move');
+    return this.expr(expr.count, afterValue, 'move');
   }
 
   private constantValue(expr: Expr, state: State): Known | undefined {
@@ -683,15 +693,13 @@ export class BorrowChecker {
   private assign(target: Expr, state: State, span: Span, value: Expr | undefined, known?: Known): State {
     const whole = value !== undefined;
     const place = this.placeOf(target);
+    if (this.constContext && value) this.checkConstAssignment(target, value, place, state, known);
     if (!place) {
       const res = target.kind === 'path' ? this.annotations.paths.get(target) : undefined;
       if (res?.kind === 'discard') return state;
       return this.expr(target, state, 'read');
     }
     const varState = state.get(place.root);
-    if (this.constContext && whole && varState && varState.init !== 'no' && !place.indirect) {
-      this.checkReplacedValue(target, place.path, varState);
-    }
     if (place.path === '' && !place.indirect && whole) {
       const local = place.root;
       if (!local.mutable && local.mode === 'move' && varState && varState.init !== 'no') {
@@ -728,10 +736,59 @@ export class BorrowChecker {
         const value = writeKnownField(varState.known, place.path.slice(1).split('.'), known);
         return setVar(state, place.root, { ...varState, partial, known: value });
       }
-    } else if (varState) {
-      this.checkUsable(place.root, varState, span, 'read');
-    }
+    } else if (varState) return this.assignIndirect(target, place.root, state, varState, span, known);
     return state;
+  }
+
+  private assignIndirect(
+    target: Expr,
+    root: LocalVar,
+    state: State,
+    previous: VarState,
+    span: Span,
+    known?: Known
+  ): State {
+    this.checkUsable(root, previous, span, 'read');
+    if (!this.constContext || previous.known === undefined) return state;
+    const updated = this.indirectWrite(target, state, previous.known, known);
+    return setVar(state, root, { ...previous, known: updated });
+  }
+
+  private checkConstAssignment(
+    target: Expr,
+    value: Expr,
+    place: PlacePath | undefined,
+    state: State,
+    known: Known | undefined
+  ): void {
+    if (this.annotations.paths.get(target)?.kind === 'discard') {
+      checkConstDrop(value.ty, known, new Set(), target.span, this.budget);
+      return;
+    }
+    if (!place || place.indirect) {
+      checkConstDrop(target.ty, undefined, new Set(), target.span, this.budget);
+      return;
+    }
+    const previous = state.get(place.root);
+    if (previous && previous.init !== 'no') this.checkReplacedValue(target, place.path, previous);
+  }
+
+  private indirectWrite(target: Expr, state: State, previous: Known, assigned: Known | undefined): Known | undefined {
+    const fields: string[] = [];
+    let current = target;
+    while (current.kind === 'index' || current.kind === 'field') {
+      if (current.kind === 'field') fields.push(current.name);
+      else {
+        const index = this.constantValue(current.index, state);
+        if (typeof index === 'bigint') fields.push(String(index));
+        else {
+          fields.length = 0;
+          assigned = undefined;
+        }
+      }
+      current = current.operand;
+    }
+    return current.kind === 'path' ? writeKnownField(previous, fields.toReversed(), assigned) : undefined;
   }
 
   private checkReplacedValue(target: Expr, path: string, state: VarState): void {

@@ -778,8 +778,7 @@ function zipped(
   shapes: [Type, Type],
   items: [Type, Type]
 ): IterValue {
-  const isCopy = (type: Type): boolean => ctx.interp.checker.solver.isCopy(type);
-  const trusted = trustedRandomAccess(shapes[0], first, isCopy) && trustedRandomAccess(shapes[1], second, isCopy);
+  const trusted = isTrustedRandomAccess(...shapes);
   const iter = adapter(first, { second }, (src, state) => ({
     next: () => {
       if (trusted && Math.min(lengthOf(src), lengthOf(state.second)) === 0) return DONE;
@@ -801,9 +800,11 @@ function zipped(
   }));
   iter.fork = () => zipped(ctx, cloneIterator(first), cloneIterator(second), shapes, items);
   if (isTrustedLen(...shapes)) iter.foldNext = zipFoldNext(first, second);
-  // `Zip` of two `TrustedRandomAccess` iterators shows nothing of them.
+  // `Zip` of two `TrustedRandomAccessNoCoerce` iterators shows nothing of them.
+  const isCopy = (type: Type): boolean => ctx.interp.checker.solver.isCopy(type);
+  const indexedFormat = trustedRandomAccess(shapes[0], first, isCopy) && trustedRandomAccess(shapes[1], second, isCopy);
   return described(iter, (show) => {
-    if (trusted) return () => 'Zip';
+    if (indexedFormat) return () => 'Zip';
     const part =
       (from: IterValue, index: 0 | 1): DebugPart =>
       (indent) =>

@@ -222,6 +222,9 @@ function arrayRepeatExpr(c: Checker, expr: Extract<Expr, { kind: 'arrayRepeat' }
   const elem = e?.kind === 'array' ? e.elem : freshVar();
   c.coerceExpr(expr.value, elem);
   const len = constUsize(c, expr.count);
+  if (len === 0 && c.annotations.paths.get(expr.value)?.kind === 'const') {
+    c.annotations.unevaluatedRepeatOperands.add(expr.value);
+  }
   c.deferredChecks.push(() => {
     if (len !== 1 && len !== 0 && !c.solver.isCopy(resolve(elem, true))) {
       const value = expr.value;

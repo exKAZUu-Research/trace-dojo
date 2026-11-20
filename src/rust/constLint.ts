@@ -210,10 +210,10 @@ export class ConstLint {
         return this.tupleOrArray(expr);
       }
       case 'arrayRepeat': {
-        const item = this.expr(expr.value);
+        const item = this.annotations.unevaluatedRepeatOperands.has(expr.value) ? undefined : this.expr(expr.value);
         this.expr(expr.count);
-        const type = normalize(shallow(expr.ty!));
-        return this.patternEvaluation && type.kind === 'array'
+        const type = expr.ty && normalize(shallow(expr.ty));
+        return this.patternEvaluation && type?.kind === 'array'
           ? { fields: new Map(), repeat: { length: type.len, item } }
           : undefined;
       }

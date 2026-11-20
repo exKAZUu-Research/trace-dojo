@@ -754,12 +754,15 @@ function readArray(c: Compiler, expr: ExprOf<'array'>): Eval {
 }
 
 function readArrayRepeat(c: Compiler, expr: ExprOf<'arrayRepeat'>): Eval {
+  if (c.annotations.unevaluatedRepeatOperands.has(expr.value)) return () => [];
   const value = c.value(expr.value);
   const count = c.value(expr.count);
+  const constant = c.annotations.paths.get(expr.value)?.kind === 'const';
   return (frame) => {
     const length = Number(count(frame) as bigint);
     frame.runtime.allocate(length);
     frame.runtime.spend(Math.ceil(length / 16));
+    if (constant) return Array.from({ length }, () => value(frame));
     const item = value(frame);
     return Array.from({ length }, () => copyValue(item));
   };

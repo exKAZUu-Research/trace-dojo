@@ -104,6 +104,7 @@ export interface ClosureInfo {
 export class Annotations {
   readonly paths = new Map<Expr | Pattern, PathRes>();
   readonly constPatterns = new Map<Pattern, Known | undefined>();
+  readonly unevaluatedRepeatOperands = new Set<Expr | Pattern>();
   readonly functionInitializers = new Map<Expr, LocalVar | undefined>();
   readonly methods = new Map<Expr, MethodRes>();
   readonly fields = new Map<Expr, FieldRes>();
