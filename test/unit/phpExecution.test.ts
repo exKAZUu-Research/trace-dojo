@@ -2291,6 +2291,29 @@ test.each([
 });
 
 test.each([
+  ['class A', 'public int $x { get; }', 'Non-abstract property hook must have a body'],
+  ['abstract class A', 'public int $x { set; }', 'Non-abstract property hook must have a body'],
+  ['trait T', 'public int $x { get => 1; set; }', 'Non-abstract property hook must have a body'],
+  ['interface I', 'public int $x { get => 1; }', 'Abstract property hook cannot have body'],
+  ['interface I', 'public int $x { get; set => $value; }', 'Abstract property hook cannot have body'],
+  ['abstract class A', 'abstract public int $x { final get; }', 'Property hook cannot be both abstract and final'],
+  ['abstract class A', 'abstract private int $x { get; }', 'Property hook cannot be both abstract and private'],
+  ['class A', 'private int $x { final get => 1; }', 'Property hook cannot be both final and private'],
+])('validates hook bodies against their property declaration: %s with %s', (owner, property, message) => {
+  expect(run(`<?php\n${owner} {\n  ${property}\n}\necho "unreachable";`)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 2, message }],
+  });
+});
+
+test('allows a concrete hook on an abstract property with another abstract hook', () => {
+  expect(run('<?php abstract class A { abstract public int $x { get => 1; set; } } echo "accepted";')).toMatchObject({
+    kind: 'executed',
+    stdout: 'accepted',
+  });
+});
+
+test.each([
   ['get => 1;', 'Read-only'],
   ['set { echo $value; }', 'Write-only'],
 ])('rejects asymmetric visibility on a single virtual hook: %s', (hook, mode) => {

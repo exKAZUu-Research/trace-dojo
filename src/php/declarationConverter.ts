@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 940 -- Keeps declaration conversion with its shared parsing and validation rules.
+// code-gauge-allow-file fileNcss 951 -- Keeps declaration conversion with its shared parsing and validation rules.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -1172,10 +1172,17 @@ export abstract class DeclarationConverter extends ConverterBase {
   }
 
   protected hooks(list: Node, prop: PropertyDeclAst, className: string): void {
-    const declarations = list.namedChildren.filter((child) => child.type === 'property_hook');
+    const declarations = list.namedChildren
+      .filter((child) => child.type === 'property_hook')
+      .map((hook) => ({
+        hook,
+        kind: lower(hook.namedChildren.find((child) => child.type === 'name')?.text ?? ''),
+        body: hook.childForFieldName('body'),
+        final: hook.children.some((child) => child.type === 'final_modifier'),
+      }));
     const kinds = new Set<string>();
-    for (const hook of declarations) {
-      const kind = lower(hook.namedChildren.find((child) => child.type === 'name')?.text ?? '');
+    for (const { hook, kind, body, final } of declarations) {
+      this.validateHookBody(hook, prop, body !== null, final);
       if (kinds.has(kind)) this.error(hook, `Cannot redeclare property hook "${kind}"`);
       kinds.add(kind);
       const parameters = hook.childForFieldName('parameters');
@@ -1189,11 +1196,9 @@ export abstract class DeclarationConverter extends ConverterBase {
         this.error(hook, `set hook of property ${className}::$${prop.name} must accept exactly one parameters`);
     }
     const hooks: NonNullable<PropertyDeclAst['hooks']> = { syntax: this.preserveSyntax ? [] : undefined };
-    for (const hook of declarations) {
+    for (const { hook, kind, body, final } of declarations) {
       const attributes = hook.childForFieldName('attributes');
       if (attributes) this.unsupported(attributes, '属性（#[...]）');
-      const kind = lower(hook.namedChildren.find((child) => child.type === 'name')?.text ?? '');
-      const body = hook.childForFieldName('body');
       const paramsNode = hook.childForFieldName('parameters');
       const outerFn = this.fn;
       const outerLoop = this.loop;
@@ -1293,7 +1298,6 @@ export abstract class DeclarationConverter extends ConverterBase {
         const usesBacking =
           body !== null &&
           ((kind === 'set' && body.type !== 'compound_statement') || referencesProperty(body, prop.name));
-        const final = hook.children.some((child) => child.type === 'final_modifier');
         this.checkGotos(this.fn, statements);
         const fn: FunctionDecl = {
           name: `$${prop.name}::${kind}`,
@@ -1347,6 +1351,16 @@ export abstract class DeclarationConverter extends ConverterBase {
       const visibilityError = virtualPropertyVisibilityError(className, prop);
       if (visibilityError) this.error(prop.row, visibilityError);
     }
+  }
+
+  private validateHookBody(hook: Node, property: PropertyDeclAst, hasBody: boolean, isFinal: boolean): void {
+    const isPrivate = property.visibility === 'private';
+    if (isFinal && isPrivate) this.error(hook, 'Property hook cannot be both final and private');
+    if (this.activeClass?.kind === 'interface' || (property.isAbstract && !hasBody)) {
+      if (hasBody) this.error(hook, 'Abstract property hook cannot have body');
+      if (isPrivate) this.error(hook, 'Property hook cannot be both abstract and private');
+      if (isFinal) this.error(hook, 'Property hook cannot be both abstract and final');
+    } else if (!hasBody) this.error(hook, 'Non-abstract property hook must have a body');
   }
 
   // code-gauge-allow functionCognitiveComplexity 24 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
