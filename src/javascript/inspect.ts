@@ -1,9 +1,10 @@
-// code-gauge-allow-file fileNcss 711 -- Ports Node.js's inspection and error formatting around shared object and stack metadata.
+// code-gauge-allow-file fileNcss 746 -- Ports Node.js's inspection and error formatting around shared object and stack metadata.
 import { inspect as hostInspect, type InspectStyle, stripVTControlCharacters } from 'node:util';
 
 import { eastAsianWidthType } from 'get-east-asian-width';
 
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
+import { closingOnThrow, DONE } from './iteration';
 import type { PromiseState } from './promises';
 import type { Realm } from './realm';
 import { type CollectionEntry, CollectionIterator } from './realmCollections';
@@ -360,7 +361,7 @@ function escapeControls(text: string): string {
   });
 }
 
-type EntryFormat = 'array' | 'collection' | undefined;
+type EntryFormat = 'array' | 'collection' | 'intrinsicCollection' | undefined;
 
 interface Frame {
   /** The text before the braces, such as a function's name. */
@@ -407,11 +408,12 @@ function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string 
 }
 
 function entryFormat(runtime: Runtime, value: JsObject, name: string | undefined): EntryFormat {
-  if (value.collection?.isWeak) return 'collection';
+  if (value.collection?.isWeak) return 'intrinsicCollection';
   const array = value instanceof JsArray;
   if (!array && !value.collection && !(value.hostIterator instanceof CollectionIterator)) return undefined;
   if (name !== undefined && !runtime.hasProperty(value, WELL_KNOWN_SYMBOLS.iterator)) return undefined;
-  return array ? 'array' : 'collection';
+  if (array) return 'array';
+  return name === undefined ? 'intrinsicCollection' : 'collection';
 }
 
 interface Body {
@@ -424,11 +426,9 @@ interface Body {
 function formatBody(ctx: Context, value: JsObject, recurseTimes: number, body: Body): string {
   const { frame, keys, inherited, entries } = body;
   const array = entries === 'array' && value instanceof JsArray ? value : undefined;
-  const output = array
-    ? formatArray(ctx, array, recurseTimes)
-    : entries === 'collection'
-      ? formatCollection(ctx, value, recurseTimes)
-      : [];
+  let output: string[] = [];
+  if (array) output = formatArray(ctx, array, recurseTimes);
+  else if (entries) output = formatCollection(ctx, value, recurseTimes, entries === 'collection');
   if (value.promise) output.push(promiseEntry(ctx, value.promise, recurseTimes));
   if (ctx.showHidden && array) output.push(`[length]: ${formatPrimitive(ctx, array.elements.length)}`);
   const properties = keys.map((key) => formatProperty(ctx, value, recurseTimes, key, { arrayExtras: !!array }));
@@ -557,7 +557,7 @@ function frameOf(ctx: Context, value: JsObject, display: DisplayConstructor, has
     const prefix = constructor === 'Array' ? '' : prefixOf(constructor, 'Array', `(${value.elements.length})`);
     return value.elements.length === 0 && !hasKeys ? `${prefix}[]` : { base: '', braces: [`${prefix}[`, ']'] };
   }
-  if (display.entries === 'collection') {
+  if (display.entries) {
     return collectionFrameOf(value, constructor, hasKeys);
   }
   if (value.turtle) return `Turtle { x: ${value.turtle.x}, y: ${value.turtle.y} }`;
@@ -1039,37 +1039,76 @@ function collectionFrameOf(value: JsObject, constructor: string | undefined, has
   return { base: '', braces: [`${prefix}{`, '}'] };
 }
 
-/** The entries of a Map, Set, or an iterator over one, which an iterator shows from where it has reached on. */
-// code-gauge-allow functionCognitiveComplexity 21 -- Ports Node.js's util.inspect, so the two stay comparable.
-function formatCollection(ctx: Context, value: JsObject, recurseTimes: number): string[] {
-  const iterator = value.hostIterator instanceof CollectionIterator ? value.hostIterator : undefined;
-  const state = iterator ? iterator.state : value.collection;
-  if (!state) return [];
-  if (state.isWeak) return ['<items unknown>'];
-  const entries = iterator ? iterator.remainingEntries() : state.liveEntries(ctx.runtime);
-  const formatEntry = (entry: CollectionEntry): string => {
-    if (!iterator) {
-      const key = formatCharged(ctx, entry.key, recurseTimes);
-      return state.kind === 'Map' ? `${key} => ${formatCharged(ctx, entry.value, recurseTimes)}` : key;
-    }
-    if (iterator.kind !== 'entries') {
-      return formatCharged(ctx, iterator.kind === 'keys' ? entry.key : entry.value, recurseTimes);
-    }
-    const pair = [formatCharged(ctx, entry.key, recurseTimes), formatCharged(ctx, entry.value, recurseTimes)];
-    return reduceToSingleString(ctx, pair, '', ['[', ']'], recurseTimes);
-  };
-  const limit = Math.min(entries.length, ctx.maxArrayLength);
-  if (iterator && !Number.isInteger(limit)) ctx.runtime.throwError('RangeError', 'Invalid array length');
-  const output: string[] = [];
+function formatCollection(ctx: Context, value: JsObject, depth: number, visible: boolean): string[] {
+  const iterator = value.hostIterator;
+  const state = value.collection;
   ctx.indentationLvl += 2;
-  for (const [index, entry] of entries.entries()) {
-    if (index >= limit) break;
-    output.push(formatEntry(entry));
+  try {
+    if (iterator instanceof CollectionIterator) return previewCollectionIterator(ctx, iterator, depth);
+    if (!state) return [];
+    if (state.isWeak) return ['<items unknown>'];
+    if (visible) return formatVisibleCollection(ctx, value, depth, state.kind === 'Map');
+    const cursor = state.cursor();
+    const output: string[] = [];
+    for (let entry = cursor.next(ctx.runtime); entry; entry = cursor.next(ctx.runtime)) {
+      output.push(formatCollectionEntry(ctx, entry, depth, state.kind === 'Map'));
+    }
+    return output;
+  } finally {
+    ctx.indentationLvl -= 2;
   }
-  ctx.indentationLvl -= 2;
-  const remaining = entries.length - limit;
-  if (remaining > 0) output.push(remainingArrayItems(remaining));
+}
+
+function formatVisibleCollection(ctx: Context, value: JsObject, depth: number, map: boolean): string[] {
+  const { runtime } = ctx;
+  const size = runtime.get(value, 'size');
+  const limit = Math.min(runtime.toNumber(size), ctx.maxArrayLength);
+  const remaining = runtime.toNumber(size) - limit;
+  const iterator = runtime.iterator(value, undefined, { text: 'value' }, 'forOf');
+  return closingOnThrow(iterator, () => {
+    const output: string[] = [];
+    for (let item = iterator.next(); item !== DONE; item = iterator.next()) {
+      const entry = map ? readMapEntry(runtime, item) : undefined;
+      if (output.length >= limit) {
+        iterator.close();
+        break;
+      }
+      output.push(entry ? formatCollectionEntry(ctx, entry, depth, true) : formatCharged(ctx, item, depth));
+    }
+    if (remaining > 0) output.push(remainingArrayItems(remaining));
+    return output;
+  });
+}
+
+function readMapEntry(runtime: Runtime, item: Value): CollectionEntry {
+  if (item === undefined || item === null)
+    runtime.throwError('TypeError', `Cannot destructure property '0' of '.for' as it is ${String(item)}.`);
+  return { key: runtime.get(item, '0'), value: runtime.get(item, '1') };
+}
+
+function formatCollectionEntry(ctx: Context, entry: CollectionEntry, depth: number, map: boolean): string {
+  const key = formatCharged(ctx, entry.key, depth);
+  return map ? `${key} => ${formatCharged(ctx, entry.value, depth)}` : key;
+}
+
+function previewCollectionIterator(ctx: Context, iterator: CollectionIterator, depth: number): string[] {
+  const entries = iterator.remainingEntries();
+  const limit = Math.min(entries.length, ctx.maxArrayLength);
+  if (!Number.isInteger(limit)) ctx.runtime.throwError('RangeError', 'Invalid array length');
+  const output = entries.slice(0, limit).map((entry) => formatIteratorEntry(ctx, entry, iterator.kind, depth));
+  if (entries.length > limit) output.push(remainingArrayItems(entries.length - limit));
   return output;
+}
+
+function formatIteratorEntry(
+  ctx: Context,
+  entry: CollectionEntry,
+  kind: CollectionIterator['kind'],
+  depth: number
+): string {
+  if (kind !== 'entries') return formatCharged(ctx, kind === 'keys' ? entry.key : entry.value, depth);
+  const pair = [formatCharged(ctx, entry.key, depth), formatCharged(ctx, entry.value, depth)];
+  return reduceToSingleString(ctx, pair, '', ['[', ']'], depth);
 }
 
 /** What a promise shows before its properties: `<pending>`, its value, or `<rejected>` and its reason. */

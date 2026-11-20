@@ -626,6 +626,35 @@ console.log(value);
 const other = { __proto__: value };
 console.log(value, Object.getPrototypeOf(other) === value);`,
   ],
+  [
+    'collection iterators and reflection',
+    `function attempt(value, options) {
+  try { console.dir(value, options); } catch (error) { console.log(error.name + ': ' + error.message); }
+}
+for (const value of [new Map([[1, 2], [3, 4]]), new Set([1, 2])]) {
+  Object.setPrototypeOf(value, Object.create(Array.prototype));
+  attempt(value, { showHidden: true });
+  Object.defineProperty(value, Symbol.iterator, { configurable: true, value: undefined });
+  attempt(value);
+  Object.defineProperty(value, Symbol.iterator, { get() { throw new Error('iterator getter'); } });
+  attempt(value);
+  Object.setPrototypeOf(value, null);
+  attempt(value, { maxArrayLength: 1, showHidden: true });
+}
+const set = new Set([1, 2, 3]);
+set[Symbol.iterator] = function* () {
+  try { yield 7; yield 8; yield 9; } finally { console.log('set iterator closed'); }
+};
+attempt(set, { maxArrayLength: 1 });
+const map = new Map([[1, 2]]);
+map[Symbol.iterator] = function* () {
+  try { yield ['a', 1]; yield null; } finally { console.log('map iterator closed'); }
+};
+attempt(map, { maxArrayLength: 1 });
+const entries = new Map([[1, 2], [3, 4]]).entries();
+console.log(entries);
+console.log(entries.next().value);`,
+  ],
   ['quoted strings and keys', String.raw`console.log(["it's", 'say "hi"\n', '\x01'], { 'a-b': 1, 2: 'two', $c: 3 });`],
   ['circular references', 'const a = { b: {} }; a.b.a = a; a.self = a; console.log(a);'],
   ['format specifiers', "console.log('%s is %d%% %j', 'x', 50, { a: [1] }, 'rest', { b: 2 });"],

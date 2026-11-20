@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 442 -- Keeps type data, cache keys, and canonical type constructors together.
+// code-gauge-allow-file fileNcss 461 -- Keeps type data, cache keys, and canonical type constructors together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { ExecutionBudget } from '../../interpreter/limits';
@@ -508,17 +508,8 @@ export function intersectionOf(types: Type[], c: Checker): Type {
   if (members.length === 0) return unknownType;
   // A union distributes, as `(A | B) & C` is `(A & C) | (B & C)`.
   const unionIndex = members.findIndex((type) => type.kind === 'union');
-  if (unionIndex !== -1) {
-    const union = members[unionIndex] as UnionType;
-    return unionOf(
-      union.types.map((member) =>
-        intersectionOf(
-          members.map((type, index) => (index === unionIndex ? member : type)),
-          c
-        )
-      )
-    );
-  }
+  const union = members[unionIndex];
+  if (union?.kind === 'union') return distributeIntersection(members, union, unionIndex, c);
   const units = members.filter((type) => type.kind === 'literal' || isPrimitive(type));
   const literal = units.find((type) => type.kind === 'literal');
   if (literal && units.length === members.length) return literal;
@@ -527,13 +518,30 @@ export function intersectionOf(types: Type[], c: Checker): Type {
   return { kind: 'intersection', id: newTypeId(), types: reduced };
 }
 
+function distributeIntersection(
+  members: Type[],
+  union: Extract<Type, { kind: 'union' }>,
+  unionIndex: number,
+  c: Checker
+): Type {
+  const alternatives = union.noInfer ? union.types.map((type) => preventInference(type, c.budget)) : union.types;
+  return unionOf(
+    alternatives.map((alternative) =>
+      intersectionOf(
+        members.map((type, index) => (index === unionIndex ? alternative : type)),
+        c
+      )
+    )
+  );
+}
+
 function intersectStringPatterns(types: Type[], c: Checker): Type[] | undefined {
   if (!types.some(isTemplateOrStringMapping)) return types;
   const unit = types.find((type) => type.kind === 'literal' && typeof type.value === 'string');
   if (!unit) return types;
   const compatible: Type[] = [];
   for (const type of types) {
-    if (isTemplateOrStringMapping(type)) {
+    if (isTemplateOrStringMapping(type) && !type.noInfer) {
       if (c.relations.isRelated(unit, type, 'strictSubtype')) continue;
       if (isPatternLiteralType(type)) return undefined;
     }
@@ -572,17 +580,18 @@ function hasDisjointIntersectionDomains(types: Type[]): boolean {
     domain = current;
     // TypeScript does not check the Boolean or null domains against other domains on their own.
     reducesDomains ||= current !== 'boolean' && current !== 'null';
-    if (type.kind === 'literal' || isNullableUnit(type)) {
-      const id = regularOf(type).id;
-      if (unit !== undefined && unit !== id) return true;
-      unit = id;
-    }
+    if (type.kind !== 'literal' && !isNullableUnit(type)) continue;
+    const id = regularOf(type).id;
+    if (unit !== undefined && unit !== id) return true;
+    unit = id;
   }
   return (
-    (mixedDomains && reducesDomains) || (types.some((type) => type.kind === 'object') && types.some(isNullableUnit))
+    (mixedDomains && reducesDomains) ||
+    (types.some((type) => type.kind === 'object' && !type.noInfer) && types.some(isNullableUnit))
   );
 }
 
+// code-gauge-allow functionCognitiveComplexity 17 -- Flattens type members and preserves inference boundaries.
 function flattenedMembers(
   types: Type[],
   kind: 'union' | 'intersection',
@@ -593,7 +602,8 @@ function flattenedMembers(
   const add = (type: Type, noInfer = false): void => {
     budget?.spend();
     const blocked = noInfer || type.noInfer === true;
-    if (type.kind === kind) {
+    const opaque = kind === 'intersection' && blocked;
+    if (type.kind === kind && !opaque) {
       for (const member of type.types) add(member, blocked);
       return;
     }
@@ -617,10 +627,35 @@ export function isTemplateOrStringMapping(type: Type): type is TemplateLiteralTy
   return type.kind === 'templateLiteral' || type.kind === 'stringMapping';
 }
 
+export function preventInference(type: Type, budget: ExecutionBudget): Type {
+  return canBlockInference(type, budget) ? { ...type, noInfer: true } : type;
+}
+
+function canBlockInference(type: Type, budget: ExecutionBudget): boolean {
+  if (type.noInfer) return false;
+  if (type.kind === 'union' || type.kind === 'intersection') {
+    budget.spend(type.types.length);
+    return type.types.some((member) => canBlockInference(member, budget));
+  }
+  if (type.kind === 'object') return type.id !== emptyObjectType.id;
+  if (isTemplateOrStringMapping(type)) return !isPatternLiteralType(type);
+  return (
+    type.kind === 'typeParameter' ||
+    type.kind === 'conditional' ||
+    type.kind === 'indexedAccess' ||
+    type.kind === 'keyof'
+  );
+}
+
 function primitiveDomain(type: Type): string | undefined {
   if (type.kind === 'literal') return typeof type.value;
-  if (type.id === booleanType.id) return 'boolean';
-  if (isTemplateOrStringMapping(type)) return 'string';
+  if (type.kind === 'union') {
+    const boolean =
+      type.types.length > 0 &&
+      type.types.every((member) => member.kind === 'literal' && typeof member.value === 'boolean');
+    return boolean ? 'boolean' : undefined;
+  }
+  if (isTemplateOrStringMapping(type)) return type.noInfer ? undefined : 'string';
   if (type.kind !== 'intrinsic' || !(isPrimitive(type) || isIntrinsic(type, 'object'))) return undefined;
   // `void` holds only `undefined`, so the two overlap as TypeScript's `VoidLike` domain.
   return type.name === 'void' ? 'undefined' : type.name;

@@ -51,6 +51,7 @@ import {
   newTypeId,
   numberType,
   type ObjectType,
+  preventInference,
   primitiveOfLiteral,
   type Property,
   propertyAccessType,
@@ -414,7 +415,7 @@ export class Checker {
     this.instantiationDepth++;
     try {
       const instantiated = this.instantiateType(type, mapper);
-      return type.noInfer ? { ...instantiated, noInfer: true } : instantiated;
+      return type.noInfer ? preventInference(instantiated, this.budget) : instantiated;
     } finally {
       this.instantiationDepth--;
     }

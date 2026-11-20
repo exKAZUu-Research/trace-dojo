@@ -25,3 +25,9 @@ console.log(arrayWithProperties);
 const inherited = [7, 8];
 Object.setPrototypeOf(inherited, Object.create(Array.prototype));
 console.log(inherited);
+
+for (const value of [new Map([[1, 2], [3, 4]]), new Set([1, 2])]) {
+  Object.setPrototypeOf(value, Object.create(Array.prototype));
+  console.dir(value, { depth: 2 });
+  console.dir(value, { depth: 2, showHidden: true });
+}
