@@ -127,8 +127,9 @@ function selfType(ctx: NativeContext): Type {
 }
 
 /** The default value of a type, as `Default::default` gives it. */
-// code-gauge-allow functionNcss 52 -- One native per method of the standard library.
+// code-gauge-allow functionNcss 57 -- One branch per type with a built-in default value.
 export function defaultValue(ctx: NativeContext, type: Type): Value {
+  ctx.runtime.spend();
   const t = normalize(shallow(type));
   switch (t.kind) {
     case 'int': {
@@ -144,9 +145,11 @@ export function defaultValue(ctx: NativeContext, type: Type): Value {
       return '\0';
     }
     case 'tuple': {
+      ctx.runtime.allocate(t.elems.length);
       return t.elems.map((elem) => defaultValue(ctx, elem));
     }
     case 'array': {
+      ctx.runtime.allocate(t.len);
       return Array.from({ length: t.len }, () => defaultValue(ctx, t.elem));
     }
     case 'ref': {
@@ -202,7 +205,9 @@ export function defaultValue(ctx: NativeContext, type: Type): Value {
         );
       }
       const subst = new Map(t.def.params.map((param, index) => [param, t.args[index]]));
-      const fields = t.def.variants[0].fields.map((field) => {
+      const defFields = t.def.variants[0].fields;
+      ctx.runtime.allocate(defFields.length);
+      const fields = defFields.map((field) => {
         const fieldType = subst.size > 0 ? substituteType(field.type, subst) : field.type;
         return defaultValue(ctx, fieldType);
       });

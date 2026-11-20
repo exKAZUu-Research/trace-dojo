@@ -836,6 +836,7 @@ test.each([
   ['a precise float', 'println!("{:.100000000}", 1.0);'],
   ['nested Vecs', 'let v = vec![vec![0u8; 10_000]; 10_000];'],
   ['nested arrays', 'let a = [[0u8; 10_000]; 10_000];'],
+  ['default values for nested arrays', 'let a: [[[[i32; 32]; 32]; 32]; 32] = Default::default();'],
   ['a concatenated Vec', 'let mut v = vec![1u8]; for _ in 0..40 { v = [v.clone(), v.clone()].concat(); }'],
   ['clones of a Vec', 'let v = vec![0u8; 900_000]; let mut w = Vec::new(); for _ in 0..100 { w.push(v.clone()); }'],
 ])('%s stops at the memory limit', (_name, body) => {
