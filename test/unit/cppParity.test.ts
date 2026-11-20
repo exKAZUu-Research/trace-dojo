@@ -226,6 +226,29 @@ int main() {
   });
 });
 
+test('retains the Apple libc++ signaling NaN from numeric_limits at each width', () => {
+  const program = `#include <iostream>
+#include <limits>
+int main() {
+  constexpr double constant = std::numeric_limits<double>::signaling_NaN();
+  double wide = constant;
+  float single = std::numeric_limits<float>::signaling_NaN();
+  long double extended = std::numeric_limits<long double>::signaling_NaN();
+  auto d = static_cast<unsigned char*>(static_cast<void*>(&wide));
+  auto f = static_cast<unsigned char*>(static_cast<void*>(&single));
+  auto l = static_cast<unsigned char*>(static_cast<void*>(&extended));
+  double computed = wide + 1.0;
+  auto result = static_cast<unsigned char*>(static_cast<void*>(&computed));
+  std::cout << int(d[6]) << ' ' << int(d[7]) << ' ' << int(f[2]) << ' ' << int(f[3]) << ' '
+            << int(l[6]) << ' ' << int(l[7]) << ' ' << int(result[6]);
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '244 127 160 127 244 127 252',
+    uncaughtException: undefined,
+  });
+});
+
 test('reads the signed representation of constant NaNs from storage', () => {
   const program = `#include <cmath>
 #include <iostream>
@@ -407,6 +430,25 @@ int main() {
     });
   }
 );
+
+test.each([
+  ['list', 'auto saved = values.begin(); values.erase(saved);', 'saved == values.begin()'],
+  ['list', 'auto saved = values.begin(); values.erase(saved);', 'values.end() != saved'],
+  ['list', 'auto saved = values.begin(); values.erase(saved);', 'saved == other.end()'],
+  ['unordered_set', 'auto saved = values.begin(); values.erase(saved);', 'saved != values.end()'],
+  ['deque', 'auto saved = values.end(); values.push_back(3);', 'saved == other.end()'],
+])('diagnoses invalidated %s iterators before comparing them', (container, mutation, comparison) => {
+  const program = `#include <${container}>
+int main() {
+  std::${container}<int> values{1, 2}, other{3};
+  ${mutation}
+  return ${comparison};
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('使えなくなったイテレータ'),
+  });
+});
 
 test('allows negative movement of bidirectional iterators', () => {
   const program = `#include <iostream>

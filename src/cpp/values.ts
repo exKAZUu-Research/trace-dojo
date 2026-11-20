@@ -522,6 +522,13 @@ export class Ptr {
     return store.location(index);
   }
 
+  checkIterator(): void {
+    const { store, index } = this;
+    if (!store) return;
+    store.checkAlive();
+    if (index < 0 || index > store.iteratorLength) throw new CppRuntimeError('invalidIterator');
+  }
+
   sharesRange(other: Ptr): boolean {
     return this.store === other.store;
   }

@@ -231,6 +231,11 @@ class HashPosition extends Ptr {
     return this.node ? this.store.positionOf(this.entry()) : this.store.length;
   }
 
+  override checkIterator(): void {
+    this.store.checkAlive();
+    if (this.node && !this.node.owner) throw new CppRuntimeError('invalidIterator');
+  }
+
   override equals(other: Ptr): boolean {
     if (other instanceof HashPosition) return this.store === other.store && this.node === other.node;
     return super.equals(other);

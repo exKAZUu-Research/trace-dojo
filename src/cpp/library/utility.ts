@@ -1,6 +1,7 @@
 import { commonType } from '../../c/types';
 import { arithmeticOperation, convertNumeric, type NumericValue } from '../arithmetic';
 import type { Expr } from '../expr';
+import { FloatNaN } from '../floatSign';
 import { BOOL, ClassInfo, isArithmetic, sameType, type Type, typeName, unqualified } from '../types';
 import { CObject, type Value } from '../values';
 import { equalTo, lessThan } from './elements';
@@ -164,6 +165,7 @@ const BINARY64_EXPONENTS = {
   min_exponent10: -307,
   max_exponent10: 308,
 };
+const SIGNALING_NAN = FloatNaN.fromBits(0x7f_f4_00_00_00_00_00_00n, false);
 
 /** `std::numeric_limits<T>`, whose static members tell the range of an arithmetic type. */
 export function numericLimitsClass(library: Library, type: Type): ClassInfo {
@@ -187,14 +189,13 @@ export function numericLimitsClass(library: Library, type: Type): ClassInfo {
         round_error: 0.5,
         infinity: Infinity,
         quiet_NaN: Number.NaN,
-        signaling_NaN: Number.NaN,
+        signaling_NaN: SIGNALING_NAN,
         denorm_min: binary32 ? 2 ** -149 : Number.MIN_VALUE,
       }
     : { round_error: zero, infinity: zero, quiet_NaN: zero, signaling_NaN: zero, denorm_min: zero };
-  const staticFunction = (name: string, value: number | bigint): void => {
-    const evaluate = (): number | bigint => value;
-    const method = native(name, [], target, evaluate, { owner: cls, isStatic: true });
-    cls.methods.set(name, [{ ...method, evaluateConstant: evaluate }]);
+  const staticFunction = (name: string, value: NumericValue): void => {
+    const method = native(name, [], target, () => value, { owner: cls, isStatic: true });
+    cls.methods.set(name, [{ ...method, evaluateConstant: () => (value instanceof FloatNaN ? Number.NaN : value) }]);
   };
   for (const [name, value] of Object.entries({
     max: limits.max,

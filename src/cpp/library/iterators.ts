@@ -298,6 +298,8 @@ function sameIteratorFamily(a: ClassInfo, b: ClassInfo): boolean {
 }
 
 function compareIterators(operator: string, a: Ptr, b: Ptr, isReverse: boolean): number {
+  a.checkIterator();
+  b.checkIterator();
   if (operator === '==') return a.store === b.store && a.equals(b) ? 1 : 0;
   if (operator === '!=') return a.store === b.store && a.equals(b) ? 0 : 1;
   if (a.store !== b.store) throw new CppRuntimeError('invalidIterator');
