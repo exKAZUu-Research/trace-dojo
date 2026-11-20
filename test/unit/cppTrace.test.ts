@@ -248,6 +248,23 @@ int main() {
   expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', uncaughtException: message });
 });
 
+test.each(['P p{7}; void* q = &p + 1;', 'P* p = new P{7}; void* q = p + 1;'])(
+  'rejects reading a first member through a one-past object pointer after %s',
+  (setup) => {
+    const program = `#include <iostream>
+struct P { int x; };
+int main() {
+  ${setup}
+  std::cout << *static_cast<int*>(q);
+}`;
+    expect(executeProgram('cpp', program)).toMatchObject({
+      kind: 'executed',
+      stdout: '',
+      uncaughtException: '配列の範囲の外を読み書きしました。',
+    });
+  }
+);
+
 test('reads only the required prefix of a C substring search needle', () => {
   const program = `#include <cstring>
 #include <string>

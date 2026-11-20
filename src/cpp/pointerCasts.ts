@@ -49,6 +49,8 @@ function firstSubobject(pointer: Ptr, source: Type, target: Type): Ptr | undefin
   if (sameType(source, target, false)) return pointer;
   if (source.kind !== 'class' || !isStandardLayout(source.cls)) return;
   if (target.kind === 'class' && source.cls.isDerivedFrom(target.cls)) return pointer.forClass(target.cls);
+  // A one-past pointer keeps its address and designates no member to project.
+  if (pointer.index < 0 || pointer.index >= pointer.target().length) return pointer;
   const object = pointer.readRaw();
   if (!(object instanceof CObject)) return;
   if (
