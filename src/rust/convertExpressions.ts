@@ -304,7 +304,7 @@ export abstract class ExpressionConverter extends MacroConverter {
     return {
       kind: 'field',
       operand: this.expr(this.field(node, 'value')),
-      name: fieldNode.text,
+      name: this.identifier(fieldNode),
       nameSpan: this.span(fieldNode),
       span,
     };
@@ -312,9 +312,9 @@ export abstract class ExpressionConverter extends MacroConverter {
 
   private rangeExpr(node: Node, span: Span): Expr {
     const children = node.namedChildren.filter((child) => !isComment(child));
-    const operatorIndex = node.children.findIndex((child) => child.type === '..' || child.type === '..=');
-    const operator = node.children[operatorIndex];
-    if (operator.type === '...' || node.text.includes('...')) syntaxError(span, '... ではなく ..= と書いてください。');
+    const operator = node.children.find((child) => child.type === '..' || child.type === '..=' || child.type === '...');
+    if (!operator) syntaxError(span, '範囲には .. または ..= を書いてください。');
+    if (operator.type === '...') syntaxError(span, '... ではなく ..= と書いてください。');
     let start: Expr | undefined;
     let end: Expr | undefined;
     for (const child of children) {
@@ -401,7 +401,7 @@ export abstract class ExpressionConverter extends MacroConverter {
       return {
         kind: 'methodCall',
         receiver: this.expr(this.field(access, 'value')),
-        method: methodNode.text,
+        method: this.identifier(methodNode),
         turbofish: fn.type === 'generic_function' ? this.typeArgs(this.field(fn, 'type_arguments')) : undefined,
         args,
         methodSpan: this.span(methodNode),
@@ -426,13 +426,13 @@ export abstract class ExpressionConverter extends MacroConverter {
       if (child.type === 'shorthand_field_initializer') {
         const name = this.onlyChild(child);
         fields.push({
-          name: name.text,
+          name: this.identifier(name),
           value: { kind: 'path', path: this.exprPath(name), span: childSpan },
           span: childSpan,
         });
       } else if (child.type === 'field_initializer') {
         const field = this.field(child, 'field');
-        fields.push({ name: field.text, value: this.expr(this.field(child, 'value')), span: childSpan });
+        fields.push({ name: this.identifier(field), value: this.expr(this.field(child, 'value')), span: childSpan });
       } else if (child.type === 'base_field_initializer') {
         base = this.expr(this.onlyChild(child));
       } else if (child.type === 'attribute_item') {

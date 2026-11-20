@@ -12,10 +12,10 @@ export abstract class MacroConverter extends PatternConverter {
     const span = this.span(node);
     const macroNode = this.field(node, 'macro');
     if (macroNode.type !== 'identifier') {
-      const name = macroNode.text.replace(/^(std|core|alloc)::/, '');
+      const name = macroNode.text.replace(/^(?:r#)?(?:std|core|alloc)::/, '').replace(/^r#/, '');
       if (name.includes('::')) unavailable(span, `マクロ ${macroNode.text}!`);
     }
-    const name = macroNode.text.replace(/^(std|core|alloc)::/, '');
+    const name = macroNode.text.replace(/^(?:r#)?(?:std|core|alloc)::/, '').replace(/^r#/, '');
     const tree = node.namedChildren.find((child) => child.type === 'token_tree');
     if (!tree) syntaxError(span, `${name}! の引数が足りません。`);
     return this.macroCall(name, tree, span);
@@ -200,7 +200,7 @@ export abstract class MacroConverter extends PatternConverter {
     const exprs: Expr[] = [];
     for (const arg of rest) {
       if (arg.type === 'assignment_expression' && this.field(arg, 'left').type === 'identifier') {
-        const name = this.field(arg, 'left').text;
+        const name = this.identifier(this.field(arg, 'left'));
         if (named.has(name)) syntaxError(this.span(arg), `名前付きの引数 ${name} が2回あります。`);
         named.set(name, exprs.length);
         exprs.push(this.expr(this.field(arg, 'right')));

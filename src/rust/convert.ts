@@ -71,7 +71,7 @@ export class Converter extends ExpressionConverter {
         const value = this.isStd ? node.childForFieldName('value') : this.field(node, 'value');
         return {
           kind: 'const',
-          name: this.field(node, 'name').text,
+          name: this.identifier(this.field(node, 'name')),
           span,
           vis: this.visibility(node),
           type: this.type(this.field(node, 'type')),
@@ -82,7 +82,7 @@ export class Converter extends ExpressionConverter {
         if (!this.isStd) return this.unsupportedItem(node);
         return {
           kind: 'typeAlias',
-          name: this.field(node, 'name').text,
+          name: this.identifier(this.field(node, 'name')),
           span,
           vis: this.visibility(node),
           generics: this.generics(node),
@@ -98,7 +98,13 @@ export class Converter extends ExpressionConverter {
           const item = this.item(child);
           if (item) items.push(item);
         }
-        return { kind: 'mod', name: this.field(node, 'name').text, span, vis: this.visibility(node), items };
+        return {
+          kind: 'mod',
+          name: this.identifier(this.field(node, 'name')),
+          span,
+          vis: this.visibility(node),
+          items,
+        };
       }
       case 'use_declaration': {
         return this.useItem(node);
@@ -221,7 +227,7 @@ export class Converter extends ExpressionConverter {
     return {
       kind: 'fn',
       isConst,
-      name: this.field(node, 'name').text,
+      name: this.identifier(this.field(node, 'name')),
       span,
       vis: this.visibility(node),
       generics: this.generics(node),
@@ -277,7 +283,7 @@ export class Converter extends ExpressionConverter {
       if (defaultType && !this.isStd) unavailable(span, '型引数の既定の型');
       const bounds = child.childForFieldName('bounds');
       generics.params.push({
-        name: this.field(child, 'name').text,
+        name: this.identifier(this.field(child, 'name')),
         span,
         bounds: bounds ? this.bounds(bounds) : [],
         defaultType: defaultType ? this.type(defaultType) : undefined,
@@ -370,7 +376,7 @@ export class Converter extends ExpressionConverter {
     }
     return {
       kind: 'struct',
-      name: this.field(node, 'name').text,
+      name: this.identifier(this.field(node, 'name')),
       span,
       vis: this.visibility(node),
       generics: this.generics(node),
@@ -387,7 +393,7 @@ export class Converter extends ExpressionConverter {
       if (child.type === 'attribute_item') unavailable(this.span(child), `属性（${child.text}）`);
       if (child.type !== 'field_declaration') continue;
       fields.push({
-        name: this.field(child, 'name').text,
+        name: this.identifier(this.field(child, 'name')),
         type: this.type(this.field(child, 'type')),
         vis: this.visibility(child),
         span: this.span(child),
@@ -423,7 +429,7 @@ export class Converter extends ExpressionConverter {
       const body = child.childForFieldName('body');
       const value = child.childForFieldName('value');
       variants.push({
-        name: this.field(child, 'name').text,
+        name: this.identifier(this.field(child, 'name')),
         span: this.span(child),
         shape: body?.type === 'field_declaration_list' ? 'named' : body ? 'tuple' : 'unit',
         fields: body?.type === 'field_declaration_list' ? this.namedFields(body) : body ? this.orderedFields(body) : [],
@@ -432,7 +438,7 @@ export class Converter extends ExpressionConverter {
     }
     return {
       kind: 'enum',
-      name: this.field(node, 'name').text,
+      name: this.identifier(this.field(node, 'name')),
       span,
       vis: this.visibility(node),
       generics: this.generics(node),
@@ -458,7 +464,7 @@ export class Converter extends ExpressionConverter {
     const bounds = node.childForFieldName('bounds');
     return {
       kind: 'trait',
-      name: this.field(node, 'name').text,
+      name: this.identifier(this.field(node, 'name')),
       span,
       vis: this.visibility(node),
       generics: this.generics(node),
@@ -522,7 +528,7 @@ export class Converter extends ExpressionConverter {
           if (tree.type === 'self' && prefix.length > 0) {
             entries.push({ path: prefix, alias: undefined, glob: false, span });
           } else {
-            entries.push({ path: [...prefix, tree.text], alias: undefined, glob: false, span });
+            entries.push({ path: [...prefix, this.identifier(tree)], alias: undefined, glob: false, span });
           }
           return;
         }
@@ -532,7 +538,7 @@ export class Converter extends ExpressionConverter {
         }
         case 'use_as_clause': {
           const path = this.field(tree, 'path');
-          const alias = this.field(tree, 'alias').text;
+          const alias = this.identifier(this.field(tree, 'alias'));
           entries.push({ path: [...prefix, ...this.simplePath(path)], alias, glob: false, span });
           return;
         }
@@ -568,10 +574,10 @@ export class Converter extends ExpressionConverter {
   private simplePath(node: Node): string[] {
     if (node.type === 'scoped_identifier') {
       const path = node.childForFieldName('path');
-      return [...(path ? this.simplePath(path) : []), this.field(node, 'name').text];
+      return [...(path ? this.simplePath(path) : []), this.identifier(this.field(node, 'name'))];
     }
     if (node.type === 'identifier' || node.type === 'self' || node.type === 'crate' || node.type === 'super') {
-      return [node.text];
+      return [this.identifier(node)];
     }
     return unavailable(this.span(node), `パスの書き方（${node.text}）`);
   }
@@ -655,7 +661,7 @@ export class Converter extends ExpressionConverter {
       const bindings = typeArguments.namedChildren
         .filter((child) => child.type === 'type_binding')
         .map((child) => ({
-          name: this.field(child, 'name').text,
+          name: this.identifier(this.field(child, 'name')),
           type: this.type(this.field(child, 'type')),
           span: this.span(child),
         }));
@@ -667,7 +673,7 @@ export class Converter extends ExpressionConverter {
       const path = node.childForFieldName('path');
       const prefix = path ? this.exprPath(path).segments : [];
       const name = this.field(node, 'name');
-      return { segments: [...prefix, { name: name.text, args: undefined, span: this.span(name) }], span };
+      return { segments: [...prefix, { name: this.identifier(name), args: undefined, span: this.span(name) }], span };
     }
     if (
       node.type === 'type_identifier' ||
@@ -677,7 +683,7 @@ export class Converter extends ExpressionConverter {
       node.type === 'crate' ||
       node.type === 'super'
     ) {
-      return { segments: [{ name: node.text, args: undefined, span }], span };
+      return { segments: [{ name: this.identifier(node), args: undefined, span }], span };
     }
     if (node.type === 'function_type') unavailable(span, '関数ポインタの型（fn(i32) -> i32）');
     return unavailable(span, `型の書き方（${node.text}）`);
@@ -710,7 +716,7 @@ export class Converter extends ExpressionConverter {
       case 'super':
       case 'type_identifier':
       case 'primitive_type': {
-        return { segments: [{ name: node.text, args: undefined, span }], span };
+        return { segments: [{ name: this.identifier(node), args: undefined, span }], span };
       }
       case 'scoped_identifier':
       case 'scoped_type_identifier': {
@@ -718,7 +724,7 @@ export class Converter extends ExpressionConverter {
         const prefix = path ? this.exprPath(path).segments : [];
         if (!path && node.text.startsWith('::')) unavailable(span, '先頭が :: のパス');
         const name = this.field(node, 'name');
-        return { segments: [...prefix, { name: name.text, args: undefined, span: this.span(name) }], span };
+        return { segments: [...prefix, { name: this.identifier(name), args: undefined, span: this.span(name) }], span };
       }
       case 'generic_type':
       case 'generic_type_with_turbofish': {

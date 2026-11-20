@@ -23,7 +23,7 @@ export abstract class PatternConverter extends SyntaxConverter {
       case 'identifier': {
         if (node.text === '_') return { kind: 'wild', span };
         checkNotReserved(node.text, span);
-        return { kind: 'binding', name: node.text, mutable: false, sub: undefined, span };
+        return { kind: 'binding', name: this.identifier(node), mutable: false, sub: undefined, span };
       }
       case 'scoped_identifier': {
         return { kind: 'path', path: this.exprPath(node), span };
@@ -91,15 +91,15 @@ export abstract class PatternConverter extends SyntaxConverter {
   }
 
   private fieldPattern(node: Node): { name: string; pattern: Pattern; span: Span } {
-    const name = this.field(node, 'name');
+    const name = this.identifier(this.field(node, 'name'));
     const sub = node.childForFieldName('pattern');
     const span = this.span(node);
     if (node.namedChildren.some((c) => c.type === 'mutable_specifier') || /^\s*ref\b/.test(node.text)) {
       unavailable(span, 'フィールドのパターンの mut・ref');
     }
     return {
-      name: name.text,
-      pattern: sub ? this.pattern(sub) : { kind: 'binding', name: name.text, mutable: false, sub: undefined, span },
+      name,
+      pattern: sub ? this.pattern(sub) : { kind: 'binding', name, mutable: false, sub: undefined, span },
       span,
     };
   }

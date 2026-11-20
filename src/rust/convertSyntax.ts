@@ -52,6 +52,16 @@ export abstract class SyntaxConverter {
     return child;
   }
 
+  protected identifier(node: Node): string {
+    const { text } = node;
+    if (!text.startsWith('r#')) return text;
+    const name = text.slice(2);
+    if (['self', 'Self', 'super', 'crate', '_'].includes(name)) {
+      syntaxError(this.span(node), `${text} は名前に使えません。`);
+    }
+    return name;
+  }
+
   protected label(node: Node): string | undefined {
     const label = node.namedChildren.find((child) => child.type === 'label');
     return label?.text.slice(1);

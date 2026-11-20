@@ -2959,3 +2959,23 @@ test('keeps Rust trait comparison operands borrowed until the comparison', () =>
     println!("{} {}", equal, value);`);
   expect(executeProgram('rust', primitive)).toMatchObject({ kind: 'executed', stdout: 'true 2\n' });
 });
+
+test('resolves raw Rust identifiers by their names', () => {
+  const program = `mod r#scope {
+    pub struct r#Record { pub r#data: i32 }
+    impl Record { pub fn r#get(&self) -> i32 { self.data } }
+}
+use scope::r#Record as r#Name;
+fn main() {
+    let record = Name { r#data: 3 };
+    let Name { data: r#type } = record;
+    println!("{type} {}", record.get());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '3 3\n' });
+});
+
+test('reports a Rust three-dot range as a compile error', () => {
+  expect(executeProgram('rust', rustMain('for value in 0...3 { println!("{}", value); }'))).toMatchObject({
+    kind: 'compileError',
+  });
+});
