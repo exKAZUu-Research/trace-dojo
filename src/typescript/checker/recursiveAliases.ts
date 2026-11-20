@@ -7,6 +7,7 @@ import {
   newTypeId,
   type ObjectType,
   type Type,
+  typeMapperCacheKey,
   type TypeParameter,
 } from './types';
 
@@ -80,7 +81,7 @@ export class RecursiveAliases {
     const mapper: Mapper = new Map(
       all.map((parameter) => [parameter.id, argumentsMapper.get(parameter.id) ?? parameter])
     );
-    const key = `${symbol.id}[${[...mapper].map(([id, type]) => `${id}=${type.id}`).join(',')}]`;
+    const key = `${symbol.id}[${typeMapperCacheKey(mapper)}]`;
     const cached = this.referenceCache.get(key);
     if (cached) return cached;
     this.c.budget.spend();

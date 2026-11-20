@@ -47,11 +47,14 @@ function reverseTuple(c: Checker, tuple: TupleInfo, mapping: MappedInfo, inferVa
 function reverseProperty(property: Property, mapping: MappedInfo, inferValue: (input: Type) => Type): Property {
   let inferred: Type | undefined;
   return {
-    ...property,
+    name: property.name,
+    nameType: property.nameType,
+    declaration: property.declaration,
+    isPrivateName: property.isPrivateName,
     optional: property.optional && mapping.optionalModifier !== '+',
     readonly: property.readonly && mapping.readonlyModifier !== '+',
     isMethod: false,
-    writeType: undefined,
+    visibility: 'public',
     type: () => (inferred ??= inferValue(property.type())),
   };
 }

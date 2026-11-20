@@ -1,0 +1,5 @@
+function choose<C extends string>(values: C[], fallback?: NoInfer<C>): C {
+  return fallback ?? values[0];
+}
+console.log(choose(['red', 'blue'], 'green'));
+const output: any = choose(['red', 'blue'], 'green');

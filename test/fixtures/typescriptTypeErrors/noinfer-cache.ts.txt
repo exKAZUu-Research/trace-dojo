@@ -1,0 +1,5 @@
+type TreeValue<T> = { item: T; children: TreeValue<T>[] };
+function first<T extends string>(values: T[], forced: NoInfer<T>[]): T { return values[0]; }
+function fromTree<T extends string>(values: TreeValue<T>, forced: TreeValue<NoInfer<T>>): T { return values.item; }
+first(['a'], ['b']);
+fromTree({ item: 'a', children: [] }, { item: 'b', children: [] });

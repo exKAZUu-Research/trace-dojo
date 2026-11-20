@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 776 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
+// code-gauge-allow-file fileNcss 779 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
 import { minimumArguments } from './callArity';
 import type { Checker } from './checker';
 import { isUnit } from './flow';
@@ -254,6 +254,8 @@ export class Relations {
    * argument may lack the others.
    */
   private relatedToIndexedAccess(s: Type, t: IndexedAccessType, relation: Relation): boolean {
+    const mapped = this.c.typeOperators.mappedIndexConstraint(t);
+    if (mapped && mapped !== t) return this.isRelated(s, mapped, relation);
     const object = this.constraintForWriting(t.objectType);
     const keys = this.constraintForWriting(t.indexType);
     if (isGenericObjectOrIndexType(object) || isGenericObjectOrIndexType(keys)) return false;

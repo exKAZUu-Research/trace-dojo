@@ -57,6 +57,8 @@ import {
   thisParameterOf,
   type TupleElement,
   type Type,
+  typeCacheKey,
+  typeMapperCacheKey,
   typeMembers,
   type TypeParameter,
   undefinedType,
@@ -311,7 +313,7 @@ export class Checker {
     const parameters = target.typeParameters ?? [];
     const filled = this.fillTypeArguments(parameters, typeArguments);
     if (filled.every((argument, index) => argument === parameters[index])) return target;
-    const key = `${target.id}<${filled.map((type) => type.id).join(',')}>`;
+    const key = `${target.id}<${filled.map(typeCacheKey).join(',')}>`;
     let reference = this.referenceCache.get(key);
     if (!reference) {
       const mapper: Mapper = new Map(parameters.map((parameter, index) => [parameter.id, filled[index]]));
@@ -417,7 +419,7 @@ export class Checker {
    * deeper instantiations of itself.
    */
   deferredAliasUnion(alias: UnionAlias, mapper: Mapper): UnionType {
-    const key = `${alias.id}[${this.mapperKey(mapper)}]`;
+    const key = `${alias.id}[${typeMapperCacheKey(mapper)}]`;
     const cached = this.deferredAliasUnionCache.get(key);
     if (cached) return cached;
     let types: Type[] | undefined;
@@ -443,10 +445,6 @@ export class Checker {
   /** Lets a union that stands for an alias inside the alias's own declaration instantiate as the alias does. */
   registerAliasUnion(union: UnionType, alias: UnionAlias): void {
     this.aliasUnions.set(union, { alias, mapper: new Map() });
-  }
-
-  private mapperKey(mapper: Mapper): string {
-    return [...mapper].map(([id, type]) => `${id}=${type.id}`).join(',');
   }
 
   private instantiateObject(type: ObjectType, mapper: Mapper): Type {
@@ -488,7 +486,7 @@ export class Checker {
         break;
       }
     }
-    const key = `${type.id}[${this.mapperKey(mapper)}]`;
+    const key = `${type.id}[${typeMapperCacheKey(mapper)}]`;
     const cached = this.instantiationCache.get(key);
     if (cached) return cached;
     const instantiated = anonymousObject(() => this.instantiateStructure(type.resolve(), mapper), {
@@ -563,7 +561,7 @@ export class Checker {
     );
     if (outer.every((parameter) => outerMapper.get(parameter.id) === argumentOf(parameter))) return type;
     if (outer.every((parameter) => outerMapper.get(parameter.id) === parameter)) return origin;
-    const key = `${origin.id}[${this.mapperKey(outerMapper)}]`;
+    const key = `${origin.id}[${typeMapperCacheKey(outerMapper)}]`;
     const cached = this.instantiationCache.get(key);
     if (cached) return cached as ObjectType;
     let structure: Structure | undefined;
@@ -703,7 +701,7 @@ export class Checker {
   private objectStructure(type: ObjectType, receiver: Type): Structure {
     const parameter = thisParameterOf(type);
     if (!parameter || parameter === receiver) return type.resolve();
-    const key = `${type.id}:${receiver.id}`;
+    const key = `${typeCacheKey(type)}:${typeCacheKey(receiver)}`;
     let structure = this.thisStructures.get(key);
     if (!structure) {
       structure = this.instantiateStructure(type.resolve(), new Map([[parameter.id, receiver]]));
@@ -721,7 +719,7 @@ export class Checker {
         : type;
     }
     if (type.kind !== 'object' || !thisParameterOf(type)) return type;
-    const key = `this:${type.id}:${receiver.id}`;
+    const key = `this:${typeCacheKey(type)}:${typeCacheKey(receiver)}`;
     let applied = this.instantiationCache.get(key);
     if (!applied) {
       applied = anonymousObject(() => this.structureOf(type, receiver), {
@@ -809,6 +807,8 @@ export class Checker {
         return this.constraintOf(type) ?? unknownType;
       }
       case 'indexedAccess': {
+        const mapped = this.typeOperators.mappedIndexConstraint(type);
+        if (mapped !== undefined) return mapped;
         const index = this.baseConstraint(type.indexType);
         const tuple = this.silently(() => this.typeOperators.variadicIndexConstraint(type, index));
         if (tuple !== undefined) return tuple;

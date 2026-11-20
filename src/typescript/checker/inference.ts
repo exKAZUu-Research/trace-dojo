@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 590 -- Keeps generic candidate collection, constraint fitting and inference completion together.
+// code-gauge-allow-file fileNcss 596 -- Keeps generic candidate collection, constraint fitting and inference completion together.
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import type { Checker, Mapper } from './checker';
 import { childTypes, objectMemberTypes } from './genericTypes';
@@ -24,6 +24,7 @@ import {
   type TemplateLiteralType,
   type TupleElement,
   type Type,
+  typeMembers,
   type TypeParameter,
   unionOf,
   type UnionType,
@@ -96,17 +97,23 @@ export class TypeInference {
     for (const parameter of parameters) {
       const inference = inferences.get(parameter.id);
       const fixed = fixes(parameter);
-      let type: Type | undefined;
-      if (inference?.fixed) type = inference.fixed;
-      else if (inference && (inference.candidates.length > 0 || inference.contravariant.length > 0))
-        // A parameter fixed for a callback's parameters takes its widened type, as `0` gives `number`.
-        type = this.inferredType(parameter, inference, fixed);
-      else if (fixed) type = parameter.constraint?.() ?? unknownType;
+      const type = this.provisionalType(parameter, inference, fixed);
       if (!type) continue;
       mapper.set(parameter.id, type);
       if (fixed && inference && keepsFixed(parameter)) inference.fixed = type;
     }
     return mapper.size > 0 ? mapper : undefined;
+  }
+
+  private provisionalType(
+    parameter: TypeParameter,
+    inference: Inference | undefined,
+    fixed: boolean
+  ): Type | undefined {
+    if (inference?.fixed) return inference.fixed;
+    if (!inference || !hasCandidates(inference)) return fixed ? (parameter.constraint?.() ?? unknownType) : undefined;
+    const type = this.inferredType(parameter, inference, fixed);
+    return inference.priority === InferencePriority.ReturnType && isAnyLike(type) ? undefined : type;
   }
 
   finalMapper(signature: Signature, parameters: TypeParameter[], inferences: Map<number, Inference>): Mapper {
@@ -182,14 +189,15 @@ export class TypeInference {
     const supertype = candidates.find((candidate) => candidates.every((other) => this.isSubtype(other, candidate)));
     if (supertype) return this.widenObjectLiterals(supertype);
     // Literals of one primitive unite, as `1` and `2` give `1 | 2` (or `number` when widened).
+    const members = candidates.flatMap(typeMembers);
     if (
-      candidates.every(
+      members.every(
         (candidate) =>
           candidate.kind === 'literal' || isIntrinsic(candidate, 'undefined') || isIntrinsic(candidate, 'null')
       )
     ) {
       const kinds = new Set(
-        candidates
+        members
           .filter((candidate) => candidate.kind === 'literal')
           .map((candidate) => typeof (candidate as { value: unknown }).value)
       );

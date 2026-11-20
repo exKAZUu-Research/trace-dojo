@@ -434,6 +434,14 @@ function unionSortKey(type: Type): number {
   return type.id;
 }
 
+export function typeCacheKey(type: Type | undefined): number | string | undefined {
+  return type?.noInfer ? `${type.id}!` : type?.id;
+}
+
+export function typeMapperCacheKey(mapper: ReadonlyMap<number, Type>): string {
+  return [...mapper].map(([id, type]) => `${id}=${typeCacheKey(type)}`).join(',');
+}
+
 /** The union of types, flattened, without duplicates, with literals absorbed by their primitives. */
 // code-gauge-allow functionNcss 42 -- Flattens, deduplicates, and reduces members as TypeScript's unions do.
 // code-gauge-allow functionCognitiveComplexity 30 -- Flattens, deduplicates, and reduces members as TypeScript's unions do.
@@ -454,7 +462,7 @@ export function unionOf(types: Type[], keepFresh = false): Type {
   if (reduced.length === 0) return neverType;
   if (reduced.length === 1) return reduced[0];
   reduced.sort((a, b) => unionSortKey(a) - unionSortKey(b));
-  const key = reduced.map((type) => `${type.id}${type.noInfer ? '!' : ''}`).join('|');
+  const key = reduced.map(typeCacheKey).join('|');
   let union = unionCache.get(key);
   if (!union) {
     if (key === booleanUnionKey) return booleanType;

@@ -1,7 +1,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
-import type { Type } from './types';
+import { type Type, typeCacheKey } from './types';
 
 export class ExpressionTypeCache {
   private readonly silentTypes = new Map<string, Type>();
@@ -21,18 +21,20 @@ export class ExpressionTypeCache {
   private key(node: TreeNode, contextual?: Type): string {
     const flow = [...(this.c.flow.current?.entries ?? [])].map(([key, entry]) => [
       key,
-      entry.type.id,
+      typeCacheKey(entry.type),
       entry.assigned,
       entry.evolving,
-      entry.constraint?.id,
+      typeCacheKey(entry.constraint),
     ]);
-    const parameters = [...this.c.functions.parameterTypes].map(([id, type]) => [id, type.id]);
+    const parameters = [...this.c.functions.parameterTypes].map(([id, type]) => [id, typeCacheKey(type)]);
     const contexts = this.c.functions.contexts.map((context) => [
       context.node.id,
       context.inReturn,
-      context.contextualReturn?.id,
+      typeCacheKey(context.contextualReturn),
     ]);
-    const captured = this.c.functions.capturedTypes.map((entries) => [...entries].map(([key, type]) => [key, type.id]));
+    const captured = this.c.functions.capturedTypes.map((entries) =>
+      [...entries].map(([key, type]) => [key, typeCacheKey(type)])
+    );
     const environment = JSON.stringify([
       this.c.flow.current !== undefined,
       this.c.flow.current?.superCalled,
@@ -49,6 +51,6 @@ export class ExpressionTypeCache {
       environmentId = this.silentEnvironments.size;
       this.silentEnvironments.set(environment, environmentId);
     }
-    return `${this.c.expressions.deferredContexts.id}/${this.c.overloadContexts.cacheKey}/${node.id}/${contextual?.id}/${this.c.literals.isConstContext(node, contextual)}/${environmentId}`;
+    return `${this.c.expressions.deferredContexts.id}/${this.c.overloadContexts.cacheKey}/${node.id}/${typeCacheKey(contextual)}/${this.c.literals.isConstContext(node, contextual)}/${environmentId}`;
   }
 }

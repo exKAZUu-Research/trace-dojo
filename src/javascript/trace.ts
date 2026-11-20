@@ -127,7 +127,7 @@ function isVariable(binding: Binding): boolean {
 type Variables = TraceVariables;
 
 function addVariable(variables: Variables, name: string, value: Value, runtime: Runtime): void {
-  const scalar = scalarOf(value, new Set());
+  const scalar = traceScalarOf(value, runtime);
   if (scalar !== NOT_SCALAR) variables.vars[name] = scalar;
   // Arrays also appear as references so that learners can expand their elements.
   if (scalar !== NOT_SCALAR && !(value instanceof JsArray)) return;
@@ -138,11 +138,17 @@ function addVariable(variables: Variables, name: string, value: Value, runtime: 
 function addThis(variables: Variables, self: JsObject, runtime: Runtime): void {
   for (const [key, property] of displayedProperties(self, runtime)) {
     if (isAccessor(property)) continue;
-    const scalar = scalarOf(property.value, new Set());
+    const scalar = traceScalarOf(property.value, runtime);
     if (scalar !== NOT_SCALAR) variables.vars[`this.${key}`] = scalar;
   }
   const node = displayNodeOf(self, new Set(), runtime);
   if (node) variables.referenceVars.this = node;
+}
+
+function traceScalarOf(value: Value, runtime: Runtime): Scalar | typeof NOT_SCALAR {
+  if (value instanceof JsObject && value.primitive !== undefined && displayedProperties(value, runtime).length > 0)
+    return NOT_SCALAR;
+  return scalarOf(value, new Set());
 }
 
 function scalarOf(value: Value, seen: Set<JsArray>): Scalar | typeof NOT_SCALAR {
@@ -162,6 +168,8 @@ const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
 type DisplayEntry = [string, DisplayNode];
 
+const BUILTIN_VALUE_LABEL = '[[PrimitiveValue]]';
+
 function displayNodeOf(value: Value, seen: Set<JsObject>, runtime: Runtime): DisplayNode | undefined {
   if (value === undefined || value === null) return NULL_NODE;
   if (typeof value === 'number' || typeof value === 'string' || typeof value === 'boolean')
@@ -175,8 +183,6 @@ function displayNodeOf(value: Value, seen: Set<JsObject>, runtime: Runtime): Dis
       entries: { x: { kind: 'value', value: value.turtle.x }, y: { kind: 'value', value: value.turtle.y } },
     };
   }
-  const builtin = scalarBuiltinNodeOf(value, seen, runtime);
-  if (builtin) return builtin;
   seen.add(value);
   const node = containerNodeOf(value, seen, runtime);
   seen.delete(value);
@@ -185,6 +191,8 @@ function displayNodeOf(value: Value, seen: Set<JsObject>, runtime: Runtime): Dis
 
 function containerNodeOf(value: JsObject, seen: Set<JsObject>, runtime: Runtime): DisplayNode {
   const fields = displayFieldsOf(value, seen, runtime);
+  const builtin = scalarBuiltinNodeOf(value, seen, runtime);
+  if (builtin) return fields.length === 0 ? builtin : containerNode('object', [[BUILTIN_VALUE_LABEL, builtin]], fields);
   if (value instanceof JsArray) return containerNode('array', arrayEntries(value, seen, runtime), fields);
   if (value.collection && !value.collection.isWeak) return collectionNodeOf(value.collection, fields, seen, runtime);
   return containerNode('object', [], fields);

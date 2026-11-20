@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 489 -- Resolves related type operators sharing generic parameters and type construction.
+// code-gauge-allow-file fileNcss 502 -- Resolves related type operators sharing generic parameters and type construction.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker, Mapper } from './checker';
@@ -254,7 +254,13 @@ export class TypeOperators {
   mappedType(info: MappedInfo, withSource?: WithMappedSource): Type {
     const { source } = info;
     if (withSource && source?.kind === 'union') return unionOf(source.types.map(withSource));
-    if (withSource && source && (source.kind === 'intrinsic' || source.kind === 'literal') && !isAnyLike(source))
+    if (
+      withSource &&
+      source &&
+      (source.kind === 'intrinsic' || source.kind === 'literal') &&
+      !isAnyLike(source) &&
+      !isIntrinsic(source, 'unknown')
+    )
       return source;
     if (this.c.relations.isGeneric(info.constraint)) {
       return {
@@ -423,16 +429,9 @@ export class TypeOperators {
   }
 
   /** `object[index]`, reporting a missing property at `node` when given. */
-  // code-gauge-allow functionCognitiveComplexity 16 -- Keeps validation and deferral in the order of TypeScript indexed access.
   indexedAccess(object: Type, index: Type, node?: TreeNode): Type {
-    // A mapped type indexed by its own keys, `{ [P in K]: X }[K]`, is its template for those keys.
-    if (object.kind === 'object' && object.objectKind === 'mapped' && object.mapped && !object.mapped.nameType) {
-      if (this.isMappedKey(index, object.mapped.constraint)) return this.substituteIndexedMapped(object.mapped, index);
-      if (node) {
-        this.c.error(node, `型 '${this.c.print(index)}' は型 '${this.c.print(object)}' のインデックスに使えません。`);
-        return errorType;
-      }
-    }
+    const mapped = this.indexedMappedAccess(object, index, node);
+    if (mapped !== undefined) return mapped;
     const variadic = variadicTupleIndex(object, index);
     if (variadic && node && !this.isVariadicTupleKey(object, index)) {
       this.c.error(node, `型 '${this.c.print(index)}' は型 '${this.c.print(object)}' のインデックスに使えません。`);
@@ -450,6 +449,22 @@ export class TypeOperators {
     if (node)
       this.c.error(node, `型 '${this.c.print(index)}' は型 '${this.c.print(object)}' のインデックスに使えません。`);
     return errorType;
+  }
+
+  private indexedMappedAccess(object: Type, index: Type, node: TreeNode | undefined): Type | undefined {
+    const mapped = object.kind === 'object' && object.objectKind === 'mapped' ? object.mapped : undefined;
+    if (!mapped || mapped.nameType) return undefined;
+    if (!this.isMappedKey(index, mapped.constraint)) {
+      if (!node) return undefined;
+      this.c.error(node, `型 '${this.c.print(index)}' は型 '${this.c.print(object)}' のインデックスに使えません。`);
+      return errorType;
+    }
+    if (
+      node?.type === 'subscript_expression' ||
+      (!mapped.source && !this.c.inference.mentions(mapped.template, mapped.typeParameter))
+    )
+      return this.substituteIndexedMapped(mapped, index);
+    return this.deferredAccess(object, index);
   }
 
   private isVariadicTupleKey(object: ObjectType, index: Type): boolean {
@@ -511,13 +526,20 @@ export class TypeOperators {
     );
   }
 
+  mappedIndexConstraint({ objectType, indexType }: IndexedAccessType): Type | undefined {
+    const mapped = objectType.kind === 'object' ? objectType.mapped : undefined;
+    if (!mapped || mapped.nameType) return undefined;
+    const keys = typeMembers(indexType);
+    return unionOf(keys.map((key) => this.substituteIndexedMapped(mapped, key)));
+  }
+
   /**
    * As TypeScript's `substituteIndexedMappedType`, a mapped type's template for `index`, with `undefined` when the
    * mapped type, or the one whose modifiers it keeps, adds `?`.
    */
   private substituteIndexedMapped(mapped: MappedInfo, index: Type): Type {
     const type = this.c.instantiate(mapped.template, new Map([[mapped.typeParameter.id, index]]));
-    const optional = mapped.optionalModifier === '+' || mappedOptionality(mapped.source) > 0;
+    const optional = mapped.optionalModifier ? mapped.optionalModifier === '+' : mappedOptionality(mapped.source) > 0;
     return optional ? unionOf([type, undefinedType]) : type;
   }
 

@@ -19,6 +19,11 @@ const stepsOf = (language: 'java' | 'javascript' | 'typescript', program: string
 
 const valueNode = (value: string | number): DisplayNode => ({ kind: 'value', value });
 
+const labeledBuiltin = (value: DisplayNode): DisplayNode => ({
+  kind: 'object',
+  entries: { '[[PrimitiveValue]]': value, label: valueNode('done') },
+});
+
 test.each([
   {
     name: 'loops, conditions, and a switch that falls through',
@@ -169,6 +174,28 @@ console.log(reads);
         label: valueNode('done'),
       },
     },
+  });
+});
+
+test('records boxed primitive and RegExp subclass fields beside their values', () => {
+  const source = `
+class Count extends Number { label = "start"; }
+class Word extends String { label = "start"; }
+class Pattern extends RegExp { label = "start"; }
+const count = new Count(3);
+const text = new Word("ab");
+const pattern = new Pattern("a+", "g");
+const plain = new Number(4);
+count.label = "done";
+text.label = "done";
+pattern.label = "done";
+`;
+  const last = traceProgram('typescript', source, source).traceItems.at(-1);
+  expect(last?.vars).toEqual({ plain: 4 });
+  expect(last?.referenceVars).toEqual({
+    count: labeledBuiltin(valueNode(3)),
+    text: labeledBuiltin(valueNode('ab')),
+    pattern: labeledBuiltin({ kind: 'value', value: '/a+/g', verbatim: true }),
   });
 });
 
