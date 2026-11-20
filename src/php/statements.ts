@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 854 -- Runs PHP statements iteratively on a heap block stack with shared loop/try/foreach helpers.
+// code-gauge-allow-file fileNcss 856 -- Runs PHP statements iteratively on a heap block stack with shared loop/try/foreach helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { CompileError } from '../interpreter/diagnostics';
 import type { ArrayCursor } from './arrayOrder';
@@ -898,6 +898,8 @@ function foreachReferenceSubject(statement: Extract<Stmt, { k: 'foreach' }>): Co
   if (!(initial instanceof PhpArray || (initial instanceof PhpObject && !initial.isResource)))
     return warnForeachSubject(statement, initial);
   const reference = place instanceof ValuePlace ? Ref.temporary(initial) : place.ref();
+  // PHP's FE_RESET_RW makes the subject a reference, which it stays after the loop.
+  if (!(place instanceof ValuePlace)) reference.isRef = true;
   runtime.holdTemporaryReference(reference);
   return withForeachSubject(reference, () => foreachReferenceLoop(statement, initial, reference));
 }

@@ -5232,6 +5232,18 @@ try { range(0.1, null, 1); } catch (ValueError $e) { echo explode("\\n", $e->get
   });
 });
 
+test('a by-reference foreach subject stays a reference for shutdown destruction', () => {
+  const prelude =
+    'class D { public $x = 1; function __construct(public $n) {} function __destruct() { echo "d", $this->n, ";"; } } $a = new D(1);';
+  expect(run(`<?php ${prelude} $b = new D(2); foreach ($b as &$v) {} unset($v); echo "end;";`)).toMatchObject({
+    kind: 'executed',
+    stdout: 'end;d1;d2;',
+  });
+  expect(run(`<?php ${prelude} $c = [1]; foreach ($c as &$r) {} unset($r); $c = new D(2); echo "end;";`)).toMatchObject(
+    { kind: 'executed', stdout: 'end;d1;d2;' }
+  );
+});
+
 test('frees a return value interrupted by a cleanup exception before enclosing handlers run', () => {
   expect(
     run(`<?php
