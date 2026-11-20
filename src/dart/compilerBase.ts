@@ -1,13 +1,12 @@
 // code-gauge-allow-file fileNcss 496 -- Type and diagnostic resolution share the compiler environment.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ClassDeclaration, Span, TypeAliasDeclaration, TypeParameter, TypeSyntax } from './ast';
-import { type ClassInfo, type Member, scopedMemberName } from './classes';
+import { type ClassInfo, type Member, memberTypeIn, scopedMemberName } from './classes';
 import type { ExtensionInfo, GlobalVariable, LibraryEnv, TypeAlias } from './environment';
 import type { Frame, FunctionInfo, Runtime, TypeEnv } from './runtime';
 import { Flow, type FunctionContext, LocalVar } from './scope';
 import { inferExtensionReceiver, inferTearOffTypes } from './typeInference';
 import {
-  asInstanceOf,
   boundOf,
   coreTypes,
   type DartType,
@@ -208,10 +207,14 @@ export abstract class CompilerBase {
   private includeFunctionTypeAnnotations = true;
 
   protected resolveTypeWithoutAnnotations(syntax: TypeSyntax): DartType {
+    return this.withoutFunctionTypeAnnotations(() => this.resolveType(syntax));
+  }
+
+  protected withoutFunctionTypeAnnotations<T>(run: () => T): T {
     const saved = this.includeFunctionTypeAnnotations;
     this.includeFunctionTypeAnnotations = false;
     try {
-      return this.resolveType(syntax);
+      return run();
     } finally {
       this.includeFunctionTypeAnnotations = saved;
     }
@@ -248,7 +251,7 @@ export abstract class CompilerBase {
   protected resolveTypeParamBounds(params: TypeParam[], syntax: TypeParameter[]): void {
     this.withTypeParams(params, () => {
       for (const [index, parameter] of syntax.entries()) {
-        if (parameter.bound) params[index].bound = this.resolveTypeWithoutAnnotations(parameter.bound);
+        if (parameter.bound) params[index].bound = this.resolveType(parameter.bound);
       }
     });
     this.checkBoundCycles(params, syntax);
@@ -377,10 +380,12 @@ export abstract class CompilerBase {
     const declaration = this.aliasWork.get(alias);
     if (!declaration) this.error(span, `型の別名 ${alias.name} が、自分自身を使って定義されています。`);
     this.aliasWork.delete(alias);
-    alias.aliased = this.withIsolatedTypes(() => {
-      alias.typeParams.push(...this.declareTypeParams(declaration.typeParameters));
-      return this.withTypeParams(alias.typeParams, () => this.resolveTypeWithoutAnnotations(declaration.aliased));
-    });
+    alias.aliased = this.withIsolatedTypes(() =>
+      this.withoutFunctionTypeAnnotations(() => {
+        alias.typeParams.push(...this.declareTypeParams(declaration.typeParameters));
+        return this.withTypeParams(alias.typeParams, () => this.resolveType(declaration.aliased));
+      })
+    );
     return alias.aliased;
   }
 
@@ -388,7 +393,9 @@ export abstract class CompilerBase {
     const declaration = this.pendingClassBounds.get(cls);
     if (!declaration) return;
     this.pendingClassBounds.delete(cls);
-    this.withIsolatedTypes(() => this.resolveTypeParamBounds(cls.typeParams, declaration.typeParameters));
+    this.withIsolatedTypes(() =>
+      this.withoutFunctionTypeAnnotations(() => this.resolveTypeParamBounds(cls.typeParams, declaration.typeParameters))
+    );
   }
 
   protected withIsolatedTypes<T>(run: () => T): T {
@@ -504,18 +511,11 @@ export abstract class CompilerBase {
     if (member.kind === 'method') member = type.cls.covarianceFor(member)?.obligation ?? member;
     // An extension type's members run on its representation, which has no class to dispatch on.
     const extension = member.owner.kind === 'extensionType' ? { ext: undefined, typeArgs: [] } : undefined;
-    return { member, type: this.memberTypeIn(type, member), extension };
+    return { member, type: memberTypeIn(type, member), extension };
   }
 
   protected runtimeMemberName(name: string): string {
     return scopedMemberName(name, this.library.name);
-  }
-
-  protected memberTypeIn(type: InterfaceType, member: Member): DartType {
-    if (member.owner.typeParams.length === 0) return member.type;
-    const owner = asInstanceOf(type, member.owner);
-    const map = new Map(member.owner.typeParams.map((param, index) => [param, owner?.args[index] ?? DYNAMIC]));
-    return substitute(member.type, map);
   }
 
   /** Finds a member for a receiver, honoring an explicit extension application (`E(x).m`). */

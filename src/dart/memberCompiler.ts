@@ -6,6 +6,7 @@ import { EMPTY_ENV } from './constructorCompiler';
 import type { ExtensionInfo } from './environment';
 import { MetadataCompiler } from './metadataCompiler';
 import { Frame, type Runtime, type TypeEnv } from './runtime';
+import { inheritsCovariance } from './statementCompiler';
 import { asInstanceOf, type DartType, DYNAMIC, type FunctionType, functionType, type TypeParam, VOID } from './types';
 import type { Callable, Value } from './values';
 
@@ -162,6 +163,9 @@ export abstract class MemberCompiler extends MetadataCompiler {
       const typeEnvFor = this.methodTypeEnv(declaredClass, ownerParams, typeParams, declaration.isStatic);
       if (member.forwarding)
         member.forwarding.bind = bindForwardedArguments(compiled, declaration.parameters, typeEnvFor);
+      if (member.kind === 'method' && declaredClass && !member.isStatic) {
+        markCovariantParameters(declaredClass, member, declaration.parameters);
+      }
       if (body && member.kind !== 'field') {
         member.impl = (runtime, receiver, args, typeArgs, callRow) =>
           this.runFunction(compiled, runtime, receiver, [], typeEnvFor(runtime, receiver, typeArgs), args, callRow);
@@ -205,6 +209,24 @@ export abstract class MemberCompiler extends MetadataCompiler {
     const instance = runtimeType.kind === 'interface' ? asInstanceOf(runtimeType, cls) : undefined;
     return new Map(cls.typeParams.map((param, index) => [param, instance?.args[index] ?? DYNAMIC]));
   }
+}
+
+function markCovariantParameters(
+  cls: ClassInfo,
+  member: Extract<Member, { kind: 'method' }>,
+  params: FormalParameters
+): void {
+  const positional = new Set<number>();
+  for (const [index, parameter] of params.positional.entries()) {
+    if (parameter.isCovariant || inheritsCovariance(cls, member.name, parameter.name, index)) positional.add(index);
+  }
+  const named = new Set<string>();
+  for (const parameter of params.named) {
+    if (parameter.isCovariant || inheritsCovariance(cls, member.name, parameter.name, undefined))
+      named.add(parameter.name);
+  }
+  if (positional.size > 0) member.covariantPositional = positional;
+  if (named.size > 0) member.covariantNamed = named;
 }
 
 function bindForwardedArguments(

@@ -2,6 +2,7 @@ import type { ClassDeclaration, ClassKind, ClassModifiers } from './ast';
 import type { Compiled } from './compilerBase';
 import type { Runtime } from './runtime';
 import {
+  asInstanceOf,
   coreTypes,
   type DartType,
   DYNAMIC,
@@ -9,6 +10,7 @@ import {
   type InterfaceType,
   interfaceType,
   isSubtype,
+  sameType,
   substitute,
   type TypeParam,
   typeParamType,
@@ -51,6 +53,7 @@ export interface MethodMember extends MemberBase {
   /** For a library method a native implements, its positional parameters' names, which a dynamic call's checks name. */
   nativeParameterNames?: readonly string[];
   covariantPositional?: ReadonlySet<number>;
+  covariantNamed?: ReadonlySet<string>;
 }
 
 export interface CovariantContract {
@@ -262,12 +265,14 @@ export class ClassInfo {
 
   forwardingDeclaration(name: string, setter: boolean): Member | undefined {
     let forwarded: Member | undefined;
-    for (const cls of this.superclassChain()) {
+    for (const cls of [...this.superclassChain()].toReversed()) {
       if (cls.isAbstract) continue;
       const handler = cls.implementation('noSuchMethod');
       if (handler?.kind !== 'method' || handler.owner === coreTypes.object) continue;
       const member = cls.interfaceMember(name, setter);
-      if (member && !member.isStatic) forwarded = member;
+      if (!member || member.isStatic || member === forwarded) continue;
+      const type = cls.thisType;
+      if (!forwarded || !sameType(memberTypeIn(type, forwarded), memberTypeIn(type, member))) forwarded = member;
     }
     return forwarded;
   }
@@ -336,4 +341,11 @@ export class ClassInfo {
     this.supertypePaths = new WeakMap();
     this.cachedDepth = undefined;
   }
+}
+
+export function memberTypeIn(type: InterfaceType, member: Member): DartType {
+  if (member.owner.typeParams.length === 0) return member.type;
+  const owner = asInstanceOf(type, member.owner);
+  const env = new Map(member.owner.typeParams.map((param, index) => [param, owner?.args[index] ?? DYNAMIC]));
+  return substitute(member.type, env);
 }

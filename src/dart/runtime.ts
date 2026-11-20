@@ -397,7 +397,7 @@ export class Runtime implements TracedRuntime<Frame> {
     const checked: MethodMember = {
       ...obligation,
       isAbstract: false,
-      covariantPositional: positions,
+      covariantPositional: new Set([...(obligation.covariantPositional ?? []), ...positions]),
       impl: (runtime, receiver, args, types, row) => {
         const bound = obligation.forwarding?.bind?.(runtime, receiver, args, types) ?? args;
         const signature = instantiateFunction(runtime.memberTypeFor(receiver, member), types);
@@ -798,7 +798,7 @@ function appendCallArguments(runtime: Runtime, output: BoundedStringParts, args:
  */
 function covariantErased(member: Member & { kind: 'method' }, type: FunctionType): FunctionType {
   const params = new Set(member.owner.typeParams);
-  if (params.size === 0 && !member.covariantPositional?.size) return type;
+  if (params.size === 0 && !member.covariantPositional?.size && !member.covariantNamed?.size) return type;
   const objectQ = interfaceType(coreTypes.object, [], true);
   const erase = (declared: DartType | undefined, actual: DartType): DartType =>
     declared && mentionsCovariantly(declared, params, true) ? objectQ : actual;
@@ -809,7 +809,9 @@ function covariantErased(member: Member & { kind: 'method' }, type: FunctionType
     ),
     named: type.named.map((named) => ({
       ...named,
-      type: erase(member.type.named.find((other) => other.name === named.name)?.type, named.type),
+      type: member.covariantNamed?.has(named.name)
+        ? objectQ
+        : erase(member.type.named.find((other) => other.name === named.name)?.type, named.type),
     })),
   };
 }

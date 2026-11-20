@@ -20,6 +20,7 @@ import {
   type ConstructorInfo,
   type FieldMember,
   type Member,
+  memberTypeIn,
   type MethodMember,
   sourceMemberName,
 } from './classes';
@@ -1045,7 +1046,7 @@ export class Compiler extends MemberCompiler {
   // code-gauge-allow functionCognitiveComplexity 30 -- Methods, accessors, and operators, static or not.
   // code-gauge-allow functionNcss 33 -- Methods, accessors, and operators, static or not.
   private declareMethod(cls: ClassInfo, declaration: MethodDeclaration, owner: ClassInfo | ExtensionInfo = cls): void {
-    const typeParams = this.declareTypeParams(declaration.typeParameters);
+    const typeParams = this.withoutFunctionTypeAnnotations(() => this.declareTypeParams(declaration.typeParameters));
     const isExtension = !(owner instanceof ClassInfo);
     const { type, positionalTypes, namedTypes } = this.withTypeParams(typeParams, () =>
       this.signatureOf(declaration.parameters, declaration.returnType, typeParams, {
@@ -1055,8 +1056,8 @@ export class Compiler extends MemberCompiler {
     );
     const { name, methodKind } = declaration;
     const isAbstract = !declaration.body && !declaration.isExternal;
-    if (isAbstract && !isExtension && !cls.isAbstract && cls.kind !== 'enum' && !this.isLibraryCode) {
-      this.error(declaration, `${cls.name} は抽象クラスではないので、本体のないメンバー ${name} は書けません。`);
+    if (isAbstract && (declaration.isStatic || isExtension || cls.kind === 'extensionType') && !this.isLibraryCode) {
+      this.error(declaration, `${cls.name}.${name} に本体がありません。`);
     }
     if (methodKind === 'operator' && declaration.isStatic) this.error(declaration, '演算子は static にできません。');
     this.checkOperatorArity(declaration);
@@ -1280,7 +1281,6 @@ export class Compiler extends MemberCompiler {
   }
 
   private checkImplemented(cls: ClassInfo, declaration: ClassDeclaration): void {
-    const hasNoSuchMethod = cls.implementation('noSuchMethod')?.owner !== coreTypes.object;
     const obligations = cls.isAbstract ? cls.interfaces : this.implementationObligations(cls);
     for (const name of cls.interfaceMemberNames()) {
       const isSetter = name.endsWith('=') && name !== '==' && name !== '[]=';
@@ -1288,7 +1288,7 @@ export class Compiler extends MemberCompiler {
       const implementation = isSetter ? cls.setterImplementation(memberName) : cls.implementation(memberName);
       if (implementation && obligations.length > 0)
         this.checkOverride(cls, implementation, isSetter, declaration, obligations);
-      if (implementation || cls.isAbstract || hasNoSuchMethod) continue;
+      if (implementation || cls.isAbstract || cls.forwardingDeclaration(memberName, isSetter)) continue;
       const declared = cls.interfaceMember(memberName, isSetter);
       if (declared)
         this.error(
@@ -1318,7 +1318,7 @@ export class Compiler extends MemberCompiler {
   ): void {
     if (member.isStatic) return;
     const row = span?.row ?? member.row ?? 0;
-    const own = this.memberTypeIn(cls.thisType, member);
+    const own = memberTypeIn(cls.thisType, member);
     const library = (member.owner.mixinOf ?? member.owner).library;
     for (const supertype of targets) {
       const inherited = this.interfaceMember(supertype, member.name, setter, library);
@@ -1431,7 +1431,9 @@ export class Compiler extends MemberCompiler {
 
   // code-gauge-allow functionCognitiveComplexity 23 -- Each branch is one of the cases Dart distinguishes for this construct.
   private declareExtension(ext: ExtensionInfo, declaration: ExtensionDeclaration): void {
-    ext.typeParams.push(...this.declareTypeParams(declaration.typeParameters));
+    ext.typeParams.push(
+      ...this.withoutFunctionTypeAnnotations(() => this.declareTypeParams(declaration.typeParameters))
+    );
     this.withTypeParams(ext.typeParams, () => {
       ext.onType = this.resolveTypeWithoutAnnotations(declaration.onType);
       const holder = new ClassInfo(ext.name ?? 'extension', 'class', this.library.name);
@@ -1463,7 +1465,7 @@ export class Compiler extends MemberCompiler {
             : entry.setter
           : undefined;
     if (!fn) return;
-    const typeParams = this.declareTypeParams(declaration.typeParameters);
+    const typeParams = this.withoutFunctionTypeAnnotations(() => this.declareTypeParams(declaration.typeParameters));
     const { type } = this.withTypeParams(typeParams, () =>
       this.signatureOf(declaration.parameters, declaration.returnType, typeParams)
     );

@@ -2832,6 +2832,33 @@ void main() {
   }
 });
 
+test('nested function bounds inherit the metadata checks of their declaration', () => {
+  const ignored = `typedef F<T extends void Function<@Ignored() U>()> = T;
+class Box<T extends void Function<@Ignored() U>()> {}
+void top<T extends void Function<@Ignored() U>()>() {}`;
+  const bound = 'void Function<@label U>()';
+  const program = `${ignored}
+void main() {
+  const label = 1;
+  void Function<T extends ${bound}>()? f() => null;
+  void local<T extends ${bound}>() {}
+  final closure = <T extends ${bound}>() {};
+  local();
+  closure();
+  top();
+  print(f());
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'null\n' });
+  for (const declaration of [
+    'void Function<T extends void Function<@Missing() U>()>()? f() => null;',
+    'void local<T extends void Function<@Missing() U>()>() {}',
+    'final closure = <T extends void Function<@Missing() U>()>() {};',
+    `final label = 1; void Function<T extends ${bound}>()? f() => null;`,
+  ]) {
+    expect(executeProgram('dart', `${ignored} void main() { ${declaration} }`)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
 test('a subclass retains inherited noSuchMethod defaults through abstract redeclarations', () => {
   const program = `abstract class Contract {
   void method([int n = 1]);
@@ -2863,6 +2890,67 @@ void main() {
     kind: 'executed',
     stdout: '[[1], {}]\n[[], {Symbol("n"): 1}]\n[[1], {}]\n[[], {Symbol("n"): 1}]\n[[1], {}]\n[[], {Symbol("n"): 1}]\n',
   });
+});
+
+test('noSuchMethod forwarders use changed signatures at the concrete dispatch class', () => {
+  const program = `abstract class Contract {
+  num get value;
+  num result([int n = 1]);
+  void take(covariant num n);
+  void named({covariant num n = 1});
+  set value(covariant num n);
+}
+class Parent implements Contract {
+  dynamic noSuchMethod(Invocation invocation) {
+    print([invocation.positionalArguments, invocation.namedArguments]);
+    return 1.5;
+  }
+}
+abstract class Middle extends Parent {
+  int get value;
+  int result([int n = 2]);
+  void take(covariant int n);
+  void named({covariant int n = 2, int extra = 3});
+  set value(covariant int n);
+}
+class Child extends Middle {
+  num oldResult() => super.result();
+}
+void main() {
+  final child = Child();
+  print(child.oldResult());
+  try { print(child.result()); } catch (error) { print(error.runtimeType); }
+  try { print(child.value); } catch (error) { print(error.runtimeType); }
+  Contract asContract = child;
+  final take = asContract.take;
+  print(take.runtimeType);
+  try { take(1.5); } catch (error) { print(error.runtimeType); }
+  dynamic named = child.named;
+  print(named.runtimeType);
+  try { named(n: 1.5); } catch (error) { print(error.runtimeType); }
+  named();
+  dynamic target = child;
+  try { target.value = 1.5; } catch (error) { print(error.runtimeType); }
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[[1], {}]\n1.5\n[[2], {}]\n_TypeError\n[[], {}]\n_TypeError\n(Object?) => void\n_TypeError\n({Object? n, int extra}) => void\n_TypeError\n[[], {Symbol("n"): 2, Symbol("extra"): 3}]\n_TypeError\n',
+  });
+});
+
+test('concrete classes may declare bodyless members when noSuchMethod implements them', () => {
+  const program = `class Parent {
+  int own();
+  dynamic noSuchMethod(Invocation invocation) => 1;
+}
+class Child extends Parent {
+  int added();
+}
+void main() { print([Parent().own(), Child().own(), Child().added()]); }`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[1, 1, 1]\n' });
+  const missingHandler = program.replace('dynamic noSuchMethod(Invocation invocation) => 1;', '');
+  expect(executeProgram('dart', missingHandler)).toMatchObject({ kind: 'compileError' });
 });
 
 test('a static member only sees its own type parameters and local variables', () => {
