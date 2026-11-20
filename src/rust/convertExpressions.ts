@@ -3,7 +3,13 @@ import type { Node } from '@willbooster/web-tree-sitter';
 import type { BinaryOp, Block, Condition, Expr, Item, MatchArm, Pattern, Span, Stmt, TypeAst } from './ast';
 import { MacroConverter } from './convertMacros';
 import { isComment, syntaxError, unavailable } from './convertSyntax';
-import { parseCharLiteral, parseFloatLiteral, parseIntegerLiteral, parseStringLiteral } from './literals';
+import {
+  parseByteLiteral,
+  parseCharLiteral,
+  parseFloatLiteral,
+  parseIntegerLiteral,
+  parseStringLiteral,
+} from './literals';
 
 const UNSUPPORTED_EXPRESSIONS: Record<string, string> = {
   raw_string_literal: '生の文字列（r"..."）',
@@ -161,10 +167,9 @@ export abstract class ExpressionConverter extends MacroConverter {
 
   private charLiteral(node: Node, span: Span): Expr {
     if (node.text.startsWith('b')) {
-      const value = parseCharLiteral(node.text.slice(1));
-      if (value === undefined || value.codePointAt(0)! > 0x7f)
-        syntaxError(span, `バイトのリテラル（${node.text}）に誤りがあります。`);
-      return { kind: 'int', value: BigInt(value.codePointAt(0)!), suffix: 'u8', span };
+      const value = parseByteLiteral(node.text);
+      if (value === undefined) syntaxError(span, `バイトのリテラル（${node.text}）に誤りがあります。`);
+      return { kind: 'int', value, suffix: 'u8', span };
     }
     const value = parseCharLiteral(node.text);
     if (value === undefined) syntaxError(span, `文字の書き方（${node.text}）に誤りがあります。`);

@@ -55,28 +55,35 @@ export function parseFloatLiteral(
   return { value: suffix === 'f32' ? f32 : Number(digits), f32, suffix };
 }
 
-/** The character a literal such as `'a'`, `'\n'`, or `'\u{3042}'` denotes. */
+type LiteralKind = 'byte' | 'char' | 'string';
+
 export function parseCharLiteral(text: string): string | undefined {
   const body = text.slice(1, -1);
-  const chars = unescape(body, true);
+  const chars = unescape(body, 'char');
   if (chars === undefined || [...chars].length !== 1) return undefined;
   return chars;
 }
 
-export function parseStringLiteral(text: string): string | undefined {
-  return unescape(text.slice(1, -1), false);
+export function parseByteLiteral(text: string): bigint | undefined {
+  const chars = unescape(text.slice(2, -1), 'byte');
+  return chars?.length === 1 ? BigInt(chars.codePointAt(0)!) : undefined;
 }
 
-function unescape(body: string, isChar: boolean): string | undefined {
+export function parseStringLiteral(text: string): string | undefined {
+  return unescape(text.slice(1, -1), 'string');
+}
+
+function unescape(body: string, kind: LiteralKind): string | undefined {
   let result = '';
   for (let index = 0; index < body.length; index++) {
     const char = body[index];
     if (char === '\r' && body[index + 1] === '\n') continue;
     if (char !== '\\') {
+      if (kind === 'byte' && (char.codePointAt(0)! > 0x7f || "\n\r\t'".includes(char))) return undefined;
       result += char;
       continue;
     }
-    const escape = readEscape(body, index + 1, isChar);
+    const escape = readEscape(body, index + 1, kind);
     if (!escape) return undefined;
     result += escape.text;
     index = escape.last;
@@ -87,25 +94,23 @@ function unescape(body: string, isChar: boolean): string | undefined {
 const SIMPLE_ESCAPES: Record<string, string> = { n: '\n', r: '\r', t: '\t', '\\': '\\', "'": "'", '"': '"', '0': '\0' };
 
 /** The text of the escape whose letter is at `index`, and the index of its last character. */
-function readEscape(body: string, index: number, isChar: boolean): { text: string; last: number } | undefined {
+function readEscape(body: string, index: number, kind: LiteralKind): { text: string; last: number } | undefined {
   const next = body[index];
   if (Object.hasOwn(SIMPLE_ESCAPES, next)) return { text: SIMPLE_ESCAPES[next], last: index };
   switch (next) {
     case 'x': {
       const hex = body.slice(index + 1, index + 3);
-      if (!/^[0-7][\da-f]$/i.test(hex)) return undefined;
-      return { text: String.fromCodePoint(Number.parseInt(hex, 16)), last: index + 2 };
+      if (!/^[\da-f]{2}$/i.test(hex)) return undefined;
+      const code = Number.parseInt(hex, 16);
+      if (kind !== 'byte' && code > 0x7f) return undefined;
+      return { text: String.fromCodePoint(code), last: index + 2 };
     }
     case 'u': {
-      const match = /^\{([\da-f_]{1,8})\}/i.exec(body.slice(index + 1));
-      if (!match) return undefined;
-      const code = Number.parseInt(match[1].replaceAll('_', ''), 16);
-      if (code > 0x10_ff_ff || (code >= 0xd8_00 && code <= 0xdf_ff)) return undefined;
-      return { text: String.fromCodePoint(code), last: index + match[0].length };
+      return kind === 'byte' ? undefined : readUnicodeEscape(body, index);
     }
     case '\n':
     case '\r': {
-      if (isChar) return undefined;
+      if (kind !== 'string') return undefined;
       let last = index;
       while (last + 1 < body.length && /\s/.test(body[last + 1])) last++;
       return { text: '', last };
@@ -114,4 +119,13 @@ function readEscape(body: string, index: number, isChar: boolean): { text: strin
       return undefined;
     }
   }
+}
+
+function readUnicodeEscape(body: string, index: number): { text: string; last: number } | undefined {
+  const match = /^\{([\da-f][\da-f_]*)\}/i.exec(body.slice(index + 1));
+  if (!match) return undefined;
+  const hex = match[1].replaceAll('_', '');
+  const code = Number.parseInt(hex, 16);
+  if (hex.length > 6 || code > 0x10_ff_ff || (code >= 0xd8_00 && code <= 0xdf_ff)) return undefined;
+  return { text: String.fromCodePoint(code), last: index + match[0].length };
 }

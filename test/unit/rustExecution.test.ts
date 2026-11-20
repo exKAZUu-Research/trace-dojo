@@ -389,6 +389,21 @@ fn main() {
   });
 });
 
+test('Rust byte literals accept the full hexadecimal byte range', () => {
+  const program = String.raw`fn main() {
+    println!("{} {} {} {}", b'a', b'\n', b'\x80', b'\xFF');
+    match b'\xFF' {
+        b'\xFF' => println!("matched"),
+        _ => (),
+    }
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '97 10 128 255\nmatched\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {
@@ -421,6 +436,9 @@ test.each([
   ['a non-exhaustive match', '    let n = 3;\n    match n { 1 => {} }', 3],
   ['arithmetic that always overflows', '    let x: u32 = 3;\n    let y = x - 5;', 3],
   ['arithmetic on an associated constant that overflows', '    let x = i32::MAX + 1;', 2],
+  ['a Unicode escape in a byte literal', String.raw`    let byte = b'\u{41}';`, 2],
+  ['a non-ASCII byte literal', "    let byte = b'é';", 2],
+  ['an out-of-range hex escape in a character literal', String.raw`    let char = '\xFF';`, 2],
   [
     'index made out of bounds by compound assignment',
     '    let a = [1, 2, 3];\n    let mut i = 2;\n    i += 1;\n    println!("{}", a[i]);',
