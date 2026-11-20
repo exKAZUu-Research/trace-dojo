@@ -438,6 +438,10 @@ test('text outside the PHP tags is printed as it is', () => {
   expect(run('Title\n<?php echo 1 + 1 ?>\nmiddle <?= "x" ?>\nend\n')).toMatchObject({
     stdout: 'Title\n2middle xend\n',
   });
+  expect(run('<?xml version="1.0"?>\n<?php echo 1; ?><?xml?><? echo 2; ?><?php?><?phpx\n<?PHP echo 3;')).toMatchObject({
+    kind: 'executed',
+    stdout: '<?xml version="1.0"?>\n1<?xml?><? echo 2; ?><?php?><?phpx\n3',
+  });
 });
 
 test('turtle methods take their Japanese and English names', () => {
