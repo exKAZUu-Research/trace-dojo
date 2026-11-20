@@ -1,8 +1,9 @@
-import { minimumArguments } from './callArity';
+import { minimumArguments, omitTrailingVoid, parameterMinimum, restTupleElements } from './callArity';
 import type { Checker, Mapper } from './checker';
 import {
   anyType,
   intersectionOf,
+  literalType,
   type Parameter,
   type Signature,
   type Type,
@@ -117,7 +118,8 @@ export class UnionSignatures {
     const instantiated = mapper.size > 0 ? this.c.instantiateSignature(source, mapper) : source;
     const related = (a: Type, b: Type): boolean => this.related(a, b, match.partial);
     if (instantiated.thisType && target.thisType && !related(instantiated.thisType, target.thisType)) return false;
-    for (let index = 0; index < target.parameters.length; index++) {
+    const count = parameterCount(target);
+    for (let index = 0; index < count; index++) {
       if (!related(this.typeAt(target, index) ?? anyType, this.typeAt(instantiated, index) ?? anyType)) return false;
     }
     return match.ignoreReturnTypes || related(instantiated.returnType(), target.returnType());
@@ -126,7 +128,7 @@ export class UnionSignatures {
   private hasMatchingArity(source: Signature, target: Signature, partial: boolean): boolean {
     const [sourceMinimum, targetMinimum] = [minimumArguments(source), minimumArguments(target)];
     if (
-      source.parameters.length === target.parameters.length &&
+      parameterCount(source) === parameterCount(target) &&
       sourceMinimum === targetMinimum &&
       hasRest(source) === hasRest(target)
     )
@@ -216,25 +218,8 @@ export class UnionSignatures {
         ? this.typeParameterMapper(rightSignature.typeParameters, left.typeParameters)
         : undefined;
     const right = mapper ? this.c.instantiateSignature(rightSignature, mapper) : rightSignature;
-    const both = (index: number): Type =>
-      this.intersectParameters([this.typeAt(left, index) ?? unknownType, this.typeAt(right, index) ?? unknownType]);
-    const longest = left.parameters.length >= right.parameters.length ? left : right;
-    const eitherRest = hasRest(left) || hasRest(right);
-    const extraRest = eitherRest && !hasRest(longest);
-    const minimum = Math.max(minimumArguments(left), minimumArguments(right));
-    const parameters: Parameter[] = longest.parameters.map((parameter, index) => {
-      const isRest = eitherRest && !extraRest && index === longest.parameters.length - 1;
-      return {
-        ...parameter,
-        rest: isRest,
-        optional: !isRest && index >= minimum,
-        type: isRest ? this.c.arrayType(both(index)) : both(index),
-      };
-    });
-    if (extraRest) {
-      const index = longest.parameters.length;
-      parameters.push({ name: 'args', rest: true, optional: false, type: this.c.arrayType(both(index)) });
-    }
+    const parameters = this.combineParameters(left, right);
+    const declaredMinimum = Math.max(declaredMinimumArguments(left), declaredMinimumArguments(right));
     const thisTypes = [left.thisType, right.thisType].filter((type) => type !== undefined);
     return {
       typeParameters: left.typeParameters.length > 0 ? left.typeParameters : right.typeParameters,
@@ -242,8 +227,35 @@ export class UnionSignatures {
       parameters,
       thisType: thisTypes.length > 0 ? intersectionOf(thisTypes, this.c) : undefined,
       returnType: () => this.c.literals.subtypeReduced([left.returnType(), right.returnType()]),
-      minimumArguments: minimum,
+      declaredMinimumArguments: declaredMinimum,
+      minimumArguments: omitTrailingVoid(declaredMinimum, (index) => parameters[index]?.type),
     };
+  }
+
+  private combineParameters(left: Signature, right: Signature): Parameter[] {
+    const [longest, shorter] = parameterCount(left) >= parameterCount(right) ? [left, right] : [right, left];
+    const length = parameterCount(longest);
+    const eitherRest = hasRest(left) || hasRest(right);
+    const extraRest = eitherRest && !hasRest(longest);
+    const minimum = Math.max(minimumArguments(left), minimumArguments(right));
+    const parameters = Array.from({ length }, (_, index): Parameter => {
+      const type = this.intersectParameters([
+        this.typeAt(left, index) ?? unknownType,
+        this.typeAt(right, index) ?? unknownType,
+      ]);
+      const rest = eitherRest && !extraRest && index === length - 1;
+      return {
+        name: longest.parameters[index]?.name ?? `arg${index}`,
+        rest,
+        optional: !rest && index >= minimum,
+        type: rest ? this.c.arrayType(type) : type,
+      };
+    });
+    if (extraRest) {
+      const element = this.typeAt(shorter, length) ?? anyType;
+      parameters.push({ name: 'args', rest: true, optional: false, type: this.c.arrayType(element) });
+    }
+    return parameters;
   }
 
   /**
@@ -252,8 +264,15 @@ export class UnionSignatures {
    */
   private typeAt(signature: Signature, index: number): Type | undefined {
     const { parameters } = signature;
-    if (hasRest(signature) && index >= parameters.length - 1)
-      return this.c.restElementType((parameters.at(-1) as Parameter).type);
+    const last = parameters.at(-1);
+    if (last?.rest && index >= parameters.length - 1) {
+      const offset = index - parameters.length + 1;
+      const tuple = restTupleElements(signature);
+      if (!tuple) return this.c.restElementType(last.type);
+      if (offset < tuple.length || hasRest(signature))
+        return this.c.typeOperators.indexedAccess(last.type, literalType(offset));
+      return undefined;
+    }
     const parameter = parameters.at(index);
     return parameter?.optional ? unionOf([parameter.type, undefinedType]) : parameter?.type;
   }
@@ -269,5 +288,17 @@ export class UnionSignatures {
 }
 
 function hasRest(signature: Signature): boolean {
-  return signature.parameters.at(-1)?.rest === true;
+  if (!signature.parameters.at(-1)?.rest) return false;
+  return restTupleElements(signature)?.some((element) => element.rest) ?? true;
+}
+
+function parameterCount(signature: Signature): number {
+  const tuple = restTupleElements(signature);
+  if (!tuple) return signature.parameters.length;
+  const prefix = tuple.findIndex((element) => element.rest);
+  return signature.parameters.length + (prefix === -1 ? tuple.length - 1 : prefix);
+}
+
+function declaredMinimumArguments(signature: Signature): number {
+  return signature.declaredMinimumArguments ?? parameterMinimum(signature.parameters);
 }

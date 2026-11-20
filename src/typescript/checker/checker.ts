@@ -790,7 +790,7 @@ export class Checker {
     return {
       ...signature,
       typeParameters,
-      parameters: this.signatures.expandRestTuple(
+      ...this.signatures.expandRestTuple(
         signature.parameters.map((parameter) => {
           const instantiate = (): Type => this.instantiate(parameter.type, mapper);
           let instantiated: Type | undefined;

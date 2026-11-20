@@ -3,7 +3,16 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import type { Checker } from './checker';
 import type { State } from './flow';
 import { named } from './syntax';
-import { isAnyLike, isIntrinsic, type Signature, type TupleElement, type Type, undefinedType, unionOf } from './types';
+import {
+  isAnyLike,
+  isIntrinsic,
+  type Parameter,
+  type Signature,
+  type TupleElement,
+  type Type,
+  undefinedType,
+  unionOf,
+} from './types';
 
 interface ArgumentPosition {
   before: State;
@@ -136,16 +145,36 @@ export function tupleTypeAt(c: Checker, elements: TupleElement[], offset: number
 /** How many arguments a call must pass, as TypeScript's `getMinArgumentCount` counts them. */
 export function minimumArguments(signature: Signature): number {
   if (signature.minimumArguments !== undefined) return signature.minimumArguments;
-  let minimum = 0;
-  for (const [index, parameter] of signature.parameters.entries()) {
-    if (!parameter.optional && !parameter.rest && !acceptsVoid(parameter.type)) minimum = index + 1;
+  const { parameters } = signature;
+  const rest = restTupleElements(signature);
+  let required = parameterMinimum(parameters);
+  if (rest) {
+    const optional = rest.findIndex((element) => element.optional || element.rest);
+    const prefix = optional === -1 ? rest.length : optional;
+    if (prefix > 0) required = parameters.length - 1 + prefix;
   }
+  return omitTrailingVoid(required, (index) =>
+    rest && index >= parameters.length - 1 ? rest[index - parameters.length + 1]?.type : parameters[index]?.type
+  );
+}
+
+export function parameterMinimum(parameters: Parameter[]): number {
+  return parameters.findLastIndex((parameter) => !parameter.optional && !parameter.rest) + 1;
+}
+
+export function restTupleElements(signature: Signature): TupleElement[] | undefined {
+  const last = signature.parameters.at(-1);
+  return last?.rest && last.type.kind === 'object' ? last.type.tuple?.elements : undefined;
+}
+
+export function omitTrailingVoid(minimum: number, typeAt: (index: number) => Type | undefined): number {
+  while (minimum > 0 && acceptsVoid(typeAt(minimum - 1))) minimum--;
   return minimum;
 }
 
 /** Whether a parameter's type has `void` as itself or a union member, which lets callers omit it when it trails. */
-function acceptsVoid(type: Type): boolean {
-  return (type.kind === 'union' ? type.types : [type]).some((member) => isIntrinsic(member, 'void'));
+function acceptsVoid(type: Type | undefined): boolean {
+  return (type?.kind === 'union' ? type.types : [type]).some((member) => member && isIntrinsic(member, 'void'));
 }
 
 export function tupleArgumentContexts(

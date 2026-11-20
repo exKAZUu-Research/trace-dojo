@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 486 -- Keeps type data, cache keys, and canonical type constructors together.
+// code-gauge-allow-file fileNcss 487 -- Keeps type data, cache keys, and canonical type constructors together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { ExecutionBudget } from '../../interpreter/limits';
@@ -127,6 +127,8 @@ export interface Signature {
   isAbstract?: boolean;
   /** How many arguments a call needs when its parameters do not tell, as a union's signature whose rest covers some. */
   minimumArguments?: number;
+  /** The required count before expanding a rest tuple or checking whether trailing parameters accept void. */
+  declaredMinimumArguments?: number;
 }
 
 export interface IndexInfo {

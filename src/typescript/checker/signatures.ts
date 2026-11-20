@@ -2,6 +2,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { erasedStatementTypes } from '../erasedSyntax';
+import { parameterMinimum } from './callArity';
 import type { Checker } from './checker';
 import type { Scope, Sym } from './scopes';
 import {
@@ -76,7 +77,7 @@ export class Signatures {
     let returnType: Type | undefined;
     const signature: Signature = {
       typeParameters,
-      parameters: this.expandRestTuple(parameters),
+      ...this.expandRestTuple(parameters),
       thisType,
       predicate: returnNode ? this.predicateOf(node, returnNode, parameters) : undefined,
       declaration: node,
@@ -103,7 +104,7 @@ export class Signatures {
     const signature: Signature = {
       declaration: node,
       typeParameters: this.typeParametersOf(node),
-      parameters: this.expandRestTuple(withRequiredPrefix(parameters)),
+      ...this.expandRestTuple(withRequiredPrefix(parameters)),
       returnType: () =>
         this.c.functions.declaredReturnType(node) ??
         this.c.flow.probe(() =>
@@ -458,21 +459,24 @@ export class Signatures {
   }
 
   /** Parameters whose rest parameter of a tuple type, `...args: [string, number]`, becomes the parameters it lists. */
-  expandRestTuple(parameters: Parameter[]): Parameter[] {
+  expandRestTuple(parameters: Parameter[]): Pick<Signature, 'parameters' | 'declaredMinimumArguments'> {
     const last = parameters.at(-1);
-    if (!last?.rest || last.type.kind !== 'object' || last.type.objectKind !== 'tuple') return parameters;
+    if (!last?.rest || last.type.kind !== 'object' || last.type.objectKind !== 'tuple') return { parameters };
     const elements = last.type.tuple?.elements ?? [];
     // A tuple with elements after a rest one, as `[...T, number]`, stays one rest parameter, as TypeScript keeps it.
-    if (elements.slice(0, -1).some((element) => element.rest)) return parameters;
-    return [
-      ...parameters.slice(0, -1),
-      ...elements.map((element, index) => ({
-        name: element.name ?? `${last.name}_${index}`,
-        type: element.rest ? element.type : element.type,
-        optional: element.optional,
-        rest: element.rest,
-      })),
-    ];
+    if (elements.slice(0, -1).some((element) => element.rest)) return { parameters };
+    return {
+      declaredMinimumArguments: parameterMinimum(parameters),
+      parameters: [
+        ...parameters.slice(0, -1),
+        ...elements.map((element, index) => ({
+          name: element.name ?? `${last.name}_${index}`,
+          type: element.type,
+          optional: element.optional,
+          rest: element.rest,
+        })),
+      ],
+    };
   }
 
   pairedSetterType(node: TreeNode): Type | undefined {
@@ -767,7 +771,7 @@ export function declaredParameterType(parameter: Parameter | undefined): Type | 
 
 /** A caller passes `undefined` for a defaulted parameter before a required parameter. */
 function withRequiredPrefix(parameters: Parameter[]): Parameter[] {
-  const minArgumentCount = parameters.findLastIndex((parameter) => !parameter.optional && !parameter.rest) + 1;
+  const minArgumentCount = parameterMinimum(parameters);
   return parameters.map((parameter, index) => {
     if (index >= minArgumentCount || !parameter.optional) return parameter;
     const required: Parameter = {
