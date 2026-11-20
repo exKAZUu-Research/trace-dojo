@@ -641,6 +641,57 @@ int main() {
   expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
 });
 
+test('honors hinted insertion and range erase in unordered containers', () => {
+  const program = `#include <iostream>
+#include <unordered_map>
+#include <unordered_set>
+int main() {
+  std::unordered_set<int> keys{1, 2, 3};
+  auto first = keys.begin();
+  auto last = first;
+  ++last;
+  int removed = *first, kept = *last;
+  auto next = keys.erase(first, last);
+  std::cout << (next == last) << ':' << keys.count(removed) << ':' << (keys.erase(last, last) == last) << ' ';
+  auto inserted = keys.insert(keys.cend(), 9);
+  std::cout << *inserted << ':' << keys.count(kept) << ':' << keys.size() << ' ';
+  std::unordered_map<int, int> values;
+  std::pair<const int, int> entry(1, 3), duplicate(1, 7);
+  auto position = values.insert(values.end(), entry);
+  auto same = values.insert(values.cend(), duplicate);
+  std::cout << (position == same) << ':' << same->second << ' ';
+  auto end = values.erase(values.cbegin(), values.cend());
+  std::cout << (end == values.end()) << ':' << values.size();
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '1:0:1 9:1:3 1:3 1:0',
+    uncaughtException: undefined,
+  });
+});
+
+test('changes unordered range size after each destroyed element', () => {
+  const program = `#include <iostream>
+#include <unordered_map>
+struct Item { Item(int n) : number(n) {} ~Item(); int number; };
+std::unordered_map<int, Item>* active;
+Item::~Item() { if (active) std::cout << active->size(); }
+int main() {
+  std::unordered_map<int, Item> values;
+  values.emplace(1, Item(1));
+  values.emplace(2, Item(2));
+  values.emplace(3, Item(3));
+  active = &values;
+  values.erase(values.begin(), values.end());
+  std::cout << ':' << values.size();
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '321:0',
+    uncaughtException: undefined,
+  });
+});
+
 test('allows negative movement of bidirectional iterators', () => {
   const program = `#include <iostream>
 #include <iterator>

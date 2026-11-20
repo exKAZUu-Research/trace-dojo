@@ -467,13 +467,43 @@ export class HashValue extends MapValue {
 
   /** Removes the node at a position, as `erase(iterator)` does. */
   remove(frame: Frame, node: HashNode): Value {
-    const count = this.buckets.length;
-    const index = constrain(node.hash, count);
-    let before = this.buckets[index] as HashNode;
+    return this.unlink(frame, node, this.beforeNode(frame, node));
+  }
+
+  eraseRange(
+    frame: Frame,
+    first: HashNode | undefined,
+    last: HashNode | undefined,
+    destroy: ElementOperations['destroy']
+  ): Ptr {
+    for (let node = first; node !== last; node = node.next) {
+      if (!node) throw new CppRuntimeError('invalidRange');
+      frame.runtime.spend();
+    }
+    if (first && first !== last) {
+      const before = this.beforeNode(frame, first);
+      for (let node: HashNode | undefined = first; node && node !== last;) {
+        const next: HashNode | undefined = node.next;
+        destroy?.(frame, node.value);
+        this.unlink(frame, node, before);
+        node = next;
+      }
+    }
+    return this.iterator(last);
+  }
+
+  private beforeNode(frame: Frame, node: HashNode): HashNode {
+    let before = this.buckets[constrain(node.hash, this.buckets.length)] as HashNode;
     while (before.next !== node) {
       frame.runtime.spend();
       before = before.next as HashNode;
     }
+    return before;
+  }
+
+  private unlink(frame: Frame, node: HashNode, before: HashNode): Value {
+    const count = this.buckets.length;
+    const index = constrain(node.hash, count);
     // The bucket loses its "before" pointer when the node was its only one.
     const next = node.next;
     if (
@@ -851,17 +881,34 @@ export function unorderedClass(
   method('cend', [], constIterator, (self) => self.iterator(undefined), true);
   method('count', [constRef(keyType)], SIZE_T, (self, [k], frame) => (self.findNode(frame, keyArg(k)) ? 1n : 0n), true);
   method('contains', [constRef(keyType)], BOOL, (self, [k], frame) => (self.findNode(frame, keyArg(k)) ? 1 : 0), true);
+  const copyEntry = { uses: (row: number) => requireElementUse(compiler, entryType, row, 'copy') };
+  const entryParameter = constRef(unqualified(entryType));
   addMethod(
     cls,
     native(
       'insert',
-      [constRef(unqualified(entryType))],
+      [entryParameter],
       classType(insertResult),
       ([entry], { self, frame }) => {
         const hash = self as HashValue;
         return insertionResult(frame, hash, ...insertCopy(table, frame, hash, (entry as Ptr).read()));
       },
-      { uses: (row) => requireElementUse(compiler, entryType, row, 'copy') }
+      copyEntry
+    )
+  );
+  addMethod(
+    cls,
+    native(
+      'insert',
+      [constIterator, entryParameter],
+      iterator,
+      ([hint, entry], { self, frame }) => {
+        const hash = self as HashValue;
+        hashPosition(hash, hint);
+        const [node] = insertCopy(table, frame, hash, (entry as Ptr).read());
+        return hash.iterator(node);
+      },
+      copyEntry
     )
   );
   method('erase', [constRef(keyType)], SIZE_T, (self, [k], frame) => {
@@ -872,17 +919,25 @@ export function unorderedClass(
     return 1n;
   });
   method('erase', [constIterator], iterator, (self, [position], frame) => {
-    if (!(position instanceof HashPosition) || position.store !== self) throw new CppRuntimeError('invalidIterator');
-    const node = position.entry();
+    const node = hashPosition(self, position).entry();
     const next = node.next;
     const removed = self.remove(frame, node);
     ops().destroy?.(frame, removed);
     return self.iterator(next);
   });
+  method('erase', [constIterator, constIterator], iterator, (self, [first, last], frame) =>
+    self.eraseRange(frame, hashPosition(self, first).node, hashPosition(self, last).node, ops().destroy)
+  );
   method('swap', [referenceTo(classType(cls))], VOID, (self, [other], frame) =>
     self.swap(frame, (other as Ptr).read() as HashValue)
   );
   return cls;
+}
+
+function hashPosition(self: HashValue, position: unknown): HashPosition {
+  if (!(position instanceof HashPosition) || position.store !== self) throw new CppRuntimeError('invalidIterator');
+  position.checkIterator();
+  return position;
 }
 
 const keyArg = (arg: unknown): Value => (arg as Ptr).read();
