@@ -531,10 +531,10 @@ export class Converter extends DeclarationConverter {
 
   private warnContinueInSwitch(node: Node, depth: number): void {
     const levels = depth > 1 ? ` ${depth}` : '';
-    const hasOuterLoop = this.loop.switches.slice(0, -depth).includes(false);
+    const hasOuterTarget = this.loop.switches.length > depth;
     this.notices.push({
       level: 'Warning',
-      message: `"continue${levels}" targeting switch is equivalent to "break${levels}"${hasOuterLoop ? `. Did you mean to use "continue ${depth + 1}"?` : ''}`,
+      message: `"continue${levels}" targeting switch is equivalent to "break${levels}"${hasOuterTarget ? `. Did you mean to use "continue ${depth + 1}"?` : ''}`,
       row: node.startPosition.row,
     });
   }

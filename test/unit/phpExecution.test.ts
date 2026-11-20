@@ -5184,4 +5184,15 @@ try { range(0.1, null, 1); } catch (ValueError $e) { echo explode("\\n", $e->get
       `<?php $a = range(0, 8); $a["a"] = 3; array_splice($a, 1, 3, [7]); unset($a[4]); $a[-2] = 7; mt_srand(0); var_dump(array_rand($a));`
     )
   ).toMatchObject({ kind: 'executed', stdout: 'int(5)\n' });
+
+  expect(run('<?php $a = [1]; $r = &$a; $r[0] = $a; unset($a, $r); var_dump(gc_collect_cycles());')).toMatchObject({
+    kind: 'executed',
+    stdout: 'int(1)\n',
+  });
+
+  expect(run('<?php\nswitch (1) { case 1: switch (2) { case 2: continue; } }\necho "done";')).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '\nWarning: "continue" targeting switch is equivalent to "break". Did you mean to use "continue 2"? in /main.php on line 2\ndone',
+  });
 });

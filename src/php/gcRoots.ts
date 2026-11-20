@@ -1,6 +1,6 @@
 // code-gauge-allow-file fileNcss 458 -- Holds GC root buffer simulation, ordering, and post-collection retirement helpers.
 import type { Runtime } from './runtime';
-import { PhpArray, PhpObject, Ref } from './values';
+import { PhpArray, PhpObject, Ref, type Value } from './values';
 
 export const GC_THRESHOLD_DEFAULT = 10_001;
 const GC_THRESHOLD_STEP = 10_000;
@@ -510,37 +510,46 @@ export function cachedObjectFree(array: PhpArray): boolean | undefined {
 export function objectFree(array: PhpArray, runtime: Runtime): boolean {
   const cached = cachedObjectFree(array);
   if (cached !== undefined) return cached;
-  const pending = [array];
   const visited = new Set<PhpArray>();
-  const counter = { scanned: 0 };
-  while (pending.length > 0) {
-    const current = pending.pop() as PhpArray;
-    if (visited.has(current)) continue;
-    const currentCached = cachedObjectFree(current);
-    if (currentCached === true) continue;
-    if (currentCached === false) return markHasObject(array, current);
-    visited.add(current);
-    if (!scanObjectFreeSlots(current, pending, runtime, counter)) return markHasObject(array, current);
+  const active = new Set<PhpArray>([array]);
+  const stack: { array: PhpArray; iter: Iterator<Value | Ref> }[] = [
+    { array, iter: array.map.ownedSlots()[Symbol.iterator]() },
+  ];
+  let scanned = 0;
+  while (stack.length > 0) {
+    const top = stack.at(-1) as (typeof stack)[number];
+    const next = top.iter.next();
+    if (next.done) {
+      stack.pop();
+      active.delete(top.array);
+      visited.add(top.array);
+      continue;
+    }
+    if (++scanned % 64 === 0) runtime.spend();
+    const child = inspectObjectFreeSlot(top.array, next.value, active, visited);
+    if (child === false) return markHasObject(array, top.array);
+    if (child) {
+      active.add(child);
+      stack.push({ array: child, iter: child.map.ownedSlots()[Symbol.iterator]() });
+    }
   }
   cacheObjectFree(visited);
   return true;
 }
 
-function scanObjectFreeSlots(
-  current: PhpArray,
-  pending: PhpArray[],
-  runtime: Runtime,
-  counter: { scanned: number }
-): boolean {
-  for (const slot of current.map.ownedSlots()) {
-    if (++counter.scanned % 64 === 0) runtime.spend();
-    if (slot instanceof Ref || slot instanceof PhpObject) return false;
-    if (slot instanceof PhpArray && slot.composite) {
-      slot.trackCachedParent(current);
-      pending.push(slot);
-    }
-  }
-  return true;
+function inspectObjectFreeSlot(
+  parent: PhpArray,
+  slot: Value | Ref,
+  active: Set<PhpArray>,
+  visited: Set<PhpArray>
+): PhpArray | false | undefined {
+  if (slot instanceof Ref || slot instanceof PhpObject) return false;
+  if (!(slot instanceof PhpArray) || !slot.composite) return undefined;
+  slot.trackCachedParent(parent);
+  if (active.has(slot)) return false;
+  if (visited.has(slot)) return undefined;
+  const childCached = cachedObjectFree(slot);
+  return childCached === false ? false : childCached === true ? undefined : slot;
 }
 
 function markHasObject(root: PhpArray, current: PhpArray): false {
