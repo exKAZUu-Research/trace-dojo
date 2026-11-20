@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 899 -- Lowers each kind of expression to the points and regions rustc's MIR gives it.
+// code-gauge-allow-file fileNcss 900 -- Lowers each kind of expression to the points and regions rustc's MIR gives it.
 import type { ExecutionBudget } from '../interpreter/limits';
 import type { Annotations, FnContext, LocalVar, MethodRes } from './annotations';
 import type { Block, Condition, Expr, FormatArgs, Pattern, Span, Stmt } from './ast';
@@ -432,7 +432,8 @@ export class LoanBuilder {
   private bind(pattern: Pattern, source: Place): void {
     const binding: Binding = { accesses: [], gens: [], defs: [], relations: [] };
     this.bindPart(binding, pattern, source, undefined);
-    this.point({ uses: [source.root], defs: binding.defs, accesses: binding.accesses, gens: binding.gens });
+    const kills = binding.defs.map((root): Place => ({ root, proj: [] }));
+    this.point({ uses: [source.root], defs: binding.defs, accesses: binding.accesses, gens: binding.gens, kills });
     for (const relation of binding.relations) relation();
   }
 

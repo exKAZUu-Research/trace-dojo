@@ -427,6 +427,33 @@ fn main() {
   });
 });
 
+test('Rust while-let bindings can reborrow each element of a mutable list', () => {
+  const program = `struct Node { value: i32, next: Option<Box<Node>> }
+
+fn bump(head: &mut Option<Box<Node>>) {
+    let mut cursor = head;
+    while let Some(node) = cursor {
+        node.value += 1;
+        cursor = &mut node.next;
+    }
+}
+
+fn main() {
+    let mut list = Some(Box::new(Node {
+        value: 1,
+        next: Some(Box::new(Node { value: 2, next: None })),
+    }));
+    bump(&mut list);
+    let node = list.unwrap();
+    println!("{} {}", node.value, node.next.unwrap().value);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '2 3\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {
