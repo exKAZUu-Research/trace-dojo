@@ -41,7 +41,7 @@ import {
   withStringConversionErrors,
 } from './operators';
 import { arrayIsShared, ElementPlace, share, VarPlace } from './places';
-import { ExitSignal, PhpThrow, rt } from './runtime';
+import { ExitSignal, PhpThrow, rt, type Runtime } from './runtime';
 import { shuffle } from './shuffle';
 import { checkedDynamicVariable } from './unsupported';
 import {
@@ -803,9 +803,7 @@ defineFunction('array_map(?callable $callback, array $array, array ...$arrays): 
       const mapped = directUser
         ? invokeUser(target, directUser, [{ v: value }], undefined, false)
         : invokeCallbackTarget(target, [{ v: value }], undefined, false);
-      const ref = runtime.lastReturnRef;
-      runtime.lastReturnRef = undefined;
-      result.setSlot(key, ref ?? share(mapped));
+      result.setSlot(key, retainCallbackSlot(runtime, mapped));
     }
   } finally {
     runtime.held.pop();
@@ -831,10 +829,13 @@ function mapMultipleArrays(callback: Value, first: PhpArray, rest: Value[]): Php
   return result;
 }
 function callbackSlot(callback: Value, args: Value[]): Value | Ref {
-  const value = callCallback(callback, args);
-  const ref = rt().lastReturnRef;
-  rt().lastReturnRef = undefined;
-  if (!ref) return value;
+  return retainCallbackSlot(rt(), callCallback(callback, args));
+}
+
+function retainCallbackSlot(runtime: Runtime, value: Value): Value | Ref {
+  const ref = runtime.lastReturnRef;
+  runtime.lastReturnRef = undefined;
+  if (!ref) return share(value);
   ref.isRef = true;
   ref.rc++;
   return ref;

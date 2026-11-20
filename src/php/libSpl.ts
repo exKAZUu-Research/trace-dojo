@@ -52,6 +52,10 @@ class ListStorage {
     return this.nodes.map((node) => node.v);
   }
 
+  releaseOrder(): Value[] {
+    return this.held().toReversed();
+  }
+
   clone(): ListStorage {
     rt().allocate(this.nodes.length);
     const copy = new ListStorage(this.flags);
@@ -601,6 +605,10 @@ class FixedStorage {
 
   held(): Value[] {
     return this.items;
+  }
+
+  releaseOrder(): Value[] {
+    return this.items.toReversed();
   }
 
   clone(): FixedStorage {

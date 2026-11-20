@@ -35,7 +35,7 @@ export function setDestructor(run: (object: PhpObject, row?: number) => void): v
 
 /** Collects unreachable objects and, when `cycles` is set, cycles; returns PHP's count of objects and arrays. */
 export function collectGarbage(runtime: Runtime, cycles = false, stopOnException = false): number {
-  if (runtime.collectingCycles) return 0;
+  if (runtime.collectingCycles || runtime.collectingObjects.size > 0) return 0;
   runtime.collectingCycles = cycles;
   if (cycles) for (const value of gcForeachSubjects(runtime)) runtime.gcRoots.delete(value);
   try {
@@ -902,8 +902,9 @@ function pushObject(object: PhpObject, pending: unknown[]): void {
     if (data.fn.kind === 'user') appendValues(pending, [...data.fn.statics.values()]);
     return;
   }
-  const held = (internal as { held?: () => unknown[] }).held;
-  if (typeof held === 'function') appendValues(pending, [...held.call(internal)]);
+  const native = internal as { held?: () => unknown[]; releaseOrder?: () => unknown[] };
+  const readChildren = native.releaseOrder ?? native.held;
+  if (typeof readChildren === 'function') appendValues(pending, [...readChildren.call(internal)]);
 }
 
 function isDeclaredPropertyKey(cls: PhpObject['cls'], key: string): boolean {
@@ -1165,13 +1166,13 @@ export function holderCounts(runtime: Runtime): Map<PhpObject, number> {
 /** Releases a unique global, retaining the index when no other object's ownership can have changed. */
 export function releaseGlobalObject(runtime: Runtime, object: PhpObject): boolean {
   if (object.internal !== undefined || objectHasOwnedValues(runtime, object)) {
-    collectGarbage(runtime, false, true);
+    releaseDropped(runtime, [object], true, 'shutdown');
     return false;
   }
   if (!object.destructed && object.cls.findMethod('__destruct')) {
     const changed = runGlobalDestructor(runtime, object);
     if (changed) {
-      collectGarbage(runtime, false, true);
+      releaseDropped(runtime, [object], true, 'shutdown');
       return false;
     }
   }

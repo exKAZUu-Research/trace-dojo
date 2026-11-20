@@ -5026,4 +5026,47 @@ echo $r;
       '<?php mt_srand(42); $a = range(0, 9999); $sum = 0; for ($i = 0; $i < 7000; $i++) $sum += array_rand($a); echo $sum;'
     )
   ).toMatchObject({ kind: 'executed', stdout: '34849407' });
+
+  expect(
+    run(
+      `<?php
+class D { function __construct(public $n) {} function __destruct() { echo 'drop:', $this->n, ';'; } }
+function f($n) { static $x = $n ? f(0) : new D('inner'); echo 'f:', $n, ':', $x->n, ';'; return $n ? null : new D('outer'); }
+f(1); echo 'after;'; f(2); echo 'end;';`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'f:0:inner;drop:outer;f:1:inner;after;f:2:inner;end;drop:inner;' });
+
+  const poolSource = `<?php
+class Res { function __construct(public $n) {} function __destruct() { echo "closing {$this->n}\\n"; echo "closed {$this->n}\\n"; } }
+class Pool { public $items = []; function add($r) { $this->items[] = $r; } }
+$pool = new Pool; $pool->add(new Res(1)); $pool->add(new Res(2));
+echo "done\\n";`;
+  expect(traceProgram('php', poolSource, poolSource).stdout).toBe('done\nclosing 1\nclosed 1\nclosing 2\nclosed 2\n');
+
+  expect(
+    run(
+      `<?php
+class E extends Exception { function __destruct() { echo 'E;'; throw new Exception('cleanup'); } }
+class D { function __destruct() { echo 'D;'; } }
+function &g() { $x = new D; return $x; }
+function &f() { try { try { throw new E; } finally { return g(); } } catch (Throwable $e) { echo 'caught:', $e->getMessage(), ';'; } echo 'after;'; $done = null; return $done; }
+f(); echo 'caller;';`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'E;D;caught:cleanup;after;caller;' });
+
+  expect(
+    run(
+      `<?php
+class R { function __construct(public $n) {} function __destruct() { echo "close {$this->n}\\n"; } }
+$s = new SplStack; $s->push(new R(1)); $s->push(new R(2));
+$f = new SplFixedArray(2); $f[0] = new R(3); $f[1] = new R(4);
+$s = null; echo "mid\\n"; $f = null;`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'close 2\nclose 1\nmid\nclose 4\nclose 3\n' });
+
+  expect(
+    run(
+      `<?php $x = 1; function &f(...$v) { global $x; return $x; } $a = array_map('f', [1]); $b = $a; $a[0] = 2; echo json_encode([$a, $b, $x]);`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '[[2],[2],2]' });
 });

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 807 -- Runs PHP statements iteratively on a heap block stack with shared loop/try/foreach helpers.
+// code-gauge-allow-file fileNcss 830 -- Runs PHP statements iteratively on a heap block stack with shared loop/try/foreach helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { CompileError } from '../interpreter/diagnostics';
 import type { ArrayCursor } from './arrayOrder';
@@ -605,18 +605,47 @@ function resolveSwitchStart(statement: Extract<Stmt, { k: 'switch' }>): number {
 }
 
 function staticDeclaration(statement: Extract<Stmt, { k: 'static' }>, frame: Frame): void {
-  const fn = frame.fn;
-  const statics = fn?.kind === 'user' ? fn.statics : rt().globalStatics;
-  for (const { name, init } of statement.vars) {
-    let ref = statics.get(name);
-    if (!ref) {
-      ref = new Ref(init ? share(ev(init)) : null);
-      ref.isRef = true;
-      statics.set(name, ref);
-      if (frame.closure) nativeOwnershipChanged(frame.closure);
-    }
-    new VarPlace(frame, name).bind(ref);
+  const statics = frame.fn?.kind === 'user' ? frame.fn.statics : rt().globalStatics;
+  for (const { name, init } of statement.vars) declareStaticVar(statics, name, init, frame);
+}
+
+function declareStaticVar(statics: Map<string, Ref>, name: string, init: Expr | undefined, frame: Frame): void {
+  const existing = statics.get(name);
+  if (existing) {
+    new VarPlace(frame, name).bind(existing);
+    return;
   }
+  const value = init ? share(ev(init)) : null;
+  const reentrant = statics.get(name);
+  if (reentrant) {
+    bindStaticDiscardingUnused(frame, name, reentrant, value);
+    return;
+  }
+  const ref = new Ref(value);
+  ref.isRef = true;
+  statics.set(name, ref);
+  if (frame.closure) nativeOwnershipChanged(frame.closure);
+  new VarPlace(frame, name).bind(ref);
+}
+
+function bindStaticDiscardingUnused(frame: Frame, name: string, ref: Ref, unused: Value): void {
+  const runtime = rt();
+  runtime.held.push(unused);
+  let bindError: unknown;
+  try {
+    new VarPlace(frame, name).bind(ref);
+  } catch (error) {
+    bindError = error;
+  } finally {
+    runtime.held.pop();
+  }
+  if (bindError === undefined) {
+    runtime.release([unused]);
+    return;
+  }
+  if (bindError instanceof PhpThrow) withPendingException(runtime, bindError, () => runtime.release([unused]));
+  else runtime.release([unused]);
+  throw bindError;
 }
 
 function finishTryNormal(
@@ -685,7 +714,6 @@ function cancelPendingReturn(
 ): void {
   if (completion.t !== 'return') return;
   frame.returning = undefined;
-  if (completion.slot instanceof Ref) return;
   if (error instanceof PhpThrow) withPendingException(runtime, error, () => runtime.release([completion.slot]));
   else runtime.release([completion.slot]);
 }
