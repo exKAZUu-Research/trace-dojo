@@ -5303,6 +5303,7 @@ test('gc_collect_cycles() counts the arrays without objects that a destructible 
   for (const [setup, expected] of [
     ['$x->a[] = 1;', 'd;int(2)\n'],
     ['$x->a[0][] = 3;', 'd;int(3)\n'],
+    ['$arr = []; $arr[] = 1; $x->a = $arr; unset($arr);', 'd;int(2)\n'],
   ]) {
     expect(
       run(

@@ -126,12 +126,12 @@ export function heldByGarbage(
 
 /**
  * How many arrays without objects or references the counted garbage still holds: the collection graph leaves them out,
- * but PHP counts them, unless live code reaches them or they are immutable literals.
+ * but PHP counts them, unless live code reaches them, they are immutable literals, or the count already has them.
  */
-export function plainArraysHeld(freed: Iterable<unknown>, storage: Set<PhpArray>, live: Set<PhpArray>): number {
+export function plainArraysHeld(counted: Set<unknown>, storage: Set<PhpArray>, live: Set<PhpArray>): number {
   const seen = new Set<PhpArray>();
   const pending: unknown[] = [];
-  for (const node of freed) if (node instanceof PhpObject) pending.push(...node.props.values());
+  for (const node of counted) if (node instanceof PhpObject) pending.push(...node.props.values());
   while (pending.length > 0) {
     const item = pending.pop();
     const value = item instanceof Ref ? item.v : item;
@@ -142,7 +142,8 @@ export function plainArraysHeld(freed: Iterable<unknown>, storage: Set<PhpArray>
   }
   const countable = (array: PhpArray): boolean =>
     storage.has(array) || (!array.persistentHolder && !array.uncollectable);
-  return [...seen].filter((array) => countable(array) && !array.composite && !live.has(array)).length;
+  return [...seen].filter((array) => countable(array) && !array.composite && !live.has(array) && !counted.has(array))
+    .length;
 }
 
 export function recordGcRoot(runtime: Runtime, value: PhpArray | PhpObject, collect: () => number): boolean {
