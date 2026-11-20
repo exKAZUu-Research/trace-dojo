@@ -497,13 +497,15 @@ export class Ptr {
     return store.get(index);
   }
 
-  offset(delta: number, asIterator = false): Ptr {
-    if (delta === 0 && this.isNull) return this;
+  offset(delta: number | bigint, asIterator = false): Ptr {
+    const isZero = delta === 0 || delta === 0n;
+    if (isZero && this.isNull) return this;
     const store = this.target();
-    const index = this.index + delta;
-    if (index < 0 || index > (asIterator ? store.iteratorLength : store.pointerLength))
-      throw new CppRuntimeError('pointerOutOfRange');
-    if (delta === 0 && !asIterator) return this;
+    const start = this.index;
+    const length = asIterator ? store.iteratorLength : store.pointerLength;
+    if (delta < -start || delta > length - start) throw new CppRuntimeError('pointerOutOfRange');
+    if (isZero && !asIterator) return this;
+    const index = start + Number(delta);
     return asIterator ? store.iteratorLocation(index) : store.location(index);
   }
 
@@ -605,10 +607,11 @@ class CompleteObjectPointer extends Ptr {
     return (this.receiver.location?.index ?? 0) + this.offsetFromObject;
   }
 
-  override offset(delta: number, asIterator = false): Ptr {
+  override offset(delta: number | bigint, asIterator = false): Ptr {
     super.offset(delta, asIterator);
-    if (delta === 0) return this;
-    return new CompleteObjectPointer(this.receiver, this.fallback, this.offsetFromObject + delta);
+    const offset = Number(delta);
+    if (offset === 0) return this;
+    return new CompleteObjectPointer(this.receiver, this.fallback, this.offsetFromObject + offset);
   }
 }
 

@@ -87,7 +87,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
 
   /** Records the step of a statement after it runs, as `StepTracker.runStatement` says. */
   withStep(row: number, exec: Exec, isOnlyCall = false): Exec {
-    if (!this.recordsSteps || this.recordsStepsOverride === false) return exec;
+    if (!this.recordsSteps) return exec;
     return (frame) => frame.runtime.steps.runStatement(row, isOnlyCall, () => exec(frame));
   }
 
@@ -228,7 +228,10 @@ export abstract class StatementCompiler extends ExpressionCompiler {
 
   // Declarations -----------------------------------------------------------------------------------------------------
 
-  private localDeclaration(node: Syntax): { exec: Exec; enter?: Exec | false } {
+  private localDeclaration(
+    node: Syntax,
+    recordStep = true
+  ): { exec: Exec; recordsStep: boolean; enter?: Exec | false } {
     const isStatic = this.hasSpecifier(node, 'static');
     const base = this.specifiedType(node, true);
     const declarators = fieldsOf(node, 'declarator');
@@ -253,7 +256,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       return;
     };
     return {
-      exec: recordsStep ? this.withStep(node.row, run, allCreate) : run,
+      exec: recordStep && recordsStep ? this.withStep(node.row, run, allCreate) : run,
+      recordsStep,
       enter: isStatic ? undefined : canEnter && run,
     };
   }
@@ -817,8 +821,9 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       let init: Exec = doNothing;
       let initRecords = false;
       if (initNode?.type === 'declaration') {
-        init = this.forInitDeclaration(initNode);
-        initRecords = fieldsOf(initNode, 'declarator').some((d) => d.type === 'init_declarator');
+        const declaration = this.localDeclaration(initNode, false);
+        init = declaration.exec;
+        initRecords = declaration.recordsStep;
       } else if (initNode) {
         const expr = this.compileExpression(initNode);
         const discard = this.discardedValue(expr);
@@ -855,20 +860,6 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     }
     return this.withScopeExit(loop, scope);
   }
-
-  /** The declaration that starts a `for` statement, which records no step of its own: the loop records one. */
-  private forInitDeclaration(node: Syntax): Exec {
-    const saved = this.recordsStepsOverride;
-    this.recordsStepsOverride = false;
-    try {
-      return this.localDeclaration(node).exec;
-    } finally {
-      this.recordsStepsOverride = saved;
-    }
-  }
-
-  /** Turns off the steps of the statements compiled meanwhile, for the parts of a `for` header. */
-  recordsStepsOverride: boolean | undefined;
 
   private rangeFor(node: Syntax): Exec {
     const scope = new Scope();

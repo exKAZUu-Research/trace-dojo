@@ -18,6 +18,7 @@ import {
   isWide,
   LONG,
   nonReference,
+  pointerTo,
   PTRDIFF_T,
   referenceTo,
   sameType,
@@ -61,7 +62,7 @@ import {
   truthy,
 } from './elements';
 import { constructPair, pairResult } from './emplacement';
-import { elementLocation } from './iterators';
+import { elementLocation, randomAccessIterator } from './iterators';
 import type { IteratorCategory } from './libraryClass';
 import type { EngineValue } from './random';
 import { uniformInteger } from './random';
@@ -677,13 +678,17 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
   define('rotate', [[0, 1, 2]], (args) => {
     const info = writableRangeAt(args, 0);
     if (!info || args.length !== 3) return;
-    const ops = elementOperations(compiler(), unqualified(info.element), args[0].row, 'relocate');
-    return native('rotate', params(args), unqualified(args[0].type), ([first, middle, last], { frame }) => {
-      const values = mutableRange(first, last, info, frame, ops);
+    const iterator = decayed(args[0].type);
+    if (!sameType(iterator, decayed(args[2].type))) return;
+    const type = unqualified(info.element);
+    const ops = elementOperations(compiler(), type, args[0].row, 'swap');
+    const trivialAssignment = hasTrivialCopyAssignment(type);
+    return native('rotate', params(args), iterator, ([first, middle, last], { frame }) => {
+      const values = mutableRange(first, last, info, frame, ops, true);
       const split = range(first, middle, info).length;
-      const items = Array.from({ length: values.length }, (_, index) => values.take(index));
-      const rotated = [...items.slice(split), ...items.slice(0, split)];
-      for (const [index, item] of rotated.entries()) values.set(index, item);
+      if (split > values.length) throw new CppRuntimeError('invalidRange');
+      frame.runtime.spend(values.length);
+      rotateRange(values, split, info.category, trivialAssignment);
       return values.iterator(values.length - split);
     });
   });
@@ -959,15 +964,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     define(name, [[0]], (args) => {
       if (args.length !== 1) return;
       const type = args[0].type;
-      if (type.kind === 'array' && args[0].isLvalue && !name.startsWith('r')) {
-        const length = type.length ?? 0;
-        return native(
-          name,
-          [referenceTo(type)],
-          { kind: 'pointer', to: name.startsWith('c') ? withConst(type.of) : type.of },
-          ([array]) => new Ptr((array as Ptr).read() as Store, name.endsWith('end') ? length : 0)
-        );
-      }
+      if (type.kind === 'array' && args[0].isLvalue) return arrayRangeFunction(library, name, type);
       return rangeMemberFunction(compiler(), name, args[0]);
     });
   }
@@ -1104,6 +1101,64 @@ function equalHasSecondEnd(args: Expr[], secondIterator?: Type): boolean {
   if (!secondIterator) return rangeAt(args, 2) !== undefined;
   const last = decayed(args[3].type);
   return iteratorInfo(last) !== undefined && sameType(decayed(secondIterator), last);
+}
+
+function rotateRange(values: Range, split: number, category: IteratorCategory, trivialAssignment: boolean): void {
+  const right = values.length - split;
+  if (split === 0 || right === 0) return;
+  if (trivialAssignment) {
+    if (split === 1) return rotateOne(values, 0, values.length - 1, 1);
+    if (right === 1 && category !== 'forward') return rotateOne(values, values.length - 1, 0, -1);
+    if (category === 'randomAccess') return rotateBlocks(values, split, right);
+  }
+  rotateForward(values, split);
+}
+
+function rotateOne(values: Range, from: number, to: number, direction: 1 | -1): void {
+  values.withTemporary(from, (saved) => {
+    for (let index = from; index !== to; index += direction) values.set(index, values.get(index + direction));
+    values.set(to, saved.read());
+  });
+}
+
+function rotateBlocks(values: Range, left: number, right: number): void {
+  let first = 0;
+  while (left > 0 && right > 0) {
+    const count = Math.min(left, right);
+    const middle = first + left;
+    for (let index = 0; index < count; index++) values.swap(middle - count + index, middle + index);
+    if (left <= right) {
+      first += left;
+      right -= left;
+    } else left -= right;
+  }
+}
+
+function rotateForward(values: Range, middle: number): void {
+  let first = 0;
+  let next = middle;
+  while (next < values.length) {
+    values.swap(first++, next++);
+    if (first === middle) middle = next;
+  }
+  next = middle;
+  while (next < values.length) {
+    values.swap(first++, next++);
+    if (first === middle) middle = next;
+    else if (next === values.length) next = middle;
+  }
+}
+
+function arrayRangeFunction(library: Library, name: string, type: Extract<Type, { kind: 'array' }>): FunctionInfo {
+  const reverse = name.startsWith('r');
+  const element = name.startsWith('c') ? withConst(type.of) : type.of;
+  const result = reverse
+    ? classType(
+        randomAccessIterator(library.iterators, undefined, withConst(element, false), isConstType(element), true)
+      )
+    : pointerTo(element);
+  const index = name.endsWith('end') === reverse ? 0 : (type.length ?? 0);
+  return native(name, [referenceTo(type)], result, ([array]) => new Ptr((array as Ptr).read() as Store, index));
 }
 
 function rangeMemberFunction(compiler: ExpressionCompiler, name: string, arg: Expr): FunctionInfo | undefined {

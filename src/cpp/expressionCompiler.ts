@@ -852,7 +852,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const type = pointer.type as Extract<Type, { kind: 'pointer' }>;
     this.checkPointerArithmetic(type, row);
     const p = pointer.run;
-    const displacement = convertArithmetic(this.rvalue(offset), LONG);
+    const displacement = this.rvalue(offset);
     const n = displacement.run;
     return {
       type,
@@ -861,7 +861,10 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       constantPointee: offsetConstantLocation(pointer.constantPointee, displacement.constant, sign),
       row,
       run: (frame) =>
-        holdAll(frame, [p, n], ([location, distance]) => (location as Ptr).offset(sign * Number(distance))),
+        holdAll(frame, [p, n], ([location, distance]) => {
+          const delta = distance as number | bigint;
+          return (location as Ptr).offset(sign === 1 ? delta : -delta);
+        }),
     };
   }
 
@@ -1367,22 +1370,22 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     if (!isInteger(offset.type))
       return this.error(row, `配列の添字には整数を書いてください（${typeName(offset.type)}）。`);
     const p = pointer.run;
-    const n = convertArithmetic(offset, LONG);
     const type = (pointer.type as Extract<Type, { kind: 'pointer' }>).to;
-    const constantLocation = offsetConstantLocation(pointer.constantPointee, n.constant);
+    const constantLocation = offsetConstantLocation(pointer.constantPointee, offset.constant);
     const original = reversed ? index : array;
     const temporaryArray = original.type.kind === 'array' ? original.temporaryBinding : undefined;
     const locate = (frame: Frame, pointerAt: Eval<Ptr>): Ptr =>
-      holdAll(frame, reversed ? [n.run, pointerAt] : [pointerAt, n.run], ([first, second]) => {
+      holdAll(frame, reversed ? [offset.run, pointerAt] : [pointerAt, offset.run], ([first, second]) => {
         const [location, position] = reversed ? [second, first] : [first, second];
-        return (location as Ptr).offset(Number(position));
+        return (location as Ptr).offset(position as number | bigint);
       });
     return {
       type,
       isLvalue: true,
       isXvalue: original.type.kind === 'array' && original.isXvalue,
       staticAddress: pointer.staticAddress && offset.constant !== undefined,
-      constantDesignation: original.type.kind === 'array' && original.constantDesignation && n.constant !== undefined,
+      constantDesignation:
+        original.type.kind === 'array' && original.constantDesignation && offset.constant !== undefined,
       constantInitialization: hasConstantObject(constantLocation),
       constantLocation,
       row,

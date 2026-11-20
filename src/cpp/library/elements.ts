@@ -64,7 +64,6 @@ export function destroyElements(
 }
 
 export function swapElements(frame: Frame, a: Ptr, b: Ptr, ops: ElementOperations): void {
-  if (a.equals(b)) return;
   if (ops.arrayElement) {
     const left = a.read() as ArrayStore;
     const right = b.read() as ArrayStore;

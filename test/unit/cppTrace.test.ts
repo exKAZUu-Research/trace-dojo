@@ -858,6 +858,44 @@ test('a loop reuses local static storage and leaves its binding behind at scope 
   expect(traceItems.find(({ line }) => line === 7)?.vars).toEqual({ last: 7, result: 7 });
 });
 
+test('a for initializer records default turtle construction as Java does', () => {
+  const cpp = 'int main() { for (Turtle t; t.canMoveForward(); t.forward()) {} }';
+  const java = `public class Main {
+  public static void main(String[] args) {
+    for (Turtle t = new Turtle(); t.canMoveForward(); t.forward()) {}
+  }
+}`;
+  const javaPositions = traceProgram('java', java, java).traceItems.map(({ turtles }) => turtles.map(({ y }) => y));
+  const cppPositions = traceProgram('cpp', cpp, cpp).traceItems.map(({ turtles }) => turtles.map(({ y }) => y));
+  expect(cppPositions).toEqual(javaPositions);
+});
+
+test.each(['p + n', 'p - n', '&p[n]', 'p += n'])('keeps the full unsigned pointer displacement in %s', (expression) => {
+  const program = `#include <climits>
+int main() {
+  int values[3] = {1, 2, 3};
+  int* p = values + 1;
+  unsigned long n = ULONG_MAX;
+  p = ${expression};
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('ポインタの足し算・引き算'),
+  });
+});
+
+test('rotate rejects a middle iterator past its end', () => {
+  const program = `#include <algorithm>
+int main() {
+  int values[] = {1, 2, 3, 4};
+  std::rotate(values + 1, values + 4, values + 3);
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('範囲（先頭と末尾のイテレータ）が正しくありません'),
+  });
+});
+
 test.each(['std::cout.width(100001)', 'std::cout << std::fixed << std::setprecision(100001)'])(
   'oversized formatted output is charged before padding: %s',
   (setup) => {
@@ -1050,6 +1088,18 @@ int main() { const char* text = nullptr; ${call}; }`;
     uncaughtException: expect.stringContaining(diagnostic),
   });
 });
+
+test.each(['strcpy(bytes, bytes + 1)', 'strncpy(bytes + 1, bytes, 3)', 'strcat(bytes, bytes + 1)'])(
+  'rejects overlapping ranges in %s',
+  (call) => {
+    const program = `#include <cstring>
+int main() { char bytes[16] = "abcd"; std::${call}; }`;
+    expect(executeProgram('cpp', program)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: expect.stringContaining('領域が重なっています'),
+    });
+  }
+);
 
 test('an exception message ends its lifetime with the exception object', () => {
   const program = `#include <stdexcept>

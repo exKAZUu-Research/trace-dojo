@@ -2,11 +2,23 @@ import { CppRuntimeError } from '../errors';
 import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import { type Eval, holdAll } from '../runtime';
-import { BOOL, ClassInfo, classType, isInteger, LONG, PTRDIFF_T, type Type, typeName, withConst } from '../types';
+import {
+  BOOL,
+  ClassInfo,
+  classType,
+  isInteger,
+  LONG,
+  pointerTo,
+  PTRDIFF_T,
+  type Type,
+  typeName,
+  withConst,
+} from '../types';
 import { NULL_PTR, Ptr, type Store } from '../values';
 import type { BitReferences } from './bitReference';
 import type { IteratorCategory } from './libraryClass';
 import { nativeConstructor } from './support';
+import { typeKey } from './templates';
 
 /** The operators that only a random-access iterator has. */
 const RANDOM_ACCESS_OPERATORS = new Set(['+', '-', '+=', '-=', '[]', '<', '<=', '>', '>=']);
@@ -21,20 +33,24 @@ const MUTATING_OPERATORS = new Set(['++', '--', 'x++', 'x--', '+=', '-=']);
  */
 export function randomAccessIterator(
   cache: Map<string, ClassInfo>,
-  container: string,
+  container: string | undefined,
   element: Type,
   isConst: boolean,
   isReverse: boolean,
   category: IteratorCategory = 'randomAccess',
   representation?: { bits?: BitReferences; underlyingSize: 8 | 16 }
 ): ClassInfo {
-  const name = `${container}::${isReverse ? (isConst ? 'const_reverse_iterator' : 'reverse_iterator') : isConst ? 'const_iterator' : 'iterator'}`;
-  const cached = cache.get(name);
+  const elementType = isConst ? withConst(element) : element;
+  const name =
+    container === undefined
+      ? `std::reverse_iterator<${typeName(pointerTo(elementType))}>`
+      : `${container}::${isReverse ? (isConst ? 'const_reverse_iterator' : 'reverse_iterator') : isConst ? 'const_iterator' : 'iterator'}`;
+  const key = container === undefined ? `reverse_iterator<${typeKey(elementType)}*>` : name;
+  const cached = cache.get(key);
   if (cached) return cached;
   const cls = new ClassInfo(name, 'class');
   cls.isComplete = true;
-  cache.set(name, cls);
-  const elementType = isConst ? withConst(element) : element;
+  cache.set(key, cls);
   const bits = representation?.bits;
   const underlyingSize = representation?.underlyingSize ?? 8;
   cls.library = {

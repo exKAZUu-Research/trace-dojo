@@ -1,5 +1,6 @@
 import { byteAt } from '../bytes';
 import { CppRuntimeError, overflowError } from '../errors';
+import type { Frame } from '../runtime';
 import {
   CHAR_POINTER,
   type FunctionInfo,
@@ -190,30 +191,19 @@ export function cFunctions(library: Library): Map<string, FunctionInfo[]> {
     })
   );
   add(
-    native('strcpy', [CHAR_POINTER, CONST_CHAR_PTR], CHAR_POINTER, ([target, source]) => {
-      writeBytes(target as Ptr, `${readCString(source as Ptr)}\0`);
-      return target;
-    })
+    native('strcpy', [CHAR_POINTER, CONST_CHAR_PTR], CHAR_POINTER, ([target, source], { frame }) =>
+      copyCString(frame, target as Ptr, source as Ptr)
+    )
   );
   add(
-    native('strncpy', [CHAR_POINTER, CONST_CHAR_PTR, SIZE_T], CHAR_POINTER, ([target, source, n], { frame }) => {
-      const count = asNumber(n);
-      let padding = false;
-      for (let index = 0; index < count; index++) {
-        frame.runtime.spend();
-        const byte: number = padding ? 0 : asNumber((source as Ptr).offset(index).read());
-        (target as Ptr).offset(index).write(byte);
-        padding = byte === 0;
-      }
-      return target;
-    })
+    native('strncpy', [CHAR_POINTER, CONST_CHAR_PTR, SIZE_T], CHAR_POINTER, ([target, source, n], { frame }) =>
+      copyCString(frame, target as Ptr, source as Ptr, { count: asNumber(n) })
+    )
   );
   add(
-    native('strcat', [CHAR_POINTER, CONST_CHAR_PTR], CHAR_POINTER, ([target, source]) => {
-      const start = readCString(target as Ptr).length;
-      writeBytes((target as Ptr).offset(start), `${readCString(source as Ptr)}\0`);
-      return target;
-    })
+    native('strcat', [CHAR_POINTER, CONST_CHAR_PTR], CHAR_POINTER, ([target, source], { frame }) =>
+      copyCString(frame, target as Ptr, source as Ptr, { append: true })
+    )
   );
   for (const pointer of [CHAR_POINTER, CONST_CHAR_PTR]) {
     add(
@@ -234,6 +224,28 @@ export function cFunctions(library: Library): Map<string, FunctionInfo[]> {
   add(native('atoi', [CONST_CHAR_PTR], INT, ([text]) => Number(parseDecimal(text as Ptr, INT))));
   add(native('atol', [CONST_CHAR_PTR], LONG, ([text]) => parseDecimal(text as Ptr, LONG)));
   return functions;
+}
+
+function copyCString(
+  frame: Frame,
+  target: Ptr,
+  source: Ptr,
+  { count, append }: { count?: number; append?: boolean } = {}
+): Ptr {
+  if (count === 0) return target;
+  const prefix = append ? readCString(target, undefined, frame.runtime).length : 0;
+  const bytes = readCString(source, count, frame.runtime);
+  const readLength = Math.min(bytes.length + 1, count ?? Number.POSITIVE_INFINITY);
+  const writeLength = count ?? readLength;
+  const targetLength = prefix + writeLength;
+  const from = source.address;
+  const to = target.address;
+  if (from.store === to.store && to.index < from.index + readLength && from.index < to.index + targetLength)
+    throw new CppRuntimeError('overlappingCopy');
+  target.offset(targetLength);
+  frame.runtime.spend(Math.ceil(writeLength / 64));
+  writeBytes(target.offset(prefix), bytes.padEnd(writeLength, '\0'));
+  return target;
 }
 
 const printf = (format: unknown, args: unknown[], spend: (cost: number) => void): string =>
