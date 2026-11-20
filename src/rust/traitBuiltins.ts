@@ -254,6 +254,11 @@ function comparison(goal: Goal): Answer {
   // The standard library's types compare with their own type, as the default `Rhs` makes them.
   const partial = name === 'PartialEq' || name === 'PartialOrd';
   if (partial && ref.args[0]) {
+    const rhs = normalize(shallow(ref.args[0]));
+    if (t.kind === 'ref' && rhs.kind === 'ref') {
+      if (name === 'PartialOrd' && t.mutable && !rhs.mutable) return 'no';
+      return solver.implements(t.target, { trait: ref.trait, args: [rhs.target] });
+    }
     return solver.unifier.tryUnify(t, ref.args[0])
       ? builtinImplements(solver, t, { trait: ref.trait, args: [] })
       : 'no';

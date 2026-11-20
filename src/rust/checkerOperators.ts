@@ -1,4 +1,4 @@
-import type { Expr } from './ast';
+import type { Expr, Span } from './ast';
 import type { Checker } from './checker';
 import { isPlaceExpr, requireMutablePlace } from './checkerPlaces';
 import { normalize } from './infer';
@@ -184,20 +184,26 @@ function badOperands(expr: Extract<Expr, { kind: 'binary' }>, left: Type, right:
   compileError(expr.opSpan, `${typeToString(l)} と ${typeToString(r)} は、${expr.op} で計算できません。`);
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Follows the `PartialEq` and `PartialOrd` impls of std case by case.
 function checkComparison(c: Checker, expr: Extract<Expr, { kind: 'binary' }>): Type {
-  const leftType = c.expr(expr.left, undefined);
+  checkComparisonOperands(c, expr.left, expr.right, expr.op, expr.opSpan);
+  return BOOL;
+}
+
+// code-gauge-allow functionCognitiveComplexity 18 -- Follows the `PartialEq` and `PartialOrd` impls of std case by case.
+export function checkComparisonOperands(c: Checker, left: Expr, right: Expr, op: string, span: Span): [Type, Type] {
+  const leftType = c.expr(left, undefined);
   const l = normalize(shallow(leftType));
   // A sequence compares with sequences of other element types (`Vec<String> == [&str; 1]`), so it guides nothing.
   const guides = !(l.kind === 'var' && !l.v.literal) && !isSequence(l);
-  const rightType = c.expr(expr.right, guides ? leftType : undefined);
+  const rightType = c.expr(right, guides ? leftType : undefined);
   const r = normalize(shallow(rightType));
-  const isEquality = expr.op === '==' || expr.op === '!=';
+  const isEquality = op === '==' || op === '!=';
   // Strings compare with each other (`String == &str`), and sequences with each other (`Vec == [T; N]`).
-  if (isEquality && (stringsCompare(l, r) || sequencesCompare(c, l, r))) return BOOL;
+  if (isEquality && (stringsCompare(l, r) || sequencesCompare(c, l, r, span))) return [leftType, rightType];
   const trait = { trait: c.program.traitDef(isEquality ? 'PartialEq' : 'PartialOrd'), args: [rightType] };
-  if ((l.kind === 'adt' || l.kind === 'param' || l.kind === 'opaque') && c.solver.implements(l, trait) === 'yes') {
-    return BOOL;
+  const customOrReference = l.kind === 'adt' || l.kind === 'param' || l.kind === 'opaque' || l.kind === 'ref';
+  if (customOrReference && c.solver.implements(l, trait) === 'yes') {
+    return [leftType, rightType];
   }
   if (!c.unifier.tryUnify(leftType, rightType)) {
     const lt = typeToString(resolve(leftType));
@@ -206,21 +212,21 @@ function checkComparison(c: Checker, expr: Extract<Expr, { kind: 'binary' }>): T
     const rr = r.kind === 'ref' ? normalize(shallow(r.target)) : r;
     if (c.unifier.tryUnify(lr, rr)) {
       compileError(
-        expr.opSpan,
-        `${lt} と ${rt} は ${expr.op} で比べられません（* で参照をたどるか、& を付けて、型をそろえてください）。`
+        span,
+        `${lt} と ${rt} は ${op} で比べられません（* で参照をたどるか、& を付けて、型をそろえてください）。`
       );
     }
-    compileError(expr.opSpan, `${lt} と ${rt} は ${expr.op} で比べられません（型をそろえてください）。`);
+    compileError(span, `${lt} と ${rt} は ${op} で比べられません（型をそろえてください）。`);
   }
-  c.require(leftType, trait, expr.opSpan);
-  return BOOL;
+  c.require(leftType, trait, span);
+  return [leftType, rightType];
 }
 
 /**
  * Whether two sequence types compare with `==` by std's `PartialEq` impls between `Vec`, `VecDeque`, arrays, and
  * slices, each side under the same number of references or under the one reference an impl names (`Vec<T> == &[U]`).
  */
-export function sequencesCompare(c: Checker, left: Type, right: Type): boolean {
+function sequencesCompare(c: Checker, left: Type, right: Type, span: Span): boolean {
   let l = normalize(shallow(left));
   let r = normalize(shallow(right));
   while (l.kind === 'ref' && r.kind === 'ref') {
@@ -232,8 +238,9 @@ export function sequencesCompare(c: Checker, left: Type, right: Type): boolean {
   if (!a || !b || !SEQUENCE_EQ.has(`${a.kind}=${b.kind}`)) return false;
   if (a.len !== undefined && b.len !== undefined && a.len !== b.len) return false;
   if (stringsCompare(a.elem, b.elem)) return true;
-  if (!c.unifier.tryUnify(a.elem, b.elem)) return false;
-  c.requireTrait(a.elem, 'PartialEq', { row: 0, col: 1 });
+  const trait = { trait: c.program.traitDef('PartialEq'), args: [b.elem] };
+  if (c.solver.implements(a.elem, trait) === 'no') return false;
+  c.require(a.elem, trait, span);
   return true;
 }
 
@@ -410,7 +417,7 @@ function isStrLike(type: Type): boolean {
  * Whether `left == right` holds by std's `PartialEq` impls between different string types: `String` with `str` and
  * `&str` both ways, and the same under equal numbers of references (`impl PartialEq<&B> for &A`).
  */
-export function stringsCompare(left: Type, right: Type): boolean {
+function stringsCompare(left: Type, right: Type): boolean {
   let l = normalize(shallow(left));
   let r = normalize(shallow(right));
   while (l.kind === 'ref' && r.kind === 'ref') {

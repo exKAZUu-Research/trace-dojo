@@ -1720,6 +1720,27 @@ fn main() {
   expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: 'hello\n' });
 });
 
+test('uses heterogeneous Rust comparisons through references, sequences and assertions', () => {
+  const program = `use std::cmp::Ordering;
+#[derive(Debug)]
+struct A(i32);
+#[derive(Debug)]
+struct B(i32);
+impl PartialEq<B> for A { fn eq(&self, other: &B) -> bool { self.0 == other.0 } }
+impl PartialOrd<B> for A {
+    fn partial_cmp(&self, other: &B) -> Option<Ordering> { self.0.partial_cmp(&other.0) }
+}
+fn main() {
+    let a = A(1);
+    let b = B(1);
+    assert_eq!(&a, &b);
+    assert_ne!(A(2), b);
+    assert_eq!(vec![A(2)], [B(2)]);
+    println!("{} {} {} {}", &&a == &&b, &a < &B(2), [A(3)] == [B(3)], &vec![A(1)][..] == &[B(1)][..]);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'true true true true\n' });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

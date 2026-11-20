@@ -208,7 +208,7 @@ function assertEqMacro(c: Compiler, macro: Macro<'assertEq'>, span: Span): Eval 
   return (frame) => {
     const a = left(frame);
     const b = right(frame);
-    if (valuesEqual(eqType(frame), a, b) !== equal) {
+    if (valuesEqual(eqType(frame), a, b, rightType(frame)) !== equal) {
       const spec = debugSpec(false);
       const l = c.support.formatter.debug(a, leftType(frame), spec, undefined);
       const r = c.support.formatter.debug(b, rightType(frame), spec, undefined);

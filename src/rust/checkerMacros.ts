@@ -1,7 +1,7 @@
 import type { FormatArgs, MacroCall, Span } from './ast';
 import type { Checker } from './checker';
 import { checkElements } from './checkerExpr';
-import { sequencesCompare, stringsCompare } from './checkerOperators';
+import { checkComparisonOperands } from './checkerOperators';
 import { traitInScope } from './checkerPaths';
 import { checkPattern } from './checkerPatterns';
 import { requireMutablePlace } from './checkerPlaces';
@@ -85,13 +85,15 @@ function checkWriterTrait(
 }
 
 function assertEqMacro(c: Checker, macro: Extract<MacroCall, { kind: 'assertEq' }>): Type {
-  const left = c.expr(macro.left, undefined);
-  const right = c.expr(macro.right, left);
-  if (!c.unifier.tryUnify(left, right) && !stringsCompare(left, right) && !sequencesCompare(c, left, right)) {
-    c.mismatch(macro.right.span, left, right);
-  }
-  c.requireTrait(left, 'PartialEq', macro.left.span);
+  const [left, right] = checkComparisonOperands(
+    c,
+    macro.left,
+    macro.right,
+    macro.equal ? '==' : '!=',
+    macro.right.span
+  );
   c.requireTrait(left, 'Debug', macro.left.span);
+  c.requireTrait(right, 'Debug', macro.right.span);
   if (macro.format) formatArgs(c, macro.format);
   return UNIT;
 }

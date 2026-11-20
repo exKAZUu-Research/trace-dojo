@@ -238,12 +238,10 @@ export function valuesEqual(type: Type, a: Value, b: Value, rhs: Type = type): b
     }
     case 'array':
     case 'slice': {
-      const xs = sliceItems(x);
-      const ys = sliceItems(y);
-      return xs.length === ys.length && xs.every((item, index) => valuesEqual(t.elem, item, ys[index]));
+      return equalSequence(t.elem, x, y, derefType(rhs));
     }
     case 'adt': {
-      return adtEqual(t, x, y);
+      return adtEqual(t, x, y, derefType(rhs));
     }
     case 'dyn': {
       return x === y;
@@ -256,7 +254,7 @@ export function valuesEqual(type: Type, a: Value, b: Value, rhs: Type = type): b
 
 // code-gauge-allow functionCognitiveComplexity 27 -- One case per kind of type.
 // code-gauge-allow functionNcss 56 -- One case per kind of type.
-function adtEqual(t: Type & { kind: 'adt' }, x: Value, y: Value): boolean {
+function adtEqual(t: Type & { kind: 'adt' }, x: Value, y: Value, rhs: Type): boolean {
   const { def } = t;
   switch (def.builtin) {
     case 'String': {
@@ -271,9 +269,7 @@ function adtEqual(t: Type & { kind: 'adt' }, x: Value, y: Value): boolean {
     }
     case 'Vec':
     case 'VecDeque': {
-      const xs = sliceItems(x);
-      const ys = sliceItems(y);
-      return xs.length === ys.length && xs.every((item, index) => valuesEqual(t.args[0], item, ys[index]));
+      return equalSequence(t.args[0], x, y, rhs);
     }
     case 'Box':
     case 'Reverse': {
@@ -320,6 +316,13 @@ function adtEqual(t: Type & { kind: 'adt' }, x: Value, y: Value): boolean {
       return x === y;
     }
   }
+}
+
+function equalSequence(elem: Type, left: Value, right: Value, rhs: Type): boolean {
+  const xs = sliceItems(left);
+  const ys = sliceItems(right);
+  const other = rhs.kind === 'array' || rhs.kind === 'slice' ? rhs.elem : rhs.kind === 'adt' ? rhs.args[0] : elem;
+  return xs.length === ys.length && xs.every((item, index) => valuesEqual(elem, item, ys[index], other));
 }
 
 function mapsEqual([keyType, valueType]: Type[], left: MapValue, right: MapValue): boolean {
