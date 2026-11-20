@@ -627,8 +627,8 @@ export class PhpArray {
     this.ordered().detachedPointer = index;
   }
 
-  sampleKey(draw: (max: number) => number): Key {
-    return this.ordered().sampleKey(draw);
+  sampleKey(draw: (max: number) => number, chargeScan?: (cost: number) => void): Key {
+    return this.ordered().sampleKey(draw, chargeScan);
   }
 
   keys(): Key[] {

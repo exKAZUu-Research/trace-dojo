@@ -5020,4 +5020,10 @@ echo $r;
     stdout: '6',
     uncaughtException: undefined,
   });
+
+  expect(
+    run(
+      '<?php mt_srand(42); $a = range(0, 9999); $sum = 0; for ($i = 0; $i < 7000; $i++) $sum += array_rand($a); echo $sum;'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '34849407' });
 });

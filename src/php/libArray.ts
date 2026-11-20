@@ -1386,11 +1386,13 @@ defineFunction('array_rand(array $array, int $num = 1): int|string|array', ({ ar
   const runtime = rt();
   const mt = runtime.mt;
   if (count === 1) {
-    runtime.spend(Math.ceil(array.size / 64));
-    return array.sampleKey((max) => {
-      runtime.spend();
-      return Number(mt.range(0n, BigInt(max)));
-    });
+    return array.sampleKey(
+      (max) => {
+        runtime.spend();
+        return Number(mt.range(0n, BigInt(max)));
+      },
+      (cost) => runtime.spend(cost)
+    );
   }
   const keys = array.keys();
   if (count <= 0 || count > keys.length) {

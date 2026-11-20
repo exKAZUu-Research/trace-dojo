@@ -100,24 +100,20 @@ export class ArrayOrder {
     return this.isPacked && this.nextIndex === this.entries.size;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
-  sampleKey(draw: (max: number) => number): Key {
-    if (this.entries.size === this.nextIndex || this.entries.size < this.nextIndex - (this.nextIndex >> 1)) {
+  sampleKey(draw: (max: number) => number, chargeScan?: (cost: number) => void): Key {
+    if (this.entries.size === this.nextIndex) {
+      const direct = this.buckets.get(draw(this.entries.size - 1) + this.indexOffset);
+      if (direct) return direct.key;
+    } else if (this.entries.size < this.nextIndex - (this.nextIndex >> 1)) {
+      chargeScan?.(Math.ceil(this.entries.size / 64));
       let index = draw(this.entries.size - 1);
       for (const entry of this.orderedEntries()) {
         if (index-- === 0) return entry.key;
       }
-    } else if (this.packed) {
-      for (;;) {
-        const key = BigInt(draw(this.nextIndex - 1));
-        if (this.get(key)) return key;
-      }
     } else {
-      const buckets: (Key | undefined)[] = [];
-      for (const entry of this.orderedEntries()) buckets[entry.index] = entry.key;
       for (;;) {
-        const key = buckets[draw(this.nextIndex - 1)];
-        if (key !== undefined) return key;
+        const direct = this.buckets.get(draw(this.nextIndex - 1) + this.indexOffset);
+        if (direct) return direct.key;
       }
     }
     throw new Error('Invalid array sampling index');
