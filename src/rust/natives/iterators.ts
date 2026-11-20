@@ -165,16 +165,20 @@ export function nextOf(iter: IterValue): Next {
   return iter.next();
 }
 
-/** Takes the element `n` places from the back, dropping those after it, as `nth_back` does. */
-function nthBack(iter: IterValue, n: number): Next {
-  for (let index = 0; index < n; index++) if (iter.nextBack!() === DONE) return DONE;
-  return iter.nextBack!();
+function nthBack(ctx: NativeContext, iter: IterValue, n: number): Next {
+  return nthItem(ctx, n, () => iter.nextBack!());
 }
 
-/** Takes the element `n` places from the front, dropping those before it, as `nth` does. */
-function nth(iter: IterValue, n: number): Next {
-  for (let index = 0; index < n; index++) if (nextOf(iter) === DONE) return DONE;
-  return nextOf(iter);
+function nth(ctx: NativeContext, iter: IterValue, n: number): Next {
+  return nthItem(ctx, n, () => nextOf(iter));
+}
+
+function nthItem(ctx: NativeContext, n: number, next: () => Next): Next {
+  for (let index = 0; index < n; index++) {
+    ctx.runtime.spend();
+    if (next() === DONE) return DONE;
+  }
+  return next();
 }
 
 /** The number of elements left, counting those `peek` looked at. */
@@ -449,7 +453,7 @@ define({
       nextBack: () => nextOf(src),
       remaining: src.remaining,
     })),
-  'IterImpl<_, _>::take': ([self, n]) =>
+  'IterImpl<_, _>::take': ([self, n], ctx) =>
     adapter(iterOf(self), { left: Number(n as bigint) }, (src, state) => ({
       next: () => {
         if (state.left <= 0) return DONE;
@@ -460,17 +464,17 @@ define({
       nextBack: () => {
         if (state.left <= 0) return DONE;
         const left = state.left--;
-        return nthBack(src, Math.max(lengthOf(src) - left, 0));
+        return nthBack(ctx, src, Math.max(lengthOf(src) - left, 0));
       },
       remaining: () => Math.min(state.left, lengthOf(src)),
     })),
-  'IterImpl<_, _>::skip': ([self, n]) =>
+  'IterImpl<_, _>::skip': ([self, n], ctx) =>
     adapter(iterOf(self), { toSkip: Number(n as bigint) }, (src, state) => ({
       next: () => {
         if (state.toSkip > 0) {
           const skip = state.toSkip;
           state.toSkip = 0;
-          return nth(src, skip);
+          return nth(ctx, src, skip);
         }
         return nextOf(src);
       },
@@ -503,13 +507,13 @@ define({
       next: () => {
         const skip = state.first ? 0 : step - 1;
         state.first = false;
-        return nth(src, skip);
+        return nth(ctx, src, skip);
       },
       // `StepBy::next_back_index`: the elements after the last one the steps reach are dropped from the back.
       nextBack: () => {
         const rem = lengthOf(src) % step;
         const index = state.first ? (rem === 0 ? step - 1 : rem - 1) : rem;
-        return nthBack(src, index);
+        return nthBack(ctx, src, index);
       },
       remaining: () => {
         const length = lengthOf(src);
@@ -870,11 +874,11 @@ define({
     return option(ctx, items.at(-1), items.length > 0);
   },
   'IterImpl<_, _>::nth': ([self, n], ctx) => {
-    const item = nth(iterOf(self), Number(n as bigint));
+    const item = nth(ctx, iterOf(self), Number(n as bigint));
     return option(ctx, item === DONE ? undefined : item, item !== DONE);
   },
   'IterImpl<_, _>::nth_back': ([self, n], ctx) => {
-    const item = nthBack(iterOf(self), Number(n as bigint));
+    const item = nthBack(ctx, iterOf(self), Number(n as bigint));
     return option(ctx, item === DONE ? undefined : item, item !== DONE);
   },
   'IterImpl<_, _>::fold': ([self, init, f], ctx) => {

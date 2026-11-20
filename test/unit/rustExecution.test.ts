@@ -811,6 +811,16 @@ test.each([
   );
 });
 
+test.each(['(0..2_000_000).nth(1_000_000)', '(0..2_000_000).take(1).next_back()'])(
+  'iterator traversal counts skipped items against the operation limit: %s',
+  (expression) => {
+    expect(executeProgram('rust', rustMain(`    let item = ${expression};`))).toEqual({
+      kind: 'limitExceeded',
+      limit: 'operations',
+    });
+  }
+);
+
 test('an endless loop stops at the operation limit', () => {
   expect(executeProgram('rust', rustMain('    let mut i: u64 = 0;\n    loop { i = i.wrapping_add(1); }'))).toEqual({
     kind: 'limitExceeded',
