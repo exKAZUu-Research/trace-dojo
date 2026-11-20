@@ -250,7 +250,11 @@ export class Interpreter implements CallSupport {
       captures
     );
     fn.duplicate = (copy) => {
-      const places = captures.map((place, index) => (byValue[index] ? new CellPlace(copy(place.get(), index)) : place));
+      const places = captures.map((place, index) => {
+        if (!byValue[index]) return place;
+        const type = concreteType(compiled.info.captures[index].type, typeArgs);
+        return new CellPlace(copy(place.get(), type));
+      });
       return this.makeClosure(compiled, frame, places, byValue) as FnValue;
     };
     return fn;

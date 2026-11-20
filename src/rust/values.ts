@@ -156,9 +156,9 @@ export class FnValue {
 
   /**
    * For a closure, a copy (or a clone) of it: what it captures by value goes through `copy` (with the capture's
-   * index), and what it captures by reference stays shared.
+   * concrete type), and what it captures by reference stays shared.
    */
-  duplicate: ((copy: (value: Value, index: number) => Value) => FnValue) | undefined;
+  duplicate: ((copy: (value: Value, type: Type) => Value) => FnValue) | undefined;
 }
 
 export const DONE: unique symbol = Symbol('done');

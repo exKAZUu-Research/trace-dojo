@@ -557,7 +557,8 @@ export function cloneValue(type: Type, value: Value): Value {
       return t.elems.map((elem, index) => cloneValue(elem, (value as Value[])[index]));
     }
     case 'closure': {
-      return cloneClosure(t.closure.captures ?? [], value as FnValue);
+      const fn = value as FnValue;
+      return fn.duplicate?.((item, type) => cloneValue(type, item)) ?? fn;
     }
     case 'array':
     case 'slice': {
@@ -618,11 +619,6 @@ export function cloneValue(type: Type, value: Value): Value {
       return value;
     }
   }
-}
-
-/** A clone of a closure, which clones what it captures by value. */
-function cloneClosure(captures: { type: Type }[], fn: FnValue): FnValue {
-  return fn.duplicate?.((item, index) => cloneValue(captures[index].type, item)) ?? fn;
 }
 
 /** A clone of an iterator, which goes on from where the iterator is, on its own. */

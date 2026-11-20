@@ -1003,6 +1003,32 @@ fn main() {
   });
 });
 
+test('clones concrete captures in generic iterator constructors', () => {
+  const program = `trait Counter { fn bump(&mut self) -> i32; }
+impl Counter for Vec<i32> {
+    fn bump(&mut self) -> i32 {
+        self[0] += 1;
+        self[0]
+    }
+}
+fn check<T: Clone + Counter>(seed: T) {
+    let mut x = seed.clone();
+    let make = (0..2).map(move |_| x.bump());
+    let other = make.clone();
+    println!("{:?} {:?}", make.collect::<Vec<_>>(), other.collect::<Vec<_>>());
+    let mut x = seed;
+    let make = std::iter::from_fn(move || Some(x.bump()));
+    let other = make.clone();
+    println!("{:?} {:?}", make.take(2).collect::<Vec<_>>(), other.take(2).collect::<Vec<_>>());
+}
+fn main() { check(vec![1]); }`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[2, 3] [2, 3]\n[2, 3] [2, 3]\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {
