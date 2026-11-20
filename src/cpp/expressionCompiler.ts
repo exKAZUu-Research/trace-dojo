@@ -2091,19 +2091,24 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       const store = pointer.target();
       if (store.allocation !== (isArray ? 'newArray' : 'new') || pointer.index !== 0)
         throw new CppRuntimeError('invalidDelete');
-      holdValues(frame, [store], () => {
-        if (isArray) {
-          destroyAllocatedArray(frame, store as ArrayStore, pointee, destroyStatic);
-        } else {
-          const object = (store as Box).value;
-          if (cls && object instanceof CObject && object.cls !== cls && !hasVirtualDestructor)
-            throw new CppRuntimeError('invalidDelete');
-          const destroy =
-            hasVirtualDestructor && object instanceof CObject ? object.cls.operations?.destroy : destroyStatic;
-          destroy?.(frame, object);
-        }
-        endLifetime(store, Liveness.Deleted);
-      });
+      frame.runtime.deleteDepth++;
+      try {
+        holdValues(frame, [store], () => {
+          if (isArray) {
+            destroyAllocatedArray(frame, store as ArrayStore, pointee, destroyStatic);
+          } else {
+            const object = (store as Box).value;
+            if (cls && object instanceof CObject && object.cls !== cls && !hasVirtualDestructor)
+              throw new CppRuntimeError('invalidDelete');
+            const destroy =
+              hasVirtualDestructor && object instanceof CObject ? object.cls.operations?.destroy : destroyStatic;
+            destroy?.(frame, object);
+          }
+          endLifetime(store, Liveness.Deleted);
+        });
+      } finally {
+        frame.runtime.deleteDepth--;
+      }
       return;
     };
     return { type: { kind: 'void' }, isLvalue: false, row: node.row, run: exec, onlyCalls: true };

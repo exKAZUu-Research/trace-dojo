@@ -176,6 +176,13 @@ class OperandAccesses {
 export class Runtime implements TracedRuntime<Frame> {
   isStdioSynchronized = true;
   readonly world = new TurtleWorld();
+  /**
+   * The turtles a program removed with their remove method or a delete expression, unlike those whose objects' lifetimes
+   * ended at the end of a scope or of the program.
+   */
+  readonly removedTurtles = new Set<TurtleState>();
+  /** The number of delete expressions destroying objects now. */
+  deleteDepth = 0;
   readonly frames: Frame[] = [];
   readonly budget = new ExecutionBudget();
   readonly io: ProgramIO;

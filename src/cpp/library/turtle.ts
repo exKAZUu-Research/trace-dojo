@@ -87,7 +87,11 @@ export function turtleClass(runtimeError: () => ClassInfo, stringType: () => Typ
   for (const name of TURTLE_METHOD_NAMES.remove) {
     addMethod(
       cls,
-      native(name, [], VOID, (_args, { self, frame }) => frame.runtime.world.remove(stateOf(self)))
+      native(name, [], VOID, (_args, { self, frame }) => {
+        const turtle = stateOf(self);
+        frame.runtime.removedTurtles.add(turtle);
+        frame.runtime.world.remove(turtle);
+      })
     );
   }
   cls.operations = {
@@ -99,7 +103,9 @@ export function turtleClass(runtimeError: () => ClassInfo, stringType: () => Typ
     },
     destroy: (frame, object) => {
       const turtle = (object as CObject).turtle;
-      if (turtle?.isAlive) frame.runtime.world.remove(turtle);
+      if (!turtle?.isAlive) return;
+      if (frame.runtime.deleteDepth > 0) frame.runtime.removedTurtles.add(turtle);
+      frame.runtime.world.remove(turtle);
     },
   };
   return cls;

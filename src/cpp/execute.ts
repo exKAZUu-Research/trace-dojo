@@ -82,7 +82,7 @@ export function runProgram(runtime: Runtime, program: CompiledProgram, onEnd?: (
   runtime.flushOutput();
   return {
     finalBoard: runtime.world.boardText(),
-    finalTurtles: runtime.world.turtleTraces(captureTurtles()),
+    finalTurtles: runtime.world.turtleTraces(finalTurtleStates(runtime, captureTurtles())),
     uncaughtException,
     ...runtime.io.output(),
   };
@@ -99,6 +99,16 @@ function runStartup(runtime: Runtime, program: CompiledProgram): void {
   } finally {
     runtime.popFrame();
   }
+}
+
+/**
+ * The turtles captured when main ended, as destructors that ran afterward left them: without the ones they removed and
+ * with the ones they put on the board.
+ */
+function finalTurtleStates(runtime: Runtime, captured: readonly TurtleState[]): TurtleState[] {
+  const kept = captured.filter((turtle) => !runtime.removedTurtles.has(turtle));
+  const added = runtime.world.currentTurtles().filter((turtle) => !captured.includes(turtle));
+  return [...kept, ...added];
 }
 
 function mainArguments(): unknown[] {

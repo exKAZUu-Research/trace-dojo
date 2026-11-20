@@ -370,6 +370,20 @@ test.each([
   expect(recording.traceItems.at(-1)?.turtles).toEqual([turtle]);
 });
 
+test.each([
+  ['struct R { Turtle* t; ~R() { t->remove(); } };\nint main() { Turtle t; R r{&t}; }', []],
+  ['struct D { Turtle* t; ~D() { delete t; } };\nint main() { Turtle* t = new Turtle(); D d{t}; }', []],
+  [
+    'Turtle* g;\nstruct M { ~M() { g = new Turtle(3, 5); } };\nM m;\nint main() {}',
+    [{ x: 3, y: 5, color: '#', dir: 'N' }],
+  ],
+])('reports the final turtles that destructors remove or add in %s', (program, turtles) => {
+  expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', finalTurtles: turtles });
+  const recording = traceProgram('cpp', program, program);
+  expect(recording.finalTurtles).toEqual(turtles);
+  expect(recording.traceItems.at(-1)?.turtles).toEqual(turtles);
+});
+
 test.each(['std::array<int[512], 1>', 'std::array<int[16][32], 1>'])(
   'meters the elements copied by assigning %s',
   (type) => {
