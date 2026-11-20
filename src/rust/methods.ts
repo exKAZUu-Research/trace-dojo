@@ -439,7 +439,8 @@ function builtinTraitAssociated(program: Program, solver: TraitSolver, t: Type, 
     const answer = solver.implements(t, { trait, args });
     // A derive implements the trait for every type argument that meets it, which may not be known yet (`W::default()`).
     const derived = t.kind === 'adt' && t.def.derives.has(trait.builtin);
-    if (answer === 'yes' || (answer === 'unknown' && (args.length > 0 || derived)))
+    const boxDefault = trait.builtin === 'Default' && t.kind === 'adt' && t.def.builtin === 'Box';
+    if (answer === 'yes' || (answer === 'unknown' && (args.length > 0 || derived || boxDefault)))
       return { fn, typeArgs: [t, ...args, ...ownParams(fn)] };
     solver.unifier.rollback(snapshot);
   }

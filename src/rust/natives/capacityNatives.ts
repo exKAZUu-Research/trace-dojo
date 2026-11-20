@@ -32,11 +32,34 @@ export function intoStringBytes(value: Value, ctx: NativeContext): bigint[] {
  * `RawVec`'s check of a length and the room asked beyond it (`with_capacity`, `reserve`), which panics when they
  * overflow a `usize` or their elements' bytes overflow an `isize`.
  */
-export function checkVecCapacity(ctx: NativeContext, len: number, additional: Value, elemSize: number): void {
+export function checkVecCapacity(
+  ctx: Pick<NativeContext, 'span'>,
+  len: number,
+  additional: Value,
+  elemSize: number
+): void {
   const capacity = BigInt(len) + (additional as bigint);
   if (capacity > USIZE_MAX || capacity * BigInt(elemSize) > ISIZE_MAX) {
     libraryPanic(ctx, 'capacity overflow', 'alloc/src/raw_vec/mod.rs:28:5');
   }
+}
+
+export function allocVecElements(
+  ctx: Pick<NativeContext, 'runtime' | 'span'>,
+  len: number,
+  additional: bigint,
+  elemSize: number
+): number {
+  checkVecCapacity(ctx, len, additional, elemSize);
+  const count = Number(additional);
+  ctx.runtime.allocate(count, (BigInt(len) + additional) * BigInt(elemSize));
+  return count;
+}
+
+export function repeatedLength(ctx: Pick<NativeContext, 'span'>, length: number, count: bigint): bigint {
+  const result = BigInt(length) * count;
+  if (result > USIZE_MAX) libraryPanic(ctx, 'capacity overflow', 'alloc/src/slice.rs:524:50');
+  return result;
 }
 
 /**
@@ -64,14 +87,17 @@ function elemType(ctx: NativeContext): Type {
 }
 
 /** The natives that add this many elements, which make room first as `RawVec::reserve` does. */
-const VEC_GROWING: Record<string, (args: Value[]) => number> = {
+const VEC_GROWING: Record<string, (args: Value[]) => number | bigint> = {
   push: () => 1,
   insert: () => 1,
   push_back: () => 1,
   push_front: () => 1,
   extend_from_slice: ([, other]) => sliceLength(deref(other)),
   append: ([, other]) => vec(other).length,
-  resize: ([self, newLen]) => Math.max(0, Number(newLen as bigint) - vec(self).length),
+  resize: ([self, newLen]) => {
+    const additional = (newLen as bigint) - BigInt(vec(self).length);
+    return additional > 0n ? additional : 0n;
+  },
 };
 
 /** The natives that may remove elements, after which the collection keeps its capacity. */
@@ -136,7 +162,10 @@ export function withCapacity(
       tracked[name] = (args, ctx) => {
         const items = vec(args[0]);
         const length = items.length;
-        reserveVec(items, length, additional(args), sizeOf(elemType(ctx)));
+        const count = BigInt(additional(args));
+        const size = sizeOf(elemType(ctx));
+        checkVecCapacity(ctx, length, count, size);
+        reserveVec(items, length, Number(count), size);
         return native(args, ctx);
       };
     } else if (VEC_SHRINKING.has(name)) {

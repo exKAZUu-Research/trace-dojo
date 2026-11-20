@@ -27,7 +27,7 @@ export function panic(ctx: NativeContext, message: string): never {
 }
 
 /** A panic inside a function of the standard library without `#[track_caller]`, which Rust reports where it is. */
-export function libraryPanic(ctx: NativeContext, message: string, location: string): never {
+export function libraryPanic(ctx: Pick<NativeContext, 'span'>, message: string, location: string): never {
   throw new RustPanic(message, ctx.span, location);
 }
 

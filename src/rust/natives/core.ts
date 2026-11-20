@@ -191,7 +191,7 @@ function builtinDefaultValue(ctx: NativeContext, type: Type): Value {
           return none(ctx);
         }
         case 'Box': {
-          return defaultValue(ctx, t.args[0]);
+          return defaultBoxValue(ctx, t.args[0]);
         }
         default: {
           break;
@@ -210,6 +210,13 @@ function builtinDefaultValue(ctx: NativeContext, type: Type): Value {
       return undefined;
     }
   }
+}
+
+function defaultBoxValue(ctx: NativeContext, type: Type): Value {
+  const content = normalize(shallow(type));
+  if (content.kind === 'str') return '';
+  if (content.kind === 'slice') return [];
+  return defaultValue(ctx, content);
 }
 
 define({

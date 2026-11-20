@@ -21,7 +21,7 @@ import {
   UNIT_VALUE,
   type Value,
 } from '../values';
-import { checkVecCapacity, intoStringBytes, withStringCapacity } from './capacityNatives';
+import { checkVecCapacity, intoStringBytes, repeatedLength, withStringCapacity } from './capacityNatives';
 import { arrayIter } from './iterators';
 import { parseFloatText, parseInteger } from './numbers';
 import { checkedRangeBounds } from './ranges';
@@ -417,9 +417,13 @@ const strNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
   eq_ignore_ascii_case: ([a, b]) =>
     textOf(a).replaceAll(/[A-Z]/g, (c) => c.toLowerCase()) === textOf(b).replaceAll(/[A-Z]/g, (c) => c.toLowerCase()),
   repeat: ([s, n], ctx) => {
+    const text = textOf(s);
+    const bytes = repeatedLength(ctx, byteLength(text), n as bigint);
+    checkVecCapacity(ctx, 0, bytes, 1);
+    if (bytes === 0n) return '';
     const count = Number(n as bigint);
-    ctx.runtime.allocateString(textOf(s).length * count);
-    return textOf(s).repeat(count);
+    ctx.runtime.allocateString(text.length * count, undefined, bytes);
+    return text.repeat(count);
   },
   parse: ([s], ctx) => parse(ctx, textOf(s)),
   to_owned: ([s]) => textOf(s),

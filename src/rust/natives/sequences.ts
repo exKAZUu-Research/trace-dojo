@@ -22,7 +22,7 @@ import {
   UNIT_VALUE,
   type Value,
 } from '../values';
-import { extendRoom, withCapacity } from './capacityNatives';
+import { allocVecElements, extendRoom, repeatedLength, withCapacity } from './capacityNatives';
 import { cloneInto } from './cloning';
 import { dequeDrain, dequeIter, dequeRange, dequeSlices, withDequeHead } from './dequeHead';
 import {
@@ -307,8 +307,8 @@ const sliceNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
   clone_from_slice: ([self, src], ctx) => copyFrom(ctx, deref(self), deref(src), elemType(ctx)),
   repeat: ([self, n], ctx) => {
     const items = sliceItems(deref(self));
-    const length = items.length * Number(n as bigint);
-    ctx.runtime.allocate(length);
+    const count = repeatedLength(ctx, items.length, n as bigint);
+    const length = allocVecElements(ctx, 0, count, sizeOf(elemType(ctx)));
     return Array.from({ length }, (_, index) => copyValue(items[index % items.length]));
   },
 };
@@ -657,12 +657,11 @@ const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
   },
   resize: ([self, newLen, value], ctx) => {
     const items = vec(self);
-    const length = Number(newLen as bigint);
-    if (length < items.length) items.length = length;
-    else {
-      ctx.runtime.allocate(length - items.length);
-      if (items.length === length) return UNIT_VALUE;
+    const additional = (newLen as bigint) - BigInt(items.length);
+    if (additional < 0n) items.length = Number(newLen as bigint);
+    else if (additional > 0n) {
       const type = elemType(ctx);
+      const length = items.length + allocVecElements(ctx, items.length, additional, sizeOf(type));
       while (items.length < length - 1) items.push(cloneValue(type, value));
       items.push(value);
     }

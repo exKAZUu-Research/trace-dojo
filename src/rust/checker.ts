@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 793 -- The checker core owns body, entry point, and type obligations.
+// code-gauge-allow-file fileNcss 797 -- The checker core owns body, entry point, and type obligations.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ExecutionBudget } from '../interpreter/limits';
 import { Annotations, type Coercion, type FnContext, type LocalVar, type PathRes } from './annotations';
@@ -147,11 +147,11 @@ export class Checker {
     }
     for (const fn of this.program.fns.slice(firstFn)) {
       if ((fn.module as Module).isStd || !fn.ast) continue;
-      for (const [index, type] of fn.paramTypes.entries()) this.checkWrittenType(type, fn.ast.params[index].span);
-      this.checkWrittenType(fn.ret, fn.ast.ret?.span ?? fn.ast.span);
+      for (const [index, type] of fn.paramTypes.entries()) this.checkSizedWrittenType(type, fn.ast.params[index].span);
+      this.checkSizedWrittenType(fn.ret, fn.ast.ret?.span ?? fn.ast.span);
     }
     for (const def of this.program.consts.slice(firstConst)) {
-      if (!def.module.isStd) this.checkWrittenType(def.type, def.ast.span);
+      if (!def.module.isStd) this.checkSizedWrittenType(def.type, def.ast.span);
     }
     for (const impl of this.program.impls.slice(firstImpl)) {
       if ((impl.module as Module).isStd) continue;
@@ -600,6 +600,7 @@ export class Checker {
             `変数 ${local.name} の型が決まりません（${typeToString(type)} の型を書いてください）。`
           );
         }
+        this.requireTrait(type, 'Sized', local.span);
       }
     }
   }
@@ -977,6 +978,11 @@ export class Checker {
     this.requireDyn(a.target, target.trait, expr.span);
     this.setCoercion(expr, { kind: 'dyn', type: a.target, mutable: a.mutable, trait: target.trait });
     return true;
+  }
+
+  private checkSizedWrittenType(type: Type, span: Span): void {
+    this.checkWrittenType(type, span);
+    this.requireTrait(type, 'Sized', span);
   }
 
   /**

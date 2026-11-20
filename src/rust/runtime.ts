@@ -143,9 +143,9 @@ export class Runtime implements TracedRuntime<Frame> {
   }
 
   /** Counts allocated elements against {@link LIMITS.maxSlots}. */
-  allocate(count: number): void {
+  allocate(count: number, bytes: number | bigint = count * SLOT_BYTES): void {
     this.slots += count;
-    if (this.slots > LIMITS.maxSlots) throw new OutOfMemory(count * SLOT_BYTES);
+    if (this.slots > LIMITS.maxSlots) throw new OutOfMemory(bytes);
   }
 
   /**
@@ -153,8 +153,8 @@ export class Runtime implements TracedRuntime<Frame> {
    * for each 64 characters of the `written` ones that end it, which bounds what a run builds in all; a string grown a
    * character at a time is charged as one built at once.
    */
-  allocateString(length: number, written = length): void {
-    if (length > LIMITS.maxStringLength) throw new OutOfMemory(length);
+  allocateString(length: number, written = length, bytes: number | bigint = length): void {
+    if (length > LIMITS.maxStringLength) throw new OutOfMemory(bytes);
     this.spend(Math.floor(length / 64) - Math.floor((length - written) / 64));
   }
 
@@ -215,7 +215,7 @@ const SLOT_BYTES = 8;
  * handler does when the system has no more memory.
  */
 export class OutOfMemory {
-  constructor(readonly bytes: number) {}
+  constructor(readonly bytes: number | bigint) {}
 }
 
 // code-gauge-allow functionNcss 38 -- One case per kind of value.

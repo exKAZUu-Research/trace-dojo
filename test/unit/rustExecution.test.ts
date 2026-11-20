@@ -4866,3 +4866,81 @@ fn main() {
 }`;
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '3 2 3\n' });
 });
+
+test('takes constant array and UTF-8 string lengths at each array declaration site', () => {
+  const program = `const NAMES: [&str; 3] = ["a", "b", "c"];
+const N: usize = NAMES.len();
+const SLICE: &[i32] = &[7, 8, 9, 10];
+const TEXT: &str = "élan";
+fn main() {
+    let counts = [0; N];
+    let typed: [i32; NAMES.len()] = [0; 3];
+    let slice: [i32; SLICE.len()] = [0; 4];
+    let text: [i32; TEXT.len()] = [0; 5];
+    let literal: [i32; [1, 2].len()] = [0; 2];
+    println!("{:?} {} {} {} {}", counts, typed.len(), slice.len(), text.len(), literal.len());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '[0, 0, 0] 3 4 5 2\n' });
+  const mixed = rustMain('let _: [i32; [1, false].len()] = [0; 2];');
+  expect(executeProgram('rust', mixed)).toMatchObject({ kind: 'compileError' });
+});
+
+test('requires sized by-value inputs, returns and bindings while allowing borrowed trait objects', () => {
+  const program = `trait Shape {}
+struct Square;
+impl Shape for Square {}
+fn draw(s: &dyn Shape) {
+    let borrowed: &dyn Shape = s;
+    let _: dyn Shape = *borrowed;
+    println!("draw");
+}
+fn main() { draw(&Square); }`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'draw\n' });
+  for (const body of ['let _x: dyn Shape = unimplemented!();', 'let s: &dyn Shape = &Square; let _x = *s;']) {
+    expect(
+      executeProgram('rust', rustMain(body, 'trait Shape {} struct Square; impl Shape for Square {}'))
+    ).toMatchObject({ kind: 'compileError' });
+  }
+  for (const declaration of [
+    'fn area(_s: dyn Shape) -> i32 { 1 }',
+    'fn area(_s: (i32, dyn Shape)) -> i32 { 1 }',
+    'fn area() -> dyn Shape { unimplemented!() }',
+  ]) {
+    expect(executeProgram('rust', rustMain('', `trait Shape {} ${declaration}`))).toMatchObject({
+      kind: 'compileError',
+    });
+  }
+});
+
+test('defaults boxed strings and slices to empty values without an element bound', () => {
+  const program = `struct NoDefault;
+fn main() {
+    let a: Box<str> = Default::default();
+    let b: Box<[i64]> = Box::default();
+    let c: Box<[NoDefault]> = Default::default();
+    let d: Box<i32> = Box::default();
+    println!("{} {} {} {}", a.is_empty(), b.len(), c.len(), *d);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'true 0 0 0\n' });
+});
+
+test('checks typed repeated allocations before converting the count to a number', () => {
+  for (const [body, location] of [
+    ['let _ = vec![0u8; 9223372036854775808usize];', 'alloc/src/raw_vec/mod.rs:28:5'],
+    ['let _ = vec![0u64; usize::MAX / 4];', 'alloc/src/raw_vec/mod.rs:28:5'],
+    ['let mut v = vec![0u8]; v.resize(usize::MAX, 0);', 'alloc/src/raw_vec/mod.rs:28:5'],
+    ['let _ = [0u8, 1].repeat(usize::MAX);', 'alloc/src/slice.rs:524:50'],
+    ['let _ = "ab".repeat(usize::MAX);', 'alloc/src/slice.rs:524:50'],
+  ] as const) {
+    const run = executeProgram('rust', rustMain(body));
+    expect(run).toMatchObject({
+      kind: 'executed',
+      uncaughtException: expect.stringContaining(`${location}:\ncapacity overflow`),
+    });
+  }
+  const tooLarge = executeProgram('rust', rustMain('let _ = vec![0u8; 1usize << 50];'));
+  expect(tooLarge).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('memory allocation of 1125899906842624 bytes failed'),
+  });
+});

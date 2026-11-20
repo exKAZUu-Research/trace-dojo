@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 503 -- One rule per trait of the standard library.
+// code-gauge-allow-file fileNcss 508 -- One rule per trait of the standard library.
 import { collectionKeyAnswer } from './collectionBounds';
 import { normalize } from './infer';
 import { supportsDebug } from './iterDebug';
@@ -182,7 +182,9 @@ export function builtinImplements(solver: TraitSolver, t: Type, ref: TraitRef): 
   return rule({ solver, t, ref, name, all });
 }
 
-function sized({ t }: Goal): Answer {
+function sized({ t, all }: Goal): Answer {
+  if (t.kind === 'tuple') return all(t.elems);
+  if (t.kind === 'array') return all([t.elem]);
   return t.kind === 'str' || t.kind === 'slice' || t.kind === 'dyn' ? 'no' : 'yes';
 }
 
@@ -407,7 +409,10 @@ function defaultValue(goal: Goal): Answer {
   if (d) return d;
   const builtin = t.def.builtin as string;
   if (DEFAULT_TYPES.has(builtin)) return 'yes';
-  if (builtin === 'Box') return all(t.args);
+  if (builtin === 'Box') {
+    const content = normalize(shallow(t.args[0]));
+    return content.kind === 'str' || content.kind === 'slice' ? 'yes' : all([content]);
+  }
   return 'no';
 }
 

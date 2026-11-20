@@ -7,6 +7,8 @@ import type { WriteChunk } from './debugText';
 import type { Spec } from './fmt';
 import { normalize } from './infer';
 import type { Program } from './items';
+import { allocVecElements } from './natives/capacityNatives';
+import { sizeOf } from './natives/layout';
 import { cloneValue, valuesEqual } from './ops';
 import { FmtFailure, type Frame, RustPanic } from './runtime';
 import { runtimeType } from './runtimeTypes';
@@ -248,18 +250,24 @@ function vecMacro(c: Compiler, macro: Macro<'vec'>): Eval {
   };
 }
 
-function vecRepeatMacro(c: Compiler, macro: Macro<'vecRepeat'>): Eval {
+function vecRepeatMacro(c: Compiler, macro: Macro<'vecRepeat'>, span: Span): Eval {
   const value = c.value(macro.value);
   const count = c.value(macro.count);
   const elemType = runtimeType(macro.value.ty!);
-  return (frame) => {
-    const item = value(frame);
-    const length = Number(count(frame) as bigint);
-    frame.runtime.allocate(length);
-    frame.runtime.spend(Math.ceil(length / 16));
-    const type = elemType(frame);
-    return Array.from({ length }, (_, index) => (index === length - 1 ? item : cloneValue(type, item)));
-  };
+  const operands = [value, count];
+  return (frame) =>
+    withEvaluatedValues(frame, operands, ([item, n]) => {
+      const { runtime } = frame;
+      const type = elemType(frame);
+      const length = allocVecElements({ runtime, span }, 0, n as bigint, sizeOf(type));
+      runtime.spend(Math.ceil(length / 16));
+      const items: Value[] = [];
+      return runtime.withRoots([items], () => {
+        for (let index = 1; index < length; index++) items.push(cloneValue(type, item));
+        if (length > 0) items.push(item);
+        return items;
+      });
+    });
 }
 
 function dbgMacro(c: Compiler, macro: Macro<'dbg'>, span: Span): Eval {

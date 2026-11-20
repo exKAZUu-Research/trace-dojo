@@ -1,4 +1,4 @@
-import type { Expr, PathAst } from './ast';
+import type { Expr, PathAst, TypeAst } from './ast';
 import { FLOAT_LIMITS, floatConstant } from './floatLimits';
 import { lookupScalarConstant, lookupType, lowerType, type TypeScope } from './items';
 import { castValue, floatArith, intArith, wrap } from './ops';
@@ -14,11 +14,14 @@ import {
   intMin,
   type IntName,
   intType,
+  REF_STR,
   sameType,
   type Type,
+  USIZE,
 } from './types';
+import { utf8Length } from './utf8';
 
-export function constInteger(expr: Expr, scope: TypeScope, expected = intType('usize')): bigint | undefined {
+export function constInteger(expr: Expr, scope: TypeScope, expected = USIZE): bigint | undefined {
   try {
     const scalar = constScalar(expr, scope, { visiting: new Set(), values: new Map(), hints: new WeakMap() }, expected);
     return scalar && sameType(scalar.type, expected) && typeof scalar.value === 'bigint' ? scalar.value : undefined;
@@ -39,6 +42,7 @@ interface ConstEvaluation {
   hints: WeakMap<Expr, Type | undefined>;
 }
 
+// code-gauge-allow functionCognitiveComplexity 17 -- Each scalar expression has its own constant evaluation rule.
 function constScalar(
   expr: Expr,
   scope: TypeScope,
@@ -58,6 +62,9 @@ function constScalar(
     case 'char': {
       return { value: expr.value, type: CHAR };
     }
+    case 'str': {
+      return { value: expr.value, type: REF_STR };
+    }
     case 'bool': {
       return { value: expr.value, type: BOOL };
     }
@@ -73,10 +80,86 @@ function constScalar(
     case 'binary': {
       return constScalarBinary(expr, scope, state, expected, evaluate);
     }
+    case 'methodCall': {
+      if (expr.method !== 'len' || expr.args.length > 0 || expr.turbofish) return;
+      const length = constLength(expr.receiver, scope, state);
+      return length === undefined ? undefined : { type: USIZE, value: length };
+    }
     default: {
       return undefined;
     }
   }
+}
+
+function constLength(expr: Expr, scope: TypeScope, state: ConstEvaluation): bigint | undefined {
+  switch (expr.kind) {
+    case 'str': {
+      return BigInt(utf8Length(expr.value));
+    }
+    case 'array': {
+      return validLiteralArray(expr.elems, scope, state) ? BigInt(expr.elems.length) : undefined;
+    }
+    case 'arrayRepeat': {
+      return validLiteralArray([expr.value], scope, state) ? lengthValue(expr.count, scope, state) : undefined;
+    }
+    case 'ref': {
+      return !expr.mutable ? constLength(expr.operand, scope, state) : undefined;
+    }
+    case 'path': {
+      return constPathLength(expr.path, scope, state);
+    }
+    default: {
+      return undefined;
+    }
+  }
+}
+
+function validLiteralArray(items: Expr[], scope: TypeScope, state: ConstEvaluation): boolean {
+  const expected = items.map((item) => scalarHint(item, scope, state)).find((hint) => hint !== undefined);
+  let type = expected;
+  for (const item of items) {
+    const scalar = constScalar(item, scope, state, type);
+    if (!scalar || (type && !sameType(scalar.type, type))) return false;
+    type = scalar.type;
+  }
+  return true;
+}
+
+function lengthValue(expr: Expr, scope: TypeScope, state: ConstEvaluation): bigint | undefined {
+  const length = constScalar(expr, scope, state, USIZE);
+  return length && sameType(length.type, USIZE) && typeof length.value === 'bigint' ? length.value : undefined;
+}
+
+function constPathLength(path: PathAst, scope: TypeScope, state: ConstEvaluation): bigint | undefined {
+  const found = lookupScalarConstant(path, scope);
+  if (!found || state.visiting.has(found.def) || state.visiting.size >= 64) return;
+  const { def, selfType } = found;
+  const initializer = def.ast.value;
+  if (!initializer) return;
+  const context = {
+    module: def.module,
+    params: new Map(def.impl?.params.map((param) => [param.name, param])),
+    selfType,
+  };
+  state.visiting.add(def);
+  try {
+    const declared = withoutRefs(def.ast.type);
+    if (declared.kind === 'array') return lengthValue(declared.len, context, state);
+    if (declared.kind !== 'slice' && !isStrType(declared)) return;
+    return constLength(initializer, context, state);
+  } finally {
+    state.visiting.delete(def);
+  }
+}
+
+function withoutRefs(type: TypeAst): TypeAst {
+  let current = type;
+  while (current.kind === 'ref') current = current.target;
+  return current;
+}
+
+function isStrType(type: TypeAst): boolean {
+  return type.kind === 'path' && type.path.segments.length === 1 && type.path.segments[0].name === 'str';
 }
 
 // code-gauge-allow functionCognitiveComplexity 18 -- Signed literals, integer overflow and boolean negation follow different rules.
@@ -114,8 +197,10 @@ function constScalarCast(
   const source = constScalar(expr.operand, scope, state, undefined, evaluate);
   if (!source) return;
   const type = lowerType(expr.type, scope);
-  if (type.kind === 'int') return castScalar(source, type);
   const numeric = source.type.kind === 'int' || source.type.kind === 'float';
+  if (type.kind === 'int' && (numeric || source.type.kind === 'bool' || source.type.kind === 'char')) {
+    return castScalar(source, type);
+  }
   if (type.kind === 'float' && numeric) return castScalar(source, type);
   if (type.kind === 'char' && source.type.kind === 'int' && source.type.name === 'u8') {
     return castScalar(source, type);
@@ -161,7 +246,9 @@ function binaryValue(
   evaluate: boolean
 ): ConstScalar | undefined {
   const { op } = expr;
-  if (COMPARISONS.has(op)) return { type: BOOL, value: compareScalars(op, a, b) };
+  if (COMPARISONS.has(op)) {
+    return type.kind === 'ref' ? undefined : { type: BOOL, value: compareScalars(op, a, b) };
+  }
   if (typeof a === 'boolean' && typeof b === 'boolean') {
     const value = booleanOperation(op, a, b);
     return value === undefined ? undefined : { type, value };
