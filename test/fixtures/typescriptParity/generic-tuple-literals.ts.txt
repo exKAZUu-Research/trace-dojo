@@ -1,0 +1,10 @@
+function copy<T extends readonly unknown[]>(value: T): [...T] { return [...value]; }
+function append<T extends readonly unknown[]>(value: T): [...T, string] { return [...value, 'last']; }
+function prepend<T extends unknown[]>(value: T): [boolean, ...T] { return [true, ...value]; }
+function ordinary<T extends readonly number[]>(value: T) { return [...value]; }
+type Tail<T> = T extends [unknown, ...infer R] ? R : never;
+type Init<T> = T extends [...infer R, unknown] ? R : never;
+function tail<T>(value: Tail<T>): Tail<T> { return value; }
+function init<T>(value: Init<T>): Init<T> { return value; }
+console.log(copy([1, 2] as const), append(['first'] as const), prepend([1, 'x']), ordinary([3, 4]));
+console.log(tail<[1, 2]>([2]), init<[1, 2]>([1]));

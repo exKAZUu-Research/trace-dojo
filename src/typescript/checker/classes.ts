@@ -575,6 +575,7 @@ export class ClassChecker {
       optional: false,
       readonly: !setter,
       getterOnly: !setter,
+      setterOnly: !getter,
       isMethod: false,
       visibility,
       writeVisibility,

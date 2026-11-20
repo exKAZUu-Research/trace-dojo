@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 631 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
+// code-gauge-allow-file fileNcss 632 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExpressionListFlow, tupleArgumentContexts } from './callArity';
@@ -175,8 +175,8 @@ export class LiteralChecker {
     const tupleElements = types.flatMap(({ type, spread }, index) => {
       if (!spread) return [{ type: isConstContext ? regularOf(type) : type, optional: false, rest: false }];
       if (
-        (type.kind === 'object' && type.objectKind === 'tuple') ||
-        (type.kind === 'union' && type.types.every((member) => this.c.isArrayOrTuple(member)))
+        !isAnyLike(type) &&
+        (this.c.isArrayOrTuple(type) || this.c.relations.isAssignable(type, this.c.arrayType(anyType, true)))
       )
         return [{ type, optional: false, rest: true }];
       return [
@@ -685,6 +685,7 @@ export class LiteralChecker {
       writeType: isGetter ? existing?.writeType : () => accessorType,
       readonly: isGetter && !existing,
       getterOnly: isGetter && !existing,
+      setterOnly: !isGetter && !existing,
     });
     if (existing && hasToken(member, 'set'))
       properties.set(name, { ...existing, writeType: () => accessorType, readonly: false, getterOnly: false });
@@ -1148,13 +1149,17 @@ function arrayElements(node: TreeNode): (TreeNode | undefined)[] {
   return elements;
 }
 
-/**
- * The property a spread gives an object: as tsc does, the property itself, with an accessor pair's write type, when the
- * spread keeps its readonly-ness, and otherwise a data property holding its value.
- */
-function spreadCopy(property: Property, readonly: boolean): Property {
-  const keeps = readonly === (property.readonly || property.getterOnly === true);
-  return keeps ? { ...property, readonly } : { ...property, readonly, getterOnly: false, writeType: undefined };
+export function spreadCopy(property: Property, readonly: boolean): Property {
+  if (!property.setterOnly && readonly === (property.readonly || property.getterOnly === true))
+    return { ...property, readonly };
+  return {
+    ...property,
+    type: property.setterOnly ? () => undefinedType : property.type,
+    readonly,
+    getterOnly: false,
+    setterOnly: false,
+    writeType: undefined,
+  };
 }
 
 function isDiscriminantValue(node: TreeNode): boolean {

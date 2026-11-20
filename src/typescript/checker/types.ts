@@ -91,6 +91,7 @@ export interface Property {
   nameType?: Type;
   /** Whether the property is a get accessor without a setter. */
   getterOnly?: boolean;
+  setterOnly?: boolean;
   isAbstract?: boolean;
 }
 

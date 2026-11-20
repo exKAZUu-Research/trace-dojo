@@ -516,13 +516,7 @@ export class Relations {
     if (a.kind === 'indexedAccess' && b.kind === 'indexedAccess')
       return this.identical(a.objectType, b.objectType) && this.identical(a.indexType, b.indexType);
     if (a.kind === 'keyof' && b.kind === 'keyof') return this.identical(a.type, b.type);
-    if (a.kind === 'conditional' && b.kind === 'conditional')
-      return (
-        this.identical(a.checkType, b.checkType) &&
-        this.identical(a.extendsType, b.extendsType) &&
-        this.identical(a.trueType, b.trueType) &&
-        this.identical(a.falseType, b.falseType)
-      );
+    if (a.kind === 'conditional' && b.kind === 'conditional') return this.identical(a, b);
     if (a.kind === 'templateLiteral' && b.kind === 'templateLiteral')
       return (
         a.texts.join('\0') === b.texts.join('\0') &&

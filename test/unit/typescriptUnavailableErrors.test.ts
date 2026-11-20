@@ -51,6 +51,25 @@ console.log("done");`;
   });
 });
 
+test.each([
+  'function show(value: () => void) { return String.raw`value=${value}`; }',
+  'class Example {} function show() { return String.raw`value=${Example}`; }',
+  'function show<T extends (() => void) | string>(value: T) { return String["raw"]`value=${value}`; }',
+])('checks known source conversions in unused String.raw templates: %s', (source) => {
+  expect(executeProgram('typescript', source + '\nconsole.log("done");')).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 0, message: '関数やクラスの文字列への変換は、この採点環境では使えません。' }],
+  });
+});
+
+test('checks dynamically typed String.raw substitutions at runtime', () => {
+  const source = 'function show(value: any) { return String.raw`value=${value}`; } show(() => {});';
+  expect(executeProgram('typescript', source)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message: '関数やクラスの文字列への変換は、この採点環境では使えません。' }],
+  });
+});
+
 test('generic source conversions allow unknown values and ordinary object string methods', () => {
   const source = `function show<T>(value: T) { return String(value); }
 function method<T extends { toString(): string }>(value: T) { return value.toString(); }

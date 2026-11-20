@@ -370,22 +370,23 @@ interface Frame {
 // code-gauge-allow functionNcss 37 -- Ports Node.js's util.inspect, so the two stay comparable.
 function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string {
   const { runtime } = ctx;
-  const constructor = inspectedConstructor(runtime, value);
-  const inherited =
-    ctx.showHidden && recurseTimes <= ctx.depth ? inspectPrototype(ctx, value, constructor, recurseTimes) : [];
-  if (value.isError && constructor.name !== 'Object') noteErrorStack(ctx, value);
+  const showsPrototype = ctx.showHidden && recurseTimes <= ctx.depth;
+  const constructor = inspectedConstructor(runtime, value, showsPrototype);
+  const inherited = showsPrototype ? inspectPrototype(ctx, value, constructor, recurseTimes) : [];
+  const name = constructor.name();
+  if (value.isError && name !== 'Object') noteErrorStack(ctx, value);
   const keys = enumerableKeys(runtime, value, ctx.showHidden, ctx.errorStacks.get(value));
   const showsLength = ctx.showHidden && value instanceof JsArray;
   const frame = frameOf(
     ctx,
     value,
-    constructor.name,
+    name,
     keys.length > 0 || inherited.length > 0 || value.promise !== undefined || showsLength
   );
   if (typeof frame === 'string') return frame;
   if (recurseTimes > ctx.depth) {
-    const name = prefixOf(constructor.name, value instanceof JsArray ? 'Array' : 'Object').slice(0, -1);
-    return constructor.name === undefined ? name : stylize(ctx, `[${name}]`, 'special');
+    const prefix = prefixOf(name, value instanceof JsArray ? 'Array' : 'Object').slice(0, -1);
+    return name === undefined ? prefix : stylize(ctx, `[${prefix}]`, 'special');
   }
   ctx.currentDepth = recurseTimes + 1;
   ctx.seen.add(value);
@@ -493,8 +494,8 @@ function* inspectionPrototypes(
   value: JsObject,
   constructor: InspectedConstructor
 ): Iterable<JsObject> {
-  const first = value.proto;
-  if (!first || (constructor.owner === first && constructor.builtin)) return;
+  const first = constructor.firstPrototype === undefined ? value.proto : constructor.firstPrototype;
+  if (!first || constructor.skipPrototype) return;
   let current: JsObject | null = first;
   for (let depth = 0; depth < 3 && current; depth++, current = current.proto) {
     if ((depth > 0 || constructor.owner === value) && hasBuiltinConstructor(runtime, current)) return;
@@ -512,7 +513,10 @@ function inspectionKeys(runtime: Runtime, object: JsObject): Key[] {
 
 function hasBuiltinConstructor(runtime: Runtime, object: JsObject): boolean {
   const constructor = constructorProperty(object);
-  const name = constructor && runtime.get(constructor, 'name');
+  return constructor !== undefined && isBuiltinConstructorName(runtime.get(constructor, 'name'));
+}
+
+function isBuiltinConstructorName(name: Value): boolean {
   return typeof name === 'string' && NODE_BUILTIN_NAMES.has(name);
 }
 
@@ -608,22 +612,35 @@ function toStringTagOf(object: JsObject): string | undefined {
 }
 
 interface InspectedConstructor {
-  name: string | undefined;
+  name: () => string | undefined;
   owner?: JsObject;
-  builtin?: boolean;
+  firstPrototype?: JsObject | null;
+  skipPrototype?: boolean;
 }
 
-function inspectedConstructor(runtime: Runtime, object: JsObject): InspectedConstructor {
+function inspectedConstructor(runtime: Runtime, object: JsObject, showsPrototype = false): InspectedConstructor {
   const known = knownConstructors(runtime.realm);
+  let firstPrototype: JsObject | null | undefined;
   for (let current: JsObject | null = object; current; current = current.proto) {
     const knownName = current === object ? undefined : known.get(current);
-    if (knownName) return { name: knownName, owner: current, builtin: true };
+    if (knownName)
+      return { name: () => knownName, owner: current, firstPrototype, skipPrototype: current === firstPrototype };
     const constructor = constructorProperty(current);
-    const name = constructor && runtime.functionName(constructor);
-    if (name && inheritsPrototypeOf(object, constructor))
-      return { name, owner: current, builtin: NODE_BUILTIN_NAMES.has(name) };
+    if (
+      constructor &&
+      runtime.get(constructor, 'name') !== '' &&
+      tryOrUndefined(() => runtime.instanceOf(object, constructor))
+    )
+      return {
+        name: () => runtime.toString(runtime.get(constructor, 'name')),
+        owner: current,
+        firstPrototype,
+        skipPrototype:
+          showsPrototype && current === firstPrototype && isBuiltinConstructorName(runtime.get(constructor, 'name')),
+      };
+    if (current === object) firstPrototype = current.proto;
   }
-  return { name: object.proto ? 'Object' : undefined };
+  return { name: () => (firstPrototype ? 'Object' : undefined), firstPrototype };
 }
 
 function constructorProperty(object: JsObject): JsFunction | undefined {
@@ -654,13 +671,6 @@ function knownConstructors(realm: Realm): Map<JsObject, string> {
     knownConstructorsByRealm.set(realm, known);
   }
   return known;
-}
-
-function inheritsPrototypeOf(object: JsObject, fn: JsFunction): boolean {
-  const prototype = fn.properties.get('prototype');
-  if (!prototype || isAccessor(prototype)) return false;
-  for (let current = object.proto; current; current = current.proto) if (current === prototype.value) return true;
-  return false;
 }
 
 function prefixOf(constructor: string | undefined, fallback: string, size = ''): string {
@@ -718,7 +728,7 @@ function plainFunctionBase(fn: JsFunction, name: string, constructor: string | u
 
 /** Node.js formats uncaught errors from the saved stack using the same name rules as util.inspect. */
 export function uncaughtErrorHeadline(runtime: Runtime, error: JsObject): string {
-  const { name: constructor } = inspectedConstructor(runtime, error);
+  const constructor = inspectedConstructor(runtime, error).name();
   return constructor === 'Object' ? inspect(runtime, error) : errorText(runtime, error, constructor);
 }
 

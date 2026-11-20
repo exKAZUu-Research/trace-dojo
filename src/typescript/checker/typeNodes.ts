@@ -708,6 +708,7 @@ export class TypeNodes {
       optional: false,
       readonly: getter && !previous?.writeType,
       getterOnly: getter && !previous?.writeType,
+      setterOnly: !getter && (!previous || previous.setterOnly === true),
       isMethod: false,
       visibility: 'public',
       declaration: member,

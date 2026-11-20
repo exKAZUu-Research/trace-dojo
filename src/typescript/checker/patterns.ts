@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
-import { isDefinitelyFalsy, isSpreadableProperty } from './literals';
+import { isDefinitelyFalsy, isSpreadableProperty, spreadCopy } from './literals';
 import { arrayPatternElements, named, numberValue, propertyNameText } from './syntax';
 import {
   anonymousObject,
@@ -131,11 +131,6 @@ export class BindingPatterns {
   }
 
   /**
-   * The type a binding or assignment pattern implies for the value it takes apart, which an initializer or a right side
-   * takes as its contextual type: an object literal there gains the properties the pattern gives defaults, as
-   * `const { a = 1 } = {}` does. `leafType` gives the type of an element that is not a pattern, with or without default.
-   */
-  /**
    * Checks an initializer, which no annotation types, against the type its pattern implies, reporting the properties of
    * its object literals that the pattern does not take apart, as TypeScript does.
    */
@@ -143,6 +138,11 @@ export class BindingPatterns {
     if (implied) this.c.expressions.checkExcessProperties(value, valueType, implied);
   }
 
+  /**
+   * The type a binding or assignment pattern implies for the value it takes apart, which an initializer or a right side
+   * takes as its contextual type: an object literal there gains the properties the pattern gives defaults, as
+   * `const { a = 1 } = {}` does. `leafType` gives the type of an element that is not a pattern, with or without default.
+   */
   impliedType(pattern: TreeNode, leafType = (element: TreeNode) => this.bindingLeafType(element)): Type | undefined {
     switch (pattern.type) {
       case 'object':
@@ -353,13 +353,11 @@ export class BindingPatterns {
         structure.numberIndex = source.numberIndex;
         structure.symbolIndex = source.symbolIndex;
         structure.patternIndexes = source.patternIndexes;
-        // As a spread does, a rest copies each value into a plain, writable property.
         for (const [name, property] of source.properties) {
           const selected = omitted.some((key) =>
             this.c.relations.isAssignable(this.c.typeOperators.propertyKeyType(property), key)
           );
-          if (!selected && isSpreadableProperty(property))
-            structure.properties.set(name, { ...property, readonly: false, getterOnly: false, writeType: undefined });
+          if (!selected && isSpreadableProperty(property)) structure.properties.set(name, spreadCopy(property, false));
         }
         return structure;
       },

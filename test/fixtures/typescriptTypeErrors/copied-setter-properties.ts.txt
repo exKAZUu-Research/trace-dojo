@@ -1,0 +1,7 @@
+const accessorSource = { set value(next: number) {} };
+const spread = { ...accessorSource };
+const { ...rest } = accessorSource;
+const wrongSpread: number = spread.value;
+const wrongRest: number = rest.value;
+spread.value = 1;
+rest.value = 2;

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 692 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
+// code-gauge-allow-file fileNcss 694 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
@@ -384,7 +384,9 @@ export class Calls {
     const calleeType = this.c.expressions.check(callee);
     const typeArguments = this.typeArguments.written(node);
     for (const part of named(template)) {
-      if (part.type === 'template_substitution') this.c.expressions.check(named(part)[0]);
+      if (part.type !== 'template_substitution') continue;
+      const substitution = named(part)[0];
+      this.c.expressions.checkFunctionText(substitution, this.c.expressions.check(substitution));
     }
     if (calleeType === errorType) return errorType;
     if (isAnyLike(calleeType)) return this.untypedCall(node, [], typeArguments);
