@@ -1,0 +1,9 @@
+{closure:App\f():3}
+{closure:T::tm():7}
+{closure:{closure:K::s():8}:8}
+#0 /main.php(9): K->{closure:K::m():9}(1)
+#1 /main.php(12): K->m()
+#2 {main}
+{closure:/main.php:13}
+{closure:{closure:/main.php:14}:14}
+{closure:outer():15}(): Argument #1 ($x) must be of type int, string given, called in /main.php on line 16

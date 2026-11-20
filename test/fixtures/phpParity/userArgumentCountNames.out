@@ -1,0 +1,13 @@
+Too few arguments to function f(), 0 passed in /main.php on line 7 and at least 2 expected
+Too few arguments to function f(), 1 passed in /main.php on line 7 and at least 2 expected
+Too few arguments to function f(), 1 passed in /main.php on line 7 and at least 2 expected
+f(): Argument #1 ($a) not passed
+f(): Argument #1 ($a) not passed
+Too few arguments to function g(), 0 passed in /main.php on line 7 and exactly 2 expected
+Too few arguments to function g(), 1 passed in /main.php on line 7 and exactly 2 expected
+Too few arguments to function g(), 1 passed in /main.php on line 7 and exactly 2 expected
+g(): Argument #1 ($a) not passed
+Too few arguments to function g(), 0 passed in /main.php on line 7 and exactly 2 expected
+Too few arguments to function q(), 0 passed in /main.php on line 7 and at least 1 expected
+q(): Argument #1 ($a) not passed
+Too few arguments to function q(), 0 passed in /main.php on line 7 and at least 1 expected

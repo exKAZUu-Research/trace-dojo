@@ -1,0 +1,4 @@
+Division by zero
+int(7)
+Cannot assign null to reference held by property Typed::$value of type ?int / Division by zero
+int(7)

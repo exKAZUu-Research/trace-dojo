@@ -1,0 +1,5 @@
+before
+
+Fatal error: Interface RepeatInterface cannot implement previously implemented interface Countable in /main.php on line 3
+Stack trace:
+#0 {main}

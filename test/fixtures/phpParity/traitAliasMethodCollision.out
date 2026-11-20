@@ -1,0 +1,4 @@
+
+Fatal error: Trait method SecondMethod::right has not been applied as Conflict::right, because of collision with FirstMethod::right in /main.php on line 4
+Stack trace:
+#0 {main}

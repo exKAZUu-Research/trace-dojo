@@ -1,0 +1,78 @@
+rewind;next;next;2
+rewind;callback;next;callback;next;2
+rewind;current;next;current;next;array(2) {
+  [0]=>
+  int(10)
+  [1]=>
+  int(20)
+}
+
+Deprecated: Using null as an array offset is deprecated, use an empty string instead in /main.php on line 19
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 19
+array(3) {
+  [1]=>
+  int(2)
+  [""]=>
+  int(1)
+  [2]=>
+  int(3)
+}
+bool(true)
+bool(false)
+bool(true)
+bool(true)
+bool(false)
+bool(true)
+exists;bool(true)
+bool(false)
+bool(false)
+bool(true)
+bool(true)
+Error: func_get_arg() cannot be called from the global scope
+
+Warning: Cannot bind an instance to a static closure, this will be an error in PHP 9 in /main.php on line 26
+NULL
+
+Warning: Cannot bind an instance to a static closure, this will be an error in PHP 9 in /main.php on line 27
+NULL
+
+Warning: Cannot unbind $this of method, this will be an error in PHP 9 in /main.php on line 29
+
+Warning: Cannot bind method BoundMethod::m() to object of class stdClass, this will be an error in PHP 9 in /main.php on line 29
+NULL
+NULL
+ValueError: array_multisort(): Argument #2 must be a valid sort flag
+TypeError: array_multisort(): Argument #3 must be an array or a sort flag that has not already been specified
+TypeError: array_multisort(): Argument #3 must be an array or a sort flag that has not already been specified
+array(2) {
+  [0]=>
+  int(2)
+  [1]=>
+  int(1)
+}
+#0 /main.php(31): traceInner('hi')
+#0 /main.php(31): traceInner()
+#1 /main.php(31): traceOuter()
+int(1)
+bool(true)
+NULL
+int(1)
+bool(true)
+NULL
+int(1)
+bool(true)
+NULL
+bool(false)
+bool(true)
+bool(false)
+bool(true)
+bool(false)
+bool(true)
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 33
+bool(true)
+bool(false)
+bool(false)
+TypeError: Cannot access offset of type string on SplFixedArray
+TypeError: Cannot access offset of type null on SplFixedArray

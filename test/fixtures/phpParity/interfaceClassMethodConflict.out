@@ -1,0 +1,4 @@
+1
+Fatal error: Declaration of DefaultArgument::run($value = 1) must be compatible with TwoArguments::run($value, $other) in /main.php on line 2
+Stack trace:
+#0 {main}

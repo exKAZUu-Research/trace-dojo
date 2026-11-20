@@ -1,0 +1,86 @@
+[dump]
+object(stdClass)#2 (2) {
+  ["a"]=>
+  object(DebugMutator)#1 (0) {
+  }
+  ["b"]=>
+  object(DropOnInspect)#3 (1) {
+    ["value"]=>
+    string(4) "live"
+  }
+drop;}
+string(5) "later"
+caught:dtor
+[print]
+drop;stdClass Object
+(
+    [a] => DebugMutator Object
+        (
+        )
+
+    [b] => DropOnInspect Object
+        (
+            [value] => live
+        )
+
+)
+caught:dtor
+[print return]
+drop;caught:dtor
+[export]
+drop;(object) array(
+   'a' => 
+  \ExportMutator::__set_state(array(
+     'change' => 'hook',
+  )),
+   'b' => 
+  \DropOnInspect::__set_state(array(
+     'value' => 'live',
+  )),
+)caught:dtor
+[export return]
+drop;caught:dtor
+object(stdClass)#9 (3) {
+  ["hook"]=>
+  object(SnapshotMutator)#4 (0) {
+  }
+  ["inner"]=>
+  object(stdClass)#7 (2) {
+    ["hook"]=>
+    object(SnapshotMutator)#1 (0) {
+    }
+    ["lost"]=>
+    object(DropOnInspect)#5 (1) {
+      ["value"]=>
+      string(4) "live"
+    }
+drop;  }
+  ["lost"]=>
+  object(DropOnInspect)#8 (1) {
+    ["value"]=>
+    string(4) "live"
+  }
+drop;}
+dtor / dtor
+object(stdClass)#14 (3) {
+  ["inner"]=>
+  object(stdClass)#11 (2) {
+    ["hook"]=>
+    object(SnapshotMutator)#3 (0) {
+    }
+    ["lost"]=>
+    object(DropOnInspect)#8 (1) {
+      ["value"]=>
+      string(4) "live"
+    }
+drop;  }
+  ["hook"]=>
+  
+Warning: Uncaught Exception: dtor in /main.php:6
+Stack trace:
+#0 [internal function]: DropOnInspect->__destruct()
+#1 /main.php(54): var_dump(Object(stdClass))
+#2 {main}
+  thrown in /main.php on line 6
+
+Fatal error: __debuginfo() must return an array in /main.php on line 54

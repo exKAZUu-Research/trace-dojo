@@ -1,0 +1,39 @@
+implode(): If argument #1 ($separator) is of type string, argument #2 ($array) must be of type array, null given
+
+Deprecated: join(): Passing null to parameter #1 ($separator) of type array|string is deprecated in /main.php on line 8
+join(): If argument #1 ($separator) is of type string, argument #2 ($array) must be of type array, null given
+
+Deprecated: implode(): Passing null to parameter #1 ($separator) of type array|string is deprecated in /main.php on line 9
+implode(): If argument #1 ($separator) is of type string, argument #2 ($array) must be of type array, null given
+
+Deprecated: implode(): Passing null to parameter #1 ($separator) of type array|string is deprecated in /main.php on line 10
+implode(): If argument #1 ($separator) is of type string, argument #2 ($array) must be of type array, null given
+
+Deprecated: implode(): Passing null to parameter #1 ($separator) of type array|string is deprecated in /main.php on line 11
+implode(): If argument #1 ($separator) is of type string, argument #2 ($array) must be of type array, null given
+implode(): If argument #1 ($separator) is of type string, argument #2 ($array) must be of type array, null given
+join(): Argument #1 ($separator) must be of type array|string, stdClass given
+implode(): Argument #1 ($separator) must be of type array|string, stdClass given
+implode(): Argument #1 ($separator) must be of type array|string, stdClass given
+implode(): Argument #1 ($separator) must be of type array|string, stdClass given
+implode(): If argument #1 ($separator) is of type string, argument #2 ($array) must be of type array, null given
+join(): If argument #1 ($separator) is of type string, argument #2 ($array) must be of type array, null given
+implode(): If argument #1 ($separator) is of type string, argument #2 ($array) must be of type array, null given
+implode(): If argument #1 ($separator) is of type string, argument #2 ($array) must be of type array, null given
+implode(): If argument #1 ($separator) is of type string, argument #2 ($array) must be of type array, null given
+string(2) "ab"
+string(2) "ab"
+string(2) "ab"
+string(2) "ab"
+string(2) "ab"
+\Stored::__set_state(array(
+   'stored' => NULL,
+))
+#0 [internal function]: FailingHook->$item::get()
+#1 /main.php(23): var_export(Object(FailingHook), true)
+#2 /main.php(24): {closure:/main.php:23}()
+#3 {main}
+#0 [internal function]: FailingHook->$item::get()
+#1 /main.php(23): json_encode(Object(FailingHook))
+#2 /main.php(24): {closure:/main.php:23}()
+#3 {main}

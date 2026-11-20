@@ -1,0 +1,53 @@
+dtor cb1
+dtor cb2
+1
+dtor cmp
+dtor cmp
+dtor cmp
+1
+dtor re1
+dtor re2
+a#b#
+1
+dtor w1
+dtor w2
+3
+dtor nw0
+dtor nw1
+1
+dtor getfoo
+getfoo
+4
+set
+dtor setv
+4
+dtor off1
+off1
+3
+dtor js
+[{"p":null,"n":"js"}]
+3
+i1
+i2
+dtor i1
+dtor i2
+5
+dtor cuf
+cuf
+5
+dtor s1
+dtor s2
+5
+[[{},null],1]
+callback 0
+callback 1
+int(2)
+callback 2
+item 1 after 3 releases
+callback 3
+item 2 after 4 releases
+callback 4
+assertion after 5 releases
+bool(false)
+assertion result
+end

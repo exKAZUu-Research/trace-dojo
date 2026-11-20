@@ -1,0 +1,8 @@
+a b c 
+a b c d 
+done
+T::f f A T
+B::s(): Return value must be of type C, B returned
+Array
+(
+)

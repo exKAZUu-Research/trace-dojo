@@ -1,0 +1,36 @@
+object(Random\Engine\Xoshiro256StarStar)#1 (1) {
+  ["__states"]=>
+  array(4) {
+    [0]=>
+    string(16) "5ac389a30c3b0363"
+    [1]=>
+    string(16) "f83697934d3197c0"
+    [2]=>
+    string(16) "47c16b10f0d3923b"
+    [3]=>
+    string(16) "45b905dac24e6e19"
+  }
+}
+Random\Engine\PcgOneseq128XslRr64 Object
+(
+    [__states] => Array
+        (
+            [0] => 2d482238e35f56f9
+            [1] => f314845713e7bcfd
+        )
+
+)
+
+object(Random\Randomizer)#3 (1) {
+  ["engine"]=>
+  object(Random\Engine\PcgOneseq128XslRr64)#2 (1) {
+    ["__states"]=>
+    array(2) {
+      [0]=>
+      string(16) "2d482238e35f56f9"
+      [1]=>
+      string(16) "f314845713e7bcfd"
+    }
+  }
+}
+626 92c21587 101b27f2 0 0

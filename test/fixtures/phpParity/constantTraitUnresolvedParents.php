@@ -1,0 +1,1 @@
+<?php class P{}trait T{const ?parent X=null;}class A extends P{use T;const ?self X=null;}class B extends P{use T;const ?B X=null;}var_dump(A::X,B::X);trait U{const ?Unknown X=null;}class D{use U;const ?Missing X=null;}var_dump(D::X);

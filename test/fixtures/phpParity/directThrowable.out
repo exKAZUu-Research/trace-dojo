@@ -1,0 +1,5 @@
+before
+
+Fatal error: Class DirectThrowable cannot implement interface Throwable, extend Exception or Error instead in /main.php on line 5
+Stack trace:
+#0 {main}

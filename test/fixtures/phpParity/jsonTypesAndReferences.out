@@ -1,0 +1,20 @@
+bool(true)
+string(5) "a�b"
+Y-m-d
+bool(true)
+Cannot assign string to reference held by property T::$x of type int
+int(1)
+bool(true)
+string(16) "missing_function"
+bool(true)
+bool(false)
+array(1) {
+  ["x"]=>
+  &int(2)
+}
+array(1) {
+  [0]=>
+  &int(2)
+}
+Recursion detected
+Cannot assign float to property T::$x of type int

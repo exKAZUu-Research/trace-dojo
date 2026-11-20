@@ -1,0 +1,30 @@
+[P][]
+[?->][?->1]
+[P][][?->]
+string(5) "value"
+string(5) "value"
+string(5) "value"
+string(17) "Example\Constants"
+string(17) "Example\Constants"
+string(17) "Example\Constants"
+Undefined constant Example\Constants::class
+Undefined constant Example\Constants::CLASS
+Cannot use value of type int as class constant name
+Cannot use value of type object as class constant name
+name evaluated
+Class "Example\Missing" not found
+name evaluated
+Class "Missing" not found
+Class "Missing" not found
+int(1)
+string(2) "1a"
+bool(true)
+array(1) {
+  [0]=>
+  int(1)
+}
+int(2)
+bool(true)
+bool(false)
+int(2)
+int(3)

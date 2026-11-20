@@ -1,0 +1,8 @@
+done;
+drop:1;
+
+Fatal error: Uncaught Exception: stop in /main.php:6
+Stack trace:
+#0 [internal function]: StorageShutdownDrop->__destruct()
+#1 {main}
+  thrown in /main.php on line 6

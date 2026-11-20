@@ -1,0 +1,10 @@
+int(3)
+int(3)
+int(5)
+typedReference(): Return value must be of type int, string returned
+string(7) "changed"
+string(11) "replacement"
+string(7) "changed"
+int(1)
+string(4) "kept"
+string(4) "live"

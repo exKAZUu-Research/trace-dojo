@@ -1,0 +1,146 @@
+NULL
+array(1) {
+  ["created"]=>
+  &NULL
+}
+
+Warning: Cannot use int as array in /main.php on line 6
+NULL
+Cannot use a scalar value as an array
+array(2) {
+  [0]=>
+  int(1)
+  [1]=>
+  &NULL
+}
+NULL
+Cannot create references to/from string offsets
+array(1) {
+  [1]=>
+  &NULL
+}
+NULL
+Cannot access uninitialized non-nullable property ListSource::$uninitialized by reference
+Cannot auto-initialize an array inside a reference held by property ListSource::$nullable of type ?int
+Cannot auto-initialize an array inside a reference held by property ListSource::$shared of type ?int
+getting missing
+
+Notice: Indirect modification of overloaded property DynamicListSource::$missing has no effect in /main.php on line 33
+
+Notice: Attempting to set reference to non referenceable value in /main.php on line 33
+
+Warning: Undefined array key 0 in /main.php on line 33
+NULL
+
+Warning: String offset cast occurred in /main.php on line 36
+Cannot create references to/from string offsets
+
+Warning: Cannot use bool as array in /main.php on line 41
+array(2) {
+  [0]=>
+  array(1) {
+    [0]=>
+    NULL
+  }
+  [1]=>
+  &NULL
+}
+
+Notice: Indirect modification of overloaded property NestedListSource::$array has no effect in /main.php on line 60
+
+Notice: Attempting to set reference to non referenceable value in /main.php on line 60
+int(1)
+
+Notice: Attempting to set reference to non referenceable value in /main.php on line 62
+int(2)
+
+Notice: Indirect modification of overloaded element of OffsetListSource has no effect in /main.php on line 65
+
+Notice: Attempting to set reference to non referenceable value in /main.php on line 65
+int(3)
+array(1) {
+  [0]=>
+  &int(5)
+}
+
+Warning: String offset cast occurred in /main.php on line 72
+Cannot create references to/from string offsets
+
+Warning: String offset cast occurred in /main.php on line 74
+Cannot create references to/from string offsets
+
+Warning: String offset cast occurred in /main.php on line 76
+Cannot create references to/from string offsets
+
+Warning: String offset cast occurred in /main.php on line 72
+Cannot create references to/from string offsets
+
+Warning: String offset cast occurred in /main.php on line 74
+Cannot create references to/from string offsets
+
+Warning: String offset cast occurred in /main.php on line 76
+Cannot create references to/from string offsets
+
+Warning: Illegal string offset "1x" in /main.php on line 72
+Cannot create references to/from string offsets
+
+Warning: Illegal string offset "1x" in /main.php on line 74
+Cannot create references to/from string offsets
+
+Warning: Illegal string offset "1x" in /main.php on line 76
+Cannot create references to/from string offsets
+Cannot access offset of type array on string
+Cannot access offset of type array on string
+Cannot access offset of type array on string
+Cannot access offset of type string on string
+Cannot access offset of type string on string
+Cannot access offset of type string on string
+
+Warning: String offset cast occurred in /main.php on line 80
+Cannot create references to/from string offsets
+
+Warning: String offset cast occurred in /main.php on line 82
+Cannot create references to/from string offsets
+
+Warning: Undefined array key 0 in /main.php on line 88
+array(1) {
+  [0]=>
+  int(1)
+}
+
+Notice: Attempting to set reference to non referenceable value in /main.php on line 94
+int(2)
+
+Notice: Attempting to set reference to non referenceable value in /main.php on line 96
+
+Warning: Cannot use int as array in /main.php on line 96
+NULL
+
+Notice: Attempting to set reference to non referenceable value in /main.php on line 98
+int(4)
+array(2) {
+  [0]=>
+  array(1) {
+    [0]=>
+    &int(5)
+  }
+  ["nested"]=>
+  array(1) {
+    [0]=>
+    array(1) {
+      [0]=>
+      array(1) {
+        [0]=>
+        &int(6)
+      }
+    }
+  }
+}
+
+Notice: Indirect modification of overloaded element of ArrayObject has no effect in /main.php on line 107
+
+Notice: Attempting to set reference to non referenceable value in /main.php on line 107
+NULL
+
+Warning: Undefined variable $missingClone in /main.php on line 109
+clone(): Argument #1 ($object) must be of type object, null given

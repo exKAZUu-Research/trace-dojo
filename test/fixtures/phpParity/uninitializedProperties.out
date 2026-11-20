@@ -1,0 +1,22 @@
+object(Node)#1 (0) {
+  ["next"]=>
+  uninitialized(Node)
+  ["prev"]=>
+  uninitialized(?Node)
+  ["n"]=>
+  uninitialized(int)
+}
+object(Sub)#1 (0) {
+  ["next"]=>
+  uninitialized(Node)
+  ["prev"]=>
+  uninitialized(?Node)
+  ["n"]=>
+  uninitialized(int)
+  ["p"]=>
+  uninitialized(Node)
+}
+Sub Object
+(
+)
+

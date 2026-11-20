@@ -1,0 +1,35 @@
+int(9)
+int(9)
+string(3) "new"
+string(3) "new"
+NULL
+NULL
+bool(true)
+bool(false)
+array(1) {
+  [0]=>
+  int(9)
+}
+bool(false)
+NULL
+int(3)
+int(3)
+receiver offset get int(42)
+int(9)
+array(1) {
+  [2]=>
+  int(1)
+}
+switch hit
+match hit
+int(2)
+string(2) "ew"
+
+Warning: Undefined variable $undefinedKey in /main.php on line 57
+
+Deprecated: Using null as an array offset is deprecated, use an empty string instead in /main.php on line 57
+
+Warning: Undefined variable $undefinedValue in /main.php on line 57
+Cannot access offset of type array on array
+Cannot access offset of type string on string
+Cannot use a scalar value as an array

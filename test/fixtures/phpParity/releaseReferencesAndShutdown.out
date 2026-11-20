@@ -1,0 +1,37 @@
+dtor a
+1
+1
+dtor a2
+2
+dtor static1
+2
+dtor g
+2
+cl5
+dtor cl
+4
+dtor x2
+2
+dtor x1
+dtor x3
+dtor x4
+2
+dtor nb
+2
+dtor nc
+thrower dtor
+caught from dtor
+5
+4
+dtor mk2
+dtor mk1
+2
+5
+4
+dtor w
+5
+end
+dtor w3
+dtor static3
+dtor q
+dtor g2

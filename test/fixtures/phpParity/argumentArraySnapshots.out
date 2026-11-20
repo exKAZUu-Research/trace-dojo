@@ -1,0 +1,35 @@
+array(2) {
+  [0]=>
+  int(2)
+  [1]=>
+  int(1)
+}
+bool(true)
+array(2) {
+  [0]=>
+  int(1)
+  [1]=>
+  int(2)
+}
+array(2) {
+  [0]=>
+  int(1)
+  [1]=>
+  int(2)
+}
+int(2)
+array(1) {
+  [0]=>
+  int(1)
+}
+array(1) {
+  [0]=>
+  int(1)
+}
+int(2)
+array(2) {
+  [0]=>
+  int(0)
+  [1]=>
+  int(1)
+}

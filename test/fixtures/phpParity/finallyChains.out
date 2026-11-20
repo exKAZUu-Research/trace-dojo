@@ -1,0 +1,13 @@
+second <- first
+b c a 
+int(1)
+Exception RuntimeException 
+
+Fatal error: Uncaught Exception: x in /main.php:10
+Stack trace:
+#0 {main}
+
+Next Error: y in /main.php:10
+Stack trace:
+#0 {main}
+  thrown in /main.php on line 10

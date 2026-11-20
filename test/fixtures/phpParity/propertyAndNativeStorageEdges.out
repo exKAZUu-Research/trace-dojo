@@ -1,0 +1,67 @@
+Cannot modify private(set) property T::$x from global scope
+set int(0)
+int(2)
+int(2)
+string(3) "abc"
+string(3) "ABC"
+string(3) "new"
+string(2) "ok"
+caught int(1)
+array(1) {
+  [0]=>
+  int(1)
+}
+array(1) {
+  [0]=>
+  int(9)
+}
+hash hash hash int(1)
+int(2)
+hash int(1)
+hash hash bool(false)
+1 9 
+1 7 
+1 2 8 
+string(13) "&Acirc;&copy;"
+string(14) "&Atilde;&copy;"
+string(6) "1$&234"
+string(8) "1$&234.5"
+string(6) "1$$234"
+string(8) "1$$234.5"
+string(6) "1$`234"
+string(8) "1$`234.5"
+string(6) "1$'234"
+string(8) "1$'234.5"
+read bool(false)
+write abc
+read bool(false)
+write abc
+read bool(false)
+write abc
+int(0)
+int(0)
+int(0)
+int(1)
+array(2) {
+  [0]=>
+  string(3) "aab"
+  [1]=>
+  string(1) "a"
+}
+int(2)
+int(1)
+int(2)
+int(1)
+0 0 
+string(4) "Ας"
+string(8) "Ασ́α"
+string(6) "Σσς"
+string(5) "Aς B"
+int(7)
+int(0)
+int(7)
+int(0)
+int(7)
+int(0)
+int(7)
+int(11)

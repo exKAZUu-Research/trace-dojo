@@ -1,0 +1,31 @@
+int(9223372036854775807)
+int(-9223372036854775808)
+int(9223372036854775807)
+int(9223372036854775807)
+int(9223372036854775807)
+int(0)
+float(1.0E+19)
+int(9223372036854775807)
+int(12)
+int(9223372036854775807)
+
+Deprecated: Implicit conversion from float-string "9999999999999999999" to int loses precision in /main.php on line 4
+
+Deprecated: Implicit conversion from float-string "1e20" to int loses precision in /main.php on line 4
+int(2)
+int(9223372036854775807)
+array(2) {
+  ["9999999999999999999"]=>
+  int(1)
+  ["1e20"]=>
+  int(2)
+}
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 6
+
+Deprecated: Implicit conversion from float-string "1.5" to int loses precision in /main.php on line 6
+
+Deprecated: Implicit conversion from float 7.9 to int loses precision in /main.php on line 6
+int(0)
+int(0)
+int(1)

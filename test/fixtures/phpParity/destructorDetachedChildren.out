@@ -1,0 +1,16 @@
+bag start
+item 1
+item 2
+bag end
+after
+start a
+start b
+start c
+end c
+end b
+end a
+after chain
+item fresh before
+item owned
+item fresh after
+mixed end

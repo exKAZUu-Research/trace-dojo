@@ -1,0 +1,14 @@
+Must not read from virtual property DynamicRead::$p
+#0 /main.php(32): DynamicRead->$p::get()
+#1 /main.php(34): {closure:/main.php:32}()
+#2 {main}
+Must not write to virtual property DynamicWrite::$p
+#0 /main.php(32): DynamicWrite->$p::set(3)
+#1 /main.php(34): {closure:/main.php:32}()
+#2 {main}
+Must not read from virtual property NestedReference::$p
+#0 /main.php(32): NestedReference->$p::get()
+#1 /main.php(34): {closure:/main.php:32}()
+#2 {main}
+NULL
+NULL

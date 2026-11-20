@@ -1,0 +1,66 @@
+array must contain only positive integer keys
+array must contain only positive integer keys
+array(2) {
+  [0]=>
+  int(1)
+  [1]=>
+  int(2)
+}
+array(2) {
+  [0]=>
+  int(9)
+  [1]=>
+  int(2)
+}
+Seek position 50 is out of range
+bool(false)
+NULL
+NULL
+
+Notice: Indirect modification of overloaded element of ArrayObject has no effect in /main.php on line 5
+array(0) {
+}
+
+Notice: Indirect modification of overloaded element of ArrayObject has no effect in /main.php on line 5
+Cannot assign by reference to an array dimension of an object
+Cannot access offset of type string on string
+Cannot access offset of type string on string
+Cannot access offset of type string on string
+int(2)
+array(2) {
+  [0]=>
+  int(1)
+  [1]=>
+  int(9)
+}
+Cannot use positional argument after named argument
+bool(false)
+string(5) "Array"
+NULL
+int(1)
+bool(false)
+int(1)
+array(1) {
+  [0]=>
+  int(1)
+}
+int(0)
+bool(false)
+int(1)
+array(1) {
+  [0]=>
+  int(1)
+}
+int(0)
+bool(true)
+int(0)
+json_validate(): Argument #3 ($flags) must be a valid flag (allowed flags: JSON_INVALID_UTF8_IGNORE)
+bool(false)
+string(2) """"
+bool(false)
+bool(false)
+string(3) "inf"
+string(1) "X"
+int(4)
+abbcabbbbb 1
+1

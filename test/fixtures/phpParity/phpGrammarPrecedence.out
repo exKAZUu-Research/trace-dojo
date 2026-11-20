@@ -1,0 +1,10 @@
+08:8;readonly:switch
+bool(false)
+bool(false)
+bool(false)
+bool(false)
+bool(false)
+Unsupported operand types: Subject * int
+Unsupported operand types: Subject * int
+Unsupported operand types: int ** Subject
+Cannot perform bitwise not on Subject

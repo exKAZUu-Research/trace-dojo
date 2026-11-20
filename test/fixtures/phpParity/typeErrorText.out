@@ -1,0 +1,28 @@
+TypeError: f(): Argument #1 ($x) must be of type int, string given, called in /main.php on line 4 and defined in /main.php:2
+Stack trace:
+#0 /main.php(4): f('abc')
+#1 {main}
+---
+f(): Argument #1 ($x) must be of type int, string given, called in /main.php on line 4
+---
+ArgumentCountError: Too few arguments to function g(), 1 passed in /main.php on line 5 and exactly 2 expected in /main.php:3
+Stack trace:
+#0 /main.php(5): g(1)
+#1 {main}
+---
+Too few arguments to function g(), 1 passed in /main.php on line 5 and exactly 2 expected
+---
+MyTE: x, called in y in /main.php:7
+Stack trace:
+#0 {main}
+---
+TypeError: x, called in y and defined in /main.php:8
+Stack trace:
+#0 {main}
+---
+
+Fatal error: Uncaught TypeError: f(): Argument #1 ($x) must be of type int, string given, called in /main.php on line 9 and defined in /main.php:2
+Stack trace:
+#0 /main.php(9): f('zzz')
+#1 {main}
+  thrown in /main.php on line 2

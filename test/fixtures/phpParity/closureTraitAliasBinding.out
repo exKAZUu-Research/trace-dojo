@@ -1,0 +1,12 @@
+
+Warning: Cannot bind method A::g() to object of class B, this will be an error in PHP 9 in /main.php on line 1
+
+Warning: Cannot bind method A::g() to object of class B, this will be an error in PHP 9 in /main.php on line 1
+NULL
+NULL
+
+Warning: Cannot bind method A::g() to object of class B, this will be an error in PHP 9 in /main.php on line 1
+
+Warning: Cannot bind method A::g() to object of class B, this will be an error in PHP 9 in /main.php on line 1
+NULL
+NULL

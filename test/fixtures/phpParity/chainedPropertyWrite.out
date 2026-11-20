@@ -1,0 +1,58 @@
+name;value;Attempt to assign property "x" on null
+name;value;Attempt to modify property "a" on null
+Attempt to increment/decrement property "a" on null
+Attempt to modify property "a" on null
+Attempt to modify property "p" on null
+Attempt to modify property "p" on null
+Attempt to modify property "p" on null
+value;getter
+Indirect modification of Chained::$scalar is not allowed
+value;getter
+Indirect modification of Chained::$scalar is not allowed
+getter
+value;getter
+Indirect modification of Chained::$scalar is not allowed
+getter
+Indirect modification of Chained::$scalar is not allowed
+value;object getter
+value;overloaded get
+
+Notice: Indirect modification of overloaded property OverloadedChain::$x has no effect in /main.php on line 40
+Attempt to assign property "y" on int
+Property Chained::$only is write-only
+Property Chained::$only is write-only
+value;Attempt to assign property "y" on null
+value;Attempt to assign property "y" on null
+array(1) {
+  ["x"]=>
+  NULL
+}
+array(1) {
+  ["none"]=>
+  NULL
+}
+
+Notice: Accessing static property Chained::$stat as non static in /main.php on line 46
+
+Deprecated: Creation of dynamic property Chained::$stat is deprecated in /main.php on line 46
+
+Notice: Accessing static property Chained::$stat as non static in /main.php on line 47
+int(2)
+bool(true)
+bool(false)
+int(2)
+
+Notice: Accessing static property Chained::$stat as non static in /main.php on line 48
+
+Notice: Accessing static property Chained::$stat as non static in /main.php on line 49
+
+Notice: Accessing static property Chained::$stat as non static in /main.php on line 50
+
+Notice: Accessing static property Chained::$stat as non static in /main.php on line 51
+Cannot access private property Chained::$hidden
+Cannot indirectly modify readonly property Chained::$frozen
+Cannot increment a reference held by property Chained::$typed of type int past its maximal value
+Cannot increment a reference held by property Chained::$typed of type int past its maximal value
+overloaded isset
+guarded get
+bool(false)

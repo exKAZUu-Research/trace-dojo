@@ -1,0 +1,3 @@
+strlen(): Argument #1 ($string) must be of type string, null given
+abs(): Argument #1 ($num) must be of type int|float, null given
+acceptMixed(): Argument #1 ($value) must be of type mixed, null given, called in /main.php on line 13

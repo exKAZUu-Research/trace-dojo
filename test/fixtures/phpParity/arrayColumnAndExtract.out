@@ -1,0 +1,76 @@
+array(0) {
+}
+array(2) {
+  [0]=>
+  NULL
+  [1]=>
+  NULL
+}
+array(2) {
+  [0]=>
+  string(7) "magic-v"
+  [1]=>
+  string(7) "magic-v"
+}
+array(2) {
+  [0]=>
+  string(4) "priv"
+  [1]=>
+  string(4) "priv"
+}
+TypeError: Cannot access offset of type array on array
+array(3) {
+  [5]=>
+  int(1)
+  ["x"]=>
+  int(2)
+  [0]=>
+  int(3)
+}
+int(5)
+int(1)
+string(1) "z"
+int(3)
+int(5)
+string(1) "z"
+int(4)
+int(3)
+int(3)
+int(1)
+int(9)
+int(1)
+int(3)
+int(1)
+int(10)
+int(1)
+int(11)
+int(0)
+int(2)
+array(2) {
+  ["m"]=>
+  &int(7)
+  ["n"]=>
+  &int(2)
+}
+array(2) {
+  ["m"]=>
+  int(1)
+  ["n"]=>
+  int(2)
+}
+Cannot re-assign $this
+extract(): Argument #2 ($flags) must be a valid extract type
+extract(): Argument #3 ($prefix) is required when using this extract type
+extract(): Argument #3 ($prefix) must be a valid identifier
+int(1)
+int(5)
+array_column(): Argument #2 ($column_key) must be of type string|int|null, array given
+array_column(): Argument #3 ($index_key) must be of type string|int|null, array given
+int(0)
+bool(false)
+bool(false)
+extract(): Argument #3 ($prefix) must be a valid identifier
+int(2)
+bool(true)
+bool(true)
+int(1)

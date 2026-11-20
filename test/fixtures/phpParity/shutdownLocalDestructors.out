@@ -1,0 +1,8 @@
+done;
+
+Fatal error: Uncaught Exception: first in /main.php:10
+Stack trace:
+#0 [internal function]: StaticShutdownOwner->__destruct()
+#1 {main}
+  thrown in /main.php on line 10
+#0 [internal function]: ShutdownLocal->__destruct()

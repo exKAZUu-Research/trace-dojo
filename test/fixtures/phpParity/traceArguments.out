@@ -1,0 +1,35 @@
+#0 /main.php(3): t(1.0, 1.0E+15, 0.33333333333333, 0.3, -0.0, 100.0, 'a\nb', 'tab\there\\x', '\xE3\x81\x82\xE3\x81\x84\xE3\x81\x86', '0123456789abcde...', NAN, INF)
+#1 {main}
+#0 /main.php(4): t(x: 1)
+#1 {main}
+#0 /main.php(5): t(1, y: 2, z: Array)
+#1 {main}
+#0 /main.php(7): u(1, 2)
+#1 {main}
+#0 /main.php(9): opt(NULL, 2)
+#1 {main}
+Array
+(
+    [0] => 
+    [1] => 2
+)
+#0 /main.php(10): opt(1, 5, 3)
+#1 {main}
+Array
+(
+    [0] => 1
+    [1] => 5
+    [2] => 3
+)
+Array
+(
+    [0] => 1
+    [1] => 2
+    [k] => 3
+)
+
+Fatal error: Uncaught Exception: e in /main.php:11
+Stack trace:
+#0 /main.php(12): v(1, 2, k: 3)
+#1 {main}
+  thrown in /main.php on line 11

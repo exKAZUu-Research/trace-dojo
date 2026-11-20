@@ -1,0 +1,25 @@
+#0 /main.php(4): O->__destruct()
+#1 /main.php(16): f()
+#2 {main}
+#0 /main.php(13): O->__destruct()
+#1 /main.php(17): H->m()
+#2 {main}
+#0 /main.php(14): O->__destruct()
+#1 /main.php(18): H::s()
+#2 {main}
+#0 /main.php(7): O->__destruct()
+#1 /main.php(19): g()
+#2 {main}
+finally;#0 /main.php(10): O->__destruct()
+#1 /main.php(20): h()
+#2 {main}
+#0 /main.php(22): O->__destruct()
+#1 {main}
+#0 /main.php(4): O->__destruct()
+#1 /main.php(23): f()
+#2 {main}
+#0 /main.php(4): O->__destruct()
+#1 /main.php(24): f()
+#2 {main}
+#0 /main.php(26): O->__destruct()
+#1 {main}

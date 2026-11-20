@@ -1,0 +1,37 @@
+\HooksForExport::__set_state(array(
+   'privateValue' => 12,
+   'readable' => 'included',
+   'backed' => 8,
+))
+\FixedForExport::__set_state(array(
+   0 => NULL,
+   1 => 10,
+   'name' => 'fixed',
+   'extra' => 3,
+))
+array(3) {
+  [0]=>
+  int(1)
+  [1]=>
+  nested hook
+object(DebugNested)#2 (1) {
+    ["label"]=>
+    string(6) "nested"
+  }
+  [2]=>
+  int(3)
+}
+array(3) {
+  [0]=>
+  int(4)
+  [1]=>
+  before throw
+
+Warning: Uncaught Exception: broken in /main.php:22
+Stack trace:
+#0 [internal function]: DebugFailure->__debugInfo()
+#1 /main.php(24): var_dump(Array)
+#2 {main}
+  thrown in /main.php on line 22
+
+Fatal error: __debuginfo() must return an array in /main.php on line 24

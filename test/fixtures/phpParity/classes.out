@@ -1,0 +1,37 @@
+[log] created circle
+[log] created square
+circle with area 12.57 and 0 sides
+square with area 9.00 and 4 sides
+2 CIRCLE yes
+12.566
+Error: Cannot modify readonly property Square::$side
+Cannot instantiate abstract class Shape
+Cannot access private property Circle::$r
+set foo
+get foo
+5
+bool(true)
+bool(false)
+bool(false)
+doThing(1,2) static other 42
+299
+10 anon
+BBA
+nullsafe
+212
+10
+bool(true)
+bool(true)
+Pt Object
+(
+    [x] => 10
+    [y] => 2
+)
+object(Pt)#10 (2) {
+  ["x"]=>
+  int(10)
+  ["y"]=>
+  int(2)
+}
+{"x":10,"y":2}
+x=10 y=2 

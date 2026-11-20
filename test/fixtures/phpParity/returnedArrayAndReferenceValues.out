@@ -1,0 +1,17 @@
+after;array(1) {
+  [0]=>
+  int(1)
+}
+array(1) {
+  [0]=>
+  array(1) {
+    [0]=>
+    int(1)
+  }
+}
+int(12)
+int(12)
+int(13)
+float(1)
+float(1)
+C::floatRef(): Return value must be of type float, int returned

@@ -1,0 +1,18 @@
+
+Warning: Cannot bind method Closure::foo() to object of class A, this will be an error in PHP 9 in /main.php on line 1
+NULL
+
+Warning: Cannot unbind $this of method, this will be an error in PHP 9 in /main.php on line 1
+NULL
+
+Warning: Cannot bind method Closure::foo() to object of class A, this will be an error in PHP 9 in /main.php on line 1
+NULL
+
+Warning: Cannot bind method Closure::foo() to object of class A, this will be an error in PHP 9 in /main.php on line 1
+NULL
+
+Warning: Cannot unbind $this of method, this will be an error in PHP 9 in /main.php on line 1
+NULL
+
+Warning: Cannot bind method Closure::foo() to object of class A, this will be an error in PHP 9 in /main.php on line 1
+NULL
