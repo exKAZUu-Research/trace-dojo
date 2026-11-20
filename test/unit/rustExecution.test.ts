@@ -144,6 +144,37 @@ true true
   });
 });
 
+test('failed patterns leave owned values available to later matches and let-else blocks', () => {
+  const program = `struct Item { name: String, code: i32 }
+
+fn take(item: Item) {
+    let Item { name, code: 0 } = item else {
+        println!("kept {}", item.name);
+        return;
+    };
+    println!("matched {}", name);
+}
+
+fn main() {
+    let pair = (String::from("tuple"), 1);
+    match pair {
+        (value, 0) => println!("first {}", value),
+        (value, _) => println!("second {}", value),
+    }
+    let pair = (String::from("alternative"), 1);
+    match pair {
+        (value, 0) | (value, 1) => println!("matched {}", value),
+        _ => (),
+    }
+    take(Item { name: String::from("struct"), code: 1 });
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'second tuple\nmatched alternative\nkept struct\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('composite collection keys preserve delimiters within strings', () => {
   const program = rustMain(
     `    let first = ("a,sb", "c");

@@ -11,6 +11,8 @@ import { CellPlace, ElementPlace, type EnumValue, isPlace, type Place, type Stru
 
 export type Matcher = (frame: Frame, value: Value, place: (() => Place) | undefined) => boolean;
 
+type PatternProbe = (frame: Frame, value: Value, place: (() => Place) | undefined, bindings: (() => void)[]) => boolean;
+
 type PatternOf<K extends Pattern['kind']> = Extract<Pattern, { kind: K }>;
 
 /**
@@ -18,6 +20,16 @@ type PatternOf<K extends Pattern['kind']> = Extract<Pattern, { kind: K }>;
  * bindings that bind by mutable reference.
  */
 export function compileMatcher(c: Compiler, pattern: Pattern): Matcher {
+  const probe = compileProbe(c, pattern);
+  return (frame, value, place) => {
+    const bindings: (() => void)[] = [];
+    if (!probe(frame, value, place, bindings)) return false;
+    for (const bind of bindings) bind();
+    return true;
+  };
+}
+
+function compileProbe(c: Compiler, pattern: Pattern): PatternProbe {
   const type = resolve(pattern.ty ?? { kind: 'tuple', elems: [] }, true);
   switch (pattern.kind) {
     case 'wild': {
@@ -40,34 +52,46 @@ export function compileMatcher(c: Compiler, pattern: Pattern): Matcher {
       return ctorMatcher(c, pattern, type);
     }
     case 'ref': {
-      const inner = compileMatcher(c, pattern.pattern);
-      return (frame, value) =>
-        inner(frame, isPlace(value) ? value.get() : value, isPlace(value) ? () => value : undefined);
+      const inner = compileProbe(c, pattern.pattern);
+      return (frame, value, _place, bindings) =>
+        inner(frame, isPlace(value) ? value.get() : value, isPlace(value) ? () => value : undefined, bindings);
     }
     case 'or': {
-      const alternatives = pattern.alternatives.map((alt) => compileMatcher(c, alt));
-      return (frame, value, place) => alternatives.some((alt) => alt(frame, value, place));
+      return orMatcher(c, pattern);
     }
   }
 }
 
-function bindingMatcher(c: Compiler, pattern: PatternOf<'binding'>, type: Type): Matcher {
+function orMatcher(c: Compiler, pattern: PatternOf<'or'>): PatternProbe {
+  const alternatives = pattern.alternatives.map((alt) => compileProbe(c, alt));
+  return (frame, value, place, bindings) => {
+    const count = bindings.length;
+    for (const alternative of alternatives) {
+      if (alternative(frame, value, place, bindings)) return true;
+      bindings.length = count;
+    }
+    return false;
+  };
+}
+
+function bindingMatcher(c: Compiler, pattern: PatternOf<'binding'>, type: Type): PatternProbe {
   const res = c.annotations.paths.get(pattern);
   if (res) return constMatcher(c, res, type);
   const local = c.annotations.bindings.get(pattern);
   if (!local) return () => true;
-  const sub = pattern.sub ? compileMatcher(c, pattern.sub) : undefined;
+  const sub = pattern.sub ? compileProbe(c, pattern.sub) : undefined;
   const copies = local.mode === 'move' && needsCopy(resolve(local.type, true)) && c.isCopy(local.type);
   const localType = normalize(shallow(local.type));
   // Match ergonomics on a `&mut` value gives the parts of the value with `&mut` types, which are their places.
   const bindsPlace = local.mode === 'refMut' || (localType.kind === 'ref' && localType.mutable);
   // Binding a part of a variable by value moves it out, leaving the variable without it, as Rust does.
   const movesOut = local.mode === 'move' && localType.kind !== 'ref' && !c.isCopy(local.type);
-  return (frame, value, place) => {
-    if (sub && !sub(frame, value, place)) return false;
-    const bound = boundValue(value, place, local.mode, bindsPlace, copies);
-    frame.locals[local.slot] = bound;
-    if (movesOut && place) place().set(MOVED);
+  return (frame, value, place, bindings) => {
+    if (sub && !sub(frame, value, place, bindings)) return false;
+    bindings.push(() => {
+      frame.locals[local.slot] = boundValue(value, place, local.mode, bindsPlace, copies);
+      if (movesOut && place) place().set(MOVED);
+    });
     return true;
   };
 }
@@ -84,35 +108,30 @@ function boundValue(
   return copies ? copyValue(value) : value;
 }
 
-function tupleMatcher(c: Compiler, pattern: PatternOf<'tuple'>): Matcher {
-  const elems = pattern.elems.map((elem) => compileMatcher(c, elem));
-  return (frame, value, place) => {
+function tupleMatcher(c: Compiler, pattern: PatternOf<'tuple'>): PatternProbe {
+  const elems = pattern.elems.map((elem) => compileProbe(c, elem));
+  return (frame, value, place, bindings) => {
     const tuple = derefAll(value) as Value[];
-    const tuplePlace = place;
     return elems.every((elem, index) =>
-      elem(
-        frame,
-        tuple[index],
-        tuplePlace || isPlace(value) ? () => new ElementPlace(derefAll(value) as Value[], index) : undefined
-      )
+      elem(frame, tuple[index], place || isPlace(value) ? () => new ElementPlace(tuple, index) : undefined, bindings)
     );
   };
 }
 
-function ctorMatcher(c: Compiler, pattern: PatternOf<'tupleStruct' | 'struct' | 'path'>, type: Type): Matcher {
+function ctorMatcher(c: Compiler, pattern: PatternOf<'tupleStruct' | 'struct' | 'path'>, type: Type): PatternProbe {
   const res = c.annotations.paths.get(pattern);
   if (!res) return () => true;
   if (res.kind !== 'ctor') return constMatcher(c, res, type);
   const variant = res.variant;
   const isEnum = res.def.kind === 'enum';
   const subs = fieldMatchers(c, pattern, res);
-  return (frame, value, place) => {
+  return (frame, value, place, bindings) => {
     const target = derefAll(value);
     if (isEnum && (target as EnumValue).variant !== variant) return false;
     const fields = (target as StructValue | EnumValue).fields;
     for (const [index, sub] of subs) {
       const fieldPlace = place || isPlace(value) ? () => new ElementPlace(fields, index) : undefined;
-      if (!sub(frame, fields[index], fieldPlace)) return false;
+      if (!sub(frame, fields[index], fieldPlace, bindings)) return false;
     }
     return true;
   };
@@ -123,14 +142,14 @@ function fieldMatchers(
   c: Compiler,
   pattern: PatternOf<'tupleStruct' | 'struct' | 'path'>,
   res: Extract<PathRes, { kind: 'ctor' }>
-): [number, Matcher][] {
-  const subs: [number, Matcher][] = [];
+): [number, PatternProbe][] {
+  const subs: [number, PatternProbe][] = [];
   if (pattern.kind === 'tupleStruct') {
-    for (const [index, elem] of pattern.elems.entries()) subs.push([index, compileMatcher(c, elem)]);
+    for (const [index, elem] of pattern.elems.entries()) subs.push([index, compileProbe(c, elem)]);
   } else if (pattern.kind === 'struct') {
     const fields = res.def.variants[res.variant].fields;
     for (const field of pattern.fields) {
-      subs.push([fields.findIndex((f) => f.name === field.name), compileMatcher(c, field.pattern)]);
+      subs.push([fields.findIndex((f) => f.name === field.name), compileProbe(c, field.pattern)]);
     }
   }
   return subs;
