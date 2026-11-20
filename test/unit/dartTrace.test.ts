@@ -194,3 +194,31 @@ void square(Turtle t) { // atomic
   expect(withoutLines(actual.traceItems)).toEqual(withoutLines(expected.traceItems));
   expect(actual.finalTurtles).toEqual(expected.finalTurtles);
 });
+
+test('a cyclic list produces finite snapshots and execution continues', () => {
+  const program = `void main() {
+  var cycle = <dynamic>[];
+  cycle.add(cycle);
+  print(cycle);
+}
+`;
+  expect(traceProgram('dart', program, program)).toMatchObject({
+    stdout: '[[...]]\n',
+    uncaughtException: undefined,
+    // oxlint-disable-next-line unicorn/no-null -- The trace format shows the repeated list reference as null.
+    finalVars: { cycle: [null] },
+  });
+});
+
+test('a synchronous generator records the counted-loop header', () => {
+  const program = `Iterable<int> values() sync* {
+  for (var i = 0; i < 2; i++) {
+    yield i;
+  }
+}
+void main() { print(values().toList()); }
+`;
+  const actual = traceProgram('dart', program, program);
+  expect(actual.stdout).toBe('[0, 1]\n');
+  expect(actual.traceItems.filter((item) => item.line === 2).map((item) => item.vars.i)).toEqual([0, 1, 2]);
+});

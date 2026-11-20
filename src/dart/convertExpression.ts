@@ -145,6 +145,7 @@ export abstract class ExpressionConverter {
     return { nullAware, selectors, assignment, ...spanOf(node) };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Each selector is a distinct grammar form.
   private cascadeSelectors(node: Node): CascadeSelector[] {
     const span = spanOf(node);
     switch (node.type) {
@@ -155,7 +156,7 @@ export abstract class ExpressionConverter {
             {
               kind: 'index',
               index: this.soleExpression(node),
-              nullAware: hasToken(node, '?['),
+              nullAware: hasToken(node, '?[') || hasToken(node, '?'),
               ...span,
             },
           ];
@@ -479,7 +480,7 @@ export abstract class ExpressionConverter {
         kind: 'index',
         object,
         index: this.fieldExpression(node, 'index'),
-        nullAware: hasToken(node, '?.[') || hasToken(node, '?['),
+        nullAware: hasToken(node, '?.[') || hasToken(node, '?[') || hasToken(node, '?'),
         ...span,
       };
     }
@@ -541,48 +542,20 @@ export abstract class ExpressionConverter {
 
   private convertNew(node: Node): Expression {
     const typeNode = requireNode(fieldOf(node, 'type'), node);
-    let type = this.convertType(typeNode);
-    let constructorName = fieldOf(node, 'constructor')?.text;
-    // `const A.c()` puts the constructor's name inside the type, where it reads like a library prefix.
-    if (constructorName === undefined && type.kind === 'named' && type.prefix !== undefined && type.args.length === 0) {
-      const identifiers = namedOf(typeNode).filter((child) => child.type === 'type_identifier');
-      if (identifiers.length === 2) {
-        constructorName = type.name;
-        // A real prefix (`const m.Point()`) is told apart by the compiler, which knows the imports.
-        type = {
-          ...type,
-          prefix: undefined,
-          name: identifiers[0].text,
-          ambiguousPrefix: true,
-        };
-      }
-    }
     return {
       kind: 'new',
-      type,
-      constructorName,
+      type: this.convertType(typeNode),
+      constructorName: fieldOf(node, 'constructor')?.text,
       arguments: this.convertArguments(requireNode(fieldOf(node, 'arguments'), node)),
       isConst: node.type === 'const_object_expression',
       ...spanOf(node),
     };
   }
 
-  // code-gauge-allow duplicateLines 18 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   private convertConstructorInvocation(node: Node): Expression {
-    const identifiers = fieldsOf(node, 'type').filter((child) => child.type === 'type_identifier');
-    const typeArguments = namedOf(node).find((child) => child.type === 'type_arguments');
-    const name = identifiers.at(-1)?.text ?? '';
-    const type: TypeSyntax = {
-      kind: 'named',
-      prefix: identifiers.length > 1 ? identifiers[0].text : undefined,
-      name,
-      args: typeArguments ? this.convertTypeArguments(typeArguments) : [],
-      nullable: false,
-      ...spanOf(node),
-    };
     return {
       kind: 'new',
-      type,
+      type: this.constructorType(node, fieldsOf(node, 'type')),
       constructorName: fieldOf(node, 'constructor')?.text,
       arguments: this.convertArguments(requireNode(fieldOf(node, 'arguments'), node)),
       isConst: false,
@@ -590,23 +563,25 @@ export abstract class ExpressionConverter {
     };
   }
 
-  // code-gauge-allow duplicateLines 18 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   private convertConstructorTearoff(node: Node): Expression {
-    const identifiers = namedOf(node).filter((child) => child.type === 'type_identifier');
-    const typeArguments = namedOf(node).find((child) => child.type === 'type_arguments');
     const nameNode = childrenOf(node).at(-1);
-    const type: TypeSyntax = {
+    return {
+      kind: 'constructorTearoff',
+      type: this.constructorType(node, namedOf(node)),
+      name: nameNode?.type === 'new' ? undefined : nameNode?.text,
+      ...spanOf(node),
+    };
+  }
+
+  private constructorType(node: Node, parts: Node[]): TypeSyntax {
+    const identifiers = parts.filter((child) => child.type === 'type_identifier');
+    const typeArguments = namedOf(node).find((child) => child.type === 'type_arguments');
+    return {
       kind: 'named',
       prefix: identifiers.length > 1 ? identifiers[0].text : undefined,
       name: identifiers.at(-1)?.text ?? '',
       args: typeArguments ? this.convertTypeArguments(typeArguments) : [],
       nullable: false,
-      ...spanOf(node),
-    };
-    return {
-      kind: 'constructorTearoff',
-      type,
-      name: nameNode?.type === 'new' ? undefined : nameNode?.text,
       ...spanOf(node),
     };
   }
@@ -962,7 +937,7 @@ export abstract class ExpressionConverter {
    * The expression of a constant pattern, which the grammar flattens: `-1`, `Color.red`, `m.pi`, `const [1]`, or
    * `const Point(1, 2)`.
    */
-  // code-gauge-allow functionCognitiveComplexity 19 -- One case per kind of node in the grammar.
+  // code-gauge-allow functionCognitiveComplexity 21 -- One case per kind of node in the grammar.
   private constantPatternExpression(node: Node, children: Node[], isConst: boolean): Expression {
     const span = spanOf(node);
     if (children[0]?.type === '.' && children.length === 2) {
@@ -986,8 +961,12 @@ export abstract class ExpressionConverter {
     }
     const creation = this.constCreationPattern(node, children, isConst, span);
     if (creation) return creation;
-    const parts = children.filter((child) => child.type === 'identifier' || child.type === 'type_identifier');
-    if (children.length > 1 && children.every((child) => child.type === 'identifier' || child.type === '.')) {
+    const tokens = children.flatMap((child) => (child.type === 'qualified' ? childrenOf(child) : [child]));
+    const parts = tokens.filter((child) => child.type === 'identifier' || child.type === 'type_identifier');
+    if (
+      parts.length > 1 &&
+      tokens.every((child) => child.type === '.' || child.type === 'identifier' || child.type === 'type_identifier')
+    ) {
       let expression: Expression = { kind: 'identifier', name: parts[0].text, ...spanOf(parts[0]) };
       for (const part of parts.slice(1)) {
         expression = { kind: 'member', object: expression, name: part.text, nullAware: false, ...span };
@@ -1145,7 +1124,7 @@ export abstract class ExpressionConverter {
 
   // Strings
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- One case per kind of node in the grammar.
+  // code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of node in the grammar.
   private convertStringParts(node: Node): StringPart[] {
     const parts: StringPart[] = [];
     const pushText = (text: string): void => {
@@ -1166,9 +1145,8 @@ export abstract class ExpressionConverter {
           parts.push(this.convertSubstitution(piece));
           continue;
         } else {
-          text = piece.text;
+          text = isMultiline && index === 0 ? stripFirstNewline(piece.text) : piece.text;
         }
-        if (isMultiline && index === 0) text = stripFirstNewline(text);
         pushText(text);
       }
       if (inner.length === 0) pushText('');
@@ -1178,11 +1156,14 @@ export abstract class ExpressionConverter {
 
   private convertSubstitution(node: Node): Expression {
     const named = namedOf(node);
-    if (named.length === 1 && named[0].type === 'identifier_dollar_escaped') {
-      return { kind: 'identifier', name: named[0].text, ...spanOf(named[0]) };
-    }
-    if (named.length === 1 && named[0].type === 'identifier' && !hasToken(node, '{')) {
-      return { kind: 'identifier', name: named[0].text, ...spanOf(named[0]) };
+    if (
+      named.length === 1 &&
+      (named[0].type === 'identifier_dollar_escaped' || (named[0].type === 'identifier' && !hasToken(node, '{')))
+    ) {
+      const identifier = named[0];
+      const span = spanOf(identifier);
+      if (identifier.text === 'this') return { kind: 'this', ...span };
+      return { kind: 'identifier', name: identifier.text, ...span };
     }
     const children = childrenOf(node).filter(
       (child) => child.type !== '$' && child.type !== '{' && child.type !== '}' && child.type !== '${'
@@ -1417,11 +1398,6 @@ export abstract class ExpressionConverter {
       name: nameNode.text,
       ...span,
     };
-  }
-
-  /** A named argument converted from its node, used by {@link convertArguments} through {@link expressionChildren}. */
-  protected namedArgumentOf(node: Node): NamedArgument {
-    return this.convertNamedArgument(node);
   }
 }
 

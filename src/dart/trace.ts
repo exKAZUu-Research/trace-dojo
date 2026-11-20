@@ -1,3 +1,4 @@
+import { LIMITS } from '../interpreter/limits';
 import type { ProgramRecording } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
@@ -133,17 +134,24 @@ function primitiveScalar(value: Value): TraceScalar | typeof NOT_SCALAR {
  * The value learners write down for a variable of a type: numbers, booleans, strings, and lists of them. A null of an
  * object type is a reference, as Java shows a null object.
  */
-function scalarOf(value: Value, type: DartType): Scalar | typeof NOT_SCALAR {
+function scalarOf(value: Value, type: DartType, path?: Set<DartList>): Scalar | typeof NOT_SCALAR {
   if (!isScalarType(type)) return NOT_SCALAR;
   const primitive = primitiveScalar(value);
   if (primitive !== NOT_SCALAR) return primitive;
   if (value instanceof DartList) {
+    const seen = path ?? new Set<DartList>();
+    if (seen.has(value) || seen.size >= LIMITS.maxCallDepth) return NOT_SCALAR;
     const elementType = value.typeArgs[0] ?? DYNAMIC;
-    return value.elements.map((element) => {
-      const scalar = scalarOf(element, elementType);
-      // oxlint-disable-next-line unicorn/no-null -- The trace format shows Dart's null as null.
-      return scalar === NOT_SCALAR ? null : scalar;
-    }) as Scalar;
+    seen.add(value);
+    try {
+      return value.elements.map((element) => {
+        const scalar = scalarOf(element, elementType, seen);
+        // oxlint-disable-next-line unicorn/no-null -- The trace format shows Dart's null as null.
+        return scalar === NOT_SCALAR ? null : scalar;
+      }) as Scalar;
+    } finally {
+      seen.delete(value);
+    }
   }
   return NOT_SCALAR;
 }
@@ -159,7 +167,7 @@ function isScalarType(type: DartType): boolean {
 // oxlint-disable-next-line unicorn/no-null -- The trace format shows Dart's null as null.
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
-// code-gauge-allow functionCognitiveComplexity 23 -- One case per kind of value a trace shows.
+// code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of value a trace shows.
 // code-gauge-allow functionNcss 43 -- One case per kind of value a trace shows.
 function displayNodeOf(value: Value, seen: Set<unknown>): DisplayNode | undefined {
   // A late field not yet initialized holds a marker, which shows nothing.
@@ -174,7 +182,7 @@ function displayNodeOf(value: Value, seen: Set<unknown>): DisplayNode | undefine
       entries: { x: { kind: 'value', value: object.turtle.x }, y: { kind: 'value', value: object.turtle.y } },
     };
   }
-  if (seen.has(object)) return undefined;
+  if (seen.has(object) || seen.size >= LIMITS.maxCallDepth) return undefined;
   if (object.cls === coreTypes.function) return undefined;
   // An enum value shows as its name, which is what learners write for it.
   if (object.cls.kind === 'enum')
@@ -221,7 +229,7 @@ function storeNodeOf(store: HashStore, seen: Set<unknown>): DisplayNode {
   const entries = Object.create(null) as Record<string, DisplayNode>;
   for (const position of store.positions()) {
     const key = store.keyAt(position);
-    const node = displayNodeOf(key, new Set());
+    const node = displayNodeOf(key, seen);
     const label = node?.kind === 'value' ? String(node.value) : `#${(key as DartObject).identity}`;
     entries[label] = displayNodeOf(store.entryValues[position], seen) ?? NULL_NODE;
   }

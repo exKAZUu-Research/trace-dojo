@@ -219,8 +219,6 @@ export type TypeSyntax =
       name: string;
       args: TypeSyntax[];
       nullable: boolean;
-      /** `const A.b()` writes a named constructor where a library prefix could be; the compiler tells which. */
-      ambiguousPrefix?: boolean;
     } & Span)
   | ({
       kind: 'function';

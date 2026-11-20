@@ -42,6 +42,7 @@ import {
 import {
   type Arguments,
   type Callable,
+  type Cell,
   DartList,
   DartRecord,
   DartTypeValue,
@@ -1049,7 +1050,6 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
   }
 
-  // code-gauge-allow functionNcss 31 -- One case per form of the construct, which reads best together.
   protected readLocal(variable: LocalVar, span: Span): Compiled {
     this.checkDefinitelyAssigned(variable, span);
     if (variable.hasConstant) {
@@ -1059,33 +1059,31 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const cell = this.cellAccess(variable);
     const type = this.isPromotable(variable) ? this.promotedType(variable) : variable.type;
     const { name } = variable;
-    const isLate = variable.options.isLate;
     const mayBeUnassigned = !variable.options.hasInitializer && !variable.options.isParameter;
-    let run: Eval;
-    if (isLate) {
-      run = (frame) => {
-        const target = cell(frame);
-        const value = target.v;
-        if (value === UNINITIALIZED)
-          frame.runtime.throwError('LateError', '', [`Local '${name}' has not been initialized.`]);
-        if (value instanceof LateInitializer) {
-          target.v = UNINITIALIZED;
-          const computed = value.run();
-          target.v = computed;
-          return computed;
-        }
-        return value;
-      };
-    } else if (mayBeUnassigned) {
-      run = (frame) => {
-        const value = cell(frame).v;
-        return value === UNASSIGNED ? undefined : value;
-      };
-    } else {
-      run = (frame) => cell(frame).v;
-    }
+    const run: Eval =
+      variable.options.isLate || mayBeUnassigned
+        ? (frame) => this.readLocalValue(frame, cell(frame), name)
+        : (frame) => cell(frame).v;
     // A const local holds a constant, which other constants may use, as `const b = [...a]`.
     return { type, run, isConst: variable.options.isConst, variable };
+  }
+
+  protected readLocalValue(frame: Frame, target: Cell, name: string): Value {
+    const value = target.v;
+    if (value === UNASSIGNED) return undefined;
+    if (value === UNINITIALIZED)
+      frame.runtime.throwError('LateError', '', [`Local '${name}' has not been initialized.`]);
+    if (value instanceof LateInitializer) {
+      target.v = UNINITIALIZED;
+      try {
+        target.v = value.run();
+      } catch (error) {
+        if (target.v === UNINITIALIZED) target.v = value;
+        throw error;
+      }
+      return target.v;
+    }
+    return value;
   }
 
   /** Rejects reading a late local without an initializer that no path, closures included, can have assigned yet. */
@@ -1632,7 +1630,6 @@ function mapTypesOfContext(context: DartType | undefined): [DartType, DartType] 
   return [base.args[0] ?? DYNAMIC, base.args[1] ?? DYNAMIC];
 }
 
-/** The element type of a literal without type arguments: the least upper bound of its elements' types. */
 /** Whether a local keeps its value from its declaration on: final, or assigned nowhere else, closures included. */
 function isStable(local: LocalVar): boolean {
   return (local.options.isFinal || !local.owner.assignedNames.has(local.name)) && !local.isWriteCaptured;

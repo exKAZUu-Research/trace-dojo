@@ -567,7 +567,6 @@ export abstract class CompilerBase {
     };
   }
 
-  /** Evaluates a type at runtime, replacing the type parameters in scope with the frame's type arguments. */
   /** A type as the running program sees it: type parameters bound by the frame, and extension types erased. */
   runtimeType(type: DartType): (frame: Frame) => DartType {
     const erased = eraseExtensionTypes(type);

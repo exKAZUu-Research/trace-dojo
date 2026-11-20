@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 775 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 780 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type {
   Block,
   Expression,
@@ -14,10 +14,9 @@ import { assignedNames, namesAssignedIn } from './astWalk';
 import type { CompiledFunction, FunctionSpec } from './callCompiler';
 import type { ClassInfo } from './classes';
 import { type Compiled, type Eval, typeName } from './compilerBase';
-import { SHORTED } from './expressionCompiler';
 import { type CompiledPattern, isRefutableSyntax, PatternCompiler } from './patternCompiler';
 import { type DartThrow, type Frame } from './runtime';
-import { type ConditionFlow, Flow, FunctionContext, type LocalVar, type StoredFlow } from './scope';
+import { Flow, FunctionContext, type LocalVar, type StoredFlow } from './scope';
 import {
   coreTypes,
   type DartType,
@@ -55,7 +54,7 @@ export const BREAK: Completion = { kind: 'break', label: undefined };
 export const CONTINUE: Completion = { kind: 'continue', label: undefined };
 
 /** Types whose values learners write down in a trace, whose for-in bindings always record a step. */
-function isAnsweredType(type: DartType): boolean {
+export function isAnsweredType(type: DartType): boolean {
   const base = nonNullable(type);
   if (base.kind !== 'interface') return false;
   return [coreTypes.int, coreTypes.double, coreTypes.num, coreTypes.bool, coreTypes.string].includes(base.cls);
@@ -67,6 +66,11 @@ export abstract class StatementCompiler extends PatternCompiler {
   protected abstract compileSwitch(statement: Extract<Statement, { kind: 'switch' }>): Exec;
   protected abstract compileTry(statement: Extract<Statement, { kind: 'try' }>): Exec;
   protected abstract compileRethrow(statement: Extract<Statement, { kind: 'rethrow' }>): Exec;
+  protected abstract compileExistingForInBinding(
+    binding: Extract<ForInBinding, { kind: 'identifier' }>,
+    elementType: DartType,
+    row: number | undefined
+  ): (frame: Frame, value: Value) => void;
   protected abstract compileGeneratorBody(
     spec: FunctionSpec,
     expectedReturn: DartType | undefined
@@ -489,7 +493,6 @@ export abstract class StatementCompiler extends PatternCompiler {
     );
   }
 
-  /** A declarator's initializer, checked against the declared type; a late one leaves the flow as it was. */
   /** The condition the initializer being compiled gave, for the local it initializes. */
   private pendingCondition: LocalVar['condition'];
 
@@ -640,41 +643,58 @@ export abstract class StatementCompiler extends PatternCompiler {
     return (frame) => (test(frame) ? consequence(frame) : undefined);
   }
 
-  // code-gauge-allow functionNcss 32 -- One case per form of the construct, which reads best together.
   private compileIfCase(statement: Extract<Statement, { kind: 'if' }>): Exec {
+    const { match, consequence, otherwise, slots } = this.compileIfCaseParts(statement, (body) =>
+      this.compileScoped(body)
+    );
+    return (frame) => {
+      try {
+        if (match(frame)) return consequence(frame);
+      } finally {
+        for (const slot of slots) frame.locals[slot] = undefined;
+      }
+      return otherwise?.(frame);
+    };
+  }
+
+  protected compileIfCaseParts<T>(
+    statement: Extract<Statement, { kind: 'if' }>,
+    compileBody: (body: Statement) => T
+  ): {
+    match: (frame: Frame) => boolean;
+    consequence: T;
+    otherwise: T | undefined;
+    slots: number[];
+  } {
     const subject = this.compileExpression(statement.condition);
     const casePattern = statement.casePattern as NonNullable<typeof statement.casePattern>;
     const before = this.flow;
     let pattern!: CompiledPattern;
     let guard: Eval | undefined;
-    let guardFlow: ConditionFlow | undefined;
     const { result: consequence, slots } = this.withScope(() => {
       pattern = this.compilePattern(casePattern.pattern, subject.type, { mode: 'match', isFinal: false });
       for (const variable of pattern.variables.values()) this.flow = this.flow.assign(variable);
       if (casePattern.guard) {
         const compiledGuard = this.compileCondition(casePattern.guard);
         guard = compiledGuard.compiled.run;
-        guardFlow = compiledGuard.flow;
-        this.flow = guardFlow.whenTrue;
+        this.flow = compiledGuard.flow.whenTrue;
       }
-      return this.compileScoped(statement.consequence);
+      return compileBody(statement.consequence);
     });
     const afterThen = this.flow;
     this.flow = before;
-    const otherwise = statement.alternative ? this.compileScoped(statement.alternative) : undefined;
+    const otherwise = statement.alternative ? compileBody(statement.alternative) : undefined;
     this.flow = Flow.join(afterThen, this.flow);
-    const test = subject.run;
-    return (frame) => {
-      const value = test(frame);
-      let matched: boolean;
+    const match = (frame: Frame): boolean => {
+      const value = subject.run(frame);
+      frame.temporaries.push(value);
       try {
-        matched = pattern.match(frame, value) && (!guard || guard(frame) === true);
-        if (matched) return consequence(frame);
+        return pattern.match(frame, value) && (!guard || guard(frame) === true);
       } finally {
-        for (const slot of slots) frame.locals[slot] = undefined;
+        frame.temporaries.pop();
       }
-      return otherwise?.(frame);
     };
+    return { match, consequence, otherwise, slots };
   }
 
   /** Compiles a statement in a scope of its own, as the branches and bodies of control statements are. */
@@ -815,7 +835,7 @@ export abstract class StatementCompiler extends PatternCompiler {
   }
 
   /** The initializer of a for loop: its variables, which each iteration copies, and the row of its step. */
-  private compileForInit(statement: Extract<Statement, { kind: 'for' }>): {
+  protected compileForInit(statement: Extract<Statement, { kind: 'for' }>): {
     initExec: Exec | undefined;
     loopVariables: LocalVar[];
     initRow: number | undefined;
@@ -847,8 +867,8 @@ export abstract class StatementCompiler extends PatternCompiler {
     const elementType = this.elementTypeOfIterable(iterable, statement.iterable);
     const { result, slots } = this.withScope(() => {
       this.enterLoop(statement);
-      const bind = this.compileForInBinding(statement.binding, elementType, statement);
       const before = this.flow;
+      const bind = this.compileForInBinding(statement.binding, elementType, statement);
       const body = this.compileLoopBody(statement.body, labels);
       const breakFlow = this.breakFlows.pop();
       this.flow = breakFlow ? Flow.join(before, breakFlow) : before;
@@ -919,17 +939,7 @@ export abstract class StatementCompiler extends PatternCompiler {
         };
       }
       case 'identifier': {
-        const variable = this.findLocal(binding.name);
-        if (!variable) {
-          return this.error(binding, `${binding.name} という変数はありません。`);
-        }
-        if (variable.options.isFinal) this.error(binding, `final の変数 ${binding.name} には代入できません。`);
-        const cell = this.cellAccess(variable);
-        const answered = isAnsweredType(variable.type);
-        return (frame, value) => {
-          cell(frame).v = value;
-          frame.runtime.steps.stepBinding(row, answered);
-        };
+        return this.compileExistingForInBinding(binding, elementType, row);
       }
       case 'pattern': {
         const pattern = this.compilePattern(binding.pattern, elementType, {
@@ -948,7 +958,7 @@ export abstract class StatementCompiler extends PatternCompiler {
   }
 
   /** Runs a for-in loop over an iterable through its iterator, as Dart does. */
-  // code-gauge-allow duplicateLines 15 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
+  // code-gauge-allow duplicateLines 16 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   protected forInLoop(iterable: Eval, bind: (frame: Frame, value: Value) => void, body: Exec, labels: string[]): Exec {
     return (frame) => {
       const { runtime } = frame;
@@ -1109,12 +1119,10 @@ export abstract class StatementCompiler extends PatternCompiler {
 
   /** Creates the iterable a `sync*` function returns, which runs a new copy of the body for each iterator. */
   protected abstract makeSyncStarIterable(frame: Frame, elementType: DartType, body: GenExec): Value;
-
-  static readonly SHORTED = SHORTED;
 }
 
 /** Whether a method overrides one whose parameter at the position or of the name is `covariant`, making it so. */
-function inheritsCovariance(
+export function inheritsCovariance(
   cls: ClassInfo,
   methodName: string,
   parameterName: string,
@@ -1154,21 +1162,22 @@ function parameterBinder(
   };
 }
 
-// code-gauge-allow functionCognitiveComplexity 26 -- Each branch is one of the cases Dart distinguishes for this construct.
-function forLoop(loop: {
+export interface CountedLoop<Body> {
   initExec: Exec | undefined;
   initRow: number | undefined;
   test: Eval | undefined;
-  body: Exec;
+  body: Body;
   labels: string[];
   loopSlots: number[];
   updates: Eval[];
   updateRow: number | undefined;
-}): Exec {
-  const { initExec, initRow, test, body, labels, loopSlots, updates, updateRow } = loop;
+}
+
+// code-gauge-allow duplicateLines 15 -- The generator loop shares the header operations and suspends around its body.
+function forLoop(loop: CountedLoop<Exec>): Exec {
+  const { test, body, labels } = loop;
   return (frame) => {
-    if (initExec) initExec(frame);
-    if (initRow !== undefined) frame.runtime.steps.step(initRow);
+    startCountedLoop(loop, frame);
     for (;;) {
       if (test && !test(frame)) return;
       const completion = body(frame);
@@ -1176,13 +1185,21 @@ function forLoop(loop: {
         const outcome = loopCompletion(completion, labels);
         if (outcome !== 'continue') return outcome;
       }
-      // Each iteration has its own loop variables, which closures created in the body keep.
-      for (const slot of loopSlots) frame.locals[slot] = new Cell((frame.locals[slot] as Cell).v);
-      for (const update of updates) update(frame);
-      if (updateRow !== undefined) frame.runtime.steps.step(updateRow);
-      frame.runtime.spend();
+      advanceCountedLoop(loop, frame);
     }
   };
+}
+
+export function startCountedLoop(loop: CountedLoop<unknown>, frame: Frame): void {
+  loop.initExec?.(frame);
+  if (loop.initRow !== undefined) frame.runtime.steps.step(loop.initRow);
+}
+
+export function advanceCountedLoop(loop: CountedLoop<unknown>, frame: Frame): void {
+  for (const slot of loop.loopSlots) frame.locals[slot] = new Cell((frame.locals[slot] as Cell).v);
+  for (const update of loop.updates) update(frame);
+  if (loop.updateRow !== undefined) frame.runtime.steps.step(loop.updateRow);
+  frame.runtime.spend();
 }
 
 export function loopCompletion(completion: Completion, labels: readonly string[]): Completion | undefined | 'continue' {

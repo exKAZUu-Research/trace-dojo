@@ -5,7 +5,6 @@ import type { Value } from './values';
 
 let nextLocalId = 0;
 
-/** A local variable or parameter. */
 /** What a condition told flow analysis: whether its branch is reachable and the variables it promoted. */
 export interface StoredFlow {
   reachable: boolean;

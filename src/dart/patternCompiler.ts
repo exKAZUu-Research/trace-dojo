@@ -15,7 +15,6 @@ import {
   isSubtype,
   NEVER,
   nonNullable,
-  objectType,
   resolveBound,
   sameType,
   vmTypeString,
@@ -696,8 +695,6 @@ export abstract class PatternCompiler extends CallCompiler {
       isConst: false,
     };
   }
-
-  static readonly OBJECT = objectType();
 }
 
 /**

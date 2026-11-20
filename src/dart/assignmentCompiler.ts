@@ -1,15 +1,16 @@
-// code-gauge-allow-file fileNcss 643 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
-import type { CascadeSelector, CollectionElement, Expression, Span, SwitchExpressionCase } from './ast';
+// code-gauge-allow-file fileNcss 644 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+import type { CascadeSelector, CollectionElement, Expression, ForInBinding, Span, SwitchExpressionCase } from './ast';
 import type { ClassInfo, Member } from './classes';
 import { at, type Compiled, type Eval, type ResolvedMember, typeName } from './compilerBase';
 import { ControlCompiler } from './controlCompiler';
 import type { GlobalVariable } from './environment';
 import { checkExhaustive } from './exhaustiveness';
-import { ExpressionCompiler, inferElementType, SHORTED } from './expressionCompiler';
+import { ExpressionCompiler, SHORTED } from './expressionCompiler';
 import type { HashStore } from './hashStore';
-import { doubleModulo, dynamicBinary, wrap } from './operators';
+import { wrap } from './operators';
 import type { Frame } from './runtime';
 import { Flow, type LocalVar } from './scope';
+import { isAnsweredType } from './statementCompiler';
 import {
   asInstanceOf,
   coreTypes,
@@ -29,7 +30,7 @@ import {
   sameType,
   upperBound,
 } from './types';
-import { type Callable, Cell, DartList, type DartObject, UNASSIGNED, UNINITIALIZED, type Value } from './values';
+import { type Callable, Cell, DartList, type DartObject, UNINITIALIZED, type Value } from './values';
 
 /** How to read and write the target of an assignment once its receiver and index are evaluated. */
 interface AssignableTarget {
@@ -48,6 +49,35 @@ interface AssignableTarget {
 }
 
 export abstract class AssignmentCompiler extends ControlCompiler {
+  protected compileExistingForInBinding(
+    binding: Extract<ForInBinding, { kind: 'identifier' }>,
+    elementType: DartType,
+    row: number | undefined
+  ): (frame: Frame, value: Value) => void {
+    const target = this.nameTarget(binding.name, binding, true);
+    if (target.variable?.options.isFinal) {
+      this.error(binding, `final の変数 ${binding.name} には代入できません。`);
+    }
+    const item: Compiled = { type: elementType, run: (frame) => frame.temporaries.at(-1), isConst: false };
+    const coerced = this.coerce(
+      item,
+      target.writeType,
+      binding,
+      (from, to) => `${from} 型の要素は、${to} 型の変数 ${binding.name} に代入できません。`
+    );
+    this.afterWrite(target.variable, coerced.type);
+    const answered = isAnsweredType(target.writeType);
+    return (frame, value) => {
+      frame.temporaries.push(value);
+      try {
+        target.write(frame, target.prepare(frame), coerced.run(frame));
+      } finally {
+        frame.temporaries.pop();
+      }
+      frame.runtime.steps.stepBinding(row, answered);
+    };
+  }
+
   protected compileAssignment(
     expression: Extract<Expression, { kind: 'assign' }>,
     context: DartType | undefined
@@ -366,12 +396,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       writeType: variable.type,
       readType,
       prepare: () => {},
-      read: (frame) => {
-        const value = cell(frame).v;
-        if (value === UNINITIALIZED)
-          frame.runtime.throwError('LateError', '', [`Local '${name}' has not been initialized.`]);
-        return value === UNASSIGNED ? undefined : value;
-      },
+      read: (frame) => this.readLocalValue(frame, cell(frame), name),
       write: isLateFinal
         ? (frame, _prepared, value) => {
             const target = cell(frame);
@@ -454,7 +479,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
         readType: DYNAMIC,
         prepare,
         read: (frame, prepared) => frame.runtime.getProperty(prepared as Value, name, span.row),
-        write: (frame, prepared, value) => frame.runtime.setProperty(prepared as Value, name, value, span.row),
+        write: (frame, prepared, value) => frame.runtime.setProperty(prepared as Value, name, value, span.row, true),
         shorting: true,
       };
     }
@@ -1080,8 +1105,6 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       isConst: false,
     };
   }
-
-  static readonly UNUSED = [Cell, doubleModulo, dynamicBinary, inferElementType, DYNAMIC] as const;
 }
 
 export type { Member };

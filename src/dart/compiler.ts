@@ -33,10 +33,9 @@ import {
   type TopLevelFunction,
   type TypeAlias,
 } from './environment';
-import { SHORTED } from './expressionCompiler';
 import { type DartThrow, Frame, type FunctionInfo, type Runtime, type TypeEnv } from './runtime';
 import { Flow, FunctionContext } from './scope';
-import type { GenExec } from './statementCompiler';
+import { type GenExec, inheritsCovariance } from './statementCompiler';
 import {
   asInstanceOf,
   coreTypes,
@@ -48,9 +47,6 @@ import {
   interfaceType,
   isNullable,
   isSubtype,
-  isTop,
-  NEVER,
-  nonNullable,
   objectType,
   substitute,
   type TypeParam,
@@ -66,7 +62,6 @@ import {
   DartClosure,
   DartObject,
   DartTypeValue,
-  NO_ARGUMENTS,
   UNINITIALIZED,
   type Value,
 } from './values';
@@ -227,7 +222,6 @@ export class Compiler extends ConstructorCompiler {
     for (const work of this.classWork) this.declareTypeParamsOf(work);
     for (const work of this.classWork) this.resolveHeader(work);
     this.checkHierarchy();
-    for (const work of this.classWork) this.layoutClass(work.cls);
     for (const work of this.orderedClassWork()) this.declareMembers(work);
     for (const { ext, declaration } of this.extensionWork) this.declareExtension(ext, declaration);
     for (const declaration of syntax.declarations) {
@@ -433,15 +427,6 @@ export class Compiler extends ConstructorCompiler {
         current = current.superclass?.cls;
       }
     }
-  }
-
-  /** Lays out an object's fields: the superclass's first, then those the class declares. */
-  private layoutClass(cls: ClassInfo, laidOut = new Set<ClassInfo>()): void {
-    if (laidOut.has(cls)) return;
-    laidOut.add(cls);
-    const superclass = cls.superclass?.cls;
-    if (superclass) this.layoutClass(superclass, laidOut);
-    void superclass;
   }
 
   // code-gauge-allow functionCognitiveComplexity 23 -- Each kind of member declares itself differently.
@@ -1495,7 +1480,7 @@ export class Compiler extends ConstructorCompiler {
     for (const supertype of cls.directSupertypes) {
       const inherited = this.interfaceMember(supertype, member.name, member.kind === 'setter');
       if (!inherited || inherited.member === member) continue;
-      const own = member.kind === 'field' || member.kind === 'getter' ? member.type : member.type;
+      const own = member.type;
       if (member.kind === 'method' && inherited.member.kind !== 'method') {
         this.error(
           { row: member.row ?? 0 },
@@ -1509,7 +1494,7 @@ export class Compiler extends ConstructorCompiler {
         );
       }
       if (member.kind === 'method' && inherited.member.kind === 'method') {
-        if (!this.isValidOverride(own as FunctionType, inherited.type as FunctionType)) {
+        if (!this.isValidOverride(member, inherited.type as FunctionType)) {
           this.error(
             { row: member.row ?? 0 },
             `${cls.name}.${member.name}（${typeToString(own)}）は、${inherited.member.owner.name}.${member.name}（${typeToString(inherited.type)}）の正しい上書きではありません。`
@@ -1531,21 +1516,39 @@ export class Compiler extends ConstructorCompiler {
     }
   }
 
-  /** Whether a method's signature may override another's, allowing covariant parameters as Dart does for fields. */
-  private isValidOverride(own: FunctionType, inherited: FunctionType): boolean {
+  private isValidOverride(member: MethodMember, inherited: FunctionType): boolean {
+    const own = member.type;
     if (isSubtype(own, inherited)) return true;
-    // Parameters marked covariant (or of a generic class's type parameters) may narrow; check the rest.
+    const { owner, name } = member;
+    const declaration = owner.declaration?.members.find(
+      (candidate): candidate is MethodDeclaration =>
+        candidate.kind === 'method' && candidate.name === name && candidate.methodKind !== 'setter'
+    );
+    const relax = (
+      type: DartType,
+      other: DartType | undefined,
+      parameter: FormalParameter | undefined,
+      index?: number
+    ): DartType => {
+      if (
+        other &&
+        isSubtype(type, other) &&
+        (parameter?.isCovariant || inheritsCovariance(owner, name, parameter?.name ?? '', index))
+      )
+        return other;
+      return type;
+    };
     const relaxed: FunctionType = {
       ...own,
       positional: own.positional.map((type, index) =>
-        inherited.positional[index] && isSubtype(type, inherited.positional[index]) ? inherited.positional[index] : type
+        relax(type, inherited.positional[index], declaration?.parameters.positional[index], index)
       ),
       named: own.named.map((named) => {
         const other = inherited.named.find((candidate) => candidate.name === named.name);
-        return other && isSubtype(named.type, other.type) ? { ...named, type: other.type } : named;
+        const parameter = declaration?.parameters.named.find((candidate) => candidate.name === named.name);
+        return { ...named, type: relax(named.type, other?.type, parameter) };
       }),
     };
-    // Dart also checks that narrowed parameters are covariant; this checker accepts them, erring toward running.
     return isSubtype(relaxed, inherited);
   }
 
@@ -1816,8 +1819,6 @@ export class Compiler extends ConstructorCompiler {
       throw new Error(`The interpreter has no native for ${key}`);
     };
   }
-
-  static readonly unused = [NEVER, nonNullable, isTop, NO_ARGUMENTS, SHORTED] as const;
 }
 
 function declarationRow(declaration: Declaration): number | undefined {
@@ -1937,7 +1938,6 @@ export {
   type FunctionInfo,
   type GlobalVariable,
   type MethodMember,
-  NO_ARGUMENTS,
   objectType,
   type TypeAlias,
 };

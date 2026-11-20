@@ -11,23 +11,13 @@ function toDouble(value: bigint | number): number {
 }
 
 /** `num.compareTo`, which orders -0.0 before 0.0 and NaN after every number. */
-// code-gauge-allow functionCognitiveComplexity 21 -- A transcription of the SDK's algorithm, case by case.
 export function compareNumbers(a: bigint | number, b: bigint | number): number {
-  if (typeof a === 'bigint' && typeof b === 'bigint') return a < b ? -1 : a > b ? 1 : 0;
-  const x = toDouble(a);
-  const y = toDouble(b);
-  if (x < y) return -1;
-  if (x > y) return 1;
-  if (x === y) {
-    if (x === 0) {
-      const negative = Object.is(x, -0);
-      if (negative === Object.is(y, -0)) return 0;
-      return negative ? -1 : 1;
-    }
-    return 0;
-  }
-  if (Number.isNaN(x)) return Number.isNaN(y) ? 0 : 1;
-  return -1;
+  if (a < b) return -1;
+  if (a > b) return 1;
+  if (Number.isNaN(a)) return Number.isNaN(b) ? 0 : 1;
+  if (Number.isNaN(b)) return -1;
+  if (Object.is(a, -0)) return Object.is(b, -0) ? 0 : -1;
+  return Object.is(b, -0) ? 1 : 0;
 }
 
 /**

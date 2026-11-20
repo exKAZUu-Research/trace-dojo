@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 594 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 598 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type { Arguments as ArgumentsSyntax, Expression, FormalParameters, FunctionBody, Span, TypeSyntax } from './ast';
 import type { ClassInfo, ConstructorInfo, Member } from './classes';
 import {
@@ -543,16 +543,28 @@ export abstract class CallCompiler extends OperatorCompiler {
     const { type: typeSyntax } = expression;
     if (typeSyntax.kind !== 'named') return this.error(expression, 'クラスの名前を書いてください。');
     let { constructorName } = expression;
-    let declaration =
-      typeSyntax.prefix === undefined
-        ? this.library.lookup(typeSyntax.name)
-        : this.library.lookupPrefixed(typeSyntax.prefix, typeSyntax.name);
-    if (typeSyntax.ambiguousPrefix && !this.library.hasPrefix(typeSyntax.prefix ?? '')) {
-      declaration = this.library.lookup(typeSyntax.name);
-    } else if (typeSyntax.ambiguousPrefix && typeSyntax.prefix && this.library.hasPrefix(typeSyntax.prefix)) {
-      declaration = this.library.lookupPrefixed(typeSyntax.prefix, constructorName ?? '');
+    let { name, prefix } = typeSyntax;
+    // The grammar can interpret the same dotted name as either a named constructor or a prefixed type.
+    if (
+      prefix === undefined &&
+      constructorName !== undefined &&
+      typeSyntax.args.length === 0 &&
+      this.library.hasPrefix(name)
+    ) {
+      prefix = name;
+      name = constructorName;
       constructorName = undefined;
+    } else if (
+      prefix !== undefined &&
+      constructorName === undefined &&
+      typeSyntax.args.length === 0 &&
+      !this.library.hasPrefix(prefix)
+    ) {
+      constructorName = name;
+      name = prefix;
+      prefix = undefined;
     }
+    const declaration = prefix === undefined ? this.library.lookup(name) : this.library.lookupPrefixed(prefix, name);
     let cls: ClassInfo | undefined;
     let aliasArgs: DartType[] | undefined;
     if (declaration?.kind === 'class') cls = declaration.cls;
@@ -560,7 +572,7 @@ export abstract class CallCompiler extends OperatorCompiler {
       cls = declaration.alias.aliased.cls;
       if (declaration.alias.typeParams.length === 0) aliasArgs = [...declaration.alias.aliased.args];
     }
-    if (!cls) return this.error(expression, `クラス ${typeSyntax.name} が見つかりません。`);
+    if (!cls) return this.error(expression, `クラス ${name} が見つかりません。`);
     const typeArgs =
       typeSyntax.args.length > 0 ? this.typeArgumentsFor(cls.typeParams, typeSyntax, cls.name) : aliasArgs;
     return this.compileConstructorCall(
@@ -1164,7 +1176,6 @@ interface CompiledArguments {
   named: (Compiled | undefined)[];
 }
 
-/** The context wins over the arguments when they fit it, as `List<num> l = List.filled(3, 0)` makes a List<num>. */
 /**
  * What a type parameter stands for in an argument's context. A closure's parameters take the context's type over what
  * the other arguments gave, as Dart solves the context first: `num n = ap(1, (a) => a + 1)` types `a` as num. Other

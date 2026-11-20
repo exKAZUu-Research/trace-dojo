@@ -281,6 +281,133 @@ test('setRange follows each list kind and copies overlapping ranges', () => {
   });
 });
 
+test('dotted Dart constants resolve as prefixes or named constructors', () => {
+  const program = `import 'dart:math' as m;
+enum Option { one, two }
+class Example { const Example.named(); }
+void main() {
+  print(const m.Point(1, 2));
+  print(new m.Point(3, 4));
+  print(const Example.named());
+  if ((Option.one, m.pi) case (Option.one, m.pi)) print('matched');
+}
+`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: "Point(1, 2)\nPoint(3, 4)\nInstance of 'Example'\nmatched\n",
+  });
+});
+
+test('dynamic writes and for-in assignments enforce the target type', () => {
+  const program = `class Box {
+  int field = 1;
+  set value(int value) { print(value); }
+}
+int global = 0;
+void main() {
+  dynamic box = Box();
+  try { box.field = 'a'; } catch (e) { print(e); }
+  try { box.value = 'a'; } catch (e) { print(e); }
+  print(box.field);
+  for (global in [7, 8]) print(global);
+  int local = 0;
+  Iterable<dynamic> items = ['x'];
+  try { for (local in items) print(local); } catch (e) { print(e); }
+}
+`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      `type 'String' is not a subtype of type 'int' of 'value'\n`.repeat(2) +
+      "1\n7\n8\ntype 'String' is not a subtype of type 'int'\n",
+  });
+});
+
+test('synchronous generators preserve iteration captures, patterns, and yield-star types', () => {
+  const program = `Iterable<int Function()> callbacks() sync* {
+  for (var index = 0; index < 3; index++) { yield () => index; }
+}
+Iterable<int> patterned(Object? x) sync* {
+  if (x case (int value, _) when value > 0) { yield value; } else { yield 0; }
+}
+Iterable<int> invalidYield() sync* { dynamic values = ['x']; yield* values; }
+void main() {
+  print([for (var callback in callbacks()) callback()]);
+  print(patterned((4, 0)).toList());
+  print(patterned((0, 0)).toList());
+  try { print(invalidYield().first); } catch (e) { print(e); }
+}
+`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: "[0, 1, 2]\n[4]\n[0]\ntype 'List<String>' is not a subtype of type 'Iterable<int>'\n",
+  });
+});
+
+test('a compound assignment retries a late initializer that throws', () => {
+  const program = `void main() {
+  var attempts = 0;
+  int init() {
+    attempts++;
+    if (attempts == 1) throw 'retry';
+    return 4;
+  }
+  late int x = init();
+  try { x += 1; } catch (e) { print(e); }
+  x += 2;
+  print(x);
+}
+`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'retry\n6\n' });
+});
+
+test('num.compareTo orders precise integers, signed zeros, and NaN', () => {
+  const program = `void main() {
+  print(9007199254740993.compareTo(9007199254740992.0));
+  print(9223372036854775808.0.compareTo(9223372036854775807));
+  print((-0.0).compareTo(0));
+  print(double.nan.compareTo(double.infinity));
+}
+`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '1\n1\n-1\n1\n' });
+});
+
+test('a parameter can only narrow an override when explicitly covariant', () => {
+  const invalid = 'class A<T> { void f(T value) {} } class B extends A<num> { void f(int value) {} } void main() {}';
+  expect(executeProgram('dart', invalid)).toMatchObject({ kind: 'compileError' });
+  const valid = `class A { void f({covariant num value = 0}) {} }
+class B extends A { void f({int value = 0}) { print(value); } }
+void main() {
+  A object = B();
+  object.f(value: 7);
+  try { object.f(value: 1.5); } catch (e) { print(e.runtimeType); }
+}
+`;
+  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '7\n_TypeError\n' });
+});
+
+test('strings and null-aware indexing preserve Dart syntax', () => {
+  const program = String.raw`class A {
+  String toString() => 'A1';
+  void show() { print('$this'); }
+}
+class N { List<int>? xs; }
+void main() {
+  A().show();
+  print('''\nabc''');
+  print('''
+literal''');
+  var n = N();
+  n.xs?[1] = 7;
+  n.xs = [5, 6];
+  n.xs?[1] = 7;
+  n.xs?[0]++;
+  print(n.xs);
+}
+`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'A1\n\nabc\nliteral\n[6, 7]\n' });
+});
+
 test('patterns, generics, and an uncaught error behave as the SDK does', () => {
   const program = `sealed class Shape {}
 

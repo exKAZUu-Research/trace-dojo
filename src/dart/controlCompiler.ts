@@ -1,12 +1,21 @@
-// code-gauge-allow-file fileNcss 508 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 515 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type { Block, CatchClause, Pattern, Statement, SwitchCase } from './ast';
 import type { FunctionSpec } from './callCompiler';
-import { type Eval, typeName } from './compilerBase';
+import type { Eval } from './compilerBase';
 import { checkExhaustive } from './exhaustiveness';
 import { type CompiledPattern } from './patternCompiler';
 import { DartThrow, type Frame } from './runtime';
 import { Flow } from './scope';
-import { type Completion, type Exec, type GenExec, loopCompletion, StatementCompiler } from './statementCompiler';
+import {
+  advanceCountedLoop,
+  type Completion,
+  type CountedLoop,
+  type Exec,
+  type GenExec,
+  loopCompletion,
+  startCountedLoop,
+  StatementCompiler,
+} from './statementCompiler';
 import { coreTypes, type DartType, DYNAMIC, interfaceType, isSubtype, iterableElementOf } from './types';
 import { Cell, type Value } from './values';
 
@@ -311,8 +320,8 @@ export abstract class ControlCompiler extends StatementCompiler {
     return clearingSlots(result, slots);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- One case per statement that may yield, in a sync* body.
-  // code-gauge-allow functionNcss 40 -- One case per form of the construct, which reads best together.
+  // code-gauge-allow functionCognitiveComplexity 17 -- One case per statement that may yield, in a sync* body.
+  // code-gauge-allow functionNcss 42 -- One case per form of the construct, which reads best together.
   private compileGenStatement(statement: Statement): GenExec {
     switch (statement.kind) {
       case 'yield': {
@@ -322,7 +331,8 @@ export abstract class ControlCompiler extends StatementCompiler {
         return this.compileGenBlock(statement);
       }
       case 'if': {
-        if (statement.casePattern || !containsYield(statement)) break;
+        if (!containsYield(statement)) break;
+        if (statement.casePattern) return this.compileGenIfCase(statement);
         return this.compileGenIf(statement);
       }
       case 'while': {
@@ -449,6 +459,21 @@ export abstract class ControlCompiler extends StatementCompiler {
     };
   }
 
+  private compileGenIfCase(statement: Extract<Statement, { kind: 'if' }>): GenExec {
+    const { match, consequence, otherwise, slots } = this.compileIfCaseParts(statement, (body) =>
+      this.compileGenScoped(body)
+    );
+    return function* (frame) {
+      try {
+        if (match(frame)) return yield* consequence(frame);
+      } finally {
+        for (const slot of slots) frame.locals[slot] = undefined;
+      }
+      if (otherwise) return yield* otherwise(frame);
+      return;
+    };
+  }
+
   // code-gauge-allow duplicateLines 21 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   private compileGenWhile(statement: Extract<Statement, { kind: 'while' }>): GenExec {
     const labels = this.takeLoopLabels();
@@ -480,27 +505,25 @@ export abstract class ControlCompiler extends StatementCompiler {
   private compileGenFor(statement: Extract<Statement, { kind: 'for' }>): GenExec {
     const labels = this.takeLoopLabels();
     const { result, slots } = this.withScope(() => {
-      const initExec = this.compileGenForInit(statement);
+      const { initExec, initRow, loopVariables } = this.compileForInit(statement);
       this.enterLoop(statement);
       const condition = statement.condition ? this.compileCondition(statement.condition) : undefined;
       if (condition) this.flow = condition.flow.whenTrue;
       const body = this.compileGenLoopBody(statement.body, labels);
       const updates = statement.updates.map((update) => this.compileExpression(update).run);
       if (condition) this.flow = condition.flow.whenFalse;
-      return genForLoop(initExec, condition?.compiled.run, body, updates, labels);
+      return genForLoop({
+        initExec,
+        initRow,
+        test: condition?.compiled.run,
+        body,
+        updates,
+        labels,
+        loopSlots: loopVariables.map((variable) => variable.slot),
+        updateRow: updates.length > 0 ? this.stepRowOf(statement) : undefined,
+      });
     });
     return clearingSlots(result, slots);
-  }
-
-  private compileGenForInit(statement: Extract<Statement, { kind: 'for' }>): Exec | undefined {
-    const { init } = statement;
-    if (init && !Array.isArray(init)) return this.compileLocalDeclaration(init, false);
-    if (!init) return undefined;
-    const runs = init.map((expression) => this.compileExpression(expression).run);
-    return (frame) => {
-      for (const run of runs) run(frame);
-      return;
-    };
   }
 
   // code-gauge-allow duplicateLines 15 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
@@ -511,8 +534,10 @@ export abstract class ControlCompiler extends StatementCompiler {
     const elementType = this.elementTypeOfIterable(iterable, statement.iterable);
     const { result, slots } = this.withScope(() => {
       this.enterLoop(statement);
+      const before = this.flow;
       const bind = this.compileForInBinding(statement.binding, elementType, statement);
       const body = this.compileGenLoopBody(statement.body, labels);
+      this.flow = before;
       const source = iterable.run;
       return function* (frame: Frame): Generator<Value, Completion | undefined, undefined> {
         const { runtime } = frame;
@@ -552,8 +577,7 @@ export abstract class ControlCompiler extends StatementCompiler {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Each branch is one of the cases Dart distinguishes for this construct.
-  // code-gauge-allow functionNcss 33 -- One case per form of the construct, which reads best together.
+  // code-gauge-allow functionNcss 37 -- One case per form of the construct, which reads best together.
   private compileYield(statement: Extract<Statement, { kind: 'yield' }>): GenExec {
     if (!this.fn.kind.isGenerator) return this.error(statement, 'yield は sync* の関数の中にしか書けません。');
     const elementType = this.fn.yieldElement;
@@ -566,21 +590,28 @@ export abstract class ControlCompiler extends StatementCompiler {
     if (statement.isEach) {
       const element = this.elementTypeOfIterable(compiled, statement.value);
       this.fn.yieldTypes?.push(element);
-      if (elementType && !isSubtype(element, elementType) && element.kind !== 'dynamic') {
-        this.error(
-          statement.value,
-          `${typeName(element)} 型の要素は、${typeName(elementType)} 型の Iterable に入れられません。`
-        );
-      }
+      compiled = this.coerce(
+        compiled,
+        context ?? interfaceType(coreTypes.iterable, [DYNAMIC]),
+        statement.value,
+        (from, to) => `${from} 型の値は、${to} 型の Iterable に yield* できません。`
+      );
       const { run } = compiled;
       const row = this.stepRowOf(statement);
       return function* (frame) {
         const { runtime } = frame;
         const values = run(frame);
-        const iterator = runtime.getProperty(values, 'iterator', undefined);
-        while (runtime.invoke(iterator, 'moveNext', { positional: [], named: undefined }, [], undefined) === true) {
-          if (row !== undefined) runtime.steps.step(row);
-          yield runtime.getProperty(iterator, 'current', undefined);
+        const mark = frame.temporaries.length;
+        frame.temporaries.push(values);
+        try {
+          const iterator = runtime.getProperty(values, 'iterator', undefined);
+          frame.temporaries.push(iterator);
+          while (runtime.invoke(iterator, 'moveNext', { positional: [], named: undefined }, [], undefined) === true) {
+            if (row !== undefined) runtime.steps.step(row);
+            yield runtime.getProperty(iterator, 'current', undefined);
+          }
+        } finally {
+          frame.temporaries.length = mark;
         }
         return;
       };
@@ -605,17 +636,10 @@ export abstract class ControlCompiler extends StatementCompiler {
   }
 }
 
-/** Groups the cases of a switch statement: empty cases share the body of the next case. */
-// code-gauge-allow functionCognitiveComplexity 16 -- Each branch is one of the cases Dart distinguishes for this construct.
-function genForLoop(
-  initExec: Exec | undefined,
-  test: Eval | undefined,
-  body: GenExec,
-  updates: Eval[],
-  labels: string[]
-): GenExec {
+function genForLoop(loop: CountedLoop<GenExec>): GenExec {
+  const { test, body, labels } = loop;
   return function* (frame: Frame): Generator<Value, Completion | undefined, undefined> {
-    initExec?.(frame);
+    startCountedLoop(loop, frame);
     for (;;) {
       if (test && !test(frame)) return undefined;
       const completion = yield* body(frame);
@@ -623,8 +647,7 @@ function genForLoop(
         const outcome = loopCompletion(completion, labels);
         if (outcome !== 'continue') return outcome;
       }
-      for (const update of updates) update(frame);
-      frame.runtime.spend();
+      advanceCountedLoop(loop, frame);
     }
   };
 }

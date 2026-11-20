@@ -298,8 +298,7 @@ export class Runtime implements TracedRuntime<Frame> {
   }
 
   /**
-   * A field typed by a type parameter of its class takes only values of the object's type argument, which a
-   * reference of a supertype (`Box<num> b = Box<int>(1)`) cannot check statically.
+   * A dynamic or covariant field write is checked against the type of the actual object.
    */
   private checkCovariantField(receiver: DartObject, field: Member & { kind: 'field' }, value: Value): void {
     const owner = asInstanceOf(interfaceType(receiver.cls, receiver.typeArgs), field.owner);
@@ -309,11 +308,11 @@ export class Runtime implements TracedRuntime<Frame> {
     const expected = substitute(field.type, env);
     if (this.links.isValueOf(this, value, expected)) return;
     this.throwTypeError(
-      `type '${vmTypeString(this.runtimeTypeOf(value))}' is not a subtype of type '${vmTypeString(expected)}' of '${field.name}'`
+      `type '${vmTypeString(this.runtimeTypeOf(value))}' is not a subtype of type '${vmTypeString(expected)}' of 'value'`
     );
   }
 
-  setProperty(receiver: Value, name: string, value: Value, callRow: number | undefined): void {
+  setProperty(receiver: Value, name: string, value: Value, callRow: number | undefined, isDynamic = false): void {
     const cls = this.classOf(receiver);
     const member = cls.setterImplementation(name);
     if (!member) {
@@ -321,14 +320,15 @@ export class Runtime implements TracedRuntime<Frame> {
       return;
     }
     if (member.kind === 'field') {
-      if (mentionsTypeParams(member.type)) this.checkCovariantField(receiver as DartObject, member, value);
+      if (isDynamic || member.isCovariant || mentionsTypeParams(member.type))
+        this.checkCovariantField(receiver as DartObject, member, value);
       (receiver as DartObject).fields[member.slot] = value;
       return;
     }
     (member.impl as NonNullable<typeof member.impl>)(
       this,
       receiver,
-      { positional: [value], named: undefined },
+      { positional: [value], named: undefined, isDynamic },
       [],
       callRow
     );
