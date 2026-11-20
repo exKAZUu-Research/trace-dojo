@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 789 -- Runs PHP statements iteratively on a heap block stack with shared loop/try/foreach helpers.
+// code-gauge-allow-file fileNcss 793 -- Runs PHP statements iteratively on a heap block stack with shared loop/try/foreach helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { CompileError } from '../interpreter/diagnostics';
 import type { ArrayCursor } from './arrayOrder';
@@ -475,7 +475,7 @@ function decrementLoopCompletion(completion: NonNullable<Completion>): Completio
 
 function unwindStackOnThrow(stack: BlockFrame[], error: unknown, runtime: Runtime, frame: Frame): void {
   let activeError = error;
-  const fromExit = error instanceof ExitSignal;
+  let fromExit = error instanceof ExitSignal;
   while (stack.length > 0) {
     const top = stack.at(-1) as BlockFrame;
     if (top.k === 'list') {
@@ -496,6 +496,7 @@ function unwindStackOnThrow(stack: BlockFrame[], error: unknown, runtime: Runtim
       const result = handleTryThrow(stack, top, activeError, runtime, frame, fromExit);
       if (result.handled) return;
       activeError = result.error;
+      fromExit = result.fromExit;
       continue;
     }
     stack.pop();
@@ -670,7 +671,7 @@ function propagateTryCompletion(
   return completion;
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Handles catch matching, finally transition, and exception chaining in one unwind step.
+// code-gauge-allow functionCognitiveComplexity 19 -- Handles catch matching, finally transition, and exception chaining in one unwind step.
 function handleTryThrow(
   stack: BlockFrame[],
   top: Extract<BlockFrame, { k: 'try' }>,
@@ -678,28 +679,30 @@ function handleTryThrow(
   runtime: Runtime,
   frame: Frame,
   fromExit = false
-): { handled: boolean; error: unknown } {
+): { handled: boolean; error: unknown; fromExit: boolean } {
+  let exitOrigin = fromExit;
   if (top.phase === 'try' && error instanceof PhpThrow) {
+    if (top.stmt.catches.length > 0) exitOrigin = false;
     const handler = top.stmt.catches.find((item) => item.types.some((name) => catches(error.object, name)));
     if (handler) {
       try {
         bindCatchVariable(handler, error.object, runtime, frame);
       } catch (bindError) {
         top.phase = 'catch';
-        return handleTryThrow(stack, top, bindError, runtime, frame, fromExit);
+        return handleTryThrow(stack, top, bindError, runtime, frame, exitOrigin);
       }
       top.phase = 'catch';
       pushListFrame(stack, handler.body);
-      return { handled: true, error };
+      return { handled: true, error, fromExit: exitOrigin };
     }
   }
   if (top.phase !== 'finally') {
-    if (error instanceof PhpThrow && (!fromExit || top.stmt.catches.length > 0) && !runtime.exhausted && top.stmt.fin) {
+    if (error instanceof PhpThrow && !exitOrigin && !runtime.exhausted && top.stmt.fin) {
       enterFinallyFrame(stack, top, runtime, frame, undefined, error);
-      return { handled: true, error };
+      return { handled: true, error, fromExit: exitOrigin };
     }
     stack.pop();
-    return { handled: false, error };
+    return { handled: false, error, fromExit: exitOrigin };
   }
   if (top.pending) runtime.held.pop();
   if (top.completion?.t === 'return') frame.returning = undefined;
@@ -707,7 +710,7 @@ function handleTryThrow(
   const nextError =
     top.finMark === undefined ? error : releaseTemporariesKeepingError(runtime, frame, top.finMark, error);
   stack.pop();
-  return { handled: false, error: nextError };
+  return { handled: false, error: nextError, fromExit: exitOrigin };
 }
 
 function bindCatchVariable(

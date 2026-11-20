@@ -4900,6 +4900,14 @@ try { f(); } catch (Throwable $e) { while ($e) { echo $e->getMessage(), ";"; $e 
       'try { return [new D, exit("exit;")]; } catch (TypeError $e) { echo "wrong;"; } finally { echo "finally;"; }',
       'exit;drop;finally;outer;destructor',
     ],
+    [
+      'try { throw new Exception("initial"); } catch (Exception $e) { return [new D, exit("exit;")]; } finally { echo "finally;"; }',
+      'exit;drop;outer;destructor',
+    ],
+    [
+      'try { try { return [new D, exit("exit;")]; } catch (TypeError $e) { echo "wrong;"; } } finally { echo "outer-fin;"; }',
+      'exit;drop;outer-fin;outer;destructor',
+    ],
   ]) {
     expect(
       run(
