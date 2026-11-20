@@ -1,0 +1,23 @@
+int 1
+double 2.5
+string text
+char c
+double 3
+int 1
+long 5
+double 2
+ref
+cref
+cref
+12 25
+Box()
+Box(int,int)
+Box(int)
+Box(int,int)
+Box(int,int)
+Box(int)
+19104920
+Box(int,int)
+Box(int)
+16
+int 3

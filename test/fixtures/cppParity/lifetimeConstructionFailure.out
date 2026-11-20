@@ -1,0 +1,12 @@
+C1 Base C2 C3 C4 body D4 D3 D2 ~Base D1 caught 1
+C1 Base C2 C3 C4 body D4 D3 D2 ~Base D1 caught 1
+C5 D5 caught 2
+C7 D7 caught 3
+C9 target ~Delegating D9 caught 4
+T1 T2 ~T2 ~T1 caught 3
+T1 T2 ~T2 ~T1 caught 3
+T1 T2 ~T2 ~T1 caught 3
+U1 U2 ~U2 ~U1 caught 3
+U1 U2 ~U2 ~U1 caught 3
+T1 T2 ~T2 ~T1 caught 3
+T1 T2 ~T2 ~T1 caught 3

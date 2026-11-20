@@ -1,0 +1,15 @@
+~Guard check
+10
+~Guard check
+invalid: negative
+~Guard check
+exception: My: zero
+~Guard check
+int 42
+oor vector
+basic_string
+stoi: no conversion
+stoi: out of range
+rethrow
+outer inner
+[uncaught] libc++abi: terminating due to uncaught exception of type MyError: My: uncaught
