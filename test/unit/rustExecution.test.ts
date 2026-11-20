@@ -2363,6 +2363,10 @@ test.each([
   ['a precise float', 'println!("{:.100000000}", 1.0);'],
   ['nested Vecs', 'let v = vec![vec![0u8; 10_000]; 10_000];'],
   ['nested arrays', 'let a = [[0u8; 10_000]; 10_000];'],
+  [
+    'implicit copies of aggregates',
+    'let a = [0u8; 1000]; let mut copies = Vec::new(); for _ in 0..1001 { copies.push(a); }',
+  ],
   ['default values for nested arrays', 'let a: [[[[i32; 32]; 32]; 32]; 32] = Default::default();'],
   [
     'elements added to a heap',

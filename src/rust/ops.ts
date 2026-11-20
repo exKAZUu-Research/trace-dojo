@@ -585,6 +585,7 @@ export function cloneValue(type: Type, value: Value): Value {
   }
   switch (t.kind) {
     case 'tuple': {
+      hooks?.allocate(t.elems.length);
       return t.elems.map((elem, index) => cloneValue(elem, (value as Value[])[index]));
     }
     case 'closure': {
@@ -629,6 +630,7 @@ export function cloneValue(type: Type, value: Value): Value {
         default: {
           if (value instanceof StructValue) {
             const types = fieldTypes(def, t.args, 0);
+            hooks?.allocate(types.length);
             return new StructValue(
               def,
               types.map((type, index) => cloneValue(type, value.fields[index]))
@@ -636,6 +638,7 @@ export function cloneValue(type: Type, value: Value): Value {
           }
           if (value instanceof EnumValue) {
             const types = fieldTypes(def, t.args, value.variant);
+            hooks?.allocate(types.length);
             return new EnumValue(
               def,
               value.variant,
@@ -674,13 +677,18 @@ export function needsCopy(type: Type): boolean {
 
 /** A copy of a value of a `Copy` type, which shares nothing mutable with the original. */
 export function copyValue(value: Value): Value {
-  if (Array.isArray(value)) return value.length === 0 ? value : value.map(copyValue);
+  if (Array.isArray(value)) return value.length === 0 ? value : copyFields(value);
   if (value instanceof FnValue) return value.duplicate?.(copyValue) ?? value;
-  if (value instanceof StructValue) return new StructValue(value.def, value.fields.map(copyValue));
+  if (value instanceof StructValue) return new StructValue(value.def, copyFields(value.fields));
   if (value instanceof EnumValue) {
-    return value.fields.length === 0 ? value : new EnumValue(value.def, value.variant, value.fields.map(copyValue));
+    return value.fields.length === 0 ? value : new EnumValue(value.def, value.variant, copyFields(value.fields));
   }
   return value;
+}
+
+function copyFields(fields: Value[]): Value[] {
+  hooks?.allocate(fields.length);
+  return fields.map(copyValue);
 }
 
 /** A clone of a map or a set, with its table's size, of keys (and values) of the types `args`. */
@@ -695,15 +703,4 @@ function cloneCollection(args: Type[], source: MapValue | SetValue): MapValue | 
   const copy = new SetValue(source.sorted);
   copy.entries.copyFrom(source.entries, (item) => cloneValue(args[0], item));
   return copy;
-}
-
-/** How many elements and fields {@link copyValue} makes in copying a value. */
-export function copiedSlots(value: Value): number {
-  let fields: Value[];
-  if (Array.isArray(value)) fields = value;
-  else if (value instanceof StructValue || value instanceof EnumValue) fields = value.fields;
-  else return 0;
-  let count = fields.length;
-  for (const field of fields) count += copiedSlots(field);
-  return count;
 }

@@ -14,7 +14,7 @@ import { compileField, compileIndex, compilePlace } from './compilerPlaces';
 import type { Formatter } from './fmt';
 import { normalize } from './infer';
 import type { Program } from './items';
-import { castValue, copiedSlots, copyValue, needsCopy } from './ops';
+import { castValue, copyValue, needsCopy } from './ops';
 import { ControlSignal, type Frame, type FunctionInfo, MOVED, UNASSIGNED } from './runtime';
 import { runtimeType } from './runtimeTypes';
 import { type ConstDef, type FnDef, isUnit, resolve, shallow, substitute, type Type, UNIT } from './types';
@@ -778,7 +778,6 @@ function readArrayRepeat(c: Compiler, expr: ExprOf<'arrayRepeat'>): Eval {
     frame.runtime.allocate(length);
     frame.runtime.spend(Math.ceil(length / 16));
     const item = value(frame);
-    frame.runtime.allocate(length * copiedSlots(item));
     return Array.from({ length }, () => copyValue(item));
   };
 }
