@@ -1,4 +1,4 @@
-import { comparePartialValues, compareValues } from '../ops';
+import { comparePartialValues } from '../ops';
 import { type IntName, intType, type Type } from '../types';
 import { ElementPlace, sliceItems, sliceSet, UNIT_VALUE, type Value } from '../values';
 import { sizeOf } from './layout';
@@ -37,7 +37,7 @@ function ordViolation(ctx: NativeContext): never {
   );
 }
 
-/** `a < b` by `Ord`, as `sort` compares its elements. */
+/** `a < b` by `PartialOrd`, as `sort` compares its elements. */
 export function lessByPartialOrd(type: Type): (a: Value, b: Value) => boolean {
   return (a, b) => (comparePartialValues(type, a, b) ?? 0) < 0;
 }
@@ -118,8 +118,8 @@ export function sortByCachedKey(ctx: NativeContext, slice: Value, f: Value): voi
   const isLess = (a: Value, b: Value): boolean => {
     const [keyA, indexA] = a as [Value, number];
     const [keyB, indexB] = b as [Value, number];
-    const order = compareValues(keyType, keyA, keyB) ?? 0;
-    return order === 0 ? indexA < indexB : order < 0;
+    const order = comparePartialValues(keyType, keyA, keyB);
+    return order === 0 ? indexA < indexB : (order ?? 0) < 0;
   };
   ctx.runtime.nativeRoots.push(pairs);
   try {

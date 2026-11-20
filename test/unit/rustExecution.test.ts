@@ -806,6 +806,34 @@ fn main() {
   });
 });
 
+test('sorts cached keys with PartialOrd', () => {
+  const program = `#[derive(Debug, Clone, PartialEq, Eq)]
+struct P(i32, i32);
+impl PartialOrd for P {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        print!("P");
+        Some(self.0.cmp(&other.0).then(self.1.cmp(&other.1)))
+    }
+}
+impl Ord for P {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        print!("O");
+        self.0.cmp(&other.0).then(self.1.cmp(&other.1))
+    }
+}
+fn main() {
+    let mut v = vec![P(3, 0), P(1, 1), P(2, 2), P(1, 0), P(3, 1)];
+    v.sort_by_cached_key(|p| p.clone());
+    println!(" cached");
+    println!("{:?}", v);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'PPPPPPP cached\n[P(1, 0), P(1, 1), P(2, 2), P(3, 0), P(3, 1)]\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {
