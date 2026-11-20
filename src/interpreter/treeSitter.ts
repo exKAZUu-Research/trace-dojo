@@ -36,20 +36,49 @@ export function parseSource<T>(
     maxNestingDepth = MAX_NESTING_DEPTH,
     tooDeepMessage = '括弧やブロックなどの入れ子が深すぎます。',
     locateErrors = (_root: Node, errors: SourceDiagnostic[]): SourceDiagnostic[] => errors,
+    progress,
+  }: {
+    maxNestingDepth?: number;
+    tooDeepMessage?: string;
+    locateErrors?: (root: Node, errors: SourceDiagnostic[]) => SourceDiagnostic[];
+    progress?: (cost?: number) => void;
   } = {}
 ): T {
-  const tree = parser.parse(source);
-  if (!tree) throw new Error('The parser returned no tree');
+  let parsingFailure: { error: unknown } | undefined;
+  const tree = parser.parse(
+    source,
+    progress
+      ? {
+          progressCallback: () => {
+            try {
+              progress();
+            } catch (error) {
+              parsingFailure = { error };
+              return true;
+            }
+          },
+        }
+      : undefined
+  );
+  if (!tree) {
+    // A cancelled parse retains resumable state, which must not be reused for another program.
+    parser.reset();
+    if (parsingFailure) throw parsingFailure.error;
+    throw new Error('The parser returned no tree');
+  }
   try {
-    const tooDeep = findTooDeepNode(tree.rootNode, maxNestingDepth);
+    const tooDeep = findTooDeepNode(tree.rootNode, maxNestingDepth, progress);
     if (tooDeep) {
       throw new CompileError([{ row: tooDeep.startPosition.row, message: tooDeepMessage }]);
     }
-    const syntaxErrors = locateErrors(tree.rootNode, collectSyntaxErrors(tree.rootNode, missingTokenNames, false));
+    const syntaxErrors = locateErrors(
+      tree.rootNode,
+      collectSyntaxErrors(tree.rootNode, missingTokenNames, false, progress)
+    );
     if (syntaxErrors.length > 0) throw new CompileError(syntaxErrors);
     const converted = convert(tree.rootNode);
     // The converter's own checks name the errors it recognizes better than an error only the tree's flags show.
-    const hiddenErrors = collectSyntaxErrors(tree.rootNode, missingTokenNames, true);
+    const hiddenErrors = collectSyntaxErrors(tree.rootNode, missingTokenNames, true, progress);
     if (hiddenErrors.length > 0) throw new CompileError(hiddenErrors);
     return converted;
   } finally {
@@ -86,13 +115,14 @@ export function commentTokens(parser: Parser, source: string): { index: number; 
 /** Converting, compiling, and running recurse into nested constructs, so deeper nesting would exhaust the stack. */
 const MAX_NESTING_DEPTH = 300;
 
-function findTooDeepNode(root: Node, maxDepth: number): Node | undefined {
+function findTooDeepNode(root: Node, maxDepth: number, progress?: () => void): Node | undefined {
   if (maxDepth === Number.POSITIVE_INFINITY) return;
   const cursor = root.walk();
   // The cursor's own `currentDepth` takes time in proportion to the depth, which deep nesting makes quadratic.
   let depth = 0;
   try {
     for (;;) {
+      progress?.();
       if (depth > maxDepth) return cursor.currentNode;
       if (cursor.gotoFirstChild()) {
         depth++;
@@ -115,7 +145,8 @@ function findTooDeepNode(root: Node, maxDepth: number): Node | undefined {
 function collectSyntaxErrors(
   root: Node,
   missingTokenNames: Record<string, string>,
-  includeHidden: boolean
+  includeHidden: boolean,
+  progress?: (cost?: number) => void
 ): SourceDiagnostic[] {
   const errors: SourceDiagnostic[] = [];
   const visit = (node: Node): void => {
@@ -127,6 +158,7 @@ function collectSyntaxErrors(
     }
     if (!node.hasError) return;
     const found = errors.length;
+    progress?.(node.childCount);
     for (const child of node.children) visit(child);
     if (includeHidden && errors.length === found) {
       errors.push({ row: hiddenErrorRow(node), message: '書き方に誤りがあります。' });
