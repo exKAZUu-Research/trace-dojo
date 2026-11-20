@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 735 -- Types literals and their spreads, members, and widening in the same literal context.
+// code-gauge-allow-file fileNcss 736 -- Types literals and their spreads, members, and widening in the same literal context.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExpressionListFlow, tupleArgumentContexts } from './callArity';
@@ -26,6 +26,7 @@ import {
   type IndexInfo,
   intersectionOf,
   isAnyLike,
+  isFreshLiteral,
   isIntrinsic,
   isPropertyKeyLiteral,
   type LiteralType,
@@ -126,7 +127,7 @@ export class LiteralChecker {
         return { type: spread, spread: true };
       }
       const contexts = contextual ? this.arrayElementContexts(contextual, index, lengths) : [];
-      const context = contexts.length > 0 ? unionOf(contexts) : undefined;
+      const context = contexts.length > 0 ? unionOf(contexts, true, true) : undefined;
       const type = this.c.expressions.check(element, context);
       const literalContext = contexts.find((candidate) => this.expectsLiteral(candidate, type)) ?? context;
       return { type: this.literalValueType(type, literalContext, isConstContext), spread: false };
@@ -256,7 +257,7 @@ export class LiteralChecker {
       return contexts.length > 0
         ? [
             intersectionOf(
-              contexts.map((types) => unionOf(types)),
+              contexts.map((types) => unionOf(types, true, true)),
               this.c.budget
             ),
           ]
@@ -596,7 +597,7 @@ export class LiteralChecker {
       const index = applicableIndex(this.c, this.c.structureOf(member), keyType);
       return index ? [index.type] : [];
     });
-    return types.length > 0 ? unionOf(types, true) : undefined;
+    return types.length > 0 ? unionOf(types, true, true) : undefined;
   }
 
   /** Reports a name declared again in an object literal, as TypeScript's grammar check of object literals does. */
@@ -1038,6 +1039,13 @@ export class LiteralChecker {
     return name === undefined ? undefined : { name, value, isShorthand };
   }
 
+  preserveContextualLiterals(type: Type, contextual: Type): Type {
+    if (!typeMembers(type).some(isFreshLiteral)) return type;
+    return mapType(type, (member) =>
+      isFreshLiteral(member) && this.expectsLiteral(contextual, member) ? regularOf(member) : member
+    );
+  }
+
   private literalValueType(type: Type, contextual: Type | undefined, isConst: boolean): Type {
     const preservesLiteral = isConst || (contextual && this.expectsLiteral(contextual, type));
     // Regular primitive literals survive later inference widening. Nested objects still need excess-property checks.
@@ -1146,7 +1154,7 @@ export class LiteralChecker {
       const index = namedPropertyIndex(this.c, this.c.structureOf(apparent), name, key);
       if (index) types.push(index.type);
     }
-    return types.length > 0 ? unionOf(types, true) : undefined;
+    return types.length > 0 ? unionOf(types, true, true) : undefined;
   }
 
   /** The type a variable declared with this initializer type gets. */

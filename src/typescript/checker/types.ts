@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 403 -- Keeps type data, cache keys, and canonical type constructors together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { ExecutionBudget } from '../../interpreter/limits';
@@ -16,6 +17,12 @@ export type Type = (
   | TemplateLiteralType
   | StringMappingType
 ) & { noInfer?: boolean };
+
+export type Mapper = Map<number, Type> & { preserveLiterals?: true };
+
+export function createMapper(entries: Iterable<readonly [number, Type]>, preserveLiterals?: true): Mapper {
+  return Object.assign(new Map(entries), { preserveLiterals });
+}
 
 let nextTypeId = 1;
 
@@ -440,27 +447,30 @@ export function typeCacheKey(type: Type | undefined): number | string | undefine
   return type?.noInfer ? `${type.id}!` : type?.id;
 }
 
-export function typeMapperCacheKey(mapper: ReadonlyMap<number, Type>): string {
-  return [...mapper].map(([id, type]) => `${id}=${typeCacheKey(type)}`).join(',');
+export function typeMapperCacheKey(mapper: ReadonlyMap<number, Type> & Pick<Mapper, 'preserveLiterals'>): string {
+  const entries = [...mapper].map(([id, type]) => `${id}=${typeCacheKey(type)}`).join(',');
+  return mapper.preserveLiterals ? `+${entries}` : entries;
 }
 
-/** The union of types, flattened, without duplicates, with literals absorbed by their primitives. */
+/** Flattens and canonicalizes unions, retaining covered literal alternatives in contextual types. */
 // code-gauge-allow functionNcss 42 -- Flattens, deduplicates, and reduces members as TypeScript's unions do.
 // code-gauge-allow functionCognitiveComplexity 30 -- Flattens, deduplicates, and reduces members as TypeScript's unions do.
-export function unionOf(types: Type[], keepFresh = false): Type {
+export function unionOf(types: Type[], keepFresh = false, preserveLiterals = false): Type {
   const flat = flattenedMembers(types, 'union', keepFresh).filter((type) => !isIntrinsic(type, 'never'));
   if (flat.includes(permissiveAnyType)) return permissiveAnyType;
   if (flat.some((type) => type === anyType || type === errorType)) return flat.find((type) => isAnyLike(type)) as Type;
   if (flat.some((type) => isIntrinsic(type, 'unknown'))) return unknownType;
   const primitives = new Set<IntrinsicName>(flat.filter((type) => type.kind === 'intrinsic').map((type) => type.name));
-  const reduced = flat.filter((type) => {
-    if (type.kind === 'literal') {
-      const primitive = typeof type.value === 'boolean' ? undefined : (typeof type.value as IntrinsicName);
-      return !primitive || !primitives.has(primitive);
-    }
-    if (type.kind === 'templateLiteral' || type.kind === 'stringMapping') return !primitives.has('string');
-    return true;
-  });
+  const reduced = preserveLiterals
+    ? flat
+    : flat.filter((type) => {
+        if (type.kind === 'literal') {
+          const primitive = typeof type.value === 'boolean' ? undefined : (typeof type.value as IntrinsicName);
+          return !primitive || !primitives.has(primitive);
+        }
+        if (type.kind === 'templateLiteral' || type.kind === 'stringMapping') return !primitives.has('string');
+        return true;
+      });
   if (reduced.length === 0) return neverType;
   if (reduced.length === 1) return reduced[0];
   reduced.sort((a, b) => unionSortKey(a) - unionSortKey(b));

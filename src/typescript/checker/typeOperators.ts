@@ -22,6 +22,7 @@ import {
   bigintType,
   booleanType,
   type ConditionalType,
+  createMapper,
   emptyStructure,
   errorType,
   type IndexedAccessType,
@@ -643,7 +644,7 @@ export class TypeOperators {
 
   /** The mapper that applies `first` and then `second`. */
   private compose(first: Mapper, second: Mapper): Mapper {
-    const composed: Mapper = new Map();
+    const composed = createMapper([], second.preserveLiterals);
     for (const [id, type] of first) composed.set(id, this.c.instantiate(type, second));
     for (const [id, type] of second) if (!composed.has(id)) composed.set(id, type);
     return composed;
@@ -656,13 +657,18 @@ export class TypeOperators {
     if (type.distributive && checkType.kind === 'union') {
       return unionOf(
         checkType.types.map((member) =>
-          this.resolveConditional(type, new Map([...outer, [(type.checkType as TypeParameter).id, member]]))
-        )
+          this.resolveConditional(
+            type,
+            createMapper([...outer, [(type.checkType as TypeParameter).id, member]], outer.preserveLiterals)
+          )
+        ),
+        false,
+        outer.preserveLiterals
       );
     }
     if (type.distributive && isIntrinsic(checkType, 'never')) return neverType;
     // The `infer` type parameters belong to this conditional type, so each instantiation gets its own.
-    const mapper: Mapper = new Map(outer);
+    const mapper = createMapper(outer, outer.preserveLiterals);
     const inferTypeParameters = type.inferTypeParameters.map((parameter): TypeParameter => ({
       ...parameter,
       id: newTypeId(),
@@ -681,7 +687,7 @@ export class TypeOperators {
     const branch = conditionalBranch(this.c, checkType, this.c.instantiate(extendsType, inferred));
     if (branch === undefined) return this.deferredConditional(deferred);
     if (branch === 'false') return falseType();
-    return branch === 'true' ? trueType() : unionOf([trueType(), falseType()]);
+    return branch === 'true' ? trueType() : unionOf([trueType(), falseType()], false, outer.preserveLiterals);
   }
 
   /**
@@ -694,7 +700,7 @@ export class TypeOperators {
     checkType: Type,
     extendsType: Type
   ): Mapper | undefined {
-    const inferred = new Map(mapper);
+    const inferred = createMapper(mapper, mapper.preserveLiterals);
     if (inferTypeParameters.length === 0) return inferred;
     const inferences = this.c.inference.inferFromTypes(inferTypeParameters, checkType, extendsType, mapper);
     if (

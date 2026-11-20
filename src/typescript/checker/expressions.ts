@@ -144,7 +144,10 @@ export class ExpressionChecker {
 
   private compute(node: TreeNode, contextual?: Type): Type {
     const checkKind = this.checkers.get(node.type);
-    if (checkKind) return checkKind(node, contextual);
+    if (checkKind) {
+      const type = checkKind(node, contextual);
+      return contextual ? this.c.literals.preserveContextualLiterals(type, contextual) : type;
+    }
     for (const child of named(node)) this.check(child);
     return anyType;
   }

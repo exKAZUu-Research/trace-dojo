@@ -2,6 +2,7 @@ import type { Checker, Mapper } from './checker';
 import type { Sym } from './scopes';
 import {
   anonymousObject,
+  createMapper,
   emptyStructure,
   errorType,
   newTypeId,
@@ -67,8 +68,9 @@ export class RecursiveAliases {
   instantiateReference(type: Type, mapper: Mapper): ObjectType | undefined {
     const reference = this.genericReferences.get(type);
     if (!reference) return undefined;
-    const instantiated: Mapper = new Map(
-      [...reference.mapper].map(([id, argument]) => [id, this.c.instantiate(argument, mapper)])
+    const instantiated = createMapper(
+      [...reference.mapper].map(([id, argument]) => [id, this.c.instantiate(argument, mapper)]),
+      mapper.preserveLiterals
     );
     return this.reference(reference.symbol, instantiated);
   }
@@ -79,8 +81,9 @@ export class RecursiveAliases {
    */
   reference(symbol: Sym, argumentsMapper: Mapper): ObjectType {
     const { own, all } = this.typeParametersOf(symbol);
-    const mapper: Mapper = new Map(
-      all.map((parameter) => [parameter.id, argumentsMapper.get(parameter.id) ?? parameter])
+    const mapper = createMapper(
+      all.map((parameter) => [parameter.id, argumentsMapper.get(parameter.id) ?? parameter]),
+      argumentsMapper.preserveLiterals
     );
     const key = `${symbol.id}[${typeMapperCacheKey(mapper)}]`;
     const cached = this.referenceCache.get(key);

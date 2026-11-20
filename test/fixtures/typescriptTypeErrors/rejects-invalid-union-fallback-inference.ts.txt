@@ -14,8 +14,6 @@ const suffixWrong: number[] = head([undefined]);
 const unionWrong: number[] = union('a');
 const literalWrong: number[] = literalUnion('first');
 console.log(value.toUpperCase());
-function head<A extends unknown[], T = string>(input: [...A,T?]): T[] { return []; }
-function union<T>(input: string | T): T[] { return []; }
 const w=union('a');
 const bad:'a'[]=w;
 function read<T>(box: {a: T | undefined}): T { return box.a!; }

@@ -1,0 +1,13 @@
+function singleton<T>(value:T):T[]{return [value];}
+function optional<T>(value:T|undefined):T[]{return [];}
+function fixed<T>(value:T|string):T[]{return [];}
+function conditional<T>(value:T):T extends string ? T[] : never{return [value] as any;}
+function conditionalOptional<T>(value:T|undefined):T extends string ? T[] : never{return [] as any;}
+function conditionalFixed<T>(value:T|string):T extends string ? T[] : never{return [] as any;}
+function box<T>(input:{value:T}):T extends string ? T : never{return input.value as any;}
+function boxArray<T>(input:{value:T}):T extends string ? T[] : never{return [input.value] as any;}
+const intermediate=singleton('a');
+const wrong:'a'[]=intermediate;
+const conflicting:'a'[]=singleton('b');
+const conflictingConditional:'a'[]=conditional('b');
+const conflictingBox:'a'=box({value:'b'});

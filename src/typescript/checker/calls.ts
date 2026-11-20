@@ -1033,12 +1033,10 @@ export class Calls {
           return arg.spread.optional && index < lastRequired
             ? { ...arg.spread, type: this.spreadValueType(arg.spread), optional: false }
             : arg.spread;
-        const parameterType = contexts[index];
-        const context = parameterType && mapper ? this.c.instantiate(parameterType, mapper) : parameterType;
         return {
           type: constContext
             ? this.probeArgumentType(arg, constContext)
-            : this.c.widenLiteral(this.probeArgumentType(arg, context)),
+            : this.c.widenLiteral(this.probeArgumentType(arg, contexts[index], mapper)),
           optional: false,
           rest: false,
         };
@@ -1084,14 +1082,14 @@ export class Calls {
     mapper: Mapper | undefined
   ): void {
     if (!parameterType) return;
-    const context = mapper ? this.c.instantiate(parameterType, mapper) : parameterType;
-    const argType = arg.spread ? this.spreadValueType(arg.spread) : this.probeArgumentType(arg, context);
+    const argType = arg.spread ? this.spreadValueType(arg.spread) : this.probeArgumentType(arg, parameterType, mapper);
     if (arg.spread) this.c.inference.inferTypes(run, argType, parameterType, true);
     else this.c.inference.inferArgument(run, argType, parameterType);
   }
 
-  private probeArgumentType(arg: ExpandedArgument, contextual: Type | undefined): Type {
-    return this.c.flow.probe(() => this.c.silently(() => this.c.expressions.check(arg.node, contextual)), arg.before);
+  private probeArgumentType(arg: ExpandedArgument, contextual: Type | undefined, mapper?: Mapper): Type {
+    const context = contextual && mapper ? this.c.instantiateContextual(contextual, mapper) : contextual;
+    return this.c.flow.probe(() => this.c.silently(() => this.c.expressions.check(arg.node, context)), arg.before);
   }
 
   private spreadElements(arg: TreeNode, type: Type): TupleElement[] {

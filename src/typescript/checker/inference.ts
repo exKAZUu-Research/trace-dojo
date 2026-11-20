@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 679 -- Keeps generic candidate collection, constraint fitting and inference completion together.
+// code-gauge-allow-file fileNcss 697 -- Keeps generic candidate collection, constraint fitting and inference completion together.
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import type { Checker, Mapper } from './checker';
 import { isUnit } from './flow';
@@ -9,6 +9,7 @@ import { tupleTypesDefinitelyUnrelated } from './tupleIndexes';
 import {
   anonymousObject,
   anyType,
+  type ConditionalType,
   emptyStructure,
   errorType,
   functionType,
@@ -48,6 +49,7 @@ export const InferencePriority = {
   /** Through a homomorphic mapped type, as `T` in `Partial<T>`. */
   HomomorphicMappedType: 8,
   MappedTypeConstraint: 32,
+  ContravariantConditional: 64,
   /** From the type the call's result is expected to have. */
   ReturnType: 128,
 } as const;
@@ -331,7 +333,7 @@ export class TypeInference {
         priority = run.priority,
         reportInference = run.reportInference
       ) => this.inferPair({ ...run, priority, reportInference }, s, t, isCovariant, path);
-      this.inferDeeper(run, source, target, path, recurse);
+      this.inferDeeper(run, source, target, path, recurse, covariant);
     } finally {
       this.depth--;
       active.delete(key);
@@ -339,7 +341,14 @@ export class TypeInference {
   }
 
   // code-gauge-allow functionCognitiveComplexity 20 -- Dispatches each target form to its inference rules.
-  private inferDeeper(run: InferenceRun, source: Type, target: Type, path: InferencePath, recurse: Recurse): void {
+  private inferDeeper(
+    run: InferenceRun,
+    source: Type,
+    target: Type,
+    path: InferencePath,
+    recurse: Recurse,
+    covariant: boolean
+  ): void {
     if (isAnyLike(source) && path.active.size > 1) {
       // `any` infers `any` for every parameter the target mentions.
       for (const parameter of run.parameters) {
@@ -355,6 +364,10 @@ export class TypeInference {
       for (const member of target.types) recurse(source, member);
       return;
     }
+    if (target.kind === 'conditional') {
+      this.inferToConditional(run, source, target, recurse, covariant);
+      return;
+    }
     if (source.kind === 'union') {
       for (const member of source.types) recurse(member, target);
       return;
@@ -362,6 +375,31 @@ export class TypeInference {
     if (target.kind === 'templateLiteral' && source.kind === 'literal' && typeof source.value === 'string')
       this.inferTemplateLiteral(source.value, target, recurse);
     if (target.kind === 'object') this.inferToObject(run, source, target, path, recurse);
+  }
+
+  private inferToConditional(
+    run: InferenceRun,
+    source: Type,
+    target: ConditionalType,
+    recurse: Recurse,
+    covariant: boolean
+  ): void {
+    if (source.kind === 'conditional') {
+      recurse(source.checkType, target.checkType);
+      recurse(source.extendsType, target.extendsType);
+      recurse(source.trueType, target.trueType);
+      recurse(source.falseType, target.falseType);
+      return;
+    }
+    const priority = covariant ? run.priority : run.priority | InferencePriority.ContravariantConditional;
+    const branches = [target.trueType, target.falseType];
+    const variables = branches.filter((branch) => {
+      const variable = inferenceVariable(branch, run);
+      return variable && run.inferences.has(variable.id);
+    });
+    for (const branch of branches) if (!variables.includes(branch)) recurse(source, branch, undefined, priority);
+    for (const variable of variables)
+      recurse(source, variable, undefined, priority | InferencePriority.NakedTypeVariable);
   }
 
   private inferTemplateLiteral(value: string, target: TemplateLiteralType, recurse: Recurse): void {
@@ -424,13 +462,7 @@ export class TypeInference {
     if (targetMembers.length === 0) return;
     const fallback = run.priority | InferencePriority.NakedTypeVariable;
     if (sourceMembers.length === 0) {
-      const matched = original.map((member) =>
-        member.kind === 'literal' && target.types.includes(regularOf(member)) ? regularOf(member) : member
-      );
-      const matchedSource = matched.every((member, index) => member === original[index])
-        ? source
-        : unionOf(matched, true);
-      recurse(matchedSource, unionOf(targetMembers, true), undefined, fallback);
+      recurse(source, unionOf(targetMembers, true), undefined, fallback);
       return;
     }
     const remaining = sourceMembers.length === original.length ? source : unionOf(sourceMembers, true);

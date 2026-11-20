@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 679 -- Holds type construction, bounded instantiation, structure lookup, and diagnostics shared by checker components.
+// code-gauge-allow-file fileNcss 710 -- Holds type construction, bounded instantiation, structure lookup, and diagnostics shared by checker components.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { type SourceDiagnostic, sourceDiagnostic } from '../../interpreter/diagnostics';
@@ -13,6 +13,7 @@ import { checkDuplicateDeclarations, checkParameterRedeclarations } from './decl
 import { ExpressionChecker } from './expressions';
 import { Flow } from './flow';
 import { FunctionChecker } from './functions';
+import { isGenericObjectOrIndexType } from './genericTypes';
 import { mergedPatternIndexes } from './indexInfos';
 import { TypeInference } from './inference';
 import { libraryScope, libraryTree, localeOptionsTree, markUnsupported } from './library';
@@ -37,12 +38,15 @@ import {
   anyType,
   booleanType,
   type ConditionalType,
+  createMapper,
   emptyStructure,
   errorType,
+  type IndexedAccessType,
   type IndexInfo,
   intersectionOf,
   isIntrinsic,
   type MappedInfo,
+  type Mapper,
   newTypeId,
   numberType,
   type ObjectType,
@@ -71,7 +75,7 @@ import {
 import { couldContainTypeVariables } from './typeVariables';
 import { unionProperty, unionStructure } from './unionMembers';
 
-export type Mapper = Map<number, Type>;
+export type { Mapper } from './types';
 
 /** A union alias, whose type is undefined while it resolves. */
 export interface UnionAlias {
@@ -311,14 +315,14 @@ export class Checker {
   // References and instantiation ---------------------------------------------------------------------------------
 
   /** A generic interface or class applied to type arguments. */
-  reference(target: ObjectType, typeArguments: Type[]): ObjectType {
+  reference(target: ObjectType, typeArguments: Type[], preserveLiterals?: true): ObjectType {
     const parameters = target.typeParameters ?? [];
     const filled = this.fillTypeArguments(parameters, typeArguments);
     if (filled.every((argument, index) => argument === parameters[index])) return target;
-    const key = `${target.id}<${filled.map(typeCacheKey).join(',')}>`;
+    const key = `${target.id}${preserveLiterals ? '+' : ''}<${filled.map(typeCacheKey).join(',')}>`;
     let reference = this.referenceCache.get(key);
     if (!reference) {
-      reference = this.referenceObject(target, () => filled);
+      reference = this.referenceObject(target, () => filled, preserveLiterals);
       this.referenceCache.set(key, reference);
     }
     return reference;
@@ -329,6 +333,7 @@ export class Checker {
     resolveArguments: () => Type[],
     options: {
       outerTypeParameters?: TypeParameter[];
+      preserveLiterals?: true;
       reportCircular?: () => void;
       checkArguments?: (types: Type[]) => void;
     }
@@ -353,14 +358,15 @@ export class Checker {
       }
     };
     let canonical: ObjectType | undefined;
-    const resolveReference = (): ObjectType => (canonical ??= this.reference(target, argumentsOf()));
-    const reference = this.referenceObject(target, argumentsOf);
+    const resolveReference = (): ObjectType =>
+      (canonical ??= this.reference(target, argumentsOf(), options.preserveLiterals));
+    const reference = this.referenceObject(target, argumentsOf, options.preserveLiterals);
     reference.resolveReference = resolveReference;
     reference.outerTypeParameters = options.outerTypeParameters;
     return reference;
   }
 
-  private referenceObject(target: ObjectType, argumentsOf: () => Type[]): ObjectType {
+  private referenceObject(target: ObjectType, argumentsOf: () => Type[], preserveLiterals?: true): ObjectType {
     let structure: Structure | undefined;
     return {
       kind: 'object',
@@ -375,8 +381,9 @@ export class Checker {
       resolve: () => {
         if (structure) return structure;
         const arguments_ = argumentsOf();
-        const mapper: Mapper = new Map(
-          (target.typeParameters ?? []).map((parameter, i) => [parameter.id, arguments_[i]])
+        const mapper = createMapper(
+          (target.typeParameters ?? []).map((parameter, i) => [parameter.id, arguments_[i]]),
+          preserveLiterals
         );
         return (structure ??= this.instantiateStructure(target.resolve(), mapper));
       },
@@ -393,6 +400,10 @@ export class Checker {
   }
 
   private instantiationDepth = 0;
+
+  instantiateContextual(type: Type, mapper: Mapper): Type {
+    return this.instantiate(type, createMapper(mapper, true));
+  }
 
   instantiate(type: Type, mapper: Mapper): Type {
     if (mapper.size === 0 || !couldContainTypeVariables(type)) return type;
@@ -456,7 +467,8 @@ export class Checker {
     if (alias) return this.deferredAliasUnion(alias.alias, this.composeMappers(alias.mapper, mapper));
     return unionOf(
       type.types.map((member) => this.instantiate(member, mapper)),
-      true
+      true,
+      mapper.preserveLiterals
     );
   }
 
@@ -523,7 +535,8 @@ export class Checker {
         if (!parameters.some((parameter) => mapper.has(parameter.id))) return target;
         return this.reference(
           target,
-          parameters.map((parameter) => mapper.get(parameter.id) ?? parameter)
+          parameters.map((parameter) => mapper.get(parameter.id) ?? parameter),
+          mapper.preserveLiterals
         );
       }
       default: {
@@ -557,18 +570,20 @@ export class Checker {
     const target = this.instantiateOuterTypeParameters(type.target as ObjectType, mapper);
     return this.reference(
       target,
-      (type.typeArguments ?? []).map((argument) => this.instantiate(argument, mapper))
+      (type.typeArguments ?? []).map((argument) => this.instantiate(argument, mapper)),
+      mapper.preserveLiterals
     );
   }
 
   private instantiateDeferredReference(type: ObjectType, mapper: Mapper): Type {
     const original = type.origin ?? type;
     const parameters = original.outerTypeParameters ?? [];
-    const substitutions: Mapper = new Map(
+    const substitutions = createMapper(
       parameters.map((parameter) => [
         parameter.id,
         this.instantiate(type.mapper?.get(parameter.id) ?? parameter, mapper),
-      ])
+      ]),
+      mapper.preserveLiterals
     );
     if (parameters.every((parameter) => substitutions.get(parameter.id) === parameter)) return original;
     const key = `${original.id}[${typeMapperCacheKey(substitutions)}]`;
@@ -578,7 +593,7 @@ export class Checker {
     const reference = this.deferredReference(
       target,
       () => (original.typeArguments ?? []).map((argument) => this.instantiate(argument, substitutions)),
-      { outerTypeParameters: original.outerTypeParameters }
+      { outerTypeParameters: original.outerTypeParameters, preserveLiterals: mapper.preserveLiterals }
     );
     reference.origin = original;
     reference.mapper = substitutions;
@@ -595,12 +610,13 @@ export class Checker {
       id: newTypeId(),
       constraint: getConstraint,
     };
-    const localMapper = new Map<number, Type>([...mapper, [mapped.typeParameter.id, typeParameter]]);
+    const localMapper = createMapper([...mapper, [mapped.typeParameter.id, typeParameter]], mapper.preserveLiterals);
     const getTemplate = (): Type => this.instantiate(mapped.template, localMapper);
     const sourceVariable = mapped.homomorphic && mapped.source?.kind === 'typeParameter' ? mapped.source : undefined;
     const withSource =
       sourceVariable &&
-      ((source: Type): Type => this.instantiate(type, new Map([...mapper, [sourceVariable.id, source]])));
+      ((source: Type): Type =>
+        this.instantiate(type, createMapper([...mapper, [sourceVariable.id, source]], mapper.preserveLiterals)));
     const instantiated = this.typeOperators.mappedType(
       {
         typeParameter,
@@ -637,8 +653,9 @@ export class Checker {
     if (!outer) return type;
     const origin = type.origin ?? type;
     const argumentOf = (parameter: TypeParameter): Type => type.mapper?.get(parameter.id) ?? parameter;
-    const outerMapper: Mapper = new Map(
-      outer.map((parameter) => [parameter.id, this.instantiate(argumentOf(parameter), mapper)])
+    const outerMapper = createMapper(
+      outer.map((parameter) => [parameter.id, this.instantiate(argumentOf(parameter), mapper)]),
+      mapper.preserveLiterals
     );
     if (outer.every((parameter) => outerMapper.get(parameter.id) === argumentOf(parameter))) return type;
     if (outer.every((parameter) => outerMapper.get(parameter.id) === parameter)) return origin;
@@ -659,7 +676,7 @@ export class Checker {
 
   /** The mapper that applies `first`, then `second`. */
   private composeMappers(first: Mapper, second: Mapper): Mapper {
-    const composed: Mapper = new Map(second);
+    const composed = createMapper(second, second.preserveLiterals);
     for (const [id, type] of first) composed.set(id, this.instantiate(type, second));
     return composed;
   }
@@ -705,7 +722,7 @@ export class Checker {
     let typeParameters = signature.typeParameters;
     // The signature's own type parameters get fresh copies whose constraints see the outer type arguments.
     if (typeParameters.length > 0 && outer.size > 0 && !typeParameters.some((parameter) => outer.has(parameter.id))) {
-      mapper = new Map(outer);
+      mapper = createMapper(outer, outer.preserveLiterals);
       const fresh = typeParameters.map((parameter): TypeParameter => ({ ...parameter, id: newTypeId() }));
       for (const [index, parameter] of typeParameters.entries()) mapper.set(parameter.id, fresh[index]);
       for (const [index, parameter] of typeParameters.entries()) {
@@ -874,6 +891,7 @@ export class Checker {
 
   private readonly circularConstraints = new CircularConstraints(this);
   private readonly conditionalConstraintsInProgress = new Set<number>();
+  private readonly indexedConstraintsInProgress = new Set<IndexedAccessType>();
 
   /** As TypeScript's `getConstraintOfTypeParameter`, none for a circular constraint. */
   constraintOf(parameter: TypeParameter): Type | undefined {
@@ -888,16 +906,13 @@ export class Checker {
         return this.constraintOf(type) ?? unknownType;
       }
       case 'indexedAccess': {
-        const mapped = this.typeOperators.mappedIndexConstraint(type);
-        if (mapped !== undefined) return mapped;
-        const index = this.indexedOperandConstraint(type.indexType);
-        if (!index) return type;
-        const tuple = this.silently(() => this.typeOperators.variadicIndexConstraint(type, index));
-        if (tuple !== undefined) return tuple;
-        const object = this.indexedOperandConstraint(type.objectType);
-        if (!object || (object === type.objectType && index === type.indexType)) return type;
-        const bound = this.silently(() => this.typeOperators.indexedAccess(object, index));
-        return bound === errorType ? type : bound;
+        if (this.indexedConstraintsInProgress.has(type)) return type;
+        this.indexedConstraintsInProgress.add(type);
+        try {
+          return this.indexedAccessConstraint(type);
+        } finally {
+          this.indexedConstraintsInProgress.delete(type);
+        }
       }
       case 'keyof': {
         return unionOf([stringType, numberType, symbolType]);
@@ -909,6 +924,46 @@ export class Checker {
         return type;
       }
     }
+  }
+
+  private indexedAccessConstraint(type: IndexedAccessType): Type {
+    const mapped = this.typeOperators.mappedIndexConstraint(type);
+    if (mapped !== undefined) return mapped;
+    const index = this.indexedOperandConstraint(type.indexType);
+    if (!index) return type;
+    const tuple = this.silently(() => this.typeOperators.variadicIndexConstraint(type, index));
+    if (tuple !== undefined) return tuple;
+    const projected = this.silently(() => this.projectedIndexedConstraint(type.objectType, index));
+    if (projected !== undefined) return projected;
+    const object = this.indexedOperandConstraint(type.objectType);
+    if (!object || (object === type.objectType && index === type.indexType)) return type;
+    const bound = this.silently(() => this.typeOperators.indexedAccess(object, index));
+    return bound === errorType ? type : bound;
+  }
+
+  private projectedIndexedConstraint(object: Type, index: Type): Type | undefined {
+    if (!isGenericObjectOrIndexType(object)) return undefined;
+    if (index.kind === 'union') return unionOf(index.types.map((key) => this.indexedProjection(object, key)));
+    if (isGenericObjectOrIndexType(index)) return undefined;
+    if (object.kind === 'union') return unionOf(object.types.map((member) => this.indexedProjection(member, index)));
+    if (object.kind !== 'intersection') return undefined;
+    // The compiler keeps keyof and indexing deferred for generic intersections with an empty object.
+    if (
+      object.types.some(
+        (member) =>
+          member.kind === 'object' && member.objectKind === 'anonymous' && this.relations.isEmptyObjectType(member)
+      )
+    )
+      return undefined;
+    return intersectionOf(
+      object.types.map((member) => this.indexedProjection(member, index)),
+      this.budget
+    );
+  }
+
+  private indexedProjection(object: Type, index: Type): Type {
+    const access = this.typeOperators.indexedAccess(object, index);
+    return access === errorType ? unknownType : this.baseConstraint(access);
   }
 
   private indexedOperandConstraint(type: Type): Type | undefined {
