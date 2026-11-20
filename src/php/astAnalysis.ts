@@ -344,7 +344,6 @@ class ReadValidator {
     return this.functions.get(lower(expression.fn.name)) ?? nativeParameters(expression.fn.name);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Follows available class and method declarations in PHP's resolution order.
   private staticMethodParameters(expression: Extract<Expr, { k: 'scall' }>): Param[] | undefined {
     const { cls, name } = expression;
     if (typeof name !== 'string') return;
@@ -354,17 +353,24 @@ class ReadValidator {
     if (active && (cls.k === 'self' || (cls.k === 'named' && lower(cls.name) === lower(active.decl.name)))) {
       return active.decl.kind === 'trait' && cls.k === 'self' ? undefined : active.methods.get(methodName)?.fn.params;
     }
-    let className = cls.k === 'named' ? cls.name : undefined;
-    const seen = new Set<string>();
-    while (className && !seen.has(lower(className))) {
-      const key = lower(className);
-      seen.add(key);
-      const current = this.classes.get(key);
-      if (!current) return nativeMethodParameters(className, methodName);
-      const method = current.methods.find((method) => lower(method.fn.name) === methodName);
-      if (method) return method.visibility === 'public' ? method.fn.params : undefined;
-      className = current.parent;
-    }
+    if (cls.k === 'named') return boundStaticMethodParameters(cls.name, methodName, (key) => this.classes.get(key));
+  }
+}
+
+export function boundStaticMethodParameters(
+  className: string,
+  methodName: string,
+  findClass: (lowerName: string) => ClassDecl | undefined
+): Param[] | undefined {
+  const seen = new Set<string>();
+  for (let name: string | undefined = className; name && !seen.has(lower(name));) {
+    const key = lower(name);
+    seen.add(key);
+    const decl = findClass(key);
+    if (!decl) return nativeMethodParameters(name, methodName);
+    const method = decl.methods.find(({ fn }) => lower(fn.name) === methodName);
+    if (method) return method.visibility === 'public' ? method.fn.params : undefined;
+    name = decl.parent;
   }
 }
 

@@ -75,12 +75,17 @@ export function compiledBuiltinResult(
   if (builtin === 'sprintf' && simpleSprintfFormat(args) !== undefined) {
     return args.length === 1 ? 'constant' : 'temporary';
   }
-  if (args.length !== 1 || args[0].spread || args[0].name !== undefined || args[0].e.k !== 'lit') return undefined;
-  const value = args[0].e.v;
+  if (args.length !== 1 || args[0].spread || args[0].name !== undefined) return undefined;
+  const value = builtinLiteralArgument(args[0].e);
   if (builtin === 'chr' && typeof value === 'bigint' && value >= 0n && value <= 255n) return 'constant';
   if (builtin === 'ord' && typeof value === 'string' && value.length === 1) return 'constant';
-  if (builtin === 'defined' && (typeof value !== 'string' || !/[\\:]/.test(value))) return 'temporary';
+  if (builtin === 'defined' && value !== undefined && (typeof value !== 'string' || !/[\\:]/.test(value)))
+    return 'temporary';
   return undefined;
+}
+
+export function builtinLiteralArgument(argument: Expr): Extract<Expr, { k: 'lit' }>['v'] | undefined {
+  return argument.k === 'lit' ? argument.v : argument.k === 'bin' ? argument.foldedString : undefined;
 }
 
 export function specializedBuiltinCall(

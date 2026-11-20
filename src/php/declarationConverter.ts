@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 959 -- Keeps declaration conversion with its shared parsing and validation rules.
+// code-gauge-allow-file fileNcss 973 -- Keeps declaration conversion with its shared parsing and validation rules.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -13,7 +13,7 @@ import type {
   Stmt,
   TraitRule,
 } from './ast';
-import { hasNullsafeReceiver } from './astAnalysis';
+import { boundStaticMethodParameters, hasNullsafeReceiver } from './astAnalysis';
 import { enc, lower } from './bytes';
 import { parseTypeText } from './calls';
 import { CompileClassConstants } from './compileClassConstants';
@@ -38,7 +38,7 @@ import { decodeLiteral, decodeSingleQuoted } from './literals';
 import { compiledOperandRow } from './opcodeRows';
 import { SCRIPT_PATH } from './runtime';
 import { describeType, typeToString } from './types';
-import { type TypeDecl, type Visibility, visibilityRank } from './values';
+import { type Param, type TypeDecl, type Visibility, visibilityRank } from './values';
 import { isSubtype } from './variance';
 
 const MAGIC_METHODS: Record<
@@ -95,6 +95,19 @@ export abstract class DeclarationConverter extends ConverterBase {
       }
     }
     return ref;
+  }
+
+  protected compileMethodParameters(name: string | Expr, cls?: ClassRef): readonly Param[] | undefined {
+    if (typeof name !== 'string') return;
+    const methodName = lower(name);
+    const active = this.activeClass;
+    const own = active?.methods.find(({ fn }) => lower(fn.name) === methodName);
+    if (cls?.k === 'named') {
+      if (lower(cls.name) === lower(active?.name ?? '')) return own?.fn.params;
+      return boundStaticMethodParameters(cls.name, methodName, (key) => this.compileClasses.boundDeclaration(key));
+    }
+    if (this.fn.isClosure || active?.kind === 'trait') return;
+    if (cls?.k === 'self' || (!cls && (own?.visibility === 'private' || own?.isFinal))) return own?.fn.params;
   }
 
   protected compiledType(expression: Expr): string | undefined {

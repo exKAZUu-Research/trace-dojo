@@ -51,6 +51,10 @@ export class CompileClassConstants {
     return true;
   }
 
+  boundDeclaration(lowerName: string): ClassDecl | undefined {
+    return this.bound.get(lowerName);
+  }
+
   className(cls: ClassRef, scope: ClassDecl | undefined, closure = false): string | undefined {
     if (closure || scope?.kind === 'trait') return undefined;
     if (cls.k === 'self') return scope?.fullName ?? scope?.name;

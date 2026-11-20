@@ -3044,6 +3044,30 @@ echo $missing + value(
   ).toMatchObject({ kind: 'executed', stdout: 'Undefined variable $missing:5\nA non-numeric value encountered:5\n12' });
 });
 
+test.each([
+  ['variadic named argument', 'label(\n  extra:\n  $value\n)', '7'],
+  ['known named parameter', 'known(\n  argument:\n  $value\n)', '8'],
+  ['dynamic named argument after unpack', '$callable(\n  ...[1],\n  extra:\n  $value\n)', '7'],
+  ['dynamic positional arguments', '$callable(\n  $value,\n  $value\n)', '7'],
+  ['instance method', '$object->label(\n  argument:\n  $value\n)', '7'],
+  ['known static method', 'Example::labelStatic(\n  argument:\n  $value\n)', '8'],
+  ['constructor', 'new Example(\n  argument:\n  $value\n)', '7'],
+  ['folded format', 'sprintf(\n  "x"\n)', '6'],
+  ['runtime format', 'sprintf(\n  "%s",\n  $value\n)', '8'],
+  ['folded character', 'chr(\n  120\n)', '6'],
+  ['folded ordinal', 'ord(\n  "" . "x"\n)', '6'],
+  ['compiled definition check', 'defined(\n  "MISSING"\n)', '6'],
+  ['string length', 'strlen(\n  "x"\n)', '7'],
+])('reports the enclosing operator line after a call with %s', (_description, operand, stdout) => {
+  const program = `<?php
+    function label(...$args) { return 'x'; }
+    function known($argument) { return 'x'; }
+    class Example { function __construct($argument) {} function label($argument) { return 'x'; } static function labelStatic($argument) { return 'x'; } }
+    $value = 'y'; $callable = 'label'; $object = new Example(0);
+    try { [] & ${operand}; } catch (Throwable $error) { echo $error->getLine(); }`;
+  expect(run(program)).toMatchObject({ kind: 'executed', stdout });
+});
+
 test('casts constant concatenation operands after calls and before deferred reads', () => {
   expect(
     run(`<?php

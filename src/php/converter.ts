@@ -14,6 +14,7 @@ import {
   onlyCalls,
 } from './astAnalysis';
 import {
+  builtinLiteralArgument,
   compiledBuiltinName,
   compiledBuiltinResult,
   simpleSprintfFormat,
@@ -36,8 +37,9 @@ import {
 import { DeclarationConverter } from './declarationConverter';
 import { exportExpr, UnexportableSyntax } from './export';
 import { decodeLiteral, decodeSingleQuoted, parseIntegerLiteral } from './literals';
-import { builtinLiteralKey, compileConstant } from './native';
+import { builtinLiteralKey, compileConstant, nativeParameters } from './native';
 import { compiledOperandRow, operandAstRow, recordOperandRows } from './opcodeRows';
+import type { Param } from './values';
 
 export type { CompileNotice } from './converterBase';
 
@@ -55,6 +57,7 @@ const VARIABLE_OPCODE_RESULTS = new Set<Expr['k']>(['mcall', 'scall', 'new', 'ne
 
 export class Converter extends DeclarationConverter {
   private declaredSymbols = new Map<string, Map<string, string>>();
+  private readonly declaredFunctions = new Map<string, readonly Param[]>();
   private readonly staticNames = new WeakMap<object, Set<string>>();
   private readonly body: Stmt[] = [];
   private namespaceStyle?: 'bracketed' | 'unbracketed';
@@ -276,7 +279,7 @@ export class Converter extends DeclarationConverter {
               `関数 ${decl.name}() は、すでに宣言されています（Cannot redeclare function ${decl.name}()）。`
             );
           }
-          this.declaredFunctions.set(key, row);
+          this.declaredFunctions.set(key, decl.params);
         }
         return [{ k: 'func', decl, row }];
       }
@@ -981,12 +984,13 @@ export class Converter extends DeclarationConverter {
         const obj = this.expr(node.childForFieldName('object') as Node);
         const nameNode = node.childForFieldName('name') as Node;
         const name = this.methodName(nameNode);
-        const { args, fcc } = this.args(node.childForFieldName('arguments') as Node);
+        const argumentsNode = node.childForFieldName('arguments') as Node;
+        const { args, fcc } = this.args(argumentsNode);
         const nullsafe = node.type.startsWith('nullsafe');
         if (fcc && (nullsafe || hasNullsafeReceiver(obj)))
           this.error(node, 'Cannot combine nullsafe operator with Closure creation');
-        return {
-          k: 'mcall',
+        const call = {
+          k: 'mcall' as const,
           obj,
           name,
           args,
@@ -994,6 +998,7 @@ export class Converter extends DeclarationConverter {
           fcc,
           row: this.memberOperandRow(name, nameNode),
         };
+        return this.withCallRows(call, argumentsNode);
       }
       case 'scoped_property_access_expression': {
         const cls = this.classRef(node.childForFieldName('scope') as Node);
@@ -1009,8 +1014,12 @@ export class Converter extends DeclarationConverter {
         const cls = this.classRef(node.childForFieldName('scope') as Node);
         const nameNode = node.childForFieldName('name') as Node;
         const name = this.methodName(nameNode);
-        const { args, fcc } = this.args(node.childForFieldName('arguments') as Node);
-        return { k: 'scall', cls, name, args, fcc, row: this.memberOperandRow(name, nameNode) };
+        const argumentsNode = node.childForFieldName('arguments') as Node;
+        const { args, fcc } = this.args(argumentsNode);
+        return this.withCallRows(
+          { k: 'scall', cls, name, args, fcc, row: this.memberOperandRow(name, nameNode) },
+          argumentsNode
+        );
       }
       case 'class_constant_access_expression': {
         return this.classConstantExpression(node, row);
@@ -1375,6 +1384,7 @@ export class Converter extends DeclarationConverter {
   }
 
   // code-gauge-allow functionCognitiveComplexity 20 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionNcss 33 -- Resolves the callable, compiles its arguments, and records the call row together.
   private functionCall(node: Node): Expr {
     const row = node.startPosition.row;
     const fnNode = node.childForFieldName('function') as Node;
@@ -1385,7 +1395,10 @@ export class Converter extends DeclarationConverter {
       if (word === 'eval') this.unsupported(node, 'eval');
       if (word === 'die' || word === 'exit') {
         const { args, fcc } = this.args(argumentsNode);
-        return { k: 'call', fn: { name: 'exit' }, args, fcc, row: node.endPosition.row };
+        return this.withCallRows(
+          { k: 'call', fn: { name: 'exit' }, args, fcc, row: node.endPosition.row },
+          argumentsNode
+        );
       }
       if (word === '__halt_compiler') this.unsupported(node, '__halt_compiler');
     }
@@ -1394,23 +1407,76 @@ export class Converter extends DeclarationConverter {
       const raw = this.nameText(fnNode);
       if (this.preserveSyntax) return { k: 'call', fn: { name: raw }, args, fcc, row };
       const name = this.resolveFunctionName(raw);
-      this.compileBuiltinArguments(compiledBuiltinName(name), args, fcc);
+      const builtin = compiledBuiltinName(name);
+      this.compileBuiltinArguments(builtin, args, fcc);
+      const call = this.withCallRows({ k: 'call', fn: name, args, fcc, row }, argumentsNode);
       if (lower(name.fallback ?? name.name) === 'assert') {
         this.addAssertionDescription(argumentsNode, args, row);
       }
-      return { k: 'call', fn: name, args, fcc, row };
+      return call;
     }
     const callable = this.opcodeOperand(fnNode);
     const fn = this.foldCallableOperand(callable);
-    if (!this.preserveSyntax) this.compileBuiltinArguments(compiledBuiltinName(fn), args, fcc);
-    return {
-      k: 'call',
-      fn,
-      args,
-      fcc,
-      initRow: compiledOperandRow(callable),
-      row: argumentsNode.startPosition.row,
-    };
+    const builtin = compiledBuiltinName(fn);
+    if (!this.preserveSyntax) this.compileBuiltinArguments(builtin, args, fcc);
+    return this.withCallRows(
+      {
+        k: 'call',
+        fn,
+        args,
+        fcc,
+        initRow: compiledOperandRow(callable),
+        row: argumentsNode.startPosition.row,
+      },
+      argumentsNode,
+      row
+    );
+  }
+
+  private withCallRows<E extends Extract<Expr, { args: Arg[] }>>(
+    call: E,
+    argumentsNode: Node | undefined,
+    entryRow = call.row
+  ): E {
+    const last = call.args.at(-1);
+    if (this.preserveSyntax || !argumentsNode || !last) return call;
+    const functionName = call.k === 'call' ? compiledBuiltinName(call.fn) : undefined;
+    const result =
+      functionName === undefined
+        ? undefined
+        : compiledBuiltinResult(functionName, call.args, this.fn.name !== undefined);
+    if (result === 'constant' || (functionName === 'defined' && result === 'temporary'))
+      return recordOperandRows(call, call.row, entryRow);
+    const lastRow = compiledOperandRow(last.e);
+    if (last.e.k === 'var' && last.e.name !== 'GLOBALS' && !last.spread && result === undefined) {
+      const first = argumentsNode.namedChildren.find((child) => child.type === 'argument');
+      const row = first?.childForFieldName('name')?.startPosition.row ?? argumentListRow(call.args[0].e);
+      if (row !== lastRow && this.usesArgumentListRow(call, last, functionName))
+        return recordOperandRows(call, call.row, row);
+    }
+    return recordOperandRows(call, call.row, lastRow);
+  }
+
+  private usesArgumentListRow(call: Extract<Expr, { args: Arg[] }>, last: Arg, functionName?: string): boolean {
+    if (call.args.some((arg) => arg.spread)) return true;
+    const parameters = this.compileCallParameters(call, functionName);
+    return (
+      !parameters ||
+      (last.name !== undefined && !parameters.some((param) => !param.variadic && param.name === last.name))
+    );
+  }
+
+  private compileCallParameters(
+    call: Extract<Expr, { args: Arg[] }>,
+    functionName?: string
+  ): readonly Param[] | undefined {
+    if (call.k === 'call')
+      return functionName === undefined
+        ? undefined
+        : (this.declaredFunctions.get(functionName) ?? nativeParameters(functionName));
+    if (call.k === 'scall') return this.compileMethodParameters(call.name, call.cls);
+    if (call.k === 'mcall' && call.obj.k === 'var' && call.obj.name === 'this')
+      return this.compileMethodParameters(call.name);
   }
 
   private compileBuiltinArguments(builtin: string | undefined, args: Arg[], fcc: boolean): void {
@@ -1562,7 +1628,10 @@ export class Converter extends DeclarationConverter {
     if (anonymous) {
       const argumentsNode = anonymous.namedChildren.find((child) => child.type === 'arguments');
       const { args } = argumentsNode ? this.args(argumentsNode) : { args: [] };
-      return { k: 'newAnon', decl: this.classDecl(anonymous, true), args, row: anonymous.startPosition.row };
+      return this.withCallRows(
+        { k: 'newAnon', decl: this.classDecl(anonymous, true), args, row: anonymous.startPosition.row },
+        argumentsNode
+      );
     }
     const parts = node.namedChildren.filter((child) => child.type !== 'comment');
     const argumentsNode = parts.find((child) => child.type === 'arguments');
@@ -1570,12 +1639,15 @@ export class Converter extends DeclarationConverter {
     const { args, fcc } = argumentsNode ? this.args(argumentsNode) : { args: [], fcc: false };
     if (fcc) this.error(node, 'new で第一級 callable は作れません（Cannot create Closure for new expression）。');
     const cls = this.classRef(classNode, this.constantInitializer);
-    return {
-      k: 'new',
-      cls,
-      args,
-      row: cls.k === 'expr' ? compiledOperandRow(cls.e) : classNode.startPosition.row,
-    };
+    return this.withCallRows(
+      {
+        k: 'new',
+        cls,
+        args,
+        row: cls.k === 'expr' ? compiledOperandRow(cls.e) : classNode.startPosition.row,
+      },
+      argumentsNode
+    );
   }
 
   private binary(node: Node): Expr {
@@ -1700,12 +1772,9 @@ export class Converter extends DeclarationConverter {
   private builtinResultIsFolded(name: string, argument: Expr | undefined): boolean {
     if (!argument) return false;
     if (name === 'strlen') return typeof this.compiledValue(argument) === 'string';
-    return (
-      name === 'defined' &&
-      argument.k === 'lit' &&
-      typeof argument.v === 'string' &&
-      compileConstant(argument.v) !== undefined
-    );
+    if (name !== 'defined') return false;
+    const value = builtinLiteralArgument(argument);
+    return typeof value === 'string' && compileConstant(value) !== undefined;
   }
 
   private shortCircuit(op: string, l: Expr, right: Node, row: number): Expr {
@@ -2222,6 +2291,11 @@ function listAssignmentRow(target: Extract<Expr, { k: 'list' }>, row: number): n
     else if (!item.byRef && (item.target.k === 'var' || item.target.k === 'varvar')) row = item.target.row;
   }
   return row;
+}
+
+function argumentListRow(first: Expr): number {
+  while (first.k === 'cast' || first.k === 'unary' || first.k === 'silence') first = first.e;
+  return operandAstRow(first);
 }
 
 export function castType(node: Node): { spelling: string; type: string } {
