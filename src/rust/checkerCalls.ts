@@ -19,6 +19,7 @@ import {
   type FnDef,
   hasVars,
   intType,
+  isBuiltin,
   ref,
   REF_STR,
   resolve,
@@ -343,12 +344,11 @@ function noMethod(c: Checker, expr: Extract<Expr, { kind: 'methodCall' }>, recei
     equals: '（比べるには == を使います）',
     toString: '（to_string() です）',
     toUpperCase: '（to_uppercase() です）',
-    push_back: '（Vec では push です）',
-    add: '（Vec では push です）',
-    append: '',
   };
-  const hint = hints[expr.method];
-  if (hint === undefined && autoderefSteps(c.program, receiverType).some((step) => isStandardType(step.type))) {
+  const receiverTypes = autoderefSteps(c.program, receiverType).map((step) => step.type);
+  const vecHint = ['push_back', 'add'].includes(expr.method) && receiverTypes.some((type) => isBuiltin(type, 'Vec'));
+  const hint = vecHint ? '（Vec では push です）' : hints[expr.method];
+  if (hint === undefined && receiverTypes.some(isStandardType)) {
     compileError(expr.methodSpan, `${t} のメソッド ${expr.method} は、この採点環境では使えません。`);
   }
   compileError(expr.methodSpan, `${t} にメソッド ${expr.method} がありません${hint ?? ''}。`);

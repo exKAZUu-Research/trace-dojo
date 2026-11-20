@@ -1655,6 +1655,8 @@ test.each([
   ['attributes on tuple elements (stage C)', '    let tuple = (#[cfg(any())] 1, 2);'],
   ['an unavailable string method', '    let matches = "abcabc".rmatch_indices("bc");'],
   ['an unavailable slice method reached through Vec', '    let groups = vec![1, 1, 2].chunk_by(|a, b| a == b);'],
+  ['available-in-Rust deque append', 'let mut a = std::collections::VecDeque::from([1]); a.append(&mut a.clone());'],
+  ['available-in-Rust integer Add method (stage C)', 'let n = 1i32; let _ = n.add(2);', 'use std::ops::Add;'],
   ['threads (stage D)', '    std::thread::spawn(|| {});'],
   ['standard input (stage D)', '    let mut s = String::new();\n    std::io::stdin().read_line(&mut s).unwrap();'],
   [
