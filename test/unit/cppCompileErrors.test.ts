@@ -2,6 +2,26 @@ import { expect, test } from 'vitest';
 
 import { executeProgram } from '../../src/interpreter/program';
 
+test.each([
+  ['time.h', 'time(0);', '時刻'],
+  ['ctime', 'time_t start = 0;', 'time_t'],
+  ['cstdlib', 'double value = atof("1.5");', 'atof'],
+  ['cstdlib', 'double value = std::atof("1.5");', 'std::atof'],
+  ['cassert', 'assert(true);', 'assert'],
+  ['cerrno', 'errno = 0;', 'errno'],
+])('an SDK declaration in <%s> gets an unsupported diagnostic for %s', (header, statement, name) => {
+  const program = `#include <${header}>
+int main() { ${statement} }`;
+  const execution = executeProgram('cpp', program);
+  expect(execution).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 1, message: expect.stringContaining(name) }],
+  });
+  expect(execution).toMatchObject({
+    diagnostics: [{ message: expect.stringContaining('この採点環境では使えません') }],
+  });
+});
+
 test.each(['Derived()', 'make()'])('a reference cannot bind to an inaccessible base of %s', (source) => {
   const program = `struct Base {};
 class Derived : private Base {};

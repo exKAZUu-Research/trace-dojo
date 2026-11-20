@@ -130,6 +130,8 @@ export abstract class CompilerBase {
   lookupName(name: string, row: number, typeOnly = false): Entity {
     const entity = this.findName(name, typeOnly);
     if (!entity) {
+      this.checkUnimplementedSdkName(name, row, 'global');
+      if (this.hasUsingStd) this.checkUnimplementedSdkName(name, row, 'std');
       const header = this.library.missingHeader(name);
       if (header)
         return this.error(row, `${name} は宣言されていません（使うには #include <${header}> を書いてください）。`);
@@ -140,6 +142,11 @@ export abstract class CompilerBase {
     }
     if (entity.kind === 'unsupported') return this.unsupported(row, entity.feature);
     return entity;
+  }
+
+  private checkUnimplementedSdkName(name: string, row: number, scope: 'global' | 'std'): void {
+    const feature = this.library.unimplementedSdkName(name, scope);
+    if (feature) this.unsupported(row, feature);
   }
 
   /** The member named `name` that a class itself declares, as an entity. */
@@ -169,7 +176,10 @@ export abstract class CompilerBase {
   private lookupInGlobal(nameNode: Syntax, typeOnly: boolean): Entity {
     const name = this.plainName(nameNode);
     const entity = typeOnly ? this.typeOnlyGlobalName(name) : this.ordinaryGlobalName(name);
-    if (!entity) return this.error(nameNode.row, `::${name} は宣言されていません。`);
+    if (!entity) {
+      this.checkUnimplementedSdkName(name, nameNode.row, 'global');
+      return this.error(nameNode.row, `::${name} は宣言されていません。`);
+    }
     return entity;
   }
 
@@ -191,6 +201,7 @@ export abstract class CompilerBase {
     const name = this.plainName(nameNode);
     const entity = this.findStdName(name);
     if (!entity) {
+      this.checkUnimplementedSdkName(name, row, 'std');
       const header = this.library.missingHeader(name);
       if (header) return this.error(row, `std::${name} を使うには #include <${header}> を書いてください。`);
       return this.error(row, `std::${name} はありません（または、この採点環境にはありません）。`);
@@ -225,7 +236,11 @@ export abstract class CompilerBase {
       const entity = this.findName(node.text, true);
       if (entity?.kind === 'class') return { kind: 'class', cls: entity.cls };
       if (entity?.kind === 'type' && entity.type.kind === 'class') return { kind: 'class', cls: entity.type.cls };
-      if (!entity) return this.error(node.row, `${node.text} は宣言されていません。`);
+      if (!entity) {
+        this.checkUnimplementedSdkName(node.text, node.row, 'global');
+        if (this.hasUsingStd) this.checkUnimplementedSdkName(node.text, node.row, 'std');
+        return this.error(node.row, `${node.text} は宣言されていません。`);
+      }
       return this.error(node.row, `${node.text} はクラスでも名前空間でもありません。`);
     }
     const type = this.resolveTypeSpecifier(node, false, true);

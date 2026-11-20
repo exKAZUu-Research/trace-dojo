@@ -1633,6 +1633,9 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const functionNode = fieldOf(node, 'function') as Syntax;
     const argsNode = fieldOf(node, 'arguments') as Syntax;
     const argNodes = argsNode.children;
+    const isUnqualified = functionNode.type === 'identifier';
+    if (isUnqualified && this.library.isFunctionMacro(functionNode.text))
+      return this.unsupported(functionNode.row, `マクロ（${functionNode.text}）`);
     const typeTarget = this.callTypeTarget(functionNode);
     if (typeTarget) {
       if (argNodes.length === 1 && typeTarget.kind !== 'class') {
@@ -1645,7 +1648,6 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       const args = argNodes.map((arg) => this.argument(arg));
       return this.constructObject(typeTarget.cls, args, node.row, false);
     }
-    const isUnqualified = functionNode.type === 'identifier';
     if (isUnqualified && !this.findName(functionNode.text)) {
       const args = argNodes.map((arg) => this.argument(arg));
       const functions = this.withArgumentDependentLookup(functionNode.text, [], args);

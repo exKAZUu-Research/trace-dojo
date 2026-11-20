@@ -39,6 +39,55 @@ int main() {
   }
 });
 
+test('charges initializer-list storage and newly constructed vector elements', () => {
+  const prefix = `#include <cstdio>
+#include <vector>
+int main() {
+  std::vector<int> values{1, 2};`;
+  const reusesStorage = `${prefix}
+  values = {3, 4};
+  std::printf("%d", values[0]);
+}`;
+  const grows = `${prefix}
+  values = {3, 4, 5};
+}`;
+  const previousLimit = LIMITS.maxSlots;
+  try {
+    LIMITS.maxSlots = 6;
+    expect(executeProgram('cpp', reusesStorage)).toMatchObject({
+      kind: 'executed',
+      stdout: '3',
+      uncaughtException: undefined,
+    });
+    for (const [limit, program] of [
+      [3, prefix + '}'],
+      [5, reusesStorage],
+      [9, grows],
+    ] as const) {
+      LIMITS.maxSlots = limit;
+      expect(executeProgram('cpp', program)).toMatchObject({
+        kind: 'executed',
+        uncaughtException: expect.stringContaining('メモリを確保しすぎました'),
+      });
+    }
+  } finally {
+    LIMITS.maxSlots = previousLimit;
+  }
+});
+
+test('accepts C compatibility headers and keeps function-like macro names usable as variables', () => {
+  const program = `#include <stdbool.h>
+#include <stdarg.h>
+#include <time.h>
+#include <assert.h>
+#include <cstdio>
+int main() {
+  bool assert = true;
+  std::printf("%d", assert);
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined, stdout: '1' });
+});
+
 test('unordered map assignment retains earlier copied entries while later entries allocate turtles', () => {
   const program = `#include <unordered_map>
 int copies;
@@ -793,6 +842,20 @@ int main() {
     vars: { global: 1, local: [2], marker: 5 },
     referenceVars: { local: { kind: 'array' } },
   });
+});
+
+test('a loop reuses local static storage and leaves its binding behind at scope exit', () => {
+  const program = `int main() {
+  int last = 0;
+  for (int i = 0; i < 2; ++i) {
+    static int count = 5;
+    last = ++count;
+  }
+  int result = last;
+}`;
+  const { traceItems } = traceProgram('cpp', program, program);
+  expect(traceItems.filter(({ line }) => line === 5).map(({ vars }) => vars.count)).toEqual([6, 7]);
+  expect(traceItems.find(({ line }) => line === 7)?.vars).toEqual({ last: 7, result: 7 });
 });
 
 test.each(['std::cout.width(100001)', 'std::cout << std::fixed << std::setprecision(100001)'])(

@@ -47,8 +47,11 @@ import { FLAGS, ManipulatorValue, Streams, type StreamValue } from './iostream';
 import {
   conflictsWithLibcGlobal,
   conflictsWithStdName,
+  isLibcFunctionMacro,
   isLibcGlobalDeclared,
   isLibcHeaderMacro,
+  isSdkGlobalType,
+  isSdkStdDeclared,
   mathWrapperCall,
   redeclaresLibcFunction,
 } from './libcGlobals';
@@ -93,8 +96,6 @@ const UNSUPPORTED_STD_NAMES: Record<string, string> = {
   promise: '非同期処理（std::promise）',
   this_thread: 'スレッド（std::this_thread）',
   chrono: '時刻・時間（std::chrono）',
-  time: '時刻（std::time）',
-  clock: '時刻（std::clock）',
   regex: '正規表現（std::regex）',
   regex_match: '正規表現（std::regex_match）',
   regex_search: '正規表現（std::regex_search）',
@@ -146,6 +147,8 @@ const UNSUPPORTED_STD_NAMES: Record<string, string> = {
 };
 
 const UNSUPPORTED_C_NAMES: Record<string, string> = {
+  time: '時刻（std::time）',
+  clock: '時刻（std::clock）',
   system: '外部のコマンドの実行（std::system）',
   getenv: '環境変数（std::getenv）',
   signal: 'シグナル（std::signal）',
@@ -328,6 +331,15 @@ export class Library {
 
   isHeaderMacro(name: string): boolean {
     return isLibcHeaderMacro(name, this.headers);
+  }
+
+  isFunctionMacro(name: string): boolean {
+    return isLibcFunctionMacro(name, this.headers);
+  }
+
+  unimplementedSdkName(name: string, scope: 'global' | 'std'): string | undefined {
+    if (scope === 'std') return isSdkStdDeclared(name, this.headers) ? `std::${name}` : undefined;
+    if (this.hasGlobalDeclaration(name) || this.isHeaderMacro(name) || isSdkGlobalType(name, this.headers)) return name;
   }
 
   /** The header to include for a library name the program uses without including it, if the library has the name. */

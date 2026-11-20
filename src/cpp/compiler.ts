@@ -1447,7 +1447,6 @@ export class Compiler extends StatementCompiler {
     undoConstruction: ((frame: Frame) => void) | undefined
   ): CompiledFunction {
     const scope = context.scope;
-    const { slots, destructibles } = scope;
     const isMain = fn.name === 'main' && !fn.owner;
     const isVoid = fn.ret.kind === 'void' || fn.isConstructor || fn.isDestructor;
     const body = (frame: Frame): void => {
@@ -1460,13 +1459,13 @@ export class Compiler extends StatementCompiler {
       } catch (error) {
         if (isMain && !(error instanceof ExecutionLimitError)) frame.runtime.onMainEnd?.(frame);
         if (error instanceof CppException) {
-          endScope(frame, slots, destructibles);
+          endScope(frame, scope);
           if (isInitialized) undoConstruction?.(frame);
         }
         throw error;
       }
       if (isMain) frame.runtime.onMainEnd?.(frame);
-      endScope(frame, slots, destructibles);
+      endScope(frame, scope);
       if (completion !== RETURN) {
         if (isMain) frame.returnValue = 0;
         else if (!isVoid) throw new CppRuntimeError('missingReturn');

@@ -110,18 +110,17 @@ export abstract class StatementCompiler extends ExpressionCompiler {
 
   /** Ends the lifetime of a scope's variables when its statements complete, however they complete. */
   withScopeExit(exec: Exec, scope: Scope): Exec {
-    const { slots, destructibles } = scope;
-    if (slots.length === 0) return exec;
+    if (scope.slots.length === 0 && scope.statics.length === 0) return exec;
     return (frame) => {
       let completion: Completion;
       try {
         completion = exec(frame);
       } catch (error) {
         // Only a caught exception unwinds the stack; other errors end the program where they occur.
-        if (error instanceof CppException) endScope(frame, slots, destructibles);
+        if (error instanceof CppException) endScope(frame, scope);
         throw error;
       }
-      endScope(frame, slots, destructibles);
+      endScope(frame, scope);
       return completion;
     };
   }
@@ -1205,7 +1204,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     if (entity?.kind !== 'local' || entity.isReference) return undefined;
     const { local } = entity;
     for (const scope of this.context.scopes.toReversed()) {
-      if (scope.slots.includes(local.slot)) return scope.statics.includes(local.slot) ? undefined : local;
+      if (scope.slots.includes(local.slot)) return local;
       if (scopeLimit === 'try' && scope.isTryBlock) return;
     }
   }
@@ -1448,12 +1447,8 @@ function endException(frame: Frame, exception: CppException): void {
   exception.endLifetime();
 }
 
-/** Ends a scope: destroys its objects, the last first, and makes its variables' storage unusable. */
-export function endScope(
-  frame: Frame,
-  slots: readonly number[],
-  destructibles: ReadonlyMap<number, (frame: Frame, value: Value) => void>
-): void {
+/** Destroys automatic objects in reverse order and clears the local bindings. */
+export function endScope(frame: Frame, { slots, statics, destructibles }: Scope): void {
   for (let index = slots.length - 1; index >= 0; index--) {
     const slot = slots[index];
     const store = frame.slots[slot];
@@ -1467,6 +1462,7 @@ export function endScope(
     }
     frame.slots[slot] = undefined;
   }
+  for (const slot of statics) frame.slots[slot] = undefined;
 }
 
 function endReturnedReferenceLifetimes(frame: Frame, value: Value): void {

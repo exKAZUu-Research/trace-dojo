@@ -10,6 +10,7 @@ from pathlib import Path
 TREE_NODE = re.compile(r"^((?:[| ] )*)(?:\|-|`-)(\w+) (.*)")
 TYPE_NAME = re.compile(r"\b\w+\b")
 USING_SHADOW = re.compile(r" (Function|FunctionTemplate|Var) 0x\w+ '([^']+)'(?: '([^']+)')?")
+NAMED_TAG = re.compile(r" (?:struct|class|union|enum) ([A-Za-z]\w*)(?: definition)?$")
 SEMANTIC_PARENT = re.compile(r"^0x\w+ parent 0x\w+")
 STD_FUNCTIONS = {"FunctionDecl", "FunctionTemplateDecl"}
 STD_OTHER_NAMES = {
@@ -29,8 +30,8 @@ def probe(header):
         ["clang++", "-std=c++20", "-x", "c++", "-dM", "-E", "-"],
         input=f"#include <{header}>\n", capture_output=True, text=True, check=True,
     ).stdout
-    for name in re.findall(r"^#define ([A-Za-z]\w*)(?= |$)", macros, re.M):
-        symbols.add((name, "macro", ""))
+    for name, function_like in re.findall(r"^#define ([A-Za-z]\w*)(\(|(?= |$))", macros, re.M):
+        symbols.add((name, "functionMacro" if function_like else "macro", ""))
     for name, kind in std_nodes(result.stdout):
         if name.isidentifier() and not name.startswith("_"):
             symbols.add((name, kind, ""))
@@ -41,12 +42,10 @@ def global_symbols(tree):
     aliases = {}
     declarations = set()
     for category, syntax, has_body in global_nodes(tree):
-        if category == "UsingShadowDecl":
-            shadow = USING_SHADOW.search(syntax)
-            if shadow:
-                target, name, signature = shadow.groups()
-                declarations.add((name, "var" if target == "Var" else "using", signature or ""))
         if category not in {"TypedefDecl", "TypeAliasDecl", "FunctionDecl", "VarDecl"}:
+            declaration = other_global_symbol(category, syntax)
+            if declaration:
+                declarations.add(declaration)
             continue
         head, sep, full_type = syntax.partition(" '")
         if not sep:
@@ -56,6 +55,7 @@ def global_symbols(tree):
         if category in {"TypedefDecl", "TypeAliasDecl"}:
             if name not in TYPE_NAME.findall(signature):
                 aliases[name] = signature
+            declarations.add((name, "type", ""))
             continue
         kind = "var" if category == "VarDecl" else "definition" if has_body else "function"
         declarations.add((name, kind, signature))
@@ -66,6 +66,18 @@ def global_symbols(tree):
         if name.isidentifier() and not name.startswith("_")
     }
     return symbols
+
+
+def other_global_symbol(category, syntax):
+    if category == "UsingShadowDecl":
+        shadow = USING_SHADOW.search(syntax)
+        if shadow:
+            target, name, signature = shadow.groups()
+            return name, "var" if target == "Var" else "using", signature or ""
+    if category in {"RecordDecl", "CXXRecordDecl", "EnumDecl"}:
+        tag = NAMED_TAG.search(syntax)
+        if tag:
+            return tag[1], "type", ""
 
 
 def std_nodes(tree):
@@ -190,12 +202,18 @@ def main():
     groups = sorted({tuple(found) for found in presence.values()})
     group_id = {group: i for i, group in enumerate(groups)}
     names = defaultdict(list)
+    types = {}
     macros = {}
+    function_macros = {}
     standard = defaultdict(list)
     for (name, kind, signature), found in sorted(presence.items()):
         group = group_id[tuple(found)]
         if kind == "macro":
             macros[name] = group
+        elif kind == "functionMacro":
+            function_macros[name] = group
+        elif kind == "type":
+            types[name] = group
         elif kind in {"stdFunction", "stdOther"}:
             standard[name].append([group, kind == "stdFunction"])
         else:
@@ -204,7 +222,9 @@ def main():
     output.write_text(json.dumps({
         "headers": groups,
         "declarations": names,
+        "types": types,
         "macros": macros,
+        "functionMacros": function_macros,
         "standard": standard,
         "mathCalls": math_wrapper_calls(),
     }, indent=2) + "\n")

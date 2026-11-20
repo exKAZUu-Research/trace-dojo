@@ -2,7 +2,9 @@ import { type FunctionInfo, type Type, typeName, unqualified } from '../types';
 import sdk from './libcGlobalDeclarations.json';
 
 const declarations: Readonly<Record<string, (string | number)[][]>> = sdk.declarations;
+const types: Readonly<Record<string, number>> = sdk.types;
 const macros: Readonly<Record<string, number>> = sdk.macros;
+const functionMacros: Readonly<Record<string, number>> = sdk.functionMacros;
 const standard: Readonly<Record<string, (number | boolean)[][]>> = sdk.standard;
 type MathWrapper = 'integer' | 'float' | 'double' | 'ldouble';
 const mathCalls: Readonly<Record<string, Partial<Record<MathWrapper, string>>>> = sdk.mathCalls;
@@ -32,6 +34,14 @@ export function conflictsWithLibcGlobal(
 
 export function isLibcHeaderMacro(name: string, headers: ReadonlySet<string>): boolean {
   return Object.hasOwn(macros, name) && visibleIn(macros[name], headers);
+}
+
+export function isLibcFunctionMacro(name: string, headers: ReadonlySet<string>): boolean {
+  return Object.hasOwn(functionMacros, name) && visibleIn(functionMacros[name], headers);
+}
+
+export function isSdkGlobalType(name: string, headers: ReadonlySet<string>): boolean {
+  return Object.hasOwn(types, name) && visibleIn(types[name], headers);
 }
 
 export function isLibcGlobalDeclared(name: string, headers: ReadonlySet<string>): boolean {

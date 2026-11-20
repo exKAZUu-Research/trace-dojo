@@ -48,13 +48,18 @@ import {
 } from './elements';
 import { elementLocation, positionOf, randomAccessIterator, rangePositions } from './iterators';
 import type { Library } from './registry';
-import { listSort, SequenceEditor, type Source, storedSource } from './sequenceEdits';
+import {
+  listSort,
+  reserveSequenceStorage as reserve,
+  SequenceEditor,
+  type Source,
+  storedSource,
+} from './sequenceEdits';
 import { addMethod, asNumber, constRef, native, nativeConstructor, type NativeOptions, throwLibrary } from './support';
 import { typeKey } from './templates';
 
 export type SequenceKind = 'vector' | 'deque' | 'array' | 'list';
 
-const MAX_ELEMENTS = 1_000_000;
 const PTRDIFF_MAX = 2n ** 63n - 1n;
 
 /** The type of a library parameter that takes a braced list or a callable as the call wrote it. */
@@ -224,7 +229,6 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
         }
         return;
       }
-      reserve(frame, Math.max(0, from.items.length - to.items.length));
       editor.assignRange(
         frame,
         to,
@@ -316,11 +320,6 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
   sequenceMethods(library, cls, element, kind, ops, editor, outOfRange, fixedLength);
   return cls;
 }
-
-const reserve = (frame: Frame, count: number): void => {
-  if (count > MAX_ELEMENTS) throw new CppRuntimeError('custom', 'コンテナの要素が多すぎます。');
-  frame.runtime.reserve(count);
-};
 
 /**
  * `max_size()` of libc++ on arm64: as many elements, or nodes of a list, as the allocator can allocate, and at most
@@ -704,7 +703,6 @@ function sequenceMethods(
     (self, [count, value], frame) => {
       checkVectorLength(frame, library, kind, element, count);
       const n = asNumber(count);
-      reserve(frame, n);
       editor.assignCopies(frame, self, n, value as Ptr);
     },
     copiesElement
@@ -713,17 +711,13 @@ function sequenceMethods(
     if (args.length === 1 && args[0].braced) {
       const list = initializerList(library.compiler, element, args[0].braced, ops);
       return instance('assign', [AS_WRITTEN], VOID, (self, _args, frame) =>
-        list(frame, (source) => {
-          reserve(frame, source.length);
-          editor.assignRange(frame, self, source);
-        })
+        list(frame, (source) => editor.assignRange(frame, self, source))
       );
     }
     const range = args.length === 2 ? iteratorRange(library.compiler, args, element, ops, 'assign') : undefined;
     if (!range) return;
     return instance('assign', range.params, VOID, (self, [first, last], frame) => {
       const source = range.read(first, last);
-      reserve(frame, source.length);
       editor.assignRange(frame, self, source);
     });
   });
@@ -752,6 +746,7 @@ export function listElementsOf(
   ops: () => ElementOperations
 ): <T>(frame: Frame, use: (source: Source) => T) => T {
   return (frame, use) => {
+    reserve(frame, inits.length);
     const { destroy, copy } = ops();
     const mark = frame.pending.length;
     const values: Value[] = [];
@@ -1139,11 +1134,12 @@ function sequenceList(
   if (elements.length > 0) requireElementUse(compiler, element, row, 'copy');
   const list = listElementsOf(inits, () => editor.ops);
   const run: Eval<Value> = (frame) =>
-    list(frame, ({ length, read, construct }) =>
-      editor.ops.destroy
+    list(frame, ({ length, read, construct }) => {
+      reserve(frame, length);
+      return editor.ops.destroy
         ? editor.construct(frame, make([]), length, (index, destination) => construct(frame, index, destination))
-        : make(Array.from({ length }, (_, index) => read(index)))
-    );
+        : make(Array.from({ length }, (_, index) => read(index)));
+    });
   listElements.set(run, inits);
   return run;
 }

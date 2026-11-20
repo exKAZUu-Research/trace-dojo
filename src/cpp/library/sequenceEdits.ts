@@ -1,4 +1,4 @@
-import { CppException } from '../errors';
+import { CppException, CppRuntimeError } from '../errors';
 import { initializeAt, makeEach, withTemporaries } from '../objectCompiler';
 import type { Frame } from '../runtime';
 import { ArrayStore, CObject, endLifetime, holdValues, Ptr, UNINIT, type Value } from '../values';
@@ -250,6 +250,7 @@ export class SequenceEditor {
   /** `assign(first, last)` and copy assignment, which assign over the existing elements. */
   assignRange(frame: Frame, self: SequenceValue, source: Source): void {
     const { length } = source;
+    this.reserveAssignment(frame, self, length);
     if (this.kind === 'vector' && length > self.capacity) {
       this.truncate(frame, self, 0);
       self.replaceAllocation([], length);
@@ -263,6 +264,7 @@ export class SequenceEditor {
 
   /** `assign(count, value)`. */
   assignCopies(frame: Frame, self: SequenceValue, count: number, value: Ptr): void {
+    this.reserveAssignment(frame, self, count);
     if (this.kind === 'vector' && count > self.capacity) {
       this.truncate(frame, self, 0);
       self.replaceAllocation([], count);
@@ -275,6 +277,11 @@ export class SequenceEditor {
     for (let index = assigned; index < count; index++)
       this.appendElement(frame, self, (target) => this.ops.copy(frame, value.read(), target));
     this.truncate(frame, self, count);
+  }
+
+  private reserveAssignment(frame: Frame, self: SequenceValue, count: number): void {
+    const reusable = this.kind === 'vector' && count > self.capacity ? 0 : self.items.length;
+    reserveSequenceStorage(frame, Math.max(0, count - reusable));
   }
 
   /** Move assignment, which destroys the elements and takes the other container's storage. */
@@ -673,4 +680,9 @@ function shifted(value: Ptr, self: SequenceValue, at: number, by: number): Ptr {
   return value.store === self && value.index >= at && value.index < self.items.length - by
     ? new Ptr(self, value.index + by)
     : value;
+}
+
+export function reserveSequenceStorage(frame: Frame, count: number): void {
+  if (count > 1_000_000) throw new CppRuntimeError('custom', 'コンテナの要素が多すぎます。');
+  frame.runtime.reserve(count);
 }
