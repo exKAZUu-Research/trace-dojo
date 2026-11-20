@@ -821,7 +821,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     if ((operator === '+' || operator === '-') && lt.kind === 'pointer' && isInteger(rt)) {
       return this.pointerOffset(left, right, operator === '+' ? 1 : -1, row);
     }
-    if (operator === '+' && isInteger(lt) && rt.kind === 'pointer') return this.pointerOffset(right, left, 1, row);
+    if (operator === '+' && isInteger(lt) && rt.kind === 'pointer')
+      return this.pointerOffset(right, left, 1, row, true);
     if (operator === '-' && lt.kind === 'pointer' && rt.kind === 'pointer') {
       this.checkPointerArithmetic(lt, row);
       this.checkPointerArithmetic(rt, row);
@@ -868,23 +869,28 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   }
 
   /** A pointer moved by a number of elements, which must stay within its array or one past its end. */
-  pointerOffset(pointer: Expr, offset: Expr, sign: 1 | -1, row: number): Expr {
+  /** `pointer + offset` (or `- offset`), evaluating the offset first when it is the left operand. */
+  pointerOffset(pointer: Expr, offset: Expr, sign: 1 | -1, row: number, offsetFirst = false): Expr {
     const type = pointer.type as Extract<Type, { kind: 'pointer' }>;
     this.checkPointerArithmetic(type, row);
     const p = pointer.run;
     const displacement = this.rvalue(offset);
     const n = displacement.run;
+    const move = (location: unknown, distance: unknown): Ptr => {
+      const delta = distance as number | bigint;
+      return (location as Ptr).offset(sign === 1 ? delta : -delta);
+    };
     return {
       type,
       isLvalue: false,
       staticAddress: pointer.staticAddress && displacement.constant !== undefined,
       constantPointee: offsetConstantLocation(pointer.constantPointee, displacement.constant, sign),
       row,
-      run: (frame) =>
-        frame.unsequencedOperands(p, n, (location, distance) => {
-          const delta = distance as number | bigint;
-          return (location as Ptr).offset(sign === 1 ? delta : -delta);
-        }),
+      run: (frame) => {
+        return offsetFirst
+          ? frame.unsequencedOperands(n, p, (distance, location) => move(location, distance))
+          : frame.unsequencedOperands(p, n, move);
+      },
     };
   }
 

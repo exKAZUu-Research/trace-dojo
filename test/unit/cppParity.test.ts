@@ -880,6 +880,27 @@ int main() {
   });
 });
 
+test('evaluates the operands of integer-plus-pointer from left to right', () => {
+  const program = `#include <iostream>
+int data[4];
+int position = 0;
+int offset() { std::cout << "L"; return 1; }
+int* base() { std::cout << "R"; return data; }
+int* buffer() { position = 2; return data; }
+int main() {
+  int* p = offset() + base();
+  int* q = base() + offset();
+  std::cout << (p - data) << (q - data) << ' ';
+  int* r = position + buffer();
+  std::cout << (r - data);
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'LRRL11 0',
+    uncaughtException: undefined,
+  });
+});
+
 test('composes constants from std::gcd, std::lcm, and std::clamp', () => {
   const program = `#include <algorithm>
 #include <iostream>
