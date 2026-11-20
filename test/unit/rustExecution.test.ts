@@ -1279,6 +1279,35 @@ test('captures values consumed by Rust macros in FnOnce closures', () => {
   });
 });
 
+test.each([
+  'fn run<F: FnMut()>(callback: F) { callback(); } fn main() {}',
+  'fn main() { let callback: Box<dyn FnMut()> = Box::new(|| ()); callback(); }',
+  'struct H { callback: Box<dyn FnMut()> } fn main() { let h = H { callback: Box::new(|| ()) }; (h.callback)(); }',
+])('requires a mutable place to call FnMut', (program) => {
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ message: expect.stringContaining('mut') })],
+  });
+});
+
+test('calls FnMut through an existing mutable reference', () => {
+  const program = `fn run<F: FnMut()>(callback: &mut F) {
+    callback();
+}
+fn main() {
+    let mut count = 0;
+    let mut f = || count += 1;
+    run(&mut f);
+    run(&mut f);
+    println!("{}", count);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '2\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

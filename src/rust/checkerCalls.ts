@@ -241,17 +241,13 @@ function callValue(
 function requireCallableMut(c: Checker, expr: Extract<Expr, { kind: 'call' }>, kind: string): void {
   c.deferredChecks.push(() => {
     const callee = expr.callee;
-    const closureType = shallow(callee.ty ?? UNIT);
-    const actual = closureType.kind === 'closure' ? closureType.closure.kind : kind;
+    const adjustment = autoderefSteps(c.program, callee.ty ?? UNIT).at(-1)!;
+    const actual = adjustment.type.kind === 'closure' ? adjustment.type.closure.kind : kind;
     if (actual !== 'FnMut') return;
-    if (callee.kind !== 'path') return;
-    const res = c.annotations.paths.get(callee);
-    if (res?.kind === 'local' && !res.local.mutable && shallow(res.local.type).kind === 'closure') {
-      compileError(
-        callee.span,
-        `変数 ${res.local.name} のクロージャは捕まえた変数を書き換えるので、let mut ${res.local.name} と宣言してください。`
-      );
+    if (adjustment.derefs.includes('ref')) {
+      compileError(callee.span, '& の参照を通して FnMut のクロージャは呼び出せません。');
     }
+    if (!adjustment.derefs.includes('mutRef')) requireMutablePlace(c, callee, 'FnMut のクロージャを呼び出す');
   });
 }
 
