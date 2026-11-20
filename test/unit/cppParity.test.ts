@@ -201,6 +201,61 @@ int main() {
   expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', stdout: '2', uncaughtException: undefined });
 });
 
+test('uses pointer addresses as unordered keys across aliasing conversions and copies', () => {
+  const program = `#include <iostream>
+#include <unordered_map>
+#include <unordered_set>
+int main() {
+  int values[2]{};
+  int other = 0;
+  int* alias = static_cast<int*>(static_cast<void*>(values + 1));
+  std::unordered_map<int*, int> map;
+  map[values] = 4;
+  map[values + 1] = 5;
+  map[&other] = 7;
+  auto copy = map;
+  std::unordered_set<int*> set{values, values + 1, alias, nullptr};
+  std::cout << copy[alias] << copy[values] << copy[&other] << ' ' << set.size() << ' '
+            << set.count(nullptr) << set.erase(alias) << set.count(values + 1);
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '547 3 110',
+    uncaughtException: undefined,
+  });
+});
+
+test('uses the configured unordered load factor for reserve and clamps it at the current load', () => {
+  const program = `#include <iostream>
+#include <unordered_map>
+#include <unordered_set>
+int main() {
+  std::unordered_map<int, int> map;
+  map.max_load_factor(0.5f);
+  map.reserve(10);
+  std::cout << map.max_load_factor() << ' ' << map.bucket_count() << ' ';
+  std::unordered_set<int> set{1, 2, 3, 4};
+  auto buckets = set.bucket_count();
+  auto load = set.load_factor();
+  set.max_load_factor(load / 2);
+  std::cout << (set.max_load_factor() == load) << ' ' << (set.bucket_count() == buckets);
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '0.5 23 1 1',
+    uncaughtException: undefined,
+  });
+});
+
+test('diagnoses a nonpositive maximum load factor', () => {
+  const program = `#include <unordered_set>
+int main() { std::unordered_set<int> values; values.max_load_factor(0); }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: 'max_load_factor には正の数を渡してください。',
+  });
+});
+
 test('binds every member in mixed C++ class declarations', () => {
   const program = `#include <iostream>
 struct Record {

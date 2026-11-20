@@ -160,6 +160,19 @@ int main() {}`;
 });
 
 test.each([
+  ['map', 'map<Key, int>'],
+  ['set', 'set<Key>'],
+])('requires comparable keys for equal_range on an empty <%s>', (header, type) => {
+  const program = `#include <${header}>
+struct Key { int value; };
+int main() { std::${type} entries; Key key{1}; entries.equal_range(key); }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 2, message: expect.stringContaining('Key の値は < で比べられない') }],
+  });
+});
+
+test.each([
   ['time.h', 'time(0);', '時刻'],
   ['ctime', 'time_t start = 0;', 'time_t'],
   ['cstdlib', 'double value = atof("1.5");', 'atof'],

@@ -485,6 +485,7 @@ const COMPARING_MEMBERS = new Set([
   'find',
   'count',
   'contains',
+  'equal_range',
   'lower_bound',
   'upper_bound',
   'at',

@@ -28,6 +28,7 @@ const MESSAGES = {
   unterminatedString: '文字列の終わり（\\0）がないまま、配列の範囲の外まで読みました。',
   overlappingCopy: 'コピー元とコピー先の領域が重なっています。',
   invalidRange: 'アルゴリズムに渡した範囲（先頭と末尾のイテレータ）が正しくありません。',
+  invalidLoadFactor: 'max_load_factor には正の数を渡してください。',
   invalidComparator: '比較の関数が、狭義の弱順序になっていません（a < a が true など）。',
 } as const;
 

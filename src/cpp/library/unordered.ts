@@ -178,7 +178,28 @@ function hashOf(type: Type): ((value: Value) => bigint) | undefined {
   }
   if (type.kind === 'class' && type.cls.library?.kind === 'string')
     return (value) => hashBytes((value as StringValue).bytes);
+  if (type.kind === 'pointer') return pointerHasher();
   return undefined;
+}
+
+function pointerHasher(): (value: Value) => bigint {
+  const allocations = new WeakMap<Store, bigint>();
+  let nextAllocation = 1n;
+  return (value) => {
+    const { store, index } = (value as Ptr).address;
+    let base = 0n;
+    if (store) {
+      base = allocations.get(store) ?? 0n;
+      if (base === 0n) {
+        base = nextAllocation++ << 32n;
+        allocations.set(store, base);
+      }
+    }
+    const address = base + BigInt(index * 8);
+    let bytes = '';
+    for (let offset = 0n; offset < 64n; offset += 8n) bytes += String.fromCodePoint(Number((address >> offset) & 255n));
+    return hashBytes(bytes);
+  };
 }
 
 interface HashNode {
@@ -297,6 +318,15 @@ export class HashValue extends MapValue {
 
   get bucketCount(): number {
     return this.buckets.length;
+  }
+
+  get loadFactor(): number {
+    return this.bucketCount === 0 ? 0 : Math.fround(this.size / this.bucketCount);
+  }
+
+  setMaxLoadFactor(value: number): void {
+    if (!(value > 0)) throw new CppRuntimeError('invalidLoadFactor');
+    this.maxLoadFactor = Math.max(value, this.loadFactor);
   }
 
   get length(): number {
@@ -753,14 +783,9 @@ export function unorderedClass(
   method('size', [], SIZE_T, (self) => BigInt(self.size), true);
   method('empty', [], BOOL, (self) => (self.size === 0 ? 1 : 0), true);
   method('bucket_count', [], SIZE_T, (self) => BigInt(self.bucketCount), true);
-  method(
-    'load_factor',
-    [],
-    FLOAT,
-    (self) => (self.bucketCount === 0 ? 0 : Math.fround(self.size / self.bucketCount)),
-    true
-  );
+  method('load_factor', [], FLOAT, (self) => self.loadFactor, true);
   method('max_load_factor', [], FLOAT, (self) => self.maxLoadFactor, true);
+  method('max_load_factor', [FLOAT], VOID, (self, [value]) => self.setMaxLoadFactor(value as number));
   method('rehash', [SIZE_T], VOID, (self, [count], frame) => self.rehash(frame, Number(count)));
   method('reserve', [SIZE_T], VOID, (self, [count], frame) =>
     self.rehash(frame, Math.ceil(Math.fround(Number(count) / self.maxLoadFactor)))
