@@ -2832,3 +2832,13 @@ fn main() {
   const mutable = program.replace('F: FnOnce()>(callback: F)', 'F: FnMut()>(mut callback: F)');
   expect(executeProgram('rust', mutable)).toMatchObject({ kind: 'compileError' });
 });
+
+test('drops Rust turtles moved out of Box storage', () => {
+  const program = rustMain(
+    `let wrapped = Box::new(Owner { turtle: Turtle::new(1, 1) });
+    let boxed = Box::new(Turtle::new(2, 2));
+    { let first = wrapped.turtle; let second = *boxed; }`,
+    'struct Owner { turtle: Turtle }'
+  );
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', finalTurtles: [] });
+});

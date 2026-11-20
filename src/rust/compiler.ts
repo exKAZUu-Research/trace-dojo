@@ -310,7 +310,7 @@ export class Compiler {
     if (!expr.ty) return undefined;
     const type = normalize(shallow(expr.ty));
     if (type.kind !== 'ref' || type.mutable) return undefined;
-    if (expr.kind === 'ref' && this.ownedFieldChain(expr.operand)) {
+    if (expr.kind === 'ref' && this.ownedPlace(expr.operand)) {
       const place = this.place(expr.operand);
       let root = expr.operand;
       while (root.kind === 'field') root = root.operand;
@@ -398,9 +398,9 @@ export class Compiler {
 
   private valueFromPlace(expr: Expr, read: Eval, type: Type): Eval {
     if (!isPlaceExpr(expr, this.annotations)) return read;
-    if (needsCopy(type) && this.isCopy(type)) return (frame) => copyValue(read(frame));
+    if (this.isCopy(type)) return needsCopy(type) ? (frame) => copyValue(read(frame)) : read;
     // Moving a whole variable out leaves it without a value, which the trace no longer shows.
-    if (expr.kind === 'path' && !this.isCopy(type)) {
+    if (expr.kind === 'path') {
       const res = this.annotations.paths.get(expr);
       if (res?.kind === 'local' && res.local.mode === 'move' && !isRefType(res.local.type)) {
         const slot = res.local.slot;
@@ -413,8 +413,7 @@ export class Compiler {
         };
       }
     }
-    // Moving a field out (`let a = s.a;`) leaves the struct without it.
-    if (expr.kind === 'field' && !this.isCopy(type) && this.ownedFieldChain(expr)) {
+    if ((expr.kind === 'field' || expr.kind === 'unary') && this.ownedPlace(expr)) {
       const place = this.place(expr);
       return (frame) => {
         const target = place(frame);
@@ -427,15 +426,18 @@ export class Compiler {
     return read;
   }
 
-  /** Whether a field chain reaches its fields from a variable that owns them, not through a reference. */
-  private ownedFieldChain(expr: Expr): boolean {
+  private ownedPlace(expr: Expr): boolean {
     if (expr.kind === 'path') {
       const res = this.annotations.paths.get(expr);
       return res?.kind === 'local' && res.local.mode === 'move' && !isRefType(res.local.type);
     }
-    if (expr.kind !== 'field') return false;
-    const field = this.annotations.fields.get(expr);
-    return field !== undefined && field.derefs.length === 0 && this.ownedFieldChain(expr.operand);
+    if (expr.kind === 'field') {
+      const field = this.annotations.fields.get(expr);
+      return field !== undefined && field.derefs.every((step) => step === 'own') && this.ownedPlace(expr.operand);
+    }
+    if (expr.kind !== 'unary' || expr.op !== '*') return false;
+    const operand = normalize(shallow(expr.operand.ty!));
+    return operand.kind === 'adt' && operand.def.builtin === 'Box' && this.ownedPlace(expr.operand);
   }
 
   // code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of expression, statement, or pattern.
