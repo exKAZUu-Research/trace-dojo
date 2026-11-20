@@ -4,7 +4,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import type { Checker, Mapper } from './checker';
 import { conditionalBranch, isGenericObjectOrIndexType, mappedOptionality } from './genericTypes';
 import { IndexedAccessKeys } from './indexedAccessKeys';
-import { addIndexInfo, applicableIndex, isNumericStringKey, isPatternKey } from './indexInfos';
+import { addIndexInfo, applicableIndex, isPatternKey } from './indexInfos';
 import { applyModifier, mappedArrayOrTuple, type WithMappedSource } from './mappedArrays';
 import { printedPropertyName } from './print';
 import { named, templateFragmentText } from './syntax';
@@ -531,26 +531,49 @@ export class TypeOperators {
   }
 
   /** `object[index]`, reporting a missing property at `node` when given. */
-  indexedAccess(object: Type, index: Type, node?: TreeNode): Type {
+  indexedAccess(object: Type, index: Type, node?: TreeNode, narrow?: (type: Type) => Type): Type {
     if (isAnyLike(object)) return object === errorType ? errorType : this.indexedAnyAccess(index, node);
-    const mapped = this.indexedMappedAccess(object, index, node);
+    const mapped = this.indexedMappedAccess(object, index, node, narrow);
     if (mapped !== undefined) return mapped;
     const variadic = variadicTupleIndex(object, index);
-    if (variadic && node && !this.isVariadicTupleKey(object, index)) {
-      this.c.error(node, `型 '${this.c.print(index)}' は型 '${this.c.print(object)}' のインデックスに使えません。`);
+    if (variadic && node && !this.indexedAccessKeys.isVariadicTupleKey(object, index, narrow)) {
+      this.reportInvalidIndex(object, index, node);
       return errorType;
     }
     if (isGenericObjectOrIndexType(object) || isGenericObjectOrIndexType(index) || variadic)
-      return this.c.relations.stringIndexByGenericKey(object, index)?.type ?? this.deferredAccess(object, index);
-    if (index.kind === 'union') return unionOf(index.types.map((member) => this.indexedAccess(object, member, node)));
+      return this.genericIndexedAccess(object, index, node, narrow);
+    if (index.kind === 'union')
+      return unionOf(index.types.map((member) => this.indexedAccess(object, member, node, narrow)));
     if (isPropertyKeyLiteral(index)) return this.propertyAccess(object, index.value, node);
     const applicable =
       applicableIndex(this.c, this.c.structureOf(object), index) ?? this.unreportedStringIndex(object, index, node);
     if (applicable) return applicable.type;
     if (index === neverType) return neverType;
-    if (node)
-      this.c.error(node, `型 '${this.c.print(index)}' は型 '${this.c.print(object)}' のインデックスに使えません。`);
+    if (node) this.reportInvalidIndex(object, index, node);
     return errorType;
+  }
+
+  private genericIndexedAccess(
+    object: Type,
+    index: Type,
+    node: TreeNode | undefined,
+    narrow: ((type: Type) => Type) | undefined
+  ): Type {
+    const probe = this.c.relations.stringIndexByGenericKey(object, index);
+    if (
+      node &&
+      narrow &&
+      (object.kind === 'typeParameter' || !probe) &&
+      this.indexedAccessKeys.isInvalidWrittenKey(object, index, narrow)
+    ) {
+      this.reportInvalidIndex(object, index, node);
+      return errorType;
+    }
+    return probe?.type ?? this.deferredAccess(object, index);
+  }
+
+  private reportInvalidIndex(object: Type, index: Type, node: TreeNode): void {
+    this.c.error(node, `型 '${this.c.print(index)}' は型 '${this.c.print(object)}' のインデックスに使えません。`);
   }
 
   private indexedAnyAccess(index: Type, node: TreeNode | undefined): Type {
@@ -564,12 +587,17 @@ export class TypeOperators {
     return result;
   }
 
-  private indexedMappedAccess(object: Type, index: Type, node: TreeNode | undefined): Type | undefined {
+  private indexedMappedAccess(
+    object: Type,
+    index: Type,
+    node: TreeNode | undefined,
+    narrow: ((type: Type) => Type) | undefined
+  ): Type | undefined {
     const mapped = object.kind === 'object' && object.objectKind === 'mapped' ? object.mapped : undefined;
     if (!mapped || mapped.nameType) return undefined;
-    if (!this.isMappedKey(index, mapped.constraint)) {
+    if (!this.indexedAccessKeys.isMappedKey(index, mapped.constraint, narrow)) {
       if (!node) return undefined;
-      this.c.error(node, `型 '${this.c.print(index)}' は型 '${this.c.print(object)}' のインデックスに使えません。`);
+      this.reportInvalidIndex(object, index, node);
       return errorType;
     }
     if (
@@ -584,11 +612,6 @@ export class TypeOperators {
     )
       return this.substituteIndexedMapped(mapped, index);
     return this.deferredAccess(object, index);
-  }
-
-  private isVariadicTupleKey(object: ObjectType, index: Type): boolean {
-    const keys = this.keyofType(object);
-    return typeMembers(index).every((key) => isNumericStringKey(key) || this.c.relations.isAssignable(key, keys));
   }
 
   variadicIndexConstraint(access: IndexedAccessType, indexType: Type): Type | undefined {
@@ -631,23 +654,9 @@ export class TypeOperators {
     const property = this.c.propertyOf(info.source, name);
     if (!property) return undefined;
     const key = this.propertyKeyType(property);
-    return this.isMappedKey(key, info.constraint) ? this.mappedProperty(info, [key], name, key) : undefined;
-  }
-
-  private isMappedKey(index: Type, keys: Type): boolean {
-    if (this.c.relations.isAssignable(index, keys)) return true;
-    if (index.kind === 'union') return index.types.every((member) => this.isMappedKey(member, keys));
-    if (keys.kind === 'union') return keys.types.some((member) => this.isMappedKey(index, member));
-    if (keys.kind === 'keyof' && keys.type.kind === 'typeParameter')
-      return !this.indexedAccessKeys.isInvalid(keys.type, index, () => []);
-    return (
-      keys.kind === 'conditional' &&
-      !this.c.relations.isGeneric(keys.extendsType) &&
-      isIntrinsic(keys.trueType, 'never') &&
-      this.c.relations.identical(keys.checkType, keys.falseType) &&
-      conditionalBranch(this.c, index, keys.extendsType) === 'false' &&
-      this.isMappedKey(index, keys.checkType)
-    );
+    return this.indexedAccessKeys.isMappedKey(key, info.constraint)
+      ? this.mappedProperty(info, [key], name, key)
+      : undefined;
   }
 
   mappedIndexConstraint({ objectType, indexType }: IndexedAccessType): Type | undefined {

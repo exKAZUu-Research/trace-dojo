@@ -6,7 +6,7 @@ import { unsupportedMessage } from '../unsupported';
 import type { Checker, Mapper, UnionAlias } from './checker';
 import { EagerTypeConstraints } from './eagerTypeConstraints';
 import { isGenericObjectOrIndexType } from './genericTypes';
-import { IndexedAccessKeys, narrowIndexedOperands } from './indexedAccessKeys';
+import { narrowIndexedOperands } from './indexedAccessKeys';
 import { addIndexInfo, isPatternKey } from './indexInfos';
 import { InterfaceBases } from './interfaceBases';
 import { RecursiveAliases } from './recursiveAliases';
@@ -116,13 +116,11 @@ export class TypeNodes {
     ['type_annotation', (node) => this.annotationType(node) ?? anyType],
   ]);
 
-  private readonly indexedAccessKeys: IndexedAccessKeys;
   readonly interfaceBases: InterfaceBases;
   readonly recursiveAliases: RecursiveAliases;
   readonly eagerConstraints = new EagerTypeConstraints();
 
   constructor(private readonly c: Checker) {
-    this.indexedAccessKeys = new IndexedAccessKeys(c);
     this.interfaceBases = new InterfaceBases(c);
     this.recursiveAliases = new RecursiveAliases(c);
   }
@@ -273,19 +271,10 @@ export class TypeNodes {
     const [object, index] = named(node);
     const objectType = this.typeFromNode(object);
     const indexType = this.typeFromNode(index);
-    const result = this.c.typeOperators.indexedAccess(objectType, indexType, index);
-    if (
-      result !== errorType &&
-      (objectType.kind === 'typeParameter' || result.kind === 'indexedAccess') &&
-      this.indexedAccessKeys.isInvalid(objectType, indexType, this.conditionalExtendsTypes(node))
-    ) {
-      this.c.error(
-        index,
-        `型 '${this.c.print(indexType)}' は型 '${this.c.print(objectType)}' のインデックスに使えません。`
-      );
-      return errorType;
-    }
-    return result;
+    let narrow: ((type: Type) => Type) | undefined;
+    return this.c.typeOperators.indexedAccess(objectType, indexType, index, (type) =>
+      (narrow ??= this.conditionalIndexNarrowing(node))(type)
+    );
   }
 
   /**
@@ -296,16 +285,6 @@ export class TypeNodes {
     if (type.kind !== 'typeParameter') return false;
     const bound = this.conditionalMapper(node, false).get(type.id);
     return bound !== undefined && this.validTupleRestType(bound);
-  }
-
-  /** Compute the branch bounds once when checking the keys of a generic indexed access. */
-  private conditionalExtendsTypes(node: TreeNode): (type: Type) => Type[] {
-    let narrow: ((type: Type) => Type) | undefined;
-    return (type) => {
-      narrow ??= this.conditionalIndexNarrowing(node);
-      const bound = narrow(type);
-      return bound === type ? [] : [bound];
-    };
   }
 
   private conditionalIndexNarrowing(node: TreeNode): (type: Type) => Type {

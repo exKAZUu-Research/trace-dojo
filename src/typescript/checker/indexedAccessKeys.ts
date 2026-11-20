@@ -1,4 +1,5 @@
 import type { Checker, Mapper } from './checker';
+import { conditionalBranch } from './genericTypes';
 import { applicablePatternIndexes, isNumericStringKey } from './indexInfos';
 import {
   type ConditionalType,
@@ -8,8 +9,11 @@ import {
   isAnyLike,
   isIntrinsic,
   type LiteralType,
+  type MappedInfo,
+  type ObjectType,
   type Structure,
   type Type,
+  typeMembers,
   type TypeParameter,
   unionOf,
   unknownType,
@@ -54,12 +58,15 @@ function narrowOperand(c: Checker, type: Type, narrow: (type: Type) => Type, par
     case 'typeParameter': {
       return parameters.get(type.id) ?? type;
     }
+    case 'object': {
+      return type.mapped ? narrowMappedOperand(c, type, type.mapped, narrow) : type;
+    }
+    case 'keyof': {
+      const object = narrow(type.type);
+      return object === type.type ? type : c.typeOperators.keyofType(object);
+    }
     case 'indexedAccess': {
-      const object = narrow(type.objectType);
-      const key = narrow(type.indexType);
-      if (object === type.objectType && key === type.indexType) return type;
-      const selected = c.typeOperators.indexedAccess(object, key);
-      return selected === errorType ? type : selected;
+      return narrowIndexedProjection(c, type, narrow);
     }
     case 'conditional': {
       const trueType = type.trueType;
@@ -80,15 +87,76 @@ function narrowOperand(c: Checker, type: Type, narrow: (type: Type) => Type, par
   }
 }
 
+function narrowIndexedProjection(c: Checker, access: IndexedAccessType, narrow: (type: Type) => Type): Type {
+  const { objectType, indexType } = access;
+  const object = narrow(objectType);
+  const key = narrow(indexType);
+  if (object === objectType && key === indexType) return access;
+  const selected = c.typeOperators.indexedAccess(object, key);
+  return selected === errorType ? access : selected;
+}
+
+function narrowMappedOperand(c: Checker, type: Type, mapped: MappedInfo, narrow: (type: Type) => Type): Type {
+  const source = mapped.source && narrow(mapped.source);
+  const constraint = narrow(mapped.constraint);
+  if (source === mapped.source && constraint === mapped.constraint) return type;
+  const nameType = mapped.nameType && narrow(mapped.nameType);
+  return c.typeOperators.mappedType({
+    typeParameter: mapped.typeParameter,
+    homomorphic: mapped.homomorphic,
+    readonlyModifier: mapped.readonlyModifier,
+    optionalModifier: mapped.optionalModifier,
+    source,
+    constraint,
+    nameType,
+    get template() {
+      return narrow(mapped.template);
+    },
+  });
+}
+
 /** Decides which keys may index a type parameter, as TypeScript's TS2536 does for an indexed access type. */
 export class IndexedAccessKeys {
   constructor(private readonly c: Checker) {}
+
+  isInvalidWrittenKey(object: Type, key: Type, narrow: (type: Type) => Type): boolean {
+    return this.isInvalid(object, key, (type) => {
+      const bound = narrow(type);
+      return bound === type ? [] : [bound];
+    });
+  }
+
+  isVariadicTupleKey(object: ObjectType, index: Type, narrow?: (type: Type) => Type): boolean {
+    const keys = this.c.typeOperators.keyofType(object);
+    const matches = (type: Type): boolean =>
+      typeMembers(type).every((key) => isNumericStringKey(key) || this.c.relations.isAssignable(key, keys));
+    return matches(index) || (!!narrow && matches(narrow(index)));
+  }
+
+  isMappedKey(index: Type, keys: Type, narrow?: (type: Type) => Type): boolean {
+    return this.matchesMappedKey(index, keys) || (!!narrow && this.matchesMappedKey(narrow(index), narrow(keys)));
+  }
+
+  private matchesMappedKey(index: Type, keys: Type): boolean {
+    if (this.c.relations.isAssignable(index, keys)) return true;
+    if (index.kind === 'union') return index.types.every((member) => this.matchesMappedKey(member, keys));
+    if (keys.kind === 'union') return keys.types.some((member) => this.matchesMappedKey(index, member));
+    if (keys.kind === 'keyof' && keys.type.kind === 'typeParameter') return !this.isInvalid(keys.type, index, () => []);
+    return (
+      keys.kind === 'conditional' &&
+      !this.c.relations.isGeneric(keys.extendsType) &&
+      isIntrinsic(keys.trueType, 'never') &&
+      this.c.relations.identical(keys.checkType, keys.falseType) &&
+      conditionalBranch(this.c, index, keys.extendsType) === 'false' &&
+      this.matchesMappedKey(index, keys.checkType)
+    );
+  }
 
   /**
    * Whether `key` may name a key that none of the types `object` stands for has: its constraint, where `T extends any`
    * is as unconstrained as `T`, and the types conditional types narrow it to.
    */
-  isInvalid(object: Type, key: Type, extendsTypes: ExtendsTypes): boolean {
+  private isInvalid(object: Type, key: Type, extendsTypes: ExtendsTypes): boolean {
     if (
       object.kind === 'object' &&
       object.mapped &&

@@ -1,0 +1,35 @@
+type Read<T, K extends keyof T> = T[K] extends {a: {n: number}} ? Readonly<T[K]['a']>['n'] : never;
+type Require<T, K extends keyof T> = T[K] extends {a: {n: number}} ? Required<T[K]['a']>['n'] : never;
+type Part<T, K extends keyof T> = T[K] extends {a: {n: number}} ? Partial<T[K]['a']>['n'] : never;
+type ReadParent<T, K extends keyof T> = T[K] extends {a: {n: number}} ? Readonly<T[K]>['a']['n'] : never;
+type RequireParent<T, K extends keyof T> = T[K] extends {a: {n: number}} ? Required<T[K]>['a']['n'] : never;
+type ReadKey<V, K extends keyof V, T, P extends keyof T> =
+  T[P] extends {selected: keyof V[K]} ? V[K][Readonly<T[P]>['selected']] : never;
+type RequireKey<V, K extends keyof V, T, P extends keyof T> =
+  T[P] extends {selected: keyof V[K]} ? V[K][Required<T[P]>['selected']] : never;
+type Explicit<T, K extends keyof T> =
+  T[K] extends {a: {n: number}} ? {[P in keyof T[K]['a']]: T[K]['a'][P]}['n'] : never;
+type Remapped<T, K extends keyof T> =
+  T[K] extends {a: {n: number}} ? {[P in keyof T[K]['a'] as 'value']: T[K]['a'][P]}['value'] : never;
+type Nested<T, K extends keyof T> =
+  T[K] extends {a: {n: number}} ? Readonly<Required<T[K]>['a']>['n'] : never;
+type A<T, K extends keyof T, B> =
+  T[K] extends {n: number} ? {[P in keyof B | 'a']: P extends 'a' ? T[K] : never}['a']['n'] : never;
+type B<T, K extends keyof T, X extends string> =
+  T[K] extends {n: number} ? {[P in 'a' | X]: P extends 'a' ? T[K] : never}['a']['n'] : never;
+type C<T, K extends keyof T, V, P extends keyof V> =
+  T[K] extends {selected: keyof V[P]} ? {[R in keyof V[P]]: R}[Readonly<T[K]>['selected']] : never;
+type E<T, K extends keyof T> = T[K] extends {value: {n: number}}
+  ? Readonly<{[P in keyof T[K] as P extends 'value' ? P : never]: T[K][P]}>['value']['n'] : never;
+type F<T, K extends keyof T> = T[K] extends [{a: string}]
+  ? Readonly<T[K]>[0]['a'] : never;
+type VariadicKey<T,K extends keyof T,U extends unknown[]> =
+ T[K] extends { selected: keyof [...U] } ? [...U][Readonly<T[K]>['selected']] : never;
+type VariadicNumber<T,K extends keyof T,U extends unknown[]> =
+ T[K] extends { selected: 0 } ? [string, ...U][Readonly<T[K]>['selected']] : never;
+type VariadicString<T,K extends keyof T,U extends unknown[]> =
+ T[K] extends { selected: '0' } ? [string, ...U][Readonly<T[K]>['selected']] : never;
+const value: ReadParent<{one: {a: {n: number}}}, 'one'> = 42;
+const selected: RequireKey<{one: {name: string}}, 'one', {p: {selected: 'name'}}, 'p'> = 'chosen';
+const optional: Part<{one: {a: {n: number}}}, 'one'> = undefined;
+console.log(value, selected, optional);
