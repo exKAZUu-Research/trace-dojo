@@ -117,6 +117,24 @@ int main() {
 });
 
 test.each([
+  ['std::ostream', 'cout', 'put(120)'],
+  ['std::ostream', 'cerr', 'flush()'],
+  ['std::ios', 'cout', 'good()'],
+])('rejects a member call through a one-past %s pointer originating at %s', (type, stream, member) => {
+  const program = `#include <iostream>
+int main() {
+  ${type}* pointer = &std::${stream};
+  ++pointer;
+  pointer->${member};
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '',
+    uncaughtException: '配列の範囲の外を読み書きしました。',
+  });
+});
+
+test.each([
   ['char', ' '],
   ['std::string', ' '],
   ['int', '0'],
@@ -189,6 +207,33 @@ int main() {
     expect(executeProgram('cpp', program)).toMatchObject({
       kind: 'executed',
       stdout: '60',
+      uncaughtException: undefined,
+    });
+  } finally {
+    LIMITS.maxOperations = previous;
+  }
+});
+
+test('reads only the required prefix of a C substring search needle', () => {
+  const program = `#include <cstring>
+#include <string>
+#include <iostream>
+int main() {
+  std::string needle(8000, 'y');
+  int failures = 0;
+  for (int i = 0; i < 35; ++i) {
+    failures += std::strstr("x", needle.c_str()) == nullptr;
+    failures += std::strstr("y", needle.c_str()) == nullptr;
+  }
+  const char* repeated = "aababababa";
+  std::cout << failures << ' ' << (std::strstr(repeated, "abababa") - repeated);
+}`;
+  const previous = LIMITS.maxOperations;
+  LIMITS.maxOperations = 1800;
+  try {
+    expect(executeProgram('cpp', program)).toMatchObject({
+      kind: 'executed',
+      stdout: '70 1',
       uncaughtException: undefined,
     });
   } finally {
@@ -287,6 +332,8 @@ test.each([
   ['std::array<int, 512> a{}, b{};', 'a.swap(b);'],
   ['std::vector<int> a(512, 1), b(512, 1);', 'a == b;'],
   ['std::vector<int> a(512, 1), b(512, 1);', 'a <= b;'],
+  ['std::pair<std::vector<int>, int> a, b; a.first.resize(512, 1); b.first.resize(512, 1);', 'a == b;'],
+  ['std::pair<std::vector<int>, int> a, b; a.first.resize(512, 1); b.first.resize(512, 1);', 'a < b;'],
   ['std::list<int> a(512, 1);', 'a.reverse();'],
   ['std::list<int> a(512, 1);', 'a.sort();'],
   ['std::list<int> a(512, 1);', 'a.remove(2);'],
@@ -295,6 +342,7 @@ test.each([
 ])('meters sequence traversal in %s %s', (setup, statement) => {
   const program = `#include <array>
 #include <list>
+#include <utility>
 #include <vector>
 int main() {
   ${setup}

@@ -4,7 +4,7 @@ import type { Expr } from '../expr';
 import { FloatNaN } from '../floatSign';
 import { BOOL, ClassInfo, isArithmetic, sameType, type Type, typeName, unqualified } from '../types';
 import { CObject, type Value } from '../values';
-import { equalTo, lessThan } from './elements';
+import { equalTo, lessThan, type ValueComparison } from './elements';
 import type { ClassOperations } from './libraryClass';
 import type { Library } from './registry';
 import { native, nativeConstructor } from './support';
@@ -39,7 +39,7 @@ export function functorClass(library: Library, name: string, type: Type | undefi
   library.instances.set(key, cls);
   cls.isComplete = true;
   const { isComparison, operator } = FUNCTORS[name];
-  const apply = (left: Type, right: Type): ((a: Value, b: Value) => Value) | undefined => {
+  const apply = (left: Type, right: Type): ValueComparison<Value> | undefined => {
     if (isArithmetic(left) && isArithmetic(right) && (!argument || isArithmetic(argument))) {
       const operand = commonType(argument ?? left, argument ?? right);
       const operation = arithmeticOperation(operator as never, operand);
@@ -58,12 +58,12 @@ export function functorClass(library: Library, name: string, type: Type | undefi
       if (operator === '==' || operator === '!=') {
         const equal = equalTo(operand);
         if (!equal) return undefined;
-        return (a, b) => ((operator === '==') === equal(a, b) ? 1 : 0);
+        return (a, b, frame) => ((operator === '==') === equal(a, b, frame) ? 1 : 0);
       }
       const less = lessThan(operand);
       if (!less) return undefined;
-      return (a, b) => {
-        const order = less(a, b);
+      return (a, b, frame) => {
+        const order = less(a, b, frame);
         const result =
           operator === '<' ? order < 0 : operator === '>' ? order > 0 : operator === '<=' ? order <= 0 : order >= 0;
         return result ? 1 : 0;
@@ -99,7 +99,7 @@ export function functorClass(library: Library, name: string, type: Type | undefi
         row,
         run: (frame) => {
           objectRun(frame);
-          return operation(values[0](frame) as Value, values[1](frame) as Value);
+          return operation(values[0](frame) as Value, values[1](frame) as Value, frame);
         },
       };
     },

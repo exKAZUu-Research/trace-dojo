@@ -37,6 +37,7 @@ import {
   requireDefaultConstruction,
   requireElementUse,
   swapElements,
+  type ValueComparison,
 } from './elements';
 import {
   addRangeMembers,
@@ -359,25 +360,22 @@ function decayed(type: Type): Type {
   return unqualified(type);
 }
 
-function orderTest(
-  operator: string,
-  compare: ((a: Value, b: Value) => number) | ((a: Value, b: Value) => boolean)
-): (a: Value, b: Value) => boolean {
-  if (operator === '==') return (a, b) => compare(a, b) === true;
-  if (operator === '!=') return (a, b) => compare(a, b) !== true;
-  const order = compare as (a: Value, b: Value) => number;
+function orderTest(operator: string, compare: ValueComparison<number | boolean>): ValueComparison<boolean> {
+  if (operator === '==') return (a, b, frame) => compare(a, b, frame) === true;
+  if (operator === '!=') return (a, b, frame) => compare(a, b, frame) !== true;
+  const order = compare as ValueComparison<number>;
   switch (operator) {
     case '<': {
-      return (a, b) => order(a, b) < 0;
+      return (a, b, frame) => order(a, b, frame) < 0;
     }
     case '<=': {
-      return (a, b) => order(a, b) <= 0;
+      return (a, b, frame) => order(a, b, frame) <= 0;
     }
     case '>': {
-      return (a, b) => order(a, b) > 0;
+      return (a, b, frame) => order(a, b, frame) > 0;
     }
     default: {
-      return (a, b) => order(a, b) >= 0;
+      return (a, b, frame) => order(a, b, frame) >= 0;
     }
   }
 }
@@ -716,19 +714,24 @@ export function orderedClass(
           type: BOOL,
           isLvalue: false,
           row,
-          run: compiler_.compareObjects(left, right, (first, second) => {
+          run: compiler_.compareObjects(left, right, (first, second, frame) => {
             const x = (first as OrderedValue).entries;
             const y = (second as OrderedValue).entries;
             if (operator === '==' || operator === '!=') {
               const same =
                 x.length === y.length &&
-                x.every((item, index) => (compareEntry as (p: Value, q: Value) => boolean)(item, y[index]));
+                x.every((item, index) => {
+                  frame.runtime.spend();
+                  return (compareEntry as ValueComparison<boolean>)(item, y[index], frame);
+                });
               return (operator === '==') === same;
             }
-            const less = compareEntry as Order;
+            const less = compareEntry as ValueComparison<number>;
             let result = 0;
-            for (let index = 0; index < Math.min(x.length, y.length) && result === 0; index++)
-              result = less(x[index], y[index]);
+            for (let index = 0; index < Math.min(x.length, y.length) && result === 0; index++) {
+              frame.runtime.spend();
+              result = less(x[index], y[index], frame);
+            }
             if (result === 0) result = x.length - y.length;
             return orderTest(operator, () => result)(undefined, undefined);
           }),

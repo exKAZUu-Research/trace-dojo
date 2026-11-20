@@ -681,16 +681,18 @@ export function unorderedClass(
           type: BOOL,
           isLvalue: false,
           row,
-          run: compiler_.compareObjects(left, right, (a, b) => {
+          run: compiler_.compareObjects(left, right, (a, b, frame) => {
             const first = a as HashValue;
             const second = b as HashValue;
             const same =
               first.size === second.size &&
               first.nodes().every((node) => {
+                frame.runtime.spend();
                 const found = second.findNode(keyOf(node.value));
                 return (
                   found !== undefined &&
-                  (!valuesEqual || valuesEqual((node.value as CObject).values[1], (found.value as CObject).values[1]))
+                  (!valuesEqual ||
+                    valuesEqual((node.value as CObject).values[1], (found.value as CObject).values[1], frame))
                 );
               });
             return same === (operator === '==');

@@ -328,7 +328,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       return call && ((frame) => (a, b) => truthy(call(frame, a, b)));
     }
     const less = sameType(left, right, false) ? lessThan(left) : undefined;
-    if (less) return () => (a, b) => less(a.read(), b.read()) < 0;
+    if (less) return (frame) => (a, b) => less(a.read(), b.read(), frame) < 0;
     const compare = locationComparison(compiler(), '<', left, right, row);
     return compare && ((frame) => (a, b) => compare(frame, a, b));
   };
@@ -704,7 +704,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
           out === 0 ||
           !(predicate
             ? truthy(predicate(frame, values.location(out - 1), values.location(index)))
-            : (equal as (a: Value, b: Value) => boolean)(values.get(out - 1), values.get(index)));
+            : (equal as NonNullable<ReturnType<typeof equalTo>>)(values.get(out - 1), values.get(index), frame));
       }
       const element = unqualified(info.element);
       compiler().requireLibraryObjectUse(element, 'move-assign', args[0].row);
@@ -1388,7 +1388,7 @@ function valueEquality(
   return {
     test: (frame, a, b) => {
       frame.runtime.spend();
-      return equal(a, b);
+      return equal(a, b, frame);
     },
   };
 }

@@ -298,27 +298,28 @@ function findCharacter(frame: Frame, text: Ptr, character: number): Ptr {
 }
 
 function findSubstring(frame: Frame, text: Ptr, needle: Ptr): Ptr {
-  if (characterReader(frame, needle)(0) === 0) return text;
+  const readNeedle = characterReader(frame, needle);
+  const first = readNeedle(0);
+  if (first === 0) return text;
+  const pattern = [first];
+  const fallback = [0];
   const read = characterReader(frame, text);
-  if (read(0) === 0) return NULL_PTR;
-  const pattern = readCString(needle, frame.runtime);
-  const fallback = new Uint32Array(pattern.length);
-  for (let index = 1, matched = 0; index < pattern.length; index++) {
-    if (index % 64 === 0) frame.runtime.spend();
-    matched = advanceMatch(pattern, fallback, matched, byteAt(pattern, index));
-    fallback[index] = matched;
-  }
   for (let index = 0, matched = 0; ; index++) {
     const byte = read(index);
     if (byte === 0) return NULL_PTR;
     matched = advanceMatch(pattern, fallback, matched, byte);
-    if (matched === pattern.length) return text.offset(index + 1 - matched);
+    if (matched === pattern.length) {
+      const next = readNeedle(matched);
+      if (next === 0) return text.offset(index + 1 - matched);
+      fallback.push(advanceMatch(pattern, fallback, fallback[matched - 1], next));
+      pattern.push(next);
+    }
   }
 }
 
-function advanceMatch(pattern: string, fallback: Uint32Array, matched: number, byte: number): number {
-  while (matched > 0 && byte !== byteAt(pattern, matched)) matched = fallback[matched - 1];
-  return byte === byteAt(pattern, matched) ? matched + 1 : matched;
+function advanceMatch(pattern: number[], fallback: number[], matched: number, byte: number): number {
+  while (matched > 0 && byte !== pattern[matched]) matched = fallback[matched - 1];
+  return byte === pattern[matched] ? matched + 1 : matched;
 }
 
 function characterReader(frame: Frame, pointer: Ptr): (offset: number) => number {
