@@ -13,7 +13,7 @@ import { compileField, compileIndex, compilePlace } from './compilerPlaces';
 import type { Formatter } from './fmt';
 import { normalize } from './infer';
 import type { Program } from './items';
-import { capturedStoragePlaces } from './loanCaptures';
+import { type CaptureMode, captureStoragePlaces } from './loanCaptures';
 import { castValue, copyValue, needsCopy } from './ops';
 import { ControlSignal, type Frame, type FunctionInfo, MOVED, UNASSIGNED } from './runtime';
 import { runtimeType } from './runtimeTypes';
@@ -44,10 +44,22 @@ export interface CompiledFn {
 }
 
 /** What compiled code calls into: functions, closures, natives, conversions, and formatting. */
+type CaptureCopy = (value: Value, type: Type) => Value;
+
+export interface ClosureCapture {
+  place: Place;
+  duplicate?: (copy: CaptureCopy) => ClosureCapture;
+}
+
+interface FieldCapture {
+  path: number[];
+  mode: CaptureMode;
+}
+
 export interface CallSupport {
   callFn(def: FnDef, typeArgs: Type[], args: Value[], callRow: number | undefined, span: Span, frame: Frame): Value;
   callValue(callee: Value, args: Value[], callRow: number | undefined): Value;
-  makeClosure(compiled: CompiledFn, frame: Frame, captures: Place[], byValue: boolean[]): Value;
+  makeClosure(compiled: CompiledFn, frame: Frame, captures: ClosureCapture[]): Value;
   toIter(value: Value, from: Type): Value;
   constValue(def: ConstDef, frame: Frame, typeArgs: Type[]): Value;
   builtinConst(name: string): Value;
@@ -572,71 +584,105 @@ export class Compiler {
       compiled.body = body.ty && isUnit(resolve(body.ty, true)) ? this.statement(body) : this.value(body);
       this.fillInfo(functionInfo, context);
     });
-    // Captures: places of the enclosing function's variables, or copies of them for a `move` closure.
     const captures = context.captures.map((local) => {
       const res: PathRes =
         local.owner === outer
           ? { kind: 'local', local }
           : { kind: 'capture', local, index: outer.captures.indexOf(local) };
-      return { res, local, fields: this.capturedFields(expr.body, local) };
+      const places = captureStoragePlaces(context.projectedCaptures?.get(local) ?? [], local.type);
+      const fields = places.map(({ proj, mode }) => ({ path: captureFieldIndices(local.type, proj), mode }));
+      return { res, local, fields };
     });
-    const byValue = context.captures.map(
-      (local) =>
-        context.isMove || context.movedCaptures?.includes(local) || context.reborrowedCaptures?.has(local) || false
-    );
-    return (frame) => {
-      const places = captures.map((capture, index) => this.capturePlace(frame, capture, context, byValue[index]));
-      return this.support.makeClosure(compiled, frame, places, byValue);
+    return (frame) =>
+      this.support.makeClosure(
+        compiled,
+        frame,
+        captures.map((capture) => this.capturePlace(frame, capture, context))
+      );
+  }
+
+  private capturePlace(
+    frame: Frame,
+    { res, local, fields }: { res: PathRes; local: LocalVar; fields: FieldCapture[] },
+    context: FnContext
+  ): ClosureCapture {
+    if (fields.length === 0) return { place: new CellPlace(UNIT_VALUE) };
+    const localRef = local.mode === 'refMut' && !context.isMove;
+    const place =
+      res.kind === 'local'
+        ? localRef
+          ? new CellPlace(frame.locals[local.slot] as Value)
+          : new LocalPlace(frame, local.slot)
+        : frame.captures[(res as { index: number }).index];
+    const value = place.get();
+    if (context.reborrowedCaptures?.has(local)) return { place: new CellPlace(value) };
+    if (!fields.some(({ mode }) => mode === 'value')) return { place };
+    const type = runtimeType(local.type)(frame);
+    if (fields[0].path.length === 0) return this.captureEntireValue(place, value, type, local);
+    const owned = this.captureFields(frame, value, type, fields, (source, field, fieldType) => {
+      const item = source[field];
+      if (this.isCopy(fieldType)) return needsCopy(fieldType) ? copyValue(item) : item;
+      source[field] = MOVED;
+      return item;
+    });
+    return this.ownedCapture(frame, owned, type, fields);
+  }
+
+  private captureEntireValue(place: Place, value: Value, type: Type, local: LocalVar): ClosureCapture {
+    let item = value;
+    if (this.isCopy(type)) {
+      if (needsCopy(type)) item = copyValue(value);
+    } else if (local.mode === 'move' && !isRefType(type)) {
+      place.set(MOVED);
+    }
+    return this.ownedValue(item, type);
+  }
+
+  private ownedValue(value: Value, type: Type): ClosureCapture {
+    const place = new CellPlace(value);
+    return { place, duplicate: (copy) => this.ownedValue(copy(place.get(), type), type) };
+  }
+
+  private ownedCapture(frame: Frame, value: Value, type: Type, fields: FieldCapture[]): ClosureCapture {
+    const place = new CellPlace(value);
+    return {
+      place,
+      duplicate: (copy) => {
+        const cloned = this.captureFields(frame, place.get(), type, fields, (source, index, item) =>
+          copy(source[index], item)
+        );
+        return this.ownedCapture(frame, cloned, type, fields);
+      },
     };
   }
 
-  /** The place a closure reaches a captured variable through: the variable's own, or a copy that it owns. */
-  private capturePlace(
+  private captureFields(
     frame: Frame,
-    { res, local, fields }: { res: PathRes; local: LocalVar; fields: number[][] | undefined },
-    context: FnContext,
-    byValue: boolean
-  ): Place {
-    let place: Place;
-    if (res.kind === 'local') {
-      const reborrowed = local.mode === 'refMut' && !context.isMove;
-      place = reborrowed ? new CellPlace(frame.locals[local.slot] as Value) : new LocalPlace(frame, local.slot);
-    } else {
-      place = frame.captures[(res as { index: number }).index];
-    }
-    if (!byValue) return place;
-    const value = place.get();
-    if (this.isCopy(local.type)) return new CellPlace(needsCopy(resolve(local.type, true)) ? copyValue(value) : value);
-    if (local.mode !== 'move' || isRefType(local.type)) return new CellPlace(value);
-    const type = normalize(shallow(resolve(local.type, true)));
-    if (fields && (value instanceof StructValue || Array.isArray(value))) {
-      return new CellPlace(this.moveCapturedFields(frame, value, type, fields));
-    }
-    place.set(MOVED);
-    return new CellPlace(value);
-  }
-
-  private capturedFields(body: Expr, local: LocalVar): number[][] | undefined {
-    const paths = capturedStoragePlaces(this.annotations, body, local);
-    if (paths.some(({ proj }) => proj.length === 0)) return undefined;
-    return paths.map(({ proj }) => captureFieldIndices(local.type, proj));
-  }
-
-  private moveCapturedFields(frame: Frame, value: StructValue | Value[], type: Type, paths: number[][]): Value {
-    const source = value instanceof StructValue ? value.fields : value;
+    value: Value,
+    type: Type,
+    captures: FieldCapture[],
+    own: (source: Value[], index: number, type: Type) => Value
+  ): Value {
+    const source = value instanceof StructValue ? value.fields : (value as Value[]);
     frame.runtime.allocate(source.length);
     const fields: Value[] = Array.from({ length: source.length });
-    for (const [index, field] of source.entries()) {
-      const projections = paths.filter((path) => path[0] === index).map((path) => path.slice(1));
-      if (projections.length === 0) continue;
+    for (const index of new Set(captures.map(({ path }) => path[0]))) {
+      const projected = captures
+        .filter(({ path }) => path[0] === index)
+        .map(({ path, mode }) => ({ path: path.slice(1), mode }));
       const fieldType = captureFieldType(type, index);
-      if (projections.every((path) => path.length) && (field instanceof StructValue || Array.isArray(field))) {
-        fields[index] = this.moveCapturedFields(frame, field, fieldType, projections);
-      } else if (this.isCopy(fieldType)) {
-        fields[index] = needsCopy(fieldType) ? copyValue(field) : field;
+      if (projected[0].path.length > 0) {
+        fields[index] = this.captureFields(frame, source[index], fieldType, projected, own);
+      } else if (projected[0].mode === 'value') {
+        fields[index] = own(source, index, fieldType);
       } else {
-        fields[index] = field;
-        source[index] = MOVED;
+        Object.defineProperty(fields, index, {
+          enumerable: true,
+          get: () => source[index],
+          set: (item: Value) => {
+            source[index] = item;
+          },
+        });
       }
     }
     return value instanceof StructValue ? new StructValue(value.def, fields) : fields;

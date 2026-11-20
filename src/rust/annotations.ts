@@ -1,5 +1,6 @@
 import type { Expr, Pattern, Span } from './ast';
 import type { Known } from './constLint';
+import type { ProjectedCapture } from './loanCaptures';
 import type { AdtDef, ClosureType, ConstDef, FnDef, TraitDef, TraitRef, Type } from './types';
 
 /** A variable of a function or closure: a `let` binding, a parameter, or a binding of a pattern. */
@@ -34,6 +35,7 @@ export interface FnContext {
   closureKind: 'Fn' | 'FnMut' | 'FnOnce';
   /** For a closure, the captured variables it moves out, which it captures by value even without `move`. */
   movedCaptures?: LocalVar[];
+  projectedCaptures?: Map<LocalVar, ProjectedCapture[]>;
   reborrowedCaptures?: Set<LocalVar>;
 }
 

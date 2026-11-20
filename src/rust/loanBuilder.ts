@@ -1,10 +1,9 @@
-// code-gauge-allow-file fileNcss 958 -- Lowers each kind of expression to the points and regions rustc's MIR gives it.
+// code-gauge-allow-file fileNcss 994 -- Lowers each kind of expression to the points and regions rustc's MIR gives it.
 import type { ExecutionBudget } from '../interpreter/limits';
 import type { Annotations, FnContext, LocalVar, MethodRes } from './annotations';
 import type { Block, Condition, Expr, FormatArgs, Pattern, Span, Stmt } from './ast';
 import { patternBindings } from './astWalk';
 import { normalize } from './infer';
-import { capturedPlaces } from './loanCaptures';
 import {
   type Access,
   type AccessKind,
@@ -92,7 +91,7 @@ export class LoanBuilder {
   private readonly vars = new Map<LocalVar, Var>();
   private readonly locals = new Map<Var, LocalVar>();
   private readonly loops: LoopFrame[] = [];
-  private readonly scopes: { locals: LocalVar[]; end: Span }[] = [];
+  private readonly scopes: { locals: LocalVar[]; temporaries: Var[]; end: Span }[] = [];
   private readonly exits: number[] = [];
   /** For a closure's body, the captures it modifies, which the closure captures by `&mut`. */
   private readonly mutatedCaptures = new Set<LocalVar>();
@@ -146,7 +145,8 @@ export class LoanBuilder {
     });
     this.point({ defs: [...defs, ...paramVars] });
     for (const [pattern, v] of destructured) this.bind(pattern, { root: v, proj: [] });
-    this.store(this.value(body), this.returnVar);
+    const bodyResult = this.withinScope([], end, () => this.value(body));
+    this.store(bodyResult, this.returnVar);
     if (this.current !== undefined) this.exits.push(this.current);
     this.join(this.exits);
     this.endLocals(parameterLocals, end);
@@ -433,15 +433,16 @@ export class LoanBuilder {
     const locals: LocalVar[] = [];
     return this.withinScope(locals, { row: block.endRow, col: 0 }, () => {
       for (const stmt of block.stmts) {
-        this.stmt(stmt);
+        this.withinScope([], stmt.span, () => this.stmt(stmt));
         if (stmt.kind === 'let') locals.push(...patternBindings(stmt.pattern, this.annotations));
       }
-      return block.tail ? this.value(block.tail) : undefined;
+      const tail = block.tail;
+      return tail ? this.withinScope([], tail.span, () => this.value(tail)) : undefined;
     });
   }
 
   private withinScope<T>(locals: LocalVar[], end: Span, body: () => T): T {
-    this.scopes.push({ locals, end });
+    this.scopes.push({ locals, temporaries: [], end });
     try {
       const result = body();
       this.endScopes(this.scopes.length - 1);
@@ -454,8 +455,17 @@ export class LoanBuilder {
   private endScopes(first: number): void {
     if (this.current === undefined) return;
     for (let index = this.scopes.length - 1; index >= first; index--) {
-      const { locals, end } = this.scopes[index];
+      const { locals, temporaries, end } = this.scopes[index];
       this.endLocals(locals, end);
+      if (temporaries.length > 0) {
+        this.point({
+          accesses: temporaries.toReversed().map((root) => ({
+            place: { root, proj: [] },
+            kind: 'storageDead',
+            span: end,
+          })),
+        });
+      }
     }
   }
 
@@ -1065,12 +1075,23 @@ export class LoanBuilder {
     method: MethodRes | undefined
   ): { receiver: Value; activation?: Loan; target?: Place } {
     const { receiver } = expr;
-    const place = method && this.place(receiver, method.fn.selfMode === 'mutRef');
-    if (!method || !place) return { receiver: this.value(receiver) };
+    if (!method) return { receiver: this.value(receiver) };
     const { derefs, autoref } = method.receiver;
+    const stored = this.place(receiver, method.fn.selfMode === 'mutRef');
+    if (!stored && autoref === 'none' && method.fn.selfMode !== 'mutRef') {
+      return { receiver: this.value(receiver) };
+    }
+    const place = stored ?? this.valuePlace(this.value(receiver));
     const target: Place = { root: place.root, proj: [...place.proj, ...derefSteps(derefs)] };
     const targetType = typeAfter(receiver.ty, derefs);
     if (autoref !== 'none') {
+      if (
+        !this.locals.has(place.root) &&
+        !target.proj.includes('*') &&
+        (autoref === 'mut' || !this.promotable(receiver))
+      ) {
+        this.scopes.at(-1)?.temporaries.push(place.root);
+      }
       // A method of the type itself borrows it in two phases; one reached through `Deref` (a slice's) does not.
       const twoPhase = autoref === 'mut' && !derefs.includes('own');
       const { value, loan } = this.borrow(target, autoref === 'mut', receiver.span, targetType, twoPhase);
@@ -1081,6 +1102,56 @@ export class LoanBuilder {
       return { receiver: value, activation: loan, target: project(target, '*') };
     }
     return { receiver: this.read(target, targetType, receiver.span) };
+  }
+
+  // code-gauge-allow functionNcss 35 -- Constant promotion accepts each eligible expression form separately.
+  private promotable(expr: Expr, constants: Set<object> = new Set()): boolean {
+    const child = (value: Expr): boolean => this.promotable(value, constants);
+    switch (expr.kind) {
+      case 'int':
+      case 'float':
+      case 'bool':
+      case 'char':
+      case 'str': {
+        return true;
+      }
+      case 'array':
+      case 'tuple': {
+        return expr.elems.every(child);
+      }
+      case 'arrayRepeat': {
+        return child(expr.value) && child(expr.count);
+      }
+      case 'ref': {
+        return !expr.mutable && child(expr.operand);
+      }
+      case 'unary': {
+        return expr.op !== '*' && child(expr.operand);
+      }
+      case 'struct': {
+        return !expr.base && expr.fields.every(({ value }) => child(value));
+      }
+      case 'call': {
+        return (
+          expr.callee.kind === 'path' &&
+          this.annotations.paths.get(expr.callee)?.kind === 'ctor' &&
+          expr.args.every(child)
+        );
+      }
+      case 'path': {
+        const resolved = this.annotations.paths.get(expr);
+        if (resolved?.kind === 'ctor' || resolved?.kind === 'builtinConst') return true;
+        const def = resolved?.kind === 'const' ? resolved.def : undefined;
+        if (!def?.ast.value || constants.has(def) || constants.size >= 64) return false;
+        constants.add(def);
+        const result = child(def.ast.value);
+        constants.delete(def);
+        return result;
+      }
+      default: {
+        return false;
+      }
+    }
   }
 
   /**
@@ -1154,23 +1225,22 @@ export class LoanBuilder {
     const captured: Place[] = [];
     context.reborrowedCaptures = new Set();
     for (const local of context.captures) {
+      const projections = context.projectedCaptures?.get(local) ?? [];
+      if (projections.length === 0) continue;
       const root = this.varOf(local);
       uses.push(root);
-      const projections = capturedPlaces(this.annotations, expr.body, local);
       const captureType = normalize(shallow(local.type));
-      const byValue = context.isMove || context.movedCaptures?.includes(local);
-      const reborrow = !byValue && captureType.kind === 'ref' && projections.every(({ proj }) => proj[0] === '*');
+      const reborrow =
+        captureType.kind === 'ref' && projections.every(({ proj, mode }) => mode !== 'value' && proj[0] === '*');
       if (reborrow) context.reborrowedCaptures.add(local);
-      for (const { proj, type: projectionType } of projections) {
-        // A closure that takes a capture by value takes the reference a deref goes through.
-        const cut = proj.indexOf('*');
-        const place: Place = { root, proj: byValue && cut !== -1 ? proj.slice(0, cut) : proj };
+      for (const { proj, type, mode } of projections) {
+        const place: Place = { root, proj };
         captured.push(reborrow ? { root, proj: [] } : place);
-        if (byValue) {
-          accesses.push({ place, kind: this.readKind(cut === -1 ? projectionType : captureType), span: expr.span });
+        if (mode === 'value') {
+          accesses.push({ place, kind: this.readKind(type), span: expr.span });
           continue;
         }
-        const mutable = body.mutatedCaptures.has(local);
+        const mutable = mode === 'mut';
         gens.push({ place, mutable, region: closureRegion, span: expr.span, point: -1 });
         accesses.push({ place, kind: mutable ? 'deep' : 'read', span: expr.span });
       }

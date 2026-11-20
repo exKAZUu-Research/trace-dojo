@@ -1,6 +1,6 @@
 import type { Span } from './ast';
 import type { Checker } from './checker';
-import { type CallSupport, type CompiledFn, Compiler } from './compiler';
+import { type CallSupport, type ClosureCapture, type CompiledFn, Compiler } from './compiler';
 import type { WriteChunk } from './debugText';
 import { Formatter, type Spec } from './fmt';
 import { normalize } from './infer';
@@ -84,8 +84,8 @@ export class Interpreter implements CallSupport {
     this.restoreOperations = setUserImpls({
       allocate: (count) => this.runtime.allocate(count),
       spend: (count) => this.runtime.spend(count),
-      eq: (type, a, b, rhs) => {
-        const found = this.userTraitMethod('PartialEq', type, 'eq', rhs);
+      eq: (method, type, a, b, rhs) => {
+        const found = this.userTraitMethod('PartialEq', type, method, rhs);
         if (!found) return;
         return this.callDispatched(found, type, [a, b]) as boolean;
       },
@@ -274,21 +274,20 @@ export class Interpreter implements CallSupport {
     return (fn as FnValue).call(args, callRow);
   }
 
-  makeClosure(compiled: CompiledFn, frame: Frame, captures: Place[], byValue: boolean[]): Value {
+  makeClosure(compiled: CompiledFn, frame: Frame, captures: ClosureCapture[]): Value {
     const { typeArgs } = frame;
+    const places = captures.map(({ place }) => place);
     const fn = new FnValue(
-      (args, callRow) => this.invoke(compiled, typeArgs, args, callRow, captures),
+      (args, callRow) => this.invoke(compiled, typeArgs, args, callRow, places),
       '{closure}',
-      captures
+      places
     );
-    fn.duplicate = (copy) => {
-      const places = captures.map((place, index) => {
-        if (!byValue[index]) return place;
-        const type = concreteType(compiled.info.captures[index].type, typeArgs);
-        return new CellPlace(copy(place.get(), type));
-      });
-      return this.makeClosure(compiled, frame, places, byValue) as FnValue;
-    };
+    fn.duplicate = (copy) =>
+      this.makeClosure(
+        compiled,
+        frame,
+        captures.map((capture) => capture.duplicate?.(copy) ?? capture)
+      ) as FnValue;
     return fn;
   }
 

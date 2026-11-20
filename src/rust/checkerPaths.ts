@@ -373,6 +373,7 @@ export function structExpr(c: Checker, expr: Extract<Expr, { kind: 'struct' }>, 
   const { def, variant, typeArgs } = resolveStructPath(c, expr.path, expr.span);
   const self = adt(def, typeArgs);
   if (expected) c.unifier.tryUnify(self, expected);
+  c.requireAdtArguments(def, typeArgs, expr.span);
   const subst = new Map(def.params.map((param, index) => [param, typeArgs[index]]));
   const variantDef = def.variants[variant];
   if (variantDef.shape === 'unit' && expr.fields.length > 0) {
@@ -388,7 +389,6 @@ export function structExpr(c: Checker, expr: Extract<Expr, { kind: 'struct' }>, 
     c.coerceAtReferenceSite(field.value, substitute(variantDef.fields[index].type, subst));
   }
   c.annotations.paths.set(expr, { kind: 'ctor', def, variant, typeArgs });
-  c.requireAdtArguments(def, typeArgs, expr.span);
   if (expr.base) {
     if (def.kind === 'enum') compileError(expr.base.span, '列挙子には .. を書けません。');
     for (const field of variantDef.fields) if (!seen.has(field.name)) checkFieldVisible(c, def, field, expr.base.span);

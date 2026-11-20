@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 552 -- One method per kind of item, type, and path.
+// code-gauge-allow-file fileNcss 556 -- One method per kind of item, type, and path.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type {
@@ -314,7 +314,6 @@ export class Converter extends ExpressionConverter {
     const bounds: BoundAst[] = [];
     for (const child of node.namedChildren) {
       if (isComment(child)) continue;
-      if (child.type === 'lifetime') continue;
       bounds.push(this.bound(child));
     }
     return bounds;
@@ -323,6 +322,10 @@ export class Converter extends ExpressionConverter {
   private bound(node: Node): BoundAst {
     const span = this.span(node);
     switch (node.type) {
+      case 'lifetime': {
+        if (node.text === "'static") return { kind: 'static', span };
+        return unavailable(span, `型のライフタイム境界（${node.text}）`);
+      }
       case 'type_identifier':
       case 'scoped_type_identifier':
       case 'generic_type': {
@@ -671,7 +674,7 @@ export class Converter extends ExpressionConverter {
     return syntaxError(span, '+ を含む impl や dyn を参照型の内側に書くときは、括弧で囲んでください。');
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Flattens bounds while separating trait and lifetime nodes.
+  // code-gauge-allow functionCognitiveComplexity 18 -- Flattens bounds while separating trait and lifetime nodes.
   private objectBoundType(
     kind: 'impl' | 'dyn',
     nodes: Node[],
@@ -687,7 +690,10 @@ export class Converter extends ExpressionConverter {
       } else bounds.push(this.bound(node));
     };
     for (const node of nodes) visit(node);
-    if (kind === 'impl') return { kind, bounds, span };
+    if (kind === 'impl') {
+      if (lifetimes.includes("'static")) bounds.push({ kind: 'static', span });
+      return { kind, bounds, span };
+    }
     if (lifetimes.length > 1) syntaxError(span, 'dyn の型のライフタイムは 1 個だけ書いてください。');
     return { kind, bounds, span, lifetime: lifetimes[0] };
   }

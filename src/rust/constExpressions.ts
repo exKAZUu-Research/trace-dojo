@@ -1,14 +1,17 @@
 import type { Expr, PathAst, TypeAst } from './ast';
 import { FLOAT_LIMITS, floatConstant } from './floatLimits';
-import { lookupScalarConstant, lookupType, lowerType, type TypeScope } from './items';
+import { Unifier } from './infer';
+import { lookupScalarConstant, lookupType, lookupValue, lowerType, type TypeScope } from './items';
 import { castValue, floatArith, intArith, wrap } from './ops';
 import { RustPanic } from './runtime';
 import {
+  adt,
   BOOL,
   CHAR,
   type ConstDef,
   F32,
   F64,
+  freshVar,
   INT_NAMES,
   intMax,
   intMin,
@@ -16,6 +19,8 @@ import {
   intType,
   REF_STR,
   sameType,
+  shallow,
+  substitute,
   type Type,
   USIZE,
 } from './types';
@@ -23,7 +28,12 @@ import { utf8Length } from './utf8';
 
 export function constInteger(expr: Expr, scope: TypeScope, expected = USIZE): bigint | undefined {
   try {
-    const scalar = constScalar(expr, scope, { visiting: new Set(), values: new Map(), hints: new WeakMap() }, expected);
+    const scalar = constScalar(
+      expr,
+      scope,
+      { visiting: new Set(), values: new Map(), hints: new WeakMap(), unifier: new Unifier() },
+      expected
+    );
     return scalar && sameType(scalar.type, expected) && typeof scalar.value === 'bigint' ? scalar.value : undefined;
   } catch (error) {
     if (error instanceof RustPanic) return undefined;
@@ -40,6 +50,7 @@ interface ConstEvaluation {
   visiting: Set<ConstDef>;
   values: Map<ConstDef, ConstScalar | undefined>;
   hints: WeakMap<Expr, Type | undefined>;
+  unifier: Unifier;
 }
 
 // code-gauge-allow functionCognitiveComplexity 17 -- Each scalar expression has its own constant evaluation rule.
@@ -97,10 +108,11 @@ function constLength(expr: Expr, scope: TypeScope, state: ConstEvaluation): bigi
       return BigInt(utf8Length(expr.value));
     }
     case 'array': {
-      return validLiteralArray(expr.elems, scope, state) ? BigInt(expr.elems.length) : undefined;
+      return constantArrayType(expr, scope, state, expr.ty) ? BigInt(expr.elems.length) : undefined;
     }
     case 'arrayRepeat': {
-      return validLiteralArray([expr.value], scope, state) ? lengthValue(expr.count, scope, state) : undefined;
+      const type = constantArrayType(expr, scope, state, expr.ty);
+      return type ? BigInt(type.len) : undefined;
     }
     case 'ref': {
       return !expr.mutable ? constLength(expr.operand, scope, state) : undefined;
@@ -114,15 +126,68 @@ function constLength(expr: Expr, scope: TypeScope, state: ConstEvaluation): bigi
   }
 }
 
-function validLiteralArray(items: Expr[], scope: TypeScope, state: ConstEvaluation): boolean {
-  const expected = items.map((item) => scalarHint(item, scope, state)).find((hint) => hint !== undefined);
-  let type = expected;
-  for (const item of items) {
-    const scalar = constScalar(item, scope, state, type);
-    if (!scalar || (type && !sameType(scalar.type, type))) return false;
-    type = scalar.type;
+function constantArrayType(
+  expr: Extract<Expr, { kind: 'array' | 'arrayRepeat' }>,
+  scope: TypeScope,
+  state: ConstEvaluation,
+  expected?: Type
+): Extract<Type, { kind: 'array' }> | undefined {
+  const entries = expr.kind === 'array' ? expr.elems : [expr.value];
+  const type = expected ? shallow(expected) : undefined;
+  const hint = type?.kind === 'array' ? type.elem : entries.map((item) => scalarHint(item, scope, state)).find(Boolean);
+  const elem = hint ?? freshVar();
+  for (const item of entries) {
+    const actual = constantValueType(item, scope, state, shallow(elem));
+    if (!actual || !state.unifier.tryUnify(actual, elem)) return;
   }
-  return true;
+  const length = expr.kind === 'array' ? BigInt(entries.length) : lengthValue(expr.count, scope, state);
+  if (length === undefined || length > BigInt(Number.MAX_SAFE_INTEGER)) return;
+  return { kind: 'array', len: Number(length), elem };
+}
+
+function constantValueType(expr: Expr, scope: TypeScope, state: ConstEvaluation, expected: Type): Type | undefined {
+  if (expr.kind === 'array' || expr.kind === 'arrayRepeat') return constantArrayType(expr, scope, state, expected);
+  if (expr.kind === 'tuple') {
+    const types = expr.elems.map((item, index) =>
+      constantValueType(item, scope, state, expected.kind === 'tuple' ? (expected.elems[index] ?? expected) : expected)
+    );
+    return types.every((type) => type !== undefined) ? { kind: 'tuple', elems: types } : undefined;
+  }
+  if (expr.kind === 'call' && expr.callee.kind === 'path') {
+    return constantConstructorType(expr.callee.path, expr.args, scope, state, expected);
+  }
+  if (expr.kind === 'path') {
+    const constructed = constantConstructorType(expr.path, [], scope, state, expected);
+    if (constructed) return constructed;
+  }
+  return constScalar(expr, scope, state, expected)?.type;
+}
+
+function constantConstructorType(
+  path: PathAst,
+  fields: Expr[],
+  scope: TypeScope,
+  state: ConstEvaluation,
+  expected: Type
+): Type | undefined {
+  const [segment] = path.segments;
+  if (path.segments.length !== 1) return;
+  const binding = lookupValue(scope.module, segment.name, path.span);
+  if (binding?.kind !== 'ctor') return;
+  const { def, variant } = binding;
+  const declaration = def.variants[variant];
+  if (declaration.shape === 'named' || declaration.fields.length !== fields.length) return;
+  const written = segment.args?.map((arg) => lowerType(arg, scope));
+  if (written && written.length !== def.params.length) return;
+  const args =
+    written ?? (expected.kind === 'adt' && expected.def === def ? expected.args : def.params.map(() => freshVar()));
+  const subst = new Map(def.params.map((param, index) => [param, args[index]]));
+  for (const [index, field] of declaration.fields.entries()) {
+    const type = shallow(substitute(field.type, subst));
+    const actual = constantValueType(fields[index], scope, state, type);
+    if (!actual || !state.unifier.tryUnify(type, actual)) return;
+  }
+  return adt(def, args);
 }
 
 function lengthValue(expr: Expr, scope: TypeScope, state: ConstEvaluation): bigint | undefined {

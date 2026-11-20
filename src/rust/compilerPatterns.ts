@@ -3,6 +3,7 @@ import type { Expr, Pattern } from './ast';
 import type { Compiler } from './compiler';
 import { derefAll, isPlaceExpr, isRefType } from './compilerCommon';
 import { normalize } from './infer';
+import { projectedBindings } from './loanCaptures';
 import { copyValue, needsCopy, valuesEqual } from './ops';
 import { type Frame, MOVED } from './runtime';
 import { runtimeType } from './runtimeTypes';
@@ -49,6 +50,7 @@ export function compileMatcher(c: Compiler, pattern: Pattern): Matcher {
 }
 
 function compileProbe(c: Compiler, pattern: Pattern): PatternProbe {
+  if (projectedBindings(pattern, c.annotations)?.length === 0) return () => true;
   const type = resolve(pattern.ty ?? { kind: 'tuple', elems: [] }, true);
   switch (pattern.kind) {
     case 'wild': {

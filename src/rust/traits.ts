@@ -47,7 +47,8 @@ export class TraitSolver {
       if (trait.builtin === 'Sized') return 'yes';
       const answer = this.boundAnswer(t.param.bounds, ref, t);
       if (answer !== 'no') return answer;
-      if (this.userImpl(trait, t, ref.args)) return 'yes';
+      const implementation = this.implAnswer(trait, t, ref.args);
+      if (implementation !== 'no') return implementation;
       return trait.builtin && PARAMETER_BLANKET_TRAITS.has(trait.builtin) ? this.builtinOnly(t, ref) : 'no';
     }
     if (t.kind === 'adt' && isPseudo(t.def)) return this.pseudoImplements(t, ref);
@@ -56,8 +57,8 @@ export class TraitSolver {
       return answer === 'no' ? this.builtinOnly(t, ref) : answer;
     }
     if (ref.fnSig) return this.closureImplements(t, ref);
-    const user = this.userImpl(trait, t, ref.args);
-    if (user) return 'yes';
+    const implementation = this.implAnswer(trait, t, ref.args);
+    if (implementation !== 'no') return implementation;
     if (trait.builtin) return builtinImplements(this, t, ref);
     return 'no';
   }
@@ -228,32 +229,40 @@ export class TraitSolver {
     return 'no';
   }
 
-  /** The user's impl of a trait for a type, with the impl's type parameters bound. */
-  userImpl(trait: TraitDef, type: Type, args: Type[] = []): { impl: ImplDef; subst: Subst } | undefined {
-    if (this.implGoals.length >= 64 || this.implGoals.some((goal) => matchesImplGoal(goal, trait, type, args))) return;
+  private implAnswer(trait: TraitDef, type: Type, args: Type[]): Answer {
+    if (this.implGoals.length >= 64 || this.implGoals.some((goal) => matchesImplGoal(goal, trait, type, args))) {
+      return 'no';
+    }
     this.implGoals.push({ trait, type, args });
     try {
-      return this.findImpl(trait, type, args);
+      return this.findImplAnswer(trait, type, args);
     } finally {
       this.implGoals.pop();
     }
   }
 
-  private findImpl(trait: TraitDef, type: Type, args: Type[]): { impl: ImplDef; subst: Subst } | undefined {
+  private findImplAnswer(trait: TraitDef, type: Type, args: Type[]): Answer {
+    let answer: Answer = 'no';
     for (const impl of this.program.impls) {
       if (impl.trait?.trait !== trait) continue;
-      const subst = this.matchImpl(impl, type, args);
-      if (subst) return { impl, subst };
+      const snapshot = this.unifier.snapshot();
+      const matched = this.matchImplAnswer(impl, type, args);
+      if (matched?.answer === 'yes') return 'yes';
+      if (matched?.answer === 'unknown') answer = 'unknown';
+      this.unifier.rollback(snapshot);
     }
-    return undefined;
+    return answer;
   }
 
   /**
    * Matches an impl's self type (and trait arguments) against a type, binding the impl's parameters to fresh
    * variables; the bindings stay when it matches, so that the caller learns the arguments.
    */
-  // code-gauge-allow functionCognitiveComplexity 17 -- Checks the impl substitutions and their trait obligations as one transaction.
   matchImpl(impl: ImplDef, type: Type, traitArgs: Type[] = []): Subst | undefined {
+    return this.matchImplAnswer(impl, type, traitArgs)?.subst;
+  }
+
+  private matchImplAnswer(impl: ImplDef, type: Type, traitArgs: Type[]): { subst: Subst; answer: Answer } | undefined {
     const subst: Subst = new Map(impl.params.map((param) => [param, freshVar()]));
     const snapshot = this.unifier.snapshot();
     const selfType = substitute(impl.selfType, subst);
@@ -270,24 +279,28 @@ export class TraitSolver {
         }
       }
     }
+    const answer = this.implBounds(impl, subst);
+    if (answer === 'no') {
+      this.unifier.rollback(snapshot);
+      return undefined;
+    }
+    return { subst, answer };
+  }
+
+  private implBounds(impl: ImplDef, subst: Subst): Answer {
+    let answer: Answer = 'yes';
+    const sized = { trait: this.program.traitDef('Sized'), args: [] };
     for (const param of impl.params) {
-      const bound = subst.get(param) as Type;
-      if (
-        !(impl.module as Module).isStd &&
-        this.implements(bound, { trait: this.program.traitDef('Sized'), args: [] }) === 'no'
-      ) {
-        this.unifier.rollback(snapshot);
-        return undefined;
-      }
-      for (const ref of param.bounds) {
-        const answer = this.implements(bound, substituteTraitRef(ref, subst));
-        if (answer === 'no') {
-          this.unifier.rollback(snapshot);
-          return undefined;
-        }
+      const type = subst.get(param) as Type;
+      const bounds = param.bounds.map((ref) => substituteTraitRef(ref, subst));
+      if (!(impl.module as Module).isStd) bounds.push(sized);
+      for (const bound of bounds) {
+        const result = this.implements(type, bound);
+        if (result === 'no') return 'no';
+        if (result === 'unknown') answer = 'unknown';
       }
     }
-    return subst;
+    return answer;
   }
 
   isCopy(type: Type): boolean {

@@ -1,6 +1,7 @@
 import type { PathRes, ReceiverAdjust } from './annotations';
 import type { Expr } from './ast';
 import type { Checker } from './checker';
+import { closureSignature } from './checkerClosures';
 import {
   applyWrittenFnArgs,
   checkMethodVisible,
@@ -116,8 +117,8 @@ function callCtor(
       `${variant.name} の引数の数が合いません（${params.length} 個ですが、${expr.args.length} 個あります）。`
     );
   }
-  checkArgs(c, expr.args, params, expectations(c, self, params, expected));
   c.requireAdtArguments(res.def, res.typeArgs, expr.span);
+  checkArgs(c, expr.args, params, expectations(c, self, params, expected));
   expr.callee.ty = { kind: 'fn', params, ret: self };
   return self;
 }
@@ -185,23 +186,6 @@ function coerceClosure(c: Checker, arg: Expr, type: Type, param: Type): void {
     return;
   }
   c.coerce(arg, type, param);
-}
-
-/** The signature a closure passed for a parameter takes: from the parameter's `Fn` bound. */
-function closureSignature(c: Checker, param: Type): { params: Type[]; ret: Type } | undefined {
-  const p = shallow(param);
-  if (p.kind === 'var') {
-    const bounds = c.varBounds.get(p.v) ?? [];
-    const fnBound = bounds.find((bound) => bound.fnSig);
-    return fnBound?.fnSig;
-  }
-  if (p.kind === 'param') return p.param.bounds.find((bound) => bound.fnSig)?.fnSig;
-  if (p.kind === 'fn') return { params: p.params, ret: p.ret };
-  if (p.kind === 'adt' && p.def.builtin === 'Box') {
-    const inner = shallow(p.args[0]);
-    if (inner.kind === 'dyn' && inner.trait.fnSig) return inner.trait.fnSig;
-  }
-  return undefined;
 }
 
 /** Calls a value: a closure, a function, or a value whose type is bounded by a closure trait. */

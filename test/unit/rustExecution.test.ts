@@ -5062,3 +5062,264 @@ fn main() {
       'le1:2 ge3:2 3\nle5:1 le5:3 le3:2 le1:3 5\nlt2:1 [1, 2, 3]\nlt2:1 false\ncmp2:1 Less\nlt3:1 lt1:2 lt3:2 [3, 2, 1]\n',
   });
 });
+
+test('lints only reachable let-condition and let-else bodies', () => {
+  const program = `fn main() {
+    let optional: Option<i32> = None;
+    while let Some(_) = optional { let a = [1, 2]; let _x = a[3]; }
+    while let Some(_) = None::<i32> { let a = [1, 2]; let _x = a[3]; }
+    let n = 3;
+    while let 4 = n { let a = [1, 2]; let _x = a[3]; }
+    if let Some(_) = optional { let a = [1, 2]; let _x = a[3]; }
+    let Some(_) = Some(3) else { let a = [1, 2]; let _x = a[3]; return; };
+    println!("alive");
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'alive\n' });
+  const reached = program.replace('while let 4 = n', 'while let 3 = n');
+  expect(executeProgram('rust', reached)).toMatchObject({ kind: 'compileError' });
+});
+
+test('dispatches PartialEq inequality independently of equality', () => {
+  const program = `struct Item(i32);
+impl PartialEq for Item {
+    fn eq(&self, other: &Self) -> bool { print!("eq "); self.0 == other.0 }
+    fn ne(&self, other: &Self) -> bool { print!("ne "); self.0 != other.0 }
+}
+struct DefaultNe(i32);
+impl PartialEq for DefaultNe {
+    fn eq(&self, other: &Self) -> bool { print!("default "); self.0 == other.0 }
+}
+fn different<T: PartialEq>(a: T, b: T) -> bool { a != b }
+fn main() {
+    println!("{}", Item(1) != Item(2));
+    println!("{}", different(Item(1), Item(1)));
+    println!("{}", Item(1) == Item(2));
+    println!("{}", DefaultNe(1) != DefaultNe(2));
+    println!("{}", Box::new(Item(1)) != Box::new(Item(2)));
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'ne true\nne false\neq false\ndefault true\nne true\n',
+  });
+});
+
+test('limits a temporary method receiver borrow to its statement or block tail', () => {
+  const working = rustMain(`println!("{}", String::from("hello").as_str());
+    println!("{:?}", vec![1, 2].as_slice());
+    let owner = String::from("live");
+    let borrowed = owner.as_str();
+    println!("{}", borrowed);
+    let extended = &String::from("extended");
+    println!("{}", extended);`);
+  expect(executeProgram('rust', working)).toMatchObject({
+    kind: 'executed',
+    stdout: 'hello\n[1, 2]\nlive\nextended\n',
+  });
+  for (const body of [
+    'let r = String::from("hello").as_str(); println!("{}", r);',
+    'let r = vec![1, 2, 3].as_slice(); println!("{:?}", r);',
+    'println!("{}", { String::from("hello").as_str() });',
+    'let r = || String::from("hello").as_str(); println!("{}", r());',
+  ]) {
+    expect(executeProgram('rust', rustMain(body))).toMatchObject({ kind: 'compileError' });
+  }
+});
+
+test('rejects unsized fields in enums and before the final field of a struct', () => {
+  for (const item of [
+    'enum E { V(dyn Shape) }',
+    'enum E { V { field: dyn Shape } }',
+    'enum E { V(str) }',
+    'enum E { V([dyn Shape; 2]) }',
+    'struct S { first: dyn Shape, last: i32 }',
+    'struct S { array: [dyn Shape; 2] }',
+  ]) {
+    expect(executeProgram('rust', rustMain('', `trait Shape {} ${item}`))).toMatchObject({ kind: 'compileError' });
+  }
+  expect(executeProgram('rust', rustMain('', 'trait Shape {} struct S { tail: dyn Shape }'))).toMatchObject({
+    kind: 'executed',
+  });
+});
+
+test('requires irrefutable patterns in explicit and inferred closure parameters', () => {
+  for (const body of [
+    'let f = |Some(x): Option<i32>| x; println!("{}", f(Some(3)));',
+    'let f = |true: bool| 1; println!("{}", f(false));',
+    'let f = |Some(x)| x; println!("{}", f(Some(3)));',
+  ]) {
+    expect(executeProgram('rust', rustMain(body))).toMatchObject({ kind: 'compileError' });
+  }
+  expect(executeProgram('rust', rustMain('let f = |(a, b)| a + b; println!("{}", f((1, 2)));'))).toMatchObject({
+    kind: 'executed',
+    stdout: '3\n',
+  });
+});
+
+test('takes closure parameter types from callable object and field bounds', () => {
+  const program = `use std::collections::HashMap;
+struct Cacher<T: Fn(u32) -> u32> { calculation: T }
+struct Named<F> where F: Fn(&str) -> usize { f: F }
+struct Boxed { f: Box<dyn Fn(&str) -> usize> }
+fn main() {
+    let c = Cacher { calculation: |n| n.pow(2) };
+    let named = Named { f: |s| s.len() };
+    let boxed = Boxed { f: Box::new(|s| s.len()) };
+    let f: &dyn Fn(&Vec<i32>) -> usize = &|values| values.len();
+    let add: Box<dyn Fn((i32, i32)) -> i32> = Box::new(|p| p.0 + p.1);
+    let mut callbacks: HashMap<&str, Box<dyn Fn(&[i32]) -> i32>> = HashMap::new();
+    callbacks.insert("sum", Box::new(|values| values.iter().sum()));
+    println!("{} {} {} {} {} {}", (c.calculation)(3), (named.f)("ab"), (boxed.f)("abc"),
+        f(&vec![1]), add((1, 2)), callbacks["sum"](&[2, 3]));
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '9 2 3 1 3 5\n' });
+});
+
+test('retains static callback bounds through generic parameters and trait objects', () => {
+  const program = `fn named<F: Fn(i32) -> i32 + 'static>(f: F) -> Box<dyn Fn(i32) -> i32> { Box::new(f) }
+fn after<F>(f: F) -> Box<dyn Fn(i32) -> i32> where F: Fn(i32) -> i32 + 'static { Box::new(f) }
+fn anonymous(f: impl Fn(i32) -> i32 + 'static) -> Box<dyn Fn(i32) -> i32> { Box::new(f) }
+fn main() {
+    let n = 2;
+    let f = named(move |x| x + n);
+    let g = after(|x| x * 2);
+    let h = anonymous(|x| x - 1);
+    println!("{} {} {}", f(3), g(3), h(3));
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '5 6 2\n' });
+  expect(executeProgram('rust', program.replace('named(move |x|', 'named(|x|'))).toMatchObject({
+    kind: 'compileError',
+  });
+  expect(executeProgram('rust', program.replace(" + 'static>(f:", '>(f:'))).toMatchObject({ kind: 'compileError' });
+});
+
+test('sizes arrays from constant aggregates regardless of scalar or aggregate element shape', () => {
+  const program = rustMain(`let a: [i32; [[1, 2], [3, 4]].len()] = [0; 2];
+    let b = [0; [Some(1), None].len()];
+    let c: [i32; [Some(1), None].len()] = [0; 2];
+    println!("{} {} {}", a.len(), b.len(), c.len());`);
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '2 2 2\n' });
+  const invalid = rustMain('let _: [i32; [Some(1), Some(false)].len()] = [0; 2];');
+  expect(executeProgram('rust', invalid)).toMatchObject({ kind: 'compileError' });
+});
+
+test('keeps prior dbg operands live across later evaluation and formatting', () => {
+  const program = `use std::fmt;
+struct Holder { t: Turtle }
+impl fmt::Debug for Holder {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let observer = Turtle::new(0, 0);
+        println!("{}", observer.can_move_forward());
+        write!(f, "Holder")
+    }
+}
+fn main() {
+    let a = Holder { t: Turtle::new(0, 1) };
+    let b = Turtle::new(0, 0);
+    let pair = dbg!(a, b.can_move_forward());
+    println!("{}", pair.1);
+    let mut a = pair.0;
+    a.t.forward();
+}`;
+  const expected = {
+    stdout: 'false\nfalse\n',
+    finalTurtles: [
+      { x: 0, y: 2 },
+      { x: 0, y: 0 },
+    ],
+  };
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', ...expected });
+  expect(traceProgram('rust', program, program)).toMatchObject(expected);
+});
+
+test('rejects unresolved unary minus operands before code generation', () => {
+  for (const arg of ['true', '1u32', '1i32']) {
+    expect(executeProgram('rust', rustMain(`let neg = |x| -x; println!("{}", neg(${arg}));`))).toMatchObject({
+      kind: 'compileError',
+    });
+  }
+  expect(executeProgram('rust', rustMain('let neg = |x: i32| -x; println!("{} {}", neg(1), -2);'))).toMatchObject({
+    kind: 'executed',
+    stdout: '-1 -2\n',
+  });
+});
+
+test('formats UTF-8 errors and their fields using pretty Debug', () => {
+  const program = rustMain(`println!("{:#?}", std::str::from_utf8(&[255u8]));
+    println!("{:#?}", String::from_utf8(vec![255u8]));`);
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: `Err(
+    Utf8Error {
+        valid_up_to: 0,
+        error_len: Some(
+            1,
+        ),
+    },
+)
+Err(
+    FromUtf8Error {
+        bytes: [
+            255,
+        ],
+        error: Utf8Error {
+            valid_up_to: 0,
+            error_len: Some(
+                1,
+            ),
+        },
+    },
+)
+`,
+  });
+});
+
+test('applies capture modes separately to moved and borrowed fields', () => {
+  const program = `struct Pair { a: String, b: String }
+fn main() {
+    let p = Pair { a: String::from("a"), b: String::from("b") };
+    let f = || { drop(p.a); println!("{}", p.b); };
+    f();
+    println!("{}", p.b);
+    let mut q = (String::from("x"), String::from("y"));
+    let g = || { drop(q.0); q.1.push('!'); };
+    g();
+    println!("{}", q.1);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'b\nb\ny!\n' });
+  const conflicting = program.replace('    g();', "    q.1.push('?');\n    g();");
+  expect(executeProgram('rust', conflicting)).toMatchObject({ kind: 'compileError' });
+});
+
+test('leaves ignored destructuring fields outside a closure environment', () => {
+  const program = `struct Pair { a: String, b: String }
+fn size<T>(_: &T) -> usize { std::mem::size_of::<T>() }
+fn main() {
+    let t = (String::from("ok"), [0u8; 64]);
+    let no_tuple = move || { let (_, _) = t; };
+    let p = Pair { a: String::from("still owned"), b: String::new() };
+    let no_struct = move || { let Pair { a: _, b: _ } = p; };
+    println!("{} {} {} {}", size(&no_tuple), size(&no_struct), t.0, p.a);
+    drop(t);
+    drop(p);
+    no_tuple();
+    no_struct();
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '0 0 ok still owned\n' });
+});
+
+test('checks conditional impl bounds again when inference fills the generic arguments', () => {
+  const program = `trait Marker {}
+struct Wrap<T>(T);
+struct NoClone;
+impl<T: Clone> Marker for Wrap<T> {}
+fn check<T: Marker>(_: &T) {}
+fn main() {
+    let mut w = Wrap(Vec::new());
+    check(&w);
+    w.0.push(NoClone);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'compileError' });
+  expect(executeProgram('rust', program.replace('struct NoClone;', '#[derive(Clone)] struct NoClone;'))).toMatchObject({
+    kind: 'executed',
+  });
+});

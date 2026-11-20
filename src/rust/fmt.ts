@@ -668,8 +668,36 @@ function errorDebug(builtin: string, value: Value, indent: number | undefined): 
         number,
         number | undefined,
       ];
-      const error = `Utf8Error { valid_up_to: ${validUpTo}, error_len: ${errorLen === undefined ? 'None' : `Some(${errorLen})`} }`;
-      return bytes ? `FromUtf8Error { bytes: [${bytes.join(', ')}], error: ${error} }` : error;
+      const error: DebugPart = (depth) =>
+        structText(
+          'Utf8Error',
+          [
+            ['valid_up_to', () => String(validUpTo)],
+            [
+              'error_len',
+              (inner) => (errorLen === undefined ? 'None' : tupleText('Some', [() => String(errorLen)], inner)),
+            ],
+          ],
+          depth
+        );
+      if (!bytes) return error(indent);
+      return structText(
+        'FromUtf8Error',
+        [
+          [
+            'bytes',
+            (depth) =>
+              list(
+                '[',
+                ']',
+                bytes.map((byte) => () => String(byte)),
+                depth
+              ),
+          ],
+          ['error', error],
+        ],
+        indent
+      );
     }
     default: {
       return builtin;

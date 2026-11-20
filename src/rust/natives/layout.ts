@@ -65,7 +65,8 @@ export function layoutOf(type: Type): Layout {
       return t.item ? { size: 0, align: 1 } : POINTER;
     }
     case 'closure': {
-      return structLayout((t.closure.layoutCaptures ?? []).map(layoutOf));
+      const captures = t.closure.captures ?? [];
+      return structLayout(captures.map(({ type, mode }) => (mode === 'value' ? layoutOf(type) : pointerTo(type))));
     }
     case 'array': {
       const elem = layoutOf(t.elem);

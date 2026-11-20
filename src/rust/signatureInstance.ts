@@ -143,13 +143,17 @@ export class SignatureInstance {
    * Relates the type parameters as their bounds say: `B: FromIterator<T>` builds a `B` of `T`s, and a closure
    * parameter `F: FnMut(T) -> B` makes `B`s of `T`s as its summary says.
    */
-  // code-gauge-allow functionCognitiveComplexity 19 -- One case per kind of bound.
+  // code-gauge-allow functionCognitiveComplexity 26 -- One case per kind of bound.
   relateBounds(applyClosure: (callee: Layout, args: Layout[], result: Layout, higherRanked: boolean[]) => void): void {
     const { fn } = this;
     for (const param of fn.params) {
       const layout = this.params.get(param) as Layout;
       const extra = (fn.extraBounds ?? []).filter((bound) => bound.param === param).map((bound) => bound.bound);
       for (const bound of [...param.bounds, ...extra]) {
+        if (bound.trait.builtin === 'Static') {
+          for (const region of regionsOf(layout)) this.outlives(region, this.staticRegion());
+          continue;
+        }
         if (bound.fnSig) {
           const args = bound.fnSig.params.map((type) => instantiate(type, this.subst, this.fresh));
           const { ret } = bound.fnSig;

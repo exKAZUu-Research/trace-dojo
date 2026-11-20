@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 797 -- The checker core owns body, entry point, and type obligations.
+// code-gauge-allow-file fileNcss 807 -- The checker core owns body, entry point, and type obligations.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ExecutionBudget } from '../interpreter/limits';
 import { Annotations, type Coercion, type FnContext, type LocalVar, type PathRes } from './annotations';
@@ -137,12 +137,16 @@ export class Checker {
     this.checkMain();
   }
 
-  // code-gauge-allow functionCognitiveComplexity 22 -- Checks each kind of declared item in its own type scope.
+  // code-gauge-allow functionCognitiveComplexity 28 -- Checks each kind of declared item in its own type scope.
   private checkDeclaredTypes(firstAdt: number, firstFn: number, firstConst: number, firstImpl: number): void {
     for (const def of this.program.adts.slice(firstAdt)) {
       if ((def.module as Module | undefined)?.isStd) continue;
       for (const variant of def.variants) {
-        for (const field of variant.fields) this.checkWrittenType(field.type, field.span);
+        for (const [index, field] of variant.fields.entries()) {
+          const sized = def.kind === 'enum' || index + 1 < variant.fields.length;
+          if (sized) this.checkSizedWrittenType(field.type, field.span);
+          else this.checkWrittenType(field.type, field.span);
+        }
       }
     }
     for (const fn of this.program.fns.slice(firstFn)) {
@@ -483,7 +487,6 @@ export class Checker {
     }
   }
 
-  // code-gauge-allow functionNcss 31 -- Binds signature types before checking the body and its obligations.
   private checkFnBody(def: FnDef, item: FnItem, body: Block): void {
     const module = def.module as Module;
     const typeParams = new Map(def.params.map((param) => [param.name, param]));
@@ -989,10 +992,11 @@ export class Checker {
    * Rejects what rustc rejects in a written type: a trait object of a trait that methods returning `Self` or taking
    * type parameters make not dyn compatible (E0038), and an unsized type (`dyn T`, `str`) as a type argument (E0277).
    */
-  // code-gauge-allow functionCognitiveComplexity 18 -- Checks type well-formedness at each nested written type.
+  // code-gauge-allow functionCognitiveComplexity 19 -- Checks type well-formedness at each nested written type.
   private checkWrittenType(type: Type, span: Span): void {
     const t = shallow(type);
     if (t.kind === 'dyn') checkDynCompatible(t.trait.trait, span);
+    if (t.kind === 'array') this.requireTrait(t.elem, 'Sized', span);
     if (t.kind === 'adt') {
       for (const [arg, bound] of adtArgumentBounds(t.def, t.args)) {
         if (this.solver.implements(arg, bound) === 'no') {
@@ -1143,11 +1147,7 @@ export class Checker {
     for (const param of fn.params) {
       const arg = subst.get(param) as Type;
       const bounds = param.bounds.map((bound) => substituteTraitRef(bound, subst));
-      const argType = shallow(arg);
-      if (argType.kind === 'var') {
-        const existing = this.varBounds.get(argType.v) ?? [];
-        this.varBounds.set(argType.v, [...existing, ...bounds]);
-      }
+      this.recordTypeBounds(arg, bounds);
       if (span) {
         for (const bound of bounds) {
           this.obligations.push({ type: arg, ref: bound, span });
@@ -1173,7 +1173,17 @@ export class Checker {
 
   requireAdtArguments(def: AdtDef, args: Type[], span: Span): void {
     if (!(def.module as Module | undefined)?.isStd) for (const arg of args) this.requireTrait(arg, 'Sized', span);
-    for (const [arg, bound] of adtArgumentBounds(def, args)) this.require(arg, bound, span);
+    for (const [arg, bound] of adtArgumentBounds(def, args)) {
+      this.recordTypeBounds(arg, [bound]);
+      this.require(arg, bound, span);
+    }
+  }
+
+  private recordTypeBounds(type: Type, bounds: TraitRef[]): void {
+    const t = shallow(type);
+    if (t.kind !== 'var' || bounds.length === 0) return;
+    const current = this.varBounds.get(t.v) ?? [];
+    this.varBounds.set(t.v, [...current, ...bounds]);
   }
 }
 

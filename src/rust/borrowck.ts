@@ -16,7 +16,7 @@ import {
 import { normalize } from './infer';
 import { compileError } from './items';
 import { LoanBuilder } from './loanBuilder';
-import { capturedStoragePlaces } from './loanCaptures';
+import { captureStoragePlaces } from './loanCaptures';
 import type { LoanError } from './loanGraph';
 import { typeAfter } from './regions';
 import type { TraitSolver } from './traits';
@@ -506,10 +506,11 @@ export class BorrowChecker {
     for (const local of info.context.captures) {
       const varState = current.get(local);
       if (!varState) continue;
-      const byValue = info.context.isMove || info.context.movedCaptures?.includes(local);
-      for (const [path, type] of this.capturedPaths(expr.body, local)) {
+      const captures = captureStoragePlaces(info.context.projectedCaptures?.get(local) ?? [], local.type);
+      for (const { proj, type, mode } of captures) {
+        const path = proj.length === 0 ? '' : `.${proj.join('.')}`;
         this.checkUsable(local, varState, expr.span, 'read', path);
-        if (byValue && local.mode === 'move' && !this.isCopy(type)) {
+        if (mode === 'value' && local.mode === 'move' && !this.isCopy(type)) {
           current = this.markMoved(current, { root: local, path, indirect: false }, expr.span, false);
         }
       }
@@ -602,13 +603,6 @@ export class BorrowChecker {
     }
     if (place.root.mode !== 'move') return state;
     return this.markMoved(state, place, expr.span, false);
-  }
-
-  private capturedPaths(body: Expr, local: LocalVar): [string, Type][] {
-    return capturedStoragePlaces(this.annotations, body, local).map(({ proj, type }) => [
-      proj.length === 0 ? '' : `.${proj.join('.')}`,
-      type,
-    ]);
   }
 
   /** Whether an expression is a capture, or a field of one, that the closure being checked owns. */
@@ -785,8 +779,6 @@ export class BorrowChecker {
   }
 
   /** The place an expression denotes, rooted in a variable of the function, or undefined for other expressions. */
-  // code-gauge-allow functionCognitiveComplexity 18 -- Follows the borrow checking rules case by case.
-  // code-gauge-allow functionNcss 31 -- Follows the borrow checking rules case by case.
   private placeOf(expr: Expr): PlacePath | undefined {
     switch (expr.kind) {
       case 'path': {

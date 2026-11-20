@@ -4,7 +4,7 @@ import type { Compiler, Eval } from './compiler';
 import { derefAll, evaluateValues, isStringType, stringish, stripRefs, withEvaluatedValues } from './compilerCommon';
 import { normalize } from './infer';
 import { btreeSetOp, hashSetMembers, type SetOp } from './natives/setOps';
-import { cloneValue, floatArith, intArith, overflow, testPartialOrder, valuesEqual, wrap } from './ops';
+import { cloneValue, floatArith, intArith, overflow, testPartialOrder, valuesEqual, valuesUnequal, wrap } from './ops';
 import type { Frame } from './runtime';
 import { runtimeType } from './runtimeTypes';
 import { type IntName, resolve, shallow, type Type } from './types';
@@ -75,9 +75,8 @@ function comparison(expr: ExprOf<'binary'>, left: Eval, right: Eval): Eval {
     withEvaluatedValues(frame, operands, ([a, b]) => {
       const type = compareType(frame);
       const rightType = rhs(frame);
-      return ordering
-        ? testPartialOrder(ordering, type, a, b, rightType)
-        : valuesEqual(type, a, b, rightType) === (op === '==');
+      if (ordering) return testPartialOrder(ordering, type, a, b, rightType);
+      return (op === '==' ? valuesEqual : valuesUnequal)(type, a, b, rightType);
     });
 }
 

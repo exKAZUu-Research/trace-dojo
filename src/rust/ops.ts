@@ -1,5 +1,5 @@
 import type { Span } from './ast';
-// code-gauge-allow-file fileNcss 504 -- Keeps type-directed arithmetic, comparison, and copying with their shared runtime hooks.
+// code-gauge-allow-file fileNcss 516 -- Keeps type-directed arithmetic, comparison, and copying with their shared runtime hooks.
 import { bigintToF32 } from './floatFormat';
 import { normalize } from './infer';
 import { RustPanic } from './runtime';
@@ -24,7 +24,7 @@ export interface UserImpls {
   /** Counts the elements a clone makes against the run's limit. */
   allocate(count: number): void;
   spend(count: number): void;
-  eq?(type: Type, a: Value, b: Value, rhs: Type): boolean | undefined;
+  eq?(method: 'eq' | 'ne', type: Type, a: Value, b: Value, rhs: Type): boolean | undefined;
   order?(method: OrderMethod, type: Type, a: Value, b: Value, rhs: Type): boolean | undefined;
   cmp?(type: Type, a: Value, b: Value, partial: boolean, rhs?: Type): { order: number | undefined } | undefined;
   clone?(type: Type, value: Value): { value: Value } | undefined;
@@ -226,7 +226,7 @@ export function valuesEqual(type: Type, a: Value, b: Value, rhs: Type = type): b
   const y = deref(b);
   const right = derefType(rhs);
   if (t.kind === 'adt' || right.kind === 'adt') {
-    const user = hooks?.eq?.(t, x, y, right);
+    const user = hooks?.eq?.('eq', t, x, y, right);
     if (user !== undefined) return user;
   }
   switch (t.kind) {
@@ -256,6 +256,21 @@ export function valuesEqual(type: Type, a: Value, b: Value, rhs: Type = type): b
       return x === y;
     }
   }
+}
+
+export function valuesUnequal(type: Type, a: Value, b: Value, rhs: Type = type): boolean {
+  const t = derefType(type);
+  const right = derefType(rhs);
+  const leftValue = deref(a);
+  const rightValue = deref(b);
+  if (t.kind === 'adt' || right.kind === 'adt') {
+    const user = hooks?.eq?.('ne', t, leftValue, rightValue, right);
+    if (user !== undefined) return user;
+    if (t.kind === 'adt' && t.def.builtin === 'Box' && right.kind === 'adt' && right.def.builtin === 'Box') {
+      return valuesUnequal(t.args[0], leftValue, rightValue, right.args[0]);
+    }
+  }
+  return !valuesEqual(t, leftValue, rightValue, right);
 }
 
 // code-gauge-allow functionCognitiveComplexity 27 -- One case per kind of type.

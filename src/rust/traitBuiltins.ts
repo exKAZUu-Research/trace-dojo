@@ -108,6 +108,7 @@ export const RANGE_TYPES = new Set([
 
 const RULES: Record<string, Rule> = {
   Sized: sized,
+  Static: () => 'yes',
   Send: () => 'yes',
   Sync: () => 'yes',
   Copy: copy,

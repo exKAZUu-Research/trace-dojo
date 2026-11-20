@@ -137,6 +137,15 @@ export class Program {
   readonly prelude = new Map<string, string[]>();
   readonly builtinAdts = new Map<BuiltinAdt, AdtDef>();
   readonly builtinTraits = new Map<string, TraitDef>();
+  readonly staticBound: TraitDef = {
+    name: "'static",
+    path: "'static",
+    params: [],
+    self: newTypeParam('Self'),
+    methods: new Map(),
+    supertraits: [],
+    builtin: 'Static',
+  };
   /** The shapes of iterators (`std::iter::shape`), which stand for std's iterator types, by name. */
   readonly shapes = new Map<string, AdtDef>();
   /** The bodies to check after every item's signature is known. */
@@ -1455,6 +1464,7 @@ function assocItem(param: TypeParam, scope: TypeScope): Type | undefined {
 
 function describeBound(bound: BoundAst): string {
   if (bound.kind === 'fn') return bound.trait;
+  if (bound.kind === 'static') return "'static";
   return bound.path.segments.map((segment) => segment.name).join('::');
 }
 
@@ -1549,6 +1559,7 @@ function lowerAdtPath(path: PathAst, def: AdtDef, args: Type[], scope: TypeScope
 
 /** Lowers a bound on `self`, which closure traits complete with their signature. */
 export function lowerBound(bound: BoundAst, scope: TypeScope, self: Type | undefined): TraitRef {
+  if (bound.kind === 'static') return { trait: scope.module.program.staticBound, args: [] };
   if (bound.kind === 'fn') {
     const trait = scope.module.program.traitDef(bound.trait);
     return {

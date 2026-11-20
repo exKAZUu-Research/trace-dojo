@@ -76,7 +76,7 @@ export function checkUnary(c: Checker, expr: Extract<Expr, { kind: 'unary' }>, e
     compileError(expr.span, `符号のない整数（${t.name}）に - は使えません。`);
   }
   if (t.kind === 'int' || t.kind === 'float' || (t.kind === 'var' && t.v.literal)) return t;
-  if (t.kind === 'var') return t;
+  if (t.kind === 'var') c.unknownLocal(expr.operand);
   return compileError(expr.span, `${typeToString(resolve(operandType))} に - は使えません。`);
 }
 
@@ -286,7 +286,10 @@ export function refExpr(c: Checker, expr: Extract<Expr, { kind: 'ref' }>, expect
   const slicing = expr.operand.kind === 'index' || expr.operand.kind === 'array';
   if (inner && shallow(inner).kind === 'slice' && !slicing) inner = undefined;
   if (inner && shallow(inner).kind === 'str') inner = undefined;
-  if (inner && shallow(inner).kind === 'dyn') inner = undefined;
+  if (inner) {
+    const target = shallow(inner);
+    if (target.kind === 'dyn' && !target.trait.fnSig) inner = undefined;
+  }
   const type = c.expr(expr.operand, inner);
   if (expr.mutable) requireMutablePlace(c, expr.operand, '&mut で借りる');
   return ref(type, expr.mutable);

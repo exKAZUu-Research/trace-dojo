@@ -277,17 +277,22 @@ function dbgMacro(c: Compiler, macro: Macro<'dbg'>, span: Span): Eval {
     text: macro.texts[index],
   }));
   return (frame) => {
-    const values = args.map(({ value, type, text }) => {
-      const v = value(frame);
-      const shown = c.support.formatter.debug(v, type(frame), debugSpec(true), 0);
-      frame.runtime.write('stderr', `[src/main.rs:${span.row + 1}:${span.col}] ${text} = ${shown}\n`);
-      return v;
-    });
+    const { runtime } = frame;
+    const label = `[src/main.rs:${span.row + 1}:${span.col}]`;
     if (args.length === 0) {
-      frame.runtime.write('stderr', `[src/main.rs:${span.row + 1}:${span.col}]\n`);
+      runtime.write('stderr', `${label}\n`);
       return UNIT_VALUE;
     }
-    return values.length === 1 ? values[0] : values;
+    const values: Value[] = [];
+    return runtime.withRoots(values, () => {
+      for (const { value, type, text } of args) {
+        const item = value(frame);
+        values.push(item);
+        const shown = c.support.formatter.debug(item, type(frame), debugSpec(true), 0);
+        runtime.write('stderr', `${label} ${text} = ${shown}\n`);
+      }
+      return values.length === 1 ? values[0] : values;
+    });
   };
 }
 

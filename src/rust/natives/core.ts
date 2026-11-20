@@ -2,7 +2,15 @@ import { TURTLE_METHOD_NAMES, type TurtleState } from '../../interpreter/turtleW
 import { madeString, sizeTable, StringGrowth } from '../capacity';
 import { DEFAULT_SPEC } from '../fmt';
 import { normalize } from '../infer';
-import { castValue, cloneValue, comparePartialValues, compareValues, testPartialOrder, valuesEqual } from '../ops';
+import {
+  castValue,
+  cloneValue,
+  comparePartialValues,
+  compareValues,
+  testPartialOrder,
+  valuesEqual,
+  valuesUnequal,
+} from '../ops';
 import { FmtFailure, ProcessExit, RustPanic } from '../runtime';
 import { intMax, type IntName, shallow, substitute as substituteType, type Type } from '../types';
 import { utf8Bytes } from '../utf8';
@@ -266,7 +274,7 @@ define({
     return ok(ctx, UNIT_VALUE);
   },
   'PartialEq::eq': ([self, other], ctx) => valuesEqual(selfType(ctx), self, other, ctx.typeArgs[1]),
-  'PartialEq::ne': ([self, other], ctx) => !valuesEqual(selfType(ctx), self, other, ctx.typeArgs[1]),
+  'PartialEq::ne': ([self, other], ctx) => valuesUnequal(selfType(ctx), self, other, ctx.typeArgs[1]),
   'PartialOrd::partial_cmp': ([self, other], ctx) => {
     const order = comparePartialValues(selfType(ctx), self, other, ctx.typeArgs[1]);
     return order === undefined ? none(ctx) : some(ctx, ordering(ctx, order));

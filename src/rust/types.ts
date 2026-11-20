@@ -54,7 +54,6 @@ export interface ClosureType {
   span?: Span;
   /** How the closure captures each variable, which decides whether it is `Copy` and `Clone`. */
   captures?: { type: Type; mode: 'ref' | 'mut' | 'value' }[];
-  layoutCaptures?: Type[];
 }
 
 /** A return type `impl Trait`, which callers see only through its bounds. */
@@ -355,12 +354,7 @@ export function childTypes(t: Type): Type[] {
       return [...t.params, t.ret];
     }
     case 'closure': {
-      return [
-        ...t.closure.params,
-        t.closure.ret,
-        ...(t.closure.captures?.map(({ type }) => type) ?? []),
-        ...(t.closure.layoutCaptures ?? []),
-      ];
+      return [...t.closure.params, t.closure.ret, ...(t.closure.captures?.map(({ type }) => type) ?? [])];
     }
     case 'dyn': {
       return [...t.trait.args, ...(t.trait.fnSig?.params ?? [])];
@@ -424,7 +418,6 @@ export function substitute(type: Type, subst: Subst): Type {
         params: closure.params.map((param) => substitute(param, subst)),
         ret: substitute(closure.ret, subst),
         captures: closure.captures?.map((capture) => ({ ...capture, type: substitute(capture.type, subst) })),
-        layoutCaptures: closure.layoutCaptures?.map((type) => substitute(type, subst)),
       },
     };
   }

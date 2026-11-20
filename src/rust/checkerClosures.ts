@@ -4,14 +4,13 @@ import { forEachDirect, patternBindingParts } from './astWalk';
 import type { Checker } from './checker';
 import { checkPattern } from './checkerPatterns';
 import { compileError } from './items';
-import { captureLayout, type CaptureMode, projectedBindings } from './loanCaptures';
+import { type CaptureMode, captureProjections, projectedBindings } from './loanCaptures';
 import { typeAfter } from './regions';
 import type { TraitSolver } from './traits';
 import { type ClosureType, freshVar, newClosureType, resolve, shallow, type Type, UNIT } from './types';
 
 export function checkClosure(c: Checker, expr: Extract<Expr, { kind: 'closure' }>, expected: Type | undefined): Type {
-  const e = expected ? shallow(expected) : undefined;
-  const expectedSig = e?.kind === 'fn' ? e : undefined;
+  const expectedSig = expected && closureSignature(c, expected);
   const parentBody = c.body;
   const fn: FnContext = {
     name: '{closure}',
@@ -45,11 +44,10 @@ export function checkClosure(c: Checker, expr: Extract<Expr, { kind: 'closure' }
     isClosure: true,
   };
   try {
-    const params = expr.params.map((param, index) => {
-      checkPattern(c, param.pattern, paramTypes[index], 'move');
-      return param.pattern;
-    });
-    void params;
+    for (const [index, { pattern }] of expr.params.entries()) {
+      checkPattern(c, pattern, paramTypes[index], 'move');
+      c.requireIrrefutable(pattern, paramTypes[index], 'fn');
+    }
     c.coerceExpr(expr.body, retType);
   } finally {
     c.body = parentBody;
@@ -69,6 +67,32 @@ export function checkClosure(c: Checker, expr: Extract<Expr, { kind: 'closure' }
   return closureType;
 }
 
+export function closureSignature(c: Checker, type: Type): { params: Type[]; ret: Type } | undefined {
+  const t = shallow(type);
+  switch (t.kind) {
+    case 'fn': {
+      return { params: t.params, ret: t.ret };
+    }
+    case 'dyn': {
+      return t.trait.fnSig;
+    }
+    case 'param':
+    case 'var': {
+      const bounds = t.kind === 'param' ? t.param.bounds : (c.varBounds.get(t.v) ?? []);
+      return bounds.find((bound) => bound.fnSig)?.fnSig;
+    }
+    case 'ref': {
+      return closureSignature(c, t.target);
+    }
+    case 'adt': {
+      return t.def.builtin === 'Box' ? closureSignature(c, t.args[0]) : undefined;
+    }
+    default: {
+      return undefined;
+    }
+  }
+}
+
 /**
  * The closure trait a closure implements, from how its body uses the variables it captures: `FnOnce` when it moves
  * one out (its value is used rather than borrowed), `FnMut` when it mutates one. Records the captures it moves, and
@@ -79,25 +103,20 @@ function closureKindOf(
   body: Expr,
   annotations: Annotations,
   solver: TraitSolver
-): Pick<ClosureType, 'kind' | 'movedAt' | 'captures' | 'layoutCaptures'> {
+): Pick<ClosureType, 'kind' | 'movedAt' | 'captures'> {
   const uses = new CaptureUses(new Set(fn.captures), annotations, solver);
   uses.visit(body, true);
   fn.movedCaptures = [...uses.moved];
-  const captures = fn.captures.map((local) => ({
-    type: local.type,
-    mode:
-      fn.isMove || uses.moved.has(local)
-        ? ('value' as const)
-        : uses.mutated.has(local)
-          ? ('mut' as const)
-          : ('ref' as const),
-  }));
-  const kind = uses.moved.size > 0 ? 'FnOnce' : uses.mutated.size > 0 ? 'FnMut' : 'Fn';
   const modeOf = (place: Expr, binding?: LocalVar): CaptureMode => (fn.isMove ? 'value' : uses.modeOf(place, binding));
-  const layoutCaptures = fn.captures.flatMap((local, index) =>
-    captureLayout(annotations, body, local, modeOf, captures[index].mode)
+  fn.projectedCaptures = new Map(
+    fn.captures.map((local) => {
+      const fallback = fn.isMove || uses.moved.has(local) ? 'value' : uses.mutated.has(local) ? 'mut' : 'ref';
+      return [local, captureProjections(annotations, body, local, modeOf, fallback)];
+    })
   );
-  return { kind, movedAt: uses.firstMove, captures, layoutCaptures };
+  const captures = [...fn.projectedCaptures.values()].flat();
+  const kind = uses.moved.size > 0 ? 'FnOnce' : uses.mutated.size > 0 ? 'FnMut' : 'Fn';
+  return { kind, movedAt: uses.firstMove, captures };
 }
 
 /** How a closure's body uses the variables it captures: those it moves out and those it modifies. */

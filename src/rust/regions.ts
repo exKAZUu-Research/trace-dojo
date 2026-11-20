@@ -19,6 +19,7 @@ export type Layout =
 
 export const NONE: Layout = { kind: 'none' };
 
+// code-gauge-allow functionNcss 31 -- Each Rust type contributes its own region layout.
 export function layoutOf(type: Type | undefined, fresh: () => RVar, staticRegion = fresh): Layout {
   if (!type) return NONE;
   const t = normalize(shallow(type));
@@ -48,7 +49,10 @@ export function layoutOf(type: Type | undefined, fresh: () => RVar, staticRegion
     case 'dyn': {
       return { kind: 'opaque', region: t.objectLifetime === 'static' ? staticRegion() : fresh() };
     }
-    case 'param':
+    case 'param': {
+      const fixed = t.param.bounds.some(({ trait }) => trait.builtin === 'Static');
+      return { kind: 'opaque', region: fixed ? staticRegion() : fresh() };
+    }
     case 'opaque': {
       return { kind: 'opaque', region: fresh() };
     }

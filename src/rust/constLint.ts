@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 608 -- Shares Rust constant propagation between diagnostics and pattern coverage.
+// code-gauge-allow-file fileNcss 617 -- Shares Rust constant propagation between diagnostics and pattern coverage.
 
 import type { ExecutionBudget } from '../interpreter/limits';
 import type { Annotations, LocalVar, PathRes } from './annotations';
@@ -138,8 +138,18 @@ export class ConstLint {
 
   private stmt(stmt: Stmt): void {
     if (stmt.kind === 'let') {
-      if (stmt.init) this.bind(stmt.pattern, this.expr(stmt.init));
-      if (stmt.else) this.branch(() => this.block(stmt.else!));
+      if (!stmt.init) return;
+      const value = this.expr(stmt.init);
+      if (!stmt.else) {
+        this.bind(stmt.pattern, value);
+        return;
+      }
+      const otherwise = stmt.else;
+      const matches = this.bindMatched(stmt.pattern, value);
+      if (matches !== true) {
+        const diverges = this.branch(() => this.block(otherwise));
+        if (matches === false) this.diverged = diverges;
+      }
     } else if (stmt.kind === 'expr') {
       this.expr(stmt.expr);
     }
@@ -314,7 +324,7 @@ export class ConstLint {
     if (res?.kind === 'local') return this.known.get(res.local);
     if (res?.kind === 'const') return this.constant(res.def);
     if (res?.kind === 'builtinConst') return integerConst(res.name) ?? floatLimit(res.name);
-    if (this.patternEvaluation && res?.kind === 'ctor') return this.construct(res, []);
+    if (res?.kind === 'ctor' && (this.patternEvaluation || res.def.kind === 'enum')) return this.construct(res, []);
     return undefined;
   }
 
@@ -429,7 +439,7 @@ export class ConstLint {
       expr.kind === 'call' && expr.callee.kind === 'path' ? this.annotations.paths.get(expr.callee) : undefined;
     if (expr.kind === 'call' && res?.kind === 'ctor') {
       const fields = expr.args.map((arg, index) => [String(index), this.expr(arg)] as const);
-      return this.patternEvaluation ? this.construct(res, fields) : aggregate(fields);
+      return this.patternEvaluation || res.def.kind === 'enum' ? this.construct(res, fields) : aggregate(fields);
     }
     forEachDirect(expr, (child) => {
       this.expr(child);
@@ -459,10 +469,13 @@ export class ConstLint {
 
   private condition(cond: Condition): Known | undefined {
     if (cond.kind === 'expr') return this.expr(cond.expr);
-    const value = this.expr(cond.value);
-    const matches = this.matchesPattern(cond.pattern, value);
-    this.bind(cond.pattern, matches === true ? value : undefined);
-    return this.patternEvaluation ? matches : undefined;
+    return this.bindMatched(cond.pattern, this.expr(cond.value));
+  }
+
+  private bindMatched(pattern: Pattern, value: Known | undefined): boolean | undefined {
+    const matches = this.matchesPattern(pattern, value);
+    this.bind(pattern, matches === true ? value : undefined);
+    return matches;
   }
 
   private matchesPattern(pattern: Pattern, value: Known | undefined): boolean | undefined {

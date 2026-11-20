@@ -58,9 +58,10 @@ export interface WherePredicate {
   span: Span;
 }
 
-/** A trait bound: a path to a trait with its type arguments, or a closure trait (`Fn(i32) -> i32`). */
+/** A bound on a type parameter, an opaque result or a trait. */
 export type BoundAst =
   | { kind: 'trait'; path: PathAst; span: Span }
+  | { kind: 'static'; span: Span }
   | { kind: 'fn'; trait: 'Fn' | 'FnMut' | 'FnOnce'; params: TypeAst[]; ret: TypeAst | undefined; span: Span };
 
 export interface FnItem {
