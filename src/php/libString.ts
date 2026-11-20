@@ -11,7 +11,14 @@ import { deprecated, throwError, warn } from './errors';
 import { decodeHtml, escapeHtml, nextChar, translationTable } from './htmlEntities';
 import { writeStream } from './libCore';
 import { ctypeUpper, isCtypeAlpha, isCtypeSpace, isUtf8Ctype } from './libLocale';
-import { defineAlias, defineConstant, defineFunction, defineOverloadedFunction, markInlined } from './native';
+import {
+  defineAlias,
+  defineConstant,
+  defineFunction,
+  defineOverloadedFunction,
+  markDeprecated,
+  markInlined,
+} from './native';
 import { toInt, toStr, withStringConversionErrors } from './operators';
 import { rt } from './runtime';
 import { shuffle } from './shuffle';
@@ -928,16 +935,8 @@ function compareLimited(a: string, b: string, length: number, insensitive: boole
   return Math.sign(Math.min(length, a.length) - Math.min(length, b.length));
 }
 
-defineFunction('utf8_encode(string $string): string', ({ args }) => {
-  deprecated(
-    'Function utf8_encode() is deprecated since 8.2, visit the php.net documentation for various alternatives'
-  );
-  return enc(s(args[0]));
-});
+defineFunction('utf8_encode(string $string): string', ({ args }) => enc(s(args[0])));
 defineFunction('utf8_decode(string $string): string', ({ args }) => {
-  deprecated(
-    'Function utf8_decode() is deprecated since 8.2, visit the php.net documentation for various alternatives'
-  );
   const text = s(args[0]);
   let result = '';
   for (let index = 0; index < text.length;) {
@@ -947,6 +946,11 @@ defineFunction('utf8_decode(string $string): string', ({ args }) => {
   }
   return result;
 });
+for (const name of ['utf8_encode', 'utf8_decode'])
+  markDeprecated(
+    name,
+    `Function ${name}() is deprecated since 8.2, visit the php.net documentation for various alternatives`
+  );
 defineFunction(
   String.raw`chunk_split(string $string, int $length = 76, string $separator = "\r\n"): string`,
   ({ args }) => {

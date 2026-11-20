@@ -2,7 +2,7 @@
 import { callMethod, consumeInvokedResult, discardInvokedResult } from './callables';
 import { implicitCallRow } from './calls';
 import { valueName } from './conversions';
-import { type CleanupException, deprecated, throwError, withCleanupExceptions, withPendingException } from './errors';
+import { type CleanupException, throwError, withCleanupExceptions, withPendingException } from './errors';
 import { releaseDropped } from './garbage';
 import { magicSerializationMethods, serializationMethods } from './libArrayObject';
 import { defineClass, type NativeMethod } from './native';
@@ -331,11 +331,9 @@ class ObjectStorage {
 
 const storageOf = (object: PhpObject): ObjectStorage => object.internal as ObjectStorage;
 
-/** Reports a method PHP 8.5 deprecates in favor of its ArrayAccess counterpart. */
-function deprecatedMethod(name: string, replacement: string): void {
-  deprecated(
-    `Method SplObjectStorage::${name}() is deprecated since 8.5, use method SplObjectStorage::${replacement}() instead`
-  );
+/** The deprecation of a method PHP 8.5 deprecates in favor of its ArrayAccess counterpart. */
+function methodDeprecation(name: string, replacement: string): string {
+  return `Method SplObjectStorage::${name}() is deprecated since 8.5, use method SplObjectStorage::${replacement}() instead`;
 }
 
 function storageKey(value: Value, method: string): PhpObject {
@@ -360,24 +358,24 @@ defineClass({
   methods: [
     {
       signature: 'attach(object $object, mixed $info = null): void',
+      deprecation: methodDeprecation('attach', 'offsetSet'),
       impl: ({ thisObj, args }) => {
-        deprecatedMethod('attach', 'offsetSet');
         storageOf(thisObj).attach(args[0] as PhpObject, args[1] ?? null);
         return null;
       },
     },
     {
       signature: 'detach(object $object): void',
+      deprecation: methodDeprecation('detach', 'offsetUnset'),
       impl: ({ thisObj, args }) => {
-        deprecatedMethod('detach', 'offsetUnset');
         detachAndRewind(thisObj, args[0] as PhpObject);
         return null;
       },
     },
     {
       signature: 'contains(object $object): bool',
+      deprecation: methodDeprecation('contains', 'offsetExists'),
       impl: ({ thisObj, args }) => {
-        deprecatedMethod('contains', 'offsetExists');
         return storageOf(thisObj).has(args[0] as PhpObject);
       },
     },

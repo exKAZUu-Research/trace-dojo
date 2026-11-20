@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 856 -- Keeps call binding, completion and frame cleanup together.
+// code-gauge-allow-file fileNcss 862 -- Keeps call binding, completion and frame cleanup together.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl, Stmt } from './ast';
@@ -6,6 +6,7 @@ import { lower, untilNul } from './bytes';
 import { valueName } from './conversions';
 import {
   type CleanupException,
+  deprecated,
   isCleanupException,
   notice,
   throwError,
@@ -280,6 +281,13 @@ function isHostMemoryError(message: string): boolean {
   );
 }
 
+const nativeDeprecations = new WeakMap<NativeFunction, string>();
+
+/** Records the deprecation PHP reports on calling a builtin, before it binds the arguments. */
+export function deprecateNative(fn: NativeFunction, deprecation: string): void {
+  nativeDeprecations.set(fn, deprecation);
+}
+
 export function invokeNative(
   target: CallTarget,
   fn: NativeFunction,
@@ -287,6 +295,8 @@ export function invokeNative(
   row: number | undefined,
   discardResult: boolean
 ): Value {
+  const deprecation = nativeDeprecations.get(fn);
+  if (deprecation) deprecated(deprecation);
   const saved = enterNativeCall(target, fn, args, row);
   let result: Value = null;
   let returnedReference: Ref | undefined;

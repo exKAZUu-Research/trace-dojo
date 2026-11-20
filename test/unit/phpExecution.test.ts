@@ -5232,6 +5232,21 @@ try { range(0.1, null, 1); } catch (ValueError $e) { echo explode("\\n", $e->get
   });
 });
 
+test('a deprecated function reports its deprecation before binding its arguments', () => {
+  expect(run('<?php utf8_encode(null);')).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '\nDeprecated: Function utf8_encode() is deprecated since 8.2, visit the php.net documentation for various alternatives in /main.php on line 1\n\nDeprecated: utf8_encode(): Passing null to parameter #1 ($string) of type string is deprecated in /main.php on line 1\n',
+  });
+  expect(
+    run('<?php $s = new SplObjectStorage; try { $s->contains(5); } catch (TypeError $e) { echo "T"; }')
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '\nDeprecated: Method SplObjectStorage::contains() is deprecated since 8.5, use method SplObjectStorage::offsetExists() instead in /main.php on line 1\nT',
+  });
+});
+
 test('a by-reference foreach subject stays a reference for shutdown destruction', () => {
   const prelude =
     'class D { public $x = 1; function __construct(public $n) {} function __destruct() { echo "d", $this->n, ";"; } } $a = new D(1);';

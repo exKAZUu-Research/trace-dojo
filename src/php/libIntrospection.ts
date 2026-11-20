@@ -2,8 +2,8 @@
 import { consumeCallbackResult } from './callables';
 import { backtraceLimit, callArguments, callNamedArguments, type CallRecord, callStack } from './calls';
 import * as conversionsModule from './conversions';
-import { clearLastError, deprecated, lastError, throwError, warn } from './errors';
-import { defineConstant, defineFunction } from './native';
+import { clearLastError, lastError, throwError, warn } from './errors';
+import { defineConstant, defineFunction, markDeprecated } from './native';
 import { toStr } from './operators';
 import { PhpThrow, rt, SCRIPT_PATH } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
@@ -96,7 +96,6 @@ for (const [index, name] of ASSERT_OPTIONS.entries()) {
 }
 
 defineFunction('assert_options(int $option, mixed $value = UNKNOWN): mixed', ({ args }) => {
-  deprecated('Function assert_options() is deprecated since 8.3');
   const name = ASSERT_OPTIONS[Number(args[0]) - 1] as (typeof ASSERT_OPTIONS)[number] | undefined;
   if (name === undefined)
     throwError('ValueError', 'assert_options(): Argument #1 ($option) must be an ASSERT_* constant');
@@ -114,6 +113,7 @@ defineFunction('assert_options(int $option, mixed $value = UNKNOWN): mixed', ({ 
   if (args.length > 1) options[name] = parseIniBool(toStr(args[1]));
   return previous;
 });
+markDeprecated('assert_options', 'Function assert_options() is deprecated since 8.3');
 
 /** Reads a boolean INI value as zend_ini_parse_bool does. */
 function parseIniBool(text: string): boolean {

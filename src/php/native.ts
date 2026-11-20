@@ -1,5 +1,5 @@
 import { enc, lower } from './bytes';
-import { parseSignature, parseTypeText } from './calls';
+import { deprecateNative, parseSignature, parseTypeText } from './calls';
 import { classConstant } from './classConstants';
 import { rt } from './runtime';
 import {
@@ -59,6 +59,10 @@ export function markInlined(name: string, forwardsReference = false): void {
   const fn = markedFunction(name);
   fn.inlined = true;
   if (forwardsReference) fn.forwardsReference = 'inlined';
+}
+
+export function markDeprecated(name: string, deprecation: string): void {
+  deprecateNative(markedFunction(name), deprecation);
 }
 
 export function markDirectOnly(...names: string[]): void {
@@ -124,6 +128,7 @@ export function constantDeprecation(name: string): string | undefined {
 export interface NativeMethod {
   signature: string;
   acceptsNamed?: boolean;
+  deprecation?: string;
   impl: (ctx: NativeContext & { thisObj: PhpObject }) => Value;
   isStatic?: boolean;
   isFinal?: boolean;
@@ -251,6 +256,7 @@ function buildClass(definition: ClassDefinition): PhpClass {
       acceptsNamed: nativeMethod.acceptsNamed,
       impl: nativeMethod.impl as (ctx: NativeContext) => Value,
     };
+    if (nativeMethod.deprecation) deprecateNative(fn, nativeMethod.deprecation);
     const method: Method = {
       name,
       lname: lower(name),

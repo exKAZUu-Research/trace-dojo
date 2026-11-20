@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { platformBinary, platformUnary } from '../interpreter/platformMath';
 import { floatFitsInt, valueName } from './conversions';
 import { deprecated, throwError } from './errors';
-import { defineAlias, defineConstant, defineFunction, defineUnitEnum } from './native';
+import { defineAlias, defineConstant, defineFunction, defineUnitEnum, markDeprecated } from './native';
 import { arithmetic, compare } from './operators';
 import { rt } from './runtime';
 import { fixedDigits, phpRound, type RoundMode } from './strings';
@@ -388,7 +388,8 @@ defineFunction('random_int(int $min, int $max): int', ({ args }) => {
     if (value <= span) return min + value;
   }
 });
-defineFunction('lcg_value(): float', () => {
-  deprecated(String.raw`Function lcg_value() is deprecated since 8.4, use \Random\Randomizer::getFloat() instead`);
-  return Math.random();
-});
+defineFunction('lcg_value(): float', () => Math.random());
+markDeprecated(
+  'lcg_value',
+  String.raw`Function lcg_value() is deprecated since 8.4, use \Random\Randomizer::getFloat() instead`
+);
