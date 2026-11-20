@@ -391,7 +391,10 @@ export class StatementChecker {
     const rightType = this.c.expressions.check(right);
     const elementType = isOf ? this.iteratedLoopType(right, rightType, false) : stringType;
     if (left.type === 'identifier') return elementType;
-    return this.c.patterns.patternType(left, elementType, symbol.name, { isConst });
+    return this.c.patterns.patternType(left, elementType, symbol.name, {
+      isConst,
+      literalSource: isOf ? right : undefined,
+    });
   }
 
   // Control flow -------------------------------------------------------------------------------------------------
@@ -558,7 +561,7 @@ export class StatementChecker {
     const body = node.childForFieldName('body') as TreeNode;
     this.loop(node, (target) => {
       const head = this.c.flow.current?.clone();
-      if (kind) this.bindLoopVariables(left, kind, elementType);
+      if (kind) this.bindLoopVariables(left, kind, elementType, isOf ? right : undefined);
       else this.assignLoopVariables(left, elementType);
       this.checkSubstatement(body);
       this.c.flow.current = this.c.flow.merge([this.c.flow.current, ...target.continues]);
@@ -576,7 +579,7 @@ export class StatementChecker {
 
   private iteratedLoopType(right: TreeNode, rightType: Type, reportErrors: boolean): Type {
     const element = this.c.patterns.iteratedType(reportErrors ? right : undefined, rightType);
-    return this.c.literals.iteratedBindingType(element, right);
+    return this.c.literals.inlineBindingType(element, right);
   }
 
   /**
@@ -655,7 +658,7 @@ export class StatementChecker {
   }
 
   /** Declares the variables of a loop's `const`, `let`, or `var` head. */
-  private bindLoopVariables(left: TreeNode, kind: string, elementType: Type): void {
+  private bindLoopVariables(left: TreeNode, kind: string, elementType: Type, literalSource?: TreeNode): void {
     const isConst = kind === 'const';
     this.c.patterns.bindPattern(
       left,
@@ -666,7 +669,7 @@ export class StatementChecker {
         this.c.expressions.setVariableType(symbol, isConst ? type : this.c.widen(type));
         this.c.flow.set(`s${symbol.id}`, { type, assigned: true });
       },
-      { isConst }
+      { isConst, literalSource }
     );
   }
 

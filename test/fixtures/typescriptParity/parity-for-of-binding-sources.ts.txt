@@ -11,3 +11,21 @@ for (const { level = 1 } of [{}]) {
   console.log(one);
 }
 for (const { start, stop } of [{ start: 1 }, { stop: 2 }]) console.log(start, stop);
+
+const flag = Boolean(console.log);
+for (const { level = 1 } of flag ? [{ level: 2 }] as const : [{}]) {
+  const allowed: 1 | 2 = level;
+  console.log(allowed);
+}
+for (const [{ level = 1 }] of flag ? [[{ level: 2 }]] : [[{}]]) {
+  const wide: number = level;
+  console.log(wide);
+}
+for (const [{ level = 1 }] of flag ? [[{ level: 2 }]] as const : [[{}]] as const) {
+  const allowed: 1 | 2 = level;
+  console.log(allowed);
+}
+for (const { nested: { level = 1 } } of flag ? [{ nested: { level: 2 } }] : [{ nested: {} }]) {
+  const wide: number = level;
+  console.log(wide);
+}

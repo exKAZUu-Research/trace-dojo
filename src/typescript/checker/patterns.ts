@@ -30,6 +30,7 @@ import {
 interface BindingOptions {
   annotated?: boolean;
   isConst?: boolean;
+  literalSource?: TreeNode;
 }
 
 /** Gives the names a binding pattern declares the types of what it destructures. */
@@ -89,7 +90,12 @@ export class BindingPatterns {
         return;
       }
       case 'object_pattern': {
-        this.bindObjectPattern(pattern, type, bind, options);
+        this.bindObjectPattern(
+          pattern,
+          options.literalSource ? this.c.literals.inlineBindingType(type, options.literalSource) : type,
+          bind,
+          options
+        );
         return;
       }
       case 'array_pattern': {
@@ -551,7 +557,11 @@ export class BindingPatterns {
   /** The type of the elements a `for...of` loop or a spread takes from a value. */
   iteratedType(node: TreeNode | undefined, type: Type): Type {
     if (isAnyLike(type)) return anyType;
-    if (type.kind === 'union') return unionOf(type.types.map((member) => this.iteratedType(node, member)));
+    if (type.kind === 'union')
+      return unionOf(
+        type.types.map((member) => this.iteratedType(node, member)),
+        true
+      );
     if (type.kind === 'object' && this.c.isArrayOrTuple(type)) return this.c.elementTypeOf(type);
     const bound = this.iterableConstraint(type);
     if (bound) return this.iteratedType(node, bound);

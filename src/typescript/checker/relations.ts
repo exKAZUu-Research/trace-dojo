@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 834 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
+// code-gauge-allow-file fileNcss 851 -- Keeps the relation modes and their recursive comparisons together.
 import { minimumArguments } from './callArity';
 import type { Checker } from './checker';
 import { isUnit } from './flow';
@@ -27,6 +27,7 @@ import {
   type ConditionalType,
   errorType,
   filterType,
+  freshTypeCacheKey,
   type IndexedAccessType,
   intersectionOf,
   type IntersectionType,
@@ -57,7 +58,7 @@ import {
   voidType,
 } from './types';
 
-type Relation = 'assignable' | 'comparable' | 'identical';
+type Relation = 'assignable' | 'comparable' | 'identical' | 'strictSubtype';
 type SignatureMode = 'signature' | 'strictCallback' | 'bivariantCallback';
 
 const MAX_RELATION_DEPTH = 100;
@@ -102,7 +103,7 @@ export class Relations {
    * With `INTERSECTION_TARGET` in `state`, as for a member of an intersection target, skips the check of a weak target
    * type; with `INTERSECTION_SOURCE`, as for a member of an intersection source, infers no index signature.
    */
-  // code-gauge-allow functionNcss 32 -- Keeps target normalization and the bounded relation-cache entry point together.
+  // code-gauge-allow functionNcss 33 -- Keeps target normalization and the bounded relation-cache entry point together.
   isRelated(
     source: Type,
     target: Type,
@@ -117,7 +118,8 @@ export class Relations {
     target = referencesForComparison(target);
     if (source === target) return true;
     this.c.budget.spend();
-    const key = `${relation}-${state}:${source.id}:${target.id}`;
+    const compared = relation === 'strictSubtype' ? freshTypeCacheKey : (type: Type) => type.id;
+    const key = `${relation}-${state}:${compared(source)}:${compared(target)}`;
     const cached = this.cache.get(key);
     if (cached !== undefined) return cached;
     if (this.assumed.has(key) || this.provisionalKeys.has(key)) return true;
@@ -208,13 +210,13 @@ export class Relations {
     return this.c.literals.isArrayOrTupleLiteral(type) ? type : recursionIdentity(type);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 26 -- Follows TypeScript's order of checks for each kind of type.
+  // code-gauge-allow functionCognitiveComplexity 28 -- Follows TypeScript's order of checks for each kind of type.
   // code-gauge-allow functionNcss 38 -- Follows TypeScript's order of checks for each kind of type.
   private structuredRelated(source: Type, target: Type, relation: Relation, state: number): boolean {
-    const s = this.c.reducedTypes.of(regularOf(source));
-    const t = this.c.reducedTypes.of(regularOf(target));
+    const s = this.c.reducedTypes.of(relation === 'strictSubtype' ? source : regularOf(source));
+    const t = this.c.reducedTypes.of(relation === 'strictSubtype' ? target : regularOf(target));
     if (relation === 'identical') return structurallyIdentical(this.c, s, t);
-    const trivial = this.trivialRelation(s, t);
+    const trivial = this.trivialRelation(s, t, relation);
     if (trivial !== undefined) return trivial;
     if (s.kind === 'union') return this.unionSourceRelated(s, t, relation, state);
     if (!(state & INTERSECTION_TARGET) && this.lacksWeakTypeProperty(s, t, relation)) return false;
@@ -411,11 +413,11 @@ export class Relations {
   }
 
   /** The relation that holds whatever the types' structures are, if any. */
-  private trivialRelation(s: Type, t: Type): boolean | undefined {
+  private trivialRelation(s: Type, t: Type, relation?: Relation): boolean | undefined {
     if (s === t || s === errorType || t === errorType || s === permissiveAnyType || t === permissiveAnyType)
       return true;
     if (isAnyLike(t) || isIntrinsic(t, 'unknown')) return true;
-    if (isAnyLike(s)) return !isIntrinsic(t, 'never');
+    if (isAnyLike(s)) return relation !== 'strictSubtype' && !isIntrinsic(t, 'never');
     if (isIntrinsic(s, 'never')) return true;
     if (t.kind === 'union' && this.isUnknownLikeUnion(t.types)) return true;
     return undefined;
@@ -478,6 +480,13 @@ export class Relations {
   }
 
   private relatedToObject(s: Type, t: ObjectType, relation: Relation, state: number): boolean {
+    if (
+      relation === 'strictSubtype' &&
+      t.fresh &&
+      this.hasNoMembers(t) &&
+      !(s.kind === 'object' && this.hasNoMembers(s))
+    )
+      return false;
     if (s.kind === 'intrinsic') {
       if (['null', 'undefined', 'void', 'unknown'].includes(s.name)) return false;
       // `object` has the members of `Object`.
@@ -747,6 +756,11 @@ export class Relations {
     if (byElements !== undefined) return byElements;
     const sourceStructure = this.c.structureOf(source);
     const targetStructure = this.c.structureOf(target);
+    if (
+      relation === 'strictSubtype' &&
+      !this.literalSubtypeProperties(source, sourceStructure, target, targetStructure)
+    )
+      return false;
     return (
       this.propertiesRelated(source, sourceStructure, target, targetStructure, relation) &&
       this.signaturesRelated(sourceStructure.callSignatures, targetStructure.callSignatures, relation) &&
@@ -754,6 +768,19 @@ export class Relations {
       keyedIndexes(targetStructure).every((index) =>
         this.indexRelated(sourceStructure, source, index.type, index.keyType, relation, state)
       )
+    );
+  }
+
+  private literalSubtypeProperties(source: Type, from: Structure, target: ObjectType, to: Structure): boolean {
+    const literalTarget = this.c.literals.isWrittenObjectLiteral(target);
+    if (literalTarget || (source.kind === 'object' && source.fresh)) this.c.budget.spend(from.properties.size);
+    if (literalTarget && [...from.properties.keys()].some((name) => !to.properties.has(name))) return false;
+    if (source.kind !== 'object' || !source.fresh) return true;
+    return [...from.properties.values()].every(
+      (property) =>
+        !this.c.literals.isWrittenMember(source, property) ||
+        to.properties.has(property.name) ||
+        applicableIndex(this.c, to, this.c.typeOperators.propertyKeyType(property)) !== undefined
     );
   }
 
@@ -811,7 +838,7 @@ export class Relations {
     return this.tupleElementRelated({ rest: true, optional: false, type: source }, expected, relation);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 22 -- Checks declared properties, static private members, and same-alias indexes in a single pass.
+  // code-gauge-allow functionCognitiveComplexity 24 -- Checks declared and optional properties together with static private members and same-alias indexes.
   private propertiesRelated(
     source: Type,
     sourceStructure: Structure,
@@ -820,6 +847,7 @@ export class Relations {
     relation: Relation
   ): boolean {
     const allowMappedIndex = relation === 'assignable' && this.sharesMappedAlias(source, target);
+    const skipOptional = relation !== 'strictSubtype' || this.allowsMissingOptionalProperties(source);
     for (const [name, targetProperty] of targetStructure.properties) {
       this.c.budget.spend();
       if (target.isClassStatic && targetProperty.isPrivateName) continue;
@@ -828,7 +856,7 @@ export class Relations {
           ? (sourceStructure.properties.get(name) ?? this.c.propertyOf(source, name))
           : this.c.propertyOf(source, name);
       if (!sourceProperty) {
-        if (targetProperty.optional) continue;
+        if (targetProperty.optional && skipOptional) continue;
         const indexed = allowMappedIndex
           ? applicableIndex(this.c, sourceStructure, this.c.typeOperators.propertyKeyType(targetProperty))
           : undefined;
@@ -838,6 +866,15 @@ export class Relations {
       if (!this.propertyRelated(sourceProperty, targetProperty, relation)) return false;
     }
     return true;
+  }
+
+  private allowsMissingOptionalProperties(source: Type): boolean {
+    return (
+      source.kind === 'object' &&
+      (this.c.literals.isWrittenObjectLiteral(source) ||
+        source.tuple !== undefined ||
+        (this.c.literals.isArrayLiteral(source) && isIntrinsic(this.c.elementTypeOf(source), 'never')))
+    );
   }
 
   private sharesMappedAlias(source: Type, target: ObjectType): boolean {
@@ -907,7 +944,7 @@ export class Relations {
     } else if (source.visibility === 'protected') {
       return false;
     }
-    if (source.optional && !target.optional && relation === 'assignable') return false;
+    if (source.optional && !target.optional && relation !== 'comparable') return false;
     return this.isRelated(propertyAccessType(source), propertyAccessType(target), relation);
   }
 

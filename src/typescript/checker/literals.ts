@@ -225,6 +225,10 @@ export class LiteralChecker {
     );
   }
 
+  isWrittenObjectLiteral(type: Type): boolean {
+    return type.kind === 'object' && (!!type.fresh || this.objectLiteralNodes.has(type.id));
+  }
+
   /** Whether a property of an object literal type is written in the literal, rather than copied by a spread. */
   isWrittenMember(literal: ObjectType, property: Property): boolean {
     const node = this.objectLiteralNodes.get(literal.id);
@@ -1092,21 +1096,11 @@ export class LiteralChecker {
             otherIndex !== index &&
             other.kind === 'object' &&
             member.kind === 'object' &&
-            this.c.relations.isAssignable(member, other) &&
-            !this.hasPropertiesBeyondLiteral(member, other) &&
-            !(this.c.relations.isAssignable(other, member) && otherIndex > index)
+            this.c.relations.isRelated(member, other, 'strictSubtype') &&
+            !(otherIndex > index && this.c.relations.isRelated(other, member, 'strictSubtype'))
         )
     );
     return unionOf(kept, true);
-  }
-
-  /** Whether a type has a property an object literal type lacks, which keeps it from being the literal's subtype. */
-  private hasPropertiesBeyondLiteral(type: Type, literal: Type): boolean {
-    if (literal.kind !== 'object' || !literal.isLiteral) return false;
-    const literalProperties = this.c.structureOf(literal).properties;
-    return [...this.c.structureOf(type).properties.values()].some(
-      (property) => !literalProperties.has(property.name) && !isIntrinsic(property.type(), 'undefined')
-    );
   }
 
   literalProperty(name: string, type: Type, readonly: boolean, declaration: TreeNode, nameType?: Type): Property {
@@ -1197,9 +1191,9 @@ export class LiteralChecker {
     return keepFresh && type.fresh ? freshObjectLiteral(widened) : widened;
   }
 
-  iteratedBindingType(element: Type, iterable: TreeNode): Type {
-    const source = mapType(element, (member) =>
-      member.kind === 'object' && this.isObjectLiteralWithin(member, iterable)
+  inlineBindingType(type: Type, expression: TreeNode): Type {
+    const source = mapType(type, (member) =>
+      member.kind === 'object' && this.isObjectLiteralWithin(member, expression)
         ? freshObjectLiteral(member.regular ?? member)
         : member
     );

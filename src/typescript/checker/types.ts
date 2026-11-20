@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 408 -- Keeps type data, cache keys, and canonical type constructors together.
+// code-gauge-allow-file fileNcss 410 -- Keeps type data, cache keys, and canonical type constructors together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { ExecutionBudget } from '../../interpreter/limits';
@@ -452,6 +452,10 @@ export function typeCacheKey(type: Type | undefined): number | string | undefine
   return type?.noInfer ? `${type.id}!` : type?.id;
 }
 
+export function freshTypeCacheKey(type: Type): string {
+  return `${typeCacheKey(type)}${type.kind === 'object' && type.fresh ? 'f' : ''}`;
+}
+
 export function typeMapperCacheKey(mapper: ReadonlyMap<number, Type> & Pick<Mapper, 'preserveLiterals'>): string {
   const entries = [...mapper].map(([id, type]) => `${id}=${typeCacheKey(type)}`).join(',');
   return mapper.preserveLiterals ? `+${entries}` : entries;
@@ -478,9 +482,7 @@ export function unionOf(types: Type[], keepFresh = false, preserveLiterals = fal
   if (reduced.length === 0) return neverType;
   if (reduced.length === 1) return reduced[0];
   reduced.sort((a, b) => unionSortKey(a) - unionSortKey(b));
-  const key = reduced
-    .map((type) => `${typeCacheKey(type)}${type.kind === 'object' && type.fresh ? 'f' : ''}`)
-    .join('|');
+  const key = reduced.map(freshTypeCacheKey).join('|');
   let union = unionCache.get(key);
   if (!union) {
     if (key === booleanUnionKey) return booleanType;
