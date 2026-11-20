@@ -846,6 +846,22 @@ int main() {
   });
 });
 
+test('folds floating division by zero outside constant expressions', () => {
+  const program = `#include <iostream>
+int main() {
+  constexpr double overflow = 1e308 * 1e308;
+  const double infinite = 1.0 / 0.0;
+  static const double negative = -1.0 / 0.0;
+  double runtime = 1.0 / 0.0;
+  std::cout << overflow << ' ' << infinite << ' ' << negative << ' ' << runtime;
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'inf inf -inf inf',
+    uncaughtException: undefined,
+  });
+});
+
 test('composes constants from typed arithmetic functors', () => {
   const program = `#include <functional>
 #include <iostream>

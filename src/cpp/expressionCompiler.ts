@@ -728,7 +728,10 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     if (knownA !== undefined && knownB !== undefined) {
       try {
         const constant = operation(knownA, knownB);
-        if (a.constant !== undefined && b.constant !== undefined) expr.constant = constant;
+        // Apple clang++ folds a floating division by zero but does not accept it in a constant expression.
+        const isConstant =
+          a.constant !== undefined && b.constant !== undefined && !dividesByZero(operator, common, knownB);
+        if (isConstant) expr.constant = constant;
         else expr.foldedValue = constant;
         if (!Number.isNaN(knownA) && !Number.isNaN(knownB)) expr.run = () => constant;
       } catch {
@@ -2253,6 +2256,10 @@ function constantFunctor(type: Type, object: Expr): Expr {
   return type.kind === 'class' && type.cls.library?.kind === 'functor'
     ? { ...object, constantInitialization: true }
     : object;
+}
+
+function dividesByZero(operator: string, type: ArithmeticType, divisor: number | bigint): boolean {
+  return operator === '/' && type.kind === 'float' && Number(divisor) === 0;
 }
 
 /** Whether a constant subscript stays within an array or one past its end, as Apple clang++ accepts in a constant expression. */

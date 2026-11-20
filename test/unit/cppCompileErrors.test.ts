@@ -1276,3 +1276,14 @@ int main() { ${declaration} int b[${bound}]; }`;
     diagnostics: [{ row: 1, message: expect.stringContaining('可変長配列') }],
   });
 });
+
+test.each(['1.0 / 0.0', '0.0 / 0.0'])(
+  'rejects the floating division by zero %s in a constexpr initializer',
+  (value) => {
+    const program = `int main() { constexpr double x = ${value}; }`;
+    expect(executeProgram('cpp', program)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [{ row: 0, message: expect.stringContaining('定数式') }],
+    });
+  }
+);
