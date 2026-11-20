@@ -39,6 +39,11 @@ test('values print as rustc prints them', () => {
     println!("{} {:?} {:?} {:?} {}", -0.0f64, 1e15, 1e16, 1e-5, 1e21);
     println!("{:?} {:?} {:?}", (-0.5f64).round_ties_even(), (-0.5f32).round_ties_even(), 0.5f64.round_ties_even());
     println!("{} {} {} {}", 2.0_f64.powi(i32::MIN), 0.5_f32.powi(i32::MIN), (-1.0_f64).powi(i32::MIN), (-0.0_f32).powi(i32::MIN));
+    let positive = f64::NAN;
+    let negative = positive.copysign(-1.0);
+    let negative32 = f32::NAN.copysign(-1.0);
+    println!("{} {} {} {}", positive.is_sign_positive(), negative.is_sign_negative(), 1.0_f64.copysign(negative), 1.0_f32.copysign(negative32));
+    println!("{} {} {}", negative32.is_sign_negative(), negative32.copysign(1.0).is_sign_positive(), (-0.0_f64).is_sign_negative());
     println!("{:?} {} {}", 0.1f32 + 0.2f32, 0.1 + 0.2, 123456789.0f32);
     println!("[{:>6}] [{:<4}] [{:^7}] [{:05}] [{:+}] [{:#x}] [{:#010b}] [{:e}]", 42, 7, "ab", -42, 5, 255, 5, 1234.5);
     println!("{:?} {:5?} {:?}", (1, "a", 'c', Some(2.5)), Some(1), "q\"\n");
@@ -51,6 +56,8 @@ test('values print as rustc prints them', () => {
 -0 1000000000000000.0 1e16 1e-5 1000000000000000000000
 -0.0 -0.0 0.0
 0 inf 1 inf
+true true -1 -1
+true true true
 0.3 0.30000000000000004 123456790
 [    42] [7   ] [  ab   ] [-0042] [+5] [0xff] [0b00000101] [1.2345e3]
 (1, "a", 'c', Some(2.5)) Some(    1) "q\\"\\n"

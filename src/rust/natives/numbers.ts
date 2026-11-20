@@ -526,8 +526,8 @@ const floating: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
     if (Number.isNaN(value)) return Number.NaN;
     return value > 0 || Object.is(value, 0) ? 1 : -1;
   },
-  is_sign_positive: ([a]) => float(a) > 0 || Object.is(float(a), 0),
-  is_sign_negative: ([a]) => float(a) < 0 || Object.is(float(a), -0),
+  is_sign_positive: ([a]) => !signBit(float(a)),
+  is_sign_negative: ([a]) => signBit(float(a)),
   // Rust multiplies by a constant of the type: `180 / PI` and `PI / 180` rounded to it.
   to_degrees: ([a], ctx) => round(ctx, float(a) * round(ctx, 180 / Math.PI)),
   to_radians: ([a], ctx) => round(ctx, float(a) * round(ctx, round(ctx, Math.PI) / 180)),
@@ -551,18 +551,25 @@ const floating: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
   },
   copysign: ([a, sign], ctx) => {
     const magnitude = Math.abs(float(a));
-    const negative = float(sign) < 0 || Object.is(float(sign), -0);
+    const negative = signBit(float(sign));
     return round(ctx, negative ? -magnitude : magnitude);
   },
 };
 
 /** The integer that orders floats as `total_cmp` does: by their bits, with negative numbers' magnitude bits flipped. */
 function totalOrderKey(value: number): bigint {
+  const bits = BigInt.asIntN(64, floatBits(value));
+  return bits ^ ((bits >> 63n) & 0x7f_ff_ff_ff_ff_ff_ff_ffn);
+}
+
+function signBit(value: number): boolean {
+  return floatBits(value) >> 63n !== 0n;
+}
+
+function floatBits(value: number): bigint {
   const view = new DataView(new ArrayBuffer(8));
   view.setFloat64(0, value);
-  let bits = view.getBigInt64(0);
-  bits ^= (bits >> 63n) & 0x7f_ff_ff_ff_ff_ff_ff_ffn;
-  return bits;
+  return view.getBigUint64(0);
 }
 
 /** `powi` as compiler-rt's `__powidf2` and `__powisf2` compute it, rounding each step to the type (`round`). */
@@ -601,9 +608,7 @@ function fma(a: number, b: number, c: number): number {
 
 /** A finite double as an integer mantissa and a power of two. */
 function decompose(value: number): [bigint, number] {
-  const view = new DataView(new ArrayBuffer(8));
-  view.setFloat64(0, value);
-  const bits = view.getBigUint64(0);
+  const bits = floatBits(value);
   const sign = bits >> 63n ? -1n : 1n;
   const exponentBits = Number((bits >> 52n) & 0x7_ffn);
   let mantissa = bits & ((1n << 52n) - 1n);
