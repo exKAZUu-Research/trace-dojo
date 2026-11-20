@@ -2,6 +2,7 @@ import type { Checker } from './checker';
 import {
   intersectionOf,
   type IntersectionType,
+  isDiscriminantLiteral,
   isIntrinsic,
   neverType,
   type Property,
@@ -53,19 +54,9 @@ export class ReducedTypes {
     if (properties.every((property) => property.optional)) return false;
     const types = properties.map((property) => propertyAccessType(property));
     return (
-      types.some(isDiscriminant) &&
+      types.some(isDiscriminantLiteral) &&
       !types.some((member) => isIntrinsic(member, 'never')) &&
       isIntrinsic(intersectionOf(types, this.c.budget), 'never')
     );
   }
-}
-
-function isDiscriminant(type: Type): boolean {
-  return type.kind === 'union'
-    ? type.types.length > 0 && type.types.every(isUnit)
-    : isUnit(type) || type.kind === 'templateLiteral' || type.kind === 'stringMapping';
-}
-
-function isUnit(type: Type): boolean {
-  return type.kind === 'literal' || isIntrinsic(type, 'null') || isIntrinsic(type, 'undefined');
 }

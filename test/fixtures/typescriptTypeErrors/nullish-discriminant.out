@@ -1,0 +1,6 @@
+(3,11): error TS2322: Type '"a" | "b"' is not assignable to type '"a"'.
+  Type '"b"' is not assignable to type '"a"'.
+(8,11): error TS2322: Type '"a" | "b"' is not assignable to type '"b"'.
+  Type '"a"' is not assignable to type '"b"'.
+(13,11): error TS2322: Type '{ tag: "same"; left: number; } | { tag: "same"; right: number; }' is not assignable to type 'never'.
+  Type '{ tag: "same"; left: number; }' is not assignable to type 'never'.

@@ -468,6 +468,7 @@ export function intersectionOf(types: Type[], budget: ExecutionBudget): Type {
   const flat = flattenedMembers(types, 'intersection', true, budget);
   if (flat.some((type) => isIntrinsic(type, 'never'))) return neverType;
   if (flat.includes(permissiveAnyType)) return permissiveAnyType;
+  if (hasObjectDomainConflict(flat)) return neverType;
   if (flat.some((type) => isAnyLike(type))) return anyType;
   const members = flat.filter((type) => !isIntrinsic(type, 'unknown'));
   if (members.length === 0) return unknownType;
@@ -499,16 +500,20 @@ export function intersectionOf(types: Type[], budget: ExecutionBudget): Type {
 }
 
 function reducedIntersectionMembers(members: Type[], units: Type[]): Type[] {
-  if (
-    members.includes(emptyObjectType) &&
-    units.some((unit) => isIntrinsic(unit, 'null') || isIntrinsic(unit, 'undefined'))
-  )
-    return [neverType];
   return members.filter(
     (type) =>
       (!isIntrinsic(type, 'void') || !units.some((unit) => isIntrinsic(unit, 'undefined'))) &&
       (type !== emptyObjectType || !units.some((unit) => !isIntrinsic(unit, 'void')))
   );
+}
+
+function hasObjectDomainConflict(types: Type[]): boolean {
+  if (types.some((type) => isIntrinsic(type, 'object')))
+    return types.some(
+      (type) =>
+        type.kind === 'literal' || type.kind === 'templateLiteral' || type.kind === 'stringMapping' || isPrimitive(type)
+    );
+  return types.some((type) => type.kind === 'object') && types.some(isNullableUnit);
 }
 
 function flattenedMembers(
@@ -555,6 +560,41 @@ function primitiveDomain(type: Type): string {
 
 export function typeMembers(type: Type): Type[] {
   return type.kind === 'union' ? type.types : [type];
+}
+
+export function isDiscriminantLiteral(type: Type): boolean {
+  if (type.kind === 'union') return type.types.every(isDiscriminantUnit);
+  return isDiscriminantUnit(type) || isPatternLiteralType(type);
+}
+
+function isDiscriminantUnit(type: Type): boolean {
+  return type.kind === 'literal' || isNullableUnit(type);
+}
+
+function isNullableUnit(type: Type): boolean {
+  return isIntrinsic(type, 'null') || isIntrinsic(type, 'undefined');
+}
+
+function isPatternLiteralType(type: Type): boolean {
+  if (type.kind === 'templateLiteral') return type.types.every(isPatternLiteralPlaceholder);
+  return type.kind === 'stringMapping' && isPatternLiteralPlaceholder(type.type);
+}
+
+function isPatternLiteralPlaceholder(type: Type): boolean {
+  if (type.kind === 'intersection') {
+    const placeholders = type.types.filter((member) => member.kind !== 'object');
+    return (
+      placeholders.length > 0 &&
+      placeholders.every((member) => isDiscriminantUnit(member) || isPatternLiteralPlaceholder(member))
+    );
+  }
+  return (
+    isAnyLike(type) ||
+    isIntrinsic(type, 'string') ||
+    isIntrinsic(type, 'number') ||
+    isIntrinsic(type, 'bigint') ||
+    isPatternLiteralType(type)
+  );
 }
 
 export function filterType(type: Type, keep: (member: Type) => boolean): Type {

@@ -1,0 +1,15 @@
+function optional(value: { kind: 'a'; entry: string | null } | { kind: 'b'; entry: number }) {
+  if (value.entry === null) {
+    const incorrectlyNarrowed: 'a' = value.kind;
+  }
+}
+function mixed(value: { kind: 'a'; entry: string | null } | { kind: 'b'; entry: number | undefined }) {
+  if (value.entry === undefined) {
+    const incorrectlyNarrowed: 'b' = value.kind;
+  }
+}
+function shared(value: { tag: 'same'; left: number } | { tag: 'same'; right: number }) {
+  if (value.tag === undefined) {
+    const impossibleParent: never = value;
+  }
+}

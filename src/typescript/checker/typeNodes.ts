@@ -92,14 +92,7 @@ export class TypeNodes {
     ['parenthesized_type', (node) => this.typeFromNode(named(node)[0])],
     ['literal_type', (node) => this.literalTypeOf(named(node)[0])],
     ['union_type', (node) => unionOf(named(node).map((member) => this.typeFromNode(member)))],
-    [
-      'intersection_type',
-      (node) =>
-        intersectionOf(
-          named(node).map((member) => this.typeFromNode(member)),
-          this.c.budget
-        ),
-    ],
+    ['intersection_type', (node) => this.intersectionType(node)],
     ['array_type', (node) => this.c.arrayType(this.typeFromNode(named(node)[0]))],
     ['readonly_type', (node) => this.readonlyType(node)],
     ['tuple_type', (node) => this.tupleTypeFromNode(node)],
@@ -151,6 +144,20 @@ export class TypeNodes {
       if (defers) this.deferredDepth--;
       this.resolutionDepth--;
     }
+  }
+
+  private intersectionType(node: TreeNode): Type {
+    const members: Type[] = [];
+    const visit = (part: TreeNode): void => {
+      if (part.type !== 'intersection_type') {
+        members.push(this.typeFromNode(part));
+        return;
+      }
+      this.c.budget.spend();
+      for (const child of named(part)) visit(child);
+    };
+    visit(node);
+    return intersectionOf(members, this.c.budget);
   }
 
   /** The type of a `type_annotation` or of the type node a field holds. */

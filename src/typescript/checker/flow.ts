@@ -19,6 +19,7 @@ import {
   intersectionOf,
   type IntersectionType,
   isAnyLike,
+  isDiscriminantLiteral,
   isIntrinsic,
   isPropertyKeyLiteral,
   type LiteralType,
@@ -29,6 +30,8 @@ import {
   nullType,
   numberType,
   type ObjectType,
+  propertyAccessType,
+  regularOf,
   simpleProperty,
   stringType,
   symbolType,
@@ -658,16 +661,19 @@ export class Flow {
     });
   }
 
-  /** Whether a union's property is a discriminant: some member has a literal type for it. */
   isDiscriminant(type: Type, name: string): boolean {
     if (type.kind !== 'union') return false;
-    return type.types.some((member) => {
-      if (member.kind !== 'object' && member.kind !== 'intersection') return false;
+    this.c.budget.spend(type.types.length);
+    const propertyTypes = type.types.flatMap((member) => {
+      if (member.kind !== 'object' && member.kind !== 'intersection') return [];
       const property = this.c.propertyOf(member, name);
-      if (!property) return false;
-      const propertyType = property.type();
-      return (propertyType.kind === 'union' ? propertyType.types : [propertyType]).some((part) => isUnit(part));
+      return property ? [regularOf(propertyAccessType(property))] : [];
     });
+    return (
+      propertyTypes.some(isDiscriminantLiteral) &&
+      new Set(propertyTypes.map((propertyType) => propertyType.id)).size > 1 &&
+      !isGenericObjectOrIndexType(unionOf(propertyTypes))
+    );
   }
 
   /** The type of a variable after assigning `assigned` to it when it is declared as `declared`. */
