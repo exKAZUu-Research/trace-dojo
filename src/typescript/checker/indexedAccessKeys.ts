@@ -53,6 +53,22 @@ export function narrowIndexedOperands(
   return narrow;
 }
 
+export function narrowKeyConstraints(c: Checker, narrow: (type: Type) => Type): (type: Type) => Type {
+  const cache = new Map<Type, Type>();
+  const project = (type: Type): Type => {
+    if (type.kind === 'keyof' || type.kind === 'templateLiteral') return narrow(type);
+    if (type.kind !== 'union' && type.kind !== 'intersection') return type;
+    const existing = cache.get(type);
+    if (existing) return existing;
+    c.budget.spend();
+    cache.set(type, type);
+    const bound = narrowComposite(c, type, project);
+    cache.set(type, bound);
+    return bound;
+  };
+  return project;
+}
+
 function narrowOperand(c: Checker, type: Type, narrow: (type: Type) => Type, parameters: Mapper): Type {
   switch (type.kind) {
     case 'typeParameter': {
@@ -83,14 +99,22 @@ function narrowOperand(c: Checker, type: Type, narrow: (type: Type) => Type, par
     }
     case 'union':
     case 'intersection': {
-      const members = type.types.map(narrow);
-      if (members.every((member, index) => member === type.types[index])) return type;
-      return type.kind === 'union' ? unionOf(members) : intersectionOf(members, c);
+      return narrowComposite(c, type, narrow);
     }
     default: {
       return type;
     }
   }
+}
+
+function narrowComposite(
+  c: Checker,
+  type: Extract<Type, { kind: 'union' | 'intersection' }>,
+  narrow: (type: Type) => Type
+): Type {
+  const members = type.types.map(narrow);
+  if (members.every((member, index) => member === type.types[index])) return type;
+  return type.kind === 'union' ? unionOf(members) : intersectionOf(members, c);
 }
 
 function narrowIndexedProjection(c: Checker, access: IndexedAccessType, narrow: (type: Type) => Type): Type {

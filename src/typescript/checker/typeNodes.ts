@@ -6,7 +6,7 @@ import { unsupportedMessage } from '../unsupported';
 import type { Checker, Mapper, UnionAlias } from './checker';
 import { EagerTypeConstraints } from './eagerTypeConstraints';
 import { isGenericObjectOrIndexType } from './genericTypes';
-import { narrowIndexedOperands } from './indexedAccessKeys';
+import { narrowIndexedOperands, narrowKeyConstraints } from './indexedAccessKeys';
 import { addIndexInfo, isPatternKey } from './indexInfos';
 import { InterfaceBases } from './interfaceBases';
 import { RecursiveAliases } from './recursiveAliases';
@@ -660,13 +660,15 @@ export class TypeNodes {
   private argumentMatchesInBranch(node: TreeNode): (argument: Type, constraint: Type) => boolean {
     const mapper = this.conditionalMapper(node);
     const project = this.conditionalTypeNarrowing(node);
+    const projectConstraint = narrowKeyConstraints(this.c, project);
     return (argument, constraint) => {
       const narrowed = this.c.instantiate(argument, mapper);
       if (narrowed !== argument && this.c.relations.isAssignable(narrowed, constraint)) return true;
+      const target = projectConstraint(constraint);
       return typeMembers(argument).every((member) => {
         const projected = project(member);
         const bound = projected === neverType && member.kind !== 'indexedAccess' ? member : projected;
-        return this.c.relations.isAssignable(bound, constraint);
+        return this.c.relations.isAssignable(bound, target);
       });
     };
   }

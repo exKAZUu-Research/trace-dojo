@@ -1,0 +1,23 @@
+(8,81): error TS2344: Type '{ key: number; }' does not satisfy the constraint 'Record<keyof T[K], number>'.
+(9,83): error TS2344: Type 'string' does not satisfy the constraint 'Uppercase<keyof T[K] & string>'.
+(10,78): error TS2344: Type '{ key: "x"; }' does not satisfy the constraint 'T[K]'.
+  'T[K]' could be instantiated with an arbitrary type which could be unrelated to '{ key: "x"; }'.
+(11,78): error TS2344: Type '{ value: { key: "x"; }; }' does not satisfy the constraint '{ value: T[K]; }'.
+  Types of property 'value' are incompatible.
+    Type '{ key: "x"; }' is not assignable to type 'T[K]'.
+      'T[K]' could be instantiated with an arbitrary type which could be unrelated to '{ key: "x"; }'.
+(12,62): error TS2344: Type '{ key: "x"; }' does not satisfy the constraint 'T'.
+  'T' could be instantiated with an arbitrary type which could be unrelated to '{ key: "x"; }'.
+(13,73): error TS2344: Type 'string' does not satisfy the constraint 'keyof T[K]'.
+  Type '"no"' is not assignable to type '"key"'.
+(14,77): error TS2344: Type '"key" | "no"' does not satisfy the constraint '"fallback" | keyof T[K]'.
+  Type '"no"' is not assignable to type '"fallback" | keyof T[K]'.
+(15,90): error TS2344: Type 'string' does not satisfy the constraint 'keyof T[K] & string'.
+  Type 'string' is not assignable to type 'keyof T[K]'.
+    Type '"no"' is not assignable to type '"key"'.
+(16,81): error TS2344: Type 'string' does not satisfy the constraint 'keyof T[K]'.
+  Type 'string' is not assignable to type 'keyof T[keyof T]'.
+    Type 'string' is not assignable to type 'keyof T[string | number | symbol]'.
+      Type 'string' is not assignable to type 'keyof T[string] & keyof T[number] & keyof T[symbol]'.
+        Type 'string' is not assignable to type 'keyof T[string]'.
+(18,81): error TS2344: Type '"X"' does not satisfy the constraint 'Uppercase<T[K]["key"]>'.
