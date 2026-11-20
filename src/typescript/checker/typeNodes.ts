@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 580 -- Resolves every kind of type syntax a program writes, each needing its own rule.
+// code-gauge-allow-file fileNcss 582 -- Resolves every kind of type syntax a program writes, each needing its own rule.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
@@ -248,9 +248,7 @@ export class TypeNodes {
     const indexType = this.typeFromNode(index);
     if (
       objectType.kind === 'typeParameter' &&
-      this.indexedAccessKeys.isInvalid(objectType, indexType, (parameter) =>
-        this.conditionalExtendsTypes(node, parameter)
-      )
+      this.indexedAccessKeys.isInvalid(objectType, indexType, this.conditionalExtendsTypes(node))
     ) {
       this.c.error(index, `型 '${this.c.print(indexType)}' は型 '${objectType.name}' のインデックスに使えません。`);
       return errorType;
@@ -263,24 +261,19 @@ export class TypeNodes {
    * checks it against an array type, as TypeScript's substitution types narrow it.
    */
   private narrowedToArray(node: TreeNode, type: Type): boolean {
-    return (
-      type.kind === 'typeParameter' &&
-      this.conditionalExtendsTypes(node, type).some((extendsType) => this.validTupleRestType(extendsType))
-    );
+    if (type.kind !== 'typeParameter') return false;
+    const bound = this.conditionalMapper(node, false).get(type.id);
+    return bound !== undefined && this.validTupleRestType(bound);
   }
 
-  /**
-   * The types that the conditional types whose true branch holds `node` check `parameter` against, as `X extends C` and
-   * `[X] extends [C]` do; `any` and `unknown` do not narrow it.
-   */
-  private conditionalExtendsTypes(node: TreeNode, parameter: TypeParameter): Type[] {
-    const types: Type[] = [];
-    for (const [check, extendsNode] of this.conditionalTrueChecks(node)) {
-      if (check.id !== parameter.id) continue;
-      const bound = this.conditionalBound(extendsNode);
-      if (bound) types.push(bound);
-    }
-    return types;
+  /** Compute the branch bounds once when checking the keys of a generic indexed access. */
+  private conditionalExtendsTypes(node: TreeNode): (parameter: TypeParameter) => Type[] {
+    let mapper: Mapper | undefined;
+    return (parameter) => {
+      mapper ??= this.conditionalMapper(node, false);
+      const bound = mapper.get(parameter.id);
+      return bound ? [bound] : [];
+    };
   }
 
   private *conditionalTrueChecks(node: TreeNode): IterableIterator<[Type, TreeNode]> {
@@ -552,7 +545,7 @@ export class TypeNodes {
       const instantiated = this.c.instantiate(constraint, mapper);
       if (this.c.relations.isAssignable(argument, instantiated)) continue;
       if (writtenAt) {
-        branchMapper ??= this.conditionalArgumentMapper(writtenAt);
+        branchMapper ??= this.conditionalMapper(writtenAt);
         const narrowed = this.c.instantiate(argument, branchMapper);
         if (narrowed !== argument && this.c.relations.isAssignable(narrowed, instantiated)) continue;
       }
@@ -560,12 +553,17 @@ export class TypeNodes {
     }
   }
 
-  private conditionalArgumentMapper(node: TreeNode): Mapper {
+  private conditionalMapper(node: TreeNode, preserveIdentity = true): Mapper {
     const mapper: Mapper = new Map();
-    for (const [check, extendsNode] of this.conditionalTrueChecks(node)) {
+    // An inner check can use a bound established by an outer true branch.
+    for (const [check, extendsNode] of [...this.conditionalTrueChecks(node)].toReversed()) {
       if (check.kind !== 'typeParameter') continue;
       const bound = this.conditionalBound(extendsNode);
-      if (bound) mapper.set(check.id, intersectionOf([mapper.get(check.id) ?? check, bound], this.c.budget));
+      if (bound) {
+        const narrowed = this.c.instantiate(bound, mapper);
+        const prior = mapper.get(check.id) ?? (preserveIdentity ? check : this.c.constraintOf(check));
+        mapper.set(check.id, prior ? intersectionOf([prior, narrowed], this.c.budget) : narrowed);
+      }
     }
     return mapper;
   }

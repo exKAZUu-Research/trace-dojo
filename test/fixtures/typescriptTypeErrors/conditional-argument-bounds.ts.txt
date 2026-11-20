@@ -1,3 +1,6 @@
 type BadFalse<T> = T extends string ? never : Uppercase<T>;
 type BadUnknown<T> = T extends unknown ? Uppercase<T> : never;
 type Chain<T,U> = T extends U ? U extends string ? Uppercase<T> : never : never;
+type FalseInner<T,U> = T extends string ? U extends T ? never : Uppercase<U> : never;
+type Holder<T extends { x: string }> = T;
+type ReverseObject<T,U> = U extends T ? T extends { x: string } ? Holder<U> : never : never;

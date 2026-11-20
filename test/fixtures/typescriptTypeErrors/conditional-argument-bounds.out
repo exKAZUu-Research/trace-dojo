@@ -1,3 +1,5 @@
 (1,57): error TS2344: Type 'T' does not satisfy the constraint 'string'.
 (2,52): error TS2344: Type 'T' does not satisfy the constraint 'string'.
 (3,62): error TS2344: Type 'U & T' does not satisfy the constraint 'string'.
+(4,75): error TS2344: Type 'U' does not satisfy the constraint 'string'.
+(6,74): error TS2344: Type 'T & U' does not satisfy the constraint '{ x: string; }'.
