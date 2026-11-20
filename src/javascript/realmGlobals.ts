@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 402 -- Registers global objects and their standard methods with one realm builder.
 import { TURTLE_METHOD_NAMES } from '../interpreter/turtleWorld';
 import { listFromArrayLike } from './arrayOps';
 import { formatLogArguments } from './consoleFormat';
@@ -85,10 +86,11 @@ function defineObject(builder: RealmBuilder): void {
   );
   builder.method(objectPrototype, 'toString', 0, ({ runtime, thisValue }) => objectToString(runtime, thisValue));
   builder.method(objectPrototype, 'valueOf', 0, ({ runtime, thisValue }) => runtime.toObject(thisValue));
-  // toLocaleString calls the value's own toString, as the specification's Invoke does.
-  builder.method(objectPrototype, 'toLocaleString', 0, ({ runtime, thisValue }) =>
-    runtime.call(runtime.get(thisValue, 'toString'), thisValue, [])
-  );
+  builder.method(objectPrototype, 'toLocaleString', 0, ({ runtime, thisValue }) => {
+    if (thisValue === null || thisValue === undefined)
+      runtime.throwError('TypeError', 'Object.prototype.toLocaleString called on null or undefined');
+    return runtime.call(runtime.get(thisValue, 'toString'), thisValue, []);
+  });
 }
 
 /** The spec's `Object.prototype.toString`, which other builtins call directly rather than through the property. */
@@ -608,7 +610,7 @@ function defineConsoleDir(
           maxStringLength: limit('maxStringLength'),
           showHidden: toBoolean(option('showHidden')),
           sorted: sortedOption(option('sorted')),
-          getters: getters === 'get' || getters === 'set' ? getters : toBoolean(getters),
+          getters: getters === true || getters === 'get' || getters === 'set' ? getters : false,
           numericSeparator: toBoolean(option('numericSeparator')),
         })
       );

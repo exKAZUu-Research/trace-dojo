@@ -45,7 +45,7 @@ const typeParameterOwners = new Set([
 /** The scopes of a program: which names each node can see, as values and as types. */
 export class Binder {
   private readonly scopes = new Map<number, Scope>();
-  private readonly deferredInterfaceBodies = new Set<number>();
+  private readonly deferredTypes = new Map<number, Scope>();
   /** The identifiers that name what an assignment changes, to find the variables a program reassigns. */
   private readonly assignedIdentifiers: TreeNode[] = [];
   readonly moduleScope: Scope;
@@ -71,7 +71,7 @@ export class Binder {
   constructor(
     root: TreeNode,
     readonly globalScope: Scope,
-    private readonly options?: { rootScope?: Scope; deferInterfaceBodies?: boolean }
+    private readonly options?: { rootScope?: Scope; deferLibraryTypes?: boolean }
   ) {
     this.moduleScope = options?.rootScope ?? new Scope('module', globalScope, root);
     this.scopes.set(root.id, this.moduleScope);
@@ -79,10 +79,11 @@ export class Binder {
     this.markAssignments();
   }
 
-  bindDeferredInterfaceBody(declaration: TreeNode, body: TreeNode): boolean {
-    if (!this.deferredInterfaceBodies.delete(body.id)) return false;
-    const scope = this.scopes.get(declaration.id);
-    if (scope) this.bindChildren(body, scope);
+  bindDeferredType(node: TreeNode): boolean {
+    const scope = this.deferredTypes.get(node.id);
+    if (!scope) return false;
+    this.deferredTypes.delete(node.id);
+    this.bind(node, scope);
     return true;
   }
 
@@ -174,10 +175,6 @@ export class Binder {
   private bindTypeDeclaration(node: TreeNode, scope: Scope, kind: 'interface' | 'alias'): void {
     const name = node.childForFieldName('name');
     if (name) scope.declareType(name.text, kind, node, name);
-    if (kind === 'interface' && this.options?.deferInterfaceBodies) {
-      const body = node.childForFieldName('body');
-      if (body) this.deferredInterfaceBodies.add(body.id);
-    }
     this.bindTypeParameterOwner(node, scope);
   }
 
@@ -280,8 +277,10 @@ export class Binder {
   private bindTypeParameterOwner(node: TreeNode, scope: Scope): void {
     const ownerScope = this.newScope(node, 'block', scope);
     this.declareTypeParameters(node, ownerScope);
+    const interfaceBody = node.type === 'interface_declaration' ? node.childForFieldName('body') : undefined;
     for (const child of named(node)) {
-      if (!this.deferredInterfaceBodies.has(child.id)) this.bind(child, ownerScope);
+      if (child.id === interfaceBody?.id) this.bindLibraryType(child, ownerScope);
+      else this.bind(child, ownerScope);
     }
   }
 
@@ -293,10 +292,7 @@ export class Binder {
         case 'lexical_declaration': {
           const kind =
             child.type === 'variable_declaration' ? 'var' : (child.childForFieldName('kind')?.text as 'let' | 'const');
-          for (const declarator of named(child)) {
-            const name = declarator.childForFieldName('name');
-            if (name) scope.declareAmbientValue(name.text, kind, declarator, name);
-          }
+          for (const declarator of named(child)) this.bindAmbientVariable(declarator, scope, kind);
           break;
         }
         case 'function_signature': {
@@ -315,6 +311,20 @@ export class Binder {
         }
       }
     }
+  }
+
+  private bindAmbientVariable(node: TreeNode, scope: Scope, kind: 'let' | 'const' | 'var'): void {
+    const name = node.childForFieldName('name');
+    if (!name) return;
+    scope.declareAmbientValue(name.text, kind, node, name);
+    const annotation = node.childForFieldName('type');
+    const type = annotation && named(annotation)[0];
+    if (type) this.bindLibraryType(type, scope);
+  }
+
+  private bindLibraryType(node: TreeNode, scope: Scope): void {
+    if (this.options?.deferLibraryTypes) this.deferredTypes.set(node.id, scope);
+    else this.bind(node, scope);
   }
 
   private declareTypeParameters(node: TreeNode, scope: Scope): void {

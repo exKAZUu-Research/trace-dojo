@@ -1,0 +1,6 @@
+type Broad = { kind: 'item'; value: string } | object;
+const primitive: Broad = 1;
+const nullish: Broad = null;
+type Narrow = (object & { value: string }) | { count: number };
+const bogus: Narrow = { arbitrary: 1 };
+const misspelled: Narrow = { value: 'x', typo: 1 };

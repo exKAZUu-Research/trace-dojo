@@ -126,7 +126,7 @@ export class Checker {
 
   constructor(readonly root: TreeNode) {
     startTypeCaches();
-    this.libraryBinder = new Binder(libraryTree.rootNode, libraryScope(), { deferInterfaceBodies: true });
+    this.libraryBinder = new Binder(libraryTree.rootNode, libraryScope(), { deferLibraryTypes: true });
     this.localeOptionsBinder = new Binder(localeOptionsTree.rootNode, this.libraryBinder.moduleScope);
     markUnsupported(this.libraryBinder.moduleScope);
     this.binder = new Binder(root, this.libraryBinder.globalScope, { rootScope: this.libraryBinder.moduleScope });
@@ -230,6 +230,11 @@ export class Checker {
   ownScope(node: TreeNode): Scope | undefined {
     if (node.tree === localeOptionsTree) return this.localeOptionsBinder.ownScope(node);
     return node.tree === libraryTree ? this.libraryBinder.ownScope(node) : this.binder.ownScope(node);
+  }
+
+  bindDeferredLibraryType(node: TreeNode): void {
+    if (node.tree === libraryTree && this.libraryBinder.bindDeferredType(node))
+      this.budget.spend(Math.ceil((node.endIndex - node.startIndex) / 32));
   }
 
   isLibrary(node: TreeNode): boolean {

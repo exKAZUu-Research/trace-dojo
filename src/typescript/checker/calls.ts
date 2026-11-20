@@ -1093,7 +1093,6 @@ export class Calls {
   }
 }
 
-/** The object a call through a property or an element, as `o.f()` or `o["f"]()`, passes as `this`. */
 /** Whether a signature's rest parameter is a tuple with elements after its rest element, as `[...string[], number]`. */
 function isTrailingRestTuple(signature: Signature): boolean {
   const last = signature.parameters.at(-1);

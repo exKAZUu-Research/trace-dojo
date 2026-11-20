@@ -1,0 +1,6 @@
+type Broad = { kind: 'item'; value: string } | object;
+const mismatch: Broad = { kind: 'item', value: 1 };
+const extra: Broad = { arbitrary: 2 };
+function consume(value: Broad): Broad { return value; }
+function create(): Broad { return { kind: 'item', value: 3 }; }
+console.log(mismatch, extra, consume({ more: true }), create());

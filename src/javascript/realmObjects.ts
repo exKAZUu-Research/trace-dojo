@@ -245,7 +245,6 @@ function holdingTemporaries(runtime: Runtime, run: () => void): void {
   }
 }
 
-/** Whether an object is sealed, or frozen when `frozen` is set, as `Object.isSealed` and `Object.isFrozen` test. */
 /** Whether no own property of a non-extensible object is configurable, nor, when `frozen`, a writable data property. */
 function isLocked(runtime: Runtime, value: Value, frozen: boolean): boolean {
   if (!isObject(value)) return true;

@@ -35,6 +35,7 @@ import {
   freshLiteralType,
   isAnyLike,
   isIntrinsic,
+  nonPrimitiveType,
   nullType,
   numberType,
   type ObjectType,
@@ -751,9 +752,10 @@ export class ExpressionChecker {
   private acceptsAnyProperty(targets: Type[]): boolean {
     return targets.some(
       (member) =>
-        member.kind === 'object' &&
-        (this.c.relations.isEmptyObjectType(member) ||
-          (member.objectKind === 'mapped' && this.c.relations.isGeneric(member)))
+        member === nonPrimitiveType ||
+        (member.kind === 'object' &&
+          (this.c.relations.isEmptyObjectType(member) ||
+            (member.objectKind === 'mapped' && this.c.relations.isGeneric(member))))
     );
   }
 
@@ -899,7 +901,7 @@ function nodeGlobalHint(name: string): string {
 /** The members of a target that an object literal's excess properties are checked against. */
 function objectTargets(target: Type): Type[] {
   return (target.kind === 'union' ? target.types : [target]).filter(
-    (member) => member.kind === 'object' || member.kind === 'intersection'
+    (member) => member === nonPrimitiveType || member.kind === 'object' || member.kind === 'intersection'
   );
 }
 

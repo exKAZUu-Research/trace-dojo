@@ -132,6 +132,7 @@ export class TypeNodes {
   typeFromNode(node: TreeNode): Type {
     const cached = this.typeNodeCache.get(node.id);
     if (cached) return cached;
+    this.c.bindDeferredLibraryType(node);
     this.c.budget.spend();
     if (this.resolutionDepth >= LIMITS.maxCallDepth) throw new ExecutionLimitError('operations');
     this.resolutionDepth++;
@@ -809,8 +810,7 @@ export class TypeNodes {
 
   interfaceBody(declaration: TreeNode): TreeNode | null {
     const body = declaration.childForFieldName('body');
-    if (body && this.c.libraryBinder.bindDeferredInterfaceBody(declaration, body))
-      this.c.budget.spend(Math.ceil((body.endIndex - body.startIndex) / 32));
+    if (body) this.c.bindDeferredLibraryType(body);
     return body;
   }
 

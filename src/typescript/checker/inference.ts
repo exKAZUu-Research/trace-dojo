@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 466 -- Keeps generic candidate collection, constraint fitting and inference completion together.
+// code-gauge-allow-file fileNcss 472 -- Keeps generic candidate collection, constraint fitting and inference completion together.
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import type { Checker, Mapper } from './checker';
 import { childTypes, objectMemberTypes } from './genericTypes';
@@ -618,7 +618,7 @@ export class TypeInference {
     return result;
   }
 
-  /** A generic signature instantiated to compare with `target`, inferring from the target's parameters. */
+  /** A generic signature instantiated against a concrete target. */
   instantiateToFit(source: Signature, target: Signature, contextual = false): Signature {
     const run = newInferenceRun(source.typeParameters, true);
     if (source.thisType && target.thisType) this.inferTypes(run, target.thisType, source.thisType, true);
@@ -626,16 +626,19 @@ export class TypeInference {
       const targetType = this.inferenceParameterType(parameter, target, index, contextual);
       if (targetType) this.inferTypes(run, targetType, parameter.type, true);
     }
-    const mapper: Mapper = new Map();
-    for (const parameter of source.typeParameters) {
-      const inference = run.inferences.get(parameter.id) as Inference;
-      mapper.set(
-        parameter.id,
-        inference.candidates.length > 0 ? unionOf(inference.candidates) : (parameter.constraint?.() ?? unknownType)
-      );
-    }
-    this.constrainInferences(source.typeParameters, mapper);
+    if (!contextual) this.inferSignatureResult(run, source, target);
+    const mapper = this.finalMapper(source, source.typeParameters, run.inferences);
     return { ...this.c.instantiateSignature(source, mapper), typeParameters: [] };
+  }
+
+  private inferSignatureResult(run: InferenceRun, source: Signature, target: Signature): void {
+    const result = { ...run, priority: InferencePriority.ReturnType };
+    if (source.predicate && target.predicate && source.predicate.index === target.predicate.index) {
+      this.inferTypes(result, target.predicate.type, source.predicate.type, true);
+      return;
+    }
+    const destination = target.returnType();
+    if (!isIntrinsic(destination, 'void')) this.inferTypes(result, destination, source.returnType(), true);
   }
 
   private inferenceParameterType(

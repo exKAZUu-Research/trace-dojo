@@ -151,7 +151,6 @@ function tableCell(text: string): { text: string; width: number } {
   return { text, width: stringWidth(stripVTControlCharacters(text)) };
 }
 
-/** The headers and cells of a table's columns, which Node.js collects as an object's keys and so orders as one. */
 /** Fills a row's cells for the own enumerable properties of an object. */
 function addOwnCells(
   runtime: Runtime,

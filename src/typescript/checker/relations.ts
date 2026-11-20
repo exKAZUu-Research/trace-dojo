@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 761 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
+// code-gauge-allow-file fileNcss 776 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
 import { minimumArguments } from './callArity';
 import type { Checker } from './checker';
 import { isUnit } from './flow';
@@ -231,7 +231,21 @@ export class Relations {
 
   private typeParameterRelated(s: TypeParameter, t: Type, relation: Relation): boolean {
     if ((t.kind === 'typeParameter' && s.id === t.id) || this.constraintRelated(s, t, relation)) return true;
+    if (t.kind === 'object' && t.tuple && this.fitsVariadicTuple(s, t.tuple, relation)) return true;
     return t.kind === 'indexedAccess' && this.relatedToIndexedAccess(s, t, relation);
+  }
+
+  private fitsVariadicTuple(source: TypeParameter, target: TupleInfo, relation: Relation): boolean {
+    const element = this.singleVariadicElement(target);
+    if (!element) return false;
+    const bound = this.c.baseConstraint(source);
+    const mutable = this.c.isArrayType(bound) || (bound.kind === 'object' && bound.tuple?.readonly === false);
+    return (target.readonly || mutable) && this.isRelated(source, element, relation);
+  }
+
+  private singleVariadicElement(tuple: TupleInfo | undefined): Type | undefined {
+    const element = tuple?.elements.length === 1 ? tuple.elements[0] : undefined;
+    return element?.rest && this.isGenericRestType(element.type) ? element.type : undefined;
   }
 
   /**
@@ -439,7 +453,11 @@ export class Relations {
   /** TypeScript relates to a generic mapped type or a type parameter target before it turns to the source's constraint. */
   private relatedToGenericTarget(s: Type, t: Type, relation: Relation): boolean {
     if (t.kind === 'object') return this.relatedToHomomorphicMapped(s, t, relation);
-    return t.kind === 'typeParameter' && s.kind === 'object' && this.mappedRelatedToParameter(s, t, relation);
+    if (t.kind !== 'typeParameter' || s.kind !== 'object') return false;
+    const element = s.tuple?.readonly === false ? this.singleVariadicElement(s.tuple) : undefined;
+    return (
+      (element !== undefined && this.isRelated(element, t, relation)) || this.mappedRelatedToParameter(s, t, relation)
+    );
   }
 
   /**
@@ -983,7 +1001,6 @@ export class Relations {
   ): boolean {
     let sourceSignature = source;
     if (source.typeParameters.length > 0) {
-      // A generic source is instantiated to fit the target, as the target's parameters infer its type arguments.
       sourceSignature = this.c.inference.instantiateToFit(source, target);
     }
     if (target.isAbstract === false && source.isAbstract) return false;
