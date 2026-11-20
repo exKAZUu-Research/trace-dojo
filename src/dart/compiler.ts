@@ -414,17 +414,9 @@ export class Compiler extends ConstructorCompiler {
       checked.add(cls);
     };
     for (const { cls, declaration } of this.classWork) visit(cls, declaration);
-    // A mixin with `on` types applies only on a superclass that has them.
     for (const { application, mixin, span } of this.pendingApplications) {
-      const base = application.superclass?.cls;
-      for (const onType of mixin.cls.onTypes) {
-        if (base && !base.isSubclassOf(onType.cls) && !this.isLibraryCode) {
-          this.error(
-            span,
-            `${base.name} は ${onType.cls.name} を継承していないので、mixin ${mixin.cls.name} を使えません。`
-          );
-        }
-      }
+      if (application.superclass && !this.isLibraryCode)
+        this.checkMixinConstraints(application.superclass, mixin, span);
     }
     for (const { cls, declaration } of this.classWork) {
       if (cls.representationType)
@@ -1447,8 +1439,7 @@ export class Compiler extends ConstructorCompiler {
     if (cls.kind === 'enum') this.checkEnumMembers(cls, declaration);
     for (const member of cls.members.values()) this.checkOverride(cls, member, false);
     for (const member of cls.setters.values()) this.checkOverride(cls, member, true);
-    if (!cls.isAbstract && cls.kind !== 'mixin' && cls.kind !== 'extensionType')
-      this.checkImplemented(cls, declaration);
+    if (cls.kind !== 'mixin' && cls.kind !== 'extensionType') this.checkImplemented(cls, declaration);
   }
 
   private checkEnumMembers(cls: ClassInfo, declaration: ClassDeclaration): void {
@@ -1472,68 +1463,65 @@ export class Compiler extends ConstructorCompiler {
     }
   }
 
-  /** A concrete class must implement every member of its interfaces, unless its noSuchMethod handles them. */
   private checkImplemented(cls: ClassInfo, declaration: ClassDeclaration): void {
     const hasNoSuchMethod = cls.implementation('noSuchMethod')?.owner !== coreTypes.object;
     for (const name of cls.interfaceMemberNames()) {
       const isSetter = name.endsWith('=') && name !== '==' && name !== '[]=';
       const memberName = isSetter ? name.slice(0, -1) : name;
       const implementation = isSetter ? cls.setterImplementation(memberName) : cls.implementation(memberName);
-      if (implementation || hasNoSuchMethod) continue;
+      if (implementation && implementation.owner !== cls && cls.interfaces.length > 0)
+        this.checkOverride(cls, implementation, isSetter, declaration);
+      if (implementation || cls.isAbstract || hasNoSuchMethod) continue;
       const declared = cls.interfaceMember(memberName, isSetter);
-      if (!declared) continue;
-      this.error(declaration, `${cls.name} には、${declared.owner.name}.${name} の実装がありません。`);
+      if (declared) this.error(declaration, `${cls.name} には、${declared.owner.name}.${name} の実装がありません。`);
     }
   }
 
   // code-gauge-allow functionCognitiveComplexity 22 -- Each branch is one of the cases Dart distinguishes for this construct.
-  private checkOverride(cls: ClassInfo, member: Member, setter: boolean): void {
+  private checkOverride(cls: ClassInfo, member: Member, setter: boolean, inheritedAt?: Span): void {
     if (member.isStatic) return;
-    for (const supertype of cls.directSupertypes) {
+    const row = inheritedAt?.row ?? member.row ?? 0;
+    const targets = inheritedAt ? cls.interfaces : cls.directSupertypes;
+    const own = inheritedAt ? this.memberTypeIn(cls.thisType, member) : member.type;
+    for (const supertype of targets) {
       const inherited = this.interfaceMember(supertype, member.name, setter);
       if (!inherited || inherited.member === member) continue;
-      const own = member.type;
       if (setter) {
-        this.checkSetterOverride(cls, member, inherited.type);
+        this.checkSetterOverride(cls, member, inherited.type, own, row);
         continue;
       }
-      if (member.kind === 'method' && inherited.member.kind !== 'method') {
-        this.error(
-          { row: member.row ?? 0 },
-          `${cls.name}.${member.name} はメソッドなので、getter やフィールドの ${inherited.member.owner.name}.${member.name} を上書きできません。`
-        );
-      }
-      if (member.kind !== 'method' && member.kind !== 'setter' && inherited.member.kind === 'method') {
-        this.error(
-          { row: member.row ?? 0 },
-          `${cls.name}.${member.name} は getter かフィールドなので、メソッドの ${inherited.member.owner.name}.${member.name} を上書きできません。`
-        );
-      }
-      if (member.kind === 'method' && inherited.member.kind === 'method') {
-        if (!this.isValidOverride(member, inherited.type as FunctionType)) {
+      if (member.kind === 'method') {
+        if (inherited.member.kind !== 'method') {
           this.error(
-            { row: member.row ?? 0 },
+            { row },
+            `${cls.name}.${member.name} はメソッドなので、getter やフィールドの ${inherited.member.owner.name}.${member.name} を上書きできません。`
+          );
+        }
+        if (!this.isValidOverride(cls, member, own as FunctionType, inherited.type as FunctionType)) {
+          this.error(
+            { row },
             `${cls.name}.${member.name}（${typeToString(own)}）は、${inherited.member.owner.name}.${member.name}（${typeToString(inherited.type)}）の正しい上書きではありません。`
           );
         }
-      } else if (
-        member.kind !== 'setter' &&
-        inherited.member.kind !== 'setter' &&
-        inherited.member.kind !== 'method' &&
-        !isSubtype(own, inherited.type)
-      ) {
-        {
-          this.error(
-            { row: member.row ?? 0 },
-            `${cls.name}.${member.name} の型 ${typeName(own)} は、${inherited.member.owner.name}.${member.name} の型 ${typeName(inherited.type)} に合いません。`
-          );
-        }
+        continue;
+      }
+      if (inherited.member.kind === 'method') {
+        this.error(
+          { row },
+          `${cls.name}.${member.name} は getter かフィールドなので、メソッドの ${inherited.member.owner.name}.${member.name} を上書きできません。`
+        );
+      }
+      if (!isSubtype(own, inherited.type)) {
+        this.error(
+          { row },
+          `${cls.name}.${member.name} の型 ${typeName(own)} は、${inherited.member.owner.name}.${member.name} の型 ${typeName(inherited.type)} に合いません。`
+        );
       }
     }
   }
 
-  private checkSetterOverride(cls: ClassInfo, member: Member, inherited: DartType): void {
-    const declaration = cls.declaration?.members.find(
+  private checkSetterOverride(cls: ClassInfo, member: Member, inherited: DartType, own: DartType, row: number): void {
+    const declaration = member.owner.declaration?.members.find(
       (candidate): candidate is MethodDeclaration =>
         candidate.kind === 'method' && candidate.methodKind === 'setter' && candidate.name === member.name
     );
@@ -1541,16 +1529,15 @@ export class Compiler extends ConstructorCompiler {
       (member.kind === 'field' && member.isCovariant) ||
       declaration?.parameters.positional[0]?.isCovariant ||
       inheritsCovariance(cls, member.name, '', 0, true);
-    if (covariant && member.kind === 'field') member.isCovariant = true;
-    if (isSubtype(inherited, member.type) || (covariant && isSubtype(member.type, inherited))) return;
+    if (covariant && member.kind === 'field' && member.owner === cls) member.isCovariant = true;
+    if (isSubtype(inherited, own) || (covariant && isSubtype(own, inherited))) return;
     this.error(
-      { row: member.row ?? 0 },
-      `${cls.name}.${member.name} の setter の型 ${typeName(member.type)} は、継承した型 ${typeName(inherited)} に合いません。`
+      { row },
+      `${cls.name}.${member.name} の setter の型 ${typeName(own)} は、継承した型 ${typeName(inherited)} に合いません。`
     );
   }
 
-  private isValidOverride(member: MethodMember, inherited: FunctionType): boolean {
-    const own = member.type;
+  private isValidOverride(cls: ClassInfo, member: MethodMember, own: FunctionType, inherited: FunctionType): boolean {
     if (isSubtype(own, inherited)) return true;
     const { owner, name } = member;
     const declaration = owner.declaration?.members.find(
@@ -1566,7 +1553,7 @@ export class Compiler extends ConstructorCompiler {
       if (
         other &&
         isSubtype(type, other) &&
-        (parameter?.isCovariant || inheritsCovariance(owner, name, parameter?.name ?? '', index))
+        (parameter?.isCovariant || inheritsCovariance(cls, name, parameter?.name ?? '', index))
       )
         return other;
       return type;

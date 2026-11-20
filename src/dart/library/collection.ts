@@ -1363,7 +1363,7 @@ class _HashSet<E> extends SetBase<E> implements HashSet<E> {
     final index = hashCode & (_buckets.length - 1);
     var entry = _buckets[index];
     while (entry != null) {
-      if (hashCode == entry.hashCode && _keysEqual(entry.key, element)) return false;
+      if (_keysEqual(entry.key, element)) return false;
       entry = entry.next;
     }
     _addEntry(element, hashCode, index);
@@ -1379,7 +1379,7 @@ class _HashSet<E> extends SetBase<E> implements HashSet<E> {
     var entry = _buckets[index];
     _HashSetEntry<E>? previous = null;
     while (entry != null) {
-      if (hashCode == entry.hashCode && _keysEqual(entry.key, object)) {
+      if (_keysEqual(entry.key, object)) {
         if (previous == null) {
           _buckets[index] = entry.next;
         } else {

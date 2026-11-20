@@ -39,6 +39,7 @@ import {
   namedOf,
   requireNode,
   spanOf,
+  syntaxChildrenOf,
   syntaxError,
   unsupported,
 } from './convertBase';
@@ -116,7 +117,7 @@ export class Converter extends ExpressionConverter {
     const hide: string[] = [];
     for (const combinator of namedOf(specification).filter((child) => child.type === 'combinator')) {
       const names = namedOf(combinator).map((child) => child.text);
-      if (hasToken(combinator, 'show')) show = [...(show ?? []), ...names];
+      if (hasToken(combinator, 'show')) show = show?.filter((name) => names.includes(name)) ?? names;
       else hide.push(...names);
     }
     return [{ uri, prefix: fieldOf(specification, 'alias')?.text, show, hide, ...spanOf(node) }];
@@ -832,7 +833,7 @@ export class Converter extends ExpressionConverter {
   private convertOptionalParameters(node: Node, isNamed: boolean): FormalParameter[] {
     const parameters: FormalParameter[] = [];
     let isRequired = false;
-    const parts = childrenOf(node);
+    const parts = syntaxChildrenOf(node);
     for (const [index, part] of parts.entries()) {
       if (part.type === 'required') isRequired = true;
       if (part.type !== 'formal_parameter') continue;
@@ -1116,7 +1117,7 @@ export class Converter extends ExpressionConverter {
   }
 
   private convertSwitchCase(node: Node): SwitchCase {
-    const children = childrenOf(node).filter((child) => child.type !== 'comment');
+    const children = syntaxChildrenOf(node);
     const labels = children
       .filter((child) => child.type === 'label')
       .map((child) => requireNode(namedOf(child)[0], child).text);
@@ -1138,7 +1139,7 @@ export class Converter extends ExpressionConverter {
   }
 
   private convertTry(node: Node): Statement {
-    const children = childrenOf(node).filter((child) => child.type !== 'comment');
+    const children = syntaxChildrenOf(node);
     const body = this.convertBlock(requireNode(fieldOf(node, 'body'), node));
     const catches: CatchClause[] = [];
     let finallyBlock: Block | undefined;

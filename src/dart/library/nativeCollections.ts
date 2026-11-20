@@ -975,9 +975,10 @@ define('Set.removeAll', (runtime, receiver, [elements]) => {
 define('Set.retainAll', (runtime, receiver, [elements]) => {
   checkSetModifiable(runtime, receiver);
   // As SetMixin.retainAll: copy the set, remove the elements from the copy, and remove what is left from the set.
-  const toRemove = copySet(runtime, receiver as DartObject);
-  forEachValue(runtime, elements, (value) => store(toRemove).delete(value));
-  forEachValue(runtime, toRemove, (value) => store(receiver).delete(value));
+  copySet(runtime, receiver as DartObject, (toRemove) => {
+    forEachValue(runtime, elements, (value) => store(toRemove).delete(value));
+    forEachValue(runtime, toRemove, (value) => store(receiver).delete(value));
+  });
   return;
 });
 /** The VM's `_Set._filter`: tests each element in place and marks the removed ones without hashing them. */
@@ -1007,30 +1008,27 @@ define('Set.containsAll', (runtime, receiver, [other]) => {
   return true;
 });
 // As SetMixin: a copy of the set (`toSet`), then the elements the other set decides about removed from it.
-define('Set.intersection', (runtime, receiver, [other]) => {
-  const result = copySet(runtime, receiver as DartObject);
-  forEachValue(runtime, receiver, (key) => {
-    if (!setContains(runtime, other, key)) store(result).delete(key);
+define('Set.intersection', (runtime, receiver, [other]) => setOperation(runtime, receiver, other, true));
+define('Set.union', (runtime, receiver, [other]) =>
+  copySet(runtime, receiver as DartObject, (result) => addAllToSet(runtime, result, other))
+);
+define('Set.difference', (runtime, receiver, [other]) => setOperation(runtime, receiver, other, false));
+
+function setOperation(runtime: Runtime, receiver: Value, other: Value, retain: boolean): DartObject {
+  return copySet(runtime, receiver as DartObject, (result) => {
+    forEachValue(runtime, receiver, (key) => {
+      if (setContains(runtime, other, key) !== retain) store(result).delete(key);
+    });
   });
-  return result;
-});
-define('Set.union', (runtime, receiver, [other]) => {
-  const result = copySet(runtime, receiver as DartObject);
-  addAllToSet(runtime, result, other);
-  return result;
-});
-define('Set.difference', (runtime, receiver, [other]) => {
-  const result = copySet(runtime, receiver as DartObject);
-  forEachValue(runtime, receiver, (key) => {
-    if (setContains(runtime, other, key)) store(result).delete(key);
-  });
-  return result;
-});
+}
 
 /** `_Set<E>()..addAll(this)`, the VM's `toSet`. */
-function copySet(runtime: Runtime, set: DartObject): DartObject {
+function copySet(runtime: Runtime, set: DartObject, update?: (result: DartObject) => void): DartObject {
   const copy = newHashObject(runtime, 'Set', set.typeArgs, false, store(set).policy);
-  return populateHashObject(runtime, copy, () => addAllToSet(runtime, copy, set));
+  return populateHashObject(runtime, copy, () => {
+    addAllToSet(runtime, copy, set);
+    update?.(copy);
+  });
 }
 define('Set.clear', (runtime, receiver) => {
   checkSetModifiable(runtime, receiver);
@@ -1164,8 +1162,10 @@ define('Map.cast', (runtime, receiver, _args, _named, typeArgs) =>
   ])
 );
 define('Map.containsValue', (runtime, receiver, [value]) => {
-  const source = store(receiver);
-  for (const position of source.positions()) if (runtime.equals(source.entryValues[position], value)) return true;
+  const values = runtime.getProperty(receiver, 'values', undefined);
+  for (const entry of iteratorValues(runtime, values, 0n, undefined)) {
+    if (runtime.equals(entry, value)) return true;
+  }
   return false;
 });
 define('Map.containsKey', (_runtime, receiver, [key]) => store(receiver).has(key));

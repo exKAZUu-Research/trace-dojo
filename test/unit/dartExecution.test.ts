@@ -60,6 +60,7 @@ test('a program formats numbers, strings, records, and collections as Dart does'
   print(sb);
   print((1, name: 'a', 2.0));
   print([1, [2, {3: 'c'}], {4, 5}]);
+  print(['𐐨'.toUpperCase(), '𐐀'.toLowerCase(), 'ß'.toUpperCase(), 'İ'.toLowerCase(), 'ᾀ'.toUpperCase(), 'Ა'.toLowerCase()]);
 }
 `;
   expect(executeProgram('dart', program)).toMatchObject({
@@ -75,8 +76,33 @@ test('a program formats numbers, strings, records, and collections as Dart does'
       '',
       '(1, 2.0, name: a)',
       '[1, [2, {3: c}], {4, 5}]',
+      '[𐐀, 𐐨, ß, i, ᾈ, Ა]',
       '',
     ].join('\n'),
+  });
+});
+
+test('hash sets compare all candidate keys in the same bucket', () => {
+  const program = `import 'dart:collection';
+class Key {
+  final int value;
+  Key(this.value);
+  int get hashCode => value;
+  bool operator ==(Object other) {
+    if (other is! Key) return false;
+    print([value, other.value]);
+    return value == other.value;
+  }
+}
+void main() {
+  final set = HashSet<Key>();
+  print(set.add(Key(1)));
+  print(set.add(Key(9)));
+  print(set.remove(Key(17)));
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'true\n[1, 9]\ntrue\n[9, 17]\n[1, 17]\nfalse\n',
   });
 });
 
@@ -496,6 +522,41 @@ void main() {
 }
 `;
   expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '7\n_TypeError\n' });
+});
+
+test('inherited implementations must match new interfaces and mixin constraints', () => {
+  const incompatible = `abstract class Reader { int read(); }
+class Parent { String read() => 'text'; }
+abstract class Child extends Parent implements Reader {}
+void main() {}`;
+  expect(executeProgram('dart', incompatible)).toMatchObject({ kind: 'compileError' });
+  const declarations = `abstract class Reader { int read(); }
+class Parent<T> { final T value; Parent(this.value); T read() => value; }
+mixin Shared<T> on Parent<T> { T readShared() => value; }`;
+  const valid = `${declarations}
+class Child extends Parent<int> with Shared<int> implements Reader { Child() : super(3); }
+void main() { final child = Child(); print([child.read(), child.readShared()]); }`;
+  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '[3, 3]\n' });
+  const wrongMixin = `${declarations}
+class Child extends Parent<String> with Shared<int> { Child() : super('text'); }
+void main() {}`;
+  expect(executeProgram('dart', wrongMixin)).toMatchObject({ kind: 'compileError' });
+});
+
+test('redirecting factories check argument types and shapes against their targets', () => {
+  for (const parameters of ['', 'int number', '{required String name}']) {
+    const invalid = `abstract class A { factory A(String text) = B; }
+class B implements A { B(${parameters}); }
+void main() {}`;
+    expect(executeProgram('dart', invalid)).toMatchObject({ kind: 'compileError' });
+  }
+  const valid = `abstract class A<T> { T get value; factory A(T value, {bool? flag}) = B<T>; }
+class B<T> implements A<T> {
+  final T value;
+  B(this.value, {bool? flag});
+}
+void main() { print(A<int>(3, flag: true).value); }`;
+  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '3\n' });
 });
 
 test('strings and null-aware indexing preserve Dart syntax', () => {
@@ -1640,6 +1701,32 @@ void main() {
   }
 });
 
+test('import show filters intersect and preserve hide exclusions', () => {
+  const directive = "import 'dart:math' show min, max, sqrt hide sqrt show max, sqrt;";
+  expect(executeProgram('dart', `${directive} void main() { print(max(1, 2)); }`)).toMatchObject({
+    kind: 'executed',
+    stdout: '2\n',
+  });
+  for (const call of ['min(1, 2)', 'sqrt(4)']) {
+    expect(executeProgram('dart', `${directive} void main() { print(${call}); }`)).toMatchObject({
+      kind: 'compileError',
+    });
+  }
+});
+
+test('comments preserve optional defaults and type operators', () => {
+  const program = `void positional([int x /* default */ = 1]) => print(x);
+void named({int? x /* default */ = 2}) => print(x);
+void main() {
+  positional();
+  named();
+  Object value = 3;
+  print(value /* test */ is int);
+  print(value /* cast */ as int);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '1\n2\ntrue\n3\n' });
+});
+
 test('generic function Type equality includes bounds and ignores parameter names', () => {
   const program = `typedef A = T Function<T extends num>(T);
 typedef B = T Function<T extends Object>(T);
@@ -2089,6 +2176,65 @@ void main() {
     kind: 'executed',
     stdout: 'true\n',
     finalTurtles: [{ x: 1, y: 2 }],
+  });
+});
+
+test('set union keeps values accumulated before a source callback collects', () => {
+  const program = `import 'dart:collection';
+Iterable<Turtle> turtles() sync* {
+  yield Turtle(1, 1);
+  yield Turtle(3, 3);
+  var last = Turtle(5, 5);
+  last.canMoveForward();
+  yield last;
+}
+class Source extends SetBase<Turtle> {
+  Iterator<Turtle> get iterator => turtles().iterator;
+  int get length => 3;
+  Set<Turtle> toSet() => <Turtle>{};
+  bool add(Turtle value) => false;
+  bool contains(Object? value) => false;
+  Turtle? lookup(Object? value) => null;
+  bool remove(Object? value) => false;
+}
+void main() {
+  final result = <Turtle>{}.union(Source());
+  result.first.forward();
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    finalTurtles: [
+      { x: 1, y: 2 },
+      { x: 3, y: 3 },
+      { x: 5, y: 5 },
+    ],
+  });
+});
+
+test('map updates and value searches detect changes to the live key set', () => {
+  const program = `late Map<int, Object> owner;
+class Entry {
+  final bool matches;
+  Entry(this.matches);
+  bool operator ==(Object other) { owner[2] = 9; return matches; }
+  int get hashCode => 0;
+}
+void main() {
+  for (var matches in [false, true]) {
+    owner = {1: Entry(matches)};
+    try { print(owner.containsValue(9)); } catch (error) { print(error.runtimeType); }
+  }
+  var map = {1: 1, 2: 2};
+  try {
+    map.updateAll((key, value) { map[9] = 9; return value + 1; });
+  } catch (error) { print([error.runtimeType, map]); }
+  map.updateAll((key, value) => value * 2);
+  print(map);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'ConcurrentModificationError\ntrue\n[ConcurrentModificationError, {1: 2, 2: 2, 9: 9}]\n{1: 4, 2: 4, 9: 18}\n',
   });
 });
 

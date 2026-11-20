@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 452 -- Type and diagnostic resolution share the compiler environment.
+// code-gauge-allow-file fileNcss 462 -- Type and diagnostic resolution share the compiler environment.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ClassDeclaration, Span, TypeAliasDeclaration, TypeParameter, TypeSyntax } from './ast';
 import type { ClassInfo, Member } from './classes';
@@ -167,6 +167,19 @@ export abstract class CompilerBase {
   protected checkUnavailableStaticMember(cls: ClassInfo, name: string, span: Span): void {
     if (UNAVAILABLE_STATIC_MEMBERS.has(`${cls.library}.${cls.name}.${name}`)) {
       this.unsupported(span, `${cls.name}.${name}`);
+    }
+  }
+
+  protected checkMixinConstraints(base: InterfaceType, mixin: InterfaceType, span: Span): void {
+    const types = new Map(mixin.cls.typeParams.map((parameter, index) => [parameter, mixin.args[index]]));
+    for (const onType of mixin.cls.onTypes) {
+      const required = substitute(onType, types);
+      if (!isSubtype(base, required)) {
+        this.error(
+          span,
+          `${typeName(base)} は ${typeName(required)} のサブタイプではないので、mixin ${mixin.cls.name} は使えません。`
+        );
+      }
     }
   }
 
@@ -437,11 +450,16 @@ export abstract class CompilerBase {
       if (type.cls !== coreTypes.object) return this.interfaceMember(objectType(), name, setter);
       return undefined;
     }
-    const owner = asInstanceOf(type, member.owner);
-    const map = new Map(member.owner.typeParams.map((param, index) => [param, owner?.args[index] ?? DYNAMIC]));
     // An extension type's members run on its representation, which has no class to dispatch on.
     const extension = member.owner.kind === 'extensionType' ? { ext: undefined, typeArgs: [] } : undefined;
-    return { member, type: substitute(member.type, map), extension };
+    return { member, type: this.memberTypeIn(type, member), extension };
+  }
+
+  protected memberTypeIn(type: InterfaceType, member: Member): DartType {
+    if (member.owner.typeParams.length === 0) return member.type;
+    const owner = asInstanceOf(type, member.owner);
+    const map = new Map(member.owner.typeParams.map((param, index) => [param, owner?.args[index] ?? DYNAMIC]));
+    return substitute(member.type, map);
   }
 
   /** Finds a member for a receiver, honoring an explicit extension application (`E(x).m`). */

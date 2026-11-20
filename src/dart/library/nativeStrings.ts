@@ -18,6 +18,7 @@ import {
   stringArg,
 } from './nativeSupport';
 import { isSurrogatePairAt } from './regExpEngine';
+import { dartStringCase } from './stringCase';
 import { trimDartEnd, trimDartStart, trimDartWhitespace } from './stringWhitespace';
 
 function checkLength(runtime: Runtime, length: number): void {
@@ -358,24 +359,12 @@ define('String.codeUnits', (runtime, receiver) => {
   return units;
 });
 define('String.runes', (runtime, receiver) => runtime.links.construct(runtime, 'Runes', '', [receiver]));
-define('String.toLowerCase', (_runtime, receiver) => mapCase(self(receiver), false));
-define('String.toUpperCase', (_runtime, receiver) => mapCase(self(receiver), true));
+define('String.toLowerCase', (runtime, receiver) => mapCase(runtime, self(receiver), false));
+define('String.toUpperCase', (runtime, receiver) => mapCase(runtime, self(receiver), true));
 
-/**
- * Case mapping as the VM does it: one UTF-16 code unit at a time with Unicode's simple mappings, so `ß` and ligatures
- * stay as they are, a final sigma is not special, and `İ` lowercases to `i`.
- */
-function mapCase(text: string, upper: boolean): string {
-  let result = '';
-  for (const unit of text.split('')) {
-    if (unit === '\u0130' && !upper) {
-      result += 'i';
-      continue;
-    }
-    const mapped = upper ? unit.toUpperCase() : unit.toLowerCase();
-    result += mapped.length === 1 ? mapped : unit;
-  }
-  return result;
+function mapCase(runtime: Runtime, text: string, upper: boolean): string {
+  runtime.spend(Math.ceil(text.length / 64));
+  return dartStringCase(text, upper);
 }
 define('String.toString', (_runtime, receiver) => receiver);
 define('String.allMatches', (runtime, receiver, [input, start = 0n]) => {

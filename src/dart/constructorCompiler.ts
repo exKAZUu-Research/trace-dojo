@@ -312,6 +312,16 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     ) {
       this.error(declaration, `${type.cls.name} は ${cls.name} のサブタイプではないので、リダイレクト先にできません。`);
     }
+    const targetTypes = new Map(
+      type.cls.typeParams.map((parameter, index) => [parameter, type.args[index] ?? DYNAMIC])
+    );
+    const signature = substitute(targetConstructor.type, targetTypes);
+    if (!isSubtype(signature, constructor.type)) {
+      this.error(
+        declaration,
+        `リダイレクト先の型 ${typeName(signature)} は factory の型 ${typeName(constructor.type)} に合いません。`
+      );
+    }
     const targetArgs = type.args;
     const params = cls.typeParams;
     constructor.impl = (runtime, _instance, args, typeArgs, callRow) => {

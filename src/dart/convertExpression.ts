@@ -32,6 +32,7 @@ import {
   namedOf,
   requireNode,
   spanOf,
+  syntaxChildrenOf,
   syntaxError,
   unsupported,
 } from './convertBase';
@@ -412,7 +413,7 @@ export abstract class ExpressionConverter {
   }
 
   private convertBinary(node: Node): Expression {
-    const children = childrenOf(node).filter((child) => child.type !== 'comment');
+    const children = syntaxChildrenOf(node);
     const operands: { expression: Expression }[] = [];
     const operators: string[] = [];
     let pendingOperand: Node[] = [];
@@ -443,7 +444,7 @@ export abstract class ExpressionConverter {
   }
 
   private convertUnary(node: Node): Expression {
-    const children = childrenOf(node).filter((child) => child.type !== 'comment');
+    const children = syntaxChildrenOf(node);
     const [operatorNode, ...rest] = children;
     const span = spanOf(node);
     if (children.length === 1) return this.convertExpression(operatorNode);
@@ -919,7 +920,7 @@ export abstract class ExpressionConverter {
 
   private convertConstantPattern(node: Node, context: PatternContext): Pattern {
     const span = spanOf(node);
-    const children = childrenOf(node).filter((child) => child.type !== 'comment');
+    const children = syntaxChildrenOf(node);
     const named = children.filter((child) => child.isNamed);
     if (named.length === 1 && named[0].type === 'identifier' && children.length === 1) {
       const name = named[0].text;
@@ -1178,7 +1179,7 @@ export abstract class ExpressionConverter {
 
   convertType(node: Node): TypeSyntax {
     const span = spanOf(node);
-    const children = childrenOf(node).filter((child) => child.type !== 'comment');
+    const children = syntaxChildrenOf(node);
     const nullable = children.at(-1)?.type === '?';
     const first = children.find((child) => child.isNamed);
     // The bare type `Function` is a keyword token rather than a type identifier.
@@ -1423,7 +1424,7 @@ function splitByComma(nodes: Node[]): Node[][] {
 }
 
 function hasTrailingComma(node: Node): boolean {
-  const children = childrenOf(node).filter((child) => child.type !== 'comment');
+  const children = syntaxChildrenOf(node);
   return children.at(-2)?.type === ',';
 }
 
@@ -1472,7 +1473,7 @@ export type { Span };
 
 /** The operands of an operator, where `this` and `super` are anonymous tokens of the grammar. */
 function operandsOf(node: Node): Node[] {
-  return childrenOf(node).filter((child) => child.isNamed || child.type === 'this' || child.type === 'super');
+  return syntaxChildrenOf(node).filter((child) => child.isNamed || child.type === 'this' || child.type === 'super');
 }
 
 export const VAR_WITH_TYPE = 'var と型の名前は、一緒には書けません。どちらか一方にしてください。';

@@ -1994,7 +1994,7 @@ abstract interface class Map<K, V> {
     throw ArgumentError.value(key, "key", "Key not in map.");
   }
   void updateAll(V Function(K key, V value) update) {
-    for (var key in this.keys.toList()) {
+    for (var key in this.keys) {
       this[key] = update(key, this[key] as V);
     }
   }

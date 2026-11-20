@@ -21,9 +21,12 @@ export function childrenOf(node: Node): Node[] {
   return node.children.filter((child): child is Node => child !== null);
 }
 
-/** The named children, without comments, which may appear between any two tokens. */
+export function syntaxChildrenOf(node: Node): Node[] {
+  return node.children.filter((child): child is Node => child !== null && child.type !== 'comment');
+}
+
 export function namedOf(node: Node): Node[] {
-  return childrenOf(node).filter((child) => child.isNamed && child.type !== 'comment');
+  return syntaxChildrenOf(node).filter((child) => child.isNamed);
 }
 
 export function fieldOf(node: Node, name: string): Node | undefined {
