@@ -142,25 +142,9 @@ function collectAfterDestruction(
     destructible
   );
   withCleanupExceptions(runtime, (capture) => {
-    for (const object of owners) {
-      if (object.destructed || !object.cls.findMethod('__destruct')) continue;
-      object.destructed = true;
-      runtime.destructibles--;
-      try {
-        runtime.held.push(object);
-        try {
-          destruct(object);
-        } finally {
-          runtime.held.pop();
-        }
-      } catch (error) {
-        if (stopOnException || !(error instanceof PhpThrow)) throw error;
-        capture(error);
-      }
-      retainCollectionReceiver(runtime, object);
-    }
-    const afterArrays = new Set<PhpArray>();
-    const after = mark(runtime, false, afterArrays);
+    const run = (objects: PhpObject[]): void => runCollectionDestructors(runtime, objects, stopOnException, capture);
+    run(owners);
+    const { after, afterArrays, created } = destructCreatedGarbage(runtime, handles, run);
     const remaining = [
       ...handles.filter((object) => runtime.objects.get(object.id) === object && !after.has(object)),
       ...objectsCreatedSince(runtime, handles, after),
@@ -169,8 +153,72 @@ function collectAfterDestruction(
     count = result.count;
     finishCollectedObjects(runtime, result.ordered, arrayStorage, nodes, result.passTwoNodes);
     forgetCollectedArrayCycles(runtime, result.freed);
+    for (const object of created) if (runtime.objects.get(object.id) === object) runtime.gcRoots.add(object);
   });
   return count;
+}
+
+function runCollectionDestructors(
+  runtime: Runtime,
+  objects: PhpObject[],
+  stopOnException: boolean,
+  capture: (error: CleanupException) => void
+): void {
+  for (const object of objects) {
+    if (object.destructed || !object.cls.findMethod('__destruct')) continue;
+    object.destructed = true;
+    runtime.destructibles--;
+    try {
+      runtime.held.push(object);
+      try {
+        destruct(object);
+      } finally {
+        runtime.held.pop();
+      }
+    } catch (error) {
+      if (stopOnException || !(error instanceof PhpThrow)) throw error;
+      capture(error);
+    }
+    retainCollectionReceiver(runtime, object);
+  }
+}
+
+/**
+ * Marks what is live after the collection's destructors ran. PHP's rerun then runs the destructors of garbage objects
+ * those destructors created, and leaves those objects and what they held for the next collection, as it does not
+ * rerun again: they count as live here.
+ */
+function destructCreatedGarbage(
+  runtime: Runtime,
+  handles: PhpObject[],
+  run: (objects: PhpObject[]) => void
+): { after: Set<PhpObject>; afterArrays: Set<PhpArray>; created: PhpObject[] } {
+  let afterArrays = new Set<PhpArray>();
+  let after = mark(runtime, false, afterArrays);
+  const created = objectsCreatedSince(runtime, handles, after, true);
+  if (created.length === 0) return { after, afterArrays, created };
+  const graph = new CollectionGraph([...created, ...objectsCreatedSince(runtime, handles, after)], runtime);
+  const deferred = heldNodes(graph, created);
+  run(created);
+  afterArrays = new Set<PhpArray>();
+  after = mark(runtime, false, afterArrays);
+  for (const node of deferred)
+    if (node instanceof PhpArray) afterArrays.add(node);
+    else if (node instanceof PhpObject) after.add(node);
+  return { after, afterArrays, created };
+}
+
+/** The objects and arrays reachable from `starts` through `graph`, `starts` included. */
+function heldNodes(graph: CollectionGraph, starts: PhpObject[]): Set<CollectionNode> {
+  const nodes = new Set<CollectionNode>(starts);
+  const pending: CollectionNode[] = [...starts];
+  while (pending.length > 0)
+    for (const child of graph.children(pending.pop() as CollectionNode))
+      if (!nodes.has(child)) {
+        nodes.add(child);
+        pending.push(child);
+      }
+  return nodes;
 }
 
 function finishCollectedObjects(
@@ -896,7 +944,7 @@ function pushFrame(frame: Frame, pending: unknown[], includeTemporaries = true):
   if (frame.closure) pending.push(frame.closure);
 }
 
-function pushObject(object: PhpObject, pending: unknown[]): void {
+export function pushObject(object: PhpObject, pending: unknown[]): void {
   const declared: unknown[] = [];
   for (const [key, slot] of object.props) {
     if (typeof slot !== 'object' || slot === null) continue;
@@ -1133,47 +1181,6 @@ function referencedGarbage(graph: CollectionGraph, roots: CollectionNode[]): Set
   return referenced;
 }
 
-/** Counts the holders of each reachable object: variables, elements, and properties that refer to it. */
-// code-gauge-allow functionNcss 49 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-export function holderCounts(runtime: Runtime): Map<PhpObject, number> {
-  const counts = new Map<PhpObject, number>();
-  const visitedArrays = new Set<PhpArray>();
-  const visitedObjects = new Set<PhpObject>();
-  const visitedRefs = new Set<Ref>();
-  const pending: unknown[] = [];
-  let work = 0;
-  const count = (value: unknown): void => {
-    if ((++work & 15) === 0) runtime.spend();
-    if (value instanceof PhpObject) counts.set(value, (counts.get(value) ?? 0) + 1);
-    if (typeof value === 'object' && value !== null) pending.push(value);
-  };
-  for (const value of ownershipRootSlots(runtime)) count(value);
-  while (pending.length > 0) {
-    const item = pending.pop();
-    if (item instanceof Ref) {
-      if (visitedRefs.has(item)) continue;
-      visitedRefs.add(item);
-      count(item.v);
-    } else if (item instanceof PhpArray) {
-      if (visitedArrays.has(item)) continue;
-      visitedArrays.add(item);
-      for (const slot of item.map.ownedSlots()) count(slot);
-    } else if (item instanceof PhpObject) {
-      if (visitedObjects.has(item)) continue;
-      visitedObjects.add(item);
-      runtime.spend(Math.ceil(item.props.size / 16));
-      const children: unknown[] = [];
-      pushObject(item, children);
-      for (const child of children) count(child);
-    } else if (item instanceof Map) {
-      for (const value of item.values()) count(value);
-    } else if (Array.isArray(item)) {
-      for (const value of item) count(value);
-    }
-  }
-  return counts;
-}
-
 /** Releases a unique global, retaining the index when no other object's ownership can have changed. */
 export function releaseGlobalObject(runtime: Runtime, object: PhpObject): boolean {
   if (object.internal !== undefined || objectHasOwnedValues(runtime, object)) {
@@ -1262,7 +1269,7 @@ function ownershipRoots(runtime: Runtime, includeTemporaries = true): Set<unknow
   );
 }
 
-function ownershipRootSlots(runtime: Runtime, includeTemporaries = true): unknown[] {
+export function ownershipRootSlots(runtime: Runtime, includeTemporaries = true): unknown[] {
   const roots: unknown[] = [];
   for (const frame of runtime.frames) pushFrame(frame, roots, includeTemporaries);
   appendValues(roots, runtime.globalStatics.values());

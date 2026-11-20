@@ -5252,6 +5252,20 @@ test("gc_collect_cycles() reruns over what destructors create and leaves out a r
   }
 });
 
+test('gc_collect_cycles() runs the destructors of cyclic objects destructors create and counts them next time', () => {
+  for (const [child, expected] of [
+    ['', 'E;int(1)\nint(1)\nint(0)\n'],
+    ['$e->c = new stdClass;', 'E;int(1)\nint(2)\nint(0)\n'],
+    ['$e->c = [new stdClass];', 'E;int(1)\nint(3)\nint(0)\n'],
+  ]) {
+    expect(
+      run(
+        `<?php class E { public $self; public $c; function __destruct() { echo "E;"; } } class D { public $self; function __destruct() { $e = new E; $e->self = $e; ${child} } } $d = new D; $d->self = $d; unset($d); var_dump(gc_collect_cycles()); var_dump(gc_collect_cycles()); var_dump(gc_collect_cycles());`
+      )
+    ).toMatchObject({ kind: 'executed', stdout: expected });
+  }
+});
+
 test('a class whose override names a later class is declared when its statement runs', () => {
   expect(
     run(

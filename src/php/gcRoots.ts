@@ -52,11 +52,18 @@ export function bufferedGarbage(
  * rerun after the destructors collects too; one with a destructor is left to reference counting, as PHP runs no
  * further rerun for it.
  */
-export function objectsCreatedSince(runtime: Runtime, known: PhpObject[], reached: Set<unknown>): PhpObject[] {
+export function objectsCreatedSince(
+  runtime: Runtime,
+  known: PhpObject[],
+  reached: Set<unknown>,
+  pendingDestructor = false
+): PhpObject[] {
   const existing = new Set(known);
   return [...runtime.objects.values()].filter(
     (object) =>
-      !existing.has(object) && !reached.has(object) && (object.destructed || !object.cls.findMethod('__destruct'))
+      !existing.has(object) &&
+      !reached.has(object) &&
+      pendingDestructor === (!object.destructed && object.cls.findMethod('__destruct') !== undefined)
   );
 }
 
