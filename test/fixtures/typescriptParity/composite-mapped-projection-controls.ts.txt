@@ -1,0 +1,17 @@
+type MapKeys<T> = { [K in keyof (T & string)]: number };
+type RequiredKeys<T> = { [K in keyof (T & string)]-?: number };
+type ReadonlyKeys<T> = { readonly [K in keyof (T & string)]: number };
+type RemappedKeys<T> = { [K in keyof (T & string) as K]: number };
+type OptionalKeys<T> = { [K in keyof (T & string)]?: number };
+type Alias<T> = MapKeys<T>;
+type OptionalProjection<U extends (OptionalKeys<U> | {length: number})['length']> = U;
+type OptionalIntersect<U extends (OptionalKeys<U> & {length: number})['length']> = U;
+type Wrapped<U extends Array<(MapKeys<U> | {length: number})['length']>> = U;
+type PlainUnion<U extends MapKeys<U> | {length: number}> = U;
+type OnlyKeys<U extends keyof (MapKeys<U> | {length: number})> = U;
+type LazyMember<U extends {items: (MapKeys<U> | {length: number})['length']}> = U;
+
+type OnlyFalse<V extends false, U extends (V extends true ? MapKeys<U> : {length: number})['length']> = U;
+type OptionalReceiver<V extends OptionalKeys<U>, U extends V['length']> = U;
+
+console.log('done');

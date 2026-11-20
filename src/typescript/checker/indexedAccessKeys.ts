@@ -205,7 +205,12 @@ export class IndexedAccessKeys {
       const constraint = this.c.relations.isGeneric(type) ? this.c.baseConstraint(type) : this.c.apparentType(type);
       return constraint !== type && next(constraint);
     }
-    return this.structureHasKey(type, key, written);
+    return (
+      this.structureHasKey(type, key, written) ||
+      (!!type.mapped &&
+        !type.mapped.nameType &&
+        this.c.relations.isAssignable(key, this.c.typeOperators.guaranteedKeys(type)))
+    );
   }
 
   private structureHasKey(type: Type, key: Type, written: boolean): boolean {

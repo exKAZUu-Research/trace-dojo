@@ -88,15 +88,45 @@ export class CircularConstraints {
   }
 
   private mappedProjectionLeadsBack({ objectType }: IndexedAccessType, path: Path): boolean {
-    if (
-      !this.declarations ||
-      (objectType.kind === 'object' && (objectType.mapped?.optionalModifier === '+' || objectType.mappedOptional))
-    )
-      return false;
-    for (const operand of this.c.typeNodes.eagerConstraints.deferredOperands(objectType, this.c.budget)) {
-      if (this.leadsBack(operand, path)) return true;
+    if (!this.declarations) return false;
+    const pending = [objectType];
+    const visited = new Set<Type>();
+    for (let receiver = pending.pop(); receiver; receiver = pending.pop()) {
+      this.c.budget.spend();
+      if (visited.has(receiver)) continue;
+      visited.add(receiver);
+      const constituents = this.projectionReceivers(receiver);
+      this.c.budget.spend(constituents.length);
+      for (const constituent of constituents) pending.push(constituent);
+      if (receiver.kind !== 'object' || receiver.mapped?.optionalModifier === '+' || receiver.mappedOptional) continue;
+      for (const operand of this.c.typeNodes.eagerConstraints.deferredOperands(receiver, this.c.budget)) {
+        if (this.leadsBack(operand, path)) return true;
+      }
     }
     return false;
+  }
+
+  private projectionReceivers(receiver: Type): readonly Type[] {
+    switch (receiver.kind) {
+      case 'union':
+      case 'intersection': {
+        return receiver.types;
+      }
+      case 'indexedAccess': {
+        return [receiver.objectType];
+      }
+      case 'conditional': {
+        const branch = this.c.conditionalBranchFromBounds(receiver);
+        return branch ? [branch] : [receiver.trueType, receiver.falseType];
+      }
+      case 'typeParameter': {
+        const constraint = this.c.constraintOf(receiver);
+        return constraint ? [constraint] : [];
+      }
+      default: {
+        return [];
+      }
+    }
   }
 
   /**

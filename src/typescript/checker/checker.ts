@@ -1045,7 +1045,7 @@ export class Checker {
     }
   }
 
-  private conditionalBranchFromBounds(type: ConditionalType): Type | undefined {
+  conditionalBranchFromBounds(type: ConditionalType): Type | undefined {
     const { checkType, extendsType } = type;
     if (!type.distributive || checkType.kind !== 'typeParameter') return undefined;
     let bound = this.constraintOf(checkType);
