@@ -122,7 +122,6 @@ function report(runtime: Runtime, error: unknown, inShutdown = false): string | 
   throw error;
 }
 
-/** Releases an uncaught exception once it is reported or handled, as PHP does before shutdown. */
 /** Releases an uncaught exception once it is reported or handled, returning whether the release completed. */
 function releaseUncaught(runtime: Runtime, object: PhpObject): { completed: boolean; failure?: string } {
   if (runtime.thrown === object) runtime.thrown = undefined;
