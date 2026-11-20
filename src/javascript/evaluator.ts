@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 530 -- Evaluates every kind of function call, class, and statement of the language in one evaluator.
+// code-gauge-allow-file fileNcss 534 -- Evaluates every kind of function call, class, and statement of the language in one evaluator.
 import assert from 'node:assert/strict';
 
 import { createArgumentsObject, mapArguments } from './argumentsObject';
@@ -505,8 +505,18 @@ export class Evaluator extends SuspendableStatementEvaluator {
    */
   private sloppyThis(thisValue: Value): Value {
     if (thisValue !== undefined && thisValue !== null) return this.runtime.toObject(thisValue);
-    this.implicitReceiver ??= this.runtime.newObject();
-    return this.implicitReceiver;
+    return this.globalReceiver();
+  }
+
+  globalReceiverFor(name: string): JsObject | undefined {
+    const { runtime } = this;
+    return runtime.hasProperty(this.implicitReceiver ?? runtime.realm.objectPrototype, name)
+      ? this.globalReceiver()
+      : undefined;
+  }
+
+  private globalReceiver(): JsObject {
+    return (this.implicitReceiver ??= this.runtime.newObject());
   }
 
   /** Runs an async function's body, whose parameters' errors reject its promise as the body's own errors do. */

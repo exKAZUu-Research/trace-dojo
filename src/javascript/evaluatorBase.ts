@@ -127,19 +127,29 @@ export abstract class EvaluatorBase {
 
   // Variables ---------------------------------------------------------------------------------------------------------
 
-  readVariable(name: string): Value {
-    const binding = this.runtime.frame.scope.lookup(name);
-    if (!binding) return this.runtime.throwError('ReferenceError', `${name} is not defined`);
-    if (binding.value === UNINITIALIZED) {
-      return this.runtime.throwError('ReferenceError', `Cannot access '${name}' before initialization`);
+  readVariable(name: string, allowMissing = false): Value {
+    const { runtime } = this;
+    const binding = runtime.frame.scope.lookup(name);
+    if (!binding) {
+      const receiver = runtime.evaluator.globalReceiverFor(name);
+      if (receiver) return runtime.get(receiver, name);
+      if (allowMissing) return undefined;
+      return runtime.throwError('ReferenceError', `${name} is not defined`);
     }
-    return binding.value;
+    const value = binding.value;
+    if (value === UNINITIALIZED)
+      return runtime.throwError('ReferenceError', `Cannot access '${name}' before initialization`);
+    return value;
   }
 
   writeVariable(name: string, value: Value, mode: BindingMode): void {
     const { runtime } = this;
     const binding = runtime.frame.scope.lookup(name);
-    if (!binding) return runtime.throwError('ReferenceError', `${name} is not defined`);
+    if (!binding) {
+      const receiver = runtime.evaluator.globalReceiverFor(name);
+      if (receiver) return runtime.set(receiver, name, value, undefined, this.isStrict());
+      return runtime.throwError('ReferenceError', `${name} is not defined`);
+    }
     if (mode === 'initialize') {
       binding.value = value;
       binding.isHoisted = false;

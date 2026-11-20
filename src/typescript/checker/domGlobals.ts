@@ -1477,7 +1477,6 @@ export const BROWSER_ONLY_GLOBALS: Record<string, DomGlobalDeclaration> = {
   status: ['var', 'string'],
   statusbar: ['var', 'BarProp'],
   stop: ['function', 'function stop(): void;\n'],
-  toString: ['function', 'function toString(): string;\n'],
   toolbar: ['var', 'BarProp'],
   top: ['var', 'WindowProxy | null'],
   visualViewport: ['var', 'VisualViewport | null'],

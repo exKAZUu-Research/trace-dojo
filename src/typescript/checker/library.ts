@@ -74,6 +74,7 @@ declare function structuredClone<T = any>(value: T, options?: any): T;
 declare function fetch(input: any, init?: any): Promise<any>;
 declare function alert(message?: any): void;
 declare function prompt(message?: string, _default?: string): string | null;
+declare function toString(): string;
 declare var globalThis: any;
 declare var Proxy: any;
 declare var Reflect: any;

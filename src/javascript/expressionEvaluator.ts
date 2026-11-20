@@ -437,8 +437,8 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     const { runtime } = this;
     switch (operator) {
       case 'typeof': {
-        if (argument.kind === 'identifier' && !runtime.frame.scope.lookup(argument.name)) return 'undefined';
-        return runtime.typeOf(this.evaluate(argument));
+        const value = argument.kind === 'identifier' ? this.readVariable(argument.name, true) : this.evaluate(argument);
+        return runtime.typeOf(value);
       }
       case 'delete': {
         return this.deleteExpression(argument);
