@@ -87,7 +87,7 @@ export class Unifier {
         return this.unifySignatures(x, y as typeof x);
       }
       case 'closure': {
-        return x.closure === (y as typeof x).closure;
+        return x.closure.id === (y as typeof x).closure.id;
       }
       case 'dyn': {
         const other = y as typeof x;

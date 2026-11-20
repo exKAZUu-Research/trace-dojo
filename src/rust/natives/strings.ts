@@ -1,4 +1,4 @@
-import { madeString, stringCapacity, vecCapacity } from '../capacity';
+import { concatStrings, madeString, stringByteLength, stringCapacity, StringGrowth, vecCapacity } from '../capacity';
 import { normalize } from '../infer';
 import { strSliceBytes } from '../interpreter';
 // code-gauge-allow-file fileNcss 488 -- One native per method of the standard library.
@@ -8,7 +8,6 @@ import { RustPanic } from '../runtime';
 import { CHAR, REF_STR, shallow, type Type } from '../types';
 import { decodeUtf8, utf8Bytes, utf8Length as byteLength } from '../utf8';
 import {
-  DONE,
   FnValue,
   isPlace,
   type IterValue,
@@ -22,9 +21,10 @@ import {
   type Value,
 } from '../values';
 import { checkVecCapacity, intoStringBytes, withStringCapacity } from './capacityNatives';
-import { arrayIter, nextForFold } from './iterators';
+import { arrayIter } from './iterators';
 import { parseFloatText, parseInteger } from './numbers';
 import { checkedRangeBounds } from './ranges';
+import { appendText, collectString, extendString } from './stringBuilder';
 import {
   linesIter,
   matchesIter,
@@ -134,6 +134,7 @@ function patternOf(ctx: NativeContext, pattern: Value): PatternKind {
 function predicatePattern(ctx: NativeContext, predicate: FnValue): Extract<PatternKind, { kind: 'predicate' }> {
   return {
     kind: 'predicate',
+    value: predicate,
     matches: (char) => call(ctx, predicate, [char]) as boolean,
     fork: () => predicatePattern(ctx, cloneValue(ctx.typeArgs[0], predicate) as FnValue),
   };
@@ -301,7 +302,7 @@ function rangeBounds(range: Value, length: number): { start: number; end: number
 }
 
 const strNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
-  len: ([s]) => BigInt(byteLength(textOf(s))),
+  len: ([s]) => BigInt(stringByteLength(s)),
   is_empty: ([s]) => textOf(s).length === 0,
   chars: ([s], ctx) => strIter(textOf(s), ctx),
   bytes: ([s], ctx) => arrayIter(utf8Bytes(textOf(s), ctx.runtime)),
@@ -355,8 +356,8 @@ const strNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
   rsplit: ([s, p], ctx) => splitIter(textOf(s), patternOf(ctx, p), 'RSplit'),
   split_inclusive: ([s, p], ctx) => splitIter(textOf(s), patternOf(ctx, p), 'SplitInclusive'),
   split_terminator: ([s, p], ctx) => splitIter(textOf(s), patternOf(ctx, p), 'SplitTerminator'),
-  splitn: ([s, n, p], ctx) => splitNIter(textOf(s), patternOf(ctx, p), Number(n as bigint), false),
-  rsplitn: ([s, n, p], ctx) => splitNIter(textOf(s), patternOf(ctx, p), Number(n as bigint), true),
+  splitn: ([s, n, p], ctx) => splitNIter(textOf(s), patternOf(ctx, p), n as bigint, false),
+  rsplitn: ([s, n, p], ctx) => splitNIter(textOf(s), patternOf(ctx, p), n as bigint, true),
   split_once: ([s, p], ctx) => splitOnce(ctx, textOf(s), p, false),
   rsplit_once: ([s, p], ctx) => splitOnce(ctx, textOf(s), p, true),
   split_at: ([s, mid], ctx) => {
@@ -442,32 +443,42 @@ function splitOnce(ctx: NativeContext, text: string, pattern: Value, reverse: bo
   return some(ctx, [decodeUtf8(searcher.bytes.subarray(0, found[0])), decodeUtf8(searcher.bytes.subarray(found[1]))]);
 }
 
-function replaceN(ctx: NativeContext, text: string, from: Value, to: string, count: number): string {
+// code-gauge-allow functionNcss 33 -- The search cursor and the copied suffix differ for empty matches.
+function replaceN(ctx: NativeContext, text: string, from: Value, to: string, count: number): StringValue {
+  const pattern = patternValue(from);
+  const fromBytes = typeof pattern === 'string' ? byteLength(pattern) : undefined;
+  const toBytes = byteLength(to);
+  const inputBytes = byteLength(text);
+  if (count === Number.POSITIVE_INFINITY && typeof pattern === 'string' && fromBytes === 1 && toBytes === 1) {
+    return madeString(
+      text.replaceAll(pattern, () => to),
+      inputBytes,
+      inputBytes
+    );
+  }
+  const capacity = Number.isFinite(count) ? 32 : fromBytes !== undefined && fromBytes <= toBytes ? inputBytes : 0;
+  const growth = new StringGrowth(capacity);
   const match = patternMatcher(ctx, from);
   let result = '';
+  const add = (piece: string): void => {
+    result = appendText(ctx, result, piece);
+    growth.write(piece);
+  };
   let position = 0;
-  let replaced = 0;
-  while (replaced < count) {
+  let end = 0;
+  for (let replaced = 0; replaced < count; replaced++) {
     const found = match(text, position);
     if (!found) break;
-    // Each match is charged, as the pieces between short matches are too short to be charged by their length.
     ctx.runtime.spend();
-    result = appended(ctx, result, text.slice(position, found.index) + to);
-    if (found.length === 0) {
-      if (found.index >= text.length) {
-        position = text.length;
-        replaced++;
-        break;
-      }
-      const char = String.fromCodePoint(text.codePointAt(found.index)!);
-      result = appended(ctx, result, char);
-      position = found.index + char.length;
-    } else {
-      position = found.index + found.length;
-    }
-    replaced++;
+    add(text.slice(end, found.index));
+    add(to);
+    end = found.index + found.length;
+    if (found.length > 0) position = end;
+    else if (end === text.length) break;
+    else position = end + String.fromCodePoint(text.codePointAt(end)!).length;
   }
-  return result + text.slice(position);
+  add(text.slice(end));
+  return growth.finish(result);
 }
 
 const stringNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
@@ -476,15 +487,7 @@ const stringNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
     checkVecCapacity(ctx, 0, capacity, 1);
     return madeString('', Number(capacity as bigint));
   },
-  from_iter: ([iter], ctx) => {
-    const iterator = deref(iter) as IterValue;
-    let text = '';
-    for (let item = nextForFold(iterator); item !== DONE; item = nextForFold(iterator)) {
-      ctx.runtime.spend();
-      text = appended(ctx, text, textOf(item));
-    }
-    return text;
-  },
+  from_iter: ([iter], ctx) => collectString(ctx, deref(iter) as IterValue, ctx.typeArgs[0], ctx.typeArgs[1]),
   from_utf8_lossy: ([bytes]) => decodeUtf8(Uint8Array.from(sliceItems(deref(bytes)) as bigint[], Number)),
   from_utf8: ([bytes], ctx) => {
     const values = deref(bytes) as bigint[];
@@ -496,16 +499,8 @@ const stringNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
       return err(ctx, new StructValue(ctx.interp.program.adtDef('Utf8Error'), [[...values], validUpTo, errorLen]));
     }
   },
-  push_str: ([self, s]) => {
-    const place = placeOf(self);
-    place.set(textOf(place) + textOf(s));
-    return UNIT_VALUE;
-  },
-  push: ([self, c]) => {
-    const place = placeOf(self);
-    place.set(textOf(place) + (c as string));
-    return UNIT_VALUE;
-  },
+  push_str: pushString,
+  push: pushString,
   pop: ([self], ctx) => {
     const place = placeOf(self);
     const chars = [...textOf(place)];
@@ -586,18 +581,16 @@ const stringNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
   },
   extend: ([self, iter], ctx) => {
     const place = placeOf(self);
-    let text = textOf(place);
-    const iterator = deref(iter) as IterValue;
-    for (;;) {
-      ctx.runtime.spend();
-      const item = nextForFold(iterator);
-      if (item === DONE) break;
-      text = appended(ctx, text, textOf(item));
-    }
-    place.set(text);
+    place.set(extendString(ctx, place, deref(iter) as IterValue, ctx.typeArgs[0], ctx.typeArgs[1]));
     return UNIT_VALUE;
   },
 };
+
+function pushString([self, text]: Value[]): Value {
+  const place = placeOf(self);
+  place.set(concatStrings(place, text));
+  return UNIT_VALUE;
+}
 
 function stringRange(
   ctx: NativeContext,
@@ -619,12 +612,6 @@ function stringRange(
     );
   }
   return [start, end];
-}
-
-/** A string a native builds piece by piece, with a piece added, checked before it is built. */
-function appended(ctx: NativeContext, text: string, piece: string): string {
-  ctx.runtime.allocateString(text.length + piece.length, piece.length);
-  return text + piece;
 }
 
 function charCode(value: Value): number {

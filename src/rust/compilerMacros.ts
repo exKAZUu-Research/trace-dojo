@@ -1,5 +1,5 @@
 import type { Expr, FormatArgs, FormatPiece, MacroCall, Span } from './ast';
-import { stringCapacity, StringGrowth } from './capacity';
+import { stringByteLength, stringCapacity, StringGrowth } from './capacity';
 import type { Compiler, Eval } from './compiler';
 import { evaluateValues, stringish } from './compilerCommon';
 import { compilePatternInput, takesWhole } from './compilerPatterns';
@@ -167,7 +167,7 @@ function writeString(
   return (frame) => {
     const p = throughRef ? (target(frame) as Place) : place(frame);
     const before = textOf(p);
-    const growth = new StringGrowth(stringCapacity(p), utf8Length(before));
+    const growth = new StringGrowth(stringCapacity(p), stringByteLength(p));
     const { text, failed } = formatPartly(format, frame, (chunk) => growth.write(chunk));
     const suffix = failed ? '' : newline;
     growth.write(suffix);

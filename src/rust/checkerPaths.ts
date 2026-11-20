@@ -50,7 +50,7 @@ export function typeOfRes(c: Checker, res: PathRes, span: Span, expected: Type |
     case 'fn': {
       const sig = c.instantiate(res.fn, res.typeArgs, span);
       const params = res.fn.selfMode ? [selfParamType(res.fn, sig.subst), ...sig.params] : sig.params;
-      return { kind: 'fn', params, ret: sig.ret };
+      return { kind: 'fn', params, ret: sig.ret, item: res.fn };
     }
     case 'ctor': {
       const variant = res.def.variants[res.variant];
@@ -71,6 +71,7 @@ export function typeOfRes(c: Checker, res: PathRes, span: Span, expected: Type |
         kind: 'fn',
         params: variant.fields.map((field) => substitute(field.type, subst)),
         ret: self,
+        item: variant,
       };
     }
     case 'const': {

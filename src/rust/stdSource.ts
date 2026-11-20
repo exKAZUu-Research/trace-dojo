@@ -24,7 +24,10 @@ pub mod marker {
     pub trait Sync {}
 }
 pub mod clone {
-    pub trait Clone { fn clone(&self) -> Self; }
+    pub trait Clone {
+        fn clone(&self) -> Self;
+        fn clone_from(&mut self, source: &Self);
+    }
 }
 pub mod borrow {
     pub trait ToOwned { fn to_owned(&self) -> Self; }

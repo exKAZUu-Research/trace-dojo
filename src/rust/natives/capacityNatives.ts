@@ -7,12 +7,13 @@ import {
   setStringCapacity,
   setVecCapacity,
   shrinkVec,
+  stringByteLength,
   stringCapacity,
   vecCapacity,
 } from '../capacity';
 import { iteratorCapability } from '../traits';
 import type { Type } from '../types';
-import { utf8Bytes, utf8Length } from '../utf8';
+import { utf8Bytes } from '../utf8';
 import { type IterValue, sliceLength, textOf, UNIT_VALUE, type Value } from '../values';
 import { isTrustedLen, lengthOf } from './iterators';
 import { sizeOf } from './layout';
@@ -173,11 +174,8 @@ export function extendRoom(ctx: NativeContext, items: Value[], iterator: IterVal
 
 /** The natives that change a `String`'s length, which make room first as `RawVec::reserve` does. */
 const STRING_RESIZING = new Set([
-  'push_str',
-  'push',
   'insert',
   'insert_str',
-  'extend',
   'replace_range',
   'pop',
   'remove',
@@ -193,26 +191,27 @@ const stringCapacityNatives: Record<string, (args: Value[], ctx: NativeContext) 
   capacity: ([self]) => BigInt(stringCapacity(self)),
   reserve: ([self, additional], ctx) => {
     const place = placeOf(self);
-    const len = utf8Length(textOf(place));
+    const len = stringByteLength(place);
     checkVecCapacity(ctx, len, additional, 1);
     setStringCapacity(place, reservedCapacity(stringCapacity(place), len, Number(additional as bigint), 1));
     return UNIT_VALUE;
   },
   reserve_exact: ([self, additional], ctx) => {
     const place = placeOf(self);
-    checkVecCapacity(ctx, utf8Length(textOf(place)), additional, 1);
-    const needed = utf8Length(textOf(place)) + Number(additional as bigint);
+    const len = stringByteLength(place);
+    checkVecCapacity(ctx, len, additional, 1);
+    const needed = len + Number(additional as bigint);
     setStringCapacity(place, Math.max(stringCapacity(place), needed));
     return UNIT_VALUE;
   },
   shrink_to_fit: ([self]) => {
     const place = placeOf(self);
-    setStringCapacity(place, utf8Length(textOf(place)));
+    setStringCapacity(place, stringByteLength(place));
     return UNIT_VALUE;
   },
   shrink_to: ([self, min]) => {
     const place = placeOf(self);
-    const target = Math.max(utf8Length(textOf(place)), Number(min as bigint));
+    const target = Math.max(stringByteLength(place), Number(min as bigint));
     setStringCapacity(place, Math.min(stringCapacity(place), target));
     return UNIT_VALUE;
   },

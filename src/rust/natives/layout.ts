@@ -42,6 +42,7 @@ export function sizeOf(type: Type): number {
   return layoutOf(type).size;
 }
 
+// code-gauge-allow functionNcss 32 -- Each represented type has its own layout.
 export function layoutOf(type: Type): Layout {
   const t = normalize(shallow(type));
   switch (t.kind) {
@@ -61,7 +62,11 @@ export function layoutOf(type: Type): Layout {
       return pointerTo(t.target);
     }
     case 'fn': {
-      return POINTER;
+      return t.item ? { size: 0, align: 1 } : POINTER;
+    }
+    case 'closure': {
+      const captures = t.closure.captures ?? [];
+      return structLayout(captures.map(({ type, mode }) => (mode === 'value' ? layoutOf(type) : pointerTo(type))));
     }
     case 'array': {
       const elem = layoutOf(t.elem);

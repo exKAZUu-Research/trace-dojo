@@ -91,21 +91,33 @@ function minNonZeroCapacity(elemSize: number): number {
 }
 
 export function stringCapacity(value: Value): number {
+  return stringLayout(value).capacity;
+}
+
+export function stringByteLength(value: Value): number {
+  return stringLayout(value).byteLength;
+}
+
+function stringLayout(value: Value): StringValue {
   let stored = value;
   while (isPlace(stored)) stored = stored.get();
-  return stored instanceof StringValue ? stored.capacity : utf8Length(textOf(stored));
+  if (stored instanceof StringValue) return stored;
+  const text = textOf(stored);
+  const bytes = utf8Length(text);
+  return new StringValue(text, bytes, bytes);
 }
 
 export function changeString(place: Place, change: () => void): void {
-  const len = utf8Length(textOf(place));
-  const capacity = stringCapacity(place);
+  const { byteLength, capacity } = stringLayout(place);
   change();
-  const added = utf8Length(textOf(place)) - len;
-  setStringCapacity(place, added > 0 ? reservedCapacity(capacity, len, added, 1) : capacity);
+  const result = stringLayout(place);
+  const updated = reservedCapacity(capacity, byteLength, result.byteLength - byteLength, 1);
+  place.set(madeString(result.text, updated, result.byteLength));
 }
 
 export function setStringCapacity(place: Place, capacity: number): void {
-  place.set(madeString(textOf(place), capacity));
+  const { text, byteLength } = stringLayout(place);
+  place.set(madeString(text, capacity, byteLength));
 }
 
 export class StringGrowth {
@@ -114,14 +126,17 @@ export class StringGrowth {
     private length = 0
   ) {}
 
-  write(text: string): void {
-    const added = utf8Length(text);
-    if (added > 0) this.capacity = reservedCapacity(this.capacity, this.length, added, 1);
+  reserve(additional: number): void {
+    this.capacity = reservedCapacity(this.capacity, this.length, additional, 1);
+  }
+
+  write(text: string, added = utf8Length(text)): void {
+    this.reserve(added);
     this.length += added;
   }
 
-  finish(text: string): string | StringValue {
-    return madeString(text, Math.max(this.capacity, utf8Length(text)));
+  finish(text: string): StringValue {
+    return madeString(text, this.capacity, this.length);
   }
 
   store(place: Place, text: string): void {
@@ -129,14 +144,15 @@ export class StringGrowth {
   }
 }
 
-export function madeString(text: string, capacity: number): string | StringValue {
-  return capacity === utf8Length(text) ? text : new StringValue(text, capacity);
+export function madeString(text: string, capacity: number, length = utf8Length(text)): StringValue {
+  return new StringValue(text, capacity, length);
 }
 
-export function concatStrings(left: Value, right: string): string | StringValue {
-  const text = textOf(left);
-  const capacity = reservedCapacity(stringCapacity(left), utf8Length(text), utf8Length(right), 1);
-  return madeString(text + right, capacity);
+export function concatStrings(left: Value, right: Value): StringValue {
+  const a = stringLayout(left);
+  const b = stringLayout(right);
+  const capacity = reservedCapacity(a.capacity, a.byteLength, b.byteLength, 1);
+  return madeString(a.text + b.text, capacity, a.byteLength + b.byteLength);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

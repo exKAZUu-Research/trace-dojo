@@ -22,6 +22,7 @@ import {
   type Value,
 } from '../values';
 import { intoStringBytes } from './capacityNatives';
+import { cloneFromDefault } from './cloning';
 import { collectInto } from './iterators';
 import { sizeOf } from './layout';
 import {
@@ -213,6 +214,10 @@ function builtinDefaultValue(ctx: NativeContext, type: Type): Value {
 
 define({
   'Clone::clone': ([self], ctx) => cloneValue(selfType(ctx), deref(self)),
+  'Clone::clone_from': ([self, source], ctx) => {
+    cloneFromDefault(ctx, selfType(ctx), placeOf(self), source);
+    return UNIT_VALUE;
+  },
   'ToOwned::to_owned': ([self], ctx) => cloneValue(selfType(ctx), deref(self)),
   'ToString::to_string': ([self], ctx) => {
     try {

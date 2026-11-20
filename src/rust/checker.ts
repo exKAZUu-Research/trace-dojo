@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 768 -- The checker core owns body, entry point, and type obligations.
+// code-gauge-allow-file fileNcss 772 -- The checker core owns body, entry point, and type obligations.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ExecutionBudget } from '../interpreter/limits';
 import { Annotations, type Coercion, type FnContext, type LocalVar, type PathRes } from './annotations';
@@ -858,6 +858,7 @@ export class Checker {
    * value coerces to the type so far, or else the values so far all coerce to its type (`&String` and `&str` give
    * `&str` in either order). `mismatch` reports a value that fits neither way.
    */
+  // code-gauge-allow functionCognitiveComplexity 18 -- Prior expressions can coerce toward a later common type.
   mergeTypes(
     values: [Expr, Type | ((expected: Type | undefined) => Type)][],
     mismatch: (expr: Expr, merged: Type, type: Type) => never
@@ -876,6 +877,11 @@ export class Checker {
         merged = type;
       }
       merged ??= type;
+      const previousType = shallow(merged);
+      const currentType = shallow(type);
+      if (previousType.kind === 'fn' && currentType.kind === 'fn' && previousType.item !== currentType.item) {
+        merged = { ...previousType, item: undefined };
+      }
       previous.push([expr, type]);
     }
     return merged;

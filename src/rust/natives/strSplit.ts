@@ -3,7 +3,7 @@ import type { DebugPart } from '../debugText';
 import { type DebugValue, described, fieldsPart, listPart, numberPart, tuplePart } from '../iterDebug';
 import { CHAR, REF_STR } from '../types';
 import { decodeUtf8 } from '../utf8';
-import { DONE, IterValue, type Next } from '../values';
+import { DONE, type FnValue, IterValue, type Next } from '../values';
 
 /**
  * `str::split` and its kin as `core::str` has them: the searchers of patterns (a `char`, a string by the two-way
@@ -18,6 +18,7 @@ const encoder = new TextEncoder();
 interface Searcher {
   readonly text: string;
   readonly bytes: Uint8Array;
+  readonly roots?: FnValue[];
   nextMatch(): [number, number] | undefined;
   nextMatchBack(): [number, number] | undefined;
   debug(show: DebugValue): DebugPart;
@@ -32,6 +33,7 @@ export type PatternKind =
 
 interface PredicatePattern {
   kind: 'predicate';
+  value?: FnValue;
   matches: (char: string) => boolean;
   fork?: () => PredicatePattern;
 }
@@ -49,7 +51,7 @@ export function searcherOf(text: string, pattern: PatternKind): Searcher {
       return new MultiCharEqSearcher(text, (char) => chars.includes(char), pattern.searcher, chars);
     }
     case 'predicate': {
-      return new MultiCharEqSearcher(text, pattern.matches, 'CharPredicateSearcher', undefined, pattern.fork);
+      return new MultiCharEqSearcher(text, pattern.matches, 'CharPredicateSearcher', undefined, pattern);
     }
   }
 }
@@ -133,7 +135,7 @@ class MultiCharEqSearcher implements Searcher {
     private readonly matches: (char: string) => boolean,
     private readonly name: string,
     private readonly charEq?: string[],
-    private readonly forkPredicate?: () => PredicatePattern
+    private readonly predicate?: PredicatePattern
   ) {
     this.bytes = encoder.encode(text);
     let offset = 0;
@@ -147,8 +149,12 @@ class MultiCharEqSearcher implements Searcher {
 
   fork(): MultiCharEqSearcher {
     const copy = shallowState(this);
-    const predicate = this.forkPredicate?.();
-    return predicate ? Object.assign(copy, { matches: predicate.matches, forkPredicate: predicate.fork }) : copy;
+    const predicate = this.predicate?.fork?.();
+    return predicate ? Object.assign(copy, { matches: predicate.matches, predicate }) : copy;
+  }
+
+  get roots(): FnValue[] {
+    return this.predicate?.value ? [this.predicate.value] : [];
   }
 
   nextMatch(): [number, number] | undefined {
@@ -466,6 +472,10 @@ class SplitInternal {
     return Object.assign(shallowState(this), { matcher: forkSearcher(this.matcher) });
   }
 
+  get roots(): FnValue[] | undefined {
+    return this.matcher.roots;
+  }
+
   private piece(from: number, to: number): string {
     return decodeUtf8(this.matcher.bytes.subarray(from, to));
   }
@@ -525,7 +535,10 @@ function splitFrom(inner: SplitInternal, kind: SplitKind): IterValue {
   const inclusive = kind === 'SplitInclusive';
   const forward = (): Next => inner.next(inclusive) ?? DONE;
   const backward = (): Next => inner.nextBack(inclusive) ?? DONE;
-  const iter = kind === 'RSplit' ? new IterValue(backward, forward) : new IterValue(forward, backward);
+  const iter =
+    kind === 'RSplit'
+      ? new IterValue(backward, forward, undefined, inner.roots)
+      : new IterValue(forward, backward, undefined, inner.roots);
   iter.fork = () => splitFrom(inner.fork(), kind);
   return described(iter, (show) =>
     inclusive ? fieldsPart(kind, [['0', inner.debug(show)]]) : tuplePart(kind, [inner.debug(show)])
@@ -533,17 +546,21 @@ function splitFrom(inner: SplitInternal, kind: SplitKind): IterValue {
 }
 
 /** `splitn` and `rsplitn`: at most `count` pieces, the last of them the rest of the text. */
-export function splitNIter(text: string, pattern: PatternKind, count: number, reverse: boolean): IterValue {
+export function splitNIter(text: string, pattern: PatternKind, count: bigint, reverse: boolean): IterValue {
   return splitNFrom(new SplitInternal(searcherOf(text, pattern), true), count, reverse);
 }
 
-function splitNFrom(inner: SplitInternal, count: number, reverse: boolean): IterValue {
+function splitNFrom(inner: SplitInternal, count: bigint, reverse: boolean): IterValue {
   let left = count;
-  const iter = new IterValue(() => {
-    if (left === 0) return DONE;
-    left--;
-    return (left === 0 ? inner.getEnd() : reverse ? inner.nextBack() : inner.next()) ?? DONE;
-  });
+  const iter = new IterValue(
+    () => {
+      if (left === 0n) return DONE;
+      return (--left === 0n ? inner.getEnd() : reverse ? inner.nextBack() : inner.next()) ?? DONE;
+    },
+    undefined,
+    undefined,
+    inner.roots
+  );
   iter.fork = () => splitNFrom(inner.fork(), left, reverse);
   return described(iter, (show) =>
     tuplePart(reverse ? 'RSplitN' : 'SplitN', [
@@ -661,7 +678,9 @@ function matchesFrom(searcher: Searcher, indexed: boolean): IterValue {
   };
   const iter = new IterValue(
     () => item(searcher.nextMatch()),
-    () => item(searcher.nextMatchBack())
+    () => item(searcher.nextMatchBack()),
+    undefined,
+    searcher.roots
   );
   iter.fork = () => matchesFrom(forkSearcher(searcher), indexed);
   const [outer, inner] = indexed ? ['MatchIndices', 'MatchIndicesInternal'] : ['Matches', 'MatchesInternal'];

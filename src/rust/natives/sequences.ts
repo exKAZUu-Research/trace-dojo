@@ -1,12 +1,12 @@
 // code-gauge-allow-file fileNcss 500 -- One native per method of the standard library.
-import { changeString, keepVecCapacity, setIntoIterBuffer, vecCapacity } from '../capacity';
+import { keepVecCapacity, setIntoIterBuffer, vecCapacity } from '../capacity';
 import { sliceRange } from '../compiler';
 import { type DebugPart } from '../debugText';
 import { normalize } from '../infer';
 import { described, fieldsPart, listPart, numberPart } from '../iterDebug';
 import { cloneValue, compareValues, copyValue, testPartialOrder, valuesEqual } from '../ops';
 import { MOVED, RustPanic } from '../runtime';
-import { isBuiltin, shallow, type Type } from '../types';
+import { shallow, type Type } from '../types';
 import {
   DONE,
   ElementPlace,
@@ -16,7 +16,6 @@ import {
   sliceGet,
   sliceItems,
   sliceLength,
-  sliceSet,
   SliceView,
   swapOwnedElements,
   textOf,
@@ -24,6 +23,7 @@ import {
   type Value,
 } from '../values';
 import { extendRoom, withCapacity } from './capacityNatives';
+import { cloneInto } from './cloning';
 import { dequeDrain, dequeIter, dequeSlices, withDequeHead } from './dequeHead';
 import {
   arrayIter,
@@ -289,7 +289,7 @@ const sliceNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
     return chunkDebug(iter, 'RChunks', done, () => [['chunk_size', numberPart(width)]]);
   },
   chunks_exact: ([self, size], ctx) => chunks(ctx, deref(self), Number(size as bigint), true),
-  fill: ([self, value], ctx) => fillSlice(deref(self), value, elemType(ctx)),
+  fill: ([self, value], ctx) => fillSlice(ctx, deref(self), value, elemType(ctx)),
   to_vec: ([self], ctx) => clonedItems(ctx, sliceItems(deref(self))),
   to_owned: ([self], ctx) => clonedItems(ctx, sliceItems(deref(self))),
   into_vec: ([self]) => sliceItems(deref(self)),
@@ -317,16 +317,13 @@ const sliceNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
   },
 };
 
-function fillSlice(slice: Value, value: Value, type: Type): Value {
+function fillSlice(ctx: NativeContext, slice: Value, value: Value, type: Type): Value {
   const length = sliceLength(slice);
   if (length === 0) return UNIT_VALUE;
   const { base, start } = sliceBase(slice);
   const last = start + length - 1;
-  const string = isBuiltin(type, 'String');
   for (let index = start; index < last; index++) {
-    const place = new ElementPlace(base, index);
-    if (string) changeString(place, () => place.set(value));
-    else place.set(cloneValue(type, value));
+    cloneInto(ctx, type, new ElementPlace(base, index), value);
   }
   base[last] = value;
   return UNIT_VALUE;
@@ -440,8 +437,10 @@ function copyFrom(ctx: NativeContext, target: Value, source: Value, cloneType?: 
         : 'destination and source slices have different lengths'
     );
   }
+  const { base, start } = sliceBase(target);
   for (const [index, item] of items.entries()) {
-    sliceSet(target, index, trivial ? copyValue(item) : cloneValue(cloneType, item));
+    if (trivial) base[start + index] = copyValue(item);
+    else cloneInto(ctx, cloneType, new ElementPlace(base, start + index), item);
   }
   return UNIT_VALUE;
 }

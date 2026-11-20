@@ -36,7 +36,8 @@ export const UNIT_VALUE: Value[] = Object.freeze([]) as unknown as Value[];
 export class StringValue {
   constructor(
     readonly text: string,
-    readonly capacity: number
+    readonly capacity: number,
+    readonly byteLength: number
   ) {}
 }
 

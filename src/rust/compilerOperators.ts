@@ -1,5 +1,5 @@
 import type { Expr, Span } from './ast';
-import { changeString, concatStrings, sizeTable } from './capacity';
+import { concatStrings, sizeTable } from './capacity';
 import type { Compiler, Eval } from './compiler';
 import { derefAll, evaluateValues, isStringType, stringish, stripRefs } from './compilerCommon';
 import { normalize } from './infer';
@@ -138,7 +138,7 @@ export function compileCompoundAssign(c: Compiler, expr: ExprOf<'compoundAssign'
       const target = place(frame);
       const addition = textOf(value(frame));
       frame.runtime.allocateString(textOf(target).length + addition.length, addition.length);
-      changeString(target, () => target.set(textOf(target) + addition));
+      target.set(concatStrings(target, addition));
       return UNIT_VALUE;
     };
   }

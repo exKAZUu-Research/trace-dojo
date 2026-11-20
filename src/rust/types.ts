@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 408 -- Defines Rust types, their substitutions and their shared structural operations.
+// code-gauge-allow-file fileNcss 411 -- Defines Rust types, their substitutions and their shared structural operations.
 import type { ConstItem, FnItem, Span } from './ast';
 import type { Module } from './items';
 
@@ -21,7 +21,7 @@ export type Type =
   | { kind: 'adt'; def: AdtDef; args: Type[]; lifetimes?: string[] }
   | { kind: 'param'; param: TypeParam }
   | { kind: 'var'; v: TypeVar }
-  | { kind: 'fn'; params: Type[]; ret: Type }
+  | { kind: 'fn'; params: Type[]; ret: Type; item?: FnDef | VariantDef }
   | { kind: 'closure'; closure: ClosureType }
   | { kind: 'dyn'; trait: TraitRef; objectLifetime?: 'static' | 'reference' }
   | { kind: 'opaque'; opaque: OpaqueType };
@@ -312,7 +312,7 @@ export function mapChildren(t: Type, f: (child: Type) => Type): Type {
       return t.args.length === 0 ? t : { kind: 'adt', def: t.def, args: t.args.map(f) };
     }
     case 'fn': {
-      return { kind: 'fn', params: t.params.map(f), ret: f(t.ret) };
+      return { ...t, params: t.params.map(f), ret: f(t.ret) };
     }
     case 'dyn': {
       return { ...t, trait: mapTraitRef(t.trait, f) };
@@ -352,7 +352,7 @@ export function childTypes(t: Type): Type[] {
       return [...t.params, t.ret];
     }
     case 'closure': {
-      return [...t.closure.params, t.closure.ret];
+      return [...t.closure.params, t.closure.ret, ...(t.closure.captures?.map(({ type }) => type) ?? [])];
     }
     case 'dyn': {
       return [...t.trait.args, ...(t.trait.fnSig?.params ?? [])];
@@ -407,6 +407,18 @@ export function substitute(type: Type, subst: Subst): Type {
   if (subst.size === 0) return type;
   const t = shallow(type);
   if (t.kind === 'param') return subst.get(t.param) ?? t;
+  if (t.kind === 'closure') {
+    const { closure } = t;
+    return {
+      kind: 'closure',
+      closure: {
+        ...closure,
+        params: closure.params.map((param) => substitute(param, subst)),
+        ret: substitute(closure.ret, subst),
+        captures: closure.captures?.map((capture) => ({ ...capture, type: substitute(capture.type, subst) })),
+      },
+    };
+  }
   if (t.kind === 'opaque') {
     const opaque = t.opaque;
     const args = opaque.args.map((arg) => substitute(arg, subst));

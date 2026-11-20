@@ -40,6 +40,7 @@ import {
 import { layoutOf, sizeOf } from './layout';
 import { rangeIterator } from './rangeIterator';
 import { lessByPartialOrd, sortSlice } from './sorting';
+import { collectString } from './stringBuilder';
 import { call, define, deref, libraryPanic, type NativeContext, none, option, placeOf, some } from './support';
 
 /** An iterator over an array's elements from `start` to `end`, from both ends. */
@@ -978,6 +979,7 @@ define({
     const stop =
       stopVariant === undefined ? undefined : (item: Value) => (deref(item) as EnumValue).variant === stopVariant;
     if (builtin === 'Vec') return collectVec(ctx, iterOf(self), ctx.typeArgs[1], ctx.typeArgs[0]);
+    if (builtin === 'String') return collectString(ctx, iterOf(self), ctx.typeArgs[0], ctx.typeArgs[1]);
     return collectInto(ctx, collectAll(ctx, iterOf(self), stop, !stop), ctx.typeArgs[2], ctx.typeArgs[0]);
   },
   'IterImpl<_, _>::sum': ([self], ctx) => sumOrProduct(ctx, iterOf(self), ctx.typeArgs[2], '+'),
@@ -1350,7 +1352,7 @@ export function collectInto(ctx: NativeContext, items: Value[], target: Type, it
       return heapify([...items], t.args[0]);
     }
     case 'String': {
-      return items.map(textOf).join('');
+      return collectString(ctx, arrayIter(items), item);
     }
     case 'BTreeMap': {
       return collectBTreeMap(ctx, items as [Value, Value][], t.args[0], item);

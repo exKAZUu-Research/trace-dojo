@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 464 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss 466 -- One native per method of the standard library.
 import { debugFloat, decimalToF32 } from '../floatFormat';
 import { FLOAT_LIMITS } from '../floatLimits';
 import { normalize } from '../infer';
@@ -533,7 +533,7 @@ const floating: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
   // Rust multiplies by a constant of the type: `180 / PI` and `PI / 180` rounded to it.
   to_degrees: ([a], ctx) => round(ctx, float(a) * round(ctx, 180 / Math.PI)),
   to_radians: ([a], ctx) => round(ctx, float(a) * round(ctx, round(ctx, Math.PI) / 180)),
-  mul_add: ([a, b, c], ctx) => round(ctx, fma(float(a), float(b), float(c))),
+  mul_add: ([a, b, c], ctx) => fma(float(a), float(b), float(c), isF32(ctx)),
   recip: ([a], ctx) => round(ctx, 1 / float(a)),
   total_cmp: ([a, b], ctx) => {
     const x = float(a);
@@ -588,9 +588,12 @@ function powi(base: number, exponent: number, round: (value: number) => number):
   return exponent < 0 ? round(1 / result) : result;
 }
 
-/** A fused multiply-add, computed exactly with bigints and rounded once, as `f64::mul_add` does. */
-function fma(a: number, b: number, c: number): number {
-  if (!Number.isFinite(a) || !Number.isFinite(b) || !Number.isFinite(c) || a === 0 || b === 0) return a * b + c;
+function fma(a: number, b: number, c: number, f32: boolean): number {
+  if (Number.isFinite(a) && Number.isFinite(b) && !Number.isFinite(c)) return c;
+  if (!Number.isFinite(a) || !Number.isFinite(b) || !Number.isFinite(c) || a === 0 || b === 0) {
+    const result = a * b + c;
+    return f32 ? Math.fround(result) : result;
+  }
   const [ma, ea] = decompose(a);
   const [mb, eb] = decompose(b);
   let mantissa = ma * mb;
@@ -604,8 +607,8 @@ function fma(a: number, b: number, c: number): number {
       exponent = ec;
     }
   }
-  if (mantissa === 0n) return a * b + c;
-  return roundToDouble(mantissa, exponent);
+  if (mantissa === 0n) return 0;
+  return roundBinary(mantissa, exponent, f32);
 }
 
 /** A finite double as an integer mantissa and a power of two. */
@@ -619,15 +622,12 @@ function decompose(value: number): [bigint, number] {
   return [sign * mantissa, exponentBits - 1075];
 }
 
-/** The double nearest to `mantissa × 2^exponent`, ties to even. */
-function roundToDouble(mantissa: bigint, exponent: number): number {
+function roundBinary(mantissa: bigint, exponent: number, f32: boolean): number {
   const negative = mantissa < 0n;
   let m = negative ? -mantissa : mantissa;
   let e = exponent;
   const length = m.toString(2).length;
-  // Keep 53 significant bits, or fewer for subnormal results.
-  let shift = length - 53;
-  if (e + shift < -1074) shift = -1074 - e;
+  const shift = Math.max(length - (f32 ? 24 : 53), (f32 ? -149 : -1074) - e);
   if (shift > 0) {
     const half = 1n << BigInt(shift - 1);
     const remainder = m & ((1n << BigInt(shift)) - 1n);
@@ -635,7 +635,8 @@ function roundToDouble(mantissa: bigint, exponent: number): number {
     if (remainder > half || (remainder === half && (m & 1n) === 1n)) m++;
     e += shift;
   }
-  const result = Number(m) * 2 ** e;
+  const magnitude = Number(m) * 2 ** e;
+  const result = f32 ? Math.fround(magnitude) : magnitude;
   return negative ? -result : result;
 }
 

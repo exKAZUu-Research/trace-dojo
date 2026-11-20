@@ -58,7 +58,7 @@ export function typeKey(type: Type): string {
       return `dyn ${concreteTraitKey(t.trait)}`;
     }
     case 'fn': {
-      return signatureKey(t);
+      return (t.item ? `item${typeIdentity(t.item)}:` : '') + signatureKey(t);
     }
     case 'closure': {
       return `closure${t.closure.id}`;
@@ -86,7 +86,7 @@ function signatureKey(signature: { params: Type[]; ret: Type }): string {
 }
 
 /** Matches a type pattern with type parameters against a concrete type, binding the parameters. */
-// code-gauge-allow functionNcss 41 -- One case per kind of type.
+// code-gauge-allow functionNcss 42 -- One case per kind of type.
 export function matchConcrete(
   pattern: Type,
   concrete: Type,
@@ -134,7 +134,8 @@ export function matchConcrete(
       return matchTraitRef(p.trait, (c as typeof p).trait, match);
     }
     case 'fn': {
-      return matchSignature(p, c as typeof p, match);
+      const other = c as typeof p;
+      return p.item === other.item && matchSignature(p, other, match);
     }
     case 'closure': {
       return p.closure.id === (c as typeof p).closure.id;

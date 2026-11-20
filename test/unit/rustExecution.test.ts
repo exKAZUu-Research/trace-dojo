@@ -4047,3 +4047,114 @@ test('formats the residual Rust window slice after a clone exhausts from either 
     stdout: 'Windows { v: [1, 2, 3], size: 2 } Windows { v: [3], size: 2 } Windows { v: [2], size: 2 }\n',
   });
 });
+
+test('grows Rust String buffers with reference collection and replacement capacities', () => {
+  const source = rustMain(`println!("{} {} {} {} {}",
+      "hello".chars().collect::<String>().capacity(),
+      "hello".replace("l", "LL").capacity(),
+      "hello world".chars().rev().collect::<String>().capacity(),
+      (0..5).map(|i| i.to_string()).collect::<String>().capacity(),
+      ["ab","cd"].iter().map(|s| s.to_string()).collect::<String>().capacity());
+    println!("{} {} {} {}", "hello".replace("l", "q").capacity(),
+      "hello".replacen("l", "LL", 1).capacity(),
+      "hello".chars().filter(|c| *c != 'l').collect::<String>().capacity(),
+      vec!['a'; 12].iter().collect::<String>().capacity());
+    println!("{:?} {:?}", "abc".replace("", "-"), "abc".replacen("", "-", 1));
+    let mut initial = String::with_capacity(24);
+    initial.push('é');
+    let text: String = [initial, String::from("b")].into_iter().collect();
+    println!("{} {} {}", text, text.len(), text.capacity());`);
+  expect(executeProgram('rust', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '8 10 16 10 8\n5 32 8 12\n"-a-b-c-" "-abc"\néb 3 24\n',
+  });
+});
+
+test('appends repeatedly to a Rust String within the execution budget', () => {
+  const source = rustMain(`let mut text = String::new();
+    while text.len() < 60000 { text.push_str("é"); }
+    println!("{} {}", text.len(), text.chars().count());`);
+  expect(executeProgram('rust', source)).toMatchObject({ kind: 'executed', stdout: '60000 30000\n' });
+});
+
+test('rounds Rust fused multiply-add once at its receiver width', () => {
+  const source = rustMain(`let a = 1.0000001192092896_f32 / 4096.0;
+    let b = 0.9999998807907104_f32 / 4096.0;
+    println!("{:?} {:?} {:?} {}", a.mul_add(b, 1.0000001192092896_f32),
+      a.mul_add(b, 1.0000003576278687_f32),
+      f32::MIN_POSITIVE.mul_add(0.5, 0.0),
+      1e308_f64.mul_add(1e308, f64::NEG_INFINITY));`);
+  expect(executeProgram('rust', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '1.0000001 1.0000004 5.877472e-39 -inf\n',
+  });
+});
+
+test('reuses destination Rust buffers and dispatches custom clone_from on slices', () => {
+  const source = rustMain(
+    `let mut strings = [String::from("xxxx"), String::with_capacity(12)];
+    strings.clone_from_slice(&[String::from("a"), String::from("abc")]);
+    println!("{} {} {} {}", strings[0], strings[0].capacity(), strings[1], strings[1].capacity());
+    let mut vector = Vec::with_capacity(12);
+    vector.push(String::from("old content"));
+    let mut destination = [vector];
+    destination.clone_from_slice(&[vec![String::from("new"), String::from("later")]]);
+    println!("{} {} {:?}", destination[0].capacity(), destination[0][0].capacity(), destination[0]);
+    let mut own = [Item(1)];
+    own.clone_from_slice(&[Item(7)]);
+    println!("{}", own[0].0);`,
+    `struct Item(i32);
+     impl Clone for Item {
+       fn clone(&self) -> Self { print!("clone "); Item(self.0) }
+       fn clone_from(&mut self, source: &Self) { print!("clone_from "); self.0 = source.0; }
+     }`
+  );
+  expect(executeProgram('rust', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'a 4 abc 12\n12 11 ["new", "later"]\nclone_from 7\n',
+  });
+});
+
+test('keeps Rust move predicates reachable through string iterators', () => {
+  for (const [method, argumentsBeforePredicate] of [
+    ['split', ''],
+    ['matches', ''],
+    ['splitn', '2, '],
+  ]) {
+    const source = rustMain(`let observer = Turtle::new(0, 0);
+      let mut turtle = Turtle::new(0, 1);
+      let mut pieces = "a,b".${method}(${argumentsBeforePredicate}move |c| { turtle.turn_right(); c == ',' });
+      println!("{}", observer.canMoveForward());
+      pieces.next();
+      println!("{}", observer.canMoveForward());`);
+    expect(executeProgram('rust', source)).toMatchObject({ kind: 'executed', stdout: 'false\nfalse\n' });
+  }
+});
+
+test('retains exact Rust splitn counts in clones', () => {
+  const source = rustMain(`let mut parts = "a,b".splitn(usize::MAX, ',');
+    parts.next();
+    let mut reverse = "a,b".rsplitn(9007199254740993_usize, ',');
+    reverse.next();
+    println!("{:?} {:?}", parts.clone(), reverse.clone());`);
+  const result = executeProgram('rust', source);
+  expect(result).toMatchObject({ kind: 'executed', stdout: expect.stringContaining('count: 18446744073709551614') });
+  expect(result).toMatchObject({ stdout: expect.stringContaining('count: 9007199254740992') });
+});
+
+test('uses Rust layouts for function items, coerced pointers, and closure captures', () => {
+  const source = rustMain(
+    `let number = 30_i64;
+    let moved = move || number;
+    let borrowed = || number;
+    let pointer = if true { first } else { second };
+    println!("{} {} {} {} {} {}", layout(first), layout(Record), layout(pointer),
+      layout(moved), layout(borrowed), generic_capture(1_u16));`,
+    `struct Record(i32);
+     fn first() {}
+     fn second() {}
+     fn layout<T>(_: T) -> usize { std::mem::size_of::<T>() }
+     fn generic_capture<T>(value: T) -> usize { layout(move || value) }`
+  );
+  expect(executeProgram('rust', source)).toMatchObject({ kind: 'executed', stdout: '0 0 8 8 8 2\n' });
+});
