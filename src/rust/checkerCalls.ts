@@ -121,7 +121,7 @@ function callCtor(
     );
   }
   checkArgs(c, expr.args, params, expectations(c, self, params, expected));
-  c.requireSizedAdtArguments(res.def, res.typeArgs, expr.span);
+  c.requireAdtArguments(res.def, res.typeArgs, expr.span);
   expr.callee.ty = { kind: 'fn', params, ret: self };
   return self;
 }

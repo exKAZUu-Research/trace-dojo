@@ -29,7 +29,6 @@ import {
   intType,
   shallow,
   substitute,
-  substituteTraitRef,
   type TraitDef,
   type Type,
   type TypeParam,
@@ -56,7 +55,7 @@ export function typeOfRes(c: Checker, res: PathRes, span: Span, expected: Type |
     case 'ctor': {
       const variant = res.def.variants[res.variant];
       const self = adt(res.def, res.typeArgs);
-      c.requireSizedAdtArguments(res.def, res.typeArgs, span);
+      c.requireAdtArguments(res.def, res.typeArgs, span);
       if (variant.shape === 'unit') {
         if (expected) c.unifier.tryUnify(self, expected);
         return self;
@@ -362,11 +361,7 @@ export function structExpr(c: Checker, expr: Extract<Expr, { kind: 'struct' }>, 
     c.coerceExpr(field.value, substitute(variantDef.fields[index].type, subst));
   }
   c.annotations.paths.set(expr, { kind: 'ctor', def, variant, typeArgs });
-  c.requireSizedAdtArguments(def, typeArgs, expr.span);
-  // A struct's bounds on its type parameters hold for every value of it (`struct Labeled<T: Display>`).
-  for (const [index, param] of def.params.entries()) {
-    for (const bound of param.bounds) c.require(typeArgs[index], substituteTraitRef(bound, subst), expr.span);
-  }
+  c.requireAdtArguments(def, typeArgs, expr.span);
   if (expr.base) {
     if (def.kind === 'enum') compileError(expr.base.span, '列挙子には .. を書けません。');
     for (const field of variantDef.fields) if (!seen.has(field.name)) checkFieldVisible(c, def, field, expr.base.span);

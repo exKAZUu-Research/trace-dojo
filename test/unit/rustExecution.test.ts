@@ -3063,3 +3063,13 @@ test('drops Rust collection elements rejected by retain before the next predicat
     expect(execution).toMatchObject({ kind: 'executed', stdout: '1\n', finalTurtles: [{ x: 1, y: 5 }] });
   }
 });
+
+test('checks Rust enum constructor bounds for inline and where declarations', () => {
+  for (const declaration of ['enum Case<T: Clone> { Some(T) }', 'enum Case<T> where T: Clone { Some(T) }']) {
+    const program = declaration + '\nstruct Value(i32);\nfn main() { let _ = Case::Some(Value(1)); }';
+    expect(executeProgram('rust', program)).toMatchObject({ kind: 'compileError' });
+    expect(executeProgram('rust', program.replace('struct Value', '#[derive(Clone)] struct Value'))).toMatchObject({
+      kind: 'executed',
+    });
+  }
+});

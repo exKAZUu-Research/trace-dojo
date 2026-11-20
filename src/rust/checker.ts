@@ -1089,9 +1089,14 @@ export class Checker {
     };
   }
 
-  requireSizedAdtArguments(def: AdtDef, args: Type[], span: Span): void {
-    if ((def.module as Module | undefined)?.isStd) return;
-    for (const arg of args) this.requireTrait(arg, 'Sized', span);
+  requireAdtArguments(def: AdtDef, args: Type[], span: Span): void {
+    const subst = new Map(def.params.map((param, index) => [param, args[index]]));
+    const sized = !(def.module as Module | undefined)?.isStd;
+    for (const [index, param] of def.params.entries()) {
+      const arg = args[index];
+      if (sized) this.requireTrait(arg, 'Sized', span);
+      for (const bound of param.bounds) this.require(arg, substituteTraitRef(bound, subst), span);
+    }
   }
 }
 
