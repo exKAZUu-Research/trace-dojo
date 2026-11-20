@@ -819,7 +819,6 @@ defineConstructor('Set.unmodifiable', (runtime, _instance, args, typeArgs) => {
 interface StoreIteratorState {
   store: HashStore;
   owner: Value;
-  positions: number[];
   next: number;
   modifications: number;
   current: Value;
@@ -835,11 +834,11 @@ function storeIterator(
   typeArgs: readonly DartType[]
 ): DartObject {
   const hashStore = store(owner);
+  runtime.allocate(1);
   const iterator = new DartObject(runtime.links.classNamed(className), typeArgs, []);
   const state: StoreIteratorState = {
     store: hashStore,
     owner,
-    positions: [...hashStore.positions()],
     next: 0,
     modifications: hashStore.modifications,
     current: undefined,
@@ -864,8 +863,9 @@ function moveStoreIterator(runtime: Runtime, receiver: Value): boolean {
   const state = (receiver as DartObject).native as unknown as StoreIteratorState;
   if (state.modifications !== state.store.modifications)
     runtime.throwError('ConcurrentModificationError', '', [state.owner]);
-  while (state.next < state.positions.length) {
-    const position = state.positions[state.next++];
+  while (state.next < state.store.keys.length) {
+    runtime.spend();
+    const position = state.next++;
     if (!state.store.isLive(position)) continue;
     const key = state.store.keyAt(position);
     if (state.kind === 'keys') state.current = key;
