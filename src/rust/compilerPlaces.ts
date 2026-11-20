@@ -204,17 +204,12 @@ export function compileIndex(c: Compiler, expr: ExprOf<'index'>): Eval {
 }
 
 function rangeIndex(c: Compiler, base: Eval, index: Eval, isStr: boolean, span: Span): Eval {
-  if (isStr) {
-    return (frame) => {
-      const range = index(frame) as RangeValue | undefined;
-      const text = base(frame) as string;
-      return c.support.strSlice(text, rangeStart(range), rangeEnd(range), span);
-    };
-  }
   return (frame) => {
-    const range = index(frame) as RangeValue | undefined;
     const container = base(frame);
-    return sliceRange(container, range, span);
+    const range = index(frame) as RangeValue | undefined;
+    return isStr
+      ? c.support.strSlice(container as string, rangeStart(range), rangeEnd(range), span)
+      : sliceRange(container, range, span);
   };
 }
 

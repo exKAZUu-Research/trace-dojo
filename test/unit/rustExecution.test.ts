@@ -281,6 +281,22 @@ test('Rust Unicode whitespace preserves U+FEFF and recognizes U+0085', () => {
   });
 });
 
+test('Rust slice indexing evaluates the container before the bounds', () => {
+  const program = `fn numbers() -> Vec<i32> { println!("numbers"); vec![1, 2, 3] }
+fn text() -> String { println!("text"); String::from("abc") }
+fn bound() -> usize { println!("bound"); 1 }
+
+fn main() {
+    println!("{:?}", &numbers()[bound()..]);
+    println!("{}", &text()[..bound()]);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'numbers\nbound\n[2, 3]\ntext\nbound\na\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {
