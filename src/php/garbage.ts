@@ -307,7 +307,7 @@ export function releaseDropped(
     if (value instanceof PhpObject) {
       if (!runtime.isCollectableObject(value)) continue;
     } else if (value instanceof PhpArray) {
-      if (value.uncollectable) continue;
+      if (value.uncollectable || runtime.separatedArrays.delete(value)) continue;
       roots ??= ownershipRoots(runtime);
       if (!ownedReachable(value, roots, runtime, undefined, undefined, true)) {
         runtime.gcRoots.delete(value);

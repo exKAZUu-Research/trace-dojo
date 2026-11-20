@@ -20,6 +20,7 @@ import {
   withPendingException,
 } from './errors';
 import { hasStoredObject } from './garbage';
+import { separate } from './gcRoots';
 import {
   ev,
   isArrayAccess,
@@ -1221,7 +1222,7 @@ function storeCompoundResult(
   try {
     result =
       op === '+' && current instanceof PhpArray && value instanceof PhpArray
-        ? mergeArrayUnion(current === value || !arrayIsShared(current) ? current : current.copy(), value)
+        ? mergeArrayUnion(current === value || !arrayIsShared(current) ? current : separate(current), value)
         : applyOperator(op, current, value, pending);
   } catch (error) {
     if (pending && error === pending) return current;

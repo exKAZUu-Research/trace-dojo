@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 401 -- Write places share container separation, reference binding and slot watching helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   deprecated,
@@ -11,6 +12,7 @@ import {
   withPendingException,
   withSuppressedErrorHandlers,
 } from './errors';
+import { separate } from './gcRoots';
 import { type Frame, PhpThrow, rt } from './runtime';
 import { watchSlot } from './slotWatch';
 import { describePropertyType } from './types';
@@ -497,7 +499,7 @@ export function writableContainer(
   if (value === undefined) value = readContainerForWrite(place, options?.update ?? false, options?.lookupRow);
   if (value instanceof PhpArray) {
     if (arrayIsShared(value)) {
-      const copy = value.copy();
+      const copy = separate(value);
       place.set(copy);
       return copy;
     }

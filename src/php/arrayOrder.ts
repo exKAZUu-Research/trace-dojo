@@ -228,7 +228,6 @@ export class ArrayOrder {
   }
 
   private toMixed(): void {
-    if (this.nextIndex >= this.capacity) this.capacity *= 2;
     this.packed = false;
     this.listLayout = false;
     this.storageVersion++;

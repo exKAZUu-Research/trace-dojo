@@ -1,10 +1,16 @@
 // code-gauge-allow-file fileNcss 458 -- Holds GC root buffer simulation, ordering, and post-collection retirement helpers.
-import type { Runtime } from './runtime';
+import { rt, type Runtime } from './runtime';
 import { PhpArray, PhpObject, Ref, type Value } from './values';
 
 export const GC_THRESHOLD_DEFAULT = 10_001;
 const GC_THRESHOLD_STEP = 10_000;
 const GC_THRESHOLD_TRIGGER = 100;
+
+/** Copies a shared array for a holder that writes to it, letting go of the original as PHP's SEPARATE_ARRAY does. */
+export function separate(array: PhpArray): PhpArray {
+  rt().separatedArrays.add(array);
+  return array.copy();
+}
 
 export function recordGcRoot(runtime: Runtime, value: PhpArray | PhpObject, collect: () => number): boolean {
   if (runtime.gcRoots.has(value)) return false;

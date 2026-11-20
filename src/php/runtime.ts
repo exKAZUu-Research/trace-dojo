@@ -158,6 +158,8 @@ export class Runtime {
   readonly objectCycles = new Set<PhpObject>();
   readonly gcRoots = new GcRoots<PhpObject | PhpArray>();
   pendingGcRoots = new Set<unknown>();
+  /** Arrays a copy-on-write separation let go of, which PHP's GC_TRY_DELREF releases without buffering as roots. */
+  readonly separatedArrays = new WeakSet<PhpArray>();
   gcThreshold = GC_THRESHOLD_DEFAULT;
   gcEnabled = true;
   readonly collectingObjects = new Set<PhpObject>();

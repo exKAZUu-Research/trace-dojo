@@ -25,6 +25,7 @@ import {
   withPendingException,
 } from './errors';
 import { releaseDropped } from './garbage';
+import { separate } from './gcRoots';
 import { cast } from './interp';
 import { compareLocaleStrings } from './libLocale';
 import { naturalCompare } from './libString';
@@ -94,7 +95,7 @@ function writableArray(ctx: NativeContext, index: number): PhpArray {
 function writableArrayRef(ref: Ref): PhpArray {
   let array = ref.v as PhpArray;
   if (arrayIsShared(array)) {
-    array = array.copy();
+    array = separate(array);
     ref.v = array;
   }
   return array;
@@ -668,6 +669,7 @@ function numberRange<T extends bigint | number>(
   const span = (end > start ? (end as number) - (start as number) : (start as number) - (end as number)) as T;
   if (span < step) rangeBoundaryError();
   const size = checkRangeSize(start, end, step, span);
+  rt().ensureRoom(size);
   rt().spend(size / 16);
   for (let index = 0; index < size; index++) {
     const offset = (fromIndex(index) as number) * (step as number);
@@ -767,7 +769,7 @@ defineFunction(
     const byReference = (flags & 256n) !== 0n;
     let array = (refs[0]?.v ?? args[0]) as PhpArray;
     if (byReference && arrayIsShared(array)) {
-      array = array.copy();
+      array = separate(array);
       if (refs[0]) refs[0].v = array;
     }
     const runtime = rt();
@@ -1017,7 +1019,7 @@ function walkContainer(ref: Ref, active: Set<PhpArray | PhpObject>): PhpArray | 
   if (active.has(container)) throwError('Error', 'Recursion detected');
   if (container instanceof PhpArray) {
     if (!arrayIsShared(container)) return container;
-    const copy = container.copy();
+    const copy = separate(container);
     ref.v = copy;
     return copy;
   }

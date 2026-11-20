@@ -314,6 +314,8 @@ test.each([
     '<?php\nfor ($i = 0; $i < 10; $i++) $a[] = array_fill(0, 200000, $i);',
     'array_fill',
   ],
+  ['a range larger than the operations budget covers', '<?php\n$a = range(1, 20000000);', 'range'],
+  ['a range of fractional steps', '<?php\n$a = range(0, 1, 1e-8);', 'range'],
   [
     'a dump of arrays that share their elements',
     '<?php\n$a = [1];\nfor ($i = 0; $i < 40; $i++) $a = [$a, $a];\nprint_r($a);',
@@ -5189,11 +5191,30 @@ try { range(0.1, null, 1); } catch (ValueError $e) { echo explode("\\n", $e->get
       `<?php $a = [0, 1, 2, 3, 4, 5, 6, 7, 8]; array_splice($a, 1, 3, [7]); $a["a"] = 3; unset($a[4]); $a[8] = 7; mt_srand(0); var_dump(array_rand($a));`
     )
   ).toMatchObject({ kind: 'executed', stdout: 'int(5)\n' });
+  for (const sort of ['ksort', 'asort']) {
+    expect(
+      run(`<?php $a = range(0, 7); ${sort}($a); unset($a[4]); $a["a"] = 3; mt_srand(0); var_dump(array_rand($a));`)
+    ).toMatchObject({ kind: 'executed', stdout: 'int(5)\n' });
+  }
 
   expect(run('<?php $a = [1]; $r = &$a; $r[0] = $a; unset($a, $r); var_dump(gc_collect_cycles());')).toMatchObject({
     kind: 'executed',
     stdout: 'int(1)\n',
   });
+  for (const [prelude, subject, expected] of [
+    ['', '[1, 2]', 'int(10000)\n'],
+    ['', '[[1]]', 'int(1)\n'],
+    ['', '[[]]', 'int(10000)\n'],
+    ['function f() { static $s = [1]; return $s; }', 'f()', 'int(1)\n'],
+    ['function f($x = [1]) { return $x; }', 'f()', 'int(1)\n'],
+    ['class K { const C = [1]; }', 'K::C', 'int(10000)\n'],
+  ]) {
+    expect(
+      run(
+        `<?php ${prelude} for ($i = 0; $i < 10000; $i++) { $a = ${subject}; $a[0] = &$a; unset($a); } var_dump(gc_collect_cycles());`
+      )
+    ).toMatchObject({ kind: 'executed', stdout: expected });
+  }
 
   expect(run('<?php\nswitch (1) { case 1: switch (2) { case 2: continue; } }\necho "done";')).toMatchObject({
     kind: 'executed',
