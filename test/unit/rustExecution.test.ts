@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 
-import { executeProgram } from '../../src/interpreter/program';
+import { executeProgram, traceProgram } from '../../src/interpreter/program';
 
 const rustMain = (body: string, items = ''): string => `${items ? `${items}\n` : ''}fn main() {
 ${body}
@@ -4772,4 +4772,22 @@ fn main() {
     }));
 }`;
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'cmp 2 1;' });
+});
+
+test('collects dropped turtles on panic and process exit', () => {
+  for (const [ending, y] of [
+    ['a.turnRight(); a.turnRight(); a.forward();', -1],
+    ['std::process::exit(0);', 0],
+  ] as const) {
+    const program = rustMain(
+      `let b = Turtle::new(5, 5);
+      consume(b);
+      let mut a = Turtle::new(0, 0);
+      ${ending}`,
+      'fn consume(mut t: Turtle) { t.forward(); }'
+    );
+    const expected = { finalTurtles: [{ x: 0, y }] };
+    expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', ...expected });
+    expect(traceProgram('rust', program, program)).toMatchObject(expected);
+  }
 });

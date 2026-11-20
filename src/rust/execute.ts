@@ -39,7 +39,7 @@ export function describePanic(panic: RustPanic): string {
 /**
  * Runs `main` to its end, to a panic, or to `std::process::exit`.
  *
- * @param onEnd Receives `main`'s frame when it returns, while the frame still holds its variables.
+ * @param onEnd Receives `main`'s frame on exit while the frame still holds its variables.
  */
 // code-gauge-allow duplicateLines 17 -- Each language reports how its program ended alike.
 export function runProgram(

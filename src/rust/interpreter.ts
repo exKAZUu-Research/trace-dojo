@@ -234,18 +234,17 @@ export class Interpreter implements CallSupport {
     runtime.pushFrame(frame);
     try {
       runtime.withRoots(args, () => compiled.bind(frame, args));
-      let result: Value;
-      try {
-        result = compiled.body(frame);
-      } catch (error) {
-        if (error instanceof ControlSignal && error.kind === 'return') result = error.value;
-        else throw error;
-      }
-      onEnd?.(frame);
-      return result;
+      return compiled.body(frame);
+    } catch (error) {
+      if (error instanceof ControlSignal && error.kind === 'return') return error.value;
+      throw error;
     } finally {
-      runtime.popFrame();
-      if (compiled.info.isAtomic) runtime.steps.completeAtomicCall();
+      try {
+        onEnd?.(frame);
+      } finally {
+        runtime.popFrame();
+        if (compiled.info.isAtomic) runtime.steps.completeAtomicCall();
+      }
     }
   }
 
