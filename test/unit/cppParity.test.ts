@@ -503,6 +503,48 @@ int main() {
   });
 });
 
+test.each([
+  ['vector', 'auto saved = values.begin();', 'values.assign(2, 9);', '*saved'],
+  ['deque', 'auto saved = values.end();', 'values.assign(source, source + 2);', 'saved == values.end()'],
+  ['list', 'int& saved = values.front();', 'values.assign({8, 9});', 'saved'],
+  ['deque', 'int* saved = &values.front();', 'values.assign(2, 9);', '*saved'],
+])('invalidates saved %s positions after member assign', (container, save, assign, use) => {
+  const program = `#include <${container}>
+#include <iostream>
+int main() {
+  std::${container}<int> values{1, 2};
+  int source[] = {8, 9};
+  ${save}
+  ${assign}
+  std::cout << values.back() << ' ';
+  std::cout << (${use});
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '9 ',
+    uncaughtException: expect.stringContaining('使えなくなったイテレータ'),
+  });
+});
+
+test('preserves list end after member assign and reuses elements during copy assignment', () => {
+  const program = `#include <iostream>
+#include <list>
+int main() {
+  std::list<int> values{1, 2}, source{3, 4};
+  auto end = values.end();
+  auto first = values.begin();
+  values = source;
+  std::cout << *first << ' ';
+  values.assign({8, 9});
+  std::cout << (end == values.end()) << ' ' << values.front();
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '3 1 8',
+    uncaughtException: undefined,
+  });
+});
+
 test('allows negative movement of bidirectional iterators', () => {
   const program = `#include <iostream>
 #include <iterator>

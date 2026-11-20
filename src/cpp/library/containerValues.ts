@@ -342,7 +342,6 @@ export class NodePositions {
   }
 
   invalidateFrom(index: number, until = Infinity): void {
-    this.invalidateEnd();
     // No position lies past the owner's length while its suffix is invalidated, so a short range is visited directly.
     const last = Math.min(until, this.owner.length + 1);
     if (last - index < this.positions.size) {
@@ -525,12 +524,23 @@ export class SequenceValue extends Store {
   }
 
   invalidateVectorSuffix(from: number): void {
-    if (this.storageKind === 'vector') this.nodes?.invalidateFrom(from);
+    if (this.storageKind === 'vector') {
+      this.nodes?.invalidateEnd();
+      this.nodes?.invalidateFrom(from);
+    }
   }
 
   finishVectorEdit(from: number, oldLength = this.length): void {
+    this.nodes?.invalidateEnd();
     this.nodes?.invalidateFrom(from, oldLength);
     this.bindElements(from, oldLength);
+  }
+
+  finishMemberAssign(): void {
+    if (this.storageKind !== 'list') this.nodes?.invalidateEnd();
+    if (this.deque) this.deque.all++;
+    this.nodes?.invalidateFrom(0);
+    this.bindElements(0, this.length);
   }
 
   bindElements(from: number, to: number): void {

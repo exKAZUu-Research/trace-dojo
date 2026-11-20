@@ -287,7 +287,7 @@ export class SequenceEditor {
   }
 
   /** `assign(first, last)` and copy assignment, which assign over the existing elements. */
-  assignRange(frame: Frame, self: SequenceValue, source: Source): void {
+  assignRange(frame: Frame, self: SequenceValue, source: Source, assignment: 'member' | 'operator'): void {
     const { length } = source;
     this.reserveAssignment(frame, self, length);
     if (this.kind === 'vector' && length > self.capacity) {
@@ -300,23 +300,22 @@ export class SequenceEditor {
       this.appendElement(frame, self, (target) => source.construct(frame, index, target));
     source.checkEndpoints?.();
     this.truncate(frame, self, length);
+    if (assignment === 'member') self.finishMemberAssign();
   }
 
   /** `assign(count, value)`. */
   assignCopies(frame: Frame, self: SequenceValue, count: number, value: Ptr): void {
-    this.reserveAssignment(frame, self, count);
-    if (this.kind === 'vector' && count > self.capacity) {
-      this.truncate(frame, self, 0);
-      self.replaceAllocation([], count);
-      for (let index = 0; index < count; index++)
-        this.appendElement(frame, self, (target) => this.ops.copy(frame, value.read(), target));
-      return;
-    }
-    const assigned = Math.min(count, self.items.length);
-    for (let index = 0; index < assigned; index++) this.assignAt(frame, self.items, index, value.read());
-    for (let index = assigned; index < count; index++)
-      this.appendElement(frame, self, (target) => this.ops.copy(frame, value.read(), target));
-    this.truncate(frame, self, count);
+    this.assignRange(
+      frame,
+      self,
+      {
+        length: count,
+        read: () => value.read(),
+        construct: (frame, _, target) => this.ops.copy(frame, value.read(), target),
+        isSameType: true,
+      },
+      'member'
+    );
   }
 
   private reserveAssignment(frame: Frame, self: SequenceValue, count: number): void {

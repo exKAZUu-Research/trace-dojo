@@ -243,7 +243,8 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
       editor.assignRange(
         frame,
         to,
-        storedSource(from.items, (f, value, destination) => ops().copy(f, value, destination, ownedCopyFromConst))
+        storedSource(from.items, (f, value, destination) => ops().copy(f, value, destination, ownedCopyFromConst)),
+        'operator'
       );
     },
     destroy: (frame, value) => {
@@ -753,14 +754,14 @@ function sequenceMethods(
     if (args.length === 1 && args[0].braced) {
       const list = initializerList(library.compiler, element, args[0].braced, ops);
       return instance('assign', [AS_WRITTEN], VOID, (self, _args, frame) =>
-        list(frame, (source) => editor.assignRange(frame, self, source))
+        list(frame, (source) => editor.assignRange(frame, self, source, 'member'))
       );
     }
     const range = args.length === 2 ? iteratorRange(library.compiler, args, element, ops, 'assign') : undefined;
     if (!range) return;
     return instance('assign', range.params, VOID, (self, [first, last], frame) => {
       const source = range.read(first, last, self);
-      editor.assignRange(frame, self, source);
+      editor.assignRange(frame, self, source, 'member');
     });
   });
   if (kind === 'list') listMethods(library, cls, element, method, editor);
@@ -1106,7 +1107,7 @@ function assignment(
         let place: Ptr | undefined;
         list(frame, (source) => {
           place = target(frame) as Ptr;
-          editor.assignRange(frame, place.read() as SequenceValue, source);
+          editor.assignRange(frame, place.read() as SequenceValue, source, 'operator');
         });
         return place as Ptr;
       },
