@@ -282,7 +282,7 @@ export class Interpreter implements CallSupport {
     }
     if (instances.has(key)) return instances.get(key);
     const value = this.evaluateConst(def, frame, types);
-    instances.set(key, value);
+    if (typeof value !== 'object') instances.set(key, value);
     return value;
   }
 

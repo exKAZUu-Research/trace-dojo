@@ -1596,6 +1596,21 @@ fn main() {
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'true false\nfalse\n2\n' });
 });
 
+test('instantiates owned Rust aggregate constants independently', () => {
+  const program = `enum Counter { Count(i32) }
+struct Seed { counter: Counter, numbers: [i32; 2] }
+const START: Seed = Seed { counter: Counter::Count(1), numbers: [2, 3] };
+fn main() {
+    let mut changed = START;
+    let Counter::Count(n) = &mut changed.counter;
+    *n = 9;
+    changed.numbers[0] = 7;
+    let Counter::Count(original) = START.counter;
+    println!("{} {} {} {}", n, changed.numbers[0], original, START.numbers[0]);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '9 7 1 2\n' });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {
