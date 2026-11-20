@@ -1036,6 +1036,8 @@ SkipWhile { iter: Cycle { orig: Iter([1, 2]), iter: Iter([]) }, flag: true }
 test.each([
   ['range patterns (stage C)', '    match 3 { 1..=5 => {}, _ => {} }'],
   ['attributes on tuple elements (stage C)', '    let tuple = (#[cfg(any())] 1, 2);'],
+  ['an unavailable string method', '    let matches = "abcabc".rmatch_indices("bc");'],
+  ['an unavailable slice method reached through Vec', '    let groups = vec![1, 1, 2].chunk_by(|a, b| a == b);'],
   ['threads (stage D)', '    std::thread::spawn(|| {});'],
   ['standard input (stage D)', '    let mut s = String::new();\n    std::io::stdin().read_line(&mut s).unwrap();'],
   ['operator overloading (stage C)', '', 'struct P;\nimpl std::ops::Add for P { fn add(self, o: P) -> P { o } }'],
