@@ -161,6 +161,7 @@ export interface ObjectType {
   typeArguments?: Type[];
   /** For a reference, the generic interface it instantiates. */
   target?: ObjectType;
+  resolveReference?: () => ObjectType;
   resolve: () => Structure;
   /** An object literal that may not have properties its target lacks. */
   fresh?: boolean;

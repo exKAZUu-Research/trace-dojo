@@ -20,6 +20,7 @@ const forwardedMembers: {
   typeParameters: true,
   typeArguments: true,
   target: true,
+  resolveReference: true,
   resolve: true,
   fresh: true,
   regular: true,
@@ -145,10 +146,16 @@ export class RecursiveAliases {
     const guard = (): void => {
       for (const symbol of symbols) if (this.pendingTypes.has(symbol)) this.circular.add(symbol);
     };
-    const { typeArguments, tuple } = type;
+    const { typeArguments, tuple, resolveReference } = type;
     const guarded: ObjectType = {
       ...type,
       id: newTypeId(),
+      resolveReference:
+        resolveReference &&
+        (() => {
+          guard();
+          return resolveReference();
+        }),
       resolve: () => {
         guard();
         return type.resolve();

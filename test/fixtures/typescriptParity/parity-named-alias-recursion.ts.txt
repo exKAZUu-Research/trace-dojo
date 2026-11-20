@@ -1,0 +1,25 @@
+interface Box<T> { next: T }
+interface Loop { next: Loop }
+type Forward = Box<Forward1>;
+type Forward1 = Box<Forward2>;
+type Forward2 = Box<Forward3>;
+type Forward3 = Box<string>;
+type Inner = Box<string>;
+type Inner2 = Box<Inner>;
+type Inner3 = Box<Inner2>;
+type Backward = (Box<Inner3>);
+type Eight = Box<Eight1>;
+type Eight1 = Box<Eight2>;
+type Eight2 = Box<Eight3>;
+type Eight3 = Box<Eight4>;
+type Eight4 = Box<Eight5>;
+type Eight5 = Box<Eight6>;
+type Eight6 = Box<Eight7>;
+type Eight7 = Box<string>;
+const forward: Forward = { next: { next: { next: { next: 'forward' } } } };
+const backward: Backward = { next: { next: { next: { next: 'backward' } } } };
+const eight: Eight = { next: { next: { next: { next: { next: { next: { next: { next: 'eight' } } } } } } } };
+const first: Loop = forward;
+const second: Loop = backward;
+const third: Loop = eight;
+console.log(first.next.next.next.next, second.next.next.next.next, third.next.next.next.next.next.next.next.next);

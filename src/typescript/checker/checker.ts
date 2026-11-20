@@ -310,31 +310,46 @@ export class Checker {
   // References and instantiation ---------------------------------------------------------------------------------
 
   /** A generic interface or class applied to type arguments. */
-  reference(target: ObjectType, typeArguments: Type[]): ObjectType {
+  reference(target: ObjectType, typeArguments: Type[], defer = false): ObjectType {
     const parameters = target.typeParameters ?? [];
     const filled = this.fillTypeArguments(parameters, typeArguments);
     if (filled.every((argument, index) => argument === parameters[index])) return target;
+    if (defer) {
+      let reference: ObjectType | undefined;
+      const resolveReference = (): ObjectType => (reference ??= this.reference(target, filled));
+      return this.referenceObject(target, filled, () => resolveReference().resolve(), resolveReference);
+    }
     const key = `${target.id}<${filled.map(typeCacheKey).join(',')}>`;
     let reference = this.referenceCache.get(key);
     if (!reference) {
       const mapper: Mapper = new Map(parameters.map((parameter, index) => [parameter.id, filled[index]]));
       let structure: Structure | undefined;
-      reference = {
-        kind: 'object',
-        id: newTypeId(),
-        objectKind: 'reference',
-        name: target.name,
-        target,
-        typeArguments: filled,
-        classInfo: target.classInfo,
-        resolve: () => {
-          structure ??= this.instantiateStructure(target.resolve(), mapper);
-          return structure;
-        },
-      };
+      reference = this.referenceObject(target, filled, () => {
+        structure ??= this.instantiateStructure(target.resolve(), mapper);
+        return structure;
+      });
       this.referenceCache.set(key, reference);
     }
     return reference;
+  }
+
+  private referenceObject(
+    target: ObjectType,
+    typeArguments: Type[],
+    resolve: () => Structure,
+    resolveReference?: () => ObjectType
+  ): ObjectType {
+    return {
+      kind: 'object',
+      id: newTypeId(),
+      objectKind: 'reference',
+      name: target.name,
+      target,
+      typeArguments,
+      classInfo: target.classInfo,
+      resolve,
+      resolveReference,
+    };
   }
 
   fillTypeArguments(parameters: TypeParameter[], typeArguments: Type[]): Type[] {

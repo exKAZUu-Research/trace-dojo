@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 582 -- Resolves every kind of type syntax a program writes, each needing its own rule.
+// code-gauge-allow-file fileNcss 591 -- Resolves every kind of type syntax a program writes, each needing its own rule.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
@@ -435,7 +435,7 @@ export class TypeNodes {
     if (parameters.length === 0) return declared;
     const filled = this.c.fillTypeArguments(parameters, typeArguments);
     this.checkWrittenTypeArgumentConstraints(node, parameters, filled);
-    return this.appliedType(symbol, declared, parameters, filled);
+    return this.appliedType(node, symbol, declared, parameters, filled);
   }
 
   // code-gauge-allow functionCognitiveComplexity 20 -- Checks local bindings, intrinsic types, unavailable symbols, and argument counts.
@@ -488,9 +488,15 @@ export class TypeNodes {
     return true;
   }
 
-  private appliedType(symbol: Sym, declared: Type, parameters: TypeParameter[], typeArguments: Type[]): Type {
+  private appliedType(
+    node: TreeNode,
+    symbol: Sym,
+    declared: Type,
+    parameters: TypeParameter[],
+    typeArguments: Type[]
+  ): Type {
     if (symbol.typeKind === 'alias') return this.aliasReference(symbol, declared, parameters, typeArguments);
-    return declared.kind === 'object' ? this.c.reference(declared, typeArguments) : declared;
+    return declared.kind === 'object' ? this.c.reference(declared, typeArguments, isDirectAliasType(node)) : declared;
   }
 
   private aliasReference(symbol: Sym, declared: Type, parameters: TypeParameter[], typeArguments: Type[]): Type {
@@ -559,11 +565,15 @@ export class TypeNodes {
     for (const [check, extendsNode] of [...this.conditionalTrueChecks(node)].toReversed()) {
       if (check.kind !== 'typeParameter') continue;
       const bound = this.conditionalBound(extendsNode);
-      if (bound) {
-        const narrowed = this.c.instantiate(bound, mapper);
-        const prior = mapper.get(check.id) ?? (preserveIdentity ? check : this.c.constraintOf(check));
-        mapper.set(check.id, prior ? intersectionOf([prior, narrowed], this.c.budget) : narrowed);
-      }
+      if (!bound) continue;
+      const narrowed = this.c.instantiate(bound, mapper);
+      const previous = mapper.get(check.id);
+      const prior = preserveIdentity
+        ? (previous?.kind === 'typeParameter' && previous.constraint?.()) || check
+        : (previous ?? this.c.constraintOf(check));
+      const constraint = prior ? intersectionOf([prior, narrowed], this.c.budget) : narrowed;
+      // Keep separate parameters opaque so an intersection of them cannot collapse to `never`.
+      mapper.set(check.id, preserveIdentity ? { ...check, id: newTypeId(), constraint: () => constraint } : constraint);
     }
     return mapper;
   }
@@ -925,6 +935,12 @@ function isMappedMember(member: TreeNode): boolean {
 
 /** The type nodes whose element types TypeScript resolves later, which lets an alias refer to itself inside them. */
 const deferringTypeNodes = new Set(['array_type', 'tuple_type', 'readonly_type']);
+
+function isDirectAliasType(node: TreeNode): boolean {
+  let value = node;
+  while (value.parent?.type === 'parenthesized_type') value = value.parent;
+  return value.parent?.type === 'type_alias_declaration' && value.parent.childForFieldName('value')?.id === value.id;
+}
 
 /** The check and extends types of a conditional type inside the one-element tuples both are wrapped in, as `[X] extends [C]`. */
 function unwrapUnaryTuples(check: TreeNode, extendsNode: TreeNode): [TreeNode, TreeNode] {

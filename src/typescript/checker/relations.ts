@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 797 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
+// code-gauge-allow-file fileNcss 803 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
 import { minimumArguments } from './callArity';
 import type { Checker } from './checker';
 import { isUnit } from './flow';
@@ -104,6 +104,9 @@ export class Relations {
     state = 0,
     track = EXPANDING_SOURCE | EXPANDING_TARGET
   ): boolean {
+    if (source === target) return true;
+    source = referencesForComparison(source);
+    target = referencesForComparison(target);
     if (source === target) return true;
     this.c.budget.spend();
     const key = `${relation}-${state}:${source.id}:${target.id}`;
@@ -1251,6 +1254,10 @@ function hasSignatures(structure: Structure): boolean {
 
 function isLeaf(type: Type): boolean {
   return type.kind === 'intrinsic' || type.kind === 'literal';
+}
+
+function referencesForComparison(type: Type): Type {
+  return type.kind === 'object' ? (type.resolveReference?.() ?? type) : type;
 }
 
 function isOptionalMappedType(type: Type): boolean {

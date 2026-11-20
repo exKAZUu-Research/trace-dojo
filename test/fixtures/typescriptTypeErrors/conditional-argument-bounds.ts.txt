@@ -4,3 +4,5 @@ type Chain<T,U> = T extends U ? U extends string ? Uppercase<T> : never : never;
 type FalseInner<T,U> = T extends string ? U extends T ? never : Uppercase<U> : never;
 type Holder<T extends { x: string }> = T;
 type ReverseObject<T,U> = U extends T ? T extends { x: string } ? Holder<U> : never : never;
+type DisjointBounds<T,U> = T extends string ? U extends number ? Holder<T & U> : never : never;
+type DisjointBoundsReversed<T,U> = T extends number ? U extends string ? Holder<T & U> : never : never;
