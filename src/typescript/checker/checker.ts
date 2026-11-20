@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 633 -- Holds type construction, bounded instantiation, structure lookup, and diagnostics shared by checker components.
+// code-gauge-allow-file fileNcss 650 -- Holds type construction, bounded instantiation, structure lookup, and diagnostics shared by checker components.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { type SourceDiagnostic, sourceDiagnostic } from '../../interpreter/diagnostics';
@@ -65,6 +65,7 @@ import {
   thisParameterOf,
   type TupleElement,
   type Type,
+  typeMembers,
   type TypeParameter,
   undefinedType,
   unionOf,
@@ -124,6 +125,7 @@ export class Checker {
   private readonly deferredAliasUnionCache = new Map<string, UnionType>();
   private readonly thisStructures = new Map<string, Structure>();
   private readonly writtenTypeNodes: TreeNode[] = [];
+  private typeDemand: TreeNode | undefined;
 
   /**
    * The operations and the time checking may take, as running a program may: a program can make checking slow, and
@@ -175,14 +177,33 @@ export class Checker {
     this.diagnostics.push({ row: node.startPosition.row, index: node.startIndex, message });
   }
 
-  checkTypeSyntax<T>(node: TreeNode, run: () => T): T {
-    if (this.silent === 0 || this.isLibrary(node)) return run();
-    this.writtenTypeNodes.push(node);
+  /** The user source requesting a type, including when a deferred member or signature first resolves. */
+  withTypeDemand<T>(node: TreeNode, run: () => T): T {
+    if (this.isLibrary(node)) return run();
+    const outer = this.typeDemand;
+    this.typeDemand = node;
     try {
       return run();
     } finally {
-      this.writtenTypeNodes.pop();
+      this.typeDemand = outer;
     }
+  }
+
+  reportTypeComplexity(node?: TreeNode): void {
+    const site = node && !this.isLibrary(node) ? node : this.typeDemand;
+    this.errorWhileResolving(site ?? this.root, 'この式の型は、表せないほど複雑な共用体型になります。');
+  }
+
+  checkTypeSyntax<T>(node: TreeNode, run: () => T): T {
+    return this.withTypeDemand(node, () => {
+      if (this.silent === 0 || this.isLibrary(node)) return run();
+      this.writtenTypeNodes.push(node);
+      try {
+        return run();
+      } finally {
+        this.writtenTypeNodes.pop();
+      }
+    });
   }
 
   private writtenTypeAt(node: TreeNode): boolean {
@@ -894,10 +915,12 @@ export class Checker {
       this.budget.spend();
       bound = this.constraintOf(bound);
     }
-    if (!bound || isIntrinsic(bound, 'any') || isIntrinsic(bound, 'unknown') || isIntrinsic(bound, 'never'))
-      return undefined;
-    if (this.relations.isAssignable(bound, extendsType)) return type.trueType;
-    return this.relations.isComparable(bound, extendsType) ? undefined : type.falseType;
+    if (!bound || isIntrinsic(bound, 'never')) return undefined;
+    const constraint = isIntrinsic(bound, 'any') ? unknownType : bound;
+    if (this.relations.isAssignable(constraint, extendsType)) return type.trueType;
+    if (isIntrinsic(extendsType, 'never')) return type.falseType;
+    const overlaps = typeMembers(extendsType).some((member) => this.relations.isAssignable(member, constraint));
+    return overlaps ? undefined : type.falseType;
   }
 
   private intersectionStructure(types: Type[], receiver: Type): Structure {

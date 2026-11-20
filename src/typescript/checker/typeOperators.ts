@@ -719,13 +719,13 @@ export class TypeOperators {
 
   templateLiteral(spelledTexts: string[], spelledTypes: Type[], node?: TreeNode): Type {
     const { texts, types } = splicedSpans(spelledTexts, spelledTypes, this.c.budget);
+    if (types.some((type) => isIntrinsic(type, 'never'))) return neverType;
     // Each union expands into one literal per member, up to the size TypeScript represents.
     const size = types.reduce((product, type) => product * (type.kind === 'union' ? type.types.length : 1), 1);
     if (size >= 100_000) {
-      if (node) this.c.error(node, 'この式の型は、表せないほど複雑な共用体型になります。');
+      this.c.reportTypeComplexity(node);
       return errorType;
     }
-    if (types.some((type) => isIntrinsic(type, 'never'))) return neverType;
     const combinations = literalCombinations(texts, types, this.c.budget);
     if (combinations) return unionOf(combinations.map((text) => literalType(text)));
     const union = types.find((type) => type.kind === 'union');

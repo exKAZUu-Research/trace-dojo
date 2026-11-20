@@ -114,10 +114,12 @@ export class ExpressionChecker {
 
   check(node: TreeNode, contextual?: Type): Type {
     this.c.budget.spend();
-    if (this.c.silent > 0) return this.silentTypes.check(node, contextual, () => this.compute(node, contextual));
-    const type = this.compute(node, contextual);
-    if (!this.c.flow.probing && this.observedTypes?.has(node.id)) this.observedTypes.set(node.id, type);
-    return type;
+    return this.c.withTypeDemand(node, () => {
+      if (this.c.silent > 0) return this.silentTypes.check(node, contextual, () => this.compute(node, contextual));
+      const type = this.compute(node, contextual);
+      if (!this.c.flow.probing && this.observedTypes?.has(node.id)) this.observedTypes.set(node.id, type);
+      return type;
+    });
   }
 
   observeTypes<T>(types: Map<number, Type | undefined>, run: () => T): T {

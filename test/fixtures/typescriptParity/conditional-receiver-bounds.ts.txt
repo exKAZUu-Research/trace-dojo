@@ -16,3 +16,21 @@ function capitals<T extends string>(value: Words<T>) {
 }
 console.log(literal<true>({ id: 1 }), bounded<string>({ id: 2 }));
 console.log(disjoint<number>({ id: 3 }), structural<{ ready: true }>({ id: 4 }), capitals<string>(["word"]));
+function explicitUnknown<T extends unknown>(value: T extends unknown ? { id: number } : null) {
+  return value.id;
+}
+function explicitAny<T extends any>(value: T extends any ? { id: number } : undefined) {
+  return value.id;
+}
+type NonEmpty<T> = T extends never ? undefined : T;
+function nonEmpty<T extends { id: number }>(value: NonEmpty<T>) {
+  return value.id;
+}
+function excludesNever<T extends string>(value: T extends never ? null : { id: number }) {
+  return value.id;
+}
+function anyNever<T extends any>(value: T extends never ? null : { id: number }) {
+  return value.id;
+}
+console.log(explicitUnknown<string>({ id: 5 }), explicitAny<number>({ id: 6 }), nonEmpty({ id: 7 }));
+console.log(excludesNever<string>({ id: 8 }), anyNever<number>({ id: 9 }));

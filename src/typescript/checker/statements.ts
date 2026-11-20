@@ -114,7 +114,8 @@ export class StatementChecker {
   private check(node: TreeNode): void {
     // Each statement costs budget, as a statement such as a finally block may be checked more than once.
     this.c.budget.spend();
-    this.checkers.get(node.type)?.(node);
+    const check = this.checkers.get(node.type);
+    if (check) this.c.withTypeDemand(node, () => check(node));
   }
 
   private expressionStatement(node: TreeNode): void {
