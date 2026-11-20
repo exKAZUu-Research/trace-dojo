@@ -1063,7 +1063,8 @@ function transferArgumentReference(caller: Frame, reference: Ref, callee: Frame 
   if (index === -1) return;
   caller.temporaries.splice(index, 1);
   if (callee) callee.temporaries.push(reference);
-  else reference.rc--;
+  // PHP frees an internal function's arguments with zval_ptr_dtor_nogc, which buffers no possible root.
+  else reference.releaseWithoutGc();
 }
 
 /** Gives a closure's frame the variables the closure captured: shared references, or copies of values. */
