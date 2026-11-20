@@ -697,8 +697,8 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
         keep = (frame, values, index) => !truthy(predicate(frame, values.location(index)));
       } else {
         const operand = iteratorOperand(info);
-        const predicate = predicateOf(args[2], operand, operand);
-        const equal = equalTo(unqualified(info.element));
+        const predicate = args.length === 3 ? predicateOf(args[2], operand, operand) : undefined;
+        const equal = args.length === 3 ? undefined : equalTo(unqualified(info.element));
         if (!predicate && !equal) return;
         keep = (frame, values, index, out) =>
           out === 0 ||

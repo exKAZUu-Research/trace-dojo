@@ -1199,3 +1199,17 @@ test.each([
     diagnostics: [{ row: 0, message: expect.stringContaining(message) }],
   });
 });
+
+test.each(['0', 'text'])('rejects a non-callable std::unique predicate %s', (predicate) => {
+  const program = `#include <algorithm>
+#include <string>
+int main() {
+  int values[3] = {1, 1, 2};
+  std::string text;
+  std::unique(values, values + 3, ${predicate});
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 5, message: expect.stringContaining('関数 unique に') }],
+  });
+});
