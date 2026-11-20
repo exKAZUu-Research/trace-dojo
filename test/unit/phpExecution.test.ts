@@ -4333,4 +4333,42 @@ $v = [];
 for ($i = 0; $i < 4; $i++) { $v[] = new P; echo spl_object_id(end($v)), ','; }
 `)
   ).toMatchObject({ kind: 'executed', stdout: '12|4,1,3,2,' });
+
+  for (const [init, handler, expected] of [
+    ['[]', '$a[] = 9;', '[4,[4,9]]'],
+    ['[]', 'echo json_encode($a), ";";', '[null];[4,[4]]'],
+    ['[4 => 1]', 'unset($a[array_key_last($a)]); $a[] = 9;', '[4,{"4":1,"5":4,"6":9}]'],
+    ['["x" => 1]', 'unset($a[array_key_last($a)]); $a[] = 9;', '[4,{"x":1,"1":4}]'],
+  ]) {
+    expect(
+      run(`<?php
+error_reporting(0);
+function f() { return 4; }
+$a = ${init};
+set_error_handler(function () use (&$a) { ${handler} return true; });
+$r = ($a[] =& f());
+restore_error_handler();
+echo json_encode([$r, $a]);
+`)
+    ).toMatchObject({ kind: 'executed', stdout: expected });
+  }
+
+  for (const [unsetOrder, expected] of [
+    ['unset($r0, $r1, $p1, $p0);', '4|2,1'],
+    ['unset($r0, $r1, $p0, $p1);', '4|1,2'],
+  ]) {
+    expect(
+      run(`<?php
+class P { public $a; public $b; }
+$p0 = new P; $r0 = [$p0];
+$p1 = new P; $r1 = [$p1];
+$p0->a = $r0; $p0->b = $p1;
+$p1->a = $r1; $p1->b = $p0;
+${unsetOrder}
+echo gc_collect_cycles(), '|';
+$x = new P; $y = new P;
+echo spl_object_id($x), ',', spl_object_id($y);
+`)
+    ).toMatchObject({ kind: 'executed', stdout: expected });
+  }
 });

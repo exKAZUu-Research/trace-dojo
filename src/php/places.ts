@@ -591,16 +591,14 @@ export function storeDimensionRef(array: PhpArray, key: Key | undefined, ref: Re
 
 function storeDimensionValueFallback(array: PhpArray, key: Key | undefined, ref: Ref): void {
   if (key === undefined) {
-    notice('Only variables should be assigned by reference');
-    if (!array.append(share(ref.v)))
+    key = array.appendKey;
+    if (!array.append(null))
       throwError('Error', 'Cannot add element to the array as the next element is already occupied');
-    return;
-  }
-  if (!array.map.has(key)) array.set(key, null);
+  } else if (!array.map.has(key)) array.set(key, null);
   const order = array.ordered();
   const bucket = order.get(key)?.index;
   const version = order.storageVersion;
   notice('Only variables should be assigned by reference');
-  const targetKey = bucket !== undefined && order.storageVersion === version ? order.keyAtBucket(bucket) : undefined;
-  if (targetKey !== undefined) ref.v = array.set(targetKey, share(ref.v));
+  const assigned = array.writeFetchedBucket(bucket, version, key, share(ref.v));
+  if (assigned !== undefined) ref.v = assigned;
 }

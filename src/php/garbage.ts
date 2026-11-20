@@ -191,9 +191,7 @@ function orderCollectedObjects(
   );
   const freedSet = new Set(freed);
   const cyclicRoots: CollectionNode[] = buffered
-    ? buffered.filter((item) =>
-        item instanceof PhpObject ? freedSet.has(item) : runtime.collectingArrays.has(item) && !reachedArrays.has(item)
-      )
+    ? buffered.filter((item) => (item instanceof PhpObject ? freedSet.has(item) : !reachedArrays.has(item)))
     : roots;
   return deferredHandleOrder<CollectionNode, PhpObject>(
     cyclicRoots,

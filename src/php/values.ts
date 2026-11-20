@@ -275,6 +275,29 @@ export class PhpArray {
     return value;
   }
 
+  writeFetchedBucket(bucket: number | undefined, version: number, key: Key, value: Value): Value | undefined {
+    const order = this.ordered();
+    if (order.storageVersion !== version) return undefined;
+    const targetKey = bucket === undefined ? undefined : order.keyAtBucket(bucket);
+    if (targetKey !== undefined) return this.set(targetKey, value);
+    if (order.isPacked && typeof key === 'bigint' && typeof order.last?.key === 'bigint' && order.last.key > key)
+      return this.restorePackedSlot(key, value);
+    return undefined;
+  }
+
+  private restorePackedSlot(key: bigint, value: Value): Value {
+    const entries = [...this.map.physicalEntries()];
+    const insertAt = entries.findIndex(([existing]) => typeof existing === 'bigint' && existing > key);
+    if (insertAt === -1) return this.set(key, value);
+    entries.splice(insertAt, 0, [key, value]);
+    this.map.clear();
+    for (const [entryKey, entrySlot] of entries) this.map.set(entryKey, entrySlot);
+    if (value !== null && typeof value === 'object') this.composite = true;
+    this.invalidate();
+    this.order?.replace(this.map.physicalKeys(), true);
+    return value;
+  }
+
   setSlot(key: Key, slot: Value | Ref): void {
     const old = this.map.ownedSlot(key);
     if (old instanceof Ref && old !== slot) old.rc--;
