@@ -64,12 +64,13 @@ export class TraitSolver {
     return ref.trait.builtin ? builtinImplements(this, t, ref) : 'no';
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Literal defaults and conversions depend on the goal and numeric kind.
+  // code-gauge-allow functionCognitiveComplexity 21 -- Literal defaults and conversions depend on the goal and numeric kind.
   private varImplements(t: Type & { kind: 'var' }, ref: TraitRef): Answer {
     // An untyped number indexing a slice is a `usize`, the only integer type slices take.
     if (t.v.literal === 'int' && ref.trait.builtin === 'SliceIndex')
       return this.unifier.tryUnify(t, USIZE) ? 'yes' : 'no';
     if (!t.v.literal) return 'unknown';
+    if (ref.trait.builtin === 'ExtendInto') return builtinImplements(this, t, ref);
     const rhs = ref.args[0];
     if (rhs && (ref.trait.builtin === 'PartialEq' || ref.trait.builtin === 'PartialOrd')) {
       if (this.unifier.tryUnify(t, rhs)) return 'yes';

@@ -3543,3 +3543,43 @@ test('propagates Rust repeated const elements without inventing destructors', ()
   const invalid = rustMain('', 'const X: () = { let values = [Some(String::new()); 1]; };');
   expect(executeProgram('rust', invalid).kind).toBe('compileError');
 });
+
+test('infers extend literals from Rust collection element types', () => {
+  const program = rustMain(`let mut wide: Vec<i64> = Vec::new();
+    wide.extend([1, 2]);
+    wide.extend(&[3, 4]);
+    let mut bytes: Vec<u8> = Vec::new();
+    bytes.extend(vec![b'a', 66]);
+    let mut floats: Vec<f32> = Vec::new();
+    floats.extend([1.5, 2.0]);
+    let mut set: std::collections::HashSet<u64> = std::collections::HashSet::new();
+    set.extend(0..3);
+    println!("{:?} {:?} {:?} {}", wide, bytes, floats, set.len());`);
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[1, 2, 3, 4] [97, 66] [1.5, 2.0] 3\n',
+  });
+  const explicit = rustMain('let mut values: Vec<u8> = Vec::new(); values.extend([1_i32]);');
+  expect(executeProgram('rust', explicit).kind).toBe('compileError');
+});
+
+test('coerces Rust collection elements and branch results at the correct sites', () => {
+  const items = `trait Read { fn read(&self) -> i32; }
+    struct A; struct B;
+    impl Read for A { fn read(&self) -> i32 { 1 } }
+    impl Read for B { fn read(&self) -> i32 { 2 } }`;
+  const valid = rustMain(
+    `let values = vec![(1, Box::new(A) as Box<dyn Read>), (2, Box::new(B))];
+    let refs = [(1, &A as &dyn Read), (2, &B)];
+    let choice: Option<Box<dyn Read>> = if true { Some(Box::new(A)) } else { Some(Box::new(B)) };
+    println!("{} {} {}", values[1].1.read(), refs[1].1.read(), choice.unwrap().read());`,
+    items
+  );
+  expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: '2 2 1\n' });
+  for (const body of [
+    'let _ = match 1 { 0 => Some(Box::new(A) as Box<dyn Read>), _ => Some(Box::new(B)) };',
+    'let _ = if true { (0, Box::new(A) as Box<dyn Read>) } else { (1, Box::new(B)) };',
+  ]) {
+    expect(executeProgram('rust', rustMain(body, items)).kind).toBe('compileError');
+  }
+});

@@ -277,7 +277,10 @@ export function checkElements(c: Checker, elems: Expr[], elem: Type): void {
     for (const item of elems) c.coerceExpr(item, elem);
     return;
   }
-  const values = elems.map((item): [Expr, Type] => [item, c.expr(item, undefined)]);
+  const values = elems.map((item): [Expr, (expected: Type | undefined) => Type] => [
+    item,
+    (expected) => c.expr(item, expected),
+  ]);
   const merged = c.mergeTypes(values, (item, result, type) => c.mismatch(item.span, result, type));
   if (merged) c.unifyOrError(elems[0].span, elem, merged);
 }
@@ -353,7 +356,7 @@ function ifExpr(c: Checker, expr: Extract<Expr, { kind: 'if' }>, expected: Type 
     const outer = scopes.slice(0, -1);
     c.body.scopes = outer;
     try {
-      const elseType = c.expr(expr.else, expected ?? (shallow(thenType).kind === 'never' ? undefined : thenType));
+      const elseType = c.expr(expr.else, expected);
       return joinBranches(c, expr.consequent, thenType, expr.else, elseType, expected);
     } finally {
       c.body.scopes = scopes;
@@ -395,15 +398,13 @@ function joinBranches(
 function matchExpr(c: Checker, expr: Extract<Expr, { kind: 'match' }>, expected: Type | undefined): Type {
   const scrutinee = c.expr(expr.scrutinee, undefined);
   const arms: [Expr, Type][] = [];
-  let hint = expected;
   for (const arm of expr.arms) {
     c.withScope(() => {
       checkPattern(c, arm.pattern, scrutinee, 'move');
-      const type = c.expr(arm.body, hint);
+      const type = c.expr(arm.body, expected);
       if (shallow(type).kind === 'never') return;
       if (expected) coerceArm(c, arm.body, type, expected);
       else arms.push([arm.body, type]);
-      hint ??= type;
     });
   }
   c.deferCoverage(() => checkExhaustive(c, expr, scrutinee));
