@@ -193,6 +193,10 @@ export class SequenceEditor {
 
   /** `emplace(position, args...)`, whose element `make` constructs. */
   emplace(frame: Frame, self: SequenceValue, at: number, make: ElementFactory): void {
+    if (this.kind === 'deque') {
+      this.dequeEmplace(frame, self, at, make);
+      return;
+    }
     const items = self.items;
     const length = items.length;
     if (this.kind === 'list') {
@@ -201,8 +205,7 @@ export class SequenceEditor {
         frame.runtime.spend();
         self.splice(at, 0, make());
       }
-    } else if (this.kind === 'deque') this.dequeEmplace(frame, self, at, make);
-    else if (length >= self.capacity)
+    } else if (length >= self.capacity)
       this.reallocate(frame, self, recommend(self, length + 1), { at, count: 1, make: (_, target) => make(target) });
     else if (at === length) this.appendElement(frame, self, make);
     else {
@@ -271,18 +274,13 @@ export class SequenceEditor {
   erase(frame: Frame, self: SequenceValue, from: number, to: number): void {
     const count = to - from;
     if (count === 0) return;
-    const items = self.items;
-    if (this.kind === 'list') {
-      this.destroyRange(frame, self, from, count);
-    } else if (this.kind === 'deque' && from <= Math.floor((items.length - count) / 2)) {
-      // A deque shifts the elements before the erased ones when they are fewer.
-      for (let index = from - 1; index >= 0; index--) this.moveAt(frame, items, index + count, items[index]);
-      this.destroyRange(frame, self, 0, count, { position: from, side: 'front' });
-    } else {
+    if (this.kind === 'list') this.destroyRange(frame, self, from, count);
+    else if (this.kind === 'deque') this.dequeErase(frame, self, from, to, count);
+    else {
+      const items = self.items;
       for (let index = to; index < items.length; index++) this.moveAt(frame, items, index - count, items[index]);
-      const tail = items.length - count;
-      this.destroyRange(frame, self, tail, count, { position: from, side: 'back' });
-      if (this.kind === 'vector') self.finishVectorEdit(from);
+      this.destroyRange(frame, self, items.length - count, count);
+      self.finishVectorEdit(from);
     }
   }
 
@@ -509,6 +507,23 @@ export class SequenceEditor {
   // A deque grows at whichever end is nearer to the position, so these build the new elements in `cells`, which has
   // room for them before the old first element.
 
+  private dequeErase(frame: Frame, self: SequenceValue, from: number, to: number, count: number): void {
+    const tail = self.length - count;
+    if (from === 0 || to === self.length) {
+      this.destroyRange(frame, self, from, count, { position: from, side: from === 0 ? 'front' : 'back' });
+      return;
+    }
+    const items = self.items;
+    if (from <= Math.floor(tail / 2)) {
+      // A deque shifts the elements before the erased ones when they are fewer.
+      for (let index = from - 1; index >= 0; index--) this.moveAt(frame, items, index + count, items[index]);
+      this.destroyRange(frame, self, 0, count, { position: from, side: 'front' });
+    } else {
+      for (let index = to; index < items.length; index++) this.moveAt(frame, items, index - count, items[index]);
+      this.destroyRange(frame, self, tail, count, { position: from, side: 'back' });
+    }
+  }
+
   private dequeEmplace(frame: Frame, self: SequenceValue, at: number, make: ElementFactory): void {
     const length = self.length;
     if (at === length) this.appendElement(frame, self, make);
@@ -534,6 +549,13 @@ export class SequenceEditor {
   }
 
   private dequeInsertCopies(frame: Frame, self: SequenceValue, at: number, count: number, value: Ptr): void {
+    if (at === 0 || at === self.length) {
+      this.dequeInsertAtEnd(frame, self, at, {
+        length: count,
+        construct: (frame) => this.copyConstruct(frame, value.read()),
+      });
+      return;
+    }
     this.editDequeInsertion(frame, self, at, count, (cells, atFront) => {
       if (atFront) this.dequeInsertCopiesAtFront(frame, self, cells, at, count, value);
       else this.dequeInsertCopiesAtBack(frame, self, cells, at, count, value);
@@ -613,9 +635,38 @@ export class SequenceEditor {
 
   /** libc++'s `deque::__insert_bidirectional`. */
   private dequeInsertBidirectional(frame: Frame, self: SequenceValue, at: number, source: Source): void {
+    if (at === 0 || at === self.length) {
+      this.dequeInsertAtEnd(frame, self, at, source);
+      return;
+    }
     this.editDequeInsertion(frame, self, at, source.length, (cells, atFront) => {
       if (atFront) this.dequeInsertRangeAtFront(frame, cells, at, source);
       else this.dequeInsertRangeAtBack(frame, cells, at, source);
+    });
+  }
+
+  private dequeInsertAtEnd(
+    frame: Frame,
+    self: SequenceValue,
+    at: number,
+    { length, construct, checkEndpoints }: Pick<Source, 'length' | 'construct' | 'checkEndpoints'>
+  ): void {
+    const atFront = at < self.length;
+    const values = Array.from<Value>({ length }).fill(UNINIT);
+    holdValues(frame, [new ArrayStore(values)], () => {
+      let made = 0;
+      try {
+        for (; made < length; made++) {
+          const index = atFront ? length - 1 - made : made;
+          values[index] = construct(frame, index);
+        }
+        checkEndpoints?.();
+      } catch (error) {
+        if (error instanceof CppException)
+          self.insertValues(at, atFront ? values.slice(length - made) : values.slice(0, made));
+        throw error;
+      }
+      self.insertValues(at, values);
     });
   }
 

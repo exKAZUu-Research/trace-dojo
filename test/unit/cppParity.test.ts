@@ -598,6 +598,32 @@ int main() {
   });
 });
 
+test('keeps untouched deque elements through endpoint insert, emplace, and erase', () => {
+  const program = `#include <deque>
+#include <iostream>
+int main() {
+  std::deque<int> values(40, 0);
+  int* saved = &values[20];
+  int incoming[] = {4, 5};
+  for (int i = 0; i < 40; ++i) {
+    values.pop_front();
+    values.insert(values.begin(), i);
+    values.pop_front();
+    values.emplace(values.begin(), i + 1);
+    values.pop_front();
+    values.insert(values.begin(), 1, i + 2);
+    values.erase(values.begin());
+    values.insert(values.begin(), incoming, incoming + 1);
+  }
+  std::cout << values.size() << ':' << values.front() << ':' << (saved == &values[20]) << ':' << *saved;
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '40:4:1:0',
+    uncaughtException: undefined,
+  });
+});
+
 test('allows negative movement of bidirectional iterators', () => {
   const program = `#include <iostream>
 #include <iterator>
