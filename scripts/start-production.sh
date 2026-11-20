@@ -2,4 +2,4 @@
 
 set -euo pipefail
 
-exec node node_modules/.bin/next start "$@"
+exec node --stack-size=4096 node_modules/.bin/next start "$@"

@@ -1,0 +1,6 @@
+ArgumentCountError: Random\Randomizer::getFloat() expects at least 2 arguments, 0 given
+ArgumentCountError: Random\Randomizer::getFloat() expects at least 2 arguments, 1 given
+TypeError: Random\Randomizer::getFloat(): Argument #3 ($boundary) must be of type Random\IntervalBoundary, null given
+TypeError: Random\Randomizer::getFloat(): Argument #3 ($boundary) must be of type Random\IntervalBoundary, int given
+float(2.6382978891214535)
+ArgumentCountError: Random\Randomizer::getFloat() expects at most 3 arguments, 4 given

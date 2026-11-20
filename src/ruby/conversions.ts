@@ -39,7 +39,7 @@ import {
 // Numbers -------------------------------------------------------------------------------------------------------------
 
 /** Formats a Float as `Float#to_s` does: the shortest digits, in exponent form below 1e-4 or from 1e16. */
-// code-gauge-allow duplicateLines 15 -- Ruby numeric formatting shares the same exponent threshold as the other interpreters.
+// code-gauge-allow duplicateLines 16 -- Ruby numeric formatting shares the same exponent threshold as the other interpreters.
 export function formatFloat(value: number): string {
   if (Number.isNaN(value)) return 'NaN';
   if (value === Number.POSITIVE_INFINITY) return 'Infinity';

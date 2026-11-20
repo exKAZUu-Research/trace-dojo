@@ -1,0 +1,18 @@
+object(FinalValues)#1 (6) {
+  ["plain"]=>
+  int(0)
+  ["before"]=>
+  int(1)
+  ["after":protected]=>
+  int(2)
+  ["readOnly"]=>
+  int(3)
+  ["restricted"]=>
+  int(4)
+  ["private":"FinalValues":private]=>
+  int(5)
+}
+
+Fatal error: Cannot override final property FinalValues::$private in /main.php on line 13
+Stack trace:
+#0 {main}

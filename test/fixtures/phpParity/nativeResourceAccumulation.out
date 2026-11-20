@@ -1,0 +1,12 @@
+
+Warning: array_sum(): Addition is not supported on type resource in /main.php on line 2
+
+Warning: array_product(): Multiplication is not supported on type resource in /main.php on line 2
+
+Warning: array_sum(): Addition is not supported on type resource in /main.php on line 2
+
+Warning: array_product(): Multiplication is not supported on type resource in /main.php on line 2
+int(4)
+int(4)
+int(5)
+int(6)

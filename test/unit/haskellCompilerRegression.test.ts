@@ -4,7 +4,9 @@ import { expect, test } from 'vitest';
 import { z } from 'zod';
 
 import { executeProgram, traceProgram } from '../../src/interpreter/program';
-import { buildNodeBundle } from '../helpers/buildNodeBundle';
+import { createNodeBundleRunner } from '../helpers/nodeBundleRunner';
+
+const runNodeBundle = createNodeBundleRunner();
 
 test.each([
   [
@@ -819,12 +821,7 @@ test('compiler work limits contain expanding diagnostics and constraints and res
 });
 
 test('compiler and native evaluation recursion remain bounded under Node', { timeout: 30_000 }, () => {
-  const bundle = buildNodeBundle('test/helpers/haskellCompilerNode.ts');
-  const output = execFileSync('node', ['--input-type=module'], {
-    input: bundle,
-    encoding: 'utf8',
-    timeout: 30_000,
-  });
+  const output = runNodeBundle('test/helpers/haskellCompilerNode.ts');
   const resultSchema = z.object({ kind: z.string() }).passthrough();
   const {
     synonyms: results,
@@ -938,12 +935,7 @@ test.each(['main=print("hello"#)', "main=print('a'#)", 'main=print(1#)', 'main=p
 );
 
 test('large IO scopes execute and record within a bounded Node heap', { timeout: 30_000 }, () => {
-  const bundle = buildNodeBundle('test/helpers/haskellScopeMemory.ts');
-  const output = execFileSync('node', ['--max-old-space-size=192', '--input-type=module'], {
-    input: bundle,
-    encoding: 'utf8',
-    timeout: 30_000,
-  });
+  const output = runNodeBundle('test/helpers/haskellScopeMemory.ts', { heapMb: 192 });
   const result = z
     .object({
       execution: z.object({ kind: z.literal('executed'), stdout: z.string(), finalTurtles: z.array(z.unknown()) }),
@@ -981,12 +973,7 @@ test.each([' ', '\t', '\n', '\v', '\f', '\r', ' \t\r\n\v\f '])('ASCII source str
 });
 
 test('bulk allocations stop at execution limits within a bounded Node heap', { timeout: 30_000 }, () => {
-  const bundle = buildNodeBundle('test/helpers/haskellAllocationMemory.ts');
-  const output = execFileSync('node', ['--max-old-space-size=512', '--input-type=module'], {
-    input: bundle,
-    encoding: 'utf8',
-    timeout: 30_000,
-  });
+  const output = runNodeBundle('test/helpers/haskellAllocationMemory.ts', { heapMb: 512 });
   const results = z
     .array(
       z.object({

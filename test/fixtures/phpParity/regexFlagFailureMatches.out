@@ -1,0 +1,18 @@
+preg_match(): Argument #4 ($flags) must be a PREG_* constant
+array(0) {
+}
+
+Warning: preg_match(): Compilation failed: missing terminating ] for character class at offset 1 in /main.php on line 7
+bool(false)
+string(3) "old"
+preg_match_all(): Argument #4 ($flags) must be a PREG_* constant
+array(0) {
+}
+
+Warning: preg_match_all(): Compilation failed: missing terminating ] for character class at offset 1 in /main.php on line 7
+bool(false)
+string(3) "old"
+ValueError: preg_match(): Argument #4 ($flags) must be a PREG_* constant in /main.php:9
+Stack trace:
+#0 /main.php(9): preg_match('/a/', 'aa', Array, 2)
+#1 {main}

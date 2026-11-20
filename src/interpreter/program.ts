@@ -18,6 +18,9 @@ import { traceJavaProgram } from '../java/trace';
 import { findJavaScriptTraceAnnotations } from '../javascript/parse';
 import { executeJavaScriptProgram } from '../javascript/run';
 import { traceJavaScriptProgram } from '../javascript/trace';
+import { findPhpTraceAnnotations } from '../php/parse';
+import { executePhpProgram } from '../php/run';
+import { tracePhpProgram } from '../php/trace';
 import { findJavaTraceAnnotations } from '../problems/fillInBlank/javaSource';
 import type { TraceItem, TraceItemVariable, TurtleTrace } from '../problems/trace';
 import { findPythonTraceAnnotations } from '../python/parse';
@@ -90,6 +93,7 @@ const interpreters = {
   },
   c: { findTraceAnnotations: findCTraceAnnotations, record: traceCProgram, execute: executeCProgram },
   cpp: { findTraceAnnotations: findCppTraceAnnotations, record: traceCppProgram, execute: executeCppProgram },
+  php: { findTraceAnnotations: findPhpTraceAnnotations, record: tracePhpProgram, execute: executePhpProgram },
   zig: { findTraceAnnotations: findZigTraceAnnotations, record: traceZigProgram, execute: executeZigProgram },
   dart: { findTraceAnnotations: findDartTraceAnnotations, record: traceDartProgram, execute: executeDartProgram },
   haskell: {

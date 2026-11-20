@@ -1,0 +1,30 @@
+get virtual
+array(1) {
+  [1]=>
+  int(2)
+}
+get virtual
+
+Notice: Indirect modification of overloaded property Overloaded::$virtual has no effect in /main.php on line 13
+get virtual
+
+Notice: Indirect modification of overloaded property Overloaded::$virtual has no effect in /main.php on line 14
+
+Deprecated: Creation of dynamic property Ordinary::$missing is deprecated in /main.php on line 17
+
+Deprecated: Creation of dynamic property Ordinary::$offset is deprecated in /main.php on line 18
+object(Ordinary)#3 (2) {
+  ["missing"]=>
+  NULL
+  ["offset"]=>
+  NULL
+}
+
+Warning: Undefined variable $unassigned in /main.php on line 21
+
+Warning: Undefined variable $notSet in /main.php on line 22
+Cannot unset offset in a non-array variable
+Cannot use string offset as an object
+Cannot unset string offsets
+Cannot access offset of type array on array
+Cannot indirectly modify readonly property WithReadonly::$value

@@ -1,0 +1,31 @@
+int(3)
+bool(false)
+int(1)
+string(2) "bb"
+int(10)
+int(7)
+int(20)
+string(3) "new"
+Error: Cannot use a scalar value as an array
+array(1) {
+  [1]=>
+  int(0)
+}
+array(2) {
+  [1]=>
+  array(1) {
+    [1]=>
+    int(0)
+  }
+  [2]=>
+  int(1)
+}
+
+Warning: Undefined property: stdClass::$third in /main.php on line 32
+array(2) {
+  ["second"]=>
+  string(6) "second"
+  ["third"]=>
+  string(5) "third"
+}
+string(5) "after"

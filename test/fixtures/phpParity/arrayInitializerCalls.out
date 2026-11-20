@@ -1,0 +1,29 @@
+
+Warning: unexpected NAN value was coerced to bool in /main.php on line 5
+
+Warning: unexpected NAN value was coerced to bool in /main.php on line 5
+
+Warning: unexpected NAN value was coerced to string in /main.php on line 5
+
+Warning: unexpected NAN value was coerced to bool in /main.php on line 20
+start
+
+Warning: unexpected NAN value was coerced to bool in /main.php on line 15
+array(3) {
+  [0]=>
+  bool(true)
+  [2]=>
+  array(1) {
+    [0]=>
+    bool(true)
+  }
+  [3]=>
+  string(4) "NANx"
+}
+bool(true)
+array(2) {
+  [0]=>
+  int(1)
+  [1]=>
+  bool(true)
+}

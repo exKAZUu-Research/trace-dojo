@@ -1,0 +1,509 @@
+bool(true)
+array(0) {
+}
+array(0) {
+}
+string(2) "[]"
+int(0)
+string(2) "[]"
+NULL
+NULL
+NULL
+NULL
+bool(false)
+NULL
+bool(false)
+NULL
+bool(false)
+bool(false)
+bool(false)
+NULL
+array(1) {
+}
+array(0) {
+}
+NULL
+array(1) {
+}
+array(0) {
+}
+array(1) {
+  [0]=>
+  int(0)
+}
+bool(true)
+int(2)
+array(1) {
+  [0]=>
+  string(3) "new"
+}
+bool(true)
+array(1) {
+  [0]=>
+  string(1) "y"
+}
+array(1) {
+  [0]=>
+  int(0)
+}
+string(7) "{"y":5}"
+int(0)
+string(7) "{"y":5}"
+string(1) "y"
+string(1) "y"
+int(5)
+int(5)
+int(5)
+string(1) "y"
+bool(false)
+NULL
+int(5)
+bool(false)
+int(5)
+int(5)
+array(1) {
+}
+array(0) {
+}
+int(5)
+array(1) {
+}
+array(0) {
+}
+array(1) {
+  [0]=>
+  int(0)
+}
+bool(true)
+int(3)
+array(2) {
+  [0]=>
+  string(1) "y"
+  [1]=>
+  string(3) "new"
+}
+bool(true)
+array(1) {
+  [0]=>
+  string(1) "y"
+}
+array(1) {
+  [0]=>
+  int(0)
+}
+string(7) "{"y":5}"
+int(0)
+string(7) "{"y":5}"
+string(1) "y"
+string(1) "y"
+int(5)
+int(5)
+int(5)
+string(1) "y"
+bool(false)
+NULL
+int(5)
+bool(false)
+int(5)
+int(5)
+array(1) {
+}
+array(0) {
+}
+int(5)
+array(1) {
+}
+array(0) {
+}
+array(1) {
+  [0]=>
+  int(0)
+}
+bool(true)
+int(3)
+array(2) {
+  [0]=>
+  string(1) "y"
+  [1]=>
+  string(3) "new"
+}
+bool(false)
+array(1) {
+  [0]=>
+  int(0)
+}
+array(1) {
+  [0]=>
+  int(0)
+}
+string(2) "[]"
+int(0)
+string(2) "[]"
+NULL
+NULL
+NULL
+NULL
+bool(false)
+NULL
+bool(false)
+NULL
+bool(false)
+bool(false)
+bool(false)
+NULL
+array(1) {
+}
+array(1) {
+  [0]=>
+  int(0)
+}
+NULL
+array(1) {
+}
+array(1) {
+  [0]=>
+  int(0)
+}
+array(2) {
+  [0]=>
+  int(0)
+  [1]=>
+  int(1)
+}
+bool(true)
+int(2)
+array(1) {
+  [0]=>
+  string(3) "new"
+}
+bool(false)
+array(2) {
+  [0]=>
+  int(0)
+  [1]=>
+  int(1)
+}
+array(2) {
+  [0]=>
+  int(0)
+  [1]=>
+  int(1)
+}
+string(3) "[5]"
+int(0)
+string(3) "[5]"
+int(0)
+int(0)
+int(5)
+int(5)
+int(5)
+int(0)
+bool(false)
+NULL
+int(5)
+bool(false)
+int(5)
+int(5)
+array(1) {
+}
+array(0) {
+}
+int(5)
+array(1) {
+}
+array(0) {
+}
+array(1) {
+  [0]=>
+  int(2)
+}
+bool(false)
+int(3)
+array(2) {
+  [0]=>
+  int(0)
+  [1]=>
+  string(3) "new"
+}
+bool(false)
+array(2) {
+  [0]=>
+  int(0)
+  [1]=>
+  int(1)
+}
+array(2) {
+  [0]=>
+  int(0)
+  [1]=>
+  int(1)
+}
+string(3) "[5]"
+int(0)
+string(3) "[5]"
+int(1)
+int(1)
+int(5)
+int(5)
+int(5)
+int(1)
+bool(false)
+NULL
+int(5)
+bool(false)
+int(5)
+int(5)
+array(1) {
+}
+array(0) {
+}
+int(5)
+array(1) {
+}
+array(0) {
+}
+array(2) {
+  [0]=>
+  int(0)
+  [1]=>
+  int(1)
+}
+bool(true)
+int(3)
+array(2) {
+  [0]=>
+  int(1)
+  [1]=>
+  string(3) "new"
+}
+bool(false)
+array(3) {
+  [0]=>
+  int(0)
+  [1]=>
+  int(1)
+  [2]=>
+  int(2)
+}
+array(3) {
+  [0]=>
+  int(0)
+  [1]=>
+  int(1)
+  [2]=>
+  int(2)
+}
+string(5) "[5,6]"
+int(0)
+string(5) "[5,6]"
+int(0)
+int(2)
+int(5)
+int(6)
+int(5)
+int(0)
+int(6)
+int(2)
+int(6)
+int(5)
+int(5)
+int(5)
+array(2) {
+  [0]=>
+  int(6)
+}
+array(1) {
+  [0]=>
+  int(0)
+}
+int(6)
+array(2) {
+  [0]=>
+  int(5)
+}
+array(1) {
+  [0]=>
+  int(0)
+}
+array(3) {
+  [0]=>
+  int(0)
+  [1]=>
+  int(1)
+  [2]=>
+  int(2)
+}
+bool(true)
+int(4)
+array(3) {
+  [0]=>
+  int(0)
+  [1]=>
+  int(2)
+  [2]=>
+  string(3) "new"
+}
+int(1)
+array(0) {
+}
+array(2) {
+  [0]=>
+  int(1)
+  [1]=>
+  int(3)
+}
+array(1) {
+  [2]=>
+  int(3)
+}
+int(3)
+array(3) {
+  [0]=>
+  int(0)
+  [1]=>
+  int(1)
+  [2]=>
+  int(2)
+}
+int(4)
+array(3) {
+  [0]=>
+  int(0)
+  [1]=>
+  int(2)
+  [2]=>
+  int(1)
+}
+string(19) "{"0":1,"2":3,"1":2}"
+array(2) {
+  [2]=>
+  int(3)
+  [1]=>
+  int(2)
+}
+array(2) {
+  [2]=>
+  int(3)
+  [1]=>
+  int(2)
+}
+array(0) {
+}
+array(1) {
+  [0]=>
+  string(1) "b"
+}
+array(1) {
+  [0]=>
+  string(1) "b"
+}
+bool(false)
+array(0) {
+}
+int(1)
+array(3) {
+  [0]=>
+  int(2)
+  ["name"]=>
+  int(4)
+}
+2=a;0=b;
+0=1;2=3;x=4;
+0=0;1=1;3=3;4=4;
+2=a;8=b;
+Cannot add element to the array as the next element is already occupied
+array(1) {
+  ["u"]=>
+  int(5)
+}
+array_combine(): Argument #1 ($keys) and argument #2 ($values) must have the same number of elements
+min(): Argument #1 ($value) must contain at least one element
+NULL
+max(): Argument #1 ($value) must contain at least one element
+NULL
+array(1) {
+  [0]=>
+  int(1)
+}
+array(1) {
+  [0]=>
+  int(1)
+}
+array(0) {
+}
+NULL
+NULL
+array(0) {
+}
+array(0) {
+}
+array(2) {
+  [0]=>
+  int(1)
+}
+array(2) {
+  ["y"]=>
+  int(5)
+}
+array(2) {
+  [2]=>
+  int(4)
+  [8]=>
+  int(2)
+}
+array(2) {
+  [2]=>
+  int(4)
+  [8]=>
+  int(2)
+}
+keys:1=2
+UndefinedArrayChild::{closure:UndefinedArrayChild::__destruct():95}(): Argument #2 ($b) not passed
+array(1) {
+  ["y"]=>
+  int(5)
+}
+array(2) {
+  ["y"]=>
+  int(5)
+  ["z"]=>
+  int(6)
+}
+array(1) {
+  ["y"]=>
+  int(5)
+}
+array(1) {
+  ["y"]=>
+  int(5)
+}
+array(1) {
+  ["y"]=>
+  int(5)
+}
+array(1) {
+  ["Y"]=>
+  int(5)
+}
+y=5
+int(5)
+y=5
+y=5
+y=5
+int(1)
+array(1) {
+  ["y"]=>
+  int(5)
+}
+string(1) "y"
+int(5)
+bool(false)
+y=5
+int(1)
+array(1) {
+  ["y"]=>
+  int(5)
+}
+string(1) "y"
+int(5)
+bool(false)

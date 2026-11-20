@@ -1,0 +1,40 @@
+
+Warning: Cannot rebind scope of closure created from function, this will be an error in PHP 9 in /main.php on line 2
+NULL
+
+Warning: Cannot rebind scope of closure created from function, this will be an error in PHP 9 in /main.php on line 2
+NULL
+
+Warning: Cannot rebind scope of closure created from function, this will be an error in PHP 9 in /main.php on line 2
+NULL
+
+Warning: Cannot rebind scope of closure created from function, this will be an error in PHP 9 in /main.php on line 2
+NULL
+object(Closure)#5 (2) {
+  ["function"]=>
+  string(12) "Closure::foo"
+  ["this"]=>
+  object(A)#4 (0) {
+  }
+}
+
+Warning: Cannot rebind scope of closure created from function, this will be an error in PHP 9 in /main.php on line 2
+NULL
+
+Warning: Cannot rebind scope of closure created from function, this will be an error in PHP 9 in /main.php on line 2
+NULL
+
+Warning: Cannot rebind scope of closure created from function, this will be an error in PHP 9 in /main.php on line 2
+NULL
+
+Warning: Cannot rebind scope of closure created from function, this will be an error in PHP 9 in /main.php on line 2
+NULL
+object(Closure)#4 (2) {
+  ["function"]=>
+  string(6) "strlen"
+  ["parameter"]=>
+  array(1) {
+    ["$string"]=>
+    string(10) "<required>"
+  }
+}

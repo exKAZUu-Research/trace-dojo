@@ -1,0 +1,6 @@
+
+Fatal error: Uncaught ErrorException: formatting in other.php:42
+Stack trace:
+#0 [internal function]: E->__toString()
+#1 {main}
+  thrown in other.php on line 42

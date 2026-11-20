@@ -1,0 +1,343 @@
+
+Deprecated: Using ${var} in strings is deprecated, use {$var} instead in /main.php on line 558
+
+Deprecated: Using ${expr} (variable variables) in strings is deprecated, use {${expr}} instead in /main.php on line 597
+
+Deprecated: Using ${var} in strings is deprecated, use {$var} instead in /main.php on line 599
+
+Deprecated: Using ${expr} (variable variables) in strings is deprecated, use {${expr}} instead in /main.php on line 602
+array:
+Warning: Array to string conversion in /main.php on line 3
+Array
+7:Undefined constant "MISSING_ARRAY_CONSTANT"
+11:Undefined constant "MISSING_ARGUMENT"
+
+Warning: Undefined variable $undefined in /main.php on line 15
+18:Unsupported operand types: string + array
+
+Warning: Undefined array key 0 in /main.php on line 21
+
+Warning: Undefined array key 1 in /main.php on line 21
+
+Warning: Undefined array key 2 in /main.php on line 22
+
+Warning: Undefined variable $unboundOne in /main.php on line 25
+
+Warning: Undefined variable $unboundTwo in /main.php on line 26
+30:exit(): Argument #1 ($status) must be of type string|int, array given
+33:clone(): Argument #1 ($object) must be of type object, int given
+
+Warning: Cannot use int as array in /main.php on line 36
+
+Warning: Cannot use int as array in /main.php on line 38
+
+Warning: Array to string conversion in /main.php on line 41
+Array
+Warning: Array to string conversion in /main.php on line 43
+
+Warning: Array to string conversion in /main.php on line 45
+Array50:Cannot use a scalar value as an array
+
+Warning: Constant DUPLICATE already defined, this will be an error in PHP 9 in /main.php on line 55
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 57
+
+Deprecated: Implicit conversion from float 2.5 to int loses precision in /main.php on line 58
+60
+63:multiline
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 70
+
+Deprecated: Implicit conversion from float 3.5 to int loses precision in /main.php on line 74
+79:Cannot access offset of type array on array
+84:Cannot access offset of type stdClass on array
+89:Cannot use a scalar value as an array
+96:Cannot use string offset as an array
+
+Warning: Undefined array key 0 in /main.php on line 101
+
+Warning: Undefined array key 0 in /main.php on line 100
+
+Warning: Constant MANY already defined, this will be an error in PHP 9 in /main.php on line 102
+106
+110
+
+Warning: Undefined property: stdClass::$unset in /main.php on line 115
+
+Warning: Undefined property: stdClass::$first in /main.php on line 121
+
+Warning: Undefined array key "first" in /main.php on line 125
+
+Warning: Undefined array key "prefix" in /main.php on line 128
+
+Warning: Undefined array key "outer" in /main.php on line 130
+
+Warning: Undefined array key "inner" in /main.php on line 131
+
+Warning: Undefined array key "append" in /main.php on line 134
+
+Warning: Undefined variable $unknownArray in /main.php on line 134
+
+Warning: Undefined variable $unknownObject in /main.php on line 138
+
+Warning: Undefined property: stdClass::$second in /main.php on line 138
+
+Warning: Undefined variable $unknownStatic in /main.php on line 146
+151:Cannot assign string to property StaticDiagnostics::$typed of type int
+
+Warning: Undefined property: stdClass::$nested in /main.php on line 156
+
+Warning: Undefined array key "key" in /main.php on line 157
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 162
+
+Deprecated: Implicit conversion from float 2.5 to int loses precision in /main.php on line 168
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 168
+
+Warning: Undefined variable $absentArray in /main.php on line 174
+
+Warning: Undefined variable $absentProperty in /main.php on line 178
+
+Warning: Undefined variable $absentStatic in /main.php on line 182
+188:Class "MissingClass" not found
+194:Class "MissingClass" not found
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 199
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 206
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 210
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 214
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 218
+finished diagnostics
+227:Class "MissingClass" not found
+232:Class "MissingClass" not found
+236:Class "MissingClass" not found
+
+Warning: Undefined variable $missing in /main.php on line 240
+
+Warning: Undefined variable $unknownKey in /main.php on line 244
+
+Deprecated: Using null as an array offset is deprecated, use an empty string instead in /main.php on line 244
+
+Warning: Undefined variable $unknownNestedKey in /main.php on line 244
+
+Warning: Undefined variable $unknownKey in /main.php on line 244
+
+Deprecated: Using null as an array offset is deprecated, use an empty string instead in /main.php on line 244
+
+Warning: Undefined variable $unknownNestedKey in /main.php on line 244
+
+Deprecated: Using null as an array offset is deprecated, use an empty string instead in /main.php on line 244
+
+Warning: Undefined variable $unknownValue in /main.php on line 244
+
+Warning: Undefined variable $unknownKey in /main.php on line 246
+
+Deprecated: Using null as an array offset is deprecated, use an empty string instead in /main.php on line 246
+
+Warning: Undefined variable $unknownKey in /main.php on line 246
+
+Warning: Undefined variable $unknownObjectValue in /main.php on line 246
+array(1) {
+  [1]=>
+  int(1)
+}
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 252
+
+Deprecated: Implicit conversion from float 2.5 to int loses precision in /main.php on line 252
+
+Deprecated: Implicit conversion from float 3.5 to int loses precision in /main.php on line 261
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 267
+1;
+Deprecated: Implicit conversion from float 2.5 to int loses precision in /main.php on line 272
+
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 280
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 285
+
+Warning: Undefined variable $undefinedAssignment in /main.php on line 289
+
+Warning: Undefined variable $undefinedChain in /main.php on line 292
+299:Class "MissingClass" not found
+302:Class "MissingClass" not found
+305:Class name must be a valid object or a string
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 312
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 318
+array(1) {
+  ["x"]=>
+  array(1) {
+    ["y"]=>
+    array(0) {
+    }
+  }
+}
+
+Warning: Undefined variable $missingName in /main.php on line 327
+
+Warning: Undefined variable $missingValue in /main.php on line 327
+
+Warning: Undefined variable $missingName in /main.php on line 327
+
+Warning: Undefined variable $missingOffset in /main.php on line 329
+Cannot use a scalar value as an array
+
+Warning: Undefined variable $missingOffset in /main.php on line 329
+
+Deprecated: Automatic conversion of false to array is deprecated in /main.php on line 329
+
+Warning: Undefined variable $missingOffset in /main.php on line 329
+
+Deprecated: Using null as an array offset is deprecated, use an empty string instead in /main.php on line 329
+
+Warning: Undefined variable $missingValue in /main.php on line 329
+
+Warning: Undefined variable $missingList in /main.php on line 333
+Class name must be a valid object or a string at 337
+
+Warning: Undefined variable $readObject in /main.php on line 341
+bool(false)
+Class "MissingClass" not found at 345
+Class "
+" not found at 350
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 356
+
+Deprecated: Implicit conversion from float 2.5 to int loses precision in /main.php on line 355
+
+Deprecated: Implicit conversion from float 3.5 to int loses precision in /main.php on line 362
+
+Deprecated: Implicit conversion from float 4.5 to int loses precision in /main.php on line 365
+
+Warning: Undefined variable $notAssigned in /main.php on line 370
+
+Warning: Undefined array key 0 in /main.php on line 375
+
+Warning: Undefined array key 1 in /main.php on line 381
+
+Warning: Undefined array key 0 in /main.php on line 382
+array(1) {
+  [1]=>
+  &NULL
+}
+
+Warning: Undefined array key 1 in /main.php on line 389
+array(1) {
+  [0]=>
+  array(1) {
+    [0]=>
+    &NULL
+  }
+}
+Class "Missing" not found at 394
+Class "Missing" not found at 398
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 402
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 411
+
+Warning: Undefined variable $undefinedBase in /main.php on line 418
+
+Warning: Trying to access array offset on null in /main.php on line 418
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 418
+
+Warning: Undefined variable $unsetList in /main.php on line 422
+
+Warning: Undefined array key 0 in /main.php on line 427
+Class "Missing" not found at 429
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 435
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 443
+Bit shift by negative number at 452
+
+Warning: Undefined variable $undefinedObject in /main.php on line 459
+
+Warning: Attempt to read property "property" on null in /main.php on line 459
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 459
+
+Warning: Undefined variable $undefinedReceiver in /main.php on line 464
+Call to a member function method() on null at 464
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 472
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 477
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 482
+
+Warning: Undefined variable $missingMethod in /main.php on line 485
+485:Method name must be a string
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 490
+
+Deprecated: Implicit conversion from float 2.5 to int loses precision in /main.php on line 494
+
+Deprecated: Implicit conversion from float 3.5 to int loses precision in /main.php on line 498
+
+Deprecated: Implicit conversion from float 4.5 to int loses precision in /main.php on line 501
+
+Deprecated: Implicit conversion from float 5.5 to int loses precision in /main.php on line 504
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 510
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 515
+
+Warning: Undefined variable $missingVariable in /main.php on line 521
+526:Undefined constant stdClass::missingConstant
+532:Call to undefined method stdClass::missing()
+
+Warning: Undefined variable $missingValue in /main.php on line 537
+545
+551
+559
+
+Warning: Undefined variable $unknown in /main.php on line 567
+
+Warning: Undefined variable $unknown in /main.php on line 570
+
+Warning: Undefined variable $unknown in /main.php on line 576
+
+Warning: Undefined variable $unknown in /main.php on line 580
+
+Warning: Undefined variable $unknown in /main.php on line 581
+
+Warning: Undefined variable $unknown in /main.php on line 584
+
+Warning: Undefined variable $ad in /main.php on line 588
+
+Warning: Undefined variable $unknown in /main.php on line 590
+name;value;
+Warning: Undefined variable $uncaptured in /main.php on line 594
+a
+Warning: Undefined variable $absent in /main.php on line 600
+
+Warning: Trying to access array offset on null in /main.php on line 600
+Undefined constant "absentName"
+
+Warning: Undefined array key 3 in /main.php on line 611
+
+Warning: Trying to access array offset on int in /main.php on line 615
+620:Cannot unset string offsets
+
+Warning: Array to string conversion in /main.php on line 624
+
+Warning: Array to string conversion in /main.php on line 625
+items
+Array
+Array
+Warning: Array to string conversion in /main.php on line 628
+
+Warning: Array to string conversion in /main.php on line 629
+items
+Array
+Array634:Object of class stdClass could not be converted to string

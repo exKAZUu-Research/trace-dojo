@@ -1,0 +1,81 @@
+TypeError: implode(): Argument #1 ($separator) must be of type string, array given
+TypeError: implode(): Argument #1 ($separator) must be of type string, array given
+TypeError: implode(): Argument #2 ($array) must be of type ?array, int given
+TypeError: implode(): If argument #1 ($separator) is of type string, argument #2 ($array) must be of type array, null given
+TypeError: implode(): If argument #1 ($separator) is of type string, argument #2 ($array) must be of type array, null given
+string(3) "a5b"
+string(5) "a1.51"
+string(3) "abc"
+string(3) "abc"
+ValueError: mb_str_pad(): Argument #5 ($encoding) must be a valid encoding, "FOO" given
+ValueError: mb_str_pad(): Argument #5 ($encoding) must be a valid encoding, "FOO" given
+ValueError: mb_str_pad(): Argument #5 ($encoding) must be a valid encoding, "FOO" given
+ValueError: mb_convert_case(): Argument #3 ($encoding) must be a valid encoding, "FOO" given
+ValueError: mb_str_split(): Argument #2 ($length) must be greater than 0
+ValueError: mb_substr_count(): Argument #2 ($needle) must not be empty
+ValueError: mb_ord(): Argument #1 ($string) must not be empty
+ValueError: mb_strpos(): Argument #4 ($encoding) must be a valid encoding, "FOO" given
+ValueError: mb_chr(): Argument #2 ($encoding) must be a valid encoding, "FOO" given
+ValueError: mb_trim(): Argument #3 ($encoding) must be a valid encoding, "FOO" given
+ValueError: mb_strlen(): Argument #2 ($encoding) must be a valid encoding, "" given
+ValueError: mb_strlen(): Argument #2 ($encoding) must be a valid encoding, "pass" given
+ValueError: mb_strlen(): Argument #2 ($encoding) must be a valid encoding, "auto" given
+int(3)
+int(3)
+int(3)
+ValueError: mb_strlen(): Argument #2 ($encoding) must be a valid encoding, "UTF-8 " given
+int(3)
+ǅemal ǈ ǋ ǲ|ǅemal ǈ ǋ ǲ|ǅemal ǉ ǌ ǳ|ǆemal ǉ ǌ ǳ
+ǄEMAL Ǉ Ǌ Ǳ|ǄEMAL Ǉ Ǌ Ǳ|ǆemal ǉ ǌ ǳ|ǆemal ǉ ǌ ǳ
+ǆemal ǉ ǌ ǳ|ǆemal ǉ ǌ ǳ|ǄEMAL Ǉ Ǌ Ǳ|ǆemal ǉ ǌ ǳ
+Ssa|ßa|Ssa|ßa
+SSA|ßA|ßa|ßa
+ssa|ßa|SSA|ßa
+Fix Flow|ﬁx ﬂow|Fix ﬂow|ﬁx ﬂow
+FIX FLOW|ﬁX ﬂOW|ﬁx ﬂow|ﬁx ﬂow
+fix flow|ﬁx ﬂow|FIX FLOW|ﬁx ﬂow
+ʼNa|ŉa|ʼNa|ŉa
+ʼNA|ŉA|ŉa|ŉa
+ʼna|ŉa|ʼNA|ŉa
+J̌a|ǰa|J̌a|ǰa
+J̌A|ǰA|ǰa|ǰa
+ǰa|ǰa|J̌A|ǰa
+ᾈa ᾼ Ὰͅ ᾼ͂ Ᾰ|ᾈa ᾼ ᾲ ᾷ Ᾰ|ᾈa ᾳ ᾲ ᾷ Ᾰ|ᾀa ᾳ ᾲ ᾷ Ᾰ
+ἈΙA ΑΙ ᾺΙ Α͂Ι Ᾰ|ᾈA ᾼ ᾲ ᾷ Ᾰ|ᾀa ᾳ ᾲ ᾷ ᾰ|ᾀa ᾳ ᾲ ᾷ ᾰ
+ἀιa αι ὰι ᾶι ᾰ|ᾀa ᾳ ᾲ ᾷ ᾰ|ἈΙA ΑΙ ᾺΙ Α͂Ι Ᾰ|ᾀa ᾳ ᾲ ᾷ ᾰ
+ابC|ابC|ابc|ابc
+ابC|ابC|ابc|ابc
+ابc|ابc|ابC|ابc
+1Abc A1B|1Abc A1B|1abc a1b|1abc a1b
+1ABC A1B|1ABC A1B|1abc a1b|1abc a1b
+1abc a1b|1abc a1b|1ABC A1B|1abc a1b
+Hello.world O'neil Foo-Bar X_Y|Hello.world O'neil Foo-Bar X_Y|Hello.world o'neil foo-bar x_y|hello.world o'neil foo-bar x_y
+HELLO.WORLD O'NEIL FOO-BAR X_Y|HELLO.WORLD O'NEIL FOO-BAR X_Y|hello.world o'neil foo-bar x_y|hello.world o'neil foo-bar x_y
+hello.world o'neil foo-bar x_y|hello.world o'neil foo-bar x_y|HELLO.WORLD O'NEIL FOO-BAR X_Y|hello.world o'neil foo-bar x_y
+Οδος Οδος.|Οδοσ Οδοσ.|ΟΔΟΣ ΟΔΟΣ.|οΔΟΣ ΟΔΟΣ.
+ΟΔΟΣ ΟΔΟΣ.|ΟΔΟΣ ΟΔΟΣ.|οδος οδος.|οδοσ οδοσ.
+οδοσ οδοσ.|οδοσ οδοσ.|ΟΔΟΣ ΟΔΟΣ.|οδος οδος.
+Ⓐbc|Ⓐbc|Ⓐbc|ⓐbc
+ⒶBC|ⒶBC|ⓐbc|ⓐbc
+ⓐbc|ⓐbc|ⒶBC|ⓐbc
+Ꭰꭱ Ꭰ|Ꭰꭱ Ꭰ|Ꭰꭱ Ꭰ|ꭰꭱ Ꭰ
+ᎠᎡ Ꭰ|ᎠᎡ Ꭰ|ꭰꭱ ꭰ|ꭰꭱ ꭰ
+ᎠᎡ Ꭰ|ᎠᎡ Ꭰ|ᎠᎡ Ꭰ|ꭰꭱ ꭰ
+I İ|I İ|I İ|ı İ
+I İ|I İ|ı i̇|ı i
+ı i̇|ı İ|I İ|ı i̇
+ა ბ|ა ბ|ა ბ|ა ბ
+Ა Ბ|Ა Ბ|ა ბ|ა ბ
+ა ბ|ა ბ|Ა Ბ|ა ბ
+ǅa|ǅa|ǅa|ǆa
+ǄA|ǄA|ǆa|ǆa
+ǆa|ǆa|ǄA|ǆa
+ǅa|ǅa|ǅA|ǆA
+ǄA|ǄA|ǆa|ǆa
+ǆa|ǆa|ǄA|ǆa
+bool(true)
+int(1)
+bool(true)
+int(1)
+bool(true)
+int(1)

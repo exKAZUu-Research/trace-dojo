@@ -1,0 +1,54 @@
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 2
+array(1) {
+  [0]=>
+  int(1)
+}
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 2
+array(1) {
+  [0]=>
+  int(1)
+}
+array(1) {
+  [0]=>
+  string(1) "A"
+}
+array(1) {
+  [0]=>
+  string(1) "B"
+}
+array(1) {
+  [0]=>
+  string(1) "A"
+}
+array(1) {
+  [0]=>
+  string(1) "B"
+}
+array(1) {
+  [0]=>
+  string(1) "A"
+}
+array(1) {
+  [0]=>
+  string(1) "B"
+}
+array(2) {
+  [0]=>
+  int(1)
+  [1]=>
+  array(1) {
+    [0]=>
+    int(3)
+  }
+}
+array(2) {
+  [0]=>
+  int(1)
+  [1]=>
+  array(1) {
+    [0]=>
+    int(2)
+  }
+}

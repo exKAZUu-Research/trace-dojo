@@ -1,19 +1,14 @@
-import { execFileSync } from 'node:child_process';
-
 import { expect, test } from 'vitest';
 import { z } from 'zod';
 
 import { traceProgram } from '../../src/interpreter/program';
 import type { DisplayNode } from '../../src/problems/trace';
-import { buildNodeBundle } from '../helpers/buildNodeBundle';
+import { createNodeBundleRunner } from '../helpers/nodeBundleRunner';
+
+const runNodeBundle = createNodeBundleRunner();
 
 test('immutable composite loops retain cheap answers within bounded transport output', { timeout: 30_000 }, () => {
-  const bundle = buildNodeBundle('test/helpers/haskellCompositeTrace.ts');
-  const output = execFileSync('node', ['--max-old-space-size=256', '--input-type=module'], {
-    input: bundle,
-    encoding: 'utf8',
-    timeout: 15_000,
-  });
+  const output = runNodeBundle('test/helpers/haskellCompositeTrace.ts', { heapMb: 256, timeout: 15_000 });
   const array = z.object({ kind: z.literal('array'), entries: z.record(z.string(), z.unknown()) });
   const display = z.union([array, z.object({ kind: z.literal('value'), value: z.unknown() })]).optional();
   const result = z

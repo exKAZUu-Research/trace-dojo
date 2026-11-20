@@ -1,0 +1,14 @@
+drop 1
+replaced
+drop 2
+instance
+staticMethod
+drop 3
+drop 4
+replaced
+drop 5
+replaced
+closureCall
+drop 6
+staticClosure
+drop 7

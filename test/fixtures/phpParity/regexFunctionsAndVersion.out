@@ -1,0 +1,52 @@
+10.49 2026-09-28|10|49
+array(3) {
+  [0]=>
+  string(2) "aN"
+  [2]=>
+  string(3) "cNN"
+  ["k"]=>
+  string(2) "dN"
+}
+NULL
+string(2) "aN"
+int(1)
+array(2) {
+  [0]=>
+  string(2) "xy"
+  [2]=>
+  string(1) "y"
+}
+int(3)
+
+Warning: preg_filter(): Compilation failed: missing closing parenthesis at offset 1 in /main.php on line 5
+
+Warning: preg_filter(): Compilation failed: missing closing parenthesis at offset 1 in /main.php on line 5
+array(0) {
+}
+NULL
+num 12
+num 3
+array(2) {
+  ["x"]=>
+  string(6) "ABC 24"
+  ["y"]=>
+  string(4) "DE 6"
+}
+int(4)
+string(3) "cab"
+int(2)
+string(10) "x[["a",1]]"
+
+Warning: preg_replace_callback_array(): Compilation failed: missing closing parenthesis at offset 1 in /main.php on line 13
+NULL
+
+Warning: preg_replace_callback_array(): Compilation failed: missing closing parenthesis at offset 1 in /main.php on line 14
+
+Warning: preg_replace_callback_array(): Compilation failed: missing closing parenthesis at offset 1 in /main.php on line 14
+array(0) {
+}
+TypeError: preg_replace_callback_array(): Argument #1 ($pattern) must contain only string patterns as keys
+TypeError: preg_replace_callback_array(): Argument #1 ($pattern) must contain only valid callbacks
+TypeError: preg_filter(): Argument #1 ($pattern) must be of type array when argument #2 ($replacement) is an array, string given
+string(3) "abc"
+int(0)

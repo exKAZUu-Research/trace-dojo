@@ -1,19 +1,15 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 
 import { expect, test } from 'vitest';
 import { z } from 'zod';
 
 import { executeProgram, traceProgram } from '../../src/interpreter/program';
-import { buildNodeBundle } from '../helpers/buildNodeBundle';
+import { createNodeBundleRunner } from '../helpers/nodeBundleRunner';
+
+const runNodeBundle = createNodeBundleRunner();
 
 test('nested turtle traces retain shared liveness within a bounded Node heap', { timeout: 30_000 }, () => {
-  const bundle = buildNodeBundle('test/helpers/haskellGcLivenessMemory.ts');
-  const output = execFileSync('node', ['--max-old-space-size=256', '--input-type=module'], {
-    input: bundle,
-    encoding: 'utf8',
-    timeout: 30_000,
-  });
+  const output = runNodeBundle('test/helpers/haskellGcLivenessMemory.ts', { heapMb: 256 });
   const results = z
     .array(
       z.object({

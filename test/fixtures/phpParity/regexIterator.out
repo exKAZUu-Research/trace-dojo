@@ -1,0 +1,106 @@
+0=>apple
+3=>avocado
+4: Array
+(
+    [0] => x1
+    [1] => x
+    [2] => 1
+)
+5: Array
+(
+    [0] => y22
+    [1] => y
+    [2] => 22
+)
+0: Array
+(
+    [0] => Array
+        (
+            [0] => a
+        )
+
+)
+1: Array
+(
+    [0] => Array
+        (
+            [0] => a
+            [1] => a
+            [2] => a
+        )
+
+)
+3: Array
+(
+    [0] => Array
+        (
+            [0] => a
+            [1] => a
+        )
+
+)
+0: Array
+(
+    [0] => 
+    [1] => pple
+)
+1: Array
+(
+    [0] => b
+    [1] => n
+    [2] => n
+    [3] => 
+)
+3: Array
+(
+    [0] => 
+    [1] => voc
+    [2] => do
+)
+0: *pple
+1: b*n*n*
+3: *voc*do
+k1=>x
+k3=>z
+1=>banana
+2=>cherry
+4=>x1
+5=>y22
+0: Array
+(
+    [0] => Array
+        (
+            [0] => a
+            [1] => 0
+        )
+
+    [1] => Array
+        (
+            [0] => a
+            [1] => 0
+        )
+
+)
+int(1)
+int(0)
+int(256)
+string(5) "/(a)/"
+int(0)
+int(1)
+int(0)
+RegexIterator::setMode(): Argument #1 ($mode) must be RegexIterator::MATCH, RegexIterator::GET_MATCH, RegexIterator::ALL_MATCHES, RegexIterator::SPLIT, or RegexIterator::REPLACE
+RegexIterator::__construct(): Argument #3 ($mode) must be RegexIterator::MATCH, RegexIterator::GET_MATCH, RegexIterator::ALL_MATCHES, RegexIterator::SPLIT, or RegexIterator::REPLACE
+int(1)
+int(2)
+int(0)
+int(1)
+int(2)
+int(3)
+int(4)
+RegexIterator Object
+(
+    [replacement] => 
+)
+
+22
+333

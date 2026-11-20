@@ -1,0 +1,13 @@
+1,2,3
+1,2,3
+1,2,3
+1,2,3
+12
+Objects returned by Wrapper::getIterator() must be traversable or implement interface Iterator
+Cannot add element to the array as the next element is already occupied
+int(1)
+int(3)
+int(0)
+int(1)
+int(0)
+int(1)

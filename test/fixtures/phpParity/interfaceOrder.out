@@ -1,0 +1,5 @@
+X: A,B,Cc,A0,B0
+Y: Cc,A,A0
+Z: X,B0,A0,Cc,B,A
+K: X,B0,A0,Cc,B,A
+L: Z,A,B,Cc,A0,B0,X

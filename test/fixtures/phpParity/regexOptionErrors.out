@@ -1,0 +1,119 @@
+/a++?/ => 
+Warning: preg_match(): Compilation failed: quantifier does not follow a repeatable item at offset 4 in /main.php on line 3
+bool(false)
+/a+?+/ => 
+Warning: preg_match(): Compilation failed: quantifier does not follow a repeatable item at offset 4 in /main.php on line 3
+bool(false)
+/(?z)a/ => 
+Warning: preg_match(): Compilation failed: unrecognized character after (? or (?- at offset 3 in /main.php on line 3
+bool(false)
+/(?i/ => 
+Warning: preg_match(): Compilation failed: missing closing parenthesis at offset 3 in /main.php on line 3
+bool(false)
+/(?=a\K)/ => 
+Warning: preg_match(): Compilation failed: \K is not allowed in lookarounds (but see PCRE2_EXTRA_ALLOW_LOOKAROUND_BSK) at offset 7 in /main.php on line 3
+bool(false)
+/(?-)a/ => int(1)
+Array
+(
+    [0] => a
+)
+/(?i-)a/ => int(1)
+Array
+(
+    [0] => a
+)
+/(?^-i)a/ => 
+Warning: preg_match(): Compilation failed: invalid hyphen in option setting at offset 4 in /main.php on line 3
+bool(false)
+Array
+(
+    [0] => a
+)
+/(?--i)a/ => 
+Warning: preg_match(): Compilation failed: invalid hyphen in option setting at offset 4 in /main.php on line 3
+bool(false)
+Array
+(
+    [0] => a
+)
+/(?ii)a/ => int(1)
+Array
+(
+    [0] => a
+)
+/(?i)+a/ => 
+Warning: preg_match(): Compilation failed: quantifier does not follow a repeatable item at offset 5 in /main.php on line 3
+bool(false)
+Array
+(
+    [0] => a
+)
+/(?>a)+b/ => int(0)
+Array
+(
+)
+/a{2,}+/ => int(1)
+Array
+(
+    [0] => aaa
+)
+/(?xx)a b/ => int(0)
+Array
+(
+)
+/(?J)a/ => int(1)
+Array
+(
+    [0] => a
+)
+/(?i:a/ => 
+Warning: preg_match(): Compilation failed: missing closing parenthesis at offset 5 in /main.php on line 3
+bool(false)
+Array
+(
+    [0] => a
+)
+/(?<=a\K)b/ => 
+Warning: preg_match(): Compilation failed: \K is not allowed in lookarounds (but see PCRE2_EXTRA_ALLOW_LOOKAROUND_BSK) at offset 9 in /main.php on line 3
+bool(false)
+Array
+(
+    [0] => a
+)
+/(?!a\K)b/ => 
+Warning: preg_match(): Compilation failed: \K is not allowed in lookarounds (but see PCRE2_EXTRA_ALLOW_LOOKAROUND_BSK) at offset 8 in /main.php on line 3
+bool(false)
+Array
+(
+    [0] => a
+)
+/(?x-x)a b/ => int(1)
+Array
+(
+    [0] => a b
+)
+/a(?i)/ => int(1)
+Array
+(
+    [0] => a
+)
+/(?i)(?-i)a/ => int(1)
+Array
+(
+    [0] => a
+)
+/(?:a(?i))b/ => int(0)
+Array
+(
+)
+int(1)
+int(0)
+int(1)
+int(0)
+int(1)
+int(0)
+int(1)
+int(0)
+int(1)
+int(0)

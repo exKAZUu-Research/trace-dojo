@@ -1,0 +1,5 @@
+item 1;item 2;item 3;object;end;drop object;
+item 1;item 2;item 3;1;end;drop array;
+item 1;item 2;drop carry 1;item 3;callback
+item 1;item 2;drop before scalar;item 3;3;end;
+drop carry 2;

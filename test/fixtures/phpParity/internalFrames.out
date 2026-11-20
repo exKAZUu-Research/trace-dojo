@@ -1,0 +1,23 @@
+#0 /main.php(2): array_keys(1)
+#1 /main.php(3): g()
+#2 {main}
+#0 /main.php(4): abs('x')
+#1 {main}
+#0 /main.php(5): str_repeat('a', -1)
+#1 {main}
+#0 /main.php(7): A->__toString()
+#1 {main}
+#0 /main.php(8): A->__toString()
+#1 {main}
+#0 /main.php(9): A->__toString()
+#1 {main}
+#0 [internal function]: {closure:/main.php:10}(1)
+#1 /main.php(10): array_map(Object(Closure), Array)
+#2 {main}
+usort(): Argument #1 ($array) must be of type array, null given
+#0 /main.php(11): usort(NULL, 'nope')
+#1 {main}
+#0 /main.php(12): intdiv(1, 0)
+#1 {main}
+#0 /main.php(13): h('a', Array)
+#1 {main}

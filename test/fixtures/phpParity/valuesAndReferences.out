@@ -1,0 +1,251 @@
+d
+bool(false)
+bool(true)
+string(1) "h"
+
+Warning: Uninitialized string offset -6 in /main.php on line 5
+|
+
+Warning: Uninitialized string offset -6 in /main.php on line 6
+string(0) ""
+
+Warning: Uninitialized string offset 7 in /main.php on line 7
+|
+string(1) "a"
+string(3) "  x"
+
+Warning: Illegal string offset -3 in /main.php on line 15
+string(2) "ab"
+Error: [] operator not supported for strings
+TypeError: Cannot access offset of type string on string
+TypeError: Cannot access offset of type string on string
+string(3) "abc"
+1
+3
+x
+3
+int(1)
+int(2)
+array(1) {
+  [0]=>
+  array(2) {
+    [0]=>
+    string(6) "漢字"
+    [1]=>
+    string(3) "、"
+  }
+}
+int(1)
+int(1)
+string(5) "a-b-c"
+int(1)
+int(1)
+int(0)
+int(1)
+int(1)
+int(1)
+int(1)
+array(3) {
+  [0]=>
+  string(5) "Hello"
+  [1]=>
+  string(5) "world"
+  [2]=>
+  string(15) "こんにちは"
+}
+int(1)
+int(1)
+array(2) {
+  [0]=>
+  &int(1)
+  [1]=>
+  int(2)
+}
+array(2) {
+  [0]=>
+  &int(1)
+  [1]=>
+  int(2)
+}
+array(2) {
+  [0]=>
+  int(1)
+  [1]=>
+  int(2)
+}
+array(3) {
+  [0]=>
+  int(1)
+  [1]=>
+  int(2)
+  [2]=>
+  &int(3)
+}
+array(3) {
+  [0]=>
+  int(1)
+  [1]=>
+  int(2)
+  [2]=>
+  int(3)
+}
+array(1) {
+  ["x"]=>
+  &NULL
+}
+array(1) {
+  [0]=>
+  int(1)
+}
+object(stdClass)#2 (1) {
+  ["p"]=>
+  &int(1)
+}
+array(1) {
+  ["in"]=>
+  &array(1) {
+    [0]=>
+    int(1)
+  }
+}
+array(1) {
+  [0]=>
+  int(1)
+}
+array(1) {
+  [5]=>
+  string(1) "x"
+}
+array(3) {
+  [0]=>
+  string(1) "a"
+  [5]=>
+  string(1) "b"
+  [6]=>
+  string(1) "x"
+}
+array(3) {
+  [0]=>
+  int(1)
+  [1]=>
+  int(2)
+  [2]=>
+  string(1) "x"
+}
+array(2) {
+  [-5]=>
+  string(1) "x"
+  [-4]=>
+  string(1) "y"
+}
+array(3) {
+  [-3]=>
+  int(1)
+  [-10]=>
+  int(2)
+  [-2]=>
+  int(3)
+}
+array(2) {
+  ["a"]=>
+  int(1)
+  [0]=>
+  int(2)
+}
+array(1) {
+  [-5]=>
+  int(1)
+}
+array(1) {
+  [-1]=>
+  int(2)
+}
+array(2) {
+  [-7]=>
+  int(1)
+  [-6]=>
+  int(2)
+}
+array(2) {
+  [0]=>
+  int(1)
+  [1]=>
+  int(3)
+}
+array(2) {
+  [-5]=>
+  int(1)
+  [-4]=>
+  int(2)
+}
+array(3) {
+  [-5]=>
+  string(1) "v"
+  [-4]=>
+  string(1) "v"
+  [-3]=>
+  string(1) "v"
+}
+a(): Argument #1 ($x) must be of type array, true given, called in /main.php on line 61
+r(): Return value must be of type array, false returned
+Call to a member function foo() on true
+
+
+Warning: Attempt to read property "p" on true in /main.php on line 64
+NULL
+Attempt to assign property "p" on true
+Cannot assign array to property X::$p of type int
+
+Warning: Trying to access array offset on true in /main.php on line 67
+NULL
+
+Warning: foreach() argument must be of type array|object, true given in /main.php on line 68
+strlen(): Argument #1 ($string) must be of type string, array given
+count(): Argument #1 ($value) must be of type Countable|array, true given
+array_keys(): Argument #1 ($array) must be of type array, false given
+Unsupported operand types: bool + array
+Cannot perform bitwise not on true
+Cannot access offset of type array on string
+Class name must be a valid object or a string
+Class name must be a valid object or a string
+Class name must be a valid object or a string
+Class name must be a valid object or a string
+Class name must be a valid object or a string
+bool(true)
+bool(true)
+int(0)
+bool(false)
+bool(true)
+bool(true)
+bool(true)
+int(0)
+bool(true)
+bool(true)
+bool(false)
+int(9007199254740993)
+bool(true)
+bool(false)
+bool(false)
+int(1)
+array(5) {
+  [0]=>
+  int(1)
+  [1]=>
+  float(2.5)
+  [2]=>
+  int(3)
+  [3]=>
+  int(9007199254740993)
+  [4]=>
+  float(9007199254740992)
+}
+object(stdClass)#5 (1) {
+  ["me"]=>
+  *RECURSION*
+}
+array(2) {
+  [0]=>
+  int(1)
+  [1]=>
+  *RECURSION*
+}

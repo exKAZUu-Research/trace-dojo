@@ -1,0 +1,5 @@
+
+Fatal error: Uncaught Error: Property A::$p is write-only in /main.php:1
+Stack trace:
+#0 {main}
+  thrown in /main.php on line 1

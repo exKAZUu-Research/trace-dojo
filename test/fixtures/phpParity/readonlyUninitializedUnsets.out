@@ -1,0 +1,8 @@
+bool(false)
+int(5)
+Cannot unset readonly property A::$p;int(6)
+NULL
+Cannot unset protected(set) readonly property A::$p from global scopeint(7)
+int(8)
+Cannot unset private(set) property PrivateSetter::$p from scope PrivateChild;Cannot modify private(set) property PrivateSetter::$p from scope PrivateChild;int(9)
+Cannot unset protected(set) readonly property Mode0::$p from global scope;Cannot modify protected(set) readonly property Mode0::$p from global scope;Cannot unset readonly property Mode0::$p;Cannot modify readonly property Mode0::$p;Cannot unset protected(set) readonly property Mode1::$p from global scope;Cannot modify protected(set) readonly property Mode1::$p from global scope;Cannot unset readonly property Mode1::$p;Cannot modify readonly property Mode1::$p;Cannot unset private(set) property Mode2::$p from global scope;Cannot modify private(set) property Mode2::$p from global scope;Cannot unset readonly property Mode2::$p;Cannot modify readonly property Mode2::$p;ok;ok;Cannot unset readonly property Mode3::$p;Cannot modify readonly property Mode3::$p;

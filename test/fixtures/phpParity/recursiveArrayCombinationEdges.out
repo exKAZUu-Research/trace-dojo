@@ -1,0 +1,213 @@
+array_merge_recursive
+int(3)
+array(1) {
+  ["k"]=>
+  &int(3)
+}
+array(1) {
+  ["k"]=>
+  array(2) {
+    [0]=>
+    int(1)
+    [1]=>
+    int(2)
+  }
+}
+array(1) {
+  ["k"]=>
+  array(2) {
+    [0]=>
+    int(2)
+    [1]=>
+    int(1)
+  }
+}
+array(1) {
+  ["a"]=>
+  int(1)
+}
+array(1) {
+  ["k"]=>
+  &array(1) {
+    ["a"]=>
+    int(1)
+  }
+}
+array(1) {
+  ["k"]=>
+  array(2) {
+    ["a"]=>
+    int(1)
+    ["b"]=>
+    int(2)
+  }
+}
+array_replace
+int(3)
+array(1) {
+  ["k"]=>
+  &int(3)
+}
+array(1) {
+  ["k"]=>
+  int(2)
+}
+array(1) {
+  ["k"]=>
+  &int(3)
+}
+array(1) {
+  ["a"]=>
+  int(1)
+}
+array(1) {
+  ["k"]=>
+  &array(1) {
+    ["a"]=>
+    int(1)
+  }
+}
+array(1) {
+  ["k"]=>
+  array(1) {
+    ["b"]=>
+    int(2)
+  }
+}
+array_replace_recursive
+int(3)
+array(1) {
+  ["k"]=>
+  &int(3)
+}
+array(1) {
+  ["k"]=>
+  int(2)
+}
+array(1) {
+  ["k"]=>
+  &int(3)
+}
+array(1) {
+  ["a"]=>
+  int(1)
+}
+array(1) {
+  ["k"]=>
+  &array(1) {
+    ["a"]=>
+    int(1)
+  }
+}
+array(1) {
+  ["k"]=>
+  array(2) {
+    ["a"]=>
+    int(1)
+    ["b"]=>
+    int(2)
+  }
+}
+array_merge_recursive:Recursion detected
+array(1) {
+  [0]=>
+  &int(2)
+}
+array(2) {
+  ["a"]=>
+  array(1) {
+    ["x"]=>
+    array(2) {
+      [0]=>
+      int(1)
+      [1]=>
+      int(1)
+    }
+  }
+  ["b"]=>
+  array(1) {
+    ["x"]=>
+    array(2) {
+      [0]=>
+      int(1)
+      [1]=>
+      int(1)
+    }
+  }
+}
+array(2) {
+  ["a"]=>
+  array(1) {
+    ["x"]=>
+    array(2) {
+      [0]=>
+      int(1)
+      [1]=>
+      int(1)
+    }
+  }
+  ["b"]=>
+  array(1) {
+    ["x"]=>
+    array(2) {
+      [0]=>
+      int(1)
+      [1]=>
+      int(1)
+    }
+  }
+}
+array_replace_recursive:Recursion detected
+array(1) {
+  [0]=>
+  &int(2)
+}
+Recursion detected
+array(2) {
+  ["a"]=>
+  array(1) {
+    ["x"]=>
+    int(1)
+  }
+  ["b"]=>
+  array(1) {
+    ["x"]=>
+    int(1)
+  }
+}
+array(1) {
+  ["k"]=>
+  array(2) {
+    [0]=>
+    NULL
+    [1]=>
+    int(2)
+  }
+}
+array(1) {
+  ["k"]=>
+  array(2) {
+    [0]=>
+    NULL
+    ["b"]=>
+    int(2)
+  }
+}
+array(1) {
+  ["k"]=>
+  array(2) {
+    ["a"]=>
+    int(1)
+    [0]=>
+    int(2)
+  }
+}
+array(1) {
+  ["k"]=>
+  array(2) {
+    ["a"]=>
+    int(1)
+    ["b"]=>
+    int(2)
+  }
+}

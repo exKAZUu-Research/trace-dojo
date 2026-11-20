@@ -1,0 +1,10 @@
+
+Fatal error: Uncaught TypeError: SplObjectStorage::offsetGet(): Argument #1 ($object) must be of type object, int given in /main.php:3
+Stack trace:
+#0 /main.php(3): SplObjectStorage->offsetGet(1)
+#1 {main}
+
+Next Error: Cannot use object of type SplObjectStorage as array in /main.php:3
+Stack trace:
+#0 {main}
+  thrown in /main.php on line 3

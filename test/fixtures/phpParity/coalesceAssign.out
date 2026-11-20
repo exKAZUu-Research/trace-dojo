@@ -1,0 +1,24 @@
+array(3) {
+  ["x"]=>
+  int(1)
+  ["n"]=>
+  int(3)
+  ["m"]=>
+  int(4)
+}
+string(1) "u"
+object(stdClass)#1 (1) {
+  ["p"]=>
+  int(5)
+}
+isset q
+set q
+array(1) {
+  ["k"]=>
+  array(1) {
+    ["z"]=>
+    string(4) "deep"
+  }
+}
+exists
+set

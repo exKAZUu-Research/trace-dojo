@@ -1,0 +1,7 @@
+ABReceiver
+
+Warning: Receiver::{closure:/main.php:5}(): Argument #1 ($value) must be passed by reference, value given in /main.php on line 7
+int(0)
+
+Warning: Receiver::{closure:/main.php:5}(): Argument #1 ($value) must be passed by reference, value given in /main.php on line 9
+int(0)

@@ -1,0 +1,5 @@
+4:Too few arguments to function typed(), 1 passed in /main.php on line 7 and exactly 2 expected
+4:typed(): Argument #2 ($second) must be of type int, array given, called in /main.php on line 9
+5:typed(): Argument #3 must be of type int, array given, called in /main.php on line 11
+15:Undefined constant "MISSING_DEFAULT"
+22:Too few arguments to function Promoted::__construct(), 1 passed in /main.php on line 25 and exactly 2 expected

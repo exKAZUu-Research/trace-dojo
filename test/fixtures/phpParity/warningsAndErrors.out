@@ -1,0 +1,31 @@
+before
+dflt
+|
+
+Warning: Undefined property: stdClass::$missing3 in /main.php on line 9
+
+none
+x
+3
+
+Warning: A non-numeric value encountered in /main.php on line 15
+10
+15.5 1001 5 2
+eq
+bool(true)
+bool(true)
+bool(false)
+bool(true)
+bool(true)
+bool(true)
+bool(true)
+---
+
+Fatal error: Uncaught DivisionByZeroError: Division by zero in /main.php:2
+Stack trace:
+#0 /main.php(3): level3(42)
+#1 /main.php(4): level2(Array)
+#2 /main.php(4): Svc->run(42)
+#3 /main.php(20): Svc::go()
+#4 {main}
+  thrown in /main.php on line 2

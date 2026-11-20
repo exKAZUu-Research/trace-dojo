@@ -1,0 +1,28 @@
+array(0) {
+}
+int(-25)
+int(-25)
+int(-25)
+int(-25)
+array(1) {
+  ["x"]=>
+  &int(2)
+}
+int(2)
+array(1) {
+  ["x"]=>
+  &int(2)
+}
+23
+int(2)
+1
+1.2345678901234E+14
+1.0000000000000E+14
+12345678901234
+int(3)
+string(4) "4100"
+string(10) "ISO-8859-1"
+int(3)
+Cannot assign string to reference held by property Typed::$x of type int
+string(5) "hello"
+count(): Argument #2 ($mode) must be either COUNT_NORMAL or COUNT_RECURSIVE

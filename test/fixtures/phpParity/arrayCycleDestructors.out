@@ -1,0 +1,8 @@
+before;tail;int(1)
+int(0)
+before;tail;int(1)
+int(0)
+rescue;int(0)
+bool(true)
+int(2)
+int(0)
