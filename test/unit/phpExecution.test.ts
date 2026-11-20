@@ -5402,6 +5402,24 @@ echo gc_collect_cycles(), ";";`)
   ).toMatchObject({ kind: 'executed', stdout: 'd2004;d1004;d4;2;d6;d1006;d2006;' });
 });
 
+test.each([
+  '$n = 1; $values = [$n]; foreach ($values as $v) { $values = 5; }',
+  '$n = 1; $values = [$n]; foreach ($values as $v) { $values = 5; } unset($v);',
+  'function iterate() { $n = 1; $values = [$n]; foreach ($values as $v) { $values = 5; } } iterate();',
+])('cycle collection excludes a released foreach subject: %s', (iterate) => {
+  expect(
+    run(`<?php
+class N {
+  public $self;
+  function __destruct() { echo "destroyed;"; }
+}
+function makeCycle() { $node = new N; $node->self = $node; }
+makeCycle();
+${iterate}
+echo gc_collect_cycles(), ";", gc_collect_cycles(), ";";`)
+  ).toMatchObject({ kind: 'executed', stdout: 'destroyed;1;0;' });
+});
+
 test("gc_collect_cycles() reruns over what destructors create and leaves out a resurrected receiver's data", () => {
   for (const [action, expected] of [
     ['$x = new stdClass; $x->self = $x; unset($x); $this->a = [];', 'int(2)\nint(0)\nint(2)\n'],

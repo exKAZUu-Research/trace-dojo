@@ -448,7 +448,11 @@ export class Runtime {
   }
 
   retireArrayGraph(root: PhpArray, retained: (array: PhpArray) => boolean, released?: unknown[]): void {
-    if (!root.composite || retained(root)) return;
+    if (retained(root)) return;
+    if (!root.composite) {
+      this.gcRoots.delete(root);
+      return;
+    }
     const retire = (array: PhpArray): Iterator<Value | Ref> => {
       this.gcRoots.delete(array);
       return array.retire().values();

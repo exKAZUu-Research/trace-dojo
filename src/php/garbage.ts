@@ -806,7 +806,7 @@ function finishArrayCollection(runtime: Runtime, arrays: Iterable<PhpArray>): vo
 
 function retireObjectFreeArrays(runtime: Runtime, dropped: unknown[]): void {
   for (const value of dropped)
-    if (value instanceof PhpArray && value.composite)
+    if (value instanceof PhpArray && (value.composite || runtime.gcRoots.has(value)))
       runtime.retireArrayGraph(value, (array) => arrayHasHolders(runtime, array, 1));
 }
 
