@@ -67,7 +67,7 @@ export abstract class MemberCompiler extends MetadataCompiler {
       })
     );
     let returnType: DartType;
-    if (returnTypeSyntax) returnType = this.resolveType(returnTypeSyntax);
+    if (returnTypeSyntax) returnType = this.resolveTypeWithoutAnnotations(returnTypeSyntax);
     else if (declaration?.methodKind === 'setter') returnType = VOID;
     else if (overridden?.kind === 'function') returnType = overridden.returnType;
     else if (overridden && declaration?.methodKind === 'getter') returnType = overridden;
@@ -121,34 +121,37 @@ export abstract class MemberCompiler extends MetadataCompiler {
     const extensionOn = extension?.onType ?? (cls.kind === 'extensionType' ? cls.thisType : undefined);
     const ownerParams = extension?.typeParams ?? cls.typeParams;
     this.inDeclarationScope(declaredClass, extension, () => {
-      const compiled = this.withTypeParams(ownerParams, () =>
-        this.withTypeParams(typeParams, () =>
-          this.compileFunction({
-            name: declaration.name,
-            span: declaration,
-            headerEndRow: declaration.headerEndRow,
-            parameters: declaration.parameters,
-            positionalTypes,
-            namedTypes,
-            isSetter: declaration.methodKind === 'setter',
-            returnType,
-            contextReturnType: undefined,
-            body: compiledBody,
-            typeParams,
-            kind: {
+      const compiled = this.withTypeParams(
+        ownerParams,
+        () =>
+          this.withTypeParams(typeParams, () =>
+            this.compileFunction({
+              name: declaration.name,
+              span: declaration,
+              headerEndRow: declaration.headerEndRow,
+              parameters: declaration.parameters,
+              positionalTypes,
+              namedTypes,
+              isSetter: declaration.methodKind === 'setter',
               returnType,
-              isGenerator: body?.modifier === 'sync*',
-              thisClass: declaredClass,
-              thisType: declaredClass?.thisType,
-              hasThis: !declaration.isStatic,
-              extensionOn,
-              isInitializer: false,
-              isConstructor: false,
-            },
-            showsThis: !declaration.isStatic && !this.isLibraryCode,
-            isClosure: false,
-          })
-        )
+              contextReturnType: undefined,
+              body: compiledBody,
+              typeParams,
+              kind: {
+                returnType,
+                isGenerator: body?.modifier === 'sync*',
+                thisClass: declaredClass,
+                thisType: declaredClass?.thisType,
+                hasThis: !declaration.isStatic,
+                extensionOn,
+                isInitializer: false,
+                isConstructor: false,
+              },
+              showsThis: !declaration.isStatic && !this.isLibraryCode,
+              isClosure: false,
+            })
+          ),
+        declaration.isStatic
       );
       const typeEnvFor = this.methodTypeEnv(declaredClass, ownerParams, typeParams, declaration.isStatic);
       if (member.forwarding)

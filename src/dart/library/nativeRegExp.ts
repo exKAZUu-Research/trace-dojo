@@ -1,6 +1,5 @@
 import { RegExpSyntaxError } from '@eslint-community/regexpp';
 
-import { quoteForError } from '../format';
 import type { Runtime } from '../runtime';
 import { coreTypes, interfaceType, makeNullable } from '../types';
 import { DartList, DartObject, type Value } from '../values';
@@ -238,7 +237,19 @@ define('RegExp.isDotAll', (_runtime, receiver) => stateOf(receiver).dotAll);
 /** The VM's regular expression engine (Irregexp) words its syntax errors differently from the host's. */
 function regExpSyntaxMessage(error: RegExpSyntaxError, source: string): string {
   const reason = error.message.replace(/^Invalid regular expression: \/[\s\S]*\/[a-z]*: /, '');
+  if (reason.startsWith('Duplicated flag ')) return 'Repeated flag in flag group';
   switch (reason) {
+    case 'Invalid empty flags': {
+      return 'Invalid flag group';
+    }
+    case 'Invalid group': {
+      return /^[ims]*-[ims]*-/.test(source.slice(error.index + 1)) ? 'Multiple dashes in flag group' : reason;
+    }
+    case 'Invalid character in character class': {
+      return error.index === source.length - 1 && source[error.index] === '\\'
+        ? String.raw`\ at end of pattern`
+        : reason;
+    }
     case 'Invalid unicode escape': {
       return 'Invalid Unicode escape';
     }
@@ -246,20 +257,25 @@ function regExpSyntaxMessage(error: RegExpSyntaxError, source: string): string {
       return inCharacterClass(source, error.index) ? 'Invalid property name in character class' : reason;
     }
     case 'Invalid escape': {
-      if (source[error.index - 1] !== '\\') return reason;
-      const escaped = source[error.index];
-      if (escaped === undefined) return String.raw`\ at end of pattern`;
-      if (escaped === 'c') return 'Invalid Unicode escape';
-      if (escaped === '0' && /\d/.test(source[error.index + 1] ?? '')) return 'Invalid decimal escape';
-      return reason;
+      return escapeDiagnostic(source, error.index);
     }
     case 'Nothing to repeat': {
-      return quantifiesLookAhead(source, error.index) ? 'Invalid quantifier' : reason;
+      return quantifiesAssertion(source, error.index) ? 'Invalid quantifier' : reason;
     }
     default: {
       return reason;
     }
   }
+}
+
+function escapeDiagnostic(source: string, offset: number): string {
+  if (source[offset - 1] === '\\') {
+    const escaped = source[offset];
+    if (escaped === undefined) return String.raw`\ at end of pattern`;
+    if (escaped === 'c') return 'Invalid Unicode escape';
+    if (escaped === '0' && /\d/.test(source[offset + 1] ?? '')) return 'Invalid decimal escape';
+  }
+  return 'Invalid escape';
 }
 
 function inCharacterClass(source: string, offset: number): boolean {
@@ -271,20 +287,20 @@ function inCharacterClass(source: string, offset: number): boolean {
   return inside;
 }
 
-function quantifiesLookAhead(source: string, offset: number): boolean {
+function quantifiesAssertion(source: string, offset: number): boolean {
   const prefix = source.slice(0, offset);
   const quantifier = /(?:[*+?]|\{\d+(?:,\d*)?\})$/.exec(prefix);
   if (!quantifier || source[quantifier.index - 1] !== ')') return false;
   let inClass = false;
   const groups: boolean[] = [];
-  for (const match of prefix.matchAll(/\\[\s\S]|\(\?[=!]|[()[\]]/g)) {
+  for (const match of prefix.matchAll(/\\[\s\S]|\(\?<?[=!]|[()[\]]/g)) {
     const [token] = match;
     if (token === '[') inClass = true;
     else if (token === ']') inClass = false;
     else if (!inClass && token.startsWith('(')) groups.push(token.length > 1);
     else if (!inClass && token === ')') {
-      const lookAhead = groups.pop();
-      if (match.index === quantifier.index - 1) return lookAhead === true;
+      const assertion = groups.pop();
+      if (match.index === quantifier.index - 1) return assertion === true;
     }
   }
   return false;
@@ -339,5 +355,3 @@ define('RegExpMatch.namedGroup', (runtime, receiver, [name]) => {
 define('RegExpMatch.groupNames', (runtime, receiver) =>
   newList(runtime, interfaceType(coreTypes.string), Object.keys(matchState(receiver).names ?? {}), false)
 );
-
-export { quoteForError };

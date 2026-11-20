@@ -1,4 +1,12 @@
-import type { Annotation, Arguments, ClassDeclaration, Expression, ExtensionDeclaration, Library } from './ast';
+import type {
+  Annotation,
+  Arguments,
+  ClassDeclaration,
+  Expression,
+  ExtensionDeclaration,
+  Library,
+  TypeParameter,
+} from './ast';
 import type { ClassInfo } from './classes';
 import { at, type Compiled } from './compilerBase';
 import { ConstructorCompiler } from './constructorCompiler';
@@ -6,6 +14,9 @@ import type { ExtensionInfo } from './environment';
 import { Flow, FunctionContext } from './scope';
 
 export abstract class MetadataCompiler extends ConstructorCompiler {
+  private readonly typeAnnotationVisits = new WeakSet<readonly TypeParameter[]>();
+  private pendingTypeAnnotations: (() => void)[] | undefined = [];
+
   protected checkDeclarationAnnotations(
     syntax: Library,
     classes: readonly { cls: ClassInfo; declaration: ClassDeclaration }[],
@@ -58,6 +69,26 @@ export abstract class MetadataCompiler extends ConstructorCompiler {
       this.currentClass = savedClass;
       this.currentExtension = savedExtension;
     }
+  }
+
+  protected checkDeferredFunctionTypeAnnotations(): void {
+    const checks = this.pendingTypeAnnotations;
+    this.pendingTypeAnnotations = undefined;
+    for (const check of checks ?? []) check();
+  }
+
+  protected checkFunctionTypeAnnotations(parameters: readonly TypeParameter[]): void {
+    if (this.isLibraryCode || !parameters.some((parameter) => parameter.annotations?.length)) return;
+    if (this.typeAnnotationVisits.has(parameters)) return;
+    this.typeAnnotationVisits.add(parameters);
+    if (this.pendingTypeAnnotations) {
+      const { currentClass, currentExtension } = this;
+      this.pendingTypeAnnotations.push(() =>
+        this.inAnnotationScope(currentClass, currentExtension, () => this.checkTypeParameterAnnotations(parameters))
+      );
+      return;
+    }
+    this.checkTypeParameterAnnotations(parameters);
   }
 
   protected checkAnnotations(annotations: Annotation[] | undefined): void {

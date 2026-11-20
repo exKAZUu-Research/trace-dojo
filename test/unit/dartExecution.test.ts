@@ -2207,6 +2207,32 @@ void main() {
   }
 });
 
+test('custom map entries stay reachable during insertion callbacks', () => {
+  const declarations = `import 'dart:collection';
+class Key {
+  int get hashCode {
+    Turtle(3, 3).canMoveForward();
+    return 1;
+  }
+}
+class Source extends MapBase<Key, Turtle> {
+  Turtle? operator [](Object? key) => null;
+  void operator []=(Key key, Turtle value) {}
+  void clear() {}
+  Turtle? remove(Object? key) => null;
+  Iterable<Key> get keys => [];
+  void forEach(void Function(Key, Turtle) add) { add(Key(), Turtle(1, 1)); }
+}`;
+  for (const create of ['var m = <Key, Turtle>{}; m.addAll(Source());', 'var m = <Key, Turtle>{...Source()};']) {
+    const program = `${declarations} void main() { ${create} m.values.first.forward(); }`;
+    expect(executeProgram('dart', program)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: undefined,
+      finalTurtles: [{ x: 1, y: 2 }],
+    });
+  }
+});
+
 test('set membership keeps its source iterator reachable during hashing', () => {
   const program = `import 'dart:collection';
 late Turtle saved;
@@ -2640,6 +2666,34 @@ test('malformed regular expressions report the first SDK diagnostic', () => {
     stdout:
       'Invalid group\nInvalid character class\nInvalid Unicode escape\nInvalid property name in character class\nInvalid quantifier\nNothing to repeat\nInvalid escape\nInvalid escape\n',
   });
+  const flagsAndAssertions = String.raw`void main() {
+    for (final pattern in [r'[\', '(?ii:a)', '(?-:a)', '(?<=a)*']) {
+      for (final unicode in [false, true]) {
+        try { RegExp(pattern, unicode: unicode); }
+        on FormatException catch (error) { print(error.message); }
+      }
+    }
+  }`;
+  expect(executeProgram('dart', flagsAndAssertions)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '\\ at end of pattern\n\\ at end of pattern\nRepeated flag in flag group\nRepeated flag in flag group\nInvalid flag group\nInvalid flag group\nInvalid quantifier\nInvalid quantifier\n',
+  });
+});
+
+test('escaped error text respects the string limit and includes its delimiters', () => {
+  const program = String.raw`void main() {
+    print(Error.safeToString('\u0001\n😀'));
+    print(Error.safeToString('a' * 999998).length);
+    for (final text in ['\u0001' * 200000, r'\' * 500000, 'a' * 999999]) {
+      try { print(Error.safeToString(text).length); }
+      catch (error) { print(error.runtimeType); }
+    }
+  }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '"\\u0001\\n😀"\n1000000\nOutOfMemoryError\nOutOfMemoryError\nOutOfMemoryError\n',
+  });
 });
 
 test('unsupported SDK exports respect import prefixes and visibility', () => {
@@ -2686,9 +2740,79 @@ test('noSuchMethod forwarders bind defaults and check arguments before invoking 
   });
 });
 
+test('super dispatch can call concrete noSuchMethod forwarders', () => {
+  const program = `abstract class Contract {
+    int run(int n);
+    int get value;
+    set value(int n);
+  }
+  class Parent implements Contract {
+    dynamic noSuchMethod(Invocation invocation) => 0;
+  }
+  class Child extends Parent {
+    dynamic noSuchMethod(Invocation invocation) {
+      print([invocation.isMethod, invocation.isGetter, invocation.isSetter, invocation.positionalArguments]);
+      return 2;
+    }
+    int call() => super.run(7);
+    int Function(int) get callback => super.run;
+    int get read => super.value;
+    set write(int n) { super.value = n; }
+  }
+  void main() {
+    final child = Child();
+    print(child.call());
+    print(child.callback(8));
+    print(child.read);
+    child.write = 9;
+  }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[true, false, false, [7]]\n2\n[true, false, false, [8]]\n2\n[false, true, false, []]\n2\n[false, false, true, [9]]\n',
+  });
+  const abstractParent = program.replace('class Parent', 'abstract class Parent');
+  expect(executeProgram('dart', abstractParent)).toMatchObject({ kind: 'compileError' });
+});
+
+test('generic function type metadata resolves in checked declaration scopes', () => {
+  const program = `typedef Callback = void Function<@Unknown() T>();
+void accept(void Function<@label T>()? f) { print(f); }
+const label = 1;
+void main() {
+  const local = 1;
+  List<void Function<@local T>()?> callbacks = [null];
+  Callback? callback = callbacks.first;
+  accept(callback);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'null\n' });
+  for (const validAnnotation of ['@label', '@local']) {
+    const invalid = program.replace(validAnnotation, '@Unknown()');
+    expect(executeProgram('dart', invalid)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
+test('a static member only sees its own type parameters and local variables', () => {
+  const program = `class T {}
+class C<T> {
+  static T identity<T>(T value) => value;
+  static int shadowed() { final T = 3; return T; }
+}
+void main() { print([C.identity(2), C.shadowed()]); }`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[2, 3]\n' });
+  for (const declaration of [
+    'class C<T> { static T? value; }',
+    'mixin C<T> { static var value = T; }',
+    'enum C<T> { value; static Type f() => T; }',
+    'extension C<T> on List<T> { static T? value; }',
+  ]) {
+    expect(executeProgram('dart', `class T {} ${declaration} void main() {}`)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
 test('the effective inherited covariance check runs on direct calls and tear-offs', () => {
-  const program = `abstract class Interface { void f(covariant num value); }
-class Parent { void f(int value) { print(value); } }
+  const program = `abstract class Interface { void f([covariant num value = 3]); }
+class Parent { void f([int value = 4]) { print(value); } }
 class Child extends Parent implements Interface {}
 class Further extends Child {}
 void main() {
@@ -2698,10 +2822,15 @@ void main() {
   print(f.runtimeType);
   try { f(1.5); } catch (error) { print(error.runtimeType); }
   f(2);
+  f();
+  Further().f();
+  Parent parent = Further();
+  parent.f();
+  Parent().f();
 }`;
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
-    stdout: '_TypeError\n(Object?) => void\n_TypeError\n2\n',
+    stdout: '_TypeError\n([Object?]) => void\n_TypeError\n2\n3\n3\n3\n4\n',
   });
 });
 
@@ -2711,11 +2840,19 @@ test('extension inference validates dependent bounds after solving receiver cons
 }
 void acceptsInt(int value) {}
 void acceptsNum(num value) {}
-void acceptsString(String value) {}`;
-  const valid = `${declarations} void main() { print((1, acceptsInt).types); }`;
-  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: 'int int\n' });
-  for (const functionName of ['acceptsNum', 'acceptsString']) {
-    const source = `${declarations} void main() { print((1, ${functionName}).types); }`;
+void acceptsString(String value) {}
+extension ListBound<T extends List<U>, U> on (U, void Function(T)) {
+  String get listTypes => '$T $U';
+}
+void acceptsIntList(List<int> value) {}
+void acceptsStringList(List<String> value) {}`;
+  const valid = `${declarations} void main() {
+    print((1, acceptsInt).types);
+    print((1, acceptsIntList).listTypes);
+  }`;
+  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: 'int int\nList<int> int\n' });
+  for (const expression of ['(1, acceptsNum).types', '(1, acceptsString).types', '(1, acceptsStringList).listTypes']) {
+    const source = `${declarations} void main() { print(${expression}); }`;
     expect(executeProgram('dart', source)).toMatchObject({ kind: 'compileError' });
   }
 });

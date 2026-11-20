@@ -1,3 +1,4 @@
+import { BoundedStringParts } from './library/boundedStringParts';
 import type { Runtime } from './runtime';
 import { vmTypeString } from './types';
 import { type DartObject, DartRecord, type Value } from './values';
@@ -47,8 +48,13 @@ export function safeToString(runtime: Runtime, value: Value): string {
   if (value === undefined || typeof value === 'boolean' || typeof value === 'bigint' || typeof value === 'number') {
     return stringOf(runtime, value);
   }
-  if (typeof value === 'string') return quoteForError(value);
-  if (value instanceof DartRecord) return `Record ${stringOf(runtime, value)}`;
+  if (typeof value === 'string') return quoteForError(runtime, value);
+  if (value instanceof DartRecord) {
+    const result = new BoundedStringParts(runtime);
+    result.append('Record ');
+    result.append(stringOf(runtime, value));
+    return result.text();
+  }
   return `Instance of '${instanceName(runtime, value)}'`;
 }
 
@@ -57,22 +63,16 @@ export function instanceName(runtime: Runtime, value: Value): string {
   return vmTypeString(runtime.runtimeTypeOf(value));
 }
 
-/** A string as `Error.safeToString` quotes it, escaping as JSON does. */
-export function quoteForError(text: string): string {
-  let result = '"';
-  for (const char of text) {
-    const code = char.codePointAt(0) as number;
-    if (char === '"') result += String.raw`\"`;
-    else if (char === '\\') result += String.raw`\\`;
-    else if (char === '\n') result += String.raw`\n`;
-    else if (char === '\r') result += String.raw`\r`;
-    else if (char === '\t') result += String.raw`\t`;
-    else if (char === '\b') result += String.raw`\b`;
-    else if (char === '\f') result += String.raw`\f`;
-    else if (code < 0x20) result += `\\u${code.toString(16).padStart(4, '0')}`;
-    else result += char;
+function quoteForError(runtime: Runtime, text: string): string {
+  const result = new BoundedStringParts(runtime);
+  result.append('"');
+  for (let start = 0; start < text.length; start += 1024) {
+    runtime.spend();
+    const chunk = text.slice(start, start + 1024);
+    result.append(chunk.replaceAll(/[\u0000-\u001F"\\]/g, (character) => JSON.stringify(character).slice(1, -1)));
   }
-  return `${result}"`;
+  result.append('"');
+  return result.text();
 }
 
 /** Text as the VM writes it to stdout: encoded as UTF-8, where a lone surrogate becomes U+FFFD. */

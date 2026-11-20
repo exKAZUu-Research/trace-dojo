@@ -127,6 +127,7 @@ function isLateInitializer(value: Value): boolean {
 
 const NOT_SCALAR = Symbol('notScalar');
 const TRUNCATED = '…';
+const CYCLE = '… (cycle)';
 type Scalar = TraceItemVariable[string];
 
 function addVariable(
@@ -194,7 +195,8 @@ function scalarOf(value: Value, type: DartType, budget: SnapshotBudget): Scalar 
 
 function listScalar(list: DartList, budget: SnapshotBudget): Scalar | typeof NOT_SCALAR {
   const seen = budget.path;
-  if (seen.has(list) || seen.size >= LIMITS.maxCallDepth) return NOT_SCALAR;
+  if (seen.has(list)) return CYCLE;
+  if (seen.size >= LIMITS.maxCallDepth) return TRUNCATED;
   if (list.elements.length > 0 && budget.remaining === 0) return omittedElements(list.elements.length);
   const elementType = list.typeArgs[0] ?? DYNAMIC;
   seen.add(list);
@@ -238,9 +240,10 @@ function isScalarType(type: DartType): boolean {
 // oxlint-disable-next-line unicorn/no-null -- The trace format shows Dart's null as null.
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 const TRUNCATED_NODE: DisplayNode = { kind: 'value', value: TRUNCATED, verbatim: true };
+const CYCLE_NODE: DisplayNode = { kind: 'value', value: CYCLE, verbatim: true };
 
 // code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of value a trace shows.
-// code-gauge-allow functionNcss 43 -- One case per kind of value a trace shows.
+// code-gauge-allow functionNcss 45 -- One case per kind of value a trace shows.
 function displayNodeOf(value: Value, budget: SnapshotBudget, previous?: DisplayNode): DisplayNode | undefined {
   if (budget.remaining === 0) return TRUNCATED_NODE;
   budget.remaining--;
@@ -260,7 +263,8 @@ function displayNodeOf(value: Value, budget: SnapshotBudget, previous?: DisplayN
       entries: { x: { kind: 'value', value: object.turtle.x }, y: { kind: 'value', value: object.turtle.y } },
     };
   }
-  if (seen.has(object) || seen.size >= LIMITS.maxCallDepth) return undefined;
+  if (seen.has(object)) return CYCLE_NODE;
+  if (seen.size >= LIMITS.maxCallDepth) return TRUNCATED_NODE;
   if (object.cls === coreTypes.function) return undefined;
   // An enum value shows as its name, which is what learners write for it.
   if (object.cls.kind === 'enum')

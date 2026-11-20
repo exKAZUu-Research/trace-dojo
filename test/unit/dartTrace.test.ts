@@ -199,14 +199,21 @@ test('a cyclic list produces finite snapshots and execution continues', () => {
   const program = `void main() {
   var cycle = <dynamic>[];
   cycle.add(cycle);
+  var nonCyclic = <dynamic>[null];
   print(cycle);
+  print(nonCyclic);
 }
 `;
-  expect(traceProgram('dart', program, program)).toMatchObject({
-    stdout: '[[...]]\n',
+  const direct = traceProgram('dart', program, program);
+  expect(direct).toMatchObject({
+    stdout: '[[...]]\n[null]\n',
     uncaughtException: undefined,
-    // oxlint-disable-next-line unicorn/no-null -- The trace format shows the repeated list reference as null.
-    finalVars: { cycle: [null] },
+    // oxlint-disable-next-line unicorn/no-null -- An actual Dart null is distinct from a cycle marker.
+    finalVars: { cycle: ['… (cycle)'], nonCyclic: [null] },
+  });
+  expect(direct.traceItems.at(-1)?.referenceVars?.cycle).toMatchObject({
+    kind: 'array',
+    entries: { 0: { kind: 'value', value: '… (cycle)', verbatim: true } },
   });
   const shared = `void main() {
   dynamic values = [];

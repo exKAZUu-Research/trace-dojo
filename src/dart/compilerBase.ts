@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 479 -- Type and diagnostic resolution share the compiler environment.
+// code-gauge-allow-file fileNcss 496 -- Type and diagnostic resolution share the compiler environment.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ClassDeclaration, Span, TypeAliasDeclaration, TypeParameter, TypeSyntax } from './ast';
 import { type ClassInfo, type Member, scopedMemberName } from './classes';
@@ -131,7 +131,7 @@ export abstract class CompilerBase {
   fn!: FunctionContext;
   flow: Flow = Flow.start();
   /** The type parameters in scope, innermost last. */
-  protected typeScopes: Map<string, TypeParam>[] = [];
+  protected typeScopes: { names: Map<string, TypeParam>; staticOwner: boolean }[] = [];
   /** The class whose body is being compiled. */
   protected currentClass: ClassInfo | undefined;
   protected currentExtension: ExtensionInfo | undefined;
@@ -205,8 +205,22 @@ export abstract class CompilerBase {
 
   // Types
 
-  protected withTypeParams<T>(params: TypeParam[], run: () => T): T {
-    this.typeScopes.push(new Map(params.map((param) => [param.name, param])));
+  private includeFunctionTypeAnnotations = true;
+
+  protected resolveTypeWithoutAnnotations(syntax: TypeSyntax): DartType {
+    const saved = this.includeFunctionTypeAnnotations;
+    this.includeFunctionTypeAnnotations = false;
+    try {
+      return this.resolveType(syntax);
+    } finally {
+      this.includeFunctionTypeAnnotations = saved;
+    }
+  }
+
+  protected abstract checkFunctionTypeAnnotations(parameters: readonly TypeParameter[]): void;
+
+  protected withTypeParams<T>(params: TypeParam[], run: () => T, staticOwner = false): T {
+    this.typeScopes.push({ names: new Map(params.map((param) => [param.name, param])), staticOwner });
     try {
       return run();
     } finally {
@@ -234,7 +248,7 @@ export abstract class CompilerBase {
   protected resolveTypeParamBounds(params: TypeParam[], syntax: TypeParameter[]): void {
     this.withTypeParams(params, () => {
       for (const [index, parameter] of syntax.entries()) {
-        if (parameter.bound) params[index].bound = this.resolveType(parameter.bound);
+        if (parameter.bound) params[index].bound = this.resolveTypeWithoutAnnotations(parameter.bound);
       }
     });
     this.checkBoundCycles(params, syntax);
@@ -254,38 +268,25 @@ export abstract class CompilerBase {
     }
   }
 
-  findTypeParam(name: string): TypeParam | undefined {
+  findTypeParam(name: string, span: Span): TypeParam | undefined {
     for (let index = this.typeScopes.length - 1; index >= 0; index--) {
-      const found = this.typeScopes[index].get(name);
-      if (found) return found;
+      const { names, staticOwner } = this.typeScopes[index];
+      const found = names.get(name);
+      if (found) {
+        if (staticOwner) this.error(span, `static なメンバーは持ち主の型引数 ${name} を使えません。`);
+        return found;
+      }
     }
     return undefined;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- One case per kind of type syntax.
   resolveType(syntax: TypeSyntax, options: { allowRaw?: boolean } = {}): DartType {
     switch (syntax.kind) {
       case 'void': {
         return VOID;
       }
       case 'function': {
-        const params = this.declareTypeParams(syntax.typeParameters);
-        const type = this.withTypeParams(params, () =>
-          functionType(
-            syntax.parameters.positional.map((parameter) => this.resolveType(parameter.type)),
-            syntax.returnType ? this.resolveType(syntax.returnType) : DYNAMIC,
-            {
-              requiredCount: syntax.parameters.requiredCount,
-              named: syntax.parameters.named.map((named) => ({
-                name: named.name,
-                type: this.resolveType(named.type),
-                isRequired: named.isRequired,
-              })),
-              typeParams: params,
-            }
-          )
-        );
-        return syntax.nullable ? makeNullable(type) : type;
+        return this.resolveFunctionType(syntax);
       }
       case 'record': {
         const names = new Set<string>();
@@ -310,11 +311,32 @@ export abstract class CompilerBase {
     }
   }
 
+  private resolveFunctionType(syntax: Extract<TypeSyntax, { kind: 'function' }>): DartType {
+    if (this.includeFunctionTypeAnnotations) this.checkFunctionTypeAnnotations(syntax.typeParameters);
+    const params = this.declareTypeParams(syntax.typeParameters);
+    const type = this.withTypeParams(params, () =>
+      functionType(
+        syntax.parameters.positional.map((parameter) => this.resolveType(parameter.type)),
+        syntax.returnType ? this.resolveType(syntax.returnType) : DYNAMIC,
+        {
+          requiredCount: syntax.parameters.requiredCount,
+          named: syntax.parameters.named.map((named) => ({
+            name: named.name,
+            type: this.resolveType(named.type),
+            isRequired: named.isRequired,
+          })),
+          typeParams: params,
+        }
+      )
+    );
+    return syntax.nullable ? makeNullable(type) : type;
+  }
+
   // code-gauge-allow functionNcss 33 -- One case per form of the construct, which reads best together.
   private resolveNamedType(syntax: Extract<TypeSyntax, { kind: 'named' }>, options: { allowRaw?: boolean }): DartType {
     const { name, prefix } = syntax;
     if (prefix === undefined) {
-      const param = this.findTypeParam(name);
+      const param = this.findTypeParam(name, syntax);
       if (param) {
         if (syntax.args.length > 0) this.error(syntax, `型引数 ${name} には、型引数を付けられません。`);
         return typeParamType(param);
@@ -357,7 +379,7 @@ export abstract class CompilerBase {
     this.aliasWork.delete(alias);
     alias.aliased = this.withIsolatedTypes(() => {
       alias.typeParams.push(...this.declareTypeParams(declaration.typeParameters));
-      return this.withTypeParams(alias.typeParams, () => this.resolveType(declaration.aliased));
+      return this.withTypeParams(alias.typeParams, () => this.resolveTypeWithoutAnnotations(declaration.aliased));
     });
     return alias.aliased;
   }
@@ -474,11 +496,12 @@ export abstract class CompilerBase {
     setter: boolean,
     library = this.library.name
   ): ResolvedMember | undefined {
-    const member = type.cls.interfaceMember(scopedMemberName(name, library), setter);
+    let member = type.cls.interfaceMember(scopedMemberName(name, library), setter);
     if (!member) {
       if (type.cls !== coreTypes.object) return this.interfaceMember(objectType(), name, setter, library);
       return undefined;
     }
+    if (member.kind === 'method') member = type.cls.covarianceFor(member)?.obligation ?? member;
     // An extension type's members run on its representation, which has no class to dispatch on.
     const extension = member.owner.kind === 'extensionType' ? { ext: undefined, typeArgs: [] } : undefined;
     return { member, type: this.memberTypeIn(type, member), extension };

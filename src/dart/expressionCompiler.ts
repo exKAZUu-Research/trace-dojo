@@ -1,5 +1,5 @@
 import { CompileError } from '../interpreter/diagnostics';
-// code-gauge-allow-file fileNcss 944 -- Expression kinds share the same scope and evaluation rules.
+// code-gauge-allow-file fileNcss 947 -- Expression kinds share the same scope and evaluation rules.
 import type {
   Annotation,
   Arguments as ArgumentsSyntax,
@@ -455,7 +455,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const explicitlyConst = 'isConst' in expression && expression.isConst;
     const params =
       this.inConstContext || explicitlyConst
-        ? new Set(this.typeScopes.flatMap((scope) => [...scope.values()]))
+        ? new Set(this.typeScopes.flatMap(({ names, staticOwner }) => (staticOwner ? [] : [...names.values()])))
         : undefined;
     const closed =
       params?.size && context && mentionsTypeParams(context, params) ? closeTypeVariables(context, params) : context;
@@ -953,11 +953,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
   // Names
 
   /** What a name means: a local, a member of the enclosing class or extension, or a top-level declaration. */
-  // code-gauge-allow functionCognitiveComplexity 28 -- Each branch is one of the cases Dart distinguishes for this construct.
-  // code-gauge-allow functionNcss 38 -- One case per form of the construct, which reads best together.
+  // code-gauge-allow functionCognitiveComplexity 29 -- Lookup order depends on lexical scope and the enclosing declaration.
+  // code-gauge-allow functionNcss 40 -- The lookup cases read in scope order.
   resolveName(name: string, span?: Span): NameResolution | undefined {
     const local = this.findLocal(name, span);
     if (local) return { kind: 'local', variable: local };
+    if (span) this.findTypeParam(name, span);
     const cls = this.currentClass;
     if (cls) {
       const own = cls.members.get(name) ?? cls.setters.get(name);
@@ -998,7 +999,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const resolution = this.resolveName(name, expression);
     if (!resolution) {
       // A type parameter is a value of type Type, its type argument at runtime.
-      const param = this.findTypeParam(name);
+      const param = this.findTypeParam(name, expression);
       if (param) {
         const resolve = this.runtimeType(typeParamType(param));
         return {
@@ -1379,7 +1380,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const compiled: Compiled = {
       type: resolved.type,
       run: (frame) => {
-        const member = classAt(frame).implementation(memberName);
+        const member = frame.runtime.instanceMember(classAt(frame), memberName);
         if (!member)
           return frame.runtime.noSuchMethod(frame.receiver, memberName, 'getter', { positional: [], named: undefined });
         return frame.runtime.readMember(frame.receiver, member, span.row);
@@ -1508,11 +1509,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
    * that the receiver's class contains, which is known only at runtime.
    */
   /** `super.m` needs a concrete `m` in the superclass chain; a mixin's superclass is known only at runtime. */
-  protected requireSuperImplementation(name: string, span: Span): void {
+  protected requireSuperImplementation(name: string, span: Span, setter = false): void {
     const cls = this.currentClass;
     if (!cls || cls.kind === 'mixin' || this.isLibraryCode) return;
-    const member = cls.superclass?.cls.implementation(this.runtimeMemberName(name));
-    if (!member || member.isAbstract)
+    const superclass = cls.superclass?.cls;
+    const key = this.runtimeMemberName(name);
+    const member = setter ? superclass?.setterImplementation(key) : superclass?.implementation(key);
+    if (!member && !superclass?.forwardingDeclaration(key, setter))
       this.error(span, `スーパークラスには ${name} の本体がないので、super.${name} は使えません。`);
   }
 

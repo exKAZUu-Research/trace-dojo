@@ -1206,7 +1206,7 @@ function superMethodCall(
   row: number | undefined
 ): Eval {
   return (frame) => {
-    const member = classAt(frame).implementation(name);
+    const member = frame.runtime.instanceMember(classAt(frame), name);
     if (member?.kind !== 'method')
       return frame.runtime.noSuchMethod(frame.receiver, name, 'method', { positional: [], named: undefined });
     const evaluated = bound.args(frame);
@@ -1232,7 +1232,7 @@ function virtualMethodCall(
     const cls = runtime.classOf(value);
     if (cls !== cachedClass) {
       cachedClass = cls;
-      cachedMember = runtime.instanceMember(value, name);
+      cachedMember = runtime.instanceMember(cls, name);
     }
     const member = cachedMember;
     if (name === 'call' && value instanceof DartClosure)

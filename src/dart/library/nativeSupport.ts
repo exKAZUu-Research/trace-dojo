@@ -207,7 +207,7 @@ export function nativeFunction(arity: number, body: (args: readonly Value[]) => 
       Array.from({ length: arity }, () => DYNAMIC),
       DYNAMIC
     ),
-    (_runtime, _receiver, args) => body(args.positional),
+    (runtime, receiver, args) => runtime.withCallRoots(receiver, args, () => body(args.positional)),
     undefined,
     [],
     { name: undefined, origin: undefined },

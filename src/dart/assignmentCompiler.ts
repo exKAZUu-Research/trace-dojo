@@ -505,7 +505,10 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     const getter = this.memberFor(receiver, lookupType, name, undefined);
     const target = { writeType: setter.type, readType: getter?.type, prepare, shorting: nullAware || shorting };
     const isSuper = (receiver as { isSuper?: boolean }).isSuper === true;
-    if (isSuper) return { ...target, ...superAccessors(this.superclassOf(span).classAt, memberName, span.row) };
+    if (isSuper) {
+      this.requireSuperImplementation(name, span, true);
+      return { ...target, ...superAccessors(this.superclassOf(span).classAt, memberName, span.row) };
+    }
     const extensionRead = this.extensionTargetCall(getter, span.row);
     const extensionWrite = this.extensionTargetCall(setter, span.row);
     return {
@@ -1176,11 +1179,11 @@ function superAccessors(
 ): Pick<AssignableTarget, 'read' | 'write'> {
   return {
     read: (frame, prepared) => {
-      const member = superclassAt(frame).implementation(name);
+      const member = frame.runtime.instanceMember(superclassAt(frame), name);
       return member ? frame.runtime.readMember(prepared as Value, member, row) : undefined;
     },
     write: (frame, prepared, value) => {
-      const member = superclassAt(frame).setterImplementation(name);
+      const member = frame.runtime.instanceMember(superclassAt(frame), name, true);
       if (member?.kind === 'field') (prepared as DartObject).fields[member.slot] = value;
       else if (member)
         (member.impl as Callable)(frame.runtime, prepared as Value, { positional: [value], named: undefined }, [], row);

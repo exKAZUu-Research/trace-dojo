@@ -217,26 +217,28 @@ export class Compiler extends MemberCompiler {
     const boundChecks = this.pendingBoundChecks;
     this.pendingBoundChecks = undefined;
     for (const check of boundChecks) check();
-    for (const work of this.orderedClassWork()) this.declareMembers(work);
+    const orderedClasses = this.orderedClassWork();
+    for (const work of orderedClasses) this.declareMembers(work);
     for (const { ext, declaration } of this.extensionWork) this.declareExtension(ext, declaration);
     for (const declaration of syntax.declarations) {
       if (declaration.kind === 'function') this.resolveTopLevelSignature(declaration);
     }
-    this.compileGlobalInitializers(syntax);
-    for (const work of this.classWork) this.checkClass(work);
-    if (!this.isLibraryCode) {
-      for (const { application, span } of this.pendingApplications) this.checkMemberOverrides(application, span);
-    }
+    this.compileGlobalInitializers(syntax, orderedClasses);
   }
 
-  private compileGlobalInitializers(syntax: Library): void {
+  private compileGlobalInitializers(syntax: Library, classes: readonly ClassWork[]): void {
     // Every top-level variable is declared before any initializer compiles, as initializers may use later ones.
     const initializers: (() => void)[] = [];
     for (const declaration of syntax.declarations) {
       if (declaration.kind === 'variables') initializers.push(...this.declareTopLevelVariables(declaration));
     }
+    this.checkDeferredFunctionTypeAnnotations();
     for (const infer of this.fieldInferences) infer();
     this.fieldInferences.length = 0;
+    for (const work of classes) this.checkClass(work);
+    if (!this.isLibraryCode) {
+      for (const { application, span } of this.pendingApplications) this.checkMemberOverrides(application, span);
+    }
     for (const compile of initializers) compile();
   }
 
@@ -333,7 +335,7 @@ export class Compiler extends MemberCompiler {
   }
 
   private resolveSupertype(cls: ClassInfo, syntax: TypeSyntax, role: string): InterfaceType {
-    const type = this.resolveType(syntax);
+    const type = this.resolveTypeWithoutAnnotations(syntax);
     if (type.kind !== 'interface' || type.nullable) {
       return this.error(syntax, `${typeToString(type)} は${role}にできません。`);
     }
@@ -454,8 +456,7 @@ export class Compiler extends MemberCompiler {
           this.declarePrimaryConstructorFields(cls, declaration);
         }
         for (const member of declaration.members) {
-          if (member.kind === 'field') this.declareField(cls, member);
-          else if (member.kind === 'method') this.declareMethod(cls, member);
+          if (member.kind !== 'constructor') this.declareAccessibleMember(cls, member, cls);
         }
         if (declaration.classKind === 'enum') this.declareEnumValues(cls, declaration);
         for (const member of declaration.members)
@@ -473,6 +474,21 @@ export class Compiler extends MemberCompiler {
       this.currentClass = undefined;
     }
     cls.resetCaches();
+  }
+
+  private declareAccessibleMember(
+    cls: ClassInfo,
+    member: FieldDeclaration | MethodDeclaration,
+    owner: ClassInfo | ExtensionInfo
+  ): void {
+    this.withTypeParams(
+      owner.typeParams,
+      () => {
+        if (member.kind === 'field') this.declareField(cls, member);
+        else this.declareMethod(cls, member, owner);
+      },
+      member.isStatic
+    );
   }
 
   /** Copies a mixin's members into the applications that use it, once the mixin's own members are declared. */
@@ -847,8 +863,8 @@ export class Compiler extends MemberCompiler {
         });
       }
       this.deferredBodies.push(() => {
-        this.inDeclarationScope(cls, undefined, () =>
-          this.withIsolatedTypes(() => this.compileGlobalInitializer(global, initializer, declaration.isConst, cls))
+        this.inGlobalTypeScope(global, () =>
+          this.compileGlobalInitializer(global, initializer, declaration.isConst, cls)
         );
       });
     }
@@ -1320,7 +1336,7 @@ export class Compiler extends MemberCompiler {
             `${cls.name}.${member.name} はメソッドなので、getter やフィールドの ${inherited.member.owner.name}.${member.name} を上書きできません。`
           );
         }
-        if (!this.isValidOverride(cls, member, own as FunctionType, inherited.type as FunctionType)) {
+        if (!this.isValidOverride(cls, member, own as FunctionType, inherited.member, inherited.type as FunctionType)) {
           this.error(
             { row },
             `${cls.name}.${member.name}（${typeToString(own)}）は、${inherited.member.owner.name}.${member.name}（${typeToString(inherited.type)}）の正しい上書きではありません。`
@@ -1360,7 +1376,14 @@ export class Compiler extends MemberCompiler {
     );
   }
 
-  private isValidOverride(cls: ClassInfo, member: MethodMember, own: FunctionType, inherited: FunctionType): boolean {
+  // code-gauge-allow functionCognitiveComplexity 17 -- The relaxed comparison and the forwarding contract use the same parameter checks.
+  private isValidOverride(
+    cls: ClassInfo,
+    member: MethodMember,
+    own: FunctionType,
+    obligation: MethodMember,
+    inherited: FunctionType
+  ): boolean {
     if (isSubtype(own, inherited)) return true;
     const { owner, name } = member;
     const declaration = (owner.mixinOf ?? owner).declaration?.members.find(
@@ -1395,8 +1418,14 @@ export class Compiler extends MemberCompiler {
       }),
     };
     if (!isSubtype(relaxed, inherited)) return false;
-    const existing = cls.inheritedCovariance.get(member);
-    if (added.size > 0) cls.inheritedCovariance.set(member, new Set([...(existing ?? []), ...added]));
+    if (added.size > 0) {
+      if (!isSubtype(inherited, relaxed)) return false;
+      const existing = cls.inheritedCovariance.get(member);
+      cls.inheritedCovariance.set(member, {
+        obligation: existing?.obligation ?? obligation,
+        positions: new Set([...(existing?.positions ?? []), ...added]),
+      });
+    }
     return true;
   }
 
@@ -1406,18 +1435,19 @@ export class Compiler extends MemberCompiler {
   private declareExtension(ext: ExtensionInfo, declaration: ExtensionDeclaration): void {
     ext.typeParams.push(...this.declareTypeParams(declaration.typeParameters));
     this.withTypeParams(ext.typeParams, () => {
-      ext.onType = this.resolveType(declaration.onType);
+      ext.onType = this.resolveTypeWithoutAnnotations(declaration.onType);
       const holder = new ClassInfo(ext.name ?? 'extension', 'class', this.library.name);
+      holder.typeParams.push(...ext.typeParams);
       for (const member of declaration.members) {
         if (member.kind === 'constructor') this.error(member, '拡張にはコンストラクタを書けません。');
         if (member.kind === 'field') {
           if (!member.isStatic) this.error(member, '拡張には、インスタンスのフィールドを宣言できません。');
-          this.declareField(holder, member);
+          this.declareAccessibleMember(holder, member, ext);
           for (const [name, value] of holder.staticMembers) ext.staticMembers.set(name, value);
           for (const [name, value] of holder.staticSetters) ext.staticSetters.set(name, value);
           continue;
         }
-        if (member.kind === 'method') this.declareMethod(holder, member, ext);
+        if (member.kind === 'method') this.declareAccessibleMember(holder, member, ext);
       }
     });
   }
@@ -1550,7 +1580,7 @@ export class Compiler extends MemberCompiler {
         }
         if (state === 'pending') {
           state = 'inferring';
-          inferred = this.inDeclarationScope(global.owner, undefined, () => this.withIsolatedTypes(infer));
+          inferred = this.inGlobalTypeScope(global, infer);
           state = 'done';
         }
         return inferred;
@@ -1560,6 +1590,12 @@ export class Compiler extends MemberCompiler {
         state = 'done';
       },
     });
+  }
+
+  private inGlobalTypeScope<T>(global: GlobalVariable, run: () => T): T {
+    return this.inDeclarationScope(global.owner, undefined, () =>
+      this.withIsolatedTypes(() => this.withTypeParams(global.owner?.typeParams ?? [], run, true))
+    );
   }
 
   // Runtime glue the expression compilers call

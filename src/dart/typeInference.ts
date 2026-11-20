@@ -63,26 +63,21 @@ export function inferExtensionReceiver(actual: DartType, formal: DartType, param
   const parameters = new Set(params);
   const lower = new Map<TypeParam, DartType>();
   const upper = new Map<TypeParam, DartType>();
-  new InferenceConstraints(parameters, lower, upper, upperBound, true).infer(actual, formal);
-  if (upper.size === 0) return instantiateToBounds(params, lower);
-  const initial = instantiateToBounds(params, new Map([...upper, ...lower]));
-  const env = new Map(params.map((param, index) => [param, initial[index]]));
-  for (const [param, limit] of upper) {
-    if (!lower.has(param)) lower.set(param, extensionUpperSolution(limit, boundOf(param), parameters, env));
+  const constraints = new InferenceConstraints(parameters, lower, upper, upperBound, true);
+  constraints.infer(actual, formal);
+  const solution = new Map<TypeParam, DartType>();
+  const env = new Map<TypeParam, DartType>(params.map((param) => [param, DYNAMIC]));
+  for (const param of params) {
+    const input = lower.get(param);
+    if (input && param.bound && mentionsTypeParams(param.bound, parameters)) constraints.infer(input, param.bound);
+    const limit = upper.get(param);
+    const choice = lower.get(param) ?? (limit && lowerBound(limit, substitute(boundOf(param), env)));
+    if (choice) {
+      solution.set(param, choice);
+      env.set(param, choice);
+    }
   }
-  return instantiateToBounds(params, lower);
-}
-
-function extensionUpperSolution(
-  limit: DartType,
-  declaredBound: DartType,
-  parameters: ReadonlySet<TypeParam>,
-  env: ReadonlyMap<TypeParam, DartType>
-): DartType {
-  if (declaredBound.kind === 'typeParam' && parameters.has(declaredBound.param)) return limit;
-  const meet = lowerBound(limit, substitute(declaredBound, env));
-  if (meet.kind === 'never' || meet.kind === 'null' || !mentionsTypeParams(declaredBound, parameters)) return meet;
-  return limit;
+  return instantiateToBounds(params, solution);
 }
 
 export function inferTearOffTypes(

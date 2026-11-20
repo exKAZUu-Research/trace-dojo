@@ -266,7 +266,7 @@ export class Runtime implements TracedRuntime<Frame> {
     callRow: number | undefined
   ): Value {
     if (name === 'call' && receiver instanceof DartClosure) return this.callValue(receiver, args, typeArgs, callRow);
-    const member = this.instanceMember(receiver, name);
+    const member = this.instanceMember(this.classOf(receiver), name);
     if (member?.kind === 'method') {
       if (args.isDynamic && !argumentsFit(member.type, args, typeArgs)) {
         return this.noSuchMethod(receiver, name, 'method', args, typeArgs, vmSignature(name, member));
@@ -298,7 +298,7 @@ export class Runtime implements TracedRuntime<Frame> {
   getProperty(receiver: Value, name: string, callRow: number | undefined): Value {
     // A function's `call` is the function itself.
     if (name === 'call' && receiver instanceof DartClosure) return receiver;
-    const member = this.instanceMember(receiver, name);
+    const member = this.instanceMember(this.classOf(receiver), name);
     if (member) return this.readMember(receiver, member, callRow);
     const field = receiver instanceof DartRecord ? receiver.field(name) : undefined;
     return field ? field[1] : this.noSuchMethod(receiver, name, 'getter', NO_ARGUMENTS);
@@ -338,7 +338,7 @@ export class Runtime implements TracedRuntime<Frame> {
   }
 
   setProperty(receiver: Value, name: string, value: Value, callRow: number | undefined, isDynamic = false): void {
-    const member = this.instanceMember(receiver, name, true);
+    const member = this.instanceMember(this.classOf(receiver), name, true);
     if (!member) {
       this.noSuchMethod(receiver, `${name}=`, 'setter', { positional: [value], named: undefined });
       return;
@@ -358,18 +358,15 @@ export class Runtime implements TracedRuntime<Frame> {
     );
   }
 
-  instanceMember(receiver: Value, name: string, setter = false): Member | undefined {
-    const cls = this.classOf(receiver);
+  instanceMember(cls: ClassInfo, name: string, setter = false): Member | undefined {
     const concrete = setter ? cls.setterImplementation(name) : cls.implementation(name);
     if (concrete?.kind === 'method') return this.checkedImplementation(cls, concrete);
     return concrete ?? this.forwardedMember(cls, name, setter);
   }
 
   private forwardedMember(cls: ClassInfo, name: string, setter: boolean): Member | undefined {
-    const declared = cls.interfaceMember(name, setter);
-    if (!declared || declared.isStatic) return undefined;
-    const handler = cls.implementation('noSuchMethod');
-    if (handler?.kind !== 'method' || handler.owner === coreTypes.object) return undefined;
+    const declared = cls.forwardingDeclaration(name, setter);
+    if (!declared) return undefined;
     const cache = setter ? this.setterForwarders : this.getterForwarders;
     const existing = cache.get(declared);
     if (existing) return existing;
@@ -385,27 +382,33 @@ export class Runtime implements TracedRuntime<Frame> {
   }
 
   private checkedImplementation(cls: ClassInfo, member: MethodMember): MethodMember {
-    const positions = cls.checkedPositions(member);
-    if (positions.size === 0) return member;
     const methods = this.checkedMethods.get(cls) ?? new Map<MethodMember, MethodMember>();
+    this.checkedMethods.set(cls, methods);
     const existing = methods.get(member);
     if (existing) return existing;
+    const contract = cls.covarianceFor(member);
+    if (!contract) {
+      methods.set(member, member);
+      return member;
+    }
+    const { obligation, positions } = contract;
     const impl = member.impl as Callable;
     const checked: MethodMember = {
-      ...member,
+      ...obligation,
+      isAbstract: false,
       covariantPositional: positions,
       impl: (runtime, receiver, args, types, row) => {
+        const bound = obligation.forwarding?.bind?.(runtime, receiver, args, types) ?? args;
         const signature = instantiateFunction(runtime.memberTypeFor(receiver, member), types);
         for (const index of positions) {
-          if (index >= args.positional.length) continue;
+          if (index >= bound.positional.length) continue;
           const name = member.forwarding?.positionalNames[index] ?? '';
-          runtime.checkForwardedType(args.positional[index], signature.positional[index], name);
+          runtime.checkForwardedType(bound.positional[index], signature.positional[index], name);
         }
-        return impl(runtime, receiver, args, types, row);
+        return impl(runtime, receiver, bound, types, row);
       },
     };
     methods.set(member, checked);
-    this.checkedMethods.set(cls, methods);
     return checked;
   }
 

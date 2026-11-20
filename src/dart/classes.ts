@@ -2,6 +2,7 @@ import type { ClassDeclaration, ClassKind, ClassModifiers } from './ast';
 import type { Compiled } from './compilerBase';
 import type { Runtime } from './runtime';
 import {
+  coreTypes,
   type DartType,
   DYNAMIC,
   type FunctionType,
@@ -50,6 +51,11 @@ export interface MethodMember extends MemberBase {
   /** For a library method a native implements, its positional parameters' names, which a dynamic call's checks name. */
   nativeParameterNames?: readonly string[];
   covariantPositional?: ReadonlySet<number>;
+}
+
+export interface CovariantContract {
+  obligation: MethodMember;
+  positions: ReadonlySet<number>;
 }
 
 export interface GetterMember extends MemberBase {
@@ -113,8 +119,7 @@ export type ConstructorImpl = (
 
 /** A class, mixin, enum, or extension type, from the program or from the libraries the interpreter defines. */
 export class ClassInfo {
-  readonly inheritedCovariance = new Map<MethodMember, Set<number>>();
-  private readonly covariantPositions = new Map<MethodMember, ReadonlySet<number>>();
+  readonly inheritedCovariance = new Map<MethodMember, CovariantContract>();
   readonly typeParams: TypeParam[] = [];
   superclass: InterfaceType | undefined;
   interfaces: InterfaceType[] = [];
@@ -255,22 +260,33 @@ export class ClassInfo {
     return found;
   }
 
+  forwardingDeclaration(name: string, setter: boolean): Member | undefined {
+    for (const cls of this.superclassChain()) {
+      if (cls.isAbstract) continue;
+      const handler = cls.implementation('noSuchMethod');
+      if (handler?.kind !== 'method' || handler.owner === coreTypes.object) continue;
+      const member = cls.interfaceMember(name, setter);
+      if (member && !member.isStatic) return member;
+    }
+    return undefined;
+  }
+
   /** This class and its superclasses, nearest first. */
   *superclassChain(): Iterable<ClassInfo> {
     yield this;
     for (let cls = this.superclass?.cls; cls; cls = cls.superclass?.cls) yield cls;
   }
 
-  checkedPositions(method: MethodMember): ReadonlySet<number> {
-    const cached = this.covariantPositions.get(method);
-    if (cached) return cached;
+  covarianceFor(method: MethodMember): CovariantContract | undefined {
+    let obligation: MethodMember | undefined;
     const positions = new Set<number>();
     for (const cls of this.superclassChain()) {
-      const checks = cls.inheritedCovariance.get(method);
-      if (checks) for (const index of checks) positions.add(index);
+      const contract = cls.inheritedCovariance.get(method);
+      if (!contract) continue;
+      obligation = contract.obligation;
+      for (const index of contract.positions) positions.add(index);
     }
-    this.covariantPositions.set(method, positions);
-    return positions;
+    return obligation && { obligation, positions };
   }
 
   /** The member a class's interface has, declared in it or inherited from a supertype, before substitution. */
