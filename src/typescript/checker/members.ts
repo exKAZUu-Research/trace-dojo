@@ -17,7 +17,6 @@ import { tupleElementBeyond } from './tupleIndexes';
 import {
   anyType,
   errorType,
-  filterType,
   isAnyLike,
   isIntrinsic,
   isPropertyKeyLiteral,
@@ -197,17 +196,14 @@ export class MemberChecker {
       return errorType;
     }
     if (isAnyLike(type)) return type;
-    const bound = type.kind === 'typeParameter' ? nullishConstraint(this.c, type) : type;
+    const bound = nullishConstraint(this.c, type);
     const members = bound.kind === 'union' ? bound.types : [bound];
     const hasNull = members.some((member) => isIntrinsic(member, 'null'));
     const hasUndefined = members.some((member) => isIntrinsic(member, 'undefined'));
     // TypeScript reports a member of `void` as missing on the type, which the member's own check does.
     if (!hasNull && !hasUndefined) return type;
     // `void` stays, as in TypeScript, whose operators then reject it.
-    const rest =
-      type.kind === 'typeParameter'
-        ? nonNullableType(this.c, type)
-        : filterType(type, (member) => !isIntrinsic(member, 'null') && !isIntrinsic(member, 'undefined'));
+    const rest = nonNullableType(this.c, type, true);
     const literal = skipParentheses(node).type;
     if (isIntrinsic(rest, 'never') && (literal === 'null' || literal === 'undefined')) {
       this.c.error(node, `値 '${hasNull ? 'null' : 'undefined'}' はここでは使えません。`);

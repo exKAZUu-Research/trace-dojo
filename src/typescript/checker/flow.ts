@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 432 -- Keeps flow state, joins, and reference narrowing together.
+// code-gauge-allow-file fileNcss 435 -- Keeps flow state, joins, and reference narrowing together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -358,7 +358,13 @@ export class Flow {
     const matches = this.typeofMatches(member, name);
     if (matches === true) return member;
     if (matches === 'maybe') return this.narrowMaybe(member, name);
-    if (member.kind !== 'object' && member.kind !== 'intersection') return neverType;
+    if (member.kind === 'typeParameter') {
+      const bound = nullishConstraint(this.c, member);
+      if (bound.kind === 'union')
+        return intersectionOf([member, this.narrowByTypeof(bound, name, true)], this.c.budget);
+      return neverType;
+    }
+    if (member.kind !== 'object' && member.kind !== 'intersection' && !isIntrinsic(member, 'object')) return neverType;
     const implied = typeofTypes[name]?.() ?? (name === 'function' ? this.c.globalType('Function') : undefined);
     return implied && this.c.relations.isAssignable(implied, member) ? implied : neverType;
   }
@@ -411,7 +417,7 @@ export class Flow {
             return name === 'object';
           }
           case 'object': {
-            return name === 'function' ? 'maybe' : name === 'object';
+            return name === 'object';
           }
           case 'never': {
             return false;
@@ -468,7 +474,6 @@ export class Flow {
       this.c.signaturesOf(type, 'call').length > 0 ||
       this.c.signaturesOf(type, 'construct').length > 0 ||
       this.c.relations.isAssignable(type, this.c.globalType('Function'));
-    if (name === 'function' && !isFunction && this.c.relations.isEmptyObjectType(type)) return 'maybe';
     if (name === 'function') return isFunction;
     return name === 'object' && !isFunction;
   }

@@ -1,0 +1,26 @@
+function concrete(value: object) {
+  if (typeof value === "function") return value();
+}
+function boxed(value: Object) {
+  if (typeof value === "function") return value.apply(undefined, []);
+}
+function unconstrained<T>(value: T) {
+  if (typeof value === "function") return value();
+}
+function empty<T extends {}>(value: T) {
+  if (typeof value === "function") return value();
+}
+function callable<T extends () => number>(value: T) {
+  if (typeof value === "function") return value();
+}
+function union<T extends object | null>(value: T) {
+  if (typeof value === "function") return value();
+}
+function mixed<T extends { count: number } | (() => number)>(value: T) {
+  if (typeof value === "function") return value();
+}
+function nonCallable<T extends object>(value: T) {
+  if (typeof value !== "function") return value.toString();
+}
+console.log(concrete(() => 1), boxed(() => 2), unconstrained(() => 3), empty(() => 4));
+console.log(callable(() => 5), union(() => 6), union(null), mixed(() => 7), nonCallable({}));

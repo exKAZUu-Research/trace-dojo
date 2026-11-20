@@ -20,15 +20,18 @@ import {
  * constraint may be either is intersected with the rest of its constraint, or with `{}` when nothing bounds it, as
  * TypeScript's `T & {}` relates.
  */
-export function nonNullableType(c: Checker, type: Type): Type {
+export function nonNullableType(c: Checker, type: Type, preserveVoid = false): Type {
+  const isNullable = (member: Type): boolean =>
+    isNullishLike(member, nullType) || isNullishLike(member, undefinedType, !preserveVoid);
   return mapType(type, (member): Type => {
     if (isIntrinsic(member, 'unknown')) return narrowedUnknownObjectType;
-    if (isNullishLike(member, nullType) || isNullishLike(member, undefinedType)) return neverType;
-    if (!isGenericMember(member)) return c.relations.removeNullish(member);
+    if (isNullable(member)) return neverType;
+    if (!isGenericMember(member) && member.kind !== 'intersection') return member;
     const bound = nullishConstraint(c, member);
-    if (isAnyLike(bound) || (!c.relations.isNullable(bound) && !isIntrinsic(bound, 'unknown'))) return member;
-    const rest = c.relations.removeNullish(bound);
-    return intersectionOf([member, isIntrinsic(rest, 'unknown') ? emptyObjectType : rest], c.budget);
+    if (isAnyLike(bound)) return member;
+    const rest = filterType(bound, (part) => !isNullable(part));
+    if (isIntrinsic(rest, 'unknown')) return intersectionOf([member, emptyObjectType], c.budget);
+    return rest === bound ? member : intersectionOf([member, rest], c.budget);
   });
 }
 
@@ -57,7 +60,9 @@ function boundWithoutUnit(bound: Type, unit: Type, other: Type, hasOther: boolea
 }
 
 /** What a type may be at most, which decides whether it may be nullish or falsy; `unknown` where nothing bounds it. */
-export function nullishConstraint(c: Checker, type: Type, seen = new Set<number>()): Type {
+export function nullishConstraint(c: Checker, type: Type, seen?: Set<number>): Type {
+  if (!isGenericMember(type) && type.kind !== 'union' && type.kind !== 'intersection') return type;
+  seen ??= new Set();
   c.budget.spend();
   if (seen.has(type.id)) return unknownType;
   seen.add(type.id);
@@ -89,11 +94,13 @@ function isGenericMember(type: Type): boolean {
 }
 
 /** Whether a type is `unit`, `null` or `undefined`, or an intersection with it, where `void` counts as `undefined`. */
-function isNullishLike(type: Type, unit: Type): boolean {
-  return type.kind === 'intersection' ? type.types.some((part) => isNullish(part, unit)) : isNullish(type, unit);
+function isNullishLike(type: Type, unit: Type, includesVoid = true): boolean {
+  return type.kind === 'intersection'
+    ? type.types.some((part) => isNullish(part, unit, includesVoid))
+    : isNullish(type, unit, includesVoid);
 }
 
-function isNullish(type: Type, unit: Type): boolean {
+function isNullish(type: Type, unit: Type, includesVoid = true): boolean {
   if (unit.kind !== 'intrinsic') return false;
-  return isIntrinsic(type, unit.name) || (unit.name === 'undefined' && isIntrinsic(type, 'void'));
+  return isIntrinsic(type, unit.name) || (includesVoid && unit.name === 'undefined' && isIntrinsic(type, 'void'));
 }
