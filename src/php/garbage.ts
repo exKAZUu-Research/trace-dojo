@@ -1061,7 +1061,6 @@ class CollectionGraph {
   }
 }
 
-/** Reference counting leaves objects that are on a cycle or reachable from one. */
 /**
  * The garbage objects reference counting frees: those no cycle keeps. The objects on cycles go into `cycleMembers`, the
  * roots that keep the rest alive until a collection frees them.

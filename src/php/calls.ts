@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 862 -- Keeps call binding, completion and frame cleanup together.
+// code-gauge-allow-file fileNcss 864 -- Keeps call binding, completion and frame cleanup together.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl, Stmt } from './ast';
@@ -288,6 +288,7 @@ export function deprecateNative(fn: NativeFunction, deprecation: string): void {
   nativeDeprecations.set(fn, deprecation);
 }
 
+// code-gauge-allow functionNcss 32 -- Reports the deprecation, binds, calls and finishes a native call in PHP's order in one frame.
 export function invokeNative(
   target: CallTarget,
   fn: NativeFunction,
@@ -912,6 +913,8 @@ function releaseFrame(
     return;
   }
   holders.push(returned);
+  // PHP's return of a variable moves its value out and buffers it as a possible root before freeing the other locals.
+  if ([...frame.vars.values()].some((ref) => ref.v === returned)) runtime.pendingGcRoots.add(returned);
   try {
     releaseFrameValues(runtime, frame, fromNative, pending);
   } catch (error) {
