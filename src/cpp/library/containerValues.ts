@@ -328,19 +328,6 @@ export class NodePositions {
     }
   }
 
-  moveBefore(first: number, last: number, destination: number): void {
-    const moved: NodePosition[] = [];
-    const count = last - first;
-    for (let index = destination; index < last; index++) {
-      const node = this.positions.get(index);
-      if (!node) continue;
-      this.positions.delete(index);
-      node.position = index < first ? index + count : destination + index - first;
-      moved.push(node);
-    }
-    for (const node of moved) this.install(node);
-  }
-
   invalidateFrom(index: number, until = Infinity): void {
     this.invalidateEnd();
     for (const [position, node] of this.positions) {
@@ -569,13 +556,6 @@ export class SequenceValue extends Store {
     if (!this.nodes || !destination.nodes) throw new Error('Node transfer requires two node stores');
     this.nodes.transferTo(destination.nodes, from, count);
     for (const value of this.splice(from, count)) destination.items.push(value);
-  }
-
-  moveNodesBefore(first: number, last: number, destination: number): void {
-    const moved = this.cells.slice(first, last);
-    this.cells.copyWithin(destination + moved.length, destination, first);
-    for (const [offset, value] of moved.entries()) this.cells[destination + offset] = value;
-    this.nodes?.moveBefore(first, last, destination);
   }
 
   eraseNodes(
