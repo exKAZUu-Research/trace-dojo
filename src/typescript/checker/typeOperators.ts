@@ -1,15 +1,21 @@
-// code-gauge-allow-file fileNcss 477 -- Resolves related type operators sharing generic parameters and type construction.
+// code-gauge-allow-file fileNcss 489 -- Resolves related type operators sharing generic parameters and type construction.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker, Mapper } from './checker';
 import { conditionalBranch, isGenericObjectOrIndexType, mappedOptionality } from './genericTypes';
 import { IndexedAccessKeys } from './indexedAccessKeys';
-import { addIndexInfo, applicableIndex, isPatternKey } from './indexInfos';
+import { addIndexInfo, applicableIndex, isNumericStringKey, isPatternKey } from './indexInfos';
 import { applyModifier, mappedArrayOrTuple, type WithMappedSource } from './mappedArrays';
 import { printedPropertyName } from './print';
 import { named, templateFragmentText } from './syntax';
 import { literalCombinations, mapText, placeholderTemplate, splicedSpans, type StringMapping } from './templateSpans';
-import { tupleElementBeyond } from './tupleIndexes';
+import {
+  constrainedTuple,
+  hasVariadicRest,
+  numericTupleIndex,
+  tupleElementBeyond,
+  variadicTupleIndex,
+} from './tupleIndexes';
 import {
   anonymousObject,
   anyType,
@@ -37,6 +43,7 @@ import {
   type Structure,
   symbolType,
   type Type,
+  typeMembers,
   type TypeParameter,
   undefinedType,
   unionOf,
@@ -58,6 +65,7 @@ const stringMappingParameter: TypeParameter = {
 export class TypeOperators {
   private readonly indexedAccessKeys: IndexedAccessKeys;
   private readonly deferredAccesses = new WeakMap<Type, WeakMap<Type, IndexedAccessType>>();
+  private readonly constrainedTuples = new WeakMap<ObjectType, Type>();
   private readonly mappedParameters = new Map<number, TypeParameter>();
   /** The keys and name types of a mapped type that a name type maps to each name, by the structure being built. */
   private readonly mappedKeys = new WeakMap<Structure, Map<string, { keys: Type[]; nameTypes: Type[] }>>();
@@ -338,11 +346,7 @@ export class TypeOperators {
   keyofType(type: Type): Type {
     // As TypeScript's `getIndexTypeForMappedType`, `keyof { [P in K]: X }` is `K`.
     if (type.kind === 'object' && type.mapped && !type.mapped.nameType) return type.mapped.constraint;
-    if (
-      isGenericObjectOrIndexType(type) ||
-      (type.kind === 'object' &&
-        type.tuple?.elements.some((element) => element.rest && isGenericObjectOrIndexType(element.type)))
-    )
+    if (isGenericObjectOrIndexType(type) || (type.kind === 'object' && hasVariadicRest(type)))
       return { kind: 'keyof', id: newTypeId(), type };
     if (isAnyLike(type) || isIntrinsic(type, 'never')) return unionOf([stringType, numberType, symbolType]);
     if (type.kind === 'union')
@@ -417,6 +421,7 @@ export class TypeOperators {
   }
 
   /** `object[index]`, reporting a missing property at `node` when given. */
+  // code-gauge-allow functionCognitiveComplexity 16 -- Keeps validation and deferral in the order of TypeScript indexed access.
   indexedAccess(object: Type, index: Type, node?: TreeNode): Type {
     // A mapped type indexed by its own keys, `{ [P in K]: X }[K]`, is its template for those keys.
     if (object.kind === 'object' && object.objectKind === 'mapped' && object.mapped && !object.mapped.nameType) {
@@ -426,7 +431,12 @@ export class TypeOperators {
         return errorType;
       }
     }
-    if (isGenericObjectOrIndexType(object) || isGenericObjectOrIndexType(index) || genericTupleIndex(object, index))
+    const variadic = variadicTupleIndex(object, index);
+    if (variadic && node && !this.isVariadicTupleKey(object, index)) {
+      this.c.error(node, `型 '${this.c.print(index)}' は型 '${this.c.print(object)}' のインデックスに使えません。`);
+      return errorType;
+    }
+    if (isGenericObjectOrIndexType(object) || isGenericObjectOrIndexType(index) || variadic)
       return this.c.relations.stringIndexReadByGenericKey(object, index) ?? this.deferredAccess(object, index);
     if (index.kind === 'union') return unionOf(index.types.map((member) => this.indexedAccess(object, member, node)));
     if (isAnyLike(object)) return anyType;
@@ -438,6 +448,27 @@ export class TypeOperators {
     if (node)
       this.c.error(node, `型 '${this.c.print(index)}' は型 '${this.c.print(object)}' のインデックスに使えません。`);
     return errorType;
+  }
+
+  private isVariadicTupleKey(object: ObjectType, index: Type): boolean {
+    const keys = this.keyofType(object);
+    return typeMembers(index).every((key) => isNumericStringKey(key) || this.c.relations.isAssignable(key, keys));
+  }
+
+  variadicIndexConstraint(access: IndexedAccessType, indexType: Type): Type | undefined {
+    const { objectType } = access;
+    if (objectType.kind !== 'object' || !hasVariadicRest(objectType)) return undefined;
+    if (indexType.kind === 'union') return unionOf(indexType.types.map((key) => this.indexedAccess(objectType, key)));
+    const numeric = numericTupleIndex(this.c, objectType, indexType);
+    if (numeric) return numeric;
+    let bound = this.constrainedTuples.get(objectType);
+    if (!bound) {
+      this.constrainedTuples.set(objectType, objectType);
+      bound = constrainedTuple(this.c, objectType);
+      this.constrainedTuples.set(objectType, bound);
+    }
+    if (bound === objectType && indexType === access.indexType) return undefined;
+    return this.indexedAccess(bound, indexType);
   }
 
   private deferredAccess(object: Type, index: Type): IndexedAccessType {
@@ -762,17 +793,4 @@ function indexKeys(structure: Structure): Type[] {
   if (structure.symbolIndex) keys.push(symbolType);
   keys.push(...(structure.patternIndexes ?? []).map((info) => info.keyType));
   return keys;
-}
-
-function genericTupleIndex(object: Type, index: Type): boolean {
-  if (object.kind !== 'object' || !object.tuple) return false;
-  const elements = object.tuple.elements;
-  if (!elements.some((element) => element.rest && isGenericObjectOrIndexType(element.type))) return false;
-  const fixed = elements.filter((element) => !element.rest).length;
-  const keys = index.kind === 'union' ? index.types : [index];
-  return keys.some((key) => {
-    if (!isPropertyKeyLiteral(key) || typeof key.value === 'symbol') return true;
-    const position = Number(key.value);
-    return String(position) !== String(key.value) || position < 0 || position >= fixed;
-  });
 }

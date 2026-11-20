@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 758 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
+// code-gauge-allow-file fileNcss 759 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
 import { minimumArguments } from './callArity';
 import type { Checker } from './checker';
 import { isUnit } from './flow';
@@ -245,7 +245,8 @@ export class Relations {
     if (isGenericObjectOrIndexType(object) || isGenericObjectOrIndexType(keys)) return false;
     const numberIndexOnly = object !== t.objectType;
     return (keys.kind === 'union' ? keys.types : [keys]).every((key) => {
-      const writeType = this.writeTypeOf(object, key, numberIndexOnly);
+      const tuple = this.c.typeOperators.variadicIndexConstraint(t, key);
+      const writeType = tuple && tuple !== t ? tuple : this.writeTypeOf(object, key, numberIndexOnly);
       return writeType !== undefined && this.isRelated(s, writeType, relation);
     });
   }
