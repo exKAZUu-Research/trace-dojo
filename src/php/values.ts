@@ -435,7 +435,8 @@ export class PhpArray {
     allocationHandler(Math.max(0, replacement.length - count), this.size);
     for (const slot of removed) if (slot instanceof Ref) slot.rc--;
     for (let index = 0; index < replacement.length; index++) this.trackSlot(BigInt(start + index), replacement[index]);
-    if (replacement.some((slot) => slot !== null && typeof slot === 'object')) this.composite = true;
+    this.composite ||= replacement.some((slot) => slot !== null && typeof slot === 'object');
+    this.capacityHint = this.size;
     this.order?.replace(this.map.keys(), true, { start, end: start + count, inserted: replacement.length });
     this.orderPacked = true;
     this.nextFree = BigInt(this.size);
