@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 685 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
+// code-gauge-allow-file fileNcss 689 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
@@ -8,6 +8,7 @@ import type { Checker, Mapper } from './checker';
 import { contextualSignatureOf } from './contextualSignatures';
 import type { State } from './flow';
 import { InferencePriority, type InferenceRun, newInferenceRun } from './inference';
+import { nonNullableType, nullishConstraint } from './nullishConstraints';
 import { prioritizeLiteralOverloads } from './overloadCandidates';
 import { isContextSensitiveFunction, parameterNodes } from './signatures';
 import { argumentParameters, isThisParameter, named, skipParentheses, stringValue, withoutAssertions } from './syntax';
@@ -25,6 +26,7 @@ import {
   type Signature,
   type TupleElement,
   type Type,
+  typeMembers,
   type TypeParameter,
   undefinedType,
   unionOf,
@@ -99,12 +101,13 @@ export class Calls {
       expression.type === 'member_expression' || expression.type === 'subscript_expression'
         ? this.c.members.checkAccess(expression)
         : undefined;
-    const chained = callee.id === expression.id ? access?.continued : undefined;
-    const checkedCallee = chained ?? access?.type ?? this.checkCallCallee(callee, args);
+    const checked = access?.type ?? this.checkCallCallee(callee, args);
+    const chained = callee.id === expression.id ? this.c.members.continuedObjectType(callee, checked) : undefined;
+    const checkedCallee = chained ?? checked;
     if (optional) this.c.members.continueChain(callee);
     if (checkedCallee === errorType) return this.checkArgumentsOnly(args, errorType);
-    const shortCircuits = chained !== undefined || (optional && this.c.relations.isNullable(checkedCallee));
     const calleeType = this.nonNullableCallee(callee, checkedCallee, optional);
+    const shortCircuits = chained !== undefined || (optional && calleeType !== checkedCallee);
     if (isAnyLike(calleeType)) return this.untypedCall(node, args, typeArguments);
     if (isIntrinsic(calleeType, 'unknown')) {
       this.c.error(
@@ -194,19 +197,20 @@ export class Calls {
 
   /** The callee's type without `null` and `undefined`, reporting them unless the call is optional. */
   private nonNullableCallee(callee: TreeNode, type: Type, optional: boolean): Type {
-    if (optional) return this.c.relations.removeNullish(type);
+    if (optional) return nonNullableType(this.c, type);
+    if (isAnyLike(type)) return type;
+    const bound = nullishConstraint(this.c, type);
     // A `void` callee is reported as not callable, as TypeScript does, rather than as possibly undefined.
-    const members = type.kind === 'union' ? type.types : [type];
-    if (isAnyLike(type) || !members.some((member) => isIntrinsic(member, 'null') || isIntrinsic(member, 'undefined')))
+    if (!typeMembers(bound).some((member) => isIntrinsic(member, 'null') || isIntrinsic(member, 'undefined')))
       return type;
-    const withoutUndefined = this.c.relations.removeUndefined(type);
+    const withoutUndefined = this.c.relations.removeUndefined(bound);
     const what = isIntrinsic(withoutUndefined, 'never')
       ? 'undefined'
       : this.c.relations.isNullable(withoutUndefined)
         ? 'null'
         : 'undefined';
     this.c.error(callee, `${what} の可能性があるオブジェクトは呼び出せません。`);
-    return this.c.relations.removeNullish(type);
+    return nonNullableType(this.c, type, true);
   }
 
   /** Reports a call that neither a signature nor an untyped function type permits. */

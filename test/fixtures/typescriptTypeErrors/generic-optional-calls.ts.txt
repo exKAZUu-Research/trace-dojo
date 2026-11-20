@@ -1,0 +1,18 @@
+function mandatory<T extends (() => number) | undefined>(fn: T): number {
+  return fn();
+}
+function parenthesized<T extends (() => () => number) | undefined>(fn: T): number | undefined {
+  return (fn?.())();
+}
+function absent<T extends undefined>(fn: T): undefined {
+  return fn?.();
+}
+function wrongReturn<T extends (() => number) | undefined>(fn: T): number {
+  return fn?.();
+}
+function wrongArgs<T extends ((x: string) => number) | null>(fn: T): number | undefined {
+  return fn?.(123);
+}
+function nestedMissing<T extends (() => (() => number) | undefined) | null>(fn: T) {
+  return fn?.()();
+}

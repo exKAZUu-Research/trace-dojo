@@ -45,7 +45,6 @@ interface CheckedAccess {
   type: Type;
   receiver?: Type;
   index?: Type;
-  continued?: Type;
 }
 
 interface PropertyAccessOptions {
@@ -68,6 +67,7 @@ export class MemberChecker {
 
   /** Checks a link of a chain, which joins where the chain's `?.` links stop it when it is the chain's end. */
   chainLink<T>(node: TreeNode, check: () => T): T {
+    this.continuedTypes.delete(node.id);
     if (this.chainFrames.at(-1)?.end.id === node.id) return check();
     const start = this.c.flow.current;
     const { result, stops } = this.stoppingChain(node, check);
@@ -119,8 +119,8 @@ export class MemberChecker {
 
   /** The type of an object that continues an optional chain, which is never what stopping the chain gave. */
   continuedObjectType(objectNode: TreeNode, checked: Type): Type | undefined {
-    if (objectNode.type === 'parenthesized_expression' || !this.isInOptionalChain(objectNode)) return undefined;
-    return this.continuedTypes.get(objectNode.id) ?? checked;
+    const continued = this.continuedTypes.get(objectNode.id);
+    return continued && unionOf([continued, undefinedType]) === checked ? continued : undefined;
   }
 
   checkAccess(node: TreeNode): CheckedAccess {
@@ -145,9 +145,7 @@ export class MemberChecker {
     shortCircuits: boolean,
     index?: Type
   ): CheckedAccess {
-    return shortCircuits
-      ? { type: this.chainResult(node, type), receiver, index, continued: type }
-      : { type, receiver, index };
+    return { type: shortCircuits ? this.chainResult(node, type) : type, receiver, index };
   }
 
   private readReceiver(node: TreeNode, object: TreeNode): { type: Type; shortCircuits: boolean } {
@@ -170,19 +168,6 @@ export class MemberChecker {
     if (entry && !this.c.expressions.isAssignmentTarget(node))
       return flowReferenceType(this.c, node, entry.type, declared);
     return typeof declared === 'function' ? declared() : declared;
-  }
-
-  private isInOptionalChain(node: TreeNode): boolean {
-    let current = skipParentheses(node);
-    while (
-      current.type === 'member_expression' ||
-      current.type === 'call_expression' ||
-      current.type === 'subscript_expression'
-    ) {
-      if (current.childForFieldName('optional_chain')) return true;
-      current = current.childForFieldName(current.type === 'call_expression' ? 'function' : 'object') as TreeNode;
-    }
-    return false;
   }
 
   /** Reports an object that may be `null`, `undefined`, or `unknown` where a member is used, returning the rest. */
