@@ -16,7 +16,7 @@ import {
 } from '../values';
 import { checkTableCapacity } from './capacityNatives';
 import { defaultValue } from './core';
-import { arrayIter, mapIter, setIter } from './iterators';
+import { arrayIter, mapIter, ownedIter, setIter } from './iterators';
 import { sizeOf } from './layout';
 import { btreeSetOp, hashSetMembers, type SetOp } from './setOps';
 import { call, define, deref, libraryPanic, type Native, type NativeContext, none, option, some } from './support';
@@ -189,12 +189,12 @@ function mapIterNatives(): Record<string, Native> {
     keys: ([self]) => mapProjection(map(self), (entry) => entry[0]),
     values: ([self]) => mapProjection(map(self), (entry) => entry[1]),
     values_mut: ([self]) => mapProjection(map(self), (entry) => new ElementPlace(entry, 1)),
-    into_keys: ([self]) => mapProjection(map(self), (entry) => entry[0]),
-    into_values: ([self]) => mapProjection(map(self), (entry) => entry[1]),
+    into_keys: ([self]) => mapProjection(map(self), (entry) => entry[0], true),
+    into_values: ([self]) => mapProjection(map(self), (entry) => entry[1], true),
     drain: ([self]) => {
       const entries = map(self).entries.snapshot();
       map(self).entries.clear();
-      return arrayIter(entries);
+      return ownedIter(entries);
     },
     retain: ([self, f], ctx) => {
       const m = map(self);
@@ -205,8 +205,9 @@ function mapIterNatives(): Record<string, Native> {
   };
 }
 
-function mapProjection(map: MapValue, project: (entry: [Value, Value]) => Value): IterValue {
+function mapProjection(map: MapValue, project: (entry: [Value, Value]) => Value, owned = false): IterValue {
   const entries = map.entries.snapshot();
+  if (owned) return ownedIter(entries, (entry) => project(entry as [Value, Value]));
   return arrayIter(entries, 0, entries.length, (index) => project(entries[index]));
 }
 
@@ -321,9 +322,9 @@ function setNatives(sorted: boolean): Record<string, (args: Value[], ctx: Native
     drain: ([self]) => {
       const values = set(self).entries.snapshot();
       set(self).entries.clear();
-      return arrayIter(values);
+      return ownedIter(values);
     },
-    into_iter: ([self]) => setIter(set(self)),
+    into_iter: ([self]) => setIter(set(self), true),
     first: ([self], ctx) => {
       const first = set(self).entries.getEdge(true);
       return option(ctx, first, first !== undefined);

@@ -1838,6 +1838,27 @@ fn main() {
   expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: 'true false\n' });
 });
 
+test('releases yielded Rust collection values while their iterator lives', () => {
+  const program = `use std::collections::BTreeMap;
+fn main() {
+    let observer = Turtle::new(1, 0);
+    let map = BTreeMap::from([(0, Turtle::new(1, 1)), (1, Turtle::new(2, 2))]);
+    for (_, turtle) in map {
+        drop(turtle);
+        println!("{}", observer.canMoveForward());
+    }
+    let values = BTreeMap::from([(0, Turtle::new(1, 1))]);
+    let mut iter = values.into_values();
+    drop(iter.next().unwrap());
+    println!("{}", observer.canMoveForward());
+    for turtle in Some(Turtle::new(1, 1)) {
+        drop(turtle);
+        println!("{}", observer.canMoveForward());
+    }
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'true\ntrue\ntrue\ntrue\n' });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

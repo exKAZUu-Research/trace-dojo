@@ -13,6 +13,7 @@ import { normalize } from '../infer';
 import { type DebugValue, described, fieldsPart, iteratorDebug, numberPart, optionPart } from '../iterDebug';
 import { intoIterShape } from '../iterTypes';
 import {
+  allocateCollectionSnapshot,
   castValue,
   cloneValue,
   compareValues,
@@ -22,6 +23,7 @@ import {
   valuesEqual,
   wrap,
 } from '../ops';
+import { MOVED } from '../runtime';
 import { iteratorCapability } from '../traits';
 import { shallow, type Type } from '../types';
 import {
@@ -69,16 +71,25 @@ export function arrayIter(
  * An iterator that owns its elements (`into_iter`, `drain`, `for x in v`): it holds only those it has not yielded,
  * so each one it hands out belongs to its receiver alone and disappears when that receiver drops it.
  */
-export function ownedIter(items: Value[]): IterValue {
-  const rest = [...items];
+export function ownedIter(items: Value[], project: (item: Value) => Value = (item) => item): IterValue {
+  let front = 0;
+  let back = items.length;
+  const take = (index: number): Value => {
+    const value = items[index];
+    items[index] = MOVED;
+    return project(value);
+  };
   const iter = new IterValue(
-    () => (rest.length > 0 ? (rest.shift() as Value) : DONE),
-    () => (rest.length > 0 ? (rest.pop() as Value) : DONE),
-    () => rest.length,
-    [rest]
+    () => (front < back ? take(front++) : DONE),
+    () => (front < back ? take(--back) : DONE),
+    () => back - front,
+    [items]
   );
-  iter.rest = () => [...rest];
-  iter.fork = (cloneItem) => ownedIter(rest.map(cloneItem));
+  iter.rest = () => Array.from({ length: back - front }, (_, offset) => project(items[front + offset]));
+  iter.fork = (cloneItem) => {
+    allocateCollectionSnapshot(back - front);
+    return ownedIter(Array.from({ length: back - front }, (_, offset) => cloneItem(project(items[front + offset]))));
+  };
   return iter;
 }
 
@@ -126,7 +137,7 @@ function collectionIter(type: Type & { kind: 'adt' }, value: Value, mode: 'value
     }
     case 'HashSet':
     case 'BTreeSet': {
-      return setIter(value as SetValue);
+      return setIter(value as SetValue, mode === 'value');
     }
     case 'Range':
     case 'RangeInclusive':
@@ -138,7 +149,8 @@ function collectionIter(type: Type & { kind: 'adt' }, value: Value, mode: 'value
       // `Some` and `Ok` hold the one element.
       const option = value as EnumValue;
       if (option.variant !== (type.def.builtin === 'Option' ? 1 : 0)) return arrayIter([]);
-      return arrayIter([mode === 'mut' ? new ElementPlace(option.fields, 0) : option.fields[0]]);
+      const items = [mode === 'mut' ? new ElementPlace(option.fields, 0) : option.fields[0]];
+      return mode === 'value' ? ownedIter(items) : arrayIter(items);
     }
     case 'Iter': {
       return mode === 'value' ? undefined : value;
@@ -152,6 +164,7 @@ function collectionIter(type: Type & { kind: 'adt' }, value: Value, mode: 'value
 /** A map's entries as tuples, in key order for a `BTreeMap`; `mut` yields places for the values. */
 export function mapIter(map: MapValue, mode: 'value' | 'ref' | 'mut'): IterValue {
   const entries = map.entries.snapshot();
+  if (mode === 'value') return ownedIter(entries);
   const iter = arrayIter(entries, 0, entries.length, (i) => {
     const entry = entries[i];
     return mode === 'mut' ? [entry[0], new ElementPlace(entry, 1)] : [entry[0], entry[1]];
@@ -160,8 +173,9 @@ export function mapIter(map: MapValue, mode: 'value' | 'ref' | 'mut'): IterValue
   return iter;
 }
 
-export function setIter(set: SetValue): IterValue {
+export function setIter(set: SetValue, owned = false): IterValue {
   const values = set.entries.snapshot();
+  if (owned) return ownedIter(values);
   const iter = arrayIter(values);
   iter.roots.push(set);
   return iter;

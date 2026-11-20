@@ -4,7 +4,7 @@ import { cloneValue, copyValue } from '../ops';
 import type { Type } from '../types';
 import { ElementPlace, type EnumValue, type IterValue, type Value } from '../values';
 import { defaultValue } from './core';
-import { arrayIter } from './iterators';
+import { arrayIter, ownedIter } from './iterators';
 import { call, define, deref, err, type NativeContext, none, ok, panic, placeOf, some } from './support';
 
 function opt(value: Value): EnumValue {
@@ -192,7 +192,8 @@ define(natives);
  */
 function outcomeIter(self: Value, present: boolean, name: string, isOption: boolean, mutable = false): IterValue {
   const fields = opt(self).fields;
-  const iter = arrayIter(present ? [mutable ? new ElementPlace(fields, 0) : fields[0]] : []);
+  const items = present ? [mutable ? new ElementPlace(fields, 0) : fields[0]] : [];
+  const iter = name === 'IntoIter' ? ownedIter(items) : arrayIter(items);
   return described(iter, (show, item) => {
     const [value] = iter.rest?.() ?? [];
     const inner = optionPart(value === undefined ? undefined : (indent) => show(value, item, indent));
