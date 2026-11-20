@@ -2096,6 +2096,27 @@ fn main() {
   expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: 'xxy' });
 });
 
+test('uses qualified Rust constants in array types and repeat counts', () => {
+  const program = `mod board {
+    pub const SIZE: usize = 2;
+    pub struct Grid(pub [[u8; Grid::SIZE]; SIZE]);
+    impl Grid {
+        pub const SIZE: usize = SIZE + 1;
+        pub fn new() -> Self { Grid([[7; Self::SIZE]; SIZE]) }
+    }
+}
+fn main() {
+    let row = [4; board::Grid::SIZE];
+    let width = [0; board::SIZE];
+    let grid = board::Grid::new();
+    println!("{:?} {} {:?}", row, width.len(), grid.0);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[4, 4, 4] 2 [[7, 7, 7], [7, 7, 7]]\n',
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

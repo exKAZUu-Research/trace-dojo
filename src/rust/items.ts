@@ -18,7 +18,9 @@ import type {
   UseItem,
   Visibility,
 } from './ast';
+import { Unifier } from './infer';
 import { intoIterItem, iterationBound } from './iterTypes';
+import { TraitSolver } from './traits';
 import {
   adt,
   type AdtDef,
@@ -41,6 +43,7 @@ import {
   newOpaque,
   newTypeParam,
   STR,
+  type Subst,
   substitute,
   type TraitDef,
   type TraitRef,
@@ -878,7 +881,7 @@ export function lookupValue(module: Module, name: string, span: Span): ValueBind
  * and `MAX`, and arithmetic on them. Undefined for other expressions.
  */
 // code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of constant expression.
-export function constInteger(expr: Expr, module: Module): bigint | undefined {
+export function constInteger(expr: Expr, scope: TypeScope, resolving = new Set<ConstDef>()): bigint | undefined {
   switch (expr.kind) {
     case 'int': {
       return expr.value;
@@ -890,27 +893,92 @@ export function constInteger(expr: Expr, module: Module): bigint | undefined {
         if (segments[1].name === 'MAX') return intMax(name);
         if (segments[1].name === 'MIN') return intMin(name);
       }
-      if (segments.length !== 1) return undefined;
-      const binding = lookupValue(module, segments[0].name, expr.span);
-      const def = binding?.kind === 'const' ? binding.def : undefined;
-      return def?.ast.value ? constInteger(def.ast.value, def.module) : undefined;
+      const found = integerConstant(expr.path, scope);
+      const value = found?.def.ast.value;
+      if (!found || !value || resolving.has(found.def) || resolving.size >= 64) return undefined;
+      const { def, selfType } = found;
+      resolving.add(def);
+      const result = constInteger(
+        value,
+        {
+          module: def.module,
+          params: new Map(def.impl?.params.map((param) => [param.name, param])),
+          selfType,
+        },
+        resolving
+      );
+      resolving.delete(def);
+      return result;
     }
     case 'cast': {
-      return constInteger(expr.operand, module);
+      return constInteger(expr.operand, scope, resolving);
     }
     case 'unary': {
-      const operand = constInteger(expr.operand, module);
+      const operand = constInteger(expr.operand, scope, resolving);
       return expr.op === '-' && operand !== undefined ? -operand : undefined;
     }
     case 'binary': {
-      const left = constInteger(expr.left, module);
-      const right = constInteger(expr.right, module);
+      const left = constInteger(expr.left, scope, resolving);
+      const right = constInteger(expr.right, scope, resolving);
       return left === undefined || right === undefined ? undefined : integerOperation(expr.op, left, right);
     }
     default: {
       return undefined;
     }
   }
+}
+
+function integerConstant(path: PathAst, scope: TypeScope): { def: ConstDef; selfType: Type | undefined } | undefined {
+  const { module } = scope;
+  const prefix = path.segments.slice(0, -1);
+  const name = path.segments.at(-1)!.name;
+  if (prefix.length === 0) {
+    const binding = lookupValue(module, name, path.span);
+    return binding?.kind === 'const' ? { def: binding.def, selfType: undefined } : undefined;
+  }
+  const owner =
+    prefix.length === 1 && prefix[0].name === 'Self'
+      ? undefined
+      : resolveTypePath(
+          prefix.map((segment) => segment.name),
+          module,
+          path.span
+        );
+  if (owner?.kind === 'mod') {
+    const entry = ownValue(owner.module, name, path.span, new Set());
+    checkVisible(entry, owner.module, module.namedModule, name, path.span);
+    return entry?.binding.kind === 'const' ? { def: entry.binding.def, selfType: undefined } : undefined;
+  }
+  const selfType = owner ? lowerPathType({ ...path, segments: prefix }, scope) : scope.selfType;
+  if (!selfType) return undefined;
+  const found = lookupAssociatedConst(
+    new TraitSolver(module.program, new Unifier()),
+    module,
+    selfType,
+    name,
+    path.span
+  );
+  return found && { def: found.def, selfType };
+}
+
+export function lookupAssociatedConst(
+  solver: TraitSolver,
+  module: Module,
+  selfType: Type,
+  name: string,
+  span: Span
+): { def: ConstDef; subst: Subst } | undefined {
+  for (const impl of module.program.impls) {
+    const def = impl.consts.get(name);
+    if (!def) continue;
+    const subst = solver.matchImpl(impl, selfType);
+    if (!subst) continue;
+    if (def.ast.vis !== 'pub' && !def.module.isStd && !def.module.namedModule.isAncestorOf(module.namedModule)) {
+      compileError(span, `${name} は非公開です（pub が付いていません）。`);
+    }
+    return { def, subst };
+  }
+  return undefined;
 }
 
 function integerOperation(op: string, left: bigint, right: bigint): bigint | undefined {
@@ -920,8 +988,8 @@ function integerOperation(op: string, left: bigint, right: bigint): bigint | und
     '*': () => left * right,
     '/': () => (right === 0n ? undefined : left / right),
     '%': () => (right === 0n ? undefined : left % right),
-    '<<': () => left << right,
-    '>>': () => left >> right,
+    '<<': () => (right >= 0n && right < 128n ? left << right : undefined),
+    '>>': () => (right >= 0n && right < 128n ? left >> right : undefined),
     '&': () => left & right,
     '|': () => left | right,
     '^': () => left ^ right,
@@ -1281,7 +1349,7 @@ export function lowerType(ast: TypeAst, scope: TypeScope): Type {
       return { kind: 'tuple', elems: ast.elems.map((elem) => lowerType(elem, scope)) };
     }
     case 'array': {
-      const length = constInteger(ast.len, scope.module);
+      const length = constInteger(ast.len, scope);
       if (length === undefined || length < 0n) {
         compileError(ast.span, '配列の長さには、整数のリテラルか定数の式を書いてください。');
       }

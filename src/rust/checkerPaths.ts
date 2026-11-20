@@ -8,6 +8,7 @@ import {
   compileError,
   globAnonymousTraits,
   globTypeNames,
+  lookupAssociatedConst,
   lookupType,
   lookupValue,
   type Module,
@@ -242,23 +243,15 @@ function associatedConst(c: Checker, t: Type, name: string, span: Span): PathRes
     return { kind: 'builtinConst', type: t, name: `${t.name}::${name}` };
   }
   if (t.kind === 'char' && name === 'MAX') return { kind: 'builtinConst', type: CHAR, name: 'char::MAX' };
-  for (const impl of c.program.impls) {
-    const constant = impl.consts.get(name);
-    if (!constant) continue;
-    const subst = c.solver.matchImpl(impl, t);
-    if (!subst) continue;
-    const module = constant.module as Module;
-    if (constant.ast.vis !== 'pub' && !module.isStd && !module.namedModule.isAncestorOf(c.body.module.namedModule)) {
-      compileError(span, `${name} は非公開です（pub が付いていません）。`);
-    }
-    return {
-      kind: 'const',
-      def: constant,
-      type: substitute(constant.type, subst),
-      typeArgs: impl.params.map((param) => subst.get(param) ?? { kind: 'param', param }),
-    };
-  }
-  return undefined;
+  const found = lookupAssociatedConst(c.solver, c.body.module, t, name, span);
+  if (!found) return undefined;
+  const { def, subst } = found;
+  return {
+    kind: 'const',
+    def,
+    type: substitute(def.type, subst),
+    typeArgs: def.impl!.params.map((param) => subst.get(param) ?? { kind: 'param', param }),
+  };
 }
 
 function selfCtor(c: Checker, span: Span): PathRes {

@@ -284,7 +284,8 @@ export function checkElements(c: Checker, elems: Expr[], elem: Type): void {
 
 function constUsize(c: Checker, expr: Expr): number {
   c.coerceExpr(expr, USIZE);
-  const count = constInteger(expr, c.body.module);
+  const { module, typeParams, selfType } = c.body;
+  const count = constInteger(expr, { module, params: typeParams, selfType });
   if (count === undefined) {
     compileError(expr.span, '[値; 個数] の個数には、整数のリテラルか定数の式を書いてください。');
   }

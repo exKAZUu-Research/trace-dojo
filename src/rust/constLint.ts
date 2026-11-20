@@ -233,7 +233,13 @@ export class ConstLint {
   private constant(def: ConstDef): Known | undefined {
     const { ast, module } = def;
     if (!ast.value || this.evaluating.has(def) || this.evaluating.size >= 64) return undefined;
-    if (!this.patternEvaluation && intTypeOf(def.type)) return constInteger(ast.value, module);
+    if (!this.patternEvaluation && intTypeOf(def.type)) {
+      return constInteger(ast.value, {
+        module,
+        params: new Map(def.impl?.params.map((param) => [param.name, param])),
+        selfType: def.impl?.selfType,
+      });
+    }
     this.evaluating.add(def);
     const result = new ConstLint(this.annotations, this.evaluating, this.patternEvaluation).expr(ast.value);
     this.evaluating.delete(def);
