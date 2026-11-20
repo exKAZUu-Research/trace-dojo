@@ -134,9 +134,10 @@ export function setStringCapacity(place: Place, capacity: number): void {
 const inFlight = new Map<string, number>();
 
 export class StringGrowth {
-  private length = 0;
-
-  constructor(private capacity = 0) {}
+  constructor(
+    private capacity = 0,
+    private length = 0
+  ) {}
 
   write(text: string): void {
     const added = utf8Length(text);
@@ -145,7 +146,12 @@ export class StringGrowth {
   }
 
   finish(text: string): string {
-    return madeString(text, this.capacity);
+    return madeString(text, Math.max(this.capacity, utf8Length(text)));
+  }
+
+  store(place: Place, text: string): void {
+    place.set(text);
+    setStringCapacity(place, Math.max(this.capacity, utf8Length(text)));
   }
 }
 

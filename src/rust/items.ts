@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 830 -- Follows Rust's name resolution case by case.
+// code-gauge-allow-file fileNcss 842 -- Follows Rust's name resolution case by case.
 import { CompileError } from '../interpreter/diagnostics';
 import type {
   BoundAst,
@@ -1012,6 +1012,18 @@ function ownValue(module: Module, name: string, span: Span, visiting: Set<Module
   return fromGlobs(module, name, span, visiting, 'value') as Entry<ValueBinding> | undefined;
 }
 
+export function* globTypeNames(module: Module, seen = new Set<Module>()): Iterable<string> {
+  if (seen.has(module)) return;
+  seen.add(module);
+  for (const glob of module.globs) {
+    const target = globTarget(module, glob);
+    if (target.kind !== 'mod') continue;
+    yield* target.module.types.keys();
+    yield* target.module.imports.keys();
+    yield* globTypeNames(target.module, seen);
+  }
+}
+
 /** The modules resolving their glob imports' paths, which must not look in those same globs. */
 const resolvingGlobs = new Set<Module>();
 
@@ -1027,13 +1039,7 @@ function fromGlobs(
   visiting.add(module);
   try {
     for (const glob of module.globs) {
-      resolvingGlobs.add(module);
-      let target: TypeBinding;
-      try {
-        target = resolveTypePath(glob.path, module, glob.span);
-      } finally {
-        resolvingGlobs.delete(module);
-      }
+      const target = globTarget(module, glob);
       if (target.kind === 'mod') {
         const found =
           ns === 'type' ? ownType(target.module, name, span, visiting) : ownValue(target.module, name, span, visiting);
@@ -1048,6 +1054,15 @@ function fromGlobs(
     return undefined;
   } finally {
     visiting.delete(module);
+  }
+}
+
+function globTarget(module: Module, glob: Module['globs'][number]): TypeBinding {
+  resolvingGlobs.add(module);
+  try {
+    return resolveTypePath(glob.path, module, glob.span);
+  } finally {
+    resolvingGlobs.delete(module);
   }
 }
 

@@ -904,6 +904,26 @@ fn main() {
   });
 });
 
+test('resolves formatting trait methods through a glob re-export', () => {
+  const program = `mod traits { pub use std::fmt::Write as Output; }
+use traits::*;
+fn append<T: Output>(dest: &mut T) {
+    Output::write_str(dest, "hi").unwrap();
+    dest.write_char('!').unwrap();
+}
+fn main() {
+    let mut s = String::new();
+    append(&mut s);
+    write!(&mut s, " {}", 7).unwrap();
+    println!("{} {}", s, s.capacity());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'hi! 7 8\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

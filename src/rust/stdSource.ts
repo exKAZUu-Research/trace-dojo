@@ -123,6 +123,7 @@ pub mod fmt {
         fn write_str(&mut self, s: &str) -> Result;
         fn write_char(&mut self, c: char) -> Result;
     }
+    impl Write for String {}
     pub struct DebugStruct<'a>;
     pub struct DebugTuple<'a>;
     pub struct DebugList<'a>;

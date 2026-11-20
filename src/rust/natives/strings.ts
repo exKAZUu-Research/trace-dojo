@@ -680,6 +680,14 @@ function caseIter(name: 'ToUppercase' | 'ToLowercase', text: string): Value {
 const natives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {};
 for (const [name, native] of Object.entries(strNatives)) natives[`str::${name}`] = native;
 for (const [name, native] of Object.entries(withStringCapacity(stringNatives))) natives[`String::${name}`] = native;
+natives['Write::write_str'] = (args, ctx) => {
+  natives['String::push_str'](args, ctx);
+  return ok(ctx, UNIT_VALUE);
+};
+natives['Write::write_char'] = (args, ctx) => {
+  natives['String::push'](args, ctx);
+  return ok(ctx, UNIT_VALUE);
+};
 for (const [name, native] of Object.entries(charNatives)) natives[`char::${name}`] = native;
 // `u8`'s ASCII methods behave as `char`'s on the byte's code point.
 const byteChar = (byte: Value): string => String.fromCodePoint(Number(deref(byte) as bigint));

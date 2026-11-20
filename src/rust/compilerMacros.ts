@@ -1,5 +1,5 @@
 import type { Expr, FormatArgs, FormatPiece, MacroCall, Span } from './ast';
-import { claimStrings, StringGrowth } from './capacity';
+import { claimStrings, stringCapacity, StringGrowth } from './capacity';
 import type { Compiler, Eval } from './compiler';
 import { evaluateValues, stringish } from './compilerCommon';
 import type { WriteChunk } from './debugText';
@@ -132,10 +132,14 @@ function writeString(
   const { program } = c;
   return (frame) => {
     const p = throughRef ? (target(frame) as Place) : place(frame);
-    const { text, failed } = formatPartly(format, frame);
-    const written = text + (failed ? '' : newline);
-    frame.runtime.allocateString((p.get() as string).length + written.length, written.length);
-    p.set((p.get() as string) + written);
+    const before = p.get() as string;
+    const growth = new StringGrowth(stringCapacity(p), utf8Length(before));
+    const { text, failed } = formatPartly(format, frame, (chunk) => growth.write(chunk));
+    const suffix = failed ? '' : newline;
+    growth.write(suffix);
+    const written = text + suffix;
+    frame.runtime.allocateString(before.length + written.length, written.length);
+    growth.store(p, before + written);
     return writeResult(program, failed);
   };
 }
