@@ -1,3 +1,5 @@
+// code-gauge-allow-file fileNcss 631 -- Central checker coordinates type inference and compilation passes.
+
 // code-gauge-allow-file fileNcss 628 -- The checker core owns body, entry point, and type obligations.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ExecutionBudget } from '../interpreter/limits';
@@ -99,6 +101,7 @@ export class Checker {
   readonly varBounds = new Map<unknown, TraitRef[]>();
   body!: BodyContext;
   deferredChecks: (() => void)[] = [];
+  readonly coverageChecks: (() => void)[] = [];
   /** The number literals of the body, which rustc's `overflowing_literals` lint checks against their types. */
   literals: Extract<Expr, { kind: 'int' | 'float' }>[] = [];
   /** The integer literals that `-` negates, whose range reaches one further below zero. */
@@ -122,6 +125,7 @@ export class Checker {
     for (const fn of this.program.pendingFns.splice(0)) this.checkFn(fn);
     while (this.nestedFns.length > 0) this.checkFn(this.nestedFns.shift()!);
     this.checkConsts();
+    for (const check of this.coverageChecks) check();
     this.checkMain();
   }
 
@@ -893,7 +897,7 @@ export class Checker {
   requireIrrefutable(pattern: Pattern, type: Type, where: 'let' | 'fn' | 'for'): void {
     if (pattern.kind === 'binding' && !this.annotations.paths.has(pattern)) return;
     if (pattern.kind === 'wild') return;
-    this.deferredChecks.push(() => {
+    this.coverageChecks.push(() => {
       const lowered = lowerPattern(pattern, this.annotations);
       if (!isIrrefutable(lowered, resolve(type, true))) {
         const name = where === 'let' ? 'let' : where === 'for' ? 'for' : '関数の引数';

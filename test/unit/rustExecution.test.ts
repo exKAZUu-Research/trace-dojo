@@ -655,6 +655,32 @@ fn main() {
   });
 });
 
+test('recognizes boolean and enum constants in exhaustive matches', () => {
+  const program = `mod flags {
+    const OFF: bool = false;
+    pub const YES: bool = !OFF;
+}
+#[derive(PartialEq, Eq)]
+enum Flag { Set(bool), Clear }
+const SET: Flag = Flag::Set(flags::YES);
+fn main() {
+    match flags::YES {
+        flags::YES => println!("yes"),
+        false => println!("no"),
+    }
+    match Flag::Set(true) {
+        SET => println!("set"),
+        Flag::Set(false) => println!("unset"),
+        Flag::Clear => println!("clear"),
+    }
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'yes\nset\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

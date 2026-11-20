@@ -5,7 +5,7 @@ import { type PropagationMode, propagationModes } from './constPropagation';
 import { normalize } from './infer';
 import { compileError, constInteger } from './items';
 import { castValue, wrap } from './ops';
-import { INT_NAMES, intMax, intMin, type IntName, resolve, shallow, type Type } from './types';
+import { type ConstDef, INT_NAMES, intMax, intMin, type IntName, resolve, shallow, type Type } from './types';
 
 /** A constant: a number, a bool, a char, or a tuple or struct of constants keyed by field (`0`, `x`). */
 type Known = bigint | number | boolean | string | Aggregate;
@@ -28,7 +28,15 @@ export class ConstLint {
   /** Whether the code checked last never finishes normally (`return`, `break`), so what follows is unreachable. */
   private diverged = false;
 
-  constructor(private readonly annotations: Annotations) {}
+  constructor(
+    private readonly annotations: Annotations,
+    private readonly evaluating = new Set<ConstDef>()
+  ) {}
+
+  boolean(expr: Expr): boolean | undefined {
+    const value = this.expr(expr);
+    return typeof value === 'boolean' ? value : undefined;
+  }
 
   check(block: Block): void {
     this.modes = propagationModes(block, this.annotations);
@@ -207,7 +215,11 @@ export class ConstLint {
       const { ast, module } = res.def;
       // A constant's initializer may not be checked yet, so its value counts by the constant's type.
       if (ast.value && intTypeOf(res.def.type)) return constInteger(ast.value, module);
-      return ast.value ? new ConstLint(this.annotations).expr(ast.value) : undefined;
+      if (!ast.value || this.evaluating.has(res.def)) return undefined;
+      this.evaluating.add(res.def);
+      const result = new ConstLint(this.annotations, this.evaluating).expr(ast.value);
+      this.evaluating.delete(res.def);
+      return result;
     }
     if (res?.kind === 'builtinConst') return integerConst(res.name);
     return undefined;
@@ -215,6 +227,7 @@ export class ConstLint {
 
   private unary(expr: Extract<Expr, { kind: 'unary' }>): Known | undefined {
     const operand = this.expr(expr.operand);
+    if (expr.op === '!' && typeof operand === 'boolean') return !operand;
     if (expr.op !== '-' || typeof operand !== 'bigint') return undefined;
     const name = intTypeOf(expr.ty);
     if (!name) return undefined;

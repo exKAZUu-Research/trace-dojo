@@ -1,7 +1,8 @@
-import type { Annotations } from './annotations';
-import type { Pattern } from './ast';
+import type { Annotations, PathRes } from './annotations';
+import type { Expr, Pattern } from './ast';
+import { ConstLint } from './constLint';
 import { normalize } from './infer';
-import { shallow, type Type } from './types';
+import { type ConstDef, shallow, type Type } from './types';
 
 /**
  * A pattern reduced to what decides matching: a constructor with subpatterns, or anything (a wildcard or binding).
@@ -22,7 +23,7 @@ export function lowerPattern(pattern: Pattern, annotations: Annotations): Pat {
     case 'binding': {
       const res = annotations.paths.get(pattern);
       if (res?.kind === 'ctor') return { kind: 'ctor', ctor: `v${res.variant}`, args: [] };
-      if (res?.kind === 'const') return { kind: 'ctor', ctor: `const:${res.def.name}`, args: [] };
+      if (res?.kind === 'const') return lowerConstant(res.def, annotations, new Set());
       return pattern.sub ? lowerPattern(pattern.sub, annotations) : ANY;
     }
     case 'lit': {
@@ -52,7 +53,7 @@ export function lowerPattern(pattern: Pattern, annotations: Annotations): Pat {
     case 'path': {
       const res = annotations.paths.get(pattern);
       if (res?.kind === 'ctor') return { kind: 'ctor', ctor: `v${res.variant}`, args: [] };
-      if (res?.kind === 'const') return { kind: 'ctor', ctor: `const:${res.def.name}`, args: [] };
+      if (res?.kind === 'const') return lowerConstant(res.def, annotations, new Set());
       return ANY;
     }
     case 'ref': {
@@ -63,6 +64,63 @@ export function lowerPattern(pattern: Pattern, annotations: Annotations): Pat {
       return { kind: 'or', alts: pattern.alternatives.map((alt) => lowerPattern(alt, annotations)) };
     }
   }
+}
+
+function lowerConstant(def: ConstDef, annotations: Annotations, active: Set<ConstDef>): Pat {
+  if (!def.ast.value || active.has(def) || active.size >= 64) return literalPattern(`const:${def.name}`);
+  active.add(def);
+  const pattern = lowerConstantExpr(def.ast.value, annotations, active);
+  active.delete(def);
+  return pattern;
+}
+
+// code-gauge-allow functionNcss 34 -- One case per structural constant expression.
+
+function lowerConstantExpr(expr: Expr, annotations: Annotations, active: Set<ConstDef>): Pat {
+  const lower = (value: Expr): Pat => lowerConstantExpr(value, annotations, active);
+  switch (expr.kind) {
+    case 'ref': {
+      return lower(expr.operand);
+    }
+    case 'tuple': {
+      return literalPattern('tuple', expr.elems.map(lower));
+    }
+    case 'path': {
+      const res = annotations.paths.get(expr);
+      if (res?.kind === 'const') return lowerConstant(res.def, annotations, active);
+      if (res?.kind === 'ctor') return lowerConstructor(res, []);
+      break;
+    }
+    case 'call': {
+      const res = annotations.paths.get(expr.callee);
+      if (res?.kind === 'ctor') return lowerConstructor(res, expr.args.map(lower));
+      break;
+    }
+    case 'struct': {
+      const res = annotations.paths.get(expr);
+      if (res?.kind !== 'ctor' || expr.base) break;
+      const fields = new Map(expr.fields.map(({ name, value }) => [name, value]));
+      const args = res.def.variants[res.variant].fields.map(({ name }) => lower(fields.get(name)!));
+      return lowerConstructor(res, args);
+    }
+    case 'block': {
+      if (expr.stmts.length === 0 && expr.tail) return lower(expr.tail);
+      break;
+    }
+    default: {
+      break;
+    }
+  }
+  const boolean = new ConstLint(annotations).boolean(expr);
+  return literalPattern(boolean === undefined ? 'const' : String(boolean));
+}
+
+function lowerConstructor(res: Extract<PathRes, { kind: 'ctor' }>, args: Pat[]): Pat {
+  return literalPattern(`v${res.variant}`, args);
+}
+
+function literalPattern(ctor: string, args: Pat[] = []): Pat {
+  return { kind: 'ctor', ctor, args };
 }
 
 /** The constructors of a type and their arities, or undefined for types with infinitely many values. */
