@@ -33,13 +33,15 @@ interface RegexWorker {
   worker: Worker;
   port: MessagePort;
   signal: Int32Array;
+  /** Set by the worker once it has handled `stop`, which a synchronous caller sees without an event-loop turn. */
+  stopped: Int32Array;
   subject?: string;
 }
 
 const BATCH_SIZES = [1, 64, 512, 2048] as const;
 
 let active: RegexWorker | undefined;
-const stoppingWorkers = new Set<Worker>();
+const stoppingWorkers = new Map<Worker, Int32Array>();
 const MAX_STOPPING_WORKERS = 2;
 
 export interface BoundedScanOptions {
@@ -144,7 +146,7 @@ function boundedRegexBatch({
   budget,
 }: BatchRequest): Exclude<z.infer<typeof batchResponse>, 'unsupported'> {
   if (budget.remainingMilliseconds === 0) throw new ExecutionLimitError('time');
-  const state = active ?? startWorker();
+  const state = active ?? startWorker(budget.remainingMilliseconds);
   Atomics.store(state.signal, 0, 0);
   state.port.postMessage({
     pattern,
@@ -183,19 +185,25 @@ export function releaseBoundedRegexSubject(): void {
 function stopWorker(state: RegexWorker): void {
   if (stoppingWorkers.has(state.worker)) return;
   if (active === state) active = undefined;
-  stoppingWorkers.add(state.worker);
+  stoppingWorkers.set(state.worker, state.stopped);
   state.port.postMessage({ stop: true });
   state.port.close();
 }
 
-function startWorker(): RegexWorker {
-  if (stoppingWorkers.size >= MAX_STOPPING_WORKERS) throw new ExecutionLimitError('time');
+function startWorker(remainingMilliseconds: number): RegexWorker {
+  for (const [worker, stopped] of stoppingWorkers) if (Atomics.load(stopped, 0) === 1) stoppingWorkers.delete(worker);
+  const [oldest, stopped] = stoppingWorkers.entries().next().value ?? [];
+  if (oldest && stopped && stoppingWorkers.size >= MAX_STOPPING_WORKERS) {
+    if (Atomics.wait(stopped, 0, 0, remainingMilliseconds) === 'timed-out') throw new ExecutionLimitError('time');
+    stoppingWorkers.delete(oldest);
+  }
+  const stoppedFlag = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
   const { port1, port2 } = new MessageChannel();
   let worker: Worker;
   try {
     worker = new Worker(WORKER_SOURCE, {
       eval: true,
-      workerData: port2,
+      workerData: { port: port2, stopped: stoppedFlag },
       transferList: [port2],
       resourceLimits: { maxOldGenerationSizeMb: 48 },
     });
@@ -208,6 +216,7 @@ function startWorker(): RegexWorker {
     worker,
     port: port1,
     signal: new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT)),
+    stopped: stoppedFlag,
   };
   worker.on('error', () => {
     stopWorker(state);
@@ -224,13 +233,15 @@ function startWorker(): RegexWorker {
 }
 
 const WORKER_SOURCE = `
-const { workerData: port } = require('node:worker_threads');
+const { workerData: { port, stopped } } = require('node:worker_threads');
 ${PCRE_WORKER_SOURCE}
 let text = Buffer.alloc(0);
 port.on('message', ({ pattern, position, retry, utf8, limit, batchBudgetMs, noEmptyRemaining, lastEnd, subject, signal, reset, stop }) => {
   if (stop) {
     disposePcre();
     port.close();
+    Atomics.store(stopped, 0, 1);
+    Atomics.notify(stopped, 0);
     return;
   }
   if (reset) {
