@@ -1182,6 +1182,16 @@ test.each([
   });
 });
 
+test.each([
+  ['PartialOrd<i64>', '1', { kind: 'executed', stdout: '8\n' }],
+  ['PartialOrd<String>', '1', { kind: 'compileError' }],
+  ['PartialEq<String>', '1.0', { kind: 'compileError' }],
+])('checks numeric literal bounds against %s', (bound, argument, expected) => {
+  const program = `fn number_size<T: ${bound}>(_: T) -> usize { std::mem::size_of::<T>() }
+fn main() { println!("{}", number_size(${argument})); }`;
+  expect(executeProgram('rust', program)).toMatchObject(expected);
+});
+
 test('derives PartialOrd and Ord with the default right-hand type', () => {
   const program = `#[derive(Debug, Clone, PartialEq, PartialOrd)]
 enum Maybe<T> { Value(T), Absent }

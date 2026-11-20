@@ -65,6 +65,10 @@ export class TraitSolver {
     if (t.v.literal === 'int' && ref.trait.builtin === 'SliceIndex')
       return this.unifier.tryUnify(t, USIZE) ? 'yes' : 'no';
     if (!t.v.literal) return 'unknown';
+    const rhs = ref.args[0];
+    if (rhs && (ref.trait.builtin === 'PartialEq' || ref.trait.builtin === 'PartialOrd')) {
+      return this.unifier.tryUnify(t, rhs) ? 'yes' : 'no';
+    }
     // rustc takes a number's type from the one impl that fits it, among the impls for numbers of its kind.
     const only = this.onlyNumericImpl(t.v.literal, ref);
     if (only) return this.unifier.tryUnify(t, only) ? 'yes' : 'no';
