@@ -284,6 +284,17 @@ int main() {
   });
 });
 
+test.each(['Turtle t(3, 5);', 'Turtle* t = new Turtle(3, 5);'])(
+  'keeps a helper turtle %s on the board when an exception escapes it uncaught',
+  (declaration) => {
+    const program = `void f() { ${declaration} throw 1; }
+int main() { f(); }`;
+    const turtle = { x: 3, y: 5, color: '#', dir: 'N' };
+    expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', finalTurtles: [turtle] });
+    expect(traceProgram('cpp', program, program)).toMatchObject({ finalTurtles: [turtle] });
+  }
+);
+
 test('reads only the required prefix of a C substring search needle', () => {
   const program = `#include <cstring>
 #include <string>
