@@ -53,7 +53,6 @@ export const NULLPTR: Type = { kind: 'nullptr' };
 export const SIZE_T = ULONG;
 export const PTRDIFF_T = LONG;
 export const CONST_CHAR: IntType = { kind: 'int', name: 'char', isConst: true };
-export const CONST_CHAR_POINTER: PointerType = { kind: 'pointer', to: CONST_CHAR };
 export const CHAR_POINTER: PointerType = { kind: 'pointer', to: CHAR };
 
 export type Access = 'public' | 'protected' | 'private';
@@ -335,10 +334,6 @@ export function isArithmetic(type: Type): type is ArithmeticType {
 
 export function isScalar(type: Type): boolean {
   return isArithmetic(type) || type.kind === 'pointer' || type.kind === 'nullptr';
-}
-
-export function isClass(type: Type): type is ClassType {
-  return type.kind === 'class';
 }
 
 export function isLibraryClass(type: Type, name?: string): type is ClassType {

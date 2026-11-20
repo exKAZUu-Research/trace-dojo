@@ -12,7 +12,7 @@ import {
   type Type,
   withConst,
 } from '../types';
-import { ArrayStore, CObject, Ptr, type Store, UNINIT, type Value } from '../values';
+import { ArrayStore, CObject, type Ptr, type Value } from '../values';
 
 export interface NativeOptions {
   isConst?: boolean;
@@ -146,16 +146,3 @@ export function signedChar(code: number): number {
 export function asNumber(value: unknown): number {
   return Number(value as number | bigint);
 }
-
-/** Reads a value that must have been written. */
-export function readValue(store: Store, index: number): Value {
-  const value = store.get(index);
-  if (value === UNINIT) throw new CppRuntimeError('uninitialized');
-  return value;
-}
-
-export function pointerTo(store: Store, index = 0): Ptr {
-  return new Ptr(store, index);
-}
-
-export { classType };
