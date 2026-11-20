@@ -5291,6 +5291,18 @@ test('gc_collect_cycles() defers what destructors of deferred objects attach or 
   }
 });
 
+test('rejecting an unsupported feature ends the run without PHP shutdown replacing the message', () => {
+  expect(
+    run(
+      '<?php\nclass D { function __destruct() { $this->undefinedMethod(); } }\n$d = new D;\necho "start\\n";\n$x = serialize([1]);\n'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'start\n',
+    uncaughtException: '直列化（serialize）は、この採点環境では使えません。',
+  });
+});
+
 test('gc_collect_cycles() frees a destructed object that only a collected object cycle held', () => {
   expect(
     run(

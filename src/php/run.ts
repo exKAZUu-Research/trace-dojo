@@ -50,15 +50,22 @@ export function runProgram(runtime: Runtime, parsed: ParsedProgram, onEnd?: (fra
     runtime.program = parsed.program;
     runtime.notices = parsed.notices;
     let uncaughtException: string | undefined;
+    let rejected = false;
     try {
       uncaughtException = guard(runtime, () => {
-        for (const notice of parsed.parseNotices)
-          emitError(notice.level === 'Deprecated' ? E_DEPRECATED : E_WARNING, notice.message, notice.row);
-        runStatements(parsed.program, parsed.conversionError);
+        try {
+          for (const notice of parsed.parseNotices)
+            emitError(notice.level === 'Deprecated' ? E_DEPRECATED : E_WARNING, notice.message, notice.row);
+          runStatements(parsed.program, parsed.conversionError);
+        } catch (error) {
+          rejected = error instanceof UnsupportedFeatureError;
+          throw error;
+        }
       });
       onEnd?.(runtime.globalFrame);
       runtime.world.recordFinalTurtles();
-      uncaughtException = shutdown(runtime) ?? uncaughtException;
+      // A rejection of an unsupported feature ends the run outside PHP, so PHP's shutdown does not run after it.
+      if (!rejected) uncaughtException = shutdown(runtime) ?? uncaughtException;
     } finally {
       releaseBoundedRegexSubject();
       runtime.flush();
