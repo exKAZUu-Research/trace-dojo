@@ -47,6 +47,12 @@ test.each([
   ['vector', 'std::vector<int> values{1}; values.rbegin().base();', 'base'],
   ['list', 'std::list<int> values{1}; values.crbegin().base();', 'base'],
   ['string', 'std::string value("a"); value.begin().base();', 'base'],
+  ['iostream', 'try {} catch (const std::ios_base::failure& error) {}', 'failure'],
+  ['iostream', 'std::ios_base::seekdir value;', 'seekdir'],
+  ['iostream', 'auto value = std::ios::beg;', 'beg'],
+  ['map', 'std::map<int, int>::value_compare* comparison = nullptr;', 'value_compare'],
+  ['random', 'std::uniform_int_distribution<int>::param_type* parameters = nullptr;', 'param_type'],
+  ['functional', 'std::less<>::is_transparent* marker = nullptr;', 'is_transparent'],
 ])('reports an unavailable member of the standard <%s> library', (header, body, member) => {
   const program = `#include <${header}>
 bool isOdd(int value) { return value % 2 != 0; }
@@ -61,6 +67,7 @@ test.each([
   ['struct Counter { int length; };', 'Counter value{0}; return value.lenght;', 'Counter', 'lenght'],
   ['#include <vector>', 'std::vector<int> value; value.lenght();', 'std::vector<int>', 'lenght'],
   ['#include <vector>', 'std::vector<bool> value; value.data();', 'std::vector<bool>', 'data'],
+  ['#include <functional>', 'std::less<int>::is_transparent* marker = nullptr;', 'std::less<int>', 'is_transparent'],
   ['#include <vector>', 'std::vector<int> value; value.rbegin().bse();', 'std::vector<int>::reverse_iterator', 'bse'],
   [
     '#include <stdexcept>\nstruct Error : std::runtime_error { Error() : std::runtime_error("bad") {} int code() const { return 1; } };',

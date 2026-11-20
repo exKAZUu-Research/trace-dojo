@@ -34,9 +34,12 @@ CLASSES = {
 }
 
 MEMBER_KINDS = {
-    "CXXMethodDecl", "FieldDecl", "FunctionTemplateDecl", "TypeAliasDecl",
-    "TypeAliasTemplateDecl", "TypedefDecl", "UsingDecl", "VarDecl",
+    "CXXMethodDecl", "CXXRecordDecl", "ClassTemplateDecl", "EnumDecl", "FieldDecl",
+    "FunctionTemplateDecl", "TypeAliasDecl", "TypeAliasTemplateDecl", "TypedefDecl",
+    "UsingDecl", "VarDecl",
 }
+
+VARIANT_ARGUMENTS = {"vector": "bool", **dict.fromkeys(CLASSES["functional"].split(), "void")}
 
 
 def main():
@@ -64,8 +67,9 @@ def probe(request):
          "-Xclang", "-ast-dump-filter", "-Xclang", f"std::{class_name}", "-"],
         input=f"#include <{header}>\n", text=True,
     )
-    primary, bit_vector = set(), set()
+    primary, specialized = set(), set()
     found_primary = False
+    variant = VARIANT_ARGUMENTS.get(class_name)
     for section in re.split(r"^Dumping ", dump, flags=re.M):
         qualified, _, body = section.partition(":\n")
         if qualified != f"std::{class_name}":
@@ -77,13 +81,13 @@ def probe(request):
             if category == "CXXRecordDecl":
                 found_primary = True
                 primary.update(members(record[1], children))
-            elif class_name == "vector" and ("TemplateArgument", "type 'bool'") in children:
-                bit_vector.update(members(record[1], children))
-    if not found_primary or (class_name == "vector" and not bit_vector):
+            elif variant and (1, "TemplateArgument", f"type '{variant}'") in children:
+                specialized.update(members(record[1], children))
+    if not found_primary or (variant and not specialized):
         raise ValueError(f"No definition measured for std::{class_name}")
     result = {key: sorted(primary) for key in keys}
-    if bit_vector:
-        result["vector<bool>"] = sorted(bit_vector)
+    if specialized:
+        result[f"{class_name}<{variant}>"] = sorted(specialized)
     return result
 
 
@@ -102,9 +106,11 @@ def records(body):
         if active and depth <= active[0]:
             yield active[1:]
             active = None
-        if active and depth == active[0] + 1:
-            active[3].append((category, syntax))
-        if not active and depth <= 1 and category in {"CXXRecordDecl", "ClassTemplatePartialSpecializationDecl"}:
+        if active and (depth == active[0] + 1 or depth == active[0] + 2 and category == "EnumConstantDecl"):
+            active[3].append((depth - active[0], category, syntax))
+        if not active and depth <= 1 and category in {
+            "CXXRecordDecl", "ClassTemplatePartialSpecializationDecl", "ClassTemplateSpecializationDecl",
+        }:
             active = (depth, category, syntax, [])
     if active:
         yield active[1:]
@@ -112,13 +118,26 @@ def records(body):
 
 def members(tag, children):
     accessible = tag == "struct"
-    for category, syntax in children:
+    unscoped_enum = False
+    for depth, category, syntax in children:
+        head = syntax.partition(" '")[0]
+        if depth == 1:
+            unscoped_enum = category == "EnumDecl" and not re.search(r"\b(class|struct)\s+\w+$", head)
         if category == "AccessSpecDecl":
             accessible = not syntax.endswith(" private")
-        elif accessible and category in MEMBER_KINDS:
-            name = syntax.partition(" '")[0].split()[-1].rsplit("::", 1)[-1]
-            if name.isidentifier() and not name.startswith("_"):
+        elif accessible and (category in MEMBER_KINDS or unscoped_enum and category == "EnumConstantDecl"):
+            name = member_name(category, head)
+            if name and name.isidentifier() and not name.startswith("_"):
                 yield name
+
+
+def member_name(category, head):
+    if category == "CXXRecordDecl":
+        if " implicit " in head:
+            return None
+        record = re.search(r"\b(?:class|struct|union) (\w+)(?: definition)?$", head)
+        return record[1] if record else None
+    return head.split()[-1].rsplit("::", 1)[-1]
 
 
 if __name__ == "__main__":
