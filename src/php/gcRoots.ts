@@ -124,16 +124,15 @@ function retireBufferNodes(
   retirePass(garbageNodes, state, passTwoSet);
   state.deferredPassTwo = undefined;
   if (passTwoNodes) retirePass(passTwoNodes, state);
-  const extraObjects: PhpObject[] = [];
-  for (const object of state.objectChildren.keys()) visitRetiredNode(object, state, extraObjects);
-  for (const object of extraObjects) state.runtime.gcRoots.delete(object);
+  for (const object of state.objectChildren.keys()) {
+    visitRetiredNode(object, state);
+    state.runtime.gcRoots.delete(object);
+  }
 }
 
 function retirePass(nodes: (PhpObject | PhpArray)[], state: RetireState, skip?: Set<PhpObject | PhpArray>): void {
   state.runtime.gcRoots.load(nodes);
-  const deferredObjects: PhpObject[] = [];
-  for (const node of nodes) if (!skip?.has(node)) visitRetiredNode(node, state, deferredObjects);
-  for (const object of deferredObjects) state.runtime.gcRoots.delete(object);
+  for (const node of nodes) if (!skip?.has(node)) visitRetiredNode(node, state);
   for (const node of nodes) if (!skip?.has(node)) state.runtime.gcRoots.delete(node);
 }
 
@@ -149,16 +148,19 @@ interface RetireState {
   deferredPassTwo?: Set<PhpObject | PhpArray>;
 }
 
-function visitRetiredNode(root: unknown, state: RetireState, deferredDeletes?: PhpObject[]): void {
-  const stack: { items: unknown[]; index: number }[] = [{ items: [root], index: 0 }];
+function visitRetiredNode(root: unknown, state: RetireState): void {
+  const first = stepRetiredItem(root, state, true);
+  if (!first) return;
+  const stack: { items: unknown[]; index: number; finish?: PhpObject }[] = [first];
   while (stack.length > 0) {
-    const frame = stack.at(-1) as { items: unknown[]; index: number };
+    const frame = stack.at(-1) as { items: unknown[]; index: number; finish?: PhpObject };
     if (frame.index >= frame.items.length) {
       stack.pop();
+      if (frame.finish) state.runtime.gcRoots.delete(frame.finish);
       continue;
     }
     const item = frame.items[frame.index++];
-    const next = stepRetiredItem(item, state, deferredDeletes);
+    const next = stepRetiredItem(item, state, false);
     if (next) stack.push(next);
   }
 }
@@ -166,22 +168,26 @@ function visitRetiredNode(root: unknown, state: RetireState, deferredDeletes?: P
 function stepRetiredItem(
   item: unknown,
   state: RetireState,
-  deferredDeletes?: PhpObject[]
-): { items: unknown[]; index: number } | undefined {
+  isTopLevel: boolean
+): { items: unknown[]; index: number; finish?: PhpObject } | undefined {
   const value = item instanceof Ref ? item.v : item;
   if ((value instanceof PhpArray || value instanceof PhpObject) && state.deferredPassTwo?.has(value)) return undefined;
-  if (value instanceof PhpArray && state.remaining.has(value)) return retireArrayNode(value, state);
+  if (value instanceof PhpArray && state.remaining.has(value)) return retireArrayNode(value, state, !isTopLevel);
   if (value instanceof PhpObject && state.compactRoots && state.objectChildren.has(value))
-    return retireObjectNode(value, state, deferredDeletes);
+    return retireObjectNode(value, state, !isTopLevel);
   recordRetiredSurvivor(value, state);
   return undefined;
 }
 
-function retireArrayNode(array: PhpArray, state: RetireState): { items: unknown[]; index: number } | undefined {
+function retireArrayNode(
+  array: PhpArray,
+  state: RetireState,
+  removeFromRoots: boolean
+): { items: unknown[]; index: number } | undefined {
   state.remaining.delete(array);
   if (state.seen.has(array) || !array.composite || state.isLiveArray(array)) return undefined;
   state.seen.add(array);
-  state.runtime.gcRoots.delete(array);
+  if (removeFromRoots) state.runtime.gcRoots.delete(array);
   const slots = array.retire();
   for (const slot of slots) {
     const target = slot instanceof Ref ? slot.v : slot;
@@ -193,12 +199,11 @@ function retireArrayNode(array: PhpArray, state: RetireState): { items: unknown[
 function retireObjectNode(
   object: PhpObject,
   state: RetireState,
-  deferredDeletes?: PhpObject[]
-): { items: unknown[]; index: number } | undefined {
+  removeOnFinish: boolean
+): { items: unknown[]; index: number; finish?: PhpObject } | undefined {
   if (state.freedObjects.has(object)) return undefined;
   state.freedObjects.add(object);
-  deferredDeletes?.push(object);
-  return { items: state.objectChildren.get(object) ?? [], index: 0 };
+  return { items: state.objectChildren.get(object) ?? [], index: 0, finish: removeOnFinish ? object : undefined };
 }
 
 function recordRetiredSurvivor(value: unknown, state: RetireState): void {

@@ -4614,6 +4614,10 @@ test('preserves GC root buffer order and count across multiple gc_collect_cycles
       '$p = new Plain; $a = new Node(2); $b = new Node(3); $q = new Plain; $p->a = ["k" => $b]; $p->b = $q; $p->c = $p; $a->b = $b; $b->c = $a; unset($b, $p); echo "[", gc_collect_cycles(), "] "; unset($q, $a);',
       '[2] | ~2 ~3 2 0 2,3,4,1,5,6,7,8,9',
     ],
+    [
+      '$v0 = new Plain; $v1 = new Plain; $v2 = new Node(2); $v3 = new Node(3); $v4 = new Node(4); $v5 = new Node(5); $v6 = new Node(6); $v7 = new Plain; $v8 = new Plain; $v9 = new Node(9); $v1->a = $v2; $v2->a = ["k" => $v6]; $v2->c = $v9; $v5->a = [$v3, [$v7]]; $v6->b = $v5; $v6->c = $v1; $v7->a = $v9; $v7->b = [$v0, [$v5]]; unset($v1, $v2, $v7, $v0, $v9, $v6); echo "[", gc_collect_cycles(), "] "; $w0 = new Plain; echo spl_object_id($w0), " "; unset($v5); unset($v4, $v3, $v8);',
+      '[~2 ~6 4] 3 ~4 | ~5 ~9 ~3 9 0 6,8,1,10,4,9,5,7,2',
+    ],
   ]) {
     expect(
       run(`<?php
