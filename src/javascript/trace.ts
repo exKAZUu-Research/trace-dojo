@@ -78,6 +78,9 @@ class Snapshotter {
       if (cls.behavior.kind !== 'class') continue;
       for (const [key, value] of displayedEntries(cls, this.runtime, cls.behavior.traceConstants))
         addVariable(variables, `${className}.${key}`, value, this.runtime);
+      for (const [key, property] of cls.properties)
+        if (typeof key === 'string' && property.enumerable && isAccessor(property))
+          variables.referenceVars[`${className}.${key}`] = accessorNode(property);
     }
   }
 

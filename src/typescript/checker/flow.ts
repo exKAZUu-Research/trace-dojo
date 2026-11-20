@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 416 -- Keeps flow state, joins, and reference narrowing together.
+// code-gauge-allow-file fileNcss 418 -- Keeps flow state, joins, and reference narrowing together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -344,8 +344,9 @@ export class Flow {
       if (isAnyLike(type) || isIntrinsic(type, 'unknown')) {
         const narrowed = typeofTypes[name];
         if (narrowed) return narrowed();
+        if (isAnyLike(type)) return type;
         if (name === 'object') return unionOf([nonPrimitiveType, nullType]);
-        if (name === 'function') return isAnyLike(type) ? type : this.c.globalType('Function');
+        if (name === 'function') return this.c.globalType('Function');
         return type;
       }
       const kept = filterType(type, (member) => this.typeofMatches(member, name) !== false);

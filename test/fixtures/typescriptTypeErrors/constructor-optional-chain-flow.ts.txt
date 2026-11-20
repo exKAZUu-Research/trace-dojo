@@ -1,0 +1,47 @@
+class ComputedCall {
+  value;
+  constructor(receiver: any) { receiver?.[this.value = 1](); }
+}
+class ComputedRead {
+  value;
+  constructor(receiver: any) { console.log(receiver?.[this.value = 2]); }
+}
+class ContinuingChain {
+  value;
+  constructor(receiver: any) { receiver?.method![this.value = 3](); }
+}
+class NestedOptional {
+  value;
+  constructor(receiver: any) { (receiver?.method)?.[this.value = 4](); }
+}
+new ComputedCall(null).value.toFixed();
+new ComputedRead(null).value.toFixed();
+new ContinuingChain(null).value.toFixed();
+new NestedOptional(null).value.toFixed();
+class ChainBreak {
+  value;
+  constructor(receiver: any) { (receiver?.method)(this.value = 5); }
+}
+class Conditional {
+  value;
+  constructor(receiver: any) {
+    if (receiver?.[this.value = 6]) {}
+    else this.value = 7;
+  }
+}
+class Coalescing {
+  value;
+  constructor(receiver: any) { (receiver?.[this.value = 8]) ?? (this.value = 9); }
+}
+class Immediate {
+  value;
+  constructor() { (() => { this.value = 10; })?.(); }
+}
+function controls(receiver: any) {
+  return [
+    new ChainBreak(receiver).value.toFixed(),
+    new Conditional(receiver).value.toFixed(),
+    new Coalescing(receiver).value.toFixed(),
+    new Immediate().value.toFixed(),
+  ];
+}

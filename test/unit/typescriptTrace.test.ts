@@ -163,6 +163,27 @@ console.log(Counter.count, Counter.title);`;
   });
 });
 
+test('static accessor replacements trace their descriptors without invoking getters', () => {
+  const source = `class Fields {
+  static readonly one = 1;
+  static readonly two = 2;
+  static ordinary = 3;
+}
+let calls = 0;
+Object.defineProperty(Fields, 'one', { get() { calls++; return 4; } });
+Object.defineProperty(Fields, 'two', { get() { calls++; return 5; }, set(value: number) { calls++; } });
+Object.defineProperty(Fields, 'ordinary', { set(value: number) { calls++; } });
+console.log(calls, Fields.one, Fields.two, Fields.ordinary, calls);`;
+  const recording = traceProgram('typescript', source, source);
+  expect(recording.stdout).toBe('0 4 5 undefined 2\n');
+  expect(recording.finalVars.calls).toBe(2);
+  expect(recording.traceItems.at(-1)?.referenceVars).toMatchObject({
+    'Fields.one': { kind: 'value', value: '[Getter]', verbatim: true },
+    'Fields.two': { kind: 'value', value: '[Getter/Setter]', verbatim: true },
+    'Fields.ordinary': { kind: 'value', value: '[Setter]', verbatim: true },
+  });
+});
+
 test('displayed object entries retain own __proto__ keys', () => {
   const source = `const parsed = JSON.parse('{"__proto__":7,"name":"item"}');
 const literal = {["__proto__"]: 8};

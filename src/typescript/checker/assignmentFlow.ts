@@ -1,6 +1,6 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
-import { isInlinedInvocation, isOptionalChain, isWithin, named, skipParentheses } from './syntax';
+import { chainObject, isInlinedInvocation, isWithin, named, skipParentheses } from './syntax';
 import { type Type, undefinedType } from './types';
 
 /** What a tracked target may hold at a point: what its assignments gave it, or what a loop's iteration began with. */
@@ -30,6 +30,11 @@ interface JumpTarget {
   isLoop: boolean;
   breaks: Values[];
   continues: Values[];
+}
+
+interface ProtectedPaths {
+  normal: Values;
+  exceptional: Values;
 }
 
 const nestedFunctionTypes = new Set([
@@ -88,8 +93,7 @@ class AssignmentFlow {
   /** The values that reach the read being asked about. */
   atRead: Values;
   private targets: JumpTarget[] = [];
-  /** The values assigned inside each enclosing `try` block, any of which its `catch` clause may start with. */
-  private readonly tryAssignments: Value[][] = [];
+  private readonly exceptionTargets: Values[][] = [];
 
   constructor(
     private readonly isTarget: (left: TreeNode) => boolean,
@@ -178,9 +182,10 @@ class AssignmentFlow {
     const operator = condition.childForFieldName('operator')?.type;
     if (condition.type === 'binary_expression' && (operator === '&&' || operator === '||'))
       return this.logicalBranch(condition, operator, values);
-    const tested = this.expression(condition, values);
+    const stops: Values[] = [];
+    const tested = this.expression(condition, values, stops);
     const constant = constantCondition(condition);
-    return [constant === false ? undefined : tested, constant === true ? undefined : tested];
+    return [constant === false ? undefined : tested, constant === true ? undefined : merge([...stops, tested])];
   }
 
   private logicalBranch(node: TreeNode, operator: '&&' | '||', values: Values): [Values, Values] {
@@ -205,6 +210,8 @@ class AssignmentFlow {
     const entry: LoopEntry = { kind: 'loopEntry' };
     const target: JumpTarget = { isLoop: true, breaks: [], continues: [] };
     const returnCount = this.returns.length;
+    const exceptions = this.exceptionTargets.at(-1);
+    const exceptionCount = exceptions?.length ?? 0;
     this.targets.push(target);
     let iteration: { tested: Values; next: Values };
     try {
@@ -218,6 +225,9 @@ class AssignmentFlow {
       current && merge(current.map((value) => (value === entry ? iterationStart : [value])));
     for (let index = returnCount; index < this.returns.length; index++)
       this.returns[index] = replaceEntry(this.returns[index]);
+    if (exceptions)
+      for (let index = exceptionCount; index < exceptions.length; index++)
+        exceptions[index] = replaceEntry(exceptions[index]);
     this.atRead = replaceEntry(this.atRead);
     return merge([replaceEntry(tested), ...target.breaks.map(replaceEntry)]);
   }
@@ -275,30 +285,34 @@ class AssignmentFlow {
     const finalizer = node.childForFieldName('finalizer');
     const finalBody = finalizer && (finalizer.childForFieldName('body') ?? named(finalizer)[0]);
     const returnCount = this.returns.length;
-    const completed = this.tryAndCatch(node, values);
-    if (!finalBody) return completed;
-    // A return leaving the `try` or `catch` runs the `finally` block on its way out; TypeScript's flow lets a `break`
-    // or `continue` skip it. The returns run it together, which gives what running it from each would.
+    const { normal, exceptional } = this.tryAndCatch(node, values);
+    if (!finalBody) return normal;
     const returning = merge(this.returns.splice(returnCount));
+    // A finalizer's own jumps replace the incoming completion. When it finishes, resume that completion.
+    const afterException = this.statement(finalBody, exceptional);
+    this.exceptionTargets.at(-1)?.push(afterException);
     if (returning) this.returns.push(this.statement(finalBody, returning));
-    return this.statement(finalBody, completed);
+    return this.statement(finalBody, normal);
   }
 
-  private tryAndCatch(node: TreeNode, values: Values): Values {
-    const assigned: Value[] = [];
-    this.tryAssignments.push(assigned);
-    let afterTry: Values;
+  private tryAndCatch(node: TreeNode, values: Values): ProtectedPaths {
+    const tried = this.withExceptionTarget(node.childForFieldName('body') as TreeNode, values);
+    const handler = node.childForFieldName('handler')?.childForFieldName('body');
+    if (!handler) return tried;
+    const caught = this.withExceptionTarget(handler, tried.exceptional);
+    return { normal: merge([tried.normal, caught.normal]), exceptional: caught.exceptional };
+  }
+
+  private withExceptionTarget(body: TreeNode, values: Values): ProtectedPaths {
+    // The binder assumes an exception can leave the scope before or after any tracked mutation.
+    const paths: Values[] = [values];
+    this.exceptionTargets.push(paths);
     try {
-      afterTry = this.statement(node.childForFieldName('body') as TreeNode, values);
+      const normal = this.statement(body, values);
+      return { normal, exceptional: merge(paths) };
     } finally {
-      this.tryAssignments.pop();
+      this.exceptionTargets.pop();
     }
-    const handler = node.childForFieldName('handler');
-    const handlerBody = handler?.childForFieldName('body');
-    const afterHandler = handlerBody
-      ? this.statement(handlerBody, merge([values, afterTry, assigned.length > 0 ? assigned : undefined]))
-      : undefined;
-    return merge([afterTry, afterHandler]);
   }
 
   private expressions(nodes: TreeNode[], values: Values): Values {
@@ -307,17 +321,16 @@ class AssignmentFlow {
     return current;
   }
 
-  // code-gauge-allow functionNcss 32 -- Handles the expression forms whose evaluation order changes assignment flow.
-  private expression(node: TreeNode, values: Values): Values {
+  // code-gauge-allow functionNcss 34 -- Handles the expression forms whose evaluation order changes assignment flow.
+  private expression(node: TreeNode, values: Values, chainStops?: Values[]): Values {
     if (!values) return values;
+    const receiver = chainObject(node);
+    if (receiver) return this.chainLink(node, receiver, values, chainStops);
     if (node.id === this.read?.id) this.atRead = merge([this.atRead, values]);
     if (nestedFunctionTypes.has(node.type)) return values;
     switch (node.type) {
       case 'assignment_expression': {
         return this.assignment(node, values);
-      }
-      case 'call_expression': {
-        return this.call(node, values);
       }
       case 'required_parameter':
       case 'optional_parameter': {
@@ -338,16 +351,23 @@ class AssignmentFlow {
         ]);
       }
       case 'binary_expression': {
-        const operator = node.childForFieldName('operator')?.text;
-        if (operator === '&&' || operator === '||') return merge(this.logicalBranch(node, operator, values));
-        const left = this.expression(node.childForFieldName('left') as TreeNode, values);
-        const right = this.expression(node.childForFieldName('right') as TreeNode, left);
-        return operator === '??' ? merge([left, right]) : right;
+        return this.binaryExpression(node, values);
       }
       default: {
         return this.expressions(named(node), values);
       }
     }
+  }
+
+  private binaryExpression(node: TreeNode, values: Value[]): Values {
+    const operator = node.childForFieldName('operator')?.text;
+    if (operator === '&&' || operator === '||') return merge(this.logicalBranch(node, operator, values));
+    const left = node.childForFieldName('left') as TreeNode;
+    const right = node.childForFieldName('right') as TreeNode;
+    if (operator !== '??') return this.expression(right, this.expression(left, values));
+    const stops: Values[] = [];
+    const tested = this.expression(skipParentheses(left), values, stops);
+    return merge([tested, this.expression(right, merge([...stops, tested]))]);
   }
 
   private assignment(node: TreeNode, values: Value[]): Values {
@@ -380,8 +400,9 @@ class AssignmentFlow {
   }
 
   private trackValue(value: Value): Values {
-    for (const assigned of this.tryAssignments) assigned.push(value);
-    return [value];
+    const values = [value];
+    this.exceptionTargets.at(-1)?.push(values);
+    return values;
   }
 
   private logicalAssignment(node: TreeNode, values: Value[]): Values {
@@ -398,15 +419,17 @@ class AssignmentFlow {
     return merge([skipped?.length ? skipped : undefined, assigned]);
   }
 
-  private call(node: TreeNode, values: Values): Values {
-    const callee = node.childForFieldName('function');
-    const argumentsNode = node.childForFieldName('arguments');
-    if (!callee) return values;
-    const before = this.expression(callee, values);
-    const after = argumentsNode ? this.expression(argumentsNode, before) : before;
-    const target = skipParentheses(callee);
-    if (after && isInlinedInvocation(target)) return this.invoked(target, after);
-    return isOptionalChain(node) ? merge([before, after]) : after;
+  private chainLink(node: TreeNode, receiver: TreeNode, values: Values, outerStops?: Values[]): Values {
+    const stops = outerStops ?? [];
+    const before = this.expression(receiver, values, stops);
+    const target = node.type === 'call_expression' ? skipParentheses(receiver) : undefined;
+    const inlined = target && isInlinedInvocation(target) ? target : undefined;
+    if (!inlined && node.childForFieldName('optional_chain')) stops.push(before);
+    const operand = node.childForFieldName(node.type === 'call_expression' ? 'arguments' : 'index');
+    const after = operand ? this.expression(operand, before) : before;
+    if (node.id === this.read?.id) this.atRead = merge([this.atRead, after]);
+    const completed = after && inlined ? this.invoked(inlined, after) : after;
+    return outerStops || stops.length === 0 ? completed : merge([...stops, completed]);
   }
 
   private bindingDefault(pattern: TreeNode | null, initializer: TreeNode | null, values: Values): Values {
