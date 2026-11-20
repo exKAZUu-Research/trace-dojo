@@ -1,7 +1,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { chainObject, isInlinedInvocation, isWithin, named, skipParentheses } from './syntax';
-import { type Type, undefinedType } from './types';
+import { anyType, type Type, undefinedType } from './types';
 
 /** What a tracked target may hold at a point: what its assignments gave it, or what a loop's iteration began with. */
 type Value = object;
@@ -62,7 +62,8 @@ export function typesAtConstructorExit(body: TreeNode, name: string, assignments
     assignments
   );
   const end = flow.statement(body, [undefinedType]);
-  return (merge([end, ...flow.returns]) ?? []).filter((value) => !isLoopEntry(value)) as Type[];
+  const exits = merge([end, ...flow.returns]);
+  return exits ? (exits.filter((value) => !isLoopEntry(value)) as Type[]) : [anyType];
 }
 
 const LOGICAL_ASSIGNMENTS = new Set(['&&=', '||=', '??=']);
