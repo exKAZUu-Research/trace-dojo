@@ -4,7 +4,7 @@ import { sliceRange } from '../compiler';
 import { type DebugPart } from '../debugText';
 import { normalize } from '../infer';
 import { described, fieldsPart, listPart, numberPart } from '../iterDebug';
-import { cloneValue, compareValues, copyValue, valuesEqual } from '../ops';
+import { cloneValue, comparePartialValues, compareValues, copyValue, valuesEqual } from '../ops';
 import { RustPanic } from '../runtime';
 import { shallow, type Type } from '../types';
 import {
@@ -26,7 +26,7 @@ import { extendRoom, withCapacity } from './capacityNatives';
 import { dequeDrain, dequeIter, dequeSlices, withDequeHead } from './dequeHead';
 import { arrayIter, collectVec, heapPop, heapPush, ownedIter, sliceIter } from './iterators';
 import { layoutOf, sizeOf } from './layout';
-import { dedupBy, intoSortedVec, lessByKey, lessByOrd, sortByCachedKey, sortSlice } from './sorting';
+import { dedupBy, intoSortedVec, lessByKey, lessByPartialOrd, sortByCachedKey, sortSlice } from './sorting';
 import {
   call,
   define,
@@ -162,11 +162,11 @@ const sliceNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
     return offset >= 0 && suffix.every((item, index) => valuesEqual(elemType(ctx), item, items[offset + index]));
   },
   sort: ([self], ctx) => {
-    sortSlice(ctx, deref(self), true, lessByOrd(elemType(ctx)));
+    sortSlice(ctx, deref(self), true, lessByPartialOrd(elemType(ctx)));
     return UNIT_VALUE;
   },
   sort_unstable: ([self], ctx) => {
-    sortSlice(ctx, deref(self), false, lessByOrd(elemType(ctx)));
+    sortSlice(ctx, deref(self), false, lessByPartialOrd(elemType(ctx)));
     return UNIT_VALUE;
   },
   sort_by: ([self, f], ctx) => {
@@ -194,7 +194,7 @@ const sliceNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
   is_sorted: ([self], ctx) => {
     const items = sliceItems(deref(self));
     return items.every(
-      (item, index) => index === 0 || (compareValues(elemType(ctx), items[index - 1], item) ?? 1) <= 0
+      (item, index) => index === 0 || (comparePartialValues(elemType(ctx), items[index - 1], item) ?? 1) <= 0
     );
   },
   reverse: ([self]) => {

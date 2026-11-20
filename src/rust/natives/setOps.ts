@@ -44,12 +44,13 @@ interface Context {
 }
 
 /** An iterator of `op` on two `BTreeSet`s, given their elements in order. */
-export function btreeSetOp(
-  op: SetOp,
-  sets: [SetValue, SetValue],
-  items: [Value[], Value[]],
-  context: Context
-): IterValue {
+export function btreeSetOp(op: SetOp, sets: [SetValue, SetValue], elem: Type, setType: Type): IterValue {
+  const items: [Value[], Value[]] = [[...sets[0].entries.values()], [...sets[1].entries.values()]];
+  const context: Context = {
+    cmp: orderOf(elem),
+    contains: (set, value) => set.entries.has(set.entries.key(elem, value)),
+    setType,
+  };
   const step =
     op === 'union' || op === 'symmetric_difference' ? merged(op, items, context) : searched(op, sets, items, context);
   return described(new IterValue(step.next), (show, item) => tuplePart(TUPLE_NAMES[op], [step.debug(show, item)]));
@@ -259,6 +260,6 @@ function valuePart(value: Value | undefined, item: Type, show: DebugValue): Debu
 }
 
 /** The order of two elements of a type, by its `Ord`. */
-export function orderOf(type: Type): Context['cmp'] {
+function orderOf(type: Type): Context['cmp'] {
   return (a, b) => compareValues(type, a, b) ?? 0;
 }

@@ -610,6 +610,51 @@ fn main() {
   });
 });
 
+test('uses Rust comparison traits and callback order in sorting and ordered collections', () => {
+  const program = `use std::cmp::Ordering;
+use std::collections::{BTreeMap, BTreeSet};
+
+#[derive(Debug, Eq, PartialEq)]
+struct P(i32);
+impl Clone for P {
+    fn clone(&self) -> Self { print!("C{} ", self.0); P(self.0) }
+}
+impl Ord for P {
+    fn cmp(&self, other: &Self) -> Ordering {
+        print!("O{}{} ", self.0, other.0);
+        self.0.cmp(&other.0)
+    }
+}
+impl PartialOrd for P {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        print!("P{}{} ", self.0, other.0);
+        Some(self.0.cmp(&other.0))
+    }
+}
+
+fn main() {
+    let mut v = vec![P(2), P(1), P(3)];
+    v.sort();
+    println!("sort {:?}", v);
+    println!("sorted {}", v.iter().is_sorted());
+    println!("max {:?}", v.iter().max());
+    let a = BTreeSet::from([P(1), P(3), P(5)]);
+    println!("first {:?}", a);
+    let b: BTreeSet<_> = [P(2), P(3), P(6)].into_iter().collect();
+    println!("second {:?}", b);
+    println!("union {:?}", &a | &b);
+    println!("symmetric difference {:?}", &a ^ &b);
+    let map: BTreeMap<_, _> = [(P(2), 1), (P(1), 2), (P(2), 3)].into_iter().collect();
+    println!("map {:?}", map);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'P12 P32 sort [P(1), P(2), P(3)]\nP12 P23 sorted true\nO12 O23 max Some(P(3))\nP31 P53 first {P(1), P(3), P(5)}\nP32 P63 second {P(2), P(3), P(6)}\nO12 C1 O32 C2 O33 C3 O56 C5 C6 union {P(1), P(2), P(3), P(5), P(6)}\nO12 C1 O32 C2 O33 O56 C5 C6 symmetric difference {P(1), P(2), P(5), P(6)}\nO12 O22 map {P(1): 2, P(2): 3}\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

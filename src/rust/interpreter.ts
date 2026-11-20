@@ -78,14 +78,7 @@ export class Interpreter implements CallSupport {
         if (!found) return;
         return this.callDispatched(found, type, [a, b]) as boolean;
       },
-      cmp: (type, a, b) => {
-        const ord = this.userTraitMethod('Ord', type, 'cmp');
-        if (ord) return { order: (this.callDispatched(ord, type, [a, b]) as EnumValue).variant - 1 };
-        const partial = this.userTraitMethod('PartialOrd', type, 'partial_cmp');
-        if (!partial) return;
-        const result = this.callDispatched(partial, type, [a, b]) as EnumValue;
-        return { order: result.variant === 0 ? undefined : (result.fields[0] as EnumValue).variant - 1 };
-      },
+      cmp: (type, a, b, partial) => this.userCompare(type, a, b, partial),
       clone: (type, value) => {
         const found = this.userTraitMethod('Clone', type, 'clone');
         if (!found) return;
@@ -93,6 +86,16 @@ export class Interpreter implements CallSupport {
       },
       fieldTypes,
     });
+  }
+
+  private userCompare(type: Type, a: Value, b: Value, partial: boolean): { order: number | undefined } | undefined {
+    const compare = partial
+      ? this.userTraitMethod('PartialOrd', type, 'partial_cmp')
+      : this.userTraitMethod('Ord', type, 'cmp');
+    if (!compare) return;
+    const result = this.callDispatched(compare, type, [a, b]) as EnumValue;
+    if (!partial) return { order: result.variant - 1 };
+    return { order: result.variant === 0 ? undefined : (result.fields[0] as EnumValue).variant - 1 };
   }
 
   // -------------------------------------------------------------------------------------------------------------------

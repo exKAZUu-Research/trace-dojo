@@ -18,7 +18,7 @@ import { checkTableCapacity } from './capacityNatives';
 import { defaultValue } from './core';
 import { arrayIter, mapIter, setIter } from './iterators';
 import { sizeOf } from './layout';
-import { btreeSetOp, orderOf, type SetOp } from './setOps';
+import { btreeSetOp, type SetOp } from './setOps';
 import { call, define, deref, libraryPanic, type Native, type NativeContext, none, option, some } from './support';
 
 /** A new `HashMap` or `HashSet` with its entries' size, and with room for `capacity` elements. */
@@ -90,11 +90,7 @@ const others = (
 const btree = (ctx: NativeContext, op: SetOp, self: Value, other: Value): Value => {
   const sets: [SetValue, SetValue] = [set(self), set(other)];
   const type = keyType(ctx);
-  return btreeSetOp(op, sets, [setValues(sets[0]), setValues(sets[1])], {
-    cmp: orderOf(type),
-    contains: (s, value) => s.entries.has(s.entries.key(type, value)),
-    setType: ctx.interp.program.builtinType('BTreeSet', [type]),
-  });
+  return btreeSetOp(op, sets, type, ctx.interp.program.builtinType('BTreeSet', [type]));
 };
 
 /** The type of the keys, which hashes them: `K` of `HashMap<K, V>`. */

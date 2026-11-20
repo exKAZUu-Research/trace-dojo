@@ -24,7 +24,7 @@ export interface UserImpls {
   allocate(count: number): void;
   spend(count: number): void;
   eq?(type: Type, a: Value, b: Value, rhs: Type): boolean | undefined;
-  cmp?(type: Type, a: Value, b: Value): { order: number | undefined } | undefined;
+  cmp?(type: Type, a: Value, b: Value, partial: boolean): { order: number | undefined } | undefined;
   clone?(type: Type, value: Value): { value: Value } | undefined;
   /** Substitutes a generic type's parameters with its arguments in a field's type. */
   fieldTypes(def: AdtDef, args: Type[], variant: number): Type[];
@@ -343,12 +343,12 @@ function setsEqual(type: Type, left: SetValue, right: SetValue): boolean {
 /** Compares two values of a type, as `Ord::cmp` and `PartialOrd::partial_cmp` do; NaN compares as `undefined`. */
 // code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of type.
 // code-gauge-allow functionNcss 34 -- One case per kind of type.
-export function compareValues(type: Type, a: Value, b: Value): number | undefined {
+export function compareValues(type: Type, a: Value, b: Value, partial = false): number | undefined {
   const t = derefType(type);
   const x = deref(a);
   const y = deref(b);
   if (t.kind === 'adt') {
-    const user = hooks?.cmp?.(t, x, y);
+    const user = hooks?.cmp?.(t, x, y, partial);
     if (user) return user.order;
   }
   switch (t.kind) {
@@ -370,17 +370,17 @@ export function compareValues(type: Type, a: Value, b: Value): number | undefine
     }
     case 'tuple': {
       for (const [index, elem] of t.elems.entries()) {
-        const order = compareValues(elem, (x as Value[])[index], (y as Value[])[index]);
+        const order = compareValues(elem, (x as Value[])[index], (y as Value[])[index], partial);
         if (order !== 0) return order;
       }
       return 0;
     }
     case 'array':
     case 'slice': {
-      return compareSequences(t.elem, sliceItems(x), sliceItems(y));
+      return compareSequences(t.elem, sliceItems(x), sliceItems(y), partial);
     }
     case 'adt': {
-      return compareAdt(t, x, y);
+      return compareAdt(t, x, y, partial);
     }
     default: {
       return 0;
@@ -388,9 +388,13 @@ export function compareValues(type: Type, a: Value, b: Value): number | undefine
   }
 }
 
+export function comparePartialValues(type: Type, a: Value, b: Value): number | undefined {
+  return compareValues(type, a, b, true);
+}
+
 // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of type.
 // code-gauge-allow functionNcss 37 -- One case per kind of type.
-function compareAdt(t: Type & { kind: 'adt' }, x: Value, y: Value): number | undefined {
+function compareAdt(t: Type & { kind: 'adt' }, x: Value, y: Value, partial: boolean): number | undefined {
   const { def } = t;
   switch (def.builtin) {
     case 'String': {
@@ -398,17 +402,22 @@ function compareAdt(t: Type & { kind: 'adt' }, x: Value, y: Value): number | und
     }
     case 'Vec':
     case 'VecDeque': {
-      return compareSequences(t.args[0], x as Value[], y as Value[]);
+      return compareSequences(t.args[0], x as Value[], y as Value[], partial);
     }
     case 'Box': {
-      return compareValues(t.args[0], x, y);
+      return compareValues(t.args[0], x, y, partial);
     }
     case 'Reverse': {
-      const order = compareValues(t.args[0], (x as StructValue).fields[0], (y as StructValue).fields[0]);
+      const order = compareValues(t.args[0], (x as StructValue).fields[0], (y as StructValue).fields[0], partial);
       return order === undefined ? undefined : -order;
     }
     case 'BTreeSet': {
-      return compareSequences(t.args[0], [...(x as SetValue).entries.values()], [...(y as SetValue).entries.values()]);
+      return compareSequences(
+        t.args[0],
+        [...(x as SetValue).entries.values()],
+        [...(y as SetValue).entries.values()],
+        partial
+      );
     }
     case 'Ordering': {
       return Math.sign((x as EnumValue).variant - (y as EnumValue).variant);
@@ -417,7 +426,7 @@ function compareAdt(t: Type & { kind: 'adt' }, x: Value, y: Value): number | und
       if (x instanceof StructValue && y instanceof StructValue) {
         const types = fieldTypes(def, t.args, 0);
         for (const [index, type] of types.entries()) {
-          const order = compareValues(type, x.fields[index], y.fields[index]);
+          const order = compareValues(type, x.fields[index], y.fields[index], partial);
           if (order !== 0) return order;
         }
         return 0;
@@ -430,7 +439,7 @@ function compareAdt(t: Type & { kind: 'adt' }, x: Value, y: Value): number | und
         }
         const types = fieldTypes(def, t.args, x.variant);
         for (const [index, type] of types.entries()) {
-          const order = compareValues(type, x.fields[index], y.fields[index]);
+          const order = compareValues(type, x.fields[index], y.fields[index], partial);
           if (order !== 0) return order;
         }
         return 0;
@@ -440,10 +449,10 @@ function compareAdt(t: Type & { kind: 'adt' }, x: Value, y: Value): number | und
   }
 }
 
-function compareSequences(elem: Type, xs: Value[], ys: Value[]): number | undefined {
+function compareSequences(elem: Type, xs: Value[], ys: Value[], partial: boolean): number | undefined {
   const length = Math.min(xs.length, ys.length);
   for (let index = 0; index < length; index++) {
-    const order = compareValues(elem, xs[index], ys[index]);
+    const order = compareValues(elem, xs[index], ys[index], partial);
     if (order !== 0) return order;
   }
   return Math.sign(xs.length - ys.length);

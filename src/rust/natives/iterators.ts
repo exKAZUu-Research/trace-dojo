@@ -4,7 +4,16 @@ import type { DebugPart } from '../debugText';
 import { normalize } from '../infer';
 import { type DebugValue, described, fieldsPart, iteratorDebug, numberPart, optionPart } from '../iterDebug';
 import { intoIterShape } from '../iterTypes';
-import { castValue, cloneValue, compareValues, copyValue, needsCopy, valuesEqual, wrap } from '../ops';
+import {
+  castValue,
+  cloneValue,
+  comparePartialValues,
+  compareValues,
+  copyValue,
+  needsCopy,
+  valuesEqual,
+  wrap,
+} from '../ops';
 import { iteratorCapability } from '../traits';
 import { shallow, type Type } from '../types';
 import {
@@ -24,6 +33,7 @@ import {
 } from '../values';
 import { layoutOf, sizeOf } from './layout';
 import { rangeIterator } from './rangeIterator';
+import { lessByPartialOrd, sortSlice } from './sorting';
 import { call, define, deref, libraryPanic, type NativeContext, none, option, placeOf, some } from './support';
 
 /** An iterator over an array's elements from `start` to `end`, from both ends. */
@@ -953,7 +963,7 @@ define({
     if (previous === DONE) return true;
     return (
       each(ctx, iter, (item) => {
-        const order = compareValues(ctx.typeArgs[0], previous as Value, item);
+        const order = comparePartialValues(ctx.typeArgs[0], previous as Value, item);
         previous = item;
         return order === undefined || order > 0 ? false : undefined;
       }) ?? true
@@ -1179,7 +1189,7 @@ function inPlaceSource(iter: IterValue, shape: Type): IterValue | undefined {
 
 /** Collects elements into a collection of the type `collect` was asked for. */
 // code-gauge-allow functionCognitiveComplexity 25 -- One native per method of the standard library.
-// code-gauge-allow functionNcss 54 -- One native per method of the standard library.
+// code-gauge-allow functionNcss 56 -- One case per collection type.
 export function collectInto(ctx: NativeContext, items: Value[], target: Type, item: Type): Value {
   const t = normalize(shallow(target));
   if (t.kind !== 'adt') throw new Error('collect into a non-collection');
@@ -1199,9 +1209,11 @@ export function collectInto(ctx: NativeContext, items: Value[], target: Type, it
     case 'String': {
       return items.map((element) => deref(element) as string).join('');
     }
-    case 'HashMap':
     case 'BTreeMap': {
-      const map = new MapValue(t.def.builtin === 'BTreeMap');
+      return collectBTreeMap(ctx, items as [Value, Value][], t.args[0], item);
+    }
+    case 'HashMap': {
+      const map = new MapValue(false);
       sizeTable(map.entries.table, sizeOf({ kind: 'tuple', elems: t.args }));
       for (const entry of items as Value[][]) {
         const hash = map.entries.key(t.args[0], entry[0]);
@@ -1211,9 +1223,11 @@ export function collectInto(ctx: NativeContext, items: Value[], target: Type, it
       }
       return map;
     }
-    case 'HashSet':
     case 'BTreeSet': {
-      const set = new SetValue(t.def.builtin === 'BTreeSet');
+      return collectBTreeSet(ctx, items, t.args[0]);
+    }
+    case 'HashSet': {
+      const set = new SetValue(false);
       sizeTable(set.entries.table, sizeOf(t.args[0]));
       for (const element of items) {
         const hash = set.entries.key(t.args[0], element);
@@ -1245,6 +1259,47 @@ export function collectInto(ctx: NativeContext, items: Value[], target: Type, it
       throw new Error(`collect into ${t.def.name}`);
     }
   }
+}
+
+function collectBTreeMap(ctx: NativeContext, pairs: [Value, Value][], key: Type, item: Type): MapValue {
+  const map = new MapValue(true);
+  sortSlice(ctx, pairs, true, (a, b) => (compareValues(key, (a as Value[])[0], (b as Value[])[0]) ?? 0) < 0, item);
+  addLastOfEqualKeys(
+    ctx,
+    pairs,
+    (entry) => entry[0],
+    key,
+    (entry) => map.entries.appendOrdered(entry)
+  );
+  return map;
+}
+
+function collectBTreeSet(ctx: NativeContext, items: Value[], elem: Type): SetValue {
+  const set = new SetValue(true);
+  sortSlice(ctx, items, true, lessByPartialOrd(elem), elem);
+  addLastOfEqualKeys(
+    ctx,
+    items,
+    (value) => value,
+    elem,
+    (value) => set.entries.appendOrdered(value)
+  );
+  return set;
+}
+
+function addLastOfEqualKeys<T extends Value>(
+  ctx: NativeContext,
+  items: T[],
+  keyOf: (item: T) => Value,
+  keyType: Type,
+  add: (item: T) => void
+): void {
+  ctx.runtime.withRoots(items, () => {
+    for (let index = 0; index < items.length; index++) {
+      const item = items[index];
+      if (index + 1 === items.length || !valuesEqual(keyType, keyOf(item), keyOf(items[index + 1]))) add(item);
+    }
+  });
 }
 
 /** Builds a max-heap from elements as `BinaryHeap::from(vec)` does: sifting down from the last parent to the root. */

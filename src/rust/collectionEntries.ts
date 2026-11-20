@@ -89,6 +89,11 @@ export class CollectionEntries<V> {
     return this.table?.values() ?? this.ordered.values();
   }
 
+  appendOrdered(value: V): void {
+    this.ordered.push(value);
+    this.treeRoot = true;
+  }
+
   range(type: Type, start: Value, end: Value, inclusive: boolean): V[] {
     const first = start === undefined ? 0 : this.orderedKey(type, start).index;
     if (end === undefined) return this.ordered.slice(first);

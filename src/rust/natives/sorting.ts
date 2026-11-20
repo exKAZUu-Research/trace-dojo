@@ -1,4 +1,4 @@
-import { compareValues } from '../ops';
+import { comparePartialValues, compareValues } from '../ops';
 import { type IntName, intType, type Type } from '../types';
 import { ElementPlace, sliceItems, sliceSet, UNIT_VALUE, type Value } from '../values';
 import { sizeOf } from './layout';
@@ -12,12 +12,13 @@ export function sortSlice(
   ctx: NativeContext,
   slice: Value,
   stable: boolean,
-  isLess: (a: Value, b: Value) => boolean
+  isLess: (a: Value, b: Value) => boolean,
+  elementType = ctx.typeArgs[0]
 ): void {
   const items = sliceItems(slice);
   ctx.runtime.nativeRoots.push(items);
   try {
-    (stable ? stableSort : unstableSort)(items, isLess, sortElement(ctx, ctx.typeArgs[0]), () => ordViolation(ctx));
+    (stable ? stableSort : unstableSort)(items, isLess, sortElement(ctx, elementType), () => ordViolation(ctx));
     for (const [index, item] of items.entries()) sliceSet(slice, index, item);
   } finally {
     ctx.runtime.nativeRoots.pop();
@@ -37,8 +38,8 @@ function ordViolation(ctx: NativeContext): never {
 }
 
 /** `a < b` by `Ord`, as `sort` compares its elements. */
-export function lessByOrd(type: Type): (a: Value, b: Value) => boolean {
-  return (a, b) => (compareValues(type, a, b) ?? 0) < 0;
+export function lessByPartialOrd(type: Type): (a: Value, b: Value) => boolean {
+  return (a, b) => (comparePartialValues(type, a, b) ?? 0) < 0;
 }
 
 /** `f(a) < f(b)`, as `sort_by_key` compares, computing both keys at each comparison. */
@@ -46,7 +47,7 @@ export function lessByKey(ctx: NativeContext, f: Value): (a: Value, b: Value) =>
   const keyType = ctx.typeArgs[1];
   return (a, b) => {
     const keyA = call(ctx, f, [a]);
-    return (compareValues(keyType, keyA, call(ctx, f, [b])) ?? 0) < 0;
+    return (comparePartialValues(keyType, keyA, call(ctx, f, [b])) ?? 0) < 0;
   };
 }
 

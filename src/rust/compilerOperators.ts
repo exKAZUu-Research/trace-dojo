@@ -1,14 +1,23 @@
 import type { Expr, Span } from './ast';
 import { changeString, concatStrings, sizeTable } from './capacity';
 import type { Compiler, Eval } from './compiler';
-import { derefAll, stringish, stripRefs } from './compilerCommon';
+import { derefAll, evaluateValues, stringish, stripRefs } from './compilerCommon';
 import { normalize } from './infer';
-import { cloneValue, compareValues, floatArith, intArith, overflow, valuesEqual, wrap } from './ops';
+import { btreeSetOp, type SetOp } from './natives/setOps';
+import { cloneValue, comparePartialValues, floatArith, intArith, overflow, valuesEqual, wrap } from './ops';
+import type { Frame } from './runtime';
 import { runtimeType } from './runtimeTypes';
 import { type IntName, resolve, shallow, type Type } from './types';
-import { type Place, SetValue, UNIT_VALUE, type Value } from './values';
+import { DONE, type Place, SetValue, UNIT_VALUE, type Value } from './values';
 
 type ExprOf<K extends Expr['kind']> = Extract<Expr, { kind: K }>;
+
+const BTREE_OPS: Record<string, SetOp> = {
+  '|': 'union',
+  '&': 'intersection',
+  '-': 'difference',
+  '^': 'symmetric_difference',
+};
 
 export function compileUnary(c: Compiler, expr: ExprOf<'unary'>): Eval {
   const operand = expr.op === '*' ? c.read(expr.operand) : c.value(expr.operand);
@@ -70,7 +79,7 @@ function comparison(expr: ExprOf<'binary'>, left: Eval, right: Eval): Eval {
   };
   const test = tests[op];
   return (frame) => {
-    const order = compareValues(compareType(frame), left(frame), right(frame));
+    const order = comparePartialValues(compareType(frame), left(frame), right(frame));
     return order !== undefined && test(order);
   };
 }
@@ -81,6 +90,11 @@ function arithmetic(expr: ExprOf<'binary'>, left: Eval, right: Eval, rightCoerce
   const span = expr.span;
   if (type.kind === 'adt' && (type.def.builtin === 'HashSet' || type.def.builtin === 'BTreeSet')) {
     const elem = runtimeType(type.args[0]);
+    if (type.def.builtin === 'BTreeSet') {
+      const setType = runtimeType(type);
+      const merge = BTREE_OPS[op];
+      return (frame) => mergeOrderedSets(merge, frame, left, right, elem(frame), setType(frame));
+    }
     return (frame) =>
       setOperation(op, derefAll(left(frame)) as SetValue, derefAll(right(frame)) as SetValue, elem(frame));
   }
@@ -169,6 +183,20 @@ function numericType(type: Type): Type {
 
 function intBitsOf(name: IntName): number {
   return name === 'usize' || name === 'isize' ? 64 : Number(name.slice(1));
+}
+
+function mergeOrderedSets(op: SetOp, frame: Frame, left: Eval, right: Eval, elem: Type, setType: Type): SetValue {
+  const [a, b] = evaluateValues(frame, [left, right]).map((value) => derefAll(value) as SetValue);
+  const result = new SetValue(true);
+  return frame.runtime.withRoots([a, b, result], () => {
+    const iter = btreeSetOp(op, [a, b], elem, setType);
+    for (let item = iter.next(); item !== DONE; item = iter.next()) {
+      frame.runtime.spend();
+      frame.runtime.allocate(1);
+      result.entries.appendOrdered(cloneValue(elem, item));
+    }
+    return result;
+  });
 }
 
 /** The set that `|`, `&`, `-`, or `^` makes of two sets, of clones of their elements, in the order they iterate. */

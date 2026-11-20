@@ -2,7 +2,7 @@ import { TURTLE_METHOD_NAMES, type TurtleState } from '../../interpreter/turtleW
 import { madeString, sizeTable } from '../capacity';
 import { DEFAULT_SPEC } from '../fmt';
 import { normalize } from '../infer';
-import { castValue, cloneValue, compareValues, valuesEqual } from '../ops';
+import { castValue, cloneValue, comparePartialValues, compareValues, valuesEqual } from '../ops';
 import { FmtFailure, ProcessExit, RustPanic } from '../runtime';
 import { intMax, type IntName, shallow, substitute as substituteType, type Type } from '../types';
 import { utf8Bytes } from '../utf8';
@@ -255,20 +255,20 @@ define({
   'PartialEq::eq': ([self, other], ctx) => valuesEqual(selfType(ctx), self, other),
   'PartialEq::ne': ([self, other], ctx) => !valuesEqual(selfType(ctx), self, other),
   'PartialOrd::partial_cmp': ([self, other], ctx) => {
-    const order = compareValues(selfType(ctx), self, other);
+    const order = comparePartialValues(selfType(ctx), self, other);
     return order === undefined ? none(ctx) : some(ctx, ordering(ctx, order));
   },
-  'PartialOrd::lt': ([self, other], ctx) => (compareValues(selfType(ctx), self, other) ?? 0) < 0,
+  'PartialOrd::lt': ([self, other], ctx) => (comparePartialValues(selfType(ctx), self, other) ?? 0) < 0,
   'PartialOrd::le': ([self, other], ctx) => {
-    const order = compareValues(selfType(ctx), self, other);
+    const order = comparePartialValues(selfType(ctx), self, other);
     return order !== undefined && order <= 0;
   },
   'PartialOrd::gt': ([self, other], ctx) => {
-    const order = compareValues(selfType(ctx), self, other);
+    const order = comparePartialValues(selfType(ctx), self, other);
     return order !== undefined && order > 0;
   },
   'PartialOrd::ge': ([self, other], ctx) => {
-    const order = compareValues(selfType(ctx), self, other);
+    const order = comparePartialValues(selfType(ctx), self, other);
     return order !== undefined && order >= 0;
   },
   'Ord::cmp': ([self, other], ctx) => ordering(ctx, compareValues(selfType(ctx), self, other) ?? 0),
@@ -378,20 +378,20 @@ define({
   'RangeInclusive<_>::contains': ([self, item], ctx) => rangeContains(ctx, deref(self) as RangeValue, item),
   'Range<_>::is_empty': ([self], ctx) => {
     const range = deref(self) as RangeValue;
-    return !((compareValues(ctx.typeArgs[0], range.start, range.end) ?? 1) < 0);
+    return !((comparePartialValues(ctx.typeArgs[0], range.start, range.end) ?? 1) < 0);
   },
   'RangeInclusive<_>::is_empty': ([self], ctx) => {
     const range = deref(self) as RangeValue;
-    return range.exhausted || !((compareValues(ctx.typeArgs[0], range.start, range.end) ?? 1) <= 0);
+    return range.exhausted || !((comparePartialValues(ctx.typeArgs[0], range.start, range.end) ?? 1) <= 0);
   },
 });
 
 function rangeContains(ctx: NativeContext, range: RangeValue, item: Value): boolean {
   const type = ctx.typeArgs[0];
   const value = deref(item);
-  if (range.start !== undefined && (compareValues(type, range.start, value) ?? 1) > 0) return false;
+  if (range.start !== undefined && (comparePartialValues(type, range.start, value) ?? 1) > 0) return false;
   if (range.end === undefined) return true;
-  const order = compareValues(type, value, range.end);
+  const order = comparePartialValues(type, value, range.end);
   if (order === undefined) return false;
   return range.inclusive ? order <= 0 : order < 0;
 }
