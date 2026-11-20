@@ -5270,6 +5270,7 @@ test('gc_collect_cycles() defers what destructors of deferred objects attach or 
   for (const [make, expected] of [
     ['$this->c = new stdClass;', 'E;int(1)\nint(2)\nint(0)\n'],
     ['$g = new G; $g->self = $g; $g->c = [new stdClass];', 'E;G;int(1)\nint(4)\nint(0)\n'],
+    ['$a = []; $a["self"] = &$a; unset($a);', 'E;int(1)\nint(2)\nint(0)\n'],
   ]) {
     expect(
       run(
