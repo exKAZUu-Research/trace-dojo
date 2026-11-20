@@ -1,19 +1,10 @@
-import { execFileSync } from 'node:child_process';
-
 import { expect, test } from 'vitest';
 import { z } from 'zod';
 
+import { runHaskellUnderNode } from '../helpers/haskellUnderNode';
+
 test('repeated ready lists stay bounded on both sides of the display element limit', { timeout: 30_000 }, () => {
-  const bundle = execFileSync(
-    'bun',
-    ['build', 'test/helpers/haskellReadyListTrace.ts', '--target=node', '--packages=external'],
-    { encoding: 'utf8', timeout: 30_000, maxBuffer: 16 * 1024 * 1024 }
-  );
-  const output = execFileSync('node', ['--max-old-space-size=256', '--input-type=module'], {
-    input: bundle,
-    encoding: 'utf8',
-    timeout: 15_000,
-  });
+  const output = runHaskellUnderNode('test/helpers/haskellReadyListTrace.ts', 256, [], 15_000);
   const summaries = z
     .array(
       z.object({

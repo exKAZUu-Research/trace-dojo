@@ -1,9 +1,7 @@
-import { execFileSync } from 'node:child_process';
-
 import { expect, test } from 'vitest';
 import { z } from 'zod';
 
-const bundles = new Map<string, string>();
+import { runHaskellUnderNode } from '../helpers/haskellUnderNode';
 
 test('shared reference views serialize and render within a bounded heap', { timeout: 30_000 }, () => {
   const output = runHelper('test/helpers/haskellDisplayOutput.ts', 512);
@@ -175,21 +173,5 @@ test('trace stops when visible-name metadata exceeds export capacity', { timeout
 });
 
 function runHelper(path: string, heap: number, args: string[] = []): unknown {
-  let bundle = bundles.get(path);
-  if (bundle === undefined) {
-    bundle = execFileSync('bun', ['build', path, '--target=node', '--packages=external'], {
-      encoding: 'utf8',
-      timeout: 30_000,
-      maxBuffer: 16 * 1024 * 1024,
-    });
-    bundles.set(path, bundle);
-  }
-  return JSON.parse(
-    execFileSync('node', [`--max-old-space-size=${heap}`, '--input-type=module', '-', ...args], {
-      input: bundle,
-      encoding: 'utf8',
-      timeout: 10_000,
-      maxBuffer: 1024 * 1024,
-    })
-  );
+  return JSON.parse(runHaskellUnderNode(path, heap, args, 10_000));
 }
