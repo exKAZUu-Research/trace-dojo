@@ -515,7 +515,7 @@ export class FunctionChecker {
   private checkOverloads(symbol: Sym, implementation: TreeNode, signature: Signature): void {
     const overloads = symbol.valueDeclarations
       .filter((declaration) => declaration.type === 'function_signature')
-      .map((overload) => this.c.signatures.signatureOf(this.c.nativeOverload(overload)));
+      .map((overload) => this.c.signatures.signatureOf(overload));
     this.checkOverloadCompatibility(signature, overloads, implementation);
   }
 

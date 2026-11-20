@@ -45,6 +45,7 @@ const typeParameterOwners = new Set([
 /** The scopes of a program: which names each node can see, as values and as types. */
 export class Binder {
   private readonly scopes = new Map<number, Scope>();
+  private readonly deferredInterfaceBodies = new Set<number>();
   /** The identifiers that name what an assignment changes, to find the variables a program reassigns. */
   private readonly assignedIdentifiers: TreeNode[] = [];
   readonly moduleScope: Scope;
@@ -70,12 +71,19 @@ export class Binder {
   constructor(
     root: TreeNode,
     readonly globalScope: Scope,
-    rootScope?: Scope
+    private readonly options?: { rootScope?: Scope; deferInterfaceBodies?: boolean }
   ) {
-    this.moduleScope = rootScope ?? new Scope('module', globalScope, root);
+    this.moduleScope = options?.rootScope ?? new Scope('module', globalScope, root);
     this.scopes.set(root.id, this.moduleScope);
     this.bindChildren(root, this.moduleScope);
     this.markAssignments();
+  }
+
+  bindDeferredInterfaceBody(declaration: TreeNode, body: TreeNode): boolean {
+    if (!this.deferredInterfaceBodies.delete(body.id)) return false;
+    const scope = this.scopes.get(declaration.id);
+    if (scope) this.bindChildren(body, scope);
+    return true;
   }
 
   private markAssignments(): void {
@@ -166,6 +174,10 @@ export class Binder {
   private bindTypeDeclaration(node: TreeNode, scope: Scope, kind: 'interface' | 'alias'): void {
     const name = node.childForFieldName('name');
     if (name) scope.declareType(name.text, kind, node, name);
+    if (kind === 'interface' && this.options?.deferInterfaceBodies) {
+      const body = node.childForFieldName('body');
+      if (body) this.deferredInterfaceBodies.add(body.id);
+    }
     this.bindTypeParameterOwner(node, scope);
   }
 
@@ -268,7 +280,9 @@ export class Binder {
   private bindTypeParameterOwner(node: TreeNode, scope: Scope): void {
     const ownerScope = this.newScope(node, 'block', scope);
     this.declareTypeParameters(node, ownerScope);
-    this.bindChildren(node, ownerScope);
+    for (const child of named(node)) {
+      if (!this.deferredInterfaceBodies.has(child.id)) this.bind(child, ownerScope);
+    }
   }
 
   // code-gauge-allow functionCognitiveComplexity 16 -- Binds ambient variables with their declaration kind and initialized resolution mode, functions with parameter scopes, and other ambient forms recursively.
@@ -343,10 +357,10 @@ export function symbolDeclaredBy(scope: Scope, name: string): Sym | undefined {
   return scope.values.get(name);
 }
 
-function assignmentOwner(scope: Scope): Scope {
+function assignmentOwner(scope: Scope): number | undefined {
   let owner = scope.functionScope;
   while (owner.node?.type === 'class_static_block' && owner.parent) owner = owner.parent.functionScope;
-  return owner;
+  return owner.node?.id;
 }
 
 function assignmentEnd(identifier: TreeNode, declarationStart: number): number {

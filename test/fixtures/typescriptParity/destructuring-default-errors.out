@@ -1,0 +1,12 @@
+Cannot read properties of null (reading 'a')
+Cannot read properties of undefined (reading 'a')
+Cannot destructure property 'a' of 'nil' as it is null.
+Cannot destructure 'nil' as it is null.
+Cannot destructure property 'a' of '{}' as it is null.
+Cannot destructure property 'a' of '{(intermediate value)}' as it is undefined.
+Cannot destructure property 'b' of '{}' as it is null.
+Cannot read properties of null (reading 'b')
+Cannot read properties of null (reading 'a')
+Cannot destructure property 'a' of '{}' as it is null.
+Cannot read properties of null (reading 'a')
+Cannot destructure property 'a' of '{}' as it is null.

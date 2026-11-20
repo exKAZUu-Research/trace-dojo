@@ -376,11 +376,15 @@ export function referenceBase(reference: Reference): Value {
 
 /** V8's TypeError for taking apart `null` or `undefined`, which names the first property and the source. */
 function destructuringMessage(pattern: Extract<Pattern, { kind: 'objectPattern' }>, value: null | undefined): string {
-  const first = pattern.properties[0]?.key;
-  const name = first?.kind === 'key' ? first.key : undefined;
-  if (pattern.isNested)
+  const first = pattern.properties[0];
+  const name = first?.key.kind === 'key' ? first.key.key : undefined;
+  const binding = first?.value;
+  const defaultSource = name !== undefined && binding?.kind === 'default' ? binding.initializerSource : undefined;
+  const defaultRead = name !== undefined && binding?.kind === 'default' && !defaultSource;
+  if (!defaultSource && (pattern.isNested || defaultRead))
     return `Cannot read properties of ${String(value)}${name === undefined ? '' : ` (reading '${name}')`}`;
-  const source = pattern.source?.text ?? (pattern.namesType && value === null ? 'object null' : String(value));
+  const source =
+    (defaultSource ?? pattern.source)?.text ?? (pattern.namesType && value === null ? 'object null' : String(value));
   return name === undefined
     ? `Cannot destructure '${source}' as it is ${String(value)}.`
     : `Cannot destructure property '${name}' of '${source}' as it is ${String(value)}.`;

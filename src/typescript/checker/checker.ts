@@ -15,14 +15,7 @@ import { Flow } from './flow';
 import { FunctionChecker } from './functions';
 import { mergedPatternIndexes } from './indexInfos';
 import { TypeInference } from './inference';
-import {
-  domInterfaceTree,
-  libraryScope,
-  libraryTree,
-  localeOptionsTree,
-  markUnsupported,
-  nativeOverloadTree,
-} from './library';
+import { libraryScope, libraryTree, localeOptionsTree, markUnsupported } from './library';
 import { LiteralChecker } from './literals';
 import { MemberChecker } from './members';
 import { intersectConstructSignatures } from './mixinConstructors';
@@ -97,7 +90,6 @@ export class Checker {
   readonly binder: Binder;
   readonly libraryBinder: Binder;
   readonly localeOptionsBinder: Binder;
-  readonly nativeOverloadBinder: Binder;
   readonly reducedTypes = new ReducedTypes(this);
   readonly relations = new Relations(this);
   readonly printer = new Printer(this);
@@ -135,11 +127,10 @@ export class Checker {
 
   constructor(readonly root: TreeNode) {
     startTypeCaches();
-    this.libraryBinder = new Binder(libraryTree.rootNode, libraryScope());
+    this.libraryBinder = new Binder(libraryTree.rootNode, libraryScope(), { deferInterfaceBodies: true });
     this.localeOptionsBinder = new Binder(localeOptionsTree.rootNode, this.libraryBinder.moduleScope);
     markUnsupported(this.libraryBinder.moduleScope);
-    this.nativeOverloadBinder = new Binder(nativeOverloadTree.rootNode, this.libraryBinder.moduleScope);
-    this.binder = new Binder(root, this.libraryBinder.globalScope, this.libraryBinder.moduleScope);
+    this.binder = new Binder(root, this.libraryBinder.globalScope, { rootScope: this.libraryBinder.moduleScope });
   }
 
   check(): SourceDiagnostic[] {
@@ -227,7 +218,6 @@ export class Checker {
 
   scopeOf(node: TreeNode): Scope {
     if (node.tree === localeOptionsTree) return this.localeOptionsBinder.scopeOf(node);
-    if (node.tree === nativeOverloadTree) return this.nativeOverloadBinder.scopeOf(node);
     return node.tree === libraryTree ? this.libraryBinder.scopeOf(node) : this.binder.scopeOf(node);
   }
 
@@ -240,35 +230,11 @@ export class Checker {
 
   ownScope(node: TreeNode): Scope | undefined {
     if (node.tree === localeOptionsTree) return this.localeOptionsBinder.ownScope(node);
-    if (node.tree === nativeOverloadTree) return this.nativeOverloadBinder.ownScope(node);
     return node.tree === libraryTree ? this.libraryBinder.ownScope(node) : this.binder.ownScope(node);
   }
 
   isLibrary(node: TreeNode): boolean {
-    return (
-      node.tree === libraryTree ||
-      node.tree === localeOptionsTree ||
-      node.tree === nativeOverloadTree ||
-      node.tree === domInterfaceTree
-    );
-  }
-
-  nativeOverload(node: TreeNode): TreeNode {
-    if (node.tree !== libraryTree) return node;
-    const name = node.childForFieldName('name')?.text;
-    if (!name) return node;
-    const originals =
-      this.libraryBinder.moduleScope
-        .lookupValue(name)
-        ?.valueDeclarations.filter(
-          (declaration) => declaration.tree === libraryTree && declaration.type === 'function_signature'
-        ) ?? [];
-    const index = originals.findIndex((declaration) => declaration.id === node.id);
-    return (
-      this.nativeOverloadBinder.moduleScope.values
-        .get(name)
-        ?.valueDeclarations.filter((declaration) => declaration.type === 'function_signature')[index] ?? node
-    );
+    return node.tree === libraryTree || node.tree === localeOptionsTree;
   }
 
   print(type: Type): string {

@@ -460,12 +460,14 @@ export abstract class ExpressionConverter extends ConverterBase {
       // An object or array literal used as a pattern spells defaults as assignments.
       case 'assignment_expression': {
         const target = this.pattern(field(node, 'left'), leaf);
-        const value = this.expression(field(node, 'right'));
+        const initializer = field(node, 'right');
+        const value = this.expression(initializer);
         if (value.suspends) unsupported(node, '分割代入の初期値の yield や await ');
         return {
           kind: 'default',
           target,
           value,
+          initializerSource: target.kind === 'objectPattern' ? iterationSource(initializer) : undefined,
           row: rowOf(node),
         };
       }
@@ -666,7 +668,13 @@ export function nameDestructuring(pattern: Pattern, source: DestructuringSource)
 
 /** Marks a pattern inside another, through its default value. */
 function nested(pattern: Pattern): Pattern {
-  if (pattern.kind === 'default') return { ...pattern, target: nested(pattern.target) };
+  if (pattern.kind === 'default') {
+    const target =
+      pattern.target.kind === 'objectPattern'
+        ? { ...pattern.target, source: pattern.initializerSource }
+        : nested(pattern.target);
+    return { ...pattern, target };
+  }
   if (pattern.kind === 'arrayPattern' || pattern.kind === 'objectPattern') return { ...pattern, isNested: true };
   return pattern;
 }

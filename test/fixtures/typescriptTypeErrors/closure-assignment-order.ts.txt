@@ -26,3 +26,9 @@ function parameterWrite(value: string | number) {
   writer.change();
   return read();
 }
+function deferredDefault(value: string | number, change = () => { value = 1; }) {
+  value = "ready";
+  const read = () => value.toUpperCase();
+  change();
+  return read();
+}

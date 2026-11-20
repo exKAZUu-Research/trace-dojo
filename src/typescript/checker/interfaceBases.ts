@@ -2,7 +2,6 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
 import { isGenericObjectOrIndexType } from './genericTypes';
-import { withDomMembers } from './library';
 import type { Sym } from './scopes';
 import { named } from './syntax';
 import { anyType, isAnyLike, nonPrimitiveType, type ObjectType, type Type } from './types';
@@ -21,8 +20,6 @@ export class InterfaceBases {
   /** The interfaces whose base types are resolving, outermost first. */
   private readonly stack: BaseResolution[] = [];
   private deferredChecks: (() => void)[] = [];
-  /** The member types of the DOM interfaces that a merged DOM interface extends, by symbol id. */
-  private readonly domBaseTypes = new Map<number, Type>();
 
   constructor(private readonly c: Checker) {}
 
@@ -64,9 +61,7 @@ export class InterfaceBases {
 
   /** The valid types the `extends` clauses of interface declarations name, reporting the others. */
   basesOf(declarations: TreeNode[]): Type[] {
-    return declarations
-      .flatMap((declaration) => heritageNodes(withDomMembers(declaration)))
-      .flatMap((node) => this.validBase(node));
+    return declarations.flatMap(heritageNodes).flatMap((node) => this.validBase(node));
   }
 
   /**
@@ -121,20 +116,8 @@ export class InterfaceBases {
     return target === symbol || this.baseTypesOf(target).some((base) => this.hasBaseType(base, symbol, searched));
   }
 
-  /** A DOM interface the library extends lends its members, though it stands for `any` where a program names it. */
-  private baseType(base: TreeNode): Type {
-    const symbol = this.c.isLibrary(base) ? this.c.scopeOf(base).lookupType(base.text) : undefined;
-    if (!symbol || !this.c.typeNodes.isOpaqueDomInterface(symbol)) return this.c.typeNodes.typeFromNode(base);
-    let type = this.domBaseTypes.get(symbol.id);
-    if (!type) {
-      type = this.c.typeNodes.interfaceType(symbol);
-      this.domBaseTypes.set(symbol.id, type);
-    }
-    return type;
-  }
-
   private validBase(baseNode: TreeNode): Type[] {
-    const base = this.baseType(baseNode);
+    const base = this.c.typeNodes.typeFromNode(baseNode);
     if (this.isValidBaseType(base)) return [base];
     this.c.errorWhileResolving(
       baseNode,

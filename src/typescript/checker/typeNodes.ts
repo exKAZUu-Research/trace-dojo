@@ -4,12 +4,10 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import { unsupportedMessage } from '../unsupported';
 import type { Checker, Mapper, UnionAlias } from './checker';
-import { BROWSER_INTERFACES } from './domGlobals';
 import { isGenericObjectOrIndexType } from './genericTypes';
 import { IndexedAccessKeys } from './indexedAccessKeys';
 import { addIndexInfo, isPatternKey } from './indexInfos';
 import { InterfaceBases } from './interfaceBases';
-import { withDomMembers } from './library';
 import { RecursiveAliases } from './recursiveAliases';
 import type { Sym } from './scopes';
 import { nameSuggestionHint } from './spelling';
@@ -68,8 +66,6 @@ const predefinedTypes: Record<string, Type> = {
 };
 
 const stringMappings = new Set(['Uppercase', 'Lowercase', 'Capitalize', 'Uncapitalize']);
-
-const domInterfaceNames = new Set(BROWSER_INTERFACES.map((entry) => (typeof entry === 'string' ? entry : entry[0])));
 
 type ResolvedTypeName = { symbol: Sym; parameters: TypeParameter[] } | { local: TypeParameter } | 'stringMapping';
 
@@ -475,7 +471,6 @@ export class TypeNodes {
 
   private appliedType(symbol: Sym, declared: Type, parameters: TypeParameter[], typeArguments: Type[]): Type {
     if (symbol.typeKind === 'alias') return this.aliasReference(symbol, declared, parameters, typeArguments);
-    // An opaque DOM interface is `any`, whatever its type arguments.
     return declared.kind === 'object' ? this.c.reference(declared, typeArguments) : declared;
   }
 
@@ -725,7 +720,7 @@ export class TypeNodes {
         break;
       }
       case 'interface': {
-        symbol.declaredType = this.isOpaqueDomInterface(symbol) ? anyType : this.interfaceType(symbol);
+        symbol.declaredType = this.interfaceType(symbol);
         break;
       }
       case 'class': {
@@ -750,14 +745,6 @@ export class TypeNodes {
     if (this.deferredDepth > 0) return symbol.pendingUnion ?? this.recursiveAliases.pendingTypeOf(symbol);
     this.c.error(symbol.typeDeclarations[0], `型エイリアス ${symbol.name} が自分自身を参照しています。`);
     return errorType;
-  }
-
-  /** A DOM interface the program does not merge into, whose members the library leaves out. */
-  isOpaqueDomInterface(symbol: Sym): boolean {
-    return (
-      domInterfaceNames.has(symbol.name) &&
-      symbol.typeDeclarations.every((declaration) => this.c.isLibrary(declaration))
-    );
   }
 
   private aliasType(symbol: Sym): Type {
@@ -818,9 +805,16 @@ export class TypeNodes {
     };
   }
 
+  interfaceBody(declaration: TreeNode): TreeNode | null {
+    const body = declaration.childForFieldName('body');
+    if (body && this.c.libraryBinder.bindDeferredInterfaceBody(declaration, body))
+      this.c.budget.spend(Math.ceil((body.endIndex - body.startIndex) / 32));
+    return body;
+  }
+
   interfaceOwnMembers(merged: TreeNode[]): Structure {
     const members = merged.map((declaration) => {
-      const body = withDomMembers(declaration).childForFieldName('body');
+      const body = this.interfaceBody(declaration);
       return body ? named(body) : [];
     });
     // TypeScript merges the overloads of later declarations before those of earlier ones.

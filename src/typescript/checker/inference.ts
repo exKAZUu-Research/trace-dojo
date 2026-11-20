@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 465 -- Keeps generic candidate collection, constraint fitting and inference completion together.
+// code-gauge-allow-file fileNcss 466 -- Keeps generic candidate collection, constraint fitting and inference completion together.
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import type { Checker, Mapper } from './checker';
 import { childTypes, objectMemberTypes } from './genericTypes';
@@ -24,6 +24,7 @@ import {
   unknownType,
   voidType,
 } from './types';
+import { couldContainTypeVariables } from './typeVariables';
 
 /**
  * How indirectly a step infers, as TypeScript's `InferencePriority` flags: a candidate replaces those of a greater
@@ -201,7 +202,7 @@ export class TypeInference {
   private inferPair(run: InferenceRun, source: Type, target: Type, covariant: boolean, path: InferencePath): void {
     const { active } = path;
     this.c.budget.spend();
-    if (target.noInfer) return;
+    if (target.noInfer || !couldContainTypeVariables(target)) return;
     if (target.kind === 'typeParameter') {
       this.inferToParameter(run, source, target, covariant, active.size === 0);
       return;

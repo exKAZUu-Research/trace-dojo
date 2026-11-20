@@ -21,3 +21,12 @@ function shadowed() {
   return () => value.toUpperCase();
 }
 console.log(ordered()(), compound(true)(), staticOrdered()(), shadowed()());
+function initializedDefault(value: string | number, fallback = (value = 'default')) {
+  value = 'ready';
+  return () => value.toUpperCase();
+}
+function initializedOptional(value: string | undefined, fallback = (value = 'default')) {
+  value = 'ready';
+  return () => value.length;
+}
+console.log(initializedDefault(0)(), initializedOptional(undefined)());

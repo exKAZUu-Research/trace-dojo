@@ -2,7 +2,6 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
 import { checkDuplicateIndexSignatures } from './indexConformance';
-import { withDomMembers } from './library';
 import { nativeGlobalRedeclaration } from './nativeGlobalIdentity';
 import type { Scope, Sym } from './scopes';
 import { hasToken, isConstructorName, isParameterProperty, named } from './syntax';
@@ -213,9 +212,7 @@ function mergedParameterTypesAgree(
 
 /** A property declared again in a merged interface, or in the class it merges with, must have the same type. */
 function checkMergedProperties(c: Checker, symbol: Sym): void {
-  const properties = symbol.typeDeclarations.flatMap((declaration) =>
-    propertyDeclarationsOf(c, withDomMembers(declaration))
-  );
+  const properties = symbol.typeDeclarations.flatMap((declaration) => propertyDeclarationsOf(c, declaration));
   checkMergedMemberKinds(c, properties);
   // TypeScript binds computed names after the others, so a plain name declares the property first.
   const seen = new Map<string, TreeNode>();
@@ -254,9 +251,11 @@ function isMethodMember(member: TreeNode): boolean {
 
 /** The instance property declarations of an interface or a class, including a class's parameter properties. */
 function propertyDeclarationsOf(c: Checker, declaration: TreeNode): TreeNode[] {
+  if (declaration.type === 'interface_declaration') {
+    const body = c.typeNodes.interfaceBody(declaration);
+    return body ? named(body).filter(isInterfaceProperty) : [];
+  }
   const members = named(declaration.childForFieldName('body') ?? declaration);
-  if (declaration.type === 'interface_declaration')
-    return members.filter((member) => member.type === 'property_signature' || member.type === 'method_signature');
   const parameters = c.classes.constructorNode(declaration)?.childForFieldName('parameters');
   return [
     ...members.filter(
@@ -268,6 +267,10 @@ function propertyDeclarationsOf(c: Checker, declaration: TreeNode): TreeNode[] {
     ),
     ...(parameters ? named(parameters).filter(isParameterProperty) : []),
   ];
+}
+
+function isInterfaceProperty(member: TreeNode): boolean {
+  return member.type === 'property_signature' || member.type === 'method_signature';
 }
 
 function isComputed(member: TreeNode): boolean {

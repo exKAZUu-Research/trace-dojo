@@ -274,5 +274,5 @@ export type Pattern = Span &
         properties: { key: PropertyName; value: Pattern }[];
         rest?: Pattern;
       } & DestructuringSource)
-    | { kind: 'default'; target: Pattern; value: Expression }
+    | { kind: 'default'; target: Pattern; value: Expression; initializerSource?: IterationSource }
   );
