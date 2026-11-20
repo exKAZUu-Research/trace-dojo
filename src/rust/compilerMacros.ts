@@ -86,8 +86,7 @@ function printMacro(c: Compiler, macro: Macro<'print'>): Eval {
   const newline = macro.newline ? '\n' : '';
   const stream = macro.stream;
   return (frame) => {
-    const text = formatOrPanic(format, frame, IO_WRITE_FAILURE) + newline;
-    frame.runtime.write(stream, text);
+    writeFormattedStream(frame, format, stream, newline, { row: 0, col: 0 });
     return UNIT_VALUE;
   };
 }
@@ -128,11 +127,21 @@ function writeStream(
 ): Eval {
   return (frame) => {
     target(frame);
-    const { text, failed } = formatPartly(format, frame);
-    frame.runtime.write(stream, text + (failed ? '' : newline));
-    if (failed) throw new RustPanic(IO_WRITE_FAILURE.message, macro.target.span, IO_WRITE_FAILURE.location);
+    writeFormattedStream(frame, format, stream, newline, macro.target.span);
     return writeResult(c.program, false);
   };
+}
+
+function writeFormattedStream(
+  frame: Frame,
+  format: FormatEval,
+  stream: 'stdout' | 'stderr',
+  newline: string,
+  span: Span
+): void {
+  const { failed } = formatPartly(format, frame, (chunk) => frame.runtime.write(stream, chunk));
+  if (failed) throw new RustPanic(IO_WRITE_FAILURE.message, span, IO_WRITE_FAILURE.location);
+  if (newline) frame.runtime.write(stream, newline);
 }
 
 /** `write!` to a `String`, which it reaches through the `&mut` reference it is given or as a place. */

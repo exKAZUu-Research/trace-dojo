@@ -1774,6 +1774,27 @@ fn main() {
   expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: 'CC 1 2 2\n' });
 });
 
+test('keeps partial Rust stream output when formatting fails', () => {
+  const program = `use std::fmt;
+struct Bad;
+impl fmt::Display for Bad {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        print!("nested ");
+        write!(f, "partial")?;
+        Err(fmt::Error)
+    }
+}
+fn main() { println!("before {} after", Bad); }`;
+  const out = executeProgram('rust', program);
+  expect(out).toMatchObject({ kind: 'executed', stdout: 'before nested partial' });
+  expect(out.kind === 'executed' && out.uncaughtException).toContain(
+    'a formatting trait implementation returned an error'
+  );
+  const err = executeProgram('rust', program.replace('println!("before', 'eprintln!("before'));
+  expect(err).toMatchObject({ kind: 'executed', stdout: 'nested ' });
+  expect(err.kind === 'executed' && err.stderr).toContain('before partial');
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {
