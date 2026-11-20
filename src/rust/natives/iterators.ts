@@ -256,7 +256,7 @@ function adapter<S extends object>(
   folds = false
 ): IterValue {
   const { next, nextBack, remaining } = parts(source, state);
-  const iter = new IterValue(next, nextBack, remaining, [source]);
+  const iter = new IterValue(next, nextBack, remaining, [source, state]);
   iter.stateRoots = () =>
     Object.values(state).map((value: unknown) => (value instanceof IteratorCallback ? value.value : value));
   // An adapter whose `fold` folds its source (`Map`, `Filter`, ...) takes its source's elements as it folds.
