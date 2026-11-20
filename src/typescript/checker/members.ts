@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 405 -- Shares member and element resolution across reads, writes, and optional chains.
+// code-gauge-allow-file fileNcss 408 -- Shares member and element resolution across reads, writes, and optional chains.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import {
@@ -10,6 +10,7 @@ import { assertedExpression, assertionTypes, isErasedTypeSyntax } from '../erase
 import { unsupportedMessage } from '../unsupported';
 import type { Checker } from './checker';
 import type { State } from './flow';
+import { isGenericObjectOrIndexType } from './genericTypes';
 import { applicableIndex } from './indexInfos';
 import { nonNullableType, nullishConstraint } from './nullishConstraints';
 import { defaultedTarget } from './patterns';
@@ -467,7 +468,9 @@ export class MemberChecker {
   }
 
   isReadonlyIndex(objectType: Type, indexType: Type): boolean {
-    if (isAnyLike(objectType) || isGenericKey(indexType)) return false;
+    if (isAnyLike(objectType)) return false;
+    if (isGenericObjectOrIndexType(indexType))
+      return this.c.relations.stringIndexByGenericKey(objectType, indexType)?.readonly === true;
     if (objectType.kind === 'union') return objectType.types.some((member) => this.isReadonlyIndex(member, indexType));
     if (indexType.kind === 'union') return indexType.types.some((member) => this.isReadonlyIndex(objectType, member));
     if (indexType.kind === 'literal' && this.c.propertyOf(objectType, String(indexType.value))) return false;
@@ -592,7 +595,7 @@ export class MemberChecker {
     }
     if (access.write && index.kind === 'union') {
       const types = index.types.map((member) => this.indexedTypeAt(access, objectType, member));
-      return types.includes(errorType) ? errorType : intersectionOf(types, this.c.budget);
+      return types.includes(errorType) ? errorType : intersectionOf(types, this.c);
     }
     const structure = this.c.structureOf(objectType);
     const applicable = applicableIndex(this.c, structure, index);

@@ -439,7 +439,7 @@ export class Checker {
       case 'intersection': {
         return intersectionOf(
           type.types.map((member) => this.instantiate(member, mapper)),
-          this.budget
+          this
         );
       }
       case 'object': {
@@ -475,16 +475,16 @@ export class Checker {
   substitutionOf(base: Type, constraint: Type): Type {
     if (isAnyLike(base) || isAnyLike(constraint) || isIntrinsic(constraint, 'unknown') || base === constraint)
       return base;
-    if (base.kind !== 'typeParameter') return intersectionOf([base, constraint], this.budget);
+    if (base.kind !== 'typeParameter') return intersectionOf([base, constraint], this);
     if (base.substitution)
       return this.substitutionOf(
         base.substitution.base,
-        intersectionOf([base.substitution.constraint, constraint], this.budget)
+        intersectionOf([base.substitution.constraint, constraint], this)
       );
     const key = `${typeCacheKey(base)}/${typeCacheKey(constraint)}`;
     let narrowed = this.substitutions.get(key);
     if (!narrowed) {
-      const bound = intersectionOf([base, constraint], this.budget);
+      const bound = intersectionOf([base, constraint], this);
       narrowed = {
         ...base,
         id: newTypeId(),
@@ -853,9 +853,7 @@ export class Checker {
   typeWithThisArgument(type: Type, receiver: Type): Type {
     if (type.kind === 'intersection') {
       const members = type.types.map((member) => this.typeWithThisArgument(member, receiver));
-      return members.some((member, index) => member !== type.types[index])
-        ? intersectionOf(members, this.budget)
-        : type;
+      return members.some((member, index) => member !== type.types[index]) ? intersectionOf(members, this) : type;
     }
     if (type.kind !== 'object' || !thisParameterOf(type)) return type;
     const key = `this:${typeCacheKey(type)}:${typeCacheKey(receiver)}`;
@@ -998,7 +996,7 @@ export class Checker {
       return undefined;
     return intersectionOf(
       object.types.map((member) => this.indexedProjection(member, index)),
-      this.budget
+      this
     );
   }
 
@@ -1020,7 +1018,7 @@ export class Checker {
       .map((member) => this.indexedOperandConstraint(member))
       .filter((member) => member !== undefined);
     if (bound.kind === 'union') return constraints.length === bound.types.length ? unionOf(constraints) : undefined;
-    return constraints.length > 0 ? intersectionOf(constraints, this.budget) : undefined;
+    return constraints.length > 0 ? intersectionOf(constraints, this) : undefined;
   }
 
   private conditionalConstraint(type: ConditionalType): Type {
@@ -1033,7 +1031,7 @@ export class Checker {
       const trueType = type.trueType;
       const yes =
         trueType === type.checkType
-          ? intersectionOf([this.baseConstraint(type.checkType), type.extendsType], this.budget)
+          ? intersectionOf([this.baseConstraint(type.checkType), type.extendsType], this)
           : this.baseConstraint(this.conditionalTrueType(type));
       const no = this.baseConstraint(type.falseType);
       if (isAnyLike(yes)) return no;
@@ -1108,10 +1106,9 @@ export class Checker {
       exactOptionalType: true,
       readonly: existing.readonly && property.readonly,
       getterOnly: existing.getterOnly === true && property.getterOnly === true,
-      type: () => intersectionOf([propertyAccessType(existing), propertyAccessType(property)], this.budget),
+      type: () => intersectionOf([propertyAccessType(existing), propertyAccessType(property)], this),
       writeType: hasWriteType
-        ? () =>
-            intersectionOf([propertyAccessType(existing, 'write'), propertyAccessType(property, 'write')], this.budget)
+        ? () => intersectionOf([propertyAccessType(existing, 'write'), propertyAccessType(property, 'write')], this)
         : undefined,
     };
   }
@@ -1123,7 +1120,7 @@ export class Checker {
     return {
       type: intersectionOf(
         present.map((index) => index.type),
-        this.budget
+        this
       ),
       readonly: present.every((index) => index.readonly),
     };

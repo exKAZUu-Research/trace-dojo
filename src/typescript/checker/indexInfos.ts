@@ -55,7 +55,7 @@ function combinedIndex(c: Checker, infos: IndexInfo[]): IndexInfo | undefined {
   return {
     type: intersectionOf(
       infos.map((info) => info.type),
-      c.budget
+      c
     ),
     readonly: infos.every((info) => info.readonly),
   };

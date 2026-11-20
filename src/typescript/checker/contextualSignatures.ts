@@ -72,7 +72,7 @@ function intersectedSignature(c: Checker, left: Signature, right: Signature): Si
     parameters,
     thisType:
       left.thisType && right.thisType ? unionOf([left.thisType, right.thisType]) : (left.thisType ?? right.thisType),
-    returnType: () => intersectionOf([left.returnType(), right.returnType()], c.budget),
+    returnType: () => intersectionOf([left.returnType(), right.returnType()], c),
   };
 }
 

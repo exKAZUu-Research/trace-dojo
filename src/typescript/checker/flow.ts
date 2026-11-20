@@ -322,7 +322,7 @@ export class Flow {
     if (!isIntrinsic(narrowed, 'never')) return narrowed;
     if (this.c.relations.isAssignable(predicateType, type)) return predicateType;
     if (this.c.relations.isAssignable(type, predicateType)) return type;
-    return intersectionOf([type, predicateType], this.c.budget);
+    return intersectionOf([type, predicateType], this.c);
   }
 
   /**
@@ -337,7 +337,7 @@ export class Flow {
     if (!isIntrinsic(related, 'never')) return related;
     return mapType(type, (member) =>
       member.kind === 'typeParameter' && assignable(candidate, member.constraint?.() ?? unknownType)
-        ? intersectionOf([member, candidate], this.c.budget)
+        ? intersectionOf([member, candidate], this.c)
         : neverType
     );
   }
@@ -363,8 +363,7 @@ export class Flow {
     if (matches === 'maybe') return this.narrowMaybe(member, name);
     if (member.kind === 'typeParameter') {
       const bound = nullishConstraint(this.c, member);
-      if (bound.kind === 'union')
-        return intersectionOf([member, this.narrowByTypeof(bound, name, true)], this.c.budget);
+      if (bound.kind === 'union') return intersectionOf([member, this.narrowByTypeof(bound, name, true)], this.c);
       return neverType;
     }
     const shape = this.typeofStructuralShape(member);
@@ -394,7 +393,7 @@ export class Flow {
           : undefined);
     if (!narrowed) return member;
     return member.kind === 'typeParameter' || member.kind === 'intersection'
-      ? intersectionOf([member, narrowed], this.c.budget)
+      ? intersectionOf([member, narrowed], this.c)
       : narrowed;
   }
 
@@ -532,7 +531,7 @@ export class Flow {
       const constraint = nullishConstraint(this.c, member);
       if (constraint === member || isIntrinsic(constraint, 'unknown')) return member;
       const nullish = this.nullishPart(constraint);
-      return isIntrinsic(nullish, 'never') ? neverType : intersectionOf([member, nullish], this.c.budget);
+      return isIntrinsic(nullish, 'never') ? neverType : intersectionOf([member, nullish], this.c);
     });
   }
 
@@ -588,7 +587,7 @@ export class Flow {
     if (!assumeTrue) return type;
     if (isAnyLike(type) || this.c.relations.isAssignable(brand, type)) return brand;
     if (this.c.relations.isAssignable(type, brand)) return type;
-    return intersectionOf([type, brand], this.c.budget);
+    return intersectionOf([type, brand], this.c);
   }
 
   // code-gauge-allow functionCognitiveComplexity 16 -- Preserves generic identity and filters concrete nominal alternatives.
@@ -597,7 +596,7 @@ export class Flow {
     if (assumeTrue) {
       if (isAnyLike(type) || isIntrinsic(type, 'unknown')) return instance;
       const related = mapType(type, (member) => {
-        if (isGenericObjectOrIndexType(member)) return intersectionOf([member, instance], this.c.budget);
+        if (isGenericObjectOrIndexType(member)) return intersectionOf([member, instance], this.c);
         if (this.isDerivedFrom(member, instance)) return member;
         return this.isDerivedFrom(instance, member) ? instance : neverType;
       });
@@ -639,7 +638,7 @@ export class Flow {
           properties: new Map([[name, simpleProperty(name, unknownType, { nameType: key })]]),
         })),
       ],
-      this.c.budget
+      this.c
     );
   }
 

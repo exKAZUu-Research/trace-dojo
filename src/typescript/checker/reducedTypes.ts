@@ -56,7 +56,7 @@ export class ReducedTypes {
     return (
       types.some(isDiscriminantLiteral) &&
       !types.some((member) => isIntrinsic(member, 'never')) &&
-      isIntrinsic(intersectionOf(types, this.c.budget), 'never')
+      isIntrinsic(intersectionOf(types, this.c), 'never')
     );
   }
 }

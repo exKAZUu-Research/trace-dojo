@@ -174,7 +174,7 @@ export class UnionSignatures {
     const predicateIndex = predicates[0]?.index;
     return {
       ...signature,
-      thisType: thisTypes.length > 0 ? intersectionOf(thisTypes, this.c.budget) : undefined,
+      thisType: thisTypes.length > 0 ? intersectionOf(thisTypes, this.c) : undefined,
       returnType: () => this.c.literals.subtypeReduced(matching.map((member) => member.returnType())),
       predicate: predicates.every((predicate) => predicate && predicate.index === predicateIndex)
         ? { index: predicateIndex as number, type: unionOf(predicates.map((predicate) => predicate?.type as Type)) }
@@ -239,7 +239,7 @@ export class UnionSignatures {
     return {
       typeParameters: left.typeParameters.length > 0 ? left.typeParameters : right.typeParameters,
       parameters,
-      thisType: thisTypes.length > 0 ? intersectionOf(thisTypes, this.c.budget) : undefined,
+      thisType: thisTypes.length > 0 ? intersectionOf(thisTypes, this.c) : undefined,
       returnType: () => this.c.literals.subtypeReduced([left.returnType(), right.returnType()]),
       minimumArguments: minimum,
     };
@@ -261,7 +261,7 @@ export class UnionSignatures {
     let result = types[0];
     for (const type of types.slice(1)) {
       if (this.c.relations.isAssignable(type, result)) result = type;
-      else if (!this.c.relations.isAssignable(result, type)) result = intersectionOf([result, type], this.c.budget);
+      else if (!this.c.relations.isAssignable(result, type)) result = intersectionOf([result, type], this.c);
     }
     return result;
   }

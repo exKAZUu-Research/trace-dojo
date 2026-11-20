@@ -41,7 +41,7 @@ function mixedConstructor(
     returnType: () =>
       (returnType ??= intersectionOf(
         components.map((component) => component.returnType()),
-        c.budget
+        c
       )),
   };
 }

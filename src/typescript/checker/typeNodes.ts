@@ -164,7 +164,7 @@ export class TypeNodes {
       for (const child of named(part)) visit(child);
     };
     visit(node);
-    return intersectionOf(members, this.c.budget);
+    return intersectionOf(members, this.c);
   }
 
   /** The type of a `type_annotation` or of the type node a field holds. */
@@ -644,7 +644,7 @@ export class TypeNodes {
       const prior = preserveIdentity
         ? (previous?.kind === 'typeParameter' && previous.constraint?.()) || check
         : (previous ?? this.c.constraintOf(check));
-      const constraint = prior ? intersectionOf([prior, narrowed], this.c.budget) : narrowed;
+      const constraint = prior ? intersectionOf([prior, narrowed], this.c) : narrowed;
       // Keep separate parameters opaque so an intersection of them cannot collapse to `never`.
       mapper.set(check.id, preserveIdentity ? { ...check, id: newTypeId(), constraint: () => constraint } : constraint);
     }

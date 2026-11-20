@@ -31,6 +31,7 @@ import {
   isAnyLike,
   isIntrinsic,
   isPropertyKeyLiteral,
+  isTemplateOrStringMapping,
   literalType,
   type MappedInfo,
   neverType,
@@ -268,7 +269,7 @@ export class TypeOperators {
     if (
       withSource &&
       source &&
-      (source.kind === 'intrinsic' || source.kind === 'literal') &&
+      (source.kind === 'intrinsic' || source.kind === 'literal' || isTemplateOrStringMapping(source)) &&
       !isAnyLike(source) &&
       !isIntrinsic(source, 'unknown')
     )
@@ -382,7 +383,7 @@ export class TypeOperators {
     if (type.kind === 'union')
       return intersectionOf(
         type.types.map((member) => this.keyofType(member)),
-        this.c.budget
+        this.c
       );
     if (type.kind === 'intersection') return unionOf(type.types.map((member) => this.keyofType(member)));
     if (type.kind !== 'object') {
@@ -403,7 +404,7 @@ export class TypeOperators {
       if (type.kind === 'union')
         return intersectionOf(
           type.types.map((member) => this.guaranteedKeys(member, visiting)),
-          this.c.budget
+          this.c
         );
       if (type.kind === 'intersection')
         return unionOf(type.types.map((member) => this.guaranteedKeys(member, visiting)));
@@ -461,7 +462,7 @@ export class TypeOperators {
       return errorType;
     }
     if (isGenericObjectOrIndexType(object) || isGenericObjectOrIndexType(index) || variadic)
-      return this.c.relations.stringIndexReadByGenericKey(object, index) ?? this.deferredAccess(object, index);
+      return this.c.relations.stringIndexByGenericKey(object, index)?.type ?? this.deferredAccess(object, index);
     if (index.kind === 'union') return unionOf(index.types.map((member) => this.indexedAccess(object, member, node)));
     if (isPropertyKeyLiteral(index)) return this.propertyAccess(object, index.value, node);
     const applicable =

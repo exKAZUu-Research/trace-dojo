@@ -30,8 +30,8 @@ export function nonNullableType(c: Checker, type: Type, preserveVoid = false): T
     const bound = nullishConstraint(c, member);
     if (isAnyLike(bound)) return member;
     const rest = filterType(bound, (part) => !isNullable(part));
-    if (isIntrinsic(rest, 'unknown')) return intersectionOf([member, emptyObjectType], c.budget);
-    return rest === bound ? member : intersectionOf([member, rest], c.budget);
+    if (isIntrinsic(rest, 'unknown')) return intersectionOf([member, emptyObjectType], c);
+    return rest === bound ? member : intersectionOf([member, rest], c);
   });
 }
 
@@ -47,7 +47,7 @@ export function withoutNullishUnit(c: Checker, type: Type, unit: Type): Type {
     const rest = isGenericMember(member)
       ? boundWithoutUnit(nullishConstraint(c, member), unit, other, hasOther)
       : undefined;
-    return rest ? intersectionOf([member, rest], c.budget) : member;
+    return rest ? intersectionOf([member, rest], c) : member;
   });
 }
 
@@ -80,7 +80,7 @@ export function nullishConstraint(c: Checker, type: Type, seen?: Set<number>): T
     if (type.kind === 'intersection')
       return intersectionOf(
         type.types.map((member) => nullishConstraint(c, member, seen)),
-        c.budget
+        c
       );
     return type;
   } finally {

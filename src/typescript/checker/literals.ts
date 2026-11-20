@@ -282,7 +282,7 @@ export class LiteralChecker {
         ? [
             intersectionOf(
               contexts.map((types) => unionOf(types, true, true)),
-              this.c.budget
+              this.c
             ),
           ]
         : [];
@@ -837,12 +837,9 @@ export class LiteralChecker {
     if (left.kind === 'intersection' && right.kind === 'object' && !isGenericSpread(right)) {
       const tail = left.types.at(-1);
       if (tail?.kind === 'object' && !isGenericSpread(tail))
-        return intersectionOf(
-          [...left.types.slice(0, -1), this.mergeOrderedSpread(literal, tail, right)],
-          this.c.budget
-        );
+        return intersectionOf([...left.types.slice(0, -1), this.mergeOrderedSpread(literal, tail, right)], this.c);
     }
-    return intersectionOf([left, right], this.c.budget);
+    return intersectionOf([left, right], this.c);
   }
 
   private spreadsNothing(type: Type): boolean {

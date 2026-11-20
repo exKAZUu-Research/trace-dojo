@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 857 -- Keeps the relation modes and their recursive comparisons together.
+// code-gauge-allow-file fileNcss 864 -- Keeps the relation modes and their recursive comparisons together.
 import { minimumArguments } from './callArity';
 import type { Checker } from './checker';
 import { isUnit } from './flow';
@@ -29,6 +29,7 @@ import {
   filterType,
   freshTypeCacheKey,
   type IndexedAccessType,
+  type IndexInfo,
   intersectionOf,
   type IntersectionType,
   isAnyLike,
@@ -44,6 +45,7 @@ import {
   propertyAccessType,
   regularOf,
   type Signature,
+  type StringMappingType,
   stringType,
   type Structure,
   type TemplateLiteralType,
@@ -535,7 +537,7 @@ export class Relations {
     const sourceKeys = this.c.typeOperators.keyofType(s);
     const hasKeys =
       mapped.optionalModifier === '+'
-        ? !isIntrinsic(intersectionOf([constraint, sourceKeys], this.c.budget), 'never')
+        ? !isIntrinsic(intersectionOf([constraint, sourceKeys], this.c), 'never')
         : this.isRelated(constraint, sourceKeys, relation);
     return hasKeys && this.isRelated(s, component.objectType, relation);
   }
@@ -623,16 +625,29 @@ export class Relations {
 
   /** Whether a string matches a template literal type such as `` `id-${number}` ``. */
   private matchesTemplate(value: string, target: Type): boolean {
-    if (target.kind === 'stringMapping') {
-      const inner = target.type;
-      const literal = literalType(value);
-      const mapped = this.c.typeOperators.stringMapping(target.mapping, literal);
-      if (mapped.kind !== 'literal' || mapped.value !== value) return false;
-      return isIntrinsic(inner, 'string') || this.isAssignable(literal, inner);
-    }
+    if (target.kind === 'stringMapping') return this.matchesStringMapping(value, target);
     if (target.kind !== 'templateLiteral') return false;
     const parts = templatePlaceholderTexts(value, target.texts);
     return parts?.every((text, index) => this.matchesPlaceholder(text, target.types[index])) ?? false;
+  }
+
+  private matchesStringMapping(value: string, target: StringMappingType): boolean {
+    const mappings = [target.mapping];
+    let inner = target.type;
+    while (inner.kind === 'stringMapping') {
+      this.c.budget.spend();
+      mappings.push(inner.mapping);
+      inner = inner.type;
+    }
+    const literal = literalType(value);
+    let mapped: Type = literal;
+    for (const mapping of mappings.toReversed()) mapped = this.c.typeOperators.stringMapping(mapping, mapped);
+    return (
+      mapped === literal &&
+      (isAnyLike(inner) ||
+        isIntrinsic(inner, 'string') ||
+        (inner.kind === 'templateLiteral' && this.matchesTemplate(value, inner)))
+    );
   }
 
   /**
@@ -679,20 +694,14 @@ export class Relations {
   }
 
   /**
-   * What reading an object with only a string index signature by a generic key gives: TypeScript's
-   * `getIndexedAccessTypeOrUndefined` reads it by `string` when the key is assignable to `string` or to `number`, as
-   * `r[k]` with `K extends string` on a `Record<string, number[]>` is `number[]`, but leaves `K extends string | number`
-   * deferred.
+   * The resolved signature when TypeScript's `getIndexedAccessTypeOrUndefined` can use `string` for a generic key.
+   * A key bounded by `string | number` stays deferred because neither domain alone covers it.
    */
-  stringIndexReadByGenericKey(object: Type, key: Type): Type | undefined {
-    if (!this.isGeneric(key) || !this.stringIndexOnly(object)) return undefined;
+  stringIndexByGenericKey(object: Type, key: Type): IndexInfo | undefined {
+    object = this.c.reducedTypes.of(object);
+    if (!this.stringIndexOnly(object)) return undefined;
     if (!this.isAssignable(key, stringType) && !this.isAssignable(key, numberType)) return undefined;
-    return this.stringIndexType(object);
-  }
-
-  private stringIndexType(object: Type): Type {
-    if (object.kind === 'union') return unionOf(object.types.map((member) => this.stringIndexType(member)));
-    return this.c.structureOf(object).stringIndex?.type ?? errorType;
+    return this.c.structureOf(object).stringIndex;
   }
 
   /**

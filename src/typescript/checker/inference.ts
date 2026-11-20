@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 767 -- Keeps generic candidate collection, constraint fitting and inference completion together.
+// code-gauge-allow-file fileNcss 772 -- Keeps generic candidate collection, constraint fitting and inference completion together.
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import type { Checker, Mapper } from './checker';
 import { isUnit } from './flow';
@@ -16,6 +16,7 @@ import {
   intersectionOf,
   isAnyLike,
   isIntrinsic,
+  isTemplateOrStringMapping,
   literalType,
   type MappedInfo,
   newTypeId,
@@ -75,16 +76,19 @@ export interface InferenceRun {
   inferences: Map<number, Inference>;
   parameters: TypeParameter[];
   priority: number;
+  bivariant?: boolean;
   reportInference?: (priority: number) => void;
   contextualSignatures: boolean;
   higherOrder?: { outer: Signature; parameters: TypeParameter[] };
   reverseMapped?: { source: TypeParameter; key: TypeParameter; value: TypeParameter };
 }
 
+type ParameterPosition = 'parameter' | 'bivariantParameter';
+
 type Recurse = (
   source: Type,
   target: Type,
-  covariant?: boolean,
+  position?: ParameterPosition,
   priority?: number,
   reportInference?: InferenceRun['reportInference']
 ) => void;
@@ -267,7 +271,8 @@ export class TypeInference {
     if (!result || result.signature.typeParameters.length > 0) return false;
     const sourceSignature = this.renameCallbackParameters(callback.signature, state.parameters);
     const candidate = newInferenceRun(run.parameters, run.contextualSignatures);
-    const infer: Recurse = (from, to, covariant = true) => this.inferTypes(candidate, from, to, covariant);
+    const infer: Recurse = (from, to, position) =>
+      this.inferTypes({ ...candidate, bivariant: position === 'bivariantParameter' }, from, to, !position);
     this.inferSignatureParameters(sourceSignature, expected.signature, infer);
     if (![...candidate.inferences.values()].some(hasCandidates)) return false;
     this.inferSignatureReturns(sourceSignature, expected.signature, infer);
@@ -325,19 +330,16 @@ export class TypeInference {
       this.inferToParameter(run, source, variable, covariant, path);
       return;
     }
-    const key = `${source.id}/${target.id}/${run.priority}/${covariant}`;
+    const key = `${source.id}/${target.id}/${run.priority}/${covariant}/${run.bivariant ?? false}`;
     if (active.has(key)) return;
     if (this.depth >= LIMITS.maxCallDepth) throw new ExecutionLimitError('operations');
     active.add(key);
     this.depth++;
     try {
-      const recurse: Recurse = (
-        s,
-        t,
-        isCovariant = covariant,
-        priority = run.priority,
-        reportInference = run.reportInference
-      ) => this.inferPair({ ...run, priority, reportInference }, s, t, isCovariant, path);
+      const recurse: Recurse = (s, t, position, priority = run.priority, reportInference = run.reportInference) => {
+        const bivariant = run.bivariant || position === 'bivariantParameter';
+        this.inferPair({ ...run, priority, reportInference, bivariant }, s, t, position ? !covariant : covariant, path);
+      };
       this.inferDeeper(run, source, target, path, recurse, covariant);
     } finally {
       this.depth--;
@@ -388,7 +390,7 @@ export class TypeInference {
     const { base, constraint } = source.substitution;
     recurse(base, target);
     recurse(
-      intersectionOf([base, constraint], this.c.budget),
+      intersectionOf([base, constraint], this.c),
       target,
       undefined,
       run.priority | InferencePriority.SubstituteSource
@@ -450,7 +452,7 @@ export class TypeInference {
       inference.topLevel = true;
       inference.priority = run.priority;
     }
-    if (covariant) this.recordCovariantCandidate(inference, source, path.argumentDepth);
+    if (covariant || run.bivariant) this.recordCovariantCandidate(inference, source, path.argumentDepth);
     else if (!inference.contravariant.some((candidate) => candidate.id === source.id))
       inference.contravariant.push(source);
     if ((run.priority & InferencePriority.ReturnType) === 0 && !isTopLevelTypeParameter(path.originalTarget, target))
@@ -663,7 +665,7 @@ export class TypeInference {
     if (['typeParameter', 'indexedAccess', 'keyof', 'conditional'].includes(source.kind)) {
       const constraint = this.c.baseConstraint(source);
       if (constraint !== source && !isIntrinsic(constraint, 'unknown')) recurse(constraint, target);
-    } else if (source.kind === 'literal' || source.kind === 'intrinsic') {
+    } else if (source.kind === 'literal' || source.kind === 'intrinsic' || isTemplateOrStringMapping(source)) {
       const apparent = this.c.apparentType(source);
       if (apparent.kind === 'object' && target.objectKind !== 'reference') recurse(apparent, target);
     }
@@ -903,11 +905,12 @@ export class TypeInference {
   }
 
   private inferSignatureParameters(source: Signature, target: Signature, recurse: Recurse): void {
-    if (source.thisType && target.thisType) recurse(source.thisType, target.thisType, false);
+    const position = target.isMethod ? 'bivariantParameter' : 'parameter';
+    if (source.thisType && target.thisType) recurse(source.thisType, target.thisType, position);
     const restIndex = target.parameters.findIndex((parameter) => parameter.rest);
     const count = Math.min(source.parameters.length, restIndex === -1 ? target.parameters.length : restIndex);
     for (let index = 0; index < count; index++) {
-      recurse(source.parameters[index].type, target.parameters[index].type, false);
+      recurse(source.parameters[index].type, target.parameters[index].type, position);
     }
     // A rest parameter such as `(...args: infer P)` takes the source's remaining parameters as a tuple.
     if (restIndex !== -1) {
@@ -924,16 +927,16 @@ export class TypeInference {
         targetRest.length === 1
           ? targetRest[0].type
           : this.c.tupleType(targetRest.map(({ type, optional, rest }) => ({ type, optional, rest }))),
-        false
+        position
       );
     }
   }
 
   private inferSignatureReturns(source: Signature, target: Signature, recurse: Recurse): void {
     const targetReturn = target.returnType();
-    if (!isIntrinsic(targetReturn, 'void')) recurse(source.returnType(), targetReturn, true);
-    else if (isIntrinsic(source.returnType(), 'void')) recurse(voidType, targetReturn, true);
-    if (source.predicate && target.predicate) recurse(source.predicate.type, target.predicate.type, true);
+    if (!isIntrinsic(targetReturn, 'void')) recurse(source.returnType(), targetReturn);
+    else if (isIntrinsic(source.returnType(), 'void')) recurse(voidType, targetReturn);
+    if (source.predicate && target.predicate) recurse(source.predicate.type, target.predicate.type);
   }
 
   private inferenceSignature(run: InferenceRun, generic: Signature, target: Signature): Signature {
@@ -1005,7 +1008,7 @@ export class TypeInference {
       if (inference.candidates.length > 0)
         result.set(parameter.id, unionOf(inference.candidates.map((candidate) => regularOf(candidate))));
       else if (inference.contravariant.length > 0)
-        result.set(parameter.id, intersectionOf(inference.contravariant, this.c.budget));
+        result.set(parameter.id, intersectionOf(inference.contravariant, this.c));
     }
     this.constrainInferences(parameters, result, outer);
     return result;

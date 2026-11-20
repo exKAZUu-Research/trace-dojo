@@ -1,0 +1,10 @@
+type Merge<A, B, C> = A & B & C;
+const direct: any & string & number = 42;
+const generic: Merge<any, string, number> = 42;
+const distinctUnits: Merge<1, any, 2> = 42;
+const booleanDomain: Merge<string, boolean, any> = 42;
+const objectDomain: Merge<boolean, any, object> = 42;
+const nullish: Merge<any, null, undefined> = 42;
+const disjointTemplateDomain: Merge<`id-${string}`, any, number> = 42;
+const disjointTemplateValue: Merge<any, `id-${number}`, 'id-bad'> = 42;
+const disjointMappedValue: Merge<Uppercase<string>, any, 'lower'> = 42;

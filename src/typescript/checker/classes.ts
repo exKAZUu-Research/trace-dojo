@@ -258,7 +258,7 @@ export class ClassChecker {
     if (!base) return info.staticType;
     const variable =
       base.kind === 'intersection' ? base.types.find(isBaseTypeVariable) : isBaseTypeVariable(base) ? base : undefined;
-    return variable ? intersectionOf([info.staticType, variable], this.c.budget) : info.staticType;
+    return variable ? intersectionOf([info.staticType, variable], this.c) : info.staticType;
   }
 
   baseStaticType(node: TreeNode): Type | undefined {

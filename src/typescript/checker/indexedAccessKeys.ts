@@ -154,7 +154,7 @@ export class IndexedAccessKeys {
     const mapper = new Map<number, Type>();
     const collect = (type: Type): void => {
       if (type.kind === 'typeParameter')
-        mapper.set(type.id, intersectionOf([this.c.baseConstraint(type), ...extendsTypes(type)], this.c.budget));
+        mapper.set(type.id, intersectionOf([this.c.baseConstraint(type), ...extendsTypes(type)], this.c));
       else if (type.kind === 'templateLiteral') for (const member of type.types) collect(member);
       else if (type.kind === 'stringMapping') collect(type.type);
     };

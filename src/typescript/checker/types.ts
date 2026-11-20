@@ -1,7 +1,8 @@
-// code-gauge-allow-file fileNcss 410 -- Keeps type data, cache keys, and canonical type constructors together.
+// code-gauge-allow-file fileNcss 439 -- Keeps type data, cache keys, and canonical type constructors together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { ExecutionBudget } from '../../interpreter/limits';
+import type { Checker } from './checker';
 
 /** A TypeScript type, as the checker represents it. */
 export type Type = (
@@ -493,14 +494,17 @@ export function unionOf(types: Type[], keepFresh = false, preserveLiterals = fal
 }
 
 // code-gauge-allow functionCognitiveComplexity 28 -- Flattens and reduces members as TypeScript's intersections do.
-export function intersectionOf(types: Type[], budget: ExecutionBudget): Type {
+export function intersectionOf(types: Type[], c: Checker): Type {
+  const { budget } = c;
   budget.spend(types.length);
   const flat = flattenedMembers(types, 'intersection', true, budget);
   if (flat.some((type) => isIntrinsic(type, 'never'))) return neverType;
-  if (flat.includes(permissiveAnyType)) return permissiveAnyType;
-  if (hasObjectDomainConflict(flat)) return neverType;
-  if (flat.some((type) => isAnyLike(type))) return anyType;
-  const members = flat.filter((type) => !isIntrinsic(type, 'unknown'));
+  if (hasDisjointIntersectionDomains(flat)) return neverType;
+  const compatible = intersectStringPatterns(flat, c);
+  if (!compatible) return neverType;
+  if (compatible.includes(permissiveAnyType)) return permissiveAnyType;
+  if (compatible.some((type) => isAnyLike(type))) return anyType;
+  const members = compatible.filter((type) => !isIntrinsic(type, 'unknown'));
   if (members.length === 0) return unknownType;
   // A union distributes, as `(A | B) & C` is `(A & C) | (B & C)`.
   const unionIndex = members.findIndex((type) => type.kind === 'union');
@@ -510,23 +514,32 @@ export function intersectionOf(types: Type[], budget: ExecutionBudget): Type {
       union.types.map((member) =>
         intersectionOf(
           members.map((type, index) => (index === unionIndex ? member : type)),
-          budget
+          c
         )
       )
     );
   }
-  // Two different primitives or literals have nothing in common.
   const units = members.filter((type) => type.kind === 'literal' || isPrimitive(type));
-  for (const unit of units) {
-    for (const other of units) {
-      if (unit !== other && !primitiveOverlaps(unit, other)) return neverType;
-    }
-  }
   const literal = units.find((type) => type.kind === 'literal');
   if (literal && units.length === members.length) return literal;
   const reduced = reducedIntersectionMembers(members, units);
   if (reduced.length === 1) return reduced[0];
   return { kind: 'intersection', id: newTypeId(), types: reduced };
+}
+
+function intersectStringPatterns(types: Type[], c: Checker): Type[] | undefined {
+  if (!types.some(isTemplateOrStringMapping)) return types;
+  const unit = types.find((type) => type.kind === 'literal' && typeof type.value === 'string');
+  if (!unit) return types;
+  const compatible: Type[] = [];
+  for (const type of types) {
+    if (isTemplateOrStringMapping(type)) {
+      if (c.relations.isRelated(unit, type, 'strictSubtype')) continue;
+      if (isPatternLiteralType(type)) return undefined;
+    }
+    compatible.push(type);
+  }
+  return compatible;
 }
 
 function reducedIntersectionMembers(members: Type[], units: Type[]): Type[] {
@@ -542,18 +555,24 @@ function reducedIntersectionMembers(members: Type[], units: Type[]): Type[] {
 function nonNullableIntersectionMember(type: Type): boolean {
   return (
     (type.kind === 'object' && type.id !== emptyObjectType.id) ||
-    type.kind === 'templateLiteral' ||
-    type.kind === 'stringMapping' ||
+    isTemplateOrStringMapping(type) ||
     isIntrinsic(type, 'object')
   );
 }
 
-function hasObjectDomainConflict(types: Type[]): boolean {
-  if (types.some((type) => isIntrinsic(type, 'object')))
-    return types.some(
-      (type) =>
-        type.kind === 'literal' || type.kind === 'templateLiteral' || type.kind === 'stringMapping' || isPrimitive(type)
-    );
+function hasDisjointIntersectionDomains(types: Type[]): boolean {
+  let domain: string | undefined;
+  let unit: LiteralValue | undefined;
+  for (const type of types) {
+    const current = primitiveDomain(type);
+    if (current === undefined) continue;
+    if (domain !== undefined && current !== domain) return true;
+    domain = current;
+    if (type.kind === 'literal') {
+      if (unit !== undefined && unit !== type.value) return true;
+      unit = type.value;
+    }
+  }
   return types.some((type) => type.kind === 'object') && types.some(isNullableUnit);
 }
 
@@ -587,14 +606,15 @@ export function isPrimitive(type: Type): boolean {
   );
 }
 
-function primitiveOverlaps(a: Type, b: Type): boolean {
-  if (a.kind === 'literal' && b.kind === 'literal') return a.value === b.value;
-  return primitiveDomain(a) === primitiveDomain(b);
+export function isTemplateOrStringMapping(type: Type): type is TemplateLiteralType | StringMappingType {
+  return type.kind === 'templateLiteral' || type.kind === 'stringMapping';
 }
 
-function primitiveDomain(type: Type): string {
+function primitiveDomain(type: Type): string | undefined {
   if (type.kind === 'literal') return typeof type.value;
-  if (type.kind !== 'intrinsic') return '';
+  if (type === booleanType) return 'boolean';
+  if (isTemplateOrStringMapping(type)) return 'string';
+  if (type.kind !== 'intrinsic' || !(isPrimitive(type) || isIntrinsic(type, 'object'))) return undefined;
   // `void` holds only `undefined`, so the two overlap as TypeScript's `VoidLike` domain.
   return type.name === 'void' ? 'undefined' : type.name;
 }

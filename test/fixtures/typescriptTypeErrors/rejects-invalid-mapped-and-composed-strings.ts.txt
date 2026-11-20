@@ -1,0 +1,8 @@
+type Identity<T> = { [K in keyof T]: T[K] };
+const uppercase: Readonly<Uppercase<string>> = 'AbC';
+const template: Identity<`id-${string}`> = 'other';
+const numericTemplate: Partial<`ref-${number}`> = 'ref-bad';
+const capitalized: Capitalize<Lowercase<string>> = 'HELLO';
+const recased: Uppercase<Lowercase<string>> = 'AbC';
+const uncapitalized: Uncapitalize<Uppercase<string>> = 'abc';
+const inside: `id-${Capitalize<Lowercase<string>>}` = 'id-WORLD';

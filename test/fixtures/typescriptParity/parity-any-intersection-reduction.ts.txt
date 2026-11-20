@@ -1,0 +1,9 @@
+type Merge<A, B, C> = A & B & C;
+const primitive: Merge<any, 'first', string> = 42;
+const union: Merge<any, 'first' | 'second', 'third'> = 43;
+const branded: Merge<number, any, { tag: string }> = 44;
+const nullable: Merge<void, undefined, any> = 45;
+const pattern: Merge<any, `id-${number}`, 'id-1'> = 46;
+const mapped: Merge<Uppercase<string>, 'ID', any> = 47;
+const literal: `id-${number}` & 'id-1' = 'id-1';
+console.log(primitive, union, branded, nullable, pattern, mapped, literal);

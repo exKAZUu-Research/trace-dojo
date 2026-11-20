@@ -335,7 +335,7 @@ export class Calls {
       return errorType;
     }
     // A union's constructors combine its members', of which any being abstract makes all abstract.
-    if ((calleeType.kind === 'union' ? calleeType.types : [calleeType]).some((member) => this.isAbstractClass(member)))
+    if ((apparent.kind === 'union' ? apparent.types : [apparent]).some((member) => this.isAbstractClass(member)))
       this.c.error(node, '抽象クラスのインスタンスは作れません。');
     this.c.classes.checkConstructorAccessibility(node, signatures[0]);
     const resolution = this.resolve(node, callee, signatures, args, typeArguments, contextual);
