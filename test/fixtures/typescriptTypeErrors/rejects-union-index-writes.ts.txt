@@ -1,0 +1,22 @@
+type Scores = { [key: string]: string | number; [key: number]: number };
+type Entries = { [key: number]: number; [key: symbol]: string };
+function setScore(scores: Scores, key: string | number, text: string) {
+  scores[key] = text;
+  scores[key] ??= text;
+  [scores[key]] = [text];
+}
+function setEntry(entries: Entries, key: number | symbol) {
+  entries[key] = 'bad';
+}
+function setPattern(value: { [key: `a${string}`]: number; [key: `b${string}`]: string | number }, key: `a${string}` | `b${string}`) {
+  value[key] = 'bad';
+}
+function setReadonly(value: { readonly name: number; [key: number]: number }, key: 'name' | number) {
+  value[key] = 7;
+}
+function setTuple(value: [number?, ...string[]], key: 0 | 1) {
+  value[key] = 1;
+}
+function setGeneric<K extends string | number>(scores: Scores, key: K, text: string) {
+  scores[key] = text;
+}

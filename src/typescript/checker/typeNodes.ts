@@ -400,6 +400,7 @@ export class TypeNodes {
           optional: node.type === 'optional_parameter',
           rest,
           name: rest ? named(nameNode as TreeNode)[0]?.text : nameNode?.text,
+          labelId: node.id,
         };
       }
       default: {

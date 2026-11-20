@@ -12,7 +12,6 @@ import {
   anyType,
   bigintType,
   errorType,
-  intersectionOf,
   isAnyLike,
   isPropertyKeyLiteral,
   type LiteralType,
@@ -24,6 +23,7 @@ import {
   propertyAccessType,
   regularOf,
   type Type,
+  typeMembers,
   unionOf,
 } from './types';
 
@@ -508,9 +508,8 @@ export class AssignmentChecker {
     const indexNode = expression.childForFieldName('index') as TreeNode;
     const objectType = this.c.members.targetReceiverType(expression, objectNode);
     const indexType = this.c.members.indexTypeOf(indexNode);
-    const keys = literalKeys(indexType);
-    const readonlyKey = keys
-      ?.filter((key) => isPropertyKeyLiteral(key))
+    const readonlyKey = typeMembers(indexType)
+      .filter(isPropertyKeyLiteral)
       .find((key) => this.isReadonlyProperty(expression, objectType, String(key.value)));
     if (readonlyKey) {
       this.c.error(
@@ -527,17 +526,14 @@ export class AssignmentChecker {
       );
       return errorType;
     }
-    const readType = this.c.members.indexedType(expression, objectNode, indexNode, objectType, indexType, compound);
-    if (readType === errorType) return readType;
+    const writeType = this.c.members.indexedType(expression, objectNode, indexNode, objectType, indexType, {
+      readsField: compound,
+      write: true,
+    });
+    if (writeType === errorType) return writeType;
     if (this.c.members.isReadonlyMappedWrite(objectType, indexType))
       return this.reportReadonlyIndex(expression, objectType);
-    const narrowed = compound ? this.narrowedType(expression) : undefined;
-    if (narrowed) return narrowed;
-    if (!keys) return readType;
-    return intersectionOf(
-      keys.map((key) => this.namedWriteType(objectType, key)),
-      this.c.budget
-    );
+    return (compound ? this.narrowedType(expression) : undefined) ?? writeType;
   }
 
   /** Whether `expression`, an element access by a literal key, names a property that it cannot write. */
@@ -573,10 +569,4 @@ export class AssignmentChecker {
 
 function isAssignmentPattern(node: TreeNode): boolean {
   return ['array', 'object', 'array_pattern', 'object_pattern'].includes(node.type);
-}
-
-/** The literals that an index type consists of, or `undefined` when it admits other keys. */
-function literalKeys(indexType: Type): LiteralType[] | undefined {
-  const members = indexType.kind === 'union' ? indexType.types : [indexType];
-  return members.every((member): member is LiteralType => member.kind === 'literal') ? members : undefined;
 }

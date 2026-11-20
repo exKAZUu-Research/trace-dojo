@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 743 -- Keeps generic candidate collection, constraint fitting and inference completion together.
+// code-gauge-allow-file fileNcss 757 -- Keeps generic candidate collection, constraint fitting and inference completion together.
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import type { Checker, Mapper } from './checker';
 import { isUnit } from './flow';
@@ -47,6 +47,7 @@ export const InferencePriority = {
   Direct: 0,
   NakedTypeVariable: 1,
   SpeculativeTuple: 2,
+  SubstituteSource: 4,
   /** Through a homomorphic mapped type, as `T` in `Partial<T>`. */
   HomomorphicMappedType: 8,
   MappedTypeConstraint: 32,
@@ -364,6 +365,7 @@ export class TypeInference {
       this.inferToUnion(run, source, target, recurse);
       return;
     }
+    if (this.inferFromSubstitution(run, source, target, recurse)) return;
     if (target.kind === 'intersection') {
       for (const member of target.types) recurse(source, member);
       return;
@@ -379,6 +381,19 @@ export class TypeInference {
     if (target.kind === 'templateLiteral' && source.kind === 'literal' && typeof source.value === 'string')
       this.inferTemplateLiteral(source.value, target, recurse);
     if (target.kind === 'object') this.inferToObject(run, source, target, path, recurse);
+  }
+
+  private inferFromSubstitution(run: InferenceRun, source: Type, target: Type, recurse: Recurse): boolean {
+    if (source.kind !== 'typeParameter' || !source.substitution) return false;
+    const { base, constraint } = source.substitution;
+    recurse(base, target);
+    recurse(
+      intersectionOf([base, constraint], this.c.budget),
+      target,
+      undefined,
+      run.priority | InferencePriority.SubstituteSource
+    );
+    return true;
   }
 
   private inferToConditional(
@@ -493,6 +508,10 @@ export class TypeInference {
     const remaining = sourceMembers.length === original.length ? source : unionOf(sourceMembers, true);
     if (targetMembers.length === 1) {
       recurse(remaining, targetMembers[0]);
+      return;
+    }
+    if (remaining.kind === 'typeParameter' && remaining.substitution) {
+      this.inferFromSubstitution(run, remaining, unionOf(targetMembers, true), recurse);
       return;
     }
     const naked = targetMembers.filter((member) => {
@@ -745,11 +764,14 @@ export class TypeInference {
         (element, index) => this.tupleElementShape(element) === this.tupleElementShape(targetElements[index])
       )
     ) {
-      const sourceTypes = sourceElements.map(tupleInferenceType);
-      const targetTypes = targetElements.map(tupleInferenceType);
+      const sourceTypes = sourceElements.map((element) => this.tupleTypeArgument(element));
+      const targetTypes = targetElements.map((element) => this.tupleTypeArgument(element));
       if (
         source.readonly === target.readonly &&
-        sourceElements.every((element, index) => element.optional === targetElements[index].optional)
+        sourceElements.every(
+          (element, index) =>
+            element.optional === targetElements[index].optional && element.labelId === targetElements[index].labelId
+        )
       )
         this.inferFromTypeArguments(sourceTypes, targetTypes, path, recurse);
       else for (const [index, element] of sourceTypes.entries()) recurse(element, targetTypes[index]);
@@ -781,6 +803,12 @@ export class TypeInference {
   private tupleElementShape(element: TupleElement): 'fixed' | 'variadic' | 'rest' {
     if (!element.rest) return 'fixed';
     return this.c.relations.isGenericRestType(element.type) ? 'variadic' : 'rest';
+  }
+
+  private tupleTypeArgument(element: TupleElement): Type {
+    return this.tupleElementShape(element) === 'rest'
+      ? this.c.restElementType(element.type)
+      : tupleInferenceType(element);
   }
 
   private inferFromTupleMiddle(

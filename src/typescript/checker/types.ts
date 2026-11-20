@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 404 -- Keeps type data, cache keys, and canonical type constructors together.
+// code-gauge-allow-file fileNcss 405 -- Keeps type data, cache keys, and canonical type constructors together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { ExecutionBudget } from '../../interpreter/limits';
@@ -222,6 +222,7 @@ export interface TupleElement {
   optional: boolean;
   rest: boolean;
   name?: string;
+  labelId?: number;
 }
 
 export interface TupleInfo {

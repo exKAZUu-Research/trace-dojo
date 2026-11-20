@@ -1,0 +1,9 @@
+(4,3): error TS2322: Type 'string' is not assignable to type 'number'.
+(5,3): error TS2322: Type 'string' is not assignable to type 'number'.
+(6,4): error TS2322: Type 'string' is not assignable to type 'number'.
+(9,3): error TS2322: Type '"bad"' is not assignable to type 'never'.
+(12,3): error TS2322: Type 'string' is not assignable to type 'number'.
+(15,9): error TS2540: Cannot assign to 'name' because it is a read-only property.
+(18,3): error TS2322: Type '1' is not assignable to type 'never'.
+(21,3): error TS2322: Type 'string' is not assignable to type 'Scores[K]'.
+  Type 'string' is not assignable to type 'number'.

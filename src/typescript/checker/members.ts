@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 401 -- Shares member and element resolution across reads, writes, and optional chains.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import {
@@ -18,6 +19,7 @@ import { assignmentKind, chainObject, isOptionalChain, skipParentheses } from '.
 import { tupleElementBeyond } from './tupleIndexes';
 import {
   errorType,
+  intersectionOf,
   isAnyLike,
   isIntrinsic,
   isPropertyKeyLiteral,
@@ -40,6 +42,12 @@ interface IndexAccess {
   node: TreeNode;
   objectNode: TreeNode;
   indexNode: TreeNode;
+  write?: boolean;
+}
+
+interface IndexAccessOptions {
+  readsField?: boolean;
+  write?: boolean;
 }
 
 interface CheckedAccess {
@@ -495,9 +503,9 @@ export class MemberChecker {
     indexNode: TreeNode,
     objectType: Type,
     indexType: Type,
-    readsField = true
+    { readsField = true, write }: IndexAccessOptions = {}
   ): Type {
-    const type = this.indexedTypeAt({ node, objectNode, indexNode }, objectType, indexType);
+    const type = this.indexedTypeAt({ node, objectNode, indexNode, write }, objectType, indexType);
     if (readsField && objectNode.type === 'this' && isPropertyKeyLiteral(indexType)) {
       const property = this.c.propertyOf(objectType, String(indexType.value));
       if (property) this.c.classDeclarations.checkFieldRead(node, objectNode, indexNode, property);
@@ -570,7 +578,7 @@ export class MemberChecker {
     if (!this.checkPropertyAvailability(access.indexNode, objectType, property)) return errorType;
     this.c.expressions.expandos.checkAssignedBefore(access.node, access.indexNode, property);
     // `o["secret"]` reads a private or protected member, which TypeScript leaves as a way around its access checks.
-    return propertyAccessType(property);
+    return propertyAccessType(property, access.write ? 'write' : 'read');
   }
 
   private computedIndexedType(access: IndexAccess, objectType: Type, index: Type): Type {
@@ -579,6 +587,10 @@ export class MemberChecker {
     if (!this.c.relations.isAssignable(index, keyTypes)) {
       this.c.error(access.indexNode, `型 '${this.c.print(index)}' はインデックスに使えません。`);
       return errorType;
+    }
+    if (access.write && index.kind === 'union') {
+      const types = index.types.map((member) => this.indexedTypeAt(access, objectType, member));
+      return types.includes(errorType) ? errorType : intersectionOf(types, this.c.budget);
     }
     const structure = this.c.structureOf(objectType);
     const applicable = applicableIndex(this.c, structure, index);
