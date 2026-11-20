@@ -153,15 +153,15 @@ function sinkOf(runtime: Runtime, receiver: Value): Pick<OutputChannel, 'write'>
   return { write: (text: string) => channel.write(encodableText(text)) };
 }
 
-define('_StandardSink.write', (runtime, receiver, [value]) => {
+define('Stdout.write', (runtime, receiver, [value]) => {
   sinkOf(runtime, receiver).write(stringOf(runtime, value));
   return;
 });
-define('_StandardSink.writeln', (runtime, receiver, args) => {
+define('Stdout.writeln', (runtime, receiver, args) => {
   sinkOf(runtime, receiver).write(`${args.length === 0 ? '' : stringOf(runtime, args[0])}\n`);
   return;
 });
-define('_StandardSink.writeAll', (runtime, receiver, [objects, separator = '']) => {
+define('Stdout.writeAll', (runtime, receiver, [objects, separator = '']) => {
   const sink = sinkOf(runtime, receiver);
   let first = true;
   forEachValue(runtime, objects, (value) => {
@@ -171,7 +171,7 @@ define('_StandardSink.writeAll', (runtime, receiver, [objects, separator = '']) 
   });
   return;
 });
-define('_StandardSink.writeCharCode', (runtime, receiver, [code]) => {
+define('Stdout.writeCharCode', (runtime, receiver, [code]) => {
   sinkOf(runtime, receiver).write(characterOf(runtime, intArg(runtime, code, 'charCode')));
   return;
 });

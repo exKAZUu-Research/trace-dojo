@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 402 -- Type and diagnostic resolution share the compiler environment.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ClassDeclaration, Span, TypeAliasDeclaration, TypeParameter, TypeSyntax } from './ast';
 import type { ClassInfo, Member } from './classes';
@@ -82,6 +83,7 @@ const UNAVAILABLE_NAMES: Record<string, string> = {
   scheduleMicrotask: 'scheduleMicrotask（非同期処理）',
   Isolate: 'Isolate',
   stdin: 'stdin（標準入力）',
+  exitCode: 'exitCode（プロセスの終了状態）',
   File: 'File（ファイルの読み書き）',
   Directory: 'Directory（ファイルの読み書き）',
   FileSystemEntity: 'FileSystemEntity（ファイルの読み書き）',
@@ -100,6 +102,21 @@ const UNAVAILABLE_NAMES: Record<string, string> = {
   Float64List: 'Float64List（dart:typed_data）',
   ByteData: 'ByteData（dart:typed_data）',
 };
+
+const UNAVAILABLE_SINK_MEMBERS = new Set([
+  'add',
+  'addError',
+  'addStream',
+  'close',
+  'done',
+  'encoding',
+  'flush',
+  'hasTerminal',
+  'nonBlocking',
+  'terminalColumns',
+  'terminalLines',
+  'supportsAnsiEscapes',
+]);
 
 export function typeName(type: DartType): string {
   return `'${typeToString(type)}'`;
@@ -135,6 +152,13 @@ export abstract class CompilerBase {
 
   unsupported(span: Span | { row: number }, what: string): never {
     return this.error(span, `${what}は、この採点環境では使えません。`);
+  }
+
+  protected checkUnavailableIoMember(receiver: DartType, name: string, span: Span): void {
+    const type = resolveBound(receiver);
+    if (type.kind !== 'interface' || type.cls.library !== 'dart:io') return;
+    if ((type.cls.name === 'Stdout' || type.cls.name === 'IOSink') && UNAVAILABLE_SINK_MEMBERS.has(name))
+      this.unsupported(span, type.cls.name + '.' + name);
   }
 
   /** Rejects a name the program does not define: as unavailable when the SDK has it outside what the interpreter runs. */

@@ -1,5 +1,5 @@
 import { CompileError } from '../interpreter/diagnostics';
-// code-gauge-allow-file fileNcss 937 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 943 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type {
   Arguments as ArgumentsSyntax,
   CascadeSelector,
@@ -30,6 +30,7 @@ import {
   isPotentiallyNullable,
   isSubtype,
   makeNullable,
+  mentionsTypeParams,
   NEVER,
   nonNullable,
   NULL,
@@ -449,7 +450,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   protected compileChainPart(expression: Expression, context: DartType | undefined): Compiled {
     const compiled = this.compileChainNode(expression, context);
-    if (!this.inConstContext && 'isConst' in expression && expression.isConst) this.checkConstant(expression, compiled);
+    const explicitlyConst = 'isConst' in expression && expression.isConst;
+    if (compiled.isConst && (this.inConstContext || explicitlyConst)) {
+      const params = new Set(this.typeScopes.flatMap((scope) => [...scope.values()]));
+      if (mentionsTypeParams(compiled.type, params)) this.error(expression, '定数の型引数には、型変数を使えません。');
+    }
+    if (!this.inConstContext && explicitlyConst) this.checkConstant(expression, compiled);
     return compiled;
   }
 
@@ -1266,6 +1272,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const lookupType = nullAware ? nonNullable(receiverType) : receiverType;
     const resolved = this.memberFor(receiver, lookupType, name, false);
     if (!resolved) {
+      this.checkUnavailableIoMember(lookupType, name, span);
       if (this.lookupMember(lookupType, name, true))
         this.error(span, `${name} には getter がないので、値を読めません。`);
       return this.error(span, `${typeName(nonNullable(receiverType))} 型には ${name} というメンバーがありません。`);
@@ -1413,7 +1420,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (declaration?.kind === 'alias') {
       const { alias } = declaration;
       const aliased = this.resolveAlias(alias, span);
-      if (aliased.kind === 'interface' && !aliased.nullable) {
+      if (aliased.kind === 'interface') {
         return { kind: 'class', cls: aliased.cls, alias, typeArgs: undefined, syntax };
       }
     }
@@ -1444,7 +1451,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
     const member = target.cls.staticMembers.get(name);
     if (member) return this.readStatic(member, span);
-    if (target.cls.constructors.has(name)) return this.compileConstructorTearoff(target.syntax, name, span);
+    if (target.cls.constructors.has(name === 'new' ? '' : name))
+      return this.compileConstructorTearoff(target.syntax, name, span);
     if (target.cls.staticSetters.has(name)) return this.error(span, `${name} には getter がないので、値を読めません。`);
     return this.error(span, `クラス ${target.cls.name} に static なメンバー ${name} がありません。`);
   }

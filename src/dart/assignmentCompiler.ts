@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 654 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 655 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type { CascadeSelector, CollectionElement, Expression, ForInBinding, Span, SwitchExpressionCase } from './ast';
 import type { ClassInfo, Member } from './classes';
 import { at, type Compiled, type Eval, type ResolvedMember, typeName } from './compilerBase';
@@ -485,6 +485,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     const lookupType = nullAware ? nonNullable(receiverType) : receiverType;
     const setter = this.lookupMember(lookupType, name, true);
     if (!setter) {
+      this.checkUnavailableIoMember(lookupType, name, span);
       const getter = this.lookupMember(lookupType, name, false);
       if (getter) return this.error(span, `${name} は final か getter だけなので、代入できません。`);
       return this.error(span, `${typeName(nonNullable(receiverType))} 型には ${name} というメンバーがありません。`);

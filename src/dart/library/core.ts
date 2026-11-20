@@ -1409,22 +1409,18 @@ bool _hasEfficientLength(Iterable<Object?> iterable) =>
     iterable is EmptyIterable ||
     iterable is _CompactKeysIterable ||
     iterable is _CompactValuesIterable ||
-    iterable is _CompactEntriesIterable ||
-    iterable is EfficientLengthMappedIterable ||
-    iterable is EfficientLengthTakeIterable ||
-    iterable is EfficientLengthSkipIterable ||
-    iterable is EfficientLengthFollowedByIterable;
+    iterable is _CompactEntriesIterable;
 
 /** The VM's marker of iterables whose length is known without iterating them, as dart:collection's views use it. */
 abstract class EfficientLengthIterable<E> extends Iterable<E> {
   const EfficientLengthIterable();
 }
 
-class EfficientLengthMappedIterable<S, T> extends MappedIterable<S, T> {
+class EfficientLengthMappedIterable<S, T> extends MappedIterable<S, T> implements EfficientLengthIterable<T> {
   EfficientLengthMappedIterable(Iterable<S> iterable, T Function(S) f) : super(iterable, f);
 }
 
-class EfficientLengthTakeIterable<E> extends TakeIterable<E> {
+class EfficientLengthTakeIterable<E> extends TakeIterable<E> implements EfficientLengthIterable<E> {
   EfficientLengthTakeIterable(Iterable<E> iterable, int takeCount) : super(iterable, takeCount);
   int get length {
     int iterableLength = _iterable.length;
@@ -1433,7 +1429,7 @@ class EfficientLengthTakeIterable<E> extends TakeIterable<E> {
   }
 }
 
-class EfficientLengthSkipIterable<E> extends SkipIterable<E> {
+class EfficientLengthSkipIterable<E> extends SkipIterable<E> implements EfficientLengthIterable<E> {
   EfficientLengthSkipIterable(Iterable<E> iterable, int skipCount) : super(iterable, skipCount);
   int get length {
     int length = _iterable.length - _skipCount;
@@ -1446,7 +1442,7 @@ class EfficientLengthSkipIterable<E> extends SkipIterable<E> {
   }
 }
 
-class EfficientLengthFollowedByIterable<E> extends FollowedByIterable<E> {
+class EfficientLengthFollowedByIterable<E> extends FollowedByIterable<E> implements EfficientLengthIterable<E> {
   EfficientLengthFollowedByIterable(Iterable<E> first, Iterable<E> second) : super(first, second);
   int get length => _first.length + _second.length;
 }
@@ -1473,7 +1469,7 @@ class CastIterable<S, T> extends Iterable<T> {
   Iterator<T> get iterator => CastIterator<S, T>(_source.iterator);
 }
 
-class _EfficientLengthCastIterable<S, T> extends CastIterable<S, T> {
+class _EfficientLengthCastIterable<S, T> extends CastIterable<S, T> implements EfficientLengthIterable<T> {
   _EfficientLengthCastIterable(Iterable<S> source) : super(source);
   int get length => _source.length;
 }

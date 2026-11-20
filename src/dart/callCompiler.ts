@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 642 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 643 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type {
   Arguments as ArgumentsSyntax,
   Expression,
@@ -181,8 +181,8 @@ export abstract class CallCompiler extends OperatorCompiler {
   }
 
   /** A call `a.b(...)`: a static member, a named constructor, a prefixed declaration, or a method. */
-  // code-gauge-allow functionCognitiveComplexity 22 -- Static, prefixed, extension and instance calls use distinct dispatch rules.
-  // code-gauge-allow functionNcss 31 -- Static, prefixed, extension and instance calls use distinct dispatch rules.
+  // code-gauge-allow functionCognitiveComplexity 24 -- Static, prefixed, extension and instance calls use distinct dispatch rules.
+  // code-gauge-allow functionNcss 32 -- Static, prefixed, extension and instance calls use distinct dispatch rules.
   private compileMemberCall(
     expression: Extract<Expression, { kind: 'call' }>,
     callee: Extract<Expression, { kind: 'member' }>,
@@ -193,19 +193,11 @@ export abstract class CallCompiler extends OperatorCompiler {
     if (target?.kind === 'class') {
       const member = target.cls.staticMembers.get(callee.name);
       if (member) return this.compileStaticCall(member, args, typeArguments, expression, context);
-      if (target.cls.constructors.has(callee.name) || target.typeArgs) {
+      const name = callee.name === 'new' ? undefined : callee.name;
+      if (target.cls.constructors.has(name ?? '') || target.typeArgs) {
         const types =
           target.typeArgs ?? (target.alias ? this.aliasConstructor(target.alias, undefined, callee).types : undefined);
-        return this.compileConstructorCall(
-          target.cls,
-          callee.name,
-          types,
-          args,
-          typeArguments,
-          expression,
-          context,
-          false
-        );
+        return this.compileConstructorCall(target.cls, name, types, args, typeArguments, expression, context, false);
       }
       return this.error(
         callee,
@@ -365,8 +357,8 @@ export abstract class CallCompiler extends OperatorCompiler {
     const lookupType = nullAware ? nonNullable(receiverType) : receiverType;
     const resolved = this.memberFor(receiver, lookupType, name, false);
     if (!resolved) {
-      const shown = name === '[]' ? '[]' : name;
-      return this.error(span, `${typeName(nonNullable(receiverType))} 型には ${shown} というメソッドがありません。`);
+      this.checkUnavailableIoMember(lookupType, name, span);
+      return this.error(span, `${typeName(nonNullable(receiverType))} 型には ${name} というメソッドがありません。`);
     }
     if (!nullAware && isNullable(receiverType) && !this.acceptsNull(resolved) && receiverType.kind !== 'null') {
       const what = name === '[]' ? '添字 [ ]' : `${name}()`;
@@ -608,7 +600,7 @@ export abstract class CallCompiler extends OperatorCompiler {
     isConstSyntax: boolean
   ): Compiled {
     if (methodTypeArguments) this.error(span, 'コンストラクタには、型引数をこの位置には書けません。');
-    const constructor = cls.constructors.get(name ?? '');
+    const constructor = cls.constructors.get(name === 'new' ? '' : (name ?? ''));
     if (!constructor) {
       if (cls.kind === 'enum') return this.error(span, '列挙型のオブジェクトは作れません。');
       if (name) return this.error(span, `クラス ${cls.name} に ${name} というコンストラクタはありません。`);
@@ -642,7 +634,7 @@ export abstract class CallCompiler extends OperatorCompiler {
     span: Span
   ): { cls: ClassInfo; types: ConstructorTypes } {
     const template = this.resolveAlias(alias, span);
-    if (template.kind !== 'interface' || template.nullable)
+    if (template.kind !== 'interface')
       return this.error(span, alias.name + ' は、コンストラクタを持つクラスの別名ではありません。');
     if (!written && alias.typeParams.length > 0)
       return { cls: template.cls, types: { template, parameters: alias.typeParams } };
@@ -1049,7 +1041,7 @@ export abstract class CallCompiler extends OperatorCompiler {
           : undefined;
     if (!target) return this.error(span, 'クラス ' + type.name + ' が見つかりません。');
     const { cls, types: typeArgs } = target;
-    const constructor = cls.constructors.get(name ?? '');
+    const constructor = cls.constructors.get(name === 'new' ? '' : (name ?? ''));
     if (!constructor)
       return this.error(span, `クラス ${cls.name} に ${name ?? '名前のない'} コンストラクタはありません。`);
     if (cls.kind === 'enum' && constructor.kind === 'generative')

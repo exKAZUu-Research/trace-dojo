@@ -144,17 +144,17 @@ abstract interface class IOSink implements StringSink {
   external void writeCharCode(int charCode);
 }
 
-class _StandardSink implements IOSink {
+class Stdout implements IOSink {
   final bool _isError;
-  _StandardSink._(this._isError);
+  Stdout._(this._isError);
   external void write(Object? object);
   external void writeln([Object? object = ""]);
   external void writeAll(Iterable<dynamic> objects, [String separator = ""]);
   external void writeCharCode(int charCode);
 }
 
-final IOSink stdout = _StandardSink._(false);
-final IOSink stderr = _StandardSink._(true);
+final Stdout stdout = Stdout._(false);
+final Stdout stderr = Stdout._(true);
 
 external Never exit(int code);
 `;

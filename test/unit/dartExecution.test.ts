@@ -727,14 +727,22 @@ test('stdout is shown, stderr is accepted without being shown, and exit stops th
   const program = `import 'dart:io';
 
 void main() {
-  stderr.writeln('hidden');
-  stdout.write('a');
-  stdout.writeln(1);
+  Stdout out = stdout;
+  Stdout err = stderr;
+  err.writeln('hidden');
+  print(out.runtimeType);
+  out.write('a');
+  out.writeln(1);
   exit(3);
   print('not reached');
 }
 `;
-  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'a1\n' });
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'Stdout\na1\n' });
+  for (const statement of ['stdout.flush()', 'stdout.close()', 'print(stdout.done)', 'exitCode = 2']) {
+    const result = executeProgram('dart', `import 'dart:io'; void main() { ${statement}; }`);
+    expect(result.kind).toBe('compileError');
+    if (result.kind === 'compileError') expect(result.diagnostics[0]?.message).toMatch(/この採点環境では使えません。$/);
+  }
 });
 
 // Each program is an error before it runs in the SDK, at the line given.
@@ -802,6 +810,10 @@ void main() {
   try { values.first = 1.5; } catch (e) { print(e.runtimeType); }
   try { values.addAll(values.where((x) => x > 0)); } catch (e) { print(e.runtimeType); }
   print(values);
+  Map<num, num> typedMap = <int, int>{};
+  try { typedMap.addEntries(<MapEntry<num, num>>[MapEntry(1, 1.5)]); } catch (e) { print(e.runtimeType); }
+  typedMap.addEntries(<MapEntry<int, int>>[MapEntry(2, 3)]);
+  print(typedMap);
   dynamic source = <num, num>{1: 2};
   print(<int, int>{...source});
   dynamic invalid = 'wrong';
@@ -813,7 +825,7 @@ void main() {
     kind: 'executed',
     uncaughtException: undefined,
     stdout:
-      '_TypeError\n_TypeError\n_TypeError\nConcurrentModificationError\n[1, 2, 1]\n{1: 2}\n_TypeError\n{1: 2, 2: 4}\n',
+      '_TypeError\n_TypeError\n_TypeError\nConcurrentModificationError\n[1, 2, 1]\n_TypeError\n{2: 3}\n{1: 2}\n_TypeError\n{1: 2, 2: 4}\n',
   });
 });
 
@@ -904,7 +916,11 @@ void main() {
 });
 
 test('construction checks constants before main and only evaluates selected branches', () => {
-  const valid = `class C {
+  const valid = `class Box<T> {
+  final T value;
+  const Box(this.value);
+}
+class C {
   final (int, int) value;
   const C(int n) : value = (n + 1, 0);
 }
@@ -913,13 +929,20 @@ void main() {
   const a = <int>[n];
   const b = [...a, n + 1];
   print([const C(n).value, b]);
+  print(const Box(1).value);
 }`;
-  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '[(4, 0), [3, 4]]\n' });
+  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '[(4, 0), [3, 4]]\n1\n' });
   for (const invalid of [
     'void main() { print("started"); const n = [1 ~/ 0]; }',
     'int f() => 5; class C { final int n; const C() : n = f(); } void main() {}',
     'class C { const C(int n) : assert(n > 0); } void main() { print(const C(0)); }',
   ]) {
+    expect(executeProgram('dart', invalid)).toMatchObject({ kind: 'compileError' });
+  }
+  for (const initializer of ['const <T>[]', 'const <T>{}', 'const <int, T>{}', 'const Box<T>()']) {
+    const invalid = `class Box<T> { const Box(); }
+class C<T> { final Object value; const C() : value = ${initializer}; }
+void main() { print('started'); }`;
     expect(executeProgram('dart', invalid)).toMatchObject({ kind: 'compileError' });
   }
 });
@@ -1028,6 +1051,7 @@ void main() {
 
 test('generic aliases substitute class arguments for constructor calls and tear-offs', () => {
   const program = `typedef Alias<T> = Box<int, T>;
+typedef Nullable<T> = Box<int, T>?;
 class Box<X, Y> {
   final X x;
   final Y y;
@@ -1041,10 +1065,13 @@ void main() {
   print(Alias.named(x: 3, y: 'inferred').runtimeType);
   var make = Alias.new;
   print(make(4, 'tear-off').runtimeType);
+  print(new Nullable<int>(2, 3).y);
+  print(Nullable<String>.named(x: 4, y: 'nullable').y);
+  print(Nullable<String>.new(4, 'tear-off').runtimeType);
 }`;
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
-    stdout: 'new\n2\nnamed\nBox<int, String>\nBox<int, String>\n',
+    stdout: 'new\n2\nnamed\nBox<int, String>\nBox<int, String>\n3\nnullable\nBox<int, String>\n',
   });
 });
 
@@ -1117,10 +1144,12 @@ void main() {
   print(RegExp('(a)').firstMatch('a')!.groups(UnmodifiableListView<int>([0, 1])));
   var mapped = HashSet<int>.of([1, 2, 3]).map((x) { print('map'); return x; });
   print([mapped.skip(1).length, mapped.take(1).length]);
+  var cast = mapped.cast<int>();
+  print([cast.skip(1).length, cast.take(1).length]);
 }`;
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
-    stdout: 'read 1\nread 0\n[0, 1]\n[a, a]\n[2, 1]\n',
+    stdout: 'read 1\nread 0\n[0, 1]\n[a, a]\n[2, 1]\n[2, 1]\n',
   });
 });
 
@@ -1245,4 +1274,27 @@ test('bulk list writes can copy large blocks without a host call argument limit'
   });
   const oversized = 'void main() { <int>[].replaceRange(0, 0, List<int>.filled(510000, 1)); }';
   expect(executeProgram('dart', oversized)).toMatchObject({ kind: 'limitExceeded', limit: 'storage' });
+});
+
+test('sync generators invalidate current when they terminate', () => {
+  const program = `Iterable<int> values(bool fail) sync* { yield 1; if (fail) throw 'stop'; }
+Iterable<int?> empty() sync* {}
+void inspect(Iterator<int> iterator) {
+  try { print(iterator.current); } catch (e) { print(e.runtimeType); }
+}
+void main() {
+  for (var fail in [false, true]) {
+    var iterator = values(fail).iterator;
+    inspect(iterator);
+    iterator.moveNext();
+    inspect(iterator);
+    try { print(iterator.moveNext()); } catch (e) { print(e); }
+    inspect(iterator);
+  }
+  print(empty().iterator.current);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '_TypeError\n1\nfalse\n_TypeError\n_TypeError\n1\nstop\n_TypeError\nnull\n',
+  });
 });

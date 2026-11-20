@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 933 -- The native lists, sets, maps, and their iterators share collection helpers.
+// code-gauge-allow-file fileNcss 952 -- The native lists, sets, maps, and their iterators share collection helpers.
 import type { TopLevelFunction } from '../environment';
 import { stringOf } from '../format';
 import { type HashPolicy, HashStore } from '../hashStore';
@@ -1135,12 +1135,16 @@ define('Map.containsKey', (_runtime, receiver, [key]) => store(receiver).has(key
 define('Map.[]', (_runtime, receiver, [key]) => store(receiver).get(key));
 define('Map.[]=', (runtime, receiver, [key, value]) => {
   checkMapModifiable(runtime, receiver);
-  const map = receiver as DartObject;
-  checkElement(runtime, key, elementTypeOf(map, 0), 'key');
-  checkElement(runtime, value, elementTypeOf(map, 1), 'value');
-  store(receiver).set(key, value);
+  writeMapEntry(runtime, receiver as DartObject, key, value);
   return;
 });
+
+function writeMapEntry(runtime: Runtime, map: DartObject, key: Value, value: Value): void {
+  checkElement(runtime, key, elementTypeOf(map, 0), 'key');
+  checkElement(runtime, value, elementTypeOf(map, 1), 'value');
+  store(map).set(key, value);
+}
+
 function mapView(runtime: Runtime, receiver: Value, className: string, typeArgs: DartType[]): DartObject {
   const view = new DartObject(runtime.links.classNamed(className), typeArgs, []);
   view.native = { map: receiver, values: () => [receiver] };
@@ -1180,9 +1184,17 @@ define('_CompactKeysIterable.contains', (_runtime, receiver, [key]) => store(vie
 define('_MapIterator.moveNext', (runtime, receiver) => moveStoreIterator(runtime, receiver));
 define('_MapIterator.current', (runtime, receiver) => storeCurrent(runtime, receiver));
 define('Map.addEntries', (runtime, receiver, [entries]) => {
-  checkMapModifiable(runtime, receiver);
+  const map = receiver as DartObject;
+  const entryType = interfaceType(coreTypes.mapEntry, map.typeArgs);
+  checkElement(runtime, entries, interfaceType(coreTypes.iterable, [entryType]), 'newEntries');
+  checkMapModifiable(runtime, map);
   forEachValue(runtime, entries, (entry) => {
-    store(receiver).set(runtime.getProperty(entry, 'key', undefined), runtime.getProperty(entry, 'value', undefined));
+    writeMapEntry(
+      runtime,
+      map,
+      runtime.getProperty(entry, 'key', undefined),
+      runtime.getProperty(entry, 'value', undefined)
+    );
   });
   return;
 });
@@ -1270,13 +1282,14 @@ define('_SyncStarIterable.iterator', (runtime, receiver) => {
     frame,
     generator: state.body(frame),
     current: undefined,
-    values: () => [
-      ...frame.locals.map((cell) => cell?.v),
-      ...frame.captured.map((cell) => cell.v),
-      frame.receiver,
-      ...frame.temporaries,
-      iteratorState.current,
-    ],
+    *values() {
+      if (!this.generator) return;
+      for (const cell of frame.locals) yield cell?.v;
+      for (const cell of frame.captured) yield cell.v;
+      yield frame.receiver;
+      yield* frame.temporaries;
+      yield this.current;
+    },
   };
   iterator.native = iteratorState as unknown as DartObject['native'];
   return iterator;
@@ -1291,6 +1304,7 @@ define('_SyncStarIterator.moveNext', (runtime, receiver) => {
     result = generator.next();
   } catch (error) {
     state.generator = undefined;
+    state.current = undefined;
     throw error;
   } finally {
     runtime.exit(state.frame);
@@ -1303,10 +1317,12 @@ define('_SyncStarIterator.moveNext', (runtime, receiver) => {
   state.current = result.value;
   return true;
 });
-define(
-  '_SyncStarIterator.current',
-  (_runtime, receiver) => ((receiver as DartObject).native as unknown as SyncStarIteratorState).current
-);
+define('_SyncStarIterator.current', (runtime, receiver) => {
+  const iterator = receiver as DartObject;
+  const state = iterator.native as unknown as SyncStarIteratorState;
+  castTo(runtime, state.current, elementTypeOf(iterator));
+  return state.current;
+});
 
 export { checkIndex, store };
 
