@@ -1404,7 +1404,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       isXvalue: original.type.kind === 'array' && original.isXvalue,
       staticAddress: pointer.staticAddress && offset.constant !== undefined,
       constantDesignation:
-        original.type.kind === 'array' && original.constantDesignation && offset.constant !== undefined,
+        original.type.kind === 'array' && original.constantDesignation && designatesElement(original.type, offset),
       constantInitialization: hasConstantObject(constantLocation),
       constantLocation,
       row,
@@ -2250,6 +2250,13 @@ function constantFunctor(type: Type, object: Expr): Expr {
   return type.kind === 'class' && type.cls.library?.kind === 'functor'
     ? { ...object, constantInitialization: true }
     : object;
+}
+
+/** Whether a constant subscript stays within an array or one past its end, as Apple clang++ accepts in a constant expression. */
+function designatesElement(array: Type & { kind: 'array' }, offset: Expr): boolean {
+  if (offset.constant === undefined || array.length === undefined) return false;
+  const index = Number(offset.constant);
+  return index >= 0 && index <= array.length;
 }
 
 /** Whether a static member named through `object` keeps its constant value: the object is absent or a constant designation. */
