@@ -15,6 +15,7 @@ const LEAF_SHAPES: Record<string, Capability[]> = {
   BinaryHeapDrainShape: ['back', 'exact'],
   StringDrainShape: ['back'],
   WindowsShape: ['back', 'exact'],
+  SliceSplitShape: ['back'],
   ChunksShape: ['back', 'exact'],
   RChunksShape: ['back', 'exact'],
   ChunksExactShape: ['back', 'exact'],
@@ -27,6 +28,7 @@ const LEAF_SHAPES: Record<string, Capability[]> = {
   OptionIterShape: ['back', 'exact'],
   SetOpShape: [],
   CaseMappingShape: ['back', 'exact'],
+  EscapeDefaultShape: ['exact'],
   RepeatShape: ['back'],
   RepeatNShape: ['back', 'exact'],
   OnceShape: ['back', 'exact'],
@@ -62,7 +64,7 @@ const RANGE_EXACT: Record<string, ReadonlySet<string>> = {
 };
 
 /** Whether an iterator (an `IterImpl`, a `&mut` one, or a shape) has a capability, as std's impls decide. */
-// code-gauge-allow functionCognitiveComplexity 26 -- Follows std's impls of the iterator traits case by case.
+// code-gauge-allow functionCognitiveComplexity 28 -- Follows std's impls of the iterator traits case by case.
 export function iteratorCapability(type: Type, capability: Capability): Answer {
   const t = normalize(shallow(type));
   if (t.kind === 'var') return 'unknown';
@@ -70,7 +72,7 @@ export function iteratorCapability(type: Type, capability: Capability): Answer {
   if (t.kind !== 'adt') return 'no';
   if (t.def.builtin === 'Iter') return iteratorCapability(t.args[1], capability);
   const raw = t.def.builtin;
-  const name = raw === 'Range' || raw === 'RangeInclusive' || raw === 'RangeFrom' ? `${raw}Shape` : t.def.name;
+  const name = raw === 'CaseIter' ? 'CaseMappingShape' : raw && DIRECT_ITERATORS.has(raw) ? `${raw}Shape` : t.def.name;
   const leaf = LEAF_SHAPES[name];
   if (leaf) return leaf.includes(capability) ? 'yes' : 'no';
   if (name.startsWith('HashMap') || name.startsWith('HashSet')) return capability === 'exact' ? 'yes' : 'no';
@@ -83,6 +85,8 @@ export function iteratorCapability(type: Type, capability: Capability): Answer {
   if (name === 'SplitShape') return capability === 'back' ? doubleEndedSearcher(t.args[0]) : 'no';
   return adapterCapability(name, t.args, capability);
 }
+
+const DIRECT_ITERATORS = new Set(['Range', 'RangeInclusive', 'RangeFrom', 'EscapeDefault']);
 
 /** The capabilities of an adapter, from those of the iterators it adapts. */
 function adapterCapability(name: string, args: Type[], capability: Capability): Answer {

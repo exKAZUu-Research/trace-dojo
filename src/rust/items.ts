@@ -813,6 +813,7 @@ const BUILTIN_STRUCTS: Record<string, BuiltinAdt> = {
   Utf8Error: 'Utf8Error',
   Entry: 'Entry',
   CaseIter: 'CaseIter',
+  EscapeDefault: 'EscapeDefault',
   ParseError: 'ParseError',
   Unsigned: 'Unsigned',
   Signed: 'Signed',
@@ -831,6 +832,7 @@ const BUILTIN_STRUCTS: Record<string, BuiltinAdt> = {
 
 const BUILTIN_ENUMS: Record<string, BuiltinAdt> = {
   Option: 'Option',
+  ControlFlow: 'ControlFlow',
   Result: 'Result',
   Ordering: 'Ordering',
   Infallible: 'Infallible',

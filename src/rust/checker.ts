@@ -472,7 +472,6 @@ export class Checker {
   }
 
   // code-gauge-allow functionNcss 31 -- Binds signature types before checking the body and its obligations.
-
   checkFn(def: FnDef): void {
     const item = def.ast as FnItem;
     if (!item.body) return;

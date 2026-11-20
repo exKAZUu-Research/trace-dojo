@@ -22,7 +22,7 @@ const RANGE_SHAPES: Record<string, string> = {
 };
 
 /** The element type a `for` loop over a value of this type binds, as `IntoIterator` gives it. */
-// code-gauge-allow functionNcss 56 -- Follows std's `IntoIterator` impls case by case.
+// code-gauge-allow functionNcss 58 -- Follows std's `IntoIterator` impls case by case.
 // code-gauge-allow functionCognitiveComplexity 24 -- Follows std's `IntoIterator` impls case by case.
 export function intoIterItem(type: Type): Type | undefined {
   const t = normalize(shallow(type));
@@ -67,6 +67,9 @@ export function intoIterItem(type: Type): Type | undefined {
     case 'CaseIter': {
       return CHAR;
     }
+    case 'EscapeDefault': {
+      return CHAR;
+    }
     case 'HashMap':
     case 'BTreeMap': {
       return { kind: 'tuple', elems: t.args };
@@ -104,6 +107,7 @@ export function intoIterShape(program: Program, type: Type): Type | undefined {
   if (t.kind !== 'adt') return undefined;
   if (t.def.builtin === 'Iter') return t.args[1];
   if (t.def.builtin === 'CaseIter') return program.shapeType('CaseMappingShape');
+  if (t.def.builtin === 'EscapeDefault') return program.shapeType('EscapeDefaultShape');
   const range = RANGE_SHAPES[t.def.builtin as string];
   if (range) return program.shapeType(range, [t.args[0]]);
   const shapes = COLLECTION_SHAPES[t.def.builtin as string];

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 466 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss 478 -- One native per method of the standard library.
 import { debugFloat, decimalToF32 } from '../floatFormat';
 import { FLOAT_LIMITS } from '../floatLimits';
 import { normalize } from '../infer';
@@ -479,6 +479,23 @@ const floating: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
   fract: ([a], ctx) => round(ctx, float(a) - Math.trunc(float(a))),
   sin: ([a], ctx) => round(ctx, Math.sin(float(a))),
   cos: ([a], ctx) => round(ctx, Math.cos(float(a))),
+  sin_cos: ([a], ctx) => [round(ctx, Math.sin(float(a))), round(ctx, Math.cos(float(a)))],
+  to_bits: ([a], ctx) => {
+    if (!isF32(ctx)) return floatBits(float(a));
+    const view = new DataView(new ArrayBuffer(4));
+    view.setFloat32(0, float(a));
+    return BigInt(view.getUint32(0));
+  },
+  from_bits: ([bits], ctx) => {
+    if (isF32(ctx)) {
+      const view = new DataView(new ArrayBuffer(4));
+      view.setUint32(0, Number(bits as bigint));
+      return view.getFloat32(0);
+    }
+    const view = new DataView(new ArrayBuffer(8));
+    view.setBigUint64(0, bits as bigint);
+    return view.getFloat64(0);
+  },
   tan: ([a], ctx) => round(ctx, Math.tan(float(a))),
   asin: ([a], ctx) => round(ctx, Math.asin(float(a))),
   acos: ([a], ctx) => round(ctx, Math.acos(float(a))),

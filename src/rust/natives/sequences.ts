@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 500 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss 511 -- One native per method of the standard library.
 import { keepVecCapacity, setIntoIterBuffer, vecCapacity } from '../capacity';
 import { sliceRange } from '../compiler';
 import { type DebugPart } from '../debugText';
@@ -10,7 +10,7 @@ import { shallow, type Type } from '../types';
 import {
   DONE,
   ElementPlace,
-  type IterValue,
+  IterValue,
   RangeValue,
   sliceBase,
   sliceGet,
@@ -24,7 +24,7 @@ import {
 } from '../values';
 import { extendRoom, withCapacity } from './capacityNatives';
 import { cloneInto } from './cloning';
-import { dequeDrain, dequeIter, dequeSlices, withDequeHead } from './dequeHead';
+import { dequeDrain, dequeIter, dequeRange, dequeSlices, withDequeHead } from './dequeHead';
 import {
   arrayIter,
   collectVec,
@@ -225,6 +225,8 @@ const sliceNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
     );
     return result.found ? ok(ctx, BigInt(result.index)) : err(ctx, BigInt(result.index));
   },
+  partition_point: ([self, f], ctx) =>
+    BigInt(binarySearch(deref(self), (item) => (call(ctx, f, [item]) ? -1 : 1)).index),
   swap: ([self, a, b], ctx) => {
     const slice = deref(self);
     const i = Number(a as bigint);
@@ -271,6 +273,11 @@ const sliceNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
     };
     return chunkDebug(iter, 'Windows', done, () => [['size', numberPart(width)]]);
   },
+  split: ([self, predicate], ctx) => {
+    const slice = deref(self);
+    const { base, start } = sliceBase(slice);
+    return sliceSplit(ctx, base, { front: start, back: start + sliceLength(slice), finished: false }, predicate);
+  },
   chunks: ([self, size], ctx) => chunks(ctx, deref(self), Number(size as bigint), false),
   rchunks: ([self, size], ctx) => {
     const slice = deref(self);
@@ -313,6 +320,47 @@ const sliceNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
     return Array.from({ length }, (_, index) => copyValue(items[index % items.length]));
   },
 };
+
+// code-gauge-allow functionCognitiveComplexity 17 -- Both ends consume the separator while keeping the untouched slice.
+function sliceSplit(
+  ctx: NativeContext,
+  base: Value[],
+  state: { front: number; back: number; finished: boolean },
+  predicate: Value
+): IterValue {
+  const take = (reverse: boolean): Value | typeof DONE => {
+    if (state.finished) return DONE;
+    const start = reverse ? state.back - 1 : state.front;
+    const end = reverse ? state.front - 1 : state.back;
+    for (let index = start; index !== end; index += reverse ? -1 : 1) {
+      ctx.runtime.spend();
+      if (!call(ctx, predicate, [base[index]])) continue;
+      if (reverse) {
+        const item = new SliceView(base, index + 1, state.back);
+        state.back = index;
+        return item;
+      }
+      const item = new SliceView(base, state.front, index);
+      state.front = index + 1;
+      return item;
+    }
+    state.finished = true;
+    return new SliceView(base, state.front, state.back);
+  };
+  const iter = new IterValue(
+    () => take(false),
+    () => take(true),
+    undefined,
+    [base, predicate]
+  );
+  iter.fork = () => sliceSplit(ctx, base, { ...state }, cloneValue(ctx.typeArgs[1], predicate));
+  return described(iter, (show, item) =>
+    fieldsPart('Split', [
+      ['v', (indent) => show(new SliceView(base, state.front, state.back), item, indent)],
+      ['finished', numberPart(state.finished)],
+    ])
+  );
+}
 
 function fillSlice(ctx: NativeContext, slice: Value, value: Value, type: Type): Value {
   const length = sliceLength(slice);
@@ -650,6 +698,11 @@ const dequeNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
   },
   contains: ([self, x], ctx) => sliceNatives.contains([self, x], ctx),
   iter: ([self], ctx) => dequeIter(vec(self), dequeCapacity(vec(self), ctx), false),
+  range: ([self, range], ctx) => {
+    const items = vec(self);
+    const [start, end] = checkedRangeBounds(ctx, range, items.length);
+    return dequeRange(items, dequeCapacity(items, ctx), start, end);
+  },
   iter_mut: ([self], ctx) => dequeIter(vec(self), dequeCapacity(vec(self), ctx), true),
   as_slices: ([self], ctx) => dequeSlices(vec(self), dequeCapacity(vec(self), ctx)),
   insert: ([self, index, value], ctx) => {

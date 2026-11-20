@@ -80,7 +80,7 @@ const RANGE_ITERATORS = new Set(['Range', 'RangeInclusive', 'RangeFrom']);
  * then by shared reference, then by mutable reference; inherent methods before trait methods, of the standard
  * library's traits those that `inScope` accepts.
  */
-// code-gauge-allow functionCognitiveComplexity 22 -- Follows rustc's method probe step by step.
+// code-gauge-allow functionCognitiveComplexity 23 -- Follows rustc's method probe step by step.
 export function lookupMethod(
   program: Program,
   solver: TraitSolver,
@@ -111,9 +111,11 @@ export function lookupMethod(
       return probeAsIter(program, solver, bounded, name, true);
     }
   }
-  // `char::to_uppercase`'s iterator is an iterator of `char`s that also displays as its text.
-  const caseIter = steps.find((step) => isBuiltin(shallow(step.type), 'CaseIter'));
-  return caseIter && probeAsIter(program, solver, caseIter, name, false);
+  const characterIter = steps.find((step) => {
+    const type = shallow(step.type);
+    return isBuiltin(type, 'CaseIter') || isBuiltin(type, 'EscapeDefault');
+  });
+  return characterIter && probeAsIter(program, solver, characterIter, name, false);
 }
 
 function isRangeIterator(type: Type): boolean {

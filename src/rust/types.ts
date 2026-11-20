@@ -103,6 +103,8 @@ export type BuiltinAdt =
   | 'RangeToInclusive'
   | 'RangeFull'
   | 'CaseIter'
+  | 'ControlFlow'
+  | 'EscapeDefault'
   | 'ParseError'
   | 'Unsigned'
   | 'Signed'

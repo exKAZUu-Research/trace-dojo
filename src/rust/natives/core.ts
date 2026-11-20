@@ -281,6 +281,7 @@ define({
   'Into::into': ([value], ctx) => ctx.interp.convertFrom(value, selfType(ctx), ctx.typeArgs[1], ctx.frame),
   'std::cmp::max': ([a, b], ctx) => ((compareValues(ctx.typeArgs[0], a, b) ?? 0) > 0 ? a : b),
   'std::cmp::min': ([a, b], ctx) => ((compareValues(ctx.typeArgs[0], a, b) ?? 0) <= 0 ? a : b),
+  'std::cmp::max_by': ([a, b, f], ctx) => ((call(ctx, f, [a, b]) as EnumValue).variant === 2 ? a : b),
   'std::cmp::max_by_key': ([a, b, f], ctx) => {
     const order = compareValues(ctx.typeArgs[2], call(ctx, f, [a]), call(ctx, f, [b])) ?? 0;
     return order > 0 ? a : b;

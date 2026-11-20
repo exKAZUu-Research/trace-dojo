@@ -123,7 +123,6 @@ export class BorrowChecker {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Keep initialization and refutable-binding flow in one pass.
   private stmt(stmt: Stmt, state: State): State {
     this.budget.spend();
     switch (stmt.kind) {

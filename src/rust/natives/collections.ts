@@ -248,7 +248,7 @@ function mapEndNatives(): Record<string, Native> {
   };
 }
 
-// code-gauge-allow functionNcss 57 -- One native per method of std's sets.
+// code-gauge-allow functionNcss 59 -- One native per method of std's sets.
 function setNatives(sorted: boolean): Record<string, (args: Value[], ctx: NativeContext) => Value> {
   return {
     new: (_args, ctx) => withTable(new SetValue(sorted), sizeOf(ctx.typeArgs[0])),
@@ -264,6 +264,15 @@ function setNatives(sorted: boolean): Record<string, (args: Value[], ctx: Native
       ctx.runtime.allocate(1);
       s.entries.set(hash, value);
       return true;
+    },
+    replace: ([self, value], ctx) => {
+      const { entries } = set(self);
+      const key = entryKey(ctx, entries, value);
+      const present = entries.has(key);
+      const previous = entries.get(key);
+      if (!present) ctx.runtime.allocate(1);
+      entries.set(key, value);
+      return option(ctx, previous, present);
     },
     contains: ([self, value], ctx) => {
       const { entries } = set(self);

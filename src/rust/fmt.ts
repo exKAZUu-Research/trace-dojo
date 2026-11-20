@@ -116,7 +116,7 @@ export class Formatter {
     }
   }
 
-  // code-gauge-allow functionNcss 41 -- Follows std::fmt's formatting rules case by case.
+  // code-gauge-allow functionNcss 42 -- Follows std::fmt's formatting rules case by case.
   display(value: Value, type: Type, spec: Spec, write?: WriteChunk): string {
     const t = this.concrete(type);
     const v = deref(value);
@@ -154,7 +154,8 @@ export class Formatter {
           case 'Box': {
             return this.display(v, t.args[0], spec, write);
           }
-          case 'CaseIter': {
+          case 'CaseIter':
+          case 'EscapeDefault': {
             // `ToUppercase` writes its chars one by one, ignoring the width.
             const text = caseIterText(v);
             if (write) for (const char of text) write(char);
@@ -323,6 +324,9 @@ export class Formatter {
       case 'CaseIter': {
         return caseIterDebug(v);
       }
+      case 'EscapeDefault': {
+        return escapeDefaultDebug(v, indent);
+      }
       case 'Turtle': {
         return 'Turtle';
       }
@@ -474,6 +478,10 @@ function caseIterDebug(value: Value): string {
   const { name } = value as unknown as { name: string };
   const chars = [...caseIterText(value)].map((c) => `'${escapeDebug(c, true)}'`).join(', ');
   return `${name}(CaseMappingIter(IntoIter([${chars}])))`;
+}
+
+export function escapeDefaultDebug(value: Value, indent: number | undefined): string {
+  return tupleText('EscapeDefault', [() => `EscapeIterInner('${caseIterText(value)}')`], indent);
 }
 
 function charCount(text: string): number {
@@ -655,10 +663,13 @@ function errorDebug(builtin: string, value: Value, indent: number | undefined): 
       return inner('ParseCharError', 'kind', kind ?? 'TooManyChars');
     }
     case 'Utf8Error': {
-      // `String::from_utf8`'s error, which keeps the bytes it was given.
-      const [bytes, validUpTo, errorLen] = (value as StructValue).fields as [bigint[], number, number | undefined];
+      const [bytes, validUpTo, errorLen] = (value as StructValue).fields as [
+        bigint[] | undefined,
+        number,
+        number | undefined,
+      ];
       const error = `Utf8Error { valid_up_to: ${validUpTo}, error_len: ${errorLen === undefined ? 'None' : `Some(${errorLen})`} }`;
-      return `FromUtf8Error { bytes: [${bytes.join(', ')}], error: ${error} }`;
+      return bytes ? `FromUtf8Error { bytes: [${bytes.join(', ')}], error: ${error} }` : error;
     }
     default: {
       return builtin;

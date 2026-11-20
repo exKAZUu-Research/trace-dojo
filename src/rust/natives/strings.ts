@@ -1,4 +1,5 @@
 import { concatStrings, madeString, stringByteLength, stringCapacity, StringGrowth, vecCapacity } from '../capacity';
+import { escapeDebug, escapeDefaultDebug } from '../fmt';
 import { normalize } from '../infer';
 import { strSliceBytes } from '../interpreter';
 // code-gauge-allow-file fileNcss 488 -- One native per method of the standard library.
@@ -656,6 +657,16 @@ const charNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> 
     textOf(a).replace(/[A-Z]/, (x) => x.toLowerCase()) === textOf(b).replace(/[A-Z]/, (x) => x.toLowerCase()),
   to_uppercase: ([c]) => caseIter('ToUppercase', textOf(c).toUpperCase()),
   to_lowercase: ([c]) => caseIter('ToLowercase', textOf(c).toLowerCase()),
+  escape_default: ([c]) => {
+    const text = textOf(c);
+    const code = text.codePointAt(0)!;
+    const escaped = ['\\', '"', "'", '\t', '\r', '\n'].includes(text)
+      ? escapeDebug(text, text === "'")
+      : code < 32 || code >= 127
+        ? `\\u{${code.toString(16)}}`
+        : text;
+    return described(arrayIter([...escaped]), (_show, _item, target) => (indent) => escapeDefaultDebug(target, indent));
+  },
   to_digit: ([c, radix], ctx) => {
     const digit = digitOf(ctx, textOf(c), Number(radix as bigint));
     return option(ctx, digit === undefined ? undefined : BigInt(digit), digit !== undefined);
@@ -702,6 +713,15 @@ function caseIter(name: 'ToUppercase' | 'ToLowercase', text: string): Value {
 
 const natives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {};
 for (const [name, native] of Object.entries(strNatives)) natives[`str::${name}`] = native;
+natives['std::str::from_utf8'] = ([value], ctx) => {
+  const bytes = Uint8Array.from(sliceItems(deref(value)) as bigint[], Number);
+  try {
+    return ok(ctx, decodeUtf8(bytes, true));
+  } catch {
+    const { validUpTo, errorLen } = utf8Error(bytes);
+    return err(ctx, new StructValue(ctx.interp.program.adtDef('Utf8Error'), [undefined, validUpTo, errorLen]));
+  }
+};
 for (const [name, native] of Object.entries(withStringCapacity(stringNatives))) natives[`String::${name}`] = native;
 natives['Write::write_str'] = (args, ctx) => {
   natives['String::push_str'](args, ctx);

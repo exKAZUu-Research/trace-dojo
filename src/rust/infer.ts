@@ -149,6 +149,7 @@ export function setPseudoTypes(types: PseudoTypes): void {
  * Replaces `ParseError<F>`, `Unsigned<N>`, `Signed<N>`, `Indexed<I, T>`, and the pseudo-types of iterators with the
  * types they stand for when their first argument is known.
  */
+// code-gauge-allow functionCognitiveComplexity 19 -- Each pseudo-type has its own normalization rules.
 export function normalize(type: Type): Type {
   if (type.kind !== 'adt' || !isPseudo(type.def)) return type;
   const arg = normalize(shallow(type.args[0]));
@@ -157,6 +158,7 @@ export function normalize(type: Type): Type {
   const iterator = iteratorPart(type, arg);
   if (iterator !== false) return iterator ? normalize(shallow(iterator)) : type;
   if (type.def.builtin === 'Unsigned' || type.def.builtin === 'Signed') {
+    if (type.def.builtin === 'Unsigned' && arg.kind === 'float') return intType(arg.name === 'f32' ? 'u32' : 'u64');
     if (arg.kind !== 'int') return type;
     return intType(`${type.def.builtin === 'Unsigned' ? 'u' : 'i'}${arg.name.slice(1)}` as never);
   }

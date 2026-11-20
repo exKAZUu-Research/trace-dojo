@@ -4383,3 +4383,82 @@ test('allows Rust mutable cursors to advance through a matched reference in a lo
     expect(executeProgram('rust', source)).toMatchObject({ kind: 'executed', stdout: '12\n' });
   }
 });
+
+test('supports Rust short-circuit iterator folds and generation', () => {
+  const source = rustMain(
+    `let mut it = 1..6;
+    let result: Result<i32, &str> = it.try_fold(0, |sum, n| {
+      if n == 3 { Err("stop") } else { Ok(sum + n) }
+    });
+    println!("{:?} {:?}", result, it.next());
+    let option = (1..4).try_fold(0_i32, |sum, n| sum.checked_add(n));
+    let flow = (0..5).try_fold(0, |sum, n| {
+      if n == 2 { ControlFlow::Break(sum) } else { ControlFlow::Continue(sum + n) }
+    });
+    let mut n = 3;
+    let ids: Vec<_> = std::iter::repeat_with(|| { n += 1; n }).take(3).collect();
+    println!("{:?} {:?} {:?} {}", option, flow, ids, n);`,
+    'use std::ops::ControlFlow;'
+  );
+  expect(executeProgram('rust', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'Err("stop") Some(4)\nSome(6) Break(1) [4, 5, 6] 6\n',
+  });
+});
+
+test('supports Rust iterator ordering, partition searching, and comparator maxima', () => {
+  const source = rustMain(`let numbers = [1, 3, 5, 7];
+    let bound = numbers.partition_point(|n| *n < 5);
+    let best = std::cmp::max_by("bbb", "aa", |a, b| a.len().cmp(&b.len()));
+    println!("{} {} {} {} {} {:?} {:?}", bound, best, (0..3).lt(1..3),
+      [0, 1].into_iter().le([0, 1]), (1..3).ge(0..3),
+      (1..3).cmp(0..3), [f64::NAN].into_iter().partial_cmp([1.0_f64]));`);
+  expect(executeProgram('rust', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '2 bbb true true true Greater None\n',
+  });
+});
+
+test('supports Rust slice splitting and deque subranges', () => {
+  const source = rustMain(
+    `let values = [0, 1, 0, 2, 0];
+    let mut pieces = values.split(|n| *n == 0);
+    println!("{:?} {:?} {:?}", pieces.next(), pieces.next_back(), pieces);
+    println!("{:?}", pieces.clone().collect::<Vec<_>>());
+    let deque = VecDeque::from([10, 20, 30, 40, 50]);
+    println!("{:?}", deque.range(1..=3).rev().collect::<Vec<_>>());`,
+    'use std::collections::VecDeque;'
+  );
+  expect(executeProgram('rust', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'Some([]) Some([]) Split { v: [1, 0, 2], finished: false }\n[[1], [2]]\n[40, 30, 20]\n',
+  });
+});
+
+test('supports Rust float bit conversions, UTF-8 validation, and character escaping', () => {
+  const source = rustMain(String.raw`let float = f64::from_bits(0x3ff8000000000000);
+    let single = f32::from_bits(0x80000000);
+    println!("{} {} {:?} {:?}", float, float.to_bits(), single, 0.0_f64.sin_cos());
+    println!("{:?} {:?}", std::str::from_utf8(&[104, 105]), std::str::from_utf8(&[0xff]));
+    let mut escaped = 'é'.escape_default();
+    println!("{} {:?} {}", escaped, escaped.clone(), escaped.len());
+    escaped.next();
+    println!("{} {:?}", escaped, escaped);`);
+  expect(executeProgram('rust', source)).toMatchObject({
+    kind: 'executed',
+    stdout: String.raw`1.5 4609434218613702656 -0.0 (0.0, 1.0)
+Ok("hi") Err(Utf8Error { valid_up_to: 0, error_len: Some(1) })
+\u{e9} EscapeDefault(EscapeIterInner('\u{e9}')) 6
+u{e9} EscapeDefault(EscapeIterInner('u{e9}'))
+`,
+  });
+});
+
+test('replaces Rust HashSet entries and returns ownership of the previous value', () => {
+  const source = rustMain(
+    `let mut set = HashSet::new();
+    println!("{:?} {:?} {}", set.replace(String::from("same")), set.replace(String::from("same")), set.len());`,
+    'use std::collections::HashSet;'
+  );
+  expect(executeProgram('rust', source)).toMatchObject({ kind: 'executed', stdout: 'None Some("same") 1\n' });
+});

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 800 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss 832 -- One native per method of the standard library.
 import { collectedVecCapacity, inPlaceCapacity, setVecCapacity, sizeTable } from '../capacity';
 import type { DebugPart } from '../debugText';
 import { normalize } from '../infer';
@@ -9,6 +9,7 @@ import {
   castValue,
   cloneIterator,
   cloneValue,
+  comparePartialValues,
   compareValues,
   copyValue,
   needsCopy,
@@ -41,7 +42,18 @@ import { layoutOf, sizeOf } from './layout';
 import { rangeIterator } from './rangeIterator';
 import { lessByPartialOrd, sortSlice } from './sorting';
 import { collectString } from './stringBuilder';
-import { call, define, deref, libraryPanic, type NativeContext, none, option, placeOf, some } from './support';
+import {
+  call,
+  define,
+  deref,
+  libraryPanic,
+  type NativeContext,
+  none,
+  option,
+  ordering,
+  placeOf,
+  some,
+} from './support';
 
 /** An iterator over an array's elements from `start` to `end`, from both ends. */
 export function arrayIter(
@@ -975,6 +987,40 @@ function foldItems(ctx: NativeContext, iter: IterValue, init: Value, fn: Value, 
   return acc;
 }
 
+function tryFoldItems(ctx: NativeContext, iter: IterValue, accumulator: Value, callback: Value): Value {
+  const type = normalize(shallow(ctx.typeArgs[3])) as Type & { kind: 'adt' };
+  const success = type.def.builtin === 'Option' ? 1 : 0;
+  for (;;) {
+    ctx.runtime.spend();
+    const result = ctx.runtime.withRoots([accumulator], () => {
+      const item = nextOf(iter);
+      return item === DONE ? DONE : (deref(call(ctx, callback, [accumulator, item])) as EnumValue);
+    });
+    if (result === DONE) return new EnumValue(type.def, success, [accumulator]);
+    if (result.variant !== success) return result;
+    accumulator = result.fields[0];
+  }
+}
+
+// code-gauge-allow functionCognitiveComplexity 16 -- Exhaustion and unordered pairs terminate lexicographic comparison.
+function iteratorOrder(ctx: NativeContext, first: IterValue, second: IterValue, total = false): number | undefined {
+  const item = ctx.typeArgs[0];
+  const rhs = total ? item : ctx.typeArgs[2];
+  for (;;) {
+    ctx.runtime.spend();
+    const a = nextOf(first);
+    if (a === DONE) return nextOf(second) === DONE ? 0 : -1;
+    const order = ctx.runtime.withRoots([a], () => {
+      const b = nextOf(second);
+      if (b === DONE) return 1;
+      return ctx.runtime.withRoots([b], () =>
+        total ? compareValues(item, a, b) : comparePartialValues(item, a, b, rhs)
+      );
+    });
+    if (order !== 0) return order;
+  }
+}
+
 define({
   'IterImpl<_, _>::collect': ([self], ctx) => {
     // Collecting into a `Result` or an `Option` stops at the first `Err` or `None`, taking nothing after it.
@@ -1004,6 +1050,7 @@ define({
     return option(ctx, item === DONE ? undefined : item, item !== DONE);
   },
   'IterImpl<_, _>::fold': ([self, init, f], ctx) => foldItems(ctx, iterOf(self), init, f, 'fold'),
+  'IterImpl<_, _>::try_fold': ([self, init, f], ctx) => tryFoldItems(ctx, iterOf(self), init, f),
   'IterImpl<_, _>::rfold': ([self, init, f], ctx) => foldItems(ctx, iterOf(self), init, f, 'back'),
   'IterImpl<_, _>::reduce': ([self, f], ctx) => {
     const iter = iterOf(self);
@@ -1075,6 +1122,16 @@ define({
       if (!valuesEqual(ctx.typeArgs[0], x, y)) return false;
     }
   },
+  'IterImpl<_, _>::cmp': ([self, other], ctx) =>
+    ordering(ctx, iteratorOrder(ctx, iterOf(self), iterOf(other), true) ?? 0),
+  'IterImpl<_, _>::partial_cmp': ([self, other], ctx) => {
+    const order = iteratorOrder(ctx, iterOf(self), iterOf(other));
+    return order === undefined ? none(ctx) : some(ctx, ordering(ctx, order));
+  },
+  'IterImpl<_, _>::lt': ([self, other], ctx) => iteratorOrder(ctx, iterOf(self), iterOf(other)) === -1,
+  'IterImpl<_, _>::le': ([self, other], ctx) => (iteratorOrder(ctx, iterOf(self), iterOf(other)) ?? 1) <= 0,
+  'IterImpl<_, _>::gt': ([self, other], ctx) => iteratorOrder(ctx, iterOf(self), iterOf(other)) === 1,
+  'IterImpl<_, _>::ge': ([self, other], ctx) => (iteratorOrder(ctx, iterOf(self), iterOf(other)) ?? -1) >= 0,
   'IterImpl<_, _>::is_sorted': ([self], ctx) => {
     // `is_sorted` stops at the first pair out of order.
     const iter = iterOf(self);
@@ -1106,6 +1163,7 @@ define({
     return [collectInto(ctx, firsts, fromA, typeA), collectInto(ctx, seconds, fromB, typeB)];
   },
   'std::iter::repeat': ([value], ctx) => repeated(ctx, value),
+  'std::iter::repeat_with': ([f], ctx) => fromFunction(ctx, new IteratorCallback(f, ctx.typeArgs[1]), true),
   'std::iter::repeat_n': ([value, n], ctx) => repeatN(ctx, value, n as bigint),
   'std::iter::once': ([value], ctx) => {
     const iter = ownedIter([value], ctx.typeArgs[0]);
@@ -1153,10 +1211,18 @@ function repeatN(ctx: NativeContext, value: Value, count: bigint): IterValue {
   });
 }
 
-function fromFunction(ctx: NativeContext, callback: IteratorCallback): IterValue {
-  const iter = new IterValue(() => optionValue(call(ctx, callback.value, [])), undefined, undefined, [callback.value]);
-  iter.fork = () => fromFunction(ctx, callback.clone());
-  return described(iter, () => () => 'FromFn');
+function fromFunction(ctx: NativeContext, callback: IteratorCallback, repeat = false): IterValue {
+  const iter = new IterValue(
+    () => {
+      const value = call(ctx, callback.value, []);
+      return repeat ? value : optionValue(value);
+    },
+    undefined,
+    undefined,
+    [callback.value]
+  );
+  iter.fork = () => fromFunction(ctx, callback.clone(), repeat);
+  return described(iter, () => () => (repeat ? 'RepeatWith { .. }' : 'FromFn'));
 }
 
 function successors(ctx: NativeContext, start: EnumValue, callback: IteratorCallback): IterValue {

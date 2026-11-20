@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 496 -- One rule per trait of the standard library.
+// code-gauge-allow-file fileNcss 503 -- One rule per trait of the standard library.
 import { collectionKeyAnswer } from './collectionBounds';
 import { normalize } from './infer';
 import { supportsDebug } from './iterDebug';
@@ -66,6 +66,7 @@ const DEBUG_TYPES = new Set([
   'Utf8Error',
   'FmtError',
   'CaseIter',
+  'EscapeDefault',
   'Entry',
 ]);
 
@@ -143,6 +144,16 @@ const RULES: Record<string, Rule> = {
   Iterator: iterator,
   IntoIterator: iterator,
   ExtendInto: extendInto,
+  TryFoldResult: ({ solver, t, ref }) => {
+    if (t.kind !== 'adt') return 'no';
+    const item =
+      t.def.builtin === 'ControlFlow'
+        ? t.args[1]
+        : ['Option', 'Result'].includes(t.def.builtin as string)
+          ? t.args[0]
+          : undefined;
+    return item && solver.unifier.tryUnify(item, ref.args[0]) ? 'yes' : 'no';
+  },
   Extend: extend,
   Sum: sum,
   Product: sum,
@@ -231,7 +242,8 @@ function cloneAdt(goal: Goal, t: AdtType): Answer {
   if (t.def.builtin === 'Iter') return all([t.args[1]]);
   if (isIteratorShape(t.def)) return NON_CLONE_ITERATORS.has(t.def.name) ? 'no' : all(t.args);
   if (CLONE_CONTAINERS.has(t.def.builtin as string)) return all(t.args);
-  if (t.def.builtin === 'String' || ERROR_TYPES.has(t.def.builtin as string)) return 'yes';
+  if (t.def.builtin === 'String' || t.def.builtin === 'EscapeDefault' || ERROR_TYPES.has(t.def.builtin as string))
+    return 'yes';
   if (t.def.builtin === 'Box') {
     const inner = shallow(t.args[0]);
     if (inner.kind === 'dyn') return 'no';
@@ -241,6 +253,7 @@ function cloneAdt(goal: Goal, t: AdtType): Answer {
   return 'no';
 }
 
+// code-gauge-allow functionCognitiveComplexity 16 -- Debug bounds depend on the represented data.
 function debug(goal: Goal): Answer {
   const { t, all } = goal;
   if (isPrimitive(t) || t.kind === 'str' || t.kind === 'never') return 'yes';
@@ -251,7 +264,11 @@ function debug(goal: Goal): Answer {
   if (t.kind !== 'adt') return 'no';
   const d = derived(goal);
   if (d) return d;
-  if (t.def.builtin === 'Iter') return supportsDebug(t.args[1]) ? all([t.args[0]]) : 'no';
+  if (t.def.builtin === 'Iter') {
+    const shape = normalize(shallow(t.args[1]));
+    if (shape.kind === 'adt' && ['FromFnShape', 'RepeatWithShape'].includes(shape.def.name)) return 'yes';
+    return supportsDebug(shape) ? all([t.args[0]]) : 'no';
+  }
   if (DEBUG_TYPES.has(t.def.builtin as string)) return all(t.args);
   return 'no';
 }
@@ -261,7 +278,10 @@ function display({ solver, t, all }: Goal): Answer {
   if (t.kind === 'ref') return all([t.target]);
   if (t.kind === 'dyn') return dynImplies(solver, t, 'Display');
   if (t.kind !== 'adt') return 'no';
-  if (t.def.builtin === 'String' || ERROR_TYPES.has(t.def.builtin as string) || t.def.builtin === 'CaseIter')
+  if (
+    ['String', 'CaseIter', 'EscapeDefault'].includes(t.def.builtin as string) ||
+    ERROR_TYPES.has(t.def.builtin as string)
+  )
     return 'yes';
   if (t.def.builtin === 'Box') return all(t.args);
   return 'no';
@@ -695,6 +715,7 @@ function isIterator(type: Type): boolean {
   const t = type.kind === 'ref' && type.mutable ? normalize(shallow(type.target)) : type;
   if (t.kind === 'param' || t.kind === 'opaque') return true;
   return (
-    t.kind === 'adt' && ['Iter', 'Range', 'RangeInclusive', 'RangeFrom', 'CaseIter'].includes(t.def.builtin as string)
+    t.kind === 'adt' &&
+    ['Iter', 'Range', 'RangeInclusive', 'RangeFrom', 'CaseIter', 'EscapeDefault'].includes(t.def.builtin as string)
   );
 }

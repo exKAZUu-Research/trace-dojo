@@ -102,6 +102,11 @@ export function dequeIter(items: Value[], capacity: number, mutable: boolean): I
   return dequeIterFrom(items, mutable, { front: 0, back: first }, { front: first, back: items.length });
 }
 
+export function dequeRange(items: Value[], capacity: number, start: number, end: number): IterValue {
+  const split = Math.min(end, Math.max(start, firstSliceLength(items, capacity)));
+  return dequeIterFrom(items, false, { front: start, back: split }, { front: split, back: end });
+}
+
 function dequeIterFrom(
   items: Value[],
   mutable: boolean,

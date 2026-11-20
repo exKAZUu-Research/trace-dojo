@@ -56,6 +56,8 @@ pub mod ops {
     pub trait Fn {}
     pub trait FnMut {}
     pub trait FnOnce {}
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum ControlFlow<B, C = ()> { Continue(C), Break(B) }
     pub struct Range<Idx> { pub start: Idx, pub end: Idx }
     pub struct RangeInclusive<Idx>;
     pub struct RangeFrom<Idx> { pub start: Idx }
@@ -111,6 +113,7 @@ pub mod cmp {
     pub struct Reverse<T>(pub T);
     pub fn max<T: Ord>(v1: T, v2: T) -> T;
     pub fn min<T: Ord>(v1: T, v2: T) -> T;
+    pub fn max_by<T, F: FnMut(&T, &T) -> Ordering>(v1: T, v2: T, compare: F) -> T;
     pub fn max_by_key<T, F: FnMut(&T) -> K, K: Ord>(v1: T, v2: T, f: F) -> T;
     pub fn min_by_key<T, F: FnMut(&T) -> K, K: Ord>(v1: T, v2: T, f: F) -> T;
 }
@@ -286,12 +289,14 @@ pub mod slice {
         pub fn binary_search(&self, x: &T) -> Result<usize, usize> where T: Ord;
         pub fn binary_search_by_key<B: Ord, F: FnMut(&T) -> B>(&self, b: &B, f: F) -> Result<usize, usize>;
         pub fn binary_search_by<F: FnMut(&T) -> Ordering>(&self, f: F) -> Result<usize, usize>;
+        pub fn partition_point<F: FnMut(&T) -> bool>(&self, predicate: F) -> usize;
         pub fn swap(&mut self, a: usize, b: usize);
         pub fn split_at(&self, mid: usize) -> (&[T], &[T]);
         pub fn split_at_mut(&mut self, mid: usize) -> (&mut [T], &mut [T]);
         pub fn split_first(&self) -> Option<(&T, &[T])>;
         pub fn split_last(&self) -> Option<(&T, &[T])>;
         pub fn windows(&self, size: usize) -> IterImpl<&[T], WindowsShape>;
+        pub fn split<F: FnMut(&T) -> bool>(&self, predicate: F) -> IterImpl<&[T], SliceSplitShape<F>>;
         pub fn chunks(&self, chunk_size: usize) -> IterImpl<&[T], ChunksShape>;
         pub fn rchunks(&self, chunk_size: usize) -> IterImpl<&[T], RChunksShape>;
         pub fn chunks_exact(&self, chunk_size: usize) -> IterImpl<&[T], ChunksExactShape>;
@@ -329,6 +334,7 @@ pub mod slice {
     }
 }
 pub mod str {
+    pub fn from_utf8(v: &[u8]) -> Result<&str, Utf8Error>;
     pub type Chars<'a> = IterImpl<'a, char, CharsShape>;
     pub type CharIndices<'a> = IterImpl<'a, (usize, char), CharIndicesShape>;
     pub type Bytes<'a> = IterImpl<'a, u8, BytesShape>;
@@ -442,6 +448,7 @@ pub mod char {
         pub fn eq_ignore_ascii_case(&self, other: &char) -> bool;
         pub fn to_uppercase(self) -> CaseIter;
         pub fn to_lowercase(self) -> CaseIter;
+        pub fn escape_default(self) -> EscapeDefault;
         pub fn to_digit(self, radix: u32) -> Option<u32>;
         pub fn len_utf8(self) -> usize;
         pub fn len_utf16(self) -> usize;
@@ -451,6 +458,7 @@ pub mod char {
     pub fn from_u32(i: u32) -> Option<char>;
     pub fn from_digit(num: u32, radix: u32) -> Option<char>;
     pub struct CaseIter;
+    pub struct EscapeDefault;
 }
 pub mod num {
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -670,6 +678,9 @@ pub mod num {
         pub const fn fract(self) -> F;
         pub fn sin(self) -> F;
         pub fn cos(self) -> F;
+        pub fn sin_cos(self) -> (F, F);
+        pub const fn to_bits(self) -> Unsigned<F>;
+        pub const fn from_bits(bits: Unsigned<F>) -> F;
         pub fn tan(self) -> F;
         pub fn asin(self) -> F;
         pub fn acos(self) -> F;
@@ -861,6 +872,7 @@ pub mod iter {
         pub struct VecDrainShape;
         pub struct StringDrainShape;
         pub struct WindowsShape;
+        pub struct SliceSplitShape<F>;
         pub struct ChunksShape;
         pub struct RChunksShape;
         pub struct ChunksExactShape;
@@ -908,7 +920,9 @@ pub mod iter {
         pub struct RangeInclusiveShape<Idx>;
         pub struct RangeFromShape<Idx>;
         pub struct CaseMappingShape;
+        pub struct EscapeDefaultShape;
         pub struct RepeatShape<T>;
+        pub struct RepeatWithShape<F>;
         pub struct RepeatNShape<T>;
         pub struct OnceShape<T>;
         pub struct EmptyShape;
@@ -987,6 +1001,7 @@ pub mod iter {
         pub fn nth(&mut self, n: usize) -> Option<T>;
         pub fn nth_back(&mut self, n: usize) -> Option<T> where S: DoubleEndedIterator;
         pub fn fold<B, F: FnMut(B, T) -> B>(self, init: B, f: F) -> B;
+        pub fn try_fold<B, R: TryFoldResult<B>, F: FnMut(B, T) -> R>(&mut self, init: B, f: F) -> R;
         pub fn rfold<B, F: FnMut(B, T) -> B>(self, init: B, f: F) -> B where S: DoubleEndedIterator;
         pub fn reduce<F: FnMut(T, T) -> T>(self, f: F) -> Option<T>;
         pub fn for_each<F: FnMut(T)>(self, f: F);
@@ -1005,6 +1020,12 @@ pub mod iter {
         pub fn min_by<F: FnMut(&T, &T) -> Ordering>(self, compare: F) -> Option<T>;
         pub fn partition<B: Extend<T>, F: FnMut(&T) -> bool>(self, f: F) -> (B, B);
         pub fn eq<S2>(self, other: IterImpl<T, S2>) -> bool where T: PartialEq;
+        pub fn cmp<S2>(self, other: IterImpl<T, S2>) -> Ordering where T: Ord;
+        pub fn partial_cmp<U, S2>(self, other: IterImpl<U, S2>) -> Option<Ordering> where T: PartialOrd<U>;
+        pub fn lt<U, S2>(self, other: IterImpl<U, S2>) -> bool where T: PartialOrd<U>;
+        pub fn le<U, S2>(self, other: IterImpl<U, S2>) -> bool where T: PartialOrd<U>;
+        pub fn gt<U, S2>(self, other: IterImpl<U, S2>) -> bool where T: PartialOrd<U>;
+        pub fn ge<U, S2>(self, other: IterImpl<U, S2>) -> bool where T: PartialOrd<U>;
         pub fn is_sorted(self) -> bool where T: PartialOrd;
         pub fn into_iter(self) -> IterImpl<T, S>;
     }
@@ -1027,6 +1048,7 @@ pub mod iter {
         pub fn unzip<FromA: FromIterator<A>, FromB: FromIterator<B>>(self) -> (FromA, FromB);
     }
     pub fn repeat<T: Clone>(elt: T) -> IterImpl<T, RepeatShape<T>>;
+    pub fn repeat_with<T, F: FnMut() -> T>(f: F) -> IterImpl<T, RepeatWithShape<F>>;
     pub fn repeat_n<T: Clone>(element: T, count: usize) -> IterImpl<T, RepeatNShape<T>>;
     pub fn once<T>(value: T) -> IterImpl<T, OnceShape<T>>;
     pub fn empty<T>() -> IterImpl<T, EmptyShape>;
@@ -1158,6 +1180,7 @@ pub mod collections {
         pub fn shrink_to_fit(&mut self);
         pub fn shrink_to(&mut self, min_capacity: usize);
         pub fn insert(&mut self, value: T) -> bool ;
+        pub fn replace(&mut self, value: T) -> Option<T>;
         pub fn contains<Q>(&self, value: &Q) -> bool where T: Borrow<Q>, Q: Eq + Hash;
         pub fn remove<Q>(&mut self, value: &Q) -> bool where T: Borrow<Q>, Q: Eq + Hash;
         pub fn take<Q>(&mut self, value: &Q) -> Option<T> where T: Borrow<Q>, Q: Eq + Hash;
@@ -1225,6 +1248,7 @@ pub mod collections {
         pub fn clear(&mut self);
         pub fn contains(&self, x: &T) -> bool where T: PartialEq;
         pub fn iter(&self) -> IterImpl<&T, VecDequeIterShape>;
+        pub fn range<R: RangeBounds<usize>>(&self, range: R) -> IterImpl<&T, VecDequeIterShape>;
         pub fn iter_mut(&mut self) -> IterImpl<&mut T, VecDequeIterMutShape>;
         pub fn as_slices(&self) -> (&[T], &[T]);
         pub fn insert(&mut self, index: usize, value: T);
@@ -1463,6 +1487,7 @@ pub mod pseudo {
     pub trait StringPart {}
     pub trait RangeBounds<T> {}
     pub trait ExtendInto<T> {}
+    pub trait TryFoldResult<T> {}
     pub trait SliceOf<T> {}
     pub trait JoinSeparator<T> {}
     pub struct ParseError<F>;
