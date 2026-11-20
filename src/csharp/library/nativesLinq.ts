@@ -218,6 +218,54 @@ function delegateCall(call: NativeCall, delegate: Value, name: string): (...args
   return (...args) => evaluator.invokeDelegate(call.frame, delegate, args, undefined);
 }
 
+/**
+ * `Join` and `GroupJoin`: each outer element with the inner elements whose key equals its own, or none for a null key,
+ * which `results` turns into the query's elements.
+ */
+function joinQuery(
+  call: NativeCall,
+  [outer, inner, outerKey, innerKey, resultSelector]: Value[],
+  name: string,
+  results: (item: Value, group: Value[] | undefined, resultOf: (...args: Value[]) => Value) => Iterable<Value>
+): Value {
+  const outerKeyOf = delegateCall(call, outerKey, 'outerKeySelector');
+  const innerKeyOf = delegateCall(call, innerKey, 'innerKeySelector');
+  const resultOf = delegateCall(call, resultSelector, 'resultSelector');
+  const outers = source(call, outer, 'outer');
+  const inners = source(call, inner, 'inner');
+  return query(call, call.typeArgs[3], name, [outer, inner], function* () {
+    const groups = groupsOf(call, inners, innerKeyOf, (item) => item, undefined);
+    const equality = equalityOf(call, undefined);
+    for (const item of outers) {
+      const key = outerKeyOf(item);
+      const group =
+        key === undefined
+          ? undefined
+          : groups.find((candidate) => candidate.key !== undefined && equality.equals(candidate.key, key));
+      yield* results(item, group?.elements, resultOf);
+    }
+  });
+}
+
+/**
+ * A query of `Where`, `SkipWhile`, or `TakeWhile`, whose predicate may also take each element's index, counted from
+ * the start of each enumeration.
+ */
+function predicateQuery(
+  call: NativeCall,
+  [items, predicate]: Value[],
+  nameOf: (withIndex: boolean) => string,
+  elements: (all: Iterable<Value>, matches: (item: Value) => boolean) => Generator<Value>
+): Value {
+  const test = delegateCall(call, predicate, 'predicate');
+  const withIndex = (call.method.parameters[1].type as NamedType).args.length === 3;
+  const all = source(call, items);
+  return query(call, call.typeArgs[0], nameOf(withIndex), [items], () => {
+    let index = 0;
+    return elements(all, (item) => Boolean(withIndex ? test(item, index++) : test(item)));
+  });
+}
+
 function source(call: NativeCall, value: Value, name = 'source'): Iterable<Value> {
   if (value === undefined) failNull(name);
   return { [Symbol.iterator]: () => iterate(call, value, name) };
@@ -860,54 +908,14 @@ const linq: Record<string, NativeMethod> = {
     );
     return lookup;
   },
-  [`${ENUMERABLE}.GroupJoin`]: (call, _receiver, [outer, inner, outerKey, innerKey, resultSelector]) => {
-    const outerKeyOf = delegateCall(call, outerKey as Value, 'outerKeySelector');
-    const innerKeyOf = delegateCall(call, innerKey as Value, 'innerKeySelector');
-    const resultOf = delegateCall(call, resultSelector as Value, 'resultSelector');
-    const outers = source(call, outer as Value, 'outer');
-    const inners = source(call, inner as Value, 'inner');
-    const innerType = call.typeArgs[1];
-    return query(
-      call,
-      call.typeArgs[3],
-      generatedIterator(call, 'GroupJoinIterator', 113),
-      [outer as Value, inner as Value],
-      function* () {
-        const groups = groupsOf(call, inners, innerKeyOf, (item) => item, undefined);
-        const equality = equalityOf(call, undefined);
-        for (const item of outers) {
-          const key = outerKeyOf(item);
-          const group = groups.find(
-            (candidate) => candidate.key !== undefined && key !== undefined && equality.equals(candidate.key, key)
-          );
-          yield resultOf(item, newArray(call, innerType, group?.elements ?? []));
-        }
-      }
-    );
-  },
-  [`${ENUMERABLE}.Join`]: (call, _receiver, [outer, inner, outerKey, innerKey, resultSelector]) => {
-    const outerKeyOf = delegateCall(call, outerKey as Value, 'outerKeySelector');
-    const innerKeyOf = delegateCall(call, innerKey as Value, 'innerKeySelector');
-    const resultOf = delegateCall(call, resultSelector as Value, 'resultSelector');
-    const outers = source(call, outer as Value, 'outer');
-    const inners = source(call, inner as Value, 'inner');
-    return query(
-      call,
-      call.typeArgs[3],
-      generatedIterator(call, 'JoinIterator', 126),
-      [outer as Value, inner as Value],
-      function* () {
-        const groups = groupsOf(call, inners, innerKeyOf, (item) => item, undefined);
-        const equality = equalityOf(call, undefined);
-        for (const item of outers) {
-          const key = outerKeyOf(item);
-          if (key === undefined) continue;
-          const group = groups.find((candidate) => candidate.key !== undefined && equality.equals(candidate.key, key));
-          for (const match of group?.elements ?? []) yield resultOf(item, match);
-        }
-      }
-    );
-  },
+  [`${ENUMERABLE}.GroupJoin`]: (call, _receiver, args) =>
+    joinQuery(call, args as Value[], generatedIterator(call, 'GroupJoinIterator', 113), (item, group, resultOf) => [
+      resultOf(item, newArray(call, call.typeArgs[1], group ?? [])),
+    ]),
+  [`${ENUMERABLE}.Join`]: (call, _receiver, args) =>
+    joinQuery(call, args as Value[], generatedIterator(call, 'JoinIterator', 126), (item, group, resultOf) =>
+      (group ?? []).map((match) => resultOf(item, match))
+    ),
   [`${ENUMERABLE}.Index`]: (call, _receiver, [items]) => {
     const all = source(call, items as Value);
     const types = [libraryType(call, 'System.Int32'), call.typeArgs[0]];
@@ -1017,26 +1025,20 @@ const linq: Record<string, NativeMethod> = {
       }
     );
   },
-  [`${ENUMERABLE}.SkipWhile`]: (call, _receiver, [items, predicate]) => {
-    const test = delegateCall(call, predicate as Value, 'predicate');
-    const withIndex = (call.method.parameters[1].type as NamedType).args.length === 3;
-    const all = source(call, items as Value);
-    return query(
+  [`${ENUMERABLE}.SkipWhile`]: (call, _receiver, args) =>
+    predicateQuery(
       call,
-      call.typeArgs[0],
-      generatedIterator(call, 'SkipWhileIterator', withIndex ? 283 : 281),
-      [items as Value],
-      function* () {
+      args as Value[],
+      (withIndex) => generatedIterator(call, 'SkipWhileIterator', withIndex ? 283 : 281),
+      function* (all, matches) {
         let skipping = true;
-        let index = 0;
         for (const item of all) {
-          if (skipping && (withIndex ? test(item, index++) : test(item))) continue;
+          if (skipping && matches(item)) continue;
           skipping = false;
           yield item;
         }
       }
-    );
-  },
+    ),
   [`${ENUMERABLE}.Sum`]: (call, _receiver, args) => sum(call, args as Value[]),
   [`${ENUMERABLE}.Take`]: (call, _receiver, [items, count]) => {
     const all = source(call, items as Value);
@@ -1060,24 +1062,18 @@ const linq: Record<string, NativeMethod> = {
       }
     );
   },
-  [`${ENUMERABLE}.TakeWhile`]: (call, _receiver, [items, predicate]) => {
-    const test = delegateCall(call, predicate as Value, 'predicate');
-    const withIndex = (call.method.parameters[1].type as NamedType).args.length === 3;
-    const all = source(call, items as Value);
-    return query(
+  [`${ENUMERABLE}.TakeWhile`]: (call, _receiver, args) =>
+    predicateQuery(
       call,
-      call.typeArgs[0],
-      generatedIterator(call, 'TakeWhileIterator', withIndex ? 320 : 318),
-      [items as Value],
-      function* () {
-        let index = 0;
+      args as Value[],
+      (withIndex) => generatedIterator(call, 'TakeWhileIterator', withIndex ? 320 : 318),
+      function* (all, matches) {
         for (const item of all) {
-          if (!(withIndex ? test(item, index++) : test(item))) return;
+          if (!matches(item)) return;
           yield item;
         }
       }
-    );
-  },
+    ),
   [`${ENUMERABLE}.ToArray`]: (call, _receiver, [items]) => {
     const values = [...source(call, items as Value)];
     return newArray(call, call.typeArgs[0], values);
@@ -1123,20 +1119,20 @@ const linq: Record<string, NativeMethod> = {
     dictionary.native = state;
     return dictionary;
   },
-  [`${ENUMERABLE}.Where`]: (call, _receiver, [items, predicate]) => {
-    const test = delegateCall(call, predicate as Value, 'predicate');
-    const withIndex = (call.method.parameters[1].type as NamedType).args.length === 3;
-    const all = source(call, items as Value);
-    const name = withIndex
-      ? generatedIterator(call, 'WhereIterator', 350)
-      : iteratorName(isArrayOrList(items as Value) ? 'SizeOptIListWhereIterator' : 'IEnumerableWhereIterator', [
-          call.typeArgs[0],
-        ]);
-    return query(call, call.typeArgs[0], name, [items as Value], function* () {
-      let index = 0;
-      for (const item of all) if (withIndex ? test(item, index++) : test(item)) yield item;
-    });
-  },
+  [`${ENUMERABLE}.Where`]: (call, _receiver, args) =>
+    predicateQuery(
+      call,
+      args as Value[],
+      (withIndex) =>
+        withIndex
+          ? generatedIterator(call, 'WhereIterator', 350)
+          : iteratorName(isArrayOrList(args[0] as Value) ? 'SizeOptIListWhereIterator' : 'IEnumerableWhereIterator', [
+              call.typeArgs[0],
+            ]),
+      function* (all, matches) {
+        for (const item of all) if (matches(item)) yield item;
+      }
+    ),
   [`${ENUMERABLE}.Zip(IEnumerable<TFirst>, IEnumerable<TSecond>, IEnumerable<TThird>)`]: (call, _receiver, args) => {
     const [first, second, third] = args as Value[];
     const sources = [source(call, first, 'first'), source(call, second, 'second'), source(call, third, 'third')];

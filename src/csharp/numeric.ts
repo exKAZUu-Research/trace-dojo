@@ -317,26 +317,9 @@ export function compareNumeric(operator: string, kind: OperandKind, left: Numeri
     return relation(operator, order);
   }
   if (typeof left === 'number' && typeof right === 'number') {
-    switch (operator) {
-      case '==': {
-        return left === right;
-      }
-      case '!=': {
-        return left !== right;
-      }
-      case '<': {
-        return left < right;
-      }
-      case '<=': {
-        return left <= right;
-      }
-      case '>': {
-        return left > right;
-      }
-      default: {
-        return left >= right;
-      }
-    }
+    // NaN is neither below, equal to, nor above anything, so only `!=` holds.
+    if (Number.isNaN(left) || Number.isNaN(right)) return operator === '!=';
+    return relation(operator, left < right ? -1 : left > right ? 1 : 0);
   }
   const a = BigInt(left as bigint);
   const b = BigInt(right as bigint);
