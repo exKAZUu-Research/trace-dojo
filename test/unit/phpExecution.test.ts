@@ -4698,6 +4698,30 @@ echo 'after;', count($a), ':', json_encode($a), ';end;';
       ).toMatchObject({ kind: 'executed', stdout: expected });
     }
   }
+
+  for (const [size, key, expected] of [
+    [0, 0, '2:[7,8]'],
+    [2, 0, '2:[7,8]'],
+    [2, 1, '2:{"1":7,"2":8}'],
+    [2, 2, '2:{"2":7,"3":8}'],
+  ] as const) {
+    const init = size ? `range(1, ${size})` : '[]';
+    expect(
+      run(`<?php
+error_reporting(0);
+function f() { return 4; }
+$a = ${init};
+set_error_handler(function() use (&$a) { unset($a[array_key_last($a)]); $a[] = 9; return true; });
+$a[] =& f();
+restore_error_handler();
+for ($i = 0; $i <= ${size}; $i++) unset($a[$i]);
+$b = $a;
+$b[${key}] = 7;
+$b[] = 8;
+echo count($b), ':', json_encode($b);
+`)
+    ).toMatchObject({ kind: 'executed', stdout: expected });
+  }
 });
 
 test('reports JIT stack limit exhaustion on long subjects with quantified groups and accurate rows for first-statement syntax errors', () => {

@@ -695,7 +695,11 @@ export class PhpArray {
    */
   copy(): PhpArray {
     if (this.size === 0 && this.map.removedUndefinedSlots < 0)
-      return Object.assign(new PhpArray(), { nextFree: this.nextFree });
+      return Object.assign(new PhpArray(), {
+        nextFree: this.nextFree,
+        order: new ArrayOrder([], this.capacityHint, this.orderPacked === false),
+        orderPacked: this.orderPacked,
+      });
     const map = new Map<Key, Value | Ref>();
     const order = this.map.countsUndefinedSlots ? this.ordered() : this.order;
     const dense = order?.endPosition === this.size;
