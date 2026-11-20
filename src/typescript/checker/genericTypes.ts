@@ -112,8 +112,9 @@ function conditionalReferencesParameter(
       ? symbol.scope.node
       : undefined;
   let unresolved = false;
-  for (const node of conditionalReferenceNodes(declaration)) {
+  for (const node of conditionalReferenceNodes(declaration, scope)) {
     c.budget.spend();
+    if (node.type === 'statement_block') return true;
     const refers =
       node.type === 'type_query' ? queryCapturesScope(c, node, scope) : referencesTypeParameter(c, node, parameter);
     if (refers) return true;
@@ -122,13 +123,23 @@ function conditionalReferencesParameter(
   return unresolved ? undefined : false;
 }
 
-function* conditionalReferenceNodes(declaration: TreeNode): IterableIterator<TreeNode> {
-  for (const field of ['right', 'consequence', 'alternative']) {
-    const branch = declaration.childForFieldName(field);
-    if (!branch) continue;
-    yield branch;
-    yield* branch.descendantsOfType(['type_identifier', 'this_type', 'type_query']);
+function* conditionalReferenceNodes(declaration: TreeNode, scope: TreeNode | undefined): IterableIterator<TreeNode> {
+  yield* referencesBelow(declaration.childForFieldName('consequence'));
+  yield* referencesBelow(declaration.childForFieldName('alternative'));
+  for (let ancestor: TreeNode | null = declaration; ancestor && ancestor.id !== scope?.id; ancestor = ancestor.parent) {
+    if (ancestor.type === 'statement_block') {
+      yield ancestor;
+      return;
+    }
+    if (ancestor.type === 'conditional_type') yield* referencesBelow(ancestor.childForFieldName('right'));
+    if (!scope) return;
   }
+}
+
+function* referencesBelow(node: TreeNode | null): IterableIterator<TreeNode> {
+  if (!node) return;
+  yield node;
+  yield* node.descendantsOfType(['type_identifier', 'this_type', 'type_query']);
 }
 
 function queryCapturesScope(c: Checker, query: TreeNode, scope: TreeNode | undefined): boolean | undefined {
