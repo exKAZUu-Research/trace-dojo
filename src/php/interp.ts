@@ -412,10 +412,9 @@ export function evChain(e: Expr, discardResult = false): Chain {
 }
 
 /**
- * Runs a call, then releases the temporaries its arguments held, as PHP frees arguments when a call returns, keeping
- * only the result until the statement stores or drops it.
+ * Releases the temporaries held since `mark`, as PHP frees a call's arguments when it returns, keeping only the call's
+ * result until the statement stores or drops it.
  */
-/** Releases the temporaries held since `mark`, keeping only a call's result. */
 function keepResult(mark: number, result: Chain, allowsReference?: boolean): Chain {
   const runtime = rt();
   const reference = allowsReference && result !== SHORT ? runtime.lastReturnRef : undefined;
