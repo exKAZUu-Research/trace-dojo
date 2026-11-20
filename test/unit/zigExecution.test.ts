@@ -5324,6 +5324,11 @@ test('memory copies preserve directional live overlap', () => {
   });
 });
 
+test('memory searches recognize an identical virtual void slice', () => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{const items=try init.gpa.alloc(void,1000001);std.debug.print("{any} {any} {any} {any}",.{std.mem.find(void,items,items),std.mem.findLast(void,items,items),std.mem.indexOfPos(void,items,0,items),std.mem.indexOfPos(void,items,1,items)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '0 0 0 null' });
+});
+
 test('zero-sized memory permutations and copies stay virtual after their checks', () => {
   const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var a:std.ArrayList(void)=.empty;try a.append(init.gpa,{});const all=a.allocatedSlice();const tail=a.unusedCapacitySlice();std.mem.reverse(void,all);std.mem.rotate(void,all,18446744073709551615);std.mem.copyForwards(void,all,tail);std.mem.copyBackwards(void,all,tail);std.debug.print("{} {}",.{all.len,tail.len});}`;
   expect(executeProgram('zig', source)).toMatchObject({

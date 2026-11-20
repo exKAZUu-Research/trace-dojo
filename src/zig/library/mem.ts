@@ -147,7 +147,9 @@ function sequence(value: Value, spend: () => void, scalar = false, type?: Type):
   if (scalar) return new Sequence(1n, () => value);
   const slice = value as Slice;
   const location =
-    type?.kind === 'int' && !isUndefinedMemory(slice) ? storageLocation(slice.target.slots, slice.start) : undefined;
+    (type?.kind === 'int' || type === VOID) && !slice.undefinedHeader && !isUndefinedMemory(slice)
+      ? storageLocation(slice.target.slots, slice.start)
+      : undefined;
   return new Sequence(slice.lengthValue, (index) => readSlice(slice, index, spend), location);
 }
 
