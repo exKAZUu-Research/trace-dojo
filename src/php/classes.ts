@@ -56,7 +56,7 @@ import {
   type Visibility,
   visibilityRank,
 } from './values';
-import { isSubtype, sameDeclarationType } from './variance';
+import { isSubtype, sameDeclarationType, variance } from './variance';
 
 export function findClass(name: string): PhpClass | undefined {
   return rt().classes.get(lower(name.startsWith('\\') ? name.slice(1) : name));
@@ -548,11 +548,8 @@ function checkTraitContract(cls: PhpClass, method: Method, contract: Method): vo
   const row = method.fn.kind === 'user' ? method.fn.decl.row : 0;
   checkFinalMethod(method, contract, row);
   checkMethodStaticness(method, contract, row);
-  if (!signatureCompatible(method, { ...contract, cls }))
-    throw new FatalError(
-      `Declaration of ${signatureText(method)} must be compatible with ${signatureText(contract, cls)}`,
-      row
-    );
+  const compatibility = signatureCompatible(method, { ...contract, cls });
+  if (compatibility !== true) throw incompatibleMethod(method, signatureText(contract, cls), compatibility, row);
 }
 
 function traitPrecedence(cls: PhpClass, rules: TraitRule[], row: number): Set<string> {
@@ -855,16 +852,14 @@ function checkOverride(cls: PhpClass, method: Method, parent: Method, reportTent
   if (lower(method.name) === '__construct' && !parent.isAbstract && parent.cls.kind !== 'interface') return;
   const tentative =
     !parent.cls.isUser && tentativeReturnMethods.includes(lower(parent.scope.name + '::' + parent.name));
-  if (!signatureCompatible(method, parent, tentative)) {
-    throw new FatalError(
-      `Declaration of ${signatureText(method)} must be compatible with ${signatureText(parent)}`,
-      row
-    );
-  }
-  if (tentative && reportTentative) {
-    const expected = returnTypeOf(parent.fn);
+  const compatibility = signatureCompatible(method, parent, tentative);
+  if (compatibility !== true) throw incompatibleMethod(method, signatureText(parent), compatibility, row);
+  const expected = tentative ? returnTypeOf(parent.fn) : undefined;
+  if (expected) {
     const actual = returnTypeOf(method.fn);
-    if (expected && (!actual || !isSubtype(actual, method.cls, expected, parent.cls))) {
+    const result = actual ? variance(actual, method.cls, expected, parent.cls) : false;
+    if (typeof result === 'string') throw incompatibleMethod(method, signatureText(parent), result, row);
+    if (!result && reportTentative) {
       const saved = rt().row;
       rt().row = row;
       try {
@@ -876,6 +871,21 @@ function checkOverride(cls: PhpClass, method: Method, parent: Method, reportTent
       }
     }
   }
+}
+
+/** The fatal error for an override PHP rejects, or cannot check because `compatibility` names a missing class. */
+function incompatibleMethod(
+  method: Method,
+  parentText: string,
+  compatibility: false | string,
+  row: number
+): FatalError {
+  return new FatalError(
+    compatibility === false
+      ? `Declaration of ${signatureText(method)} must be compatible with ${parentText}`
+      : `Could not check compatibility between ${signatureText(method)} and ${parentText}, because class ${compatibility} is not available`,
+    row
+  );
 }
 
 function checkFinalMethod(method: Method, parent: Method, row: number): void {
@@ -895,46 +905,52 @@ function checkMethodStaticness(method: Method, parent: Method, row: number): voi
 
 /**
  * Whether a method may override another as PHP's inheritance check allows: it accepts every call the parent accepts
- * (parameters as many, as optional, and as wide in type) and returns only what the parent may return.
+ * (parameters as many, as optional, and as wide in type) and returns only what the parent may return. A string result
+ * is the missing class that leaves the check unresolved.
  */
-// code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function signatureCompatible(child: Method, parent: Method, skipReturn = false): boolean {
+function signatureCompatible(child: Method, parent: Method, skipReturn = false): boolean | string {
   if (
     parent.fn.kind === 'user' &&
     parent.fn.decl.byRefReturn &&
     (child.fn.kind !== 'user' || !child.fn.decl.byRefReturn)
   )
     return false;
+  const params = parametersCompatible(child, parent);
+  const parentReturn = skipReturn ? undefined : returnTypeOf(parent.fn);
+  if (params === false || !parentReturn) return params;
+  const childReturn = returnTypeOf(child.fn);
+  const result = childReturn ? variance(childReturn, child.cls, parentReturn, parent.cls) : false;
+  if (result === true) return params;
+  return result && (typeof params === 'string' ? params : result);
+}
+
+// code-gauge-allow functionCognitiveComplexity 20 -- Checks parameters in PHP's order, keeping the first unresolved class it reports.
+function parametersCompatible(child: Method, parent: Method): boolean | string {
   const childParams = child.fn.params;
   const parentParams = parent.fn.params;
   const childRequired = childParams.filter((param) => !param.optional && !param.variadic).length;
   if (childRequired > parentParams.filter((param) => !param.variadic).length) return false;
+  let unresolved: string | undefined;
   for (const [index, param] of parentParams.entries()) {
     const own = childParams[index] ?? (childParams.at(-1)?.variadic ? childParams.at(-1) : undefined);
-    if (!own || !paramCompatible(own, child.cls, param, parent.cls)) return false;
-    if (
-      param.variadic &&
-      (!childParams.at(-1)?.variadic ||
-        childParams.slice(index).some((own) => !paramCompatible(own, child.cls, param, parent.cls)))
-    )
-      return false;
+    if (!own || (param.variadic && !childParams.at(-1)?.variadic)) return false;
+    for (const candidate of param.variadic ? [own, ...childParams.slice(index)] : [own]) {
+      const result = paramCompatible(candidate, child.cls, param, parent.cls);
+      if (result === false) return false;
+      if (typeof result === 'string') unresolved ??= result;
+    }
   }
-  if (skipReturn) return true;
-  const parentReturn = returnTypeOf(parent.fn);
-  const childReturn = returnTypeOf(child.fn);
-  if (!parentReturn) return true;
-  if (!childReturn) return false;
-  return isSubtype(childReturn, child.cls, parentReturn, parent.cls);
+  return unresolved ?? true;
 }
 
-function paramCompatible(own: Param, ownClass: PhpClass, param: Param, parentClass: PhpClass): boolean {
+function paramCompatible(own: Param, ownClass: PhpClass, param: Param, parentClass: PhpClass): boolean | string {
   if (param.byRef !== own.byRef) return false;
   if (param.optional && !own.optional && !own.variadic) return false;
   const ownType = parameterType(own);
   if (!ownType) return true;
   const paramType = parameterType(param);
   if (!paramType) return ownType.k === 'named' && ownType.name === 'mixed';
-  return isSubtype(paramType, parentClass, ownType, ownClass);
+  return variance(paramType, parentClass, ownType, ownClass);
 }
 
 function returnTypeOf(fn: Callable): TypeDecl | undefined {

@@ -54,6 +54,42 @@ export function isSubtype(
   return namedSubtype(lower(sub.name), subScope, lower(sup.name), supScope, allowUnresolved);
 }
 
+/**
+ * Checks `sub` against `sup` as isSubtype does, but distinguishes PHP's unresolved outcome: when the check holds only
+ * by assuming classes that do not exist, the result is the first such class PHP reports (from `sub`, then `sup`).
+ */
+export function variance(
+  sub: TypeDecl,
+  subScope: PhpClass | undefined,
+  sup: TypeDecl,
+  supScope: PhpClass | undefined
+): boolean | string {
+  if (isSubtype(sub, subScope, sup, supScope)) {
+    // PHP still loads a class that `object` accepts, so a missing one leaves the check unresolved.
+    const missing = typeNames(sup).has('object') ? unresolvedClass(sub, subScope, supScope) : undefined;
+    return missing === undefined || typeNames(sup).has(lower(missing)) ? true : missing;
+  }
+  if (!isSubtype(sub, subScope, sup, supScope, true)) return false;
+  return unresolvedClass(sub, subScope, supScope) ?? unresolvedClass(sup, supScope, subScope) ?? false;
+}
+
+function typeNames(type: TypeDecl): Set<string> {
+  return type.k === 'named' ? new Set([lower(type.name)]) : new Set(type.types.flatMap((part) => [...typeNames(part)]));
+}
+
+function unresolvedClass(type: TypeDecl, scope: PhpClass | undefined, peer: PhpClass | undefined): string | undefined {
+  if (type.k !== 'named') {
+    for (const part of type.types) {
+      const name = unresolvedClass(part, scope, peer);
+      if (name) return name;
+    }
+    return undefined;
+  }
+  const word = lower(type.name);
+  if (BUILTIN.has(word) || word === 'static' || resolve(word, scope, peer)) return undefined;
+  return type.name;
+}
+
 function expandIterable(nullable: boolean | undefined): TypeDecl {
   const types: TypeDecl[] = [
     { k: 'named', name: 'array' },

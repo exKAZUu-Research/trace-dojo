@@ -5232,6 +5232,38 @@ try { range(0.1, null, 1); } catch (ValueError $e) { echo explode("\\n", $e->get
   });
 });
 
+test('an override naming a missing class reports that its compatibility cannot be checked', () => {
+  for (const [parent, child, expected] of [
+    [
+      'function f(Missing $a) {}',
+      'function f(Other $a) {}',
+      'C::f(Other $a) and P::f(Missing $a), because class Missing is not available',
+    ],
+    [
+      'function f(): Missing {}',
+      'function f(): Other {}',
+      'C::f(): Other and P::f(): Missing, because class Other is not available',
+    ],
+    [
+      'function f(): object {}',
+      'function f(): Missing {}',
+      'C::f(): Missing and P::f(): object, because class Missing is not available',
+    ],
+  ]) {
+    expect(run(`<?php class P { ${parent} } class C extends P { ${child} } echo "x";`)).toMatchObject({
+      kind: 'executed',
+      stdout: `\nFatal error: Could not check compatibility between ${expected} in /main.php on line 1\nStack trace:\n#0 {main}\n`,
+    });
+  }
+  expect(
+    run('<?php class A implements IteratorAggregate { function getIterator(): Generator_test {} } echo "x";')
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '\nFatal error: Could not check compatibility between A::getIterator(): Generator_test and IteratorAggregate::getIterator(): Traversable, because class Generator_test is not available in /main.php on line 1\nStack trace:\n#0 {main}\n',
+  });
+});
+
 test('a non-public destructor runs only where its visibility allows', () => {
   expect(
     run(
