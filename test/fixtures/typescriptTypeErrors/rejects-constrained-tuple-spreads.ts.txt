@@ -37,3 +37,9 @@ function addedSuffix<U extends [number] & { tag: string }>(source: U): [number, 
 function readonlySpread<U extends [number] & { tag: string }>(source: readonly [...U]): readonly [number] {
   return source;
 }
+function sameOpen<T extends unknown[]>(source: T): T {
+  return [...source];
+}
+const noFirstPosition: { 1: 'second' } = [1, 'second'];
+const missingOptionalPosition: { 0?: 'first' } = [];
+const wrongPosition: { 0: 'first' } = ['other'];

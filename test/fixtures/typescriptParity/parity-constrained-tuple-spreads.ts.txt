@@ -61,3 +61,24 @@ console.log(
   readonlyMixed([1]),
   readonlyChoice(Object.assign(['six'] as const, { tag: 'tag' }))
 );
+
+function sameTagged<T extends [number] & { tag: string }>(source: T): T {
+  return [...source];
+}
+function positionalTagged<T extends [number] & { tag: string }>(source: T): { 0: number } {
+  return [...source];
+}
+function relayed<A extends [number], T extends A>(source: T): T {
+  return [...source];
+}
+const positional: { 0: 'first'; 1: 2 } = ['first', 2];
+const exactLength: string[] & { length: 1 } = ['one'];
+const intersected: { 0: 'first' } & { 1: 'second' } = ['first', 'second'];
+console.log(
+  sameTagged(Object.assign([1] as [number], { tag: 'tag' })),
+  positionalTagged(Object.assign([2] as [number], { tag: 'tag' })),
+  relayed([3]),
+  positional,
+  exactLength,
+  intersected
+);

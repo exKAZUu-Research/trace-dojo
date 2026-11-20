@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 746 -- Types literals and their spreads, members, and widening in the same literal context.
+// code-gauge-allow-file fileNcss 756 -- Types literals and their spreads, members, and widening in the same literal context.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExpressionListFlow, tupleArgumentContexts } from './callArity';
@@ -38,6 +38,7 @@ import {
   numberType,
   type ObjectType,
   type Property,
+  propertyAccessType,
   regularOf,
   simpleProperty,
   stringType,
@@ -113,11 +114,13 @@ export class LiteralChecker {
 
   constructor(private readonly c: Checker) {}
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Checks array elements and spread positions in their contextual shape.
   arrayLiteral(node: TreeNode, contextual?: Type): Type {
     contextual = this.literalContext(node, contextual);
     const elements = arrayElements(node);
     const isConstContext = this.isConstContext(node, contextual);
     const lengths = contextual ? this.arrayElementLengths(elements) : [];
+    const firstSpread = elements.findIndex((element) => element?.type === 'spread_element');
     const types: { type: Type; spread: boolean }[] = elements.map((element, index) => {
       // A hole, as in `[, 1]`, reads as `undefined`.
       if (!element) return { type: undefinedType, spread: false };
@@ -125,7 +128,8 @@ export class LiteralChecker {
         const spread = this.c.expressions.check(named(element)[0]);
         return { type: spread, spread: true };
       }
-      const contexts = contextual ? this.arrayElementContexts(contextual, index, lengths) : [];
+      const fixed = firstSpread === -1 || index < firstSpread;
+      const contexts = contextual ? this.arrayElementContexts(contextual, index, lengths, fixed) : [];
       const context = contexts.length > 0 ? unionOf(contexts, true, true) : undefined;
       const type = this.c.expressions.check(element, context);
       const literalContext = contexts.find((candidate) => this.expectsLiteral(candidate, type)) ?? context;
@@ -240,24 +244,39 @@ export class LiteralChecker {
   }
 
   private takesTupleContext(type: Type): boolean {
-    if (type.kind === 'union' || type.kind === 'intersection')
-      return type.types.some((member) => this.takesTupleContext(member));
-    if (type.kind !== 'object') return false;
+    type = this.c.apparentType(type);
+    if (type.kind === 'union') return type.types.some((member) => this.takesTupleContext(member));
+    if (type.kind !== 'object' && type.kind !== 'intersection') return false;
+    if (
+      (type.kind === 'object' && (type.objectKind === 'tuple' || this.isTupleMappedContext(type))) ||
+      this.c.propertyOf(type, '0')
+    )
+      return true;
+    const length = this.c.propertyOf(type, 'length')?.type();
     return (
-      type.objectKind === 'tuple' ||
-      (type.objectKind === 'mapped' &&
-        type.mapped?.source !== undefined &&
-        !type.mapped.nameType &&
-        this.c.relations.isGeneric(type))
+      !!length &&
+      typeMembers(length).every((member) => member.kind === 'literal' && typeof member.value === 'number') &&
+      this.c.relations.isAssignable(type, this.c.arrayType(anyType, true))
     );
   }
 
-  private arrayElementContexts(contextual: Type, index: number, lengths: (number | undefined)[]): Type[] {
+  private isTupleMappedContext(type: ObjectType): boolean {
+    const { mapped } = type;
+    return !!mapped?.source && !mapped.nameType && this.c.relations.isGeneric(type);
+  }
+
+  private arrayElementContexts(
+    contextual: Type,
+    index: number,
+    lengths: (number | undefined)[],
+    fixed: boolean
+  ): Type[] {
+    contextual = this.c.apparentType(contextual);
     if (contextual.kind === 'union')
-      return contextual.types.flatMap((member) => this.arrayElementContexts(member, index, lengths));
+      return contextual.types.flatMap((member) => this.arrayElementContexts(member, index, lengths, fixed));
     if (contextual.kind === 'intersection') {
       const contexts = contextual.types
-        .map((member) => this.arrayElementContexts(member, index, lengths))
+        .map((member) => this.arrayElementContexts(member, index, lengths, fixed))
         .filter((types) => types.length > 0);
       return contexts.length > 0
         ? [
@@ -271,12 +290,14 @@ export class LiteralChecker {
     const context =
       contextual.kind === 'object' && contextual.objectKind === 'tuple'
         ? tupleArgumentContexts(this.c, contextual, lengths)[index]
-        : this.elementContext(contextual);
+        : this.elementContext(contextual, fixed ? index : undefined);
     return context === undefined ? [] : [context];
   }
 
-  private elementContext(contextual: Type): Type | undefined {
+  private elementContext(contextual: Type, position: number | undefined): Type | undefined {
     if (contextual.kind !== 'object') return undefined;
+    const property = position === undefined ? undefined : this.c.propertyOf(contextual, String(position));
+    if (property) return propertyAccessType(property);
     if (this.c.isArrayOrTuple(contextual)) return this.c.elementTypeOf(contextual);
     if (!this.c.propertyOf(contextual, this.c.typeNodes.librarySymbolKey('iterator'))) return undefined;
     const iterated = this.c.silently(() => this.c.patterns.iteratedType(undefined, contextual));
