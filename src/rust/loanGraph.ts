@@ -62,7 +62,8 @@ export class LoanGraph {
   readonly names: string[] = [];
   /** The regions of the references in each variable's type, which contain the points where the variable is live. */
   readonly varRegions: RVar[][] = [];
-  readonly dropLive = new Map<Var, { proj: string[]; regions: RVar[] }[]>();
+  readonly dropLive = new Map<Var, string[][]>();
+  readonly dropStores: { point: number; place: Place; regions: RVar[] }[] = [];
   regionCount = 0;
   /** Regions that contain the whole function: those of parameters, captures, the return value, and `'static`. */
   readonly universal = new Set<RVar>();
@@ -176,11 +177,10 @@ export class LoanGraph {
     for (const [index, live] of liveIn.entries()) {
       for (const v of live.values()) for (const region of this.varRegions[v]) regions[region].add(index);
     }
-    for (const [root, slots] of this.dropLive) {
-      for (const slot of slots) {
-        for (const index of this.dropLiveness({ root, proj: slot.proj }, preds, reachable)) {
-          for (const region of slot.regions) regions[region].add(index);
-        }
+    for (const store of this.dropStores) {
+      if (!reachable[store.point]) continue;
+      for (const index of this.dropLiveness(store.place, store.point, preds, reachable)) {
+        for (const region of store.regions) regions[region].add(index);
       }
     }
     for (const region of this.universal) regions[region].fill();
@@ -193,15 +193,16 @@ export class LoanGraph {
     return regions;
   }
 
-  private dropLiveness(place: Place, preds: number[][], reachable: boolean[]): Set<number> {
-    const { definitions, deinitializes, drops, pending } = this.dropEvents(place, reachable);
+  private dropLiveness(place: Place, definition: number, preds: number[][], reachable: boolean[]): Set<number> {
+    const { definitions, deinitializes, drops } = this.dropEvents(place, reachable);
+    const pending = [...this.points[definition].succ];
     const initialized = new Set<number>();
     while (pending.length > 0) {
       this.budget.spend();
       const index = pending.pop()!;
       if (initialized.has(index)) continue;
       initialized.add(index);
-      if (!deinitializes.has(index)) pending.push(...this.points[index].succ);
+      if (!definitions.has(index) && !deinitializes.has(index)) pending.push(...this.points[index].succ);
     }
     for (const drop of drops) if (initialized.has(drop)) pending.push(drop);
     const live = new Set<number>();
@@ -224,7 +225,6 @@ export class LoanGraph {
     definitions: Set<number>;
     deinitializes: Set<number>;
     drops: Set<number>;
-    pending: number[];
   } {
     const definitions = new Set<number>();
     const deinitializes = new Set<number>();
@@ -241,8 +241,7 @@ export class LoanGraph {
         if (access.kind === 'write') definitions.add(index);
       }
     }
-    const pending = [...definitions].flatMap((index) => this.points[index].succ);
-    return { definitions, deinitializes, drops, pending };
+    return { definitions, deinitializes, drops };
   }
 
   /** The variables live on entry to each point. */

@@ -3073,3 +3073,36 @@ test('checks Rust enum constructor bounds for inline and where declarations', ()
     });
   }
 });
+
+test('releases Rust borrows when an owning callback is replaced', () => {
+  const program = rustMain(`let mut source = 5;
+    let original = &mut source;
+    let mut callback: Box<dyn Fn() -> i32> = Box::new(|| *original);
+    println!("{}", callback());
+    callback = Box::new(|| 2);
+    let next: &mut i32 = original;
+    println!("{}", next);`);
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '5\n5\n' });
+  const conditional = program.replace('callback = Box::new(|| 2);', 'if false { callback = Box::new(|| 2); }');
+  expect(executeProgram('rust', conditional)).toMatchObject({ kind: 'compileError' });
+});
+
+test('keeps Rust callback borrows through nested owners and collection insertion', () => {
+  for (const [owner, call] of [
+    ['let values: Vec<Box<dyn Fn() -> i32>> = vec![Box::new(|| *original)];', 'values[0]()'],
+    ['let mut values: Vec<Box<dyn Fn() -> i32>> = vec![]; values.push(Box::new(|| *original));', 'values[0]()'],
+    ['let values: Box<Box<dyn Fn() -> i32>> = Box::new(Box::new(|| *original));', '(**values)()'],
+  ]) {
+    const drawing = `${owner} println!("{}", ${call});`;
+    const program = rustMain(`let mut source = 5;
+    let original = &mut source;
+    ${drawing}
+    let next: &mut i32 = original;
+    println!("{}", next);`);
+    expect(executeProgram('rust', program)).toMatchObject({ kind: 'compileError' });
+    expect(executeProgram('rust', program.replace(drawing, `{ ${drawing} }`))).toMatchObject({
+      kind: 'executed',
+      stdout: '5\n5\n',
+    });
+  }
+});

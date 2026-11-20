@@ -71,6 +71,7 @@ interface Binding {
   defs: Var[];
   /** Relations of regions, which need the layouts of the bound variables. */
   relations: (() => void)[];
+  dropSources: { into: Var; from: Place }[];
 }
 
 interface LoopFrame {
@@ -273,7 +274,7 @@ export class LoanBuilder {
     let v = this.vars.get(local);
     if (v === undefined) {
       v = this.newVar(local.name, local.type);
-      const slots = dropSlots(local.type, this.layouts[v]);
+      const slots = dropSlots(local.type);
       if (slots.length > 0) this.graph.dropLive.set(v, slots);
       this.vars.set(local, v);
       this.locals.set(v, local);
@@ -507,11 +508,27 @@ export class LoanBuilder {
 
   /** Binds a pattern's variables, moving, copying, or borrowing the parts of the place they bind. */
   private bind(pattern: Pattern, source: Place): void {
-    const binding: Binding = { accesses: [], gens: [], defs: [], relations: [] };
+    const binding: Binding = { accesses: [], gens: [], defs: [], relations: [], dropSources: [] };
     this.bindPart(binding, pattern, source, undefined);
     const kills = binding.defs.map((root): Place => ({ root, proj: [] }));
-    this.point({ uses: [source.root], defs: binding.defs, accesses: binding.accesses, gens: binding.gens, kills });
+    const at = this.point({
+      uses: [source.root],
+      defs: binding.defs,
+      accesses: binding.accesses,
+      gens: binding.gens,
+      kills,
+    });
+    for (const { into, from } of binding.dropSources) this.storeDrop(at, { root: into, proj: [] }, from);
     for (const relation of binding.relations) relation();
+  }
+
+  private storeDrop(at: number, into: Place, from: Place): void {
+    for (const proj of this.graph.dropLive.get(into.root) ?? []) {
+      if (!into.proj.every((part, index) => part === proj[index])) continue;
+      const remainder = proj.slice(into.proj.length);
+      const regions = regionsOf(this.placeLayout({ root: from.root, proj: [...from.proj, ...remainder] }));
+      if (regions.length > 0) this.graph.dropStores.push({ point: at, place: { root: into.root, proj }, regions });
+    }
   }
 
   /** Binds a part of a pattern to a place, which bindings take by reference in the binding mode `byRef`. */
@@ -570,6 +587,7 @@ export class LoanBuilder {
     if (!mode) {
       binding.accesses.push({ place, kind: this.readKind(local.type), span: p.span });
       binding.relations.push(() => relate(this.outlives, this.placeLayout(place), this.layouts[v]));
+      if (this.graph.dropLive.has(v)) binding.dropSources.push({ into: v, from: place });
       return;
     }
     const layout = this.layouts[v];
@@ -816,12 +834,13 @@ export class LoanBuilder {
     const throughRef = place.proj.includes('*');
     // `v[i] = x` on a `Vec` borrows it mutably for `IndexMut`.
     const overloaded = expr.target.kind === 'index' && this.annotations.indexes.get(expr.target)?.overloaded === true;
-    this.point({
+    const at = this.point({
       uses: whole || !(throughRef || overloaded) ? values : [...values, place.root],
       defs: whole ? [place.root] : [],
       accesses: [{ place, kind: overloaded ? 'deep' : 'write', span: expr.span }],
       kills: [place],
     });
+    if (value !== undefined) this.storeDrop(at, place, { root: value, proj: [] });
     relate(this.outlives, this.layout(value), this.placeLayout(place));
   }
 
@@ -1018,11 +1037,13 @@ export class LoanBuilder {
 
   private methodCall(expr: Extract<Expr, { kind: 'methodCall' }>): Value {
     const method = this.annotations.methods.get(expr);
-    const { receiver, activation } = this.receiver(expr, method);
+    const { receiver, activation, target } = this.receiver(expr, method);
     const args = expr.args.map((arg, index) => this.argument(arg, method?.fn.paramTypes[index]));
     const accesses: Access[] = [];
     if (activation) accesses.push({ place: activation.place, kind: 'deep', span: expr.span, activates: activation });
     const result = this.callPoint(expr, [receiver, ...args], accesses);
+    if (target && method && this.current !== undefined)
+      this.storeCollectionElement(target, method.fn, args, this.current);
     if (activation && this.current !== undefined) activation.activation = this.current;
     const inputs = [receiver, ...args].map((v) => this.layout(v));
     if (method) this.relateCall(method.fn, method.typeArgs, inputs, this.layout(result));
@@ -1031,11 +1052,18 @@ export class LoanBuilder {
     return result;
   }
 
+  private storeCollectionElement(target: Place, fn: FnDef, args: Value[], point: number): void {
+    const key = fn.nativeKey;
+    if (!key || !/^(Vec|VecDeque|BinaryHeap)<_>::(push|push_back|push_front|insert|extend)$/.test(key)) return;
+    const argument = args[key.endsWith('::insert') ? 1 : 0];
+    if (argument !== undefined) this.storeDrop(point, target, { root: argument, proj: [] });
+  }
+
   /** A method's receiver after its adjustment: autoref borrows it, and `&mut` references are reborrowed. */
   private receiver(
     expr: Extract<Expr, { kind: 'methodCall' }>,
     method: MethodRes | undefined
-  ): { receiver: Value; activation?: Loan } {
+  ): { receiver: Value; activation?: Loan; target?: Place } {
     const { receiver } = expr;
     const place = method && this.place(receiver);
     if (!method || !place) return { receiver: this.value(receiver) };
@@ -1046,11 +1074,11 @@ export class LoanBuilder {
       // A method of the type itself borrows it in two phases; one reached through `Deref` (a slice's) does not.
       const twoPhase = autoref === 'mut' && !derefs.includes('own');
       const { value, loan } = this.borrow(target, autoref === 'mut', receiver.span, targetType, twoPhase);
-      return { receiver: value, activation: twoPhase ? loan : undefined };
+      return { receiver: value, activation: twoPhase ? loan : undefined, target };
     }
     if (method.fn.selfMode === 'mutRef' && isMutReference(targetType)) {
       const { value, loan } = this.borrow(project(target, '*'), true, receiver.span, refTarget(targetType), true);
-      return { receiver: value, activation: loan };
+      return { receiver: value, activation: loan, target: project(target, '*') };
     }
     return { receiver: this.read(target, targetType, receiver.span) };
   }

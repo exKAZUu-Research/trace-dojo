@@ -77,20 +77,18 @@ export function isNone(layout: Layout): boolean {
   return layout.kind === 'none';
 }
 
-export function dropSlots(type: Type, layout: Layout, proj: string[] = []): { proj: string[]; regions: RVar[] }[] {
+export function dropSlots(type: Type, proj: string[] = []): string[][] {
   const t = normalize(shallow(type));
-  if (t.kind === 'tuple' && layout.kind === 'tuple') {
-    return t.elems.flatMap((elem, index) => dropSlots(elem, layout.elems[index], [...proj, String(index)]));
+  if (t.kind === 'tuple') {
+    return t.elems.flatMap((elem, index) => dropSlots(elem, [...proj, String(index)]));
   }
-  if (
-    t.kind === 'adt' &&
-    layout.kind === 'adt' &&
-    t.def.builtin === 'Box' &&
-    normalize(shallow(t.args[0])).kind === 'dyn'
-  ) {
-    return [{ proj, regions: regionsOf(layout.args[0]) }];
+  if (t.kind === 'array' && t.len > 0 && dropSlots(t.elem).length > 0) return [proj];
+  if (t.kind !== 'adt') return [];
+  if (t.def.builtin === 'Box') {
+    const target = normalize(shallow(t.args[0]));
+    return target.kind === 'dyn' ? [proj] : dropSlots(target, [...proj, '#']);
   }
-  return [];
+  return t.args.some((arg) => dropSlots(arg).length > 0) ? [proj] : [];
 }
 
 export function regionsOf(layout: Layout): RVar[] {
