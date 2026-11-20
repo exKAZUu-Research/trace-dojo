@@ -12,9 +12,9 @@ TYPE_NAME = re.compile(r"\b\w+\b")
 USING_SHADOW = re.compile(r" (\w+) 0x\w+ '([^']+)'(?: '([^']+)')?")
 NAMED_TAG = re.compile(r" (?:struct|class|union|enum) ([A-Za-z]\w*)(?: definition)?$")
 SEMANTIC_PARENT = re.compile(r"^0x\w+ parent 0x\w+")
-STD_FUNCTIONS = {"FunctionDecl", "FunctionTemplateDecl"}
+STD_FUNCTIONS = {"FunctionDecl": "stdFunction", "FunctionTemplateDecl": "stdTemplate"}
 USING_KINDS = {
-    "Function": "using", "FunctionTemplate": "using", "Var": "var",
+    "Function": "function", "FunctionTemplate": "template", "Var": "var",
     **dict.fromkeys(("Typedef", "TypeAlias", "TypeAliasTemplate", "ClassTemplate", "CXXRecord", "Record", "Enum"), "type"),
 }
 STD_OTHER_NAMES = {
@@ -74,7 +74,10 @@ def global_symbols(tree):
 
 def other_global_symbol(category, syntax):
     if category == "UsingShadowDecl":
-        return using_symbol(syntax)
+        imported = using_symbol(syntax)
+        if imported:
+            name, kind, signature = imported
+            return name, "using" if kind in {"function", "template"} else kind, signature
     if category in {"RecordDecl", "CXXRecordDecl", "EnumDecl"}:
         tag = NAMED_TAG.search(syntax)
         if tag:
@@ -104,9 +107,9 @@ def std_nodes(tree):
             imported = using_symbol(syntax)
             if imported:
                 imported_name, kind, _ = imported
-                yield imported_name, "stdFunction" if kind == "using" else "stdOther"
+                yield imported_name, f"std{kind.title()}" if kind in {"function", "template"} else "stdOther"
         elif name and category in STD_FUNCTIONS:
-            yield name, "stdFunction"
+            yield name, STD_FUNCTIONS[category]
         elif name and category in STD_OTHER_NAMES:
             yield name, "stdOther"
 
@@ -230,8 +233,8 @@ def main():
             function_macros[name] = group
         elif kind == "type":
             types[name] = group
-        elif kind in {"stdFunction", "stdOther"}:
-            standard[name].append([group, kind == "stdFunction"])
+        elif kind.startswith("std"):
+            standard[name].append([group, kind[3:].lower()])
         else:
             names[name].append([group, kind, signature])
     output = Path("src/cpp/library/libcGlobalDeclarations.json")

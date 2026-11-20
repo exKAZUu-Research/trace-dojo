@@ -205,9 +205,6 @@ export function headerOf(name: string): string | undefined {
   return typedefHeader(name) ?? DECLARING_HEADERS[name]?.[0];
 }
 
-export function hasLocaleCtypeOverload(name: string, headers: ReadonlySet<string>): boolean {
-  if (!DECLARING_HEADERS[name]?.includes('cctype') || name === 'isblank') return false;
-  return ['locale', 'ios', 'istream', 'ostream', 'iostream', 'sstream', 'iomanip'].some((header) =>
-    headers.has(header)
-  );
+export function isCtypeFunction(name: string): boolean {
+  return DECLARING_HEADERS[name]?.includes('cctype') === true;
 }

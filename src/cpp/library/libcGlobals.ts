@@ -5,7 +5,7 @@ const declarations: Readonly<Record<string, (string | number)[][]>> = sdk.declar
 const types: Readonly<Record<string, number>> = sdk.types;
 const macros: Readonly<Record<string, number>> = sdk.macros;
 const functionMacros: Readonly<Record<string, number>> = sdk.functionMacros;
-const standard: Readonly<Record<string, (number | boolean)[][]>> = sdk.standard;
+const standard: Readonly<Record<string, (number | string)[][]>> = sdk.standard;
 type MathWrapper = 'integer' | 'float' | 'double' | 'ldouble';
 const mathCalls: Readonly<Record<string, Partial<Record<MathWrapper, string>>>> = sdk.mathCalls;
 const headerGroups = sdk.headers.map((group) => new Set(group));
@@ -68,16 +68,17 @@ export function conflictsWithStdName(name: string, isFunction: boolean, headers:
   return (
     Object.hasOwn(standard, name) &&
     standard[name].some(
-      ([group, isStdFunction]) =>
-        typeof group === 'number' && (!isFunction || !isStdFunction) && visibleIn(group, headers)
+      ([group, kind]) => typeof group === 'number' && (!isFunction || kind === 'other') && visibleIn(group, headers)
     )
   );
 }
 
-export function isSdkStdDeclared(name: string, headers: ReadonlySet<string>): boolean {
+export function isSdkStdDeclared(name: string, headers: ReadonlySet<string>, kind?: 'function' | 'template'): boolean {
   return (
     Object.hasOwn(standard, name) &&
-    standard[name].some(([group]) => typeof group === 'number' && visibleIn(group, headers))
+    standard[name].some(
+      ([group, declared]) => typeof group === 'number' && (!kind || kind === declared) && visibleIn(group, headers)
+    )
   );
 }
 

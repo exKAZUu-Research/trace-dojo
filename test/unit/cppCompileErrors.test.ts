@@ -12,6 +12,19 @@ int main() { std::FILE* stream = stdout; }`;
 });
 
 test.each([
+  ['qualified', '', 'std::remove'],
+  ['unqualified', 'using namespace std;', 'remove'],
+])('rejects %s algorithm remove with only <cstdio>', (_scope, directive, name) => {
+  const program = `#include <cstdio>
+${directive}
+int main() { int a[] = {1, 2, 1}; ${name}(a, a + 3, 1); }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 2, message: expect.stringContaining('remove') }],
+  });
+});
+
+test.each([
   ['double value{source};', 'long double'],
   ['std::vector<double> values{source};', 'long double'],
   ['float value{3.4028236e38};', 'double'],

@@ -59,7 +59,7 @@ import { randomEngines } from './random';
 import { stringClass, stringFunctions } from './string';
 import { asNumber, CONST_CHAR_PTR, generic, native } from './support';
 import { turtleClass } from './turtle';
-import { hasLocaleCtypeOverload, headerOf, isVisible } from './visibility';
+import { headerOf, isCtypeFunction, isVisible } from './visibility';
 
 /** A class template of the library, such as `std::vector`, which template arguments instantiate. */
 export type LibraryTemplate =
@@ -196,6 +196,7 @@ export class Library {
   readonly streams: Streams;
   private readonly exceptions: Map<string, ClassInfo>;
   private readonly stdNames = new Map<string, Entity>();
+  private readonly nativeStdTemplates = new Set<FunctionInfo>();
   private readonly localeCtypeOverloads = new Map<string, FunctionInfo>();
   private readonly globalNames = new Map<string, Entity>();
   private readonly headers = new Set<string>();
@@ -249,20 +250,30 @@ export class Library {
   std(name: string): Entity | undefined {
     if (!isVisible(name, this.headers, 'std')) return undefined;
     const entity = this.stdNames.get(name);
-    const cOverload = this.cOverload(name);
-    if (cOverload) {
-      return { kind: 'functions', functions: [...(entity?.kind === 'functions' ? entity.functions : []), cOverload] };
-    }
-    if (entity?.kind === 'functions' && hasLocaleCtypeOverload(name, this.headers)) {
+    if (entity && entity.kind !== 'functions') return entity;
+    const functions = this.stdFunctions(name, entity?.functions ?? []);
+    if (functions.length > 0) return { kind: 'functions', functions };
+    const feature = Object.hasOwn(UNSUPPORTED_STD_NAMES, name) ? UNSUPPORTED_STD_NAMES[name] : undefined;
+    return feature ? { kind: 'unsupported', feature } : this.unsupportedCName(name);
+  }
+
+  private stdFunctions(name: string, registered: FunctionInfo[]): FunctionInfo[] {
+    const templates = isSdkStdDeclared(name, this.headers, 'template');
+    const ordinary = isSdkStdDeclared(name, this.headers, 'function');
+    const visible = registered.filter((fn) =>
+      fn.isTemplate || this.nativeStdTemplates.has(fn) ? templates : ordinary
+    );
+    const cOverload = ordinary ? this.cOverload(name) : undefined;
+    if (cOverload) visible.push(cOverload);
+    if (templates && isCtypeFunction(name)) {
       let overload = this.localeCtypeOverloads.get(name);
       if (!overload) {
         overload = generic(name, () => {});
         this.localeCtypeOverloads.set(name, overload);
       }
-      return { kind: 'functions', functions: [...entity.functions, overload] };
+      visible.push(overload);
     }
-    const feature = Object.hasOwn(UNSUPPORTED_STD_NAMES, name) ? UNSUPPORTED_STD_NAMES[name] : undefined;
-    return entity ?? (feature ? { kind: 'unsupported', feature } : this.unsupportedCName(name));
+    return visible;
   }
 
   global(name: string): Entity | undefined {
@@ -471,6 +482,7 @@ export class Library {
         return stream;
       });
       fn.streamManipulator = isOutputOnly ? 'output' : 'both';
+      if (isOutputOnly) this.nativeStdTemplates.add(fn);
       this.addStd(name, { kind: 'functions', functions: [fn] });
     }
     const manipulatorFunctions = new Map<string, FunctionInfo[]>();
@@ -492,12 +504,12 @@ export class Library {
     ];
     for (const [name, paramType, apply] of parameterized) {
       const manipulatorType = streams.manipulatorType(OUTPUT_MANIPULATORS.has(name));
-      manipulatorFunctions.set(name, [
-        native(name, [paramType], manipulatorType, ([value]) => {
-          const number = asNumber(value);
-          return new ManipulatorValue((stream) => apply(stream, number), `std::${name}`);
-        }),
-      ]);
+      const fn = native(name, [paramType], manipulatorType, ([value]) => {
+        const number = asNumber(value);
+        return new ManipulatorValue((stream) => apply(stream, number), `std::${name}`);
+      });
+      if (name === 'setfill') this.nativeStdTemplates.add(fn);
+      manipulatorFunctions.set(name, [fn]);
     }
     this.addFunctions(manipulatorFunctions, this.stdNames);
     this.addFunctions(new Map([['getline', streams.getline()]]), this.stdNames);

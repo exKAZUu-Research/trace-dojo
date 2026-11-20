@@ -25,6 +25,17 @@ int main() { ${body} }`;
   expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
 });
 
+test('selects the algorithm remove overload when its declaration is visible', () => {
+  const program = `#include <algorithm>
+#include <cstdio>
+using namespace std;
+int main() {
+  int a[] = {1, 2, 1};
+  std::printf("%ld", remove(a, a + 3, 1) - a);
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', stdout: '1', uncaughtException: undefined });
+});
+
 test('allows const map keys and pointers to const set elements', () => {
   const program = `#include <iostream>
 #include <map>
