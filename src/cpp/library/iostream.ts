@@ -1,4 +1,4 @@
-import { isFloatUnderflow, isSpaceByte, parseFloatPrefix, parseIntegerPrefix } from '../../c/library/numberParsing';
+import { isFloatUnderflow, isSpaceByte, parseFloatPrefix } from '../../c/library/numberParsing';
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import { byteArray, byteAt } from '../bytes';
 import { scalarValue } from '../conversions';
@@ -931,29 +931,80 @@ const INTEGER_RANGES: Record<string, [bigint, bigint]> = {
 };
 
 /**
- * Reads an integer as libc++'s `num_get` does: it gathers the characters an integer of the stream's base may hold, and
- * fails storing 0 unless `strtoll` (`strtoull` for an unsigned type) converts all of them; a value out of range fails
- * storing the nearest limit, though an unsigned type wraps a negated value that fits.
+ * Reads an integer as libc++'s `num_get::__do_get_integral` does in one pass: after a sign, it detects the base from a
+ * `0` or `0x` prefix when no base flag is set (and swallows a `0x` in hex), then accumulates the digits of that base;
+ * no digit fails storing 0, and a value out of range fails storing the nearest limit, though an unsigned type wraps a
+ * negated value.
  */
 function readInteger(stream: StreamValue, frame: Frame, name: string): Value {
-  const base = numberBase(stream.flags);
-  const text = gatherInteger(stream, frame, base);
   const [min, max] = INTEGER_RANGES[name] ?? INTEGER_RANGES.int;
-  const isUnsigned = min === 0n;
-  const isNegated = isUnsigned && text.startsWith('-');
-  const digits = isNegated ? text.slice(1) : text;
-  const parsed = parseIntegerPrefix(byteArray(digits), base, undefined, () => frame.runtime.spend());
-  let value: bigint;
-  if (digits === '' || parsed.length !== digits.length) {
-    stream.state |= IO_STATE.failbit;
-    value = 0n;
-  } else if (parsed.value < min || parsed.value > max) {
-    stream.state |= IO_STATE.failbit;
-    value = parsed.value > 0n ? max : min;
-  } else {
-    value = isNegated ? BigInt.asUintN(max.toString(2).length, -parsed.value) : parsed.value;
-  }
+  const value = scanInteger(stream, frame, min, max);
   return ['long', 'ulong', 'llong', 'ullong'].includes(name) ? value : Number(value);
+}
+
+function scanInteger(stream: StreamValue, frame: Frame, min: bigint, max: bigint): bigint {
+  const atEnd = (): boolean => stream.position >= stream.buffer.length;
+  if (atEnd()) return stopScan(stream, IO_STATE.eofbit | IO_STATE.failbit, 0n);
+  const isNegated = stream.buffer[stream.position] === '-';
+  if (isNegated || stream.buffer[stream.position] === '+') stream.position++;
+  if (atEnd()) return stopScan(stream, IO_STATE.eofbit | IO_STATE.failbit, 0n);
+  const prefix = scanBasePrefix(stream, numberBase(stream.flags));
+  if (!prefix) return stopScan(stream, IO_STATE.eofbit, 0n);
+  const isUnsigned = min === 0n;
+  const digits = accumulateDigits(stream, frame, prefix.base, isUnsigned ? max : max * 2n + 1n);
+  const end = atEnd() ? IO_STATE.eofbit : IO_STATE.goodbit;
+  if (!prefix.hasDigit && !digits.hasDigit) return stopScan(stream, end | IO_STATE.failbit, 0n);
+  if (digits.overflowed) return stopScan(stream, end | IO_STATE.failbit, !isUnsigned && isNegated ? min : max);
+  const { magnitude } = digits;
+  if (!isNegated)
+    return magnitude > max ? stopScan(stream, end | IO_STATE.failbit, max) : stopScan(stream, end, magnitude);
+  if (isUnsigned) return stopScan(stream, end, BigInt.asUintN(max.toString(2).length, -magnitude));
+  return magnitude > -min ? stopScan(stream, end | IO_STATE.failbit, min) : stopScan(stream, end, -magnitude);
+}
+
+function stopScan(stream: StreamValue, state: number, value: bigint): bigint {
+  stream.state |= state;
+  return value;
+}
+
+/**
+ * Consumes a `0` or `0x` prefix when no base flag is set (detecting the base) or in hex, giving the base and whether
+ * the `0` already counts as a digit, or undefined when the input ends after that `0`.
+ */
+function scanBasePrefix(stream: StreamValue, base: number): { base: number; hasDigit: boolean } | undefined {
+  if ((base !== 0 && base !== 16) || stream.buffer[stream.position] !== '0')
+    return { base: base || 10, hasDigit: false };
+  stream.position++;
+  if (stream.position >= stream.buffer.length) return;
+  const next = stream.buffer[stream.position];
+  if (next !== 'x' && next !== 'X') return { base: base || 8, hasDigit: true };
+  stream.position++;
+  return { base: 16, hasDigit: false };
+}
+
+/** Accumulates the digits of a base, noting a magnitude above `limit` (the unsigned range of the target type). */
+function accumulateDigits(
+  stream: StreamValue,
+  frame: Frame,
+  base: number,
+  limit: bigint
+): { magnitude: bigint; overflowed: boolean; hasDigit: boolean } {
+  const start = stream.position;
+  let magnitude = 0n;
+  let overflowed = false;
+  for (; stream.position < stream.buffer.length; stream.position++) {
+    chargeInput(frame, stream.position - start);
+    let digit = INTEGER_ATOMS.indexOf(stream.buffer[stream.position]);
+    if (digit === -1 || digit >= 22) break;
+    if (base === 16 && digit >= 16) digit -= 6;
+    if (digit >= base) break;
+    magnitude = magnitude * BigInt(base) + BigInt(digit);
+    if (magnitude > limit) {
+      overflowed = true;
+      magnitude &= limit;
+    }
+  }
+  return { magnitude, overflowed, hasDigit: stream.position > start };
 }
 
 /** `ios_base::basefield` as `num_get` reads it: 0 (no base flag) takes the base from the number's prefix. */
@@ -962,26 +1013,6 @@ function numberBase(flags: number): number {
   if (field === FLAGS.oct) return 8;
   if (field === FLAGS.hex) return 16;
   return field === 0 ? 0 : 10;
-}
-
-/** libc++'s `__stage2_int_loop`: a leading sign, digits of the base, and the `x` of a `0x` prefix in base 16. */
-function gatherInteger(stream: StreamValue, frame: Frame, base: number): string {
-  let text = '';
-  const start = stream.position;
-  for (; stream.position < stream.buffer.length; stream.position++) {
-    chargeInput(frame, stream.position - start);
-    const char = stream.buffer[stream.position];
-    if (text === '' && (char === '+' || char === '-')) {
-      text += char;
-      continue;
-    }
-    const atom = INTEGER_ATOMS.indexOf(char);
-    if (atom === -1 || atom >= 24 || ((base === 8 || base === 10) && atom >= base)) break;
-    if (base === 16 && atom >= 22 && !(text.length > 0 && text.length <= 2 && text.endsWith('0'))) break;
-    text += char;
-  }
-  if (stream.position >= stream.buffer.length) stream.state |= IO_STATE.eofbit;
-  return text;
 }
 
 /** Reads a `bool` as `num_get` does: a `long` that must be 0 or 1, or with `boolalpha` the word `true` or `false`. */
