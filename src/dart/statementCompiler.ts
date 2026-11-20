@@ -170,15 +170,19 @@ export abstract class StatementCompiler extends PatternCompiler {
 
   private inferredReturnType(fn: FunctionContext, spec: FunctionSpec): DartType {
     if (spec.kind.isGenerator) {
-      let element: DartType | undefined;
-      for (const type of fn.yieldTypes ?? []) element = element ? upperBound(element, type) : type;
-      return interfaceType(coreTypes.iterable, [element ?? DYNAMIC]);
+      return interfaceType(coreTypes.iterable, [fn.yieldElement ?? DYNAMIC]);
     }
     const types = fn.returnTypes ?? [];
     if (spec.contextReturnType?.kind === 'void') return VOID;
     let result: DartType | undefined;
     for (const type of types) result = result ? upperBound(result, type) : type;
     return result ?? NEVER;
+  }
+
+  protected inferYieldElement(fn: FunctionContext): DartType {
+    let element: DartType | undefined;
+    for (const type of fn.yieldTypes ?? []) element = element ? upperBound(element, type) : type;
+    return element ?? DYNAMIC;
   }
 
   /** Compiles a returned value: checks it against the declared return type, or collects its type to infer one. */

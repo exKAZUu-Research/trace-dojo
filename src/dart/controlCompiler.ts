@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 593 -- Switches and loops share flow analysis with their generator forms.
+// code-gauge-allow-file fileNcss 596 -- Switches and loops share flow analysis with their generator forms.
 import type { Block, CatchClause, Pattern, Span, Statement, SwitchCase } from './ast';
 import { localNamesIn } from './astWalk';
 import type { FunctionSpec } from './callCompiler';
@@ -17,7 +17,16 @@ import {
   startCountedLoop,
   StatementCompiler,
 } from './statementCompiler';
-import { coreTypes, type DartType, DYNAMIC, interfaceType, isSubtype, iterableElementOf, sameType } from './types';
+import {
+  coreTypes,
+  type DartType,
+  DYNAMIC,
+  interfaceType,
+  isSubtype,
+  iterableElementOf,
+  nonNullable,
+  sameType,
+} from './types';
 import { Cell, type Value } from './values';
 
 /** Switch, try, and the bodies of sync* generators. */
@@ -353,13 +362,17 @@ export abstract class ControlCompiler extends StatementCompiler {
 
   protected compileGeneratorBody(spec: FunctionSpec, expectedReturn: DartType | undefined): (frame: Frame) => Value {
     if (spec.body.kind === 'expression') return this.error(spec.body, 'sync* の関数には、=> の本体は書けません。');
-    const elementType = expectedReturn ? iterableElementOf(expectedReturn) : undefined;
-    if (expectedReturn && !elementType && expectedReturn.kind !== 'dynamic') {
-      this.error(spec.span, 'sync* の関数の戻り値の型は、Iterable でなければなりません。');
+    const elementType = expectedReturn ? iterableElementOf(nonNullable(expectedReturn)) : undefined;
+    const iterable = interfaceType(coreTypes.iterable, [elementType ?? DYNAMIC]);
+    if (expectedReturn && (spec.returnType?.kind === 'void' || !isSubtype(iterable, expectedReturn))) {
+      this.error(spec.span, 'sync* の関数の戻り値の型には、Iterable を代入できる必要があります。');
     }
     this.fn.yieldElement = elementType;
     const body = this.compileGenBlock(spec.body.block);
-    const resolveElement = this.runtimeType(elementType ?? DYNAMIC);
+    if (!spec.returnType && (!elementType || elementType.kind === 'dynamic')) {
+      this.fn.yieldElement = this.inferYieldElement(this.fn);
+    }
+    const resolveElement = this.runtimeType(this.fn.yieldElement ?? DYNAMIC);
     return (frame) => this.makeSyncStarIterable(frame, resolveElement(frame), body);
   }
 

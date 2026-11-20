@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 535 -- Keep declarations and their attached metadata conversion together.
+// code-gauge-allow-file fileNcss 545 -- Keep declaration syntax and parameter validation together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type {
@@ -363,18 +363,21 @@ export class Converter extends ExpressionConverter {
       onTypes: [],
       members: bodyNode ? this.convertMembers(bodyNode) : [],
       enumConstants: [],
-      primaryConstructor: this.convertPrimaryConstructor(primary, hasToken(node, 'const')),
+      primaryConstructor: this.convertPrimaryConstructor(primary, hasToken(node, 'const'), false),
       annotations: this.annotationsOf(node),
       isLibrary: this.isLibrary,
       ...spanOf(node),
     };
   }
 
-  private convertPrimaryConstructor(node: Node, isConst: boolean): PrimaryConstructor {
+  private convertPrimaryConstructor(node: Node, isConst: boolean, allowInitializingFormals = true): PrimaryConstructor {
     return {
       name: fieldOf(node, 'name')?.text,
       isConst: isConst || hasToken(node, 'const'),
-      parameters: this.convertFormalParameters(requireNode(fieldOf(node, 'parameters'), node)),
+      parameters: this.convertFormalParameters(
+        requireNode(fieldOf(node, 'parameters'), node),
+        allowInitializingFormals
+      ),
       ...spanOf(node),
     };
   }
@@ -531,19 +534,19 @@ export class Converter extends ExpressionConverter {
         const initializers = initializersNode ? this.convertInitializers(initializersNode) : [];
         if (redirection) initializers.push(this.convertRedirection(redirection));
         const isRedirectingFactory = signature.type === 'redirecting_factory_constructor_signature';
+        const isFactory = signature.type === 'factory_constructor_signature';
         const target = isRedirectingFactory ? requireNode(fieldOf(signature, 'target'), signature) : undefined;
         const constructor: ConstructorDeclaration = {
           kind: 'constructor',
-          constructorKind: isRedirectingFactory
-            ? 'redirectingFactory'
-            : signature.type === 'factory_constructor_signature'
-              ? 'factory'
-              : 'generative',
+          constructorKind: isRedirectingFactory ? 'redirectingFactory' : isFactory ? 'factory' : 'generative',
           name,
           isConst:
             signature.type === 'constant_constructor_signature' || tokens.has('const') || hasToken(signature, 'const'),
           isExternal,
-          parameters: this.convertFormalParameters(requireNode(fieldOf(signature, 'parameters'), signature)),
+          parameters: this.convertFormalParameters(
+            requireNode(fieldOf(signature, 'parameters'), signature),
+            !isFactory && !isRedirectingFactory && !redirection
+          ),
           initializers,
           body,
           redirectTarget: target
@@ -826,7 +829,7 @@ export class Converter extends ExpressionConverter {
     return { kind: 'expression', expression: this.soleExpression(node, rest), modifier, ...span };
   }
 
-  convertFormalParameters(node: Node): FormalParameters {
+  convertFormalParameters(node: Node, allowInitializingFormals = false): FormalParameters {
     const positional: FormalParameter[] = [];
     const named: FormalParameter[] = [];
     let requiredCount = 0;
@@ -839,6 +842,7 @@ export class Converter extends ExpressionConverter {
         (isNamed ? named : positional).push(...this.convertOptionalParameters(child, isNamed));
       }
     }
+    if (!allowInitializingFormals) requirePlainParameters(positional, named);
     return { positional, requiredCount, named, ...spanOf(node) };
   }
 
@@ -1184,6 +1188,8 @@ export class Converter extends ExpressionConverter {
         finallyBlock = this.convertBlock(requireNode(namedOf(child)[0], child));
       }
     }
+    if (catches.length === 0 && !finallyBlock)
+      return syntaxError(node, 'try の後には on、catch、finally のいずれかを書いてください。');
     return { kind: 'try', body, catches, finally: finallyBlock, ...spanOf(node) };
   }
 }
@@ -1200,6 +1206,7 @@ function asUntypedMethod(member: MemberDeclaration, owner: string | undefined): 
   if (member.kind !== 'constructor' || member.constructorKind !== 'generative') return undefined;
   if (member.className === undefined || member.className === owner || member.name !== undefined) return undefined;
   if (member.isConst || member.initializers.length > 0) return undefined;
+  requirePlainParameters(member.parameters.positional, member.parameters.named);
   return {
     kind: 'method',
     methodKind: 'method',
@@ -1217,4 +1224,9 @@ function asUntypedMethod(member: MemberDeclaration, owner: string | undefined): 
     start: member.start,
     end: member.end,
   };
+}
+
+function requirePlainParameters(positional: FormalParameter[], named: FormalParameter[]): void {
+  const invalid = [...positional, ...named].find((parameter) => parameter.binding !== 'plain');
+  if (invalid) syntaxError(invalid, `引数 ${invalid.binding}.${invalid.name} は、この引数リストでは使えません。`);
 }

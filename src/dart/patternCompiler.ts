@@ -647,6 +647,8 @@ export abstract class PatternCompiler extends CallCompiler {
     const positional = pattern.fields.filter((field) => field.name === undefined);
     const named = pattern.fields.filter((field) => field.name !== undefined);
     const names = this.fieldNames(named);
+    const shape = recordShape(pattern.fields);
+    this.requireAssignable(shape, matchedType, options, pattern);
     const positionalPatterns = positional.map((field, index) =>
       this.compilePatternInner(
         field.pattern,
@@ -664,32 +666,15 @@ export abstract class PatternCompiler extends CallCompiler {
         variables
       ),
     }));
-    const shapeMatches =
-      recordType !== undefined &&
-      !recordType.nullable &&
-      recordType.positional.length === positional.length &&
-      recordType.named.length === named.length &&
-      recordType.named.every((field) => names.has(field.name));
-    if (recordType && !shapeMatches && !isNullable(matchedType) && options.mode !== 'match') {
-      this.error(pattern, `${typeName(matchedType)} 型の値は、このレコードのパターンと形が合いません。`);
-    }
     const sortedNames = [...names].toSorted();
-    const shape = recordShape(pattern.fields);
-    const castsDynamic = options.mode !== 'match' && matchedType.kind === 'dynamic';
-    return {
-      match: (frame, value) => {
-        if (castsDynamic && !this.valueIsAt(frame, value, shape)) {
-          frame.runtime.throwTypeError(
-            `type '${vmTypeString(frame.runtime.runtimeTypeOf(value))}' is not a subtype of type '${vmTypeString(shape)}'`
-          );
-        }
-        return matchesRecord(frame, value, positionalPatterns, namedPatterns, sortedNames);
-      },
-      irrefutable:
-        shapeMatches &&
-        positionalPatterns.every((field) => field.irrefutable) &&
+    return this.typeTest(
+      shape,
+      matchedType,
+      (frame, value) => matchesRecord(frame, value, positionalPatterns, namedPatterns, sortedNames),
+      positionalPatterns.every((field) => field.irrefutable) &&
         namedPatterns.every((field) => field.pattern.irrefutable),
-    };
+      options.mode
+    );
   }
 
   private fieldNames(named: readonly RecordPatternField[]): Set<string> {

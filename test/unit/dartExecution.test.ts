@@ -242,6 +242,12 @@ test('String.fromCharCodes stops at the end of the requested slice', () => {
   const program = `import 'dart:collection';
 Iterable<int> streamed() sync* { print('start'); yield 65; }
 int visit(int code) { print(code); return code; }
+class LoggedList extends ListBase<int> {
+  int get length => 1;
+  set length(int size) {}
+  int operator [](int index) { print('read'); return 65; }
+  void operator []=(int index, int value) {}
+}
 void main() {
   var codes = [65, 66];
   print(String.fromCharCodes(codes, 0, 5));
@@ -253,12 +259,45 @@ void main() {
     print('past=' + String.fromCharCodes(mapped, 5, 10));
   }
   print('stream=' + String.fromCharCodes(streamed().map(visit), 5));
+  print('custom=' + String.fromCharCodes(LoggedList(), 1));
+  print('view=' + String.fromCharCodes(UnmodifiableListView<int>(LoggedList()), 5));
+  print('inside=' + String.fromCharCodes(LoggedList(), 0, 1));
 }
 `;
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
-    stdout: 'AB\n\n65\nA\nequal=\npast=\nequal=\npast=\nequal=\npast=\nequal=\npast=\nstart\n65\nstream=\n',
+    stdout:
+      'AB\n\n65\nA\nequal=\npast=\nequal=\npast=\nequal=\npast=\nequal=\npast=\nstart\n65\nstream=\ncustom=\nview=\nread\ninside=A\n',
   });
+});
+
+test('record destructuring requires a compatible static shape', () => {
+  const valid = `void main() {
+    (int, int)? promoted = (1, 2);
+    var (a, b) = promoted;
+    (a, b) = (b, a);
+    final (parenthesized) = (a, b);
+    print(parenthesized);
+    Object unmatched = 5;
+    if (unmatched case (var x, var y)) { print([x, y]); } else { print('else'); }
+    dynamic wrong = 5;
+    try { var (x, y) = wrong; print([x, y]); } catch (error) { print(error); }
+  }`;
+  expect(executeProgram('dart', valid)).toMatchObject({
+    kind: 'executed',
+    stdout: "(2, 1)\nelse\ntype 'int' is not a subtype of type '(dynamic, dynamic)'\n",
+  });
+  for (const body of [
+    'var (a, b) = source; print(a);',
+    'Object value = (1, 2); var (a, b) = value; print(a);',
+    'var (a, b) = 5; print(a);',
+    'var (a, b) = (1, 2, 3); print(a);',
+    'var (a, :named) = (1, other: 2); print(a);',
+    'Object value = (1, 2); int a = 0, b = 0; (a, b) = value;',
+  ]) {
+    const program = `(int, int)? get source => (1, 2); void main() { ${body} }`;
+    expect(executeProgram('dart', program)).toMatchObject({ kind: 'compileError' });
+  }
 });
 
 test('conditions cast dynamic operands to bool and preserve short-circuiting', () => {
@@ -362,6 +401,41 @@ void main() {
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
     stdout: "Point(1, 2)\nPoint(3, 4)\nInstance of 'Example'\nmatched\n",
+  });
+});
+
+test('initializing formals only occur in constructors that can bind them', () => {
+  const valid = `class Parent {
+    final int value;
+    const Parent({required this.value});
+  }
+  class Child extends Parent {
+    const Child({required super.value});
+  }
+  void main() { print(const Child(value: 3).value); }`;
+  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '3\n' });
+  for (const invalid of [
+    'void f(this.value) {}',
+    'class A { int value = 1; void f(super.value) {} }',
+    'class A { int value = 1; f(this.value) {} }',
+    'void f() { final g = (this.value) {}; g(1); }',
+    'void f() { void local({required super.value}) {} local(value: 1); }',
+    'class A { final int value = 1; A.named(); factory A(this.value) => A.named(); }',
+    'class A { final int value = 1; A.named(); factory A(this.value) = A.named; }',
+    'class A { final int value; A.named(this.value); A(this.value) : this.named(value); }',
+  ]) {
+    expect(executeProgram('dart', `${invalid} void main() {}`)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
+test('try blocks require a handler or finally', () => {
+  const valid = `void main() {
+    try { throw StateError('raised'); } on StateError { print('caught'); }
+    try { print('body'); } finally { print('finished'); }
+  }`;
+  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: 'caught\nbody\nfinished\n' });
+  expect(executeProgram('dart', `void main() { try { print('body'); } print('finished'); }`)).toMatchObject({
+    kind: 'compileError',
   });
 });
 
@@ -3373,4 +3447,32 @@ void main() {
     kind: 'executed',
     stdout: '[1, 10]\n[1, 10, 11, -1, 2, 10, 11, -1, 20]\n[0, 2, 3]\n',
   });
+});
+
+test('synchronous generators accept return types that can hold an Iterable', () => {
+  const valid = `Object objectValues() sync* { yield 1; }
+Object? optionalObject() sync* { yield 1; }
+Iterable<int>? optionalIterable() sync* { yield 1; }
+void main() {
+  local() sync* { yield 1; }
+  Object Function() closure = () sync* { yield 1; };
+  Iterable<num> Function() contextual = () sync* { yield 1; };
+  void Function() discarded = () sync* { yield 1; };
+  discarded();
+  print([objectValues().runtimeType, optionalObject().runtimeType, optionalIterable().runtimeType]);
+  print([local().runtimeType, closure().runtimeType, contextual().runtimeType]);
+}`;
+  expect(executeProgram('dart', valid)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[_SyncStarIterable<dynamic>, _SyncStarIterable<dynamic>, _SyncStarIterable<int>]\n[_SyncStarIterable<int>, _SyncStarIterable<int>, _SyncStarIterable<num>]\n',
+  });
+  for (const declaration of [
+    'List<int> values() sync* { yield 1; }',
+    'void values() sync* { yield 1; }',
+    'T values<T extends Object>() sync* { yield 1; }',
+    "Iterable<int>? values() sync* { yield 'text'; }",
+  ]) {
+    expect(executeProgram('dart', `${declaration} void main() {}`)).toMatchObject({ kind: 'compileError' });
+  }
 });

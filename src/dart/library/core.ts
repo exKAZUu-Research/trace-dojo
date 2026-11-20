@@ -1433,8 +1433,7 @@ class FollowedByIterable<E> extends Iterable<E> {
  * The VM's variants of the lazy iterables for a source whose length is known without iterating (a Set, a List, a
  * map's keys), which give their length the same way.
  */
-bool _hasEfficientLength(Iterable<Object?> iterable) =>
-    iterable is EfficientLengthIterable || iterable is List;
+bool _hasEfficientLength(Iterable<Object?> iterable) => iterable is EfficientLengthIterable;
 
 /** The VM's marker of iterables whose length is known without iterating them, as dart:collection's views use it. */
 abstract class EfficientLengthIterable<E> extends Iterable<E> {
@@ -1686,7 +1685,7 @@ extension NullableIterableExtensions<T extends Object> on Iterable<T?> {
 
 // Lists
 
-abstract interface class List<E> extends Iterable<E> {
+abstract interface class List<E> extends EfficientLengthIterable<E> {
   external factory List.filled(int length, E fill, {bool growable = false});
   external factory List.empty({bool growable = false});
   external factory List.from(Iterable elements, {bool growable = true});
