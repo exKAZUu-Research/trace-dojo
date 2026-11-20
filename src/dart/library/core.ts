@@ -191,7 +191,7 @@ abstract final class int extends num {
   external double truncateToDouble();
   external String toString();
   external String toRadixString(int radix);
-  external static int parse(String source, {int? radix, int Function(String source)? onError});
+  external static int parse(String source, {int? radix});
   external static int? tryParse(String source, {int? radix});
 }
 
@@ -2135,9 +2135,35 @@ final class _RegExpMatchIterator implements Iterator<RegExpMatch> {
 }
 
 final class _StringAllMatchesIterable extends Iterable<Match> {
-  final List<Match> _matches;
-  _StringAllMatchesIterable._(this._matches);
-  Iterator<Match> get iterator => _matches.iterator;
+  final String _input;
+  final String _pattern;
+  final int _start;
+  _StringAllMatchesIterable._(this._input, this._pattern, this._start);
+  Iterator<Match> get iterator => _StringAllMatchesIterator(_input, _pattern, _start);
+}
+
+class _StringAllMatchesIterator implements Iterator<Match> {
+  final String _input;
+  final String _pattern;
+  int _next;
+  Match? _current;
+  _StringAllMatchesIterator(this._input, this._pattern, this._next);
+  bool moveNext() {
+    if (_next + _pattern.length > _input.length) {
+      _current = null;
+      return false;
+    }
+    final position = _input.indexOf(_pattern, _next);
+    if (position < 0) {
+      _next = _input.length + 1;
+      _current = null;
+      return false;
+    }
+    _current = _StringMatch(position, _input, _pattern);
+    _next = position + (_pattern.isEmpty ? 1 : _pattern.length);
+    return true;
+  }
+  Match get current => _current as Match;
 }
 
 class _RegExp extends RegExp {

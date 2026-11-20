@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 1000 -- The natives of List, Set, Map, and their iterators share the helpers of this file.
+// code-gauge-allow-file fileNcss 932 -- The native lists, sets, maps, and their iterators share collection helpers.
 import type { TopLevelFunction } from '../environment';
 import { stringOf } from '../format';
 import { type HashPolicy, HashStore } from '../hashStore';
@@ -13,6 +13,8 @@ import {
   makeNullable,
 } from '../types';
 import { Cell, DartClosure, DartList, DartObject, type Value } from '../values';
+import { BoundedStringParts } from './boundedStringParts';
+import { dartSort } from './listSort';
 import { identical, identityHashCode } from './nativeCore';
 import {
   callFunction,
@@ -27,6 +29,7 @@ import {
   index,
   intArg,
   iterableValues,
+  listLength,
   named,
   nativeFunction,
   newList,
@@ -112,13 +115,26 @@ defineConstructor(
   (_runtime, _instance, args, typeArgs) =>
     new DartList(coreTypes.list, typeArgs[0] ?? DYNAMIC, [], named(args.named, 'growable', false) === true)
 );
-defineConstructor('List.from', (runtime, _instance, args, typeArgs) => {
-  const elementType = typeArgs[0] ?? DYNAMIC;
-  const result = newList(runtime, elementType, [], named(args.named, 'growable', true) !== false);
+defineConstructor('List.from', (runtime, _instance, args, typeArgs) =>
+  listFrom(runtime, args.positional[0], typeArgs[0] ?? DYNAMIC, named(args.named, 'growable', true) !== false, false)
+);
+defineConstructor('List.unmodifiable', (runtime, _instance, args, typeArgs) =>
+  listFrom(runtime, args.positional[0], typeArgs[0] ?? DYNAMIC, false, true)
+);
+
+function listFrom(
+  runtime: Runtime,
+  source: Value,
+  elementType: DartType,
+  growable: boolean,
+  unmodifiable: boolean
+): DartList {
+  runtime.allocate(1);
+  const result = new DartList(coreTypes.list, elementType, [], growable, unmodifiable);
   const frame = runtime.currentFrame;
   frame?.temporaries.push(result);
   try {
-    forEachValue(runtime, args.positional[0], (value) => {
+    forEachValue(runtime, source, (value) => {
       implicitCast(runtime, value, elementType);
       runtime.allocate(1);
       result.elements.push(value);
@@ -127,7 +143,8 @@ defineConstructor('List.from', (runtime, _instance, args, typeArgs) => {
   } finally {
     frame?.temporaries.pop();
   }
-});
+}
+
 defineConstructor('List.of', (runtime, _instance, args, typeArgs) => {
   const values = iterableValues(runtime, args.positional[0]);
   runtime.allocate(values.length + 1);
@@ -155,11 +172,6 @@ defineConstructor('List.generate', (runtime, _instance, args, typeArgs) => {
     frame?.temporaries.pop();
   }
   return result;
-});
-defineConstructor('List.unmodifiable', (runtime, _instance, args, typeArgs) => {
-  const values = iterableValues(runtime, args.positional[0]);
-  runtime.allocate(values.length + 1);
-  return new DartList(coreTypes.list, typeArgs[0] ?? DYNAMIC, values, false, true);
 });
 
 // Access
@@ -287,12 +299,27 @@ define('List.forEach', (runtime, receiver, [action]) => {
 });
 define('List.contains', (runtime, receiver, [value]) => {
   const target = list(receiver);
-  for (const element of target.elements) if (runtime.equals(element, value)) return true;
+  const { length } = target.elements;
+  for (let position = 0; position < length; position++) {
+    if (runtime.equals(target.elements[position], value)) return true;
+    if (target.elements.length !== length) runtime.throwError('ConcurrentModificationError', '', [target]);
+    runtime.spend();
+  }
   return false;
 });
 define('List.join', (runtime, receiver, [separator = '']) => {
   const target = list(receiver);
-  return target.elements.map((element) => stringOf(runtime, element)).join(separator as string);
+  const { length } = target.elements;
+  const delimiter = separator as string;
+  const liveLength = target.growable && length > 1 && delimiter.length > 0;
+  const result = new BoundedStringParts(runtime);
+  for (let position = 0; position < (liveLength ? target.elements.length : length); position++) {
+    runtime.spend();
+    if (position > 0) result.append(delimiter);
+    const element = target.elements[checkIndex(runtime, target, BigInt(position), 'length')];
+    result.append(stringOf(runtime, element));
+  }
+  return result.text();
 });
 define('List.toString', (runtime, receiver) =>
   iterableToFullString(runtime, receiver, list(receiver).elements, '[', ']')
@@ -309,9 +336,17 @@ export function iterableToFullString(
   if (runtime.toStringVisiting.includes(object)) return `${left}...${right}`;
   runtime.toStringVisiting.push(object);
   try {
-    const parts: string[] = [];
-    for (const element of elements) parts.push(stringOf(runtime, element));
-    return left + parts.join(', ') + right;
+    const result = new BoundedStringParts(runtime);
+    result.append(left);
+    let first = true;
+    for (const element of elements) {
+      runtime.spend();
+      if (!first) result.append(', ');
+      first = false;
+      result.append(stringOf(runtime, element));
+    }
+    result.append(right);
+    return result.text();
   } finally {
     runtime.toStringVisiting.pop();
   }
@@ -380,21 +415,32 @@ define('List.insertAll', (runtime, receiver, [at, iterable]) => {
     changed(target);
     rangeError(runtime, start + target.elements.length, start, target.elements.length, 'end');
   }
-  target.elements.splice(index(position), 0, ...values);
+  replaceListElements(target.elements, index(position), index(position), values);
   changed(target);
   return;
 });
 define('List.setAll', (runtime, receiver, [at, iterable]) => {
   const target = list(receiver);
-  checkElement(runtime, iterable, interfaceType(coreTypes.iterable, [elementTypeOf(target)]), 'iterable');
+  const elementType = elementTypeOf(target);
+  checkElement(runtime, iterable, interfaceType(coreTypes.iterable, [elementType]), 'iterable');
   checkModifiable(runtime, target);
-  const position = intArg(runtime, at, 'index');
-  const values = iterableValues(runtime, iterable);
-  if (position < 0n || position > BigInt(target.elements.length))
-    rangeError(runtime, position, 0, target.elements.length, 'index');
-  if (index(position) + values.length > target.elements.length)
-    rangeError(runtime, index(position) + values.length, Number(position), target.elements.length, 'end');
-  for (const [offset, value] of values.entries()) target.elements[index(position) + offset] = value;
+  let position = intArg(runtime, at, 'index');
+  const length = target.elements.length;
+  const write = (index: number, value: Value): void => writeListItem(runtime, target, index, value, elementType);
+  if (!target.growable && (position < 0n || position > BigInt(length)))
+    rangeError(runtime, position, 0, length, 'index');
+  if (runtime.links.isValueOf(runtime, iterable, interfaceType(coreTypes.list, [elementType]))) {
+    const end = position + listLength(runtime, iterable);
+    if (target.growable) {
+      const [from, to] = checkRange(runtime, position, end, length);
+      copyListRange(runtime, iterable, 0n, from, to, write);
+    } else {
+      if (end > BigInt(length)) rangeError(runtime, end, 0, length, undefined);
+      copyListRange(runtime, iterable, 0n, Number(position), Number(end), write);
+    }
+  } else {
+    forEachValue(runtime, iterable, (value) => write(Number(position++), value));
+  }
   return;
 });
 define('List.remove', (runtime, receiver, [value]) => {
@@ -459,7 +505,6 @@ define('List.sublist', (runtime, receiver, [start, end]) => {
   return newList(runtime, elementTypeOf(target), target.elements.slice(from, to));
 });
 // code-gauge-allow functionCognitiveComplexity 17 -- Growable and fixed lists differ for iterable and list sources.
-// code-gauge-allow functionNcss 34 -- Keep the copy cases with the shared checks and write rules.
 define('List.setRange', (runtime, receiver, [start, end, iterable, skip = 0n]) => {
   const target = list(receiver);
   checkElement(runtime, iterable, interfaceType(coreTypes.iterable, [elementTypeOf(target)]), 'iterable');
@@ -470,12 +515,7 @@ define('List.setRange', (runtime, receiver, [start, end, iterable, skip = 0n]) =
   if (target.growable && skipCount < 0n)
     runtime.throwError('RangeError', 'range', [skipCount, 0n, undefined, 'skipCount']);
   const elementType = elementTypeOf(target);
-  const write = (position: number, value: Value): void => {
-    checkIndex(runtime, target, BigInt(position), 'index');
-    checkElement(runtime, value, elementType, 'value');
-    target.elements[position] = value;
-    runtime.spend();
-  };
+  const write = (position: number, value: Value): void => writeListItem(runtime, target, position, value, elementType);
   if (runtime.links.isValueOf(runtime, iterable, interfaceType(coreTypes.list, [elementType]))) {
     if (target.growable) {
       const sourceLength = runtime.getProperty(iterable, 'length', undefined) as bigint;
@@ -493,6 +533,19 @@ define('List.setRange', (runtime, receiver, [start, end, iterable, skip = 0n]) =
   }
   return;
 });
+
+function writeListItem(
+  runtime: Runtime,
+  target: DartList,
+  position: number,
+  value: Value,
+  elementType: DartType
+): void {
+  checkIndex(runtime, target, BigInt(position), 'index');
+  checkElement(runtime, value, elementType, 'value');
+  target.elements[position] = value;
+  runtime.spend();
+}
 
 function copyListRange(
   runtime: Runtime,
@@ -535,10 +588,20 @@ define('List.replaceRange', (runtime, receiver, [start, end, iterable]) => {
   checkGrowable(runtime, target, 'remove');
   const [from, to] = checkRange(runtime, start, end, target.elements.length);
   const values = iterableValues(runtime, iterable);
-  target.elements.splice(from, to - from, ...values);
+  runtime.allocate(Math.max(0, values.length - (to - from)));
+  replaceListElements(target.elements, from, to, values);
   changed(target);
   return;
 });
+function replaceListElements(elements: Value[], start: number, end: number, values: Value[]): void {
+  const oldLength = elements.length;
+  const newLength = oldLength - (end - start) + values.length;
+  if (elements.length < newLength) elements.length = newLength;
+  elements.copyWithin(start + values.length, end, oldLength);
+  elements.length = newLength;
+  for (let offset = 0; offset < values.length; offset++) elements[start + offset] = values[offset];
+}
+
 define('List.indexOf', (runtime, receiver, [value, start = 0n]) => {
   const target = list(receiver);
   let from = index(intArg(runtime, start, 'start'));
@@ -622,198 +685,6 @@ define('List.cast', (runtime, receiver, _args, _named, typeArgs) => {
     typeArgs[0] ?? DYNAMIC,
   ]);
 });
-
-/**
- * Dart's sort: insertion sort for up to 32 elements, which is stable, and otherwise the dual-pivot quicksort of
- * dart:_internal, whose order of equal elements programs may see.
- */
-export function dartSort(values: Value[], compare: (a: Value, b: Value) => number): void {
-  doSort(values, 0, values.length - 1, compare);
-}
-
-const INSERTION_SORT_THRESHOLD = 32;
-
-function doSort(a: Value[], left: number, right: number, compare: (a: Value, b: Value) => number): void {
-  if (right - left <= INSERTION_SORT_THRESHOLD) insertionSort(a, left, right, compare);
-  else dualPivotQuicksort(a, left, right, compare);
-}
-
-function insertionSort(a: Value[], left: number, right: number, compare: (a: Value, b: Value) => number): void {
-  for (let i = left + 1; i <= right; i++) {
-    const element = a[i];
-    let j = i;
-    while (j > left && compare(a[j - 1], element) > 0) {
-      a[j] = a[j - 1];
-      j--;
-    }
-    a[j] = element;
-  }
-}
-
-type Compare = (a: Value, b: Value) => number;
-
-/** A transcription of dart:_internal's _dualPivotQuicksort, whose order of ties and of comparisons programs see. */
-function dualPivotQuicksort(a: Value[], left: number, right: number, compare: Compare): void {
-  const { pivot1, pivot2, index1, index5 } = choosePivots(a, left, right, compare);
-  let less = left + 1;
-  let great = right - 1;
-  const pivotsAreEqual = compare(pivot1, pivot2) === 0;
-  ({ less, great } = pivotsAreEqual
-    ? partitionAroundPivot(a, less, great, pivot1, compare)
-    : partitionThree(
-        a,
-        less,
-        great,
-        pivot1,
-        (value) => compare(value, pivot1) < 0,
-        (value) => compare(value, pivot2) > 0,
-        compare
-      ));
-  a[left] = a[less - 1];
-  a[less - 1] = pivot1;
-  a[right] = a[great + 1];
-  a[great + 1] = pivot2;
-  doSort(a, left, less - 2, compare);
-  doSort(a, great + 2, right, compare);
-  if (pivotsAreEqual) return;
-  if (less < index1 && great > index5) {
-    while (compare(a[less], pivot1) === 0) less++;
-    while (compare(a[great], pivot2) === 0) great--;
-    ({ less, great } = partitionThree(
-      a,
-      less,
-      great,
-      pivot1,
-      (value) => compare(value, pivot1) === 0,
-      (value) => compare(value, pivot2) === 0,
-      compare
-    ));
-  }
-  doSort(a, less, great, compare);
-}
-
-/** Sorts five sample elements with a sorting network and takes the second and fourth as the pivots. */
-function choosePivots(
-  a: Value[],
-  left: number,
-  right: number,
-  compare: Compare
-): { pivot1: Value; pivot2: Value; index1: number; index5: number } {
-  const sixth = Math.trunc((right - left + 1) / 6);
-  const index1 = left + sixth;
-  const index5 = right - sixth;
-  const index3 = Math.trunc((left + right) / 2);
-  const index2 = index3 - sixth;
-  const index4 = index3 + sixth;
-  const el = [a[index1], a[index2], a[index3], a[index4], a[index5]];
-  for (const [x, y] of [
-    [0, 1],
-    [3, 4],
-    [0, 2],
-    [1, 2],
-    [0, 3],
-    [2, 3],
-    [1, 4],
-    [1, 2],
-    [3, 4],
-  ] as const) {
-    if (compare(el[x], el[y]) > 0) [el[x], el[y]] = [el[y], el[x]];
-  }
-  a[index1] = el[0];
-  a[index3] = el[2];
-  a[index5] = el[4];
-  a[index2] = a[left];
-  a[index4] = a[right];
-  return { pivot1: el[1], pivot2: el[3], index1, index5 };
-}
-
-/** Moves the elements less than the pivot to the left and the greater ones to the right, keeping equal ones between. */
-// code-gauge-allow duplicateLines 28 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
-// code-gauge-allow functionCognitiveComplexity 17 -- A transcription of dart:_internal's dual-pivot quicksort, whose comparisons programs see.
-function partitionAroundPivot(
-  a: Value[],
-  start: number,
-  end: number,
-  pivot: Value,
-  compare: Compare
-): { less: number; great: number } {
-  let less = start;
-  let great = end;
-  for (let k = less; k <= great; k++) {
-    const ak = a[k];
-    const comp = compare(ak, pivot);
-    if (comp === 0) continue;
-    if (comp < 0) {
-      if (k !== less) {
-        a[k] = a[less];
-        a[less] = ak;
-      }
-      less++;
-      continue;
-    }
-    for (;;) {
-      const greatComp = compare(a[great], pivot);
-      if (greatComp > 0) {
-        great--;
-        continue;
-      }
-      if (greatComp < 0) {
-        a[k] = a[less];
-        a[less++] = a[great];
-      } else {
-        a[k] = a[great];
-      }
-      a[great--] = ak;
-      break;
-    }
-  }
-  return { less, great };
-}
-
-/** Moves the elements that belong left to the left and those that belong right to the right. */
-// code-gauge-allow duplicateLines 28 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
-// code-gauge-allow functionCognitiveComplexity 21 -- A transcription of dart:_internal's dual-pivot quicksort, whose comparisons programs see.
-// code-gauge-allow functionParameterCount 7 -- The parameters are the parts a caller already holds; grouping them would only rename them.
-function partitionThree(
-  a: Value[],
-  start: number,
-  end: number,
-  pivot1: Value,
-  belongsLeft: (value: Value) => boolean,
-  belongsRight: (value: Value) => boolean,
-  compare: Compare
-): { less: number; great: number } {
-  let less = start;
-  let great = end;
-  for (let k = less; k <= great; k++) {
-    const ak = a[k];
-    if (belongsLeft(ak)) {
-      if (k !== less) {
-        a[k] = a[less];
-        a[less] = ak;
-      }
-      less++;
-      continue;
-    }
-    if (!belongsRight(ak)) continue;
-    for (;;) {
-      if (belongsRight(a[great])) {
-        great--;
-        if (great < k) break;
-        continue;
-      }
-      if (compare(a[great], pivot1) < 0) {
-        a[k] = a[less];
-        a[less++] = a[great];
-      } else {
-        a[k] = a[great];
-      }
-      a[great--] = ak;
-      break;
-    }
-  }
-  return { less, great };
-}
 
 // Sets
 

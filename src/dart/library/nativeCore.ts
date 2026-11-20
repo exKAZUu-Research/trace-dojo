@@ -2,9 +2,9 @@ import { TURTLE_METHOD_NAMES, type TurtleState } from '../../interpreter/turtleW
 import { encodableText, formatDouble, safeToString, stringOf } from '../format';
 import { HashStore } from '../hashStore';
 import type { Runtime } from '../runtime';
-import { coreTypes, type DartType, sameType, vmTypeString } from '../types';
+import { coreTypes, type DartType, DYNAMIC, sameType, vmTypeString } from '../types';
 import { DartClosure, DartList, DartObject, DartRecord, DartTypeValue, type Value } from '../values';
-import { define, defineConstructor, intArg, iterableValues, stringArg } from './nativeSupport';
+import { define, defineConstructor, intArg, iterableValues, listElement, listLength, stringArg } from './nativeSupport';
 
 // Object
 
@@ -77,20 +77,50 @@ define('Function.==', (_runtime, receiver, [other]) => {
   );
 });
 define('Function.apply', (runtime, _receiver, [fn, positional, namedArguments]) => {
-  const args = positional instanceof DartList ? [...positional.elements] : [];
-  let named: Map<string, Value> | undefined;
-  if (namedArguments instanceof DartObject) {
-    named = new Map();
-    const entries = runtime.getProperty(namedArguments, 'entries', undefined);
-    const iterator = runtime.getProperty(entries, 'iterator', undefined);
-    while (runtime.invoke(iterator, 'moveNext', { positional: [], named: undefined }, [], undefined) === true) {
-      const entry = runtime.getProperty(iterator, 'current', undefined);
-      const symbol = runtime.getProperty(entry, 'key', undefined) as DartObject;
-      named.set(symbol.fields[0] as string, runtime.getProperty(entry, 'value', undefined));
-    }
+  const args: Value[] = [];
+  const frame = runtime.currentFrame;
+  const mark = frame?.temporaries.length ?? 0;
+  frame?.temporaries.push(fn, positional, namedArguments, new DartList(coreTypes.list, DYNAMIC, args, true));
+  try {
+    if (positional !== undefined) readApplyArguments(runtime, positional, args);
+    return runtime.callValue(
+      fn,
+      { positional: args, named: readApplyNamedArguments(runtime, namedArguments), isDynamic: true },
+      [],
+      runtime.userCallRow
+    );
+  } finally {
+    if (frame) frame.temporaries.length = mark;
   }
-  return runtime.callValue(fn, { positional: args, named, isDynamic: true }, [], runtime.userCallRow);
 });
+
+function readApplyArguments(runtime: Runtime, list: Value, result: Value[]): void {
+  const length = listLength(runtime, list);
+  if (length < 0n) runtime.throwError('RangeError', 'value', [length, 'length']);
+  runtime.allocate(Number(length));
+  for (let index = length - 1n; index >= 0n; index--) {
+    runtime.spend();
+    result[Number(index)] = listElement(runtime, list, index);
+  }
+}
+
+function readApplyNamedArguments(runtime: Runtime, args: Value): Map<string, Value> | undefined {
+  if (!(args instanceof DartObject)) return undefined;
+  const named = new Map<string, Value>();
+  const frame = runtime.currentFrame;
+  const entries = runtime.getProperty(args, 'entries', undefined);
+  frame?.temporaries.push(entries);
+  const iterator = runtime.getProperty(entries, 'iterator', undefined);
+  frame?.temporaries.push(iterator);
+  while (runtime.invoke(iterator, 'moveNext', { positional: [], named: undefined }, [], undefined) === true) {
+    const entry = runtime.getProperty(iterator, 'current', undefined);
+    const symbol = runtime.getProperty(entry, 'key', undefined) as DartObject;
+    const value = runtime.getProperty(entry, 'value', undefined);
+    frame?.temporaries.push(value);
+    named.set(symbol.fields[0] as string, value);
+  }
+  return named;
+}
 
 // Records
 

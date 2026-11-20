@@ -797,6 +797,7 @@ test('typed collection operations check dynamic values as they enter the collect
 }
 void main() {
   try { List<int>.from(items()); } catch (e) { print(e.runtimeType); }
+  try { List<int>.unmodifiable(items()); } catch (e) { print(e.runtimeType); }
   List<num> values = <int>[1, 2];
   try { values.first = 1.5; } catch (e) { print(e.runtimeType); }
   try { values.addAll(values.where((x) => x > 0)); } catch (e) { print(e.runtimeType); }
@@ -811,7 +812,8 @@ void main() {
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
     uncaughtException: undefined,
-    stdout: '_TypeError\n_TypeError\nConcurrentModificationError\n[1, 2, 1]\n{1: 2}\n_TypeError\n{1: 2, 2: 4}\n',
+    stdout:
+      '_TypeError\n_TypeError\n_TypeError\nConcurrentModificationError\n[1, 2, 1]\n{1: 2}\n_TypeError\n{1: 2, 2: 4}\n',
   });
 });
 
@@ -1056,6 +1058,11 @@ test('list switch cases can partition finite element values and lengths', () => 
 String nullable(List<int?> list) => switch (list) {
   [] => 'empty', [null, ...] => 'null', [int(), ...] => 'int',
 };
+String row(List<(List<int>, int)> rows) => switch (rows) {
+  [] => 'no rows',
+  [([], _), ...] => 'row empty',
+  [([var head, ...], _), ...] => 'row starts $head',
+};
 void main() {
   print(flag([]));
   print(flag([true]));
@@ -1063,10 +1070,11 @@ void main() {
   print(flag([false, false, true]));
   print(nullable([null]));
   print(nullable([3]));
+  print(row([([1, 2], 3)]));
 }`;
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
-    stdout: 'empty\nfirst\nlast\nboth\nnull\nint\n',
+    stdout: 'empty\nfirst\nlast\nboth\nnull\nint\nrow starts 1\n',
   });
 });
 
@@ -1082,10 +1090,159 @@ void main() {
   var text = 'x' * 600000;
   try { jsonEncode([text, text]); } catch (e) { print(e); }
   try { jsonEncode('\x00' * 200000); } catch (e) { print(e); }
+  try { text.replaceFirst('x', text); } catch (e) { print(e); }
+  try { text.replaceRange(0, 0, text); } catch (e) { print(e); }
+  try { 'xx'.splitMapJoin('x', onMatch: (m) => text); } catch (e) { print(e); }
+  try { [text, text].join(); } catch (e) { print(e); }
+  try { [text, text].toString(); } catch (e) { print(e); }
 }`;
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
     uncaughtException: undefined,
-    stdout: 'first caught\nOut of Memory\nOut of Memory\n',
+    stdout:
+      'first caught\nOut of Memory\nOut of Memory\nOut of Memory\nOut of Memory\nOut of Memory\nOut of Memory\nOut of Memory\n',
   });
+});
+
+test('Function.apply and regexp match groups read any Dart List', () => {
+  const program = `import 'dart:collection';
+class View extends ListBase<int> {
+  int get length => 2;
+  set length(int n) {}
+  int operator [](int n) { print('read $n'); return n; }
+  void operator []=(int n, int value) {}
+}
+void main() {
+  print(Function.apply((int a, int b) => [a, b], View()));
+  print(RegExp('(a)').firstMatch('a')!.groups(UnmodifiableListView<int>([0, 1])));
+  var mapped = HashSet<int>.of([1, 2, 3]).map((x) { print('map'); return x; });
+  print([mapped.skip(1).length, mapped.take(1).length]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'read 1\nread 0\n[0, 1]\n[a, a]\n[2, 1]\n',
+  });
+});
+
+test('line splitting and string matching consume input on demand', () => {
+  const program = String.raw`import 'dart:convert';
+class _RegExp implements Pattern {
+  Iterable<Match> allMatches(String s, [int start = 0]) => 'a'.allMatches(s, start);
+  Match? matchAsPrefix(String s, [int start = 0]) => 'a'.matchAsPrefix(s, start);
+}
+void main() {
+  print(LineSplitter.split('a\r\n' + 'x' * 999997).first);
+  print(LineSplitter.split('abc\r\n\rxy', 1, 7).toList());
+  var matches = 'a'.allMatches('a' * 1000000);
+  print([matches.first.start, matches.first.end]);
+  print(''.allMatches('xy').map((match) => match.start).toList());
+  print('aa'.replaceFirst(_RegExp(), 'b'));
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'a\n[bc, , x]\n[0, 1]\n[0, 1, 2]\nba\n',
+  });
+});
+
+test('JSON revivers keep prior results reachable during callbacks', () => {
+  const program = `import 'dart:convert';
+void main() {
+  var result = jsonDecode('{"a":1,"b":2}', reviver: (key, value) {
+    if (key == 'a') return Turtle(1, 1);
+    if (key == 'b') Turtle(3, 3).canMoveForward();
+    return value;
+  });
+  result['a'].forward();
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    finalTurtles: [{ x: 1, y: 2 }],
+  });
+});
+
+test('numeric parsing applies the SDK whitespace and argument rules', () => {
+  const program = String.raw`void main() {
+  print(double.tryParse('\u00851.5'));
+  print(num.tryParse('2.5\u0085'));
+  print(int.tryParse('\u008542'));
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '1.5\n2.5\n42\n' });
+  expect(executeProgram('dart', 'void main() { print(int.parse("42", onError: (s) => 0)); }')).toMatchObject({
+    kind: 'compileError',
+  });
+});
+
+test('JSON map snapshots retain values across serialization callbacks', () => {
+  const program = `import 'dart:convert';
+late Turtle saved;
+class Entry {
+  Map<String, dynamic> toJson() => {'trigger': 1, 'turtle': Turtle(1, 1)};
+}
+class Trigger {
+  int toJson() { Turtle(3, 3).canMoveForward(); return 0; }
+}
+void main() {
+  final contents = Entry().toJson()..['trigger'] = Trigger();
+  print(jsonEncode(contents, toEncodable: (value) {
+    if (value is Turtle) {
+      saved = value;
+      value.forward();
+      return 1;
+    }
+    contents.remove('turtle');
+    return (value as dynamic).toJson();
+  }));
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    finalTurtles: [{ x: 1, y: 2 }],
+    stdout: '{"trigger":0,"turtle":1}\n',
+  });
+});
+
+test('list mutations preserve the prefix written before an error', () => {
+  const program = `late List<dynamic> items;
+class Marker {
+  final bool equal;
+  Marker(this.equal);
+  bool operator ==(Object other) { items.add(2); return equal; }
+  int get hashCode => 0;
+}
+class JoinMarker {
+  String toString() { items.add(2); return 'x'; }
+}
+Iterable<int> source() sync* { yield 1; throw 'stop'; }
+void main() {
+  for (var value in [false, true]) {
+    items = [Marker(value)];
+    try { print(items.contains(9)); } catch (e) { print(e.runtimeType); }
+  }
+  items = [JoinMarker(), 1];
+  print(items.join(','));
+  items = [JoinMarker(), 1];
+  print(items.join());
+  var target = [0, 0];
+  try { target.setAll(0, source()); } catch (e) { print(target); }
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'ConcurrentModificationError\ntrue\nx,1,2\nx1\n[1, 0]\n',
+  });
+});
+
+test('bulk list writes can copy large blocks without a host call argument limit', () => {
+  const program = `void main() {
+  final source = List<int>.filled(200000, 1);
+  final values = [0, 2];
+  values.insertAll(1, source);
+  print([values.length, values.first, values.last]);
+  values.replaceRange(0, 200001, [5, 6]);
+  print(values);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[200002, 0, 2]\n[5, 6, 2]\n',
+  });
+  const oversized = 'void main() { <int>[].replaceRange(0, 0, List<int>.filled(510000, 1)); }';
+  expect(executeProgram('dart', oversized)).toMatchObject({ kind: 'limitExceeded', limit: 'storage' });
 });

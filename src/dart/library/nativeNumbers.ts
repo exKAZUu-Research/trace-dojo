@@ -3,6 +3,7 @@ import { doubleModulo, intModulo, intRemainder, numericBinary, shiftLeft, trunca
 import type { Runtime } from '../runtime';
 import type { Value } from '../values';
 import { define, defineAll, intArg, named, numArg, stringArg } from './nativeSupport';
+import { trimDartWhitespace } from './stringWhitespace';
 
 const MAX_INT = 9_223_372_036_854_775_807n;
 
@@ -92,7 +93,7 @@ function toStringAsPrecision(runtime: Runtime, value: number, digits: Value): st
 const DOUBLE_PATTERN = /^[+-]?(?:(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?|Infinity|NaN)$/;
 
 export function parseDouble(text: string): number | undefined {
-  const trimmed = text.trim();
+  const trimmed = trimDartWhitespace(text);
   if (!DOUBLE_PATTERN.test(trimmed)) return undefined;
   if (trimmed.endsWith('NaN')) return Number.NaN;
   return Number(trimmed);
@@ -105,7 +106,7 @@ function parseInt(
   radix: number | undefined
 ): bigint | 'Negative' | 'Positive' | undefined {
   runtime.spend(1 + text.length / 64);
-  let rest = text.trim();
+  let rest = trimDartWhitespace(text);
   let negative = false;
   if (rest.startsWith('-') || rest.startsWith('+')) {
     negative = rest.startsWith('-');
@@ -322,13 +323,9 @@ define('int.parse', (runtime, _self, [source], namedArgs) => {
   const text = stringArg(runtime, source, 'source');
   const radix = checkRadix(runtime, named(namedArgs, 'radix', undefined));
   const result = parseInt(runtime, text, radix);
-  const onError = named(namedArgs, 'onError', undefined);
   if (typeof result === 'bigint') return result;
-  if (onError !== undefined) {
-    return runtime.callValue(onError, { positional: [text], named: undefined }, [], runtime.userCallRow);
-  }
   if (result !== undefined) throwFormat(runtime, `${result} input exceeds the limit of integer`, text);
-  if (text.trim().length === 0 && radix === undefined) throwFormat(runtime, 'Invalid number', text, 0n);
+  if (trimDartWhitespace(text).length === 0 && radix === undefined) throwFormat(runtime, 'Invalid number', text, 0n);
   throwFormat(runtime, `Invalid radix-${radix ?? 10} number`, text, 0n);
 });
 define('int.tryParse', (runtime, _self, [source], namedArgs) =>

@@ -4,6 +4,7 @@ import { concatenate } from '../operators';
 import type { Runtime } from '../runtime';
 import { coreTypes, interfaceType } from '../types';
 import { DartList, type DartObject, type Value } from '../values';
+import { BoundedStringParts } from './boundedStringParts';
 import { allMatchesOf, isRegExp, matchAt, type MatchState, newMatch } from './nativeRegExp';
 import {
   define,
@@ -16,6 +17,7 @@ import {
   newList,
   stringArg,
 } from './nativeSupport';
+import { trimDartEnd, trimDartStart, trimDartWhitespace } from './stringWhitespace';
 
 function checkLength(runtime: Runtime, length: number): void {
   if (length > LIMITS.maxStringLength) runtime.throwError('OutOfMemoryError', '', []);
@@ -111,13 +113,9 @@ define('String.substring', (runtime, receiver, [start, end]) => {
   if (to < from || to > BigInt(text.length)) rangeError(runtime, to, Number(from), text.length, 'end');
   return text.slice(index(from), index(to));
 });
-// Dart's whitespace, which unlike JavaScript's includes U+0085.
-const DART_SPACE = String.raw`[\t-\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]`;
-const LEADING_SPACE = new RegExp(`^${DART_SPACE}+`);
-const TRAILING_SPACE = new RegExp(`${DART_SPACE}+$`);
-define('String.trim', (_runtime, receiver) => self(receiver).replace(LEADING_SPACE, '').replace(TRAILING_SPACE, ''));
-define('String.trimLeft', (_runtime, receiver) => self(receiver).replace(LEADING_SPACE, ''));
-define('String.trimRight', (_runtime, receiver) => self(receiver).replace(TRAILING_SPACE, ''));
+define('String.trim', (_runtime, receiver) => trimDartWhitespace(self(receiver)));
+define('String.trimLeft', (_runtime, receiver) => trimDartStart(self(receiver)));
+define('String.trimRight', (_runtime, receiver) => trimDartEnd(self(receiver)));
 define('String.*', (runtime, receiver, [times]) => {
   const count = intArg(runtime, times, 'times');
   if (count <= 0n) return '';
@@ -163,7 +161,7 @@ function* matchesOf(runtime: Runtime, pattern: Value, text: string, start = 0): 
     }
     return;
   }
-  if (isRegExp(pattern)) {
+  if (isRegExp(runtime, pattern)) {
     yield* allMatchesOf(runtime, pattern, text, start);
     return;
   }
@@ -193,14 +191,15 @@ function replaceWith(
   matches: Iterable<MatchState>,
   replace: (match: MatchState) => string
 ): string {
-  let result = '';
+  const result = new BoundedStringParts(runtime);
   let last = 0;
   for (const match of matches) {
-    result += text.slice(last, match.start) + replace(match);
+    result.append(text.slice(last, match.start));
+    result.append(replace(match));
     last = match.end;
-    checkLength(runtime, result.length);
   }
-  return result + text.slice(last);
+  result.append(text.slice(last));
+  return result.text();
 }
 
 function mappedReplacement(runtime: Runtime, replace: Value): (match: MatchState) => string {
@@ -245,7 +244,9 @@ define('String.replaceRange', (runtime, receiver, [start, end, replacement]) => 
   const to = end === undefined ? BigInt(text.length) : intArg(runtime, end, 'end');
   if (from < 0n || from > BigInt(text.length)) rangeError(runtime, from, 0, text.length, 'start');
   if (to < from || to > BigInt(text.length)) rangeError(runtime, to, Number(from), text.length, 'end');
-  return text.slice(0, index(from)) + stringArg(runtime, replacement, 'replacement') + text.slice(index(to));
+  const inserted = stringArg(runtime, replacement, 'replacement');
+  checkLength(runtime, text.length - Number(to - from) + inserted.length);
+  return text.slice(0, index(from)) + inserted + text.slice(index(to));
 });
 define('String.split', (runtime, receiver, [pattern]) => {
   const text = self(receiver);
@@ -287,14 +288,16 @@ define('String.splitMapJoin', (runtime, receiver, [pattern], namedArgs) => {
           runtime,
           runtime.callValue(onNonMatch, { positional: [part], named: undefined }, [], runtime.userCallRow)
         );
-  let result = '';
+  const result = new BoundedStringParts(runtime);
+  const mapMatch = onMatch === undefined ? undefined : mappedReplacement(runtime, onMatch);
   let last = 0;
   for (const match of matchesOf(runtime, pattern, text)) {
-    result += nonMatch(text.slice(last, match.start));
-    result += onMatch === undefined ? text.slice(match.start, match.end) : mappedReplacement(runtime, onMatch)(match);
+    result.append(nonMatch(text.slice(last, match.start)));
+    result.append(mapMatch ? mapMatch(match) : text.slice(match.start, match.end));
     last = match.end;
   }
-  return result + nonMatch(text.slice(last));
+  result.append(nonMatch(text.slice(last)));
+  return result.text();
 });
 define('String.codeUnits', (runtime, receiver) => {
   const text = self(receiver);
@@ -335,11 +338,7 @@ define('String.allMatches', (runtime, receiver, [input, start = 0n]) => {
   const text = stringArg(runtime, input, 'string');
   const at = intArg(runtime, start, 'start');
   if (at < 0n || at > BigInt(text.length)) rangeError(runtime, at, 0, text.length, 'start');
-  const matches = Array.from(matchesOf(runtime, receiver, text, index(at)), (match) =>
-    runtime.links.construct(runtime, '_StringMatch', '', [BigInt(match.start), text, receiver])
-  );
-  const list = newList(runtime, interfaceType(runtime.links.classNamed('Match')), matches, false);
-  return runtime.links.construct(runtime, '_StringAllMatchesIterable', '_', [list]);
+  return runtime.links.construct(runtime, '_StringAllMatchesIterable', '_', [text, receiver, at]);
 });
 define('String.matchAsPrefix', (runtime, receiver, [input, start = 0n]) => {
   const text = stringArg(runtime, input, 'string');

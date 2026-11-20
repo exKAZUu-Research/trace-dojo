@@ -1,8 +1,18 @@
 import { quoteForError } from '../format';
 import type { Runtime } from '../runtime';
 import { coreTypes, interfaceType, makeNullable } from '../types';
-import { type DartList, DartObject, type Value } from '../values';
-import { define, defineConstructor, index, intArg, named, newList, stringArg } from './nativeSupport';
+import { DartList, DartObject, type Value } from '../values';
+import {
+  define,
+  defineConstructor,
+  index,
+  intArg,
+  listElement,
+  listLength,
+  named,
+  newList,
+  stringArg,
+} from './nativeSupport';
 import { type CompiledRegExp, compileRegExp, execRegExp, isSurrogatePairAt } from './regExpEngine';
 
 /** A match of a pattern: where it is and the texts of its groups. */
@@ -31,8 +41,8 @@ function stateOf(value: Value): RegExpState {
   return (value as DartObject).native as unknown as RegExpState;
 }
 
-export function isRegExp(value: Value): boolean {
-  return value instanceof DartObject && value.cls.name === '_RegExp';
+export function isRegExp(runtime: Runtime, value: Value): boolean {
+  return value instanceof DartObject && value.cls === runtime.links.classNamed('_RegExp');
 }
 
 defineConstructor('RegExp.new', (runtime, _instance, args) => {
@@ -130,7 +140,7 @@ export function matchAt(
       ? undefined
       : { start: found, end: found + pattern.length, groups: [pattern], names: undefined, input, pattern };
   }
-  if (isRegExp(pattern)) {
+  if (isRegExp(runtime, pattern)) {
     const match = execAt(runtime, stateOf(pattern), input, position, anchored);
     if (match) match.pattern = pattern;
     return match;
@@ -280,12 +290,22 @@ define('RegExpMatch.end', (_runtime, receiver) => BigInt(matchState(receiver).en
 define('RegExpMatch.group', (runtime, receiver, [which]) => group(runtime, receiver, which));
 define('RegExpMatch.[]', (runtime, receiver, [which]) => group(runtime, receiver, which));
 define('RegExpMatch.groups', (runtime, receiver, [indices]) => {
-  const list = indices as DartList;
-  return newList(
-    runtime,
-    makeNullable(interfaceType(coreTypes.string)),
-    list.elements.map((which) => group(runtime, receiver, which))
-  );
+  const frame = runtime.currentFrame;
+  frame?.temporaries.push(indices);
+  try {
+    const length = listLength(runtime, indices);
+    if (length < 0n) runtime.throwError('RangeError', 'value', [length, 'length']);
+    runtime.allocate(Number(length) + 1);
+    const groups: Value[] = Array.from({ length: Number(length) });
+    for (let position = 0n; position < listLength(runtime, indices); position++) {
+      if (position >= length) runtime.throwError('RangeError', 'range', [position, 0n, length - 1n, 'index']);
+      runtime.spend();
+      groups[Number(position)] = group(runtime, receiver, listElement(runtime, indices, position));
+    }
+    return new DartList(coreTypes.list, makeNullable(interfaceType(coreTypes.string)), groups, false);
+  } finally {
+    frame?.temporaries.pop();
+  }
 });
 define('RegExpMatch.groupCount', (_runtime, receiver) => BigInt(matchState(receiver).groups.length - 1));
 define('RegExpMatch.input', (_runtime, receiver) => matchState(receiver).input);

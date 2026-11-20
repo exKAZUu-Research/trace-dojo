@@ -122,24 +122,46 @@ external String _base64Normalize(String source, int start, int? end);
 
 class LineSplitter extends Converter<String, List<String>> {
   const LineSplitter();
-  static Iterable<String> split(String lines, [int start = 0, int? end]) => _splitLines(lines.substring(start, end));
-  List<String> convert(String data) => _splitLines(data);
+  static Iterable<String> split(String lines, [int start = 0, int? end]) =>
+      _LineSplitIterable(lines, start, RangeError.checkValidRange(start, end, lines.length));
+  List<String> convert(String data) => split(data).toList();
 }
 
-List<String> _splitLines(String data) {
-  var lines = <String>[];
-  var start = 0;
-  var i = 0;
-  while (i < data.length) {
-    var char = data.codeUnitAt(i);
-    if (char == 10 || char == 13) {
-      lines.add(data.substring(start, i));
-      if (char == 13 && i + 1 < data.length && data.codeUnitAt(i + 1) == 10) i++;
-      start = i + 1;
+class _LineSplitIterable extends Iterable<String> {
+  final String _source;
+  final int _start;
+  final int _end;
+  _LineSplitIterable(this._source, this._start, this._end);
+  Iterator<String> get iterator => _LineSplitIterator(_source, _start, _end);
+}
+
+class _LineSplitIterator implements Iterator<String> {
+  final String _source;
+  int _start;
+  final int _end;
+  int _lineStart = 0;
+  int _lineEnd = -1;
+  String? _current;
+  _LineSplitIterator(this._source, this._start, this._end);
+  bool moveNext() {
+    _current = null;
+    _lineStart = _start;
+    _lineEnd = -1;
+    for (int i = _start; i < _end; i++) {
+      int code = _source.codeUnitAt(i);
+      if (code != 10 && code != 13) continue;
+      _lineEnd = i;
+      _start = i + 1;
+      if (code == 13 && _start < _end && _source.codeUnitAt(_start) == 10) _start++;
+      return true;
     }
-    i++;
+    if (_start == _end) return false;
+    _lineEnd = _end;
+    _start = _end;
+    return true;
   }
-  if (start < data.length) lines.add(data.substring(start));
-  return lines;
+  String get current => _current ??= (_lineEnd >= 0
+      ? _source.substring(_lineStart, _lineEnd)
+      : (throw StateError("No element")));
 }
 `;

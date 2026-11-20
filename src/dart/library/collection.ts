@@ -896,7 +896,7 @@ abstract mixin class SetMixin<E> implements Set<E> {
     return result;
   }
   List<E> toList({bool growable = true}) => List<E>.of(this, growable: growable);
-  Iterable<T> map<T>(T Function(E e) f) => MappedIterable<E, T>(this, f);
+  Iterable<T> map<T>(T Function(E e) f) => EfficientLengthMappedIterable<E, T>(this, f);
   E get single {
     if (length > 1) throw StateError("Too many elements");
     Iterator<E> it = iterator;

@@ -49,7 +49,8 @@ export function checkExhaustive(
 ): boolean {
   if (patterns.some((pattern) => coversAll(compiler, pattern, type))) return true;
   const cutoff = Math.min(MAX_SPACES - 1, listLengthCutoff(patterns));
-  const spaces = expand(type, cutoff);
+  const depth = Math.max(0, ...patterns.map(listNesting));
+  const spaces = expand(type, cutoff, depth);
   const missing = spaces.find((space) => !patterns.some((pattern) => covers(compiler, pattern, space)));
   if (!missing) return true;
   if (isStatement && !isAlwaysExhaustive(type)) return false;
@@ -95,23 +96,23 @@ function isAlwaysExhaustive(type: DartType): boolean {
 }
 
 /** Splits a type into the spaces a switch must cover one by one. */
-function expand(type: DartType, listCutoff: number): Space[] {
+function expand(type: DartType, listCutoff: number, listDepth: number): Space[] {
   if (type.kind === 'null') return [{ kind: 'null' }];
   if (type.kind === 'never' && !type.nullable) return [];
   if (type.kind === 'dynamic') {
     return [{ kind: 'type', type: interfaceType(coreTypes.object) }, { kind: 'null' }];
   }
   if (isNullable(type) && type.kind !== 'void') {
-    const nonNullSpaces = expand(nonNullable(type), listCutoff);
+    const nonNullSpaces = expand(nonNullable(type), listCutoff, listDepth);
     return nonNullSpaces.length >= MAX_SPACES ? [{ kind: 'type', type }] : [...nonNullSpaces, { kind: 'null' }];
   }
   const base = resolveBound(type);
-  if (base.kind === 'record') return expandRecord(base, listCutoff);
-  if (base.kind === 'interface') return expandInterface(base, listCutoff);
+  if (base.kind === 'record') return expandRecord(base, listCutoff, listDepth);
+  if (base.kind === 'interface') return expandInterface(base, listCutoff, listDepth);
   return [{ kind: 'type', type }];
 }
 
-function expandRecord(type: DartType & { kind: 'record' }, listCutoff: number): Space[] {
+function expandRecord(type: DartType & { kind: 'record' }, listCutoff: number, listDepth: number): Space[] {
   const fieldTypes = [...type.positional, ...type.named.map((field) => field.type)];
   const names: (string | undefined)[] = [
     ...type.positional.map((): string | undefined => undefined),
@@ -119,14 +120,14 @@ function expandRecord(type: DartType & { kind: 'record' }, listCutoff: number): 
   ];
   let products: Space[][] = [[]];
   for (const fieldType of fieldTypes) {
-    const options = expand(fieldType, listCutoff);
+    const options = expand(fieldType, listCutoff, listDepth);
     if (products.length * options.length > MAX_SPACES) return [{ kind: 'type', type }];
     products = products.flatMap((product) => options.map((option) => [...product, option]));
   }
   return products.map((fields) => ({ kind: 'record', fields, names, type }));
 }
 
-function expandInterface(base: DartType & { kind: 'interface' }, listCutoff: number): Space[] {
+function expandInterface(base: DartType & { kind: 'interface' }, listCutoff: number, listDepth: number): Space[] {
   const { cls } = base;
   if (cls === coreTypes.bool) {
     return [
@@ -147,19 +148,19 @@ function expandInterface(base: DartType & { kind: 'interface' }, listCutoff: num
   if (cls.modifiers.isSealed) {
     const spaces: Space[] = [];
     for (const subclass of cls.subclasses) {
-      const options = expand(subclassType(base, subclass), listCutoff);
+      const options = expand(subclassType(base, subclass), listCutoff, listDepth);
       if (spaces.length + options.length > MAX_SPACES) return [{ kind: 'type', type: base }];
       spaces.push(...options);
     }
     return spaces;
   }
-  const list = listCutoff > 0 ? asInstanceOf(base, coreTypes.list) : undefined;
-  if (list) return expandList(base, list.args[0] ?? DYNAMIC, listCutoff);
+  const list = listCutoff > 0 && listDepth > 0 ? asInstanceOf(base, coreTypes.list) : undefined;
+  if (list) return expandList(base, list.args[0] ?? DYNAMIC, listCutoff, listDepth);
   return [{ kind: 'type', type: base }];
 }
 
-function expandList(type: DartType, elementType: DartType, cutoff: number): Space[] {
-  const options = expand(elementType, 0);
+function expandList(type: DartType, elementType: DartType, cutoff: number, depth: number): Space[] {
+  const options = expand(elementType, cutoff, depth - 1);
   const spaces: ListSpace[] = [];
   for (let length = 0; length <= cutoff; length++) {
     const space: ListSpace = { kind: 'list', type, elementType, length, hasLongerLengths: length === cutoff };
@@ -183,6 +184,9 @@ function listLengthCutoff(patterns: Pattern[]): number {
   let suffix = 0;
   const visit = (pattern: Pattern): void => {
     if (pattern.kind !== 'list') return;
+    for (const element of pattern.elements) {
+      if (element.kind !== 'rest') cutoff = Math.max(cutoff, listLengthCutoff([element]));
+    }
     const rest = pattern.elements.findIndex((element) => element.kind === 'rest');
     if (rest === -1) {
       cutoff = Math.max(cutoff, pattern.elements.length + 1);
@@ -196,6 +200,20 @@ function listLengthCutoff(patterns: Pattern[]): number {
   };
   for (const pattern of patterns) visitNestedPatterns(pattern, visit);
   return Math.max(prefix + suffix, cutoff);
+}
+
+function listNesting(pattern: Pattern): number {
+  let depth = 0;
+  visitNestedPatterns(pattern, (part) => {
+    if (part.kind !== 'list') return;
+    let nested = 0;
+    for (const element of part.elements) {
+      const child = element.kind === 'rest' ? element.pattern : element;
+      if (child) nested = Math.max(nested, listNesting(child));
+    }
+    depth = Math.max(depth, nested + 1);
+  });
+  return depth;
 }
 
 function visitNestedPatterns(pattern: Pattern, visit: (pattern: Pattern) => void): void {

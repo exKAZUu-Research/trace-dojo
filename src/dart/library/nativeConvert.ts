@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 539 -- dart:convert's JSON, UTF-8, and Base64 codecs, each transcribed from the SDK.
+// code-gauge-allow-file fileNcss 560 -- dart:convert's JSON, UTF-8, and Base64 codecs, each transcribed from the SDK.
 import { LIMITS } from '../../interpreter/limits';
 import { formatDouble } from '../format';
 import { HashStore } from '../hashStore';
@@ -60,12 +60,16 @@ class JsonStringifier {
   ) {}
 
   encode(value: Value): string {
+    const roots = (): Iterable<Value> => this.visiting;
+    this.runtime.roots.add(roots);
     try {
       this.write(value, 0);
       return this.output.join('');
     } catch (error) {
       if (error === JSON_OUTPUT_LIMIT) this.runtime.throwError('OutOfMemoryError', '', []);
       throw error;
+    } finally {
+      this.runtime.roots.delete(roots);
     }
   }
 
@@ -174,11 +178,26 @@ class JsonStringifier {
 
   private writeMap(map: Value, depth: number): boolean {
     const { runtime } = this;
-    if (runtime.getProperty(map, 'isEmpty', undefined) === true) return this.append('{}');
-    runtime.getProperty(map, 'length', undefined);
-    const entries: [Value, Value][] = [];
-    forEachEntry(runtime, map, (key, value) => entries.push([key, value]));
-    if (entries.some(([key]) => typeof key !== 'string')) return false;
+    const frame = runtime.currentFrame;
+    const mark = frame?.temporaries.length ?? 0;
+    frame?.temporaries.push(map);
+    try {
+      if (runtime.getProperty(map, 'isEmpty', undefined) === true) return this.append('{}');
+      runtime.getProperty(map, 'length', undefined);
+      const entries: [Value, Value][] = [];
+      forEachEntry(runtime, map, (key, value) => {
+        runtime.allocate(2);
+        entries.push([key, value]);
+        frame?.temporaries.push(key, value);
+      });
+      if (entries.some(([key]) => typeof key !== 'string')) return false;
+      return this.writeMapEntries(map, entries, depth);
+    } finally {
+      if (frame) frame.temporaries.length = mark;
+    }
+  }
+
+  private writeMapEntries(map: Value, entries: [Value, Value][], depth: number): true {
     this.visiting.push(map);
     try {
       this.append('{');
@@ -434,7 +453,14 @@ function revive(runtime: Runtime, key: Value, value: Value, reviver: Value): Val
 
 define('_jsonDecode', (runtime, _receiver, [source, reviver]) => {
   const result = new JsonParser(runtime, stringArg(runtime, source, 'source')).parse();
-  return reviver === undefined ? result : revive(runtime, undefined, result, reviver);
+  if (reviver === undefined) return result;
+  const frame = runtime.currentFrame;
+  frame?.temporaries.push(result);
+  try {
+    return revive(runtime, undefined, result, reviver);
+  } finally {
+    frame?.temporaries.pop();
+  }
 });
 
 // UTF-8 and Base64
