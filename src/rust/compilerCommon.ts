@@ -1,10 +1,19 @@
 import type { Annotations } from './annotations';
 import type { Expr } from './ast';
 import { claimStrings } from './capacity';
+import type { Eval } from './compiler';
 import { normalize } from './infer';
 import { type Frame, UNASSIGNED } from './runtime';
 import { type AdtDef, shallow, type Type } from './types';
 import { EnumValue, isPlace, type Place, StructValue, type Value } from './values';
+
+export function evaluateValues(frame: Frame, reads: Eval[]): Value[] {
+  const values: Value[] = [];
+  return frame.runtime.withRoots(values, () => {
+    for (const read of reads) values.push(read(frame));
+    return values;
+  });
+}
 
 export class LocalPlace implements Place {
   readonly isPlace = true;

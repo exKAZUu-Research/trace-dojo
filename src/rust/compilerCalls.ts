@@ -1,7 +1,7 @@
 import type { MethodRes, ReceiverAdjust } from './annotations';
 import type { Expr } from './ast';
 import type { Compiler, Eval } from './compiler';
-import { construct, derefAll, isStringType, stripRefs } from './compilerCommon';
+import { construct, derefAll, evaluateValues, isStringType, stripRefs } from './compilerCommon';
 import { placeThrough, valueThrough } from './compilerPlaces';
 import { copyValue, needsCopy } from './ops';
 import { runtimeType } from './runtimeTypes';
@@ -19,16 +19,11 @@ export function compileCall(c: Compiler, expr: ExprOf<'call'>): Eval {
   if (res?.kind === 'fn') {
     const { fn } = res;
     if ((fn as { nativeKey?: string }).nativeKey === 'Turtle::new') {
-      return (frame) =>
-        c.support.turtleNew(
-          args.map((arg) => arg(frame)),
-          span,
-          frame
-        );
+      return (frame) => c.support.turtleNew(evaluateValues(frame, args), span, frame);
     }
     const typeArgs = res.typeArgs.map((arg) => runtimeType(arg));
     return (frame) => {
-      const values = args.map((arg) => arg(frame));
+      const values = evaluateValues(frame, args);
       return c.support.callFn(
         fn,
         typeArgs.map((arg) => arg(frame)),
@@ -43,17 +38,13 @@ export function compileCall(c: Compiler, expr: ExprOf<'call'>): Eval {
     const { def, variant } = res;
     return (frame) => {
       frame.runtime.allocate(args.length);
-      return construct(
-        def,
-        variant,
-        args.map((arg) => arg(frame))
-      );
+      return construct(def, variant, evaluateValues(frame, args));
     };
   }
   const calleeValue = c.read(callee);
+  const operands: Eval[] = [(frame) => derefAll(calleeValue(frame)), ...args];
   return (frame) => {
-    const fn = derefAll(calleeValue(frame));
-    const values = args.map((arg) => arg(frame));
+    const [fn, ...values] = evaluateValues(frame, operands);
     return c.support.callValue(fn instanceof DynValue ? fn.value : fn, values, callRow);
   };
 }
@@ -62,15 +53,13 @@ export function compileMethodCall(c: Compiler, expr: ExprOf<'methodCall'>): Eval
   const method = c.annotations.methods.get(expr);
   if (!method) throw new Error(`Unresolved method ${expr.method}`);
   const receiver = compileReceiver(c, expr, method);
-  const args = expr.args.map((arg) => c.value(arg));
+  const args = [receiver, ...expr.args.map((arg) => c.value(arg))];
   const typeArgs = method.typeArgs.map((arg) => runtimeType(arg));
   const { fn } = method;
   const span = expr.methodSpan;
   const callRow = expr.span.row;
   return (frame) => {
-    const self = receiver(frame);
-    const values = [self];
-    for (const arg of args) values.push(arg(frame));
+    const values = evaluateValues(frame, args);
     return c.support.callFn(
       fn,
       typeArgs.map((arg) => arg(frame)),

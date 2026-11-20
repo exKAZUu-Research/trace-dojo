@@ -1,11 +1,11 @@
-// code-gauge-allow-file fileNcss 563 -- Keeps the compilation that shares a function's context and step state together.
+// code-gauge-allow-file fileNcss 564 -- Keeps the compilation that shares a function's context and step state together.
 import type { Annotations, Coercion, FnContext, LocalVar, PathRes } from './annotations';
 import type { Block, Expr, Pattern, Span, Stmt } from './ast';
 import { forEachDirect, patternBindings } from './astWalk';
 import { claimString, claimStrings, moveString, settleStrings } from './capacity';
 import type { Checker } from './checker';
 import { compileCall, compileMethodCall } from './compilerCalls';
-import { construct, isPlaceExpr, isRefType, isStringType, LocalPlace } from './compilerCommon';
+import { construct, evaluateValues, isPlaceExpr, isRefType, isStringType, LocalPlace } from './compilerCommon';
 import { compileFor, compileIf, compileLoop, compileMatch, compileWhile } from './compilerControl';
 import { compileMacro } from './compilerMacros';
 import { compileBinary, compileCompoundAssign, compileUnary } from './compilerOperators';
@@ -530,11 +530,13 @@ export class Compiler {
     const moved = fields.map((field, index) => !given.has(index) && !this.isCopy(substitute(field.type, subst)));
     return (frame) => {
       const result: Value[] = Array.from({ length: fields.length });
-      for (const { index, value } of values) result[index] = value(frame);
-      if (base) takeFromBase(base(frame) as StructValue, result, given, moved);
-      frame.runtime.allocate(fields.length);
-      claimStrings(result);
-      return def.kind === 'enum' ? new EnumValue(def, variant, result) : new StructValue(def, result);
+      return frame.runtime.withRoots(result, () => {
+        for (const { index, value } of values) result[index] = value(frame);
+        if (base) takeFromBase(base(frame) as StructValue, result, given, moved);
+        frame.runtime.allocate(fields.length);
+        claimStrings(result);
+        return def.kind === 'enum' ? new EnumValue(def, variant, result) : new StructValue(def, result);
+      });
     };
   }
 
@@ -727,14 +729,14 @@ function readRange(c: Compiler, expr: ExprOf<'range'>): Eval {
 function readTuple(c: Compiler, expr: ExprOf<'tuple'>): Eval {
   if (expr.elems.length === 0) return () => UNIT_VALUE;
   const elems = expr.elems.map((elem) => c.value(elem));
-  return (frame) => claimStrings(elems.map((elem) => elem(frame)));
+  return (frame) => claimStrings(evaluateValues(frame, elems));
 }
 
 function readArray(c: Compiler, expr: ExprOf<'array'>): Eval {
   const elems = expr.elems.map((elem) => c.value(elem));
   return (frame) => {
     frame.runtime.allocate(elems.length);
-    return claimStrings(elems.map((elem) => elem(frame)));
+    return claimStrings(evaluateValues(frame, elems));
   };
 }
 

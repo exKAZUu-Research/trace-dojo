@@ -115,7 +115,7 @@ export class Runtime implements TracedRuntime<Frame> {
   readonly steps = new StepTracker();
   readonly io: ProgramIO;
   private slots = 0;
-  /** Values that native code holds while it runs, such as the elements a sort is ordering. */
+  /** Values in use outside frame storage, such as arguments under evaluation and elements being sorted. */
   readonly nativeRoots: Value[][] = [];
 
   constructor(
@@ -127,6 +127,15 @@ export class Runtime implements TracedRuntime<Frame> {
 
   spend(cost = 1): void {
     this.budget.spend(cost);
+  }
+
+  withRoots<T>(values: Value[], use: () => T): T {
+    this.nativeRoots.push(values);
+    try {
+      return use();
+    } finally {
+      this.nativeRoots.pop();
+    }
   }
 
   /** Counts allocated elements against {@link LIMITS.maxSlots}. */

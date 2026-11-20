@@ -1,7 +1,7 @@
 import type { Expr, FormatArgs, MacroCall, Span } from './ast';
 import { claimStrings } from './capacity';
 import type { Compiler, Eval } from './compiler';
-import { stringish } from './compilerCommon';
+import { evaluateValues, stringish } from './compilerCommon';
 import type { Spec } from './fmt';
 import { normalize } from './infer';
 import type { Program } from './items';
@@ -167,7 +167,7 @@ function vecMacro(c: Compiler, macro: Macro<'vec'>): Eval {
   const elems = macro.elems.map((elem) => c.value(elem));
   return (frame) => {
     frame.runtime.allocate(elems.length);
-    return claimStrings(elems.map((elem) => elem(frame)));
+    return claimStrings(evaluateValues(frame, elems));
   };
 }
 
@@ -223,12 +223,14 @@ function compileFormat(c: Compiler, format: FormatArgs): (frame: Frame) => strin
   const types = format.args.map((arg) => runtimeType(arg.ty!));
   const { pieces } = format;
   return (frame) => {
-    const values = args.map((arg) => arg(frame));
+    const values = evaluateValues(frame, args);
     frame.runtime.spend();
-    return c.support.formatter.format(
-      pieces,
-      values,
-      types.map((type) => type(frame))
+    return frame.runtime.withRoots(values, () =>
+      c.support.formatter.format(
+        pieces,
+        values,
+        types.map((type) => type(frame))
+      )
     );
   };
 }

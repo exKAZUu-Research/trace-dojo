@@ -193,7 +193,7 @@ export class Interpreter implements CallSupport {
     const frame = new Frame(runtime, compiled.info, callRow, typeArgs, captures);
     runtime.pushFrame(frame);
     try {
-      compiled.bind(frame, args);
+      runtime.withRoots(args, () => compiled.bind(frame, args));
       let result: Value;
       try {
         result = compiled.body(frame);
@@ -215,7 +215,7 @@ export class Interpreter implements CallSupport {
     if (!native) throw new RustPanic(`${key} は、この採点環境では使えません。`, span);
     const context: NativeContext = { interp: this, runtime: this.runtime, frame, span, typeArgs };
     const before = receiverText(args[0]);
-    const result = native(args, context);
+    const result = this.runtime.withRoots(args, () => native(args, context));
     // Library functions build `String`s through these two ways out: a result, and a receiver they write to.
     if (typeof result === 'string' && shallow(def.ret).kind !== 'ref') this.runtime.allocateString(result.length);
     if (before !== undefined) {

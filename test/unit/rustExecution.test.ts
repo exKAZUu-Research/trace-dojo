@@ -583,6 +583,33 @@ test('overflow in an open-ended Rust range reports the library location', () => 
   });
 });
 
+test('Rust keeps evaluated arguments and aggregate values live while evaluating later operands', () => {
+  const program = `struct Holder { turtle: Turtle }
+impl Holder {
+    fn report(self, clear: bool) { println!("{}", clear); }
+}
+fn report(turtle: Turtle, clear: bool) { println!("{}", clear); }
+fn release(turtle: Turtle, observer: &mut Turtle) {
+    std::mem::drop(turtle);
+    println!("{}", observer.canMoveForward());
+}
+
+fn main() {
+    let mut observer = Turtle::new(0, 0);
+    report(Turtle::new(0, 1), observer.canMoveForward());
+    println!("{}", observer.canMoveForward());
+    release(Turtle::new(0, 1), &mut observer);
+    Holder { turtle: Turtle::new(0, 1) }.report(observer.canMoveForward());
+    let pair = (Turtle::new(0, 1), observer.canMoveForward());
+    println!("{}", pair.1);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'false\ntrue\ntrue\nfalse\nfalse\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {
