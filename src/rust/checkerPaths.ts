@@ -188,8 +188,17 @@ function unavailableStd(names: string[], span: Span): never {
 /** Whether a trait is in scope in the body: imported, in the prelude, or the trait of the body's impl. */
 export function traitInScope(c: Checker, trait: TraitDef): boolean {
   if (trait === c.body.currentTrait) return true;
-  const binding = lookupType(c.body.module, trait.name, { row: 0, col: 1 });
-  return binding?.kind === 'trait' && binding.def === trait;
+  const isTrait = (binding: TypeBinding | undefined): boolean => binding?.kind === 'trait' && binding.def === trait;
+  const { module } = c.body;
+  const span = { row: 0, col: 1 };
+  if (isTrait(lookupType(module, trait.name, span))) return true;
+  for (let scope: Module | undefined = module; scope; scope = scope.lexicalParent) {
+    if (scope.anonymousImports.some((entry) => isTrait(entry.types?.binding))) return true;
+    for (const [name, entry] of scope.imports) {
+      if (isTrait(entry.types?.binding) && isTrait(lookupType(module, name, span))) return true;
+    }
+  }
+  return false;
 }
 
 export function checkMethodVisible(c: Checker, fn: FnDef, span: Span): void {

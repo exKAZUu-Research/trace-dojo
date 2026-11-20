@@ -465,6 +465,34 @@ test.each([
   });
 });
 
+test('Rust formatting traits can be imported by alias or anonymously', () => {
+  const program = `mod named {
+    use std::fmt::Write as FmtWrite;
+    pub fn render() -> String {
+        let mut s = String::new();
+        write!(&mut s, "first").unwrap();
+        s
+    }
+}
+mod anonymous {
+    use std::fmt::Write as _;
+    use std::fmt::Display as _;
+    pub fn render() -> String {
+        let mut s = String::new();
+        writeln!(&mut s, "second").unwrap();
+        s
+    }
+}
+fn main() {
+    println!("{} {}", named::render(), anonymous::render().trim());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'first second\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

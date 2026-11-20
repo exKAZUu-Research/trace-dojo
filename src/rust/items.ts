@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 803 -- Follows Rust's name resolution case by case.
+// code-gauge-allow-file fileNcss 810 -- Follows Rust's name resolution case by case.
 import { CompileError } from '../interpreter/diagnostics';
 import type {
   BoundAst,
@@ -86,6 +86,7 @@ export class Module {
   readonly types = new Map<string, Entry<TypeBinding>>();
   readonly values = new Map<string, Entry<ValueBinding>>();
   readonly imports = new Map<string, Import>();
+  readonly anonymousImports: Import[] = [];
   readonly globs: { path: string[]; span: Span; isPublic: boolean }[] = [];
   readonly children: Module[] = [];
 
@@ -672,14 +673,19 @@ export class ItemCollector {
       if ((name === 'self' || name === 'super' || name === 'crate') && entry.path.length === 1) {
         compileError(entry.span, `use ${name}; は書けません。`);
       }
-      if (module.imports.has(name)) compileError(entry.span, `${name} という名前が2回 use されています。`);
-      module.imports.set(name, {
+      const imported: Import = {
         path: entry.path,
         span: entry.span,
         isPublic: item.vis === 'pub',
         resolving: false,
         resolved: false,
-      });
+      };
+      if (name === '_') {
+        module.anonymousImports.push(imported);
+      } else {
+        if (module.imports.has(name)) compileError(entry.span, `${name} という名前が2回 use されています。`);
+        module.imports.set(name, imported);
+      }
     }
   }
 }
@@ -938,6 +944,7 @@ function integerOperation(op: string, left: bigint, right: bigint): bigint | und
 /** Resolves every import of a module and the modules in it, reporting imports that name nothing, as rustc does. */
 export function resolveImports(module: Module): void {
   for (const entry of module.imports.values()) resolveImport(module, entry);
+  for (const entry of module.anonymousImports) resolveImport(module, entry);
   for (const glob of module.globs) {
     const target = resolveTypePath(glob.path, module, glob.span);
     if (target.kind === 'mod' && target.module.isStd) checkUnavailableStd(['std', ...glob.path.slice(1)], glob.span);

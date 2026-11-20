@@ -2,10 +2,11 @@ import type { FormatArgs, MacroCall, Span } from './ast';
 import type { Checker } from './checker';
 import { checkElements } from './checkerExpr';
 import { sequencesCompare, stringsCompare } from './checkerOperators';
+import { traitInScope } from './checkerPaths';
 import { checkPattern } from './checkerPatterns';
 import { requireMutablePlace } from './checkerPlaces';
 import { normalize } from './infer';
-import { compileError, lookupType } from './items';
+import { compileError, resolveTypePath } from './items';
 import { BOOL, freshVar, NEVER, resolve, shallow, type Type, typeToString, UNIT, USIZE } from './types';
 
 // code-gauge-allow functionNcss 34 -- One case per kind of macro.
@@ -65,9 +66,8 @@ function writeMacro(c: Checker, macro: Extract<MacroCall, { kind: 'write' }>): T
     );
   }
   if (isString) {
-    // `write!` calls `write_fmt`, which `String` has only from `std::fmt::Write` in scope.
-    const write = lookupType(c.body.module, 'Write', macro.target.span);
-    if (write?.kind !== 'trait' || !write.def.methods.has('write_str')) {
+    const write = resolveTypePath(['fmt', 'Write'], c.program.std, macro.target.span);
+    if (write.kind !== 'trait' || !traitInScope(c, write.def)) {
       compileError(macro.target.span, 'String に write! で書き込むには、use std::fmt::Write; を書いてください。');
     }
     requireMutablePlace(c, macro.target.kind === 'ref' ? macro.target.operand : macro.target, 'write! で書き込む');
