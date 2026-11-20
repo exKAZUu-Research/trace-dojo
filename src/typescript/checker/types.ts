@@ -551,7 +551,7 @@ function flattenedMembers(
   return [...members.values()];
 }
 
-function isPrimitive(type: Type): boolean {
+export function isPrimitive(type: Type): boolean {
   return (
     type.kind === 'intrinsic' &&
     ['string', 'number', 'bigint', 'symbol', 'undefined', 'null', 'void'].includes(type.name)

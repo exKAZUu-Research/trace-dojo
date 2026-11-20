@@ -31,6 +31,7 @@ import {
   type IntersectionType,
   isAnyLike,
   isIntrinsic,
+  isPrimitive,
   literalType,
   nonPrimitiveType,
   nullType,
@@ -85,6 +86,8 @@ export class Relations {
   constructor(private readonly c: Checker) {}
 
   isAssignable(source: Type, target: Type): boolean {
+    if (source.kind === 'object' && (this.trivialRelation(source, target) === true || isIntrinsic(target, 'object')))
+      return true;
     return this.isRelated(source, target, 'assignable');
   }
 
@@ -104,8 +107,8 @@ export class Relations {
     state = 0,
     track = EXPANDING_SOURCE | EXPANDING_TARGET
   ): boolean {
-    const simple = this.relatedBeforeNormalization(source, target, relation);
-    if (simple !== undefined) return simple;
+    if (source === target) return true;
+    if (relation === 'assignable' && source.kind === 'object' && isPrimitiveComparisonTarget(target)) return false;
     source = referencesForComparison(source);
     target = referencesForComparison(target);
     if (source === target) return true;
@@ -397,16 +400,6 @@ export class Relations {
     return relation === 'comparable'
       ? s.types.some((member) => this.isRelated(member, t, relation, state))
       : s.types.every((member) => this.isRelated(member, t, relation, state));
-  }
-
-  private relatedBeforeNormalization(source: Type, target: Type, relation: Relation): boolean | undefined {
-    if (source === target) return true;
-    if (relation !== 'assignable' || source.kind !== 'object') return undefined;
-    if (target.kind === 'literal' || target === booleanType) return false;
-    if (target.kind === 'intrinsic' && target.name !== 'never')
-      return this.trivialRelation(source, target) ?? this.intrinsicTarget(source, target.name, relation);
-    if (target.kind === 'union' && this.isUnknownLikeUnion(target.types)) return true;
-    return undefined;
   }
 
   /** The relation that holds whatever the types' structures are, if any. */
@@ -1265,6 +1258,12 @@ function hasSignatures(structure: Structure): boolean {
 
 function isLeaf(type: Type): boolean {
   return type.kind === 'intrinsic' || type.kind === 'literal';
+}
+
+function isPrimitiveComparisonTarget(type: Type): boolean {
+  return (
+    type === booleanType || isPrimitive(type) || ['literal', 'templateLiteral', 'stringMapping'].includes(type.kind)
+  );
 }
 
 function referencesForComparison(type: Type): Type {

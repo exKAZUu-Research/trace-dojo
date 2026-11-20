@@ -31,3 +31,7 @@ type BooleanA = Box<BooleanB>;
 type BooleanB = Box<BooleanA>['value'] extends boolean ? never : Box<BooleanA>['value'];
 type UnknownA = Box<UnknownB>;
 type UnknownB = Box<UnknownA>['value'] extends {} | null | undefined ? Box<UnknownA>['value'] : never;
+type TuplePrimitive = Box<TuplePrimitiveLink>;
+type TuplePrimitiveLink = [Box<TuplePrimitive>['value']] extends [number] ? never : Box<TuplePrimitive>['value'];
+type TupleInfer = Box<TupleInferLink>;
+type TupleInferLink = [Box<TupleInfer>['value']] extends [infer X] ? X : never;
