@@ -254,19 +254,27 @@ define('String.split', (runtime, receiver, [pattern]) => {
     if (pattern.length === 0) return newList(runtime, stringType, text.split(''));
     return newList(runtime, stringType, text.split(pattern));
   }
-  if (text.length === 0) {
-    const empty = matchAt(runtime, pattern, text, 0, true);
-    return newList(runtime, stringType, empty ? [] : ['']);
-  }
+  const matches = matchesOf(runtime, pattern, text);
   const parts: Value[] = [];
+  let previous = 0;
   let start = 0;
-  for (const match of matchesOf(runtime, pattern, text)) {
-    if (match.end === match.start && (match.start === 0 || match.start === text.length)) continue;
-    parts.push(text.slice(start, match.start));
-    start = match.end;
+  try {
+    if (text.length === 0 && !matches.next().done) return newList(runtime, stringType, []);
+    while (start !== text.length) {
+      const { value: match, done } = matches.next();
+      if (done || match.start === text.length) break;
+      if (start === match.end && match.end === previous) {
+        start++;
+        continue;
+      }
+      parts.push(text.slice(previous, match.start));
+      start = previous = match.end;
+    }
+    parts.push(text.slice(previous));
+    return newList(runtime, stringType, parts);
+  } finally {
+    matches.return?.();
   }
-  parts.push(text.slice(start));
-  return newList(runtime, stringType, parts);
 });
 define('String.splitMapJoin', (runtime, receiver, [pattern], namedArgs) => {
   const text = self(receiver);

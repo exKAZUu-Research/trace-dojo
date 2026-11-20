@@ -191,7 +191,9 @@ export abstract class StatementCompiler extends PatternCompiler {
   ): Compiled {
     const context = expected && expected.kind !== 'void' ? expected : undefined;
     const compiled = this.compileExpression(expression, context);
-    this.fn.returnTypes?.push(compiled.type);
+    if (!expected || expected.kind === 'void' || (compiled.type.kind === 'void' && !spec.returnType)) {
+      this.fn.returnTypes?.push(compiled.type);
+    }
     if (!expected) return compiled;
     if (expected.kind === 'void') {
       if (!isArrow && !isTop(compiled.type) && compiled.type.kind !== 'null' && !(compiled.type.kind === 'never')) {
@@ -204,12 +206,14 @@ export abstract class StatementCompiler extends PatternCompiler {
     if (compiled.type.kind === 'void' && !isTop(expected)) {
       this.error(expression, 'void の値は返せません。');
     }
-    return this.coerce(
+    const coerced = this.coerce(
       compiled,
       expected,
       expression,
       (from, to) => `${from} 型の値は、戻り値の型 ${to} に合いません。`
     );
+    this.fn.returnTypes?.push(coerced.type);
+    return coerced;
   }
 
   // code-gauge-allow functionCognitiveComplexity 19 -- Positional and named parameters bind alike, each with its covariance check.
@@ -1060,28 +1064,16 @@ export abstract class StatementCompiler extends PatternCompiler {
   }
 
   private compileReturnValueOf(value: Expression, expected: DartType | undefined): Compiled {
-    const context = expected && expected.kind !== 'void' ? expected : undefined;
-    const compiled = this.compileExpression(value, context ?? this.closureContextReturn());
-    this.fn.returnTypes?.push(compiled.type);
-    if (!expected) {
-      const contextReturn = this.closureContextReturn();
-      if (contextReturn && contextReturn.kind !== 'void') {
-        return this.coerce(
-          compiled,
-          contextReturn,
-          value,
-          (from, to) => `${from} 型の値は、戻り値の型 ${to} に合いません。`
-        );
-      }
-      return compiled;
-    }
-    if (expected.kind === 'void') {
-      if (!isTop(compiled.type) && compiled.type.kind !== 'null')
-        this.error(value, '戻り値の型が void の関数は、値を返せません。');
-      return compiled;
-    }
-    if (compiled.type.kind === 'void') this.error(value, 'void の値は返せません。');
-    return this.coerce(compiled, expected, value, (from, to) => `${from} 型の値は、戻り値の型 ${to} に合いません。`);
+    const context = expected ?? this.closureContextReturn();
+    const compiled = this.compileExpression(value, context?.kind === 'void' ? undefined : context);
+    if (expected?.kind === 'void' && !isTop(compiled.type) && compiled.type.kind !== 'null')
+      this.error(value, '戻り値の型が void の関数は、値を返せません。');
+    const returned =
+      context && context.kind !== 'void'
+        ? this.coerce(compiled, context, value, (from, to) => `${from} 型の値は、戻り値の型 ${to} に合いません。`)
+        : compiled;
+    this.fn.returnTypes?.push(returned.type);
+    return returned;
   }
 
   /** The return type a closure's context expects, which its returns are checked against. */

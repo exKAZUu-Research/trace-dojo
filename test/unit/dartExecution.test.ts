@@ -762,3 +762,55 @@ test.each([
   expect(result.kind).toBe('compileError');
   if (result.kind === 'compileError') expect(result.diagnostics[0]?.message).toMatch(/この採点環境では使えません。$/);
 });
+
+test('assignment retains a temporary indexed receiver through the right-hand side', () => {
+  const program = `late Turtle saved;
+class Holder {
+  final Turtle turtle = Turtle(1, 1);
+  void operator []=(int index, int value) { saved = turtle; }
+}
+int collect() {
+  var other = Turtle(3, 3);
+  other.canMoveForward();
+  return 0;
+}
+void main() {
+  Holder()[0] = collect();
+  saved.forward();
+}
+`;
+  const result = executeProgram('dart', program);
+  expect(result).toMatchObject({ kind: 'executed', uncaughtException: undefined, finalTurtles: [{ x: 1, y: 2 }] });
+});
+
+test('compound assignment requires a readable property before main runs', () => {
+  const program = 'class C { set x(int? value) {} } void main() { print("started"); C().x ??= 1; }';
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'compileError' });
+});
+
+test('typed collection operations check dynamic values as they enter the collection', () => {
+  const program = `Iterable<dynamic> items() sync* {
+  yield 1;
+  yield 'bad';
+  print('late element');
+  yield 2;
+}
+void main() {
+  try { List<int>.from(items()); } catch (e) { print(e.runtimeType); }
+  List<num> values = <int>[1, 2];
+  try { values.first = 1.5; } catch (e) { print(e.runtimeType); }
+  try { values.addAll(values.where((x) => x > 0)); } catch (e) { print(e.runtimeType); }
+  print(values);
+  dynamic source = <num, num>{1: 2};
+  print(<int, int>{...source});
+  dynamic invalid = 'wrong';
+  try { print(<int>[?invalid]); } catch (e) { print(e.runtimeType); }
+  print(Map<int, int>.fromIterable([1, 2], key: (x) => x, value: (x) { return x * 2; }));
+}
+`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '_TypeError\n_TypeError\nConcurrentModificationError\n[1, 2, 1]\n{1: 2}\n_TypeError\n{1: 2, 2: 4}\n',
+  });
+});

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 644 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 647 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type { CascadeSelector, CollectionElement, Expression, ForInBinding, Span, SwitchExpressionCase } from './ast';
 import type { ClassInfo, Member } from './classes';
 import { at, type Compiled, type Eval, type ResolvedMember, typeName } from './compilerBase';
@@ -38,7 +38,7 @@ interface AssignableTarget {
   writeType: DartType;
   /** The type reading the target gives, for compound assignments. */
   readType: DartType | undefined;
-  /** Evaluates the receiver and index, keeping them for the read and the write. */
+  /** Evaluates the receiver and index and appends them to the temporary roots. */
   prepare: (frame: Frame) => unknown;
   read: (frame: Frame, prepared: unknown) => Value;
   write: (frame: Frame, prepared: unknown, value: Value) => void;
@@ -107,7 +107,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
   // code-gauge-allow functionCognitiveComplexity 23 -- Simple, compound, and null-aware assignments.
   // code-gauge-allow functionNcss 56 -- Simple, compound, and null-aware assignments.
   private assignTo(target: AssignableTarget, operator: string, valueSyntax: Expression, span: Span): Compiled {
-    const { prepare, read, write, variable, writeType } = target;
+    const { read, write, variable, writeType } = target;
     if (operator === '=') {
       let value = this.compileExpression(valueSyntax, writeType);
       if (value.type.kind === 'void') this.error(valueSyntax, 'void の値は代入できません。');
@@ -121,19 +121,18 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       const run = value.run;
       return {
         type: value.type,
-        run: (frame) => {
-          const prepared = prepare(frame);
-          if (prepared === SHORTED) return SHORTED;
+        run: withPrepared(target, (frame, prepared) => {
           const result = run(frame);
           write(frame, prepared, result);
           return result;
-        },
+        }),
         isConst: false,
         variable: undefined,
         creates: value.creates,
       };
     }
-    const readType = target.readType ?? DYNAMIC;
+    const { readType } = target;
+    if (!readType) return this.error(span, '複合代入には、値を読み取れる代入先が必要です。');
     const current: Compiled = { type: readType, run: (frame) => frame.temporaries.at(-1), isConst: false };
     if (operator === '??=') {
       const before = this.flow;
@@ -149,15 +148,13 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       const run = value.run;
       return {
         type: upperBound(nonNullable(readType), value.type),
-        run: (frame) => {
-          const prepared = prepare(frame);
-          if (prepared === SHORTED) return SHORTED;
+        run: withPrepared(target, (frame, prepared) => {
           const existing = read(frame, prepared);
           if (existing !== undefined) return existing;
           const result = run(frame);
           write(frame, prepared, result);
           return result;
-        },
+        }),
         isConst: false,
       };
     }
@@ -177,9 +174,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     const run = coerced.run;
     return {
       type: coerced.type,
-      run: (frame) => {
-        const prepared = prepare(frame);
-        if (prepared === SHORTED) return SHORTED;
+      run: withPrepared(target, (frame, prepared) => {
         frame.temporaries.push(read(frame, prepared));
         let result: Value;
         try {
@@ -189,7 +184,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
         }
         write(frame, prepared, result);
         return result;
-      },
+      }),
       isConst: false,
     };
   }
@@ -208,7 +203,8 @@ export abstract class AssignmentCompiler extends ControlCompiler {
 
   protected compileIncrement(operand: Expression, operator: '+' | '-', isPrefix: boolean, span: Span): Compiled {
     const target = this.assignableTarget(operand, false);
-    const readType = target.readType ?? DYNAMIC;
+    const { readType } = target;
+    if (!readType) return this.error(span, '増減演算には、値を読み取れる代入先が必要です。');
     if (isNullable(readType) && readType.kind !== 'dynamic') {
       this.error(
         span,
@@ -225,16 +221,14 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       (from, to) => `${from} 型の値は、${to} 型の代入先に代入できません。`
     );
     this.afterWrite(target.variable, coerced.type);
-    const { prepare, read, write } = target;
+    const { read, write } = target;
     const numeric = numericClassOf(readType);
     const run = coerced.run;
     const step =
       numeric === 'int' ? (value: Value): Value => wrap((value as bigint) + (operator === '+' ? 1n : -1n)) : undefined;
     return {
       type: isPrefix ? coerced.type : readType,
-      run: (frame) => {
-        const prepared = prepare(frame);
-        if (prepared === SHORTED) return SHORTED;
+      run: withPrepared(target, (frame, prepared) => {
         const before = read(frame, prepared);
         let after: Value;
         if (step && typeof before === 'bigint') {
@@ -247,9 +241,10 @@ export abstract class AssignmentCompiler extends ControlCompiler {
             frame.temporaries.pop();
           }
         }
+        frame.temporaries.push(before);
         write(frame, prepared, after);
         return isPrefix ? after : before;
-      },
+      }),
       isConst: false,
     };
   }
@@ -548,11 +543,9 @@ export abstract class AssignmentCompiler extends ControlCompiler {
         const value = receiverRun(frame);
         if (value === SHORTED || (nullAware && value === undefined)) return SHORTED;
         frame.temporaries.push(value);
-        try {
-          return [value, indexRun(frame)];
-        } finally {
-          frame.temporaries.pop();
-        }
+        const key = indexRun(frame);
+        frame.temporaries.push(key);
+        return [value, key];
       },
       read: (frame, prepared) => {
         const [object, key] = prepared as [Value, Value];
@@ -682,13 +675,13 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     const { nullAwareKey, nullAwareValue } = element;
     const key = this.coerceElement(
       this.compileExpression(element.key, nullAwareKey ? nullableContext(elementContext) : elementContext),
-      nullAwareKey ? undefined : elementContext,
+      nullAwareKey ? nullableContext(elementContext) : elementContext,
       element.key,
       kind
     );
     const value = this.coerceElement(
       this.compileExpression(element.value, nullAwareValue ? nullableContext(valueContext) : valueContext),
-      nullAwareValue ? undefined : valueContext,
+      nullAwareValue ? nullableContext(valueContext) : valueContext,
       element.value,
       kind
     );
@@ -722,13 +715,8 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     types: ElementTypes[]
   ): { run: (frame: Frame, add: AddElement) => void; isConst: boolean } {
     if (kind === 'map') this.error(element, 'マップのリテラルには、キーと値の組を書いてください。');
-    const compiled = this.compileExpression(element.value, nullableContext(elementContext));
-    if (elementContext && !isSubtype(nonNullable(compiled.type), elementContext) && compiled.type.kind !== 'dynamic') {
-      this.error(
-        element,
-        `${typeName(compiled.type)} 型の値は、${typeName(elementContext)} 型の${collectionName(kind)}の要素にできません。`
-      );
-    }
+    const context = nullableContext(elementContext);
+    const compiled = this.coerceElement(this.compileExpression(element.value, context), context, element, kind);
     types.push({ key: nonNullable(compiled.type) });
     const { run } = compiled;
     return {
@@ -773,6 +761,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     return { run, isConst: compiled.isConst };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Validate both map type arguments before configuring the spread.
   private compileMapSpread(
     element: Extract<CollectionElement, { kind: 'spread' }>,
     compiled: Compiled,
@@ -788,12 +777,16 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     if (!instance && base.kind !== 'dynamic' && !spreadsNull)
       this.error(element, `${typeName(compiled.type)} 型の値は Map ではないので、マップの中では展開できません。`);
     const [keyType, valueType] = instance?.args ?? [DYNAMIC, DYNAMIC];
-    if (keyContext && !isSubtype(keyType, keyContext))
+    if (!spreadsNull && keyContext && keyType.kind !== 'dynamic' && !isSubtype(keyType, keyContext))
       this.error(element, `${typeName(keyType)} 型のキーは、${typeName(keyContext)} 型のマップに入れられません。`);
-    if (valueContext && !isSubtype(valueType, valueContext))
+    if (!spreadsNull && valueContext && valueType.kind !== 'dynamic' && !isSubtype(valueType, valueContext))
       this.error(element, `${typeName(valueType)} 型の値は、${typeName(valueContext)} 型のマップに入れられません。`);
     if (!spreadsNull) types.push({ key: keyType, value: valueType });
-    const { run } = compiled;
+    const mapType = interfaceType(coreTypes.map, [DYNAMIC, DYNAMIC]);
+    const run =
+      base.kind === 'dynamic'
+        ? this.runtimeCast(compiled.run, element.nullAware ? makeNullable(mapType) : mapType, false)
+        : compiled.run;
     const { nullAware } = element;
     return (frame, add) => {
       const map = run(frame);
@@ -1109,11 +1102,25 @@ export abstract class AssignmentCompiler extends ControlCompiler {
 
 export type { Member };
 
+function withPrepared(target: AssignableTarget, action: (frame: Frame, prepared: unknown) => Value): Eval {
+  return (frame) => {
+    const count = frame.temporaries.length;
+    try {
+      const prepared = target.prepare(frame);
+      return prepared === SHORTED ? SHORTED : action(frame, prepared);
+    } finally {
+      frame.temporaries.length = count;
+    }
+  };
+}
+
 /** Evaluates a target's receiver, giving SHORTED where a null-aware access short-circuits. */
 function preparingReceiver(run: Eval, nullAware: boolean): AssignableTarget['prepare'] {
   return (frame) => {
     const value = run(frame);
-    return value === SHORTED || (nullAware && value === undefined) ? SHORTED : value;
+    if (value === SHORTED || (nullAware && value === undefined)) return SHORTED;
+    frame.temporaries.push(value);
+    return value;
   };
 }
 

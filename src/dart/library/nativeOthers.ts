@@ -56,7 +56,7 @@ define('pow', (runtime, _receiver, [x, exponent]) => {
   const b = toDouble(base);
   const p = toDouble(power);
   // Dart follows C's pow, where 1 to any power and any number to the power 0 are 1, even with NaN.
-  if (b === 1 || p === 0) return 1;
+  if (b === 1 || p === 0 || (b === -1 && Math.abs(p) === Infinity)) return 1;
   return b ** p;
 });
 

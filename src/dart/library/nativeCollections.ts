@@ -1,8 +1,16 @@
-// code-gauge-allow-file fileNcss 928 -- The natives of List, Set, Map, and their iterators share the helpers of this file.
+// code-gauge-allow-file fileNcss 956 -- The natives of List, Set, Map, and their iterators share the helpers of this file.
 import { stringOf } from '../format';
 import { HashStore } from '../hashStore';
 import { type Frame, Frame as FrameClass, type Runtime } from '../runtime';
-import { coreTypes, type DartType, DYNAMIC, type InterfaceType, interfaceType } from '../types';
+import {
+  coreTypes,
+  type DartType,
+  DYNAMIC,
+  type InterfaceType,
+  interfaceType,
+  isSubtype,
+  makeNullable,
+} from '../types';
 import { Cell, DartList, DartObject, type Value } from '../values';
 import {
   callFunction,
@@ -104,11 +112,19 @@ defineConstructor(
 );
 defineConstructor('List.from', (runtime, _instance, args, typeArgs) => {
   const elementType = typeArgs[0] ?? DYNAMIC;
-  const values = iterableValues(runtime, args.positional[0]);
-  // The SDK's List.from adds each element of a dynamic iteration, an implicit cast.
-  for (const value of values) implicitCast(runtime, value, elementType);
-  runtime.allocate(values.length + 1);
-  return new DartList(coreTypes.list, elementType, values, named(args.named, 'growable', true) !== false);
+  const result = newList(runtime, elementType, [], named(args.named, 'growable', true) !== false);
+  const frame = runtime.currentFrame;
+  frame?.temporaries.push(result);
+  try {
+    forEachValue(runtime, args.positional[0], (value) => {
+      implicitCast(runtime, value, elementType);
+      runtime.allocate(1);
+      result.elements.push(value);
+    });
+    return result;
+  } finally {
+    frame?.temporaries.pop();
+  }
 });
 defineConstructor('List.of', (runtime, _instance, args, typeArgs) => {
   const values = iterableValues(runtime, args.positional[0]);
@@ -152,9 +168,9 @@ define('List.[]', (runtime, receiver, [at]) => {
 });
 define('List.[]=', (runtime, receiver, [at, value]) => {
   const target = list(receiver);
+  checkElement(runtime, value, elementTypeOf(target), 'value');
   checkModifiable(runtime, target);
   const position = checkIndex(runtime, target, at, 'index');
-  checkElement(runtime, value, elementTypeOf(target), 'value');
   target.elements[position] = value;
   return;
 });
@@ -188,6 +204,7 @@ define('List.last', (runtime, receiver) => {
 });
 define('List.first=', (runtime, receiver, [value]) => {
   const target = list(receiver);
+  checkElement(runtime, value, elementTypeOf(target), 'value');
   checkModifiable(runtime, target);
   if (target.elements.length === 0) rangeError(runtime, 0, 0, -1, 'index');
   target.elements[0] = value;
@@ -195,6 +212,7 @@ define('List.first=', (runtime, receiver, [value]) => {
 });
 define('List.last=', (runtime, receiver, [value]) => {
   const target = list(receiver);
+  checkElement(runtime, value, elementTypeOf(target), 'value');
   checkModifiable(runtime, target);
   if (target.elements.length === 0) rangeError(runtime, -1, 0, -1, 'index');
   target.elements[target.elements.length - 1] = value;
@@ -304,8 +322,8 @@ define('List.hashCode', (_runtime, receiver) => BigInt((receiver as DartObject).
 
 define('List.add', (runtime, receiver, [value]) => {
   const target = list(receiver);
-  checkGrowable(runtime, target, 'add');
   checkElement(runtime, value, elementTypeOf(target), 'value');
+  checkGrowable(runtime, target, 'add');
   runtime.allocate(1);
   target.elements.push(value);
   changed(target);
@@ -313,23 +331,29 @@ define('List.add', (runtime, receiver, [value]) => {
 });
 define('List.addAll', (runtime, receiver, [iterable]) => {
   const target = list(receiver);
+  const elementType = elementTypeOf(target);
+  checkElement(runtime, iterable, interfaceType(coreTypes.iterable, [elementType]), 'iterable');
   checkGrowable(runtime, target, 'add');
-  // The VM copies a list by index, which it refuses to do from the list itself.
-  if (iterable === target) runtime.throwError('ConcurrentModificationError', '', [target]);
-  const values = iterableValues(runtime, iterable);
-  for (const value of values) checkElement(runtime, value, elementTypeOf(target), 'value');
-  runtime.allocate(values.length);
-  target.elements.push(...values);
-  changed(target);
+  if (iterable === target && target.elements.length > 0)
+    runtime.throwError('ConcurrentModificationError', '', [target]);
+  let length = target.elements.length;
+  forEachValue(runtime, iterable, (value) => {
+    if (target.elements.length !== length) runtime.throwError('ConcurrentModificationError', '', [target]);
+    checkElement(runtime, value, elementType, 'value');
+    runtime.allocate(1);
+    target.elements.push(value);
+    changed(target);
+    length++;
+  });
   return;
 });
 define('List.insert', (runtime, receiver, [at, value]) => {
   const target = list(receiver);
+  checkElement(runtime, value, elementTypeOf(target), 'element');
   checkGrowable(runtime, target, 'add');
   const position = intArg(runtime, at, 'index');
   if (position < 0n || position > BigInt(target.elements.length))
     rangeError(runtime, position, 0, target.elements.length, undefined);
-  checkElement(runtime, value, elementTypeOf(target), 'element');
   runtime.allocate(1);
   target.elements.splice(index(position), 0, value);
   changed(target);
@@ -337,6 +361,7 @@ define('List.insert', (runtime, receiver, [at, value]) => {
 });
 define('List.insertAll', (runtime, receiver, [at, iterable]) => {
   const target = list(receiver);
+  checkElement(runtime, iterable, interfaceType(coreTypes.iterable, [elementTypeOf(target)]), 'iterable');
   checkGrowable(runtime, target, 'add');
   const position = intArg(runtime, at, 'index');
   if (position < 0n || position > BigInt(target.elements.length))
@@ -359,6 +384,7 @@ define('List.insertAll', (runtime, receiver, [at, iterable]) => {
 });
 define('List.setAll', (runtime, receiver, [at, iterable]) => {
   const target = list(receiver);
+  checkElement(runtime, iterable, interfaceType(coreTypes.iterable, [elementTypeOf(target)]), 'iterable');
   checkModifiable(runtime, target);
   const position = intArg(runtime, at, 'index');
   const values = iterableValues(runtime, iterable);
@@ -431,9 +457,10 @@ define('List.sublist', (runtime, receiver, [start, end]) => {
   return newList(runtime, elementTypeOf(target), target.elements.slice(from, to));
 });
 // code-gauge-allow functionCognitiveComplexity 17 -- Growable and fixed lists differ for iterable and list sources.
-// code-gauge-allow functionNcss 33 -- Keep the copy cases with the shared checks and write rules.
+// code-gauge-allow functionNcss 34 -- Keep the copy cases with the shared checks and write rules.
 define('List.setRange', (runtime, receiver, [start, end, iterable, skip = 0n]) => {
   const target = list(receiver);
+  checkElement(runtime, iterable, interfaceType(coreTypes.iterable, [elementTypeOf(target)]), 'iterable');
   checkModifiable(runtime, target);
   const [from, to] = checkRange(runtime, start, end, target.elements.length, target.growable);
   if (from === to) return;
@@ -492,13 +519,17 @@ define('List.removeRange', (runtime, receiver, [start, end]) => {
 });
 define('List.fillRange', (runtime, receiver, [start, end, fill]) => {
   const target = list(receiver);
+  const elementType = elementTypeOf(target);
+  checkElement(runtime, fill, makeNullable(elementType), 'fill');
   checkModifiable(runtime, target);
   const [from, to] = checkRange(runtime, start, end, target.elements.length);
+  castTo(runtime, fill, elementType);
   for (let position = from; position < to; position++) target.elements[position] = fill;
   return;
 });
 define('List.replaceRange', (runtime, receiver, [start, end, iterable]) => {
   const target = list(receiver);
+  checkElement(runtime, iterable, interfaceType(coreTypes.iterable, [elementTypeOf(target)]), 'newContents');
   checkGrowable(runtime, target, 'remove');
   const [from, to] = checkRange(runtime, start, end, target.elements.length);
   const values = iterableValues(runtime, iterable);
@@ -930,14 +961,16 @@ define('Set.add', (runtime, receiver, [value]) => {
   return store(receiver).set(value, undefined);
 });
 define('Set.addAll', (runtime, receiver, [elements]) => {
-  checkSetModifiable(runtime, receiver);
-  addAllToSet(runtime, receiver as DartObject, elements);
+  const set = receiver as DartObject;
+  checkElement(runtime, elements, interfaceType(coreTypes.iterable, [elementTypeOf(set)]), 'other');
+  checkSetModifiable(runtime, set);
+  addAllToSet(runtime, set, elements);
   return;
 });
 
 /** The VM's `_Set.addAll`: an empty set copies another `_Set` without deleted entries, and otherwise adds each. */
 function addAllToSet(runtime: Runtime, set: DartObject, elements: Value): void {
-  if (isPlainHashObject(runtime, elements, '_Set') && store(set).quickCopy(store(elements))) return;
+  if (quickCopySet(runtime, set, elements)) return;
   forEachValue(runtime, elements, (value) => {
     checkElement(runtime, value, elementTypeOf(set), 'value');
     store(set).set(value, undefined);
@@ -1218,8 +1251,10 @@ define('Map.removeWhere', (runtime, receiver, [test]) => {
   return;
 });
 define('Map.addAll', (runtime, receiver, [other]) => {
-  checkMapModifiable(runtime, receiver);
-  addAllToMap(runtime, receiver as DartObject, other);
+  const map = receiver as DartObject;
+  checkElement(runtime, other, interfaceType(coreTypes.map, map.typeArgs), 'other');
+  checkMapModifiable(runtime, map);
+  addAllToMap(runtime, map, other);
   return;
 });
 define('Map.remove', (runtime, receiver, [key]) => {
@@ -1383,11 +1418,27 @@ define('Map.putIfAbsent', (runtime, receiver, [key, ifAbsent]) => {
 
 /** The VM's `_Map.addAll`: an empty map copies another `_Map` without deleted entries, and otherwise sets each. */
 export function addAllToMap(runtime: Runtime, map: DartObject, other: Value): void {
-  if (isPlainHashObject(runtime, other, '_Map') && store(map).quickCopy(store(other))) return;
-  forEachEntry(runtime, other, (key, value) => store(map).set(key, value));
+  const keyType = elementTypeOf(map, 0);
+  const valueType = elementTypeOf(map, 1);
+  if (
+    isPlainHashObject(runtime, other, '_Map') &&
+    isSubtype(elementTypeOf(other, 0), keyType) &&
+    isSubtype(elementTypeOf(other, 1), valueType) &&
+    store(map).quickCopy(store(other))
+  )
+    return;
+  forEachEntry(runtime, other, (key, value) => {
+    implicitCast(runtime, key, keyType);
+    implicitCast(runtime, value, valueType);
+    store(map).set(key, value);
+  });
 }
 
 /** The quick copy of `_Set.addAll` into an empty set, telling whether it applied. */
 export function quickCopySet(runtime: Runtime, set: DartObject, other: Value): boolean {
-  return isPlainHashObject(runtime, other, '_Set') && store(set).quickCopy(store(other));
+  return (
+    isPlainHashObject(runtime, other, '_Set') &&
+    isSubtype(elementTypeOf(other), elementTypeOf(set)) &&
+    store(set).quickCopy(store(other))
+  );
 }
