@@ -1,3 +1,4 @@
+import { utf8Length } from './utf8';
 import { ElementPlace, EnumValue, isPlace, type Place, StructValue, type Value } from './values';
 
 /**
@@ -179,15 +180,6 @@ export function claimStrings(elements: Value[]): Value[] {
 export function concatStrings(left: string, right: string): string {
   const capacity = inFlight.get(left) ?? utf8Length(left);
   return madeString(left + right, reservedCapacity(capacity, utf8Length(left), utf8Length(right), 1));
-}
-
-export function utf8Length(text: string): number {
-  let length = 0;
-  for (const char of text) {
-    const code = char.codePointAt(0) as number;
-    length += code < 0x80 ? 1 : code < 0x8_00 ? 2 : code < 0x1_00_00 ? 3 : 4;
-  }
-  return length;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

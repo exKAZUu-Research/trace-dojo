@@ -5,7 +5,7 @@ import { strSliceBytes } from '../interpreter';
 import { described, fieldsPart, listPart, numberPart, tuplePart } from '../iterDebug';
 import { RustPanic } from '../runtime';
 import { CHAR, REF_STR, shallow, type Type } from '../types';
-import { decodeUtf8 } from '../utf8';
+import { decodeUtf8, utf8Bytes, utf8Length as byteLength } from '../utf8';
 import {
   DONE,
   FnValue,
@@ -49,15 +49,6 @@ const encoder = new TextEncoder();
 
 function str(value: Value): string {
   return deref(value) as string;
-}
-
-export function byteLength(text: string): number {
-  let length = 0;
-  for (const char of text) {
-    const code = char.codePointAt(0)!;
-    length += code < 0x80 ? 1 : code < 0x8_00 ? 2 : code < 0x1_00_00 ? 3 : 4;
-  }
-  return length;
 }
 
 /** The byte offset in UTF-8 of a UTF-16 index. */
@@ -187,7 +178,12 @@ function secondByteRange(first: number): [number, number] {
   return [0x80, 0xbf];
 }
 
-function strIter(items: string[]): IterValue {
+function strIter(text: string, ctx: NativeContext): IterValue {
+  const items: string[] = [];
+  for (const char of text) {
+    ctx.runtime.allocate(1);
+    items.push(char);
+  }
   return arrayIter(items);
 }
 
@@ -289,13 +285,14 @@ function rangeBounds(range: Value, length: number): { start: number; end: number
 const strNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
   len: ([s]) => BigInt(byteLength(str(s))),
   is_empty: ([s]) => str(s).length === 0,
-  chars: ([s]) => strIter([...str(s)]),
-  bytes: ([s]) => arrayIter(Array.from(encoder.encode(str(s)), BigInt)),
-  char_indices: ([s]) => {
+  chars: ([s], ctx) => strIter(str(s), ctx),
+  bytes: ([s], ctx) => arrayIter(utf8Bytes(str(s), ctx.runtime)),
+  char_indices: ([s], ctx) => {
     const text = str(s);
     const items: Value[] = [];
     let offset = 0;
     for (const char of text) {
+      ctx.runtime.allocate(3);
       items.push([BigInt(offset), char]);
       offset += byteLength(char);
     }
@@ -316,7 +313,7 @@ const strNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
       ]);
     });
   },
-  as_bytes: ([s]) => Array.from(encoder.encode(str(s)), BigInt),
+  as_bytes: ([s], ctx) => utf8Bytes(str(s), ctx.runtime),
   trim: ([s]) => trimWith(str(s), true, true, isWhitespace),
   trim_start: ([s]) => trimWith(str(s), true, false, isWhitespace),
   trim_end: ([s]) => trimWith(str(s), false, true, isWhitespace),
@@ -532,7 +529,7 @@ const stringNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
   },
   as_str: ([self]) => str(self),
   as_mut_str: ([self]) => self,
-  into_bytes: ([self]) => Array.from(encoder.encode(str(self)), BigInt),
+  into_bytes: ([self], ctx) => utf8Bytes(str(self), ctx.runtime),
   into_boxed_str: ([self]) => str(self),
   retain: ([self, f], ctx) => {
     const place = placeOf(self);
@@ -548,7 +545,7 @@ const stringNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
     const removed = strSliceBytes(text, start, end, ctx.span);
     const head = strSliceBytes(text, 0, start, ctx.span);
     place.set(head + text.slice(head.length + removed.length));
-    const iter = strIter([...removed]);
+    const iter = strIter(removed, ctx);
     return described(iter, (show) =>
       tuplePart('Drain', [(indent) => show((iter.rest?.() ?? []).join(''), REF_STR, indent)])
     );

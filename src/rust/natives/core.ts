@@ -5,6 +5,7 @@ import { normalize } from '../infer';
 import { castValue, cloneValue, compareValues, valuesEqual } from '../ops';
 import { FmtFailure, ProcessExit, RustPanic } from '../runtime';
 import { intMax, type IntName, shallow, substitute as substituteType, type Type } from '../types';
+import { utf8Bytes } from '../utf8';
 import {
   DynValue,
   EnumValue,
@@ -305,7 +306,7 @@ define({
     const value = deref(self);
     // A string as `[u8]` is its UTF-8 bytes.
     const isBytes = normalize(shallow(ctx.typeArgs[1])).kind === 'slice' && typeof value === 'string';
-    return isBytes ? Array.from(new TextEncoder().encode(value), BigInt) : value;
+    return isBytes ? utf8Bytes(value, ctx.runtime) : value;
   },
   'std::mem::size_of': (_args, ctx) => BigInt(sizeOf(ctx.typeArgs[0])),
   'std::mem::swap': ([x, y]) => {
@@ -408,10 +409,8 @@ export function convert(ctx: NativeContext, value: Value, from: Type, to: Type):
         return deref(value) as string;
       }
       case 'Vec': {
-        const isText = typeof deref(value) === 'string';
-        return isText
-          ? Array.from(new TextEncoder().encode(deref(value) as string), BigInt)
-          : [...sliceItems(deref(value))];
+        const input = deref(value);
+        return typeof input === 'string' ? utf8Bytes(input, ctx.runtime) : [...sliceItems(input)];
       }
       case 'Option': {
         return some(ctx, value);

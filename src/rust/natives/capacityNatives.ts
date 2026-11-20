@@ -10,11 +10,11 @@ import {
   setVecCapacity,
   shrinkVec,
   stringCapacity,
-  utf8Length,
   vecCapacity,
 } from '../capacity';
 import { iteratorCapability } from '../traits';
 import type { Type } from '../types';
+import { utf8Length } from '../utf8';
 import { ElementPlace, type IterValue, sliceLength, UNIT_VALUE, type Value } from '../values';
 import { isTrustedLen } from './iterators';
 import { sizeOf } from './layout';
