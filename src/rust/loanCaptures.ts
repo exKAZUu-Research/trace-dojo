@@ -1,6 +1,6 @@
 import type { Annotations, LocalVar } from './annotations';
-import type { Expr } from './ast';
-import { forEachDirect } from './astWalk';
+import type { Expr, Pattern } from './ast';
+import { forEachDirect, patternBindingParts } from './astWalk';
 import { normalize } from './infer';
 import { derefSteps, typeAfter } from './regions';
 import { ref, shallow, substitute, type Type } from './types';
@@ -22,16 +22,30 @@ export function capturedPlaces(annotations: Annotations, body: Expr, local: Loca
   );
 }
 
+export function capturedStoragePlaces(annotations: Annotations, body: Expr, local: LocalVar): Projection[] {
+  const storage = new Map<string, Projection>();
+  for (const { proj } of capturedPlaces(annotations, body, local)) {
+    const deref = proj.findIndex((part) => part === '*' || part === '#' || part === '[]');
+    const path = deref === -1 ? proj : proj.slice(0, deref);
+    if (path.length === 0) return [{ proj: [], type: local.type }];
+    storage.set(path.join('.'), { proj: path, type: projectionPrefixType(local.type, path) });
+  }
+  const places = [...storage.values()];
+  return places.filter(
+    ({ proj }) => !places.some(({ proj: other }) => other.length < proj.length && covers(other, proj))
+  );
+}
+
 export function captureLayout(
   annotations: Annotations,
   body: Expr,
   local: LocalVar,
-  modeOf: (place: Expr) => CaptureMode,
+  modeOf: (place: Expr, binding?: LocalVar) => CaptureMode,
   fallback: CaptureMode
 ): Type[] {
   const observations: (Projection & { mode: CaptureMode })[] = [];
-  forEachCapture(annotations, body, local, (place, { proj, type }) => {
-    const mode = modeOf(place);
+  forEachCapture(annotations, body, local, (place, { proj, type }, binding) => {
+    const mode = modeOf(place, binding);
     const boundary = proj.findIndex((part) => part === '[]' || (mode === 'value' && (part === '#' || part === '*')));
     const path = boundary === -1 ? proj : proj.slice(0, boundary);
     observations.push({ proj: path, type: boundary === -1 ? type : projectionPrefixType(local.type, path), mode });
@@ -50,11 +64,13 @@ function covers(prefix: string[], path: string[]): boolean {
   return prefix.length <= path.length && prefix.every((part, index) => path[index] === part);
 }
 
+// code-gauge-allow functionCognitiveComplexity 30 -- Expression projections and pattern projections share one checked walk.
+// code-gauge-allow functionNcss 36 -- Keeps source places and their evaluated index inputs together.
 function forEachCapture(
   annotations: Annotations,
   body: Expr,
   local: LocalVar,
-  capture: (expr: Expr, projection: Projection) => void
+  capture: (expr: Expr, projection: Projection, binding?: LocalVar) => void
 ): void {
   visit(body);
 
@@ -69,12 +85,63 @@ function forEachCapture(
     }
     const proj = fieldChain(annotations, expr, local);
     if (!proj) {
-      forEachDirect(expr, visit);
+      forEachDirect(expr, visit, capturePattern);
       return;
     }
     const reborrows = annotations.reborrows.has(expr);
     capture(expr, { proj: reborrows ? [...proj, '*'] : proj, type: expr.ty ?? local.type });
     if (expr.kind === 'index') visit(expr.index);
+  }
+
+  function capturePattern(pattern: Pattern, source: Expr): boolean {
+    const base = fieldChain(annotations, source, local);
+    if (!base) return false;
+    const parts = projectedBindings(pattern, annotations);
+    if (!parts?.length) return false;
+    for (const part of parts) {
+      const path = part.path.split('.').slice(1);
+      if (part.throughRef) {
+        capture(source, { proj: base, type: source.ty ?? local.type }, part.local);
+        continue;
+      }
+      const type = normalize(shallow(part.local.type));
+      const projected = part.local.mode !== 'move' && type.kind === 'ref' ? type.target : type;
+      capture(source, { proj: [...base, ...path], type: projected }, part.local);
+    }
+    if (source.kind === 'index') visit(source.index);
+    return true;
+  }
+}
+
+export function projectedBindings(
+  pattern: Pattern,
+  annotations: Annotations
+): ReturnType<typeof patternBindingParts> | undefined {
+  const aggregate = pattern.kind === 'tuple' || pattern.kind === 'struct' || pattern.kind === 'tupleStruct';
+  return aggregate && canProjectPattern(pattern) ? patternBindingParts(pattern, annotations) : undefined;
+}
+
+function canProjectPattern(pattern: Pattern): boolean {
+  switch (pattern.kind) {
+    case 'binding': {
+      return !pattern.sub;
+    }
+    case 'wild': {
+      return true;
+    }
+    case 'tuple': {
+      return pattern.elems.every(canProjectPattern);
+    }
+    case 'tupleStruct':
+    case 'struct': {
+      const type = pattern.ty && normalize(shallow(pattern.ty));
+      if (type?.kind !== 'adt' || type.def.kind !== 'struct') return false;
+      const fields = pattern.kind === 'struct' ? pattern.fields.map((field) => field.pattern) : pattern.elems;
+      return fields.every(canProjectPattern);
+    }
+    default: {
+      return false;
+    }
   }
 }
 
@@ -102,10 +169,13 @@ function receiverProjection(
   if (!base) return undefined;
   const method = annotations.methods.get(expr);
   const receiver = method?.receiver;
-  const proj = [...base, ...derefSteps(receiver?.derefs)];
+  const steps = receiver?.derefs ?? [];
+  const beforeLast = steps.at(-1) === 'own' ? typeAfter(expr.receiver.ty, steps.slice(0, -1)) : undefined;
+  const storageSteps = beforeLast?.kind === 'array' ? steps.slice(0, -1) : steps;
+  const proj = [...base, ...derefSteps(storageSteps)];
   if (receiver?.autoref === 'none' && (method?.fn.selfMode === 'ref' || method?.fn.selfMode === 'mutRef'))
     proj.push('*');
-  return { proj, type: typeAfter(expr.receiver.ty, receiver?.derefs ?? []) ?? local.type };
+  return { proj, type: typeAfter(expr.receiver.ty, storageSteps) ?? local.type };
 }
 
 function fieldChain(annotations: Annotations, expr: Expr, local: LocalVar): string[] | undefined {

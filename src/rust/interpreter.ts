@@ -43,6 +43,7 @@ import {
   FormatterValue,
   isPlace,
   type Place,
+  type RangeValue,
   StringValue,
   StructValue,
   textOf,
@@ -431,8 +432,9 @@ export class Interpreter implements CallSupport {
     });
   }
 
-  strSlice(text: string, start: number | undefined, end: number | undefined, span: Span): string {
-    return strSliceBytes(text, start, end, span);
+  strSlice(text: string, range: RangeValue | undefined, span: Span): string {
+    const writtenEnd = range?.inclusive ? (range.end as bigint) : undefined;
+    return strSliceBytes(text, range?.sliceStart(), range?.sliceEnd(), span, writtenEnd);
   }
 
   turtleNew(args: Value[], span: Span, frame: Frame): Value {
@@ -511,20 +513,29 @@ function unwrapDyn(receiver: Value): { type: Type; receiver: Value } {
 }
 
 /** `&s[start..end]` of a string by byte offsets, panicking as Rust does out of bounds or inside a character. */
-export function strSliceBytes(text: string, start: number | undefined, end: number | undefined, span: Span): string {
+export function strSliceBytes(
+  text: string,
+  start: number | bigint | undefined,
+  end: number | bigint | undefined,
+  span: Span,
+  writtenEnd?: bigint
+): string {
   const bytes = new TextEncoder().encode(text);
   const from = start ?? 0;
   const to = end ?? bytes.length;
-  if (to > bytes.length) {
-    throw new RustPanic(`end byte index ${to} is out of bounds for string of length ${bytes.length}`, span);
-  }
   if (from > bytes.length) {
     throw new RustPanic(`start byte index ${from} is out of bounds for string of length ${bytes.length}`, span);
   }
+  if (to > bytes.length) {
+    throw new RustPanic(
+      `end byte index ${writtenEnd ?? to} is out of bounds for string of length ${bytes.length}`,
+      span
+    );
+  }
   if (from > to) throw new RustPanic(`byte range starts at ${from} but ends at ${to}`, span);
   for (const [index, which] of [
-    [from, 'start'],
-    [to, 'end'],
+    [Number(from), 'start'],
+    [Number(to), 'end'],
   ] as const) {
     if (index < bytes.length && (bytes[index] & 0xc0) === 0x80) {
       let charStart = index;
@@ -538,7 +549,7 @@ export function strSliceBytes(text: string, start: number | undefined, end: numb
       );
     }
   }
-  return decodeUtf8(bytes.subarray(from, to));
+  return decodeUtf8(bytes.subarray(Number(from), Number(to)));
 }
 
 export { cloneValue, compareValues, valuesEqual, StructValue, EnumValue, UNIT_VALUE };

@@ -4944,3 +4944,121 @@ test('checks typed repeated allocations before converting the count to a number'
     uncaughtException: expect.stringContaining('memory allocation of 1125899906842624 bytes failed'),
   });
 });
+
+test('captures array storage before slice coercion and projects destructured closure captures', () => {
+  const program = `struct S { a: String, b: [u8; 64] }
+struct Nested { x: S, y: u64 }
+fn size<T>(_: T) -> usize { std::mem::size_of::<T>() }
+fn main() {
+    let s = S { a: String::new(), b: [0; 64] };
+    let mixed = || { drop(s.a); println!("{} {} {}", s.b.len(), s.b.iter().count(), s.b.is_empty()); };
+    let nested = Nested { x: S { a: String::new(), b: [1; 64] }, y: 7 };
+    let named = || { let Nested { x: S { a, b: _ }, y: _ } = nested; drop(a); };
+    let pair = (String::new(), [2u8; 64]);
+    let tuple = || { let (a, _) = pair; drop(a); };
+    println!("{} {} {}", size(mixed), size(named), size(tuple));
+    println!("{} {} {}", nested.x.b[0], nested.y, pair.1[0]);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '32 24 24\n1 7 2\n',
+  });
+});
+
+test('uses Rust relation methods for Ord extrema and forwards free extrema to Ord overrides', () => {
+  const program = `use std::cmp::{self, Ordering};
+#[derive(Eq, PartialEq)]
+struct Job(i32);
+impl PartialOrd for Job {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        print!("p{}:{} ", self.0, other.0);
+        Some(self.0.cmp(&other.0))
+    }
+}
+impl Ord for Job {
+    fn cmp(&self, other: &Self) -> Ordering {
+        print!("c{}:{} ", self.0, other.0);
+        other.0.cmp(&self.0)
+    }
+}
+#[derive(Eq, PartialEq, PartialOrd)]
+struct Override(i32);
+impl Ord for Override {
+    fn cmp(&self, other: &Self) -> Ordering { self.0.cmp(&other.0) }
+    fn max(self, other: Self) -> Self { Self(self.0 + other.0) }
+}
+fn main() {
+    println!("{} {}", Job(1).max(Job(5)).0, Job(1).min(Job(5)).0);
+    println!("{} {}", cmp::max(Job(1), Job(5)).0, cmp::min(Job(1), Job(5)).0);
+    println!("{}", Job(5).clamp(Job(1), Job(3)).0);
+    println!("{}", cmp::max(Override(2), Override(4)).0);
+    println!("{}", [Job(1), Job(5)].into_iter().max().unwrap().0);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'p5:1 p5:1 5 1\np5:1 p5:1 5 1\np1:3 p5:1 p5:3 3\n6\nc1:5 1\n',
+  });
+});
+
+test('reports exact written range bounds before converting them into byte or slice offsets', () => {
+  for (const [body, message] of [
+    [
+      'let s = String::from("abc"); let _ = &s[..=s.len()];',
+      'end byte index 3 is out of bounds for string of length 3',
+    ],
+    [
+      'let s = String::from("abc"); let _ = &s[1..=usize::MAX];',
+      'end byte index 18446744073709551615 is out of bounds for string of length 3',
+    ],
+    ['let s = String::from("abc"); let _ = &s[6..=5];', 'start byte index 6 is out of bounds for string of length 3'],
+    [
+      'let s = String::from("éx"); let _ = &s[..=0];',
+      "end byte index 1 is not a char boundary; it is inside 'é' (bytes 0..2 of string)",
+    ],
+    [
+      'let v = vec![1, 2, 3]; let _ = &v[1..=usize::MAX];',
+      'range end index 18446744073709551615 out of range for slice of length 3',
+    ],
+  ] as const) {
+    expect(executeProgram('rust', rustMain(body))).toMatchObject({
+      kind: 'executed',
+      uncaughtException: expect.stringContaining(message),
+    });
+  }
+});
+
+test('uses the individual Rust relation operators for heap sifts and reverses operands for Reverse', () => {
+  const program = `use std::cmp::{Ordering, Reverse};
+use std::collections::BinaryHeap;
+#[derive(Clone, Copy, Eq, PartialEq)]
+struct K(i32);
+impl PartialOrd for K {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> { Some(self.0.cmp(&other.0)) }
+    fn lt(&self, other: &Self) -> bool { print!("lt{}:{} ", self.0, other.0); self.0 < other.0 }
+    fn le(&self, other: &Self) -> bool { print!("le{}:{} ", self.0, other.0); self.0 <= other.0 }
+    fn ge(&self, other: &Self) -> bool { print!("ge{}:{} ", self.0, other.0); self.0 >= other.0 }
+}
+impl Ord for K {
+    fn cmp(&self, other: &Self) -> Ordering {
+        print!("cmp{}:{} ", self.0, other.0);
+        other.0.cmp(&self.0)
+    }
+}
+fn main() {
+    let mut h = BinaryHeap::from([K(3), K(1), K(2)]);
+    println!("{}", h.peek().unwrap().0);
+    h.push(K(5));
+    println!("{}", h.pop().unwrap().0);
+    println!("{:?}", h.into_sorted_vec().into_iter().map(|k| k.0).collect::<Vec<_>>());
+    println!("{}", Reverse(K(1)) < Reverse(K(2)));
+    println!("{:?}", Reverse(K(1)).cmp(&Reverse(K(2))));
+    let mut keys = [K(3), K(1), K(2)];
+    keys.sort_by_key(|k| Reverse(*k));
+    println!("{:?}", keys.map(|k| k.0));
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'le1:2 ge3:2 3\nle5:1 le5:3 le3:2 le1:3 5\nlt2:1 [1, 2, 3]\nlt2:1 false\ncmp2:1 Less\nlt3:1 lt1:2 lt3:2 [3, 2, 1]\n',
+  });
+});

@@ -56,7 +56,10 @@ export class Frame implements TracedFrame {
 
   /** Ends the scope of variables, which leave the trace with the references to them. */
   endScope(slots: readonly number[]): void {
-    for (const slot of slots) this.locals[slot] = UNASSIGNED;
+    for (const slot of slots) {
+      this.locals[slot] = UNASSIGNED;
+      this.referents.delete(slot);
+    }
     for (const [slot, { root }] of this.referents) if (slots.includes(root)) this.referents.delete(slot);
   }
   /** Values in use that no variable holds, such as the value a `for` loop iterates, for garbage collection. */

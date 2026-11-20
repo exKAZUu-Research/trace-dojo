@@ -299,7 +299,7 @@ function parse(ctx: NativeContext, text: string): Value {
 
 function rangeBounds(range: Value, length: number): { start: number; end: number } {
   const bounds = deref(range) as RangeValue | undefined;
-  return { start: bounds?.sliceStart() ?? 0, end: bounds?.sliceEnd() ?? length };
+  return { start: Number(bounds?.sliceStart() ?? 0), end: Number(bounds?.sliceEnd() ?? length) };
 }
 
 const strNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {

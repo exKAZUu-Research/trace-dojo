@@ -241,13 +241,13 @@ export class RangeValue {
     public exhausted = false
   ) {}
 
-  sliceStart(): number | undefined {
+  sliceStart(): bigint | undefined {
     if (this.exhausted && this.inclusive) return this.sliceEnd();
-    return this.start === undefined ? undefined : Number(this.start as bigint);
+    return this.start as bigint | undefined;
   }
 
-  sliceEnd(): number | undefined {
-    return this.end === undefined ? undefined : Number(this.end as bigint) + (this.inclusive ? 1 : 0);
+  sliceEnd(): bigint | undefined {
+    return this.end === undefined ? undefined : (this.end as bigint) + (this.inclusive ? 1n : 0n);
   }
 }
 

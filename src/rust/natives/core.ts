@@ -219,6 +219,12 @@ function defaultBoxValue(ctx: NativeContext, type: Type): Value {
   return defaultValue(ctx, content);
 }
 
+function callOrd(ctx: NativeContext, name: 'max' | 'min', args: Value[]): Value {
+  const { interp, span, frame } = ctx;
+  const method = interp.program.traitDef('Ord').methods.get(name)!;
+  return interp.callFn(method, [ctx.typeArgs[0]], args, undefined, span, frame);
+}
+
 define({
   'Clone::clone': ([self], ctx) => cloneValue(selfType(ctx), deref(self)),
   'Clone::clone_from': ([self, source], ctx) => {
@@ -270,24 +276,24 @@ define({
   'PartialOrd::gt': ([self, other], ctx) => testPartialOrder('gt', selfType(ctx), self, other, ctx.typeArgs[1]),
   'PartialOrd::ge': ([self, other], ctx) => testPartialOrder('ge', selfType(ctx), self, other, ctx.typeArgs[1]),
   'Ord::cmp': ([self, other], ctx) => ordering(ctx, compareValues(selfType(ctx), self, other) ?? 0),
-  'Ord::max': ([self, other], ctx) => ((compareValues(selfType(ctx), self, other) ?? 0) > 0 ? self : other),
-  'Ord::min': ([self, other], ctx) => ((compareValues(selfType(ctx), self, other) ?? 0) <= 0 ? self : other),
+  'Ord::max': ([self, other], ctx) => (testPartialOrder('lt', selfType(ctx), other, self) ? self : other),
+  'Ord::min': ([self, other], ctx) => (testPartialOrder('lt', selfType(ctx), other, self) ? other : self),
   'Ord::clamp': ([self, min, max], ctx) => {
     const type = selfType(ctx);
-    if ((compareValues(type, min, max) ?? 0) > 0) {
+    if (!testPartialOrder('le', type, min, max)) {
       // Integers report their bounds; other types assert.
       const isInt = normalize(shallow(type)).kind === 'int';
       panic(ctx, isInt ? `min > max. min = ${min as bigint}, max = ${max as bigint}` : 'assertion failed: min <= max');
     }
-    if ((compareValues(type, self, min) ?? 0) < 0) return min;
-    if ((compareValues(type, self, max) ?? 0) > 0) return max;
+    if (testPartialOrder('lt', type, self, min)) return min;
+    if (testPartialOrder('gt', type, self, max)) return max;
     return self;
   },
   'Default::default': (_args, ctx) => builtinDefaultValue(ctx, selfType(ctx)),
   'From::from': ([value], ctx) => convert(ctx, value, ctx.typeArgs[1], selfType(ctx)),
   'Into::into': ([value], ctx) => ctx.interp.convertFrom(value, selfType(ctx), ctx.typeArgs[1], ctx.frame),
-  'std::cmp::max': ([a, b], ctx) => ((compareValues(ctx.typeArgs[0], a, b) ?? 0) > 0 ? a : b),
-  'std::cmp::min': ([a, b], ctx) => ((compareValues(ctx.typeArgs[0], a, b) ?? 0) <= 0 ? a : b),
+  'std::cmp::max': (args, ctx) => callOrd(ctx, 'max', args),
+  'std::cmp::min': (args, ctx) => callOrd(ctx, 'min', args),
   'std::cmp::max_by': ([a, b, f], ctx) => ((call(ctx, f, [a, b]) as EnumValue).variant === 2 ? a : b),
   'std::cmp::max_by_key': ([a, b, f], ctx) => {
     const order = compareValues(ctx.typeArgs[2], call(ctx, f, [a]), call(ctx, f, [b])) ?? 0;

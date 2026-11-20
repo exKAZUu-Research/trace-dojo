@@ -4,7 +4,7 @@ import { forEachDirect, patternBindingParts } from './astWalk';
 import type { Checker } from './checker';
 import { checkPattern } from './checkerPatterns';
 import { compileError } from './items';
-import { captureLayout, type CaptureMode } from './loanCaptures';
+import { captureLayout, type CaptureMode, projectedBindings } from './loanCaptures';
 import { typeAfter } from './regions';
 import type { TraitSolver } from './traits';
 import { type ClosureType, freshVar, newClosureType, resolve, shallow, type Type, UNIT } from './types';
@@ -93,7 +93,7 @@ function closureKindOf(
           : ('ref' as const),
   }));
   const kind = uses.moved.size > 0 ? 'FnOnce' : uses.mutated.size > 0 ? 'FnMut' : 'Fn';
-  const modeOf = (place: Expr): CaptureMode => (fn.isMove ? 'value' : (uses.modes.get(place) ?? 'ref'));
+  const modeOf = (place: Expr, binding?: LocalVar): CaptureMode => (fn.isMove ? 'value' : uses.modeOf(place, binding));
   const layoutCaptures = fn.captures.flatMap((local, index) =>
     captureLayout(annotations, body, local, modeOf, captures[index].mode)
   );
@@ -112,6 +112,12 @@ class CaptureUses {
     private readonly annotations: Annotations,
     private readonly solver: TraitSolver
   ) {}
+
+  modeOf(place: Expr, binding?: LocalVar): CaptureMode {
+    if (!binding) return this.modes.get(place) ?? 'ref';
+    if (binding.mode === 'refMut') return 'mut';
+    return binding.mode === 'move' && !this.isCopy(binding.type) ? 'value' : 'ref';
+  }
 
   /** Visits an expression, whose value the closure moves when `consumed`. */
   visit(expr: Expr | undefined, consumed: boolean): void {
@@ -132,7 +138,18 @@ class CaptureUses {
       (pattern) => bindsByValue(pattern, this.annotations, this.isCopy),
       this.isCopy
     );
-    forEachDirect(expr, (child) => this.visit(child, consumes(child, consumed)));
+    forEachDirect(
+      expr,
+      (child) => this.visit(child, consumes(child, consumed)),
+      (pattern, source) => {
+        if (!this.capturedLocal(source)) return false;
+        const parts = projectedBindings(pattern, this.annotations);
+        if (!parts) return false;
+        const moves = parts.some(({ local, throughRef }) => !throughRef && !this.isCopy(local.type));
+        this.visit(source, moves);
+        return true;
+      }
+    );
   }
 
   private mutate(place: Expr): void {

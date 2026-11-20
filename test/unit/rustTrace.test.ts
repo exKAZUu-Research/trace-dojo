@@ -394,3 +394,16 @@ test('Rust traces brace-free statement match arms as Java switch cases', () => {
   const { traceItems } = traceProgram('rust', program, program);
   expect(traceItems.map(({ line }) => line)).toEqual([0, 2, 3, 5, 3, 6, 6, 3, 7]);
 });
+
+test('drops shared-reference aliases when their binding scope ends', () => {
+  const source = `fn main() {
+    let mut n = 1;
+    {
+        let r = &n;
+        let r2 = r;
+        println!("{}", r2);
+    }
+    n = 2;
+}`;
+  expect(traceProgram('rust', source, source).finalVars).toEqual({ n: 2 });
+});

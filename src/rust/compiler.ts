@@ -1,7 +1,7 @@
 // code-gauge-allow-file fileNcss 605 -- Keeps the compilation that shares a function's context and step state together.
 import type { Annotations, Coercion, FnContext, LocalVar, PathRes } from './annotations';
 import type { Block, Expr, Pattern, Span, Stmt } from './ast';
-import { forEachDirect, patternBindings } from './astWalk';
+import { patternBindings } from './astWalk';
 import type { Checker } from './checker';
 import { compileCall, compileMethodCall } from './compilerCalls';
 import { construct, evaluateValues, isPlaceExpr, isRefType, LocalPlace } from './compilerCommon';
@@ -13,6 +13,7 @@ import { compileField, compileIndex, compilePlace } from './compilerPlaces';
 import type { Formatter } from './fmt';
 import { normalize } from './infer';
 import type { Program } from './items';
+import { capturedStoragePlaces } from './loanCaptures';
 import { castValue, copyValue, needsCopy } from './ops';
 import { ControlSignal, type Frame, type FunctionInfo, MOVED, UNASSIGNED } from './runtime';
 import { runtimeType } from './runtimeTypes';
@@ -53,7 +54,7 @@ export interface CallSupport {
   formatter: Formatter;
   turtleNew(args: Value[], span: Span, frame: Frame): Value;
   convertError(value: Value, from: Type, to: Type, frame: Frame): Value;
-  strSlice(text: string, start: number | undefined, end: number | undefined, span: Span): string;
+  strSlice(text: string, range: RangeValue | undefined, span: Span): string;
 }
 
 type ExprOf<K extends Expr['kind']> = Extract<Expr, { kind: K }>;
@@ -615,28 +616,10 @@ export class Compiler {
     return new CellPlace(value);
   }
 
-  /**
-   * The fields of a captured variable that a closure's body uses (`p.name`), which it captures on their own as edition
-   * 2021 does, or undefined when the body uses the whole variable.
-   */
-  // code-gauge-allow functionCognitiveComplexity 16 -- The walk keeps each projected field attached to its capture path.
   private capturedFields(body: Expr, local: LocalVar): number[][] | undefined {
-    const fields: number[][] = [];
-    const path = (expr: Expr): number[] | undefined => {
-      const res = expr.kind === 'path' ? this.annotations.paths.get(expr) : undefined;
-      if ((res?.kind === 'capture' || res?.kind === 'local') && res.local === local) return [];
-      if (expr.kind !== 'field') return undefined;
-      const field = this.annotations.fields.get(expr);
-      const base = field?.derefs.length === 0 && path(expr.operand);
-      return base ? [...base, field.index] : undefined;
-    };
-    const visit = (expr: Expr): void => {
-      const capture = path(expr);
-      if (capture) fields.push(capture);
-      else forEachDirect(expr, visit);
-    };
-    visit(body);
-    return fields.length > 0 && fields.every((field) => field.length > 0) ? fields : undefined;
+    const paths = capturedStoragePlaces(this.annotations, body, local);
+    if (paths.some(({ proj }) => proj.length === 0)) return undefined;
+    return paths.map(({ proj }) => captureFieldIndices(local.type, proj));
   }
 
   private moveCapturedFields(frame: Frame, value: StructValue | Value[], type: Type, paths: number[][]): Value {
@@ -680,6 +663,16 @@ export class Compiler {
       throw new ControlSignal('return', undefined, new EnumValue(value.def, 1, [error]));
     };
   }
+}
+
+function captureFieldIndices(type: Type, path: string[]): number[] {
+  let current = type;
+  return path.map((field) => {
+    const t = normalize(shallow(current));
+    const index = t.kind === 'adt' ? t.def.variants[0].fields.findIndex(({ name }) => name === field) : Number(field);
+    current = captureFieldType(current, index);
+    return index;
+  });
 }
 
 function captureFieldType(type: Type, index: number): Type {

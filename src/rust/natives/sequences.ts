@@ -29,6 +29,7 @@ import {
   arrayIter,
   collectVec,
   extendedValue,
+  heapIntoSortedVec,
   heapPop,
   heapPush,
   isTrustedLen,
@@ -40,7 +41,7 @@ import {
 } from './iterators';
 import { layoutOf, sizeOf } from './layout';
 import { checkedRangeBounds } from './ranges';
-import { dedupBy, intoSortedVec, lessByKey, lessByPartialOrd, sortByCachedKey, sortSlice } from './sorting';
+import { dedupBy, lessByKey, lessByPartialOrd, sortByCachedKey, sortSlice } from './sorting';
 import {
   call,
   define,
@@ -797,7 +798,7 @@ const heapNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> 
   pop: ([self], ctx) => {
     const items = vec(self);
     if (items.length === 0) return none(ctx);
-    return some(ctx, heapPop(items, elemType(ctx)));
+    return some(ctx, heapPop(ctx, items, elemType(ctx)));
   },
   peek: ([self], ctx) => option(ctx, vec(self)[0], vec(self).length > 0),
   len: ([self]) => BigInt(vec(self).length),
@@ -810,7 +811,7 @@ const heapNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> 
   into_vec: ([self]) => vec(self),
   into_sorted_vec: ([self], ctx) => {
     const items = vec(self);
-    return intoSortedVec(items, (a, b) => compareValues(elemType(ctx), a, b) ?? 0);
+    return heapIntoSortedVec(items, elemType(ctx));
   },
   extend: ([self, iter], ctx) => {
     const items = vec(self);

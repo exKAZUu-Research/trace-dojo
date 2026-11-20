@@ -16,6 +16,7 @@ import {
 import { normalize } from './infer';
 import { compileError } from './items';
 import { LoanBuilder } from './loanBuilder';
+import { capturedStoragePlaces } from './loanCaptures';
 import type { LoanError } from './loanGraph';
 import { typeAfter } from './regions';
 import type { TraitSolver } from './traits';
@@ -603,25 +604,11 @@ export class BorrowChecker {
     return this.markMoved(state, place, expr.span, false);
   }
 
-  /**
-   * The places of a captured variable that a closure's body uses, which it captures each on its own as edition 2021
-   * does: `p.a` alone when the body uses only that field, or the whole variable (`''`).
-   */
   private capturedPaths(body: Expr, local: LocalVar): [string, Type][] {
-    const paths = new Map<string, Type>();
-    const visit = (expr: Expr): void => {
-      const place = this.placeOf(expr);
-      const fieldsOnly = expr.kind === 'path' || (expr.kind === 'field' && isFieldChain(expr));
-      if (fieldsOnly && place?.root === local) {
-        paths.set(place.path, expr.ty ?? local.type);
-        return;
-      }
-      forEachDirect(expr, visit);
-    };
-    visit(body);
-    if (paths.has('') || paths.size === 0) return [['', local.type]];
-    // A field whose parent is captured too goes with the parent.
-    return [...paths].filter(([path]) => ![...paths.keys()].some((other) => path.startsWith(`${other}.`)));
+    return capturedStoragePlaces(this.annotations, body, local).map(({ proj, type }) => [
+      proj.length === 0 ? '' : `.${proj.join('.')}`,
+      type,
+    ]);
   }
 
   /** Whether an expression is a capture, or a field of one, that the closure being checked owns. */
@@ -944,10 +931,4 @@ function isReference(type: Type | undefined): boolean {
 
 function diverges(ret: Type): boolean {
   return normalize(shallow(ret)).kind === 'never';
-}
-
-function isFieldChain(expr: Expr): boolean {
-  let current = expr;
-  while (current.kind === 'field') current = current.operand;
-  return current.kind === 'path';
 }

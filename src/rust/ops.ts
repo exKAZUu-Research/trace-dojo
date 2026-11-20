@@ -1,5 +1,5 @@
 import type { Span } from './ast';
-// code-gauge-allow-file fileNcss 503 -- Keeps type-directed arithmetic, comparison, and copying with their shared runtime hooks.
+// code-gauge-allow-file fileNcss 504 -- Keeps type-directed arithmetic, comparison, and copying with their shared runtime hooks.
 import { bigintToF32 } from './floatFormat';
 import { normalize } from './infer';
 import { RustPanic } from './runtime';
@@ -371,6 +371,11 @@ export function testPartialOrder(method: OrderMethod, type: Type, a: Value, b: V
     const user = hooks?.order?.(method, t, deref(a), deref(b), right);
     if (user !== undefined) return user;
   }
+  if (t.kind === 'adt' && t.def.builtin === 'Reverse' && right.kind === 'adt' && right.def.builtin === 'Reverse') {
+    const x = deref(a) as StructValue;
+    const y = deref(b) as StructValue;
+    return testPartialOrder(method, right.args[0], y.fields[0], x.fields[0], t.args[0]);
+  }
   const order = comparePartialValues(t, a, b, rhs);
   return order !== undefined && orderTests[method](order);
 }
@@ -444,8 +449,7 @@ function compareAdt(t: Type & { kind: 'adt' }, x: Value, y: Value, partial: bool
       return compareValues(t.args[0], x, y, partial);
     }
     case 'Reverse': {
-      const order = compareValues(t.args[0], (x as StructValue).fields[0], (y as StructValue).fields[0], partial);
-      return order === undefined ? undefined : -order;
+      return compareValues(t.args[0], (y as StructValue).fields[0], (x as StructValue).fields[0], partial);
     }
     case 'BTreeSet': {
       return compareOrderedEntries(t.args[0], x as SetValue, y as SetValue, partial);

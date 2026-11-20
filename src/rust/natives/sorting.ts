@@ -1,6 +1,6 @@
 import { comparePartialValues, testPartialOrder } from '../ops';
 import { type IntName, intType, type Type } from '../types';
-import { ElementPlace, sliceItems, sliceSet, swapOwnedElements, UNIT_VALUE, type Value } from '../values';
+import { ElementPlace, sliceItems, sliceSet, UNIT_VALUE, type Value } from '../values';
 import { sizeOf } from './layout';
 import type { SortElement } from './sort/shared';
 import { stableSort } from './sort/stable';
@@ -46,29 +46,8 @@ export function lessByKey(ctx: NativeContext, f: Value): (a: Value, b: Value) =>
   const keyType = ctx.typeArgs[1];
   return (a, b) => {
     const keyA = call(ctx, f, [a]);
-    return testPartialOrder('lt', keyType, keyA, call(ctx, f, [b]));
+    return ctx.runtime.withRoots([keyA], () => testPartialOrder('lt', keyType, keyA, call(ctx, f, [b])));
   };
-}
-
-/** `BinaryHeap::into_sorted_vec`: swaps the greatest to the end and sifts the rest down, as std's heap does. */
-export function intoSortedVec(data: Value[], compare: (a: Value, b: Value) => number): Value[] {
-  for (let end = data.length - 1; end > 0; end--) {
-    swapOwnedElements(data, 0, end);
-    siftDownRange(data, end, compare);
-  }
-  return data;
-}
-
-function siftDownRange(data: Value[], end: number, compare: (a: Value, b: Value) => number): void {
-  let hole = 0;
-  let child = 1;
-  while (child < end) {
-    if (child + 1 < end && compare(data[child], data[child + 1]) <= 0) child++;
-    if (compare(data[hole], data[child]) >= 0) return;
-    swapOwnedElements(data, hole, child);
-    hole = child;
-    child = 2 * hole + 1;
-  }
 }
 
 /**

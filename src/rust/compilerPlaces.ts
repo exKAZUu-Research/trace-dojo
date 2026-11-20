@@ -211,9 +211,7 @@ function rangeIndex(c: Compiler, base: Eval, index: Eval, isStr: boolean, span: 
     const container = base(frame);
     return frame.runtime.withRoots([container], () => {
       const range = index(frame) as RangeValue | undefined;
-      return isStr
-        ? c.support.strSlice(textOf(container), range?.sliceStart(), range?.sliceEnd(), span)
-        : sliceRange(container, range, span);
+      return isStr ? c.support.strSlice(textOf(container), range, span) : sliceRange(container, range, span);
     });
   };
 }
@@ -221,22 +219,18 @@ function rangeIndex(c: Compiler, base: Eval, index: Eval, isStr: boolean, span: 
 /** `&v[a..b]`: a window on a slice, panicking as Rust does when the range is out of order or bounds. */
 export function sliceRange(container: Value, range: RangeValue | undefined, span: Span): Value {
   const length = sliceLength(container);
-  const start = range?.sliceStart() ?? 0;
-  const end = range?.sliceEnd() ?? length;
+  const start = range?.sliceStart() ?? 0n;
+  const end = range?.sliceEnd() ?? BigInt(length);
   if (start > length) {
-    const index = range!.exhausted ? (range!.end as bigint) + 1n : (range!.start as bigint);
-    throw new RustPanic(`range start index ${index} out of range for slice of length ${length}`, span);
-  }
-  if (range?.inclusive && range.end !== undefined && (range.end as bigint) === 0xff_ff_ff_ff_ff_ff_ff_ffn) {
-    throw new RustPanic('attempted to index slice up to maximum usize', span);
+    throw new RustPanic(`range start index ${start} out of range for slice of length ${length}`, span);
   }
   if (start > end) throw new RustPanic(`slice index starts at ${start} but ends at ${end}`, span);
   if (end > length) {
-    // An inclusive range reports its last index, and others their end, as the numbers the program wrote.
-    throw new RustPanic(`range end index ${range!.end as bigint} out of range for slice of length ${length}`, span);
+    const index = range?.inclusive ? (range.end as bigint) : end;
+    throw new RustPanic(`range end index ${index} out of range for slice of length ${length}`, span);
   }
   const { base, start: offset } = sliceBase(container);
-  return new SliceView(base, offset + start, offset + end);
+  return new SliceView(base, offset + Number(start), offset + Number(end));
 }
 
 /** The message of an index past the end; `VecDeque`'s says less. */

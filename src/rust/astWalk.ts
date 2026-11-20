@@ -1,13 +1,15 @@
 import type { Annotations, LocalVar } from './annotations';
-import type { Block, Expr, MacroCall, Pattern } from './ast';
+import type { Block, Condition, Expr, MacroCall, Pattern } from './ast';
 import { normalize } from './infer';
 import { shallow } from './types';
 
-export function walkBlock(block: Block, visit: (expr: Expr) => void): void {
+type PatternSource = (pattern: Pattern, source: Expr) => boolean;
+
+export function walkBlock(block: Block, visit: (expr: Expr) => void, patternSource?: PatternSource): void {
   for (const stmt of block.stmts) {
     if (stmt.kind === 'let') {
-      if (stmt.init) visit(stmt.init);
-      if (stmt.else) walkBlock(stmt.else, visit);
+      if (stmt.init) visitPatternSource(stmt.pattern, stmt.init, visit, patternSource);
+      if (stmt.else) walkBlock(stmt.else, visit, patternSource);
     } else if (stmt.kind === 'expr') visit(stmt.expr);
   }
   if (block.tail) visit(block.tail);
@@ -51,7 +53,7 @@ function forEachLoopResult(loop: Extract<Expr, { kind: 'loop' }>, visit: (expr: 
 }
 
 /** Calls `visit` on the expressions directly inside an expression, in evaluation order. */
-export function forEachDirect(expr: Expr, visit: (expr: Expr) => void): void {
+export function forEachDirect(expr: Expr, visit: (expr: Expr) => void, patternSource?: PatternSource): void {
   switch (expr.kind) {
     case 'unary':
     case 'ref':
@@ -82,13 +84,13 @@ export function forEachDirect(expr: Expr, visit: (expr: Expr) => void): void {
       return;
     }
     default: {
-      forEachDirectInCompound(expr, visit);
+      forEachDirectInCompound(expr, visit, patternSource);
     }
   }
 }
 
 // code-gauge-allow functionNcss 35 -- One case per kind of expression.
-function forEachDirectInCompound(expr: Expr, visit: (expr: Expr) => void): void {
+function forEachDirectInCompound(expr: Expr, visit: (expr: Expr) => void, patternSource?: PatternSource): void {
   switch (expr.kind) {
     case 'call': {
       visit(expr.callee);
@@ -121,41 +123,42 @@ function forEachDirectInCompound(expr: Expr, visit: (expr: Expr) => void): void 
       return;
     }
     default: {
-      forEachDirectInControlFlow(expr, visit);
+      forEachDirectInControlFlow(expr, visit, patternSource);
     }
   }
 }
 
-// code-gauge-allow functionNcss 37 -- One case per kind of expression.
-function forEachDirectInControlFlow(expr: Expr, visit: (expr: Expr) => void): void {
+// code-gauge-allow functionNcss 40 -- One case per kind of expression.
+function forEachDirectInControlFlow(expr: Expr, visit: (expr: Expr) => void, patternSource?: PatternSource): void {
   switch (expr.kind) {
     case 'block': {
-      walkBlock(expr, visit);
+      walkBlock(expr, visit, patternSource);
       return;
     }
     case 'if': {
-      visit(expr.cond.kind === 'expr' ? expr.cond.expr : expr.cond.value);
-      walkBlock(expr.consequent, visit);
+      visitCondition(expr.cond, visit, patternSource);
+      walkBlock(expr.consequent, visit, patternSource);
       if (expr.else) visit(expr.else);
       return;
     }
     case 'match': {
-      visit(expr.scrutinee);
+      if (expr.arms.length === 1) visitPatternSource(expr.arms[0].pattern, expr.scrutinee, visit, patternSource);
+      else visit(expr.scrutinee);
       for (const arm of expr.arms) visit(arm.body);
       return;
     }
     case 'loop': {
-      walkBlock(expr.body, visit);
+      walkBlock(expr.body, visit, patternSource);
       return;
     }
     case 'while': {
-      visit(expr.cond.kind === 'expr' ? expr.cond.expr : expr.cond.value);
-      walkBlock(expr.body, visit);
+      visitCondition(expr.cond, visit, patternSource);
+      walkBlock(expr.body, visit, patternSource);
       return;
     }
     case 'for': {
       visit(expr.iterable);
-      walkBlock(expr.body, visit);
+      walkBlock(expr.body, visit, patternSource);
       return;
     }
     case 'break':
@@ -207,6 +210,20 @@ function forEachMacroArg(macro: MacroCall, visit: (expr: Expr) => void): void {
     }
   }
   for (const arg of macro.format?.args ?? []) visit(arg);
+}
+
+function visitCondition(cond: Condition, visit: (expr: Expr) => void, patternSource?: PatternSource): void {
+  if (cond.kind === 'expr') visit(cond.expr);
+  else visitPatternSource(cond.pattern, cond.value, visit, patternSource);
+}
+
+function visitPatternSource(
+  pattern: Pattern,
+  source: Expr,
+  visit: (expr: Expr) => void,
+  capture?: PatternSource
+): void {
+  if (!capture?.(pattern, source)) visit(source);
 }
 
 /** The variables a pattern binds, in order, each once (or-patterns bind the same variables in each alternative). */

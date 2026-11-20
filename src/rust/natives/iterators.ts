@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 834 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss 842 -- One native per method of the standard library.
 import { collectedVecCapacity, inPlaceCapacity, setVecCapacity, sizeTable } from '../capacity';
 import type { DebugPart } from '../debugText';
 import { normalize } from '../infer';
@@ -1526,6 +1526,14 @@ export function heapify(heap: Value[], type: Type): Value[] {
   return heap;
 }
 
+export function heapIntoSortedVec(heap: Value[], type: Type): Value[] {
+  for (let end = heap.length - 1; end > 0; end--) {
+    swapOwnedElements(heap, 0, end);
+    siftDownRange(heap, 0, end, type);
+  }
+  return heap;
+}
+
 export function rebuildHeapTail(heap: Value[], start: number, type: Type): void {
   const tail = heap.length - start;
   if (tail === 0) return;
@@ -1540,13 +1548,14 @@ export function rebuildHeapTail(heap: Value[], start: number, type: Type): void 
 function siftDownRange(heap: Value[], start: number, end: number, type: Type): void {
   let hole = start;
   let child = 2 * hole + 1;
-  while (child < end) {
-    if (child + 1 < end && (compareValues(type, heap[child], heap[child + 1]) ?? 0) <= 0) child++;
-    if ((compareValues(type, heap[hole], heap[child]) ?? 0) >= 0) return;
+  while (child + 1 < end) {
+    if (testPartialOrder('le', type, heap[child], heap[child + 1])) child++;
+    if (testPartialOrder('ge', type, heap[hole], heap[child])) return;
     swapOwnedElements(heap, hole, child);
     hole = child;
     child = 2 * hole + 1;
   }
+  if (child === end - 1 && testPartialOrder('lt', type, heap[hole], heap[child])) swapOwnedElements(heap, hole, child);
 }
 
 export function heapPush(heap: Value[], value: Value, type: Type): void {
@@ -1554,27 +1563,29 @@ export function heapPush(heap: Value[], value: Value, type: Type): void {
   siftUp(heap, heap.length - 1, type);
 }
 
-export function heapPop(heap: Value[], type: Type): Value | undefined {
+export function heapPop(ctx: NativeContext, heap: Value[], type: Type): Value | undefined {
   if (heap.length === 0) return undefined;
   swapOwnedElements(heap, 0, heap.length - 1);
   const top = heap.pop();
-  let hole = 0;
-  let child = 1;
-  while (child < heap.length) {
-    if (child + 1 < heap.length && (compareValues(type, heap[child], heap[child + 1]) ?? 0) <= 0) child++;
-    swapOwnedElements(heap, hole, child);
-    hole = child;
-    child = 2 * hole + 1;
-  }
-  siftUp(heap, hole, type);
-  return top;
+  return ctx.runtime.withRoots([top], () => {
+    let hole = 0;
+    let child = 1;
+    while (child < heap.length) {
+      if (child + 1 < heap.length && testPartialOrder('le', type, heap[child], heap[child + 1])) child++;
+      swapOwnedElements(heap, hole, child);
+      hole = child;
+      child = 2 * hole + 1;
+    }
+    siftUp(heap, hole, type);
+    return top;
+  });
 }
 
 function siftUp(heap: Value[], start: number, type: Type): void {
   let index = start;
   while (index > 0) {
     const parent = (index - 1) >> 1;
-    if ((compareValues(type, heap[index], heap[parent]) ?? 0) <= 0) break;
+    if (testPartialOrder('le', type, heap[index], heap[parent])) break;
     swapOwnedElements(heap, index, parent);
     index = parent;
   }
