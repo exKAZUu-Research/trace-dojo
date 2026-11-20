@@ -13,7 +13,7 @@ import {
   withCleanupExceptions,
   withPendingException,
 } from './errors';
-import { recordPossibleRoot, releaseDropped } from './garbage';
+import { hasStoredObject, recordPossibleRoot, releaseDropped } from './garbage';
 import { decodeLiteral } from './literals';
 import { share } from './places';
 import {
@@ -922,14 +922,21 @@ function releaseFrame(
       throw releaseFailedCallResult(runtime, holders, returned, error);
     }
   } finally {
-    releaseThis(runtime, frame);
+    releaseCallee(runtime, frame);
   }
 }
 
-/** Buffers `$this` as a possible root after the locals, as PHP's leave helper releases it after freeing them. */
-function releaseThis(runtime: Runtime, frame: Frame): void {
-  if (!frame.thisObj) return;
-  runtime.pendingGcRoots.add(frame.thisObj);
+/**
+ * Buffers `$this` or the called closure as a possible root after the locals, as PHP's leave helper releases the call's
+ * reference to them after freeing the locals.
+ */
+function releaseCallee(runtime: Runtime, frame: Frame): void {
+  if (frame.thisObj) runtime.pendingGcRoots.add(frame.thisObj);
+  // PHP's call holds its own reference to a closure, whose release buffers the closure while a variable still holds it
+  // and it is not buffered yet.
+  else if (frame.closure && !runtime.gcRoots.has(frame.closure) && hasStoredObject(runtime, frame.closure))
+    runtime.pendingGcRoots.add(frame.closure);
+  else return;
   releaseDropped(runtime, [], true);
 }
 
