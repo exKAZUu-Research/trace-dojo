@@ -5184,6 +5184,11 @@ try { range(0.1, null, 1); } catch (ValueError $e) { echo explode("\\n", $e->get
       `<?php $a = range(0, 8); $a["a"] = 3; array_splice($a, 1, 3, [7]); unset($a[4]); $a[-2] = 7; mt_srand(0); var_dump(array_rand($a));`
     )
   ).toMatchObject({ kind: 'executed', stdout: 'int(5)\n' });
+  expect(
+    run(
+      `<?php $a = [0, 1, 2, 3, 4, 5, 6, 7, 8]; array_splice($a, 1, 3, [7]); $a["a"] = 3; unset($a[4]); $a[8] = 7; mt_srand(0); var_dump(array_rand($a));`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'int(5)\n' });
 
   expect(run('<?php $a = [1]; $r = &$a; $r[0] = $a; unset($a, $r); var_dump(gc_collect_cycles());')).toMatchObject({
     kind: 'executed',
@@ -5195,4 +5200,19 @@ try { range(0.1, null, 1); } catch (ValueError $e) { echo explode("\\n", $e->get
     stdout:
       '\nWarning: "continue" targeting switch is equivalent to "break". Did you mean to use "continue 2"? in /main.php on line 2\ndone',
   });
+});
+
+test('frees a return value interrupted by a cleanup exception before enclosing handlers run', () => {
+  expect(
+    run(`<?php
+class D { function __construct(public $n) {} function __destruct() { echo $this->n, ';'; if ($this->n[0] !== 'q') throw new Exception($this->n); } }
+function g($x) { return new D("q"); }
+function a() { try { try { return new D("r"); } finally { return new D("f"); } } finally { echo 'outer;'; } }
+function b() { try { try { return [new D("r")]; } finally { return new D("f"); } } catch (Exception $e) { echo 'caught;'; return 1; } finally { echo 'outer;'; } }
+function c() { try { return g(new D("t")); } finally { echo 'fin;'; } }
+foreach (['a', 'b', 'c'] as $f) {
+  try { $f(); echo 'ret;'; } catch (Exception $e) { echo $e->getMessage(), ';', $e->getPrevious()?->getMessage(); }
+  echo "\\n";
+}`)
+  ).toMatchObject({ kind: 'executed', stdout: 'r;f;outer;f;r\nr;f;caught;outer;ret;\nt;q;fin;t;\n' });
 });

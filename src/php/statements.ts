@@ -197,8 +197,8 @@ export function execList(statements: Stmt[], seek?: string): Completion {
       if (statement.k === 'return' && !byRefReturn && statement.e) {
         const value = statement.e.k === 'bin' ? (statement.e.foldedString ?? binary(statement.e)) : ev(statement.e);
         frame.returning = share(value);
-        releaseListHeld(top, runtime, frame);
         completion = { t: 'return', slot: frame.returning, row: statement.e.row };
+        releaseListHeld(top, runtime, frame);
       } else if (statement.k === 'expr') {
         const mark = runtime.steps.statementMark();
         if (statement.e.k === 'var') evQuiet(statement.e);
@@ -210,7 +210,7 @@ export function execList(statements: Stmt[], seek?: string): Completion {
         if (stack.at(-1) === top) releaseListHeld(top, runtime, frame);
       }
     } catch (error) {
-      unwindStackOnThrow(stack, error, runtime, frame);
+      unwindStackOnThrow(stack, cancelPendingReturn(runtime, frame, completion, error), runtime, frame);
       completion = undefined;
     }
   }
@@ -697,26 +697,25 @@ function propagateTryCompletion(
   if (pending) {
     runtime.held.pop();
     if (runtime.thrown === pending.object) runtime.thrown = undefined;
-    try {
-      runtime.release([pending.object]);
-    } catch (error) {
-      cancelPendingReturn(runtime, frame, completion, error);
-      throw error;
-    }
+    runtime.release([pending.object]);
   }
   return completion;
 }
 
-function cancelPendingReturn(
-  runtime: Runtime,
-  frame: Frame,
-  completion: NonNullable<Completion>,
-  error: unknown
-): void {
-  if (completion.t !== 'return') return;
+/**
+ * Frees the value of a return that `error` interrupts before enclosing handlers run, as PHP frees live temporaries
+ * when an exception is raised, returning the error to unwind with.
+ */
+function cancelPendingReturn(runtime: Runtime, frame: Frame, completion: Completion, error: unknown): unknown {
+  if (completion?.t !== 'return' || frame.returning !== completion.slot) return error;
   frame.returning = undefined;
-  if (error instanceof PhpThrow) withPendingException(runtime, error, () => runtime.release([completion.slot]));
-  else runtime.release([completion.slot]);
+  try {
+    if (error instanceof PhpThrow) withPendingException(runtime, error, () => runtime.release([completion.slot]));
+    else runtime.release([completion.slot]);
+  } catch (releaseError) {
+    return releaseError;
+  }
+  return error;
 }
 
 // code-gauge-allow functionCognitiveComplexity 19 -- Handles catch matching, finally transition, and exception chaining in one unwind step.
