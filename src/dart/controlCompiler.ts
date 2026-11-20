@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 504 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 508 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type { Block, CatchClause, Pattern, Statement, SwitchCase } from './ast';
 import type { FunctionSpec } from './callCompiler';
 import { type Eval, typeName } from './compilerBase';
@@ -129,21 +129,14 @@ export abstract class ControlCompiler extends StatementCompiler {
     const before = this.flow;
     const body = this.compileBlock(statement.body);
     let after = this.flow;
+    const exceptionalFlow = before.forget(this.writtenLocals(statement.body));
     const catches = statement.catches.map((clause) => {
-      this.flow = Flow.join(before, after).forget([]);
+      this.flow = exceptionalFlow;
       const compiled = this.compileCatch(clause);
       after = Flow.join(after, this.flow);
       return compiled;
     });
-    let finallyExec: Exec | undefined;
-    if (statement.finally) {
-      const flowAfterTry = after;
-      this.flow = Flow.join(before, after);
-      finallyExec = this.compileBlock(statement.finally);
-      this.flow = this.flow.reachable ? flowAfterTry : this.flow;
-    } else {
-      this.flow = after;
-    }
+    const finallyExec = this.compileFinally(statement, before, after, (block) => this.compileBlock(block));
     const tryCatch: Exec =
       catches.length === 0
         ? body
@@ -175,6 +168,34 @@ export abstract class ControlCompiler extends StatementCompiler {
       const finallyCompletion = runFinally(frame);
       return finallyCompletion ?? completion;
     };
+  }
+
+  private compileFinally<T>(
+    statement: Extract<Statement, { kind: 'try' }>,
+    before: Flow,
+    afterTry: Flow,
+    compile: (block: Block) => T
+  ): T | undefined {
+    const block = statement.finally;
+    this.flow = afterTry;
+    if (!block) return undefined;
+
+    const tryBlocks = [statement.body, ...statement.catches.map((clause) => clause.body)];
+    this.flow = Flow.join(afterTry, before.forget(this.writtenLocals(tryBlocks)));
+    const run = compile(block);
+    const afterFinally = this.flow;
+    const promotions = new Map(afterTry.forget(this.writtenLocals(block)).promotions);
+    for (const [variable, type] of afterFinally.promotions) {
+      const promoted = promotions.get(variable);
+      if (!promoted || isSubtype(type, promoted)) promotions.set(variable, type);
+    }
+    this.flow = new Flow(
+      afterTry.reachable && afterFinally.reachable,
+      promotions,
+      new Set([...afterTry.assigned, ...afterFinally.assigned]),
+      new Set([...afterTry.maybeAssigned, ...afterFinally.maybeAssigned])
+    );
+    return run;
   }
 
   private compileCatch(clause: CatchClause): {
@@ -347,21 +368,14 @@ export abstract class ControlCompiler extends StatementCompiler {
     const before = this.flow;
     const body = this.compileGenBlock(statement.body);
     let after = this.flow;
+    const exceptionalFlow = before.forget(this.writtenLocals(statement.body));
     const catches = statement.catches.map((clause) => {
-      this.flow = Flow.join(before, after).forget([]);
+      this.flow = exceptionalFlow;
       const compiled = this.compileCatchClause(clause, (block) => this.compileGenBlock(block));
       after = Flow.join(after, this.flow);
       return compiled;
     });
-    let finallyBody: GenExec | undefined;
-    if (statement.finally) {
-      const flowAfterTry = after;
-      this.flow = Flow.join(before, after);
-      finallyBody = this.compileGenBlock(statement.finally);
-      this.flow = this.flow.reachable ? flowAfterTry : this.flow;
-    } else {
-      this.flow = after;
-    }
+    const finallyBody = this.compileFinally(statement, before, after, (block) => this.compileGenBlock(block));
     const tryCatch: GenExec = function* (frame) {
       const mark = frame.temporaries.length;
       try {

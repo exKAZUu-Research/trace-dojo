@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 901 -- The natives of List, Set, Map, and their iterators share the helpers of this file.
+// code-gauge-allow-file fileNcss 928 -- The natives of List, Set, Map, and their iterators share the helpers of this file.
 import { stringOf } from '../format';
 import { HashStore } from '../hashStore';
 import { type Frame, Frame as FrameClass, type Runtime } from '../runtime';
@@ -11,6 +11,7 @@ import {
   define,
   defineConstructor,
   elementTypeOf,
+  forEachIteratorValue,
   forEachValue,
   implicitCast,
   index,
@@ -73,11 +74,11 @@ function changed(target: DartList): void {
   target.modifications++;
 }
 
-function checkRange(runtime: Runtime, start: Value, end: Value, length: number): [number, number] {
+function checkRange(runtime: Runtime, start: Value, end: Value, length: number, namedBounds = true): [number, number] {
   const from = intArg(runtime, start, 'start');
-  if (from < 0n || from > BigInt(length)) rangeError(runtime, from, 0, length, 'start');
+  if (from < 0n || from > BigInt(length)) rangeError(runtime, from, 0, length, namedBounds ? 'start' : undefined);
   const to = end === undefined ? BigInt(length) : intArg(runtime, end, 'end');
-  if (to < from || to > BigInt(length)) rangeError(runtime, to, Number(from), length, 'end');
+  if (to < from || to > BigInt(length)) rangeError(runtime, to, Number(from), length, namedBounds ? 'end' : undefined);
   return [index(from), index(to)];
 }
 
@@ -429,17 +430,58 @@ define('List.sublist', (runtime, receiver, [start, end]) => {
   const [from, to] = checkRange(runtime, start, end, target.elements.length);
   return newList(runtime, elementTypeOf(target), target.elements.slice(from, to));
 });
+// code-gauge-allow functionCognitiveComplexity 17 -- Growable and fixed lists differ for iterable and list sources.
+// code-gauge-allow functionNcss 33 -- Keep the copy cases with the shared checks and write rules.
 define('List.setRange', (runtime, receiver, [start, end, iterable, skip = 0n]) => {
   const target = list(receiver);
   checkModifiable(runtime, target);
-  const [from, to] = checkRange(runtime, start, end, target.elements.length);
+  const [from, to] = checkRange(runtime, start, end, target.elements.length, target.growable);
+  if (from === to) return;
   const skipCount = intArg(runtime, skip, 'skipCount');
-  if (skipCount < 0n) rangeError(runtime, skipCount, 0, MAX_LIST_LENGTH, 'skipCount');
-  const values = iterableValues(runtime, iterable).slice(index(skipCount));
-  if (values.length < to - from) runtime.throwError('StateError', '', ['Too few elements']);
-  for (let position = from; position < to; position++) target.elements[position] = values[position - from];
+  if (target.growable && skipCount < 0n)
+    runtime.throwError('RangeError', 'range', [skipCount, 0n, undefined, 'skipCount']);
+  const elementType = elementTypeOf(target);
+  const write = (position: number, value: Value): void => {
+    checkIndex(runtime, target, BigInt(position), 'index');
+    checkElement(runtime, value, elementType, 'value');
+    target.elements[position] = value;
+    runtime.spend();
+  };
+  if (runtime.links.isValueOf(runtime, iterable, interfaceType(coreTypes.list, [elementType]))) {
+    if (target.growable) {
+      const sourceLength = runtime.getProperty(iterable, 'length', undefined) as bigint;
+      if (skipCount + BigInt(to - from) > sourceLength) runtime.throwError('StateError', '', ['Too few elements']);
+    }
+    copyListRange(runtime, iterable, skipCount, from, to, write);
+  } else if (target.growable) {
+    const values = iterableValues(runtime, iterable).slice(index(skipCount));
+    if (values.length < to - from) runtime.throwError('StateError', '', ['Too few elements']);
+    for (let position = from; position < to; position++) write(position, values[position - from]);
+  } else {
+    const skip = skipCount < 0n ? 0n : skipCount;
+    let position = from;
+    forEachIteratorValue(runtime, iterable, skip, skip + BigInt(to - from), (value) => write(position++, value));
+  }
   return;
 });
+
+function copyListRange(
+  runtime: Runtime,
+  source: Value,
+  skipCount: bigint,
+  from: number,
+  to: number,
+  write: (position: number, value: Value) => void
+): void {
+  const length = to - from;
+  const backwards = skipCount < BigInt(from);
+  for (let offset = 0; offset < length; offset++) {
+    const position = backwards ? length - offset - 1 : offset;
+    const args = { positional: [skipCount + BigInt(position)], named: undefined };
+    write(from + position, runtime.invoke(source, '[]', args, [], undefined));
+  }
+}
+
 define('List.removeRange', (runtime, receiver, [start, end]) => {
   const target = list(receiver);
   checkGrowable(runtime, target, 'remove');

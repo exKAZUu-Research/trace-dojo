@@ -366,6 +366,11 @@ export type CollectionElement =
 
 export type StringPart = string | Expression;
 
+export interface RecordLiteralField extends Span {
+  name: string | undefined;
+  value: Expression;
+}
+
 export type Expression =
   | ({ kind: 'int'; value: bigint; text: string } & Span)
   | ({ kind: 'double'; value: number } & Span)
@@ -380,7 +385,7 @@ export type Expression =
       elements: CollectionElement[];
       isConst: boolean;
     } & Span)
-  | ({ kind: 'record'; positional: Expression[]; named: NamedArgument[]; isConst: boolean } & Span)
+  | ({ kind: 'record'; fields: RecordLiteralField[]; isConst: boolean } & Span)
   | ({ kind: 'identifier'; name: string } & Span)
   | ({ kind: 'this' } & Span)
   | ({ kind: 'super' } & Span)

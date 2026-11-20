@@ -5,7 +5,17 @@ import type { Runtime } from '../runtime';
 import { coreTypes, interfaceType } from '../types';
 import { DartList, type DartObject, type Value } from '../values';
 import { allMatchesOf, isRegExp, matchAt, type MatchState, newMatch } from './nativeRegExp';
-import { define, defineConstructor, index, intArg, iterableValues, named, newList, stringArg } from './nativeSupport';
+import {
+  define,
+  defineConstructor,
+  forEachIteratorValue,
+  index,
+  intArg,
+  iterableValues,
+  named,
+  newList,
+  stringArg,
+} from './nativeSupport';
 
 function checkLength(runtime: Runtime, length: number): void {
   if (length > LIMITS.maxStringLength) runtime.throwError('OutOfMemoryError', '', []);
@@ -336,25 +346,56 @@ define('String.matchAsPrefix', (runtime, receiver, [input, start = 0n]) => {
   return runtime.links.construct(runtime, '_StringMatch', '', [at, text, pattern]);
 });
 define('String.fromCharCodes', (runtime, _receiver, [codes, start = 0n, end]) => {
-  const values = iterableValues(runtime, codes).map((code) => Number(intArg(runtime, code, 'charCodes')));
-  const from = Number(intArg(runtime, start, 'start'));
-  const to = end === undefined ? values.length : Number(intArg(runtime, end, 'end'));
-  if (from < 0 || from > values.length) rangeError(runtime, BigInt(from), 0, values.length, 'start');
-  if (to < from || to > values.length) rangeError(runtime, BigInt(to), from, values.length, 'end');
-  return values
-    .slice(from, to)
-    .map((code) => {
-      if (code < 0 || code > 0x10_ff_ff) rangeError(runtime, BigInt(code), 0, 0x10_ff_ff, undefined);
-      return String.fromCodePoint(code);
-    })
-    .join('');
+  const from = intArg(runtime, start, 'start');
+  if (from < 0n) runtime.throwError('RangeError', 'range', [from, 0n, undefined, 'start']);
+  const to = end === undefined ? undefined : intArg(runtime, end, 'end');
+  if (to !== undefined && to < from) runtime.throwError('RangeError', 'range', [to, from, undefined, 'end']);
+  if (to === from) return '';
+  return stringFromCharCodes(runtime, codes, from, to);
 });
-define('String.fromCharCode', (runtime, _receiver, [code]) => {
-  const value = Number(intArg(runtime, code, 'charCode'));
-  if (value < 0 || value > 0x10_ff_ff) rangeError(runtime, BigInt(value), 0, 0x10_ff_ff, undefined);
-  return String.fromCodePoint(value);
-});
+define('String.fromCharCode', (runtime, _receiver, [code]) => characterOf(runtime, intArg(runtime, code, 'charCode')));
 define('String.fromEnvironment', (_runtime, _receiver, _args, namedArgs) => named(namedArgs, 'defaultValue', ''));
+
+// code-gauge-allow functionCognitiveComplexity 16 -- The VM distinguishes invalid codes in lists and iterators.
+function stringFromCharCodes(runtime: Runtime, codes: Value, from: bigint, to: bigint | undefined): string {
+  const parts: string[] = [];
+  let length = 0;
+  let invalidCode: bigint | undefined;
+  const add = (value: Value): void => {
+    const code = intArg(runtime, value, 'charCodes');
+    if (code < 0n || code > 0x10_ff_ffn) {
+      if (invalidCode === undefined || code < 0n || code > 0x3f_ff_ff_ff_ff_ff_ff_ffn) invalidCode = code;
+      return;
+    }
+    const text = String.fromCodePoint(Number(code));
+    length += text.length;
+    if (length > LIMITS.maxStringLength) runtime.throwError('OutOfMemoryError', '', []);
+    parts.push(text);
+  };
+  if (codes instanceof DartList) {
+    const end = to === undefined ? codes.elements.length : Math.min(Number(to), codes.elements.length);
+    for (let position = Number(from); position < end; position++) {
+      add(codes.elements[position]);
+      runtime.spend();
+    }
+  } else {
+    forEachIteratorValue(runtime, codes, from, to, add);
+  }
+  if (invalidCode !== undefined) throwCharCodesError(runtime, codes, invalidCode);
+  return parts.join('');
+}
+
+function throwCharCodesError(runtime: Runtime, codes: Value, invalidCode: bigint): never {
+  if (codes instanceof DartList) {
+    const showList = invalidCode < 0n || invalidCode > 0x3f_ff_ff_ff_ff_ff_ff_ffn;
+    runtime.throwError('ArgumentError', '', showList ? [codes] : []);
+  }
+  runtime.throwError('ArgumentError', 'value', [
+    codes,
+    'charCodes',
+    'Contains invalid character code, not 0 <= code <= 0x10FFFF',
+  ]);
+}
 
 // StringBuffer
 
@@ -376,26 +417,27 @@ defineConstructor('StringBuffer.new', (runtime, instance, args) => {
 define('StringBuffer.length', (_runtime, receiver) => BigInt(bufferOf(receiver).text.length));
 define('StringBuffer.isEmpty', (_runtime, receiver) => bufferOf(receiver).text.length === 0);
 define('StringBuffer.isNotEmpty', (_runtime, receiver) => bufferOf(receiver).text.length > 0);
-define('StringBuffer.write', (runtime, receiver, [value]) => {
-  const buffer = bufferOf(receiver);
-  const text = stringOf(runtime, value);
-  checkLength(runtime, buffer.text.length + text.length);
-  buffer.text += text;
-  return;
-});
-define('StringBuffer.writeCharCode', (runtime, receiver, [code]) => {
-  bufferOf(receiver).text += String.fromCodePoint(Number(intArg(runtime, code, 'charCode')));
-  return;
-});
-define('StringBuffer.writeln', (runtime, receiver, [value = '']) => {
-  const buffer = bufferOf(receiver);
-  const text = `${stringOf(runtime, value)}\n`;
-  checkLength(runtime, buffer.text.length + text.length);
-  buffer.text += text;
-  return;
-});
+define('StringBuffer.write', (runtime, receiver, [value]) => appendBuffer(runtime, receiver, stringOf(runtime, value)));
+define('StringBuffer.writeCharCode', (runtime, receiver, [code]) =>
+  appendBuffer(runtime, receiver, characterOf(runtime, intArg(runtime, code, 'charCode')))
+);
+define('StringBuffer.writeln', (runtime, receiver, args) =>
+  appendBuffer(runtime, receiver, `${args.length === 0 ? '' : stringOf(runtime, args[0])}\n`)
+);
 define('StringBuffer.clear', (_runtime, receiver) => {
   bufferOf(receiver).text = '';
   return;
 });
 define('StringBuffer.toString', (_runtime, receiver) => bufferOf(receiver).text);
+
+function appendBuffer(runtime: Runtime, receiver: Value, text: string): undefined {
+  const buffer = bufferOf(receiver);
+  checkLength(runtime, buffer.text.length + text.length);
+  buffer.text += text;
+  return undefined;
+}
+
+export function characterOf(runtime: Runtime, code: bigint): string {
+  if (code < 0n || code > 0x10_ff_ffn) rangeError(runtime, code, 0, 0x10_ff_ff, undefined);
+  return String.fromCodePoint(Number(code));
+}

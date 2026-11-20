@@ -1,5 +1,5 @@
 import { CompileError } from '../interpreter/diagnostics';
-// code-gauge-allow-file fileNcss 909 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 910 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type {
   Arguments as ArgumentsSyntax,
   CascadeSelector,
@@ -186,18 +186,18 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   /** Compiles a condition, which must be a `bool`, and the flow when it is true and when it is false. */
   compileCondition(expression: Expression): { compiled: Compiled; flow: ConditionFlow } {
-    const before = this.flow;
     const { compiled, flow } = this.compileConditionInner(expression);
-    this.checkBool(compiled, expression);
-    void before;
-    return { compiled, flow };
+    return { compiled: this.requireBool(compiled, expression), flow };
   }
 
-  protected checkBool(compiled: Compiled, span: Span): void {
-    if (compiled.type.kind === 'dynamic') return;
-    if (!isSubtype(compiled.type, interfaceType(coreTypes.bool))) {
+  private requireBool(compiled: Compiled, span: Span): Compiled {
+    const type = interfaceType(coreTypes.bool);
+    if (compiled.type.kind === 'dynamic')
+      return { ...compiled, type, run: this.runtimeCast(compiled.run, type, false) };
+    if (!isSubtype(compiled.type, type)) {
       this.error(span, `条件には bool 型の値が必要ですが、${typeName(compiled.type)} 型の値が書かれています。`);
     }
+    return compiled;
   }
 
   /**
@@ -251,8 +251,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       case 'prefix': {
         if (expression.operator !== '!') break;
         const inner = this.compileConditionInner(expression.operand);
-        this.checkBool(inner.compiled, expression.operand);
-        const { run } = inner.compiled;
+        const { run } = this.requireBool(inner.compiled, expression.operand);
         return {
           compiled: {
             type: interfaceType(coreTypes.bool),
@@ -288,12 +287,10 @@ export abstract class ExpressionCompiler extends CompilerBase {
   } {
     const isAnd = expression.operator === '&&';
     const left = this.compileConditionInner(expression.left);
-    this.checkBool(left.compiled, expression.left);
+    const leftRun = this.requireBool(left.compiled, expression.left).run;
     this.flow = isAnd ? left.flow.whenTrue : left.flow.whenFalse;
     const right = this.compileConditionInner(expression.right);
-    this.checkBool(right.compiled, expression.right);
-    const leftRun = left.compiled.run;
-    const rightRun = right.compiled.run;
+    const rightRun = this.requireBool(right.compiled, expression.right).run;
     const flow: ConditionFlow = isAnd
       ? { whenTrue: right.flow.whenTrue, whenFalse: Flow.join(left.flow.whenFalse, right.flow.whenFalse) }
       : { whenTrue: Flow.join(left.flow.whenTrue, right.flow.whenTrue), whenFalse: right.flow.whenFalse };
@@ -824,7 +821,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     isConst: boolean
   ): Compiled;
 
-  // code-gauge-allow functionCognitiveComplexity 26 -- Each branch is one of the cases Dart distinguishes for this construct.
+  // code-gauge-allow functionCognitiveComplexity 29 -- Compile fields in source order and keep named fields sorted in the type and value.
   // code-gauge-allow functionNcss 37 -- One case per form of the construct, which reads best together.
   private compileRecordLiteral(
     expression: Extract<Expression, { kind: 'record' }>,
@@ -832,86 +829,72 @@ export abstract class ExpressionCompiler extends CompilerBase {
   ): Compiled {
     const base = context ? resolveBound(context) : undefined;
     const recordContext = base?.kind === 'record' ? base : undefined;
+    const positionalCount = expression.fields.filter(({ name }) => name === undefined).length;
+    const positionalContext =
+      recordContext?.positional.length === positionalCount ? recordContext.positional : undefined;
     const names = new Set<string>();
-    for (const field of expression.named) {
-      if (names.has(field.name)) this.error(field, `レコードのフィールド ${field.name} が重複しています。`);
-      if (
-        /^\$\d+$/.test(field.name) ||
-        field.name === 'hashCode' ||
-        field.name === 'runtimeType' ||
-        field.name === 'toString' ||
-        field.name === 'noSuchMethod'
-      ) {
-        this.error(field, `レコードのフィールドに ${field.name} という名前は付けられません。`);
-      }
-      names.add(field.name);
-    }
-    // Inside `const (...)`, the fields are constant contexts, as `const (1, [2])` makes the list constant.
-    const positional = this.withConstContext(expression.isConst, () =>
-      expression.positional.map((field, index) =>
-        this.compileExpression(
-          field,
-          recordContext?.positional.length === expression.positional.length
-            ? recordContext.positional[index]
-            : undefined
-        )
-      )
+    let position = 0;
+    const fields = this.withConstContext(expression.isConst, () =>
+      expression.fields.map((field) => {
+        const { name, value } = field;
+        if (name !== undefined) this.checkRecordFieldName(name, field, names);
+        const expected =
+          name === undefined
+            ? positionalContext?.[position++]
+            : recordContext?.named.find((other) => other.name === name)?.type;
+        const compiled = this.compileExpression(value, expected);
+        if (compiled.type.kind === 'void') this.error(field, 'void の値はレコードに入れられません。');
+        return { name, compiled };
+      })
     );
-    const named = this.withConstContext(expression.isConst, () =>
-      expression.named.map((field) => ({
-        name: field.name,
-        compiled: this.compileExpression(
-          field.value,
-          recordContext?.named.find((other) => other.name === field.name)?.type
-        ),
-        order: expression.named.indexOf(field),
-      }))
-    ).toSorted((a, b) => (a.name < b.name ? -1 : 1));
-    for (const field of [...positional, ...named.map((entry) => entry.compiled)]) {
-      if (field.type.kind === 'void') this.error(expression, 'void の値はレコードに入れられません。');
-    }
     const type: DartType = {
       kind: 'record',
-      positional: positional.map((field) => field.type),
-      named: named.map((field) => ({ name: field.name, type: field.compiled.type })),
+      positional: fields.flatMap(({ name, compiled }) => (name === undefined ? [compiled.type] : [])),
+      named: fields
+        .flatMap(({ name, compiled }) => (name === undefined ? [] : [{ name, type: compiled.type }]))
+        .toSorted((a, b) => (a.name < b.name ? -1 : 1)),
       nullable: false,
     };
-    const isConst =
-      expression.isConst ||
-      (positional.every((field) => field.isConst) &&
-        named.every((field) => field.compiled.isConst) &&
-        this.inConstContext);
-    if (
-      expression.isConst &&
-      !(positional.every((field) => field.isConst) && named.every((field) => field.compiled.isConst))
-    ) {
+    const allConstant = fields.every(({ compiled }) => compiled.isConst);
+    if (expression.isConst && !allConstant) {
       this.error(expression, 'const のレコードのフィールドは、定数でなければなりません。');
     }
-    // Fields evaluate in source order, whatever their names.
-    const order = expression.positional.length;
-    const evaluators: { run: Eval; slot: number }[] = [];
-    for (const [index, field] of positional.entries()) evaluators.push({ run: field.run, slot: index });
-    const sourceOrder = named.toSorted((a, b) => a.order - b.order);
-    for (const field of sourceOrder) evaluators.push({ run: field.compiled.run, slot: order + named.indexOf(field) });
-    const names2 = named.map((field) => field.name);
+    const isConst = expression.isConst || (allConstant && this.inConstContext);
     const build: Eval = (frame) => {
-      const values: Value[] = Array.from({ length: evaluators.length });
+      const positional: Value[] = [];
+      const named = new Map<string, Value>();
       const mark = frame.temporaries.length;
       try {
-        for (const evaluator of evaluators) {
-          values[evaluator.slot] = evaluator.run(frame);
-          frame.temporaries.push(values[evaluator.slot]);
+        for (const { name, compiled } of fields) {
+          const value = compiled.run(frame);
+          frame.temporaries.push(value);
+          if (name === undefined) positional.push(value);
+          else named.set(name, value);
         }
       } finally {
         frame.temporaries.length = mark;
       }
       return new DartRecord(
         coreTypes.record,
-        values.slice(0, order),
-        names2.map((name, index) => [name, values[order + index]])
+        positional,
+        type.named.map(({ name }) => [name, named.get(name)])
       );
     };
     return { type, run: isConst ? this.canonicalized(build) : build, isConst };
+  }
+
+  private checkRecordFieldName(name: string, field: Span, names: Set<string>): void {
+    if (names.has(name)) this.error(field, `レコードのフィールド ${name} が重複しています。`);
+    if (
+      /^\$\d+$/.test(name) ||
+      name === 'hashCode' ||
+      name === 'runtimeType' ||
+      name === 'toString' ||
+      name === 'noSuchMethod'
+    ) {
+      this.error(field, `レコードのフィールドに ${name} という名前は付けられません。`);
+    }
+    names.add(name);
   }
 
   /** Whether the expression being compiled is in a constant context (`const` literals and constructors). */

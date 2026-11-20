@@ -55,19 +55,39 @@ function parseBigInt(runtime: Runtime, text: string, radix: number | undefined):
     rest = rest.slice(2);
   }
   if (rest.length === 0) return undefined;
-  const digits = '0123456789abcdefghijklmnopqrstuvwxyz'.slice(0, base);
+  const digits = new Set('0123456789abcdefghijklmnopqrstuvwxyz'.slice(0, base));
   const lower = rest.toLowerCase();
-  for (const char of lower) if (!digits.includes(char)) return undefined;
-  const bits = Math.ceil(lower.length * Math.log2(base));
+  runtime.spend(1 + lower.length / 64);
+  for (const char of lower) if (!digits.has(char)) return undefined;
+  const bitsPerDigit = Math.log2(base);
+  const bits = Math.ceil(lower.length * bitsPerDigit);
   reserve(runtime, bits, bits / 128);
   const prefix = HOST_PREFIXES.get(base);
-  let result = 0n;
-  if (prefix === undefined) {
-    for (const char of lower) result = result * BigInt(base) + BigInt(digits.indexOf(char));
-  } else {
-    result = BigInt(`${prefix}${lower}`);
-  }
+  const result =
+    prefix === undefined ? combineRadixDigits(runtime, lower, base, bitsPerDigit) : BigInt(`${prefix}${lower}`);
   return negative ? -result : result;
+}
+
+function combineRadixDigits(runtime: Runtime, digits: string, radix: number, bitsPerDigit: number): bigint {
+  const base = BigInt(radix);
+  const powers = new Map<number, bigint>();
+  const convert = (from: number, to: number): bigint => {
+    const length = to - from;
+    // Eight digits fit exactly in a number even at radix 36.
+    if (length <= 8) return BigInt(Number.parseInt(digits.slice(from, to), radix));
+    const rightLength = Math.floor(length / 2);
+    const split = to - rightLength;
+    const left = convert(from, split);
+    const right = convert(split, to);
+    runtime.spend(1 + (length * bitsPerDigit) / 512);
+    let power = powers.get(rightLength);
+    if (power === undefined) {
+      power = base ** BigInt(rightLength);
+      powers.set(rightLength, power);
+    }
+    return left * power + right;
+  };
+  return convert(0, digits.length);
 }
 
 const HOST_PREFIXES = new Map([

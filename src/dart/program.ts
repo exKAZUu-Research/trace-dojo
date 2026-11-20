@@ -324,18 +324,18 @@ function keyOf(item: Value): string {
 /** A key that equal constants share, or undefined for values that are canonical already. */
 function constantKey(value: Value): string | undefined {
   if (!(value instanceof DartObject)) return undefined;
-  const parts: string[] = [vmTypeString(interfaceType(value.cls, value.typeArgs))];
-  if (value instanceof DartList) parts.push(...value.elements.map(keyOf));
-  else if (value instanceof DartRecord) {
-    parts.push(...value.positional.map(keyOf));
-    for (const [name, field] of value.named) parts.push(`${name}=${keyOf(field)}`);
-  } else if (value.native && 'keys' in value.native) {
-    for (const item of value.native.values()) parts.push(keyOf(item));
-  } else {
-    parts.push(...value.fields.map(keyOf));
-    if (value.native) return undefined;
+  const type = vmTypeString(interfaceType(value.cls, value.typeArgs));
+  if (value instanceof DartRecord) {
+    return JSON.stringify([
+      type,
+      value.positional.map(keyOf),
+      value.named.map(([name, field]) => [name, keyOf(field)]),
+    ]);
   }
-  return parts.join('|');
+  if (value instanceof DartList) return JSON.stringify([type, value.elements.map(keyOf)]);
+  if (!value.native) return JSON.stringify([type, value.fields.map(keyOf)]);
+  if ('keys' in value.native) return JSON.stringify([type, Array.from(value.native.values(), keyOf)]);
+  return undefined;
 }
 
 export type { Runtime };

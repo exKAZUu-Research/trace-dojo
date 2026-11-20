@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 773 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 775 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type {
   Block,
   Expression,
@@ -693,13 +693,17 @@ export abstract class StatementCompiler extends PatternCompiler {
 
   /** Forgets what a loop's body may change before compiling it, as flow analysis does at a loop's start. */
   protected enterLoop(statement: object): void {
+    this.flow = this.flow.forget(this.writtenLocals(statement));
+  }
+
+  protected writtenLocals(statement: object): LocalVar[] {
     const names = namesAssignedIn(statement);
     const variables: LocalVar[] = [];
     for (const name of names) {
       const variable = this.findLocal(name);
       if (variable) variables.push(variable);
     }
-    this.flow = this.flow.forget(variables);
+    return variables;
   }
 
   // code-gauge-allow duplicateLines 19 -- Each function handles its own construct; the shared shape reads better than a helper with flags.

@@ -1,7 +1,15 @@
 import type { ConstructorImpl } from '../classes';
 import type { Runtime } from '../runtime';
 import { coreTypes, type DartType, DYNAMIC, functionType, vmTypeString } from '../types';
-import { type Arguments, type Callable, DartClosure, DartList, type DartObject, type Value } from '../values';
+import {
+  type Arguments,
+  type Callable,
+  DartClosure,
+  DartList,
+  type DartObject,
+  NO_ARGUMENTS,
+  type Value,
+} from '../values';
 
 /** The natives of the interpreter's libraries, by `Class.member`, `Class.member=`, `Class.new`, or a function's name. */
 export const NATIVES = new Map<string, Callable | ConstructorImpl>();
@@ -84,11 +92,7 @@ export function callFunction(runtime: Runtime, fn: Value, ...args: Value[]): Val
 export function iterableValues(runtime: Runtime, iterable: Value): Value[] {
   if (iterable instanceof DartList) return [...iterable.elements];
   const values: Value[] = [];
-  const iterator = runtime.getProperty(iterable, 'iterator', undefined);
-  while (runtime.invoke(iterator, 'moveNext', { positional: [], named: undefined }, [], undefined) === true) {
-    values.push(runtime.getProperty(iterator, 'current', undefined));
-    runtime.spend();
-  }
+  forEachIteratorValue(runtime, iterable, 0n, undefined, (value) => values.push(value));
   return values;
 }
 
@@ -102,9 +106,20 @@ export function forEachValue(runtime: Runtime, iterable: Value, body: (value: Va
     }
     return;
   }
+  forEachIteratorValue(runtime, iterable, 0n, undefined, body);
+}
+
+export function forEachIteratorValue(
+  runtime: Runtime,
+  iterable: Value,
+  from: bigint,
+  to: bigint | undefined,
+  body: (value: Value) => void
+): void {
   const iterator = runtime.getProperty(iterable, 'iterator', undefined);
-  while (runtime.invoke(iterator, 'moveNext', { positional: [], named: undefined }, [], undefined) === true) {
-    body(runtime.getProperty(iterator, 'current', undefined));
+  for (let position = 0n; to === undefined || position < to; position++) {
+    if (runtime.invoke(iterator, 'moveNext', NO_ARGUMENTS, [], undefined) !== true) return;
+    if (position >= from) body(runtime.getProperty(iterator, 'current', undefined));
     runtime.spend();
   }
 }

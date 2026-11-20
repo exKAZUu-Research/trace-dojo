@@ -775,35 +775,17 @@ function callMember(type: FunctionType): Member {
   return member;
 }
 
-const recordFields = new Map<string, Member>();
-
-/** The getter of a record's field, which reads it by name or position. */
 function recordFieldMember(name: string): Member {
-  let member = recordFields.get(name);
-  if (!member) {
-    const position = /^\$([1-9]\d*)$/.exec(name);
-    member = {
-      kind: 'getter',
-      name,
-      owner: coreTypes.record,
-      isStatic: false,
-      isAbstract: false,
-      row: undefined,
-      type: DYNAMIC,
-      impl: (_runtime, receiver) => {
-        const record = receiver as DartRecord;
-        if (position) {
-          const index = Number(position[1]) - 1;
-          if (index < record.positional.length) return record.positional[index];
-        }
-        return record.named.find(([field]) => field === name)?.[1];
-      },
-    };
-    recordFields.set(name, member);
-  }
-  return member;
+  return {
+    kind: 'getter',
+    name,
+    owner: coreTypes.record,
+    isStatic: false,
+    isAbstract: false,
+    row: undefined,
+    type: DYNAMIC,
+    impl: (_runtime, receiver) => (receiver as DartRecord).field(name)?.[1],
+  };
 }
-
-export { recordFieldMember };
 
 export type { TypeEnv };

@@ -166,6 +166,121 @@ test('BigInt conversions and shifts report invalid shift counts as Dart errors',
   });
 });
 
+test('text sinks distinguish omitted values from null and report invalid code points', () => {
+  const program = `import 'dart:io';
+void main() {
+  var buffer = StringBuffer();
+  buffer.writeln(null);
+  buffer.writeln();
+  stdout.writeln(null);
+  stdout.writeln();
+  try { buffer.writeCharCode(-1); } catch (error) { print(error); }
+  try { stdout.writeCharCode(9223372036854775807); } catch (error) { print(error); }
+  buffer.writeCharCode(0x1f600);
+  print(buffer);
+}
+`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: [
+      'null',
+      '',
+      'RangeError: Invalid value: Not in inclusive range 0..1114111: -1',
+      'RangeError: Invalid value: Not in inclusive range 0..1114111: 9223372036854775807',
+      'null',
+      '',
+      '😀',
+      '',
+    ].join('\n'),
+  });
+});
+
+test('records evaluate in source order and expose their fields through dynamic', () => {
+  const program = `int side(int value) { print(value); return value; }
+void main() {
+  const a = ['a|string:b'];
+  const b = ['a', 'b'];
+  print([a, b, identical(a, b), identical(b, const ['a', 'b'])]);
+  print((side(1), z: side(2), side(3), a: side(4)));
+  dynamic record = (7, f: () => 8, name: null);
+  print([record.$1, record.f(), record.name]);
+}
+`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[[a|string:b], [a, b], false, true]\n1\n2\n3\n4\n(1, 3, a: 4, z: 2)\n[7, 8, null]\n',
+  });
+});
+
+test('String.fromCharCodes stops at the end of the requested slice', () => {
+  const program = `void main() {
+  var codes = [65, 66];
+  print(String.fromCharCodes(codes, 0, 5));
+  print(String.fromCharCodes(codes, 5));
+  print(String.fromCharCodes(codes.map((code) { print(code); return code; }), 0, 1));
+}
+`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'AB\n\n65\nA\n' });
+});
+
+test('conditions cast dynamic operands to bool and preserve short-circuiting', () => {
+  const program = `void main() {
+  dynamic value = 1;
+  try { if (value) print('bad'); } catch (error) { print(error); }
+  try { print(true && value); } catch (error) { print(error); }
+  try { print(!value); } catch (error) { print(error); }
+  print(false && value);
+}
+`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: `type 'int' is not a subtype of type 'bool'\n`.repeat(3) + 'false\n',
+  });
+});
+
+test('finally propagates assignments in functions and synchronous generators', () => {
+  const program = `Iterable<int> generate() sync* {
+  int x;
+  try { yield 4; } finally { x = 5; }
+  yield x;
+}
+void main() {
+  int local;
+  try { print('try'); } finally { local = 3; }
+  print(local);
+  print(generate().toList());
+}
+`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'try\n3\n[4, 5]\n' });
+});
+
+test('large integer inputs distinguish int overflow from exact BigInt values', () => {
+  const program = `void main() {
+  print(int.tryParse('9' * 600000));
+  print(int.tryParse('0xffffffffffffffff'));
+  print(BigInt.parse('2' * 150000, radix: 3).bitLength);
+}
+`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'null\n-1\n237745\n' });
+});
+
+test('setRange follows each list kind and copies overlapping ranges', () => {
+  const program = `void main() {
+  var fixed = List<int>.filled(3, 0);
+  var growable = [0, 0, 0];
+  for (var list in [fixed, growable]) {
+    list.setRange(0, 1, [1, 2].map((value) { print(value); return value; }));
+    list.setRange(1, 3, list);
+    print(list);
+  }
+}
+`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '1\n[1, 1, 0]\n1\n2\n[1, 1, 0]\n',
+  });
+});
+
 test('patterns, generics, and an uncaught error behave as the SDK does', () => {
   const program = `sealed class Shape {}
 

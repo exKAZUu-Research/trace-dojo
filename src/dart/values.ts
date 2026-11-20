@@ -85,6 +85,13 @@ export class DartRecord extends DartObject {
   ) {
     super(cls, [], []);
   }
+
+  field(name: string): [string, Value] | undefined {
+    const position = /^\$([1-9]\d*)$/.exec(name);
+    if (!position) return this.named.find(([field]) => field === name);
+    const index = Number(position[1]) - 1;
+    return index < this.positional.length ? [name, this.positional[index]] : undefined;
+  }
 }
 
 export class DartClosure extends DartObject {

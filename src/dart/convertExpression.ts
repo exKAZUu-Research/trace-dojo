@@ -15,6 +15,7 @@ import type {
   NamedArgument,
   ParameterTypes,
   Pattern,
+  RecordLiteralField,
   RecordPatternField,
   Span,
   StringPart,
@@ -746,8 +747,6 @@ export abstract class ExpressionConverter {
   }
 
   private convertRecordLiteral(node: Node): Expression {
-    const positional: Expression[] = [];
-    const named: NamedArgument[] = [];
     // A record of one field has no record_field node; its parts sit directly in the literal.
     const children = childrenOf(node).filter(
       (child) => child.type !== '(' && child.type !== ')' && child.type !== 'const'
@@ -755,18 +754,14 @@ export abstract class ExpressionConverter {
     const groups = children.some((child) => child.type === 'record_field')
       ? children.filter((child) => child.type === 'record_field').map((field) => childrenOf(field))
       : splitByComma(children).filter((group) => group.length > 0);
-    for (const group of groups) {
+    const fields: RecordLiteralField[] = groups.map((group) => {
       const label = group.find((child) => child.type === 'label');
       const rest = group.filter((child) => child.id !== label?.id);
       const value = this.soleExpression(node, rest);
-      if (label) {
-        const name = requireNode(namedOf(label)[0], label).text;
-        named.push({ name, value, ...spanOf(label) });
-      } else {
-        positional.push(value);
-      }
-    }
-    return { kind: 'record', positional, named, isConst: hasToken(node, 'const'), ...spanOf(node) };
+      const name = label ? requireNode(namedOf(label)[0], label).text : undefined;
+      return { ...spanOf(label ?? group[0]), name, value };
+    });
+    return { kind: 'record', fields, isConst: hasToken(node, 'const'), ...spanOf(node) };
   }
 
   private convertSwitchExpression(node: Node): Expression {

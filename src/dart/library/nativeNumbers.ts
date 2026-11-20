@@ -108,10 +108,14 @@ export function parseDouble(text: string): number | undefined {
   return Number(trimmed);
 }
 
-/** `int.parse`: an optional sign, then digits of the radix, or `0x` and hexadecimal digits without a radix. */
-export function parseInt(text: string, radix: number | undefined, bounded = true): bigint | undefined {
-  const trimmed = text.trim();
-  let rest = trimmed;
+// code-gauge-allow functionCognitiveComplexity 18 -- Verify the whole digit sequence while capping the accumulator.
+function parseInt(
+  runtime: Runtime,
+  text: string,
+  radix: number | undefined
+): bigint | 'Negative' | 'Positive' | undefined {
+  runtime.spend(1 + text.length / 64);
+  let rest = text.trim();
   let negative = false;
   if (rest.startsWith('-') || rest.startsWith('+')) {
     negative = rest.startsWith('-');
@@ -123,18 +127,23 @@ export function parseInt(text: string, radix: number | undefined, bounded = true
     rest = rest.slice(2);
   }
   if (rest.length === 0) return undefined;
+  const unsignedHex = base === 16 && radix === undefined && !negative;
+  const bound = unsignedHex ? 0xff_ff_ff_ff_ff_ff_ff_ffn : negative ? MAX_INT + 1n : MAX_INT;
   const digits = '0123456789abcdefghijklmnopqrstuvwxyz'.slice(0, base);
+  const bigBase = BigInt(base);
   let result = 0n;
   for (const char of rest.toLowerCase()) {
     const digit = digits.indexOf(char);
     if (digit === -1) return undefined;
-    result = result * BigInt(base) + BigInt(digit);
+    if (result <= bound) result = result * bigBase + BigInt(digit);
   }
-  if (negative) result = -result;
-  if (base === 16 && radix === undefined && !negative && result <= 0xff_ff_ff_ff_ff_ff_ff_ffn) return wrap(result);
-  if (!bounded) return result;
-  if (result > MAX_INT || result < -MAX_INT - 1n) return undefined;
-  return result;
+  if (result > bound) return negative ? 'Negative' : 'Positive';
+  return negative ? -result : wrap(result);
+}
+
+function tryParseInt(runtime: Runtime, text: string, radix?: number): bigint | undefined {
+  const result = parseInt(runtime, text, radix);
+  return typeof result === 'bigint' ? result : undefined;
 }
 
 function checkRadix(runtime: Runtime, radix: Value): number | undefined {
@@ -322,24 +331,18 @@ function throwFormat(runtime: Runtime, message: string, source: string, offset?:
 define('int.parse', (runtime, _self, [source], namedArgs) => {
   const text = stringArg(runtime, source, 'source');
   const radix = checkRadix(runtime, named(namedArgs, 'radix', undefined));
-  const result = parseInt(text, radix);
+  const result = parseInt(runtime, text, radix);
   const onError = named(namedArgs, 'onError', undefined);
-  if (result === undefined && onError !== undefined) {
+  if (typeof result === 'bigint') return result;
+  if (onError !== undefined) {
     return runtime.callValue(onError, { positional: [text], named: undefined }, [], runtime.userCallRow);
   }
-  if (result === undefined) {
-    if (text.trim().length === 0 && radix === undefined) throwFormat(runtime, 'Invalid number', text, 0n);
-    // The VM reports digits that are all valid but too many for 64 bits separately, without the position.
-    const unbounded = parseInt(text, radix, false);
-    if (unbounded !== undefined) {
-      throwFormat(runtime, `${unbounded < 0n ? 'Negative' : 'Positive'} input exceeds the limit of integer`, text);
-    }
-    throwFormat(runtime, `Invalid radix-${radix ?? 10} number`, text, 0n);
-  }
-  return result;
+  if (result !== undefined) throwFormat(runtime, `${result} input exceeds the limit of integer`, text);
+  if (text.trim().length === 0 && radix === undefined) throwFormat(runtime, 'Invalid number', text, 0n);
+  throwFormat(runtime, `Invalid radix-${radix ?? 10} number`, text, 0n);
 });
 define('int.tryParse', (runtime, _self, [source], namedArgs) =>
-  parseInt(stringArg(runtime, source, 'source'), checkRadix(runtime, named(namedArgs, 'radix', undefined)))
+  tryParseInt(runtime, stringArg(runtime, source, 'source'), checkRadix(runtime, named(namedArgs, 'radix', undefined)))
 );
 define('double.parse', (runtime, _self, [source]) => {
   const text = stringArg(runtime, source, 'source');
@@ -350,13 +353,13 @@ define('double.parse', (runtime, _self, [source]) => {
 define('double.tryParse', (runtime, _self, [source]) => parseDouble(stringArg(runtime, source, 'source')));
 define('num.parse', (runtime, _self, [source]) => {
   const text = stringArg(runtime, source, 'input');
-  const result = parseInt(text, undefined) ?? parseDouble(text);
+  const result = tryParseInt(runtime, text) ?? parseDouble(text);
   if (result === undefined) runtime.throwError('FormatException', '', [text]);
   return result;
 });
 define('num.tryParse', (runtime, _self, [source]) => {
   const text = stringArg(runtime, source, 'input');
-  return parseInt(text, undefined) ?? parseDouble(text);
+  return tryParseInt(runtime, text) ?? parseDouble(text);
 });
 
 // bool

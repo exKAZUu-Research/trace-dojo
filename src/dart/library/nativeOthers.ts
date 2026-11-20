@@ -3,6 +3,7 @@ import { encodableText, stringOf } from '../format';
 import { ProgramExit, type Runtime } from '../runtime';
 import { DartObject, type Value } from '../values';
 import { compareNumbers, toDouble } from './nativeNumbers';
+import { characterOf } from './nativeStrings';
 import { define, defineConstructor, intArg, iterableValues, numArg } from './nativeSupport';
 
 // dart:math
@@ -156,8 +157,8 @@ define('_StandardSink.write', (runtime, receiver, [value]) => {
   sinkOf(runtime, receiver).write(stringOf(runtime, value));
   return;
 });
-define('_StandardSink.writeln', (runtime, receiver, [value = '']) => {
-  sinkOf(runtime, receiver).write(`${stringOf(runtime, value)}\n`);
+define('_StandardSink.writeln', (runtime, receiver, args) => {
+  sinkOf(runtime, receiver).write(`${args.length === 0 ? '' : stringOf(runtime, args[0])}\n`);
   return;
 });
 define('_StandardSink.writeAll', (runtime, receiver, [objects, separator = '']) => {
@@ -169,7 +170,7 @@ define('_StandardSink.writeAll', (runtime, receiver, [objects, separator = '']) 
   return;
 });
 define('_StandardSink.writeCharCode', (runtime, receiver, [code]) => {
-  sinkOf(runtime, receiver).write(String.fromCodePoint(Number(intArg(runtime, code, 'charCode'))));
+  sinkOf(runtime, receiver).write(characterOf(runtime, intArg(runtime, code, 'charCode')));
   return;
 });
 define('exit', (runtime, _receiver, [code]) => {
