@@ -589,7 +589,7 @@ export class FunctionChecker {
         const symbol = this.c.scopeOf(identifier).lookupValue(identifier.text);
         if (symbol) this.c.flow.current?.entries.set(`s${symbol.id}`, { type: bound, assigned: true });
       },
-      parameter.childForFieldName('type') !== null
+      { annotated: parameter.childForFieldName('type') !== null }
     );
   }
 

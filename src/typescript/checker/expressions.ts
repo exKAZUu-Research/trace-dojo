@@ -1,6 +1,7 @@
-// code-gauge-allow-file fileNcss 534 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
+// code-gauge-allow-file fileNcss 558 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
+import { assertedExpression } from '../erasedSyntax';
 import { unsupportedMessage } from '../unsupported';
 import { Calls } from './calls';
 import type { Checker } from './checker';
@@ -58,6 +59,8 @@ interface ExcessPropertyOptions {
 
 const reportExcessProperties: ExcessPropertyOptions = { report: true };
 
+export type CheckExpression = (node: TreeNode, contextual?: Type) => Type;
+
 /** Checks expressions, computing their types and narrowing the references their conditions test. */
 export class ExpressionChecker {
   private observedTypes?: Map<number, Type | undefined>;
@@ -81,7 +84,7 @@ export class ExpressionChecker {
     ['undefined', () => undefinedType],
     ['identifier', (node, contextual) => this.identifier(node, contextual)],
     ['this', (node) => this.thisExpression(node)],
-    ['parenthesized_expression', (node, contextual) => this.check(named(node)[0], contextual)],
+    ['parenthesized_expression', (node, contextual) => this.checkWrapped(node, contextual)],
     ['array', (node, contextual) => this.c.literals.arrayLiteral(node, contextual)],
     ['object', (node, contextual) => this.c.literals.objectLiteral(node, contextual)],
     ['function_expression', (node, contextual) => this.c.functions.functionExpression(node, contextual)],
@@ -101,10 +104,10 @@ export class ExpressionChecker {
     ['unary_expression', (node) => this.c.operators.unary(node)],
     ['binary_expression', (node, contextual) => this.c.operators.binary(node, contextual)],
     ['ternary_expression', (node, contextual) => this.c.operators.ternary(node, contextual)],
-    ['as_expression', (node, contextual) => this.c.operators.assertion(node, contextual)],
-    ['type_assertion', (node, contextual) => this.c.operators.assertion(node, contextual)],
-    ['satisfies_expression', (node, contextual) => this.check(named(node)[0], contextual)],
-    ['non_null_expression', (node, contextual) => nonNullableType(this.c, this.check(named(node)[0], contextual))],
+    ['as_expression', (node, contextual) => this.checkWrapped(node, contextual)],
+    ['type_assertion', (node, contextual) => this.checkWrapped(node, contextual)],
+    ['satisfies_expression', (node, contextual) => this.checkWrapped(node, contextual)],
+    ['non_null_expression', (node, contextual) => this.checkWrapped(node, contextual)],
     ['spread_element', (node) => this.check(named(node)[0])],
   ]);
 
@@ -128,6 +131,39 @@ export class ExpressionChecker {
       const type = this.compute(node, contextual);
       if (!this.c.flow.probing && this.observedTypes?.has(node.id)) this.observedTypes.set(node.id, type);
       return type;
+    });
+  }
+
+  checkMemberCallee(callee: TreeNode, reference: TreeNode): { type: Type; receiver?: Type } {
+    if (callee.id === reference.id) return this.c.members.checkAccess(callee);
+    let receiver: Type | undefined;
+    const check: CheckExpression = (node, contextual) => {
+      this.c.budget.spend();
+      return this.c.withTypeDemand(node, () => {
+        if (node.id !== reference.id) return this.checkWrapped(node, contextual, check);
+        const access = this.c.members.checkAccess(node);
+        receiver = access.receiver;
+        return access.type;
+      });
+    };
+    const type = check(callee);
+    return { type, receiver };
+  }
+
+  private checkWrapped(
+    node: TreeNode,
+    contextual: Type | undefined,
+    check: CheckExpression = (operand, context) => this.check(operand, context)
+  ): Type {
+    const operand = assertedExpression(node) as TreeNode;
+    if (node.type === 'as_expression' || node.type === 'type_assertion')
+      return this.c.operators.assertion(node, operand, contextual, check);
+    if (node.type !== 'non_null_expression') return check(operand, contextual);
+    const members = this.c.members;
+    return members.chainLink(node, () => {
+      const type = check(operand, contextual);
+      const continued = members.continuedObjectType(operand, type);
+      return continued ? members.chainResult(node, nonNullableType(this.c, continued)) : nonNullableType(this.c, type);
     });
   }
 
@@ -649,7 +685,9 @@ export class ExpressionChecker {
         const annotation = this.c.typeNodes.annotationType(declaration.childForFieldName('type'));
         if (annotation) {
           if (pattern.type === 'identifier' || pattern.type === 'rest_pattern') return annotation;
-          return this.c.silently(() => this.c.patterns.patternType(pattern, annotation, symbol.name));
+          return this.c.silently(() =>
+            this.c.patterns.patternType(pattern, annotation, symbol.name, { annotated: true })
+          );
         }
         const value = declaration.childForFieldName('value');
         if (value) return this.widenedTypeOfInitializer(value);

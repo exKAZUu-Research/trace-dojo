@@ -1,0 +1,15 @@
+const { unsupported } = {};
+const named: {} = {};
+const { missing = 'x' } = named;
+const { explicit = 'x' }: { explicit?: string } = {};
+const tooNarrow: 'x' = explicit;
+let { mutable = 'x' } = {};
+const mustBeMutable: 'x' = mutable;
+const { existing = 1 } = { existing: 7 };
+const fromSource: 1 = existing;
+const { defaultNumber = 1 } = {};
+const incorrect: 2 = defaultNumber;
+const stored = {};
+const { notInStored = 1 } = stored;
+function defaultOptions({ count = 1 } = {}) { return count; }
+defaultOptions({ count: 'wrong' });

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 641 -- Follows the flow of control through each kind of statement.
+// code-gauge-allow-file fileNcss 644 -- Follows the flow of control through each kind of statement.
 import assert from 'node:assert/strict';
 
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
@@ -335,11 +335,11 @@ export class StatementChecker {
   private patternDeclarator(declarator: TreeNode, pattern: TreeNode, isConst: boolean): void {
     const value = declarator.childForFieldName('value');
     const annotation = this.c.typeNodes.annotationType(declarator.childForFieldName('type'));
-    const implied = annotation ? undefined : this.c.patterns.impliedType(pattern);
+    const implied = annotation ? undefined : this.c.patterns.impliedBindingType(pattern, isConst);
     const valueType = value ? this.c.expressions.check(value, annotation ?? implied) : (annotation ?? anyType);
     if (annotation && value) this.c.expressions.checkAssignable(pattern, valueType, annotation);
     if (value && implied) this.c.patterns.checkInitializer(pattern, value, valueType, implied);
-    const sourceType = annotation ?? this.c.literals.widenDeclared(valueType, false);
+    const sourceType = annotation ?? valueType;
     if (isConst) this.c.patterns.correlatedSources.set(pattern.id, sourceType);
     this.c.patterns.bindPattern(
       pattern,
@@ -351,7 +351,7 @@ export class StatementChecker {
         this.c.expressions.setVariableType(symbol, declared);
         this.c.flow.set(`s${symbol.id}`, { type: declared, assigned: true });
       },
-      annotation !== undefined
+      { annotated: annotation !== undefined, isConst }
     );
   }
 
@@ -377,10 +377,9 @@ export class StatementChecker {
     }
     const source =
       annotation ??
-      (value
-        ? this.c.literals.widenDeclared(this.c.expressions.check(value, this.c.patterns.impliedType(nameNode)), false)
-        : anyType);
-    return this.c.literals.widenDeclared(this.c.patterns.patternType(nameNode, source, symbol.name), isConst);
+      (value ? this.c.expressions.check(value, this.c.patterns.impliedBindingType(nameNode, isConst)) : anyType);
+    const type = this.c.patterns.patternType(nameNode, source, symbol.name, { isConst, annotated: !!annotation });
+    return this.c.literals.widenDeclared(type, isConst);
   }
 
   private loopVariableType(node: TreeNode, symbol: Sym): Type {
@@ -388,10 +387,11 @@ export class StatementChecker {
     const right = header.childForFieldName('right') as TreeNode;
     const left = header.childForFieldName('left') as TreeNode;
     const isOf = header.childForFieldName('operator')?.text === 'of';
-    const rightType = this.c.expressions.check(right, isOf ? this.iterableContext(left) : undefined);
+    const isConst = header.childForFieldName('kind')?.text === 'const';
+    const rightType = this.c.expressions.check(right, isOf ? this.iterableContext(left, isConst) : undefined);
     const elementType = isOf ? this.c.patterns.iteratedType(undefined, rightType) : stringType;
     if (left.type === 'identifier') return elementType;
-    return this.c.patterns.patternType(left, elementType, symbol.name);
+    return this.c.patterns.patternType(left, elementType, symbol.name, { isConst });
   }
 
   // Control flow -------------------------------------------------------------------------------------------------
@@ -552,7 +552,7 @@ export class StatementChecker {
     const right = header.childForFieldName('right') as TreeNode;
     const isOf = header.childForFieldName('operator')?.text === 'of';
     const kind = header.childForFieldName('kind')?.text;
-    const rightType = this.c.expressions.check(right, isOf ? this.iterableContext(left) : undefined);
+    const rightType = this.c.expressions.check(right, isOf ? this.iterableContext(left, kind === 'const') : undefined);
     const elementType = this.loopElementType(node, rightType);
     if (!isOf) this.forInObjectTypes.set(node.id, rightType);
     const body = node.childForFieldName('body') as TreeNode;
@@ -611,8 +611,8 @@ export class StatementChecker {
   }
 
   /** The array a `for...of` loop's pattern implies for an array literal it iterates. */
-  private iterableContext(left: TreeNode): Type | undefined {
-    const implied = this.c.patterns.impliedType(left);
+  private iterableContext(left: TreeNode, isConst: boolean): Type | undefined {
+    const implied = this.c.patterns.impliedBindingType(left, isConst);
     return implied && this.c.arrayType(implied);
   }
 
@@ -657,12 +657,18 @@ export class StatementChecker {
 
   /** Declares the variables of a loop's `const`, `let`, or `var` head. */
   private bindLoopVariables(left: TreeNode, kind: string, elementType: Type): void {
-    this.c.patterns.bindPattern(left, elementType, (identifier, type) => {
-      const symbol = this.c.scopeOf(identifier).lookupValue(identifier.text);
-      if (!symbol) return;
-      this.c.expressions.setVariableType(symbol, kind === 'const' ? type : this.c.widen(type));
-      this.c.flow.set(`s${symbol.id}`, { type, assigned: true });
-    });
+    const isConst = kind === 'const';
+    this.c.patterns.bindPattern(
+      left,
+      elementType,
+      (identifier, type) => {
+        const symbol = this.c.scopeOf(identifier).lookupValue(identifier.text);
+        if (!symbol) return;
+        this.c.expressions.setVariableType(symbol, isConst ? type : this.c.widen(type));
+        this.c.flow.set(`s${symbol.id}`, { type, assigned: true });
+      },
+      { isConst }
+    );
   }
 
   /** Assigns the existing variables a loop's head without a declaration names. */

@@ -1,6 +1,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
+import type { CheckExpression } from './expressions';
 import { nonNullableType, nullishConstraint } from './nullishConstraints';
 import { isConstAssertion, named, numberValue, skipParentheses, withoutAssertions } from './syntax';
 import {
@@ -504,12 +505,11 @@ export class OperatorChecker {
     return this.c.literals.subtypeReduced([trueType, falseType]);
   }
 
-  assertion(node: TreeNode, contextual?: Type): Type {
-    const expression = node.type === 'type_assertion' ? (named(node).at(-1) as TreeNode) : named(node)[0];
+  assertion(node: TreeNode, expression: TreeNode, contextual: Type | undefined, check: CheckExpression): Type {
     const typeNode = node.type === 'type_assertion' ? named(named(node)[0])[0] : named(node)[1];
-    if (!typeNode || isConstAssertion(node)) return this.constAssertion(node, expression, contextual);
+    if (!typeNode || isConstAssertion(node)) return this.constAssertion(node, expression, contextual, check);
     const target = this.c.typeNodes.typeFromNode(typeNode);
-    const source = this.c.expressions.check(expression, target);
+    const source = check(expression, target);
     const widened = this.c.widen(source);
     if (!this.c.relations.isRelated(target, widened, 'comparable')) {
       const reported = this.c.diagnostics.length;
@@ -533,7 +533,12 @@ export class OperatorChecker {
     return target;
   }
 
-  private constAssertion(node: TreeNode, expression: TreeNode, contextual: Type | undefined): Type {
+  private constAssertion(
+    node: TreeNode,
+    expression: TreeNode,
+    contextual: Type | undefined,
+    check: CheckExpression
+  ): Type {
     const operand = skipParentheses(expression);
     const signedLiteral =
       operand.type === 'unary_expression' &&
@@ -544,9 +549,7 @@ export class OperatorChecker {
       !signedLiteral
     )
       this.c.error(node, 'const アサーションは、リテラル式にのみ使えます。');
-    return mapType(this.c.expressions.check(expression, contextual), (type) =>
-      type.kind === 'literal' ? regularOf(type) : type
-    );
+    return mapType(check(expression, contextual), (type) => (type.kind === 'literal' ? regularOf(type) : type));
   }
 }
 

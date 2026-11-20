@@ -96,13 +96,13 @@ export class Calls {
       if (typeArguments) this.c.error(node, '型引数は 0 個にしてください。');
       return this.evolvingPush(callee, args);
     }
-    const expression = skipParentheses(callee);
+    const reference = withoutAssertions(callee);
     const access =
-      expression.type === 'member_expression' || expression.type === 'subscript_expression'
-        ? this.c.members.checkAccess(expression)
+      reference.type === 'member_expression' || reference.type === 'subscript_expression'
+        ? this.c.expressions.checkMemberCallee(callee, reference)
         : undefined;
     const checked = access?.type ?? this.checkCallCallee(callee, args);
-    const chained = callee.id === expression.id ? this.c.members.continuedObjectType(callee, checked) : undefined;
+    const chained = this.c.members.continuedObjectType(callee, checked);
     const checkedCallee = chained ?? checked;
     if (optional) this.c.members.continueChain(callee);
     if (checkedCallee === errorType) return this.checkArgumentsOnly(args, errorType);
@@ -122,7 +122,7 @@ export class Calls {
       for (const arg of args) this.c.expressions.check(arg);
       return callable.untyped ? this.untypedCall(node, [], typeArguments) : this.uncallableType(callee, calleeType);
     }
-    const receiver = access?.receiver ?? this.assertedSuperReceiver(callee);
+    const receiver = access?.receiver;
     const resolution = this.resolveWithTextConversions(node, callee, signatures, args, {
       typeArguments,
       contextual,
@@ -132,12 +132,6 @@ export class Calls {
     this.resolved.set(node.id, resolution.signature);
     const result = resolution.returnType;
     return shortCircuits ? this.c.members.chainResult(node, result) : result;
-  }
-
-  private assertedSuperReceiver(callee: TreeNode): Type | undefined {
-    return withoutAssertions(callee).childForFieldName('object')?.type === 'super'
-      ? this.c.classes.superType(callee)
-      : undefined;
   }
 
   private resolveWithTextConversions(

@@ -280,7 +280,7 @@ export class AssignmentChecker {
         case 'object_assignment_pattern': {
           const left = element.childForFieldName('left') as TreeNode;
           used.push(literalType(left.text));
-          assign(element, this.c.patterns.destructuredProperty(left, type, left.text));
+          assign(element, this.c.patterns.destructuredProperty(left, type, left.text, true));
           break;
         }
         case 'pair':
@@ -291,7 +291,12 @@ export class AssignmentChecker {
           const computedType =
             expressionTypes?.get(key.id) ??
             (inferField && key.type === 'computed_property_name' ? this.assignmentValueType(named(key)[0]) : undefined);
-          const selected = this.c.patterns.destructuredKey(key, type, computedType);
+          const selected = this.c.patterns.destructuredKey(
+            key,
+            type,
+            defaultedTarget(value) !== undefined,
+            computedType
+          );
           used.push(selected.keyType);
           assign(value, selected.type);
           break;

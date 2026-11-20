@@ -465,7 +465,7 @@ export class MemberChecker {
   }
 
   isReadonlyIndex(objectType: Type, indexType: Type): boolean {
-    if (isAnyLike(objectType)) return false;
+    if (isAnyLike(objectType) || isGenericKey(indexType)) return false;
     if (objectType.kind === 'union') return objectType.types.some((member) => this.isReadonlyIndex(member, indexType));
     if (indexType.kind === 'union') return indexType.types.some((member) => this.isReadonlyIndex(objectType, member));
     if (indexType.kind === 'literal' && this.c.propertyOf(objectType, String(indexType.value))) return false;

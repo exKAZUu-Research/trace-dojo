@@ -352,12 +352,8 @@ export class LiteralChecker {
     for (const member of members) this.objectMember(literal, member);
     if (literal.isTooComplex) return errorType;
     if (literal.spreadsAny) return anyType;
-    if (literal.orderedSpread) {
-      if (contextual) this.addPatternDefaults(literal.properties, contextual);
-      return this.flushOrderedMembers(literal);
-    }
+    if (literal.orderedSpread) return this.flushOrderedMembers(literal);
     if (literal.spreadIndexes && literal.hasPendingMembers) this.spreadWrittenIndexes(literal);
-    if (contextual) this.addPatternDefaults(properties, contextual);
     return this.concreteLiteral(literal, node);
   }
 
@@ -435,16 +431,6 @@ export class LiteralChecker {
       return type.types.map((member) => this.thisTypeArgument(member)).find((member) => member !== undefined);
     const marker = this.c.globalType('ThisType');
     return type.kind === 'object' && type.target === marker ? type.typeArguments?.[0] : undefined;
-  }
-
-  /** Gives an object literal a binding pattern takes apart the properties the pattern has defaults for. */
-  private addPatternDefaults(properties: Map<string, Property>, contextual: Type): void {
-    for (const member of contextual.kind === 'union' ? contextual.types : [contextual]) {
-      if (!this.c.patterns.impliedTypes.has(member)) continue;
-      for (const [name, property] of this.c.structureOf(member).properties) {
-        if (property.optional && !properties.has(name)) properties.set(name, property);
-      }
-    }
   }
 
   private prepareObjectReceiver(literal: ObjectLiteral, members: TreeNode[]): void {

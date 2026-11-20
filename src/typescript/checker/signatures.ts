@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 494 -- Keeps signature resolution and the TypeScript grammar of parameters and accessors together.
+// code-gauge-allow-file fileNcss 497 -- Keeps signature resolution and the TypeScript grammar of parameters and accessors together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { erasedStatementTypes } from '../erasedSyntax';
@@ -356,7 +356,11 @@ export class Signatures {
     if (expected) return this.c.silently(() => this.c.patterns.initializerType(value, expected));
     this.inferringParameterDefaults.add(parameter.id);
     try {
-      return this.c.silently(() => this.c.patterns.initializerType(value, this.c.patterns.impliedType(pattern)));
+      return this.c.silently(() => {
+        const implied = this.c.patterns.impliedType(pattern);
+        const initializer = this.c.patterns.initializerType(value, implied);
+        return this.c.patterns.parameterInitializerType(pattern, initializer, implied);
+      });
     } finally {
       this.inferringParameterDefaults.delete(parameter.id);
     }

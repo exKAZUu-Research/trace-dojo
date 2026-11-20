@@ -17,7 +17,6 @@ import {
   neverType,
   type ObjectType,
   propertyAccessType,
-  regularOf,
   simpleProperty,
   stringType,
   type TupleElement,
@@ -27,21 +26,29 @@ import {
   type UnionType,
 } from './types';
 
+interface BindingOptions {
+  annotated?: boolean;
+  isConst?: boolean;
+}
+
 /** Gives the names a binding pattern declares the types of what it destructures. */
 export class BindingPatterns {
   readonly correlatedSources = new Map<number, Type>();
-  /** The object types `impliedType` made, whose defaulted properties an object literal they contextually type gains. */
-  readonly impliedTypes = new WeakSet<Type>();
   private readonly selectedKeys = new Map<number, string[] | undefined>();
   constructor(private readonly c: Checker) {}
 
   /** The type a binding pattern gives the name `name` when it destructures a value of `type`. */
-  patternType(pattern: TreeNode, type: Type, name: string): Type {
+  patternType(pattern: TreeNode, type: Type, name: string, options: BindingOptions = {}): Type {
     return this.c.flow.probe(() => {
       let result: Type = anyType;
-      this.bindPattern(pattern, type, (identifier, identifierType) => {
-        if (identifier.text === name) result = identifierType;
-      });
+      this.bindPattern(
+        pattern,
+        type,
+        (identifier, identifierType) => {
+          if (identifier.text === name) result = identifierType;
+        },
+        options
+      );
       return result;
     });
   }
@@ -54,7 +61,7 @@ export class BindingPatterns {
     pattern: TreeNode,
     type: Type,
     bind: (identifier: TreeNode, type: Type) => void,
-    annotated = false
+    options: BindingOptions = {}
   ): void {
     switch (pattern.type) {
       case 'identifier':
@@ -66,25 +73,26 @@ export class BindingPatterns {
       case 'object_assignment_pattern': {
         const left = pattern.childForFieldName('left') as TreeNode;
         const right = pattern.childForFieldName('right') as TreeNode;
-        const implied = this.impliedType(left);
-        const defaultType = this.initializerType(right, implied ?? type);
+        const implied = this.impliedBindingType(left, options.isConst);
+        const defaultType = this.initializerType(right, implied ?? (options.annotated ? type : undefined));
         this.checkInitializer(left, right, defaultType, implied);
         const withoutUndefined = this.c.relations.removeUndefined(type);
-        if (annotated && !isIntrinsic(withoutUndefined, 'never')) {
+        if (options.annotated && !isIntrinsic(withoutUndefined, 'never')) {
           const declared = this.defaultMayBeUndefined(defaultType) ? type : withoutUndefined;
           this.c.expressions.checkAssignable(right, defaultType, declared);
-          this.bindPattern(left, declared, bind, annotated);
+          this.bindPattern(left, declared, bind, options);
           return;
         }
-        this.bindPattern(left, this.c.widen(unionOf([withoutUndefined, regularOf(defaultType)])), bind, annotated);
+        const combined = unionOf([withoutUndefined, defaultType], true);
+        this.bindPattern(left, options.isConst ? combined : this.c.widen(combined), bind, options);
         return;
       }
       case 'object_pattern': {
-        this.bindObjectPattern(pattern, type, bind, annotated);
+        this.bindObjectPattern(pattern, type, bind, options);
         return;
       }
       case 'array_pattern': {
-        this.bindArrayPattern(pattern, type, bind, annotated);
+        this.bindArrayPattern(pattern, type, bind, options);
         return;
       }
       default: {
@@ -141,8 +149,7 @@ export class BindingPatterns {
 
   /**
    * The type a binding or assignment pattern implies for the value it takes apart, which an initializer or a right side
-   * takes as its contextual type: an object literal there gains the properties the pattern gives defaults, as
-   * `const { a = 1 } = {}` does. `leafType` gives the type of an element that is not a pattern, with or without default.
+   * takes as its contextual type. `leafType` gives the type of an element that is not a pattern, with or without default.
    */
   impliedType(pattern: TreeNode, leafType = (element: TreeNode) => this.bindingLeafType(element)): Type | undefined {
     switch (pattern.type) {
@@ -158,6 +165,34 @@ export class BindingPatterns {
         return undefined;
       }
     }
+  }
+
+  impliedBindingType(pattern: TreeNode, isConst = false): Type | undefined {
+    return this.impliedType(pattern, (element) => this.bindingLeafType(element, isConst));
+  }
+
+  parameterInitializerType(pattern: TreeNode, value: Type, implied: Type | undefined): Type {
+    if (!implied) return value;
+    if (isTuple(value) && isTuple(implied)) return this.padParameterTuple(value, implied);
+    if (pattern.type !== 'object_pattern' || value.kind !== 'object' || !value.fresh) return value;
+    const structure = this.c.structureOf(value);
+    const properties = new Map(structure.properties);
+    for (const [name, property] of this.c.structureOf(implied).properties) {
+      if (property.optional) properties.set(name, { ...(properties.get(name) ?? property), optional: true });
+    }
+    return anonymousObject(() => ({ ...structure, properties }), { isLiteral: true });
+  }
+
+  private padParameterTuple(value: ObjectType, implied: ObjectType): Type {
+    const tuple = value.tuple;
+    if (!tuple || tuple.elements.some((element) => element.rest)) return value;
+    const extra = (implied.tuple?.elements ?? []).slice(tuple.elements.length).filter((element) => !element.rest);
+    return extra.length > 0
+      ? this.c.tupleType(
+          [...tuple.elements, ...extra.map((element) => ({ ...element, optional: true }))],
+          tuple.readonly
+        )
+      : value;
   }
 
   private impliedObjectType(pattern: TreeNode, leafType: (element: TreeNode) => Type): Type {
@@ -178,9 +213,7 @@ export class BindingPatterns {
         simpleProperty(name, this.impliedElementType(value, leafType), { optional: !!defaultedTarget(value) })
       );
     }
-    const type = anonymousObject(() => structure);
-    this.impliedTypes.add(type);
-    return type;
+    return anonymousObject(() => structure);
   }
 
   private impliedTupleType(pattern: TreeNode, leafType: (element: TreeNode) => Type): Type {
@@ -202,16 +235,19 @@ export class BindingPatterns {
     return this.impliedType(defaultedTarget(element) ?? element, leafType) ?? leafType(element);
   }
 
-  private bindingLeafType(element: TreeNode): Type {
+  private bindingLeafType(element: TreeNode, isConst = false): Type {
     const right = defaultedTarget(element) && element.childForFieldName('right');
-    return right ? this.c.flow.probe(() => this.c.silently(() => this.c.expressions.checkWidened(right))) : anyType;
+    if (!right) return anyType;
+    return this.c.flow.probe(() =>
+      this.c.silently(() => (isConst ? this.c.expressions.check(right) : this.c.expressions.checkWidened(right)))
+    );
   }
 
   private bindObjectPattern(
     pattern: TreeNode,
     type: Type,
     bind: (identifier: TreeNode, type: Type) => void,
-    annotated: boolean
+    options: BindingOptions
   ): void {
     if (isEmptyPattern(pattern)) this.checkEmptyObjectSource(pattern, type);
     const used: Type[] = [];
@@ -225,15 +261,15 @@ export class BindingPatterns {
         case 'object_assignment_pattern': {
           const left = element.childForFieldName('left') as TreeNode;
           used.push(literalType(left.text));
-          const propertyType = this.destructuredProperty(left, type, left.text);
-          this.bindPattern(element, propertyType, bind, annotated);
+          const propertyType = this.destructuredProperty(left, type, left.text, true);
+          this.bindPattern(element, propertyType, bind, options);
           break;
         }
         case 'pair_pattern': {
           const key = element.childForFieldName('key') as TreeNode;
           const value = element.childForFieldName('value') as TreeNode;
-          const selected = this.destructuredKey(key, type);
-          this.bindPattern(value, selected.type, bind, annotated);
+          const selected = this.destructuredKey(key, type, defaultedTarget(value) !== undefined);
+          this.bindPattern(value, selected.type, bind, options);
           used.push(selected.keyType);
           break;
         }
@@ -252,14 +288,15 @@ export class BindingPatterns {
   destructuredKey(
     key: TreeNode,
     objectType: Type,
+    allowMissing: boolean,
     computedType?: Type
   ): { type: Type; keyType: Type; names?: string[] } {
     const selection = this.patternKey(key, computedType);
     this.selectedKeys.set(key.id, selection.names);
-    const namedTypes = selection.names?.map((name) => this.destructuredProperty(key, objectType, name));
+    const namedTypes = selection.names?.map((name) => this.destructuredProperty(key, objectType, name, allowMissing));
     const type =
       namedTypes && !this.c.relations.isGeneric(selection.type)
-        ? unionOf(namedTypes)
+        ? unionOf(namedTypes, true)
         : this.c.members.indexedType(key, key, selection.node, objectType, selection.type);
     return { type, keyType: selection.type, names: selection.names };
   }
@@ -382,16 +419,17 @@ export class BindingPatterns {
     );
   }
 
-  destructuredProperty(node: TreeNode, type: Type, name: string): Type {
+  destructuredProperty(node: TreeNode, type: Type, name: string, allowMissing = false): Type {
     if (isAnyLike(type)) return anyType;
     // As an element access does, any property of `never` is `never`.
     if (isIntrinsic(type, 'never')) return neverType;
-    const united = type.kind === 'union' ? this.unionDestructuredProperty(node, type, name) : undefined;
+    const united = type.kind === 'union' ? this.unionDestructuredProperty(node, type, name, allowMissing) : undefined;
     if (united) return united;
     const property = this.c.propertyOf(type, name);
     if (!property) {
       const indexType = this.c.members.indexSignatureType(type, name);
       if (indexType) return indexType;
+      if (allowMissing && type.kind === 'object' && type.fresh) return undefinedType;
       this.c.error(node, `プロパティ '${name}' は型 '${this.c.print(type)}' にありません。`);
       return errorType;
     }
@@ -400,30 +438,37 @@ export class BindingPatterns {
   }
 
   /** The union of a property's types when each member of a union has it, or `undefined` when one lacks it. */
-  private unionDestructuredProperty(node: TreeNode, type: UnionType, name: string): Type | undefined {
-    const types = type.types.map((member) => this.c.silently(() => this.destructuredProperty(node, member, name)));
+  private unionDestructuredProperty(
+    node: TreeNode,
+    type: UnionType,
+    name: string,
+    allowMissing: boolean
+  ): Type | undefined {
+    const types = type.types.map((member) =>
+      this.c.silently(() => this.destructuredProperty(node, member, name, allowMissing))
+    );
     if (types.includes(errorType)) return undefined;
     for (const member of type.types) {
       const property = this.c.propertyOf(member, name);
       if (property) this.c.members.checkPropertyUse(node, node, node, type, property);
     }
-    return unionOf(types);
+    return unionOf(types, true);
   }
 
   private bindArrayPattern(
     pattern: TreeNode,
     type: Type,
     bind: (identifier: TreeNode, type: Type) => void,
-    annotated: boolean
+    options: BindingOptions
   ): void {
     if (isEmptyPattern(pattern)) this.iteratedType(pattern, type);
     for (const { element, index } of arrayPatternElements(pattern)) {
       if (element.type === 'rest_pattern') {
         const target = named(element)[0];
-        if (target) this.bindPattern(target, this.restOfIterable(pattern, type, index, true), bind, annotated);
+        if (target) this.bindPattern(target, this.restOfIterable(pattern, type, index, true), bind, options);
         break;
       }
-      this.bindPattern(element, this.elementAt(element, type, index), bind, annotated);
+      this.bindPattern(element, this.elementAt(element, type, index), bind, options);
     }
   }
 
@@ -444,6 +489,7 @@ export class BindingPatterns {
       (member.tuple?.elements ?? []).some((element, position) => element.rest || position === index);
     const allTuples = type.types.every(isTuple);
     if (allTuples && !type.types.some((member) => reaches(member as ObjectType))) {
+      if (defaultedTarget(node)) return undefinedType;
       this.c.error(node, `プロパティ '${index}' は型 '${this.c.print(type)}' にありません。`);
       return errorType;
     }
@@ -451,7 +497,8 @@ export class BindingPatterns {
       type.types.map((member) => {
         if (!isTuple(member) || reaches(member)) return this.elementAt(node, member, index);
         return allTuples ? undefinedType : this.iteratedType(node, member);
-      })
+      }),
+      true
     );
   }
 
@@ -463,7 +510,7 @@ export class BindingPatterns {
     const element = elements[index];
     if (element) return element.optional ? unionOf([element.type, undefinedType]) : element.type;
     // An element with a default, as in `const [a = 1] = []`, takes the default where the tuple ends.
-    if (node.type === 'assignment_pattern') return undefinedType;
+    if (defaultedTarget(node)) return undefinedType;
     this.c.error(
       node,
       `長さ ${elements.length} のタプル型 '${this.c.print(type)}' には、インデックス ${index} の要素がありません。`
