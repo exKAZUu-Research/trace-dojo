@@ -3049,3 +3049,17 @@ fn main() {
     expect(executeProgram('rust', program.replace(bound, 'T'))).toMatchObject({ kind: 'compileError' });
   }
 });
+
+test('drops Rust collection elements rejected by retain before the next predicate', () => {
+  for (const [constructor, method] of [
+    ['vec![Turtle::new(1, 6), Turtle::new(1, 5)]', 'retain'],
+    ['vec![Turtle::new(1, 6), Turtle::new(1, 5)]', 'retain_mut'],
+    ['std::collections::VecDeque::from([Turtle::new(1, 6), Turtle::new(1, 5)])', 'retain'],
+  ]) {
+    const program = rustMain(`let mut turtles = ${constructor};
+    turtles.${method}(|turtle| turtle.canMoveForward());
+    println!("{}", turtles.len());`);
+    const execution = executeProgram('rust', program);
+    expect(execution).toMatchObject({ kind: 'executed', stdout: '1\n', finalTurtles: [{ x: 1, y: 5 }] });
+  }
+});

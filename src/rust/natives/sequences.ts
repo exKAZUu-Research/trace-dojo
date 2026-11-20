@@ -2,6 +2,7 @@
 import {
   changeString,
   claimString,
+  clearStringSlotsFrom,
   insertOwnedElement,
   keepVecCapacity,
   pushOwnedElement,
@@ -16,7 +17,7 @@ import { type DebugPart } from '../debugText';
 import { normalize } from '../infer';
 import { described, fieldsPart, listPart, numberPart } from '../iterDebug';
 import { cloneValue, compareValues, copyValue, testPartialOrder, valuesEqual } from '../ops';
-import { RustPanic } from '../runtime';
+import { MOVED, RustPanic } from '../runtime';
 import { isBuiltin, shallow, type Type } from '../types';
 import {
   DONE,
@@ -65,6 +66,25 @@ function vec(self: Value): Value[] {
 
 function elemType(ctx: NativeContext): Type {
   return ctx.typeArgs[0];
+}
+
+function retainElements(items: Value[], keep: (item: ElementPlace) => boolean): Value {
+  keepVecCapacity(items, items.length);
+  let write = 0;
+  let read = 0;
+  try {
+    for (; read < items.length; read++) {
+      if (keep(new ElementPlace(items, read))) swapOwnedElements(items, write++, read);
+      else items[read] = MOVED;
+    }
+  } finally {
+    if (write < read) {
+      for (; read < items.length; read++) swapOwnedElements(items, write++, read);
+      clearStringSlotsFrom(items, write);
+      items.length = write;
+    }
+  }
+  return UNIT_VALUE;
 }
 
 function cmpWith(ctx: NativeContext, f: Value): (a: Value, b: Value) => number {
@@ -546,22 +566,8 @@ const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
     const [start, end] = drainBounds(ctx, items, range);
     return ownedIter(items.splice(start, end - start));
   },
-  retain: ([self, f], ctx) => {
-    const items = vec(self);
-    const kept = items.filter((item) => deref(call(ctx, f, [item])) as boolean);
-    items.length = 0;
-    items.push(...kept);
-    return UNIT_VALUE;
-  },
-  retain_mut: ([self, f], ctx) => {
-    const items = vec(self);
-    // The closure may change each element before deciding, so the kept elements are read after it runs.
-    const keep = items.map((_, index) => deref(call(ctx, f, [new ElementPlace(items, index)])) as boolean);
-    const kept = items.filter((_, index) => keep[index]);
-    items.length = 0;
-    items.push(...kept);
-    return UNIT_VALUE;
-  },
+  retain: ([self, f], ctx) => retainElements(vec(self), (item) => deref(call(ctx, f, [item.get()])) as boolean),
+  retain_mut: ([self, f], ctx) => retainElements(vec(self), (item) => deref(call(ctx, f, [item])) as boolean),
   dedup: ([self], ctx) => dedupBy(vec(self), (current, kept) => valuesEqual(elemType(ctx), current.get(), kept.get())),
   dedup_by: ([self, f], ctx) => dedupBy(vec(self), (current, kept) => call(ctx, f, [current, kept]) as boolean),
   dedup_by_key: ([self, f], ctx) => {
