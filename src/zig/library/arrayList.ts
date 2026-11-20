@@ -140,7 +140,7 @@ function reallocate(frame: Frame, list: List, requested: number | bigint, child:
   const complete = reserveNativeAllocation(frame, list.allocator, capacity, child, previous);
   if (!complete) return false;
   spendTransfers(list, list.items.length * 2 + capacity);
-  const values = list.items.values().map(copyForStorage);
+  const values = list.items.values((count) => frame.runtime.spend(count)).map(copyForStorage);
   for (let index = values.length; index < capacity; index++) values.push(undefinedValue(child));
   const storage = new ZArray(values, 0, capacity);
   complete(storage, list.items.length);
@@ -529,7 +529,7 @@ function defineMembers(type: StructType, child: Type): void {
       const complete = reserveNativeAllocation(frame, list.allocator, list.items.length, child, list.items.target);
       if (!complete) return ERROR_OUT_OF_MEMORY;
       spendTransfers(list, list.items.lengthValue, 2);
-      const values = list.items.values().map(copyForStorage);
+      const values = list.items.values((count) => frame.runtime.spend(count)).map(copyForStorage);
       const owned = new ZArray(values, 0, values.length);
       complete(owned);
       list.struct.slots[0] = new Slice(new ZArray([]), 0, 0);

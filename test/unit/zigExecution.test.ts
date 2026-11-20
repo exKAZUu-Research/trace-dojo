@@ -9390,6 +9390,20 @@ test('reusing a proven overflow result keeps aggregate evaluations independent',
   });
 });
 
+test.each([
+  [
+    'allocator duplication',
+    'const data:[100000]u8=@splat(7);for(0..3)|_|{const copy=try a.dupe(u8,&data);a.free(copy);}',
+  ],
+  [
+    'ArrayList capacity growth',
+    'const data:[60000]u8=@splat(7);var list:std.ArrayList(u8)=.empty;defer list.deinit(a);try list.appendSlice(a,&data);for(0..3)|_|{try list.ensureTotalCapacityPrecise(a,list.capacity+1);}',
+  ],
+])('%s counts copying the source window', (_name, body) => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{const a=init.gpa;${body}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
 test.each(['allocUpperString', 'allocLowerString'])(
   'allocating ASCII %s meters source reads and destination stores',
   (method) => {

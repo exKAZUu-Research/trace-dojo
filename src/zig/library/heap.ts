@@ -202,7 +202,9 @@ function allocateSlice(
   const initialized = request.source ? Math.min(request.source.length, length) : 0;
   frame.runtime.spend((length + initialized) * transferCost(child));
   const values = request.source
-    ? new Slice(request.source.target, request.source.start, initialized).values().map(copyForStorage)
+    ? new Slice(request.source.target, request.source.start, initialized)
+        .values((count) => frame.runtime.spend(count))
+        .map(copyForStorage)
     : [];
   while (values.length < length) values.push(undefinedValue(child));
   const array = new ZArray(values, 0, length);

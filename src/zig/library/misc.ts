@@ -395,7 +395,7 @@ function priorityQueueType(element: Type, context: Type, compareExpression: TExp
       return true;
     }
     frame.runtime.spend((Number(capacity) + items.length) * transferCost(element));
-    const values = items.values().map(copyForStorage);
+    const values = items.values((count) => frame.runtime.spend(count)).map(copyForStorage);
     while (BigInt(values.length) < capacity) values.push(undefinedValue(element));
     const storage = new ZArray(values, 0, capacity);
     complete(storage, items.length);
