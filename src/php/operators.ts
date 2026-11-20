@@ -9,7 +9,6 @@ import {
   floatFitsInt,
   formatFloat,
   formatFloatRepr,
-  intOrFloat,
   NAN_STRING_WARNING,
   normalizeKeyString,
   numericPrefix,
@@ -236,14 +235,10 @@ export function arithmetic(op: string, left: Value, right: Value, pending?: PhpT
   const a = arithmeticOperand(left, op, left, right, pending);
   const b = arithmeticOperand(right, op, left, right, pending);
   switch (op) {
-    case '+': {
-      return typeof a === 'bigint' && typeof b === 'bigint' ? intOrFloat(a + b) : Number(a) + Number(b);
-    }
-    case '-': {
-      return typeof a === 'bigint' && typeof b === 'bigint' ? intOrFloat(a - b) : Number(a) - Number(b);
-    }
+    case '+':
+    case '-':
     case '*': {
-      return typeof a === 'bigint' && typeof b === 'bigint' ? intOrFloat(a * b) : Number(a) * Number(b);
+      return signedArithmetic(op, a, b);
     }
     case '/': {
       if (Number(b) === 0) throwError('DivisionByZeroError', 'Division by zero');
@@ -260,6 +255,16 @@ export function arithmetic(op: string, left: Value, right: Value, pending?: PhpT
   throw new Error(`Unknown arithmetic operator ${op}`);
 }
 
+function signedArithmetic(op: '+' | '-' | '*', left: bigint | number, right: bigint | number): bigint | number {
+  if (typeof left === 'bigint' && typeof right === 'bigint') {
+    const exact = op === '+' ? left + right : op === '-' ? left - right : left * right;
+    if (exact >= INT_MIN && exact <= INT_MAX) return exact;
+  }
+  const a = Number(left);
+  const b = Number(right);
+  return op === '+' ? a + b : op === '-' ? a - b : a * b;
+}
+
 function power(a: bigint | number, b: bigint | number, pending?: PhpThrow): bigint | number {
   if (typeof a === 'bigint' && typeof b === 'bigint' && b >= 0n) {
     if (a === 0n || a === 1n || b === 0n) return b === 0n ? 1n : a;
@@ -270,15 +275,13 @@ function power(a: bigint | number, b: bigint | number, pending?: PhpThrow): bigi
     while (exponent > 0n) {
       if (exponent % 2n !== 0n) {
         exponent--;
-        const product = result * factor;
-        if (product < INT_MIN || product > INT_MAX)
-          return Number(result) * Number(factor) * platformBinary('pow', Number(factor), Number(exponent));
+        const product = signedArithmetic('*', result, factor);
+        if (typeof product === 'number') return product * platformBinary('pow', Number(factor), Number(exponent));
         result = product;
       } else {
         exponent /= 2n;
-        const square = factor * factor;
-        if (square < INT_MIN || square > INT_MAX)
-          return Number(result) * platformBinary('pow', Number(factor) * Number(factor), Number(exponent));
+        const square = signedArithmetic('*', factor, factor);
+        if (typeof square === 'number') return Number(result) * platformBinary('pow', square, Number(exponent));
         factor = square;
       }
     }

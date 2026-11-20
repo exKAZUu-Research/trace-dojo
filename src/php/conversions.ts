@@ -53,12 +53,6 @@ export function floatFitsInt(value: number): boolean {
   return Number.isFinite(value) && value >= -9.223372036854776e18 && value < 9.223372036854776e18;
 }
 
-/** The result of an integer operation, or the float PHP produces when it overflows. */
-export function intOrFloat(value: bigint): bigint | number {
-  if (value > INT_MAX || value < INT_MIN) return Number(value);
-  return value;
-}
-
 export interface NumericPrefix {
   /** The number the string starts with. */
   value: bigint | number;

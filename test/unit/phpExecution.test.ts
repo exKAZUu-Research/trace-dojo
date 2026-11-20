@@ -2942,6 +2942,23 @@ test.each([
   expect(JSON.stringify(result)).toContain('Cannot use string as default value for parameter $x of type int');
 });
 
+test('rounds integer operands before computing an overflowing result', () => {
+  const source = `<?php
+    class NumberBox { public static float $product = 9007199254740993 * 9007199254740993; }
+    $a = 2842708560640077593;
+    $b = 8063126569282620044;
+    $a += $b;
+    $n = 9007199254740993;
+    var_dump($a, -2842708560640077593 - $b, $n * $n, array_product([$n, $n]), NumberBox::$product, $n + 1);
+  `;
+  expect(run(source)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'float(1.09058351299227E+19)\nfloat(-1.09058351299227E+19)\nfloat(8.112963841460668E+31)\n' +
+      'float(8.112963841460668E+31)\nfloat(8.112963841460668E+31)\nint(9007199254740994)\n',
+  });
+});
+
 test.each(['"01"', '"+1"', '"-0"', '" 1"', '"1 "', '"1x"', '"1ex"'])(
   'folds PHP compile-time string offsets: %s',
   (offset) => {
