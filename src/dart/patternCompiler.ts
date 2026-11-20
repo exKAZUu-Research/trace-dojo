@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 457 -- The compilation of every kind of pattern, which share their type and binding helpers.
+// code-gauge-allow-file fileNcss 460 -- The compilation of every kind of pattern, which share their type and binding helpers.
 import type { Expression, ListPatternElement, Pattern, RecordPatternField, Span } from './ast';
 import { CallCompiler } from './callCompiler';
 import { type Compiled, type ResolvedMember, typeName } from './compilerBase';
@@ -410,6 +410,7 @@ export abstract class PatternCompiler extends CallCompiler {
       this.compileExpression(value, matchedType.kind === 'dynamic' ? undefined : nonNullable(matchedType))
     );
     if (!compiled.isConst) this.error(value, 'case のパターンには、定数を書いてください。');
+    this.checkConstant(value, compiled);
     const { run } = compiled;
     return {
       match: (frame, actual) => frame.runtime.equals(run(frame), actual),
@@ -424,6 +425,7 @@ export abstract class PatternCompiler extends CallCompiler {
   ): Omit<CompiledPattern, 'variables'> {
     const operand = this.withConstContext(true, () => this.compileExpression(pattern.value));
     if (!operand.isConst) this.error(pattern.value, '比べる相手には、定数を書いてください。');
+    this.checkConstant(pattern.value, operand);
     const { operator } = pattern;
     const { run } = operand;
     if (operator === '==' || operator === '!=') {
@@ -504,7 +506,7 @@ export abstract class PatternCompiler extends CallCompiler {
   }
 
   // code-gauge-allow functionCognitiveComplexity 20 -- One case per part of the pattern, matched in Dart's order.
-  // code-gauge-allow functionNcss 33 -- One case per part of the pattern, matched in Dart's order.
+  // code-gauge-allow functionNcss 34 -- One case per part of the pattern, matched in Dart's order.
   private mapPattern(
     pattern: Extract<Pattern, { kind: 'map' }>,
     matchedType: DartType,
@@ -527,6 +529,7 @@ export abstract class PatternCompiler extends CallCompiler {
     const entries = pattern.entries.map((entry) => {
       const key = this.withConstContext(true, () => this.compileExpression(entry.key, keyType));
       if (!key.isConst) this.error(entry.key, 'マップのパターンのキーには、定数を書いてください。');
+      this.checkConstant(entry.key, key);
       return { key: key.run, value: this.compilePatternInner(entry.value, valueType, options, variables) };
     });
     this.requireAssignable(mapType, matchedType, options, pattern);

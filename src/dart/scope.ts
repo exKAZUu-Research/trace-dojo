@@ -1,4 +1,6 @@
+import type { Span } from './ast';
 import type { ClassInfo } from './classes';
+import type { Eval } from './compilerBase';
 import type { FunctionInfo, TypeEnv } from './runtime';
 import type { DartType, FunctionType, InterfaceType, TypeParam } from './types';
 import type { Value } from './values';
@@ -15,12 +17,14 @@ export class LocalVar {
   readonly id = nextLocalId++;
   unavailable: string | undefined;
   inPatternGuard = false;
+  hasAssignment = false;
   /** Assigned inside a closure, which stops Dart from promoting it. */
   isWriteCaptured = false;
   /** Read inside a closure. */
   isCaptured = false;
   /** A primitive value a `const` local holds. */
   constant: Value | undefined;
+  constantInitializer: Eval | undefined;
   /**
    * For a bool local initialized with a condition (`final ok = x != null;`), what the condition told flow analysis
    * when true and when false, which `if (ok)` applies again as Dart does.
@@ -29,6 +33,7 @@ export class LocalVar {
   hasConstant = false;
 
   constructor(
+    readonly syntax: Span,
     readonly name: string,
     readonly type: DartType,
     readonly slot: number,
@@ -53,10 +58,8 @@ export class FunctionContext {
   readonly labels: { name: string; isLoop: boolean; isSwitchCase: boolean }[] = [];
   loopDepth = 0;
   switchDepth = 0;
-  /** The variables assigned anywhere in the function's body other than their declarations, by name. */
-  assignedNames: ReadonlySet<string> = new Set();
-  /** The names assigned inside closures nested in the function. */
-  closureAssignedNames: ReadonlySet<string> = new Set();
+  assignments: ReadonlyMap<Span, ReadonlySet<string>> = new Map();
+  capturedAssignments: ReadonlyMap<Span, ReadonlySet<string>> = new Map();
   /** The type of the value each `return` gives, collected to infer a closure's return type. */
   returnTypes: DartType[] | undefined;
   /** For `sync*` functions, the type of the elements `yield` gives. */

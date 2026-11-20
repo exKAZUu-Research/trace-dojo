@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 984 -- The natives of List, Set, Map, and their iterators share the helpers of this file.
+// code-gauge-allow-file fileNcss 1000 -- The natives of List, Set, Map, and their iterators share the helpers of this file.
 import type { TopLevelFunction } from '../environment';
 import { stringOf } from '../format';
 import { type HashPolicy, HashStore } from '../hashStore';
@@ -840,7 +840,7 @@ function newHashObject(
     ? `CompactLinked${policy.identity ? 'Identity' : 'Custom'}Hash${kind}`
     : `_${isConst ? 'Const' : ''}${kind}`;
   const result = new DartObject(runtime.links.classNamed(name), typeArgs, []);
-  result.native = new HashStore(runtime, kind === 'Map', policy);
+  result.native = new HashStore(runtime, kind === 'Map', policy, isConst);
   (result as DartObject & { unmodifiable?: boolean }).unmodifiable = isConst;
   return result;
 }
@@ -889,6 +889,18 @@ const identityPolicies = new WeakMap<Runtime, HashPolicy>();
 installHashFactories('Set', 1);
 installHashFactories('Map', 2);
 
+function populateHashObject(runtime: Runtime, target: DartObject, populate: () => void): DartObject {
+  const frame = runtime.currentFrame;
+  const mark = frame?.temporaries.length ?? 0;
+  frame?.temporaries.push(target);
+  try {
+    populate();
+    return target;
+  } finally {
+    if (frame) frame.temporaries.length = mark;
+  }
+}
+
 function checkSetModifiable(runtime: Runtime, set: Value): void {
   if ((set as DartObject & { unmodifiable?: boolean }).unmodifiable)
     runtime.throwError('UnsupportedError', '', ['Cannot change an unmodifiable set']);
@@ -908,17 +920,18 @@ function setFrom(
   isConst = false
 ): DartObject {
   const set = newSet(runtime, elementType, false);
-  // Set.from adds each element as it iterates; Set.of is addAll, which may copy another set's table outright.
-  if (check) {
-    forEachValue(runtime, elements, (value) => {
-      castTo(runtime, value, elementType);
-      store(set).set(value, undefined);
-    });
-  } else {
-    addAllToSet(runtime, set, elements);
-  }
-  (set as DartObject & { unmodifiable?: boolean }).unmodifiable = isConst;
-  return set;
+  return populateHashObject(runtime, set, () => {
+    // Set.from adds each element as it iterates; Set.of is addAll, which may copy another set's table outright.
+    if (check) {
+      forEachValue(runtime, elements, (value) => {
+        castTo(runtime, value, elementType);
+        store(set).set(value, undefined);
+      });
+    } else {
+      addAllToSet(runtime, set, elements);
+    }
+    (set as DartObject & { unmodifiable?: boolean }).unmodifiable = isConst;
+  });
 }
 defineConstructor('Set.from', (runtime, _instance, args, typeArgs) =>
   setFrom(runtime, args.positional[0], typeArgs[0] ?? DYNAMIC, true)
@@ -1113,8 +1126,7 @@ define('Set.difference', (runtime, receiver, [other]) => {
 /** `_Set<E>()..addAll(this)`, the VM's `toSet`. */
 function copySet(runtime: Runtime, set: DartObject): DartObject {
   const copy = newHashObject(runtime, 'Set', set.typeArgs, false, store(set).policy);
-  addAllToSet(runtime, copy, set);
-  return copy;
+  return populateHashObject(runtime, copy, () => addAllToSet(runtime, copy, set));
 }
 define('Set.clear', (runtime, receiver) => {
   checkSetModifiable(runtime, receiver);
@@ -1158,18 +1170,19 @@ function mapFrom(
   isConst = false
 ): DartObject {
   const map = newMap(runtime, typeArgs[0] ?? DYNAMIC, typeArgs[1] ?? DYNAMIC);
-  // Map.from sets each entry as forEach gives it; Map.of is addAll, which may copy another map's table outright.
-  if (check || !(isPlainHashObject(runtime, other, '_Map') && store(map).quickCopy(store(other)))) {
-    forEachEntry(runtime, other, (key, value) => {
-      if (check) {
-        castTo(runtime, key, typeArgs[0] ?? DYNAMIC);
-        castTo(runtime, value, typeArgs[1] ?? DYNAMIC);
-      }
-      store(map).set(key, value);
-    });
-  }
-  (map as DartObject & { unmodifiable?: boolean }).unmodifiable = isConst;
-  return map;
+  return populateHashObject(runtime, map, () => {
+    // Map.from sets each entry as forEach gives it; Map.of is addAll, which may copy another map's table outright.
+    if (check || !(isPlainHashObject(runtime, other, '_Map') && store(map).quickCopy(store(other)))) {
+      forEachEntry(runtime, other, (key, value) => {
+        if (check) {
+          castTo(runtime, key, typeArgs[0] ?? DYNAMIC);
+          castTo(runtime, value, typeArgs[1] ?? DYNAMIC);
+        }
+        store(map).set(key, value);
+      });
+    }
+    (map as DartObject & { unmodifiable?: boolean }).unmodifiable = isConst;
+  });
 }
 defineConstructor('Map.from', (runtime, _instance, args, typeArgs) =>
   mapFrom(runtime, args.positional[0], typeArgs, true)
@@ -1184,39 +1197,55 @@ defineConstructor('Map.unmodifiable', (runtime, _instance, args, typeArgs) => {
 });
 defineConstructor('Map.fromIterable', (runtime, _instance, args, typeArgs) => {
   const map = newMap(runtime, typeArgs[0] ?? DYNAMIC, typeArgs[1] ?? DYNAMIC);
-  const keyOf = named(args.named, 'key', undefined);
-  const valueOf = named(args.named, 'value', undefined);
-  forEachValue(runtime, args.positional[0], (element) => {
-    const key = keyOf === undefined ? element : callFunction(runtime, keyOf, element);
-    const value = valueOf === undefined ? element : callFunction(runtime, valueOf, element);
-    store(map).set(key, value);
+  return populateHashObject(runtime, map, () => {
+    const keyOf = named(args.named, 'key', undefined);
+    const valueOf = named(args.named, 'value', undefined);
+    forEachValue(runtime, args.positional[0], (element) => {
+      const key = keyOf === undefined ? element : callFunction(runtime, keyOf, element);
+      const frame = runtime.currentFrame;
+      frame?.temporaries.push(key);
+      try {
+        const value = valueOf === undefined ? element : callFunction(runtime, valueOf, element);
+        implicitCast(runtime, key, elementTypeOf(map, 0));
+        implicitCast(runtime, value, elementTypeOf(map, 1));
+        store(map).set(key, value);
+      } finally {
+        frame?.temporaries.pop();
+      }
+    });
   });
-  return map;
 });
 defineConstructor('Map.fromIterables', (runtime, _instance, args, typeArgs) => {
   const map = newMap(runtime, typeArgs[0] ?? DYNAMIC, typeArgs[1] ?? DYNAMIC);
-  // As the SDK's _fillMapWithIterables: both iterators in step, each pair set as it is read.
-  const keys = runtime.getProperty(args.positional[0], 'iterator', undefined);
-  const values = runtime.getProperty(args.positional[1], 'iterator', undefined);
-  const moveNext = (iterator: Value): boolean =>
-    runtime.invoke(iterator, 'moveNext', { positional: [], named: undefined }, [], undefined) === true;
-  let hasNextKey = moveNext(keys);
-  let hasNextValue = moveNext(values);
-  while (hasNextKey && hasNextValue) {
-    store(map).set(runtime.getProperty(keys, 'current', undefined), runtime.getProperty(values, 'current', undefined));
-    hasNextKey = moveNext(keys);
-    hasNextValue = moveNext(values);
-    runtime.spend();
-  }
-  if (hasNextKey || hasNextValue) runtime.throwError('ArgumentError', '', ['Iterables do not have same length.']);
-  return map;
+  return populateHashObject(runtime, map, () => {
+    // As the SDK's _fillMapWithIterables: both iterators in step, each pair set as it is read.
+    const keys = runtime.getProperty(args.positional[0], 'iterator', undefined);
+    runtime.currentFrame?.temporaries.push(keys);
+    const values = runtime.getProperty(args.positional[1], 'iterator', undefined);
+    runtime.currentFrame?.temporaries.push(values);
+    const moveNext = (iterator: Value): boolean =>
+      runtime.invoke(iterator, 'moveNext', { positional: [], named: undefined }, [], undefined) === true;
+    let hasNextKey = moveNext(keys);
+    let hasNextValue = moveNext(values);
+    while (hasNextKey && hasNextValue) {
+      store(map).set(
+        runtime.getProperty(keys, 'current', undefined),
+        runtime.getProperty(values, 'current', undefined)
+      );
+      hasNextKey = moveNext(keys);
+      hasNextValue = moveNext(values);
+      runtime.spend();
+    }
+    if (hasNextKey || hasNextValue) runtime.throwError('ArgumentError', '', ['Iterables do not have same length.']);
+  });
 });
 defineConstructor('Map.fromEntries', (runtime, _instance, args, typeArgs) => {
   const map = newMap(runtime, typeArgs[0] ?? DYNAMIC, typeArgs[1] ?? DYNAMIC);
-  forEachValue(runtime, args.positional[0], (entry) => {
-    store(map).set(runtime.getProperty(entry, 'key', undefined), runtime.getProperty(entry, 'value', undefined));
+  return populateHashObject(runtime, map, () => {
+    forEachValue(runtime, args.positional[0], (entry) => {
+      store(map).set(runtime.getProperty(entry, 'key', undefined), runtime.getProperty(entry, 'value', undefined));
+    });
   });
-  return map;
 });
 define('Map.cast', (runtime, receiver, _args, _named, typeArgs) =>
   runtime.links.construct(runtime, 'CastMap', '', [receiver], undefined, [

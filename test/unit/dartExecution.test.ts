@@ -875,3 +875,101 @@ void main() {
     stdout: '[2, null, 1]\n[1, abc, false, true]\n[1, abc, false, true]\n',
   });
 });
+
+test('a closure inherits promotions when assignments target shadowed locals', () => {
+  const program = `void main() {
+  int? total = 5;
+  if (total != null) print([1, 2].map((value) => value + total));
+  for (var i = 0; i < 2; i++) { var total = i; total++; }
+  (() { var total = 0; total++; })();
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '(6, 7)\n' });
+});
+
+test('generic function arguments constrain parameters in both directions', () => {
+  const program = `R Function(A) memo<A, R>(R Function(A) callback) => callback;
+Type pair<T>(T value, void Function(T) callback) => T;
+Type named<T>(void Function({required T value}) callback) => T;
+void main() {
+  print(memo((int n) => n * n)(4));
+  print(pair(1, (num x) {}));
+  print(named(({required int value}) {}));
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '16\nint\nint\n' });
+});
+
+test('construction checks constants before main and only evaluates selected branches', () => {
+  const valid = `class C {
+  final (int, int) value;
+  const C(int n) : value = (n + 1, 0);
+}
+void main() {
+  const n = true ? 3 : 1 ~/ 0;
+  const a = <int>[n];
+  const b = [...a, n + 1];
+  print([const C(n).value, b]);
+}`;
+  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '[(4, 0), [3, 4]]\n' });
+  for (const invalid of [
+    'void main() { print("started"); const n = [1 ~/ 0]; }',
+    'int f() => 5; class C { final int n; const C() : n = f(); } void main() {}',
+    'class C { const C(int n) : assert(n > 0); } void main() { print(const C(0)); }',
+  ]) {
+    expect(executeProgram('dart', invalid)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
+test('a single switch case shares its binding with closures from the guard', () => {
+  const program = `late int Function() saved;
+bool remember(int Function() callback) { saved = callback; return true; }
+void main() {
+  switch (1) {
+    case int n when remember(() => n):
+      n++;
+      print(saved());
+  }
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '2\n' });
+});
+
+test('for-in writes the iterable element to an implicit instance field', () => {
+  const program = `class C {
+  int value = 0;
+  void run() { for (value in [3, 4]) print(value); }
+}
+void main() { C().run(); }`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '3\n4\n' });
+});
+
+test('a set being built retains values from earlier generator iterations', () => {
+  const program = `Iterable<Turtle> generate() sync* {
+  yield Turtle(1, 1);
+  yield Turtle(3, 3);
+  var third = Turtle(5, 5);
+  third.canMoveForward();
+  yield third;
+}
+void main() {
+  var turtles = Set<Turtle>.from(generate());
+  turtles.first.forward();
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    finalTurtles: [
+      { x: 1, y: 2 },
+      { x: 3, y: 3 },
+      { x: 5, y: 5 },
+    ],
+  });
+});
+
+test('constants with same-named types from different libraries stay distinct', () => {
+  const program = `import 'dart:core' as core;
+class String { const String(); }
+void main() {
+  const local = <String>[];
+  const sdk = <core.String>[];
+  print([identical(local, sdk), local is List<String>, sdk is List<core.String>]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[false, true, true]\n' });
+});

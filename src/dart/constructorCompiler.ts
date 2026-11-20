@@ -325,7 +325,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     return resolution?.kind === 'declaration' && resolution.declaration.kind === 'class';
   }
 
-  // code-gauge-allow functionNcss 33 -- The steps of a generative constructor: checks, its frame, initializers, and body, in order.
+  // code-gauge-allow functionNcss 34 -- The steps of a generative constructor: checks, its frame, initializers, and body, in order.
   private compileGenerative(
     cls: ClassInfo,
     constructor: ConstructorInfo,
@@ -333,15 +333,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     positionalTypes: DartType[],
     namedTypes: Map<string, DartType>
   ): void {
-    if (constructor.isConst && !this.isLibraryCode) {
-      const mutable = cls.fields.find((field) => !field.isFinal);
-      if (mutable) {
-        this.error(
-          declaration,
-          `const のコンストラクタがあるので、フィールド ${mutable.name} も final にしてください。`
-        );
-      }
-    }
+    this.checkConstConstructor(cls, constructor, declaration);
     const redirect = declaration.initializers.find((initializer) => initializer.kind === 'this');
     if (redirect && (declaration.initializers.length > 1 || declaration.body)) {
       this.error(redirect, 'this(...) にリダイレクトするコンストラクタには、ほかの初期化子や本体は書けません。');
@@ -384,7 +376,13 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     let prologue: ((frame: Frame) => void) | undefined;
     const initializedFields = new Set<string>();
     const compiled = this.compileFunctionWithPrologue(spec, () => {
-      prologue = this.compileConstructorPrologue(cls, declaration, initializedFields);
+      const previous = this.potentialConstInitializer;
+      this.potentialConstInitializer = constructor.isConst && !this.isLibraryCode;
+      try {
+        prologue = this.compileConstructorPrologue(cls, declaration, initializedFields);
+      } finally {
+        this.potentialConstInitializer = previous;
+      }
     });
     constructor.defaults = {
       positional: parameters.positional.map((parameter) => defaults.get(parameter)),
@@ -408,6 +406,18 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
       }
       return;
     };
+  }
+
+  private checkConstConstructor(
+    cls: ClassInfo,
+    constructor: ConstructorInfo,
+    declaration: ConstructorDeclaration
+  ): void {
+    if (!constructor.isConst || this.isLibraryCode) return;
+    if (declaration.body) this.error(declaration.body, 'const のコンストラクタには、本体を書けません。');
+    const invalidField = cls.fields.find((field) => !field.isFinal || field.isLate);
+    if (invalidField)
+      this.error(declaration, `フィールド ${invalidField.name} は、late ではない final にしてください。`);
   }
 
   private inheritedDefaults(cls: ClassInfo, declaration: ConstructorDeclaration): Map<FormalParameter, Compiled> {
@@ -469,7 +479,6 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     return super.compileBlock(block, clear);
   }
 
-  // code-gauge-allow duplicateLines 15 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   // code-gauge-allow functionCognitiveComplexity 19 -- The initializer list's entries and the implicit super().
   // code-gauge-allow functionNcss 45 -- The initializer list's entries and the implicit super().
   private compileConstructorPrologue(
@@ -479,7 +488,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
   ): (frame: Frame) => void {
     const steps: ((frame: Frame) => void)[] = [];
     const redirect = declaration.initializers.find((initializer) => initializer.kind === 'this');
-    if (!redirect) steps.push(...this.compileFieldInitializers(cls, initializedFields));
+    if (!redirect) steps.push(...this.compileFieldInitializersWithoutParameters(cls, initializedFields));
     steps.push(...this.compileInitializingFormals(cls, declaration, initializedFields));
     const explicitFields = new Set(
       [...declaration.parameters.positional, ...declaration.parameters.named]
@@ -497,7 +506,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
           explicitFields.add(field.name);
           initializedFields.add(field.name);
           const value = this.coerce(
-            this.compileExpression(initializer.value, field.type),
+            this.compileInitializerValue(initializer.value, field.type),
             field.type,
             initializer.value,
             (from, to) => `${from} 型の値は、${to} 型のフィールド ${field.name} に代入できません。`
@@ -518,7 +527,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
           break;
         }
         case 'assert': {
-          this.compileCondition(initializer.condition);
+          steps.push(this.compileInitializerAssert(initializer));
           break;
         }
         case 'super':
@@ -567,6 +576,29 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     };
   }
 
+  private compileInitializerValue(expression: Expression, context: DartType | undefined): Compiled {
+    const compiled = this.compileExpression(expression, context);
+    if (this.potentialConstInitializer && !compiled.isConst)
+      this.error(expression, 'const のコンストラクタの初期化子には、定数として評価できる式を書いてください。');
+    return compiled;
+  }
+
+  private compileInitializerAssert(
+    initializer: Extract<ConstructorDeclaration['initializers'][number], { kind: 'assert' }>
+  ): (frame: Frame) => void {
+    const { compiled } = this.compileCondition(initializer.condition);
+    if (this.potentialConstInitializer && !compiled.isConst)
+      this.error(
+        initializer.condition,
+        'const のコンストラクタの assert には、定数として評価できる条件を書いてください。'
+      );
+    const message = initializer.message ? this.compileInitializerValue(initializer.message, undefined).run : undefined;
+    return (frame) => {
+      if (frame.runtime.checkingConstants && compiled.run(frame) !== true)
+        frame.runtime.throwError('AssertionError', '', [message?.(frame)]);
+    };
+  }
+
   /** The `this.x` parameters, which store their arguments in the fields before the initializer list runs. */
   private compileInitializingFormals(
     cls: ClassInfo,
@@ -601,6 +633,19 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     return steps;
   }
 
+  private compileFieldInitializersWithoutParameters(
+    cls: ClassInfo,
+    initializedFields: Set<string>
+  ): ((frame: Frame) => void)[] {
+    const scope = this.fn.scopes[0];
+    this.fn.scopes[0] = new Map();
+    try {
+      return this.compileFieldInitializers(cls, initializedFields);
+    } finally {
+      this.fn.scopes[0] = scope;
+    }
+  }
+
   /** The initializers of the fields a class declares, one step per declaration as Java's are. */
   private compileFieldInitializers(cls: ClassInfo, initializedFields: Set<string>): ((frame: Frame) => void)[] {
     const declaration = cls.declaration;
@@ -616,7 +661,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
         const field = cls.fields.find((candidate) => candidate.name === variable.name) as FieldMember;
         initializedFields.add(field.name);
         const compiled = this.coerce(
-          this.compileExpression(variable.initializer, field.type),
+          this.compileInitializerValue(variable.initializer, field.type),
           field.type,
           variable.initializer,
           (from, to) => `${from} 型の値は、${to} 型のフィールド ${field.name} に代入できません。`
@@ -643,7 +688,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
 
   /** The call of the superclass's constructor or of another constructor of the class, in an initializer list. */
   // code-gauge-allow functionParameterCount 7 -- The parameters are the parts a caller already holds; grouping them would only rename them.
-  // code-gauge-allow functionCognitiveComplexity 20 -- Each check of a super(...) or this(...) call reports its own SDK error.
+  // code-gauge-allow functionCognitiveComplexity 22 -- Each check of a super(...) or this(...) call reports its own SDK error.
   private compileDelegation(
     cls: ClassInfo,
     declaration: ConstructorDeclaration,
@@ -714,6 +759,8 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
       ...passed.named.map((_, index) => ({ kind: 'named' as const, index })),
     ];
     const bound = this.bindArguments(signature, passed, undefined, span, undefined);
+    if (this.potentialConstInitializer && !this.argumentsAreConst)
+      this.error(span, `const のコンストラクタの ${kind} に渡す値は、定数として評価できなければなりません。`);
     const typeArgs = this.runtimeTypes(targetType.args);
     const row = isImplicit || this.isLibraryCode ? undefined : span.row;
     const targetClass = targetType.cls;

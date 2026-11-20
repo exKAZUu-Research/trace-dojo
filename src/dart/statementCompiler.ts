@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 788 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 794 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type {
   Block,
   Expression,
@@ -10,7 +10,7 @@ import type {
   TypeSyntax,
   VariableDeclaration,
 } from './ast';
-import { assignedNames, namesAssignedIn } from './astWalk';
+import { assignmentTargets } from './astWalk';
 import type { CompiledFunction, FunctionSpec } from './callCompiler';
 import type { ClassInfo } from './classes';
 import { type Compiled, type Eval, typeName } from './compilerBase';
@@ -89,9 +89,9 @@ export abstract class StatementCompiler extends PatternCompiler {
     const info = this.newFunctionInfo(spec.name, undefined, spec.showsThis);
     info.isAtomic = isAtomic;
     const fn = new FunctionContext(isClosure ? savedFn : undefined, info, spec.kind);
-    const names = assignedNames(spec.body);
-    fn.assignedNames = names.all;
-    fn.closureAssignedNames = names.inClosures;
+    const assignments = assignmentTargets(spec.body, spec.parameters);
+    fn.assignments = assignments.locals;
+    fn.capturedAssignments = assignments.captured;
     if (spec.returnType === undefined) fn.returnTypes = [];
     if (spec.kind.isGenerator) fn.yieldTypes = [];
     fn.contextReturn = spec.contextReturnType;
@@ -102,9 +102,7 @@ export abstract class StatementCompiler extends PatternCompiler {
       ? new Flow(
           true,
           new Map(
-            [...savedFlow.promotions].filter(
-              ([variable]) => !variable.owner.assignedNames.has(variable.name) && !variable.isWriteCaptured
-            )
+            [...savedFlow.promotions].filter(([variable]) => !variable.hasAssignment && !variable.isWriteCaptured)
           ),
           savedFlow.assigned,
           savedFlow.maybeAssigned
@@ -289,6 +287,7 @@ export abstract class StatementCompiler extends PatternCompiler {
         span,
         (from, to) => `${from} 型の既定値は、${to} 型の引数 ${parameter.name} に合いません。`
       );
+      if (parameter.defaultValue) this.checkConstant(span, coerced);
       defaults?.set(parameter, coerced);
       defaultValue = coerced.run;
     } else if (
@@ -469,7 +468,8 @@ export abstract class StatementCompiler extends PatternCompiler {
     return this.withStep(statement, exec, this.onlyCalls(expression, compiled));
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Each branch is one of the cases Dart distinguishes for this construct.
+  // code-gauge-allow functionCognitiveComplexity 24 -- Bind a declaration, retain its constant or promotion, and emit its step.
+  // code-gauge-allow functionNcss 31 -- Bind a declaration, retain its constant or promotion, and emit its step.
   protected compileLocalDeclaration(declaration: VariableDeclaration, recordStep = true): Exec {
     const declaredType = declaration.type ? this.resolveType(declaration.type) : undefined;
     const parts: { slot: number; run: Eval | undefined; isLate: boolean }[] = [];
@@ -486,9 +486,14 @@ export abstract class StatementCompiler extends PatternCompiler {
         isParameter: false,
         hasInitializer: declarator.initializer !== undefined,
       });
-      if (declaration.isConst && compiled?.constValue) {
-        variable.constant = compiled.constValue.value;
-        variable.hasConstant = true;
+      if (declaration.isConst && compiled) {
+        if (compiled.constValue) {
+          variable.constant = compiled.constValue.value;
+          variable.hasConstant = true;
+        } else {
+          variable.constantInitializer = this.canonicalized(compiled.run);
+          compiled.run = variable.constantInitializer;
+        }
       }
       if (compiled && !declaration.isLate) this.flowAfterInitializer(variable, compiled, declaredType);
       variable.condition = this.pendingCondition;
@@ -549,6 +554,7 @@ export abstract class StatementCompiler extends PatternCompiler {
         (from, to) => `${from} 型の値は、${to} 型の変数 ${declarator.name} に代入できません。`
       );
     }
+    if (declaration.isConst) this.checkConstant(initializer, compiled);
     // `var x = f();` with a void `f` declares a void variable, which Dart rejects only where it is used.
     return compiled;
   }
@@ -731,11 +737,17 @@ export abstract class StatementCompiler extends PatternCompiler {
   }
 
   protected writtenLocals(statement: object): LocalVar[] {
-    const names = namesAssignedIn(statement);
+    const { locals, free } = assignmentTargets(statement);
     const variables: LocalVar[] = [];
-    for (const name of names) {
+    for (const name of free) {
       const variable = this.findLocal(name);
       if (variable) variables.push(variable);
+    }
+    for (const [syntax, names] of locals) {
+      for (const name of names) {
+        const variable = this.findLocal(name);
+        if (variable?.syntax === syntax) variables.push(variable);
+      }
     }
     return variables;
   }

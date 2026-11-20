@@ -5,6 +5,7 @@ import type { ClassInfo, Member } from './classes';
 import type { ExtensionInfo, GlobalVariable, LibraryEnv, TypeAlias } from './environment';
 import type { Frame, FunctionInfo, Runtime, TypeEnv } from './runtime';
 import { Flow, type FunctionContext, LocalVar } from './scope';
+import { inferFromSubtype } from './typeInference';
 import {
   asInstanceOf,
   boundOf,
@@ -24,7 +25,6 @@ import {
   NEVER,
   NULL,
   objectType,
-  type RecordType,
   resolveBound,
   substitute,
   TypeParam,
@@ -241,7 +241,6 @@ export abstract class CompilerBase {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Each branch is one of the cases Dart distinguishes for this construct.
   // code-gauge-allow functionNcss 33 -- One case per form of the construct, which reads best together.
   private resolveNamedType(syntax: Extract<TypeSyntax, { kind: 'named' }>, options: { allowRaw?: boolean }): DartType {
     const { name, prefix } = syntax;
@@ -462,7 +461,9 @@ export abstract class CompilerBase {
   ): LocalVar {
     const scope = this.fn.scopes.at(-1) as Map<string, LocalVar>;
     if (name !== '_' && scope.has(name)) this.error(span, `変数 ${name} は、同じスコープで既に宣言されています。`);
-    const variable = new LocalVar(name, type, this.fn.allocateSlot(), this.fn, options);
+    const variable = new LocalVar(span, name, type, this.fn.allocateSlot(), this.fn, options);
+    variable.hasAssignment = this.fn.assignments.get(span)?.has(name) ?? false;
+    variable.isWriteCaptured = this.fn.capturedAssignments.get(span)?.has(name) ?? false;
     if (name !== '_') scope.set(name, variable);
     this.fn.info.locals[variable.slot] = { name, type };
     if (name === '_' || name.startsWith('\0')) this.fn.info.locals[variable.slot] = { name: '\0', type };
@@ -513,8 +514,8 @@ export abstract class CompilerBase {
 
   /** Whether a local can be promoted: not write-captured and not a late variable read in a closure. */
   isPromotable(variable: LocalVar): boolean {
-    if (variable.isWriteCaptured || variable.owner.closureAssignedNames.has(variable.name)) return false;
-    if (variable.owner !== this.fn && variable.owner.assignedNames.has(variable.name)) return false;
+    if (variable.isWriteCaptured) return false;
+    if (variable.owner !== this.fn && variable.hasAssignment) return false;
     return true;
   }
 
@@ -690,113 +691,6 @@ export function eraseExtensionTypes(type: DartType): DartType {
       return type;
     }
   }
-}
-
-/**
- * Collects the constraints a context puts on a function's result type: where the result is a subclass of the context's
- * class (`R<int> r = E()`), its type arguments are matched through the subclass's supertype.
- */
-export function inferFromContext(
-  context: DartType,
-  formal: DartType,
-  params: ReadonlySet<TypeParam>,
-  solution: Map<TypeParam, DartType>
-): void {
-  const base = resolveBound(context);
-  if (
-    formal.kind === 'interface' &&
-    base.kind === 'interface' &&
-    formal.cls !== base.cls &&
-    formal.cls.isSubclassOf(base.cls)
-  ) {
-    const path = asInstanceOf(formal, base.cls);
-    if (path) {
-      for (const [index, arg] of path.args.entries()) {
-        const given = base.args[index];
-        if (given) inferFromSubtype(given, arg, params, solution, (a) => a);
-      }
-      return;
-    }
-  }
-  inferFromSubtype(context, formal, params, solution, (a) => a);
-}
-
-/**
- * Collects the constraints that make `actual` a subtype of `formal` on the type parameters in `params`, keeping in
- * `solution` the least upper bound of what each must be a supertype of.
- */
-// code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of type.
-export function inferFromSubtype(
-  actual: DartType,
-  formal: DartType,
-  params: ReadonlySet<TypeParam>,
-  solution: Map<TypeParam, DartType>,
-  join: (a: DartType, b: DartType) => DartType = (a) => a
-): void {
-  if (formal.kind === 'typeParam' && params.has(formal.param)) {
-    const target = formal.nullable && actual.kind !== 'dynamic' ? nonNullOf(actual) : actual;
-    if (target.kind === 'never' && !target.nullable) return;
-    const previous = solution.get(formal.param);
-    solution.set(formal.param, previous ? join(previous, target) : target);
-    return;
-  }
-  if (actual.kind === 'dynamic' && !mentionsTypeParams(formal, params)) return;
-  if (formal.kind === 'interface') {
-    inferFromInterface(actual, formal, params, solution, join);
-    return;
-  }
-  if (formal.kind === 'function' && actual.kind === 'function') {
-    inferFromSubtype(actual.returnType, formal.returnType, params, solution, join);
-    return;
-  }
-  if (formal.kind === 'record' && actual.kind === 'record') inferFromRecord(actual, formal, params, solution, join);
-}
-
-function inferFromInterface(
-  actual: DartType,
-  formal: InterfaceType,
-  params: ReadonlySet<TypeParam>,
-  solution: Map<TypeParam, DartType>,
-  join: (a: DartType, b: DartType) => DartType
-): void {
-  const base = actual.kind === 'typeParam' ? resolveBound(actual) : actual;
-  if (base.kind === 'dynamic') {
-    for (const arg of formal.args) inferFromSubtype(DYNAMIC, arg, params, solution, join);
-    return;
-  }
-  if (base.kind !== 'interface') return;
-  const instance = asInstanceOf({ ...base, nullable: false }, formal.cls);
-  if (!instance) return;
-  for (const [index, arg] of formal.args.entries()) {
-    const actualArg = instance.args[index];
-    if (actualArg) inferFromSubtype(actualArg, arg, params, solution, join);
-  }
-}
-
-function inferFromRecord(
-  actual: RecordType,
-  formal: RecordType,
-  params: ReadonlySet<TypeParam>,
-  solution: Map<TypeParam, DartType>,
-  join: (a: DartType, b: DartType) => DartType
-): void {
-  for (const [index, field] of formal.positional.entries()) {
-    const actualField = actual.positional[index];
-    if (actualField) inferFromSubtype(actualField, field, params, solution, join);
-  }
-  for (const field of formal.named) {
-    const actualField = actual.named.find((other) => other.name === field.name);
-    if (actualField) inferFromSubtype(actualField.type, field.type, params, solution, join);
-  }
-}
-
-function nonNullOf(type: DartType): DartType {
-  if (type.kind === 'null') return NEVER;
-  if (type.kind === 'interface' || type.kind === 'function' || type.kind === 'record') {
-    return type.nullable ? { ...type, nullable: false } : type;
-  }
-  if (type.kind === 'typeParam' && type.nullable) return { ...type, nullable: false };
-  return type;
 }
 
 const callMembers = new WeakMap<FunctionType, Member>();

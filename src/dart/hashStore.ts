@@ -40,7 +40,8 @@ export class HashStore implements NativeState {
     private readonly runtime: Runtime,
     /** Whether the store keeps values, as a map does, or only keys, as a set does. */
     readonly isMap: boolean,
-    readonly policy?: HashPolicy
+    readonly policy?: HashPolicy,
+    private readonly isConst = false
   ) {}
 
   get size(): number {
@@ -84,6 +85,7 @@ export class HashStore implements NativeState {
 
   /** Adds or replaces an entry, telling whether the key was new (`map[key] = value`, `set.add(key)`). */
   set(key: Value, value: Value): boolean {
+    if (this.isConst && this.runtime.checkingConstants) this.runtime.requireConstantKey(key);
     return this.setHashed(key, value, this.hashOf(key));
   }
 

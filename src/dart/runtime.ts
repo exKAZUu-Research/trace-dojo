@@ -137,11 +137,14 @@ export class Runtime implements TracedRuntime<Frame> {
   globals: Cell[] = [];
   /** Canonical constants by their structure, so that equal constants are identical. */
   readonly constants = new Map<string, Value>();
+  /** Structurally distinct constant types that share a display name. */
+  readonly constantTypes = new Map<string, InterfaceType[]>();
   /** The canonical tear-offs of top-level functions and static methods. */
   readonly tearOffs = new Map<unknown, DartClosure>();
   /** The value of each constant expression evaluated so far, by the code that builds it. */
   readonly constantSites = new Map<unknown, Value>();
   allocatedSlots = 0;
+  checkingConstants = false;
   links!: LibraryLinks;
   /** Objects `toString` is visiting, which collections print as `[...]` when they contain themselves. */
   readonly toStringVisiting: Value[] = [];
@@ -465,6 +468,8 @@ export class Runtime implements TracedRuntime<Frame> {
 
   /** `a == b`, calling the left operand's `==` for objects of the program. */
   equals(a: Value, b: Value): boolean {
+    if (this.checkingConstants && a instanceof DartObject && a.cls.implementation('==')?.owner.isLibrary === false)
+      this.throwError('ArgumentError', '', ['A constant comparison requires primitive equality']);
     // `==` calls an object's operator even on itself; only a record's own `==` starts with `identical`.
     if (a === b && (!(a instanceof DartObject) || a instanceof DartRecord)) {
       return typeof a !== 'number' || !Number.isNaN(a);
@@ -485,6 +490,19 @@ export class Runtime implements TracedRuntime<Frame> {
         return this.invoke(a, '==', { positional: [b], named: undefined }, [], undefined) === true;
       }
     }
+  }
+
+  requireConstantKey(value: Value): void {
+    if (value instanceof DartRecord) {
+      for (const field of value.positional) this.requireConstantKey(field);
+      for (const [, field] of value.named) this.requireConstantKey(field);
+      return;
+    }
+    if (
+      value instanceof DartObject &&
+      ['==', 'hashCode'].some((name) => value.cls.implementation(name)?.owner.isLibrary === false)
+    )
+      this.throwError('ArgumentError', '', ['A constant key requires primitive equality']);
   }
 
   // Runtime types

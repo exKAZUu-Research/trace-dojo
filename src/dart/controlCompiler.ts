@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 542 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 550 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type { Block, CatchClause, Pattern, Span, Statement, SwitchCase } from './ast';
 import type { FunctionSpec } from './callCompiler';
 import type { Eval } from './compilerBase';
@@ -63,26 +63,7 @@ export abstract class ControlCompiler extends StatementCompiler {
       for (const group of groupCases(statement.cases)) {
         this.flow = before;
         const { result, slots } = this.withScope(() => {
-          const heads = group.cases.map((switchCase) =>
-            this.withScope(() => this.compileCaseHead(switchCase, subjectType, before))
-          );
-          let joined = heads[0].result.flow;
-          for (const head of heads.slice(1)) joined = Flow.join(joined, head.result.flow);
-          this.flow = joined;
-          const variables = this.sharedCaseVariables(
-            group.cases[0],
-            heads.map(({ result }) => result.pattern),
-            group.labels.length > 0
-          );
-          const matchers = heads.map(({ result: { pattern, guard }, slots: headSlots }): SwitchMatcher => ({
-            pattern,
-            guard,
-            slots: headSlots,
-            bindings: variables.flatMap((variable) => {
-              const binding = pattern?.variables.get(variable.name);
-              return binding ? [{ from: binding.slot, to: variable.slot }] : [];
-            }),
-          }));
+          const matchers = this.compileSwitchMatchers(group.cases, subjectType, before, group.labels.length > 0);
           const body = this.compileStatements(group.statements);
           return { matchers, body };
         });
@@ -97,6 +78,39 @@ export abstract class ControlCompiler extends StatementCompiler {
       );
     }
     return { groups, after };
+  }
+
+  private compileSwitchMatchers(
+    cases: SwitchCase[],
+    subjectType: DartType,
+    before: Flow,
+    hasLabel: boolean
+  ): SwitchMatcher[] {
+    if (cases.length === 1 && !hasLabel) {
+      const { pattern, guard, flow } = this.compileCaseHead(cases[0], subjectType, before);
+      this.flow = flow;
+      return [{ pattern, guard, slots: [], bindings: [] }];
+    }
+    const heads = cases.map((switchCase) =>
+      this.withScope(() => this.compileCaseHead(switchCase, subjectType, before))
+    );
+    let joined = heads[0].result.flow;
+    for (const head of heads.slice(1)) joined = Flow.join(joined, head.result.flow);
+    this.flow = joined;
+    const variables = this.sharedCaseVariables(
+      cases[0],
+      heads.map(({ result }) => result.pattern),
+      hasLabel
+    );
+    return heads.map(({ result: { pattern, guard }, slots: headSlots }): SwitchMatcher => ({
+      pattern,
+      guard,
+      slots: headSlots,
+      bindings: variables.flatMap((variable) => {
+        const binding = pattern?.variables.get(variable.name);
+        return binding ? [{ from: binding.slot, to: variable.slot }] : [];
+      }),
+    }));
   }
 
   private isSwitchExhaustive(statement: Extract<Statement, { kind: 'switch' }>, subjectType: DartType): boolean {
@@ -705,6 +719,7 @@ interface SwitchGroup {
 }
 
 /** The index of the first group with a case that matches, clearing the variables of the groups that do not. */
+// code-gauge-allow functionCognitiveComplexity 17 -- Clear the failed matcher while keeping the selected body bindings live.
 function selectSwitchGroup(frame: Frame, value: Value, groups: readonly SwitchGroup[]): number {
   for (const [index, group] of groups.entries()) {
     for (const { pattern, guard, slots, bindings } of group.matchers) {
@@ -716,6 +731,7 @@ function selectSwitchGroup(frame: Frame, value: Value, groups: readonly SwitchGr
         for (const slot of slots) frame.locals[slot] = undefined;
       }
     }
+    for (const slot of group.slots) frame.locals[slot] = undefined;
   }
   return -1;
 }

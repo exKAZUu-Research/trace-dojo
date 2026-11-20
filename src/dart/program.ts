@@ -1,7 +1,8 @@
 import { CompileError } from '../interpreter/diagnostics';
+import { ExecutionLimitError } from '../interpreter/limits';
 import type { Library } from './ast';
 import type { ClassInfo } from './classes';
-import { type CompiledProgram, Compiler, instantiateObject } from './compiler';
+import { type CompiledProgram, Compiler, initialGlobals, instantiateObject } from './compiler';
 import { valueIs } from './compilerBase';
 import { type GlobalVariable, LibraryEnv, type TopLevelFunction } from './environment';
 import { stringOf } from './format';
@@ -17,7 +18,7 @@ import './library/nativeConvert';
 import './library/nativeBigInt';
 import { NATIVES } from './library/nativeSupport';
 import { parseDart } from './parse';
-import { DartThrow, type LibraryLinks, type Runtime } from './runtime';
+import { DartThrow, EMPTY_TYPE_ENV, Frame, type FunctionInfo, type LibraryLinks, Runtime } from './runtime';
 import {
   coreTypes,
   type DartType,
@@ -25,6 +26,7 @@ import {
   functionType,
   interfaceType,
   isSubtype as import_isSubtype,
+  sameType,
   vmTypeString,
 } from './types';
 import { DartList, DartObject, DartRecord, type Value } from './values';
@@ -222,12 +224,44 @@ export function compileProgram(syntax: Library, options: { atomicRows?: Readonly
   }
   const main = mainDeclaration.fn;
   checkMain(main);
+  validateConstants(compiler, globals);
   return {
     main,
     globals,
     programGlobals: globals.slice(libraryGlobals.length),
     mainTakesArguments: main.type.positional.length > 0,
   };
+}
+
+function validateConstants(compiler: Compiler, globals: GlobalVariable[]): void {
+  if (compiler.constantChecks.length === 0) return;
+  const runtime = new Runtime();
+  runtime.links = LINKS;
+  runtime.globals = initialGlobals(globals);
+  runtime.checkingConstants = true;
+  const info: FunctionInfo = {
+    name: '<constant>',
+    isAtomic: false,
+    isLibrary: true,
+    locals: [],
+    captures: [],
+    showsThis: false,
+  };
+  const frame = new Frame(runtime, info, 0, undefined, [], EMPTY_TYPE_ENV, undefined);
+  runtime.enter(frame);
+  try {
+    for (const { span, run } of compiler.constantChecks) {
+      try {
+        run(frame);
+      } catch (error) {
+        if (error instanceof DartThrow || error instanceof ExecutionLimitError)
+          compiler.error(span, '定数の式を評価できません。');
+        throw error;
+      }
+    }
+  } finally {
+    runtime.exit(frame);
+  }
 }
 
 function checkMain(main: TopLevelFunction): void {
@@ -297,7 +331,7 @@ export const LINKS: LibraryLinks = {
   newSet: (runtime, elementType, isConst) => newSet(runtime, elementType, isConst),
   newMap: (runtime, keyType, valueType, isConst) => newMap(runtime, keyType, valueType, isConst),
   canonicalize(runtime, value) {
-    const key = constantKey(value);
+    const key = constantKey(runtime, value);
     if (key === undefined) return value;
     const existing = runtime.constants.get(key);
     if (existing !== undefined) return existing;
@@ -322,9 +356,9 @@ function keyOf(item: Value): string {
 }
 
 /** A key that equal constants share, or undefined for values that are canonical already. */
-function constantKey(value: Value): string | undefined {
+function constantKey(runtime: Runtime, value: Value): string | undefined {
   if (!(value instanceof DartObject)) return undefined;
-  const type = vmTypeString(interfaceType(value.cls, value.typeArgs));
+  const type = constantTypeKey(runtime, value);
   if (value instanceof DartRecord) {
     return JSON.stringify([
       type,
@@ -336,6 +370,19 @@ function constantKey(value: Value): string | undefined {
   if (!value.native) return JSON.stringify([type, value.fields.map(keyOf)]);
   if ('keys' in value.native) return JSON.stringify([type, Array.from(value.native.values(), keyOf)]);
   return undefined;
+}
+
+function constantTypeKey(runtime: Runtime, value: DartObject): [string, number] {
+  const type = interfaceType(value.cls, value.typeArgs);
+  const display = vmTypeString(type);
+  const collisions = runtime.constantTypes.get(display);
+  if (!collisions) {
+    runtime.constantTypes.set(display, [type]);
+    return [display, 0];
+  }
+  const index = collisions.findIndex((other) => sameType(type, other));
+  if (index !== -1) return [display, index];
+  return [display, collisions.push(type) - 1];
 }
 
 export type { Runtime };

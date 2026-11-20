@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 984 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 986 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import type {
   ClassDeclaration,
@@ -903,6 +903,7 @@ export class Compiler extends ConstructorCompiler {
         initializer,
         (from, to) => `${from} 型の値は、${to} 型の ${global.name} に代入できません。`
       );
+      if (isConst) this.checkConstant(initializer, compiled);
       if (compiled.constValue && (compiled.isConst || isPrimitiveConstant(compiled)))
         global.initialValue = { value: compiled.constValue.value };
       const { run } = compiled;

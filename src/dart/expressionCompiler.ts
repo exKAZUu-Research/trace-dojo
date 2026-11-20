@@ -1,5 +1,5 @@
 import { CompileError } from '../interpreter/diagnostics';
-// code-gauge-allow-file fileNcss 910 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 921 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type {
   Arguments as ArgumentsSyntax,
   CascadeSelector,
@@ -421,7 +421,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
           const result = this.valueIsAt(frame, run(frame), resolve(frame));
           return result !== negated;
         },
-        isConst: false,
+        isConst: value.isConst,
       },
       flow: negated ? { whenTrue: this.flow, whenFalse: promoted } : { whenTrue: promoted, whenFalse: this.flow },
     };
@@ -431,8 +431,14 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return valueIs(frame.runtime, value, type);
   }
 
-  // code-gauge-allow functionNcss 38 -- One case per form of the construct, which reads best together.
   protected compileChainPart(expression: Expression, context: DartType | undefined): Compiled {
+    const compiled = this.compileChainNode(expression, context);
+    if (!this.inConstContext && 'isConst' in expression && expression.isConst) this.checkConstant(expression, compiled);
+    return compiled;
+  }
+
+  // code-gauge-allow functionNcss 38 -- One case per form of the construct, which reads best together.
+  private compileChainNode(expression: Expression, context: DartType | undefined): Compiled {
     switch (expression.kind) {
       case 'assign': {
         return this.compileAssignment(expression, context);
@@ -823,7 +829,6 @@ export abstract class ExpressionCompiler extends CompilerBase {
   ): Compiled;
 
   // code-gauge-allow functionCognitiveComplexity 29 -- Compile fields in source order and keep named fields sorted in the type and value.
-  // code-gauge-allow functionNcss 37 -- One case per form of the construct, which reads best together.
   private compileRecordLiteral(
     expression: Extract<Expression, { kind: 'record' }>,
     context: DartType | undefined
@@ -861,27 +866,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
       this.error(expression, 'const のレコードのフィールドは、定数でなければなりません。');
     }
     const isConst = expression.isConst || (allConstant && this.inConstContext);
-    const build: Eval = (frame) => {
-      const positional: Value[] = [];
-      const named = new Map<string, Value>();
-      const mark = frame.temporaries.length;
-      try {
-        for (const { name, compiled } of fields) {
-          const value = compiled.run(frame);
-          frame.temporaries.push(value);
-          if (name === undefined) positional.push(value);
-          else named.set(name, value);
-        }
-      } finally {
-        frame.temporaries.length = mark;
-      }
-      return new DartRecord(
-        coreTypes.record,
-        positional,
-        type.named.map(({ name }) => [name, named.get(name)])
-      );
+    const build = recordLiteralBuilder(fields, type.named);
+    return {
+      type,
+      run: isConst ? this.canonicalized(build) : build,
+      isConst: isConst || (allConstant && this.potentialConstInitializer),
     };
-    return { type, run: isConst ? this.canonicalized(build) : build, isConst };
   }
 
   private checkRecordFieldName(name: string, field: Span, names: Set<string>): void {
@@ -897,6 +887,16 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
     names.add(name);
   }
+
+  readonly constantChecks: { span: Span; run: Eval }[] = [];
+
+  protected checkConstant(span: Span, compiled: Compiled): void {
+    if (!this.isLibraryCode && compiled.isConst && !compiled.constValue) {
+      this.constantChecks.push({ span, run: compiled.run });
+    }
+  }
+
+  protected potentialConstInitializer = false;
 
   /** Whether the expression being compiled is in a constant context (`const` literals and constructors). */
   protected inConstContext = false;
@@ -1056,6 +1056,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
       const value = variable.constant;
       return { type: variable.type, run: () => value, isConst: true, constValue: { value }, variable };
     }
+    if (this.inConstContext && variable.constantInitializer)
+      return { type: variable.type, run: variable.constantInitializer, isConst: true, variable };
     const cell = this.cellAccess(variable);
     const type = this.isPromotable(variable) ? this.promotedType(variable) : variable.type;
     const { name } = variable;
@@ -1065,7 +1067,14 @@ export abstract class ExpressionCompiler extends CompilerBase {
         ? (frame) => this.readLocalValue(frame, cell(frame), name)
         : (frame) => cell(frame).v;
     // A const local holds a constant, which other constants may use, as `const b = [...a]`.
-    return { type, run, isConst: variable.options.isConst, variable };
+    return {
+      type,
+      run,
+      variable,
+      isConst:
+        variable.options.isConst ||
+        (this.potentialConstInitializer && !this.inConstContext && variable.options.isParameter),
+    };
   }
 
   protected readLocalValue(frame: Frame, target: Cell, name: string): Value {
@@ -1090,8 +1099,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
   private checkLateAssignable(variable: LocalVar, span: Span): void {
     if (variable.options.hasInitializer || !this.flow.reachable || this.flow.maybeAssigned.has(variable)) return;
     const { owner, name } = variable;
-    if (variable.isWriteCaptured || owner.closureAssignedNames.has(name)) return;
-    if (owner !== this.fn && owner.assignedNames.has(name)) return;
+    if (variable.isWriteCaptured) return;
+    if (owner !== this.fn && variable.hasAssignment) return;
     this.error(span, `late の変数 ${name} には、まだどこでも値を代入していないので、使えません。`);
   }
 
@@ -1106,10 +1115,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (options.hasInitializer || options.isParameter || this.flow.assigned.has(variable)) return;
     if (!this.flow.reachable) return;
     // A closure may run after the variable is assigned; Dart still rejects definitely unassigned ones.
-    if (
-      variable.owner !== this.fn &&
-      (this.flow.maybeAssigned.has(variable) || variable.owner.assignedNames.has(variable.name))
-    ) {
+    if (variable.owner !== this.fn && (this.flow.maybeAssigned.has(variable) || variable.hasAssignment)) {
       return;
     }
     if (options.isFinal) {
@@ -1211,7 +1217,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (!resolved || member?.kind !== 'field' || !member.isFinal) return compiled;
     let variable = this.fieldKeys.get(member);
     if (!variable) {
-      variable = new LocalVar(name, resolved.type, -1, this.fn, {
+      variable = new LocalVar({ row: member.row ?? 0, column: 0, start: 0, end: 0 }, name, resolved.type, -1, this.fn, {
         isFinal: true,
         isLate: false,
         isConst: false,
@@ -1631,9 +1637,35 @@ function mapTypesOfContext(context: DartType | undefined): [DartType, DartType] 
   return [base.args[0] ?? DYNAMIC, base.args[1] ?? DYNAMIC];
 }
 
+function recordLiteralBuilder(
+  fields: { name: string | undefined; compiled: Compiled }[],
+  namedTypes: readonly { name: string }[]
+): Eval {
+  return (frame) => {
+    const positional: Value[] = [];
+    const named = new Map<string, Value>();
+    const mark = frame.temporaries.length;
+    try {
+      for (const { name, compiled } of fields) {
+        const value = compiled.run(frame);
+        frame.temporaries.push(value);
+        if (name === undefined) positional.push(value);
+        else named.set(name, value);
+      }
+    } finally {
+      frame.temporaries.length = mark;
+    }
+    return new DartRecord(
+      coreTypes.record,
+      positional,
+      namedTypes.map(({ name }) => [name, named.get(name)])
+    );
+  };
+}
+
 /** Whether a local keeps its value from its declaration on: final, or assigned nowhere else, closures included. */
 function isStable(local: LocalVar): boolean {
-  return (local.options.isFinal || !local.owner.assignedNames.has(local.name)) && !local.isWriteCaptured;
+  return (local.options.isFinal || !local.hasAssignment) && !local.isWriteCaptured;
 }
 
 export function inferElementType(types: DartType[]): DartType {

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 651 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 654 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type { CascadeSelector, CollectionElement, Expression, ForInBinding, Span, SwitchExpressionCase } from './ast';
 import type { ClassInfo, Member } from './classes';
 import { at, type Compiled, type Eval, type ResolvedMember, typeName } from './compilerBase';
@@ -68,11 +68,14 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     this.afterWrite(target.variable, coerced.type);
     const answered = isAnsweredType(target.writeType);
     return (frame, value) => {
+      const mark = frame.temporaries.length;
       frame.temporaries.push(value);
       try {
-        target.write(frame, target.prepare(frame), coerced.run(frame));
+        const prepared = target.prepare(frame);
+        frame.temporaries.push(value);
+        target.write(frame, prepared, coerced.run(frame));
       } finally {
-        frame.temporaries.pop();
+        frame.temporaries.length = mark;
       }
       frame.runtime.steps.stepBinding(row, answered);
     };
@@ -103,7 +106,6 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     return this.assignTo(target, operator, value, span);
   }
 
-  // code-gauge-allow duplicateLines 17 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   // code-gauge-allow functionCognitiveComplexity 23 -- Simple, compound, and null-aware assignments.
   // code-gauge-allow functionNcss 56 -- Simple, compound, and null-aware assignments.
   private assignTo(target: AssignableTarget, operator: string, valueSyntax: Expression, span: Span): Compiled {

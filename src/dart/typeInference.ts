@@ -1,0 +1,132 @@
+import {
+  asInstanceOf,
+  type DartType,
+  DYNAMIC,
+  type FunctionType,
+  type InterfaceType,
+  lowerBound,
+  NEVER,
+  type RecordType,
+  resolveBound,
+  type TypeParam,
+} from './types';
+
+/**
+ * Collects the constraints a context puts on a function's result type: where the result is a subclass of the context's
+ * class (`R<int> r = E()`), its type arguments are matched through the subclass's supertype.
+ */
+export function inferFromContext(
+  context: DartType,
+  formal: DartType,
+  params: ReadonlySet<TypeParam>,
+  solution: Map<TypeParam, DartType>
+): void {
+  const base = resolveBound(context);
+  if (
+    formal.kind === 'interface' &&
+    base.kind === 'interface' &&
+    formal.cls !== base.cls &&
+    formal.cls.isSubclassOf(base.cls)
+  ) {
+    const path = asInstanceOf(formal, base.cls);
+    if (path) {
+      for (const [index, arg] of path.args.entries()) {
+        const given = base.args[index];
+        if (given) inferFromSubtype(given, arg, params, solution, (a) => a);
+      }
+      return;
+    }
+  }
+  inferFromSubtype(context, formal, params, solution, (a) => a);
+}
+
+/** Collects constraints on type parameters that occur in the parameter type of a generic call. */
+export function inferFromSubtype(
+  actual: DartType,
+  formal: DartType,
+  params: ReadonlySet<TypeParam>,
+  lower: Map<TypeParam, DartType>,
+  join: (a: DartType, b: DartType) => DartType = (a) => a,
+  upper?: Map<TypeParam, DartType>
+): void {
+  new InferenceConstraints(params, lower, upper, join).infer(actual, formal);
+}
+
+class InferenceConstraints {
+  constructor(
+    private readonly params: ReadonlySet<TypeParam>,
+    private readonly lower: Map<TypeParam, DartType>,
+    private readonly upper: Map<TypeParam, DartType> | undefined,
+    private readonly join: (a: DartType, b: DartType) => DartType
+  ) {}
+
+  infer(given: DartType, pattern: DartType, reversed = false): void {
+    if (pattern.kind === 'typeParam' && this.params.has(pattern.param)) {
+      this.addBound(given, pattern, reversed);
+    } else if (pattern.kind === 'interface') {
+      this.inferInterface(given, pattern, reversed);
+    } else if (pattern.kind === 'function' && given.kind === 'function') {
+      this.infer(given.returnType, pattern.returnType, reversed);
+      if (this.upper) this.inferParameters(given, pattern, !reversed);
+    } else if (pattern.kind === 'record' && given.kind === 'record') {
+      this.inferRecord(given, pattern, reversed);
+    }
+  }
+
+  private addBound(given: DartType, pattern: DartType & { kind: 'typeParam' }, reversed: boolean): void {
+    const bounds = reversed ? this.upper : this.lower;
+    if (!bounds || (reversed && given.kind === 'dynamic')) return;
+    const target = pattern.nullable ? nonNullOf(given) : given;
+    if (!reversed && target.kind === 'never' && !target.nullable) return;
+    const previous = bounds.get(pattern.param);
+    const join = reversed ? lowerBound : this.join;
+    bounds.set(pattern.param, previous ? join(previous, target) : target);
+  }
+
+  private inferInterface(given: DartType, pattern: InterfaceType, reversed: boolean): void {
+    const base = resolveBound(given);
+    if (base.kind === 'dynamic' && !reversed) {
+      for (const arg of pattern.args) this.infer(DYNAMIC, arg);
+      return;
+    }
+    if (base.kind !== 'interface') return;
+    const actualType = reversed ? base : asInstanceOf({ ...base, nullable: false }, pattern.cls);
+    const formalType = reversed ? asInstanceOf(pattern, base.cls) : pattern;
+    if (!actualType || !formalType) return;
+    for (const [index, arg] of formalType.args.entries()) {
+      const actualArg = actualType.args[index];
+      if (actualArg) this.infer(actualArg, arg, reversed);
+    }
+  }
+
+  private inferParameters(given: FunctionType, pattern: FunctionType, reversed: boolean): void {
+    for (const [index, parameter] of pattern.positional.entries()) {
+      const corresponding = given.positional[index];
+      if (corresponding) this.infer(corresponding, parameter, reversed);
+    }
+    for (const parameter of pattern.named) {
+      const corresponding = given.named.find((other) => other.name === parameter.name);
+      if (corresponding) this.infer(corresponding.type, parameter.type, reversed);
+    }
+  }
+
+  private inferRecord(given: RecordType, pattern: RecordType, reversed: boolean): void {
+    for (const [index, field] of pattern.positional.entries()) {
+      const actualField = given.positional[index];
+      if (actualField) this.infer(actualField, field, reversed);
+    }
+    for (const field of pattern.named) {
+      const actualField = given.named.find((other) => other.name === field.name);
+      if (actualField) this.infer(actualField.type, field.type, reversed);
+    }
+  }
+}
+
+function nonNullOf(type: DartType): DartType {
+  if (type.kind === 'null') return NEVER;
+  if (type.kind === 'interface' || type.kind === 'function' || type.kind === 'record') {
+    return type.nullable ? { ...type, nullable: false } : type;
+  }
+  if (type.kind === 'typeParam' && type.nullable) return { ...type, nullable: false };
+  return type;
+}

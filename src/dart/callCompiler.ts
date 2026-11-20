@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 604 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 609 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type {
   Arguments as ArgumentsSyntax,
   Expression,
@@ -9,21 +9,13 @@ import type {
   TypeSyntax,
 } from './ast';
 import type { ClassInfo, ConstructorInfo, Member } from './classes';
-import {
-  at,
-  type Compiled,
-  type Eval,
-  inferFromContext,
-  inferFromSubtype,
-  instantiateToBounds,
-  type ResolvedMember,
-  typeName,
-} from './compilerBase';
+import { at, type Compiled, type Eval, instantiateToBounds, type ResolvedMember, typeName } from './compilerBase';
 import type { ExtensionInfo, TopLevelFunction } from './environment';
 import { INFERENCE_HOLE, isInferenceHole, SHORTED } from './expressionCompiler';
 import { OperatorCompiler } from './operatorCompiler';
 import type { Frame, Runtime, TypeEnv } from './runtime';
 import type { FunctionContext } from './scope';
+import { inferFromContext, inferFromSubtype } from './typeInference';
 import {
   boundOf,
   coreTypes,
@@ -727,13 +719,17 @@ export abstract class CallCompiler extends OperatorCompiler {
       inferFromContext(context, type.returnType, params, fromContext);
     }
     const solution = new Map<TypeParam, DartType>();
+    const upper = new Map<TypeParam, DartType>();
     for (const closurePass of [false, true]) {
       const infer = (argument: Expression, parameterType: DartType): Compiled => {
         const map = new Map(
-          type.typeParams.map((param) => [param, argumentContextFor(param, type, fromContext, solution, closurePass)])
+          type.typeParams.map((param) => [
+            param,
+            argumentContextFor(param, type, fromContext, solution, upper, closurePass),
+          ])
         );
         const result = this.compileExpression(argument, substitute(parameterType, map));
-        inferFromSubtype(result.type, parameterType, params, solution, upperBound);
+        inferFromSubtype(result.type, parameterType, params, solution, upperBound, upper);
         return result;
       };
       for (const [index, argument] of args.positional.entries()) {
@@ -746,7 +742,7 @@ export abstract class CallCompiler extends OperatorCompiler {
         compiled.named[index] = infer(argument.value, parameterType);
       }
     }
-    return fitToBounds(type, chooseTypeArguments(type, params, solution, fromContext));
+    return fitToBounds(type, chooseTypeArguments(type, params, solution, upper, fromContext));
   }
 
   private compileArgumentRuns(
@@ -1209,6 +1205,7 @@ function argumentContextFor(
   type: FunctionType,
   fromContext: ReadonlyMap<TypeParam, DartType>,
   solution: ReadonlyMap<TypeParam, DartType>,
+  upper: ReadonlyMap<TypeParam, DartType>,
   closurePass: boolean
 ): DartType {
   const params = new Set(type.typeParams);
@@ -1223,7 +1220,7 @@ function argumentContextFor(
   if (usable) return usable;
   if (!closurePass) return INFERENCE_HOLE;
   if (contextual && param.bound && !mentionsTypeParams(param.bound, params)) return param.bound;
-  return solution.get(param) ?? INFERENCE_HOLE;
+  return solution.get(param) ?? upper.get(param) ?? INFERENCE_HOLE;
 }
 
 /** Whether a type argument satisfies its parameter's bound, with the parameter itself in place of F-bounded uses. */
@@ -1238,22 +1235,26 @@ function chooseTypeArguments(
   type: FunctionType,
   params: ReadonlySet<TypeParam>,
   solution: ReadonlyMap<TypeParam, DartType>,
+  upper: ReadonlyMap<TypeParam, DartType>,
   fromContext: ReadonlyMap<TypeParam, DartType>
 ): DartType[] {
   const defaults = instantiateToBounds(type.typeParams);
   return type.typeParams.map((param, index) => {
     const fromArguments = solution.get(param);
     const contextual = fromContext.get(param);
+    const limit = upper.get(param);
     if (
       contextual &&
       !isInferenceHole(contextual) &&
       (!fromArguments || isSubtype(fromArguments, contextual)) &&
+      (!limit || isSubtype(contextual, limit)) &&
       !mentionsTypeParams(contextual, params) &&
       withinBound(param, contextual, type.typeParams)
     ) {
       return contextual;
     }
     if (fromArguments && !isInferenceHole(fromArguments)) return fromArguments;
+    if (limit && !isInferenceHole(limit)) return limit;
     if (contextual && !isInferenceHole(contextual)) return contextual;
     return defaults[index];
   });
