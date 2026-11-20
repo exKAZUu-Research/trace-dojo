@@ -57,6 +57,7 @@ export interface LibraryClass {
   isReverse?: boolean;
   /** The category of an iterator, which decides its operators and the algorithms that accept it. */
   iteratorCategory?: IteratorCategory;
+  readonly iteratorFamily?: string;
   readonly iteratorReference?: Type;
   readonly valueInitializedMembers?: readonly Type[];
   outputContainer?: Type;

@@ -942,6 +942,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     if (!type || (!specified && !sameType(type, commonDeduced(args[1], args[2]) ?? VOID))) return;
     const less = extremumOrder(args, 3, type);
     if (!less) return;
+    const hasUserComparator = args[3]?.functions !== undefined;
     return native(
       'clamp',
       [constRef(type), constRef(type), constRef(type), ...params(args).slice(3)],
@@ -950,10 +951,16 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
         const compare = less(frame);
         const lower = low as Ptr;
         const upper = high as Ptr;
-        if (compare(upper, lower)) throw new CppRuntimeError('invalidRange');
+        if (!hasUserComparator && compare(upper, lower)) throw new CppRuntimeError('invalidRange');
         const value = v as Ptr;
-        if (compare(value, lower)) return low;
-        if (compare(upper, value)) return high;
+        if (compare(value, lower)) {
+          if (value.equals(upper)) throw new CppRuntimeError('invalidRange');
+          return low;
+        }
+        if (compare(upper, value)) {
+          if (value.equals(lower)) throw new CppRuntimeError('invalidRange');
+          return high;
+        }
         return v;
       }
     );

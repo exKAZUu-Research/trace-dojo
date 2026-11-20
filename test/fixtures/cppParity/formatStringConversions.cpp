@@ -27,6 +27,10 @@ int main() {
   printf("%a %zu %a\n", midpoint, consumed, stof("0x1.0000010000000001p0"));
   string copied = "abcd";
   cout << copied.copy(copied.data(), 10, 2) << ' ' << copied << '\n';
+  double letters[] = {65.9, 66.1};
+  string converted(letters, letters + 2);
+  converted.append(rbegin(letters), rend(letters));
+  cout << converted << '\n';
 
   string s = "abc";
   const char* before = s.c_str();

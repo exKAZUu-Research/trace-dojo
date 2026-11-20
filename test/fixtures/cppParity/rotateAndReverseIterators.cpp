@@ -20,6 +20,11 @@ struct Named {
   ~Named() { std::cout << 'D' << name; }
 };
 
+bool loggingLess(int left, int right) {
+  std::cout << left << ',' << right << ';';
+  return left < right;
+}
+
 int main() {
   {
     Item items[] = {1, 2, 3, 4, 5};
@@ -55,6 +60,9 @@ int main() {
   std::cout << '|' << *std::rbegin(constant) << '\n';
   std::cout << std::distance(values + 3, values) << ' '
             << std::distance(std::rbegin(values), std::rend(values)) << '\n';
+  const auto& view = values;
+  std::cout << (std::rbegin(values) == std::rbegin(view)) << ' ' << (std::rend(values) - std::rend(view)) << '\n';
+  std::cout << std::clamp(5, 0, 10, loggingLess) << ' ' << std::clamp(-1, 0, 10, loggingLess) << '\n';
   char bytes[8] = "a";
   std::strncpy(bytes + 2, bytes, 4);
   std::puts(bytes + 2);

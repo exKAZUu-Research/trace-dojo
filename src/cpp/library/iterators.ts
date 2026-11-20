@@ -58,6 +58,7 @@ export function randomAccessIterator(
     args: [elementType],
     isReverse,
     iteratorCategory: category,
+    iteratorFamily: container ?? `pointer<${typeKey(element)}>`,
     iteratorReference: isConst ? bits?.constant : bits?.mutable,
     // Apple's libc++ reverse_iterator stores two underlying iterators.
     size: isReverse ? 2 * underlyingSize : underlyingSize,
@@ -288,7 +289,11 @@ function iteratorOperator(
 
 /** Whether two iterator classes are the same but for `const`, which compare with each other. */
 function sameIteratorFamily(a: ClassInfo, b: ClassInfo): boolean {
-  return a === b || a.name.replace('const_', '') === b.name.replace('const_', '');
+  const family = a.library?.iteratorFamily;
+  return (
+    a === b ||
+    (family !== undefined && family === b.library?.iteratorFamily && a.library?.isReverse === b.library?.isReverse)
+  );
 }
 
 function compareIterators(operator: string, a: Ptr, b: Ptr, isReverse: boolean): number {

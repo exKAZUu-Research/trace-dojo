@@ -1,3 +1,4 @@
+import { convertScalar, type Scalar } from '../../c/arith';
 import { isFloatUnderflow, isSpaceByte, parseFloatPrefix, parseIntegerPrefix } from '../../c/library/numberParsing';
 import { LIMITS } from '../../interpreter/limits';
 import { byteArray, byteAt } from '../bytes';
@@ -8,6 +9,7 @@ import type { ExpressionCompiler } from '../expressionCompiler';
 import { type Eval, type Frame, holdAll } from '../runtime';
 import type { Syntax } from '../syntax';
 import {
+  type ArithmeticType,
   BOOL,
   CHAR,
   ClassInfo,
@@ -39,6 +41,7 @@ import type { Library } from './registry';
 import {
   addMethod,
   asNumber,
+  checkByteWrite,
   CONST_CHAR_PTR,
   constRef,
   native,
@@ -292,11 +295,11 @@ export function stringClass(library: Library): ClassInfo {
     {
       ...nativeConstructor(cls, [], () => {}),
       instantiate: (args) => {
-        const iteratorType = args.length === 2 ? inputIterator(args, 0) : undefined;
-        if (!iteratorType) return;
+        const iterator = args.length === 2 ? inputIterator(args, 0) : undefined;
+        if (!iterator) return;
         return {
-          ...nativeConstructor(cls, [iteratorType, iteratorType], ([first, last]) =>
-            make(rangeBytes(first as Ptr, last as Ptr, isReverseIterator(iteratorType)))
+          ...nativeConstructor(cls, [iterator.type, iterator.type], ([first, last], { frame }) =>
+            make(rangeBytes(frame, first as Ptr, last as Ptr, iterator))
           ),
           isTemplate: true,
         };
@@ -341,16 +344,15 @@ export function stringClass(library: Library): ClassInfo {
     addMethod(cls, {
       ...native(name, [], VOID, () => {}),
       instantiate: (args) => {
-        const iteratorType = args.length === params.length + 2 ? inputIterator(args, params.length) : undefined;
-        if (!iteratorType) return;
-        const isReverse = isReverseIterator(iteratorType);
+        const iterator = args.length === params.length + 2 ? inputIterator(args, params.length) : undefined;
+        if (!iterator) return;
         const fn = native(
           name,
-          [...params, iteratorType, iteratorType],
+          [...params, iterator.type, iterator.type],
           ret,
           (callArgs, { self, selfLocation, frame }) => {
             const [first, last] = callArgs.slice(params.length) as Ptr[];
-            const result = run(self as StringValue, callArgs, rangeBytes(first, last, isReverse), frame);
+            const result = run(self as StringValue, callArgs, rangeBytes(frame, first, last, iterator), frame);
             return ret.kind === 'reference' && result === self ? selfLocation : result;
           },
           { owner: cls }
@@ -652,6 +654,7 @@ export function stringClass(library: Library): ClassInfo {
       const length = clampedLength(count, s.bytes.length - from);
       const target = destination as Ptr;
       rejectOverlappingBytes(target, length, s.characterBuffer().location(from), length);
+      checkByteWrite(target, length);
       const bytes = s.bytes.slice(from, from + length);
       for (let index = 0; index < bytes.length; index++) target.offset(index).write(signedChar(byteAt(bytes, index)));
       return BigInt(bytes.length);
@@ -738,8 +741,13 @@ function pointerBytes(pointer: Ptr, count: unknown): string {
   return bytes;
 }
 
-/** The type an input iterator template parameter deduces from the two arguments from `at`, if they iterate characters. */
-function inputIterator(args: Expr[], at: number): Type | undefined {
+interface CharacterInputIterator {
+  type: Type;
+  element: ArithmeticType;
+  isReverse: boolean;
+}
+
+function inputIterator(args: Expr[], at: number): CharacterInputIterator | undefined {
   const [first, second] = args.slice(at, at + 2).map((arg) => decay(arg.type));
   if (!first || !second || typeKey(first) !== typeKey(second)) return undefined;
   const element =
@@ -748,19 +756,24 @@ function inputIterator(args: Expr[], at: number): Type | undefined {
       : first.kind === 'class' && first.cls.library?.kind === 'iterator'
         ? first.cls.library.args[0]
         : undefined;
-  return element && isArithmetic(unqualified(element)) ? first : undefined;
+  if (!element || !isArithmetic(element)) return undefined;
+  return { type: first, element, isReverse: first.kind === 'class' && first.cls.library?.isReverse === true };
 }
 
 const decay = (type: Type): Type => (type.kind === 'array' ? pointerTo(type.of) : unqualified(type));
 
-const isReverseIterator = (type: Type): boolean => type.kind === 'class' && type.cls.library?.isReverse === true;
-
-function rangeBytes(first: Ptr, last: Ptr, isReverse: boolean): string {
-  const length = isReverse ? first.index - last.index : last.index - first.index;
-  if (first.store !== last.store || length < 0) throw new CppRuntimeError('invalidRange');
+function rangeBytes(frame: Frame, first: Ptr, last: Ptr, { element, isReverse }: CharacterInputIterator): string {
+  const length = first.rangeLength(last, isReverse);
+  checkStringLength(length);
+  frame.runtime.spend(Math.ceil(length / 64));
+  if (length === 0) return '';
+  const store = first.target();
+  const start = first.index;
   let bytes = '';
-  for (let offset = 0; offset < length; offset++)
-    bytes += charOf(first.store?.get(isReverse ? first.index - 1 - offset : first.index + offset));
+  for (let offset = 0; offset < length; offset++) {
+    const value = store.get(isReverse ? start - 1 - offset : start + offset) as Scalar;
+    bytes += charOf(convertScalar(value, element, CHAR));
+  }
   return bytes;
 }
 

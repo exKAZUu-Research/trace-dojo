@@ -1117,6 +1117,31 @@ int main() { char bytes[16] = "abcd"; std::${call}; }`;
   }
 );
 
+test.each(['strcpy(bytes, "abc")', 'strncpy(bytes, "ab", 4)', 'strcat(bytes, "c")'])(
+  'reports a short destination buffer as an out-of-bounds write in %s',
+  (call) => {
+    const program = `#include <cstring>
+int main() { char bytes[3] = "ab"; std::${call}; }`;
+    expect(executeProgram('cpp', program)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: expect.stringContaining('配列の範囲の外を読み書きしました'),
+    });
+  }
+);
+
+test.each([
+  'std::string text(values.begin(), values.end());',
+  'std::string text; text.append(values.begin(), values.end());',
+])('string iterator ranges use the normal conversion to char: %s', (statement) => {
+  const program = `#include <string>
+#include <vector>
+int main() { std::vector<double> values{200.0}; ${statement} }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('浮動小数点数を整数にした値'),
+  });
+});
+
 test('C string copies still reject overlapping character views of scalar storage', () => {
   const program = `#include <cstring>
 int main() {

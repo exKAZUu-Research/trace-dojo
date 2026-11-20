@@ -136,6 +136,17 @@ export function rejectOverlappingBytes(target: Ptr, targetLength: number, source
     throw new CppRuntimeError('overlappingCopy');
 }
 
+export function checkByteWrite(target: Ptr, length: number): void {
+  if (length === 0) return;
+  try {
+    target.offset(length);
+  } catch (error) {
+    if (error instanceof CppRuntimeError && error.kind === 'pointerOutOfRange')
+      throw new CppRuntimeError('outOfBounds');
+    throw error;
+  }
+}
+
 /** A new null-terminated array of `char` holding bytes, as `c_str()` and `what()` return. */
 export function cStringStore(bytes: string): ArrayStore {
   const values: Value[] = [];

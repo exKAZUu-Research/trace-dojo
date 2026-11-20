@@ -20,7 +20,15 @@ import type { Ptr } from '../values';
 import { NULL_PTR } from '../values';
 import { formatPrintf, type PrintfArgument } from './formatting';
 import type { Library } from './registry';
-import { asNumber, CONST_CHAR_PTR, native, readCString, rejectOverlappingBytes, signedChar } from './support';
+import {
+  asNumber,
+  checkByteWrite,
+  CONST_CHAR_PTR,
+  native,
+  readCString,
+  rejectOverlappingBytes,
+  signedChar,
+} from './support';
 
 const CHARACTER_CLASSES: Record<string, (c: number) => boolean> = {
   isalnum: (c) => /[\dA-Za-z]/.test(String.fromCodePoint(c)),
@@ -239,7 +247,7 @@ function copyCString(
   const writeLength = count ?? readLength;
   const targetLength = prefix + writeLength;
   rejectOverlappingBytes(target, targetLength, source, readLength);
-  target.offset(targetLength);
+  checkByteWrite(target, targetLength);
   frame.runtime.spend(Math.ceil(writeLength / 64));
   writeBytes(target.offset(prefix), bytes.padEnd(writeLength, '\0'));
   return target;
