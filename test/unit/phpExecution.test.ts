@@ -5134,4 +5134,16 @@ $it = new IteratorIterator(new I); $it->rewind(); unset($it);
 $a = [&$x]; unset($x); $b = $a; $a[0] = 2; echo json_encode([$a, $b]);`
     )
   ).toMatchObject({ kind: 'executed', stdout: '[[2],[1]]' });
+
+  expect(
+    run(
+      `<?php
+try { key_exists([], []); } catch (Error $e) { echo $e->getMessage(), "\\n"; }
+try { sizeof([], 99); } catch (Error $e) { echo $e->getMessage(), "\\n"; }`
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'key_exists(): Argument #1 ($key) must be a valid array offset type\nsizeof(): Argument #2 ($mode) must be either COUNT_NORMAL or COUNT_RECURSIVE\n',
+  });
 });

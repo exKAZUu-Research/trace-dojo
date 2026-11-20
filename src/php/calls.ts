@@ -390,6 +390,7 @@ function prepareNativeCall(
   }
   if (saved.forwardsReference) saved.runtime.lastReturnRef = undefined;
   return {
+    name: fn.name,
     args: values,
     refs,
     thisObj: target.thisObj,

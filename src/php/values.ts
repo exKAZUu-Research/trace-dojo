@@ -782,6 +782,7 @@ export type TypeDecl =
   | { k: 'inter'; types: TypeDecl[] };
 
 export interface NativeContext {
+  name?: string;
   directOverload?: boolean;
   discardResult?: boolean;
   args: Value[];

@@ -145,10 +145,10 @@ function rebuild(
 
 // Counting and access ------------------------------------------------------------------------------------------------
 
-defineFunction('count(Countable|array $value, int $mode = COUNT_NORMAL): int', ({ args }) => {
+defineFunction('count(Countable|array $value, int $mode = COUNT_NORMAL): int', ({ args, name = 'count' }) => {
   const [value, mode = 0n] = args;
   if (mode !== 0n && mode !== 1n)
-    throwError('ValueError', 'count(): Argument #2 ($mode) must be either COUNT_NORMAL or COUNT_RECURSIVE');
+    throwError('ValueError', `${name}(): Argument #2 ($mode) must be either COUNT_NORMAL or COUNT_RECURSIVE`);
   if (value instanceof PhpArray) return BigInt(mode === 1n ? countRecursive(value) : value.size);
   if (value instanceof PhpObject) {
     const countable = rt().classes.get('countable');
@@ -156,7 +156,7 @@ defineFunction('count(Countable|array $value, int $mode = COUNT_NORMAL): int', (
       return toInt(callMethod(value, 'count', []));
     }
   }
-  throwError('TypeError', `count(): Argument #1 ($value) must be of type Countable|array, ${valueName(value)} given`);
+  throwError('TypeError', `${name}(): Argument #1 ($value) must be of type Countable|array, ${valueName(value)} given`);
 });
 defineAlias('sizeof', 'count');
 markInlined('count');
@@ -244,22 +244,19 @@ defineFunction('array_unshift(array &$array, mixed ...$values): int', (ctx) => {
   return BigInt(array.size);
 });
 
-defineFunction('array_key_exists($key, array $array): bool', ({ args, row }) => {
+defineFunction('array_key_exists($key, array $array): bool', ({ args, name = 'array_key_exists', row }) => {
   const [key, array] = args;
   if (!(array instanceof PhpArray))
-    throwError(
-      'TypeError',
-      `array_key_exists(): Argument #2 ($array) must be of type array, ${valueName(array)} given`
-    );
-  return array.has(arrayKeyOf(key, row !== undefined));
+    throwError('TypeError', `${name}(): Argument #2 ($array) must be of type array, ${valueName(array)} given`);
+  return array.has(arrayKeyOf(key, row !== undefined, name));
 });
 markInlined('array_key_exists');
 defineAlias('key_exists', 'array_key_exists');
 
 /** The key `array_key_exists` looks up; the opcode a direct call compiles to rejects an invalid key as an offset does. */
-function arrayKeyOf(key: Value, inlined: boolean): Key {
+function arrayKeyOf(key: Value, inlined: boolean, name = 'array_key_exists'): Key {
   if ((key instanceof PhpArray || key instanceof PhpObject) && !inlined)
-    throwError('TypeError', 'array_key_exists(): Argument #1 ($key) must be a valid array offset type');
+    throwError('TypeError', `${name}(): Argument #1 ($key) must be a valid array offset type`);
   if (key !== null) return toKey(key);
   deprecated('Using null as the key parameter for array_key_exists() is deprecated, use an empty string instead');
   return '';
