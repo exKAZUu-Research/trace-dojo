@@ -1,9 +1,10 @@
-// code-gauge-allow-file fileNcss 495 -- The nativesRegex module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss 504 -- The nativesRegex module keeps one stage of the C# interpreter together.
 // oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
 import { defineNatives, defineNativesKeepingStrings, type NativeCall } from '../natives';
 import type { NativeState } from '../runtime';
 import { CsObject, type CsString, freshString, plainString, stringText, type Value } from '../values';
 import { type EnumerableState, LibraryEnumerator } from './iteration';
+import { type CompiledRegExp, compileRegExp, execRegExp } from './regexEngine';
 import { evaluatorOf, fail, failNull, failOutOfRange, libraryType, newArray, unsupportedCall } from './support';
 
 const NAMESPACE = 'System.Text.RegularExpressions';
@@ -29,7 +30,8 @@ const START = String.raw`(?<![\s\S])`;
 interface CompiledPattern {
   pattern: string;
   options: number;
-  regex: RegExp;
+  /** The rewritten pattern on a matcher that charges the run's budget, which the host's RegExp could not. */
+  matcher: CompiledRegExp;
   /** The .NET number of each JavaScript capture group, by its index. */
   numberOfIndex: number[];
   /** The group names in .NET's order of numbers: unnamed groups first, then named ones. */
@@ -52,13 +54,21 @@ function compilePattern(pattern: string, options: number): CompiledPattern {
     if (jsIndex === -1) throw new UnsupportedPattern();
     return `\\${jsIndex}`;
   });
-  let regex: RegExp;
+  const ignoreCase = (options & OPTION.ignoreCase) !== 0;
   try {
-    regex = new RegExp(finalPattern, `dgu${options & OPTION.ignoreCase ? 'i' : ''}`);
+    // The host's parser accepts or rejects the rewritten pattern first, as the matcher's parser expects.
+    new RegExp(finalPattern, `u${ignoreCase ? 'i' : ''}`);
   } catch {
     throw new UnsupportedPattern();
   }
-  return { pattern, options, regex, ...numbered };
+  const matcher = compileRegExp(finalPattern, {
+    unicode: true,
+    ignoreCase,
+    multiLine: false,
+    dotAll: false,
+    codeUnits: true,
+  });
+  return { pattern, options, matcher, ...numbered };
 }
 
 /** Translates a .NET pattern into JavaScript's syntax one construct at a time, recording its capture groups. */
@@ -344,7 +354,8 @@ class MatchListState implements EnumerableState {
   }
 }
 
-const compiledPatterns = new Map<string, CompiledPattern>();
+/** The patterns each run compiled, which the run keeps, so that a program's patterns go away with it. */
+const compiledPatterns = new WeakMap<object, Map<string, CompiledPattern>>();
 
 /** The first error that .NET's parser reports for the common mistakes in a pattern, with its offset. */
 function patternError(pattern: string): PatternError | undefined {
@@ -422,7 +433,12 @@ function patternOf(call: NativeCall, patternString: Value, options: Value = 0): 
   if (patternString === undefined) failNull('pattern');
   const pattern = plainString(patternString);
   const key = `${options as number}:${pattern as string}`;
-  let compiled = compiledPatterns.get(key);
+  let patterns = compiledPatterns.get(call.frame.runtime);
+  if (!patterns) {
+    patterns = new Map();
+    compiledPatterns.set(call.frame.runtime, patterns);
+  }
+  let compiled = patterns.get(key);
   if (!compiled) {
     const invalid = patternError(pattern as string);
     if (invalid) {
@@ -437,7 +453,7 @@ function patternOf(call: NativeCall, patternString: Value, options: Value = 0): 
       if (error instanceof UnsupportedPattern) unsupportedCall(call, `正規表現のパターン「${pattern as string}」`);
       throw error;
     }
-    compiledPatterns.set(key, compiled);
+    patterns.set(key, compiled);
   }
   return compiled;
 }
@@ -451,21 +467,26 @@ function inputOf(value: Value): string | CsString {
   return value as string | CsString;
 }
 
+const STEPS_PER_OPERATION = 8;
+
 function findMatch(call: NativeCall, compiled: CompiledPattern, source: string | CsString, start: number): CsObject {
   const input = stringText(source);
-  compiled.regex.lastIndex = start;
-  const found = compiled.regex.exec(input);
+  let steps = 0;
+  // A step of the matcher costs little next to an operation of the program.
+  const found = execRegExp(compiled.matcher, input, start, false, () => {
+    if (++steps % STEPS_PER_OPERATION === 0) call.frame.runtime.spend();
+  });
   if (!found) return emptyMatch(call);
   const groups: GroupResult[] = Array.from({ length: compiled.names.length });
   for (const [jsIndex, number] of compiled.numberOfIndex.entries()) {
-    const span = found.indices?.[jsIndex];
+    const span = found.spans[jsIndex];
     groups[number] = {
       number,
       name: compiled.names[number],
       success: span !== undefined,
       index: span?.[0] ?? 0,
       length: span ? span[1] - span[0] : 0,
-      value: found[jsIndex] ?? '',
+      value: span ? input.slice(span[0], span[1]) : '',
       whole: span?.[0] === 0 && span[1] === input.length ? source : undefined,
     };
   }
