@@ -229,23 +229,8 @@ export class MemberChecker {
     objectType = this.c.reducedTypes.of(objectType);
     if (isAnyLike(objectType)) return objectType;
     const isPrivate = propertyNode.type === 'private_property_identifier';
-    if (!isPrivate && objectType.kind === 'union') {
-      // TypeScript reports a property some member lacks once, on the whole union, suggesting one all members have.
-      if (objectType.types.some((member) => this.lacksProperty(member, name))) {
-        const suggestion = this.suggestProperty(objectType, name);
-        this.c.error(
-          propertyNode,
-          `プロパティ '${name}' は型 '${this.c.print(objectType)}' にありません。${suggestion ? `'${suggestion}' のことですか？` : ''}`
-        );
-        return errorType;
-      }
-      return unionOf(
-        objectType.types.map((member) =>
-          this.propertyAccess(node, objectNode, propertyNode, member, name, { ...options, receiver })
-        ),
-        true
-      );
-    }
+    if (!isPrivate && objectType.kind === 'union')
+      return this.unionPropertyAccess(node, objectNode, propertyNode, objectType, name, { ...options, receiver });
     const property = isPrivate
       ? this.c.classes.privateProperty(node, propertyNode, objectType)
       : this.c.propertyOf(objectType, name);
@@ -260,6 +245,32 @@ export class MemberChecker {
     return this.checkPropertyUse(node, objectNode, propertyNode, receiver, property, options.write)
       ? propertyAccessType(property)
       : errorType;
+  }
+
+  private unionPropertyAccess(
+    node: TreeNode,
+    objectNode: TreeNode,
+    propertyNode: TreeNode,
+    objectType: UnionType,
+    name: string,
+    options: PropertyAccessOptions
+  ): Type {
+    if (objectType.types.some((member) => this.c.propertyOf(member, name))) {
+      if (!objectType.types.some((member) => this.lacksProperty(member, name)))
+        return unionOf(
+          objectType.types.map((member) => this.propertyAccess(node, objectNode, propertyNode, member, name, options)),
+          true
+        );
+    } else {
+      const index = this.indexSignatureType(objectType, name);
+      if (index) return index;
+    }
+    const suggestion = this.suggestProperty(objectType, name);
+    this.c.error(
+      propertyNode,
+      `プロパティ '${name}' は型 '${this.c.print(objectType)}' にありません。${suggestion ? `'${suggestion}' のことですか？` : ''}`
+    );
+    return errorType;
   }
 
   checkPropertyUse(
@@ -516,7 +527,7 @@ export class MemberChecker {
     if (objectType.kind === 'typeParameter')
       return this.indexedTypeAt(access, this.c.apparentType(objectType), indexType);
     if (isPropertyKeyLiteral(index)) {
-      const type = this.literalIndexedType(access, objectType, index.value, indexType);
+      const type = this.literalIndexedType(access, objectType, index.value);
       if (type) return type;
     }
     return this.computedIndexedType(access, objectType, index);
@@ -546,15 +557,9 @@ export class MemberChecker {
   }
 
   /** The type of the element a literal index names, or `undefined` when no property has its name. */
-  private literalIndexedType(
-    access: IndexAccess,
-    objectType: Type,
-    value: string | number | symbol,
-    indexType: Type
-  ): Type | undefined {
+  private literalIndexedType(access: IndexAccess, objectType: Type, value: string | number | symbol): Type | undefined {
     const name = String(value);
     objectType = this.c.reducedTypes.of(objectType);
-    if (objectType.kind === 'union') return this.indexedTypeOfMembers(access, objectType, indexType);
     const property = this.c.propertyOf(objectType, name);
     // A unique symbol matches the symbol index signature only.
     if (!property)
@@ -578,6 +583,7 @@ export class MemberChecker {
     const structure = this.c.structureOf(objectType);
     const applicable = applicableIndex(this.c, structure, index);
     if (applicable) return applicable.type;
+    if (index === neverType) return neverType;
     if (
       index.kind === 'union' &&
       index.types.every((member) => member.kind === 'literal' || applicableIndex(this.c, structure, member))
@@ -594,10 +600,6 @@ export class MemberChecker {
       `型 '${this.c.print(index)}' の式は型 '${this.c.print(objectType)}' のインデックスに使えないため、要素の型が暗黙に any になります。${missing}`
     );
     return errorType;
-  }
-
-  private indexedTypeOfMembers(access: IndexAccess, objectType: UnionType, indexType: Type): Type {
-    return unionOf(objectType.types.map((member) => this.indexedTypeAt(access, member, indexType)));
   }
 }
 

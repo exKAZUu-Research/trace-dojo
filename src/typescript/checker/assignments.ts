@@ -2,6 +2,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
 import type { State } from './flow';
+import { applicableIndex } from './indexInfos';
 import { defaultedTarget, isEmptyPattern } from './patterns';
 import { printedPropertyName } from './print';
 import type { Sym } from './scopes';
@@ -497,10 +498,9 @@ export class AssignmentChecker {
     const type = this.c.members.propertyAccess(expression, objectNode, propertyNode, objectType, propertyNode.text, {
       write: true,
     });
+    if (type === errorType) return type;
     if (compound) return this.narrowedType(expression) ?? type;
-    return unionOf(
-      (objectType.kind === 'union' ? objectType.types : [objectType]).map((member) => this.namedWriteType(member, key))
-    );
+    return this.namedWriteType(objectType, literalType(key));
   }
 
   private elementTargetType(expression: TreeNode, compound: boolean): Type {
@@ -528,20 +528,14 @@ export class AssignmentChecker {
       return errorType;
     }
     const readType = this.c.members.indexedType(expression, objectNode, indexNode, objectType, indexType, compound);
-    if (readType !== errorType && this.c.members.isReadonlyMappedWrite(objectType, indexType))
+    if (readType === errorType) return readType;
+    if (this.c.members.isReadonlyMappedWrite(objectType, indexType))
       return this.reportReadonlyIndex(expression, objectType);
     const narrowed = compound ? this.narrowedType(expression) : undefined;
     if (narrowed) return narrowed;
     if (!keys) return readType;
-    // A write must suit every key it may select, but any member of an object union.
     return intersectionOf(
-      keys.map((key) =>
-        unionOf(
-          (objectType.kind === 'union' ? objectType.types : [objectType]).map((member) =>
-            this.namedWriteType(member, String(key.value))
-          )
-        )
-      ),
+      keys.map((key) => this.namedWriteType(objectType, key)),
       this.c.budget
     );
   }
@@ -564,11 +558,11 @@ export class AssignmentChecker {
     return key ? this.c.flow.entry(key)?.type : undefined;
   }
 
-  private namedWriteType(type: Type, name: string): Type {
-    const property = this.c.propertyOf(type, name);
-    // The access, checked before, has reported a property that neither exists nor falls under an index signature.
-    if (!property) return isAnyLike(type) ? type : (this.c.members.indexSignatureType(type, name) ?? errorType);
-    return propertyAccessType(property, 'write');
+  private namedWriteType(type: Type, key: LiteralType): Type {
+    if (isAnyLike(type)) return type;
+    const property = this.c.propertyOf(type, String(key.value));
+    if (property) return propertyAccessType(property, 'write');
+    return applicableIndex(this.c, this.c.structureOf(type), key)?.type ?? errorType;
   }
 
   private reportReadonlyIndex(expression: TreeNode, objectType: Type): Type {

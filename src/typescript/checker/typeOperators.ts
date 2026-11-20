@@ -452,11 +452,11 @@ export class TypeOperators {
     if (isGenericObjectOrIndexType(object) || isGenericObjectOrIndexType(index) || variadic)
       return this.c.relations.stringIndexReadByGenericKey(object, index) ?? this.deferredAccess(object, index);
     if (index.kind === 'union') return unionOf(index.types.map((member) => this.indexedAccess(object, member, node)));
-    if (object.kind === 'union') return unionOf(object.types.map((member) => this.indexedAccess(member, index, node)));
     if (isPropertyKeyLiteral(index)) return this.propertyAccess(object, index.value, node);
     const applicable =
       applicableIndex(this.c, this.c.structureOf(object), index) ?? this.unreportedStringIndex(object, index, node);
     if (applicable) return applicable.type;
+    if (index === neverType) return neverType;
     if (node)
       this.c.error(node, `型 '${this.c.print(index)}' は型 '${this.c.print(object)}' のインデックスに使えません。`);
     return errorType;

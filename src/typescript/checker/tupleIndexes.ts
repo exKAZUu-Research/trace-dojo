@@ -12,10 +12,26 @@ import {
   typeMembers,
   undefinedType,
   unionOf,
+  type UnionType,
 } from './types';
 
 export function hasVariadicRest(type: ObjectType): boolean {
   return type.tuple?.elements.some((element) => element.rest && isGenericObjectOrIndexType(element.type)) ?? false;
+}
+
+export function tupleTypesDefinitelyUnrelated(source: ObjectType, target: ObjectType): boolean {
+  const sourceElements = source.tuple?.elements ?? [];
+  const targetElements = target.tuple?.elements ?? [];
+  if (!hasVariadicRest(target) && minimumTupleLength(targetElements) > minimumTupleLength(sourceElements)) return true;
+  return (
+    !targetElements.some((element) => element.rest) &&
+    (sourceElements.some((element) => element.rest) || targetElements.length < sourceElements.length)
+  );
+}
+
+function minimumTupleLength(elements: TupleElement[]): number {
+  return elements.filter((element) => (element.rest ? isGenericObjectOrIndexType(element.type) : !element.optional))
+    .length;
 }
 
 export function variadicTupleIndex(type: Type, index: Type): type is ObjectType {
@@ -93,7 +109,9 @@ export function tupleElementBeyond(
   name: string,
   node: TreeNode | undefined
 ): Type | undefined {
-  if (object.kind !== 'object' || object.objectKind !== 'tuple' || !isNumericName(name)) return undefined;
+  if (!isNumericName(name)) return undefined;
+  if (object.kind === 'union') return tupleUnionElementBeyond(c, object, name, node);
+  if (object.kind !== 'object' || object.objectKind !== 'tuple') return undefined;
   const elements = object.tuple?.elements ?? [];
   const restIndex = elements.findIndex((element) => element.rest);
   if (restIndex !== -1)
@@ -110,4 +128,18 @@ export function tupleElementBeyond(
         : `長さ ${elements.length} のタプル型 '${c.print(object)}' には、インデックス ${name} の要素がありません。`
     );
   return undefinedType;
+}
+
+function tupleUnionElementBeyond(
+  c: Checker,
+  object: UnionType,
+  name: string,
+  node: TreeNode | undefined
+): Type | undefined {
+  if (!object.types.every((type): type is ObjectType => type.kind === 'object' && type.objectKind === 'tuple'))
+    return undefined;
+  if (node && object.types.every((type) => type.tuple?.elements.every((element) => !element.rest)))
+    c.error(node, `プロパティ '${name}' は型 '${c.print(object)}' にありません。`);
+  if (Number(name) < 0) return undefined;
+  return unionOf(object.types.map((type) => tupleElementBeyond(c, type, name, undefined) ?? undefinedType));
 }

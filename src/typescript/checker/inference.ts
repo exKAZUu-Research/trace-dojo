@@ -1,9 +1,10 @@
-// code-gauge-allow-file fileNcss 604 -- Keeps generic candidate collection, constraint fitting and inference completion together.
+// code-gauge-allow-file fileNcss 606 -- Keeps generic candidate collection, constraint fitting and inference completion together.
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import type { Checker, Mapper } from './checker';
 import { childTypes, objectMemberTypes } from './genericTypes';
 import { applicableIndex, hasIndexSignature, isIndexKeyOf, isPropertyKeyOf, keyedIndexes } from './indexInfos';
 import { reverseMappedType } from './reverseMappedInference';
+import { tupleTypesDefinitelyUnrelated } from './tupleIndexes';
 import {
   anonymousObject,
   anyType,
@@ -584,7 +585,8 @@ export class TypeInference {
       return true;
     }
     if (source.objectKind !== 'tuple' || target.objectKind !== 'tuple') return false;
-    this.inferFromTupleElements(run, source.tuple?.elements ?? [], target.tuple?.elements ?? [], recurse);
+    if (!tupleTypesDefinitelyUnrelated(source, target))
+      this.inferFromTupleElements(run, source.tuple?.elements ?? [], target.tuple?.elements ?? [], recurse);
     return true;
   }
 

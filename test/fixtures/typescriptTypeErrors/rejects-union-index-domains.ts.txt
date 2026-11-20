@@ -1,0 +1,41 @@
+type Mixed = { [key: string]: number } | { [key: number]: string };
+type A = Mixed[0];
+type B = Mixed['1'];
+function mixed(x: Mixed, key: number): void {
+  const a = x[0];
+  const b = x['1'];
+  const c = x[key];
+  x[0] = 1;
+  console.log(a, b, c);
+}
+const key = Symbol();
+function sym(x: {[key: symbol]: number} | {[key: string]: string}, y: {[key]: string} | {[key: symbol]: number}): void {
+  const a = x[key];
+  const b = y[key];
+  console.log(a, b);
+}
+function pat(x: {[key: `data-${string}`]: number} | {[key: string]: string}): void {
+  const a = x['data-foo'];
+  const b = x['data-foo' as 'data-foo' | 'data-bar'];
+  console.log(a, b);
+}
+function noCommonDot(x: {[key: `data${string}`]: number} | {[key: string]: string}): void {
+  console.log(x.dataFoo);
+}
+function missingTuple(x: [number] | [number, string]): void {
+  console.log(x[2]);
+  console.log(x[-1]);
+}
+function missingProp(x: {a: string} | {b: string}): void {
+  console.log(x['a']);
+}
+function readonly(x: {readonly [key: string]: number} | {[key: string]: string}): void {
+  x['f'] = '';
+}
+function tupleWrite(x: [number] | [number, string]): void {
+  x[1] = 15;
+  x[1] = undefined;
+}
+function symbolWrite(x: {[key: symbol]: string} | {[key: symbol]: number}): void {
+  x[key] = true;
+}

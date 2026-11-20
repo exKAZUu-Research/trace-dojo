@@ -1,7 +1,9 @@
 import type { Checker } from './checker';
 import { applicableIndex, isSameKeyType } from './indexInfos';
+import { tupleElementBeyond } from './tupleIndexes';
 import {
   type IndexInfo,
+  isPropertyKeyLiteral,
   literalType,
   type Property,
   simpleProperty,
@@ -44,13 +46,17 @@ export function unionStructure(c: Checker, types: Type[]): Structure {
  * `createUnionOrIntersectionProperty` makes it: optional or read-only if it is in any member.
  */
 export function unionProperty(c: Checker, types: Type[], name: string): Property | undefined {
+  const declared = types.map((member) => c.propertyOf(member, name));
+  const first = declared.find((property) => property !== undefined);
+  if (!first) return undefined;
+  const key = first.nameType;
+  const isSymbol = key && isPropertyKeyLiteral(key) && typeof key.value === 'symbol';
   const properties: Property[] = [];
-  for (const member of types) {
-    const property = c.propertyOf(member, name) ?? indexProperty(c, member, name);
+  for (const [position, member] of types.entries()) {
+    const property = declared[position] ?? (isSymbol ? undefined : indexProperty(c, member, name));
     if (!property) return undefined;
     properties.push(property);
   }
-  const [first] = properties;
   // A private or protected property exists on a union only when every member has that same declaration.
   if (
     properties.some((property) => property.visibility !== 'public') &&
@@ -75,7 +81,9 @@ export function unionProperty(c: Checker, types: Type[], name: string): Property
 
 function indexProperty(c: Checker, member: Type, name: string): Property | undefined {
   const index = applicableIndex(c, c.structureOf(member), literalType(name));
-  return index && simpleProperty(name, index.type, { readonly: index.readonly });
+  if (!index) return undefined;
+  const type = tupleElementBeyond(c, member, name, undefined) ?? index.type;
+  return simpleProperty(name, type, { readonly: index.readonly });
 }
 
 function unitedIndex(indexes: (IndexInfo | undefined)[]): IndexInfo | undefined {

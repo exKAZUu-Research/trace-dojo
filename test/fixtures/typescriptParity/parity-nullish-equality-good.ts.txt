@@ -1,0 +1,5 @@
+function optional(a?: 'left', b?: 'right'): boolean { return a === b; }
+function nullable(a: 1 | null, b: 2 | null): boolean { return a == b; }
+function singleton(a: 1 | null, b: undefined): boolean { return a === b; }
+function standalone(a: 1, b: null): boolean { return b !== a; }
+console.log(optional(), optional('left'), nullable(null, null), singleton(null, undefined), standalone(1, null));

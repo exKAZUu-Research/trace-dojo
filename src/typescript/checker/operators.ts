@@ -387,22 +387,14 @@ export class OperatorChecker {
     const r = regularOf(rightType);
     if (isAnyLike(l) || isAnyLike(r)) return;
     if (isNullishIntrinsic(l) || isNullishIntrinsic(r)) return;
-    const overlaps = (a: Type, b: Type): boolean =>
-      this.c.relations.isComparable(this.comparableForm(a), this.comparableForm(b));
-    if (overlaps(l, r)) return;
+    if (this.c.relations.isComparable(l, r)) return;
     // As TypeScript does, the message names the operands' base types when those do not overlap either.
     const [leftBase, rightBase] = [baseTypeOfLiteral(l), baseTypeOfLiteral(r)];
-    const [shownLeft, shownRight] = overlaps(leftBase, rightBase) ? [l, r] : [leftBase, rightBase];
+    const [shownLeft, shownRight] = this.c.relations.isComparable(leftBase, rightBase) ? [l, r] : [leftBase, rightBase];
     this.c.error(
       node,
       `この比較は意図したものではないようです。型 '${this.c.print(shownLeft)}' と型 '${this.c.print(shownRight)}' には重なりがありません。`
     );
-  }
-
-  /** A type with `null` and `undefined` removed, which comparisons always allow. */
-  private comparableForm(type: Type): Type {
-    const removed = this.c.relations.removeNullish(type);
-    return isIntrinsic(removed, 'never') ? type : removed;
   }
 
   private logical(operator: string, left: TreeNode, right: TreeNode, contextual?: Type): Type {
