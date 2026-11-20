@@ -21,6 +21,7 @@ const UNSUPPORTED_EXPRESSIONS: Record<string, string> = {
   try_block: 'try ブロック',
   yield_expression: 'yield',
   become_expression: 'become',
+  attribute_item: '式に付けた属性',
   attributed_expression: '式に付けた属性',
 };
 
@@ -277,7 +278,7 @@ export abstract class ExpressionConverter extends MacroConverter {
         return this.rangeExpr(node, span);
       }
       case 'tuple_expression': {
-        const elems = node.namedChildren.filter((child) => !isComment(child) && child.type !== 'attribute_item');
+        const elems = node.namedChildren.filter((child) => !isComment(child));
         return { kind: 'tuple', elems: elems.map((child) => this.expr(child)), span };
       }
       case 'unit_expression': {
