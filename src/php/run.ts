@@ -89,7 +89,7 @@ function guard(runtime: Runtime, run: () => void): string | undefined {
 const rejectedRuns = new WeakSet<Runtime>();
 
 // code-gauge-allow functionCognitiveComplexity 24 -- Dispatches uncaught outcomes before runtime shutdown.
-function report(runtime: Runtime, error: unknown, inShutdown = false): string | undefined {
+function report(runtime: Runtime, error: unknown, inShutdown = false, release = true): string | undefined {
   if (error instanceof ExitSignal) {
     if (inShutdown) runtime.shuttingDown = true;
     return undefined;
@@ -101,7 +101,7 @@ function report(runtime: Runtime, error: unknown, inShutdown = false): string | 
   }
   if (error instanceof PhpThrow) {
     restoreStack(runtime);
-    return invokeExceptionHandler(runtime, error.object, inShutdown);
+    return invokeExceptionHandler(runtime, error.object, inShutdown, release);
   }
   if (error instanceof HostStackExhaustion) {
     const trace = traceText(error.record ? [error.record] : []);
@@ -122,9 +122,23 @@ function report(runtime: Runtime, error: unknown, inShutdown = false): string | 
   throw error;
 }
 
-function invokeExceptionHandler(runtime: Runtime, object: PhpObject, inShutdown: boolean): string | undefined {
+/** Releases an uncaught exception once it is reported or handled, as PHP does before shutdown. */
+function releaseUncaught(runtime: Runtime, object: PhpObject): string | undefined {
+  if (runtime.thrown === object) runtime.thrown = undefined;
+  return guard(runtime, () => runtime.release([object], false, true));
+}
+
+function invokeExceptionHandler(
+  runtime: Runtime,
+  object: PhpObject,
+  inShutdown: boolean,
+  release: boolean
+): string | undefined {
   const handler = runtime.exceptionHandler;
-  if (handler === null || handler === undefined) return printUncaught(runtime, object);
+  if (handler === null || handler === undefined) {
+    const message = printUncaught(runtime, object);
+    return (release ? releaseUncaught(runtime, object) : undefined) ?? message;
+  }
   runtime.replacedExceptionHandlers.push(handler);
   runtime.exceptionHandler = undefined;
   try {
@@ -132,9 +146,10 @@ function invokeExceptionHandler(runtime: Runtime, object: PhpObject, inShutdown:
     asInternal(() => callValue(handler, [{ v: object }], undefined));
     if (runtime.exceptionHandler === undefined)
       runtime.exceptionHandler = runtime.replacedExceptionHandlers.pop() ?? null;
-    return undefined;
+    return releaseUncaught(runtime, object);
   } catch (error_) {
-    return report(runtime, error_, inShutdown);
+    // PHP keeps both exceptions when the handler throws, so their objects survive until shutdown.
+    return report(runtime, error_, inShutdown, false);
   }
 }
 

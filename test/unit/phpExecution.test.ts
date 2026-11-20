@@ -971,6 +971,23 @@ test.each([
   });
 });
 
+const uncaughtReleaseProgram = (handler: string): string =>
+  `<?php class D { function __construct(public $id) {} function __destruct() { echo "d{$this->id};"; } } function f($p) { throw new Exception("x"); } $x = new D(14); ${handler} f(new D(1));`;
+
+test('releases an uncaught exception after reporting or handling it, before shutdown', () => {
+  expect(run(uncaughtReleaseProgram(''))).toMatchObject({
+    kind: 'executed',
+    stdout: expect.stringMatching(/thrown in \/main\.php on line 1\nd1;d14;$/),
+  });
+  expect(run(uncaughtReleaseProgram('set_exception_handler(function ($e) { echo "handler;"; });'))).toMatchObject({
+    kind: 'executed',
+    stdout: 'handler;d1;d14;',
+  });
+  expect(
+    run(uncaughtReleaseProgram('set_exception_handler(function ($e) { echo "handler;"; throw new Exception("y"); });'))
+  ).toMatchObject({ kind: 'executed', stdout: expect.stringMatching(/d14;d1;$/) });
+});
+
 test('unrelated array temporaries do not invalidate scalar-grid garbage caches', () => {
   const execution = run(
     '<?php $data=[]; for($i=0;$i<10000;$i++) $data[]=[$i]; for($i=0;$i<10000;$i++){ $temp=[$i]; $x=new stdClass(); } echo "done";'
