@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 856 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss 860 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
@@ -499,13 +499,17 @@ export class Runtime {
 
   /** The spec's ArraySetLength, which stops shrinking at the last non-configurable element. */
   setLength(array: JsArray, value: Value, strict = true, writable = true): void {
-    // V8 refuses a read-only length before converting the value, and even a write of the same length.
+    // A length that is already read-only rejects assignment without coercion.
     if (!array.isLengthWritable) {
       this.refuse(strict, readOnlyLengthMessage);
       return;
     }
     const length = this.toArrayLength(value);
     const { elements } = array;
+    if (!array.isLengthWritable) {
+      if (length !== elements.length) this.refuse(strict, readOnlyLengthMessage);
+      return;
+    }
     if (length >= elements.length) {
       this.grow(array, length);
       array.isLengthWritable &&= writable;
