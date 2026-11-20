@@ -24,7 +24,7 @@ export interface UserImpls {
   /** Counts the elements a clone makes against the run's limit. */
   allocate(count: number): void;
   eq?(type: Type, a: Value, b: Value, rhs: Type): boolean | undefined;
-  cmp?(type: Type, a: Value, b: Value): number | undefined;
+  cmp?(type: Type, a: Value, b: Value): { order: number | undefined } | undefined;
   clone?(type: Type, value: Value): { value: Value } | undefined;
   /** Substitutes a generic type's parameters with its arguments in a field's type. */
   fieldTypes(def: AdtDef, args: Type[], variant: number): Type[];
@@ -324,7 +324,7 @@ export function compareValues(type: Type, a: Value, b: Value): number | undefine
   const y = deref(b);
   if (t.kind === 'adt') {
     const user = hooks?.cmp?.(t, x, y);
-    if (user !== undefined) return user;
+    if (user) return user.order;
   }
   switch (t.kind) {
     case 'int': {

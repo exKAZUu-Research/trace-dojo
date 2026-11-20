@@ -257,8 +257,7 @@ define({
     const order = compareValues(selfType(ctx), self, other);
     return order === undefined ? none(ctx) : some(ctx, ordering(ctx, order));
   },
-  'PartialOrd::lt': ([self, other], ctx) =>
-    (compareValues(selfType(ctx), self, other) ?? 0) < 0 && compareValues(selfType(ctx), self, other) !== undefined,
+  'PartialOrd::lt': ([self, other], ctx) => (compareValues(selfType(ctx), self, other) ?? 0) < 0,
   'PartialOrd::le': ([self, other], ctx) => {
     const order = compareValues(selfType(ctx), self, other);
     return order !== undefined && order <= 0;

@@ -404,6 +404,29 @@ test('Rust byte literals accept the full hexadecimal byte range', () => {
   });
 });
 
+test('a Rust PartialOrd implementation can leave its values unordered', () => {
+  const program = `use std::cmp::Ordering;
+#[derive(PartialEq)]
+struct P(i32);
+impl PartialOrd for P {
+    fn partial_cmp(&self, _other: &Self) -> Option<Ordering> {
+        print!("cmp ");
+        None
+    }
+}
+
+fn main() {
+    println!("{} {} {} {} {:?}",
+        P(1) < P(2), P(1) <= P(2), P(2) > P(1), P(2) >= P(1),
+        P(1).partial_cmp(&P(2)));
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'cmp cmp cmp cmp cmp false false false false None\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

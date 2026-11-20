@@ -79,11 +79,11 @@ export class Interpreter implements CallSupport {
       },
       cmp: (type, a, b) => {
         const ord = this.userTraitMethod('Ord', type, 'cmp');
-        if (ord) return (this.callDispatched(ord, type, [a, b]) as EnumValue).variant - 1;
+        if (ord) return { order: (this.callDispatched(ord, type, [a, b]) as EnumValue).variant - 1 };
         const partial = this.userTraitMethod('PartialOrd', type, 'partial_cmp');
         if (!partial) return;
         const result = this.callDispatched(partial, type, [a, b]) as EnumValue;
-        return result.variant === 0 ? undefined : (result.fields[0] as EnumValue).variant - 1;
+        return { order: result.variant === 0 ? undefined : (result.fields[0] as EnumValue).variant - 1 };
       },
       clone: (type, value) => {
         const found = this.userTraitMethod('Clone', type, 'clone');
