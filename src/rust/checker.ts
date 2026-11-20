@@ -16,6 +16,7 @@ import { TraitSolver } from './traits';
 import {
   type AdtDef,
   childTypes,
+  type ConstDef,
   type FloatName,
   type FnDef,
   freshVar,
@@ -91,7 +92,7 @@ export class Checker {
   /** Bodies of functions declared in blocks, checked after the function around them. */
   private readonly nestedFns: FnDef[] = [];
   /** The context of each checked function, which the compiler reads. */
-  readonly fnContexts = new Map<FnDef, FnContext>();
+  readonly fnContexts = new Map<FnDef | ConstDef, FnContext>();
   /** For each instantiated type parameter of a call, the bounds that closures passed for it take their signature from. */
   readonly varBounds = new Map<unknown, TraitRef[]>();
   body!: BodyContext;
@@ -202,15 +203,22 @@ export class Checker {
 
   private checkConstsAndMain(): void {
     for (const def of this.program.consts) {
-      const ast = def.ast as { value?: Expr; span: Span; name: string };
-      if (!ast.value || (def as { checked?: boolean }).checked) continue;
-      (def as { checked?: boolean }).checked = true;
-      const module = this.program.root;
-      this.body = this.newBody({ name: def.name, module, retType: def.type, isAtomic: false });
+      const { ast, module, impl } = def;
+      if (!ast.value) continue;
+      this.body = this.newBody({
+        name: def.name,
+        module,
+        retType: def.type,
+        isAtomic: true,
+        typeParams: new Map(impl?.params.map((param) => [param.name, param])),
+        selfType: impl?.selfType,
+        currentTrait: impl?.trait?.trait,
+      });
+      this.fnContexts.set(def, this.body.fn);
       this.coerceExpr(ast.value, def.type);
       this.finishBody(ast.span);
       // rustc evaluates constants before running, so one whose value overflows or divides by zero is an error.
-      new ConstLint(this.annotations, module).checkExpr(ast.value);
+      new ConstLint(this.annotations).checkExpr(ast.value);
     }
     const main = this.program.root.values.get('main');
     if (main?.binding.kind !== 'fn') {
@@ -296,7 +304,7 @@ export class Checker {
     this.checkBorrows(() =>
       new BorrowChecker(this.annotations, this.solver).checkFn(item, this.body.fn, this.body.retType)
     );
-    new ConstLint(this.annotations, this.body.module).check(item.body);
+    new ConstLint(this.annotations).check(item.body);
   }
 
   /** Runs the borrow checker, reporting its first error or a move by a `&` pattern, whichever comes first. */

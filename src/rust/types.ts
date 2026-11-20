@@ -1,4 +1,5 @@
-import type { FnItem, Span } from './ast';
+import type { ConstItem, FnItem, Span } from './ast';
+import type { Module } from './items';
 
 export type IntName = 'i8' | 'i16' | 'i32' | 'i64' | 'i128' | 'isize' | 'u8' | 'u16' | 'u32' | 'u64' | 'u128' | 'usize';
 export type FloatName = 'f32' | 'f64';
@@ -175,10 +176,9 @@ export interface ImplDef {
 export interface ConstDef {
   name: string;
   type: Type;
-  /** The value, once the compiler has computed it. */
-  value?: unknown;
-  ast: unknown;
-  compute?: () => unknown;
+  ast: ConstItem;
+  module: Module;
+  impl: ImplDef | undefined;
 }
 
 export interface FnDef {

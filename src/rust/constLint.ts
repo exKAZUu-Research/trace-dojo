@@ -3,7 +3,7 @@ import type { Block, Condition, Expr, MatchArm, Pattern, Stmt } from './ast';
 import { forEachDirect, patternBindings } from './astWalk';
 import { type PropagationMode, propagationModes } from './constPropagation';
 import { normalize } from './infer';
-import { compileError, constInteger, type Module } from './items';
+import { compileError, constInteger } from './items';
 import { castValue, wrap } from './ops';
 import { INT_NAMES, intMax, intMin, type IntName, resolve, shallow, type Type } from './types';
 
@@ -28,10 +28,7 @@ export class ConstLint {
   /** Whether the code checked last never finishes normally (`return`, `break`), so what follows is unreachable. */
   private diverged = false;
 
-  constructor(
-    private readonly annotations: Annotations,
-    private readonly module: Module
-  ) {}
+  constructor(private readonly annotations: Annotations) {}
 
   check(block: Block): void {
     this.modes = propagationModes(block, this.annotations);
@@ -207,10 +204,10 @@ export class ConstLint {
     const res = this.annotations.paths.get(expr);
     if (res?.kind === 'local') return this.known.get(res.local);
     if (res?.kind === 'const') {
-      const ast = res.def.ast as { value?: Expr };
+      const { ast, module } = res.def;
       // A constant's initializer may not be checked yet, so its value counts by the constant's type.
-      if (ast.value && intTypeOf(res.def.type)) return constInteger(ast.value, this.module);
-      return ast.value ? this.constValue(ast.value) : undefined;
+      if (ast.value && intTypeOf(res.def.type)) return constInteger(ast.value, module);
+      return ast.value ? new ConstLint(this.annotations).expr(ast.value) : undefined;
     }
     if (res?.kind === 'builtinConst') return integerConst(res.name);
     return undefined;
@@ -254,7 +251,7 @@ export class ConstLint {
   }
 
   private closure(expr: Extract<Expr, { kind: 'closure' }>): void {
-    const lint = new ConstLint(this.annotations, this.module);
+    const lint = new ConstLint(this.annotations);
     lint.modes = this.modes;
     for (const [local, value] of this.known) lint.known.set(local, value);
     if (expr.body.kind === 'block') lint.block(expr.body);
@@ -337,10 +334,6 @@ export class ConstLint {
     const result = name && this.integerBinary(expr, name, left, right);
     this.endBlock();
     this.assign(expr.target, result);
-  }
-
-  private constValue(expr: Expr): Known | undefined {
-    return new ConstLint(this.annotations, this.module).expr(expr);
   }
 
   private binary(expr: Extract<Expr, { kind: 'binary' }>): Known | undefined {

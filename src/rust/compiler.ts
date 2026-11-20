@@ -17,7 +17,7 @@ import type { Program } from './items';
 import { castValue, copiedSlots, copyValue, needsCopy } from './ops';
 import { ControlSignal, type Frame, type FunctionInfo, MOVED, UNASSIGNED } from './runtime';
 import { runtimeType } from './runtimeTypes';
-import { type FnDef, isUnit, resolve, shallow, substitute, type Type } from './types';
+import { type ConstDef, type FnDef, isUnit, resolve, shallow, substitute, type Type } from './types';
 import {
   CellPlace,
   DynValue,
@@ -48,7 +48,7 @@ export interface CallSupport {
   callValue(callee: Value, args: Value[], callRow: number | undefined): Value;
   makeClosure(compiled: CompiledFn, frame: Frame, captures: Place[], byValue: boolean[]): Value;
   toIter(value: Value, from: Type): Value;
-  constValue(def: unknown, frame: Frame): Value;
+  constValue(def: ConstDef, frame: Frame): Value;
   builtinConst(name: string): Value;
   formatter: Formatter;
   turtleNew(args: Value[], span: Span, frame: Frame): Value;

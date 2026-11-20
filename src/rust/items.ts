@@ -592,7 +592,7 @@ export class ItemCollector {
   }
 
   private constDef(item: ConstItem, module: Module, impl: ImplDef | undefined): ConstDef {
-    const def: ConstDef = { name: item.name, type: UNIT, ast: item };
+    const def: ConstDef = { name: item.name, type: UNIT, ast: item, module, impl };
     this.program.consts.push(def);
     this.lowering.push(() => {
       const scope: TypeScope = {
@@ -898,8 +898,8 @@ export function constInteger(expr: Expr, module: Module): bigint | undefined {
       }
       if (segments.length !== 1) return undefined;
       const binding = lookupValue(module, segments[0].name, expr.span);
-      const constItem = binding?.kind === 'const' ? (binding.def.ast as ConstItem) : undefined;
-      return constItem?.value ? constInteger(constItem.value, module) : undefined;
+      const def = binding?.kind === 'const' ? binding.def : undefined;
+      return def?.ast.value ? constInteger(def.ast.value, def.module) : undefined;
     }
     case 'cast': {
       return constInteger(expr.operand, module);

@@ -361,6 +361,34 @@ fn main() {
   });
 });
 
+test('Rust constants use their declaration scope and initializer locals', () => {
+  const program = `const BASE: i32 = 10;
+mod numbers {
+    const BASE: i32 = 3;
+    pub const LIMIT: i32 = BASE + 1;
+    pub struct Number;
+    impl Number {
+        const FACTOR: i32 = 2;
+        pub const TOTAL: i32 = LIMIT * Self::FACTOR;
+    }
+}
+
+fn main() {
+    const LOCAL: i32 = { let addition = 2; BASE + addition };
+    {
+        const BASE: i32 = 5;
+        const NESTED: i32 = BASE + LOCAL;
+        println!("{} {} {}", numbers::LIMIT, numbers::Number::TOTAL, NESTED);
+    }
+    println!("{}", LOCAL);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '4 8 17\n12\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

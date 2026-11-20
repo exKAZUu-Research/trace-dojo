@@ -1,4 +1,4 @@
-import type { Expr, Span } from './ast';
+import type { Span } from './ast';
 import type { Checker } from './checker';
 import { type CallSupport, type CompiledFn, Compiler } from './compiler';
 import { Formatter, type Spec } from './fmt';
@@ -11,6 +11,7 @@ import { ControlSignal, FmtFailure, Frame, type FunctionInfo, type Runtime, Rust
 import { concreteType, matchConcrete, typeKey } from './runtimeTypes';
 import {
   type AdtDef,
+  type ConstDef,
   type FnDef,
   type ImplDef,
   resolve,
@@ -48,8 +49,8 @@ export class Interpreter implements CallSupport {
   readonly formatter: Formatter;
   readonly compiler: Compiler;
   private readonly dispatchCache = new Map<string, Dispatch | undefined>();
-  private readonly constValues = new Map<unknown, Value>();
-  private readonly constFns = new Map<unknown, CompiledFn>();
+  private readonly constValues = new Map<ConstDef, Value>();
+  private readonly constFns = new Map<ConstDef, CompiledFn>();
 
   constructor(
     readonly program: Program,
@@ -251,36 +252,26 @@ export class Interpreter implements CallSupport {
   // -------------------------------------------------------------------------------------------------------------------
   // Constants and conversions
 
-  constValue(def: unknown, frame: Frame): Value {
+  constValue(def: ConstDef, frame: Frame): Value {
     if (this.constValues.has(def)) return this.constValues.get(def);
-    const constDef = def as { ast: { value?: Expr; name: string }; type: Type };
-    const native = NATIVES[`const:${constDef.ast.name}`];
+    const native = NATIVES[`const:${def.name}`];
     let value: Value;
-    if (!constDef.ast.value) {
+    if (!def.ast.value) {
       value = native
         ? native([], {
             interp: this,
             runtime: this.runtime,
             frame,
             span: { row: 0, col: 0 },
-            typeArgs: [constDef.type],
+            typeArgs: [def.type],
           })
         : undefined;
     } else {
       let compiled = this.constFns.get(def);
       if (!compiled) {
-        const context = {
-          name: 'const',
-          locals: [],
-          slotCount: 0,
-          captures: [],
-          parent: undefined,
-          isClosure: false,
-          isAtomic: true,
-          isMove: false,
-          closureKind: 'Fn' as const,
-        };
-        compiled = this.compiler.compileConst(constDef.ast.value, context);
+        const context = this.checker.fnContexts.get(def);
+        if (!context) throw new Error(`No checked initializer for ${def.name}`);
+        compiled = this.compiler.compileConst(def.ast.value, context);
         this.constFns.set(def, compiled);
       }
       value = this.invoke(compiled, new Map(), [], undefined, []);
