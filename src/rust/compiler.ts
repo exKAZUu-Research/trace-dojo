@@ -256,7 +256,13 @@ export class Compiler {
   }
 
   private compileLet(stmt: Extract<Stmt, { kind: 'let' }>): Eval {
-    if (!stmt.init) return () => UNIT_VALUE;
+    if (!stmt.init) {
+      const locals = patternBindings(stmt.pattern, this.annotations);
+      return (frame) => {
+        for (const local of locals) frame.locals[local.slot] = MOVED;
+        return UNIT_VALUE;
+      };
+    }
     // Destructuring a place moves the parts its bindings take; the place keeps the rest.
     if (stmt.pattern.kind !== 'binding' && isPlaceExpr(stmt.init, this.annotations)) return this.destructure(stmt);
     const init = this.value(stmt.init);
@@ -408,7 +414,7 @@ export class Compiler {
         return (frame) => {
           const value = read(frame);
           if (movesString) moveString(new LocalPlace(frame, slot));
-          frame.locals[slot] = UNASSIGNED;
+          frame.locals[slot] = MOVED;
           return value;
         };
       }
@@ -640,8 +646,7 @@ export class Compiler {
     if (fields && (value instanceof StructValue || Array.isArray(value))) {
       return new CellPlace(this.moveCapturedFields(frame, value, type, fields));
     }
-    if (res.kind === 'local') frame.locals[local.slot] = UNASSIGNED;
-    else place.set(MOVED);
+    place.set(MOVED);
     return new CellPlace(value);
   }
 

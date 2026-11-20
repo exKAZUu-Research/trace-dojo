@@ -312,3 +312,21 @@ test('Rust traces forget a String consumed by concatenation and preserve its cap
   expect(stdout).toBe('100\n');
   expect(finalVars).toEqual({ combined: 'ab' });
 });
+
+test('a moved Rust binding keeps an older binding shadowed', () => {
+  const program = `fn main() {
+    let item = 1;
+    {
+        let item = String::from("hi");
+        let owned = item;
+        println!("{}", owned);
+    }
+    println!("{}", item);
+    let item = String::from("last");
+    drop(item);
+}`;
+  const { traceItems, finalVars, stdout } = traceProgram('rust', program, program);
+  expect(stdout).toBe('hi\n1\n');
+  expect(traceItems.find(({ vars }) => vars.owned === 'hi')?.vars).toEqual({ owned: 'hi' });
+  expect(finalVars).toEqual({});
+});

@@ -5,7 +5,7 @@ import type { Compiler } from './compiler';
 import { derefAll, isPlaceExpr, isRefType, LocalPlace } from './compilerCommon';
 import { normalize } from './infer';
 import { copyValue, needsCopy, valuesEqual } from './ops';
-import { type Frame, MOVED, UNASSIGNED } from './runtime';
+import { type Frame, MOVED } from './runtime';
 import { runtimeType } from './runtimeTypes';
 import { resolve, shallow, type Type } from './types';
 import { CellPlace, ElementPlace, type EnumValue, isPlace, type Place, type StructValue, type Value } from './values';
@@ -215,7 +215,7 @@ export function takesWhole(c: Compiler, scrutinee: Expr, pattern: Pattern): ((fr
   if (res?.kind !== 'local' || res.local.mode !== 'move' || isRefType(res.local.type)) return undefined;
   const slot = res.local.slot;
   return (frame) => {
-    frame.locals[slot] = UNASSIGNED;
+    frame.locals[slot] = MOVED;
   };
 }
 
