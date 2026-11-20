@@ -2,6 +2,7 @@ import type { Checker } from './checker';
 import { applicablePatternIndexes, isNumericStringKey } from './indexInfos';
 import {
   type ConditionalType,
+  type IndexedAccessType,
   intersectionOf,
   isAnyLike,
   isIntrinsic,
@@ -12,12 +13,12 @@ import {
   unknownType,
 } from './types';
 
-/** The types that the conditional types around an indexed access check a type parameter against. */
-type ExtendsTypes = (parameter: TypeParameter) => Type[];
+/** The types an enclosing conditional establishes for a receiver or a key. */
+type ExtendsTypes = (type: Type) => Type[];
 
 /** The indexed type parameter and what stands for it along the path to a key. */
 interface KeyContext {
-  object: TypeParameter;
+  object: Type;
   constraints: Type[];
   extendsTypes: ExtendsTypes;
   visited: Set<number>;
@@ -31,10 +32,13 @@ export class IndexedAccessKeys {
    * Whether `key` may name a key that none of the types `object` stands for has: its constraint, where `T extends any`
    * is as unconstrained as `T`, and the types conditional types narrow it to.
    */
-  isInvalid(object: TypeParameter, key: Type, extendsTypes: ExtendsTypes): boolean {
+  isInvalid(object: Type, key: Type, extendsTypes: ExtendsTypes): boolean {
     const context = {
       object,
-      constraints: constraintsOf(this.c, object, extendsTypes),
+      constraints:
+        object.kind === 'typeParameter'
+          ? constraintsOf(this.c, object, extendsTypes)
+          : [object, ...extendsTypes(object)],
       extendsTypes,
       visited: new Set<number>(),
     };
@@ -83,9 +87,27 @@ export class IndexedAccessKeys {
       case 'typeParameter': {
         return this.isInvalidParameterKey(context, key);
       }
+      case 'indexedAccess': {
+        return this.isInvalidIndexedKey(context, key);
+      }
       default: {
         return false;
       }
+    }
+  }
+
+  private isInvalidIndexedKey(context: KeyContext, key: IndexedAccessType): boolean {
+    if (context.visited.has(key.id)) return true;
+    context.visited.add(key.id);
+    try {
+      if (context.extendsTypes(key).some((bound) => !this.isInvalidKey(context, bound, false))) return false;
+      const constraint = this.c.baseConstraint(key);
+      if (constraint !== key) return this.isInvalidKey(context, constraint, false);
+      return context.constraints.every(
+        (object) => !this.c.relations.isAssignable(key, this.c.typeOperators.keyofType(object))
+      );
+    } finally {
+      context.visited.delete(key.id);
     }
   }
 

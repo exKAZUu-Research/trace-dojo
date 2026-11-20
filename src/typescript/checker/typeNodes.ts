@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 688 -- Resolves every kind of type syntax a program writes, each needing its own rule.
+// code-gauge-allow-file fileNcss 699 -- Resolves every kind of type syntax a program writes, each needing its own rule.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
@@ -24,6 +24,7 @@ import {
   emptyStructure,
   errorType,
   falseType,
+  type IndexedAccessType,
   type IndexInfo,
   intersectionOf,
   isAnyLike,
@@ -274,10 +275,13 @@ export class TypeNodes {
     const objectType = this.typeFromNode(object);
     const indexType = this.typeFromNode(index);
     if (
-      objectType.kind === 'typeParameter' &&
+      (objectType.kind === 'typeParameter' || objectType.kind === 'indexedAccess') &&
       this.indexedAccessKeys.isInvalid(objectType, indexType, this.conditionalExtendsTypes(node))
     ) {
-      this.c.error(index, `型 '${this.c.print(indexType)}' は型 '${objectType.name}' のインデックスに使えません。`);
+      this.c.error(
+        index,
+        `型 '${this.c.print(indexType)}' は型 '${this.c.print(objectType)}' のインデックスに使えません。`
+      );
       return errorType;
     }
     return this.c.typeOperators.indexedAccess(objectType, indexType, index);
@@ -294,13 +298,25 @@ export class TypeNodes {
   }
 
   /** Compute the branch bounds once when checking the keys of a generic indexed access. */
-  private conditionalExtendsTypes(node: TreeNode): (parameter: TypeParameter) => Type[] {
+  private conditionalExtendsTypes(node: TreeNode): (type: Type) => Type[] {
     let mapper: Mapper | undefined;
-    return (parameter) => {
+    return (type) => {
       mapper ??= this.conditionalMapper(node, false);
-      const bound = mapper.get(parameter.id);
+      if (type.kind === 'indexedAccess') return this.indexedAccessNarrowings(node, type, mapper);
+      const bound = mapper.get(type.id);
       return bound ? [bound] : [];
     };
+  }
+
+  private indexedAccessNarrowings(node: TreeNode, access: IndexedAccessType, mapper: Mapper): Type[] {
+    const narrowed = this.c.instantiate(access, mapper);
+    const bounds = narrowed === access ? [] : [narrowed];
+    for (const [check, extendsNode] of this.conditionalTrueChecks(node)) {
+      if (check.kind !== 'indexedAccess' || !this.c.relations.identical(check, access)) continue;
+      const bound = this.conditionalBound(extendsNode);
+      if (bound) bounds.push(this.c.instantiate(bound, mapper));
+    }
+    return bounds;
   }
 
   private *conditionalTrueChecks(node: TreeNode): IterableIterator<[Type, TreeNode]> {
