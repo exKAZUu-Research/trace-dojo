@@ -1,5 +1,5 @@
 import type { Checker, Mapper } from './checker';
-import { conditionalBranch } from './genericTypes';
+import { conditionalBranch, typeParametersIn } from './genericTypes';
 import { applicablePatternIndexes, isNumericStringKey } from './indexInfos';
 import {
   type ConditionalType,
@@ -75,6 +75,12 @@ function narrowOperand(c: Checker, type: Type, narrow: (type: Type) => Type, par
       const no = narrow(falseType);
       return yes === trueType && no === falseType ? type : unionOf([yes, no]);
     }
+    case 'templateLiteral': {
+      const members = type.types.map(narrow);
+      return members.every((member, index) => member === type.types[index])
+        ? type
+        : c.typeOperators.templateLiteral(type.texts, members);
+    }
     case 'union':
     case 'intersection': {
       const members = type.types.map(narrow);
@@ -99,8 +105,8 @@ function narrowIndexedProjection(c: Checker, access: IndexedAccessType, narrow: 
 function narrowMappedOperand(c: Checker, type: Type, mapped: MappedInfo, narrow: (type: Type) => Type): Type {
   const source = mapped.source && narrow(mapped.source);
   const constraint = narrow(mapped.constraint);
-  if (source === mapped.source && constraint === mapped.constraint) return type;
   const nameType = mapped.nameType && narrow(mapped.nameType);
+  if (source === mapped.source && constraint === mapped.constraint && nameType === mapped.nameType) return type;
   return c.typeOperators.mappedType({
     typeParameter: mapped.typeParameter,
     homomorphic: mapped.homomorphic,
@@ -115,9 +121,20 @@ function narrowMappedOperand(c: Checker, type: Type, mapped: MappedInfo, narrow:
   });
 }
 
-/** Decides which keys may index a type parameter, as TypeScript's TS2536 does for an indexed access type. */
 export class IndexedAccessKeys {
   constructor(private readonly c: Checker) {}
+
+  hasUnresolvedMappedKeys(info: MappedInfo): boolean {
+    const { nameType, source, typeParameter } = info;
+    const knownReference =
+      info.homomorphic && source?.kind === 'object' && source.resolveReference && !this.c.isArrayOrTuple(source);
+    if (knownReference) return !!nameType && typeParametersIn(nameType, [typeParameter], this.c.budget).length > 0;
+    if (this.c.relations.isGeneric(info.constraint)) return true;
+    if (!nameType || !this.c.relations.isGeneric(nameType)) return false;
+    return typeMembers(info.constraint).some((key) =>
+      this.c.relations.isGeneric(this.c.instantiate(nameType, new Map([[typeParameter.id, key]])))
+    );
+  }
 
   isInvalidWrittenKey(object: Type, key: Type, narrow: (type: Type) => Type): boolean {
     return this.isInvalid(object, key, (type) => {

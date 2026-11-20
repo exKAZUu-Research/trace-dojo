@@ -310,6 +310,8 @@ export class TypeOperators {
   private reportUnlessAssignable(node: TreeNode, type: Type, target: Type): void {
     this.c.typeNodes.interfaceBases.afterResolving(() => {
       if (this.c.relations.isAssignable(type, target)) return;
+      const narrowed = this.c.typeNodes.conditionalTypeNarrowing(node)(type);
+      if (narrowed !== type && this.c.relations.isAssignable(narrowed, target)) return;
       this.c.errorWhileResolving(node, this.c.expressions.elaboration.typeRelationMessage(type, target));
     });
   }
@@ -329,7 +331,7 @@ export class TypeOperators {
       !isIntrinsic(source, 'unknown')
     )
       return source;
-    if (!this.hasDeferredMappedKeys(info) && this.c.relations.isGeneric(info.constraint)) {
+    if (this.indexedAccessKeys.hasUnresolvedMappedKeys(info)) {
       return {
         kind: 'object',
         id: newTypeId(),
@@ -346,16 +348,6 @@ export class TypeOperators {
       mappedOptional: info.optionalModifier === '+' ? true : undefined,
       mappedKeys: info.nameType ? undefined : () => info.constraint,
     });
-  }
-
-  private hasDeferredMappedKeys(info: MappedInfo): boolean {
-    const { source } = info;
-    return !!(
-      info.homomorphic &&
-      source?.kind === 'object' &&
-      source.resolveReference &&
-      !this.c.isArrayOrTuple(source)
-    );
   }
 
   private mappedStructure(info: MappedInfo): Structure {

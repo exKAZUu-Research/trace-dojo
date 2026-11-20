@@ -46,6 +46,7 @@ import {
   trueType,
   type TupleElement,
   type Type,
+  typeMembers,
   type TypeParameter,
   undefinedType,
   unionOf,
@@ -271,10 +272,7 @@ export class TypeNodes {
     const [object, index] = named(node);
     const objectType = this.typeFromNode(object);
     const indexType = this.typeFromNode(index);
-    let narrow: ((type: Type) => Type) | undefined;
-    return this.c.typeOperators.indexedAccess(objectType, indexType, index, (type) =>
-      (narrow ??= this.conditionalIndexNarrowing(node))(type)
-    );
+    return this.c.typeOperators.indexedAccess(objectType, indexType, index, this.conditionalTypeNarrowing(node));
   }
 
   /**
@@ -287,7 +285,12 @@ export class TypeNodes {
     return bound !== undefined && this.validTupleRestType(bound);
   }
 
-  private conditionalIndexNarrowing(node: TreeNode): (type: Type) => Type {
+  conditionalTypeNarrowing(node: TreeNode): (type: Type) => Type {
+    let narrow: ((type: Type) => Type) | undefined;
+    return (type) => (narrow ??= this.computeConditionalTypeNarrowing(node))(type);
+  }
+
+  private computeConditionalTypeNarrowing(node: TreeNode): (type: Type) => Type {
     const checked: [Type, Type][] = [];
     for (const [check, extendsNode] of this.conditionalTrueChecks(node)) {
       if (check.kind !== 'indexedAccess') continue;
@@ -642,20 +645,30 @@ export class TypeNodes {
     writtenAt?: TreeNode
   ): IterableIterator<TypeArgumentMismatch> {
     const mapper: Mapper = new Map(parameters.map((parameter, index) => [parameter.id, typeArguments[index]]));
-    let branchMapper: Mapper | undefined;
+    let branchCheck: ((argument: Type, constraint: Type) => boolean) | undefined;
     for (let index = 0; index < count; index++) {
       const constraint = parameters[index]?.constraint?.();
       if (!constraint) continue;
       const argument = typeArguments[index];
       const instantiated = this.c.instantiate(constraint, mapper);
       if (this.c.relations.isAssignable(argument, instantiated)) continue;
-      if (writtenAt) {
-        branchMapper ??= this.conditionalMapper(writtenAt);
-        const narrowed = this.c.instantiate(argument, branchMapper);
-        if (narrowed !== argument && this.c.relations.isAssignable(narrowed, instantiated)) continue;
-      }
+      if (writtenAt && (branchCheck ??= this.argumentMatchesInBranch(writtenAt))(argument, instantiated)) continue;
       yield { index, argument, constraint: instantiated };
     }
+  }
+
+  private argumentMatchesInBranch(node: TreeNode): (argument: Type, constraint: Type) => boolean {
+    const mapper = this.conditionalMapper(node);
+    const project = this.conditionalTypeNarrowing(node);
+    return (argument, constraint) => {
+      const narrowed = this.c.instantiate(argument, mapper);
+      if (narrowed !== argument && this.c.relations.isAssignable(narrowed, constraint)) return true;
+      return typeMembers(argument).every((member) => {
+        const projected = project(member);
+        const bound = projected === neverType && member.kind !== 'indexedAccess' ? member : projected;
+        return this.c.relations.isAssignable(bound, constraint);
+      });
+    };
   }
 
   private conditionalMapper(node: TreeNode, preserveIdentity = true): Mapper {
