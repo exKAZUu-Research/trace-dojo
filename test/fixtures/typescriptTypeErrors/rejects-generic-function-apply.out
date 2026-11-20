@@ -1,0 +1,16 @@
+(7,18): error TS2345: Argument of type '[number]' is not assignable to parameter of type '[first: unknown, second: unknown]'.
+  Source has 1 element(s) but target requires 2.
+(8,18): error TS2345: Argument of type '[number, number, number]' is not assignable to parameter of type '[first: unknown, second: unknown]'.
+  Source has 3 element(s) but target allows only 2.
+(9,25): error TS2322: Type 'string' is not assignable to type 'number'.
+(10,1): error TS2684: The 'this' context of type '<T>(first: T, second: T) => T[]' is not assignable to method's 'this' of type '(this: null, args_0: number, args_1: string) => unknown[]'.
+  Types of parameters 'second' and 'args_1' are incompatible.
+    Type 'string' is not assignable to type 'number'.
+(12,1): error TS2684: The 'this' context of type '<T>(first: T, second: T) => T[]' is not assignable to method's 'this' of type '(this: null, args_0: number, args_1: string) => unknown[]'.
+  Types of parameters 'second' and 'args_1' are incompatible.
+    Type 'string' is not assignable to type 'number'.
+(13,7): error TS2322: Type '<T>(first: T, second: T) => T[]' is not assignable to type '(first: number, second: string) => unknown[]'.
+  Types of parameters 'second' and 'second' are incompatible.
+    Type 'string' is not assignable to type 'number'.
+(14,7): error TS2322: Type 'unknown[]' is not assignable to type 'number[]'.
+  Type 'unknown' is not assignable to type 'number'.

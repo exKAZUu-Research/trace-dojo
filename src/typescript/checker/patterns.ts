@@ -75,7 +75,7 @@ export class BindingPatterns {
         const right = pattern.childForFieldName('right') as TreeNode;
         const implied = this.impliedBindingType(left, options.isConst);
         const defaultType = this.initializerType(right, implied ?? (options.annotated ? type : undefined));
-        this.checkInitializer(left, right, defaultType, implied);
+        this.checkInitializer(left, right, defaultType);
         const withoutUndefined = this.c.relations.removeUndefined(type);
         if (options.annotated && !isIntrinsic(withoutUndefined, 'never')) {
           const declared = this.defaultMayBeUndefined(defaultType) ? type : withoutUndefined;
@@ -143,8 +143,9 @@ export class BindingPatterns {
    * Checks an initializer, which no annotation types, against the type its pattern implies, reporting the properties of
    * its object literals that the pattern does not take apart, as TypeScript does.
    */
-  checkInitializer(pattern: TreeNode, value: TreeNode, valueType: Type, implied = this.impliedType(pattern)): void {
-    if (implied) this.c.expressions.checkExcessProperties(value, valueType, implied);
+  checkInitializer(pattern: TreeNode, value: TreeNode, valueType: Type): void {
+    const shape = this.impliedType(pattern, () => anyType);
+    if (shape) this.c.expressions.checkExcessProperties(value, valueType, shape);
   }
 
   /**

@@ -885,7 +885,7 @@ export class Calls {
   // Inference ----------------------------------------------------------------------------------------------------
 
   /** A signature with its type parameters replaced by the given or inferred type arguments. */
-  // code-gauge-allow functionNcss 36 -- Follows TypeScript's inference passes: the contextual return, context-insensitive arguments, then callbacks.
+  // code-gauge-allow functionNcss 37 -- Keeps the contextual return, receiver, ordinary arguments, and callbacks in inference order.
   // code-gauge-allow functionCognitiveComplexity 20 -- Follows TypeScript's inference passes: the contextual return, context-insensitive arguments, then callbacks.
   private instantiateFor(
     signature: Signature,
@@ -903,8 +903,6 @@ export class Calls {
     const arguments_ = this.expandedArguments(args);
     const parameterTypes = this.argumentParameterTypes(signature, arguments_);
     this.recordImpliedArity(run, signature, arguments_);
-    // A `this` parameter infers from the object the method is called on.
-    if (receiver && signature.thisType) this.c.inference.inferTypes(run, receiver, signature.thisType, true);
     if (contextual)
       this.c.inference.inferTypes(
         { ...run, priority: InferencePriority.ReturnType },
@@ -912,19 +910,16 @@ export class Calls {
         signature.returnType(),
         true
       );
+    const returnContext = this.c.inference.partialMapper(parameters, run.inferences);
+    // A `this` parameter infers from the object the method is called on.
+    if (receiver && signature.thisType) this.c.inference.inferTypes(run, receiver, signature.thisType, true);
     // Context-insensitive arguments infer first; functions without parameter annotations then see what they inferred.
     const sensitive = arguments_.map(
       (arg) => !arg.spread && this.c.flow.probe(() => this.isContextSensitive(arg.node), arg.before)
     );
     for (const [index, arg] of arguments_.entries()) {
       if (restIndex !== undefined && index >= restIndex) continue;
-      if (!sensitive[index])
-        this.inferFromArgument(
-          run,
-          arg,
-          parameterTypes[index],
-          this.c.inference.partialMapper(parameters, run.inferences)
-        );
+      if (!sensitive[index]) this.inferFromArgument(run, arg, parameterTypes[index], returnContext);
     }
     // `...args: T` infers `T` as the tuple of the arguments it takes.
     if (restIndex !== undefined)

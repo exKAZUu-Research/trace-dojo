@@ -46,7 +46,7 @@ export class AssignmentChecker {
       this.checkPatternExpressions(leftExpression, expressionTypes);
       const implied = this.patternContext(leftExpression, expressionTypes);
       const valueType = this.c.expressions.check(right, implied);
-      this.c.patterns.checkInitializer(leftExpression, right, valueType, implied);
+      if (implied) this.c.expressions.checkExcessProperties(right, valueType, implied);
       this.destructuringAssignment(leftExpression, valueType, expressionTypes);
       return valueType;
     }

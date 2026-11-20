@@ -1,0 +1,20 @@
+function pair<T>(first: T, second: T) {
+  return [first, second];
+}
+function choose<T>(first: T, second: T) {
+  return first;
+}
+function numeric<T extends number>(first: T, second: T) {
+  return [first, second];
+}
+const mixed: unknown[] = pair.apply(null, [1, 'a']);
+console.log(mixed, choose.apply(null, [1, true]));
+const bothNumbers: number[] = numeric.apply(null, [2, 3]);
+console.log(bothNumbers);
+const ordinary = (first: number, second: string) => second.repeat(first);
+console.log(ordinary.apply(undefined, [2, 'yes']));
+const receiver = { name: 'box' };
+function named(this: { name: string }, n: number) {
+  return this.name.repeat(n);
+}
+console.log(named.apply(receiver, [2]));

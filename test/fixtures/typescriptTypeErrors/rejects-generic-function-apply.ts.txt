@@ -1,0 +1,14 @@
+function pair<T>(first: T, second: T) {
+  return [first, second];
+}
+function numeric<T extends number>(first: T, second: T) {
+  return first + second;
+}
+pair.apply(null, [1]);
+pair.apply(null, [1, 2, 3]);
+numeric.apply(null, [1, 'a']);
+pair.call(null, 1, 'a');
+const explicit: [number, string] = [1, 'a'];
+pair.apply(null, explicit);
+const direct: (first: number, second: string) => unknown[] = pair;
+const wrongResult: number[] = pair.apply(null, [1, 'a']);

@@ -607,7 +607,7 @@ export class FunctionChecker {
     const implied = expected ? undefined : this.c.patterns.impliedType(pattern);
     const valueType = this.c.patterns.initializerType(value, expected ?? implied);
     if (expected) this.c.expressions.checkAssignable(pattern, valueType, expected, value);
-    else this.c.patterns.checkInitializer(pattern, value, valueType, implied);
+    else this.c.patterns.checkInitializer(pattern, value, valueType);
     return valueType;
   }
 
