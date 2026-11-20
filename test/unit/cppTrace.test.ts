@@ -63,6 +63,60 @@ int main() {
 });
 
 test.each([
+  'std::ostringstream stream(source);',
+  'std::istringstream stream(source);',
+  'std::stringstream stream; stream.str(source);',
+])('counts storage owned by a string stream in %s', (statement) => {
+  const program = `#include <sstream>
+#include <string>
+int main() {
+  std::string source(16000, 'x');
+  ${statement}
+}`;
+  const previous = LIMITS.maxSlots;
+  LIMITS.maxSlots = 3000;
+  try {
+    expect(executeProgram('cpp', program)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: 'メモリを確保しすぎました。',
+    });
+  } finally {
+    LIMITS.maxSlots = previous;
+  }
+});
+
+test('meters ostream::write only when the stream accepts output', () => {
+  const program = `#include <iostream>
+#include <sstream>
+#include <string>
+int main() {
+  std::string source(16384, 'x');
+  std::ostringstream stream;
+  FAIL
+  for (int i = 0; i < 24; ++i) {
+    stream.write(source.data(), source.size());
+    stream.str("");
+  }
+  std::cout << stream.str().size();
+}`;
+  const previous = LIMITS.maxOperations;
+  LIMITS.maxOperations = 2048;
+  try {
+    expect(executeProgram('cpp', program.replace('FAIL', ''))).toMatchObject({
+      kind: 'limitExceeded',
+      limit: 'operations',
+    });
+    expect(executeProgram('cpp', program.replace('FAIL', 'stream.setstate(std::ios::failbit);'))).toMatchObject({
+      kind: 'executed',
+      stdout: '0',
+      uncaughtException: undefined,
+    });
+  } finally {
+    LIMITS.maxOperations = previous;
+  }
+});
+
+test.each([
   'std::string copy(source.data(), source.size());',
   'std::string copy(source.c_str());',
   'std::string copy(source.begin(), source.end());',
@@ -82,6 +136,35 @@ int main() {
     });
   } finally {
     LIMITS.maxSlots = previous;
+  }
+});
+
+test('stops C-string scans as soon as the result is known', () => {
+  const program = `#include <cstring>
+#include <string>
+#include <iostream>
+int main() {
+  std::string a(8000, 'x'), b(8000, 'x');
+  b[0] = 'y';
+  int matches = 0;
+  for (int i = 0; i < 15; ++i) {
+    matches += std::strcmp(a.c_str(), b.c_str()) < 0;
+    matches += std::strncmp(a.c_str(), b.c_str(), 8000) < 0;
+    matches += std::strchr(a.c_str(), 'x') == a.c_str();
+    matches += std::strstr(a.c_str(), "xxx") == a.c_str();
+  }
+  std::cout << matches;
+}`;
+  const previous = LIMITS.maxOperations;
+  LIMITS.maxOperations = 1800;
+  try {
+    expect(executeProgram('cpp', program)).toMatchObject({
+      kind: 'executed',
+      stdout: '60',
+      uncaughtException: undefined,
+    });
+  } finally {
+    LIMITS.maxOperations = previous;
   }
 });
 
@@ -124,6 +207,30 @@ int main() {
 });
 
 test.each([
+  'std::accumulate(values.begin(), values.end(), 0, accumulate);',
+  'std::inner_product(values.begin(), values.end(), factors, 0, accumulate, multiply);',
+])('validates the end iterator after the final callback in %s', (statement) => {
+  const program = `#include <numeric>
+#include <vector>
+std::vector<int> values;
+int accumulate(int sum, int value) {
+  values.push_back(9);
+  return sum + value;
+}
+int multiply(int a, int b) { return a * b; }
+int main() {
+  values.reserve(5);
+  values.push_back(1);
+  int factors[]{7};
+  ${statement}
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('使えなくなったイテレータ'),
+  });
+});
+
+test.each([
   ['list', '=='],
   ['vector', '!='],
 ])('rejects %s iterator comparison %s across different sequences', (container, operator) => {
@@ -146,6 +253,11 @@ test.each([
   'std::string copy(source.data(), source.size());',
   'std::string copy(source.c_str());',
   'source.compare(source);',
+  'source.starts_with(source);',
+  'source.ends_with(source);',
+  'source == source;',
+  'source.find("y");',
+  'source.rfind("y");',
   'std::strlen(source.c_str());',
   'std::strcmp(source.c_str(), source.c_str());',
   'std::snprintf(nullptr, 0, "%s", source.c_str());',

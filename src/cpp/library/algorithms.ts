@@ -594,7 +594,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
           : (equal as ValueEquality).test(frame, values.get(index), others.get(index));
         if (!matches) return 0;
       }
-      return values.length === otherLength ? 1 : 0;
+      return values.length === (boundedOther?.length ?? otherLength) ? 1 : 0;
     });
   });
 
@@ -855,7 +855,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       sumType,
       ([first, last, start], { frame }) => {
         const values = range(first, last, info, frame);
-        return foldValues(frame, accumulator, start as Value, values.length, (index) => values.location(index));
+        return foldValues(frame, accumulator, start as Value, values, (index) => values.location(index));
       }
     );
   });
@@ -887,7 +887,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
           frame,
           accumulator,
           initial as Value,
-          values.length,
+          values,
           (index) => (current) => product.run(current, values.location(index), others.location(index))
         );
       }
@@ -1562,11 +1562,11 @@ function foldValues(
   frame: Frame,
   accumulator: NumericAccumulator,
   initial: Value,
-  length: number,
+  values: Range,
   item: (index: number) => OperationArgument
 ): Value {
   const sum = holdAccumulator(frame, accumulator.ops, new Box(initial));
-  for (let index = 0; index < length; index++) {
+  for (let index = 0; index < values.length; index++) {
     withTemporaries(frame, () => accumulator.update(frame, sum, item(index)));
   }
   return constructElementFromRvalue(frame, accumulator.ops.type, sum.read());

@@ -227,7 +227,7 @@ export class Runtime implements TracedRuntime<Frame> {
   standardStream(target: 'stdout' | 'stderr' | 'clog'): StreamValue {
     let stream = this.streams.get(target);
     if (!stream) {
-      stream = new StreamValue(target === 'clog' ? 'stderr' : target);
+      stream = new StreamValue('ostream', target === 'clog' ? 'stderr' : target);
       if (target === 'stderr') stream.tied = new Ptr(this.standardStream('stdout'), 0);
       this.streams.set(target, stream);
     }

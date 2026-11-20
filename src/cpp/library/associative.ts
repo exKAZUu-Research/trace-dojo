@@ -396,7 +396,7 @@ export class OrderedValue extends MapValue {
     return this.tree.values;
   }
 
-  get size(): number {
+  get size(): bigint {
     return this.tree.size;
   }
 
@@ -778,7 +778,8 @@ export function orderedClass(
   cls.operations = {
     copy: (frame, source) => {
       const target = make();
-      target.assignFrom(frame, source as OrderedValue, ops());
+      const original = source as OrderedValue;
+      if (original.size !== 0n) target.assignFrom(frame, original, ops());
       return target;
     },
     assign: (frame, target, source) => {
@@ -810,9 +811,9 @@ export function orderedClass(
       )
     );
   };
-  method('size', [], SIZE_T, (self) => BigInt(self.size), { isConst: true });
+  method('size', [], SIZE_T, (self) => self.size, { isConst: true });
   method('max_size', [], SIZE_T, () => treeMaxSize(entryType), { isConst: true });
-  method('empty', [], BOOL, (self) => (self.size === 0 ? 1 : 0), { isConst: true });
+  method('empty', [], BOOL, (self) => (self.size === 0n ? 1 : 0), { isConst: true });
   method('clear', [], VOID, (self, _args, frame) => self.clear(frame, ops().destroy));
   for (const isConst of [false, true]) {
     const it = isConst ? types.constIterator : types.iterator;

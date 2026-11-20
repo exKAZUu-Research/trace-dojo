@@ -24,10 +24,14 @@ export class OrderedTree {
   private order: Node[] = [];
   private entries: Value[] = [];
   private begin?: Node;
-  size = 0;
+  private cachedSize = 0n;
 
   get values(): readonly Value[] {
     return this.entries;
+  }
+
+  get size(): bigint {
+    return this.cachedSize;
   }
 
   get beginIndex(): number {
@@ -40,7 +44,7 @@ export class OrderedTree {
     if (index <= begin && begin < index + count) this.begin = this.order[index + count];
     for (let offset = 0; offset < count; offset++) this.remove(this.order[index + offset]);
     this.order.splice(index, count);
-    this.size -= count;
+    this.cachedSize = BigInt.asUintN(64, this.cachedSize - BigInt(count));
     for (const [offset, value] of inserted.entries()) this.insert(index + offset, value);
     return this.entries.splice(index, count, ...inserted);
   }
@@ -55,7 +59,7 @@ export class OrderedTree {
     this.order = [];
     this.entries = [];
     this.begin = undefined;
-    this.size = 0;
+    this.cachedSize = 0n;
   }
 
   assignFrom(
@@ -65,10 +69,10 @@ export class OrderedTree {
   ): void {
     const previous = new Map(this.order.map((node, index) => [node, index]));
     try {
-      this.root = assignSubtree(this.root, source.root, operations);
+      this.root = assignSubtree(this.cachedSize === 0n ? undefined : this.root, source.root, operations);
       this.begin = this.root;
       while (this.begin?.children[0]) this.begin = this.begin.children[0];
-      this.size = source.size;
+      this.cachedSize = source.cachedSize;
     } finally {
       const order: Node[] = [];
       inorder(this.root, order);
@@ -88,7 +92,7 @@ export class OrderedTree {
     else this.root = node;
     this.begin = this.begin ? (this.begin.children[0] ?? this.begin) : this.root;
     this.balanceInsertion(node);
-    this.size++;
+    this.cachedSize = BigInt.asUintN(64, this.cachedSize + 1n);
   }
 
   private balanceInsertion(node: Node): void {

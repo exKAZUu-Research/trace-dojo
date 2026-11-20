@@ -532,19 +532,8 @@ export function stringClass(library: Library): ClassInfo {
       { isConst: true }
     );
   };
-  search(
-    'find',
-    (bytes, needle, start) => (start > BigInt(bytes.length) ? -1 : bytes.indexOf(needle, Number(start))),
-    0n
-  );
-  search(
-    'rfind',
-    (bytes, needle, start) => {
-      const from = start > BigInt(bytes.length) ? bytes.length : Number(start);
-      return bytes.lastIndexOf(needle, from);
-    },
-    NPOS
-  );
+  search('find', (bytes, needle, start, frame) => findBytes(frame, bytes, needle, start, false), 0n);
+  search('rfind', (bytes, needle, start, frame) => findBytes(frame, bytes, needle, start, true), NPOS);
   search('find_first_of', searchCharacterSet(false, true), 0n);
   search('find_first_not_of', searchCharacterSet(false, false), 0n);
   search('find_last_of', searchCharacterSet(true, true), NPOS);
@@ -560,14 +549,18 @@ export function stringClass(library: Library): ClassInfo {
       'starts_with',
       [otherType],
       BOOL,
-      (s, [other], frame) => (s.bytes.startsWith(textOf(frame, other)) ? 1 : 0),
+      (s, [other], frame) => Number(matchesAt(frame, s.bytes, textOf(frame, other), false)),
       {
         isConst: true,
       }
     );
-    method('ends_with', [otherType], BOOL, (s, [other], frame) => (s.bytes.endsWith(textOf(frame, other)) ? 1 : 0), {
-      isConst: true,
-    });
+    method(
+      'ends_with',
+      [otherType],
+      BOOL,
+      (s, [other], frame) => Number(matchesAt(frame, s.bytes, textOf(frame, other), true)),
+      { isConst: true }
+    );
   }
   compareMethod([SIZE_T, SIZE_T, CONST_CHAR_PTR, SIZE_T], (s, [start, count, other, n], frame) =>
     compareBytes(frame, substring(frame, s.bytes, start, count), pointerBytes(frame, other as Ptr, n))
@@ -722,7 +715,10 @@ export function stringClass(library: Library): ClassInfo {
       rejectOverlappingBytes(target, length, s.characterBuffer().location(from), length);
       checkByteWrite(target, length);
       const bytes = s.bytes.slice(from, from + length);
-      for (let index = 0; index < bytes.length; index++) target.offset(index).write(signedChar(byteAt(bytes, index)));
+      for (let index = 0; index < bytes.length; index++) {
+        if (index % 64 === 0) frame.runtime.spend();
+        target.offset(index).write(signedChar(byteAt(bytes, index)));
+      }
       return BigInt(bytes.length);
     },
     { isConst: true, optional: 1 }
@@ -777,16 +773,35 @@ const searchCharacterSet =
     return -1;
   };
 
-/** Compares as `char_traits<char>::compare` does with `memcmp`, which returns the difference of the unequal bytes. */
-const compareBytes = (frame: Frame, a: string, b: string): number => {
-  const length = Math.min(a.length, b.length);
+function findBytes(frame: Frame, bytes: string, needle: string, start: bigint, reverse: boolean): number {
+  const finalStart = bytes.length - needle.length;
+  if (finalStart < 0 || (!reverse && start > BigInt(finalStart))) return -1;
+  const from = Number(start > BigInt(finalStart) ? BigInt(finalStart) : start);
+  const found = reverse ? bytes.lastIndexOf(needle, from) : bytes.indexOf(needle, from);
+  const distance = found === -1 ? (reverse ? from : finalStart - from) : Math.abs(found - from);
+  frame.runtime.spend(Math.ceil((distance + needle.length) / 64));
+  return found;
+}
+
+function matchesAt(frame: Frame, bytes: string, needle: string, suffix: boolean): boolean {
+  return (
+    needle.length <= bytes.length &&
+    compareSpan(frame, bytes, needle, suffix ? bytes.length - needle.length : 0, needle.length) === 0
+  );
+}
+
+const compareBytes = (frame: Frame, a: string, b: string): number =>
+  compareSpan(frame, a, b, 0, Math.min(a.length, b.length)) || Math.sign(a.length - b.length);
+
+/** `char_traits<char>::compare` returns the difference of the first unequal bytes. */
+function compareSpan(frame: Frame, a: string, b: string, start: number, length: number): number {
   for (let index = 0; index < length; index++) {
     if (index % 64 === 0) frame.runtime.spend();
-    const difference = byteAt(a, index) - byteAt(b, index);
+    const difference = byteAt(a, start + index) - byteAt(b, index);
     if (difference !== 0) return difference;
   }
-  return a.length === b.length ? 0 : a.length < b.length ? -1 : 1;
-};
+  return 0;
+}
 
 /**
  * The capacity libc++'s string allocates for a length: the short form's, or room for the length and the terminating
@@ -1032,9 +1047,15 @@ function stringOperator(
         isLvalue: false,
         row,
         run: (frame) =>
-          frame.unsequencedOperands(a.run, b.run, (left, right) =>
-            test(operandBytes(frame, a, left), operandBytes(frame, b, right)) ? 1 : 0
-          ),
+          frame.unsequencedOperands(a.run, b.run, (left, right) => {
+            const first = operandBytes(frame, a, left);
+            const second = operandBytes(frame, b, right);
+            const order =
+              (operator === '==' || operator === '!=') && first.length !== second.length
+                ? Math.sign(first.length - second.length)
+                : compareBytes(frame, first, second);
+            return Number(test(order));
+          }),
       };
     }
     case '[]': {
@@ -1070,13 +1091,13 @@ function stringOperandLength(expr: Expr): number | undefined {
   return expr.constantStringLength ?? literalStringLength(expr.literalBytes);
 }
 
-const COMPARE: Record<string, (a: string, b: string) => boolean> = {
-  '==': (a, b) => a === b,
-  '!=': (a, b) => a !== b,
-  '<': (a, b) => a < b,
-  '<=': (a, b) => a <= b,
-  '>': (a, b) => a > b,
-  '>=': (a, b) => a >= b,
+const COMPARE: Record<string, (order: number) => boolean> = {
+  '==': (order) => order === 0,
+  '!=': (order) => order !== 0,
+  '<': (order) => order < 0,
+  '<=': (order) => order <= 0,
+  '>': (order) => order > 0,
+  '>=': (order) => order >= 0,
 };
 
 /** The free functions of `<string>`: `std::to_string` and `std::stoi` and the like. */

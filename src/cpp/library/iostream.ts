@@ -17,6 +17,7 @@ import {
   type NativeFunction,
   pointerTo,
   referenceTo,
+  sizeOf,
   type Type,
   typeName,
   UINT,
@@ -26,8 +27,7 @@ import { NULL_PTR, type Ptr, Store, type Value } from '../values';
 import { formatFloat, pointerText } from './formatting';
 import type { LibraryClass } from './libraryClass';
 import type { Library } from './registry';
-import type { StringValue } from './string';
-import { makeString } from './string';
+import { makeString, StringValue } from './string';
 import {
   addMethod,
   asNumber,
@@ -65,30 +65,82 @@ export const FLAGS = {
 const OPEN_MODE = { app: 0x01, ate: 0x02, binary: 0x04, in: 0x08, out: 0x10, trunc: 0x20 } as const;
 const IO_STATE = { goodbit: 0, badbit: 1, eofbit: 2, failbit: 4 } as const;
 
+const STREAM_SIZES = {
+  ios_base: 136,
+  ios: 152,
+  ostream: 160,
+  istream: 168,
+  ostringstream: 264,
+  istringstream: 272,
+  stringstream: 280,
+} as const;
+
+type StreamKind = Exclude<keyof typeof STREAM_SIZES, 'ios_base' | 'ios'>;
+
+type StreamBaseKind = 'ios_base' | 'ios' | 'ostream' | 'istream';
+
+const IOS_OFFSETS: Record<StreamKind, number> = {
+  ostream: 8,
+  istream: 16,
+  ostringstream: 112,
+  istringstream: 120,
+  stringstream: 128,
+};
+
 /** A stream: standard output or error, or a string stream, with its formatting state. */
 export class StreamValue extends Store {
   width = 0;
   precision = 6;
   fill = ' ';
   flags: number = FLAGS.skipws | FLAGS.dec;
-  /** The text a string stream holds, as bytes. */
-  buffer = '';
+  private readonly content = new StringValue('');
   /** Where reading continues in the buffer. */
   position = 0;
   /** Where writing continues in the buffer, overwriting what is there, as `basic_stringbuf`'s put area does. */
   writePosition = 0;
   state: number = IO_STATE.goodbit;
   tied = NULL_PTR;
+  private readonly bases = new Map<StreamBaseKind, Ptr>();
 
   constructor(
+    private readonly kind: StreamKind,
     readonly target: 'stdout' | 'stderr' | 'buffer',
     readonly mode = OPEN_MODE.in | OPEN_MODE.out
   ) {
     super();
   }
 
+  override classView(location: Ptr, cls: ClassInfo): Ptr | undefined {
+    const kind = cls.library?.kind;
+    const complete = location.store instanceof StreamBaseStorage ? location.store.complete : location;
+    if (kind === this.kind) return complete;
+    if (kind !== 'ios_base' && kind !== 'ios' && kind !== 'ostream' && kind !== 'istream') return;
+    let view = this.bases.get(kind);
+    if (!view) {
+      const offset =
+        kind === 'ios' || kind === 'ios_base'
+          ? IOS_OFFSETS[this.kind]
+          : this.kind === 'stringstream' && kind === 'ostream'
+            ? 16
+            : 0;
+      view = new StreamBaseStorage(complete, this, offset, sizeOf(classType(cls))).location(0);
+      this.bases.set(kind, view);
+    }
+    return view;
+  }
+
   get length(): number {
     return 1;
+  }
+
+  get buffer(): string {
+    return this.content.bytes;
+  }
+
+  resetBuffer(frame: Frame, bytes: string): void {
+    this.content.replaceBytes(frame, bytes);
+    this.position = 0;
+    this.writePosition = this.mode & (OPEN_MODE.app | OPEN_MODE.ate) ? bytes.length : 0;
   }
 
   get(): Value {
@@ -118,8 +170,7 @@ export class StreamValue extends Store {
       const at = this.writePosition;
       const end = at + bytes.length;
       if (end > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
-      frame.runtime.reserve(Math.ceil(bytes.length / 8));
-      this.buffer = this.buffer.slice(0, at) + bytes + this.buffer.slice(end);
+      this.content.replaceBytes(frame, this.buffer.slice(0, at) + bytes + this.buffer.slice(end), bytes.length);
       this.writePosition = end;
     } else {
       frame.runtime.write(this.target, bytes);
@@ -153,17 +204,40 @@ export class StreamValue extends Store {
   }
 }
 
-const STREAM_SIZES = {
-  ios_base: 136,
-  ios: 152,
-  ostream: 160,
-  istream: 168,
-  ostringstream: 264,
-  istringstream: 272,
-  stringstream: 280,
-} as const;
+class StreamBaseStorage extends Store {
+  readonly length = 1;
 
-type StreamKind = Exclude<keyof typeof STREAM_SIZES, 'ios_base' | 'ios'>;
+  constructor(
+    readonly complete: Ptr,
+    private readonly stream: StreamValue,
+    private readonly offset: number,
+    private readonly size: number
+  ) {
+    super();
+  }
+
+  override get containingLocation(): Ptr {
+    return this.complete;
+  }
+
+  override checkAlive(): void {
+    this.complete.target();
+  }
+
+  override projectAddress(index: number, byteOffset: number): Ptr['address'] {
+    const { store, index: completeIndex } = this.complete.address;
+    return { store, index: completeIndex + this.offset + index * this.size + byteOffset };
+  }
+
+  get(index: number): Value {
+    if (index !== 0) throw new CppRuntimeError('outOfBounds');
+    return this.stream;
+  }
+
+  set(): void {
+    throw new Error('A stream cannot be assigned');
+  }
+}
 
 /** The streams of `<iostream>` and `<sstream>`, and the manipulators of `<ios>` and `<iomanip>`. */
 export class Streams {
@@ -244,19 +318,19 @@ export class Streams {
     else {
       const defaultMode = (isInput ? OPEN_MODE.in : 0) | (isOutput ? OPEN_MODE.out : 0);
       const requiredMode = isInput && isOutput ? 0 : defaultMode;
-      const make = (bytes: string, mode = defaultMode): StreamValue => {
-        const stream = new StreamValue('buffer', mode | requiredMode);
-        setStreamBuffer(stream, bytes);
+      const make = (frame: Frame, bytes: string, mode = defaultMode): StreamValue => {
+        const stream = new StreamValue(kind, 'buffer', mode | requiredMode);
+        stream.resetBuffer(frame, bytes);
         return stream;
       };
       cls.constructors = [
-        nativeConstructor(cls, [], () => make('')),
-        nativeConstructor(cls, [UINT], ([mode]) => make('', asNumber(mode)), { isExplicit: true }),
+        nativeConstructor(cls, [], (_args, { frame }) => make(frame, '')),
+        nativeConstructor(cls, [UINT], ([mode], { frame }) => make(frame, '', asNumber(mode)), { isExplicit: true }),
         nativeConstructor(
           cls,
           [constRef(this.library.stringType), UINT],
-          ([text, mode]) =>
-            make(((text as Ptr).read() as StringValue).bytes, mode === undefined ? defaultMode : asNumber(mode)),
+          ([text, mode], { frame }) =>
+            make(frame, ((text as Ptr).read() as StringValue).bytes, mode === undefined ? defaultMode : asNumber(mode)),
           { isExplicit: true, optional: 1 }
         ),
       ];
@@ -274,8 +348,8 @@ export class Streams {
       );
       addMethod(
         cls,
-        native('str', [constRef(this.library.stringType)], VOID, ([text], { self }) => {
-          setStreamBuffer(self as StreamValue, ((text as Ptr).read() as StringValue).bytes);
+        native('str', [constRef(this.library.stringType)], VOID, ([text], { self, frame }) => {
+          (self as StreamValue).resetBuffer(frame, ((text as Ptr).read() as StringValue).bytes);
           return;
         })
       );
@@ -351,7 +425,8 @@ export class Streams {
   }
 
   private addOutputMembers(cls: ClassInfo): void {
-    const result = referenceTo(classType(this.ostream ?? cls));
+    const ostream = this.ostream ?? cls;
+    const result = referenceTo(classType(ostream));
     const output = (
       name: string,
       params: Type[],
@@ -361,7 +436,7 @@ export class Streams {
         cls,
         native(name, params, result, (args, { self: object, selfLocation, frame }) => {
           run(self(object), args, frame);
-          return selfLocation;
+          return selfLocation?.forClass(ostream);
         })
       );
     };
@@ -369,10 +444,13 @@ export class Streams {
       stream.write(frame, String.fromCodePoint(asNumber(char) & 0xff));
     });
     output('write', [CONST_CHAR_PTR, LONG], (stream, [pointer, count], frame) => {
+      if (!stream.isGood) return;
       const start = pointer as Ptr;
       let bytes = '';
-      for (let index = 0; index < Number(count); index++)
+      for (let index = 0; index < Number(count); index++) {
+        if (index % 64 === 0) frame.runtime.spend();
         bytes += String.fromCodePoint(asNumber(start.offset(index).read()) & 0xff);
+      }
       stream.write(frame, bytes);
     });
     output('flush', [], () => {});
@@ -613,12 +691,6 @@ function bindStreamMethods(cls: ClassInfo) {
       native(name, params, ret, (args, { self: object, frame }) => run(self(object), args, frame), options)
     );
   };
-}
-
-function setStreamBuffer(stream: StreamValue, bytes: string): void {
-  stream.buffer = bytes;
-  stream.position = 0;
-  stream.writePosition = stream.mode & (OPEN_MODE.app | OPEN_MODE.ate) ? bytes.length : 0;
 }
 
 const readLine: NativeFunction = ([stream, text, delimiter], { frame }) => {

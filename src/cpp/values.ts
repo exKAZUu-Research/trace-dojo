@@ -85,6 +85,10 @@ export abstract class Store {
     return undefined;
   }
 
+  classView(_location: Ptr, _cls: ClassInfo): Ptr | undefined {
+    return undefined;
+  }
+
   /** Reads an element, which must exist and have a value. */
   abstract get(index: number): Value;
   abstract set(index: number, value: Value): void;
@@ -538,9 +542,9 @@ export class Ptr {
 
   forClass(cls: ClassInfo): Ptr {
     const object = this.addressedValue();
-    return object instanceof CObject && (object.completeLocation || object.completeClass !== cls)
-      ? object.receiver(cls)
-      : this;
+    if (object instanceof CObject && (object.completeLocation || object.completeClass !== cls))
+      return object.receiver(cls);
+    return object instanceof Store ? (object.classView(this, cls) ?? this) : this;
   }
 
   allocationLocation(): Ptr {

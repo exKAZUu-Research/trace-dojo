@@ -180,20 +180,13 @@ export function cFunctions(library: Library): Map<string, FunctionInfo[]> {
   );
   add(
     native('strcmp', [CONST_CHAR_PTR, CONST_CHAR_PTR], INT, ([a, b], { frame }) =>
-      compareBytes(frame, readCString(a as Ptr, frame.runtime), readCString(b as Ptr, frame.runtime))
+      compareCStrings(frame, a as Ptr, b as Ptr, Infinity)
     )
   );
   add(
-    native('strncmp', [CONST_CHAR_PTR, CONST_CHAR_PTR, SIZE_T], INT, ([a, b, n], { frame }) => {
-      const count = asNumber(n);
-      for (let index = 0; index < count; index++) {
-        frame.runtime.spend();
-        const left = asNumber((a as Ptr).offset(index).read()) & 0xff;
-        const right = asNumber((b as Ptr).offset(index).read()) & 0xff;
-        if (left !== right || left === 0) return left - right;
-      }
-      return 0;
-    })
+    native('strncmp', [CONST_CHAR_PTR, CONST_CHAR_PTR, SIZE_T], INT, ([a, b, n], { frame }) =>
+      compareCStrings(frame, a as Ptr, b as Ptr, asNumber(n))
+    )
   );
   add(
     native('strcpy', [CHAR_POINTER, CONST_CHAR_PTR], CHAR_POINTER, ([target, source], { frame }) =>
@@ -212,22 +205,14 @@ export function cFunctions(library: Library): Map<string, FunctionInfo[]> {
   );
   for (const pointer of [CHAR_POINTER, CONST_CHAR_PTR]) {
     add(
-      native('strchr', [pointer, INT], pointer, ([text, char], { frame }) => {
-        const bytes = readCString(text as Ptr, frame.runtime);
-        const code = asNumber(char) & 0xff;
-        if (code !== 0) frame.runtime.spend(Math.ceil(bytes.length / 64));
-        const index = code === 0 ? bytes.length : bytes.indexOf(String.fromCodePoint(code));
-        return index < 0 ? NULL_PTR : (text as Ptr).offset(index);
-      })
+      native('strchr', [pointer, INT], pointer, ([text, char], { frame }) =>
+        findCharacter(frame, text as Ptr, asNumber(char) & 0xff)
+      )
     );
     add(
-      native('strstr', [pointer, CONST_CHAR_PTR], pointer, ([text, needle], { frame }) => {
-        const haystack = readCString(text as Ptr, frame.runtime);
-        const substring = readCString(needle as Ptr, frame.runtime);
-        frame.runtime.spend(Math.ceil(haystack.length / 64));
-        const index = haystack.indexOf(substring);
-        return index === -1 ? NULL_PTR : (text as Ptr).offset(index);
-      })
+      native('strstr', [pointer, CONST_CHAR_PTR], pointer, ([text, needle], { frame }) =>
+        findSubstring(frame, text as Ptr, needle as Ptr)
+      )
     );
   }
   add(native('atoi', [CONST_CHAR_PTR], INT, ([text], { frame }) => Number(parseDecimal(frame, text as Ptr, INT))));
@@ -291,12 +276,57 @@ function characterArgument(input: unknown): number {
   return value;
 }
 
-function compareBytes(frame: Frame, a: string, b: string): number {
-  const length = Math.min(a.length, b.length);
-  for (let index = 0; index < length; index++) {
-    if (index % 64 === 0) frame.runtime.spend();
-    const difference = byteAt(a, index) - byteAt(b, index);
-    if (difference !== 0) return difference;
+function compareCStrings(frame: Frame, a: Ptr, b: Ptr, count: number): number {
+  if (count === 0) return 0;
+  const left = characterReader(frame, a);
+  const right = characterReader(frame, b);
+  for (let index = 0; index < count; index++) {
+    const x = left(index);
+    const y = right(index);
+    if (x !== y || x === 0) return x - y;
   }
-  return byteAt(a, length) - byteAt(b, length);
+  return 0;
+}
+
+function findCharacter(frame: Frame, text: Ptr, character: number): Ptr {
+  const read = characterReader(frame, text);
+  for (let index = 0; ; index++) {
+    const byte = read(index);
+    if (byte === character) return text.offset(index);
+    if (byte === 0) return NULL_PTR;
+  }
+}
+
+function findSubstring(frame: Frame, text: Ptr, needle: Ptr): Ptr {
+  if (characterReader(frame, needle)(0) === 0) return text;
+  const read = characterReader(frame, text);
+  if (read(0) === 0) return NULL_PTR;
+  const pattern = readCString(needle, frame.runtime);
+  const fallback = new Uint32Array(pattern.length);
+  for (let index = 1, matched = 0; index < pattern.length; index++) {
+    if (index % 64 === 0) frame.runtime.spend();
+    matched = advanceMatch(pattern, fallback, matched, byteAt(pattern, index));
+    fallback[index] = matched;
+  }
+  for (let index = 0, matched = 0; ; index++) {
+    const byte = read(index);
+    if (byte === 0) return NULL_PTR;
+    matched = advanceMatch(pattern, fallback, matched, byte);
+    if (matched === pattern.length) return text.offset(index + 1 - matched);
+  }
+}
+
+function advanceMatch(pattern: string, fallback: Uint32Array, matched: number, byte: number): number {
+  while (matched > 0 && byte !== byteAt(pattern, matched)) matched = fallback[matched - 1];
+  return byte === byteAt(pattern, matched) ? matched + 1 : matched;
+}
+
+function characterReader(frame: Frame, pointer: Ptr): (offset: number) => number {
+  const store = pointer.target();
+  const start = pointer.index;
+  return (offset) => {
+    if (offset % 64 === 0) frame.runtime.spend();
+    if (start < 0 || start + offset >= store.length) throw new CppRuntimeError('unterminatedString');
+    return asNumber(store.get(start + offset)) & 0xff;
+  };
 }

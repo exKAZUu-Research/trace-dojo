@@ -680,6 +680,33 @@ int main() {
   });
 });
 
+test.each(['map', 'multimap'])('keeps the cached std::%s size unsigned after an interrupted copy', (kind) => {
+  const program = `#include <iostream>
+#include <map>
+bool armed = false;
+struct Value {
+  int number;
+  Value(int n) : number(n) {}
+  Value(const Value& source) : number(source.number) { if (armed && number == 3) throw 3; }
+};
+int main() {
+  std::${kind}<int, Value> target{{9, 9}}, source{{2, 2}, {1, 1}, {3, 3}};
+  armed = true;
+  try { target = source; } catch (int) {}
+  std::cout << target.erase(1) << target.erase(2) << ' ' << target.size() << ' ' << target.empty();
+  target.emplace(5, 5);
+  auto copied = target;
+  std::cout << ' ' << target.size() << (copied.begin() == copied.end());
+  target.clear();
+  std::cout << ' ' << target.size();
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '11 18446744073709551615 0 01 0',
+    uncaughtException: undefined,
+  });
+});
+
 test.each([
   ['find_if', 'true'],
   ['find_if_not', 'false'],
@@ -735,6 +762,39 @@ int main() {
   expect(BigInt(nextByte) - BigInt(scalar)).toBe(1n);
   expect(BigInt(secondField) - BigInt(firstField)).toBe(4n);
   expect(comparisons).toBe('0111');
+});
+
+test('projects library stream bases onto distinct physical locations and shares the virtual ios', () => {
+  const program = `#include <iostream>
+#include <sstream>
+int main() {
+  std::ostringstream output;
+  std::istringstream input;
+  std::stringstream both;
+  std::ios* a = &output;
+  std::ios* b = &input;
+  std::ios* c = &both;
+  std::istream* in = &both;
+  std::ostream* out = &both;
+  std::ios* fromIn = in;
+  std::ios* fromOut = out;
+  std::ios_base* asBase = fromOut;
+  std::cout << (static_cast<void*>(a) == static_cast<void*>(&output))
+            << (static_cast<void*>(b) == static_cast<void*>(&input))
+            << (static_cast<void*>(c) == static_cast<void*>(&both))
+            << (static_cast<void*>(in) == static_cast<void*>(out))
+            << (fromIn == fromOut)
+            << (static_cast<void*>(asBase) == static_cast<void*>(c)) << ' ';
+  *out << 41;
+  int value = 0;
+  *in >> value;
+  std::cout << value;
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '000011 41',
+    uncaughtException: undefined,
+  });
 });
 
 test('copies and destroys ordered-map subtrees in libc++ order after erasure', () => {
