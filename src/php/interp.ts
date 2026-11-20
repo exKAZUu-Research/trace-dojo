@@ -45,9 +45,9 @@ import {
 } from './classes';
 import * as classesModule from './classes';
 import { debugType, floatFitsInt, getType, numericPrefix, toBool, valueName } from './conversions';
-import * as conversionsModule from './conversions';
 import { deprecated, throwError, type UpdateWarning, warn, withOperandWarnings, withPendingException } from './errors';
 import { acquireIterator, callIteratorMethod } from './iteratorAcquisition';
+import { matchExpression } from './match';
 import { constantDeprecation } from './native';
 import { compiledOperandRow, constantAstRow } from './opcodeRows';
 import {
@@ -73,6 +73,7 @@ import { checkedDynamicVariable, UnsupportedFeatureError } from './unsupported';
 import {
   type ClosureData,
   copyValueSlot,
+  deref,
   INT_MAX,
   INT_MIN,
   isClosure,
@@ -319,7 +320,7 @@ export function evChain(e: Expr, discardResult = false): Chain {
       return assignExpression(e.target, e.value);
     }
     case 'assignRef': {
-      return assignReference(e.target, e.source);
+      return deref(assignReference(e.target, e.source));
     }
     case 'assignOp': {
       return compoundAssign(e);
@@ -353,12 +354,7 @@ export function evChain(e: Expr, discardResult = false): Chain {
       return cast(e.type, evOpcodeOperand(e.e));
     }
     case 'silence': {
-      runtime.silence++;
-      try {
-        return ev(e.e);
-      } finally {
-        runtime.silence--;
-      }
+      return withSilence(runtime, () => ev(e.e));
     }
     case 'clone': {
       return cloneExpression(e);
@@ -423,6 +419,15 @@ function keepResult(mark: number, result: Chain, allowsReference?: boolean): Cha
   runtime.dropTemporaries(runtime.frame, retained ? mark + 1 : mark);
   if (allowsReference !== undefined) runtime.lastReturnRef = reference;
   return reference ? share(reference.v) : result;
+}
+
+export function withSilence<T>(runtime: Runtime, evaluate: () => T): T {
+  runtime.silence++;
+  try {
+    return evaluate();
+  } finally {
+    runtime.silence--;
+  }
 }
 
 function isThrowableObject(object: PhpObject): boolean {
@@ -1378,30 +1383,4 @@ function objectToArrayCast(object: PhpObject): PhpArray {
     | undefined;
   if (storage?.properties) return storage.properties().copy();
   return classesModule.objectToArray(object, storage?.indexedProperties?.());
-}
-
-// code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function matchExpression(e: Extract<Expr, { k: 'match' }>): Value {
-  const runtime = rt();
-  const readSubject = prepareOperand(e.subject);
-  const snapshot = e.jumpTable ? readSubject() : undefined;
-  for (const arm of e.arms) {
-    if (!arm.conditions) continue;
-    for (const condition of arm.conditions) {
-      if (
-        consumeExpression(condition, (value) =>
-          strictEquals(snapshot === undefined ? readSubject(condition.row) : snapshot, value)
-        )
-      )
-        return ev(arm.body);
-    }
-  }
-  const fallback = e.arms.find((arm) => !arm.conditions);
-  if (fallback) return ev(fallback.body);
-  const subject =
-    e.subject.k === 'var' && isCompiledVariable(e.subject)
-      ? (runtime.frame.vars.get(e.subject.name)?.v ?? null)
-      : readSubject();
-  runtime.row = (e.jumpTable ? e.subject : (e.arms.at(-1)?.conditions?.at(-1) ?? e.subject)).row;
-  throwError('UnhandledMatchError', `Unhandled match case ${conversionsModule.matchCaseText(subject)}`);
 }

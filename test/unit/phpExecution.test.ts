@@ -1072,6 +1072,31 @@ Unhandled match case of type resource
   });
 });
 
+test.each([
+  ['a reference-bound variable', '$value', 'of type bool'],
+  ['a by-reference call', 'currentValue()', 'of type bool'],
+  ['a silenced by-reference call', '@currentValue()', 'of type bool'],
+  ['a reference-assignment result', '$alias = &$value', 'of type bool'],
+  ['an array element fetch', '$items[0]', 'true'],
+  ['a copied variable', '@$value', 'true'],
+])('reports the unhandled match value from %s', (_description, subject, message) => {
+  const program = `<?php
+    function &currentValue() { global $value; return $value; }
+    $value = true; $items = [&$value];
+    try { match (${subject}) { 1, 2 => 0 }; }
+    catch (UnhandledMatchError $error) { echo $error->getMessage(); }`;
+  expect(run(program)).toMatchObject({ kind: 'executed', stdout: `Unhandled match case ${message}` });
+});
+
+test('match sees changes to a returned reference made while evaluating a condition', () => {
+  const program = `<?php
+    function &currentValue() { global $value; return $value; }
+    function update() { global $value; $value = 'changed'; return 'changed'; }
+    $value = 5;
+    echo match (currentValue()) { update() => 'matched', default => 'missed' };`;
+  expect(run(program)).toMatchObject({ kind: 'executed', stdout: 'matched' });
+});
+
 test('unrelated array temporaries do not invalidate scalar-grid garbage caches', () => {
   const execution = run(
     '<?php $data=[]; for($i=0;$i<10000;$i++) $data[]=[$i]; for($i=0;$i<10000;$i++){ $temp=[$i]; $x=new stdClass(); } echo "done";'

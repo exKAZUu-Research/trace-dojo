@@ -186,35 +186,3 @@ export function compareNumbers(a: bigint | number, b: bigint | number): number {
   if (Number.isNaN(x) || Number.isNaN(y)) return 1;
   return x < y ? -1 : x > y ? 1 : 0;
 }
-
-export function matchCaseText(value: Value): string {
-  if (typeof value === 'string') {
-    return `'${escapeTruncated(value.slice(0, 15))}${value.length > 15 ? '...' : ''}'`;
-  }
-  if (typeof value === 'bigint') return value.toString();
-  if (typeof value === 'number') {
-    const text = formatFloat(value);
-    return Number.isFinite(value) && !/[.E]/.test(text) ? `${text}.0` : text;
-  }
-  if (typeof value === 'boolean') return value ? 'true' : 'false';
-  if (value === null) return 'NULL';
-  return `of type ${valueName(value)}`;
-}
-
-const TRUNCATED_ESCAPES: Record<string, string> = {
-  '\\': '\\',
-  '\n': 'n',
-  '\r': 'r',
-  '\t': 't',
-  '\f': 'f',
-  '\v': 'v',
-  '\u001B': 'e',
-};
-
-/** Escapes bytes as PHP's `smart_str_append_escaped` does for messages. */
-function escapeTruncated(bytes: string): string {
-  return bytes.replaceAll(/[\\\0-\u001F\u007F-\u00FF]/g, (byte) => {
-    const escape = TRUNCATED_ESCAPES[byte];
-    return escape ? `\\${escape}` : `\\x${byte.codePointAt(0)!.toString(16).toUpperCase().padStart(2, '0')}`;
-  });
-}

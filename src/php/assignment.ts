@@ -1009,7 +1009,7 @@ function nativeRefDimension(object: PhpObject, rawKey: Value | undefined): reado
   throwError('Error', 'Cannot assign by reference to an array dimension of an object');
 }
 
-export function assignReference(target: Expr, source: Expr): Value {
+export function assignReference(target: Expr, source: Expr): Value | Ref {
   const runtime = rt();
   let ref: Ref;
   let valueFallback = false;
@@ -1031,7 +1031,7 @@ export function assignReference(target: Expr, source: Expr): Value {
   } else ref = placeOf(source, 'write', true).ref();
   runtime.row = target.row;
   bindRef(target, ref, valueFallback);
-  return ref.v;
+  return valueFallback ? ref.v : ref;
 }
 
 export function destructureAssignment(target: Extract<Expr, { k: 'list' }>, expression: Expr): Value {
