@@ -493,6 +493,26 @@ fn main() {
   });
 });
 
+test('Rust owned sequence conversions clone borrowed items and move owned items', () => {
+  const program = `fn main() {
+    let source = [vec![1]];
+    let mut vector = Vec::from(&source);
+    let mut boxed: Box<[Vec<i32>]> = Box::from(&source[..]);
+    vector[0].push(2);
+    boxed[0].push(3);
+    println!("{:?} {:?} {:?}", source, vector, boxed);
+
+    struct NonClone(i32);
+    let owned = Vec::from([NonClone(4)]);
+    println!("{}", owned[0].0);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[[1]] [[1, 2]] [[1, 3]]\n4\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

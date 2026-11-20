@@ -410,7 +410,9 @@ export function convert(ctx: NativeContext, value: Value, from: Type, to: Type):
       }
       case 'Vec': {
         const input = deref(value);
-        return typeof input === 'string' ? utf8Bytes(input, ctx.runtime) : [...sliceItems(input)];
+        return typeof input === 'string'
+          ? utf8Bytes(input, ctx.runtime)
+          : ownedSequence(ctx, input, source, target.args[0]);
       }
       case 'Option': {
         return some(ctx, value);
@@ -445,10 +447,16 @@ function boxValue(ctx: NativeContext, value: Value, source: Type, inner: Type): 
     }
     return new DynValue(source, value);
   }
-  // A `Box<[T]>` owns a copy of the elements; a `Box<str>` is its text.
-  if (inner.kind === 'slice') return [...sliceItems(deref(value))];
+  if (inner.kind === 'slice') return ownedSequence(ctx, deref(value), source, inner.elem);
   if (inner.kind === 'str') return deref(value) as string;
   return value;
+}
+
+function ownedSequence(ctx: NativeContext, input: Value, source: Type, elem: Type): Value {
+  if (source.kind === 'ref') return cloneValue({ kind: 'slice', elem }, input);
+  const items = sliceItems(input);
+  ctx.runtime.allocate(items.length);
+  return [...items];
 }
 
 export { EnumValue, RustPanic };
