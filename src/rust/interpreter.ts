@@ -20,6 +20,7 @@ import {
   type Type,
   type TypeParam,
 } from './types';
+import { decodeUtf8 } from './utf8';
 import {
   AccessorPlace,
   CellPlace,
@@ -439,14 +440,14 @@ export function strSliceBytes(text: string, start: number | undefined, end: numb
       while (charStart > 0 && (bytes[charStart] & 0xc0) === 0x80) charStart--;
       let charEnd = charStart + 1;
       while (charEnd < bytes.length && (bytes[charEnd] & 0xc0) === 0x80) charEnd++;
-      const char = new TextDecoder().decode(bytes.slice(charStart, charEnd));
+      const char = decodeUtf8(bytes.subarray(charStart, charEnd));
       throw new RustPanic(
         `${which} byte index ${index} is not a char boundary; it is inside '${char}' (bytes ${charStart}..${charEnd} of string)`,
         span
       );
     }
   }
-  return new TextDecoder().decode(bytes.slice(from, to));
+  return decodeUtf8(bytes.subarray(from, to));
 }
 
 export { cloneValue, compareValues, valuesEqual, StructValue, EnumValue, UNIT_VALUE };

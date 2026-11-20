@@ -235,6 +235,22 @@ Err("invalid digit found in string") [
   });
 });
 
+test('Rust UTF-8 conversions and string operations preserve U+FEFF', () => {
+  const program = String.raw`fn main() {
+    let strict = String::from_utf8(vec![239, 187, 191, 65]).unwrap();
+    let lossy = String::from_utf8_lossy(&[239, 187, 191, 255]);
+    let mut head = String::from("\u{feff}A");
+    head.truncate(3);
+    println!("{} {} {}", strict.len(), lossy.len(), head.len());
+    println!("{} {}", &strict[..3] == "\u{feff}", "\u{feff},B".split(',').next().unwrap() == "\u{feff}");
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '4 6 3\ntrue true\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

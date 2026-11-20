@@ -2,6 +2,7 @@
 import type { DebugPart } from '../debugText';
 import { type DebugValue, described, fieldsPart, listPart, numberPart, tuplePart } from '../iterDebug';
 import { CHAR, REF_STR } from '../types';
+import { decodeUtf8 } from '../utf8';
 import { DONE, IterValue, type Next } from '../values';
 
 /**
@@ -12,7 +13,6 @@ import { DONE, IterValue, type Next } from '../values';
 
 const USIZE_MAX = 18_446_744_073_709_551_615n;
 const encoder = new TextEncoder();
-const decoder = new TextDecoder();
 
 /** A searcher over a haystack's UTF-8 bytes: the next match from the front or the back, as byte offsets. */
 interface Searcher {
@@ -450,7 +450,7 @@ class SplitInternal {
   }
 
   private piece(from: number, to: number): string {
-    return decoder.decode(this.matcher.bytes.subarray(from, to));
+    return decodeUtf8(this.matcher.bytes.subarray(from, to));
   }
 
   getEnd(): string | undefined {
@@ -581,7 +581,7 @@ export function splitAsciiWhitespaceIter(text: string): IterValue {
   const take = (fromBack: boolean): Next => {
     while (!finished) {
       const piece = cut(fromBack);
-      if (piece.length > 0) return decoder.decode(piece);
+      if (piece.length > 0) return decodeUtf8(piece);
     }
     return DONE;
   };
@@ -615,7 +615,7 @@ export function matchesIter(text: string, pattern: PatternKind, indexed: boolean
   const searcher = searcherOf(text, pattern);
   const item = (found: [number, number] | undefined): Next => {
     if (!found) return DONE;
-    const piece = decoder.decode(searcher.bytes.subarray(found[0], found[1]));
+    const piece = decodeUtf8(searcher.bytes.subarray(found[0], found[1]));
     return indexed ? [BigInt(found[0]), piece] : piece;
   };
   const iter = new IterValue(

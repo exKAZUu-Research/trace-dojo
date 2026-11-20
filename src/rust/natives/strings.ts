@@ -5,6 +5,7 @@ import { strSliceBytes } from '../interpreter';
 import { described, fieldsPart, listPart, numberPart, tuplePart } from '../iterDebug';
 import { RustPanic } from '../runtime';
 import { CHAR, REF_STR, shallow, type Type } from '../types';
+import { decodeUtf8 } from '../utf8';
 import {
   DONE,
   FnValue,
@@ -145,7 +146,7 @@ function headAtBoundary(ctx: NativeContext, text: string, offset: number, name: 
   if (offset > bytes.length || (offset < bytes.length && (bytes[offset] & 0xc0) === 0x80)) {
     panic(ctx, `assertion failed: self.is_char_boundary(${name})`);
   }
-  return new TextDecoder().decode(bytes.slice(0, offset));
+  return decodeUtf8(bytes.subarray(0, offset));
 }
 
 /**
@@ -478,12 +479,12 @@ const stringNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
     }
     return text;
   },
-  from_utf8_lossy: ([bytes]) => new TextDecoder().decode(Uint8Array.from(sliceItems(deref(bytes)) as bigint[], Number)),
+  from_utf8_lossy: ([bytes]) => decodeUtf8(Uint8Array.from(sliceItems(deref(bytes)) as bigint[], Number)),
   from_utf8: ([bytes], ctx) => {
     const values = deref(bytes) as bigint[];
     const array = Uint8Array.from(values, Number);
     try {
-      return ok(ctx, new TextDecoder('utf-8', { fatal: true }).decode(array));
+      return ok(ctx, decodeUtf8(array, true));
     } catch {
       const { validUpTo, errorLen } = utf8Error(array);
       return err(ctx, new StructValue(ctx.interp.program.adtDef('Utf8Error'), [[...values], validUpTo, errorLen]));
