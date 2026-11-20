@@ -31,17 +31,18 @@ pub mod default {
     pub trait Default { fn default() -> Self; }
 }
 pub mod ops {
-    pub trait Add<Rhs> {}
-    pub trait Sub<Rhs> {}
-    pub trait Mul<Rhs> {}
-    pub trait Div<Rhs> {}
-    pub trait Rem<Rhs> {}
+    pub trait Add<Rhs = Self> {}
+    pub trait Sub<Rhs = Self> {}
+    pub trait Mul<Rhs = Self> {}
+    pub trait Div<Rhs = Self> {}
+    pub trait Rem<Rhs = Self> {}
     pub trait Neg {}
     pub trait Not {}
-    pub trait AddAssign<Rhs> {}
-    pub trait SubAssign<Rhs> {}
-    pub trait MulAssign<Rhs> {}
-    pub trait DivAssign<Rhs> {}
+    pub trait AddAssign<Rhs = Self> {}
+    pub trait SubAssign<Rhs = Self> {}
+    pub trait MulAssign<Rhs = Self> {}
+    pub trait DivAssign<Rhs = Self> {}
+    pub trait RemAssign<Rhs = Self> {}
     pub trait Index<Idx> {}
     pub trait IndexMut<Idx> {}
     pub trait Deref {}
@@ -70,7 +71,7 @@ pub mod ops {
     }
 }
 pub mod cmp {
-    pub trait PartialEq<Rhs> {
+    pub trait PartialEq<Rhs = Self> {
         fn eq(&self, other: &Rhs) -> bool;
         fn ne(&self, other: &Rhs) -> bool;
     }

@@ -36,6 +36,7 @@ export interface TypeParam {
   name: string;
   id: number;
   bounds: TraitRef[];
+  defaultType?: Type;
   /** Whether this is the `Self` of a trait, which stands for the implementing type. */
   isSelf?: boolean;
 }

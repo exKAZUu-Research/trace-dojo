@@ -1198,12 +1198,18 @@ test.each([
   ['an unavailable slice method reached through Vec', '    let groups = vec![1, 1, 2].chunk_by(|a, b| a == b);'],
   ['threads (stage D)', '    std::thread::spawn(|| {});'],
   ['standard input (stage D)', '    let mut s = String::new();\n    std::io::stdin().read_line(&mut s).unwrap();'],
+  [
+    'associated output types of operator bounds (stage C)',
+    '',
+    'use std::ops::Add; fn plus<T: Add<Output = T>>(a: T, b: T) -> T { a + b }',
+  ],
+  ['generic assignment operators (stage C)', '', 'fn inc<T: std::ops::AddAssign + Copy>(mut a: T, b: T) { a += b; }'],
   ['operator overloading (stage C)', '', 'struct P;\nimpl std::ops::Add for P { fn add(self, o: P) -> P { o } }'],
 ])('%s are unavailable', (_name, body, items = '') => {
   const execution = executeProgram('rust', rustMain(body, items));
   expect(execution.kind).toBe('compileError');
   expect(execution.kind === 'compileError' && execution.diagnostics[0].message).toMatch(
-    /この採点環境では使えません。$/
+    /この採点環境では使えません(?:）)?。$/
   );
 });
 

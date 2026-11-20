@@ -49,6 +49,7 @@ export interface GenericParamAst {
   name: string;
   span: Span;
   bounds: BoundAst[];
+  defaultType?: TypeAst;
 }
 
 export interface WherePredicate {

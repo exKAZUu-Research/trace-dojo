@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 810 -- Follows Rust's name resolution case by case.
+// code-gauge-allow-file fileNcss 830 -- Follows Rust's name resolution case by case.
 import { CompileError } from '../interpreter/diagnostics';
 import type {
   BoundAst,
@@ -208,6 +208,7 @@ export class ItemCollector {
   private readonly lowering: (() => void)[] = [];
   /** The self types of impls, which their methods' signatures need first. */
   private readonly implLowering: (() => void)[] = [];
+  private readonly traitDefaults: (() => void)[] = [];
   private readonly bodies: (() => void)[] = [];
 
   constructor(readonly program: Program) {}
@@ -218,6 +219,7 @@ export class ItemCollector {
 
   /** Lowers the signatures of every item collected so far. */
   finish(): void {
+    for (const lower of this.traitDefaults.splice(0)) lower();
     for (const lower of this.implLowering.splice(0)) lower();
     for (const lower of this.lowering.splice(0)) lower();
     for (const body of this.bodies.splice(0)) body();
@@ -457,9 +459,13 @@ export class ItemCollector {
       if (module.isStd) fn.nativeKey = `${def.path}::${method.name}`;
       def.methods.set(method.name, fn);
     }
+    const params = new Map(def.params.map((param) => [param.name, param]));
+    const scope: TypeScope = { module, params, selfType };
+    for (const [index, param] of item.generics.params.entries()) {
+      const defaultType = param.defaultType;
+      if (defaultType) this.traitDefaults.push(() => (def.params[index].defaultType = lowerType(defaultType, scope)));
+    }
     this.lowering.unshift(() => {
-      const params = new Map(def.params.map((param) => [param.name, param]));
-      const scope: TypeScope = { module, params, selfType };
       def.supertraits = item.supertraits.map((bound) => lowerBound(bound, scope, selfType));
       self.bounds.push(...def.supertraits);
     });
@@ -535,6 +541,7 @@ export class ItemCollector {
         'SubAssign',
         'MulAssign',
         'DivAssign',
+        'RemAssign',
         'Index',
         'IndexMut',
       ];
@@ -1186,8 +1193,6 @@ export function checkUnavailableStd(segments: string[], span: Span): void {
   }
 }
 
-/** Resolves a path to a trait, with the type arguments its last segment gives. */
-/** A trait with its arguments, where `PartialEq` without one compares with `self`, its default `Rhs`. */
 export function resolveTraitPath(path: PathAst, scope: TypeScope, self?: Type): TraitRef {
   const binding = resolveTypePath(
     path.segments.map((segment) => segment.name),
@@ -1198,13 +1203,7 @@ export function resolveTraitPath(path: PathAst, scope: TypeScope, self?: Type): 
     compileError(path.span, `${path.segments.map((s) => s.name).join('::')} はトレイトではありません。`);
   const def = binding.def;
   const last = path.segments.at(-1);
-  const args = (last?.args ?? []).map((arg) => lowerType(arg, scope));
-  if (args.length !== def.params.length) {
-    if (def.params.length > 0 && args.length === 0 && def.builtin === 'PartialEq') {
-      return { trait: def, args: self ? [self] : [] };
-    }
-    compileError(path.span, `トレイト ${def.name} の型引数の数が合いません（${def.params.length} 個です）。`);
-  }
+  const args = traitArguments(def, last?.args ?? [], scope, path.span, self);
   let item: Type | undefined;
   for (const assoc of last?.bindings ?? []) {
     const isIterator = def.builtin === 'Iterator' || def.builtin === 'IntoIterator';
@@ -1214,6 +1213,27 @@ export function resolveTraitPath(path: PathAst, scope: TypeScope, self?: Type): 
     item = lowerType(assoc.type, scope);
   }
   return item ? { trait: def, args, item } : { trait: def, args };
+}
+
+function traitArguments(def: TraitDef, written: TypeAst[], scope: TypeScope, span: Span, self?: Type): Type[] {
+  const args = written.map((arg) => lowerType(arg, scope));
+  const subst = new Map<TypeParam, Type>();
+  if (self) subst.set(def.self, self);
+  for (const [index, param] of def.params.entries()) {
+    if (index < args.length) {
+      subst.set(param, args[index]);
+      continue;
+    }
+    if (!param.defaultType) break;
+    const arg = substitute(param.defaultType, subst);
+    if (arg.kind === 'param' && arg.param === def.self && !self) return args;
+    args.push(arg);
+    subst.set(param, arg);
+  }
+  if (args.length !== def.params.length) {
+    compileError(span, `トレイト ${def.name} の型引数の数が合いません（${def.params.length} 個です）。`);
+  }
+  return args;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 503 -- One method per kind of item, type, and path.
+// code-gauge-allow-file fileNcss 504 -- One method per kind of item, type, and path.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type {
@@ -252,7 +252,8 @@ export class Converter extends ExpressionConverter {
   }
 
   // code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of syntax node.
-  // code-gauge-allow functionNcss 33 -- One case per kind of syntax node.
+  // code-gauge-allow functionCognitiveComplexity 28 -- Type and lifetime parameters and where clauses use distinct Rust syntax.
+  // code-gauge-allow functionNcss 34 -- One case per kind of syntax node.
   private generics(node: Node): Generics {
     const generics: Generics = { params: [], lifetimes: [], where: [] };
     const parameters = node.childForFieldName('type_parameters');
@@ -267,12 +268,14 @@ export class Converter extends ExpressionConverter {
       }
       if (child.type === 'const_parameter') unavailable(span, '定数のジェネリクス（const N: usize）');
       if (child.type !== 'type_parameter') unavailable(span, `型引数の書き方（${child.text}）`);
-      if (child.childForFieldName('default_type')) unavailable(span, '型引数の既定の型');
+      const defaultType = child.childForFieldName('default_type');
+      if (defaultType && !this.isStd) unavailable(span, '型引数の既定の型');
       const bounds = child.childForFieldName('bounds');
       generics.params.push({
         name: this.field(child, 'name').text,
         span,
         bounds: bounds ? this.bounds(bounds) : [],
+        defaultType: defaultType ? this.type(defaultType) : undefined,
       });
     }
     const where = node.namedChildren.find((child) => child.type === 'where_clause');
