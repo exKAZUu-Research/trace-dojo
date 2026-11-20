@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 617 -- Holds type construction, bounded instantiation, structure lookup, and diagnostics shared by checker components.
+// code-gauge-allow-file fileNcss 633 -- Holds type construction, bounded instantiation, structure lookup, and diagnostics shared by checker components.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { type SourceDiagnostic, sourceDiagnostic } from '../../interpreter/diagnostics';
@@ -871,6 +871,8 @@ export class Checker {
     if (this.conditionalConstraintsInProgress.has(id)) return unknownType;
     this.conditionalConstraintsInProgress.add(id);
     try {
+      const knownBranch = this.conditionalBranchFromBounds(type);
+      if (knownBranch) return this.baseConstraint(knownBranch);
       // The true branch sees its check type narrowed to the extends type.
       const trueType = type.trueType;
       const trueConstraint =
@@ -881,6 +883,21 @@ export class Checker {
     } finally {
       this.conditionalConstraintsInProgress.delete(id);
     }
+  }
+
+  private conditionalBranchFromBounds(type: ConditionalType): Type | undefined {
+    const { checkType, extendsType } = type;
+    if (!type.distributive || checkType.kind !== 'typeParameter' || this.relations.isGeneric(extendsType))
+      return undefined;
+    let bound = this.constraintOf(checkType);
+    while (bound?.kind === 'typeParameter') {
+      this.budget.spend();
+      bound = this.constraintOf(bound);
+    }
+    if (!bound || isIntrinsic(bound, 'any') || isIntrinsic(bound, 'unknown') || isIntrinsic(bound, 'never'))
+      return undefined;
+    if (this.relations.isAssignable(bound, extendsType)) return type.trueType;
+    return this.relations.isComparable(bound, extendsType) ? undefined : type.falseType;
   }
 
   private intersectionStructure(types: Type[], receiver: Type): Structure {

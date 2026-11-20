@@ -1,0 +1,12 @@
+function unbounded<T>(value: T extends unknown ? { id: number } : null) {
+  return value.id;
+}
+function overlap<T extends string>(value: T extends "empty" ? null : { id: number }) {
+  return value.id;
+}
+function partial<T extends 1 | 2>(value: T extends 1 ? { id: number } : null) {
+  return value.id;
+}
+function unknownTarget<T extends { ready: true }, U>(value: T extends U ? { id: number } : null) {
+  return value.id;
+}

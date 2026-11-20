@@ -72,8 +72,7 @@ export function nullishConstraint(c: Checker, type: Type, seen?: Set<number>): T
       return constraint ? nullishConstraint(c, constraint, seen) : unknownType;
     }
     if (type.kind === 'union') return unionOf(type.types.map((member) => nullishConstraint(c, member, seen)));
-    if (type.kind === 'conditional')
-      return unionOf([nullishConstraint(c, type.trueType, seen), nullishConstraint(c, type.falseType, seen)]);
+    if (type.kind === 'conditional') return nullishConstraint(c, c.baseConstraint(type), seen);
     if (type.kind === 'indexedAccess') {
       const constraint = c.baseConstraint(type);
       return constraint.kind === 'indexedAccess' ? unknownType : nullishConstraint(c, constraint, seen);

@@ -1,0 +1,18 @@
+function literal<T extends true>(value: T extends true ? { id: number } : null) {
+  return value.id;
+}
+function bounded<T extends string>(value: T extends unknown ? { id: number } : null) {
+  return value.id;
+}
+function disjoint<T extends number>(value: T extends string ? null : { id: number }) {
+  return value.id;
+}
+function structural<T extends { ready: true }>(value: T extends { ready: boolean } ? { id: number } : null) {
+  return value.id;
+}
+type Words<T> = T extends string ? T[] : null;
+function capitals<T extends string>(value: Words<T>) {
+  return value.map((item) => item.toUpperCase()).join(",");
+}
+console.log(literal<true>({ id: 1 }), bounded<string>({ id: 2 }));
+console.log(disjoint<number>({ id: 3 }), structural<{ ready: true }>({ id: 4 }), capitals<string>(["word"]));

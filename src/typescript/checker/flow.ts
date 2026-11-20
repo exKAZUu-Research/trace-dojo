@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 435 -- Keeps flow state, joins, and reference narrowing together.
+// code-gauge-allow-file fileNcss 443 -- Keeps flow state, joins, and reference narrowing together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -364,9 +364,21 @@ export class Flow {
         return intersectionOf([member, this.narrowByTypeof(bound, name, true)], this.c.budget);
       return neverType;
     }
-    if (member.kind !== 'object' && member.kind !== 'intersection' && !isIntrinsic(member, 'object')) return neverType;
+    const shape = this.typeofStructuralShape(member);
+    if (shape.kind !== 'object' && !isIntrinsic(shape, 'object')) return neverType;
     const implied = typeofTypes[name]?.() ?? (name === 'function' ? this.c.globalType('Function') : undefined);
-    return implied && this.c.relations.isAssignable(implied, member) ? implied : neverType;
+    return implied && this.c.relations.isAssignable(implied, shape) ? implied : neverType;
+  }
+
+  private typeofStructuralShape(type: Type): Type {
+    if (type.kind !== 'intersection') return type;
+    const members = type.types.filter(
+      (member) =>
+        member.kind !== 'object' ||
+        this.c.isLibraryType(member, 'Object') ||
+        !this.c.relations.isEmptyObjectType(member)
+    );
+    return members.length === 1 ? members[0] : type;
   }
 
   private narrowMaybe(member: Type, name: string): Type {
@@ -452,15 +464,17 @@ export class Flow {
    * are tags it ignores, and an intersection with other object members is an object, a function when it is callable.
    */
   private intersectionTypeofMatches(type: IntersectionType, name: string): boolean | 'maybe' {
-    const tagged = type.types.some(
+    const bound = nullishConstraint(this.c, type);
+    if (bound.kind !== 'intersection') return this.typeofMatches(bound, name);
+    const tagged = bound.types.some(
       (member) =>
         member.kind === 'literal' ||
         member.kind === 'templateLiteral' ||
         member.kind === 'stringMapping' ||
         (member.kind === 'intrinsic' && member.name !== 'object')
     );
-    if (!tagged && type.types.some((member) => member.kind === 'object')) return this.objectTypeofMatches(type, name);
-    const results = type.types
+    if (!tagged && bound.types.some((member) => member.kind === 'object')) return this.objectTypeofMatches(bound, name);
+    const results = bound.types
       .filter((member) => member.kind !== 'object')
       .map((member) => this.typeofMatches(member, name));
     if (results.includes(false)) return false;
@@ -468,8 +482,7 @@ export class Flow {
   }
 
   private objectTypeofMatches(type: Type, name: string): boolean | 'maybe' {
-    const bound = type.kind === 'intersection' ? nullishConstraint(this.c, type) : type;
-    if (bound === emptyObjectType || bound === narrowedUnknownObjectType) return name === 'undefined' ? false : 'maybe';
+    if (type === emptyObjectType || type === narrowedUnknownObjectType) return name === 'undefined' ? false : 'maybe';
     const isFunction =
       this.c.signaturesOf(type, 'call').length > 0 ||
       this.c.signaturesOf(type, 'construct').length > 0 ||

@@ -15,3 +15,16 @@ function generic<T extends { toString(): string }>(value: T) {
 function boundedUnion<T extends string | number>(value: T) {
   if (typeof value === "bigint") return value.toString();
 }
+type Augmented = Object & { tag?: number };
+function augmentedString(value: Augmented) {
+  if (typeof value === "string") return value.toUpperCase();
+}
+function augmentedNumber(value: Augmented) {
+  if (typeof value === "number") return value.toFixed(1);
+}
+function augmentedCallable(value: Augmented) {
+  if (typeof value === "function") return value();
+}
+function augmentedGeneric<T extends Augmented>(value: T) {
+  if (typeof value === "string") return value.toUpperCase();
+}
