@@ -390,11 +390,15 @@ export class Compiler {
   value(expr: Expr): Eval {
     const read = this.read(expr);
     const coercion = this.annotations.coercions.get(expr);
-    const coerced = coercion ? this.coerce(read, coercion, expr) : read;
-    if (!isPlaceExpr(expr, this.annotations)) return coerced;
     const type = resolve(expr.ty ?? { kind: 'tuple', elems: [] }, true);
-    if (coercion) return coerced;
-    if (needsCopy(type) && this.isCopy(type)) return (frame) => copyValue(coerced(frame));
+    if (!coercion) return this.valueFromPlace(expr, read, type);
+    const input = coercion.kind !== 'deref' && !isRefType(type) ? this.valueFromPlace(expr, read, type) : read;
+    return this.coerce(input, coercion, expr);
+  }
+
+  private valueFromPlace(expr: Expr, read: Eval, type: Type): Eval {
+    if (!isPlaceExpr(expr, this.annotations)) return read;
+    if (needsCopy(type) && this.isCopy(type)) return (frame) => copyValue(read(frame));
     // Moving a whole variable out leaves it without a value, which the trace no longer shows.
     if (expr.kind === 'path' && !this.isCopy(type)) {
       const res = this.annotations.paths.get(expr);
@@ -402,7 +406,7 @@ export class Compiler {
         const slot = res.local.slot;
         const movesString = isStringType(type) || normalize(shallow(type)).kind === 'adt';
         return (frame) => {
-          const value = coerced(frame);
+          const value = read(frame);
           if (movesString) moveString(new LocalPlace(frame, slot));
           frame.locals[slot] = UNASSIGNED;
           return value;
@@ -420,7 +424,7 @@ export class Compiler {
         return value;
       };
     }
-    return coerced;
+    return read;
   }
 
   /** Whether a field chain reaches its fields from a variable that owns them, not through a reference. */

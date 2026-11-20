@@ -1,7 +1,7 @@
 import type { Expr, Span } from './ast';
 import { changeString, concatStrings, sizeTable } from './capacity';
 import type { Compiler, Eval } from './compiler';
-import { derefAll, evaluateValues, stringish, stripRefs } from './compilerCommon';
+import { derefAll, evaluateValues, isStringType, stringish, stripRefs } from './compilerCommon';
 import { normalize } from './infer';
 import { btreeSetOp, hashSetMembers, type SetOp } from './natives/setOps';
 import { cloneValue, floatArith, intArith, overflow, testPartialOrder, valuesEqual, wrap } from './ops';
@@ -59,7 +59,8 @@ export function compileBinary(c: Compiler, expr: ExprOf<'binary'>): Eval {
   const leftCoerced = c.annotations.coercions.get(expr.left) ? c.value(expr.left) : left;
   const rightCoerced = c.annotations.coercions.get(expr.right) ? c.value(expr.right) : right;
   if (['==', '!=', '<', '<=', '>', '>='].includes(op)) return comparison(expr, leftCoerced, rightCoerced);
-  return arithmetic(expr, left, right, rightCoerced);
+  const arithmeticLeft = op === '+' && isStringType(expr.left.ty!) ? c.value(expr.left) : left;
+  return arithmetic(expr, arithmeticLeft, right, rightCoerced);
 }
 
 function comparison(expr: ExprOf<'binary'>, left: Eval, right: Eval): Eval {

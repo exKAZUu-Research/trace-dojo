@@ -300,3 +300,15 @@ removed Some(5) true
     uncaughtException: undefined,
   });
 });
+
+test('Rust traces forget a String consumed by concatenation and preserve its capacity', () => {
+  const program = `fn main() {
+    let mut s = String::with_capacity(100);
+    s.push_str("a");
+    let combined = s + "b";
+    println!("{}", combined.capacity());
+}`;
+  const { finalVars, stdout } = traceProgram('rust', program, program);
+  expect(stdout).toBe('100\n');
+  expect(finalVars).toEqual({ combined: 'ab' });
+});

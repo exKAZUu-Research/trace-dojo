@@ -2761,3 +2761,20 @@ fn main() {
     stdout: '2\n',
   });
 });
+
+test('drops Rust turtles moved into coerced owners', () => {
+  const program = `trait Contents {}
+struct Owner { turtle: Turtle }
+impl Contents for Owner {}
+fn main() {
+    let input = Box::new(Owner { turtle: Turtle::new(1, 1) });
+    {
+        let erased: Box<dyn Contents> = input;
+    }
+    let turtles = vec![Turtle::new(2, 2)];
+    {
+        let zipped = (0..1).zip(turtles);
+    }
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', finalTurtles: [] });
+});
