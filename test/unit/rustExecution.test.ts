@@ -1859,6 +1859,24 @@ fn main() {
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'true\ntrue\ntrue\ntrue\n' });
 });
 
+test('accumulates Rust outcomes before pulling the next iterator item', () => {
+  const sum = rustMain(`let values = [Some(127_i8), Some(1), None];
+    let total: Option<i8> = values.into_iter().map(|item| { print!("x"); item }).sum();
+    println!("{:?}", total);`);
+  const product = rustMain(`let values = [Ok(255_u8), Ok(2), Err(1)];
+    let total: Result<u8, i32> = values.into_iter().map(|item| { print!("x"); item }).product();
+    println!("{:?}", total);`);
+  for (const source of [sum, product]) {
+    const execution = executeProgram('rust', source);
+    expect(execution).toMatchObject({ kind: 'executed', stdout: 'xx' });
+    expect(execution.kind === 'executed' && execution.uncaughtException).toContain('with overflow');
+  }
+  const early = rustMain(`let items = [Some(Some(1)), Some(None), None];
+    let value: Option<Option<i32>> = items.into_iter().map(|item| { print!("x"); item }).sum();
+    println!("{:?}", value);`);
+  expect(executeProgram('rust', early)).toMatchObject({ kind: 'executed', stdout: 'xxSome(None)\n' });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

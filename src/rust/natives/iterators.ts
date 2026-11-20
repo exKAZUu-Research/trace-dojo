@@ -1189,19 +1189,20 @@ function keepsBest(order: number, sign: 1 | -1): boolean {
 function sumOfOutcomes(ctx: NativeContext, iter: IterValue, t: Type & { kind: 'adt' }, op: '+' | '*'): Value {
   const success = t.def.builtin === 'Result' ? 0 : 1;
   let failure: EnumValue | undefined;
-  const values: Value[] = [];
-  each(ctx, iter, (item) => {
+  const source = foldingView(iter);
+  const values = new IterValue(() => {
+    if (failure) return DONE;
+    const item = nextOf(source);
+    if (item === DONE) return DONE;
     const outcome = deref(item) as EnumValue;
     if (outcome.variant !== success) {
       failure = outcome;
-      return true;
+      return DONE;
     }
-    values.push(outcome.fields[0]);
-    return;
+    return outcome.fields[0];
   });
-  if (failure) return failure;
-  const total = sumOrProduct(ctx, arrayIter(values), t.args[0], op);
-  return new EnumValue(t.def, success, [total]);
+  const total = sumOrProduct(ctx, values, t.args[0], op);
+  return failure ?? new EnumValue(t.def, success, [total]);
 }
 
 function sumOrProduct(ctx: NativeContext, iter: IterValue, type: Type, op: '+' | '*'): Value {
