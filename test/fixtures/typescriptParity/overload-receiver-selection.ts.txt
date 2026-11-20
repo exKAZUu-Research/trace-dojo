@@ -1,0 +1,13 @@
+function pick(this: { tag: "text" }): string;
+function pick(this: { tag: "number" }): number;
+function pick(this: { tag: string }): any { return this.tag === "text" ? "word" : 2; }
+
+const textReceiver = { tag: "text" as const, pick };
+const numberReceiver = { tag: "number" as const, pick };
+interface NumberReceiver {
+  tag: "number";
+  pick(this: { tag: "text" }): string;
+  pick(this: { tag: "number" }): number;
+}
+const annotated: NumberReceiver = numberReceiver;
+console.log(textReceiver.pick().toUpperCase(), numberReceiver.pick().toFixed(), annotated.pick().toFixed());

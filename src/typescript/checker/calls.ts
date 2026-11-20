@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 633 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
+// code-gauge-allow-file fileNcss 640 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
@@ -32,6 +32,11 @@ import { UnionSignatures } from './unionSignatures';
 interface Resolution {
   signature: Signature;
   returnType: Type;
+}
+
+interface CallAttempt {
+  instantiate: (candidate: Signature) => Signature;
+  checkThis: (signature: Signature, report?: boolean) => boolean;
 }
 
 interface ExpandedArgument {
@@ -109,7 +114,6 @@ export class Calls {
     });
     if (!resolution) return errorType;
     this.resolved.set(node.id, resolution.signature);
-    this.checkThisContext(callee, resolution.signature, receiver);
     const result = resolution.returnType;
     return shortCircuits ? this.c.members.chainResult(node, result) : result;
   }
@@ -332,16 +336,31 @@ export class Calls {
     return resolution?.returnType ?? errorType;
   }
 
-  /** Reports a call whose `this`, the object it is called on (or `void`), does not fit the `this` parameter. */
-  private checkThisContext(callee: TreeNode, signature: Signature, context: Type = voidType): void {
-    if (callee.childForFieldName('object')?.type === 'super') return;
+  private checkThisContext(
+    callee: TreeNode,
+    signature: Signature,
+    context: Type | undefined,
+    report: boolean
+  ): boolean {
     const { thisType } = signature;
-    if (!thisType || isAnyLike(thisType) || isIntrinsic(thisType, 'void')) return;
-    if (this.c.relations.isAssignable(context, thisType)) return;
-    this.c.error(
-      callee,
-      `'this' の型 '${this.c.print(context)}' は、このメソッドの 'this' の型 '${this.c.print(thisType)}' に代入できません。`
-    );
+    if (!context || !thisType || isAnyLike(thisType) || isIntrinsic(thisType, 'void')) return true;
+    if (this.c.relations.isAssignable(context, thisType)) return true;
+    if (report)
+      this.c.error(
+        callee,
+        `'this' の型 '${this.c.print(context)}' は、このメソッドの 'this' の型 '${this.c.print(thisType)}' に代入できません。`
+      );
+    return false;
+  }
+
+  private thisContext(node: TreeNode, callee: TreeNode, receiver: Type | undefined): Type | undefined {
+    if (
+      node.type === 'new_expression' ||
+      callee.type === 'super' ||
+      callee.childForFieldName('object')?.type === 'super'
+    )
+      return undefined;
+    return receiver ?? voidType;
   }
 
   /** A tagged template, `String.raw\`...\``, which calls the tag with the template's strings and substitutions. */
@@ -504,20 +523,25 @@ export class Calls {
       return undefined;
     }
     const argumentFlow = new ExpressionListFlow(this.c, args);
-    const instantiate = (candidate: Signature): Signature =>
-      this.c.flow.probe(() => this.instantiateFor(candidate, argumentFlow, typeArguments, contextual, receiver));
+    const context = this.thisContext(node, callee, receiver);
+    const attempt: CallAttempt = {
+      instantiate: (candidate) =>
+        this.c.flow.probe(() => this.instantiateFor(candidate, argumentFlow, typeArguments, contextual, receiver)),
+      checkThis: (signature, report = false) => this.checkThisContext(callee, signature, context, report),
+    };
     const callbacks = candidates.length > 1 ? this.c.overloadContexts.callbacksOf(args) : undefined;
     const choose = (): Resolution => {
       for (const candidate of candidates) {
         if (!this.arity.arityMatches(candidate, argumentFlow)) continue;
-        const instantiated = this.c.silently(() => instantiate(candidate));
-        if (!this.arity.instanceArityMatches(instantiated, candidate, argumentFlow)) continue;
+        const instantiated = this.c.silently(() => attempt.instantiate(candidate));
+        if (!this.arity.instanceArityMatches(instantiated, candidate, argumentFlow) || !attempt.checkThis(instantiated))
+          continue;
         if (callbacks?.nodes.size)
           this.c.overloadContexts.capture(callbacks, () => this.previewArguments(instantiated, argumentFlow));
         if (this.c.flow.probe(() => this.c.silently(() => this.checkArguments(instantiated, args, false))))
-          return this.finishOverload(node, candidate, argumentFlow, { typeArguments, contextual, receiver });
+          return this.finishOverload(node, candidate, argumentFlow, { typeArguments, contextual, receiver }, attempt);
       }
-      return this.reportUnresolved(node, callee, candidates, argumentFlow, instantiate);
+      return this.reportUnresolved(node, callee, candidates, argumentFlow, attempt);
     };
     return callbacks?.nodes.size ? this.c.overloadContexts.withCall(choose) : choose();
   }
@@ -526,7 +550,8 @@ export class Calls {
     node: TreeNode,
     candidate: Signature,
     args: ExpressionListFlow,
-    { typeArguments, contextual, receiver }: { typeArguments?: Type[]; contextual?: Type; receiver?: Type }
+    { typeArguments, contextual, receiver }: { typeArguments?: Type[]; contextual?: Type; receiver?: Type },
+    attempt: CallAttempt
   ): Resolution {
     const deferred =
       candidate.typeParameters.length > 0 && !typeArguments
@@ -535,7 +560,7 @@ export class Calls {
     const final = this.c.flow.probe(() =>
       this.instantiateFor(candidate, args, typeArguments, deferred ?? contextual, receiver)
     );
-    this.checkArguments(final, args.nodes, true, node);
+    this.checkArguments(final, args.nodes, attempt.checkThis(final, true), node);
     this.checkImmediateBody(node, final);
     if (typeArguments)
       this.c.typeNodes.checkTypeArgumentConstraints(
@@ -572,17 +597,11 @@ export class Calls {
     callee: TreeNode,
     candidates: Signature[],
     args: ExpressionListFlow,
-    instantiate: (candidate: Signature) => Signature
+    attempt: CallAttempt
   ): Resolution {
     const byArity = candidates.filter((candidate) => this.arity.arityMatches(candidate, args));
     if (candidates.length === 1 || byArity.length === 1)
-      return this.reportSignature(
-        node,
-        callee,
-        candidates.length === 1 ? candidates[0] : byArity[0],
-        args,
-        instantiate
-      );
+      return this.reportSignature(node, callee, candidates.length === 1 ? candidates[0] : byArity[0], args, attempt);
     if (byArity.length === 0) {
       this.checkArgumentsOnly(args.nodes);
       const minimum = Math.min(...candidates.map((candidate) => minimumArguments(candidate)));
@@ -595,9 +614,9 @@ export class Calls {
       );
       return { signature: candidates[0], returnType: candidates[0].returnType() };
     }
-    const at = this.overloadErrorLocation(node, callee, byArity, args, instantiate);
+    const at = this.overloadErrorLocation(node, callee, byArity, args, attempt);
     const last = byArity.at(-1) as Signature;
-    const returnType = this.c.silently(() => instantiate(last)).returnType();
+    const returnType = this.c.silently(() => attempt.instantiate(last)).returnType();
     this.checkArgumentsOnly(args.nodes);
     const message = 'この呼び出しに合うオーバーロードがありません。';
     if (at) this.c.diagnostics.push({ ...at, message });
@@ -615,11 +634,11 @@ export class Calls {
     callee: TreeNode,
     candidates: Signature[],
     args: ExpressionListFlow,
-    instantiate: (candidate: Signature) => Signature
+    attempt: CallAttempt
   ): { row: number; index: number } | undefined {
     if (this.c.silent > 0) return undefined;
     const start = this.c.diagnostics.length;
-    this.c.flow.probe(() => this.reportSignature(node, callee, candidates.at(-1) as Signature, args, instantiate));
+    this.c.flow.probe(() => this.reportSignature(node, callee, candidates.at(-1) as Signature, args, attempt));
     const [first] = this.c.diagnostics.splice(start);
     return first && { row: first.row, index: first.index };
   }
@@ -630,16 +649,16 @@ export class Calls {
     callee: TreeNode,
     candidate: Signature,
     args: ExpressionListFlow,
-    instantiate: (candidate: Signature) => Signature
+    attempt: CallAttempt
   ): Resolution {
-    const instantiated = this.arity.arityMatches(candidate, args) ? instantiate(candidate) : undefined;
+    const instantiated = this.arity.arityMatches(candidate, args) ? attempt.instantiate(candidate) : undefined;
     if (instantiated && this.arity.instanceArityMatches(instantiated, candidate, args)) {
-      this.checkArguments(instantiated, args.nodes, true, node);
+      this.checkArguments(instantiated, args.nodes, attempt.checkThis(instantiated, true), node);
       this.checkImmediateBody(node, instantiated);
       return { signature: instantiated, returnType: instantiated.returnType() };
     }
     this.arity.reportArity(node, callee, instantiated ?? candidate, args);
-    const returnType = (instantiated ?? this.c.silently(() => instantiate(candidate))).returnType();
+    const returnType = (instantiated ?? this.c.silently(() => attempt.instantiate(candidate))).returnType();
     for (const arg of args.nodes) this.c.expressions.check(arg);
     this.checkImmediateBody(node, instantiated ?? candidate);
     return { signature: instantiated ?? candidate, returnType };

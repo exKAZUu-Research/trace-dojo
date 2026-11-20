@@ -11,7 +11,7 @@ import {
   argumentParameters,
   hasToken,
   isClassConstructor,
-  isImmediatelyInvoked,
+  isInlinedInvocation,
   named,
   patternIdentifiers,
   propertyNameText,
@@ -676,13 +676,4 @@ function mayBeUndefined(type: Type): boolean {
 function mayReturnNever(node: TreeNode): boolean {
   if (node.type === 'arrow_function' || node.type === 'function_expression') return true;
   return node.type === 'method_definition' && node.parent?.type === 'object';
-}
-
-/** Whether a function runs where it is written, synchronously, as tsc's binder inlines the flow of such a function. */
-function isInlinedInvocation(node: TreeNode): boolean {
-  return (
-    (node.type === 'arrow_function' || node.type === 'function_expression') &&
-    !hasToken(node, 'async') &&
-    isImmediatelyInvoked(node)
-  );
 }

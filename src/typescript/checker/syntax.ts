@@ -281,6 +281,15 @@ export function chainObject(node: TreeNode): TreeNode | undefined {
   }
 }
 
+/** Whether TypeScript inlines the flow of a synchronous, non-generator immediate call. */
+export function isInlinedInvocation(node: TreeNode): boolean {
+  return (
+    (node.type === 'arrow_function' || node.type === 'function_expression') &&
+    !hasToken(node, 'async') &&
+    isImmediatelyInvoked(node)
+  );
+}
+
 export function isImmediatelyInvoked(node: TreeNode): boolean {
   let expression = node;
   while (expression.parent?.type === 'parenthesized_expression') expression = expression.parent;

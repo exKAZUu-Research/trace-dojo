@@ -1,6 +1,6 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
-import { isImmediatelyInvoked, named, skipParentheses } from './syntax';
+import { isInlinedInvocation, isOptionalChain, isWithin, named, skipParentheses } from './syntax';
 import { type Type, undefinedType } from './types';
 
 /** What a tracked target may hold at a point: what its assignments gave it, or what a loop's iteration began with. */
@@ -259,7 +259,8 @@ class AssignmentFlow {
     try {
       for (const caseNode of cases) {
         const test = caseNode.childForFieldName('value');
-        const entry = merge([test ? this.expression(test, tested) : tested, fallthrough]);
+        if (test && this.read && isWithin(this.read, test)) this.expression(test, tested);
+        const entry = merge([tested, fallthrough]);
         const statements = caseNode.childrenForFieldName('body').filter((child) => child.isNamed);
         fallthrough = this.statements(statements, entry);
       }
@@ -306,13 +307,25 @@ class AssignmentFlow {
     return current;
   }
 
+  // code-gauge-allow functionNcss 32 -- Handles the expression forms whose evaluation order changes assignment flow.
   private expression(node: TreeNode, values: Values): Values {
     if (!values) return values;
     if (node.id === this.read?.id) this.atRead = merge([this.atRead, values]);
-    if (nestedFunctionTypes.has(node.type)) return isImmediatelyInvoked(node) ? this.invoked(node, values) : values;
+    if (nestedFunctionTypes.has(node.type)) return values;
     switch (node.type) {
       case 'assignment_expression': {
         return this.assignment(node, values);
+      }
+      case 'call_expression': {
+        return this.call(node, values);
+      }
+      case 'required_parameter':
+      case 'optional_parameter': {
+        return this.bindingDefault(node.childForFieldName('pattern'), node.childForFieldName('value'), values);
+      }
+      case 'assignment_pattern':
+      case 'object_assignment_pattern': {
+        return this.bindingDefault(node.childForFieldName('left'), node.childForFieldName('right'), values);
       }
       case 'augmented_assignment_expression': {
         return this.logicalAssignment(node, values);
@@ -371,19 +384,34 @@ class AssignmentFlow {
     return [value];
   }
 
-  /**
-   * The values after `&&=`, `||=`, or `??=` to a target: those the operator skips the assignment for, and the assigned
-   * one where it runs. Other compound assignments read the target first, so they leave it as it was.
-   */
   private logicalAssignment(node: TreeNode, values: Value[]): Values {
     const operator = node.childForFieldName('operator')?.text ?? '';
     const right = node.childForFieldName('right');
     const left = node.childForFieldName('left');
-    if (!right || !left || !LOGICAL_ASSIGNMENTS.has(operator) || !this.isTarget(left))
-      return this.expressions(named(node), values);
-    const skipped = values.flatMap((value) => this.skippedBy(operator, value) ?? []);
-    const assigned = this.assignment(node, values);
-    return merge([skipped.length > 0 ? skipped : undefined, assigned]);
+    if (!right || !left || !LOGICAL_ASSIGNMENTS.has(operator)) return this.expressions(named(node), values);
+
+    const before = this.expression(left, values);
+    const after = this.expression(right, before);
+    if (!this.isTarget(left)) return merge([before, after]);
+    const skipped = before?.flatMap((value) => this.skippedBy(operator, value) ?? []);
+    const assigned = after ? this.trackValue(this.assignedValue(right)) : undefined;
+    return merge([skipped?.length ? skipped : undefined, assigned]);
+  }
+
+  private call(node: TreeNode, values: Values): Values {
+    const callee = node.childForFieldName('function');
+    const argumentsNode = node.childForFieldName('arguments');
+    if (!callee) return values;
+    const before = this.expression(callee, values);
+    const after = argumentsNode ? this.expression(argumentsNode, before) : before;
+    const target = skipParentheses(callee);
+    if (after && isInlinedInvocation(target)) return this.invoked(target, after);
+    return isOptionalChain(node) ? merge([before, after]) : after;
+  }
+
+  private bindingDefault(pattern: TreeNode | null, initializer: TreeNode | null, values: Values): Values {
+    const bound = initializer ? merge([values, this.expression(initializer, values)]) : values;
+    return pattern ? this.expression(pattern, bound) : bound;
   }
 
   /** The values after a function called where it is written, which runs its body before the call completes. */
@@ -392,7 +420,9 @@ class AssignmentFlow {
     this.returns = [];
     this.targets = [];
     try {
-      const end = this.statement(node.childForFieldName('body') as TreeNode, values);
+      const parameters = node.childForFieldName('parameters');
+      const entry = parameters ? this.expression(parameters, values) : values;
+      const end = this.statement(node.childForFieldName('body') as TreeNode, entry);
       return merge([end, ...this.returns]);
     } finally {
       this.returns = returns;
