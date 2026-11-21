@@ -83,6 +83,10 @@ console.log(show("text"), method({ toString() { return "object"; } }));`;
 
 test.each([
   'const { toString: method } = fn; method.call(fn);',
+  'const { toString: method } = fn; const key = "call"; method[key](fn);',
+  'const { toString: method } = fn; const alias = method; const next = alias; next.call(fn);',
+  'const { toString: method } = fn; let alias: () => string; alias = method; alias.call(fn);',
+  'const { toString: method } = fn; const alias = method; console.log({ alias });',
   'const [{ toString: method }] = [fn]; const escaped = { method }; escaped.method.call(fn);',
   'function use({ target: { toString: method } }: { target: () => void }) { return method; } use({ target: fn });',
   'function use(method: () => string) { var method: () => string = fn.toString; arguments[0].call(fn); } use(() => "");',

@@ -11,3 +11,25 @@ const { name: destructuredName, length: destructuredLength } = sourceMetadata.to
 const { toString: { name: nestedName } } = sourceMetadata;
 console.log(nameOfSourceMethod, (sourceMetadata.toString)['length'], Function.prototype.toString.name);
 console.log(sourceMethod?.name, extractedMethod['length'], destructuredName, destructuredLength, nestedName, aliasName);
+
+const byName = 'name';
+const byLength = 'length' as const;
+const keys = { methodLength: byLength } as const;
+function metadataKey(flag: boolean): 'name' | 'length' {
+  return flag ? byName : byLength;
+}
+const { [byName]: computedAliasName } = sourceMethod;
+const { toString: { [byLength]: computedNestedLength } } = sourceMetadata;
+console.log(sourceMetadata.toString[`name`], sourceMethod[byName], sourceMetadata.toString[keys.methodLength]);
+console.log(computedAliasName, computedNestedLength, sourceMethod[metadataKey(true)], sourceMethod[metadataKey(false)]);
+
+const alias = sourceMethod;
+const nextAlias = alias;
+let assignedAlias: typeof nextAlias;
+assignedAlias = extractedMethod;
+function inspectSourceMethod() {
+  const nameOnly = nextAlias;
+  console.log(nameOnly.name, assignedAlias[byLength]);
+}
+inspectSourceMethod();
+sourceMetadata.toString;
