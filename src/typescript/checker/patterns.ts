@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 407 -- Binding declarations and assignments share property and rest type resolution.
+// code-gauge-allow-file fileNcss 408 -- Binding declarations and assignments share property and rest type resolution.
 import assert from 'node:assert/strict';
 
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
@@ -13,6 +13,7 @@ import {
 import type { Checker } from './checker';
 import { isGenericObjectOrIndexType } from './genericTypes';
 import { isDefinitelyFalsy, isSpreadableProperty, spreadCopy } from './literals';
+import { nonUndefinedBindingSource } from './nullishConstraints';
 import type { Sym } from './scopes';
 import { arrayPatternElements, isImmediatelyInvoked, isWithin, named, numberValue, propertyNameText } from './syntax';
 import { tupleElementReadType, tupleSliceReadType } from './tupleIndexes';
@@ -117,11 +118,11 @@ export class BindingPatterns {
     const contextual = options.annotated ? type : this.impliedBindingType(left, options.isConst, options.parameter);
     const initialDefault = this.initializerType(right, contextual, true);
     const defaultType = options.parameter ? this.parameterInitializerType(left, initialDefault) : initialDefault;
-    const withoutUndefined = this.c.relations.removeUndefined(type);
+    const withoutUndefined = nonUndefinedBindingSource(this.c, type);
     const initial =
       assigned === errorType
         ? errorType
-        : unionOf([this.c.relations.removeUndefined(assigned ?? type), initialDefault], true);
+        : unionOf([nonUndefinedBindingSource(this.c, assigned ?? type), initialDefault], true);
     if (options.annotated && !isIntrinsic(withoutUndefined, 'never')) {
       const declared = this.defaultMayBeUndefined(defaultType) ? type : withoutUndefined;
       this.c.expressions.checkAssignable(right, defaultType, declared);

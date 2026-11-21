@@ -10,10 +10,25 @@ import {
   neverType,
   nullType,
   type Type,
+  typeMembers,
   undefinedType,
   unionOf,
   unknownType,
 } from './types';
+
+/** As TypeScript's `getNonUndefinedType`, use the bounds of generic members when one admits an explicit `undefined`. */
+export function nonUndefinedBindingSource(c: Checker, type: Type): Type {
+  const members = typeMembers(type);
+  const bounds = members.map((member) => {
+    if (!isGenericMember(member)) return member;
+    const bound = nullishConstraint(c, member);
+    return isIntrinsic(bound, 'unknown') ? member : bound;
+  });
+  const hasUndefinedBound = bounds.some(
+    (bound, index) => bound !== members[index] && typeMembers(bound).includes(undefinedType)
+  );
+  return c.relations.removeUndefined(hasUndefinedBound ? unionOf(bounds, true) : type);
+}
 
 /**
  * A type without `null` and `undefined`, as TypeScript's `getNonNullableType` gives it: a generic member whose

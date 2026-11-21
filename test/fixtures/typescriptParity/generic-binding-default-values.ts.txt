@@ -1,0 +1,31 @@
+function display<K extends 'x' | 'y'>(key: K, obj: Partial<Record<K, number>>) {
+  const {[key]: value = 1} = obj;
+  return value.toFixed();
+}
+function nullable<K extends 'x' | 'y'>(key: K, obj: Partial<Record<K, string | null>>) {
+  const {[key]: value = 'fallback'} = obj;
+  return value === null ? 'null' : value.toUpperCase();
+}
+function tupleDefault<T extends number | undefined>(source: [T]) {
+  const [value = 4] = source;
+  return value.toFixed();
+}
+function parameter<K extends 'x' | 'y'>(key: K, {[key]: value = 5}: Partial<Record<K, number>>) {
+  return value.toFixed();
+}
+console.log(display('x', {}), display('y', {y: 2}));
+console.log(nullable('x', {}), nullable('y', {y: null}));
+console.log(tupleDefault([undefined]), parameter('x', {}));
+function tuple<T extends number | undefined>([value = 1]: [T]) {
+  return value;
+}
+function object<T extends number | null | undefined>({value = 2}: {value: T}) {
+  return value === null ? 'null' : value.toFixed();
+}
+function chained<U extends number | undefined, T extends U>([value = 3]: [T]) {
+  return value.toFixed();
+}
+function mixed<T extends number | undefined, U extends string>([value = 4]: [T | U]): number | string {
+  return value;
+}
+console.log(tuple([undefined]), object({value: null}), object({value: undefined}), chained([undefined]), mixed([undefined]));

@@ -1,0 +1,25 @@
+function retainNull<K extends 'x' | 'y'>(key: K, obj: Partial<Record<K, string | null>>) {
+  const {[key]: value = 'fallback'} = obj;
+  return value.toUpperCase();
+}
+function canDefaultToUndefined<K extends 'x' | 'y'>(key: K, obj: Partial<Record<K, number>>, fallback: number | undefined) {
+  const {[key]: value = fallback} = obj;
+  return value.toFixed();
+}
+function assigned<K extends 'x' | 'y'>(key: K, obj: Partial<Record<K, number>>) {
+  let value: number;
+  ({[key]: value = 3} = obj);
+  return value.toFixed();
+}
+function mismatch<T extends string | undefined>([value = 1]: [T]) {
+  return value;
+}
+function nonNullable<T extends number>([value = 1]: [T]) {
+  return value;
+}
+function genericIdentity<T extends number | undefined>([value = 1]: [T]): T {
+  return value;
+}
+function fallbackStillGeneric<T extends number | undefined>(fallback: number | undefined, [value = fallback]: [T]) {
+  return value;
+}

@@ -1,0 +1,13 @@
+(3,10): error TS18047: 'value' is possibly 'null'.
+(7,10): error TS18048: 'value' is possibly 'undefined'.
+(11,12): error TS2322: Type 'number | undefined' is not assignable to type 'number'.
+  Type 'undefined' is not assignable to type 'number'.
+(14,50): error TS2322: Type 'number' is not assignable to type 'string'.
+(17,41): error TS2322: Type 'number' is not assignable to type 'T'.
+  'number' is assignable to the constraint of type 'T', but 'T' could be instantiated with a different subtype of constraint 'number'.
+(21,3): error TS2322: Type 'number' is not assignable to type 'T'.
+  'number' is assignable to the constraint of type 'T', but 'T' could be instantiated with a different subtype of constraint 'number | undefined'.
+(23,92): error TS2322: Type 'number | undefined' is not assignable to type 'T'.
+  'number | undefined' is assignable to the constraint of type 'T', but 'T' could be instantiated with a different subtype of constraint 'number | undefined'.
+    Type 'undefined' is not assignable to type 'T'.
+      'undefined' is assignable to the constraint of type 'T', but 'T' could be instantiated with a different subtype of constraint 'number | undefined'.
