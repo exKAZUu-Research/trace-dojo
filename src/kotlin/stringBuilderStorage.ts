@@ -13,8 +13,8 @@ export class StringBuilderStorage {
     this.bytes = new Uint8Array(capacity);
   }
 
-  text(): string {
-    return Array.from({ length: this.length }, (_, index) => String.fromCodePoint(this.codeAt(index))).join('');
+  text(from = 0, to = this.length): string {
+    return Array.from({ length: to - from }, (_, index) => String.fromCodePoint(this.codeAt(from + index))).join('');
   }
 
   codeAt(index: number): number {
@@ -46,6 +46,32 @@ export class StringBuilderStorage {
 
   appendText(text: string): void {
     this.append(text.length, (index) => codeUnit(text, index));
+  }
+
+  appendBuilder(source: StringBuilderStorage, fail: (required: number, available: number) => never): void {
+    const end = this.length + source.length;
+    if (!this.wide && source.wide) {
+      const capacity = this.bytes.length;
+      const bytes = new Uint8Array(2 * (end <= capacity ? capacity : Math.max(end, capacity + 2)));
+      for (let index = 0; index < this.length; index++) bytes[2 * index] = this.bytes[index];
+      this.bytes = bytes;
+      this.wide = true;
+    } else {
+      this.bytes = this.reserve(end, this.wide);
+    }
+    const required = source.length << Number(source.wide);
+    if (required > source.bytes.length) fail(required, source.bytes.length);
+    if (this.wide === source.wide) {
+      this.bytes.set(source.bytes.subarray(0, required), this.length << Number(this.wide));
+    } else {
+      for (let index = 0; index < source.length; index++) {
+        const offset = 2 * (this.length + index);
+        this.bytes[offset] = source.bytes[index];
+        this.bytes[offset + 1] = 0;
+      }
+    }
+    this.length = end;
+    this.maybeLatin1 ||= source.maybeLatin1;
   }
 
   append(length: number, read: (index: number) => number): void {

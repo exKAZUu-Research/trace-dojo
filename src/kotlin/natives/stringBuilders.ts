@@ -3,7 +3,7 @@ import type { Frame } from '../runtime';
 import { StringBuilderStorage } from '../stringBuilderStorage';
 import { KObject, UNIT, type Value } from '../values';
 import { charSequence, type Sequence } from './charSequences';
-import { checkStringIndex, compareStrings, reverseKeepingPairs, stringRangeError, substring } from './core';
+import { builderSubstring, checkStringIndex, compareStrings, reverseKeepingPairs, stringRangeError } from './core';
 import { defineNative, defineNativeProperty, throwError } from './registry';
 
 const BUILDER = 'kotlin.text.StringBuilder';
@@ -51,11 +51,15 @@ function defineReaders(): void {
     checkStringIndex(frame, position, storage.readableLength);
     return storage.codeAt(position);
   });
-  defineNative(`${BUILDER}.subSequence(Int, Int)`, builderSubstring);
-  defineNative(`${BUILDER}.substring(Int, Int)`, builderSubstring);
-  defineNative(`${BUILDER}.substring(Int)`, (frame, receiver, [start]) =>
-    builderSubstring(frame, receiver, [start, builder(receiver).length])
-  );
+  for (const name of ['subSequence', 'substring']) {
+    defineNative(`${BUILDER}.${name}(Int, Int)`, (frame, receiver, [start, end]) =>
+      builderSubstring(frame, builder(receiver), start as number, end as number)
+    );
+  }
+  defineNative(`${BUILDER}.substring(Int)`, (frame, receiver, [start]) => {
+    const storage = builder(receiver);
+    return builderSubstring(frame, storage, start as number, storage.length);
+  });
   defineNative(`${BUILDER}.indexOf(String)`, (_frame, receiver, [value]) =>
     builder(receiver)
       .text()
@@ -81,10 +85,6 @@ function defineReaders(): void {
     frame.runtime.allocateString(frame, storage.length);
     return storage.text();
   });
-}
-
-function builderSubstring(frame: Frame, receiver: Value, [start, end]: Value[]): string {
-  return substring(frame, builder(receiver).text(), start as number, end as number);
 }
 
 function defineAppenders(): void {
@@ -192,7 +192,18 @@ function defineReplacements(): void {
 
 function appendSequence(frame: Frame, receiver: Value, value: Value): Value {
   if (value === undefined || typeof value === 'string') return appendText(frame, receiver, value ?? 'null');
-  if (value instanceof KObject && value.builder) return appendText(frame, receiver, value.builder.text());
+  if (value instanceof KObject && value.builder) {
+    const storage = builder(receiver);
+    frame.runtime.allocateString(frame, storage.length + value.builder.length, value.builder.length);
+    storage.appendBuilder(value.builder, (required, available) =>
+      throwError(
+        frame,
+        'java.lang.ArrayIndexOutOfBoundsException',
+        `arraycopy: last source index ${required} out of bounds for byte[${available}]`
+      )
+    );
+    return receiver;
+  }
   const source = charSequence(frame, value);
   return appendSequenceRange(frame, receiver, source, 0, source.length());
 }

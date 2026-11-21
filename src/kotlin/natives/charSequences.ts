@@ -2,7 +2,7 @@ import { callFunction, getPropertyValue } from '../dispatch';
 import { charToString, stringOf } from '../format';
 import type { Frame } from '../runtime';
 import { KObject, type Value } from '../values';
-import { checkStringIndex, substring } from './core';
+import { builderSubstring, checkStringIndex } from './core';
 import { foldJdkCodePoint } from './jdkCase';
 import { libraryClass, throwError } from './registry';
 import { textSearch } from './textSearch';
@@ -252,10 +252,7 @@ function sequenceAccess(frame: Frame, value: Value): Omit<Sequence, 'charge'> {
         checkStringIndex(frame, index, storage.readableLength);
         return storage.codeAt(index);
       },
-      subSequenceText: (from, to) => {
-        frame.runtime.spend(1 + Math.floor(storage.length / 64));
-        return substring(frame, storage.text(), from, to);
-      },
+      subSequenceText: (from, to) => builderSubstring(frame, storage, from, to),
     };
   }
   const owner = libraryClass('kotlin.CharSequence');

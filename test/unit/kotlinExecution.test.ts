@@ -77,6 +77,28 @@ test.each([
     stdout: '1=a\n2=b\n3=c\nmodified\n1=a\n2=b\n3=c\nmodified\n7=one\n',
   },
   {
+    name: 'builder copies validate backing ranges independently of toString padding',
+    source: `class Source(val destination: StringBuilder) : CharSequence by "xy" {
+    override fun get(index: Int): Char {
+        if (index == 0) destination.append('λ')
+        return "xy"[index]
+    }
+}
+fun main() {
+    for (capacity in listOf(2, 3, 16)) {
+        val builder = StringBuilder(capacity).append("abc")
+        builder.insert(1, Source(builder))
+        println("capacity $capacity")
+        println(builder.toString().map { it.code })
+        try { println(builder.substring(0).map { it.code }) } catch(e: Exception) { println(e.toString()) }
+        try { println(builder.subSequence(0, 5).toString().map { it.code }) } catch(e: Exception) { println(e.toString()) }
+        try { println(StringBuilder().append(builder).toString().map { it.code }) } catch(e: Exception) { println(e.toString()) }
+    }
+}`,
+    stdout:
+      'capacity 2\n[30817, 25209, 99, 0, 0]\njava.lang.StringIndexOutOfBoundsException: Range [0, 0 + 5) out of bounds for length 3\njava.lang.StringIndexOutOfBoundsException: Range [0, 0 + 5) out of bounds for length 3\njava.lang.ArrayIndexOutOfBoundsException: arraycopy: last source index 10 out of bounds for byte[6]\ncapacity 3\n[30817, 25209, 99, 0, 0]\njava.lang.StringIndexOutOfBoundsException: Range [0, 0 + 5) out of bounds for length 4\njava.lang.StringIndexOutOfBoundsException: Range [0, 0 + 5) out of bounds for length 4\njava.lang.ArrayIndexOutOfBoundsException: arraycopy: last source index 10 out of bounds for byte[8]\ncapacity 16\n[30817, 25209, 99, 0, 0]\n[30817, 25209, 99, 0, 0]\n[30817, 25209, 99, 0, 0]\n[30817, 25209, 99, 0, 0]\n',
+  },
+  {
     name: 'map entry equality reads the value after a custom key getter',
     source: `class Candidate(private val change: () -> Unit) : Map.Entry<Int, Int> {
     override val key: Int get() { change(); return 1 }

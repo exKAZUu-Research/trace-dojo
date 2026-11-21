@@ -19,6 +19,7 @@ import {
 } from '../operators';
 import { EXCEPTIONS } from '../prelude/runtimeTypes';
 import type { Frame } from '../runtime';
+import type { StringBuilderStorage } from '../stringBuilderStorage';
 import type { PropertySymbol } from '../symbols';
 import { Boxed, KObject, type PrimitiveKind, UNIT, type Value } from '../values';
 import { defineNative, defineNativeProperty, libraryClass, newItems, throwError } from './registry';
@@ -362,15 +363,29 @@ export function checkStringIndex(frame: Frame, position: number, length: number)
 }
 
 export function substring(frame: Frame, text: string, start: number, end: number): string {
-  if (start < 0 || end > text.length || start > end) {
-    return throwError(
-      frame,
-      'java.lang.StringIndexOutOfBoundsException',
-      `Range [${start}, ${end}) out of bounds for length ${text.length}`
-    );
-  }
+  checkStringRange(frame, start, end, text.length);
   frame.runtime.allocateString(frame, end - start);
   return text.slice(start, end);
+}
+
+export function builderSubstring(frame: Frame, storage: StringBuilderStorage, start: number, end: number): string {
+  checkStringRange(frame, start, end, storage.length);
+  const length = end - start;
+  if (length === 0) return '';
+  const available = storage.readableLength;
+  if (end > available) {
+    throwError(
+      frame,
+      'java.lang.StringIndexOutOfBoundsException',
+      `Range [${start}, ${start} + ${length}) out of bounds for length ${available}`
+    );
+  }
+  frame.runtime.allocateString(frame, length);
+  return storage.text(start, end);
+}
+
+function checkStringRange(frame: Frame, start: number, end: number, length: number): void {
+  if (start < 0 || end > length || start > end) stringRangeError(frame, start, end, length);
 }
 
 export function checkArrayIndex(frame: Frame, items: Value[], index: number): void {
