@@ -26,6 +26,16 @@ test.each([
     stdout: '[, abc]\n[, a, , c, ]\n[, a, b, c, ]\n[, ]\n[abc]\n',
   },
   {
+    name: 'smart casts under Boolean negation',
+    source: `fun show(text: String?, value: Any) {
+    if (!(text == null)) println(text.length)
+    if (!(value !is String)) println(value.length)
+    if (!(text == null || text.isEmpty())) println(text[0])
+}
+fun main() { show("abc", "do") }`,
+    stdout: '3\n2\na\n',
+  },
+  {
     name: 'resized copies of primitive and reference arrays',
     source: `fun main() {
     val source = intArrayOf(1, 2, 3)

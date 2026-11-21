@@ -75,6 +75,9 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
         repr: 'ref',
         eval: (frame) => !(evaluate(frame) as boolean),
         constant: operand.constant === undefined ? undefined : !operand.constant,
+        narrowing: operand.narrowing
+          ? { whenTrue: operand.narrowing.whenFalse, whenFalse: operand.narrowing.whenTrue }
+          : undefined,
       };
     }
     const kind = this.primitiveOf(operand.type);
