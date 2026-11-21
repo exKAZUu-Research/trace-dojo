@@ -3,6 +3,15 @@ import { expect, test } from 'vitest';
 import { LIMITS } from '../../src/interpreter/limits';
 import { executeProgram, traceProgram } from '../../src/interpreter/program';
 
+const CLONED_TURTLE = `struct Owner(Turtle);
+impl Clone for Owner {
+    fn clone(&self) -> Self {
+        let t = Turtle::new(2, 2);
+        let _free = t.can_move_forward();
+        Owner(t)
+    }
+}`;
+
 const rustMain = (body: string, items = ''): string => `${items ? `${items}\n` : ''}fn main() {
 ${body}
 }
@@ -6986,4 +6995,42 @@ test('stops an exhaustiveness check whose or-patterns multiply past the compile 
     diagnostics: [expect.objectContaining({ message: expect.stringContaining('コンパイル処理の上限') })],
   });
   expect(performance.now() - start).toBeLessThan(5 * LIMITS.maxMilliseconds);
+});
+
+test.each([
+  [
+    'an array built by map',
+    '',
+    `    let mut made = [0, 2].map(|x| {
+        let t = Turtle::new(x, 0);
+        let _free = t.can_move_forward();
+        t
+    });
+    made[0].forward();
+    made[1].forward();`,
+    2,
+  ],
+  [
+    'an array cloned by a Clone impl',
+    CLONED_TURTLE,
+    '    let copied = [Owner(Turtle::new(0, 0)), Owner(Turtle::new(1, 0))].clone();',
+    2,
+  ],
+  [
+    'a Vec cloned by to_vec',
+    CLONED_TURTLE,
+    '    let copied = [Owner(Turtle::new(0, 0)), Owner(Turtle::new(1, 0))].to_vec();',
+    2,
+  ],
+  [
+    'a value assigned to a place found by a function',
+    'fn index() -> usize {\n    let n = 0;\n    n\n}',
+    '    let mut held = [Turtle::new(0, 0)];\n    held[index()] = Turtle::new(2, 2);\n    held[0].forward();',
+    1,
+  ],
+])('keeps turtles owned by %s while later code of the program runs', (_name, items, body, turtles) => {
+  const program = rustMain(body, items);
+  const execution = executeProgram('rust', program);
+  expect(execution.kind === 'executed' && execution.finalTurtles).toHaveLength(turtles);
+  expect(traceProgram('rust', program, program).finalTurtles).toHaveLength(turtles);
 });

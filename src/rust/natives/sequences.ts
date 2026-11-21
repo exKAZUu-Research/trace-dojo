@@ -2,7 +2,15 @@
 import { keepVecCapacity, reserveVec, setIntoIterBuffer, setVecCapacity, vecCapacity } from '../capacity';
 import { sliceRange } from '../compiler';
 import { normalize } from '../infer';
-import { cloneValue, compareValues, copyValue, needsCopy, testPartialOrder, valuesEqual } from '../ops';
+import {
+  cloneValue,
+  compareValues,
+  copyValue,
+  needsCopy,
+  testPartialOrder,
+  valuesEqual,
+  withCloneResults,
+} from '../ops';
 import { MOVED, RustPanic } from '../runtime';
 import { shallow, type Type } from '../types';
 import {
@@ -42,6 +50,7 @@ import { chunksNative, groupedSlice, mutableSlice, splitSlice, windows } from '.
 import { compareByKey, dedupBy, lessByKey, lessByPartialOrd, sortByCachedKey, sortSlice } from './sorting';
 import {
   call,
+  callForEach,
   define,
   deref,
   err,
@@ -425,7 +434,7 @@ function isTrivialClone(type: Type): boolean {
 /** Clones of a slice's elements, as a new `Vec` holds them. */
 function clonedItems(ctx: NativeContext, items: Value[]): Value[] {
   ctx.runtime.allocate(items.length);
-  return items.map((item) => cloneValue(elemType(ctx), item));
+  return withCloneResults(() => items.map((item) => cloneValue(elemType(ctx), item)));
 }
 
 function joinSlices(ctx: NativeContext, slices: Value, separator: Value): Value[] {
@@ -784,7 +793,7 @@ for (const [name, native] of Object.entries(dequeTracked)) natives[`VecDeque<_>:
 for (const [name, native] of Object.entries(withCapacity(heapNatives))) natives[`BinaryHeap<_>::${name}`] = native;
 natives['BinaryHeap<_>::append'] = ([self, other], ctx) => appendHeap(ctx, self, other);
 natives['[_]::into_iter'] = ([self], ctx) => ownedIter(sliceItems(deref(self)), elemType(ctx));
-natives['[_]::map'] = ([self, f], ctx) => sliceItems(deref(self)).map((item) => call(ctx, f, [item]));
+natives['[_]::map'] = ([self, f], ctx) => callForEach(ctx, sliceItems(deref(self)), (item) => call(ctx, f, [item]));
 natives['&[_]::into_iter'] = ([self]) => sliceIter(deref(self), false);
 natives['&mut [_]::into_iter'] = ([self]) => sliceIter(deref(self), true);
 natives['&Vec<_>::into_iter'] = ([self]) => sliceIter(deref(self), false);

@@ -86,6 +86,19 @@ export function ordering(ctx: NativeContext, order: number): Value {
   return new EnumValue(ctx.interp.program.adtDef('Ordering'), Math.sign(order) + 1, []);
 }
 
+/** The results of running the program's code for each item, the earlier ones kept alive while it runs for the later. */
+export function callForEach(
+  ctx: NativeContext,
+  items: readonly Value[],
+  run: (item: Value, index: number) => Value
+): Value[] {
+  const results: Value[] = [];
+  return ctx.runtime.withRoots([results], () => {
+    for (const [index, item] of items.entries()) results.push(run(item, index));
+    return results;
+  });
+}
+
 export function call(ctx: NativeContext, fn: Value, args: Value[]): Value {
   return ctx.interp.callValue(fn, args, undefined);
 }

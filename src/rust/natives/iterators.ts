@@ -16,6 +16,7 @@ import {
   needsCopy,
   testPartialOrder,
   valuesEqual,
+  withCloneResults,
   wrap,
 } from '../ops';
 import { MOVED } from '../runtime';
@@ -112,8 +113,8 @@ export function ownedIter(
   iter.ownedItemType = itemType;
   iter.fork = () => {
     allocateCollectionSnapshot(back - front);
-    const cloned = Array.from({ length: back - front }, (_, offset) =>
-      cloneValue(itemType, map(items[front + offset]))
+    const cloned = withCloneResults(() =>
+      Array.from({ length: back - front }, (_, offset) => cloneValue(itemType, map(items[front + offset])))
     );
     return ownedIter(cloned, itemType);
   };

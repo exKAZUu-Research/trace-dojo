@@ -1,5 +1,5 @@
 import type { Span } from './ast';
-// code-gauge-allow-file fileNcss 549 -- Keeps type-directed arithmetic, comparison, and copying with their shared runtime hooks.
+// code-gauge-allow-file fileNcss 569 -- Keeps type-directed arithmetic, comparison, and copying with their shared runtime hooks.
 import { floatNumber } from './floatBits';
 import { bigintToF32 } from './floatFormat';
 import { normalize } from './infer';
@@ -627,28 +627,63 @@ function encodeStringKey(value: string): string {
   return `${value.length}:${value}`;
 }
 
+/**
+ * What the program's own `clone`s have returned for the clone in progress. Only the unfinished copy holds them, so they
+ * stay rooted while the later `clone`s run.
+ */
+let cloneResults: Value[] | undefined;
+
+/** Runs clones that build one value, keeping what the program's own `clone`s return alive until it is built. */
+export function withCloneResults<T>(build: () => T): T {
+  if (cloneResults || !hooks) return build();
+  const results: Value[] = [];
+  cloneResults = results;
+  try {
+    return hooks.withRoots([results], build);
+  } finally {
+    cloneResults = undefined;
+  }
+}
+
 /** A deep copy of a value as `Clone::clone` makes it, calling the program's own `clone` for its types. */
-// code-gauge-allow functionNcss 60 -- One case per kind of value.
 export function cloneValue(type: Type, value: Value): Value {
+  return cloneResults || !hooks ? clonePart(type, value) : withCloneResults(() => clonePart(type, value));
+}
+
+/** The program's own `clone` of a value, whose body builds values of its own. */
+function userClone(type: Type, value: Value): { value: Value } | undefined {
+  const building = cloneResults;
+  cloneResults = undefined;
+  try {
+    const user = hooks?.clone?.(type, value);
+    if (user) building?.push(user.value);
+    return user;
+  } finally {
+    cloneResults = building;
+  }
+}
+
+// code-gauge-allow functionNcss 60 -- One case per kind of value.
+function clonePart(type: Type, value: Value): Value {
   const t = normalize(shallow(type));
   if (t.kind === 'ref') return value;
   if (t.kind === 'adt') {
-    const user = hooks?.clone?.(t, value);
+    const user = userClone(t, value);
     if (user) return user.value;
   }
   switch (t.kind) {
     case 'tuple': {
       hooks?.allocate(t.elems.length);
-      return t.elems.map((elem, index) => cloneValue(elem, (value as Value[])[index]));
+      return t.elems.map((elem, index) => clonePart(elem, (value as Value[])[index]));
     }
     case 'closure': {
       const fn = value as FnValue;
-      return fn.duplicate?.((item, type) => cloneValue(type, item)) ?? fn;
+      return fn.duplicate?.((item, type) => clonePart(type, item)) ?? fn;
     }
     case 'array':
     case 'slice': {
       const items = sliceItems(value);
-      return cloneItems(items, (item) => cloneValue(t.elem, item));
+      return cloneItems(items, (item) => clonePart(t.elem, item));
     }
     case 'adt': {
       const { def } = t;
@@ -659,10 +694,10 @@ export function cloneValue(type: Type, value: Value): Value {
         case 'Vec':
         case 'VecDeque':
         case 'BinaryHeap': {
-          return cloneItems(value as Value[], (item) => cloneValue(t.args[0], item));
+          return cloneItems(value as Value[], (item) => clonePart(t.args[0], item));
         }
         case 'Box': {
-          return cloneValue(t.args[0], value);
+          return clonePart(t.args[0], value);
         }
         case 'HashMap':
         case 'BTreeMap':
@@ -676,7 +711,7 @@ export function cloneValue(type: Type, value: Value): Value {
         case 'RangeTo':
         case 'RangeToInclusive': {
           const range = value as RangeValue;
-          return copyRange(range, (item) => cloneValue(t.args[0], item));
+          return copyRange(range, (item) => clonePart(t.args[0], item));
         }
         case 'Iter': {
           return cloneIterator(value as IterValue);
@@ -687,7 +722,7 @@ export function cloneValue(type: Type, value: Value): Value {
             hooks?.allocate(types.length);
             return new StructValue(
               def,
-              types.map((type, index) => cloneValue(type, value.fields[index]))
+              types.map((type, index) => clonePart(type, value.fields[index]))
             );
           }
           if (value instanceof EnumValue) {
@@ -696,7 +731,7 @@ export function cloneValue(type: Type, value: Value): Value {
             return new EnumValue(
               def,
               value.variant,
-              types.map((type, index) => cloneValue(type, value.fields[index]))
+              types.map((type, index) => clonePart(type, value.fields[index]))
             );
           }
           return value;
@@ -769,13 +804,13 @@ function cloneCollection(args: Type[], source: MapValue | SetValue): MapValue | 
   if (source instanceof MapValue) {
     hooks?.allocate(source.entries.size * 2);
     const copy = new MapValue(source.sorted);
-    copy.entries.copyFrom(source.entries, ([key, item]) => [cloneValue(args[0], key), cloneValue(args[1], item)]);
+    copy.entries.copyFrom(source.entries, ([key, item]) => [clonePart(args[0], key), clonePart(args[1], item)]);
     hooks?.copyScalarStorage(source, copy);
     return copy;
   }
   hooks?.allocate(source.entries.size);
   const copy = new SetValue(source.sorted);
-  copy.entries.copyFrom(source.entries, (item) => cloneValue(args[0], item));
+  copy.entries.copyFrom(source.entries, (item) => clonePart(args[0], item));
   hooks?.copyScalarStorage(source, copy);
   return copy;
 }

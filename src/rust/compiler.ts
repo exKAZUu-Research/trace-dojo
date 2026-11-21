@@ -572,8 +572,8 @@ export class Compiler {
     const place = this.place(expr.target);
     return (frame) => {
       const v = value(frame);
-      const target = place(frame);
-      target.set(v);
+      // Evaluating the place can run the program's code, during which only this assignment holds the value.
+      frame.runtime.withRoots([v], () => place(frame).set(v));
       return UNIT_VALUE;
     };
   }

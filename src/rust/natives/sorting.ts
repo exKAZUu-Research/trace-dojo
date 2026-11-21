@@ -6,7 +6,7 @@ import { sizeOf } from './layout';
 import type { SortElement } from './sort/shared';
 import { stableSort } from './sort/stable';
 import { unstableSort } from './sort/unstable';
-import { call, libraryPanic, type NativeContext } from './support';
+import { call, callForEach, libraryPanic, type NativeContext } from './support';
 
 /** Sorts a slice in place as std's stable sort (`sort`) or unstable sort (`sort_unstable`) does. */
 export function sortSlice(
@@ -94,7 +94,7 @@ export function sortByCachedKey(ctx: NativeContext, slice: Value, f: Value): voi
   const keyType = ctx.typeArgs[1];
   const items = [...sliceItems(slice)];
   if (items.length < 2) return;
-  const pairs: Value[] = items.map((item, index) => [call(ctx, f, [item]), index]);
+  const pairs = callForEach(ctx, items, (item, index) => [call(ctx, f, [item]), index]);
   const pairType = (name: IntName): Type => ({ kind: 'tuple', elems: [keyType, intType(name)] });
   const names: IntName[] = ['u8', 'u16', 'u32', 'usize'];
   let index = 0;
