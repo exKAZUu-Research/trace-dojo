@@ -6,6 +6,7 @@ import { childTypes, objectMemberTypes } from './genericTypes';
 import { applicableIndex, hasIndexSignature, isIndexKeyOf, isPropertyKeyOf, keyedIndexes } from './indexInfos';
 import { reverseMappedType } from './reverseMappedInference';
 import { hasBivariantParameters } from './signatures';
+import { templateParts } from './templateParts';
 import { tupleTypesDefinitelyUnrelated } from './tupleIndexes';
 import {
   anonymousObject,
@@ -382,8 +383,7 @@ export class TypeInference {
       for (const member of source.types) recurse(member, target);
       return;
     }
-    if (target.kind === 'templateLiteral' && source.kind === 'literal' && typeof source.value === 'string')
-      this.inferTemplateLiteral(source.value, target, recurse);
+    if (target.kind === 'templateLiteral') this.inferTemplateLiteral(source, target, recurse);
     if (target.kind === 'object') this.inferToObject(run, source, target, path, recurse);
   }
 
@@ -425,15 +425,40 @@ export class TypeInference {
       recurse(source, variable, undefined, priority | InferencePriority.NakedTypeVariable);
   }
 
-  private inferTemplateLiteral(value: string, target: TemplateLiteralType, recurse: Recurse): void {
-    this.c.budget.spend(value.length * target.types.length);
-    const captures = templateCaptures(value, target.texts);
+  private inferTemplateLiteral(source: Type, target: TemplateLiteralType, recurse: Recurse): void {
+    const sourceParts =
+      source.kind === 'literal' && typeof source.value === 'string'
+        ? { texts: [source.value], types: [] }
+        : source.kind === 'templateLiteral'
+          ? source
+          : undefined;
+    if (!sourceParts) return;
+    const { budget, typeOperators } = this.c;
+    const textLength = sourceParts.texts.reduce((length, text) => length + text.length, 0);
+    budget.spend((textLength + sourceParts.types.length) * target.types.length);
+    const aligned =
+      sourceParts.texts.length === target.texts.length &&
+      sourceParts.texts.every((text, index) => text === target.texts[index]);
+    const captures = aligned
+      ? sourceParts.types
+      : templateParts(sourceParts, target, (texts, types) => typeOperators.templateLiteral(texts, types));
     if (!captures) return;
-    const { types } = target;
-    for (const [index, type] of types.entries()) {
-      const constraint = this.c.baseConstraint(type);
-      recurse(this.templateCapture(captures[index], constraint), type);
-    }
+    for (const [index, type] of target.types.entries())
+      recurse(this.templateCandidate(captures[index], type, aligned), type);
+  }
+
+  private templateCandidate(capture: Type, placeholder: Type, aligned: boolean): Type {
+    if (capture.kind === 'literal' && typeof capture.value === 'string')
+      return this.templateCapture(capture.value, this.c.baseConstraint(placeholder));
+    if (
+      !aligned ||
+      isAnyLike(capture) ||
+      isTemplateOrStringMapping(capture) ||
+      isIntrinsic(capture, 'string') ||
+      this.c.relations.isAssignable(this.c.baseConstraint(capture), this.c.baseConstraint(placeholder))
+    )
+      return capture;
+    return this.c.typeOperators.templateLiteral(['', ''], [capture]);
   }
 
   private inferToParameter(
@@ -1174,21 +1199,6 @@ function equivalentInferenceCandidates(inference: Inference): Type[] {
     if (!previous || depth(candidate) <= depth(previous)) byBase.set(base, candidate);
   }
   return [...byBase.values()];
-}
-
-function templateCaptures(value: string, texts: string[]): string[] | undefined {
-  if (!value.startsWith(texts[0])) return undefined;
-  let position = texts[0].length;
-  const captures: string[] = [];
-  for (let index = 0; index < texts.length - 1; index++) {
-    const delimiter = texts[index + 1];
-    const last = index === texts.length - 2;
-    const end = last ? value.length - delimiter.length : delimiter ? value.indexOf(delimiter, position) : position + 1;
-    if (end < position || end > value.length || !value.startsWith(delimiter, end)) return undefined;
-    captures.push(value.slice(position, end));
-    position = end + delimiter.length;
-  }
-  return position === value.length ? captures : undefined;
 }
 
 function isTopLevelTypeParameter(type: Type, parameter: TypeParameter, depth = 0): boolean {

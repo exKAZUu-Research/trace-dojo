@@ -10,6 +10,47 @@ const diagnosticsOf = (source: string): string[] => {
   return execution.diagnostics.map((diagnostic) => `${diagnostic.row + 1}: ${diagnostic.message}`);
 };
 
+test('checks separately written conditional template types with inferred placeholders', () => {
+  const source = `function consume<T extends string>(value: T extends \`x\${infer S}\` ? S : never) {
+  console.log(value);
+}
+function forward<T extends string>(value: T extends \`x\${infer R}\` ? R : never) {
+  consume<T>(value);
+}
+function parseId<T extends string>(value: T): T extends \`id-\${infer N}\` ? N : never {
+  return value.slice(3) as T extends \`id-\${infer M}\` ? M : never;
+}
+forward<'xhello'>('hello');
+console.log(parseId('id-42'));`;
+  expect(executeProgram('typescript', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'hello\n42\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('infers constrained and compound placeholders from template literal types', () => {
+  const source = `type Tail<S> = S extends \`id-\${infer T}\` ? T : never;
+type NumericTail<S> = S extends \`id-\${infer N extends number}\` ? N : never;
+const plain: Tail<\`id-\${number}\`> = '42';
+const nested: Tail<\`id-item-\${number}\`> = 'item-42';
+const numeric: NumericTail<\`id-\${number}\`> = 42;
+console.log(plain, nested, numeric);`;
+  expect(executeProgram('typescript', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '42 item-42 42\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('reports only the invalid argument when conditional template types agree', () => {
+  const source = `function copy<T extends string>(values: Array<T extends \`a\${infer R}\` ? R : 'b'>): Array<T extends \`a\${infer S}\` ? S : 'b'> {
+  return values;
+}
+copy(['1']);`;
+  expect(diagnosticsOf(source)).toEqual([expect.stringMatching(/^4: .*"1".*"b"/)]);
+});
+
 test.each([
   ['LF before the closing quote', "console.log('text\n');"],
   ['CRLF in an empty double-quoted string', 'console.log("\r\n");'],

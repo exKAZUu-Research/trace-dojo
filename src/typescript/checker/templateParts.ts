@@ -1,12 +1,14 @@
 import { literalType, type TemplateLiteralType, type Type } from './types';
 
+type TemplateSpans = Pick<TemplateLiteralType, 'texts' | 'types'>;
+
 /**
  * The part of a template literal type each placeholder of another takes, as TypeScript's
  * `inferFromLiteralPartsToTemplateLiteral` splits it: a placeholder ends at the first occurrence of the text after it,
  * which may lie in a later text of the source, or after one character when another placeholder follows directly.
  */
 export function templateParts(
-  source: TemplateLiteralType,
+  source: TemplateSpans,
   target: TemplateLiteralType,
   template: (texts: string[], types: Type[]) => Type
 ): Type[] | undefined {
@@ -65,7 +67,7 @@ function templatePartEnd(
 
 /** The part of a template literal type between two positions: a string literal within one text, else a template. */
 function templatePart(
-  source: TemplateLiteralType,
+  source: TemplateSpans,
   textAt: (index: number) => string,
   [segment, position]: TemplatePosition,
   [endSegment, endPosition]: TemplatePosition,
