@@ -8522,3 +8522,26 @@ test('converting a value into its own type keeps it', () => {
   );
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'Some(7) None {1: 2} {1, 2}\n' });
 });
+
+test('a map extends from the borrowed pairs of another map of Copy keys and values', () => {
+  const program = rustMain(
+    `
+    let input = BTreeMap::from([(1, 10), (2, 20)]);
+    let mut merged = BTreeMap::new();
+    merged.insert(3, 30);
+    merged.extend(input.iter());
+    merged.extend(&input);
+    println!("{:?} {}", merged, input.len());`,
+    'use std::collections::BTreeMap;'
+  );
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '{1: 10, 2: 20, 3: 30} 2\n' });
+});
+
+test('? turns an io::Error from writing to standard output into a boxed error', () => {
+  const program = rustMain(
+    `    writeln!(io::stdout(), "hello")?;
+    Ok(())`,
+    'use std::io::{self, Write};'
+  ).replace('fn main() {', 'fn main() -> Result<(), Box<dyn std::error::Error>> {');
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'hello\n' });
+});

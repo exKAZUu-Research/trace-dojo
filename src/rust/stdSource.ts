@@ -1178,7 +1178,7 @@ pub mod collections {
         pub fn remove<Q>(&mut self, k: &Q) -> Option<V> where K: Borrow<Q>, Q: Eq + Hash;
         pub fn remove_entry<Q>(&mut self, k: &Q) -> Option<(K, V)> where K: Borrow<Q>, Q: Eq + Hash;
         pub fn entry(&mut self, key: K) -> Entry<K, V> ;
-        pub fn extend<S>(&mut self, iter: IterImpl<(K, V), S>) ;
+        pub fn extend<A: ExtendInto<(K, V)>, S>(&mut self, iter: IterImpl<A, S>);
     }
     impl<K, V> &HashMap<K, V> {
         pub fn into_iter(self) -> IterImpl<(&K, &V), HashMapIterShape>;
@@ -1216,7 +1216,7 @@ pub mod collections {
         pub fn pop_first(&mut self) -> Option<(K, V)>;
         pub fn pop_last(&mut self) -> Option<(K, V)>;
         pub fn retain<F: FnMut(&K, &mut V) -> bool>(&mut self, f: F);
-        pub fn extend<S>(&mut self, iter: IterImpl<(K, V), S>) ;
+        pub fn extend<A: ExtendInto<(K, V)>, S>(&mut self, iter: IterImpl<A, S>);
     }
     impl<K, V> &BTreeMap<K, V> {
         pub fn into_iter(self) -> IterImpl<(&K, &V), BTreeMapIterShape>;

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 547 -- One rule per trait of the standard library.
+// code-gauge-allow-file fileNcss 554 -- One rule per trait of the standard library.
 import { collectionKeyAnswer } from './collectionBounds';
 import { isPseudo, normalize } from './infer';
 import { debugOperands, supportsDebug } from './iterDebug';
@@ -325,7 +325,7 @@ function display({ solver, t, all }: Goal): Answer {
   if (t.kind === 'dyn') return dynImplies(solver, t, 'Display');
   if (t.kind !== 'adt') return 'no';
   if (
-    ['String', 'CaseIter', 'EscapeDefault', 'EscapeUnicode'].includes(t.def.builtin as string) ||
+    ['String', 'CaseIter', 'EscapeDefault', 'EscapeUnicode', 'IoError'].includes(t.def.builtin as string) ||
     ERROR_TYPES.has(t.def.builtin as string)
   )
     return 'yes';
@@ -467,7 +467,8 @@ function defaultValue(goal: Goal): Answer {
 }
 
 function stdError({ t, all }: Goal): Answer {
-  if (t.kind === 'adt') return ERROR_TYPES.has(t.def.builtin as string) ? 'yes' : 'no';
+  // `io::Error` is an error, though unlike the others it is neither `Clone` nor `PartialEq`.
+  if (t.kind === 'adt') return ERROR_TYPES.has(t.def.builtin as string) || t.def.builtin === 'IoError' ? 'yes' : 'no';
   if (t.kind === 'ref') return all([t.target]);
   return 'no';
 }
@@ -603,12 +604,21 @@ function iteratorWithCapability(goal: Goal, capability: 'back' | 'exact'): Answe
 function extendInto({ solver, t, ref }: Goal): Answer {
   const [target] = ref.args;
   if (solver.unifier.tryUnify(t, target)) return 'yes';
-  if (t.kind === 'ref' && !t.mutable) {
-    const snapshot = solver.unifier.snapshot();
-    if (solver.unifier.unify(t.target, target) && solver.isCopy(t.target)) return 'yes';
-    solver.unifier.rollback(snapshot);
-  }
+  const snapshot = solver.unifier.snapshot();
+  if (copiesFrom(solver, t, target)) return 'yes';
+  solver.unifier.rollback(snapshot);
   return 'no';
+}
+
+/** Whether a `&T`, or a map's pair `(&K, &V)`, copies out into its target, as std's `Extend` of `Copy` items does. */
+function copiesFrom(solver: TraitSolver, t: Type, target: Type): boolean {
+  if (t.kind === 'ref' && !t.mutable) return solver.unifier.unify(t.target, target) && solver.isCopy(t.target);
+  const pair = shallow(target);
+  if (t.kind !== 'tuple' || t.elems.length !== 2 || pair.kind !== 'tuple' || pair.elems.length !== 2) return false;
+  return t.elems.every((elem, index) => {
+    const part = shallow(elem);
+    return part.kind === 'ref' && copiesFrom(solver, part, pair.elems[index]);
+  });
 }
 
 /** Collections of `Copy` elements also extend from references to them. */

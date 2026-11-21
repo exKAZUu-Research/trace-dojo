@@ -1,7 +1,8 @@
 import type { TableMap } from '../capacity';
 import type { CollectionEntries, CollectionKey } from '../collectionEntries';
+import { normalize } from '../infer';
 import { cloneValue, compareValues, testPartialOrder, valuesEqual } from '../ops';
-import type { Type } from '../types';
+import { shallow, type Type } from '../types';
 import { DONE, ElementPlace, EntryValue, type IterValue, MapValue, SetValue, UNIT_VALUE, type Value } from '../values';
 import { checkTableCapacity } from './capacityNatives';
 import { defaultValue } from './core';
@@ -207,12 +208,17 @@ function mapProjection(
 }
 
 function extendMap(ctx: NativeContext, m: MapValue, iterator: IterValue): Value {
-  if (m.entries.table) reserveHashInput(ctx, m.entries.table, iterator, ctx.typeArgs[2]);
+  const [keyType, valueType, itemType, shape] = ctx.typeArgs;
+  if (m.entries.table) reserveHashInput(ctx, m.entries.table, iterator, shape);
+  const item = normalize(shallow(itemType));
+  const parts = item.kind === 'tuple' ? item.elems : [itemType, itemType];
+  const copyKey = extendedValue(keyType, parts[0]);
+  const copyValue = extendedValue(valueType, parts[1]);
   for (;;) {
     ctx.runtime.spend();
     const item = nextForFold(iterator);
     if (item === DONE) break;
-    const [k, v] = item as Value[];
+    const [k, v] = [copyKey((item as Value[])[0]), copyValue((item as Value[])[1])];
     // Finding the key can run the program's `Eq` or `Ord`, during which only this loop holds the entry.
     ctx.runtime.withRoots([item], () => {
       const key = entryKey(ctx, m.entries, k);
