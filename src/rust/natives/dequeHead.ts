@@ -136,7 +136,8 @@ function dequeIterFrom(
   };
   const values = (range: { front: number; back: number }): Value[] =>
     Array.from({ length: Math.max(0, range.back - range.front) }, (_, offset) => element(range.front + offset));
-  const iter = new IterValue(next, nextBack, () => i1.back - i1.front + i2.back - i2.front, [items]);
+  const iter = new IterValue(next, nextBack, () => i1.back - i1.front + i2.back - i2.front);
+  iter.borrowedRoots.push(items);
   iter.rest = () => [...values(i1), ...values(i2)];
   if (!mutable) iter.fork = () => dequeIterFrom(items, mutable, { ...i1 }, { ...i2 });
   return described(iter, (show, item) =>

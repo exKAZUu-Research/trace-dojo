@@ -4,7 +4,7 @@ import { StepTracker } from '../interpreter/stepTracker';
 import type { TracedFrame, TracedRuntime } from '../interpreter/traceRecorder';
 import { TurtleWorld } from '../interpreter/turtleWorld';
 import type { Span } from './ast';
-import type { Type, TypeParam } from './types';
+import { shallow, type Type, type TypeParam } from './types';
 import {
   CellPlace,
   DynValue,
@@ -12,6 +12,7 @@ import {
   EntryValue,
   EnumValue,
   FnValue,
+  isPlace,
   IterValue,
   MapValue,
   type Place,
@@ -145,6 +146,20 @@ export class Runtime implements TracedRuntime<Frame> {
     }
   }
 
+  withActiveIterators<T>(values: Value[], use: () => T): T {
+    const roots: Value[] = [];
+    const seen = new Set<IterValue>();
+    const visit = (value: unknown): void => {
+      while (isPlace(value)) value = value.get();
+      if (!(value instanceof IterValue) || seen.has(value)) return;
+      seen.add(value);
+      for (const borrow of value.borrowedRoots) roots.push(borrow);
+      for (const source of value.roots) visit(source);
+    };
+    for (const value of values) visit(value);
+    return roots.length === 0 ? use() : this.withRoots(roots, use);
+  }
+
   /** Counts allocated elements against {@link LIMITS.maxSlots}. */
   allocate(count: number, bytes: number | bigint = count * SLOT_BYTES): void {
     this.slots += count;
@@ -221,8 +236,8 @@ export class OutOfMemory {
   constructor(readonly bytes: number | bigint) {}
 }
 
-// code-gauge-allow functionNcss 38 -- One case per kind of value.
-// code-gauge-allow functionCognitiveComplexity 18 -- Each runtime value representation exposes its own reachable objects.
+// code-gauge-allow functionNcss 39 -- One case per kind of value.
+// code-gauge-allow functionCognitiveComplexity 22 -- Each runtime value representation exposes its own reachable objects.
 function pushChildren(item: object, stack: unknown[]): void {
   if (Array.isArray(item)) {
     pushAll(stack, item);
@@ -243,12 +258,22 @@ function pushChildren(item: object, stack: unknown[]): void {
   } else if (item instanceof IterValue) {
     pushAll(stack, item.roots);
     if (item.stateRoots) pushAll(stack, item.stateRoots());
-    if (item.peeked) pushAll(stack, item.peeked);
+    if (item.peeked && item.peekedType) {
+      for (const next of item.peeked) pushOwned(stack, next, item.peekedType);
+    }
   } else if (item instanceof FnValue) {
     pushAll(stack, item.roots);
   } else if (item instanceof EntryValue) {
     stack.push(item.map, item.key);
   }
+}
+
+function pushOwned(stack: unknown[], value: unknown, type: Type): void {
+  const t = shallow(type);
+  if (t.kind === 'ref') return;
+  if (t.kind === 'tuple' && Array.isArray(value)) {
+    for (const [index, elem] of t.elems.entries()) pushOwned(stack, value[index], elem);
+  } else stack.push(value);
 }
 
 /** Pushes many items, which spreading them as arguments would overflow the call stack with. */

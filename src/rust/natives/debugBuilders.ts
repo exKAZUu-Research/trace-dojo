@@ -83,7 +83,8 @@ function body(b: DebugBuilder, nonExhaustive: boolean): string {
   }
   const entries = nonExhaustive ? [...b.entries, '..'] : b.entries;
   const padding = b.kind === 'struct' ? ' ' : '';
-  return `${open}${padding}${entries.join(', ')}${padding}${close}`;
+  const comma = b.kind === 'tuple' && b.name === '' && entries.length === 1 ? ',' : '';
+  return `${open}${padding}${entries.join(', ')}${comma}${padding}${close}`;
 }
 
 define({

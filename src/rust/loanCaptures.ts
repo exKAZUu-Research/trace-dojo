@@ -123,6 +123,7 @@ export function projectedBindings(
   pattern: Pattern,
   annotations: Annotations
 ): ReturnType<typeof patternBindingParts> | undefined {
+  if (pattern.kind === 'wild') return [];
   const aggregate = pattern.kind === 'tuple' || pattern.kind === 'struct' || pattern.kind === 'tupleStruct';
   return aggregate && canProjectPattern(pattern, annotations) ? patternBindingParts(pattern, annotations) : undefined;
 }

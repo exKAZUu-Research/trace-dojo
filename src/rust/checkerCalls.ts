@@ -16,6 +16,7 @@ import { normalize } from './infer';
 import type { Module } from './items';
 import { compileError } from './items';
 import { autoderefSteps, boundsOf, lookupMethod } from './methods';
+import { typeAfter } from './regions';
 import {
   adt,
   type ClosureType,
@@ -67,6 +68,7 @@ function callFn(
     );
   }
   checkArgs(c, expr.args, params, expectations(c, sig.ret, params, expected));
+  if (fn.selfMode === 'value') c.requireTrait(params[0], 'Sized', expr.args[0].span);
   expr.callee.ty = { kind: 'fn', params, ret: sig.ret };
   return sig.ret;
 }
@@ -382,6 +384,7 @@ function checkMoveOutOfRef(
   selfType: Type
 ): void {
   if (adjust.autoref !== 'none' || adjust.asIter) return;
+  c.requireTrait(typeAfter(expr.receiver.ty, adjust.derefs) ?? selfType, 'Sized', expr.receiver.span);
   const throughRef = adjust.derefs.some((step) => step === 'ref' || step === 'mutRef');
   if (!throughRef) return;
   c.deferredChecks.push(() => {

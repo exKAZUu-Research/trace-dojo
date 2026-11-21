@@ -180,10 +180,12 @@ export class IterValue {
     public nextBack?: () => Next,
     /** The number of elements left, for iterators that know it (ExactSizeIterator). */
     public remaining?: () => number | bigint,
-    /** What the iterator keeps alive, such as the collection it walks, for garbage collection. */
+    /** Owned values the iterator keeps alive across calls. */
     readonly roots: unknown[] = []
   ) {}
 
+  readonly borrowedRoots: Value[] = [];
+  remainingTextBytes?: () => number;
   stateRoots?: () => Iterable<unknown>;
 
   /** Elements pushed back by `peekable`. */

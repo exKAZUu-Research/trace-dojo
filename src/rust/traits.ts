@@ -29,6 +29,7 @@ export type Answer = 'yes' | 'no' | 'unknown';
 /** Decides which types implement which traits: from impls, derives, bounds, and the standard library's rules. */
 export class TraitSolver {
   private readonly implGoals: { trait: TraitDef; type: Type; args: Type[] }[] = [];
+  private readonly sizedGoals: Type[] = [];
 
   constructor(
     readonly program: Program,
@@ -65,6 +66,16 @@ export class TraitSolver {
 
   private builtinOnly(t: Type, ref: TraitRef): Answer {
     return ref.trait.builtin ? builtinImplements(this, t, ref) : 'no';
+  }
+
+  sizedTail(owner: Type, tail: Type, all: (types: Type[]) => Answer): Answer {
+    if (this.sizedGoals.length >= 64 || this.sizedGoals.some((type) => sameType(type, owner))) return 'no';
+    this.sizedGoals.push(owner);
+    try {
+      return all([tail]);
+    } finally {
+      this.sizedGoals.pop();
+    }
   }
 
   private pseudoImplements(type: Type & { kind: 'adt' }, ref: TraitRef): Answer {

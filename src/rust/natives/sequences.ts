@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 529 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss 530 -- One native per method of the standard library.
 import { keepVecCapacity, setIntoIterBuffer, vecCapacity } from '../capacity';
 import { sliceRange } from '../compiler';
 import { type DebugPart } from '../debugText';
@@ -344,8 +344,9 @@ function sliceSplit(
     () => take(false),
     () => take(true),
     undefined,
-    [base, predicate]
+    [predicate]
   );
+  iter.borrowedRoots.push(base);
   iter.fork = () => sliceSplit(ctx, base, { ...state }, cloneValue(ctx.typeArgs[1], predicate));
   return described(iter, (show, item) =>
     fieldsPart('Split', [
@@ -399,9 +400,9 @@ function windows(base: Value[], front: number, back: number, width: number): Ite
   const iter = new IterValue(
     () => (remaining() === 0 ? DONE : take(0n, false)),
     () => take(0n, true),
-    remaining,
-    [base]
+    remaining
   );
+  iter.borrowedRoots.push(base);
   iter.nth = (n) => take(n, false);
   iter.nthBack = (n) => take(n, true);
   iter.rest = () => Array.from({ length: remaining() }, (_, index) => view(front + index));

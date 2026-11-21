@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 508 -- One rule per trait of the standard library.
+// code-gauge-allow-file fileNcss 514 -- One rule per trait of the standard library.
 import { collectionKeyAnswer } from './collectionBounds';
 import { normalize } from './infer';
 import { supportsDebug } from './iterDebug';
@@ -6,7 +6,17 @@ import { intoIterItem } from './iterTypes';
 import { conversionExists, intoConversion } from './traitConversions';
 import { doubleEndedSearcher, iteratorCapability } from './traitIterators';
 import type { Answer, TraitSolver } from './traits';
-import { freshVar, isBuiltin, isIteratorShape, isSigned, shallow, type TraitRef, type Type, USIZE } from './types';
+import {
+  freshVar,
+  isBuiltin,
+  isIteratorShape,
+  isSigned,
+  shallow,
+  substitute,
+  type TraitRef,
+  type Type,
+  USIZE,
+} from './types';
 
 /** A question of whether a type implements one of the standard library's traits. */
 interface Goal {
@@ -183,9 +193,15 @@ export function builtinImplements(solver: TraitSolver, t: Type, ref: TraitRef): 
   return rule({ solver, t, ref, name, all });
 }
 
-function sized({ t, all }: Goal): Answer {
+function sized({ solver, t, all }: Goal): Answer {
   if (t.kind === 'tuple') return all(t.elems);
   if (t.kind === 'array') return all([t.elem]);
+  if (t.kind === 'adt' && !t.def.builtin && t.def.kind === 'struct') {
+    const tail = t.def.variants[0]?.fields.at(-1)?.type;
+    if (!tail) return 'yes';
+    const subst = new Map(t.def.params.map((param, index) => [param, t.args[index]]));
+    return solver.sizedTail(t, substitute(tail, subst), all);
+  }
   return t.kind === 'str' || t.kind === 'slice' || t.kind === 'dyn' ? 'no' : 'yes';
 }
 

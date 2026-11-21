@@ -1,5 +1,5 @@
-// code-gauge-allow-file fileNcss 869 -- One native per method of the standard library.
-import { collectedVecCapacity, inPlaceCapacity, setVecCapacity, sizeTable } from '../capacity';
+// code-gauge-allow-file fileNcss 877 -- One native per method of the standard library.
+import { collectedVecCapacity, inPlaceCapacity, setVecCapacity, sizeTable, type TableMap } from '../capacity';
 import type { DebugPart } from '../debugText';
 import { normalize } from '../infer';
 import { type DebugValue, described, fieldsPart, iteratorDebug, numberPart, optionPart } from '../iterDebug';
@@ -67,9 +67,9 @@ export function arrayIter(
   const iter = new IterValue(
     () => (front < back ? map(front++) : DONE),
     () => (front < back ? map(--back) : DONE),
-    () => back - front,
-    [array]
+    () => back - front
   );
+  iter.borrowedRoots.push(array);
   iter.rest = () => Array.from({ length: Math.max(back - front, 0) }, (_, offset) => map(front + offset));
   iter.frontIndex = () => front;
   iter.fork = () => arrayIter(array, front, back, map);
@@ -183,16 +183,13 @@ export function mapIter(map: MapValue, mode: 'value' | 'ref' | 'mut', types: Typ
     const entry = entries[i];
     return mode === 'mut' ? [entry[0], new ElementPlace(entry, 1)] : [entry[0], entry[1]];
   });
-  iter.roots.push(map);
   return iter;
 }
 
 export function setIter(set: SetValue, owned?: Type): IterValue {
   const values = set.entries.snapshot();
   if (owned) return ownedIter(values, owned);
-  const iter = arrayIter(values);
-  iter.roots.push(set);
-  return iter;
+  return arrayIter(values);
 }
 
 function iterOf(value: Value): IterValue {
@@ -1036,17 +1033,8 @@ function iteratorOrder(ctx: NativeContext, first: IterValue, second: IterValue, 
 }
 
 define({
-  'IterImpl<_, _>::collect': ([self], ctx) => {
-    // Collecting into a `Result` or an `Option` stops at the first `Err` or `None`, taking nothing after it.
-    const target = normalize(shallow(ctx.typeArgs[2]));
-    const builtin = target.kind === 'adt' ? target.def.builtin : undefined;
-    const stopVariant = builtin === 'Result' ? 1 : builtin === 'Option' ? 0 : undefined;
-    const stop =
-      stopVariant === undefined ? undefined : (item: Value) => (deref(item) as EnumValue).variant === stopVariant;
-    if (builtin === 'Vec') return collectVec(ctx, iterOf(self), ctx.typeArgs[1], ctx.typeArgs[0]);
-    if (builtin === 'String') return collectString(ctx, iterOf(self), ctx.typeArgs[0], ctx.typeArgs[1]);
-    return collectInto(ctx, collectAll(ctx, iterOf(self), stop, !stop), ctx.typeArgs[2], ctx.typeArgs[0]);
-  },
+  'IterImpl<_, _>::collect': ([self], ctx) =>
+    collectIterator(ctx, iterOf(self), ctx.typeArgs[2], ctx.typeArgs[0], ctx.typeArgs[1]),
   'IterImpl<_, _>::sum': ([self], ctx) => sumOrProduct(ctx, iterOf(self), ctx.typeArgs[2], '+'),
   'IterImpl<_, _>::product': ([self], ctx) => sumOrProduct(ctx, iterOf(self), ctx.typeArgs[2], '*'),
   'IterImpl<_, _>::count': ([self], ctx) => {
@@ -1358,22 +1346,27 @@ function keepsBest(order: number, sign: 1 | -1): boolean {
  * which it takes no more elements.
  */
 function sumOfOutcomes(ctx: NativeContext, iter: IterValue, t: Type & { kind: 'adt' }, op: '+' | '*'): Value {
-  const success = t.def.builtin === 'Result' ? 0 : 1;
+  return consumeOutcomes(iter, t, (values) => sumOrProduct(ctx, values, t.args[0], op));
+}
+
+function consumeOutcomes(
+  iter: IterValue,
+  target: Type & { kind: 'adt' },
+  consume: (values: IterValue) => Value
+): Value {
+  const success = target.def.builtin === 'Result' ? 0 : 1;
   let failure: EnumValue | undefined;
-  const source = foldingView(iter);
   const values = new IterValue(() => {
     if (failure) return DONE;
-    const item = nextOf(source);
+    const item = nextForFold(iter);
     if (item === DONE) return DONE;
     const outcome = deref(item) as EnumValue;
-    if (outcome.variant !== success) {
-      failure = outcome;
-      return DONE;
-    }
-    return outcome.fields[0];
+    if (outcome.variant === success) return outcome.fields[0];
+    failure = outcome;
+    return DONE;
   });
-  const total = sumOrProduct(ctx, values, t.args[0], op);
-  return failure ?? new EnumValue(t.def, success, [total]);
+  const value = consume(values);
+  return failure ?? new EnumValue(target.def, success, [value]);
 }
 
 function sumOrProduct(ctx: NativeContext, iter: IterValue, type: Type, op: '+' | '*'): Value {
@@ -1461,81 +1454,113 @@ function inPlaceSource(iter: IterValue, shape: Type): IterValue | undefined {
 }
 
 export function collectInto(ctx: NativeContext, items: Value[], target: Type, item: Type): Value {
-  return ctx.runtime.withRoots(items, () => collectFromItems(ctx, items, target, item));
+  return ctx.runtime.withRoots(items, () => collectIterator(ctx, arrayIter(items), target, item));
 }
 
-/** Collects elements into a collection of the type `collect` was asked for. */
-// code-gauge-allow functionCognitiveComplexity 25 -- One native per method of the standard library.
-// code-gauge-allow functionNcss 56 -- One case per collection type.
-function collectFromItems(ctx: NativeContext, items: Value[], target: Type, item: Type): Value {
+function collectIterator(ctx: NativeContext, iter: IterValue, target: Type, item: Type, shape?: Type): Value {
   const t = normalize(shallow(target));
   if (t.kind !== 'adt') throw new Error('collect into a non-collection');
-  ctx.runtime.allocate(items.length);
   switch (t.def.builtin) {
-    case 'Vec':
-    case 'VecDeque': {
-      return items;
-    }
-    case 'Box': {
-      // A `Box<str>` collects text, as `String` does; a `Box<[T]>` the elements.
-      return shallow(t.args[0]).kind === 'str' ? items.map(textOf).join('') : items;
-    }
-    case 'BinaryHeap': {
-      return heapify([...items], t.args[0]);
+    case 'Vec': {
+      if (shape) return collectVec(ctx, iter, shape, item);
+      return collectBulk(ctx, iter, t, item);
     }
     case 'String': {
-      return collectString(ctx, arrayIter(items), item);
-    }
-    case 'BTreeMap': {
-      return collectBTreeMap(ctx, items as [Value, Value][], t.args[0], item);
-    }
-    case 'HashMap': {
-      const map = new MapValue(false);
-      sizeTable(map.entries.table, sizeOf({ kind: 'tuple', elems: t.args }));
-      for (const entry of items as Value[][]) {
-        const hash = map.entries.key(t.args[0], entry[0]);
-        const existing = map.entries.get(hash);
-        if (existing) existing[1] = entry[1];
-        else map.entries.set(hash, [entry[0], entry[1]]);
-      }
-      return map;
-    }
-    case 'BTreeSet': {
-      return collectBTreeSet(ctx, items, t.args[0]);
+      return collectString(ctx, iter, item, shape);
     }
     case 'HashSet': {
-      const set = new SetValue(false);
-      sizeTable(set.entries.table, sizeOf(t.args[0]));
-      for (const element of items) {
-        const hash = set.entries.key(t.args[0], element);
-        if (!set.entries.has(hash)) set.entries.set(hash, element);
-      }
-      return set;
+      return collectHashSet(ctx, iter, t.args[0], shape);
     }
+    case 'HashMap': {
+      return collectHashMap(ctx, iter, t.args, shape);
+    }
+    case 'Option':
     case 'Result': {
-      const values: Value[] = [];
-      for (const element of items as EnumValue[]) {
-        if (element.variant === 1) return element;
-        values.push(element.fields[0]);
-      }
-      const inner = normalize(shallow(item)) as { args: Type[] };
-      return new EnumValue(ctx.interp.program.adtDef('Result'), 0, [
-        collectInto(ctx, values, t.args[0], inner.args[0]),
-      ]);
-    }
-    case 'Option': {
-      const values: Value[] = [];
-      for (const element of items as EnumValue[]) {
-        if (element.variant === 0) return element;
-        values.push(element.fields[0]);
-      }
-      const inner = normalize(shallow(item)) as { args: Type[] };
-      return some(ctx, collectInto(ctx, values, t.args[0], inner.args[0]));
+      return collectOutcome(ctx, iter, t, item);
     }
     default: {
-      throw new Error(`collect into ${t.def.name}`);
+      return collectBulk(ctx, iter, t, item);
     }
   }
+}
+
+function collectOutcome(ctx: NativeContext, iter: IterValue, target: Type & { kind: 'adt' }, item: Type): Value {
+  const input = normalize(shallow(item)) as Type & { kind: 'adt' };
+  return consumeOutcomes(iter, target, (values) => collectIterator(ctx, values, target.args[0], input.args[0]));
+}
+
+function collectHashMap(ctx: NativeContext, iter: IterValue, types: Type[], shape?: Type): MapValue {
+  const map = new MapValue(false);
+  sizeTable(map.entries.table, sizeOf({ kind: 'tuple', elems: types }));
+  reserveHashInput(map.entries.table!, iter, shape);
+  return collectHash(ctx, iter, map, (item) => {
+    const [key, value] = item as Value[];
+    const lookup = map.entries.key(types[0], key);
+    const existing = map.entries.get(lookup);
+    if (existing) existing[1] = value;
+    else {
+      ctx.runtime.allocate(1);
+      map.entries.set(lookup, [key, value]);
+    }
+  });
+}
+
+function collectHashSet(ctx: NativeContext, iter: IterValue, itemType: Type, shape?: Type): SetValue {
+  const set = new SetValue(false);
+  sizeTable(set.entries.table, sizeOf(itemType));
+  reserveHashInput(set.entries.table!, iter, shape);
+  return collectHash(ctx, iter, set, (item) => {
+    const lookup = set.entries.key(itemType, item);
+    if (set.entries.has(lookup)) return;
+    ctx.runtime.allocate(1);
+    set.entries.set(lookup, item);
+  });
+}
+
+function collectHash<T extends MapValue | SetValue>(
+  ctx: NativeContext,
+  iter: IterValue,
+  collection: T,
+  insert: (item: Value) => void
+): T {
+  return ctx.runtime.withRoots([collection], () => {
+    each(ctx, iter, (item) => ctx.runtime.withRoots([item], () => insert(item)), 'fold');
+    return collection;
+  });
+}
+
+function reserveHashInput(table: TableMap<unknown, unknown>, iter: IterValue, shape?: Type): void {
+  if (shape && iteratorCapability(shape, 'exact') !== 'yes') return;
+  const count = lengthOf(iter);
+  if (count <= BigInt(Number.MAX_SAFE_INTEGER)) table.reserve(Number(count));
+}
+
+function collectBulk(ctx: NativeContext, iter: IterValue, target: Type & { kind: 'adt' }, item: Type): Value {
+  const items = collectAll(ctx, iter, undefined, true);
+  ctx.runtime.allocate(items.length);
+  return ctx.runtime.withRoots(items, () => {
+    switch (target.def.builtin) {
+      case 'Vec':
+      case 'VecDeque': {
+        return items;
+      }
+      case 'Box': {
+        return shallow(target.args[0]).kind === 'str' ? items.map(textOf).join('') : items;
+      }
+      case 'BinaryHeap': {
+        return heapify(items, target.args[0]);
+      }
+      case 'BTreeMap': {
+        return collectBTreeMap(ctx, items as [Value, Value][], target.args[0], item);
+      }
+      case 'BTreeSet': {
+        return collectBTreeSet(ctx, items, target.args[0]);
+      }
+      default: {
+        throw new Error(`collect into ${target.def.name}`);
+      }
+    }
+  });
 }
 
 function collectBTreeMap(ctx: NativeContext, pairs: [Value, Value][], key: Type, item: Type): MapValue {

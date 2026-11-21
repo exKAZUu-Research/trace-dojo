@@ -49,7 +49,7 @@ function lowerHint(iter: IterValue, shape: Type): bigint {
   const t = normalize(shallow(shape));
   if (t.kind !== 'adt') return 0n;
   if (t.def.name === 'CharsShape') {
-    const bytes = (iter.rest?.() ?? []).reduce<number>((sum, char) => sum + stringByteLength(char), 0);
+    const bytes = iter.remainingTextBytes?.() ?? 0;
     return BigInt(Math.ceil(bytes / 4));
   }
   if (['RangeShape', 'RangeInclusiveShape'].includes(t.def.name)) return lengthOf(iter);

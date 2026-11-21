@@ -107,26 +107,24 @@ export function compileFor(c: Compiler, expr: ExprOf<'for'>): Eval {
   const answered = bindsAnswer(expr.pattern);
   return (frame) => {
     const source = iterable(frame);
-    // The iterator keeps what the loop still uses: all of a borrowed collection, or what an owned one has left.
     const iterator = c.support.toIter(source, fromType(frame)) as IterValue;
-    frame.temporaries.push(iterator);
-    try {
-      for (;;) {
-        frame.runtime.spend();
-        const next = iterator.next();
-        if (next === DONE) return UNIT_VALUE;
-        frame.temporaries.push(bind(frame, next));
-        try {
-          stepBinding(frame, row, answered);
-          if (runBody(body, frame, label)) return UNIT_VALUE;
-        } finally {
-          frame.temporaries.pop();
-          frame.endScope(patternSlots);
+    return frame.runtime.withRoots([iterator], () =>
+      frame.runtime.withActiveIterators([iterator], () => {
+        for (;;) {
+          frame.runtime.spend();
+          const next = iterator.next();
+          if (next === DONE) return UNIT_VALUE;
+          frame.temporaries.push(bind(frame, next));
+          try {
+            stepBinding(frame, row, answered);
+            if (runBody(body, frame, label)) return UNIT_VALUE;
+          } finally {
+            frame.temporaries.pop();
+            frame.endScope(patternSlots);
+          }
         }
-      }
-    } finally {
-      frame.temporaries.pop();
-    }
+      })
+    );
   };
 }
 

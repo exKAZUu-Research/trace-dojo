@@ -362,7 +362,7 @@ export class ItemCollector {
   }
 
   // code-gauge-allow functionCognitiveComplexity 27 -- Resolves enum declarations, variants, and discriminants in order.
-  // code-gauge-allow functionNcss 42 -- Follows Rust's name resolution case by case.
+  // code-gauge-allow functionNcss 43 -- Follows Rust's name resolution case by case.
   private enumItem(item: EnumItem, module: Module): void {
     const def: AdtDef = {
       name: item.name,
@@ -396,18 +396,16 @@ export class ItemCollector {
     // Discriminants are known before the bodies, since they are literals in learning programs.
     let next = 0n;
     const discriminants = new Set<bigint>();
+    const hasPayloadVariant = item.variants.some((variant) => variant.shape !== 'unit');
     for (const [index, variant] of item.variants.entries()) {
       let discriminant = next;
       if (variant.discriminant) {
         const literal = variant.discriminant;
+        if (hasPayloadVariant) compileError(literal.span, 'フィールドを持つ列挙型の列挙子には、値を書けません。');
         if (literal.kind === 'int') discriminant = literal.value;
         else if (literal.kind === 'unary' && literal.op === '-' && literal.operand.kind === 'int') {
           discriminant = -literal.operand.value;
         } else compileError(literal.span, '列挙子の値には、整数のリテラルを書いてください。');
-        if (variant.shape !== 'unit' && item.variants.some((v) => v.shape !== 'unit')) {
-          // Explicit discriminants on enums with fields need #[repr], which is an attribute.
-          compileError(literal.span, 'フィールドを持つ列挙型の列挙子には、値を書けません。');
-        }
       }
       if (discriminant < intMin('isize') || discriminant > intMax('isize')) {
         compileError(variant.discriminant?.span ?? variant.span, `列挙子 ${variant.name} の値が isize の範囲外です。`);
@@ -454,6 +452,7 @@ export class ItemCollector {
     const def: TraitDef = {
       name: item.name,
       path: module.isStd && module.path !== 'std::io' ? item.name : `${module.path}::${item.name}`,
+      span: item.span,
       params: item.generics.params.map((param) => newTypeParam(param.name)),
       self,
       methods: new Map(),

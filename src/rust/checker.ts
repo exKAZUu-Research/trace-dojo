@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 847 -- The checker core owns body, entry point, and type obligations.
+// code-gauge-allow-file fileNcss 877 -- The checker core owns body, entry point, and type obligations.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ExecutionBudget } from '../interpreter/limits';
 import { Annotations, type Coercion, type FnContext, type LocalVar, type PathRes } from './annotations';
@@ -129,7 +129,7 @@ export class Checker {
   }
 
   checkProgram(): void {
-    this.checkDeclaredTypes(0, 0, 0, 0);
+    this.checkDeclaredTypes(0, 0, 0, 0, 0);
     this.checkDerivedTraits();
     this.checkImplCoherence();
     for (const impl of this.program.impls) this.checkImplSignatures(impl);
@@ -140,30 +140,60 @@ export class Checker {
   }
 
   // code-gauge-allow functionCognitiveComplexity 28 -- Checks each kind of declared item in its own type scope.
-  private checkDeclaredTypes(firstAdt: number, firstFn: number, firstConst: number, firstImpl: number): void {
+  private checkDeclaredTypes(
+    firstAdt: number,
+    firstFn: number,
+    firstConst: number,
+    firstImpl: number,
+    firstTrait: number
+  ): void {
+    for (const trait of this.program.traits.slice(firstTrait)) {
+      if (!trait.span || (trait.module as Module | undefined)?.isStd) continue;
+      this.checkParamBounds([...trait.params, trait.self], trait.span);
+    }
     for (const def of this.program.adts.slice(firstAdt)) {
       if ((def.module as Module | undefined)?.isStd) continue;
-      for (const variant of def.variants) {
-        for (const [index, field] of variant.fields.entries()) {
-          checkFieldLifetimes(field.type, field.span, def.lifetimeParams ?? []);
-          const sized = def.kind === 'enum' || index + 1 < variant.fields.length;
-          if (sized) this.checkSizedWrittenType(field.type, field.span);
-          else this.checkWrittenType(field.type, field.span);
-        }
-      }
+      this.checkAdtDeclaration(def);
     }
     for (const fn of this.program.fns.slice(firstFn)) {
       if ((fn.module as Module).isStd || !fn.ast) continue;
-      for (const [index, type] of fn.paramTypes.entries()) this.checkSizedWrittenType(type, fn.ast.params[index].span);
-      this.checkSizedWrittenType(fn.ret, fn.ast.ret?.span ?? fn.ast.span);
+      this.checkFnDeclaration(fn, fn.ast);
     }
     for (const def of this.program.consts.slice(firstConst)) {
       if (!def.module.isStd) this.checkSizedWrittenType(def.type, def.ast.span);
     }
     for (const impl of this.program.impls.slice(firstImpl)) {
       if ((impl.module as Module).isStd) continue;
+      this.checkParamBounds(impl.params, impl.span);
       this.checkWrittenType(impl.selfType, impl.span);
       for (const type of impl.trait?.args ?? []) this.checkWrittenType(type, impl.span);
+    }
+  }
+
+  private checkAdtDeclaration(def: AdtDef): void {
+    this.checkParamBounds(def.params, def.span);
+    for (const variant of def.variants) {
+      for (const [index, field] of variant.fields.entries()) {
+        checkFieldLifetimes(field.type, field.span, def.lifetimeParams ?? []);
+        if (def.kind === 'enum' || index + 1 < variant.fields.length) {
+          this.checkSizedWrittenType(field.type, field.span);
+        } else this.checkWrittenType(field.type, field.span);
+      }
+    }
+  }
+
+  private checkFnDeclaration(fn: FnDef, ast: FnItem): void {
+    this.checkParamBounds(fn.params, ast.span);
+    for (const { param, bound } of fn.extraBounds ?? []) {
+      this.checkTraitApplication({ kind: 'param', param }, bound, ast.span);
+    }
+    for (const [index, type] of fn.paramTypes.entries()) this.checkSizedWrittenType(type, ast.params[index].span);
+    this.checkSizedWrittenType(fn.ret, ast.ret?.span ?? ast.span);
+  }
+
+  private checkParamBounds(params: TypeParam[], span: Span): void {
+    for (const param of params) {
+      for (const bound of param.bounds) this.checkTraitApplication({ kind: 'param', param }, bound, span);
     }
   }
 
@@ -318,14 +348,7 @@ export class Checker {
 
   private checkImplRequirements(impl: ImplDef, trait: TraitRef): void {
     const self = shallow(impl.selfType);
-    const parameters = new Map<TypeParam, Type>([
-      [trait.trait.self, self],
-      ...trait.trait.params.map((param, index): [TypeParam, Type] => [param, trait.args[index]]),
-    ]);
-    for (const param of trait.trait.params) {
-      const arg = parameters.get(param) as Type;
-      for (const bound of param.bounds) this.require(arg, substituteTraitRef(bound, parameters), impl.span);
-    }
+    this.checkTraitApplication(self, trait, impl.span);
     for (const bound of supertraitsOf(trait, self)) {
       if (this.solver.implements(self, bound) === 'no') {
         compileError(
@@ -1024,14 +1047,33 @@ export class Checker {
     this.requireTrait(type, 'Sized', span);
   }
 
+  private checkTraitApplication(self: Type, ref: TraitRef, span: Span): void {
+    const { trait, args } = ref;
+    const parameters = new Map<TypeParam, Type>([[trait.self, self]]);
+    for (const [index, param] of trait.params.entries()) parameters.set(param, args[index]);
+    const implicitSized = !(trait.module as Module | undefined)?.isStd && !!trait.span;
+    for (const [index, param] of trait.params.entries()) {
+      const arg = args[index];
+      this.checkWrittenType(arg, span);
+      if (implicitSized) this.requireTrait(arg, 'Sized', span);
+      for (const bound of param.bounds) this.require(arg, substituteTraitRef(bound, parameters), span);
+    }
+  }
+
   /**
    * Rejects what rustc rejects in a written type: a trait object of a trait that methods returning `Self` or taking
    * type parameters make not dyn compatible (E0038), and an unsized type (`dyn T`, `str`) as a type argument (E0277).
    */
-  // code-gauge-allow functionCognitiveComplexity 19 -- Checks type well-formedness at each nested written type.
+  // code-gauge-allow functionCognitiveComplexity 22 -- Checks type well-formedness at each nested written type.
   private checkWrittenType(type: Type, span: Span): void {
     const t = shallow(type);
-    if (t.kind === 'dyn') checkDynCompatible(t.trait.trait, span);
+    if (t.kind === 'dyn') {
+      checkDynCompatible(t.trait.trait, span);
+      this.checkTraitApplication(t, t.trait, span);
+    }
+    if (t.kind === 'opaque') {
+      for (const bound of t.opaque.bounds) this.checkTraitApplication(t, bound, span);
+    }
     if (t.kind === 'array') this.requireTrait(t.elem, 'Sized', span);
     if (t.kind === 'adt') {
       for (const [arg, bound] of adtArgumentBounds(t.def, t.args)) {
@@ -1083,10 +1125,11 @@ export class Checker {
     const firstFn = this.program.fns.length;
     const firstConst = this.program.consts.length;
     const firstImpl = this.program.impls.length;
+    const firstTrait = this.program.traits.length;
     collector.collectItems(block.items, module);
     collector.finish();
     resolveImports(module);
-    this.checkDeclaredTypes(firstAdt, firstFn, firstConst, firstImpl);
+    this.checkDeclaredTypes(firstAdt, firstFn, firstConst, firstImpl, firstTrait);
     this.checkDerivedTraits(firstAdt);
     for (const impl of this.program.impls.slice(firstImpl)) this.checkImplSignatures(impl);
     this.nestedFns.push(...this.program.pendingFns.splice(pendingBefore));

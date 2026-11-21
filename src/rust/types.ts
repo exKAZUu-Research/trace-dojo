@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 432 -- Defines Rust types, their substitutions and their shared structural operations.
+// code-gauge-allow-file fileNcss 433 -- Defines Rust types, their substitutions and their shared structural operations.
 import type { ConstItem, FnItem, Span } from './ast';
 import type { Module } from './items';
 
@@ -155,6 +155,7 @@ export interface AdtDef {
 export interface TraitDef {
   name: string;
   path: string;
+  span?: Span;
   params: TypeParam[];
   /** The trait's `Self`, which its methods' signatures refer to. */
   self: TypeParam;

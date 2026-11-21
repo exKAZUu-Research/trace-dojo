@@ -2680,7 +2680,7 @@ test.each([
     'let _allocated = vec![0; 999_945]; let a: std::collections::HashSet<_> = (0..15).collect(); let b: std::collections::HashSet<_> = (15..30).collect(); let _union = &a | &b;',
   ],
   ['a trailing format literal', `let s = format!("{}{}", "a".repeat(999_000), "${'b'.repeat(1024)}");`],
-  ['materialized UTF-8 bytes', 'let s = "é".repeat(300_000); let _a = s.as_bytes(); let _b = s.bytes();'],
+  ['materialized UTF-8 bytes', 'let s = "é".repeat(300_000); let _a = s.as_bytes(); let _b = s.as_bytes();'],
   ['a concatenated Vec', 'let mut v = vec![1u8]; for _ in 0..40 { v = [v.clone(), v.clone()].concat(); }'],
   ['clones of a Vec', 'let v = vec![0u8; 900_000]; let mut w = Vec::new(); for _ in 0..100 { w.push(v.clone()); }'],
 ])('%s stops at the memory limit', (_name, body) => {
@@ -5546,5 +5546,177 @@ fn main() {
   expect(executeProgram('rust', program)).toMatchObject({
     kind: 'executed',
     stdout: 'ne vec false\nne array false\nne slice false\nne tuple false\nne deque false\neq option false\n',
+  });
+});
+
+test('follows Rust temporary scopes for explicit borrows and constant promotion', () => {
+  const program = `fn main() {
+    const DIVISOR: i32 = 2;
+    let direct = &String::from("direct");
+    let (wrapped,) = (&String::from("tuple"),);
+    let indexed = &vec![String::from("index")][0];
+    let promoted = [1 + 2, 5 % DIVISOR, 6 / -1, 1u8 as i32, [8, 9][1], (4, 5).0].iter();
+    println!("{} {} {} {:?}", direct, wrapped, indexed, promoted);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'direct tuple index Iter([3, 1, -6, 1, 9, 4])\n',
+  });
+  for (const init of [
+    '(&String::from("text")).as_str()',
+    'String::from("text").as_str()',
+    '(&Box::new(String::from("text"))).as_str()',
+    '[6 / (1 + 1)].iter()',
+    '[(3 + 4) / -1].iter()',
+    '[true && false].iter()',
+  ]) {
+    expect(executeProgram('rust', `fn main() { let value = ${init}; println!("{:?}", value); }`)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [{ message: expect.stringContaining('参照を外へ持ち出せません') }],
+    });
+  }
+});
+
+test('ignores a wildcard place in move and borrowing Rust closures', () => {
+  const program = `fn main() {
+    let first = String::from("first");
+    let second = String::from("second");
+    let moved = move || { let _ = first; };
+    let borrowed = || { let _ = second; };
+    println!("{}", first);
+    drop(second);
+    moved();
+    borrowed();
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'first\n' });
+});
+
+test('formats anonymous singleton DebugTuple output with a trailing comma', () => {
+  const program = `use std::fmt;
+struct Row;
+impl fmt::Debug for Row {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("").field(&"entry").finish()
+    }
+}
+fn main() { println!("{:?} {:#?}", Row, Row); }`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '("entry",) (\n    "entry",\n)\n',
+  });
+});
+
+test('drops Turtle collections after the last use of a borrowing iterator', () => {
+  for (const collection of ['vec![Turtle::new(0, 1)]', 'std::collections::VecDeque::from([Turtle::new(0, 1)])']) {
+    const program = `fn main() {
+    let observer = Turtle::new(0, 0);
+    let owners = ${collection};
+    let mut iter = owners.iter().peekable();
+    println!("{}", iter.peek().is_some());
+    println!("{}", observer.can_move_forward());
+    drop(owners);
+    println!("{}", observer.can_move_forward());
+    for _ in vec![Turtle::new(0, 1)].iter().take(1) {
+        println!("{}", observer.can_move_forward());
+    }
+    println!("{}", observer.can_move_forward());
+}`;
+    expect(executeProgram('rust', program)).toMatchObject({
+      kind: 'executed',
+      stdout: 'true\nfalse\ntrue\nfalse\ntrue\n',
+    });
+  }
+});
+
+test('rejects unsized values and malformed trait bounds at declaration and call boundaries', () => {
+  for (const declaration of [
+    'enum Message { Quit = 0, Move(i32) }',
+    'enum Message { Move { dist: i32 }, Quit = 0 }',
+    'struct Text { tail: str } fn take(_: Text) {}',
+    'trait Shape {} struct Tail { tail: dyn Shape } struct Outer(Tail); fn take(_: Outer) {}',
+    'trait Tr<T: Clone> {} struct Plain; fn bad<X: Tr<Plain>>() {}',
+    'trait Tr<T: Clone> {} struct Plain; fn bad<X>() where X: Tr<Plain> {}',
+    'trait Tr<T: Clone> {} struct Plain; struct Bad<X: Tr<Plain>>(X);',
+    'trait Tr<T: Clone> {} struct Plain; trait Bad: Tr<Plain> {}',
+  ]) {
+    expect(executeProgram('rust', `${declaration}\nfn main() {}`)).toMatchObject({ kind: 'compileError' });
+  }
+  const dispatch = `trait Consume { fn consume(self) -> i32; }
+struct Item;
+impl Consume for Item { fn consume(self) -> i32 { 7 } }
+fn main() {
+    let boxed: Box<dyn Consume> = Box::new(Item);
+    println!("{}", boxed.consume());
+}`;
+  expect(executeProgram('rust', dispatch)).toMatchObject({ kind: 'compileError' });
+  expect(executeProgram('rust', dispatch.replace('boxed.consume()', 'Consume::consume(*boxed)'))).toMatchObject({
+    kind: 'compileError',
+  });
+  expect(executeProgram('rust', dispatch.replace('Box<dyn Consume>', 'Box<Item>'))).toMatchObject({
+    kind: 'executed',
+    stdout: '7\n',
+  });
+  expect(
+    executeProgram(
+      'rust',
+      `trait Tr<T: Clone> {}
+struct Text { tail: str }
+fn take(_: &Text) {}
+fn bounded<X: Tr<T>, T: Clone>() {}
+fn main() {}`
+    )
+  ).toMatchObject({ kind: 'executed' });
+});
+
+test('inserts Rust hash collection entries before requesting the next element', () => {
+  const program = `use std::collections::{HashMap, HashSet};
+#[derive(Eq, Hash)]
+struct K(i32);
+impl PartialEq for K {
+    fn eq(&self, other: &Self) -> bool { print!("eq "); self.0 == other.0 }
+}
+fn main() {
+    let _: HashSet<_> = [K(1), K(1), K(2)].into_iter().map(|k| { print!("s{} ", k.0); k }).collect();
+    let _: HashMap<_, _> = [K(1), K(1), K(2)].into_iter().map(|k| { print!("m{} ", k.0); (k, 0) }).collect();
+    let _: Result<HashSet<_>, i32> = [Ok(K(1)), Ok(K(1)), Err(3), Ok(K(2))].into_iter()
+        .map(|item| { print!("r "); item }).collect();
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 's1 s1 eq s2 m1 m1 eq m2 r r eq r ',
+  });
+});
+
+test('clones a partially consumed Rust HashSet operation without replaying its prefix', () => {
+  const program = `use std::collections::HashSet;
+fn main() {
+    let left: HashSet<i32> = (0..2000).collect();
+    let right = HashSet::new();
+    let mut iter = left.union(&right);
+    let mut count = 0;
+    while let Some(_) = iter.next() { let _peek = iter.clone().next(); count += 1; }
+    println!("{}", count);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '2000\n' });
+});
+
+test('advances UTF-8 string iterators lazily from both ends', () => {
+  const program = `fn main() {
+    let text = "é🙂x".repeat(400);
+    for _ in 0..600 {
+        let _ = text.chars().next();
+        let _ = text.char_indices().next();
+        let _ = text.bytes().next();
+    }
+    let mut indices = "é🙂λx".char_indices();
+    println!("{:?} {:?} {:?} {:?}", indices.next(), indices.next_back(), indices.clone().next_back(), indices);
+    let mut bytes = "🙂é".bytes();
+    println!("{:?} {:?} {} {:?}", bytes.next(), bytes.next_back(), bytes.len(), bytes.clone().rev().collect::<Vec<_>>());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      "Some((0, 'é')) Some((8, 'x')) Some((6, 'λ')) CharIndices { front_offset: 2, iter: Chars(['🙂', 'λ']) }\n" +
+      'Some(240) Some(169) 4 [195, 130, 153, 159]\n',
   });
 });

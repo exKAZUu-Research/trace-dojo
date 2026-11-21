@@ -3,10 +3,10 @@ import { escapeDebug, escapeDefaultDebug } from '../fmt';
 import { normalize } from '../infer';
 import { strSliceBytes } from '../interpreter';
 // code-gauge-allow-file fileNcss 488 -- One native per method of the standard library.
-import { described, fieldsPart, listPart, numberPart, tuplePart } from '../iterDebug';
+import { described, tuplePart } from '../iterDebug';
 import { cloneValue } from '../ops';
 import { RustPanic } from '../runtime';
-import { CHAR, REF_STR, shallow, type Type } from '../types';
+import { REF_STR, shallow, type Type } from '../types';
 import { decodeUtf8, utf8Bytes, utf8Length as byteLength } from '../utf8';
 import {
   FnValue,
@@ -26,6 +26,7 @@ import { arrayIter } from './iterators';
 import { parseFloatText, parseInteger } from './numbers';
 import { checkedRangeBounds } from './ranges';
 import { appendText, collectString, extendString } from './stringBuilder';
+import { byteCursor, charCursor, finalScalarStart } from './stringCursors';
 import {
   linesIter,
   matchesIter,
@@ -198,15 +199,6 @@ function secondByteRange(first: number): [number, number] {
   return [0x80, 0xbf];
 }
 
-function strIter(text: string, ctx: NativeContext): IterValue {
-  const items: string[] = [];
-  for (const char of text) {
-    ctx.runtime.allocate(1);
-    items.push(char);
-  }
-  return arrayIter(items);
-}
-
 function isWhitespace(char: string): boolean {
   return /^\p{White_Space}$/u.test(char);
 }
@@ -305,34 +297,9 @@ function rangeBounds(range: Value, length: number): { start: number; end: number
 const strNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
   len: ([s]) => BigInt(stringByteLength(s)),
   is_empty: ([s]) => textOf(s).length === 0,
-  chars: ([s], ctx) => strIter(textOf(s), ctx),
-  bytes: ([s], ctx) => arrayIter(utf8Bytes(textOf(s), ctx.runtime)),
-  char_indices: ([s], ctx) => {
-    const text = textOf(s);
-    const items: Value[] = [];
-    let offset = 0;
-    for (const char of text) {
-      ctx.runtime.allocate(3);
-      items.push([BigInt(offset), char]);
-      offset += byteLength(char);
-    }
-    const iter = arrayIter(items);
-    return described(iter, (show, _item, target) => {
-      const rest = (target.rest?.() ?? []) as [bigint, string][];
-      const front = items[target.frontIndex!()] as [bigint, string] | undefined;
-      const chars = tuplePart('Chars', [
-        listPart(
-          rest.map(([, char]) => char),
-          CHAR,
-          show
-        ),
-      ]);
-      return fieldsPart('CharIndices', [
-        ['front_offset', numberPart(front?.[0] ?? offset)],
-        ['iter', chars],
-      ]);
-    });
-  },
+  chars: ([s]) => charCursor(textOf(s)),
+  bytes: ([s]) => byteCursor(textOf(s)),
+  char_indices: ([s]) => charCursor(textOf(s), true),
   as_bytes: ([s], ctx) => utf8Bytes(textOf(s), ctx.runtime),
   trim: ([s]) => trimWith(textOf(s), true, true, isWhitespace),
   trim_start: ([s]) => trimWith(textOf(s), true, false, isWhitespace),
@@ -512,8 +479,7 @@ const stringNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
     const text = textOf(value);
     const end = text.length;
     if (end === 0) return none(ctx);
-    const previous = text.codePointAt(end - 2) ?? 0;
-    const start = end - (previous > 0xff_ff ? 2 : 1);
+    const start = finalScalarStart(text, end);
     const last = text.slice(start);
     const remaining = stringByteLength(value) - byteLength(last);
     place.set(madeString(text.slice(0, start), stringCapacity(value), remaining));
@@ -571,9 +537,8 @@ const stringNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
     const [start, end] = stringRange(ctx, bytes, range, 'drain');
     const removed = decodeUtf8(bytes.subarray(start, end));
     place.set(decodeUtf8(bytes.subarray(0, start)) + decodeUtf8(bytes.subarray(end)));
-    const iter = strIter(removed, ctx);
-    return described(iter, (show) =>
-      tuplePart('Drain', [(indent) => show((iter.rest?.() ?? []).join(''), REF_STR, indent)])
+    return described(charCursor(removed), (show, _item, target) =>
+      tuplePart('Drain', [(indent) => show((target.rest?.() ?? []).join(''), REF_STR, indent)])
     );
   },
   split_off: ([self, at], ctx) => {

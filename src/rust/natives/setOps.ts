@@ -39,21 +39,38 @@ export function hashSetIter(op: SetOp, left: SetValue, right: SetValue, type: Ty
   return hashSetCursor(sources, type);
 }
 
-function hashSetCursor(sources: HashSetSource[], type: Type, sourceIndex = 0, offset = 0): IterValue {
+type RawCursor = () => { value: Value; next: RawCursor } | undefined;
+
+function rawCursor(values: Iterator<Value>): RawCursor {
+  let step: ReturnType<RawCursor>;
+  let loaded = false;
+  return () => {
+    if (!loaded) {
+      const entry = values.next();
+      if (!entry.done) step = { value: entry.value, next: rawCursor(values) };
+      loaded = true;
+    }
+    return step;
+  };
+}
+
+// code-gauge-allow functionCognitiveComplexity 17 -- Advances across sources and applies their membership filters.
+function hashSetCursor(
+  sources: HashSetSource[],
+  type: Type,
+  sourceIndex = 0,
+  cursor = rawCursor(sources[sourceIndex].from.entries.values())
+): IterValue {
   let source = sources[sourceIndex];
-  let cursor = source?.from.entries.values();
-  spendCollectionWork(offset);
-  for (let index = 0; index < offset; index++) cursor?.next();
   const next = (): Next => {
-    while (cursor) {
-      const entry = cursor.next();
-      if (entry.done) {
+    while (source) {
+      const entry = cursor();
+      if (!entry) {
         source = sources[++sourceIndex];
-        cursor = source?.from.entries.values();
-        offset = 0;
+        if (source) cursor = rawCursor(source.from.entries.values());
         continue;
       }
-      offset++;
+      cursor = entry.next;
       spendCollectionWork(1);
       const { membership, other } = source;
       if (
@@ -65,13 +82,9 @@ function hashSetCursor(sources: HashSetSource[], type: Type, sourceIndex = 0, of
     }
     return DONE;
   };
-  const iter = new IterValue(
-    next,
-    undefined,
-    undefined,
-    sources.flatMap(({ from, other }) => [from, other])
-  );
-  const fork = (): IterValue => hashSetCursor(sources, type, sourceIndex, offset);
+  const iter = new IterValue(next);
+  iter.borrowedRoots.push(...sources.flatMap(({ from, other }) => [from, other]));
+  const fork = (): IterValue => hashSetCursor(sources, type, sourceIndex, cursor);
   iter.fork = fork;
   return described(iter, (show, itemType, _target, write) => (indent) => {
     const copy = fork();
@@ -132,12 +145,13 @@ export function btreeSetOp(op: SetOp, sets: [SetValue, SetValue], elem: Type, se
     op === 'union' || op === 'symmetric_difference'
       ? merged(op, new SortedIter(items[0]), new SortedIter(items[1]), context.cmp)
       : searched(op, sets, items, context);
-  return setOpIter(op, step);
+  return setOpIter(op, step, sets);
 }
 
-function setOpIter(op: SetOp, step: Step): IterValue {
+function setOpIter(op: SetOp, step: Step, sets: [SetValue, SetValue]): IterValue {
   const iter = new IterValue(step.next);
-  iter.fork = () => setOpIter(op, step.fork());
+  iter.borrowedRoots.push(...sets);
+  iter.fork = () => setOpIter(op, step.fork(), sets);
   return described(iter, (show, item) => tuplePart(TUPLE_NAMES[op], [step.debug(show, item)]));
 }
 

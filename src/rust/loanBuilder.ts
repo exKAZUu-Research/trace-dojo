@@ -32,6 +32,7 @@ import {
   typeAfter,
 } from './regions';
 import { SignatureInstance } from './signatureInstance';
+import { markExtendedTemporaries, promotable } from './temporaryScopes';
 import type { TraitSolver } from './traits';
 import { type ClosureType, type FnDef, resolve, shallow, type Type } from './types';
 
@@ -80,6 +81,12 @@ interface LoopFrame {
   scopeDepth: number;
 }
 
+interface StorageScope {
+  locals: LocalVar[];
+  temporaries: Var[];
+  end: Span;
+}
+
 /**
  * Lowers a function's body to a {@link LoanGraph} in the order rustc evaluates it, with a region for each reference in
  * the types of its variables, and checks it as rustc's NLL borrow checker does.
@@ -91,7 +98,8 @@ export class LoanBuilder {
   private readonly vars = new Map<LocalVar, Var>();
   private readonly locals = new Map<Var, LocalVar>();
   private readonly loops: LoopFrame[] = [];
-  private readonly scopes: { locals: LocalVar[]; temporaries: Var[]; end: Span }[] = [];
+  private readonly scopes: StorageScope[] = [];
+  private readonly extendedTemporaries = new WeakMap<Expr, StorageScope>();
   private readonly exits: number[] = [];
   /** For a closure's body, the captures it modifies, which the closure captures by `&mut`. */
   private readonly mutatedCaptures = new Set<LocalVar>();
@@ -335,7 +343,20 @@ export class LoanBuilder {
 
   /** The place an expression denotes, or a temporary that holds its value. */
   private placeOrTemp(expr: Expr, mutable = false): Place {
-    return this.place(expr, mutable) ?? this.valuePlace(this.value(expr));
+    return this.place(expr, mutable) ?? this.temporaryPlace(expr, mutable);
+  }
+
+  private temporaryPlace(expr: Expr, mutable: boolean): Place {
+    const place = this.valuePlace(this.value(expr));
+    this.trackTemporary(place, expr, mutable);
+    return place;
+  }
+
+  private trackTemporary(place: Place, expr: Expr, mutable: boolean): void {
+    const type = expr.ty && normalize(shallow(expr.ty));
+    if ((!mutable || (type?.kind === 'array' && type.len === 0)) && promotable(expr, this.annotations)) return;
+    const scope = this.extendedTemporaries.get(expr) ?? this.scopes.at(-1);
+    scope?.temporaries.push(place.root);
   }
 
   private valuePlace(value: Value): Place {
@@ -496,6 +517,9 @@ export class LoanBuilder {
     }
     if (stmt.kind !== 'let' || !stmt.init) return;
     const { pattern, init } = stmt;
+    const enclosing = this.scopes.at(-2);
+    if (enclosing)
+      markExtendedTemporaries(init, this.annotations, (expr) => this.extendedTemporaries.set(expr, enclosing));
     // `let (a, b) = (x, y);` binds each element from its own expression.
     if (pattern.kind === 'tuple' && init.kind === 'tuple' && pattern.elems.length === init.elems.length) {
       const values = init.elems.map((elem) => this.value(elem));
@@ -646,8 +670,7 @@ export class LoanBuilder {
         return undefined;
       }
       case 'ref': {
-        const place = this.place(expr.operand, expr.mutable);
-        if (!place) return this.borrowTemporary(expr);
+        const place = this.placeOrTemp(expr.operand, expr.mutable);
         return this.borrow(place, expr.mutable, expr.span, expr.operand.ty).value;
       }
       case 'binary': {
@@ -785,18 +808,6 @@ export class LoanBuilder {
       }
     }
     this.current = undefined;
-  }
-
-  /** `&expr` of a value that is no place borrows a temporary, which holds the value's borrows. */
-  private borrowTemporary(expr: Extract<Expr, { kind: 'ref' }>): Value {
-    const value = this.value(expr.operand);
-    const temp = this.temp(expr.ty);
-    const layout = this.layout(temp);
-    this.point({ uses: value === undefined ? [] : [value], defs: temp === undefined ? [] : [temp] });
-    const target = layout.kind === 'ref' ? layout.target : NONE;
-    relate(this.outlives, this.layout(value), target);
-    if (layout.kind === 'ref') outlivesAll(this.outlives, target, layout.region);
-    return temp;
   }
 
   private tryExpr(expr: Extract<Expr, { kind: 'try' }>): Value {
@@ -1085,13 +1096,7 @@ export class LoanBuilder {
     const target: Place = { root: place.root, proj: [...place.proj, ...derefSteps(derefs)] };
     const targetType = typeAfter(receiver.ty, derefs);
     if (autoref !== 'none') {
-      if (
-        !this.locals.has(place.root) &&
-        !target.proj.includes('*') &&
-        (autoref === 'mut' || !this.promotable(receiver))
-      ) {
-        this.scopes.at(-1)?.temporaries.push(place.root);
-      }
+      if (!stored && !target.proj.includes('*')) this.trackTemporary(place, receiver, autoref === 'mut');
       // A method of the type itself borrows it in two phases; one reached through `Deref` (a slice's) does not.
       const twoPhase = autoref === 'mut' && !derefs.includes('own');
       const { value, loan } = this.borrow(target, autoref === 'mut', receiver.span, targetType, twoPhase);
@@ -1102,56 +1107,6 @@ export class LoanBuilder {
       return { receiver: value, activation: loan, target: project(target, '*') };
     }
     return { receiver: this.read(target, targetType, receiver.span) };
-  }
-
-  // code-gauge-allow functionNcss 35 -- Constant promotion accepts each eligible expression form separately.
-  private promotable(expr: Expr, constants: Set<object> = new Set()): boolean {
-    const child = (value: Expr): boolean => this.promotable(value, constants);
-    switch (expr.kind) {
-      case 'int':
-      case 'float':
-      case 'bool':
-      case 'char':
-      case 'str': {
-        return true;
-      }
-      case 'array':
-      case 'tuple': {
-        return expr.elems.every(child);
-      }
-      case 'arrayRepeat': {
-        return child(expr.value) && child(expr.count);
-      }
-      case 'ref': {
-        return !expr.mutable && child(expr.operand);
-      }
-      case 'unary': {
-        return expr.op !== '*' && child(expr.operand);
-      }
-      case 'struct': {
-        return !expr.base && expr.fields.every(({ value }) => child(value));
-      }
-      case 'call': {
-        return (
-          expr.callee.kind === 'path' &&
-          this.annotations.paths.get(expr.callee)?.kind === 'ctor' &&
-          expr.args.every(child)
-        );
-      }
-      case 'path': {
-        const resolved = this.annotations.paths.get(expr);
-        if (resolved?.kind === 'ctor' || resolved?.kind === 'builtinConst') return true;
-        const def = resolved?.kind === 'const' ? resolved.def : undefined;
-        if (!def?.ast.value || constants.has(def) || constants.size >= 64) return false;
-        constants.add(def);
-        const result = child(def.ast.value);
-        constants.delete(def);
-        return result;
-      }
-      default: {
-        return false;
-      }
-    }
   }
 
   /**
