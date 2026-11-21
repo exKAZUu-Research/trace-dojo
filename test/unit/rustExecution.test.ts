@@ -8199,3 +8199,21 @@ test('sorting long strings stops at the operation limit, and strings order by co
     stdout: '["", "a", "a😀", "a😁", "\\u{e000}", "\\u{ffff}", "𐀀"]\n',
   });
 });
+
+test('collecting into Box<str> builds the text within the string limit', () => {
+  const collected = rustMain(`
+    let reversed: Box<str> = "héllo".chars().rev().collect();
+    let joined: Box<str> = vec![String::from("x"), String::from("y")].into_iter().collect();
+    let numbers: Box<[i32]> = (1..4).collect();
+    println!("{reversed} {joined} {numbers:?} {}", reversed.len());`);
+  expect(executeProgram('rust', collected)).toMatchObject({ kind: 'executed', stdout: 'olléh xy [1, 2, 3] 6\n' });
+
+  const oversized = rustMain(`
+    let half = "a".repeat(600000);
+    let whole: Box<str> = vec![&half[..], &half[..]].into_iter().collect();
+    println!("{}", whole.len());`);
+  expect(executeProgram('rust', oversized)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('memory allocation of 1200000 bytes failed'),
+  });
+});

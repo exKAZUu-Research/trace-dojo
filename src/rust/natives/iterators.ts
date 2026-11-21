@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 981 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss 984 -- One native per method of the standard library.
 import { inPlaceCapacity, reserveVec, setVecCapacity, sizeTable, type TableMap, vecCapacity } from '../capacity';
 import type { DebugPart } from '../debugText';
 import { floatNumber } from '../floatBits';
@@ -1670,6 +1670,10 @@ function collectIterator(ctx: NativeContext, iter: IterValue, target: Type, item
     case 'Result': {
       return collectOutcome(ctx, iter, t, item, shape);
     }
+    case 'Box': {
+      if (shallow(t.args[0]).kind === 'str') return textOf(collectString(ctx, iter, item, shape));
+      return collectBulk(ctx, iter, t, item);
+    }
     default: {
       return collectBulk(ctx, iter, t, item);
     }
@@ -1747,11 +1751,9 @@ function collectBulk(ctx: NativeContext, iter: IterValue, target: Type & { kind:
   ctx.runtime.allocate(items.length);
   return ctx.runtime.withRoots(items, () => {
     switch (target.def.builtin) {
-      case 'VecDeque': {
-        return items;
-      }
+      case 'VecDeque':
       case 'Box': {
-        return shallow(target.args[0]).kind === 'str' ? items.map(textOf).join('') : items;
+        return items;
       }
       case 'BinaryHeap': {
         return heapify(items, target.args[0]);
