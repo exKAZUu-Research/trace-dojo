@@ -391,9 +391,11 @@ export class ConstLint {
     const operand = this.expr(expr.operand);
     if (expr.op === '!' && typeof operand === 'boolean') return !operand;
     if (expr.op === '-' && typeof operand === 'number') return -operand;
-    if (expr.op !== '-' || typeof operand !== 'bigint') return undefined;
     const name = intTypeOf(expr.ty);
-    if (!name) return undefined;
+    if (typeof operand !== 'bigint' || !name) return undefined;
+    // `!` flips the bits of the integer's own width, and cannot overflow.
+    if (expr.op === '!') return wrap(name, ~operand);
+    if (expr.op !== '-') return undefined;
     const negated = this.checked(-operand, name, expr);
     this.endBlock();
     return negated;

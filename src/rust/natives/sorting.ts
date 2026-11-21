@@ -19,7 +19,8 @@ export function sortSlice(
   const items = sliceItems(slice);
   const sort = stable ? stableSort : unstableSort;
   const layout = sortElement(ctx, elementType);
-  ctx.runtime.withRoots(items, () => {
+  // The sort keeps elements in buffers of its own while it overwrites the array, so a copy holds them all throughout.
+  ctx.runtime.withRoots([...items], () => {
     sort(items, isLess, layout, () => ordViolation(ctx));
     for (const [index, item] of items.entries()) sliceSet(slice, index, item);
   });

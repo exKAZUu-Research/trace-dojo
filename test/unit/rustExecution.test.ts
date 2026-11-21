@@ -8084,3 +8084,37 @@ test.each([
     diagnostics: [expect.objectContaining({ message: expect.stringContaining(message) })],
   });
 });
+
+test.each(['sort_by', 'sort_unstable_by'])('%s keeps every turtle of the vector it sorts', (method) => {
+  const program = `struct Piece { key: i32, turtle: Turtle }
+fn main() {
+    let mut pieces = Vec::new();
+    for i in 0..21 {
+        pieces.push(Piece { key: (i * 7) % 21, turtle: Turtle::new(i % 7, i / 7) });
+    }
+    pieces.${method}(|a, b| {
+        let _free = a.turtle.can_move_forward();
+        a.key.cmp(&b.key)
+    });
+    println!("{} {}", pieces.len(), pieces[0].key);
+}`;
+  const execution = executeProgram('rust', program);
+  expect(execution).toMatchObject({ kind: 'executed', stdout: '21 0\n' });
+  expect(execution.kind === 'executed' && execution.finalTurtles).toHaveLength(21);
+});
+
+test('integer bitwise negation takes part in constant lints', () => {
+  const program = rustMain(
+    '    let mask = 0b1010u8;\n    println!("{} {} {} {}", !0u8, !5i32, !0u16 - 1, !mask & 0x0f);'
+  );
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '255 -6 65534 5\n' });
+  for (const [body, message] of [
+    ['let x = !0u8;\n    let y = x + 1;', '必ずあふれます'],
+    ['let z = !(-1i32);\n    let x = 1 / z;', '必ず panic'],
+  ]) {
+    expect(executeProgram('rust', rustMain(`    ${body}`))).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [expect.objectContaining({ message: expect.stringContaining(message) })],
+    });
+  }
+});
