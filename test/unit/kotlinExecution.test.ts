@@ -90,6 +90,16 @@ fun main() {
   });
 });
 
+test.each(['==', '==='])('keeps both Kotlin %s operands reachable while evaluating equality', (operator) => {
+  const source = `fun rhs(): Turtle {
+    val probe = Turtle(0, 0)
+    println(probe.canMoveForward())
+    return probe
+}
+fun main() { println(Turtle(0, 1) ${operator} rhs()) }`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: 'false\nfalse\n' });
+});
+
 test.each(['Token.values()', 'enumValues<Token>()'])('charges repeated %s array copies to the Kotlin heap', (call) => {
   const names = Array.from({ length: 200 }, (_, index) => `TOKEN${index}`).join(', ');
   const source = `enum class Token { ${names} }

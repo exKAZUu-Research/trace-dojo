@@ -438,14 +438,9 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
       const leftEval = convertRepr(left.eval, left.repr, 'ref');
       const rightEval = convertRepr(this.convertTo(right, right.type, row), reprOf(this.core, right.type), 'ref');
       const isPrimitiveIdentity = isIdentity && left.repr !== 'ref' && right.repr !== 'ref';
-      test =
-        isIdentity || comparesNullLiteral
-          ? (frame) => {
-              const a = isPrimitiveIdentity ? left.eval(frame) : leftEval(frame);
-              const b = isPrimitiveIdentity ? right.eval(frame) : rightEval(frame);
-              return a === b || isSameCachedBox(a, b);
-            }
-          : (frame) => valueEquals(frame, leftEval(frame), rightEval(frame));
+      test = isPrimitiveIdentity
+        ? (frame) => sameReference(frame, left.eval(frame), right.eval(frame))
+        : referenceEquality(leftEval, rightEval, isIdentity || comparesNullLiteral ? sameReference : valueEquals);
     }
     const narrowing = this.equalityNarrowing(left, right, negated);
     return {
@@ -843,6 +838,26 @@ function isIntegerConstant(expression: Expression): boolean {
     }
   }
 }
+function referenceEquality(
+  left: Eval,
+  right: Eval,
+  compare: (frame: Frame, a: Value, b: Value) => boolean
+): (frame: Frame) => boolean {
+  return (frame) => {
+    const a = left(frame);
+    const operands: Value[] = [a];
+    return frame.runtime.withNativeRoots([operands], () => {
+      const b = right(frame);
+      operands.push(b);
+      return compare(frame, a, b);
+    });
+  };
+}
+
+function sameReference(_frame: Frame, a: Value, b: Value): boolean {
+  return a === b || isSameCachedBox(a, b);
+}
+
 /**
  * Whether two boxes are the same object on the JVM, whose `valueOf` caches the boxes of small integers and characters,
  * so that `===` of two `Int?` holding 127 is true and of two holding 1000 is false.
