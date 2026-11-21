@@ -5,7 +5,16 @@ import type { Type } from '../types';
 import { DONE, ElementPlace, EntryValue, type IterValue, MapValue, SetValue, UNIT_VALUE, type Value } from '../values';
 import { checkTableCapacity } from './capacityNatives';
 import { defaultValue } from './core';
-import { arrayIter, extendedValue, mapIter, nextForFold, ownedIter, reserveHashInput, setIter } from './iterators';
+import {
+  arrayIter,
+  extendedValue,
+  mapIter,
+  nextForFold,
+  ownedIter,
+  reserveHashInput,
+  setIter,
+  snapshotIter,
+} from './iterators';
 import { sizeOf } from './layout';
 import { boundsOf } from './ranges';
 import { btreeSetOp, hashSetIter, type SetOp } from './setOps';
@@ -166,11 +175,11 @@ function mapIterNatives(): Record<string, Native> {
     into_iter: ([self], ctx) => mapIter(map(self), 'value', ctx.typeArgs),
     iter: ([self], ctx) => mapIter(map(self), 'ref', ctx.typeArgs),
     iter_mut: ([self], ctx) => mapIter(map(self), 'mut', ctx.typeArgs),
-    keys: ([self]) => mapProjection(map(self), (entry) => entry[0]),
-    values: ([self]) => mapProjection(map(self), (entry) => entry[1]),
-    values_mut: ([self]) => mapProjection(map(self), (entry) => new ElementPlace(entry, 1)),
-    into_keys: ([self], ctx) => mapProjection(map(self), (entry) => entry[0], ctx.typeArgs[0]),
-    into_values: ([self], ctx) => mapProjection(map(self), (entry) => entry[1], ctx.typeArgs[1]),
+    keys: ([self], ctx) => mapProjection(map(self), ctx.typeArgs, (entry) => entry[0]),
+    values: ([self], ctx) => mapProjection(map(self), ctx.typeArgs, (entry) => entry[1]),
+    values_mut: ([self], ctx) => mapProjection(map(self), ctx.typeArgs, (entry) => new ElementPlace(entry, 1)),
+    into_keys: ([self], ctx) => mapProjection(map(self), ctx.typeArgs, (entry) => entry[0], 0),
+    into_values: ([self], ctx) => mapProjection(map(self), ctx.typeArgs, (entry) => entry[1], 1),
     drain: ([self], ctx) => {
       const entries = map(self).entries.snapshot();
       map(self).entries.clear();
@@ -185,10 +194,16 @@ function mapIterNatives(): Record<string, Native> {
   };
 }
 
-function mapProjection(map: MapValue, project: (entry: [Value, Value]) => Value, owned?: Type): IterValue {
+function mapProjection(
+  map: MapValue,
+  types: Type[],
+  project: (entry: [Value, Value]) => Value,
+  owned?: 0 | 1
+): IterValue {
   const entries = map.entries.snapshot();
-  if (owned) return ownedIter(entries, owned, (entry) => project(entry as [Value, Value]));
-  return arrayIter(entries, 0, entries.length, (index) => project(entries[index]));
+  const storageType: Type = { kind: 'tuple', elems: types };
+  if (owned === undefined) return snapshotIter(entries, storageType, project);
+  return ownedIter(entries, types[owned], { map: (entry) => project(entry as [Value, Value]), storageType });
 }
 
 function extendMap(ctx: NativeContext, m: MapValue, iterator: IterValue): Value {
@@ -449,7 +464,8 @@ function treeRange<V extends Value>(
       );
     }
   }
-  return arrayIter(collection.range(type, start, end));
+  const entry: Type = name === 'BTreeMap' ? { kind: 'tuple', elems: ctx.typeArgs.slice(0, 2) } : type;
+  return snapshotIter(collection.range(type, start, end), entry);
 }
 
 natives['BTreeMap<_, _>::range'] = ([self, range], ctx) => treeRange(ctx, map(self).entries, range, 'BTreeMap');

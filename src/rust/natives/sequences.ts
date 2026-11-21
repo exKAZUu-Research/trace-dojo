@@ -428,6 +428,37 @@ function clonedItems(ctx: NativeContext, items: Value[]): Value[] {
   return items.map((item) => cloneValue(elemType(ctx), item));
 }
 
+function joinSlices(ctx: NativeContext, slices: Value, separator: Value): Value[] {
+  const count = sliceLength(slices);
+  const separatorSize = BigInt(sliceLength(separator));
+  let length = BigInt(Math.max(0, count - 1)) * separatorSize;
+  for (let i = 0; i < count; i++) {
+    ctx.runtime.spend();
+    length += BigInt(sliceLength(deref(sliceGet(slices, i))));
+  }
+  const elem = elemType(ctx);
+  const size = sizeOf(elem);
+  checkVecCapacity(ctx, 0, length, size);
+  ctx.runtime.allocate(Number(length), length * BigInt(size));
+  const joined: Value[] = [];
+  return ctx.runtime.withRoots(joined, () => {
+    for (let i = 0; i < count; i++) {
+      ctx.runtime.spend();
+      if (i > 0) appendClones(ctx, joined, elem, separator);
+      appendClones(ctx, joined, elem, deref(sliceGet(slices, i)));
+    }
+    return joined;
+  });
+}
+
+function appendClones(ctx: NativeContext, dest: Value[], elem: Type, source: Value): void {
+  const length = sliceLength(source);
+  for (let i = 0; i < length; i++) {
+    ctx.runtime.spend();
+    dest.push(cloneValue(elem, sliceGet(source, i)));
+  }
+}
+
 function joinStrings(ctx: NativeContext, self: Value, sep: Value): string {
   const parts = sliceItems(deref(self)).map(textOf);
   const separator = textOf(sep);
@@ -758,20 +789,10 @@ natives['[String]::join'] = ([self, sep], ctx) => joinStrings(ctx, self, sep);
 natives['[String]::concat'] = ([self], ctx) => joinStrings(ctx, self, '');
 natives['[&str]::join'] = ([self, sep], ctx) => joinStrings(ctx, self, sep);
 natives['[&str]::concat'] = ([self], ctx) => joinStrings(ctx, self, '');
-natives['[SliceOf]::concat'] = ([self], ctx) =>
-  clonedItems(
-    ctx,
-    sliceItems(deref(self)).flatMap((item) => sliceItems(deref(item)))
-  );
+natives['[SliceOf]::concat'] = ([self], ctx) => joinSlices(ctx, deref(self), UNIT_VALUE);
 natives['[SliceOf]::join'] = ([self, sep], ctx) => {
   const separator = normalize(shallow((normalize(shallow(ctx.typeArgs[2])) as Type & { kind: 'ref' }).target));
-  const parts = separator.kind === 'slice' ? sliceItems(deref(sep)) : [deref(sep)];
-  const joined: Value[] = [];
-  for (const [index, item] of sliceItems(deref(self)).entries()) {
-    if (index > 0) for (const part of parts) joined.push(part);
-    for (const element of sliceItems(deref(item))) joined.push(element);
-  }
-  return clonedItems(ctx, joined);
+  return joinSlices(ctx, deref(self), separator.kind === 'slice' ? deref(sep) : [deref(sep)]);
 };
 void ordering;
 void placeOf;

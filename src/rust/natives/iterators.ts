@@ -87,8 +87,12 @@ export function arrayIter(
  * An iterator that owns its elements (`into_iter`, `drain`, `for x in v`): it holds only those it has not yielded,
  * so each one it hands out belongs to its receiver alone and disappears when that receiver drops it.
  */
-export function ownedIter(items: Value[], itemType: Type, project?: (item: Value) => Value): IterValue {
-  const map = project ?? ((item: Value) => item);
+export function ownedIter(
+  items: Value[],
+  itemType: Type,
+  projection?: { map: (item: Value) => Value; storageType: Type }
+): IterValue {
+  const map = projection?.map ?? ((item: Value) => item);
   let front = 0;
   let back = items.length;
   const take = (index: number): Value => {
@@ -100,7 +104,7 @@ export function ownedIter(items: Value[], itemType: Type, project?: (item: Value
     () => (front < back ? take(front++) : DONE),
     () => (front < back ? take(--back) : DONE),
     () => back - front,
-    project || canReachTurtle(itemType) ? [items] : []
+    canReachTurtle(projection?.storageType ?? itemType) ? [items] : []
   );
   iter.rest = () => Array.from({ length: back - front }, (_, offset) => map(items[front + offset]));
   iter.ownedItemType = itemType;
@@ -190,21 +194,20 @@ export function mapIter(map: MapValue, mode: 'value' | 'ref' | 'mut', types: Typ
   const entries = map.entries.snapshot();
   const item: Type = { kind: 'tuple', elems: types };
   if (mode === 'value') return ownedIter(entries, item);
-  return arrayIter(
-    entries,
-    0,
-    entries.length,
-    (i) => {
-      const [key, value] = entries[i];
-      return [key, mode === 'mut' ? new ElementPlace(entries[i], 1) : value];
-    },
-    item
-  );
+  return snapshotIter(entries, item, (entry) => [entry[0], mode === 'mut' ? new ElementPlace(entry, 1) : entry[1]]);
+}
+
+export function snapshotIter<T extends Value>(
+  items: T[],
+  storageType: Type,
+  read: (item: T) => Value = (item) => item
+): IterValue {
+  return arrayIter(items, 0, items.length, (index) => read(items[index]), storageType);
 }
 
 export function setIter(set: SetValue, item: Type, owned = false): IterValue {
   const values = set.entries.snapshot();
-  return owned ? ownedIter(values, item) : arrayIter(values, 0, values.length, undefined, item);
+  return owned ? ownedIter(values, item) : snapshotIter(values, item);
 }
 
 function iterOf(value: Value): IterValue {

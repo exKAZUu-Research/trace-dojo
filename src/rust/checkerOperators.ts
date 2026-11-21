@@ -320,7 +320,7 @@ function validateCast(c: Checker, expr: Extract<Expr, { kind: 'cast' }>, sourceT
   if ((s.kind === 'bool' || s.kind === 'char') && t.kind === 'int') return ok();
   if (s.kind === 'int' && s.name === 'u8' && t.kind === 'char') return ok();
   if (s.kind === 'var' && s.v.literal === 'int' && t.kind === 'char') {
-    c.unifier.unify(s, intType('u8'));
+    c.fallbackChecks.push(() => validateCast(c, expr, resolve(sourceType, true), target));
     return ok();
   }
   if (

@@ -1,7 +1,7 @@
 import { collectionKeyAnswer, collectionKeyTraits } from './collectionBounds';
 import { normalize } from './infer';
 import type { Answer, TraitSolver } from './traits';
-import { shallow, type Type } from './types';
+import { F32, F64, INT_NAMES, intType, shallow, type Type } from './types';
 
 type AdtType = Type & { kind: 'adt' };
 
@@ -20,6 +20,15 @@ export function conversionExists(solver: TraitSolver, source: Type, target: Type
   if (t.kind === 'int') return intFrom(source, t.name) ? 'yes' : 'no';
   if (t.kind === 'float') return floatFrom(source, t.name) ? 'yes' : 'no';
   return t.kind === 'char' && source.kind === 'int' && source.name === 'u8' ? 'yes' : 'no';
+}
+
+export function inferNumericSource(solver: TraitSolver, source: Type & { kind: 'var' }, target: Type): Answer {
+  const t = normalize(shallow(target));
+  if (t.kind !== 'char' && t.kind !== 'int' && t.kind !== 'float') return 'unknown';
+  const candidates =
+    source.v.literal === 'int' ? INT_NAMES.map(intType) : source.v.literal === 'float' ? [F32, F64] : [];
+  const matching = candidates.filter((candidate) => conversionExists(solver, candidate, t) === 'yes');
+  return matching.length === 1 && solver.unifier.tryUnify(source, matching[0]) ? 'yes' : 'unknown';
 }
 
 function borrowedSequenceClone(solver: TraitSolver, source: Type, target: AdtType): Answer | undefined {

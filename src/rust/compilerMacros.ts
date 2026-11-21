@@ -229,10 +229,10 @@ function assertEqMacro(c: Compiler, macro: Macro<'assertEq'>, span: Span): Eval 
   return (frame) =>
     withEvaluatedValues(frame, operands, ([a, b]) => {
       if (valuesEqual(eqType(frame), a, b, rightType(frame)) !== equal) {
+        const message = format ? `: ${format(frame)}` : '';
         const spec = debugSpec(false);
         const l = c.support.formatter.debug(a, leftType(frame), spec, undefined);
         const r = c.support.formatter.debug(b, rightType(frame), spec, undefined);
-        const message = format ? `: ${format(frame)}` : '';
         throw new RustPanic(
           `assertion \`left ${equal ? '==' : '!='} right\` failed${message}\n  left: ${l}\n right: ${r}`,
           span

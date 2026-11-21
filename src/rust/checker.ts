@@ -112,6 +112,7 @@ export class Checker {
   readonly varBounds = new Map<unknown, TraitRef[]>();
   body!: BodyContext;
   deferredChecks: (() => void)[] = [];
+  readonly fallbackChecks: (() => void)[] = [];
   readonly coverageChecks = new Map<FnDef | ConstDef, CoverageCheck[]>();
   /** The number literals of the body, which rustc's `overflowing_literals` lint checks against their types. */
   literals: Extract<Expr, { kind: 'int' | 'float' }>[] = [];
@@ -678,6 +679,7 @@ export class Checker {
     this.solveObligations(false);
     for (const check of this.deferredChecks.splice(0)) check();
     this.solveObligations(true);
+    for (const check of this.fallbackChecks.splice(0)) check();
     this.checkLiteralRanges();
     void span;
   }

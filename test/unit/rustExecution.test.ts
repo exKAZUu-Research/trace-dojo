@@ -6509,3 +6509,105 @@ test('writes through mutable ranges returned by slice get_mut', () => {
     println!("{values:?} {}", values.get_mut(8..).is_none());`);
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '[1, 8, 7] true\n' });
 });
+
+test('infers source literals for unique numeric From implementations without extending as casts', () => {
+  const program = rustMain(`let n = 98;
+    let text: String = (0..3).map(|i| char::from(97 + i)).collect();
+    let delayed = 67;
+    let c = delayed as char;
+    let _: u8 = delayed;
+    println!("{} {text} {} {c} {}", char::from(n), 65 as char, i8::from(7));`);
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'b abc A C 7\n' });
+  for (const body of ['let n = 65; println!("{}", n as char);', 'for i in 0..3 { print!("{}", (97 + i) as char); }']) {
+    expect(executeProgram('rust', rustMain(body))).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [expect.objectContaining({ message: expect.stringContaining('u8 だけが変換できます') })],
+    });
+  }
+});
+
+test('joins and concatenates slices in order with each separator inserted between parts', () => {
+  const program = rustMain(`let parts = [vec![1, 2], vec![], vec![3]];
+    println!("{:?} {:?} {:?}", parts.join(&9), parts.join(&[8, 9][..]), parts.concat());`);
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[1, 2, 9, 9, 3] [1, 2, 8, 9, 8, 9, 3] [1, 2, 3]\n',
+  });
+});
+
+test('selects borrowed into_iter before dereferencing an array receiver', () => {
+  const program = rustMain(`let a = [String::from("x"), String::from("y")];
+    let r = &a;
+    let v: Vec<&String> = r.into_iter().rev().collect();
+    println!("{v:?} {:?}", (&&a).into_iter().cloned().collect::<Vec<_>>());
+    let mut a = [1, 2, 3];
+    for x in (&mut a).into_iter() { *x *= 2; }
+    println!("{a:?}");`);
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '["y", "x"] ["x", "y"]\n[2, 4, 6]\n',
+  });
+});
+
+test('prunes scalar map snapshots and retains owners hidden by projected keys', () => {
+  for (const [kind, cursor] of [
+    ['HashMap', 'values_mut()'],
+    ['HashMap', 'into_keys()'],
+    ['BTreeMap', 'range(..)'],
+  ]) {
+    const program = rustMain(
+      `let mut values: ${kind}<_, _> = (0..20000).map(|n| (n, n)).collect();
+        let mut cursor = values.${cursor};
+        let observer = Turtle::new();
+        let mut count = 0;
+        while let Some(_) = cursor.next() { count += 1; }
+        println!("{count}");`,
+      `use std::collections::${kind};`
+    );
+    expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '20000\n' });
+  }
+  const projected = rustMain(
+    `let mut keys = HashMap::from([(1, Turtle::new(0, 1))]).into_keys();
+    let observer = Turtle::new(0, 0);
+    println!("{} {:?} {}", observer.can_move_forward(), keys.next(), observer.can_move_forward());`,
+    'use std::collections::HashMap;'
+  );
+  expect(executeProgram('rust', projected)).toMatchObject({ kind: 'executed', stdout: 'false Some(1) true\n' });
+});
+
+test('evaluates a failing assertion message before debugging its operands', () => {
+  const items = `use std::fmt;
+struct Mark(i32);
+impl PartialEq for Mark {
+    fn eq(&self, other: &Self) -> bool { self.0 % 2 == other.0 % 2 }
+}
+impl fmt::Debug for Mark {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        println!("debug {}", self.0);
+        write!(f, "Mark")
+    }
+}`;
+  for (const [assertion, right] of [
+    ['assert_eq', 2],
+    ['assert_ne', 3],
+  ]) {
+    const program = rustMain(`${assertion}!(Mark(1), Mark(${right}), "{}", { println!("message"); 3 });`, items);
+    expect(executeProgram('rust', program)).toMatchObject({
+      kind: 'executed',
+      stdout: `message\ndebug 1\ndebug ${right}\n`,
+      uncaughtException: expect.stringContaining('failed: 3\n  left: Mark\n right: Mark'),
+    });
+  }
+});
+
+test('keeps typed scalar closure captures out of repeated iterator scans', () => {
+  for (const capture of ['', 'move ']) {
+    const program = rustMain(`let values = vec![1i32; 20000];
+      let mut cursor = (0..20000).map(${capture}|index| values[index]);
+      let observer = Turtle::new();
+      let mut total = 0;
+      while let Some(value) = cursor.next() { total += value; }
+      println!("{total}");`);
+    expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '20000\n' });
+  }
+});

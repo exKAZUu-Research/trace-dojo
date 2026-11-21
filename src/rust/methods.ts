@@ -381,15 +381,18 @@ function matchSelf(
   return { fn, typeArgs: [...implArgs, ...ownParams(fn)], selfType: substitute(impl.selfType, subst) };
 }
 
-/**
- * An array taken by value as the slice of its elements, for the methods of `[T; N]` that the standard library's
- * declarations write on `[T]`, having no length parameters (`map`, whose result has the array's length).
- */
+/** Standard declarations use slice stand-ins for arrays without const length parameters. */
 function arrayAsSlice(fn: FnDef, selfType: Type): Type {
+  if (fn.selfMode !== 'value' || !(fn.module as { isStd?: boolean }).isStd) return selfType;
   const t = normalize(shallow(selfType));
   const declared = fn.impl && normalize(shallow(fn.impl.selfType));
-  const takesArray = fn.selfMode === 'value' && declared?.kind === 'slice' && (fn.module as { isStd?: boolean }).isStd;
-  return takesArray && t.kind === 'array' ? { kind: 'slice', elem: t.elem } : selfType;
+  if (t.kind === 'array' && declared?.kind === 'slice') return { kind: 'slice', elem: t.elem };
+  if (t.kind === 'ref' && declared?.kind === 'ref' && t.mutable === declared.mutable) {
+    const target = normalize(shallow(t.target));
+    if (target.kind === 'array' && shallow(declared.target).kind === 'slice')
+      return { ...t, target: { kind: 'slice', elem: target.elem } };
+  }
+  return selfType;
 }
 
 /** A trait's default method, called on a type with an impl of the trait that does not override it. */

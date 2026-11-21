@@ -3,7 +3,7 @@ import { collectionKeyAnswer } from './collectionBounds';
 import { normalize } from './infer';
 import { supportsDebug } from './iterDebug';
 import { dynIteratorTarget, intoIterItem } from './iterTypes';
-import { arrayTryFrom, conversionExists, intoConversion } from './traitConversions';
+import { arrayTryFrom, conversionExists, inferNumericSource, intoConversion } from './traitConversions';
 import { doubleEndedSearcher, iteratorCapability } from './traitIterators';
 import type { Answer, TraitSolver } from './traits';
 import {
@@ -652,7 +652,7 @@ function fromInto({ solver, t, ref }: Goal): Answer {
     return solver.implements(target, { trait: solver.program.traitDef('From'), args: [t] });
   }
   const source = normalize(shallow(ref.args[0]));
-  if (source.kind === 'var') return 'unknown';
+  if (source.kind === 'var') return inferNumericSource(solver, source, t);
   if (source.kind === 'adt' && ['ParseError', 'Unsigned', 'Signed', 'Indexed'].includes(source.def.builtin as string))
     return 'unknown';
   if (solver.unifier.tryUnify(t, source)) return 'yes';
