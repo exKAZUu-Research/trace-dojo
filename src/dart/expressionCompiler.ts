@@ -14,7 +14,7 @@ import type {
   TypeParameter,
   TypeSyntax,
 } from './ast';
-import type { ClassInfo, Member } from './classes';
+import type { ClassInfo, FieldMember, Member } from './classes';
 import { at, type Compiled, CompilerBase, type Eval, type ResolvedMember, typeName, valueIs } from './compilerBase';
 import type { Declaration, ExtensionInfo, GlobalVariable, TopLevelFunction, TypeAlias } from './environment';
 import { formatDouble, stringOf } from './format';
@@ -1222,11 +1222,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
   /** Whether no declaration in the program keeps a private field of this name from being promoted. */
   protected abstract isPromotableFieldName(name: string): boolean;
 
+  /** The field a member reads: itself, or the field behind a late field's getter. */
+  protected abstract backingField(member: Member): FieldMember | undefined;
+
   private promotableField(compiled: Compiled, member: Member, receiver: Compiled): Compiled {
     const name = member.name;
     if (
-      member.kind !== 'field' ||
-      !member.isFinal ||
+      !this.backingField(member)?.isFinal ||
       !name.startsWith('_') ||
       this.isLibraryCode ||
       !this.isPromotableFieldName(name)

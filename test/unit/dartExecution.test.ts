@@ -1327,6 +1327,20 @@ void main() {
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[[7], int, 1, 2, 3]\n' });
 });
 
+test('Dart promotes private late final fields but not private late fields', () => {
+  const promoted = `class A {
+  late final int? _x;
+  late final String? _s = 'ab';
+  A(this._x);
+  void show() { if (_x != null && _s != null) print([_x.isEven, _s.length]); }
+}
+void main() { A(4).show(); }`;
+  expect(executeProgram('dart', promoted)).toMatchObject({ kind: 'executed', stdout: '[true, 2]\n' });
+  const mutable =
+    'class A { late int? _x = 4; void show() { if (_x != null) print(_x.isEven); } }\nvoid main() { A().show(); }';
+  expect(executeProgram('dart', mutable)).toMatchObject({ kind: 'compileError' });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}

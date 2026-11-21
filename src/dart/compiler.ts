@@ -807,10 +807,14 @@ export class Compiler extends MemberCompiler {
     for (const { cls } of this.classWork) {
       const member = cls.members.get(name);
       if (!member || member.isStatic) continue;
-      if (member.kind === 'getter' && !member.isAbstract) return false;
-      if (member.kind === 'field' && (!member.isFinal || member.isAbstract)) return false;
+      const field = this.backingField(member);
+      if (field ? !field.isFinal || field.isAbstract : member.kind === 'getter' && !member.isAbstract) return false;
     }
     return true;
+  }
+
+  protected backingField(member: Member): FieldMember | undefined {
+    return member.kind === 'field' ? member : this.lateFieldAccessors.get(member)?.field;
   }
 
   private readonly fieldInferences: { cls: ClassInfo; variable: FieldDeclaration['variables'][number] }[] = [];
