@@ -5956,6 +5956,13 @@ void main() {
   printMap<int?>(null);
 }`;
   expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '2\ntrue\n{2: true}\n{}\n' });
+
+  for (const type of ['T extends dynamic', 'T extends Null', 'T extends U, U extends dynamic']) {
+    const checked = `void check<${type}>(T? value) { if (value != null) throw value; } void main() {}`;
+    const coalesced = `void check<${type}>(T? value) { value ?? (throw 1); throw value; } void main() {}`;
+    expect(executeProgram('dart', checked)).toMatchObject({ kind: 'compileError' });
+    expect(executeProgram('dart', coalesced)).toMatchObject({ kind: 'compileError' });
+  }
 });
 
 test('super rejects null-aware property writes and accepts null-aware indexing', () => {
@@ -6142,6 +6149,44 @@ void main() {
   expect(executeProgram('dart', source)).toMatchObject({
     kind: 'executed',
     stdout: '0\n_TypeError\n2\n_TypeError\n[66, 65]\n[66]\n',
+  });
+});
+
+test('ListQueue commits the tail and invalidates iterators only after a list copy finishes', () => {
+  const source = `import 'dart:collection';
+class Source extends ListBase<int> {
+  int get length { print('length'); return 2; }
+  set length(int value) {}
+  int operator [](int index) {
+    print('read ' + index.toString());
+    if (index == 1) throw 'bad';
+    return 7;
+  }
+  void operator []=(int index, int value) {}
+}
+void main() {
+  final queue = ListQueue<int>()..add(3);
+  final before = queue.iterator;
+  try { queue.addAll(Source()); } catch (_) { print(queue); }
+  print(before.moveNext());
+  queue.addAll(<int>[]);
+  try { before.moveNext(); } catch (error) { print(error.runtimeType); }
+
+  final wrapped = ListQueue<int>.of([0, 1, 2, 3, 4, 5, 6]);
+  for (var i = 0; i < 5; i++) wrapped.removeFirst();
+  try { wrapped.addAll(Source()); } catch (_) { print(wrapped); }
+  wrapped.addAll([7, 8, 9, 10]);
+  wrapped.addFirst(4);
+  print(wrapped);
+  wrapped.addAll([11, 12, 13, 14]);
+  wrapped.removeWhere((value) => value.isEven);
+  print(wrapped.toList());
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'length\nread 1\n{3}\ntrue\nConcurrentModificationError\n' +
+      'length\nread 0\nread 1\n{5, 6}\n{4, 5, 6, 7, 8, 9, 10}\n[5, 7, 9, 11, 13]\n',
   });
 });
 

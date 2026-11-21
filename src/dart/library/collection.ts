@@ -2044,87 +2044,208 @@ abstract interface class Queue<E> implements EfficientLengthIterable<E> {
 }
 
 final class ListQueue<E> extends ListIterable<E> implements Queue<E> {
-  final List<E> _elements = <E>[];
+  static const int _initialCapacity = 8;
+  List<E?> _table;
+  int _head = 0;
+  int _tail = 0;
   int _modificationCount = 0;
-  ListQueue([int? initialCapacity]);
+
+  ListQueue([int? initialCapacity]) : _table = List<E?>.filled(_capacity(initialCapacity), null);
   factory ListQueue.from(Iterable<dynamic> elements) {
-    ListQueue<E> queue = ListQueue<E>();
-    for (final element in elements) {
-      queue.addLast(element as E);
+    if (elements is List<dynamic>) {
+      int count = elements.length;
+      var queue = ListQueue<E>(count + 1);
+      for (int i = 0; i < count; i++) queue._table[i] = elements[i] as E;
+      queue._tail = count;
+      return queue;
     }
+    int capacity = elements is EfficientLengthIterable ? elements.length : _initialCapacity;
+    var queue = ListQueue<E>(capacity);
+    for (var element in elements) queue.addLast(element as E);
     return queue;
   }
   factory ListQueue.of(Iterable<E> elements) => ListQueue<E>()..addAll(elements);
+
   Iterator<E> get iterator => _QueueIterator<E>(this);
-  int get length => _elements.length;
-  bool get isEmpty => _elements.isEmpty;
-  bool get isNotEmpty => _elements.isNotEmpty;
+  int get length => (_tail - _head) & (_table.length - 1);
+  bool get isEmpty => _head == _tail;
+  bool get isNotEmpty => _head != _tail;
   E get first {
-    if (_elements.isEmpty) throw StateError("No element");
-    return _elements.first;
+    if (isEmpty) throw StateError("No element");
+    return _table[_head] as E;
   }
   E get last {
-    if (_elements.isEmpty) throw StateError("No element");
-    return _elements.last;
+    if (isEmpty) throw StateError("No element");
+    return _table[(_tail - 1) & (_table.length - 1)] as E;
   }
   E get single {
-    if (_elements.isEmpty) throw StateError("No element");
-    if (_elements.length > 1) throw StateError("Too many elements");
-    return _elements.first;
+    if (isEmpty) throw StateError("No element");
+    if (length > 1) throw StateError("Too many elements");
+    return _table[_head] as E;
   }
   E elementAt(int index) {
-    RangeError.checkValidIndex(index, this, "index", _elements.length);
-    return _elements[index];
+    IndexError.check(index, length, indexable: this);
+    return _table[(_head + index) & (_table.length - 1)] as E;
   }
-  List<E> toList({bool growable = true}) => _elements.toList(growable: growable);
-  void add(E value) {
-    _elements.add(value);
+  void forEach(void Function(E) action) {
+    int stamp = _modificationCount;
+    for (int i = _head; i != _tail; i = (i + 1) & (_table.length - 1)) {
+      action(_table[i] as E);
+      _checkModification(stamp);
+    }
+  }
+  List<E> toList({bool growable = true}) {
+    int count = length;
+    if (count == 0) return List<E>.empty(growable: growable);
+    var result = List<E>.filled(count, first, growable: growable);
+    for (int i = 0; i < count; i++) result[i] = elementAt(i);
+    return result;
+  }
+  void add(E value) => addLast(value);
+  void addAll(Iterable<E> elements) {
+    if (elements is! List<E>) {
+      for (var element in elements) addLast(element);
+      return;
+    }
+    int count = elements.length;
+    int size = length;
+    if (size + count >= _table.length) {
+      _preGrow(size + count);
+      _table.setRange(size, size + count, elements);
+      _tail += count;
+    } else {
+      int endSpace = _table.length - _tail;
+      if (count < endSpace) {
+        _table.setRange(_tail, _tail + count, elements);
+        _tail += count;
+      } else {
+        int prefix = count - endSpace;
+        _table.setRange(_tail, _tail + endSpace, elements);
+        _table.setRange(0, prefix, elements, endSpace);
+        _tail = prefix;
+      }
+    }
     _modificationCount++;
   }
-  void addAll(Iterable<E> elements) {
-    for (var element in elements) add(element);
-  }
   bool remove(Object? value) {
-    bool removed = _elements.remove(value);
-    if (removed) _modificationCount++;
-    return removed;
+    for (int i = _head; i != _tail; i = (i + 1) & (_table.length - 1)) {
+      if (_table[i] == value) {
+        _remove(i);
+        _modificationCount++;
+        return true;
+      }
+    }
+    return false;
   }
   void removeWhere(bool Function(E element) test) => _filterWhere(test, true);
   void retainWhere(bool Function(E element) test) => _filterWhere(test, false);
-  void _filterWhere(bool Function(E element) test, bool removeMatching) {
-    int stamp = _modificationCount;
-    int index = 0;
-    while (index < _elements.length) {
-      bool matches = test(_elements[index]);
-      if (stamp != _modificationCount) throw ConcurrentModificationError(this);
-      if (matches == removeMatching) {
-        _elements.removeAt(index);
-        stamp = ++_modificationCount;
-      } else {
-        index++;
-      }
-    }
-  }
   void clear() {
-    if (_elements.isEmpty) return;
-    _elements.clear();
+    if (isEmpty) return;
+    for (int i = _head; i != _tail; i = (i + 1) & (_table.length - 1)) _table[i] = null;
+    _head = _tail = 0;
     _modificationCount++;
   }
   String toString() => Iterable.iterableToFullString(this, "{", "}");
-  void addLast(E value) => add(value);
+  void addLast(E value) {
+    _table[_tail] = value;
+    _tail = (_tail + 1) & (_table.length - 1);
+    if (_head == _tail) _grow();
+    _modificationCount++;
+  }
   void addFirst(E value) {
-    _elements.insert(0, value);
+    _head = (_head - 1) & (_table.length - 1);
+    _table[_head] = value;
+    if (_head == _tail) _grow();
     _modificationCount++;
   }
   E removeFirst() {
-    if (_elements.isEmpty) throw StateError("No element");
+    if (isEmpty) throw StateError("No element");
+    E result = _table[_head] as E;
+    _table[_head] = null;
+    _head = (_head + 1) & (_table.length - 1);
     _modificationCount++;
-    return _elements.removeAt(0);
+    return result;
   }
   E removeLast() {
-    if (_elements.isEmpty) throw StateError("No element");
+    if (isEmpty) throw StateError("No element");
+    _tail = (_tail - 1) & (_table.length - 1);
+    E result = _table[_tail] as E;
+    _table[_tail] = null;
     _modificationCount++;
-    return _elements.removeLast();
+    return result;
+  }
+
+  void _filterWhere(bool Function(E) test, bool removeMatching) {
+    int stamp = _modificationCount;
+    int i = _head;
+    while (i != _tail) {
+      bool matches = test(_table[i] as E);
+      _checkModification(stamp);
+      if (matches == removeMatching) {
+        i = _remove(i);
+        stamp = ++_modificationCount;
+      } else {
+        i = (i + 1) & (_table.length - 1);
+      }
+    }
+  }
+  void _checkModification(int expected) {
+    if (expected != _modificationCount) throw ConcurrentModificationError(this);
+  }
+  int _remove(int offset) {
+    int mask = _table.length - 1;
+    int before = (offset - _head) & mask;
+    int after = (_tail - offset) & mask;
+    if (before < after) {
+      for (int i = offset; i != _head;) {
+        int previous = (i - 1) & mask;
+        _table[i] = _table[previous];
+        i = previous;
+      }
+      _table[_head] = null;
+      _head = (_head + 1) & mask;
+      return (offset + 1) & mask;
+    }
+    _tail = (_tail - 1) & mask;
+    for (int i = offset; i != _tail;) {
+      int next = (i + 1) & mask;
+      _table[i] = _table[next];
+      i = next;
+    }
+    _table[_tail] = null;
+    return offset;
+  }
+  void _grow() {
+    var next = List<E?>.filled(_table.length * 2, null);
+    var split = _table.length - _head;
+    next.setRange(0, split, _table, _head);
+    next.setRange(split, split + _head, _table);
+    _tail = _table.length;
+    _table = next;
+    _head = 0;
+  }
+  void _preGrow(int count) {
+    var next = List<E?>.filled(_roundCapacity(count + (count >> 1)), null);
+    int size = length;
+    if (_head <= _tail) {
+      next.setRange(0, size, _table, _head);
+    } else {
+      int split = _table.length - _head;
+      next.setRange(0, split, _table, _head);
+      next.setRange(split, size, _table);
+    }
+    _head = 0;
+    _tail = size;
+    _table = next;
+  }
+  static int _capacity(int? initial) {
+    if (initial == null || initial < _initialCapacity) return _initialCapacity;
+    return _roundCapacity(initial);
+  }
+  static int _roundCapacity(int requested) {
+    int result = 1;
+    while (result < requested && result > 0) result <<= 1;
+    return result;
   }
 }
 
@@ -2257,17 +2378,20 @@ class _LinkedQueueIterator<E> implements Iterator<E> {
 class _QueueIterator<E> implements Iterator<E> {
   final ListQueue<E> _queue;
   final int _stamp;
-  int _position = 0;
+  final int _end;
+  int _position;
   E? _current;
-  _QueueIterator(this._queue) : _stamp = _queue._modificationCount;
+  _QueueIterator(this._queue)
+      : _stamp = _queue._modificationCount, _end = _queue._tail, _position = _queue._head;
   E get current => _current as E;
   bool moveNext() {
-    if (_stamp != _queue._modificationCount) throw ConcurrentModificationError(_queue);
-    if (_position >= _queue._elements.length) {
+    _queue._checkModification(_stamp);
+    if (_position == _end) {
       _current = null;
       return false;
     }
-    _current = _queue._elements[_position++];
+    _current = _queue._table[_position];
+    _position = (_position + 1) & (_queue._table.length - 1);
     return true;
   }
 }
