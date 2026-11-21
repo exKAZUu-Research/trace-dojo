@@ -933,9 +933,7 @@ export function vmTypeString(type: DartType): string {
       const parts = type.positional.map(vmTypeString);
       if (type.named.length > 0)
         parts.push(`{${type.named.map((field) => `${vmTypeString(field.type)} ${field.name}`).join(', ')}}`);
-      // Unlike a record value, the VM writes a type of one positional field without a trailing comma.
-      const inner = parts.join(', ');
-      return `(${inner})${type.nullable ? '?' : ''}`;
+      return `(${parts.join(', ')})${type.nullable ? '?' : ''}`;
     }
     default: {
       return typeToString(type);
