@@ -89,12 +89,27 @@ export function primitiveArrayView(object: KObject): PrimitiveArrayView | undefi
   return object.native?.arrayView as PrimitiveArrayView | undefined;
 }
 
+export interface ListView {
+  source: KObject;
+  parent: KObject;
+  from: number;
+  size: number;
+}
+
+export function listView(object: KObject): ListView | undefined {
+  return object.native?.listView as ListView | undefined;
+}
+
 export function indexedSize(object: KObject): number {
+  const list = listView(object);
+  if (list) return list.size;
   const view = primitiveArrayView(object);
   return view?.range?.size ?? ((view?.source.items ?? object.items) as Value[]).length;
 }
 
 export function indexedItem(object: KObject, index: number, kind?: PrimitiveKind | 'Boolean'): Value {
+  const list = listView(object);
+  if (list) return list.source.items?.[list.from + index];
   const view = primitiveArrayView(object);
   const value = ((view?.source.items ?? object.items) as Value[])[index + (view?.range?.from ?? 0)];
   const primitive = view?.kind ?? kind;
@@ -102,6 +117,8 @@ export function indexedItem(object: KObject, index: number, kind?: PrimitiveKind
 }
 
 export function indexedItems(object: KObject): Value[] | undefined {
+  const list = listView(object);
+  if (list) return list.source.items?.slice(list.from, list.from + list.size);
   return primitiveArrayView(object)
     ? Array.from({ length: indexedSize(object) }, (_, index) => indexedItem(object, index))
     : object.items;

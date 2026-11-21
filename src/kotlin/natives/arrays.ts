@@ -20,7 +20,7 @@ import { arrayFactoryName, UNSIGNED_ARRAYS } from '../prelude/arrays';
 import type { Frame } from '../runtime';
 import type { FunctionSymbol } from '../symbols';
 import { box, KObject, NULL, type PrimitiveKind, UNIT, type Value } from '../values';
-import { elementsOf, newList, newPrimitiveArrayList, touch } from './collections';
+import { elementsOf, newList, newPrimitiveArrayList } from './collections';
 import { arrayIterator, checkArrayIndex } from './core';
 import { defineNative, defineNativeProperty, libraryClass } from './registry';
 
@@ -99,8 +99,6 @@ function writeBack(frame: Frame, list: KObject, values: Value[]): void {
   if (list.items) {
     list.items.length = values.length;
     for (const [index, value] of values.entries()) list.items[index] = value;
-    const parent = list.native?.parent as KObject | undefined;
-    if (parent) touch(list);
     return;
   }
   const set = libraryClass('kotlin.collections.MutableList').members.get('set')?.[0] as FunctionSymbol;

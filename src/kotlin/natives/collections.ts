@@ -10,6 +10,7 @@ import {
   indexedSize,
   KObject,
   type KStore,
+  listView,
   type PrimitiveArrayView,
   primitiveArrayView,
   type PrimitiveKind,
@@ -42,18 +43,20 @@ function className(value: Value): string {
 
 /** Throws `UnsupportedOperationException` for a change a read-only or fixed-size list does not allow. */
 function requireResizable(frame: Frame, list: Value): void {
-  const name = className(list);
-  const isResizable = name === 'ArrayList' || name === 'SubList' || (name === 'ListBuilder' && !isBuilt(list));
+  const root = listView(list as KObject)?.source ?? list;
+  const name = className(root);
+  const isResizable = name === 'ArrayList' || (name === 'ListBuilder' && !isBuilt(root));
   if (!isResizable) throwError(frame, 'java.lang.UnsupportedOperationException');
 }
 
 function requireMutable(frame: Frame, list: Value): void {
-  const name = className(list);
+  const root = listView(list as KObject)?.source ?? list;
+  const name = className(root);
   if (
     name === 'SingletonList' ||
     name === 'EmptyList' ||
     name === 'EnumEntriesList' ||
-    (name === 'ListBuilder' && isBuilt(list))
+    (name === 'ListBuilder' && isBuilt(root))
   ) {
     throwError(frame, 'java.lang.UnsupportedOperationException');
   }
@@ -69,7 +72,7 @@ function checkIndex(frame: Frame, list: Value, index: number): void {
   const size = indexedSize(list as KObject);
   if (index >= 0 && index < size) return;
   // A sublist of any list is AbstractList's SubList on the JVM, which checks indexes with Objects.checkIndex.
-  const isSublist = (list as KObject).native?.parent !== undefined;
+  const isSublist = listView(list as KObject) !== undefined;
   switch (isSublist ? 'SubList' : className(list)) {
     case 'PrimitiveArrayList': {
       if (primitiveArrayView(list as KObject)?.range) {
@@ -103,8 +106,6 @@ function checkIndex(frame: Frame, list: Value, index: number): void {
 /** Marks a structural change, which makes the iterators created before it fail. */
 export function touch(collection: KObject): void {
   collection.modCount = (collection.modCount ?? 0) + 1;
-  const parent = listParent(collection);
-  if (parent) touch(parent);
 }
 
 export function indexOfValue(frame: Frame, values: Value[], element: Value): number {
@@ -145,7 +146,8 @@ export function newPrimitiveArrayList(frame: Frame, arrayView: PrimitiveArrayVie
 /** The elements of any collection or iterable, read natively when it is one of the library's. */
 export function elementsOf(frame: Frame, collection: Value): Value[] {
   const object = collection as KObject;
-  if (primitiveArrayView(object)) return readableItems(object);
+  checkListView(frame, object);
+  if (primitiveArrayView(object) || listView(object)) return readableItems(object);
   if (object.items) return [...object.items];
   if (object.store) return storeElements(object);
   if (object.native?.view) return viewElements(frame, object);
@@ -229,56 +231,54 @@ const LIST_READING_NATIVES: Record<string, ListNative> = {
 const LIST_CHANGING_NATIVES: Record<string, ListNative> = {
   'add(E)': (frame, list, [element]) => {
     requireResizable(frame, list);
-    insertListItems(frame, list as KObject, items(list).length, [element]);
+    replaceListItems(frame, list as KObject, indexedSize(list as KObject), 0, [element]);
     return true;
   },
   'add(Int, E)': (frame, list, [index, element]) => {
     requireResizable(frame, list);
     const position = insertionIndex(frame, list, index as number);
-    insertListItems(frame, list as KObject, position, [element]);
+    replaceListItems(frame, list as KObject, position, 0, [element]);
     return UNIT;
   },
   'addAll(Collection<E>)': (frame, list, [elements]) => {
     requireResizable(frame, list);
     const added = elementsOf(frame, elements);
-    insertListItems(frame, list as KObject, items(list).length, added);
+    replaceListItems(frame, list as KObject, indexedSize(list as KObject), 0, added);
     return added.length > 0;
   },
   'addAll(Int, Collection<E>)': (frame, list, [index, elements]) => {
     requireResizable(frame, list);
     const position = insertionIndex(frame, list, index as number);
     const added = elementsOf(frame, elements);
-    insertListItems(frame, list as KObject, position, added);
+    replaceListItems(frame, list as KObject, position, 0, added);
     return added.length > 0;
   },
   'remove(E)': (frame, list, [element]) => {
-    const values = items(list);
+    const values = readableItems(list);
     const index = indexOfValue(frame, values, element);
     if (index === -1) {
       requireMutable(frame, list);
       return false;
     }
     requireResizable(frame, list);
-    values.splice(index, 1);
-    touch(list as KObject);
-    syncParent(list as KObject);
+    replaceListItems(frame, list as KObject, index, 1, []);
     return true;
   },
   'removeAt(Int)': (frame, list, [index]) => {
     requireResizable(frame, list);
     checkIndex(frame, list, index as number);
-    const [removed] = items(list).splice(index as number, 1);
-    touch(list as KObject);
-    syncParent(list as KObject);
+    const removed = indexedItem(list as KObject, index as number);
+    replaceListItems(frame, list as KObject, index as number, 1, []);
     return removed;
   },
   'set(Int, E)': (frame, list, [index, element]) => {
     requireMutable(frame, list);
     checkIndex(frame, list, index as number);
-    const values = items(list);
-    const old = values[index as number];
-    values[index as number] = element;
-    syncParent(list as KObject);
+    const view = listView(list as KObject);
+    const values = items(view?.source ?? list);
+    const position = (index as number) + (view?.from ?? 0);
+    const old = values[position];
+    values[position] = element;
     return old;
   },
   'removeAll(Collection<E>)': (frame, list, [elements]) => {
@@ -293,33 +293,32 @@ const LIST_CHANGING_NATIVES: Record<string, ListNative> = {
   },
   'clear()': (frame, list) => {
     requireResizable(frame, list);
-    items(list).length = 0;
-    touch(list as KObject);
-    syncParent(list as KObject);
+    replaceListItems(frame, list as KObject, 0, indexedSize(list as KObject), []);
     return UNIT;
   },
 };
 
 function insertionIndex(frame: Frame, list: Value, position: number): number {
-  const size = items(list).length;
+  const size = indexedSize(list as KObject);
   if (position < 0 || position > size)
     throwError(frame, 'java.lang.IndexOutOfBoundsException', `Index: ${position}, Size: ${size}`);
   return position;
 }
 
-function insertListItems(frame: Frame, list: KObject, position: number, added: Value[]): void {
-  const values = items(list);
-  let copies = 1;
-  for (let parent = listParent(list); parent; parent = listParent(parent)) copies++;
-  frame.runtime.spend(values.length - position + added.length);
-  frame.runtime.allocate(frame, added.length * copies);
-  replaceListRange(values, position, 0, added);
-  touch(list);
-  syncParent(list);
-}
-
-function listParent(list: KObject): KObject | undefined {
-  return list.native?.parent as KObject | undefined;
+function replaceListItems(frame: Frame, list: KObject, index: number, removed: number, added: Value[]): void {
+  const view = listView(list);
+  const source = view?.source ?? list;
+  const values = items(source);
+  const from = index + (view?.from ?? 0);
+  const growth = added.length - removed;
+  frame.runtime.spend(values.length - from + added.length);
+  if (growth > 0) frame.runtime.allocate(frame, growth);
+  replaceListRange(values, from, removed, added);
+  touch(source);
+  for (let current = list, range = view; range; current = range.parent, range = listView(current)) {
+    range.size += growth;
+    current.modCount = source.modCount;
+  }
 }
 
 function defineLists(): void {
@@ -355,22 +354,33 @@ function defineLists(): void {
     });
   }
   for (const type of [LIST, PRIMITIVE_ARRAY_LIST]) {
-    defineNativeProperty(`${type}.size`, (_frame, list) => indexedSize(list as KObject));
-    for (const [signature, native] of Object.entries(LIST_READING_NATIVES))
-      defineNative(`${type}.${signature}`, native);
+    defineNativeProperty(`${type}.size`, (frame, list) => {
+      checkListView(frame, list as KObject);
+      return indexedSize(list as KObject);
+    });
+    for (const [signature, native] of Object.entries(LIST_READING_NATIVES)) registerListNative(type, signature, native);
   }
-  for (const [signature, native] of Object.entries(LIST_CHANGING_NATIVES)) defineNative(`${LIST}.${signature}`, native);
+  for (const [signature, native] of Object.entries(LIST_CHANGING_NATIVES)) registerListNative(LIST, signature, native);
+}
+
+function registerListNative(type: string, signature: string, native: ListNative): void {
+  defineNative(`${type}.${signature}`, (frame, list, args) => {
+    checkListView(frame, list as KObject);
+    return native(frame, list, args);
+  });
+}
+
+function checkListView(frame: Frame, list: KObject): void {
+  const view = listView(list);
+  if (view && view.source.modCount !== list.modCount) throwError(frame, 'java.util.ConcurrentModificationException');
 }
 
 /** Removes the elements `keeps` rejects, telling whether any went. */
 export function filterInPlace(frame: Frame, list: KObject, keeps: (value: Value) => boolean): boolean {
-  const values = list.items as Value[];
+  const values = readableItems(list);
   const kept = values.filter((value) => keeps(value));
   if (kept.length === values.length) return false;
-  replaceListRange(values, 0, values.length, kept);
-  touch(list);
-  syncParent(list);
-  void frame;
+  replaceListItems(frame, list, 0, values.length, kept);
   return true;
 }
 
@@ -389,10 +399,6 @@ export function listHash(frame: Frame, values: Value[]): number {
   return hash;
 }
 
-/**
- * `subList`, a view of a range of a list. It copies the range and writes changes back, which keeps the parent and the
- * view consistent for the changes a program makes through one of them at a time.
- */
 function subList(frame: Frame, list: KObject, from: number, to: number): KObject {
   const size = indexedSize(list);
   if (from < 0) throwError(frame, 'java.lang.IndexOutOfBoundsException', `fromIndex = ${from}`);
@@ -405,25 +411,13 @@ function subList(frame: Frame, list: KObject, from: number, to: number): KObject
       range: { from: (arrayView.range?.from ?? 0) + from, size: to - from },
     });
   }
-  const view = newList(
-    frame,
-    className(list) === 'ArrayList' || className(list) === 'SubList' ? 'ArrayList' : 'ArraysList',
-    items(list).slice(from, to)
-  );
-  if (className(list) === 'ArrayList' || className(list) === 'SubList')
-    view.cls = libraryClass('kotlin.collections.SubList');
-  view.native = { parent: list, from, length: to - from };
+  const parent = listView(list);
+  const source = parent?.source ?? list;
+  frame.runtime.allocate(frame, 1);
+  const view = new KObject(libraryClass('kotlin.collections.SubList'), 0);
+  view.modCount = source.modCount;
+  view.native = { listView: { source, parent: list, from: from + (parent?.from ?? 0), size: to - from } };
   return view;
-}
-
-/** Writes a sublist's elements back into its parent's range after a change. */
-function syncParent(list: KObject): void {
-  const native = list.native as { parent?: KObject; from: number; length: number } | undefined;
-  if (!native?.parent) return;
-  const parentItems = native.parent.items as Value[];
-  replaceListRange(parentItems, native.from, native.length, items(list));
-  native.length = (list.items as Value[]).length;
-  syncParent(native.parent);
 }
 
 function replaceListRange(values: Value[], from: number, removed: number, added: Value[]): void {
@@ -462,9 +456,7 @@ function defineIterators(): void {
     if (current.last === undefined) throwError(frame, 'java.lang.IllegalStateException');
     checkIteratorModification(frame, current);
     requireResizable(frame, current.source);
-    (current.source.items as Value[]).splice(current.last, 1);
-    touch(current.source);
-    syncParent(current.source);
+    replaceListItems(frame, current.source, current.last, 1, []);
     return finishIteratorMutation(current, current.last);
   });
   defineNative(`${iterator}.set(T)`, (frame, receiver, [element]) => {
@@ -505,6 +497,7 @@ function itemIteratorState(value: Value): ItemIteratorState {
 }
 
 function checkIteratorModification(frame: Frame, current: ItemIteratorState): void {
+  checkListView(frame, current.source);
   if (current.source.modCount !== current.expectedModCount)
     throwError(frame, 'java.util.ConcurrentModificationException');
 }

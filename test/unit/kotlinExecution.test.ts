@@ -287,6 +287,31 @@ fun main() {
     stdout: '2\n8\n[1, 9, 3]\n1\n[9, 3]\n[0, 9, 3, 7]\n[0, 9, 3, 7, 11]\n[0, 9, 3, 7]\n',
   },
   {
+    name: 'sublists share parent changes and compose with reversed views',
+    source: `fun main() {
+    val source = mutableListOf(8, 3, 2, 1, 7)
+    val view = source.subList(1, 4)
+    view.reverse()
+    println(source)
+    source[1] = 9
+    println(view)
+    val nested = view.subList(1, 3).asReversed()
+    nested.add(0, 4)
+    println(source)
+    println(view)
+    println(nested)
+    view.sort()
+    println(source)
+    source.add(10)
+    try {
+        println(view.size)
+    } catch (error: ConcurrentModificationException) {
+        println("stale")
+    }
+}`,
+    stdout: '[8, 1, 2, 3, 7]\n[9, 2, 3]\n[8, 9, 2, 3, 4, 7]\n[9, 2, 3, 4]\n[4, 3, 2]\n[8, 2, 3, 4, 9, 7]\nstale\n',
+  },
+  {
     name: 'bulk mutations through a reversed view',
     source: `fun main() {
     val source = mutableListOf(1, 3, 2)
