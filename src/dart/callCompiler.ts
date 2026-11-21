@@ -799,9 +799,8 @@ export abstract class CallCompiler extends OperatorCompiler {
       ) {
         tearOffs.push({ result, parameterType });
       } else {
-        // A function literal's own type constrains even by Never, as a closure that throws makes its result Never.
-        const isLiteral = functionLiteral(argument) !== undefined;
-        inferFromSubtype(result.type, parameterType, params, solution, upperBound, upper, isLiteral);
+        // An argument's type constrains even by Never, as <Never>[] for List<T> or a closure that throws make T Never.
+        inferFromSubtype(result.type, parameterType, params, solution, upperBound, upper, true);
       }
     });
     for (const { result, parameterType } of tearOffs) {

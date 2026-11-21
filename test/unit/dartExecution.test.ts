@@ -1827,6 +1827,14 @@ void main() { f([]); g({}); h([]); print(C([]).rows.runtimeType); }`;
   });
 });
 
+test('Dart generic calls keep Never constraints from typed collection arguments', () => {
+  const program = `void f<T>(List<T> xs) { print(T); }
+void g<T>(Map<String, List<T>> m) { print(T); }
+void h<T>(List<void Function(T)> a) { print(T); }
+void main() { f(<Never>[]); g(<String, List<Never>>{}); h([(g) {}]); }`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'Never\nNever\nObject?\n' });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}
