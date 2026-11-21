@@ -13,14 +13,21 @@ export function utf8Bytes(text: string, runtime: Runtime): bigint[] {
   return Array.from(encoder.encode(text), BigInt);
 }
 
-/** Whether a byte offset into a string's UTF-8 is where a character starts or the string ends. */
-export function isUtf8Boundary(text: string, offset: number): boolean {
-  let at = 0;
-  for (const char of text) {
-    if (at >= offset) break;
-    at += utf8Length(char);
+/**
+ * The UTF-8 bytes of strings, which callers only read. It keeps those of the last string asked about, since a program
+ * that looks at one byte offset after another asks about the same string each time.
+ */
+export class Utf8Reader {
+  private text: string | undefined;
+  private bytes = new Uint8Array();
+
+  of(text: string): Uint8Array {
+    if (text !== this.text) {
+      this.bytes = encoder.encode(text);
+      this.text = text;
+    }
+    return this.bytes;
   }
-  return at === offset;
 }
 
 export function utf8Length(text: string): number {
