@@ -549,3 +549,20 @@ test('a mutable reference moved to another binding leaves the trace, while a reb
 `;
   expect(traceProgram('rust', dropped, dropped).finalVars).toEqual({ v: [1, 2] });
 });
+
+test('stops building a snapshot whose shared references expand past the trace size limit', () => {
+  const program = `fn main() { // atomic
+    let a = [0; 10];
+    let b = [&a; 10];
+    let c = [&b; 10];
+    let d = [&c; 10];
+}
+`;
+  const previousLimit = LIMITS.maxTraceSize;
+  LIMITS.maxTraceSize = 5000;
+  try {
+    expect(() => traceProgram('rust', program, program)).toThrow('Execution limit exceeded: trace');
+  } finally {
+    LIMITS.maxTraceSize = previousLimit;
+  }
+});

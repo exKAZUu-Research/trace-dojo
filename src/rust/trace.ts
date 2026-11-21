@@ -43,7 +43,7 @@ export function traceRustProgram(program: string, trace: TraceOptions, input?: P
   };
   const recorder = new TraceRecorder(runtime, {
     isAtomic: (frame) => frame.info.isAtomic,
-    variablesOf: (frame) => variablesOf(frame),
+    variablesOf: snapshotOf,
     recordItem: (item) => {
       charge(item.board.length + NODE_COST * (item.callLines.length + item.turtles.length * 4 + 1));
       charge(traceCost(item.vars) + traceCost(item.referenceVars));
@@ -54,11 +54,31 @@ export function traceRustProgram(program: string, trace: TraceOptions, input?: P
   let finalVars: TraceItemVariable = {};
   // A model program may end with a panic to show how one stops the program.
   const run = runProgram(runtime, built, true, (frame) => {
-    finalVars = variablesOf(frame).vars;
+    finalVars = snapshotOf(frame).vars;
   });
   charge(traceCost(finalVars));
   return { traceItems: recorder.traceItems, finalVars, ...run };
 }
+
+/**
+ * A frame's variables, stopping once one snapshot alone exceeds the trace budget: references shared across arrays
+ * expand into far more nodes than the run allocates, so the snapshot must stop before it is built in full.
+ */
+function snapshotOf(frame: Frame): TraceVariables {
+  let remaining = LIMITS.maxTraceSize;
+  chargeSnapshot = (cost) => {
+    remaining -= cost;
+    if (remaining < 0) throw new ExecutionLimitError('trace');
+  };
+  try {
+    return variablesOf(frame);
+  } finally {
+    chargeSnapshot = undefined;
+  }
+}
+
+/** What building the current snapshot spends of its budget; set only while a snapshot is being built. */
+let chargeSnapshot: ((cost: number) => void) | undefined;
 
 /** The cost of trace data, in the units of {@link LIMITS.maxTraceSize}: its text, plus a node's cost for each object. */
 function traceCost(data: unknown): number {
@@ -165,6 +185,12 @@ function elementType(t: Type): Type | undefined {
 }
 
 function scalarOf(value: Value, type: Type): Scalar | typeof NOT_SCALAR {
+  const scalar = scalarValueOf(value, type);
+  chargeSnapshot?.(typeof scalar === 'string' ? scalar.length : 1);
+  return scalar;
+}
+
+function scalarValueOf(value: Value, type: Type): Scalar | typeof NOT_SCALAR {
   const t = derefType(type);
   const v = deref(value);
   if (v === MOVED) return NOT_SCALAR;
@@ -228,6 +254,7 @@ const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
 // code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of value the trace shows.
 function displayNodeOf(value: Value, type: Type, seen: Set<unknown>): DisplayNode | undefined {
+  chargeSnapshot?.(NODE_COST);
   const t = derefType(type);
   const v = deref(value);
   // A part moved out (`let a = s.a;`) leaves what held it.
