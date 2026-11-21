@@ -116,6 +116,7 @@ export interface LoopContext {
   identity: object;
   /** Whether a `break` leaves the loop, without which `while (true)` never completes. */
   hasBreak: boolean;
+  doWhileExits?: { breaks: Flow[]; continues: Flow[] };
   /** The variables declared before the loop, which an assignment in it may assign more than once. */
   outerVals: Set<VariableSymbol>;
 }

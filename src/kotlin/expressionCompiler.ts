@@ -1701,6 +1701,10 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const loop = context.loops.at(-1);
     if (!loop) this.error(row, `${isBreak ? 'break' : 'continue'} は、ループの中に書いてください。`);
     if (isBreak) loop.hasBreak = true;
+    if (loop.doWhileExits && !this.flow.isDead) {
+      const exits = isBreak ? loop.doWhileExits.breaks : loop.doWhileExits.continues;
+      exits.push(this.flow.copy());
+    }
     const signal = new LoopSignal(loop.identity, isBreak);
     this.flow.isDead = true;
     return {

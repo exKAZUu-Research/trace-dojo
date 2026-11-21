@@ -377,6 +377,21 @@ test.each([
   ],
   ['println of a Nothing value, which every overload accepts', false, 'fun main() {\n    println(TODO())\n}'],
   [
+    'a read after breaking from a do-while before assignment',
+    false,
+    'fun run(stop: Boolean) { var n: Int; do { if (stop) break; n = 1 } while (false); println(n) }\nfun main() { run(true) }',
+  ],
+  [
+    'a condition reached by continue before assignment',
+    false,
+    'fun run(stop: Boolean) { var n: Int; do { if (stop) continue; n = 1 } while (n < 1) }\nfun main() { run(true) }',
+  ],
+  [
+    'a read after all do-while exits assign the variable',
+    true,
+    'fun run(stop: Boolean) { var n: Int; do { if (stop) { n = 2; break }; n = 1 } while (false); println(n) }\nfun main() { run(true) }',
+  ],
+  [
     'a setter on the line of an expression getter without a semicolon',
     false,
     'class A {\n    var c = 1\n    var f: Int get() = c  set(v) { c = v }\n}\nfun main() { val a = A(); a.f = 2; println(a.f) }',

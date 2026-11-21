@@ -772,15 +772,16 @@ export abstract class StatementCompiler extends OperatorCompiler {
 
   private compileDoWhile(scope: Scope, context: FunctionContext, statement: DoWhileStatement): Exec {
     this.forgetAssignedIn(scope, [...statement.body.statements]);
+    this.forgetAssignedIn(scope, statement.condition);
     const loop = this.newLoop(context, scope);
+    const exits: NonNullable<LoopContext['doWhileExits']> = { breaks: [], continues: [] };
+    loop.doWhileExits = exits;
     // The condition sees the body's variables, as Kotlin's scoping of do-while does.
     const bodyScope = new Scope(scope, context);
     context.loops.push(loop);
     let bodyEval: Eval;
-    let test: Eval;
     const firstSlot = context.info.slotCount;
     try {
-      for (const name of assignedNames([...statement.body.statements])) void name;
       const compiled = this.compileStatementsValue(
         bodyScope,
         context,
@@ -793,10 +794,13 @@ export abstract class StatementCompiler extends OperatorCompiler {
     } finally {
       context.loops.pop();
     }
+    this.flow = Flow.merge([this.flow, ...exits.continues]);
     const condition = this.compileCondition(bodyScope, context, statement.condition);
-    test = condition.compiled.eval;
+    const test = condition.compiled.eval;
     const lastSlot = context.info.slotCount;
-    this.applyNarrowing(condition.whenFalse);
+    const conditionExit = this.withNarrowing(this.flow, condition.whenFalse);
+    conditionExit.isDead ||= condition.compiled.constant === true;
+    this.flow = Flow.merge([conditionExit, ...exits.breaks]);
     const body: Exec = (frame) => {
       bodyEval(frame);
     };
