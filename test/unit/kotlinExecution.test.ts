@@ -427,6 +427,18 @@ test.each([
     uncaughtException: 'java.lang.ArrayIndexOutOfBoundsException: Index 5 out of bounds for length 2',
   },
   {
+    name: 'an exhausted character sequence iterator',
+    source: `fun main() {
+    val chars: CharSequence = StringBuilder("ab")
+    val iterator = chars.iterator()
+    println(iterator.next())
+    println(iterator.next())
+    println(iterator.next())
+}`,
+    stdout: 'a\nb\n',
+    uncaughtException: 'java.lang.StringIndexOutOfBoundsException: Index 2 out of bounds for length 2',
+  },
+  {
     name: 'a division by zero',
     source: 'fun main() {\n    val z = 0\n    println(1 / z)\n}',
     stdout: '',

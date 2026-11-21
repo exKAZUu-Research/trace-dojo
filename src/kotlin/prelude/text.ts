@@ -156,10 +156,7 @@ operator fun CharSequence.iterator(): CharIterator = CharIterator(this)
 class CharIterator(private val text: CharSequence) : Iterator<Char> {
     private var index = 0
     override fun hasNext(): Boolean = index < text.length
-    override fun next(): Char {
-        if (index >= text.length) throw NoSuchElementException(index.toString())
-        return text[index++]
-    }
+    override fun next(): Char = text[index++]
 }
 
 external fun String.uppercase(): String
