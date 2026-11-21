@@ -6787,6 +6787,20 @@ var initial = 1;
   ).toMatchObject({ kind: 'compileError' });
 });
 
+test('extension type representations reject direct and transitive cycles', () => {
+  for (const declarations of [
+    'extension type E(E value) {}',
+    'extension type E(List<E> value) {}',
+    'extension type A(B value) {} extension type B(A value) {}',
+    'extension type E(T Function<T extends E>(T) value) {}',
+  ]) {
+    expect(executeProgram('dart', `${declarations} void main() {}`)).toMatchObject({ kind: 'compileError' });
+  }
+  expect(
+    executeProgram('dart', 'extension type E<T>(List<T> value) {} void main() { print(E<E<int>>); }')
+  ).toMatchObject({ kind: 'executed', stdout: 'List<List<int>>\n' });
+});
+
 test('extension type constructors reject super initializers and formals', () => {
   for (const constructor of [
     'E.bad() : super();',

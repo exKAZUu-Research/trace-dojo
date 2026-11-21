@@ -36,6 +36,7 @@ import {
 } from './environment';
 import { initializeField, lateFieldGetter, lateFieldSetter } from './lateFields';
 import { markCovariantParameters, MemberCompiler } from './memberCompiler';
+import { checkRepresentationCycles } from './representationCycles';
 import { Frame, type FunctionInfo, type Runtime, type TypeEnv } from './runtime';
 import type { FunctionContext } from './scope';
 import { type GenExec, inheritsCovariance } from './statementCompiler';
@@ -213,6 +214,9 @@ export class Compiler extends MemberCompiler {
     for (const [alias, declaration] of this.aliasWork) this.resolveAlias(alias, declaration);
     for (const { cls } of this.classWork) this.resolveClassBounds(cls);
     for (const work of this.classWork) this.resolveHeader(work);
+    checkRepresentationCycles(this.classWork, (span, name) =>
+      this.error(span, `拡張型 ${name} が、表現型を通して自分自身に依存しています。`)
+    );
     this.checkHierarchy();
     const boundChecks = this.pendingBoundChecks;
     this.pendingBoundChecks = undefined;
