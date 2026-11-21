@@ -793,9 +793,9 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     if (!instance && base.kind !== 'dynamic' && !spreadsNull)
       this.error(element, `${typeName(compiled.type)} 型の値は Map ではないので、マップの中では展開できません。`);
     const [keyType, valueType] = instance?.args ?? [DYNAMIC, DYNAMIC];
-    if (!spreadsNull && keyContext && keyType.kind !== 'dynamic' && !isSubtype(keyType, keyContext))
+    if (!spreadsNull && keyContext && !fitsContext(keyType, keyContext))
       this.error(element, `${typeName(keyType)} 型のキーは、${typeName(keyContext)} 型のマップに入れられません。`);
-    if (!spreadsNull && valueContext && valueType.kind !== 'dynamic' && !isSubtype(valueType, valueContext))
+    if (!spreadsNull && valueContext && !fitsContext(valueType, valueContext))
       this.error(element, `${typeName(valueType)} 型の値は、${typeName(valueContext)} 型のマップに入れられません。`);
     if (!spreadsNull) types.push({ key: keyType, value: valueType });
     const mapType = interfaceType(coreTypes.map, [DYNAMIC, DYNAMIC]);
@@ -826,12 +826,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     const elementType = spreadsNull ? NEVER : iterableElementOf(base);
     if (!elementType)
       this.error(element, `${typeName(compiled.type)} 型の値は Iterable ではないので、展開できません。`);
-    if (
-      elementContext &&
-      !containsInferenceHole(elementContext) &&
-      elementType.kind !== 'dynamic' &&
-      !isSubtype(elementType, elementContext)
-    ) {
+    if (elementContext && !fitsContext(elementType, elementContext)) {
       this.error(element, `${typeName(elementType)} 型の要素は、${typeName(elementContext)} 型の要素にできません。`);
     }
     if (!spreadsNull) types.push({ key: elementType });
@@ -1180,4 +1175,12 @@ function addIterableElements(frame: Frame, iterable: Value, elementType: DartTyp
       add(value);
     })
   );
+}
+
+/**
+ * Whether a spread's element type fits a collection's context. A context still waiting for a call's type arguments
+ * only guides the elements, whose own types then constrain those arguments.
+ */
+function fitsContext(type: DartType, context: DartType): boolean {
+  return containsInferenceHole(context) || type.kind === 'dynamic' || isSubtype(type, context);
 }

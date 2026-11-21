@@ -1763,8 +1763,9 @@ test('Dart collection literal arguments infer their types from annotated closure
   const program = `void f<T>(List<T Function(T)> a) { print(T); }
 void g<T>(Map<String, void Function(T)> a) { print(T); }
 void h<T>(Set<void Function(T)> a) { print(T); }
-void main() { f([(int x) => x]); g({'a': (int x) {}}); h({(int x) {}}); }`;
-  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'int\nint\nint\n' });
+void k<T>(Map<void Function(T), int> a) { print(T); }
+void main() { f([(int x) => x]); g({'a': (int x) {}}); h({(int x) {}}); g({...{'a': (int x) {}}}); k({...{(int x) {}: 1}}); }`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'int\nint\nint\nint\nint\n' });
 });
 
 test('Dart spread maps keep their turtles while the target hashes keys', () => {
