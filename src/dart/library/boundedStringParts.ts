@@ -16,16 +16,21 @@ export function copyString(text: string): string {
 
 export class BoundedStringParts {
   private readonly parts = new StringParts();
-  private length = 0;
+  private size = 0;
 
   constructor(private readonly runtime: Runtime) {}
 
+  get length(): number {
+    return this.size;
+  }
+
   append(part: string): void {
     if (part.length === 0) return;
-    this.length += part.length;
-    if (this.length > LIMITS.maxStringLength) this.runtime.throwError('OutOfMemoryError', '', []);
+    const size = this.size + part.length;
+    if (size > LIMITS.maxStringLength) this.runtime.throwError('OutOfMemoryError', '', []);
     this.runtime.spend(Math.ceil(part.length / 1024));
     this.parts.append(part);
+    this.size = size;
   }
 
   appendEscaped(text: string, asciiCharacters: RegExp, escape: (character: string) => string): void {

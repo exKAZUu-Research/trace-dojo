@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 403 -- String methods share bounds, matching, and formatting helpers.
+// code-gauge-allow-file fileNcss 411 -- String methods and buffers share bounds, matching, and formatting helpers.
 import { LIMITS } from '../../interpreter/limits';
 import { stringOf } from '../format';
 import { concatenate } from '../operators';
@@ -180,9 +180,9 @@ define('String.contains', (runtime, receiver, [pattern, start = 0n]) => {
 
 type StringMatch = DartObject | MatchState;
 
-function* matchesOf(runtime: Runtime, pattern: Value, text: string, start = 0): IterableIterator<StringMatch> {
+function* matchesOf(runtime: Runtime, pattern: Value, text: string, start?: number): IterableIterator<StringMatch> {
   if (typeof pattern === 'string') {
-    let position = text.indexOf(pattern, start);
+    let position = text.indexOf(pattern, start ?? 0);
     while (position >= 0 && position <= text.length) {
       const end = position + pattern.length;
       runtime.spend();
@@ -194,13 +194,13 @@ function* matchesOf(runtime: Runtime, pattern: Value, text: string, start = 0): 
     return;
   }
   if (isRegExp(runtime, pattern)) {
-    yield* allMatchesOf(runtime, pattern, text, start);
+    yield* allMatchesOf(runtime, pattern, text, start ?? 0);
     return;
   }
   const iterable = runtime.invoke(
     pattern,
     'allMatches',
-    { positional: [text, BigInt(start)], named: undefined },
+    { positional: start === undefined ? [text] : [text, BigInt(start)], named: undefined },
     [],
     undefined
   );
@@ -257,7 +257,7 @@ define('String.replaceFirst', (runtime, receiver, [from, to, start = 0n]) => {
   const at = intArg(runtime, start, 'startIndex');
   if (at < 0n || at > BigInt(text.length)) rangeError(runtime, at, 0, text.length, 'startIndex');
   const replacement = stringArg(runtime, to, 'to');
-  for (const match of matchesOf(runtime, from, text, index(at))) {
+  for (const match of matchesOf(runtime, from, text, at === 0n ? undefined : index(at))) {
     return replaceMatch(runtime, text, match, replacement);
   }
   return text;
@@ -502,41 +502,57 @@ function throwCharCodesError(runtime: Runtime, codes: Value, invalidCode: bigint
 // StringBuffer
 
 interface BufferState {
-  text: string;
+  parts: BoundedStringParts;
+  snapshot: string | undefined;
+  readonly text: string;
   values(): Iterable<Value>;
-}
-
-function bufferOf(receiver: Value): BufferState {
-  return (receiver as DartObject).native as unknown as BufferState;
 }
 
 defineConstructor('StringBuffer.new', (runtime, instance, args) => {
   const object = instance as DartObject;
   const content = args.positional[0];
-  object.native = { text: content === undefined ? '' : stringOf(runtime, content), values: () => [] };
-  return;
+  const parts = new BoundedStringParts(runtime);
+  parts.append(content === undefined ? '' : stringOf(runtime, content));
+  const state: BufferState = {
+    parts,
+    snapshot: undefined,
+    get text() {
+      if (this.snapshot === undefined) {
+        runtime.spend(Math.ceil(this.parts.length / 1024));
+        this.snapshot = this.parts.text();
+      }
+      return this.snapshot;
+    },
+    values: () => [],
+  };
+  object.native = state as unknown as DartObject['native'];
 });
-define('StringBuffer.length', (_runtime, receiver) => BigInt(bufferOf(receiver).text.length));
-define('StringBuffer.isEmpty', (_runtime, receiver) => bufferOf(receiver).text.length === 0);
-define('StringBuffer.isNotEmpty', (_runtime, receiver) => bufferOf(receiver).text.length > 0);
-define('StringBuffer.write', (runtime, receiver, [value]) => appendBuffer(runtime, receiver, stringOf(runtime, value)));
+define('StringBuffer.length', (_runtime, receiver) => BigInt(bufferOf(receiver).parts.length));
+define('StringBuffer.isEmpty', (_runtime, receiver) => bufferOf(receiver).parts.length === 0);
+define('StringBuffer.isNotEmpty', (_runtime, receiver) => bufferOf(receiver).parts.length > 0);
+define('StringBuffer.write', (runtime, receiver, [value]) => appendBuffer(receiver, stringOf(runtime, value)));
 define('StringBuffer.writeCharCode', (runtime, receiver, [code]) =>
-  appendBuffer(runtime, receiver, characterOf(runtime, intArg(runtime, code, 'charCode')))
+  appendBuffer(receiver, characterOf(runtime, intArg(runtime, code, 'charCode')))
 );
 define('StringBuffer.writeln', (runtime, receiver, args) =>
-  appendBuffer(runtime, receiver, `${args.length === 0 ? '' : stringOf(runtime, args[0])}\n`)
+  appendBuffer(receiver, `${args.length === 0 ? '' : stringOf(runtime, args[0])}\n`)
 );
-define('StringBuffer.clear', (_runtime, receiver) => {
-  bufferOf(receiver).text = '';
-  return;
+define('StringBuffer.clear', (runtime, receiver) => {
+  const buffer = bufferOf(receiver);
+  buffer.parts = new BoundedStringParts(runtime);
+  buffer.snapshot = '';
 });
 define('StringBuffer.toString', (_runtime, receiver) => bufferOf(receiver).text);
 
-function appendBuffer(runtime: Runtime, receiver: Value, text: string): undefined {
+function appendBuffer(receiver: Value, text: string): undefined {
+  if (text.length === 0) return;
   const buffer = bufferOf(receiver);
-  checkLength(runtime, buffer.text.length + text.length);
-  buffer.text += text;
-  return undefined;
+  buffer.parts.append(text);
+  buffer.snapshot = undefined;
+}
+
+function bufferOf(receiver: Value): BufferState {
+  return (receiver as DartObject).native as unknown as BufferState;
 }
 
 export function characterOf(runtime: Runtime, code: bigint): string {

@@ -6229,6 +6229,50 @@ test('regex group names use a fresh ordered set or the canonical empty list', ()
   });
 });
 
+test('string pattern calls preserve omitted starts and explicit zero', () => {
+  const source = `class PatternWithDefault implements Pattern {
+  Iterable<Match> allMatches(String text, [int start = 1]) {
+    print(start);
+    return 'a'.allMatches(text, start);
+  }
+  Match? matchAsPrefix(String text, [int start = 0]) => null;
+}
+void main() {
+  final pattern = PatternWithDefault();
+  print('aa'.replaceFirst(pattern, 'b'));
+  print('aaa'.replaceFirst(pattern, 'b', 2));
+  print('aa'.replaceFirstMapped(pattern, (_) => 'b'));
+  print('aa'.replaceAll(pattern, 'b'));
+  print('aa'.replaceAllMapped(pattern, (_) => 'b'));
+  print('aa'.split(pattern));
+  print('aa'.splitMapJoin(pattern, onMatch: (_) => 'b'));
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '1\nab\n2\naab\n0\nba\n1\nab\n1\nab\n1\n[a, ]\n1\nab\n',
+  });
+});
+
+test('StringBuffer meters appends and preserves snapshots across writes and clear', () => {
+  const source = `void main() {
+  final buffer = StringBuffer();
+  for (var i = 0; i < 50000; i++) buffer.write('x');
+  print(buffer.length);
+  final snapshot = buffer.toString();
+  buffer.write('');
+  buffer.writeln('end');
+  print([snapshot.length, buffer.length, buffer.toString().endsWith('end\\n')]);
+  try { buffer.write('x' * 1000000); } catch (error) { print(error.runtimeType); }
+  print(buffer.length);
+  buffer.clear();
+  print([buffer.isEmpty, buffer.toString(), snapshot.length]);
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '50000\n[50000, 50004, true]\nOutOfMemoryError\n50004\n[true, , 50000]\n',
+  });
+});
+
 test('error representations escape isolated surrogates without splitting pairs', () => {
   const source = `void main() {
   var isolated = String.fromCharCodes([0xd800, 0xdc00, 0xdc00]);
