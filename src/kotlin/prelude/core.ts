@@ -1,4 +1,4 @@
-import { arithmeticResult, NUMBER_OPERATOR_NAMES, SIGNED_NUMBER_KINDS } from '../operators';
+import { arithmeticResult, NUMBER_OPERATOR_NAMES, SIGNED_NUMBER_KINDS, UNSIGNED_NUMBER_KINDS } from '../operators';
 import type { ArithmeticOperator, NumericKind } from '../operators';
 import { kotlin } from './source';
 
@@ -244,7 +244,9 @@ ${unsignedConversions(true)}
 }
 
 class UByte private constructor() : Comparable<UByte> {
-    external override fun compareTo(other: UByte): Int
+${numberOperators('UByte')}
+    external operator fun inc(): UByte
+    external operator fun dec(): UByte
     external fun toInt(): Int
     external fun toLong(): Long
     external fun toUInt(): UInt
@@ -254,7 +256,9 @@ class UByte private constructor() : Comparable<UByte> {
 }
 
 class UShort private constructor() : Comparable<UShort> {
-    external override fun compareTo(other: UShort): Int
+${numberOperators('UShort')}
+    external operator fun inc(): UShort
+    external operator fun dec(): UShort
     external fun toInt(): Int
     external fun toLong(): Long
     external fun toUInt(): UInt
@@ -264,7 +268,9 @@ class UShort private constructor() : Comparable<UShort> {
 }
 
 class UInt private constructor() : Comparable<UInt> {
-    external override fun compareTo(other: UInt): Int
+${numberOperators('UInt')}
+    external operator fun inc(): UInt
+    external operator fun dec(): UInt
     external fun toInt(): Int
     external fun toLong(): Long
     external fun toULong(): ULong
@@ -284,7 +290,9 @@ class UInt private constructor() : Comparable<UInt> {
 }
 
 class ULong private constructor() : Comparable<ULong> {
-    external override fun compareTo(other: ULong): Int
+${numberOperators('ULong')}
+    external operator fun inc(): ULong
+    external operator fun dec(): ULong
     external fun toInt(): Int
     external fun toLong(): Long
     external fun toUInt(): UInt
@@ -344,11 +352,14 @@ function unsignedConversions(floating = false): string {
 }
 
 function numberOperators(kind: NumericKind): string {
-  return SIGNED_NUMBER_KINDS.flatMap((other) => [
-    ...Object.entries(NUMBER_OPERATOR_NAMES).map(
-      ([operator, name]) =>
-        `    external operator fun ${name}(other: ${other}): ${arithmeticResult(kind, other, operator as ArithmeticOperator)}`
-    ),
-    `    external ${other === kind ? 'override' : 'operator'} fun compareTo(other: ${other}): Int`,
-  ]).join('\n');
+  const operands: readonly NumericKind[] = kind.startsWith('U') ? UNSIGNED_NUMBER_KINDS : SIGNED_NUMBER_KINDS;
+  return operands
+    .flatMap((other) => [
+      ...Object.entries(NUMBER_OPERATOR_NAMES).map(
+        ([operator, name]) =>
+          `    external operator fun ${name}(other: ${other}): ${arithmeticResult(kind, other, operator as ArithmeticOperator)}`
+      ),
+      `    external ${other === kind ? 'override' : 'operator'} fun compareTo(other: ${other}): Int`,
+    ])
+    .join('\n');
 }

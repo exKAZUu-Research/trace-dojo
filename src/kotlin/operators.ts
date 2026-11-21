@@ -13,6 +13,7 @@ export const NUMBER_OPERATOR_NAMES = {
 } as const;
 
 export const SIGNED_NUMBER_KINDS = ['Byte', 'Short', 'Int', 'Long', 'Float', 'Double'] as const;
+export const UNSIGNED_NUMBER_KINDS = ['UByte', 'UShort', 'UInt', 'ULong'] as const;
 
 type Binary = (frame: Frame, a: number | bigint, b: number | bigint) => number | bigint;
 

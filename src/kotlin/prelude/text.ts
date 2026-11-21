@@ -373,9 +373,13 @@ external fun String.toLong(radix: Int): Long
 external fun String.toLongOrNull(): Long?
 external fun String.toLongOrNull(radix: Int): Long?
 external fun String.toShort(): Short
+external fun String.toShort(radix: Int): Short
 external fun String.toShortOrNull(): Short?
+external fun String.toShortOrNull(radix: Int): Short?
 external fun String.toByte(): Byte
+external fun String.toByte(radix: Int): Byte
 external fun String.toByteOrNull(): Byte?
+external fun String.toByteOrNull(radix: Int): Byte?
 fun String.toUIntOrNull(): UInt? {
     if (startsWith('-')) return null
     val value = toLongOrNull() ?: return null

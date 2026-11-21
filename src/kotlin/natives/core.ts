@@ -14,6 +14,7 @@ import {
   step,
   toFloat,
   toInt32,
+  UNSIGNED_NUMBER_KINDS,
   widen,
 } from '../operators';
 import { EXCEPTIONS } from '../prelude/runtimeTypes';
@@ -21,8 +22,6 @@ import type { Frame } from '../runtime';
 import type { PropertySymbol } from '../symbols';
 import { Boxed, KObject, type PrimitiveKind, UNIT, type Value } from '../values';
 import { defineNative, defineNativeProperty, libraryClass, newItems, throwError } from './registry';
-
-const SIGNED_NUMBER_KIND_NAMES = new Set<PrimitiveKind>(SIGNED_NUMBER_KINDS);
 
 /** Converts a number of one kind to another, as `toInt()`, `toLong()`, and their kin do. */
 // code-gauge-allow functionNcss 43 -- registers the natives of one class together, in the order the prelude declares them.
@@ -116,19 +115,6 @@ const CONVERSIONS: [string, PrimitiveKind][] = [
   ['toUShort', 'UShort'],
 ];
 
-const NUMBER_KINDS: PrimitiveKind[] = [
-  'Byte',
-  'Short',
-  'Int',
-  'Long',
-  'Float',
-  'Double',
-  'UByte',
-  'UShort',
-  'UInt',
-  'ULong',
-];
-
 function boxedEquals(kind: PrimitiveKind): (frame: Frame, receiver: Value, args: Value[]) => Value {
   return (_frame, receiver, [other]) => {
     if (!(other instanceof Boxed) || other.kind !== kind) return false;
@@ -148,42 +134,46 @@ function range(name: string, first: Value, last: Value): Value {
 }
 
 function defineOperatorMembers(): void {
-  for (const kind of SIGNED_NUMBER_KINDS) {
-    for (const other of SIGNED_NUMBER_KINDS) {
-      for (const [operator, name] of Object.entries(NUMBER_OPERATOR_NAMES) as [ArithmeticOperator, string][]) {
-        const result = arithmeticResult(kind, other, operator) as NumericKind;
-        const operation = arithmeticOperation(result, operator);
-        defineNative(`kotlin.${kind}.${name}(${other})`, (frame, receiver, [argument]) =>
-          operation(
-            frame,
-            widen(receiver as number | bigint, kind, result),
-            widen(argument as number | bigint, other, result)
-          )
-        );
-      }
-      const common = arithmeticResult(kind, other, '+') as NumericKind;
-      const isFloating = common === 'Double' || common === 'Float';
-      defineNative(`kotlin.${kind}.compareTo(${other})`, (_frame, receiver, [argument]) => {
-        const a = widen(receiver as number | bigint, kind, common);
-        const b = widen(argument as number | bigint, other, common);
-        return isFloating ? compareDoubles(a as number, b as number) : compareNumbers(a, b);
-      });
+  for (const kinds of [SIGNED_NUMBER_KINDS, UNSIGNED_NUMBER_KINDS]) {
+    for (const kind of kinds) {
+      for (const other of kinds) defineNumberPair(kind, other);
+      const result = kind === 'Short' || kind === 'Byte' ? 'Int' : kind;
+      if (!kind.startsWith('U'))
+        defineNative(`kotlin.${kind}.unaryMinus()`, (_frame, receiver) => negate(result, receiver as number | bigint));
+      defineNative(`kotlin.${kind}.inc()`, (_frame, receiver) => step(kind, receiver as number | bigint, 1));
+      defineNative(`kotlin.${kind}.dec()`, (_frame, receiver) => step(kind, receiver as number | bigint, -1));
     }
-    const result = kind === 'Short' || kind === 'Byte' ? 'Int' : kind;
-    defineNative(`kotlin.${kind}.unaryMinus()`, (_frame, receiver) => negate(result, receiver as number | bigint));
-    defineNative(`kotlin.${kind}.inc()`, (_frame, receiver) => step(kind, receiver as number | bigint, 1));
-    defineNative(`kotlin.${kind}.dec()`, (_frame, receiver) => step(kind, receiver as number | bigint, -1));
   }
 }
 
+function defineNumberPair(kind: NumericKind, other: NumericKind): void {
+  for (const [operator, name] of Object.entries(NUMBER_OPERATOR_NAMES) as [ArithmeticOperator, string][]) {
+    const result = arithmeticResult(kind, other, operator) as NumericKind;
+    const operation = arithmeticOperation(result, operator);
+    defineNative(`kotlin.${kind}.${name}(${other})`, (frame, receiver, [argument]) =>
+      operation(
+        frame,
+        widen(receiver as number | bigint, kind, result),
+        widen(argument as number | bigint, other, result)
+      )
+    );
+  }
+  const common = arithmeticResult(kind, other, '+') as NumericKind;
+  const isFloating = common === 'Double' || common === 'Float';
+  defineNative(`kotlin.${kind}.compareTo(${other})`, (_frame, receiver, [argument]) => {
+    const a = widen(receiver as number | bigint, kind, common);
+    const b = widen(argument as number | bigint, other, common);
+    return isFloating ? compareDoubles(a as number, b as number) : compareNumbers(a, b);
+  });
+}
+
 function definePrimitives(): void {
-  for (const kind of [...NUMBER_KINDS, 'Char' as const]) {
+  for (const kind of [...SIGNED_NUMBER_KINDS, ...UNSIGNED_NUMBER_KINDS, 'Char' as const]) {
     const prefix = `kotlin.${kind}`;
     for (const [name, to] of CONVERSIONS) {
       defineNative(`${prefix}.${name}()`, (_frame, receiver) => convertNumber(receiver as number | bigint, kind, to));
     }
-    // The signed number types compare with every number type, which defineOperatorMembers covers.
-    if (!SIGNED_NUMBER_KIND_NAMES.has(kind)) {
+    if (kind === 'Char') {
       defineNative(`${prefix}.compareTo(${kind})`, (_frame, receiver, [other]) =>
         compareNumbers(receiver as number | bigint, other as number | bigint)
       );

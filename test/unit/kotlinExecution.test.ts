@@ -1741,6 +1741,39 @@ fun main() {
       'concurrent\n[3, 1, 2, 3]\nconcurrent\n[1, 2, 3, 3]\ncontains 3\ncontains 2\ncontains 1\n[1, 3]\ncontains 2\ncontains 3\ncontains 1\n[2]\n[first, longer]\n1122\nfalse\nfalse\nimmutable\ntrue\ntrue\nfalse\n4\nfalse\nfalse\n',
   },
   {
+    name: 'unsigned arithmetic and narrow radix parsing follow Kotlin numeric rules',
+    source: `fun main() {
+    println("7f".toByte(16))
+    println("-80".toByte(16))
+    println("80".toByteOrNull(16))
+    println("100".toShortOrNull(2))
+    println("-8000".toShort(16))
+    println("8000".toShortOrNull(16))
+    try { println("80".toByte(16)) } catch (e: Exception) { println(e) }
+    try { println("g".toShort(16)) } catch (e: Exception) { println(e) }
+    try { println("1".toByteOrNull(1)) } catch (e: Exception) { println(e) }
+    for (word in listOf("ǳabc", "ǆabc", "ǅabc", "ßabc", "𐐨abc")) println(word.capitalize())
+    val byte: UByte = 255u
+    val short: UShort = 256u
+    val int: UInt = 4_294_967_295u
+    val long: ULong = 4_294_967_296uL
+    println(byte.compareTo(short))
+    println(int.compareTo(long))
+    println(long.compareTo(int))
+    println(int.plus(1u))
+    println(byte.plus(short))
+    println(0u.minus(1u))
+    println(int.times(2u))
+    println(long.div(short))
+    println(long.rem(7u))
+    println(byte.inc())
+    println(0uL.dec())
+    try { println(int.div(0u)) } catch (e: ArithmeticException) { println(e.message) }
+}`,
+    stdout:
+      '127\n-128\nnull\n4\n-32768\nnull\njava.lang.NumberFormatException: Value out of range. Value:"80" Radix:16\njava.lang.NumberFormatException: For input string: "g" under radix 16\njava.lang.IllegalArgumentException: radix 1 was not in valid range 2..36\nǲabc\nǅabc\nǅabc\nSSabc\n𐐨abc\n-1\n-1\n1\n0\n511\n4294967295\n4294967294\n16777216\n4\n0\n18446744073709551615\n/ by zero\n',
+  },
+  {
     name: 'exactly-once scope lambdas initialize deferred vals',
     source: `fun main() {
     val first: Int

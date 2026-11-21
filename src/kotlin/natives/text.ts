@@ -109,12 +109,17 @@ function parseInteger(frame: Frame, value: string, radix: number, bits: 8 | 16 |
 }
 
 /** `Short.parseShort` and `Byte.parseByte`, which name a number out of their range differently from a malformed one. */
-function parseNarrow(frame: Frame, value: string, bits: 8 | 16): number {
-  const parsed = parseInteger(frame, value, 10, 32);
-  if (parsed === undefined) return numberFormatError(frame, value);
+function parseNarrow(frame: Frame, value: string, bits: 8 | 16, radix = 10): number {
+  const parsed = parseInteger(frame, value, radix, 32);
+  if (parsed === undefined) return numberFormatError(frame, value, radix);
   if (BigInt.asIntN(bits, parsed) !== parsed)
-    throwError(frame, 'java.lang.NumberFormatException', `Value out of range. Value:"${value}" Radix:10`);
+    throwError(frame, 'java.lang.NumberFormatException', `Value out of range. Value:"${value}" Radix:${radix}`);
   return Number(parsed);
+}
+
+function parseNarrowOrNull(frame: Frame, value: string, kind: 'Byte' | 'Short', radix = 10): Boxed | undefined {
+  const parsed = parseInteger(frame, value, radix, kind === 'Byte' ? 8 : 16);
+  return parsed === undefined ? undefined : new Boxed(kind, Number(parsed));
 }
 
 function numberFormatError(frame: Frame, value: string, radix = 10): never {
@@ -371,15 +376,15 @@ const TEXT_PARSING_NATIVES: Record<string, TextNative> = {
     return parsed === undefined ? undefined : new Boxed('Long', parsed);
   },
   'String.toShort()': (frame, receiver) => parseNarrow(frame, text(receiver), 16),
-  'String.toShortOrNull()': (frame, receiver) => {
-    const parsed = parseInteger(frame, text(receiver), 10, 16);
-    return parsed === undefined ? undefined : new Boxed('Short', Number(parsed));
-  },
+  'String.toShort(Int)': (frame, receiver, [radix]) => parseNarrow(frame, text(receiver), 16, radix as number),
+  'String.toShortOrNull()': (frame, receiver) => parseNarrowOrNull(frame, text(receiver), 'Short'),
+  'String.toShortOrNull(Int)': (frame, receiver, [radix]) =>
+    parseNarrowOrNull(frame, text(receiver), 'Short', radix as number),
   'String.toByte()': (frame, receiver) => parseNarrow(frame, text(receiver), 8),
-  'String.toByteOrNull()': (frame, receiver) => {
-    const parsed = parseInteger(frame, text(receiver), 10, 8);
-    return parsed === undefined ? undefined : new Boxed('Byte', Number(parsed));
-  },
+  'String.toByte(Int)': (frame, receiver, [radix]) => parseNarrow(frame, text(receiver), 8, radix as number),
+  'String.toByteOrNull()': (frame, receiver) => parseNarrowOrNull(frame, text(receiver), 'Byte'),
+  'String.toByteOrNull(Int)': (frame, receiver, [radix]) =>
+    parseNarrowOrNull(frame, text(receiver), 'Byte', radix as number),
   'String.toLongOrNull()': (frame, receiver) => {
     const parsed = parseInteger(frame, text(receiver), 10, 64);
     return parsed === undefined ? undefined : new Boxed('Long', parsed);
@@ -407,9 +412,17 @@ const TEXT_PARSING_NATIVES: Record<string, TextNative> = {
   },
 };
 
+function capitalize(value: string): string {
+  const first = value.charAt(0);
+  const code = first.codePointAt(0) ?? 0;
+  if (!isJdkLowerCase(code)) return value;
+  const title = titleJdkChar(code);
+  return (title === upperJdkChar(code) ? first.toUpperCase() : charToString(title)) + value.slice(1);
+}
+
 /** Characters, and the conversions between characters, numbers, and text. */
 const CHAR_NATIVES: Record<string, TextNative> = {
-  'String.capitalize()': (_frame, receiver) => text(receiver).charAt(0).toUpperCase() + text(receiver).slice(1),
+  'String.capitalize()': (_frame, receiver) => capitalize(text(receiver)),
   'String.decapitalize()': (_frame, receiver) => text(receiver).charAt(0).toLowerCase() + text(receiver).slice(1),
   'Char.isDigit()': (_frame, receiver) => isJdkDigit(receiver as number),
   'Char.isLetter()': (_frame, receiver) => isJdkLetter(receiver as number),
