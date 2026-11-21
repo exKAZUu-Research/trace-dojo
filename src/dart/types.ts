@@ -433,7 +433,10 @@ function topBottomSubtype(s: DartType, t: DartType): boolean | undefined {
 }
 
 function isSubtypeOfObject(s: DartType, t: DartType): boolean {
-  if (s.kind === 'typeParam') return s.promoted ? isSubtype(s.promoted, t) : isSubtype(boundOf(s.param), t);
+  if (s.kind === 'typeParam') {
+    if (s.nullable) return false;
+    return s.promoted ? isSubtype(s.promoted, t) : isSubtype(boundOf(s.param), t);
+  }
   // An extension type is outside the class hierarchy: it is an Object only through a supertype it implements.
   if (s.kind === 'interface' && s.cls.kind === 'extensionType' && !s.nullable)
     return s.cls.interfaces.some((supertype) => isSubtypeOfObject(supertype, t));

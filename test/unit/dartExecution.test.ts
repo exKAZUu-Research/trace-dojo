@@ -1666,6 +1666,8 @@ test('Dart throws only dynamic values and subtypes of Object', () => {
     'extension type E(int? v) {}\nvoid main() { throw E(null); }',
     'extension type E(int v) {}\nvoid f<T extends E>(T t) { throw t; }\nvoid main() {}',
     'void f(int? x) { throw x; }\nvoid main() {}',
+    'void f<T extends Object>(T? t) { throw t; }\nvoid main() {}',
+    'void f<T extends int>(T? t) { Object o = t; }\nvoid main() {}',
   ]) {
     expect(executeProgram('dart', program)).toMatchObject({ kind: 'compileError' });
   }
