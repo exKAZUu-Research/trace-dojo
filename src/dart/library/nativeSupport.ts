@@ -138,6 +138,7 @@ export function forEachValue(runtime: Runtime, iterable: Value, body: (value: Va
   if (iterable instanceof DartList) {
     const { length } = iterable.elements;
     for (let position = 0; position < length; position++) {
+      runtime.spend();
       body(iterable.elements[position]);
       if (iterable.elements.length !== length) runtime.throwError('ConcurrentModificationError', '', [iterable]);
     }

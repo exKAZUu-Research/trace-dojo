@@ -8712,3 +8712,16 @@ void main() {
       'List<Object?>\n',
   });
 });
+
+test('Dart native list callbacks consume the shared execution budget', () => {
+  const program = `void main() {
+  final outer = List<int>.filled(1100, 1);
+  final inner = List<int>.filled(1100, 2);
+  outer.forEach((_) => inner.forEach((_) {}));
+  print('done');
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'limitExceeded',
+    limit: expect.stringMatching(/^(operations|time)$/),
+  });
+});

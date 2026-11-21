@@ -297,12 +297,7 @@ define('_ListIterator.current', (runtime, receiver) => {
 });
 
 define('List.forEach', (runtime, receiver, [action]) => {
-  const target = list(receiver);
-  const length = target.elements.length;
-  for (let position = 0; position < length; position++) {
-    callFunction(runtime, action, target.elements[position]);
-    if (length !== target.elements.length) runtime.throwError('ConcurrentModificationError', '', [target]);
-  }
+  forEachValue(runtime, receiver, (value) => callFunction(runtime, action, value));
   return;
 });
 define('List.contains', (runtime, receiver, [value]) => {
@@ -531,11 +526,9 @@ function filterList(runtime: Runtime, receiver: Value, test: Value, keep: boolea
   const length = target.elements.length;
   const retained: Value[] = [];
   runtime.withCallRoots(target, { positional: retained, named: undefined }, () => {
-    for (let position = 0; position < length; position++) {
-      const element = target.elements[position];
+    forEachValue(runtime, target, (element) => {
       if ((callFunction(runtime, test, element) === true) === keep) retained.push(element);
-      if (length !== target.elements.length) runtime.throwError('ConcurrentModificationError', '', [target]);
-    }
+    });
     if (retained.length !== length) target.elements = retained;
   });
   return undefined;
@@ -678,6 +671,7 @@ define('List.lastIndexOf', (runtime, receiver, [value, start]) => {
   let from = start === undefined ? target.elements.length - 1 : index(intArg(runtime, start, 'start'));
   if (from >= target.elements.length) from = target.elements.length - 1;
   for (let position = from; position >= 0; position--) {
+    runtime.spend();
     const element = target.elements[checkListIndex(runtime, target, BigInt(position), 'index')];
     if (runtime.equals(element, value)) return BigInt(position);
   }
@@ -688,6 +682,7 @@ define('List.indexWhere', (runtime, receiver, [test, start = 0n]) => {
   let from = index(intArg(runtime, start, 'start'));
   if (from < 0) from = 0;
   for (let position = from; position < target.elements.length; position++) {
+    runtime.spend();
     if (callFunction(runtime, test, target.elements[position]) === true) return BigInt(position);
   }
   return -1n;
@@ -697,6 +692,7 @@ define('List.lastIndexWhere', (runtime, receiver, [test, start]) => {
   let from = start === undefined ? target.elements.length - 1 : index(intArg(runtime, start, 'start'));
   if (from >= target.elements.length) from = target.elements.length - 1;
   for (let position = from; position >= 0; position--) {
+    runtime.spend();
     const element = target.elements[checkListIndex(runtime, target, BigInt(position), 'index')];
     if (callFunction(runtime, test, element) === true) return BigInt(position);
   }
@@ -1049,6 +1045,7 @@ function filterSet(runtime: Runtime, receiver: Value, test: Value, keep: boolean
   const used = source.keys.length;
   let modifications = source.modifications;
   for (let position = 0; position < used; position++) {
+    runtime.spend();
     if (!source.isLive(position)) continue;
     const result = callFunction(runtime, test, source.keyAt(position)) === true;
     if (source.modifications !== modifications) runtime.throwError('ConcurrentModificationError', '', [receiver]);
@@ -1276,6 +1273,7 @@ define('Map.removeWhere', (runtime, receiver, [test]) => {
   const used = source.keys.length;
   let modifications = source.modifications;
   for (let position = 0; position < used; position++) {
+    runtime.spend();
     if (!source.isLive(position)) continue;
     const remove = callFunction(runtime, test, source.keyAt(position), source.entryValues[position]) === true;
     if (source.modifications !== modifications) runtime.throwError('ConcurrentModificationError', '', [receiver]);
@@ -1432,6 +1430,7 @@ export function forEachEntry(runtime: Runtime, map: Value, body: (key: Value, va
     const used = source.keys.length;
     const modifications = source.modifications;
     for (let position = 0; position < used; position++) {
+      runtime.spend();
       if (!source.isLive(position)) continue;
       body(source.keyAt(position), source.entryValues[position]);
       if (source.modifications !== modifications) runtime.throwError('ConcurrentModificationError', '', [map]);
