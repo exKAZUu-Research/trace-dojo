@@ -329,7 +329,6 @@ export class BindingPatterns {
     }
     const node = named(key)[0];
     const type = computedType ?? this.c.expressions.check(node);
-    this.c.sourceMethodUses.recordKey(node, type);
     const constraint = this.c.baseConstraint(type);
     const members = constraint.kind === 'union' ? constraint.types : [constraint];
     const names: string[] = [];

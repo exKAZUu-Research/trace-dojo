@@ -28,23 +28,16 @@ export class SourceMethodUses {
 
   check(): void {
     for (const property of this.properties.values()) {
-      if (!this.isNonConvertingUse(property)) {
+      const method = this.boundMethod(property.parent);
+      const binding = propertyBinding(property) ?? methodAliasTarget(method);
+      const symbol = binding && localBinding(this.c, binding);
+      if (this.isInvoked(method) || (symbol && this.hasInvokedAlias(symbol))) {
         this.c.error(property, unsupportedMessage('関数やクラスの文字列への変換'));
       }
     }
   }
 
-  private isNonConvertingUse(property: TreeNode): boolean {
-    const read = property.parent;
-    if (this.isSafeMethodUse(read)) return true;
-    const binding = propertyBinding(property) ?? methodAliasTarget(read);
-    if (!binding) return false;
-    if (binding.type === 'object_pattern') return this.isMetadataBinding(binding);
-    const symbol = localBinding(this.c, binding);
-    return !!symbol && this.aliasesOnlyHaveSafeUses(symbol);
-  }
-
-  private aliasesOnlyHaveSafeUses(symbol: Sym): boolean {
+  private hasInvokedAlias(symbol: Sym): boolean {
     const references = this.valueReferences();
     const visited = new Set<Sym>();
     const pending = [symbol];
@@ -55,14 +48,54 @@ export class SourceMethodUses {
       const declarations = new Set(binding.valueEntries.map((entry) => entry.name.id));
       for (const use of references.get(binding) ?? []) {
         this.c.budget.spend();
-        if (declarations.has(use.id) || this.isSafeMethodUse(use)) continue;
-        const target = methodAliasTarget(use);
+        if (declarations.has(use.id)) continue;
+        const method = this.boundMethod(use);
+        if (this.isInvoked(method)) return true;
+        const target = methodAliasTarget(method);
         const alias = target && localBinding(this.c, target);
-        if (!alias) return false;
-        pending.push(alias);
+        if (alias) pending.push(alias);
       }
     }
-    return true;
+    return false;
+  }
+
+  private boundMethod(read: TreeNode | null): TreeNode | undefined {
+    let method = read ? outermostRuntimeExpression(read) : undefined;
+    while (method) {
+      const invoked = this.invokedMember(method);
+      if (!invoked || !invoked.keys.every((name) => name === 'bind')) break;
+      method = outermostRuntimeExpression(invoked.call);
+    }
+    return method;
+  }
+
+  private isInvoked(method: TreeNode | undefined): boolean {
+    if (!method) return false;
+    return (
+      !!callOf(method) || this.invokedMember(method)?.keys.some((name) => name === 'call' || name === 'apply') === true
+    );
+  }
+
+  private invokedMember(method: TreeNode): { call: TreeNode; keys: string[] } | undefined {
+    const member = method.parent;
+    if (!member || chainObject(member)?.id !== method.id) return undefined;
+    const call = callOf(outermostRuntimeExpression(member));
+    if (!call) return undefined;
+    const property = member.childForFieldName('property');
+    const name = property && propertyNameText(property);
+    const index = member.childForFieldName('index');
+    const keys = name ? [name] : index ? this.memberNames(index) : [];
+    return keys.length === 0 ? undefined : { call, keys };
+  }
+
+  private memberNames(key: TreeNode): string[] {
+    const types = this.keyTypes.get(key.id);
+    if (!types) return [];
+    return [...types].flatMap((type) =>
+      typeMembers(this.c.baseConstraint(type)).map((member) =>
+        member.kind === 'literal' && typeof member.value === 'string' ? member.value : ''
+      )
+    );
   }
 
   private valueReferences(): Map<Sym, TreeNode[]> {
@@ -90,62 +123,17 @@ export class SourceMethodUses {
     this.references = references;
     return references;
   }
-
-  private isSafeMethodUse(read: TreeNode | null): boolean {
-    if (!read) return false;
-    const expression = outermostRuntimeExpression(read);
-    const { parent } = expression;
-    if (parent?.type === 'expression_statement') return true;
-    if (parent?.type === 'assignment_expression' && parent.childForFieldName('left')?.id === expression.id) return true;
-    if (parent?.type === 'unary_expression')
-      return ['typeof', 'void'].includes(parent.childForFieldName('operator')?.text ?? '');
-    if (parent?.type === 'binary_expression')
-      return ['===', '!==', '==', '!='].includes(parent.childForFieldName('operator')?.text ?? '');
-    if (parent?.type === 'variable_declarator') {
-      const binding = methodAliasTarget(expression);
-      return binding?.type === 'object_pattern' && this.isMetadataBinding(binding);
-    }
-    if (parent && chainObject(parent)?.id === expression.id) {
-      const property = parent.childForFieldName('property');
-      if (property) return isMethodMetadata(propertyNameText(property));
-      const index = parent.childForFieldName('index');
-      return !!index && this.isMetadataKey(index);
-    }
-    return false;
-  }
-
-  private isMetadataBinding(binding: TreeNode): boolean {
-    return named(binding).every((element) => {
-      if (element.type === 'rest_pattern') return false;
-      const key = element.childForFieldName('key') ?? defaultedTarget(element) ?? element;
-      return key.type === 'computed_property_name'
-        ? this.isMetadataKey(named(key)[0])
-        : isMethodMetadata(propertyNameText(key));
-    });
-  }
-
-  private isMetadataKey(key: TreeNode): boolean {
-    const types = this.keyTypes.get(key.id);
-    if (!types) return false;
-    return [...types].every((type) =>
-      typeMembers(this.c.baseConstraint(type)).every(
-        (member) => member.kind === 'literal' && isMethodMetadata(member.value)
-      )
-    );
-  }
 }
 
 function localBinding(c: Checker, node: TreeNode): Sym | undefined {
   if (!isValueName(node)) return undefined;
   const symbol = c.binder.lookupValue(node, node.text);
-  if (!symbol?.valueEntries.length || symbol.isLibrary) return undefined;
-  // A redeclared parameter can expose the value through a non-strict function's arguments object.
-  if (symbol.valueEntries.length > 1 && symbol.valueKind === 'parameter') return undefined;
-  return symbol;
+  return symbol?.valueEntries.length === 1 && !symbol.isLibrary && !symbol.isReassigned ? symbol : undefined;
 }
 
-function isMethodMetadata(name: unknown): boolean {
-  return name === 'name' || name === 'length';
+function callOf(method: TreeNode): TreeNode | undefined {
+  const call = method.parent;
+  return call?.type === 'call_expression' && call.childForFieldName('function')?.id === method.id ? call : undefined;
 }
 
 function outermostRuntimeExpression(node: TreeNode): TreeNode {
@@ -174,20 +162,9 @@ function propertyBinding(property: TreeNode): TreeNode | undefined {
   return name ?? undefined;
 }
 
-function methodAliasTarget(read: TreeNode | null): TreeNode | undefined {
-  if (!read) return undefined;
-  const value = outermostRuntimeExpression(read);
-  const { parent } = value;
-  if (parent?.type === 'variable_declarator' && parent.childForFieldName('value')?.id === value.id) {
-    return parent.childForFieldName('name') ?? undefined;
-  }
-  if (
-    parent?.type === 'assignment_expression' &&
-    parent.childForFieldName('right')?.id === value.id &&
-    outermostRuntimeExpression(parent).parent?.type === 'expression_statement'
-  ) {
-    const target = parent.childForFieldName('left');
-    if (target?.type === 'identifier') return target;
-  }
-  return undefined;
+function methodAliasTarget(value: TreeNode | undefined): TreeNode | undefined {
+  const declarator = value?.parent;
+  if (declarator?.type !== 'variable_declarator' || declarator.childForFieldName('value')?.id !== value?.id)
+    return undefined;
+  return declarator.childForFieldName('name') ?? undefined;
 }

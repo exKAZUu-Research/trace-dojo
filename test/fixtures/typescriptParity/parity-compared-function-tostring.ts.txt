@@ -47,3 +47,15 @@ const methodForDestructuring = sourceMetadata.toString;
 destructuredKey = 'length';
 const { [destructuredKey]: lengthAfterAssignment } = methodForDestructuring;
 console.log(lengthAfterAssignment);
+
+console.log(Boolean(sourceMetadata.toString), new Boolean(sourceMethod).valueOf(), [sourceMethod].length);
+console.log(sourceMethod.bind(sourceMetadata).name);
+const boxedMethod = { method: sourceMethod };
+function exposeMethod({ target: { toString: method } }: { target: () => void }) {
+  return method;
+}
+console.log(typeof boxedMethod.method, exposeMethod({ target: sourceMetadata }).name);
+for (const key of ['name', 'call'] as const) console.log(typeof sourceMethod[key]);
+let replacedMethod = sourceMetadata.toString;
+replacedMethod = () => 'replacement';
+console.log(replacedMethod());

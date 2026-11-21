@@ -86,14 +86,13 @@ test.each([
   'const { toString: method } = fn; const key = "call"; method[key](fn);',
   'const { toString: method } = fn; const alias = method; const next = alias; next.call(fn);',
   'const { toString: method } = fn; let alias: () => string; alias = method; alias.call(fn);',
-  'const { toString: method } = fn; const alias = method; console.log({ alias });',
   'function neverCalled() { let key: "name" | "call" = "name"; const method = fn.toString; key = "call"; method[key](fn); }',
-  'let key: "name" | "call" = "name"; const method = fn.toString; for (const value of ["name", "call"] as const) { key = value; console.log(method[key]); }',
+  'function neverBound() { const method = fn.toString; const bound = method.bind(fn); return bound(); }',
+  'function neverComputed() { const key = "apply"; const method = fn.toString; return method[key](fn, []); }',
   'const [{ toString: method }] = [fn]; const escaped = { method }; escaped.method.call(fn);',
-  'function use({ target: { toString: method } }: { target: () => void }) { return method; } use({ target: fn });',
   'function use(method: () => string) { var method: () => string = fn.toString; arguments[0].call(fn); } use(() => "");',
   'const { toString: method } = fn; type Method = typeof method; (method as Method).call(fn);',
-])('rejects conversion through a destructured function method: %s', (use) => {
+])('rejects function source conversion through %s', (use) => {
   const source = `function fn() {} ${use}`;
   expect(executeProgram('typescript', source)).toMatchObject({
     kind: 'compileError',
