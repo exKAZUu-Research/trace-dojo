@@ -1057,7 +1057,7 @@ export class Compiler extends MemberCompiler {
       this.error(declaration, `${cls.name}.${name} に本体がありません。`);
     }
     if (methodKind === 'operator' && declaration.isStatic) this.error(declaration, '演算子は static にできません。');
-    this.checkOperatorArity(declaration);
+    this.checkOperatorSignature(declaration, type.returnType);
     const nativeKey = `${isExtension ? (owner as ExtensionInfo).name : cls.name}.${methodKind === 'setter' ? `${name}=` : name}`;
     const impl = declaration.isExternal ? this.externalMember(nativeKey, methodKind) : undefined;
     const member = this.declaredMember(cls, declaration, type, positionalTypes[0], impl, isAbstract);
@@ -1100,10 +1100,13 @@ export class Compiler extends MemberCompiler {
     ) as Callable;
   }
 
-  private checkOperatorArity(declaration: MethodDeclaration): void {
+  private checkOperatorSignature(declaration: MethodDeclaration, returnType: DartType): void {
     if (declaration.methodKind !== 'operator') return;
     const count = declaration.parameters.positional.length;
-    const expected = declaration.name === '[]=' ? 2 : declaration.name === '~' || declaration.name === 'unary-' ? 0 : 1;
+    const writesIndex = declaration.name === '[]=';
+    if (writesIndex && returnType.kind !== 'void')
+      this.error(declaration, '演算子 []= の戻り値の型には void を書くか、省略してください。');
+    const expected = writesIndex ? 2 : declaration.name === '~' || declaration.name === 'unary-' ? 0 : 1;
     if (
       count !== expected ||
       declaration.parameters.named.length > 0 ||
@@ -1640,7 +1643,7 @@ export class Compiler extends MemberCompiler {
   }
 
   constructSymbol(frame: Frame, name: string): Value {
-    return frame.runtime.links.construct(frame.runtime, 'Symbol', '', [name]);
+    return frame.runtime.symbol(name, name.startsWith('_') ? this.library.name : undefined);
   }
 
   constructObject(

@@ -24,8 +24,8 @@ export type NativeMethod = (
 
 /** Registers a method, getter, setter, static member, or top-level function. */
 export function define(key: string, run: NativeMethod): void {
-  const native: Callable = (runtime, receiver, args, typeArgs) =>
-    runtime.withCallRoots(receiver, args, () => run(runtime, receiver, args.positional, args.named, typeArgs));
+  const native: Callable = (runtime, receiver, args, typeArgs, callRow) =>
+    runtime.withCallRoots(receiver, args, () => run(runtime, receiver, args.positional, args.named, typeArgs), callRow);
   NATIVES.set(key, native);
 }
 
@@ -36,7 +36,7 @@ export function defineAll(keys: string[], run: NativeMethod): void {
 
 export function defineConstructor(key: string, run: ConstructorImpl): void {
   const native: ConstructorImpl = (runtime, receiver, args, typeArgs, callRow) =>
-    runtime.withCallRoots(receiver, args, () => run(runtime, receiver, args, typeArgs, callRow));
+    runtime.withCallRoots(receiver, args, () => run(runtime, receiver, args, typeArgs, callRow), callRow);
   NATIVES.set(key, native);
 }
 

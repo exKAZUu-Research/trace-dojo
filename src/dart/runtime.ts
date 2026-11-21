@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 500 -- Keep runtime dispatch alongside its reified types, call frames, and roots.
+// code-gauge-allow-file fileNcss 507 -- Keep runtime dispatch alongside its reified types, call frames, and roots.
 import { ExecutionBudget, ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
@@ -181,7 +181,12 @@ export class Runtime implements TracedRuntime<Frame> {
   onMainExit: (() => void) | undefined;
   /** Extra roots for garbage collection, such as the iterators of running loops. */
   readonly roots = new Set<() => Iterable<Value>>();
-  private readonly activeCalls: { receiver: Value; args: Arguments }[] = [];
+  private readonly activeCalls: {
+    receiver: Value;
+    args: Arguments;
+    frameDepth: number;
+    callRow?: number;
+  }[] = [];
 
   constructor(input?: ProgramInput) {
     this.io = new ProgramIO(this.budget, input);
@@ -228,9 +233,10 @@ export class Runtime implements TracedRuntime<Frame> {
     return this.frames.at(-1);
   }
 
-  /** The row of the call that a library function called back from would show: the row its library frame was called at. */
   get userCallRow(): number | undefined {
+    const nativeCall = this.activeCalls.findLast((call) => call.callRow !== undefined);
     for (let index = this.frames.length - 1; index >= 0; index--) {
+      if (nativeCall?.frameDepth === index + 1) return nativeCall.callRow;
       const frame = this.frames[index];
       if (!frame.info.isLibrary) return undefined;
       if (frame.callRow !== undefined) return frame.callRow;
@@ -639,7 +645,7 @@ export class Runtime implements TracedRuntime<Frame> {
     typeArgs: readonly DartType[] = [],
     found?: string
   ): Value {
-    const invocation = this.newInvocation(sourceMemberName(name), kind, args, typeArgs);
+    const invocation = this.newInvocation(name, kind, args, typeArgs);
     const handler = this.classOf(receiver).implementation('noSuchMethod');
     if (handler?.kind === 'method' && handler.owner !== coreTypes.object) {
       return (handler.impl as NonNullable<typeof handler.impl>)(
@@ -654,6 +660,12 @@ export class Runtime implements TracedRuntime<Frame> {
     return this.throwError('NoSuchMethodError', '_withInvocation', [receiver, invocation]);
   }
 
+  symbol(name: string, library?: string): Value {
+    return library === undefined
+      ? this.links.construct(this, 'Symbol', '', [name])
+      : this.links.construct(this, 'Symbol', '_scoped', [name, library]);
+  }
+
   private newInvocation(
     name: string,
     kind: 'method' | 'getter' | 'setter',
@@ -662,16 +674,12 @@ export class Runtime implements TracedRuntime<Frame> {
   ): DartObject {
     const named = this.links.newMap(this, interfaceType(this.links.classNamed('Symbol')), objectType(true), false);
     for (const [key, value] of args.named ?? []) {
-      this.invoke(
-        named,
-        '[]=',
-        { positional: [this.links.construct(this, 'Symbol', '', [key]), value], named: undefined },
-        [],
-        undefined
-      );
+      this.invoke(named, '[]=', { positional: [this.symbol(key), value], named: undefined }, [], undefined);
     }
+    const scopeEnd = name.indexOf('\0');
+    const symbol = this.symbol(sourceMemberName(name), scopeEnd === -1 ? undefined : name.slice(0, scopeEnd));
     return this.links.construct(this, '_InvocationMirror', '_', [
-      name,
+      symbol,
       BigInt(['method', 'getter', 'setter'].indexOf(kind)),
       new DartList(coreTypes.list, objectType(true), [...args.positional], false, true),
       named,
@@ -750,8 +758,8 @@ export class Runtime implements TracedRuntime<Frame> {
 
   // Garbage collection
 
-  withCallRoots<T>(receiver: Value, args: Arguments, call: () => T): T {
-    this.activeCalls.push({ receiver, args });
+  withCallRoots<T>(receiver: Value, args: Arguments, call: () => T, callRow?: number): T {
+    this.activeCalls.push({ receiver, args, frameDepth: this.frames.length, callRow });
     try {
       return call();
     } finally {

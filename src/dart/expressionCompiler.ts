@@ -149,7 +149,6 @@ export abstract class ExpressionCompiler extends CompilerBase {
   };
   abstract compileMethodCall(
     receiver: Compiled,
-    receiverSyntax: Expression,
     name: string,
     args: ArgumentsSyntax,
     typeArguments: TypeSyntax[] | undefined,
@@ -498,7 +497,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   private compileChainNode(expression: Expression, context: DartType | undefined): Compiled {
     switch (expression.kind) {
       case 'assign': {
-        return this.compileAssignment(expression, context);
+        return this.compileAssignment(expression);
       }
       case 'patternAssign': {
         return this.compilePatternAssignment(expression.pattern, expression.value, expression);
@@ -579,7 +578,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         const { name } = expression;
         return {
           type: interfaceType(coreTypes.symbol),
-          run: (frame) => this.constructSymbol(frame, name),
+          run: this.canonicalized((frame) => this.constructSymbol(frame, name)),
           isConst: true,
         };
       }
@@ -606,7 +605,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         return { ...inner, variable: inner.variable };
       }
       case 'member': {
-        return this.compileMember(expression, context);
+        return this.compileMember(expression);
       }
       case 'index': {
         return this.compileIndex(expression);
@@ -1242,10 +1241,10 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   // Members
 
-  private compileMember(expression: Extract<Expression, { kind: 'member' }>, context: DartType | undefined): Compiled {
+  private compileMember(expression: Extract<Expression, { kind: 'member' }>): Compiled {
     const { object, name } = expression;
     const target = this.staticTarget(object);
-    if (target) return this.readStaticTarget(target, name, expression, context);
+    if (target) return this.readStaticTarget(target, name, expression);
     if (object.kind === 'super') return this.readSuperMember(name, expression);
     const receiver = this.compileChainPart(object, undefined);
     return this.readMemberOf(receiver, name, expression, expression.nullAware);
@@ -1477,10 +1476,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
   protected readStaticTarget(
     target: NonNullable<ReturnType<ExpressionCompiler['staticTarget']>>,
     name: string,
-    span: Span,
-    context: DartType | undefined
+    span: Span
   ): Compiled {
-    void context;
     if (target.kind === 'prefix') {
       const declaration = this.library.lookupPrefixed(target.prefix, name);
       if (!declaration) return this.undefinedName(span, name, target.prefix);
@@ -1503,7 +1500,6 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (expression.object.kind === 'super') {
       return this.compileMethodCall(
         this.superReceiver(expression),
-        expression.object,
         '[]',
         singleArgument(expression.index),
         undefined,
@@ -1515,7 +1511,6 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const receiver = this.compileChainPart(expression.object, undefined);
     return this.compileMethodCall(
       receiver,
-      expression.object,
       '[]',
       singleArgument(expression.index),
       undefined,
@@ -1626,10 +1621,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   // Assignment
 
   /** Compiles an assignment `target op= value`. */
-  protected abstract compileAssignment(
-    expression: Extract<Expression, { kind: 'assign' }>,
-    context: DartType | undefined
-  ): Compiled;
+  protected abstract compileAssignment(expression: Extract<Expression, { kind: 'assign' }>): Compiled;
 
   /** Compiles `++x`, `x--`, and the like, which assign `x + 1` or `x - 1`. */
   protected abstract compileIncrement(

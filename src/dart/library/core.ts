@@ -99,14 +99,13 @@ class _Invocation implements Invocation {
 }
 
 final class _InvocationMirror implements Invocation {
-  final String _name;
+  final Symbol memberName;
   final int _kind;
   final List<dynamic> positionalArguments;
   final Map<Symbol, Object?> namedArguments;
   final List<Type> typeArguments;
-  _InvocationMirror._(this._name, this._kind, this.positionalArguments, Map<Symbol, Object?> named, this.typeArguments)
+  _InvocationMirror._(this.memberName, this._kind, this.positionalArguments, Map<Symbol, Object?> named, this.typeArguments)
       : namedArguments = named.isEmpty ? const <Symbol, Object?>{} : Map<Symbol, Object?>.unmodifiable(named);
-  Symbol get memberName => Symbol(_name);
   bool get isMethod => _kind == 0;
   bool get isGetter => _kind == 1;
   bool get isSetter => _kind == 2;
@@ -451,9 +450,14 @@ abstract interface class Type {
 
 class Symbol {
   final String _name;
-  const Symbol(String name) : _name = name;
-  int get hashCode => _name.hashCode;
-  bool operator ==(Object other) => other is Symbol && other._name == _name;
+  final String? _library;
+  const Symbol(String name) : _name = name, _library = null;
+  const Symbol._scoped(this._name, this._library);
+  int get hashCode {
+    var scoped = _library == null ? _name : _library! + "@" + _name;
+    return 0x1fffffff & (664597 * scoped.hashCode);
+  }
+  bool operator ==(Object other) => other is Symbol && other._name == _name && other._library == _library;
   String toString() => 'Symbol("' + _name + '")';
 }
 

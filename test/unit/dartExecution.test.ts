@@ -4232,3 +4232,78 @@ void main() {
     )
   ).toMatchObject({ kind: 'compileError' });
 });
+
+test('index assignment operators must declare a void result', () => {
+  const program = `typedef Nothing = void;
+class A {
+  Nothing operator []=(int index, int value) { print(value); }
+}
+extension B on int {
+  operator []=(int index, int value) { print(value); }
+}
+void main() { A()[0] = 1; 2[0] = 3; }`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '1\n3\n' });
+  for (const source of [
+    'class A { int operator []=(int i, int n) => n; } void main() {}',
+    'extension E on int { dynamic operator []=(int i, int n) => n; } void main() {}',
+  ]) {
+    expect(executeProgram('dart', source)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
+test('insertAll grows and shifts the destination before reading efficient sources', () => {
+  const program = `import 'dart:collection';
+class Input extends ListBase<int?> {
+  final List<int?> target;
+  Input(this.target);
+  int get length => 2;
+  set length(int value) {}
+  int operator [](int index) {
+    print(target);
+    if (index == 0) throw 'stop';
+    return 9;
+  }
+  void operator []=(int index, int? value) {}
+}
+void main() {
+  var start = <int?>[1, 2, 3], middle = <int?>[1, 2, 3], empty = <int>[];
+  start.insertAll(0, start);
+  empty.insertAll(0, empty);
+  try { middle.insertAll(1, middle); } catch (error) { print(error.runtimeType); }
+  print([start, middle, empty]);
+  var target = <int?>[1, 2];
+  try { target.insertAll(1, Input(target)); } catch (error) { print(error); }
+  print(target);
+  target.insertAll(1, {7, 8});
+  print(target);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'RangeError\n[[1, 2, 3, 1, 2, 3], [1, 2, 3, null, 2, 3], []]\n[1, 2, null, 2]\n[1, 2, 9, 2]\nstop\n[1, 2, 9, 2]\n[1, 7, 8, 2, 9, 2]\n',
+  });
+});
+
+test('symbols preserve SDK hashes, canonical identity, and private lookup scope', () => {
+  const program = `import 'dart:collection';
+class Handler {
+  Object? noSuchMethod(Invocation call) {
+    print([call.memberName, call.memberName == #_foo, call.memberName == const Symbol('_foo')]);
+    return null;
+  }
+}
+void main() {
+  var public = #foo, private = #_foo;
+  print([identical(public, #foo), identical(public, const Symbol('foo')),
+      identical(private, #_foo), private == const Symbol('_foo'), #C._foo == const Symbol('C._foo')]);
+  print([public.hashCode, (#bar).hashCode, Symbol('').hashCode]);
+  print(HashSet.of([#a, #b, #c, #d, #e]));
+  dynamic receiver = Handler();
+  receiver._foo();
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[true, true, true, false, true]\n[195624481, 67840445, 664597]\n{Symbol("e"), Symbol("d"), Symbol("a"), Symbol("c"), Symbol("b")}\n[Symbol("_foo"), true, false]\n',
+  });
+});

@@ -602,7 +602,7 @@ export abstract class StatementCompiler extends PatternCompiler {
     const { run } = value;
     const exec: Exec = (frame) => {
       const result = run(frame);
-      if (!pattern.match(frame, result)) this.throwPatternMismatch(frame, result);
+      if (!pattern.match(frame, result)) this.throwPatternMismatch(frame);
       return;
     };
     return this.withStep(statement, exec, false);
@@ -1013,7 +1013,7 @@ export abstract class StatementCompiler extends PatternCompiler {
           this.error(binding, 'このパターンには合わない要素があるので、for-in の変数には使えません。');
         for (const variable of pattern.variables.values()) this.flow = this.flow.assign(variable);
         return (frame, value) => {
-          if (!pattern.match(frame, value)) this.throwPatternMismatch(frame, value);
+          if (!pattern.match(frame, value)) this.throwPatternMismatch(frame);
           frame.runtime.steps.stepBinding(row, true);
         };
       }

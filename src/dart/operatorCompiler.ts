@@ -203,16 +203,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
       order: rightSyntax.map((_, index) => ({ kind: 'positional' as const, index })),
       ...at(span),
     };
-    return this.compileMethodCall(
-      left,
-      { ...at(span), kind: 'this' },
-      operator,
-      args,
-      undefined,
-      span,
-      undefined,
-      false
-    );
+    return this.compileMethodCall(left, operator, args, undefined, span, undefined, false);
   }
 
   // code-gauge-allow functionCognitiveComplexity 28 -- The typing rules of num's operators.
@@ -416,7 +407,6 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
           const isMethod = previous?.kind === 'member';
           current = this.compileMethodCall(
             current,
-            { ...at(span), kind: 'this' },
             isMethod ? previous.name : 'call',
             selector.arguments,
             selector.typeArguments,
@@ -429,7 +419,6 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
         case 'index': {
           current = this.compileMethodCall(
             current,
-            { ...at(span), kind: 'this' },
             '[]',
             singleArgument(selector.index),
             undefined,

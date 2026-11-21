@@ -52,7 +52,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     if (cls.kind === 'mixin') this.error(declaration, 'mixin にはコンストラクタを書けません。');
     // An enum's generative constructors are constant whether or not they say so.
     const isConst = declaration.isConst || (cls.kind === 'enum' && declaration.constructorKind === 'generative');
-    const { positionalTypes, namedTypes } = this.constructorParameterTypes(cls, declaration.parameters, declaration);
+    const { positionalTypes, namedTypes } = this.constructorParameterTypes(cls, declaration.parameters);
     const type = functionType(positionalTypes, cls.thisType, {
       requiredCount: declaration.parameters.requiredCount,
       named: declaration.parameters.named.map((parameter) => ({
@@ -82,8 +82,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
   /** The types of a constructor's parameters: declared, the field's for `this.x`, or the superclass's for `super.x`. */
   private constructorParameterTypes(
     cls: ClassInfo,
-    parameters: FormalParameters,
-    span: Span
+    parameters: FormalParameters
   ): { positionalTypes: DartType[]; namedTypes: Map<string, DartType> } {
     const typeOf = (parameter: FormalParameter, position: number | undefined): DartType => {
       if (parameter.type) return this.resolveType(parameter.type);
@@ -96,7 +95,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
           );
         return field.type;
       }
-      if (parameter.binding === 'super') return this.superParameterType(cls, parameter, position, span);
+      if (parameter.binding === 'super') return this.superParameterType(cls, parameter, position);
       return DYNAMIC;
     };
     const positionalTypes = parameters.positional.map((parameter, index) => typeOf(parameter, index));
@@ -104,13 +103,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     return { positionalTypes, namedTypes };
   }
 
-  private superParameterType(
-    cls: ClassInfo,
-    parameter: FormalParameter,
-    position: number | undefined,
-    span: Span
-  ): DartType {
-    void span;
+  private superParameterType(cls: ClassInfo, parameter: FormalParameter, position: number | undefined): DartType {
     const superclass = cls.superclass;
     const declaration = cls.declaration?.members.find(
       (member): member is ConstructorDeclaration =>
@@ -773,11 +766,9 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
       this.error(span, `const のコンストラクタの ${kind} に渡す値は、定数として評価できなければなりません。`);
     const typeArgs = this.runtimeTypes(targetType.args);
     const row = isImplicit || this.isLibraryCode ? undefined : span.row;
-    const targetClass = targetType.cls;
     return (frame) => {
       const impl = target.impl as ConstructorImpl;
       impl(frame.runtime, frame.receiver as DartObject, bound.args(frame), typeArgs(frame), row);
-      void targetClass;
     };
   }
 

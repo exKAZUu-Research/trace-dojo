@@ -13,7 +13,7 @@ import { parseDart } from './parse';
 import { compileProgram } from './program';
 import type { Frame, Runtime } from './runtime';
 import { coreTypes, type DartType, DYNAMIC } from './types';
-import { DartList, DartObject, DartRecord, UNASSIGNED, UNINITIALIZED, type Value } from './values';
+import { DartList, DartObject, DartRecord, LateInitializer, UNASSIGNED, UNINITIALIZED, type Value } from './values';
 
 // code-gauge-allow duplicateLines 17 -- Dart wires its runtime into the shared recorder.
 export function traceDartProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
@@ -22,6 +22,7 @@ export function traceDartProgram(program: string, trace: TraceOptions, input?: P
   const snapshotter = new Snapshotter(runtime, compiled);
   const recorder = new TraceRecorder(runtime, {
     isAtomic: (frame) => frame.info.isAtomic,
+    hidesCallRow: (frame) => frame.info.isLibrary,
     recordItem: (item) => snapshotter.recordItem(item),
     variablesOf: (frame) => snapshotter.variablesOf(frame, true, true),
     scalarVarsOf: (frame) => snapshotter.variablesOf(frame, true).vars,
@@ -131,13 +132,13 @@ class Snapshotter {
     for (const [slot, local] of frame.info.locals.entries()) {
       const cell = frame.locals[slot];
       if (!cell || local.name.startsWith('\0') || (hidesArgs && slot === 0)) continue;
-      if (cell.v === UNASSIGNED || cell.v === UNINITIALIZED || isLateInitializer(cell.v)) continue;
+      if (!showsValue(cell.v)) continue;
       shown.add(local.name);
       yield { name: local.name, value: cell.v, type: local.type };
     }
     for (const [position, capture] of frame.info.captures.entries()) {
       const cell = frame.captured[position];
-      if (!cell || shown.has(capture.name) || cell.v === UNASSIGNED || cell.v === UNINITIALIZED) continue;
+      if (!cell || shown.has(capture.name) || !showsValue(cell.v)) continue;
       shown.add(capture.name);
       yield { name: capture.name, value: cell.v, type: capture.type };
     }
@@ -177,8 +178,8 @@ function snapshot(roots: Iterable<SnapshotRoot>, includeReferences: boolean, lis
   return variables;
 }
 
-function isLateInitializer(value: Value): boolean {
-  return typeof value === 'object' && !(value instanceof DartObject);
+function showsValue(value: Value): boolean {
+  return value !== UNASSIGNED && value !== UNINITIALIZED && !(value instanceof LateInitializer);
 }
 
 const NOT_SCALAR = Symbol('notScalar');

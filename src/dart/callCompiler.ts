@@ -9,7 +9,7 @@ import type {
   TypeSyntax,
 } from './ast';
 import type { ClassInfo, ConstructorInfo, Member, MethodMember, SetterMember } from './classes';
-import { at, type Compiled, type Eval, type ResolvedMember, typeName } from './compilerBase';
+import { at, type Compiled, type Eval, typeName } from './compilerBase';
 import type { ExtensionInfo, TopLevelFunction, TypeAlias } from './environment';
 import { INFERENCE_HOLE, isInferenceHole, SHORTED } from './expressionCompiler';
 import { OperatorCompiler } from './operatorCompiler';
@@ -144,7 +144,6 @@ export abstract class CallCompiler extends OperatorCompiler {
         this.requireThis(callee, callee.name);
         return this.compileMethodCall(
           this.thisReceiver(callee),
-          callee,
           callee.name,
           args,
           typeArguments,
@@ -245,7 +244,6 @@ export abstract class CallCompiler extends OperatorCompiler {
     if (callee.object.kind === 'super') {
       return this.compileMethodCall(
         this.superReceiver(callee.object),
-        callee.object,
         callee.name,
         args,
         typeArguments,
@@ -255,16 +253,7 @@ export abstract class CallCompiler extends OperatorCompiler {
       );
     }
     const receiver = this.compileChainPart(callee.object, undefined);
-    return this.compileMethodCall(
-      receiver,
-      callee.object,
-      callee.name,
-      args,
-      typeArguments,
-      expression,
-      context,
-      callee.nullAware
-    );
+    return this.compileMethodCall(receiver, callee.name, args, typeArguments, expression, context, callee.nullAware);
   }
 
   /** `E(x)`, which applies the extension E to x explicitly. */
@@ -334,24 +323,14 @@ export abstract class CallCompiler extends OperatorCompiler {
         completes: !isNeverType(bound.returnType),
       };
     }
-    return this.compileMethodCall(
-      target,
-      { ...at(span), kind: 'this' },
-      'call',
-      args,
-      typeArguments,
-      span,
-      context,
-      false
-    );
+    return this.compileMethodCall(target, 'call', args, typeArguments, span, context, false);
   }
 
   /** Calls a member found through a receiver's static type, dispatching on the receiver's class at runtime. */
   // code-gauge-allow functionNcss 35 -- Methods, getters, extensions, records, and dynamic receivers.
-  // code-gauge-allow functionParameterCount 8 -- Methods, getters, extensions, records, and dynamic receivers.
+  // code-gauge-allow functionParameterCount 7 -- Methods, getters, extensions, records, and dynamic receivers.
   compileMethodCall(
     receiver: Compiled,
-    receiverSyntax: Expression,
     name: string,
     args: ArgumentsSyntax,
     typeArguments: TypeSyntax[] | undefined,
@@ -359,7 +338,6 @@ export abstract class CallCompiler extends OperatorCompiler {
     context: DartType | undefined,
     nullAware: boolean
   ): Compiled {
-    void receiverSyntax;
     const receiverType = receiver.type;
     if (receiverType.kind === 'void') this.error(span, 'void の値のメンバーは使えません。');
     this.skipOnNull(receiver, nullAware);
@@ -385,7 +363,7 @@ export abstract class CallCompiler extends OperatorCompiler {
       return this.compileValueCall(value, args, typeArguments, span, context);
     }
     const signature = resolved.type as FunctionType;
-    const bound = this.bindArguments(signature, args, typeArguments, span, context, resolved);
+    const bound = this.bindArguments(signature, args, typeArguments, span, context);
     const receiverRun = receiver.run;
     const row = this.callRow(span);
     const specialType = this.specialNumericReturn(receiverType, name, args);
@@ -407,12 +385,10 @@ export abstract class CallCompiler extends OperatorCompiler {
       const run = superMethodCall(this.superclassOf(span).classAt, this.runtimeMemberName(name), bound, row);
       return { type: returnType, run, isConst: false, completes };
     }
-    const constFold = this.foldConstantCall(receiver, name, args);
     return {
       type: returnType,
       run: virtualMethodCall(receiverRun, this.runtimeMemberName(name), bound, nullAware, row),
-      isConst: constFold !== undefined,
-      constValue: constFold,
+      isConst: false,
       completes,
     };
   }
@@ -441,14 +417,6 @@ export abstract class CallCompiler extends OperatorCompiler {
 
   /** The static types of the arguments the last bound call compiled, by their syntax. */
   protected readonly argumentTypes = new WeakMap<Expression, DartType>();
-
-  /** A call of a method on a constant that Dart folds, such as `'abc'.length` (only getters fold in Dart). */
-  private foldConstantCall(receiver: Compiled, name: string, args: ArgumentsSyntax): { value: Value } | undefined {
-    void receiver;
-    void name;
-    void args;
-    return undefined;
-  }
 
   private dynamicCall(
     receiver: Compiled,
@@ -681,10 +649,8 @@ export abstract class CallCompiler extends OperatorCompiler {
     args: ArgumentsSyntax,
     typeArguments: TypeSyntax[] | undefined,
     span: Span,
-    context: DartType | undefined,
-    resolved?: ResolvedMember
+    context: DartType | undefined
   ): BoundCall {
-    void resolved;
     this.checkArity(type, args, span);
     const compiled: CompiledArguments = {
       positional: Array.from({ length: args.positional.length }),

@@ -390,19 +390,25 @@ define('List.insertAll', (runtime, receiver, [at, iterable]) => {
   const position = intArg(runtime, at, 'index');
   if (position < 0n || position > BigInt(target.elements.length))
     rangeError(runtime, position, 0, target.elements.length, undefined);
-  const values = iterableValues(runtime, iterable);
-  runtime.allocate(values.length);
-  if (iterable === target) {
-    // As the VM: the list grows first and then copies itself in, which the longer list no longer fits.
+  const efficient = [coreTypes.list, coreTypes.set, runtime.links.classNamed('SubListIterable')].some((cls) =>
+    runtime.links.isValueOf(runtime, iterable, interfaceType(cls, [DYNAMIC]))
+  );
+  const source = efficient
+    ? iterable
+    : runtime.invoke(iterable, 'toList', { positional: [], named: undefined }, [], undefined);
+  const args = { positional: [position, source], named: undefined };
+  return runtime.withCallRoots(target, args, () => {
+    const count = listLength(runtime, source);
+    if (count < 0n) rangeError(runtime, count, 0, Number.MAX_SAFE_INTEGER, 'length');
+    const size = Number(count);
+    runtime.allocate(size);
     const start = index(position);
     const oldLength = target.elements.length;
-    target.elements.length = oldLength + values.length;
+    target.elements.length += size;
     target.elements.fill(undefined, oldLength);
-    target.elements.copyWithin(start + values.length, start, oldLength);
-    rangeError(runtime, start + target.elements.length, start, target.elements.length, 'end');
-  }
-  insertListElements(target.elements, index(position), values);
-  return;
+    target.elements.copyWithin(start + size, start, oldLength);
+    return runtime.invoke(target, 'setAll', args, [], undefined);
+  });
 });
 define('List.setAll', (runtime, receiver, [at, iterable]) => {
   const target = list(receiver);
@@ -587,13 +593,6 @@ define('_checkListCanRemove', (runtime, _receiver, [target]) => {
   checkGrowable(runtime, list(target), 'remove');
   return;
 });
-function insertListElements(elements: Value[], start: number, values: Value[]): void {
-  const oldLength = elements.length;
-  elements.length += values.length;
-  elements.copyWithin(start + values.length, start, oldLength);
-  for (let offset = 0; offset < values.length; offset++) elements[start + offset] = values[offset];
-}
-
 define('List.indexOf', (runtime, receiver, [value, start = 0n]) => {
   const from = Math.max(0, index(intArg(runtime, start, 'start')));
   return BigInt(findListElement(runtime, list(receiver), value, from));

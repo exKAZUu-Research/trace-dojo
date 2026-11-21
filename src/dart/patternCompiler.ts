@@ -785,8 +785,7 @@ export abstract class PatternCompiler extends CallCompiler {
   }
 
   /** Throws the error a refutable pattern in a declaration or an assignment raises when it fails to match. */
-  protected throwPatternMismatch(frame: Frame, value: Value): never {
-    void value;
+  protected throwPatternMismatch(frame: Frame): never {
     throw new DartThrow(
       frame.runtime.links.construct(frame.runtime, 'StateError', '', ['Pattern matching error']),
       undefined
@@ -817,7 +816,7 @@ export abstract class PatternCompiler extends CallCompiler {
             frame,
             (cache) => check.match(frame, result, cache) && matcher.match(frame, result, cache)
           );
-          if (!matched) this.throwPatternMismatch(frame, result);
+          if (!matched) this.throwPatternMismatch(frame);
           for (const { slot, target } of writes) target(frame).v = (frame.locals[slot] as Cell).v;
           return result;
         } finally {

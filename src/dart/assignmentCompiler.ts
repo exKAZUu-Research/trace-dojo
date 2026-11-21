@@ -82,11 +82,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     };
   }
 
-  protected compileAssignment(
-    expression: Extract<Expression, { kind: 'assign' }>,
-    context: DartType | undefined
-  ): Compiled {
-    void context;
+  protected compileAssignment(expression: Extract<Expression, { kind: 'assign' }>): Compiled {
     const target = this.assignableTarget(expression.target, expression.operator === '=');
     return this.assignTo(target, expression.operator, expression.value, expression);
   }

@@ -397,3 +397,33 @@ test('map snapshots preserve distinct entries with indistinguishable source labe
     },
   });
 });
+
+test('a captured late local is shown only after its initializer runs', () => {
+  const program = `void main() {
+  late final int value = 1;
+  void show() {
+    print('before');
+    print(value);
+  }
+  show();
+}`;
+  const trace = traceProgram('dart', program, program);
+  expect(trace.stdout).toBe('before\n1\n');
+  expect(trace.traceItems.find(({ line }) => line === 4)?.vars).not.toHaveProperty('value');
+  expect(trace.traceItems.find(({ line }) => line === 5)?.vars).toMatchObject({ value: 1 });
+});
+
+test('learner callbacks retain a single call row for native and SDK operations', () => {
+  for (const expression of [
+    '[1, 2].forEach((n) {\n    t.forward();\n  });',
+    'Iterable.generate(2).forEach((n) {\n    t.forward();\n  });',
+    '[1, 2].map((n) {\n    t.forward(); return n;\n  }).toList();',
+    'List<int>.generate(2, (n) {\n    t.forward(); return n;\n  });',
+  ]) {
+    const program = `void main() {\n  var t = Turtle();\n  ${expression}\n}`;
+    const calls = traceProgram('dart', program, program)
+      .traceItems.filter(({ line }) => line === 4)
+      .map(({ callLines }) => callLines);
+    expect(calls).toEqual([[3], [3]]);
+  }
+});
