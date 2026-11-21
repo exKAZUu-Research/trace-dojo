@@ -20,12 +20,14 @@ import {
 export function impliedPatternType(
   c: Checker,
   pattern: TreeNode,
-  leafType: (element: TreeNode) => Type
+  leafType: (element: TreeNode) => Type,
+  parameter = false
 ): Type | undefined {
   return patternShape(
     c,
     pattern,
-    (element) => impliedPatternType(c, defaultedTarget(element) ?? element, leafType) ?? leafType(element)
+    (element) => impliedPatternType(c, defaultedTarget(element) ?? element, leafType, parameter) ?? leafType(element),
+    parameter
   );
 }
 
@@ -40,23 +42,25 @@ export function inferredPatternParameterType(
   return anyType;
 }
 
+type ParameterInitializer = 'bindingDefault' | 'element' | 'wholeParameter';
+
 export function applyParameterPattern(
   c: Checker,
   pattern: TreeNode,
   value: Type,
   implied: Type | undefined,
-  nested = true
+  mode: ParameterInitializer = 'bindingDefault'
 ): Type {
   if (!implied || implied.kind !== 'object') return value;
   const project = (member: Type): Type => {
     if (member.kind !== 'object') return member;
     if (pattern.type === 'array_pattern' && member.tuple && implied.tuple)
-      return tupleInitializer(c, pattern, member.tuple, implied.tuple, nested);
+      return tupleInitializer(c, pattern, member.tuple, implied.tuple, mode);
     if (pattern.type === 'object_pattern' && member.fresh)
-      return objectInitializer(c, pattern, member, implied, nested);
+      return objectInitializer(c, pattern, member, implied, mode !== 'wholeParameter');
     return member;
   };
-  return nested ? mapType(value, project) : project(value);
+  return mode === 'wholeParameter' ? project(value) : mapType(value, project);
 }
 
 function objectInitializer(
@@ -69,10 +73,10 @@ function objectInitializer(
   const structure = c.structureOf(value);
   const properties = new Map(structure.properties);
   const expected = c.structureOf(implied).properties;
+  if (nested) projectNestedProperties(c, pattern, properties, expected);
   for (const [name, property] of expected) {
     if (property.optional) properties.set(name, { ...(properties.get(name) ?? property), optional: true });
   }
-  if (nested) projectNestedProperties(c, pattern, properties, expected);
   return freshObjectLiteral(anonymousObject(() => ({ ...structure, properties }), { isLiteral: true }));
 }
 
@@ -93,13 +97,19 @@ function projectNestedProperties(
     if (!actual) continue;
     properties.set(actual.name, {
       ...actual,
-      type: () => applyParameterPattern(c, nested, actual.type(), expected.get(actual.name)?.type()),
+      type: () => applyParameterPattern(c, nested, actual.type(), expected.get(actual.name)?.type(), 'element'),
     });
   }
 }
 
-function tupleInitializer(c: Checker, pattern: TreeNode, value: TupleInfo, implied: TupleInfo, nested: boolean): Type {
-  const entries = nested ? arrayPatternElements(pattern) : [];
+function tupleInitializer(
+  c: Checker,
+  pattern: TreeNode,
+  value: TupleInfo,
+  implied: TupleInfo,
+  mode: ParameterInitializer
+): Type {
+  const entries = mode === 'wholeParameter' ? [] : arrayPatternElements(pattern);
   const elements = [...value.elements];
   if (value.elements.some((element) => element.rest)) return c.tupleType(elements, value.readonly);
   for (const { element, index } of entries) {
@@ -108,10 +118,10 @@ function tupleInitializer(c: Checker, pattern: TreeNode, value: TupleInfo, impli
     if (actual && isBindingPattern(nested))
       elements[index] = {
         ...actual,
-        type: applyParameterPattern(c, nested, actual.type, implied.elements[index]?.type),
+        type: applyParameterPattern(c, nested, actual.type, implied.elements[index]?.type, 'element'),
       };
   }
-  if (elements.length > lastRequiredPosition(entries)) {
+  if (mode !== 'element' && elements.length > lastRequiredPosition(entries)) {
     for (const element of implied.elements.slice(elements.length))
       if (!element.rest) elements.push({ ...element, optional: true });
   }
@@ -126,7 +136,7 @@ function inferParameterElement(c: Checker, element: TreeNode, implicitAny: (elem
   const target = defaultedTarget(element);
   const value = target && element.childForFieldName('right');
   if (!value) return inferredPatternParameterType(c, element, implicitAny);
-  const contextual = c.patterns.impliedType(target);
+  const contextual = c.patterns.impliedBindingType(target, false, true);
   return c.flow.probe(() =>
     c.silently(() => {
       const initial = c.patterns.initializerType(value, contextual);

@@ -109,7 +109,7 @@ export class BindingPatterns {
   private bindDefault(pattern: TreeNode, type: Type, bind: Bind, options: BindingOptions, assigned?: Type): void {
     const left = pattern.childForFieldName('left') as TreeNode;
     const right = pattern.childForFieldName('right') as TreeNode;
-    const implied = this.impliedBindingType(left, options.isConst);
+    const implied = this.impliedBindingType(left, options.isConst, options.inferredParameter);
     const initialDefault = this.initializerType(right, implied ?? (options.annotated ? type : undefined), true);
     const defaultType = options.inferredParameter
       ? applyParameterPattern(this.c, left, initialDefault, implied)
@@ -222,12 +222,12 @@ export class BindingPatterns {
     }
   }
 
-  impliedBindingType(pattern: TreeNode, isConst = false): Type | undefined {
-    return this.impliedType(pattern, (element) => this.bindingLeafType(element, isConst));
+  impliedBindingType(pattern: TreeNode, isConst = false, parameter = false): Type | undefined {
+    return impliedPatternType(this.c, pattern, (element) => this.bindingLeafType(element, isConst), parameter);
   }
 
   parameterInitializerType(pattern: TreeNode, value: Type, implied: Type | undefined): Type {
-    return applyParameterPattern(this.c, pattern, value, implied, false);
+    return applyParameterPattern(this.c, pattern, value, implied, 'wholeParameter');
   }
 
   private bindingLeafType(element: TreeNode, isConst = false): Type {

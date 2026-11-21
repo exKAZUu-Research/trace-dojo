@@ -43,3 +43,23 @@ function arrays({x:[a=1]=[]}){const y:number=a; console.log(y);}
 arrays({}); arrays({x:[]}); arrays({x:[2]});
 function reversed([{a=1} = {}]){const y:number=a; console.log(y);}
 reversed([]); reversed([{}]); reversed([{a:2}]);
+const nestedKey = 'a';
+function named({x:{[nestedKey]: a=1}={}}){const y:number=a;console.log(y);}
+named({}); named({x:{a:2}});
+const numericKey = 2;
+function indexed({x:{[numericKey]: a=1}={}}){const y:number=a;console.log(y);}
+indexed({}); indexed({x:{2:2}});
+const nestedSymbol = Symbol();
+function symbolKey({x:{[nestedSymbol]: a=1}={}}){const y:number=a;console.log(y);}
+symbolKey({}); symbolKey({x:{[nestedSymbol]:2}});
+function deepKey({x:{child:{[nestedKey]: a=1}}={child:{}}}){const y:number=a;console.log(y);}
+deepKey({}); deepKey({x:{child:{a:2}}});
+function explicitTuple({x:{value:[n=1]}={value:[]}}) { console.log(n); }
+explicitTuple({});
+explicitTuple({x:{value:[]}});
+function explicitArrayElement({x:[[n=2]]=[[]]}) { console.log(n); }
+explicitArrayElement({x:[[]]});
+function directTupleDefault({x:[n=1,m=2]=[3]}) { console.log(n, m); }
+directTupleDefault({});
+directTupleDefault({x:[4]});
+directTupleDefault({x:[4,5]});
