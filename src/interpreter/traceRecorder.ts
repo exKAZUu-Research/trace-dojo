@@ -24,6 +24,7 @@ export interface TracedFrame {
 
 export interface FrameReader<F extends TracedFrame> {
   isAtomic(frame: F): boolean;
+  hidesCallRow?(frame: F): boolean;
   variablesOf(frame: F): TraceVariables;
   stateVariables?(variables: TraceVariables): Record<string, unknown>;
   ignoreStateVariable?: IgnoreStateVariable;
@@ -56,7 +57,11 @@ export class TraceRecorder<F extends TracedFrame> implements StepRecorder {
     const variables = this.frames.variablesOf(current);
     const item: TraceItem = {
       line: row + 1,
-      callLines: frames.slice(1).flatMap(({ callRow }) => (callRow === undefined ? [] : [callRow + 1])),
+      callLines: frames
+        .slice(1)
+        .flatMap((frame) =>
+          frame.callRow === undefined || this.frames.hidesCallRow?.(frame) ? [] : [frame.callRow + 1]
+        ),
       ...variables,
       turtles: world.turtleTraces(),
       board: world.boardText(),

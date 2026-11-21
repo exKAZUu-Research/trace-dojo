@@ -31,6 +31,7 @@
         "@willbooster/shared-lib-react": "6.3.0",
         "@willbooster/tree-sitter-c": "40.0.2",
         "@willbooster/tree-sitter-cpp": "34.0.1",
+        "@willbooster/tree-sitter-dart": "22.0.1",
         "@willbooster/tree-sitter-go": "13.0.2",
         "@willbooster/tree-sitter-haskell": "26.0.2",
         "@willbooster/tree-sitter-java": "35.0.2",
@@ -759,6 +760,8 @@
     "@willbooster/tree-sitter-c": ["@willbooster/tree-sitter-c@40.0.2", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-649CTdwChG3bVnX5bC0LgHi0RDKNac7wwI90UwO5K+JIhKd8qDZ+a/LxBtr6CyQf3Ld7w0Zqro/vqmKeAMDTxA=="],
 
     "@willbooster/tree-sitter-cpp": ["@willbooster/tree-sitter-cpp@34.0.1", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-YOef4CBjkFPSA1ld3kX0r4vOUIhpmN9gK+LO4XBKr1dP1HkjdOZYGVV6nt140Se7AV4l/Tqhk4gL+bwADkHazA=="],
+
+    "@willbooster/tree-sitter-dart": ["@willbooster/tree-sitter-dart@22.0.1", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-rbCZRVK9NqSAvuHSqjqsVAWjcU1oYVvObv9NrCYxHb97POSG/LCZbOScoe1RuVb+YCsrBZZq1aWrjy52F6TmWg=="],
 
     "@willbooster/tree-sitter-go": ["@willbooster/tree-sitter-go@13.0.2", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-iCMMpq7POkqyd5MdT/8857CcxevDMIsNexRbpmVijrIXlx8Ztrt4vqQZq6ej615WSi3268ar9vs2Oy0RGV2DRg=="],
 
