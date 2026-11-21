@@ -8,3 +8,6 @@
 (14,26): error TS2353: Object literal may only specify known properties, and 'ww' does not exist in type '{ w?: 1 | undefined; }'.
 (17,38): error TS2353: Object literal may only specify known properties, and 'extra' does not exist in type '{ value: number; }'.
 (21,61): error TS2353: Object literal may only specify known properties, and 'extra' does not exist in type '{ outer?: { value: number; } | undefined; }'.
+(26,18): error TS2339: Property 'value' does not exist on type 'number | { value: number; } | {}'.
+(30,18): error TS2339: Property 'value' does not exist on type 'number | {}'.
+(34,26): error TS2339: Property 'value' does not exist on type 'number | { value: number; } | {}'.

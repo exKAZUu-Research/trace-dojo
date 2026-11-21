@@ -21,3 +21,17 @@ const { v: { w = 1 } = { ww: 2 } } = {};
   const {outer: {value} = {value: 1}} = {outer: {value: 2}, extra: true};
   console.log(value);
 }
+
+function nonObjectOuterBranch(flag: boolean) {
+  const {outer: {value} = {value: 1}} = flag ? {outer: 1} : {outer: {}};
+  return value;
+}
+function nonObjectDefaultedBranch(flag: boolean) {
+  const {outer: {value = 1} = {}} = flag ? {outer: 1} : {outer: {}};
+  return value;
+}
+function nonObjectNestedBranch(flag: boolean) {
+  const {outer: {child: {value} = {value: 1}} = {child: {value: 1}}} =
+    flag ? {outer: {child: 1}} : {outer: {child: {}}};
+  return value;
+}

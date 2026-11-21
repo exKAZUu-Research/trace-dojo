@@ -60,3 +60,13 @@ function annotatedVariableDefault() {
   return value;
 }
 console.log(annotatedVariableDefault());
+
+function objectOrEmptyBranch(flag: boolean) {
+  const {outer: {value} = {value: 1}} = flag ? {outer: {value: 2}} : {outer: {}};
+  return value;
+}
+function objectOrMissingBranch(flag: boolean) {
+  const {outer: {value} = {value: 1}} = flag ? {outer: {value: 2}} : {};
+  return value;
+}
+console.log(objectOrEmptyBranch(true), objectOrEmptyBranch(false), objectOrMissingBranch(true), objectOrMissingBranch(false));

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 866 -- Keeps the relation modes and their recursive comparisons together.
+// code-gauge-allow-file fileNcss 867 -- Keeps the relation modes and their recursive comparisons together.
 import { minimumArguments } from './callArity';
 import type { Checker } from './checker';
 import { isUnit } from './flow';
@@ -952,7 +952,12 @@ export class Relations {
       return false;
     }
     if (source.optional && !target.optional && relation !== 'comparable') return false;
-    return this.isRelated(propertyAccessType(source), propertyAccessType(target), relation);
+    const keepFresh = relation === 'strictSubtype';
+    return this.isRelated(
+      propertyAccessType(source, 'read', keepFresh),
+      propertyAccessType(target, 'read', keepFresh),
+      relation
+    );
   }
 
   private indexRelated(
