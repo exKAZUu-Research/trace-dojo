@@ -8074,6 +8074,16 @@ test.each([
   ],
   ['a trait object made from a str', 'fn show() { let s: &str = "hi"; let x: &dyn std::fmt::Display = s; }', 'str'],
   [
+    'a trait object made from a struct that ends in a str',
+    '#[derive(Debug)]\nstruct Text { n: i32, s: str }\nfn show(t: &Text) -> &dyn std::fmt::Debug { t }',
+    'Sized',
+  ],
+  [
+    'a default method that makes a trait object of an unsized Self',
+    'trait Show: std::fmt::Debug { fn erased(&self) -> &dyn std::fmt::Debug { self } }',
+    'Self: Sized',
+  ],
+  [
     'iterators of a type without PartialEq compared',
     'struct X;\nfn same() { let a = vec![X]; a.iter().eq(a.iter()); }',
     '比べられません',
@@ -8117,4 +8127,21 @@ test('integer bitwise negation takes part in constant lints', () => {
       diagnostics: [expect.objectContaining({ message: expect.stringContaining(message) })],
     });
   }
+});
+
+test('a sized Self and generic values become trait objects', () => {
+  const program = `use std::fmt::{Debug, Display};
+trait Show: Debug { fn erased(&self) -> &dyn Debug where Self: Sized { self } }
+trait Named: Debug + Sized { fn erased(&self) -> &dyn Debug { self } }
+#[derive(Debug)]
+struct S;
+impl Show for S {}
+impl Named for S {}
+fn show<T: Display>(t: &T) -> &dyn Display { t }
+fn main() {
+    let boxed: Box<dyn Debug> = Box::new(vec![1]);
+    let again: &dyn Debug = &*boxed;
+    println!("{:?} {:?} {} {:?}", Show::erased(&S), Named::erased(&S), show(&5), again);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'S S 5 [1]\n' });
 });
