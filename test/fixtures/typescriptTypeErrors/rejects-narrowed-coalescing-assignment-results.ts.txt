@@ -8,3 +8,39 @@ const literalNarrower: number | 'a' = read;
 let evaluated: number | string = 1;
 const result = (evaluated ??= 'fallback');
 const expressionNarrower: number = result;
+class Wide {
+  get value(): number { return 1; }
+  set value(input: number | string) { void input; }
+}
+class WideLiteral {
+  get value(): 1 | 2 { return 1; }
+  set value(input: 1 | 2 | string) { void input; }
+}
+function dot(a: Wide) {
+  const n: number = (a.value ??= 'a');
+  const s: string = (a.value ??= 'a');
+  const o: number = (a.value ||= 1);
+  const p: number = (a.value &&= 1);
+  const z: string = (a.value ||= 'a');
+}
+function bracket(a: Wide) {
+  const n: number = (a['value'] ??= 'a');
+  const s: string = (a['value'] ??= 'a');
+  const o: number = (a['value'] ||= 1);
+  const p: number = (a['value'] &&= 1);
+}
+function namedLiteral(a: WideLiteral) {
+  const n: 1 | 2 = (a.value ??= 'a');
+  const o: number = (a.value ||= 1);
+  const p: number = (a.value &&= 1);
+}
+function bracketLiteral(a: WideLiteral) {
+  const n: 1 | 2 = (a['value'] ??= 'a');
+  const o: number = (a['value'] ||= 1);
+  const p: number = (a['value'] &&= 1);
+}
+function wrapped(a: Wide) {
+  const n: number = ((a.value) ??= 'a');
+  const o: number = (a.value! ??= 'a');
+  const p: number = (a['value']! ??= 'a');
+}

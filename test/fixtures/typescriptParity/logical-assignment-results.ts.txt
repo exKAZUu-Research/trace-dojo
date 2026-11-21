@@ -22,3 +22,14 @@ function useAccessor(obj: CoalescingAccessor) {
   return obj.value;
 }
 console.log(useAccessor(new CoalescingAccessor()));
+function accessorResults(obj: CoalescingAccessor) {
+  const first: number = (obj.value ??= 'a');
+  const second: number = (obj.value ??= 'b');
+  const or: number = (obj.value ||= 1);
+  const and: number = (obj.value &&= 2);
+  const bracket: number | string = (obj['value'] ??= 'c');
+  const wrapped: number = ((obj.value) ??= 1);
+  const asserted: number = (obj.value!! ??= 1);
+  console.log(first, second, or, and, bracket, wrapped, asserted);
+}
+accessorResults(new CoalescingAccessor());
