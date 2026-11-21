@@ -1,6 +1,6 @@
-import type { FnItem } from './ast';
-import { compileError } from './items';
-import { type FnDef, shallow, type Type } from './types';
+import type { FnItem, Span } from './ast';
+import { compileError, type Module } from './items';
+import { childTypes, type FnDef, shallow, type Type } from './types';
 
 /**
  * Requires a lifetime that the return type leaves out to be decided by the parameters, as rustc does (E0106): it is
@@ -38,4 +38,28 @@ function lifetimePlaces(type: Type, onlyElided: boolean): number {
 function childTypesOf(t: Type): Type[] {
   if (t.kind === 'tuple') return t.elems;
   return t.kind === 'array' || t.kind === 'slice' ? [t.elem] : [];
+}
+
+/** Requires each lifetime of a field's type to be written and declared, as rustc does for a type's fields. */
+export function checkFieldLifetimes(type: Type, span: Span, declared: string[]): void {
+  const t = shallow(type);
+  if (t.kind === 'ref') checkFieldLifetime(t.lifetime, span, declared);
+  if (t.kind === 'dyn' && t.lifetime) checkFieldLifetime(t.lifetime, span, declared);
+  if (t.kind === 'adt' && !(t.def.module as Module | undefined)?.isStd) {
+    const expected = t.def.lifetimeParams?.length ?? 0;
+    const lifetimes = t.lifetimes ?? [];
+    if (lifetimes.length !== expected) {
+      compileError(span, `フィールドの型 ${t.def.name} には、ライフタイムを ${expected} 個書いてください。`);
+    }
+    for (const lifetime of lifetimes) checkFieldLifetime(lifetime, span, declared);
+  }
+  const stored = t.kind === 'dyn' ? t.trait.args : childTypes(t);
+  for (const child of stored) checkFieldLifetimes(child, span, declared);
+}
+
+function checkFieldLifetime(lifetime: string | undefined, span: Span, declared: string[]): void {
+  if (!lifetime || lifetime === "'_") compileError(span, 'フィールドの型には、ライフタイムを書いてください。');
+  if (lifetime !== "'static" && !declared.includes(lifetime)) {
+    compileError(span, `ライフタイム ${lifetime} が宣言されていません。`);
+  }
 }

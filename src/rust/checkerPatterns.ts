@@ -14,6 +14,19 @@ export function checkPattern(c: Checker, pattern: Pattern, type: Type, mode: Loc
   distinctBindings(c, pattern);
 }
 
+/** Checks the patterns of one parameter list, which must not bind a name twice between them either (E0415). */
+export function checkParamPatterns(c: Checker, patterns: Pattern[], types: Type[]): void {
+  const names = new Set<string>();
+  for (const [index, pattern] of patterns.entries()) {
+    checkPattern(c, pattern, types[index], 'move');
+    for (const name of distinctBindings(c, pattern)) {
+      if (names.has(name)) compileError(pattern.span, `引数の並びで ${name} が2回束縛されています。`);
+      names.add(name);
+    }
+    c.requireIrrefutable(pattern, types[index], 'fn');
+  }
+}
+
 function distinctBindings(c: Checker, pattern: Pattern): Set<string> {
   switch (pattern.kind) {
     case 'binding': {

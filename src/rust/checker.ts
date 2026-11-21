@@ -10,13 +10,13 @@ import { BorrowChecker } from './borrowck';
 import { settleClosures } from './checkerClosures';
 import { exprInner } from './checkerExpr';
 import { settleBinaries } from './checkerOperators';
-import { checkPattern } from './checkerPatterns';
+import { checkParamPatterns, checkPattern } from './checkerPatterns';
 import { checkConstOperations, ConstLint } from './constLint';
 import { isIrrefutable, lowerPattern } from './exhaustiveness';
 import { deepNormalize, isPseudo, normalize, Unifier } from './infer';
 import { compileError, ItemCollector, lowerType, Module, type Program, resolveImports, type TypeScope } from './items';
 import { dynIteratorTarget, intoIterItem, intoIterShape } from './iterTypes';
-import { checkElidedReturnLifetime } from './lifetimeElision';
+import { checkElidedReturnLifetime, checkFieldLifetimes } from './lifetimeElision';
 import { autoderefSteps, derefOnce } from './methods';
 import { orderHint } from './orderingDiagnostics';
 import { TraitSolver } from './traits';
@@ -591,10 +591,11 @@ export class Checker {
       const local = this.declareLocal('self', type, item.selfParam.mutable, item.selfParam.span);
       local.isSelf = true;
     }
-    for (const [index, param] of item.params.entries()) {
-      checkPattern(this, param.pattern, def.paramTypes[index], 'move');
-      this.requireIrrefutable(param.pattern, def.paramTypes[index], 'fn');
-    }
+    checkParamPatterns(
+      this,
+      item.params.map((param) => param.pattern),
+      def.paramTypes
+    );
     const bodyType = this.checkBlock(body, this.body.retType);
     if (body.tail) {
       this.coerceReturned(body.tail, bodyType, this.body.retType);
@@ -1168,6 +1169,7 @@ export class Checker {
     resolveImports(module);
     this.checkDeclaredTypes(firstAdt, firstFn, firstConst, firstImpl, firstTrait);
     this.checkDerivedTraits(firstAdt);
+    if (this.program.impls.length > firstImpl) this.checkImplCoherence();
     for (const impl of this.program.impls.slice(firstImpl)) this.checkImplSignatures(impl);
     this.nestedFns.push(...this.program.pendingFns.splice(pendingBefore));
     this.body.module = module;
@@ -1309,29 +1311,6 @@ function* adtArgumentBounds(def: AdtDef, args: Type[]): Iterable<[Type, TraitRef
   const subst = new Map(def.params.map((param, index) => [param, args[index]]));
   for (const [index, param] of def.params.entries()) {
     for (const bound of param.bounds) yield [args[index], substituteTraitRef(bound, subst)];
-  }
-}
-
-function checkFieldLifetimes(type: Type, span: Span, declared: string[]): void {
-  const t = shallow(type);
-  if (t.kind === 'ref') checkFieldLifetime(t.lifetime, span, declared);
-  if (t.kind === 'dyn' && t.lifetime) checkFieldLifetime(t.lifetime, span, declared);
-  if (t.kind === 'adt' && !(t.def.module as Module | undefined)?.isStd) {
-    const expected = t.def.lifetimeParams?.length ?? 0;
-    const lifetimes = t.lifetimes ?? [];
-    if (lifetimes.length !== expected) {
-      compileError(span, `フィールドの型 ${t.def.name} には、ライフタイムを ${expected} 個書いてください。`);
-    }
-    for (const lifetime of lifetimes) checkFieldLifetime(lifetime, span, declared);
-  }
-  const stored = t.kind === 'dyn' ? t.trait.args : childTypes(t);
-  for (const child of stored) checkFieldLifetimes(child, span, declared);
-}
-
-function checkFieldLifetime(lifetime: string | undefined, span: Span, declared: string[]): void {
-  if (!lifetime || lifetime === "'_") compileError(span, 'フィールドの型には、ライフタイムを書いてください。');
-  if (lifetime !== "'static" && !declared.includes(lifetime)) {
-    compileError(span, `ライフタイム ${lifetime} が宣言されていません。`);
   }
 }
 

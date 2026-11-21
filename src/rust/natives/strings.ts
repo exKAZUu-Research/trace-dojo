@@ -7,7 +7,7 @@ import { described, tuplePart } from '../iterDebug';
 import { cloneValue } from '../ops';
 import { RustPanic } from '../runtime';
 import { REF_STR, shallow, type Type } from '../types';
-import { decodeUtf8, utf8Bytes, utf8Length as byteLength } from '../utf8';
+import { decodeUtf8, isUtf8Boundary, utf8Bytes, utf8Length as byteLength } from '../utf8';
 import {
   FnValue,
   isPlace,
@@ -398,7 +398,7 @@ const strNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
   parse: ([s], ctx) => parse(ctx, textOf(s)),
   to_owned: ([s]) => textOf(s),
   into_string: ([s]) => textOf(s),
-  is_char_boundary: ([s, i]) => isCharBoundary(encoder.encode(textOf(s)), Number(i as bigint)),
+  is_char_boundary: ([s, i]) => isUtf8Boundary(textOf(s), Number(i as bigint)),
   get: ([s, range], ctx) => {
     const text = textOf(s);
     const { start, end } = rangeBounds(range, byteLength(text));
@@ -463,7 +463,6 @@ const stringNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
     return madeString('', Number(capacity as bigint));
   },
   from_iter: ([iter], ctx) => collectString(ctx, deref(iter) as IterValue, ctx.typeArgs[0], ctx.typeArgs[1]),
-  from_utf8_lossy: ([bytes]) => decodeUtf8(Uint8Array.from(sliceItems(deref(bytes)) as bigint[], Number)),
   from_utf8: ([bytes], ctx) => {
     const values = deref(bytes) as bigint[];
     const array = Uint8Array.from(values, Number);

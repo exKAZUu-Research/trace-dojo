@@ -195,7 +195,6 @@ pub mod string {
         pub const fn new() -> String;
         pub fn with_capacity(capacity: usize) -> String;
         pub fn from_utf8(vec: Vec<u8>) -> Result<String, FromUtf8Error>;
-        pub fn from_utf8_lossy(v: &[u8]) -> String;
         pub fn from_iter<P: StringPart, S>(iter: IterImpl<P, S>) -> String;
         pub fn push_str(&mut self, string: &str);
         pub fn push(&mut self, ch: char);

@@ -571,7 +571,7 @@ impl PartialEq for Key { fn eq(&self, _: &Self) -> bool { false } }`
 test('Rust UTF-8 conversions and string operations preserve U+FEFF', () => {
   const program = String.raw`fn main() {
     let strict = String::from_utf8(vec![239, 187, 191, 65]).unwrap();
-    let lossy = String::from_utf8_lossy(&[239, 187, 191, 255]);
+    let lossy = String::from_utf8(vec![239, 187, 191, 255]).unwrap_err().into_utf8_lossy();
     let mut head = String::from("\u{feff}A");
     head.truncate(3);
     println!("{} {} {}", strict.len(), lossy.len(), head.len());
@@ -7123,4 +7123,46 @@ test.each([
       diagnostics: [expect.objectContaining({ message: expect.stringContaining('ライフタイムを書いてください') })],
     });
   }
+});
+
+test('next_if keeps an end it did not take, and is_char_boundary tells each byte offset', () => {
+  const program = rustMain(`    let mut n = 0;
+    let mut it = std::iter::from_fn(|| { n += 1; if n == 1 { None } else { Some(n) } }).peekable();
+    println!("{:?} {:?} {:?}", it.next_if(|_| true), it.next(), it.next());
+    let s = "aé😀z";
+    let boundaries: Vec<bool> = (0..=s.len() + 1).map(|i| s.is_char_boundary(i)).collect();
+    println!("{:?}", boundaries);`);
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'None None Some(2)\n[true, true, false, true, false, false, false, true, true, false]\n',
+  });
+});
+
+test.each([
+  [
+    'a second impl of a trait in a block',
+    'trait Count { fn n(&self) -> i32; }\nstruct S;\nimpl Count for S { fn n(&self) -> i32 { 1 } }\nfn main() {\n    impl Count for S { fn n(&self) -> i32 { 2 } }\n}',
+    '2回実装',
+  ],
+  [
+    'an impl of a std trait for a std type in a block',
+    'fn main() {\n    impl Default for i32 { fn default() -> Self { 7 } }\n}',
+    '自分で宣言した型にだけ',
+  ],
+  ['two parameters of one name', 'fn add(x: i32, x: i32) -> i32 { x }\nfn main() {}', '引数の並びで x が2回'],
+  [
+    'a closure parameter that repeats a destructured name',
+    'fn main() {\n    let add = |(a, b): (i32, i32), a: i32| a + b;\n}',
+    '引数の並びで a が2回',
+  ],
+  [
+    'String::from_utf8_lossy, whose Cow result is not available',
+    'fn main() {\n    let s = String::from_utf8_lossy(&[72, 105]);\n}',
+    '使えません',
+  ],
+])('rejects %s', (_name, program, message) => {
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ message: expect.stringContaining(message) })],
+  });
 });

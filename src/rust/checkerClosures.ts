@@ -2,7 +2,7 @@ import { type Annotations, type FnContext, type LocalVar } from './annotations';
 import type { Expr, MacroCall, Pattern, Span } from './ast';
 import { forEachDirect, patternBindingParts } from './astWalk';
 import type { Checker } from './checker';
-import { checkPattern } from './checkerPatterns';
+import { checkParamPatterns } from './checkerPatterns';
 import { compileError } from './items';
 import { type CaptureMode, captureProjections, projectedBindings } from './loanCaptures';
 import { typeAfter } from './regions';
@@ -54,10 +54,11 @@ export function checkClosure(c: Checker, expr: Extract<Expr, { kind: 'closure' }
     isClosure: true,
   };
   try {
-    for (const [index, { pattern }] of expr.params.entries()) {
-      checkPattern(c, pattern, paramTypes[index], 'move');
-      c.requireIrrefutable(pattern, paramTypes[index], 'fn');
-    }
+    checkParamPatterns(
+      c,
+      expr.params.map((param) => param.pattern),
+      paramTypes
+    );
     c.coerceExpr(expr.body, retType);
   } finally {
     c.body = parentBody;

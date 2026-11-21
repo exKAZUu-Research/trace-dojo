@@ -766,8 +766,8 @@ define({
   'IterImpl<_, PeekableShape<_, _>>::next_if': ([self, f], ctx) => {
     const iter = peekSource(self);
     const item = nextOf(iter);
-    if (item === DONE) return none(ctx);
-    if (truthy(call(ctx, f, [item]))) return some(ctx, item);
+    if (item !== DONE && truthy(call(ctx, f, [item]))) return some(ctx, item);
+    // What is not taken, the end included, is what the next call sees.
     iter.peekedType = ctx.typeArgs[0];
     iter.peeked ??= [];
     iter.peeked.unshift(item);
