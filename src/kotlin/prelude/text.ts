@@ -540,17 +540,17 @@ inline fun CharSequence.indexOfLast(predicate: (Char) -> Boolean): Int {
     return -1
 }
 inline fun <K> CharSequence.groupingBy(crossinline keySelector: (Char) -> K): Grouping<Char, K> = asIterable().groupingBy(keySelector)
-fun CharSequence.toList(): List<Char> {
-    val result = ArrayList<Char>(length)
-    for (char in this) result.add(char)
-    return result.optimizeReadOnlyList()
+fun CharSequence.toList(): List<Char> = when (length) {
+    0 -> emptyList()
+    1 -> listOf(this[0])
+    else -> toMutableList()
 }
-fun CharSequence.toMutableList(): MutableList<Char> {
-    val result = ArrayList<Char>(length)
-    for (char in this) result.add(char)
-    return result
+fun CharSequence.toMutableList(): MutableList<Char> = toCollection(ArrayList<Char>(length))
+fun CharSequence.toSet(): Set<Char> = when (length) {
+    0 -> emptySet()
+    1 -> setOf(this[0])
+    else -> toCollection(LinkedHashSet<Char>(mapCapacity(length.coerceAtMost(128))))
 }
-fun CharSequence.toSet(): Set<Char> = toList().toSet()
 fun CharSequence.withIndex(): Iterable<IndexedValue<Char>> = asIterable().withIndex()
 fun CharSequence.chunked(size: Int): List<String> = windowed(size, size, partialWindows = true)
 fun CharSequence.windowed(size: Int, step: Int = 1, partialWindows: Boolean = false): List<String> =

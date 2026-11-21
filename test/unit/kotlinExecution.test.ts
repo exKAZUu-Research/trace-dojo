@@ -3008,6 +3008,22 @@ fun main() {
       'size\n[]\nsize\nisEmpty\nsize\nget 3\n[3]\nsize\nlistIterator 2\n[2, 3]\nsize\nsize\nget 2\nget 3\n[2, 3]\n[2, 3]\n0\n',
   },
   {
+    name: 'character sequence conversions use Kotlin length-based paths',
+    source: `class CharProbe(private val value: String) : CharSequence by value {
+    override val length: Int get() { println("length"); return value.length }
+    override fun get(index: Int): Char { println("get $index"); return value[index] }
+}
+fun main() {
+    for (value in listOf("", "x", "xyx")) {
+        val sequence = CharProbe(value)
+        println(sequence.toList())
+        println(sequence.toSet())
+    }
+}`,
+    stdout:
+      'length\n[]\nlength\n[]\nlength\nget 0\n[x]\nlength\nget 0\n[x]\nlength\nlength\nlength\nget 0\nlength\nget 1\nlength\nget 2\nlength\n[x, y, x]\nlength\nlength\nlength\nget 0\nlength\nget 1\nlength\nget 2\nlength\n[x, y]\n',
+  },
+  {
     name: 'slicing calls index collections in JVM order and preserves array kinds',
     source: `class IndexSelection(private val data: List<Int>) : Collection<Int> by data {
     override val size: Int get() { println("size"); return data.size }
