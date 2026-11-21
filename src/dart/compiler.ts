@@ -874,14 +874,11 @@ export class Compiler extends MemberCompiler {
   ): void {
     if (declaration.isConst && !variable.initializer)
       this.error(variable, `const の ${variable.name} には初期値が必要です。`);
-    if (
-      !variable.initializer &&
-      !declaration.isLate &&
-      !isNullable(type) &&
-      !this.isLibraryCode &&
-      !declaration.isExternal
-    ) {
-      this.error(variable, `null にならない static なフィールド ${variable.name} には、初期値が必要です。`);
+    if (!variable.initializer && !declaration.isLate && !this.isLibraryCode && !declaration.isExternal) {
+      if (declaration.isFinal)
+        this.error(variable, `final の static なフィールド ${variable.name} には、初期値が必要です。`);
+      else if (!isNullable(type))
+        this.error(variable, `null にならない static なフィールド ${variable.name} には、初期値が必要です。`);
     }
     const global = this.newGlobal(
       variable.name,
@@ -1615,7 +1612,9 @@ export class Compiler extends MemberCompiler {
       if (declaration.isConst && !variable.initializer)
         this.error(variable, `const の ${variable.name} には初期値が必要です。`);
       const type = declaredType ?? DYNAMIC;
-      if (!variable.initializer && !declaration.isLate && !isNullable(type) && type.kind !== 'dynamic') {
+      if (!variable.initializer && !declaration.isLate && declaration.isFinal) {
+        this.error(variable, `final の ${variable.name} には初期値が必要です。`);
+      } else if (!variable.initializer && !declaration.isLate && !isNullable(type) && type.kind !== 'dynamic') {
         this.error(variable, `null にならない変数 ${variable.name} には、初期値が必要です。`);
       }
       const global = this.newGlobal(

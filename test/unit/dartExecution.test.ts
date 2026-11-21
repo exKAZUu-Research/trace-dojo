@@ -1305,6 +1305,17 @@ test('Dart keeps the sign of a negated zero integer literal in a double context'
   });
 });
 
+test.each([
+  "final int? x;\nvoid main() { print('hi'); }",
+  'final x;\nvoid main() { print(x); }',
+  "class C { static final int? x; }\nvoid main() { print('hi'); }",
+])('Dart requires an initializer on a final top-level or static variable: %s', (program) => {
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ row: 0 })],
+  });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}
