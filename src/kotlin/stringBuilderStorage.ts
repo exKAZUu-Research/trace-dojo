@@ -73,9 +73,9 @@ export class StringBuilderStorage {
   }
 
   resize(length: number): void {
+    this.bytes = this.reserve(length, this.wide);
     if (length > this.length) {
       const width = this.wide ? 2 : 1;
-      this.bytes = this.reserve(length, this.wide);
       this.bytes.fill(0, this.length * width, length * width);
     } else if (length < this.length) {
       this.markPossiblyLatin1();

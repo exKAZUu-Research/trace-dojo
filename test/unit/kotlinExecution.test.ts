@@ -2021,6 +2021,24 @@ fun main() {
     stdout: '3\nhello\n5\naba\n',
   },
   {
+    name: 'builder resize restores encoded capacity after reentrant recoding',
+    source: `class ResizeSource(val builder: StringBuilder) : CharSequence by "xy" {
+    override fun get(index: Int): Char {
+        if (index == 0) builder.setCharAt(0, 'λ')
+        return "xy"[index]
+    }
+}
+fun main() {
+    for (size in listOf(4, 5, 6)) {
+        val builder = StringBuilder(2).append("abc")
+        builder.insert(1, ResizeSource(builder))
+        builder.setLength(size)
+        println(builder.toString().map { it.code })
+    }
+}`,
+    stdout: '[30817, 25209, 99, 0]\n[30817, 25209, 99, 0, 0]\n[30817, 25209, 99, 0, 0, 0]\n',
+  },
+  {
     name: 'builder materialization checks recoded storage only when compaction is possible',
     source: `class RecodeSource(val builder: StringBuilder, val overwrite: Boolean) : CharSequence by "xy" {
     override fun get(index: Int): Char {
