@@ -514,7 +514,9 @@ function treeRange<V extends Value>(
     }
   }
   const entry: Type = name === 'BTreeMap' ? { kind: 'tuple', elems: ctx.typeArgs.slice(0, 2) } : type;
-  return snapshotIter(collection.range(type, start, end), entry);
+  // The iterator borrows the collection, which cannot change while it runs, so it reads entries as it goes.
+  const [from, to] = collection.rangeRanks(type, start, end);
+  return arrayIter([], from, Math.max(from, to), (rank) => collection.entryAt(rank), entry);
 }
 
 natives['BTreeMap<_, _>::range'] = ([self, range], ctx) => treeRange(ctx, map(self).entries, range, 'BTreeMap');

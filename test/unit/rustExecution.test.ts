@@ -8658,3 +8658,17 @@ test('a large hash set checks its disjointness from an empty one cheaply', () =>
   );
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '1000\n' });
 });
+
+test('successor queries through BTreeSet ranges read only the entries they take', () => {
+  const program = rustMain(
+    `
+    let keys: BTreeSet<i32> = (0..2000).collect();
+    let mut total = 0;
+    for query in 0..2000 {
+        if let Some(next) = keys.range(query..).next() { total += next; }
+    }
+    println!("{total}");`,
+    'use std::collections::BTreeSet;'
+  );
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '1999000\n' });
+});

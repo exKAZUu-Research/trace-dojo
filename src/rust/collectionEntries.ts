@@ -92,8 +92,12 @@ export class CollectionEntries<V> {
     this.tree!.appendOrdered(value);
   }
 
-  range(type: Type, start: RangeEndpoint | undefined, end: RangeEndpoint | undefined): V[] {
-    return this.tree!.range(type, start, end);
+  rangeRanks(type: Type, start: RangeEndpoint | undefined, end: RangeEndpoint | undefined): [number, number] {
+    return this.tree!.rangeRanks(type, start, end);
+  }
+
+  entryAt(rank: number): V {
+    return this.tree!.entryAt(rank);
   }
 
   retain(keep: (value: V) => boolean): void {

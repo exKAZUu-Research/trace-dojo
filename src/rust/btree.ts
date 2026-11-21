@@ -1,4 +1,4 @@
-import { allocateCollectionSnapshot, compareValues, spendCollectionWork } from './ops';
+import { compareValues, spendCollectionWork } from './ops';
 import type { Type } from './types';
 import type { RangeEndpoint, Value } from './values';
 
@@ -153,9 +153,10 @@ export class BTree<V> {
     updateToRoot(parent);
   }
 
-  range(type: Type, start: RangeEndpoint | undefined, end: RangeEndpoint | undefined): V[] {
+  /** The ranks, in key order, of a range's first entry and of the first entry after it. */
+  rangeRanks(type: Type, start: RangeEndpoint | undefined, end: RangeEndpoint | undefined): [number, number] {
     this.finishBulk();
-    if (!this.root) return [];
+    if (!this.root) return [0, 0];
     const firstBound = start ?? ALL;
     const lastBound = end ?? ALL;
     let first = this.boundEdge(this.root, type, firstBound, false, 0);
@@ -165,10 +166,13 @@ export class BTree<V> {
       first = this.boundEdge(first.node.children[first.index], type, first.next, false, 0);
       last = this.boundEdge(last.node.children[last.index], type, last.next, true, same ? first.index : 0);
     }
-    const from = edgeRank(first);
-    const to = edgeRank(last);
-    allocateCollectionSnapshot(Math.max(0, to - from));
-    return [...walk(this.root, from, to)];
+    return [edgeRank(first), edgeRank(last)];
+  }
+
+  /** The entry of a rank, in key order. */
+  entryAt(rank: number): V {
+    const { node, index } = atRank(this.root!, rank);
+    return node!.entries[index];
   }
 
   private findInNode(node: Node<V>, type: Type, key: Value, start: number): TreeKey<V> {
