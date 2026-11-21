@@ -351,6 +351,22 @@ test('a deferred val appears in the trace after its scope lambda assigns it', ()
   expect(trace.traceItems.at(-1)?.vars.answer).toBe(3);
 });
 
+test('records narrow unsigned arrays including nested scalar arrays', () => {
+  const program = `fun main() {
+    val bytes = arrayOf(128u.toUByte(), 255u.toUByte())
+    val shorts = arrayOf(32768u.toUShort(), 65535u.toUShort())
+    val nested = arrayOf(bytes)
+    println("done")
+}`;
+  const trace = traceProgram('kotlin', program, program);
+  expect(trace.finalVars).toMatchObject({
+    bytes: [128, 255],
+    shorts: [32_768, 65_535],
+    nested: [[128, 255]],
+  });
+  expect(trace.traceItems.at(-1)?.vars.nested).toEqual([[128, 255]]);
+});
+
 test('cyclic reference arrays remain inspectable and do not interrupt execution', () => {
   const program = `fun main() {
     val first = arrayOfNulls<Any>(1)

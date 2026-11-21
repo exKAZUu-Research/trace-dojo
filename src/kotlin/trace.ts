@@ -137,20 +137,6 @@ function primitiveKindOf(type: KType): PrimitiveKind | undefined {
   return getLibrary().core.primitives.get(actual.cls);
 }
 
-const SCALAR_CLASSES = new Set([
-  'Int',
-  'Long',
-  'Short',
-  'Byte',
-  'Double',
-  'Float',
-  'Char',
-  'Boolean',
-  'String',
-  'UInt',
-  'ULong',
-]);
-
 /** Whether the elements of an array of the type are values learners write, nested arrays included. */
 function holdsScalars(type: KType): boolean {
   const actual = resolved(type);
@@ -160,7 +146,8 @@ function holdsScalars(type: KType): boolean {
   if (!argument || argument.variance === 'star') return false;
   const element = resolved(argument.type);
   if (element.kind !== 'class' || !element.cls.isLibrary) return false;
-  return SCALAR_CLASSES.has(element.cls.name) || holdsScalars(element);
+  const { boolean, string, primitives } = getLibrary().core;
+  return element.cls === boolean || element.cls === string || primitives.has(element.cls) || holdsScalars(element);
 }
 
 const NOT_SCALAR = Symbol('notScalar');
