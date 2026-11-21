@@ -35,6 +35,7 @@ import {
 import { arrayIterator } from './core';
 import { jdkHashCapacity, mapCapacity, newStore, reserveForCopy } from './hashTables';
 import { listEquals } from './listEquality';
+import { mapEquals } from './mapEquality';
 import { defineNative, defineNativeProperty, libraryClass, throwError } from './registry';
 
 /**
@@ -366,16 +367,11 @@ const LIST_CHANGING_NATIVES: Record<string, ListNative> = {
 
 function insertListElements(frame: Frame, list: KObject, index: number | undefined, elements: Value): boolean {
   const view = listView(list);
-  const kind = listKind(list);
-  const isFixed = !view && (kind === 'SingletonList' || kind === 'ArraysList');
+  const kind = listKind(view?.source ?? list);
+  const isFixed = kind === 'SingletonList' || kind === 'ArraysList';
   if (!view && !isFixed) requireResizable(frame, list);
   const position = index === undefined ? indexedSize(list) : insertionIndex(frame, list, index);
-  if (isFixed) {
-    return withCollectionElements(frame, elements, (values) => {
-      if (!values[Symbol.iterator]().next().done) requireResizable(frame, list);
-      return false;
-    });
-  }
+  if (isFixed) return rejectFixedListInsertion(frame, list, elements);
   const added = elementsOf(frame, elements);
   if (added.length === 0 && (view || kind === 'ArrayDeque')) return false;
   if (view) {
@@ -384,6 +380,17 @@ function insertListElements(frame: Frame, list: KObject, index: number | undefin
   }
   replaceListItems(frame, list, position, 0, added);
   return added.length > 0;
+}
+
+function rejectFixedListInsertion(frame: Frame, list: KObject, elements: Value): false {
+  if (listView(list)) {
+    if (collectionSize(frame, elements) === 0) return false;
+    checkListView(frame, list);
+  }
+  return withCollectionElements(frame, elements, (values) => {
+    if (!values[Symbol.iterator]().next().done) requireResizable(frame, list);
+    return false;
+  });
 }
 
 function insertionIndex(frame: Frame, list: Value, position: number): number {
@@ -946,24 +953,6 @@ function mapEntriesOf(frame: Frame, map: Value): [Value, Value][] {
     readCollectionProperty(frame, entry, owner, 'key'),
     readCollectionProperty(frame, entry, owner, 'value'),
   ]);
-}
-
-function mapEquals(frame: Frame, map: KObject, other: Value): boolean {
-  if (map === other) return true;
-  const owner = 'kotlin.collections.Map';
-  if (!(other instanceof KObject) || !other.cls.isSubclassOf(libraryClass(owner))) return false;
-  const store = storeOf(map);
-  if (map.cls === libraryClass('kotlin.collections.EmptyMap')) {
-    return callCollectionMember(frame, other, owner, 'isEmpty') === true;
-  }
-  if (store.entries.length !== readCollectionProperty(frame, other, owner, 'size')) return false;
-  return compareCollections(() =>
-    store.ordered().every(({ key, value }) => {
-      const actual = callCollectionMember(frame, other, owner, 'get', [key]);
-      if (value !== undefined) return valueEquals(frame, value, actual);
-      return actual === undefined && callCollectionMember(frame, other, owner, 'containsKey', [key]) === true;
-    })
-  );
 }
 
 function mapToString(frame: Frame, map: KObject): string {

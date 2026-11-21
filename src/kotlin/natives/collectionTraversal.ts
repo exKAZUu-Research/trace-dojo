@@ -22,7 +22,7 @@ export function forEachIterable(frame: Frame, iterable: Value, visit: (element: 
   });
 }
 
-function everyIterableElement(
+export function everyIterableElement(
   frame: Frame,
   iterable: Value,
   accepts: (element: Value, iterator: Value) => boolean

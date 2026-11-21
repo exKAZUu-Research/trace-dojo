@@ -1341,6 +1341,26 @@ fun main() {
     stdout: 'added\n3\ncleared\nview changed\n[item, last]\n3\n[item, null]\n0\n',
   },
   {
+    name: 'hash map equality checks live iterator versions only on advancement',
+    source: `class Other(val target: MutableMap<Int, Int>, val at: Int) : Map<Int, Int> by mapOf(1 to 1, 2 to 2) {
+    override fun get(key: Int): Int? {
+        if (key == at) target.remove(2)
+        return key
+    }
+}
+fun main() {
+    for (hash in listOf(true, false)) {
+        for (at in listOf(1, 2)) {
+            val map = if (hash) hashMapOf(1 to 1, 2 to 2) else linkedMapOf(1 to 1, 2 to 2)
+            try { println(map == Other(map, at)) } catch (e: Exception) { println(e) }
+            println(map)
+        }
+    }
+}`,
+    stdout:
+      'java.util.ConcurrentModificationException\n{1=1}\ntrue\n{1=1}\njava.util.ConcurrentModificationException\n{1=1}\ntrue\n{1=1}\n',
+  },
+  {
     name: 'singleton lookup skips hashing and native getOrDefault looks up one key',
     source: `var hashes = 0
 var equalities = 0
@@ -1918,8 +1938,9 @@ fun main() {
       'java.lang.OutOfMemoryError: Requested array size exceeds VM limit\njava.lang.OutOfMemoryError: Requested array size exceeds VM limit\njava.lang.OutOfMemoryError: Java heap space\njava.lang.IllegalArgumentException: Illegal Capacity: -1\n0\n0\n',
   },
   {
-    name: 'fixed JVM lists test their source before rejecting insertion',
+    name: 'fixed JVM lists and their views read only the first element before rejecting insertion',
     source: `class Source : Collection<String> by listOf("new", "second") {
+    override val size: Int get() { println("size"); return 2 }
     override fun iterator(): Iterator<String> = ReadingIterator()
 }
 class ReadingIterator : Iterator<String> {
@@ -1935,13 +1956,17 @@ fun main() {
         try { list.addAll(-1, emptyList()) } catch (e: Exception) { println(e) }
         try { list.addAll(Source()) } catch (e: Exception) { println(e) }
         try { list.addAll(0, Source()) } catch (e: Exception) { println(e) }
+        val view = list.subList(0, list.size)
+        println(view.addAll(0, emptyList()))
+        try { view.addAll(Source()) } catch (e: Exception) { println(e) }
+        try { view.addAll(0, Source()) } catch (e: Exception) { println(e) }
         println(list)
     }
     val fixed = buildList { add("z") } as MutableList<String>
     try { fixed.addAll(emptyList()) } catch (e: Exception) { println(e) }
 }`,
     stdout:
-      'false\nfalse\njava.lang.IndexOutOfBoundsException: Index: -1, Size: 1\nhas\nnext 1\njava.lang.UnsupportedOperationException\nhas\nnext 1\njava.lang.UnsupportedOperationException\n[x]\nfalse\nfalse\njava.lang.IndexOutOfBoundsException: Index: -1, Size: 2\nhas\nnext 1\njava.lang.UnsupportedOperationException\nhas\nnext 1\njava.lang.UnsupportedOperationException\n[x, y]\nfalse\nfalse\njava.lang.IndexOutOfBoundsException: Index: -1, Size: 1\nhas\nnext 1\njava.lang.UnsupportedOperationException\nhas\nnext 1\njava.lang.UnsupportedOperationException\n[x]\njava.lang.UnsupportedOperationException\n',
+      'false\nfalse\njava.lang.IndexOutOfBoundsException: Index: -1, Size: 1\nhas\nnext 1\njava.lang.UnsupportedOperationException\nhas\nnext 1\njava.lang.UnsupportedOperationException\nfalse\nsize\nhas\nnext 1\njava.lang.UnsupportedOperationException\nsize\nhas\nnext 1\njava.lang.UnsupportedOperationException\n[x]\nfalse\nfalse\njava.lang.IndexOutOfBoundsException: Index: -1, Size: 2\nhas\nnext 1\njava.lang.UnsupportedOperationException\nhas\nnext 1\njava.lang.UnsupportedOperationException\nfalse\nsize\nhas\nnext 1\njava.lang.UnsupportedOperationException\nsize\nhas\nnext 1\njava.lang.UnsupportedOperationException\n[x, y]\nfalse\nfalse\njava.lang.IndexOutOfBoundsException: Index: -1, Size: 1\nhas\nnext 1\njava.lang.UnsupportedOperationException\nhas\nnext 1\njava.lang.UnsupportedOperationException\nfalse\nsize\nhas\nnext 1\njava.lang.UnsupportedOperationException\nsize\nhas\nnext 1\njava.lang.UnsupportedOperationException\n[x]\njava.lang.UnsupportedOperationException\n',
   },
   {
     name: 'reversed searches and removals respect the iterator and singleton mutability',
