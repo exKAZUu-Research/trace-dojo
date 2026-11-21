@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 616 -- The operations of Dart's types belong together; each is a short case analysis.
+// code-gauge-allow-file fileNcss 626 -- The operations of Dart's types belong together; each is a short case analysis.
 import type { ClassInfo } from './classes';
 
 /** A type parameter of a class, a function type, or a generic function. */
@@ -671,19 +671,23 @@ function allSupertypes(type: InterfaceType): InterfaceType[] {
   return result;
 }
 
-export function closeTypeVariables(type: DartType, params: ReadonlySet<TypeParam>): DartType {
-  return replaceTypeVariables(type, (variable, covariant) =>
-    params.has(variable.param) ? (covariant ? NEVER : objectType(true)) : variable
-  );
+export function closeTypeVariables(type: DartType, params: ReadonlySet<TypeParam>, greatest = false): DartType {
+  const replace = (variable: TypeParamType, covariant: boolean): DartType => {
+    if (!params.has(variable.param)) return variable;
+    if (covariant === greatest) return objectType(true);
+    return NEVER;
+  };
+  const closeBound = (fn: FunctionType, covariant: boolean): DartType | undefined => {
+    if (!fn.typeParams.some(({ bound }) => bound && mentionsTypeParams(bound, params))) return undefined;
+    const result = covariant === greatest ? interfaceType(coreTypes.function) : NEVER;
+    return fn.nullable ? makeNullable(result) : result;
+  };
+  return replaceTypeVariables(type, replace, true, closeBound);
 }
 
 export function objectPatternBound(param: TypeParam, parameters: ReadonlySet<TypeParam>): DartType {
   if (param.bound === undefined) return DYNAMIC;
-  const bound = resolveBound(typeParamType(param));
-  return replaceTypeVariables(bound, (variable, covariant) => {
-    if (!parameters.has(variable.param)) return variable;
-    return covariant ? objectType(true) : NEVER;
-  });
+  return closeTypeVariables(resolveBound(typeParamType(param)), parameters, true);
 }
 
 export function overapproximateType(type: DartType): DartType {
@@ -702,9 +706,10 @@ export function overapproximateType(type: DartType): DartType {
 function replaceTypeVariables(
   type: DartType,
   replace: (variable: TypeParamType, covariant: boolean) => DartType,
-  covariant = true
+  covariant = true,
+  closeBound?: (type: FunctionType, covariant: boolean) => DartType | undefined
 ): DartType {
-  const close = (part: DartType): DartType => replaceTypeVariables(part, replace, covariant);
+  const close = (part: DartType): DartType => replaceTypeVariables(part, replace, covariant, closeBound);
   switch (type.kind) {
     case 'typeParam': {
       return replace(type, covariant);
@@ -720,12 +725,14 @@ function replaceTypeVariables(
       };
     }
     case 'function': {
+      const closed = closeBound?.(type, covariant);
+      if (closed) return closed;
       const replaceFree = (variable: TypeParamType, positive: boolean): DartType =>
         type.typeParams.includes(variable.param) ? variable : replace(variable, positive);
-      const parameter = (part: DartType): DartType => replaceTypeVariables(part, replaceFree, !covariant);
+      const parameter = (part: DartType): DartType => replaceTypeVariables(part, replaceFree, !covariant, closeBound);
       return {
         ...type,
-        returnType: replaceTypeVariables(type.returnType, replaceFree, covariant),
+        returnType: replaceTypeVariables(type.returnType, replaceFree, covariant, closeBound),
         positional: type.positional.map(parameter),
         named: type.named.map((field) => ({ ...field, type: parameter(field.type) })),
       };

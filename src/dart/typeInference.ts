@@ -1,9 +1,11 @@
 import {
   asInstanceOf,
   boundOf,
+  closeTypeVariables,
   type DartType,
   DYNAMIC,
   type FunctionType,
+  instantiateFunction,
   instantiateToBounds,
   type InterfaceType,
   isSubtype,
@@ -15,6 +17,7 @@ import {
   resolveBound,
   substitute,
   type TypeParam,
+  typeParamType,
   upperBound,
 } from './types';
 
@@ -120,6 +123,8 @@ export function inferTearOffTypes(
 }
 
 class InferenceConstraints {
+  private scopedParameters = new Set<TypeParam>();
+
   constructor(
     private readonly params: ReadonlySet<TypeParam>,
     private readonly lower: Map<TypeParam, DartType>,
@@ -134,8 +139,7 @@ class InferenceConstraints {
     } else if (pattern.kind === 'interface') {
       this.inferInterface(given, pattern, reversed);
     } else if (pattern.kind === 'function' && given.kind === 'function') {
-      this.infer(given.returnType, pattern.returnType, reversed);
-      if (this.upper) this.inferParameters(given, pattern, !reversed);
+      this.inferFunction(given, pattern, reversed);
     } else if (pattern.kind === 'record' && given.kind === 'record') {
       this.inferRecord(given, pattern, reversed);
     }
@@ -144,7 +148,10 @@ class InferenceConstraints {
   private addBound(given: DartType, pattern: DartType & { kind: 'typeParam' }, reversed: boolean): void {
     const bounds = reversed ? this.upper : this.lower;
     if (!bounds || (reversed && given.kind === 'dynamic')) return;
-    const target = pattern.nullable ? nonNullOf(given) : given;
+    let target = pattern.nullable ? nonNullOf(given) : given;
+    if (this.scopedParameters.size > 0 && mentionsTypeParams(target, this.scopedParameters)) {
+      target = closeTypeVariables(target, this.scopedParameters, !reversed);
+    }
     if (!this.retainBottom && !reversed && target.kind === 'never' && !target.nullable) return;
     const previous = bounds.get(pattern.param);
     const join = reversed ? lowerBound : this.join;
@@ -165,6 +172,34 @@ class InferenceConstraints {
       const actualArg = actualType.args[index];
       if (actualArg) this.infer(actualArg, arg, reversed);
     }
+  }
+
+  private inferFunction(given: FunctionType, pattern: FunctionType, reversed: boolean): void {
+    if (given.typeParams.length !== pattern.typeParams.length) return;
+    if (given.typeParams.length === 0) {
+      this.inferFunctionBody(given, pattern, reversed);
+      return;
+    }
+    const enclosingParameters = this.scopedParameters;
+    this.scopedParameters = new Set([...enclosingParameters, ...given.typeParams]);
+    try {
+      const typeArguments = given.typeParams.map((param) => typeParamType(param));
+      const renamed = new Map(pattern.typeParams.map((param, index) => [param, typeArguments[index]]));
+      for (const [index, param] of pattern.typeParams.entries()) {
+        const givenBound = boundOf(given.typeParams[index]);
+        const patternBound = substitute(boundOf(param), renamed);
+        this.infer(givenBound, patternBound);
+        this.infer(givenBound, patternBound, true);
+      }
+      this.inferFunctionBody(given, instantiateFunction(pattern, typeArguments), reversed);
+    } finally {
+      this.scopedParameters = enclosingParameters;
+    }
+  }
+
+  private inferFunctionBody(given: FunctionType, pattern: FunctionType, reversed: boolean): void {
+    this.infer(given.returnType, pattern.returnType, reversed);
+    if (this.upper) this.inferParameters(given, pattern, !reversed);
   }
 
   private inferParameters(given: FunctionType, pattern: FunctionType, reversed: boolean): void {

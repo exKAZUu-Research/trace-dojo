@@ -6621,6 +6621,24 @@ void main() {
   });
 });
 
+test('raw object pattern aliases infer invariant generic function bounds', () => {
+  const source = `typedef Direct<X> = void Function<T extends X>(T);
+typedef Nested<X> = void Function<T extends List<X>>(T);
+typedef Result<X> = X Function<T extends num>(T);
+void writeNumber<A extends num>(A value) => print(value);
+void writeList<B extends List<int>>(B value) => print(value);
+T echo<T extends num>(T value) => value;
+void main() {
+  void Function<A extends num>(A) number = writeNumber;
+  if (number case Direct(call: var f)) f(2); else print('no match');
+  void Function<B extends List<int>>(B) list = writeList;
+  if (list case Nested(call: var f)) f(<int>[3]); else print('no match');
+  T Function<T extends num>(T) result = echo;
+  if (result case Result()) print('match'); else print('no match');
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '2\n[3]\nno match\n' });
+});
+
 test('switches over generic nullable bounds cover the null case', () => {
   for (const source of [
     'int f<T extends bool?>(T input) => switch (input) { true => 1, false => 0 }; void main() {}',
