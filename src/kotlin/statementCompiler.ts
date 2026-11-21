@@ -204,6 +204,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
   // Declarations.
 
   private compileLocalProperty(scope: Scope, context: FunctionContext, statement: PropertyDecl): Exec {
+    this.validateAnnotations(scope, statement.modifiers);
     const { row, name } = statement;
     if (statement.getter || statement.setter) this.error(row, 'ローカル変数には get・set を書けません。');
     const declared = statement.type ? this.resolveType(scope, statement.type) : undefined;

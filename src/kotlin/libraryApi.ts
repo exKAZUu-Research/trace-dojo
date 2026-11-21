@@ -1,5 +1,5 @@
 import { unavailableJavaFeature } from './convertSupport';
-import { javaTypeAliases, libraryDeclarationNames, libraryMemberNames } from './libraryApiData';
+import { javaTypeAliases, libraryAnnotationNames, libraryDeclarationNames, libraryMemberNames } from './libraryApiData';
 import type { ClassSymbol, TypeParameterSymbol } from './symbols';
 import { type KType, resolved, typeToString } from './types';
 
@@ -19,6 +19,13 @@ export function unavailableLibraryMember(type: KType, name: string): string | un
 
 export function isKnownLibraryPackage(path: string): boolean {
   return Object.hasOwn(libraryDeclarationNames, path);
+}
+
+export function isKnownLibraryAnnotation(path: string): boolean {
+  for (let split = path.lastIndexOf('.'); split > 0; split = path.lastIndexOf('.', split - 1)) {
+    if (hasName(libraryAnnotationNames, path.slice(0, split), path.slice(split + 1))) return true;
+  }
+  return false;
 }
 
 export function isJavaTypeAlias(javaName: string, kotlinName: string): boolean {

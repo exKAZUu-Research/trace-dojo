@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 990 -- The declaration compiler shares symbol and class-linking logic.
+// code-gauge-allow-file fileNcss 1000 -- The declaration compiler shares symbol and class-linking logic.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import { accessesBackingField } from './accessorFieldUsage';
 import { VISIBILITY_KEYWORDS } from './ast';
@@ -30,7 +30,7 @@ import {
   resultType,
 } from './inheritedMembers';
 import { jvmSignatures, overriddenMembers } from './jvmSignatures';
-import { isKnownLibraryPackage } from './libraryApi';
+import { isKnownLibraryAnnotation, isKnownLibraryPackage } from './libraryApi';
 import { arrayContentHash, arrayContentString, dataArrayKind } from './natives/arrays';
 import { type NativeFunction, type NativeProperty, typeRefText } from './nativeTypes';
 import { toInt32 } from './operators';
@@ -238,6 +238,11 @@ export abstract class DeclarationCompiler extends StatementCompiler {
         continue;
       }
       const name = path.at(-1) as string;
+      const qualified = path.join('.');
+      if (isKnownLibraryAnnotation(qualified)) {
+        context.importedAnnotations.set(name, qualified);
+        continue;
+      }
       const packageScope = this.packages.get(path.slice(0, -1).join('.'));
       if (packageScope) this.importFromPackage(context, packageScope, name, declaration);
       else this.importFromClass(context, name, declaration);
@@ -394,6 +399,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
 
   private declareSupertypes(entry: ClassEntry): void {
     const { symbol } = entry;
+    this.validateAnnotations(entry.scope, entry.decl.modifiers);
     for (const spec of entry.decl.supers) {
       const type = this.resolveType(entry.scope, spec.type) as ClassType;
       if (type.kind !== 'class') this.error(spec.row, '親にはクラスかインターフェースを書いてください。');
@@ -484,6 +490,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   private declarePrimaryConstructor(entry: ClassEntry): FunctionSymbol {
     const { symbol, decl, scope } = entry;
     const primary = decl.primaryConstructor;
+    if (primary) this.validateAnnotations(scope, primary.modifiers);
     const constructorSymbol = new FunctionSymbol(symbol.name);
     constructorSymbol.isConstructor = true;
     constructorSymbol.owner = symbol;
@@ -635,6 +642,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   }
 
   private declareParameter(scope: Scope, param: ParameterDecl): ParameterSymbol {
+    this.validateAnnotations(scope, param.modifiers);
     if (!param.type) this.error(param.row, `引数 ${param.name} の型を書いてください。`);
     const { keywords } = param.modifiers;
     return {
@@ -670,12 +678,14 @@ export abstract class DeclarationCompiler extends StatementCompiler {
 
   // code-gauge-allow functionNcss 31 -- builds the function symbol from the declaration and its modifiers.
   // code-gauge-allow functionNcss 32 -- declaration flags and type constraints describe the same signature.
+  // code-gauge-allow functionNcss 33 -- Declaration flags, annotations, and the signature share the scope.
   private declareFunction(
     decl: FunctionDecl,
     ownerScope: Scope,
     cls: ClassEntry | undefined,
     file: FileContext
   ): FunctionEntry {
+    this.validateAnnotations(ownerScope, decl.modifiers);
     const symbol = new FunctionSymbol(decl.name);
     symbol.owner = cls?.symbol;
     symbol.row = decl.row;
@@ -782,6 +792,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     cls: ClassEntry | undefined,
     file: FileContext
   ): PropertyEntry {
+    this.validateAnnotations(ownerScope, decl.modifiers);
     const symbol = new PropertySymbol(decl.name);
     symbol.owner = cls?.symbol;
     symbol.row = decl.row;
@@ -1394,6 +1405,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       packageName,
       isLibrary,
       importedClasses: new Map(),
+      importedAnnotations: new Map(),
       importedFunctions: new Map(),
       importedProperties: new Map(),
       starPackages: [],

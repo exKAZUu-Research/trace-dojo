@@ -1,5 +1,6 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
+import { convertAnnotation } from './annotationArguments';
 import { VISIBILITY_KEYWORDS } from './ast';
 import type {
   Argument,
@@ -20,6 +21,7 @@ import {
   children,
   firstOfType,
   hasToken,
+  identifierName,
   named,
   namedOfType,
   required,
@@ -555,12 +557,12 @@ export abstract class ExpressionConverter {
   }
 
   /** Reads a declaration's modifiers, rejecting the annotations and keywords learners' programs may not use. */
-  convertModifiers(node: Node | undefined, allowed: ReadonlySet<string>): Modifiers {
+  convertModifiers(node: Node | undefined, allowed: ReadonlySet<string>, allowsValueClass = false): Modifiers {
     const keywords = new Set<string>();
     const annotations: Modifiers['annotations'] = [];
     for (const child of node ? named(node) : []) {
       if (child.type === 'annotation') {
-        annotations.push(this.convertAnnotation(child));
+        annotations.push(convertAnnotation(child, this.isLibrary));
         continue;
       }
       const keyword = child.text;
@@ -568,21 +570,13 @@ export abstract class ExpressionConverter {
       if (keywords.has(keyword)) throw syntaxError(child, `${keyword} 修飾子が2回書かれています。`);
       keywords.add(keyword);
     }
+    const isValueClass = allowsValueClass && keywords.has('value') && !keywords.has('enum');
+    if (node && !this.isLibrary && !isValueClass && annotations.some(({ name }) => name === 'JvmInline'))
+      throw syntaxError(node, '@JvmInline は value class にだけ付けられます。');
     const visibility = VISIBILITY_KEYWORDS.filter((keyword) => keywords.has(keyword));
     if (node && visibility.length > 1)
       throw syntaxError(node, `公開範囲の修飾子 ${visibility.join(' と ')} は同時に書けません。`);
     return { keywords, annotations };
-  }
-
-  private convertAnnotation(node: Node): Modifiers['annotations'][number] {
-    const parts = named(node);
-    if (parts.some((part) => part.type === 'use_site_target'))
-      throw unavailable(node, '対象を指定したアノテーション（@get: など）');
-    const target = parts[0];
-    const typeNode = target.type === 'constructor_invocation' ? named(target)[0] : target;
-    const name = typeNode.text;
-    if (!this.isLibrary && !LEARNER_ANNOTATIONS.has(name)) throw unavailable(node, `アノテーション @${name}`);
-    return { row: rowOf(node), name };
   }
 }
 
@@ -629,12 +623,3 @@ const UNAVAILABLE_EXPRESSIONS: Record<string, string> = {
   collection_literal: 'アノテーションの外での [...]',
   spread_expression: '配列の展開（*配列）',
 };
-
-/** The annotations of the Kotlin tour, which change nothing a program prints. */
-const LEARNER_ANNOTATIONS = new Set(['JvmInline', 'OptIn']);
-
-/** An identifier's name, without the backticks of a quoted one. */
-export function identifierName(node: Node): string {
-  const { text } = node;
-  return text.startsWith('`') ? text.slice(1, -1) : text;
-}

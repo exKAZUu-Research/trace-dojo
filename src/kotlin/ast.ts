@@ -16,6 +16,8 @@ export interface Import {
 export interface Annotation {
   row: number;
   name: string;
+  qualifiedName?: string;
+  markers?: { row: number; path: string[] }[];
 }
 
 export const VISIBILITY_KEYWORDS = ['private', 'protected', 'internal', 'public'] as const;

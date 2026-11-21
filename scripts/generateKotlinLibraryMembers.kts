@@ -21,6 +21,7 @@ val defaultPackages = setOf(
 )
 val members = sortedMapOf<String, MutableSet<String>>()
 val declarations = sortedMapOf<String, MutableSet<String>>()
+val annotations = sortedMapOf<String, MutableSet<String>>()
 val javaAliases = sortedMapOf<String, MutableSet<String>>()
 
 fun isPublicApi(visibility: Visibility, annotations: List<KmAnnotation>): Boolean =
@@ -91,6 +92,7 @@ JarFile(File(stdlib.protectionDomain.codeSource.location.toURI())).use { jar ->
                     val packageName = klass.name.substringBeforeLast('/').replace('/', '.')
                     val name = klass.name.substringAfterLast('/')
                     declarations.getOrPut(packageName) { sortedSetOf() }.add(name)
+                    if (clazz.isAnnotation) annotations.getOrPut(packageName) { sortedSetOf() }.add(name)
                     collect(klass, klass.name)
                 }
             }
@@ -170,5 +172,12 @@ println("export const libraryDeclarationNames: Readonly<Record<string, string>> 
 for ((pkg, names) in declarations) {
     val identifiers = names.filter { it.matches(Regex("[A-Za-z][A-Za-z0-9_.]*")) }
     if (identifiers.isNotEmpty()) println("  '$pkg': '${identifiers.joinToString(" ")}',")
+}
+println("};")
+
+println()
+println("export const libraryAnnotationNames: Readonly<Record<string, string>> = {")
+for ((pkg, names) in annotations) {
+    println("  '$pkg': '${names.joinToString(" ")}',")
 }
 println("};")

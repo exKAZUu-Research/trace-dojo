@@ -23,8 +23,18 @@ import type {
   SuperSpec,
   TypeParameterDecl,
 } from './ast';
-import { ExpressionConverter, identifierName } from './convertExpression';
-import { firstOfType, hasToken, named, namedOfType, required, rowOf, syntaxError, unavailable } from './convertSupport';
+import { ExpressionConverter } from './convertExpression';
+import {
+  firstOfType,
+  hasToken,
+  identifierName,
+  named,
+  namedOfType,
+  required,
+  rowOf,
+  syntaxError,
+  unavailable,
+} from './convertSupport';
 
 /** The modifiers of the Kotlin tour and of the curriculum's Java programs, which learners' programs may use. */
 const CLASS_MODIFIERS = new Set([
@@ -306,10 +316,15 @@ export class Converter extends ExpressionConverter {
     };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- class kind and allowed class annotation targets share the syntax.
   private convertClass(node: Node, isTopLevel: boolean): ClassDecl {
     if (!isTopLevel && this.isLocal && !this.isLibrary) throw unavailable(node, '関数の中でのクラスの宣言');
     const modifiersNode = firstOfType(node, 'modifiers');
-    const modifiers = this.convertModifiers(modifiersNode, CLASS_MODIFIERS);
+    const modifiers = this.convertModifiers(
+      modifiersNode,
+      CLASS_MODIFIERS,
+      node.type === 'class_declaration' && !hasToken(node, 'interface')
+    );
     if (hasToken(node, 'interface') && hasToken(node, 'fun')) {
       this.requireLibrary(node, '関数型のインターフェース（fun interface）');
     }

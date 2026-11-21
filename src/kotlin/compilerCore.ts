@@ -1,4 +1,4 @@
-import type { TypeProjectionRef, TypeRef } from './ast';
+import type { Modifiers, TypeProjectionRef, TypeRef } from './ast';
 import {
   type Compiled,
   compileError,
@@ -14,7 +14,7 @@ import {
   typeMismatchMessage,
 } from './compilerBase';
 import { unavailableJavaFeature, unavailableMessage } from './convertSupport';
-import { isJavaTypeAlias, knownLibraryDeclaration } from './libraryApi';
+import { isJavaTypeAlias, isKnownLibraryAnnotation, knownLibraryDeclaration } from './libraryApi';
 import type { Frame } from './runtime';
 import type { ClassSymbol, FunctionSymbol, MemberSymbol, PropertySymbol, TypeParameterSymbol } from './symbols';
 import { VariableSymbol } from './symbols';
@@ -61,6 +61,7 @@ export interface FileContext {
   packageName: string;
   isLibrary: boolean;
   importedClasses: Map<string, ClassSymbol>;
+  importedAnnotations: Map<string, string>;
   importedFunctions: Map<string, FunctionSymbol[]>;
   importedProperties: Map<string, PropertySymbol[]>;
   /** The packages of the file's `import p.*`, which come before the default imports. */
@@ -106,6 +107,28 @@ export abstract class CompilerCore {
       this.unavailable(row, `Java のクラスの直接の利用（${qualified}）`);
     }
     if (known) this.unavailable(row, known);
+  }
+
+  protected validateAnnotations(scope: Scope, modifiers: Modifiers): void {
+    if (this.file.isLibrary) return;
+    for (const { qualifiedName, name, row, markers } of modifiers.annotations) {
+      if (!qualifiedName && this.findClass(scope, name))
+        this.error(row, `${name} はアノテーションクラスではありません。`);
+      for (const marker of markers ?? []) this.validateAnnotationMarker(scope, marker.path, marker.row);
+    }
+  }
+
+  private validateAnnotationMarker(scope: Scope, path: string[], row: number): void {
+    const name = path.join('.');
+    const qualified = path.length > 1;
+    const ordinary = qualified ? this.findQualifiedClass(path) : this.findClass(scope, name);
+    const libraryName = qualified
+      ? name
+      : (this.file.importedAnnotations.get(name) ?? knownLibraryDeclaration(name, this.visiblePackageLevels()));
+    if (!ordinary && libraryName && isKnownLibraryAnnotation(libraryName)) return;
+    if (ordinary || (libraryName && knownLibraryDeclaration(libraryName, [])))
+      this.error(row, `${name} はアノテーションクラスではありません。`);
+    this.error(row, `${name} 型が見つかりません。`);
   }
 
   protected packageScope(name: string): PackageScope {

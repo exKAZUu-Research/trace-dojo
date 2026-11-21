@@ -58,3 +58,9 @@ export function required<T>(value: T | null | undefined): T {
 export function rowOf(node: Node): number {
   return node.startPosition.row;
 }
+
+/** An identifier's name, without the backticks of a quoted one. */
+export function identifierName(node: Node): string {
+  const { text } = node;
+  return text.startsWith('`') ? text.slice(1, -1) : text;
+}

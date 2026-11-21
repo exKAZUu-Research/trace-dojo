@@ -568,3 +568,23 @@ export const libraryDeclarationNames: Readonly<Record<string, string>> = {
     'AbstractDoubleTimeSource AbstractLongTimeSource Clock Clock.Companion Clock.System ComparableTimeMark Duration Duration.Companion DurationUnit ExperimentalTime Instant Instant.Companion InstantParseResult.Failure InstantParseResult.Success InstantSerialized.Companion LongParser.Companion TestTimeSource TimeMark TimeSource TimeSource.Companion TimeSource.Monotonic TimeSource.Monotonic.ValueTimeMark TimeSource.WithComparableMarks TimedValue UnboundLocalDateTime.Companion measureTime measureTimedValue',
   'kotlin.uuid': 'ExperimentalUuidApi Uuid Uuid.Companion UuidSerialized.Companion',
 };
+
+export const libraryAnnotationNames: Readonly<Record<string, string>> = {
+  kotlin:
+    'BuilderInference ConsistentCopyVisibility ContextFunctionTypeParams Deprecated DeprecatedSinceKotlin DslMarker EqualityBound ExperimentalContextParameters ExperimentalMultiplatform ExperimentalStdlibApi ExperimentalSubclassOptIn ExperimentalUnsignedTypes ExperimentalVersionOverloading ExposedCopyVisibility ExtensionFunctionType IgnorableReturnValue IntroducedAt Metadata MustUseReturnValues OptIn OptionalExpectation OverloadResolutionByLambdaReturnType ParameterName PublishedApi ReplaceWith RequiresOptIn SinceKotlin SubclassOptInRequired Suppress UnsafeVariance',
+  'kotlin.annotation': 'MustBeDocumented Repeatable Retention Target',
+  'kotlin.concurrent.atomics': 'ExperimentalAtomicApi',
+  'kotlin.contracts': 'ExperimentalContracts ExperimentalExtendedContracts',
+  'kotlin.coroutines': 'ExperimentalStdlibCoroutineSupportApi RestrictsSuspension',
+  'kotlin.experimental':
+    'ExpectRefinement ExperimentalNativeApi ExperimentalObjCEnum ExperimentalObjCName ExperimentalObjCRefinement ExperimentalTypeInference',
+  'kotlin.io.encoding': 'ExperimentalEncodingApi',
+  'kotlin.io.path': 'ExperimentalPathApi',
+  'kotlin.js':
+    'ExperimentalJsCollectionsApi ExperimentalJsExport ExperimentalJsFileName ExperimentalJsNoRuntime ExperimentalJsReflectionCreateInstance ExperimentalJsStatic',
+  'kotlin.jvm':
+    'ImplicitlyActualizedByJvmDeclaration JvmDefaultWithCompatibility JvmDefaultWithoutCompatibility JvmExposeBoxed JvmField JvmInline JvmMultifileClass JvmName JvmOverloads JvmRecord JvmSerializableLambda JvmStatic JvmSuppressWildcards JvmSynthetic JvmWildcard PurelyImplements Strictfp Synchronized Throws Transient Volatile',
+  'kotlin.jvm.internal': 'SerializedIr SourceDebugExtension',
+  'kotlin.time': 'ExperimentalTime',
+  'kotlin.uuid': 'ExperimentalUuidApi',
+};

@@ -5707,6 +5707,37 @@ fun main() {
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '4\n4\n3\n5\n5\n' });
 });
 
+test('validates compile-time annotations and executes value classes and unsigned arrays', () => {
+  const source = `import kotlin.ExperimentalUnsignedTypes
+
+@kotlin.jvm.JvmInline()
+value class Index(val value: Int)
+
+@kotlin.OptIn(markerClass = [ExperimentalUnsignedTypes::class, kotlin.ExperimentalStdlibApi::class])
+fun main() {
+    @OptIn(*arrayOf(ExperimentalUnsignedTypes::class))
+    val indices = uintArrayOf(1u, 2u)
+    println(Index(indices.size))
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: 'Index(value=2)\n' });
+});
+
+test.each([
+  '@OptIn(MissingMarker::class) fun main() {}',
+  '@OptIn(123) fun main() {}',
+  '@OptIn(String::class) fun main() {}',
+  '@OptIn(markers = [ExperimentalUnsignedTypes::class]) fun main() {}',
+  '@OptIn(markerClass = ExperimentalUnsignedTypes::class) fun main() {}',
+  'class ExperimentalUnsignedTypes\n@OptIn(ExperimentalUnsignedTypes::class) fun main() {}',
+  '@OptIn(markerClass = [kotlin.MissingMarker::class]) fun main() {}',
+  'fun main() { @OptIn(MissingMarker::class) val answer = 42; println(answer) }',
+  '@JvmInline class Index(val value: Int)\nfun main() {}',
+  '@JvmInline fun main() {}',
+  '@JvmInline(1) value class Index(val value: Int)\nfun main() {}',
+])('rejects invalid compile-time annotations in %s', (source) => {
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'compileError' });
+});
+
 test('only object arrays support mapNotNull', () => {
   const objectArray = 'fun main() { println(arrayOf(1, null, 2).mapNotNull { it }) }';
   expect(executeProgram('kotlin', objectArray)).toMatchObject({ kind: 'executed', stdout: '[1, 2]\n' });
