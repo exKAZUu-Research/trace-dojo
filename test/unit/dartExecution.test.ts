@@ -1672,6 +1672,20 @@ test('Dart throws only dynamic values and subtypes of Object', () => {
   expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '1\n' });
 });
 
+test('Dart chooses a call context type argument over a closure argument bound', () => {
+  for (const use of [
+    'print([1, 2, 3].fold(0, (int a, int b) => a + b));',
+    'print(f16(1, (int y) => y * 2));',
+    'print([1, g((a) => a)]);',
+  ]) {
+    const program = `T f16<T>(T a, T Function(T) g) => g(a);\nT g<T extends num>(T Function(T) c) => c(1 as T);\nvoid main() { ${use} }`;
+    expect(executeProgram('dart', program)).toMatchObject({ kind: 'compileError' });
+  }
+  const valid =
+    'T id<T>(T x) => x;\nvoid main() { var s = [1, 2, 3].fold(0, (int a, int b) => a + b); num n = id(2); print([s, n, id(1)]); }';
+  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '[6, 2, 1]\n' });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}

@@ -1352,7 +1352,6 @@ function chooseTypeArguments(
       contextual &&
       !isInferenceHole(contextual) &&
       (!fromArguments || isSubtype(fromArguments, contextual)) &&
-      (!limit || isSubtype(contextual, limit)) &&
       !mentionsTypeParams(contextual, params) &&
       withinBound(param, contextual, type.typeParams)
     ) {
