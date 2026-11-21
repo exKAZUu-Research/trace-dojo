@@ -30,6 +30,7 @@ import {
   vmTypeString,
 } from './types';
 import { DartList, DartObject, DartRecord, DartTypeValue, type Value } from './values';
+import { assignVmClassIds } from './vmClassIds';
 
 interface LibrarySource {
   uri: string;
@@ -227,6 +228,7 @@ export function compileProgram(syntax: Library, options: { atomicRows?: Readonly
   const compiler = new Compiler(env, false, options.atomicRows, globals, NATIVES);
   compiler.declareAll(syntax);
   compiler.resolveAll(syntax);
+  assignVmClassIds(env.declarations.values());
   compiler.compileAll(syntax);
   const mainDeclaration = env.declarations.get('main');
   if (mainDeclaration?.kind !== 'function') {

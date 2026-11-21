@@ -5,6 +5,48 @@ import { executeProgram, traceProgram } from '../../src/interpreter/program';
 // Dart SDK 3.13.7 (`dart run`) prints the expected output: the VM's hash codes and the bucket order of HashMap and
 // HashSet, the default map's insertion order, Random's sequence for a seed, shuffle, and the order sort leaves equal
 // elements in.
+test('learner class IDs determine Dart type hashes and hash-set order', () => {
+  const program = `import 'dart:collection';
+class Cat {}
+class Dog {}
+class Box<T> {}
+void main() {
+  final types = <Type>[Cat, Dog, Box<int>, List<Cat>, List<Dog>, List<Box<int>>];
+  print(types.map((type) => type.hashCode).toList());
+  print(HashSet<Type>.of(types));
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[112432739, 338475303, 316355173, 161123295, 226588083, 914555672]\n' +
+      '{List<Box<int>>, List<Dog>, Cat, Box<int>, List<Cat>, Dog}\n',
+  });
+  const withEarlierClass = program.replace('class Cat', 'class Extra {}\nclass Cat');
+  expect(executeProgram('dart', withEarlierClass)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[338475303, 1029180056, 832762096, 226588083, 188099438, 1070093471]\n' +
+      '{Box<int>, Dog, List<Cat>, List<Dog>, List<Box<int>>, Cat}\n',
+  });
+  const classHeaders = `class WithBound<T extends List<B>> {}
+class Combined extends Root with M, N {}
+class Independent {}
+class Root {}
+class B {}
+mixin M {}
+mixin N {}
+class Reused extends Root with M {}
+class Named = Root with N;
+void main() {
+  final types = <Type>[WithBound, Combined, Independent, Root, B, M, N, Reused, Named];
+  print(types.map((type) => type.hashCode).toList());
+}`;
+  expect(executeProgram('dart', classHeaders)).toMatchObject({
+    kind: 'executed',
+    stdout: '[391944146, 1029180056, 20088519, 481707390, 338475303, 40931333, 210019128, 823985842, 404436695]\n',
+  });
+});
+
 test('a program prints the hash order, random numbers, and sort order the Dart VM gives', () => {
   const program = String.raw`import 'dart:collection';
 import 'dart:math';

@@ -146,6 +146,7 @@ export class ClassInfo {
   modifiers: ClassModifiers = { isAbstract: false, isSealed: false, isBase: false, isFinal: false, isInterface: false };
   /** The name the VM's class of these objects has, where the interpreter's class differs (`_SetIterator`). */
   vmName: string | undefined;
+  vmClassId: number | undefined;
   /** The application of a mixin to a superclass, as `A with M` creates, whose members are copies of the mixin's. */
   mixinOf: ClassInfo | undefined;
   mixinMembersApplied = false;

@@ -88,7 +88,8 @@ export function vmTypeHash(runtime: Runtime, type: DartType, parameters = EMPTY_
       return hashInterface(175, type.nullable);
     }
     case 'interface': {
-      const classId = type.cls.library === 'dart:core' ? CORE_CLASS_IDS.get(type.cls.name) : undefined;
+      const classId =
+        type.cls.vmClassId ?? (type.cls.library === 'dart:core' ? CORE_CLASS_IDS.get(type.cls.name) : undefined);
       if (classId !== undefined) return hashInterface(classId, type.nullable, hashArguments(type.args, hash));
       let result = type.cls.name.length;
       for (const argument of type.args) result = Math.imul(result, 31) + hash(argument);
