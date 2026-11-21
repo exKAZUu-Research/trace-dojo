@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 637 -- Switch coverage shares type partitions and pattern coverage rules.
+// code-gauge-allow-file fileNcss 638 -- Switch coverage shares type partitions and pattern coverage rules.
 import type { Expression, Pattern, Span } from './ast';
 import { nullPatternComparison } from './astWalk';
 import type { ClassInfo, FieldMember } from './classes';

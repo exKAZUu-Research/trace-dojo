@@ -88,7 +88,8 @@ function checkRange(runtime: Runtime, start: Value, end: Value, length: number, 
 
 defineConstructor('List.filled', (runtime, _instance, args, typeArgs) => {
   const length = intArg(runtime, args.positional[0], 'length');
-  if (length < 0n || length > MAX_LIST_LENGTH) rangeError(runtime, length, 0, MAX_LIST_LENGTH, 'length');
+  const growable = named(args.named, 'growable', false) === true;
+  checkListLength(runtime, length, growable);
   const count = index(length);
   runtime.allocate(count + 1);
   const fill = args.positional[1];
@@ -96,7 +97,7 @@ defineConstructor('List.filled', (runtime, _instance, args, typeArgs) => {
     coreTypes.list,
     typeArgs[0] ?? DYNAMIC,
     Array.from({ length: count }, () => fill),
-    named(args.named, 'growable', false) === true
+    growable
   );
 });
 defineConstructor(
@@ -166,15 +167,11 @@ function copyIterableToList(
 
 defineConstructor('List.generate', (runtime, _instance, args, typeArgs) => {
   const length = intArg(runtime, args.positional[0], 'length');
-  if (length < 0n || length > MAX_LIST_LENGTH) rangeError(runtime, length, 0, MAX_LIST_LENGTH, 'length');
+  const growable = named(args.named, 'growable', true) !== false;
+  checkListLength(runtime, length, growable);
   const generator = args.positional[1];
   const values: Value[] = [];
-  const result = new DartList(
-    coreTypes.list,
-    typeArgs[0] ?? DYNAMIC,
-    values,
-    named(args.named, 'growable', true) !== false
-  );
+  const result = new DartList(coreTypes.list, typeArgs[0] ?? DYNAMIC, values, growable);
   const frame = runtime.currentFrame;
   frame?.temporaries.push(result);
   try {
@@ -207,7 +204,7 @@ define('List.length=', (runtime, receiver, [length]) => {
   const target = list(receiver);
   checkGrowable(runtime, target, 'length');
   const count = intArg(runtime, length, 'newLength');
-  if (count < 0n || count > MAX_LIST_LENGTH) rangeError(runtime, count, 0, MAX_LIST_LENGTH, 'length');
+  checkListLength(runtime, count, true);
   const elements = target.elements;
   if (count > BigInt(elements.length)) {
     const elementType = elementTypeOf(target);
@@ -217,6 +214,14 @@ define('List.length=', (runtime, receiver, [length]) => {
   resizeListSlots(elements, index(count));
   return;
 });
+
+function checkListLength(runtime: Runtime, length: bigint, growable: boolean): void {
+  if (length < 0n || length > MAX_LIST_LENGTH) {
+    // The VM diagnoses negative growable lengths using the adjusted backing array capacity.
+    const value = growable && length < 0n ? length | 1n : length;
+    rangeError(runtime, value, 0, MAX_LIST_LENGTH, 'length');
+  }
+}
 function first(runtime: Runtime, target: DartList): Value {
   if (target.elements.length === 0) runtime.throwError('StateError', '', ['No element']);
   return target.elements[0];

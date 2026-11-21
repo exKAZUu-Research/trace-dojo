@@ -6719,6 +6719,27 @@ test('constant collections canonicalize repeated strings without conflating dist
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[true, false, true]\n' });
 });
 
+test('negative growable list lengths report the rejected backing capacity', () => {
+  const program = `void main() {
+  for (final write in <void Function()>[
+    () { final list = [1]; list.length = -2; },
+    () => List<int>.generate(-2, (i) { print('unexpected'); return i; }),
+    () => List<int>.filled(-100, 0, growable: true),
+    () { final list = [1]; list.length = -3; },
+    () => List<int>.filled(-2, 0),
+    () => List<int>.generate(-4, (i) => i, growable: false),
+  ]) {
+    try { write(); } catch (e) { print(e); }
+  }
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: [-1, -1, -99, -3, -2, -4]
+      .map((value) => `RangeError (length): Invalid value: Not in inclusive range 0..576460752303423487: ${value}\n`)
+      .join(''),
+  });
+});
+
 test('growable list bulk writes check the live source length before reading elements', () => {
   const program = `import 'dart:collection';
 class Input extends ListBase<int> {
