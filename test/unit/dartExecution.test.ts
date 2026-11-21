@@ -1610,6 +1610,21 @@ test('Dart accepts nullable, late, and initialized fields without generative con
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[null, 1, null]\n' });
 });
 
+test.each([
+  'class B extends A implements A {}',
+  'class B extends A implements A, C {}',
+  'mixin M on A, A {}',
+  'mixin M on A implements A {}',
+])('Dart rejects a supertype listed twice across clauses: %s', (declaration) => {
+  expect(executeProgram('dart', `class A {}\nclass C {}\n${declaration}\nvoid main() {}`)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ row: 2 })],
+  });
+  expect(executeProgram('dart', 'mixin A {}\nclass B with A implements A {}\nvoid main() {}')).toMatchObject({
+    kind: 'executed',
+  });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}

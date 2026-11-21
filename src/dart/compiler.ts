@@ -54,6 +54,7 @@ import {
   isNullable,
   isSubtype,
   objectType,
+  sameType,
   substitute,
   type TypeParam,
   typeParamType,
@@ -295,9 +296,19 @@ export class Compiler extends MemberCompiler {
       const interfaces = declaration.interfaces.map((type) =>
         this.resolveSupertype(cls, type, '実装するインターフェース')
       );
+      for (const [index, type] of cls.onTypes.entries()) {
+        if (cls.onTypes.slice(0, index).some((other) => other.cls === type.cls))
+          this.error(declaration.onTypes[index], `${type.cls.name} は、1 回しか on に書けません。`);
+      }
+      const extended = declaration.superclass && cls.superclass ? [cls.superclass] : cls.onTypes;
       for (const [index, type] of interfaces.entries()) {
         if (interfaces.slice(0, index).some((other) => other.cls === type.cls)) {
           this.error(declaration.interfaces[index], `${type.cls.name} は、1 回しか implements に書けません。`);
+        } else if (extended.some((other) => sameType(other, type))) {
+          this.error(
+            declaration.interfaces[index],
+            `${type.cls.name} は、extends（on）と implements の両方には書けません。`
+          );
         }
       }
       cls.interfaces.push(...interfaces);
