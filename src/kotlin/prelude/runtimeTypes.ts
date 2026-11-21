@@ -33,6 +33,8 @@ fun print(message: CharArray) = print(message.concatToString())
 export const SYSTEM_SOURCE = kotlin`
 package java.lang
 
+import java.util.Locale
+
 class PrintStream internal constructor(private val isError: Boolean) {
     fun println(message: Any?) {
         writeStream(isError, message.toString() + "\\n")
@@ -43,6 +45,16 @@ class PrintStream internal constructor(private val isError: Boolean) {
     fun print(message: Any?) {
         writeStream(isError, message.toString())
     }
+    fun format(pattern: String, vararg args: Any?): PrintStream {
+        print(pattern.format(*args))
+        return this
+    }
+    fun format(locale: Locale?, pattern: String, vararg args: Any?): PrintStream {
+        print(pattern.format(locale, *args))
+        return this
+    }
+    fun printf(pattern: String, vararg args: Any?): PrintStream = format(pattern, *args)
+    fun printf(locale: Locale?, pattern: String, vararg args: Any?): PrintStream = format(locale, pattern, *args)
 }
 
 object System {

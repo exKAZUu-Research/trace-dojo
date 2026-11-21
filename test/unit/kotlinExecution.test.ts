@@ -26,6 +26,15 @@ test.each([
     stdout: '[, abc]\n[, a, , c, ]\n[, a, b, c, ]\n[, ]\n[abc]\n',
   },
   {
+    name: 'formatted Java streams with chaining',
+    source: `fun main() {
+    System.out.printf("%s: %03d", "points", 7).println()
+    System.out.format(null, "%.2f%n", 1.25)
+    System.err.printf("hidden: %d", 2)
+}`,
+    stdout: 'points: 007\n1.25\n',
+  },
+  {
     name: 'explicit calls to Char and Boolean operators',
     source: `fun main() {
     println('a'.plus(2))
