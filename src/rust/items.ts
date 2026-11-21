@@ -840,6 +840,7 @@ const BUILTIN_STRUCTS: Record<string, BuiltinAdt> = {
   TryFromIntError: 'TryFromIntError',
   TryFromSliceError: 'TryFromSliceError',
   Utf8Error: 'Utf8Error',
+  FromUtf8Error: 'FromUtf8Error',
   Entry: 'Entry',
   OccupiedEntry: 'OccupiedEntry',
   CaseIter: 'CaseIter',

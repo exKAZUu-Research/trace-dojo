@@ -88,8 +88,6 @@ interface CoverageCheck {
   constantPattern?: Pattern;
 }
 
-let nextLocalId = 0;
-
 /** Checks the types of every function body, recording what the compiler needs in {@link Annotations}. */
 export class Checker {
   private readonly adtStorage: AdtStorage;
@@ -814,7 +812,6 @@ export class Checker {
       span,
       owner: fn,
       mode,
-      id: nextLocalId++,
     };
     fn.locals.push(local);
     (this.body.scopes.at(-1) as Map<string, LocalVar>).set(name, local);

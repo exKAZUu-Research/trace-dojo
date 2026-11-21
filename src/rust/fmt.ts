@@ -326,7 +326,6 @@ export class Formatter {
       case 'TryFromSliceError':
       case 'CharTryFromError':
       case 'TryFromCharError':
-      case 'Utf8Error':
       case 'FmtError': {
         return errorDebug(def.builtin, v, indent);
       }
@@ -627,11 +626,14 @@ export function errorDisplay(builtin: string, value: Value): string {
     case 'FmtError': {
       return 'an error occurred when formatting an argument';
     }
+    case 'FromUtf8Error': {
+      return errorDisplay('Utf8Error', (value as StructValue).fields[1]);
+    }
     case 'Utf8Error': {
-      const [, validUpTo, errorLen] = (value as StructValue).fields as [Value, number, number | undefined];
-      return errorLen === undefined
+      const [validUpTo, errorLen] = (value as StructValue).fields as [bigint, EnumValue];
+      return errorLen.variant === 0
         ? `incomplete utf-8 byte sequence from index ${validUpTo}`
-        : `invalid utf-8 sequence of ${errorLen} bytes from index ${validUpTo}`;
+        : `invalid utf-8 sequence of ${errorLen.fields[0] as bigint} bytes from index ${validUpTo}`;
     }
     case 'ParseCharError': {
       return kind === 'EmptyString' ? 'cannot parse char from empty string' : 'too many characters in string';
@@ -673,43 +675,6 @@ function errorDebug(builtin: string, value: Value, indent: number | undefined): 
     }
     case 'ParseCharError': {
       return inner('ParseCharError', 'kind', kind ?? 'TooManyChars');
-    }
-    case 'Utf8Error': {
-      const [bytes, validUpTo, errorLen] = (value as StructValue).fields as [
-        bigint[] | undefined,
-        number,
-        number | undefined,
-      ];
-      const error: DebugPart = (depth) =>
-        structText(
-          'Utf8Error',
-          [
-            ['valid_up_to', () => String(validUpTo)],
-            [
-              'error_len',
-              (inner) => (errorLen === undefined ? 'None' : tupleText('Some', [() => String(errorLen)], inner)),
-            ],
-          ],
-          depth
-        );
-      if (!bytes) return error(indent);
-      return structText(
-        'FromUtf8Error',
-        [
-          [
-            'bytes',
-            (depth) =>
-              list(
-                '[',
-                ']',
-                bytes.map((byte) => () => String(byte)),
-                depth
-              ),
-          ],
-          ['error', error],
-        ],
-        indent
-      );
     }
     default: {
       return builtin;

@@ -33,6 +33,7 @@ import {
 } from './regions';
 import { SignatureInstance } from './signatureInstance';
 import { markExtendedTemporaries, promotable } from './temporaryScopes';
+import { arrayTryFrom } from './traitConversions';
 import type { TraitSolver } from './traits';
 import { type ClosureType, type FnDef, resolve, shallow, type Type } from './types';
 
@@ -1122,7 +1123,20 @@ export class LoanBuilder {
     const signature = new SignatureInstance(fn, typeArgs, this.fresh, this.outlives, () => this.static());
     signature.bindInputs(inputs);
     signature.bindOutput(result, inputs);
+    this.relateArrayBorrow(fn, typeArgs, inputs[0], result);
     signature.relateBounds((callee, args, ret, higherRanked) => this.applyClosure(callee, args, ret, higherRanked));
+  }
+
+  private relateArrayBorrow(fn: FnDef, typeArgs: readonly Type[], input: Layout, result: Layout): void {
+    const name = fn.trait?.builtin;
+    if (name !== 'TryInto' && name !== 'TryFrom') return;
+    const [from, to] = name === 'TryInto' ? typeArgs : [typeArgs[1], typeArgs[0]];
+    if (arrayTryFrom(from, to)?.mode !== 'borrow') return;
+    relate(
+      this.outlives,
+      input,
+      fieldLayout(result, 0, 0, () => this.static())
+    );
   }
 
   /**

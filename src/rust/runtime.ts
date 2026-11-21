@@ -4,6 +4,7 @@ import { StepTracker } from '../interpreter/stepTracker';
 import type { TracedFrame, TracedRuntime } from '../interpreter/traceRecorder';
 import { TurtleWorld } from '../interpreter/turtleWorld';
 import type { Span } from './ast';
+import { canReachTurtle } from './turtleTypes';
 import { shallow, type Type, type TypeParam } from './types';
 import {
   CellPlace,
@@ -129,6 +130,8 @@ export class Runtime implements TracedRuntime<Frame> {
   };
   /** Values in use outside frame storage, such as arguments under evaluation and elements being sorted. */
   readonly nativeRoots: Value[][] = [];
+  // A collection keeps the type of its storage even when an iterator takes ownership of the buffer.
+  private readonly scalarStorage = new WeakSet<object>();
 
   constructor(
     input?: ProgramInput,
@@ -150,6 +153,17 @@ export class Runtime implements TracedRuntime<Frame> {
     }
   }
 
+  borrowCandidate(value: Value, type?: Type, bindings?: ReadonlyMap<TypeParam, Type>): boolean {
+    const storage = collectionStorage(value);
+    if (storage && this.scalarStorage.has(storage)) return false;
+    if (!this.world.hasTurtles && !storage) return false;
+    if (type && !canReachTurtle(type, bindings)) {
+      if (storage) this.scalarStorage.add(storage);
+      return false;
+    }
+    return this.world.hasTurtles;
+  }
+
   withActiveBorrows<T>(values: Value[], use: () => T): T {
     const roots = this.borrowRoots(values);
     return roots.length === 0 ? use() : this.withRoots(roots, use);
@@ -162,7 +176,7 @@ export class Runtime implements TracedRuntime<Frame> {
     const seen = new Set<object>();
     while (pending.length > 0) {
       const item = pending.pop();
-      if (typeof item !== 'object' || item === null || seen.has(item)) continue;
+      if (typeof item !== 'object' || item === null || seen.has(item) || this.scalarStorage.has(item)) continue;
       seen.add(item);
       pushActiveBorrowChildren(item, pending, roots);
     }
@@ -222,7 +236,7 @@ export class Runtime implements TracedRuntime<Frame> {
     const turtles = new Set<unknown>();
     while (stack.length > 0) {
       const item = stack.pop();
-      if (item === undefined || item === null || typeof item !== 'object' || reached.has(item)) continue;
+      if (typeof item !== 'object' || item === null || reached.has(item) || this.scalarStorage.has(item)) continue;
       reached.add(item);
       if (item instanceof TurtleValue) {
         turtles.add(item.state);
@@ -245,6 +259,14 @@ const SLOT_BYTES = 8;
  */
 export class OutOfMemory {
   constructor(readonly bytes: number | bigint) {}
+}
+
+function collectionStorage(value: Value): object | undefined {
+  let storage = value;
+  while (isPlace(storage)) storage = storage.get();
+  if (storage instanceof SliceView) return storage.base;
+  if (Array.isArray(storage) || storage instanceof MapValue || storage instanceof SetValue) return storage;
+  return undefined;
 }
 
 function pushActiveBorrowChildren(item: object, pending: unknown[], roots: Value[]): void {

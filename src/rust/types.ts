@@ -140,6 +140,7 @@ export type BuiltinAdt =
   | 'TryFromIntError'
   | 'TryFromSliceError'
   | 'Utf8Error'
+  | 'FromUtf8Error'
   | 'Entry'
   | 'OccupiedEntry'
   | 'Infallible';

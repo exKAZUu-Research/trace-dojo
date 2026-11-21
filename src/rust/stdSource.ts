@@ -180,13 +180,20 @@ pub mod fmt {
 }
 pub mod string {
     pub struct String;
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct FromUtf8Error { bytes: Vec<u8>, error: Utf8Error }
+    impl FromUtf8Error {
+        pub fn as_bytes(&self) -> &[u8];
+        pub fn into_bytes(self) -> Vec<u8>;
+        pub fn utf8_error(&self) -> Utf8Error;
+    }
     pub trait ToString { fn to_string(&self) -> String; }
     impl String {
         pub fn len(&self) -> usize;
         pub fn is_empty(&self) -> bool;
         pub const fn new() -> String;
         pub fn with_capacity(capacity: usize) -> String;
-        pub fn from_utf8(vec: Vec<u8>) -> Result<String, Utf8Error>;
+        pub fn from_utf8(vec: Vec<u8>) -> Result<String, FromUtf8Error>;
         pub fn from_utf8_lossy(v: &[u8]) -> String;
         pub fn from_iter<P: StringPart, S>(iter: IterImpl<P, S>) -> String;
         pub fn push_str(&mut self, string: &str);
@@ -347,6 +354,12 @@ pub mod slice {
     }
 }
 pub mod str {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Utf8Error { valid_up_to: usize, error_len: Option<u8> }
+    impl Utf8Error {
+        pub const fn valid_up_to(&self) -> usize;
+        pub const fn error_len(&self) -> Option<usize>;
+    }
     pub fn from_utf8(v: &[u8]) -> Result<&str, Utf8Error>;
     pub type Chars<'a> = IterImpl<'a, char, CharsShape>;
     pub type CharIndices<'a> = IterImpl<'a, (usize, char), CharIndicesShape>;
@@ -1548,6 +1561,5 @@ pub mod pseudo {
     pub struct IterTarget<I>;
     pub struct IntoItem<T>;
     pub struct IntoShape<T>;
-    pub struct Utf8Error;
 }
 `;

@@ -469,8 +469,7 @@ const stringNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
     try {
       return ok(ctx, madeString(decodeUtf8(array, true), vecCapacity(values, values.length, 1)));
     } catch {
-      const { validUpTo, errorLen } = utf8Error(array);
-      return err(ctx, new StructValue(ctx.interp.program.adtDef('Utf8Error'), [[...values], validUpTo, errorLen]));
+      return err(ctx, new StructValue(ctx.interp.program.adtDef('FromUtf8Error'), [values, utf8Failure(ctx, array)]));
     }
   },
   push_str: pushString,
@@ -696,6 +695,12 @@ function caseIter(name: 'ToUppercase' | 'ToLowercase', text: string): Value {
   return iter;
 }
 
+function utf8Failure(ctx: NativeContext, bytes: Uint8Array): StructValue {
+  const { validUpTo, errorLen } = utf8Error(bytes);
+  const length = errorLen === undefined ? none(ctx) : some(ctx, BigInt(errorLen));
+  return new StructValue(ctx.interp.program.adtDef('Utf8Error'), [BigInt(validUpTo), length]);
+}
+
 const natives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {};
 for (const [name, native] of Object.entries(strNatives)) natives[`str::${name}`] = native;
 natives['std::str::from_utf8'] = ([value], ctx) => {
@@ -703,11 +708,15 @@ natives['std::str::from_utf8'] = ([value], ctx) => {
   try {
     return ok(ctx, decodeUtf8(bytes, true));
   } catch {
-    const { validUpTo, errorLen } = utf8Error(bytes);
-    return err(ctx, new StructValue(ctx.interp.program.adtDef('Utf8Error'), [undefined, validUpTo, errorLen]));
+    return err(ctx, utf8Failure(ctx, bytes));
   }
 };
 for (const [name, native] of Object.entries(withStringCapacity(stringNatives))) natives[`String::${name}`] = native;
+natives['FromUtf8Error::as_bytes'] = ([self]) => (deref(self) as StructValue).fields[0];
+natives['FromUtf8Error::into_bytes'] = natives['FromUtf8Error::as_bytes'];
+natives['FromUtf8Error::utf8_error'] = ([self]) => (deref(self) as StructValue).fields[1];
+natives['Utf8Error::valid_up_to'] = ([self]) => (deref(self) as StructValue).fields[0];
+natives['Utf8Error::error_len'] = ([self]) => (deref(self) as StructValue).fields[1];
 natives['Write::write_str'] = (args, ctx) => {
   natives['String::push_str'](args, ctx);
   return ok(ctx, UNIT_VALUE);

@@ -90,9 +90,10 @@ function cmpWith(ctx: NativeContext, f: Value): (a: Value, b: Value) => number {
 }
 
 /** `get` with a range: the part of the slice it covers, or `None` when it reaches outside. */
-function subslice(ctx: NativeContext, slice: Value, range: Value): Value {
+function subslice(ctx: NativeContext, slice: Value, range: Value, mutable = false): Value {
   try {
-    return some(ctx, sliceRange(slice, deref(range) as RangeValue | undefined, ctx.span));
+    const view = sliceRange(slice, deref(range) as RangeValue | undefined, ctx.span);
+    return some(ctx, mutable ? mutableSlice(view) : view);
   } catch (error) {
     if (error instanceof RustPanic) return none(ctx);
     throw error;
@@ -148,7 +149,7 @@ const sliceNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
   },
   get_mut: ([self, index], ctx) => {
     const slice = deref(self);
-    if (typeof index !== 'bigint') return subslice(ctx, slice, index);
+    if (typeof index !== 'bigint') return subslice(ctx, slice, index, true);
     const position = Number(index);
     const { base, start } = sliceBase(slice);
     return option(ctx, new ElementPlace(base, start + position), position < sliceLength(slice));

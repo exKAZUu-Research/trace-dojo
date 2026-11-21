@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 545 -- One rule per trait of the standard library.
+// code-gauge-allow-file fileNcss 547 -- One rule per trait of the standard library.
 import { collectionKeyAnswer } from './collectionBounds';
 import { normalize } from './infer';
 import { supportsDebug } from './iterDebug';
@@ -75,6 +75,7 @@ const DEBUG_TYPES = new Set([
   'TryFromIntError',
   'TryFromSliceError',
   'Utf8Error',
+  'FromUtf8Error',
   'FmtError',
   'CaseIter',
   'EscapeDefault',
@@ -105,6 +106,7 @@ export const ERROR_TYPES = new Set([
   'CharTryFromError',
   'TryFromCharError',
   'Utf8Error',
+  'FromUtf8Error',
   'FmtError',
   'Infallible',
 ]);

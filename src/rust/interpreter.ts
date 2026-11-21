@@ -20,7 +20,7 @@ import {
   StackOverflow,
 } from './runtime';
 import { concreteType, matchConcrete, typeIdentity, typeKey } from './runtimeTypes';
-import { canReachTurtle, nativeArgumentTypes } from './turtleTypes';
+import { nativeArgumentTypes } from './turtleTypes';
 import {
   type AdtDef,
   childTypes,
@@ -263,7 +263,7 @@ export class Interpreter implements CallSupport {
     const result = this.runtime.withRoots(args, () => {
       if (!this.runtime.world.hasTurtles) return native(args, context);
       const types = nativeArgumentTypes(def, typeArgs);
-      const borrowers = args.filter((_arg, index) => !types[index] || canReachTurtle(types[index]));
+      const borrowers = args.filter((arg, index) => this.runtime.borrowCandidate(arg, types[index]));
       return this.runtime.withActiveBorrows(borrowers, () => native(args, context));
     });
     // Library functions build `String`s through these two ways out: a result, and a receiver they write to.

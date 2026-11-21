@@ -15,8 +15,6 @@ export interface LocalVar {
   isSelf?: boolean;
   /** How a binding binds the value it matches: by value, or through a shared or mutable reference. */
   mode: 'move' | 'ref' | 'refMut';
-  /** Whether the program assigns the variable after its declaration, for the check of immutable variables. */
-  id: number;
 }
 
 /** What a function's or closure's body compiles to: its slots and the variables the trace shows. */

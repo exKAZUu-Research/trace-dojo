@@ -311,10 +311,10 @@ function applies(solver: TraitSolver, attempt: () => unknown): boolean {
 }
 
 /** The type `Self` must be for a method with this receiver mode to take `receiverType`. */
-function selfForMode(mode: 'value' | 'ref' | 'mutRef', receiverType: Type, allowUnsized = false): Type | undefined {
+function selfForMode(mode: 'value' | 'ref' | 'mutRef', receiverType: Type): Type | undefined {
   if (mode === 'value') {
     const t = normalize(shallow(receiverType));
-    return allowUnsized || (t.kind !== 'str' && t.kind !== 'slice' && t.kind !== 'dyn') ? receiverType : undefined;
+    return t.kind === 'str' || t.kind === 'slice' || t.kind === 'dyn' ? undefined : receiverType;
   }
   const t = shallow(receiverType);
   if (t.kind !== 'ref') return undefined;
@@ -373,7 +373,7 @@ function matchSelf(
   fn: FnDef,
   receiverType: Type
 ): Omit<MethodMatch, 'adjust'> | undefined {
-  const selfType = selfForMode(fn.selfMode!, receiverType, !impl.trait);
+  const selfType = selfForMode(fn.selfMode!, receiverType);
   if (!selfType) return undefined;
   const subst = solver.matchImpl(impl, arrayAsSlice(fn, selfType));
   if (!subst) return undefined;

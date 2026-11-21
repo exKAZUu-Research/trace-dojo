@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 980 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss 981 -- One native per method of the standard library.
 import { inPlaceCapacity, reserveVec, setVecCapacity, sizeTable, type TableMap, vecCapacity } from '../capacity';
 import type { DebugPart } from '../debugText';
 import { floatNumber } from '../floatBits';
@@ -20,6 +20,7 @@ import {
 } from '../ops';
 import { MOVED } from '../runtime';
 import { iteratorCapability } from '../traits';
+import { canReachTurtle } from '../turtleTypes';
 import { intMax, sameType, shallow, type Type } from '../types';
 import {
   CellPlace,
@@ -65,7 +66,8 @@ export function arrayIter(
   array: Value[],
   start = 0,
   end = array.length,
-  map: (index: number) => Value = (i) => array[i]
+  map: (index: number) => Value = (i) => array[i],
+  storageType?: Type
 ): IterValue {
   let front = start;
   let back = end;
@@ -74,10 +76,10 @@ export function arrayIter(
     () => (front < back ? map(--back) : DONE),
     () => back - front
   );
-  iter.borrowedRoots.push(array);
+  if (!storageType || canReachTurtle(storageType)) iter.borrowedRoots.push(array);
   iter.rest = () => Array.from({ length: Math.max(back - front, 0) }, (_, offset) => map(front + offset));
   iter.frontIndex = () => front;
-  iter.fork = () => arrayIter(array, front, back, map);
+  iter.fork = () => arrayIter(array, front, back, map, storageType);
   return iter;
 }
 
@@ -85,26 +87,27 @@ export function arrayIter(
  * An iterator that owns its elements (`into_iter`, `drain`, `for x in v`): it holds only those it has not yielded,
  * so each one it hands out belongs to its receiver alone and disappears when that receiver drops it.
  */
-export function ownedIter(items: Value[], itemType: Type, project: (item: Value) => Value = (item) => item): IterValue {
+export function ownedIter(items: Value[], itemType: Type, project?: (item: Value) => Value): IterValue {
+  const map = project ?? ((item: Value) => item);
   let front = 0;
   let back = items.length;
   const take = (index: number): Value => {
     const value = items[index];
     items[index] = MOVED;
-    return project(value);
+    return map(value);
   };
   const iter = new IterValue(
     () => (front < back ? take(front++) : DONE),
     () => (front < back ? take(--back) : DONE),
     () => back - front,
-    [items]
+    project || canReachTurtle(itemType) ? [items] : []
   );
-  iter.rest = () => Array.from({ length: back - front }, (_, offset) => project(items[front + offset]));
+  iter.rest = () => Array.from({ length: back - front }, (_, offset) => map(items[front + offset]));
   iter.ownedItemType = itemType;
   iter.fork = () => {
     allocateCollectionSnapshot(back - front);
     const cloned = Array.from({ length: back - front }, (_, offset) =>
-      cloneValue(itemType, project(items[front + offset]))
+      cloneValue(itemType, map(items[front + offset]))
     );
     return ownedIter(cloned, itemType);
   };
@@ -158,7 +161,7 @@ function collectionIter(type: Type & { kind: 'adt' }, value: Value, mode: 'value
     }
     case 'HashSet':
     case 'BTreeSet': {
-      return setIter(value as SetValue, mode === 'value' ? type.args[0] : undefined);
+      return setIter(value as SetValue, type.args[0], mode === 'value');
     }
     case 'Range':
     case 'RangeInclusive':
@@ -185,18 +188,23 @@ function collectionIter(type: Type & { kind: 'adt' }, value: Value, mode: 'value
 /** A map's entries as tuples, in key order for a `BTreeMap`; `mut` yields places for the values. */
 export function mapIter(map: MapValue, mode: 'value' | 'ref' | 'mut', types: Type[]): IterValue {
   const entries = map.entries.snapshot();
-  if (mode === 'value') return ownedIter(entries, { kind: 'tuple', elems: types });
-  const iter = arrayIter(entries, 0, entries.length, (i) => {
-    const entry = entries[i];
-    return mode === 'mut' ? [entry[0], new ElementPlace(entry, 1)] : [entry[0], entry[1]];
-  });
-  return iter;
+  const item: Type = { kind: 'tuple', elems: types };
+  if (mode === 'value') return ownedIter(entries, item);
+  return arrayIter(
+    entries,
+    0,
+    entries.length,
+    (i) => {
+      const [key, value] = entries[i];
+      return [key, mode === 'mut' ? new ElementPlace(entries[i], 1) : value];
+    },
+    item
+  );
 }
 
-export function setIter(set: SetValue, owned?: Type): IterValue {
+export function setIter(set: SetValue, item: Type, owned = false): IterValue {
   const values = set.entries.snapshot();
-  if (owned) return ownedIter(values, owned);
-  return arrayIter(values);
+  return owned ? ownedIter(values, item) : arrayIter(values, 0, values.length, undefined, item);
 }
 
 function iterOf(value: Value): IterValue {

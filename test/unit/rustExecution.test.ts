@@ -6424,3 +6424,88 @@ impl Ord for Key { fn cmp(&self, other: &Self) -> Ordering { self.0.cmp(&other.0
     stdout: '2\n1\ncompare 2 1\n4\n3\ncompare 4 3\n2 3\n',
   });
 });
+
+test('walks long borrowed and owned scalar iterators within the Turtle budget', () => {
+  for (const method of ['iter', 'into_iter']) {
+    const program = rustMain(`let values = vec![1i32; 20000];
+        let mut iter = values.${method}();
+        let turtle = Turtle::new();
+        let mut count = 0;
+        while let Some(_) = iter.next() { count += 1; }
+        println!("{count}");`);
+    expect(executeProgram('rust', program)).toMatchObject({
+      kind: 'executed',
+      stdout: '20000\n',
+      finalTurtles: [expect.objectContaining({ x: 0, y: 0 })],
+    });
+  }
+});
+
+test('keeps scalar move and coercion operands within budget alongside live turtles', () => {
+  const program = rustMain(
+    `let turtle = Turtle::new();
+    let mut values = vec![1i32; 30000];
+    let mut i = 0;
+    while i < length(&values) { i += 1; }
+    for _ in 0..i { values = identity(values); }
+    println!("{i} {}", values.len());`,
+    `fn length(values: &[i32]) -> usize { values.len() }
+fn identity(values: Vec<i32>) -> Vec<i32> { values }`
+  );
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '30000 30000\n',
+    finalTurtles: [expect.objectContaining({ x: 0, y: 0 })],
+  });
+});
+
+test('iterates through an unsized slice range by borrowing it', () => {
+  const program = rustMain(`let values = vec![1, 2, 3, 4];
+    let sum: i32 = values[..2].into_iter().sum();
+    let tail: Vec<_> = values[1..].into_iter().rev().copied().collect();
+    let array = [String::from("owned")].into_iter().next().unwrap();
+    println!("{sum} {tail:?} {array}");`);
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '3 [4, 3, 2] owned\n' });
+});
+
+test('relates fallible borrowed-array results to the original slice loan', () => {
+  for (const body of [
+    'let a: &[i32; 2] = values[..2].try_into().unwrap(); values[0] = 5; println!("{a:?}");',
+    'let a: Result<&[i32; 2], _> = TryFrom::try_from(&values[..2]); values.push(5); println!("{a:?}");',
+    'let a: &mut [i32; 2] = (&mut values[..2]).try_into().unwrap(); values[0] = 5; a[1] = 2;',
+  ]) {
+    expect(executeProgram('rust', rustMain(`let mut values = vec![1, 2, 3]; ${body}`))).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [expect.objectContaining({ message: expect.stringContaining('借りられていて') })],
+    });
+  }
+  const copied = rustMain(`let mut values = vec![1, 2, 3];
+    let a: [i32; 2] = values[..2].try_into().unwrap();
+    values[0] = 5;
+    println!("{a:?} {values:?}");`);
+  expect(executeProgram('rust', copied)).toMatchObject({ kind: 'executed', stdout: '[1, 2] [5, 2, 3]\n' });
+});
+
+test('recovers invalid String input bytes while exposing a separate UTF-8 error', () => {
+  const program = rustMain(`let mut bytes = Vec::with_capacity(16);
+    bytes.extend([97, 255]);
+    let error: std::string::FromUtf8Error = String::from_utf8(bytes).unwrap_err();
+    let detail: std::str::Utf8Error = error.utf8_error();
+    println!("{:?} {} {:?} {}", error.as_bytes(), detail.valid_up_to(), detail.error_len(), error == error.clone());
+    let recovered = error.into_bytes();
+    println!("{recovered:?} {}", recovered.capacity());`);
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[97, 255] 1 Some(1) true\n[97, 255] 16\n',
+  });
+});
+
+test('writes through mutable ranges returned by slice get_mut', () => {
+  const program = rustMain(`let mut values = vec![1, 2, 3];
+    values.get_mut(1..).unwrap()[0] = 9;
+    values.get_mut(..2).unwrap()[1] = 8;
+    let tail = values.get_mut(1..=2).unwrap();
+    tail[1] = 7;
+    println!("{values:?} {}", values.get_mut(8..).is_none());`);
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '[1, 8, 7] true\n' });
+});

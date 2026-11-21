@@ -290,7 +290,7 @@ function setNatives(sorted: boolean): Record<string, (args: Value[], ctx: Native
       set(self).entries.clear();
       return UNIT_VALUE;
     },
-    iter: ([self]) => setIter(set(self)),
+    iter: ([self], ctx) => setIter(set(self), keyType(ctx)),
     union: ([self, other], ctx) => setOp(ctx, sorted, 'union', self, other),
     intersection: ([self, other], ctx) => setOp(ctx, sorted, 'intersection', self, other),
     difference: ([self, other], ctx) => setOp(ctx, sorted, 'difference', self, other),
@@ -312,7 +312,7 @@ function setNatives(sorted: boolean): Record<string, (args: Value[], ctx: Native
       set(self).entries.clear();
       return ownedIter(values, ctx.typeArgs[0]);
     },
-    into_iter: ([self], ctx) => setIter(set(self), ctx.typeArgs[0]),
+    into_iter: ([self], ctx) => setIter(set(self), keyType(ctx), true),
     first: ([self], ctx) => {
       const first = set(self).entries.getEdge(true);
       return option(ctx, first, first !== undefined);
@@ -464,7 +464,7 @@ natives['&HashMap<_, _>::into_iter'] = ([self], ctx) => mapIter(map(self), 'ref'
 natives['&mut HashMap<_, _>::into_iter'] = ([self], ctx) => mapIter(map(self), 'mut', ctx.typeArgs);
 natives['&BTreeMap<_, _>::into_iter'] = ([self], ctx) => mapIter(map(self), 'ref', ctx.typeArgs);
 natives['&mut BTreeMap<_, _>::into_iter'] = ([self], ctx) => mapIter(map(self), 'mut', ctx.typeArgs);
-natives['&HashSet<_>::into_iter'] = ([self]) => setIter(set(self));
-natives['&BTreeSet<_>::into_iter'] = ([self]) => setIter(set(self));
+natives['&HashSet<_>::into_iter'] = ([self], ctx) => setIter(set(self), keyType(ctx));
+natives['&BTreeSet<_>::into_iter'] = ([self], ctx) => setIter(set(self), keyType(ctx));
 void cloneValue;
 define(natives);
