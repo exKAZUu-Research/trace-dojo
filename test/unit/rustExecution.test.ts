@@ -1,7 +1,16 @@
-import { expect, test } from 'vitest';
+import { afterAll, beforeAll, expect, test } from 'vitest';
 
 import { LIMITS } from '../../src/interpreter/limits';
 import { executeProgram, traceProgram } from '../../src/interpreter/program';
+
+// The programs here stop at limits of their own or finish, which the real-time limit would preempt on a busy machine.
+const { maxMilliseconds } = LIMITS;
+beforeAll(() => {
+  LIMITS.maxMilliseconds = 60_000;
+});
+afterAll(() => {
+  LIMITS.maxMilliseconds = maxMilliseconds;
+});
 
 const CLONED_TURTLE = `struct Owner(Turtle);
 impl Clone for Owner {
@@ -6989,12 +6998,17 @@ test('stops an exhaustiveness check whose or-patterns multiply past the compile 
   const size = 26;
   const program = rustMain(`    let flags = (${Array.from({ length: size }, () => 'true').join(', ')});
     match flags { (${Array.from({ length: size }, () => 'true | false').join(', ')}) => (), }`);
-  const start = performance.now();
-  expect(executeProgram('rust', program)).toMatchObject({
-    kind: 'compileError',
-    diagnostics: [expect.objectContaining({ message: expect.stringContaining('コンパイル処理の上限') })],
-  });
-  expect(performance.now() - start).toBeLessThan(5 * LIMITS.maxMilliseconds);
+  LIMITS.maxMilliseconds = maxMilliseconds;
+  try {
+    const start = performance.now();
+    expect(executeProgram('rust', program)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [expect.objectContaining({ message: expect.stringContaining('コンパイル処理の上限') })],
+    });
+    expect(performance.now() - start).toBeLessThan(5 * maxMilliseconds);
+  } finally {
+    LIMITS.maxMilliseconds = 60_000;
+  }
 });
 
 test.each([
