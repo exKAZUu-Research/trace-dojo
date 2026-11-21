@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 554 -- One rule per trait of the standard library.
+// code-gauge-allow-file fileNcss 555 -- One rule per trait of the standard library.
 import { collectionKeyAnswer } from './collectionBounds';
 import { isPseudo, normalize } from './infer';
 import { debugOperands, supportsDebug } from './iterDebug';
@@ -795,15 +795,21 @@ function borrowedSliceElem(type: Type): Type | 'unknown' | undefined {
   return target.kind === 'slice' ? target.elem : undefined;
 }
 
+/** The builtin types that are iterators themselves, not only collections that make one. */
+export const ITERATOR_BUILTINS: ReadonlySet<string> = new Set([
+  'Iter',
+  'Range',
+  'RangeInclusive',
+  'RangeFrom',
+  'CaseIter',
+  'EscapeDefault',
+  'EscapeUnicode',
+]);
+
 /** Whether a type is an iterator itself, not only a collection that makes one: `IterImpl`, a range, or `&mut` of one. */
 function isIterator(type: Type): boolean {
   if (dynIteratorTarget(type)) return true;
   const t = type.kind === 'ref' && type.mutable ? normalize(shallow(type.target)) : type;
   if (t.kind === 'param' || t.kind === 'opaque') return true;
-  return (
-    t.kind === 'adt' &&
-    ['Iter', 'Range', 'RangeInclusive', 'RangeFrom', 'CaseIter', 'EscapeDefault', 'EscapeUnicode'].includes(
-      t.def.builtin as string
-    )
-  );
+  return t.kind === 'adt' && ITERATOR_BUILTINS.has(t.def.builtin as string);
 }

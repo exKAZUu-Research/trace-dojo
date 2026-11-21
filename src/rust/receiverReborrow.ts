@@ -1,10 +1,8 @@
 import type { MethodRes, ReceiverAdjust } from './annotations';
 import { normalize } from './infer';
 import { type Layout, type RVar, typeAfter } from './regions';
+import { ITERATOR_BUILTINS } from './traitBuiltins';
 import { shallow, type Type } from './types';
-
-/** The builtin types that are iterators themselves: the adapters, and the ranges that iterate. */
-const ITERATOR_TYPES = new Set(['Iter', 'Range', 'RangeInclusive', 'RangeFrom']);
 
 /**
  * How a method taking `self` by value reborrows its receiver instead of moving it, as rustc does: a `&mut` receiver
@@ -25,7 +23,7 @@ export function receiverReborrow(
 export function reborrowsIterator(derefs: ReceiverAdjust['derefs'], selfType: Type | undefined): boolean {
   if (derefs.length === 0 || !derefs.every((step) => step === 'mutRef')) return false;
   const t = selfType && normalize(shallow(selfType));
-  return t?.kind === 'adt' && ITERATOR_TYPES.has(t.def.builtin as string);
+  return t?.kind === 'adt' && ITERATOR_BUILTINS.has(t.def.builtin as string);
 }
 
 /**
