@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 575 -- Declaration scopes, types, and record shapes share the compiler environment.
+// code-gauge-allow-file fileNcss 576 -- Declaration scopes, types, and record shapes share the compiler environment.
 import { CompileError } from '../interpreter/diagnostics';
 import type {
   ClassDeclaration,

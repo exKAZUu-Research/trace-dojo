@@ -46,6 +46,7 @@ function hasCoverageAlternatives(kind: Pattern['kind']): boolean {
   return kind === 'or' || kind === 'and' || kind === 'nullCheck' || kind === 'nullAssert';
 }
 
+// code-gauge-allow functionNcss 31 -- Dispatch pattern punctuation and logical operators together before computing coverage.
 function normalize(
   compiler: PatternCompiler,
   pattern: Pattern,

@@ -858,7 +858,7 @@ export abstract class ExpressionConverter {
     return pattern;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of pattern node in the grammar.
+  // code-gauge-allow functionCognitiveComplexity 18 -- One case per kind of pattern node in the grammar.
   // code-gauge-allow functionNcss 42 -- One case per kind of pattern node in the grammar.
   protected convertPattern(node: Node, context: PatternContext): Pattern {
     const span = spanOf(node);

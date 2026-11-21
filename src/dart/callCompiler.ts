@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 675 -- Type inference, argument binding, and call dispatch share this compiler phase.
+// code-gauge-allow-file fileNcss 676 -- Type inference, argument binding, and call dispatch share this compiler phase.
 import type {
   Arguments as ArgumentsSyntax,
   Expression,
