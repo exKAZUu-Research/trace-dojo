@@ -40,6 +40,7 @@ import { instanceTest } from './typeChecks';
 import { branchHint, commonSupertype, isSubtype } from './typeRelations';
 import { type ClassType, type KType, nonNull, NOTHING, resolved, substitute, typeToString } from './types';
 import { Boxed, type KObject, NULL, type PrimitiveKind, UNIT, type Value } from './values';
+import { coverTypeCases } from './whenCoverage';
 
 type Exec = (frame: Frame) => void;
 
@@ -362,7 +363,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
       const value = this.compileExpression(scope, context, statement.value, place.type);
       const converted = this.expectType(value, place.type, statement.value.row);
       const toPlace = convertRepr(converted, reprOf(this.core, place.type), place.repr);
-      place.recordAssignment?.();
+      place.recordAssignment?.(value.type);
       this.narrowAfterAssignment(scope, target, value, place.type);
       return this.withStep(
         row,
@@ -377,6 +378,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
   }
 
   /** `x += y` and the like: `plusAssign` when the target's type has one, else `x = x + y`. */
+  // code-gauge-allow functionNcss 31 -- the operation shares receiver, value, and write state across resolution and evaluation.
   private compileCompoundAssignment(scope: Scope, context: FunctionContext, statement: AssignmentStatement): Exec {
     const { operator, row, target } = statement;
     const operation = operator.slice(0, -1) as '+' | '-' | '*' | '/' | '%';
@@ -415,6 +417,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     const combined = this.compileArithmeticWith(scope, context, operation, currentHolder, statement.value, row);
     const converted = this.expectType(combined, place.type, row);
     const toPlace = convertRepr(converted, reprOf(this.core, place.type), place.repr);
+    place.recordAssignment?.(combined.type);
     this.narrowAfterAssignment(scope, target, combined, place.type);
     return (frame) => {
       const bound = place.bind(frame);
@@ -559,7 +562,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     return this.propertyPlace(property, receiver, row, scope, isOwnReceiver && !isCompound ? context : undefined);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionCognitiveComplexity 19 -- finds the closest variable and determines which assignments it permits.
   private variablePlace(
     scope: Scope,
     context: FunctionContext,
@@ -601,7 +604,10 @@ export abstract class StatementCompiler extends OperatorCompiler {
       readType:
         isCompound && stableLocal(scope, context, variable) ? this.flow.narrowed.get(keyOf(variable)) : undefined,
       repr: reprOf(this.core, variable.type),
-      recordAssignment: () => this.recordAssignment(context, variable, row),
+      recordAssignment: (type) => {
+        if (variable.owner !== context) variable.capturedWriteTypes.add(type);
+        this.recordAssignment(context, variable, row);
+      },
       bind: (frame) => ({ get: () => access.read(frame), set: (value) => access.write(frame, value) }),
     };
   }
@@ -1249,9 +1255,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
       const evaluate = convertRepr(subject.eval, subject.repr, 'ref');
       const narrowing = new Map<string, KType>();
       if (subject.stableKey) narrowing.set(subject.stableKey, this.narrowedType(subject.type, type));
-      const actual = resolved(type);
-      if (!condition.negated && actual.kind === 'class') covered.add(`class:${keyOf(actual.cls)}`);
-      if (!condition.negated && actual.kind === 'nothing') covered.add('null');
+      coverTypeCases(covered, subject.type, type, condition.negated, this.core.boolean);
       const exclusion = isExclusion(subject.stableKey, type);
       return condition.negated
         ? { test: (frame) => !test(evaluate(frame)), whenTrue: exclusion, whenFalse: narrowing }

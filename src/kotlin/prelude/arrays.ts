@@ -223,7 +223,7 @@ function arrayUtilities(kind: ArrayKind): string[] {
   const unsigned = element.startsWith('U');
   const lines = [
     `external fun ${g}${receiver}.copyInto(destination: ${result}, destinationOffset: Int = 0, startIndex: Int = 0, endIndex: Int = size): ${result}`,
-    `fun ${g}${receiver}?.contentHashCode(): Int = this?.asList()?.hashCode() ?: 0`,
+    `external fun ${g}${receiver}?.contentHashCode(): Int`,
     `operator fun ${g}${receiver}.plus(element: ${element}): ${result} {
         val result = copyOf(size + 1)${cast}
         result[size] = element
@@ -270,8 +270,8 @@ fun <T : Comparable<T>> Array<out T>.maxOrNull(): T? = asList().maxOrNull()
 fun <T : Comparable<T>> Array<out T>.minOrNull(): T? = asList().minOrNull()
 fun <T : Comparable<T>> Array<out T>.sorted(): List<T> = asList().sorted()
 fun <T : Comparable<T>> Array<out T>.sortedDescending(): List<T> = asList().sortedDescending()
-fun <T : Comparable<T>> Array<out T>.sort() = asList().toMutableList().let { list -> list.sort(); list.forEachIndexed { index, element -> (this as Array<T>)[index] = element } }
-fun <T> Array<out T>.sortWith(comparator: Comparator<in T>) = asList().toMutableList().let { list -> list.sortWith(comparator); list.forEachIndexed { index, element -> (this as Array<T>)[index] = element } }
+fun <T : Comparable<T>> Array<out T>.sort() = sortWith(naturalOrder())
+external fun <T> Array<out T>.sortWith(comparator: Comparator<in T>)
 inline fun <T, R : Comparable<R>> Array<out T>.sortBy(crossinline selector: (T) -> R?) = sortWith(compareBy(selector))
 fun Array<out Int>.sum(): Int = asList().sum()
 fun Array<out Double>.sum(): Double = asList().sum()

@@ -1,16 +1,28 @@
 import type { Block, Expression, ForStatement, Statement } from './ast';
 import type { FunctionContext, Scope } from './compilerBase';
 import type { VariableSymbol } from './symbols';
+import { isSubtype } from './typeRelations';
+import { nonNull, resolved } from './types';
 
 export function stableLocal(scope: Scope, context: FunctionContext, variable: VariableSymbol): boolean {
   if (!variable.isVar) return true;
-  if (variable.isCapturedAndModified && !context.assignedCaptures.has(variable)) return false;
+  if (variable.isCapturedAndModified && !context.assignedCaptures.has(variable) && !preservesNullCheck(variable))
+    return false;
   if (!escapesOwner(context, variable.owner)) return true;
   for (let current: Scope | undefined = scope; current; current = current.parent) {
     if (current.pendingWrites?.has(variable.name)) return false;
     if (current.variables.has(variable.name)) return true;
   }
   return true;
+}
+
+function preservesNullCheck(variable: VariableSymbol): boolean {
+  const type = resolved(variable.type);
+  if (!type.nullable || type.kind !== 'class' || type.cls.isInheritable || variable.capturedWriteTypes.size === 0) {
+    return false;
+  }
+  const nonNullType = nonNull(type);
+  return [...variable.capturedWriteTypes].every((written) => isSubtype(written, nonNullType));
 }
 
 function escapesOwner(context: FunctionContext, owner: FunctionContext | undefined): boolean {

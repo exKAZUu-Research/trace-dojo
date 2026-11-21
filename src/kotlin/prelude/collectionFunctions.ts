@@ -1325,7 +1325,8 @@ private fun <T> MutableList<T>.compactRandomAccess(predicate: (T) -> Boolean, re
     return true
 }
 
-fun <T> MutableCollection<T>.removeIf(predicate: (T) -> Boolean): Boolean = filterInPlace(predicate, true)
+fun <T> MutableCollection<T>.removeIf(predicate: (T) -> Boolean): Boolean =
+    NativeLists.removeIfArrayList(this, predicate) ?: filterInPlace(predicate, true)
 
 private fun <T> MutableIterable<T>.filterInPlace(predicate: (T) -> Boolean, predicateResultToRemove: Boolean): Boolean {
     var result = false
@@ -1418,6 +1419,7 @@ object NativeLists {
     external fun <T> of(elements: Collection<T>): MutableList<T>
     external fun <T> builder(): ListBuilder<T>
     external fun <T> toArray(elements: Iterable<T>): Array<T>
+    external fun <T> removeIfArrayList(list: MutableCollection<T>, predicate: (T) -> Boolean): Boolean?
 }
 
 // Maps.

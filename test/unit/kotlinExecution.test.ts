@@ -5,6 +5,177 @@ import { executeProgram } from '../../src/interpreter/program';
 /** Programs with the output of Kotlin 2.4.21 on the JVM (Java 25), which the interpreter must reproduce exactly. */
 test.each([
   {
+    name: 'when type tests cover sealed and nullable Boolean alternatives',
+    source: `sealed interface Shape
+class Circle : Shape
+class Square : Shape
+fun asNumber(shape: Shape): Int = when (shape) { !is Circle -> 1; is Circle -> 2 }
+fun nullable(x: Boolean?): Int = when (x) { is Boolean -> if (x) 1 else 0; null -> 2 }
+fun main() {
+    println(asNumber(Circle()))
+    println(asNumber(Square()))
+    println(nullable(true))
+    println(nullable(null))
+}`,
+    stdout: '2\n1\n1\n2\n',
+  },
+  {
+    name: 'JVM distinguishes character mappings, sequence results, and array storage hashes',
+    source: `fun main() {
+    println('İ'.lowercaseChar())
+    println('ᾀ'.uppercaseChar())
+    println('ß'.titlecase())
+    println('ﬀ'.titlecase())
+    println('ǳ'.titlecaseChar())
+    val sequence: CharSequence = "abc"
+    val reversed = sequence.reversed() as StringBuilder
+    reversed.append('!')
+    println(reversed)
+    println(ubyteArrayOf(255u).contentHashCode())
+    println(ushortArrayOf(65535u).contentHashCode())
+    val empty: UByteArray? = null
+    println(empty.contentHashCode())
+    try { println("alpha".trimMargin(" ")) } catch (error: IllegalArgumentException) { println(error.message) }
+}`,
+    stdout: 'i\nᾈ\nSs\nFf\nǲ\ncba!\n30\n30\n0\nmarginPrefix must be non-blank string.\n',
+  },
+  {
+    name: 'custom sequences and generic iterator overrides use the declared interfaces',
+    source: `class Text(private val text: String) : CharSequence {
+    override val length: Int get() = text.length
+    override fun get(index: Int): Char = text[index]
+    override fun subSequence(startIndex: Int, endIndex: Int): CharSequence = text.substring(startIndex, endIndex)
+    override fun toString(): String = "description"
+}
+class OneIterator : Iterator<Int> {
+    private var hasItem = true
+    override fun hasNext(): Boolean = hasItem
+    override fun next(): Int { hasItem = false; return 7 }
+}
+class Numbers : Collection<Int> by listOf(7) {
+    override fun iterator(): Iterator<Int> = OneIterator()
+}
+fun main() {
+    val item: CharSequence = Text("contents")
+    println(StringBuilder(item))
+    val copy = ArrayList(Numbers())
+    val x: Any = copy[0]
+    println(x is Int)
+    println(x == 7)
+    println(copy.hashCode())
+}`,
+    stdout: 'contents\ntrue\ntrue\n38\n',
+  },
+  {
+    name: 'map and entry equality dispatch through their declared interfaces',
+    source: `class Wrapped(private val map: Map<String, Int?>) : Map<String, Int?> by map
+class Entry(override val key: String, override val value: Int?) : Map.Entry<String, Int?>
+fun main() {
+    val map = mapOf("a" to 3, "b" to null)
+    println(map == Wrapped(mapOf("a" to 3, "b" to null)))
+    println(map == Wrapped(mapOf("a" to 3, "c" to null)))
+    val empty: Map<String, Int?> = emptyMap()
+    println(empty == Wrapped(empty))
+    println(map.entries.first() == Entry("a", 3))
+    val mutable = mutableMapOf("a" to 1)
+    val view = mutable.values
+    val views = hashSetOf(view)
+    mutable["b"] = 2
+    println(view in views)
+}`,
+    stdout: 'true\nfalse\ntrue\ntrue\ntrue\n',
+  },
+  {
+    name: 'a new hash key is hashed once for each insertion',
+    source: `var hashes = 0
+class Key {
+    override fun hashCode(): Int { hashes++; return 42 }
+}
+fun main() {
+    val key = Key()
+    val map = HashMap<Key, Int>()
+    map[key] = 5
+    println(hashes)
+    val set = HashSet<Key>()
+    set.add(key)
+    println(hashes)
+    set.add(key)
+    println(hashes)
+}`,
+    stdout: '1\n2\n3\n',
+  },
+
+  {
+    name: 'comparators observe the JVM mutation order of arrays, lists, and sublists',
+    source: `fun main() {
+    val list = mutableListOf(3, 1, 2)
+    list.sortWith(Comparator { a, b -> println(list); a.compareTo(b) })
+    println(list)
+    val values = arrayOf(3, 1, 2)
+    values.sortWith(Comparator { a, b -> println(values.contentToString()); a.compareTo(b) })
+    println(values.contentToString())
+    val root = mutableListOf(0, 3, 1, 2, 4)
+    val view = root.subList(1, 4)
+    try {
+        view.sortWith(Comparator { a, b ->
+            println(view)
+            if (view[0] == 1) throw IllegalArgumentException()
+            a.compareTo(b)
+        })
+    } catch (error: IllegalArgumentException) {
+        println(root)
+    }
+}`,
+    stdout:
+      '[3, 1, 2]\n[3, 1, 2]\n[1, 3, 2]\n[1, 3, 2]\n[1, 2, 3]\n[3, 1, 2]\n[3, 1, 2]\n[1, 3, 2]\n[1, 3, 2]\n[1, 2, 3]\n[3, 1, 2]\n[3, 1, 2]\n[1, 3, 2]\n[0, 1, 3, 2, 4]\n',
+  },
+  {
+    name: 'nonnull captured writes preserve null-check refinements',
+    source: `fun main() {
+    var count: Int? = 3
+    val setCount = { count = 5 }
+    if (count != null) { count--; count += 5; println(count + 1) }
+    setCount()
+    while (count != null && count > 0) count--
+    println(count)
+    var name: String? = "hello"
+    val setName = { name = "home" }
+    if (name != null) println(name.length)
+    setName()
+}`,
+    stdout: '8\n0\n5\n',
+  },
+  {
+    name: 'Kotlin indentation and Unicode case properties use JVM predicates',
+    source: String.raw`fun main() {
+    println("\u3000first\n\u00a0second".trimIndent())
+    println("\n\u3000first\n   \n\u00a0third\n".trimIndent().replace(' ', '.'))
+    println("|\n|margin\n|".trimMargin().replace('\n', ':'))
+    println('\u0085'.isWhitespace())
+    println('Ⅳ'.isUpperCase())
+    println('ⅳ'.isLowerCase())
+    println('Ⓐ'.isUpperCase())
+    println('ⓐ'.isLowerCase())
+}`,
+    stdout: 'first\nsecond\nfirst\n..\nthird\n:margin:\nfalse\ntrue\ntrue\ntrue\ntrue\n',
+  },
+  {
+    name: 'ArrayList removeIf defers structural changes until callbacks finish',
+    source: `fun main() {
+    val values = mutableListOf("-1", "2", "bad", "-3")
+    try { values.removeIf { it.toInt() < 0 } } catch (error: NumberFormatException) { println(values) }
+    val list = mutableListOf(0, 1, 2, 3, 4, 5)
+    list.subList(1, 5).removeIf { println(list); it % 2 == 0 }
+    println(list)
+    val set = linkedSetOf(1, 2, 3)
+    set.removeIf { println(set); it % 2 == 1 }
+    println(set)
+}`,
+    stdout:
+      '[-1, 2, bad, -3]\n[0, 1, 2, 3, 4, 5]\n[0, 1, 2, 3, 4, 5]\n[0, 1, 2, 3, 4, 5]\n[0, 1, 2, 3, 4, 5]\n[0, 1, 3, 5]\n[1, 2, 3]\n[2, 3]\n[2, 3]\n[2]\n',
+  },
+
+  {
     name: 'delegate forwarders override inherited implementations through each interface',
     source: `interface Speaker { fun speak(): String }
 open class Base : Speaker { override fun speak(): String = "base" }
@@ -686,6 +857,21 @@ fun main() { println(A(3).values) }`,
     println(listOf((x < i), (i > x), (x >= i), (i.toLong() <= x), (high > low), (low < high), (high.toFloat() > low)))
 }`,
     stdout: '[false, false, true, true, true, true, true]\n',
+  },
+  {
+    name: 'Float literals and text parse directly to binary32',
+    source: `fun main() {
+    println("1.0000000596046448".toFloat())
+    println(1.0000000596046448f)
+    println("1.0000001788139343".toFloatOrNull())
+    println(1.0000001788139343f)
+    println("0x1.0000010000000000000000000001p0".toFloat())
+    println("0x1.fffffep127".toFloat())
+    println("0x1.ffffffp127".toFloat())
+    println("-0x1p-150".toFloat())
+    println("0x1.00000001p-150".toFloat())
+}`,
+    stdout: '1.0000001\n1.0000001\n1.0000001\n1.0000001\n1.0000001\n3.4028235E38\nInfinity\n-0.0\n1.4E-45\n',
   },
   {
     name: 'the iteration order of hash maps and sets',
@@ -1704,6 +1890,43 @@ fun main() {
     'a smart cast in a closure before a sibling closure captures and writes the variable',
     false,
     'fun main() { var value: Any = "a"; val read = { if (value is String) value.length else 0 }; val set = { value = 1 }; println(read()) }',
+  ],
+  [
+    'conflicting delegated members without an explicit override',
+    false,
+    'interface A { fun f(): String }; interface B { fun f(): String }; class C(a: A, b: B) : A by a, B by b; fun main() {}',
+  ],
+  [
+    'a null check of a captured variable that a closure may set to null',
+    false,
+    'fun main() { var value: Int? = 1; val reset = { value = null }; if (value != null) println(value + 1); reset() }',
+  ],
+  ['a Nothing-returning function that falls through', false, 'fun bad(): Nothing { println("bad") }; fun main() {}'],
+  ['a Nothing-returning function that always throws', true, 'fun abort(): Nothing { error("done") }; fun main() {}'],
+  [
+    'a nullable is test does not prove the subject nonnull',
+    false,
+    'fun size(value: Any?) { if (value is String?) println(value.length) }; fun main() {}',
+  ],
+  [
+    'a nullable negated is test does not prove the subject nonnull',
+    false,
+    'fun size(value: Any?) { if (value !is String?) return; println(value.length) }; fun main() {}',
+  ],
+  [
+    'a private nested type reached by its package',
+    false,
+    'package demo\nclass Outer { private class Hidden }; fun main() { val value: demo.Outer.Hidden? = null }',
+  ],
+  [
+    'a private nested type named in an import',
+    false,
+    'package demo\nimport demo.Outer.Hidden\nclass Outer { private class Hidden }; fun main() {}',
+  ],
+  [
+    'a private superclass property read through super',
+    false,
+    'open class Parent { private val x = 1 }; class Child : Parent() { fun peek() = super.x }; fun main() {}',
   ],
   [
     'a private object member through its qualifier',

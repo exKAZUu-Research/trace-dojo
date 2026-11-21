@@ -1,4 +1,5 @@
 import type { CompileError } from '../interpreter/diagnostics';
+import { float32FromText } from './float32';
 
 type Fail = (message: string) => CompileError;
 
@@ -35,8 +36,8 @@ export function parseRealLiteral(
   const match = /^((?:[\d_]*\.[\d_]+|[\d_]+)(?:[eE][+-]?[\d_]+)?)([fF])?$/.exec(text);
   if (!match || /(^|[.eE+-])_|_($|[.eE])/.test(match[1])) throw fail('数の書き方に誤りがあります。');
   const isFloat = match[2] !== undefined;
-  const parsed = Number(match[1].replaceAll('_', ''));
-  const value = isFloat ? Math.fround(parsed) : parsed;
+  const digits = match[1].replaceAll('_', '');
+  const value = isFloat ? float32FromText(digits) : Number(digits);
   return { kind: 'real', text, value, isFloat };
 }
 

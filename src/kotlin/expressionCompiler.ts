@@ -69,7 +69,7 @@ export interface Place {
   readType?: KType;
   repr: Repr;
   bind: (frame: Frame) => BoundPlace;
-  recordAssignment?: () => void;
+  recordAssignment?: (type: KType) => void;
 }
 
 export abstract class ExpressionCompiler extends CallCompiler {
@@ -452,6 +452,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
       if (property) return this.readTopLevelProperty(property, row);
     }
     const cls = this.findClass(scope, name);
+    if (cls) this.checkNestedAccessible(scope, cls, row);
     if (cls) {
       const value = this.classAsValue(cls, row);
       if (value) return value;
@@ -694,6 +695,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     if (cls.kind === 'enum' && cls.enumEntries.some((entry) => entry.name === name))
       return this.readEnumEntry(cls, name);
     const nested = cls.nested.get(name);
+    if (nested) this.checkNestedAccessible(scope, nested, row);
     const nestedValue = nested && this.classAsValue(nested, row);
     if (nestedValue) return nestedValue;
     const holder = cls.isObject ? cls : cls.companion;
@@ -804,6 +806,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     if (this.findStaticMember(scope, name, row)) return undefined;
     if (this.topLevelProperties(name).length > 0) return undefined;
     const cls = this.findClass(scope, name);
+    if (cls) this.checkNestedAccessible(scope, cls, row);
     if (cls) return { kind: 'class', cls };
     const packageScope = this.packages.get(name);
     if (packageScope || name === 'java' || name === 'javax')
@@ -888,6 +891,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const { superType, receiver } = this.superOf(scope, context, row);
     const property = this.membersOf<PropertySymbol>(superType, name, 'property')[0];
     if (!property) this.error(row, `super には ${name} がありません。`);
+    this.checkAccessible(scope, property.symbol, row, undefined);
     const type = resolved(substitute(this.ensurePropertyType(property.symbol, row), property.substitution));
     const { symbol } = property;
     return {
@@ -992,6 +996,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
       return this.compileInvoke(scope, context, receiverLevels, args, hasTrailingLambda, row);
     const levels = [...receiverLevels, ...this.companionLevels(scope, name), ...this.topLevelFunctionLevels(name)];
     const cls = this.findClass(scope, name);
+    if (cls) this.checkNestedAccessible(scope, cls, row);
     if (
       cls?.isFunInterface &&
       args.length === 1 &&

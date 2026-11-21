@@ -10,12 +10,12 @@ interface Run {
 const MIN_MERGE = 32;
 const INITIAL_GALLOP = 7;
 
-export function stableSort(frame: Frame, values: Value[], comparator: Compare): Value[] {
+export function stableSort(frame: Frame, values: Value[], comparator: Compare, from: number, to: number): void {
   const compare: Compare = (a, b) => {
     frame.runtime.spend();
     return comparator(a, b);
   };
-  return new TimSort(frame, [...values], compare).sortValues();
+  new TimSort(frame, values, compare).sortValues(from, to);
 }
 
 class TimSort {
@@ -28,28 +28,26 @@ class TimSort {
     private readonly compare: Compare
   ) {}
 
-  sortValues(): Value[] {
-    const size = this.values.length;
-    const minimum = minRun(size);
-    for (let start = 0; start < size;) {
-      const naturalEnd = this.findRun(start);
-      const end = Math.max(naturalEnd, Math.min(start + minimum, size));
+  sortValues(from: number, to: number): void {
+    const minimum = minRun(to - from);
+    for (let start = from; start < to;) {
+      const naturalEnd = this.findRun(start, to);
+      const end = Math.max(naturalEnd, Math.min(start + minimum, to));
       this.extendRun(start, naturalEnd, end);
       this.runs.push({ start, end });
       this.collapse(false);
       start = end;
     }
     this.collapse(true);
-    return this.values;
   }
 
-  private findRun(start: number): number {
+  private findRun(start: number, limit: number): number {
     const { values, compare } = this;
     let end = start + 1;
-    if (end === values.length) return end;
+    if (end === limit) return end;
     const descending = compare(values[end], values[start]) < 0;
     end++;
-    while (end < values.length && compare(values[end], values[end - 1]) < 0 === descending) end++;
+    while (end < limit && compare(values[end], values[end - 1]) < 0 === descending) end++;
     if (descending) {
       for (let left = start, right = end - 1; left < right; left++, right--) {
         this.frame.runtime.spend();
@@ -157,8 +155,8 @@ class RunMerge {
     right: Run,
     private readonly forward: boolean
   ) {
-    this.left = new MergeCursor(values.slice(left.start, left.end), forward);
-    this.right = new MergeCursor(values.slice(right.start, right.end), forward);
+    this.left = new MergeCursor(values, left, forward, forward);
+    this.right = new MergeCursor(values, right, forward, !forward);
     this.destination = forward ? left.start : right.end - 1;
   }
 
@@ -228,14 +226,19 @@ class RunMerge {
 }
 
 class MergeCursor {
-  private low = 0;
+  private readonly values: Value[];
+  private low: number;
   private high: number;
 
   constructor(
-    private readonly values: Value[],
-    private readonly forward: boolean
+    values: Value[],
+    run: Run,
+    private readonly forward: boolean,
+    buffered: boolean
   ) {
-    this.high = values.length;
+    this.values = buffered ? values.slice(run.start, run.end) : values;
+    this.low = buffered ? 0 : run.start;
+    this.high = buffered ? this.values.length : run.end;
   }
 
   get length(): number {

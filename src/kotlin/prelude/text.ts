@@ -244,7 +244,7 @@ external fun CharSequence.split(vararg delimiters: String, ignoreCase: Boolean =
 external fun CharSequence.split(vararg delimiters: Char, ignoreCase: Boolean = false, limit: Int = 0): List<String>
 external fun CharSequence.lines(): List<String>
 external fun String.reversed(): String
-fun CharSequence.reversed(): CharSequence = toString().reversed()
+fun CharSequence.reversed(): CharSequence = StringBuilder(this).reverse()
 external fun String.toCharArray(): CharArray
 fun CharSequence.padStart(length: Int, padChar: Char = ' '): CharSequence {
     if (length < 0) throw IllegalArgumentException("Desired length $length is less than zero.")
@@ -307,6 +307,8 @@ fun String.toUInt(): UInt = toUIntOrNull() ?: throw NumberFormatException("Inval
 external fun String.toDouble(): Double
 external fun String.toDoubleOrNull(): Double?
 external fun String.toFloat(): Float
+external fun String.toFloatOrNull(): Float?
+
 external fun String?.toBoolean(): Boolean
 external fun String.toBooleanStrict(): Boolean
 external fun String.capitalize(): String
@@ -544,6 +546,7 @@ external fun Char.lowercaseChar(): Char
 external fun Char.uppercase(): String
 external fun Char.lowercase(): String
 external fun Char.titlecase(): String
+external fun Char.titlecaseChar(): Char
 external fun Char.digitToInt(): Int
 external fun Char.digitToInt(radix: Int): Int
 external fun Char.digitToIntOrNull(): Int?

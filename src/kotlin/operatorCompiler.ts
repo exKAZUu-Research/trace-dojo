@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 418 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss 422 -- the compiler of one area of Kotlin, whose parts call each other closely.
 import type { CallExpression, Expression, TypeRef } from './ast';
 import { type ArgumentSyntax } from './callCompiler';
 import {
@@ -142,9 +142,11 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     const readType = place.readType ?? place.type;
     const kind = this.primitiveOf(readType);
     if (!kind) this.error(row, `${typeToString(resolved(readType))} には ${delta === 1 ? '++' : '--'} を使えません。`);
+    const type = this.primitiveType(kind);
+    place.recordAssignment?.(type);
     const toPlace = (value: number | bigint): Value => (place.repr === 'ref' ? box(kind, value) : value);
     return {
-      type: this.primitiveType(kind),
+      type,
       repr: kind,
       eval: (frame) => {
         const bound = place.bind(frame);
@@ -642,10 +644,11 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
   }
 
   /** The type `is` narrows to: the class type with the arguments the value's static type gives it. */
-  // code-gauge-allow functionCognitiveComplexity 20 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionCognitiveComplexity 24 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   protected narrowedType(staticType: KType, checked: KType): KType {
     const target = resolved(checked);
     const source = nonNull(resolved(staticType));
+    const keepsNull = isNullable(staticType) && isNullable(target);
     if (target.kind === 'class' && target.cls.typeParameters.length > 0 && source.kind === 'class') {
       // A subtype's arguments come from the supertype's, as `List<Int>` checked against `ArrayList<*>` gives `ArrayList<Int>`.
       const substitution = new Map<TypeParameterSymbol, KType>();
@@ -657,11 +660,12 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
             if (sourceArg && sourceArg.variance !== 'star') substitution.set(argument.type.param, sourceArg.type);
           }
         }
-        return substitute(target.cls.selfType, substitution);
+        const narrowed = substitute(target.cls.selfType, substitution);
+        return keepsNull ? nullable(narrowed) : narrowed;
       }
     }
-    if (isSubtype(source, target) && !isNullable(target)) return source;
-    return nonNull(target);
+    const narrower = isSubtype(source, target) ? source : nonNull(target);
+    return keepsNull ? nullable(narrower) : narrower;
   }
 
   protected compileIs(
@@ -686,7 +690,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionCognitiveComplexity 17 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   protected compileAs(
     scope: Scope,
     context: FunctionContext,
@@ -694,7 +698,8 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
   ): Compiled {
     const operand = this.compileExpression(scope, context, expression.operand);
     const written = this.resolveType(scope, expression.type, true);
-    const type = this.isBare(written) ? this.narrowedType(operand.type, written) : written;
+    const narrowed = this.isBare(written) ? this.narrowedType(operand.type, written) : written;
+    const type = isNullable(written) ? nullable(narrowed) : narrowed;
     const actual = resolved(type);
     const isErased =
       (actual.kind === 'class' && actual.args.some((argument) => argument.variance !== 'star')) ||

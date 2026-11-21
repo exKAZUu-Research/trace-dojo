@@ -1,8 +1,8 @@
-// code-gauge-allow-file fileNcss 780 -- the natives of the collections, which share the helpers of their items.
-import { getPropertyValue, runtimeClassOf } from '../dispatch';
-import { hashOf, stringOf, valueEquals } from '../format';
+// code-gauge-allow-file fileNcss 819 -- the natives of the collections, which share the helpers of their items.
+import { callFunction, getPropertyValue, runtimeClassOf } from '../dispatch';
+import { hashOf, identityHash, stringOf, valueEquals } from '../format';
 import { toInt32 } from '../operators';
-import type { Frame } from '../runtime';
+import { type Frame, KotlinThrow } from '../runtime';
 import {
   type HashEntry,
   indexedItem,
@@ -183,19 +183,14 @@ export function elementsOf(frame: Frame, collection: Value): Value[] {
 
 /** Reads an iterable of the program through its iterator, as the library's functions do. */
 function iterateElements(frame: Frame, iterable: KObject): Value[] {
-  const iterableClass = libraryClass('kotlin.collections.Iterable');
-  const iteratorClass = libraryClass('kotlin.collections.Iterator');
-  const call = (receiver: Value, owner: typeof iterableClass, name: string): Value => {
-    const member = owner.members.get(name)?.find((candidate) => candidate.kind === 'function');
-    if (member?.kind !== 'function') throw new Error(`No ${name}`);
-    const target = runtimeClassOf(receiver).dispatch(member);
-    return (target.invoke as NonNullable<typeof target.invoke>)(frame, receiver, [], undefined);
-  };
-  const iterator = call(iterable, iterableClass, 'iterator');
+  const iteratorClass = 'kotlin.collections.Iterator';
+  const iterator = callCollectionMember(frame, iterable, 'kotlin.collections.Iterable', 'iterator');
   const result: Value[] = [];
   frame.runtime.nativeRoots.push(iterator);
   try {
-    while (call(iterator, iteratorClass, 'hasNext') === true) result.push(call(iterator, iteratorClass, 'next'));
+    while (callCollectionMember(frame, iterator, iteratorClass, 'hasNext') === true) {
+      result.push(callCollectionMember(frame, iterator, iteratorClass, 'next'));
+    }
   } finally {
     frame.runtime.nativeRoots.pop();
   }
@@ -205,6 +200,14 @@ function iterateElements(frame: Frame, iterable: KObject): Value[] {
 function storeElements(object: KObject): Value[] {
   const store = object.store as KStore;
   return store.ordered().map((entry) => entry.key);
+}
+
+function callCollectionMember(frame: Frame, receiver: Value, owner: string, name: string, args: Value[] = []): Value {
+  const member = libraryClass(owner)
+    .members.get(name)
+    ?.find((candidate) => candidate.kind === 'function');
+  if (!member) throw new Error(`No function ${owner}.${name}`);
+  return callFunction(member, frame, receiver, args, undefined);
 }
 
 type ListNative = (frame: Frame, list: Value, args: Value[]) => Value;
@@ -374,6 +377,10 @@ function defineLists(): void {
       },
     ],
   ];
+  defineNative(
+    'kotlin.collections.NativeLists.removeIfArrayList(MutableCollection<T>, (T) -> Boolean)',
+    (frame, _receiver, [list, predicate]) => removeIfArrayList(frame, list as KObject, predicate as KObject)
+  );
   defineNative('kotlin.collections.NativeLists.builder()', (frame) => newList(frame, 'ListBuilder', []));
   defineNative('kotlin.collections.ListBuilder.build()', (_frame, list) => {
     (list as KObject).native = { isBuilt: true };
@@ -413,9 +420,38 @@ function registerListNative(type: string, signature: string, native: ListNative)
   });
 }
 
-function checkListView(frame: Frame, list: KObject): void {
+export function checkListView(frame: Frame, list: KObject): void {
   const view = listView(list);
   if (view && view.source.modCount !== list.modCount) throwError(frame, 'java.util.ConcurrentModificationException');
+}
+
+function removeIfArrayList(frame: Frame, list: KObject, predicate: KObject): boolean | undefined {
+  const view = listView(list);
+  const source = view?.source ?? list;
+  if (source.cls !== libraryClass('kotlin.collections.ArrayList')) return undefined;
+  checkListView(frame, list);
+  const modCount = source.modCount;
+  const values = items(source);
+  const from = view?.from ?? 0;
+  const size = view?.size ?? values.length;
+  const removed = new Uint8Array(size);
+  const test = predicate.function;
+  if (!test) throw new Error('Missing collection predicate');
+  let anyRemoved = false;
+  for (let index = 0; index < size; index++) {
+    if (test.call(frame, [values[from + index]]) === true) {
+      removed[index] = 1;
+      anyRemoved = true;
+    }
+  }
+  if (source.modCount !== modCount) throwError(frame, 'java.util.ConcurrentModificationException');
+  if (!anyRemoved) return false;
+  const kept: Value[] = [];
+  for (let index = 0; index < size; index++) {
+    if (!removed[index]) kept.push(values[from + index]);
+  }
+  replaceListItems(frame, list, 0, size, kept);
+  return true;
 }
 
 /** Removes the elements `keeps` rejects, telling whether any went. */
@@ -578,7 +614,10 @@ export function findEntry(frame: Frame, store: KStore, key: Value): HashEntry | 
     const { index, isFound } = store.positionOf(frame, key);
     return isFound ? store.entries[index] : undefined;
   }
-  const hash = hashOf(frame, key);
+  return findHashedEntry(frame, store, key, hashOf(frame, key));
+}
+
+function findHashedEntry(frame: Frame, store: KStore, key: Value, hash: number): HashEntry | undefined {
   for (const entry of store.withHash(hash)) {
     frame.runtime.spend();
     if (entry.key === key || valueEquals(frame, key, entry.key)) return entry;
@@ -588,15 +627,21 @@ export function findEntry(frame: Frame, store: KStore, key: Value): HashEntry | 
 
 /** `HashMap.hash` keeps the hashes as Java's `hashCode` returns them; the store spreads them into buckets. */
 export function putEntry(frame: Frame, store: KStore, key: Value, value: Value): Value {
-  const existing = findEntry(frame, store, key);
+  const position = store.order === 'sorted' ? store.positionOf(frame, key) : undefined;
+  const hash = position ? 0 : hashOf(frame, key);
+  const existing = position
+    ? position.isFound
+      ? store.entries[position.index]
+      : undefined
+    : findHashedEntry(frame, store, key, hash);
   if (existing) {
     const old = existing.value;
     existing.value = value;
     return old;
   }
   frame.runtime.allocate(frame, 2);
-  const entry: HashEntry = { key, value, hash: store.order === 'sorted' ? 0 : hashOf(frame, key) };
-  if (store.order === 'sorted') store.insertAt(store.positionOf(frame, key).index, entry);
+  const entry: HashEntry = { key, value, hash };
+  if (position) store.insertAt(position.index, entry);
   else store.add(entry);
   return undefined;
 }
@@ -733,14 +778,28 @@ function readMapProperty(frame: Frame, receiver: Value, owner: string, name: str
 
 function mapEquals(frame: Frame, map: KObject, other: Value): boolean {
   if (map === other) return true;
-  if (!(other instanceof KObject) || !other.store || other.native?.isSet || map.native?.isSet) return false;
-  const a = storeOf(map);
-  const b = other.store;
-  if (a.entries.length !== b.entries.length) return false;
-  return a.entries.every((entry) => {
-    const found = findEntry(frame, b, entry.key);
-    return found !== undefined && valueEquals(frame, entry.value, found.value);
-  });
+  const owner = 'kotlin.collections.Map';
+  if (!(other instanceof KObject) || !other.cls.isSubclassOf(libraryClass(owner))) return false;
+  const store = storeOf(map);
+  if (map.cls === libraryClass('kotlin.collections.EmptyMap')) {
+    return callCollectionMember(frame, other, owner, 'isEmpty') === true;
+  }
+  if (store.entries.length !== readMapProperty(frame, other, owner, 'size')) return false;
+  try {
+    return store.ordered().every(({ key, value }) => {
+      const actual = callCollectionMember(frame, other, owner, 'get', [key]);
+      if (value !== undefined) return valueEquals(frame, value, actual);
+      return actual === undefined && callCollectionMember(frame, other, owner, 'containsKey', [key]) === true;
+    });
+  } catch (error) {
+    if (
+      error instanceof KotlinThrow &&
+      (error.value.cls.qualifiedName === 'java.lang.ClassCastException' ||
+        error.value.cls.qualifiedName === 'java.lang.NullPointerException')
+    )
+      return false;
+    throw error;
+  }
 }
 
 function mapToString(frame: Frame, map: KObject): string {
@@ -773,10 +832,9 @@ function defineSets(): void {
     'add(E)': (frame, set, [element]) => {
       requireMutableMap(frame, set);
       const store = storeOf(set);
-      if (findEntry(frame, store, element)) return false;
-      putEntry(frame, store, element, undefined);
-      touch(set as KObject);
-      return true;
+      const changed = addSetEntry(frame, store, element);
+      if (changed) touch(set as KObject);
+      return changed;
     },
     'remove(E)': (frame, set, [element]) => {
       if (isBuilt(set)) requireMutableMap(frame, set);
@@ -792,9 +850,7 @@ function defineSets(): void {
       requireMutableMap(frame, set);
       let changed = false;
       for (const element of elementsOf(frame, elements)) {
-        if (findEntry(frame, storeOf(set), element)) continue;
-        putEntry(frame, storeOf(set), element, undefined);
-        changed = true;
+        if (addSetEntry(frame, storeOf(set), element)) changed = true;
       }
       if (changed) touch(set as KObject);
       return changed;
@@ -822,6 +878,12 @@ function defineSets(): void {
     'toString()': (frame, set) => collectionToString(frame, set, storeElements(set as KObject)),
   };
   for (const [signature, native] of Object.entries(natives)) defineNative(`${SET}.${signature}`, native);
+}
+
+function addSetEntry(frame: Frame, store: KStore, element: Value): boolean {
+  const size = store.entries.length;
+  putEntry(frame, store, element, undefined);
+  return size !== store.entries.length;
 }
 
 function defineSetConstructors(): void {
@@ -961,7 +1023,9 @@ function defineViewReading(owner: string): void {
     collectionToString(frame, view, viewElements(frame, view as KObject))
   );
   defineNative(`${owner}.hashCode()`, (frame, view) =>
-    sumHashes(viewElements(frame, view as KObject).map((element) => hashOf(frame, element)))
+    viewOf(view).view === 'values'
+      ? identityHash(view)
+      : sumHashes(viewElements(frame, view as KObject).map((element) => hashOf(frame, element)))
   );
   defineNative(`${owner}.equals(Any?)`, (frame, view, [other]) => {
     if (viewOf(view).view === 'values') return view === other;
@@ -1065,10 +1129,13 @@ function defineNativeEntry(): void {
     return hashOf(frame, stored.key) ^ hashOf(frame, stored.value);
   });
   defineNative(`${entry}.equals(Any?)`, (frame, receiver, [other]) => {
-    if (!(other instanceof KObject) || other.cls !== (receiver as KObject).cls) return false;
-    const a = entryOf(receiver).entry;
-    const b = entryOf(other).entry;
-    return valueEquals(frame, a.key, b.key) && valueEquals(frame, a.value, b.value);
+    const owner = 'kotlin.collections.Map.Entry';
+    if (!(other instanceof KObject) || !other.cls.isSubclassOf(libraryClass(owner))) return false;
+    const { key, value } = entryOf(receiver).entry;
+    return (
+      valueEquals(frame, key, readMapProperty(frame, other, owner, 'key')) &&
+      valueEquals(frame, value, readMapProperty(frame, other, owner, 'value'))
+    );
   });
 }
 
@@ -1091,7 +1158,7 @@ function fill(frame: Frame, store: KStore, pairs: Value[]): KStore {
 
 function setOfValues(frame: Frame, name: string, order: KStore['order'], values: Value[], capacity: number): KObject {
   const store = newStore(order, capacity);
-  for (const value of values) if (!findEntry(frame, store, value)) putEntry(frame, store, value, undefined);
+  for (const value of values) putEntry(frame, store, value, undefined);
   return setInstance(frame, name, store);
 }
 

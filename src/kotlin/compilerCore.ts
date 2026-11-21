@@ -162,13 +162,13 @@ export abstract class CompilerCore {
     for (const part of ref.parts.slice(consumed)) {
       const nested: ClassSymbol | undefined = cls.nested.get(part.name);
       if (!nested) this.error(ref.row, `型 ${cls.name}.${part.name} が見つかりません。`);
-      this.checkNestedAccessible(scope, nested, ref.row);
       cls = nested;
       args =
         allowsBareClass && part.args.length === 0
           ? cls.typeParameters.map((): TypeArgument => ({ variance: 'star' }))
           : this.resolveArguments(scope, cls, part.args, ref.row);
     }
+    this.checkNestedAccessible(scope, cls, ref.row);
     return { kind: 'class', cls, args, nullable: ref.nullable };
   }
 
@@ -436,14 +436,26 @@ export abstract class CompilerCore {
     return variable;
   }
 
-  /** Rejects a use of a private nested class outside its outer class, as kotlinc does. */
-  protected checkNestedAccessible(scope: Scope, nested: ClassSymbol, row: number): void {
-    const { outer } = nested;
-    if (nested.visibility !== 'private' || !outer) return;
-    for (let current: Scope | undefined = scope; current; current = current.parent) {
-      for (let cls = current.receiver?.cls ?? current.staticClass; cls; cls = cls.outer) if (cls === outer) return;
+  protected checkNestedAccessible(scope: Scope | undefined, nested: ClassSymbol, row: number): void {
+    for (let current = nested; current.outer; current = current.outer) {
+      const { outer, visibility } = current;
+      if (visibility !== 'private' && visibility !== 'protected') continue;
+      if (this.canSeeNestedClass(scope, outer, visibility)) continue;
+      this.error(row, `${current.name} は ${visibility} なので、${outer.name} の外からは使えません。`);
     }
-    this.error(row, `${nested.name} は private なので、${outer.name} の外からは使えません。`);
+  }
+
+  private canSeeNestedClass(
+    scope: Scope | undefined,
+    outer: ClassSymbol,
+    visibility: 'private' | 'protected'
+  ): boolean {
+    for (let current = scope; current; current = current.parent) {
+      for (let cls = current.receiver?.cls ?? current.staticClass; cls; cls = cls.outer) {
+        if (visibility === 'private' ? cls === outer : cls.isSubclassOf(outer)) return true;
+      }
+    }
+    return false;
   }
 
   protected compiledConstant(compiled: Compiled): Value | undefined {

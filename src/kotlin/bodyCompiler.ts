@@ -140,7 +140,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
           false
         );
         const isUnit = this.isClass(returnType, this.core.unit);
-        if (!isUnit && !this.flow.isDead && !(resolved(returnType).kind === 'nothing')) {
+        if (!isUnit && !this.flow.isDead) {
           this.error(decl.body.block.endRow, `関数 ${symbol.name} の最後に return を書いてください。`);
         }
         const evaluate = compiled.eval;

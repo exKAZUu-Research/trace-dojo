@@ -19,8 +19,8 @@ import { compareDoubles, compareNumbers, toInt32 } from '../operators';
 import { arrayFactoryName, UNSIGNED_ARRAYS } from '../prelude/arrays';
 import type { Frame } from '../runtime';
 import type { FunctionSymbol } from '../symbols';
-import { box, KObject, NULL, type PrimitiveKind, UNIT, type Value } from '../values';
-import { elementsOf, joinRendered, newList, newPrimitiveArrayList, touch } from './collections';
+import { box, KObject, listView, NULL, type PrimitiveKind, UNIT, type Value } from '../values';
+import { checkListView, elementsOf, joinRendered, newList, newPrimitiveArrayList, touch } from './collections';
 import { arrayIterator, checkArrayIndex } from './core';
 import { defineNative, defineNativeProperty, libraryClass } from './registry';
 import { stableSort } from './timSort';
@@ -78,6 +78,11 @@ function defineArrays(): void {
     return array;
   });
   defineNative('kotlin.collections.MutableList<T>.sortWith(Comparator<in T>)', sortList);
+  defineNative('kotlin.collections.Array<out T>.sortWith(Comparator<in T>)', (frame, array, [comparator]) => {
+    const values = (array as KObject).items as Value[];
+    sortValues(frame, array, comparator, values, 0, values.length);
+    return UNIT;
+  });
   defineNative('kotlin.collections.MutableList<T>.reverse()', (frame, list) => {
     const values = elementsOf(frame, list).toReversed();
     if (values.length > 1) writeBack(frame, list as KObject, values);
@@ -87,22 +92,42 @@ function defineArrays(): void {
 
 function sortList(frame: Frame, list: Value, [comparator]: Value[]): Value {
   const object = list as KObject;
-  const values = elementsOf(frame, list);
-  if (values.length <= 1) return UNIT;
-  const compare = comparatorFunction(frame, comparator);
-  const isArrayList = object.cls === libraryClass('kotlin.collections.ArrayList');
-  const modCount = object.modCount;
-  frame.runtime.nativeRoots.push(list, comparator);
-  try {
-    const sorted = stableSort(frame, values, compare);
-    if (isArrayList && object.modCount !== modCount)
-      frame.runtime.throwError(frame, 'java.util.ConcurrentModificationException');
-    writeBack(frame, object, sorted);
-    if (isArrayList) touch(object);
-  } finally {
-    frame.runtime.nativeRoots.length -= 2;
+  const view = listView(object);
+  const source = view?.source ?? object;
+  if (source.cls === libraryClass('kotlin.collections.ArrayList')) {
+    checkListView(frame, object);
+    const from = view?.from ?? 0;
+    const values = source.items as Value[];
+    const size = view?.size ?? values.length;
+    if (size <= 1) return UNIT;
+    const modCount = source.modCount;
+    sortValues(frame, list, comparator, values, from, from + size);
+    if (source.modCount !== modCount) frame.runtime.throwError(frame, 'java.util.ConcurrentModificationException');
+    if (!view) touch(source);
+  } else if (!view && source.cls === libraryClass('kotlin.collections.ArraysList')) {
+    const values = source.items as Value[];
+    sortValues(frame, list, comparator, values, 0, values.length);
+  } else {
+    const values = elementsOf(frame, list);
+    if (values.length <= 1) return UNIT;
+    sortValues(frame, list, comparator, values, 0, values.length);
+    writeBack(frame, object, values);
   }
   return UNIT;
+}
+
+function sortValues(frame: Frame, owner: Value, comparator: Value, values: Value[], from: number, to: number): void {
+  if (to - from <= 1) return;
+  const { nativeRoots } = frame.runtime;
+  const mark = nativeRoots.length;
+  frame.runtime.spend(1 + Math.floor((to - from) / 64));
+  nativeRoots.push(owner, comparator);
+  try {
+    for (let index = from; index < to; index++) nativeRoots.push(values[index]);
+    stableSort(frame, values, comparatorFunction(frame, comparator), from, to);
+  } finally {
+    nativeRoots.length = mark;
+  }
 }
 
 function writeBack(frame: Frame, list: KObject, values: Value[]): void {
@@ -355,6 +380,10 @@ function defineArrayReading(receiver: string, kind: PrimitiveKind | 'Boolean' | 
     const list = newList(frame, 'ArraysList', []);
     list.items = source.items;
     return list;
+  });
+  defineNative(`${prefix}?.contentHashCode()`, (frame, array) => {
+    const storage = kind && SIGNED_STORAGE[kind as keyof typeof SIGNED_STORAGE];
+    return arrayContentHash(frame, array, storage || kind);
   });
   defineNative(`${prefix}?.contentToString()`, (frame, array) => arrayContentString(frame, array, kind));
   defineNative(`${prefix}.copyOf()`, cloneArray);

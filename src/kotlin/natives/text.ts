@@ -1,13 +1,23 @@
-// code-gauge-allow-file fileNcss 401 -- the text and character natives share string, casing, and parsing operations.
+// code-gauge-allow-file fileNcss 410 -- the text and character natives share string, casing, and parsing operations.
 import { formatJava, type FormatValues } from '../../interpreter/javaFormatter';
-import { runtimeClassOf } from '../dispatch';
+import { callFunction, getPropertyValue, runtimeClassOf } from '../dispatch';
+import { float32FromText } from '../float32';
 import { charToString, formatPrimitive, hashOf, stringOf } from '../format';
 import { toInt32 } from '../operators';
 import type { Frame } from '../runtime';
 import { Boxed, KObject, UNIT, type Value } from '../values';
 import { newList } from './collections';
 import { compareStrings, substring } from './core';
-import { compareJdkCase, foldJdkCodePoint } from './jdkCase';
+import {
+  compareJdkCase,
+  foldJdkCodePoint,
+  isJdkLowerCase,
+  isJdkUpperCase,
+  lowerJdkChar,
+  titleJdkChar,
+  titleJdkText,
+  upperJdkChar,
+} from './jdkCase';
 import { defineNative, defineNativeProperty, libraryClass, throwError } from './registry';
 import { type TextSearch, textSearch } from './textSearch';
 
@@ -41,11 +51,20 @@ function text(value: Value): string {
   return value as string;
 }
 
-/** The text of a `CharSequence`: a string or a `StringBuilder`. */
 export function sequenceText(frame: Frame, value: Value): string {
   if (typeof value === 'string') return value;
   if (value instanceof KObject && value.builder !== undefined) return value.builder;
-  return stringOf(frame, value);
+  const owner = libraryClass('kotlin.CharSequence');
+  const length = owner.members.get('length')?.find((member) => member.kind === 'property');
+  const get = owner.members.get('get')?.find((member) => member.kind === 'function');
+  if (!length || !get) throw new Error('Missing CharSequence members');
+  const size = getPropertyValue(length, frame, value) as number;
+  frame.runtime.allocateString(frame, size);
+  const characters: string[] = [];
+  for (let index = 0; index < size; index++) {
+    characters.push(charToString(callFunction(get, frame, value, [index], undefined) as number));
+  }
+  return characters.join('');
 }
 
 function result(frame: Frame, value: string): string {
@@ -70,14 +89,12 @@ function isJavaWhitespace(code: number): boolean {
 
 /** Kotlin's `Char.isWhitespace`, which also counts the no-break spaces. */
 function isKotlinWhitespace(code: number): boolean {
-  return isJavaWhitespace(code) || code === 0xa0 || code === 0x20_07 || code === 0x20_2f || code === 0x85;
+  return isJavaWhitespace(code) || code === 0xa0 || code === 0x20_07 || code === 0x20_2f;
 }
 
 function trimWith(value: string, start: boolean, end: boolean): string {
-  let from = 0;
+  const from = start ? leadingWhitespace(value) : 0;
   let to = value.length;
-  // oxlint-disable-next-line unicorn/prefer-code-point -- Kotlin chars are UTF-16 code units.
-  while (start && from < to && isKotlinWhitespace(value.charCodeAt(from))) from++;
   // oxlint-disable-next-line unicorn/prefer-code-point -- Kotlin chars are UTF-16 code units.
   while (end && to > from && isKotlinWhitespace(value.charCodeAt(to - 1))) to--;
   return value.slice(from, to);
@@ -138,28 +155,20 @@ function doubleFormatError(frame: Frame, value: string): never {
 }
 
 /** `String.toDouble()`, which accepts Java's floating-point syntax, such as `1e3`, `1.5f`, and surrounding blanks. */
-function parseDouble(value: string): number | undefined {
+function parseFloating(value: string, asFloat = false): number | undefined {
   const trimmed = trimControls(value);
   if (/^[+-]?(NaN|Infinity)$/.test(trimmed)) return Number(trimmed);
   const hex = /^([+-]?)0[xX]([\dA-Fa-f]*)(?:\.([\dA-Fa-f]*))?[pP]([+-]?\d+)[fFdD]?$/.exec(trimmed);
   if (hex && (hex[2] || hex[3])) {
+    if (asFloat) return float32FromText(trimmed);
     const [, sign, whole, fraction, exponent] = hex;
     const magnitude =
       Number.parseInt(`${whole}${fraction ?? ''}` || '0', 16) * 2 ** (Number(exponent) - 4 * (fraction?.length ?? 0));
     return sign === '-' ? -magnitude : magnitude;
   }
   if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)([eE][+-]?\d+)?[fFdD]?$/.test(trimmed)) return undefined;
-  return Number(trimmed.replace(/[fFdD]$/, ''));
+  return asFloat ? float32FromText(trimmed) : Number(trimmed.replace(/[fFdD]$/, ''));
 }
-
-/** The digraphs whose title case differs from their upper case, which JavaScript has no function for. */
-const TITLECASE_DIGRAPHS = new Map(
-  ['ǅǄǆ', 'ǈǇǉ', 'ǋǊǌ', 'ǲǱǳ'].flatMap(([title, upper, lower]) => [
-    [title, title],
-    [upper, title],
-    [lower, title],
-  ])
-);
 
 /** The natives of strings and characters, by signature without the package. */
 type TextNative = (frame: Frame, receiver: Value, args: Value[]) => Value;
@@ -173,7 +182,8 @@ const TEXT_CASE_AND_TRIM_NATIVES: Record<string, TextNative> = {
   'String.trimStart()': (frame, receiver) => result(frame, trimWith(text(receiver), true, false)),
   'String.trimEnd()': (frame, receiver) => result(frame, trimWith(text(receiver), false, true)),
   'String.trimIndent()': (frame, receiver) => result(frame, trimIndent(text(receiver))),
-  'String.trimMargin(String)': (frame, receiver, [prefix]) => result(frame, trimMargin(text(receiver), text(prefix))),
+  'String.trimMargin(String)': (frame, receiver, [prefix]) =>
+    result(frame, trimMargin(frame, text(receiver), text(prefix))),
   'String.substring(Int)': (frame, receiver, [start]) =>
     substring(frame, text(receiver), start as number, text(receiver).length),
   'String.substring(Int, Int)': (frame, receiver, [start, end]) =>
@@ -362,14 +372,16 @@ const TEXT_PARSING_NATIVES: Record<string, TextNative> = {
     const parsed = parseInteger(frame, text(receiver), 10, 64);
     return parsed === undefined ? undefined : new Boxed('Long', parsed);
   },
-  'String.toDouble()': (frame, receiver) => parseDouble(text(receiver)) ?? doubleFormatError(frame, text(receiver)),
+  'String.toDouble()': (frame, receiver) => parseFloating(text(receiver)) ?? doubleFormatError(frame, text(receiver)),
   'String.toDoubleOrNull()': (_frame, receiver) => {
-    const parsed = parseDouble(text(receiver));
+    const parsed = parseFloating(text(receiver));
     return parsed === undefined ? undefined : new Boxed('Double', parsed);
   },
-  'String.toFloat()': (frame, receiver) => {
-    const parsed = parseDouble(text(receiver));
-    return parsed === undefined ? numberFormatError(frame, text(receiver)) : Math.fround(parsed);
+  'String.toFloat()': (frame, receiver) =>
+    parseFloating(text(receiver), true) ?? doubleFormatError(frame, text(receiver)),
+  'String.toFloatOrNull()': (_frame, receiver) => {
+    const parsed = parseFloating(text(receiver), true);
+    return parsed === undefined ? undefined : new Boxed('Float', parsed);
   },
   'String?.toBoolean()': (_frame, receiver) => typeof receiver === 'string' && receiver.toLowerCase() === 'true',
   'String.toBooleanStrict()': (frame, receiver) => {
@@ -391,21 +403,19 @@ const CHAR_NATIVES: Record<string, TextNative> = {
   'Char.isLetter()': (_frame, receiver) => /\p{L}/u.test(charToString(receiver as number)),
   'Char.isLetterOrDigit()': (_frame, receiver) => /[\p{L}\p{Nd}]/u.test(charToString(receiver as number)),
   'Char.isWhitespace()': (_frame, receiver) => isKotlinWhitespace(receiver as number),
-  'Char.isUpperCase()': (_frame, receiver) => /\p{Lu}/u.test(charToString(receiver as number)),
-  'Char.isLowerCase()': (_frame, receiver) => /\p{Ll}/u.test(charToString(receiver as number)),
+  'Char.isUpperCase()': (_frame, receiver) => isJdkUpperCase(receiver as number),
+  'Char.isLowerCase()': (_frame, receiver) => isJdkLowerCase(receiver as number),
   'Char.equals(Char, Boolean)': (_frame, receiver, [other, ignoreCase]) =>
     receiver === other ||
     (ignoreCase === true && foldJdkCodePoint(receiver as number) === foldJdkCodePoint(other as number)),
-  'Char.uppercaseChar()': (_frame, receiver) => upperChar(receiver as number),
-  'Char.lowercaseChar()': (_frame, receiver) => lowerChar(receiver as number),
-  'Char.toUpperCase()': (_frame, receiver) => upperChar(receiver as number),
-  'Char.toLowerCase()': (_frame, receiver) => lowerChar(receiver as number),
+  'Char.uppercaseChar()': (_frame, receiver) => upperJdkChar(receiver as number),
+  'Char.lowercaseChar()': (_frame, receiver) => lowerJdkChar(receiver as number),
+  'Char.toUpperCase()': (_frame, receiver) => upperJdkChar(receiver as number),
+  'Char.toLowerCase()': (_frame, receiver) => lowerJdkChar(receiver as number),
   'Char.uppercase()': (_frame, receiver) => charToString(receiver as number).toUpperCase(),
   'Char.lowercase()': (_frame, receiver) => charToString(receiver as number).toLowerCase(),
-  'Char.titlecase()': (_frame, receiver) => {
-    const char = charToString(receiver as number);
-    return TITLECASE_DIGRAPHS.get(char) ?? char.toUpperCase();
-  },
+  'Char.titlecase()': (_frame, receiver) => titleJdkText(receiver as number),
+  'Char.titlecaseChar()': (_frame, receiver) => titleJdkChar(receiver as number),
   'Char.digitToInt()': (frame, receiver) => {
     const digit = digitOf(receiver as number);
     return (
@@ -488,18 +498,6 @@ function isDecimalDigit(code: number): boolean {
   return /^\p{Nd}$/u.test(charToString(code));
 }
 
-function upperChar(code: number): number {
-  const upper = charToString(code).toUpperCase();
-  // oxlint-disable-next-line unicorn/prefer-code-point -- Kotlin chars are UTF-16 code units.
-  return upper.length === 1 ? upper.charCodeAt(0) : code;
-}
-
-function lowerChar(code: number): number {
-  const lower = charToString(code).toLowerCase();
-  // oxlint-disable-next-line unicorn/prefer-code-point -- Kotlin chars are UTF-16 code units.
-  return lower.length === 1 ? lower.charCodeAt(0) : code;
-}
-
 function replaceAll(frame: Frame, value: string, oldValue: string, replacement: string, ignoreCase: boolean): string {
   const { indexOf } = textSearch(frame, value, oldValue, ignoreCase);
   frame.runtime.spend(1 + Math.floor((value.length + oldValue.length) / 64));
@@ -553,24 +551,42 @@ function splitText(
 }
 
 function trimIndent(value: string): string {
-  const lines = value.split(LINE_ENDINGS);
-  const indents = lines.filter((line) => line.trim() !== '').map((line) => /^[ \t]*/.exec(line)?.[0].length ?? 0);
-  const minimum = indents.length > 0 ? Math.min(...indents) : 0;
-  const trimmed = lines.map((line) => (line.trim() === '' ? '' : line.slice(minimum)));
-  if (trimmed.length > 0 && trimmed[0].trim() === '') trimmed.shift();
-  if (trimmed.length > 0 && trimmed.at(-1)?.trim() === '') trimmed.pop();
-  return trimmed.join('\n');
+  const lines = trimBlankEdges(value.split(LINE_ENDINGS));
+  let indent = Infinity;
+  for (const line of lines) {
+    const size = leadingWhitespace(line);
+    if (size < line.length) indent = Math.min(indent, size);
+  }
+  const common = indent === Infinity ? 0 : indent;
+  return lines.map((line) => line.slice(common)).join('\n');
 }
 
-function trimMargin(value: string, prefix: string): string {
-  const lines = value.split(LINE_ENDINGS);
-  const trimmed = lines.map((line) => {
-    const start = line.search(/\S/);
-    return start !== -1 && line.startsWith(prefix, start) ? line.slice(start + prefix.length) : line;
-  });
-  if (trimmed.length > 0 && trimmed[0].trim() === '') trimmed.shift();
-  if (trimmed.length > 0 && trimmed.at(-1)?.trim() === '') trimmed.pop();
-  return trimmed.join('\n');
+function trimMargin(frame: Frame, value: string, prefix: string): string {
+  if (leadingWhitespace(prefix) === prefix.length) {
+    return throwError(frame, 'java.lang.IllegalArgumentException', 'marginPrefix must be non-blank string.');
+  }
+  return trimBlankEdges(value.split(LINE_ENDINGS))
+    .map((line) => {
+      const start = leadingWhitespace(line);
+      return line.startsWith(prefix, start) ? line.slice(start + prefix.length) : line;
+    })
+    .join('\n');
+}
+
+function trimBlankEdges(lines: string[]): string[] {
+  const first = lines[0];
+  const last = lines.at(-1) as string;
+  return lines.slice(
+    Number(leadingWhitespace(first) === first.length),
+    lines.length - Number(leadingWhitespace(last) === last.length)
+  );
+}
+
+function leadingWhitespace(line: string): number {
+  let end = 0;
+  // oxlint-disable-next-line unicorn/prefer-code-point -- Kotlin treats whitespace as UTF-16 chars.
+  while (end < line.length && isKotlinWhitespace(line.charCodeAt(end))) end++;
+  return end;
 }
 
 const JAVA_KINDS: Record<string, string> = {

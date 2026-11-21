@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 855 -- The declaration compiler shares symbol and class-linking logic.
+// code-gauge-allow-file fileNcss 862 -- The declaration compiler shares symbol and class-linking logic.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import type {
   ClassDecl,
@@ -268,18 +268,21 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     const owner = this.findQualifiedClass(path.slice(0, -1));
     const nested = owner?.nested.get(name);
     if (nested) {
+      this.checkNestedAccessible(undefined, nested, row);
       context.importedClasses.set(name, nested);
       return;
     }
     if (owner) {
+      this.checkNestedAccessible(undefined, owner, row);
       const members = owner.members.get(name) ?? [];
       if (members.length === 0 || !owner.isObject) this.rejectImport(row, path.join('.'));
       this.importObjectMembers(context, owner, name, members);
       return;
     }
     const cls = this.findQualifiedClass(path);
-    if (cls) context.importedClasses.set(name, cls);
-    else this.rejectImport(row, path.join('.'));
+    if (!cls) this.rejectImport(row, path.join('.'));
+    this.checkNestedAccessible(undefined, cls, row);
+    context.importedClasses.set(name, cls);
   }
 
   /** Imports members of an object, such as `Delegates.observable`, as if they were top-level. */
@@ -1191,6 +1194,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   // code-gauge-allow functionCognitiveComplexity 17 -- traversal retains the substitution and tracks override roots for each delegate.
   private linkDelegates(entry: ClassEntry): void {
     const { symbol } = entry;
+    const delegateSlots = new Map<MemberSymbol, number>();
     for (const field of entry.delegateFields) {
       const seen = new Set<MemberSymbol>();
       const visit = (type: ClassType): void => {
@@ -1199,7 +1203,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
           for (const member of members) {
             if (member.visibility === 'private' || seen.has(member.root)) continue;
             seen.add(member.root);
-            this.linkDelegateMember(symbol, member, substitution, field);
+            this.linkDelegateMember(symbol, member, substitution, field, delegateSlots);
           }
         }
         for (const supertype of type.cls.supertypes) visit(substitute(supertype, substitution) as ClassType);
@@ -1212,16 +1216,24 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     symbol: ClassSymbol,
     member: MemberSymbol,
     substitution: Substitution,
-    field: ClassEntry['delegateFields'][number]
+    field: ClassEntry['delegateFields'][number],
+    delegateSlots: Map<MemberSymbol, number>
   ): void {
-    if (symbol.vtable.get(member.root)?.owner === symbol) return;
+    if (symbol.vtable.get(member.root)?.owner === symbol) {
+      const prior = delegateSlots.get(member.root);
+      if (prior === undefined || prior === field.slot) return;
+      this.error(field.spec.row, `${member.name} は複数の委譲先にあるため、override を書いてください。`);
+    }
     const bases = this.findOverridden(symbol, member, substitution);
     const final = bases.find((base) => !base.owner?.isInterface && !base.isOpen && !base.isAbstract);
     if (final) {
       this.error(field.spec.row, `委譲では ${final.owner?.name ?? ''}.${final.name} を上書きできません。`);
     }
     const forward = this.forwarder(member, field.slot, symbol);
-    for (const base of bases) symbol.vtable.set(base.root, forward);
+    for (const base of bases) {
+      delegateSlots.set(base.root, field.slot);
+      symbol.vtable.set(base.root, forward);
+    }
   }
 
   /** A member that calls the delegate's implementation of `member`. */

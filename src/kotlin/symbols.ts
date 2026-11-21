@@ -222,6 +222,7 @@ export type MemberSymbol = FunctionSymbol | PropertySymbol;
 export class VariableSymbol {
   /** Whether a lambda assigns the variable, which rules out smart casts. */
   isCapturedAndModified = false;
+  readonly capturedWriteTypes = new Set<KType>();
   /** Whether a lambda captures the `var`, which then lives in a cell that the lambda and the function share. */
   isCell = false;
   /** The function or lambda whose frame holds the variable. */
