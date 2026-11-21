@@ -635,6 +635,7 @@ class UnmodifiableListView<E> extends _UnmodifiableListBase<E> {
   UnmodifiableListView(Iterable<E> source) : _source = source;
   int get length => _source.length;
   E operator [](int index) => _source.elementAt(index);
+  List<R> cast<R>() => UnmodifiableListView<R>(_source.cast<R>());
 }
 
 // Maps the program implements
@@ -1333,6 +1334,8 @@ class _HashSetEntry<E> {
 class _HashSet<E> extends SetBase<E> implements HashSet<E> {
   final _HashKeyPolicy<E>? _policy;
   _HashSet([this._policy]);
+  Set<R> cast<R>() => Set.castFrom<E, R>(this, newSet: _newSimilarSet);
+  Set<R> _newSimilarSet<R>() => HashSet<R>();
   bool _keysEqual(Object? left, Object? right) {
     final policy = _policy;
     return policy == null ? left == right : policy.equal(left, right);
@@ -1479,6 +1482,7 @@ class _HashSet<E> extends SetBase<E> implements HashSet<E> {
 
 class _IdentityHashSet<E> extends _HashSet<E> {
   _IdentityHashSet() : super(_HashKeyPolicy<E>(identity: true));
+  Set<R> _newSimilarSet<R>() => HashSet<R>.identity();
 }
 
 class _CustomHashSet<E> extends _HashSet<E> {
@@ -2028,6 +2032,8 @@ final class SplayTreeSet<E> extends SetBase<E> {
   }
   factory SplayTreeSet.of(Iterable<E> elements, [int Function(E key1, E key2)? compare, bool Function(dynamic potentialKey)? isValidKey]) =>
       SplayTreeSet<E>(compare, isValidKey)..addAll(elements);
+  Set<R> cast<R>() => Set.castFrom<E, R>(this, newSet: _newSimilarSet);
+  Set<R> _newSimilarSet<R>() => SplayTreeSet<R>((a, b) => _tree._compare(a as E, b as E), _tree._validKey);
   Iterator<E> get iterator => _SplayTreeKeyIterator<E, _SplayTreeSetNode<E>>(_tree);
   int get length => _tree._count;
   bool get isEmpty => _tree._root == null;

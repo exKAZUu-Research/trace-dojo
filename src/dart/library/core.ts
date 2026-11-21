@@ -2107,7 +2107,8 @@ abstract interface class Set<E> extends EfficientLengthIterable<E> {
   external Set<E> union(Set<E> other);
   external Set<E> difference(Set<Object?> other);
   external void clear();
-  external Set<R> cast<R>();
+  Set<R> cast<R>() => Set.castFrom<E, R>(this, newSet: _emptyCastSet);
+  static Set<R> _emptyCastSet<R>() => <R>{};
   external int get length;
   external bool get isEmpty;
   external bool get isNotEmpty;
@@ -2123,10 +2124,13 @@ class _Set<E> extends Set<E> implements LinkedHashSet<E> {
 
 class CompactLinkedIdentityHashSet<E> extends _Set<E> {
   CompactLinkedIdentityHashSet._() : super._();
+  Set<R> cast<R>() => Set.castFrom<E, R>(this, newSet: _emptyIdentityCastSet);
+  static Set<R> _emptyIdentityCastSet<R>() => Set<R>.identity();
 }
 
 class CompactLinkedCustomHashSet<E> extends _Set<E> {
   CompactLinkedCustomHashSet._() : super._();
+  Set<R> cast<R>() => Set.castFrom<E, R>(this);
 }
 
 abstract final class LinkedHashSet<E> implements Set<E> {

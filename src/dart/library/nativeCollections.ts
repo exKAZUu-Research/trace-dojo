@@ -1096,13 +1096,6 @@ define('Set.clear', (runtime, receiver) => {
   store(receiver).clear();
   return;
 });
-// As the SDK's castFrom, views that cast what they read and write.
-define('Set.cast', (runtime, receiver, _args, _named, typeArgs) =>
-  runtime.links.construct(runtime, 'CastSet', '', [receiver], undefined, [
-    elementTypeOf(receiver as DartObject),
-    typeArgs[0] ?? DYNAMIC,
-  ])
-);
 define('Set.length', (_runtime, receiver) => BigInt(store(receiver).size));
 define('Set.isEmpty', (_runtime, receiver) => store(receiver).size === 0);
 define('Set.isNotEmpty', (_runtime, receiver) => store(receiver).size > 0);

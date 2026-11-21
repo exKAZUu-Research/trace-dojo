@@ -8585,3 +8585,66 @@ void main() {
       'false\n',
   });
 });
+
+test('Dart cast views preserve set factories and unmodifiable-list behavior', () => {
+  const program = `import 'dart:collection';
+
+class Equal {
+  bool operator ==(Object other) => other is Equal;
+  int get hashCode => 0;
+}
+void identityViews() {
+  for (final set in [HashSet<Equal>.identity(), LinkedHashSet<Equal>.identity(), Set<Equal>.identity()]) {
+    set.addAll([Equal(), Equal()]);
+    final view = set.cast<Object>().cast<Object?>();
+    print([view.toSet().runtimeType, view.toSet().length, view.union({Equal()}).length, view.difference({}).length]);
+  }
+}
+void policyViews() {
+  final sorted = SplayTreeSet<int>.of([1,3,2], (a,b) => b.compareTo(a));
+  final sortedView = sorted.cast<num>();
+  print([sortedView.toSet(), sortedView.union({4}), sortedView.intersection({1,3}), sortedView.difference({2})]);
+  try { sortedView.toSet().add(2.5); } catch(error) { print(error.runtimeType); }
+  final hash = HashSet<int>(equals: (a,b) => a.abs() == b.abs(), hashCode: (n) => n.abs())..add(2);
+  final linked = LinkedHashSet<int>(equals: (a,b) => a.abs() == b.abs(), hashCode: (n) => n.abs())..add(2);
+  for (final set in [hash, linked]) {
+    final view = set.cast<num>();
+    final copy = view.toSet();
+    print([copy.runtimeType, copy.add(-2), copy.length, view.difference({}).runtimeType]);
+  }
+  print(HashSet<int>.of([1,9,17]).cast<num>().toSet().runtimeType);
+  print((const <int>{1,2}).cast<num>().toSet().runtimeType);
+}
+void readOnlyList() {
+  final original = [1,2];
+  final view = UnmodifiableListView<int>(original).cast<num>();
+  original[0] = 3;
+  print([view.runtimeType, view]);
+  try { view.add(2.5); } catch(error) { print(error); }
+  try { view.fillRange(0, 0); } catch(error) { print(error); }
+  try { view[0] = 2.5; } catch(error) { print(error); }
+  final narrowed = view.cast<double>();
+  print(narrowed.runtimeType);
+  try { print(narrowed[0]); } catch(error) { print(error.runtimeType); }
+}
+void main() { identityViews(); policyViews(); readOnlyList(); }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[_IdentityHashSet<Object?>, 2, 3, 2]\n' +
+      '[CompactLinkedIdentityHashSet<Object?>, 2, 3, 2]\n' +
+      '[CompactLinkedIdentityHashSet<Object?>, 2, 3, 2]\n' +
+      '[{3, 2, 1}, {4, 3, 2, 1}, {3, 1}, {3, 1}]\n' +
+      '_TypeError\n' +
+      '[_HashSet<num>, true, 2, _HashSet<num>]\n' +
+      '[_Set<num>, true, 2, CastSet<int, num>]\n' +
+      '_HashSet<num>\n' +
+      '_Set<num>\n' +
+      '[UnmodifiableListView<num>, [3, 2]]\n' +
+      'Unsupported operation: Cannot add to an unmodifiable list\n' +
+      'Unsupported operation: Cannot modify an unmodifiable list\n' +
+      'Unsupported operation: Cannot modify an unmodifiable list\n' +
+      'UnmodifiableListView<double>\n' +
+      '_TypeError\n',
+  });
+});
