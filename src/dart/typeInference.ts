@@ -155,9 +155,13 @@ class InferenceConstraints {
   private addBound(given: DartType, pattern: DartType & { kind: 'typeParam' }, reversed: boolean): void {
     const bounds = reversed ? this.upper : this.lower;
     if (!bounds || (reversed && isInferenceHole(given))) return;
-    // `Null <: T?` holds through the `?` alone, so unlike `Never <: T?` it leaves `T` unconstrained.
-    if (!reversed && pattern.nullable && given.kind === 'null') return;
     let target = pattern.nullable ? nonNullOf(given) : given;
+    if (!reversed && pattern.nullable && given.kind === 'null') {
+      // As the SDK's constraint generation: `Null <: T?` constrains `T` by `Null` when `T`'s bound admits it, and
+      // otherwise holds through the `?` alone, leaving `T` unconstrained.
+      if (pattern.param.bound && !isSubtype(given, closeTypeVariables(pattern.param.bound, this.params, true))) return;
+      target = given;
+    }
     if (this.scopedParameters.size > 0 && mentionsTypeParams(target, this.scopedParameters)) {
       target = closeTypeVariables(target, this.scopedParameters, !reversed);
     }
