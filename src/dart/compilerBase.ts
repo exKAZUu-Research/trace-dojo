@@ -280,11 +280,19 @@ export abstract class CompilerBase {
   }
 
   protected resolveTypeParamBounds(params: TypeParam[], syntax: TypeParameter[]): void {
-    this.withTypeParams(params, () => {
-      for (const [index, parameter] of syntax.entries()) {
-        if (parameter.bound) params[index].bound = this.resolveType(parameter.bound);
-      }
-    });
+    // A bound such as `T extends Shape<T>` is checked once every bound of the list is known, whatever declares it.
+    const deferred: (() => void)[] | undefined = this.pendingBoundChecks ? undefined : [];
+    if (deferred) this.pendingBoundChecks = deferred;
+    try {
+      this.withTypeParams(params, () => {
+        for (const [index, parameter] of syntax.entries()) {
+          if (parameter.bound) params[index].bound = this.resolveType(parameter.bound);
+        }
+      });
+    } finally {
+      if (deferred) this.pendingBoundChecks = undefined;
+    }
+    for (const check of deferred ?? []) check();
     const pending = this.pendingBoundChecks;
     this.checkBoundCycles(params, syntax, pending === undefined);
     if (pending && params.length > 0) pending.push(() => this.checkBoundCycles(params, syntax, true));

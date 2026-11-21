@@ -1906,6 +1906,21 @@ void main() {
   });
 });
 
+test('Dart generic functions accept self-referential bounds over F-bounded classes', () => {
+  const program = `abstract class Shape<T extends Shape<T>> { T copy(); }
+class Sq extends Shape<Sq> { Sq copy() => Sq(); }
+class C { static String s<T extends Shape<T>>(T x) => '\${x.copy().runtimeType}'; }
+void s<T extends Shape<T>>(T x) { print(x.copy().runtimeType); }
+void main() { s(Sq()); print(C.s(Sq())); }`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'Sq\nSq\n' });
+  expect(
+    executeProgram(
+      'dart',
+      'abstract class Shape<T extends Shape<T>> {}\nvoid s<T extends Shape<int>>(T x) {}\nvoid main() {}'
+    )
+  ).toMatchObject({ kind: 'compileError' });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}
