@@ -162,6 +162,7 @@ function arrangeVisibility(envs: ReadonlyMap<string, LibraryEnv>): void {
     ['_ListIterator', 'ListIterator'],
     ['_SetIterator', '_CompactIterator'],
     ['_MapIterator', '_CompactIterator'],
+    ['_RegExpMatchIterator', '_AllMatchesIterator'],
   ]) {
     (core.declarations.get(name) as { cls: { vmName: string | undefined } }).cls.vmName = vmName;
   }
@@ -175,6 +176,7 @@ function arrangeVisibility(envs: ReadonlyMap<string, LibraryEnv>): void {
     if (declaration) collection.reexports.set(name, declaration);
   }
   (core.declarations.get('_Symbol') as { cls: ClassInfo }).cls.vmName = 'Symbol';
+  (collection.declarations.get('_QueueIterator') as { cls: ClassInfo }).cls.vmName = '_ListQueueIterator';
   (collection.declarations.get('_Uint8List') as { cls: ClassInfo }).cls.vmName = 'Uint8List';
 }
 

@@ -3,12 +3,12 @@ import { scopedMemberName } from '../classes';
 import { encodableText, formatDouble, stringOf } from '../format';
 import { HashStore } from '../hashStore';
 import type { Runtime } from '../runtime';
-import { coreTypes, sameType, vmTypeString } from '../types';
+import { coreTypes, vmTypeString } from '../types';
 import { DartClosure, DartList, DartObject, DartPackedList, DartRecord, DartTypeValue, type Value } from '../values';
 import { appendJsonQuoted, BoundedStringParts } from './boundedStringParts';
 import { appendRegExpDescription, isRegExp } from './nativeRegExp';
 import { define, defineConstructor, forEachValue, intArg, iterableValues, stringArg } from './nativeSupport';
-import { vmTypeHash } from './vmTypeHash';
+import { sameVmType, vmTypeHash } from './vmTypeHash';
 
 // Object
 
@@ -95,7 +95,7 @@ function identityOf(value: Value): number {
 }
 
 export function identical(a: Value, b: Value): boolean {
-  if (a instanceof DartTypeValue && b instanceof DartTypeValue) return sameType(a.type, b.type);
+  if (a instanceof DartTypeValue && b instanceof DartTypeValue) return sameVmType(a.type, b.type);
   if (typeof a === 'number' && typeof b === 'number') return Object.is(a, b) || (a === b && a !== 0);
   return a === b;
 }
@@ -180,7 +180,7 @@ define('Record.toString', (runtime, receiver) => recordToString(runtime, receive
 define('Type.hashCode', (runtime, receiver) => BigInt(vmTypeHash(runtime, (receiver as DartTypeValue).type)));
 define('Type.==', (_runtime, receiver, [other]) => {
   if (!(other instanceof DartTypeValue)) return false;
-  return sameType((receiver as DartTypeValue).type, other.type);
+  return sameVmType((receiver as DartTypeValue).type, other.type);
 });
 define('Type.toString', (_runtime, receiver) => vmTypeString((receiver as DartTypeValue).type));
 

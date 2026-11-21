@@ -1,3 +1,4 @@
+import type { ClassInfo } from '../classes';
 import type { Runtime } from '../runtime';
 import {
   boundOf,
@@ -5,9 +6,11 @@ import {
   DYNAMIC,
   type FunctionType,
   type RecordType,
+  sameType,
   type TypeParam,
   type TypeParamType,
 } from '../types';
+import { SDK_CLASS_IDS } from './sdkClassIds';
 
 interface FunctionParameterHash {
   base: number;
@@ -18,166 +21,18 @@ interface FunctionParameterHash {
 type FunctionParameters = ReadonlyMap<TypeParam, FunctionParameterHash>;
 const EMPTY_PARAMETERS: FunctionParameters = new Map();
 
-// Class IDs for public types in the Dart SDK 3.13.7 JIT platform snapshot.
-const SDK_CLASS_IDS: ReadonlyMap<string, ReadonlyMap<string, number>> = new Map([
-  [
-    'dart:core',
-    new Map([
-      ['ArgumentError', 202],
-      ['AssertionError', 200],
-      ['BigInt', 194],
-      ['CastIterable', 706],
-      ['CastIterator', 705],
-      ['CompactLinkedCustomHashMap', 410],
-      ['CompactLinkedCustomHashSet', 427],
-      ['CompactLinkedIdentityHashMap', 408],
-      ['CompactLinkedIdentityHashSet', 425],
-      ['Comparable', 195],
-      ['ConcurrentModificationError', 209],
-      ['Deprecated', 189],
-      ['Duration', 197],
-      ['EfficientLengthFollowedByIterable', 740],
-      ['EfficientLengthIndexedIterable', 747],
-      ['EfficientLengthIterable', 224],
-      ['EfficientLengthMappedIterable', 720],
-      ['EfficientLengthSkipIterable', 733],
-      ['EfficientLengthTakeIterable', 728],
-      ['EmptyIterable', 737],
-      ['EmptyIterator', 738],
-      ['Enum', 198],
-      ['Error', 199],
-      ['Exception', 212],
-      ['ExpandIterable', 725],
-      ['ExpandIterator', 726],
-      ['FollowedByIterable', 739],
-      ['FollowedByIterator', 741],
-      ['FormatException', 214],
-      ['Function', 184],
-      ['IndexError', 204],
-      ['IndexedIterable', 746],
-      ['IndexedIterator', 748],
-      ['IntegerDivisionByZeroException', 215],
-      ['Invocation', 216],
-      ['Iterable', 218],
-      ['Iterator', 222],
-      ['LateError', 714],
-      ['LinkedHashMap', 392],
-      ['LinkedHashSet', 394],
-      ['List', 226],
-      ['ListIterable', 220],
-      ['ListIterator', 718],
-      ['Map', 227],
-      ['MapEntry', 228],
-      ['MappedIterable', 719],
-      ['MappedIterator', 721],
-      ['MappedListIterable', 722],
-      ['Match', 230],
-      ['NoSuchMethodError', 205],
-      ['Null', 172],
-      ['Object', 45],
-      ['OutOfMemoryError', 210],
-      ['Pattern', 229],
-      ['RangeError', 203],
-      ['Record', 185],
-      ['RegExp', 231],
-      ['RegExpMatch', 232],
-      ['ReversedListIterable', 752],
-      ['RuneIterator', 240],
-      ['Runes', 239],
-      ['Set', 234],
-      ['SkipIterable', 732],
-      ['SkipIterator', 734],
-      ['SkipWhileIterable', 735],
-      ['SkipWhileIterator', 736],
-      ['StackOverflowError', 211],
-      ['StackTrace', 236],
-      ['StateError', 208],
-      ['String', 188],
-      ['StringBuffer', 241],
-      ['StringSink', 242],
-      ['SubListIterable', 717],
-      ['Symbol', 243],
-      ['TakeIterable', 727],
-      ['TakeIterator', 729],
-      ['TakeWhileIterable', 730],
-      ['TakeWhileIterator', 731],
-      ['Type', 183],
-      ['TypeError', 201],
-      ['UnimplementedError', 207],
-      ['UnmodifiableSetView', 489],
-      ['UnsupportedError', 206],
-      ['WhereIterable', 723],
-      ['WhereIterator', 724],
-      ['WhereTypeIterable', 742],
-      ['WhereTypeIterator', 743],
-      ['bool', 63],
-      ['double', 187],
-      ['int', 186],
-      ['num', 58],
-      ['pragma', 193],
-    ]),
-  ],
-  [
-    'dart:math',
-    new Map([
-      ['MutableRectangle', 781],
-      ['Point', 777],
-      ['Random', 778],
-      ['Rectangle', 780],
-    ]),
-  ],
-  [
-    'dart:collection',
-    new Map([
-      ['CastList', 710],
-      ['CastMap', 712],
-      ['CastQueue', 713],
-      ['CastSet', 711],
-      ['CodeUnits', 688],
-      ['DoubleLinkedQueue', 481],
-      ['DoubleLinkedQueueEntry', 479],
-      ['HashMap', 462],
-      ['HashSet', 463],
-      ['ListBase', 264],
-      ['ListMapView', 751],
-      ['ListQueue', 483],
-      ['MapBase', 430],
-      ['Queue', 476],
-      ['SetBase', 445],
-      ['SplayTreeMap', 495],
-      ['SplayTreeSet', 504],
-      ['UnmodifiableListView', 460],
-      ['UnmodifiableMapView', 473],
-    ]),
-  ],
-  [
-    'dart:convert',
-    new Map([
-      ['Base64Codec', 534],
-      ['Base64Decoder', 542],
-      ['Base64Encoder', 536],
-      ['Codec', 535],
-      ['Converter', 525],
-      ['Encoding', 523],
-      ['JsonCodec', 558],
-      ['JsonCyclicError', 557],
-      ['JsonDecoder', 563],
-      ['JsonEncoder', 559],
-      ['JsonUnsupportedObjectError', 556],
-      ['LineSplitter', 577],
-      ['Utf8Codec', 590],
-      ['Utf8Decoder', 595],
-      ['Utf8Encoder', 591],
-    ]),
-  ],
-  [
-    'dart:io',
-    new Map([
-      ['IOSink', 995],
-      ['Stdout', 1080],
-    ]),
-  ],
-]);
+export function sameVmType(left: DartType, right: DartType): boolean {
+  return sameType(left, right, sameVmClass);
+}
+
+function sameVmClass(left: ClassInfo, right: ClassInfo): boolean {
+  const id = vmClassId(left);
+  return id !== undefined && id === vmClassId(right);
+}
+
+function vmClassId(cls: ClassInfo): number | undefined {
+  return cls.vmClassId ?? SDK_CLASS_IDS.get(cls.library)?.get(cls.name);
+}
 
 export function vmTypeHash(runtime: Runtime, type: DartType, parameters = EMPTY_PARAMETERS): number {
   runtime.spend();
@@ -196,7 +51,7 @@ export function vmTypeHash(runtime: Runtime, type: DartType, parameters = EMPTY_
       return hashInterface(175, type.nullable);
     }
     case 'interface': {
-      const classId = type.cls.vmClassId ?? SDK_CLASS_IDS.get(type.cls.library)?.get(type.cls.name);
+      const classId = vmClassId(type.cls);
       if (classId !== undefined) return hashInterface(classId, type.nullable, hashArguments(type.args, hash));
       let result = type.cls.name.length;
       for (const argument of type.args) result = Math.imul(result, 31) + hash(argument);

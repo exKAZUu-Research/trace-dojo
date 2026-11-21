@@ -5,6 +5,35 @@ import { executeProgram, traceProgram } from '../../src/interpreter/program';
 // Dart SDK 3.13.7 (`dart run`) prints the expected output: the VM's hash codes and the bucket order of HashMap and
 // HashSet, the default map's insertion order, Random's sequence for a seed, shuffle, and the order sort leaves equal
 // elements in.
+test('SDK runtime types use the implementation class IDs for hashing and equality', () => {
+  const program = `import 'dart:collection';
+import 'dart:convert';
+void main() {
+  final values = <Object>[
+    <int>{}, <int, int>{}, const <int>{1}, const <int, int>{1: 2},
+    HashMap<int, int>(), HashSet<int>(), HashMap<int, int>.identity(), HashSet<int>.identity(),
+    utf8.encode('dart'), RegExp('a').allMatches('abc'), 'a'.allMatches('abc'),
+    RegExp('a').allMatches('a').iterator, ListQueue<int>().iterator, const Symbol('foo'),
+    {1: 2}.entries.iterator, [1], const [1],
+  ];
+  print(values.map((value) => value.runtimeType.hashCode).toList());
+  final setIterator = {1}.iterator.runtimeType;
+  final mapIterator = {1: 2}.keys.iterator.runtimeType;
+  print([setIterator, mapIterator, setIterator.hashCode, setIterator == mapIterator,
+    identical(setIterator, mapIterator), HashSet<Type>.of([setIterator, mapIterator]).length]);
+  final entries = {1: 2}.entries.iterator;
+  print([entries.runtimeType, entries.moveNext(), entries.current.value]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[424476787, 265172708, 148984701, 818322171, 459265929, 825108430, 893455867, 129618337, ' +
+      '774657860, 318142069, 629774339, 54613558, 713928503, 591490724, 681192328, 77465998, 77465998]\n' +
+      '[_CompactIterator<int>, _CompactIterator<int>, 254673379, true, true, 1]\n' +
+      '[_CompactEntriesIterator<int, int>, true, 2]\n',
+  });
+});
+
 test('public SDK types share Dart VM hashes across libraries', () => {
   const program = `import 'dart:collection';
 import 'dart:convert';

@@ -204,24 +204,29 @@ export function nonNullable(type: DartType): DartType {
 
 // code-gauge-allow functionCognitiveComplexity 19 -- One case per kind of type, in the order of Dart's rules.
 // code-gauge-allow functionNcss 32 -- Each kind compares its own structure.
-export function sameType(a: DartType, b: DartType): boolean {
+export function sameType(
+  a: DartType,
+  b: DartType,
+  sameClass?: (left: ClassInfo, right: ClassInfo) => boolean
+): boolean {
   if (a === b) return true;
   if (a.kind !== b.kind) return false;
+  const equal = sameClass ? (left: DartType, right: DartType) => sameType(left, right, sameClass) : sameType;
   switch (a.kind) {
     case 'interface': {
       const other = b as InterfaceType;
       return (
-        a.cls === other.cls &&
+        (a.cls === other.cls || sameClass?.(a.cls, other.cls) === true) &&
         a.nullable === other.nullable &&
         a.args.length === other.args.length &&
-        a.args.every((arg, index) => sameType(arg, other.args[index]))
+        a.args.every((arg, index) => equal(arg, other.args[index]))
       );
     }
     case 'typeParam': {
       const other = b as TypeParamType;
       if (a.param !== other.param || a.nullable !== other.nullable) return false;
       if (!a.promoted || !other.promoted) return a.promoted === other.promoted;
-      return sameType(a.promoted, other.promoted);
+      return equal(a.promoted, other.promoted);
     }
     case 'never': {
       return a.nullable === (b as { nullable: boolean }).nullable;
@@ -231,10 +236,10 @@ export function sameType(a: DartType, b: DartType): boolean {
       return (
         a.nullable === other.nullable &&
         a.positional.length === other.positional.length &&
-        a.positional.every((type, index) => sameType(type, other.positional[index])) &&
+        a.positional.every((type, index) => equal(type, other.positional[index])) &&
         a.named.length === other.named.length &&
         a.named.every(
-          (field, index) => field.name === other.named[index].name && sameType(field.type, other.named[index].type)
+          (field, index) => field.name === other.named[index].name && equal(field.type, other.named[index].type)
         )
       );
     }
@@ -248,17 +253,17 @@ export function sameType(a: DartType, b: DartType): boolean {
       ) {
         return false;
       }
-      const aligned = alignTypeParams(a, other, sameType);
+      const aligned = alignTypeParams(a, other, equal);
       if (!aligned) return false;
       const [left, right] = aligned;
       return (
-        sameType(left.returnType, right.returnType) &&
-        left.positional.every((type, index) => sameType(type, right.positional[index])) &&
+        equal(left.returnType, right.returnType) &&
+        left.positional.every((type, index) => equal(type, right.positional[index])) &&
         left.named.every(
           (named, index) =>
             named.name === right.named[index].name &&
             named.isRequired === right.named[index].isRequired &&
-            sameType(named.type, right.named[index].type)
+            equal(named.type, right.named[index].type)
         )
       );
     }

@@ -3,15 +3,7 @@ import type { TopLevelFunction } from '../environment';
 import { stringOf } from '../format';
 import { type HashPolicy, HashStore } from '../hashStore';
 import { type Frame, Frame as FrameClass, type Runtime } from '../runtime';
-import {
-  coreTypes,
-  type DartType,
-  DYNAMIC,
-  type InterfaceType,
-  interfaceType,
-  isSubtype,
-  makeNullable,
-} from '../types';
+import { coreTypes, type DartType, DYNAMIC, interfaceType, isSubtype, makeNullable } from '../types';
 import { Cell, DartClosure, DartList, DartObject, type Value } from '../values';
 import { BoundedStringParts } from './boundedStringParts';
 import { dartSort } from './listSort';
@@ -982,9 +974,7 @@ function moveStoreIterator(runtime: Runtime, receiver: Value): boolean {
         '_',
         [key, state.store.entryValues[position]],
         undefined,
-        (receiver as DartObject).typeArgs[0].kind === 'interface'
-          ? ((receiver as DartObject).typeArgs[0] as InterfaceType).args
-          : undefined
+        (receiver as DartObject).typeArgs
       );
     }
     return true;
@@ -1260,18 +1250,17 @@ define('_CompactKeysIterable.iterator', (runtime, receiver) =>
 define('_CompactValuesIterable.iterator', (runtime, receiver) =>
   storeIterator(runtime, viewedMap(receiver), '_MapIterator', 'values', (receiver as DartObject).typeArgs)
 );
-define('_CompactEntriesIterable.iterator', (runtime, receiver) => {
-  const mapEntry = runtime.links.classNamed('MapEntry');
-  return storeIterator(runtime, viewedMap(receiver), '_MapIterator', 'entries', [
-    interfaceType(mapEntry, (receiver as DartObject).typeArgs),
-  ]);
-});
+define('_CompactEntriesIterable.iterator', (runtime, receiver) =>
+  storeIterator(runtime, viewedMap(receiver), '_CompactEntriesIterator', 'entries', (receiver as DartObject).typeArgs)
+);
 define('_CompactKeysIterable.length', (_runtime, receiver) => BigInt(store(viewedMap(receiver)).size));
 define('_CompactValuesIterable.length', (_runtime, receiver) => BigInt(store(viewedMap(receiver)).size));
 define('_CompactEntriesIterable.length', (_runtime, receiver) => BigInt(store(viewedMap(receiver)).size));
 define('_CompactKeysIterable.contains', (_runtime, receiver, [key]) => store(viewedMap(receiver)).has(key));
 define('_MapIterator.moveNext', (runtime, receiver) => moveStoreIterator(runtime, receiver));
 define('_MapIterator.current', (runtime, receiver) => storeCurrent(runtime, receiver));
+define('_CompactEntriesIterator.moveNext', (runtime, receiver) => moveStoreIterator(runtime, receiver));
+define('_CompactEntriesIterator.current', (runtime, receiver) => storeCurrent(runtime, receiver));
 define('Map.addEntries', (runtime, receiver, [entries]) => {
   const map = receiver as DartObject;
   const entryType = interfaceType(coreTypes.mapEntry, map.typeArgs);

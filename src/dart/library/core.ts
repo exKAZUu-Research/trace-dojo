@@ -2290,6 +2290,12 @@ class _MapIterator<E> implements Iterator<E> {
   external E get current;
 }
 
+class _CompactEntriesIterator<K, V> implements Iterator<MapEntry<K, V>> {
+  _CompactEntriesIterator._();
+  external bool moveNext();
+  external MapEntry<K, V> get current;
+}
+
 // Big integers
 
 abstract final class BigInt implements Comparable<BigInt> {
