@@ -60,6 +60,39 @@ test.each(['contains', 'split'])('charges the execution budget during CharSequen
 /** Programs with the output of Kotlin 2.4.21 on the JVM (Java 25), which the interpreter must reproduce exactly. */
 test.each([
   {
+    name: 'map builders remove the last matching value using the stored value’s equality',
+    source: `class Match(val id: Int) {
+    override fun equals(other: Any?): Boolean {
+        println("compare $id")
+        return other is Match && other.id == 0
+    }
+    override fun hashCode(): Int = id
+    override fun toString(): String = "Match($id)"
+}
+
+fun main() {
+    val builder = buildMap {
+        put(1, "same")
+        put(2, "same")
+        values.remove("same")
+    }
+    println(builder)
+    val ordinary = mutableMapOf(1 to "same", 2 to "same")
+    ordinary.values.remove("same")
+    println(ordinary)
+    println(buildMap {
+        put(1, Match(1))
+        put(2, Match(2))
+        values.remove(Match(0))
+    })
+}`,
+    stdout: `{1=same}
+{2=same}
+compare 2
+{1=Match(1)}
+`,
+  },
+  {
     name: 'floating point neighbors use the precision of each imported overload',
     source: `import kotlin.math.nextUp
 import kotlin.math.nextDown

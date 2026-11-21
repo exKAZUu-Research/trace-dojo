@@ -1238,10 +1238,11 @@ function matchingEntry(frame: Frame, store: KStore, element: Value, removing: bo
 function defineViewChanging(owner: string): void {
   defineNative(`${owner}.remove(E)`, (frame, view, [element]) => {
     const { map, view: kind } = viewOf(view);
-    if (storeOf(map).isSingleton)
-      return removeFirstIterable(frame, view, (value) => valueEquals(frame, element, value));
+    const store = storeOf(map);
+    if (store.isSingleton) return removeFirstIterable(frame, view, (value) => valueEquals(frame, element, value));
     requireMutableMap(frame, map);
-    if (kind === 'values') return removeFirstIterable(frame, view, (value) => objectsEqual(frame, element, value));
+    if (kind === 'values' && !(store instanceof BuilderStore))
+      return removeFirstIterable(frame, view, (value) => objectsEqual(frame, element, value));
     const entry = matchingViewEntry(frame, view, element, true);
     if (!entry) return false;
     removeStoreEntry(frame, map, entry);
