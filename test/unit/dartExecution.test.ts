@@ -1638,6 +1638,18 @@ void main() { Object a = F(1); Object b = G(2); Object? c = H(3); print([a, b, c
   expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '[1, 2, 3]\n' });
 });
 
+test('Dart fully annotated closures constrain type arguments alongside the other arguments', () => {
+  const program = `T f16<T>(T a, T Function(T) g) => g(a);
+T apply2<T>(T a, T b, T Function(T, T) g) => g(a, b);
+void main() {
+  var x = f16(1, (num y) => y * 1.5);
+  var y = apply2(1, 2, (num p, num q) => p / q);
+  num z = x;
+  print([z, x.runtimeType, y]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[1.5, double, 0.5]\n' });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}

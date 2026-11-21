@@ -800,7 +800,8 @@ export abstract class CallCompiler extends OperatorCompiler {
         tearOffs.push({ result, parameterType });
       } else {
         // A function literal's own type constrains even by Never, as a closure that throws makes its result Never.
-        inferFromSubtype(result.type, parameterType, params, solution, upperBound, upper, closurePass);
+        const isLiteral = functionLiteral(argument) !== undefined;
+        inferFromSubtype(result.type, parameterType, params, solution, upperBound, upper, isLiteral);
       }
     });
     for (const { result, parameterType } of tearOffs) {
@@ -1253,9 +1254,15 @@ function visitCallArguments(
   for (const closure of closures) visit(closure, true);
 }
 
+/** Whether an argument is a function literal that takes a parameter's type from its context, which Dart types last. */
 function isClosureArgument(expression: Expression): boolean {
+  const literal = functionLiteral(expression);
+  return literal !== undefined && [...literal.parameters.positional, ...literal.parameters.named].some((p) => !p.type);
+}
+
+function functionLiteral(expression: Expression): Extract<Expression, { kind: 'function' }> | undefined {
   while (expression.kind === 'parenthesized') expression = expression.expression;
-  return expression.kind === 'function';
+  return expression.kind === 'function' ? expression : undefined;
 }
 
 function callArgument(
