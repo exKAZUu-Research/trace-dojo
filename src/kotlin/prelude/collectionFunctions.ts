@@ -902,10 +902,29 @@ inline fun <T> List<T>.takeLastWhile(predicate: (T) -> Boolean): List<T> {
 fun <T> Iterable<T>.drop(n: Int): List<T> {
     if (n < 0) throw IllegalArgumentException("Requested element count $n is less than zero.")
     if (n == 0) return toList()
-    val list = ArrayList<T>()
-    var count = 0
+    val list: ArrayList<T>
+    if (this is Collection) {
+        val remaining = size - n
+        if (remaining <= 0) return emptyList()
+        if (remaining == 1) return listOf(last())
+        list = ArrayList<T>(remaining)
+        if (this is List) {
+            val source: List<T> = this
+            if (source is RandomAccess) {
+                val end = this.size
+                for (index in n until end) list.add(this.get(index))
+            } else {
+                val iterator = source.listIterator(n)
+                while (iterator.hasNext()) list.add(iterator.next())
+            }
+            return list
+        }
+    } else {
+        list = ArrayList<T>()
+    }
+    var skipped = 0
     for (item in this) {
-        if (count >= n) list.add(item) else ++count
+        if (skipped < n) ++skipped else list.add(item)
     }
     return list.optimizeReadOnlyList()
 }

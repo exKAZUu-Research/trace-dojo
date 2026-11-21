@@ -2985,6 +2985,29 @@ fun main() { println(A(3).values) }`,
     stdout: 'set\nmap\nkeys\nentry\n[1, 2]\n{1=a, 2=b}\n',
   },
   {
+    name: 'drop skips whole collections and reads list suffixes in JVM order',
+    source: `class DropProbe(private val values: List<Int>) : List<Int> by values {
+    override val size: Int get() { println("size"); return values.size }
+    override fun isEmpty(): Boolean { println("isEmpty"); return values.isEmpty() }
+    override fun get(index: Int): Int { println("get $index"); return values[index] }
+    override fun iterator(): Iterator<Int> { println("iterator"); return values.iterator() }
+    override fun listIterator(index: Int): ListIterator<Int> { println("listIterator $index"); return values.listIterator(index) }
+}
+class RandomDrop(private val list: DropProbe) : List<Int> by list, RandomAccess
+fun main() {
+    val list = DropProbe(listOf(0, 1, 2, 3))
+    println(list.drop(4))
+    println(list.drop(3))
+    println(list.drop(2))
+    println(RandomDrop(list).drop(2))
+    println((0..3).drop(2))
+    val large = IntArray(150000).asList()
+    println(large.drop(150000).size)
+}`,
+    stdout:
+      'size\n[]\nsize\nisEmpty\nsize\nget 3\n[3]\nsize\nlistIterator 2\n[2, 3]\nsize\nsize\nget 2\nget 3\n[2, 3]\n[2, 3]\n0\n',
+  },
+  {
     name: 'slicing calls index collections in JVM order and preserves array kinds',
     source: `class IndexSelection(private val data: List<Int>) : Collection<Int> by data {
     override val size: Int get() { println("size"); return data.size }
