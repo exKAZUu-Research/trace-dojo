@@ -252,6 +252,12 @@ ${unsignedDivision('UByte')}
     external override fun equals(other: Any?): Boolean
     external override fun hashCode(): Int
     external override fun toString(): String
+    companion object {
+        const val MIN_VALUE: UByte = 0u
+        const val MAX_VALUE: UByte = 255u
+        const val SIZE_BYTES: Int = 1
+        const val SIZE_BITS: Int = 8
+    }
 }
 
 class UShort private constructor() : Comparable<UShort> {
@@ -263,6 +269,12 @@ ${unsignedDivision('UShort')}
     external override fun equals(other: Any?): Boolean
     external override fun hashCode(): Int
     external override fun toString(): String
+    companion object {
+        const val MIN_VALUE: UShort = 0u
+        const val MAX_VALUE: UShort = 65535u
+        const val SIZE_BYTES: Int = 2
+        const val SIZE_BITS: Int = 16
+    }
 }
 
 class UInt private constructor() : Comparable<UInt> {
@@ -278,6 +290,8 @@ ${unsignedDivision('UInt')}
     companion object {
         const val MIN_VALUE: UInt = 0u
         const val MAX_VALUE: UInt = 4294967295u
+        const val SIZE_BYTES: Int = 4
+        const val SIZE_BITS: Int = 32
     }
 }
 
@@ -294,6 +308,8 @@ ${unsignedDivision('ULong')}
     companion object {
         const val MIN_VALUE: ULong = 0uL
         const val MAX_VALUE: ULong = 18446744073709551615uL
+        const val SIZE_BYTES: Int = 8
+        const val SIZE_BITS: Int = 64
     }
 }
 
