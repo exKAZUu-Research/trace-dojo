@@ -1592,6 +1592,24 @@ void main() { A().show(); print({...items}); }`;
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[{1, 2}, {a: 1}]\n{3}\n' });
 });
 
+test.each([
+  'mixin M { int x; }\nclass C with M {}\nvoid main() { print(C().x); }',
+  'mixin M<T> { T t; }\nvoid main() {}',
+  'mixin M { final int x; }\nvoid main() {}',
+  'class A { int x; factory A() => throw 1; }\nvoid main() {}',
+])('Dart requires initializers on fields no generative constructor can set: %s', (program) => {
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ row: 0 })],
+  });
+});
+
+test('Dart accepts nullable, late, and initialized fields without generative constructors', () => {
+  const program =
+    'mixin M { int? x; late int y; int z = 1; final w = 2; dynamic d; }\nclass C with M {}\nvoid main() { print([C().x, C().z, C().d]); }';
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[null, 1, null]\n' });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}

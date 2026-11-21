@@ -1336,6 +1336,23 @@ export class Compiler extends MemberCompiler {
     if (cls.kind === 'enum') this.checkEnumMembers(cls, declaration);
     this.checkMemberOverrides(cls);
     if (cls.kind !== 'mixin' && cls.kind !== 'extensionType') this.checkImplemented(cls, declaration);
+    if (![...cls.constructors.values()].some((constructor) => constructor.kind === 'generative'))
+      this.checkFieldsWithoutConstructors(cls, declaration);
+  }
+
+  /** A mixin's or factory-only class's field no constructor can initialize needs an initializer, as Dart reports at it. */
+  private checkFieldsWithoutConstructors(cls: ClassInfo, declaration: ClassDeclaration): void {
+    for (const member of declaration.members) {
+      if (member.kind !== 'field' || member.isStatic || member.isLate || member.isAbstract || member.isExternal)
+        continue;
+      for (const variable of member.variables) {
+        if (variable.initializer) continue;
+        const field = cls.fields.find((candidate) => candidate.name === variable.name);
+        if (member.isFinal) this.error(variable, `final のフィールド ${variable.name} が、初期化されていません。`);
+        else if (field && !isNullable(field.type) && field.type.kind !== 'dynamic')
+          this.error(variable, `null にならないフィールド ${variable.name} には、初期値が必要です。`);
+      }
+    }
   }
 
   private checkMemberOverrides(cls: ClassInfo, span?: Span): void {
