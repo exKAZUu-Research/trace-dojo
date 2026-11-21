@@ -2048,6 +2048,40 @@ void main() {
   }
 });
 
+test('Dart type annotations may be super-bounded while instantiations stay regular-bounded', () => {
+  const header = 'class Box<T extends num> { final T? value; Box([this.value]); }';
+  const program = `${header}
+void main() {
+  Box<dynamic> b = Box<int>(1);
+  List<Box<Object?>> l = [Box<double>(2.5)];
+  Object o = b;
+  print([b.value, l.first.value, o is Box<void>]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[1, 2.5, true]\n' });
+  for (const rest of [
+    'void main() { Box<dynamic>(); }',
+    'class C extends Box<dynamic> {} void main() {}',
+    'typedef B = Box<dynamic>; void main() {}',
+    'void main() { Box<String>? b; }',
+  ]) {
+    expect(executeProgram('dart', `${header}\n${rest}`)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
+test('Dart static members cannot share a name with inherited instance members', () => {
+  for (const program of [
+    'class A { int count = 0; } class B extends A { static int count = 5; } void main() {}',
+    'class A { set x(int v) {} } class B extends A { static int get x => 1; } void main() {}',
+    'mixin M { int y = 0; } class B with M { static int y = 1; } void main() {}',
+  ]) {
+    expect(executeProgram('dart', program)).toMatchObject({ kind: 'compileError' });
+  }
+  const allowed = `class A { static void f() {} static int c = 0; }
+class B extends A { void f() { print('B.f'); } static int c = 1; }
+void main() { B().f(); print(B.c); }`;
+  expect(executeProgram('dart', allowed)).toMatchObject({ kind: 'executed', stdout: 'B.f\n1\n' });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}

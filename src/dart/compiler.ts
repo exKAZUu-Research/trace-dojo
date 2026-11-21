@@ -375,6 +375,7 @@ export class Compiler extends MemberCompiler {
     if (type.kind !== 'interface' || type.nullable) {
       return this.error(syntax, `${typeToString(type)} は${role}にできません。`);
     }
+    this.checkBounds(type.cls.typeParams, type.args, syntax);
     if (cls.kind === 'extensionType') {
       if (type.cls === coreTypes.function || type.cls === coreTypes.record)
         this.error(syntax, `${typeToString(type)} は${role}にできません。`);
@@ -1411,6 +1412,23 @@ export class Compiler extends MemberCompiler {
   private checkMemberOverrides(cls: ClassInfo, span?: Span): void {
     for (const member of cls.members.values()) this.checkOverride(cls, member, false, span);
     for (const member of cls.setters.values()) this.checkOverride(cls, member, true, span);
+    for (const member of [...cls.staticMembers.values(), ...cls.staticSetters.values()])
+      this.checkStaticConflict(cls, member, span);
+  }
+
+  /** A static member may not share its name with an instance getter, setter or method of a supertype. */
+  private checkStaticConflict(cls: ClassInfo, member: Member, span?: Span): void {
+    const library = cls.library;
+    for (const supertype of cls.directSupertypes) {
+      const inherited =
+        this.interfaceMember(supertype, member.name, false, library) ??
+        this.interfaceMember(supertype, member.name, true, library);
+      if (!inherited || inherited.member.isStatic) continue;
+      this.error(
+        { row: member.row ?? span?.row ?? 0 },
+        `静的メンバー ${cls.name}.${member.name} は、受け継いだ ${(inherited.member.owner.mixinOf ?? inherited.member.owner).name}.${member.name} と同じ名前なので宣言できません。`
+      );
+    }
   }
 
   private checkEnumMembers(cls: ClassInfo, declaration: ClassDeclaration): void {

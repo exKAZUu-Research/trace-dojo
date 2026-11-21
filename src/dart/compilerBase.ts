@@ -453,7 +453,7 @@ export abstract class CompilerBase {
     const type = this.resolveAlias(alias, syntax);
     if (syntax.args.length === 0 && alias.typeParams.length > 0 && options.inferOmitted)
       return options.inferOmitted(type, alias.typeParams);
-    const args = this.typeArgumentsFor(alias.typeParams, syntax, syntax.name);
+    const args = this.typeArgumentsFor(alias.typeParams, syntax, syntax.name, true);
     return substitute(type, new Map(alias.typeParams.map((param, index) => [param, args[index]])));
   }
 
@@ -466,7 +466,12 @@ export abstract class CompilerBase {
       this.withIsolatedTypes(() =>
         this.withoutFunctionTypeAnnotations(() => {
           alias.typeParams.push(...this.declareTypeParams(declaration.typeParameters));
-          return this.withTypeParams(alias.typeParams, () => this.resolveType(declaration.aliased));
+          return this.withTypeParams(alias.typeParams, () => {
+            const aliased = this.resolveType(declaration.aliased);
+            if (aliased.kind === 'interface')
+              this.checkBounds(aliased.cls.typeParams, aliased.args, declaration.aliased);
+            return aliased;
+          });
         })
       )
     );
@@ -521,22 +526,26 @@ export abstract class CompilerBase {
     this.resolveClassBounds(cls);
     if (syntax.args.length === 0 && cls.typeParams.length > 0 && options.inferOmitted)
       return options.inferOmitted(cls.thisType, cls.typeParams);
-    const args = this.typeArgumentsFor(cls.typeParams, syntax, cls.name);
+    const args = this.typeArgumentsFor(cls.typeParams, syntax, cls.name, true);
     return cls === coreTypes.nullClass ? NULL : interfaceType(cls, args);
   }
 
-  /** The type arguments of a generic type, or the instantiation to bounds when they are omitted. */
+  /**
+   * The type arguments of a generic type, or the instantiation to bounds when they are omitted. A type annotation may be
+   * super-bounded (`Box<dynamic>` for `Box<T extends num>`); an instantiation must be regular-bounded.
+   */
   protected typeArgumentsFor(
     params: TypeParam[],
     syntax: Extract<TypeSyntax, { kind: 'named' }>,
-    name: string
+    name: string,
+    superBounded = false
   ): DartType[] {
     if (syntax.args.length === 0) return instantiateToBounds(params);
     if (syntax.args.length !== params.length) {
       this.error(syntax, `型 ${name} の型引数は ${params.length} 個ですが、${syntax.args.length} 個書かれています。`);
     }
     const args = syntax.args.map((arg) => this.resolveType(arg));
-    this.checkBounds(params, args, syntax);
+    this.checkBounds(params, args, syntax, superBounded);
     return args;
   }
 
@@ -548,23 +557,32 @@ export abstract class CompilerBase {
     return typeArgs;
   }
 
-  protected checkBounds(params: readonly TypeParam[], args: readonly DartType[], span: Span): void {
+  protected checkBounds(
+    params: readonly TypeParam[],
+    args: readonly DartType[],
+    span: Span,
+    superBounded = false
+  ): void {
     // A bound may refer to a subclass whose supertypes are declared later.
     if (this.pendingBoundChecks) {
-      this.pendingBoundChecks.push(() => this.checkBounds(params, args, span));
+      this.pendingBoundChecks.push(() => this.checkBounds(params, args, span, superBounded));
       return;
     }
-    const map = new Map(params.map((param, index) => [param, args[index]]));
-    for (const [index, param] of params.entries()) {
-      if (!param.bound) continue;
-      const bound = substitute(param.bound, map);
-      if (!isSubtype(args[index], bound)) {
-        this.error(
-          span,
-          `型引数 ${typeName(args[index])} は、${param.name} の制約 ${typeName(bound)} を満たしません。`
-        );
-      }
-    }
+    const violation = boundViolation(params, args);
+    if (
+      !violation ||
+      (superBounded &&
+        !boundViolation(
+          params,
+          args.map((arg) => withoutTopTypes(arg, true))
+        ))
+    )
+      return;
+    const [index, bound] = violation;
+    this.error(
+      span,
+      `型引数 ${typeName(args[index])} は、${params[index].name} の制約 ${typeName(bound)} を満たしません。`
+    );
   }
 
   protected checkRepresentationInterfaces(cls: ClassInfo, representation: DartType, interfaces: TypeSyntax[]): void {
@@ -1031,4 +1049,47 @@ export function extensionMember(
     type: substitute(member.type, map),
     extension: { ext, typeArgs, onType: substitute(ext.onType, map) },
   };
+}
+
+/** The first type argument outside its parameter's bound, with that bound. */
+function boundViolation(params: readonly TypeParam[], args: readonly DartType[]): [number, DartType] | undefined {
+  const map = new Map(params.map((param, index) => [param, args[index]]));
+  for (const [index, param] of params.entries()) {
+    if (!param.bound) continue;
+    const bound = substitute(param.bound, map);
+    if (!isSubtype(args[index], bound)) return [index, bound];
+  }
+  return undefined;
+}
+
+/**
+ * The type a super-bounded type is checked as: covariant top types become `Never` and contravariant `Never` becomes
+ * `Object?`.
+ */
+function withoutTopTypes(type: DartType, covariant: boolean): DartType {
+  if (covariant && isTop(type)) return NEVER;
+  if (!covariant && type.kind === 'never' && !type.nullable) return objectType(true);
+  switch (type.kind) {
+    case 'interface': {
+      return { ...type, args: type.args.map((arg) => withoutTopTypes(arg, covariant)) };
+    }
+    case 'record': {
+      return {
+        ...type,
+        positional: type.positional.map((field) => withoutTopTypes(field, covariant)),
+        named: type.named.map((field) => ({ ...field, type: withoutTopTypes(field.type, covariant) })),
+      };
+    }
+    case 'function': {
+      return {
+        ...type,
+        returnType: withoutTopTypes(type.returnType, covariant),
+        positional: type.positional.map((parameter) => withoutTopTypes(parameter, !covariant)),
+        named: type.named.map((parameter) => ({ ...parameter, type: withoutTopTypes(parameter.type, !covariant) })),
+      };
+    }
+    default: {
+      return type;
+    }
+  }
 }
