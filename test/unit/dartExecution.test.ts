@@ -2138,9 +2138,10 @@ void main() {
   int Function(int) a = true ? id : (int x) => x;
   int Function(int) b = switch (1) { 1 => id, _ => (int x) => x };
   int Function(int) c = g ?? id;
-  print([a(1), b(2), c(3)]);
+  var d = g ?? id;
+  print([a(1), b(2), c(3), d.runtimeType]);
 }`;
-  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[1, 2, 3]\n' });
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[1, 2, 3, (int) => int]\n' });
 });
 
 test('Dart infers type arguments from the call method of a callable object', () => {

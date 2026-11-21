@@ -270,10 +270,8 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     const left = this.compileExpression(expression.left, context ? makeNullable(context) : undefined);
     const { whenNull, whenNonNull } = this.nullBranches(left);
     this.flow = whenNull;
-    const right = this.instantiateInContext(
-      this.compileExpression(expression.right, context ?? nonNullable(left.type)),
-      context
-    );
+    const rightContext = context ?? nonNullable(left.type);
+    const right = this.instantiateInContext(this.compileExpression(expression.right, rightContext), rightContext);
     this.flow = Flow.join(whenNonNull, this.flow);
     const leftRun = left.run;
     const rightRun = right.run;
