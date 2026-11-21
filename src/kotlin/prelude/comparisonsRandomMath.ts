@@ -5,13 +5,13 @@ export const COMPARISONS_SOURCE = kotlin`
 package kotlin.comparisons
 
 fun <T : Comparable<*>> compareValues(a: T?, b: T?): Int {
-    if (a === b) return 0
-    if (a == null) return -1
+    if (a == null) return if (b == null) 0 else -1
     if (b == null) return 1
     return (a as Comparable<Any>).compareTo(b)
 }
 
 fun <T> compareValuesBy(a: T, b: T, vararg selectors: (T) -> Comparable<*>?): Int {
+    require(selectors.isNotEmpty())
     for (fn in selectors) {
         val v1 = fn(a)
         val v2 = fn(b)

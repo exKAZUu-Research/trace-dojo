@@ -33,6 +33,22 @@ test.each(['contains', 'split'])('charges the execution budget during CharSequen
 /** Programs with the output of Kotlin 2.4.21 on the JVM (Java 25), which the interpreter must reproduce exactly. */
 test.each([
   {
+    name: 'comparisons invoke user code for identical operands and reject empty selector lists',
+    source: `class Score : Comparable<Score> {
+    override fun compareTo(other: Score): Int {
+        println("compare")
+        return 0
+    }
+}
+fun main() {
+    val score = Score()
+    println(compareValues(score, score))
+    println(compareBy<Score> { it }.compare(score, score))
+    try { compareValuesBy(1, 2) } catch (e: IllegalArgumentException) { println(e.message) }
+}`,
+    stdout: 'compare\n0\ncompare\n0\nFailed requirement.\n',
+  },
+  {
     name: 'primitive extension property writes share the receiver representation of reads',
     source: `var Int.score: Int
     get() { println("int get $this"); return this }
