@@ -8585,3 +8585,18 @@ test('an integer literal writes its base prefix in lowercase', () => {
     stdout: '255 5\n',
   });
 });
+
+test('a range with a parenthesized end is the body of a closure, return, and break', () => {
+  const program = rustMain(
+    `
+    let n = 4;
+    let ranges: Vec<i32> = (0..n).flat_map(|i| 0..(n - i)).collect();
+    let r = loop { break 0..(n + 1); };
+    println!("{:?} {:?} {:?}", ranges, r, up_to(2));`,
+    'fn up_to(n: i32) -> std::ops::Range<i32> { return 0..(n + 1); }'
+  );
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[0, 1, 2, 3, 0, 1, 2, 0, 1, 0] 0..5 0..3\n',
+  });
+});
