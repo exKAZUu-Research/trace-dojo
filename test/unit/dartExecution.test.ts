@@ -1888,6 +1888,8 @@ test.each(['var y = {...x};', 'var y = {if (true) ...x};'])(
     expect(executeProgram('dart', 'void main() { var y = {...{}, ...<int>{1}}; }')).toMatchObject({
       kind: 'compileError',
     });
+    const wrapped = 'void main() { print([{...(true ? {} : {}), 1}.runtimeType, [...[1], ...[2.0]].runtimeType]); }';
+    expect(executeProgram('dart', wrapped)).toMatchObject({ kind: 'executed', stdout: '[_Set<dynamic>, List<num>]\n' });
   }
 );
 
