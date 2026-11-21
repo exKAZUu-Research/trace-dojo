@@ -1476,13 +1476,13 @@ export class Compiler extends MemberCompiler {
       ext.onType = this.resolveTypeWithoutAnnotations(declaration.onType);
       const holder = new ClassInfo(ext.name ?? 'extension', 'class', this.library.name);
       holder.typeParams.push(...ext.typeParams);
+      ext.staticMembers = holder.staticMembers;
+      ext.staticSetters = holder.staticSetters;
       for (const member of declaration.members) {
         if (member.kind === 'constructor') this.error(member, '拡張にはコンストラクタを書けません。');
         if (member.kind === 'field') {
           if (!member.isStatic) this.error(member, '拡張には、インスタンスのフィールドを宣言できません。');
           this.declareAccessibleMember(holder, member, ext);
-          for (const [name, value] of holder.staticMembers) ext.staticMembers.set(name, value);
-          for (const [name, value] of holder.staticSetters) ext.staticSetters.set(name, value);
           continue;
         }
         if (member.kind === 'method') this.declareAccessibleMember(holder, member, ext);

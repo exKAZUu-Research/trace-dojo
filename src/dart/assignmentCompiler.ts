@@ -248,25 +248,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
         return this.error(expression, '括弧で囲んだ式には代入できません。');
       }
       case 'member': {
-        const staticTarget = this.staticTarget(expression.object);
-        if (staticTarget?.kind === 'class') {
-          const member =
-            staticTarget.cls.staticSetters.get(expression.name) ?? staticTarget.cls.staticMembers.get(expression.name);
-          if (!member)
-            return this.error(
-              expression,
-              `クラス ${staticTarget.cls.name} に static なメンバー ${expression.name} がありません。`
-            );
-          return this.staticTarget2(member, expression);
-        }
-        if (staticTarget?.kind === 'prefix') {
-          return this.prefixedTarget(staticTarget.prefix, expression.name, expression);
-        }
-        if (expression.object.kind === 'super') {
-          return this.memberTarget(this.superReceiver(expression.object), expression.name, false, expression);
-        }
-        const receiver = this.compileChainPart(expression.object, undefined);
-        return this.memberTarget(receiver, expression.name, expression.nullAware, expression);
+        return this.qualifiedMemberTarget(expression);
       }
       case 'index': {
         const receiver =
@@ -279,6 +261,28 @@ export abstract class AssignmentCompiler extends ControlCompiler {
         return this.error(expression, 'この式には代入できません。');
       }
     }
+  }
+
+  private qualifiedMemberTarget(expression: Extract<Expression, { kind: 'member' }>): AssignableTarget {
+    const staticTarget = this.staticTarget(expression.object);
+    if (staticTarget?.kind === 'prefix') {
+      return this.prefixedTarget(staticTarget.prefix, expression.name, expression);
+    }
+    if (staticTarget) {
+      const owner = staticTarget.kind === 'class' ? staticTarget.cls : staticTarget.ext;
+      const member = owner.staticSetters.get(expression.name) ?? owner.staticMembers.get(expression.name);
+      if (!member)
+        return this.error(
+          expression,
+          `${staticTarget.kind === 'class' ? 'クラス' : '拡張'} ${owner.name ?? ''} に static なメンバー ${expression.name} がありません。`
+        );
+      return this.staticMemberTarget(member, expression);
+    }
+    if (expression.object.kind === 'super') {
+      return this.memberTarget(this.superReceiver(expression.object), expression.name, false, expression);
+    }
+    const receiver = this.compileChainPart(expression.object, undefined);
+    return this.memberTarget(receiver, expression.name, expression.nullAware, expression);
   }
 
   private prefixedTarget(prefix: string, name: string, span: Span): AssignableTarget {
@@ -310,7 +314,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       case 'staticMember': {
         const cls = resolution.cls;
         const member = cls.staticSetters.get(name) ?? resolution.member;
-        return this.staticTarget2(member, span);
+        return this.staticMemberTarget(member, span);
       }
       case 'declaration': {
         const { declaration } = resolution;
@@ -363,7 +367,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
   }
 
   // code-gauge-allow duplicateLines 24 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
-  private staticTarget2(member: Member, span: Span): AssignableTarget {
+  private staticMemberTarget(member: Member, span: Span): AssignableTarget {
     this.checkUnavailableStaticMember(member.owner, member.name, span);
     if (member.kind === 'field') {
       const global = this.globals[member.slot];

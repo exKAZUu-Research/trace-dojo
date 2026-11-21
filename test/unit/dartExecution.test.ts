@@ -6061,6 +6061,23 @@ void main() {
   expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '[C, C, "hello"]\n' });
 });
 
+test('qualified writes update extension static fields and accessors', () => {
+  const source = `extension Counter on String {
+  static int count = 0;
+  static int get twice => count * 2;
+  static set twice(int value) { count = value ~/ 2; }
+  static void increase() { twice += 2; }
+}
+void main() {
+  Counter.count = 3;
+  print(Counter.count++);
+  Counter.twice += 2;
+  Counter.increase();
+  print([Counter.count, Counter.twice]);
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '3\n[6, 12]\n' });
+});
+
 test('generic result contexts combine covariant and contravariant positions', () => {
   const source = `Map<T, T> makeMap<T>() => {};
 (List<T>, Set<T>) makePair<T>() => (<T>[], <T>{});

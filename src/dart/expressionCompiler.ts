@@ -969,7 +969,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         if (resolved) return { kind: 'extensionMember', resolved, name };
       }
       const staticMember = ext.staticMembers.get(name) ?? ext.staticSetters.get(name);
-      if (staticMember) return { kind: 'staticMember', member: staticMember, cls: coreTypes.object };
+      if (staticMember) return { kind: 'staticMember', member: staticMember, cls: staticMember.owner };
     }
     const declaration = this.library.lookup(name);
     if (declaration) return { kind: 'declaration', declaration };
