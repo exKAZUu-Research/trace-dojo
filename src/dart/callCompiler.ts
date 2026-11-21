@@ -67,6 +67,7 @@ export interface FunctionSpec {
   namedTypes: Map<string, DartType>;
   defaults?: Map<FormalParameter, Compiled>;
   parameterMember?: MethodMember | SetterMember;
+  bodyless?: boolean;
   /** Undefined to infer the return type from the body, as closures do. */
   returnType: DartType | undefined;
   /** For closures, the return type the context expects, which return expressions are checked against. */

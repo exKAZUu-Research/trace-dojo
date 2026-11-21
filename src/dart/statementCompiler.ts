@@ -220,7 +220,7 @@ export abstract class StatementCompiler extends PatternCompiler {
       const { variable, defaultValue } = this.declareParameter(
         parameter,
         type,
-        index >= parameters.requiredCount,
+        !spec.bodyless && index >= parameters.requiredCount,
         spec.defaults
       );
       binders.push(
@@ -236,7 +236,7 @@ export abstract class StatementCompiler extends PatternCompiler {
     }
     for (const parameter of parameters.named) {
       const type = spec.namedTypes.get(parameter.argumentName) ?? DYNAMIC;
-      const { variable, defaultValue } = this.declareParameter(parameter, type, true, spec.defaults);
+      const { variable, defaultValue } = this.declareParameter(parameter, type, !spec.bodyless, spec.defaults);
       const { argumentName: name } = parameter;
       binders.push(
         parameterBinder(
@@ -259,7 +259,7 @@ export abstract class StatementCompiler extends PatternCompiler {
   private declareParameter(
     parameter: FormalParameter,
     type: DartType,
-    isOptional: boolean,
+    requiresDefault: boolean,
     defaults: Map<FormalParameter, Compiled> | undefined
   ): { variable: LocalVar; defaultValue: Eval | undefined } {
     let defaultValue: Eval | undefined;
@@ -279,7 +279,7 @@ export abstract class StatementCompiler extends PatternCompiler {
       defaults?.set(parameter, coerced);
       defaultValue = coerced.run;
     } else if (
-      isOptional &&
+      requiresDefault &&
       !parameter.isRequired &&
       !isNullable(type) &&
       type.kind !== 'dynamic' &&

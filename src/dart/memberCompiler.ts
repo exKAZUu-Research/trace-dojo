@@ -191,6 +191,7 @@ export abstract class MemberCompiler extends MetadataCompiler {
               positionalTypes,
               namedTypes,
               parameterMember: member.kind === 'method' || member.kind === 'setter' ? member : undefined,
+              bodyless: body === undefined,
               returnType,
               contextReturnType: undefined,
               body: compiledBody,

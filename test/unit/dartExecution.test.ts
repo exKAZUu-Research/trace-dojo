@@ -5069,6 +5069,23 @@ test('dynamic operators reject void operands before execution', () => {
   }
 });
 
+test('bodyless methods can leave optional defaults to the implementation', () => {
+  const program = `abstract class Shape {
+  double area({int scale});
+}
+class Square implements Shape {
+  double area({int scale = 1}) => 4.0 * scale;
+}
+mixin Operation { int apply([int count]); }
+class External { external void run({int count}); }
+void main() {
+  Shape shape = Square();
+  print([shape.area(), shape.area(scale: 3)]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[4.0, 12.0]\n' });
+  expect(executeProgram('dart', program.replace('scale = 1', 'scale'))).toMatchObject({ kind: 'compileError' });
+});
+
 test('optional parameter defaults require explicit const for collections and constructors', () => {
   const declaration = 'class A { const A(); }';
   for (const expression of ['<int>[]', '<int, int>{}', 'A()', '(1, [2])']) {
