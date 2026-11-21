@@ -1,6 +1,6 @@
 import type { MethodRes, ReceiverAdjust } from './annotations';
 import { normalize } from './infer';
-import { typeAfter } from './regions';
+import { type Layout, type RVar, typeAfter } from './regions';
 import { shallow, type Type } from './types';
 
 /** The builtin types that are iterators themselves: the adapters, and the ranges that iterate. */
@@ -28,7 +28,16 @@ export function reborrowsIterator(derefs: ReceiverAdjust['derefs'], selfType: Ty
   return t?.kind === 'adt' && ITERATOR_TYPES.has(t.def.builtin as string);
 }
 
-function isMutableReference(type: Type | undefined): boolean {
+/**
+ * The layout of std's `&'b mut I` used as an iterator: an iterator whose own lifetime is the reborrow's `'b`, which
+ * the adapter it makes keeps, while its items keep their own regions. Undefined for an iterator without a lifetime.
+ */
+export function reborrowedIteratorLayout(layout: Layout | undefined, region: RVar): Layout | undefined {
+  if (layout?.kind !== 'adt' || layout.own.length === 0) return undefined;
+  return { ...layout, own: layout.own.map(() => region) };
+}
+
+export function isMutableReference(type: Type | undefined): boolean {
   const t = type && normalize(shallow(type));
   return t?.kind === 'ref' && t.mutable;
 }

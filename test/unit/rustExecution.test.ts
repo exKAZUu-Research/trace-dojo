@@ -8762,3 +8762,20 @@ test('an adapter of a borrowed iterator holds its mutable reborrow', () => {
     println!("{:?}", b.next());`);
   expect(executeProgram('rust', overlapping)).toMatchObject({ kind: 'compileError' });
 });
+
+test('the items a reborrowed iterator yields do not keep the iterator borrowed', () => {
+  const program = rustMain(`
+    let v = vec![1, 3, 2];
+    let mut it = v.iter();
+    let r = &mut it;
+    let first: Vec<&i32> = r.take(1).collect();
+    let rest: Vec<&i32> = it.collect();
+    let mut words = "a b c".split_whitespace();
+    let w = &mut words;
+    let biggest = w.max();
+    println!("{:?} {:?} {:?} {:?}", first, rest, biggest, words.next());`);
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[1] [3, 2] Some("c") None\n',
+  });
+});

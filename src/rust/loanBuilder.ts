@@ -14,7 +14,8 @@ import {
   type Point,
   type Var,
 } from './loanGraph';
-import { reborrowsIterator } from './receiverReborrow';
+import { type BindingMode, matchDeref, project } from './loanPlaces';
+import { isMutableReference, reborrowedIteratorLayout, reborrowsIterator } from './receiverReborrow';
 import {
   derefSteps,
   dropSlots,
@@ -63,9 +64,6 @@ interface LoanCheck {
 interface Shared extends LoanCheck {
   summaries: Map<ClosureType, ClosureSummary>;
 }
-
-/** How a pattern binds variables: by value, or by a shared or a mutable reference (match ergonomics). */
-type BindingMode = 'shared' | 'mut' | undefined;
 
 /** What binding a pattern does at one point. */
 interface Binding {
@@ -460,6 +458,16 @@ export class LoanBuilder {
     }
   }
 
+  /** std's `&'b mut I` as an iterator, which reborrows it: the adapter a by-value method makes keeps only `'b`. */
+  private iteratorReborrow(target: Place, span: Span, type: Type | undefined): Var {
+    const { value, loan } = this.borrow(target, true, span, type, false);
+    const layout = reborrowedIteratorLayout(this.placeLayouts(target).at(-1), loan.region);
+    if (!layout) return value;
+    const reborrowed = this.newVarWithLayout('{reborrow}', layout);
+    this.point({ uses: [value], defs: [reborrowed] });
+    return reborrowed;
+  }
+
   // -------------------------------------------------------------------------------------------------------------------
   // Statements
 
@@ -661,7 +669,7 @@ export class LoanBuilder {
   /** Evaluates an expression for its value, moving or copying the place it denotes. */
   private value(expr: Expr): Value {
     const mutable = this.annotations.reborrows.get(expr);
-    if (mutable !== undefined && isMutReference(expr.ty)) {
+    if (mutable !== undefined && isMutableReference(expr.ty)) {
       const place = this.place(expr, mutable);
       if (place) return this.borrow(project(place, '*'), mutable, expr.span, refTarget(expr.ty)).value;
     }
@@ -1142,10 +1150,9 @@ export class LoanBuilder {
       return { receiver: value, activation: twoPhase ? loan : undefined, target };
     }
     if (method.fn.selfMode === 'value' && reborrowsIterator(derefs, targetType)) {
-      // The adapter the method returns keeps the mutable reborrow of the iterator.
-      return { receiver: this.borrow(target, true, receiver.span, targetType, false).value, target };
+      return { receiver: this.iteratorReborrow(target, receiver.span, targetType), target };
     }
-    if ((method.fn.selfMode === 'mutRef' || method.fn.selfMode === 'value') && isMutReference(targetType)) {
+    if ((method.fn.selfMode === 'mutRef' || method.fn.selfMode === 'value') && isMutableReference(targetType)) {
       const { value, loan } = this.borrow(project(target, '*'), true, receiver.span, refTarget(targetType), true);
       return { receiver: value, activation: loan, target: project(target, '*') };
     }
@@ -1392,7 +1399,7 @@ export class LoanBuilder {
       this.point({ uses: value === undefined ? args : [value, ...args] });
       return;
     }
-    const throughRef = isMutReference(targetExpr.ty);
+    const throughRef = isMutableReference(targetExpr.ty);
     const target = throughRef ? refTarget(targetExpr.ty) : targetExpr.ty;
     const { value, loan } = this.borrow(throughRef ? project(place, '*') : place, true, targetExpr.span, target, true);
     const args = this.formatArgs(format);
@@ -1409,30 +1416,6 @@ export class LoanBuilder {
   }
 }
 
-/**
- * A pattern that is no binding matches through the references in its type, which make its bindings bind by reference.
- * The type checker gives the parts of a value matched by reference reference types, which no place has.
- */
-function matchDeref(p: Pattern, place: Place, byRef: BindingMode): [Place, BindingMode] {
-  let sub = place;
-  let mode = byRef;
-  let wrapped = byRef !== undefined;
-  let t = p.ty && normalize(shallow(p.ty));
-  while (t?.kind === 'ref') {
-    if (wrapped) wrapped = false;
-    else {
-      sub = project(sub, '*');
-      mode = t.mutable && mode !== 'shared' ? 'mut' : 'shared';
-    }
-    t = normalize(shallow(t.target));
-  }
-  return [sub, mode];
-}
-
-function project(place: Place, elem: string): Place {
-  return { root: place.root, proj: [...place.proj, elem] };
-}
-
 function tupleElem(layout: Layout, index: number): Layout {
   return layout.kind === 'tuple' ? (layout.elems[index] ?? NONE) : NONE;
 }
@@ -1444,9 +1427,4 @@ function refTarget(type: Type | undefined): Type | undefined {
 
 function isReference(type: Type | undefined): boolean {
   return type !== undefined && normalize(shallow(type)).kind === 'ref';
-}
-
-function isMutReference(type: Type | undefined): boolean {
-  const t = type && normalize(shallow(type));
-  return t?.kind === 'ref' && t.mutable;
 }
