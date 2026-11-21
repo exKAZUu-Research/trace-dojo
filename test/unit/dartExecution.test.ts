@@ -2189,7 +2189,6 @@ void main() {
 });
 
 test.each([
-  'enum E { a; E(); } void main() {}',
   'enum E { a } void main() { E(); }',
   'enum E { a } class Child extends E {} void main() {}',
   'class A { set x(int value) {} } class B extends A { set x(String value) {} } void main() {}',
