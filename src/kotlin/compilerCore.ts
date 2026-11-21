@@ -48,18 +48,6 @@ export const DEFAULT_IMPORTS = [
   'kotlin.jvm',
 ];
 
-const IMPLICIT_JAVA_TYPES = new Set([
-  'Character',
-  'Class',
-  'Integer',
-  'Math',
-  'ProcessBuilder',
-  'Runtime',
-  'StrictMath',
-  'Thread',
-  'ThreadLocal',
-]);
-
 /** The names a file sees beyond its own scopes: its package, its imports, and the default imports. */
 export interface FileContext {
   packageName: string;
@@ -101,14 +89,11 @@ export abstract class CompilerCore {
   }
 
   protected rejectUnavailableLibraryReference(path: string, row: number): void {
-    let qualified = path;
-    if (IMPLICIT_JAVA_TYPES.has(path)) qualified = `java.lang.${path}`;
-    if (path === 'Scanner' && this.file.starPackages.includes('java.util')) qualified = 'java.util.Scanner';
+    const known = knownLibraryDeclaration(path, this.visiblePackageLevels());
+    const qualified = known && isJavaPath(known) ? known : path;
     const unavailable = unavailableJavaFeature(qualified);
     if (unavailable) this.unavailable(row, unavailable);
-    const known = knownLibraryDeclaration(qualified, this.visiblePackageLevels());
-    if (known?.startsWith('java.')) qualified = known;
-    if (qualified.startsWith('java.') || qualified.startsWith('javax.')) {
+    if (isJavaPath(qualified)) {
       this.unavailable(row, `Java のクラスの直接の利用（${qualified}）`);
     }
     if (known) this.unavailable(row, known);
@@ -214,11 +199,17 @@ export abstract class CompilerCore {
     const own = this.packages.get(this.file.packageName)?.classes.get(name);
     if (own) return own;
     if (imported) return imported;
-    for (const level of this.visiblePackageLevels().slice(1)) {
-      for (const packageName of level) {
-        const found = this.packages.get(packageName)?.classes.get(name);
-        if (found) return found;
-      }
+    const fromWildcard = this.findClassInPackages(name, this.file.starPackages);
+    if (fromWildcard) return fromWildcard;
+    const omittedJava = this.file.starPackages.filter(isJavaPath);
+    if (knownLibraryDeclaration(name, [omittedJava])) return undefined;
+    return this.findClassInPackages(name, DEFAULT_IMPORTS);
+  }
+
+  private findClassInPackages(name: string, packages: string[]): ClassSymbol | undefined {
+    for (const packageName of packages) {
+      const found = this.packages.get(packageName)?.classes.get(name);
+      if (found) return found;
     }
     return undefined;
   }
@@ -449,3 +440,7 @@ function overrides(member: MemberSymbol, other: MemberSymbol): boolean {
 }
 
 export { FunctionContext, Scope };
+
+function isJavaPath(path: string): boolean {
+  return path.startsWith('java.') || path.startsWith('javax.');
+}

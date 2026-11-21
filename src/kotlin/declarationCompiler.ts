@@ -19,6 +19,7 @@ import type { FileContext } from './compilerCore';
 import { unavailableMessage } from './convertSupport';
 import { callFunction, isVirtual, propertyRepr } from './dispatch';
 import { hashOf, stringHash, stringOf, valueEquals } from './format';
+import { isKnownLibraryPackage } from './libraryApi';
 import { type NativeFunction, type NativeProperty, typeRefText } from './nativeTypes';
 import { toInt32 } from './operators';
 import { type Frame, MISSING } from './runtime';
@@ -193,7 +194,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       const { path, row } = declaration;
       if (declaration.isWildcard) {
         const name = path.join('.');
-        if (!this.packages.has(name)) this.rejectImport(row, name);
+        if (!this.packages.has(name) && !isKnownLibraryPackage(name)) this.rejectImport(row, name);
         context.starPackages.push(name);
         continue;
       }

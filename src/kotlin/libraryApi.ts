@@ -17,6 +17,10 @@ export function unavailableLibraryMember(type: KType, name: string): string | un
   }
 }
 
+export function isKnownLibraryPackage(path: string): boolean {
+  return Object.hasOwn(libraryDeclarationNames, path);
+}
+
 export function knownLibraryDeclaration(path: string, visiblePackages: readonly string[][]): string | undefined {
   const separator = path.lastIndexOf('.');
   if (separator !== -1) {

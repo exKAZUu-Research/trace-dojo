@@ -94,14 +94,20 @@ JarFile(File(stdlib.protectionDomain.codeSource.location.toURI())).use { jar ->
     }
 }
 
-val langClasses = FileSystems.getFileSystem(URI.create("jrt:/")).getPath("/modules/java.base/java/lang")
-Files.list(langClasses).use { files ->
-    val names = declarations.getOrPut("java.lang") { sortedSetOf() }
-    files.forEach { file ->
-        val name = file.fileName.toString().removeSuffix(".class")
-        if (name.matches(Regex("[A-Z][A-Za-z0-9]*"))) {
-            val type = Class.forName("java.lang.$name", false, null)
-            if (Modifier.isPublic(type.modifiers)) names.add(name)
+val jrt = FileSystems.getFileSystem(URI.create("jrt:/"))
+val javaBase = ModuleLayer.boot().findModule("java.base").orElseThrow()
+for (export in javaBase.descriptor.exports()) {
+    val packageName = export.source()
+    if (export.isQualified || (!packageName.startsWith("java.") && !packageName.startsWith("javax."))) continue
+    val directory = jrt.getPath("/modules/java.base/" + packageName.replace('.', '/'))
+    Files.list(directory).use { files ->
+        val names = declarations.getOrPut(packageName) { sortedSetOf() }
+        files.forEach { file ->
+            val name = file.fileName.toString().removeSuffix(".class")
+            if (name.matches(Regex("[A-Z][A-Za-z0-9]*"))) {
+                val type = Class.forName("$packageName.$name", false, null)
+                if (Modifier.isPublic(type.modifiers)) names.add(name)
+            }
         }
     }
 }
