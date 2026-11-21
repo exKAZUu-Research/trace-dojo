@@ -26,6 +26,9 @@ import { tracePythonProgram } from '../python/trace';
 import { findRubyTraceAnnotations } from '../ruby/parse';
 import { executeRubyProgram } from '../ruby/run';
 import { traceRubyProgram } from '../ruby/trace';
+import { executeRustProgram } from '../rust/execute';
+import { findRustTraceAnnotations } from '../rust/parse';
+import { traceRustProgram } from '../rust/trace';
 import { findTypeScriptTraceAnnotations } from '../typescript/parse';
 import { executeTypeScriptProgram } from '../typescript/run';
 import { traceTypeScriptProgram } from '../typescript/trace';
@@ -99,6 +102,7 @@ const interpreters = {
   },
   cpp: { findTraceAnnotations: findCppTraceAnnotations, record: traceCppProgram, execute: executeCppProgram },
   php: { findTraceAnnotations: findPhpTraceAnnotations, record: tracePhpProgram, execute: executePhpProgram },
+  rust: { findTraceAnnotations: findRustTraceAnnotations, record: traceRustProgram, execute: executeRustProgram },
   zig: { findTraceAnnotations: findZigTraceAnnotations, record: traceZigProgram, execute: executeZigProgram },
   haskell: {
     findTraceAnnotations: findHaskellTraceAnnotations,

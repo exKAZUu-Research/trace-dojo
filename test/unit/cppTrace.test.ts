@@ -924,8 +924,8 @@ int main() {
     values.size();
   }
 }`;
-  const previousLimit = LIMITS.maxCppTraceSize;
-  LIMITS.maxCppTraceSize = 16_000;
+  const previousLimit = LIMITS.maxTraceSize;
+  LIMITS.maxTraceSize = 16_000;
   try {
     const short = program.replace('COUNT', '1');
     const long = program.replace('COUNT', '20');
@@ -933,7 +933,7 @@ int main() {
     expect(() => traceProgram('cpp', long, long)).toThrow('Execution limit exceeded: trace');
     expect(executeProgram('cpp', long)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
   } finally {
-    LIMITS.maxCppTraceSize = previousLimit;
+    LIMITS.maxTraceSize = previousLimit;
   }
 });
 

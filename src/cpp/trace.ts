@@ -42,7 +42,7 @@ const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
 /** Reads the program's variables as learners see them, leaving out values the program never wrote. */
 class Snapshotter {
-  private remaining = LIMITS.maxCppTraceSize;
+  private remaining = LIMITS.maxTraceSize;
 
   constructor(private readonly program: CompiledProgram) {}
 

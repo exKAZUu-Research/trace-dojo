@@ -34,7 +34,7 @@ export function parseSource<T>(
   convert: (root: Node) => T,
   {
     maxNestingDepth = MAX_NESTING_DEPTH,
-    tooDeepMessage = '括弧やブロックなどの入れ子が深すぎます。',
+    tooDeepMessage = NESTING_TOO_DEEP,
     locateErrors = (_root: Node, errors: SourceDiagnostic[]): SourceDiagnostic[] => errors,
     progress,
   }: {
@@ -67,10 +67,7 @@ export function parseSource<T>(
     throw new Error('The parser returned no tree');
   }
   try {
-    const tooDeep = findTooDeepNode(tree.rootNode, maxNestingDepth, progress);
-    if (tooDeep) {
-      throw new CompileError([{ row: tooDeep.startPosition.row, message: tooDeepMessage }]);
-    }
+    assertNestingDepth(tree.rootNode, maxNestingDepth, tooDeepMessage, progress);
     const syntaxErrors = locateErrors(
       tree.rootNode,
       collectSyntaxErrors(tree.rootNode, missingTokenNames, false, progress)
@@ -114,6 +111,18 @@ export function commentTokens(parser: Parser, source: string): { index: number; 
 
 /** Converting, compiling, and running recurse into nested constructs, so deeper nesting would exhaust the stack. */
 const MAX_NESTING_DEPTH = 300;
+
+export const NESTING_TOO_DEEP = '括弧やブロックなどの入れ子が深すぎます。';
+
+export function assertNestingDepth(
+  root: Node,
+  maxDepth = MAX_NESTING_DEPTH,
+  message = NESTING_TOO_DEEP,
+  progress?: () => void
+): void {
+  const tooDeep = findTooDeepNode(root, maxDepth, progress);
+  if (tooDeep) throw new CompileError([{ row: tooDeep.startPosition.row, message }]);
+}
 
 function findTooDeepNode(root: Node, maxDepth: number, progress?: () => void): Node | undefined {
   if (maxDepth === Number.POSITIVE_INFINITY) return;
