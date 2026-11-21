@@ -765,7 +765,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     if (cls.kind === 'enum') {
       const marker = new KObject(cls, 0);
       runtime.objects.set(cls, marker);
-      this.createEnumEntries(frame, cls);
+      cls.initializeEnumEntries?.(frame);
       if (cls.companion) this.objectInstance(cls.companion)(frame);
       return marker;
     }
@@ -777,23 +777,20 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     return instance;
   }
 
-  private createEnumEntries(frame: Frame, cls: ClassSymbol): void {
-    const entry = this.entryOfClass.get(cls);
-    if (!entry) return;
-    const ctor = entry.constructorSymbol as FunctionSymbol;
+  private createEnumEntries(
+    frame: Frame,
+    cls: ClassSymbol,
+    ctor: FunctionSymbol,
+    evaluators: ((frame: Frame) => Value[])[]
+  ): void {
     const instances: KObject[] = [];
     frame.runtime.enumEntries.set(cls, instances);
-    for (const [ordinal, enumEntry] of entry.decl.enumEntries.entries()) {
+    const initialize = ctor.initialize as NonNullable<FunctionSymbol['initialize']>;
+    for (const [ordinal, enumEntry] of cls.enumEntries.entries()) {
       const instance = new KObject(cls);
       instance.native = { name: enumEntry.name, ordinal };
       instances.push(instance);
-      const args = this.enumArguments.get(cls)?.[ordinal];
-      (ctor.initialize as NonNullable<FunctionSymbol['initialize']>)(
-        frame,
-        instance,
-        args ? args(frame) : [],
-        undefined
-      );
+      initialize(frame, instance, evaluators[ordinal](frame), undefined);
     }
   }
 
@@ -833,14 +830,11 @@ export abstract class BodyCompiler extends DeclarationCompiler {
           enumEntry.name
         ).evaluateArgs;
       });
-      this.enumArguments.set(entry.symbol, evaluators);
+      entry.symbol.initializeEnumEntries = (frame) => this.createEnumEntries(frame, entry.symbol, ctor, evaluators);
     } finally {
       this.recordsSteps = savedRecords;
     }
   }
-
-  /** The arguments of each enum constant's constructor, compiled with the class. */
-  protected readonly enumArguments = new Map<ClassSymbol, ((frame: Frame) => Value[])[]>();
 
   protected compileEnumEntries(cls: ClassSymbol): Compiled {
     const instance = this.objectInstance(cls);

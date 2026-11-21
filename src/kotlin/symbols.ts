@@ -54,6 +54,7 @@ export class ClassSymbol {
   readonly ownFields: PropertySymbol[] = [];
   /** Sets up a new instance: runs property initializers and `init` blocks after the superclass's constructor. */
   initialize: ((frame: Frame, instance: Value) => void) | undefined;
+  initializeEnumEntries: ((frame: Frame) => void) | undefined;
   row = 0;
   isLibrary = false;
   /** The name Kotlin's runtime messages use, such as `kotlin.String`; set with the package. */

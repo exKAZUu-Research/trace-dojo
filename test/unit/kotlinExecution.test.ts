@@ -26,6 +26,18 @@ test.each([
     stdout: '[, abc]\n[, a, , c, ]\n[, a, b, c, ]\n[, ]\n[abc]\n',
   },
   {
+    name: 'library enum entries used directly before other library calls',
+    source: `import kotlin.time.DurationUnit
+import kotlin.time.toDuration
+fun main() {
+    println(DurationUnit.SECONDS)
+    println(DurationUnit.entries)
+    println(DurationUnit.values().size)
+    println(5.toDuration(DurationUnit.valueOf("SECONDS")))
+}`,
+    stdout: 'SECONDS\n[NANOSECONDS, MICROSECONDS, MILLISECONDS, SECONDS, MINUTES, HOURS, DAYS]\n7\n5s\n',
+  },
+  {
     name: 'floating-point collection and selector extrema',
     source: `fun main() {
     println(listOf(1.0f, Float.NaN).min())
