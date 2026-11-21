@@ -1928,6 +1928,28 @@ fun main() {
     stdout: '3\nhello\n5\naba\n',
   },
   {
+    name: 'builder materialization checks recoded storage only when compaction is possible',
+    source: `class RecodeSource(val builder: StringBuilder, val overwrite: Boolean) : CharSequence by "xy" {
+    override fun get(index: Int): Char {
+        if (index == 0) {
+            if (overwrite) builder.setCharAt(0, 'λ')
+            else builder.clear().append('λ')
+        }
+        return "xy"[index]
+    }
+}
+fun main() {
+    for (insert in listOf(false, true)) for (overwrite in listOf(false, true)) {
+        val builder = StringBuilder(3).append("abc")
+        val source = RecodeSource(builder, overwrite)
+        if (insert) builder.insert(1, source) else builder.append(source)
+        try { println(builder.toString()) } catch (e: Exception) { println(e) }
+    }
+}`,
+    stdout:
+      'java.lang.StringIndexOutOfBoundsException: Range [0, 0 + 5) out of bounds for length 4\njava.lang.StringIndexOutOfBoundsException: Range [0, 0 + 5) out of bounds for length 4\njava.lang.StringIndexOutOfBoundsException: Range [0, 0 + 5) out of bounds for length 4\njava.lang.StringIndexOutOfBoundsException: Range [0, 0 + 5) out of bounds for length 4\n',
+  },
+  {
     name: 'builder insert and appendLine honor their typed arguments and callbacks',
     source: `class Change(private val action: () -> Unit, private val label: String) {
     override fun toString(): String {

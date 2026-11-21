@@ -71,6 +71,13 @@ function defineReaders(): void {
   );
   defineNative(`${BUILDER}.toString()`, (frame, receiver) => {
     const storage = builder(receiver);
+    const limit = storage.compactionLimit;
+    if (limit !== undefined)
+      throwError(
+        frame,
+        'java.lang.StringIndexOutOfBoundsException',
+        `Range [0, 0 + ${storage.length}) out of bounds for length ${limit}`
+      );
     frame.runtime.allocateString(frame, storage.length);
     return storage.text();
   });
@@ -163,17 +170,22 @@ function defineReplacements(): void {
     replaceRange(frame, receiver, start as number, end as number, value as string)
   );
   defineNative(`${BUILDER}.delete(Int, Int)`, (frame, receiver, [start, end]) =>
-    replaceRange(frame, receiver, start as number, end as number, '')
+    replaceRange(frame, receiver, start as number, end as number, undefined)
   );
   defineNative(`${BUILDER}.deleteCharAt(Int)`, (frame, receiver, [index]) => {
     const position = index as number;
-    checkStringIndex(frame, position, builder(receiver).length);
-    return replaceText(frame, receiver, position, position + 1, '');
+    const storage = builder(receiver);
+    checkStringIndex(frame, position, storage.length);
+    replaceText(frame, receiver, position, position + 1, '');
+    storage.markPossiblyLatin1();
+    return receiver;
   });
   defineNative(`${BUILDER}.setCharAt(Int, Char)`, (frame, receiver, [index, char]) => {
     const position = index as number;
-    checkStringIndex(frame, position, builder(receiver).length);
-    replaceText(frame, receiver, position, position + 1, charToString(char as number), 1);
+    const storage = builder(receiver);
+    checkStringIndex(frame, position, storage.length);
+    frame.runtime.allocateString(frame, storage.length, 1);
+    storage.setCharAt(position, charToString(char as number));
     return UNIT;
   });
 }
@@ -239,17 +251,25 @@ function checkInsertPosition(frame: Frame, position: number, count: number): voi
   if (position < 0 || position > count) stringRangeError(frame, position, count, count);
 }
 
-function replaceRange(frame: Frame, receiver: Value, from: number, end: number, value: string): Value {
-  const count = builder(receiver).length;
-  const to = Math.min(end, count);
-  if (from < 0 || from > to) stringRangeError(frame, from, to, count);
-  return replaceText(frame, receiver, from, to, value);
+function replaceRange(
+  frame: Frame,
+  receiver: Value,
+  from: number,
+  end: number,
+  replacement: string | undefined
+): Value {
+  const storage = builder(receiver);
+  const to = Math.min(end, storage.length);
+  if (from < 0 || from > to) stringRangeError(frame, from, to, storage.length);
+  replaceText(frame, receiver, from, to, replacement ?? '');
+  if (replacement !== undefined || from < to) storage.markPossiblyLatin1();
+  return receiver;
 }
 
-function replaceText(frame: Frame, receiver: Value, from: number, to: number, value: string, work?: number): Value {
+function replaceText(frame: Frame, receiver: Value, from: number, to: number, value: string): Value {
   const storage = builder(receiver);
   const remaining = storage.length - to;
-  frame.runtime.allocateString(frame, from + value.length + remaining, work ?? remaining + value.length);
+  frame.runtime.allocateString(frame, from + value.length + remaining, remaining + value.length);
   storage.replace(from, to, value);
   return receiver;
 }

@@ -6,6 +6,7 @@ interface BuilderPosition {
 export class StringBuilderStorage {
   private bytes: Uint8Array;
   private wide = false;
+  private maybeLatin1 = false;
   length = 0;
 
   constructor(capacity: number) {
@@ -23,6 +24,20 @@ export class StringBuilderStorage {
 
   get readableLength(): number {
     return Math.min(this.length, this.bytes.length >> Number(this.wide));
+  }
+
+  get compactionLimit(): number | undefined {
+    const readable = this.readableLength;
+    return this.wide && this.maybeLatin1 && this.length > readable ? readable : undefined;
+  }
+
+  markPossiblyLatin1(): void {
+    this.maybeLatin1 = true;
+  }
+
+  setCharAt(index: number, value: string): void {
+    this.replace(index, index + 1, value);
+    if (this.wide) this.markPossiblyLatin1();
   }
 
   position(): BuilderPosition {
@@ -62,6 +77,8 @@ export class StringBuilderStorage {
       const width = this.wide ? 2 : 1;
       this.bytes = this.reserve(length, this.wide);
       this.bytes.fill(0, this.length * width, length * width);
+    } else if (length < this.length) {
+      this.markPossiblyLatin1();
     }
     this.length = length;
   }
