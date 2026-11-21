@@ -82,7 +82,7 @@ export function inferFromContext(
 ): void {
   const lower = new Map<TypeParam, DartType>();
   const upper = new Map<TypeParam, DartType>();
-  new InferenceConstraints(params, lower, upper, upperBound, true).infer(context, formal, true);
+  new InferenceConstraints(params, lower, upper, upperBound).infer(context, formal, true);
   for (const param of params) {
     const choice = lower.get(param) ?? upper.get(param);
     if (choice) solution.set(param, choice);
@@ -96,10 +96,9 @@ export function inferFromSubtype(
   params: ReadonlySet<TypeParam>,
   lower: Map<TypeParam, DartType>,
   join: (a: DartType, b: DartType) => DartType = (a) => a,
-  upper?: Map<TypeParam, DartType>,
-  retainBottom = false
+  upper?: Map<TypeParam, DartType>
 ): void {
-  new InferenceConstraints(params, lower, upper, join, retainBottom).infer(actual, formal);
+  new InferenceConstraints(params, lower, upper, join).infer(actual, formal);
 }
 
 export function inferObjectPatternType(
@@ -110,7 +109,7 @@ export function inferObjectPatternType(
   const parameters = new Set(params);
   const lower = new Map<TypeParam, DartType>();
   const upper = new Map<TypeParam, DartType>();
-  new InferenceConstraints(parameters, lower, upper, upperBound, true).infer(
+  new InferenceConstraints(parameters, lower, upper, upperBound).infer(
     nonNullOf(resolveBound(matchedType)),
     template,
     true
@@ -129,7 +128,7 @@ export function inferExtensionReceiver(actual: DartType, formal: DartType, param
   const parameters = new Set(params);
   const lower = new Map<TypeParam, DartType>();
   const upper = new Map<TypeParam, DartType>();
-  const constraints = new InferenceConstraints(parameters, lower, upper, upperBound, true);
+  const constraints = new InferenceConstraints(parameters, lower, upper, upperBound);
   constraints.infer(actual, formal);
   const solution = new Map<TypeParam, DartType>();
   const env = new Map<TypeParam, DartType>(params.map((param) => [param, DYNAMIC]));
@@ -153,7 +152,7 @@ export function inferTearOffTypes(
 ): DartType[] | undefined {
   const solution = new Map<TypeParam, DartType>();
   const upper = new Map<TypeParam, DartType>();
-  const constraints = new InferenceConstraints(new Set(source.typeParams), solution, upper, upperBound, true);
+  const constraints = new InferenceConstraints(new Set(source.typeParams), solution, upper, upperBound);
   for (const [index, parameter] of source.positional.entries()) {
     const given = expected.positional[index];
     if (given) constraints.infer(given, parameter);
@@ -179,8 +178,7 @@ class InferenceConstraints {
     private readonly params: ReadonlySet<TypeParam>,
     private readonly lower: Map<TypeParam, DartType>,
     private readonly upper: Map<TypeParam, DartType> | undefined,
-    private readonly join: (a: DartType, b: DartType) => DartType,
-    private readonly retainBottom = false
+    private readonly join: (a: DartType, b: DartType) => DartType
   ) {}
 
   infer(given: DartType, pattern: DartType, reversed = false): void {
@@ -208,7 +206,6 @@ class InferenceConstraints {
     if (this.scopedParameters.size > 0 && mentionsTypeParams(target, this.scopedParameters)) {
       target = closeTypeVariables(target, this.scopedParameters, !reversed);
     }
-    if (!this.retainBottom && !reversed && target.kind === 'never' && !target.nullable) return;
     const previous = bounds.get(pattern.param);
     const join = reversed ? lowerBound : this.join;
     bounds.set(pattern.param, previous ? join(previous, target) : target);

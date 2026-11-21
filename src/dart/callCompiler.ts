@@ -799,8 +799,7 @@ export abstract class CallCompiler extends OperatorCompiler {
       ) {
         tearOffs.push({ result, parameterType });
       } else {
-        // An argument's type constrains even by Never, as <Never>[] for List<T> or a closure that throws make T Never.
-        inferFromSubtype(result.type, parameterType, params, solution, upperBound, upper, true);
+        inferFromSubtype(result.type, parameterType, params, solution, upperBound, upper);
       }
     });
     for (const { result, parameterType } of tearOffs) {
