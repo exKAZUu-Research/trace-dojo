@@ -26,6 +26,16 @@ test.each([
     stdout: '[, abc]\n[, a, , c, ]\n[, a, b, c, ]\n[, ]\n[abc]\n',
   },
   {
+    name: 'NaN and signed zero in floating-point array extrema',
+    source: `fun main() {
+    println(doubleArrayOf(1.0, Double.NaN).max())
+    println(floatArrayOf(0.0f, -0.0f).min())
+    println(doubleArrayOf(-0.0, 0.0).maxOrNull())
+    println(floatArrayOf(2.0f, Float.NaN).minOrNull())
+}`,
+    stdout: 'NaN\n-0.0\n0.0\nNaN\n',
+  },
+  {
     name: 'live primitive array iterators and list views',
     source: `fun main() {
     val values = intArrayOf(1, 2, 3)

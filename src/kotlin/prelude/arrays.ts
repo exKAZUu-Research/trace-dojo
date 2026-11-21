@@ -181,9 +181,12 @@ function functionsOf(kind: ArrayKind): string {
     );
   }
   if (kind.isComparable) {
+    const floating = e === 'Double' || e === 'Float';
+    const keepMax = floating ? 'max = kotlin.math.max(max, e)' : 'if (max < e) max = e';
+    const keepMin = floating ? 'min = kotlin.math.min(min, e)' : 'if (min > e) min = e';
     lines.push(
-      `fun ${r}.max(): ${e} { if (isEmpty()) throw NoSuchElementException(); var max = this[0]; for (i in 1..lastIndex) { val e = this[i]; if (max < e) max = e }; return max }`,
-      `fun ${r}.min(): ${e} { if (isEmpty()) throw NoSuchElementException(); var min = this[0]; for (i in 1..lastIndex) { val e = this[i]; if (min > e) min = e }; return min }`,
+      `fun ${r}.max(): ${e} { if (isEmpty()) throw NoSuchElementException(); var max = this[0]; for (i in 1..lastIndex) { val e = this[i]; ${keepMax} }; return max }`,
+      `fun ${r}.min(): ${e} { if (isEmpty()) throw NoSuchElementException(); var min = this[0]; for (i in 1..lastIndex) { val e = this[i]; ${keepMin} }; return min }`,
       `fun ${r}.maxOrNull(): ${e}? = if (isEmpty()) null else max()`,
       `fun ${r}.minOrNull(): ${e}? = if (isEmpty()) null else min()`,
       `external fun ${r}.sort()`,
