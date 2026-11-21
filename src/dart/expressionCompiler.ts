@@ -1039,8 +1039,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (cls) {
       const own = cls.members.get(name) ?? cls.setters.get(name);
       if (own && !own.isStatic) {
-        // A setter declared here does not hide a getter the class inherits.
-        const resolved = this.lookupMember(cls.thisType, name, false) ?? this.lookupMember(cls.thisType, name, true);
+        // A setter declared here does not hide a getter the class inherits, though an extension's getter never applies.
+        const resolved = this.interfaceMember(cls.thisType, name, false) ?? this.lookupMember(cls.thisType, name, true);
         if (resolved) return { kind: 'thisMember', resolved, name };
       }
       const staticMember = cls.staticMembers.get(name) ?? cls.staticSetters.get(name);

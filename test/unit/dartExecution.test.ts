@@ -2189,6 +2189,7 @@ test('Dart rejects reading a name declared only as a setter', () => {
     'extension E on int { set x(int n) {} void f() { print(x); } } void main() { E(0).f(); }',
     'class C { int x = 5; } extension E on C { set x(int n) {} void f() { print(x); } } void main() { E(C()).f(); }',
     'class C { set x(int n) {} void f() { print(x); } } void main() { C().f(); }',
+    'class C { set x(int n) {} void f() { print(x); } } extension E on C { int get x => 20; } void main() { C().f(); }',
   ]) {
     expect(executeProgram('dart', program)).toMatchObject({ kind: 'compileError' });
   }
