@@ -8709,3 +8709,13 @@ test('borrowing a string as bytes through AsRef costs no allocation per borrow',
   );
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '1200\n' });
 });
+
+test('a mutable reference stays usable after a method that takes it by value', () => {
+  const program = rustMain(`
+    let mut v = vec![1, 2];
+    let a = &mut v;
+    for x in a.into_iter() { *x += 1; }
+    a.push(3);
+    println!("{:?}", a);`);
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '[2, 3, 3]\n' });
+});

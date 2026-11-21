@@ -1,7 +1,7 @@
 // code-gauge-allow-file fileNcss 671 -- Follows the borrow checking rules case by case.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ExecutionBudget } from '../interpreter/limits';
-import type { Annotations, FnContext, LocalVar } from './annotations';
+import type { Annotations, FnContext, LocalVar, MethodRes } from './annotations';
 import type { Block, Condition, Expr, FnItem, FormatArgs, Pattern, Span, Stmt } from './ast';
 import { forEachDirect, patternBindingParts, patternBindings } from './astWalk';
 import {
@@ -451,22 +451,21 @@ export class BorrowChecker {
   private methodCall(expr: Extract<Expr, { kind: 'methodCall' }>, state: State): State {
     const method = this.annotations.methods.get(expr);
     let current = state;
-    if (method) {
-      const { receiver } = method;
-      const throughRef = receiver.derefs.some((step) => step === 'ref' || step === 'mutRef');
-      if (receiver.autoref === 'mut' || (method.fn.selfMode === 'mutRef' && isMutReference(expr.receiver.ty))) {
-        current = this.expr(expr.receiver, current, 'mut');
-      } else {
-        const adjusted = typeAfter(expr.receiver.ty, receiver.derefs);
-        const moves =
-          receiver.autoref === 'none' && method.fn.selfMode === 'value' && !throughRef && !this.isCopy(adjusted);
-        current = this.expr(expr.receiver, current, moves ? 'move' : 'read');
-      }
-    } else {
-      current = this.expr(expr.receiver, current, 'read');
-    }
+    current = this.expr(expr.receiver, current, method ? this.receiverUse(expr.receiver, method) : 'read');
     for (const arg of expr.args) current = this.expr(arg, current, 'move');
     return method && diverges(method.fn.ret) ? BOTTOM : current;
+  }
+
+  /** How a method call uses its receiver: rustc reborrows a `&mut` one, even for a method taking `self` by value. */
+  private receiverUse(receiver: Expr, method: MethodRes): 'mut' | 'move' | 'read' {
+    const { derefs, autoref } = method.receiver;
+    const { selfMode } = method.fn;
+    const reborrows = selfMode === 'mutRef' || (selfMode === 'value' && derefs.length === 0);
+    if (autoref === 'mut' || (reborrows && isMutReference(receiver.ty))) return 'mut';
+    const throughRef = derefs.some((step) => step === 'ref' || step === 'mutRef');
+    const moves =
+      autoref === 'none' && selfMode === 'value' && !throughRef && !this.isCopy(typeAfter(receiver.ty, derefs));
+    return moves ? 'move' : 'read';
   }
 
   private loop(label: string | undefined, state: State, body: (state: State) => State, exits: boolean): State {

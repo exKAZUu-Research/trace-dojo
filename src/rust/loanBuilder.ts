@@ -1118,7 +1118,7 @@ export class LoanBuilder {
     if (argument !== undefined) this.storeDrop(point, target, { root: argument, proj: [] });
   }
 
-  /** A method's receiver after its adjustment: autoref borrows it, and `&mut` references are reborrowed. */
+  /** A method's receiver after its adjustment: autoref borrows it, and `&mut` references (also by value) are reborrowed. */
   private receiver(
     expr: Extract<Expr, { kind: 'methodCall' }>,
     method: MethodRes | undefined
@@ -1140,7 +1140,7 @@ export class LoanBuilder {
       const { value, loan } = this.borrow(target, autoref === 'mut', receiver.span, targetType, twoPhase);
       return { receiver: value, activation: twoPhase ? loan : undefined, target };
     }
-    if (method.fn.selfMode === 'mutRef' && isMutReference(targetType)) {
+    if ((method.fn.selfMode === 'mutRef' || method.fn.selfMode === 'value') && isMutReference(targetType)) {
       const { value, loan } = this.borrow(project(target, '*'), true, receiver.span, refTarget(targetType), true);
       return { receiver: value, activation: loan, target: project(target, '*') };
     }
