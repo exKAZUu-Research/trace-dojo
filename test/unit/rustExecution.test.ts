@@ -8348,3 +8348,16 @@ test.each([
     println!("{:?}", result);`);
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: `${printed}\n` });
 });
+
+test('a turtle in a temporary borrowed as a mutable trait object stays on the board while the borrow lives', () => {
+  const program = rustMain(
+    `
+    let shape: &mut dyn Shape = &mut S(Turtle::new(1, 1));
+    let observer = Turtle::new(1, 0);
+    println!("{} {}", observer.can_move_forward(), shape.check());`,
+    `trait Shape { fn check(&self) -> bool; }
+struct S(Turtle);
+impl Shape for S { fn check(&self) -> bool { self.0.can_move_forward() } }`
+  );
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'false true\n' });
+});

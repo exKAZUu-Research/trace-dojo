@@ -8,6 +8,7 @@ import { canReachTurtle, turtleCaptureRoots } from './turtleTypes';
 import { shallow, type Type, type TypeParam } from './types';
 import { utf8Reader } from './utf8';
 import {
+  AccessorPlace,
   CellPlace,
   DynValue,
   ElementPlace,
@@ -310,8 +311,8 @@ function pushActiveBorrowChildren(item: object, pending: unknown[], roots: Value
   pushChildren(item, pending);
 }
 
-// code-gauge-allow functionNcss 39 -- One case per kind of value.
-// code-gauge-allow functionCognitiveComplexity 22 -- Each runtime value representation exposes its own reachable objects.
+// code-gauge-allow functionNcss 42 -- One case per kind of value.
+// code-gauge-allow functionCognitiveComplexity 23 -- Each runtime value representation exposes its own reachable objects.
 function pushChildren(item: object, stack: unknown[]): void {
   if (Array.isArray(item)) {
     pushAll(stack, item);
@@ -319,6 +320,8 @@ function pushChildren(item: object, stack: unknown[]): void {
     pushAll(stack, item.fields);
   } else if (item instanceof CellPlace) {
     stack.push(item.value);
+  } else if (item instanceof AccessorPlace) {
+    stack.push(item.target);
   } else if (item instanceof ElementPlace) {
     stack.push(item.owner);
   } else if (item instanceof SliceView) {

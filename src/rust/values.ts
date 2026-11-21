@@ -112,7 +112,9 @@ export class AccessorPlace implements Place {
   readonly isPlace = true;
   constructor(
     readonly get: () => Value,
-    readonly set: (value: Value) => void
+    readonly set: (value: Value) => void,
+    /** The place that `get` and `set` reach, which a collection follows as it follows a reference to that place. */
+    readonly target?: Place
   ) {}
 }
 

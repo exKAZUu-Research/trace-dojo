@@ -771,7 +771,8 @@ function dynCoercion(read: Eval, type: (frame: Frame) => Type, mutable: boolean)
     const concrete = type(frame);
     return new AccessorPlace(
       () => new DynValue(concrete, target.get()),
-      (value) => target.set(value instanceof DynValue ? value.value : value)
+      (value) => target.set(value instanceof DynValue ? value.value : value),
+      target
     );
   };
 }
