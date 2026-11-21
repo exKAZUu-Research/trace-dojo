@@ -303,7 +303,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
           param.type,
           declaration?.row ?? entry.cls.decl.row
         );
-        if (declaration?.binding !== 'var') scope.variables.set(param.name, variable);
+        if (!declaration?.binding) scope.variables.set(param.name, variable);
         this.flow.assigned.add(variable);
         this.initializerVariables.add(variable);
       }

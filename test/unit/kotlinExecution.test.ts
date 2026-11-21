@@ -4679,6 +4679,19 @@ fun main() {
     stdout: '[9, 3, 5]\n[3, 2, 9]\n[9, 2, 8, 5]\n[5, 8, 2, 9]\n[9, 2, 8, 5]\n',
   },
   {
+    name: 'primary-constructor properties use virtual getters in initializers',
+    source: `open class Base(open val x: Int, plain: Int) {
+    val snapshot = x
+    init { println("base $x plain $plain") }
+}
+class Child(override val x: Int) : Base(x, x)
+fun main() {
+    val child = Child(5)
+    println("\${child.snapshot} \${child.x}")
+}`,
+    stdout: 'base 0 plain 5\n0 5\n',
+  },
+  {
     name: 'mutable primary-constructor properties in initializers and captures',
     source: `open class Base(val original: Int)
 class Counter(var n: Int = 1, val next: Int = n + 1) : Base(n) {
