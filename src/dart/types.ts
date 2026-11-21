@@ -126,9 +126,6 @@ export function isNullable(type: DartType): boolean {
     case 'null': {
       return true;
     }
-    case 'never': {
-      return type.nullable;
-    }
     default: {
       return type.nullable;
     }
@@ -417,7 +414,7 @@ function topBottomSubtype(s: DartType, t: DartType): boolean | undefined {
   if (s.kind === 'never' && !s.nullable) return true;
   if (isObject(t)) return isSubtypeOfObject(s, t);
   if (s.kind === 'null' || (s.kind === 'never' && s.nullable)) {
-    if (t.kind === 'typeParam') return t.nullable || (t.promoted === undefined && false);
+    if (t.kind === 'typeParam') return t.nullable;
     return isNullable(t);
   }
   if (isTop(s)) return false;
