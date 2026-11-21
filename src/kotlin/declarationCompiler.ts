@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 852 -- The declaration compiler shares symbol and class-linking logic.
+// code-gauge-allow-file fileNcss 855 -- The declaration compiler shares symbol and class-linking logic.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import type {
   ClassDecl,
@@ -1188,6 +1188,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- traversal retains the substitution and tracks override roots for each delegate.
   private linkDelegates(entry: ClassEntry): void {
     const { symbol } = entry;
     for (const field of entry.delegateFields) {

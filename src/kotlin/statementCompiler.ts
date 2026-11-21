@@ -95,7 +95,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
    *
    * @param clearsLocals Function bodies keep their locals so that a trace can report `main`'s final variables.
    */
-  // code-gauge-allow functionCognitiveComplexity 18 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionCognitiveComplexity 19 -- statement compilation and execution both restore the block state when an exit interrupts them.
   protected compileStatementsValue(
     scope: Scope,
     context: FunctionContext,
