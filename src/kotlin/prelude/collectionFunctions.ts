@@ -452,31 +452,6 @@ fun <T : Comparable<T>> Iterable<T>.min(): T {
     return min
 }
 
-// The floating-point overloads propagate NaN, as kotlin.math.min does, where compareTo would order NaN last.
-@JvmName("minOfDouble")
-fun Iterable<Double>.min(): Double = minOrNull() ?: throw NoSuchElementException()
-
-@JvmName("minOrNullOfDouble")
-fun Iterable<Double>.minOrNull(): Double? {
-    val iterator = iterator()
-    if (!iterator.hasNext()) return null
-    var min = iterator.next()
-    while (iterator.hasNext()) min = kotlin.math.min(min, iterator.next())
-    return min
-}
-
-@JvmName("maxOfDouble")
-fun Iterable<Double>.max(): Double = maxOrNull() ?: throw NoSuchElementException()
-
-@JvmName("maxOrNullOfDouble")
-fun Iterable<Double>.maxOrNull(): Double? {
-    val iterator = iterator()
-    if (!iterator.hasNext()) return null
-    var max = iterator.next()
-    while (iterator.hasNext()) max = kotlin.math.max(max, iterator.next())
-    return max
-}
-
 fun <T : Comparable<T>> Iterable<T>.maxOrNull(): T? {
     val iterator = iterator()
     if (!iterator.hasNext()) return null
@@ -610,6 +585,8 @@ inline fun <T, R : Comparable<R>> Iterable<T>.minOfOrNull(selector: (T) -> R): R
     }
     return minValue
 }
+
+${floatingExtremaSource()}
 
 fun <T> Iterable<T>.maxWith(comparator: Comparator<in T>): T {
     val iterator = iterator()
@@ -1532,3 +1509,38 @@ fun <K, V> MutableMap<in K, in V>.putAll(pairs: Iterable<Pair<K, V>>) {
 
 fun <K, V> Map<out K, V>.containsKeyOf(key: K): Boolean = containsKey(key)
 `;
+
+function floatingExtremaSource(): string {
+  return ['Double', 'Float']
+    .flatMap((type) => ['min', 'max'].map((operation) => floatingExtremum(type, operation)))
+    .join('\n');
+}
+
+function floatingExtremum(type: string, operation: string): string {
+  return kotlin`
+@JvmName("${operation}Of${type}Elements")
+fun Iterable<${type}>.${operation}(): ${type} = ${operation}OrNull() ?: throw NoSuchElementException()
+
+@JvmName("${operation}OrNullOf${type}Elements")
+fun Iterable<${type}>.${operation}OrNull(): ${type}? {
+    val values = iterator()
+    if (!values.hasNext()) return null
+    var result = values.next()
+    while (values.hasNext()) result = kotlin.math.${operation}(result, values.next())
+    return result
+}
+
+@JvmName("${operation}Of${type}Results")
+inline fun <T> Iterable<T>.${operation}Of(selector: (T) -> ${type}): ${type} =
+    ${operation}OfOrNull(selector) ?: throw NoSuchElementException()
+
+@JvmName("${operation}OfOrNullOf${type}Results")
+inline fun <T> Iterable<T>.${operation}OfOrNull(selector: (T) -> ${type}): ${type}? {
+    val values = iterator()
+    if (!values.hasNext()) return null
+    var result = selector(values.next())
+    while (values.hasNext()) result = kotlin.math.${operation}(result, selector(values.next()))
+    return result
+}
+`;
+}

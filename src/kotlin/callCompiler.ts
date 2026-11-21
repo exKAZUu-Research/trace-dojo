@@ -495,7 +495,7 @@ export abstract class CallCompiler extends CompilerCore {
     if (!probe) return undefined;
     const fitting = attempts.filter((_, index) => {
       const type = lambdaTypes[index];
-      return type.kind === 'function' && isExactlyType(probe, resolved(type.returnType));
+      return type.kind === 'function' && !hasOpenVariables(type.returnType) && isExactlyType(probe, type.returnType);
     });
     return fitting.length > 0 ? fitting[0] : undefined;
   }

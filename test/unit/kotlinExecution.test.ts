@@ -26,6 +26,17 @@ test.each([
     stdout: '[, abc]\n[, a, , c, ]\n[, a, b, c, ]\n[, ]\n[abc]\n',
   },
   {
+    name: 'floating-point collection and selector extrema',
+    source: `fun main() {
+    println(listOf(1.0f, Float.NaN).min())
+    println(listOf(1, 2).minOf { if (it == 1) Double.NaN else 1.0 })
+    println(listOf(1, 2).maxOfOrNull { if (it == 1) -0.0f else 0.0f })
+    println(listOf(2, 1).minOf { it.toString() })
+    println(emptyList<Float>().minOrNull())
+}`,
+    stdout: 'NaN\nNaN\n0.0\n1\nnull\n',
+  },
+  {
     name: 'collection subtraction removes every matching occurrence',
     source: `fun main() {
     val values = mutableListOf(1, 1, 2, 3, 3, 4)
