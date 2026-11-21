@@ -249,8 +249,9 @@ const sliceNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
     const i = Number(a as bigint);
     const j = Number(b as bigint);
     const length = sliceLength(slice);
-    for (const index of [i, j]) {
-      if (index >= length) panic(ctx, `index out of bounds: the len is ${length} but the index is ${index}`);
+    // A `usize` is formatted from the argument itself, which a number rounds above 2^53.
+    for (const index of [a, b] as bigint[]) {
+      if (index >= BigInt(length)) panic(ctx, `index out of bounds: the len is ${length} but the index is ${index}`);
     }
     const { base, start } = sliceBase(slice);
     swapOwnedElements(base, start + i, start + j);
@@ -581,7 +582,7 @@ const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
     const items = vec(self);
     const position = Number(at as bigint);
     if (position > items.length)
-      panic(ctx, `\`at\` split index (is ${position}) should be <= len (is ${items.length})`);
+      panic(ctx, `\`at\` split index (is ${at as bigint}) should be <= len (is ${items.length})`);
     return items.splice(position);
   },
   as_slice: ([self]) => vec(self),

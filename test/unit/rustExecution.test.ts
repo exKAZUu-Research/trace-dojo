@@ -7766,3 +7766,13 @@ test.each([
     diagnostics: [expect.objectContaining({ message: expect.stringContaining(message) })],
   });
 });
+
+test.each([
+  ['v.swap(0, usize::MAX);', 'index out of bounds: the len is 1 but the index is 18446744073709551615'],
+  ['v.split_off(usize::MAX);', '`at` split index (is 18446744073709551615) should be <= len (is 1)'],
+  ['v.insert(usize::MAX, 2);', 'insertion index (is 18446744073709551615) should be <= len (is 1)'],
+  ['let _ = v[usize::MAX - 1 + v.len()];', 'index out of bounds: the len is 1 but the index is 18446744073709551615'],
+])('prints the whole index when %s panics', (statement, message) => {
+  const execution = executeProgram('rust', rustMain(`    let mut v = vec![1];\n    ${statement}`));
+  expect(execution.kind === 'executed' && execution.uncaughtException).toContain(`\n${message}\n`);
+});
