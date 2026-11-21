@@ -7088,3 +7088,39 @@ test('checks the message of an assertion only on its failing path', () => {
     diagnostics: [expect.objectContaining({ row: 4, message: expect.stringContaining('ムーブされた') })],
   });
 });
+
+test.each([
+  [
+    'two references to choose from',
+    'fn longest(a: &str, b: &str) -> &str { if a.len() >= b.len() { a } else { b } }',
+    false,
+  ],
+  ['no parameter to borrow from', 'fn word() -> &str { "x" }', false],
+  ['two parameters that name one lifetime', "fn first<'a>(a: &'a str, b: &'a str) -> &str { a }", false],
+  [
+    'a struct that leaves its lifetime out',
+    'struct Text<\'a> { t: &\'a str }\nfn make() -> Text { Text { t: "x" } }',
+    false,
+  ],
+  ['an associated function of a trait', 'trait Pick { fn pick(a: &str, b: &str) -> &str; }', false],
+  ['a single reference', 'fn pick(a: &str, n: i32) -> Option<&str> { if n > 0 { Some(a) } else { None } }', true],
+  [
+    'a method that borrows self',
+    "struct Text<'a> { t: &'a str }\nimpl<'a> Text<'a> { fn get(&self, other: &str) -> &str { self.t } }",
+    true,
+  ],
+  [
+    'a written lifetime',
+    "fn longest<'a>(a: &'a str, b: &'a str) -> &'a str { if a.len() >= b.len() { a } else { b } }",
+    true,
+  ],
+])('decides a return type without a lifetime from the parameters: %s', (_name, items, accepted) => {
+  const execution = executeProgram('rust', rustMain('', items));
+  if (accepted) expect(execution.kind).toBe('executed');
+  else {
+    expect(execution).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [expect.objectContaining({ message: expect.stringContaining('ライフタイムを書いてください') })],
+    });
+  }
+});

@@ -16,6 +16,7 @@ import { isIrrefutable, lowerPattern } from './exhaustiveness';
 import { deepNormalize, isPseudo, normalize, Unifier } from './infer';
 import { compileError, ItemCollector, lowerType, Module, type Program, resolveImports, type TypeScope } from './items';
 import { dynIteratorTarget, intoIterItem, intoIterShape } from './iterTypes';
+import { checkElidedReturnLifetime } from './lifetimeElision';
 import { autoderefSteps, derefOnce } from './methods';
 import { orderHint } from './orderingDiagnostics';
 import { TraitSolver } from './traits';
@@ -206,6 +207,7 @@ export class Checker {
     }
     for (const [index, type] of fn.paramTypes.entries()) this.checkSizedWrittenType(type, ast.params[index].span);
     this.checkSizedWrittenType(fn.ret, ast.ret?.span ?? ast.span);
+    checkElidedReturnLifetime(fn, ast);
   }
 
   private checkParamBounds(params: TypeParam[], span: Span): void {
