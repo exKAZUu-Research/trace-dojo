@@ -439,6 +439,64 @@ test('try blocks require a handler or finally', () => {
   });
 });
 
+test('required named parameters cannot have defaults', () => {
+  for (const declarations of [
+    'void f({required int n = 1}) {}',
+    'class A { A({required int n = 1}); }',
+    'class A { A.named({int n = 1}); factory A({required int n = 1}) = A.named; }',
+    'void f() { void local({required int n = 1}) {} }',
+    'void f() { var closure = ({required int n = 1}) {}; }',
+  ]) {
+    expect(executeProgram('dart', `${declarations} void main() {}`)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
+test('setters use one required positional argument and return void', () => {
+  const valid = `typedef Nothing = void;
+int value = 0;
+Nothing set top(int n) { value = n; }
+class A { void set property(int n) { value += n; } }
+void main() { top = 1; A().property = 2; print(value); }`;
+  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '3\n' });
+  for (const declarations of [
+    'int set x(int n) => n;',
+    'set x([int n = 1]) {}',
+    'set x({required int n}) {}',
+    'class A { int set x(int n) => n; }',
+    'class A { static set x([int n = 1]) {} }',
+    'extension A on int { dynamic set x(int n) {} }',
+  ]) {
+    expect(executeProgram('dart', `${declarations} void main() {}`)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
+test('covariant parameters follow the rules of their declaration context', () => {
+  const valid = `class A(covariant var int value) { void set property(covariant int n) { value = n; } }
+void main() { final object = A(1); object.property = 2; print(object.value); }`;
+  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '2\n' });
+  for (const declarations of [
+    'void f(covariant int n) {}',
+    'class A { static void f(covariant int n) {} }',
+    'extension A on int { void f(covariant int n) {} }',
+    'extension type A(int value) { void f(covariant int n) {} }',
+    'class A(covariant int value) {}',
+    'class A(covariant final int value) {}',
+  ]) {
+    expect(executeProgram('dart', `${declarations} void main() {}`)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
+test('main receives a checked second argument explicitly set to null', () => {
+  const optional = 'void main(List<String> args, [dynamic value = 10]) { print([args, value]); }';
+  expect(executeProgram('dart', optional)).toMatchObject({ kind: 'executed', stdout: '[[], null]\n' });
+  const required = 'void main(List<String> args, int value) { print(value); }';
+  expect(executeProgram('dart', required)).toMatchObject({
+    kind: 'executed',
+    stdout: '',
+    uncaughtException: "Unhandled exception:\ntype 'Null' is not a subtype of type 'int' of 'value'",
+  });
+});
+
 test('dynamic writes and for-in assignments enforce the target type', () => {
   const program = `class Box {
   int field = 1;

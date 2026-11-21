@@ -1,4 +1,4 @@
-import type { FormalParameters, FunctionBody, MethodDeclaration, TypeSyntax } from './ast';
+import type { FormalParameters, FunctionBody, MethodDeclaration, Span, TypeSyntax } from './ast';
 import type { CompiledFunction } from './callCompiler';
 import {
   ClassInfo,
@@ -39,9 +39,7 @@ export abstract class MemberCompiler extends MetadataCompiler {
     const base = { name, owner: cls, isStatic, isAbstract, row, impl };
     if (methodKind === 'getter') return { ...base, kind: 'getter', type: type.returnType };
     if (methodKind === 'setter') {
-      if (declaration.parameters.positional.length !== 1 || declaration.parameters.named.length > 0) {
-        this.error(declaration, 'setter の引数は 1 つにしてください。');
-      }
+      this.checkSetterSignature(declaration.parameters, type.returnType, declaration);
       return { ...base, kind: 'setter', type: firstParameter ?? DYNAMIC };
     }
     return {
@@ -53,6 +51,17 @@ export abstract class MemberCompiler extends MetadataCompiler {
         ? declaration.parameters.positional.map((parameter) => parameter.name)
         : undefined,
     };
+  }
+
+  protected checkSetterSignature(parameters: FormalParameters, result: DartType, span: Span): void {
+    if (parameters.requiredCount !== 1 || parameters.positional.length !== 1 || parameters.named.length > 0)
+      this.error(span, 'setter の引数は必須の位置引数 1 つにしてください。');
+    if (result.kind !== 'void') this.error(span, 'setter の戻り値の型には void を書くか、省略してください。');
+  }
+
+  protected checkCovariantFormals(parameters: FormalParameters): void {
+    const covariant = [...parameters.positional, ...parameters.named].find((parameter) => parameter.isCovariant);
+    if (covariant) this.error(covariant, 'この引数には covariant を付けられません。');
   }
 
   /** The function type of a signature, inferring omitted types from the member it overrides. */

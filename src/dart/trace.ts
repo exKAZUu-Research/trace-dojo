@@ -1,9 +1,9 @@
-import { LIMITS } from '../interpreter/limits';
+import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import type { ProgramRecording } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder';
-import type { DisplayNode, TraceItemVariable, TraceScalar } from '../problems/trace';
+import type { DisplayNode, TraceItem, TraceItemVariable, TraceScalar } from '../problems/trace';
 import type { ClassInfo, FieldMember } from './classes';
 import type { CompiledProgram } from './compiler';
 import { newRuntime, runProgram } from './execute';
@@ -15,13 +15,14 @@ import type { Frame, Runtime } from './runtime';
 import { coreTypes, type DartType, DYNAMIC } from './types';
 import { DartList, DartObject, DartRecord, UNASSIGNED, UNINITIALIZED, type Value } from './values';
 
-// code-gauge-allow duplicateLines 16 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
+// code-gauge-allow duplicateLines 17 -- Dart wires its runtime into the shared recorder.
 export function traceDartProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
   const compiled = compileProgram(parseDart(program), { atomicRows: new Set(trace.atomicAnnotations.keys()) });
   const runtime = newRuntime(input);
   const snapshotter = new Snapshotter(runtime, compiled);
   const recorder = new TraceRecorder(runtime, {
     isAtomic: (frame) => frame.info.isAtomic,
+    recordItem: (item) => snapshotter.recordItem(item),
     variablesOf: (frame) => snapshotter.variablesOf(frame, true, true),
     scalarVarsOf: (frame) => snapshotter.variablesOf(frame, true).vars,
   });
@@ -31,10 +32,12 @@ export function traceDartProgram(program: string, trace: TraceOptions, input?: P
   const run = runProgram(runtime, compiled, (frame) => {
     finalVars = snapshotter.variablesOf(frame, false).vars;
   });
+  snapshotter.chargeScalars(finalVars);
   return { traceItems: recorder.traceItems, finalVars, ...run };
 }
 
 const MAX_SNAPSHOT_NODES = 4096;
+const TRACE_NODE_COST = 32;
 
 interface ListSnapshots {
   scalar: WeakMap<DartList, Scalar[]>;
@@ -58,11 +61,64 @@ interface SnapshotRoot {
 
 class Snapshotter {
   private readonly lists: ListSnapshots = { scalar: new WeakMap(), display: new WeakMap() };
+  private readonly chargedSnapshots = new WeakSet<object>();
+  private remainingTraceSize = LIMITS.maxDartTraceSize;
 
   constructor(
     private readonly runtime: Runtime,
     private readonly program: CompiledProgram
   ) {}
+
+  recordItem(item: TraceItem): TraceItem {
+    this.charge(item.board.length + TRACE_NODE_COST * (item.callLines.length + item.turtles.length * 4 + 1));
+    this.chargeScalars(item.vars);
+    for (const [name, node] of Object.entries(item.referenceVars)) {
+      this.charge(name.length);
+      this.chargeReference(node);
+    }
+    return item;
+  }
+
+  chargeScalars(vars: TraceItemVariable): void {
+    for (const [name, value] of Object.entries(vars)) {
+      this.charge(name.length);
+      this.chargeScalar(value);
+    }
+  }
+
+  private chargeScalar(value: Scalar): void {
+    if (!Array.isArray(value)) {
+      this.charge(TRACE_NODE_COST + (typeof value === 'string' ? value.length : 0));
+      return;
+    }
+    if (!this.chargeSnapshot(value)) return;
+    this.charge(8 * value.length);
+    for (const item of value) this.chargeScalar(item);
+  }
+
+  private chargeReference(node: DisplayNode): void {
+    if (!this.chargeSnapshot(node)) return;
+    if (node.kind === 'value') {
+      if (typeof node.value === 'string') this.charge(node.value.length);
+      return;
+    }
+    for (const [name, child] of Object.entries(node.entries)) {
+      this.charge(16 + name.length);
+      this.chargeReference(child);
+    }
+  }
+
+  private chargeSnapshot(snapshot: object): boolean {
+    if (this.chargedSnapshots.has(snapshot)) return false;
+    this.chargedSnapshots.add(snapshot);
+    this.charge(TRACE_NODE_COST);
+    return true;
+  }
+
+  private charge(cost: number): void {
+    this.remainingTraceSize -= cost;
+    if (this.remainingTraceSize < 0) throw new ExecutionLimitError('trace');
+  }
 
   variablesOf(frame: Frame, withContext: boolean, includeReferences = false): TraceVariables {
     return snapshot(this.rootsOf(frame, withContext), includeReferences, this.lists);

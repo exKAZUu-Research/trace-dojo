@@ -805,10 +805,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
 }
 
 function isFieldParameter(parameter: FormalParameter): boolean {
-  return (
-    parameter.binding === 'plain' &&
-    (parameter.isFinal || (parameter as FormalParameter & { isVar?: boolean }).isVar === true)
-  );
+  return parameter.binding === 'plain' && (parameter.isFinal || parameter.isVar === true);
 }
 
 function spanOnly(span: Span): Span {

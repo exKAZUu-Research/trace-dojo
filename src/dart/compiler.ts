@@ -678,11 +678,7 @@ export class Compiler extends MemberCompiler {
   private declarePrimaryConstructorFields(cls: ClassInfo, declaration: ClassDeclaration): void {
     const primary = declaration.primaryConstructor as NonNullable<ClassDeclaration['primaryConstructor']>;
     for (const parameter of [...primary.parameters.positional, ...primary.parameters.named]) {
-      if (
-        parameter.binding !== 'plain' ||
-        (!parameter.isFinal && !(parameter as FormalParameter & { isVar?: boolean }).isVar)
-      )
-        continue;
+      if (parameter.binding !== 'plain' || (!parameter.isFinal && !parameter.isVar)) continue;
       if (!parameter.type) this.error(parameter, `フィールド ${parameter.name} の型を書いてください。`);
       this.declareField(cls, {
         ...parameter,
@@ -691,7 +687,7 @@ export class Compiler extends MemberCompiler {
         isFinal: parameter.isFinal,
         isConst: false,
         isLate: false,
-        isCovariant: false,
+        isCovariant: parameter.isCovariant,
         isExternal: false,
         isAbstract: false,
         type: parameter.type,
@@ -1049,6 +1045,8 @@ export class Compiler extends MemberCompiler {
   private declareMethod(cls: ClassInfo, declaration: MethodDeclaration, owner: ClassInfo | ExtensionInfo = cls): void {
     const typeParams = this.withoutFunctionTypeAnnotations(() => this.declareTypeParams(declaration.typeParameters));
     const isExtension = !(owner instanceof ClassInfo);
+    const canBeAbstract = !declaration.isStatic && !isExtension && cls.kind !== 'extensionType';
+    if (!canBeAbstract) this.checkCovariantFormals(declaration.parameters);
     const { type, positionalTypes, namedTypes } = this.withTypeParams(typeParams, () =>
       this.signatureOf(declaration.parameters, declaration.returnType, typeParams, {
         cls: isExtension ? undefined : cls,
@@ -1057,7 +1055,7 @@ export class Compiler extends MemberCompiler {
     );
     const { name, methodKind } = declaration;
     const isAbstract = !declaration.body && !declaration.isExternal;
-    if (isAbstract && (declaration.isStatic || isExtension || cls.kind === 'extensionType') && !this.isLibraryCode) {
+    if (isAbstract && !canBeAbstract && !this.isLibraryCode) {
       this.error(declaration, `${cls.name}.${name} に本体がありません。`);
     }
     if (methodKind === 'operator' && declaration.isStatic) this.error(declaration, '演算子は static にできません。');
@@ -1476,11 +1474,14 @@ export class Compiler extends MemberCompiler {
             : entry.setter
           : undefined;
     if (!fn) return;
+    this.checkCovariantFormals(declaration.parameters);
     const typeParams = this.withoutFunctionTypeAnnotations(() => this.declareTypeParams(declaration.typeParameters));
     const { type } = this.withTypeParams(typeParams, () =>
       this.signatureOf(declaration.parameters, declaration.returnType, typeParams)
     );
     fn.type = declaration.functionKind === 'setter' && !declaration.returnType ? { ...type, returnType: VOID } : type;
+    if (declaration.functionKind === 'setter')
+      this.checkSetterSignature(declaration.parameters, fn.type.returnType, declaration);
     if (declaration.isExternal) {
       const kind = declaration.functionKind === 'function' ? 'method' : declaration.functionKind;
       fn.impl = this.native(

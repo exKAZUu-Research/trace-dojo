@@ -7,7 +7,7 @@ import { parseDart } from './parse';
 import { compileProgram, LINKS } from './program';
 import { DartThrow, type Frame, ProgramExit, Runtime } from './runtime';
 import { coreTypes, interfaceType } from './types';
-import { type Callable, DartList } from './values';
+import { type Callable, DartList, type Value } from './values';
 
 export function executeDartProgram(source: string, input?: ProgramInput): ProgramExecution {
   let compiled: CompiledProgram;
@@ -52,10 +52,16 @@ export function runProgram(
   runtime.onMainExit = recordEnd;
   let uncaughtException: string | undefined;
   try {
-    const args = program.mainTakesArguments
-      ? [new DartList(coreTypes.list, interfaceType(coreTypes.string), [], true)]
-      : [];
-    (program.main.impl as Callable)(runtime, undefined, { positional: args, named: undefined }, [], undefined);
+    const args: Value[] = [];
+    if (program.mainTakesArguments) args.push(new DartList(coreTypes.list, interfaceType(coreTypes.string), [], true));
+    if (program.main.type.positional.length > 1) args.push(undefined);
+    (program.main.impl as Callable)(
+      runtime,
+      undefined,
+      { positional: args, named: undefined, isDynamic: true },
+      [],
+      undefined
+    );
   } catch (error) {
     uncaughtException = describeUncaught(runtime, error);
   }

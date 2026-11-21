@@ -202,6 +202,7 @@ export interface FormalParameter extends Span {
   type: TypeSyntax | undefined;
   /** `this.x` initializes a field, `super.x` passes the argument on to the superclass constructor. */
   binding: 'plain' | 'this' | 'super';
+  isVar?: boolean;
   isFinal: boolean;
   isCovariant: boolean;
   isRequired: boolean;

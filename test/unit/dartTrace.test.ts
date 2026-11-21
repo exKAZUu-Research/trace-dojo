@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest';
 
+import { ExecutionLimitError } from '../../src/interpreter/limits';
 import { traceProgram } from '../../src/interpreter/program';
 import type { TraceItem } from '../../src/problems/trace';
 
@@ -260,6 +261,21 @@ test('a cyclic list produces finite snapshots and execution continues', () => {
   const references = result.traceItems.at(-1)?.referenceVars;
   expect(references?.followed).toMatchObject({ kind: 'array', entries: { 0: { kind: 'value', value: 7 } } });
   expect(JSON.stringify(references?.values)).toContain('"value":"…"');
+});
+
+test('Dart limits cumulative trace size across individually small snapshots', () => {
+  for (const source of [
+    `void main() {
+      final values = List<int>.filled(2000, 1);
+      for (var i = 0; i < 1000; i++) { values[i % 2000] = i; }
+    }`,
+    `void main() {
+      final text = 'x' * 500000;
+      for (var i = 0; i < 100; i++) { final length = text.length; print(length); }
+    }`,
+  ]) {
+    expect(() => traceProgram('dart', source, source)).toThrow(new ExecutionLimitError('trace'));
+  }
 });
 
 test('a synchronous generator records the counted-loop header', () => {

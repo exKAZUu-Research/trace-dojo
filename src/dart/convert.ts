@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 545 -- Keep declaration syntax and parameter validation together.
+// code-gauge-allow-file fileNcss 552 -- Keep declaration syntax and parameter validation together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type {
@@ -371,13 +371,18 @@ export class Converter extends ExpressionConverter {
   }
 
   private convertPrimaryConstructor(node: Node, isConst: boolean, allowInitializingFormals = true): PrimaryConstructor {
+    const parameters = this.convertFormalParameters(
+      requireNode(fieldOf(node, 'parameters'), node),
+      allowInitializingFormals
+    );
+    const invalid = [...parameters.positional, ...parameters.named].find(
+      (parameter) => parameter.isCovariant && (!parameter.isVar || !allowInitializingFormals)
+    );
+    if (invalid) syntaxError(invalid, 'covariant は、var で宣言するインスタンスのフィールドに付けてください。');
     return {
       name: fieldOf(node, 'name')?.text,
       isConst: isConst || hasToken(node, 'const'),
-      parameters: this.convertFormalParameters(
-        requireNode(fieldOf(node, 'parameters'), node),
-        allowInitializingFormals
-      ),
+      parameters,
       ...spanOf(node),
     };
   }
@@ -843,6 +848,8 @@ export class Converter extends ExpressionConverter {
       }
     }
     if (!allowInitializingFormals) requirePlainParameters(positional, named);
+    const requiredWithDefault = named.find((parameter) => parameter.isRequired && parameter.defaultValue);
+    if (requiredWithDefault) syntaxError(requiredWithDefault, 'required の引数には既定値を書けません。');
     return { positional, requiredCount, named, ...spanOf(node) };
   }
 
@@ -912,6 +919,7 @@ export class Converter extends ExpressionConverter {
       name: requireNode(nameNode, node).text,
       type: typeNode ? this.convertType(typeNode) : undefined,
       binding: 'plain',
+      isVar: tokens.has('var') || undefined,
       isFinal: tokens.has('final'),
       isCovariant: tokens.has('covariant'),
       isRequired,
