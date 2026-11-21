@@ -1,0 +1,46 @@
+0=>1
+2=>3
+4=>5
+cb 1 a ArrayIterator
+cb 2 b ArrayIterator
+b=>2
+cb 3 c ArrayIterator
+c=>3
+cb 1 a ArrayIterator
+cb 2 b ArrayIterator
+cb 3 c ArrayIterator
+array(2) {
+  ["b"]=>
+  int(2)
+  ["c"]=>
+  int(3)
+}
+3,6,9
+Cannot instantiate abstract class FilterIterator
+Error: The object is in an invalid state as the parent constructor was not called
+Array
+(
+    [0] => __construct
+    [1] => accept
+    [2] => rewind
+    [3] => next
+    [4] => getInnerIterator
+    [5] => valid
+    [6] => key
+    [7] => current
+)
+Array
+(
+    [0] => accept
+    [1] => __construct
+    [2] => rewind
+    [3] => next
+    [4] => getInnerIterator
+    [5] => valid
+    [6] => key
+    [7] => current
+)
+CallbackFilterIterator Object
+(
+)
+

@@ -1,0 +1,36 @@
+1
+MyException too big: 5 42 info line 6
+finally
+in finally
+try
+g-finally
+caught a
+inner finally
+outer caught inner
+multi InvalidArgumentException
+Division by zero
+Modulo by zero
+Division by zero
+Call to a member function method() on null
+cause
+19 same
+#0 /main.php(21): thrower()
+#1 /main.php(22): middle()
+#2 {main}
+Array
+(
+    [0] => thrower
+    [1] => middle
+)
+2
+handler: [2] Undefined variable $undefinedVar at 25
+handler: [2] Undefined array key "missing" at 26
+end
+release:error;cleanup;previous handler;
+release:exception;cleanup;bool(true)
+during:ReplacingHandler;restored:ReplacingHandler
+
+Fatal error: Uncaught MyException: uncaught! in /main.php:66
+Stack trace:
+#0 {main}
+  thrown in /main.php on line 66

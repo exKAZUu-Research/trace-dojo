@@ -1,0 +1,13 @@
+Unsupported operand types: int * array
+
+Warning: A non-numeric value encountered in /main.php on line 13
+Unsupported operand types: string * array
+
+Warning: A non-numeric value encountered in /main.php on line 13
+Unsupported operand types: string + array
+
+Deprecated: Implicit conversion from float 2.5 to int loses precision in /main.php on line 13
+Unsupported operand types: float | array
+
+Deprecated: Implicit conversion from float 2.5 to int loses precision in /main.php on line 13
+Unsupported operand types: float << array

@@ -1,0 +1,6 @@
+CachingIterator::offsetSet(): Argument #1 ($key) must be of type string, int given
+CachingIterator::offsetGet(): Argument #1 ($key) must be of type string, int given
+CachingIterator::offsetExists(): Argument #1 ($key) must be of type string, int given
+CachingIterator::offsetUnset(): Argument #1 ($key) must be of type string, int given
+array(0) {
+}

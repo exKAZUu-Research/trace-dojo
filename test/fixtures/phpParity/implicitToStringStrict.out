@@ -1,0 +1,6 @@
+
+Fatal error: Uncaught TypeError: A::__toString(): Return value must be of type string, int returned in /main.php:1
+Stack trace:
+#0 /main.php(1): A->__toString()
+#1 {main}
+  thrown in /main.php on line 1

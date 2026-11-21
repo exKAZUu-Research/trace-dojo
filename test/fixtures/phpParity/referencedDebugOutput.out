@@ -1,0 +1,28 @@
+array(1) {
+  ["key"]=>
+  hook
+&object(DebugReference)#1 (1) {
+    ["value"]=>
+    int(42)
+  }
+}
+object(stdClass)#2 (1) {
+  ["value"]=>
+  hook
+&object(DebugReference)#1 (1) {
+    ["value"]=>
+    int(42)
+  }
+}
+array(1) {
+  ["key"]=>
+  throwing hook
+
+Warning: Uncaught Exception: stop in /main.php:6
+Stack trace:
+#0 [internal function]: FailingDebugReference->__debugInfo()
+#1 /main.php(15): var_dump(Array)
+#2 {main}
+  thrown in /main.php on line 6
+
+Fatal error: __debuginfo() must return an array in /main.php on line 15

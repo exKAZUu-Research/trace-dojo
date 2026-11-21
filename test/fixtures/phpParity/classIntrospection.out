@@ -1,0 +1,126 @@
+array(3) {
+  ["T2"]=>
+  string(2) "T2"
+  ["T1"]=>
+  string(2) "T1"
+  ["T3"]=>
+  string(2) "T3"
+}
+array(3) {
+  ["T2"]=>
+  string(2) "T2"
+  ["T1"]=>
+  string(2) "T1"
+  ["T3"]=>
+  string(2) "T3"
+}
+array(1) {
+  ["T3"]=>
+  string(2) "T3"
+}
+array(1) {
+  ["T1"]=>
+  string(2) "T1"
+}
+array(0) {
+}
+
+Warning: class_uses(): Class Nope does not exist and could not be loaded in /main.php on line 7
+bool(false)
+
+Warning: class_uses(): Class Nope does not exist in /main.php on line 8
+bool(false)
+
+Warning: class_implements(): Class Nope does not exist and could not be loaded in /main.php on line 9
+
+Warning: class_parents(): Class Nope does not exist and could not be loaded in /main.php on line 9
+bool(false)
+bool(false)
+class_uses(): Argument #1 ($object_or_class) must be of type object|string, int given
+array(4) {
+  ["type"]=>
+  int(2)
+  ["message"]=>
+  string(66) "class_parents(): Class Nope does not exist and could not be loaded"
+  ["file"]=>
+  string(1) "F"
+  ["line"]=>
+  int(9)
+}
+
+Warning: Undefined variable $undef1 in /main.php on line 12
+array(4) {
+  ["type"]=>
+  int(2)
+  ["message"]=>
+  string(26) "Undefined variable $undef1"
+  ["file"]=>
+  string(1) "F"
+  ["line"]=>
+  int(12)
+}
+NULL
+array(4) {
+  ["type"]=>
+  int(2)
+  ["message"]=>
+  string(26) "Undefined variable $undef2"
+  ["file"]=>
+  string(1) "F"
+  ["line"]=>
+  int(16)
+}
+handler: Undefined variable $undef3
+array(4) {
+  ["type"]=>
+  int(2)
+  ["message"]=>
+  string(26) "Undefined variable $undef2"
+  ["file"]=>
+  string(1) "F"
+  ["line"]=>
+  int(16)
+}
+handler2: Undefined variable $undef4
+
+Warning: Undefined variable $undef4 in /main.php on line 22
+array(4) {
+  ["type"]=>
+  int(2)
+  ["message"]=>
+  string(26) "Undefined variable $undef4"
+  ["file"]=>
+  string(1) "F"
+  ["line"]=>
+  int(22)
+}
+array(4) {
+  ["type"]=>
+  int(512)
+  ["message"]=>
+  string(5) "quiet"
+  ["file"]=>
+  string(1) "F"
+  ["line"]=>
+  int(26)
+}
+array(4) {
+  ["type"]=>
+  int(512)
+  ["message"]=>
+  string(5) "quiet"
+  ["file"]=>
+  string(1) "F"
+  ["line"]=>
+  int(26)
+}
+
+Deprecated: dep in /main.php on line 32
+Array
+(
+    [type] => 16384
+    [message] => dep
+    [file] => /main.php
+    [line] => 32
+)
+NULL

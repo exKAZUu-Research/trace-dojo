@@ -1,0 +1,4 @@
+inherited
+Fatal error: Cannot override final method Base::inherited() in /main.php on line 8
+Stack trace:
+#0 {main}

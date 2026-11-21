@@ -1,0 +1,5 @@
+NULL
+
+Fatal error: T and U define the same constant (X) in the composition of A. However, the definition differs and is considered incompatible. Class was composed in /main.php on line 3
+Stack trace:
+#0 {main}

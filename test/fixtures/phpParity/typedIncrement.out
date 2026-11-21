@@ -1,0 +1,6 @@
+Cannot increment property T::$i of type int past its maximal value
+Cannot decrement property T::$n of type ?int past its minimal value
+float(9.223372036854776E+18)
+Cannot increment property T::$s of type int past its maximal value
+float(9.223372036854776E+18)
+int(9223372036854775807)

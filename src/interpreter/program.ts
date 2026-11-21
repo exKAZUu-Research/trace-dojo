@@ -1,6 +1,9 @@
 import { executeCProgram } from '../c/execute';
 import { findCTraceAnnotations } from '../c/parse';
 import { traceCProgram } from '../c/trace';
+import { executeCppProgram } from '../cpp/execute';
+import { findCppTraceAnnotations } from '../cpp/parse';
+import { traceCppProgram } from '../cpp/trace';
 import { executeGoProgram } from '../go/execute';
 import { findGoTraceAnnotations } from '../go/parse';
 import { traceGoProgram } from '../go/trace';
@@ -15,6 +18,9 @@ import { traceJavaScriptProgram } from '../javascript/trace';
 import { executeKotlinProgram } from '../kotlin/execute';
 import { findKotlinTraceAnnotations } from '../kotlin/parse';
 import { traceKotlinProgram } from '../kotlin/trace';
+import { findPhpTraceAnnotations } from '../php/parse';
+import { executePhpProgram } from '../php/run';
+import { tracePhpProgram } from '../php/trace';
 import { findJavaTraceAnnotations } from '../problems/fillInBlank/javaSource';
 import type { TraceItem, TraceItemVariable, TurtleTrace } from '../problems/trace';
 import { findPythonTraceAnnotations } from '../python/parse';
@@ -23,6 +29,9 @@ import { tracePythonProgram } from '../python/trace';
 import { findRubyTraceAnnotations } from '../ruby/parse';
 import { executeRubyProgram } from '../ruby/run';
 import { traceRubyProgram } from '../ruby/trace';
+import { executeZigProgram } from '../zig/execute';
+import { findZigTraceAnnotations } from '../zig/parse';
+import { traceZigProgram } from '../zig/trace';
 import type { SourceDiagnostic } from './diagnostics';
 import type { ExecutionLimitError } from './limits';
 import type { ProgramInput, ProgramOutput } from './programIo';
@@ -88,6 +97,9 @@ const interpreters = {
     record: traceKotlinProgram,
     execute: executeKotlinProgram,
   },
+  cpp: { findTraceAnnotations: findCppTraceAnnotations, record: traceCppProgram, execute: executeCppProgram },
+  php: { findTraceAnnotations: findPhpTraceAnnotations, record: tracePhpProgram, execute: executePhpProgram },
+  zig: { findTraceAnnotations: findZigTraceAnnotations, record: traceZigProgram, execute: executeZigProgram },
   haskell: {
     findTraceAnnotations: findHaskellTraceAnnotations,
     record: traceHaskellProgram,

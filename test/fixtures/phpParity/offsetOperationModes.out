@@ -1,0 +1,53 @@
+get
+
+Notice: Indirect modification of overloaded element of Offsets has no effect in /main.php on line 13
+get
+
+Notice: Indirect modification of overloaded element of Offsets has no effect in /main.php on line 13
+int(3)
+int(4)
+int(3)
+get
+set
+int(5)
+ref
+int(2)
+int(2)
+int(3)
+Cannot access offset of type array on array
+Cannot access offset of type array in isset or empty
+Cannot access offset of type array in isset or empty
+Cannot access offset of type array in isset or empty
+Cannot access offset of type array on ArrayObject
+Cannot access offset of type array in isset or empty
+Cannot unset offset of type array on ArrayObject
+Cannot access offset of type array on RecursiveArrayIterator
+bool(false)
+bool(true)
+Cannot access offset of type array on string
+
+Warning: Illegal string offset "1x" in /main.php on line 29
+string(1) "b"
+
+Deprecated: Implicit conversion from float 1.2 to int loses precision in /main.php on line 29
+bool(true)
+
+Deprecated: Automatic conversion of false to array is deprecated in /main.php on line 36
+key1key2
+Deprecated: Automatic conversion of false to array is deprecated in /main.php on line 38
+
+bool(false)
+Cannot unset offset in a non-array variable
+key1key2Cannot unset offset in a non-array variable
+bool(true)
+Cannot unset offset in a non-array variable
+key1key2Cannot unset offset in a non-array variable
+int(1)
+Cannot unset offset in a non-array variable
+key1key2Cannot unset offset in a non-array variable
+float(1.2)
+key1key2
+NULL
+Cannot unset string offsets
+key1key2Cannot use string offset as an array
+string(3) "abc"

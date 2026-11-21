@@ -1,0 +1,48 @@
+Rect(2x3) 6 4 cm cm
+5noneYN
+none
+w=2,h=3,
+{"w":2,"h":3,"units":"cm"} ST
+0:a 1:b 
+1,2
+Rex says Woof | Bit says Woof! | Dog
+bool(true)
+bool(true)
+bool(true)
+bool(true)
+bool(true)
+Hello from Person Person Person Greets 12
+Array
+(
+    [a] => 1
+    [b] => 2
+)
+bool(true)
+Call to private Config::__construct() from global scope
+12
+Cannot modify readonly property Money::$amount
+12 3
+15
+2
+anything:3
+12
+bool(false)
+array(2) {
+  ["a"]=>
+  int(1)
+  ["b"]=>
+  array(2) {
+    [0]=>
+    int(1)
+    [1]=>
+    int(2)
+  }
+}
+object(stdClass)#12 (1) {
+  ["x"]=>
+  int(1)
+}
+v
+Rect object Rect
+cm Rect
+TraitMagicDefaults;TraitMagicDefaults static;TraitMagicDefaults instance;MagicUsingClass

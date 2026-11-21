@@ -1,0 +1,33 @@
+object(Reg)#1 (2) {
+  ["name"]=>
+  string(3) "reg"
+  ["storage":"SplObjectStorage":private]=>
+  array(1) {
+    [0]=>
+    array(2) {
+      ["obj"]=>
+      object(stdClass)#2 (0) {
+      }
+      ["inf"]=>
+      string(1) "x"
+    }
+  }
+}
+Reg Object
+(
+    [name] => reg
+    [storage:SplObjectStorage:private] => Array
+        (
+            [0] => Array
+                (
+                    [obj] => stdClass Object
+                        (
+                        )
+
+                    [inf] => x
+                )
+
+        )
+
+)
+

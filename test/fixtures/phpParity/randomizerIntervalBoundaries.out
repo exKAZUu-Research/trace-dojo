@@ -1,0 +1,47 @@
+float(1.9822252063816341)
+ClosedOpen
+float(1.8811665814091647)
+float(-1.1336763317879162)
+ClosedClosed
+float(1.1932888807201667)
+float(-1.0930438152207331)
+OpenClosed
+float(1.9668592341004738)
+float(-1.4505760517999073)
+OpenOpen
+float(1.7307581725898213)
+float(-1.5974614173875419)
+bool(true)
+bool(true)
+bool(true)
+bool(true)
+enum(Random\IntervalBoundary::OpenClosed)
+\Random\IntervalBoundary::OpenClosed
+Random\IntervalBoundary Enum
+(
+    [name] => OpenClosed
+)
+bool(false)
+string(46) "Non-backed enums have no default serialization"
+Random\Randomizer::getFloat(): Argument #2 ($max) must be greater than argument #1 ($min)
+Random\Randomizer::getFloat(): Argument #2 ($max) must be greater than argument #1 ($min)
+float(1)
+float(-1.0000000000000002)
+float(2)
+Random\Randomizer::getFloat(): Argument #2 ($max) must be greater than or equal to argument #1 ($min)
+float(1.0000000000000002)
+float(-1)
+Random\Randomizer::getFloat(): Argument #2 ($max) must be greater than argument #1 ($min)
+Random\Randomizer::getFloat(): Argument #2 ($max) must be greater than argument #1 ($min)
+float(1.0000000000000002)
+float(-1)
+Random\Randomizer::getFloat(): Argument #2 ($max) must be greater than argument #1 ($min)
+Random\Randomizer::getFloat(): Argument #2 ($max) must be greater than argument #1 ($min)
+The given interval is empty, there are no floats between argument #1 ($min) and argument #2 ($max)
+The given interval is empty, there are no floats between argument #1 ($min) and argument #2 ($max)
+Random\Randomizer::getFloat(): Argument #3 ($boundary) must be of type Random\IntervalBoundary, string given
+889562942
+#0 /main.php(30): enumTrace(Random\IntervalBoundary::OpenOpen)
+#1 {main}
+#0 /main.php(32): Random\Randomizer->getFloat(-1, -1, Random\IntervalBoundary::ClosedOpen)
+#1 {main}

@@ -1,0 +1,14 @@
+string(2) "13"
+int(3)
+int(3)
+array (
+  3 => 1,
+)
+array (
+  'first' => true,
+  'current' => true,
+)
+array (
+  'first' => 1,
+  'current' => 2,
+)

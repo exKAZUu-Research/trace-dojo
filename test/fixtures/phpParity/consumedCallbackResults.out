@@ -1,0 +1,23 @@
+array_filter
+make 1
+drop 1
+make 2
+drop 2
+array_all
+make 1
+drop 1
+make 2
+drop 2
+array_find
+make 1
+drop 1
+array_walk
+make 1
+drop 1
+make 2
+drop 2
+result make 1
+drop 1
+make 2
+drop 2
+12

@@ -1,0 +1,4 @@
+body:value0;advance:0;drop:value0;drop:key0;body:value1;advance:1;end:retain;drop:value1;drop:key1;
+body:value0;drop:key0;drop:value0;advance:0;body:value1;drop:key1;drop:value1;advance:1;end:unset;
+body:value0;end:break;drop:value0;drop:key0;
+body:value0;caught:throw;end:throw;drop:value0;drop:key0;

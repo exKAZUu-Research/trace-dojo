@@ -1,0 +1,45 @@
+string(3) "abc"
+int(65537)
+int(65537)
+int(1)
+int(5)
+int(1)
+int(5)
+int(1)
+string(5) "value"
+int(3)
+array(2) {
+  ["data"]=>
+  string(5) "value"
+  ["priority"]=>
+  int(11)
+}
+#0 /main.php(22): traceOptions('visible', 9007199254740993)
+#0 /main.php(23): traceOptions()
+#0 /main.php(24): traceOptions()
+int(9007199254740993)
+int(9007199254740995)
+abc=zzz
+int(9223372036854775807)
+int(-9007199254740993)
+item;done
+item;done
+item;child
+Seek position 9007199254740993 is out of range
+NULL
+Seek position 9223372036854775807 is out of range
+NULL
+Seek position -9007199254740993 is out of range
+NULL
+string(6) "second"
+
+Deprecated: Method SplObjectStorage::attach() is deprecated since 8.5, use method SplObjectStorage::offsetSet() instead in /main.php on line 58
+
+Deprecated: Method SplObjectStorage::attach() is deprecated since 8.5, use method SplObjectStorage::offsetSet() instead in /main.php on line 59
+int(1)
+Seek position 9007199254740993 is out of range
+int(1)
+Seek position 9223372036854775807 is out of range
+int(1)
+Seek position -9007199254740993 is out of range
+int(1)

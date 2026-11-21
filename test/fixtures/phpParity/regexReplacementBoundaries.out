@@ -1,0 +1,22 @@
+1prqs2prqsarray(2) {
+  [0]=>
+  string(1) "x"
+  [1]=>
+  string(1) "x"
+}
+pparray(2) {
+  [0]=>
+  string(3) "xxx"
+  [1]=>
+  string(1) "x"
+}
+callback:3
+replacement:replacement:1
+callback array:42
+string(6) "58e9e9"
+array(2) {
+  [0]=>
+  string(0) ""
+  [1]=>
+  string(4) "e9e9"
+}

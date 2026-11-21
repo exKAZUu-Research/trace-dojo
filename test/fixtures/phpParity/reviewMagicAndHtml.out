@@ -1,0 +1,25 @@
+created
+foo[42]
+foo{"a":1}
+q{"k":3}
+int(2)
+array(5) {
+  [0]=>
+  string(1) "x"
+  [1]=>
+  string(0) ""
+  [2]=>
+  string(0) ""
+  [3]=>
+  string(1) "c"
+  [4]=>
+  string(1) "y"
+}
+string(8) "&commat;"
+string(7) ":
+≂̸"
+string(7) "&nesim;"
+destroy after
+Cannot access uninitialized non-nullable property T::$x by reference
+bool(true)
+AB

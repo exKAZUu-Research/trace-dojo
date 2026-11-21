@@ -1,0 +1,4 @@
+
+Fatal error: Declaration of Implementation::check(Implementation $value): Implementation must be compatible with SignatureOwner::check(SignatureOwner $value): SignatureOwner in /main.php on line 3
+Stack trace:
+#0 {main}

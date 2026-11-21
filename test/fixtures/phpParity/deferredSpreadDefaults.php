@@ -1,0 +1,3 @@
+<?php define('K',1);echo 'run;';function a(true $x=![...[MISSING]]){}function b(true $x=![...[...MISSING,1]]){}function c(true $x=![...[1=>MISSING]]){}function d(true $x=![...[1/0]]){}function e(true $x=![...[K]]){}function f(true $x=![...[K=>1]]){}function g(true $x=![MISSING]){}function h(true $x=![...(true?MISSING:[1])]){}a(true);b(true);c(true);d(true);e(true);f(true);g(true);h(true);echo 'ok';
+function precisionDefault(true $x=![...(array)(string)1.234]){}precisionDefault(true);echo 'precision';
+function rawArray(int $x=[MISSING]){}class DeferredProperty{public int $x=[MISSING];}rawArray(1);echo 'deferred';

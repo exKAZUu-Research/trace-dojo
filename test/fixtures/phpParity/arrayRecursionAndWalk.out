@@ -1,0 +1,16 @@
+
+Warning: count(): Recursion detected in /main.php on line 2
+int(1)
+int(3)
+array(1) {
+  [0]=>
+  int(3)
+}
+string(1) "b"
+string(1) "b"
+bool(true)
+string(3) "axc"
+
+Warning: Undefined variable $x in /main.php on line 9
+ok
+destroy afterRecursion detected

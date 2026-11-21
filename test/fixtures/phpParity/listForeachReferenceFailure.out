@@ -1,0 +1,5 @@
+before;
+Fatal error: Uncaught Error: Cannot use a scalar value as an array in /main.php:2
+Stack trace:
+#0 {main}
+  thrown in /main.php on line 2

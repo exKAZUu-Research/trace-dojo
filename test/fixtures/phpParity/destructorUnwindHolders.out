@@ -1,0 +1,5 @@
+closure-a;caught:closure-a;closure-b;closure-end
+both-a;both-b;caught:both-b;caught:both-a;both-end
+array-a;caught:array-a;array-b;array-end
+native-a;caught:native-a;native-b;native-end
+parent;child;caught:child;caught:parent;parent-end

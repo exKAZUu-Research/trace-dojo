@@ -1,0 +1,6 @@
+
+Fatal error: __debuginfo() must return an array in /main.php on line 3
+Stack trace:
+#0 /main.php(3): var_dump(Object(BadDebugInfo))
+#1 /main.php(4): dump_object(Object(BadDebugInfo))
+#2 {main}

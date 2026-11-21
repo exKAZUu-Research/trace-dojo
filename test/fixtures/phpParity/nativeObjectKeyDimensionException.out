@@ -1,0 +1,6 @@
+
+Fatal error: Uncaught UnexpectedValueException: Object not found in /main.php:4
+Stack trace:
+#0 /main.php(6): missingObjectKey()
+#1 {main}
+  thrown in /main.php on line 4

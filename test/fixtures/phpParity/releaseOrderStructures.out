@@ -1,0 +1,102 @@
+object(N)#4 (2) {
+  ["next"]=>
+  object(N)#3 (2) {
+    ["next"]=>
+    object(N)#2 (2) {
+      ["next"]=>
+      object(N)#1 (2) {
+        ["next"]=>
+        NULL
+        ["v"]=>
+        int(0)
+      }
+      ["v"]=>
+      int(1)
+    }
+    ["v"]=>
+    int(2)
+  }
+  ["v"]=>
+  int(3)
+}
+object(stdClass)#4 (0) {
+}
+object(T)#4 (1) {
+  ["children"]=>
+  array(2) {
+    [0]=>
+    object(T)#5 (1) {
+      ["children"]=>
+      array(0) {
+      }
+    }
+    [1]=>
+    object(T)#6 (1) {
+      ["children"]=>
+      array(1) {
+        [0]=>
+        object(T)#7 (1) {
+          ["children"]=>
+          array(0) {
+          }
+        }
+      }
+    }
+  }
+}
+object(stdClass)#4 (0) {
+}
+object(stdClass)#6 (0) {
+}
+array(3) {
+  [0]=>
+  object(N)#4 (2) {
+    ["next"]=>
+    NULL
+    ["v"]=>
+    int(1)
+  }
+  [1]=>
+  object(N)#7 (2) {
+    ["next"]=>
+    NULL
+    ["v"]=>
+    int(2)
+  }
+  [2]=>
+  object(N)#5 (2) {
+    ["next"]=>
+    NULL
+    ["v"]=>
+    int(3)
+  }
+}
+object(stdClass)#7 (0) {
+}
+object(N)#5 (2) {
+  ["next"]=>
+  NULL
+  ["v"]=>
+  int(3)
+}
+array(2) {
+  ["x"]=>
+  object(N)#7 (2) {
+    ["next"]=>
+    NULL
+    ["v"]=>
+    string(1) "x"
+  }
+  ["y"]=>
+  object(N)#6 (2) {
+    ["next"]=>
+    NULL
+    ["v"]=>
+    string(1) "y"
+  }
+}
+object(stdClass)#8 (0) {
+}
+object(stdClass)#10 (0) {
+}
+end

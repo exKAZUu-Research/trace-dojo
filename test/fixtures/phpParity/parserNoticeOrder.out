@@ -1,0 +1,13 @@
+
+Deprecated: Non-canonical cast (integer) is deprecated, use the (int) cast instead in /main.php on line 4
+
+Deprecated: Non-canonical cast (double) is deprecated, use the (float) cast instead in /main.php on line 4
+
+Deprecated: Non-canonical cast (boolean) is deprecated, use the (bool) cast instead in /main.php on line 4
+
+Deprecated: Non-canonical cast (binary) is deprecated, use the (string) cast instead in /main.php on line 4
+
+Warning: The use statement with non-compound name 'Exception' has no effect in /main.php on line 2
+
+Deprecated: fnWithDefaults(): Optional parameter $a declared before required parameter $b is implicitly treated as a required parameter in /main.php on line 3
+1214

@@ -1,0 +1,31 @@
+call;array(1) {
+  [0]=>
+  int(4)
+}
+method;array(1) {
+  [0]=>
+  int(4)
+}
+array(1) {
+  [0]=>
+  &int(2)
+}
+array(1) {
+  [0]=>
+  int(2)
+}
+destroy;cleanup:body
+caught;argument-destroy;TypeError
+array(2) {
+  [0]=>
+  int(1)
+  [1]=>
+  string(3) "bad"
+}
+TypeError
+array(2) {
+  ["good"]=>
+  int(1)
+  ["bad"]=>
+  string(3) "bad"
+}

@@ -13,6 +13,8 @@ export const LIMITS = {
   maxCallDepth: 512,
   /** The total number of array elements and object fields allocated while running. */
   maxSlots: 1_000_000,
+  /** The cumulative cost of C++ trace nodes and text. */
+  maxCppTraceSize: 12_000_000,
   /** The length of one string built while running; building strings also costs operations, which bounds the rest. */
   maxStringLength: 1_000_000,
   /** The total length of what a run writes to standard output and standard error. */
@@ -34,7 +36,11 @@ export class ExecutionBudget {
   }
 
   private nextClockCheck = OPERATIONS_PER_CLOCK_CHECK;
-  private deadline = performance.now() + LIMITS.maxMilliseconds;
+  private deadline: number;
+
+  constructor(maxMilliseconds = LIMITS.maxMilliseconds) {
+    this.deadline = performance.now() + maxMilliseconds;
+  }
 
   get remainingMilliseconds(): number {
     return Math.max(0, Math.ceil(this.deadline - performance.now()));
@@ -49,6 +55,11 @@ export class ExecutionBudget {
     // checks the clock at once; single operations check it periodically.
     if (cost === 1 && this.operations < this.nextClockCheck) return;
     this.nextClockCheck = this.operations + OPERATIONS_PER_CLOCK_CHECK;
+    this.checkClock();
+  }
+
+  /** Stops the run if its time is up, after native work that may take long without charging operations. */
+  checkClock(): void {
     if (performance.now() > this.deadline) throw new ExecutionLimitError('time');
   }
 

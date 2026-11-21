@@ -1,0 +1,250 @@
+array(2) {
+  [0]=>
+  int(25)
+  [1]=>
+  string(3) "Bob"
+}
+NULL
+int(-1)
+NULL
+array(1) {
+  [0]=>
+  NULL
+}
+int(0)
+NULL
+array(3) {
+  [0]=>
+  int(12)
+  [1]=>
+  string(6) "apples"
+  [2]=>
+  NULL
+}
+array(7) {
+  [0]=>
+  int(31)
+  [1]=>
+  int(15)
+  [2]=>
+  int(0)
+  [3]=>
+  NULL
+  [4]=>
+  NULL
+  [5]=>
+  NULL
+  [6]=>
+  NULL
+}
+array(4) {
+  [0]=>
+  int(255)
+  [1]=>
+  int(31)
+  [2]=>
+  int(-26)
+  [3]=>
+  int(0)
+}
+array(4) {
+  [0]=>
+  string(20) "18446744073709551611"
+  [1]=>
+  string(20) "18446744073709551615"
+  [2]=>
+  string(20) "18446744073709551615"
+  [3]=>
+  string(19) "9223372036854775808"
+}
+array(3) {
+  [0]=>
+  int(9223372036854775807)
+  [1]=>
+  int(-9223372036854775808)
+  [2]=>
+  int(123)
+}
+array(6) {
+  [0]=>
+  float(3.14)
+  [1]=>
+  float(-0.5)
+  [2]=>
+  float(1000)
+  [3]=>
+  float(1.5)
+  [4]=>
+  NULL
+  [5]=>
+  NULL
+}
+array(6) {
+  [0]=>
+  string(5) "hello"
+  [1]=>
+  int(5)
+  [2]=>
+  string(1) "w"
+  [3]=>
+  string(1) "o"
+  [4]=>
+  string(3) "rld"
+  [5]=>
+  int(11)
+}
+array(3) {
+  [0]=>
+  string(3) "abc"
+  [1]=>
+  string(3) "123"
+  [2]=>
+  string(3) "def"
+}
+array(2) {
+  [0]=>
+  string(2) "a-"
+  [1]=>
+  string(1) "b"
+}
+array(1) {
+  [0]=>
+  NULL
+}
+array(1) {
+  [0]=>
+  NULL
+}
+array(3) {
+  [0]=>
+  int(12)
+  [1]=>
+  int(34)
+  [2]=>
+  int(56)
+}
+array(3) {
+  [0]=>
+  int(2024)
+  [1]=>
+  int(1)
+  [2]=>
+  int(15)
+}
+array(3) {
+  [0]=>
+  string(1) "b"
+  [1]=>
+  string(1) "c"
+  [2]=>
+  string(1) "a"
+}
+array(1) {
+  [0]=>
+  string(1) "b"
+}
+array(1) {
+  [0]=>
+  int(10)
+}
+array(1) {
+  [0]=>
+  int(10)
+}
+int(2)
+int(12)
+int(34)
+int(1)
+int(12)
+NULL
+array(1) {
+  [0]=>
+  int(42)
+}
+array(1) {
+  [0]=>
+  int(42)
+}
+array(1) {
+  [0]=>
+  float(4.5)
+}
+array(1) {
+  [0]=>
+  string(1) "x"
+}
+array(1) {
+  [0]=>
+  string(0) ""
+}
+array(1) {
+  [0]=>
+  string(2) "ab"
+}
+426164207363616e20636f6e76657273696f6e2063686172616374657220227a22 Bad scan conversion character "z"
+426164207363616e20636f6e76657273696f6e206368617261637465722022 Bad scan conversion character "
+556e6d617463686564205b20696e20666f726d617420737472696e67 Unmatched [ in format string
+556e6d617463686564205b20696e20666f726d617420737472696e67 Unmatched [ in format string
+556e6d617463686564205b20696e20666f726d617420737472696e67 Unmatched [ in format string
+63616e6e6f74206d69782022252220616e642022256e242220636f6e76657273696f6e2073706563696669657273 cannot mix "%" and "%n$" conversion specifiers
+63616e6e6f74206d69782022252220616e642022256e242220636f6e76657273696f6e2073706563696669657273 cannot mix "%" and "%n$" conversion specifiers
+22256e242220617267756d656e7420696e646578206f7574206f662072616e6765 "%n$" argument index out of range
+22256e242220617267756d656e7420696e646578206f7574206f662072616e6765 "%n$" argument index out of range
+5661726961626c652069732061737369676e6564206279206d756c7469706c652022256e242220636f6e76657273696f6e2073706563696669657273 Variable is assigned by multiple "%n$" conversion specifiers
+Different numbers of variable names and field specifiers
+Variable is not assigned by any conversion specifiers
+"%n$" argument index out of range
+int(2)
+int(2)
+int(1)
+array(3) {
+  [0]=>
+  NULL
+  [1]=>
+  NULL
+  [2]=>
+  int(5)
+}
+array(1) {
+  [0]=>
+  string(1) "a"
+}
+array(0) {
+}
+array(1) {
+  [0]=>
+  string(2) "bc"
+}
+array(1) {
+  [0]=>
+  NULL
+}
+NULL
+
+Deprecated: bin2hex(): Passing null to parameter #1 ($string) of type string is deprecated in /main.php on line 24
+
+Deprecated: bin2hex(): Passing null to parameter #1 ($string) of type string is deprecated in /main.php on line 24
+array(2) {
+  [0]=>
+  string(0) ""
+  [1]=>
+  string(0) ""
+}
+array(2) {
+  [0]=>
+  string(4) "9085"
+  [1]=>
+  string(2) "7a"
+}
+array(1) {
+  [0]=>
+  string(3) "abc"
+}
+array(1) {
+  [0]=>
+  string(1) "a"
+}
+array(1) {
+  [0]=>
+  string(2) "x-"
+}
