@@ -36,6 +36,7 @@ import { arrayIterator } from './core';
 import { jdkHashCapacity, mapCapacity, newStore, reserveForCopy } from './hashTables';
 import { listEquals } from './listEquality';
 import { mapEntryEquals, mapEquals } from './mapEquality';
+import { defineMapForEach } from './mapForEach';
 import { defineNative, defineNativeProperty, libraryClass, throwError } from './registry';
 
 /**
@@ -1442,6 +1443,7 @@ defineFactories();
 defineIterators();
 defineMapConstructors();
 defineMaps();
+defineMapForEach();
 defineSets();
 defineNative('kotlin.collections.LinkedHashSet<E>.finishBuild()', finishBuild);
 defineNative('kotlin.collections.LinkedHashMap<K, V>.startBuild()', (_frame, collection) => {

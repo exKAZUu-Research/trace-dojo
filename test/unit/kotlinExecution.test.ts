@@ -60,6 +60,23 @@ test.each(['contains', 'split'])('charges the execution budget during CharSequen
 /** Programs with the output of Kotlin 2.4.21 on the JVM (Java 25), which the interpreter must reproduce exactly. */
 test.each([
   {
+    name: 'two-argument map forEach checks structural changes after live traversal',
+    source: `fun main() {
+    for (map in listOf(hashMapOf(1 to "a", 2 to "b"), linkedMapOf(1 to "a", 2 to "b"))) {
+        try {
+            map.forEach { key, value ->
+                println("$key=$value")
+                if (key == 1) map[3] = "c"
+            }
+        } catch (e: ConcurrentModificationException) {
+            println("modified")
+        }
+    }
+    mapOf(7 to "one").forEach { key, value -> println("$key=$value") }
+}`,
+    stdout: '1=a\n2=b\n3=c\nmodified\n1=a\n2=b\n3=c\nmodified\n7=one\n',
+  },
+  {
     name: 'map entry equality reads the value after a custom key getter',
     source: `class Candidate(private val change: () -> Unit) : Map.Entry<Int, Int> {
     override val key: Int get() { change(); return 1 }
@@ -5078,6 +5095,24 @@ fun main() {
             return field
         }
     fun main() { println(answer) }`,
+  ],
+  [
+    'a nonlocal return from the two-argument map callback',
+    false,
+    `fun probe(): Int {
+        mapOf(1 to 2).forEach { key, value -> return key + value }
+        return 0
+    }
+    fun main() { println(probe()) }`,
+  ],
+  [
+    'a break from outside the two-argument map callback',
+    false,
+    `fun main() {
+        while (true) {
+            mapOf(1 to 2).forEach { key, value -> break }
+        }
+    }`,
   ],
   [
     'an initializer where a do-while condition reads a loop local named field',

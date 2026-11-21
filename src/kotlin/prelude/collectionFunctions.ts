@@ -1480,9 +1480,7 @@ inline fun <K, V> Map<out K, V>.forEach(action: (Map.Entry<K, V>) -> Unit) {
     for (element in this) action(element)
 }
 
-inline fun <K, V> Map<out K, V>.forEach(action: (K, V) -> Unit) {
-    for (element in this) action(element.key, element.value)
-}
+external fun <K, V> Map<out K, V>.forEach(action: (K, V) -> Unit)
 
 inline fun <K, V, R> Map<out K, V>.map(transform: (Map.Entry<K, V>) -> R): List<R> {
     val destination = ArrayList<R>(size)
