@@ -33,28 +33,27 @@ export interface RegExpMatchResult {
   groups: (string | undefined)[];
 }
 
-export function compileRegExp(source: string, flags: RegExpFlags): CompiledRegExp {
+export function compileRegExp(source: string, flags: RegExpFlags, charge: () => void): CompiledRegExp {
   const pattern = new RegExpParser({ ecmaVersion: 2025 }).parsePattern(source, 0, source.length, {
     unicode: flags.unicode,
   });
-  const groups: AST.CapturingGroup[] = [];
-  collectGroups(pattern, groups);
-  const compiler = new Compiler(groups, flags.unicode);
+  const captures = indexCaptures(pattern, charge);
+  const compiler = new Compiler(captures, flags.unicode, charge);
   compiler.alternatives(pattern.alternatives, { ...flags, backward: false });
   compiler.emit({ op: 'succeed' });
   const names = new Map<string, number[]>();
-  for (const [position, group] of groups.entries()) {
+  for (const [group, number] of captures.numbers) {
     if (group.name === null) continue;
     const numbers = names.get(group.name) ?? [];
-    numbers.push(position + 1);
+    numbers.push(number);
     names.set(group.name, numbers);
   }
   return {
-    groupCount: groups.length,
+    groupCount: captures.numbers.size,
     names,
     unicode: flags.unicode,
     program: compiler.program,
-    registerCount: 2 * (groups.length + 1) + 2 * compiler.loops,
+    registerCount: 2 * (captures.numbers.size + 1) + 2 * compiler.loops,
   };
 }
 
@@ -99,17 +98,24 @@ interface Context extends RegExpFlags {
   backward: boolean;
 }
 
+interface CaptureIndex {
+  numbers: Map<AST.CapturingGroup, number>;
+  loops: Map<AST.Quantifier, { firstRegister: number; endRegister: number }>;
+}
+
 class Compiler {
   readonly program: Instruction[] = [];
   loops = 0;
   private readonly testCache = new Map<string, CharTest>();
 
   constructor(
-    private readonly groups: readonly AST.CapturingGroup[],
-    private readonly unicode: boolean
+    private readonly captures: CaptureIndex,
+    private readonly unicode: boolean,
+    private readonly charge: () => void
   ) {}
 
   emit(instruction: Instruction): number {
+    this.charge();
     this.program.push(instruction);
     return this.program.length - 1;
   }
@@ -151,7 +157,7 @@ class Compiler {
         return;
       }
       case 'CapturingGroup': {
-        const group = this.groups.indexOf(element) + 1;
+        const group = this.captureNumber(element);
         this.emit({ op: 'save', register: 2 * group + (context.backward ? 1 : 0) });
         this.alternatives(element.alternatives, context);
         this.emit({ op: 'save', register: 2 * group + (context.backward ? 0 : 1) });
@@ -169,7 +175,7 @@ class Compiler {
         const resolved = element.ambiguous ? element.resolved : [element.resolved];
         this.emit({
           op: 'backref',
-          groups: resolved.map((group) => this.groups.indexOf(group) + 1),
+          groups: resolved.map((group) => this.captureNumber(group)),
           backward: context.backward,
           equal: context.ignoreCase ? caseInsensitiveEqual(context.unicode) : (a, b) => a === b,
         });
@@ -178,14 +184,17 @@ class Compiler {
     }
   }
 
+  private captureNumber(group: AST.CapturingGroup): number {
+    this.charge();
+    return this.captures.numbers.get(group) as number;
+  }
+
   /** ECMAScript's RepeatMatcher: a counted loop that clears its groups each iteration and stops on an empty one. */
   private quantifier(element: AST.Quantifier, context: Context): void {
     if (element.max === 0) return;
     const loop = this.loops++;
-    const count = 2 * (this.groups.length + 1) + 2 * loop;
-    const inner: AST.CapturingGroup[] = [];
-    collectGroups(element.element, inner);
-    const numbers = inner.map((group) => this.groups.indexOf(group) + 1);
+    const count = 2 * (this.captures.numbers.size + 1) + 2 * loop;
+    const range = this.captures.loops.get(element);
     this.emit({ op: 'loopInit', count });
     const decide: Extract<Instruction, { op: 'loop' }> = {
       op: 'loop',
@@ -200,8 +209,8 @@ class Compiler {
     decide.enter = this.emit({
       op: 'loopEnter',
       start: count + 1,
-      firstRegister: numbers.length === 0 ? 0 : 2 * Math.min(...numbers),
-      endRegister: numbers.length === 0 ? 0 : 2 * Math.max(...numbers) + 2,
+      firstRegister: range?.firstRegister ?? 0,
+      endRegister: range?.endRegister ?? 0,
     });
     this.element(element.element, context);
     this.emit({ op: 'loopEnd', count, start: count + 1, min: element.min, decide: decideAt });
@@ -290,9 +299,19 @@ function modified(context: Context, modifiers: AST.Modifiers): Context {
   return result;
 }
 
-function collectGroups(node: AST.Node, groups: AST.CapturingGroup[]): void {
-  if (node.type === 'CapturingGroup') groups.push(node);
-  for (const child of childrenOf(node)) collectGroups(child, groups);
+function indexCaptures(pattern: AST.Pattern, charge: () => void): CaptureIndex {
+  const numbers = new Map<AST.CapturingGroup, number>();
+  const loops: CaptureIndex['loops'] = new Map();
+  const visit = (node: AST.Node): void => {
+    charge();
+    const first = numbers.size + 1;
+    if (node.type === 'CapturingGroup') numbers.set(node, first);
+    for (const child of childrenOf(node)) visit(child);
+    if (node.type === 'Quantifier' && first <= numbers.size)
+      loops.set(node, { firstRegister: 2 * first, endRegister: 2 * numbers.size + 2 });
+  };
+  visit(pattern);
+  return { numbers, loops };
 }
 
 function childrenOf(node: AST.Node): readonly AST.Node[] {

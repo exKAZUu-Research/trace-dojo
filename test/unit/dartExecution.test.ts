@@ -1119,6 +1119,14 @@ test.each([
     body: "  print(RegExp(r'(x+x+)+y').hasMatch('x' * 40));",
   },
   {
+    name: 'a regular expression with too many captures to compile',
+    body: "  print(RegExp('(a)' * 250000).hasMatch('a'));",
+  },
+  {
+    name: 'a regular expression nested beyond the parser limit',
+    body: "  print(RegExp('(' * 1000 + 'a' + ')' * 1000).hasMatch('a'));",
+  },
+  {
     name: 'a gcd of BigInts with millions of bits',
     body: '  var a = (BigInt.one << 2000000) - BigInt.one;\n  print(a.gcd(a - BigInt.two));',
   },
@@ -1127,6 +1135,16 @@ test.each([
     kind: 'limitExceeded',
     limit: 'operations',
   });
+});
+
+test('large regular expressions within the budget retain capture numbers', () => {
+  const program = `void main() {
+    final regex = RegExp('(a)' * 2048);
+    final match = regex.firstMatch('a' * 2048)!;
+    print([match.groupCount, match[2048]]);
+    print(identical(regex, RegExp('(a)' * 2048)));
+  }`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[2048, a]\ntrue\n' });
 });
 
 test('a BigInt too large to compute runs out of memory before it is computed', () => {

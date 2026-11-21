@@ -1,5 +1,6 @@
 import { RegExpSyntaxError } from '@eslint-community/regexpp';
 
+import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import type { Runtime } from '../runtime';
 import { coreTypes, interfaceType, makeNullable } from '../types';
 import { DartList, DartObject, type Value } from '../values';
@@ -60,13 +61,18 @@ defineConstructor('RegExp.new', (runtime, _instance, args) => {
   }
   const cached = cache.get(key);
   if (cached) return cached;
+  // The parser and host character tests run synchronously, so reserve their work before entering them.
+  runtime.spend(1 + 32 * source.length);
+  checkPatternNesting(source);
   let compiled: CompiledRegExp;
   try {
-    compiled = compileRegExp(source, { multiLine, ignoreCase: !caseSensitive, unicode, dotAll });
+    compiled = compileRegExp(source, { multiLine, ignoreCase: !caseSensitive, unicode, dotAll }, () => runtime.spend());
   } catch (error) {
     if (!(error instanceof RegExpSyntaxError)) throw error;
     return runtime.throwError('FormatException', '', [regExpSyntaxMessage(error, source), source]);
   }
+  runtime.budget.checkClock();
+  runtime.allocate(1 + compiled.program.length + compiled.registerCount);
   const object = new DartObject(runtime.links.classNamed('_RegExp'), [], []);
   object.native = { source, multiLine, caseSensitive, unicode, dotAll, compiled, values: () => [] };
   cache.set(key, object);
@@ -74,6 +80,20 @@ defineConstructor('RegExp.new', (runtime, _instance, args) => {
 });
 
 const regExpCaches = new WeakMap<Runtime, Map<string, DartObject>>();
+
+function checkPatternNesting(source: string): void {
+  let depth = 0;
+  let inClass = false;
+  for (let index = 0; index < source.length; index++) {
+    const character = source[index];
+    if (character === '\\') index++;
+    else if (character === '[') inClass = true;
+    else if (character === ']') inClass = false;
+    else if (!inClass && character === '(' && ++depth > LIMITS.maxCallDepth / 2)
+      throw new ExecutionLimitError('operations');
+    else if (!inClass && character === ')' && depth > 0) depth--;
+  }
+}
 
 function execAt(
   runtime: Runtime,
