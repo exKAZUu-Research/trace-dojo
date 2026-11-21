@@ -1514,6 +1514,17 @@ test('Dart upper bounds of lists and sets are Iterable', () => {
   });
 });
 
+test('Dart primary constructor bodies keep their initializer lists', () => {
+  const program = `class B { final int x; B(this.x); }
+class C(int? n) { final int a, b; this: a = n!, b = n; }
+class D(int n) extends B { int? c; this: c = n, assert(n > 0), super(n * 2) { print('body'); } }
+void main() {
+  final d = D(4);
+  print([C(4).b, d.c, d.x]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'body\n[4, 4, 8]\n' });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}

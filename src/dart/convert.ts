@@ -582,7 +582,7 @@ export class Converter extends ExpressionConverter {
       case 'redirecting_factory_constructor_signature': {
         const nameParts = fieldsOf(signature, 'name');
         const name = constructorName(nameParts.length >= 3 ? nameParts[2].text : undefined);
-        const initializers = initializersNode ? this.convertInitializers(initializersNode) : [];
+        const initializers = this.convertInitializers(initializersNode);
         if (redirection) initializers.push(this.convertRedirection(redirection));
         const isRedirectingFactory = signature.type === 'redirecting_factory_constructor_signature';
         const isFactory = signature.type === 'factory_constructor_signature';
@@ -619,7 +619,10 @@ export class Converter extends ExpressionConverter {
           isConst: false,
           isExternal,
           parameters: emptyParameters(span),
-          initializers: initializersNode ? this.convertInitializers(initializersNode) : [],
+          // The grammar nests a primary constructor body's initializer list inside its signature.
+          initializers: this.convertInitializers(
+            namedOf(signature).find((child) => child.type === 'initializers') ?? initializersNode
+          ),
           body,
           redirectTarget: undefined,
           annotations,
@@ -679,7 +682,8 @@ export class Converter extends ExpressionConverter {
     };
   }
 
-  private convertInitializers(node: Node): ConstructorInitializer[] {
+  private convertInitializers(node: Node | undefined): ConstructorInitializer[] {
+    if (!node) return [];
     return namedOf(node)
       .filter((child) => child.type === 'initializer_list_entry')
       .map((entry) => {
