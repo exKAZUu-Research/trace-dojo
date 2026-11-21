@@ -29,12 +29,10 @@ import {
   implicitCast,
   index,
   intArg,
-  iterableValues,
   iteratorValues,
   listLength,
   named,
   nativeFunction,
-  newList,
 } from './nativeSupport';
 
 const MAX_LIST_LENGTH = 576_460_752_303_423_487n;
@@ -521,14 +519,32 @@ define('List.clear', (runtime, receiver) => {
 });
 define('List.+', (runtime, receiver, [other]) => {
   const target = list(receiver);
-  const values = [...target.elements, ...(other instanceof DartList ? other.elements : iterableValues(runtime, other))];
-  return newList(runtime, elementTypeOf(target), values);
+  const elementType = elementTypeOf(target);
+  if (other instanceof DartList) {
+    runtime.allocate(target.elements.length + other.elements.length + 1);
+    // oxlint-disable-next-line unicorn/prefer-spread -- Copy into one array without spread growth or argument expansion.
+    return new DartList(coreTypes.list, elementType, target.elements.concat(other.elements), true);
+  }
+  const result = copyListSlice(runtime, target, 0, target.elements.length);
+  runtime.withCallRoots(result, { positional: [], named: undefined }, () => {
+    forEachValue(runtime, other, (value) => {
+      runtime.allocate(1);
+      result.elements.push(value);
+    });
+  });
+  return result;
 });
 define('List.sublist', (runtime, receiver, [start, end]) => {
   const target = list(receiver);
   const [from, to] = checkRange(runtime, start, end, target.elements.length);
-  return newList(runtime, elementTypeOf(target), target.elements.slice(from, to));
+  return copyListSlice(runtime, target, from, to);
 });
+
+function copyListSlice(runtime: Runtime, source: DartList, start: number, end: number): DartList {
+  runtime.allocate(end - start + 1);
+  return new DartList(coreTypes.list, elementTypeOf(source), source.elements.slice(start, end), true);
+}
+
 // code-gauge-allow functionCognitiveComplexity 17 -- Growable and fixed lists differ for iterable and list sources.
 // code-gauge-allow functionNcss 31 -- Each list kind needs a separate range-copy path.
 define('List.setRange', (runtime, receiver, [start, end, iterable, skip = 0n]) => {

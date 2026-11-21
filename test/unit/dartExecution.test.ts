@@ -3039,6 +3039,119 @@ test('super dispatch can call concrete noSuchMethod forwarders', () => {
   expect(executeProgram('dart', abstractParent)).toMatchObject({ kind: 'compileError' });
 });
 
+test('indexed super assignments use the superclass and evaluate the index once', () => {
+  const program = `class Parent {
+    int? value;
+    int? operator [](int index) { print('read $index'); return value; }
+    void operator []=(int index, int? next) { print('write $index $next'); value = next; }
+  }
+  mixin Update on Parent {
+    int index() { print('index'); return 7; }
+    void update() {
+      super[index()] ??= 2;
+      super[index()] ??= 3;
+      super[index()] = 4;
+    }
+  }
+  class Counter {
+    int value = 5;
+    int operator [](int index) => value;
+    void operator []=(int index, int next) { value = next; }
+  }
+  class Child extends Counter {
+    int operator [](int index) => throw StateError('virtual read');
+    void operator []=(int index, int next) => throw StateError('virtual write');
+    void update() { print(super[0]++); print(++super[0]); super[0] += 8; print(super[0]); }
+  }
+  class Mixed extends Parent with Update {
+    int? operator [](int index) => throw StateError('virtual read');
+    void operator []=(int index, int? next) => throw StateError('virtual write');
+  }
+  void main() { Mixed().update(); Child().update(); }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'index\nread 7\nwrite 7 2\nindex\nread 7\nindex\nwrite 7 4\n5\n7\n15\n',
+  });
+});
+
+test('simple indexed super writes only require a concrete setter', () => {
+  const program = `abstract class Parent {
+    int operator [](int index);
+    void operator []=(int index, int next) { print(next); }
+  }
+  class Child extends Parent {
+    int operator [](int index) => 1;
+    void update() { super[0] = 2; }
+  }
+  void main() { Child().update(); }`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '2\n' });
+  expect(executeProgram('dart', program.replace('super[0] =', 'super[0] +='))).toMatchObject({ kind: 'compileError' });
+});
+
+test('indexed updates validate both operator arguments before reading or writing', () => {
+  const program = `class Counter {
+    int operator [](String key) { print('read $key'); return 1; }
+    void operator []=(int key, int value) { print('write $key $value'); }
+  }
+  int rhs() { print('rhs'); return 2; }
+  void main() {
+    for (dynamic key in [0, 'x', true]) {
+      try { Counter()[key] += rhs(); } catch (error) { print(error); }
+    }
+    Counter()[0] = rhs();
+  }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      "type 'int' is not a subtype of type 'String'\ntype 'String' is not a subtype of type 'int'\ntype 'bool' is not a subtype of type 'int'\nrhs\nwrite 0 2\n",
+  });
+  for (const update of ['Counter()[0] += rhs()', 'Counter()[0]++', "Counter()['x']++"]) {
+    expect(executeProgram('dart', program.replace('Counter()[0] = rhs()', update))).toMatchObject({
+      kind: 'compileError',
+    });
+  }
+});
+
+test('call flow follows written argument order and checks closure bodies after the other arguments', () => {
+  const declarations = `void show(int value, {int other = 0}) { print([value, other]); }
+  T echo<T>(T value, {required T other}) { print([value, other]); return value; }
+  void withClosure<T>(T value, {required T Function(T) read}) { print(read(value)); }`;
+  const program = `${declarations} void main() {
+    final int a;
+    show(other: a = 1, a);
+    int b;
+    echo(other: b = 2, b);
+    int c;
+    dynamic call = show;
+    call(other: c = 3, c);
+    int d;
+    withClosure(read: ((n) => n + d), d = 4);
+  }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[1, 1]\n[2, 2]\n[3, 3]\n8\n',
+  });
+  for (const call of ['show(other: a, a = 1)', 'echo(other: a, a = 1)', 'invoke(other: a, a = 1)']) {
+    const invalid = `${declarations} void main() { dynamic invoke = show; int a; ${call}; }`;
+    expect(executeProgram('dart', invalid)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
+test('constructor delegation evaluates written arguments in source order', () => {
+  const program = `int mark(String name) { print(name); return 1; }
+  class Parent { Parent(int x, {int y = 0, int z = 0}); }
+  class Child extends Parent {
+    Child({super.z}) : super(y: mark('super named'), mark('super positional'));
+    Child.redirect() : this.named(y: mark('this named'), mark('this positional'));
+    Child.named(int x, {int y = 0}) : super(x, y: y);
+  }
+  void main() { Child(z: 30); Child.redirect(); }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'super named\nsuper positional\nthis named\nthis positional\n',
+  });
+});
+
 test('generic function type metadata resolves in checked declaration scopes', () => {
   const program = `typedef Callback = void Function<@Unknown() T>();
 void Function<@Unknown() T>()? ignoredTopLevelReturn() => null;
@@ -3380,6 +3493,35 @@ void acceptsStringList(List<String> value) {}`;
   for (const expression of ['(1, acceptsNum).types', '(1, acceptsString).types', '(1, acceptsStringList).listTypes']) {
     const source = `${declarations} void main() { print(${expression}); }`;
     expect(executeProgram('dart', source)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
+test('explicit extension applications check type arguments and the instantiated receiver type', () => {
+  const declarations = `extension Sum<T extends num> on List<T> { Type get item => T; }
+  extension Dependent<A, B extends List<A>> on B { Type get item => A; }
+  extension Any on dynamic { int get tag => 1; }`;
+  const program = `${declarations} void main() {
+    dynamic numbers = [3];
+    print(Sum<int>([]).item);
+    print(Sum(numbers).item);
+    print(Dependent<num, List<int>>(numbers).item);
+    print(Any(null).tag);
+    dynamic words = ['x'];
+    try { print(Sum<int>(words).item); } catch (error) { print(error.runtimeType); }
+  }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'int\nnum\nnum\n1\n_TypeError\n',
+  });
+  for (const expression of [
+    "Sum<int>(['x']).item",
+    "Sum<String>(['x']).item",
+    'Sum<int, int>([1]).item',
+    'Dependent<int, List<num>>([1]).item',
+  ]) {
+    expect(executeProgram('dart', `${declarations} void main() { print(${expression}); }`)).toMatchObject({
+      kind: 'compileError',
+    });
   }
 });
 
@@ -4327,6 +4469,50 @@ void main() {
   });
 });
 
+test('map patterns cache lookups and check presence only for nullable values', () => {
+  const program = `import 'dart:collection';
+  class Input<T> extends MapBase<String, T> {
+    final T? value;
+    final bool present;
+    Input(this.value, this.present);
+    T? operator [](Object? key) { print('get $key'); return value; }
+    void operator []=(String key, T value) {}
+    Iterable<String> get keys => ['a'];
+    void clear() {}
+    T? remove(Object? key) => null;
+    bool containsKey(Object? key) { print('contains $key'); return present; }
+  }
+  void match<T>(Map<String, T> input) {
+    print(switch (input) { {'a': 2} => 'two', {'a': var value} => value, _ => 'absent' });
+  }
+  void main() {
+    match(Input<int>(1, true));
+    match(Input<int>(null, false));
+    match(Input<int?>(null, true));
+    match(Input<int?>(null, false));
+  }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'get a\n1\nget a\nabsent\nget a\ncontains a\nnull\nget a\ncontains a\nabsent\n',
+  });
+});
+
+test('destructuring assignments enforce late final initialization when committing writes', () => {
+  for (const assignment of ['(value,) = (2,)', '[value] = [2]']) {
+    const program = `void main() {
+      late final int value;
+      void initialize() { value = 1; }
+      initialize();
+      try { ${assignment}; } catch (error) { print(error); }
+      print(value);
+    }`;
+    expect(executeProgram('dart', program)).toMatchObject({
+      kind: 'executed',
+      stdout: "LateInitializationError: Local 'value' has already been initialized.\n1\n",
+    });
+  }
+});
+
 test('list copies skip empty efficient iterators and verify reported nonempty lengths', () => {
   const program = `import 'dart:collection';
 class Input extends ListBase<int> {
@@ -4362,6 +4548,35 @@ void main() {
     kind: 'executed',
     stdout:
       'length\n[]\nlength\n[]\nlength\n[]\nlength\niterator\nConcurrentModificationError\nlength\niterator\nRangeError (index): Invalid value: Only valid value is 0: 1\n1\n2\n3\n4\n1\n',
+  });
+});
+
+test('list concatenation and slicing stay within the allocation budget', () => {
+  for (const body of [
+    'final a = List<int>.filled(400000, 1); final b = List<int>.filled(400000, 2); print((a + b).length);',
+    'final a = List<int>.filled(600000, 1); print(a.sublist(0).length);',
+  ]) {
+    expect(executeProgram('dart', `void main() { ${body} }`)).toMatchObject({
+      kind: 'limitExceeded',
+      limit: 'storage',
+    });
+  }
+  const program = `import 'dart:collection';
+  class Input extends ListBase<int> {
+    int get length => 1;
+    set length(int value) {}
+    int operator [](int index) => 4;
+    void operator []=(int index, int value) {}
+    Iterator<int> get iterator { print('iterator'); return [4].iterator; }
+  }
+  void main() {
+    print([1, 2] + [3]);
+    print([1, 2] + Input());
+    print([1, 2, 3].sublist(1, 2));
+  }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[1, 2, 3]\niterator\n[1, 2, 4]\n[2]\n',
   });
 });
 

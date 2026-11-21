@@ -15,6 +15,7 @@ import {
   type FunctionType,
   interfaceType,
   isNullable,
+  isPotentiallyNullable,
   isSubtype,
   NEVER,
   nonNullable,
@@ -105,7 +106,7 @@ interface PatternOptions {
 
 interface PatternWrite {
   slot: number;
-  target: (frame: Frame) => Cell;
+  write: (frame: Frame, value: Value) => void;
 }
 
 export abstract class PatternCompiler extends CallCompiler {
@@ -535,11 +536,7 @@ export abstract class PatternCompiler extends CallCompiler {
     if (options.assignments?.has(variable)) {
       this.error(pattern, `${pattern.name} はこのパターンですでに代入先として使われています。`);
     }
-    if (variable.unavailable) this.error(pattern, variable.unavailable);
-    if (variable.inPatternGuard) this.error(pattern, `パターン変数 ${pattern.name} には、when の中で代入できません。`);
-    if (variable.options.isFinal && (variable.options.hasInitializer || this.flow.maybeAssigned.has(variable))) {
-      this.error(pattern, `final の変数 ${pattern.name} には、もう値を代入できません。`);
-    }
+    const write = this.localWriter(variable, pattern);
     if (!isSubtype(matchedType, variable.type) && matchedType.kind !== 'dynamic') {
       this.error(
         pattern,
@@ -547,8 +544,7 @@ export abstract class PatternCompiler extends CallCompiler {
       );
     }
     const slot = this.fn.allocateSlot();
-    options.assignments?.set(variable, { slot, target: this.cellAccess(variable) });
-    if (variable.owner !== this.fn) variable.isWriteCaptured = true;
+    options.assignments?.set(variable, { slot, write });
     this.flow = this.flow.assign(variable).demote(variable);
     const save = (frame: Frame, value: Value): boolean => {
       frame.locals[slot] = new Cell(value);
@@ -635,7 +631,7 @@ export abstract class PatternCompiler extends CallCompiler {
     return instance?.args[0] ?? DYNAMIC;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- One case per part of the pattern, matched in Dart's order.
+  // code-gauge-allow functionCognitiveComplexity 22 -- Type checks, lazy lookups, and subpatterns match in Dart's order.
   // code-gauge-allow functionNcss 34 -- One case per part of the pattern, matched in Dart's order.
   private mapPattern(
     pattern: Extract<Pattern, { kind: 'map' }>,
@@ -653,6 +649,7 @@ export abstract class PatternCompiler extends CallCompiler {
     });
     this.requireAssignable(mapType, matchedType, options, pattern);
     const typeCheck = this.typeTest(mapType, matchedType, () => true, true, options.mode);
+    const nullableValueType = isPotentiallyNullable(valueType) ? this.runtimeType(valueType) : undefined;
     return {
       match: (frame, value, cache) => {
         if (!typeCheck.match(frame, value, cache)) return false;
@@ -660,11 +657,14 @@ export abstract class PatternCompiler extends CallCompiler {
         for (const entry of entries) {
           const key = entry.key(frame);
           const args = { positional: [key], named: undefined };
-          const presence = cache.child(MAP_CONTAINS_KEY).child(key);
-          if (presence.read(frame, () => runtime.invoke(value, 'containsKey', args, [], undefined)) !== true)
-            return false;
           const path = cache.child(MAP_VALUE).child(key);
           const found = path.read(frame, () => runtime.invoke(value, '[]', args, [], undefined));
+          if (found === undefined) {
+            if (!nullableValueType || !isPotentiallyNullable(nullableValueType(frame))) return false;
+            const presence = cache.child(MAP_CONTAINS_KEY).child(key);
+            if (presence.read(frame, () => runtime.invoke(value, 'containsKey', args, [], undefined)) !== true)
+              return false;
+          }
           if (!entry.value.match(frame, found, path)) return false;
         }
         return true;
@@ -816,7 +816,7 @@ export abstract class PatternCompiler extends CallCompiler {
             (cache) => check.match(frame, result, cache) && matcher.match(frame, result, cache)
           );
           if (!matched) this.throwPatternMismatch(frame);
-          for (const { slot, target } of writes) target(frame).v = (frame.locals[slot] as Cell).v;
+          for (const { slot, write } of writes) write(frame, (frame.locals[slot] as Cell).v);
           return result;
         } finally {
           for (const { slot } of writes) frame.locals[slot] = undefined;

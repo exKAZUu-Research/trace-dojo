@@ -691,7 +691,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
 
   /** The call of the superclass's constructor or of another constructor of the class, in an initializer list. */
   // code-gauge-allow functionParameterCount 7 -- The parameters are the parts a caller already holds; grouping them would only rename them.
-  // code-gauge-allow functionCognitiveComplexity 22 -- Each check of a super(...) or this(...) call reports its own SDK error.
+  // code-gauge-allow functionCognitiveComplexity 24 -- Validate delegation and splice the forwarded parameters into the call order.
   private compileDelegation(
     cls: ClassInfo,
     declaration: ConstructorDeclaration,
@@ -755,12 +755,15 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
         })),
         ...argsSyntax.named,
       ],
-      order: [],
+      order: [
+        ...superPositional.map((_, index) => ({ kind: 'positional' as const, index })),
+        ...superNamed.map((_, index) => ({ kind: 'named' as const, index })),
+        ...argsSyntax.order.map(({ kind, index }) => ({
+          kind,
+          index: index + (kind === 'positional' ? superPositional.length : superNamed.length),
+        })),
+      ],
     };
-    passed.order = [
-      ...passed.positional.map((_, index) => ({ kind: 'positional' as const, index })),
-      ...passed.named.map((_, index) => ({ kind: 'named' as const, index })),
-    ];
     const bound = this.bindArguments(signature, passed, undefined, span, undefined);
     if (this.potentialConstInitializer && !this.argumentsAreConst)
       this.error(span, `const のコンストラクタの ${kind} に渡す値は、定数として評価できなければなりません。`);

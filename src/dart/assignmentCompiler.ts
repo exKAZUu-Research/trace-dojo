@@ -45,8 +45,6 @@ interface AssignableTarget {
   write: (frame: Frame, prepared: unknown, value: Value) => void;
   /** The local a write assigns, for flow analysis. */
   variable?: LocalVar;
-  /** Whether a null-aware access may skip the assignment. */
-  shorting: boolean;
 }
 
 export abstract class AssignmentCompiler extends ControlCompiler {
@@ -98,7 +96,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     let target: AssignableTarget;
     if (selector.kind === 'member') target = this.memberTarget(receiver, selector.name, selector.nullAware, selector);
     else if (selector.kind === 'index')
-      target = this.indexTarget(receiver, selector.index, selector.nullAware, selector);
+      target = this.indexTarget(receiver, selector.index, selector.nullAware, selector, operator === '=');
     else return this.error(span, 'この形には代入できません。');
     return this.assignTo(target, operator, value, span);
   }
@@ -275,26 +273,14 @@ export abstract class AssignmentCompiler extends ControlCompiler {
           return this.memberTarget(this.superReceiver(expression.object), expression.name, false, expression);
         }
         const receiver = this.compileChainPart(expression.object, undefined);
-        return this.memberTarget(
-          receiver,
-          expression.name,
-          expression.nullAware,
-          expression,
-          this.isShorting(expression.object)
-        );
+        return this.memberTarget(receiver, expression.name, expression.nullAware, expression);
       }
       case 'index': {
         const receiver =
           expression.object.kind === 'super'
             ? this.superReceiver(expression.object)
             : this.compileChainPart(expression.object, undefined);
-        return this.indexTarget(
-          receiver,
-          expression.index,
-          expression.nullAware,
-          expression,
-          this.isShorting(expression.object)
-        );
+        return this.indexTarget(receiver, expression.index, expression.nullAware, expression, isPlainAssignment);
       }
       default: {
         return this.error(expression, 'この式には代入できません。');
@@ -360,7 +346,6 @@ export abstract class AssignmentCompiler extends ControlCompiler {
                 span.row
               );
             },
-            shorting: false,
           };
         }
         return this.error(span, `${name} には代入できません。`);
@@ -371,45 +356,16 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- Each branch is one of the cases Dart distinguishes for this construct.
   private localTarget(variable: LocalVar, span: Span, isPlainAssignment: boolean): AssignableTarget {
-    const { options, name } = variable;
-    if (variable.unavailable) this.error(span, variable.unavailable);
-    if (variable.inPatternGuard) this.error(span, `パターン変数 ${name} には、when の中で代入できません。`);
-    if (options.isConst) this.error(span, `const の変数 ${name} には代入できません。`);
-    if (options.isFinal && options.isLate && (options.hasInitializer || this.flow.assigned.has(variable))) {
-      this.error(span, `late final の変数 ${name} には、もう値を代入できません。`);
-    }
-    if (options.isFinal && !options.isLate) {
-      const assigned =
-        options.hasInitializer ||
-        options.isParameter ||
-        this.flow.maybeAssigned.has(variable) ||
-        variable.owner !== this.fn;
-      if (assigned) this.error(span, `final の変数 ${name} には、もう値を代入できません。`);
-    }
-    if (!isPlainAssignment) this.checkDefinitelyAssigned(variable, span);
-    if (variable.owner !== this.fn) variable.isWriteCaptured = true;
+    const write = this.localWriter(variable, span, !isPlainAssignment);
     const cell = this.cellAccess(variable);
-    const isLateFinal = options.isLate && options.isFinal;
-    const readType = this.isPromotable(variable) ? this.promotedType(variable) : variable.type;
     return {
       writeType: variable.type,
-      readType,
+      readType: this.isPromotable(variable) ? this.promotedType(variable) : variable.type,
       prepare: () => {},
-      read: (frame) => this.readLocalValue(frame, cell(frame), name),
-      write: isLateFinal
-        ? (frame, _prepared, value) => {
-            const target = cell(frame);
-            if (target.v !== UNINITIALIZED)
-              frame.runtime.throwError('LateError', '', [`Local '${name}' has already been initialized.`]);
-            target.v = value;
-          }
-        : (frame, _prepared, value) => {
-            cell(frame).v = value;
-          },
+      read: (frame) => this.readLocalValue(frame, cell(frame), variable.name),
+      write: (frame, _prepared, value) => write(frame, value),
       variable,
-      shorting: false,
     };
   }
 
@@ -438,7 +394,6 @@ export abstract class AssignmentCompiler extends ControlCompiler {
         write: (frame, _prepared, value) => {
           (setter.impl as Callable)(frame.runtime, undefined, { positional: [value], named: undefined }, [], span.row);
         },
-        shorting: false,
       };
     }
     return this.error(span, `${member.name} には代入できません。`);
@@ -463,22 +418,15 @@ export abstract class AssignmentCompiler extends ControlCompiler {
         }
         cell.v = value;
       },
-      shorting: false,
     };
   }
 
-  private memberTarget(
-    receiver: Compiled,
-    name: string,
-    nullAware: boolean,
-    span: Span,
-    shorting = false
-  ): AssignableTarget {
+  private memberTarget(receiver: Compiled, name: string, nullAware: boolean, span: Span): AssignableTarget {
     const receiverType = receiver.type;
     this.skipOnNull(receiver, nullAware);
     const prepare = preparingReceiver(receiver.run, nullAware);
     const memberName = this.runtimeMemberName(name);
-    if (receiverType.kind === 'dynamic') {
+    if (receiverType.kind === 'dynamic' && !receiver.extensionOverride) {
       return {
         writeType: DYNAMIC,
         readType: DYNAMIC,
@@ -486,7 +434,6 @@ export abstract class AssignmentCompiler extends ControlCompiler {
         read: (frame, prepared) => frame.runtime.getProperty(prepared as Value, memberName, span.row),
         write: (frame, prepared, value) =>
           frame.runtime.setProperty(prepared as Value, memberName, value, span.row, true),
-        shorting: true,
       };
     }
     const lookupType = nullAware ? nonNullable(receiverType) : receiverType;
@@ -501,7 +448,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       this.error(span, `${typeName(receiverType)} 型の値は null かもしれないので、${name} に直接は代入できません。`);
     }
     const getter = this.memberFor(receiver, lookupType, name, undefined);
-    const target = { writeType: setter.type, readType: getter?.type, prepare, shorting: nullAware || shorting };
+    const target = { writeType: setter.type, readType: getter?.type, prepare };
     if (receiver.isSuper) {
       this.requireSuperImplementation(name, span, true);
       return { ...target, ...superAccessors(this.superclassOf(span).classAt, memberName, span.row) };
@@ -528,17 +475,18 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     indexSyntax: Expression,
     nullAware: boolean,
     span: Span,
-    shorting = false
+    isPlainAssignment: boolean
   ): AssignableTarget {
     const receiverType = receiver.type;
     this.skipOnNull(receiver, nullAware);
     const lookupType = nullAware ? nonNullable(receiverType) : receiverType;
     let indexContext: DartType | undefined;
+    let readContext: DartType | undefined;
     let writeType: DartType = DYNAMIC;
     let readType: DartType | undefined = DYNAMIC;
     let setter: ResolvedMember | undefined;
     let getter: ResolvedMember | undefined;
-    if (receiverType.kind !== 'dynamic') {
+    if (receiverType.kind !== 'dynamic' || receiver.extensionOverride) {
       setter = this.memberFor(receiver, lookupType, '[]=', span);
       if (!setter || setter.member.kind !== 'method')
         return this.error(span, `${typeName(nonNullable(receiverType))} 型には演算子 []= がありません。`);
@@ -547,22 +495,15 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       const signature = setter.type as FunctionType;
       indexContext = signature.positional[0];
       writeType = signature.positional[1] ?? DYNAMIC;
-      getter = this.memberFor(receiver, lookupType, '[]', undefined);
-      readType = getter?.member.kind === 'method' ? (getter.type as FunctionType).returnType : undefined;
+      getter = isPlainAssignment ? undefined : this.memberFor(receiver, lookupType, '[]', undefined);
+      const readSignature = getter?.member.kind === 'method' ? (getter.type as FunctionType) : undefined;
+      readType = readSignature?.returnType;
+      readContext = readSignature?.positional[0];
     }
-    let index = this.compileExpression(indexSyntax, indexContext);
-    if (index.type.kind === 'void') this.error(indexSyntax, 'void の値は、添字に使えません。');
-    if (indexContext)
-      index = this.coerce(
-        index,
-        indexContext,
-        indexSyntax,
-        (from, to) => `${from} 型の値は、添字の型 ${to} に合いません。`
-      );
+    const indexKeys = this.prepareIndexKeys(indexSyntax, indexContext, readContext);
     const receiverRun = receiver.run;
-    const indexRun = index.run;
-    const extensionRead = this.extensionTargetCall(getter, span.row);
-    const extensionWrite = this.extensionTargetCall(setter, span.row);
+    const read = !isPlainAssignment && readType ? this.indexOperatorCall(receiver, getter, '[]', span) : undefined;
+    const write = this.indexOperatorCall(receiver, setter, '[]=', span);
     return {
       writeType,
       readType,
@@ -570,31 +511,65 @@ export abstract class AssignmentCompiler extends ControlCompiler {
         const value = receiverRun(frame);
         if (value === SHORTED || (nullAware && value === undefined)) return SHORTED;
         frame.temporaries.push(value);
-        const key = indexRun(frame);
-        frame.temporaries.push(key);
-        return [value, key];
+        return [value, ...indexKeys(frame)];
       },
       read: (frame, prepared) => {
-        const [object, key] = prepared as [Value, Value];
-        if (extensionRead) return extensionRead(frame, object, [key]);
-        return frame.runtime.invoke(object, '[]', { positional: [key], named: undefined }, [], span.row);
+        const [object, , key] = prepared as [Value, Value, Value];
+        return read?.(frame, object, [key]);
       },
       write: (frame, prepared, value) => {
         const [object, key] = prepared as [Value, Value];
-        if (extensionWrite) {
-          extensionWrite(frame, object, [key, value]);
-          return;
-        }
-        frame.runtime.invoke(
-          object,
-          '[]=',
-          { positional: [key, value], named: undefined, isDynamic: receiverType.kind === 'dynamic' },
-          [],
-          span.row
-        );
+        write(frame, object, [key, value]);
       },
-      shorting: nullAware || shorting,
     };
+  }
+
+  private prepareIndexKeys(
+    syntax: Expression,
+    writeType: DartType | undefined,
+    readType: DartType | undefined
+  ): (frame: Frame) => [Value, Value] {
+    const index = this.compileExpression(syntax, writeType);
+    if (index.type.kind === 'void') this.error(syntax, 'void の値は、添字に使えません。');
+    const coerce = (value: Compiled, type: DartType | undefined): Eval =>
+      type
+        ? this.coerce(value, type, syntax, (from, to) => `${from} 型の値は、添字の型 ${to} に合いません。`).run
+        : value.run;
+    if (!readType || (writeType && sameType(writeType, readType))) {
+      const run = coerce(index, writeType);
+      return (frame) => {
+        const key = run(frame);
+        frame.temporaries.push(key);
+        return [key, key];
+      };
+    }
+    const writeKey = coerce({ ...index, run: (frame) => frame.temporaries.at(-1) }, writeType);
+    const readKey = coerce({ ...index, run: (frame) => frame.temporaries.at(-2) }, readType);
+    return (frame) => {
+      frame.temporaries.push(index.run(frame));
+      const forWrite = writeKey(frame);
+      frame.temporaries.push(forWrite);
+      const forRead = readKey(frame);
+      frame.temporaries.push(forRead);
+      return [forWrite, forRead];
+    };
+  }
+
+  private indexOperatorCall(
+    receiver: Compiled,
+    member: ResolvedMember | undefined,
+    name: '[]' | '[]=',
+    span: Span
+  ): (frame: Frame, receiver: Value, positional: Value[]) => Value {
+    if (receiver.isSuper) {
+      const call = this.superMethodTarget(name, span, span.row);
+      return (frame: Frame, _receiver: Value, positional: Value[]) => call(frame, { positional, named: undefined });
+    }
+    const extensionCall = this.extensionTargetCall(member, span.row);
+    if (extensionCall) return extensionCall;
+    const isDynamic = name === '[]=' && receiver.type.kind === 'dynamic';
+    return (frame: Frame, object: Value, positional: Value[]) =>
+      frame.runtime.invoke(object, name, { positional, named: undefined, isDynamic }, [], span.row);
   }
 
   private extensionTargetCall(

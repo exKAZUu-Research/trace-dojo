@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 650 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 653 -- Type inference, argument binding, and call dispatch share this compiler phase.
 import type {
   Arguments as ArgumentsSyntax,
   Expression,
@@ -15,7 +15,7 @@ import { INFERENCE_HOLE, isInferenceHole, SHORTED } from './expressionCompiler';
 import { OperatorCompiler } from './operatorCompiler';
 import type { Frame, Runtime, TypeEnv } from './runtime';
 import type { FunctionContext } from './scope';
-import { inferFromContext, inferFromSubtype } from './typeInference';
+import { inferExtensionReceiver, inferFromContext, inferFromSubtype } from './typeInference';
 import {
   boundOf,
   coreTypes,
@@ -82,6 +82,13 @@ interface AliasConstructor {
 }
 
 type ConstructorTypes = DartType[] | AliasConstructor | undefined;
+
+interface CallArgument {
+  argument: Expression;
+  index: number;
+  name?: string;
+  parameterType: DartType | undefined;
+}
 
 export interface CompiledFunction {
   fn: FunctionContext;
@@ -265,12 +272,26 @@ export abstract class CallCompiler extends OperatorCompiler {
   ): Compiled {
     if (args.positional.length !== 1 || args.named.length > 0)
       this.error(span, `拡張 ${ext.name ?? ''} を明示して使うときは、値を 1 つだけ書いてください。`);
-    const value = this.compileExpression(args.positional[0], ext.typeParams.length === 0 ? ext.onType : undefined);
-    const typeArgs = typeArguments
-      ? typeArguments.map((argument) => this.resolveType(argument))
-      : this.matchExtension(ext, value.type);
-    if (!typeArgs) return this.error(span, `${typeName(value.type)} 型の値には、拡張 ${ext.name ?? ''} は使えません。`);
-    return { ...value, extensionOverride: { ext, typeArgs }, variable: undefined };
+    const argument = args.positional[0];
+    const instantiate = (types: readonly DartType[]): DartType =>
+      substitute(ext.onType, new Map(ext.typeParams.map((parameter, index) => [parameter, types[index]])));
+    const written = typeArguments && this.explicitTypeArguments(ext.typeParams, typeArguments, span);
+    const context = written ? instantiate(written) : ext.typeParams.length === 0 ? ext.onType : undefined;
+    const value = this.compileExpression(argument, context);
+    const typeArgs =
+      written ??
+      (value.type.kind === 'dynamic'
+        ? instantiateToBounds(ext.typeParams)
+        : inferExtensionReceiver(value.type, ext.onType, ext.typeParams));
+    if (!written) this.checkBounds(ext.typeParams, typeArgs, span);
+    const onType = context ?? instantiate(typeArgs);
+    const checked = this.coerce(
+      value,
+      onType,
+      argument,
+      (from, to) => `${from} 型の値には、${to} 型の拡張 ${ext.name ?? ''} は使えません。`
+    );
+    return { ...checked, type: onType, extensionOverride: { ext, typeArgs }, variable: undefined };
   }
 
   /** The type arguments written after a class's name in a constructor call (`Box<int>(1)`), if any. */
@@ -341,7 +362,7 @@ export abstract class CallCompiler extends OperatorCompiler {
     const receiverType = receiver.type;
     if (receiverType.kind === 'void') this.error(span, 'void の値のメンバーは使えません。');
     this.skipOnNull(receiver, nullAware);
-    if (receiverType.kind === 'dynamic' || (receiverType.kind === 'never' && !receiverType.nullable)) {
+    if (!receiver.extensionOverride && (receiverType.kind === 'dynamic' || isNeverType(receiverType))) {
       return this.dynamicCall(receiver, name, args, span, nullAware, typeArguments);
     }
     const lookupType = nullAware ? nonNullable(receiverType) : receiverType;
@@ -381,8 +402,8 @@ export abstract class CallCompiler extends OperatorCompiler {
       return { type: returnType, run, isConst: false, completes };
     }
     if (receiver.isSuper) {
-      this.requireSuperImplementation(name, span);
-      const run = superMethodCall(this.superclassOf(span).classAt, this.runtimeMemberName(name), bound, row);
+      const call = this.superMethodTarget(name, span, row);
+      const run: Eval = (frame) => call(frame, bound.args(frame), bound.typeArgs(frame));
       return { type: returnType, run, isConst: false, completes };
     }
     return {
@@ -390,6 +411,22 @@ export abstract class CallCompiler extends OperatorCompiler {
       run: virtualMethodCall(receiverRun, this.runtimeMemberName(name), bound, nullAware, row),
       isConst: false,
       completes,
+    };
+  }
+
+  protected superMethodTarget(
+    name: string,
+    span: Span,
+    row: number | undefined
+  ): (frame: Frame, args: Arguments, typeArgs?: readonly DartType[]) => Value {
+    this.requireSuperImplementation(name, span);
+    const { classAt } = this.superclassOf(span);
+    const key = this.runtimeMemberName(name);
+    return (frame, args, typeArgs = []) => {
+      const { runtime, receiver } = frame;
+      const member = runtime.instanceMember(classAt(frame), key);
+      if (member?.kind !== 'method') return runtime.noSuchMethod(receiver, key, 'method', args, typeArgs);
+      return (member.impl as Callable)(runtime, receiver, args, typeArgs, row);
     };
   }
 
@@ -427,20 +464,8 @@ export abstract class CallCompiler extends OperatorCompiler {
     typeArguments: TypeSyntax[] = []
   ): Compiled {
     const typeArgs = typeArguments.map((argument) => this.runtimeType(this.resolveType(argument)));
-    const positional = args.positional.map((argument) => this.compileExpression(argument));
-    const named = args.named.map((argument) => ({
-      name: argument.name,
-      compiled: this.compileExpression(argument.value),
-    }));
-    for (const compiled of [...positional, ...named.map((argument) => argument.compiled)]) {
-      if (compiled.type.kind === 'void') this.error(span, 'void の値は引数に渡せません。');
-    }
-    const evaluate = this.argumentEvaluator(
-      args,
-      positional.map((compiled) => compiled.run),
-      named.map((argument) => ({ name: argument.name, run: argument.compiled.run })),
-      true
-    );
+    const { positionalRuns, namedRuns } = this.compileArgumentRuns(undefined, args);
+    const evaluate = this.argumentEvaluator(args, positionalRuns, namedRuns, true);
     const receiverRun = receiver.run;
     const row = this.callRow(span);
     const member = name === undefined ? undefined : this.runtimeMemberName(name);
@@ -652,13 +677,10 @@ export abstract class CallCompiler extends OperatorCompiler {
     context: DartType | undefined
   ): BoundCall {
     this.checkArity(type, args, span);
-    const compiled: CompiledArguments = {
-      positional: Array.from({ length: args.positional.length }),
-      named: Array.from({ length: args.named.length }),
-    };
+    const compiled = new Map<Expression, Compiled>();
     let staticTypeArgs: DartType[] = [];
     let signature = type;
-    if (typeArguments) staticTypeArgs = this.explicitTypeArguments(type, typeArguments, span);
+    if (typeArguments) staticTypeArgs = this.explicitTypeArguments(type.typeParams, typeArguments, span);
     if (type.typeParams.length > 0) {
       if (!typeArguments) staticTypeArgs = this.inferTypeArguments(type, args, context, compiled);
       signature = instantiateFunction(type, staticTypeArgs);
@@ -672,12 +694,12 @@ export abstract class CallCompiler extends OperatorCompiler {
     };
   }
 
-  private explicitTypeArguments(type: FunctionType, typeArguments: TypeSyntax[], span: Span): DartType[] {
-    if (typeArguments.length !== type.typeParams.length) {
-      this.error(span, `型引数は ${type.typeParams.length} 個ですが、${typeArguments.length} 個書かれています。`);
+  private explicitTypeArguments(params: readonly TypeParam[], typeArguments: TypeSyntax[], span: Span): DartType[] {
+    if (typeArguments.length !== params.length) {
+      this.error(span, `型引数は ${params.length} 個ですが、${typeArguments.length} 個書かれています。`);
     }
     const typeArgs = typeArguments.map((argument) => this.resolveType(argument));
-    this.checkBounds(type.typeParams, typeArgs, span);
+    this.checkBounds(params, typeArgs, span);
     return typeArgs;
   }
 
@@ -692,7 +714,7 @@ export abstract class CallCompiler extends OperatorCompiler {
     type: FunctionType,
     args: ArgumentsSyntax,
     context: DartType | undefined,
-    compiled: CompiledArguments
+    compiled: Map<Expression, Compiled>
   ): DartType[] {
     const params = new Set(type.typeParams);
     const fromContext = new Map<TypeParam, DartType>();
@@ -712,33 +734,22 @@ export abstract class CallCompiler extends OperatorCompiler {
       );
       return substitute(parameterType, map);
     };
-    for (const closurePass of [false, true]) {
-      const infer = (argument: Expression, parameterType: DartType): Compiled => {
-        const result = this.compileExpression(argument, argumentContext(parameterType, closurePass));
-        const formal = resolveBound(parameterType);
-        const actual = resolveBound(result.type);
-        if (
-          formal.kind === 'function' &&
-          formal.typeParams.length === 0 &&
-          actual.kind === 'function' &&
-          actual.typeParams.length > 0
-        ) {
-          tearOffs.push({ result, parameterType });
-        } else {
-          inferFromSubtype(result.type, parameterType, params, solution, upperBound, upper);
-        }
-        return result;
-      };
-      for (const [index, argument] of args.positional.entries()) {
-        if (isClosure(argument) === closurePass)
-          compiled.positional[index] = infer(argument, type.positional[index] ?? DYNAMIC);
+    visitCallArguments(args, type, ({ argument, parameterType = DYNAMIC }, closurePass) => {
+      const result = this.compileExpression(argument, argumentContext(parameterType, closurePass));
+      compiled.set(argument, result);
+      const formal = resolveBound(parameterType);
+      const actual = resolveBound(result.type);
+      if (
+        formal.kind === 'function' &&
+        formal.typeParams.length === 0 &&
+        actual.kind === 'function' &&
+        actual.typeParams.length > 0
+      ) {
+        tearOffs.push({ result, parameterType });
+      } else {
+        inferFromSubtype(result.type, parameterType, params, solution, upperBound, upper);
       }
-      for (const [index, argument] of args.named.entries()) {
-        if (isClosure(argument.value) !== closurePass) continue;
-        const parameterType = type.named.find((named) => named.name === argument.name)?.type ?? DYNAMIC;
-        compiled.named[index] = infer(argument.value, parameterType);
-      }
-    }
+    });
     for (const { result, parameterType } of tearOffs) {
       const instantiated = this.instantiateGeneric(result, argumentContext(parameterType, true), true);
       if (instantiated) inferFromSubtype(instantiated.type, parameterType, params, solution, upperBound, upper);
@@ -747,39 +758,31 @@ export abstract class CallCompiler extends OperatorCompiler {
   }
 
   private compileArgumentRuns(
-    signature: FunctionType,
+    signature: FunctionType | undefined,
     args: ArgumentsSyntax,
-    compiled: CompiledArguments
+    compiled?: ReadonlyMap<Expression, Compiled>
   ): { positionalRuns: Eval[]; namedRuns: { name: string; run: Eval }[] } {
     let allConst = true;
     const positionalRuns: Eval[] = [];
-    for (const [index, argument] of args.positional.entries()) {
-      const parameterType = signature.positional[index] ?? DYNAMIC;
-      const value = compiled.positional[index] ?? this.compileExpression(argument, parameterType);
+    const namedRuns: { name: string; run: Eval }[] = [];
+    visitCallArguments(args, signature, ({ argument, index, name, parameterType }) => {
+      const value = compiled?.get(argument) ?? this.compileExpression(argument, parameterType);
       this.argumentTypes.set(argument, value.type);
-      if (value.type.kind === 'void' && parameterType.kind !== 'void' && parameterType.kind !== 'dynamic') {
+      if (value.type.kind === 'void' && parameterType?.kind !== 'void' && parameterType?.kind !== 'dynamic') {
         this.error(argument, 'void の値は引数に渡せません。');
       }
       allConst &&= value.isConst;
-      positionalRuns.push(
-        this.coerce(value, parameterType, argument, (from, to) => `${from} 型の値は、${to} 型の引数に渡せません。`).run
-      );
-    }
-    const namedRuns: { name: string; run: Eval }[] = [];
-    for (const [index, argument] of args.named.entries()) {
-      const parameterType = signature.named.find((named) => named.name === argument.name)?.type ?? DYNAMIC;
-      const value = compiled.named[index] ?? this.compileExpression(argument.value, parameterType);
-      allConst &&= value.isConst;
-      namedRuns.push({
-        name: argument.name,
-        run: this.coerce(
-          value,
-          parameterType,
-          argument.value,
-          (from, to) => `${from} 型の値は、${to} 型の引数 ${argument.name} に渡せません。`
-        ).run,
-      });
-    }
+      const run = parameterType
+        ? this.coerce(
+            value,
+            parameterType,
+            argument,
+            (from, to) => `${from} 型の値は、${to} 型の引数${name === undefined ? '' : ` ${name}`}に渡せません。`
+          ).run
+        : value.run;
+      if (name === undefined) positionalRuns[index] = run;
+      else namedRuns[index] = { name, run };
+    });
     this.argumentsAreConst = allConst;
     return { positionalRuns, namedRuns };
   }
@@ -1105,10 +1108,6 @@ function supertypesOf(type: InterfaceType): InterfaceType[] {
   return result;
 }
 
-function isClosure(expression: Expression): boolean {
-  return expression.kind === 'function';
-}
-
 function isNeverType(type: DartType): boolean {
   return type.kind === 'never' && !type.nullable;
 }
@@ -1149,7 +1148,6 @@ function extensionMethodCall(
   };
 }
 
-/** `super.m(...)`, which runs the superclass's implementation on this. */
 function constructorSignature(cls: ClassInfo, constructor: ConstructorInfo, typeArgs: ConstructorTypes): FunctionType {
   if (!typeArgs) return { ...constructor.type, typeParams: cls.typeParams };
   const classArgs = Array.isArray(typeArgs) ? typeArgs : typeArgs.template.args;
@@ -1163,21 +1161,6 @@ function constructorArguments(typeArgs: ConstructorTypes, inferred: readonly Dar
   if (Array.isArray(typeArgs)) return typeArgs;
   const substitution = new Map(typeArgs.parameters.map((param, index) => [param, inferred[index] ?? DYNAMIC]));
   return typeArgs.template.args.map((arg) => substitute(arg, substitution));
-}
-
-function superMethodCall(
-  classAt: (frame: Frame) => ClassInfo,
-  name: string,
-  bound: BoundCall,
-  row: number | undefined
-): Eval {
-  return (frame) => {
-    const member = frame.runtime.instanceMember(classAt(frame), name);
-    if (member?.kind !== 'method')
-      return frame.runtime.noSuchMethod(frame.receiver, name, 'method', { positional: [], named: undefined });
-    const evaluated = bound.args(frame);
-    return (member.impl as Callable)(frame.runtime, frame.receiver, evaluated, bound.typeArgs(frame), row);
-  };
 }
 
 /** A call dispatched on the receiver's class, caching the implementation for the last class seen. */
@@ -1210,10 +1193,41 @@ function virtualMethodCall(
   };
 }
 
-/** The arguments compiled while inferring type arguments, which are not compiled again. */
-interface CompiledArguments {
-  positional: (Compiled | undefined)[];
-  named: (Compiled | undefined)[];
+function visitCallArguments(
+  args: ArgumentsSyntax,
+  signature: FunctionType | undefined,
+  visit: (argument: CallArgument, closurePass: boolean) => void
+): void {
+  const closures: CallArgument[] = [];
+  for (const entry of args.order) {
+    const argument = callArgument(args, entry, signature);
+    if (isClosureArgument(argument.argument)) closures.push(argument);
+    else visit(argument, false);
+  }
+  // Dart checks a function literal's body with the flow and type constraints from the other arguments.
+  for (const closure of closures) visit(closure, true);
+}
+
+function isClosureArgument(expression: Expression): boolean {
+  while (expression.kind === 'parenthesized') expression = expression.expression;
+  return expression.kind === 'function';
+}
+
+function callArgument(
+  args: ArgumentsSyntax,
+  entry: ArgumentsSyntax['order'][number],
+  signature: FunctionType | undefined
+): CallArgument {
+  const { index } = entry;
+  if (entry.kind === 'positional')
+    return { argument: args.positional[index], index, parameterType: signature?.positional[index] };
+  const { value, name } = args.named[index];
+  return {
+    argument: value,
+    index,
+    name,
+    parameterType: signature?.named.find((parameter) => parameter.name === name)?.type,
+  };
 }
 
 /**

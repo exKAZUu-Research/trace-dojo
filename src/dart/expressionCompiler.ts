@@ -1,5 +1,5 @@
+// code-gauge-allow-file fileNcss 982 -- Expression kinds share the same scope and evaluation rules.
 import { CompileError } from '../interpreter/diagnostics';
-// code-gauge-allow-file fileNcss 972 -- Expression kinds share the same scope and evaluation rules.
 import type {
   Annotation,
   Arguments as ArgumentsSyntax,
@@ -206,25 +206,6 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const variable = receiver.variable;
     const narrowed = promotionTarget(receiver.type, nonNullable(receiver.type));
     if (variable && narrowed && this.isPromotable(variable)) this.flow = this.flow.promote(variable, narrowed);
-  }
-
-  /** Whether a null-aware access appears in the selector chain of an expression, so that it may give `SHORTED`. */
-  protected isShorting(expression: Expression): boolean {
-    switch (expression.kind) {
-      case 'member':
-      case 'index': {
-        return expression.nullAware || this.isShorting(expression.object);
-      }
-      case 'call': {
-        return this.isShorting(expression.callee);
-      }
-      case 'nullAssert': {
-        return this.isShorting(expression.operand);
-      }
-      default: {
-        return false;
-      }
-    }
   }
 
   /** Compiles a condition, which must be a `bool`, and the flow when it is true and when it is false. */
@@ -1155,6 +1136,32 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return value;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 18 -- Ordinary and pattern assignments share the local write rules.
+  protected localWriter(variable: LocalVar, span: Span, readsCurrent = false): (frame: Frame, value: Value) => void {
+    const { options, name } = variable;
+    if (variable.unavailable) this.error(span, variable.unavailable);
+    if (variable.inPatternGuard) this.error(span, `パターン変数 ${name} には、when の中で代入できません。`);
+    if (options.isConst) this.error(span, `const の変数 ${name} には代入できません。`);
+    if (options.isFinal && options.isLate && (options.hasInitializer || this.flow.assigned.has(variable))) {
+      this.error(span, `late final の変数 ${name} には、もう値を代入できません。`);
+    }
+    if (options.isFinal && !options.isLate) {
+      const assigned = options.hasInitializer || options.isParameter || this.flow.maybeAssigned.has(variable);
+      if (assigned || variable.owner !== this.fn)
+        this.error(span, `final の変数 ${name} には、もう値を代入できません。`);
+    }
+    if (readsCurrent) this.checkDefinitelyAssigned(variable, span);
+    if (variable.owner !== this.fn) variable.isWriteCaptured = true;
+    const cell = this.cellAccess(variable);
+    const isLateFinal = options.isLate && options.isFinal;
+    return (frame, value) => {
+      const target = cell(frame);
+      if (isLateFinal && target.v !== UNINITIALIZED)
+        frame.runtime.throwError('LateError', '', [`Local '${name}' has already been initialized.`]);
+      target.v = value;
+    };
+  }
+
   /** Rejects reading a late local without an initializer that no path, closures included, can have assigned yet. */
   private checkLateAssignable(variable: LocalVar, span: Span): void {
     if (variable.options.hasInitializer || !this.flow.reachable || this.flow.maybeAssigned.has(variable)) return;
@@ -1285,12 +1292,15 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   /** What a member access on a value of the receiver's static type reads, checking nullability. */
-  // code-gauge-allow functionCognitiveComplexity 20 -- Each branch is one of the cases Dart distinguishes for this construct.
+  // code-gauge-allow functionCognitiveComplexity 21 -- Resolve static and dynamic reads and their distinct nullable cases.
   protected readMemberOf(receiver: Compiled, name: string, span: Span, nullAware: boolean): Compiled {
     const receiverType = receiver.type;
     if (receiverType.kind === 'void') this.error(span, 'void の値のメンバーは使えません。');
     this.skipOnNull(receiver, nullAware);
-    if (receiverType.kind === 'dynamic' || (receiverType.kind === 'never' && !receiverType.nullable)) {
+    if (
+      !receiver.extensionOverride &&
+      (receiverType.kind === 'dynamic' || (receiverType.kind === 'never' && !receiverType.nullable))
+    ) {
       const { run } = receiver;
       const memberName = this.runtimeMemberName(name);
       return {
