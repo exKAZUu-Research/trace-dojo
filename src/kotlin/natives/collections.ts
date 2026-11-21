@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 765 -- the natives of the collections, which share the helpers of their items.
+// code-gauge-allow-file fileNcss 774 -- the natives of the collections, which share the helpers of their items.
 import { runtimeClassOf } from '../dispatch';
 import { hashOf, stringOf, valueEquals } from '../format';
 import { toInt32 } from '../operators';
@@ -158,6 +158,7 @@ export function newList(
   const list = new KObject(libraryClass(`kotlin.collections.${className}`), 0);
   list.items = values;
   list.modCount = 0;
+  list.readOnlyCollection = className === 'EmptyList';
   return list;
 }
 
@@ -165,6 +166,7 @@ export function newPrimitiveArrayList(frame: Frame, arrayView: PrimitiveArrayVie
   frame.runtime.allocate(frame, 1);
   const list = new KObject(libraryClass(PRIMITIVE_ARRAY_LIST), 0);
   list.native = { arrayView };
+  list.readOnlyCollection = true;
   return list;
 }
 
@@ -445,6 +447,7 @@ function subList(frame: Frame, list: KObject, from: number, to: number): KObject
   if (from < 0) throwError(frame, 'java.lang.IndexOutOfBoundsException', `fromIndex = ${from}`);
   if (to > size) throwError(frame, 'java.lang.IndexOutOfBoundsException', `toIndex = ${to}`);
   if (from > to) throwError(frame, 'java.lang.IllegalArgumentException', `fromIndex(${from}) > toIndex(${to})`);
+  if (className(list) === 'EmptyList') return list;
   const arrayView = primitiveArrayView(list);
   if (arrayView) {
     return newPrimitiveArrayList(frame, {
@@ -458,6 +461,7 @@ function subList(frame: Frame, list: KObject, from: number, to: number): KObject
   const cls = className(source) === 'ArrayDeque' ? 'SequentialSubList' : 'SubList';
   const view = new KObject(libraryClass(`kotlin.collections.${cls}`), 0);
   view.modCount = source.modCount;
+  view.readOnlyCollection = source.readOnlyCollection;
   view.native = { listView: { source, parent: list, from: from + (parent?.from ?? 0), size: to - from } };
   return view;
 }
@@ -602,6 +606,7 @@ export function newMap(frame: Frame, className: string, store: KStore): KObject 
   const map = new KObject(libraryClass(`kotlin.collections.${className}`), 0);
   map.store = store;
   map.modCount = 0;
+  map.readOnlyCollection = className === 'EmptyMap' || className === 'EmptySet';
   return map;
 }
 
@@ -851,6 +856,9 @@ function setEquals(frame: Frame, elements: Value[], other: Value): boolean {
 type ViewKind = 'keys' | 'values' | 'entries';
 
 function newView(frame: Frame, map: KObject, view: ViewKind): KObject {
+  if (map.readOnlyCollection) {
+    return view === 'values' ? newList(frame, 'EmptyList', []) : setInstance(frame, 'EmptySet', newStore('insertion'));
+  }
   frame.runtime.allocate(frame, 1);
   const object = new KObject(
     libraryClass(view === 'values' ? 'kotlin.collections.MapValues' : 'kotlin.collections.MapKeysOrEntries'),
@@ -885,6 +893,7 @@ export function newEntry(frame: Frame, map: KObject | undefined, entry: HashEntr
 
 function storeIterator(frame: Frame, collection: KObject, kind: ViewKind, map = collection): KObject {
   const iterator = new KObject(libraryClass('kotlin.collections.StoreIterator'), 0);
+  iterator.readOnlyCollection = map.readOnlyCollection;
   iterator.native = {
     map,
     kind,

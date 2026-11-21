@@ -378,6 +378,8 @@ export function arrayItem(frame: Frame, array: KObject, index: number): Value {
 export function arrayIterator(_frame: Frame, source: KObject, kind?: PrimitiveKind | 'Boolean'): KObject {
   const iterator = new KObject(libraryClass('kotlin.collections.ItemIterator'), 0);
   iterator.native = { source, kind, index: 0, expectedModCount: source.modCount };
+  iterator.readOnlyCollection =
+    source.readOnlyCollection || !source.cls.isSubclassOf(libraryClass('kotlin.collections.MutableList'));
   return iterator;
 }
 

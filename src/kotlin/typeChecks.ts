@@ -6,7 +6,7 @@ import { type KType, resolved } from './types';
 import { KObject, type Value } from './values';
 
 /** A test of whether a value is an instance of a type, as `is` checks it with type arguments erased. */
-// code-gauge-allow functionCognitiveComplexity 22 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+// code-gauge-allow functionCognitiveComplexity 26 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
 export function instanceTest(core: Core, type: KType): (value: Value) => boolean {
   const actual = resolved(type);
   const acceptsNull = actual.nullable;
@@ -25,13 +25,22 @@ export function instanceTest(core: Core, type: KType): (value: Value) => boolean
       if (target === core.function)
         return (value) =>
           value === undefined ? acceptsNull : value instanceof KObject && value.function !== undefined;
-      return (value) => (value === undefined ? acceptsNull : runtimeClassOf(value).isSubclassOf(target));
+      const checksMutability = isMutableCollectionType(target);
+      return (value) => {
+        if (value === undefined) return acceptsNull;
+        if (checksMutability && value instanceof KObject && value.readOnlyCollection) return false;
+        return runtimeClassOf(value).isSubclassOf(target);
+      };
     }
     default: {
       // A type parameter's type is erased; only its bound can be checked, which the checker allows for reified ones.
       return (value) => value !== undefined || acceptsNull;
     }
   }
+}
+
+function isMutableCollectionType(cls: ClassSymbol): boolean {
+  return cls.isLibrary && cls.kotlinName.startsWith('kotlin.collections.Mutable');
 }
 
 /** The binary names of the JDK's classes, which a `ClassCastException` names; arrays, as `[I`, are the JDK's too. */
@@ -46,6 +55,9 @@ function moduleOf(cls: ClassSymbol): string {
 /** The message of the `ClassCastException` that casting `value` to `target` throws, as the JVM words it. */
 export function castFailureMessage(value: Value, target: ClassSymbol): string {
   const source = runtimeClassOf(value);
+  if (value instanceof KObject && value.readOnlyCollection && isMutableCollectionType(target)) {
+    return `${source.qualifiedName} cannot be cast to ${target.kotlinName}`;
+  }
   const sourceModule = moduleOf(source);
   const targetModule = moduleOf(target);
   const where =

@@ -5,6 +5,41 @@ import { executeProgram } from '../../src/interpreter/program';
 /** Programs with the output of Kotlin 2.4.21 on the JVM (Java 25), which the interpreter must reproduce exactly. */
 test.each([
   {
+    name: 'Kotlin collection types remain visible with a java.util wildcard import',
+    source: `import java.util.*
+fun main() {
+    val list: List<Int> = ArrayList<Int>()
+    val map: Map<String, Int> = HashMap<String, Int>()
+    val set: Set<Int> = HashSet<Int>()
+    val comparator = Comparator<Int> { a, b -> a - b }
+    println(list)
+    println(map)
+    println(set)
+    println(comparator.compare(1, 2))
+    println(kotlin.collections.ArrayDeque(listOf(3)))
+}`,
+    stdout: '[]\n{}\n[]\n-1\n[3]\n',
+  },
+  {
+    name: 'read-only runtime collection markers distinguish Kotlin and Java implementations',
+    source: `enum class E { A }
+fun main() {
+    val empty: Any = emptyList<Int>()
+    println(empty is MutableList<*>)
+    try { println(empty as MutableList<Int>) } catch (error: ClassCastException) { println(error.message) }
+    println(emptyList<Int>().iterator() is MutableIterator<*>)
+    println(emptySet<Int>() is MutableSet<*>)
+    println(emptyMap<Int, Int>() is MutableMap<*, *>)
+    println(emptyMap<Int, Int>().keys is MutableSet<*>)
+    println(E.entries is MutableList<*>)
+    println(intArrayOf(1).asList().subList(0, 1) is MutableList<*>)
+    println(listOf(1) is MutableList<*>)
+    println(buildList { add(1) } is MutableList<*>)
+}`,
+    stdout:
+      'false\nkotlin.collections.EmptyList cannot be cast to kotlin.collections.MutableList\nfalse\nfalse\nfalse\nfalse\nfalse\nfalse\ntrue\ntrue\n',
+  },
+  {
     name: 'Duration conversion ties, infinite arithmetic, and large finite values',
     source: `import kotlin.time.*
 import kotlin.time.Duration.Companion.seconds
@@ -72,8 +107,21 @@ fun main() {
     println(mutableSetOf(1).ifEmpty { emptySet() })
     println(arrayListOf(1).ifEmpty { emptyList() })
     show { listOf(1, 2).filter { it > 0 }.ifEmpty { emptyList() } }
+    println(listOf(1, 2).ifEmpty { emptySet() })
+    println(mutableListOf(1).ifEmpty { mutableSetOf() })
+    println(setOf(1).ifEmpty { emptyList() })
+    val mixed: Collection<Int> = emptyList<Int>().ifEmpty { emptySet() }
+    println(mixed)
+    println(linkedSetOf<Int>().ifEmpty { mutableListOf() })
+    val nested = mutableListOf(listOf(1))
+    nested += listOf(emptyList())
+    println(nested)
+    println(listOf(listOf(1)) + listOf(listOf()))
+    println(mapOf(1 to emptyList<Int>()) + mapOf(2 to emptyList()))
+    println(listOf(1).zip(listOf()) { a: Int, b: String -> a })
 }`,
-    stdout: '[]\n[1, 2]\n[1]\n{1=2}\n[1, 2, 3]\n[1, 2, 3]\n[1, 2, 3]\n[1]\n[1]\n[1]\n[1]\n[1, 2]\n',
+    stdout:
+      '[]\n[1, 2]\n[1]\n{1=2}\n[1, 2, 3]\n[1, 2, 3]\n[1, 2, 3]\n[1]\n[1]\n[1]\n[1]\n[1, 2]\n[1, 2]\n[1]\n[1]\n[]\n[]\n[[1], []]\n[[1], []]\n{1=[], 2=[]}\n[]\n',
   },
   {
     name: 'ArrayDeque and list builder positional errors match Kotlin/JVM wording',

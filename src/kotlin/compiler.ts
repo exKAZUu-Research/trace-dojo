@@ -410,6 +410,7 @@ export class Compiler extends BodyCompiler {
     return (_frame, entries) => {
       const list = new KObject(listClass, 0);
       list.items = [...entries];
+      list.readOnlyCollection = true;
       return list;
     };
   }

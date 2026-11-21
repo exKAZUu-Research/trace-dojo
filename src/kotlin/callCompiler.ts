@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 585 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss 616 -- the compiler of one area of Kotlin, whose parts call each other closely.
 import { CompileError } from '../interpreter/diagnostics';
 import {
   type ArgumentEvaluation,
@@ -26,6 +26,7 @@ import type { ClassSymbol, FunctionSymbol, ParameterSymbol, PropertySymbol, Type
 import {
   asSuper,
   checkVariableBounds,
+  commonGenericHint,
   constrainThroughBounds,
   determinedType,
   fixVariable,
@@ -279,6 +280,7 @@ export abstract class CallCompiler extends CompilerCore {
   ): (Compiled | undefined)[] {
     const compiledArgs: (Compiled | undefined)[] = [];
     let viable = attempts;
+    for (const attempt of attempts) this.constrainFromLambdaParameters(scope, attempt, args);
     for (const [index, argument] of args.entries()) {
       if (isLambdaArgument(argument.value)) {
         compiledArgs.push(undefined);
@@ -286,7 +288,7 @@ export abstract class CallCompiler extends CompilerCore {
       }
       const expectedType =
         expectedArgumentType(viable, compiledArgs, index, argument.value, isOverloaded && viable.length > 1) ??
-        (isBareCallExpression(argument.value)
+        (containsBareCall(argument.value)
           ? this.checkBareArgumentHints(scope, context, argument.value, argumentTypeHints(viable, index))
           : undefined);
       const compiled = this.compileExpression(scope, context, argument.value, expectedType);
@@ -295,6 +297,21 @@ export abstract class CallCompiler extends CompilerCore {
         viable = viable.filter((attempt) => this.constrainArgumentHint(attempt, index, compiled));
     }
     return compiledArgs;
+  }
+
+  private constrainFromLambdaParameters(scope: Scope, attempt: Attempt, args: ArgumentSyntax[]): void {
+    for (const [index, { value }] of args.entries()) {
+      if (!isLambdaArgument(value) || !value.params?.some((param) => param.type)) continue;
+      const declared = parameterTypeOf(attempt, index);
+      if (!declared) continue;
+      const type = resolved(substitute(declared, attempt.substitution));
+      const callable = this.samOf(type)?.functionType ?? type;
+      if (callable.kind !== 'function') continue;
+      for (const [position, param] of value.params.entries()) {
+        const input = callable.params[position];
+        if (input && param.type) isSubtype(input, this.resolveType(scope, param.type));
+      }
+    }
   }
 
   private constrainArgumentHint(attempt: Attempt, index: number, argument: Compiled): boolean {
@@ -306,29 +323,35 @@ export abstract class CallCompiler extends CompilerCore {
     return attempt.variables.every((variable) => nominalBoundsFit(variable, attempt.substitution));
   }
 
+  private probingArgumentHint = false;
+
+  // code-gauge-allow functionCognitiveComplexity 16 -- the hint loop restores its compiler state even when it rejects an ambiguous result.
   private checkBareArgumentHints(
     scope: Scope,
     context: FunctionContext,
     expression: Expression,
     hints: (KType | undefined)[]
   ): KType | undefined {
-    let applicable: KType | undefined;
+    if (this.probingArgumentHint) return undefined;
+    let applicable: { hint: KType; result: KType } | undefined;
     const saved = this.flow;
     for (const hint of hints) {
-      if (!hint || hasOpenVariables(hint) || (applicable && isSameType(applicable, hint))) continue;
+      if (!hint || hasOpenVariables(hint) || (applicable && isSameType(applicable.hint, hint))) continue;
       this.flow = saved.copy();
+      this.probingArgumentHint = true;
       try {
         const probe = this.compileExpression(scope, this.probeContext(context), expression, hint);
         if (!isSubtype(probe.type, hint)) continue;
-        if (applicable) return undefined;
-        applicable = hint;
+        if (applicable && !isSameType(applicable.result, probe.type)) return undefined;
+        applicable ??= { hint, result: probe.type };
       } catch (error) {
         if (!(error instanceof CompileError)) throw error;
       } finally {
         this.flow = saved;
+        this.probingArgumentHint = false;
       }
     }
-    return applicable;
+    return applicable?.hint;
   }
 
   /** The most specific applicable candidate of the nearest level that has one. */
@@ -683,9 +706,7 @@ export abstract class CallCompiler extends CompilerCore {
     const result = substitute(declaredReturn, substitution);
     const expectedHint = soleLowerBound(resolved(expected));
     if (expectedHint && variables.every((variable) => variable.lower.length === 0 && variable.upper.length === 0)) {
-      const hint =
-        result.kind === 'class' && expectedHint.kind === 'class' ? asSuper(expectedHint, result.cls) : undefined;
-      this.constrainReturnType(result, hint ?? expectedHint);
+      this.constrainReturnType(result, commonGenericHint(result, expectedHint) ?? expectedHint);
     }
     this.constrainReturnType(result, expected);
   }
@@ -1010,6 +1031,24 @@ function forwardTypeVariable(variable: InferenceVariable, owned: readonly Infere
   if (upper.some((type) => type.kind !== 'variable' || type.variable !== target.variable)) return false;
   variable.fixed = target;
   return true;
+}
+
+function containsBareCall(expression: Expression): boolean {
+  switch (expression.kind) {
+    case 'call': {
+      return isBareCallExpression(expression) || expression.args.some(({ value }) => containsBareCall(value));
+    }
+    case 'infix':
+    case 'binary': {
+      return containsBareCall(expression.left) || containsBareCall(expression.right);
+    }
+    case 'parenthesized': {
+      return containsBareCall(expression.expression);
+    }
+    default: {
+      return false;
+    }
+  }
 }
 
 function nominalBoundsFit(variable: InferenceVariable, substitution: Substitution): boolean {

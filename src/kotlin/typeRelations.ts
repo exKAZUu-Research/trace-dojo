@@ -355,6 +355,15 @@ export function lambdaResultHint(type: KType | undefined): KType | undefined {
   return determinedType(type) ?? type;
 }
 
+export function commonGenericHint(result: KType, known: KType): KType | undefined {
+  if (result.kind !== 'class' || known.kind !== 'class') return undefined;
+  for (const type of [result, ...supertypesInOrder(result)]) {
+    if (type.kind !== 'class' || !hasOpenVariables(type)) continue;
+    const projection = asSuper(known, type.cls);
+    if (projection) return projection;
+  }
+}
+
 /**
  * The expected type of a later branch of an `if`, `when`, or `?:` whose value is a call without arguments, such as
  * `emptyList()`: an earlier branch's generic type, which gives the call its type arguments, where it fits the expected

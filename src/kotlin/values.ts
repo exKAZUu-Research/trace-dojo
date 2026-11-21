@@ -136,6 +136,8 @@ export class KObject {
   builder?: string;
   /** Counts the structural changes of a collection, which make its iterators fail fast. */
   modCount?: number;
+  /** Whether Kotlin/JVM exposes the collection through its read-only runtime marker. */
+  readOnlyCollection?: boolean;
   /** What a function value runs, with the arguments its type lists (a receiver first). */
   function?: KFunction;
   /** Set by the Turtle constructor. */

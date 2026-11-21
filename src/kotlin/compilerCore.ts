@@ -13,7 +13,7 @@ import {
   Scope,
 } from './compilerBase';
 import { unavailableJavaFeature, unavailableMessage } from './convertSupport';
-import { knownLibraryDeclaration } from './libraryApi';
+import { isJavaTypeAlias, knownLibraryDeclaration } from './libraryApi';
 import type { Frame } from './runtime';
 import type { ClassSymbol, FunctionSymbol, MemberSymbol, PropertySymbol, TypeParameterSymbol } from './symbols';
 import { VariableSymbol } from './symbols';
@@ -202,8 +202,10 @@ export abstract class CompilerCore {
     const fromWildcard = this.findClassInPackages(name, this.file.starPackages);
     if (fromWildcard) return fromWildcard;
     const omittedJava = this.file.starPackages.filter(isJavaPath);
-    if (knownLibraryDeclaration(name, [omittedJava])) return undefined;
-    return this.findClassInPackages(name, DEFAULT_IMPORTS);
+    const javaImport = knownLibraryDeclaration(name, [omittedJava]);
+    const fromDefaults = this.findClassInPackages(name, DEFAULT_IMPORTS);
+    if (!javaImport || (fromDefaults && isJavaTypeAlias(javaImport, fromDefaults.kotlinName))) return fromDefaults;
+    return undefined;
   }
 
   private findClassInPackages(name: string, packages: string[]): ClassSymbol | undefined {
