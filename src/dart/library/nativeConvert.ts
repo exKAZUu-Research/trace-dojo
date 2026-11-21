@@ -681,6 +681,7 @@ function utf8Error(bytes: Uint8Array): { message: string; offset: number } | und
 /* oxlint-enable unicorn/prefer-code-point */
 
 define('_base64Encode', (runtime, _receiver, [bytes, urlSafe]) => {
+  if (runtime.getProperty(bytes, 'isEmpty', undefined) === true) return '';
   let hasInvalid = false;
   const data = readByteList(runtime, bytes, 'bytes', (value) => {
     if (value < 0n || value > 0xffn) hasInvalid = true;
@@ -729,8 +730,10 @@ define('_base64Decode', (runtime, _receiver, [source, start, end]) => {
   const fail = (message: string, offset: number): never =>
     runtime.throwError('FormatException', '', [message, input, BigInt(from + offset)]);
   runtime.spend(1 + (to - from) / 64);
-  const bytes = decodeBase64(input.slice(from, to), fail);
-  return newList(runtime, interfaceType(coreTypes.int), bytes.map(BigInt), false);
+  const encodedLength = validatedBase64Length(input.slice(from, to), fail);
+  runtime.allocate(Math.floor((encodedLength * 3) / 4) + 1);
+  const bytes = Buffer.from(input.slice(from, from + encodedLength), 'base64');
+  return new DartList(coreTypes.list, interfaceType(coreTypes.int), Array.from(bytes, BigInt), false);
 });
 
 define('_base64Normalize', (runtime, _receiver, [source, start, end]) => {
@@ -807,44 +810,29 @@ const BASE64_VALUES: readonly number[] = Array.from({ length: 128 }, (_, code) =
   return index === -1 ? -2 : index;
 });
 
-/** Base64 decoding as the SDK's _Base64Decoder does it, with its errors and their offsets. */
-// code-gauge-allow functionNcss 34 -- A transcription of the SDK's _Base64Decoder.decodeChunk, case by case.
-// code-gauge-allow functionCognitiveComplexity 30 -- A transcription of the SDK's _Base64Decoder.decodeChunk, case by case.
-function decodeBase64(input: string, fail: (message: string, offset: number) => never): number[] {
-  const output: number[] = [];
-  let bits = 0;
+/** The complete valid data before padding, validating even the discarded bits in the last sextet. */
+// code-gauge-allow functionCognitiveComplexity 18 -- Validate the final quantum and source-aware padding in one scan.
+function validatedBase64Length(input: string, fail: (message: string, offset: number) => never): number {
+  let last = 0;
   let count = 0;
   for (let position = 0; position < input.length; position++) {
     // oxlint-disable-next-line unicorn/prefer-code-point -- Base64 reads UTF-16 code units.
     const code = input.charCodeAt(position);
     const value = code > 127 ? -2 : (BASE64_VALUES[code] as number);
     if (value >= 0) {
-      bits = ((bits << 6) | value) & 0xff_ff_ff;
+      last = value;
       count = (count + 1) & 3;
-      if (count === 0) {
-        output.push((bits >> 16) & 0xff, (bits >> 8) & 0xff, bits & 0xff);
-        bits = 0;
-      }
       continue;
     }
-    if (value === -1 && count > 1) {
-      if (count === 3) {
-        if ((bits & 0x03) !== 0) fail('Invalid encoding before padding', position);
-        output.push((bits >> 10) & 0xff, (bits >> 2) & 0xff);
-      } else {
-        if ((bits & 0x0f) !== 0) fail('Invalid encoding before padding', position);
-        output.push((bits >> 4) & 0xff);
-      }
-      let expected = (3 - count) * 3;
-      if (input[position] === '%') expected += 2;
-      const remaining = checkBase64Padding(input, position + 1, expected, fail);
-      if (remaining > 0) fail('Missing padding character', input.length);
-      return output;
-    }
-    fail('Invalid character', position);
+    if (value !== -1 || count <= 1) fail('Invalid character', position);
+    if ((last & (count === 3 ? 0x03 : 0x0f)) !== 0) fail('Invalid encoding before padding', position);
+    const expected = (3 - count) * 3 + (input[position] === '%' ? 2 : 0);
+    const remaining = checkBase64Padding(input, position + 1, expected, fail);
+    if (remaining > 0) fail('Missing padding character', input.length);
+    return position;
   }
   if (count > 0) fail('Invalid length, must be multiple of four', input.length);
-  return output;
+  return input.length;
 }
 
 /** Checks the padding after the first `=` or `%3D`, returning how many padding characters are still missing. */

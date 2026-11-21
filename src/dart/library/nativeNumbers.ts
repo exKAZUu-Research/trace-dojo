@@ -3,7 +3,7 @@ import { doubleModulo, intModulo, intRemainder, numericBinary, shiftLeft, trunca
 import type { Runtime } from '../runtime';
 import type { Value } from '../values';
 import { define, defineAll, intArg, named, numArg, stringArg } from './nativeSupport';
-import { trimDartWhitespace } from './stringWhitespace';
+import { trimDartEnd, trimDartStart, trimDartWhitespace } from './stringWhitespace';
 
 const MAX_INT = 9_223_372_036_854_775_807n;
 
@@ -100,25 +100,56 @@ function parseDouble(runtime: Runtime, text: string): number | undefined {
   return Number(trimmed);
 }
 
-function parseInt(
-  runtime: Runtime,
-  text: string,
-  radix: number | undefined
-): bigint | 'Negative' | 'Positive' | undefined {
+const RADIX_BLOCK_LENGTHS = [
+  62, 39, 30, 26, 23, 22, 20, 19, 18, 17, 17, 16, 16, 15, 15, 15, 14, 14, 14, 14, 13, 13, 13, 13, 13, 13, 12, 12, 12,
+  12, 12, 12, 12, 12, 11,
+];
+
+interface IntParseError {
+  message: string;
+  offset?: number;
+}
+
+function parseInt(runtime: Runtime, text: string, radix: number | undefined): bigint | IntParseError {
   runtime.spend(1 + text.length / 64);
-  const [rest, base, negative] = radixSource(trimDartWhitespace(text), radix);
-  if (rest.length === 0) return undefined;
-  const unsignedHex = base === 16 && radix === undefined && !negative;
-  const bound = unsignedHex ? 0xff_ff_ff_ff_ff_ff_ff_ffn : negative ? MAX_INT + 1n : MAX_INT;
-  const bigBase = BigInt(base);
-  let result = 0n;
-  for (const char of rest) {
-    const digit = radixDigit(char, base);
-    if (digit === -1) return undefined;
-    if (result <= bound) result = result * bigBase + BigInt(digit);
+  const withoutLeading = trimDartStart(text);
+  const trimmed = trimDartEnd(withoutLeading);
+  const [digits, base, negative] = radixSource(trimmed, radix);
+  const start = text.length - withoutLeading.length + trimmed.length - digits.length;
+  if (digits.length === 0) {
+    return { message: radix === undefined ? 'Invalid number' : `Invalid radix-${radix} number`, offset: start };
   }
-  if (result > bound) return negative ? 'Negative' : 'Positive';
-  return negative ? -result : wrap(result);
+  const unsignedHex = base === 16 && radix === undefined && !negative;
+  const limit = unsignedHex ? 0xff_ff_ff_ff_ff_ff_ff_ffn : negative ? MAX_INT + 1n : MAX_INT;
+  const result = parseIntBlocks(digits, start, base, limit, negative);
+  return typeof result === 'bigint' ? (negative ? -result : wrap(result)) : result;
+}
+
+function parseIntBlocks(
+  digits: string,
+  offset: number,
+  base: number,
+  limit: bigint,
+  negative: boolean
+): bigint | IntParseError {
+  let start = 0;
+  while (digits[start] === '0') start++;
+  // The VM parses a shorter first block, then reports invalid input at the start of its block.
+  const width = RADIX_BLOCK_LENGTHS[base - 2];
+  let end = start + ((digits.length - start) % width || width);
+  const radix = BigInt(base);
+  let value = 0n;
+  while (start < digits.length) {
+    for (let index = start; index < end; index++) {
+      const digit = radixDigit(digits[index], base);
+      if (digit < 0) return { message: `Invalid radix-${base} number`, offset: offset + start };
+      value = value * radix + BigInt(digit);
+    }
+    if (value > limit) return { message: `${negative ? 'Negative' : 'Positive'} input exceeds the limit of integer` };
+    start = end;
+    end += width;
+  }
+  return value;
 }
 
 export function radixSource(
@@ -187,8 +218,13 @@ export function modInverse(runtime: Runtime, value: bigint, modulus: bigint): bi
 }
 
 export function bitLength(value: bigint): number {
-  const magnitude = value < 0n ? ~value : value;
-  return magnitude === 0n ? 0 : magnitude.toString(2).length;
+  return magnitudeBitLength(value < 0n ? ~value : value);
+}
+
+export function magnitudeBitLength(value: bigint): number {
+  if (value === 0n) return 0;
+  const hex = (value < 0n ? -value : value).toString(16);
+  return (hex.length - 1) * 4 + 32 - Math.clz32(Number.parseInt(hex[0], 16));
 }
 
 function sign(value: bigint | number): Value {
@@ -351,9 +387,7 @@ define('int.parse', (runtime, _self, [source], namedArgs) => {
   const radix = checkRadix(runtime, named(namedArgs, 'radix', undefined));
   const result = parseInt(runtime, text, radix);
   if (typeof result === 'bigint') return result;
-  if (result !== undefined) throwFormat(runtime, `${result} input exceeds the limit of integer`, text);
-  if (trimDartWhitespace(text).length === 0 && radix === undefined) throwFormat(runtime, 'Invalid number', text, 0n);
-  throwFormat(runtime, `Invalid radix-${radix ?? 10} number`, text, 0n);
+  throwFormat(runtime, result.message, text, result.offset === undefined ? undefined : BigInt(result.offset));
 });
 define('int.tryParse', (runtime, _self, [source], namedArgs) =>
   tryParseInt(runtime, stringArg(runtime, source, 'source'), checkRadix(runtime, named(namedArgs, 'radix', undefined)))

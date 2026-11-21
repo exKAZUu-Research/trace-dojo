@@ -14,7 +14,6 @@ import {
   intArg,
   iteratorValues,
   named,
-  newList,
   stringArg,
 } from './nativeSupport';
 import { isSurrogatePairAt } from './regExpEngine';
@@ -268,17 +267,21 @@ function replaceRange(runtime: Runtime, text: string, from: bigint, to: bigint, 
 define('String.split', (runtime, receiver, [pattern]) => {
   const text = self(receiver);
   const stringType = interfaceType(coreTypes.string);
+  runtime.allocate(1);
   if (typeof pattern === 'string') {
-    if (pattern.length === 0) return newList(runtime, stringType, text.split(''));
-    return newList(runtime, stringType, text.split(pattern));
+    return new DartList(coreTypes.list, stringType, splitAtString(runtime, text, pattern), true);
   }
   const matches = matchesOf(runtime, pattern, text);
   const parts: Value[] = [];
+  const append = (begin: bigint, end: bigint): void => {
+    runtime.allocate(1);
+    parts.push(substringBetween(runtime, text, begin, end));
+  };
   let previous = 0n;
   let start = 0n;
   const length = BigInt(text.length);
   try {
-    if (text.length === 0 && !matches.next().done) return newList(runtime, stringType, []);
+    if (text.length === 0 && !matches.next().done) return new DartList(coreTypes.list, stringType, parts, true);
     while (start !== length) {
       const { value: match, done } = matches.next();
       if (done || boundary(runtime, match, 'start') === length) break;
@@ -287,15 +290,34 @@ define('String.split', (runtime, receiver, [pattern]) => {
         start++;
         continue;
       }
-      parts.push(substringBetween(runtime, text, previous, boundary(runtime, match, 'start')));
+      append(previous, boundary(runtime, match, 'start'));
       start = previous = end;
     }
-    parts.push(substringBetween(runtime, text, previous, length));
-    return newList(runtime, stringType, parts);
+    append(previous, length);
+    return new DartList(coreTypes.list, stringType, parts, true);
   } finally {
     matches.return?.();
   }
 });
+function splitAtString(runtime: Runtime, text: string, separator: string): string[] {
+  if (separator === '') {
+    runtime.allocate(text.length);
+    return text.split('');
+  }
+  const parts: string[] = [];
+  let start = 0;
+  for (;;) {
+    const end = text.indexOf(separator, start);
+    runtime.allocate(1);
+    if (end === -1) {
+      parts.push(text.slice(start));
+      return parts;
+    }
+    parts.push(text.slice(start, end));
+    start = end + separator.length;
+  }
+}
+
 define('String.splitMapJoin', (runtime, receiver, [pattern], namedArgs) => {
   const text = self(receiver);
   const onMatch = named(namedArgs, 'onMatch', undefined);

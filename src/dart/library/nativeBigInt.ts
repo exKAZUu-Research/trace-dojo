@@ -3,7 +3,7 @@ import { formatDouble } from '../format';
 import { wrap } from '../operators';
 import type { Runtime } from '../runtime';
 import { DartObject, type Value } from '../values';
-import { bitLength, modInverse, radixDigit, radixSource } from './nativeNumbers';
+import { bitLength, magnitudeBitLength as bitsOf, modInverse, radixDigit, radixSource } from './nativeNumbers';
 import { define, defineConstructor, intArg, named, numArg, stringArg } from './nativeSupport';
 
 interface BigIntState {
@@ -12,6 +12,7 @@ interface BigIntState {
 }
 
 function newBigInt(runtime: Runtime, value: bigint): DartObject {
+  checkSize(runtime, bitsOf(value));
   const object = new DartObject(runtime.links.classNamed('_BigIntImpl'), [], []);
   object.native = { value, values: () => [] } satisfies BigIntState as unknown as DartObject['native'];
   return object;
@@ -24,22 +25,15 @@ function valueOf(runtime: Runtime, value: Value, name = 'other'): bigint {
   return (state as BigIntState).value;
 }
 
-/**
- * The most bits a BigInt of a run may have, as many as a string of the longest length in hexadecimal digits holds.
- * Host BigInt operations cannot be interrupted, so a result beyond it fails before it is computed, as the VM runs out
- * of memory, and each operation charges operations for the 32-bit digits it works through, at rates measured on the
- * hosts' subquadratic multiplication, division, and conversion.
- */
 const MAX_BITS = 4 * LIMITS.maxStringLength;
 
-function reserve(runtime: Runtime, resultBits: number, operations: number): void {
-  if (resultBits > MAX_BITS) runtime.throwError('OutOfMemoryError', '', []);
-  runtime.spend(1 + operations);
+function checkSize(runtime: Runtime, bits: number): void {
+  if (bits > MAX_BITS) runtime.throwError('OutOfMemoryError', '', []);
 }
 
-/** An upper bound of a value's bits, read in linear time. */
-function bitsOf(value: bigint): number {
-  return value === 0n ? 0 : (value < 0n ? -value : value).toString(16).length * 4;
+function reserve(runtime: Runtime, minimumBits: number, operations: number): void {
+  checkSize(runtime, minimumBits);
+  runtime.spend(1 + operations);
 }
 
 function parseBigInt(runtime: Runtime, text: string, radix: number | undefined): bigint | undefined {
@@ -58,7 +52,6 @@ function parseBigInt(runtime: Runtime, text: string, radix: number | undefined):
   const prefix = HOST_PREFIXES.get(base);
   const result =
     prefix === undefined ? combineRadixDigits(runtime, digits, base, bitsPerDigit) : BigInt(`${prefix}${digits}`);
-  if (maximumBits > MAX_BITS && bitLength(result) > MAX_BITS) runtime.throwError('OutOfMemoryError', '', []);
   return negative ? -result : result;
 }
 
@@ -138,32 +131,33 @@ defineConstructor('BigInt.from', (runtime, _instance, args) => {
   return newBigInt(runtime, BigInt(Math.trunc(value)));
 });
 
-/** A binary operation, whose result size and digit work `cost` bounds from the operands' sizes in bits. */
+interface BinaryCost {
+  minimumBits?: number;
+  work: number;
+}
+
 function binary(
   name: string,
-  cost: (a: number, b: number) => { bits: number; work: number },
+  cost: (a: number, b: number) => BinaryCost,
   run: (runtime: Runtime, a: bigint, b: bigint) => bigint
 ): void {
   define(`BigInt.${name}`, (runtime, receiver, [other]) => {
     const a = valueOf(runtime, receiver);
     const b = valueOf(runtime, other);
-    const { bits, work } = cost(bitsOf(a), bitsOf(b));
-    reserve(runtime, bits, work);
+    const { minimumBits = 0, work } = cost(bitsOf(a), bitsOf(b));
+    reserve(runtime, minimumBits, work);
     return newBigInt(runtime, run(runtime, a, b));
   });
 }
 
-const linear = (a: number, b: number): { bits: number; work: number } => ({
-  bits: Math.max(a, b) + 1,
-  work: (a + b) / 2048,
+const linear = (a: number, b: number): BinaryCost => ({ work: (a + b) / 2048 });
+const product = (a: number, b: number): BinaryCost => ({
+  minimumBits: a === 0 || b === 0 ? 0 : a + b - 1,
+  work: (a + b) / 512,
 });
-const product = (a: number, b: number): { bits: number; work: number } => ({ bits: a + b, work: (a + b) / 512 });
-const quotient = (a: number, b: number): { bits: number; work: number } => ({ bits: a, work: (a + b) / 512 });
+const quotient = (a: number, b: number): BinaryCost => ({ work: (a + b) / 512 });
 /** Euclid's algorithm takes up to a step per bit, each a division through the digits. */
-const euclid = (a: number, b: number): { bits: number; work: number } => ({
-  bits: Math.max(a, b),
-  work: (Math.max(a, b) * Math.max(a, b)) / 131_072,
-});
+const euclid = (a: number, b: number): BinaryCost => ({ work: Math.max(a, b) ** 2 / 131_072 });
 
 function checkDivisor(runtime: Runtime, b: bigint): void {
   if (b === 0n) runtime.throwError('IntegerDivisionByZeroException', '', []);
@@ -297,8 +291,9 @@ define('BigInt.pow', (runtime, receiver, [exponent]) => {
   if (power < 0n) runtime.throwError('ArgumentError', '', [`Exponent must not be negative: ${power}`]);
   const base = valueOf(runtime, receiver);
   if (base !== 0n && base !== 1n && base !== -1n) {
-    const bits = bitLength(base < 0n ? -base : base) * Number(power);
-    reserve(runtime, bits, bits / 512);
+    const bits = bitsOf(base);
+    const exponent = Number(power);
+    reserve(runtime, (bits - 1) * exponent + 1, (bits * exponent) / 512);
   }
   return newBigInt(runtime, base ** power);
 });

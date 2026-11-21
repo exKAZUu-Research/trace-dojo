@@ -2,8 +2,10 @@
 export const CONVERT_SOURCE = String.raw`
 abstract mixin class Codec<S, T> {
   const Codec();
-  T encode(S input);
-  S decode(T encoded);
+  Converter<S, T> get encoder;
+  Converter<T, S> get decoder;
+  T encode(S input) => encoder.convert(input);
+  S decode(T encoded) => decoder.convert(encoded);
 }
 
 abstract mixin class Converter<S, T> {
@@ -112,8 +114,6 @@ final class Base64Codec extends Codec<List<int>, String> {
   const Base64Codec() : encoder = const Base64Encoder();
   const Base64Codec.urlSafe() : encoder = const Base64Encoder.urlSafe();
   Base64Decoder get decoder => const Base64Decoder();
-  String encode(List<int> input) => encoder.convert(input);
-  List<int> decode(String encoded) => decoder.convert(encoded);
   String normalize(String source, [int start = 0, int? end]) => _base64Normalize(source, start, end);
 }
 

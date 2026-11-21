@@ -4116,3 +4116,119 @@ int f({int value = 1}) => value;
 void main() { var c = C(f()); c.value += 2; print(c.value); }`;
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '3\n' });
 });
+
+test('Base64 encoders read custom list lengths in SDK order', () => {
+  const program = `import 'dart:convert';
+import 'dart:collection';
+class Input extends ListBase<int> {
+  int checks = 0;
+  int get length { checks++; print(checks); return checks; }
+  set length(int value) {}
+  int operator [](int index) => 65 + index;
+  void operator []=(int index, int value) {}
+}
+void main() {
+  print(base64Encode(Input()));
+  print(base64Url.encoder.convert(Input()));
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '1\n2\nQUI=\n1\n2\nQUI=\n',
+  });
+});
+
+test('Base64 validation preserves input offsets before checking output storage', () => {
+  const program = `import 'dart:convert';
+void main() {
+  var slots = List<int>.filled(600000, 0);
+  try { base64Decode('/' * 999996 + '?'); }
+  on FormatException catch (error) { print(error.offset); }
+  print(slots.length);
+  print(base64.decoder.convert('xQQ%3d%3dy', 1, 9));
+  print(base64Url.decode('-_8='));
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '999996\n600000\n[65]\n[251, 255]\n',
+  });
+});
+
+test('String.split keeps literal separators and custom match boundaries', () => {
+  const program = `void main() {
+  print('a--b----'.split('--'));
+  print(''.split('-').length);
+  print('😀'.split('').map((part) => part.codeUnitAt(0)).toList());
+  print('a23b'.split(RegExp('[0-9]+')));
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[a, b, , ]\n1\n[55357, 56832]\n[a, b]\n',
+  });
+});
+
+test('int.parse reports the radix and the VM parsing block offset', () => {
+  const program = `void parse(String source, [int? radix]) {
+  try { print(int.parse(source, radix: radix)); }
+  on FormatException catch (error) { print([error.message, error.offset]); }
+}
+void main() {
+  parse('0xG');
+  parse('-12x');
+  parse(' + ');
+  parse(' ');
+  parse('000x', 10);
+  parse('9999999999999999999999999x');
+  parse('999999999999999999999999');
+  parse('0xffffffffffffffff');
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[Invalid radix-16 number, 2]\n[Invalid radix-10 number, 1]\n[Invalid number, 2]\n[Invalid number, 1]\n[Invalid radix-10 number, 3]\n[Invalid radix-10 number, 8]\n[Positive input exceeds the limit of integer, null]\n-1\n',
+  });
+});
+
+test('BigInt size limits accept exact results at the boundary', () => {
+  const program = `void main() {
+  var n = BigInt.one << 3999999;
+  print([(n + BigInt.zero).bitLength, (n - BigInt.one).bitLength, (n * BigInt.one).bitLength]);
+  print([(n | BigInt.zero).bitLength, (n ^ n).bitLength, BigInt.two.pow(3999999).bitLength]);
+  try { print(n + n); } on OutOfMemoryError { print('too large'); }
+  try { print(n * n); } on OutOfMemoryError { print('too large'); }
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[4000000, 3999999, 4000000]\n[4000000, 0, 4000000]\ntoo large\ntoo large\n',
+  });
+});
+
+test('Codec exposes typed converters and inherited encode and decode methods', () => {
+  const program = `import 'dart:convert';
+class Count extends Converter<String, int> {
+  int convert(String input) => input.length;
+}
+class Stars extends Converter<int, String> {
+  String convert(int count) => '*' * count;
+}
+class Example extends Codec<String, int> {
+  Converter<String, int> get encoder => Count();
+  Converter<int, String> get decoder => Stars();
+}
+void main() {
+  Codec<Object?, String> jsonCodec = json;
+  print([jsonCodec.encoder.convert(1), jsonCodec.decoder.convert('true')]);
+  Codec<String, int> example = Example();
+  print([example.encode('abc'), example.decode(2)]);
+  print(base64.decode(base64.encode([65])));
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[1, true]\n[3, **]\n[65]\n',
+  });
+  expect(
+    executeProgram(
+      'dart',
+      "import 'dart:convert'; class Broken extends Codec<String,int> { int encode(String s) => 0; String decode(int n) => ''; } void main() {}"
+    )
+  ).toMatchObject({ kind: 'compileError' });
+});
