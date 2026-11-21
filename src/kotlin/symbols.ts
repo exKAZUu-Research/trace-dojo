@@ -8,6 +8,7 @@ export type Visibility = (typeof VISIBILITY_KEYWORDS)[number];
 
 export class TypeParameterSymbol {
   bounds: KType[] = [];
+  projectionLowerBound: KType | undefined;
 
   constructor(
     readonly name: string,

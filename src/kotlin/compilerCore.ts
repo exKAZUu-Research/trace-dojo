@@ -18,7 +18,14 @@ import { isJavaTypeAlias, knownLibraryDeclaration } from './libraryApi';
 import type { Frame } from './runtime';
 import type { ClassSymbol, FunctionSymbol, MemberSymbol, PropertySymbol, TypeParameterSymbol } from './symbols';
 import { VariableSymbol } from './symbols';
-import { anyType, asSuper, isSubtype, substitutionOf } from './typeRelations';
+import {
+  anyType,
+  approximatedReadType,
+  asSuper,
+  isSubtype,
+  memberSubstitutionOf,
+  substitutionOf,
+} from './typeRelations';
 import {
   type ClassType,
   type KType,
@@ -312,10 +319,13 @@ export abstract class CompilerCore {
       const current = queue.shift() as ClassType;
       if (visited.has(current.cls)) continue;
       visited.add(current.cls);
-      const substitution = substitutionOf(current);
+      const substitution = memberSubstitutionOf(current);
       for (const member of current.cls.members.get(name) ?? []) {
         if (member.kind !== kind) continue;
-        this.addMemberReference(found, { symbol: member as T, substitution }, actual.cls);
+        const types = allowsProjectedSearch(member)
+          ? new Map([...substitution].map(([param, type]) => [param, approximatedReadType(type)]))
+          : substitution;
+        this.addMemberReference(found, { symbol: member as T, substitution: types }, actual.cls);
       }
       for (const supertype of current.cls.supertypes) queue.push(substitute(supertype, substitution) as ClassType);
       if (current.cls.supertypes.length === 0 && current.cls !== this.core.any) {
@@ -518,6 +528,29 @@ function overrides(member: MemberSymbol, other: MemberSymbol): boolean {
 }
 
 export { FunctionContext, Scope };
+
+const COLLECTION_SEARCH_NAMES = new Set([
+  'contains',
+  'containsAll',
+  'containsKey',
+  'containsValue',
+  'get',
+  'getOrDefault',
+  'indexOf',
+  'lastIndexOf',
+  'remove',
+  'removeAll',
+  'retainAll',
+]);
+
+function allowsProjectedSearch(member: MemberSymbol): boolean {
+  return (
+    member.kind === 'function' &&
+    member.isLibrary &&
+    member.owner?.kotlinName.startsWith('kotlin.collections.') === true &&
+    COLLECTION_SEARCH_NAMES.has(member.name)
+  );
+}
 
 function isJavaPath(path: string): boolean {
   return path.startsWith('java.') || path.startsWith('javax.');

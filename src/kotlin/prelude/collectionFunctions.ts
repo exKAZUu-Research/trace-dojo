@@ -1426,10 +1426,7 @@ operator fun <K, V> Map.Entry<K, V>.component2(): V = value
 
 fun <K, V> Map.Entry<K, V>.toPair(): Pair<K, V> = Pair(key, value)
 
-fun <K, V> Map<out K, V>.getOrDefault(key: K, defaultValue: V): V {
-    val value = get(key)
-    return if (value == null && !containsKey(key)) defaultValue else value as V
-}
+external fun <K, V> Map<out K, V>.getOrDefault(key: K, defaultValue: V): V
 
 inline fun <K, V> Map<K, V>.getOrElse(key: K, defaultValue: () -> V): V = get(key) ?: defaultValue()
 

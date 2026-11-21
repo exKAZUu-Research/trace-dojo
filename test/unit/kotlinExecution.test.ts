@@ -1233,6 +1233,129 @@ fun main() { println(Diamond().move()); println(Duck().walk()) }`,
     stdout: 'first\nboth\n',
   },
   {
+    name: 'ArrayDeque rendering is fail-fast and ListBuilder rendering keeps its initial range',
+    source: `class Rendered(private val mutate: () -> Unit) {
+    override fun toString(): String { mutate(); return "item" }
+}
+fun main() {
+    val deque = ArrayDeque<Any>()
+    deque.add(Rendered { deque.add("new") })
+    deque.add("last")
+    try { println(deque) } catch (error: ConcurrentModificationException) { println("added") }
+    println(deque.size)
+    deque.clear()
+    deque.add(Rendered { deque.clear() })
+    deque.add("last")
+    try { println(deque) } catch (error: ConcurrentModificationException) { println("cleared") }
+
+    deque.add(Rendered { deque.add("new") })
+    deque.add("last")
+    val view = deque.subList(0, 2)
+    try { println(view) } catch (error: ConcurrentModificationException) { println("view changed") }
+
+    buildList<Any> {
+        val builder = this
+        add(Rendered { builder.add("new") })
+        add("last")
+        println(this)
+        println(size)
+    }
+    buildList<Any> {
+        val builder = this
+        add(Rendered { builder.clear() })
+        add("last")
+        println(this)
+        println(size)
+    }
+}`,
+    stdout: 'added\n3\ncleared\nview changed\n[item, last]\n3\n[item, null]\n0\n',
+  },
+  {
+    name: 'singleton lookup skips hashing and native getOrDefault looks up one key',
+    source: `var hashes = 0
+var equalities = 0
+class Key(private val value: Int) {
+    override fun equals(other: Any?): Boolean {
+        equalities++
+        return other is Key && value == other.value
+    }
+    override fun hashCode(): Int {
+        hashes++
+        return value
+    }
+}
+class Observed : Map<Key, Int?> by emptyMap<Key, Int?>() {
+    override fun get(key: Key): Int? { println("get"); return null }
+    override fun containsKey(key: Key): Boolean {
+        println("contains")
+        return false
+    }
+}
+fun main() {
+    val key = Key(1)
+    val set = setOf(key)
+    val map = mapOf(key to 7)
+    println(hashes)
+    println(set.contains(key))
+    println(map[key])
+    println(map.getOrDefault(Key(2), 9))
+    println(hashes)
+    println(equalities)
+    println(map.hashCode())
+    println(hashes)
+
+    val hashMap = hashMapOf<Key, Int?>(key to null)
+    hashes = 0
+    println(hashMap.getOrDefault(Key(1), 9))
+    println(hashes)
+    hashes = 0
+    println(hashMap.getOrDefault(Key(2), 9))
+    println(hashes)
+    println(Observed().getOrDefault(key, 9))
+}`,
+    stdout: '0\ntrue\n7\n9\n0\n3\n6\n1\nnull\n1\n9\n1\nget\ncontains\n9\n',
+  },
+  {
+    name: 'mixed signed range endpoints widen to the JVM range type',
+    source: `fun main() {
+    val byte: Byte = 1
+    val short: Short = 2
+    val int = 4
+    val long = 5L
+    println((byte..short).toList())
+    println((byte..int).toList())
+    println((byte..long).toList())
+    println((short..<int).toList())
+    println((short..<long).toList())
+    println((int..<long).toList())
+    println((1L..<int).toList())
+    println((1L..<short).toList())
+    println((byte..<Int.MIN_VALUE).toList())
+    println((short..<Long.MIN_VALUE).toList())
+}`,
+    stdout: '[1, 2]\n[1, 2, 3, 4]\n[1, 2, 3, 4, 5]\n[2, 3]\n[2, 3, 4]\n[4]\n[1, 2, 3]\n[1]\n[]\n[]\n',
+  },
+  {
+    name: 'star-projected collections can read, search, and remove elements',
+    source: `fun main() {
+    val values: MutableList<*> = mutableListOf(1, 2)
+    println(values[0])
+    println(values.contains("a"))
+    println(values.remove("a"))
+    println(values.indexOf("a"))
+    println(values.addAll(emptyList()))
+    val array: Array<*> = arrayOf(3)
+    println(array[0])
+    println(array.contains("a"))
+    val map: MutableMap<*, *> = mutableMapOf("a" to 4)
+    println(map["a"])
+    println(map.containsKey("a"))
+    println(map.containsValue(4))
+    println(map.remove("x"))
+}`,
+    stdout: '1\nfalse\nfalse\n-1\nfalse\n3\nfalse\n4\ntrue\ntrue\nnull\n',
+  },
+  {
     name: 'set insertion follows the source iterator and keeps partial changes',
     source: `class SourceIterator(private val target: Set<Int>) : Iterator<Int> {
     private var count = 0
@@ -3177,6 +3300,31 @@ test.each([
     'a write through super to a val',
     false,
     'open class A { val x = 1 }\nclass C : A() { fun change() { super.x = 2 } }\nfun main() {}',
+  ],
+  [
+    'adding a value through a star-projected mutable list',
+    false,
+    'fun main() { val items: MutableList<*> = mutableListOf(1); items.add("wrong") }',
+  ],
+  [
+    'adding null through a star-projected mutable list',
+    false,
+    'fun main() { val items: MutableList<*> = mutableListOf(1); items.add(null) }',
+  ],
+  [
+    'writing a read value through a star-projected mutable list',
+    false,
+    'fun main() { val items: MutableList<*> = mutableListOf(1); items[0] = items[0] }',
+  ],
+  [
+    'assigning through a star-projected Array',
+    false,
+    'fun main() { val items: Array<*> = arrayOf(1); items[0] = "wrong" }',
+  ],
+  [
+    'writing through a star-projected MutableMap',
+    false,
+    'fun main() { val items: MutableMap<*, *> = mutableMapOf("key" to 1); items["key"] = "wrong" }',
   ],
   ['a cycle between open classes', false, 'open class A : B()\nopen class B : A()\nfun main() {}'],
   ['a cycle between interfaces', false, 'interface A : B\ninterface B : A\nfun main() {}'],

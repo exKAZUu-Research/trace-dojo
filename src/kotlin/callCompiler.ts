@@ -24,6 +24,7 @@ import { literalFits } from './literals';
 import type { Frame } from './runtime';
 import type { ClassSymbol, FunctionSymbol, ParameterSymbol, PropertySymbol, TypeParameterSymbol } from './symbols';
 import {
+  approximatedReadType,
   asSuper,
   checkVariableBounds,
   commonGenericHint,
@@ -901,7 +902,7 @@ export abstract class CallCompiler extends CompilerCore {
   ): KType {
     const { symbol } = candidate;
     if (candidate.kind !== 'constructor' || !symbol.owner) {
-      return resolved(substitute(this.declaredReturnOf(candidate, row), substitution));
+      return approximatedReadType(substitute(this.declaredReturnOf(candidate, row), substitution));
     }
     return {
       kind: 'class',

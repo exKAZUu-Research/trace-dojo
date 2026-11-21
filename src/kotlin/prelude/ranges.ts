@@ -362,9 +362,13 @@ function mixedIntegralProgressions(): string {
   return mixedIntegralOverloads((from, to, result) => {
     const receiver = from === result ? 'this' : `to${result}()`;
     const end = to === result ? 'to' : `to.to${result}()`;
+    const other = to === result ? 'other' : `other.to${result}()`;
+    const rangeTo = `operator fun ${from}.rangeTo(other: ${to}): ${result}Range = ${receiver}.rangeTo(${other})`;
     return [
       `infix fun ${from}.until(to: ${to}): ${result}Range = ${receiver}.until(${end})`,
       `infix fun ${from}.downTo(to: ${to}): ${result}Progression = ${receiver}.downTo(${end})`,
+      ...((from === 'Int' && to === 'Long') || (from === 'Long' && to === 'Int') ? [] : [rangeTo]),
+      `operator fun ${from}.rangeUntil(other: ${to}): ${result}Range = ${receiver}.rangeUntil(${other})`,
     ];
   });
 }

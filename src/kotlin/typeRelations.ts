@@ -1,4 +1,4 @@
-import type { ClassSymbol, TypeParameterSymbol } from './symbols';
+import { type ClassSymbol, TypeParameterSymbol } from './symbols';
 import {
   type ClassType,
   type FunctionType,
@@ -51,6 +51,34 @@ export function substitutionOf(type: ClassType): Map<TypeParameterSymbol, KType>
   return map;
 }
 
+const starCaptures = new WeakMap<TypeArgument, Map<TypeParameterSymbol, TypeParameterSymbol>>();
+
+export function memberSubstitutionOf(type: ClassType): Map<TypeParameterSymbol, KType> {
+  const substitution = substitutionOf(type);
+  for (const [index, param] of type.cls.typeParameters.entries()) {
+    const argument = type.args[index];
+    if (argument?.variance !== 'star') continue;
+    let captures = starCaptures.get(argument);
+    if (!captures) starCaptures.set(argument, (captures = new Map()));
+    let capture = captures.get(param);
+    if (!capture) {
+      capture = new TypeParameterSymbol(param.name, 'inv', false);
+      capture.bounds = [upperBoundOf(param)];
+      capture.projectionLowerBound = NOTHING;
+      captures.set(param, capture);
+    }
+    substitution.set(param, { kind: 'param', param: capture, nullable: false });
+  }
+  return substitution;
+}
+
+export function approximatedReadType(type: KType): KType {
+  const actual = resolved(type);
+  if (actual.kind !== 'param' || !actual.param.projectionLowerBound) return actual;
+  const bound = upperBoundOf(actual.param);
+  return actual.nullable ? nullable(bound) : bound;
+}
+
 export function upperBoundOf(param: TypeParameterSymbol): KType {
   return param.bounds[0] ?? anyType(true);
 }
@@ -85,6 +113,10 @@ export function isSubtype(subType: KType, superType: KType): boolean {
   const sub = resolved(subType);
   const sup = resolved(superType);
   if (sub.kind === 'variable' || sup.kind === 'variable') return constrainSubtype(sub, sup);
+  if (sup.kind === 'param' && sup.param.projectionLowerBound && (sub.kind !== 'param' || sub.param !== sup.param)) {
+    const lower = sup.param.projectionLowerBound;
+    return isSubtype(sub, sup.nullable ? nullable(lower) : lower);
+  }
   if (isNullable(sub) && !isNullable(sup)) return false;
   if (sub.kind === 'nothing') return true;
   if (sup.kind === 'nothing') return false;

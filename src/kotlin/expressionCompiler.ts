@@ -38,7 +38,14 @@ import {
   type TypeParameterSymbol,
   type VariableSymbol,
 } from './symbols';
-import { anyType, commonSupertype, fixVariable, isSubtype, lambdaResultHint } from './typeRelations';
+import {
+  anyType,
+  approximatedReadType,
+  commonSupertype,
+  fixVariable,
+  isSubtype,
+  lambdaResultHint,
+} from './typeRelations';
 import {
   type ClassType,
   classType,
@@ -648,7 +655,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const { symbol, substitution } = member;
     this.checkAccessible(scope, symbol, row, receiver.type);
     const declaredType = this.ensurePropertyType(symbol, row);
-    const type = resolved(substitute(declaredType, substitution));
+    const type = approximatedReadType(substitute(declaredType, substitution));
     const receiverEval = convertRepr(receiver.eval, receiver.repr, receiverRepr(symbol));
     const isStable = receiver.stableKey !== undefined && this.isStableProperty(symbol);
     const key = isStable ? `${receiver.stableKey}.${keyOf(symbol)}` : undefined;

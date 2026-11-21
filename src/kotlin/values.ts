@@ -64,6 +64,7 @@ export type HashEntry = SharedHashEntry<Value>;
 export class KStore extends HashStore<Value, Frame> {
   /** Whether the program gave the initial capacity, which `HashMap()` leaves to its first insertion. */
   isSized = false;
+  isSingleton = false;
 }
 
 let nextIdentity = 1;

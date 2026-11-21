@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 896 -- the natives of the collections, which share the helpers of their items.
+// code-gauge-allow-file fileNcss 923 -- the natives of the collections, which share the helpers of their items.
 import { runtimeClassOf } from '../dispatch';
 import { hashOf, identityHash, stringOf, valueEquals } from '../format';
 import { toInt32 } from '../operators';
@@ -247,10 +247,14 @@ const LIST_READING_NATIVES: Record<string, ListNative> = {
 
 function renderList(frame: Frame, receiver: Value): string {
   const list = receiver as KObject;
-  if (!usesArrayListIterator(list)) return collectionToString(frame, list, readableItems(list));
+  const view = listView(list);
+  const source = view?.source ?? list;
+  if (listKind(source) === 'ListBuilder') {
+    return renderListBuilder(frame, list, source.items as Value[], view?.from ?? 0);
+  }
+  if (!usesJvmListIterator(list)) return collectionToString(frame, list, readableItems(list));
 
   checkListView(frame, list);
-
   const iterator = collectionIterator(frame, list);
   function* elements(): Iterable<Value> {
     while (iterator.hasNext()) yield iterator.next();
@@ -258,8 +262,18 @@ function renderList(frame: Frame, receiver: Value): string {
   return frame.runtime.withNativeRoots([iterator.value], () => collectionToString(frame, list, elements()));
 }
 
-function usesArrayListIterator(list: KObject): boolean {
-  return (listView(list)?.source ?? list).arrayList !== undefined;
+function renderListBuilder(frame: Frame, list: KObject, items: Value[], from: number): string {
+  checkListView(frame, list);
+  const end = from + indexedSize(list);
+  function* elements(): Iterable<Value> {
+    for (let index = from; index < end; index++) yield items[index];
+  }
+  return frame.runtime.withNativeRoots([items], () => collectionToString(frame, list, elements()));
+}
+
+function usesJvmListIterator(list: KObject): boolean {
+  const kind = listKind(listView(list)?.source ?? list);
+  return kind === 'ArrayList' || kind === 'ArrayDeque';
 }
 
 function findListValue(frame: Frame, list: KObject, element: Value, fromEnd = false): number {
@@ -624,7 +638,7 @@ function defineIterators(): void {
   defineNative(`${iterator}.hasNext()`, (_frame, receiver) => {
     const current = itemIteratorState(receiver);
     const size = indexedSize(current.source);
-    return usesArrayListIterator(current.source) ? current.index !== size : current.index < size;
+    return usesJvmListIterator(current.source) ? current.index !== size : current.index < size;
   });
   defineNative(`${iterator}.next()`, (frame, receiver) => {
     const current = itemIteratorState(receiver);
@@ -710,6 +724,8 @@ function storeOf(value: Value): KStore {
 
 /** Finds the entry of a key, comparing with `equals` among the entries of its hash, or by order in a sorted store. */
 export function findEntry(frame: Frame, store: KStore, key: Value): HashEntry | undefined {
+  if (!store.isAllocated && store.entries.length === 0) return undefined;
+  if (store.isSingleton) return store.entries.find((entry) => valueEquals(frame, key, entry.key));
   if (store.order === 'sorted') {
     const { index, isFound } = store.positionOf(frame, key);
     return isFound ? store.entries[index] : undefined;
@@ -908,7 +924,7 @@ function defineSets(): void {
   defineNativeProperty(`${SET}.size`, (_frame, set) => storeOf(set).entries.length);
   const natives: Record<string, (frame: Frame, set: Value, args: Value[]) => Value> = {
     'isEmpty()': (_frame, set) => storeOf(set).entries.length === 0,
-    'contains(E)': (frame, set, [element]) => setContains(frame, set as KObject, element),
+    'contains(E)': (frame, set, [element]) => findEntry(frame, storeOf(set), element) !== undefined,
     'containsAll(Collection<E>)': (frame, set, [elements]) => containsAll(frame, set, elements),
     'iterator()': (frame, set) => storeIterator(frame, set as KObject, 'keys'),
     'add(E)': (frame, set, [element]) => {
@@ -948,14 +964,6 @@ function defineSets(): void {
     'toString()': (frame, set) => collectionToString(frame, set, storeElements(set as KObject)),
   };
   for (const [signature, native] of Object.entries(natives)) defineNative(`${SET}.${signature}`, native);
-}
-
-function setContains(frame: Frame, set: KObject, element: Value): boolean {
-  const store = storeOf(set);
-  if (set.cls === libraryClass('kotlin.collections.EmptySet')) return false;
-  if (set.cls === libraryClass('kotlin.collections.SingletonSet'))
-    return objectsEqual(frame, element, store.entries[0].key);
-  return findEntry(frame, store, element) !== undefined;
 }
 
 function addSetElements(frame: Frame, set: KObject, elements: Value): boolean {
@@ -1126,6 +1134,7 @@ function matchingViewEntry(frame: Frame, view: Value, element: Value, removing: 
 }
 
 function findMapValue(frame: Frame, store: KStore, value: Value): HashEntry | undefined {
+  if (store.isSingleton) return store.entries.find((entry) => valueEquals(frame, value, entry.value));
   return store.findOrdered((entry) => {
     frame.runtime.spend();
     return frame.runtime.withNativeRoots([entry.key, entry.value], () => objectsEqual(frame, value, entry.value));
@@ -1264,6 +1273,27 @@ function fill(frame: Frame, store: KStore, pairs: Value[]): KStore {
   return store;
 }
 
+function singletonStore(frame: Frame, key: Value, value: Value): KStore {
+  frame.runtime.allocate(frame, 2);
+  const store = newStore('insertion', 1);
+  store.isSingleton = true;
+  store.add({ key, value, hash: 0 });
+  return store;
+}
+
+function mapGetOrDefault(frame: Frame, map: Value, [key, fallback]: Value[]): Value {
+  const store = (map as KObject).store;
+  if (store && store.order !== 'sorted' && !isBuilt(map)) {
+    const entry = findEntry(frame, store, key);
+    return entry ? entry.value : fallback;
+  }
+  const owner = 'kotlin.collections.Map';
+  const value = callCollectionMember(frame, map, owner, 'get', [key]);
+  return value !== undefined || callCollectionMember(frame, map, owner, 'containsKey', [key]) === true
+    ? value
+    : fallback;
+}
+
 function setOfValues(frame: Frame, name: string, order: KStore['order'], values: Value[], capacity: number): KObject {
   const store = newStore(order, capacity);
   for (const value of values) putEntry(frame, store, value, undefined);
@@ -1285,11 +1315,12 @@ function defineFactories(): void {
     'arrayListOf()': (frame) => mutableListOfItems(frame, []),
     'arrayListOf(vararg T)': (frame, _receiver, [array]) => mutableListOfItems(frame, varargItems(array)),
     'setOf()': (frame) => setInstance(frame, 'EmptySet', newStore('insertion')),
-    'setOf(T)': (frame, _receiver, [element]) => setOfValues(frame, 'SingletonSet', 'insertion', [element], 1),
+    'setOf(T)': (frame, _receiver, [element]) =>
+      setInstance(frame, 'SingletonSet', singletonStore(frame, element, undefined)),
     'setOf(vararg T)': (frame, _receiver, [array]) => {
       const values = varargItems(array);
       if (values.length === 0) return setInstance(frame, 'EmptySet', newStore('insertion'));
-      if (values.length === 1) return setOfValues(frame, 'SingletonSet', 'insertion', values, 1);
+      if (values.length === 1) return setInstance(frame, 'SingletonSet', singletonStore(frame, values[0], undefined));
       return setOfValues(frame, 'LinkedHashSet', 'insertion', values, mapCapacity(values.length));
     },
     'emptySet()': (frame) => setInstance(frame, 'EmptySet', newStore('insertion')),
@@ -1308,8 +1339,11 @@ function defineFactories(): void {
       return setOfValues(frame, 'LinkedHashSet', 'insertion', values, mapCapacity(values.length));
     },
     'mapOf()': (frame) => newMap(frame, 'EmptyMap', newStore('insertion')),
-    'mapOf(Pair<K, V>)': (frame, _receiver, [pair]) =>
-      newMap(frame, 'SingletonMap', fill(frame, newStore('insertion', 1), [pair])),
+    'mapOf(Pair<K, V>)': (frame, _receiver, [pair]) => {
+      const [key, value] = pairParts(pair);
+      return newMap(frame, 'SingletonMap', singletonStore(frame, key, value));
+    },
+    'Map<out K, V>.getOrDefault(K, V)': mapGetOrDefault,
     'mapOf(vararg Pair<K, V>)': (frame, _receiver, [array]) => {
       const pairs = varargItems(array);
       if (pairs.length === 0) return newMap(frame, 'EmptyMap', newStore('insertion'));
