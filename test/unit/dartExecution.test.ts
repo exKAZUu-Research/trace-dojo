@@ -1278,6 +1278,15 @@ test.each([
   });
 });
 
+test.each(['-big', '~big'])('Dart charges the digits of each %s result to the operation budget', (expression) => {
+  const program = `void main() {
+  final big = BigInt.one << 1000000;
+  final values = List.generate(1500, (_) => ${expression});
+  print(values.length);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}

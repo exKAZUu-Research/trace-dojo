@@ -13,7 +13,10 @@ interface BigIntState {
 }
 
 function newBigInt(runtime: Runtime, value: bigint): DartObject {
-  checkSize(runtime, bitsOf(value));
+  const bits = bitsOf(value);
+  checkSize(runtime, bits);
+  // Every result's digits cost operations at the rate strings' characters do, which bounds the memory results take.
+  runtime.spend(Math.ceil(bits / 256));
   const object = new DartObject(runtime.links.classNamed('_BigIntImpl'), [], []);
   object.native = { value, values: () => [] } satisfies BigIntState as unknown as DartObject['native'];
   return object;
