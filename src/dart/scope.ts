@@ -26,6 +26,8 @@ interface StoredFlow {
 export class LocalVar {
   readonly id = nextLocalId++;
   unavailable: string | undefined;
+  /** Why the local cannot be written here, such as a primary constructor parameter in a field initializer. */
+  writeError: string | undefined;
   inPatternGuard = false;
   fieldReceiver?: LocalVar;
   hasAssignment = false;
@@ -64,6 +66,16 @@ export interface JumpTarget {
   labels: readonly string[];
   breakFlow?: Flow;
   continueFlow?: Flow;
+}
+
+/** A primary constructor parameter as field initializers see it: readable but never assignable. */
+export function primaryParameterInInitializer(variable: LocalVar): LocalVar {
+  const view = new LocalVar(variable.syntax, variable.name, variable.type, variable.slot, variable.owner, {
+    ...variable.options,
+    isFinal: true,
+  });
+  view.writeError = `プライマリコンストラクタの引数 ${variable.name} には、初期化子の中で代入できません。`;
+  return view;
 }
 
 export class LocalScope {

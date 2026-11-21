@@ -14,7 +14,7 @@ import type { CompiledFunction, FunctionSpec } from './callCompiler';
 import { type ClassInfo, type ConstructorImpl, type ConstructorInfo, type FieldMember } from './classes';
 import { at, type Compiled, type Eval, typeName } from './compilerBase';
 import { Frame, type TypeEnv } from './runtime';
-import { LocalScope } from './scope';
+import { LocalScope, primaryParameterInInitializer } from './scope';
 import type { Exec } from './statementCompiler';
 import {
   type DartType,
@@ -576,7 +576,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     if (!redirect) {
       steps.push(
         ...(declaration.isPrimary
-          ? this.compileFieldInitializers(cls, initializedFields)
+          ? this.compileFieldInitializersWithPrimaryParameters(cls, declaration, initializedFields)
           : this.compileFieldInitializersWithoutParameters(cls, initializedFields))
       );
     }
@@ -724,6 +724,24 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
       });
     }
     return steps;
+  }
+
+  private compileFieldInitializersWithPrimaryParameters(
+    cls: ClassInfo,
+    declaration: ConstructorDeclaration,
+    initializedFields: Set<string>
+  ): ((frame: Frame) => void)[] {
+    const scope = new LocalScope();
+    for (const parameter of [...declaration.parameters.positional, ...declaration.parameters.named]) {
+      const variable = this.findLocal(parameter.name);
+      if (variable) scope.names.set(parameter.name, primaryParameterInInitializer(variable));
+    }
+    this.fn.scopes.push(scope);
+    try {
+      return this.compileFieldInitializers(cls, initializedFields);
+    } finally {
+      this.fn.scopes.pop();
+    }
   }
 
   private compileFieldInitializersWithoutParameters(

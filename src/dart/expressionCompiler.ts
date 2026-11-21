@@ -1100,6 +1100,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   protected localWriter(variable: LocalVar, span: Span, readsCurrent = false): (frame: Frame, value: Value) => void {
     const { options, name } = variable;
     if (variable.unavailable) this.error(span, variable.unavailable);
+    if (variable.writeError) this.error(span, variable.writeError);
     if (variable.inPatternGuard) this.error(span, `パターン変数 ${name} には、when の中で代入できません。`);
     if (options.isConst) this.error(span, `const の変数 ${name} には代入できません。`);
     if (options.isFinal && options.isLate && (options.hasInitializer || this.flow.assigned.has(variable))) {

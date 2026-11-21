@@ -39,7 +39,7 @@ import { initializeField, lateFieldGetter, lateFieldSetter } from './lateFields'
 import { markCovariantParameters, MemberCompiler } from './memberCompiler';
 import { checkRepresentationCycles } from './representationCycles';
 import { Frame, type FunctionInfo, type Runtime, type TypeEnv } from './runtime';
-import type { FunctionContext } from './scope';
+import { type FunctionContext, primaryParameterInInitializer } from './scope';
 import { type GenExec, inheritsCovariance } from './statementCompiler';
 import {
   asInstanceOf,
@@ -865,23 +865,35 @@ export class Compiler extends MemberCompiler {
 
   /** The type of a field's or variable's initializer, compiled ahead of the body to infer the declaration's type. */
   private inferInitializerType(initializer: Expression, isStatic: boolean, cls: ClassInfo | undefined): DartType {
-    const primary = isStatic ? undefined : cls?.declaration?.primaryConstructor?.parameters;
     const compiled = this.inTemporaryFunction(isStatic, cls, () => {
-      // An instance field's initializer reads the primary constructor's parameters, as it runs in that constructor.
-      for (const parameter of primary ? [...primary.positional, ...primary.named] : []) {
-        const type = parameter.type ? this.resolveType(parameter.type) : DYNAMIC;
-        this.declareLocal(parameter, parameter.name, type, {
-          isFinal: true,
-          isLate: false,
-          isConst: false,
-          isParameter: true,
-          hasInitializer: true,
-        });
-      }
+      if (!isStatic && cls) this.declarePrimaryParametersForInference(cls);
       return this.compileExpression(initializer);
     });
     if (compiled.type.kind === 'null') return DYNAMIC;
     return compiled.type;
+  }
+
+  /** Declares the primary constructor's parameters, typed as its signature types them, as its field initializers see them. */
+  private declarePrimaryParametersForInference(cls: ClassInfo): void {
+    const primary = cls.declaration?.primaryConstructor;
+    const signature = primary && cls.constructors.get(primary.name ?? '')?.type;
+    if (!primary || !signature) return;
+    const typed = [
+      ...primary.parameters.positional.map((parameter, index) => [parameter, signature.positional[index]] as const),
+      ...primary.parameters.named.map(
+        (parameter) => [parameter, signature.named.find((named) => named.name === parameter.name)?.type] as const
+      ),
+    ];
+    for (const [parameter, type] of typed) {
+      const variable = this.declareLocal(parameter, parameter.name, type ?? DYNAMIC, {
+        isFinal: false,
+        isLate: false,
+        isConst: false,
+        isParameter: true,
+        hasInitializer: true,
+      });
+      this.fn.scopes.at(-1)?.names.set(parameter.name, primaryParameterInInitializer(variable));
+    }
   }
 
   private declareStaticField(

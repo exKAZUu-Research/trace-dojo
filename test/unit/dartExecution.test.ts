@@ -1379,6 +1379,28 @@ void main() {
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
 });
 
+test('Dart field initializers see primary constructor parameters typed as the constructor types them', () => {
+  const program = `class C(this.x) { final int x; final values = [x]; }
+class Box<T>({required this.value}) { final T value; final values = [value]; final int Function() f = () => 1; }
+class D(int n) { final int Function() read = () => n; }
+void main() {
+  List<int> values = C(4).values;
+  print([values, Box(value: 7).values.runtimeType, D(5).read()]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[[4], List<int>, 5]\n' });
+});
+
+test.each([
+  'final int value = (n = 3);',
+  'final int value = ++n;',
+  'final int Function() f = () { n = 5; return n; };',
+])('Dart rejects assigning a primary constructor parameter in the field initializer %s', (field) => {
+  expect(executeProgram('dart', `class C(int n) { ${field} }\nvoid main() { C(4); }`)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 0, message: 'プライマリコンストラクタの引数 n には、初期化子の中で代入できません。' }],
+  });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}
