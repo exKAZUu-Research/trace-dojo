@@ -657,9 +657,17 @@ function interfaceUpperBound(a: InterfaceType, b: InterfaceType): DartType {
   }
   for (const depth of [...byDepth.keys()].toSorted((x, y) => y - x)) {
     const candidates = byDepth.get(depth) as InterfaceType[];
-    if (candidates.length === 1) return candidates[0];
+    if (candidates.length === 1 && !isHiddenFromUpperBounds(candidates[0].cls)) return candidates[0];
   }
   return objectType();
+}
+
+/**
+ * Whether the SDK keeps a class out of upper bounds: everything implementing `EfficientLengthIterable` also implements
+ * `HideEfficientLengthIterable` at the same depth, so neither is ever the unique deepest candidate.
+ */
+function isHiddenFromUpperBounds(cls: ClassInfo): boolean {
+  return cls.name === 'EfficientLengthIterable' && cls.library === 'dart:core';
 }
 
 function allSupertypes(type: InterfaceType): InterfaceType[] {

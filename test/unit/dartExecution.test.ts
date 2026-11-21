@@ -1502,6 +1502,18 @@ test.each(['final int a = n!; final int b = n;', 'final int a = n!, b = n;'])(
   }
 );
 
+test('Dart upper bounds of lists and sets are Iterable', () => {
+  const program = `void main() {
+  final values = [<int>[], <int>{}];
+  values.add([1].where((x) => true));
+  print([values.runtimeType, [<String>['x'], <String>{'y'}].runtimeType, values.length]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[List<Iterable<int>>, List<Iterable<String>>, 3]\n',
+  });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}
