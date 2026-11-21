@@ -5747,6 +5747,32 @@ test('enum values remain reserved when the generated getter is installed', () =>
   ).toMatchObject({ kind: 'executed', stdout: '[E.a]\n' });
 });
 
+test('Dart arithmetic supplies a double context to the right operand of int operators', () => {
+  const program = `double area(int side) => side * 2 - 1;
+double take(double value) => value;
+class Box { final double size; Box(int n) : size = n * 2; }
+void main() {
+  int n = 3;
+  double sum = 1 + 2;
+  double product = n * 2;
+  double nested = 2 * 3 + 1;
+  double modulo = n % 2;
+  double? optional = n == 3 ? n * 2 : n + 1;
+  final List<double> values = [n * 2, n + 1];
+  double Function() f = () => n * 2;
+  double quotient = n / 9007199254740993;
+  print([sum, product, nested, modulo, optional, values, area(n), take(1 + 2), f(), Box(n).size, quotient]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[3.0, 6.0, 7.0, 1.0, 6.0, [6.0, 4.0], 5.0, 3.0, 6.0, 6.0, 3.3306690738754696e-16]\n',
+  });
+  for (const expression of ['1 + n', 'n + 9007199254740993', 'n << 2']) {
+    const invalid = `void main() { int n = 3; double d = ${expression}; print(d); }`;
+    expect(executeProgram('dart', invalid)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
 test('unrepresentable integer literals in double contexts produce compile errors', () => {
   const digits = '1' + '0'.repeat(400);
   for (const literal of [digits, '-' + digits]) {

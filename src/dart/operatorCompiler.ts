@@ -37,6 +37,8 @@ import {
 } from './types';
 import { Cell, type Value } from './values';
 
+const DOUBLE_CONTEXT_OPERATORS = new Set(['+', '-', '*', '%']);
+
 /** Operators, conditionals, casts, throws, and cascades. */
 export abstract class OperatorCompiler extends ExpressionCompiler {
   // code-gauge-allow functionCognitiveComplexity 25 -- Each branch is one of the cases Dart distinguishes for this construct.
@@ -135,10 +137,9 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     const leftNumeric = numericClassOf(left.type);
     if (leftNumeric) {
       const parameterContext = leftNumeric === 'double' ? interfaceType(coreTypes.num) : undefined;
-      const right = this.compileExpression(
-        expression.right,
-        context && leftNumeric === 'int' && isDoubleContext(context) ? undefined : parameterContext
-      );
+      const promotesRight =
+        context && leftNumeric === 'int' && isDoubleContext(context) && DOUBLE_CONTEXT_OPERATORS.has(operator);
+      const right = this.compileExpression(expression.right, promotesRight ? context : parameterContext);
       return this.numericOperator(operator, left, right, leftNumeric, span);
     }
     if (left.type.kind === 'dynamic') {
