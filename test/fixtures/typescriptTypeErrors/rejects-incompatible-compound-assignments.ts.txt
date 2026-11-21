@@ -1,0 +1,60 @@
+let item: number | string = 1;
+item += 'x';
+item = item + 'x';
+let literal: 1 | 2 = 1;
+literal += 1;
+literal *= 3;
+function narrowed(x: number | string) {
+  if (typeof x === 'number') x += 'x';
+}
+function field(o: {v: number | string}) {
+  if (typeof o.v === 'number') o.v += 'x';
+  if (typeof o['v'] === 'number') o['v'] += 'x';
+}
+function fieldLiteral(o: {v: 1 | 2; w: 1 | 2}) {
+  o.v += 3;
+  o['w'] *= 3;
+}
+class WiderSetter {
+  get value(): number { return 1; }
+  set value(input: number | string) { void input; }
+}
+class NarrowerSetter {
+  get value(): number | string { return 1; }
+  set value(input: number) { void input; }
+}
+let wide = new WiderSetter();
+wide.value += 'x';
+wide['value'] += 'x';
+let narrow = new NarrowerSetter();
+narrow.value += 'x';
+narrow['value'] += 'x';
+let logic: number | string = 0;
+logic ||= 'x';
+let coalesce: number | string | undefined = undefined;
+coalesce ??= 'x';
+let truthy: number | string = 1;
+truthy &&= 'x';
+class Accessor {
+  get value(): number | string { return Math.abs(1); }
+  set value(input: number | string | boolean) { void input; }
+}
+function dot(a: Accessor) {
+  if (typeof a.value === 'number') a.value += 'x';
+}
+function index(a: Accessor) {
+  if (typeof a['value'] === 'number') a['value'] += 'x';
+}
+class NarrowAccessor {
+  get value(): number | string { return Math.abs(1); }
+  set value(input: number) { void input; }
+}
+function narrowDot(a: NarrowAccessor) {
+  if (typeof a.value === 'string') a.value += 'x';
+}
+function narrowIndex(a: NarrowAccessor) {
+  if (typeof a['value'] === 'string') a['value'] += 'x';
+}
+function signed(a: Accessor) {
+  if (typeof a.value === 'number') (a.value) += 'x';
+}

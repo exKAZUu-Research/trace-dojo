@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 488 -- Keeps type data, cache keys, and canonical type constructors together.
+// code-gauge-allow-file fileNcss 492 -- Keeps type data, cache keys, and canonical type constructors together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { ExecutionBudget } from '../../interpreter/limits';
@@ -389,6 +389,11 @@ const literalPrimitives: Record<LiteralKind, Type> = {
 /** The primitive type of a literal's value. */
 export function primitiveOfLiteral(type: LiteralType): Type {
   return literalPrimitives[typeof type.value as LiteralKind];
+}
+
+export function baseTypeOfLiteral(type: Type): Type {
+  if (isTemplateOrStringMapping(type)) return stringType;
+  return type.kind === 'literal' && typeof type.value !== 'symbol' ? primitiveOfLiteral(type) : type;
 }
 
 export function isIntrinsic(type: Type, name: IntrinsicName): boolean {

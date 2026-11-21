@@ -38,6 +38,7 @@ import { TypeOperators } from './typeOperators';
 import {
   anonymousObject,
   anyType,
+  baseTypeOfLiteral,
   booleanType,
   type ConditionalType,
   createMapper,
@@ -1222,7 +1223,7 @@ export class Checker {
   widenLiteralForMessage(source: Type, target: Type): Type {
     const regular = regularOf(source);
     if (!isLiteralType(regular) || this.couldHaveTopLevelSingletonTypes(target)) return regular;
-    return regular.kind === 'union' ? unionOf(regular.types.map(baseTypeOfUnit)) : baseTypeOfUnit(regular);
+    return regular.kind === 'union' ? unionOf(regular.types.map(baseTypeOfLiteral)) : baseTypeOfLiteral(regular);
   }
 
   /** TypeScript's `typeCouldHaveTopLevelSingletonTypes`, which treats `boolean` itself as holding no literal. */
@@ -1267,9 +1268,4 @@ function isUnitType(type: Type): boolean {
 /** TypeScript's `isLiteralType`: a unit type or a union of them, `boolean` included. */
 function isLiteralType(type: Type): boolean {
   return type.kind === 'union' ? type.types.every((member) => isUnitType(member)) : isUnitType(type);
-}
-
-/** The primitive of a literal other than a unique symbol, which TypeScript's `getBaseTypeOfLiteralType` keeps. */
-function baseTypeOfUnit(type: Type): Type {
-  return type.kind === 'literal' && typeof type.value !== 'symbol' ? primitiveOfLiteral(type) : type;
 }

@@ -1,0 +1,11 @@
+(2,1): error TS2322: Type 'string' is not assignable to type 'number'.
+(8,30): error TS2322: Type 'string' is not assignable to type 'number'.
+(11,32): error TS2322: Type 'string' is not assignable to type 'number'.
+(12,35): error TS2322: Type 'string' is not assignable to type 'number'.
+(30,1): error TS2322: Type 'string' is not assignable to type 'number'.
+(31,1): error TS2322: Type 'string' is not assignable to type 'number'.
+(43,36): error TS2322: Type 'string' is not assignable to type 'number'.
+(46,39): error TS2322: Type 'string' is not assignable to type 'number'.
+(53,36): error TS2322: Type 'string' is not assignable to type 'never'.
+(56,39): error TS2322: Type 'string' is not assignable to type 'never'.
+(59,36): error TS2322: Type 'string' is not assignable to type 'number'.

@@ -10,12 +10,15 @@ import { nameSuggestionHint } from './spelling';
 import { arrayPatternElements, isOptionalChain, named, skipParentheses, withoutAssertions } from './syntax';
 import {
   anyType,
+  baseTypeOfLiteral,
   bigintType,
   errorType,
+  intersectionOf,
   isAnyLike,
   isPropertyKeyLiteral,
   type LiteralType,
   literalType,
+  mapType,
   neverType,
   numberType,
   type ObjectType,
@@ -139,11 +142,11 @@ export class AssignmentChecker {
     const isAuto = symbol !== undefined && this.isAutoTyped(symbol);
     const type = isAuto
       ? this.c.widen(assigned)
-      : this.c.flow.assignmentReduced(this.assignedAccessorType(target) ?? declared, assigned);
+      : this.c.flow.assignmentReduced(this.accessorReadType(target) ?? declared, assigned);
     this.c.flow.set(key, { type, assigned: true, evolving: entry?.evolving }, target);
   }
 
-  private assignedAccessorType(target: TreeNode): Type | undefined {
+  private accessorReadType(target: TreeNode): Type | undefined {
     if (target.type !== 'member_expression' && target.type !== 'subscript_expression') return undefined;
     return this.c.flow.probe(() =>
       this.c.silently(() => {
@@ -338,6 +341,8 @@ export class AssignmentChecker {
       if (targetType !== errorType) this.assignReference(skipParentheses(left), declared, result, operator !== '&&=');
       return result;
     }
+    const reference = skipParentheses(left);
+    const writeType = this.compoundWriteType(reference, declared, targetType);
     const valueType = this.c.expressions.check(right);
     const resultType = this.c.operators.binaryOperatorType(
       node,
@@ -352,9 +357,17 @@ export class AssignmentChecker {
       resultType !== errorType &&
       (operator === '+=' || this.c.operators.hasNumericOperands(left, right, targetType, valueType))
     )
-      this.c.expressions.checkAssignable(skipParentheses(left), resultType, declared);
-    this.assignReference(skipParentheses(left), declared, resultType, false);
+      this.c.expressions.checkAssignable(reference, resultType, mapType(writeType, baseTypeOfLiteral));
+    this.assignReference(reference, declared, resultType, false);
     return resultType;
+  }
+
+  private compoundWriteType(reference: TreeNode, declared: Type, read: Type): Type {
+    if (reference.type !== 'member_expression' && reference.type !== 'subscript_expression') return read;
+    const narrowed = this.narrowedType(reference);
+    return narrowed && narrowed !== this.accessorReadType(reference)
+      ? intersectionOf([declared, narrowed], this.c)
+      : declared;
   }
 
   private logicalAssignmentType(operator: string, targetType: Type, valueType: Type): Type {
