@@ -6861,6 +6861,17 @@ var initial = 1;
   ).toMatchObject({ kind: 'compileError' });
 });
 
+test('generic bounds reject cycles through extension type representations', () => {
+  for (const declaration of ['class C<T extends Id<T>> {}', 'void call<T extends Id<T>>() {}']) {
+    const source = `extension type Id<X>(X value) {} ${declaration} void main() { print('valid'); }`;
+    expect(executeProgram('dart', source)).toMatchObject({ kind: 'compileError' });
+    expect(executeProgram('dart', source.replace('X value', 'List<X> value'))).toMatchObject({
+      kind: 'executed',
+      stdout: 'valid\n',
+    });
+  }
+});
+
 test('extension type representations reject direct and transitive cycles', () => {
   for (const declarations of [
     'extension type E(E value) {}',

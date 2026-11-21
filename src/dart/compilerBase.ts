@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 560 -- Declaration scopes, types, and record shapes share the compiler environment.
+// code-gauge-allow-file fileNcss 565 -- Declaration scopes, types, and record shapes share the compiler environment.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ClassDeclaration, Span, TypeAliasDeclaration, TypeParameter, TypeSyntax } from './ast';
 import { type ClassInfo, type Member, memberTypeIn, scopedMemberName } from './classes';
@@ -268,10 +268,13 @@ export abstract class CompilerBase {
         if (parameter.bound) params[index].bound = this.resolveType(parameter.bound);
       }
     });
-    this.checkBoundCycles(params, syntax);
+    const pending = this.pendingBoundChecks;
+    this.checkBoundCycles(params, syntax, pending === undefined);
+    if (pending && params.length > 0) pending.push(() => this.checkBoundCycles(params, syntax, true));
   }
 
-  private checkBoundCycles(params: TypeParam[], syntax: TypeParameter[]): void {
+  // code-gauge-allow functionCognitiveComplexity 16 -- Detect type-parameter cycles before and after resolving representations.
+  private checkBoundCycles(params: TypeParam[], syntax: TypeParameter[], eraseRepresentations: boolean): void {
     const checked = new Set<TypeParam>();
     for (const [index, param] of params.entries()) {
       const chain = new Set<TypeParam>();
@@ -279,7 +282,11 @@ export abstract class CompilerBase {
       while (current && !checked.has(current)) {
         if (chain.has(current)) this.error(syntax[index], `型引数 ${param.name} の境界が循環しています。`);
         chain.add(current);
-        current = current.bound?.kind === 'typeParam' ? current.bound.param : undefined;
+        let bound: DartType | undefined = current.bound;
+        if (eraseRepresentations && bound?.kind === 'interface' && bound.cls.kind === 'extensionType') {
+          bound = eraseExtensionTypes(bound);
+        }
+        current = bound?.kind === 'typeParam' ? bound.param : undefined;
       }
       for (const member of chain) checked.add(member);
     }
