@@ -977,12 +977,19 @@ export abstract class ExpressionCompiler extends CompilerBase {
    * assignment of the whole record to report.
    */
   private convertRecordField(written: Compiled, expected: DartType, span: Span): Compiled {
-    const hole = containsInferenceHole(expected);
-    const instantiated = this.instantiateGeneric(written, expected, hole);
-    if (instantiated) return instantiated;
-    if (hole || isSubtype(written.type, expected)) return written;
+    const instantiated = this.instantiateInContext(written, expected);
+    if (instantiated !== written || containsInferenceHole(expected) || isSubtype(written.type, expected))
+      return instantiated;
     if (written.type.kind === 'dynamic') return this.coerce(written, expected, span, () => '');
     return this.implicitCallTearOff(written, expected, span) ?? written;
+  }
+
+  /**
+   * Instantiates a generic function value with the type arguments its context asks for. A value whose type is joined
+   * with others (a branch, a record field) needs this before the join, which would otherwise lose its signature.
+   */
+  protected instantiateInContext(compiled: Compiled, context: DartType | undefined): Compiled {
+    return (context && this.instantiateGeneric(compiled, context, containsInferenceHole(context))) ?? compiled;
   }
 
   readonly constantChecks: { span: Span; run: Eval }[] = [];

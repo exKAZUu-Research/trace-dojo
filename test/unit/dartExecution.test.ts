@@ -2131,6 +2131,18 @@ void main() { P p = P(0); print([p == .make(0), p != .new(1).me, 3 == .parse('3'
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[true, true, true]\n' });
 });
 
+test('Dart branches instantiate generic tear-offs from their context before joining', () => {
+  const program = `S id<S>(S x) => x;
+void main() {
+  int Function(int)? g;
+  int Function(int) a = true ? id : (int x) => x;
+  int Function(int) b = switch (1) { 1 => id, _ => (int x) => x };
+  int Function(int) c = g ?? id;
+  print([a(1), b(2), c(3)]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[1, 2, 3]\n' });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}

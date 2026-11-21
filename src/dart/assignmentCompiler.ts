@@ -1061,7 +1061,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
           whenFalse: unmatched,
         } = this.compileCasePattern(switchCase.pattern, patternSubject, switchCase.guard);
         whenFalse = unmatched;
-        const body = this.compileExpression(switchCase.body, context);
+        const body = this.instantiateInContext(this.compileExpression(switchCase.body, context), context);
         return { pattern, guard, body };
       });
       after = after ? Flow.join(after, this.flow) : this.flow;

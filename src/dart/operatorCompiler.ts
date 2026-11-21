@@ -270,7 +270,10 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     const left = this.compileExpression(expression.left, context ? makeNullable(context) : undefined);
     const { whenNull, whenNonNull } = this.nullBranches(left);
     this.flow = whenNull;
-    const right = this.compileExpression(expression.right, context ?? nonNullable(left.type));
+    const right = this.instantiateInContext(
+      this.compileExpression(expression.right, context ?? nonNullable(left.type)),
+      context
+    );
     this.flow = Flow.join(whenNonNull, this.flow);
     const leftRun = left.run;
     const rightRun = right.run;
@@ -296,10 +299,10 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
   ): Compiled {
     const { compiled: condition, flow } = this.compileCondition(expression.condition);
     this.flow = flow.whenTrue;
-    const then = this.compileExpression(expression.consequent, context);
+    const then = this.instantiateInContext(this.compileExpression(expression.consequent, context), context);
     const afterThen = this.flow;
     this.flow = flow.whenFalse;
-    const otherwise = this.compileExpression(expression.alternative, context);
+    const otherwise = this.instantiateInContext(this.compileExpression(expression.alternative, context), context);
     this.flow = Flow.join(afterThen, this.flow);
     const type =
       then.type.kind === 'never' && !then.type.nullable
