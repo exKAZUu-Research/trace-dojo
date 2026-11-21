@@ -184,13 +184,14 @@ export function nonNullable(type: DartType): DartType {
       return type;
     }
     case 'typeParam': {
-      if (type.promoted) return { ...type, nullable: false, promoted: nonNullable(type.promoted) };
-      if (type.nullable) return { kind: 'typeParam', param: type.param, nullable: false };
-      // `T` with a nullable bound promotes to `T & B` where B is the non-nullable bound.
-      if (isNullable(boundOf(type.param))) {
-        return { kind: 'typeParam', param: type.param, nullable: false, promoted: nonNullable(boundOf(type.param)) };
-      }
-      return type;
+      if (isNonNullable(type)) return type;
+      const bound = type.promoted ?? boundOf(type.param);
+      const promoted = isNonNullable(bound)
+        ? type.promoted
+        : bound.kind === 'dynamic' || bound.kind === 'void'
+          ? objectType()
+          : nonNullable(bound);
+      return { ...type, nullable: false, promoted };
     }
     default: {
       return type.nullable ? { ...type, nullable: false } : type;

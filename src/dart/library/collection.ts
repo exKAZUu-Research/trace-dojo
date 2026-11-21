@@ -529,11 +529,9 @@ class CastList<S, T> extends ListBase<T> {
 
 typedef ListMixin<E> = ListBase<E>;
 
-class CodeUnits extends ListBase<int> {
+class CodeUnits extends _UnmodifiableListBase<int> {
   external int get length;
-  set length(int value) => throw UnsupportedError("Cannot change the length of an unmodifiable list");
   external int operator [](int index);
-  void operator []=(int index, int value) => throw UnsupportedError("Cannot modify an unmodifiable list");
 }
 
 class _Uint8List extends ListBase<int> {
@@ -541,14 +539,32 @@ class _Uint8List extends ListBase<int> {
   set length(int value) => throw UnsupportedError("Cannot resize a fixed-length list");
   external int operator [](int index);
   external void operator []=(int index, int value);
+  external _Uint8List sublist(int start, [int? end]);
+  void add(int value) => throw UnsupportedError("Cannot add to a fixed-length list");
+  void addAll(Iterable<int> values) => throw UnsupportedError("Cannot add to a fixed-length list");
+  void insert(int index, int value) => throw UnsupportedError("Cannot insert into a fixed-length list");
+  void insertAll(int index, Iterable<int> values) => throw UnsupportedError("Cannot insert into a fixed-length list");
+  bool remove(Object? element) => throw _cannotRemove();
+  void removeWhere(bool Function(int) test) => throw _cannotRemove();
+  void retainWhere(bool Function(int) test) => throw _cannotRemove();
+  int removeAt(int index) => throw _cannotRemove();
+  int removeLast() => throw _cannotRemove();
+  void removeRange(int start, int end) => throw _cannotRemove();
+  void replaceRange(int start, int end, Iterable<int> values) => throw _cannotRemove();
+  void clear() => throw _cannotRemove();
+
+  void setAll(int index, Iterable<int> iterable) => setRange(index, iterable.length + index, iterable);
+  void fillRange(int start, int end, [int? fillValue]) {
+    RangeError.checkValidRange(start, end, length);
+    if (start == end) return;
+    if (fillValue == null) throw ArgumentError.notNull("fillValue");
+    for (int index = start; index < end; index++) this[index] = fillValue;
+  }
+  UnsupportedError _cannotRemove() => UnsupportedError("Cannot remove from a fixed-length list");
 }
 
-class UnmodifiableListView<E> extends ListBase<E> {
-  final Iterable<E> _source;
-  UnmodifiableListView(Iterable<E> source) : _source = source;
-  int get length => _source.length;
+abstract class _UnmodifiableListBase<E> extends ListBase<E> {
   set length(int newLength) => throw UnsupportedError("Cannot change the length of an unmodifiable list");
-  E operator [](int index) => _source.elementAt(index);
   void operator []=(int index, E value) => throw UnsupportedError("Cannot modify an unmodifiable list");
   set first(E value) => throw UnsupportedError("Cannot modify an unmodifiable list");
   set last(E value) => throw UnsupportedError("Cannot modify an unmodifiable list");
@@ -569,6 +585,13 @@ class UnmodifiableListView<E> extends ListBase<E> {
   void removeRange(int start, int end) => throw UnsupportedError("Cannot remove from an unmodifiable list");
   void replaceRange(int start, int end, Iterable<E> values) => throw UnsupportedError("Cannot remove from an unmodifiable list");
   void clear() => throw UnsupportedError("Cannot clear an unmodifiable list");
+}
+
+class UnmodifiableListView<E> extends _UnmodifiableListBase<E> {
+  final Iterable<E> _source;
+  UnmodifiableListView(Iterable<E> source) : _source = source;
+  int get length => _source.length;
+  E operator [](int index) => _source.elementAt(index);
 }
 
 // Maps the program implements

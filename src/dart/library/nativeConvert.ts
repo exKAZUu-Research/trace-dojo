@@ -459,6 +459,14 @@ define('_Uint8List.[]=', (runtime, receiver, [position, value]) => {
   return;
 });
 
+define('_Uint8List.sublist', (runtime, receiver, [start, end]) => {
+  const list = receiver as DartPackedList;
+  const [from, to] = conversionRange(runtime, BigInt(list.length), start, end);
+  runtime.allocate(to - from + 1);
+  const view = (list.contents as Uint8Array).subarray(from, to);
+  return new DartPackedList(list.cls, Uint8Array.from(view));
+});
+
 define('_utf8Encode', (runtime, _receiver, [input, start = 0n, end]) => {
   const source = stringArg(runtime, input, 'input');
   const [from, to] = conversionRange(runtime, BigInt(source.length), start, end);

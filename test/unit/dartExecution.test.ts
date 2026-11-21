@@ -5942,6 +5942,45 @@ void main() { print(add<int, int>(2)); show<Map<int, int>?>(null); show({1: 2});
   expect(executeProgram('dart', bounds)).toMatchObject({ kind: 'executed', stdout: '3\n{}\n{1: 2}\n' });
 });
 
+test('non-null promotions retain generic identity through nullable bounds', () => {
+  const source = `void check<T>(T? value) { if (value != null) throw value; }
+void printEven<T extends U, U extends int?>(T value) {
+  value ?? (throw StateError('null'));
+  print(value.isEven);
+}
+void printMap<T extends int?>(T? value) { print({?value: value.isEven}); }
+void main() {
+  try { check(2); } catch (error) { print(error); }
+  printEven<int, int?>(2);
+  printMap<int?>(2);
+  printMap<int?>(null);
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '2\ntrue\n{2: true}\n{}\n' });
+});
+
+test('super rejects null-aware property writes and accepts null-aware indexing', () => {
+  for (const operation of ['super?.x = 2', 'super?.x += 1', 'super?.x++', '++super?.x']) {
+    const source = `class A { int x = 1; } class B extends A { void run() { ${operation}; } } void main() {}`;
+    expect(executeProgram('dart', source)).toMatchObject({ kind: 'compileError' });
+  }
+  const source = `class A {
+  int value = 1;
+  int operator [](int i) => value;
+  void operator []=(int i, int next) { value = next; }
+}
+class B extends A {
+  void run() {
+    print(super?[0]);
+    super?[0] = 2;
+    super?[0] += 3;
+    print(super?[0]++);
+    print(super?[0]);
+  }
+}
+void main() { B().run(); }`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '1\n5\n6\n' });
+});
+
 test('super delegation uses the originating library of a forwarded constructor', () => {
   const aliases = `mixin M {}
 mixin N {}
@@ -6037,6 +6076,33 @@ void main() {
     kind: 'executed',
     stdout:
       '[[0, 255, 1], Uint8List, [255], Uint8List]\n[1000000, 120, [55357, 56832]]\nUnsupported operation: Cannot modify an unmodifiable list\n',
+  });
+});
+
+test('packed lists preserve SDK copy results and mutation restrictions', () => {
+  const source = `import 'dart:convert';
+void main() {
+  final bytes = utf8.encode('ab');
+  final slice = bytes.sublist(0);
+  final concatenated = bytes + bytes;
+  slice[0] = -1;
+  concatenated[0] = 300;
+  print([slice.runtimeType, slice, bytes, concatenated.runtimeType, concatenated]);
+  for (final list in [bytes, 'ab'.codeUnits]) {
+    try { list.removeWhere((value) { print(value); return false; }); } catch (error) { print(error); }
+    try { list.addAll([]); } catch (error) { print(error); }
+    try { list.setAll(0, []); } catch (error) { print(error); }
+  }
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[Uint8List, [255, 98], [97, 98], List<int>, [300, 98, 97, 98]]\n' +
+      'Unsupported operation: Cannot remove from a fixed-length list\n' +
+      'Unsupported operation: Cannot add to a fixed-length list\n' +
+      'Unsupported operation: Cannot remove from an unmodifiable list\n' +
+      'Unsupported operation: Cannot add to an unmodifiable list\n' +
+      'Unsupported operation: Cannot modify an unmodifiable list\n',
   });
 });
 
