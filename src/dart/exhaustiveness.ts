@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 477 -- Switch coverage shares type partitions and pattern coverage rules.
+// code-gauge-allow-file fileNcss 478 -- Switch coverage shares type partitions and pattern coverage rules.
 import type { Expression, Pattern, Span } from './ast';
 import { nullPatternComparison } from './astWalk';
 import type { ClassInfo, FieldMember } from './classes';
@@ -145,7 +145,12 @@ class ObjectSpaces {
   private refineFields(fields: readonly Space[], patternsAt: (index: number) => Pattern[]): Space[][] | undefined {
     let products: Space[][] = [[]];
     for (const [index, field] of fields.entries()) {
-      const options = this.refine([field], patternsAt(index));
+      const patterns = patternsAt(index);
+      const spaces =
+        field.kind === 'type' && patterns.some((pattern) => !coversAll(this.compiler, pattern, field.type))
+          ? expand(field.type, this.listCutoff, this.listDepth)
+          : [field];
+      const options = this.refine(spaces, patterns);
       if (products.length * options.length > MAX_SPACES) return undefined;
       products = products.flatMap((product) => options.map((option) => [...product, option]));
     }
@@ -271,13 +276,13 @@ function expandRecord(type: DartType & { kind: 'record' }, listCutoff: number, l
     ...type.positional.map((): string | undefined => undefined),
     ...type.named.map((field) => field.name),
   ];
-  let products: Space[][] = [[]];
+  const fields: Space[] = [];
   for (const fieldType of fieldTypes) {
     const options = expand(fieldType, listCutoff, listDepth);
-    if (products.length * options.length > MAX_SPACES) return [{ kind: 'type', type }];
-    products = products.flatMap((product) => options.map((option) => [...product, option]));
+    if (options.length === 0) return [];
+    fields.push(options.length === 1 ? options[0] : { kind: 'type', type: fieldType });
   }
-  return products.map((fields) => ({ kind: 'record', fields, names, type }));
+  return [{ kind: 'record', fields, names, type }];
 }
 
 function expandInterface(base: DartType & { kind: 'interface' }, listCutoff: number, listDepth: number): Space[] {
@@ -324,7 +329,8 @@ function expandList(type: DartType, elementType: DartType, cutoff: number, depth
   for (let length = 0; length <= cutoff; length++) {
     const space: ListSpace = { kind: 'list', type, elementType, length, hasLongerLengths: length === cutoff };
     if (options.length === 0 && length > 0) continue;
-    if (options.length <= 1 || options.length ** length > MAX_SPACES - spaces.length - cutoff + length) {
+    const hasPartitions = options.length > 1 || options[0]?.kind === 'record';
+    if (!hasPartitions || options.length ** length > MAX_SPACES - spaces.length - cutoff + length) {
       spaces.push(space);
       continue;
     }

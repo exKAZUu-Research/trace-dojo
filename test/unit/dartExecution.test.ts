@@ -6844,6 +6844,31 @@ test('extension type constructors reject super initializers and formals', () => 
   }
 });
 
+test('wide record switches partition fields that their patterns inspect', () => {
+  const program = `typedef Wide = (bool, bool, bool, bool, bool, bool, bool, bool, bool);
+int first(Wide value) => switch (value) {
+  (true, _, _, _, _, _, _, _, _) => 1,
+  (false, _, _, _, _, _, _, _, _) => 0,
+};
+int last(Wide value) => switch (value) {
+  (_, _, _, _, _, _, _, _, true) => 1,
+  (_, _, _, _, _, _, _, _, false) => 0,
+};
+int firstInList(List<Wide> values) => switch (values) {
+  [] => -1,
+  [(true, _, _, _, _, _, _, _, _), ...] => 1,
+  [(false, _, _, _, _, _, _, _, _), ...] => 0,
+};
+void main() {
+  final value = (true, false, false, false, false, false, false, false, false);
+  print([first(value), last(value), firstInList([value])]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[1, 0, 1]\n' });
+  expect(executeProgram('dart', program.replace('  (_, _, _, _, _, _, _, _, false) => 0,\n', ''))).toMatchObject({
+    kind: 'compileError',
+  });
+});
+
 test('constructor formals and tear-offs use inferred field types', () => {
   const declarations = `class Parent {
   var value = Later().value;
