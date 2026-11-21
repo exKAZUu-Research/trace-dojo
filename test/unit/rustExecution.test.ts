@@ -8799,3 +8799,19 @@ fn widen(x: u8) -> Result<i32, Problem> { let y: i32 = i32::try_from(x)?; Ok(y) 
   );
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'Ok(5)\n' });
 });
+
+test('a semicolon after a block-like expression discards its value', () => {
+  const program = rustMain(`
+    let mut v = vec![1];
+    let c = 1;
+    if c > 0 { v.pop() } else { None };
+    match c { 1 => 5, _ => 6 };
+    loop { break 5; };
+    println!("{:?}", v);`);
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '[]\n' });
+});
+
+test('a match on a reference to Infallible still needs an arm', () => {
+  const program = rustMain('', 'fn convert(value: &std::convert::Infallible) -> i32 { match value {} }');
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'compileError' });
+});

@@ -49,7 +49,7 @@ export abstract class ExpressionConverter extends MacroConverter {
         if (isLast && !terminated && (expr.kind === 'macro' || isBlockLike(expr))) tail = expr;
         else stmts.push({ kind: 'expr', expr, semi: terminated, span: this.span(expression) });
       } else if (child.type === 'empty_statement') {
-        stmts.push({ kind: 'empty', span: this.span(child) });
+        this.emptyStatement(stmts, child, children[index - 1]);
       } else if (isItem(child)) {
         const item = this.item(child);
         if (item) items.push(item);
@@ -60,6 +60,17 @@ export abstract class ExpressionConverter extends MacroConverter {
       }
     }
     return { kind: 'block', stmts, tail, span, endRow: node.endPosition.row, items };
+  }
+
+  /**
+   * A lone `;`. The grammar leaves the `;` after a block-like expression (`match x { .. };`) as a statement of its own,
+   * where rustc makes it end that expression's statement.
+   */
+  private emptyStatement(stmts: Stmt[], node: Node, previousNode: Node | undefined): void {
+    const previous = stmts.at(-1);
+    if (previous?.kind === 'expr' && !previous.semi && previousNode?.type === 'expression_statement')
+      previous.semi = true;
+    else stmts.push({ kind: 'empty', span: this.span(node) });
   }
 
   private letStmt(node: Node): Stmt {
