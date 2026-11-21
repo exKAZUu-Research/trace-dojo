@@ -1,5 +1,6 @@
-// code-gauge-allow-file fileNcss 982 -- Expression kinds share the same scope and evaluation rules.
+// code-gauge-allow-file fileNcss 990 -- Expression kinds share the same scope and evaluation rules.
 import { CompileError } from '../interpreter/diagnostics';
+import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import type {
   Annotation,
   Arguments as ArgumentsSyntax,
@@ -17,7 +18,7 @@ import type { ClassInfo, Member } from './classes';
 import { at, type Compiled, CompilerBase, type Eval, type ResolvedMember, typeName, valueIs } from './compilerBase';
 import type { Declaration, ExtensionInfo, GlobalVariable, TopLevelFunction, TypeAlias } from './environment';
 import { formatDouble, stringOf } from './format';
-import { concatenate } from './operators';
+import { BoundedStringParts } from './library/boundedStringParts';
 import type { Frame } from './runtime';
 import { type ConditionFlow, Flow, LocalVar, type StoredFlow } from './scope';
 import {
@@ -625,57 +626,38 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return { type: interfaceType(coreTypes.int), run: () => value, isConst: true, constValue: { value } };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Each branch is one of the cases Dart distinguishes for this construct.
-  // code-gauge-allow functionNcss 39 -- One case per form of the construct, which reads best together.
   private compileString(parts: StringPart[]): Compiled {
     const pieces: (string | Eval)[] = [];
-    let isConst = true;
-    let constText: string | undefined = '';
     for (const part of parts) {
       if (typeof part === 'string') {
         pieces.push(part);
-        if (constText !== undefined) constText += part;
         continue;
       }
       const compiled = this.compileExpression(part);
       if (compiled.type.kind === 'void') this.error(part, 'void の値は文字列に埋め込めません。');
       const constant = compiled.constValue?.value;
       if (compiled.isConst && compiled.constValue && isPrimitive(constant)) {
-        const text = primitiveText(constant);
-        pieces.push(text);
-        if (constText !== undefined) constText += text;
-        continue;
-      }
-      isConst = false;
-      constText = undefined;
-      pieces.push(compiled.run);
+        pieces.push(primitiveText(constant));
+      } else pieces.push(compiled.run);
     }
     const type = interfaceType(coreTypes.string);
+    const isConst = pieces.every((piece) => typeof piece === 'string');
+    const constText = isConst ? this.foldConstantString(pieces) : undefined;
     if (constText !== undefined) {
-      const text = constText;
-      return { type, run: () => text, isConst: true, constValue: { value: text } };
+      return { type, run: () => constText, isConst: true, constValue: { value: constText } };
     }
-    return {
-      type,
-      run: (frame) => {
-        let text = '';
-        for (const piece of pieces) {
-          if (typeof piece === 'string') {
-            text += piece;
-            continue;
-          }
-          const value = piece(frame);
-          frame.temporaries.push(value);
-          try {
-            text = concatenate(frame.runtime, text, stringOf(frame.runtime, value));
-          } finally {
-            frame.temporaries.pop();
-          }
-        }
-        return text;
-      },
-      isConst,
-    };
+    return { type, run: (frame) => interpolateString(frame, pieces), isConst };
+  }
+
+  private constantStringBudget: ExecutionBudget | undefined;
+
+  protected foldConstantString(parts: readonly string[]): string | undefined {
+    const length = parts.reduce((total, part) => total + part.length, 0);
+    if (length > LIMITS.maxStringLength) return undefined;
+    const budget = (this.constantStringBudget ??= new ExecutionBudget());
+    // Folded results stay reachable throughout compilation, which needs a tighter aggregate bound than runtime work.
+    budget.spend(Math.max(1, Math.ceil(length / 8)));
+    return parts.join('');
   }
 
   private compileListLiteral(
@@ -1645,6 +1627,24 @@ export abstract class ExpressionCompiler extends CompilerBase {
 }
 
 // Helpers
+
+function interpolateString(frame: Frame, pieces: readonly (string | Eval)[]): string {
+  const text = new BoundedStringParts(frame.runtime);
+  for (const piece of pieces) {
+    if (typeof piece === 'string') {
+      text.append(piece);
+      continue;
+    }
+    const value = piece(frame);
+    frame.temporaries.push(value);
+    try {
+      text.append(stringOf(frame.runtime, value));
+    } finally {
+      frame.temporaries.pop();
+    }
+  }
+  return text.text();
+}
 
 export function isPrimitive(value: Value): value is undefined | boolean | bigint | number | string {
   return value === undefined || typeof value !== 'object';

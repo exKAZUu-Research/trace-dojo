@@ -53,12 +53,9 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
         this.error(expression, `${typeName(value.type)} 型には ~ 演算子がありません。`);
       const constValue = value.constValue ? { value: negate(value.constValue.value, operator) } : undefined;
       return {
-        type:
-          value.type.kind === 'typeParam'
-            ? value.type
-            : interfaceType(
-                numeric === 'int' ? coreTypes.int : numeric === 'double' ? coreTypes.double : coreTypes.num
-              ),
+        type: interfaceType(
+          numeric === 'int' ? coreTypes.int : numeric === 'double' ? coreTypes.double : coreTypes.num
+        ),
         run: prefixEvaluation(run, operator, methodName, expression.row),
         isConst: value.isConst,
         constValue,
@@ -168,15 +165,17 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
       if (!isSubtype(right.type, interfaceType(coreTypes.string)) && right.type.kind !== 'dynamic') {
         this.error(expression.right, `${typeName(right.type)} 型の値は、String の + に渡せません。`);
       }
-      const constValue =
-        left.constValue && right.constValue
-          ? { value: (left.constValue.value as string) + (right.constValue.value as string) }
+      const leftText = left.constValue?.value;
+      const rightText = right.constValue?.value;
+      const folded =
+        typeof leftText === 'string' && typeof rightText === 'string'
+          ? this.foldConstantString([leftText, rightText])
           : undefined;
       return {
         type: interfaceType(coreTypes.string),
         run: stringAddition(left.run, right.run, right.type.kind === 'dynamic', span.row),
         isConst: left.isConst && right.isConst,
-        constValue,
+        constValue: folded === undefined ? undefined : { value: folded },
       };
     }
     return this.compileOperatorCall(left, operator, [expression.right], span);
@@ -238,14 +237,6 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     else if (leftNumeric === 'int' && rightNumeric === 'int') resultType = interfaceType(coreTypes.int);
     else if (leftNumeric === 'int' && rightNumeric === 'double') resultType = interfaceType(coreTypes.double);
     else resultType = interfaceType(coreTypes.num);
-    if (
-      ARITHMETIC.has(operator) &&
-      left.type.kind === 'typeParam' &&
-      sameType(left.type, right.type) &&
-      leftNumeric !== 'num'
-    ) {
-      resultType = left.type;
-    }
     const leftValue = left.constValue?.value;
     const rightValue = right.constValue?.value;
     const constValue =
@@ -451,7 +442,6 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
   }
 }
 
-const ARITHMETIC = new Set(['+', '-', '*', '%', 'remainder']);
 const BITWISE = new Set(['&', '|', '^', '<<', '>>', '>>>']);
 const INTEGER_OPERAND_METHODS = new Map([
   ['+', '_addFromInteger'],

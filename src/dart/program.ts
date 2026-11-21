@@ -341,6 +341,7 @@ export const LINKS: LibraryLinks = {
     runtime.constants.set(key, value);
     return value;
   },
+  constantIdentityKey,
   newThrow(_runtime, value) {
     return new DartThrow(value, undefined);
   },
@@ -352,9 +353,18 @@ export const LINKS: LibraryLinks = {
   isValueOf: (runtime, value, type) => valueIs(runtime, value, type),
 };
 
-function keyOf(runtime: Runtime, item: Value): string {
+function constantIdentityKey(runtime: Runtime, item: Value): string {
   if (item instanceof DartTypeValue) return JSON.stringify(constantTypeKey(runtime, item.type));
   if (item instanceof DartObject) return `#${item.identity}`;
+  if (typeof item === 'string') {
+    const { constantStrings } = runtime;
+    let id = constantStrings.get(item);
+    if (id === undefined) {
+      id = constantStrings.size;
+      constantStrings.set(item, id);
+    }
+    return `s${id}`;
+  }
   if (typeof item === 'number') return `d${Object.is(item, -0) ? '-0' : item}`;
   return `${typeof item}:${String(item)}`;
 }
@@ -363,7 +373,7 @@ function keyOf(runtime: Runtime, item: Value): string {
 function constantKey(runtime: Runtime, value: Value): string | undefined {
   if (!(value instanceof DartObject)) return undefined;
   if (value instanceof DartTypeValue) return undefined;
-  const keyOfValue = (item: Value): string => keyOf(runtime, item);
+  const keyOfValue = (item: Value): string => constantIdentityKey(runtime, item);
   const type = constantTypeKey(runtime, interfaceType(value.cls, value.typeArgs));
   if (value instanceof DartRecord) {
     return JSON.stringify([

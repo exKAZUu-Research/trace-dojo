@@ -909,7 +909,7 @@ export class Converter extends ExpressionConverter {
         type: typeNode ? this.convertType(typeNode) : undefined,
         binding: constructorParam.type === 'constructor_param' ? 'this' : 'super',
         isVar: tokens.has('var') || ownTokens.has('var') || undefined,
-        isFinal: tokens.has('final') || ownTokens.has('final'),
+        isFinal: true,
         isCovariant: tokens.has('covariant'),
         isRequired,
         defaultValue,

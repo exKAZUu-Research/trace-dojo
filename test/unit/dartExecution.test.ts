@@ -3112,6 +3112,24 @@ test('indexed updates validate both operator arguments before reading or writing
   }
 });
 
+test('dynamic indexed updates type-check the reader before entering its body', () => {
+  const program = `class Counter {
+    int operator [](int key) { print('read $key'); return 1; }
+    void operator []=(dynamic key, int value) { print('write $key $value'); }
+  }
+  void main() {
+    dynamic counter = Counter();
+    try { counter['x'] += 2; } catch (error) { print(error.runtimeType); }
+    try { counter['x']++; } catch (error) { print(error.runtimeType); }
+    counter[7] += 2;
+    counter['x'] = 2;
+  }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '_TypeError\n_TypeError\nread 7\nwrite 7 3\nwrite x 2\n',
+  });
+});
+
 test('call flow follows written argument order and checks closure bodies after the other arguments', () => {
   const declarations = `void show(int value, {int other = 0}) { print([value, other]); }
   T echo<T>(T value, {required T other}) { print([value, other]); return value; }
@@ -3522,6 +3540,89 @@ test('explicit extension applications check type arguments and the instantiated 
     expect(executeProgram('dart', `${declarations} void main() { print(${expression}); }`)).toMatchObject({
       kind: 'compileError',
     });
+  }
+});
+
+test('extension-type members use static owner arguments and separate method arguments', () => {
+  const program = `extension type Box<T>(List<T> values) {
+    Type get elementType => T;
+    bool accepts(Object? value) => value is T;
+    set first(T value) { values[0] = value; print(T); }
+    (Type, Type) describe<U>() => (T, U);
+  }
+  void main() {
+    final box = Box<int>([1]);
+    print(box.elementType);
+    print([box.accepts('x'), box.accepts(2)]);
+    box.first = 3;
+    print(box.values);
+    print(box.describe<String>());
+    final describe = box.describe;
+    print(describe<bool>());
+  }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'int\n[false, true]\nint\n[3]\n(int, String)\n(int, bool)\n',
+  });
+});
+
+test('mixin applications substitute inferred types for writable and late fields', () => {
+  const program = `mixin Items<T> {
+    final fixed = <T>[];
+    late var writable = <T>[];
+    var ordinary = <T>[];
+  }
+  class Numbers with Items<int> {}
+  class Words with Items<String> {}
+  void main() {
+    final numbers = Numbers();
+    final words = Words();
+    numbers.writable = [7];
+    words.ordinary = ['x'];
+    print([numbers.fixed.runtimeType, numbers.writable.runtimeType]);
+    print([words.ordinary.runtimeType, words.writable.runtimeType]);
+  }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[List<int>, List<int>]\n[List<String>, List<String>]\n',
+  });
+  expect(executeProgram('dart', program.replace('numbers.writable = [7]', "numbers.writable = ['bad']"))).toMatchObject(
+    {
+      kind: 'compileError',
+    }
+  );
+});
+
+test('initializing and super formals are final during constructor initialization', () => {
+  const program = `class A {
+    int x;
+    int y;
+    A(this.x) : y = x { x = 3; }
+  }
+  class B extends A {
+    int z;
+    B(super.x) : z = x { x = 4; }
+  }
+  void main() { print([A(1).x, B(2).x, B(2).z]); }`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[3, 4, 2]\n' });
+  for (const source of [program.replace('y = x', 'y = (x = 2)'), program.replace('z = x', 'z = x++')]) {
+    expect(executeProgram('dart', source)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
+test('numeric operators on bounded type parameters return numeric types', () => {
+  const declarations = [
+    'int add<T extends int>(T a, T b) => a+b;',
+    'double multiply<T extends double>(T a, T b) => a*b;',
+    'int negate<T extends int>(T a) => -a;',
+    'int complement<T extends int>(T a) => ~a;',
+  ];
+  const program = `${declarations.join('\n')}
+  void main() { print([add(2, 3), multiply(2.0, 3.0), negate(2), complement(2)]); }`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[5, 6.0, -2, -3]\n' });
+  for (const declaration of declarations) {
+    const invalid = program.replace(declaration, declaration.replace(/^\w+ /, 'T '));
+    expect(executeProgram('dart', invalid)).toMatchObject({ kind: 'compileError' });
   }
 });
 
@@ -4497,6 +4598,36 @@ test('map patterns cache lookups and check presence only for nullable values', (
   });
 });
 
+test('map patterns reject repeated constant identities, including aliases and records', () => {
+  for (const [first, second] of [
+    ["'id'", "'id'"],
+    ['id', "'i' + 'd'"],
+    ['(id,)', "('id',)"],
+  ]) {
+    const invalid = `const id = 'id';
+    void main() {
+      final map = <Object, int>{};
+      if (map case {${first}: var first, ${second}: var second}) print([first, second]);
+    }`;
+    expect(executeProgram('dart', invalid)).toMatchObject({ kind: 'compileError' });
+  }
+  const valid = `import 'dart:collection';
+  class Keys extends MapBase<num, int> {
+    Iterable<num> get keys => [0];
+    void clear() {}
+    int? remove(Object? key) => null;
+    void operator []=(num key, int value) {}
+    int? operator [](Object? key) {
+      print(key);
+      return key is int ? 1 : (key as double).isNegative ? 3 : 2;
+    }
+  }
+  void main() {
+    if (Keys() case {0: var a, 0.0: var b, -0.0: var c}) print([a, b, c]);
+  }`;
+  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '0\n0.0\n-0.0\n[1, 2, 3]\n' });
+});
+
 test('destructuring assignments enforce late final initialization when committing writes', () => {
   for (const assignment of ['(value,) = (2,)', '[value] = [2]']) {
     const program = `void main() {
@@ -4563,7 +4694,13 @@ test('list concatenation and slicing stay within the allocation budget', () => {
   }
   const program = `import 'dart:collection';
   class Input extends ListBase<int> {
-    int get length => 1;
+    final int count;
+    Input(this.count);
+    int get length {
+      print('length');
+      if (count < 0) throw StateError('length read');
+      return count;
+    }
     set length(int value) {}
     int operator [](int index) => 4;
     void operator []=(int index, int value) {}
@@ -4571,13 +4708,110 @@ test('list concatenation and slicing stay within the allocation budget', () => {
   }
   void main() {
     print([1, 2] + [3]);
-    print([1, 2] + Input());
+    print([1, 2] + Input(1));
+    print([1, 2] + Input(0));
+    try { print([1, 2] + Input(-1)); } catch (error) { print(error); }
     print([1, 2, 3].sublist(1, 2));
   }`;
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
-    stdout: '[1, 2, 3]\niterator\n[1, 2, 4]\n[2]\n',
+    stdout: '[1, 2, 3]\nlength\niterator\n[1, 2, 4]\nlength\n[1, 2]\nlength\nBad state: length read\n[2]\n',
   });
+});
+
+test('lastOrNull consumes one lazy cursor and retains the efficient-list shortcut', () => {
+  const program = `import 'dart:collection';
+  Iterable<int?> lazy(bool empty) sync* {
+    print('start');
+    if (empty) return;
+    yield 1;
+    print('next');
+    yield null;
+  }
+  class Input extends ListBase<int> {
+    int get length { print('length'); return 1; }
+    set length(int value) {}
+    int operator [](int index) => 8;
+    void operator []=(int index, int value) {}
+    int get last { print('last'); return 8; }
+    Iterator<int> get iterator => throw StateError('unused');
+  }
+  void main() {
+    print(lazy(false).lastOrNull);
+    print(lazy(true).lastOrNull);
+    print(Input().lastOrNull);
+  }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'start\nnext\nnull\nstart\nnull\nlength\nlast\n8\n',
+  });
+});
+
+test('elementAtOrNull uses indexed access when its iterable has efficient length', () => {
+  const program = `Iterable<int> lazy() sync* {
+    print('first'); yield 1;
+    print('second'); yield 2;
+    print('third'); yield 3;
+  }
+  void main() {
+    final mapped = [1, 2].map((n) { print('map $n'); return n; });
+    print(mapped.elementAtOrNull(1));
+    print(mapped.elementAtOrNull(5));
+    print(lazy().elementAtOrNull(1));
+    try { print(mapped.elementAtOrNull(-1)); } catch (error) { print(error.runtimeType); }
+  }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'map 2\n2\nnull\nfirst\nsecond\n2\nRangeError\n',
+  });
+});
+
+test('dynamic native calls and tear-offs validate named arguments before dispatch', () => {
+  const program = `void main() {
+    dynamic text = 'abc';
+    dynamic call = text.splitMapJoin;
+    try { print(text.splitMapJoin('z', onMatch: 1)); } catch (error) { print(error.runtimeType); }
+    try { print(text.splitMapJoin('z', onNonMatch: 1)); } catch (error) { print(error.runtimeType); }
+    try { print(call('z', onMatch: 1)); } catch (error) { print(error.runtimeType); }
+    print(call('z', onNonMatch: null));
+    print(text.splitMapJoin('b', onMatch: (Match m) => 'X'));
+  }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '_TypeError\n_TypeError\n_TypeError\nabc\naXc\n',
+  });
+});
+
+test('constant string construction keeps folding and evaluation within string limits', () => {
+  for (const join of [(name: string) => `${name} + ${name}`, (name: string) => `'$${name}$${name}'`]) {
+    const larger = Array.from({ length: 24 }, (_, index) => `const s${index + 1} = ${join(`s${index}`)};`);
+    const prefix = `const s0 = 'x';\n${larger.slice(0, 19).join('\n')}`;
+    const valid = `${prefix} void main() { print(s19.length); }`;
+    expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '524288\n' });
+    expect(executeProgram('dart', `${prefix}\n${larger.slice(19).join('\n')} void main() {}`)).toMatchObject({
+      kind: 'compileError',
+    });
+    const local = `${prefix} void main() { const result = ${join('s19')}; print(result.length); }`;
+    expect(executeProgram('dart', local)).toMatchObject({ kind: 'compileError' });
+    const runtime = `${prefix} void main() {
+      try { print(${join('s19')}); } catch (error) { print(error.runtimeType); }
+    }`;
+    expect(executeProgram('dart', runtime)).toMatchObject({ kind: 'executed', stdout: 'OutOfMemoryError\n' });
+  }
+});
+
+test('constant collections canonicalize repeated strings without conflating distinct values', () => {
+  const repeated = 's8,'.repeat(1024);
+  const declarations = Array.from({ length: 8 }, (_, index) => `const s${index + 1} = s${index} + s${index};`);
+  const program = `const s0 = 'abc';
+  ${declarations.join('\n')}
+  const list = [${repeated}];
+  const same = [${repeated}];
+  const different = ['other', ${'s8,'.repeat(1023)}];
+  const pair = (s8, label: s8);
+  const map = {s8: pair};
+  void main() { print([identical(list, same), identical(list, different), identical(map, const {s8: (s8, label: s8)})]); }`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[true, false, true]\n' });
 });
 
 test('growable list bulk writes check the live source length before reading elements', () => {

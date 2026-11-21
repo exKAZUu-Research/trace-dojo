@@ -631,7 +631,6 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
       steps.push((frame) => {
         (frame.receiver as DartObject).fields[fieldSlot] = (frame.locals[slot] as Cell).v;
       });
-      // Inside the initializer list and the body, the name refers to the parameter, which is final.
     }
     return steps;
   }

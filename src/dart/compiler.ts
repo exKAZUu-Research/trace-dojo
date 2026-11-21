@@ -505,7 +505,7 @@ export class Compiler extends MemberCompiler {
       application.fieldCount = application.superclass?.cls.fieldCount ?? 0;
       const mixinArgs = (application as ClassInfo & { mixinArgs?: readonly DartType[] }).mixinArgs ?? [];
       const map = new Map(mixin.typeParams.map((param, index) => [param, mixinArgs[index] ?? DYNAMIC]));
-      const slotMap = new Map<number, number>();
+      const fieldsByOriginalSlot = new Map<number, FieldMember>();
       for (const field of mixin.fields) {
         const copy: FieldMember = {
           ...field,
@@ -513,15 +513,14 @@ export class Compiler extends MemberCompiler {
           type: substitute(field.type, map),
           slot: application.fieldCount++,
         };
-        slotMap.set(field.slot, copy.slot);
+        fieldsByOriginalSlot.set(field.slot, copy);
         application.fields.push(copy);
       }
       for (const [name, member] of mixin.members)
-        application.members.set(name, this.copyMixinMember(member, application, map, slotMap));
+        application.members.set(name, this.copyMixinMember(member, application, map, fieldsByOriginalSlot));
       for (const [name, member] of mixin.setters)
-        application.setters.set(name, this.copyMixinMember(member, application, map, slotMap));
-      (application as ClassInfo & { mixinFieldSlots?: Map<number, number> }).mixinFieldSlots = slotMap;
-      this.declareForwardingConstructors(application, mixin, slotMap);
+        application.setters.set(name, this.copyMixinMember(member, application, map, fieldsByOriginalSlot));
+      this.declareForwardingConstructors(application, mixin, fieldsByOriginalSlot);
       application.resetCaches();
     }
   }
@@ -532,7 +531,11 @@ export class Compiler extends MemberCompiler {
    */
   // code-gauge-allow functionCognitiveComplexity 29 -- Each branch is one of the cases Dart distinguishes for this construct.
   // code-gauge-allow functionNcss 40 -- One case per form of the construct, which reads best together.
-  private declareForwardingConstructors(application: ClassInfo, mixin: ClassInfo, slotMap: Map<number, number>): void {
+  private declareForwardingConstructors(
+    application: ClassInfo,
+    mixin: ClassInfo,
+    fieldsByOriginalSlot: ReadonlyMap<number, FieldMember>
+  ): void {
     const superclass = application.superclass as InterfaceType;
     const superMap = new Map(
       superclass.cls.typeParams.map((param, index) => [param, superclass.args[index] ?? DYNAMIC])
@@ -563,7 +566,7 @@ export class Compiler extends MemberCompiler {
                       variable.initializer,
                       (from, to) => `${from} 型の値は、${to} 型のフィールド ${field.name} に代入できません。`
                     );
-                    writes.push({ slot: slotMap.get(field.slot) ?? field.slot, run: compiled.run });
+                    writes.push({ slot: fieldsByOriginalSlot.get(field.slot)?.slot ?? field.slot, run: compiled.run });
                   }
                 }
                 const fn = this.fn;
@@ -612,21 +615,13 @@ export class Compiler extends MemberCompiler {
     member: Member,
     application: ClassInfo,
     map: Map<TypeParam, DartType>,
-    slotMap: Map<number, number>
+    fieldsByOriginalSlot: ReadonlyMap<number, FieldMember>
   ): Member {
-    if (member.kind === 'field') {
-      return {
-        ...member,
-        owner: application,
-        type: substitute(member.type, map),
-        slot: slotMap.get(member.slot) ?? member.slot,
-      };
-    }
+    if (member.kind === 'field') return fieldsByOriginalSlot.get(member.slot) as FieldMember;
     const copy = { ...member, owner: application, type: substitute(member.type, map) } as Member;
     const late = this.lateFieldAccessors.get(member);
     if (late) {
-      const slot = slotMap.get(late.field.slot);
-      const field = application.fields.find((candidate) => candidate.slot === slot) as FieldMember;
+      const field = fieldsByOriginalSlot.get(late.field.slot) as FieldMember;
       (copy as MethodMember).impl = late.bind(field);
       return copy;
     }
@@ -783,6 +778,15 @@ export class Compiler extends MemberCompiler {
     } finally {
       this.currentClass = savedClass;
     }
+    this.setInferredFieldType(cls, name, type);
+    for (const { application, mixin } of this.pendingApplications) {
+      if (mixin.cls !== cls) continue;
+      const map = new Map(cls.typeParams.map((param, index) => [param, mixin.args[index] ?? DYNAMIC]));
+      this.setInferredFieldType(application, name, substitute(type, map));
+    }
+  }
+
+  private setInferredFieldType(cls: ClassInfo, name: string, type: DartType): void {
     for (const table of [cls.members, cls.setters]) {
       const member = table.get(name);
       if (member && member.kind !== 'method') member.type = type;

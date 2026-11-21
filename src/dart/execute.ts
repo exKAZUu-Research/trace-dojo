@@ -10,16 +10,11 @@ import { coreTypes, interfaceType } from './types';
 import { type Callable, DartList, type Value } from './values';
 
 export function executeDartProgram(source: string, input?: ProgramInput): ProgramExecution {
-  let compiled: CompiledProgram;
   try {
-    compiled = compileProgram(parseDart(source));
-  } catch (error) {
-    if (error instanceof CompileError) return { kind: 'compileError', diagnostics: error.diagnostics };
-    throw error;
-  }
-  try {
+    const compiled = compileProgram(parseDart(source));
     return { kind: 'executed', ...runProgram(newRuntime(input), compiled) };
   } catch (error) {
+    if (error instanceof CompileError) return { kind: 'compileError', diagnostics: error.diagnostics };
     if (error instanceof ExecutionLimitError) return { kind: 'limitExceeded', limit: error.limit };
     throw error;
   }

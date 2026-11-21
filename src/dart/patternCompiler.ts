@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 553 -- Pattern kinds share their type, rooting, and binding helpers.
+// code-gauge-allow-file fileNcss 565 -- Pattern kinds share their type, rooting, and binding helpers.
 import type { Expression, ListPatternElement, Pattern, RecordPatternField, Span } from './ast';
 import { nullPatternComparison } from './astWalk';
 import { CallCompiler } from './callCompiler';
@@ -631,7 +631,7 @@ export abstract class PatternCompiler extends CallCompiler {
     return instance?.args[0] ?? DYNAMIC;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 22 -- Type checks, lazy lookups, and subpatterns match in Dart's order.
+  // code-gauge-allow functionCognitiveComplexity 23 -- Type checks, lazy lookups, and subpatterns match in Dart's order.
   // code-gauge-allow functionNcss 34 -- One case per part of the pattern, matched in Dart's order.
   private mapPattern(
     pattern: Extract<Pattern, { kind: 'map' }>,
@@ -644,9 +644,13 @@ export abstract class PatternCompiler extends CallCompiler {
     const entries = pattern.entries.map((entry) => {
       const key = this.withConstContext(true, () => this.compileExpression(entry.key, keyType));
       if (!key.isConst) this.error(entry.key, 'マップのパターンのキーには、定数を書いてください。');
-      this.checkConstant(entry.key, key);
-      return { key: key.run, value: this.compilePatternInner(entry.value, valueType, options, variables) };
+      return {
+        key,
+        span: entry.key,
+        value: this.compilePatternInner(entry.value, valueType, options, variables),
+      };
     });
+    this.checkMapPatternKeys(pattern, entries);
     this.requireAssignable(mapType, matchedType, options, pattern);
     const typeCheck = this.typeTest(mapType, matchedType, () => true, true, options.mode);
     const nullableValueType = isPotentiallyNullable(valueType) ? this.runtimeType(valueType) : undefined;
@@ -655,13 +659,14 @@ export abstract class PatternCompiler extends CallCompiler {
         if (!typeCheck.match(frame, value, cache)) return false;
         const { runtime } = frame;
         for (const entry of entries) {
-          const key = entry.key(frame);
+          const key = entry.key.run(frame);
           const args = { positional: [key], named: undefined };
-          const path = cache.child(MAP_VALUE).child(key);
+          const identity = runtime.links.constantIdentityKey(runtime, key);
+          const path = cache.child(MAP_VALUE).child(identity);
           const found = path.read(frame, () => runtime.invoke(value, '[]', args, [], undefined));
           if (found === undefined) {
             if (!nullableValueType || !isPotentiallyNullable(nullableValueType(frame))) return false;
-            const presence = cache.child(MAP_CONTAINS_KEY).child(key);
+            const presence = cache.child(MAP_CONTAINS_KEY).child(identity);
             if (presence.read(frame, () => runtime.invoke(value, 'containsKey', args, [], undefined)) !== true)
               return false;
           }
@@ -671,6 +676,26 @@ export abstract class PatternCompiler extends CallCompiler {
       },
       irrefutable: false,
     };
+  }
+
+  private checkMapPatternKeys(span: Span, entries: readonly { key: Compiled; span: Span }[]): void {
+    if (entries.length === 1) {
+      this.checkConstant(entries[0].span, entries[0].key);
+      return;
+    }
+    if (this.isLibraryCode || entries.length === 0) return;
+    this.constantChecks.push({
+      span,
+      run: (frame) => {
+        const seen = new Set<string>();
+        const { runtime } = frame;
+        for (const entry of entries) {
+          const key = runtime.links.constantIdentityKey(runtime, entry.key.run(frame));
+          if (seen.has(key)) this.error(entry.span, 'マップのパターンに同じキーを 2 回書けません。');
+          seen.add(key);
+        }
+      },
+    });
   }
 
   private mapPatternTypes(pattern: Extract<Pattern, { kind: 'map' }>, matchedType: DartType): readonly DartType[] {

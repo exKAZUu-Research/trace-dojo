@@ -196,8 +196,7 @@ export abstract class MemberCompiler extends MetadataCompiler {
   }
 
   /**
-   * The type environment a method runs in: an extension's type arguments come first among the call's, and a class's
-   * come from the receiver.
+   * An extension or extension type takes owner arguments from the call. Ordinary classes take them from the receiver.
    */
   private methodTypeEnv(
     ownerClass: ClassInfo | undefined,
@@ -205,7 +204,7 @@ export abstract class MemberCompiler extends MetadataCompiler {
     ownTypeParams: readonly TypeParam[],
     isStatic: boolean
   ): (runtime: Runtime, receiver: Value, typeArgs: readonly DartType[]) => TypeEnv {
-    if (!ownerClass) {
+    if (!ownerClass || (!isStatic && ownerClass.kind === 'extensionType')) {
       return (_runtime, _receiver, typeArgs) => {
         const env = new Map<TypeParam, DartType>();
         for (const [index, param] of ownerParams.entries()) env.set(param, typeArgs[index] ?? DYNAMIC);

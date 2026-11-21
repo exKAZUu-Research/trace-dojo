@@ -1654,8 +1654,17 @@ extension IterableExtensions<T> on Iterable<T> {
     return null;
   }
   T? get lastOrNull {
-    if (isEmpty) return null;
-    return last;
+    if (this is EfficientLengthIterable) {
+      if (isEmpty) return null;
+      return last;
+    }
+    var iterator = this.iterator;
+    if (!iterator.moveNext()) return null;
+    T result;
+    do {
+      result = iterator.current;
+    } while (iterator.moveNext());
+    return result;
   }
   T? get singleOrNull {
     var iterator = this.iterator;
@@ -1667,6 +1676,10 @@ extension IterableExtensions<T> on Iterable<T> {
   }
   T? elementAtOrNull(int index) {
     RangeError.checkNotNegative(index, "index");
+    if (this is EfficientLengthIterable) {
+      if (index >= length) return null;
+      return elementAt(index);
+    }
     var iterator = this.iterator;
     for (var i = 0; i <= index; i++) {
       if (!iterator.moveNext()) return null;

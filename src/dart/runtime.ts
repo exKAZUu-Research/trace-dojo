@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 507 -- Keep runtime dispatch alongside its reified types, call frames, and roots.
+// code-gauge-allow-file fileNcss 516 -- Keep runtime dispatch alongside reified types, call frames, and roots.
 import { ExecutionBudget, ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
@@ -115,6 +115,7 @@ export interface LibraryLinks {
   newMap(runtime: Runtime, keyType: DartType, valueType: DartType, isConst: boolean): DartObject;
   /** The canonical copy of a constant, which equal constants share. */
   canonicalize(runtime: Runtime, value: Value): Value;
+  constantIdentityKey(runtime: Runtime, value: Value): string;
   /** The exception a `throw` raises, recording a stack trace in an `Error`. */
   newThrow(runtime: Runtime, value: Value): DartThrow;
   stackTraceOf(runtime: Runtime, error: DartThrow): Value;
@@ -159,6 +160,7 @@ export class Runtime implements TracedRuntime<Frame> {
   globals: Cell[] = [];
   /** Canonical constants by their structure, so that equal constants are identical. */
   readonly constants = new Map<string, Value>();
+  readonly constantStrings = new Map<string, number>();
   /** Structurally distinct constant types that share a display name. */
   readonly constantTypes = new Map<string, DartType[]>();
   /** The canonical tear-offs of top-level functions and static methods. */
@@ -543,7 +545,11 @@ export class Runtime implements TracedRuntime<Frame> {
     return new DartClosure(
       coreTypes.function,
       type,
-      (runtime, _receiver, args, typeArgs, callRow) => impl(runtime, receiver, args, typeArgs, callRow),
+      (runtime, _receiver, args, typeArgs, callRow) => {
+        if (args.isDynamic && member.nativeParameterNames)
+          runtime.checkNativeArguments(receiver, member, args, typeArgs);
+        return impl(runtime, receiver, args, typeArgs, callRow);
+      },
       receiver,
       [],
       {
@@ -595,7 +601,6 @@ export class Runtime implements TracedRuntime<Frame> {
     return args;
   }
 
-  /** A dynamic call of a native checks its positional arguments' types as a Dart method's parameters would. */
   private checkNativeArguments(
     receiver: Value,
     member: Member & { kind: 'method' },
@@ -603,13 +608,18 @@ export class Runtime implements TracedRuntime<Frame> {
     typeArgs: readonly DartType[]
   ): void {
     const type = instantiateFunction(this.memberTypeFor(receiver, member), typeArgs);
-    for (const [index, value] of args.positional.entries()) {
-      const expected = type.positional[index];
-      if (!expected || this.links.isValueOf(this, value, expected)) continue;
-      this.throwTypeError(
-        `type '${vmTypeString(this.runtimeTypeOf(value))}' is not a subtype of type '${vmTypeString(expected)}' of '${member.nativeParameterNames?.[index] ?? ''}'`
-      );
+    for (const [index, value] of args.positional.entries())
+      this.checkNativeArgument(value, type.positional[index], member.nativeParameterNames?.[index] ?? '');
+    for (const { name, type: expected } of type.named) {
+      if (args.named?.has(name)) this.checkNativeArgument(args.named.get(name), expected, name);
     }
+  }
+
+  private checkNativeArgument(value: Value, expected: DartType | undefined, name: string): void {
+    if (!expected || this.links.isValueOf(this, value, expected)) return;
+    this.throwTypeError(
+      `type '${vmTypeString(this.runtimeTypeOf(value))}' is not a subtype of type '${vmTypeString(expected)}' of '${name}'`
+    );
   }
 
   private throwClosureMismatch(closure: DartClosure, args: Arguments, typeArgs: readonly DartType[]): never {

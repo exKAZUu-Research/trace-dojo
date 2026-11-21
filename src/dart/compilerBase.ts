@@ -7,6 +7,7 @@ import type { Frame, FunctionInfo, Runtime, TypeEnv } from './runtime';
 import { Flow, type FunctionContext, LocalVar } from './scope';
 import { inferExtensionReceiver, inferTearOffTypes } from './typeInference';
 import {
+  asInstanceOf,
   boundOf,
   coreTypes,
   type DartType,
@@ -64,7 +65,7 @@ export interface ResolvedMember {
   /** The type of a field or getter, the parameter of a setter, or the signature of a method. */
   type: DartType;
   /** An extension member, or a member of an extension type, which runs on the receiver without dispatch. */
-  extension?: { ext: ExtensionInfo | undefined; typeArgs: DartType[]; onType?: DartType };
+  extension?: { ext: ExtensionInfo | undefined; typeArgs: readonly DartType[]; onType?: DartType };
 }
 
 /** Only the position of a span, without the fields of the node it belongs to. */
@@ -515,7 +516,10 @@ export abstract class CompilerBase {
     }
     if (member.kind === 'method') member = type.cls.covarianceFor(member)?.obligation ?? member;
     // An extension type's members run on its representation, which has no class to dispatch on.
-    const extension = member.owner.kind === 'extensionType' ? { ext: undefined, typeArgs: [] } : undefined;
+    const extension =
+      member.owner.kind === 'extensionType'
+        ? { ext: undefined, typeArgs: asInstanceOf(type, member.owner)?.args ?? [] }
+        : undefined;
     return { member, type: memberTypeIn(type, member), extension };
   }
 
