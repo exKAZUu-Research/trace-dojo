@@ -425,6 +425,9 @@ function checkMoveOutOfRef(
 ): void {
   if (adjust.autoref !== 'none') return;
   if (adjust.asIter && !isBuiltin(shallow(selfType), 'Box')) return;
+  // std's `impl Iterator for &mut I`: such a method on a borrowed iterator consumes a reborrow, advancing the iterator.
+  const throughMutOnly = adjust.derefs.length > 0 && adjust.derefs.every((step) => step === 'mutRef');
+  if (throughMutOnly && isBuiltin(normalize(shallow(selfType)), 'Iter')) return;
   c.requireTrait(selfType, 'Sized', expr.receiver.span);
   const throughRef = adjust.derefs.some((step) => step === 'ref' || step === 'mutRef');
   if (!throughRef) return;

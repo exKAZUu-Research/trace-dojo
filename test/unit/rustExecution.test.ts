@@ -8730,3 +8730,18 @@ test('a closure reborrowing a captured mutable reference for a by-value method c
     println!("{:?}", v);`);
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '[3, 4]\n' });
 });
+
+test('by-value iterator methods run on a borrowed iterator and advance it', () => {
+  const program = rustMain(
+    `
+    let v = vec![1, 2, 3, 4];
+    let mut it = v.iter();
+    let head = first_two(&mut it);
+    let mut letters = "ab cd".chars();
+    let word = first_word(&mut letters);
+    println!("{} {:?} {} {:?}", head, it.collect::<Vec<_>>(), word, letters.collect::<String>());`,
+    `fn first_two(it: &mut std::slice::Iter<i32>) -> i32 { it.take(2).sum() }
+fn first_word(it: &mut std::str::Chars) -> String { it.take_while(|c| *c != ' ').collect() }`
+  );
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '3 [3, 4] ab "cd"\n' });
+});
