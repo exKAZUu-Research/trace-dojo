@@ -6729,6 +6729,35 @@ var initial = 1;
   ).toMatchObject({ kind: 'compileError' });
 });
 
+test('constructor formals and tear-offs use inferred field types', () => {
+  const declarations = `class Parent {
+  var value = Later().value;
+  Parent(this.value);
+}
+class Child extends Parent { Child(super.value); }
+mixin M {}
+class Mixed = Parent with M;
+class Later { var value = 1; }
+`;
+  expect(
+    executeProgram(
+      'dart',
+      `${declarations} void main() {
+  print(Parent.new.runtimeType);
+  print(Child.new.runtimeType);
+  print(Mixed.new.runtimeType);
+  print([Mixed(2).value].runtimeType);
+}`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '(int) => Parent\n(int) => Child\n(int) => Mixed\nList<int>\n' });
+  expect(executeProgram('dart', `${declarations} void main() { Mixed('invalid'); }`)).toMatchObject({
+    kind: 'compileError',
+  });
+  expect(
+    executeProgram('dart', 'class Cycle { var value = Cycle(0).value; Cycle(this.value); } void main() {}')
+  ).toMatchObject({ kind: 'compileError' });
+});
+
 test('raw object pattern aliases infer invariant generic function bounds', () => {
   const source = `typedef Direct<X> = void Function<T extends X>(T);
 typedef Nested<X> = void Function<T extends List<X>>(T);

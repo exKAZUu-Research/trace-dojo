@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 410 -- Constructor declarations, initializer ordering, and delegation share the same checks.
+// code-gauge-allow-file fileNcss 431 -- Constructor types, initializer ordering, and delegation share the same declarations.
 import { AssignmentCompiler } from './assignmentCompiler';
 import type {
   Arguments as ArgumentsSyntax,
@@ -73,20 +73,20 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     if (cls.kind === 'mixin') this.error(declaration, 'mixin にはコンストラクタを書けません。');
     // An enum's generative constructors are constant whether or not they say so.
     const isConst = declaration.isConst || (cls.kind === 'enum' && declaration.constructorKind === 'generative');
-    const { positionalTypes, namedTypes } = this.constructorParameterTypes(cls, declaration.parameters);
-    const type = functionType(positionalTypes, cls.thisType, {
-      requiredCount: declaration.parameters.requiredCount,
-      named: declaration.parameters.named.map((parameter) => ({
-        name: parameter.argumentName,
-        type: namedTypes.get(parameter.argumentName) ?? DYNAMIC,
-        isRequired: parameter.isRequired,
-      })),
-    });
     const nativeKey = `${cls.name}.${name || 'new'}`;
+    const resolve = this.memoizeTypeInference(nativeKey, declaration, () =>
+      this.inDeclarationScope(cls, undefined, () =>
+        this.withIsolatedTypes(() =>
+          this.withTypeParams(cls.typeParams, () => this.constructorSignature(cls, declaration))
+        )
+      )
+    );
     const constructor: ConstructorInfo = {
       name,
       owner: cls,
-      type,
+      get type() {
+        return resolve().type;
+      },
       kind: declaration.constructorKind,
       isConst,
       row: declaration.row,
@@ -94,10 +94,46 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     };
     cls.constructors.set(name, constructor);
     if (!declaration.isExternal) {
-      this.deferredBodies.push(() =>
-        this.compileConstructor(cls, constructor, declaration, positionalTypes, namedTypes)
-      );
+      this.deferredBodies.push(() => {
+        const { positionalTypes, namedTypes } = resolve();
+        this.compileConstructor(cls, constructor, declaration, positionalTypes, namedTypes);
+      });
     }
+  }
+
+  protected memoizeTypeInference<T>(name: string, span: Span, infer: () => T): () => T {
+    let inferred: T | undefined;
+    let inferring = false;
+    return () => {
+      if (inferring) {
+        this.error(span, `${name} の型は、自分の初期値に依存しているので推論できません。型を書いてください。`);
+      }
+      if (inferred !== undefined) return inferred;
+      inferring = true;
+      try {
+        inferred = infer();
+        return inferred;
+      } finally {
+        inferring = false;
+      }
+    };
+  }
+
+  private constructorSignature(
+    cls: ClassInfo,
+    declaration: ConstructorDeclaration
+  ): { type: FunctionType; positionalTypes: DartType[]; namedTypes: Map<string, DartType> } {
+    const { parameters } = declaration;
+    const { positionalTypes, namedTypes } = this.constructorParameterTypes(cls, parameters);
+    const type = functionType(positionalTypes, cls.thisType, {
+      requiredCount: parameters.requiredCount,
+      named: parameters.named.map((parameter) => ({
+        name: parameter.argumentName,
+        type: namedTypes.get(parameter.argumentName) ?? DYNAMIC,
+        isRequired: parameter.isRequired,
+      })),
+    });
+    return { type, positionalTypes, namedTypes };
   }
 
   /** The types of a constructor's parameters: declared, the field's for `this.x`, or the superclass's for `super.x`. */

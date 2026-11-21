@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 551 -- Types and record shape metadata are resolved in the compiler environment.
+// code-gauge-allow-file fileNcss 560 -- Declaration scopes, types, and record shapes share the compiler environment.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ClassDeclaration, Span, TypeAliasDeclaration, TypeParameter, TypeSyntax } from './ast';
 import { type ClassInfo, type Member, memberTypeIn, scopedMemberName } from './classes';
@@ -427,6 +427,19 @@ export abstract class CompilerBase {
     this.withIsolatedTypes(() =>
       this.withoutFunctionTypeAnnotations(() => this.resolveTypeParamBounds(cls.typeParams, declaration.typeParameters))
     );
+  }
+
+  protected inDeclarationScope<T>(cls: ClassInfo | undefined, ext: ExtensionInfo | undefined, run: () => T): T {
+    const savedClass = this.currentClass;
+    const savedExtension = this.currentExtension;
+    this.currentClass = cls;
+    this.currentExtension = ext;
+    try {
+      return run();
+    } finally {
+      this.currentClass = savedClass;
+      this.currentExtension = savedExtension;
+    }
   }
 
   protected withIsolatedTypes<T>(run: () => T): T {

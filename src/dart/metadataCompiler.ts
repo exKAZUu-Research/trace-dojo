@@ -58,19 +58,6 @@ export abstract class MetadataCompiler extends ConstructorCompiler {
     this.inDeclarationScope(cls, ext, () => this.inTemporaryFunction(true, cls, run));
   }
 
-  protected inDeclarationScope<T>(cls: ClassInfo | undefined, ext: ExtensionInfo | undefined, run: () => T): T {
-    const savedClass = this.currentClass;
-    const savedExtension = this.currentExtension;
-    this.currentClass = cls;
-    this.currentExtension = ext;
-    try {
-      return run();
-    } finally {
-      this.currentClass = savedClass;
-      this.currentExtension = savedExtension;
-    }
-  }
-
   protected checkDeferredFunctionTypeAnnotations(): void {
     const checks = this.pendingTypeAnnotations;
     this.pendingTypeAnnotations = undefined;

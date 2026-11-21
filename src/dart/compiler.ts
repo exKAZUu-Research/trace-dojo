@@ -233,6 +233,9 @@ export class Compiler extends MemberCompiler {
       if (declaration.kind === 'variables') initializers.push(...this.declareTopLevelVariables(declaration));
     }
     const resolveFields = this.fieldInferences.map(({ cls, variable }) => this.prepareFieldInference(cls, variable));
+    for (const { cls } of classes) {
+      for (const constructor of cls.constructors.values()) void constructor.type;
+    }
     this.checkDeferredFunctionTypeAnnotations();
     for (const resolve of resolveFields) resolve();
     this.fieldInferences.length = 0;
@@ -556,7 +559,7 @@ export class Compiler extends MemberCompiler {
    * mixin's fields and passes its arguments on, as Dart's forwarding constructors do.
    */
   // code-gauge-allow functionCognitiveComplexity 30 -- Constructor forwarding and mixin field initialization share the slot mapping.
-  // code-gauge-allow functionNcss 42 -- Constructor forwarding and mixin field initialization share the slot mapping.
+  // code-gauge-allow functionNcss 44 -- Constructor forwarding and mixin field initialization share the slot mapping.
   private declareForwardingConstructors(
     application: ClassInfo,
     mixin: ClassInfo,
@@ -617,14 +620,19 @@ export class Compiler extends MemberCompiler {
     }
     for (const [name, constructor] of superclass.cls.constructors) {
       if (constructor.kind !== 'generative') continue;
-      const signature = substitute({ ...constructor.type, typeParams: [] }, superMap) as FunctionType;
       const superArgs = superclass.args;
       const params = application.typeParams;
+      let type: FunctionType | undefined;
       application.constructors.set(name, {
         name,
         owner: application,
         forwardedFrom: constructor.forwardedFrom ?? constructor.owner,
-        type: { ...signature, returnType: application.thisType },
+        get type() {
+          return (type ??= {
+            ...(substitute({ ...constructor.type, typeParams: [] }, superMap) as FunctionType),
+            returnType: application.thisType,
+          });
+        },
         kind: 'generative',
         isConst: constructor.isConst && mixin.fields.length === 0,
         row: undefined,
@@ -794,8 +802,7 @@ export class Compiler extends MemberCompiler {
 
   private prepareFieldInference(cls: ClassInfo, variable: FieldDeclaration['variables'][number]): () => void {
     const { name, initializer } = variable;
-    const inferred: { name: string; type: DartType } = { name, type: DYNAMIC };
-    this.inferTypeOnFirstUse(inferred, variable, () => {
+    const infer = this.memoizeTypeInference(name, variable, () => {
       const inherited = this.inheritedFieldType(cls, name);
       if (inherited || !initializer) return inherited ?? DYNAMIC;
       return this.inDeclarationScope(cls, undefined, () =>
@@ -804,12 +811,12 @@ export class Compiler extends MemberCompiler {
         )
       );
     });
-    const resolve = this.bindInferredFieldType(cls, name, () => inferred.type);
+    const resolve = this.bindInferredFieldType(cls, name, infer);
     const resolveApplications: (() => void)[] = [];
     for (const { application, mixin } of this.pendingApplications) {
       if (mixin.cls !== cls) continue;
       const map = new Map(cls.typeParams.map((param, index) => [param, mixin.args[index] ?? DYNAMIC]));
-      resolveApplications.push(this.bindInferredFieldType(application, name, () => substitute(inferred.type, map)));
+      resolveApplications.push(this.bindInferredFieldType(application, name, () => substitute(infer(), map)));
     }
     return () => {
       resolve();
@@ -890,12 +897,10 @@ export class Compiler extends MemberCompiler {
     const { initializer } = variable;
     if (initializer) {
       if (!declaration.type) {
-        this.inferTypeOnFirstUse(global, initializer, () =>
-          this.inGlobalTypeScope(global, () => {
-            field.type = this.inferInitializerType(initializer, true, cls);
-            return field.type;
-          })
-        );
+        this.inferTypeOnFirstUse(global, initializer, () => {
+          field.type = this.inferInitializerType(initializer, true, cls);
+          return field.type;
+        });
       }
       this.deferredBodies.push(() => {
         this.inGlobalTypeScope(global, () =>
@@ -1609,11 +1614,8 @@ export class Compiler extends MemberCompiler {
       this.declareName(variable.name, { kind: 'variable', global }, variable);
       const { initializer } = variable;
       if (!initializer) continue;
-      if (!declaredType) {
-        this.inferTypeOnFirstUse(global, initializer, () =>
-          this.inGlobalTypeScope(global, () => this.inferInitializerType(initializer, true, undefined))
-        );
-      }
+      if (!declaredType)
+        this.inferTypeOnFirstUse(global, initializer, () => this.inferInitializerType(initializer, true, undefined));
       initializers.push(() => {
         void global.type;
         this.compileGlobalInitializer(global, initializer, declaration.isConst, undefined);
@@ -1622,34 +1624,9 @@ export class Compiler extends MemberCompiler {
     return initializers;
   }
 
-  private inferTypeOnFirstUse(
-    target: { name: string; type: DartType },
-    initializer: Span,
-    infer: () => DartType
-  ): void {
-    let state: 'pending' | 'inferring' | 'done' = 'pending';
-    let inferred: DartType = DYNAMIC;
-    Object.defineProperty(target, 'type', {
-      configurable: true,
-      enumerable: true,
-      get: () => {
-        if (state === 'inferring') {
-          this.error(
-            initializer,
-            `${target.name} の型は、自分の初期値に依存しているので推論できません。型を書いてください。`
-          );
-        }
-        if (state === 'pending') {
-          state = 'inferring';
-          inferred = infer();
-          state = 'done';
-        }
-        return inferred;
-      },
-      set: (value: DartType) => {
-        inferred = value;
-        state = 'done';
-      },
+  private inferTypeOnFirstUse(global: GlobalVariable, initializer: Span, infer: () => DartType): void {
+    Object.defineProperty(global, 'type', {
+      get: this.memoizeTypeInference(global.name, initializer, () => this.inGlobalTypeScope(global, infer)),
     });
   }
 
