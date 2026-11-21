@@ -223,10 +223,10 @@ define(
 
 // Errors
 
-define('Error.stackTrace', () => {});
+define('Error.stackTrace', (runtime, receiver) => runtime.errorStackTrace(receiver));
 define('Error._safeToString', (runtime, _receiver, [value]) => safeToStringOf(runtime, value));
-define('Error.throwWithStackTrace', (runtime, _receiver, [error]) => {
-  throw runtime.links.newThrow(runtime, error);
+define('Error.throwWithStackTrace', (runtime, _receiver, [error, stackTrace]) => {
+  throw runtime.newThrow(error, stackTrace);
 });
 // The VM's stack traces show file paths and the VM's own frames, which the interpreter cannot reproduce.
 define('StackTrace.current', (runtime) =>

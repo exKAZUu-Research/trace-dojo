@@ -37,7 +37,7 @@ import {
 import { initializeField, lateFieldGetter, lateFieldSetter } from './lateFields';
 import { BoundedStringParts } from './library/boundedStringParts';
 import { markCovariantParameters, MemberCompiler } from './memberCompiler';
-import { type DartThrow, Frame, type FunctionInfo, type Runtime, type TypeEnv } from './runtime';
+import { Frame, type FunctionInfo, type Runtime, type TypeEnv } from './runtime';
 import type { FunctionContext } from './scope';
 import { type GenExec, inheritsCovariance } from './statementCompiler';
 import {
@@ -1683,14 +1683,6 @@ export class Compiler extends MemberCompiler {
     if (expression.kind === 'assign') return expression.operator === '=' && compiled.creates === true;
     if (expression.kind === 'cascade') return false;
     return expression.kind === 'call' || expression.kind === 'new';
-  }
-
-  newThrow(frame: Frame, value: Value): unknown {
-    return frame.runtime.links.newThrow(frame.runtime, value);
-  }
-
-  stackTraceValue(frame: Frame, error: DartThrow): Value {
-    return frame.runtime.links.stackTraceOf(frame.runtime, error);
   }
 
   makeSyncStarIterable(frame: Frame, elementType: DartType, body: GenExec): Value {

@@ -1578,9 +1578,6 @@ export abstract class ExpressionCompiler extends CompilerBase {
     context: DartType | undefined
   ): Compiled;
 
-  /** The exception that a `throw` of a value raises, recording the stack trace an `Error` keeps. */
-  protected abstract newThrow(frame: Frame, value: Value): unknown;
-
   /** Assigns through the last selector of a cascade section, whose receiver is already compiled. */
   protected abstract compileAssignmentTo(
     receiver: Compiled,

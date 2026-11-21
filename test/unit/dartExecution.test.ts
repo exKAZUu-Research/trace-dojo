@@ -4948,6 +4948,57 @@ test('dynamic native calls and tear-offs validate named arguments before dispatc
   });
 });
 
+test('errors retain their first throw trace and catches receive the trace of the current throw', () => {
+  const program = `void main() {
+    final error = StateError('ordinary');
+    print(error.stackTrace == null);
+    late StackTrace first;
+    try {
+      try { throw error; }
+      catch (caught, trace) {
+        first = trace;
+        print(identical(error.stackTrace, trace));
+        rethrow;
+      }
+    } catch (_, trace) { print(identical(first, trace)); }
+    try { Error.throwWithStackTrace(error, StackTrace.empty); }
+    catch (_, trace) {
+      print([identical(error.stackTrace, first), identical(trace, StackTrace.empty)]);
+    }
+    final explicit = StateError('explicit');
+    try { Error.throwWithStackTrace(explicit, StackTrace.empty); }
+    catch (_, trace) { print([identical(explicit.stackTrace, trace), identical(trace, StackTrace.empty)]); }
+    try { List<int>.empty()[0]; }
+    catch (error, trace) { if (error is Error) print(identical(error.stackTrace, trace)); }
+  }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'true\ntrue\ntrue\n[true, true]\n[true, true]\ntrue\n',
+  });
+});
+
+test('an exception in flight keeps a custom trace reachable through rethrow', () => {
+  const program = `class CustomTrace implements StackTrace {
+    final Turtle turtle;
+    CustomTrace(this.turtle);
+    String toString() => 'custom';
+  }
+  void fail() { Error.throwWithStackTrace(StateError('test'), CustomTrace(Turtle(1, 1))); }
+  void main() {
+    late Turtle restored;
+    try {
+      try { fail(); }
+      catch (_) { Turtle(3, 3).canMoveForward(); rethrow; }
+    } catch (_, trace) {
+      restored = (trace as CustomTrace).turtle;
+      restored.forward();
+    }
+  }`;
+  const finalTurtles = [{ x: 1, y: 2 }];
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', finalTurtles });
+  expect(traceProgram('dart', program, program)).toMatchObject({ finalTurtles });
+});
+
 test('constant string construction keeps folding and evaluation within string limits', () => {
   for (const join of [(name: string) => `${name} + ${name}`, (name: string) => `'$${name}$${name}'`]) {
     const larger = Array.from({ length: 24 }, (_, index) => `const s${index + 1} = ${join(`s${index}`)};`);

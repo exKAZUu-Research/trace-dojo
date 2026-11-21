@@ -5,7 +5,7 @@ import { CallCompiler } from './callCompiler';
 import { type Compiled, type Eval, typeName } from './compilerBase';
 import { promotionTarget, SHORTED } from './expressionCompiler';
 import { listElement, listLength } from './library/nativeSupport';
-import { DartThrow, type Frame } from './runtime';
+import type { Frame } from './runtime';
 import { Flow, type LocalVar } from './scope';
 import {
   asInstanceOf,
@@ -810,10 +810,7 @@ export abstract class PatternCompiler extends CallCompiler {
 
   /** Throws the error a refutable pattern in a declaration or an assignment raises when it fails to match. */
   protected throwPatternMismatch(frame: Frame): never {
-    throw new DartThrow(
-      frame.runtime.links.construct(frame.runtime, 'StateError', '', ['Pattern matching error']),
-      undefined
-    );
+    return frame.runtime.throwError('StateError', '', ['Pattern matching error']);
   }
 
   /** Compiles a pattern assignment `(a, b) = (b, a)`. */

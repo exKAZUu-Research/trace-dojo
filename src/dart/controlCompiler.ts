@@ -341,7 +341,7 @@ export abstract class ControlCompiler extends StatementCompiler {
       enter: (frame, error) => {
         frame.locals[thrownSlot] = new Cell(error as unknown as Value);
         if (exception) frame.locals[exception.slot] = new Cell(error.value);
-        if (stackTrace) frame.locals[stackTrace.slot] = new Cell(this.stackTraceValue(frame, error));
+        if (stackTrace) frame.locals[stackTrace.slot] = new Cell(error.stackTrace);
       },
       leave: (frame) => {
         for (const slot of [...slots, thrownSlot]) frame.locals[slot] = undefined;

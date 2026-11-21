@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 516 -- Keep runtime dispatch alongside reified types, call frames, and roots.
+// code-gauge-allow-file fileNcss 535 -- Keep runtime dispatch alongside reified types, call frames, and roots.
 import { ExecutionBudget, ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
@@ -116,9 +116,6 @@ export interface LibraryLinks {
   /** The canonical copy of a constant, which equal constants share. */
   canonicalize(runtime: Runtime, value: Value): Value;
   constantIdentityKey(runtime: Runtime, value: Value): string;
-  /** The exception a `throw` raises, recording a stack trace in an `Error`. */
-  newThrow(runtime: Runtime, value: Value): DartThrow;
-  stackTraceOf(runtime: Runtime, error: DartThrow): Value;
   /** The iterable a `sync*` function returns. */
   syncStarIterable(
     frame: Frame,
@@ -172,6 +169,7 @@ export class Runtime implements TracedRuntime<Frame> {
   private readonly setterForwarders = new WeakMap<Member, Member>();
   private readonly checkedMethods = new WeakMap<ClassInfo, Map<MethodMember, MethodMember>>();
   private readonly covariantFields = new WeakMap<FieldMember, boolean>();
+  private readonly errorTraces = new WeakMap<DartObject, Value>();
   /** The value of each constant expression evaluated so far, by the code that builds it. */
   readonly constantSites = new Map<unknown, Value>();
   allocatedSlots = 0;
@@ -247,7 +245,28 @@ export class Runtime implements TracedRuntime<Frame> {
   }
 
   throwError(className: string, constructorName: string, args: Value[], named?: Record<string, Value>): never {
-    throw new DartThrow(this.links.construct(this, className, constructorName, args, named), undefined);
+    throw this.newThrow(this.links.construct(this, className, constructorName, args, named));
+  }
+
+  newThrow(value: Value, stackTrace: Value = this.newStackTrace()): DartThrow {
+    if (value instanceof DartObject && !this.errorTraces.has(value)) {
+      const errorClass = this.links.classNamed('Error');
+      for (const cls of value.cls.superclassChain()) {
+        if (cls !== errorClass) continue;
+        this.errorTraces.set(value, stackTrace);
+        break;
+      }
+    }
+    return new DartThrow(value, stackTrace);
+  }
+
+  private newStackTrace(): DartObject {
+    this.allocate(1);
+    return new DartObject(this.links.classNamed('_StackTrace'), [], []);
+  }
+
+  errorStackTrace(value: Value): Value {
+    return value instanceof DartObject ? this.errorTraces.get(value) : undefined;
   }
 
   /** Throws a `TypeError` with the VM's message, as failed casts and null checks do. */
@@ -782,15 +801,9 @@ export class Runtime implements TracedRuntime<Frame> {
   // code-gauge-allow functionNcss 38 -- One case per kind of value garbage collection reaches.
   collectGarbage(): void {
     if (!this.world.hasTurtles) return;
-    const reached = new Set<unknown>();
-    const pending: Value[] = [];
-    const mark = (root: Value): void => {
-      const value = root instanceof LateInitializer ? root.closure : root;
-      if (value instanceof DartObject && !reached.has(value)) {
-        reached.add(value);
-        pending.push(value);
-      }
-    };
+    const reached = new Set<DartObject>();
+    const pending: DartObject[] = [];
+    const mark = (root: Value): void => markRoot(root, reached, pending);
     for (const frame of this.frames) {
       for (const cell of frame.locals) if (cell) mark(cell.v);
       for (const cell of frame.captured) mark(cell.v);
@@ -803,10 +816,11 @@ export class Runtime implements TracedRuntime<Frame> {
     for (const value of this.activeCallValues()) mark(value);
     while (pending.length > 0) {
       const object = pending.pop() as DartObject;
+      mark(this.errorTraces.get(object));
       for (const child of childrenOf(object)) mark(child);
     }
     const turtles = new Set<unknown>();
-    for (const object of reached) if ((object as DartObject).turtle) turtles.add((object as DartObject).turtle);
+    for (const object of reached) if (object.turtle) turtles.add(object.turtle);
     this.world.retain((turtle) => turtles.has(turtle));
   }
 
@@ -816,6 +830,19 @@ export class Runtime implements TracedRuntime<Frame> {
       yield* args.positional;
       if (args.named) yield* args.named.values();
     }
+  }
+}
+
+function markRoot(root: Value | DartThrow, reached: Set<DartObject>, pending: DartObject[]): void {
+  if (root instanceof DartThrow) {
+    markRoot(root.value, reached, pending);
+    markRoot(root.stackTrace, reached, pending);
+    return;
+  }
+  const value = root instanceof LateInitializer ? root.closure : root;
+  if (value instanceof DartObject && !reached.has(value)) {
+    reached.add(value);
+    pending.push(value);
   }
 }
 

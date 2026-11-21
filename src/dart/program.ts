@@ -345,12 +345,6 @@ export const LINKS: LibraryLinks = {
     return value;
   },
   constantIdentityKey,
-  newThrow(_runtime, value) {
-    return new DartThrow(value, undefined);
-  },
-  stackTraceOf(runtime) {
-    return LINKS.construct(runtime, '_StackTrace', '', []);
-  },
   syncStarIterable,
   listIterator,
   isValueOf: (runtime, value, type) => valueIs(runtime, value, type),

@@ -16,7 +16,7 @@ import type { CompiledFunction, FunctionSpec } from './callCompiler';
 import type { ClassInfo } from './classes';
 import { at, type Compiled, type Eval, typeName } from './compilerBase';
 import { type CompiledPattern, isRefutableSyntax, PatternCompiler } from './patternCompiler';
-import { type DartThrow, type Frame } from './runtime';
+import type { Frame } from './runtime';
 import { Flow, FunctionContext, type JumpTarget, type LocalVar, type StoredFlow } from './scope';
 import {
   coreTypes,
@@ -1122,8 +1122,6 @@ export abstract class StatementCompiler extends PatternCompiler {
 
   /** The slots holding the exceptions of the catch clauses being compiled, innermost last. */
   protected readonly rethrowSlots: number[] = [];
-
-  protected abstract stackTraceValue(frame: Frame, error: DartThrow): Value;
 
   private compileLabeled(statement: Extract<Statement, { kind: 'labeled' }>): Exec {
     const { labels, body } = statement;
