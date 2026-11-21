@@ -1132,7 +1132,7 @@ pub mod collections {
         pub type Keys<'a, K, V> = IterImpl<'a, &'a K, HashMapKeysShape>;
         pub type Values<'a, K, V> = IterImpl<'a, &'a V, HashMapValuesShape>;
         pub type IntoIter<K, V> = IterImpl<(K, V), HashMapIntoIterShape>;
-        pub struct Entry<'a, K, V>;
+        pub struct Entry<'a, K, V> { map: &'a mut HashMap<K, V> }
         pub use super::HashMap;
     }
     pub mod btree_map {
@@ -1141,7 +1141,7 @@ pub mod collections {
         pub type Keys<'a, K, V> = IterImpl<'a, &'a K, BTreeMapKeysShape>;
         pub type Values<'a, K, V> = IterImpl<'a, &'a V, BTreeMapValuesShape>;
         pub type IntoIter<K, V> = IterImpl<(K, V), BTreeMapIntoIterShape>;
-        pub struct OccupiedEntry<'a, K, V>;
+        pub struct OccupiedEntry<'a, K, V> { map: &'a mut BTreeMap<K, V> }
         pub use super::hash_map::Entry;
         pub use super::BTreeMap;
     }

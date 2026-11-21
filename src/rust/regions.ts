@@ -17,6 +17,8 @@ export type Layout =
   | { kind: 'opaque'; region: RVar; closure?: ClosureType; referenceObject?: boolean }
   | { kind: 'none' };
 
+type AdtLayout = Extract<Layout, { kind: 'adt' }>;
+
 export const NONE: Layout = { kind: 'none' };
 
 // code-gauge-allow functionNcss 31 -- Each Rust type contributes its own region layout.
@@ -154,8 +156,7 @@ export function relate(outlives: Outlives, sup: Layout, sub: Layout, invariant =
     sup.own.length === sub.own.length &&
     sup.args.length === sub.args.length
   ) {
-    for (const [index, region] of sup.own.entries()) both(region, sub.own[index]);
-    for (const [index, arg] of sup.args.entries()) relate(outlives, arg, sub.args[index], invariant);
+    relateAdt(outlives, sup, sub, invariant);
     return;
   }
   if (sup.kind === 'tuple' && sub.kind === 'tuple' && sup.elems.length === sub.elems.length) {
@@ -172,6 +173,94 @@ export function relate(outlives: Outlives, sup: Layout, sub: Layout, invariant =
   }
   // The shapes differ (a coercion, or a type the layouts do not follow): any borrow may flow anywhere.
   for (const a of regionsOf(sup)) for (const b of regionsOf(sub)) both(a, b);
+}
+
+function relateAdt(outlives: Outlives, sup: AdtLayout, sub: AdtLayout, invariant: boolean): void {
+  const fixed = invariantParams(sup.def);
+  for (const [index, region] of sup.own.entries()) {
+    outlives(region, sub.own[index]);
+    if (invariant || fixed.lifetimes.has(index)) outlives(sub.own[index], region);
+  }
+  for (const [index, arg] of sup.args.entries()) {
+    relate(outlives, arg, sub.args[index], invariant || fixed.params.has(index));
+  }
+}
+
+/** The lifetime and type parameters of a type, by index, that it is invariant in. */
+export interface InvariantParams {
+  lifetimes: Set<number>;
+  params: Set<number>;
+}
+
+const invariantParamsOf = new WeakMap<AdtDef, InvariantParams>();
+
+/**
+ * The parameters a type is invariant in: those its fields name behind a `&mut`, or as an argument that another type
+ * is invariant in. A value of the type lets its holder write through that `&mut`, so the regions of such a parameter
+ * must stay equal, not only outlive, when the value flows from one place to another.
+ */
+export function invariantParams(def: AdtDef): InvariantParams {
+  const known = invariantParamsOf.get(def);
+  if (known) return known;
+  // Types that refer to each other are invariant in what any of them is, so they are settled together.
+  const group: InvarianceGroup = new Map([[def, { lifetimes: new Set(), params: new Set() }]]);
+  for (let before = -1, after = groupSize(group); before !== after; before = after, after = groupSize(group)) {
+    for (const [member, result] of group) {
+      for (const variant of member.variants) {
+        for (const field of variant.fields) markInvariant(field.type, false, member, result, group);
+      }
+    }
+  }
+  for (const [member, result] of group) invariantParamsOf.set(member, result);
+  return group.get(def)!;
+}
+
+/** The types whose invariance is being settled, with what is known so far. */
+type InvarianceGroup = Map<AdtDef, InvariantParams>;
+
+function groupSize(group: InvarianceGroup): number {
+  let size = group.size;
+  for (const { lifetimes, params } of group.values()) size += lifetimes.size + params.size;
+  return size;
+}
+
+/** What is known of a type's invariance, adding it to the group being settled unless it is settled already. */
+function invarianceIn(group: InvarianceGroup, def: AdtDef): InvariantParams {
+  const settled = invariantParamsOf.get(def);
+  if (settled) return settled;
+  let pending = group.get(def);
+  if (!pending) {
+    pending = { lifetimes: new Set(), params: new Set() };
+    group.set(def, pending);
+  }
+  return pending;
+}
+
+/** Marks the parameters of `member` that a part of one of its fields' types names where it is invariant. */
+// code-gauge-allow functionCognitiveComplexity 18 -- One rule per kind of type that can name a parameter.
+function markInvariant(
+  type: Type,
+  invariant: boolean,
+  member: AdtDef,
+  result: InvariantParams,
+  group: InvarianceGroup
+): void {
+  const t = shallow(type);
+  if (t.kind === 'param') {
+    const index = invariant ? member.params.indexOf(t.param) : -1;
+    if (index !== -1) result.params.add(index);
+    return;
+  }
+  const inner = t.kind === 'adt' ? invarianceIn(group, t.def) : undefined;
+  const lifetimes = t.kind === 'ref' ? [t.lifetime] : t.kind === 'adt' ? (t.lifetimes ?? []) : [];
+  for (const [index, name] of lifetimes.entries()) {
+    const own = (member.lifetimeParams ?? []).indexOf(name ?? '');
+    if (own !== -1 && (invariant || inner?.lifetimes.has(index))) result.lifetimes.add(own);
+  }
+  for (const [index, child] of childTypes(t).entries()) {
+    const fixed = (t.kind === 'ref' && t.mutable) || inner?.params.has(index);
+    markInvariant(child, invariant || !!fixed, member, result, group);
+  }
 }
 
 /** Every region of a layout outlives `region`, as a reference to a value of the layout requires. */

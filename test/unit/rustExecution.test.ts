@@ -6951,3 +6951,26 @@ test('decides closure captures and traits after inference supplies the captured 
     diagnostics: [expect.objectContaining({ row: 3, message: expect.stringContaining('Fn のクロージャ') })],
   });
 });
+
+test.each([
+  ['HashMap::entry().or_insert', 'HashMap', 'm.entry(1).or_insert(&s);'],
+  ['BTreeMap::entry().or_insert_with', 'BTreeMap', 'm.entry(1).or_insert_with(|| &s);'],
+  ['a struct with a &mut field passed by value', 'HashMap', 'put(Slot { map: &mut m }, &s);'],
+  ['a struct with a lifetime behind &mut', 'HashMap', 'put_ref(Shared { map: &mut m }, &s);'],
+])('keeps a reference stored through %s borrowed while the map is used', (_name, map, store) => {
+  const items = `use std::collections::{BTreeMap, HashMap};
+struct Slot<'a, T> { map: &'a mut HashMap<i32, T> }
+fn put<T>(slot: Slot<T>, value: T) { slot.map.insert(1, value); }
+struct Shared<'a, 'b> { map: &'a mut HashMap<i32, &'b String> }
+fn put_ref<'a, 'b>(shared: Shared<'a, 'b>, value: &'b String) { shared.map.insert(1, value); }`;
+  const body = `    let s = String::from("a");\n    let mut m = ${map}::new();\n    ${store}\n`;
+  expect(executeProgram('rust', rustMain(`${body}    drop(s);\n    println!("{:?}", m);`, items))).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ row: 9, message: expect.stringContaining('借りられていて') })],
+  });
+  expect(executeProgram('rust', rustMain(`${body}    println!("{:?}", m);\n    drop(s);`, items))).toMatchObject({
+    kind: 'executed',
+    stdout: '{1: "a"}\n',
+  });
+  expect(executeProgram('rust', rustMain(`${body}    drop(s);`, items))).toMatchObject({ kind: 'executed' });
+});

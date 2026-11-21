@@ -1,5 +1,6 @@
 import {
   instantiate,
+  invariantParams,
   isNone,
   type Layout,
   layoutOf,
@@ -86,7 +87,11 @@ export class SignatureInstance {
       if (layout) relate(this.outlives, actual, layout, invariant);
       return;
     }
-    for (const [written, region] of ownRegions(t, actual)) edge(region, this.lifetime(this.inputName(written)));
+    for (const [written, region, fixed] of ownRegions(t, actual)) {
+      const declaredRegion = this.lifetime(this.inputName(written));
+      edge(region, declaredRegion);
+      if (fixed) this.outlives(declaredRegion, region);
+    }
     if (forEachPart(t, actual, invariant, (type, layout, inv) => this.bindInput(type, layout, inv))) return;
     for (const a of regionsOf(actual)) for (const b of this.declaredRegions(t)) edge(a, b);
   }
@@ -104,7 +109,7 @@ export class SignatureInstance {
     this.bindOutputPart(fn.ret, result, false, elided, inputs.flatMap(regionsOf));
   }
 
-  // code-gauge-allow functionCognitiveComplexity 23 -- Applies the lifetime elision rules.
+  // code-gauge-allow functionCognitiveComplexity 24 -- Applies the lifetime elision rules.
   private bindOutputPart(
     declared: Type,
     actual: Layout,
@@ -114,9 +119,9 @@ export class SignatureInstance {
   ): void {
     if (isNone(actual)) return;
     const t = shallow(declared);
-    const edge = (a: RVar, b: RVar): void => {
+    const edge = (a: RVar, b: RVar, fixed = false): void => {
       this.outlives(a, b);
-      if (invariant) this.outlives(b, a);
+      if (invariant || fixed) this.outlives(b, a);
     };
     if (t.kind === 'dyn' && t.objectLifetime === 'static' && actual.kind === 'opaque') {
       edge(this.staticRegion(), actual.region);
@@ -126,11 +131,11 @@ export class SignatureInstance {
       relate(this.outlives, this.params.get(t.param) as Layout, actual, invariant);
       return;
     }
-    for (const [written, region] of ownRegions(t, actual)) {
+    for (const [written, region, fixed] of ownRegions(t, actual)) {
       // A lifetime that elision cannot pick may be that of any input.
       const name = written && written !== "'_" ? written : elided;
       if (name === undefined) for (const a of inputRegions) edge(a, region);
-      else edge(this.lifetime(name), region);
+      else edge(this.lifetime(name), region, fixed);
     }
     const recurse = (type: Type, layout: Layout, inv: boolean): void =>
       this.bindOutputPart(type, layout, inv, elided, inputRegions);
@@ -171,13 +176,17 @@ export class SignatureInstance {
   }
 }
 
-/** The lifetimes a declared type names at its top level (a reference's, an ADT's) with the matching regions. */
-function ownRegions(t: Type, actual: Layout): [string | undefined, RVar][] {
-  if (t.kind === 'ref' && actual.kind === 'ref') return [[t.lifetime, actual.region]];
-  if (t.kind === 'dyn' && t.lifetime && actual.kind === 'opaque') return [[t.lifetime, actual.region]];
+/**
+ * The lifetimes a declared type names at its top level (a reference's, an ADT's) with the matching regions, and
+ * whether the type is invariant in each.
+ */
+function ownRegions(t: Type, actual: Layout): [string | undefined, RVar, boolean][] {
+  if (t.kind === 'ref' && actual.kind === 'ref') return [[t.lifetime, actual.region, false]];
+  if (t.kind === 'dyn' && t.lifetime && actual.kind === 'opaque') return [[t.lifetime, actual.region, false]];
   if (t.kind === 'adt' && actual.kind === 'adt' && actual.def === t.def) {
     const written = t.lifetimes ?? [];
-    return actual.own.map((region, index) => [written[index], region]);
+    const fixed = invariantParams(t.def).lifetimes;
+    return actual.own.map((region, index) => [written[index], region, fixed.has(index)]);
   }
   return [];
 }
@@ -197,7 +206,8 @@ function forEachPart(
     return true;
   }
   if (t.kind === 'adt' && actual.kind === 'adt' && actual.def === t.def) {
-    for (const [index, arg] of t.args.entries()) visit(arg, actual.args[index] ?? NONE, invariant);
+    const fixed = invariantParams(t.def).params;
+    for (const [index, arg] of t.args.entries()) visit(arg, actual.args[index] ?? NONE, invariant || fixed.has(index));
     return true;
   }
   if (t.kind === 'tuple' && actual.kind === 'tuple' && t.elems.length === actual.elems.length) {
