@@ -1,4 +1,4 @@
-import { kotlin } from './source';
+import { forwardingSelectorExtrema, kotlin } from './source';
 
 /** The extension functions of `kotlin.collections`, transcribed from Kotlin's standard library. */
 export const COLLECTION_FUNCTIONS_SOURCE = kotlin`
@@ -1432,8 +1432,7 @@ inline fun <K, V, R : Comparable<R>> Map<out K, V>.maxByOrNull(selector: (Map.En
 inline fun <K, V, R : Comparable<R>> Map<out K, V>.minByOrNull(selector: (Map.Entry<K, V>) -> R): Map.Entry<K, V>? = entries.minByOrNull(selector)
 inline fun <K, V, R : Comparable<R>> Map<out K, V>.maxBy(selector: (Map.Entry<K, V>) -> R): Map.Entry<K, V> = entries.maxBy(selector)
 inline fun <K, V, R : Comparable<R>> Map<out K, V>.minBy(selector: (Map.Entry<K, V>) -> R): Map.Entry<K, V> = entries.minBy(selector)
-inline fun <K, V, R : Comparable<R>> Map<out K, V>.maxOf(selector: (Map.Entry<K, V>) -> R): R = entries.maxOf(selector)
-inline fun <K, V, R : Comparable<R>> Map<out K, V>.minOf(selector: (Map.Entry<K, V>) -> R): R = entries.minOf(selector)
+${forwardingSelectorExtrema('Map<out K, V>', 'Map.Entry<K, V>', 'entries', 'K, V, ').join('\n')}
 
 inline fun <K, V> Map<out K, V>.sumOf(selector: (Map.Entry<K, V>) -> Int): Int {
     var sum = 0

@@ -217,6 +217,18 @@ fun main() {
     stdout: 'SECONDS\n[NANOSECONDS, MICROSECONDS, MILLISECONDS, SECONDS, MINUTES, HOURS, DAYS]\n7\n5s\n',
   },
   {
+    name: 'floating-point selectors on arrays, maps, and text',
+    source: `fun main() {
+    println(intArrayOf(1, 2).minOf { if (it == 1) Double.NaN else 1.0 })
+    println(arrayOf(1, 2).maxOfOrNull { if (it == 1) Float.NaN else 1.0f })
+    println(mapOf(1 to 1, 2 to 2).minOf { if (it.key == 1) Double.NaN else 1.0 })
+    println("ab".minOf { if (it == 'a') Double.NaN else 1.0 })
+    println(emptyMap<Int, Int>().maxOfOrNull { it.value.toDouble() })
+    println(arrayOf(3, 1).minOf { it.toString() })
+}`,
+    stdout: 'NaN\nNaN\nNaN\nNaN\nnull\n1\n',
+  },
+  {
     name: 'floating-point collection and selector extrema',
     source: `fun main() {
     println(listOf(1.0f, Float.NaN).min())

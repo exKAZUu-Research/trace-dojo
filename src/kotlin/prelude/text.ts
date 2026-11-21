@@ -1,4 +1,4 @@
-import { kotlin } from './source';
+import { forwardingSelectorExtrema, kotlin } from './source';
 
 /** `java.util.Locale`, which the prelude declares only for the overloads of `format` that take one. */
 export const UTIL_SOURCE = kotlin`
@@ -116,8 +116,7 @@ inline fun CharSequence.reduce(operation: (acc: Char, Char) -> Char): Char {
 inline fun <R> CharSequence.fold(initial: R, operation: (acc: R, Char) -> R): R = toList().fold(initial, operation)
 inline fun <R> CharSequence.flatMap(transform: (Char) -> Iterable<R>): List<R> = toList().flatMap(transform)
 inline fun <V> CharSequence.associateWith(valueSelector: (Char) -> V): Map<Char, V> = toList().associateWith(valueSelector)
-inline fun <R : Comparable<R>> CharSequence.maxOf(selector: (Char) -> R): R = toList().maxOf(selector)
-inline fun <R : Comparable<R>> CharSequence.minOf(selector: (Char) -> R): R = toList().minOf(selector)
+${forwardingSelectorExtrema('CharSequence', 'Char', 'toList()', '').join('\n')}
 inline fun CharSequence.partition(predicate: (Char) -> Boolean): Pair<String, String> {
     val first = StringBuilder()
     val second = StringBuilder()

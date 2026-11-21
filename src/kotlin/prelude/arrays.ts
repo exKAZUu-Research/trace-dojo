@@ -1,3 +1,5 @@
+import { forwardingSelectorExtrema } from './source';
+
 /**
  * The functions of arrays, generated for `Array<T>` and each primitive array as Kotlin's standard library generates
  * them. Most go through `asList()`, a list of the array's elements, which keeps their results and messages those of
@@ -121,8 +123,7 @@ function functionsOf(kind: ArrayKind): string {
     `inline fun ${g('R : Comparable<R>')}${r}.minBy(selector: (${e}) -> R): ${e} { if (isEmpty()) throw NoSuchElementException(); return asList().minBy(selector) }`,
     `inline fun ${g('R : Comparable<R>')}${r}.maxByOrNull(selector: (${e}) -> R): ${e}? = asList().maxByOrNull(selector)`,
     `inline fun ${g('R : Comparable<R>')}${r}.minByOrNull(selector: (${e}) -> R): ${e}? = asList().minByOrNull(selector)`,
-    `inline fun ${g('R : Comparable<R>')}${r}.maxOf(selector: (${e}) -> R): R = asList().maxOf(selector)`,
-    `inline fun ${g('R : Comparable<R>')}${r}.minOf(selector: (${e}) -> R): R = asList().minOf(selector)`,
+    ...forwardingSelectorExtrema(r, e, 'asList()', kind.typeParameters),
     `inline fun ${g('R : Comparable<R>')}${r}.sortedBy(crossinline selector: (${e}) -> R?): List<${e}> = asList().sortedBy(selector)`,
     `inline fun ${g('R : Comparable<R>')}${r}.sortedByDescending(crossinline selector: (${e}) -> R?): List<${e}> = asList().sortedByDescending(selector)`,
     `fun ${g()}${r}.sortedWith(comparator: Comparator<in ${e}>): List<${e}> = asList().sortedWith(comparator)`,
