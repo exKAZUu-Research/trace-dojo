@@ -488,9 +488,10 @@ function defineLists(): void {
     list.listBuilderCapacity = size;
     return list;
   });
-  defineNative('kotlin.collections.ListBuilder.build()', (_frame, list) => {
-    (list as KObject).native = { isBuilt: true };
-    return list;
+  defineNative('kotlin.collections.ListBuilder.build()', (frame, list) => {
+    const builder = list as KObject;
+    builder.native = { isBuilt: true };
+    return indexedSize(builder) === 0 ? emptyCollection(frame, 'ListBuilder') : builder;
   });
   for (const cls of ['ArrayList', 'ArrayDeque']) {
     for (const [signature, initialize] of constructors) {
@@ -1347,13 +1348,14 @@ function setOfValues(frame: Frame, name: string, order: KStore['order'], values:
   return setInstance(frame, name, store);
 }
 
-function emptyCollection(frame: Frame, name: 'EmptyList' | 'EmptySet' | 'EmptyMap'): KObject {
+function emptyCollection(frame: Frame, name: 'EmptyList' | 'EmptySet' | 'EmptyMap' | 'ListBuilder'): KObject {
   const cls = libraryClass(`kotlin.collections.${name}`);
   const existing = frame.runtime.objects.get(cls);
   if (existing) return existing;
   let empty: KObject;
-  if (name === 'EmptyList') {
+  if (name === 'EmptyList' || name === 'ListBuilder') {
     empty = newList(frame, name, []);
+    if (name === 'ListBuilder') empty.native = { isBuilt: true };
   } else {
     const store = newStore('insertion');
     empty = name === 'EmptySet' ? setInstance(frame, name, store) : newMap(frame, name, store);

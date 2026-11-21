@@ -75,6 +75,34 @@ fun main() {
 /** Programs with the output of Kotlin 2.4.21 on the JVM (Java 25), which the interpreter must reproduce exactly. */
 test.each([
   {
+    name: 'empty built lists reuse a singleton and close the original builder',
+    source: `fun main() {
+    val first = buildList<Int> {}
+    val second = buildList<Int> {}
+    println(first === second)
+    var leaked: MutableList<Int>? = null
+    val cleared = buildList<Int> {
+        leaked = this
+        add(1)
+        clear()
+    }
+    println(first === cleared)
+    println(first === emptyList<Int>())
+    println(cleared === leaked)
+    try {
+        leaked!!.add(2)
+    } catch (e: UnsupportedOperationException) {
+        println("original closed")
+    }
+}`,
+    stdout: `true
+true
+false
+false
+original closed
+`,
+  },
+  {
     name: 'map builder equality reads the other map’s entries without calling get',
     source: `class ObservedMap : Map<Int, String> by mapOf(1 to "one", 2 to "two") {
     override fun get(key: Int): String? {
