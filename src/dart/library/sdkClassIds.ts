@@ -53,6 +53,8 @@ export const SDK_CLASS_IDS: ReadonlyMap<string, ReadonlyMap<string, number>> = n
       ['MappedListIterable', 722],
       ['Match', 230],
       ['NoSuchMethodError', 205],
+      ['NonNullsIterable', 744],
+      ['NonNullsIterator', 745],
       ['Null', 172],
       ['Object', 45],
       ['OutOfMemoryError', 210],

@@ -8725,3 +8725,70 @@ test('Dart native list callbacks consume the shared execution budget', () => {
     limit: expect.stringMatching(/^(operations|time)$/),
   });
 });
+
+test('Dart nonNulls preserves its lazy view identity and iterator states', () => {
+  const program = `import 'dart:collection';
+class Source extends Iterable<int?> {
+  Iterator<int?> get iterator { print('iterator'); return Cursor(); }
+}
+class Cursor implements Iterator<int?> {
+  int index = 0;
+  bool moveNext() {
+    index++;
+    if (index == 3) throw 'stop';
+    return index < 6;
+  }
+  int? get current {
+    print(['read', index]);
+    return index == 2 || index == 4 ? index : null;
+  }
+}
+void show(Iterator<int> cursor) {
+  try { print(cursor.current); } catch (error) { print(error); }
+}
+void main() {
+  final filtered = Source().nonNulls;
+  print([filtered.runtimeType, filtered.runtimeType.hashCode, filtered.first]);
+  final cursor = filtered.iterator;
+  print([cursor.runtimeType, cursor.runtimeType.hashCode]);
+  show(cursor);
+  print(cursor.moveNext());
+  show(cursor);
+  try { cursor.moveNext(); } catch (error) { print(error); }
+  show(cursor);
+  print(cursor.moveNext());
+  show(cursor);
+  print(cursor.moveNext());
+  show(cursor);
+  final values = <int?>[null];
+  final live = values.nonNulls;
+  print(live.isEmpty);
+  values.add(4);
+  print([live.isNotEmpty, live.toList()]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'iterator\n' +
+      '[read, 1]\n' +
+      '[read, 2]\n' +
+      '[NonNullsIterable<int>, 325788693, 2]\n' +
+      'iterator\n' +
+      '[NonNullsIterator<int>, 540098490]\n' +
+      'Bad state: No element\n' +
+      '[read, 1]\n' +
+      '[read, 2]\n' +
+      'true\n' +
+      '2\n' +
+      'stop\n' +
+      'Bad state: No element\n' +
+      '[read, 4]\n' +
+      'true\n' +
+      '4\n' +
+      '[read, 5]\n' +
+      'false\n' +
+      'Bad state: No element\n' +
+      'true\n' +
+      '[true, [4]]\n',
+  });
+});

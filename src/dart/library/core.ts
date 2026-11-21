@@ -1856,10 +1856,42 @@ class IndexedIterator<T> implements Iterator<(int, T)> {
 }
 
 extension NullableIterableExtensions<T extends Object> on Iterable<T?> {
-  Iterable<T> get nonNulls sync* {
-    for (var element in this) {
-      if (element != null) yield element;
+  Iterable<T> get nonNulls => NonNullsIterable<T>(this);
+}
+
+class NonNullsIterable<T extends Object> extends Iterable<T> {
+  final Iterable<T?> _source;
+  NonNullsIterable(this._source);
+
+  bool get isEmpty => _firstNonNull == null;
+  bool get isNotEmpty => _firstNonNull != null;
+  T get first => _firstNonNull ?? (throw StateError("No element"));
+  Iterator<T> get iterator => NonNullsIterator<T>(_source.iterator);
+
+  T? get _firstNonNull {
+    for (final value in _source) {
+      if (value != null) return value;
     }
+    return null;
+  }
+}
+
+class NonNullsIterator<T extends Object> implements Iterator<T> {
+  final Iterator<T?> _source;
+  T? _current;
+  NonNullsIterator(this._source);
+
+  T get current => _current ?? (throw StateError("No element"));
+  bool moveNext() {
+    _current = null;
+    while (_source.moveNext()) {
+      final value = _source.current;
+      if (value != null) {
+        _current = value;
+        return true;
+      }
+    }
+    return false;
   }
 }
 
