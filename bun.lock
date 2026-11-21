@@ -27,7 +27,7 @@
         "@trpc/next": "11.28.1",
         "@trpc/react-query": "11.28.1",
         "@trpc/server": "11.28.1",
-        "@willbooster/shared-lib": "11.1.1",
+        "@willbooster/shared-lib": "11.2.0",
         "@willbooster/shared-lib-react": "6.3.0",
         "@willbooster/tree-sitter-c": "40.0.2",
         "@willbooster/tree-sitter-cpp": "34.0.1",
@@ -751,7 +751,7 @@
 
     "@willbooster/oxlint-config": ["@willbooster/oxlint-config@1.4.9", "", { "peerDependencies": { "oxlint": ">=1.60.0", "oxlint-tsgolint": ">=0.18.1" } }, "sha512-xqWuKdEzT4LqYc+WiK7g6sLGjvRj1iAb6CtYW1AA2qa6U1Sfa0rRFoSCJ7bBbrMxG+wS8IgKTJkz/FY/RrW1Iw=="],
 
-    "@willbooster/shared-lib": ["@willbooster/shared-lib@11.1.1", "", {}, "sha512-snBLyc2+d9svXGTdl/80MKeTH6zupxkFFPNIgtDeUWdJPbXoDUBayZ9K8M4arYAinEPXkCYtg73vwpq7vvtTkw=="],
+    "@willbooster/shared-lib": ["@willbooster/shared-lib@11.2.0", "", {}, "sha512-bBA3rCJ4qqcPVxbxmdI9mfpWplQE7v2OX5kGdaH7c/ObAGuQqC5brGdRx1emMLXCls2gub+YedF/Jm2C0WfJFQ=="],
 
     "@willbooster/shared-lib-react": ["@willbooster/shared-lib-react@6.3.0", "", { "peerDependencies": { "react": "~19.2.0", "react-dom": "~19.2.0" } }, "sha512-Y1n2KYTb1vLRY/cTX0KlWRtCJ9KVqCVOoXY7maPriU20eVvCbXV9cu2ROi6Ds4Om8ZS+l37EZQuEDIzxvsC0Nw=="],
 
