@@ -705,10 +705,16 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (!kind) {
       // Spreads whose types depend on loop bindings or promotions decide only once compiled in their scopes, so the
       // literal is the one kind it compiles as.
-      const fits = (['set', 'map'] as const).filter((candidate) => this.compilesAs(expression, candidate));
-      if (fits.length !== 1)
+      // A literal decides once, so nested undecided literals do not multiply the compilations.
+      let decided = this.compiledKinds.get(expression);
+      if (decided === undefined) {
+        const fits = (['set', 'map'] as const).filter((candidate) => this.compilesAs(expression, candidate));
+        decided = fits.length === 1 ? fits[0] : 'ambiguous';
+        this.compiledKinds.set(expression, decided);
+      }
+      if (decided === 'ambiguous')
         return this.error(syntax[0], 'セットかマップかを決められません。型引数か、変数の型を書いてください。');
-      return this.compileSetOrMapLiteral(expression, unresolvedCollectionType(fits[0]));
+      return this.compileSetOrMapLiteral(expression, unresolvedCollectionType(decided));
     }
     const types = typeArguments?.map((argument) => this.resolveType(argument));
     if (kind === 'set') {
@@ -808,6 +814,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
       }
     }
   }
+
+  private readonly compiledKinds = new WeakMap<Expression, 'set' | 'map' | 'ambiguous'>();
 
   /** Whether braces compile as the kind, compiling them without keeping their code, flow, or errors. */
   private compilesAs(expression: Extract<Expression, { kind: 'setOrMap' }>, kind: 'set' | 'map'): boolean {
