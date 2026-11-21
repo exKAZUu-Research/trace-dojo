@@ -14,7 +14,6 @@ import { isGenericObjectOrIndexType } from './genericTypes';
 import { applicableIndex } from './indexInfos';
 import { nonNullableType, nullishConstraint } from './nullishConstraints';
 import { printedPropertyName } from './print';
-import { isNonConvertingSourceMethodUse } from './sourceMethodUses';
 import { spellingSuggestion } from './spelling';
 import { assignmentKind, chainObject, isOptionalChain, skipParentheses } from './syntax';
 import { tupleElementBeyond } from './tupleIndexes';
@@ -353,13 +352,8 @@ export class MemberChecker {
     if (owner === 'ArrayConstructor' && name === 'fromAsync') return 'Array.fromAsync';
     if (owner === 'RegExpConstructor' && unavailableRegExpStatics.has(name)) return legacyRegExpStaticsFeature;
     // Node.js shows a function's source as tsx's esbuild printed it, which this interpreter does not reproduce.
-    if (
-      owner === 'Function' &&
-      name === 'toString' &&
-      !this.isTypeOnlyUse(propertyNode) &&
-      !isNonConvertingSourceMethodUse(this.c, propertyNode)
-    )
-      return '関数やクラスの文字列への変換';
+    if (owner === 'Function' && name === 'toString' && !this.isTypeOnlyUse(propertyNode))
+      this.c.sourceMethodUses.recordSourceMethod(propertyNode);
     return undefined;
   }
 
@@ -440,7 +434,9 @@ export class MemberChecker {
   /** The type an element access's index selects by, which is `number` for a `for...in` variable over an array. */
   indexTypeOf(indexNode: TreeNode): Type {
     const type = this.c.expressions.check(indexNode);
-    return this.c.statements.isForInNumericIndex(indexNode) ? numberType : type;
+    const index = this.c.statements.isForInNumericIndex(indexNode) ? numberType : type;
+    this.c.sourceMethodUses.recordKey(indexNode, index);
+    return index;
   }
 
   isReadonlyIndex(objectType: Type, indexType: Type): boolean {

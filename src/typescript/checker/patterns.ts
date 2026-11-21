@@ -113,7 +113,7 @@ export class BindingPatterns {
     const implied = this.impliedBindingType(left, options.isConst, options.parameter);
     const initialDefault = this.initializerType(right, implied ?? (options.annotated ? type : undefined), true);
     const defaultType = options.parameter ? padParameterInitializer(this.c, left, initialDefault) : initialDefault;
-    this.checkInitializer(left, right, initialDefault);
+    if (!options.parameter) this.checkInitializer(left, right, initialDefault);
     const withoutUndefined = this.c.relations.removeUndefined(type);
     const initial =
       assigned === errorType
@@ -344,6 +344,7 @@ export class BindingPatterns {
     }
     const node = named(key)[0];
     const type = computedType ?? this.c.expressions.check(node);
+    this.c.sourceMethodUses.recordKey(node, type);
     const constraint = this.c.baseConstraint(type);
     const members = constraint.kind === 'union' ? constraint.types : [constraint];
     const names: string[] = [];

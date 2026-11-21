@@ -624,7 +624,6 @@ export class FunctionChecker {
     const valueType = this.c.patterns.initializerType(value, expected ?? implied);
     const initial = annotation ? valueType : this.c.patterns.parameterInitializerType(pattern, valueType);
     if (expected) this.c.expressions.checkAssignable(pattern, initial, expected, value);
-    else this.c.patterns.checkInitializer(pattern, value, valueType);
     return initial;
   }
 

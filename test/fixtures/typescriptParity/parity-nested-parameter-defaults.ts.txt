@@ -57,3 +57,17 @@ function partialBranch({outer: {flag, text} = {flag: false, text: 'inner'}} = {o
 }
 console.log(nestedOwnDefault(), nestedOwnDefault({}), nestedOwnDefault({outer: {value: 4}}));
 console.log(nestedOwnDefaultArray(), partialBranch(), partialBranch({}));
+
+function withExtraDefault({outer: {value} = {value: 1}} = {outer: {value: 2, extra: true}}) {
+  return value;
+}
+function onlyExtraDefault({outer: {value} = {value: 1}} = {outer: {extra: true}}) {
+  return value;
+}
+function extendedOuter({outer: {value = 1} = {value: 2}} = {outer: {value: 3, extra: true}}) {
+  return value;
+}
+function restInPattern({value = 1, ...extra} = {value: 2, extra: 3}) {
+  return extra.extra;
+}
+console.log(withExtraDefault(), onlyExtraDefault(), extendedOuter(), restInPattern());

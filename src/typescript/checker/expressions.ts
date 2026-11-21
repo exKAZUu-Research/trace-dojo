@@ -832,14 +832,17 @@ export class ExpressionChecker {
     report: boolean
   ): boolean {
     if (!this.isKnownProperty(targets, property)) {
-      if (report)
-        this.c.error(
-          property.declaration?.childForFieldName('key') ?? property.declaration ?? node,
-          `オブジェクトリテラルには既知のプロパティしか書けません。'${property.name}' は型 '${this.c.print(target)}' にありません。`
-        );
+      if (report) this.reportUnknownLiteralProperty(property.declaration ?? node, property.name, target);
       return false;
     }
     return target.kind !== 'union' || this.fitsUnionProperty(node, property, targets, target, report);
+  }
+
+  reportUnknownLiteralProperty(declaration: TreeNode, name: string, target: Type): void {
+    this.c.error(
+      declaration.childForFieldName('key') ?? declaration.childForFieldName('name') ?? declaration,
+      `オブジェクトリテラルには既知のプロパティしか書けません。'${name}' は型 '${this.c.print(target)}' にありません。`
+    );
   }
 
   private acceptsAnyProperty(targets: Type[]): boolean {

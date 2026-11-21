@@ -21,3 +21,6 @@
 (48,43): error TS2339: Property 'absent' does not exist on type '{ value: number; } | {}'.
 (52,33): error TS2339: Property 'value' does not exist on type '{} | { value: number; }'.
 (55,33): error TS2339: Property 'value' does not exist on type '{ value: number; } | {}'.
+(59,74): error TS2353: Object literal may only specify known properties, and 'extra' does not exist in type '{ outer?: { value: number; } | undefined; }'.
+(62,78): error TS2353: Object literal may only specify known properties, and 'extra' does not exist in type '{ value?: number | undefined; }'.
+(65,60): error TS2353: Object literal may only specify known properties, and 'extra' does not exist in type '{ value: any; }'.

@@ -33,3 +33,17 @@ function inspectSourceMethod() {
 }
 inspectSourceMethod();
 sourceMetadata.toString;
+
+let changingKey: 'call' | 'name' = 'call';
+const methodForChangingKey = sourceMetadata.toString;
+changingKey = 'name';
+console.log(methodForChangingKey[changingKey]);
+changingKey = Boolean(console.log) ? 'name' : 'call';
+if (changingKey === 'name') {
+  console.log(methodForChangingKey[changingKey]);
+}
+let destructuredKey: 'bind' | 'length' = 'bind';
+const methodForDestructuring = sourceMetadata.toString;
+destructuredKey = 'length';
+const { [destructuredKey]: lengthAfterAssignment } = methodForDestructuring;
+console.log(lengthAfterAssignment);

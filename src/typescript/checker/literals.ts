@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 788 -- Types literals and their spreads, members, and widening in the same literal context.
+// code-gauge-allow-file fileNcss 794 -- Types literals and their spreads, members, and widening in the same literal context.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExpressionListFlow, tupleArgumentContexts } from './callArity';
@@ -599,14 +599,19 @@ export class LiteralChecker {
   }
 
   private setWritten(literal: ObjectLiteral, name: string, property: Property): void {
-    const { contextual } = literal;
-    const optional =
-      contextual &&
-      this.c.patterns.initializerContexts.has(contextual) &&
-      this.c.propertyOf(contextual, name)?.optional;
-    literal.properties.set(name, optional ? { ...property, optional } : property);
+    literal.properties.set(name, this.contextualBindingProperty(literal.contextual, property));
     literal.writtenNames.add(name);
     if (property.declaration) literal.explicitMembers.set(name, property.declaration);
+  }
+
+  private contextualBindingProperty(context: Type | undefined, property: Property): Property {
+    if (!context || !this.c.patterns.initializerContexts.has(context)) return property;
+    const expected = this.c.propertyOf(context, property.name);
+    const { declaration } = property;
+    if (!expected && declaration && !this.c.structureOf(context).stringIndex) {
+      this.c.expressions.reportUnknownLiteralProperty(declaration, property.name, context);
+    }
+    return expected?.optional ? { ...property, optional: true } : property;
   }
 
   private memberValue(literal: ObjectLiteral, value: TreeNode, context: Type | undefined): Type {

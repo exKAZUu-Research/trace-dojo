@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 743 -- Holds type construction, bounded instantiation, structure lookup, and diagnostics shared by checker components.
+// code-gauge-allow-file fileNcss 746 -- Holds type construction, bounded instantiation, structure lookup, and diagnostics shared by checker components.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { type SourceDiagnostic, sourceDiagnostic } from '../../interpreter/diagnostics';
@@ -28,6 +28,7 @@ import { ReducedTypes } from './reducedTypes';
 import { Relations } from './relations';
 import type { Scope } from './scopes';
 import { Signatures } from './signatures';
+import { SourceMethodUses } from './sourceMethodUses';
 import { StatementChecker } from './statements';
 import { bigIntPropertyNames } from './syntax';
 import { tupleSliceReadType } from './tupleIndexes';
@@ -106,6 +107,7 @@ export class Checker {
   readonly literals = new LiteralChecker(this);
   readonly patterns = new BindingPatterns(this);
   readonly members = new MemberChecker(this);
+  readonly sourceMethodUses = new SourceMethodUses(this);
   readonly assignments = new AssignmentChecker(this);
   readonly operators = new OperatorChecker(this);
   readonly overloadContexts = new OverloadContexts(this);
@@ -156,6 +158,7 @@ export class Checker {
     this.typeNodes.checkWrittenTypeNames(this.root);
     this.typeNodes.checkPendingArgumentConstraints();
     checkParameterRedeclarations(this, this.binder.allScopes);
+    this.sourceMethodUses.check();
     const seen = new Set<string>();
     return this.diagnostics
       .toSorted((a, b) => a.index - b.index)

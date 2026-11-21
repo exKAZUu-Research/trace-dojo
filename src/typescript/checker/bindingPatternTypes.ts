@@ -22,7 +22,7 @@ export function impliedPatternType(
   leafType: (element: TreeNode) => Type,
   parameter = false
 ): Type | undefined {
-  const shape = patternShape(
+  return patternShape(
     c,
     pattern,
     (element) => {
@@ -33,10 +33,8 @@ export function impliedPatternType(
         leafType(element)
       );
     },
-    parameter
+    parameter ? 'initializer' : undefined
   );
-  if (parameter && pattern.type === 'object_pattern' && shape) c.patterns.initializerContexts.add(shape);
-  return shape;
 }
 
 export function inferredPatternParameterType(c: Checker, pattern: TreeNode): Type {
@@ -44,7 +42,7 @@ export function inferredPatternParameterType(c: Checker, pattern: TreeNode): Typ
     c,
     pattern,
     (element) => parameterElementDefaultType(c, element) ?? inferredPatternParameterType(c, element),
-    true
+    'inferred'
   );
   if (type) return type;
   c.patterns.reportImplicitAny(pattern);
@@ -107,11 +105,13 @@ function parameterElementDefaultType(c: Checker, element: TreeNode): Type | unde
   );
 }
 
+type ParameterPattern = 'initializer' | 'inferred';
+
 function patternShape(
   c: Checker,
   pattern: TreeNode,
   elementType: (element: TreeNode) => Type,
-  parameter = false
+  parameter?: ParameterPattern
 ): Type | undefined {
   switch (pattern.type) {
     case 'object':
@@ -120,7 +120,7 @@ function patternShape(
     }
     case 'array':
     case 'array_pattern': {
-      return tupleType(c, pattern, elementType, parameter);
+      return tupleType(c, pattern, elementType, parameter !== undefined);
     }
     default: {
       return undefined;
@@ -128,16 +128,27 @@ function patternShape(
   }
 }
 
-function objectType(c: Checker, pattern: TreeNode, elementType: (element: TreeNode) => Type, parameter: boolean): Type {
+function objectType(
+  c: Checker,
+  pattern: TreeNode,
+  elementType: (element: TreeNode) => Type,
+  parameter: ParameterPattern | undefined
+): Type {
   const structure = emptyStructure();
+  let hasDynamicKey = false;
   for (const element of named(pattern)) {
-    const { name, value } = objectBindingEntry(c, element, parameter);
+    const { name, value } = objectBindingEntry(c, element, parameter !== undefined);
     if (isRest(element) || (name === undefined && !parameter))
       structure.stringIndex = { type: anyType, readonly: false };
-    else if (name !== undefined)
+    else if (name === undefined) hasDynamicKey = true;
+    else
       structure.properties.set(name, simpleProperty(name, elementType(value), { optional: !!defaultedTarget(value) }));
   }
-  return anonymousObject(() => structure);
+  const shape = anonymousObject(() => structure);
+  if (parameter === 'initializer' && !hasDynamicKey && structure.properties.size > 0) {
+    c.patterns.initializerContexts.add(shape);
+  }
+  return shape;
 }
 
 function objectBindingEntry(

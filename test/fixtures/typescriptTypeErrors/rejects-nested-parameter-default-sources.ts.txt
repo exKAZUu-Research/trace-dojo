@@ -55,3 +55,13 @@ function storedDefault({outer: {value} = {value: 1}} = {outer: storedEmptyForBin
 function spreadDefault({outer: {value} = {value: 1}} = {outer: {...{}}}) {
   return value;
 }
+
+function extraAtRoot({outer: {value} = {value: 1}} = {outer: {value: 2}, extra: true}) {
+  return value;
+}
+function extraWithoutNestedDefault({outer: {value = 1}} = {outer: {value: 2, extra: true}}) {
+  return value;
+}
+function extraInNestedDefault({outer: {value} = {value: 1, extra: true}} = {outer: {value: 2}}) {
+  return value;
+}
