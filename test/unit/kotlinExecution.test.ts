@@ -1838,6 +1838,32 @@ fun main() {
       '[30817, 25209, 99, 0, 0]\njava.lang.StringIndexOutOfBoundsException: Index 3 out of bounds for length 3\njava.lang.StringIndexOutOfBoundsException: Index 4 out of bounds for length 3\njava.lang.StringIndexOutOfBoundsException: Index 4 out of bounds for length 3\n[30817, 25209, 99, 0, 0]\n0\njava.lang.StringIndexOutOfBoundsException: Index 4 out of bounds for length 4\njava.lang.StringIndexOutOfBoundsException: Index 4 out of bounds for length 4\n[30817, 25209, 99, 0, 0]\n0\n0\n0\ntrue\ntrue\n[LEFT, RIGHT]\nfalse\n[LEFT, RIGHT]\ntrue\n',
   },
   {
+    name: 'fixed JVM lists test their source before rejecting insertion',
+    source: `class Source : Collection<String> by listOf("new", "second") {
+    override fun iterator(): Iterator<String> = ReadingIterator()
+}
+class ReadingIterator : Iterator<String> {
+    var visits = 0
+    override fun hasNext(): Boolean { println("has"); return visits < 2 }
+    override fun next(): String { visits++; println("next $visits"); return "new" }
+}
+fun main() {
+    for (values in listOf(listOf("x"), listOf("x", "y"), arrayOf("x").asList())) {
+        val list = values as MutableList<String>
+        println(list.addAll(emptyList()))
+        println(list.addAll(0, emptyList()))
+        try { list.addAll(-1, emptyList()) } catch (e: Exception) { println(e) }
+        try { list.addAll(Source()) } catch (e: Exception) { println(e) }
+        try { list.addAll(0, Source()) } catch (e: Exception) { println(e) }
+        println(list)
+    }
+    val fixed = buildList { add("z") } as MutableList<String>
+    try { fixed.addAll(emptyList()) } catch (e: Exception) { println(e) }
+}`,
+    stdout:
+      'false\nfalse\njava.lang.IndexOutOfBoundsException: Index: -1, Size: 1\nhas\nnext 1\njava.lang.UnsupportedOperationException\nhas\nnext 1\njava.lang.UnsupportedOperationException\n[x]\nfalse\nfalse\njava.lang.IndexOutOfBoundsException: Index: -1, Size: 2\nhas\nnext 1\njava.lang.UnsupportedOperationException\nhas\nnext 1\njava.lang.UnsupportedOperationException\n[x, y]\nfalse\nfalse\njava.lang.IndexOutOfBoundsException: Index: -1, Size: 1\nhas\nnext 1\njava.lang.UnsupportedOperationException\nhas\nnext 1\njava.lang.UnsupportedOperationException\n[x]\njava.lang.UnsupportedOperationException\n',
+  },
+  {
     name: 'reversed searches and removals respect the iterator and singleton mutability',
     source: `class Search(private val edit: () -> Unit = {}, private val matches: Boolean = false) {
     override fun equals(other: Any?): Boolean { edit(); return matches }

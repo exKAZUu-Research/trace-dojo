@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 991 -- the natives of the collections, which share the helpers of their items.
+// code-gauge-allow-file fileNcss 998 -- the natives of the collections, which share the helpers of their items.
 import { runtimeClassOf } from '../dispatch';
 import { hashOf, identityHash, stringOf, valueEquals } from '../format';
 import { toInt32 } from '../operators';
@@ -366,10 +366,18 @@ const LIST_CHANGING_NATIVES: Record<string, ListNative> = {
 
 function insertListElements(frame: Frame, list: KObject, index: number | undefined, elements: Value): boolean {
   const view = listView(list);
-  if (!view) requireResizable(frame, list);
+  const kind = listKind(list);
+  const isFixed = !view && (kind === 'SingletonList' || kind === 'ArraysList');
+  if (!view && !isFixed) requireResizable(frame, list);
   const position = index === undefined ? indexedSize(list) : insertionIndex(frame, list, index);
+  if (isFixed) {
+    return withCollectionElements(frame, elements, (values) => {
+      if (!values[Symbol.iterator]().next().done) requireResizable(frame, list);
+      return false;
+    });
+  }
   const added = elementsOf(frame, elements);
-  if (added.length === 0 && (view || listKind(list) === 'ArrayDeque')) return false;
+  if (added.length === 0 && (view || kind === 'ArrayDeque')) return false;
   if (view) {
     checkListView(frame, list);
     requireResizable(frame, list);
