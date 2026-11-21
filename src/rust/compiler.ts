@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 642 -- Keeps the compilation that shares a function's context and step state together.
+// code-gauge-allow-file fileNcss 645 -- Keeps the compilation that shares a function's context and step state together.
 import type { Annotations, Coercion, FnContext, LocalVar, PathRes } from './annotations';
 import type { Block, Expr, Pattern, Span, Stmt } from './ast';
 import { patternBindings } from './astWalk';
@@ -699,7 +699,8 @@ export class Compiler {
     let item = value;
     if (this.isCopy(type)) {
       if (needsCopy(type)) item = copyValue(value);
-    } else if (local.mode === 'move' && !isRefType(type)) {
+    } else if (local.mode === 'move' && (!isRefType(type) || isMutableRef(type))) {
+      // A `&mut` is not `Copy`, so capturing it by value moves it out as any other such value.
       place.set(MOVED);
     }
     return this.ownedValue(item, type);
@@ -794,6 +795,11 @@ function captureFieldType(type: Type, index: number): Type {
   if (t.kind !== 'adt') throw new Error('Expected a struct or tuple capture');
   const subst = new Map(t.def.params.map((param, i) => [param, t.args[i]]));
   return substitute(t.def.variants[0].fields[index].type, subst);
+}
+
+function isMutableRef(type: Type): boolean {
+  const t = normalize(shallow(type));
+  return t.kind === 'ref' && t.mutable;
 }
 
 function readInt(_c: Compiler, expr: ExprOf<'int'>): Eval {

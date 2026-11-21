@@ -531,4 +531,12 @@ test('a mutable reference moved to another binding leaves the trace, while a reb
 }
 `;
   expect(traceProgram('rust', reborrowed, reborrowed).finalVars).toEqual({ value: 3, a: 3, b: 3 });
+  const captured = `fn main() {
+    let mut value = 1;
+    let a = &mut value;
+    let mut f = move || { *a = 2; };
+    f();
+}
+`;
+  expect(traceProgram('rust', captured, captured).finalVars).toEqual({ value: 2 });
 });
