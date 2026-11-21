@@ -134,6 +134,12 @@ export function withoutAssertions(node: TreeNode): TreeNode {
   }
 }
 
+export function skipNonNullAssertions(node: TreeNode): TreeNode {
+  let current = skipParentheses(node);
+  while (current.type === 'non_null_expression') current = skipParentheses(named(current)[0]);
+  return current;
+}
+
 /** The expression inside parentheses. */
 export function skipParentheses(node: TreeNode): TreeNode {
   let current = node;

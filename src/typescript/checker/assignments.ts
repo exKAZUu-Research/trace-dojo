@@ -9,7 +9,14 @@ import { defaultedTarget, isEmptyPattern } from './patterns';
 import { printedPropertyName } from './print';
 import type { Sym } from './scopes';
 import { nameSuggestionHint } from './spelling';
-import { arrayPatternElements, isOptionalChain, named, skipParentheses, withoutAssertions } from './syntax';
+import {
+  arrayPatternElements,
+  isOptionalChain,
+  named,
+  skipNonNullAssertions,
+  skipParentheses,
+  withoutAssertions,
+} from './syntax';
 import {
   anyType,
   baseTypeOfLiteral,
@@ -149,7 +156,7 @@ export class AssignmentChecker {
   }
 
   accessorTypes(target: TreeNode): { read: Type; write: Type } | undefined {
-    target = skipParentheses(target);
+    target = skipNonNullAssertions(target);
     if (target.type !== 'member_expression' && target.type !== 'subscript_expression') return undefined;
     return this.c.flow.probe(() =>
       this.c.silently(() => {
@@ -336,7 +343,7 @@ export class AssignmentChecker {
     const reference = skipParentheses(left);
     if (operator === '&&=' || operator === '||=' || operator === '??=')
       return this.logicalAssignment(left, right, operator, declared, targetType);
-    const writeType = this.compoundWriteType(reference, declared, targetType);
+    const writeType = this.compoundWriteType(left, declared, targetType);
     const valueType = this.c.expressions.check(right);
     const resultType = this.c.operators.binaryOperatorType(
       node,
@@ -358,8 +365,7 @@ export class AssignmentChecker {
 
   private logicalAssignment(left: TreeNode, right: TreeNode, operator: string, declared: Type, checked: Type): Type {
     const reference = skipParentheses(left);
-    let target = reference;
-    while (target.type === 'non_null_expression') target = skipParentheses(named(target)[0]);
+    const target = skipNonNullAssertions(reference);
     const read = target.type === 'member_expression' ? (this.accessorTypes(target)?.read ?? declared) : declared;
     const operand = target === reference ? read : nonNullableType(this.c, read);
     const write = left.type === 'member_expression' ? declared : operand;
@@ -451,7 +457,8 @@ export class AssignmentChecker {
         return this.elementTargetType(expression, compound);
       }
       case 'non_null_expression': {
-        return this.targetType(named(expression)[0], compound);
+        const type = this.targetType(named(expression)[0], compound);
+        return compound ? nonNullableType(this.c, type) : type;
       }
       case 'as_expression':
       case 'type_assertion': {

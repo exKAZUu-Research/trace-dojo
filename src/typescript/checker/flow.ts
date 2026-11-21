@@ -7,7 +7,7 @@ import { ExceptionFlow } from './exceptionFlow';
 import { isGenericObjectOrIndexType } from './genericTypes';
 import { applicableIndex } from './indexInfos';
 import { nonNullableType, nullishConstraint, withoutNullishUnit } from './nullishConstraints';
-import { named, propertyNameText, skipParentheses } from './syntax';
+import { named, propertyNameText, skipNonNullAssertions, skipParentheses } from './syntax';
 import {
   anonymousObject,
   bigintType,
@@ -243,7 +243,7 @@ export class Flow {
 
   /** The key of a reference that narrowing applies to: a variable, `this`, or a property path of one. */
   referenceKey(node: TreeNode): string | undefined {
-    const expression = skipParentheses(node);
+    const expression = skipNonNullAssertions(node);
     switch (expression.type) {
       case 'identifier':
       case 'shorthand_property_identifier':
@@ -252,9 +252,6 @@ export class Flow {
       }
       case 'this': {
         return `this${this.c.classes.thisOwnerId(expression)}`;
-      }
-      case 'non_null_expression': {
-        return this.referenceKey(named(expression)[0]);
       }
       case 'member_expression': {
         const object = expression.childForFieldName('object');

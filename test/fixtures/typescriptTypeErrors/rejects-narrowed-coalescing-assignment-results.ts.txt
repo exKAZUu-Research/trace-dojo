@@ -44,3 +44,18 @@ function wrapped(a: Wide) {
   const o: number = (a.value! ??= 'a');
   const p: number = (a['value']! ??= 'a');
 }
+class GuardedAssertedAccessor {
+  get value(): number { return 1; }
+  set value(input: number | string) { void input; }
+}
+function guardedWrite(a: GuardedAssertedAccessor) {
+  if (typeof a.value! === 'number') {
+    a.value! ??= 1;
+    a.value += 'x';
+  }
+}
+function wrappedCompound(a: GuardedAssertedAccessor) {
+  (a.value) += 'x';
+  a.value! += 'x';
+  a.value += 'x';
+}
