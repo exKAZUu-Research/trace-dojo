@@ -294,11 +294,11 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       case 'thisMember':
       case 'extensionMember': {
         this.requireThis(span, name);
-        const setter = this.lookupMember(this.fn.kind.extensionOn ?? this.fn.kind.thisType ?? DYNAMIC, name, true);
-        if (!setter) {
+        const receiver = resolution.kind === 'extensionMember' ? resolution.receiver(span) : this.thisReceiver(span);
+        if (!this.memberFor(receiver, this.fn.kind.extensionOn ?? this.fn.kind.thisType ?? DYNAMIC, name, span, true)) {
           return this.error(span, `${name} は final か getter だけなので、代入できません。`);
         }
-        return this.memberTarget(this.thisReceiver(span), name, false, span);
+        return this.memberTarget(receiver, name, false, span);
       }
       case 'staticMember': {
         const cls = resolution.cls;

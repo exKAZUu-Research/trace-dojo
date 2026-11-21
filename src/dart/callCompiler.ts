@@ -206,7 +206,7 @@ export abstract class CallCompiler extends OperatorCompiler {
       case 'extensionMember': {
         this.requireThis(callee, callee.name);
         return this.compileMethodCall(
-          this.thisReceiver(callee),
+          resolution.kind === 'extensionMember' ? resolution.receiver(callee) : this.thisReceiver(callee),
           callee.name,
           args,
           typeArguments,

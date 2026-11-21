@@ -666,14 +666,7 @@ export abstract class CompilerBase {
     if (receiver.isSuper) return this.lookupSuperMember(lookupType, name, setter);
     const override = receiver.extensionOverride;
     if (!override) return this.lookupMember(lookupType, name, setter, span);
-    const member = (setter ? override.ext.setters : override.ext.members).get(name);
-    if (!member) return undefined;
-    const map = new Map(override.ext.typeParams.map((param, index) => [param, override.typeArgs[index]]));
-    return {
-      member,
-      type: substitute(member.type, map),
-      extension: { ext: override.ext, typeArgs: override.typeArgs, onType: substitute(override.ext.onType, map) },
-    };
+    return extensionMember(override.ext, override.typeArgs, name, setter);
   }
 
   protected usesLexicalTypeVariables(type: DartType): boolean {
@@ -1022,3 +1015,20 @@ function recordFieldMember(name: string): Member {
 }
 
 export type { TypeEnv };
+
+/** A member of one extension applied with the given type arguments. */
+export function extensionMember(
+  ext: ExtensionInfo,
+  typeArgs: DartType[],
+  name: string,
+  setter: boolean
+): ResolvedMember | undefined {
+  const member = (setter ? ext.setters : ext.members).get(name);
+  if (!member) return undefined;
+  const map = new Map(ext.typeParams.map((param, index) => [param, typeArgs[index]]));
+  return {
+    member,
+    type: substitute(member.type, map),
+    extension: { ext, typeArgs, onType: substitute(ext.onType, map) },
+  };
+}

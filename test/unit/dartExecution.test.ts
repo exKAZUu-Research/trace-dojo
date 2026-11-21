@@ -2007,6 +2007,24 @@ void main() { print([S('a') + 'b', 'a' + 'b', -E(1), E(1) + 2, F(1) + 2, 1 + 2])
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[extension, ab, 50, 7, 8, 3]\n' });
 });
 
+test('Dart unqualified extension members bind to the enclosing extension', () => {
+  const program = `class C { int x = 5; int f() => 2; int get v => 20; }
+extension E on C {
+  int f() => 1;
+  int get v => 10;
+  set x(int value) { print('E.x = $value'); }
+  int get x => 9;
+  void g() { x = 3; print([f(), v, x, f.call()]); }
+}
+extension F on int { int f() => 3; int g() => f(); }
+extension G on int { int f() => 4; }
+void main() { var c = C(); E(c).g(); print([c.x, F(0).g()]); }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'E.x = 3\n[1, 10, 9, 1]\n[5, 3]\n',
+  });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}

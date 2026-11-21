@@ -15,7 +15,16 @@ import type {
   TypeSyntax,
 } from './ast';
 import type { ClassInfo, FieldMember, Member } from './classes';
-import { at, type Compiled, CompilerBase, type Eval, type ResolvedMember, typeName, valueIs } from './compilerBase';
+import {
+  at,
+  type Compiled,
+  CompilerBase,
+  type Eval,
+  extensionMember,
+  type ResolvedMember,
+  typeName,
+  valueIs,
+} from './compilerBase';
 import type { Declaration, ExtensionInfo, GlobalVariable, TopLevelFunction, TypeAlias } from './environment';
 import { formatDouble, stringOf } from './format';
 import { BoundedStringParts } from './library/boundedStringParts';
@@ -105,7 +114,7 @@ export type NameResolution =
   | { kind: 'local'; variable: LocalVar }
   | { kind: 'thisMember'; resolved: ResolvedMember; name: string }
   | { kind: 'staticMember'; member: Member; cls: ClassInfo }
-  | { kind: 'extensionMember'; resolved: ResolvedMember; name: string }
+  | { kind: 'extensionMember'; resolved: ResolvedMember; name: string; receiver: (span: Span) => Compiled }
   | { kind: 'declaration'; declaration: Declaration }
   | { kind: 'prefix'; prefix: string };
 
@@ -1004,10 +1013,15 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
     const ext = this.currentExtension;
     if (ext) {
-      const own = ext.members.get(name) ?? ext.setters.get(name);
-      if (own) {
-        const resolved = this.lookupMember(ext.onType, name, ext.members.get(name) === undefined);
-        if (resolved) return { kind: 'extensionMember', resolved, name };
+      if (ext.members.has(name) || ext.setters.has(name)) {
+        // An extension's own member is bound to that extension, never to a same-named member of the on type.
+        const typeArgs = ext.typeParams.map((param) => typeParamType(param));
+        const receiver = (site: Span): Compiled => ({
+          ...this.thisReceiver(site),
+          extensionOverride: { ext, typeArgs },
+        });
+        const resolved = extensionMember(ext, typeArgs, name, !ext.members.has(name));
+        if (resolved) return { kind: 'extensionMember', resolved, name, receiver };
       }
       const staticMember = ext.staticMembers.get(name) ?? ext.staticSetters.get(name);
       if (staticMember) return { kind: 'staticMember', member: staticMember, cls: staticMember.owner };
@@ -1021,7 +1035,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
     if (ext) {
       const resolved = this.lookupMember(ext.onType, name, false);
-      if (resolved) return { kind: 'extensionMember', resolved, name };
+      if (resolved) return { kind: 'extensionMember', resolved, name, receiver: (site) => this.thisReceiver(site) };
     }
     return undefined;
   }
@@ -1058,7 +1072,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
       case 'thisMember':
       case 'extensionMember': {
         this.requireThis(expression, name);
-        const receiver = this.thisReceiver(expression);
+        const receiver =
+          resolution.kind === 'extensionMember' ? resolution.receiver(expression) : this.thisReceiver(expression);
         const compiled = this.readMember(receiver, resolution.resolved, name, expression, false);
         return resolution.kind === 'thisMember'
           ? this.promotableField(compiled, resolution.resolved.member, receiver)
