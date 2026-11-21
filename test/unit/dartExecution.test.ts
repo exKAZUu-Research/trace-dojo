@@ -1815,6 +1815,18 @@ void main() { print([[E(1), 2].runtimeType, [E(1), F(2)].runtimeType, [G(1), 2].
   ).toMatchObject({ kind: 'compileError' });
 });
 
+test('Dart empty collection literals take the greatest closure of a partly unresolved context', () => {
+  const program = `void f<T>(List<List<T>> a) { print(a.runtimeType); }
+void g<T>(Map<String, List<T>> a) { print(a.runtimeType); }
+void h<T>(List<T> a) { print([T, a.runtimeType]); }
+class C<T> { final List<List<T>> rows; C(this.rows); }
+void main() { f([]); g({}); h([]); print(C([]).rows.runtimeType); }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'List<List<Object?>>\n_Map<String, List<Object?>>\n[dynamic, List<dynamic>]\nList<List<Object?>>\n',
+  });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}

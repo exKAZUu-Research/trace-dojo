@@ -21,7 +21,7 @@ import { formatDouble, stringOf } from './format';
 import { BoundedStringParts } from './library/boundedStringParts';
 import type { Frame } from './runtime';
 import { type ConditionFlow, Flow, LocalVar } from './scope';
-import { containsInferenceHole } from './typeInference';
+import { closeInferenceHoles, containsInferenceHole, isInferenceHole } from './typeInference';
 import {
   closeTypeVariables,
   coreTypes,
@@ -665,10 +665,10 @@ export abstract class ExpressionCompiler extends CompilerBase {
     );
     if (expression.isConst && !elements.isConst)
       this.error(expression, 'const のリストの要素は、定数でなければなりません。');
-    elementType ??=
-      contextElement && !containsInferenceHole(contextElement)
-        ? contextElement
-        : inferElementType(elements.types.map((type) => type.key));
+    elementType ??= literalTypeArgument(
+      contextElement,
+      elements.types.map((type) => type.key)
+    );
     const type = interfaceType(coreTypes.list, [elementType]);
     const resolve = this.runtimeType(elementType);
     // Inside a constant context, a literal without `const` is constant too.
@@ -711,9 +711,10 @@ export abstract class ExpressionCompiler extends CompilerBase {
         this.error(expression, 'const のセットの要素は、定数でなければなりません。');
       const elementType =
         types?.[0] ??
-        (contextElement && !containsInferenceHole(contextElement)
-          ? contextElement
-          : inferElementType(compiled.types.map((type) => type.key)));
+        literalTypeArgument(
+          contextElement,
+          compiled.types.map((type) => type.key)
+        );
       return this.buildSet(
         interfaceType(coreTypes.set, [elementType]),
         compiled.run,
@@ -730,14 +731,16 @@ export abstract class ExpressionCompiler extends CompilerBase {
       this.error(expression, 'const のマップの要素は、定数でなければなりません。');
     const keyType =
       types?.[0] ??
-      (keyContext && !containsInferenceHole(keyContext)
-        ? keyContext
-        : inferElementType(compiled.types.map((type) => type.key)));
+      literalTypeArgument(
+        keyContext,
+        compiled.types.map((type) => type.key)
+      );
     const valueType =
       types?.[1] ??
-      (valueContext && !containsInferenceHole(valueContext)
-        ? valueContext
-        : inferElementType(compiled.types.map((type) => type.value ?? DYNAMIC)));
+      literalTypeArgument(
+        valueContext,
+        compiled.types.map((type) => type.value ?? DYNAMIC)
+      );
     return this.buildMap(
       interfaceType(coreTypes.map, [keyType, valueType]),
       compiled.run,
@@ -1724,3 +1727,14 @@ export function singleArgument(index: Expression): ArgumentsSyntax {
 }
 
 export { isNonNullable, objectType, typeParamType, type Arguments };
+
+/**
+ * A collection literal's type argument from its context and its elements' types. A context still waiting for a call's
+ * type arguments yields to the elements, and with no elements to its greatest closure (`f<T>(List<List<T>> a)` takes
+ * `[]` as List<List<Object?>>), except a bare unknown, which leaves the elements' dynamic.
+ */
+function literalTypeArgument(context: DartType | undefined, elementTypes: DartType[]): DartType {
+  if (context && !containsInferenceHole(context)) return context;
+  if (context && !isInferenceHole(context) && elementTypes.length === 0) return closeInferenceHoles(context);
+  return inferElementType(elementTypes);
+}
