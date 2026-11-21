@@ -181,8 +181,6 @@ export class Runtime implements TracedRuntime<Frame> {
   }
 
   /** Removes the turtles that the program can no longer reach. */
-  // code-gauge-allow functionNcss 35 -- one pass over the reachable values, which splitting would make walk them twice.
-  // code-gauge-allow functionCognitiveComplexity 27 -- one pass over the reachable values, which splitting would make walk them twice.
   collectGarbage(): void {
     const reached = new Set<unknown>();
     const turtles = new Set<unknown>();
@@ -191,38 +189,43 @@ export class Runtime implements TracedRuntime<Frame> {
       ...this.objects.values(),
       ...this.enumEntries.values(),
       ...this.nativeRoots,
+      ...this.frames,
     ];
-    const enqueue = (values: Iterable<unknown>): void => {
-      for (const value of values) if (typeof value === 'object' && value !== null) stack.push(value);
-    };
-    for (const frame of this.frames) stack.push(frame);
     while (stack.length > 0) {
       const item = stack.pop();
       if (typeof item !== 'object' || item === null || reached.has(item)) continue;
       reached.add(item);
       if (item instanceof Frame) {
-        enqueue(item.locals);
-        enqueue(item.temporaries);
-        enqueue(item.captured);
+        enqueueObjects(stack, item.locals);
+        enqueueObjects(stack, item.temporaries);
+        enqueueObjects(stack, item.captured);
         stack.push(item.thisValue);
       } else if (item instanceof KObject) {
         if (item.turtle) turtles.add(item.turtle);
-        enqueue(item.fields);
-        if (item.env) enqueue(item.env);
-        if (item.items) enqueue(item.items);
-        if (item.store) for (const entry of item.store.entries) stack.push(entry.key, entry.value);
-        if (item.native) enqueue(Object.values(item.native));
+        enqueueObjectReferences(stack, item);
       } else if (item instanceof Cell) {
         stack.push(item.value);
       } else if (Array.isArray(item)) {
-        enqueue(item);
+        enqueueObjects(stack, item);
       } else if (!(item instanceof Boxed)) {
         // Native state such as an iterator's source.
-        enqueue(Object.values(item));
+        enqueueObjects(stack, Object.values(item));
       }
     }
     this.world.retain((turtle) => turtles.has(turtle));
   }
+}
+
+function enqueueObjectReferences(stack: unknown[], object: KObject): void {
+  enqueueObjects(stack, object.fields);
+  if (object.env) enqueueObjects(stack, object.env);
+  if (object.items) enqueueObjects(stack, object.items);
+  if (object.store) for (const entry of object.store.entries) stack.push(entry.key, entry.value);
+  if (object.native) enqueueObjects(stack, Object.values(object.native));
+}
+
+function enqueueObjects(stack: unknown[], values: Iterable<unknown>): void {
+  for (const value of values) if (typeof value === 'object' && value !== null) stack.push(value);
 }
 
 /** The value of a property's backing field in an instance. */
