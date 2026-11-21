@@ -1336,25 +1336,37 @@ export abstract class ExpressionCompiler extends CallCompiler {
   }
 
   private memberCallLevels(scope: Scope, receiver: Compiled, name: string, row: number): CallLevel[] {
-    const nullableReceiver = isNullable(resolved(receiver.type));
-    const members = this.memberCandidates(nonNull(receiver.type), name);
+    const memberType = nonNull(receiver.type);
+    const members = this.memberCandidates(memberType, name);
     const extensions = this.extensionCandidates(receiver.type, name);
-    const levels: CallLevel[] = [];
-    const extension = { candidates: extensions, receiver };
-    if (nullableReceiver && extensions.length > 0) levels.push(extension);
-    if (members.length > 0) levels.push({ candidates: members, receiver });
-    const property = this.findProperty(scope, nonNull(receiver.type), name);
-    const declaredType = property?.symbol.type;
-    if (property && (!declaredType || resolved(substitute(declaredType, property.substitution)).kind === 'function')) {
-      levels.push({
-        functionValue: () => {
-          this.requireNonNullReceiver(receiver, row, false);
-          return this.readProperty(scope, property, receiver, row);
-        },
-      });
-    }
-    if (!nullableReceiver && extensions.length > 0) levels.push(extension);
-    return levels;
+    const memberProperty = this.membersOf<PropertySymbol>(memberType, name, 'property')[0];
+    const extensionProperty = this.findExtensionProperty(scope, receiver.type, name);
+    const memberLevels: CallLevel[] = members.length === 0 ? [] : [{ candidates: members, receiver }];
+    const extensionLevels: CallLevel[] = extensions.length === 0 ? [] : [{ candidates: extensions, receiver }];
+    const memberValue = this.propertyCallLevel(scope, memberProperty, receiver, row);
+    if (memberValue) memberLevels.push(memberValue);
+    const extensionValue = this.propertyCallLevel(scope, extensionProperty, receiver, row);
+    if (extensionValue) extensionLevels.push(extensionValue);
+    return isNullable(resolved(receiver.type))
+      ? [...extensionLevels, ...memberLevels]
+      : [...memberLevels, ...extensionLevels];
+  }
+
+  private propertyCallLevel(
+    scope: Scope,
+    property: MemberRef<PropertySymbol> | undefined,
+    receiver: Compiled,
+    row: number
+  ): CallLevel | undefined {
+    if (!property) return undefined;
+    const type = property.symbol.type;
+    if (type && resolved(substitute(type, property.substitution)).kind !== 'function') return undefined;
+    return {
+      functionValue: () => {
+        if (!property.symbol.extensionReceiver) this.requireNonNullReceiver(receiver, row, false);
+        return this.readProperty(scope, property, receiver, row);
+      },
+    };
   }
 
   /**

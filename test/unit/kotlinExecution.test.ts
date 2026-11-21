@@ -1864,6 +1864,35 @@ fun main() {
     stdout: 'concurrent\n3\nconcurrent\n3\nconcurrent\n3\nconcurrent\n3\nfalse\nfalse\nimmutable\n',
   },
   {
+    name: 'function properties preserve member and extension levels on nullable and non-null receivers',
+    source: `class Item {
+    fun implicit() = format("inside")
+}
+val Item.format: (String) -> String
+    get() = { "property $it" }
+fun Item.format(value: String) = "function $value"
+
+val Item?.label: (Int) -> String
+    get() = { if (this == null) "null $it" else "item $it" }
+fun Item?.label(value: String) = "function $value"
+
+class Both {
+    val choose: (Int) -> String = { "member $it" }
+}
+val Both.choose: (String) -> String
+    get() = { "extension $it" }
+fun main() {
+    println(Item().format("outside"))
+    println(Item().implicit())
+    val missing: Item? = null
+    println(missing.label(2))
+    println(missing.label("word"))
+    println(Both().choose(4))
+    println(Both().choose("word"))
+}`,
+    stdout: 'function outside\nfunction inside\nnull 2\nfunction word\nmember 4\nextension word\n',
+  },
+  {
     name: 'function properties resolve by applicability among member and extension functions',
     source: `class D {
     val format: (String) -> String
