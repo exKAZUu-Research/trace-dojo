@@ -118,6 +118,34 @@ fun main() {
 /** Programs with the output of Kotlin 2.4.21 on the JVM (Java 25), which the interpreter must reproduce exactly. */
 test.each([
   {
+    name: 'values assigned on every normal try or catch path remain initialized after finally',
+    source: `fun read(trigger: Boolean): String {
+    var text: String
+    try {
+        text = if (trigger) error("throw") else "body"
+    } catch (e: IllegalStateException) {
+        text = "handler"
+    } finally {
+        println("finally")
+    }
+    return text
+}
+fun bothBranches(test: Boolean): Int {
+    if (test) return 1 else return 2
+}
+fun main() {
+    println(read(false))
+    println(read(true))
+    println(bothBranches(true))
+}`,
+    stdout: `finally
+body
+finally
+handler
+1
+`,
+  },
+  {
     name: 'uppercase format conversions use lowercase error letters and uppercase output',
     source: `fun main() {
     try { println(String.format("%X", 1.5)) } catch (e: Exception) { println(e.message) }
@@ -5845,6 +5873,32 @@ fun main() {
     'an initializer with a field reference in a nested lambda',
     true,
     'val answer: Int = 2\n    get() = run { field + 3 }\nfun main() { println(answer) }',
+  ],
+  [
+    'an assignment completed by try alone when a catch can finish without it',
+    false,
+    'fun failure(): Int { throw IllegalStateException() }\nfun main() { var x: Int; try { x = failure() } catch (e: Exception) { println("caught") }; println(x) }',
+  ],
+  [
+    'a smart cast invalidated by a catch branch',
+    false,
+    `fun main() {
+        var text: String? = "ready"
+        if (text != null) {
+            try { "bad".toInt() } catch (e: NumberFormatException) { text = null }
+            println(text.length)
+        }
+    }`,
+  ],
+  [
+    'a non-Unit function whose sole return is in if (true)',
+    false,
+    'fun missing(): Int { if (true) return 1 }\nfun main() { println(missing()) }',
+  ],
+  [
+    'a non-Unit function returning only in the constant-true arm of an if',
+    false,
+    'fun missing(): Int { if (!false) return 1 else println("missing") }\nfun main() { println(missing()) }',
   ],
   ['nextUp without its math import', false, 'fun main() { println(1.0.nextUp()) }'],
   ['Locale without its import', false, 'fun main() {\n    val l: Locale? = null\n}'],

@@ -1176,7 +1176,6 @@ export abstract class StatementCompiler extends OperatorCompiler {
         ? discardResult(branch.eval)
         : convertRepr(this.convertTo(branch, type, row), reprOf(this.core, type), repr)
     );
-    if (asStatement && this.isConstantTrue(condition.compiled)) this.flow.isDead = flows[0].isDead;
     return {
       type,
       repr,
@@ -1601,6 +1600,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
         use,
         catchThrows
       );
+      flows.push(this.flow);
       return { ...binding, value };
     });
     this.flow = Flow.merge(flows);
