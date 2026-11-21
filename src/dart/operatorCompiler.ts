@@ -22,13 +22,13 @@ import {
   DYNAMIC,
   interfaceType,
   isNeverType,
-  isNonNullable,
   isPotentiallyNullable,
   isSubtype,
   makeNullable,
   NEVER,
   nonNullable,
   numericClassOf,
+  objectType,
   promotionTarget,
   resolveBound,
   sameType,
@@ -340,8 +340,12 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
   protected compileThrow(expression: Extract<Expression, { kind: 'throw' }>): Compiled {
     const value = this.compileExpression(expression.value);
     if (value.type.kind === 'void') this.error(expression, 'void の値は throw できません。');
-    if (!isNonNullable(value.type) && value.type.kind !== 'dynamic') {
-      this.error(expression, `null かもしれない ${typeName(value.type)} 型の値は throw できません。`);
+    // Dart throws only dynamic values and Object's subtypes, which excludes extension types that implement no Object.
+    if (!isSubtype(value.type, objectType()) && value.type.kind !== 'dynamic') {
+      this.error(
+        expression,
+        `${typeName(value.type)} 型の値は、dynamic でも null にならない型でもないので throw できません。`
+      );
     }
     const { run } = value;
     this.flow = this.flow.unreachable;

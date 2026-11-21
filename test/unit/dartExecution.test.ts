@@ -1650,6 +1650,20 @@ void main() {
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[1.5, double, 0.5]\n' });
 });
 
+test('Dart throws only dynamic values and subtypes of Object', () => {
+  for (const program of [
+    'extension type E(int v) {}\nvoid main() { throw E(1); }',
+    'extension type E(int? v) {}\nvoid main() { throw E(null); }',
+    'extension type E(int v) {}\nvoid f<T extends E>(T t) { throw t; }\nvoid main() {}',
+    'void f(int? x) { throw x; }\nvoid main() {}',
+  ]) {
+    expect(executeProgram('dart', program)).toMatchObject({ kind: 'compileError' });
+  }
+  const valid =
+    'extension type E(int v) implements Object {}\nvoid main() { try { throw E(1); } catch (e) { print(e); } }';
+  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '1\n' });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}
