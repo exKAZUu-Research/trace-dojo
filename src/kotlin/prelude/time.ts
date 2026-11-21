@@ -1,6 +1,6 @@
 import { kotlin } from './source';
 
-/** `kotlin.time`: durations, transcribed from Kotlin's standard library, which holds them in nanoseconds. */
+/** `kotlin.time`: Duration values and conversions. */
 export const TIME_SOURCE = kotlin`
 package kotlin.time
 
@@ -14,38 +14,41 @@ enum class DurationUnit(internal val nanos: Long) {
     DAYS(86400000000000L)
 }
 
-class Duration internal constructor(internal val nanos: Long) : Comparable<Duration> {
-    operator fun plus(other: Duration): Duration = Duration(nanos + other.nanos)
-    operator fun minus(other: Duration): Duration = Duration(nanos - other.nanos)
-    operator fun times(scale: Int): Duration = Duration(nanos * scale)
-    operator fun div(scale: Int): Duration = Duration(nanos / scale)
-    operator fun div(other: Duration): Double = nanos.toDouble() / other.nanos.toDouble()
-    operator fun unaryMinus(): Duration = Duration(-nanos)
-    override fun compareTo(other: Duration): Int = nanos.compareTo(other.nanos)
-    override fun equals(other: Any?): Boolean = other is Duration && nanos == other.nanos
-    override fun hashCode(): Int = (nanos xor (nanos ushr 32)).toInt()
-    fun isNegative(): Boolean = nanos < 0L
-    fun isPositive(): Boolean = nanos > 0L
+class Duration internal constructor(internal val raw: Long) : Comparable<Duration> {
+    operator fun plus(other: Duration): Duration = Duration(durationPlus(raw, other.raw))
+    operator fun minus(other: Duration): Duration = this + (-other)
+    operator fun times(scale: Int): Duration = Duration(durationTimes(raw, scale))
+    operator fun div(scale: Int): Duration = Duration(durationDiv(raw, scale))
+    operator fun div(other: Duration): Double = durationRatio(raw, other.raw)
+    operator fun unaryMinus(): Duration = Duration(-(raw shr 1) * 2L + (raw and 1L))
+    override fun compareTo(other: Duration): Int = durationCompare(raw, other.raw)
+    override fun equals(other: Any?): Boolean = other is Duration && raw == other.raw
+    override fun hashCode(): Int = (raw xor (raw ushr 32)).toInt()
+    fun isNegative(): Boolean = raw < 0L
+    fun isPositive(): Boolean = raw > 0L
+    fun isInfinite(): Boolean = raw == Long.MAX_VALUE || raw == Long.MIN_VALUE + 3L
+    fun isFinite(): Boolean = !isInfinite()
     val absoluteValue: Duration get() = if (isNegative()) -this else this
-    val inWholeDays: Long get() = nanos / 86400000000000L
-    val inWholeHours: Long get() = nanos / 3600000000000L
-    val inWholeMinutes: Long get() = nanos / 60000000000L
-    val inWholeSeconds: Long get() = nanos / 1000000000L
-    val inWholeMilliseconds: Long get() = nanos / 1000000L
-    val inWholeMicroseconds: Long get() = nanos / 1000L
-    val inWholeNanoseconds: Long get() = nanos
-    fun toDouble(unit: DurationUnit): Double = nanos.toDouble() / unit.nanos.toDouble()
-    fun toLong(unit: DurationUnit): Long = nanos / unit.nanos
+    val inWholeDays: Long get() = toLong(DurationUnit.DAYS)
+    val inWholeHours: Long get() = toLong(DurationUnit.HOURS)
+    val inWholeMinutes: Long get() = toLong(DurationUnit.MINUTES)
+    val inWholeSeconds: Long get() = toLong(DurationUnit.SECONDS)
+    val inWholeMilliseconds: Long get() = toLong(DurationUnit.MILLISECONDS)
+    val inWholeMicroseconds: Long get() = toLong(DurationUnit.MICROSECONDS)
+    val inWholeNanoseconds: Long get() = toLong(DurationUnit.NANOSECONDS)
+    fun toDouble(unit: DurationUnit): Double = durationToDouble(raw, unit.nanos)
+    fun toLong(unit: DurationUnit): Long = durationToLong(raw, unit.nanos)
 
     override fun toString(): String {
-        if (nanos == 0L) return "0s"
+        if (raw == 0L) return "0s"
+        if (isInfinite()) return if (isNegative()) "-Infinity" else "Infinity"
         val isNegative = isNegative()
-        val absolute = if (isNegative) -nanos else nanos
-        val days = absolute / 86400000000000L
-        val hours = ((absolute / 3600000000000L) % 24L).toInt()
-        val minutes = ((absolute / 60000000000L) % 60L).toInt()
-        val seconds = ((absolute / 1000000000L) % 60L).toInt()
-        val nanoseconds = (absolute % 1000000000L).toInt()
+        val absolute = absoluteValue
+        val days = absolute.inWholeDays
+        val hours = (absolute.inWholeHours % 24L).toInt()
+        val minutes = (absolute.inWholeMinutes % 60L).toInt()
+        val seconds = (absolute.inWholeSeconds % 60L).toInt()
+        val nanoseconds = durationSubsecondNanos(absolute.raw)
         val builder = StringBuilder()
         if (isNegative) builder.append('-')
         val hasDays = days != 0L
@@ -95,6 +98,7 @@ class Duration internal constructor(internal val nanos: Long) : Comparable<Durat
 
     companion object {
         val ZERO: Duration = Duration(0L)
+        val INFINITE: Duration = Duration(Long.MAX_VALUE)
         val Int.nanoseconds: Duration get() = toDuration(DurationUnit.NANOSECONDS)
         val Int.microseconds: Duration get() = toDuration(DurationUnit.MICROSECONDS)
         val Int.milliseconds: Duration get() = toDuration(DurationUnit.MILLISECONDS)
@@ -102,8 +106,15 @@ class Duration internal constructor(internal val nanos: Long) : Comparable<Durat
         val Int.minutes: Duration get() = toDuration(DurationUnit.MINUTES)
         val Int.hours: Duration get() = toDuration(DurationUnit.HOURS)
         val Int.days: Duration get() = toDuration(DurationUnit.DAYS)
+        val Long.nanoseconds: Duration get() = toDuration(DurationUnit.NANOSECONDS)
+        val Long.microseconds: Duration get() = toDuration(DurationUnit.MICROSECONDS)
         val Long.milliseconds: Duration get() = toDuration(DurationUnit.MILLISECONDS)
         val Long.seconds: Duration get() = toDuration(DurationUnit.SECONDS)
+        val Long.minutes: Duration get() = toDuration(DurationUnit.MINUTES)
+        val Long.hours: Duration get() = toDuration(DurationUnit.HOURS)
+        val Long.days: Duration get() = toDuration(DurationUnit.DAYS)
+        val Double.nanoseconds: Duration get() = toDuration(DurationUnit.NANOSECONDS)
+        val Double.microseconds: Duration get() = toDuration(DurationUnit.MICROSECONDS)
         val Double.milliseconds: Duration get() = toDuration(DurationUnit.MILLISECONDS)
         val Double.seconds: Duration get() = toDuration(DurationUnit.SECONDS)
         val Double.minutes: Duration get() = toDuration(DurationUnit.MINUTES)
@@ -112,18 +123,26 @@ class Duration internal constructor(internal val nanos: Long) : Comparable<Durat
     }
 }
 
-fun Int.toDuration(unit: DurationUnit): Duration = Duration(this.toLong() * unit.nanos)
-fun Long.toDuration(unit: DurationUnit): Duration = Duration(this * unit.nanos)
-fun Double.toDuration(unit: DurationUnit): Duration {
-    if (isNaN()) throw IllegalArgumentException("Duration value cannot be NaN.")
-    return Duration(kotlin.math.round(this * unit.nanos.toDouble()).toLong())
-}
+fun Int.toDuration(unit: DurationUnit): Duration = toLong().toDuration(unit)
+fun Long.toDuration(unit: DurationUnit): Duration = Duration(durationFromLong(this, unit.nanos))
+fun Double.toDuration(unit: DurationUnit): Duration = Duration(durationFromDouble(this, unit.nanos))
 
 inline fun measureTime(block: () -> Unit): Duration {
     val start = monotonicNanos()
     block()
-    return Duration(monotonicNanos() - start)
+    return (monotonicNanos() - start).toDuration(DurationUnit.NANOSECONDS)
 }
+
+internal external fun durationFromLong(value: Long, unit: Long): Long
+internal external fun durationFromDouble(value: Double, unit: Long): Long
+internal external fun durationPlus(left: Long, right: Long): Long
+internal external fun durationTimes(raw: Long, scale: Int): Long
+internal external fun durationDiv(raw: Long, scale: Int): Long
+internal external fun durationRatio(left: Long, right: Long): Double
+internal external fun durationCompare(left: Long, right: Long): Int
+internal external fun durationToDouble(raw: Long, unit: Long): Double
+internal external fun durationToLong(raw: Long, unit: Long): Long
+internal external fun durationSubsecondNanos(raw: Long): Int
 
 internal external fun monotonicNanos(): Long
 `;
