@@ -19,7 +19,7 @@ import {
   substituteTraitRef,
   type Type,
 } from './types';
-import { EnumValue, isPlace, RangeValue, sliceItems, SliceView, StructValue, type Value } from './values';
+import { EnumValue, isPlace, NaNValue, RangeValue, sliceItems, SliceView, StructValue, type Value } from './values';
 
 type ConstPath = Extract<PathRes, { kind: 'const' }>;
 interface FunctionInstance {
@@ -201,6 +201,7 @@ function patternValue(value: Value, budget: ExecutionBudget): Known | undefined 
   budget.spend();
   if (isPlace(value)) return patternValue(value.get(), budget);
   if (value === undefined || typeof value !== 'object') return value;
+  if (value instanceof NaNValue) return Number.NaN;
   if (value instanceof EnumValue || value instanceof StructValue) {
     const variant = value instanceof EnumValue ? value.variant : 0;
     return {

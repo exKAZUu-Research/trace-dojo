@@ -1,5 +1,6 @@
 import type { Span } from './ast';
-// code-gauge-allow-file fileNcss 529 -- Keeps type-directed arithmetic, comparison, and copying with their shared runtime hooks.
+// code-gauge-allow-file fileNcss 538 -- Keeps type-directed arithmetic, comparison, and copying with their shared runtime hooks.
+import { floatNumber } from './floatBits';
 import { bigintToF32 } from './floatFormat';
 import { normalize } from './infer';
 import { RustPanic } from './runtime';
@@ -11,6 +12,7 @@ import {
   isPlace,
   type IterValue,
   MapValue,
+  NaNValue,
   RangeValue,
   SetValue,
   sliceItems,
@@ -176,19 +178,23 @@ export function castValue(value: Value, to: Type): Value {
     const cast = castToInt(value, target.name);
     if (cast !== undefined) return cast;
   }
-  if (target.kind === 'float') {
-    if (typeof value === 'bigint') return target.name === 'f32' ? bigintToF32(value) : Number(value);
-    return target.name === 'f32' ? Math.fround(value as number) : (value as number);
-  }
+  if (target.kind === 'float') return castToFloat(value, target.name === 'f32');
   if (target.kind === 'char') return String.fromCodePoint(Number(value as bigint));
   return value;
+}
+
+function castToFloat(value: Value, single: boolean): Value {
+  if (typeof value === 'bigint') return single ? bigintToF32(value) : Number(value);
+  if (value instanceof NaNValue && value.width === (single ? 32 : 64)) return value;
+  const number = floatNumber(value);
+  return single ? Math.fround(number) : number;
 }
 
 function castToInt(value: Value, name: IntName): Value | undefined {
   if (typeof value === 'bigint') return wrap(name, value);
   if (typeof value === 'boolean') return value ? 1n : 0n;
   if (typeof value === 'string') return wrap(name, BigInt(value.codePointAt(0) ?? 0));
-  if (typeof value === 'number') return saturatingFloatToInt(value, name);
+  if (typeof value === 'number' || value instanceof NaNValue) return saturatingFloatToInt(floatNumber(value), name);
   if (value instanceof EnumValue) return wrap(name, value.def.variants[value.variant].discriminant);
   return undefined;
 }
@@ -230,8 +236,10 @@ export function valuesEqual(type: Type, a: Value, b: Value, rhs: Type = type): b
     if (user !== undefined) return user;
   }
   switch (t.kind) {
+    case 'float': {
+      return floatNumber(x) === floatNumber(y);
+    }
     case 'int':
-    case 'float':
     case 'bool':
     case 'char': {
       return x === y;
@@ -410,6 +418,11 @@ export function testPartialOrder(method: OrderMethod, type: Type, a: Value, b: V
   return order !== undefined && orderTests[method](order);
 }
 
+function partialFloatOrder(a: number, b: number): number | undefined {
+  if (Number.isNaN(a) || Number.isNaN(b)) return undefined;
+  return a === b ? 0 : a < b ? -1 : 1;
+}
+
 /** Compares two values of a type, as `Ord::cmp` and `PartialOrd::partial_cmp` do; NaN compares as `undefined`. */
 // code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of type.
 // code-gauge-allow functionNcss 35 -- One case per kind of type.
@@ -427,8 +440,7 @@ export function compareValues(type: Type, a: Value, b: Value, partial = false, r
       return x === y ? 0 : (x as bigint) < (y as bigint) ? -1 : 1;
     }
     case 'float': {
-      if (Number.isNaN(x) || Number.isNaN(y)) return undefined;
-      return x === y ? 0 : (x as number) < (y as number) ? -1 : 1;
+      return partialFloatOrder(floatNumber(x), floatNumber(y));
     }
     case 'bool': {
       return Number(x) - Number(y);
@@ -572,7 +584,7 @@ export function hashKey(type: Type, value: Value): string {
       return encodeStringKey(textOf(x));
     }
     case 'float': {
-      return `f${String(x)}`;
+      return `f${floatNumber(x)}`;
     }
     case 'tuple': {
       return `(${t.elems.map((elem, index) => hashKey(elem, (x as Value[])[index])).join(',')})`;

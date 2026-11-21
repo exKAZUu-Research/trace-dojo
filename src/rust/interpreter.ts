@@ -1,6 +1,7 @@
 import type { Span } from './ast';
 import type { Checker } from './checker';
 import { type CallSupport, type ClosureCapture, type CompiledFn, Compiler } from './compiler';
+import { derefAll } from './compilerCommon';
 import type { WriteChunk } from './debugText';
 import { Formatter, type Spec } from './fmt';
 import { normalize } from './infer';
@@ -146,7 +147,7 @@ export class Interpreter implements CallSupport {
     let self = this.revealType(typeArgs[0]);
     let receiverArgs = args;
     if (self.kind === 'dyn' && def.selfMode) {
-      const unwrapped = unwrapDyn(args[0]);
+      const unwrapped = unwrapDyn(args[0], def.selfMode === 'mutRef');
       self = unwrapped.type;
       receiverArgs = [unwrapped.receiver, ...args.slice(1)];
     }
@@ -507,14 +508,14 @@ export function fieldTypes(def: AdtDef, args: Type[], variant: number): Type[] {
 }
 
 /** The concrete type and receiver of a trait object's method call. */
-function unwrapDyn(receiver: Value): { type: Type; receiver: Value } {
+function unwrapDyn(receiver: Value, mutable: boolean): { type: Type; receiver: Value } {
   if (receiver instanceof DynValue) {
-    return { type: receiver.type, receiver: receiver.value };
+    return { type: receiver.type, receiver: mutable ? receiver.value : derefAll(receiver.value) };
   }
   if (isPlace(receiver)) {
     const inner = receiver.get();
     if (inner instanceof DynValue) {
-      if (isPlace(inner.value)) return { type: inner.type, receiver: inner.value };
+      if (!mutable || isPlace(inner.value)) return unwrapDyn(inner, mutable);
       return {
         type: inner.type,
         receiver: new AccessorPlace(
@@ -523,7 +524,7 @@ function unwrapDyn(receiver: Value): { type: Type; receiver: Value } {
         ),
       };
     }
-    return unwrapDyn(inner);
+    return unwrapDyn(inner, mutable);
   }
   throw new Error('A trait object call without a trait object');
 }

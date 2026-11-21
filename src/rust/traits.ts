@@ -278,14 +278,15 @@ export class TraitSolver {
     return this.matchImplAnswer(impl, type, traitArgs)?.subst;
   }
 
-  private matchImplAnswer(impl: ImplDef, type: Type, traitArgs: Type[]): { subst: Subst; answer: Answer } | undefined {
+  matchImplSelf(impl: ImplDef, type: Type): Subst | undefined {
     const subst: Subst = new Map(impl.params.map((param) => [param, freshVar()]));
+    return this.unifier.tryUnify(substitute(impl.selfType, subst), type) ? subst : undefined;
+  }
+
+  private matchImplAnswer(impl: ImplDef, type: Type, traitArgs: Type[]): { subst: Subst; answer: Answer } | undefined {
     const snapshot = this.unifier.snapshot();
-    const selfType = substitute(impl.selfType, subst);
-    if (!this.unifier.unify(selfType, type)) {
-      this.unifier.rollback(snapshot);
-      return undefined;
-    }
+    const subst = this.matchImplSelf(impl, type);
+    if (!subst) return undefined;
     if (impl.trait) {
       const implArgs = substituteTraitRef(impl.trait, subst).args;
       for (const [index, arg] of traitArgs.entries()) {

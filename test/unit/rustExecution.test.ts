@@ -6244,3 +6244,97 @@ test('uses live and fixed inner lengths when reserving for flattened vectors', (
     println!("{} {} {} {}", borrowed.capacity(), owned.capacity(), fixed.capacity(), variable.capacity());`);
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '12 12 2 15\n' });
 });
+
+test('autoborrows unsized ranges for conversions and writes through mutable string subranges', () => {
+  const program = rustMain(
+    `let bytes = vec![1u8, 2, 3, 4, 5, 6, 7, 8];
+    let fixed: [u8; 4] = bytes[..4].try_into().unwrap();
+    let copied: Vec<u8> = bytes[4..].into();
+    let mut text = String::with_capacity(64);
+    text.push_str("éHello world");
+    text[2..7].make_ascii_uppercase();
+    let part = &mut text[4..];
+    lower(&mut part[..3]);
+    let first: String = text[..2].into();
+    let boxed: Box<str> = text[2..4].into();
+    println!("{fixed:?} {copied:?} {text} {first} {boxed} {}", text.capacity());`,
+    'fn lower(part: &mut str) { part.make_ascii_lowercase(); }'
+  );
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[1, 2, 3, 4] [5, 6, 7, 8] éHEllo world é HE 64\n',
+  });
+});
+
+test('preserves NaN payloads without changing partial comparison or formatting', () => {
+  const program = rustMain(`let single = f32::from_bits(0x7f800001);
+    let double = f64::from_bits(0x7ff0000000000001);
+    let negative = double.copysign(-0.0);
+    let numbers = [double.clone(), negative, -double, negative.abs()];
+    println!("{:x} {:x} {} {:?} {} {:?}", single.to_bits(), double.to_bits(), single != single,
+             single.total_cmp(&f32::NAN), negative.is_sign_negative(), double.partial_cmp(&negative));
+    println!("{:x?} {:?} {}", numbers.map(f64::to_bits), double, f64::from_bits(0x8000000000000000).to_bits());`);
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '7f800001 7ff0000000000001 true Less true None\n[7ff0000000000001, fff0000000000001, fff0000000000001, 7ff0000000000001] NaN 9223372036854775808\n',
+  });
+});
+
+test('reads and reborrows a mutable trait object through shared dispatch', () => {
+  const program = rustMain(
+    `let mut square = Square(2.0);
+    println!("{}", show(&mut square));
+    println!("{}", twice(&mut square));
+    let dynamic: &mut dyn Shape = &mut square;
+    let shared: &dyn Shape = dynamic;
+    println!("{}", shared.area());`,
+    `trait Shape { fn area(&self) -> f64; fn grow(&mut self); }
+struct Square(f64);
+impl Shape for Square {
+    fn area(&self) -> f64 { self.0 * self.0 }
+    fn grow(&mut self) { self.0 += 1.0; }
+}
+fn show(shape: &dyn Shape) -> f64 { shape.area() }
+fn twice(shape: &mut dyn Shape) -> f64 {
+    println!("{} {}", shape.area(), show(&*shape));
+    shape.grow();
+    show(shape)
+}`
+  );
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '4\n4 4\n9\n9\n' });
+});
+
+test('checks moves inside an index even under another projection', () => {
+  for (const [values, projection] of [
+    ['[[1]]', '[0]'],
+    ['[Field { value: 1 }]', '.value'],
+  ]) {
+    const program = rustMain(
+      `let values = ${values};
+        let text = String::from("moved");
+        println!("{}", values[{ drop(text); 0 }]${projection});
+        println!("{text}");`,
+      'struct Field { value: i32 }'
+    );
+    expect(executeProgram('rust', program)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [expect.objectContaining({ message: expect.stringContaining('ムーブされた') })],
+    });
+  }
+});
+
+test('compares heterogeneous iterator items and accepts an iterable right operand', () => {
+  const program = rustMain(
+    `let strings = [String::from("hi")];
+    let slices = ["hi"];
+    println!("{} {} {}", strings.iter().eq(slices.iter()),
+        [Left(2)].into_iter().eq::<_>([Right(2)]), [Left(2)].into_iter().eq([Right(3)]));`,
+    `struct Left(i32);
+struct Right(i32);
+impl PartialEq<Right> for Left {
+    fn eq(&self, other: &Right) -> bool { self.0 == other.0 }
+}`
+  );
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'true true false\n' });
+});

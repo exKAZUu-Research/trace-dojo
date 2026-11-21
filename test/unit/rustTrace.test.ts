@@ -407,3 +407,17 @@ test('drops shared-reference aliases when their binding scope ends', () => {
 }`;
   expect(traceProgram('rust', source, source).finalVars).toEqual({ n: 2 });
 });
+
+test('traces the live value of an indexed referent without rerunning the index', () => {
+  const program = `fn main() {
+    let mut items = vec![1, 2];
+    let first = &items[{ println!("index"); 0 }];
+    let alias = first;
+    println!("{}", alias);
+    items[0] = 9;
+    let done = true;
+  }`;
+  const trace = traceProgram('rust', program, program);
+  expect(trace.stdout).toBe('index\n1\n');
+  expect(trace.finalVars).toEqual({ items: [9, 2], first: 9, alias: 9, done: true });
+});

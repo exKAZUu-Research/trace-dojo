@@ -310,8 +310,7 @@ export class BorrowChecker {
       const inner = this.expr(expr.operand, state, 'read');
       return expr.kind === 'index' ? this.expr(expr.index, inner, 'move') : inner;
     }
-    const current = expr.kind === 'index' ? this.expr(expr.index, state, 'move') : state;
-    return this.usePlaceAt(place, expr, current, mode);
+    return this.usePlaceAt(place, expr, this.placeIndexes(expr, state), mode);
   }
 
   private binary(expr: Extract<Expr, { kind: 'binary' }>, state: State): State {
@@ -451,7 +450,8 @@ export class BorrowChecker {
         current = this.expr(expr.receiver, current, 'mut');
       } else {
         const adjusted = typeAfter(expr.receiver.ty, receiver.derefs);
-        const moves = method.fn.selfMode === 'value' && !throughRef && !this.isCopy(adjusted);
+        const moves =
+          receiver.autoref === 'none' && method.fn.selfMode === 'value' && !throughRef && !this.isCopy(adjusted);
         current = this.expr(expr.receiver, current, moves ? 'move' : 'read');
       }
     } else {
@@ -659,7 +659,6 @@ export class BorrowChecker {
     }
   }
 
-  /** Evaluates the indexes of an assigned place (`v[i] = x` reads `i`). */
   private placeIndexes(target: Expr, state: State): State {
     if (target.kind === 'index') return this.expr(target.index, this.placeIndexes(target.operand, state), 'move');
     if (target.kind === 'field' || (target.kind === 'unary' && target.op === '*')) {

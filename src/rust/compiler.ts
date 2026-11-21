@@ -4,7 +4,7 @@ import type { Block, Expr, Pattern, Span, Stmt } from './ast';
 import { patternBindings } from './astWalk';
 import type { Checker } from './checker';
 import { compileCall, compileMethodCall } from './compilerCalls';
-import { construct, evaluateValues, isPlaceExpr, isRefType, LocalPlace } from './compilerCommon';
+import { construct, derefAll, evaluateValues, isPlaceExpr, isRefType, LocalPlace } from './compilerCommon';
 import { compileFor, compileIf, compileLoop, compileMatch, compileWhile } from './compilerControl';
 import { compileMacro } from './compilerMacros';
 import { compileBinary, compileCompoundAssign, compileUnary } from './compilerOperators';
@@ -19,6 +19,7 @@ import { ControlSignal, type Frame, type FunctionInfo, MOVED, UNASSIGNED } from 
 import { runtimeType } from './runtimeTypes';
 import { type ConstDef, type FnDef, isUnit, resolve, shallow, substitute, type Type } from './types';
 import {
+  AccessorPlace,
   CellPlace,
   DynValue,
   EnumValue,
@@ -269,8 +270,8 @@ export class Compiler {
     }
     // Destructuring a place moves the parts its bindings take; the place keeps the rest.
     if (stmt.pattern.kind !== 'binding' && isPlaceExpr(stmt.init, this.annotations)) return this.destructure(stmt);
-    const init = this.value(stmt.init);
     if (stmt.else) {
+      const init = this.value(stmt.init);
       const matcher = this.compileMatcher(stmt.pattern);
       const elseBlock = this.compileBlock(stmt.else, true);
       const run: Eval = (frame) => {
@@ -284,11 +285,10 @@ export class Compiler {
     const bind = this.compileBinder(stmt.pattern);
     const local =
       stmt.pattern.kind === 'binding' && !stmt.pattern.sub ? this.annotations.bindings.get(stmt.pattern) : undefined;
-    const refer = local && this.referent(stmt.init, local.slot);
+    const init = this.bindingValue(stmt.init, local?.slot);
     const run: Eval = (frame) => {
       frame.runtime.spend();
       bind(frame, init(frame));
-      refer?.(frame);
       return UNIT_VALUE;
     };
     return this.withStep(stmt.span, run, isObjectCreation(stmt.init, this.annotations));
@@ -302,32 +302,32 @@ export class Compiler {
     };
   }
 
-  /**
-   * Records the place a variable's shared reference refers to (`let r = &x;`, `r = &s.name;`, `let r2 = r;`), for the
-   * trace to show its current value, or forgets the one it had.
-   */
-  private referent(expr: Expr, slot: number): ((frame: Frame) => void) | undefined {
-    if (!expr.ty) return undefined;
+  // code-gauge-allow functionCognitiveComplexity 17 -- Direct borrows, reference copies and overwrites update the same trace slot.
+  private bindingValue(expr: Expr, slot: number | undefined): Eval {
+    const read = this.value(expr);
+    if (slot === undefined || !expr.ty) return read;
     const type = normalize(shallow(expr.ty));
-    if (type.kind !== 'ref' || type.mutable) return undefined;
-    if (expr.kind === 'ref' && this.ownedPlace(expr.operand)) {
+    if (type.kind !== 'ref' || type.mutable) return read;
+    if (expr.kind === 'ref' && this.ownedPlace(expr.operand) && !this.annotations.coercions.has(expr)) {
       const place = this.place(expr.operand);
       let root = expr.operand;
-      while (root.kind === 'field') root = root.operand;
-      const rootRes = this.annotations.paths.get(root);
-      const rootSlot = rootRes?.kind === 'local' ? rootRes.local.slot : -1;
-      return (frame) => void frame.referents.set(slot, { place: place(frame), root: rootSlot });
-    }
-    const res = expr.kind === 'path' ? this.annotations.paths.get(expr) : undefined;
-    if (res?.kind === 'local') {
-      const source = res.local.slot;
+      while (root.kind === 'field' || root.kind === 'index' || root.kind === 'unary') root = root.operand;
+      const res = this.annotations.paths.get(root);
+      const rootSlot = res?.kind === 'local' ? res.local.slot : -1;
       return (frame) => {
-        const place = frame.referents.get(source);
-        if (place) frame.referents.set(slot, place);
-        else frame.referents.delete(slot);
+        const target = place(frame);
+        frame.referents.set(slot, { place: target, root: rootSlot });
+        return target.get();
       };
     }
-    return (frame) => void frame.referents.delete(slot);
+    const res = expr.kind === 'path' ? this.annotations.paths.get(expr) : undefined;
+    return (frame) => {
+      const value = read(frame);
+      const referent = res?.kind === 'local' ? frame.referents.get(res.local.slot) : undefined;
+      if (referent) frame.referents.set(slot, referent);
+      else frame.referents.delete(slot);
+      return value;
+    };
   }
 
   private destructure(stmt: Extract<Stmt, { kind: 'let' }>): Eval {
@@ -429,6 +429,10 @@ export class Compiler {
       const field = this.annotations.fields.get(expr);
       return field !== undefined && field.derefs.every((step) => step === 'own') && this.ownedPlace(expr.operand);
     }
+    if (expr.kind === 'index') {
+      const index = this.annotations.indexes.get(expr);
+      return !!index && !index.range && index.derefs.every((step) => step === 'own') && this.ownedPlace(expr.operand);
+    }
     if (expr.kind !== 'unary' || expr.op !== '*') return false;
     const operand = normalize(shallow(expr.operand.ty!));
     return operand.kind === 'adt' && operand.def.builtin === 'Box' && this.ownedPlace(expr.operand);
@@ -450,8 +454,7 @@ export class Compiler {
         };
       }
       case 'dyn': {
-        const type = runtimeType(coercion.type);
-        return (frame) => new DynValue(type(frame), read(frame));
+        return dynCoercion(read, runtimeType(coercion.type), coercion.mutable);
       }
       case 'intoIter': {
         const from = runtimeType(coercion.from);
@@ -549,10 +552,9 @@ export class Compiler {
     if (res?.kind === 'discard') return (frame) => (value(frame), UNIT_VALUE);
     if (res?.kind === 'local' && res.local.mode === 'move') {
       const slot = res.local.slot;
-      const refer = this.referent(expr.value, slot);
+      const assigned = this.bindingValue(expr.value, slot);
       return (frame) => {
-        frame.locals[slot] = value(frame);
-        refer?.(frame);
+        frame.locals[slot] = assigned(frame);
         return UNIT_VALUE;
       };
     }
@@ -747,6 +749,18 @@ function readFloat(_c: Compiler, expr: ExprOf<'float'>): Eval {
 function readLiteral(_c: Compiler, expr: ExprOf<'bool' | 'char' | 'str'>): Eval {
   const value = expr.value;
   return () => value;
+}
+
+function dynCoercion(read: Eval, type: (frame: Frame) => Type, mutable: boolean): Eval {
+  if (!mutable) return (frame) => new DynValue(type(frame), derefAll(read(frame)));
+  return (frame) => {
+    const target = read(frame) as Place;
+    const concrete = type(frame);
+    return new AccessorPlace(
+      () => new DynValue(concrete, target.get()),
+      (value) => target.set(value instanceof DynValue ? value.value : value)
+    );
+  };
 }
 
 function readRef(c: Compiler, expr: ExprOf<'ref'>): Eval {

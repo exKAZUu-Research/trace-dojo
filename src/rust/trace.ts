@@ -5,7 +5,8 @@ import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder
 import type { DisplayNode, TraceItemVariable, TraceScalar } from '../problems/trace';
 import { buildProgram } from './build';
 import { runProgram } from './execute';
-import { debugFloat, displayFloat } from './floatFormat';
+import { floatNumber } from './floatBits';
+import { displayFloat } from './floatFormat';
 import { DEFAULT_SPEC, Formatter } from './fmt';
 import { normalize } from './infer';
 import { fieldTypes } from './interpreter';
@@ -144,7 +145,7 @@ function scalarOf(value: Value, type: Type): Scalar | typeof NOT_SCALAR {
     }
     case 'float': {
       // Learners write a float as Java shows a double.
-      return Number(t.name === 'f32' ? displayFloat(v as number, true) : (v as number));
+      return Number(t.name === 'f32' ? displayFloat(floatNumber(v), true) : floatNumber(v));
     }
     case 'bool': {
       return v as boolean;
@@ -301,5 +302,3 @@ function keyLabel(key: Value, type: Type): string {
   if (scalar !== NOT_SCALAR) return String(scalar);
   return keyFormatter.debug(key, type, DEFAULT_SPEC, undefined);
 }
-
-export { debugFloat };

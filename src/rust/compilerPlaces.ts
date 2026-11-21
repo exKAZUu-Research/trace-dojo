@@ -1,10 +1,12 @@
 import type { Expr, Span } from './ast';
+import { madeString, stringCapacity } from './capacity';
 import type { Compiler, Eval, PlaceEval } from './compiler';
 import { LocalPlace } from './compilerCommon';
 import { normalize } from './infer';
 import { RustPanic } from './runtime';
 import { runtimeType } from './runtimeTypes';
 import { shallow } from './types';
+import { decodeUtf8 } from './utf8';
 import {
   AccessorPlace,
   CellPlace,
@@ -116,6 +118,7 @@ function indexPlace(c: Compiler, expr: ExprOf<'index'>): PlaceEval {
   const index = c.value(expr.index);
   const span = res.overloaded ? expr.bracketSpan : expr.span;
   if (res.range) {
+    if (res.container === 'str') return strRangePlace(c, base, index, span);
     const read = compileIndex(c, expr);
     return (frame) => new CellPlace(read(frame));
   }
@@ -129,6 +132,26 @@ function indexPlace(c: Compiler, expr: ExprOf<'index'>): PlaceEval {
       const { base: array, start } = sliceBase(container);
       return new ElementPlace(array, start + Number(position), temporaryOwner(place));
     });
+  };
+}
+
+function strRangePlace(c: Compiler, base: PlaceEval, index: Eval, span: Span): PlaceEval {
+  return (frame) => {
+    const owner = base(frame);
+    const text = textOf(owner);
+    const range = index(frame) as RangeValue | undefined;
+    const part = c.support.strSlice(text, range, span);
+    const offset = Number(range?.sliceStart() ?? 0n);
+    const start = offset === 0 ? 0 : decodeUtf8(new TextEncoder().encode(text).subarray(0, offset)).length;
+    const end = start + part.length;
+    return new AccessorPlace(
+      () => textOf(owner).slice(start, end),
+      (value) => {
+        const whole = textOf(owner);
+        const updated = whole.slice(0, start) + textOf(value) + whole.slice(end);
+        owner.set(madeString(updated, stringCapacity(owner)));
+      }
+    );
   };
 }
 

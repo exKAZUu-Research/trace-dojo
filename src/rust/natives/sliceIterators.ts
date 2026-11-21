@@ -194,17 +194,16 @@ function splitCursor(
 }
 
 function splitDebug(state: SplitState, reverse: boolean, view: DebugPart): DebugPart {
-  const inner = fieldsPart('Split', [
+  const inner = fieldsPart(reverse ? 'RSplit' : 'Split', [
     ['v', view],
     ['finished', numberPart(state.finished)],
   ]);
   if (state.count === undefined) return inner;
-  const split = reverse ? fieldsPart('RSplit', [['inner', inner]]) : inner;
   return fieldsPart(reverse ? 'RSplitN' : 'SplitN', [
     [
       'inner',
       fieldsPart('GenericSplitN', [
-        ['iter', split],
+        ['iter', inner],
         ['count', numberPart(state.count)],
       ]),
     ],

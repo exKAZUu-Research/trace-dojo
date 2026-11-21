@@ -777,7 +777,7 @@ export class Checker {
       Clone: `${type} は Clone ではありません（#[derive(Clone)] を付けてください）。`,
       PartialEq: `${type} どうしは比べられません（#[derive(PartialEq)] を付けてください）。`,
       PartialOrd: `${type} どうしは大小を比べられません（#[derive(PartialOrd)] を付けてください）。`,
-      Ord: `${type} は Ord ではありません。${orderHint(obligation.type)}`,
+      Ord: `${type} は Ord ではありません。${orderHint(obligation.type, this.solver)}`,
     };
     compileError(obligation.span, hints[name] ?? `${type} にトレイト ${trait} が実装されていません。`);
   }

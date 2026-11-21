@@ -10,8 +10,10 @@ import {
   type ImplDef,
   isBuiltin,
   ref,
+  resolve,
   shallow,
   substitute,
+  substituteTraitRef,
   type TraitDef,
   type TraitRef,
   type Type,
@@ -309,8 +311,11 @@ function applies(solver: TraitSolver, attempt: () => unknown): boolean {
 }
 
 /** The type `Self` must be for a method with this receiver mode to take `receiverType`. */
-function selfForMode(mode: 'value' | 'ref' | 'mutRef', receiverType: Type): Type | undefined {
-  if (mode === 'value') return receiverType;
+function selfForMode(mode: 'value' | 'ref' | 'mutRef', receiverType: Type, allowUnsized = false): Type | undefined {
+  if (mode === 'value') {
+    const t = normalize(shallow(receiverType));
+    return allowUnsized || (t.kind !== 'str' && t.kind !== 'slice' && t.kind !== 'dyn') ? receiverType : undefined;
+  }
   const t = shallow(receiverType);
   if (t.kind !== 'ref') return undefined;
   if (mode === 'mutRef' && !t.mutable) return undefined;
@@ -322,13 +327,53 @@ function ownParams(fn: FnDef): Type[] {
   return fn.params.slice(fn.parentParamCount).map(() => freshVar());
 }
 
+export function failedInherentBound(
+  program: Program,
+  solver: TraitSolver,
+  receiver: Type,
+  name: string
+): { type: Type; ref: TraitRef } | undefined {
+  for (const { type } of autoderefSteps(program, receiver)) {
+    for (const impl of program.impls) {
+      const fn = impl.methods.get(name);
+      if (impl.trait || !fn?.selfMode) continue;
+      const missing = failedImplBound(solver, impl, arrayAsSlice(fn, type));
+      if (missing) return missing;
+    }
+  }
+  return undefined;
+}
+
+function failedImplBound(
+  solver: TraitSolver,
+  impl: ImplDef,
+  receiver: Type
+): { type: Type; ref: TraitRef } | undefined {
+  const snapshot = solver.unifier.snapshot();
+  try {
+    const subst = solver.matchImplSelf(impl, receiver);
+    if (!subst) return undefined;
+    for (const param of impl.params) {
+      const type = subst.get(param)!;
+      for (const bound of param.bounds) {
+        const ref = substituteTraitRef(bound, subst);
+        if (solver.implements(type, ref) === 'no')
+          return { type: resolve(type), ref: { ...ref, args: ref.args.map((arg) => resolve(arg)) } };
+      }
+    }
+    return undefined;
+  } finally {
+    solver.unifier.rollback(snapshot);
+  }
+}
+
 function matchSelf(
   solver: TraitSolver,
   impl: ImplDef,
   fn: FnDef,
   receiverType: Type
 ): Omit<MethodMatch, 'adjust'> | undefined {
-  const selfType = selfForMode(fn.selfMode!, receiverType);
+  const selfType = selfForMode(fn.selfMode!, receiverType, !impl.trait);
   if (!selfType) return undefined;
   const subst = solver.matchImpl(impl, arrayAsSlice(fn, selfType));
   if (!subst) return undefined;

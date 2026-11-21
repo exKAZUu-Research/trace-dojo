@@ -5,13 +5,14 @@ import type { AdtDef, Type } from './types';
 
 /**
  * A value at run time. Types decide how a value reads, so values carry no types: integers are bigints, floats
- * numbers, `char`s and text JS strings, tuples, arrays, and `Vec`s JS arrays, and a shared reference is the value it
+ * numbers or payload-preserving NaN values, `char`s and text JS strings, tuples, arrays, and `Vec`s JS arrays, and a shared reference is the value it
  * refers to, since nothing can change that value while the reference lives. A mutable reference is a {@link Place}.
  * `Box<T>` is the boxed value itself.
  */
 export type Value =
   | bigint
   | number
+  | NaNValue
   | boolean
   | string
   | StringValue
@@ -32,6 +33,13 @@ export type Value =
   | undefined;
 
 export const UNIT_VALUE: Value[] = Object.freeze([]) as unknown as Value[];
+
+export class NaNValue {
+  constructor(
+    readonly bits: bigint,
+    readonly width: 32 | 64
+  ) {}
+}
 
 export class StringValue {
   constructor(

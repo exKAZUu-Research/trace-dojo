@@ -2,6 +2,7 @@ import type { Expr, Span } from './ast';
 import { concatStrings, sizeTable } from './capacity';
 import type { Compiler, Eval } from './compiler';
 import { derefAll, evaluateValues, isStringType, stringish, stripRefs, withEvaluatedValues } from './compilerCommon';
+import { floatNumber, negateFloat } from './floatBits';
 import { normalize } from './infer';
 import { btreeSetOp, hashSetMembers, type SetOp } from './natives/setOps';
 import { cloneValue, floatArith, intArith, overflow, testPartialOrder, valuesEqual, valuesUnequal, wrap } from './ops';
@@ -36,7 +37,7 @@ export function compileUnary(c: Compiler, expr: ExprOf<'unary'>): Eval {
       return name.startsWith('u') ? BigInt.asUintN(intBitsOf(name), ~value) : ~value;
     };
   }
-  if (type.kind === 'float') return (frame) => -(derefAll(operand(frame)) as number);
+  if (type.kind === 'float') return (frame) => negateFloat(operand(frame));
   const name = (type as { name: IntName }).name;
   return (frame) => {
     const negated = -(derefAll(operand(frame)) as bigint);
@@ -113,7 +114,7 @@ function arithmetic(expr: ExprOf<'binary'>, left: Eval, right: Eval, rightCoerce
   }
   if (type.kind === 'float') {
     const f32 = type.name === 'f32';
-    return (frame) => floatArith(op, derefAll(left(frame)) as number, derefAll(right(frame)) as number, f32);
+    return (frame) => floatArith(op, floatNumber(left(frame)), floatNumber(right(frame)), f32);
   }
   return intArithmetic(op, (type as { name: IntName }).name, left, right, span);
 }
@@ -157,9 +158,9 @@ export function compileCompoundAssign(c: Compiler, expr: ExprOf<'compoundAssign'
   if (type.kind === 'float') {
     const f32 = type.name === 'f32';
     return (frame) => {
-      const operand = derefAll(value(frame)) as number;
+      const operand = floatNumber(value(frame));
       const target = place(frame);
-      target.set(floatArith(op, target.get() as number, operand, f32));
+      target.set(floatArith(op, floatNumber(target.get()), operand, f32));
       return UNIT_VALUE;
     };
   }

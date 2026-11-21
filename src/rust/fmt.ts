@@ -1,6 +1,7 @@
-// code-gauge-allow-file fileNcss 431 -- Follows std::fmt's formatting rules case by case.
+// code-gauge-allow-file fileNcss 432 -- Follows std::fmt's formatting rules case by case.
 import type { FormatPiece, FormatSpec } from './ast';
 import { type DebugPart, emit, list, rangeText, structText, tupleText, type WriteChunk } from './debugText';
+import { floatNumber } from './floatBits';
 import { debugFloat, displayFloat, expFloat, fixedFloat } from './floatFormat';
 import { normalize } from './infer';
 import { iteratorDebug } from './iterDebug';
@@ -133,7 +134,7 @@ export class Formatter {
         return padNumber(integerText(v as bigint, spec), spec, 0, write);
       }
       case 'float': {
-        return padNumber(this.floatText(v as number, t.name === 'f32', spec), spec, 0, write);
+        return padNumber(this.floatText(floatNumber(v), t.name === 'f32', spec), spec, 0, write);
       }
       case 'bool': {
         return padString(String(v), spec, write);
@@ -220,8 +221,8 @@ export class Formatter {
       }
       case 'float': {
         if (spec.precision !== undefined)
-          return padNumber(this.floatText(v as number, t.name === 'f32', spec), spec, 0, write);
-        let text = debugFloat(v as number, t.name === 'f32');
+          return padNumber(this.floatText(floatNumber(v), t.name === 'f32', spec), spec, 0, write);
+        let text = debugFloat(floatNumber(v), t.name === 'f32');
         if (spec.sign === '+' && !text.startsWith('-') && text !== 'NaN') text = `+${text}`;
         return padNumber(text, spec, 0, write);
       }
@@ -424,8 +425,8 @@ export class Formatter {
       if (spec.precision !== undefined) this.hooks.allocateString(spec.precision, 0);
       const letter = trait === 'lowerExp' ? 'e' : 'E';
       if (t.kind === 'float') {
-        let text = expFloat(v as number, t.name === 'f32', spec.precision, letter);
-        if (spec.sign === '+' && !text.startsWith('-') && !Number.isNaN(v as number)) text = `+${text}`;
+        let text = expFloat(floatNumber(v), t.name === 'f32', spec.precision, letter);
+        if (spec.sign === '+' && !text.startsWith('-') && !Number.isNaN(floatNumber(v))) text = `+${text}`;
         return padNumber(text, spec, 0, write);
       }
       return padNumber(intExp(v as bigint, spec.precision, letter, spec.sign === '+'), spec, 0, write);

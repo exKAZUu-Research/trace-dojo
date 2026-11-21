@@ -1,4 +1,5 @@
 // code-gauge-allow-file fileNcss 491 -- One native per method of the standard library.
+import { floatBits, floatFromBits, floatNumber as float, signedFloat } from '../floatBits';
 import { debugFloat, decimalToF32 } from '../floatFormat';
 import { F64_CONSTS, FLOAT_LIMITS, floatConstant } from '../floatLimits';
 import { normalize } from '../infer';
@@ -130,8 +131,8 @@ export function parseFloatText(ctx: NativeContext, text: string, f32: boolean): 
   return ok(ctx, sign * (f32 ? decimalToF32(match[3]) : Number(match[3])));
 }
 
-function float(value: Value): number {
-  return deref(value) as number;
+function floatWidth(ctx: NativeContext): 32 | 64 {
+  return isF32(ctx) ? 32 : 64;
 }
 
 function round(ctx: NativeContext, value: number): number {
@@ -461,7 +462,7 @@ const floating: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
     const unit = base === 1 || (Math.abs(base) === 1 && Math.abs(float(n)) === Number.POSITIVE_INFINITY);
     return unit ? 1 : round(ctx, Math.pow(base, float(n)));
   },
-  abs: ([a], ctx) => round(ctx, Math.abs(float(a))),
+  abs: ([a], ctx) => signedFloat(a, floatWidth(ctx), false),
   floor: ([a], ctx) => round(ctx, Math.floor(float(a))),
   ceil: ([a], ctx) => round(ctx, Math.ceil(float(a))),
   round: ([a], ctx) => {
@@ -480,22 +481,8 @@ const floating: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
   sin: ([a], ctx) => round(ctx, Math.sin(float(a))),
   cos: ([a], ctx) => round(ctx, Math.cos(float(a))),
   sin_cos: ([a], ctx) => [round(ctx, Math.sin(float(a))), round(ctx, Math.cos(float(a)))],
-  to_bits: ([a], ctx) => {
-    if (!isF32(ctx)) return floatBits(float(a));
-    const view = new DataView(new ArrayBuffer(4));
-    view.setFloat32(0, float(a));
-    return BigInt(view.getUint32(0));
-  },
-  from_bits: ([bits], ctx) => {
-    if (isF32(ctx)) {
-      const view = new DataView(new ArrayBuffer(4));
-      view.setUint32(0, Number(bits as bigint));
-      return view.getFloat32(0);
-    }
-    const view = new DataView(new ArrayBuffer(8));
-    view.setBigUint64(0, bits as bigint);
-    return view.getFloat64(0);
-  },
+  to_bits: ([a], ctx) => floatBits(a, floatWidth(ctx)),
+  from_bits: ([bits], ctx) => floatFromBits(bits as bigint, floatWidth(ctx)),
   tan: ([a], ctx) => round(ctx, Math.tan(float(a))),
   asin: ([a], ctx) => round(ctx, Math.asin(float(a))),
   acos: ([a], ctx) => round(ctx, Math.acos(float(a))),
@@ -535,7 +522,7 @@ const floating: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
     }
     // Comparing keeps -0 and NaN as they are, where `Math.max(-0, 0)` gives 0.
     const value = float(a);
-    return value < float(min) ? float(min) : value > float(max) ? float(max) : value;
+    return value < float(min) ? deref(min) : value > float(max) ? deref(max) : deref(a);
   },
   is_nan: ([a]) => Number.isNaN(float(a)),
   is_infinite: ([a]) => !Number.isFinite(float(a)) && !Number.isNaN(float(a)),
@@ -545,18 +532,17 @@ const floating: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
     if (Number.isNaN(value)) return Number.NaN;
     return value > 0 || Object.is(value, 0) ? 1 : -1;
   },
-  is_sign_positive: ([a]) => !signBit(float(a)),
-  is_sign_negative: ([a]) => signBit(float(a)),
+  is_sign_positive: ([a], ctx) => !signBit(a, floatWidth(ctx)),
+  is_sign_negative: ([a], ctx) => signBit(a, floatWidth(ctx)),
   // Rust multiplies by a constant of the type: `180 / PI` and `PI / 180` rounded to it.
   to_degrees: ([a], ctx) => round(ctx, float(a) * round(ctx, 180 / Math.PI)),
   to_radians: ([a], ctx) => round(ctx, float(a) * round(ctx, round(ctx, Math.PI) / 180)),
   mul_add: ([a, b, c], ctx) => fma(float(a), float(b), float(c), isF32(ctx)),
   recip: ([a], ctx) => round(ctx, 1 / float(a)),
   total_cmp: ([a, b], ctx) => {
-    const x = float(a);
-    const y = float(b);
-    const kx = totalOrderKey(x);
-    const ky = totalOrderKey(y);
+    const width = floatWidth(ctx);
+    const kx = totalOrderKey(a, width);
+    const ky = totalOrderKey(b, width);
     return ordering(ctx, kx < ky ? -1 : kx > ky ? 1 : 0);
   },
   rem_euclid: ([a, b], ctx) => {
@@ -569,26 +555,19 @@ const floating: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
     return round(ctx, q);
   },
   copysign: ([a, sign], ctx) => {
-    const magnitude = Math.abs(float(a));
-    const negative = signBit(float(sign));
-    return round(ctx, negative ? -magnitude : magnitude);
+    const width = floatWidth(ctx);
+    return signedFloat(a, width, signBit(sign, width));
   },
 };
 
-/** The integer that orders floats as `total_cmp` does: by their bits, with negative numbers' magnitude bits flipped. */
-function totalOrderKey(value: number): bigint {
-  const bits = BigInt.asIntN(64, floatBits(value));
-  return bits ^ ((bits >> 63n) & 0x7f_ff_ff_ff_ff_ff_ff_ffn);
+function totalOrderKey(value: Value, width: 32 | 64): bigint {
+  const bits = BigInt.asIntN(width, floatBits(value, width));
+  const lowerBits = (1n << BigInt(width - 1)) - 1n;
+  return bits < 0n ? bits ^ lowerBits : bits;
 }
 
-function signBit(value: number): boolean {
-  return floatBits(value) >> 63n !== 0n;
-}
-
-function floatBits(value: number): bigint {
-  const view = new DataView(new ArrayBuffer(8));
-  view.setFloat64(0, value);
-  return view.getBigUint64(0);
+function signBit(value: Value, width: 32 | 64): boolean {
+  return BigInt.asIntN(width, floatBits(value, width)) < 0n;
 }
 
 /** `powi` as compiler-rt's `__powidf2` and `__powisf2` compute it, rounding each step to the type (`round`). */
@@ -630,7 +609,7 @@ function fma(a: number, b: number, c: number, f32: boolean): number {
 
 /** A finite double as an integer mantissa and a power of two. */
 function decompose(value: number): [bigint, number] {
-  const bits = floatBits(value);
+  const bits = floatBits(value, 64);
   const sign = bits >> 63n ? -1n : 1n;
   const exponentBits = Number((bits >> 52n) & 0x7_ffn);
   let mantissa = bits & ((1n << 52n) - 1n);

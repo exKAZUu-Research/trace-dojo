@@ -1,9 +1,10 @@
 // code-gauge-allow-file fileNcss 980 -- One native per method of the standard library.
 import { inPlaceCapacity, reserveVec, setVecCapacity, sizeTable, type TableMap, vecCapacity } from '../capacity';
 import type { DebugPart } from '../debugText';
+import { floatNumber } from '../floatBits';
 import { normalize } from '../infer';
 import { type DebugValue, described, fieldsPart, iteratorDebug, numberPart, optionPart } from '../iterDebug';
-import { intoIterShape } from '../iterTypes';
+import { intoIterItem, intoIterShape } from '../iterTypes';
 import {
   allocateCollectionSnapshot,
   castValue,
@@ -1233,14 +1234,16 @@ define({
   'IterImpl<_, _>::eq': ([self, other], ctx) => {
     // `eq` stops at the first difference.
     const a = iterOf(self);
-    const b = iterOf(other);
+    const otherType = ctx.typeArgs[2];
+    const b = iterOf(toIterator(other, otherType));
+    const item = intoIterItem(otherType)!;
     for (;;) {
       ctx.runtime.spend();
       const x = nextOf(a);
       if (x === DONE) return nextOf(b) === DONE;
       const equal = ctx.runtime.withRoots([x], () => {
         const y = nextOf(b);
-        return y !== DONE && ctx.runtime.withRoots([y], () => valuesEqual(ctx.typeArgs[0], x, y));
+        return y !== DONE && ctx.runtime.withRoots([y], () => valuesEqual(ctx.typeArgs[0], x, y, item));
       });
       if (!equal) return false;
     }
@@ -1476,7 +1479,7 @@ function sumOrProduct(ctx: NativeContext, iter: IterValue, type: Type, op: '+' |
     if (item === DONE) return total;
     total =
       t.kind === 'float'
-        ? floatStep(t.name, op, total as number, deref(item) as number)
+        ? floatStep(t.name, op, floatNumber(total), floatNumber(item))
         : intStep(ctx, t, op, total as bigint, deref(item) as bigint);
   }
 }

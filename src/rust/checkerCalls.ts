@@ -15,7 +15,7 @@ import { requireMutablePlace } from './checkerPlaces';
 import { normalize } from './infer';
 import type { Module } from './items';
 import { compileError } from './items';
-import { autoderefSteps, boundsOf, lookupMethod } from './methods';
+import { autoderefSteps, boundsOf, failedInherentBound, lookupMethod } from './methods';
 import { typeAfter } from './regions';
 import {
   adt,
@@ -341,6 +341,8 @@ function noMethod(c: Checker, expr: Extract<Expr, { kind: 'methodCall' }>, recei
       `メソッド ${expr.method} はトレイト ${trait.name} のものなので、use でトレイトを取り込んでください。`
     );
   }
+  const missing = failedInherentBound(c.program, c.solver, receiverType, expr.method);
+  if (missing) c.require(missing.type, missing.ref, expr.methodSpan);
   const t = typeToString(resolve(receiverType));
   const fieldType = fieldTypeOf(c, receiverType, expr.method);
   if (fieldType) {
