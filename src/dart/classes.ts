@@ -11,6 +11,7 @@ import {
   interfaceType,
   isSubtype,
   mentionsCovariantly,
+  objectType,
   sameType,
   substitute,
   type TypeParam,
@@ -160,6 +161,7 @@ export class ClassInfo {
   private readonly setterImplementations = new Map<string, Member | undefined>();
   private readonly combinedMethods = new WeakMap<MethodMember, MethodMember>();
   private cachedDepth: number | undefined;
+  private combinedMixinSuperInterface: InterfaceType | undefined;
   /** Natives attach their state to instances of some library classes. */
   isNativeBacked = false;
 
@@ -183,6 +185,16 @@ export class ClassInfo {
 
   get isAbstract(): boolean {
     return this.modifiers.isAbstract || this.modifiers.isSealed || this.kind === 'mixin';
+  }
+
+  get mixinSuperInterface(): InterfaceType {
+    if (this.onTypes.length < 2) return this.onTypes[0] ?? objectType();
+    if (this.combinedMixinSuperInterface) return this.combinedMixinSuperInterface;
+    const combined = new ClassInfo(this.name, 'class', this.library);
+    combined.typeParams.push(...this.typeParams);
+    combined.interfaces = this.onTypes;
+    this.combinedMixinSuperInterface = combined.thisType;
+    return this.combinedMixinSuperInterface;
   }
 
   /** The superclass, mixins, `on` types, and interfaces, in terms of this class's type parameters. */

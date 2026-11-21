@@ -1535,10 +1535,6 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return { type, run: (frame) => frame.receiver, isConst: false, isSuper: true };
   }
 
-  /**
-   * The class `super` names: a class's superclass, or for a mixin, the superclass of the application of the mixin
-   * that the receiver's class contains, which is known only at runtime.
-   */
   /** `super.m` needs a concrete `m` in the superclass chain; a mixin's superclass is known only at runtime. */
   protected requireSuperImplementation(name: string, span: Span, setter = false): void {
     const cls = this.currentClass;
@@ -1553,7 +1549,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   protected superclassOf(span: Span): { type: InterfaceType; classAt: (frame: Frame) => ClassInfo } {
     const cls = this.currentClass;
     if (cls?.kind === 'mixin') {
-      const type = cls.onTypes[0] ?? objectType();
+      const type = cls.mixinSuperInterface;
       return {
         type,
         classAt: (frame) => {
@@ -1564,7 +1560,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
           ) {
             if (current.mixinOf === cls) return current.superclass?.cls ?? coreTypes.object;
           }
-          return type.cls;
+          return cls.onTypes[0]?.cls ?? coreTypes.object;
         },
       };
     }

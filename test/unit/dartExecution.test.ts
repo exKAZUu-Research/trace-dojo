@@ -6965,6 +6965,32 @@ test('bodyless top-level functions and accessors require the external modifier',
   });
 });
 
+test('mixin super accesses use the combined constraint interface', () => {
+  const program = `class A {
+  int get a => 1;
+  num choose(num value) => value;
+}
+mixin class B<T> {
+  T? stored;
+  T? get value => stored;
+  set value(T? next) => stored = next;
+  T id(T input) => input;
+  int choose(num value) => value.toInt();
+  int operator [](int index) => index + 3;
+}
+mixin M<T> on A, B<T> {
+  T update(T value) {
+    super.value = value;
+    return super.id(super.value!);
+  }
+  int read() => super[0] + super.a + super.choose(1);
+}
+class C extends A with B<int>, M<int> {}
+void main() { print([C().update(2), C().read()]); }
+`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[2, 5]\n' });
+});
+
 test('mixin class superclasses resolve to Object through aliases', () => {
   const source = `typedef Root = Object;
 mixin class First extends Object {}
