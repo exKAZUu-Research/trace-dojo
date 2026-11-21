@@ -1359,7 +1359,8 @@ export class Compiler extends MemberCompiler {
     if (this.isLibraryCode) return;
     if (cls.kind === 'enum') this.checkEnumMembers(cls, declaration);
     // An extension type's members are resolved statically, so they redeclare inherited ones instead of overriding them.
-    if (cls.kind !== 'extensionType') this.checkMemberOverrides(cls);
+    if (cls.kind === 'extensionType') this.checkInheritedExtensionMembers(cls, declaration);
+    else this.checkMemberOverrides(cls);
     if (cls.kind !== 'mixin' && cls.kind !== 'extensionType') this.checkImplemented(cls, declaration);
     if (![...cls.constructors.values()].some((constructor) => constructor.kind === 'generative'))
       this.checkFieldsWithoutConstructors(cls, declaration);
@@ -1376,6 +1377,24 @@ export class Compiler extends MemberCompiler {
         if (member.isFinal) this.error(variable, `final のフィールド ${variable.name} が、初期化されていません。`);
         else if (field && !isNullable(field.type) && field.type.kind !== 'dynamic')
           this.error(variable, `null にならないフィールド ${variable.name} には、初期値が必要です。`);
+      }
+    }
+  }
+
+  /** An extension type must redeclare a member that its extension-type supertypes declare differently. */
+  private checkInheritedExtensionMembers(cls: ClassInfo, declaration: ClassDeclaration): void {
+    const parents = cls.directSupertypes.map((type) => type.cls).filter((parent) => parent.kind === 'extensionType');
+    if (parents.length < 2) return;
+    for (const setter of [false, true]) {
+      const names = new Set(parents.flatMap((parent) => extensionMemberNames(parent, setter)));
+      for (const name of names) {
+        if ((setter ? cls.setters : cls.members).get(name)?.owner === cls) continue;
+        const origins = new Set(parents.map((parent) => parent.interfaceMember(name, setter)).filter(Boolean));
+        if (origins.size > 1)
+          this.error(
+            declaration,
+            `拡張型 ${cls.name} は、${name} を複数の拡張型から受け継ぐので、宣言し直してください。`
+          );
       }
     }
   }
@@ -1929,4 +1948,15 @@ function registerSealedSubclass(cls: ClassInfo): void {
   while (current?.mixinOf && !current.declaration) current = current.superclass?.cls;
   if (current?.modifiers.isSealed && current.library === cls.library && !current.subclasses.includes(cls))
     current.subclasses.push(cls);
+}
+
+/** The instance member names an extension type and its extension-type supertypes declare. */
+function extensionMemberNames(cls: ClassInfo, setter: boolean): string[] {
+  const own = [...(setter ? cls.setters : cls.members).values()]
+    .filter((member) => !member.isStatic)
+    .map((m) => m.name);
+  const inherited = cls.directSupertypes
+    .filter((type) => type.cls.kind === 'extensionType')
+    .flatMap((type) => extensionMemberNames(type.cls, setter));
+  return [...own, ...inherited];
 }

@@ -1733,6 +1733,22 @@ test.each([
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'compileError' });
 });
 
+test('Dart extension types must redeclare members inherited from several extension types', () => {
+  const declarations = 'extension type E(int value) { int f() => 1; }\nextension type F(int data) { int f() => 2; }';
+  expect(
+    executeProgram(
+      'dart',
+      `${declarations}\nextension type G(int item) implements E, F {}\nvoid main() { print(G(1).f()); }`
+    )
+  ).toMatchObject({ kind: 'compileError' });
+  const valid = `${declarations}
+extension type G(int item) implements E, F { int f() => 3; }
+extension type H(int d) implements E {}
+extension type I(int d) implements E, H {}
+void main() { print([G(1).f(), I(1).f()]); }`;
+  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '[3, 1]\n' });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}
