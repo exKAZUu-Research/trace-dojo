@@ -417,6 +417,7 @@ export class Compiler extends BodyCompiler {
   protected reportUnknownFunction(name: string, row: number): never {
     // An own property only, as a name such as `valueOf` would otherwise find Object.prototype's.
     if (Object.hasOwn(UNAVAILABLE_FUNCTIONS, name)) this.error(row, unavailableMessage(UNAVAILABLE_FUNCTIONS[name]));
+    this.rejectUnavailableLibraryReference(name, row);
     return this.error(row, `${name} が見つかりません。`);
   }
 

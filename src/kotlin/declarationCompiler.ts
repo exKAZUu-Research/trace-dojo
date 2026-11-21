@@ -252,7 +252,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   ): void;
 
   private rejectImport(row: number, path: string): never {
-    this.rejectUnavailableJavaReference(path, row);
+    this.rejectUnavailableLibraryReference(path, row);
     return this.error(row, unavailableMessage(describeUnavailableImport(path)));
   }
 

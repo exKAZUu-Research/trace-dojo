@@ -1194,6 +1194,36 @@ test.each([
     'Java のクラスの直接の利用（java.lang.Math）は、この採点環境では使えません。',
   ],
   [
+    'a standard text extension outside the interpreter',
+    'fun main() { println("abc".chunkedSequence(1)) }',
+    'String の chunkedSequenceは、この採点環境では使えません。',
+  ],
+  [
+    'the Result companion',
+    'fun main() { println(Result.success(1)) }',
+    'kotlin.Resultは、この採点環境では使えません。',
+  ],
+  [
+    'a JVM class implicitly imported by Kotlin',
+    'fun main() { println(StringBuffer()) }',
+    'Java のクラスの直接の利用（java.lang.StringBuffer）は、この採点環境では使えません。',
+  ],
+  [
+    'a recognized static System method',
+    'fun main() { println(System.currentTimeMillis()) }',
+    'System.currentTimeMillisは、この採点環境では使えません。',
+  ],
+  [
+    'an imported standard time function',
+    'import kotlin.system.measureTimeMillis\nfun main() { println(measureTimeMillis { }) }',
+    'kotlin.system.measureTimeMillisは、この採点環境では使えません。',
+  ],
+  [
+    'an omitted collection factory',
+    'fun main() { println(sortedMapOf(1 to 2)) }',
+    'kotlin.collections.sortedMapOfは、この採点環境では使えません。',
+  ],
+  [
     'a standard-list member outside the interpreter',
     'fun main() { println(listOf(1, 2).foldRightIndexed(0) { i, v, acc -> acc + i * v }) }',
     'List<Int> の foldRightIndexedは、この採点環境では使えません。',
@@ -1254,10 +1284,15 @@ test("prints the same identity hashes whatever ran before in the server's proces
   expect(executeProgram('kotlin', program)).toEqual(first);
 });
 
-test('reports a missing member on a class declared by the program', () => {
-  const program = 'class Counter\nfun main() { Counter().missing() }';
+test.each([
+  ['class Counter\nfun main() { Counter().missing() }', 'Counter には missing がありません。'],
+  ['fun main() { println("abc".lenght) }', 'String には lenght がありません。'],
+  ['fun main() { println(listOf(1).sizee) }', 'List<Int> には sizee がありません。'],
+  ['fun main() { "abc".substrin(1) }', 'String には substrin がありません。'],
+  ['fun main() { "abc".toSortedMap() }', 'String には toSortedMap がありません。'],
+])('reports a missing member for %s', (program, message) => {
   expect(executeProgram('kotlin', program)).toMatchObject({
     kind: 'compileError',
-    diagnostics: [{ message: 'Counter には missing がありません。' }],
+    diagnostics: [{ message }],
   });
 });

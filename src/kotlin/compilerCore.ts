@@ -13,6 +13,7 @@ import {
   Scope,
 } from './compilerBase';
 import { unavailableJavaFeature, unavailableMessage } from './convertSupport';
+import { knownLibraryDeclaration } from './libraryApi';
 import type { Frame } from './runtime';
 import type { ClassSymbol, FunctionSymbol, MemberSymbol, PropertySymbol, TypeParameterSymbol } from './symbols';
 import { VariableSymbol } from './symbols';
@@ -99,15 +100,18 @@ export abstract class CompilerCore {
     throw compileError(row, unavailableMessage(what));
   }
 
-  protected rejectUnavailableJavaReference(path: string, row: number): void {
+  protected rejectUnavailableLibraryReference(path: string, row: number): void {
     let qualified = path;
     if (IMPLICIT_JAVA_TYPES.has(path)) qualified = `java.lang.${path}`;
     if (path === 'Scanner' && this.file.starPackages.includes('java.util')) qualified = 'java.util.Scanner';
     const unavailable = unavailableJavaFeature(qualified);
     if (unavailable) this.unavailable(row, unavailable);
+    const known = knownLibraryDeclaration(qualified, this.visiblePackageLevels());
+    if (known?.startsWith('java.')) qualified = known;
     if (qualified.startsWith('java.') || qualified.startsWith('javax.')) {
       this.unavailable(row, `Java のクラスの直接の利用（${qualified}）`);
     }
+    if (known) this.unavailable(row, known);
   }
 
   protected packageScope(name: string): PackageScope {
@@ -156,7 +160,7 @@ export abstract class CompilerCore {
     let cls = local ?? qualified;
     if (!cls) {
       const path = names.join('.');
-      this.rejectUnavailableJavaReference(path, ref.row);
+      this.rejectUnavailableLibraryReference(path, ref.row);
       this.error(ref.row, `型 ${path} が見つかりません。`);
     }
     // A fully qualified name such as `kotlin.reflect.KProperty<*>` carries its arguments on its last part.

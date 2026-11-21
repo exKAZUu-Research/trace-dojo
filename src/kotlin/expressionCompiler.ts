@@ -22,9 +22,10 @@ import {
   typeMismatchMessage,
 } from './compilerBase';
 import type { MemberRef } from './compilerCore';
-import { unavailableJavaFeature, unavailableMessage } from './convertSupport';
+import { unavailableJavaFeature } from './convertSupport';
 import { getPropertyValue, propertyRepr, receiverRepr } from './dispatch';
 import { formatPrimitive, stringOf } from './format';
+import { knownLibraryMember, unavailableLibraryMember } from './libraryApi';
 import { literalFits } from './literals';
 import { type Frame, type FunctionInfo, KotlinThrow, LoopSignal, ReturnSignal } from './runtime';
 import {
@@ -465,7 +466,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
       if (value) return value;
       this.error(row, `${name} はクラスなので、値としては使えません。`);
     }
-    this.rejectUnavailableJavaReference(name, row);
+    this.rejectUnavailableLibraryReference(name, row);
     return this.error(row, `${name} が見つかりません。`);
   }
 
@@ -713,9 +714,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
       );
     }
     if (cls.kind === 'enum' && name === 'entries') return this.compileEnumEntries(cls);
-    const unavailable = unavailableJavaFeature(`${cls.kotlinName}.${name}`);
-    if (unavailable) this.unavailable(row, unavailable);
-    return this.error(row, `${cls.name}.${name} が見つかりません。`);
+    return this.reportMissingQualifiedMember(cls, holder, name, row);
   }
 
   /** `p.name` for a package `p`: a top-level property or an object. */
@@ -725,7 +724,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const cls = scope?.classes.get(name);
     const value = cls && this.classAsValue(cls, row);
     if (value) return value;
-    if (!cls) this.rejectUnavailableJavaReference(`${path}.${name}`, row);
+    if (!cls) this.rejectUnavailableLibraryReference(`${path}.${name}`, row);
     return this.error(row, `${name} が見つかりません。`);
   }
 
@@ -799,7 +798,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     if (packageScope) return { kind: 'package', path, scope: packageScope };
     const cls = outer.scope?.classes.get(expression.name);
     if (cls) return { kind: 'class', cls };
-    this.rejectUnavailableJavaReference(path, expression.row);
+    this.rejectUnavailableLibraryReference(path, expression.row);
     return undefined;
   }
 
@@ -1121,7 +1120,6 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const enumClass = this.enclosingEnum(scope);
     if (enumClass && (name === 'values' || name === 'valueOf'))
       return this.compileEnumFunction(scope, context, enumClass, name, args, row);
-    this.rejectUnavailableJavaReference(name, row);
     return this.reportUnknownFunction(name, row);
   }
 
@@ -1383,22 +1381,25 @@ export abstract class ExpressionCompiler extends CallCompiler {
     if (isNullable(resolved(receiver.type)) && this.extensionCandidates(nonNull(receiver.type), name).length > 0) {
       this.requireNonNullReceiver(receiver, row, false);
     }
-    if (Object.hasOwn(UNAVAILABLE_MEMBER_FUNCTIONS, name))
-      this.error(row, unavailableMessage(UNAVAILABLE_MEMBER_FUNCTIONS[name]));
     return this.reportMissingMember(receiver.type, name, row);
   }
 
   private reportMissingMember(type: KType, name: string, row: number): never {
-    const actual = resolved(type);
-    const shown = typeToString(actual);
-    if (
-      actual.kind === 'class' &&
-      actual.cls.isLibrary &&
-      (actual.cls.kotlinName.startsWith('kotlin.') || actual.cls.kotlinName.startsWith('java.'))
-    ) {
-      this.unavailable(row, `${shown} の ${name}`);
-    }
-    return this.error(row, `${shown} には ${name} がありません。`);
+    const unavailable = unavailableLibraryMember(type, name);
+    if (unavailable) this.unavailable(row, unavailable);
+    return this.error(row, `${typeToString(type)} には ${name} がありません。`);
+  }
+
+  private reportMissingQualifiedMember(
+    cls: ClassSymbol,
+    holder: ClassSymbol | undefined,
+    name: string,
+    row: number
+  ): never {
+    const label = unavailableJavaFeature(`${cls.kotlinName}.${name}`);
+    if (label) this.unavailable(row, label);
+    if (holder && knownLibraryMember(holder, name)) this.unavailable(row, `${cls.name}.${name}`);
+    return this.error(row, `${cls.name}.${name} が見つかりません。`);
   }
 
   // code-gauge-allow functionParameterCount 9 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
@@ -1435,7 +1436,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
         levels.push({ candidates: this.constructorCandidates(cls, row), receiver: undefined });
       }
       if (levels.length === 0) {
-        this.rejectUnavailableJavaReference(`${qualified.path}.${name}`, row);
+        this.rejectUnavailableLibraryReference(`${qualified.path}.${name}`, row);
         this.error(row, `${name} が見つかりません。`);
       }
       return this.resolveInLevels(scope, context, levels, args, hasTrailingLambda, typeArgs, expected, row, name);
@@ -1461,7 +1462,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     if (cls.kind === 'enum' && (name === 'values' || name === 'valueOf')) {
       return this.compileEnumFunction(scope, context, cls, name, args, row);
     }
-    if (levels.length === 0) this.error(row, `${cls.name}.${name} が見つかりません。`);
+    if (levels.length === 0) return this.reportMissingQualifiedMember(cls, holder, name, row);
     return this.resolveInLevels(scope, context, levels, args, hasTrailingLambda, typeArgs, expected, row, name);
   }
 
@@ -1933,15 +1934,6 @@ function withNullabilityOf<T extends KType>(type: T, isNullable: boolean): T {
 function returnUnit(): Value {
   return UNIT;
 }
-
-/** Functions of the standard library's classes that this environment does not provide, by what they are for. */
-const UNAVAILABLE_MEMBER_FUNCTIONS: Record<string, string> = {
-  asSequence: 'シーケンス（asSequence）',
-  filterIsInstance: '型で要素を絞り込む filterIsInstance',
-  toRegex: '正規表現（toRegex）',
-  toSortedMap: '並べ替えた Map（toSortedMap）',
-  toSortedSet: '並べ替えた Set（toSortedSet）',
-};
 
 /** The library's functions that collect their arguments, which only create objects when every argument does. */
 const COLLECTION_FACTORIES = new Set(['arrayOf', 'listOf', 'mutableListOf', 'arrayListOf', 'setOf', 'mutableSetOf']);
