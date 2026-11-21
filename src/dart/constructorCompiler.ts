@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 403 -- Constructor declarations, initializer ordering, and delegation share the same checks.
 import { AssignmentCompiler } from './assignmentCompiler';
 import type {
   Arguments as ArgumentsSyntax,
@@ -611,13 +612,16 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
   private compileInitializerAssert(
     initializer: Extract<ConstructorDeclaration['initializers'][number], { kind: 'assert' }>
   ): (frame: Frame) => void {
-    const { compiled } = this.compileCondition(initializer.condition);
+    const before = this.flow;
+    const { compiled, flow } = this.compileCondition(initializer.condition);
     if (this.potentialConstInitializer && !compiled.isConst)
       this.error(
         initializer.condition,
         'const のコンストラクタの assert には、定数として評価できる条件を書いてください。'
       );
+    this.flow = flow.whenFalse;
     const message = initializer.message ? this.compileInitializerValue(initializer.message, undefined).run : undefined;
+    this.flow = before;
     return (frame) => {
       if (frame.runtime.checkingConstants && compiled.run(frame) !== true)
         frame.runtime.throwError('AssertionError', '', [message?.(frame)]);
@@ -713,7 +717,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
   /** The call of the superclass's constructor or of another constructor of the class, in an initializer list. */
   // code-gauge-allow functionParameterCount 7 -- The parameters are the parts a caller already holds; grouping them would only rename them.
   // code-gauge-allow functionCognitiveComplexity 27 -- Validate redirects and splice the forwarded parameters into the call order.
-  // code-gauge-allow functionNcss 31 -- Delegation checks share the resolved constructor and its signature.
+  // code-gauge-allow functionNcss 32 -- Delegation checks share the resolved constructor and its signature.
   private compileDelegation(
     cls: ClassInfo,
     declaration: ConstructorDeclaration,
@@ -724,6 +728,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     isImplicit = false
   ): (frame: Frame) => void {
     const targetType = kind === 'super' ? (cls.superclass as InterfaceType) : cls.thisType;
+    this.checkUnavailableStaticMember(targetType.cls, name ?? '', span);
     const target = targetType.cls.constructors.get(name ?? '');
     if (!target) {
       if (isImplicit) {

@@ -1,7 +1,7 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { ClassInfo } from './classes';
 import type { Runtime } from './runtime';
-import type { DartType, FunctionType, InterfaceType } from './types';
+import type { DartType, FunctionType } from './types';
 
 /**
  * A Dart value: `undefined` is `null`, a bigint is an `int` (always within 64 bits), a number is a `double`, a
@@ -61,9 +61,6 @@ export interface NativeState {
 }
 
 export class DartList extends DartObject {
-  /** The type the VM's own list class for this list shows, as `CodeUnits` for `'ab'.codeUnits`. */
-  vmType: InterfaceType | undefined;
-
   constructor(
     cls: ClassInfo,
     elementType: DartType,
@@ -72,6 +69,37 @@ export class DartList extends DartObject {
     public readonly unmodifiable = false
   ) {
     super(cls, [elementType], []);
+  }
+
+  get length(): number {
+    return this.elements.length;
+  }
+
+  entries(): IterableIterator<[number, Value]> {
+    return this.elements.entries();
+  }
+}
+
+export class DartPackedList extends DartObject {
+  constructor(
+    cls: ClassInfo,
+    readonly contents: string | Uint8Array
+  ) {
+    super(cls, [], []);
+  }
+
+  get length(): number {
+    return this.contents.length;
+  }
+
+  at(index: number): bigint {
+    const { contents } = this;
+    // oxlint-disable-next-line unicorn/prefer-code-point -- A code-unit list exposes both halves of a surrogate pair.
+    return BigInt(typeof contents === 'string' ? contents.charCodeAt(index) : contents[index]);
+  }
+
+  *entries(): IterableIterator<[number, bigint]> {
+    for (let index = 0; index < this.length; index++) yield [index, this.at(index)];
   }
 }
 

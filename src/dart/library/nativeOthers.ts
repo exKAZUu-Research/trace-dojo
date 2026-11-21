@@ -168,7 +168,7 @@ define('Random.nextBool', (runtime, receiver) => randomOf(receiver).nextInt(runt
 function sinkOf(runtime: Runtime, receiver: Value): Pick<OutputChannel, 'write'> {
   const isError = (receiver as DartObject).fields[0] === true;
   const channel = isError ? runtime.io.stderr : runtime.io.stdout;
-  return { write: (text: string) => channel.write(encodableText(text)) };
+  return { write: (text: string) => channel.write(text, encodableText) };
 }
 
 define('Stdout.write', (runtime, receiver, [value]) => {

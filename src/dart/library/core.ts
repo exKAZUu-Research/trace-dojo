@@ -71,9 +71,6 @@ abstract class Invocation {
   bool get isAccessor;
 }
 
-/** The VM's class of String.codeUnits, which the list of code units shows as its runtimeType. */
-abstract final class CodeUnits implements List<int> {}
-
 class _HashOmitted { const _HashOmitted(); }
 
 class _Invocation implements Invocation {
@@ -448,16 +445,24 @@ abstract interface class Type {
   external String toString();
 }
 
-class Symbol {
+abstract interface class Symbol {
+  static const Symbol unaryMinus = Symbol("unary-");
+  static const Symbol empty = Symbol("");
+  const factory Symbol(String name) = _Symbol;
+  int get hashCode;
+  bool operator ==(Object other);
+}
+
+class _Symbol implements Symbol {
   final String _name;
   final String? _library;
-  const Symbol(String name) : _name = name, _library = null;
-  const Symbol._scoped(this._name, this._library);
+  const _Symbol(String name) : _name = name, _library = null;
+  const _Symbol._scoped(this._name, this._library);
   int get hashCode {
     var scoped = _library == null ? _name : _library! + "@" + _name;
     return 0x1fffffff & (664597 * scoped.hashCode);
   }
-  bool operator ==(Object other) => other is Symbol && other._name == _name && other._library == _library;
+  bool operator ==(Object other) => other is _Symbol && other._name == _name && other._library == _library;
   String toString() => 'Symbol("' + _name + '")';
 }
 
@@ -741,7 +746,7 @@ class NoSuchMethodError extends Error {
   NoSuchMethodError._withExternal(this._receiver, this._invocation) : _found = null, _isExternal = true;
   NoSuchMethodError.withInvocation(this._receiver, this._invocation) : _found = null, _isExternal = false;
   static String _toStringPlain(Object? receiver, Invocation invocation) {
-    var name = invocation.memberName._name;
+    var name = (invocation.memberName as _Symbol)._name;
     var receiverType = receiver.runtimeType.toString();
     if (invocation.isAccessor) {
       return "NoSuchMethodError: " + receiverType + " has no " + name + " " + (invocation.isGetter ? "getter" : "setter");
@@ -767,7 +772,7 @@ class NoSuchMethodError extends Error {
       buffer..write(separator)..write("{");
       separator = "";
       for (var key in invocation.namedArguments.keys) {
-        buffer..write(separator)..write(key._name)..write(": _");
+        buffer..write(separator)..write((key as _Symbol)._name)..write(": _");
         separator = ",";
       }
       buffer.write("}");

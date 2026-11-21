@@ -1,6 +1,6 @@
 import type { Arguments as ArgumentsSyntax, CascadeSection, Expression, Span } from './ast';
 import { at, type Compiled, type Eval, typeName } from './compilerBase';
-import { ExpressionCompiler, isDoubleContext, promotionTarget, SHORTED, singleArgument } from './expressionCompiler';
+import { ExpressionCompiler, isDoubleContext, SHORTED, singleArgument } from './expressionCompiler';
 import {
   doubleModulo,
   doubleTruncatingDivide,
@@ -27,6 +27,7 @@ import {
   NEVER,
   nonNullable,
   numericClassOf,
+  promotionTarget,
   sameType,
   upperBound,
   vmTypeString,
@@ -258,9 +259,10 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
 
   private compileIfNull(expression: Extract<Expression, { kind: 'binary' }>, context: DartType | undefined): Compiled {
     const left = this.compileExpression(expression.left, context ? makeNullable(context) : undefined);
-    const before = this.flow;
+    const { whenNull, whenNonNull } = this.nullBranches(left);
+    this.flow = whenNull;
     const right = this.compileExpression(expression.right, context ?? nonNullable(left.type));
-    this.flow = Flow.join(before, this.flow);
+    this.flow = Flow.join(whenNonNull, this.flow);
     const leftRun = left.run;
     const rightRun = right.run;
     const type = upperBound(left.type.kind === 'dynamic' ? DYNAMIC : nonNullable(left.type), right.type);

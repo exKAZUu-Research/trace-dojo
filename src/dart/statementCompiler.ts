@@ -1147,7 +1147,8 @@ export abstract class StatementCompiler extends PatternCompiler {
 
   private compileAssert(statement: Extract<Statement, { kind: 'assert' }>): Exec {
     const before = this.flow;
-    this.compileCondition(statement.condition);
+    const { flow } = this.compileCondition(statement.condition);
+    this.flow = flow.whenFalse;
     if (statement.message) this.compileExpression(statement.message);
     this.flow = before;
     // `dart run` runs without --enable-asserts, which skips assertions.

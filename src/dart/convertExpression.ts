@@ -410,6 +410,9 @@ export abstract class ExpressionConverter {
   /** The receiver of a member, index, or call node, which the grammar may give as a `this` or `super` token. */
   private objectOf(node: Node, field = 'object'): Expression {
     const object = requireNode(fieldOf(node, field), node);
+    if (object.type === 'super' && node.type.startsWith('null_aware_')) {
+      syntaxError(node, 'super に null 対応の演算子は使えません。');
+    }
     if (object.type === 'this' || object.type === 'super') return { kind: object.type, ...spanOf(object) };
     return this.convertExpression(object);
   }

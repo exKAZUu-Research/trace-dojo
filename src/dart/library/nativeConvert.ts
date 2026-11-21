@@ -4,21 +4,19 @@ import { formatDouble } from '../format';
 import { HashStore } from '../hashStore';
 import { DartThrow, type Runtime } from '../runtime';
 import { coreTypes, DYNAMIC, interfaceType } from '../types';
-import { DartList, DartObject, type Value } from '../values';
-import { StringParts } from './boundedStringParts';
+import { DartList, DartObject, DartPackedList, type Value } from '../values';
+import { appendJsonQuoted, StringParts } from './boundedStringParts';
 import { forEachEntry, newMap } from './nativeCollections';
-import { define, intArg, listElement, listLength, newList, stringArg } from './nativeSupport';
-
-function quoteJson(text: string, append: (text: string) => void): void {
-  append('"');
-  for (let start = 0; start < text.length;) {
-    let end = Math.min(start + 1024, text.length);
-    if ((text.codePointAt(end - 1) ?? 0) > 0xff_ff) end++;
-    append(JSON.stringify(text.slice(start, end)).slice(1, -1));
-    start = end;
-  }
-  append('"');
-}
+import {
+  define,
+  index,
+  intArg,
+  listElement,
+  listLength,
+  newList,
+  registerPackedList,
+  stringArg,
+} from './nativeSupport';
 
 function isMap(value: Value): value is DartObject {
   return value instanceof DartObject && value.native instanceof HashStore && value.native.isMap;
@@ -101,7 +99,7 @@ class JsonStringifier {
       this.checkCapacity(text.length + 2);
       return this.append('"' + text + '"');
     }
-    quoteJson(text, (part) => this.append(part));
+    appendJsonQuoted(text, (part) => this.append(part));
     return true;
   }
 
@@ -450,6 +448,17 @@ define('_jsonDecode', (runtime, _receiver, [source, reviver]) =>
 
 // UTF-8 and Base64
 
+registerPackedList('_Uint8List');
+define('_Uint8List.[]=', (runtime, receiver, [position, value]) => {
+  const list = receiver as DartPackedList;
+  const at = intArg(runtime, position, 'index');
+  if (at < 0n || at >= BigInt(list.length)) {
+    runtime.throwError('IndexError', '', [at, list, 'index', undefined, BigInt(list.length)]);
+  }
+  (list.contents as Uint8Array)[index(at)] = Number(BigInt.asUintN(8, intArg(runtime, value, 'value')));
+  return;
+});
+
 define('_utf8Encode', (runtime, _receiver, [input, start = 0n, end]) => {
   const source = stringArg(runtime, input, 'input');
   const [from, to] = conversionRange(runtime, BigInt(source.length), start, end);
@@ -461,9 +470,7 @@ define('_utf8Encode', (runtime, _receiver, [input, start = 0n, end]) => {
     size += code < 0x80 ? 1 : code < 0x8_00 ? 2 : code < 0x1_00_00 ? 3 : 4;
   }
   runtime.allocate(size + 1);
-  const bytes = new TextEncoder().encode(text);
-  const elements = Array.from(bytes, BigInt);
-  return new DartList(coreTypes.list, interfaceType(coreTypes.int), elements, false);
+  return new DartPackedList(runtime.links.classNamed('_Uint8List'), new TextEncoder().encode(text));
 });
 define('_utf8Decode', (runtime, _receiver, [codeUnits, allowMalformed, start = 0n, end]) => {
   // The VM replaces values that are not bytes with 0xFF, which is invalid.
@@ -722,7 +729,7 @@ define('_base64Decode', (runtime, _receiver, [source, start, end]) => {
   const encodedLength = validatedBase64Length(input.slice(from, to), fail);
   runtime.allocate(Math.floor((encodedLength * 3) / 4) + 1);
   const bytes = Buffer.from(input.slice(from, from + encodedLength), 'base64');
-  return new DartList(coreTypes.list, interfaceType(coreTypes.int), Array.from(bytes, BigInt), false);
+  return new DartPackedList(runtime.links.classNamed('_Uint8List'), bytes);
 });
 
 define('_base64Normalize', (runtime, _receiver, [source, start, end]) => {
@@ -744,12 +751,13 @@ function checkCodecStringLength(runtime: Runtime, length: number): void {
 }
 
 // code-gauge-allow functionCognitiveComplexity 26 -- Preserve the SDK order of Base64 normalization and validation.
-// code-gauge-allow functionNcss 41 -- The selected range and original offsets belong to the same scan.
+// code-gauge-allow functionNcss 42 -- The selected range and original offsets belong to the same scan.
 function normalizeBase64(runtime: Runtime, input: string, start: number, end: number): string {
   const fail = (message: string, offset: number): never =>
     runtime.throwError('FormatException', '', [message, input, BigInt(offset)]);
   runtime.spend(1 + (end - start) / 64);
-  let normalized = '';
+  const normalized = new StringParts();
+  let length = 0;
   let padOffset = end;
   let firstPad = -1;
   let padding = 0;
@@ -765,17 +773,17 @@ function normalizeBase64(runtime: Runtime, input: string, start: number, end: nu
     if (char === '=') {
       if (firstPad < 0) {
         padOffset = offset;
-        firstPad = normalized.length;
+        firstPad = length;
       }
       padding++;
-      normalized += char;
+      normalized.append(char);
     } else {
       const value = BASE64_VALUES[char.codePointAt(0) ?? 128] ?? -2;
       if (value < 0) fail('Invalid base64 data', offset);
-      normalized += BASE64_ALPHABET[value];
+      normalized.append(BASE64_ALPHABET[value]);
     }
+    length++;
   }
-  const length = normalized.length;
   if (firstPad >= 0) {
     if (length % 4 !== 0) fail(`Invalid base64 padding, padded length must be multiple of four, is ${length}`, end);
     if (firstPad + padding !== length) fail("Invalid base64 padding, '=' not at the end", padOffset);
@@ -785,7 +793,7 @@ function normalizeBase64(runtime: Runtime, input: string, start: number, end: nu
   }
   const addedPadding = firstPad < 0 ? (4 - (length % 4)) % 4 : 0;
   checkCodecStringLength(runtime, input.length - (end - start) + length + addedPadding);
-  return input.slice(0, start) + normalized + '='.repeat(addedPadding) + input.slice(end);
+  return input.slice(0, start) + normalized.text() + '='.repeat(addedPadding) + input.slice(end);
 }
 
 /** The inverse of the Base64 alphabets, both the standard and the URL-safe one: -1 for padding, -2 for others. */

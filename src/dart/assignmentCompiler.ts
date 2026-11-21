@@ -681,6 +681,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     );
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Compile and run both holders of a conditional map entry in source order.
   private compileMapEntryElement(
     element: Extract<CollectionElement, { kind: 'mapEntry' }>,
     kind: 'list' | 'set' | 'map',
@@ -698,7 +699,10 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       element.key,
       kind
     );
+    const keyBranches = nullAwareKey ? this.nullBranches(key) : undefined;
+    if (keyBranches) this.flow = keyBranches.whenNonNull;
     const compiledValue = this.compileExpression(element.value, mapValueContext);
+    if (keyBranches) this.flow = Flow.join(keyBranches.whenNull, this.flow);
     const valueType = nullAwareValue && mapValueContext?.kind === 'void' ? DYNAMIC : (mapValueContext ?? DYNAMIC);
     const value = this.coerceElement(compiledValue, valueType, element.value, kind);
     types.push({

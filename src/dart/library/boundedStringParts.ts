@@ -27,6 +27,17 @@ export class BoundedStringParts {
   }
 }
 
+export function appendJsonQuoted(text: string, append: (part: string) => void): void {
+  append('"');
+  for (let start = 0; start < text.length;) {
+    let end = Math.min(start + 1024, text.length);
+    if ((text.codePointAt(end - 1) ?? 0) > 0xff_ff) end++;
+    append(JSON.stringify(text.slice(start, end)).slice(1, -1));
+    start = end;
+  }
+  append('"');
+}
+
 export class StringParts {
   private readonly chunks: string[] = [];
   private readonly fragments: string[] = [];

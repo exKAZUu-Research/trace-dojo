@@ -707,8 +707,8 @@ export class Runtime implements TracedRuntime<Frame> {
 
   symbol(name: string, library?: string): Value {
     return library === undefined
-      ? this.links.construct(this, 'Symbol', '', [name])
-      : this.links.construct(this, 'Symbol', '_scoped', [name, library]);
+      ? this.links.construct(this, '_Symbol', '', [name])
+      : this.links.construct(this, '_Symbol', '_scoped', [name, library]);
   }
 
   private newInvocation(
@@ -793,7 +793,6 @@ export class Runtime implements TracedRuntime<Frame> {
       };
     }
     if (value === undefined) return { kind: 'null' };
-    if (value instanceof DartList && value.vmType) return value.vmType;
     if (value instanceof DartObject) return interfaceType(value.cls, value.typeArgs);
     return interfaceType(this.classOf(value));
   }

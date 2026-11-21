@@ -13,7 +13,16 @@ import { parseDart } from './parse';
 import { compileProgram } from './program';
 import type { Frame, Runtime } from './runtime';
 import { coreTypes, type DartType, DYNAMIC } from './types';
-import { DartList, DartObject, DartRecord, LateInitializer, UNASSIGNED, UNINITIALIZED, type Value } from './values';
+import {
+  DartList,
+  DartObject,
+  DartPackedList,
+  DartRecord,
+  LateInitializer,
+  UNASSIGNED,
+  UNINITIALIZED,
+  type Value,
+} from './values';
 
 // code-gauge-allow duplicateLines 17 -- Dart wires its runtime into the shared recorder.
 export function traceDartProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
@@ -41,11 +50,13 @@ const MAX_SNAPSHOT_NODES = 4096;
 const TRACE_NODE_COST = 32;
 
 interface ListSnapshots {
-  scalar: WeakMap<DartList, Scalar[]>;
-  display: WeakMap<DartList, { node: ArrayNode; count: number }>;
+  scalar: WeakMap<TraceList, Scalar[]>;
+  display: WeakMap<TraceList, { node: ArrayNode; count: number }>;
 }
 
 type ArrayNode = Extract<DisplayNode, { kind: 'array' | 'object' }>;
+
+type TraceList = DartList | DartPackedList;
 
 interface SnapshotBudget {
   remaining: number;
@@ -195,7 +206,7 @@ function addVariable(
 ): void {
   const scalar = mode === 'reference' ? NOT_SCALAR : scalarOf(value, type, scalars);
   if (scalar !== NOT_SCALAR) variables.vars[name] = scalar;
-  if (!references || mode === 'scalar' || (scalar !== NOT_SCALAR && !(value instanceof DartList))) return;
+  if (!references || mode === 'scalar' || (scalar !== NOT_SCALAR && !isTraceList(value))) return;
   const node = displayNodeOf(value, references);
   if (node) variables.referenceVars[name] = node;
 }
@@ -247,23 +258,27 @@ function scalarOf(value: Value, type: DartType, budget: SnapshotBudget): Scalar 
   if (!isScalarType(type)) return NOT_SCALAR;
   const primitive = primitiveScalar(value);
   if (primitive !== NOT_SCALAR) return primitive;
-  return value instanceof DartList ? listScalar(value, budget) : NOT_SCALAR;
+  return isTraceList(value) ? listScalar(value, budget) : NOT_SCALAR;
 }
 
-function listScalar(list: DartList, budget: SnapshotBudget): Scalar | typeof NOT_SCALAR {
+function isTraceList(value: Value): value is TraceList {
+  return value instanceof DartList || value instanceof DartPackedList;
+}
+
+function listScalar(list: TraceList, budget: SnapshotBudget): Scalar | typeof NOT_SCALAR {
   const seen = budget.path;
   if (seen.has(list)) return CYCLE;
   if (seen.size >= LIMITS.maxCallDepth) return TRUNCATED;
-  if (list.elements.length > 0 && budget.remaining === 0) return omittedElements(list.elements.length);
+  if (list.length > 0 && budget.remaining === 0) return omittedElements(list.length);
   const elementType = list.typeArgs[0] ?? DYNAMIC;
   seen.add(list);
   try {
     const entries: Scalar[] = [];
-    for (const [index, element] of list.elements.entries()) {
-      const reserveMarker = index + 1 < list.elements.length ? 1 : 0;
+    for (const [index, element] of list.entries()) {
+      const reserveMarker = index + 1 < list.length ? 1 : 0;
       if (budget.remaining === reserveMarker) {
         budget.remaining -= reserveMarker;
-        entries.push(omittedElements(list.elements.length - index));
+        entries.push(omittedElements(list.length - index));
         break;
       }
       budget.remaining -= reserveMarker;
@@ -331,7 +346,7 @@ function displayNodeOf(value: Value, budget: SnapshotBudget, previous?: DisplayN
   }
   seen.add(object);
   try {
-    if (object instanceof DartList) return listDisplayNode(object, budget);
+    if (isTraceList(object)) return listDisplayNode(object, budget);
     if (object instanceof DartRecord) return entriesNode('object', recordFields(object), budget);
     const store = object.native as unknown as HashStore | undefined;
     if (store && typeof store.positions === 'function') return storeNodeOf(store, budget);
@@ -347,12 +362,12 @@ function displayNodeOf(value: Value, budget: SnapshotBudget, previous?: DisplayN
   }
 }
 
-function listDisplayNode(list: DartList, budget: SnapshotBudget): DisplayNode {
+function listDisplayNode(list: TraceList, budget: SnapshotBudget): DisplayNode {
   const previous = budget.lists.display.get(list);
   const entries = traceEntries<DisplayNode>();
   let unchanged = previous !== undefined;
   let count = 0;
-  for (const [position, item] of list.elements.entries()) {
+  for (const [position, item] of list.entries()) {
     const prior = previous?.node.entries[position];
     const node = displayNodeOf(item, budget, prior) ?? NULL_NODE;
     if (node !== prior) unchanged = false;

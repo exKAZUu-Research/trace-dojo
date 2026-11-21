@@ -529,6 +529,20 @@ class CastList<S, T> extends ListBase<T> {
 
 typedef ListMixin<E> = ListBase<E>;
 
+class CodeUnits extends ListBase<int> {
+  external int get length;
+  set length(int value) => throw UnsupportedError("Cannot change the length of an unmodifiable list");
+  external int operator [](int index);
+  void operator []=(int index, int value) => throw UnsupportedError("Cannot modify an unmodifiable list");
+}
+
+class _Uint8List extends ListBase<int> {
+  external int get length;
+  set length(int value) => throw UnsupportedError("Cannot resize a fixed-length list");
+  external int operator [](int index);
+  external void operator []=(int index, int value);
+}
+
 class UnmodifiableListView<E> extends ListBase<E> {
   final Iterable<E> _source;
   UnmodifiableListView(Iterable<E> source) : _source = source;

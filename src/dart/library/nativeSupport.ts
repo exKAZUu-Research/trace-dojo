@@ -7,6 +7,7 @@ import {
   DartClosure,
   DartList,
   type DartObject,
+  DartPackedList,
   NO_ARGUMENTS,
   type Value,
 } from '../values';
@@ -84,22 +85,30 @@ export function elementTypeOf(object: DartObject, position = 0): DartType {
   return object.typeArgs[position] ?? DYNAMIC;
 }
 
+export function registerPackedList(className: string): void {
+  define(`${className}.length`, (_runtime, receiver) => BigInt((receiver as DartPackedList).length));
+  define(`${className}.[]`, (runtime, receiver, [position]) => {
+    const list = receiver as DartPackedList;
+    return list.at(checkListIndex(runtime, list, position, 'length'));
+  });
+}
+
 export function listLength(runtime: Runtime, list: Value): bigint {
-  return list instanceof DartList
-    ? BigInt(list.elements.length)
+  return list instanceof DartList || list instanceof DartPackedList
+    ? BigInt(list.length)
     : intArg(runtime, runtime.getProperty(list, 'length', undefined), 'length');
 }
 
 export function listElement(runtime: Runtime, list: Value, position: bigint): Value {
-  return list instanceof DartList
-    ? list.elements[checkListIndex(runtime, list, position, 'length')]
-    : runtime.invoke(list, '[]', { positional: [position], named: undefined }, [], undefined);
+  if (list instanceof DartList) return list.elements[checkListIndex(runtime, list, position, 'length')];
+  if (list instanceof DartPackedList) return list.at(checkListIndex(runtime, list, position, 'length'));
+  return runtime.invoke(list, '[]', { positional: [position], named: undefined }, [], undefined);
 }
 
-export function checkListIndex(runtime: Runtime, list: DartList, value: Value, name: string): number {
+export function checkListIndex(runtime: Runtime, list: DartList | DartPackedList, value: Value, name: string): number {
   const position = intArg(runtime, value, 'index');
-  if (position < 0n || position >= BigInt(list.elements.length)) {
-    runtime.throwError('RangeError', 'range', [position, 0n, BigInt(list.elements.length - 1), name]);
+  if (position < 0n || position >= BigInt(list.length)) {
+    runtime.throwError('RangeError', 'range', [position, 0n, BigInt(list.length - 1), name]);
   }
   return index(position);
 }

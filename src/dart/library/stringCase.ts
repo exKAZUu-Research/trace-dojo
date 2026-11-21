@@ -1,13 +1,15 @@
+import { StringParts } from './boundedStringParts';
+
 type CaseRange = readonly [start: number, end: number, step: number, delta: number];
 
 export function dartStringCase(text: string, upper: boolean): string {
   const ranges = upper ? UPPER_CASE : LOWER_CASE;
-  let result = '';
+  const result = new StringParts();
   for (const character of text) {
     const codePoint = character.codePointAt(0) ?? 0;
-    result += String.fromCodePoint(mapCodePoint(codePoint, ranges));
+    result.append(String.fromCodePoint(mapCodePoint(codePoint, ranges)));
   }
-  return result;
+  return result.text();
 }
 
 function mapCodePoint(codePoint: number, ranges: readonly CaseRange[]): number {

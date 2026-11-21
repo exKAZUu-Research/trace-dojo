@@ -384,14 +384,22 @@ function throwFormat(runtime: Runtime, message: string, source: string, offset?:
 
 define('int.parse', (runtime, _self, [source], namedArgs) => {
   const text = stringArg(runtime, source, 'source');
-  const radix = checkRadix(runtime, named(namedArgs, 'radix', undefined));
-  const result = parseInt(runtime, text, radix);
+  const requestedRadix = named(namedArgs, 'radix', undefined);
+  if (text === '') {
+    const message =
+      requestedRadix === undefined ? 'Invalid number' : `Invalid radix-${requestedRadix as bigint} number`;
+    throwFormat(runtime, message, text, 0n);
+  }
+  const result = parseInt(runtime, text, checkRadix(runtime, requestedRadix));
   if (typeof result === 'bigint') return result;
   throwFormat(runtime, result.message, text, result.offset === undefined ? undefined : BigInt(result.offset));
 });
-define('int.tryParse', (runtime, _self, [source], namedArgs) =>
-  tryParseInt(runtime, stringArg(runtime, source, 'source'), checkRadix(runtime, named(namedArgs, 'radix', undefined)))
-);
+define('int.tryParse', (runtime, _self, [source], namedArgs) => {
+  const text = stringArg(runtime, source, 'source');
+  return text === ''
+    ? undefined
+    : tryParseInt(runtime, text, checkRadix(runtime, named(namedArgs, 'radix', undefined)));
+});
 define('double.parse', (runtime, _self, [source]) => {
   const text = stringArg(runtime, source, 'source');
   const result = parseDouble(runtime, text);

@@ -40,6 +40,7 @@ import {
   nonNullable,
   NULL,
   objectType,
+  promotionTarget,
   resolveBound,
   sameType,
   substitute,
@@ -201,15 +202,21 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   protected skipOnNull(receiver: Compiled, nullAware: boolean): void {
     if (!nullAware) return;
-    const before = this.flow;
+    const { whenNull, whenNonNull } = this.nullBranches(receiver);
     const { exit } = this.nullChain;
-    const maySkip = isPotentiallyNullable(receiver.type);
-    const skipped = maySkip ? before : before.unreachable;
-    this.nullChain.exit = exit ? Flow.join(exit, skipped) : skipped;
-    if (!maySkip) return;
-    const variable = receiver.variable;
-    const narrowed = promotionTarget(receiver.type, nonNullable(receiver.type));
-    if (variable && narrowed && this.isPromotable(variable)) this.flow = this.flow.promote(variable, narrowed);
+    this.nullChain.exit = exit ? Flow.join(exit, whenNull) : whenNull;
+    this.flow = whenNonNull;
+  }
+
+  protected nullBranches(value: Compiled): { whenNull: Flow; whenNonNull: Flow } {
+    const before = this.flow;
+    if (!isPotentiallyNullable(value.type)) return { whenNull: before.unreachable, whenNonNull: before };
+    if (value.type.kind === 'null') return { whenNull: before, whenNonNull: before.unreachable };
+    const variable = value.variable;
+    const narrowed = promotionTarget(value.type, nonNullable(value.type));
+    const whenNonNull =
+      variable && narrowed && this.isPromotable(variable) ? before.promote(variable, narrowed) : before;
+    return { whenNull: before, whenNonNull };
   }
 
   /** Compiles a condition, which must be a `bool`, and the flow when it is true and when it is false. */
@@ -1744,19 +1751,6 @@ export function inferElementType(types: DartType[]): DartType {
   let result = types[0];
   for (const type of types.slice(1)) result = upperBound(result, type);
   return result;
-}
-
-/** The type an `is` test or a cast promotes a variable of type `current` to, if it promotes it. */
-export function promotionTarget(current: DartType, tested: DartType): DartType | undefined {
-  if (sameType(current, tested)) return undefined;
-  if (isSubtype(tested, current)) {
-    if (current.kind === 'typeParam' && !current.promoted) return { ...current, promoted: tested, nullable: false };
-    return tested;
-  }
-  if (current.kind === 'typeParam' && isSubtype(tested, resolveBound(current))) {
-    return { ...current, nullable: isNullable(tested) && current.nullable, promoted: tested };
-  }
-  return undefined;
 }
 
 export function singleArgument(index: Expression): ArgumentsSyntax {

@@ -27,24 +27,13 @@ export function inferFromContext(
   params: ReadonlySet<TypeParam>,
   solution: Map<TypeParam, DartType>
 ): void {
-  const base = resolveBound(context);
-  const constraints = new InferenceConstraints(params, solution, undefined, (a) => a, true);
-  if (
-    formal.kind === 'interface' &&
-    base.kind === 'interface' &&
-    formal.cls !== base.cls &&
-    formal.cls.isSubclassOf(base.cls)
-  ) {
-    const path = asInstanceOf(formal, base.cls);
-    if (path) {
-      for (const [index, arg] of path.args.entries()) {
-        const given = base.args[index];
-        if (given) constraints.infer(given, arg);
-      }
-      return;
-    }
+  const lower = new Map<TypeParam, DartType>();
+  const upper = new Map<TypeParam, DartType>();
+  new InferenceConstraints(params, lower, upper, upperBound, true).infer(context, formal, true);
+  for (const param of params) {
+    const choice = lower.get(param) ?? upper.get(param);
+    if (choice) solution.set(param, choice);
   }
-  constraints.infer(context, formal);
 }
 
 /** Collects constraints on type parameters that occur in the parameter type of a generic call. */

@@ -3,7 +3,7 @@ import type { Expression, ListPatternElement, Pattern, RecordPatternField, Span 
 import { nullPatternComparison } from './astWalk';
 import { CallCompiler } from './callCompiler';
 import { type Compiled, type Eval, typeName } from './compilerBase';
-import { promotionTarget, SHORTED } from './expressionCompiler';
+import { SHORTED } from './expressionCompiler';
 import { listElement, listLength } from './library/nativeSupport';
 import type { Frame } from './runtime';
 import { Flow, type LocalVar } from './scope';
@@ -19,6 +19,7 @@ import {
   isSubtype,
   NEVER,
   nonNullable,
+  promotionTarget,
   type RecordType,
   resolveBound,
   sameType,

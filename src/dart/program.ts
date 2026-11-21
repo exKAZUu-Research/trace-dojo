@@ -144,7 +144,6 @@ function arrangeVisibility(envs: ReadonlyMap<string, LibraryEnv>): void {
     'FollowedByIterator',
     'CastIterator',
     'LateError',
-    'CodeUnits',
     'EmptyIterable',
     'replaceListRange',
     'EfficientLengthMappedIterable',
@@ -164,12 +163,16 @@ function arrangeVisibility(envs: ReadonlyMap<string, LibraryEnv>): void {
     (core.declarations.get(name) as { cls: { vmName: string | undefined } }).cls.vmName = vmName;
   }
   // The VM's view of List.asMap is internal to the SDK, not part of dart:collection's API.
-  for (const name of ['ListMapView', 'CastList', 'CastSet', 'CastMap'])
+  for (const name of ['ListMapView', 'CastList', 'CastSet', 'CastMap', 'CodeUnits'])
     (envs.get('dart:collection') as LibraryEnv).hiddenNames.add(name);
-  for (const name of ['LinkedHashMap', 'LinkedHashSet']) {
-    core.hiddenNames.add(name);
-    (envs.get('dart:collection') as LibraryEnv).reexports.set(name, core.declarations.get(name) as never);
+  const collection = envs.get('dart:collection') as LibraryEnv;
+  for (const name of ['LinkedHashMap', 'LinkedHashSet']) core.hiddenNames.add(name);
+  for (const name of ['LinkedHashMap', 'LinkedHashSet', 'IterableExtensions', 'NullableIterableExtensions']) {
+    const declaration = core.declarations.get(name);
+    if (declaration) collection.reexports.set(name, declaration);
   }
+  (core.declarations.get('_Symbol') as { cls: ClassInfo }).cls.vmName = 'Symbol';
+  (collection.declarations.get('_Uint8List') as { cls: ClassInfo }).cls.vmName = 'Uint8List';
 }
 
 function assignCoreTypes(core: LibraryEnv): void {

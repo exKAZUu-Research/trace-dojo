@@ -84,7 +84,8 @@ export class HashStore implements NativeState {
 
   /** The position of a key's entry, or -1, hashing the key once as the VM's lookups do. */
   find(key: Value): number {
-    return this.policy?.valid?.(key) === false ? -1 : this.probe(key, this.hashOf(key)).found;
+    if ((this.isConst && this.size === 0) || this.policy?.valid?.(key) === false) return -1;
+    return this.probe(key, this.hashOf(key)).found;
   }
 
   has(key: Value): boolean {

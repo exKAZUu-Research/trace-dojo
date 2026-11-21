@@ -121,8 +121,10 @@ export class LibraryEnv {
     for (const declaration of this.declarations.values())
       if (declaration.kind === 'extension') result.push(declaration.ext);
     for (const entry of this.imports) {
-      for (const [name, declaration] of entry.library.declarations) {
-        if (declaration.kind === 'extension' && isVisible(entry, name)) result.push(declaration.ext);
+      for (const declarations of [entry.library.declarations, entry.library.reexports]) {
+        for (const [name, declaration] of declarations) {
+          if (declaration.kind === 'extension' && isVisible(entry, name)) result.push(declaration.ext);
+        }
       }
     }
     return result;

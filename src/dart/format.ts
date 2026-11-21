@@ -1,4 +1,4 @@
-import { BoundedStringParts } from './library/boundedStringParts';
+import { appendJsonQuoted, BoundedStringParts } from './library/boundedStringParts';
 import type { Runtime } from './runtime';
 import { vmTypeString } from './types';
 import { type DartObject, DartRecord, type Value } from './values';
@@ -65,10 +65,7 @@ export function instanceName(runtime: Runtime, value: Value): string {
 
 function quoteForError(runtime: Runtime, text: string): string {
   const result = new BoundedStringParts(runtime);
-  result.append('"');
-  // oxlint-disable-next-line eslint/no-control-regex -- Error strings escape control characters.
-  result.appendEscaped(text, /[\u0000-\u001F"\\]/g, (character) => JSON.stringify(character).slice(1, -1));
-  result.append('"');
+  appendJsonQuoted(text, (part) => result.append(part));
   return result.text();
 }
 

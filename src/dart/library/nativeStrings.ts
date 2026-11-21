@@ -1,10 +1,10 @@
-// code-gauge-allow-file fileNcss 402 -- String methods share bounds, matching, and formatting helpers.
+// code-gauge-allow-file fileNcss 403 -- String methods share bounds, matching, and formatting helpers.
 import { LIMITS } from '../../interpreter/limits';
 import { stringOf } from '../format';
 import { concatenate } from '../operators';
 import type { Runtime } from '../runtime';
 import { asInstanceOf, coreTypes, interfaceType } from '../types';
-import { DartList, DartObject, type Value } from '../values';
+import { DartList, DartObject, DartPackedList, type Value } from '../values';
 import { BoundedStringParts, StringParts } from './boundedStringParts';
 import {
   allMatchesOf,
@@ -23,6 +23,7 @@ import {
   intArg,
   iteratorValues,
   named,
+  registerPackedList,
   stringArg,
 } from './nativeSupport';
 import { isSurrogatePairAt } from './regExpEngine';
@@ -75,7 +76,7 @@ define('String.hashCode', (runtime, receiver) => {
   if (size <= LIMITS.maxStringLength) {
     runtime.allocate(1);
     // A substring key may otherwise keep its much larger source string alive.
-    cache.hashes.set(Buffer.from(text, 'utf16le').toString('utf16le'), hash);
+    cache.hashes.set(copyString(text), hash);
     cache.size += size;
   }
   return hash;
@@ -345,10 +346,10 @@ function splitAtString(runtime: Runtime, text: string, separator: string): strin
     const end = text.indexOf(separator, start);
     runtime.allocate(1);
     if (end === -1) {
-      parts.push(text.slice(start));
+      parts.push(copyString(text.slice(start)));
       return parts;
     }
-    parts.push(text.slice(start, end));
+    parts.push(copyString(text.slice(start, end)));
     start = end + separator.length;
   }
 }
@@ -399,21 +400,19 @@ function* emptyPatternMatches(input: string, runtime: Runtime): IterableIterator
 function substringBetween(runtime: Runtime, text: string, start: bigint, end: bigint): string {
   if (start < 0n || start > BigInt(text.length)) rangeError(runtime, start, 0, text.length, 'start');
   if (end < start || end > BigInt(text.length)) rangeError(runtime, end, Number(start), text.length, 'end');
-  return text.slice(index(start), index(end));
+  const slice = text.slice(index(start), index(end));
+  return slice === text ? text : copyString(slice);
 }
+
+function copyString(text: string): string {
+  return Buffer.from(text, 'utf16le').toString('utf16le');
+}
+
+registerPackedList('CodeUnits');
+
 define('String.codeUnits', (runtime, receiver) => {
-  const text = self(receiver);
-  runtime.allocate(text.length + 1);
-  const units = new DartList(
-    coreTypes.list,
-    interfaceType(coreTypes.int),
-    // oxlint-disable-next-line unicorn/prefer-code-point -- Dart's code units are UTF-16 code units.
-    Array.from({ length: text.length }, (_, position) => BigInt(text.charCodeAt(position))),
-    false,
-    true
-  );
-  units.vmType = interfaceType(runtime.links.classNamed('CodeUnits'));
-  return units;
+  runtime.allocate(1);
+  return new DartPackedList(runtime.links.classNamed('CodeUnits'), self(receiver));
 });
 define('String.runes', (runtime, receiver) => runtime.links.construct(runtime, 'Runes', '', [receiver]));
 define('String.toLowerCase', (runtime, receiver) => mapCase(runtime, self(receiver), false));

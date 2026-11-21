@@ -262,7 +262,7 @@ define('NoSuchMethodError._describe', (runtime, _receiver, [receiver, invocation
   const symbolName = scopedMemberName('_name', 'dart:core');
   const member = runtime.getProperty(field('memberName'), symbolName, undefined) as string;
   const kind = field('isGetter') === true ? 'getter' : field('isSetter') === true ? 'setter' : 'method';
-  const call = describeInvocation(runtime, member, kind, field);
+  const call = describeInvocation(runtime, member, kind, field, isExternal === true);
   const output = new BoundedStringParts(runtime);
   if (isExternal === true) {
     output.append(
@@ -296,8 +296,10 @@ function describeInvocation(
   runtime: Runtime,
   member: string,
   kind: 'method' | 'getter' | 'setter',
-  field: (name: string) => Value
+  field: (name: string) => Value,
+  isExternal: boolean
 ): string {
+  if (isExternal && kind === 'setter') return member;
   const call = new BoundedStringParts(runtime);
   call.append(member);
   if (kind === 'method') {
@@ -348,7 +350,7 @@ function appendInvocationArguments(runtime: Runtime, output: BoundedStringParts,
 // Top-level functions
 
 define('print', (runtime, _receiver, [value]) => {
-  runtime.io.stdout.write(encodableText(`${stringOf(runtime, value)}\n`));
+  runtime.io.stdout.write(`${stringOf(runtime, value)}\n`, encodableText);
   return;
 });
 define('identical', (_runtime, _receiver, [a, b]) => identical(a, b));

@@ -5913,3 +5913,125 @@ void main() {
     stdout: 'StateError\nStateError\n[[1, 2, 3, 2, 3], [1, 2, 3]]\n',
   });
 });
+
+test('nullable branches promote values only on their executed paths', () => {
+  const source = `int? key() => 1;
+void main() {
+  int? x = key();
+  print({?x: x.isEven});
+  x ?? (throw StateError('null'));
+  print(x.isOdd);
+  String? s;
+  s ?? (s = 'dart');
+  print(s.length);
+}
+void check(String? text) { assert(text == null, text.length); }
+class C { C(String? text) : assert(text == null, text.length); }`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '{1: false}\ntrue\n4\n' });
+  for (const invalid of [
+    'int? key() => null; void main() { int value; print({?key(): (value = 1)}); print(value); }',
+    'void f<T extends Map<int, int>?>(T map) { print({...map}); } void main() {}',
+    'class A { int get n => 1; } class B extends A { int get n => super?.n; } void main() {}',
+    'class D extends Duration { D() : super._microseconds(3); } void main() {}',
+  ]) {
+    expect(executeProgram('dart', invalid)).toMatchObject({ kind: 'compileError' });
+  }
+  const bounds = `int add<T extends U, U extends int>(T x) => x + 1;
+void show<T extends Map<int, int>?>(T x) { print({...?x}); }
+void main() { print(add<int, int>(2)); show<Map<int, int>?>(null); show({1: 2}); }`;
+  expect(executeProgram('dart', bounds)).toMatchObject({ kind: 'executed', stdout: '3\n{}\n{1: 2}\n' });
+});
+
+test('generic result contexts combine covariant and contravariant positions', () => {
+  const source = `Map<T, T> makeMap<T>() => {};
+(List<T>, Set<T>) makePair<T>() => (<T>[], <T>{});
+void Function(T) callback<T>() => (T value) => print(value);
+void Function({required T value}) namedCallback<T>() => ({required T value}) => print(value);
+void main() {
+  Map<int, String> map = makeMap();
+  (List<int>, Set<String>) pair = makePair();
+  print(map.runtimeType);
+  print(pair.runtimeType);
+  void Function(int) typed = callback();
+  void Function({required String value}) named = namedCallback();
+  dynamic a = typed;
+  dynamic b = named;
+  try { a('bad'); } catch (error) { print(error.runtimeType); }
+  try { b(value: 1); } catch (error) { print(error.runtimeType); }
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '_Map<Never, Never>\n(List<Never>, _Set<Never>)\n_TypeError\n_TypeError\n',
+  });
+});
+
+test('collection import combinators expose the SDK iterable extensions', () => {
+  const source = `import 'dart:core' hide IterableExtensions, NullableIterableExtensions;
+import 'dart:collection' show IterableExtensions, NullableIterableExtensions;
+void main() { print([1].firstOrNull); print([1, null, 2].nonNulls.toList()); }`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '1\n[1, 2]\n' });
+  expect(
+    executeProgram('dart', source.replace('show IterableExtensions, NullableIterableExtensions', 'show ListBase'))
+  ).toMatchObject({ kind: 'compileError' });
+});
+
+test('symbols keep the public interface separate from the VM representation', () => {
+  const source = `class Custom implements Symbol {
+  String toString() => 'custom';
+}
+class Missing {
+  dynamic noSuchMethod(Invocation invocation) =>
+      invocation.memberName == Symbol.unaryMinus ? 42 : super.noSuchMethod(invocation);
+}
+void main() {
+  print(Custom());
+  print((-(Missing() as dynamic)));
+  print(Symbol.empty);
+  print(identical(Symbol.empty, const Symbol('')));
+  print(Symbol('text').runtimeType);
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'custom\n42\nSymbol("")\ntrue\nSymbol\n',
+  });
+  expect(
+    executeProgram('dart', "class Invalid extends Symbol { Invalid() : super('x'); } void main() {}")
+  ).toMatchObject({
+    kind: 'compileError',
+  });
+});
+
+test('codec byte lists wrap writes and code units remain an unmodifiable view', () => {
+  const source = `import 'dart:convert';
+void main() {
+  var bytes = utf8.encode('abc');
+  bytes[0] = 256;
+  bytes.setRange(1, 3, [-1, 257]);
+  var decoded = base64.decode('YQ==');
+  decoded[0] = -1;
+  print([bytes, bytes.runtimeType, decoded, decoded.runtimeType]);
+  var units = 'x' * 1000000;
+  print([units.codeUnits.length, units.codeUnits.first, '😀'.codeUnits]);
+  try { units.codeUnits[0] = 1; } catch (error) { print(error); }
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[[0, 255, 1], Uint8List, [255], Uint8List]\n[1000000, 120, [55357, 56832]]\nUnsupported operation: Cannot modify an unmodifiable list\n',
+  });
+});
+
+test('error representations escape isolated surrogates without splitting pairs', () => {
+  const source = `void main() {
+  var isolated = String.fromCharCodes([0xd800, 0xdc00, 0xdc00]);
+  var boundary = 'x' * 1023 + isolated;
+  var quoted = Error.safeToString(boundary);
+  print(quoted.substring(1024).codeUnits);
+  print(int.tryParse('', radix: 37));
+  try { int.parse('', radix: 37); } on FormatException catch (error) { print([error.message, error.offset]); }
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '[55296, 56320, 92, 117, 100, 99, 48, 48, 34]\nnull\n[Invalid radix-37 number, 0]\n',
+  });
+});

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 599 -- The operations of Dart's types belong together; each is a short case analysis.
+// code-gauge-allow-file fileNcss 605 -- The operations of Dart's types belong together; each is a short case analysis.
 import type { ClassInfo } from './classes';
 
 /** A type parameter of a class, a function type, or a generic function. */
@@ -861,6 +861,19 @@ export function numericClassOf(type: DartType): 'int' | 'double' | 'num' | undef
   if (base.cls === coreTypes.int) return 'int';
   if (base.cls === coreTypes.double) return 'double';
   if (base.cls === coreTypes.num) return 'num';
+  return undefined;
+}
+
+/** The type an `is` test or a cast promotes a variable of type `current` to, if it promotes it. */
+export function promotionTarget(current: DartType, tested: DartType): DartType | undefined {
+  if (sameType(current, tested)) return undefined;
+  if (isSubtype(tested, current)) {
+    if (current.kind === 'typeParam' && !current.promoted) return { ...current, promoted: tested, nullable: false };
+    return tested;
+  }
+  if (current.kind === 'typeParam' && isSubtype(tested, resolveBound(current))) {
+    return { ...current, nullable: isNullable(tested) && current.nullable, promoted: tested };
+  }
   return undefined;
 }
 
