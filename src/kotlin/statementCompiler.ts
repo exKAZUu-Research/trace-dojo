@@ -782,15 +782,14 @@ export abstract class StatementCompiler extends OperatorCompiler {
     let bodyEval: Eval;
     const firstSlot = context.info.slotCount;
     try {
-      const compiled = this.compileStatementsValue(
+      bodyEval = this.compileStatementsValue(
         bodyScope,
         context,
         statement.body.statements,
         undefined,
         true,
         false
-      );
-      bodyEval = compiled.eval;
+      ).eval;
     } finally {
       context.loops.pop();
     }

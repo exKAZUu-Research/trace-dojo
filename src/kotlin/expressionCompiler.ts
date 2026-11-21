@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 967 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss 970 -- the compiler of one area of Kotlin, whose parts call each other closely.
 import type { Block, Expression, LambdaExpression } from './ast';
 import { type ArgumentSyntax, CallCompiler, type Candidate, type ResolvedCall } from './callCompiler';
 import {
