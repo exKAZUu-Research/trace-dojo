@@ -1,0 +1,12 @@
+(14,13): error TS2365: Operator '+' cannot be applied to types 'void' and 'number'.
+(15,25): error TS2363: The right-hand side of an arithmetic operation must be of type 'any', 'number', 'bigint' or an enum type.
+(16,15): error TS2362: The left-hand side of an arithmetic operation must be of type 'any', 'number', 'bigint' or an enum type.
+(17,14): error TS2362: The left-hand side of an arithmetic operation must be of type 'any', 'number', 'bigint' or an enum type.
+(18,14): error TS2365: Operator '<' cannot be applied to types 'void' and 'number'.
+(19,17): error TS2365: Operator '>=' cannot be applied to types 'number' and 'void'.
+(20,1): error TS2365: Operator '+=' cannot be applied to types 'number' and 'void'.
+(21,10): error TS2363: The right-hand side of an arithmetic operation must be of type 'any', 'number', 'bigint' or an enum type.
+(22,17): error TS2362: The left-hand side of an arithmetic operation must be of type 'any', 'number', 'bigint' or an enum type.
+(23,17): error TS2365: Operator '+' cannot be applied to types 'void' and 'number'.
+(24,17): error TS2365: Operator '+' cannot be applied to types 'void | number' and 'number'.
+(25,18): error TS2365: Operator '<' cannot be applied to types 'void | number' and 'number'.

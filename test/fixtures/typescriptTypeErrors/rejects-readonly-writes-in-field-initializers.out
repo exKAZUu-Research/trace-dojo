@@ -1,0 +1,4 @@
+(3,19): error TS2540: Cannot assign to 'count' because it is a read-only property.
+(5,25): error TS2540: Cannot assign to 'limit' because it is a read-only property.
+(6,24): error TS2540: Cannot assign to 'count' because it is a read-only property.
+(8,10): error TS2540: Cannot assign to 'limit' because it is a read-only property.

@@ -1,0 +1,26 @@
+class Point {
+  constructor(x: number) {
+    this.x = x;
+  }
+}
+const p = new Point(1);
+p["y"] = 2;
+p.y += 1;
+const u: { a: number } | { b: string } = { a: 1 };
+u.a = 2;
+const r: Record<string, number> = {};
+r.total = 3;
+r["count"] = 4;
+r.total = "five";
+class Bag {
+  [key: string]: number;
+  constructor() {
+    this.size = 0;
+    this.name = "bag";
+  }
+}
+const t = { a: 1 } as { a: number } | { a: string; b: number };
+t.b = 1;
+const o = { a: 1 };
+o.b = 2;
+console.log(p, u, r, new Bag(), t, o);

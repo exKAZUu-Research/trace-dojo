@@ -1,0 +1,2 @@
+abstract class A { abstract f(): number; }
+class B extends A { f() { return super.f(); } }

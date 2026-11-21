@@ -1,0 +1,16 @@
+class Base {
+  read(this: { need: string }) { return this.need; }
+  static read(this: { extra: number }) { return this.extra; }
+  typed<T>(this: T): T { return this; }
+}
+class Derived extends Base {
+  need = 5;
+  static extra = true;
+  bracket() { return super["read"](); }
+  dot() { return super.read(); }
+  generic(): Base { return super["typed"](); }
+  static bracket() { return super["read"](); }
+  static dot() { return super.read(); }
+}
+const derived = new Derived();
+console.log(derived.bracket(), derived.dot(), Derived.bracket(), Derived.dot(), derived.generic() === derived);

@@ -1,0 +1,10 @@
+type Body = { text: string };
+class AbortController {}
+type AlgorithmIdentifier = string;
+interface XPathNSResolver { x: number }
+class NodeFilter {}
+class Storage {}
+let localStorage = 1;
+const URLSearchParams = 1;
+interface Report { title: string }
+console.log("checked");

@@ -1,0 +1,38 @@
+type Numeric = { [n: number]: string } | { other: number };
+function notNumericName(x: Numeric): void {
+  if ("1e3" in x) console.log(x[0].toUpperCase());
+}
+function leadingZero(x: Numeric): void {
+  if ("01" in x) console.log(x[0].toUpperCase());
+}
+function falseKeepsIndex(x: Numeric): void {
+  if (0 in x) console.log(x);
+  else console.log(x.other);
+}
+function negatedKeepsIndex(x: Numeric): void {
+  if (!(0 in x)) {
+    const other: { other: number } = x;
+    console.log(other);
+  }
+}
+function falseKeepsOptional(x: { a?: number } | { b: string }): void {
+  if ("a" in x) console.log(x);
+  else {
+    const b: { b: string } = x;
+    console.log(b);
+  }
+}
+function falseKeepsStringIndex(x: { [k: string]: number } | { other: string }): void {
+  if ("q" in x) console.log(x);
+  else console.log(x.other);
+}
+function unknownKeyFalse(x: { a: number } | { b: string }): void {
+  if (!("c" in x)) console.log(x.c);
+}
+notNumericName({ other: 1 });
+leadingZero({ other: 1 });
+falseKeepsIndex({ other: 1 });
+negatedKeepsIndex({ other: 1 });
+falseKeepsOptional({ b: "x" });
+falseKeepsStringIndex({ other: "y" });
+unknownKeyFalse({ a: 1 });

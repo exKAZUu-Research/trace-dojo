@@ -1,0 +1,8 @@
+let flag = !true;
+flag = true;
+const arr = [1];
+const empty = !arr.length;
+const b: boolean = empty;
+const c = !"";
+const d: true = c;
+console.log(flag, b, d);

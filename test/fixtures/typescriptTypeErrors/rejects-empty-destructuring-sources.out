@@ -1,0 +1,20 @@
+(1,30): error TS2531: Object is possibly 'null'.
+(2,7): error TS2488: Type '1' must have a '[Symbol.iterator]()' method that returns an iterator.
+(3,57): error TS2532: Object is possibly 'undefined'.
+(4,36): error TS2531: Object is possibly 'null'.
+(8,20): error TS2532: Object is possibly 'undefined'.
+(9,19): error TS2488: Type 'number' must have a '[Symbol.iterator]()' method that returns an iterator.
+(10,2): error TS2531: Object is possibly 'null'.
+(11,1): error TS2488: Type '1' must have a '[Symbol.iterator]()' method that returns an iterator.
+(12,8): error TS2488: Type 'number' must have a '[Symbol.iterator]()' method that returns an iterator.
+(13,12): error TS2531: Object is possibly 'null'.
+(14,8): error TS2532: Object is possibly 'undefined'.
+(16,7): error TS2532: Object is possibly 'undefined'.
+(19,2): error TS2571: Object is of type 'unknown'.
+(20,7): error TS2488: Type 'void' must have a '[Symbol.iterator]()' method that returns an iterator.
+(20,7): error TS2532: Object is possibly 'undefined'.
+(21,17): error TS2532: Object is possibly 'undefined'.
+(22,12): error TS2531: Object is possibly 'null'.
+(23,6): error TS2532: Object is possibly 'undefined'.
+(24,12): error TS2532: Object is possibly 'undefined'.
+(25,7): error TS2488: Type '2' must have a '[Symbol.iterator]()' method that returns an iterator.

@@ -1,0 +1,30 @@
+type LiteralKey = { [k: 'x']: number };
+interface GenericKey<T> {
+  [k: T]: number;
+}
+type BooleanKey = { [k: boolean]: number };
+class UnionLiteralKey {
+  [k: 'a' | 'b']: number;
+}
+type AnyKey = { [k: any]: number };
+type MixedKey = { [k: string | boolean]: number };
+type ObjectKey = { [k: object]: number };
+type KeyofKey = { [k: keyof { a: 1 }]: number };
+type NeverKey = { [k: never]: number };
+type MappedKey<T extends string> = { [k: Lowercase<T>]: number };
+type Letters = 'a' | 'b';
+type AliasKey = { [k: Letters]: number };
+type UnknownKey = { [k: `a${number}`]: number; [j: unknown]: number };
+type TwoBad = { [k: bigint]: number; [z: string | 1]: number };
+class GenericUnionKey<T> {
+  [k: number | T]: number;
+}
+type Name = string;
+type Valid = {
+  [k: Name]: number;
+  [n: number]: number;
+  [s: symbol]: number;
+  [t: `a${string}`]: number;
+  [u: Uppercase<string>]: number;
+};
+type Branded = { [b: string & { brand: 1 }]: number };

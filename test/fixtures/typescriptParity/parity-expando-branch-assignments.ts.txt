@@ -1,0 +1,13 @@
+const f = () => 1;
+if (Math.abs(-1) > 0) {
+  f.tag = "a";
+} else {
+  f.tag = "b";
+}
+console.log(f.tag);
+const g = () => 2;
+try { g.tag = "t"; } finally {}
+console.log(g.tag);
+const m = () => 5;
+{ m.tag = "x"; }
+console.log(m.tag);

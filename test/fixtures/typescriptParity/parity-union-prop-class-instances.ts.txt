@@ -1,0 +1,7 @@
+class A { name = "a"; a = 1; }
+class B { name = "b"; b = 2; }
+function f(x: A | B) {
+  const { name } = x;
+  console.log(name);
+}
+f(new A());

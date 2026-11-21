@@ -1,0 +1,21 @@
+type OrdinaryAny<U extends `${U & string}` | any> = U;
+type OrdinaryNever<U extends `${U & string}` & never> = U;
+type OrdinaryUnknown<U extends `${U & string}` | unknown> = U;
+type InferAny<T> = T extends [infer U extends `${U & string}` | any, infer U] ? U : never;
+type InferNever<T> = T extends [infer U extends `${U & string}` & never, infer U] ? U : never;
+type ArrayTemplate<U extends Array<`${U & string}`>> = U;
+type InferArray<T> = T extends [infer U extends Array<`${U & string}`>, infer U] ? U : never;
+type ArraySyntax<U extends (U & string)[]> = U;
+type TupleMapping<U extends [Uppercase<U & string>]> = U;
+type InferTuple<T> = T extends [infer U extends [Uppercase<U & string>], infer U] ? U : never;
+type TuplePattern<U extends [U & `key-${string}`]> = U;
+type Narrow<T> = T & string;
+type AliasArray<U extends Narrow<U>[]> = U;
+type Wrapper<T> = {text: T};
+type GenericArgument<U extends Wrapper<`${U & string}`>> = U;
+type Empty = {};
+type EmptyBound<U extends [U & Empty]> = U;
+type SelectedBranch<U extends (true extends true ? Array<U & string> | any : {})> = U;
+type DeferredBranch<T, U extends (T extends true ? Array<U & string> : {})> = U;
+
+console.log('done');

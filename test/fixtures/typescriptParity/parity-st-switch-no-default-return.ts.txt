@@ -1,0 +1,2 @@
+function f(x: "a" | "b"): number { switch (x) { case "a": return 1; case "b": return 2; } }
+console.log(f("a"));

@@ -1,0 +1,19 @@
+type RN = Record<string, number>;
+type RS = Record<string, string>;
+function test(rn: RN, rs: RS, u: RN | RS, un: RN | RS | undefined, ro: Readonly<RN>, nu: { [n: number]: number } | { [n: number]: string }, mix: RN | { a: string }, k: string) {
+  const s1 = { ...rn, ...rs }; const t1: boolean = s1.foo;
+  const s2 = { a: 1, ...rn }; const t2: boolean = s2.foo;
+  const s3 = { ...rn, a: 1 }; const t3: boolean = s3.foo;
+  const s4 = { ...un }; const t4: boolean = s4.foo;
+  const s5 = { ...rn, ...u }; const t5: boolean = s5.foo;
+  const s6 = { ...u, ...rn }; const t6: boolean = s6.foo;
+  const s7 = { ...ro }; s7.foo = 1;
+  const s8 = { ...nu }; const t8: boolean = s8[0];
+  const s9 = { ...mix }; const t9: boolean = s9.zz;
+  const s10 = { ...u, ...nu }; const t10: boolean = s10[0];
+  const s11 = { ...nu, ...rn }; const t11: boolean = s11[0];
+  const s12 = { ...rn, [k]: true }; const t12: number = s12.foo;
+  const s13 = { [k]: true, ...rn }; const t13: number = s13.foo;
+  const s14 = { ...u, [k]: true }; const t14: number = s14.foo;
+  const s15 = { ...u, ...{} }; const t15: boolean = s15.foo;
+}

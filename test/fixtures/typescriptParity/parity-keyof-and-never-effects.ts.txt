@@ -1,0 +1,37 @@
+const colors = { "#fff": "white", "#000": "black", "__@name": "plain" };
+const color: keyof typeof colors = "#fff";
+const ordinary: keyof typeof colors = "__@name";
+const symbol = Symbol("flag");
+const withSymbol = { [symbol]: "symbol", ...colors };
+const symbolKey: keyof typeof withSymbol = symbol;
+console.log(colors[color], colors[ordinary], withSymbol[symbolKey]);
+
+class Names {
+  "#field" = "public";
+  #field = "private";
+  read() { return this.#field; }
+}
+const field: keyof Names = "#field";
+const names = new Names();
+console.log(names[field], names.read());
+
+function fail(): never { throw new Error("missing"); }
+const annotated: { nested: { fail(): never } } = { nested: { fail } };
+function useAnnotated(value?: number) {
+  if (value === undefined) annotated.nested.fail();
+  return value.toFixed(1);
+}
+function direct(value?: number) {
+  if (value === undefined) fail();
+  return value.toFixed(1);
+}
+function optionalPresent(stop: () => never, value?: number) {
+  if (value === undefined) stop?.();
+  return value.toFixed(1);
+}
+console.log(useAnnotated(2), direct(3), optionalPresent(fail, 4));
+
+class Inheritance extends (class { later(): number { return 5; } }) {
+  read(): number { return new Inheritance().later(); }
+}
+console.log(new Inheritance().read());

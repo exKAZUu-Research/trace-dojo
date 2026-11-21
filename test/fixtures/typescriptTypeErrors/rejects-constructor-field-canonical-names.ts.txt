@@ -1,0 +1,10 @@
+const k = 1;
+class C { 1; constructor() { this[k] = 1; } }
+const n: number = new C()[1];
+class D { ["x"]; constructor() { this["x"] = "s"; } }
+const s: string = new D().x;
+class E { ["y"]; constructor() { this.y = true; } }
+const b: boolean = new E().y;
+class F { 2; constructor() { this[2] = 1; } }
+const m: string = new F()[2];
+console.log(n, s, b);

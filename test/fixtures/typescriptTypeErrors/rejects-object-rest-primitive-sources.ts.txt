@@ -1,0 +1,28 @@
+const { ...n } = 1; console.log(n);
+const { ...s } = "abc"; console.log(s);
+function unconstrained<T>(t: T) { const { ...r } = t; }
+function constrained<T extends string>(t: T) { const { ...r } = t; }
+function objectConstrained<T extends object>(t: T) { const { ...r } = t; }
+function unknownConstrained<T extends unknown>(t: T) { const { ...r } = t; }
+function keyed<K extends keyof { a: 1 }>(k: K) { const { ...r } = k; }
+function mixed(u: string | { a: number }) { const { ...r } = u; }
+function anyValue(a: any) { const { ...r } = a; }
+function unknownValue(u: unknown) { const { ...r } = u; }
+const { a: aa, ...array } = [1, 2];
+function bool(b: boolean) { const { ...r } = b; }
+function nullValue(v: null) { const { ...r } = v; }
+let tmp; ({ ...tmp } = 1);
+function nullable(v: { a: number } | null | undefined) { const { ...r } = v; r.a; }
+const { length: len, ...str } = "abc";
+function sym(v: symbol) { const { ...r } = v; }
+function big(v: bigint) { const { ...r } = v; }
+function nev(v: never) { const { ...r } = v; }
+function falsyZero(x: 0 | { a: number }) { const { ...r } = x; }
+function falsyFalse(x: false | { a: number }) { const { ...r } = x; }
+function fn(f: () => void) { const { ...r } = f; }
+function nonPrimitive(o: object) { const { ...r } = o; }
+function empty(o: {}) { const { ...r } = o; }
+function branded(x: string & { brand: 1 }) { const { ...r } = x; }
+function restParameter(...[{ ...r }]: [number]) {}
+function parameter({ ...r }: string) {}
+for (const { ...r } of [1, 2]) {}

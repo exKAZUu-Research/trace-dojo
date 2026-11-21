@@ -3,6 +3,7 @@ import type { ProgramRecording } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder';
+import { NOT_SCALAR, type Scalar, scalarItems } from '../interpreter/traceScalars';
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
 import { formatFloat, quotedSymbolName, strInspect, symInspect } from './conversions';
 import { regexpValueDisplayOf } from './libRegexp';
@@ -119,10 +120,6 @@ function addVariable(variables: TraceVariables, name: string, value: Value): voi
     });
 }
 
-const NOT_SCALAR = Symbol('notScalar');
-type Scalar = TraceItemVariable[string];
-
-// code-gauge-allow functionNcss 31 -- The ordered cases for runtime value graph serialization share state; splitting them solely for the metric would hide their sequencing.
 function scalarOf(value: Value, seen: Set<object>, budget: { remaining: number }): Scalar | typeof NOT_SCALAR {
   if (budget.remaining-- <= 0) throw new ExecutionLimitError('trace');
   rt().spend();
@@ -142,15 +139,7 @@ function scalarOf(value: Value, seen: Set<object>, budget: { remaining: number }
   if (value instanceof RSymbol) return symInspect(value);
   if (!(value instanceof RArray) || seen.has(value)) return NOT_SCALAR;
   if (seen.size >= 256) throw new ExecutionLimitError('trace');
-  seen.add(value);
-  const items: Scalar[] = [];
-  for (const item of value.items) {
-    const scalar = scalarOf(item, seen, budget);
-    if (scalar === NOT_SCALAR) return NOT_SCALAR;
-    items.push(scalar);
-  }
-  seen.delete(value);
-  return items as Scalar;
+  return scalarItems<object, Value>(value, value.items, seen, (item) => scalarOf(item, seen, budget));
 }
 
 function traceIntOf(value: bigint): number | bigint {
@@ -225,40 +214,57 @@ function rangeText(value: RRange): string {
 function containerNodeOf(value: RBasic, seen: Set<object>, budget: { remaining: number }): DisplayNode {
   const entries: Record<string, DisplayNode> = {};
   if (value instanceof RArray) {
-    for (const [index, item] of value.items.entries()) {
-      entries[index] = displayNodeOf(item, seen, budget) ?? NULL_NODE;
-      if (budget.remaining <= 0) {
-        if (index + 1 < value.items.length) markTruncated(entries, String(index + 1));
-        break;
-      }
-    }
+    addArrayEntries(entries, value, seen, budget);
     return { kind: 'array', entries };
   }
-  if (value instanceof RHash) {
-    const ordered: HashEntry[] = [];
-    for (const entry of value.map.values()) {
-      if (ordered.length >= Math.max(1, budget.remaining)) break;
-      ordered.push(entry);
-    }
-    const labels = keyLabels(ordered.map((entry) => entry.key));
-    for (const [index, entry] of ordered.entries()) {
-      Object.defineProperty(entries, labels[index], {
-        value: displayNodeOf(entry.value, seen, budget) ?? NULL_NODE,
-        enumerable: true,
-        configurable: true,
-        writable: true,
-      });
-      if (budget.remaining <= 0) {
-        if (index + 1 < value.map.size) {
-          let marker = '…';
-          while (Object.hasOwn(entries, marker)) marker += '…';
-          markTruncated(entries, marker);
-        }
-        break;
-      }
-    }
-  } else addInstanceEntries(entries, value, seen, budget);
+  if (value instanceof RHash) addHashEntries(entries, value, seen, budget);
+  else addInstanceEntries(entries, value, seen, budget);
   return { kind: 'object', entries };
+}
+
+function addArrayEntries(
+  entries: Record<string, DisplayNode>,
+  value: RArray,
+  seen: Set<object>,
+  budget: { remaining: number }
+): void {
+  for (const [index, item] of value.items.entries()) {
+    entries[index] = displayNodeOf(item, seen, budget) ?? NULL_NODE;
+    if (budget.remaining <= 0) {
+      if (index + 1 < value.items.length) markTruncated(entries, String(index + 1));
+      break;
+    }
+  }
+}
+
+function addHashEntries(
+  entries: Record<string, DisplayNode>,
+  value: RHash,
+  seen: Set<object>,
+  budget: { remaining: number }
+): void {
+  const ordered: HashEntry[] = [];
+  for (const entry of value.map.values()) {
+    if (ordered.length >= Math.max(1, budget.remaining)) break;
+    ordered.push(entry);
+  }
+  const labels = keyLabels(ordered.map((entry) => entry.key));
+  for (const [index, entry] of ordered.entries()) {
+    Object.defineProperty(entries, labels[index], {
+      value: displayNodeOf(entry.value, seen, budget) ?? NULL_NODE,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+    if (budget.remaining <= 0) {
+      if (index + 1 < value.map.size) {
+        let marker = '…';
+        while (Object.hasOwn(entries, marker)) marker += '…';
+        markTruncated(entries, marker);
+      }
+      break;
+    }
+  }
 }
 
 function addInstanceEntries(

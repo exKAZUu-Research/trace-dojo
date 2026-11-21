@@ -1,0 +1,5 @@
+(3,24): error TS2353: Object literal may only specify known properties, and 'w' does not exist in type 'P2'.
+(4,17): error TS2353: Object literal may only specify known properties, and 'w' does not exist in type 'P2'.
+(5,30): error TS2353: Object literal may only specify known properties, and 'nested' does not exist in type 'P2'.
+(6,67): error TS2353: Object literal may only specify known properties, and 'extra' does not exist in type 'P2'.
+(9,25): error TS2353: Object literal may only specify known properties, and 'extra' does not exist in type 'P2'.

@@ -1,0 +1,13 @@
+class OuterAccess {
+  private x=1;
+  protected y=2;
+  make() { return new class { get(a:OuterAccess) { return a.x+a.y; } }; }
+}
+const outerAccess = new OuterAccess();
+console.log(outerAccess.make().get(outerAccess));
+class AccessBase { protected value=3; }
+class AccessDerived extends AccessBase {
+  make() { return new class { get(a:AccessDerived) { return a.value; } }; }
+}
+const derivedAccess = new AccessDerived();
+console.log(derivedAccess.make().get(derivedAccess));

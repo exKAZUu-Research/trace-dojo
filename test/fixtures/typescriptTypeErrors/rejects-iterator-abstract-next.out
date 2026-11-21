@@ -1,0 +1,4 @@
+(1,7): error TS2515: Non-abstract class 'Numbers' does not implement inherited abstract member next from class 'Iterator<number, undefined, unknown>'.
+(3,7): error TS2515: Non-abstract class 'Words' does not implement inherited abstract member next from class 'Base'.
+(8,7): error TS2515: Non-abstract class 'Square' does not implement inherited abstract member area from class 'Middle'.
+(9,1): error TS2511: Cannot create an instance of an abstract class.

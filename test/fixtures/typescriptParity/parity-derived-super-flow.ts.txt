@@ -1,0 +1,18 @@
+class FlowBase { constructor(public value = 1) {} }
+class FlowBranches extends FlowBase {
+  constructor(flag: boolean) { if (flag) super(2); else super(3); console.log(this.value); }
+}
+class FlowBlock extends FlowBase {
+  constructor() { { super(4); } console.log(this.value); }
+}
+class FlowCapture extends FlowBase {
+  constructor() { const read = () => this.value; super(5); console.log(read()); }
+}
+class FlowUnreachable extends FlowBase {
+  constructor() { if (false) console.log(this.value); super(6); console.log(this.value); }
+}
+new FlowBranches(true);
+new FlowBranches(false);
+new FlowBlock();
+new FlowCapture();
+new FlowUnreachable();

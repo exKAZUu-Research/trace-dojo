@@ -1,0 +1,15 @@
+class Base {
+  static label = 'base';
+}
+class Derived extends Base {}
+const Bound = Derived.bind(null);
+const Rebound = Bound.bind(null);
+console.log(new Derived() instanceof Bound, new Bound() instanceof Rebound, Bound.label);
+console.log(new Base() instanceof Rebound);
+
+type Dictionary<K extends string> = { [P in K]: boolean };
+const flags: Dictionary<string> = { ready: true };
+const selected: Dictionary<'ready'> = flags;
+const values: Record<string, number> = { answer: 42 };
+const chosen: Record<'answer', number> = values;
+console.log(selected.ready, chosen.answer);

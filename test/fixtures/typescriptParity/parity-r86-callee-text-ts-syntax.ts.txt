@@ -1,0 +1,13 @@
+const obj: any = { inner: {} };
+const tries: (() => unknown)[] = [
+  () => (obj as any).method(),
+  () => obj.inner!.go(),
+  () => (<any>obj).g(),
+  () => obj?.inner.h(),
+  () => (obj.inner as { k: () => void }).k(),
+  () => obj . spaced (),
+  () => obj.inner[`tmpl`](),
+  () => obj[0](),
+  () => new obj.inner.C(),
+];
+for (const t of tries) { try { t(); } catch (e: any) { console.log(e.message); } }

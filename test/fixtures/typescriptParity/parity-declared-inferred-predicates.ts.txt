@@ -1,0 +1,48 @@
+function declaredString(value: unknown) { return typeof value === 'string'; }
+const declaredMixed: (string | number)[] = ['a', 2, 'b'];
+console.log(declaredMixed.filter(declaredString).map(value => value.toUpperCase()));
+for (const value of declaredMixed) {
+  if (declaredString(value)) console.log(value.toUpperCase());
+  else console.log(value.toFixed(1));
+}
+class DeclaredGuards {
+  number(value: unknown) { return typeof value === 'number'; }
+  static string(value: unknown) { return typeof value === 'string'; }
+}
+const declaredGuards = new DeclaredGuards();
+console.log(declaredMixed.filter(declaredGuards.number).map(value => value.toFixed(1)));
+console.log(declaredMixed.filter(DeclaredGuards.string).map(value => value.toUpperCase()));
+const declaredObjectGuard = { string(value: unknown) { return typeof value === 'string'; } };
+console.log(declaredMixed.filter(declaredObjectGuard.string).map(value => value.toUpperCase()));
+function declaredNonNull<T>(value: T) { return value !== null && value !== undefined; }
+const declaredNullable: (string | null | undefined)[] = ['c', null, undefined];
+console.log(declaredNullable.filter(declaredNonNull).map(value => value.toUpperCase()));
+function declaredNested(value: unknown) {
+  function unrelated() { return false; }
+  return typeof value === 'string';
+}
+console.log(declaredMixed.filter(declaredNested).map(value => value.toUpperCase()));
+function declaredExplicit(value: unknown): value is string;
+function declaredExplicit(value: unknown) { return typeof value === 'string'; }
+console.log(declaredMixed.filter(declaredExplicit).map(value => value.toUpperCase()));
+let declaredOuter: unknown = 'outer';
+if (declaredString(declaredOuter)) console.log(declaredOuter.toUpperCase());
+declaredOuter = 3;
+if (declaredGuards.number(declaredOuter)) console.log(declaredOuter.toFixed(2));
+function declaredExplicitNonNull<T>(value: T): value is NonNullable<T> { return value !== null && value !== undefined; }
+console.log(declaredNullable.filter(declaredExplicitNonNull).map(value => value.toUpperCase()));
+function nonPredicateIdentity<T extends number>(value: T) { return value; }
+console.log([1, 2].map(nonPredicateIdentity).map(value => value.toFixed(1)));
+class ComposedDeclaredGuards {
+  string(value: unknown) { return typeof value === 'string'; }
+  composed(value: unknown) { return this.string(value); }
+}
+const composedDeclaredGuards = new ComposedDeclaredGuards();
+for (const value of declaredMixed) {
+  if (composedDeclaredGuards.composed(value)) console.log('composed', value.toUpperCase());
+}
+function nonNullableBranch<T>(value: T & {}) {
+  if (value === null || value === undefined) { const unreachable: never = value; return unreachable; }
+  return value;
+}
+console.log(nonNullableBranch('present'));

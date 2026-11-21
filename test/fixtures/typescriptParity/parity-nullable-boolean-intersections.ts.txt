@@ -1,0 +1,15 @@
+type Intersect<A, B, C> = A & B & C;
+const one: Intersect<boolean, any, null> = 1;
+const two: Intersect<any, boolean, null> = 2;
+const three: Intersect<boolean, null, any> = 3;
+const four: boolean & any & null = 4;
+const five: (true | false) & any & null = 5;
+const six: Intersect<false | true, any, null> & any = 6;
+const seven: Intersect<null, any, null> = 7;
+const eight: Intersect<boolean, any, true> = 8;
+const nine: Intersect<boolean, any, false> = 9;
+console.log(one, two, three, four, five, six, seven, eight, nine);
+
+const delayed: Intersect<NoInfer<boolean>, any, null> = 10;
+const alsoDelayed: Intersect<NoInfer<true | false>, NoInfer<null>, any> = 11;
+console.log(delayed, alsoDelayed);

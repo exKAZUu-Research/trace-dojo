@@ -1,0 +1,4 @@
+const t: true = !false;
+const u = !0;
+const v: true = u;
+console.log(t, v);

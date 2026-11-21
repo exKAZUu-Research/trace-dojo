@@ -1,0 +1,9 @@
+type Length<V extends {a: {length: number}}, K extends keyof V> = V[K]['length'];
+type Size<V extends {name: string}, K extends keyof V> = V[K]['toUpperCase'];
+type Unknowns<T extends {entry: {length: number}}, K extends keyof T> = T[K]['length'];
+type Choice<V extends {a: {length: number}; b: number}, K extends 'a' | 'b'> = V[K]['length'];
+type IndexedKey<V extends {a: {length: number}; b: 'notLength'}> = V['a'][V['b']];
+type CorrelationLost<V extends {a: {length: number}}, K extends keyof V, P extends keyof V['a']> = V[K][P];
+type Independent<V, K extends keyof V, T, P extends keyof T> = V[K][T[P]];
+type IndependentConcrete<V extends {a: {length: number}}, T extends {selected: string}, P extends keyof T> = V['a'][T[P]];
+console.log('ok');

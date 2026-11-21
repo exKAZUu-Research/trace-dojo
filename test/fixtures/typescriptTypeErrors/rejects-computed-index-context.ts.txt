@@ -1,0 +1,23 @@
+function f(k: string, n: number, u: "x" | "y") {
+  const a: { [key: string]: (n: number) => number } = { [k]: (v) => v + 1 };
+  const b: { [key: number]: (s: string) => number; [key: string]: (s: string) => unknown } = { [n]: (s) => s.length };
+  const c: { [key: string]: (n: number) => number } = { [u]: (v) => v + 1 };
+  const m: { [key: string]: (n: number) => number } = { [k](v) { return v + 1; } };
+  const d = { [k]: "hello" } as const;
+  const e: "hello" = d.zz;
+  d.q = "hello";
+  const g = { [k]: "hello" };
+  const h: "hello" = g.zz;
+  const l: { x: (n: number) => number; y: (n: number) => number } = { [u]: (v) => v };
+  const p = { [k]: { inner: 1 } } as const;
+  p.z.inner = 2;
+  const r: { [key: string]: { a: number } } = { [k]: { a: 1, b: 2 } };
+  console.log(a, b, c, m, e, h, l, r);
+}
+function s(i: { [k: string]: number }) {
+  const o = { ...i } as const;
+  o.a = 1;
+  const t = { ...{ a: 1 } } as const;
+  t.a = 2;
+}
+console.log(f, s);

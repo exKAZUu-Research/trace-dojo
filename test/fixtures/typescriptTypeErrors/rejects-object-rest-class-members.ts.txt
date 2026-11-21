@@ -1,0 +1,15 @@
+class A { get x() { return 1; } y = 2; }
+const { ...ra } = new A();
+console.log(ra.x);
+class B { private x = 1; read() { const { ...r } = this; return r.x; } }
+console.log(new B().read());
+class C { m() {} #p = 1; protected q = 2; public z = 3; set s(v: number) {} }
+const { ...rc } = new C(); rc.m; rc.q; rc.s; rc.z;
+const o = { get g() { return 1; }, f() {} }; const { ...ro } = o; ro.g; ro.f;
+class E { protected y = 1; read() { const { ...r } = this; return r.y; } }
+class F { m() {} get g() { return 1; } private p = 1; z = 2; read() { const { ...r } = this; r.m; r.g; r.z; return r; } }
+function generic<T extends F>(t: T) { const { ...r } = t; r.m; r.g; r.z; r.p; }
+class D extends C { n() {} w = 3; }
+const { ...rd } = new D(); rd.m; rd.n; rd.w; rd.z;
+function intersected(ci: C & { w: number }) { const { ...r } = ci; r.w; r.m; }
+function united(cu: C | { k: number }) { const { ...r } = cu; r.m; }

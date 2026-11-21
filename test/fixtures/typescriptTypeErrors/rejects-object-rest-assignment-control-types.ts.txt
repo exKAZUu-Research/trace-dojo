@@ -1,0 +1,5 @@
+function declared<T extends object,K extends keyof T>(o:T,k:K){const{[k]:value,...rest}=o;return rest[k];}
+let property;({a:property}={a:1});property.toUpperCase();
+let element;[element]=[1];element.toUpperCase();
+let arrayRest;[...arrayRest]=[1];arrayRest.nope();
+let initialized={a:1};({...initialized}={a:2});initialized.nope();

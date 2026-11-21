@@ -1,0 +1,13 @@
+const add = (a: number, b: number) => a + b;
+console.log(add(...[1, 2]));
+console.log(add(1, ...[2]));
+function f(a: number, b = 2) { return a + b; }
+console.log(f(...[1]));
+function g(a: number, b: string) { return `${a}${b}`; }
+console.log(g(...[1, "a"]));
+console.log(add(...([3, 4])));
+function h<T>(a: T, b: T) { return [a, b]; }
+console.log(h(...[1, 2]));
+class P { constructor(public x: number, public y: number) {} }
+console.log(new P(...[1, 2]));
+console.log(Math.max(...[1, 5, 3]));

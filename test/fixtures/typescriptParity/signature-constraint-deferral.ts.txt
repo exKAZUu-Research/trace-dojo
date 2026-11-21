@@ -1,0 +1,18 @@
+type FunctionKeys<U extends (x: keyof (U & string)) => void> = U;
+type FunctionLength<U extends (x: (U & string)['length']) => void> = U;
+type FunctionUpper<U extends (x: Uppercase<U & string>) => void> = U;
+type Optional<U extends (x?: keyof (U & string)) => void> = U;
+type Rest<U extends (...x: Array<keyof (U & string)>) => void> = U;
+type Constructor<U extends new (x: keyof (U & string)) => object> = U;
+type InferKeys<T> = T extends infer U extends (x: keyof (U & string)) => void ? U : never;
+type InferLength<T> = T extends infer U extends (x: (U & string)['length']) => void ? U : never;
+type InferUpper<T> = T extends infer U extends (x: Uppercase<U & string>) => void ? U : never;
+type InferOptional<T> = T extends infer U extends (x?: keyof (U & string)) => void ? U : never;
+type InferRest<T> = T extends infer U extends (...x: Array<keyof (U & string)>) => void ? U : never;
+type InferConstructor<T> = T extends infer U extends new (x: keyof (U & string)) => object ? U : never;
+type InsideArray<U extends Array<(x: keyof (U & string)) => void>> = U;
+type CallbackReturn<U extends () => keyof (U & string)> = U;
+type Forward<U extends Callback<U>> = U;
+type Callback<T> = (x: keyof (T & string)) => void;
+
+console.log('done');

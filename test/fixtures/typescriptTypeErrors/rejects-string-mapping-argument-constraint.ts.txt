@@ -1,0 +1,11 @@
+type T = Uppercase<number>;
+type U<T> = Lowercase<T>;
+type V<T extends string> = Capitalize<T>;
+type W = Uncapitalize<"a" | 1>;
+type X = Uppercase<any>;
+type Y = Uppercase<never>;
+type Z<T extends `a${string}`> = Uppercase<T>;
+type Z2 = Lowercase<string>;
+type Z3 = Lowercase<unknown>;
+type Z4<T extends "a" | "b"> = Lowercase<T>;
+console.log(1);

@@ -1,0 +1,4 @@
+Number.prototype.toString requires that 'this' be a Number
+Number.prototype.toFixed requires that 'this' be a Number
+Boolean.prototype.toString requires that 'this' be a Boolean
+String.prototype.toString requires that 'this' be a String

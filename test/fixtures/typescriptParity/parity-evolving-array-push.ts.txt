@@ -1,0 +1,4 @@
+const b = []; b.push(...[1, 2]); console.log(b[0].toFixed());
+const c = []; c.unshift(..."ab"); const s: string = c[0];
+const d = []; const m: number = d.push("x"); d.push(2); const e: (string | number)[] = d;
+console.log(m, e, s);

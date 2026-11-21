@@ -1,0 +1,5 @@
+type V<T extends {a:number},K extends string>=K extends "a" ? T[`${K}`] : never; const x:V<{a:number},"a">=1;
+type W<T extends {A:number},K extends string>=K extends "a" ? T[Uppercase<K>] : never;
+type X<T extends {a:number},K extends string>=K extends "b" ? T[`${K}`] : never;
+type Y<T extends {a:number},K extends string>=K extends "a" ? T[K] : never;
+console.log(x);

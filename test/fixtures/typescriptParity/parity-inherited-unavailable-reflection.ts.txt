@@ -1,0 +1,9 @@
+const r:any=/a/;
+console.log(Object.hasOwn(r,"compile"),"compile" in r,typeof r.compile);
+console.log(Object.getOwnPropertyDescriptor(r,"compile"),Object.getOwnPropertyDescriptor(Object.getPrototypeOf(r),"compile")!.value.length);
+const child:any=Object.create(r);
+console.log(Object.hasOwn(child,"compile"),"compile" in child,typeof child.compile);
+const copy=r.compile;
+console.log(typeof copy,copy.name,copy.length);
+delete (RegExp.prototype as any).compile;
+console.log(Object.hasOwn(r,"compile"),"compile" in r,typeof r.compile);

@@ -1,0 +1,5 @@
+[ 'stack' ] [ 'stack', 'message', 'cause' ] []
+true true false
+[ 'get', 'set', 'enumerable', 'configurable' ] 0 1 true
+true
+true

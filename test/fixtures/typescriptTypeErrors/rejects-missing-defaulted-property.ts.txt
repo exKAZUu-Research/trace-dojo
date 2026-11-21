@@ -1,0 +1,14 @@
+const empty: {} = {};
+const { a = 1 } = empty;
+let b: number;
+({ b = 1 } = empty);
+function f({ x = 2 }: {}) {}
+class C {}
+const c: C = new C();
+const { v = 1 } = c;
+const { w: renamed = 1 } = c;
+const inferred = {};
+const { d = 1 } = inferred;
+function g({ x = 2 }: { y?: number } = {}) {}
+const union: { e: number } | {} = {};
+const { e = 1 } = union;

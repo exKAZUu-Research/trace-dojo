@@ -1,0 +1,1 @@
+(2,47): error TS2353: Object literal may only specify known properties, and 'side' does not exist in type '{ kind: "circle"; radius: number; }'.

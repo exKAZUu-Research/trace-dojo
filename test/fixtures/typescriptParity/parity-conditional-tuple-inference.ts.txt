@@ -1,0 +1,27 @@
+function first<T>(value: T extends string ? [T, ...T[]] : T[][]): T {
+  return value[0] as T;
+}
+function forward<U>(value: U extends string ? [U, ...U[]] : U[][]): string {
+  return first(value);
+}
+function tag<T>(value: T extends { tag: string } ? [T, ...T[]] : T[][]): T {
+  return value[0] as T;
+}
+function forwardTag<U>(value: U extends { tag: string } ? [U, ...U[]] : U[][]): { tag: string } {
+  return tag(value);
+}
+function fixed<T>(value: T extends string ? [item: T] : never): T {
+  return value[0];
+}
+function forwardLabeled<U>(value: U extends string ? [item: U] : never): string {
+  return fixed(value);
+}
+function readOnly<T>(value: T extends string ? readonly [T] : never): T {
+  return value[0];
+}
+function forwardMutable<U>(value: U extends string ? [U] : never): string {
+  return readOnly(value);
+}
+console.log(forward<string>(['ready', 'now']));
+console.log(forwardTag([{ tag: 'label' }]).tag);
+console.log(forwardLabeled(['named']), forwardMutable(['mutable']));

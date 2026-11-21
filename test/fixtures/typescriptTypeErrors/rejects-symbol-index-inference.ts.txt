@@ -1,0 +1,12 @@
+function first<T>(map: { [key: symbol]: T }): T { return map[Symbol.for('x')]; }
+function values<T>(map: { [key: string]: T }): T[] { return Object.values(map); }
+function numbers<T>(map: { [key: number]: T }): T { return map[1]; }
+const k = Symbol();
+const r1: string = first({ [k]: 2 });
+const r2: number[] = values({ a: 1, [k]: 'x' });
+const r3: number = numbers({ 1: 'a', b: 2 });
+const typed: { a: number } = { a: 1 };
+const r4: string[] = values(typed);
+const both: { [key: symbol]: string; [key: string]: number } = {};
+const r6: boolean = first(both);
+console.log(r1, r2, r3, r4, r6);

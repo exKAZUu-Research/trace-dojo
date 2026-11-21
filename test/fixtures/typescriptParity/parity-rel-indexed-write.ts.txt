@@ -1,0 +1,6 @@
+function setValue<K extends "a" | "b">(o: { a: number; b: number }, k: K): void {
+  o[k] = 1;
+}
+const obj = { a: 0, b: 0 };
+setValue(obj, "a");
+console.log(obj.a);

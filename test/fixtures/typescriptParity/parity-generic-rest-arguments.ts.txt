@@ -1,0 +1,10 @@
+function forward<T extends number[]>(fn: (...args: T) => void, args: T): void { fn(...args); }
+function prefix<T extends number[]>(fn: (label: string, ...args: T) => void, args: T): void { fn('value', ...args); }
+function concrete(fn: (...args: number[]) => void): void { fn(); fn(3, 4); }
+forward((n: 1) => console.log(n), [1]);
+prefix((label: string, n: 2) => console.log(label, n), [2]);
+concrete((...args: number[]) => console.log(args.join(',')));
+function spreadPrefix<T extends number[]>(fn: (label: string, ...args: T) => void, args: T): void { const head: [string] = ['prefix']; fn(...head, ...args); }
+spreadPrefix((label: string, n: 2) => console.log(label, n), [2]);
+function suffix<T extends number[]>(fn: (...args: [...T, string]) => void, args: T): void { fn(...args, 'end'); }
+suffix((n: 2, end: string) => console.log(n, end), [2]);

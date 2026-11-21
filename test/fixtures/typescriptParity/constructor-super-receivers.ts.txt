@@ -1,0 +1,30 @@
+class Base {
+  m() { return 1; }
+  get value() { return 3; }
+  static get shared() { return 4; }
+}
+class Delayed extends Base {
+  static { console.log(super.shared); }
+  constructor(callback: () => number = () => super.m()) {
+    const get = () => super.value;
+    super();
+    console.log(callback(), get());
+  }
+}
+class Initialized extends Base {
+  constructor(flag: boolean) {
+    if (flag) super();
+    else super();
+    console.log(super.m(), super["value"]);
+  }
+}
+class Unreachable extends Base {
+  constructor() {
+    throw Error("stop");
+    console.log(super.m());
+    super();
+  }
+}
+new Delayed();
+new Initialized(false);
+try { new Unreachable(); } catch { console.log("stopped"); }

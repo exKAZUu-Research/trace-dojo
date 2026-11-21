@@ -1,0 +1,9 @@
+(5,7): error TS2540: Cannot assign to 'prop' because it is a read-only property.
+(10,3): error TS2411: Property 'name' of type 'string' is not assignable to 'string' index type 'number'.
+(16,1): error TS2542: Index signature in type 'ReadonlyStringArray' only permits reading.
+(22,16): error TS2561: Object literal may only specify known properties, but 'colour' does not exist in type 'SquareConfig'. Did you mean to write 'color'?
+(24,14): error TS2559: Type '{ colour: string; }' has no properties in common with type 'SquareConfig'.
+(26,10): error TS2339: Property 'push' does not exist on type 'readonly string[]'.
+(29,18): error TS2493: Tuple type '[string, number]' of length '2' has no element at index '2'.
+(33,20): error TS4104: The type 'readonly [3, 4]' is 'readonly' and cannot be assigned to the mutable type '[number, number]'.
+(36,1): error TS4104: The type 'readonly string[]' is 'readonly' and cannot be assigned to the mutable type 'string[]'.

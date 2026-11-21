@@ -1,0 +1,12 @@
+function ready() { return false; }
+function valid() { return true; }
+const flag = Boolean(1);
+if (ready &&
+    valid &&
+    flag) console.log(1);
+const label = ready && "ready";
+if (flag || ready) console.log(2);
+const branch = flag && valid ? "yes" : "no";
+const parenthesized = (ready) && ready();
+function narrowed(fn?: () => boolean) { return fn && fn && 1; }
+function united(fn: (() => boolean) | (() => number)) { return fn && 1; }

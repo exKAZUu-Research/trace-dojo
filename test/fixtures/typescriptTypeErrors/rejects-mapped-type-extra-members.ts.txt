@@ -1,0 +1,17 @@
+type Values = { [K in "a" | "b"]: number; label: string };
+type V2 = { [K in "a"]: number; reset(): void };
+type V3 = { label: string; [K in "a"]: number };
+type V4 = { [K in "a"]: number; [k: string]: number };
+type V5 = { [K in "a"]: number; [J in "b"]: string };
+type V6 = { [K in "a"]: number; (): void };
+type V7 = { [K in "a"]: number; new (): object };
+type V8 = { [K in "a"]: number; get g(): number };
+type V9<T> = { [K in keyof T]: T[K]; extra: 1 };
+interface I { [K in "a"]: number }
+interface I2 { a: string; [K in "a"]: number }
+type T2 = { a: string; b: number; [K in "a"]: number };
+type U2 = { [K in "a"]: number; [J in "b"]: string; c: 1 };
+type W2 = { a: string; [K in "a"]: number; [J in "b"]: string };
+class C { [K in "a"]: number }
+const v: { a: 1; [K in "a"]: number } = { a: 1 };
+console.log('runs');

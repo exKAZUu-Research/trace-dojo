@@ -1,0 +1,14 @@
+(2,33): error TS2416: Property 'name' in type 'Strict' is not assignable to the same property in base type 'Named'.
+  Type 'string | number' is not assignable to type 'string | undefined'.
+    Type 'number' is not assignable to type 'string'.
+(3,35): error TS2416: Property 'name' in type 'Optional' is not assignable to the same property in base type 'Named'.
+  Type 'number | undefined' is not assignable to type 'string | undefined'.
+    Type 'number' is not assignable to type 'string'.
+(5,41): error TS2416: Property 'label' in type 'MaybeLabeled' is not assignable to the same property in base type 'Labeled'.
+  Type 'string | undefined' is not assignable to type 'string'.
+    Type 'undefined' is not assignable to type 'string'.
+(6,7): error TS2420: Class 'ParameterLabeled' incorrectly implements interface 'Labeled'.
+  Types of property 'label' are incompatible.
+    Type 'number' is not assignable to type 'string'.
+(8,7): error TS2420: Class 'Incomplete' incorrectly implements interface 'Both'.
+  Property 'size' is missing in type 'Incomplete' but required in type 'Both'.

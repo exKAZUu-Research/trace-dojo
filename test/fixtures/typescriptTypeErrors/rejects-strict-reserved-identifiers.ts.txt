@@ -1,0 +1,9 @@
+function bad() {
+  const implements = 3;
+  console.log(implements);
+  const p\u0061ckage = 2;
+  console.log(package);
+  const public = 1;
+  console.log(public);
+}
+bad();

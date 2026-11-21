@@ -1,0 +1,10 @@
+class A { x: number; constructor() { throw new Error("no"); } }
+try { new A(); } catch (e) { console.log((e as Error).message); }
+class B {
+  x: number;
+  constructor(fail: boolean) {
+    if (fail) throw new Error("failed");
+    this.x = 3;
+  }
+}
+console.log(new B(false).x);

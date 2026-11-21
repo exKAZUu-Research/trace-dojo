@@ -1,0 +1,10 @@
+25 77
+[ [ 4, -1 ], [ 1, 4 ] ]
+a undefined 1
+2 2
+[ 'A', 'B' ]
+x 5
+base false
+child of base true
+1 { y: 2 } { x: 1, y: 2, z: 3 }
+6

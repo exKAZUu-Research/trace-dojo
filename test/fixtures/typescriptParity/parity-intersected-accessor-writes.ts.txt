@@ -1,0 +1,18 @@
+type Getter = { get x(): number };
+type Field = { x: number };
+const v: Getter & Field = { x: 1 };
+v.x = 2;
+const w: { get value(): string } & { value: string } & { tag: number } = { value: "a", tag: 1 };
+w.value = "b";
+class Box {
+  #size = 1;
+  get size(): number {
+    return this.#size;
+  }
+  set size(value: number | string) {
+    this.#size = Number(value);
+  }
+}
+const box: Box & { size: number } = Object.assign(new Box(), { size: 2 });
+box.size = 3;
+console.log(v.x, w.value, box.size);

@@ -1,0 +1,11 @@
+type ByInfer<O, Z, Y, P extends (Z extends true ? (Y extends infer Z ? keyof O : keyof O) : keyof O)> = P;
+type Infer<T, K extends keyof T, Z, Y> = T[K] extends {key: 'x'} ? ByInfer<T[K], Z, Y, 'key'> : never;
+type Captured<O, Z, Y, P extends (Z extends true ? (Y extends <Inner extends Z>(x: Inner) => Inner ? keyof O : keyof O) : keyof O)> = P;
+type CapturedInMap<O, Z, Y, P extends (Z extends true ? (Y extends {[Index in Z & string]: Index} ? keyof O : keyof O) : keyof O)> = P;
+type Actual<T, K extends keyof T, Z, Y> = T[K] extends {key: 'x'} ? Captured<T[K], Z, Y, 'key'> : never;
+type ActualInMap<T, K extends keyof T, Z, Y> = T[K] extends {key: 'x'} ? CapturedInMap<T[K], Z, Y, 'key'> : never;
+function Capture<Z, Y>() {
+  const shape = { name: '' };
+  type Key<O, P extends (Z extends true ? (Y extends typeof shape ? keyof O : keyof O) : keyof O)> = P;
+  type Result<T, K extends keyof T> = T[K] extends {key: 'x'} ? Key<T[K], 'key'> : never;
+}

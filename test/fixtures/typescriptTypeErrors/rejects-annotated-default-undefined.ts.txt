@@ -1,0 +1,15 @@
+function t(a: any, n: number | undefined, v: void, un: undefined, g: <T>() => T) {
+  { const { x = JSON.parse('1') }: { x?: number } = {}; x.toFixed(); }
+  { const [x = JSON.parse('1')]: [number?] = []; x.toFixed(); }
+  { const { x = 1 as any }: { x?: number } = {}; x.toFixed(); }
+  { const { x = a }: { x?: number } = {}; x.toFixed(); }
+  { const { x = n }: { x?: number } = {}; x.toFixed(); }
+  { const { x = un }: { x?: number } = {}; x.toFixed(); }
+  { const { x = 2 }: { x?: number } = {}; x.toFixed(); }
+  { const { x = g() }: { x?: number } = {}; x.toFixed(); }
+  function p({ x = a }: { x?: number }) { x.toFixed(); }
+}
+function t2(k: unknown, v: void) {
+  { const { x = k as number | void }: { x?: number } = {}; x; }
+  { const { x = (k as any) as unknown as number }: { x?: number } = {}; x.toFixed(); }
+}

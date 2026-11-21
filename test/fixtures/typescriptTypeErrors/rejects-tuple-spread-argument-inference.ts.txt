@@ -1,0 +1,30 @@
+function choose<T>(a: number, b: string, value: T): T { return value; }
+function convert<T>(a: number, b: string, callback: (value: number) => T): T { return callback(a); }
+function capture<T extends unknown[]>(a: number, b: string, ...values: T): T { return values; }
+const pair: [number, string] = [1, 'x'];
+const first: [number] = [2];
+const second: [string] = ['y'];
+const empty: [] = [];
+const chosen: string = choose(...pair, true);
+const converted: number = convert(...pair, value => value.toFixed(1));
+convert(...pair, value => value.toUpperCase());
+const multiple: {value: string} = choose(...first, ...empty, ...second, {value: 3});
+const rest: [string, number] = capture(...pair, true, 4);
+const inside: [number, string, boolean, number] = [3, 'z', false, 5];
+const crossing: [boolean, string] = capture(...inside);
+function optional<T>(a: number, b: string | undefined, value: T): T { return value; }
+const maybe: [number, string?] = [1, 'present'];
+const optionalResult: number = optional(...maybe, true);
+function arrayTail<T>(a: number, ...values: T[]): T { return values[0]; }
+const strings = ['a', 'b'];
+const arrayResult: number = arrayTail(...first, ...strings);
+choose(...pair, true, 'extra');
+choose(...pair);
+function suffix<T>(...args: [...string[], (value: number) => T]): T {
+  const callback = args[args.length - 1] as (value: number) => T;
+  return callback(2);
+}
+const trailing: number = suffix(...strings, value => value.toFixed(2));
+suffix(...strings, value => value.toUpperCase());
+function all<T extends unknown[]>(...values: T): T { return values; }
+const optionalTuple: [number, string, boolean] = all(...maybe, true);

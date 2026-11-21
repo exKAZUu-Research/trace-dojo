@@ -1,0 +1,13 @@
+(8,91): error TS2345: Argument of type 'string | number' is not assignable to parameter of type 'string'.
+  Type 'number' is not assignable to type 'string'.
+(10,99): error TS2345: Argument of type 'U extends string ? { value: U; } : U' is not assignable to parameter of type '{ value: string; }'.
+  Type 'U | { value: U; }' is not assignable to type '{ value: string; }'.
+    Type 'U' is not assignable to type '{ value: string; }'.
+(12,102): error TS2345: Argument of type 'U extends string ? () => U : U' is not assignable to parameter of type '() => string'.
+  Type 'U | (() => U)' is not assignable to type '() => string'.
+    Type 'U' is not assignable to type '() => string'.
+(15,69): error TS2322: Type 'string & U' is not assignable to type 'number'.
+(16,68): error TS2322: Type 'string & U' is not assignable to type 'boolean'.
+(17,65): error TS2322: Type 'string & U' is not assignable to type '"a"'.
+(20,88): error TS2322: Type 'number & U' is not assignable to type 'string'.
+(21,96): error TS2322: Type 'string & U' is not assignable to type 'number'.

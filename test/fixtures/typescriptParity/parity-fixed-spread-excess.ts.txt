@@ -1,0 +1,11 @@
+function single(x: { a: number }) { console.log(x); }
+function double(x: { a: number }, two: number) { console.log(x, two); }
+function tuple(...items: [{ a: number }, number]) { console.log(items); }
+single(...[{ a: 1, b: 2 }] as [{ a: number; b: number }]);
+const saved = [{ a: 1, b: 2 }, 3] as const;
+double(...saved);
+function spreadOverload(options: { a: number }): 1;
+function spreadOverload(options: { a: number; b: number }): 2;
+function spreadOverload(options: { a: number; b?: number }): 1 | 2 { return options.b === undefined ? 1 : 2; }
+const selected: 2 = spreadOverload(...[{ a: 1, b: 2 }] as const);
+console.log(selected);

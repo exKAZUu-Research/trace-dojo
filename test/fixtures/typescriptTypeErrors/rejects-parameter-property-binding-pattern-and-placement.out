@@ -1,0 +1,7 @@
+(2,15): error TS1187: A parameter property may not be declared using a binding pattern.
+(5,37): error TS1187: A parameter property may not be declared using a binding pattern.
+(8,15): error TS2369: A parameter property is only allowed in a constructor implementation.
+(8,22): error TS2300: Duplicate identifier 'value'.
+(9,22): error TS2300: Duplicate identifier 'value'.
+(11,19): error TS2369: A parameter property is only allowed in a constructor implementation.
+(14,23): error TS2369: A parameter property is only allowed in a constructor implementation.

@@ -1,0 +1,13 @@
+class A {
+  constructor(this: A) {}
+  f(x: number, this: A) { return x; }
+  get v(this: A) { return 1; }
+}
+function g(x: number, this: { v: number }) { console.log(x); }
+const h = (this: number) => 1;
+type F = (x: number, this: number) => void;
+type N = new (this: number) => object;
+interface I { m(x: number, this: I): void }
+const o = { m(x: number, this: {}) { return x; } };
+const ok = function (this: { v: number }, x: number) { return this.v + x; };
+console.log(new A().f(1, new A()), g, h, o.m(1, {}), ok.call({ v: 1 }, 2));

@@ -1,0 +1,6 @@
+Left { left: 1 }
+Point { x: 3 }
+Generic { value: 4 }
+Right { right: 2 }
+Scaled { x: 3, scale: 2 }
+Point { x: 4 }

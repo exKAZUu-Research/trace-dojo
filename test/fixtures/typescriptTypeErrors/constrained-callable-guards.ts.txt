@@ -1,0 +1,15 @@
+function invoke<T extends object>(value: T) {
+  if (typeof value === "function") return value();
+}
+function apply<T extends Object>(value: T) {
+  if (typeof value === "function") return value.apply(undefined, []);
+}
+function structural<T extends { toString(): string }>(value: T) {
+  if (typeof value === "function") return value();
+}
+function chained<T extends U, U extends Object>(value: T) {
+  if (typeof value === "function") return value();
+}
+function union<T extends { count: number } | null>(value: T) {
+  if (typeof value === "function") return value();
+}

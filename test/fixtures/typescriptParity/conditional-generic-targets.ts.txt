@@ -1,0 +1,11 @@
+type Universal<T> = T extends unknown ? number : never;
+type WithAny<T> = T extends any ? number : never;
+type Related<T> = T extends unknown ? T : never;
+type Both<T> = T extends string ? 5 : 5 | 6;
+type Ordinary<T> = [T] extends [unknown] ? boolean : never;
+function universal<T>(): Universal<T> { return 3; }
+function withAny<T>(): WithAny<T> { return 4; }
+function dependent<T>(value: T): Related<T> { return value; }
+function both<T>(): Both<T> { return 5; }
+const ordinary: Ordinary<never> = true;
+console.log(universal<string>(), withAny<undefined>(), dependent("same"), both<number>(), ordinary);

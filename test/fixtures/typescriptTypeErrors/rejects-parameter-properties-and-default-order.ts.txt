@@ -1,0 +1,5 @@
+class RepeatedField {
+  constructor(public value: number) {}
+  value = 2;
+}
+function laterDefault(first = last, middle = 0, last = 1) { return first; }

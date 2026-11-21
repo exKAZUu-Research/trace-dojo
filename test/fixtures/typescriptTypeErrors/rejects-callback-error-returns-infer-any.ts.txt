@@ -1,0 +1,20 @@
+type Person = { age: number; name: string };
+const people: Person[] = [{ age: 20, name: "Ann" }];
+
+const names = people.map((p) => p.nmae);
+names.forEach((x) => console.log(x.toFixed()));
+const ages = people.map((p) => p.agee);
+ages.sort((a, b) => a - b);
+console.log(ages[0] + 1);
+const doubled = [1, 2, 3].map((x) => twice(x));
+console.log(doubled.filter((x) => x > 2));
+function apply<T>(f: () => T): T {
+  return f();
+}
+const value = apply(() => missing);
+console.log(value.anything);
+
+const total = people.reduce((sum, p) => sum + p.agee, 0);
+total.toUpperCase();
+const first = people.reduce((sum, p) => unknownName, 0);
+first.toUpperCase();

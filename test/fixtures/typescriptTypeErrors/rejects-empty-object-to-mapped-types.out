@@ -1,0 +1,8 @@
+(1,41): error TS2322: Type '{}' is not assignable to type 'Record<K, number>'.
+(2,26): error TS2322: Type '{}' is not assignable to type '{ [P in keyof T]: number; }'.
+(3,26): error TS2322: Type '{}' is not assignable to type 'Required<T>'.
+(4,44): error TS2353: Object literal may only specify known properties, and 'a' does not exist in type 'Partial<T>'.
+(5,26): error TS2322: Type '{}' is not assignable to type 'Readonly<T>'.
+(10,27): error TS2322: Type '{}' is not assignable to type '{ [P in keyof T]-?: T[P]; }'.
+(13,27): error TS2322: Type '[]' is not assignable to type 'Partial<T>'.
+(14,27): error TS2322: Type '{}' is not assignable to type 'Pick<T, keyof T>'.

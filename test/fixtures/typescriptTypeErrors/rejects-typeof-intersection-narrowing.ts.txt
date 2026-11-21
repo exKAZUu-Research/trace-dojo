@@ -1,0 +1,33 @@
+type A = { a: number };
+type B = { b: number };
+type Tagged = (() => number) & { tag: string };
+
+function objectAsFunction(x: (A & B) | number) {
+  if (typeof x === 'function') {
+    const n: never = x;
+    return n;
+  }
+  return 0;
+}
+function functionAsObject(x: Tagged | number) {
+  if (typeof x === 'object') {
+    const n: never = x;
+    return n;
+  }
+  return 0;
+}
+function genericAsFunction<T>(x: T & A) {
+  if (typeof x === 'function') return x.a;
+  return 0;
+}
+function keptGeneric<T>(x: T & A) {
+  if (typeof x === 'object') {
+    const n: never = x;
+    return n;
+  }
+  return 0;
+}
+function nullableIntersection(x: (A & B) | null | string) {
+  if (typeof x === 'object') return x.a;
+  return 0;
+}

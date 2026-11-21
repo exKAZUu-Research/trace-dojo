@@ -1,0 +1,33 @@
+for (let levels = 0; levels <= 3; levels++) {
+  let prototype = Object.create(null);
+  for (let index = 0; index < levels; index++) prototype = Object.create(prototype);
+  for (const value of [[], [1, 2], new Map([[1, 2]]), new Set([1])]) {
+    Object.setPrototypeOf(value, prototype);
+    console.dir(value, { depth: 1 });
+  }
+}
+const sparse = [1, , 3];
+Object.defineProperty(sparse, '1', { value: 2, enumerable: false });
+Object.defineProperty(sparse, '4', { get() { throw new Error('array getter ran'); }, enumerable: true });
+Object.assign(sparse, { note: 'own' });
+Object.setPrototypeOf(sparse, Object.create(null));
+console.dir(sparse, { depth: 2, showHidden: true });
+console.log(sparse);
+const many = [1, 2, 3, 4, 5, 6, 7, 8];
+Object.setPrototypeOf(many, Object.create(null));
+console.dir(many, { depth: 2, maxArrayLength: 1 });
+const detached = [[1, 2], new Map([[1, 2]]), new Set([1])];
+for (const value of detached) Object.setPrototypeOf(value, null);
+console.log(detached);
+const arrayWithProperties = [7, 8];
+Object.setPrototypeOf(arrayWithProperties, {});
+console.log(arrayWithProperties);
+const inherited = [7, 8];
+Object.setPrototypeOf(inherited, Object.create(Array.prototype));
+console.log(inherited);
+
+for (const value of [new Map([[1, 2], [3, 4]]), new Set([1, 2])]) {
+  Object.setPrototypeOf(value, Object.create(Array.prototype));
+  console.dir(value, { depth: 2 });
+  console.dir(value, { depth: 2, showHidden: true });
+}

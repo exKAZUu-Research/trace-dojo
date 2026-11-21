@@ -1,0 +1,10 @@
+interface Box<T> { value: T; optional?: T; }
+type Dictionary<T> = { [name: string]: T };
+function get<T>(value: Box<T>["value"]): T { return value; }
+function optional<T>(value: Box<T>["optional"]): T | undefined { return value; }
+function first<T>(value: T[][0]): T { return value; }
+function named<T>(value: Dictionary<T>["item"]): T { return value; }
+function midpoint<T>(value: (readonly [boolean, T])[1]): T { return value; }
+function key<T, K extends keyof T>(object: T, name: K): T[K] { return object[name]; }
+console.log(get<string>("box"), optional<number>(undefined), first<number>(1));
+console.log(named<boolean>(true), midpoint<string>("center"), key({ item: 42 }, "item"));

@@ -1,0 +1,6 @@
+(5,46): error TS2322: Type 'string' is not assignable to type 'Universal<T>'.
+(6,38): error TS2322: Type 'string' is not assignable to type 'WithAny<T>'.
+(7,44): error TS2322: Type 'string' is not assignable to type 'Related<T>'.
+(8,42): error TS2322: Type '5' is not assignable to type 'Disjoint<T>'.
+(9,7): error TS2322: Type '3' is not assignable to type 'never'.
+(10,7): error TS2322: Type '3' is not assignable to type 'never'.

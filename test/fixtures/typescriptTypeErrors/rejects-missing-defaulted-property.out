@@ -1,0 +1,8 @@
+(2,9): error TS2339: Property 'a' does not exist on type '{}'.
+(4,4): error TS2339: Property 'b' does not exist on type '{}'.
+(5,14): error TS2339: Property 'x' does not exist on type '{}'.
+(8,9): error TS2339: Property 'v' does not exist on type 'C'.
+(9,9): error TS2339: Property 'w' does not exist on type 'C'.
+(11,9): error TS2339: Property 'd' does not exist on type '{}'.
+(12,14): error TS2339: Property 'x' does not exist on type '{ y?: number | undefined; }'.
+(14,9): error TS2339: Property 'e' does not exist on type '{}'.

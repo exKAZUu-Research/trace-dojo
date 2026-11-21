@@ -1,0 +1,7 @@
+const a: number[][] = [[1], [2, 3]];
+const full = a.flat(Infinity);
+const depth: number = 5;
+const flattened = a.flat(depth);
+console.log(full, flattened, a.flat(0), a.flat(1), a.flat(10));
+const b: number[][][] = [[[4]], [[5]]];
+console.log(b.flat(Infinity), b.flat(depth));

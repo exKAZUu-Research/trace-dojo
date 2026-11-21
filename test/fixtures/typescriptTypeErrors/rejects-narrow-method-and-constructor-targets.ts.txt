@@ -1,0 +1,17 @@
+class Animal { name = 'animal'; }
+class Dog extends Animal { bark() { return 'woof'; } }
+
+class DogMethods {
+  handle(dog: Dog) { return dog.bark(); }
+}
+
+interface DogInterface { handle(dog: Dog): string }
+const dogInterface: DogInterface = new DogMethods();
+
+class DogHandler {
+  constructor(dog: Dog) { console.log(dog.bark()); }
+}
+
+const fromClass: (animal: Animal) => string = new DogMethods().handle;
+const fromInterface: (animal: Animal) => string = dogInterface.handle;
+const explicit: new (animal: Animal) => DogHandler = DogHandler;

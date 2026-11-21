@@ -1,0 +1,36 @@
+const s = "abc".replace(
+  "a",
+  2,
+);
+const c = ["x"].concat(
+  "y",
+  1,
+);
+const d = [1].concat([
+  2,
+  "a",
+]);
+function g2(a: string, b: string): void;
+function g2(a: number, b: number): void;
+function g2(a: any, b: any) {}
+g2(
+  true,
+  1,
+);
+g2(
+  "s",
+  1,
+);
+function h2(a: { x: number }): void;
+function h2(a: { y: string }): void;
+function h2(a: any) {}
+h2({
+  x: "s",
+});
+function k2(a: string): void;
+function k2(a: number): void;
+function k2(a: boolean): void;
+function k2(a: any) {}
+k2(
+  null,
+);

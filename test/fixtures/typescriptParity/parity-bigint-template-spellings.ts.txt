@@ -1,0 +1,18 @@
+type Big = `${bigint}`;
+const zero: Big = '0';
+const negativeZero: Big = '-0';
+const decimal: Big = '-123456789012345678901234567890';
+const hex: Big = '0x12';
+const upperHex: Big = '0X1f';
+const negativeHex: Big = '-0x12';
+const binary: Big = '0b101';
+const octal: Big = '0O77';
+const id: `id-${bigint}` = 'id-0b11';
+const all: Big[] = [zero, negativeZero, decimal, hex, upperHex, negativeHex, binary, octal];
+console.log(all.map((text) => (text.startsWith('-') ? -BigInt(text.slice(1)) : BigInt(text))).join(' '), id);
+type Num = `${number}`;
+const spaced: Num = ' 1';
+const radix: Num = '0x10';
+const exponent: Num = '1e3';
+const dotted: Num = '.5';
+console.log([spaced, radix, exponent, dotted].map(Number).join(' '));

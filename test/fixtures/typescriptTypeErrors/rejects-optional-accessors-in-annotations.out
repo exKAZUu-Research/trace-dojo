@@ -1,0 +1,26 @@
+(1,24): error TS1005: '(' expected.
+(1,25): error TS1005: ',' expected.
+(1,36): error TS1005: '=>' expected.
+(1,37): error TS1128: Declaration or statement expected.
+(1,38): error TS1128: Declaration or statement expected.
+(1,54): error TS1005: ',' expected.
+(1,63): error TS1005: ',' expected.
+(2,24): error TS1005: '(' expected.
+(3,24): error TS1005: '(' expected.
+(3,25): error TS1005: ',' expected.
+(3,36): error TS1005: '=>' expected.
+(3,37): error TS1128: Declaration or statement expected.
+(3,38): error TS1128: Declaration or statement expected.
+(3,48): error TS1128: Declaration or statement expected.
+(4,21): error TS1005: '(' expected.
+(4,22): error TS1134: Variable declaration expected.
+(4,33): error TS1005: '=>' expected.
+(4,34): error TS1109: Expression expected.
+(4,36): error TS1109: Expression expected.
+(5,18): error TS1005: '(' expected.
+(5,19): error TS1136: Property assignment expected.
+(5,22): error TS1005: ',' expected.
+(5,31): error TS1005: ':' expected.
+(5,32): error TS1005: ':' expected.
+(5,34): error TS1128: Declaration or statement expected.
+(5,36): error TS1128: Declaration or statement expected.

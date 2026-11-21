@@ -1,0 +1,7 @@
+const raw: Object = {};
+const settings: { verbose?: boolean } = raw;
+function defaults(input: Object): { count?: number } { return input; }
+const mutable: [number, number] = [1, 2];
+const numericIndex: { [key: number]: number } = mutable;
+const stringIndex: { [key: string]: number } = { foo: 2 };
+console.log(settings.verbose, defaults({}).count, numericIndex[0], stringIndex.foo);

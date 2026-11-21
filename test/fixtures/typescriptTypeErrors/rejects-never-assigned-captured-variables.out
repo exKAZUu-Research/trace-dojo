@@ -1,0 +1,11 @@
+(3,22): error TS2454: Variable 'top' is used before being assigned.
+(8,22): error TS2454: Variable 'deep' is used before being assigned.
+(13,13): error TS2454: Variable 'seed' is used before being assigned.
+(14,28): error TS2454: Variable 'seed' is used before being assigned.
+(27,16): error TS2454: Variable 'y' is used before being assigned.
+(28,9): error TS2454: Variable 'y' is used before being assigned.
+(35,22): error TS2454: Variable 'n' is used before being assigned.
+(40,16): error TS2454: Variable 'a' is used before being assigned.
+(43,69): error TS2454: Variable 'message' is used before being assigned.
+(44,47): error TS2454: Variable 'x' is used before being assigned.
+(45,61): error TS2454: Variable 'x' is used before being assigned.

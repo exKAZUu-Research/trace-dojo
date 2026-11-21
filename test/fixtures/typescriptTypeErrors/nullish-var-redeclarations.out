@@ -1,0 +1,3 @@
+(2,5): error TS2403: Subsequent variable declarations must have the same type.  Variable 'fromNull' must be of type 'any', but here has type 'string'.
+(4,5): error TS2403: Subsequent variable declarations must have the same type.  Variable 'fromUndefined' must be of type 'any', but here has type 'number'.
+(6,5): error TS2403: Subsequent variable declarations must have the same type.  Variable 'toNull' must be of type 'string', but here has type 'any'.

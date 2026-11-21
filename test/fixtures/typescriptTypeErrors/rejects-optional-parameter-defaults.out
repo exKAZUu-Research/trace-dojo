@@ -1,0 +1,13 @@
+(1,22): error TS1015: Parameter cannot have question mark and initializer.
+(6,22): error TS1015: Parameter cannot have question mark and initializer.
+(7,9): error TS1015: Parameter cannot have question mark and initializer.
+(11,16): error TS1015: Parameter cannot have question mark and initializer.
+(12,30): error TS1015: Parameter cannot have question mark and initializer.
+(15,15): error TS1015: Parameter cannot have question mark and initializer.
+(16,23): error TS1015: Parameter cannot have question mark and initializer.
+(17,18): error TS1015: Parameter cannot have question mark and initializer.
+(17,18): error TS2371: A parameter initializer is only allowed in a function or constructor implementation.
+(19,8): error TS1015: Parameter cannot have question mark and initializer.
+(19,8): error TS2371: A parameter initializer is only allowed in a function or constructor implementation.
+(21,23): error TS1015: Parameter cannot have question mark and initializer.
+(24,3): error TS1015: Parameter cannot have question mark and initializer.

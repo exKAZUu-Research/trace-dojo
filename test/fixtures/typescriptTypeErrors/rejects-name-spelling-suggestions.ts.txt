@@ -1,0 +1,11 @@
+function total(a: number) { return a; }
+const items = [1, 2];
+console.log(totl(1));
+console.log(itmes.length);
+console.log(Mth.max(1));
+console.log(undefinedName);
+console.log(xyzzy);
+function f() { const counter = 1; return countr; }
+console.log(cosole);
+console.log(require);
+console.log(Stirng(1), lenght);

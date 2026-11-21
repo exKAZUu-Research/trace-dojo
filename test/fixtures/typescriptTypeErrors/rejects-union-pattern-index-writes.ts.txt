@@ -1,0 +1,8 @@
+function allReadonly<T extends {readonly [k: `x${string}`]: number} | {readonly [k: `x${string}`]: string}>(x: T, k: `x${string}`) {x[k] = 1;}
+function numberKeys<T extends {readonly [k: `x${string}`]: number} | {readonly [k: `x${string}`]: string}>(x: T, k: `x${number}`) {x[k] = 1;}
+function mixedReadonly<T extends {readonly [k: `x${string}`]: number} | {[k: `x${string}`]: string}>(x: T, k: `x${string}`) {x[k] = 1;}
+function broadIndex<T extends {readonly [k: `x${string}`]: number} | {readonly [k: string]: string}>(x: T, k: `x${string}`) {x[k] = 1;}
+function narrowerIndex<T extends {readonly [k: `x${string}`]: number} | {readonly [k: `x${number}`]: string}>(x: T, k: `x${number}`) {x[k] = 1;}
+function badRead<T extends {[k: `x${string}`]: number} | {[k: `x${string}`]: string}>(x: T, k: `x${string}`) {const n: number = x[k];}
+function absentIndex<T extends {[k: `x${string}`]: number} | {[k: `y${string}`]: string}>(x: T, k: `x${string}`) {x[k] = 1;}
+function narrowerRead<T extends {[k: `x${string}`]: number} | {[k: `x${number}`]: string}>(x: T, k: `x${number}`) {return x[k];}

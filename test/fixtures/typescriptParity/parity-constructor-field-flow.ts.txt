@@ -1,0 +1,128 @@
+class BothBranches {
+  x;
+  constructor(c: boolean) {
+    if (c) this.x = 1;
+    else this.x = 2;
+  }
+}
+
+class Switched {
+  x;
+  constructor(k: number) {
+    switch (k) {
+      case 1:
+        this.x = 10;
+        break;
+      default:
+        this.x = 20;
+    }
+  }
+}
+
+class Throwing {
+  x;
+  constructor(c: boolean) {
+    if (c) this.x = 1;
+    else throw new Error("no value");
+  }
+}
+
+class Ternary {
+  x;
+  constructor(c: boolean) {
+    c ? (this.x = 1) : (this.x = 2);
+  }
+}
+
+class DoOnce {
+  x;
+  constructor() {
+    do {
+      this.x = 3;
+    } while (false);
+  }
+}
+
+class Guarded {
+  x;
+  constructor(fail: boolean) {
+    try {
+      if (fail) throw new Error("fail");
+      this.x = 4;
+    } catch {
+      this.x = 5;
+    } finally {
+      console.log("finally");
+    }
+  }
+}
+
+class Returned {
+  x;
+  constructor(c: boolean) {
+    if (c) {
+      this.x = 6;
+      return;
+    }
+    this.x = 7;
+  }
+}
+
+class Endless {
+  x;
+  constructor(limit: number) {
+    for (let i = 0; ; i++) {
+      if (i >= limit) {
+        this.x = i;
+        break;
+      }
+    }
+  }
+}
+
+class Chained {
+  x;
+  y;
+  constructor() {
+    this.x = this.y = 8;
+  }
+}
+
+class Fallthrough {
+  x;
+  constructor(k: number) {
+    switch (k) {
+      case 1:
+        this.x = "one";
+      default:
+        this.x = "many";
+    }
+  }
+}
+
+class MaybeUndefined {
+  x;
+  constructor(c: boolean) {
+    this.x = c ? 9 : undefined;
+  }
+}
+
+const values: number[] = [
+  new BothBranches(true).x,
+  new BothBranches(false).x,
+  new Switched(1).x,
+  new Switched(2).x,
+  new Throwing(true).x,
+  new Ternary(false).x,
+  new DoOnce().x,
+  new Guarded(false).x,
+  new Guarded(true).x,
+  new Returned(true).x,
+  new Returned(false).x,
+  new Endless(3).x,
+  new Chained().x + new Chained().y,
+];
+console.log(values.join(" "));
+const text: string = new Fallthrough(1).x;
+const maybe: number | undefined = new MaybeUndefined(false).x;
+console.log(text, maybe);

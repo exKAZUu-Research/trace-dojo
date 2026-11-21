@@ -1,0 +1,15 @@
+type Figure = { kind: "circle"; radius: number } | { kind: "square"; side: number };
+function area(figure: Figure): number {
+  const { kind: tag } = figure;
+  if (tag === "circle") return figure.radius * figure.radius;
+  return figure.side * figure.side;
+}
+function size(figure: Figure): number {
+  const { kind: tag } = figure;
+  switch (tag) {
+    case "circle": return figure.radius;
+    case "square": return figure.side;
+  }
+}
+console.log(area({kind: "circle", radius: 2}), area({kind: "square", side: 3}));
+console.log(size({kind: "circle", radius: 5}), size({kind: "square", side: 6}));

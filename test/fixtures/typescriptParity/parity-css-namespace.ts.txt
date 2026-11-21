@@ -1,0 +1,16 @@
+if (typeof CSS !== 'undefined') {
+  const escaped: string = CSS.escape('a b');
+  const pair: boolean = CSS.supports('display', 'grid');
+  const condition: boolean = CSS.supports('(display: grid)');
+  const width: number = CSS.px(5).value;
+  const registry: HighlightRegistry = CSS.highlights;
+  CSS.registerProperty({ name: '--demo', syntax: '<length>', inherits: false, initialValue: '0px' });
+  console.log(escaped, pair, condition, width, registry);
+} else {
+  console.log('CSS is unavailable');
+}
+try {
+  console.log(CSS.escape('x'));
+} catch (error) {
+  if (error instanceof ReferenceError) console.log(error.name, error.message);
+}

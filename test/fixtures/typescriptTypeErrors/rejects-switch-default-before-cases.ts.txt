@@ -1,0 +1,37 @@
+function middle(x: 'a' | 'b' | 'c'): string {
+  switch (x) {
+    case 'a':
+      return 'A';
+    default:
+      const rest: never = x;
+      return rest;
+    case 'b':
+      return 'B';
+  }
+}
+
+function first(x: 'a' | 'b' | 'c'): string {
+  switch (x) {
+    default:
+      const onlyA: 'a' = x;
+      return onlyA;
+    case 'a':
+      return 'A';
+    case 'b':
+      return 'B';
+  }
+}
+
+function conditions(x: string | number | boolean): string {
+  switch (true) {
+    default:
+      const text: string = x;
+      return text;
+    case typeof x === 'string':
+      return x;
+    case typeof x === 'number':
+      return 'number';
+  }
+}
+
+console.log(middle('a'), first('a'), conditions(true));

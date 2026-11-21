@@ -1,0 +1,2 @@
+(2,15): error TS5076: '||' and '??' operations cannot be mixed without parentheses.
+(3,23): error TS5076: '??' and '&&' operations cannot be mixed without parentheses.

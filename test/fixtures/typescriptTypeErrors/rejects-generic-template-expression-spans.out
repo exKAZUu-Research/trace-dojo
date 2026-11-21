@@ -1,0 +1,6 @@
+(2,3): error TS2322: Type '`(${string})`' is not assignable to type '`(${T})`'.
+(5,3): error TS2322: Type '`<${string}>`' is not assignable to type '`<${T & string}>`'.
+(9,3): error TS2322: Type 'string' is not assignable to type '`${T}`'.
+(12,3): error TS2322: Type '`<${T}>`' is not assignable to type '"x"'.
+  Type '`<${string}>`' is not assignable to type '"x"'.
+(15,7): error TS2322: Type '`p${string}`' is not assignable to type '`p${number}`'.

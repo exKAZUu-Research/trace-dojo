@@ -1,0 +1,8 @@
+CSS = CSS;
+CSS.escape(12);
+CSS.px('12');
+CSS.supports();
+const wrong: string = CSS.supports('color', 'black');
+const width: string = CSS.px(2).value;
+CSS.registerProperty({ name: '--demo', syntax: '<length>' });
+CSS.missing();

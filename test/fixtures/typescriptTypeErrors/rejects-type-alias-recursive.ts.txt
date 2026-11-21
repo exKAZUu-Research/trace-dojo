@@ -1,0 +1,7 @@
+type Tree = { value: number; children: Tree[] };
+const t: Tree = { value: 1, children: [{ value: 2, children: [] }] };
+function sum(t: Tree): number { return t.value + t.children.reduce((a, c) => a + sum(c), 0); }
+type Json = string | number | boolean | null | Json[] | { [k: string]: Json };
+const j: Json = { a: [1, "x", { b: null }] };
+const bad: Json = { a: undefined };
+console.log(sum(t), j, bad);

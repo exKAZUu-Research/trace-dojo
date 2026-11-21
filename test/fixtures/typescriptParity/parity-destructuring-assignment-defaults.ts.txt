@@ -1,0 +1,12 @@
+let x: number;
+({x = 3} = {});
+let y: number;
+({a: y = 4} = {});
+let z: number;
+[z = 5] = [undefined];
+let nested: number;
+({a: [nested = 6]} = {a: [undefined]});
+console.log(x, y, z, nested);
+({x = 9} = {x: 1});
+({a: y = 9} = {a: 2});
+console.log(x, y);

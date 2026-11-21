@@ -1,0 +1,4 @@
+(4,7): error TS2322: Type 'number | bigint' is not assignable to type 'number'.
+(5,7): error TS2322: Type 'number | bigint' is not assignable to type 'number'.
+(7,44): error TS2736: Operator '+' cannot be applied to type 'number | bigint'.
+(8,64): error TS2736: Operator '+' cannot be applied to type 'T'.

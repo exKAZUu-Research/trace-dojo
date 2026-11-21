@@ -1,0 +1,5 @@
+(2,1): error TS2322: Type 'string' is not assignable to type 'number'.
+(4,1): error TS2588: Cannot assign to 'c' because it is a constant.
+(6,7): error TS2322: Type 'string' is not assignable to type 'number'.
+(7,1): error TS2322: Type 'string' is not assignable to type 'number'.
+(9,11): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.

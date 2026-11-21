@@ -1,0 +1,4 @@
+class EarlyVariable { static { console.log(laterVariable); } }
+let laterVariable = 1;
+class EarlyClass { static { console.log(new LaterClass()); } }
+class LaterClass {}

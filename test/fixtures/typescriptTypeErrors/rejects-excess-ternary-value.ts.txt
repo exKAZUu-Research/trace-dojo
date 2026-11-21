@@ -1,0 +1,4 @@
+interface P { x: number }
+const flag = Math.floor(1.5) > 0;
+const p: P = flag ? { x: 1 } : { x: 2, y: 3 };
+console.log(p);

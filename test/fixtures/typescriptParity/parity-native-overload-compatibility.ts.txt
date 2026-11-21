@@ -1,0 +1,10 @@
+function print() { console.log("print"); }
+function close() { return 1; }
+function confirm(value: string | undefined) { return value !== undefined; }
+function getSelection(): Selection | null { return null; }
+function open(url?: string | URL): WindowProxy | null { return null; }
+print();
+console.log(close(), confirm("yes"), confirm(), getSelection(), open("file"));
+console.log(getSelection()?.anchorNode, open()?.closed);
+const closedResult: number = close();
+console.log(closedResult);

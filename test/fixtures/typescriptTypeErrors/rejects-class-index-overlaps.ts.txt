@@ -1,0 +1,5 @@
+class ConflictingClassIndexes { [key:string]:number; [key:number]:string; }
+class ConflictingClassPattern { [key:string]:number; [key:`data-${string}`]:string; }
+class ClassIndexBase { [key:string]:number; }
+class InheritedClassIndex extends ClassIndexBase { [key:number]:string; }
+class InheritedClassProperty extends ClassIndexBase { value='wrong'; }

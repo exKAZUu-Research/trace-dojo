@@ -1,0 +1,12 @@
+type Item = { tag?: "a" } & { tag?: "b" } & { tag: "c" | undefined };
+const item: Item = { tag: undefined };
+item.tag = undefined;
+console.log(item.tag);
+
+class Data {
+  get value(): string | undefined { return undefined; }
+  set value(value: string | number | undefined) { console.log(value); }
+}
+const data: Data & { value?: string } = new Data();
+data.value = undefined;
+data.value = "a";

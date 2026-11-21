@@ -4,6 +4,18 @@ export interface SourceDiagnostic {
   message: string;
 }
 
+const sourceIndices = new WeakMap<SourceDiagnostic, number>();
+
+export function sourceDiagnostic(row: number, index: number, message: string): SourceDiagnostic {
+  const diagnostic = { row, message };
+  sourceIndices.set(diagnostic, index);
+  return diagnostic;
+}
+
+export function diagnosticIndex(diagnostic: SourceDiagnostic): number | undefined {
+  return sourceIndices.get(diagnostic);
+}
+
 /** Rejects a program before it runs. */
 export class CompileError extends Error {
   constructor(readonly diagnostics: SourceDiagnostic[]) {

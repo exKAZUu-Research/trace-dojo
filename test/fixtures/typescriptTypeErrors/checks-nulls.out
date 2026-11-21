@@ -1,0 +1,5 @@
+(2,10): error TS18048: 's' is possibly 'undefined'.
+(5,10): error TS18047: 's' is possibly 'null'.
+(8,13): error TS2532: Object is possibly 'undefined'.
+(11,13): error TS18048: 'found' is possibly 'undefined'.
+(13,13): error TS18047: 'maybe' is possibly 'null'.

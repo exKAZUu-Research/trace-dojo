@@ -1,0 +1,8 @@
+function symbolic(a: symbol, b: symbol) { return a < b; }
+function anyRight(a: symbol, b: any) { return a > b; }
+function anyLeft(a: any, b: symbol) { return a <= b; }
+function constrained<T extends symbol>(a: T, b: any) { return a >= b; }
+function union(a: string | symbol, b: string) { return a < b; }
+const key = Symbol('key');
+function unique(a: typeof key, b: any) { return a < b; }
+function nullable(a: symbol | undefined, b: any) { return a < b; }

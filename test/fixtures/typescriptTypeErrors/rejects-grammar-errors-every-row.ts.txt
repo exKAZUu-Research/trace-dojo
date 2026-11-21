@@ -1,0 +1,14 @@
+let a = 1;
+let a = 2;
+const z;
+function f() { continue; }
+function g() { break; }
+for (;;) {
+  const [p];
+  if (a) { break; }
+}
+if (a) let q = 1;
+while (a) {
+  function h() { continue; }
+  const { r };
+}

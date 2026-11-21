@@ -1,0 +1,14 @@
+class Left { left = 1; }
+class Right { right = 2; }
+class Point { constructor(public x: number) {} }
+class Scaled { constructor(public x: number, public scale = 2) {} }
+class Generic<T> { constructor(public value: T) {} }
+
+for (const flag of [true, false]) {
+  const Constructor = flag ? Left : Right;
+  const made: Left | Right = new Constructor();
+  console.log(made);
+  const Shape = flag ? Point : Scaled;
+  console.log(new Shape(3));
+  console.log(new (flag ? Generic : Point)(4));
+}

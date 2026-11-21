@@ -1,0 +1,23 @@
+let literal: 1 | 2 = 1;
+literal += 1;
+literal *= 3;
+const bag: {value: 1 | 2; indexed: 1 | 2} = {value: 1, indexed: 2};
+bag.value += 2;
+bag['indexed'] *= 2;
+console.log(literal, bag.value, bag.indexed);
+let word: `a${string}` = 'a';
+word += 'b';
+let logic: number | string = 0;
+logic ||= 'left';
+let coalesce: number | string | undefined = undefined;
+coalesce ??= 'middle';
+let truthy: number | string = 1;
+truthy &&= 'right';
+console.log(word, logic, coalesce, truthy);
+class WideSetter {
+  get value(): number { return 1; }
+  set value(input: number | string) { console.log(input); }
+}
+const wide = new WideSetter();
+wide.value += 'dot';
+wide['value'] += 'index';

@@ -1,0 +1,12 @@
+(4,14): error TS2698: Spread types may only be created from object types.
+(5,14): error TS2698: Spread types may only be created from object types.
+(6,14): error TS2698: Spread types may only be created from object types.
+(7,14): error TS2698: Spread types may only be created from object types.
+(10,14): error TS2698: Spread types may only be created from object types.
+(12,14): error TS2698: Spread types may only be created from object types.
+(14,15): error TS2698: Spread types may only be created from object types.
+(17,7): error TS2322: Type '{ count?: number | undefined; }' is not assignable to type 'number'.
+(18,7): error TS2322: Type '{ x: number; } | { x: number; a: number; } | { x: number; b: string; }' is not assignable to type 'number'.
+  Type '{ x: number; }' is not assignable to type 'number'.
+(19,7): error TS2322: Type '{ a?: number | undefined; b?: number | undefined; }' is not assignable to type 'number'.
+(20,7): error TS2322: Type '{ a?: number | undefined; }' is not assignable to type 'number'.

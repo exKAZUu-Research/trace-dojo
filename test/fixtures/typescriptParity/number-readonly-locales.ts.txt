@@ -1,0 +1,7 @@
+const locales = ["en-US"] as const;
+const mutable: string[] = ["en-US"];
+const frozen = Object.freeze(["en-US", "en-GB"]);
+console.log((1234).toLocaleString(locales), new Number(5).toLocaleString(locales));
+console.log((1234).toLocaleString(mutable, { useGrouping: false }), (1234).toLocaleString("en-US"));
+console.log((1234).toLocaleString(frozen, { maximumFractionDigits: 1 }));
+console.log((5678n).toLocaleString(locales));

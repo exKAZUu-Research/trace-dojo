@@ -1,0 +1,61 @@
+function choose(value: string): 'general';
+function choose(value: 'yes'): 'specific';
+function choose(value: string): 'general' | 'specific' { return value === 'yes' ? 'specific' : 'general'; }
+function numeric(value: number): string;
+function numeric(value: 1): number;
+function numeric(value: number): number | string { return value === 1 ? 1 : 'other'; }
+function flag(value: boolean): string;
+function flag(value: false): number;
+function flag(value: boolean): number | string { return value ? 'yes' : 0; }
+const specific: 'specific' = choose('yes');
+console.log(specific, choose('no'), numeric(1).toFixed(), flag(false).toFixed());
+
+interface Dispatch {
+  send(value: 'yes'): 'first';
+  send(value: string): 'earlier';
+}
+interface Dispatch {
+  send(value: 'yes'): 'second';
+  send(value: string): 'later';
+}
+const dispatch: Dispatch = { send: (value: string) => value === 'yes' ? 'first' : 'later' } as any;
+const first: 'first' = dispatch.send('yes');
+const last: 'later' = dispatch.send('no');
+console.log(first, last);
+
+interface Callable {
+  (value: string): 'earlier';
+  (value: `yes`): 'first';
+}
+interface Callable {
+  (value: string): 'later';
+  (value: 'yes'): 'second';
+}
+const callable: Callable = ((value: string) => value === 'yes' ? 'first' : 'later') as any;
+const firstCall: 'first' = callable('yes');
+const lastCall: 'later' = callable('no');
+console.log(firstCall, lastCall);
+
+interface Factory {
+  new (value: string): { name: 'general' };
+  new (value: 'yes'): { name: 'specific' };
+}
+class Maker { constructor(public name: string) { name === 'yes' ? this.name = 'specific' : this.name = 'general'; } }
+const Factory: Factory = Maker as any;
+const made: 'specific' = new Factory('yes').name;
+console.log(made);
+
+type Alias = 'yes';
+interface NonSpecialized {
+  (value: string | undefined): 'first';
+  (value: Alias): 'alias';
+  (value: ('yes')): 'parenthesized';
+  (value: 'yes' | 'no'): 'union';
+  (value: `yes${number}`): 'template';
+  (value: undefined): 'undefined';
+}
+const ordinary: NonSpecialized = (() => 'first') as any;
+const alias: 'first' = ordinary('yes');
+const templated: 'first' = ordinary('yes4');
+const omitted: 'first' = ordinary(undefined);
+console.log(alias, templated, omitted);

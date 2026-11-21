@@ -1,0 +1,2 @@
+function f1(x:{a:1}|{b:2},z:{c:1}|{d:2}|null){ const y={...x,...z,...z,...z,...z,...z,...z,...z,...z,...z,...z}; }
+function f2(x:{a:1}|{b:2},z:{c:1}|{d:2}|undefined){ const y={...x,...z,...z,...z,...z,...z,...z,...z,...z,...z,...z}; }

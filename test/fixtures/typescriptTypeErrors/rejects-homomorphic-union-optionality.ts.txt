@@ -1,0 +1,9 @@
+const a:Required<{x?:string}|{x?:number}>={x:undefined};
+const b:Required<{x?:string}|{x:number}>={x:undefined};
+type Shape={kind:"s";value?:string}|{kind:"n";value:number|undefined};
+const c:Required<Shape>={kind:"s",value:undefined};
+const d:Required<Shape>={kind:"n"};
+type Indexed<T extends {value:object}> = {[K in keyof T["value"]]-?:T["value"][K]};
+const indexed:Indexed<{value:{x:string|undefined}|{x?:number}}>={x:undefined};
+type Direct = {[K in keyof ({x:string|undefined}|{x?:number})]-?:({x:string|undefined}|{x?:number})[K]};
+const direct:Direct={x:undefined};

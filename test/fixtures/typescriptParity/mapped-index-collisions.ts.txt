@@ -1,0 +1,14 @@
+type MappedText = { [K in 'a' | 'b' as string]: K };
+type Numbers = { [K in 'a' | 'b' as number]: K };
+type Symbols = { [K in 'a' | 'b' as symbol]: K };
+type Patterns = { [K in 'a' | 'b' as `field${number}`]: K };
+type Optional = { readonly [K in 'a' | 'b' as string]?: K };
+type Values = { [K in 'a' | 'b' as string]: { key: K; data: K extends 'a' ? number : string } };
+const texts: MappedText = { letters: 'a', second: 'b' };
+const counts: Numbers = { 0: 'a', 1: 'b' };
+const key = Symbol('index');
+const symbols: Symbols = { [key]: 'a' };
+const fields: Patterns = { field1: 'a', field2: 'b' };
+const values: Values = { first: { key: 'a', data: 1 }, second: { key: 'b', data: 'text' } };
+const optional: Optional = { first: 'a', missing: undefined };
+console.log(texts.letters, counts[0], symbols[key], fields.field1, values.second.data, optional.missing);

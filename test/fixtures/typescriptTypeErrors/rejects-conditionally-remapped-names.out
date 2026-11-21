@@ -1,0 +1,7 @@
+(2,28): error TS2536: Type '"y"' cannot be used to index type '{ [P in "a" as T[K]["key"]]: number; }'.
+(4,28): error TS2536: Type '"pre-y"' cannot be used to index type '{ [P in "a" as `pre-${T[K]["key"]}`]: number; }'.
+(6,46): error TS2322: Type 'T[K]["key"]' is not assignable to type 'string | number | symbol'.
+  Type 'boolean' is not assignable to type 'string | number | symbol'.
+(8,53): error TS2322: Type 'T[K]["key"]' is not assignable to type 'string | number | bigint | boolean | null | undefined'.
+  Type 'symbol' is not assignable to type 'string | number | bigint | boolean | null | undefined'.
+(10,28): error TS2536: Type '"X"' cannot be used to index type '{ [P in "a" as Uppercase<T[K]["key"]>]: number; }'.

@@ -1,0 +1,13 @@
+(3,9): error TS2322: Type 'Deep<string>' is not assignable to type 'Deep<number>'.
+  Type 'string' is not assignable to type 'number'.
+(10,9): error TS2322: Type 'Box<string>' is not assignable to type 'Box<number>'.
+  Type 'string' is not assignable to type 'number'.
+(14,9): error TS2322: Type 'List<string>' is not assignable to type 'List<number>'.
+  Type 'string' is not assignable to type 'number'.
+(19,9): error TS2322: Type 'Tree' is not assignable to type 'Tree2'.
+  Types of property 'label' are incompatible.
+    Type 'string' is not assignable to type 'number'.
+(23,9): error TS2322: Type 'Nest<string>' is not assignable to type 'Nest<number>'.
+  Type 'string' is not assignable to type 'number'.
+(27,9): error TS2322: Type 'Grow<string>' is not assignable to type 'Grow<number>'.
+  Type 'string' is not assignable to type 'number'.

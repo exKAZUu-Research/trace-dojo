@@ -1,0 +1,5 @@
+(3,76): error TS2344: Type 'string' does not satisfy the constraint 'Z extends true ? keyof T[K] : keyof T[K]'.
+(7,76): error TS2344: Type '"key"' does not satisfy the constraint 'Z extends true ? "fallback" | keyof T[K] : keyof T[K]'.
+(11,76): error TS2344: Type 'string' does not satisfy the constraint 'Z extends true ? number | keyof T[K] : keyof T[K]'.
+(16,78): error TS2344: Type 'string' does not satisfy the constraint 'Z extends true ? keyof T[K] : keyof T[K]'.
+(20,93): error TS2344: Type 'string' does not satisfy the constraint 'Y extends Z ? Z extends true ? keyof T[K] : keyof T[K] : keyof T[K]'.

@@ -1,0 +1,15 @@
+function nullAndUndefined(x: { a: 1 } | { b: 2 }, z: { c: 1 } | { d: 2 } | null | undefined) {
+  const y = { ...x, ...z, ...z, ...z, ...z, ...z, ...z, ...z, ...z };
+}
+function underLimit(x: { a: 1 } | { b: 2 }, z: { c: 1 } | { d: 2 } | null | undefined) {
+  const y = { ...x, ...z, ...z, ...z, ...z, ...z, ...z, ...z };
+}
+function voidAndUndefined(x: { a: 1 } | { b: 2 }, z: { c: 1 } | { d: 2 } | undefined | void) {
+  const y = { ...x, ...z, ...z, ...z, ...z, ...z, ...z, ...z, ...z };
+}
+function threeObjects(x: { a: 1 } | { b: 2 }, z: { c: 1 } | { d: 2 } | { e: 3 } | null | undefined) {
+  const y = { ...x, ...z, ...z, ...z, ...z, ...z, ...z, ...z };
+}
+function nullOnly(x: { a: 1 } | { b: 2 }, z: { c: 1 } | { d: 2 } | null) {
+  const y = { ...x, ...z, ...z, ...z, ...z, ...z, ...z, ...z, ...z, ...z };
+}

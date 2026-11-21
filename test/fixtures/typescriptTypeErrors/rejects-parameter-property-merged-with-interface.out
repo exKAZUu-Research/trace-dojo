@@ -1,0 +1,5 @@
+(5,22): error TS2403: Subsequent variable declarations must have the same type.  Variable 'x' must be of type 'string', but here has type 'number'.
+(20,22): error TS2687: All declarations of 'x' must have identical modifiers.
+(23,3): error TS2687: All declarations of 'x' must have identical modifiers.
+(29,3): error TS2717: Subsequent property declarations must have the same type.  Property 'x' must be of type 'string | number', but here has type 'number'.
+(35,3): error TS2717: Subsequent property declarations must have the same type.  Property 'x' must be of type 'number', but here has type 'string'.

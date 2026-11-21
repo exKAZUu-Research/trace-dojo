@@ -1,0 +1,39 @@
+class Field {
+  get value(): string | number { return 1; }
+  set value(input: string | number | boolean) {}
+}
+const field = new Field();
+field.value = 1;
+const numeric: number = field.value;
+field['value'] = 'text';
+const text: string = field.value;
+field.value = true;
+const broad: number = field.value;
+class ReadString {
+  get value(): string { return 'a'; }
+  set value(input: string | number) {}
+}
+class ReadNumber {
+  get value(): number { return 1; }
+  set value(input: string | number) {}
+}
+function union(object: ReadString | ReadNumber) {
+  object.value = 1;
+  const combined: number = object.value;
+}
+class Setter {set value(value: string | number) {}}
+const setter = new Setter();
+setter.value = 1;
+const valid: number = setter.value;
+const invalid: string = setter.value;
+const object = {get value(): string | number { return 'read'; }, set value(input: string | number) {}};
+object.value = 1;
+const answer: number = object.value;
+class Internal {
+  get #value(): string | number { return 1; }
+  set #value(input: string | number) {}
+  run() {
+    this.#value = 1;
+    const inside: number = this.#value;
+  }
+}

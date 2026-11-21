@@ -1,0 +1,11 @@
+class A{x=1;constructor(){return 5;}}
+class Base{x=1;}
+class Derived extends Base{constructor(){super();return 5;}}
+class SuperReturn extends Base{constructor(){return super();}}
+class Missing{x=1;method(){}constructor(){return {x:2};}}
+class Wrong{x=1;constructor(){return {x:"wrong"};}}
+class ExplicitUndefined{x=1;constructor(){return undefined;}}
+class ExplicitVoid{x=1;constructor(){return void 0;}}
+class MaybeUndefined{x=1;constructor(flag:boolean){return flag?this:undefined;}}
+class Private{private x=1;constructor(){return {x:2};}}
+class Generic<T>{x:T;constructor(x:T){this.x=x;return {x:1};}}

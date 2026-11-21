@@ -1,0 +1,12 @@
+function f(t: [number?]) { return t.map((x) => x.toFixed()); }
+function g(x: Record<string, { a: number }> & Record<string, { b: string }>) { console.log(x.k.a, x.k.b); }
+g({ k: { a: 1, b: "x" } });
+interface A { (x: string): string }
+interface B { (x: number): number }
+interface C extends A, B {}
+function h(c: C) { return [c(1), c("s")]; }
+interface D extends A { (x: boolean): boolean }
+function k(d: D) { return [d(true), d("s")]; }
+function m(t: [number, string?]) { t.forEach((x) => x.toString()); }
+function n(x: { [k: number]: { a: 1 } } & { [k: number]: { b: 2 } }) { return x[0].a + x[0].b; }
+console.log(f.length);

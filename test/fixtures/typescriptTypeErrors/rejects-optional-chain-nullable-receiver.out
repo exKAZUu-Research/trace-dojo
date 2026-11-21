@@ -1,0 +1,10 @@
+(7,15): error TS2684: The 'this' context of type 'H | undefined' is not assignable to method's 'this' of type '{ x: number; }'.
+  Type 'undefined' is not assignable to type '{ x: number; }'.
+(7,15): error TS18048: 'o.a' is possibly 'undefined'.
+(10,15): error TS2532: Object is possibly 'undefined'.
+(10,15): error TS2684: The 'this' context of type 'H | undefined' is not assignable to method's 'this' of type '{ x: number; }'.
+  Type 'undefined' is not assignable to type '{ x: number; }'.
+(14,3): error TS2322: Type 'number | undefined' is not assignable to type 'number'.
+  Type 'undefined' is not assignable to type 'number'.
+(17,3): error TS2322: Type 'number | undefined' is not assignable to type 'number'.
+  Type 'undefined' is not assignable to type 'number'.

@@ -1,0 +1,7 @@
+const name = "x";
+let status = 1;
+const top = 2;
+let event = 3;
+class Plugin {}
+console.log(name, status, top, event);
+const undefined = 2;

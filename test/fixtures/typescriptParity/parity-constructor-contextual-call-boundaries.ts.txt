@@ -1,0 +1,15 @@
+function wrap(x:number):[number];
+function wrap<T>(x:T):[T];
+function wrap(x:any):[any]{return [x];}
+class Overload{x;constructor(){[this.x]=wrap(1)}}
+class ArrayLength{x;constructor(){[this.x]=new Array(1)}}
+class EmptyArray{x;constructor(){[this.x]=new Array()}}
+class ArrayCall{x;constructor(){[this.x]=Array(2)}}
+class TypedArrow{x;constructor(){[this.x]=(():[number]=>[3])()}}
+class TypedFunction{x;constructor(){[this.x]=(function():[number]{return [4]})()}}
+class IndependentArrow{x;constructor(input:[number]){[this.x]=(()=>input)()}}
+class IndependentFunction{x;constructor(input:[number]){[this.x]=(function(){return input})()}}
+console.log(new Overload().x,new ArrayLength().x,new EmptyArray().x,new ArrayCall().x,new TypedArrow().x,new TypedFunction().x,new IndependentArrow([5]).x,new IndependentFunction([6]).x);
+class AssertedReturn{x;constructor(){[this.x]=(()=>[7] as [number])()}}
+class BranchTyped{x;constructor(input:[number],flag:boolean){[this.x]=(()=>{if(flag)return input;return input;})()}}
+console.log(new AssertedReturn().x,new BranchTyped([8],true).x);

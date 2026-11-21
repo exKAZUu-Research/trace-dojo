@@ -1,0 +1,13 @@
+class PublicConstructor { constructor() {} }
+class PrivateConstructor { private constructor() {} }
+class ProtectedConstructor { protected constructor() {} }
+
+const explicitlyTyped: (typeof PublicConstructor | typeof PrivateConstructor)[] = [PublicConstructor, PrivateConstructor];
+const tuple = [PublicConstructor, ProtectedConstructor] as const;
+const pair: [typeof PublicConstructor, typeof ProtectedConstructor] = [PublicConstructor, ProtectedConstructor];
+class DifferentConstructor {
+  private constructor() {}
+  different() { return 1; }
+}
+const shapes = [PublicConstructor, DifferentConstructor];
+console.log(new explicitlyTyped[0](), new tuple[0](), new pair[0](), new shapes[0]());

@@ -1,0 +1,76 @@
+string "abc" 3
+sloppy-write 0 "a"
+sloppy-delete 0 false
+strict-write 0 TypeError Cannot assign to read only property '0' of string 'abc'
+strict-delete 0 TypeError Cannot delete property '0' of [object String]
+sloppy-write length 3
+sloppy-delete length false
+strict-write length TypeError Cannot assign to read only property 'length' of string 'abc'
+strict-delete length TypeError Cannot delete property 'length' of [object String]
+sloppy-write 4 undefined
+sloppy-delete 4 true
+strict-write 4 ok
+strict-delete 4 true
+sloppy-write 01 undefined
+sloppy-delete 01 true
+strict-write 01 TypeError Cannot create property '01' on string 'abc'
+strict-delete 01 true
+sloppy-write -0 undefined
+sloppy-delete -0 true
+strict-write -0 TypeError Cannot create property '-0' on string 'abc'
+strict-delete -0 true
+string "A😀B" 4
+sloppy-write 1 "\ud83d"
+sloppy-delete 1 false
+strict-write 1 TypeError Cannot assign to read only property '1' of string 'A😀B'
+strict-delete 1 TypeError Cannot delete property '1' of [object String]
+sloppy-write 2 "\ude00"
+sloppy-delete 2 false
+strict-write 2 TypeError Cannot assign to read only property '2' of string 'A😀B'
+strict-delete 2 TypeError Cannot delete property '2' of [object String]
+sloppy-write 3 "B"
+sloppy-delete 3 false
+strict-write 3 TypeError Cannot assign to read only property '3' of string 'A😀B'
+strict-delete 3 TypeError Cannot delete property '3' of [object String]
+sloppy-write length 4
+sloppy-delete length false
+strict-write length TypeError Cannot assign to read only property 'length' of string 'A😀B'
+strict-delete length TypeError Cannot delete property 'length' of [object String]
+sloppy-write 4 undefined
+sloppy-delete 4 true
+strict-write 4 ok
+strict-delete 4 true
+string "" 0
+sloppy-write 0 undefined
+sloppy-delete 0 true
+strict-write 0 ok
+strict-delete 0 true
+sloppy-write length 0
+sloppy-delete length false
+strict-write length TypeError Cannot assign to read only property 'length' of string ''
+strict-delete length TypeError Cannot delete property 'length' of [object String]
+sloppy-write 4 undefined
+sloppy-delete 4 true
+strict-write 4 ok
+strict-delete 4 true
+[
+  'four:string:changed',
+  'four:string:changed',
+  'four:string:changed',
+  'four:string:changed',
+  'zero:object:changed',
+  'zero:object:changed',
+  'four:string:changed',
+  'four:string:changed'
+]
+55357 56832
+nullish-write TypeError Cannot set properties of undefined (setting '0')
+nullish-delete TypeError Cannot convert undefined or null to object
+strict-write 0 TypeError Cannot set properties of undefined (setting '0')
+strict-delete 0 TypeError Cannot convert undefined or null to object
+nullish-write TypeError Cannot set properties of null (setting '0')
+nullish-delete TypeError Cannot convert undefined or null to object
+strict-write 0 TypeError Cannot set properties of null (setting '0')
+strict-delete 0 TypeError Cannot convert undefined or null to object
+boxed-delete false false true
+number-delete true true

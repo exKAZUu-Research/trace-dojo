@@ -1,0 +1,15 @@
+Cannot assign to read only property 'locked' of object '[object Array Iterator]'
+Cannot delete property 'locked' of [object Array Iterator]
+Cannot set property read of [object Array Iterator] which has only a getter
+Cannot assign to read only property 'locked' of object '[object Array Iterator]'
+Cannot delete property 'locked' of [object Array Iterator]
+Cannot set property read of [object Array Iterator] which has only a getter
+Cannot assign to read only property 'locked' of object '#<Object>'
+Cannot delete property 'locked' of #<Object>
+Cannot set property read of #<Object> which has only a getter
+Cannot assign to read only property 'locked' of object '[object Set Iterator]'
+Cannot delete property 'locked' of [object Set Iterator]
+Cannot set property read of [object Set Iterator] which has only a getter
+Cannot assign to read only property 'locked' of object '[object Object]'
+Cannot delete property 'locked' of [object Object]
+Cannot set property read of [object Object] which has only a getter

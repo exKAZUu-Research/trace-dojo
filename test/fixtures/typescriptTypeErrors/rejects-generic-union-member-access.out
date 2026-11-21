@@ -1,0 +1,5 @@
+(17,12): error TS2339: Property 'value' does not exist on type 'Hidden | Plain'.
+(20,12): error TS2339: Property 'value' does not exist on type 'Guarded | Plain'.
+(23,12): error TS2339: Property 'value' does not exist on type 'Hidden | Other'.
+(26,5): error TS2339: Property 'value' does not exist on type 'Hidden | Plain'.
+(29,12): error TS2339: Property 'value' does not exist on type 'Hidden | Shape'.

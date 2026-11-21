@@ -1,0 +1,6 @@
+function f(x: string | null) {
+  if (x === null) return 0;
+  function inner() { return x.length; }
+  return inner();
+}
+console.log(f("ab"));

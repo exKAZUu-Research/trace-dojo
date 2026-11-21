@@ -1,0 +1,5 @@
+const globalConstant: string | undefined = "global";
+const readConstant = () => globalConstant.length;
+function closureLocal() { let local: string | undefined = "local"; const read = () => local.length; return read(); }
+{ let blockLocal: string | undefined = "block"; const read = () => blockLocal.length; console.log(read()); }
+console.log(readConstant(), closureLocal());

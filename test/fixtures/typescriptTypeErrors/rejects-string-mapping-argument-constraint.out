@@ -1,0 +1,5 @@
+(1,20): error TS2344: Type 'number' does not satisfy the constraint 'string'.
+(2,23): error TS2344: Type 'T' does not satisfy the constraint 'string'.
+(4,23): error TS2344: Type 'string | number' does not satisfy the constraint 'string'.
+  Type 'number' is not assignable to type 'string'.
+(9,21): error TS2344: Type 'unknown' does not satisfy the constraint 'string'.

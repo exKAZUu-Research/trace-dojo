@@ -1,0 +1,5 @@
+{} {} { '0': 'a', '1': 'b' } Pattern /abc/g [RegExp: null prototype] /abc/g RegExp <[Object: null prototype] {}> /undefined/undefined [Number (null prototype): 5] [String (null prototype): 'z'] /changed/y
+{ [lastIndex]: 0 }
+{ '0': 'a', '1': 'b', [length]: 2 }
+[RegExp: null prototype] /abc/g { [lastIndex]: 0 }
+{ nested: [Object] }

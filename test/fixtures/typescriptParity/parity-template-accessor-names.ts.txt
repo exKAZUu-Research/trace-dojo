@@ -1,0 +1,41 @@
+interface Reading {
+  get [`value`](): number;
+  set value(input);
+}
+const reading: Reading = { value: 3 };
+reading.value = 4;
+console.log(reading.value);
+
+class Gauge {
+  private current = 1;
+  get [`value`](): number {
+    return this.current;
+  }
+  set value(input) {
+    this.current = Number(input.toFixed(1));
+  }
+}
+const gauge = new Gauge();
+gauge.value = 2.25;
+console.log(gauge.value);
+
+const key = `level`;
+class Meter {
+  private current = 0;
+  get [key](): number {
+    return this.current;
+  }
+  set level(input) {
+    this.current = input * 2;
+  }
+}
+const meter = new Meter();
+meter.level = 5;
+console.log(meter.level);
+
+const literal: 'value' = key === `level` ? `value` : 'value';
+interface Keyed {
+  [`b`]: number;
+}
+const keyed: Keyed = { b: 7 };
+console.log(literal, keyed.b, { [`a`]: 1 }.a);

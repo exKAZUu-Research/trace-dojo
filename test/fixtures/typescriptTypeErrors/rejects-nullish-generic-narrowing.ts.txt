@@ -1,0 +1,7 @@
+function onlyUndefined(x: undefined) { return 1; }
+function f<T>(x: T | undefined) { return x ?? onlyUndefined(x); }
+function g<T extends string>(x: T | undefined) { return x ?? onlyUndefined(x); }
+function h<T extends string | null>(x: T | undefined) { return x ?? onlyUndefined(x); }
+function k<T>(x: T | undefined) { if (x == null) { const u: undefined | null = x; return u; } return x; }
+function m(x: string | undefined) { if (x == null) { const u: undefined = x; return u; } return x; }
+console.log(f<number>(1), g<"a">(undefined), m(undefined));

@@ -1,0 +1,20 @@
+type Box<T extends string = number> = { value: T };
+function identity<T extends number = string>(value: T): T { return value; }
+interface I<T extends { a: number } = { a: string }> { v: T }
+class C<T extends unknown[] = string> {}
+type Ok1<T, U extends T = T> = [T, U];
+type Bad1<T extends string, U extends T = number> = [T, U];
+type Ok2<T extends string = 'a' | 'b'> = T;
+type Ok3<T extends keyof { a: 1 } = 'a'> = T;
+type Bad3<T extends keyof { a: 1 } = 'b'> = T;
+type Ok4<T extends Array<T> = never> = T;
+const f = <T extends boolean = 1>(x: T) => x;
+type Fn = <T extends string = 0>() => void;
+class D { m<T extends string = 1>() {} }
+type Ok5<T extends object = {}> = T;
+type Ok6<T extends any = 3> = T;
+interface J<T = string> {}
+interface J<T = string> {}
+type Ok7<T extends (string | number)[] = string[]> = T;
+type Rec<T extends Rec<any> | number = number> = T;
+console.log(identity(2));

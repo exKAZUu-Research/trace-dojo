@@ -1,0 +1,6 @@
+type Sh = { kind: "c"; r: number } | { kind: "s"; side: number };
+function area(s: Sh): number {
+  const isC = s.kind === "c";
+  return isC ? s.r : s.side;
+}
+console.log(area({ kind: "c", r: 1 }));

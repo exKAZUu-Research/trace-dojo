@@ -1,0 +1,11 @@
+const wideIterator:Iterator<number,undefined,unknown>=[1,2].values();
+const inputIterator:Iterator<number,undefined,string>=wideIterator;
+const widerIterator:Iterator<number,undefined,unknown>=inputIterator;
+console.log(inputIterator.next('unused'), widerIterator.next());
+const wideIterable:Iterable<number,undefined,unknown>=[3];
+const inputIterable:Iterable<number,undefined,string>=wideIterable;
+const widerIterable:Iterable<number,undefined,unknown>=inputIterable;
+console.log(typeof inputIterable, typeof widerIterable);
+const wideIterableIterator:IterableIterator<number,undefined,unknown>=[4].values();
+const inputIterableIterator:IterableIterator<number,undefined,string>=wideIterableIterator;
+console.log(inputIterableIterator.next('unused'));

@@ -1,0 +1,9 @@
+(2,1): error TS2347: Untyped function calls may not accept type arguments.
+(4,1): error TS2347: Untyped function calls may not accept type arguments.
+(5,1): error TS2347: Untyped function calls may not accept type arguments.
+(7,1): error TS2347: Untyped function calls may not accept type arguments.
+(8,1): error TS2347: Untyped function calls may not accept type arguments.
+(9,2): error TS2304: Cannot find name 'MissingType'.
+(11,1): error TS2347: Untyped function calls may not accept type arguments.
+(12,2): error TS2304: Cannot find name 'MissingConstructorType'.
+(14,27): error TS2558: Expected 0 type arguments, but got 1.

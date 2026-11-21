@@ -1,0 +1,1 @@
+(5,17): error TS2339: Property 'nope' does not exist on type 'number'.

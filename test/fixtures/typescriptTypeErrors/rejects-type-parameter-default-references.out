@@ -1,0 +1,9 @@
+(1,16): error TS2744: Type parameter defaults can only reference previously declared type parameters.
+(2,14): error TS2744: Type parameter defaults can only reference previously declared type parameters.
+(3,28): error TS2744: Type parameter defaults can only reference previously declared type parameters.
+(4,32): error TS2744: Type parameter defaults can only reference previously declared type parameters.
+(4,45): error TS2744: Type parameter defaults can only reference previously declared type parameters.
+(5,19): error TS2744: Type parameter defaults can only reference previously declared type parameters.
+(6,12): error TS2744: Type parameter defaults can only reference previously declared type parameters.
+(8,18): error TS2716: Type parameter 'T' has a circular default.
+(10,12): error TS2716: Type parameter 'U' has a circular default.

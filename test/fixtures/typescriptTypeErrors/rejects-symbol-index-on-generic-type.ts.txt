@@ -1,0 +1,12 @@
+type V1<T extends { a: number }> = T[symbol];
+type V2<T> = T extends { a: number } ? T[symbol] : never;
+type V3<T extends { [k: string]: number }> = T[symbol];
+type V4<T extends { [k: string]: number }> = T[string | symbol];
+const u = Symbol("u");
+type V5<T extends { a: number }> = T[typeof u];
+type V6<T extends { [k: string]: number }> = T[typeof u];
+type V7<T extends { [k: symbol]: number }> = T[typeof u];
+type V8<T extends { [k: symbol]: number }> = T[symbol | number];
+type M = { [K in 1]: string };
+type V9<T extends M> = T["1"];
+console.log("unreached");

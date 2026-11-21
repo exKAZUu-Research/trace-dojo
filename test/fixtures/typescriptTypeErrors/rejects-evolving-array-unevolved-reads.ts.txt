@@ -1,0 +1,8 @@
+const a = [];
+console.log(a);
+const b = [];
+b.length;
+const c = [];
+c[0] = 1;
+c["x"] = 2;
+console.log(c);

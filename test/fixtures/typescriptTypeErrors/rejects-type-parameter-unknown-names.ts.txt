@@ -1,0 +1,9 @@
+function f1<T extends Missing1>() {}
+type A1<T extends Missing2> = 1;
+interface I1<T = Missing3> {}
+class C1<T extends Missing4> {}
+type Fn = <T extends Missing5>() => void;
+const g = <T extends Missing6>() => {};
+class C2 { m<T = Missing7>() {} }
+type O = { m<T extends Missing8>(): void };
+console.log('x');

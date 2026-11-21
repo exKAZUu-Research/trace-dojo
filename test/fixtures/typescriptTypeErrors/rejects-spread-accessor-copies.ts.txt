@@ -1,0 +1,10 @@
+let stored = 0;
+const both = {
+  get size(): number { return stored; },
+  set size(v: string | number) { stored = Number(v); },
+};
+both.size = "5";
+const copied = { ...both };
+copied.size = "5";
+const frozen = { ...both } as const;
+frozen.size = 1;

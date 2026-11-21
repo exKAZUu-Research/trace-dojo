@@ -1,0 +1,28 @@
+type Empty = {};
+type CompletionText = string & {};
+type TextPair<T> = T extends [infer U extends CompletionText, infer U extends {} & string] ? U : 'no';
+type BooleanPair<T> = T extends [infer U extends boolean & {}, infer U extends boolean] ? U : 'no';
+type SymbolPair<T> = T extends [infer U extends symbol & {}, infer U extends symbol] ? U : 'no';
+type LiteralPair<T> = T extends [infer U extends string & 'ok' & {}, infer U extends 'ok'] ? U : 'no';
+
+const a: TextPair<['yes', 'yes']> = 'yes';
+const b: BooleanPair<[true, true]> = true;
+const c: SymbolPair<[symbol, symbol]> = Symbol('value');
+const d: LiteralPair<['ok', 'ok']> = 'ok';
+const number: number & {} = 1;
+const bigint: bigint & {} = 2n;
+const code: `item-${string}` & {} = 'item-x';
+const plain: string = a;
+console.log(plain.toUpperCase(), b, c.description, d, number + number, bigint + bigint, code.slice(5));
+
+type NamedEmptyPair<T> = T extends [infer U extends string & Empty, infer U extends string] ? U : 'no';
+type PlainPatternPair<T> = T extends [
+  infer U extends string & `item-${string}`,
+  infer U extends `item-${string}`,
+] ? U : 'no';
+type NestedPair<T> = T extends [infer U extends (string & {}) & unknown, infer U extends string] ? U : 'no';
+
+const namedEmpty: NamedEmptyPair<['yes', 'yes']> = 'yes';
+const pattern: PlainPatternPair<['item-x', 'item-x']> = 'item-x';
+const nested: NestedPair<['nested', 'nested']> = 'nested';
+console.log(namedEmpty, pattern, nested);

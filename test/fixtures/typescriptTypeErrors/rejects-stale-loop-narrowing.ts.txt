@@ -1,0 +1,51 @@
+function whileLoop<T extends 'a' | 'b'>(x: T, y: T) {
+  if (x === 'a') {
+    let count = 0;
+    while (count < 2) {
+      const current: 'a' = x;
+      console.log(current);
+      x = y;
+      count++;
+    }
+  }
+}
+
+function forLoop<T extends 'a' | 'b'>(x: T, y: T) {
+  if (x === 'a') {
+    for (let count = 0; count < 2; count++) {
+      const current: 'a' = x;
+      console.log(current);
+      x = y;
+    }
+  }
+}
+
+function nestedLoop<T extends 'a' | 'b'>(x: T, y: T) {
+  if (x === 'a') {
+    let count = 0;
+    do {
+      for (let inner = 0; inner < 1; inner++) {
+        const current: 'a' = x;
+        console.log(current);
+      }
+      x = y;
+      count++;
+    } while (count < 2);
+  }
+}
+
+whileLoop<'a' | 'b'>('a', 'b');
+forLoop<'a' | 'b'>('a', 'b');
+nestedLoop<'a' | 'b'>('a', 'b');
+
+function narrowedEachIteration<T extends 'a' | 'b'>(x: T, y: T) {
+  let count = 0;
+  while (x === 'a' && count < 2) {
+    const current: 'a' = x;
+    console.log(current);
+    x = y;
+    count++;
+  }
+}
+
+narrowedEachIteration<'a' | 'b'>('a', 'b');

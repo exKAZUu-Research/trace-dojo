@@ -1,0 +1,18 @@
+const standard = Object.prototype.toString;
+console.log(typeof toString, toString() === '[object Undefined]', standard === toString);
+Object.prototype.toString = () => 'updated';
+console.log(toString());
+delete (Object.prototype as any).toString;
+console.log(typeof toString);
+try {
+  toString();
+} catch (error) {
+  console.log((error as Error).message);
+}
+Object.prototype.toString = standard;
+function local() {
+  const toString = () => 'local';
+  console.log(toString());
+}
+local();
+console.log(toString());

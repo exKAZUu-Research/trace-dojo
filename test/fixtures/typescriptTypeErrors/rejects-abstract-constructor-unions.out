@@ -1,0 +1,3 @@
+(10,10): error TS2511: Cannot create an instance of an abstract class.
+(17,10): error TS2511: Cannot create an instance of an abstract class.
+(24,10): error TS2511: Cannot create an instance of an abstract class.

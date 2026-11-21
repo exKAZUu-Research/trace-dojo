@@ -1,0 +1,37 @@
+function groupBy<T, K extends string>(xs: T[], f: (x: T) => K): Partial<Record<K, T[]>> {
+  const groups: Partial<Record<K, T[]>> = {};
+  for (const x of xs) (groups[f(x)] ??= []).push(x);
+  return groups;
+}
+
+function countBy<K extends string>(keys: K[]): Partial<Record<K, number>> {
+  const counts: Partial<Record<K, number>> = {};
+  for (const key of keys) counts[key] = (counts[key] ?? 0) + 1;
+  return counts;
+}
+
+function clear<K extends string>(key: K, counts: Partial<Record<K, number>>): number | undefined {
+  const before = counts[key];
+  counts[key] = undefined;
+  return before;
+}
+
+function clearField<T, K extends keyof T>(key: K, partial: Partial<T>): void {
+  partial[key] = undefined;
+}
+
+function firstOrDefault<K extends string>(key: K, lists: Partial<Record<K, string[]>>): string {
+  const list = lists[key];
+  return list === undefined ? "none" : (list[0] ?? "empty");
+}
+
+const parity = groupBy([1, 2, 3, 4, 5], (n) => (n % 2 ? "odd" : "even"));
+console.log(parity);
+const counts = countBy(["a", "b", "a", "c", "a"]);
+console.log(counts);
+console.log(clear("a", counts), counts);
+const point: { x: number; y?: number } = { x: 1, y: 2 };
+clearField("y", point);
+console.log(point);
+const lists: Partial<Record<"odd" | "even", string[]>> = { odd: ["one"], even: [] };
+console.log(firstOrDefault("odd", lists), firstOrDefault("even", lists));

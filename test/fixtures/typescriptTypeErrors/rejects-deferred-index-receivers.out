@@ -1,0 +1,8 @@
+(1,67): error TS2536: Type '"length"' cannot be used to index type 'V[K]'.
+(2,58): error TS2536: Type '"toUpperCase"' cannot be used to index type 'V[K]'.
+(3,73): error TS2536: Type '"length"' cannot be used to index type 'T[K]'.
+(4,80): error TS2536: Type '"length"' cannot be used to index type 'V[K]'.
+(5,68): error TS2536: Type 'V["b"]' cannot be used to index type 'V["a"]'.
+(6,100): error TS2536: Type 'P' cannot be used to index type 'V[K]'.
+(7,64): error TS2536: Type 'T[P]' cannot be used to index type 'V[K]'.
+(8,110): error TS2536: Type 'T[P]' cannot be used to index type 'V["a"]'.

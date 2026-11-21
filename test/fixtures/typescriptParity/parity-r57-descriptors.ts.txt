@@ -1,0 +1,7 @@
+const show = (o: any, k: any) => console.log(String(k), JSON.stringify(Object.getOwnPropertyDescriptor(o, k)));
+show(Math, 'PI'); show(Array.prototype, 'map'); show(function () {}, 'prototype'); show(class {}, 'prototype');
+show(function f() {}, 'name'); show(function f(a: any) {}, 'length'); show([1], 'length'); show('ab', 0); show('ab', 'length');
+show(new Error('x'), 'message'); show(Error.prototype, 'name'); show(Number, 'MAX_VALUE'); show(console, 'log');
+const d = Object.getOwnPropertyDescriptor(Map.prototype, 'size') as any; console.log(typeof d.get, d.get.name, d.enumerable, d.configurable);
+const r = Object.getOwnPropertyDescriptor(RegExp.prototype, 'global') as any; console.log(r.get.name);
+show(/a/g, 'lastIndex');

@@ -1,0 +1,4 @@
+(3,21): error TS2510: Base constructors must all have the same return type.
+(8,22): error TS2510: Base constructors must all have the same return type.
+(12,21): error TS2510: Base constructors must all have the same return type.
+(15,22): error TS2510: Base constructors must all have the same return type.

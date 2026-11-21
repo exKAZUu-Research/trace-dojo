@@ -1,0 +1,6 @@
+const mapped = [1, 2].flatMap(() => [undefined]);
+const nested: undefined[][] = mapped;
+const nullValues = [1, 2].flatMap(() => [null]);
+const numbers: number[] = nullValues;
+function single<T>(input: T | ReadonlyArray<T>): T[] { return [] as T[]; }
+const wrong: number[][] = single([1, 2]);

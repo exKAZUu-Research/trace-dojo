@@ -1,0 +1,7 @@
+function write(array: readonly number[], tuple: readonly [number], index: number): void {
+  array[index] = 3;
+  array["0"] = 3;
+  array["length"] = 3;
+  tuple[0] = 3;
+  tuple["length"] = 1;
+}

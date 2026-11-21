@@ -1,0 +1,3 @@
+function hello(): string { return "hi"; }
+const r = hello ? "yes" : "no";
+console.log(r);

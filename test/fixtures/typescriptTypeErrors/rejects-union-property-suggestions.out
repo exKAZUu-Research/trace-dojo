@@ -1,0 +1,10 @@
+(1,45): error TS2551: Property 'lenght' does not exist on type 'string | string[]'. Did you mean 'length'?
+  Property 'lenght' does not exist on type 'string'.
+(2,37): error TS2551: Property 'lenght' does not exist on type '"a" | "b"'. Did you mean 'length'?
+  Property 'lenght' does not exist on type '"a"'.
+(3,40): error TS2551: Property 'psh' does not exist on type 'string[] | number[]'. Did you mean 'push'?
+  Property 'psh' does not exist on type 'string[]'.
+(4,43): error TS2339: Property 'toFixed' does not exist on type 'string | number'.
+  Property 'toFixed' does not exist on type 'string'.
+(5,66): error TS2339: Property 'widht' does not exist on type '{ width: number; } | { height: number; }'.
+  Property 'widht' does not exist on type '{ width: number; }'.

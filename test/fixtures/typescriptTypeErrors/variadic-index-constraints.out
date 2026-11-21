@@ -1,0 +1,15 @@
+(1,82): error TS2322: Type 'number' is not assignable to type '[...T]["length"]'.
+  Type 'number' is not assignable to type '1'.
+(2,87): error TS2322: Type 'string | number' is not assignable to type 'number'.
+  Type 'string' is not assignable to type 'number'.
+(3,89): error TS2322: Type 'string | number' is not assignable to type 'number'.
+  Type 'string' is not assignable to type 'number'.
+(4,87): error TS2322: Type 'number | T[number]' is not assignable to type 'string'.
+  Type 'number' is not assignable to type 'string'.
+(5,46): error TS2536: Type '"missing"' cannot be used to index type '[...T]'.
+(6,49): error TS2536: Type 'symbol' cannot be used to index type '[...T]'.
+(7,74): error TS2536: Type 'K' cannot be used to index type '[...T]'.
+(8,93): error TS2322: Type '[...T]["push"]' is not assignable to type '(item: number) => number'.
+  Type '(...items: string[]) => number' is not assignable to type '(item: number) => number'.
+    Types of parameters 'items' and 'item' are incompatible.
+      Type 'number' is not assignable to type 'string'.

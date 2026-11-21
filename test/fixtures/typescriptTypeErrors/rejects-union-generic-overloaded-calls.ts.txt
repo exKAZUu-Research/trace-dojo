@@ -1,0 +1,30 @@
+interface A { (x: number): void; (x: boolean): void }
+interface B { (x: string): void; (x: boolean): void }
+interface C { (x: number): string; (x: string): number }
+type F = ((x: number) => void) | (<T extends string>(x: T) => void);
+type G = (<T>(x: T) => T) | ((x: number) => number);
+type H = (<T>(x: T) => T) | (<U>(x: U) => U);
+type I = (<T extends string>(x: T) => T) | (<U extends number>(x: U) => U);
+type J = ((x: number) => string) | ((x: number) => number);
+type K = ((x: number) => void) | ((x: number, y: string) => void);
+type L = C | ((x: number) => boolean);
+type N = C | ((x: boolean) => boolean);
+function test(f: F, a: A | B, g: G, h: H, i: I, j: J, k: K, l: L, n: N, c: C | C) {
+  f(1);
+  a(1);
+  a(true);
+  a("s");
+  const r1: number = g(1);
+  const r2: string = h("s");
+  const r3: number = h(1);
+  i("s");
+  const r4: boolean = j(1);
+  k(1);
+  k(1, "s");
+  const r5: boolean = l(1);
+  l("s");
+  n(1);
+  const r6: number = c("s");
+  const r7: string = c(1);
+  console.log(r1, r2, r3, r4, r5, r6, r7);
+}

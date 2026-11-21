@@ -1,0 +1,26 @@
+function narrowed() {
+  let value: string | number = 'text';
+  const copy: typeof value = 1;
+}
+function member(value: {item: string | number}) {
+  if (typeof value.item === 'string') { const copy: typeof value.item = 1; }
+}
+function unassigned() {
+  let value: number;
+  const copy: typeof value = undefined;
+  let empty;
+  const number: typeof empty = 1;
+}
+function captures() {
+  let value: string | number = 'text';
+  const arrow = () => { const copy: typeof value = 1; return copy; };
+}
+function nullable(value: string | undefined) {
+  if (value) { const copy: typeof value = undefined; }
+}
+function snapshot() {
+  let value: string | number = 'initial';
+  type Initial = typeof value;
+  value = 1;
+  const copy: Initial = 2;
+}

@@ -1,0 +1,18 @@
+function headline(run: () => void): void {
+  try { run(); }
+  catch (error) { if (error instanceof Error) console.log(error.message); }
+}
+const nil: any = null;
+const missing: any = undefined;
+headline(() => { const { a = 1 } = nil; });
+headline(() => { const { a: b = 1 } = missing; });
+headline(() => { const { a, b = 1 } = nil; });
+headline(() => { const { ['a']: b = 1 } = nil; });
+headline(() => { const { a: { b } = {} } = nil; });
+headline(() => { const { a: { b } = { b: 5 } } = missing; });
+headline(() => { const { a: { b } = {} } = { a: nil }; });
+headline(() => { const { a: { b = 1 } = {} } = { a: nil }; });
+headline(() => { const { a: [b] = [1] } = nil; });
+headline(() => { let b: number | undefined; ({ a: { b } = {} as { b?: number } } = nil); });
+headline(() => { function f({ a = 1 }: { a?: number }) {} f(nil); });
+headline(() => { const [{ a } = {}] = [nil]; });

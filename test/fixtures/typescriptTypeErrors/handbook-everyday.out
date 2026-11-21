@@ -1,0 +1,9 @@
+(4,7): error TS2345: Argument of type 'number' is not assignable to parameter of type 'string'.
+(6,12): error TS2741: Property 'y' is missing in type '{ x: number; }' but required in type '{ x: number; y: number; }'.
+(8,15): error TS18048: 'obj.last' is possibly 'undefined'.
+(11,18): error TS2339: Property 'toUpperCase' does not exist on type 'string | number'.
+(14,1): error TS2322: Type '"howdy"' is not assignable to type '"hello"'.
+(16,27): error TS2345: Argument of type '"centre"' is not assignable to parameter of type '"center" | "left" | "right"'.
+(21,11): error TS2345: Argument of type '"automatic"' is not assignable to parameter of type '"auto" | Options'.
+(24,24): error TS2345: Argument of type 'string' is not assignable to parameter of type '"GET" | "POST"'.
+(25,11): error TS2352: Conversion of type 'string' to type 'number' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.

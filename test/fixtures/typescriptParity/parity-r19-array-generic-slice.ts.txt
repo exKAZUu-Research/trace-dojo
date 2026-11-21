@@ -1,0 +1,4 @@
+function f(a: number, b: number) { return Array.prototype.slice.call(arguments); }
+console.log(f(1, 2));
+console.log(Array.prototype.join.call({ length: 2, 0: 'a', 1: 'b' } as any, '-'));
+console.log(Array.prototype.map.call('ab', (c: any) => c + c));

@@ -1,0 +1,4 @@
+interface A { x: number }
+interface A { x?: number }
+interface B { readonly x: number }
+interface B { x: number }

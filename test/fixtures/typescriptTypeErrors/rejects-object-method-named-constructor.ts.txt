@@ -1,0 +1,27 @@
+const factory = {
+  constructor(): number {
+    return "bad";
+  },
+};
+const n: number = factory.constructor();
+console.log(n);
+const empty = {
+  constructor(): number {},
+};
+class Base {}
+class Derived extends Base {
+  constructor() {
+    super();
+  }
+  make() {
+    return {
+      constructor() {
+        super();
+      },
+    };
+  }
+}
+class Plain {
+  constructor(public x: number) {}
+}
+console.log(new Plain(1).x, empty, Derived);

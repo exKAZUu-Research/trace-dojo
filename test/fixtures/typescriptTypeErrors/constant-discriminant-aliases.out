@@ -1,0 +1,13 @@
+(4,34): error TS2339: Property 'a' does not exist on type 'Choice'.
+  Property 'a' does not exist on type '{ kind: "b"; b: string; }'.
+(5,16): error TS2339: Property 'b' does not exist on type 'Choice'.
+  Property 'b' does not exist on type '{ kind: "a"; a: number; }'.
+(9,34): error TS2339: Property 'a' does not exist on type 'Choice'.
+  Property 'a' does not exist on type '{ kind: "b"; b: string; }'.
+(10,16): error TS2339: Property 'b' does not exist on type 'Choice'.
+  Property 'b' does not exist on type '{ kind: "a"; a: number; }'.
+(15,35): error TS2339: Property 'a' does not exist on type 'Choice'.
+  Property 'a' does not exist on type '{ kind: "b"; b: string; }'.
+(16,16): error TS2339: Property 'b' does not exist on type 'Choice'.
+  Property 'b' does not exist on type '{ kind: "a"; a: number; }'.
+(21,34): error TS2339: Property 'a' does not exist on type 'never'.

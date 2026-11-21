@@ -1,0 +1,9 @@
+const a = "x";
+let b = a;
+b = "y";
+const c = { k: "x" };
+c.k = "z";
+let d: "x" = "x";
+let e = d;
+e = "q";
+console.log(b, c, e);

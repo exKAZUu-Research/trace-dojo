@@ -1,0 +1,28 @@
+function onlyUndefined(x: undefined) {
+  return 'missing';
+}
+function onlyNull(x: null) {
+  return 'none';
+}
+function onlyB(s: { k: 'b'; v: null }) {
+  return s.k;
+}
+type S = { k: 'a'; v: number } | { k: 'b'; v: null };
+
+function text(x: string | undefined) {
+  return x ?? onlyUndefined(x);
+}
+function count(x: number | null) {
+  return x ?? onlyNull(x);
+}
+function property(o: { p: string | null }) {
+  return o.p ?? onlyNull(o.p);
+}
+function discriminant(s: S) {
+  return s.v ?? onlyB(s);
+}
+
+console.log(text('a'), text(undefined));
+console.log(count(0), count(null));
+console.log(property({ p: 'p' }), property({ p: null }));
+console.log(discriminant({ k: 'a', v: 1 }), discriminant({ k: 'b', v: null }));

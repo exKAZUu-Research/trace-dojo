@@ -1,0 +1,5 @@
+(1,18): error TS7022: 'self' implicitly has type 'any' because it does not have a type annotation and is referenced directly or indirectly in its own initializer.
+(1,27): error TS2729: Property 'self' is used before its initialization.
+(2,11): error TS7022: 'x' implicitly has type 'any' because it does not have a type annotation and is referenced directly or indirectly in its own initializer.
+(2,20): error TS2729: Property 'y' is used before its initialization.
+(2,23): error TS7022: 'y' implicitly has type 'any' because it does not have a type annotation and is referenced directly or indirectly in its own initializer.

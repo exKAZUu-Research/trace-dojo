@@ -1,0 +1,3 @@
+(2,23): error TS2717: Subsequent property declarations must have the same type.  Property 'value' must be of type 'T extends { value: infer U; } ? U : never', but here has type 'T extends { value: infer V; } ? V : never'.
+(7,24): error TS2717: Subsequent property declarations must have the same type.  Property 'value' must be of type 'Left<T>', but here has type 'Right<T>'.
+(13,3): error TS2717: Subsequent property declarations must have the same type.  Property 'value' must be of type '<T>(arg: T) => T extends { value: infer U; } ? U : never', but here has type '<S>(arg: S) => S extends { value: infer U; } ? U : never'.

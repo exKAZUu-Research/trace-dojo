@@ -1,0 +1,26 @@
+function toRequired<T>(p: Partial<T>): Required<T> {
+  return p;
+}
+type Prefixed<T> = { [K in keyof T as `get_${K & string}`]: T[K] };
+type Suffixed<T> = { [K in keyof T as `${K & string}_get`]: T[K] };
+function swap<T>(p: Prefixed<T>): Suffixed<T> {
+  return p;
+}
+type Opt<T> = { [K in keyof T]+?: T[K] };
+type Plain<T> = { [K in keyof T]: T[K] };
+function toPlain<T>(o: Opt<T>): Plain<T> {
+  return o;
+}
+type Renamed<T> = { [K in keyof T as K]: T[K] };
+function toRenamed<T>(o: Plain<T>): Renamed<T> {
+  return o;
+}
+function fromPartialPlain<T>(o: Partial<T>): Plain<T> {
+  return o;
+}
+type Keys<T> = { [K in keyof T]: string };
+type Some<T> = { [K in Exclude<keyof T, 'a'>]: string };
+function widenKeys<T>(o: Some<T>): Keys<T> {
+  return o;
+}
+console.log(toRequired, swap, toPlain, toRenamed, fromPartialPlain, widenKeys);

@@ -1,0 +1,25 @@
+function fromRecord<K extends 'x' | 'y'>(key: K, values: Record<K, number>) {
+  const {[key]: value} = values;
+  return value;
+}
+function fromMapped<K extends 'left' | 'right'>(key: K, values: {[P in K]: string}) {
+  const {[key]: value} = values;
+  return value;
+}
+function assignRecord<K extends 1 | 2>(key: K, values: Record<K, number>) {
+  let value: number;
+  ({[key]: value} = values);
+  return value;
+}
+const first = Symbol('first');
+const second = Symbol('second');
+function fromSymbol<K extends typeof first | typeof second>(key: K, values: Record<K, number>) {
+  const {[key]: value} = values;
+  return value;
+}
+function concreteUnion(key: 'x' | 'y', values: {x: number; y: string}) {
+  const {[key]: value} = values;
+  return value;
+}
+console.log(fromRecord('x', {x: 1}), fromMapped('right', {right: 'two'}), assignRecord(2, {2: 3}));
+console.log(fromSymbol(second, {[second]: 4}), concreteUnion('y', {x: 5, y: 'six'}));

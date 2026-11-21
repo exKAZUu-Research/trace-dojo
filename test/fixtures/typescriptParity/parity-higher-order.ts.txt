@@ -1,0 +1,31 @@
+function wrap<T,U>(fn: (value:T) => U): (value:T) => U {
+  return value => fn(value);
+}
+function id<T>(value:T):T { return value; }
+function compose<A,B,C>(first: (a:A) => B, second: (b:B) => C): (a:A) => C {
+  return a => second(first(a));
+}
+function array<T>(x:T):T[] { return [x]; }
+function box<T>(x:T):{value:T} { return {value:x}; }
+const generic = wrap(id);
+const n: number = generic(1);
+const s: string = generic('text');
+const composed = compose(array, box);
+const a: string[] = composed('hello').value;
+const b: number[] = composed(2).value;
+const keyed = wrap(<T extends { key: string }>(value:T) => value);
+const k: number = keyed({ key: 'known', count: 3 }).count;
+function pair<A,B,C,D>(first: (a:A) => B, second: (c:C) => D): (a:A, c:C) => [B,D] {
+  return (a,c) => [first(a), second(c)];
+}
+const p: [number, string] = pair(id, id)(4, 'last');
+console.log(n, s, a[0], b[0], k, ...p);
+class Box<T> {
+  constructor(public value: T) {}
+}
+function wrapConstructor<A, B>(ctor: new (value: A) => B): new (value: A) => B {
+  return ctor;
+}
+const WrappedBox = wrapConstructor(Box);
+const constructed: string = new WrappedBox('constructor').value;
+console.log(constructed);

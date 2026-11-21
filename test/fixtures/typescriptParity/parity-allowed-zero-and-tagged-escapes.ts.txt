@@ -1,0 +1,2 @@
+console.log("\0".length, "\\101", "\x41\u0042\u{43}");
+console.log(String.raw`\101`, String.raw`\08`, String.raw`\8`, String.raw`\0`);

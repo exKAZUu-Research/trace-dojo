@@ -1,0 +1,3 @@
+(3,11): error TS2322: Type 'object' is not assignable to type 'string'.
+(8,11): error TS2322: Type 'object | null' is not assignable to type 'object'.
+  Type 'null' is not assignable to type 'object'.

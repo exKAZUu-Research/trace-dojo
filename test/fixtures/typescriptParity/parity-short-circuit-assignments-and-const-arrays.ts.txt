@@ -1,0 +1,25 @@
+function left() {}
+function right() {}
+function nested() {}
+true && (left.label = 'and');
+false || (right.label = 'or');
+(true && true) && (nested.label = 'nested');
+console.log(left.label, right.label, nested.label);
+
+function optional<const T extends string[] | undefined>(value: T): T {
+  return value;
+}
+function withLength<const T extends string[] & { length: number }>(value: T): T {
+  return value;
+}
+function mixed<const T extends string[] | readonly number[]>(value: T): T {
+  return value;
+}
+const optionalResult = optional(['a']);
+const intersectionResult = withLength(['b']);
+const mixedResult = mixed([3]);
+const a: ['a'] = optionalResult;
+const b: ['b'] = intersectionResult;
+const c: [3] = mixedResult;
+const d: ['d'] = ['d'] as const;
+console.log(a[0], b[0], c[0], d[0]);

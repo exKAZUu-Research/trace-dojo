@@ -1,0 +1,4 @@
+interface A { x: number }
+interface B extends A { x: string }
+const b: B = { x: "a" };
+console.log(b);

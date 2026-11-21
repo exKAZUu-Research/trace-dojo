@@ -1,0 +1,21 @@
+function bad<T extends string[]>(values: [...T, number?]) {
+  const [first, ...remaining] = values;
+  const destructured: string | number = first;
+  const read: string | number = values[0];
+  const suffix: (string | number)[] = remaining;
+  const fromRest: string | number = remaining[0];
+  const [head = 'fallback'] = values;
+  const defaulted: string | number = head;
+}
+function withPrefix<T extends string[]>(values: [boolean, ...T, number?]) {
+  const [head, first, ...remaining] = values;
+  const safeHead: boolean = head;
+  const unsafe: string | number = first;
+  const read: string | number = values[2];
+  const suffix: (string | number)[] = remaining;
+}
+function required<T extends string[]>(values: [...T, number]) {
+  const [first, ...remaining] = values;
+  const read: number | string = values[1];
+  const fromRest: number | string = remaining[1];
+}

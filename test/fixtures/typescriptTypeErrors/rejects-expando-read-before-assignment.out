@@ -1,0 +1,7 @@
+(3,17): error TS2565: Property 'tag' is used before being assigned.
+(11,19): error TS2565: Property 'label' is used before being assigned.
+(14,15): error TS2448: Block-scoped variable 'k' used before its declaration.
+(14,15): error TS2454: Variable 'k' is used before being assigned.
+(14,17): error TS2565: Property 'size' is used before being assigned.
+(19,15): error TS2565: Property 'label' is used before being assigned.
+(25,15): error TS2565: Property 'tag' is used before being assigned.

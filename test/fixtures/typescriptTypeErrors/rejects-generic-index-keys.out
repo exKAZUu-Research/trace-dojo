@@ -1,0 +1,12 @@
+(1,57): error TS2536: Type '"a"' cannot be used to index type 'T'.
+(2,45): error TS2536: Type '0' cannot be used to index type 'T'.
+(3,43): error TS2536: Type '"0"' cannot be used to index type 'T'.
+(4,55): error TS2536: Type '"01"' cannot be used to index type 'T'.
+(5,41): error TS2536: Type '"b"' cannot be used to index type 'T'.
+(6,39): error TS2536: Type '"nope"' cannot be used to index type 'T'.
+(7,36): error TS2536: Type '"a"' cannot be used to index type 'T'.
+(8,39): error TS2536: Type 'true' cannot be used to index type 'T'.
+(9,38): error TS2536: Type '"a"' cannot be used to index type 'T'.
+(10,30): error TS2536: Type '"x"' cannot be used to index type 'T'.
+(11,53): error TS2536: Type '"b"' cannot be used to index type 'U'.
+(12,48): error TS2536: Type '"a"' cannot be used to index type 'T'.

@@ -1,0 +1,9 @@
+class Values{x;constructor(values:number[]){for(this.x of values){}}}
+const required:number=new Values([]).x;
+new Values([1]).x='bad';
+class Keys{x;constructor(values:{a:number}){for(this.x in values){}}}
+new Keys({a:1}).x=1;
+class Pattern{x;y;constructor(values:[number,string][]){for([this.x,this.y] of values){}}}
+new Pattern([[1,'a']]).x='bad';
+new Pattern([[1,'a']]).y=2;
+class Overwritten{x;constructor(values:number[]){for(this.x of values){this.x='last';}}}

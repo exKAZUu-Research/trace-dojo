@@ -1,0 +1,13 @@
+(1,29): error TS1016: A required parameter cannot follow an optional parameter.
+(2,11): error TS2371: A parameter initializer is only allowed in a function or constructor implementation.
+(3,27): error TS1016: A required parameter cannot follow an optional parameter.
+(4,28): error TS1016: A required parameter cannot follow an optional parameter.
+(4,51): error TS2371: A parameter initializer is only allowed in a function or constructor implementation.
+(5,15): error TS2371: A parameter initializer is only allowed in a function or constructor implementation.
+(7,14): error TS2371: A parameter initializer is only allowed in a function or constructor implementation.
+(8,23): error TS2371: A parameter initializer is only allowed in a function or constructor implementation.
+(8,55): error TS2371: A parameter initializer is only allowed in a function or constructor implementation.
+(9,23): error TS1016: A required parameter cannot follow an optional parameter.
+(10,29): error TS1016: A required parameter cannot follow an optional parameter.
+(11,33): error TS1016: A required parameter cannot follow an optional parameter.
+(12,39): error TS1016: A required parameter cannot follow an optional parameter.

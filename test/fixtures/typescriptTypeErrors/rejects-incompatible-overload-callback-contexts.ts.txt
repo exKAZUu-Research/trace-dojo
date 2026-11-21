@@ -1,0 +1,55 @@
+function apply(fn: (x: string) => void): void;
+function apply(fn: (x: number, y: number) => void): void;
+function apply(fn: any) { fn(2, 3); }
+apply(
+  (x = 1, y: number) => console.log(x + y)
+);
+
+function another(fn: (x: number) => void): void;
+function another(fn: (x: string, y: number) => void): void;
+function another(fn: any) { fn('a', 3); }
+another(
+  (x = 'a', y: number) => console.log(x.repeat(y))
+);
+
+const empty: [] = [];
+apply(
+  (x = 1, y: number) => console.log(x + y),
+  ...empty
+);
+
+function prefixed(tag: number, fn: (x: string) => void): void;
+function prefixed(tag: number, fn: (x: number, y: number) => void): void;
+function prefixed(tag: number, fn: any) { fn(tag, 3); }
+const prefix: [number] = [2];
+prefixed(
+  ...prefix,
+  (x = 1, y: number) => console.log(x + y)
+);
+
+function objectCall(value: { run: (x: string) => void }): void;
+function objectCall(value: { run: (x: number, y: number) => void }): void;
+function objectCall(value: any) { value.run(2, 3); }
+objectCall({ run: (x = 1, y: number) => console.log(x + y) });
+objectCall({ run(x = 1, y: number) { console.log(x + y); } });
+
+function tupleCall(value: [(x: string) => void]): void;
+function tupleCall(value: [(x: number, y: number) => void]): void;
+function tupleCall(value: any) { value[0](2, 3); }
+tupleCall([(x = 1, y: number) => console.log(x + y)]);
+
+objectCall(true && { run: (x = 1, y: number) => console.log(x + y) });
+objectCall({ ...{ run: (x = 1, y: number) => console.log(x + y) } });
+objectCall(({ ...{ ...{ run: (x = 1, y: number) => console.log(x + y) } } }));
+
+function tagged(value: { kind: 'text'; run: (x: string) => void }): void;
+function tagged(value: { kind: 'number'; run: (x: number, y: number) => void }): void;
+function tagged(value: any) { value.run(2, 3); }
+tagged({ kind: 'number', ...{ run: (x = 1, y: number) => console.log(x + y) } });
+tagged({ ...{ run: (x = 1, y: number) => console.log(x + y) }, kind: 'number' });
+tagged(true && { kind: 'number', run: (x = 1, y: number) => console.log(x + y) });
+
+function mixed(value: { kind: 'text'; run: (x: string) => void; note: (x: string) => void }): void;
+function mixed(value: { kind: 'number'; run: (x: number, y: number) => void; note: (x: number) => void }): void;
+function mixed(value: any) { value.run(2, 3); }
+mixed({ kind: 'number', note: (value = 1) => console.log(value), ...{ run: (x = 1, y: number) => console.log(x + y) } });

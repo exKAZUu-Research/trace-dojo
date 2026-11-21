@@ -1,0 +1,15 @@
+console.log(Math.abs(-3), Math.max(1, 5, 3), Math.min(), Math.max(), Math.floor(-1.5), Math.ceil(1.2), Math.round(2.5), Math.round(-2.5));
+console.log(Math.trunc(-4.7), Math.sign(-3), Math.sqrt(16), Math.cbrt(27), Math.pow(2, 8), Math.hypot(3, 4), Math.PI, Math.E);
+console.log(Math.log(Math.E), Math.log2(8), Math.log10(1000), Math.sin(0), Math.cos(Math.PI), Math.atan2(1, 1));
+console.log((3.14159).toFixed(2), (0.000001234).toPrecision(2), (1234.5678).toFixed(1), (1e21).toFixed(2), (-1.005).toFixed(2));
+console.log(Number("42"), Number(""), Number("abc"), Number(" 12 "), Number(null), Number(undefined), Number(true));
+console.log(parseInt("42px"), parseInt("ff", 16), parseFloat("3.14abc"), parseInt("abc"), Number.parseFloat("1e3"));
+console.log(Number.isInteger(5.0), Number.isInteger(5.5), Number.isNaN(NaN), isNaN(Number("x")), Number.isFinite(1 / 0), isFinite(42));
+console.log(Number.MAX_SAFE_INTEGER, Number.MIN_SAFE_INTEGER, Number.MAX_VALUE, Number.MIN_VALUE, Number.EPSILON);
+console.log(0.1 * 3, 1 / 3, 100 / 3, 2 ** 53, 2 ** 53 + 1, 1e-7, 123e-20, 5e-324, -1e21);
+console.log((25).toString(36), (-255).toString(16), (0.5).toString(2), 1.0, 1.50, 100, 1e300 * 10);
+console.log(7 % -3, -7 % 3, 5.5 % 2, Math.floor(7 / 2), (7 / 2) | 0, ~~(7.9));
+const big = 12345678901234567890n;
+console.log(big, big * 2n, big / 7n, big % 7n, -big, BigInt(10) ** 30n, typeof big, BigInt("123"));
+console.log((123.456).toExponential(2), Number("0x1f"), Number("0b11"), +"3", -"4");
+console.log(Math.max(...[1, 9, 3]), [3, 1, 2].reduce((a, b) => Math.max(a, b)), Number.parseInt("08"));

@@ -1,0 +1,26 @@
+type PrimitiveWhen<V> = V extends boolean ? string : number;
+type ConditionalUnion<V> = PrimitiveWhen<V> | {name: string};
+type ObjectsWhen<V> = V extends boolean ? {name: string} : {id: number};
+
+function wrapArray<V, T extends (V extends boolean ? string : number) & {}>(value: T, marker: V): T[] {
+  return [value];
+}
+function wrapObject<V, T extends ConditionalUnion<V>>(value: T, marker: V): {value: T} {
+  return {value};
+}
+function wrapAlias<V, T extends PrimitiveWhen<V> & {}>(value: T, marker: V): {value: T} {
+  return {value};
+}
+function wrapNumbers<V, T extends (ObjectsWhen<V> | PrimitiveWhen<V>) & {}>(value: T, marker: V): T[] {
+  return [value];
+}
+
+const a = wrapArray('array', true);
+const b = wrapObject('object', true);
+const c = wrapAlias('alias', true);
+const d = wrapNumbers(4, 'number');
+const array: 'array' = a[0];
+const object: 'object' = b.value;
+const alias: 'alias' = c.value;
+const number: 4 = d[0];
+console.log(array, object, alias, number);

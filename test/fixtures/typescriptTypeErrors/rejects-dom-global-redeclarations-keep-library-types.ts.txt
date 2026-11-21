@@ -1,0 +1,6 @@
+let name = "a";
+console.log(name.length);
+name = "b";
+let status = 0;
+status = status + 1;
+console.log(status.toFixed());

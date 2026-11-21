@@ -1,0 +1,15 @@
+(2,3): error TS2300: Duplicate identifier 'foo'.
+(5,3): error TS2300: Duplicate identifier 'foo'.
+(8,3): error TS2300: Duplicate identifier 'foo'.
+(11,3): error TS2300: Duplicate identifier 'foo'.
+(14,3): error TS2300: Duplicate identifier 'foo'.
+(17,3): error TS2300: Duplicate identifier 'foo'.
+(20,3): error TS2300: Duplicate identifier 'foo'.
+(23,7): error TS2300: Duplicate identifier 'foo'.
+(26,7): error TS2300: Duplicate identifier 'foo'.
+(29,7): error TS2300: Duplicate identifier 'foo'.
+(32,3): error TS2300: Duplicate identifier 'foo'.
+(35,22): error TS2300: Duplicate identifier 'foo'.
+(41,3): error TS2717: Subsequent property declarations must have the same type.  Property 'foo' must be of type 'number', but here has type 'string'.
+(47,12): error TS2687: All declarations of 'value' must have identical modifiers.
+(47,12): error TS2717: Subsequent property declarations must have the same type.  Property 'value' must be of type 'number', but here has type '3'.

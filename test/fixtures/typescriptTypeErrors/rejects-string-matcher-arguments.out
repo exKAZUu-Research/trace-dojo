@@ -1,0 +1,18 @@
+(1,27): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type 'number' is not assignable to parameter of type 'string | RegExp'.
+(2,28): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type 'number' is not assignable to parameter of type 'string | RegExp'.
+(3,27): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type 'number' is not assignable to parameter of type 'string | RegExp'.
+(4,26): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type 'boolean' is not assignable to parameter of type 'string | RegExp'.
+(5,23): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type '{}' is not assignable to parameter of type 'string | RegExp'.
+(8,23): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type 'null' is not assignable to parameter of type 'string | RegExp'.

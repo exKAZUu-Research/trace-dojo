@@ -1,0 +1,5 @@
+(2,3): error TS2386: Overload signatures must all be optional or required.
+(7,1): error TS2722: Cannot invoke an object which is possibly 'undefined'.
+(9,3): error TS2391: Function implementation is missing or not immediately following the declaration.
+(15,3): error TS2386: Overload signatures must all be optional or required.
+(19,3): error TS2386: Overload signatures must all be optional or required.

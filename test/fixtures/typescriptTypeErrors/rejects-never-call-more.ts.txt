@@ -1,0 +1,11 @@
+function fail(msg: string): never { throw new Error(msg); }
+const failArrow = (msg: string): never => { throw new Error(msg); };
+function f(x: number | string): number {
+  if (typeof x === "number") return x;
+  failArrow("bad");
+}
+function g(x?: number): number {
+  if (x === undefined) fail("none");
+  return x;
+}
+console.log(g(1), typeof f);

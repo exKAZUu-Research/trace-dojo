@@ -1,0 +1,26 @@
+type A = { b?: { c?: string } } | undefined;
+function compareNullable(a: A, x: string | null, y: string | undefined, z: unknown): void {
+  if (a?.b?.c == x) console.log(a.b.c);
+  if (a?.b?.c === y) console.log(a.b.c);
+  if (a?.b?.c === z) console.log(a.b.c);
+  if (a?.b?.c === null) console.log(a.b.c);
+}
+function oppositeBranches(a: A): void {
+  if (a?.b?.c) console.log("set");
+  else console.log(a.b);
+  if (a?.b?.c === undefined) console.log(a.b.c);
+  if (typeof a?.b?.c === "undefined") console.log(a.b);
+  if (a?.b?.c !== "x") console.log(a.b);
+}
+function notChained(a: { b: { c?: string } | undefined } | undefined): void {
+  if (a?.b.c) console.log(a.b.c);
+  if ((a?.b)?.c) console.log(a.b.c);
+}
+function parenthesized(d: A): void {
+  if ((d?.b)!.c) console.log(d.b.c);
+  if (((d)?.b)?.c) console.log(d.b.c);
+}
+compareNullable({ b: { c: "x" } }, "x", "x", "x");
+oppositeBranches({ b: { c: "x" } });
+notChained({ b: { c: "x" } });
+parenthesized({ b: { c: "x" } });

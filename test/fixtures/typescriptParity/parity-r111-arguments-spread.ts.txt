@@ -1,0 +1,7 @@
+function inner(a: number, b: number) {
+  const copy = [...arguments];
+  let total = 0;
+  for (const x of arguments) total += x;
+  return [copy, total, Array.from(arguments)];
+}
+console.log(inner(1, 2));

@@ -1,0 +1,14 @@
+interface A { a: number }
+type B = { b: number };
+type C = { c: number };
+class P { x = 1; }
+function f1(ab: A & B) { const r: Record<string, number> = ab; }
+function f2(pb: P & B) { const r: { [k: string]: number } = pb; }
+function f3(bc: B & C) { const r: { [k: string]: number } = bc; }
+function f4(rb: Record<string, number> & B) { const r: { [k: string]: number } = rb; }
+function f5(fb: (() => void) & B) { const r: { [k: string]: unknown } = fb; }
+function f6(ab: A & B) { const r: { [k: string]: unknown } = ab; }
+function f7(bc: B & { c: string }) { const r: Record<string, number> = bc; }
+function f8(x: { n: A & B }) { const r: { n: Record<string, number> } = x; }
+const ab: A & B = { a: 1, b: 2 };
+const r9: Record<string, number> = ab;

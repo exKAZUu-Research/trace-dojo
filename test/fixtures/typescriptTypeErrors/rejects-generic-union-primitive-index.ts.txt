@@ -1,0 +1,10 @@
+type A = { a: number; b: string };
+type V<T> = T extends { a: number } ? T["a" | "missing"] : never;
+type W<T extends A> = T["a" | "missing"];
+type X<T extends { [n: number]: string }> = T[string];
+type Y<T extends A> = T[number];
+type Ok1<T extends A> = T["a" | "b"];
+type Ok2<T extends { [n: number]: string }> = T[number];
+type Ok3<T extends { [k: string]: string }> = T[number];
+type Ok4<T extends string[]> = T["length" | number];
+type Z<T extends A | { a: boolean }> = T["a" | "b"];

@@ -1,0 +1,37 @@
+interface A {
+  x: string;
+}
+class A {
+  constructor(public x = 1) {}
+}
+class B {
+  constructor(public x = "b") {}
+}
+interface B {
+  x: string;
+}
+class D {
+  constructor(public x?: number) {}
+}
+interface D {
+  x?: number;
+}
+class E {
+  constructor(public x?: number) {}
+}
+interface E {
+  x: number | undefined;
+}
+class F {
+  constructor(public x: number | string = 1) {}
+}
+interface F {
+  x: number;
+}
+class G {
+  constructor(public x = 1) {}
+}
+interface G {
+  x: string;
+}
+console.log(new G().x, new A().x, new B().x, new D().x, new E().x, new F().x);

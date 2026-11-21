@@ -1,0 +1,13 @@
+type NumberThenString<T extends { [k: number]: string }> = T[`${number}${string}`];
+type TwoNumbers<T extends { [k: number]: string }> = T[`${number}${number}`];
+type NumericString<T extends { [k: number]: string }> = T[`${number}`];
+type BigIntString<T extends { [k: number]: string }> = T[`${bigint}`];
+type Mixed<T extends { [k: number]: string }> = T[`${number}` | 1 | "5"];
+type Literals<T extends { [k: number]: string }> = T[`${1 | 2}` | `${1}${2}`];
+type FromNumber<T extends { [k: number]: string }, K extends number> = T[`${K}`];
+type FromNumberTwice<T extends { [k: number]: string }, K extends number> = T[`${K}${K}`];
+type FromNumericString<T extends { [k: number]: string }, K extends `${number}`> = T[K];
+type FromNumericLiteral<T extends { [k: number]: string }, K extends "5"> = T[K];
+type FromNumberLiteral<T extends { [k: number]: string }, K extends 5> = T[K];
+type FromBranches<T extends { [k: number]: string }, K extends string> = T[K extends "a" ? "5" : "6"];
+type ByString<T extends { [k: string]: string }, K extends `${number}${string}`> = T[K];

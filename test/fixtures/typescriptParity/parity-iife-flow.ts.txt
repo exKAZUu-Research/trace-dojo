@@ -1,0 +1,6 @@
+class Counter { count: number; constructor(start: number) { (() => { this.count = start; })(); } }
+let y: number; (() => { y = 1; })(); console.log(y);
+let x: string | undefined; (() => { x = "a"; })(); console.log(x.length);
+let w: number; (function () { w = 1; })(); console.log(w);
+console.log(new Counter(3).count);
+let z: string | number = ["a", 1][0]; if (typeof z === "string") { console.log((() => z.length)()); } z = 5;

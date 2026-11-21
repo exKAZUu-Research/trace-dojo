@@ -1,5 +1,3 @@
-import type { Node } from '@willbooster/web-tree-sitter';
-
 import type {
   Block,
   CatchClause,
@@ -9,6 +7,7 @@ import type {
   Expression,
   FunctionKind,
   FunctionNode,
+  IterationSource,
   Pattern,
   Program,
   PropertyName,
@@ -18,22 +17,30 @@ import type {
 import { initializerContext, newContext } from './converterBase';
 import {
   accessorOf,
+  calleeText,
   fail,
   field,
   hasChild,
+  hasUseStrictDirective,
+  isOptionalChain,
+  iterationSource,
   keyName,
   namedChildren,
   namedField,
   nameOf,
+  type Node,
   optionalNameOf,
   rowOf,
   unsupported,
   unsupportedFeatures,
+  unwrapParentheses,
 } from './convertNodes';
-import { ExpressionConverter, patternSuspends } from './expressionConverter';
+import { ExpressionConverter, nameDestructuring, patternSuspends } from './expressionConverter';
+import { decodeStringLiteral } from './literals';
+import { chain } from './operatorPrinter';
 import { isConstantExpression } from './stepRules';
 
-type StatementConverter = (node: Node) => Statement;
+export type StatementConverter = (node: Node) => Statement;
 
 const loopTypes = new Set(['for_statement', 'for_in_statement', 'while_statement', 'do_statement']);
 const declarationTypes = new Set([
@@ -48,8 +55,10 @@ const declarationTypes = new Set([
 export class ProgramConverter extends ExpressionConverter {
   /** Whether the class being converted extends another, which lets its constructor call `super()`. */
   private derivedConstructor = false;
+  /** Whether a program without a `"use strict"` directive is strict mode code, as a module or a JavaScript file is. */
+  protected readonly isStrictByDefault: boolean = true;
 
-  private readonly statementConverters: Record<string, StatementConverter> = {
+  protected readonly statementConverters: Record<string, StatementConverter> = {
     expression_statement: (node) =>
       this.steppable(node, {
         kind: 'expression',
@@ -115,11 +124,12 @@ export class ProgramConverter extends ExpressionConverter {
   convert(root: Node): Program {
     const scope = this.pushScope(true);
     const statements = namedChildren(root).filter((child) => child.type !== 'hash_bang_line');
+    this.isStrict = this.isStrictByDefault || hasUseStrictDirective(statements);
     rejectUsingIn(statements, 'using 宣言はプログラムの一番外側には書けません。');
     const body = this.statementList(statements);
     this.popScope();
     this.assignAtomicAnnotations();
-    const program = { body, scope };
+    const program = { body, scope, isStrict: this.isStrict };
     return program;
   }
 
@@ -181,6 +191,11 @@ export class ProgramConverter extends ExpressionConverter {
       );
       if (!valueNode && declarationKind === 'const') fail(declarator, 'const で宣言する変数には初期値が必要です。');
       if (!valueNode && target.kind !== 'identifier') fail(declarator, '分割代入には初期値が必要です。');
+      if (valueNode) {
+        const source =
+          target.kind === 'arrayPattern' ? this.arrayDestructuringSource(valueNode) : iterationSource(valueNode);
+        nameDestructuring(target, { source });
+      }
       return { target, init: valueNode ? this.namedValue(valueNode, target) : undefined };
     });
     const declaration: VariableDeclaration = {
@@ -192,6 +207,24 @@ export class ProgramConverter extends ExpressionConverter {
     // A declaration without an initializer assigns nothing that learners could answer, so it records no step.
     if (recordsStep && declarators.some((declarator) => declarator.init)) this.steppable(node, declaration);
     return declaration;
+  }
+
+  protected arrayDestructuringSource(node: Node): IterationSource | undefined {
+    if (isOptionalChain(node)) return undefined;
+    if (node.type === 'call_expression' && field(node, 'function').type !== 'identifier') return undefined;
+    return [
+      'identifier',
+      'call_expression',
+      'new_expression',
+      'number',
+      'null',
+      'undefined',
+      'true',
+      'false',
+      'object',
+    ].includes(node.type)
+      ? iterationSource(node)
+      : undefined;
   }
 
   private forStatement(node: Node): Statement {
@@ -241,12 +274,20 @@ export class ProgramConverter extends ExpressionConverter {
         : this.assignmentTarget(leftNode);
       // A loop binds its target in one go, as a destructuring assignment does.
       if (patternSuspends(target)) unsupported(leftNode, 'この位置の yield や await ');
+      // V8 takes apart a declared target from its hidden variable `.for`, but reads an assigned object pattern's
+      // properties directly from the value.
+      if (isOf)
+        nameDestructuring(
+          target,
+          declarationKind ? { source: { text: '.for' } } : { isNested: target.kind === 'objectPattern' }
+        );
       return {
         kind: isOf ? 'forOf' : 'forIn',
         isAwait,
         declarationKind,
         target,
         iterable: this.expression(field(header, 'right')),
+        iterableSource: forOfIterationSource(field(header, 'right')),
         body: this.inBreakable(true, () => this.substatement(field(node, 'body'))),
         scope,
         stepRow: this.stepRowOf(node),
@@ -341,6 +382,8 @@ export class ProgramConverter extends ExpressionConverter {
         const param = parameterNode
           ? this.bindingPattern(parameterNode, (identifier, name) => this.declareLexical(identifier, name))
           : undefined;
+        // V8 takes apart an object from its hidden variable `.catch`, and an iterable by its value.
+        if (param?.kind === 'objectPattern') nameDestructuring(param, { source: { text: '.catch' } });
         return { param, body: this.block(field(handlerNode, 'body')), scope };
       });
     }
@@ -369,6 +412,8 @@ export class ProgramConverter extends ExpressionConverter {
     context.isAsync = isAsync;
     context.isAsyncGenerator = isAsync && isGenerator;
     context.isGenerator = isGenerator;
+    const outerStrict = this.isStrict;
+    this.isStrict ||= bodyNode.type === 'statement_block' && hasUseStrictDirective(namedChildren(bodyNode));
     return this.withContext(context, () => {
       const scope = this.pushScope(true);
       try {
@@ -393,12 +438,14 @@ export class ProgramConverter extends ExpressionConverter {
           scope,
           isAtomic: false,
           source: this.sourceOf(node),
+          isStrict: this.isStrict,
           row: rowOf(node),
         };
         this.addFunction(node, bodyNode, fn);
         return fn;
       } finally {
         this.popScope();
+        this.isStrict = outerStrict;
       }
     });
   }
@@ -412,14 +459,25 @@ export class ProgramConverter extends ExpressionConverter {
     for (const parameter of parameterNodes) {
       if (rest) fail(parameter, '残余引数は最後の引数にしか書けません。');
       if (parameter.type === 'rest_pattern') rest = this.bindingPattern(namedChildren(parameter)[0], declare);
-      else params.push(this.bindingPattern(parameter, declare));
+      else params.push(namedParameter(this.bindingPattern(parameter, declare)));
     }
     if (kind === 'getter' && (params.length > 0 || rest)) fail(node, 'getter には引数を書けません。');
     if (kind === 'setter' && (params.length !== 1 || rest)) fail(node, 'setter には引数を1つだけ書いてください。');
     return { params, rest };
   }
 
+  /** Converts a class, all of whose code is strict mode code. */
   classNode(node: Node, name: string): ClassNode {
+    const outerStrict = this.isStrict;
+    this.isStrict = true;
+    try {
+      return this.strictClassNode(node, name);
+    } finally {
+      this.isStrict = outerStrict;
+    }
+  }
+
+  private strictClassNode(node: Node, name: string): ClassNode {
     if (namedChildren(node).some((child) => child.type === 'decorator')) unsupported(node, 'デコレータ');
     const heritage = namedChildren(node).find((child) => child.type === 'class_heritage');
     const superClass = heritage ? this.expression(namedChildren(heritage)[0]) : undefined;
@@ -461,9 +519,16 @@ export class ProgramConverter extends ExpressionConverter {
       const valueNode = member.childForFieldName('value');
       // Field initializers run like method bodies, where `this` is the instance and `super.x` works.
       const value = valueNode ? this.withContext(initializerContext(), () => this.expression(valueNode)) : undefined;
-      const fieldMember: ClassMember = { kind: 'field', isStatic, key, value, row: rowOf(member) };
-      // As in Java, a static field's constant initializer records no step: it changes nothing learners see.
-      const recordsStep = value !== undefined && !(isStatic && isConstantExpression(value));
+      const constant = value !== undefined && isStatic && isConstantExpression(value);
+      const fieldMember: ClassMember = {
+        kind: 'field',
+        isStatic,
+        isTraceConstant: constant && hasChild(member, 'readonly') ? true : undefined,
+        key,
+        value,
+        row: rowOf(member),
+      };
+      const recordsStep = value !== undefined && !constant;
       return recordsStep ? this.steppable(member, fieldMember) : fieldMember;
     }
     if (member.type === 'class_static_block') return this.staticBlock(member);
@@ -550,8 +615,115 @@ function checkMemberName(member: Node, key: PropertyName, isStatic: boolean, isF
   if (isField && key.key === 'constructor') fail(member, 'フィールドに constructor という名前は使えません。');
 }
 
-function isConstructorDefinition(member: Node): boolean {
+/** Whether a class member is the constructor, whose name is `constructor` written as a name or as a string. */
+export function isConstructorDefinition(member: Node): boolean {
   if (member.type !== 'method_definition' || hasChild(member, 'static')) return false;
   const name = member.childForFieldName('name');
+  if (name?.type === 'string') return decodeStringLiteral(name.text) === 'constructor';
   return name?.type === 'property_identifier' && nameOf(name) === 'constructor';
+}
+
+/**
+ * Records how V8 names an object a parameter takes apart: by the value's type, or with a default value, by the
+ * conditional V8 desugars the default to.
+ */
+function namedParameter(param: Pattern): Pattern {
+  if (param.kind === 'objectPattern') nameDestructuring(param, { namesType: true });
+  if (param.kind === 'default' && param.target.kind === 'objectPattern') {
+    nameDestructuring(param.target, {
+      source: { text: '(intermediate value)(intermediate value)(intermediate value)' },
+    });
+  }
+  return param;
+}
+
+/**
+ * How V8 names the iterable of a `for...of` loop, which it names by its value instead when it is a conditional, an
+ * object literal, a logical `&&` or `||` after a name, a `!` of an operation or a property, or a chain of more than
+ * two operands of one operator or of commas; and `??` as `coalescingIterationSource` names it.
+ */
+function forOfIterationSource(node: Node): IterationSource | undefined {
+  const operand = unwrapParentheses(node);
+  const operator = operand.type === 'binary_expression' ? field(operand, 'operator').text : undefined;
+  const isLogical = operator === '&&' || operator === '||';
+  const isNegation = operand.type === 'unary_expression' && field(operand, 'operator').text === '!';
+  if (operator === '??') return coalescingIterationSource(operand);
+  if (operand.type === 'object') return objectIterationSource(operand);
+  if (operand.type === 'ternary_expression') {
+    // A conditional on a literal is printed by its parts; one on anything else is named by its value.
+    return isLiteral(unwrapParentheses(field(operand, 'condition'))) ? iterationSource(node) : undefined;
+  }
+  if (
+    (isLogical && !LITERAL_TYPES.has(unwrapParentheses(field(operand, 'left')).type)) ||
+    (isNegation && NEGATED_BY_VALUE.has(unwrapParentheses(field(operand, 'argument')).type)) ||
+    (operator !== undefined && !isLogical && chain(operand, operator).length > 2) ||
+    (operand.type === 'sequence_expression' && namedChildren(operand).flatMap(sequenceParts).length > 2)
+  )
+    return undefined;
+  return iterationSource(node);
+}
+
+/**
+ * How V8 names a `for...of` iterable written as `a ?? b`, which it prints with a call as its callee, by what the right
+ * operand is: a call as a callee that returns no iterable, a name always, a literal after a name or a literal (after a
+ * call, by that call's callee), and a property only after a literal other than `null`; otherwise by its value.
+ */
+function coalescingIterationSource(operand: Node): IterationSource | undefined {
+  const left = unwrapParentheses(field(operand, 'left'));
+  // V8 tells a parenthesized right operand apart from a bare one.
+  const written = field(operand, 'right');
+  const right = unwrapParentheses(written);
+  const text = `(${printed(left)} ?? ${printed(right)})`;
+  if (right.type === 'call_expression') return { text, callee: text };
+  if (left.type === 'call_expression' && isLiteral(right))
+    return { text, unreadName: calleeText(field(left, 'function')) };
+  const named =
+    written.type === 'identifier' ||
+    (isLiteral(right) && (left.type === 'identifier' || isLiteral(left))) ||
+    ((right.type === 'member_expression' || right.type === 'subscript_expression') &&
+      isLiteral(left) &&
+      left.type !== 'null');
+  return named ? { text } : undefined;
+}
+
+/**
+ * How V8 names a `for...of` iterable written as an object literal: by a part for each member when every member is a
+ * `key: value` pair or an accessor with a written key, or when only accessors follow a leading spread; and otherwise,
+ * as with a computed key, a shorthand, a method, or a later spread, by its value.
+ */
+function objectIterationSource(operand: Node): IterationSource | undefined {
+  const members = namedChildren(operand).filter((member) => member.type !== 'comment');
+  const [first, ...rest] = members;
+  const printable =
+    first?.type === 'spread_element'
+      ? rest.every((member) => isAccessor(member) && !hasComputedKey(member))
+      : members.every((member) => (member.type === 'pair' || isAccessor(member)) && !hasComputedKey(member));
+  return printable ? { text: `{${'(intermediate value)'.repeat(members.length)}}` } : undefined;
+}
+
+function isAccessor(member: Node): boolean {
+  return (
+    member.type === 'method_definition' && member.children.some((child) => child.type === 'get' || child.type === 'set')
+  );
+}
+
+function hasComputedKey(member: Node): boolean {
+  return (member.childForFieldName('key') ?? member.childForFieldName('name'))?.type === 'computed_property_name';
+}
+
+/** How V8 prints an operand of `??` in a loop's error, a call as its callee and an optional chain as a value. */
+function printed(side: Node): string {
+  if (isOptionalChain(side)) return '(intermediate value)';
+  return side.type === 'call_expression' ? calleeText(field(side, 'function')) : calleeText(side);
+}
+
+function isLiteral(side: Node): boolean {
+  return LITERAL_TYPES.has(side.type);
+}
+
+const LITERAL_TYPES = new Set(['number', 'string', 'true', 'false', 'null']);
+const NEGATED_BY_VALUE = new Set(['binary_expression', 'member_expression', 'subscript_expression']);
+
+function sequenceParts(node: Node): Node[] {
+  return node.type === 'sequence_expression' ? namedChildren(node).flatMap(sequenceParts) : [node];
 }

@@ -1,0 +1,6 @@
+(5,3): error TS2322: Type '42' is not assignable to type 'never'.
+(10,3): error TS2322: Type 'string' is not assignable to type 'number'.
+(15,3): error TS2322: Type 'string' is not assignable to type 'number'.
+(20,3): error TS2322: Type 'undefined' is not assignable to type 'number'.
+(24,3): error TS2322: Type '1' is not assignable to type 'never'.
+(29,3): error TS2322: Type '5' is not assignable to type '10'.

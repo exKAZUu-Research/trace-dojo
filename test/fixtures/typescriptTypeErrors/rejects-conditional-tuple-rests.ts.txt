@@ -1,0 +1,6 @@
+type Concat<A, B> = A extends unknown[] ? (B extends unknown[] ? [...A, ...B] : never) : never;
+const c: Concat<[1], [2]> = [1, 2];
+function push<T>(xs: T extends unknown[] ? [...T, 0] : never) { return xs; }
+type Bad<A> = A extends string ? [...A] : never;
+type Bad2<A> = A extends unknown[] ? never : [...A];
+console.log(c, push);

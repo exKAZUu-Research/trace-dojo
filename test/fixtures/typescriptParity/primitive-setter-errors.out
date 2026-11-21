@@ -1,0 +1,14 @@
+Cannot set property description of [object Symbol] which has only a getter
+Cannot set property getterOnly of [object Number] which has only a getter
+Cannot set property Symbol(key) of [object String] which has only a getter
+Cannot set property Symbol(key) of [object Boolean] which has only a getter
+Cannot set property Symbol(key) of [object BigInt] which has only a getter
+Cannot set property Symbol(key) of [object Symbol] which has only a getter
+Cannot assign to read only property '0' of string 'text'
+Cannot assign to read only property 'length' of string 'text'
+Cannot assign to read only property 'readOnly' of number '3'
+Cannot create property 'writableData' on number '3'
+Cannot create property 'missing' on number '3'
+setter number 3 1
+loose assignment survived
+Cannot set properties of null (setting 'x')

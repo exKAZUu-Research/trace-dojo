@@ -1,0 +1,31 @@
+class Left {
+  #value = 1;
+  #read(): number {
+    return this.#value;
+  }
+  left(): number {
+    return this.#read();
+  }
+}
+class Right {
+  #value = 'right';
+  #read(): string {
+    return this.#value;
+  }
+  right(): string {
+    return this.#read();
+  }
+}
+interface Both extends Left, Right {}
+class Base {
+  #shared = 0;
+  shared(): number {
+    return this.#shared;
+  }
+}
+class First extends Base {}
+class Second extends Base {}
+interface Shared extends First, Second {}
+const describe = (both: Both, shared: Shared): string => `${both.left()} ${both.right()} ${shared.shared()}`;
+console.log(typeof describe);
+console.log(new Left().left(), new Right().right(), new First().shared());

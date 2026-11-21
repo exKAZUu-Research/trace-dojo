@@ -1,0 +1,3 @@
+(6,1): error TS18048: 'nullable.value' is possibly 'undefined'.
+(7,1): error TS18048: 'optional.value' is possibly 'undefined'.
+(8,1): error TS2554: Expected 2 arguments, but got 1.

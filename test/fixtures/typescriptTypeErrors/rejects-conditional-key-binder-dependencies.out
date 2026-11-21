@@ -1,0 +1,4 @@
+(2,88): error TS2344: Type 'string' does not satisfy the constraint 'Z extends true ? Y extends infer Z ? keyof T[K] : keyof T[K] : keyof T[K]'.
+(5,90): error TS2344: Type 'string' does not satisfy the constraint 'Z extends true ? Y extends <Inner extends Z>(x: Inner) => Inner ? keyof T[K] : keyof T[K] : keyof T[K]'.
+(6,100): error TS2344: Type 'string' does not satisfy the constraint 'Z extends true ? Y extends { [Index in Z & string]: Index; } ? keyof T[K] : keyof T[K] : keyof T[K]'.
+(10,75): error TS2344: Type 'string' does not satisfy the constraint 'Z extends true ? Y extends { name: string; } ? keyof T[K] : keyof T[K] : keyof T[K]'.

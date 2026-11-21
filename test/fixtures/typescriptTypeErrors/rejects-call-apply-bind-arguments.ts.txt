@@ -1,0 +1,17 @@
+const f = (x: number): number => x;
+console.log(f.call(null, 'str'));
+console.log(f.apply(null, ['str']));
+console.log(f.bind(null, 'str')());
+const g = (x: number, y: number): number => x + y;
+console.log(g.call(null, 1));
+console.log(g.call(null, 1, 2, 3));
+class C {
+  m(s: string): string { return s; }
+}
+console.log(new C().m.call(new C(), 5));
+console.log(g.bind(null, 1)('a'));
+console.log(g.apply(null, [1]));
+function k(this: { n: number }, d: number): number { return this.n + d; }
+console.log(k.call({ n: "x" }, 1));
+class P { constructor(public x: number) {} }
+console.log(P.bind(null, 'a'));

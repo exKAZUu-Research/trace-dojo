@@ -1,0 +1,15 @@
+function value(a?: { number?: number; inner?: { n?: number } }): void {
+  if (a?.number) console.log(a?.number.toFixed());
+  if (a?.["number"] !== undefined) console.log(a?.["number"].toFixed());
+  if (a?.inner?.n !== undefined) console.log(a?.inner?.n.toFixed());
+}
+
+function call(a?: { compute?: () => number }): void {
+  if (a?.compute) console.log(a?.compute());
+  if (a?.["compute"] !== undefined) console.log(a?.["compute"]());
+}
+
+value({ number: 2, inner: { n: 3 } });
+value(undefined);
+call({ compute: () => 5 });
+call(undefined);

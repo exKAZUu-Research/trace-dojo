@@ -1,0 +1,19 @@
+[
+  { count: 2 },
+  { count: 2 },
+  { count: 3 },
+  { name: 'n' },
+  { a: 1 },
+  { x: 1, a: 1 },
+  2
+]
+[ {}, {}, {}, {}, { b: 2 }, { x: 1 }, undefined ]
+[
+  {},
+  {},
+  { count: 5 },
+  { name: 'm' },
+  { b: 2 },
+  { x: 1, b: 's' },
+  undefined
+]

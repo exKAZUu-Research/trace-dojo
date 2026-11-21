@@ -1,0 +1,14 @@
+class Plain{x=1;constructor(){return this;}}
+class Empty{constructor(){return 5;}}
+class Replacement{x=1;constructor(){return {x:2};}}
+class Generic<T>{x:T;constructor(x:T){this.x=x;return {x};}}
+class Contextual{fn!:(n:number)=>number;constructor(){return {fn:n=>n+1};}}
+class Bare{x=1;constructor(flag:boolean){if(flag)return;}}
+class DerivedGood extends Plain{constructor(){super();return this;}}
+class EmptyDerived extends Empty{constructor(){super();return 5;}}
+class ReturnAny{x=1;constructor(){return 5 as any;}}
+function fail():never{throw new Error("fail");}
+class NeverReturn{x=1;constructor(){return fail();}}
+console.log(new Plain(),new Empty(),new Replacement(),new Generic(3),new Contextual().fn(4),new Bare(true),new DerivedGood(),new ReturnAny());
+try{new EmptyDerived();}catch(e){console.log(e instanceof TypeError);}
+try{new NeverReturn();}catch(e){console.log(e instanceof Error);}

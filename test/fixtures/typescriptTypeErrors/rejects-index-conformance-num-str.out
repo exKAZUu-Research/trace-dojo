@@ -1,0 +1,1 @@
+(1,42): error TS2413: 'number' index type 'number' is not assignable to 'string' index type 'string'.

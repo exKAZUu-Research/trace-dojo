@@ -1,0 +1,29 @@
+type Scores = { [key: string]: number | string; [key: number]: number };
+function setScore(scores: Scores, key: string | number, score: number) {
+  scores[key] = score;
+  scores[key] += 2;
+  scores[key]++;
+  return scores[key];
+}
+function setSharedIndex(obj: { [key: number]: number } | { [key: number]: string }, key: number) {
+  obj[key] = 'updated';
+  return obj[key];
+}
+function updateAccessor(obj: { get label(): string; set label(value: string | number); [key: number]: number }, key: 'label' | number) {
+  obj[key] = 4;
+  return obj[key]++;
+}
+function setGeneric<K extends string | number>(obj: Scores, key: K, score: number) {
+  obj[key] = score;
+}
+const scores: Scores = { 0: 10 };
+console.log(setScore(scores, 0, 20), setSharedIndex({ 0: '' }, 0));
+const accessors = {
+  current: 0,
+  0: 1,
+  get label(): string { return String(this.current); },
+  set label(value: string | number) { this.current = Number(value); }
+};
+console.log(updateAccessor(accessors, 'label'), accessors.label);
+setGeneric(scores, 'final', 30);
+console.log(scores.final);

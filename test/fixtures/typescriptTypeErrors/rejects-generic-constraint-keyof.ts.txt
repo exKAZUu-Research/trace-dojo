@@ -1,0 +1,5 @@
+function getProp<T, K extends keyof T>(o: T, k: K): T[K] { return o[k]; }
+const o = { a: 1, b: "x" };
+const v: string = getProp(o, "b");
+getProp(o, "c");
+console.log(v);

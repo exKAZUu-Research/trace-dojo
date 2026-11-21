@@ -1,0 +1,42 @@
+function boom(value: number): string { throw new Error(String(value)); }
+function nestedExpression() {
+  let x: string | number = 'hi';
+  try { x = boom(x = 1); } catch { x.toUpperCase(); }
+}
+function nestedBlock() {
+  let x: string | number = 'hi';
+  try { if (true) { x = 1; x = 'bye'; } } catch { x.toUpperCase(); }
+}
+function finallyIntermediate() {
+  let x: string | number = 'hi';
+  try { x = 1; x = 'bye'; } finally { x.toUpperCase(); }
+}
+function nestedEmptyFinally() {
+  let x: string | number = 'hi';
+  try { try { x = 1; throw 0; } finally {} } catch { x.toUpperCase(); }
+}
+function nestedFinallyIntermediate() {
+  let x: string | number = 'hi';
+  try { try { x = 1; throw 0; } finally { x = 2; x = 'ok'; } } catch { x.toUpperCase(); }
+}
+function catchIntermediate() {
+  let x: string | number = 'hi';
+  try { throw 0; } catch { x = 1; x = 'ok'; } finally { x.toUpperCase(); }
+}
+function destructured() {
+  let x: string | number = 'hi';
+  try { ({value: x} = {value: 1}); x = 'ok'; } catch { x.toUpperCase(); }
+}
+function defaulted(input: {value?: string}) {
+  let x: string | number = 'hi';
+  let y = '';
+  try { ({value: y = boom(x = 1)} = input); } catch { x.toUpperCase(); }
+}
+function loop(flag: boolean) {
+  let x: string | number = 'hi';
+  try { while (flag) { x = 1; x = 'ok'; flag = false; } } catch { x.toUpperCase(); }
+}
+function inlineFinally() {
+  let x: string | number = 'hi';
+  try { (() => { x = 1; })(); } finally { x.toUpperCase(); }
+}

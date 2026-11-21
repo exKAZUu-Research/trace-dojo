@@ -1,0 +1,11 @@
+let x: number;
+console.log(x);
+let y: number;
+if (Math.max(1, 2) > 1) y = 1;
+console.log(y);
+let z: number;
+if (Math.max(1, 2) > 1) z = 1;
+else z = 2;
+console.log(z);
+let w: number | undefined;
+console.log(w);

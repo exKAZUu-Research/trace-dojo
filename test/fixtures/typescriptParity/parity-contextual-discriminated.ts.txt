@@ -1,0 +1,5 @@
+type Action =
+  | { type: "add"; run: (n: number) => number }
+  | { type: "say"; run: (s: string) => string };
+const a: Action = { type: "say", run: (s) => s.toUpperCase() };
+console.log(a.type);

@@ -1,0 +1,15 @@
+type Known<V extends {a: {length: number}}, K extends 'a'> = NonNullable<V[K]>['length'];
+type Intersection<V, K extends keyof V> = (V[K] & {length: number})['length'];
+type Union<V extends {a: {length: number}}, K extends 'a'> = (V[K] | {length: number})['length'];
+type Conditional<Z, V extends {a: {length: number}}, K extends 'a'> =
+  (Z extends true ? V[K] : {length: number})['length'];
+type ConditionFalse<Z extends false, V, K extends keyof V> = (Z extends true ? V[K] : {length: number})['length'];
+type Identity<T> = T;
+type KnownKey<T, K extends keyof Identity<T>> = T[K];
+type KeyMap<T> = { [K in keyof T as 'mapped']: T[K] };
+type MapKey<T extends {a: number}> = KeyMap<T>['mapped'];
+type MapNamed<T extends {key: number}> = { [P in keyof T & string as `p-${P}`]: T[P] };
+type RemappedKey<T extends {key: number}> = MapNamed<T>['p-key'];
+
+const value: Known<{a: {length: number}}, 'a'> = 5;
+console.log(value);

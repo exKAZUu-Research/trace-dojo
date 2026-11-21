@@ -1,0 +1,2 @@
+var undefined = 2;
+{ var undefined = 4; }

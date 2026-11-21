@@ -1,0 +1,15 @@
+const s = Symbol("x");
+const a = +s;
+const b = -s;
+const c = ~s;
+const d = +Symbol("y");
+let u: symbol | number = 1 as symbol | number;
+const e = -u;
+function f<T extends symbol>(t: T) { return +t; }
+const g = s + 1;
+const h = s * 2;
+const i = `${s}`;
+let j = s; j++;
+const k = !s;
+const l = typeof s;
+console.log(k, l);

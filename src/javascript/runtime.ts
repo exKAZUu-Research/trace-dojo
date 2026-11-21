@@ -1,15 +1,22 @@
-// code-gauge-allow-file fileNcss 592 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss 892 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import { TurtleWorld } from '../interpreter/turtleWorld';
+import { redefineArgument } from './argumentsObject';
+import type { IterationContext, IterationSource } from './ast';
+import { Frame } from './callFrame';
 import { Evaluator } from './evaluator';
 import { findReachableTurtles } from './garbageCollection';
 import { DONE, type HostIterator, stepHostIterator, ValueIterator } from './iteration';
+import { notIterableMessage } from './iterationErrors';
 import { defineFunctionProperties } from './memberProperties';
 import { EventLoop } from './promises';
 import { createRealm, type ErrorName, type Realm } from './realm';
-import { WELL_KNOWN_SYMBOLS } from './realmIterators';
+import { dateValueOf } from './realmDate';
+import { iteratorClassOf, WELL_KNOWN_SYMBOLS } from './realmIterators';
+import { rejectUnavailableMember, type UnavailableMemberCheck } from './unavailableMembers';
 import {
   type AccessorProperty,
   appendAll,
@@ -35,33 +42,20 @@ import {
   type Value,
 } from './values';
 
-export class Frame {
-  /** Values a pending call or allocation holds outside any variable, which must keep their turtles alive. */
-  readonly temporaries: Value[] = [];
-  /** The unfinished iterations the frame runs, which stay reachable as long as the frame can still resume them. */
-  readonly iterations = new Set<ValueIterator>();
-  /** How many builtins run in the frame now, which keep what the program's code returns to them in its temporaries. */
-  builtinsRunning = 0;
-
-  constructor(
-    public scope: Scope,
-    /** The row of the call that created this frame, or undefined for the program and implicit calls. */
-    readonly callRow: number | undefined,
-    /** Whether this frame runs a function marked `// atomic`. */
-    readonly isAtomic: boolean
-  ) {}
-
-  /** What the frame keeps reachable: its scope, its temporaries, and its unfinished iterations' roots. */
-  reachableValues(): unknown[] {
-    const values: unknown[] = [this.scope, ...this.temporaries];
-    for (const iteration of this.iterations) appendAll(values, iteration.roots);
-    return values;
-  }
-}
+export type { Frame };
 
 type Primitive = undefined | null | boolean | number | bigint | string | symbol;
 
+const readOnlyLengthMessage = "Cannot assign to read only property 'length' of object '[object Array]'";
+
 export class Runtime {
+  private stackAccessors?: AccessorProperty;
+  private readonly unavailableValues = new WeakMap<symbol, CompileError>();
+  private readonly functionConstructor: Value;
+  private readonly functionToString: Value;
+  private readonly functionHasInstance: Value;
+  private readonly objectToString: Value;
+  private readonly errorToString: Value;
   readonly world = new TurtleWorld();
   readonly budget = new ExecutionBudget();
   readonly io: ProgramIO;
@@ -73,13 +67,29 @@ export class Runtime {
    * own functions count as called.
    */
   currentRow: number | undefined;
+  /** Set from the program: whether turning a function into text ends it as unavailable. */
+  rejectsFunctionText = false;
+  allowsOnlyStringRawTag = false;
+  /** Set from the program: names a library member the realm leaves out, which a read then ends the program for. */
+  unavailableMember: UnavailableMemberCheck | undefined;
   readonly steps = new StepTracker();
   readonly evaluator: Evaluator;
   private allocatedSlots = 0;
+  private readonly nodeErrorPrototypes = new Map<string, JsObject>();
+  private readonly nodeErrorBrand = Symbol('kIsNodeError');
+  private readonly errorConstructors: Map<string, Value>;
 
   constructor(input?: ProgramInput) {
     this.io = new ProgramIO(this.budget, input);
     this.realm = createRealm(this);
+    this.errorConstructors = new Map(
+      Object.entries(this.realm.errorPrototypes).map(([name, prototype]) => [name, this.get(prototype, 'constructor')])
+    );
+    this.functionConstructor = this.realm.globals.lookup('Function')?.value;
+    this.functionToString = this.get(this.realm.functionPrototype, 'toString');
+    this.functionHasInstance = this.get(this.realm.functionPrototype, WELL_KNOWN_SYMBOLS.hasInstance);
+    this.objectToString = this.get(this.realm.objectPrototype, 'toString');
+    this.errorToString = this.get(this.realm.errorPrototypes.Error, 'toString');
     this.evaluator = new Evaluator(this);
   }
 
@@ -136,17 +146,115 @@ export class Runtime {
     return fn;
   }
 
-  throwError(name: ErrorName, message: string): never {
-    throw new JsThrow(this.newError(name, message));
+  throwError(name: ErrorName, message: string | (() => string)): never {
+    let detail: string | symbol;
+    try {
+      detail = typeof message === 'string' ? message : message();
+    } catch (error) {
+      if (!(error instanceof CompileError)) throw error;
+      detail = Symbol('unavailable error message');
+      this.unavailableValues.set(detail, error);
+    }
+    const exception = this.newError(name, typeof detail === 'string' ? detail : '');
+    if (typeof detail === 'symbol') defineHidden(exception, 'message', detail);
+    throw new JsThrow(exception);
   }
 
   newError(name: ErrorName, message: string): JsObject {
     const error = new JsObject(this.realm.errorPrototypes[name]);
-    error.isError = true;
+    this.markError(error);
     defineHidden(error, 'message', message);
     return error;
   }
 
+  newNodeError(name: ErrorName, code: string, message: string): JsObject {
+    const key = `${name}:${code}`;
+    let prototype = this.nodeErrorPrototypes.get(key);
+    if (!prototype) {
+      prototype = this.createNodeErrorPrototype(name, code);
+      this.nodeErrorPrototypes.set(key, prototype);
+    }
+    const error = this.newObject(prototype);
+    this.markError(error);
+    this.createDataProperty(error, 'code', code);
+    defineHidden(error, 'message', message);
+    return error;
+  }
+
+  private createNodeErrorPrototype(name: ErrorName, code: string): JsObject {
+    const formatter = this.newObject(this.realm.errorPrototypes[name]);
+    const wrapper = this.newObject(formatter);
+    const constructor = this.errorConstructors.get(name);
+    for (const prototype of [formatter, wrapper]) {
+      prototype.properties.set('constructor', {
+        get: this.newNativeFunction('get constructor', 0, () => constructor),
+        set: undefined,
+        enumerable: false,
+        configurable: true,
+      });
+    }
+    defineHidden(
+      formatter,
+      'toString',
+      this.newNativeFunction('toString', 0, ({ runtime, thisValue }) => runtime.nodeErrorText(thisValue, code))
+    );
+    formatter.properties.set(this.nodeErrorBrand, {
+      get: this.newNativeFunction('get [kIsNodeError]', 0, () => true),
+      set: undefined,
+      enumerable: false,
+      configurable: true,
+    });
+    return wrapper;
+  }
+
+  nodeErrorHeadline(error: JsObject): string | undefined {
+    return this.hasProperty(error, this.nodeErrorBrand) ? this.nodeErrorText(error) : undefined;
+  }
+
+  private nodeErrorText(error: Value, code?: string): string {
+    const name = this.toString(this.get(error, 'name'));
+    const displayedCode = code ?? this.toString(this.get(error, 'code'));
+    const message = this.toString(this.get(error, 'message'));
+    return `${name} [${displayedCode}]: ${message}`;
+  }
+
+  markError(error: JsObject): void {
+    error.isError = true;
+    if (this.unavailableMember) this.defineUnavailableStack(error);
+  }
+
+  captureErrorStack(target: JsObject): void {
+    if (!target.extensible) this.throwError('TypeError', 'Cannot define property stack, object is not extensible');
+    if (target.properties.get('stack')?.configurable === false)
+      this.throwError('TypeError', 'Cannot redefine property: stack');
+    if (!this.unavailableMember) return;
+    if (!target.properties.has('stack')) this.allocate(1);
+    this.defineUnavailableStack(target);
+    target.stackHeadline = undefined;
+  }
+
+  private defineUnavailableStack(target: JsObject): void {
+    this.stackAccessors ??= {
+      get: this.newNativeFunction('', 0, rejectStackAccess),
+      set: this.newNativeFunction('', 1, rejectStackAccess),
+      configurable: true,
+      enumerable: false,
+    };
+    target.properties.set('stack', { ...this.stackAccessors });
+  }
+
+  isUnavailableValue(value: Value): boolean {
+    return typeof value === 'symbol' && this.unavailableValues.has(value);
+  }
+
+  readPropertyValue(property: DataProperty): Value {
+    const { value } = property;
+    const unavailable = typeof value === 'symbol' ? this.unavailableValues.get(value) : undefined;
+    if (unavailable) throw unavailable;
+    return value;
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of exotic object whose own properties are not stored as properties.
   getOwnProperty(object: JsObject, key: Key): Property | undefined {
     if (typeof object.primitive === 'string') {
       const element = ownElement(object.primitive, key);
@@ -158,16 +266,22 @@ export class Runtime {
       if (key === 'length')
         return {
           value: object.elements.length,
-          writable: !object.frozen,
+          writable: object.isLengthWritable,
           enumerable: false,
           configurable: false,
         };
       const index = arrayIndexOf(key);
       if (index !== undefined) {
         const element = index < object.elements.length ? object.elements[index] : HOLE;
-        return element === HOLE
-          ? undefined
-          : { value: element, writable: !object.frozen, enumerable: true, configurable: !object.sealed };
+        if (element === HOLE) return undefined;
+        const defined = object.definedElements?.get(index);
+        if (defined && isAccessor(defined)) return { ...defined, configurable: defined.configurable && !object.sealed };
+        return {
+          value: element,
+          writable: (defined?.writable ?? true) && !object.frozen,
+          enumerable: defined?.enumerable ?? true,
+          configurable: (defined?.configurable ?? true) && !object.sealed,
+        };
       }
     }
     return object.properties.get(key);
@@ -178,11 +292,17 @@ export class Runtime {
     if (element !== MISSING) return element;
     for (let current: JsObject | null = this.objectFor(value, key); current; current = current.proto) {
       const property = this.getOwnProperty(current, key);
+      this.checkUnavailableMember(current, key);
       if (!property) continue;
-      if (!isAccessor(property)) return property.value;
+      if (!isAccessor(property)) return this.readPropertyValue(property);
       return property.get ? this.call(property.get, receiver, [], this.currentRow) : undefined;
     }
     return undefined;
+  }
+
+  private checkUnavailableMember(value: Value, key?: Key): void {
+    const unavailable = this.unavailableMember?.(value, key);
+    if (unavailable) rejectUnavailableMember(unavailable, this.currentRow);
   }
 
   /** The object whose properties `value` has: itself, or the prototype of its primitive type. */
@@ -201,64 +321,177 @@ export class Runtime {
    *
    * @param lookupStart Where the property is looked up instead of `target`, as `super[key] = value` starts at the
    * parent's prototype while acting on `this`.
+   * @param strict Whether an assignment the property refuses throws, as it does in strict mode code and in builtins.
    */
-  set(target: Value, key: Key, value: Value, lookupStart?: JsObject): void {
-    if (!(target instanceof JsObject)) {
-      if (target === undefined || target === null) {
-        this.throwError('TypeError', `Cannot set properties of ${String(target)} (setting '${String(key)}')`);
-      }
-      return this.throwError(
-        'TypeError',
-        `Cannot create property '${String(key)}' on ${typeof target} '${String(target)}'`
-      );
+  set(target: Value, key: Key, value: Value, lookupStart?: JsObject, strict = true): void {
+    const start = lookupStart ?? target;
+    if (start === undefined || start === null) {
+      this.throwError('TypeError', `Cannot set properties of ${String(start)} (setting '${String(key)}')`);
     }
-    if (!lookupStart && target instanceof JsArray && this.setArrayProperty(target, key, value)) return;
-    const property = this.findProperty(lookupStart ?? target, key);
+    const base = this.toObject(start);
+    const property = this.findProperty(base, key);
     if (property && isAccessor(property)) {
-      if (!property.set) {
-        this.throwError(
-          'TypeError',
-          `Cannot set property ${String(key)} of ${this.describe(target)} which has only a getter`
+      if (property.readonlyAssignment) this.refuse(strict, () => this.readOnlyMessage(key, target));
+      else if (property.set) this.call(property.set, target, [value], this.currentRow);
+      else
+        this.refuse(
+          strict,
+          () => `Cannot set property ${String(key)} of ${this.receiverText(base)} which has only a getter`
         );
-      }
-      this.call(property.set, target, [value], this.currentRow);
-      return;
+    } else if (property?.writable === false || (lookupStart && !(target instanceof JsObject))) {
+      this.refuse(strict, () => this.readOnlyMessage(key, target));
+    } else if (target instanceof JsObject) {
+      this.writeOwnData(target, key, value, strict);
+    } else {
+      this.refuse(strict, `Cannot create property '${String(key)}' on ${typeof target} '${String(target)}'`);
     }
-    if (property && !property.writable) {
-      this.throwError('TypeError', `Cannot assign to read only property '${String(key)}' of ${this.describe(target)}`);
-    }
-    this.writeOwnData(target, key, value);
   }
 
   /** Stores a data property of the object assigned to, which an own accessor or a read-only property refuses. */
-  private writeOwnData(target: JsObject, key: Key, value: Value): void {
-    const own = target.properties.get(key);
-    if (own && isAccessor(own)) this.throwError('TypeError', `Cannot redefine property: ${String(key)}`);
-    if (own) {
-      if (!own.writable)
-        this.throwError(
-          'TypeError',
-          `Cannot assign to read only property '${String(key)}' of ${this.describe(target)}`
-        );
-      own.value = value;
+  private writeOwnData(target: JsObject, key: Key, value: Value, strict: boolean): void {
+    const own = this.getOwnProperty(target, key);
+    if (own && isAccessor(own)) {
+      this.refuse(strict, `Cannot redefine property: ${String(key)}`);
+    } else if (own?.writable === false) {
+      this.refuse(strict, () => this.readOnlyMessage(key, target));
+    } else if (!own && !target.extensible) {
+      this.refuse(strict, `Cannot add property ${String(key)}, object is not extensible`);
+    } else if (target instanceof JsArray && this.writeArrayData(target, key, value, strict)) {
       return;
+    } else if (own) {
+      writeDataValue(own, value);
+    } else {
+      this.allocate(1);
+      target.properties.set(key, { value, writable: true, enumerable: true, configurable: true });
     }
-    if (!target.extensible)
-      this.throwError('TypeError', `Cannot add property ${String(key)}, object is not extensible`);
-    this.allocate(1);
-    target.properties.set(key, { value, writable: true, enumerable: true, configurable: true });
   }
 
-  /** Sets an element or the length of an array, returning false for any other property. */
-  private setArrayProperty(array: JsArray, key: Key, value: Value): boolean {
+  reflectedOwnProperty(object: JsObject, key: Key): Property | undefined {
+    this.checkUnavailableMember(object, key);
+    return this.getOwnProperty(object, key);
+  }
+
+  private readOnlyMessage(key: Key, target: Value): string {
+    const kind = target instanceof JsObject ? (target instanceof JsFunction ? 'function' : 'object') : typeof target;
+    const receiver = target instanceof JsObject ? this.receiverText(target) : String(target);
+    return `Cannot assign to read only property '${String(key)}' of ${kind} '${receiver}'`;
+  }
+
+  /**
+   * The text of a function as `Function.prototype.toString` gives it; a program that rejects it ends with a compile
+   * error on the row that asked for it.
+   */
+  functionSource(fn: JsFunction): string {
+    if (this.rejectsFunctionText) {
+      throw new CompileError([
+        { row: this.currentRow ?? 0, message: '関数やクラスの文字列への変換は、この採点環境では使えません。' },
+      ]);
+    }
+    return this.functionSourceText(fn);
+  }
+
+  private functionSourceText(fn: JsFunction): string {
+    const { behavior } = fn;
+    if (behavior.kind === 'native') return `function ${this.functionName(fn)}() { [native code] }`;
+    return behavior.node.source;
+  }
+
+  /** Ends a program that may call only `String.raw` as a tag when a tagged template calls another function. */
+  checkTag(fn: Value): void {
+    if (!this.allowsOnlyStringRawTag || fn === this.realm.stringRaw) return;
+    throw new CompileError([
+      { row: this.currentRow ?? 0, message: 'タグ付きテンプレートは、この採点環境では使えません。' },
+    ]);
+  }
+
+  /** V8 describes receivers for errors without invoking program code. */
+  receiverText(target: JsObject): string {
+    if (target instanceof JsFunction) return this.functionSourceText(target);
+    const method = this.receiverData(target, 'toString');
+    if (target.isError || method === this.errorToString) return this.errorReceiverText(target);
+    if (method === this.objectToString) {
+      const constructor = this.receiverData(target, 'constructor');
+      const name = constructor instanceof JsFunction ? this.receiverFunctionName(constructor) : '';
+      if (name) return `#<${name}>`;
+    }
+    const tag = this.receiverData(target, WELL_KNOWN_SYMBOLS.toStringTag);
+    return `[object ${typeof tag === 'string' ? tag : receiverClassName(target)}]`;
+  }
+
+  internalConstructorName(value: JsObject): string {
+    const name = this.allocationName(value);
+    if (name && name !== 'Object') return name;
+    for (let current: JsObject | null = value; current; current = current.proto) {
+      this.spend();
+      const tag = current.properties.get(WELL_KNOWN_SYMBOLS.toStringTag);
+      if (tag && !isAccessor(tag) && typeof tag.value === 'string') return tag.value;
+      if (current === value) continue;
+      const original = prototypeConstructorName(current);
+      if (original && original !== 'Object') return original;
+    }
+    if (value.isError) return 'Error';
+    if (value.promise) return 'Promise';
+    if (value instanceof JsFunction) return 'Function';
+    return receiverClassName(value);
+  }
+
+  private allocationName(value: JsObject): string | undefined {
+    const constructor = value.instanceConstructor;
+    if (!constructor) return undefined;
+    const name = this.receiverData(constructor, 'name');
+    return typeof name === 'string' ? name : constructor.initialName;
+  }
+
+  private receiverData(target: JsObject, key: Key): Value {
+    const property = this.findProperty(target, key);
+    return property && !isAccessor(property) ? property.value : undefined;
+  }
+
+  private receiverFunctionName(fn: JsFunction): string {
+    let name = '';
+    let target = fn;
+    while (target.boundTarget) {
+      this.spend();
+      name += 'bound ';
+      target = target.boundTarget;
+    }
+    return name + target.initialName;
+  }
+
+  /** V8's side-effect-free text of an error: its `name` and `message` when both are plain data, as `Error: x`. */
+  private errorReceiverText(error: JsObject): string {
+    const read = (key: string): string => {
+      const value = this.receiverData(error, key);
+      return typeof value === 'string' ? value : '';
+    };
+    const name = read('name');
+    const message = read('message');
+    return message === '' ? name : name === '' ? message : `${name}: ${message}`;
+  }
+
+  /** Throws the TypeError of a refused assignment or deletion in strict mode code, which other code ignores. */
+  private refuse(strict: boolean, message: string | (() => string)): void {
+    if (strict) this.throwError('TypeError', message);
+  }
+
+  private writeArrayData(array: JsArray, key: Key, value: Value, strict: boolean): boolean {
+    if (key === 'length') {
+      this.setLength(array, value, strict);
+      return true;
+    }
     const index = arrayIndexOf(key);
-    if (index !== undefined) this.setElement(array, index, value);
-    else if (key === 'length') this.setLength(array, value);
-    else return false;
+    if (index === undefined) return false;
+    if (index >= array.elements.length) {
+      if (!array.isLengthWritable) {
+        this.refuse(strict, readOnlyLengthMessage);
+        return true;
+      }
+      this.grow(array, index + 1);
+    }
+    array.elements[index] = value;
     return true;
   }
 
-  /** The property `key` of an object or of the nearest prototype that has it. */
   private findProperty(object: JsObject, key: Key): Property | undefined {
     for (let current: JsObject | null = object; current; current = current.proto) {
       const property = this.getOwnProperty(current, key);
@@ -267,39 +500,43 @@ export class Runtime {
     return undefined;
   }
 
-  /** Assigns an element, which a frozen array refuses and a non-extensible one refuses where it has none. */
-  setElement(array: JsArray, index: number, value: Value): void {
-    const { elements } = array;
-    if (index >= elements.length || elements[index] === HOLE) {
-      if (!array.extensible) this.throwError('TypeError', `Cannot add property ${index}, object is not extensible`);
-    } else if (array.frozen) {
-      this.throwError('TypeError', `Cannot assign to read only property '${index}' of object '[object Array]'`);
+  /** The spec's ArraySetLength, which stops shrinking at the last non-configurable element. */
+  setLength(array: JsArray, value: Value, strict = true, writable = true): void {
+    // A length that is already read-only rejects assignment without coercion.
+    if (!array.isLengthWritable) {
+      this.refuse(strict, readOnlyLengthMessage);
+      return;
     }
-    if (index >= elements.length) this.grow(array, index + 1);
-    elements[index] = value;
-  }
-
-  /** The spec's ArraySetLength, which stops shrinking at the last element a sealed array cannot delete. */
-  setLength(array: JsArray, value: Value): void {
-    const length = this.toNumber(value);
-    if (!Number.isInteger(length) || length < 0 || length >= 2 ** 32)
-      this.throwError('RangeError', 'Invalid array length');
+    const length = this.toArrayLength(value);
     const { elements } = array;
-    if (array.frozen) {
-      this.throwError('TypeError', "Cannot assign to read only property 'length' of object '[object Array]'");
+    if (!array.isLengthWritable) {
+      if (length !== elements.length) this.refuse(strict, readOnlyLengthMessage);
+      return;
     }
     if (length >= elements.length) {
       this.grow(array, length);
+      array.isLengthWritable &&= writable;
       return;
     }
-    if (array.sealed) {
-      const last = elements.findLastIndex((element, index) => index >= length && element !== HOLE);
-      if (last !== -1) {
-        elements.length = last + 1;
-        this.throwError('TypeError', `Cannot delete property '${last}' of [object Array]`);
+    this.scan(elements.length - length);
+    for (let index = elements.length - 1; index >= length; index--) {
+      if (!this.deleteProperty(array, String(index), false)) {
+        elements.length = index + 1;
+        array.isLengthWritable &&= writable;
+        this.refuse(strict, `Cannot delete property '${index}' of [object Array]`);
+        return;
       }
     }
     elements.length = length;
+    array.isLengthWritable &&= writable;
+  }
+
+  /** The length a value gives an array, which must be an integer an array can hold. */
+  toArrayLength(value: Value): number {
+    // The spec's ArraySetLength converts the value twice, as ToUint32 and as ToNumber, which must agree.
+    const length = this.toNumber(value) >>> 0;
+    if (length !== this.toNumber(value)) this.throwError('RangeError', 'Invalid array length');
+    return length;
   }
 
   private grow(array: JsArray, length: number): void {
@@ -308,6 +545,7 @@ export class Runtime {
     while (elements.length < length) elements.push(HOLE);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Handles indexed storage before keeping ordinary descriptor and trace state.
   defineProperty(object: JsObject, key: Key, property: Property): void {
     // A String object's indices and length are read-only and never stored: a definition compatible with them changes
     // nothing, and any other, such as a class field of that name, throws.
@@ -324,16 +562,65 @@ export class Runtime {
         return;
       }
     }
-    if (object instanceof JsArray && (arrayIndexOf(key) !== undefined || key === 'length')) {
-      if (isAccessor(property)) this.throwError('TypeError', 'Accessors on array elements are not supported');
-      this.set(object, key, property.value);
+    const index = object instanceof JsArray ? arrayIndexOf(key) : undefined;
+    if (object instanceof JsArray && index !== undefined) {
+      this.defineElement(object, index, property);
       return;
     }
-    if (!object.properties.has(key)) this.allocate(1);
-    object.properties.set(key, property);
+    if (object instanceof JsArray && key === 'length') {
+      this.defineLength(object, property);
+      return;
+    }
+    const current = object.properties.get(key);
+    if (!current) this.allocate(1);
+    else preserveTraceConstant(current, property);
+    object.properties.set(key, object.isArguments && current ? redefineArgument(current, property) : property);
   }
 
-  createDataProperty(object: JsObject, key: Key, value: Value): void {
+  private defineLength(array: JsArray, property: Property): void {
+    if (isAccessor(property)) this.throwError('TypeError', `Cannot redefine property: length`);
+    // A read-only length, which is non-configurable, can only be restated by a definition, never assigned.
+    if (!array.isLengthWritable) {
+      const restates =
+        !property.writable &&
+        !property.enumerable &&
+        !property.configurable &&
+        this.toArrayLength(property.value) === array.elements.length;
+      if (!restates) this.throwError('TypeError', `Cannot redefine property: length`);
+      return;
+    }
+    this.setLength(array, property.value, true, property.writable);
+  }
+
+  /** Defines an element, remembering attributes other than a plain element's, or an accessor, in `definedElements`. */
+  private defineElement(array: JsArray, index: number, property: Property): void {
+    const plain = !isAccessor(property) && property.writable && property.enumerable && property.configurable;
+    if (index >= array.elements.length) {
+      if (!array.isLengthWritable || !array.extensible)
+        this.throwError('TypeError', `Cannot define property ${index}, object is not extensible`);
+      this.grow(array, index + 1);
+    }
+    array.elements[index] = isAccessor(property) ? undefined : property.value;
+    if (plain) {
+      array.definedElements?.delete(index);
+      return;
+    }
+    array.definedElements ??= new Map();
+    array.definedElements.set(index, isAccessor(property) ? property : { ...property, value: undefined });
+  }
+
+  createDataProperty(object: JsObject, key: Key, value: Value, throwOnFailure = true): void {
+    const current = this.getOwnProperty(object, key);
+    if (current && !current.configurable) {
+      this.refuse(throwOnFailure, `Cannot redefine property: ${String(key)}`);
+      return;
+    }
+    const blockedLength =
+      object instanceof JsArray && !object.isLengthWritable && (arrayIndexOf(key) ?? -1) >= object.elements.length;
+    if ((!current && !object.extensible) || blockedLength) {
+      this.refuse(throwOnFailure, `Cannot define property ${String(key)}, object is not extensible`);
+      return;
+    }
     this.defineProperty(object, key, {
       value,
       writable: true,
@@ -342,29 +629,39 @@ export class Runtime {
     });
   }
 
-  deleteProperty(target: Value, key: Key): boolean {
-    if (target === undefined || target === null)
-      this.throwError('TypeError', 'Cannot convert undefined or null to object');
-    if (!(target instanceof JsObject)) return true;
-    if (target instanceof JsArray) {
+  /** Deletes a property as `delete target[key]` does, returning false where code that is not strict fails to. */
+  deleteProperty(target: Value, key: Key, strict = true): boolean {
+    const object = this.toObject(target);
+    if (object instanceof JsArray) {
       const index = arrayIndexOf(key);
       // Deleting a hole changes nothing, which a sealed array allows.
-      if (index !== undefined && index < target.elements.length && target.elements[index] !== HOLE) {
-        if (target.sealed) this.throwError('TypeError', `Cannot delete property '${index}' of [object Array]`);
-        target.elements[index] = HOLE;
+      if (index !== undefined && index < object.elements.length && object.elements[index] !== HOLE) {
+        if (object.sealed || object.definedElements?.get(index)?.configurable === false) {
+          this.refuse(strict, `Cannot delete property '${index}' of [object Array]`);
+          return false;
+        }
+        object.definedElements?.delete(index);
+        object.elements[index] = HOLE;
       }
       if (index !== undefined) return true;
     }
-    const property = this.getOwnProperty(target, key);
+    const property = this.getOwnProperty(object, key);
     if (property && !property.configurable) {
-      this.throwError('TypeError', `Cannot delete property '${String(key)}' of ${this.describe(target)}`);
+      this.refuse(strict, () => `Cannot delete property '${String(key)}' of ${this.receiverText(object)}`);
+      return false;
     }
-    target.properties.delete(key);
+    object.properties.delete(key);
     return true;
   }
 
   hasProperty(object: JsObject, key: Key): boolean {
     return this.findProperty(object, key) !== undefined;
+  }
+
+  reflectOwnSymbols(object: JsObject): symbol[] {
+    const symbols = this.ownSymbols(object);
+    for (const symbol of symbols) this.checkUnavailableMember(symbol);
+    return symbols;
   }
 
   /** Own symbol keys in the order they were added, which follow the string keys. */
@@ -442,7 +739,7 @@ export class Runtime {
       return;
     }
     if (!property.writable) this.throwError('TypeError', `Private method '${privateNameOf(name)}' is not writable`);
-    property.value = value;
+    writeDataValue(property, value);
   }
 
   definePrivate(target: JsObject, name: string, property: Property): void {
@@ -476,6 +773,7 @@ export class Runtime {
   // Calls -------------------------------------------------------------------------------------------------------------
 
   call(fn: Value, thisValue: Value, args: Value[], callRow?: number): Value {
+    this.checkCallableAvailability(fn, callRow);
     if (!isCallable(fn)) return this.throwError('TypeError', `${this.describe(fn)} is not a function`);
     this.spend();
     const { behavior } = fn;
@@ -486,12 +784,12 @@ export class Runtime {
       const held = temporaries.length;
       temporaries.push(fn, thisValue);
       appendAll(temporaries, args);
-      frame.builtinsRunning++;
+      frame.enterBuiltin(fn.forwardsLegacyCaller);
       let result: Value;
       try {
         result = behavior.run({ runtime: this, thisValue, args, newTarget: undefined, callRow });
       } finally {
-        frame.builtinsRunning--;
+        frame.leaveBuiltin(fn.forwardsLegacyCaller);
         temporaries.length = held;
       }
       // A builtin called by another, as a bound function is, hands its result on to the one that called it.
@@ -524,11 +822,11 @@ export class Runtime {
     const { temporaries } = frame;
     const length = temporaries.length;
     appendAll(temporaries, held);
-    frame.builtinsRunning++;
+    frame.enterBuiltin();
     try {
       return run();
     } finally {
-      frame.builtinsRunning--;
+      frame.leaveBuiltin();
       temporaries.length = length;
     }
   }
@@ -540,6 +838,7 @@ export class Runtime {
   }
 
   construct(fn: Value, args: Value[], newTarget: Value = fn, callRow?: number): JsObject {
+    this.checkCallableAvailability(fn, callRow);
     if (!(fn instanceof JsFunction) || !fn.isConstructor) {
       return this.throwError('TypeError', `${this.describe(fn)} is not a constructor`);
     }
@@ -556,17 +855,29 @@ export class Runtime {
     if (behavior.kind === 'class') {
       return this.returnedToBuiltin(frame, this.evaluator.constructClass(fn, behavior, args, target, callRow));
     }
-    const thisValue = this.newObject(this.prototypeFor(target, this.realm.objectPrototype));
+    const thisValue = this.newInstance(fn, target);
     const result = this.evaluator.callFunction(fn, behavior, thisValue, args, callRow, target);
     return this.returnedToBuiltin(frame, isObject(result) ? result : thisValue);
+  }
+
+  private checkCallableAvailability(fn: Value, row: number | undefined): void {
+    if (this.unavailableMember && fn === this.functionConstructor)
+      rejectUnavailableMember('Function コンストラクタ', row ?? this.currentRow);
   }
 
   /** What String, Number, or Boolean returns: the primitive when called, and its box when constructed with `new`. */
   primitiveOrBox(value: string | number | boolean, newTarget: JsFunction | undefined): Value {
     if (!newTarget) return value;
     const box = this.toObject(value);
-    box.proto = this.prototypeFor(newTarget, box.proto ?? this.realm.objectPrototype);
+    box.setPrototype(this.prototypeFor(newTarget, box.proto ?? this.realm.objectPrototype));
     return box;
+  }
+
+  /** The object `new` creates for `newTarget` before its constructor runs. */
+  newInstance(constructor: JsFunction, newTarget: JsFunction): JsObject {
+    const instance = this.newObject(this.prototypeFor(newTarget, this.realm.objectPrototype));
+    if (constructor === newTarget) instance.instanceConstructor = constructor;
+    return instance;
   }
 
   /** The prototype of an object that `new` creates for `newTarget`. */
@@ -576,9 +887,9 @@ export class Runtime {
     return isObject(prototype) ? prototype : fallback;
   }
 
-  pushFrame(scope: Scope, callRow: number | undefined, isAtomic: boolean): Frame {
+  pushFrame(scope: Scope, callRow: number | undefined, isAtomic: boolean, callee?: JsFunction, args?: Value[]): Frame {
     if (this.frames.length >= LIMITS.maxCallDepth) this.throwError('RangeError', 'Maximum call stack size exceeded');
-    const frame = new Frame(scope, callRow, isAtomic);
+    const frame = new Frame(scope, callRow, isAtomic, callee, args);
     this.frames.push(frame);
     return frame;
   }
@@ -624,7 +935,8 @@ export class Runtime {
 
   // Conversions -------------------------------------------------------------------------------------------------------
 
-  toPrimitive(value: Value, hint: 'number' | 'string' | 'default'): Primitive {
+  // code-gauge-allow functionCognitiveComplexity 17 -- Preserves the two coercion hooks and the outcome of numeric-only conversion in their evaluation order.
+  toPrimitive(value: Value, hint: 'number' | 'string' | 'default', numericOnly = false): Primitive {
     if (!isObject(value)) return value;
     const exotic = this.get(value, WELL_KNOWN_SYMBOLS.toPrimitive);
     if (exotic !== undefined && exotic !== null) {
@@ -635,6 +947,7 @@ export class Runtime {
     for (const name of hint === 'string' ? ['toString', 'valueOf'] : ['valueOf', 'toString']) {
       const method = this.get(value, name);
       if (isCallable(method)) {
+        if (numericOnly && this.hidesFunctionSource(value, method)) return Number.NaN;
         const result = this.call(method, value, [], this.currentRow);
         if (!isObject(result)) return result;
       }
@@ -642,8 +955,12 @@ export class Runtime {
     return this.throwError('TypeError', 'Cannot convert object to primitive value');
   }
 
+  private hidesFunctionSource(value: JsObject, method: JsFunction): boolean {
+    return this.rejectsFunctionText && value instanceof JsFunction && method === this.functionToString;
+  }
+
   toNumber(value: Value): number {
-    const primitive = this.toPrimitive(value, 'number');
+    const primitive = this.toPrimitive(value, 'number', true);
     if (typeof primitive === 'string') this.scan(primitive.length);
     if (typeof primitive === 'symbol') this.throwError('TypeError', 'Cannot convert a Symbol value to a number');
     if (typeof primitive === 'bigint') this.throwError('TypeError', 'Cannot convert a BigInt value to a number');
@@ -652,12 +969,16 @@ export class Runtime {
 
   /** Converts a value to a number or a BigInt, as arithmetic operators do before deciding which they compute with. */
   toNumeric(value: Value): number | bigint {
-    const primitive = this.toPrimitive(value, 'number');
+    const primitive = this.toPrimitive(value, 'number', true);
     return typeof primitive === 'bigint' ? primitive : this.toNumber(primitive);
   }
 
-  toString(value: Value): string {
-    const primitive = this.toPrimitive(value, 'string');
+  toNumericText(value: Value): string {
+    return this.toString(value, true);
+  }
+
+  toString(value: Value, numericOnly = false): string {
+    const primitive = this.toPrimitive(value, 'string', numericOnly);
     if (typeof primitive === 'symbol') this.throwError('TypeError', 'Cannot convert a Symbol value to a string');
     return String(primitive);
   }
@@ -697,19 +1018,33 @@ export class Runtime {
 
   /** Evaluates `value instanceof constructor`, which a `Symbol.hasInstance` method of the right side decides. */
   instanceOf(value: Value, constructor: Value): boolean {
-    if (!isObject(constructor)) this.throwError('TypeError', "Right-hand side of 'instanceof' is not an object");
-    const method = this.get(constructor, WELL_KNOWN_SYMBOLS.hasInstance);
-    if (method !== undefined && method !== null)
-      return toBoolean(this.call(method, constructor, [value], this.currentRow));
-    if (!isCallable(constructor)) this.throwError('TypeError', "Right-hand side of 'instanceof' is not callable");
-    return this.ordinaryHasInstance(constructor, value);
+    for (;;) {
+      if (!isObject(constructor)) this.throwError('TypeError', "Right-hand side of 'instanceof' is not an object");
+      const method = this.get(constructor, WELL_KNOWN_SYMBOLS.hasInstance);
+      if (method !== undefined && method !== null && method !== this.functionHasInstance)
+        return toBoolean(this.call(method, constructor, [value], this.currentRow));
+      if (!isCallable(constructor)) {
+        if (method === this.functionHasInstance) return false;
+        this.throwError('TypeError', "Right-hand side of 'instanceof' is not callable");
+      }
+      if (!constructor.boundTarget) return this.ordinaryHasInstance(constructor, value);
+      this.spend();
+      constructor = constructor.boundTarget;
+    }
   }
 
   /** Whether `value` inherits the prototype of `constructor`, as `Function.prototype[Symbol.hasInstance]` checks. */
   ordinaryHasInstance(constructor: Value, value: Value): boolean {
-    if (!isCallable(constructor) || !isObject(value)) return false;
+    if (!isCallable(constructor)) return false;
+    if (constructor.boundTarget) return this.instanceOf(value, constructor.boundTarget);
+    if (!isObject(value)) return false;
     const prototype = this.get(constructor, 'prototype');
-    if (!isObject(prototype)) this.throwError('TypeError', 'Function has non-object prototype in instanceof check');
+    if (!isObject(prototype)) {
+      this.throwError(
+        'TypeError',
+        `Function has non-object prototype '${this.describePlain(prototype)}' in instanceof check`
+      );
+    }
     for (let current = value.proto; current; current = current.proto) {
       this.spend();
       if (current === prototype) return true;
@@ -724,9 +1059,12 @@ export class Runtime {
    */
   iterator(
     value: Value,
-    method = value === undefined || value === null ? undefined : this.get(value, WELL_KNOWN_SYMBOLS.iterator)
+    method = value === undefined || value === null ? undefined : this.get(value, WELL_KNOWN_SYMBOLS.iterator),
+    source?: IterationSource,
+    context: IterationContext = 'syntax'
   ): ValueIterator {
-    if (!isCallable(method)) return this.throwError('TypeError', `${this.describe(value)} is not iterable`);
+    if (!isCallable(method))
+      return this.throwError('TypeError', notIterableMessage(value, this.describeTyped(value), source, context));
     const iterator = this.call(method, value, [], this.currentRow);
     if (!isObject(iterator))
       return this.throwError('TypeError', 'Result of the Symbol.iterator method is not an object');
@@ -787,13 +1125,28 @@ export class Runtime {
     if (!isObject(result)) this.throwError('TypeError', `Iterator result ${this.describe(result)} is not an object`);
   }
 
-  /** All the values an iterable yields, as spread reads them. */
-  iterate(value: Value): Value[] {
+  /** All the values an iterable yields, as spread reads them; `source` names it as V8 does where syntax spreads it. */
+  iterate(value: Value, source?: IterationSource, context: IterationContext = 'syntax'): Value[] {
     if (value instanceof JsArray) this.scan(value.elements.length);
-    return this.iterator(value).rest();
+    return this.iterator(value, undefined, source, context).rest();
   }
 
-  /** A short description of a value for error messages. */
+  /** How V8 names a value by its type, as `number 5`, `string "a"`, `object null`, or just `object`. */
+  describeTyped(value: Value): string {
+    if (value === undefined) return 'undefined';
+    if (value === null) return 'object null';
+    if (typeof value === 'string') return `string "${value}"`;
+    if (typeof value === 'symbol' || typeof value === 'bigint' || isObject(value)) return this.typeOf(value);
+    return `${typeof value} ${this.toString(value)}`;
+  }
+
+  /** How V8 shows a value without running its code: a string as it is, an object as `#<Name>`. */
+  describePlain(value: Value): string {
+    if (typeof value === 'symbol') return value.toString();
+    if (value instanceof JsObject) return this.receiverText(value);
+    return String(value);
+  }
+
   describe(value: Value): string {
     if (typeof value === 'string') return JSON.stringify(value.length > 30 ? `${value.slice(0, 30)}...` : value);
     if (value instanceof JsFunction) return this.functionName(value) || 'function';
@@ -815,6 +1168,8 @@ export class Runtime {
     const roots: unknown[] = [];
     for (const frame of this.frames) appendAll(roots, frame.reachableValues());
     appendAll(roots, this.eventLoop.roots());
+    // Every later non-strict call without a receiver gets this object again.
+    roots.push(this.evaluator.implicitReceiver);
     const { reached, scanned } = findReachableTurtles(roots);
     this.spend(Math.ceil(scanned / 64));
     this.world.retain((turtle) => reached.has(turtle));
@@ -823,7 +1178,11 @@ export class Runtime {
 
 const MISSING = Symbol('missing');
 
+const rejectStackAccess: NativeFunction = ({ runtime }) =>
+  rejectUnavailableMember('Error の stack', runtime.currentRow);
+
 /** Reads an array element, an array's length, a string's character, or a string's length without a lookup. */
+// code-gauge-allow functionCognitiveComplexity 16 -- Reads a string's or an array's element without its descriptor, unless an accessor defines it.
 function ownElement(value: Value, key: Key): Value | typeof MISSING {
   if (typeof value === 'string') {
     if (key === 'length') return value.length;
@@ -832,8 +1191,10 @@ function ownElement(value: Value, key: Key): Value | typeof MISSING {
   } else if (value instanceof JsArray) {
     if (key === 'length') return value.elements.length;
     const index = arrayIndexOf(key);
+    // An accessor element is read through its getter, which `get` calls.
     if (index !== undefined && index < value.elements.length && value.elements[index] !== HOLE) {
-      return value.elements[index] as Value;
+      const defined = value.definedElements?.get(index);
+      return defined && isAccessor(defined) ? MISSING : (value.elements[index] as Value);
     }
   }
   return MISSING;
@@ -842,4 +1203,56 @@ function ownElement(value: Value, key: Key): Value | typeof MISSING {
 /** Defines a non-enumerable data property, as builtin methods and `name` are. */
 export function defineHidden(object: JsObject, key: Key, value: Value, writable = true): void {
   object.properties.set(key, { value, writable, enumerable: false, configurable: true });
+}
+
+function prototypeConstructorName(prototype: JsObject): string | undefined {
+  const descriptor = prototype.properties.get('constructor');
+  if (!descriptor || isAccessor(descriptor)) return undefined;
+  const fn = descriptor.value;
+  return fn instanceof JsFunction && !fn.boundTarget ? fn.initialName : undefined;
+}
+
+function receiverClassName(target: JsObject): string {
+  if (target instanceof JsArray) return 'Array';
+  if (target.regexp) return 'RegExp';
+  if (dateValueOf(target) !== undefined) return 'Date';
+  if (target.primitive !== undefined) return primitiveClassName(target.primitive);
+  if (target.isArguments) return 'Arguments';
+  if (target.generator || target.asyncGenerator) return 'Generator';
+  return target.collection?.kind ?? iteratorClassOf(target) ?? 'Object';
+}
+
+function writeDataValue(property: DataProperty, value: Value): void {
+  if (property.hiddenTraceConstant && !Object.is(property.value, value)) delete property.hiddenTraceConstant;
+  property.value = value;
+}
+
+function preserveTraceConstant(current: Property, property: Property): void {
+  if (
+    !isAccessor(current) &&
+    current.hiddenTraceConstant &&
+    !isAccessor(property) &&
+    Object.is(current.value, property.value)
+  )
+    property.hiddenTraceConstant = true;
+}
+
+function primitiveClassName(primitive: Value): string {
+  switch (typeof primitive) {
+    case 'string': {
+      return 'String';
+    }
+    case 'number': {
+      return 'Number';
+    }
+    case 'boolean': {
+      return 'Boolean';
+    }
+    case 'bigint': {
+      return 'BigInt';
+    }
+    default: {
+      return 'Symbol';
+    }
+  }
 }

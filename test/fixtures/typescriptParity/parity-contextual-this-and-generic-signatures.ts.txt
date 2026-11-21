@@ -1,0 +1,30 @@
+type Greeter = ((this: { name: string }, greeting: string) => string) | ((this: { id: number }, greeting: string) => string);
+const greet: Greeter = function (greeting) {
+  return `${greeting}, ${this.name}`;
+};
+console.log(greet.call({ name: 'Ada', id: 1 }, 'Hello'));
+
+const overloaded: { (this: { x: number }): number; (this: { y: number }, scale?: number): number } = function () {
+  return 'x' in this ? this.x : this.y;
+};
+console.log(overloaded.call({ y: 4 }, 2));
+
+const counter: { count: number; increment(this: { count: number }, by: number): void } = {
+  count: 0,
+  increment(by) {
+    this.count += by;
+  },
+};
+counter.increment(5);
+console.log(counter.count);
+
+const identity: (<T>(value: T) => T) | (<U>(value: U) => U) = (value) => value;
+console.log(identity('same'), identity(42));
+
+const twice: { <T>(value: T): T[]; <U>(value: U, times?: number): U[] } = (value, times: number = 2) =>
+  Array.from({ length: times }, () => value);
+console.log(twice('a'), twice(true, 3));
+
+const constrained: (<T extends string>(value: T) => number) | (<U extends string>(value: U) => number) = (value) =>
+  value.length;
+console.log(constrained('four'));

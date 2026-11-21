@@ -1,0 +1,54 @@
+class Public {
+  kind = 'public';
+  constructor() {}
+}
+class Hidden {
+  kind = 'hidden';
+  private constructor() {}
+  static create(flag: boolean) {
+    const C = flag ? Public : Hidden;
+    return new C();
+  }
+}
+class Protected {
+  kind = 'protected';
+  protected constructor() {}
+}
+class Child extends Protected {
+  constructor() { super(); }
+  static create(flag: boolean) {
+    const C = flag ? Public : Protected;
+    return new C();
+  }
+}
+function privateForward(flag: boolean) { const C = flag ? Public : Hidden; return new C(); }
+function privateReverse(flag: boolean) { const C = flag ? Hidden : Public; return new C(); }
+function protectedForward(flag: boolean) { const C = flag ? Public : Protected; return new C(); }
+function protectedReverse(flag: boolean) { const C = flag ? Protected : Public; return new C(); }
+function generic<T extends typeof Public | typeof Hidden>(C: T) { return new C(); }
+function assigned(C: typeof Public | typeof Hidden) { return new C(); }
+function assignedReverse(C: typeof Hidden | typeof Public) { return new C(); }
+class Width {
+  kind = 'wide';
+  constructor(value?: number) {}
+}
+class WidthHidden {
+  kind = 'narrow';
+  private constructor(value?: 1) {}
+}
+function mixedArity(C: typeof Width | typeof WidthHidden) { return new C(1); }
+class EmptyA { constructor() {} }
+class EmptyB { private constructor() {} }
+function emptyForward(flag:boolean) { const C = flag ? EmptyA : EmptyB; return new C(); }
+function emptyReverse(flag:boolean) { const C = flag ? EmptyB : EmptyA; return new C(); }
+function emptyVariable(C: typeof EmptyA | typeof EmptyB) { return new C(); }
+class AForCross { value = 1; constructor() {} }
+class BForCross { hidden = 'x'; private constructor() {} }
+function cross(flag:boolean) { const C = flag ? AForCross : BForCross; return new C(); }
+let publicFactory: typeof EmptyA = EmptyB;
+let protectedFactory: typeof Protected = Hidden;
+const explicitPrivate: new () => Hidden = Hidden;
+const explicitProtected: new () => Protected = Protected;
+function make<T>(C: new () => T): T { return new C(); }
+make(Hidden);
+make(Protected);

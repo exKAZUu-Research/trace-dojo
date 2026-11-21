@@ -1,0 +1,16 @@
+class Base { protected constructor() {} }
+class Derived extends Base {}
+new Derived();
+class GrandChild extends Derived {}
+new GrandChild();
+class Outsider { make() { return new Derived(); } }
+const Alias = Base;
+class FromAlias extends Alias {}
+new FromAlias();
+class Overloaded { protected constructor(x: number); protected constructor(x: any) {} }
+class FromOverloaded extends Overloaded {}
+new FromOverloaded(1);
+abstract class Shape { protected constructor() {} }
+class Square extends Shape {}
+new Square();
+const make = () => new Derived();

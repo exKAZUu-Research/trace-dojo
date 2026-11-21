@@ -58,8 +58,11 @@ function formatFormatString(
 /** The text a placeholder stands for, or undefined for a `%` that starts no placeholder. */
 function formatPlaceholder(runtime: Runtime, kind: string, value: Value, budget: OutputBudget): string | undefined {
   if (kind === 'o' || kind === 'O') {
-    // Node.js's `%o` also shows hidden properties, which this leaves out.
-    return inspectValue(runtime, value, budget, kind === 'o' ? 4 : undefined);
+    // Node.js's `%o` shows hidden properties, as an array's `[length]` and a function's `[length]`, `[name]`, and
+    // `[prototype]`.
+    return kind === 'o'
+      ? inspectValue(runtime, value, budget, 4, { showHidden: true })
+      : inspectValue(runtime, value, budget);
   }
   if (kind === 's' && value instanceof JsObject && !(value instanceof JsFunction) && hasBuiltinToString(value)) {
     return inspect(runtime, value, budget, 0);
@@ -70,6 +73,7 @@ function formatPlaceholder(runtime: Runtime, kind: string, value: Value, budget:
 }
 
 /** Formats `%s`, `%j`, `%d`, `%i`, and `%f` as Node.js's `formatWithOptions` does, which never rejects a BigInt or a symbol. */
+// code-gauge-allow functionCognitiveComplexity 17 -- Each placeholder has its own coercion and formatting rules for numbers, bigints, and symbols.
 function formatPrimitivePlaceholder(runtime: Runtime, kind: string, value: Value): string | undefined {
   switch (kind) {
     case 's': {
@@ -86,10 +90,10 @@ function formatPrimitivePlaceholder(runtime: Runtime, kind: string, value: Value
     }
     case 'i': {
       if (typeof value === 'bigint') return `${value}n`;
-      return typeof value === 'symbol' ? 'NaN' : formatNumber(Number.parseInt(runtime.toString(value)));
+      return typeof value === 'symbol' ? 'NaN' : formatNumber(Number.parseInt(runtime.toNumericText(value)));
     }
     case 'f': {
-      return typeof value === 'symbol' ? 'NaN' : formatNumber(Number.parseFloat(runtime.toString(value)));
+      return typeof value === 'symbol' ? 'NaN' : formatNumber(Number.parseFloat(runtime.toNumericText(value)));
     }
     case 'c': {
       return '';

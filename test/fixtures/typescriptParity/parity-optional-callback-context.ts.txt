@@ -1,0 +1,10 @@
+function runOptional(callback: (value?: number) => void) { callback(); callback(2); }
+runOptional(value => { const result: number = value ?? 0; console.log(result); });
+runOptional(() => console.log("ignored"));
+const optionalCallback: (value?: number) => void = value => console.log(value ?? 3);
+optionalCallback();
+optionalCallback(4);
+interface OptionalMethod { method(value?: number): void; }
+const methods: OptionalMethod = { method(value: number) { console.log(value); } };
+methods.method();
+methods.method(5);

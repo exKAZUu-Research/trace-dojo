@@ -1,0 +1,9 @@
+function checkEarly(): void { later.push(1); }
+const fixed = ([]);
+fixed.push(1);
+let fixedAgain = (([]));
+fixedAgain.unshift('x');
+const later = ([]);
+function checkClosure(): void { fixed[0] = 1; }
+var third = ([/* no elements */]);
+third[0] = 1;

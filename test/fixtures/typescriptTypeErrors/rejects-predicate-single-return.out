@@ -1,0 +1,12 @@
+(7,1): error TS2531: Object is possibly 'null'.
+(7,15): error TS2339: Property 'toUpperCase' does not exist on type 'string | number'.
+  Property 'toUpperCase' does not exist on type 'number'.
+(13,1): error TS2531: Object is possibly 'null'.
+(13,17): error TS2339: Property 'toUpperCase' does not exist on type 'string | number'.
+  Property 'toUpperCase' does not exist on type 'number'.
+(20,1): error TS2531: Object is possibly 'null'.
+(20,16): error TS2339: Property 'toUpperCase' does not exist on type 'string | number'.
+  Property 'toUpperCase' does not exist on type 'number'.
+(26,1): error TS2531: Object is possibly 'null'.
+(26,15): error TS2339: Property 'toUpperCase' does not exist on type 'string | number'.
+  Property 'toUpperCase' does not exist on type 'number'.
