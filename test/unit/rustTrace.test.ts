@@ -490,3 +490,23 @@ test.each([
 `;
   expect(traceProgram('rust', program, program).traceItems.at(-1)?.vars).toEqual(vars);
 });
+
+test('a trait-object variable copied from a concrete reference shows the object', () => {
+  const program = `trait Shape { fn check(&self) -> i32; }
+struct S(i32);
+impl Shape for S { fn check(&self) -> i32 { self.0 } }
+fn main() {
+    let s = S(1);
+    let concrete = &s;
+    let shape: &dyn Shape = concrete;
+    println!("{}", shape.check());
+    let n = 0;
+}
+`;
+  const object = { kind: 'object', entries: { 0: { kind: 'value', value: 1 } } };
+  expect(traceProgram('rust', program, program).traceItems.at(-1)?.referenceVars).toEqual({
+    s: object,
+    concrete: object,
+    shape: object,
+  });
+});

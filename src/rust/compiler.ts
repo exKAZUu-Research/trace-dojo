@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 618 -- Keeps the compilation that shares a function's context and step state together.
+// code-gauge-allow-file fileNcss 631 -- Keeps the compilation that shares a function's context and step state together.
 import type { Annotations, Coercion, FnContext, LocalVar, PathRes } from './annotations';
 import type { Block, Expr, Pattern, Span, Stmt } from './ast';
 import { patternBindings } from './astWalk';
@@ -311,13 +311,37 @@ export class Compiler {
     if (expr.kind === 'ref' && this.ownedPlace(expr.operand)) {
       return this.directBorrow(expr, expr.operand, slot);
     }
+    return this.copiedBorrow(expr, slot, read);
+  }
+
+  /** A shared reference that a binding copies, which follows the referent of the variable it copies, if any. */
+  private copiedBorrow(expr: Expr, slot: number, read: Eval): Eval {
     const res = expr.kind === 'path' ? this.annotations.paths.get(expr) : undefined;
+    const coercedView = this.coercedView(expr);
     return (frame) => {
       const value = read(frame);
       const referent = res?.kind === 'local' ? frame.referents.get(res.local.slot) : undefined;
-      if (referent) frame.referents.set(slot, referent);
-      else frame.referents.delete(slot);
+      if (!referent) frame.referents.delete(slot);
+      else if (!coercedView) frame.referents.set(slot, referent);
+      else {
+        // The copy shows the source's view of the referent, coerced again as this binding's type requires.
+        const { view } = referent;
+        const coerce = coercedView(frame);
+        frame.referents.set(slot, { ...referent, view: (item) => coerce(view ? view(item) : item) });
+      }
       return value;
+    };
+  }
+
+  /** How a binding's coercion applies to a referent's current value in `frame`, when the binding coerces it. */
+  private coercedView(expr: Expr): ((frame: Frame) => (value: Value) => Value) | undefined {
+    const coercion = this.annotations.coercions.get(expr);
+    if (!coercion) return undefined;
+    const pending: Value[] = [];
+    const coerced = this.coerce(() => pending.pop() as Value, coercion, expr);
+    return (frame) => (value) => {
+      pending.push(value);
+      return coerced(frame);
     };
   }
 
@@ -331,19 +355,14 @@ export class Compiler {
     while (root.kind === 'field' || root.kind === 'index' || root.kind === 'unary') root = root.operand;
     const res = this.annotations.paths.get(root);
     const rootSlot = res?.kind === 'local' ? res.local.slot : -1;
-    const coercion = this.annotations.coercions.get(expr);
-    const borrowed: Value[] = [];
-    const coerced = coercion && this.coerce(() => borrowed.pop() as Value, coercion, expr);
+    const coercedView = this.coercedView(expr);
     return (frame) => {
       const target = place(frame);
-      if (!coerced) {
+      if (!coercedView) {
         frame.referents.set(slot, { place: target, root: rootSlot });
         return target.get();
       }
-      const view = (value: Value): Value => {
-        borrowed.push(value);
-        return coerced(frame);
-      };
+      const view = coercedView(frame);
       frame.referents.set(slot, { place: target, root: rootSlot, view });
       return view(target.get());
     };
