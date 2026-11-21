@@ -1281,14 +1281,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const receiverType = receiver.type;
     if (receiverType.kind === 'void') this.error(span, 'void の値のメンバーは使えません。');
     this.skipOnNull(receiver, nullAware);
-    if (
-      !receiver.extensionOverride &&
-      (receiverType.kind === 'dynamic' || (receiverType.kind === 'never' && !receiverType.nullable))
-    ) {
+    const dispatchType = this.dynamicDispatchType(receiver);
+    if (dispatchType) {
       const { run } = receiver;
       const memberName = this.runtimeMemberName(name);
       return {
-        type: receiverType.kind === 'never' ? NEVER : DYNAMIC,
+        type: dispatchType,
         run: (frame) => {
           const value = run(frame);
           if (value === SHORTED) return SHORTED;

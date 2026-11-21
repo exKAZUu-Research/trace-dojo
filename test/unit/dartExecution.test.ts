@@ -5972,6 +5972,19 @@ void main() {
   expect(executeProgram('dart', asserted)).toMatchObject({ kind: 'executed', stdout: '_TypeError\n_TypeError\n' });
 });
 
+test('an asserted Null-bound receiver permits unreachable selectors and operators', () => {
+  for (const expression of ['value!.missing', 'value!.missing()', 'value![0]', 'value!()', 'value! + 1', '-value!']) {
+    const source = `Object check<T extends Null>(T? value) => ${expression};
+void main() { try { check(null); } catch (error) { print(error.runtimeType); } }`;
+    expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '_TypeError\n' });
+  }
+  for (const statement of ['value!.missing = 2', 'value![0]++']) {
+    const source = `void check<T extends Null>(T? value) { ${statement}; }
+void main() { try { check(null); } catch (error) { print(error.runtimeType); } }`;
+    expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '_TypeError\n' });
+  }
+});
+
 test('super rejects null-aware property writes and accepts null-aware indexing', () => {
   for (const operation of ['super?.x = 2', 'super?.x += 1', 'super?.x++', '++super?.x']) {
     const source = `class A { int x = 1; } class B extends A { void run() { ${operation}; } } void main() {}`;

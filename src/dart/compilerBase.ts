@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 539 -- Types and record shape metadata are resolved in the compiler environment.
+// code-gauge-allow-file fileNcss 545 -- Types and record shape metadata are resolved in the compiler environment.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ClassDeclaration, Span, TypeAliasDeclaration, TypeParameter, TypeSyntax } from './ast';
 import { type ClassInfo, type Member, memberTypeIn, scopedMemberName } from './classes';
@@ -19,6 +19,7 @@ import {
   type InterfaceType,
   interfaceType,
   isFunctionLike,
+  isNeverType,
   isNullable,
   isPotentiallyNullable,
   isSubtype,
@@ -588,6 +589,12 @@ export abstract class CompilerBase {
       type: substitute(member.type, map),
       extension: { ext: override.ext, typeArgs: override.typeArgs, onType: substitute(override.ext.onType, map) },
     };
+  }
+
+  protected dynamicDispatchType(receiver: Compiled): DartType | undefined {
+    if (receiver.extensionOverride) return;
+    if (receiver.type.kind === 'dynamic') return DYNAMIC;
+    return isNeverType(receiver.type) ? NEVER : undefined;
   }
 
   /** Whether a member may be used on a receiver that may be null: Object's members and extensions on nullable types. */

@@ -20,6 +20,7 @@ import {
   type DartType,
   DYNAMIC,
   interfaceType,
+  isNeverType,
   isNonNullable,
   isPotentiallyNullable,
   isSubtype,
@@ -186,6 +187,13 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
 
   /** Calls an operator method of the left operand's class, checking the operand against its parameter. */
   protected compileOperatorCall(left: Compiled, operator: string, rightSyntax: Expression[], span: Span): Compiled {
+    const args: ArgumentsSyntax = {
+      positional: rightSyntax,
+      named: [],
+      order: rightSyntax.map((_, index) => ({ kind: 'positional' as const, index })),
+      ...at(span),
+    };
+    if (isNeverType(left.type)) return this.compileMethodCall(left, operator, args, undefined, span, undefined, false);
     const resolved = this.lookupMember(left.type, operator, false, span);
     if (
       isPotentiallyNullable(left.type) &&
@@ -203,12 +211,6 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
         `${typeName(left.type)} 型には演算子 ${operator === 'unary-' ? '-' : operator} がありません。`
       );
     }
-    const args: ArgumentsSyntax = {
-      positional: rightSyntax,
-      named: [],
-      order: rightSyntax.map((_, index) => ({ kind: 'positional' as const, index })),
-      ...at(span),
-    };
     return this.compileMethodCall(left, operator, args, undefined, span, undefined, false);
   }
 
@@ -468,9 +470,8 @@ const INTEGER_OPERAND_METHODS = new Map([
 ]);
 
 function assertedNonNullable(type: DartType): DartType {
-  return type.kind === 'typeParam' && resolveBound(type).kind === 'null'
-    ? { ...type, nullable: false, promoted: NEVER }
-    : nonNullable(type);
+  const bound = resolveBound(type);
+  return bound.kind === 'null' || isNeverType(bound) ? NEVER : nonNullable(type);
 }
 
 function stringAddition(left: Eval, right: Eval, dynamicArgument: boolean, row: number): Eval {

@@ -414,15 +414,17 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     };
   }
 
+  // code-gauge-allow functionNcss 31 -- Static and dynamic property targets share the prepared receiver.
   private memberTarget(receiver: Compiled, name: string, nullAware: boolean, span: Span): AssignableTarget {
     const receiverType = receiver.type;
     this.skipOnNull(receiver, nullAware);
     const prepare = preparingReceiver(receiver.run, nullAware);
     const memberName = this.runtimeMemberName(name);
-    if (receiverType.kind === 'dynamic' && !receiver.extensionOverride) {
+    const dispatchType = this.dynamicDispatchType(receiver);
+    if (dispatchType) {
       return {
         writeType: DYNAMIC,
-        readType: DYNAMIC,
+        readType: dispatchType,
         prepare,
         read: (frame, prepared) => frame.runtime.getProperty(prepared as Value, memberName, span.row),
         write: (frame, prepared, value) =>
@@ -477,10 +479,11 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     let indexContext: DartType | undefined;
     let readContext: DartType | undefined;
     let writeType: DartType = DYNAMIC;
-    let readType: DartType | undefined = DYNAMIC;
+    const dispatchType = this.dynamicDispatchType(receiver);
+    let readType: DartType | undefined = dispatchType ?? DYNAMIC;
     let setter: ResolvedMember | undefined;
     let getter: ResolvedMember | undefined;
-    if (receiverType.kind !== 'dynamic' || receiver.extensionOverride) {
+    if (!dispatchType) {
       setter = this.memberFor(receiver, lookupType, '[]=', span);
       if (!setter || setter.member.kind !== 'method')
         return this.error(span, `${typeName(nonNullable(receiverType))} 型には演算子 []= がありません。`);

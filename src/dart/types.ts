@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 605 -- The operations of Dart's types belong together; each is a short case analysis.
+// code-gauge-allow-file fileNcss 608 -- The operations of Dart's types belong together; each is a short case analysis.
 import type { ClassInfo } from './classes';
 
 /** A type parameter of a class, a function type, or a generic function. */
@@ -141,6 +141,11 @@ export function isNullable(type: DartType): boolean {
  */
 export function isPotentiallyNullable(type: DartType): boolean {
   return !isNonNullable(type);
+}
+
+export function isNeverType(type: DartType): boolean {
+  const base = resolveBound(type);
+  return base.kind === 'never' && !base.nullable;
 }
 
 /** Whether the type excludes `null` for every instantiation. */

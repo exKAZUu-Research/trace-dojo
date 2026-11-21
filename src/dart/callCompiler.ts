@@ -27,6 +27,7 @@ import {
   instantiateToBounds,
   type InterfaceType,
   interfaceType,
+  isNeverType,
   isNullable,
   isPotentiallyNullable,
   isSubtype,
@@ -410,7 +411,7 @@ export abstract class CallCompiler extends OperatorCompiler {
     const receiverType = receiver.type;
     if (receiverType.kind === 'void') this.error(span, 'void の値のメンバーは使えません。');
     this.skipOnNull(receiver, nullAware);
-    if (!receiver.extensionOverride && (receiverType.kind === 'dynamic' || isNeverType(receiverType))) {
+    if (this.dynamicDispatchType(receiver)) {
       return this.dynamicCall(receiver, name, args, span, nullAware, typeArguments);
     }
     const lookupType = nullAware ? nonNullable(receiverType) : receiverType;
@@ -1143,10 +1144,6 @@ function supertypesOf(type: InterfaceType): InterfaceType[] {
     }
   }
   return result;
-}
-
-function isNeverType(type: DartType): boolean {
-  return type.kind === 'never' && !type.nullable;
 }
 
 import { Frame as FrameClass } from './runtime';
