@@ -58,3 +58,47 @@ function narrowIndex(a: NarrowAccessor) {
 function signed(a: Accessor) {
   if (typeof a.value === 'number') (a.value) += 'x';
 }
+class Receiver {
+  private stored = 1;
+  get value(): number { return this.stored; }
+  set value(value: number | string) { this.stored = typeof value === 'number' ? value : value.length; }
+  guard() {
+    if (typeof this.value === 'number') this.value += 'x';
+  }
+}
+function guarded(receiver: Receiver) {
+  if (typeof receiver.value === 'number') receiver.value += 'x';
+}
+function assigned(receiver: Receiver) {
+  receiver.value = 2;
+  receiver.value += 'x';
+}
+function guardedIndex(receiver: Receiver) {
+  if (typeof receiver['value'] === 'number') receiver['value'] += 'x';
+}
+function afterUpdate(receiver: Receiver) {
+  receiver.value++;
+  receiver.value += 'x';
+}
+function afterCompound(receiver: Receiver) {
+  receiver.value += 1;
+  receiver.value += 'x';
+}
+function afterGuardedCompound(receiver: Receiver) {
+  if (typeof receiver.value === 'number') {
+    receiver.value += 1;
+    receiver.value += 'x';
+  }
+}
+function afterGuardedUpdate(receiver: Receiver) {
+  if (typeof receiver.value === 'number') {
+    receiver.value++;
+    receiver.value += 'x';
+  }
+}
+function resultType() {
+  let numeric: 1 | 2 = 1;
+  numeric += 9;
+  const impossible: 1 | 2 = numeric;
+  return impossible;
+}

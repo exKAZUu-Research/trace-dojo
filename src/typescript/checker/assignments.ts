@@ -358,16 +358,22 @@ export class AssignmentChecker {
       (operator === '+=' || this.c.operators.hasNumericOperands(left, right, targetType, valueType))
     )
       this.c.expressions.checkAssignable(reference, resultType, mapType(writeType, baseTypeOfLiteral));
-    this.assignReference(reference, declared, resultType, false);
+    this.recordCompoundWrite(reference);
     return resultType;
   }
 
   private compoundWriteType(reference: TreeNode, declared: Type, read: Type): Type {
     if (reference.type !== 'member_expression' && reference.type !== 'subscript_expression') return read;
     const narrowed = this.narrowedType(reference);
-    return narrowed && narrowed !== this.accessorReadType(reference)
-      ? intersectionOf([declared, narrowed], this.c)
-      : declared;
+    return narrowed ? intersectionOf([declared, narrowed], this.c) : declared;
+  }
+
+  private recordCompoundWrite(reference: TreeNode): void {
+    const key = this.c.flow.referenceKey(reference);
+    if (!key) return;
+    this.c.flow.invalidate(key);
+    const entry = this.c.flow.entry(key);
+    if (entry) this.c.flow.set(key, { ...entry, type: mapType(entry.type, baseTypeOfLiteral) }, reference);
   }
 
   private logicalAssignmentType(operator: string, targetType: Type, valueType: Type): Type {
@@ -394,7 +400,6 @@ export class AssignmentChecker {
 
   update(node: TreeNode): Type {
     const argument = node.childForFieldName('argument') as TreeNode;
-    const declared = this.declaredTargetType(argument);
     const type = this.targetType(argument, true);
     if (type === errorType) return numberType;
     // As TypeScript's `checkNonNullType`, then its arithmetic operand check, which rejects `void`.
@@ -405,7 +410,7 @@ export class AssignmentChecker {
       return numberType;
     }
     const result = this.c.operators.isBigintLike(operand) ? bigintType : numberType;
-    this.assignReference(skipParentheses(argument), declared, result, false);
+    this.recordCompoundWrite(skipParentheses(argument));
     return result;
   }
 
