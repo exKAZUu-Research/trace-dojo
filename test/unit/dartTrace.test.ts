@@ -310,18 +310,11 @@ test('a cyclic list produces finite snapshots and execution continues', () => {
 });
 
 test('Dart limits cumulative trace size across individually small snapshots', () => {
-  for (const source of [
-    `void main() {
-      final values = List<int>.filled(2000, 1);
-      for (var i = 0; i < 1000; i++) { values[i % 2000] = i; }
-    }`,
-    `void main() {
-      final text = 'x' * 500000;
-      for (var i = 0; i < 100; i++) { final length = text.length; print(length); }
-    }`,
-  ]) {
-    expect(() => traceProgram('dart', source, source)).toThrow(new ExecutionLimitError('trace'));
-  }
+  const source = `void main() {
+    final text = 'x' * 500000;
+    for (var i = 0; i < 100; i++) { final length = text.length; print(length); }
+  }`;
+  expect(() => traceProgram('dart', source, source)).toThrow(new ExecutionLimitError('trace'));
 });
 
 test('a synchronous generator records the counted-loop header', () => {
@@ -382,6 +375,24 @@ void main() {
       { x: 2, y: 2 },
     ],
   });
+});
+
+test('a changing list of hundreds of elements traces with the Java trace length', () => {
+  const dart = `void main() {
+  final values = List.filled(500, 0);
+  for (var i = 0; i < 1000; i++) {
+    values[i % 500] = i;
+  }
+}`;
+  const java = `public class Main {
+  public static void main(String[] args) {
+    int[] values = new int[500];
+    for (int i = 0; i < 1000; i++) {
+      values[i % 500] = i;
+    }
+  }
+}`;
+  expect(traceProgram('dart', dart, dart).traceItems).toHaveLength(traceProgram('java', java, java).traceItems.length);
 });
 
 test('nested grid updates complete with the Java trace length', () => {

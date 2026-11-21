@@ -105,7 +105,10 @@ class Snapshotter {
     }
     if (!this.chargeSnapshot(value)) return;
     this.charge(8 * value.length);
-    for (const item of value) this.chargeScalar(item);
+    for (const item of value) {
+      if (Array.isArray(item)) this.chargeScalar(item);
+      else if (typeof item === 'string') this.charge(item.length);
+    }
   }
 
   private chargeReference(node: DisplayNode): void {
