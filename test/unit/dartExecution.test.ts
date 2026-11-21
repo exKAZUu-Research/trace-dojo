@@ -3086,6 +3086,18 @@ test('numeric parsing applies the SDK whitespace and argument rules', () => {
   });
 });
 
+test('floating-point power uses the VM arithmetic and special values', () => {
+  const source = `import 'dart:math';
+void main() {
+  print([pow(11 / 7, 3.0), pow(15 / 7, 3.0), pow(-0.0, 3.0), pow(-0.0, 0.5)]);
+  print([pow(-double.infinity, 0.5), pow(1.0, double.nan), pow(double.nan, 0.0), pow(-1.0, double.infinity)]);
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '[3.8804664723032065, 9.839650145772593, -0.0, 0.0]\n[Infinity, 1.0, 1.0, 1.0]\n',
+  });
+});
+
 test('int.parse uses its VM error callback only for invalid numbers', () => {
   const source = `void main() {
   int fallback(String input) { print('fallback: <$input>'); return 42; }

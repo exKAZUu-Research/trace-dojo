@@ -1,3 +1,4 @@
+import { platformBinary, platformPower, platformUnary } from '../../interpreter/platformMath';
 import type { OutputChannel } from '../../interpreter/programIo';
 import { encodableText, stringOf } from '../format';
 import { ProgramExit, type Runtime } from '../runtime';
@@ -40,21 +41,11 @@ function compareMathOperands(a: bigint | number, b: bigint | number): number {
   return x < y ? -1 : x > y ? 1 : 0;
 }
 
-for (const [name, fn] of [
-  ['sin', Math.sin],
-  ['cos', Math.cos],
-  ['tan', Math.tan],
-  ['acos', Math.acos],
-  ['asin', Math.asin],
-  ['atan', Math.atan],
-  ['sqrt', Math.sqrt],
-  ['exp', Math.exp],
-  ['log', Math.log],
-] as const) {
-  define(name, (runtime, _receiver, [x]) => fn(toDouble(numArg(runtime, x, 'x'))));
+for (const name of ['sin', 'cos', 'tan', 'acos', 'asin', 'atan', 'sqrt', 'exp', 'log']) {
+  define(name, (runtime, _receiver, [x]) => platformUnary(name, toDouble(numArg(runtime, x, 'x'))));
 }
 define('atan2', (runtime, _receiver, [a, b]) =>
-  Math.atan2(toDouble(numArg(runtime, a, 'a')), toDouble(numArg(runtime, b, 'b')))
+  platformBinary('atan2', toDouble(numArg(runtime, a, 'a')), toDouble(numArg(runtime, b, 'b')))
 );
 define('pow', (runtime, _receiver, [x, exponent]) => {
   const base = numArg(runtime, x, 'x');
@@ -71,12 +62,17 @@ define('pow', (runtime, _receiver, [x, exponent]) => {
     }
     return result;
   }
-  const b = toDouble(base);
-  const p = toDouble(power);
-  // Dart follows C's pow, where 1 to any power and any number to the power 0 are 1, even with NaN.
-  if (b === 1 || p === 0 || (b === -1 && Math.abs(p) === Infinity)) return 1;
-  return b ** p;
+  return doublePower(toDouble(base), toDouble(power));
 });
+
+function doublePower(base: number, exponent: number): number {
+  if (exponent === 0 || base === 1) return 1;
+  if (exponent === 1) return base;
+  if (exponent === 2) return base * base;
+  if (exponent === 3) return base * base * base;
+  if (exponent === 0.5 && base !== -Infinity) return base === 0 ? 0 : Math.sqrt(base);
+  return platformPower(base, exponent, false);
+}
 
 /** The VM's Random: multiply-with-carry with the seed mixed by Thomas Wang's 64-bit hash. */
 class RandomState {
