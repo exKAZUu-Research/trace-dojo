@@ -75,8 +75,11 @@ export abstract class MemberCompiler extends MetadataCompiler {
     options: { cls?: ClassInfo; declaration?: MethodDeclaration; local?: boolean } = {}
   ): { type: FunctionType; positionalTypes: DartType[]; namedTypes: Map<string, DartType> } {
     const { cls, declaration, local } = options;
+    // An extension type's members redeclare inherited ones, so they infer nothing from them.
     const overridden =
-      cls && declaration && !declaration.isStatic ? this.overriddenSignature(cls, declaration, typeParams) : undefined;
+      cls && cls.kind !== 'extensionType' && declaration && !declaration.isStatic
+        ? this.overriddenSignature(cls, declaration, typeParams)
+        : undefined;
     const positionalTypes = parameters.positional.map((parameter, index) => {
       if (parameter.type) return this.resolveType(parameter.type);
       if (overridden && declaration?.methodKind === 'setter') return overridden;

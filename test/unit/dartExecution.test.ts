@@ -1786,6 +1786,13 @@ void main() {
   expect(result.kind === 'executed' && result.finalTurtles).toHaveLength(4);
 });
 
+test('Dart extension type redeclarations infer nothing from inherited members', () => {
+  const program = `extension type E(int value) { int f(int x) => x; int get g => 1; }
+extension type F(int value) implements E { f(x) => x; get g => 'g'; }
+void main() { print([F(1).f('ok'), F(1).g]); }`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[ok, g]\n' });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}
