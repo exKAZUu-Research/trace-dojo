@@ -1050,6 +1050,7 @@ export abstract class CallCompiler extends OperatorCompiler {
     );
     runtime.enter(frame);
     try {
+      runtime.spend();
       compiled.bind(frame, args);
       return compiled.run(frame);
     } finally {

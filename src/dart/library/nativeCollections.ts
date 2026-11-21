@@ -168,6 +168,7 @@ defineConstructor('List.generate', (runtime, _instance, args, typeArgs) => {
   frame?.temporaries.push(result);
   try {
     for (let position = 0n; position < length; position++) {
+      runtime.spend();
       runtime.allocate(1);
       values.push(callFunction(runtime, generator, position));
     }

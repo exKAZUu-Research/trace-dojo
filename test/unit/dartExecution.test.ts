@@ -1223,6 +1223,20 @@ test.each([
   ).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
 });
 
+test.each([
+  [
+    'an expression-bodied recursive function',
+    'int fib(int n) => n < 2 ? n : fib(n - 1) + fib(n - 2);\nvoid main() => print(fib(32));',
+  ],
+  ['a list generator', 'void main() => print(List<int>.generate(1100000, (i) => i).length);'],
+  [
+    'repeated fillRange',
+    'void main() {\n  final a = List<int>.filled(1100, 0);\n  for (var i = 0; i < 1100; i++) a.fillRange(0, a.length, 1);\n}',
+  ],
+])('%s charges the operation budget', (_work, source) => {
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}
