@@ -5,6 +5,28 @@ import { executeProgram, traceProgram } from '../../src/interpreter/program';
 // Dart SDK 3.13.7 (`dart run`) prints the expected output: the VM's hash codes and the bucket order of HashMap and
 // HashSet, the default map's insertion order, Random's sequence for a seed, shuffle, and the order sort leaves equal
 // elements in.
+test('public SDK types share Dart VM hashes across libraries', () => {
+  const program = `import 'dart:collection';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:math';
+class Holder<T> {}
+void main() {
+  final types = <Type>[
+    Point<int>, ListQueue<int>, HashMap<int, int>, SplayTreeSet<int>, List<Point<int>>,
+    JsonCodec, Utf8Codec, Stdout, Holder<Point<int>>, LinkedHashMap<int, int>,
+  ];
+  print(types.map((type) => type.hashCode).toList());
+  print(HashSet<Type>.of(types));
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[195568320, 56450997, 259497269, 137660767, 385687430, 955317462, 153614933, 47563481, 228988073, 346085082]\n' +
+      '{Point<int>, ListQueue<int>, HashMap<int, int>, Utf8Codec, List<Point<int>>, JsonCodec, Holder<Point<int>>, Stdout, LinkedHashMap<int, int>, SplayTreeSet<int>}\n',
+  });
+});
+
 test('learner class IDs determine Dart type hashes and hash-set order', () => {
   const program = `import 'dart:collection';
 class Cat {}
