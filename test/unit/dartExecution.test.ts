@@ -1872,11 +1872,16 @@ test.each(['var y = {...x};', 'var y = {if (true) ...x};'])(
     expect(executeProgram('dart', `void main() { dynamic x = {1: 2}; ${declaration} }`)).toMatchObject({
       kind: 'compileError',
     });
-    const valid =
-      'void main() { dynamic x = {1: 2}; Map<int, int> y = {...x}; print([y, {}.runtimeType, {...x, 3: 4}]); }';
+    const valid = `void main() {
+  dynamic x = {1: 2};
+  Map<int, int> y = {...x};
+  Map<int, int> z = {...{...x}};
+  Set<int> e = {...{}};
+  print([y, z, e, {}.runtimeType, {...x, 3: 4}]);
+}`;
     expect(executeProgram('dart', valid)).toMatchObject({
       kind: 'executed',
-      stdout: '[{1: 2}, _Map<dynamic, dynamic>, {1: 2, 3: 4}]\n',
+      stdout: '[{1: 2}, {1: 2}, {}, _Map<dynamic, dynamic>, {1: 2, 3: 4}]\n',
     });
   }
 );
