@@ -7096,7 +7096,14 @@ class C with M {}
 void main() { print([M().value, M.named().value, C().value]); }
 `;
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[2, 2, 2]\n' });
-  for (const constructor of ['M() {}', 'M([int x = 0]);', 'int x; M(this.x);', 'M() : super();']) {
+  for (const constructor of [
+    'M() {}',
+    'M([int x = 0]);',
+    'int x; M(this.x);',
+    'M() : super();',
+    'external M();',
+    'external const M();',
+  ]) {
     expect(executeProgram('dart', `mixin class M { ${constructor} } void main() {}`)).toMatchObject({
       kind: 'compileError',
     });

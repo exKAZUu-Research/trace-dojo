@@ -882,8 +882,14 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
   }
 }
 
-function isTrivialConstructor({ body, initializers, parameters }: ConstructorDeclaration): boolean {
-  return !body && initializers.length === 0 && parameters.positional.length === 0 && parameters.named.length === 0;
+function isTrivialConstructor({ body, initializers, parameters, isExternal }: ConstructorDeclaration): boolean {
+  return (
+    !isExternal &&
+    !body &&
+    initializers.length === 0 &&
+    parameters.positional.length === 0 &&
+    parameters.named.length === 0
+  );
 }
 
 function isFieldParameter(parameter: FormalParameter): boolean {
