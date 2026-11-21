@@ -1,4 +1,4 @@
-import type { Expr, MacroCall } from './ast';
+import type { Block, Expr, MacroCall } from './ast';
 import { shallow } from './types';
 
 /**
@@ -43,6 +43,15 @@ function macroOperands(macro: MacroCall): Expr[] {
   }
 }
 
+/** The expressions a block evaluates in turn: its statements' and its value's. */
+function blockOperands(block: Block): Expr[] {
+  const statements = block.stmts.flatMap((stmt) =>
+    stmt.kind === 'expr' ? [stmt.expr] : stmt.kind === 'let' && stmt.init ? [stmt.init] : []
+  );
+  return block.tail ? [...statements, block.tail] : statements;
+}
+
+// code-gauge-allow functionNcss 39 -- One case per kind of expression.
 function requiredOperands(expr: Expr): Expr[] {
   switch (expr.kind) {
     case 'unary':
@@ -80,6 +89,20 @@ function requiredOperands(expr: Expr): Expr[] {
     }
     case 'macro': {
       return macroOperands(expr.macro);
+    }
+    // Control flow always evaluates what decides it, though not the branches or the body it then picks.
+    case 'if':
+    case 'while': {
+      return [expr.cond.kind === 'expr' ? expr.cond.expr : expr.cond.value];
+    }
+    case 'match': {
+      return [expr.scrutinee];
+    }
+    case 'for': {
+      return [expr.iterable];
+    }
+    case 'block': {
+      return blockOperands(expr);
     }
     default: {
       return [];

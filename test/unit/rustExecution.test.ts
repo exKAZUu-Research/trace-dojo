@@ -7992,3 +7992,18 @@ fn main() {}`;
     diagnostics: [expect.objectContaining({ row: 4, message: expect.stringContaining('2回定義') })],
   });
 });
+
+test('a condition or scrutinee that never finishes ends a function that returns a value', () => {
+  const program = `fn by_condition() -> i32 { if { return 7; false } {}; }
+fn by_scrutinee() -> i32 { match { return 3; 1 } { _ => {} }; }
+fn by_block() -> i32 { let _x = { return 5; }; }
+fn main() {
+    println!("{} {} {}", by_condition(), by_scrutinee(), by_block());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '7 3 5\n' });
+  const optional = 'fn cond() -> bool { true }\nfn stop() -> i32 { if cond() { return 1; }; }\nfn main() {}';
+  expect(executeProgram('rust', optional)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ message: expect.stringContaining('値を返していません') })],
+  });
+});
