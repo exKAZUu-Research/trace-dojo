@@ -33,3 +33,15 @@ class NestedDefaults {
   }
 }
 console.log(typed(), generic(), omittedOuter(), new NestedDefaults().getValue());
+
+function requiredOuter({ outer: { value = 1 } } = { outer: { value: 2 } }) {
+  return value;
+}
+function fromArray([{value = 3}] = [{value: 4}]) {
+  return value;
+}
+const configKey = 'count';
+function computedOuter({ outer: { [configKey]: count = 5 } } = { outer: { count: 6 } }) {
+  return count;
+}
+console.log(requiredOuter({outer: {}}), requiredOuter(), fromArray([{}]), fromArray(), computedOuter({outer: {}}), computedOuter());

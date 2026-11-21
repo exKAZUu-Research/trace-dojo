@@ -249,7 +249,7 @@ export class FunctionChecker {
             },
             {
               annotated: parameterNode.childForFieldName('type') !== null,
-              inferredParameter: this.c.patterns.hasInferredParameterType(parameterNode),
+              parameter: true,
             }
           )
         );
@@ -605,7 +605,7 @@ export class FunctionChecker {
       },
       {
         annotated: parameter.childForFieldName('type') !== null,
-        inferredParameter: this.c.patterns.hasInferredParameterType(parameter),
+        parameter: true,
       }
     );
   }
@@ -617,15 +617,15 @@ export class FunctionChecker {
   ): Type | undefined {
     const value = parameter.childForFieldName('value');
     if (!value) return undefined;
-    const expected =
-      this.c.typeNodes.annotationType(parameter.childForFieldName('type')) ??
-      (contextual && this.c.signatures.contextualParameterType(contextual, index, false));
+    const annotation = this.c.typeNodes.annotationType(parameter.childForFieldName('type'));
+    const expected = annotation ?? (contextual && this.c.signatures.contextualParameterType(contextual, index, false));
     const pattern = parameter.childForFieldName('pattern') ?? parameter;
-    const implied = expected ? undefined : this.c.patterns.impliedType(pattern);
+    const implied = expected ? undefined : this.c.patterns.impliedBindingType(pattern, false, true);
     const valueType = this.c.patterns.initializerType(value, expected ?? implied);
-    if (expected) this.c.expressions.checkAssignable(pattern, valueType, expected, value);
+    const initial = annotation ? valueType : this.c.patterns.parameterInitializerType(pattern, valueType);
+    if (expected) this.c.expressions.checkAssignable(pattern, initial, expected, value);
     else this.c.patterns.checkInitializer(pattern, value, valueType);
-    return valueType;
+    return initial;
   }
 
   /**

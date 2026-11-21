@@ -1,3 +1,13 @@
 const f30 = () => 1;
 console.log(typeof f30.toString, typeof (f30.toString));
 console.log(Function.prototype.toString === Object.prototype.toString, f30.toString !== undefined);
+
+function sourceMetadata() {}
+const nameOfSourceMethod = sourceMetadata.toString.name;
+const sourceMethod = sourceMetadata['toString'];
+const { toString: extractedMethod } = sourceMetadata;
+const { name: aliasName } = sourceMethod;
+const { name: destructuredName, length: destructuredLength } = sourceMetadata.toString;
+const { toString: { name: nestedName } } = sourceMetadata;
+console.log(nameOfSourceMethod, (sourceMetadata.toString)['length'], Function.prototype.toString.name);
+console.log(sourceMethod?.name, extractedMethod['length'], destructuredName, destructuredLength, nestedName, aliasName);

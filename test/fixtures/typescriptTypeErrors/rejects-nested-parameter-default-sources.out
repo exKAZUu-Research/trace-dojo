@@ -6,3 +6,13 @@
 (17,27): error TS2339: Property 'value' does not exist on type '{}'.
 (18,41): error TS2339: Property 'value' does not exist on type '{}'.
 (22,19): error TS2339: Property 'value' does not exist on type '{}'.
+(28,31): error TS7031: Binding element 'value' implicitly has an 'any' type.
+(29,31): error TS7031: Binding element 'value' implicitly has an 'any' type.
+(30,38): error TS7031: Binding element 'missing' implicitly has an 'any' type.
+(32,34): error TS7031: Binding element 'value' implicitly has an 'any' type.
+(33,41): error TS7031: Binding element 'value' implicitly has an 'any' type.
+(34,41): error TS7031: Binding element 'value' implicitly has an 'any' type.
+(36,10): error TS7031: Binding element 'value' implicitly has an 'any' type.
+(38,17): error TS2322: Type '[]' is not assignable to type '[number]'.
+  Source has 0 element(s) but target requires 1.
+(42,17): error TS2741: Property 'value' is missing in type '{}' but required in type '{ value: number; }'.

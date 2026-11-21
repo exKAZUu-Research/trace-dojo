@@ -24,3 +24,19 @@ const method = {
   },
 };
 console.log(arrow(), expression(), method.read());
+
+function missingTupleBinding([value] = []) { return value; }
+function missingFirstBinding([value, fallback = 1] = []) { return [value, fallback]; }
+function missingAfterValue([present, missing] = [1]) { return [present, missing]; }
+const tupleSource = [] as [];
+function missingFromStoredTuple([value] = tupleSource) { return value; }
+function missingNestedBinding({values: [value] = []} = {}) { return value; }
+function annotatedNestedTuple({values: [value] = []}: {values?: [number?]}) { return value; }
+function choose(callback: (value?: [number?]) => number | undefined) { return callback(); }
+choose(([value] = []) => value);
+function tupleWithValue([[value = 2]] = [[1]]) { return value; }
+tupleWithValue([[]]);
+function spreadObject({outer: {value = 2}} = {outer: {...{value: 1}}}) { return value; }
+spreadObject({outer: {}});
+function defaultedOuter({outer: {value = 2} = {}} = {outer: {value: 1}}) { return value; }
+defaultedOuter({outer: {}});

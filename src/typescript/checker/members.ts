@@ -1,4 +1,3 @@
-// code-gauge-allow-file fileNcss 417 -- Shares member and element resolution across reads, writes, and optional chains.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import {
@@ -7,15 +6,15 @@ import {
   unavailableWellKnownSymbols,
   wellKnownSymbolFeature,
 } from '../../javascript/unavailableMembers';
-import { assertedExpression, assertionTypes, isErasedTypeSyntax } from '../erasedSyntax';
+import { isErasedTypeSyntax } from '../erasedSyntax';
 import { unsupportedMessage } from '../unsupported';
 import type { Checker } from './checker';
 import type { State } from './flow';
 import { isGenericObjectOrIndexType } from './genericTypes';
 import { applicableIndex } from './indexInfos';
 import { nonNullableType, nullishConstraint } from './nullishConstraints';
-import { defaultedTarget } from './patterns';
 import { printedPropertyName } from './print';
+import { isNonConvertingSourceMethodUse } from './sourceMethodUses';
 import { spellingSuggestion } from './spelling';
 import { assignmentKind, chainObject, isOptionalChain, skipParentheses } from './syntax';
 import { tupleElementBeyond } from './tupleIndexes';
@@ -354,17 +353,14 @@ export class MemberChecker {
     if (owner === 'ArrayConstructor' && name === 'fromAsync') return 'Array.fromAsync';
     if (owner === 'RegExpConstructor' && unavailableRegExpStatics.has(name)) return legacyRegExpStaticsFeature;
     // Node.js shows a function's source as tsx's esbuild printed it, which this interpreter does not reproduce.
-    if (owner === 'Function' && name === 'toString' && !this.isNeverCalled(propertyNode))
+    if (
+      owner === 'Function' &&
+      name === 'toString' &&
+      !this.isTypeOnlyUse(propertyNode) &&
+      !isNonConvertingSourceMethodUse(this.c, propertyNode)
+    )
       return '関数やクラスの文字列への変換';
     return undefined;
-  }
-
-  private isNeverCalled(property: TreeNode): boolean {
-    const read = property.parent;
-    if (isOnlyCompared(read)) return true;
-    if (this.isTypeOnlyUse(property)) return true;
-    const binding = propertyBinding(property) ?? initializerBinding(read);
-    return !!binding && this.isOnlyComparedBinding(binding);
   }
 
   private isTypeOnlyUse(property: TreeNode): boolean {
@@ -373,34 +369,6 @@ export class MemberChecker {
       if (isErasedTypeSyntax(ancestor.type)) return true;
     }
     return false;
-  }
-
-  private isOnlyComparedBinding(binding: TreeNode): boolean {
-    const name = binding.text;
-    const symbol = this.c.binder.lookupValue(binding, name);
-    if (!symbol) return false;
-    const declarations = new Set(symbol.valueEntries.map((entry) => entry.name.id));
-    if (!declarations.has(binding.id)) return false;
-    // Redeclaring a simple parameter can expose the value through `arguments` in a non-strict function.
-    if (declarations.size > 1 && symbol.valueKind === 'parameter') return false;
-    const scope = symbol.scope.kind === 'module' ? this.c.root : (symbol.scope.node ?? this.c.root);
-    const visitsOnlyComparisons = (node: TreeNode): boolean => {
-      this.c.budget.spend();
-      if (isErasedTypeSyntax(node.type)) return true;
-      if (assertionTypes.has(node.type)) {
-        const expression = assertedExpression(node);
-        return !expression || visitsOnlyComparisons(expression);
-      }
-      if (
-        !declarations.has(node.id) &&
-        isValueName(node, name) &&
-        !isOnlyCompared(node) &&
-        this.c.binder.lookupValue(node, name) === symbol
-      )
-        return false;
-      return node.namedChildren.every((child) => child === null || visitsOnlyComparisons(child));
-    };
-    return visitsOnlyComparisons(scope);
   }
 
   indexSignatureType(type: Type, name: string): Type | undefined {
@@ -632,59 +600,6 @@ export class MemberChecker {
 
 function isGenericKey(index: Type): boolean {
   return ['typeParameter', 'keyof', 'conditional', 'indexedAccess'].includes(index.kind);
-}
-
-/**
- * Whether a member read's value is only examined or discarded, as the operand of `typeof`, `void`, or an equality, so
- * that it can never be called afterwards.
- */
-function isOnlyCompared(read: TreeNode | null): boolean {
-  const parent = read && outermostRuntimeExpression(read).parent;
-  if (parent?.type === 'unary_expression')
-    return ['typeof', 'void'].includes(parent.childForFieldName('operator')?.text ?? '');
-  return (
-    parent?.type === 'binary_expression' &&
-    ['===', '!==', '==', '!='].includes(parent.childForFieldName('operator')?.text ?? '')
-  );
-}
-
-function outermostRuntimeExpression(node: TreeNode): TreeNode {
-  let expression = node;
-  for (let parent = expression.parent; parent; parent = parent.parent) {
-    if (
-      parent.type !== 'parenthesized_expression' &&
-      (!assertionTypes.has(parent.type) || assertedExpression(parent)?.id !== expression.id)
-    )
-      break;
-    expression = parent;
-  }
-  return expression;
-}
-
-function isValueName(node: TreeNode, name: string): boolean {
-  return (
-    ['identifier', 'shorthand_property_identifier', 'shorthand_property_identifier_pattern'].includes(node.type) &&
-    node.text === name
-  );
-}
-
-function propertyBinding(property: TreeNode): TreeNode | undefined {
-  const entry = property.parent;
-  if (property.type === 'shorthand_property_identifier_pattern') return property;
-  if (entry?.type !== 'pair_pattern' || entry.childForFieldName('key')?.id !== property.id) return undefined;
-  const value = entry.childForFieldName('value');
-  const name = value && (defaultedTarget(value) ?? value);
-  return name?.type === 'identifier' ? name : undefined;
-}
-
-function initializerBinding(read: TreeNode | null): TreeNode | undefined {
-  if (!read) return undefined;
-  const initializer = outermostRuntimeExpression(read);
-  const declarator = initializer.parent;
-  if (declarator?.type !== 'variable_declarator' || declarator.childForFieldName('value')?.id !== initializer.id)
-    return undefined;
-  const name = declarator.childForFieldName('name');
-  return name?.type === 'identifier' ? name : undefined;
 }
 
 /** The outermost link of the chain a link belongs to, as `a?.b.c()` for `a?.b`. */

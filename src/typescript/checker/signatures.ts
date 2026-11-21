@@ -377,9 +377,9 @@ export class Signatures {
     this.inferringParameterDefaults.add(parameter.id);
     try {
       return this.c.silently(() => {
-        const implied = this.c.patterns.impliedType(pattern);
+        const implied = this.c.patterns.impliedBindingType(pattern, false, true);
         const initializer = this.c.patterns.initializerType(value, implied);
-        return this.c.patterns.parameterInitializerType(pattern, initializer, implied);
+        return this.c.patterns.parameterInitializerType(pattern, initializer);
       });
     } finally {
       this.inferringParameterDefaults.delete(parameter.id);

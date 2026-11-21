@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 785 -- Types literals and their spreads, members, and widening in the same literal context.
+// code-gauge-allow-file fileNcss 787 -- Types literals and their spreads, members, and widening in the same literal context.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExpressionListFlow, tupleArgumentContexts } from './callArity';
@@ -598,7 +598,12 @@ export class LiteralChecker {
   }
 
   private setWritten(literal: ObjectLiteral, name: string, property: Property): void {
-    literal.properties.set(name, property);
+    const { contextual } = literal;
+    const optional =
+      contextual &&
+      this.c.patterns.initializerContexts.has(contextual) &&
+      this.c.propertyOf(contextual, name)?.optional;
+    literal.properties.set(name, optional ? { ...property, optional } : property);
     literal.writtenNames.add(name);
     if (property.declaration) literal.explicitMembers.set(name, property.declaration);
   }

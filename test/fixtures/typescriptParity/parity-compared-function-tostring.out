@@ -1,2 +1,4 @@
 function function
 false true
+toString 0 toString
+toString 0 toString 0 toString toString

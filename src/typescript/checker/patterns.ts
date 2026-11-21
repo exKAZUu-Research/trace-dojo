@@ -4,10 +4,10 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { functionLikeTypes } from './binder';
 import {
-  applyParameterPattern,
   defaultedTarget,
   impliedPatternType,
   inferredPatternParameterType,
+  padParameterInitializer,
 } from './bindingPatternTypes';
 import type { Checker } from './checker';
 import { isDefinitelyFalsy, isSpreadableProperty, spreadCopy } from './literals';
@@ -42,7 +42,7 @@ interface BindingOptions {
   annotated?: boolean;
   isConst?: boolean;
   literalSource?: TreeNode;
-  inferredParameter?: boolean;
+  parameter?: boolean;
 }
 
 type Bind = (identifier: TreeNode, type: Type, assigned?: Type) => void;
@@ -50,6 +50,7 @@ type Bind = (identifier: TreeNode, type: Type, assigned?: Type) => void;
 /** Gives the names a binding pattern declares the types of what it destructures. */
 export class BindingPatterns {
   readonly correlatedSources = new Map<number, Type>();
+  readonly initializerContexts = new WeakSet<Type>();
   private readonly selectedKeys = new Map<number, string[] | undefined>();
   private readonly inferredParameters = new Set<number>();
   constructor(private readonly c: Checker) {}
@@ -109,11 +110,9 @@ export class BindingPatterns {
   private bindDefault(pattern: TreeNode, type: Type, bind: Bind, options: BindingOptions, assigned?: Type): void {
     const left = pattern.childForFieldName('left') as TreeNode;
     const right = pattern.childForFieldName('right') as TreeNode;
-    const implied = this.impliedBindingType(left, options.isConst, options.inferredParameter);
+    const implied = this.impliedBindingType(left, options.isConst, options.parameter);
     const initialDefault = this.initializerType(right, implied ?? (options.annotated ? type : undefined), true);
-    const defaultType = options.inferredParameter
-      ? applyParameterPattern(this.c, left, initialDefault, implied)
-      : initialDefault;
+    const defaultType = options.parameter ? padParameterInitializer(this.c, left, initialDefault) : initialDefault;
     this.checkInitializer(left, right, initialDefault);
     const withoutUndefined = this.c.relations.removeUndefined(type);
     const initial =
@@ -192,13 +191,13 @@ export class BindingPatterns {
     return impliedPatternType(this.c, pattern, leafType);
   }
 
-  inferredParameterType(parameter: TreeNode, pattern: TreeNode, implicitAny: (element: TreeNode) => void): Type {
+  inferredParameterType(parameter: TreeNode, pattern: TreeNode): Type {
     if (this.c.silent === 0) this.inferredParameters.add(parameter.id);
-    return inferredPatternParameterType(this.c, pattern, implicitAny);
+    return inferredPatternParameterType(this.c, pattern);
   }
 
-  hasInferredParameterType(parameter: TreeNode): boolean {
-    return this.inferredParameters.has(parameter.id);
+  reportImplicitAny(element: TreeNode): void {
+    this.c.error(element, `分割代入の要素 ${element.text} の型が暗黙に any になります。型を書いてください。`);
   }
 
   checkParameterDefaultRead(reference: TreeNode, symbol: Sym): void {
@@ -226,8 +225,8 @@ export class BindingPatterns {
     return impliedPatternType(this.c, pattern, (element) => this.bindingLeafType(element, isConst), parameter);
   }
 
-  parameterInitializerType(pattern: TreeNode, value: Type, implied: Type | undefined): Type {
-    return applyParameterPattern(this.c, pattern, value, implied, 'wholeParameter');
+  parameterInitializerType(pattern: TreeNode, value: Type): Type {
+    return padParameterInitializer(this.c, pattern, value);
   }
 
   private bindingLeafType(element: TreeNode, isConst = false): Type {

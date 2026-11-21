@@ -1,14 +1,13 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
-import { arrayPatternElements, named, propertyNameText } from './syntax';
+import { arrayLiteralLength, arrayPatternElements, named, propertyNameText } from './syntax';
 import {
   anonymousObject,
   anyType,
   emptyStructure,
   freshObjectLiteral,
   isPropertyKeyLiteral,
-  mapType,
   type ObjectType,
   type Property,
   simpleProperty,
@@ -23,124 +22,85 @@ export function impliedPatternType(
   leafType: (element: TreeNode) => Type,
   parameter = false
 ): Type | undefined {
-  return patternShape(
+  const shape = patternShape(
     c,
     pattern,
-    (element) => impliedPatternType(c, defaultedTarget(element) ?? element, leafType, parameter) ?? leafType(element),
+    (element) => {
+      const initializer = parameter ? parameterElementDefaultType(c, element) : undefined;
+      return (
+        initializer ??
+        impliedPatternType(c, defaultedTarget(element) ?? element, leafType, parameter) ??
+        leafType(element)
+      );
+    },
     parameter
   );
+  if (parameter && pattern.type === 'object_pattern' && shape) c.patterns.initializerContexts.add(shape);
+  return shape;
 }
 
-export function inferredPatternParameterType(
-  c: Checker,
-  pattern: TreeNode,
-  implicitAny: (element: TreeNode) => void
-): Type {
-  const type = patternShape(c, pattern, (element) => inferParameterElement(c, element, implicitAny), true);
+export function inferredPatternParameterType(c: Checker, pattern: TreeNode): Type {
+  const type = patternShape(
+    c,
+    pattern,
+    (element) => parameterElementDefaultType(c, element) ?? inferredPatternParameterType(c, element),
+    true
+  );
   if (type) return type;
-  implicitAny(pattern);
+  c.patterns.reportImplicitAny(pattern);
   return anyType;
 }
 
-type ParameterInitializer = 'bindingDefault' | 'element' | 'wholeParameter';
-
-export function applyParameterPattern(
-  c: Checker,
-  pattern: TreeNode,
-  value: Type,
-  implied: Type | undefined,
-  mode: ParameterInitializer = 'bindingDefault'
-): Type {
-  if (!implied || implied.kind !== 'object') return value;
-  const project = (member: Type): Type => {
-    if (member.kind !== 'object') return member;
-    if (pattern.type === 'array_pattern' && member.tuple && implied.tuple)
-      return tupleInitializer(c, pattern, member.tuple, implied.tuple, mode);
-    if (pattern.type === 'object_pattern' && member.fresh)
-      return objectInitializer(c, pattern, member, implied, mode !== 'wholeParameter');
-    return member;
-  };
-  return mode === 'wholeParameter' ? project(value) : mapType(value, project);
+export function padParameterInitializer(c: Checker, pattern: TreeNode, value: Type): Type {
+  if (value.kind !== 'object') return value;
+  if (pattern.type === 'array_pattern' && value.tuple) return padTupleInitializer(c, pattern, value.tuple, value);
+  if (pattern.type === 'object_pattern' && value.fresh) return padObjectInitializer(c, pattern, value);
+  return value;
 }
 
-function objectInitializer(
-  c: Checker,
-  pattern: TreeNode,
-  value: ObjectType,
-  implied: ObjectType,
-  nested: boolean
-): Type {
+function padObjectInitializer(c: Checker, pattern: TreeNode, value: ObjectType): Type {
   const structure = c.structureOf(value);
-  const properties = new Map(structure.properties);
-  const expected = c.structureOf(implied).properties;
-  if (nested) projectNestedProperties(c, pattern, properties, expected);
-  for (const [name, property] of expected) {
-    if (property.optional) properties.set(name, { ...(properties.get(name) ?? property), optional: true });
-  }
-  return freshObjectLiteral(anonymousObject(() => ({ ...structure, properties }), { isLiteral: true }));
-}
-
-function projectNestedProperties(
-  c: Checker,
-  pattern: TreeNode,
-  properties: Map<string, Property>,
-  expected: Map<string, Property>
-): void {
+  const missing = new Map<string, Property>();
   for (const element of named(pattern)) {
-    if (element.type !== 'pair_pattern') continue;
-    const key = element.childForFieldName('key') as TreeNode;
-    const pattern = element.childForFieldName('value') as TreeNode;
-    const nested = defaultedTarget(pattern) ?? pattern;
-    if (!isBindingPattern(nested)) continue;
-    const name = impliedPropertyName(c, key, true);
-    const actual = name === undefined ? undefined : properties.get(name);
-    if (!actual) continue;
-    properties.set(actual.name, {
-      ...actual,
-      type: () => applyParameterPattern(c, nested, actual.type(), expected.get(actual.name)?.type(), 'element'),
-    });
+    const { name, value: binding } = objectBindingEntry(c, element, true);
+    if (name === undefined || structure.properties.has(name)) continue;
+    const type = parameterElementDefaultType(c, binding);
+    if (type) missing.set(name, simpleProperty(name, type, { optional: true }));
   }
+  if (missing.size === 0) return value;
+  return freshObjectLiteral(
+    anonymousObject(() => ({ ...structure, properties: new Map([...structure.properties, ...missing]) }), {
+      isLiteral: true,
+    })
+  );
 }
 
-function tupleInitializer(
-  c: Checker,
-  pattern: TreeNode,
-  value: TupleInfo,
-  implied: TupleInfo,
-  mode: ParameterInitializer
-): Type {
-  const entries = mode === 'wholeParameter' ? [] : arrayPatternElements(pattern);
-  const elements = [...value.elements];
-  if (value.elements.some((element) => element.rest)) return c.tupleType(elements, value.readonly);
-  for (const { element, index } of entries) {
-    const actual = elements[index];
-    const nested = defaultedTarget(element) ?? element;
-    if (actual && isBindingPattern(nested))
-      elements[index] = {
-        ...actual,
-        type: applyParameterPattern(c, nested, actual.type, implied.elements[index]?.type, 'element'),
-      };
+function padTupleInitializer(c: Checker, pattern: TreeNode, tuple: TupleInfo, value: Type): Type {
+  const { elements: source, readonly } = tuple;
+  const length = arrayLiteralLength(pattern);
+  if (source.length >= length || source.some((element) => element.rest)) return value;
+  const bindings = new Map(arrayPatternElements(pattern).map(({ element, index }) => [index, element]));
+  const elements = [...source];
+  for (let index = elements.length; index < length; index++) {
+    const element = bindings.get(index);
+    if (element && isRest(element)) break;
+    const type = element && parameterElementDefaultType(c, element);
+    if (element && !type) c.patterns.reportImplicitAny(element);
+    elements.push({ type: type ?? anyType, optional: true, rest: false });
   }
-  if (mode !== 'element' && elements.length > lastRequiredPosition(entries)) {
-    for (const element of implied.elements.slice(elements.length))
-      if (!element.rest) elements.push({ ...element, optional: true });
-  }
-  return c.tupleType(elements, value.readonly);
+  return c.tupleType(elements, readonly);
 }
 
-function isBindingPattern(node: TreeNode): boolean {
-  return node.type === 'object_pattern' || node.type === 'array_pattern';
-}
-
-function inferParameterElement(c: Checker, element: TreeNode, implicitAny: (element: TreeNode) => void): Type {
+function parameterElementDefaultType(c: Checker, element: TreeNode): Type | undefined {
   const target = defaultedTarget(element);
-  const value = target && element.childForFieldName('right');
-  if (!value) return inferredPatternParameterType(c, element, implicitAny);
+  if (!target) return undefined;
+  const value = element.childForFieldName('right');
+  if (!value) return undefined;
   const contextual = c.patterns.impliedBindingType(target, false, true);
   return c.flow.probe(() =>
     c.silently(() => {
       const initial = c.patterns.initializerType(value, contextual);
-      return c.literals.widenDeclared(applyParameterPattern(c, target, initial, contextual), false);
+      return c.literals.widenDeclared(padParameterInitializer(c, target, initial), false, true);
     })
   );
 }
@@ -169,16 +129,24 @@ function patternShape(
 function objectType(c: Checker, pattern: TreeNode, elementType: (element: TreeNode) => Type, parameter: boolean): Type {
   const structure = emptyStructure();
   for (const element of named(pattern)) {
-    const isPair = element.type === 'pair' || element.type === 'pair_pattern';
-    const value = isPair ? (element.childForFieldName('value') as TreeNode) : element;
-    const key = isPair ? element.childForFieldName('key') : undefined;
-    const name = key ? impliedPropertyName(c, key, parameter) : (defaultedTarget(element) ?? element).text;
+    const { name, value } = objectBindingEntry(c, element, parameter);
     if (isRest(element) || (name === undefined && !parameter))
       structure.stringIndex = { type: anyType, readonly: false };
     else if (name !== undefined)
       structure.properties.set(name, simpleProperty(name, elementType(value), { optional: !!defaultedTarget(value) }));
   }
   return anonymousObject(() => structure);
+}
+
+function objectBindingEntry(
+  c: Checker,
+  element: TreeNode,
+  parameter: boolean
+): { name: string | undefined; value: TreeNode } {
+  const key = element.childForFieldName('key');
+  const value = key ? (element.childForFieldName('value') ?? element) : element;
+  const name = key ? impliedPropertyName(c, key, parameter) : (defaultedTarget(element) ?? element).text;
+  return { name, value };
 }
 
 function impliedPropertyName(c: Checker, key: TreeNode, parameter: boolean): string | undefined {
