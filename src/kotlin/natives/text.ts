@@ -1,6 +1,6 @@
 // code-gauge-allow-file fileNcss 410 -- the text and character natives share string, casing, and parsing operations.
 import { formatJava, type FormatValues } from '../../interpreter/javaFormatter';
-import { runtimeClassOf } from '../dispatch';
+import { callFunction, runtimeClassOf } from '../dispatch';
 import { float32FromText } from '../float32';
 import { charToString, formatPrimitive, hashOf, stringOf } from '../format';
 import { toInt32 } from '../operators';
@@ -10,12 +10,13 @@ import {
   copySequenceForBuilder,
   sequenceAll,
   sequenceContentEquals,
+  sequenceFindAnyString,
   sequenceIndexOf,
   sequenceIndexOfAnyChar,
-  sequenceIndexOfAnyString,
   sequenceIndexOfChar,
   sequenceLines,
   sequenceMatchesAt,
+  sequenceRegionMatches,
   sequenceSplit,
 } from './charSequences';
 import { elementsOf, newList } from './collections';
@@ -211,23 +212,38 @@ const TEXT_SEARCH_NATIVES: Record<string, TextNative> = {
       true
     ),
   'CharSequence.indexOfAny(Collection<String>, Int, Boolean)': (frame, receiver, [strings, start, ignoreCase]) =>
-    sequenceIndexOfAnyString(
+    sequenceFindAnyString(
       frame,
       receiver,
       elementsOf(frame, strings).map(text),
       start as number,
       ignoreCase === true,
       false
-    ),
+    )?.index ?? -1,
   'CharSequence.lastIndexOfAny(Collection<String>, Int, Boolean)': (frame, receiver, [strings, start, ignoreCase]) =>
-    sequenceIndexOfAnyString(
+    sequenceFindAnyString(
       frame,
       receiver,
       elementsOf(frame, strings).map(text),
       start as number,
       ignoreCase === true,
       true
-    ),
+    )?.index ?? -1,
+  'CharSequence.findAnyOf(Collection<String>, Int, Boolean)': (frame, receiver, [strings, start, ignoreCase]) =>
+    delimiterPair(frame, receiver, strings, start as number, ignoreCase === true, false),
+  'CharSequence.findLastAnyOf(Collection<String>, Int, Boolean)': (frame, receiver, [strings, start, ignoreCase]) =>
+    delimiterPair(frame, receiver, strings, start as number, ignoreCase === true, true),
+  'CharSequence.regionMatches(Int, CharSequence, Int, Int, Boolean)': (
+    frame,
+    receiver,
+    [from, other, otherFrom, count, ignoreCase]
+  ) =>
+    sequenceRegionMatches(frame, receiver, other, {
+      from: from as number,
+      otherFrom: otherFrom as number,
+      count: count as number,
+      ignoreCase: ignoreCase === true,
+    }),
   'CharSequence?.contentEquals(CharSequence?)': (frame, receiver, [other]) =>
     sequenceContentEquals(frame, receiver, other, false),
   'CharSequence?.contentEquals(CharSequence?, Boolean)': (frame, receiver, [other, ignoreCase]) =>
@@ -277,13 +293,11 @@ const TEXT_SEARCH_NATIVES: Record<string, TextNative> = {
       typeof receiver === 'string' ? receiver.split(LINE_ENDINGS) : sequenceLines(frame, receiver)
     ),
   'String.reversed()': (frame, receiver) => result(frame, reverseKeepingPairs(text(receiver))),
-  'String.toCharArray()': (frame, receiver) => {
-    const array = new KObject(libraryClass('kotlin.CharArray'), 0);
-    // oxlint-disable-next-line unicorn/prefer-code-point -- Kotlin chars are UTF-16 code units.
-    array.items = Array.from({ length: text(receiver).length }, (_, index) => text(receiver).charCodeAt(index));
-    frame.runtime.allocate(frame, array.items.length);
-    return array;
-  },
+  'String.toCharArray()': (frame, receiver) => stringCharArray(frame, text(receiver), 0, text(receiver).length),
+  'String.toCharArray(Int, Int)': (frame, receiver, [start, end]) =>
+    stringCharArray(frame, text(receiver), start as number, end as number),
+  'String.toCharArray(CharArray, Int, Int, Int)': (frame, receiver, [chars, offset, start, end]) =>
+    copyStringChars(frame, text(receiver), chars as KObject, offset as number, start as number, end as number),
   'String.padStart(Int, Char)': (frame, receiver, [length, char]) => {
     if ((length as number) < 0)
       throwError(frame, 'java.lang.IllegalArgumentException', `Desired length ${length as number} is less than zero.`);
@@ -525,6 +539,60 @@ function replaceAll(frame: Frame, value: string, oldValue: string, replacement: 
   }
   parts.push(value.slice(offset));
   return parts.join('');
+}
+
+function delimiterPair(
+  frame: Frame,
+  receiver: Value,
+  strings: Value,
+  from: number,
+  ignoreCase: boolean,
+  backwards: boolean
+): Value {
+  const match = sequenceFindAnyString(
+    frame,
+    receiver,
+    elementsOf(frame, strings).map(text),
+    from,
+    ignoreCase,
+    backwards
+  );
+  if (!match) return undefined;
+  const constructor = libraryClass('kotlin.Pair').constructors[0];
+  return callFunction(constructor, frame, undefined, [new Boxed('Int', match.index), match.delimiter], undefined);
+}
+
+function stringCharArray(frame: Frame, value: string, from: number, to: number): KObject {
+  if (from < 0 || to > value.length)
+    throwError(
+      frame,
+      'java.lang.IndexOutOfBoundsException',
+      `fromIndex: ${from}, toIndex: ${to}, size: ${value.length}`
+    );
+  if (from > to) throwError(frame, 'java.lang.IllegalArgumentException', `fromIndex: ${from} > toIndex: ${to}`);
+  frame.runtime.allocate(frame, to - from);
+  const array = new KObject(libraryClass('kotlin.CharArray'), 0);
+  // oxlint-disable-next-line unicorn/prefer-code-point -- a Char array holds UTF-16 code units.
+  array.items = Array.from({ length: to - from }, (_, index) => value.charCodeAt(from + index));
+  return array;
+}
+
+function copyStringChars(
+  frame: Frame,
+  value: string,
+  array: KObject,
+  offset: number,
+  from: number,
+  to: number
+): KObject {
+  if (from < 0 || from > to || to > value.length) rangeError(frame, from, to, value.length);
+  const chars = array.items as Value[];
+  if (offset < 0 || offset > chars.length - (to - from)) rangeError(frame, offset, offset + to - from, chars.length);
+  for (let index = from; index < to; index++) {
+    // oxlint-disable-next-line unicorn/prefer-code-point -- a Char array holds UTF-16 code units.
+    chars[offset + index - from] = value.charCodeAt(index);
+  }
+  return array;
 }
 
 function splitSequence(

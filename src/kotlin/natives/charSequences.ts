@@ -108,27 +108,55 @@ export function sequenceIndexOfAnyChar(
   return findAnyChar(charSequence(frame, value), chars, start, ignoreCase, backwards);
 }
 
-export function sequenceIndexOfAnyString(
+export function sequenceFindAnyString(
   frame: Frame,
   value: Value,
   strings: string[],
   start: number,
   ignoreCase: boolean,
   backwards: boolean
-): number {
-  if (!ignoreCase && strings.length === 1) return sequenceIndexOf(frame, value, strings[0], start, false, backwards);
-  const source = charSequence(frame, value);
+): { index: number; delimiter: string } | undefined {
+  if (!ignoreCase && strings.length === 1) {
+    const index = sequenceIndexOf(frame, value, strings[0], start, false, backwards);
+    return index === -1 ? undefined : { index, delimiter: strings[0] };
+  }
   if (typeof value === 'string') {
     const matchers = strings.map((text) => textSearch(frame, value, text, ignoreCase));
-    return findIndex(
-      (index) => matchers.some((matcher) => matcher.matchesAt(index)),
+    let found = -1;
+    const index = findIndex(
+      (index) => {
+        found = matchers.findIndex((matcher) => matcher.matchesAt(index));
+        return found !== -1;
+      },
       backwards ? Math.min(start, value.length - 1) : Math.max(0, start),
       backwards ? 0 : value.length,
       backwards
     );
+    return index === -1 ? undefined : { index, delimiter: strings[found] };
   }
+  const source = charSequence(frame, value);
   const targets = strings.map((text) => charSequence(frame, text));
-  return findAnyString(source, targets, start, ignoreCase, backwards)?.index ?? -1;
+  const match = findAnyString(source, targets, start, ignoreCase, backwards);
+  return match && { index: match.index, delimiter: strings[match.position] };
+}
+
+export function sequenceRegionMatches(
+  frame: Frame,
+  left: Value,
+  right: Value,
+  { from, otherFrom, count, ignoreCase }: { from: number; otherFrom: number; count: number; ignoreCase: boolean }
+): boolean {
+  if (typeof left === 'string' && typeof right === 'string') {
+    if (from < 0 || otherFrom < 0 || from > left.length - count || otherFrom > right.length - count) return false;
+    if (count <= 0) return true;
+    return textSearch(
+      frame,
+      left.slice(from, from + count),
+      right.slice(otherFrom, otherFrom + count),
+      ignoreCase
+    ).matchesAt(0);
+  }
+  return regionMatches(charSequence(frame, left), from, charSequence(frame, right), otherFrom, count, ignoreCase);
 }
 
 export function sequenceContentEquals(frame: Frame, left: Value, right: Value, ignoreCase: boolean): boolean {
@@ -287,14 +315,16 @@ function findAnyString(
   start: number,
   ignoreCase: boolean,
   backwards: boolean
-): { index: number; length: number } | undefined {
+): { index: number; length: number; position: number } | undefined {
   const last = source.length();
   const step = backwards ? -1 : 1;
   const from = backwards ? Math.min(start, last - 1) : Math.max(0, start);
   const to = backwards ? 0 : last;
   for (let index = from; (to - index) * step >= 0; index += step) {
-    const matching = targets.find((target) => regionMatches(target, 0, source, index, target.length(), ignoreCase));
-    if (matching) return { index, length: matching.length() };
+    const position = targets.findIndex((target) =>
+      regionMatches(target, 0, source, index, target.length(), ignoreCase)
+    );
+    if (position !== -1) return { index, length: targets[position].length(), position };
   }
 }
 

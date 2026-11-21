@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 950 -- One method per kind of Kotlin statement and control structure.
+// code-gauge-allow-file fileNcss 958 -- One method per kind of Kotlin statement and control structure.
 import type {
   AssignmentStatement,
   Block,
@@ -363,11 +363,13 @@ export abstract class StatementCompiler extends OperatorCompiler {
     const { operator, row, target } = statement;
     if (operator === '=') {
       const place = this.compilePlace(scope, context, target, row, false);
+      const skipped = place.canSkip ? this.flow.copy() : undefined;
       const value = this.compileExpression(scope, context, statement.value, place.type);
       const converted = this.expectType(value, place.type, statement.value.row);
       const toPlace = convertRepr(converted, reprOf(this.core, place.type), place.repr);
       place.recordAssignment?.(value.type);
       this.narrowAfterAssignment(scope, target, value, place.type);
+      if (skipped) this.flow = Flow.merge([skipped, this.flow]);
       return this.withStep(
         row,
         (frame) => {
@@ -381,7 +383,6 @@ export abstract class StatementCompiler extends OperatorCompiler {
   }
 
   /** `x += y` and the like: `plusAssign` when the target's type has one, else `x = x + y`. */
-  // code-gauge-allow functionNcss 31 -- the operation shares receiver, value, and write state across resolution and evaluation.
   private compileCompoundAssignment(scope: Scope, context: FunctionContext, statement: AssignmentStatement): Exec {
     const { operator, row, target } = statement;
     const operation = operator.slice(0, -1) as '+' | '-' | '*' | '/' | '%';
@@ -410,7 +411,18 @@ export abstract class StatementCompiler extends OperatorCompiler {
         };
       }
     }
+    return this.compileStoredCompoundAssignment(scope, context, statement, operation);
+  }
+
+  private compileStoredCompoundAssignment(
+    scope: Scope,
+    context: FunctionContext,
+    statement: AssignmentStatement,
+    operation: keyof typeof ASSIGN_OPERATORS
+  ): Exec {
+    const { row, target } = statement;
     const place = this.compilePlace(scope, context, target, row, true);
+    const skipped = place.canSkip ? this.flow.copy() : undefined;
     const current = new Handoff<BoundPlace>();
     const currentHolder: Compiled = {
       type: place.readType ?? place.type,
@@ -422,6 +434,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     const toPlace = convertRepr(converted, reprOf(this.core, place.type), place.repr);
     place.recordAssignment?.(combined.type);
     this.narrowAfterAssignment(scope, target, combined, place.type);
+    if (skipped) this.flow = Flow.merge([skipped, this.flow]);
     return (frame) => {
       const bound = place.bind(frame);
       if (bound.isSkipped) return;

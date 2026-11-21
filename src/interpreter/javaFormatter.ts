@@ -29,7 +29,7 @@ interface Specifier {
 /** Formats as `String.format` does for the conversions learners use. */
 // code-gauge-allow functionCognitiveComplexity 18 -- argument position and conversion rules share one left-to-right traversal.
 export function formatJava<V>(pattern: string, args: V[], values: FormatValues<V>): string {
-  const { specifiers, malformed } = scanPattern(values, pattern);
+  const specifiers = scanPattern(values, pattern);
   const result: string[] = [];
   let end = 0;
   let nextArg = 0;
@@ -56,26 +56,21 @@ export function formatJava<V>(pattern: string, args: V[], values: FormatValues<V
     );
     result.push(pad(formatted, flags, width));
   }
-  if (malformed) values.fail('UnknownFormatConversionException', "Conversion = '%'");
   result.push(pattern.slice(end));
   return result.join('');
 }
 
-function scanPattern<V>(values: FormatValues<V>, pattern: string): { specifiers: Specifier[]; malformed: boolean } {
+function scanPattern<V>(values: FormatValues<V>, pattern: string): Specifier[] {
   values.scan(pattern.length);
   const specifiers: Specifier[] = [];
-  let malformed = false;
   for (let start = pattern.indexOf('%'); start >= 0; start = pattern.indexOf('%', start + 1)) {
     const specifier = readSpecifier(pattern, start);
-    if (!specifier) {
-      malformed = true;
-      continue;
-    }
+    if (!specifier) values.fail('UnknownFormatConversionException', `Conversion = '${pattern[start + 1] ?? '%'}'`);
     checkSpecifier(values, specifier);
     specifiers.push(specifier);
     start = specifier.end - 1;
   }
-  return { specifiers, malformed };
+  return specifiers;
 }
 
 function readSpecifier(pattern: string, start: number): Specifier | undefined {
@@ -115,6 +110,8 @@ function skipDigits(pattern: string, start: number): number {
 }
 
 function checkSpecifier<V>(values: FormatValues<V>, { source, flags, width, precision, conversion }: Specifier): void {
+  if (!'bBhHsScCdoxXfeEgG%n'.includes(conversion))
+    values.fail('UnknownFormatConversionException', `Conversion = '${conversion}'`);
   const lower = conversion.toLowerCase();
   if (lower === 'n') return;
   // A width or precision makes text of its length, which is charged before anything is built.

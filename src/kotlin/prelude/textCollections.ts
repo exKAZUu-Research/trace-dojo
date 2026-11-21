@@ -118,7 +118,42 @@ inline fun <R> CharSequence.foldRightIndexed(initial: R, operation: (Int, Char, 
     return result
 }
 inline fun CharSequence.reduceOrNull(operation: (Char, Char) -> Char): Char? =
-    if (isEmpty()) null else reduce(operation)
+    reduceIndexedOrNull { _, acc, element -> operation(acc, element) }
+inline fun CharSequence.reduceIndexed(operation: (Int, Char, Char) -> Char): Char =
+    reduceIndexedOrNull(operation) ?: throw UnsupportedOperationException("Empty char sequence can't be reduced.")
+inline fun CharSequence.reduceIndexedOrNull(operation: (Int, Char, Char) -> Char): Char? {
+    val end = lastIndex
+    if (end < 0) return null
+    var result = this[0]
+    for (index in 1..end) result = operation(index, result, this[index])
+    return result
+}
+inline fun CharSequence.reduceRight(operation: (Char, Char) -> Char): Char =
+    reduceRightOrNull(operation) ?: throw UnsupportedOperationException("Empty char sequence can't be reduced.")
+inline fun CharSequence.reduceRightOrNull(operation: (Char, Char) -> Char): Char? =
+    reduceRightIndexedOrNull { _, element, acc -> operation(element, acc) }
+inline fun CharSequence.reduceRightIndexed(operation: (Int, Char, Char) -> Char): Char =
+    reduceRightIndexedOrNull(operation) ?: throw UnsupportedOperationException("Empty char sequence can't be reduced.")
+inline fun CharSequence.reduceRightIndexedOrNull(operation: (Int, Char, Char) -> Char): Char? {
+    val end = lastIndex
+    if (end < 0) return null
+    var result = this[end]
+    for (index in end - 1 downTo 0) result = operation(index, this[index], result)
+    return result
+}
+inline fun CharSequence.runningReduce(operation: (Char, Char) -> Char): List<Char> =
+    runningReduceIndexed { _, acc, element -> operation(acc, element) }
+inline fun CharSequence.runningReduceIndexed(operation: (Int, Char, Char) -> Char): List<Char> {
+    if (isEmpty()) return emptyList()
+    var result = this[0]
+    val values = ArrayList<Char>(length)
+    values.add(result)
+    for (index in 1..lastIndex) {
+        result = operation(index, result, this[index])
+        values.add(result)
+    }
+    return values
+}
 
 inline fun <R> CharSequence.runningFold(initial: R, operation: (R, Char) -> R): List<R> {
     if (isEmpty()) return listOf(initial)
@@ -148,6 +183,97 @@ inline fun <R> CharSequence.scan(initial: R, operation: (R, Char) -> R): List<R>
     runningFold(initial, operation)
 inline fun <R> CharSequence.scanIndexed(initial: R, operation: (Int, R, Char) -> R): List<R> =
     runningFoldIndexed(initial, operation)
+
+${charSumOfSource()}
+
+inline fun <K> CharSequence.groupBy(keySelector: (Char) -> K): Map<K, List<Char>> =
+    groupBy(keySelector) { it }
+inline fun <K, V> CharSequence.groupBy(keySelector: (Char) -> K, valueTransform: (Char) -> V): Map<K, List<V>> =
+    groupByTo(LinkedHashMap<K, MutableList<V>>(), keySelector, valueTransform)
+inline fun <K, M : MutableMap<in K, MutableList<Char>>> CharSequence.groupByTo(destination: M, keySelector: (Char) -> K): M =
+    groupByTo(destination, keySelector) { it }
+inline fun <K, V, M : MutableMap<in K, MutableList<V>>> CharSequence.groupByTo(
+    destination: M, keySelector: (Char) -> K, valueTransform: (Char) -> V
+): M {
+    for (element in this) {
+        val key = keySelector(element)
+        val values = destination.get(key) ?: ArrayList<V>().also { destination.put(key, it) }
+        values.add(valueTransform(element))
+    }
+    return destination
+}
+
+inline fun <R : Any> CharSequence.firstNotNullOf(transform: (Char) -> R?): R =
+    firstNotNullOfOrNull(transform) ?: throw NoSuchElementException("No element of the char sequence was transformed to a non-null value.")
+inline fun <R : Any> CharSequence.firstNotNullOfOrNull(transform: (Char) -> R?): R? {
+    for (element in this) {
+        val value = transform(element)
+        if (value != null) return value
+    }
+    return null
+}
+
+inline fun <R, C : MutableCollection<in R>> CharSequence.mapTo(destination: C, transform: (Char) -> R): C {
+    for (element in this) destination.add(transform(element))
+    return destination
+}
+inline fun <R, C : MutableCollection<in R>> CharSequence.mapIndexedTo(destination: C, transform: (Int, Char) -> R): C {
+    var index = 0
+    for (element in this) destination.add(transform(index++, element))
+    return destination
+}
+inline fun <R : Any, C : MutableCollection<in R>> CharSequence.mapNotNullTo(destination: C, transform: (Char) -> R?): C {
+    for (element in this) {
+        val value = transform(element)
+        if (value != null) destination.add(value)
+    }
+    return destination
+}
+inline fun <R : Any> CharSequence.mapIndexedNotNull(transform: (Int, Char) -> R?): List<R> =
+    mapIndexedNotNullTo(ArrayList<R>(), transform)
+inline fun <R : Any, C : MutableCollection<in R>> CharSequence.mapIndexedNotNullTo(
+    destination: C, transform: (Int, Char) -> R?
+): C {
+    var index = 0
+    for (element in this) {
+        val value = transform(index++, element)
+        if (value != null) destination.add(value)
+    }
+    return destination
+}
+
+inline fun CharSequence.filterTo(destination: StringBuilder, predicate: (Char) -> Boolean): StringBuilder {
+    for (element in this) if (predicate(element)) destination.append(element)
+    return destination
+}
+inline fun CharSequence.filterNotTo(destination: StringBuilder, predicate: (Char) -> Boolean): StringBuilder =
+    filterTo(destination) { !predicate(it) }
+inline fun CharSequence.filterIndexedTo(destination: StringBuilder, predicate: (Int, Char) -> Boolean): StringBuilder {
+    var index = 0
+    for (element in this) if (predicate(index++, element)) destination.append(element)
+    return destination
+}
+
+fun <C : MutableCollection<in Char>> CharSequence.toCollection(destination: C): C {
+    for (element in this) destination.add(element)
+    return destination
+}
+fun CharSequence.toHashSet(): HashSet<Char> = toCollection(HashSet<Char>(mapCapacity(length)))
+
+fun CharSequence.maxWith(comparator: Comparator<in Char>): Char = maxWithOrNull(comparator) ?: throw NoSuchElementException()
+fun CharSequence.minWith(comparator: Comparator<in Char>): Char = minWithOrNull(comparator) ?: throw NoSuchElementException()
+fun CharSequence.maxWithOrNull(comparator: Comparator<in Char>): Char? = bestWith(comparator, true)
+fun CharSequence.minWithOrNull(comparator: Comparator<in Char>): Char? = bestWith(comparator, false)
+private fun CharSequence.bestWith(comparator: Comparator<in Char>, largest: Boolean): Char? {
+    if (isEmpty()) return null
+    var best = this[0]
+    for (index in 1..lastIndex) {
+        val next = this[index]
+        val order = comparator.compare(best, next)
+        if (if (largest) order < 0 else order > 0) best = next
+    }
+    return best
+}
 `;
 
 function charSelectorExtrema(): string {
@@ -177,4 +303,24 @@ function charSelectorExtremum(direction: string, type: string, orNull: boolean):
     }
     return best
 }`;
+}
+
+function charSumOfSource(): string {
+  const types = [
+    ['Int', '0'],
+    ['Long', '0L'],
+    ['Double', '0.0'],
+    ['UInt', '0u'],
+    ['ULong', '0uL'],
+  ];
+  return types
+    .map(
+      ([type, zero]) => `@JvmName("sumOf${type}")
+inline fun CharSequence.sumOf(selector: (Char) -> ${type}): ${type} {
+    var result = ${zero}
+    for (element in this) result += selector(element)
+    return result
+}`
+    )
+    .join('\n');
 }

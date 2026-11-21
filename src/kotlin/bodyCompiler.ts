@@ -803,15 +803,8 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       if (seen.has(parent) || parent.isLibrary) return;
       seen.add(parent);
       for (const { cls } of parent.interfaces) visit(cls);
-      const hasDefaultMethod = [...parent.members.values()]
-        .flat()
-        .some(
-          (member) =>
-            member.visibility !== 'private' &&
-            !member.isAbstract &&
-            (member.kind === 'function' || member.hasCustomGetter)
-        );
-      if (hasDefaultMethod) this.ensureClassInitialized(frame, parent);
+      if ([...parent.members.values()].some((members) => members.some((member) => this.contributesJvmDefault(member))))
+        this.ensureClassInitialized(frame, parent);
     };
     for (const { cls: parent } of cls.interfaces) visit(parent);
   }

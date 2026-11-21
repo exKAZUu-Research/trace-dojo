@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 819 -- the natives of the collections, which share the helpers of their items.
+// code-gauge-allow-file fileNcss 849 -- the natives of the collections, which share the helpers of their items.
 import { callFunction, getPropertyValue, runtimeClassOf } from '../dispatch';
 import { hashOf, identityHash, stringOf, valueEquals } from '../format';
 import { toInt32 } from '../operators';
@@ -157,8 +157,15 @@ export function newList(
   frame.runtime.allocate(frame, values.length + 1);
   const list = new KObject(libraryClass(`kotlin.collections.${className}`), 0);
   list.items = values;
+  if (className === 'ArrayList') list.arrayList = { size: values.length, capacity: values.length };
   list.modCount = 0;
   list.readOnlyCollection = className === 'EmptyList';
+  return list;
+}
+
+function mutableListOfItems(frame: Frame, values: Value[]): KObject {
+  const list = newList(frame, 'ArrayList', values);
+  if (values.length === 0) list.arrayList = { size: 0, capacity: undefined };
   return list;
 }
 
@@ -347,17 +354,33 @@ function insertionIndex(frame: Frame, list: Value, position: number): number {
 function replaceListItems(frame: Frame, list: KObject, index: number, removed: number, added: Value[]): void {
   const view = listView(list);
   const source = view?.source ?? list;
-  const values = items(source);
+  const oldSize = indexedSize(source);
   const from = index + (view?.from ?? 0);
   const growth = added.length - removed;
-  frame.runtime.spend(values.length - from + added.length);
+  frame.runtime.spend(oldSize - from + added.length);
   if (growth > 0) frame.runtime.allocate(frame, growth);
-  replaceListRange(values, from, removed, added);
+  const values = listStorageForSize(frame, source, oldSize + growth);
+  replaceListRange(values, from, removed, added, oldSize);
+  if (source.arrayList) source.arrayList.size = oldSize + growth;
+  else values.length = oldSize + growth;
   touch(source);
   for (let current = list, range = view; range; current = range.parent, range = listView(current)) {
     range.size += growth;
     current.modCount = source.modCount;
   }
+}
+
+function listStorageForSize(frame: Frame, list: KObject, required: number): Value[] {
+  const current = items(list);
+  const array = list.arrayList;
+  if (!array || required <= (array.capacity ?? 0)) return current;
+  // Java replaces elementData on growth, so operations already holding it keep using the old array.
+  const capacity = array.capacity === undefined ? 10 : array.capacity + Math.floor(array.capacity / 2);
+  array.capacity = Math.max(required, capacity);
+  frame.runtime.spend(Math.floor(current.length / 64));
+  const grown = [...current];
+  list.items = grown;
+  return grown;
 }
 
 function defineLists(): void {
@@ -393,8 +416,13 @@ function defineLists(): void {
         list.items = [];
         list.modCount = 0;
         initialize(frame, list, args);
-        const capacity = cls === 'ArrayDeque' && signature === '(Int)' ? (args[0] as number) : list.items.length;
-        frame.runtime.allocate(frame, capacity + 1);
+        finishListAllocation(
+          frame,
+          list,
+          cls,
+          signature === '()',
+          signature === '(Int)' ? (args[0] as number) : undefined
+        );
         return UNIT;
       });
     }
@@ -407,6 +435,19 @@ function defineLists(): void {
     for (const [signature, native] of Object.entries(LIST_READING_NATIVES)) registerListNative(type, signature, native);
   }
   for (const [signature, native] of Object.entries(LIST_CHANGING_NATIVES)) registerListNative(LIST, signature, native);
+}
+
+function finishListAllocation(
+  frame: Frame,
+  list: KObject,
+  kind: string,
+  defaultSize: boolean,
+  initialCapacity: number | undefined
+): void {
+  const size = items(list).length;
+  if (kind === 'ArrayList') list.arrayList = { size, capacity: defaultSize ? undefined : (initialCapacity ?? size) };
+  const allocated = kind === 'ArrayDeque' ? (initialCapacity ?? size) : size;
+  frame.runtime.allocate(frame, allocated + 1);
 }
 
 function registerListNative(type: string, signature: string, native: ListNative): void {
@@ -433,19 +474,17 @@ function removeIfArrayList(frame: Frame, list: KObject, predicate: KObject): boo
   const modCount = source.modCount;
   const values = items(source);
   const from = view?.from ?? 0;
-  const size = view?.size ?? values.length;
+  const size = view?.size ?? indexedSize(source);
   const removed = new Uint8Array(size);
   const test = predicate.function;
   if (!test) throw new Error('Missing collection predicate');
-  let anyRemoved = false;
-  for (let index = 0; index < size; index++) {
-    if (test.call(frame, [values[from + index]]) === true) {
-      removed[index] = 1;
-      anyRemoved = true;
+  frame.runtime.withNativeRoots([values], () => {
+    for (let index = 0; index < size; index++) {
+      if (test.call(frame, [values[from + index]]) === true) removed[index] = 1;
     }
-  }
+  });
   if (source.modCount !== modCount) throwError(frame, 'java.util.ConcurrentModificationException');
-  if (!anyRemoved) return false;
+  if (!removed.includes(1)) return false;
   const kept: Value[] = [];
   for (let index = 0; index < size; index++) {
     if (!removed[index]) kept.push(values[from + index]);
@@ -502,12 +541,11 @@ function subList(frame: Frame, list: KObject, from: number, to: number): KObject
   return view;
 }
 
-function replaceListRange(values: Value[], from: number, removed: number, added: Value[]): void {
-  const oldLength = values.length;
+function replaceListRange(values: Value[], from: number, removed: number, added: Value[], size: number): void {
   const change = added.length - removed;
-  if (change > 0) values.length += change;
-  if (change !== 0) values.copyWithin(from + added.length, from + removed, oldLength);
-  if (change < 0) values.length += change;
+  if (change > 0 && size + change > values.length) values.length = size + change;
+  if (change !== 0) values.copyWithin(from + added.length, from + removed, size);
+  if (change < 0) values.fill(undefined, size + change, size);
   for (const [offset, value] of added.entries()) values[from + offset] = value;
 }
 
@@ -744,7 +782,7 @@ function defineMaps(): void {
   };
   for (const [signature, native] of Object.entries(natives)) defineNative(`${MAP}.${signature}`, native);
   for (const view of ['keys', 'values', 'entries'] as const) {
-    defineNativeProperty(`${MAP}.${view}`, (frame, map) => newView(frame, map as KObject, view));
+    defineNativeProperty(`${MAP}.${view}`, (frame, map) => liveMapView(frame, map as KObject, view));
   }
 }
 
@@ -928,6 +966,12 @@ function setEquals(frame: Frame, elements: Value[], other: Value): boolean {
 // Views of maps and iterators over stores.
 
 type ViewKind = 'keys' | 'values' | 'entries';
+
+function liveMapView(frame: Frame, map: KObject, kind: ViewKind): KObject {
+  const state = (map.native ??= {});
+  const views = (state.mapViews ??= {}) as Partial<Record<ViewKind, KObject>>;
+  return (views[kind] ??= newView(frame, map, kind));
+}
 
 function newView(frame: Frame, map: KObject, view: ViewKind): KObject {
   if (map.readOnlyCollection) {
@@ -1172,10 +1216,10 @@ function defineFactories(): void {
       return values.length === 0 ? newList(frame, 'EmptyList', []) : newList(frame, 'ArraysList', values);
     },
     'emptyList()': (frame) => newList(frame, 'EmptyList', []),
-    'mutableListOf()': (frame) => newList(frame, 'ArrayList', []),
-    'mutableListOf(vararg T)': (frame, _receiver, [array]) => newList(frame, 'ArrayList', varargItems(array)),
-    'arrayListOf()': (frame) => newList(frame, 'ArrayList', []),
-    'arrayListOf(vararg T)': (frame, _receiver, [array]) => newList(frame, 'ArrayList', varargItems(array)),
+    'mutableListOf()': (frame) => mutableListOfItems(frame, []),
+    'mutableListOf(vararg T)': (frame, _receiver, [array]) => mutableListOfItems(frame, varargItems(array)),
+    'arrayListOf()': (frame) => mutableListOfItems(frame, []),
+    'arrayListOf(vararg T)': (frame, _receiver, [array]) => mutableListOfItems(frame, varargItems(array)),
     'setOf()': (frame) => setInstance(frame, 'EmptySet', newStore('insertion')),
     'setOf(T)': (frame, _receiver, [element]) => setOfValues(frame, 'SingletonSet', 'insertion', [element], 1),
     'setOf(vararg T)': (frame, _receiver, [array]) => {

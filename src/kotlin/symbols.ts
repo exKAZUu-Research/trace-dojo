@@ -1,9 +1,10 @@
+import type { VISIBILITY_KEYWORDS } from './ast';
 import type { FunctionContext } from './compilerBase';
 import type { Frame, FunctionInfo, Invoker } from './runtime';
 import type { ClassType, KType } from './types';
 import type { Value } from './values';
 
-export type Visibility = 'public' | 'private' | 'protected' | 'internal';
+export type Visibility = (typeof VISIBILITY_KEYWORDS)[number];
 
 export class TypeParameterSymbol {
   bounds: KType[] = [];

@@ -30,8 +30,35 @@ const JVM_ALIASES: Record<string, string> = {
   'kotlin.collections.MutableMap.MutableEntry': 'java.util.Map$Entry',
 };
 
+const JVM_MEMBER_ALIASES: Readonly<Record<string, string>> = {
+  'kotlin.CharSequence.get': 'charAt',
+  'kotlin.CharSequence.length': 'length',
+  'kotlin.Enum.name': 'name',
+  'kotlin.Enum.ordinal': 'ordinal',
+  'kotlin.collections.Collection.size': 'size',
+  'kotlin.collections.List.size': 'size',
+  'kotlin.collections.MutableCollection.size': 'size',
+  'kotlin.collections.MutableList.size': 'size',
+  'kotlin.collections.MutableList.removeAt': 'remove',
+  'kotlin.collections.Set.size': 'size',
+  'kotlin.collections.MutableSet.size': 'size',
+  'kotlin.collections.Map.size': 'size',
+  'kotlin.collections.Map.keys': 'keySet',
+  'kotlin.collections.Map.values': 'values',
+  'kotlin.collections.Map.entries': 'entrySet',
+  'kotlin.collections.MutableMap.size': 'size',
+  'kotlin.collections.MutableMap.keys': 'keySet',
+  'kotlin.collections.MutableMap.values': 'values',
+  'kotlin.collections.MutableMap.entries': 'entrySet',
+};
+
 export function jvmSignatures(core: Core, member: MemberSymbol, accessors?: PropertyAccessors): string[] {
-  if (member.kind === 'function') return [functionSignature(core, member)];
+  if (member.kind === 'function') {
+    const alias = jvmMemberAlias(member);
+    return alias
+      ? [functionSignature(core, member), functionSignature(core, member, alias)]
+      : [functionSignature(core, member)];
+  }
   if (accessors?.constant || !member.type) return [];
   return propertySignatures(core, member, accessors?.customSetter === true);
 }
@@ -41,7 +68,7 @@ export function jvmParameterDescriptor(core: Core, parameter: ParameterSymbol): 
   return parameter.isVararg ? `[${descriptor}` : descriptor;
 }
 
-function functionSignature(core: Core, member: FunctionSymbol): string {
+function functionSignature(core: Core, member: FunctionSymbol, name = member.name): string {
   const inputs = [
     ...(member.extensionReceiver ? [member.extensionReceiver] : []),
     ...member.params.map((parameter) => parameter.type),
@@ -53,7 +80,7 @@ function functionSignature(core: Core, member: FunctionSymbol): string {
     ...(member.extensionReceiver ? [typeDescriptor(core, member.extensionReceiver)] : []),
     ...member.params.map((param) => jvmParameterDescriptor(core, param)),
   ].join('');
-  return `${jvmName(member, member.name, [...inputs, ...(result && member.owner ? [result] : [])])}(${parameters})${descriptor}`;
+  return `${jvmName(member, name, [...inputs, ...(result && member.owner ? [result] : [])])}(${parameters})${descriptor}`;
 }
 
 function propertySignatures(core: Core, member: PropertySymbol, customSetter: boolean): string[] {
@@ -67,11 +94,18 @@ function propertySignatures(core: Core, member: PropertySymbol, customSetter: bo
   if (member.visibility !== 'private' || member.hasCustomGetter) {
     const get = booleanName ? member.name : `get${baseName}`;
     signatures.push(`${jvmName(member, get, [...receiver, type])}(${parameters})${descriptor}`);
+    const alias = jvmMemberAlias(member);
+    if (alias) signatures.push(`${alias}(${parameters})${descriptor}`);
   }
   if (member.isVar && ((member.visibility !== 'private' && member.setterVisibility !== 'private') || customSetter)) {
     signatures.push(`${jvmName(member, `set${baseName}`, [...receiver, type])}(${parameters}${descriptor})V`);
   }
   return signatures;
+}
+
+function jvmMemberAlias(member: MemberSymbol): string | undefined {
+  const owner = member.owner;
+  return owner?.isLibrary ? JVM_MEMBER_ALIASES[`${owner.kotlinName}.${member.name}`] : undefined;
 }
 
 function jvmName(member: MemberSymbol, name: string, types: KType[]): string {

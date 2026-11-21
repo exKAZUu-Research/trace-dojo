@@ -1183,6 +1183,169 @@ fun main() { println(Child().get()) }`,
     stdout: 'from child\n',
   },
   {
+    name: 'text overloads preserve selector types, ranges, and destinations',
+    source: String.raw`fun main() {
+    val s = "abc"
+    println(s.sumOf { it.code.toLong() })
+    println(s.sumOf { it.code.toDouble() })
+    println(s.sumOf { it.code.toUInt() })
+    println(s.sumOf { it.code.toULong() })
+    println(s.groupBy({ it }, { it.code }))
+    println(s.toCharArray(0, 2).contentToString())
+    val target = charArrayOf('-', '-', '-', '-')
+    println(s.toCharArray(target, 1, 1, 3).contentToString())
+    println(listOf(s.reduceIndexed { index, acc, char -> if (index == 2) char else acc },
+        s.reduceIndexedOrNull { _, acc, _ -> acc }, s.reduceRight { _, acc -> acc },
+        "".reduceRightOrNull { _, acc -> acc }, s.runningReduce { _, char -> char }))
+    println(s.mapIndexedNotNull { index, char -> if (index == 1) null else char.toString() })
+    println(s.mapTo(mutableListOf<Int>()) { it.code })
+    println(s.filterTo(StringBuilder("prefix-")) { it != 'b' })
+    println(s.firstNotNullOf { if (it == 'c') it.code else null })
+    println(s.firstNotNullOfOrNull { if (it == 'q') it.code else null })
+    println(s.findAnyOf(listOf("bc", "c")))
+    println(s.findLastAnyOf(listOf("bc", "c")))
+    println(s.minWithOrNull(compareBy<Char> { it.code }))
+    println(s.maxWith(compareBy<Char> { it.code }))
+    println(s.toCollection(mutableListOf('z')))
+    println(s.toHashSet().size)
+    println(s.regionMatches(1, StringBuilder("bC"), 0, 2, ignoreCase = true))
+}`,
+    stdout:
+      '294\n294.0\n294\n294\n{a=[97], b=[98], c=[99]}\n[a, b]\n[-, b, c, -]\n[c, a, c, null, [a, b, c]]\n[a, c]\n[97, 98, 99]\nprefix-ac\n99\nnull\n(1, bc)\n(2, c)\na\nc\n[z, a, b, c]\n3\ntrue\n',
+  },
+  {
+    name: 'library accessors permit Kotlin overrides without descriptor collisions',
+    source: String.raw`class Valid : Exception() {
+    override val message: String get() = "custom"
+}
+class Text(private val backing: CharSequence) : CharSequence by backing {
+    override val length: Int get() = backing.length
+}
+fun main() { println(Valid().message); println(Text("abc").length) }`,
+    stdout: 'custom\n3\n',
+  },
+  {
+    name: 'ArrayList removeIf preserves JVM callback null checks',
+    source: String.raw`fun main() {
+    val a = mutableListOf(1, 2, 3)
+    try {
+        a.removeIf { if (it == 1) a.clear(); false }
+    } catch (error: NullPointerException) {
+        println("null check")
+    }
+    println(a)
+    val nullable = mutableListOf<Int?>(1, 2, 3)
+    try {
+        nullable.removeIf { println(it); if (it == 1) nullable.clear(); false }
+    } catch (error: Exception) {
+        println(error)
+    }
+}`,
+    stdout: 'null check\n[]\n1\nnull\nnull\njava.util.ConcurrentModificationException\n',
+  },
+  {
+    name: 'generated interface bridges initialize their interface companions',
+    source: String.raw`interface Named : Comparable<String> {
+    override fun compareTo(other: String): Int
+    companion object { init { println("comparison interface") } }
+}
+interface Base {
+    val token: Any
+}
+interface Derived : Base {
+    override val token: String
+    companion object { init { println("property interface") } }
+}
+class Item : Named, Derived {
+    override fun compareTo(other: String): Int = 0
+    override val token: String = "item"
+}
+fun main() { println("start"); Item() }`,
+    stdout: 'start\ncomparison interface\nproperty interface\n',
+  },
+  {
+    name: 'ArrayList growth gives a running sort the previous element buffer',
+    source: String.raw`fun sortAndGrow(list: MutableList<Int>, changeAt: Int) {
+    var comparisons = 0
+    try {
+        list.sortWith(Comparator { a, b ->
+            comparisons++
+            if (comparisons == changeAt) list.add(4)
+            a.compareTo(b)
+        })
+    } catch (error: ConcurrentModificationException) {
+        println(list)
+    }
+}
+fun main() {
+    sortAndGrow(mutableListOf(3, 1, 2), 1)
+    sortAndGrow(mutableListOf(3, 1, 2), 3)
+    val roomy = ArrayList<Int>(10)
+    roomy.addAll(listOf(3, 1, 2))
+    sortAndGrow(roomy, 1)
+    val empty = mutableListOf<Int>()
+    empty.addAll(listOf(3, 1, 2))
+    sortAndGrow(empty, 1)
+}`,
+    stdout: '[3, 1, 2, 4]\n[1, 3, 2, 4]\n[1, 2, 3, 4]\n[1, 2, 3, 4]\n',
+  },
+  {
+    name: 'malformed JVM format specifiers fail before formatting any arguments',
+    source: String.raw`class Noisy {
+    override fun toString(): String {
+        println("unexpected side effect")
+        return "noise"
+    }
+}
+fun main() {
+    for (pattern in listOf("%.d", "%5", "%1$", "%08,3d", "%!", "%- ", "%", "%Q %5")) {
+        try { println(pattern.format(1)) } catch (error: Exception) { println(error.message) }
+    }
+    try { println("%s %5".format(Noisy())) } catch (error: Exception) { println(error.message) }
+}`,
+    stdout:
+      "Conversion = '.'\nConversion = '5'\nConversion = '1'\nConversion = '0'\nConversion = '!'\nConversion = '-'\nConversion = '%'\nConversion = 'Q'\nConversion = '5'\n",
+  },
+  {
+    name: 'a data class equality overload preserves structural equals',
+    source: String.raw`data class Point(val x: Int) {
+    fun equals(other: Int): Boolean = x == other
+}
+data class Custom(val x: Int) {
+    override fun equals(other: Any?): Boolean = false
+    override fun hashCode(): Int = 0
+}
+fun main() {
+    val a = Point(1)
+    val b = Point(1)
+    println(a == b)
+    println(a.equals(1))
+    println(setOf(a).contains(b))
+    println(Custom(1) == Custom(1))
+}`,
+    stdout: 'true\ntrue\ntrue\nfalse\n',
+  },
+  {
+    name: 'escaped infix names resolve like ordinary escaped calls',
+    source: 'infix fun Int.`is`(n: Int) = this == n\nfun main() { println(1 `is` 1); println(1.`is`(1)) }',
+    stdout: 'true\ntrue\n',
+  },
+  {
+    name: 'mutable maps retain the same live views across reads and writes',
+    source: `fun main() {
+    val map = mutableMapOf("a" to 1)
+    val values = map.values
+    val views = hashSetOf(values)
+    println(map.values in views)
+    println(map.values === values)
+    println(map.keys === map.keys)
+    println(map.entries === map.entries)
+    map["b"] = 2
+    println(values)
+}`,
+    stdout: 'true\ntrue\ntrue\ntrue\n[1, 2]\n',
+  },
+  {
     name: 'a delegated local var shares its delegate across lambda calls',
     source: `import kotlin.properties.Delegates
 fun main() {
@@ -2306,6 +2469,30 @@ fun main() {
     false,
     'class A { companion object; class Companion }; fun main() {}',
   ],
+  [
+    'a method that clashes with an inherited Throwable accessor',
+    false,
+    'class Problem : Exception() { fun getMessage(): String = "custom" }\nfun main() { println(Problem().getMessage()) }',
+  ],
+  [
+    'a method that clashes with a delegated CharSequence accessor',
+    false,
+    'class Letters : CharSequence by "abc" { fun getLength(): Int = 7 }\nfun main() { println(Letters().getLength()) }',
+  ],
+  ['a zero-argument main returning Unit?', false, 'fun main(): Unit? = println("executed")'],
+  ['an array-argument main returning Unit?', false, 'fun main(args: Array<String>): Unit? = println(args.size)'],
+  [
+    'a missing return after a safe assignment with a terminal RHS',
+    false,
+    'class Box { var value = 0 }\nclass Stop { val never: Nothing get() = error("never") }\nfun compute(b: Box?, s: Stop): Int { b?.value = s.never }\nfun main() { println(compute(null, Stop())) }',
+  ],
+  [
+    'complementary type tests without null coverage in a nullable sealed when',
+    false,
+    'sealed interface Shape\ninterface Tagged\nopen class Group:Shape\nclass Marked:Shape,Tagged\nfun choose(s:Shape?):Int=when(s){is Tagged->1;!is Tagged->2}\nfun main() { println(choose(null)) }',
+  ],
+  ['a class with conflicting visibility modifiers', false, 'private public class A\nfun main() {}'],
+  ['a function with conflicting visibility modifiers', false, 'internal private fun f() = 1; fun main() {}'],
   ['a Nothing-returning function that falls through', false, 'fun bad(): Nothing { println("bad") }; fun main() {}'],
   ['a Nothing-returning function that always throws', true, 'fun abort(): Nothing { error("done") }; fun main() {}'],
   [

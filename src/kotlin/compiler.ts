@@ -259,6 +259,7 @@ export class Compiler extends BodyCompiler {
         !symbol.isLibrary &&
         !symbol.extensionReceiver &&
         symbol.returnType !== undefined &&
+        !resolved(symbol.returnType).nullable &&
         this.isClass(symbol.returnType, this.core.unit)
     );
     return (

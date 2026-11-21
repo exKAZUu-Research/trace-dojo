@@ -10,7 +10,7 @@ export class WhenCoverage {
 
   coverTypeCases(subject: KType, checked: KType, negated: boolean, booleanClass: ClassSymbol): void {
     const target = resolved(checked);
-    if (isNullable(subject) && isNullable(target) !== negated) this.cases.add('null');
+    if (!negated && isNullable(subject) && isNullable(target)) this.cases.add('null');
     const actual = resolved(subject);
     if (actual.kind !== 'class') return;
     const sameSign = negated ? this.negativeTypes : this.positiveTypes;

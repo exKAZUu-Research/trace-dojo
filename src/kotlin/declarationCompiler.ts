@@ -1,5 +1,6 @@
-// code-gauge-allow-file fileNcss 936 -- The declaration compiler shares symbol and class-linking logic.
+// code-gauge-allow-file fileNcss 950 -- The declaration compiler shares symbol and class-linking logic.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
+import { VISIBILITY_KEYWORDS } from './ast';
 import type {
   ClassDecl,
   ClassParameterDecl,
@@ -118,12 +119,10 @@ export interface PropertyEntry {
   delegateGlobal?: number;
 }
 
-const ACCESS_KEYWORDS: Visibility[] = ['private', 'protected', 'internal', 'public'];
-
 const VISIBILITY_RANK: Record<Visibility, number> = { private: 0, protected: 1, internal: 2, public: 2 };
 
 function visibilityOf(modifiers: Modifiers): Visibility {
-  return ACCESS_KEYWORDS.find((keyword) => modifiers.keywords.has(keyword)) ?? 'public';
+  return VISIBILITY_KEYWORDS.find((keyword) => modifiers.keywords.has(keyword)) ?? 'public';
 }
 
 export abstract class DeclarationCompiler extends StatementCompiler {
@@ -857,11 +856,17 @@ export abstract class DeclarationCompiler extends StatementCompiler {
         true
       );
     }
-    if (!declaresFunction(symbol, 'equals', 1)) {
+    const equalityParameter = anyType(true);
+    const definesEquality = symbol.members.get('equals')?.some((member) => {
+      if (member.kind !== 'function' || member.extensionReceiver || member.params.length !== 1) return false;
+      const [parameter] = member.params;
+      return !parameter.isVararg && isSameType(parameter.type, equalityParameter);
+    });
+    if (!definesEquality) {
       addGenerated(
         symbol,
         'equals',
-        [{ name: 'other', type: anyType(true), hasDefault: false, isVararg: false }],
+        [{ name: 'other', type: equalityParameter, hasDefault: false, isVararg: false }],
         this.booleanType,
         (frame, receiver, [other]) => this.dataObjectEquals(frame, receiver as KObject, other, properties),
         true
@@ -1173,7 +1178,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       if (symbol.isLibrary) continue;
       const inherited = this.inheritedJvmSignatures(symbol);
       for (const [signature, bases] of inherited) {
-        if (bases.slice(1).some((base) => !sameSourceDeclaration(base, bases[0])))
+        if (bases.some((base) => !base.isLibrary && bases.some((other) => !compatibleJvmInheritance(base, other))))
           this.error(symbol.row, `JVM では継承した ${signature} が重複しています。`);
       }
       this.checkJvmSignatures([...symbol.members.values()].flat(), inherited);
@@ -1186,7 +1191,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       const overridden = overriddenMembers(member);
       const signatures = new Set([
         ...this.jvmSignaturesOf(member),
-        ...[...overridden].filter((base) => !base.isLibrary).flatMap((base) => this.jvmSignaturesOf(base)),
+        ...[...overridden].flatMap((base) => this.jvmSignaturesOf(base)),
       ]);
       for (const signature of signatures) {
         if (declared.has(signature) || inherited.get(signature)?.some((base) => !overridden.has(base)))
@@ -1200,7 +1205,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     const signatures = new Map<string, MemberSymbol[]>();
     const seen = new Set<ClassSymbol>();
     const visit = (parent: ClassSymbol): void => {
-      if (seen.has(parent) || parent.isLibrary) return;
+      if (seen.has(parent)) return;
       seen.add(parent);
       for (const member of [...parent.members.values()].flat()) {
         if (member.visibility === 'private') continue;
@@ -1214,6 +1219,15 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     };
     for (const { cls } of symbol.supertypes) visit(cls);
     return signatures;
+  }
+
+  protected contributesJvmDefault(member: MemberSymbol): boolean {
+    if (member.visibility === 'private') return false;
+    if (!member.isAbstract && (member.kind === 'function' || member.hasCustomGetter)) return true;
+    const declared = this.jvmSignaturesOf(member);
+    return [...overriddenMembers(member)].some((base) =>
+      this.jvmSignaturesOf(base).some((signature) => !declared.includes(signature))
+    );
   }
 
   private jvmSignaturesOf(member: MemberSymbol): string[] {
@@ -1349,6 +1363,10 @@ export abstract class DeclarationCompiler extends StatementCompiler {
 }
 
 /** A parameter as the key of a native names it, such as `vararg T`. */
+function compatibleJvmInheritance(a: MemberSymbol, b: MemberSymbol): boolean {
+  return a === b || overriddenMembers(a).has(b) || overriddenMembers(b).has(a) || sameSourceDeclaration(a, b);
+}
+
 function sameSourceDeclaration(a: MemberSymbol, b: MemberSymbol): boolean {
   if (a.kind !== b.kind || a.name !== b.name) return false;
   const leftReceiver = a.extensionReceiver;

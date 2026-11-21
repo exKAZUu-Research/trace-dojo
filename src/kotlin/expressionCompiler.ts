@@ -67,6 +67,7 @@ const SKIPPED_PLACE: BoundPlace = { get: () => NULL, set: () => {}, isSkipped: t
 export interface Place {
   type: KType;
   readType?: KType;
+  canSkip?: true;
   repr: Repr;
   bind: (frame: Frame) => BoundPlace;
   recordAssignment?: (type: KType) => void;
@@ -848,6 +849,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const receiverEval = convertRepr(receiver.eval, receiver.repr, 'ref');
     return {
       ...inner,
+      canSkip: true,
       bind: (frame) => {
         const value = receiverEval(frame);
         if (value === NULL) return SKIPPED_PLACE;
@@ -1846,6 +1848,9 @@ export abstract class ExpressionCompiler extends CallCompiler {
       hasReceiver,
       receiverIsUnboxed: hasReceiver && reprOf(this.core, receiverType) !== 'ref',
       paramReprs: variables.map((variable) => reprOf(this.core, variable.type)),
+      nonNullParameters: [receiverType, ...variables.map((variable) => variable.type)]
+        .filter((type) => type !== undefined)
+        .map((type) => !isNullable(resolved(type))),
       resultEval,
       functionClass: this.core.function,
     });
@@ -1989,6 +1994,7 @@ function lambdaValue(lambda: {
   hasReceiver: boolean;
   receiverIsUnboxed: boolean;
   paramReprs: Repr[];
+  nonNullParameters: boolean[];
   resultEval: Eval;
   functionClass: ClassSymbol;
 }): Eval {
@@ -2000,6 +2006,8 @@ function lambdaValue(lambda: {
     value.function = {
       arity,
       call: (caller, args) => {
+        if (args.some((value, index) => value === undefined && lambda.nonNullParameters[index]))
+          caller.runtime.throwError(caller, 'java.lang.NullPointerException');
         const receiver = hasReceiver ? unboxedIf(receiverIsUnboxed, args[0]) : undefined;
         const values = hasReceiver ? args.slice(1) : args;
         const converted = values.map((arg, index) => unboxedIf(paramReprs[index] !== 'ref', arg));

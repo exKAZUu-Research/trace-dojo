@@ -272,6 +272,9 @@ external fun CharSequence.indexOfAny(chars: CharArray, startIndex: Int = 0, igno
 external fun CharSequence.indexOfAny(strings: Collection<String>, startIndex: Int = 0, ignoreCase: Boolean = false): Int
 external fun CharSequence.lastIndexOfAny(chars: CharArray, startIndex: Int = lastIndex, ignoreCase: Boolean = false): Int
 external fun CharSequence.lastIndexOfAny(strings: Collection<String>, startIndex: Int = lastIndex, ignoreCase: Boolean = false): Int
+external fun CharSequence.findAnyOf(strings: Collection<String>, startIndex: Int = 0, ignoreCase: Boolean = false): Pair<Int, String>?
+external fun CharSequence.findLastAnyOf(strings: Collection<String>, startIndex: Int = lastIndex, ignoreCase: Boolean = false): Pair<Int, String>?
+external fun CharSequence.regionMatches(thisOffset: Int, other: CharSequence, otherOffset: Int, length: Int, ignoreCase: Boolean = false): Boolean
 external infix fun CharSequence?.contentEquals(other: CharSequence?): Boolean
 external fun CharSequence?.contentEquals(other: CharSequence?, ignoreCase: Boolean): Boolean
 external fun String.replace(oldValue: String, newValue: String, ignoreCase: Boolean = false): String
@@ -299,6 +302,8 @@ external fun CharSequence.lines(): List<String>
 external fun String.reversed(): String
 fun CharSequence.reversed(): CharSequence = StringBuilder(this).reverse()
 external fun String.toCharArray(): CharArray
+external fun String.toCharArray(startIndex: Int = 0, endIndex: Int = length): CharArray
+external fun String.toCharArray(destination: CharArray, destinationOffset: Int = 0, startIndex: Int = 0, endIndex: Int = length): CharArray
 fun CharSequence.padStart(length: Int, padChar: Char = ' '): CharSequence {
     if (length < 0) throw IllegalArgumentException("Desired length $length is less than zero.")
     if (length <= this.length) return subSequence(0, this.length)
@@ -509,20 +514,6 @@ inline fun CharSequence.indexOfLast(predicate: (Char) -> Boolean): Int {
         index--
     }
     return -1
-}
-inline fun CharSequence.sumOf(selector: (Char) -> Int): Int {
-    var sum = 0
-    for (element in this) sum += selector(element)
-    return sum
-}
-inline fun <K> CharSequence.groupBy(keySelector: (Char) -> K): Map<K, List<Char>> {
-    val destination = LinkedHashMap<K, MutableList<Char>>()
-    for (element in this) {
-        val key = keySelector(element)
-        val list = destination.getOrPut(key) { ArrayList<Char>() }
-        list.add(element)
-    }
-    return destination
 }
 inline fun <K> CharSequence.groupingBy(crossinline keySelector: (Char) -> K): Grouping<Char, K> = asIterable().groupingBy(keySelector)
 fun CharSequence.toList(): List<Char> {

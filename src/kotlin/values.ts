@@ -103,6 +103,7 @@ export function listView(object: KObject): ListView | undefined {
 export function indexedSize(object: KObject): number {
   const list = listView(object);
   if (list) return list.size;
+  if (object.arrayList) return object.arrayList.size;
   const view = primitiveArrayView(object);
   return view?.range?.size ?? ((view?.source.items ?? object.items) as Value[]).length;
 }
@@ -119,6 +120,8 @@ export function indexedItem(object: KObject, index: number, kind?: PrimitiveKind
 export function indexedItems(object: KObject): Value[] | undefined {
   const list = listView(object);
   if (list) return list.source.items?.slice(list.from, list.from + list.size);
+  if (object.arrayList && object.items?.length !== object.arrayList.size)
+    return object.items?.slice(0, object.arrayList.size);
   return primitiveArrayView(object)
     ? Array.from({ length: indexedSize(object) }, (_, index) => indexedItem(object, index))
     : object.items;
@@ -130,6 +133,7 @@ export class KObject {
   readonly fields: Value[];
   /** The elements of a list or an array. */
   items?: Value[];
+  arrayList?: { size: number; capacity: number | undefined };
   /** The entries of a map or a set. */
   store?: KStore;
   /** The text of a `StringBuilder`. */

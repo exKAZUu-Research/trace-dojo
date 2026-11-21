@@ -1,5 +1,6 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
+import { VISIBILITY_KEYWORDS } from './ast';
 import type {
   Argument,
   BinaryOperator,
@@ -157,7 +158,7 @@ export abstract class ExpressionConverter {
         return {
           kind: 'infix',
           row: rowOf(name),
-          name: name.text,
+          name: identifierName(name),
           left: this.convertExpression(left),
           right: this.convertExpression(right),
         };
@@ -567,6 +568,9 @@ export abstract class ExpressionConverter {
       if (keywords.has(keyword)) throw syntaxError(child, `${keyword} 修飾子が2回書かれています。`);
       keywords.add(keyword);
     }
+    const visibility = VISIBILITY_KEYWORDS.filter((keyword) => keywords.has(keyword));
+    if (node && visibility.length > 1)
+      throw syntaxError(node, `公開範囲の修飾子 ${visibility.join(' と ')} は同時に書けません。`);
     return { keywords, annotations };
   }
 

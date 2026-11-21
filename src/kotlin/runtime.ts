@@ -108,7 +108,7 @@ export class Runtime implements TracedRuntime<Frame> {
   /** The constants of each enum class, created with its first use. */
   readonly enumEntries = new Map<ClassSymbol, KObject[]>();
   /** Values that native code holds while it calls back into the program, such as a list being sorted. */
-  readonly nativeRoots: Value[] = [];
+  readonly nativeRoots: (Value | readonly Value[])[] = [];
   /** Called when a frame returns or throws, with the frame still holding its locals. */
   onExit: ((frame: Frame) => void) | undefined;
   private allocated = 0;
@@ -155,6 +155,16 @@ export class Runtime implements TracedRuntime<Frame> {
     input?: ProgramInput
   ) {
     this.io = new ProgramIO(this.budget, input);
+  }
+
+  withNativeRoots<T>(roots: (Value | readonly Value[])[], evaluate: () => T): T {
+    const previous = this.nativeRoots.length;
+    this.nativeRoots.push(...roots);
+    try {
+      return evaluate();
+    } finally {
+      this.nativeRoots.length = previous;
+    }
   }
 
   spend(cost = 1): void {

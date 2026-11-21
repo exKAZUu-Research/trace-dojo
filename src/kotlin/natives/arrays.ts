@@ -19,7 +19,7 @@ import { compareDoubles, compareNumbers, toInt32 } from '../operators';
 import { arrayFactoryName, UNSIGNED_ARRAYS } from '../prelude/arrays';
 import type { Frame } from '../runtime';
 import type { FunctionSymbol } from '../symbols';
-import { box, KObject, listView, NULL, type PrimitiveKind, UNIT, type Value } from '../values';
+import { box, indexedSize, KObject, listView, NULL, type PrimitiveKind, UNIT, type Value } from '../values';
 import { checkListView, elementsOf, joinRendered, newList, newPrimitiveArrayList, touch } from './collections';
 import { arrayIterator, checkArrayIndex } from './core';
 import { defineNative, defineNativeProperty, libraryClass } from './registry';
@@ -98,7 +98,7 @@ function sortList(frame: Frame, list: Value, [comparator]: Value[]): Value {
     checkListView(frame, object);
     const from = view?.from ?? 0;
     const values = source.items as Value[];
-    const size = view?.size ?? values.length;
+    const size = view?.size ?? indexedSize(source);
     if (size <= 1) return UNIT;
     const modCount = source.modCount;
     sortValues(frame, list, comparator, values, from, from + size);
@@ -118,28 +118,17 @@ function sortList(frame: Frame, list: Value, [comparator]: Value[]): Value {
 
 function sortValues(frame: Frame, owner: Value, comparator: Value, values: Value[], from: number, to: number): void {
   if (to - from <= 1) return;
-  const { nativeRoots } = frame.runtime;
-  const mark = nativeRoots.length;
   frame.runtime.spend(1 + Math.floor((to - from) / 64));
-  nativeRoots.push(owner, comparator);
-  try {
-    for (let index = from; index < to; index++) nativeRoots.push(values[index]);
+  frame.runtime.withNativeRoots([owner, comparator, values], () => {
     stableSort(frame, values, comparatorFunction(frame, comparator), from, to);
-  } finally {
-    nativeRoots.length = mark;
-  }
+  });
 }
 
 function writeBack(frame: Frame, list: KObject, values: Value[]): void {
   const set = libraryClass('kotlin.collections.MutableList').members.get('set')?.[0] as FunctionSymbol;
-  const { nativeRoots } = frame.runtime;
-  const mark = nativeRoots.length;
-  for (const value of values) nativeRoots.push(value);
-  try {
+  frame.runtime.withNativeRoots([values], () => {
     for (const [index, value] of values.entries()) callFunction(set, frame, list, [index, value], undefined);
-  } finally {
-    nativeRoots.length = mark;
-  }
+  });
 }
 
 /** Calls a `Comparator`'s `compare`, dispatched on its class. */

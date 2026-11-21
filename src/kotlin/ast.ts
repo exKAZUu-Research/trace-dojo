@@ -18,6 +18,8 @@ export interface Annotation {
   name: string;
 }
 
+export const VISIBILITY_KEYWORDS = ['private', 'protected', 'internal', 'public'] as const;
+
 export interface Modifiers {
   keywords: ReadonlySet<string>;
   annotations: Annotation[];
