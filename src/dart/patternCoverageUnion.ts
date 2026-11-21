@@ -2,21 +2,52 @@ import type { Pattern } from './ast';
 import type { PatternCompiler } from './patternCompiler';
 import { type DartType, DYNAMIC, sameType } from './types';
 
+interface Alternative {
+  pattern: Pattern;
+  nonNull: boolean;
+}
+
 export function coverageDisjuncts(compiler: PatternCompiler, pattern: Pattern): readonly Pattern[] {
   while (pattern.kind === 'parenthesized') pattern = pattern.pattern;
   if (pattern.kind !== 'or') return [pattern];
   const cached = compiler.coverageUnions.get(pattern);
   if (cached) return cached;
-  const pending: Pattern[] = [pattern];
+  const pending: Alternative[] = [{ pattern, nonNull: false }];
   const arms: Pattern[] = [];
-  for (let arm = pending.pop(); arm; arm = pending.pop()) {
-    while (arm.kind === 'parenthesized') arm = arm.pattern;
-    if (arm.kind === 'or') pending.push(arm.right, arm.left);
-    else arms.push(arm);
+  for (let next = pending.pop(); next; next = pending.pop()) {
+    addCoverageAlternative(next, pending, arms);
   }
   const selected = uniqueListSpaces(compiler, arms);
   compiler.coverageUnions.set(pattern, selected);
   return selected;
+}
+
+function addCoverageAlternative({ pattern, nonNull }: Alternative, pending: Alternative[], arms: Pattern[]): void {
+  switch (pattern.kind) {
+    case 'parenthesized': {
+      pending.push({ pattern: pattern.pattern, nonNull });
+      break;
+    }
+    case 'or': {
+      pending.push({ pattern: pattern.right, nonNull }, { pattern: pattern.left, nonNull });
+      break;
+    }
+    case 'nullAssert': {
+      const { row, column, start, end } = pattern;
+      const span = { row, column, start, end };
+      // Dart adds a distinct null space for an assertion before deduplicating the list restrictions.
+      arms.push({ ...span, kind: 'constant', value: { ...span, kind: 'null' } });
+      pending.push({ pattern: pattern.pattern, nonNull: true });
+      break;
+    }
+    case 'nullCheck': {
+      pending.push({ pattern: pattern.pattern, nonNull: true });
+      break;
+    }
+    default: {
+      arms.push(nonNull && pattern.kind !== 'list' ? { ...pattern, kind: 'nullCheck', pattern } : pattern);
+    }
+  }
 }
 
 function uniqueListSpaces(compiler: PatternCompiler, arms: readonly Pattern[]): readonly Pattern[] {

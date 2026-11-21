@@ -8246,3 +8246,26 @@ void main() { counted(0); whileLoop(0); forIn(0); print(generator(0).toList()); 
     stdout: 'true\ntrue\n1\ntrue\n[true]\n[1]\ntrue\n[1]\ntrue\n',
   });
 });
+
+test('Dart coverage deduplicates list restrictions through null suffixes and retains assertion null spaces', () => {
+  for (const pattern of [
+    '(([true, ...])? || [false, ...]?)',
+    '([true, ...]! || [false, ...]!)',
+    '([true, ...]? || [false, ...])',
+    '(([true, ...] || [false, ...])? || [true, ...])',
+  ]) {
+    const program = (fallback: string): string => `int select(List<bool>? x) => switch (x) {
+  null => -1, [] => 0, ${pattern} => 2${fallback},
+};
+void main() { print([select([false]), select([true]), select(null)]); }`;
+    expect(executeProgram('dart', program(''))).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [expect.objectContaining({ message: expect.stringContaining('すべての値') })],
+    });
+    expect(executeProgram('dart', program(', _ => 3'))).toMatchObject({ kind: 'executed', stdout: '[2, 2, -1]\n' });
+  }
+  const nullable = `int select(List<bool>? x) => switch (x) { [] => 0, ([_, ...]? || [_, ...]!) => 1 };
+int nested(List<bool>? x) => switch (x) { [] => 0, (([_, ...]!)? || [_, ...]?) => 1 };
+void main() { print([select([false]), nested([false])]); }`;
+  expect(executeProgram('dart', nullable)).toMatchObject({ kind: 'executed', stdout: '[1, 1]\n' });
+});
