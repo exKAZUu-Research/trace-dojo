@@ -1810,8 +1810,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const outerFlow = this.flow;
     this.flow = outerFlow.copy();
     const variables = params.map((param) => {
-      const variable = this.newParameter(lambdaScope, lambdaContext, param.name ?? '_', param.type, param.row);
-      if (param.name === undefined) lambdaScope.variables.delete('_');
+      const variable = this.newParameter(lambdaScope, lambdaContext, param.name, param.type, param.row);
       this.flow.assigned.add(variable);
       return variable;
     });
@@ -1872,6 +1871,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     }
     if (expectedParams && expectedParams.length !== lambda.params.length)
       this.error(lambda.row, `このラムダ式には引数が ${expectedParams.length} 個要ります。`);
+    this.rejectDuplicateNames(lambda.params);
     return lambda.params.map((param, index) => {
       const declared = param.type ? this.resolveType(scope, param.type) : undefined;
       const expectedType = expectedParams?.[index];

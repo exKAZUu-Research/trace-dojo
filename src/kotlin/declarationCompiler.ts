@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 950 -- The declaration compiler shares symbol and class-linking logic.
+// code-gauge-allow-file fileNcss 956 -- The declaration compiler shares symbol and class-linking logic.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import { VISIBILITY_KEYWORDS } from './ast';
 import type {
@@ -216,14 +216,6 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     }
   }
 
-  /** Rejects a name declared twice among parameters or enum entries, which Kotlin reports as conflicting. */
-  private rejectDuplicateNames(declarations: { name: string; row: number }[]): void {
-    for (const [index, declaration] of declarations.entries()) {
-      if (declarations.slice(0, index).some((other) => other.name === declaration.name))
-        this.error(declaration.row, `${declaration.name} が2回宣言されています。`);
-    }
-  }
-
   /** Resolves a file's imports, which name classes, top-level functions and properties, and members of objects. */
   protected resolveImports(file: KotlinFile, context: FileContext): void {
     for (const declaration of file.imports) {
@@ -314,7 +306,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   }
 
   /** Resolves the supertypes and members' signatures of every class, and declares the top-level functions and properties. */
-  protected declareHeaders(files: { file: KotlinFile; context: FileContext }[]): void {
+  protected declareHeaders(files: { file: KotlinFile; context: FileContext }[]): ClassEntry[] {
     for (const entry of this.classEntries) {
       this.file = entry.file;
       this.declareTypeParameters(entry.scope, entry.decl.typeParameters, (params) => {
@@ -325,6 +317,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       this.file = entry.file;
       this.declareSupertypes(entry);
     }
+    const classOrder = this.classLinkOrder();
     for (const entry of this.classEntries) {
       this.file = entry.file;
       this.declareMembers(entry);
@@ -335,6 +328,30 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       const fileScope = new Scope(undefined, undefined);
       for (const declaration of file.declarations) this.declareTopLevel(declaration, fileScope, context, packageScope);
     }
+    return classOrder;
+  }
+
+  private classLinkOrder(): ClassEntry[] {
+    const ordered: ClassEntry[] = [];
+    const done = new Set<ClassEntry>();
+    const active = new Set<ClassEntry>();
+    const visit = (entry: ClassEntry): void => {
+      if (done.has(entry)) return;
+      if (active.has(entry)) {
+        this.file = entry.file;
+        this.error(entry.decl.row, `${entry.symbol.name} の継承関係が循環しています。`);
+      }
+      active.add(entry);
+      for (const { cls } of entry.symbol.supertypes) {
+        const parent = this.entryOfClass.get(cls);
+        if (parent) visit(parent);
+      }
+      active.delete(entry);
+      done.add(entry);
+      ordered.push(entry);
+    };
+    for (const entry of this.classEntries) visit(entry);
+    return ordered;
   }
 
   private declareTopLevel(
@@ -963,20 +980,12 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   // Phase 3: layout, overrides, and dispatch.
 
   /** Lays out fields and links overrides, superclasses before subclasses. */
-  protected linkClasses(): void {
-    const done = new Set<ClassSymbol>();
-    const visit = (entry: ClassEntry): void => {
-      if (done.has(entry.symbol)) return;
-      done.add(entry.symbol);
-      for (const supertype of entry.symbol.supertypes) {
-        const parent = this.entryOfClass.get(supertype.cls);
-        if (parent) visit(parent);
-      }
+  protected linkClasses(entries: ClassEntry[]): void {
+    for (const entry of entries) {
       this.file = entry.file;
       this.layOutFields(entry);
       this.linkOverrides(entry);
-    };
-    for (const entry of this.classEntries) visit(entry);
+    }
   }
 
   private layOutFields(entry: ClassEntry): void {

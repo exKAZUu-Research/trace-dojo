@@ -407,19 +407,20 @@ export abstract class CompilerCore {
   protected newVariable(
     scope: Scope,
     context: FunctionContext,
-    name: string,
+    name: string | undefined,
     type: KType,
     isVar: boolean,
     row: number,
     isShown = true
   ): VariableSymbol {
     // A local may hide a parameter, as the body of a function or lambda shares the parameters' scope here.
-    if (isShown && name !== '_' && scope.variables.get(name)?.isParameter === false)
+    if (isShown && name !== undefined && name !== '_' && scope.variables.get(name)?.isParameter === false)
       this.error(row, `${name} は、すでに宣言されています。`);
-    const slot = context.allocate(name, type, isShown && !context.info.isLibrary);
-    const variable = new VariableSymbol(name, type, isVar, 0, slot, row);
+    const localName = name ?? '_';
+    const slot = context.allocate(localName, type, isShown && !context.info.isLibrary);
+    const variable = new VariableSymbol(localName, type, isVar, 0, slot, row);
     variable.owner = context;
-    scope.variables.set(name, variable);
+    if (name !== undefined) scope.variables.set(name, variable);
     return variable;
   }
 
@@ -427,13 +428,22 @@ export abstract class CompilerCore {
   protected newParameter(
     scope: Scope,
     context: FunctionContext,
-    name: string,
+    name: string | undefined,
     type: KType,
     row: number
   ): VariableSymbol {
-    const variable = this.newVariable(scope, context, name, type, false, row, name !== '_');
+    const variable = this.newVariable(scope, context, name, type, false, row, name !== undefined);
     variable.isParameter = true;
     return variable;
+  }
+
+  protected rejectDuplicateNames(declarations: { name: string | undefined; row: number }[]): void {
+    const names = new Set<string>();
+    for (const { name, row } of declarations) {
+      if (name === undefined) continue;
+      if (names.has(name)) this.error(row, `${name} が2回宣言されています。`);
+      names.add(name);
+    }
   }
 
   protected checkNestedAccessible(scope: Scope | undefined, nested: ClassSymbol, row: number): void {

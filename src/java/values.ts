@@ -95,35 +95,63 @@ export function defaultValue(type: JavaType): Value {
 
 /** Formats a double as `Double.toString` does (JDK 19 and later print the shortest round-trip digits). */
 export function formatDouble(value: number): string {
-  return formatShortest(value, (magnitude) => magnitude.toExponential());
+  return formatShortest(value, (magnitude) => {
+    const digits = magnitude.toExponential();
+    return digits.includes('.') ? digits : magnitude.toExponential(1);
+  });
 }
+
+const FLOAT_BITS = new DataView(new ArrayBuffer(4));
+const FLOAT_UNITS_PER_INTEGER = 1n << 150n;
 
 /** Formats a float as `Float.toString` does: the shortest digits that read back as the same float. */
 export function formatFloat(value: number): string {
-  return formatShortest(value, shortestFloatDigits);
+  return formatShortest(Math.fround(value), shortestFloatDigits);
 }
 
 /** The double whose shortest digits are those `Float.toString` prints for `value`. */
 export function floatToShortestDouble(value: number): number {
-  if (!Number.isFinite(value) || value === 0) return value;
-  return Math.sign(value) * Number(twoDigitsAtLeast(Math.abs(value), shortestFloatDigits));
+  const float = Math.fround(value);
+  if (!Number.isFinite(float) || float === 0) return float;
+  return Math.sign(float) * Number(shortestFloatDigits(Math.abs(float)));
 }
 
 function shortestFloatDigits(magnitude: number): string {
-  for (let precision = 1; precision < 9; precision++) {
-    const candidate = magnitude.toExponential(precision - 1);
-    if (Math.fround(Number(candidate)) === magnitude) return candidate;
+  FLOAT_BITS.setFloat32(0, magnitude);
+  const bits = FLOAT_BITS.getUint32(0);
+  const units = floatUnits(bits);
+  const lower = (units + floatUnits(bits - 1)) / 2n;
+  const upper = (units + floatUnits(bits + 1)) / 2n;
+  const acceptsTie = (bits & 1) === 0;
+  const scale = Number(magnitude.toExponential().split('e')[1]);
+  // The JVM considers one- and two-digit decimals together when a one-digit decimal round-trips.
+  for (let exponent = scale - 1; exponent >= scale - 8; exponent--) {
+    const numeratorScale = 10n ** BigInt(Math.max(0, -exponent));
+    const unit = FLOAT_UNITS_PER_INTEGER * 10n ** BigInt(Math.max(0, exponent));
+    const scaled = units * numeratorScale;
+    const significand = scaled / unit;
+    const below = significand * unit;
+    const above = below + unit;
+    const left = lower * numeratorScale;
+    const right = upper * numeratorScale;
+    const acceptsBelow = below > left || (acceptsTie && below === left);
+    const acceptsAbove = above < right || (acceptsTie && above === right);
+    if (!acceptsBelow && !acceptsAbove) continue;
+    const distanceBelow = scaled - below;
+    const distanceAbove = above - scaled;
+    const closerBelow = distanceBelow < distanceAbove || (distanceBelow === distanceAbove && significand % 2n === 0n);
+    const best = acceptsBelow && (!acceptsAbove || closerBelow) ? significand : significand + 1n;
+    const digits = String(best);
+    return `${digits[0]}.${digits.slice(1)}e${exponent + digits.length - 1}`;
   }
-  return magnitude.toExponential(8);
+  throw new Error('No round-trip decimal for Float');
 }
 
-/**
- * The shortest digits in exponential notation, but at least two of them as Java prints: among the two-digit
- * decimals, the closest one reads back as the same value whenever a one-digit one does.
- */
-function twoDigitsAtLeast(magnitude: number, shortest: (magnitude: number) => string): string {
-  const digits = shortest(magnitude);
-  return digits.includes('.') ? digits : magnitude.toExponential(1);
+// Use half the smallest float as a unit so both adjacent midpoints are exact integers.
+function floatUnits(bits: number): bigint {
+  const exponent = bits >>> 23;
+  const significand = (bits & 0x7f_ff_ff) + (exponent > 0 ? 0x80_00_00 : 0);
+  return BigInt(significand) << BigInt(Math.max(1, exponent));
 }
 
 function formatShortest(value: number, shortest: (magnitude: number) => string): string {
@@ -132,7 +160,7 @@ function formatShortest(value: number, shortest: (magnitude: number) => string):
   if (value === Number.NEGATIVE_INFINITY) return '-Infinity';
   if (value === 0) return Object.is(value, -0) ? '-0.0' : '0.0';
   const sign = value < 0 ? '-' : '';
-  const [mantissa, exponentText] = twoDigitsAtLeast(Math.abs(value), shortest).split('e');
+  const [mantissa, exponentText] = shortest(Math.abs(value)).split('e');
   const digits = mantissa.replace('.', '').replace(/0+$/, '');
   const exponent = Number(exponentText);
   if (exponent < -3 || exponent >= 7) return `${sign}${digits[0]}.${digits.slice(1) || '0'}E${exponent}`;

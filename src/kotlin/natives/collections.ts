@@ -1,8 +1,8 @@
-// code-gauge-allow-file fileNcss 853 -- the natives of the collections, which share the helpers of their items.
-import { callFunction, getPropertyValue, runtimeClassOf } from '../dispatch';
+// code-gauge-allow-file fileNcss 886 -- the natives of the collections, which share the helpers of their items.
+import { runtimeClassOf } from '../dispatch';
 import { hashOf, identityHash, stringOf, valueEquals } from '../format';
 import { toInt32 } from '../operators';
-import { type Frame, KotlinThrow } from '../runtime';
+import type { Frame } from '../runtime';
 import {
   type HashEntry,
   indexedItem,
@@ -17,6 +17,17 @@ import {
   UNIT,
   type Value,
 } from '../values';
+import {
+  callCollectionMember,
+  COLLECTION,
+  collectionContains,
+  collectionSize,
+  compareCollections,
+  containsAll,
+  filterCollection,
+  iterateElements,
+  readCollectionProperty,
+} from './collectionTraversal';
 import { arrayIterator } from './core';
 import { jdkHashCapacity, mapCapacity, newStore, reserveForCopy } from './hashTables';
 import { defineNative, defineNativeProperty, libraryClass, throwError } from './registry';
@@ -194,33 +205,9 @@ export function elementsOf(frame: Frame, collection: Value): Value[] {
   return iterateElements(frame, object);
 }
 
-/** Reads an iterable of the program through its iterator, as the library's functions do. */
-function iterateElements(frame: Frame, iterable: KObject): Value[] {
-  const iteratorClass = 'kotlin.collections.Iterator';
-  const iterator = callCollectionMember(frame, iterable, 'kotlin.collections.Iterable', 'iterator');
-  const result: Value[] = [];
-  frame.runtime.nativeRoots.push(iterator);
-  try {
-    while (callCollectionMember(frame, iterator, iteratorClass, 'hasNext') === true) {
-      result.push(callCollectionMember(frame, iterator, iteratorClass, 'next'));
-    }
-  } finally {
-    frame.runtime.nativeRoots.pop();
-  }
-  return result;
-}
-
 function storeElements(object: KObject): Value[] {
   const store = object.store as KStore;
   return store.ordered().map((entry) => entry.key);
-}
-
-function callCollectionMember(frame: Frame, receiver: Value, owner: string, name: string, args: Value[] = []): Value {
-  const member = libraryClass(owner)
-    .members.get(name)
-    ?.find((candidate) => candidate.kind === 'function');
-  if (!member) throw new Error(`No function ${owner}.${name}`);
-  return callFunction(member, frame, receiver, args, undefined);
 }
 
 type ListNative = (frame: Frame, list: Value, args: Value[]) => Value;
@@ -229,11 +216,7 @@ type ListNative = (frame: Frame, list: Value, args: Value[]) => Value;
 const LIST_READING_NATIVES: Record<string, ListNative> = {
   'isEmpty()': (_frame, list) => indexedSize(list as KObject) === 0,
   'contains(E)': (frame, list, [element]) => indexOfValue(frame, readableItems(list), element) !== -1,
-  'containsAll(Collection<E>)': (frame, list, [elements]) => {
-    const others = elementsOf(frame, elements);
-    const values = readableItems(list);
-    return others.every((element) => indexOfValue(frame, values, element) !== -1);
-  },
+  'containsAll(Collection<E>)': (frame, list, [elements]) => containsAll(frame, list, elements),
   'get(Int)': (frame, list, [index]) => {
     checkIndex(frame, list, index as number);
     return indexedItem(list as KObject, index as number);
@@ -314,16 +297,8 @@ const LIST_CHANGING_NATIVES: Record<string, ListNative> = {
     values[position] = element;
     return old;
   },
-  'removeAll(Collection<E>)': (frame, list, [elements]) => {
-    requireResizable(frame, list);
-    const removing = elementsOf(frame, elements);
-    return filterInPlace(frame, list as KObject, (value) => indexOfValue(frame, removing, value) === -1);
-  },
-  'retainAll(Collection<E>)': (frame, list, [elements]) => {
-    requireResizable(frame, list);
-    const keeping = elementsOf(frame, elements);
-    return filterInPlace(frame, list as KObject, (value) => indexOfValue(frame, keeping, value) !== -1);
-  },
+  'removeAll(Collection<E>)': (frame, list, [elements]) => filterList(frame, list as KObject, elements, false),
+  'retainAll(Collection<E>)': (frame, list, [elements]) => filterList(frame, list as KObject, elements, true),
   'clear()': (frame, list) => {
     requireResizable(frame, list);
     if (listKind(list) !== 'ArrayDeque' || indexedSize(list as KObject) > 0)
@@ -370,7 +345,11 @@ function replaceListItems(frame: Frame, list: KObject, index: number, removed: n
   if (source.arrayList) source.arrayList.size = oldSize + growth;
   else values.length = oldSize + growth;
   touch(source);
-  for (let current = list, range = view; range; current = range.parent, range = listView(current)) {
+  updateListViews(list, source, growth);
+}
+
+function updateListViews(list: KObject, source: KObject, growth: number): void {
+  for (let current = list, range = listView(list); range; current = range.parent, range = listView(current)) {
     range.size += growth;
     current.modCount = source.modCount;
   }
@@ -499,13 +478,74 @@ function removeIfArrayList(frame: Frame, list: KObject, predicate: KObject): boo
   return true;
 }
 
-/** Removes the elements `keeps` rejects, telling whether any went. */
-export function filterInPlace(frame: Frame, list: KObject, keeps: (value: Value) => boolean): boolean {
-  const values = readableItems(list);
-  const kept = values.filter((value) => keeps(value));
-  if (kept.length === values.length) return false;
-  replaceListItems(frame, list, 0, values.length, kept);
-  return true;
+function filterList(frame: Frame, list: KObject, elements: Value, retain: boolean): boolean {
+  const view = listView(list);
+  const source = view?.source ?? list;
+  const keeps = (value: Value): boolean => collectionContains(frame, elements, value) === retain;
+  if (source.arrayList) {
+    const oldSize = source.arrayList.size;
+    const from = view?.from ?? 0;
+    const changed = filterArrayList(frame, source, from, from + indexedSize(list), keeps);
+    if (changed) updateListViews(list, source, source.arrayList.size - oldSize);
+    return changed;
+  }
+  if (listKind(source) === 'ListBuilder' || listKind(list) === 'ArrayDeque') {
+    requireResizable(frame, list);
+    const from = view?.from ?? 0;
+    const size = indexedSize(list);
+    const values = listStorage(source);
+    let write = from;
+    for (let read = from; read < from + size; read++) {
+      const element = values[read];
+      if (keeps(element)) values[write++] = element;
+    }
+    if (write === from + size) return false;
+    replaceListItems(frame, list, write - from, from + size - write, []);
+    return true;
+  }
+  return filterCollection(frame, list, elements, retain, false);
+}
+
+function filterArrayList(
+  frame: Frame,
+  source: KObject,
+  from: number,
+  end: number,
+  keeps: (value: Value) => boolean
+): boolean {
+  const array = source.arrayList as NonNullable<KObject['arrayList']>;
+  const values = listStorage(source);
+  return frame.runtime.withNativeRoots([values], () => {
+    let read = from;
+    while (read < end && keeps(values[read])) read++;
+    if (read === end) return false;
+    let write = read++;
+    try {
+      for (; read < end; read++) {
+        const element = values[read];
+        if (keeps(element)) values[write++] = element;
+      }
+    } catch (error) {
+      // ArrayList keeps all elements from the failed lookup onward, even if earlier lookups removed some.
+      values.copyWithin(write, read, end);
+      write += end - read;
+      throw error;
+    } finally {
+      touch(source);
+      if (array.size < end) {
+        throwError(
+          frame,
+          'java.lang.ArrayIndexOutOfBoundsException',
+          `arraycopy: length ${array.size - end} is negative`
+        );
+      }
+      values.copyWithin(write, end, array.size);
+      const newSize = array.size - (end - write);
+      values.fill(undefined, newSize, array.size);
+      array.size = newSize;
+    }
+    return true;
+  });
 }
 
 export function listEquals(frame: Frame, list: KObject, other: Value): boolean {
@@ -804,20 +844,16 @@ function putMapEntry(frame: Frame, map: KObject, key: Value, value: Value): Valu
 function mapEntriesOf(frame: Frame, map: Value): [Value, Value][] {
   const object = map as KObject;
   if (object.store) return object.store.ordered().map((entry) => [entry.key, entry.value]);
-  const entries = elementsOf(frame, readMapProperty(frame, map, 'kotlin.collections.Map', 'entries'));
+  const entries = elementsOf(frame, readCollectionProperty(frame, map, 'kotlin.collections.Map', 'entries'));
   const owner = 'kotlin.collections.Map.Entry';
   return entries.map((entry) => [
-    readMapProperty(frame, entry, owner, 'key'),
-    readMapProperty(frame, entry, owner, 'value'),
+    readCollectionProperty(frame, entry, owner, 'key'),
+    readCollectionProperty(frame, entry, owner, 'value'),
   ]);
 }
 
-function readMapProperty(frame: Frame, receiver: Value, owner: string, name: string): Value {
-  const property = libraryClass(owner)
-    .members.get(name)
-    ?.find((member) => member.kind === 'property');
-  if (!property) throw new Error(`No property ${owner}.${name}`);
-  return getPropertyValue(property, frame, receiver);
+function sameValue(frame: Frame, left: Value, right: Value): boolean {
+  return left === right || valueEquals(frame, left, right);
 }
 
 function mapEquals(frame: Frame, map: KObject, other: Value): boolean {
@@ -828,22 +864,14 @@ function mapEquals(frame: Frame, map: KObject, other: Value): boolean {
   if (map.cls === libraryClass('kotlin.collections.EmptyMap')) {
     return callCollectionMember(frame, other, owner, 'isEmpty') === true;
   }
-  if (store.entries.length !== readMapProperty(frame, other, owner, 'size')) return false;
-  try {
-    return store.ordered().every(({ key, value }) => {
+  if (store.entries.length !== readCollectionProperty(frame, other, owner, 'size')) return false;
+  return compareCollections(() =>
+    store.ordered().every(({ key, value }) => {
       const actual = callCollectionMember(frame, other, owner, 'get', [key]);
       if (value !== undefined) return valueEquals(frame, value, actual);
       return actual === undefined && callCollectionMember(frame, other, owner, 'containsKey', [key]) === true;
-    });
-  } catch (error) {
-    if (
-      error instanceof KotlinThrow &&
-      (error.value.cls.isSubclassOf(libraryClass('kotlin.ClassCastException')) ||
-        error.value.cls.isSubclassOf(libraryClass('kotlin.NullPointerException')))
-    )
-      return false;
-    throw error;
-  }
+    })
+  );
 }
 
 function mapToString(frame: Frame, map: KObject): string {
@@ -869,9 +897,8 @@ function defineSets(): void {
   defineNativeProperty(`${SET}.size`, (_frame, set) => storeOf(set).entries.length);
   const natives: Record<string, (frame: Frame, set: Value, args: Value[]) => Value> = {
     'isEmpty()': (_frame, set) => storeOf(set).entries.length === 0,
-    'contains(E)': (frame, set, [element]) => findEntry(frame, storeOf(set), element) !== undefined,
-    'containsAll(Collection<E>)': (frame, set, [elements]) =>
-      elementsOf(frame, elements).every((element) => findEntry(frame, storeOf(set), element) !== undefined),
+    'contains(E)': (frame, set, [element]) => setContains(frame, set as KObject, element),
+    'containsAll(Collection<E>)': (frame, set, [elements]) => containsAll(frame, set, elements),
     'iterator()': (frame, set) => storeIterator(frame, set as KObject, 'keys'),
     'add(E)': (frame, set, [element]) => {
       requireMutableMap(frame, set);
@@ -900,16 +927,12 @@ function defineSets(): void {
       return changed;
     },
     'removeAll(Collection<E>)': (frame, set, [elements]) => {
-      if (isBuilt(set)) requireMutableMap(frame, set);
       requireMutableMap(frame, set);
-      const removing = elementsOf(frame, elements);
-      return removeEntries(frame, set as KObject, (entry) => indexOfValue(frame, removing, entry.key) !== -1);
+      return filterCollection(frame, set, elements, false, true);
     },
     'retainAll(Collection<E>)': (frame, set, [elements]) => {
-      if (isBuilt(set)) requireMutableMap(frame, set);
       requireMutableMap(frame, set);
-      const keeping = elementsOf(frame, elements);
-      return removeEntries(frame, set as KObject, (entry) => indexOfValue(frame, keeping, entry.key) === -1);
+      return filterCollection(frame, set, elements, true, true);
     },
     'clear()': (frame, set) => {
       requireMutableMap(frame, set);
@@ -917,11 +940,19 @@ function defineSets(): void {
       touch(set as KObject);
       return UNIT;
     },
-    'equals(Any?)': (frame, set, [other]) => setEquals(frame, storeElements(set as KObject), other),
+    'equals(Any?)': (frame, set, [other]) => setEquals(frame, set, other),
     'hashCode()': (frame, set) => sumHashes(storeOf(set).entries.map((entry) => hashOf(frame, entry.key))),
     'toString()': (frame, set) => collectionToString(frame, set, storeElements(set as KObject)),
   };
   for (const [signature, native] of Object.entries(natives)) defineNative(`${SET}.${signature}`, native);
+}
+
+function setContains(frame: Frame, set: KObject, element: Value): boolean {
+  const store = storeOf(set);
+  if (set.cls === libraryClass('kotlin.collections.EmptySet')) return false;
+  if (set.cls === libraryClass('kotlin.collections.SingletonSet'))
+    return sameValue(frame, element, store.entries[0].key);
+  return findEntry(frame, store, element) !== undefined;
 }
 
 function addSetEntry(frame: Frame, store: KStore, element: Value): boolean {
@@ -952,21 +983,13 @@ function defineSetConstructors(): void {
   }
 }
 
-function removeEntries(frame: Frame, collection: KObject, removes: (entry: HashEntry) => boolean): boolean {
-  const store = collection.store as KStore;
-  const removed = store.entries.filter((entry) => removes(entry));
-  for (const entry of removed) store.remove(entry);
-  if (removed.length > 0) touch(collection);
-  void frame;
-  return removed.length > 0;
-}
-
-function setEquals(frame: Frame, elements: Value[], other: Value): boolean {
-  if (!(other instanceof KObject) || !runtimeClassOf(other).isSubclassOf(libraryClass('kotlin.collections.Set')))
-    return false;
-  const others = elementsOf(frame, other);
-  if (others.length !== elements.length) return false;
-  return elements.every((element) => indexOfValue(frame, others, element) !== -1);
+function setEquals(frame: Frame, set: Value, other: Value): boolean {
+  if (set === other) return true;
+  if (!(other instanceof KObject) || !other.cls.isSubclassOf(libraryClass('kotlin.collections.Set'))) return false;
+  if ((set as KObject).cls === libraryClass('kotlin.collections.EmptySet'))
+    return callCollectionMember(frame, other, COLLECTION, 'isEmpty') === true;
+  if (collectionSize(frame, other) !== collectionSize(frame, set)) return false;
+  return compareCollections(() => callCollectionMember(frame, set, COLLECTION, 'containsAll', [other]) === true);
 }
 
 // Views of maps and iterators over stores.
@@ -1059,12 +1082,9 @@ function defineViewReading(owner: string): void {
   defineNative(`${owner}.isEmpty()`, (_frame, view) => (viewOf(view).map.store as KStore).entries.length === 0);
   defineNative(
     `${owner}.contains(E)`,
-    (frame, view, [element]) => indexOfValue(frame, viewElements(frame, view as KObject), element) !== -1
+    (frame, view, [element]) => matchingViewEntry(frame, view, element, false) !== undefined
   );
-  defineNative(`${owner}.containsAll(Collection<E>)`, (frame, view, [elements]) => {
-    const all = viewElements(frame, view as KObject);
-    return elementsOf(frame, elements).every((element) => indexOfValue(frame, all, element) !== -1);
-  });
+  defineNative(`${owner}.containsAll(Collection<E>)`, (frame, view, [elements]) => containsAll(frame, view, elements));
   defineNative(`${owner}.iterator()`, (frame, view) => {
     const { view: kind, map } = viewOf(view);
     return storeIterator(frame, view as KObject, kind, map);
@@ -1079,19 +1099,40 @@ function defineViewReading(owner: string): void {
   );
   defineNative(`${owner}.equals(Any?)`, (frame, view, [other]) => {
     if (viewOf(view).view === 'values') return view === other;
-    return setEquals(frame, viewElements(frame, view as KObject), other);
+    return setEquals(frame, view, other);
   });
+}
+
+function matchingViewEntry(frame: Frame, view: Value, element: Value, removing: boolean): HashEntry | undefined {
+  const { view: kind, map } = viewOf(view);
+  const store = storeOf(map);
+  if (kind === 'keys') return findEntry(frame, store, element);
+  if (kind === 'values') return store.ordered().find((entry) => sameValue(frame, element, entry.value));
+  return matchingEntry(frame, store, element, removing);
+}
+
+function matchingEntry(frame: Frame, store: KStore, element: Value, removing: boolean): HashEntry | undefined {
+  const owner = 'kotlin.collections.Map.Entry';
+  if (!(element instanceof KObject) || !element.cls.isSubclassOf(libraryClass(owner))) return undefined;
+  const key = readCollectionProperty(frame, element, owner, 'key');
+  if (removing) {
+    const value = readCollectionProperty(frame, element, owner, 'value');
+    const found = findEntry(frame, store, key);
+    return found && sameValue(frame, value, found.value) ? found : undefined;
+  }
+  const found = findEntry(frame, store, key);
+  if (!found || found === element.native?.entry) return found;
+  if (!sameValue(frame, found.key, readCollectionProperty(frame, element, owner, 'key'))) return undefined;
+  return sameValue(frame, found.value, readCollectionProperty(frame, element, owner, 'value')) ? found : undefined;
 }
 
 /** What changes a map through its keys, values, or entries, which remove from the map and never add to it. */
 function defineViewChanging(owner: string): void {
   defineNative(`${owner}.remove(E)`, (frame, view, [element]) => {
-    const { view: kind, map } = viewOf(view);
+    const { map } = viewOf(view);
     requireMutableMap(frame, map);
     const store = map.store as KStore;
-    const entry = store
-      .ordered()
-      .find((candidate) => valueEquals(frame, element, viewElement(frame, map, kind, candidate)));
+    const entry = matchingViewEntry(frame, view, element, true);
     if (!entry) return false;
     store.remove(entry);
     touch(map);
@@ -1105,12 +1146,7 @@ function defineViewChanging(owner: string): void {
     defineNative(`${owner}.${name}(Collection<E>)`, (frame, view, [elements]) => {
       const { view: kind, map } = viewOf(view);
       requireMutableMap(frame, map);
-      const others = elementsOf(frame, elements);
-      return removeEntries(
-        frame,
-        map,
-        (entry) => (indexOfValue(frame, others, viewElement(frame, map, kind, entry)) !== -1) === (name === 'removeAll')
-      );
+      return filterCollection(frame, view, elements, name === 'retainAll', kind !== 'values');
     });
   }
   defineNative(`${owner}.clear()`, (frame, view) => {
@@ -1183,8 +1219,8 @@ function defineNativeEntry(): void {
     if (!(other instanceof KObject) || !other.cls.isSubclassOf(libraryClass(owner))) return false;
     const { key, value } = entryOf(receiver).entry;
     return (
-      valueEquals(frame, key, readMapProperty(frame, other, owner, 'key')) &&
-      valueEquals(frame, value, readMapProperty(frame, other, owner, 'value'))
+      valueEquals(frame, key, readCollectionProperty(frame, other, owner, 'key')) &&
+      valueEquals(frame, value, readCollectionProperty(frame, other, owner, 'value'))
     );
   });
 }

@@ -154,7 +154,7 @@ export class Runtime implements TracedRuntime<Frame> {
     readonly exceptions: ExceptionFactory,
     input?: ProgramInput
   ) {
-    this.io = new ProgramIO(this.budget, input);
+    this.io = new ProgramIO(this.budget, input, 'jvm-utf8');
   }
 
   withNativeRoots<T>(roots: (Value | readonly Value[])[], evaluate: () => T): T {

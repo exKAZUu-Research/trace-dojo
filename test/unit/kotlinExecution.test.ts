@@ -644,6 +644,109 @@ fun main() {
       "java.util.IllegalFormatPrecisionException: 2\njava.util.IllegalFormatFlagsException: Flags = '+'\njava.util.IllegalFormatWidthException: 5\njava.util.IllegalFormatFlagsException: Flags = '0'\njava.util.IllegalFormatPrecisionException: 2\n%        %\n1234 1,234\n1234 1234 1234\njava.util.DuplicateFormatFlagsException: Flags = '<'\njava.util.MissingFormatArgumentException: Format specifier '%<s'\n",
   },
   {
+    name: 'Float formatting selects the nearest decimal and resolves ties to even',
+    source: `fun main() {
+    println(-3850040.25f)
+    println(324442.125f)
+    println(-403805.625f)
+    println(Float.MIN_VALUE)
+    println(Float.MAX_VALUE)
+    println(-0f)
+}`,
+    stdout: '-3850040.2\n324442.12\n-403805.62\n1.4E-45\n3.4028235E38\n-0.0\n',
+  },
+  {
+    name: 'set equality and map views use hash lookup with identity and exception handling',
+    source: `var hashCalls = 0
+var failHash = false
+class Key(val index: Int) {
+    override fun hashCode(): Int {
+        hashCalls++
+        if (failHash) throw NullPointerException("hash")
+        return index
+    }
+    override fun equals(other: Any?): Boolean = other is Key && other.index == index
+}
+class Candidate(override val key: Key, override val value: String) : MutableMap.MutableEntry<Key, String> {
+    override fun setValue(newValue: String): String = error("not writable")
+}
+class Observed(private val source: Set<Key>) : Set<Key> by source {
+    override val size: Int get() { println("size"); return source.size }
+    override fun iterator(): Iterator<Key> { println("iterator"); return source.iterator() }
+}
+fun main() {
+    val a = hashSetOf(Key(3), Key(5))
+    val b = hashSetOf(Key(3), Key(5))
+    hashCalls = 0
+    println(a == a)
+    println(hashCalls)
+    println(a == Observed(b))
+    println(hashCalls)
+    failHash = true
+    println(a == b)
+    failHash = false
+
+    val map = mutableMapOf(Key(3) to "a", Key(5) to "b")
+    hashCalls = 0
+    println(Key(3) in map.keys)
+    println(Candidate(Key(5), "b") in map.entries)
+    println(map.entries.remove(Candidate(Key(5), "other")))
+    println(map.entries.remove(Candidate(Key(5), "b")))
+    println(map.keys.remove(Key(3)))
+    println(map.isEmpty())
+    println(hashCalls)
+    val integers = (0 until 1500).toSet()
+    println(integers == (0 until 1500).toSet())
+    val keys = (0 until 1500).associateWith { it }.keys
+    var hits = 0
+    repeat(1000) { if (-1 in keys) hits++ }
+    println(hits)
+}`,
+    stdout: 'true\n0\nsize\niterator\ntrue\n2\nfalse\ntrue\ntrue\nfalse\ntrue\ntrue\ntrue\n5\ntrue\n0\n',
+  },
+  {
+    name: 'bulk filtering calls supplied membership and preserves partial ArrayList changes',
+    source: `class Allowed : Collection<String> by listOf("a") {
+    override fun contains(element: String): Boolean {
+        if (element == "!") error("membership")
+        return element.equals("a", ignoreCase = true)
+    }
+}
+fun main() {
+    val allowed = Allowed()
+    val list = mutableListOf("A", "discard", "a", "!", "rest")
+    try { list.retainAll(allowed) } catch (error: IllegalStateException) { println(error.message) }
+    println(list)
+
+    val root = mutableListOf("outside", "A", "discard", "a", "!", "rest")
+    val view = root.subList(1, 5)
+    try { view.retainAll(allowed) } catch (error: IllegalStateException) { println(error.message) }
+    println(root)
+    try { println(view.size) } catch (error: ConcurrentModificationException) { println("invalidated") }
+
+    val set = mutableSetOf("A", "b")
+    set.retainAll(allowed)
+    println(set)
+    val map = linkedMapOf("A" to 1, "b" to 2, "a" to 3)
+    map.keys.retainAll(allowed)
+    println(map)
+    val removed = mutableSetOf("A", "b", "a")
+    removed.removeAll(allowed)
+    println(removed)
+}`,
+    stdout: 'membership\n[A, a, !, rest]\nmembership\n[outside, A, a, !, rest]\ninvalidated\n[A]\n{A=1, a=3}\n[A, b]\n',
+  },
+  {
+    name: 'anonymous lambda parameters do not hide a named underscore or prevent local shadowing',
+    source: `fun main() {
+    val callback: (Int, Int, Int) -> Int = { \`_\`, _, _ -> \`_\` }
+    println(callback(7, 2, 3))
+    val shadows = { item: Int -> val item = item + 1; item }
+    println(shadows(4))
+}`,
+    stdout: '7\n5\n',
+  },
+  {
     name: 'zip transforms combine arrays, iterables, and character sequences',
     source: `fun main() {
     println("abc".zip("xy") { a, b -> "$a$b" })
@@ -2424,6 +2527,31 @@ test.each([
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException });
 });
 
+test('encodes JVM stdout and stderr without splitting surrogate pairs across writes', () => {
+  const source = `fun main() {
+    val high = "😀".take(1)
+    val low = "😀".drop(1)
+    println(high)
+    print(low)
+    print(high)
+    print(low)
+    print(high)
+    println("end")
+    System.out.print(low)
+    System.out.println(high)
+    System.err.print(high)
+    System.out.print("ignored stderr here")
+    System.err.print(low)
+    print(high)
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '?\n?😀?end\n??\nignored stderr here',
+    stderr: '😀',
+    uncaughtException: undefined,
+  });
+});
+
 test('stops an endless loop at the execution limit', () => {
   expect(executeProgram('kotlin', 'fun main() {\n    var i = 0\n    while (true) i++\n}')).toMatchObject({
     kind: 'limitExceeded',
@@ -2432,6 +2560,13 @@ test('stops an endless loop at the execution limit', () => {
 
 /** Programs with whether kotlinc 2.4.21 compiles them, which decides whether the interpreter may run them. */
 test.each([
+  ['a cycle between open classes', false, 'open class A : B()\nopen class B : A()\nfun main() {}'],
+  ['a cycle between interfaces', false, 'interface A : B\ninterface B : A\nfun main() {}'],
+  [
+    'a lambda with two parameters of the same name',
+    false,
+    'fun main() { val f = { x: Int, x: Int -> x }; println(f(1, 2)) }',
+  ],
   ['a type mismatch', false, 'fun main() {\n    val x: Int = "a"\n    println(x)\n}'],
   [
     'a super call that omits an inherited default argument',

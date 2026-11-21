@@ -153,13 +153,13 @@ export class Compiler extends BodyCompiler {
       this.file = context;
       this.resolveImports(file, context);
     }
-    this.declareHeaders(prepared);
+    const classOrder = this.declareHeaders(prepared);
     this.checkAtomicRows();
     for (const { file, context } of prepared) {
       this.file = context;
       this.resolveImports(file, context);
     }
-    this.linkClasses();
+    this.linkClasses(classOrder);
     afterHeaders();
     this.compileBodies();
     const initializers: CompiledProgram['initializers'] = [];
