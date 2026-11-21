@@ -753,17 +753,14 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     valueContext: DartType | undefined,
     types: ElementTypes[]
   ): { run: (frame: Frame, add: AddElement) => void; isConst: boolean } {
-    // Without a context of its own, the spread value is inferred alone, as `[...[1], ...[2.0]]` makes List<num>.
+    // Without element types of its own context, the spread value still takes the collection's kind but infers its
+    // element types alone, as `[...[1], ...[2.0]]` makes List<num> and `{...{}, 1}` a set.
     const hasContext =
       kind === 'map' ? elementContext !== undefined || valueContext !== undefined : elementContext !== undefined;
-    // Untyped braces spread there still take the enclosing kind, leaving their element types to their own elements.
-    const bracesOnly = element.value.kind === 'setOrMap' && !element.value.typeArguments;
     const contextType = !hasContext
-      ? bracesOnly
-        ? kind === 'map'
-          ? interfaceType(coreTypes.map, [INFERENCE_HOLE, INFERENCE_HOLE])
-          : interfaceType(coreTypes.iterable, [INFERENCE_HOLE])
-        : undefined
+      ? kind === 'map'
+        ? interfaceType(coreTypes.map, [INFERENCE_HOLE, INFERENCE_HOLE])
+        : interfaceType(coreTypes.iterable, [INFERENCE_HOLE])
       : kind === 'map'
         ? interfaceType(coreTypes.map, [elementContext ?? DYNAMIC, valueContext ?? DYNAMIC])
         : interfaceType(coreTypes.iterable, [elementContext ?? DYNAMIC]);
