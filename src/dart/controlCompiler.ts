@@ -4,7 +4,7 @@ import { localNamesIn } from './astWalk';
 import type { FunctionSpec } from './callCompiler';
 import type { Compiled, Eval } from './compilerBase';
 import { checkExhaustive } from './exhaustiveness';
-import { type CompiledPattern } from './patternCompiler';
+import { type CompiledPattern, PatternCache } from './patternCompiler';
 import { DartThrow, type Frame } from './runtime';
 import { Flow, type LocalVar } from './scope';
 import {
@@ -59,7 +59,7 @@ export abstract class ControlCompiler extends StatementCompiler {
       const value = test(frame);
       frame.temporaries.push(value);
       try {
-        return selectSwitchGroup(frame, value, groups);
+        return PatternCache.run(frame, (cache) => selectSwitchGroup(frame, value, groups, cache));
       } finally {
         frame.temporaries.pop();
       }
@@ -805,11 +805,16 @@ type SwitchRoute = (completion: Completion | void) => number | Completion | unde
 
 /** The index of the first group with a case that matches, clearing the variables of the groups that do not. */
 // code-gauge-allow functionCognitiveComplexity 17 -- Clear the failed matcher while keeping the selected body bindings live.
-function selectSwitchGroup(frame: Frame, value: Value, groups: readonly SwitchGroup<unknown>[]): number {
+function selectSwitchGroup(
+  frame: Frame,
+  value: Value,
+  groups: readonly SwitchGroup<unknown>[],
+  cache: PatternCache
+): number {
   for (const [index, group] of groups.entries()) {
     for (const { pattern, guard, slots, bindings } of group.matchers) {
       try {
-        if (pattern && (!pattern.match(frame, value) || (guard && guard(frame) !== true))) continue;
+        if (pattern && (!pattern.match(frame, value, cache) || (guard && guard(frame) !== true))) continue;
         for (const { from, to } of bindings) frame.locals[to] = new Cell((frame.locals[from] as Cell).v);
         return index;
       } finally {

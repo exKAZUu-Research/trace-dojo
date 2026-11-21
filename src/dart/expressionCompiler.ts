@@ -206,7 +206,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return { compiled: this.requireBool(compiled, expression), flow };
   }
 
-  private requireBool(compiled: Compiled, span: Span): Compiled {
+  protected requireBool(compiled: Compiled, span: Span): Compiled {
     const type = interfaceType(coreTypes.bool);
     if (compiled.type.kind === 'dynamic')
       return { ...compiled, type, run: this.runtimeCast(compiled.run, type, false) };
@@ -382,7 +382,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
-  private equalityOf(left: Compiled, right: Compiled, negated: boolean, span: Span): Compiled {
+  protected equalityOf(left: Compiled, right: Compiled, negated: boolean, span: Span): Compiled {
     if (left.type.kind !== 'dynamic' && left.type.kind !== 'null' && !isNullable(left.type)) {
       const equals = this.lookupMember(left.type, '==', false);
       if (equals?.member.kind === 'method') {

@@ -1,7 +1,9 @@
+// code-gauge-allow-file fileNcss 469 -- Switch coverage shares type partitions and pattern coverage rules.
 import type { Expression, Pattern, Span } from './ast';
 import { nullPatternComparison } from './astWalk';
 import type { ClassInfo, Member } from './classes';
-import type { ExpressionCompiler } from './expressionCompiler';
+import type { PatternCompiler } from './patternCompiler';
+import type { Frame } from './runtime';
 import {
   asInstanceOf,
   coreTypes,
@@ -16,6 +18,7 @@ import {
   substitute,
   typeToString,
 } from './types';
+import { DartObject, type Value } from './values';
 
 /** One case of the values a switch must cover: a constant, null, or every value of a type. */
 interface ListSpace {
@@ -29,10 +32,12 @@ interface ListSpace {
 
 type Space =
   | ListSpace
-  | { kind: 'constant'; key: unknown; type: DartType; text: string }
+  | { kind: 'constant'; key: boolean | Member; type: DartType; text: string }
   | { kind: 'null' }
-  | { kind: 'type'; type: DartType }
+  | { kind: 'type'; type: DartType; properties?: ReadonlyMap<string, Space> }
   | { kind: 'record'; fields: Space[]; names: (string | undefined)[]; type: DartType };
+
+type Coverage = boolean | ((frame: Frame) => boolean);
 
 const MAX_SPACES = 256;
 
@@ -41,8 +46,9 @@ const MAX_SPACES = 256;
  * statement on a type Dart requires to be covered (bool, enums, sealed classes, and records and nullable types of
  * them), is rejected when they do not.
  */
+// code-gauge-allow functionCognitiveComplexity 17 -- Report uncovered partitions now or after constant evaluation.
 export function checkExhaustive(
-  compiler: ExpressionCompiler,
+  compiler: PatternCompiler,
   type: DartType,
   patterns: Pattern[],
   span: Span,
@@ -51,14 +57,157 @@ export function checkExhaustive(
   if (patterns.some((pattern) => coversAll(compiler, pattern, type))) return true;
   const cutoff = Math.min(MAX_SPACES - 1, listLengthCutoff(patterns));
   const depth = Math.max(0, ...patterns.map(listNesting));
-  const spaces = expand(type, cutoff, depth);
-  const missing = spaces.find((space) => !patterns.some((pattern) => covers(compiler, pattern, space)));
-  if (!missing) return true;
-  if (isStatement && !isAlwaysExhaustive(type)) return false;
-  compiler.error(
+  const coverage = new ObjectSpaces(compiler, cutoff, depth);
+  const spaces = coverage.refine(expand(type, cutoff, depth), patterns);
+  const pending: { space: Space; test: (frame: Frame) => boolean }[] = [];
+  const mustCover = !isStatement || isAlwaysExhaustive(type);
+  const reportMissing = (space: Space): never =>
+    compiler.error(
+      span,
+      `switch が ${typeToString(type)} 型のすべての値を扱っていません（${spaceText(space)} の場合がありません）。`
+    );
+  for (const space of spaces) {
+    const test = combineCoverage(patterns, (pattern) => covers(compiler, pattern, space), false);
+    if (test === false) {
+      if (mustCover) reportMissing(space);
+      return false;
+    }
+    if (typeof test === 'function') pending.push({ space, test });
+  }
+  if (pending.length === 0) return true;
+  if (!mustCover) return false;
+  compiler.constantChecks.push({
     span,
-    `switch が ${typeToString(type)} 型のすべての値を扱っていません（${spaceText(missing)} の場合がありません）。`
-  );
+    run: (frame) => {
+      for (const { space, test } of pending) if (!test(frame)) reportMissing(space);
+      return;
+    },
+  });
+  return true;
+}
+
+function combineCoverage<T>(values: Iterable<T>, check: (value: T) => Coverage, every: boolean): Coverage {
+  const pending: ((frame: Frame) => boolean)[] = [];
+  for (const value of values) {
+    const result = check(value);
+    if (result === !every) return !every;
+    if (typeof result === 'function') pending.push(result);
+  }
+  if (pending.length === 0) return every;
+  return (frame) => {
+    for (const test of pending) if (test(frame) === !every) return !every;
+    return every;
+  };
+}
+
+class ObjectSpaces {
+  constructor(
+    private readonly compiler: PatternCompiler,
+    private readonly listCutoff: number,
+    private readonly listDepth: number
+  ) {}
+
+  refine(spaces: Space[], patterns: Pattern[]): Space[] {
+    if (patterns.length === 0) return spaces;
+    const parts = patterns.flatMap(patternAlternatives);
+    const result: Space[] = [];
+    for (const space of spaces) {
+      const refined = this.refineSpace(space, parts);
+      if (result.length + refined.length > MAX_SPACES) return spaces;
+      result.push(...refined);
+    }
+    return result;
+  }
+
+  private refineSpace(space: Space, parts: Pattern[]): Space[] {
+    if (space.kind === 'record') {
+      const fields = this.refineFields(space.fields, (index) => recordSubpatterns(parts, space.names, index));
+      return fields?.map((value) => ({ ...space, fields: value })) ?? [space];
+    }
+    if (space.kind === 'list' && space.elements) {
+      const elements = this.refineFields(space.elements, (index) => listSubpatterns(parts, space.length, index));
+      return elements?.map((value) => ({ ...space, elements: value })) ?? [space];
+    }
+    if (space.kind !== 'type') return [space];
+    const properties = this.propertyPatterns(space.type, parts);
+    if (properties.size === 0) return [space];
+    let products: Map<string, Space>[] = [new Map()];
+    for (const [name, { type, patterns }] of properties) {
+      const options = this.refine(expand(type, this.listCutoff, this.listDepth), patterns);
+      if (products.length * options.length > MAX_SPACES) return [space];
+      products = products.flatMap((product) => options.map((option) => new Map([...product, [name, option]])));
+    }
+    return products.map((properties) => ({ ...space, properties }));
+  }
+
+  private refineFields(fields: readonly Space[], patternsAt: (index: number) => Pattern[]): Space[][] | undefined {
+    let products: Space[][] = [[]];
+    for (const [index, field] of fields.entries()) {
+      const options = this.refine([field], patternsAt(index));
+      if (products.length * options.length > MAX_SPACES) return undefined;
+      products = products.flatMap((product) => options.map((option) => [...product, option]));
+    }
+    return products;
+  }
+
+  private propertyPatterns(type: DartType, parts: Pattern[]): Map<string, { type: DartType; patterns: Pattern[] }> {
+    const properties = new Map<string, { type: DartType; patterns: Pattern[] }>();
+    for (const part of parts) {
+      if (part.kind !== 'object') continue;
+      const target = withDynamicArgs(this.compiler.resolveType(part.type, { allowRaw: true }));
+      if (!isSubtype(type, target)) continue;
+      for (const field of part.fields) {
+        if (!field.name) continue;
+        const member = this.compiler.lookupMember(type, field.name, false);
+        if (!member || member.extension) continue;
+        const entry = properties.get(field.name) ?? { type: member.type, patterns: [] };
+        entry.patterns.push(field.pattern);
+        properties.set(field.name, entry);
+      }
+    }
+    return properties;
+  }
+}
+
+function patternAlternatives(pattern: Pattern): Pattern[] {
+  switch (pattern.kind) {
+    case 'parenthesized':
+    case 'cast':
+    case 'nullCheck':
+    case 'nullAssert': {
+      return patternAlternatives(pattern.pattern);
+    }
+    case 'or':
+    case 'and': {
+      return [...patternAlternatives(pattern.left), ...patternAlternatives(pattern.right)];
+    }
+    default: {
+      return [pattern];
+    }
+  }
+}
+
+function recordSubpatterns(parts: Pattern[], names: (string | undefined)[], index: number): Pattern[] {
+  const name = names[index];
+  return parts.flatMap((part) => {
+    if (part.kind !== 'record') return [];
+    const field = name
+      ? part.fields.find((field) => field.name === name)
+      : part.fields.filter((field) => !field.name)[index];
+    return field ? [field.pattern] : [];
+  });
+}
+
+function listSubpatterns(parts: Pattern[], length: number, index: number): Pattern[] {
+  return parts.flatMap((part) => {
+    if (part.kind !== 'list') return [];
+    const rest = part.elements.findIndex((element) => element.kind === 'rest');
+    if (rest === -1) return part.elements[index] ? [part.elements[index] as Pattern] : [];
+    const suffix = part.elements.length - rest - 1;
+    const position = index < rest ? index : index >= length - suffix ? part.elements.length - (length - index) : rest;
+    const element = part.elements[position];
+    return element && element.kind !== 'rest' ? [element] : [];
+  });
 }
 
 function spaceText(space: Space): string {
@@ -70,7 +219,8 @@ function spaceText(space: Space): string {
       return 'null';
     }
     case 'type': {
-      return `${typeToString(space.type)}()`;
+      const fields = [...(space.properties ?? [])].map(([name, value]) => `${name}: ${spaceText(value)}`);
+      return `${typeToString(space.type)}(${fields.join(', ')})`;
     }
     case 'list': {
       return `List(length ${space.hasLongerLengths ? '>=' : '='} ${space.length})`;
@@ -266,7 +416,7 @@ function subclassType(supertype: DartType & { kind: 'interface' }, subclass: Cla
 /** Whether a pattern matches every value of a type. */
 // code-gauge-allow functionCognitiveComplexity 29 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
 // code-gauge-allow functionNcss 47 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
-function coversAll(compiler: ExpressionCompiler, pattern: Pattern, type: DartType): boolean {
+function coversAll(compiler: PatternCompiler, pattern: Pattern, type: DartType): boolean {
   const comparison = nullPatternComparison(pattern);
   if (comparison) return comparison === '==' ? isSubtype(type, NULL) : !isNullable(type);
   switch (pattern.kind) {
@@ -305,7 +455,7 @@ function coversAll(compiler: ExpressionCompiler, pattern: Pattern, type: DartTyp
     case 'record': {
       const base = resolveBound(type);
       if (base.kind !== 'record' || isNullable(type)) return false;
-      return recordFieldsCover(compiler, pattern, base, (fieldPattern, fieldType) =>
+      return recordFieldsCover(pattern, base, (fieldPattern, fieldType) =>
         coversAll(compiler, fieldPattern, fieldType)
       );
     }
@@ -321,7 +471,7 @@ function coversAll(compiler: ExpressionCompiler, pattern: Pattern, type: DartTyp
           elementType: list.args[0] ?? DYNAMIC,
           length: 0,
           hasLongerLengths: true,
-        })
+        }) === true
       );
     }
     case 'map': {
@@ -350,12 +500,10 @@ function withDynamicArgs(type: DartType): DartType {
 }
 
 function recordFieldsCover(
-  compiler: ExpressionCompiler,
   pattern: Extract<Pattern, { kind: 'record' }>,
   type: DartType & { kind: 'record' },
   check: (pattern: Pattern, type: DartType) => boolean
 ): boolean {
-  void compiler;
   const positional = pattern.fields.filter((field) => field.name === undefined);
   const named = pattern.fields.filter((field) => field.name !== undefined);
   if (positional.length !== type.positional.length || named.length !== type.named.length) return false;
@@ -370,23 +518,25 @@ function recordFieldsCover(
 
 // code-gauge-allow functionCognitiveComplexity 18 -- Match every supported kind of pattern against a value space.
 // code-gauge-allow functionNcss 39 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
-function covers(compiler: ExpressionCompiler, pattern: Pattern, space: Space): boolean {
+function covers(compiler: PatternCompiler, pattern: Pattern, space: Space): Coverage {
   const comparison = nullPatternComparison(pattern);
   if (comparison) return comparison === '==' ? space.kind === 'null' : space.kind !== 'null' && !isNullable(space.type);
   switch (pattern.kind) {
     case 'parenthesized': {
       return covers(compiler, pattern.pattern, space);
     }
-    case 'or': {
-      return covers(compiler, pattern.left, space) || covers(compiler, pattern.right, space);
-    }
+    case 'or':
     case 'and': {
-      return covers(compiler, pattern.left, space) && covers(compiler, pattern.right, space);
+      return combineCoverage(
+        [pattern.left, pattern.right],
+        (part) => covers(compiler, part, space),
+        pattern.kind === 'and'
+      );
     }
     case 'cast': {
       return (
-        covers(compiler, pattern.pattern, space) ||
-        coversAll(compiler, pattern.pattern, compiler.resolveType(pattern.type))
+        coversAll(compiler, pattern.pattern, compiler.resolveType(pattern.type)) ||
+        covers(compiler, pattern.pattern, space)
       );
     }
     case 'nullAssert': {
@@ -426,10 +576,10 @@ function covers(compiler: ExpressionCompiler, pattern: Pattern, space: Space): b
 
 // code-gauge-allow functionCognitiveComplexity 18 -- Keep the prefix, middle and suffix of each list length space together.
 function listCovers(
-  compiler: ExpressionCompiler,
+  compiler: PatternCompiler,
   pattern: Extract<Pattern, { kind: 'list' }>,
   space: ListSpace
-): boolean {
+): Coverage {
   if (pattern.typeArguments?.length === 1) {
     const requiredElement = compiler.resolveType(pattern.typeArguments[0]);
     if (!isSubtype(space.elementType, requiredElement)) return false;
@@ -437,105 +587,89 @@ function listCovers(
   const rest = pattern.elements.findIndex((element) => element.kind === 'rest');
   const fixed = pattern.elements.length - (rest !== -1 ? 1 : 0);
   if (rest !== -1 ? space.length < fixed : space.hasLongerLengths || space.length !== fixed) return false;
-  return pattern.elements.every((element, index) => {
-    if (element.kind === 'rest') {
-      if (!element.pattern) return true;
-      const length = space.length - fixed;
-      return covers(compiler, element.pattern, {
-        ...space,
-        length,
-        type: interfaceType(coreTypes.list, [space.elementType]),
-        elements: space.elements?.slice(rest, rest + length),
-      });
-    }
-    const position = rest !== -1 && index > rest ? space.length + index - pattern.elements.length : index;
-    const elementSpace = space.elements?.[position];
-    return elementSpace ? covers(compiler, element, elementSpace) : coversAll(compiler, element, space.elementType);
-  });
+  return combineCoverage(
+    pattern.elements.entries(),
+    ([index, element]) => {
+      if (element.kind === 'rest') {
+        if (!element.pattern) return true;
+        const length = space.length - fixed;
+        return covers(compiler, element.pattern, {
+          ...space,
+          length,
+          type: interfaceType(coreTypes.list, [space.elementType]),
+          elements: space.elements?.slice(rest, rest + length),
+        });
+      }
+      const position = rest !== -1 && index > rest ? space.length + index - pattern.elements.length : index;
+      const elementSpace = space.elements?.[position];
+      return elementSpace ? covers(compiler, element, elementSpace) : coversAll(compiler, element, space.elementType);
+    },
+    true
+  );
 }
 
-function constantCovers(compiler: ExpressionCompiler, value: Expression, space: Space): boolean {
-  if (space.kind === 'null') return value.kind === 'null';
-  if (space.kind !== 'constant') return false;
-  if (value.kind === 'dotShorthand' && space.type.kind === 'interface') {
-    return space.type.cls.staticMembers.get(value.name) === space.key;
-  }
-  return constantKey(compiler, value) === space.key;
+function constantCovers(compiler: PatternCompiler, value: Expression, space: Space): Coverage {
+  if (space.kind !== 'constant' && space.kind !== 'null') return false;
+  const compiled = compiler.patternConstants.get(value);
+  if (!compiled) return false;
+  const type = space.kind === 'null' ? NULL : space.type;
+  if (!isSubtype(type, compiled.type) && !isSubtype(compiled.type, type)) return false;
+  const matches = (actual: Value): boolean => {
+    if (space.kind === 'null') return actual === undefined;
+    const { key } = space;
+    if (typeof key === 'boolean') return actual === key;
+    return actual instanceof DartObject && actual.cls === key.owner && actual.native?.name === key.name;
+  };
+  if (compiled.constValue) return matches(compiled.constValue.value);
+  return (frame) => matches(compiled.run(frame));
 }
 
 function objectCovers(
-  compiler: ExpressionCompiler,
+  compiler: PatternCompiler,
   pattern: Extract<Pattern, { kind: 'object' }>,
   space: Space
-): boolean {
+): Coverage {
   if (space.kind === 'null') return false;
   const target = withDynamicArgs(compiler.resolveType(pattern.type, { allowRaw: true }));
   if (!isSubtype(space.type, target)) return false;
   if (space.kind === 'constant' && pattern.fields.length > 0) return false;
-  return pattern.fields.every((field) => {
-    const member = field.name ? compiler.lookupMember(space.type, field.name, false) : undefined;
-    return member ? coversAll(compiler, field.pattern, member.type) : false;
-  });
+  return combineCoverage(
+    pattern.fields,
+    (field) => {
+      if (!field.name) return false;
+      const property = space.kind === 'type' ? space.properties?.get(field.name) : undefined;
+      if (property) return covers(compiler, field.pattern, property);
+      const member = compiler.lookupMember(space.type, field.name, false);
+      return member ? coversAll(compiler, field.pattern, member.type) : false;
+    },
+    true
+  );
 }
 
 function recordCovers(
-  compiler: ExpressionCompiler,
+  compiler: PatternCompiler,
   pattern: Extract<Pattern, { kind: 'record' }>,
   space: Space
-): boolean {
+): Coverage {
   if (space.kind === 'record') {
     const positional = pattern.fields.filter((field) => field.name === undefined);
     const named = pattern.fields.filter((field) => field.name !== undefined);
     const positionalCount = space.names.filter((name) => name === undefined).length;
     if (positional.length !== positionalCount || named.length !== space.names.length - positionalCount) return false;
-    return space.fields.every((fieldSpace, index) => {
-      const name = space.names[index];
-      const field = name === undefined ? positional[index] : named.find((other) => other.name === name);
-      return field !== undefined && covers(compiler, field.pattern, fieldSpace);
-    });
+    return combineCoverage(
+      space.fields.entries(),
+      ([index, fieldSpace]) => {
+        const name = space.names[index];
+        const field = name === undefined ? positional[index] : named.find((other) => other.name === name);
+        return field !== undefined && covers(compiler, field.pattern, fieldSpace);
+      },
+      true
+    );
   }
   if (space.kind !== 'type') return false;
   const base = resolveBound(space.type);
   return (
     base.kind === 'record' &&
-    recordFieldsCover(compiler, pattern, base, (fieldPattern, fieldType) =>
-      coversAll(compiler, fieldPattern, fieldType)
-    )
+    recordFieldsCover(pattern, base, (fieldPattern, fieldType) => coversAll(compiler, fieldPattern, fieldType))
   );
-}
-
-/** The identity of a constant that a space of a bool or an enum names, for comparing it with a constant pattern. */
-function constantKey(compiler: ExpressionCompiler, expression: Expression): unknown {
-  switch (expression.kind) {
-    case 'bool': {
-      return expression.value;
-    }
-    case 'null': {
-      return NULL;
-    }
-    case 'parenthesized': {
-      return constantKey(compiler, expression.expression);
-    }
-    case 'identifier': {
-      const resolution = compiler.resolveName(expression.name);
-      if (resolution?.kind === 'staticMember') return resolution.member;
-      if (resolution?.kind === 'declaration' && resolution.declaration.kind === 'variable')
-        return resolution.declaration.global;
-      return undefined;
-    }
-    case 'member': {
-      if (expression.object.kind !== 'identifier') return undefined;
-      const resolution = compiler.resolveName(expression.object.name);
-      if (resolution?.kind === 'declaration' && resolution.declaration.kind === 'class') {
-        return resolution.declaration.cls.staticMembers.get(expression.name);
-      }
-      return undefined;
-    }
-    case 'dotShorthand': {
-      return { dotShorthand: expression.name };
-    }
-    default: {
-      return undefined;
-    }
-  }
 }

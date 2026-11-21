@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 674 -- Assignment targets share read and write dispatch.
+// code-gauge-allow-file fileNcss 675 -- Assignment targets share read and write dispatch.
 import type { CascadeSelector, CollectionElement, Expression, ForInBinding, Span, SwitchExpressionCase } from './ast';
 import type { ClassInfo, Member } from './classes';
 import { at, type Compiled, type Eval, type ResolvedMember, typeName } from './compilerBase';
@@ -8,6 +8,7 @@ import { checkExhaustive } from './exhaustiveness';
 import { ExpressionCompiler, SHORTED } from './expressionCompiler';
 import type { HashStore } from './hashStore';
 import { wrap } from './operators';
+import { PatternCache } from './patternCompiler';
 import type { Frame } from './runtime';
 import { Flow, type LocalVar } from './scope';
 import { isAnsweredType } from './statementCompiler';
@@ -1123,24 +1124,28 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     const test = subject.run;
     return {
       type,
-      run: (frame) => {
-        const value = test(frame);
-        frame.temporaries.push(value);
-        try {
-          for (const switchCase of compiledCases) {
-            try {
-              if (switchCase.pattern.match(frame, value) && (!switchCase.guard || switchCase.guard(frame) === true)) {
-                return switchCase.body.run(frame);
+      run: (frame) =>
+        PatternCache.run(frame, (cache) => {
+          const value = test(frame);
+          frame.temporaries.push(value);
+          try {
+            for (const switchCase of compiledCases) {
+              try {
+                if (
+                  switchCase.pattern.match(frame, value, cache) &&
+                  (!switchCase.guard || switchCase.guard(frame) === true)
+                ) {
+                  return switchCase.body.run(frame);
+                }
+              } finally {
+                for (const slot of switchCase.slots) frame.locals[slot] = undefined;
               }
-            } finally {
-              for (const slot of switchCase.slots) frame.locals[slot] = undefined;
             }
+          } finally {
+            frame.temporaries.pop();
           }
-        } finally {
-          frame.temporaries.pop();
-        }
-        return frame.runtime.throwError('StateError', '', ['No switch case matched']);
-      },
+          return frame.runtime.throwError('StateError', '', ['No switch case matched']);
+        }),
       isConst: false,
     };
   }

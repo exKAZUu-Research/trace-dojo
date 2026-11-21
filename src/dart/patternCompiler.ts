@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 544 -- Pattern kinds share their type, rooting, and binding helpers.
+// code-gauge-allow-file fileNcss 550 -- Pattern kinds share their type, rooting, and binding helpers.
 import type { Expression, ListPatternElement, Pattern, RecordPatternField, Span } from './ast';
 import { nullPatternComparison } from './astWalk';
 import { CallCompiler } from './callCompiler';
@@ -12,6 +12,7 @@ import {
   coreTypes,
   type DartType,
   DYNAMIC,
+  type FunctionType,
   interfaceType,
   isNullable,
   isSubtype,
@@ -26,14 +27,58 @@ import { type Arguments, type Callable, Cell, DartRecord, type Value } from './v
 
 export type PatternMode = 'match' | 'declare' | 'assign';
 
-/** A compiled pattern: how to match a value, binding variables as it goes, and what it declares. */
-export interface CompiledPattern {
-  match: (frame: Frame, value: Value) => boolean;
-  /** The variables the pattern declares, by name. */
-  variables: Map<string, LocalVar>;
-  /** Whether the pattern matches every value of the type it was compiled against. */
+interface PatternMatch {
+  match: MatchValue;
   irrefutable: boolean;
 }
+
+type MatchValue = (frame: Frame, value: Value, cache: PatternCache) => boolean;
+
+export interface CompiledPattern extends Omit<PatternMatch, 'match'> {
+  match: (frame: Frame, value: Value, cache?: PatternCache) => boolean;
+  variables: Map<string, LocalVar>;
+}
+
+export class PatternCache {
+  private readonly paths = new Map<unknown, PatternCache>();
+  private extracted: { value: Value } | undefined;
+
+  private constructor(private readonly roots: Value[]) {}
+
+  static run<T>(frame: Frame, match: (cache: PatternCache) => T): T {
+    const values: Value[] = [];
+    const roots = (): Value[] => values;
+    frame.runtime.roots.add(roots);
+    try {
+      return match(new PatternCache(values));
+    } finally {
+      frame.runtime.roots.delete(roots);
+    }
+  }
+
+  child(key: unknown): PatternCache {
+    let child = this.paths.get(key);
+    if (!child) {
+      child = new PatternCache(this.roots);
+      this.paths.set(key, child);
+    }
+    return child;
+  }
+
+  read(frame: Frame, extract: () => Value): Value {
+    if (this.extracted) return this.extracted.value;
+    const value = extract();
+    frame.runtime.allocate(1);
+    this.roots.push(value);
+    this.extracted = { value };
+    return value;
+  }
+}
+
+const MAP_VALUE = Symbol('map value');
+const MAP_CONTAINS_KEY = Symbol('map contains key');
+const LIST_LENGTH = Symbol('list length');
+const SUBLIST = Symbol('sublist');
 
 interface PatternOptions {
   mode: PatternMode;
@@ -51,6 +96,8 @@ interface PatternWrite {
 }
 
 export abstract class PatternCompiler extends CallCompiler {
+  readonly patternConstants = new WeakMap<Expression, Compiled>();
+
   protected compileCasePattern(
     syntax: Pattern,
     subject: Compiled,
@@ -84,7 +131,13 @@ export abstract class PatternCompiler extends CallCompiler {
   compilePattern(pattern: Pattern, matchedType: DartType, options: PatternOptions): CompiledPattern {
     const variables = new Map<string, LocalVar>();
     const compiled = this.compilePatternInner(pattern, matchedType, options, variables);
-    return { ...compiled, variables };
+    const { match, irrefutable } = compiled;
+    return {
+      irrefutable,
+      variables,
+      match: (frame, value, cache) =>
+        cache ? match(frame, value, cache) : PatternCache.run(frame, (created) => match(frame, value, created)),
+    };
   }
 
   /** The type a pattern expects of the value, which declarations use as the context of their initializer. */
@@ -167,14 +220,14 @@ export abstract class PatternCompiler extends CallCompiler {
     matchedType: DartType,
     options: PatternOptions,
     variables: Map<string, LocalVar>
-  ): Omit<CompiledPattern, 'variables'> {
+  ): PatternMatch {
     const { match, irrefutable } = this.compilePatternNode(pattern, matchedType, options, variables);
     return {
       irrefutable,
-      match: (frame, value) => {
+      match: (frame, value, cache) => {
         frame.temporaries.push(value);
         try {
-          return match(frame, value);
+          return match(frame, value, cache);
         } finally {
           frame.temporaries.pop();
         }
@@ -188,7 +241,7 @@ export abstract class PatternCompiler extends CallCompiler {
     matchedType: DartType,
     options: PatternOptions,
     variables: Map<string, LocalVar>
-  ): Omit<CompiledPattern, 'variables'> {
+  ): PatternMatch {
     switch (pattern.kind) {
       case 'parenthesized': {
         return this.compilePatternInner(pattern.pattern, matchedType, options, variables);
@@ -224,7 +277,7 @@ export abstract class PatternCompiler extends CallCompiler {
           variables
         );
         return {
-          match: (frame, value) => left.match(frame, value) && right.match(frame, value),
+          match: (frame, value, cache) => left.match(frame, value, cache) && right.match(frame, value, cache),
           irrefutable: left.irrefutable && right.irrefutable,
         };
       }
@@ -234,16 +287,16 @@ export abstract class PatternCompiler extends CallCompiler {
       case 'nullCheck': {
         const inner = this.compilePatternInner(pattern.pattern, nonNullable(matchedType), options, variables);
         return {
-          match: (frame, value) => value !== undefined && inner.match(frame, value),
+          match: (frame, value, cache) => value !== undefined && inner.match(frame, value, cache),
           irrefutable: !isNullable(matchedType) && inner.irrefutable,
         };
       }
       case 'nullAssert': {
         const inner = this.compilePatternInner(pattern.pattern, nonNullable(matchedType), options, variables);
         return {
-          match: (frame, value) => {
+          match: (frame, value, cache) => {
             if (value === undefined) frame.runtime.throwTypeError('Null check operator used on a null value');
-            return inner.match(frame, value);
+            return inner.match(frame, value, cache);
           },
           irrefutable: inner.irrefutable,
         };
@@ -268,7 +321,7 @@ export abstract class PatternCompiler extends CallCompiler {
     matchedType: DartType,
     options: PatternOptions,
     variables: Map<string, LocalVar>
-  ): Omit<CompiledPattern, 'variables'> {
+  ): PatternMatch {
     const declared = pattern.type ? this.resolveType(pattern.type) : undefined;
     const type = declared ?? matchedType;
     const variable = this.patternVariable(
@@ -294,7 +347,7 @@ export abstract class PatternCompiler extends CallCompiler {
     matchedType: DartType,
     options: PatternOptions,
     variables: Map<string, LocalVar>
-  ): Omit<CompiledPattern, 'variables'> {
+  ): PatternMatch {
     const before = new Set(variables.keys());
     const left = this.compilePatternInner(
       pattern.left,
@@ -317,7 +370,7 @@ export abstract class PatternCompiler extends CallCompiler {
       }
     }
     return {
-      match: (frame, value) => left.match(frame, value) || right.match(frame, value),
+      match: (frame, value, cache) => left.match(frame, value, cache) || right.match(frame, value, cache),
       irrefutable: left.irrefutable || right.irrefutable,
     };
   }
@@ -326,19 +379,19 @@ export abstract class PatternCompiler extends CallCompiler {
     pattern: Extract<Pattern, { kind: 'cast' }>,
     options: PatternOptions,
     variables: Map<string, LocalVar>
-  ): Omit<CompiledPattern, 'variables'> {
+  ): PatternMatch {
     const type = this.resolveType(pattern.type);
     const inner = this.compilePatternInner(pattern.pattern, type, options, variables);
     const resolve = this.runtimeType(type);
     return {
-      match: (frame, value) => {
+      match: (frame, value, cache) => {
         const target = resolve(frame);
         if (!this.valueIsAt(frame, value, target)) {
           frame.runtime.throwTypeError(
             `type '${vmTypeString(frame.runtime.runtimeTypeOf(value))}' is not a subtype of type '${vmTypeString(target)}' in type cast`
           );
         }
-        return inner.match(frame, value);
+        return inner.match(frame, value, cache);
       },
       irrefutable: inner.irrefutable,
     };
@@ -432,29 +485,29 @@ export abstract class PatternCompiler extends CallCompiler {
   private typeTest(
     type: DartType,
     matchedType: DartType,
-    then: (frame: Frame, value: Value) => boolean,
+    then: MatchValue,
     thenIrrefutable: boolean,
     mode: PatternMode = 'match'
-  ): Omit<CompiledPattern, 'variables'> {
+  ): PatternMatch {
     if (isSubtype(matchedType, type)) return { match: then, irrefutable: thenIrrefutable };
     const resolve = this.runtimeType(type);
     // A declaration or an assignment casts a dynamic value to the type the pattern needs, as Dart does.
     if (mode !== 'match') {
       return {
-        match: (frame, value) => {
+        match: (frame, value, cache) => {
           const required = resolve(frame);
           if (!this.valueIsAt(frame, value, required)) {
             frame.runtime.throwTypeError(
               `type '${vmTypeString(frame.runtime.runtimeTypeOf(value))}' is not a subtype of type '${vmTypeString(required)}'`
             );
           }
-          return then(frame, value);
+          return then(frame, value, cache);
         },
         irrefutable: false,
       };
     }
     return {
-      match: (frame, value) => this.valueIsAt(frame, value, resolve(frame)) && then(frame, value),
+      match: (frame, value, cache) => this.valueIsAt(frame, value, resolve(frame)) && then(frame, value, cache),
       irrefutable: false,
     };
   }
@@ -463,7 +516,7 @@ export abstract class PatternCompiler extends CallCompiler {
     pattern: Extract<Pattern, { kind: 'assignedVariable' }>,
     matchedType: DartType,
     options: PatternOptions
-  ): Omit<CompiledPattern, 'variables'> {
+  ): PatternMatch {
     const variable = this.findLocal(pattern.name, pattern);
     if (!variable) return this.error(pattern, `${pattern.name} という変数はありません。`);
     if (options.assignments?.has(variable)) {
@@ -491,12 +544,13 @@ export abstract class PatternCompiler extends CallCompiler {
     return this.typeTest(variable.type, matchedType, save, true, options.mode);
   }
 
-  private constantPattern(value: Expression, matchedType: DartType): Omit<CompiledPattern, 'variables'> {
+  private constantPattern(value: Expression, matchedType: DartType): PatternMatch {
     const compiled = this.withConstContext(true, () =>
       this.compileExpression(value, matchedType.kind === 'dynamic' ? undefined : nonNullable(matchedType))
     );
     if (!compiled.isConst) this.error(value, 'case のパターンには、定数を書いてください。');
     this.checkConstant(value, compiled);
+    this.patternConstants.set(value, compiled);
     const { run } = compiled;
     return {
       match: (frame, actual) => frame.runtime.equals(run(frame), actual),
@@ -504,44 +558,20 @@ export abstract class PatternCompiler extends CallCompiler {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- One case per part of the pattern, matched in Dart's order.
-  private relationalPattern(
-    pattern: Extract<Pattern, { kind: 'relational' }>,
-    matchedType: DartType
-  ): Omit<CompiledPattern, 'variables'> {
-    const operand = this.withConstContext(true, () => this.compileExpression(pattern.value));
-    if (!operand.isConst) this.error(pattern.value, '比べる相手には、定数を書いてください。');
-    this.checkConstant(pattern.value, operand);
-    const { operator } = pattern;
-    const { run } = operand;
-    if (operator === '==' || operator === '!=') {
-      return {
-        match: (frame, value) => frame.runtime.equals(value, run(frame)) === (operator === '=='),
-        irrefutable: false,
-      };
-    }
-    const receiverType = nonNullable(matchedType);
-    if (receiverType.kind !== 'dynamic') {
-      const member = this.lookupMember(receiverType, operator, false);
-      if (!member) this.error(pattern, `${typeName(matchedType)} 型には演算子 ${operator} がありません。`);
-    }
-    return {
-      match: (frame, value) => {
-        if (value === undefined) return false;
-        const other = run(frame);
-        if (
-          (typeof value === 'bigint' || typeof value === 'number') &&
-          (typeof other === 'bigint' || typeof other === 'number')
-        ) {
-          const a = Number(value);
-          const b = Number(other);
-          if (typeof value === 'bigint' && typeof other === 'bigint') return compareBigints(operator, value, other);
-          return compareNumbers(operator, a, b);
-        }
-        return frame.runtime.invoke(value, operator, { positional: [other], named: undefined }, [], undefined) === true;
-      },
-      irrefutable: false,
-    };
+  private relationalPattern(pattern: Extract<Pattern, { kind: 'relational' }>, matchedType: DartType): PatternMatch {
+    const { operator, value } = pattern;
+    const method = matchedType.kind === 'dynamic' ? undefined : this.lookupMember(matchedType, operator, false);
+    const parameter = method?.member.kind === 'method' ? (method.type as FunctionType).positional[0] : undefined;
+    const operand = this.withConstContext(true, () => this.compileExpression(value, parameter));
+    if (!operand.isConst) this.error(value, '比べる相手には、定数を書いてください。');
+    this.checkConstant(value, operand);
+    const receiver: Compiled = { type: matchedType, run: (frame) => frame.temporaries.at(-1), isConst: false };
+    const comparison =
+      operator === '==' || operator === '!='
+        ? this.equalityOf(receiver, operand, operator === '!=', pattern)
+        : this.withConstContext(true, () => this.compileBinaryWithLeft(receiver, operator, value, pattern, undefined));
+    const { run } = this.requireBool(comparison, pattern);
+    return { match: (frame) => run(frame) === true, irrefutable: false };
   }
 
   private listPattern(
@@ -549,7 +579,7 @@ export abstract class PatternCompiler extends CallCompiler {
     matchedType: DartType,
     options: PatternOptions,
     variables: Map<string, LocalVar>
-  ): Omit<CompiledPattern, 'variables'> {
+  ): PatternMatch {
     const elementType = this.listPatternElementType(pattern, matchedType);
     const listType = interfaceType(coreTypes.list, [elementType]);
     const restIndex = pattern.elements.findIndex((element) => element.kind === 'rest');
@@ -576,7 +606,8 @@ export abstract class PatternCompiler extends CallCompiler {
     this.requireAssignable(listType, matchedType, options, pattern);
     const typeCheck = this.typeTest(listType, matchedType, () => true, true, options.mode);
     return {
-      match: (frame, value) => typeCheck.match(frame, value) && matchListParts(frame, value, parts),
+      match: (frame, value, cache) =>
+        typeCheck.match(frame, value, cache) && matchListParts(frame, value, parts, cache),
       irrefutable: typeCheck.irrefutable && hasRest && head.length + tail.length === 0 && (!rest || rest.irrefutable),
     };
   }
@@ -598,7 +629,7 @@ export abstract class PatternCompiler extends CallCompiler {
     matchedType: DartType,
     options: PatternOptions,
     variables: Map<string, LocalVar>
-  ): Omit<CompiledPattern, 'variables'> {
+  ): PatternMatch {
     const [keyType, valueType] = this.mapPatternTypes(pattern, matchedType);
     const mapType = interfaceType(coreTypes.map, [keyType, valueType]);
     const entries = pattern.entries.map((entry) => {
@@ -610,15 +641,18 @@ export abstract class PatternCompiler extends CallCompiler {
     this.requireAssignable(mapType, matchedType, options, pattern);
     const typeCheck = this.typeTest(mapType, matchedType, () => true, true, options.mode);
     return {
-      match: (frame, value) => {
-        if (!typeCheck.match(frame, value)) return false;
+      match: (frame, value, cache) => {
+        if (!typeCheck.match(frame, value, cache)) return false;
         const { runtime } = frame;
         for (const entry of entries) {
           const key = entry.key(frame);
-          if (runtime.invoke(value, 'containsKey', { positional: [key], named: undefined }, [], undefined) !== true)
+          const args = { positional: [key], named: undefined };
+          const presence = cache.child(MAP_CONTAINS_KEY).child(key);
+          if (presence.read(frame, () => runtime.invoke(value, 'containsKey', args, [], undefined)) !== true)
             return false;
-          const found = runtime.invoke(value, '[]', { positional: [key], named: undefined }, [], undefined);
-          if (!entry.value.match(frame, found)) return false;
+          const path = cache.child(MAP_VALUE).child(key);
+          const found = path.read(frame, () => runtime.invoke(value, '[]', args, [], undefined));
+          if (!entry.value.match(frame, found, path)) return false;
         }
         return true;
       },
@@ -641,7 +675,7 @@ export abstract class PatternCompiler extends CallCompiler {
     matchedType: DartType,
     options: PatternOptions,
     variables: Map<string, LocalVar>
-  ): Omit<CompiledPattern, 'variables'> {
+  ): PatternMatch {
     const base = resolveBound(matchedType);
     const recordType = base.kind === 'record' ? base : undefined;
     const positional = pattern.fields.filter((field) => field.name === undefined);
@@ -670,7 +704,7 @@ export abstract class PatternCompiler extends CallCompiler {
     return this.typeTest(
       shape,
       matchedType,
-      (frame, value) => matchesRecord(frame, value, positionalPatterns, namedPatterns, sortedNames),
+      (frame, value, cache) => matchesRecord(frame, value, positionalPatterns, namedPatterns, sortedNames, cache),
       positionalPatterns.every((field) => field.irrefutable) &&
         namedPatterns.every((field) => field.pattern.irrefutable),
       options.mode
@@ -687,13 +721,13 @@ export abstract class PatternCompiler extends CallCompiler {
     return names;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- One case per part of the pattern, matched in Dart's order.
+  // code-gauge-allow functionCognitiveComplexity 19 -- Resolve object properties and match their projected values.
   private objectPattern(
     pattern: Extract<Pattern, { kind: 'object' }>,
     matchedType: DartType,
     options: PatternOptions,
     variables: Map<string, LocalVar>
-  ): Omit<CompiledPattern, 'variables'> {
+  ): PatternMatch {
     let type = this.resolveType(pattern.type, { allowRaw: true });
     this.fieldNames(pattern.fields);
     if (type.kind === 'interface' && type.args.length === 0 && type.cls.typeParams.length > 0) {
@@ -721,11 +755,13 @@ export abstract class PatternCompiler extends CallCompiler {
     });
     const typeCheck = this.typeTest(type, matchedType, () => true, true, options.mode);
     return {
-      match: (frame, value) => {
-        if (!typeCheck.match(frame, value)) return false;
+      match: (frame, value, cache) => {
+        if (!typeCheck.match(frame, value, cache)) return false;
         for (const field of fields) {
-          const fieldValue = this.readPatternField(frame, value, field.name, field.member);
-          if (!field.pattern.match(frame, fieldValue)) return false;
+          const key = field.member.extension ? field.member.member : field.name;
+          const path = cache.child(key);
+          const fieldValue = path.read(frame, () => this.readPatternField(frame, value, field.name, field.member));
+          if (!field.pattern.match(frame, fieldValue, path)) return false;
         }
         return true;
       },
@@ -781,7 +817,11 @@ export abstract class PatternCompiler extends CallCompiler {
         if (result === SHORTED) return;
         frame.temporaries.push(result);
         try {
-          if (!check.match(frame, result) || !matcher.match(frame, result)) this.throwPatternMismatch(frame, result);
+          const matched = PatternCache.run(
+            frame,
+            (cache) => check.match(frame, result, cache) && matcher.match(frame, result, cache)
+          );
+          if (!matched) this.throwPatternMismatch(frame, result);
           for (const { slot, target } of writes) target(frame).v = (frame.locals[slot] as Cell).v;
           return result;
         } finally {
@@ -842,88 +882,64 @@ export function isRefutableSyntax(pattern: Pattern): boolean {
 }
 
 interface ListPatternParts {
-  head: (Omit<CompiledPattern, 'variables'> | undefined)[];
-  rest: Omit<CompiledPattern, 'variables'> | undefined;
+  head: (PatternMatch | undefined)[];
+  rest: PatternMatch | undefined;
   tail: ListPatternParts['head'];
   hasRest: boolean;
 }
 
 /** Matches a list's length, the elements before and after the rest, and the rest as a new list. */
 // code-gauge-allow functionCognitiveComplexity 20 -- The pattern length and three subranges follow the specification.
-function matchListParts(frame: Frame, value: Value, parts: ListPatternParts): boolean {
+function matchListParts(frame: Frame, value: Value, parts: ListPatternParts, cache: PatternCache): boolean {
   const { head, rest, tail, hasRest } = parts;
   const { runtime } = frame;
   const minimum = BigInt(head.length + tail.length);
-  const count = hasRest && minimum === 0n ? 0n : listLength(runtime, value);
+  const count =
+    hasRest && minimum === 0n ? 0n : (cache.child(LIST_LENGTH).read(frame, () => listLength(runtime, value)) as bigint);
+  const matchElement = (pattern: PatternMatch, index: bigint): boolean => {
+    const path = cache.child(index);
+    return pattern.match(
+      frame,
+      path.read(frame, () => listElement(runtime, value, index)),
+      path
+    );
+  };
   if (hasRest ? count < minimum : count !== minimum && (minimum > 0n || count > 0n)) return false;
   for (const [index, element] of head.entries()) {
-    if (element && !element.match(frame, listElement(runtime, value, BigInt(index)))) return false;
+    if (element && !matchElement(element, BigInt(index))) return false;
   }
   if (rest) {
     const positional = [BigInt(head.length)];
     if (tail.length > 0) positional.push(count - BigInt(tail.length));
-    const sublist = runtime.invoke(value, 'sublist', { positional, named: undefined }, [], undefined);
-    if (!rest.match(frame, sublist)) return false;
+    const path = cache.child(SUBLIST).child(positional[0]).child(positional[1]);
+    const sublist = path.read(frame, () =>
+      runtime.invoke(value, 'sublist', { positional, named: undefined }, [], undefined)
+    );
+    if (!rest.match(frame, sublist, path)) return false;
   }
   for (const [index, element] of tail.entries()) {
-    if (element && !element.match(frame, listElement(runtime, value, count - BigInt(tail.length - index))))
-      return false;
+    if (element && !matchElement(element, count - BigInt(tail.length - index))) return false;
   }
   return true;
-}
-
-// code-gauge-allow duplicateLines 16 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
-function compareBigints(operator: string, a: bigint, b: bigint): boolean {
-  switch (operator) {
-    case '<': {
-      return a < b;
-    }
-    case '<=': {
-      return a <= b;
-    }
-    case '>': {
-      return a > b;
-    }
-    default: {
-      return a >= b;
-    }
-  }
-}
-
-// code-gauge-allow duplicateLines 16 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
-function compareNumbers(operator: string, a: number, b: number): boolean {
-  switch (operator) {
-    case '<': {
-      return a < b;
-    }
-    case '<=': {
-      return a <= b;
-    }
-    case '>': {
-      return a > b;
-    }
-    default: {
-      return a >= b;
-    }
-  }
 }
 
 /** Whether a value is a record of the pattern's shape whose fields match their patterns. */
 function matchesRecord(
   frame: Frame,
   value: Value,
-  positionalPatterns: readonly Omit<CompiledPattern, 'variables'>[],
-  namedPatterns: readonly { name: string; pattern: Omit<CompiledPattern, 'variables'> }[],
-  sortedNames: readonly string[]
+  positionalPatterns: readonly PatternMatch[],
+  namedPatterns: readonly { name: string; pattern: PatternMatch }[],
+  sortedNames: readonly string[],
+  cache: PatternCache
 ): boolean {
   if (!(value instanceof DartRecord)) return false;
   if (value.positional.length !== positionalPatterns.length || value.named.length !== sortedNames.length) return false;
   if (!value.named.every(([name], index) => name === sortedNames[index])) return false;
   for (const [index, field] of positionalPatterns.entries())
-    if (!field.match(frame, value.positional[index])) return false;
+    if (!field.match(frame, value.positional[index], cache.child(`$${index + 1}`))) return false;
   for (const field of namedPatterns) {
     const entry = value.named.find(([name]) => name === field.name);
-    if (!field.pattern.match(frame, entry?.[1])) return false;
+    if (!field.pattern.match(frame, entry?.[1], cache.child(field.name))) return false;
   }
   return true;
 }

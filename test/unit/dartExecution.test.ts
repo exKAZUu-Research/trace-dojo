@@ -3694,3 +3694,110 @@ void main() {
     kind: 'compileError',
   });
 });
+
+test('switch coverage evaluates named and computed boolean and enum constants', () => {
+  const program = `enum Choice { first, second }
+const yes = true;
+const first = Choice.first;
+class State { static const other = Choice.second; }
+int test(bool value) => switch (value) { yes => 1, false => 0 };
+int choose(Choice value) => switch (value) { first => 1, State.other => 2 };
+int local(bool? value) {
+  const off = !yes;
+  const empty = null;
+  switch (value) {
+    case yes: return 1;
+    case off: return 0;
+    case empty: return -1;
+  }
+}
+void main() { print([test(true), choose(Choice.first), choose(Choice.second), local(false), local(null)]); }`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[1, 1, 2, 0, -1]\n' });
+  expect(executeProgram('dart', program.replace('const off = !yes;', 'const off = yes;'))).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ message: expect.stringContaining('false') })],
+  });
+});
+
+test('exhaustiveness combines object property patterns across cases', () => {
+  const program = `enum Mode { off, on }
+const active = Mode.on;
+sealed class State {}
+class Value extends State {
+  final Mode mode;
+  Value(this.mode);
+}
+class Wrapped extends State {
+  final Value value;
+  Wrapped(this.value);
+}
+int score(State object) => switch (object) {
+  Value(mode: active) => 1,
+  Value(mode: Mode.off) => 2,
+  Wrapped(value: Value(mode: active)) => 3,
+  Wrapped(value: Value(mode: Mode.off)) => 4,
+};
+int boolean(Value a) => switch ((a, true)) {
+  (Value(mode: active), _) => 1,
+  (Value(mode: Mode.off), _) => 2,
+};
+void main() { print([score(Value(Mode.on)), score(Wrapped(Value(Mode.off))), boolean(Value(Mode.off))]); }`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[1, 4, 2]\n' });
+  expect(executeProgram('dart', program.replace('  Wrapped(value: Value(mode: Mode.off)) => 4,', ''))).toMatchObject({
+    kind: 'compileError',
+  });
+});
+
+test('pattern decisions reuse each extracted path across alternatives and guards', () => {
+  const program = `class C {
+  int calls = 0;
+  int get value { print('read'); return ++calls; }
+}
+void main() {
+  var c = C();
+  var answer = switch (c) {
+    C(value: 1) when (c.calls = 10) > 20 => 0,
+    C(value: 1) => 1,
+    _ => -1,
+  };
+  print(answer);
+  if (C() case C(value: 2) || C(value: 1)) print('or');
+  c = C();
+  if ((c, c) case (C(value: 1), C(value: 2))) print('separate');
+  c = C();
+  switch (c) {
+    case C(value: 2): print(2);
+    case C(value: 1): print(1);
+  }
+  if (c case C(value: 2)) print('new decision');
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'read\n1\nread\nor\nread\nread\nseparate\nread\n1\nread\nnew decision\n',
+  });
+});
+
+test('relational patterns validate operands and check dynamic results as bool', () => {
+  const program = `class Score {
+  dynamic operator <(int bound) => 0;
+}
+void main() {
+  int value = 1;
+  if (value case < 2) print('less');
+  for (dynamic subject in [Score(), null]) {
+    try { if (subject case < 2) print('matched'); }
+    catch (error) { print(error.runtimeType); }
+  }
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'less\n_TypeError\nNoSuchMethodError\n',
+  });
+  for (const source of [
+    "void main() { if (1 case < 'a') print('matched'); }",
+    "class C { int operator <(int n) => 1; } void main() { if (C() case < 2) print('matched'); }",
+    'bool check(int? n) => switch(n) { < 2 => true, _ => false }; void main() {}',
+  ]) {
+    expect(executeProgram('dart', source)).toMatchObject({ kind: 'compileError' });
+  }
+});
