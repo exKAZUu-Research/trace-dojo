@@ -1550,6 +1550,25 @@ void main() {
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'body\n[4, 4, 8]\n' });
 });
 
+test('Dart primary constructors type super formals, protect parameters before the body, and allow one body', () => {
+  const program = `class B { final int x; B.named(this.x); }
+class C(super.x) extends B { final values = [x]; this: super.named(); }
+class D(int n) { final int x; this: x = n { n = 7; print(n); } }
+void main() {
+  print([C(4).values.runtimeType, D(4).x]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '7\n[List<int>, 4]\n' });
+  for (const invalid of [
+    'class C(int n) { final int x; this: x = (n = 5); }',
+    'class C(int n) { final int x; this: x = ++n; }',
+    'class C(int n) { final int x; this: x = n; this: x = n + 1; }',
+  ]) {
+    expect(executeProgram('dart', `${invalid}\nvoid main() { print(C(4).x); }`)).toMatchObject({
+      kind: 'compileError',
+    });
+  }
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}

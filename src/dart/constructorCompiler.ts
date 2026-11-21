@@ -182,7 +182,8 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
 
   private superParameterType(cls: ClassInfo, parameter: FormalParameter, argument: number | string): DartType {
     const superclass = cls.superclass;
-    const declaration = cls.declaration?.members.find(
+    const primary = this.primaryDeclarations.get(cls);
+    const declaration = [...(cls.declaration?.members ?? []), ...(primary ? [primary] : [])].find(
       (member): member is ConstructorDeclaration =>
         member.kind === 'constructor' &&
         [...member.parameters.positional, ...member.parameters.named].includes(parameter)
@@ -199,6 +200,9 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     const superIndex = superPositional.indexOf(parameter);
     return signature.positional[superIndex] ?? DYNAMIC;
   }
+
+  /** The constructor declaration each class's primary constructor lowers to, which is not among its members. */
+  private readonly primaryDeclarations = new WeakMap<ClassInfo, ConstructorDeclaration>();
 
   protected declarePrimaryConstructor(cls: ClassInfo, declaration: ClassDeclaration): void {
     const primary = declaration.primaryConstructor as NonNullable<ClassDeclaration['primaryConstructor']>;
@@ -227,9 +231,11 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
         isFieldParameter(parameter) ? { ...parameter, binding: 'this' as const } : parameter
       ),
     };
-    const bodyDeclaration = declaration.members.find(
+    const [bodyDeclaration, ...extraBodies] = declaration.members.filter(
       (member): member is ConstructorDeclaration => member.kind === 'constructor' && member.name === '\0primaryBody'
     );
+    for (const extra of extraBodies)
+      this.error(extra, 'プライマリコンストラクタの本体（this）は、1 つしか書けません。');
     const constructorDeclaration: ConstructorDeclaration = {
       ...primary,
       kind: 'constructor',
@@ -246,6 +252,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
       headerEndRow: primary.row,
       isPrimary: true,
     };
+    this.primaryDeclarations.set(cls, constructorDeclaration);
     this.declareConstructor(cls, constructorDeclaration);
   }
 
@@ -565,8 +572,28 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
   }
 
   // code-gauge-allow functionCognitiveComplexity 19 -- The initializer list's entries and the implicit super().
-  // code-gauge-allow functionNcss 45 -- The initializer list's entries and the implicit super().
   private compileConstructorPrologue(
+    cls: ClassInfo,
+    declaration: ConstructorDeclaration,
+    initializedFields: Set<string>
+  ): (frame: Frame) => void {
+    if (!declaration.isPrimary) return this.compileInitializerSteps(cls, declaration, initializedFields);
+    // Everything before a primary constructor's body reads its parameters but cannot assign them.
+    const scope = new LocalScope();
+    for (const parameter of [...declaration.parameters.positional, ...declaration.parameters.named]) {
+      const variable = this.findLocal(parameter.name);
+      if (variable) scope.names.set(parameter.name, primaryParameterInInitializer(variable));
+    }
+    this.fn.scopes.push(scope);
+    try {
+      return this.compileInitializerSteps(cls, declaration, initializedFields);
+    } finally {
+      this.fn.scopes.pop();
+    }
+  }
+
+  // code-gauge-allow functionNcss 45 -- The initializer list's entries and the implicit super().
+  private compileInitializerSteps(
     cls: ClassInfo,
     declaration: ConstructorDeclaration,
     initializedFields: Set<string>
@@ -576,7 +603,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     if (!redirect) {
       steps.push(
         ...(declaration.isPrimary
-          ? this.compileFieldInitializersWithPrimaryParameters(cls, declaration, initializedFields)
+          ? this.compileFieldInitializers(cls, initializedFields)
           : this.compileFieldInitializersWithoutParameters(cls, initializedFields))
       );
     }
@@ -724,24 +751,6 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
       });
     }
     return steps;
-  }
-
-  private compileFieldInitializersWithPrimaryParameters(
-    cls: ClassInfo,
-    declaration: ConstructorDeclaration,
-    initializedFields: Set<string>
-  ): ((frame: Frame) => void)[] {
-    const scope = new LocalScope();
-    for (const parameter of [...declaration.parameters.positional, ...declaration.parameters.named]) {
-      const variable = this.findLocal(parameter.name);
-      if (variable) scope.names.set(parameter.name, primaryParameterInInitializer(variable));
-    }
-    this.fn.scopes.push(scope);
-    try {
-      return this.compileFieldInitializers(cls, initializedFields);
-    } finally {
-      this.fn.scopes.pop();
-    }
   }
 
   private compileFieldInitializersWithoutParameters(
