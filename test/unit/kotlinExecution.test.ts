@@ -77,6 +77,25 @@ test.each([
     stdout: '1=a\n2=b\n3=c\nmodified\n1=a\n2=b\n3=c\nmodified\n7=one\n',
   },
   {
+    name: 'set intersection and subtraction preserve membership for custom and large collections',
+    source: `class Membership(private val values: Collection<Int>) : Collection<Int> by values {
+    override fun contains(element: Int): Boolean { println("contains $element"); return element == 1 }
+}
+fun main() {
+    val a = (0 until 1000).toList()
+    val b = (1000 until 2000).toSet()
+    println((a intersect b).size)
+    println((a subtract b).size)
+    val receiver = listOf(1, 2, 3)
+    val membership = Membership(listOf(2, 2, 2))
+    println(receiver intersect membership)
+    println(receiver subtract membership)
+    println(receiver subtract Membership(listOf(2)))
+}`,
+    stdout:
+      '0\n1000\ncontains 1\ncontains 2\ncontains 3\n[1]\ncontains 1\ncontains 2\ncontains 3\n[2, 3]\ncontains 1\ncontains 2\ncontains 3\n[2, 3]\n',
+  },
+  {
     name: 'collection bulk addition uses source sizes and iterators without indexed reads',
     source: `class Probe(private val items: List<Int>) : List<Int> by items {
     override val size: Int get() { println("size"); return items.size }

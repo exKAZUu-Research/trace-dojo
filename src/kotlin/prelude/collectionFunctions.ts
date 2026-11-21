@@ -1245,16 +1245,17 @@ infix fun <T> Iterable<T>.union(other: Iterable<T>): Set<T> {
     return set
 }
 
-infix fun <T> Iterable<T>.intersect(other: Iterable<T>): Set<T> {
-    val set = this.toMutableSet()
-    set.retainAll(other.toList())
-    return set
-}
+infix fun <T> Iterable<T>.intersect(other: Iterable<T>): Set<T> =
+    selectByMembership(other, true)
 
-infix fun <T> Iterable<T>.subtract(other: Iterable<T>): Set<T> {
-    val set = this.toMutableSet()
-    set.removeAll(other.toList())
-    return set
+infix fun <T> Iterable<T>.subtract(other: Iterable<T>): Set<T> =
+    selectByMembership(other, false)
+
+private fun <T> Iterable<T>.selectByMembership(other: Iterable<T>, retain: Boolean): Set<T> {
+    val membership = other.asCollectionForMembership()
+    val result = LinkedHashSet<T>()
+    for (element in this) if ((element in membership) == retain) result.add(element)
+    return result
 }
 
 fun <T> MutableCollection<in T>.addAll(elements: Iterable<T>): Boolean {
