@@ -108,10 +108,10 @@ export abstract class AssignmentCompiler extends ControlCompiler {
   private assignTo(target: AssignableTarget, operator: string, valueSyntax: Expression, span: Span): Compiled {
     const { read, write, variable, writeType } = target;
     if (operator === '=') {
-      let value = this.compileExpression(valueSyntax, writeType);
-      if (value.type.kind === 'void') this.error(valueSyntax, 'void の値は代入できません。');
-      value = this.coerce(
-        value,
+      const written = this.compileExpression(valueSyntax, writeType);
+      if (written.type.kind === 'void') this.error(valueSyntax, 'void の値は代入できません。');
+      const value = this.coerce(
+        written,
         writeType,
         valueSyntax,
         (from, to) => `${from} 型の値は、${to} 型の${variable ? `変数 ${variable.name} ` : '代入先'}に代入できません。`
@@ -119,7 +119,8 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       this.afterWrite(variable, value.type);
       const run = value.run;
       return {
-        type: value.type,
+        // The assignment has its value's static type; a dynamic value's runtime check for the write does not change it.
+        type: written.type.kind === 'dynamic' ? written.type : value.type,
         run: withPrepared(target, (frame, prepared) => {
           const result = run(frame);
           write(frame, prepared, result);
@@ -135,9 +136,9 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     const current: Compiled = { type: readType, run: (frame) => frame.temporaries.at(-1), isConst: false };
     if (operator === '??=') {
       const before = this.flow;
-      let value = this.compileExpression(valueSyntax, writeType);
-      value = this.coerce(
-        value,
+      const written = this.compileExpression(valueSyntax, writeType);
+      const value = this.coerce(
+        written,
         writeType,
         valueSyntax,
         (from, to) => `${from} 型の値は、${to} 型の代入先に代入できません。`
@@ -146,7 +147,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       if (variable) this.afterWrite(variable, upperBound(nonNullable(readType), value.type));
       const run = value.run;
       return {
-        type: upperBound(nonNullable(readType), value.type),
+        type: upperBound(nonNullable(readType), written.type.kind === 'dynamic' ? written.type : value.type),
         run: withPrepared(target, (frame, prepared) => {
           const existing = read(frame, prepared);
           if (existing !== undefined) return existing;

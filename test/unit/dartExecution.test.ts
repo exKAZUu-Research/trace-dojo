@@ -1972,6 +1972,21 @@ test('Dart braces with only scoped spreads take the kind their spreads compile a
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[{1, 2}, {1, 2}, {1: 2}]\n' });
 });
 
+test('Dart assignment expressions keep a dynamic value type', () => {
+  const program = `void main() {
+  dynamic d = 1;
+  num x = 0;
+  num? z;
+  var y = x = d;
+  var w = z ??= d;
+  print([y.isEven, w.isEven, x.runtimeType]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[false, false, int]\n' });
+  expect(executeProgram('dart', 'void main() { dynamic d = 1; num x = 0; x = d; x.isEven; }')).toMatchObject({
+    kind: 'compileError',
+  });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}
