@@ -110,10 +110,9 @@ export class BindingPatterns {
   private bindDefault(pattern: TreeNode, type: Type, bind: Bind, options: BindingOptions, assigned?: Type): void {
     const left = pattern.childForFieldName('left') as TreeNode;
     const right = pattern.childForFieldName('right') as TreeNode;
-    const implied = this.impliedBindingType(left, options.isConst, options.parameter);
-    const initialDefault = this.initializerType(right, implied ?? (options.annotated ? type : undefined), true);
+    const contextual = options.annotated ? type : this.impliedBindingType(left, options.isConst, options.parameter);
+    const initialDefault = this.initializerType(right, contextual, true);
     const defaultType = options.parameter ? padParameterInitializer(this.c, left, initialDefault) : initialDefault;
-    if (!options.parameter) this.checkInitializer(left, right, initialDefault);
     const withoutUndefined = this.c.relations.removeUndefined(type);
     const initial =
       assigned === errorType
@@ -130,7 +129,10 @@ export class BindingPatterns {
       return member.kind === 'literal' && typeMembers(withoutUndefined).includes(regular) ? regular : member;
     });
     const combined = unionOf([withoutUndefined, declaredDefault], true);
-    const declared = options.isConst || implied ? combined : this.c.widen(combined);
+    const declared =
+      options.isConst || left.type === 'object_pattern' || left.type === 'array_pattern'
+        ? combined
+        : this.c.widen(combined);
     this.bindPattern(left, declared, bind, options, initial);
   }
 
@@ -175,19 +177,10 @@ export class BindingPatterns {
   }
 
   /**
-   * Checks an initializer, which no annotation types, against the type its pattern implies, reporting the properties of
-   * its object literals that the pattern does not take apart, as TypeScript does.
-   */
-  checkInitializer(pattern: TreeNode, value: TreeNode, valueType: Type): void {
-    const shape = this.impliedType(pattern, () => anyType);
-    if (shape) this.c.expressions.checkExcessProperties(value, valueType, shape);
-  }
-
-  /**
    * The type a binding or assignment pattern implies for the value it takes apart, which an initializer or a right side
    * takes as its contextual type. `leafType` gives the type of an element that is not a pattern, with or without default.
    */
-  impliedType(pattern: TreeNode, leafType = (element: TreeNode) => this.bindingLeafType(element)): Type | undefined {
+  impliedType(pattern: TreeNode, leafType: (element: TreeNode) => Type): Type | undefined {
     return impliedPatternType(this.c, pattern, leafType);
   }
 
@@ -222,19 +215,11 @@ export class BindingPatterns {
   }
 
   impliedBindingType(pattern: TreeNode, isConst = false, parameter = false): Type | undefined {
-    return impliedPatternType(this.c, pattern, (element) => this.bindingLeafType(element, isConst), parameter);
+    return impliedPatternType(this.c, pattern, () => anyType, { isConst, parameter });
   }
 
   parameterInitializerType(pattern: TreeNode, value: Type): Type {
     return padParameterInitializer(this.c, pattern, value);
-  }
-
-  private bindingLeafType(element: TreeNode, isConst = false): Type {
-    const right = defaultedTarget(element) && element.childForFieldName('right');
-    if (!right) return anyType;
-    return this.c.flow.probe(() =>
-      this.c.silently(() => (isConst ? this.c.expressions.check(right) : this.c.expressions.checkWidened(right)))
-    );
   }
 
   private bindObjectPattern(pattern: TreeNode, type: Type, bind: Bind, options: BindingOptions, assigned?: Type): void {
@@ -461,9 +446,14 @@ export class BindingPatterns {
   ): Type | undefined {
     const properties = type.types.map((member) => this.c.propertyOf(member, name));
     const hasProperty = properties.some(Boolean);
+    const emptyLiteral =
+      allowMissing &&
+      type.types.every(
+        (member) => member.kind === 'object' && member.fresh && this.c.relations.isEmptyObjectType(member)
+      );
     const types = type.types.map((member) => {
-      const mayOmit = hasProperty && member.kind === 'object' && !member.hasSpread;
-      return this.c.silently(() => this.destructuredProperty(node, member, name, allowMissing || mayOmit));
+      const mayOmit = emptyLiteral || (hasProperty && member.kind === 'object' && !member.hasSpread);
+      return this.c.silently(() => this.destructuredProperty(node, member, name, mayOmit));
     });
     if (types.includes(errorType)) return undefined;
     for (const property of properties) {

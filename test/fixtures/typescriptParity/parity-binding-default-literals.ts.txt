@@ -40,3 +40,23 @@ function listDefaults([first = 1, second = 2] = []) {
 }
 listDefaults();
 listDefaults([3]);
+
+{
+  const {outer: {value} = {value: 1}} = {outer: {value: 2, extra: true}};
+  const result: number = value;
+  console.log(result);
+}
+{
+  let {outer: {value} = {value: 3}} = {outer: {extra: true}};
+  const result: number | undefined = value;
+  console.log(result);
+}
+{
+  const {outer: {value = 4} = {value: 5}} = {outer: {extra: true}};
+  console.log(value);
+}
+function annotatedVariableDefault() {
+  const {outer: {value} = {value: 6, extra: true}}: {outer?: {value: number; extra: boolean}} = {};
+  return value;
+}
+console.log(annotatedVariableDefault());

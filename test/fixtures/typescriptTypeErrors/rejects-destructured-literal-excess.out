@@ -6,3 +6,5 @@
 (7,44): error TS2353: Object literal may only specify known properties, and 'm' does not exist in type '{ l: any; }'.
 (11,10): error TS2537: Type '{ z: number; w: number; }' has no matching index signature for type 'string'.
 (14,26): error TS2353: Object literal may only specify known properties, and 'ww' does not exist in type '{ w?: 1 | undefined; }'.
+(17,38): error TS2353: Object literal may only specify known properties, and 'extra' does not exist in type '{ value: number; }'.
+(21,61): error TS2353: Object literal may only specify known properties, and 'extra' does not exist in type '{ outer?: { value: number; } | undefined; }'.

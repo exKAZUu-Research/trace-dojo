@@ -335,7 +335,6 @@ export class StatementChecker {
     const implied = annotation ? undefined : this.c.patterns.impliedBindingType(pattern, isConst);
     const valueType = value ? this.c.expressions.check(value, annotation ?? implied) : (annotation ?? anyType);
     if (annotation && value) this.c.expressions.checkAssignable(pattern, valueType, annotation);
-    if (value && implied) this.c.patterns.checkInitializer(pattern, value, valueType);
     const sourceType = annotation ?? valueType;
     if (isConst) this.c.patterns.correlatedSources.set(pattern.id, sourceType);
     this.c.patterns.bindPattern(

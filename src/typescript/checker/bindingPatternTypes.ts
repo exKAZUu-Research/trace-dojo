@@ -16,24 +16,31 @@ import {
   type Type,
 } from './types';
 
+interface BindingContext {
+  isConst: boolean;
+  parameter: boolean;
+}
+
+const parameterContext: BindingContext = { isConst: false, parameter: true };
+
 export function impliedPatternType(
   c: Checker,
   pattern: TreeNode,
   leafType: (element: TreeNode) => Type,
-  parameter = false
+  binding?: BindingContext
 ): Type | undefined {
   return patternShape(
     c,
     pattern,
     (element) => {
-      const initializer = parameter ? parameterElementDefaultType(c, element) : undefined;
+      const initializer = binding && bindingElementDefaultType(c, element, binding);
       return (
         initializer ??
-        impliedPatternType(c, defaultedTarget(element) ?? element, leafType, parameter) ??
+        impliedPatternType(c, defaultedTarget(element) ?? element, leafType, binding) ??
         leafType(element)
       );
     },
-    parameter ? 'initializer' : undefined
+    binding ? (binding.parameter ? 'parameter' : 'variable') : undefined
   );
 }
 
@@ -41,7 +48,7 @@ export function inferredPatternParameterType(c: Checker, pattern: TreeNode): Typ
   const type = patternShape(
     c,
     pattern,
-    (element) => parameterElementDefaultType(c, element) ?? inferredPatternParameterType(c, element),
+    (element) => bindingElementDefaultType(c, element) ?? inferredPatternParameterType(c, element),
     'inferred'
   );
   if (type) return type;
@@ -62,7 +69,7 @@ function padObjectInitializer(c: Checker, pattern: TreeNode, value: ObjectType):
   for (const element of named(pattern)) {
     const { name, value: binding } = objectBindingEntry(c, element, true);
     if (name === undefined || structure.properties.has(name)) continue;
-    const type = parameterElementDefaultType(c, binding);
+    const type = bindingElementDefaultType(c, binding);
     if (type) missing.set(name, simpleProperty(name, type, { optional: true }));
   }
   if (missing.size === 0) return value;
@@ -84,43 +91,51 @@ function padTupleInitializer(c: Checker, pattern: TreeNode, tuple: TupleInfo, va
   for (let index = elements.length; index < length; index++) {
     const element = bindings.get(index);
     if (element && isRest(element)) break;
-    const type = element && parameterElementDefaultType(c, element);
+    const type = element && bindingElementDefaultType(c, element);
     if (element && !type) c.patterns.reportImplicitAny(element);
     elements.push({ type: type ?? anyType, optional: true, rest: false });
   }
   return c.tupleType(elements, readonly);
 }
 
-function parameterElementDefaultType(c: Checker, element: TreeNode): Type | undefined {
+function bindingElementDefaultType(
+  c: Checker,
+  element: TreeNode,
+  { isConst, parameter }: BindingContext = parameterContext
+): Type | undefined {
   const target = defaultedTarget(element);
   if (!target) return undefined;
   const value = element.childForFieldName('right');
   if (!value) return undefined;
-  const contextual = c.patterns.impliedBindingType(target, false, true);
+  const contextual = c.patterns.impliedBindingType(target, isConst, parameter);
   return c.flow.probe(() =>
     c.silently(() => {
       const initial = c.patterns.initializerType(value, contextual);
-      return c.literals.widenDeclared(padParameterInitializer(c, target, initial), false, true);
+      return c.literals.widenDeclared(
+        parameter ? padParameterInitializer(c, target, initial) : initial,
+        isConst,
+        parameter
+      );
     })
   );
 }
 
-type ParameterPattern = 'initializer' | 'inferred';
+type BindingPatternMode = 'parameter' | 'variable' | 'inferred';
 
 function patternShape(
   c: Checker,
   pattern: TreeNode,
   elementType: (element: TreeNode) => Type,
-  parameter?: ParameterPattern
+  mode?: BindingPatternMode
 ): Type | undefined {
   switch (pattern.type) {
     case 'object':
     case 'object_pattern': {
-      return objectType(c, pattern, elementType, parameter);
+      return objectType(c, pattern, elementType, mode);
     }
     case 'array':
     case 'array_pattern': {
-      return tupleType(c, pattern, elementType, parameter !== undefined);
+      return tupleType(c, pattern, elementType, mode === 'parameter' || mode === 'inferred');
     }
     default: {
       return undefined;
@@ -132,20 +147,19 @@ function objectType(
   c: Checker,
   pattern: TreeNode,
   elementType: (element: TreeNode) => Type,
-  parameter: ParameterPattern | undefined
+  mode: BindingPatternMode | undefined
 ): Type {
   const structure = emptyStructure();
   let hasDynamicKey = false;
   for (const element of named(pattern)) {
-    const { name, value } = objectBindingEntry(c, element, parameter !== undefined);
-    if (isRest(element) || (name === undefined && !parameter))
-      structure.stringIndex = { type: anyType, readonly: false };
+    const { name, value } = objectBindingEntry(c, element, mode !== undefined);
+    if (isRest(element) || (name === undefined && !mode)) structure.stringIndex = { type: anyType, readonly: false };
     else if (name === undefined) hasDynamicKey = true;
     else
       structure.properties.set(name, simpleProperty(name, elementType(value), { optional: !!defaultedTarget(value) }));
   }
   const shape = anonymousObject(() => structure);
-  if (parameter === 'initializer' && !hasDynamicKey && structure.properties.size > 0) {
+  if (mode && mode !== 'inferred' && !hasDynamicKey && structure.properties.size > 0) {
     c.patterns.initializerContexts.add(shape);
   }
   return shape;

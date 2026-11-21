@@ -12,3 +12,12 @@ const { [key]: r } = { z: 1, w: 2 };
 const { s }: { s: number } = { s: 1 };
 for (const { t } of [{ t: 1, u: 2 }]) {}
 const { v: { w = 1 } = { ww: 2 } } = {};
+
+{
+  const {outer: {value} = {value: 1, extra: true}}: {outer?: {value: number}} = {};
+  console.log(value);
+}
+{
+  const {outer: {value} = {value: 1}} = {outer: {value: 2}, extra: true};
+  console.log(value);
+}
