@@ -118,7 +118,7 @@ export function lookupMethod(
   }
   const characterIter = steps.find((step) => {
     const type = shallow(step.type);
-    return isBuiltin(type, 'CaseIter') || isBuiltin(type, 'EscapeDefault');
+    return isBuiltin(type, 'CaseIter') || isBuiltin(type, 'EscapeDefault') || isBuiltin(type, 'EscapeUnicode');
   });
   return characterIter && probeAsIter(program, solver, characterIter, name, false);
 }

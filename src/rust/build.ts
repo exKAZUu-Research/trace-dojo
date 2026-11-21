@@ -11,7 +11,7 @@ import { intoIterItem, intoIterShape, iterationBound } from './iterTypes';
 import { turtleImplSource } from './natives/core';
 import { parseRust, parseWith } from './parse';
 import { STD_SOURCE } from './stdSource';
-import { intoConversion } from './traitConversions';
+import { arrayTryFrom, intoConversion } from './traitConversions';
 import { TraitSolver } from './traits';
 import { hasVars, shallow, type Type } from './types';
 
@@ -111,6 +111,8 @@ function tryFromErrorType(solver: TraitSolver, source: Type, target: Type): Type
   const { program } = solver;
   if (intoConversion(solver, s, t) === 'yes') return program.builtinType('Infallible');
   if (isAbstract(s) || isAbstract(t)) return undefined;
+  const array = arrayTryFrom(s, t);
+  if (array) return array.mode === 'move' ? s : program.builtinType('TryFromSliceError');
   if (t.kind === 'char') return program.builtinType('CharTryFromError');
   if (s.kind === 'char') return program.builtinType('TryFromCharError');
   return program.builtinType('TryFromIntError');

@@ -297,11 +297,22 @@ pub mod slice {
         pub fn split_at_mut(&mut self, mid: usize) -> (&mut [T], &mut [T]);
         pub fn split_first(&self) -> Option<(&T, &[T])>;
         pub fn split_last(&self) -> Option<(&T, &[T])>;
+        pub fn split_first_mut(&mut self) -> Option<(&mut T, &mut [T])>;
+        pub fn split_last_mut(&mut self) -> Option<(&mut T, &mut [T])>;
         pub fn windows(&self, size: usize) -> IterImpl<&[T], WindowsShape>;
         pub fn split<F: FnMut(&T) -> bool>(&self, predicate: F) -> IterImpl<&[T], SliceSplitShape<F>>;
+        pub fn splitn<F: FnMut(&T) -> bool>(&self, n: usize, predicate: F) -> IterImpl<&[T], SliceSplitNShape<F>>;
+        pub fn rsplitn<F: FnMut(&T) -> bool>(&self, n: usize, predicate: F) -> IterImpl<&[T], SliceSplitNShape<F>>;
+        pub fn chunk_by<F: FnMut(&T, &T) -> bool>(&self, predicate: F) -> IterImpl<&[T], ChunkByShape<F>>;
         pub fn chunks(&self, chunk_size: usize) -> IterImpl<&[T], ChunksShape>;
         pub fn rchunks(&self, chunk_size: usize) -> IterImpl<&[T], RChunksShape>;
         pub fn chunks_exact(&self, chunk_size: usize) -> IterImpl<&[T], ChunksExactShape>;
+        pub fn rchunks_exact(&self, chunk_size: usize) -> IterImpl<&[T], RChunksExactShape>;
+        pub fn chunks_mut(&mut self, chunk_size: usize) -> IterImpl<&mut [T], ChunksMutShape>;
+        pub fn chunks_exact_mut(&mut self, chunk_size: usize) -> IterImpl<&mut [T], ChunksExactMutShape>;
+        pub fn rchunks_mut(&mut self, chunk_size: usize) -> IterImpl<&mut [T], RChunksMutShape>;
+        pub fn rchunks_exact_mut(&mut self, chunk_size: usize) -> IterImpl<&mut [T], RChunksExactMutShape>;
+        pub fn copy_within<R: RangeBounds<usize>>(&mut self, src: R, dest: usize) where T: Copy;
         pub fn fill(&mut self, value: T) where T: Clone;
         pub fn to_vec(&self) -> Vec<T> where T: Clone;
         pub fn to_owned(&self) -> Vec<T> where T: Clone;
@@ -382,7 +393,9 @@ pub mod str {
         pub fn find<P: Pattern>(&self, pat: P) -> Option<usize>;
         pub fn rfind<P: Pattern>(&self, pat: P) -> Option<usize>;
         pub fn matches<P: Pattern>(&self, pat: P) -> IterImpl<&str, SplitShape<P>>;
+        pub fn rmatches<P: Pattern>(&self, pat: P) -> IterImpl<&str, SplitShape<P>>;
         pub fn match_indices<P: Pattern>(&self, pat: P) -> IterImpl<(usize, &str), SplitShape<P>>;
+        pub fn rmatch_indices<P: Pattern>(&self, pat: P) -> IterImpl<(usize, &str), SplitShape<P>>;
         pub fn replace<P: Pattern>(&self, from: P, to: &str) -> String;
         pub fn replacen<P: Pattern>(&self, pat: P, to: &str, count: usize) -> String;
         pub fn to_uppercase(&self) -> String;
@@ -452,6 +465,7 @@ pub mod char {
         pub fn to_uppercase(self) -> CaseIter;
         pub fn to_lowercase(self) -> CaseIter;
         pub fn escape_default(self) -> EscapeDefault;
+        pub fn escape_unicode(self) -> EscapeUnicode;
         pub fn to_digit(self, radix: u32) -> Option<u32>;
         pub fn len_utf8(self) -> usize;
         pub fn len_utf16(self) -> usize;
@@ -462,7 +476,12 @@ pub mod char {
     pub fn from_digit(num: u32, radix: u32) -> Option<char>;
     pub struct CaseIter;
     pub struct EscapeDefault;
+    pub struct EscapeUnicode;
 }
+pub mod array {
+    pub struct TryFromSliceError;
+}
+
 pub mod num {
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct ParseIntError;
@@ -877,9 +896,16 @@ pub mod iter {
         pub struct StringDrainShape;
         pub struct WindowsShape;
         pub struct SliceSplitShape<F>;
+        pub struct SliceSplitNShape<F>;
+        pub struct ChunkByShape<F>;
         pub struct ChunksShape;
         pub struct RChunksShape;
         pub struct ChunksExactShape;
+        pub struct RChunksExactShape;
+        pub struct ChunksMutShape;
+        pub struct ChunksExactMutShape;
+        pub struct RChunksMutShape;
+        pub struct RChunksExactMutShape;
         pub struct CharsShape;
         pub struct BytesShape;
         pub struct DynIteratorShape<D>;
@@ -1024,6 +1050,7 @@ pub mod iter {
         pub fn max_by<F: FnMut(&T, &T) -> Ordering>(self, compare: F) -> Option<T>;
         pub fn min_by<F: FnMut(&T, &T) -> Ordering>(self, compare: F) -> Option<T>;
         pub fn partition<B: Extend<T>, F: FnMut(&T) -> bool>(self, f: F) -> (B, B);
+        pub fn unzip<A, B, FromA: Default + Extend<A>, FromB: Default + Extend<B>>(self) -> (FromA, FromB) where T: PairOf<A, B>;
         pub fn eq<S2>(self, other: IterImpl<T, S2>) -> bool where T: PartialEq;
         pub fn cmp<S2>(self, other: IterImpl<T, S2>) -> Ordering where T: Ord;
         pub fn partial_cmp<U, S2>(self, other: IterImpl<U, S2>) -> Option<Ordering> where T: PartialOrd<U>;
@@ -1048,9 +1075,6 @@ pub mod iter {
     }
     impl IterImpl<char, CharsShape> {
         pub fn as_str(&self) -> &str;
-    }
-    impl<A, B, S> IterImpl<(A, B), S> {
-        pub fn unzip<FromA: FromIterator<A>, FromB: FromIterator<B>>(self) -> (FromA, FromB);
     }
     pub fn repeat<T: Clone>(elt: T) -> IterImpl<T, RepeatShape<T>>;
     pub fn repeat_with<T, F: FnMut() -> T>(f: F) -> IterImpl<T, RepeatWithShape<F>>;
@@ -1083,9 +1107,12 @@ pub mod collections {
         pub type Keys<'a, K, V> = IterImpl<'a, &'a K, BTreeMapKeysShape>;
         pub type Values<'a, K, V> = IterImpl<'a, &'a V, BTreeMapValuesShape>;
         pub type IntoIter<K, V> = IterImpl<(K, V), BTreeMapIntoIterShape>;
+        pub struct OccupiedEntry<'a, K, V>;
         pub use super::hash_map::Entry;
         pub use super::BTreeMap;
     }
+    use btree_map::OccupiedEntry;
+
     impl<K, V> HashMap<K, V> {
         pub fn new() -> HashMap<K, V>;
         pub fn with_capacity(capacity: usize) -> HashMap<K, V>;
@@ -1149,6 +1176,8 @@ pub mod collections {
         pub fn entry(&mut self, key: K) -> Entry<K, V> ;
         pub fn first_key_value(&self) -> Option<(&K, &V)>;
         pub fn last_key_value(&self) -> Option<(&K, &V)>;
+        pub fn first_entry(&mut self) -> Option<OccupiedEntry<K, V>>;
+        pub fn last_entry(&mut self) -> Option<OccupiedEntry<K, V>>;
         pub fn pop_first(&mut self) -> Option<(K, V)>;
         pub fn pop_last(&mut self) -> Option<(K, V)>;
         pub fn retain<F: FnMut(&K, &mut V) -> bool>(&mut self, f: F);
@@ -1167,6 +1196,15 @@ pub mod collections {
         pub fn or_default(self) -> &mut V where V: Default;
         pub fn and_modify<F: FnOnce(&mut V)>(self, f: F) -> Entry<K, V>;
         pub fn key(&self) -> &K;
+    }
+    impl<'a, K, V> OccupiedEntry<'a, K, V> {
+        pub fn key(&self) -> &K;
+        pub fn get(&self) -> &V;
+        pub fn get_mut(&mut self) -> &mut V;
+        pub fn into_mut(self) -> &'a mut V;
+        pub fn insert(&mut self, value: V) -> V;
+        pub fn remove(self) -> V;
+        pub fn remove_entry(self) -> (K, V);
     }
     impl<T> HashSet<T> {
         pub fn new() -> HashSet<T>;
@@ -1224,6 +1262,7 @@ pub mod collections {
         pub fn difference<'a>(&'a self, other: &'a BTreeSet<T>) -> IterImpl<&'a T, SetOpShape>;
         pub fn symmetric_difference<'a>(&'a self, other: &'a BTreeSet<T>) -> IterImpl<&'a T, SetOpShape>;
         pub fn is_subset(&self, other: &BTreeSet<T>) -> bool;
+        pub fn is_disjoint(&self, other: &BTreeSet<T>) -> bool;
         pub fn is_superset(&self, other: &BTreeSet<T>) -> bool;
         pub fn retain<F: FnMut(&T) -> bool>(&mut self, f: F);
         pub fn extend<A: ExtendInto<T>, S>(&mut self, iter: IterImpl<A, S>) ;
@@ -1283,6 +1322,7 @@ pub mod collections {
         pub fn shrink_to_fit(&mut self);
         pub fn push(&mut self, item: T) where T: Ord;
         pub fn pop(&mut self) -> Option<T> where T: Ord;
+        pub fn append(&mut self, other: &mut BinaryHeap<T>) where T: Ord;
         pub fn peek(&self) -> Option<&T>;
         pub fn len(&self) -> usize;
         pub fn is_empty(&self) -> bool;
@@ -1493,6 +1533,7 @@ pub mod pseudo {
     pub trait StringPart {}
     pub trait RangeBounds<T> {}
     pub trait ExtendInto<T> {}
+    pub trait PairOf<A, B> {}
     pub trait TryFoldResult<T> {}
     pub trait SliceOf<T> {}
     pub trait JoinSeparator<T> {}

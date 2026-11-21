@@ -1,9 +1,9 @@
-// code-gauge-allow-file fileNcss 534 -- One rule per trait of the standard library.
+// code-gauge-allow-file fileNcss 543 -- One rule per trait of the standard library.
 import { collectionKeyAnswer } from './collectionBounds';
 import { normalize } from './infer';
 import { supportsDebug } from './iterDebug';
 import { dynIteratorTarget, intoIterItem } from './iterTypes';
-import { conversionExists, intoConversion } from './traitConversions';
+import { arrayTryFrom, conversionExists, intoConversion } from './traitConversions';
 import { doubleEndedSearcher, iteratorCapability } from './traitIterators';
 import type { Answer, TraitSolver } from './traits';
 import {
@@ -73,11 +73,14 @@ const DEBUG_TYPES = new Set([
   'ParseIntError',
   'ParseFloatError',
   'TryFromIntError',
+  'TryFromSliceError',
   'Utf8Error',
   'FmtError',
   'CaseIter',
   'EscapeDefault',
+  'EscapeUnicode',
   'Entry',
+  'OccupiedEntry',
 ]);
 
 const DEFAULT_TYPES = new Set([
@@ -98,6 +101,7 @@ export const ERROR_TYPES = new Set([
   'ParseBoolError',
   'ParseCharError',
   'TryFromIntError',
+  'TryFromSliceError',
   'CharTryFromError',
   'TryFromCharError',
   'Utf8Error',
@@ -155,6 +159,7 @@ const RULES: Record<string, Rule> = {
   Iterator: iterator,
   IntoIterator: iterator,
   ExtendInto: extendInto,
+  PairOf: ({ solver, t, ref }) => (solver.unifier.tryUnify(t, { kind: 'tuple', elems: ref.args }) ? 'yes' : 'no'),
   TryFoldResult: ({ solver, t, ref }) => {
     if (t.kind !== 'adt') return 'no';
     const item =
@@ -244,6 +249,10 @@ function clone(goal: Goal): Answer {
 }
 
 const NON_CLONE_ITERATORS = new Set([
+  'ChunksMutShape',
+  'ChunksExactMutShape',
+  'RChunksMutShape',
+  'RChunksExactMutShape',
   'ByRefShape',
   'SliceIterMutShape',
   'VecDrainShape',
@@ -274,7 +283,12 @@ function cloneAdt(goal: Goal, t: AdtType): Answer {
   if (t.def.builtin === 'Iter') return all([t.args[1]]);
   if (isIteratorShape(t.def)) return NON_CLONE_ITERATORS.has(t.def.name) ? 'no' : all(t.args);
   if (CLONE_CONTAINERS.has(t.def.builtin as string)) return all(t.args);
-  if (t.def.builtin === 'String' || t.def.builtin === 'EscapeDefault' || ERROR_TYPES.has(t.def.builtin as string))
+  if (
+    t.def.builtin === 'String' ||
+    t.def.builtin === 'EscapeDefault' ||
+    t.def.builtin === 'EscapeUnicode' ||
+    ERROR_TYPES.has(t.def.builtin as string)
+  )
     return 'yes';
   if (t.def.builtin === 'Box') {
     const inner = shallow(t.args[0]);
@@ -311,7 +325,7 @@ function display({ solver, t, all }: Goal): Answer {
   if (t.kind === 'dyn') return dynImplies(solver, t, 'Display');
   if (t.kind !== 'adt') return 'no';
   if (
-    ['String', 'CaseIter', 'EscapeDefault'].includes(t.def.builtin as string) ||
+    ['String', 'CaseIter', 'EscapeDefault', 'EscapeUnicode'].includes(t.def.builtin as string) ||
     ERROR_TYPES.has(t.def.builtin as string)
   )
     return 'yes';
@@ -593,6 +607,7 @@ function extendInto({ solver, t, ref }: Goal): Answer {
 
 /** Collections of `Copy` elements also extend from references to them. */
 function extend({ solver, t, ref }: Goal): Answer {
+  if (t.kind === 'adt' && ['Box', 'Result', 'Option'].includes(t.def.builtin as string)) return 'no';
   const item = shallow(ref.args[0]);
   if (item.kind === 'ref' && t.kind === 'adt' && t.args.length === 1) {
     const snapshot = solver.unifier.snapshot();
@@ -637,12 +652,19 @@ function fromInto({ solver, t, ref }: Goal): Answer {
   return conversionExists(solver, source, t);
 }
 
+// code-gauge-allow functionCognitiveComplexity 16 -- Checked conversions have distinct applicability and element bounds.
 function tryFrom({ solver, t, ref, name }: Goal): Answer {
   const other = normalize(shallow(ref.args[0]));
   const [source, target] = name === 'TryFrom' ? [other, t] : [t, other];
   if (source.kind === 'var' || target.kind === 'var') return unresolvedTryFrom(source, target);
   if (name === 'TryInto')
     return solver.implements(target, { trait: solver.program.traitDef('TryFrom'), args: [source] });
+  const array = arrayTryFrom(source, target);
+  if (array) {
+    if (!solver.unifier.tryUnify(array.elem, array.array.elem)) return 'no';
+    if (array.mode !== 'copy') return 'yes';
+    return solver.implements(array.elem, { trait: solver.program.traitDef('Copy'), args: [] });
+  }
   if (source.kind === 'int' && (target.kind === 'int' || target.kind === 'bool')) return 'yes';
   if (target.kind === 'char' && source.kind === 'int' && source.name === 'u32') return 'yes';
   if (source.kind === 'char' && target.kind === 'int' && target.name === 'u8') return 'yes';
@@ -756,6 +778,8 @@ function isIterator(type: Type): boolean {
   if (t.kind === 'param' || t.kind === 'opaque') return true;
   return (
     t.kind === 'adt' &&
-    ['Iter', 'Range', 'RangeInclusive', 'RangeFrom', 'CaseIter', 'EscapeDefault'].includes(t.def.builtin as string)
+    ['Iter', 'Range', 'RangeInclusive', 'RangeFrom', 'CaseIter', 'EscapeDefault', 'EscapeUnicode'].includes(
+      t.def.builtin as string
+    )
   );
 }

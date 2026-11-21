@@ -106,6 +106,10 @@ export class CollectionEntries<V> {
     return this.tree!.getEdge(first);
   }
 
+  edgeKey(first: boolean): CollectionKey<V> | undefined {
+    return this.tree!.edgeKey(first);
+  }
+
   takeEdge(first: boolean): V | undefined {
     return this.tree!.takeEdge(first);
   }

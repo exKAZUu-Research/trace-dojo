@@ -132,6 +132,26 @@ function floatFrom(source: Type, target: string): boolean {
   return target === 'f64' ? bits <= 32 : bits <= 16;
 }
 
+interface ArrayConversion {
+  array: Type & { kind: 'array' };
+  elem: Type;
+  mode: 'move' | 'copy' | 'borrow';
+}
+
+export function arrayTryFrom(source: Type, target: Type): ArrayConversion | undefined {
+  const from = normalize(shallow(source));
+  const to = normalize(shallow(target));
+  const array = to.kind === 'ref' ? normalize(shallow(to.target)) : to;
+  if (array.kind !== 'array') return;
+  if (from.kind === 'adt' && from.def.builtin === 'Vec' && to.kind === 'array')
+    return { array, elem: from.args[0], mode: 'move' };
+  if (from.kind !== 'ref') return;
+  const slice = normalize(shallow(from.target));
+  if (slice.kind !== 'slice') return;
+  if (to.kind === 'ref' && to.mutable !== from.mutable) return;
+  return { array, elem: slice.elem, mode: to.kind === 'ref' ? 'borrow' : 'copy' };
+}
+
 export function intoConversion(solver: TraitSolver, source: Type, target: Type): Answer {
   return solver.implements(source, { trait: solver.program.traitDef('Into'), args: [target] });
 }

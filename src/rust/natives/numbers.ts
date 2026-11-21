@@ -1,11 +1,11 @@
-// code-gauge-allow-file fileNcss 478 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss 491 -- One native per method of the standard library.
 import { debugFloat, decimalToF32 } from '../floatFormat';
 import { F64_CONSTS, FLOAT_LIMITS, floatConstant } from '../floatLimits';
 import { normalize } from '../infer';
-import { bitsOf, intArith, overflow, wrap } from '../ops';
-import { intoConversion } from '../traitConversions';
+import { bitsOf, copyValue, intArith, needsCopy, overflow, wrap } from '../ops';
+import { arrayTryFrom, intoConversion } from '../traitConversions';
 import { INT_NAMES, intMax, intMin, type IntName, shallow, type Type } from '../types';
-import { EnumValue, StructValue, textOf, type Value } from '../values';
+import { EnumValue, sliceItems, sliceLength, StructValue, textOf, type Value } from '../values';
 import {
   define,
   deref,
@@ -657,13 +657,16 @@ function roundBinary(mantissa: bigint, exponent: number, f32: boolean): number {
   return negative ? -result : result;
 }
 
-/** `T::try_from(value)` between integer types: the value when it fits, or `TryFromIntError`. */
+// code-gauge-allow functionCognitiveComplexity 16 -- Each checked target has its own representation and error type.
+// code-gauge-allow functionNcss 31 -- Dispatches the supported TryFrom conversions.
 function tryConvert(ctx: NativeContext, value: Value, from: Type, to: Type): Value {
   const { interp, span, frame } = ctx;
   if (intoConversion(interp.checker.solver, from, to) === 'yes') {
     const into = interp.program.traitDef('Into').methods.get('into')!;
     return ok(ctx, interp.callFn(into, [from, to], [value], undefined, span, frame));
   }
+  const array = arrayTryFrom(from, to);
+  if (array) return tryArray(ctx, value, array);
   const t = normalize(shallow(to));
   const v = deref(value);
   if (t.kind === 'char') {
@@ -685,6 +688,22 @@ function tryConvert(ctx: NativeContext, value: Value, from: Type, to: Type): Val
   } else if (inRange(target.name, number)) return ok(ctx, number);
   const kind = number < 0n ? 'NegOverflow' : 'PosOverflow';
   return err(ctx, new StructValue(ctx.interp.program.adtDef('TryFromIntError'), [kind]));
+}
+
+function tryArray(
+  ctx: NativeContext,
+  value: Value,
+  { array, mode }: NonNullable<ReturnType<typeof arrayTryFrom>>
+): Value {
+  const items = deref(value);
+  if (sliceLength(items) !== array.len) {
+    return err(ctx, mode === 'move' ? items : new StructValue(ctx.interp.program.adtDef('TryFromSliceError'), []));
+  }
+  if (mode === 'move') return ok(ctx, items);
+  if (mode === 'borrow') return ok(ctx, value);
+  ctx.runtime.allocate(array.len);
+  const copy = sliceItems(items);
+  return ok(ctx, needsCopy(array.elem) ? copy.map(copyValue) : [...copy]);
 }
 
 /** An integer's bytes, most significant first, in two's complement. */

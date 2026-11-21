@@ -666,25 +666,24 @@ function splitAsciiWhitespaceFrom(bytes: Uint8Array, done: boolean): IterValue {
 }
 
 /** `matches` and `match_indices`: each match, with its byte offset for `match_indices`. */
-export function matchesIter(text: string, pattern: PatternKind, indexed: boolean): IterValue {
-  return matchesFrom(searcherOf(text, pattern), indexed);
+export function matchesIter(text: string, pattern: PatternKind, indexed: boolean, reverse = false): IterValue {
+  return matchesFrom(searcherOf(text, pattern), indexed, reverse);
 }
 
-function matchesFrom(searcher: Searcher, indexed: boolean): IterValue {
+function matchesFrom(searcher: Searcher, indexed: boolean, reverse: boolean): IterValue {
   const item = (found: [number, number] | undefined): Next => {
     if (!found) return DONE;
     const piece = decodeUtf8(searcher.bytes.subarray(found[0], found[1]));
     return indexed ? [BigInt(found[0]), piece] : piece;
   };
-  const iter = new IterValue(
-    () => item(searcher.nextMatch()),
-    () => item(searcher.nextMatchBack()),
-    undefined,
-    searcher.roots
-  );
-  iter.fork = () => matchesFrom(forkSearcher(searcher), indexed);
+  const front = (): Next => item(searcher.nextMatch());
+  const back = (): Next => item(searcher.nextMatchBack());
+  const iter = new IterValue(reverse ? back : front, reverse ? front : back, undefined, searcher.roots);
+  iter.fork = () => matchesFrom(forkSearcher(searcher), indexed, reverse);
   const [outer, inner] = indexed ? ['MatchIndices', 'MatchIndicesInternal'] : ['Matches', 'MatchesInternal'];
-  return described(iter, (show) => tuplePart(outer, [tuplePart(inner, [searcher.debug(show)])]));
+  return described(iter, (show) =>
+    tuplePart(reverse ? `R${outer}` : outer, [tuplePart(inner, [searcher.debug(show)])])
+  );
 }
 
 function forkSearcher(searcher: Searcher): Searcher {

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 929 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss 963 -- One native per method of the standard library.
 import { inPlaceCapacity, reserveVec, setVecCapacity, sizeTable, type TableMap, vecCapacity } from '../capacity';
 import type { DebugPart } from '../debugText';
 import { normalize } from '../infer';
@@ -40,6 +40,7 @@ import {
   type Value,
 } from '../values';
 import { checkTableCapacity, checkVecCapacity } from './capacityNatives';
+import { defaultValue } from './core';
 import { layoutOf, sizeOf } from './layout';
 import { rangeIterator } from './rangeIterator';
 import { lessByPartialOrd, sortSlice } from './sorting';
@@ -50,6 +51,7 @@ import {
   deref,
   libraryPanic,
   type NativeContext,
+  NATIVES,
   none,
   option,
   ordering,
@@ -1256,13 +1258,7 @@ define({
   'IterImpl<&mut _, _>::copied': ([self]) => mapped(iterOf(self), (item) => copyValue(deref(item))),
   'IterImpl<&mut _, _>::cloned': ([self], ctx) =>
     mapped(iterOf(self), (item) => cloneValue(ctx.typeArgs[0], deref(item))),
-  'IterImpl<(_, _), _>::unzip': ([self], ctx) => {
-    const items = collectAll(ctx, iterOf(self)) as Value[][];
-    const [typeA, typeB, , fromA, fromB] = ctx.typeArgs;
-    const firsts = items.map((item) => item[0]);
-    const seconds = items.map((item) => item[1]);
-    return [collectInto(ctx, firsts, fromA, typeA), collectInto(ctx, seconds, fromB, typeB)];
-  },
+  'IterImpl<_, _>::unzip': ([self], ctx) => unzip(ctx, iterOf(self)),
   'std::iter::repeat': ([value], ctx) => repeated(ctx, value),
   'std::iter::repeat_with': ([f], ctx) => fromFunction(ctx, new IteratorCallback(f, ctx.typeArgs[1]), true),
   'std::iter::repeat_n': ([value, n], ctx) => repeatN(ctx, value, n as bigint),
@@ -1534,6 +1530,67 @@ function inPlaceSource(iter: IterValue, shape: Type): IterValue | undefined {
     source = source?.roots[0] instanceof IterValue ? source.roots[0] : undefined;
   }
   return t.kind === 'adt' && t.def.name === 'VecIntoIterShape' ? source : undefined;
+}
+
+function unzip(ctx: NativeContext, iter: IterValue): Value {
+  const [, shape, typeA, typeB, fromA, fromB] = ctx.typeArgs;
+  const left = new CellPlace(undefined);
+  const right = new CellPlace(undefined);
+  return ctx.runtime.withRoots([left, right], () => {
+    left.set(defaultValue(ctx, fromA));
+    right.set(defaultValue(ctx, fromB));
+    const bound = iteratorLowerBound(iter, shape);
+    const first = unzipColumn(ctx, left, fromA, typeA, bound);
+    const second = unzipColumn(ctx, right, fromB, typeB, bound);
+    each(
+      ctx,
+      iter,
+      (item) => {
+        ctx.runtime.withRoots([item], () => {
+          const [a, b] = item as Value[];
+          first(a);
+          second(b);
+        });
+      },
+      'fold'
+    );
+    return [left.get(), right.get()];
+  });
+}
+
+function unzipColumn(
+  ctx: NativeContext,
+  output: CellPlace,
+  target: Type,
+  item: Type,
+  bound: bigint
+): (value: Value) => void {
+  const t = normalize(shallow(target));
+  if (t.kind !== 'adt') throw new Error('unzip into a non-collection');
+  const name = t.def.builtin!;
+  const prefix = t.args.length === 0 ? name : `${name}<${t.args.map(() => '_').join(', ')}>`;
+  const nativeCtx = { ...ctx, typeArgs: t.args };
+  const source = normalize(shallow(item));
+  const char = source.kind === 'ref' ? normalize(shallow(source.target)).kind === 'char' : source.kind === 'char';
+  if (bound > 0n && (!['BTreeMap', 'BTreeSet', 'String'].includes(name) || (name === 'String' && char))) {
+    NATIVES[`${prefix}::reserve`]([output, bound], nativeCtx);
+  }
+  if (name.endsWith('Map')) {
+    return (pair) => {
+      NATIVES[`${prefix}::insert`]([output, ...(pair as Value[])], nativeCtx);
+    };
+  }
+  if (name.endsWith('Set')) {
+    const convert = extendedValue(t.args[0], item);
+    return (value) => {
+      NATIVES[`${prefix}::insert`]([output, convert(value)], nativeCtx);
+    };
+  }
+  const shape = ctx.interp.program.shapeType('ArrayIntoIterShape');
+  const input = { ...ctx, typeArgs: [...t.args, item, shape] };
+  return (value) => {
+    NATIVES[`${prefix}::extend`]([output, arrayIter([value])], input);
+  };
 }
 
 export function collectInto(ctx: NativeContext, items: Value[], target: Type, item: Type): Value {

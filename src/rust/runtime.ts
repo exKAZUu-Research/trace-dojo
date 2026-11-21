@@ -61,7 +61,11 @@ export class Frame implements TracedFrame {
       this.locals[slot] = UNASSIGNED;
       this.referents.delete(slot);
     }
-    for (const [slot, { root }] of this.referents) if (slots.includes(root)) this.referents.delete(slot);
+    for (const [slot, { root }] of this.referents) {
+      if (!slots.includes(root)) continue;
+      this.locals[slot] = UNASSIGNED;
+      this.referents.delete(slot);
+    }
   }
   /** Values in use that no variable holds, such as the value a `for` loop iterates, for garbage collection. */
   readonly temporaries: Value[] = [];
@@ -151,6 +155,7 @@ export class Runtime implements TracedRuntime<Frame> {
     return roots.length === 0 ? use() : this.withRoots(roots, use);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Iterators can borrow transitively through their source or adapter state.
   borrowRoots(values: Value[]): Value[] {
     const roots: Value[] = [];
     const seen = new Set<IterValue>();
@@ -159,6 +164,7 @@ export class Runtime implements TracedRuntime<Frame> {
         value = value.get();
         roots.push(value as Value);
       }
+      if (value instanceof SliceView) roots.push(value.base);
       if (!(value instanceof IterValue) || seen.has(value)) return;
       seen.add(value);
       for (const borrow of value.borrowedRoots) roots.push(borrow);
@@ -212,7 +218,9 @@ export class Runtime implements TracedRuntime<Frame> {
     const reached = new Set<unknown>();
     const stack: unknown[] = [];
     for (const frame of this.frames) {
-      pushAll(stack, frame.locals);
+      for (const [slot, value] of frame.locals.entries()) {
+        if (!frame.referents.has(slot)) stack.push(value);
+      }
       pushAll(stack, frame.temporaries);
       pushAll(stack, frame.captures);
     }
@@ -257,7 +265,7 @@ function pushChildren(item: object, stack: unknown[]): void {
   } else if (item instanceof ElementPlace) {
     stack.push(item.owner);
   } else if (item instanceof SliceView) {
-    stack.push(item.base);
+    stack.push(item.owner);
   } else if (item instanceof MapValue) {
     for (const [key, value] of item.entries.values()) stack.push(key, value);
   } else if (item instanceof SetValue) {

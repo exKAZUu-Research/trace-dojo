@@ -61,7 +61,7 @@ function hashSetOp(ctx: NativeContext, op: SetOp, self: Value, other: Value): Va
 }
 
 /** `BTreeSet`'s set operations, which take std's steps. */
-const btree = (ctx: NativeContext, op: SetOp, self: Value, other: Value): Value => {
+const btree = (ctx: NativeContext, op: SetOp, self: Value, other: Value): IterValue => {
   const sets: [SetValue, SetValue] = [set(self), set(other)];
   const type = keyType(ctx);
   return btreeSetOp(op, sets, type, ctx.interp.program.builtinType('BTreeSet', [type]));
@@ -208,6 +208,8 @@ function extendMap(ctx: NativeContext, m: MapValue, iterator: IterValue): Value 
 
 function mapEndNatives(): Record<string, Native> {
   return {
+    first_entry: ([self], ctx) => edgeEntry(ctx, map(self), true),
+    last_entry: ([self], ctx) => edgeEntry(ctx, map(self), false),
     first_key_value: ([self], ctx) => {
       const first = map(self).entries.getEdge(true);
       return option(ctx, first && [first[0], first[1]], first !== undefined);
@@ -227,6 +229,13 @@ function mapEndNatives(): Record<string, Native> {
       return option(ctx, last && [last[0], last[1]], last !== undefined);
     },
   };
+}
+
+function edgeEntry(ctx: NativeContext, value: MapValue, first: boolean): Value {
+  const lookup = value.entries.edgeKey(first);
+  if (!lookup) return none(ctx);
+  const [key] = value.entries.get(lookup)!;
+  return some(ctx, new EntryValue(value, lookup, key));
 }
 
 // code-gauge-allow functionNcss 59 -- One native per method of std's sets.
@@ -288,7 +297,10 @@ function setNatives(sorted: boolean): Record<string, (args: Value[], ctx: Native
     symmetric_difference: ([self, other], ctx) => setOp(ctx, sorted, 'symmetric_difference', self, other),
     is_subset: ([self, other], ctx) => everySetMember(ctx, set(self), set(other), true),
     is_superset: ([self, other], ctx) => everySetMember(ctx, set(other), set(self), true),
-    is_disjoint: ([self, other], ctx) => everySetMember(ctx, set(self), set(other), false),
+    is_disjoint: ([self, other], ctx) =>
+      sorted
+        ? btree(ctx, 'intersection', self, other).next() === DONE
+        : everySetMember(ctx, set(self), set(other), false),
     retain: ([self, f], ctx) => {
       const s = set(self);
       s.entries.retain((value) => deref(call(ctx, f, [value])) as boolean);
@@ -384,6 +396,33 @@ const entryNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
   },
 };
 
+const occupiedNatives: Record<string, Native> = {
+  key: ([self]) => entryValue(self).key,
+  get: ([self]) => occupiedValue(self)[1],
+  get_mut: ([self]) => new ElementPlace(occupiedValue(self), 1),
+  into_mut: ([self]) => new ElementPlace(occupiedValue(self), 1),
+  insert: ([self, value]) => {
+    const pair = occupiedValue(self);
+    const old = pair[1];
+    pair[1] = value;
+    return old;
+  },
+  remove: ([self]) => removeOccupied(self)[1],
+  remove_entry: ([self]) => removeOccupied(self),
+};
+
+function occupiedValue(self: Value): [Value, Value] {
+  const entry = entryValue(self);
+  return entry.map.entries.get(entry.lookup)!;
+}
+
+function removeOccupied(self: Value): [Value, Value] {
+  const entry = entryValue(self);
+  const pair = entry.map.entries.get(entry.lookup)!;
+  entry.map.entries.delete(entry.lookup);
+  return pair;
+}
+
 const natives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {};
 function treeRange<V extends Value>(
   ctx: NativeContext,
@@ -420,6 +459,7 @@ for (const [name, native] of Object.entries(mapNatives(true))) natives[`BTreeMap
 for (const [name, native] of Object.entries(setNatives(false))) natives[`HashSet<_>::${name}`] = native;
 for (const [name, native] of Object.entries(setNatives(true))) natives[`BTreeSet<_>::${name}`] = native;
 for (const [name, native] of Object.entries(entryNatives)) natives[`Entry<_, _>::${name}`] = native;
+for (const [name, native] of Object.entries(occupiedNatives)) natives[`OccupiedEntry<_, _>::${name}`] = native;
 natives['&HashMap<_, _>::into_iter'] = ([self], ctx) => mapIter(map(self), 'ref', ctx.typeArgs);
 natives['&mut HashMap<_, _>::into_iter'] = ([self], ctx) => mapIter(map(self), 'mut', ctx.typeArgs);
 natives['&BTreeMap<_, _>::into_iter'] = ([self], ctx) => mapIter(map(self), 'ref', ctx.typeArgs);

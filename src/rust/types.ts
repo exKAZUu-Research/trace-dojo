@@ -112,6 +112,7 @@ export type BuiltinAdt =
   | 'CaseIter'
   | 'ControlFlow'
   | 'EscapeDefault'
+  | 'EscapeUnicode'
   | 'ParseError'
   | 'Unsigned'
   | 'Signed'
@@ -137,8 +138,10 @@ export type BuiltinAdt =
   | 'ParseBoolError'
   | 'ParseCharError'
   | 'TryFromIntError'
+  | 'TryFromSliceError'
   | 'Utf8Error'
   | 'Entry'
+  | 'OccupiedEntry'
   | 'Infallible';
 
 export interface AdtDef {

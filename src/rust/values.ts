@@ -116,7 +116,8 @@ export class SliceView {
   constructor(
     readonly base: Value[],
     readonly start: number,
-    readonly end: number
+    readonly end: number,
+    readonly owner?: Place
   ) {}
 
   get length(): number {

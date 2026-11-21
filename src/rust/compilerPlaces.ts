@@ -103,7 +103,7 @@ function derefPlace(c: Compiler, expr: ExprOf<'unary'>): PlaceEval {
   }
   if (operandType.kind === 'ref') {
     const operand = c.read(expr.operand);
-    return (frame) => new CellPlace(operand(frame));
+    return (frame) => readOnlyPlace(operand(frame));
   }
   // A Box is its value.
   return compilePlace(c, expr.operand);
@@ -141,7 +141,7 @@ export function placeThrough(c: Compiler, operand: Expr, derefs: Derefs): PlaceE
   if (derefs.some((step) => step === 'ref')) {
     // Through a shared reference only reads happen, so a place over the value serves.
     const read = valueThrough(c, operand, derefs);
-    return (frame) => new CellPlace(read(frame));
+    return (frame) => readOnlyPlace(read(frame));
   }
   const base = compilePlace(c, operand);
   if (!derefs.includes('mutRef')) return base;
@@ -150,6 +150,13 @@ export function placeThrough(c: Compiler, operand: Expr, derefs: Derefs): PlaceE
     for (const step of derefs) if (step === 'mutRef') place = place.get() as Place;
     return place;
   };
+}
+
+function readOnlyPlace(value: Value): Place {
+  return new AccessorPlace(
+    () => value,
+    () => {}
+  );
 }
 
 /** An operand's value after derefs, reading through `&mut` references. */
@@ -200,7 +207,10 @@ export function compileIndex(c: Compiler, expr: ExprOf<'index'>): Eval {
       });
     };
   }
-  if (res.range) return rangeIndex(c, base, index, res.container === 'str', span);
+  if (res.range) {
+    if (res.container === 'str') return strRangeIndex(c, base, index, span);
+    return sliceRangeIndex(placeThrough(c, expr.operand, res.derefs), index, span);
+  }
   return (frame) => {
     const container = base(frame);
     return frame.runtime.withRoots([container], () => {
@@ -212,18 +222,29 @@ export function compileIndex(c: Compiler, expr: ExprOf<'index'>): Eval {
   };
 }
 
-function rangeIndex(c: Compiler, base: Eval, index: Eval, isStr: boolean, span: Span): Eval {
+function strRangeIndex(c: Compiler, base: Eval, index: Eval, span: Span): Eval {
   return (frame) => {
     const container = base(frame);
     return frame.runtime.withRoots([container], () => {
       const range = index(frame) as RangeValue | undefined;
-      return isStr ? c.support.strSlice(textOf(container), range, span) : sliceRange(container, range, span);
+      return c.support.strSlice(textOf(container), range, span);
+    });
+  };
+}
+
+function sliceRangeIndex(base: PlaceEval, index: Eval, span: Span): Eval {
+  return (frame) => {
+    const place = base(frame);
+    const container = place.get();
+    return frame.runtime.withRoots([container], () => {
+      const range = index(frame) as RangeValue | undefined;
+      return sliceRange(container, range, span, temporaryOwner(place));
     });
   };
 }
 
 /** `&v[a..b]`: a window on a slice, panicking as Rust does when the range is out of order or bounds. */
-export function sliceRange(container: Value, range: RangeValue | undefined, span: Span): Value {
+export function sliceRange(container: Value, range: RangeValue | undefined, span: Span, owner?: Place): SliceView {
   const length = sliceLength(container);
   const start = range?.sliceStart() ?? 0n;
   const end = range?.sliceEnd() ?? BigInt(length);
@@ -236,7 +257,12 @@ export function sliceRange(container: Value, range: RangeValue | undefined, span
     throw new RustPanic(`range end index ${index} out of range for slice of length ${length}`, span);
   }
   const { base, start: offset } = sliceBase(container);
-  return new SliceView(base, offset + Number(start), offset + Number(end));
+  return new SliceView(
+    base,
+    offset + Number(start),
+    offset + Number(end),
+    owner ?? (container instanceof SliceView ? container.owner : undefined)
+  );
 }
 
 /** The message of an index past the end; `VecDeque`'s says less. */

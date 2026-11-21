@@ -39,7 +39,8 @@ export function intoIterItem(type: Type): Type | undefined {
     case 'CaseIter': {
       return CHAR;
     }
-    case 'EscapeDefault': {
+    case 'EscapeDefault':
+    case 'EscapeUnicode': {
       return CHAR;
     }
     case 'HashMap':
@@ -113,7 +114,8 @@ export function intoIterShape(program: Program, type: Type): Type | undefined {
   if (t.kind !== 'adt') return undefined;
   if (t.def.builtin === 'Iter') return t.args[1];
   if (t.def.builtin === 'CaseIter') return program.shapeType('CaseMappingShape');
-  if (t.def.builtin === 'EscapeDefault') return program.shapeType('EscapeDefaultShape');
+  if (t.def.builtin === 'EscapeDefault' || t.def.builtin === 'EscapeUnicode')
+    return program.shapeType('EscapeDefaultShape');
   const range = RANGE_SHAPES[t.def.builtin as string];
   if (range) return program.shapeType(range, [t.args[0]]);
   const shapes = COLLECTION_SHAPES[t.def.builtin as string];

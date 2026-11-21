@@ -17,9 +17,15 @@ const LEAF_SHAPES: Record<string, Capability[]> = {
   StringDrainShape: ['back'],
   WindowsShape: ['back', 'exact'],
   SliceSplitShape: ['back'],
+  ChunkByShape: ['back'],
   ChunksShape: ['back', 'exact'],
   RChunksShape: ['back', 'exact'],
   ChunksExactShape: ['back', 'exact'],
+  RChunksExactShape: ['back', 'exact'],
+  ChunksMutShape: ['back', 'exact'],
+  ChunksExactMutShape: ['back', 'exact'],
+  RChunksMutShape: ['back', 'exact'],
+  RChunksExactMutShape: ['back', 'exact'],
   CharsShape: ['back'],
   BytesShape: ['back', 'exact'],
   CharIndicesShape: ['back'],
@@ -109,7 +115,7 @@ function abstractCapability(type: Type, capability: Capability, solver?: TraitSo
   return iterable === 'yes' ? solver.implements(concrete, { trait, args: [] }) : iterable;
 }
 
-const DIRECT_ITERATORS = new Set(['Range', 'RangeInclusive', 'RangeFrom', 'EscapeDefault']);
+const DIRECT_ITERATORS = new Set(['Range', 'RangeInclusive', 'RangeFrom', 'EscapeDefault', 'EscapeUnicode']);
 
 /** The capabilities of an adapter, from those of the iterators it adapts. */
 function adapterCapability(name: string, args: Type[], capability: Capability, solver?: TraitSolver): Answer {

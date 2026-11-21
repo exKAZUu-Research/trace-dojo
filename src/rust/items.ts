@@ -838,10 +838,13 @@ const BUILTIN_STRUCTS: Record<string, BuiltinAdt> = {
   ParseIntError: 'ParseIntError',
   ParseFloatError: 'ParseFloatError',
   TryFromIntError: 'TryFromIntError',
+  TryFromSliceError: 'TryFromSliceError',
   Utf8Error: 'Utf8Error',
   Entry: 'Entry',
+  OccupiedEntry: 'OccupiedEntry',
   CaseIter: 'CaseIter',
   EscapeDefault: 'EscapeDefault',
+  EscapeUnicode: 'EscapeUnicode',
   ParseError: 'ParseError',
   Unsigned: 'Unsigned',
   Signed: 'Signed',
@@ -1228,7 +1231,7 @@ function resolveImportedName(
     const typeEntry = ownType(parent.module, last, span, new Set());
     const valueEntry = ownValue(parent.module, last, span, new Set());
     if (!typeEntry && !valueEntry && parent.module.isStd)
-      checkUnavailableStd([...parent.module.path.split('::'), last], span);
+      unavailableStdItem([...parent.module.path.split('::'), last], span);
     checkVisible(typeEntry, module, last, span);
     checkVisible(valueEntry, module, last, span);
     return { types: typeEntry, values: valueEntry };
@@ -1307,7 +1310,7 @@ export function resolveTypePath(segments: string[], module: Module, span: Span):
     }
     const entry = ownType(owner, segment, span, new Set());
     if (!entry) {
-      if (owner.isStd) checkUnavailableStd([...segments.slice(0, segments.indexOf(segment)), segment], span);
+      if (owner.isStd) unavailableStdItem([...owner.path.split('::'), segment], span);
       compileError(span, `${segments.join('::')} が見つかりません。`);
     }
     checkVisible(entry, module, segment, span);
@@ -1316,8 +1319,13 @@ export function resolveTypePath(segments: string[], module: Module, span: Span):
   return current;
 }
 
+export function unavailableStdItem(segments: string[], span: Span): never {
+  checkUnavailableStd(segments, span);
+  return compileError(span, `${segments.join('::')} は、この採点環境では使えません。`);
+}
+
 /** Rejects the modules of the standard library that touch the outside world or run concurrently (stage D). */
-export function checkUnavailableStd(segments: string[], span: Span): void {
+function checkUnavailableStd(segments: string[], span: Span): void {
   const [, module, name] = segments;
   const unavailable: Record<string, string> = {
     fs: 'ファイルの読み書き（std::fs）',

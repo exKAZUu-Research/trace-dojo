@@ -15,6 +15,7 @@ import {
   type Module,
   resolveTypePath,
   type TypeBinding,
+  unavailableStdItem,
   type ValueBinding,
   visibilityScope,
   visibleFrom,
@@ -159,7 +160,7 @@ function moduleValueRes(
 ): PathRes {
   const binding = lookupQualifiedValue(module, c.body.module, last.name, span);
   if (!binding) {
-    if (module.isStd) unavailableStd([...module.path.split('::'), last.name], span);
+    if (module.isStd) unavailableStdItem([...module.path.split('::'), last.name], span);
     compileError(span, `${names.join('::')} が見つかりません。`);
   }
   return valueBindingRes(c, binding, last.args, span, names.join('::'));
@@ -190,7 +191,7 @@ function associatedValueRes(c: Checker, t: Type, last: PathAst['segments'][numbe
 }
 
 function missingAssociatedValue(owner: Type, name: string, span: Span): never {
-  if (isStandardType(owner)) unavailableStd([typeToString(owner), name], span);
+  if (isStandardType(owner)) unavailableStdItem([typeToString(owner), name], span);
   if (owner.kind === 'adt' && owner.def.kind === 'enum') {
     compileError(span, `${owner.def.name} に列挙子 ${name} がありません。`);
   }
@@ -203,17 +204,6 @@ export function isStandardType(type: Type): boolean {
   if (t.kind === 'adt') return (t.def.module as Module | undefined)?.isStd ?? false;
   if (t.kind === 'dyn') return (t.trait.trait.module as Module | undefined)?.isStd ?? false;
   return ['array', 'slice', 'str', 'char', 'int', 'float', 'bool'].includes(t.kind);
-}
-
-function unavailableStd(names: string[], span: Span): never {
-  const module = names.find((name) => !['std', 'core', 'alloc'].includes(name));
-  if (module === 'io' || module === 'fs') {
-    compileError(span, '標準入力・ファイルの入出力は、この採点環境では使えません。');
-  }
-  if (module === 'thread') compileError(span, 'スレッド（std::thread）は、この採点環境では使えません。');
-  if (module === 'env')
-    compileError(span, '環境変数とコマンドラインの引数（std::env）は、この採点環境では使えません。');
-  return compileError(span, `${names.join('::')} は、この採点環境では使えません。`);
 }
 
 /** Whether a trait is in scope in the body: imported, in the prelude, or the trait of the body's impl. */

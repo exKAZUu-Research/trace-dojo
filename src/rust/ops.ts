@@ -716,8 +716,7 @@ export function needsCopy(type: Type): boolean {
   if (t.kind === 'array') return true;
   // A closure that captures by value copies what it captures.
   if (t.kind === 'closure') return t.closure.captures?.some((capture) => capture.mode === 'value') ?? false;
-  if (t.kind === 'adt')
-    return !t.def.builtin || t.def.builtin === 'Option' || t.def.builtin === 'Result' || t.def.builtin === 'Reverse';
+  if (t.kind === 'adt') return !t.def.builtin || ['Bound', 'Option', 'Result', 'Reverse'].includes(t.def.builtin);
   return false;
 }
 

@@ -1,5 +1,5 @@
 import { concatStrings, madeString, stringByteLength, stringCapacity, StringGrowth, vecCapacity } from '../capacity';
-import { escapeDebug, escapeDefaultDebug } from '../fmt';
+import { charEscapeDebug, escapeDebug } from '../fmt';
 import { normalize } from '../infer';
 import { strSliceBytes } from '../interpreter';
 // code-gauge-allow-file fileNcss 488 -- One native per method of the standard library.
@@ -354,7 +354,9 @@ const strNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
     return found ? some(ctx, BigInt(found[0])) : none(ctx);
   },
   matches: ([s, p], ctx) => matchesIter(textOf(s), patternOf(ctx, p), false),
+  rmatches: ([s, p], ctx) => matchesIter(textOf(s), patternOf(ctx, p), false, true),
   match_indices: ([s, p], ctx) => matchesIter(textOf(s), patternOf(ctx, p), true),
+  rmatch_indices: ([s, p], ctx) => matchesIter(textOf(s), patternOf(ctx, p), true, true),
   replace: ([s, from, to], ctx) => replaceN(ctx, textOf(s), from, textOf(to), Number.POSITIVE_INFINITY),
   replacen: ([s, from, to, count], ctx) => replaceN(ctx, textOf(s), from, textOf(to), Number(count as bigint)),
   to_uppercase: ([s]) => upper(textOf(s)),
@@ -640,8 +642,9 @@ const charNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> 
       : code < 32 || code >= 127
         ? `\\u{${code.toString(16)}}`
         : text;
-    return described(arrayIter([...escaped]), (_show, _item, target) => (indent) => escapeDefaultDebug(target, indent));
+    return escapedChar('EscapeDefault', escaped);
   },
+  escape_unicode: ([c]) => escapedChar('EscapeUnicode', `\\u{${textOf(c).codePointAt(0)!.toString(16)}}`),
   to_digit: ([c, radix], ctx) => {
     const digit = digitOf(ctx, textOf(c), Number(radix as bigint));
     return option(ctx, digit === undefined ? undefined : BigInt(digit), digit !== undefined);
@@ -651,6 +654,13 @@ const charNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> 
   from_u32: ([i], ctx) => fromU32(ctx, i),
   from_digit: ([num, radix], ctx) => fromDigit(ctx, num, radix),
 };
+
+function escapedChar(name: string, escaped: string): IterValue {
+  return described(
+    arrayIter(escaped.split('')),
+    (_show, _item, target) => (indent) => charEscapeDebug(name, target, indent)
+  );
+}
 
 function digitOf(ctx: NativeContext, c: string, radix: number): number | undefined {
   if (radix < 2 || radix > 36) {

@@ -1,32 +1,29 @@
 // code-gauge-allow-file fileNcss 541 -- One native per method of the standard library.
-import { keepVecCapacity, setIntoIterBuffer, setVecCapacity, vecCapacity } from '../capacity';
+import { keepVecCapacity, reserveVec, setIntoIterBuffer, setVecCapacity, vecCapacity } from '../capacity';
 import { sliceRange } from '../compiler';
-import { type DebugPart } from '../debugText';
 import { normalize } from '../infer';
-import { described, fieldsPart, listPart, numberPart } from '../iterDebug';
-import { cloneValue, compareValues, copyValue, testPartialOrder, valuesEqual } from '../ops';
+import { cloneValue, compareValues, copyValue, needsCopy, testPartialOrder, valuesEqual } from '../ops';
 import { MOVED, RustPanic } from '../runtime';
 import { shallow, type Type } from '../types';
 import {
   DONE,
   ElementPlace,
-  IterValue,
+  type IterValue,
   RangeValue,
   sliceBase,
   sliceGet,
   sliceItems,
   sliceLength,
-  SliceView,
+  type SliceView,
   swapOwnedElements,
   textOf,
   UNIT_VALUE,
   type Value,
 } from '../values';
-import { allocVecElements, extendRoom, repeatedLength, withCapacity } from './capacityNatives';
+import { allocVecElements, checkVecCapacity, extendRoom, repeatedLength, withCapacity } from './capacityNatives';
 import { cloneInto } from './cloning';
 import { dequeDrain, dequeIter, dequeRange, dequeSlices, withDequeHead } from './dequeHead';
 import {
-  arrayIter,
   collectVec,
   extendedValue,
   heapIntoSortedVec,
@@ -41,6 +38,7 @@ import {
 } from './iterators';
 import { layoutOf, sizeOf } from './layout';
 import { checkedRangeBounds } from './ranges';
+import { chunksNative, groupedSlice, mutableSlice, splitSlice, windows } from './sliceIterators';
 import { dedupBy, lessByKey, lessByPartialOrd, sortByCachedKey, sortSlice } from './sorting';
 import {
   call,
@@ -242,50 +240,26 @@ const sliceNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
   },
   split_at: ([self, mid], ctx) => splitAt(ctx, deref(self), Number(mid as bigint)),
   split_at_mut: ([self, mid], ctx) => {
-    const [left, right] = splitAt(ctx, deref(self), Number(mid as bigint)) as Value[];
-    return [
-      { isPlace: true, get: () => left, set: () => {} },
-      { isPlace: true, get: () => right, set: () => {} },
-    ] as unknown as Value;
+    return splitAt(ctx, deref(self), Number(mid as bigint)).map(mutableSlice);
   },
-  split_first: ([self], ctx) => {
-    const slice = deref(self);
-    if (sliceLength(slice) === 0) return none(ctx);
-    return some(ctx, [sliceGet(slice, 0), sliceRange(slice, rangeFrom(1), ctx.span)]);
-  },
-  split_last: ([self], ctx) => {
-    const slice = deref(self);
-    const length = sliceLength(slice);
-    if (length === 0) return none(ctx);
-    return some(ctx, [sliceGet(slice, length - 1), sliceRange(slice, rangeTo(length - 1), ctx.span)]);
-  },
-  windows: ([self, size], ctx) => {
-    const slice = deref(self);
-    const width = Number(size as bigint);
-    if (width === 0) panic(ctx, 'window size must be non-zero');
-    const { base, start } = sliceBase(slice);
-    return windows(base, start, start + sliceLength(slice), width);
-  },
-  split: ([self, predicate], ctx) => {
-    const slice = deref(self);
-    const { base, start } = sliceBase(slice);
-    return sliceSplit(ctx, base, { front: start, back: start + sliceLength(slice), finished: false }, predicate);
-  },
-  chunks: ([self, size], ctx) => chunks(ctx, deref(self), Number(size as bigint), false),
-  rchunks: ([self, size], ctx) => {
-    const slice = deref(self);
-    const width = Number(size as bigint);
-    if (width === 0) panic(ctx, 'chunk size must be non-zero');
-    const { base, start } = sliceBase(slice);
-    const length = sliceLength(slice);
-    const iter = arrayIter(base, 0, Math.ceil(length / width), (index) => {
-      const end = length - index * width;
-      return new SliceView(base, start + Math.max(0, end - width), start + end);
-    });
-    const done = (): SliceView => new SliceView(base, start, start);
-    return chunkDebug(iter, 'RChunks', done, () => [['chunk_size', numberPart(width)]]);
-  },
-  chunks_exact: ([self, size], ctx) => chunks(ctx, deref(self), Number(size as bigint), true),
+  split_first: ([self], ctx) => splitEnd(ctx, deref(self), true, false),
+  split_last: ([self], ctx) => splitEnd(ctx, deref(self), false, false),
+  split_first_mut: ([self], ctx) => splitEnd(ctx, deref(self), true, true),
+  split_last_mut: ([self], ctx) => splitEnd(ctx, deref(self), false, true),
+  copy_within: ([self, source, destination], ctx) => copyWithin(ctx, deref(self), source, destination as bigint),
+  windows: ([self, size], ctx) => windows(ctx, deref(self), Number(size as bigint)),
+  split: ([self, predicate], ctx) => splitSlice(ctx, deref(self), predicate),
+  splitn: ([self, count, predicate], ctx) => splitSlice(ctx, deref(self), predicate, count as bigint),
+  rsplitn: ([self, count, predicate], ctx) => splitSlice(ctx, deref(self), predicate, count as bigint, true),
+  chunks: chunksNative(false, false, false),
+  chunks_exact: chunksNative(true, false, false),
+  chunks_mut: chunksNative(false, false, true),
+  chunks_exact_mut: chunksNative(true, false, true),
+  rchunks: chunksNative(false, true, false),
+  rchunks_exact: chunksNative(true, true, false),
+  rchunks_mut: chunksNative(false, true, true),
+  rchunks_exact_mut: chunksNative(true, true, true),
+  chunk_by: ([self, predicate], ctx) => groupedSlice(ctx, deref(self), predicate),
   fill: ([self, value], ctx) => fillSlice(ctx, deref(self), value, elemType(ctx)),
   to_vec: ([self], ctx) => clonedItems(ctx, sliceItems(deref(self))),
   to_owned: ([self], ctx) => clonedItems(ctx, sliceItems(deref(self))),
@@ -314,48 +288,6 @@ const sliceNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
   },
 };
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Both ends consume the separator while keeping the untouched slice.
-function sliceSplit(
-  ctx: NativeContext,
-  base: Value[],
-  state: { front: number; back: number; finished: boolean },
-  predicate: Value
-): IterValue {
-  const take = (reverse: boolean): Value | typeof DONE => {
-    if (state.finished) return DONE;
-    const start = reverse ? state.back - 1 : state.front;
-    const end = reverse ? state.front - 1 : state.back;
-    for (let index = start; index !== end; index += reverse ? -1 : 1) {
-      ctx.runtime.spend();
-      if (!call(ctx, predicate, [base[index]])) continue;
-      if (reverse) {
-        const item = new SliceView(base, index + 1, state.back);
-        state.back = index;
-        return item;
-      }
-      const item = new SliceView(base, state.front, index);
-      state.front = index + 1;
-      return item;
-    }
-    state.finished = true;
-    return new SliceView(base, state.front, state.back);
-  };
-  const iter = new IterValue(
-    () => take(false),
-    () => take(true),
-    undefined,
-    [predicate]
-  );
-  iter.borrowedRoots.push(base);
-  iter.fork = () => sliceSplit(ctx, base, { ...state }, cloneValue(ctx.typeArgs[1], predicate));
-  return described(iter, (show, item) =>
-    fieldsPart('Split', [
-      ['v', (indent) => show(new SliceView(base, state.front, state.back), item, indent)],
-      ['finished', numberPart(state.finished)],
-    ])
-  );
-}
-
 function fillSlice(ctx: NativeContext, slice: Value, value: Value, type: Type): Value {
   const length = sliceLength(slice);
   if (length === 0) return UNIT_VALUE;
@@ -376,93 +308,34 @@ function rangeTo(end: number): RangeValue {
   return new RangeValue(undefined, BigInt(end), false);
 }
 
-function splitAt(ctx: NativeContext, slice: Value, mid: number): Value {
+function splitAt(ctx: NativeContext, slice: Value, mid: number): [SliceView, SliceView] {
   if (mid > sliceLength(slice)) panic(ctx, 'mid > len');
   return [sliceRange(slice, rangeTo(mid), ctx.span), sliceRange(slice, rangeFrom(mid), ctx.span)];
 }
 
-function windows(base: Value[], front: number, back: number, width: number): IterValue {
-  const remaining = (): number => Math.max(0, back - front - width + 1);
-  const view = (start: number): SliceView => new SliceView(base, start, start + width);
-  const take = (n: bigint, reverse: boolean): ReturnType<IterValue['next']> => {
-    if (n >= BigInt(remaining())) {
-      back = front;
-      return DONE;
-    }
-    const step = Number(n);
-    if (!reverse) {
-      front += step + 1;
-      return view(front - 1);
-    }
-    back -= step + 1;
-    return view(back + 1 - width);
-  };
-  const iter = new IterValue(
-    () => (remaining() === 0 ? DONE : take(0n, false)),
-    () => take(0n, true),
-    remaining
-  );
-  iter.borrowedRoots.push(base);
-  iter.nth = (n) => take(n, false);
-  iter.nthBack = (n) => take(n, true);
-  iter.rest = () => Array.from({ length: remaining() }, (_, index) => view(front + index));
-  iter.fork = () => windows(base, front, back, width);
-  return described(iter, (show, item) =>
-    fieldsPart('Windows', [
-      ['v', listPart(base.slice(front, back), sliceElem(item), show)],
-      ['size', numberPart(width)],
-    ])
-  );
-}
-
-function chunks(ctx: NativeContext, slice: Value, size: number, exact: boolean): IterValue {
-  if (size === 0) panic(ctx, 'chunk size must be non-zero');
-  const { base, start } = sliceBase(slice);
+function splitEnd(ctx: NativeContext, slice: Value, first: boolean, mutable: boolean): Value {
   const length = sliceLength(slice);
-  const count = exact ? Math.floor(length / size) : Math.ceil(length / size);
-  const iter = arrayIter(
-    base,
-    0,
-    count,
-    (index) => new SliceView(base, start + index * size, start + Math.min(length, (index + 1) * size))
-  );
-  const done = (): SliceView => new SliceView(base, start, start);
-  const chunkSize: [string, DebugPart] = ['chunk_size', numberPart(size)];
-  if (!exact) return chunkDebug(iter, 'Chunks', done, () => [chunkSize]);
-  const rem = sliceItems(new SliceView(base, start + count * size, start + length));
-  return chunkDebug(iter, 'ChunksExact', done, (part) => [['rem', part(rem)], chunkSize]);
+  if (length === 0) return none(ctx);
+  const index = first ? 0 : length - 1;
+  const rest = sliceRange(slice, first ? rangeFrom(1) : rangeTo(index), ctx.span);
+  if (!mutable) return some(ctx, [sliceGet(slice, index), rest]);
+  const { base, start } = sliceBase(slice);
+  return some(ctx, [new ElementPlace(base, start + index), mutableSlice(rest)]);
 }
 
-/**
- * `{:?}` of `Chunks`, `RChunks`, and `ChunksExact`: `v`, the part of the slice their elements left cover
- * (`done` once none is left), then their other fields; `ChunksExact` also shows the remainder `rem`.
- */
-function chunkDebug(
-  iter: IterValue,
-  name: string,
-  done: (target: IterValue) => SliceView,
-  fields: (part: (values: Value[]) => DebugPart) => [string, DebugPart][]
-): IterValue {
-  return described(iter, (show, item, target) => {
-    const elem = sliceElem(item);
-    const views = (target.rest?.() ?? []) as SliceView[];
-    let from = Number.POSITIVE_INFINITY;
-    let to = 0;
-    for (const view of views) {
-      from = Math.min(from, view.start);
-      to = Math.max(to, view.end);
-    }
-    const covered = views.length > 0 ? sliceItems(new SliceView(views[0].base, from, to)) : sliceItems(done(target));
-    const part = (values: Value[]): DebugPart => listPart(values, elem, show);
-    return fieldsPart(name, [['v', part(covered)], ...fields(part)]);
-  });
-}
-
-/** The element type of the slices an iterator yields (`&[T]`). */
-function sliceElem(item: Type): Type {
-  let t = normalize(shallow(item));
-  if (t.kind === 'ref') t = normalize(shallow(t.target));
-  return t.kind === 'slice' || t.kind === 'array' ? t.elem : t;
+function copyWithin(ctx: NativeContext, slice: Value, range: Value, dest: bigint): Value {
+  const length = sliceLength(slice);
+  const [from, to] = checkedRangeBounds(ctx, range, length);
+  const count = to - from;
+  if (dest > BigInt(length - count)) panic(ctx, 'dest is out of bounds');
+  const { base, start } = sliceBase(slice);
+  const target = start + Number(dest);
+  ctx.runtime.spend(count);
+  if (needsCopy(elemType(ctx))) {
+    const copied = base.slice(start + from, start + to).map(copyValue);
+    for (const [offset, value] of copied.entries()) base[target + offset] = value;
+  } else base.copyWithin(target, start + from, start + to);
+  return UNIT_VALUE;
 }
 
 function sliceIsSorted(items: Value[], type: Type): boolean {
@@ -842,12 +715,35 @@ const heapNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> 
   into_iter: ([self], ctx) => ownedIter(vec(self), elemType(ctx)),
 };
 
+function appendHeap(ctx: NativeContext, destination: Value, source: Value): Value {
+  let into = vec(destination);
+  let from = vec(source);
+  if (into.length < from.length) {
+    [into, from] = [from, into];
+    placeOf(destination).set(into);
+    placeOf(source).set(from);
+  }
+  if (from.length === 0) return UNIT_VALUE;
+  const start = into.length;
+  const elem = elemType(ctx);
+  const size = sizeOf(elem);
+  checkVecCapacity(ctx, start, BigInt(from.length), size);
+  reserveVec(into, start, from.length, size);
+  ctx.runtime.allocate(from.length);
+  keepVecCapacity(from, from.length);
+  for (const item of from) into.push(item);
+  from.length = 0;
+  rebuildHeapTail(into, start, elem);
+  return UNIT_VALUE;
+}
+
 const natives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {};
 for (const [name, native] of Object.entries(sliceNatives)) natives[`[_]::${name}`] = native;
 for (const [name, native] of Object.entries(withCapacity(vecNatives))) natives[`Vec<_>::${name}`] = native;
 const dequeTracked = withDequeHead(withCapacity(dequeNatives), dequeCapacity);
 for (const [name, native] of Object.entries(dequeTracked)) natives[`VecDeque<_>::${name}`] = native;
 for (const [name, native] of Object.entries(withCapacity(heapNatives))) natives[`BinaryHeap<_>::${name}`] = native;
+natives['BinaryHeap<_>::append'] = ([self, other], ctx) => appendHeap(ctx, self, other);
 natives['[_]::into_iter'] = ([self], ctx) => ownedIter(sliceItems(deref(self)), elemType(ctx));
 natives['[_]::map'] = ([self, f], ctx) => sliceItems(deref(self)).map((item) => call(ctx, f, [item]));
 natives['&[_]::into_iter'] = ([self]) => sliceIter(deref(self), false);

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 424 -- Follows std::fmt's formatting rules case by case.
+// code-gauge-allow-file fileNcss 431 -- Follows std::fmt's formatting rules case by case.
 import type { FormatPiece, FormatSpec } from './ast';
 import { type DebugPart, emit, list, rangeText, structText, tupleText, type WriteChunk } from './debugText';
 import { debugFloat, displayFloat, expFloat, fixedFloat } from './floatFormat';
@@ -121,7 +121,7 @@ export class Formatter {
     }
   }
 
-  // code-gauge-allow functionNcss 42 -- Follows std::fmt's formatting rules case by case.
+  // code-gauge-allow functionNcss 43 -- Follows std::fmt's formatting rules case by case.
   display(value: Value, type: Type, spec: Spec, write?: WriteChunk): string {
     const t = this.concrete(type);
     const v = deref(value);
@@ -160,7 +160,8 @@ export class Formatter {
             return this.display(v, t.args[0], spec, write);
           }
           case 'CaseIter':
-          case 'EscapeDefault': {
+          case 'EscapeDefault':
+          case 'EscapeUnicode': {
             // `ToUppercase` writes its chars one by one, ignoring the width.
             const text = caseIterText(v);
             if (write) for (const char of text) write(char);
@@ -320,6 +321,7 @@ export class Formatter {
       case 'ParseFloatError':
       case 'ParseCharError':
       case 'TryFromIntError':
+      case 'TryFromSliceError':
       case 'CharTryFromError':
       case 'TryFromCharError':
       case 'Utf8Error':
@@ -329,8 +331,9 @@ export class Formatter {
       case 'CaseIter': {
         return caseIterDebug(v);
       }
-      case 'EscapeDefault': {
-        return escapeDefaultDebug(v, indent);
+      case 'EscapeDefault':
+      case 'EscapeUnicode': {
+        return charEscapeDebug(def.builtin, v, indent);
       }
       case 'Turtle': {
         return 'Turtle';
@@ -338,7 +341,8 @@ export class Formatter {
       case 'Iter': {
         return this.iteratorText(v as IterValue, t, spec, indent, write);
       }
-      case 'Entry': {
+      case 'Entry':
+      case 'OccupiedEntry': {
         return this.entryText(v as EntryValue, t, spec, indent);
       }
       default: {
@@ -367,11 +371,11 @@ export class Formatter {
               ['value', value],
             ],
             depth,
-            true
+            !entry.map.sorted
           );
         }
       : (depth) => tupleText('VacantEntry', [key], depth);
-    return tupleText('Entry', [inner], indent);
+    return t.def.builtin === 'OccupiedEntry' ? inner(indent) : tupleText('Entry', [inner], indent);
   }
 
   private iteratorText(
@@ -491,8 +495,8 @@ function caseIterDebug(value: Value): string {
   return `${name}(CaseMappingIter(IntoIter([${chars}])))`;
 }
 
-export function escapeDefaultDebug(value: Value, indent: number | undefined): string {
-  return tupleText('EscapeDefault', [() => `EscapeIterInner('${caseIterText(value)}')`], indent);
+export function charEscapeDebug(name: string, value: Value, indent: number | undefined): string {
+  return tupleText(name, [() => `EscapeIterInner('${caseIterText(value)}')`], indent);
 }
 
 function charCount(text: string): number {
@@ -615,6 +619,9 @@ export function errorDisplay(builtin: string, value: Value): string {
     case 'ParseBoolError': {
       return 'provided string was not `true` or `false`';
     }
+    case 'TryFromSliceError': {
+      return 'could not convert slice to array';
+    }
     case 'TryFromIntError': {
       return `number too ${kind === 'NegOverflow' ? 'small' : 'large'} to fit in target type`;
     }
@@ -665,7 +672,8 @@ function errorDebug(builtin: string, value: Value, indent: number | undefined): 
       return 'Error';
     }
     case 'CharTryFromError':
-    case 'TryFromCharError': {
+    case 'TryFromCharError':
+    case 'TryFromSliceError': {
       return indent === undefined
         ? `${builtin}(())`
         : `${builtin}(\n${'    '.repeat(indent + 1)}(),\n${'    '.repeat(indent)})`;

@@ -95,19 +95,24 @@ export class BTree<V> {
   }
 
   getEdge(first: boolean): V | undefined {
-    this.finishBulk();
-    if (!this.root?.size) return undefined;
-    return leaf(this.root, first).entries.at(first ? 0 : -1);
+    const key = this.edgeKey(first);
+    return key?.node?.entries[key.index];
   }
 
   takeEdge(first: boolean): V | undefined {
+    const key = this.edgeKey(first);
+    if (!key) return;
+    const value = key.node!.entries[key.index];
+    this.remove(key);
+    return value;
+  }
+
+  edgeKey(first: boolean): TreeKey<V> | undefined {
     this.finishBulk();
     if (!this.root?.size) return undefined;
     const node = leaf(this.root, first);
     const index = first ? 0 : node.entries.length - 1;
-    const value = node.entries[index];
-    this.remove({ node, index, present: true });
-    return value;
+    return { node, index, present: true };
   }
 
   retain(keep: (value: V) => boolean): void {

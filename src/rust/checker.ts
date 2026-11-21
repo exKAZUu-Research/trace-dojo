@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 902 -- The checker core owns body, entry point, and type obligations.
+// code-gauge-allow-file fileNcss 912 -- The checker core owns body, entry point, and type obligations.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ExecutionBudget } from '../interpreter/limits';
 import { AdtStorage } from './adtStorage';
@@ -753,10 +753,11 @@ export class Checker {
     // rustc reports a closure that implements too weak a closure trait where the closure is written.
     const needsFn = obligation.ref.trait.name === 'Fn' || (throughRef && obligation.ref.fnSig !== undefined);
     if (closure.kind === 'closure' && closure.closure.kind === 'FnMut' && needsFn && closure.closure.span) {
-      compileError(
-        closure.closure.span,
-        'Fn のクロージャが要りますが、このクロージャは取り込んだ変数を書き換えるので FnMut です（参照ではなく、そのまま渡してください）。'
-      );
+      const remedy =
+        obligation.ref.trait.name === 'Fn'
+          ? '境界を FnMut に変えるか、変数を書き換えないクロージャにしてください。'
+          : '共有参照にせず、そのまま渡してください。';
+      compileError(closure.closure.span, `このクロージャは取り込んだ変数を書き換えるので FnMut です。${remedy}`);
     }
     if (closure.kind === 'closure' && closure.closure.movedAt) {
       const { name, span } = closure.closure.movedAt;
@@ -775,7 +776,7 @@ export class Checker {
       Clone: `${type} は Clone ではありません（#[derive(Clone)] を付けてください）。`,
       PartialEq: `${type} どうしは比べられません（#[derive(PartialEq)] を付けてください）。`,
       PartialOrd: `${type} どうしは大小を比べられません（#[derive(PartialOrd)] を付けてください）。`,
-      Ord: `${type} は Ord ではありません（f64 などの小数は sort や max に使えません）。`,
+      Ord: `${type} は Ord ではありません。${orderHint(obligation.type)}`,
     };
     compileError(obligation.span, hints[name] ?? `${type} にトレイト ${trait} が実装されていません。`);
   }
@@ -1279,6 +1280,16 @@ export class Checker {
 }
 
 export { hasParams, deepNormalize, derefOnce };
+
+function orderHint(type: Type): string {
+  const t = normalize(shallow(type));
+  if (t.kind === 'ref') return orderHint(t.target);
+  if (t.kind === 'float') return '小数を並べ替えるには、sort_by で total_cmp を使えます。';
+  if (t.kind === 'adt' && !(t.def.module as Module | undefined)?.isStd) {
+    return 'すべてのフィールドが Ord なら、#[derive(PartialEq, Eq, PartialOrd, Ord)] を付けてください。';
+  }
+  return '';
+}
 
 function* adtArgumentBounds(def: AdtDef, args: Type[]): Iterable<[Type, TraitRef]> {
   const subst = new Map(def.params.map((param, index) => [param, args[index]]));

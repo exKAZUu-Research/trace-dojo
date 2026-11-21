@@ -2580,8 +2580,11 @@ SkipWhile { iter: Cycle { orig: Iter([1, 2]), iter: Iter([]) }, flag: true }
 test.each([
   ['range patterns (stage C)', '    match 3 { 1..=5 => {}, _ => {} }'],
   ['attributes on tuple elements (stage C)', '    let tuple = (#[cfg(any())] 1, 2);'],
-  ['an unavailable string method', '    let matches = "abcabc".rmatch_indices("bc");'],
-  ['an unavailable slice method reached through Vec', '    let groups = vec![1, 1, 2].chunk_by(|a, b| a == b);'],
+  ['an unavailable string method', '    let escaped = "abc".escape_debug();'],
+  [
+    'an unavailable slice method reached through Vec',
+    '    let mut values = vec![1, 1, 2]; let _ = values.select_nth_unstable(1);',
+  ],
   ['available-in-Rust deque append', 'let mut a = std::collections::VecDeque::from([1]); a.append(&mut a.clone());'],
   ['available-in-Rust integer Add method (stage C)', 'let n = 1i32; let _ = n.add(2);', 'use std::ops::Add;'],
   ['threads (stage D)', '    std::thread::spawn(|| {});'],
@@ -6052,4 +6055,108 @@ test('moves Rust ranges and generic iterators into consuming methods', () => {
 }
 fn main() { println!("{}", twice(0..3)); }`;
   expect(executeProgram('rust', generic)).toMatchObject({ kind: 'compileError' });
+});
+
+test('mutates slices and borrowed fixed arrays while fallible owned conversions preserve their inputs', () => {
+  const program = rustMain(`let mut v = vec![1, 2, 3, 4, 5];
+    for c in v.chunks_mut(2) { c[0] = 0; }
+    let sub: &mut [i32] = &mut v[1..3];
+    let pair: &mut [i32; 2] = sub.try_into().unwrap();
+    pair[1] = 8;
+    let head = &v[..3];
+    let copied: [i32; 3] = head.try_into().unwrap();
+    let wrong: Result<&[i32; 4], _> = head.try_into();
+    println!("{copied:?} {:?}", wrong.unwrap_err());
+    let failed: Result<[i32; 4], _> = v.try_into();
+    let moved: [i32; 5] = failed.unwrap_err().try_into().unwrap();
+    println!("{moved:?}");`);
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[0, 2, 8] TryFromSliceError(())\n[0, 2, 8, 4, 0]\n',
+  });
+});
+
+test('extends both unzip outputs in input order and roots their elements across comparisons', () => {
+  const declarations = `use std::collections::HashSet;
+#[derive(Hash, Eq)]
+struct K(i32);
+impl PartialEq for K {
+    fn eq(&self, other: &Self) -> bool {
+        let observer = Turtle::new(0, 0);
+        println!("{}", observer.can_move_forward());
+        self.0 == other.0
+    }
+}`;
+  for (const [pair, target, sizes] of [
+    ['(K(1), t)', '(HashSet<K>, Vec<Turtle>)', '1 3'],
+    ['(t, K(1))', '(Vec<Turtle>, HashSet<K>)', '3 1'],
+  ]) {
+    const program = rustMain(
+      `let kept: ${target} = (0..3).map(|i| {
+        println!("item {i}");
+        let t = Turtle::new(2 * i, 1);
+        ${pair}
+    }).unzip();
+    println!("{} {}", kept.0.len(), kept.1.len());`,
+      declarations
+    );
+    expect(executeProgram('rust', program)).toMatchObject({
+      kind: 'executed',
+      stdout: `item 0\nitem 1\nfalse\nitem 2\nfalse\n${sizes}\n`,
+      finalTurtles: [
+        expect.objectContaining({ x: 0, y: 1 }),
+        expect.objectContaining({ x: 2, y: 1 }),
+        expect.objectContaining({ x: 4, y: 1 }),
+      ],
+    });
+  }
+});
+
+test('drops slice owners after their last use and retains temporaries extended by a let binding', () => {
+  const program = rustMain(`let observer = Turtle::new(0, 0);
+    let owners = vec![Turtle::new(0, 1)];
+    let borrowed = &owners;
+    let slice = &borrowed[..];
+    println!("{}", slice.len());
+    drop(owners);
+    println!("{}", observer.can_move_forward());
+    {
+        let slice = &vec![Turtle::new(0, 1)][..];
+        println!("{} {}", slice.len(), observer.can_move_forward());
+    }
+    println!("{}", observer.can_move_forward());`);
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '1\ntrue\n1 false\ntrue\n',
+    finalTurtles: [expect.objectContaining({ x: 0, y: 0 })],
+  });
+});
+
+test('uses explicit dereference to borrow strings and mutate vector slices', () => {
+  const program = rustMain(`let s = String::from("hello");
+    let r = &s;
+    let mut v = vec![1, 2];
+    let slice = &mut *v;
+    slice[1] += 3;
+    println!("{} {} {:?} {}", &*s, &**r, &*v, (*v).len());`);
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'hello hello [1, 5] 2\n',
+  });
+});
+
+test('appends a larger heap while retaining the smaller heap buffer for reuse', () => {
+  const program = rustMain(
+    `let mut heap = BinaryHeap::from([3, 4, 2]);
+    let mut other = BinaryHeap::from([1, 5, 6, 0]);
+    heap.append(&mut other);
+    println!("{:?} {} {}", heap.clone().into_vec(), heap.capacity(), other.capacity());
+    other.push(9);
+    println!("{:?} {}", other.peek(), other.capacity());`,
+    'use std::collections::BinaryHeap;'
+  );
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[6, 5, 3, 0, 4, 1, 2] 8 3\nSome(9) 3\n',
+  });
 });

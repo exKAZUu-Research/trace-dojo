@@ -4,6 +4,7 @@ import { isPlaceExpr, requireMutablePlace } from './checkerPlaces';
 import { collectionKeyTraits } from './collectionBounds';
 import { normalize } from './infer';
 import { compileError } from './items';
+import { derefOnce } from './methods';
 import { BOOL, freshVar, intType, ref, REF_STR, resolve, shallow, type Type, typeToString, UNIT } from './types';
 
 /**
@@ -60,8 +61,8 @@ function settleBinary(
 export function checkUnary(c: Checker, expr: Extract<Expr, { kind: 'unary' }>, expected: Type | undefined): Type {
   if (expr.op === '*') {
     const type = normalize(shallow(c.settled(c.expr(expr.operand, undefined))));
-    if (type.kind === 'ref') return type.target;
-    if (type.kind === 'adt' && type.def.builtin === 'Box') return type.args[0];
+    const deref = derefOnce(c.program, type);
+    if (deref) return deref.type;
     if (type.kind === 'var') compileError(expr.span, '型が決まらないので、* で参照をたどれません。');
     compileError(expr.span, `${typeToString(resolve(type))} は参照ではないので、* でたどれません。`);
   }
