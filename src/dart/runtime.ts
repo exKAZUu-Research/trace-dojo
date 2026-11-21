@@ -20,6 +20,7 @@ import {
   boundOf,
   coreTypes,
   type DartType,
+  DYNAMIC,
   type FunctionType,
   instantiateFunction,
   instantiateToBounds,
@@ -730,10 +731,11 @@ export class Runtime implements TracedRuntime<Frame> {
     }
     const scopeEnd = name.indexOf('\0');
     const symbol = this.symbol(sourceMemberName(name), scopeEnd === -1 ? undefined : name.slice(0, scopeEnd));
+    const positionalType = args.positional.length === 0 ? objectType(true) : DYNAMIC;
     return this.links.construct(this, '_InvocationMirror', '_', [
       symbol,
       BigInt(['method', 'getter', 'setter'].indexOf(kind)),
-      new DartList(coreTypes.list, objectType(true), [...args.positional], false, true),
+      new DartList(coreTypes.list, positionalType, [...args.positional], false, true),
       named,
       new DartList(
         coreTypes.list,

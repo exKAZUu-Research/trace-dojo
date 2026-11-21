@@ -8667,3 +8667,48 @@ void main() {
       "type 'Null' is not a subtype of type '(int) => dynamic' of 'f'\n",
   });
 });
+
+test('Dart invocation mirrors give VM positional arguments their native list type', () => {
+  const program = `class H {
+  dynamic noSuchMethod(Invocation call) {
+    final args = call.positionalArguments;
+    print([call.isGetter, call.isSetter, args.runtimeType, args]);
+    try { args.add(7); } catch(error) { print(error); }
+  }
+}
+abstract class Method { void missing(int value); }
+class Implementation implements Method {
+  dynamic noSuchMethod(Invocation call) {
+    print([call.positionalArguments.runtimeType, call.positionalArguments]);
+  }
+}
+void main() {
+  dynamic h = H();
+  h.f(1);
+  h.f(null, 2);
+  h.x = 1;
+  h.f();
+  h.f(named: 1);
+  h.x;
+  Implementation().missing(1);
+  print(Invocation.method(#written, [1]).positionalArguments.runtimeType);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[false, false, List<dynamic>, [1]]\n' +
+      'Unsupported operation: Cannot add to an unmodifiable list\n' +
+      '[false, false, List<dynamic>, [null, 2]]\n' +
+      'Unsupported operation: Cannot add to an unmodifiable list\n' +
+      '[false, true, List<dynamic>, [1]]\n' +
+      'Unsupported operation: Cannot add to an unmodifiable list\n' +
+      '[false, false, List<Object?>, []]\n' +
+      'Unsupported operation: Cannot add to an unmodifiable list\n' +
+      '[false, false, List<Object?>, []]\n' +
+      'Unsupported operation: Cannot add to an unmodifiable list\n' +
+      '[true, false, List<Object?>, []]\n' +
+      'Unsupported operation: Cannot add to an unmodifiable list\n' +
+      '[List<dynamic>, [1]]\n' +
+      'List<Object?>\n',
+  });
+});
