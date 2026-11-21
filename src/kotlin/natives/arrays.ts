@@ -326,9 +326,9 @@ function javaMin(a: number, b: number): number {
 }
 
 /** The receivers of the generated array functions, as the prelude writes them. */
-const ARRAY_RECEIVERS: [receiver: string, kind: PrimitiveKind | 'Boolean' | undefined][] = [
-  ['Array<out T>', undefined],
-  ...PRIMITIVE_ARRAYS.map(([name, kind]): [string, PrimitiveKind | 'Boolean'] => [name, kind]),
+const ARRAY_RECEIVERS: [receiver: string, kind: PrimitiveKind | 'Boolean' | undefined, zero: Value][] = [
+  ['Array<out T>', undefined, NULL],
+  ...PRIMITIVE_ARRAYS,
 ];
 
 function boxedItems(array: Value, kind: PrimitiveKind | 'Boolean' | undefined): Value[] {
@@ -336,10 +336,10 @@ function boxedItems(array: Value, kind: PrimitiveKind | 'Boolean' | undefined): 
   return kind === undefined || kind === 'Boolean' ? items : items.map((value) => box(kind, value as number));
 }
 
-function copyArray(frame: Frame, array: Value, items: Value[]): KObject {
-  frame.runtime.allocate(frame, items.length + 1);
+function copyArray(frame: Frame, array: Value, size: number, makeItems: () => Value[]): KObject {
+  checkSize(frame, size);
   const copy = new KObject((array as KObject).cls, 0);
-  copy.items = items;
+  copy.items = makeItems();
   return copy;
 }
 
@@ -365,8 +365,8 @@ function defineUnsignedArrayStrings(): void {
 }
 
 function defineArrayFunctions(): void {
-  for (const [receiver, kind] of ARRAY_RECEIVERS) {
-    defineArrayReading(receiver, kind);
+  for (const [receiver, kind, zero] of ARRAY_RECEIVERS) {
+    defineArrayReading(receiver, kind, zero);
     defineArrayChanging(receiver, kind);
   }
   defineNative('kotlin.collections.arrayOf(vararg T)', fromVararg('Array'));
@@ -384,8 +384,8 @@ function defineArrayFunctions(): void {
   }
 }
 
-/** What reads an array, of objects for an undefined `kind` or of a primitive kind. */
-function defineArrayReading(receiver: string, kind: PrimitiveKind | 'Boolean' | undefined): void {
+// code-gauge-allow functionNcss 36 -- Registers the array readers together in prelude declaration order.
+function defineArrayReading(receiver: string, kind: PrimitiveKind | 'Boolean' | undefined, zero: Value): void {
   const prefix = `kotlin.collections.${receiver}`;
   defineNative(`${prefix}.asList()`, (frame, array) => {
     const source = array as KObject;
@@ -401,9 +401,17 @@ function defineArrayReading(receiver: string, kind: PrimitiveKind | 'Boolean' | 
     frame.runtime.allocateString(frame, text.length);
     return text;
   });
-  defineNative(`${prefix}.copyOf()`, (frame, array) =>
-    copyArray(frame, array, [...((array as KObject).items as Value[])])
-  );
+  defineNative(`${prefix}.copyOf()`, (frame, array) => {
+    const items = (array as KObject).items as Value[];
+    return copyArray(frame, array, items.length, () => [...items]);
+  });
+  defineNative(`${prefix}.copyOf(Int)`, (frame, array, [newSize]) => {
+    const size = newSize as number;
+    const items = (array as KObject).items as Value[];
+    return copyArray(frame, array, size, () =>
+      Array.from({ length: size }, (_, index) => (index < items.length ? items[index] : zero))
+    );
+  });
   defineNative(`${prefix}.copyOfRange(Int, Int)`, (frame, array, [from, to]) => {
     const items = (array as KObject).items as Value[];
     const start = from as number;
@@ -415,7 +423,8 @@ function defineArrayReading(receiver: string, kind: PrimitiveKind | 'Boolean' | 
         `toIndex (${end}) is greater than size (${items.length}).`
       );
     if (start > end) frame.runtime.throwError(frame, 'java.lang.IllegalArgumentException', `${start} > ${end}`);
-    return copyArray(frame, array, items.slice(start, end));
+    const copied = items.slice(start, end);
+    return copyArray(frame, array, copied.length, () => copied);
   });
   defineNative(`${prefix}.contentEquals(${receiver})`, (frame, array, [other]) => {
     if (other === undefined) return false;

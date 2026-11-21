@@ -71,6 +71,7 @@ function functionsOf(kind: ArrayKind): string {
     `external fun ${g()}${r}.asList(): List<${e}>`,
     `external fun ${g()}${r}.contentToString(): String`,
     `external fun ${g()}${r}.copyOf(): ${r.replace('out ', '')}`,
+    `external fun ${g()}${r}.copyOf(newSize: Int): ${r === 'Array<out T>' ? 'Array<T?>' : r}`,
     `external fun ${g()}${r}.copyOfRange(fromIndex: Int, toIndex: Int): ${r.replace('out ', '')}`,
     `external infix fun ${g()}${r}.contentEquals(other: ${r}): Boolean`,
     `val ${g()}${r}.indices: IntRange get() = 0..size - 1`,

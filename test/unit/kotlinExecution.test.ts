@@ -26,6 +26,20 @@ test.each([
     stdout: '[, abc]\n[, a, , c, ]\n[, a, b, c, ]\n[, ]\n[abc]\n',
   },
   {
+    name: 'resized copies of primitive and reference arrays',
+    source: `fun main() {
+    val source = intArrayOf(1, 2, 3)
+    println(source.copyOf(2).contentToString())
+    println(source.copyOf(4).contentToString())
+    println(booleanArrayOf(true).copyOf(2).contentToString())
+    val refs: Array<String?> = arrayOf("x").copyOf(2)
+    println(refs.contentToString())
+    println(source.contentToString())
+    try { source.copyOf(-1) } catch (e: NegativeArraySizeException) { println(e.message) }
+}`,
+    stdout: '[1, 2]\n[1, 2, 3, 0]\n[true, false]\n[x, null]\n[1, 2, 3]\n-1\n',
+  },
+  {
     name: 'inherited defaults through base and derived receiver types',
     source: `open class Parent {
     open fun greet(name: String = "world", message: String = "Hi " + name): String = message
