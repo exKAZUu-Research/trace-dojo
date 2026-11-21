@@ -605,7 +605,7 @@ export abstract class CallCompiler extends CompilerCore {
       temporaries.push(receiver);
       try {
         const values = evaluateArgs(frame);
-        temporaries.push(...values);
+        for (const value of values) temporaries.push(value);
         return callFunction(symbol, frame, receiver, values, callRow);
       } finally {
         temporaries.length = mark;

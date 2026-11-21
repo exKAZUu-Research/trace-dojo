@@ -97,8 +97,9 @@ export function argumentEvaluator(
       for (const { paramIndex, eval: evaluate, isSpread } of evaluations) {
         const value = evaluate(frame);
         temporaries.push(value);
-        if (isSpread) varargs.push(...((value as KObject).items as Value[]));
-        else if (paramIndex === varargIndex) varargs.push(value);
+        if (isSpread) {
+          for (const item of (value as KObject).items as Value[]) varargs.push(item);
+        } else if (paramIndex === varargIndex) varargs.push(value);
         else values[paramIndex] = value;
       }
       if (varargArray) values[varargIndex] = varargArray(frame, varargs);

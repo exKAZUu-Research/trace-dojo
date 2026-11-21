@@ -97,7 +97,8 @@ function defineArrays(): void {
 /** Stores sorted or reversed elements into a list, as `set` would, without counting as a structural change. */
 function writeBack(frame: Frame, list: KObject, values: Value[]): void {
   if (list.items) {
-    list.items.splice(0, list.items.length, ...values);
+    list.items.length = values.length;
+    for (const [index, value] of values.entries()) list.items[index] = value;
     const parent = list.native?.parent as KObject | undefined;
     if (parent) touch(list);
     return;
@@ -131,7 +132,7 @@ export function stableSort(frame: Frame, values: Value[], compare: (a: Value, b:
     );
     return array;
   }
-  const runs: Value[][] = [];
+  let runs: Value[][] = [];
   for (let start = 0; start < array.length; start += 32) {
     const run = array.slice(start, start + 32);
     binaryInsertionSort(
@@ -149,24 +150,30 @@ export function stableSort(frame: Frame, values: Value[], compare: (a: Value, b:
     for (let index = 0; index < runs.length; index += 2) {
       const left = runs[index];
       const right = runs[index + 1];
-      if (!right) {
-        merged.push(left);
-        continue;
-      }
-      const result: Value[] = [];
-      let i = 0;
-      let j = 0;
-      while (i < left.length && j < right.length) {
-        frame.runtime.spend();
-        if (compare(right[j], left[i]) < 0) result.push(right[j++]);
-        else result.push(left[i++]);
-      }
-      result.push(...left.slice(i), ...right.slice(j));
-      merged.push(result);
+      merged.push(right ? mergeSortedRuns(frame, left, right, compare) : left);
     }
-    runs.splice(0, runs.length, ...merged);
+    runs = merged;
   }
   return runs[0];
+}
+
+function mergeSortedRuns(
+  frame: Frame,
+  left: Value[],
+  right: Value[],
+  compare: (a: Value, b: Value) => number
+): Value[] {
+  const merged: Value[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < left.length && j < right.length) {
+    frame.runtime.spend();
+    if (compare(right[j], left[i]) < 0) merged.push(right[j++]);
+    else merged.push(left[i++]);
+  }
+  for (; i < left.length; i++) merged.push(left[i]);
+  for (; j < right.length; j++) merged.push(right[j]);
+  return merged;
 }
 
 function countRunAndMakeAscending(
@@ -181,7 +188,8 @@ function countRunAndMakeAscending(
   frame.runtime.spend();
   if (compare(array[runHigh++], array[low]) < 0) {
     while (runHigh < high && compare(array[runHigh], array[runHigh - 1]) < 0) runHigh++;
-    array.splice(low, runHigh - low, ...array.slice(low, runHigh).toReversed());
+    for (let start = low, end = runHigh - 1; start < end; start++, end--)
+      [array[start], array[end]] = [array[end], array[start]];
   } else {
     while (runHigh < high && compare(array[runHigh], array[runHigh - 1]) >= 0) runHigh++;
   }

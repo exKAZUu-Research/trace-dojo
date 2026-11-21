@@ -192,26 +192,33 @@ export class Runtime implements TracedRuntime<Frame> {
       ...this.enumEntries.values(),
       ...this.nativeRoots,
     ];
+    const enqueue = (values: Iterable<unknown>): void => {
+      for (const value of values) if (typeof value === 'object' && value !== null) stack.push(value);
+    };
     for (const frame of this.frames) stack.push(frame);
     while (stack.length > 0) {
       const item = stack.pop();
       if (typeof item !== 'object' || item === null || reached.has(item)) continue;
       reached.add(item);
       if (item instanceof Frame) {
-        stack.push(...item.locals, ...item.temporaries, item.thisValue, ...item.captured);
+        enqueue(item.locals);
+        enqueue(item.temporaries);
+        enqueue(item.captured);
+        stack.push(item.thisValue);
       } else if (item instanceof KObject) {
         if (item.turtle) turtles.add(item.turtle);
-        stack.push(...item.fields, ...(item.env ?? []));
-        if (item.items) stack.push(...item.items);
+        enqueue(item.fields);
+        if (item.env) enqueue(item.env);
+        if (item.items) enqueue(item.items);
         if (item.store) for (const entry of item.store.entries) stack.push(entry.key, entry.value);
-        if (item.native) stack.push(...Object.values(item.native));
+        if (item.native) enqueue(Object.values(item.native));
       } else if (item instanceof Cell) {
         stack.push(item.value);
       } else if (Array.isArray(item)) {
-        stack.push(...(item as unknown[]));
+        enqueue(item);
       } else if (!(item instanceof Boxed)) {
         // Native state such as an iterator's source.
-        stack.push(...Object.values(item));
+        enqueue(Object.values(item));
       }
     }
     this.world.retain((turtle) => turtles.has(turtle));
