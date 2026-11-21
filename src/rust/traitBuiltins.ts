@@ -534,7 +534,8 @@ function pattern(goal: Goal): Answer {
       fnSig: { params: [{ kind: 'char' }], ret: { kind: 'bool' } },
     });
   }
-  if (t.kind === 'ref') return referencePattern(goal, shallow(t.target));
+  // std's string patterns are shared references (`&str`, `&String`, `&[char]`); a `&mut` one is none.
+  if (t.kind === 'ref') return t.mutable ? 'no' : referencePattern(goal, shallow(t.target));
   if (t.kind === 'array' && shallow(t.elem).kind === 'char') return 'yes';
   return 'no';
 }

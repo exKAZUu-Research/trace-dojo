@@ -8633,3 +8633,13 @@ test('String::from takes a String only by shared reference', () => {
     diagnostics: [{ message: 'String にトレイト From<&mut String> が実装されていません。' }],
   });
 });
+
+test('a mutable string reference is not a search pattern', () => {
+  const program = rustMain(`
+    let mut part = String::from("el");
+    println!("{}", "hello".contains(&mut part));`);
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message: '&mut String にトレイト Pattern が実装されていません。' }],
+  });
+});
