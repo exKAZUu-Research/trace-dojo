@@ -287,7 +287,7 @@ export class Flow {
   static join(a: Flow, b: Flow): Flow {
     if (!a.reachable)
       return b.reachable
-        ? b.inheritTests(a)
+        ? b.inheritTypeTests(a)
         : new Flow(
             false,
             b.promotions,
@@ -296,7 +296,7 @@ export class Flow {
             combineWrites(a.writes, b.writes),
             joinFacts(a, b)
           );
-    if (!b.reachable) return a.inheritTests(b);
+    if (!b.reachable) return a.inheritTypeTests(b);
     const promotions = new Map<LocalVar, readonly DartType[]>();
     for (const [variable, chain] of a.promotions) {
       const other = b.promotions.get(variable);
@@ -314,7 +314,7 @@ export class Flow {
     );
   }
 
-  private inheritTests(other: Flow): Flow {
+  inheritTypeTests(other: Flow): Flow {
     const testedTypes = mergeTypeTests(this.facts.testedTypes, other.facts.testedTypes);
     return testedTypes === this.facts.testedTypes ? this : this.withFacts({ ...this.facts, testedTypes });
   }

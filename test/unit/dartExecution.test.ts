@@ -2837,6 +2837,43 @@ void main() { sample('hello', 'Dart'); }`;
   }
 });
 
+test('Dart assignment promotions use tests consumed by control flow', () => {
+  const valid = `class Check {
+  final bool value;
+  Check(num n) : assert(n is int), value = (n = 3) != 0 && n.isEven;
+}
+void main() {
+  print(Check(1).value);
+  num asserted = 1;
+  assert(asserted is int);
+  asserted = 3;
+  print(asserted.isEven);
+  num branched = 1;
+  if (!(branched is int)) {}
+  branched = 3;
+  print(branched.isEven);
+  num logical = 1;
+  final test = true && logical is int;
+  logical = 3;
+  print([test, logical.isEven]);
+}`;
+  expect(executeProgram('dart', valid)).toMatchObject({
+    kind: 'executed',
+    stdout: 'false\nfalse\nfalse\n[true, false]\n',
+  });
+  for (const statements of [
+    'print(n is int); n = 3; print(n.isEven);',
+    'var test = n is int; n = 3; print(n.isEven);',
+    'final test = !(n is int); n = 3; print(n.isEven);',
+    'final test = n is int; n = 3; if (test) print(n.isEven);',
+    'assert(true, n is int ? 1 : 2); n = 3; print(n.isEven);',
+    'assert(n is int); print(n.isEven);',
+  ]) {
+    const program = `void main() { num n = 1; ${statements} }`;
+    expect(executeProgram('dart', program)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
 test('writes preserve or recover Dart promotions supported by the value type', () => {
   const valid = `void probe(num n, Object value) {
   if (n is int) {

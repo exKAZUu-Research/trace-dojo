@@ -523,7 +523,6 @@ export abstract class StatementCompiler extends PatternCompiler {
     if (isCondition) {
       const result = this.compileConditionInner(initializer);
       compiled = result.compiled;
-      this.flow = Flow.join(result.flow.whenTrue, result.flow.whenFalse);
       this.pendingCondition = {
         whenTrue: storeFlow(result.flow.whenTrue, savedFlow),
         whenFalse: storeFlow(result.flow.whenFalse, savedFlow),
@@ -1174,7 +1173,7 @@ export abstract class StatementCompiler extends PatternCompiler {
     const { flow } = this.compileCondition(statement.condition);
     this.flow = flow.whenFalse;
     if (statement.message) this.compileExpression(statement.message);
-    this.flow = before;
+    this.flow = before.inheritTypeTests(flow.whenTrue).inheritTypeTests(flow.whenFalse);
     // `dart run` runs without --enable-asserts, which skips assertions.
     return () => {};
   }

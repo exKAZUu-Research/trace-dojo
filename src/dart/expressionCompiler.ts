@@ -440,12 +440,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const resolve = this.runtimeType(type);
     const { run } = value;
     const { variable } = value;
-    if (variable) this.flow = this.flow.rememberTypeTest(variable, type);
-    let promoted = this.flow;
+    const tested = variable ? this.flow.rememberTypeTest(variable, type) : this.flow;
+    let promoted = tested;
     if (variable && this.isPromotable(variable)) {
       const current = this.promotedType(variable);
       const narrowed = promotionTarget(current, type);
-      if (narrowed) promoted = this.flow.promote(variable, narrowed);
+      if (narrowed) promoted = tested.promote(variable, narrowed);
     }
     const { negated } = expression;
     return {
@@ -457,7 +457,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         },
         isConst: value.isConst && !this.usesLexicalTypeVariables(type),
       },
-      flow: negated ? { whenTrue: this.flow, whenFalse: promoted } : { whenTrue: promoted, whenFalse: this.flow },
+      flow: negated ? { whenTrue: tested, whenFalse: promoted } : { whenTrue: promoted, whenFalse: tested },
     };
   }
 

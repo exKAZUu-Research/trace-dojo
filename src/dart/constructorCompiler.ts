@@ -679,7 +679,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
       );
     this.flow = flow.whenFalse;
     const message = initializer.message ? this.compileInitializerValue(initializer.message, undefined).run : undefined;
-    this.flow = before;
+    this.flow = before.inheritTypeTests(flow.whenTrue).inheritTypeTests(flow.whenFalse);
     return (frame) => {
       if (frame.runtime.checkingConstants && compiled.run(frame) !== true)
         frame.runtime.throwError('AssertionError', '', [message?.(frame)]);
