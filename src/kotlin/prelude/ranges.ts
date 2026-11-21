@@ -374,19 +374,21 @@ function mixedIntegralProgressions(): string {
 
 function mixedRangeMembership(): string {
   const integral = ['Byte', 'Short', 'Int', 'Long'];
-  const types = [...integral, 'Float', 'Double'];
-  return types
-    .flatMap((target, index) =>
-      types.flatMap((source, sourceIndex) => {
-        if (source === target) return [];
-        const fits =
-          index < integral.length && sourceIndex > index
-            ? `value >= ${target}.MIN_VALUE.to${source}() && value <= ${target}.MAX_VALUE.to${source}() && `
-            : '';
-        return [
-          `@JvmName("${target}RangeContains${source}") operator fun ClosedRange<${target}>.contains(value: ${source}): Boolean = ${fits}contains(value.to${target}())`,
-        ];
-      })
+  const groups = [integral, ['Float', 'Double']];
+  return groups
+    .flatMap((types) =>
+      types.flatMap((target, index) =>
+        types.flatMap((source, sourceIndex) => {
+          if (source === target) return [];
+          const fits =
+            types === integral && sourceIndex > index
+              ? `value >= ${target}.MIN_VALUE.to${source}() && value <= ${target}.MAX_VALUE.to${source}() && `
+              : '';
+          return [
+            `@JvmName("${target}RangeContains${source}") operator fun ClosedRange<${target}>.contains(value: ${source}): Boolean = ${fits}contains(value.to${target}())`,
+          ];
+        })
+      )
     )
     .join('\n');
 }

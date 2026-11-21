@@ -69,6 +69,7 @@ function generics(kind: ArrayKind, own: string): string {
 function functionsOf(kind: ArrayKind): string {
   const { receiver: r, element: e } = kind;
   const g = (own = ''): string => generics(kind, own);
+  const onlyInput = kind.typeParameters ? '<@OnlyInputTypes T> ' : '';
   const lines = [
     `external fun ${g()}${r}.asList(): List<${e}>`,
     `external fun ${g()}${r}.contentToString(): String`,
@@ -109,11 +110,11 @@ function functionsOf(kind: ArrayKind): string {
     `fun ${g()}${r}.getOrNull(index: Int): ${e}? = if (index >= 0 && index < size) get(index) else null`,
     `inline fun ${g()}${r}.getOrElse(index: Int, defaultValue: (Int) -> ${e}): ${e} = if (index >= 0 && index < size) get(index) else defaultValue(index)`,
     `fun ${g()}${r}.elementAt(index: Int): ${e} = get(index)`,
-    `fun ${g()}${r}.indexOf(element: ${e}): Int = asList().indexOf(element)`,
-    `fun ${g()}${r}.lastIndexOf(element: ${e}): Int = asList().lastIndexOf(element)`,
+    `fun ${onlyInput}${r}.indexOf(element: ${e}): Int = asList().indexOf(element)`,
+    `fun ${onlyInput}${r}.lastIndexOf(element: ${e}): Int = asList().lastIndexOf(element)`,
     `inline fun ${g()}${r}.indexOfFirst(predicate: (${e}) -> Boolean): Int = asList().indexOfFirst(predicate)`,
     `inline fun ${g()}${r}.indexOfLast(predicate: (${e}) -> Boolean): Int = asList().indexOfLast(predicate)`,
-    `operator fun ${g()}${r}.contains(element: ${e}): Boolean = indexOf(element) >= 0`,
+    `operator fun ${onlyInput}${r}.contains(element: ${e}): Boolean = indexOf(element) >= 0`,
     `inline fun ${g('R')}${r}.fold(initial: R, operation: (acc: R, ${e}) -> R): R = asList().fold(initial, operation)`,
     `inline fun ${g('R')}${r}.foldIndexed(initial: R, operation: (index: Int, acc: R, ${e}) -> R): R = asList().foldIndexed(initial, operation)`,
     `inline fun ${g()}${r}.sumOf(selector: (${e}) -> Int): Int = asList().sumOf(selector)`,
