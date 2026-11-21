@@ -2025,6 +2025,29 @@ void main() { var c = C(); E(c).g(); print([c.x, F(0).g()]); }`;
   });
 });
 
+test('Dart dot shorthands take the context of their whole selector chain', () => {
+  const header = `class A {
+  static A get inst => A();
+  A();
+  static A? maybe() => A();
+  A get me => this;
+  A next() => A();
+  String toString() => 'A!';
+}`;
+  const program = `${header}
+void main() {
+  A b = .inst.next().me;
+  A? c = .maybe()?.next();
+  List<A> l = [.new().next()];
+  int i = .parse('-1').abs();
+  print([b, c, l, i]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[A!, A!, [A!], 1]\n' });
+  for (const use of ["int i = .parse('-1').abs() + 1;", '.inst.next();']) {
+    expect(executeProgram('dart', `${header}\nvoid main() { ${use} }`)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}

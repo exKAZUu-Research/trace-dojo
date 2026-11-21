@@ -76,7 +76,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
   }
 
   protected compileNullAssert(expression: Extract<Expression, { kind: 'nullAssert' }>): Compiled {
-    const value = this.rejectExtensionApplication(this.compileChainPart(expression.operand, undefined), expression);
+    const value = this.rejectExtensionApplication(this.compileReceiver(expression.operand), expression);
     const { run } = value;
     // After `x!` completes, x is known not to be null.
     if (value.variable && this.isPromotable(value.variable)) {

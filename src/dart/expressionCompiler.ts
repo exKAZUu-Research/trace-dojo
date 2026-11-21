@@ -198,7 +198,15 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   /** An expression that may also be an explicit extension application, as the left operand of a binary operator. */
   protected compileOperatorReceiver(expression: Expression, context?: DartType): Compiled {
-    const { result: compiled, skipped } = this.compileNullChain(() => this.compileChainPart(expression, context));
+    const outerChainContext = this.chainContext;
+    this.chainContext = context;
+    let result: { result: Compiled; skipped: Flow | undefined };
+    try {
+      result = this.compileNullChain(() => this.compileChainPart(expression, context));
+    } finally {
+      this.chainContext = outerChainContext;
+    }
+    const { result: compiled, skipped } = result;
     if (!skipped) return compiled;
     const { run } = compiled;
     return {
@@ -213,6 +221,14 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   private nullChain = { exit: undefined as Flow | undefined };
+  /** The context of the whole selector chain being compiled, which a dot shorthand at its head takes (`A a = .inst.next()`). */
+  private chainContext: DartType | undefined;
+
+  /** Compiles the receiver of a selector (`.m`, `.m()`, `[i]`, `!`) in the current chain. */
+  protected compileReceiver(object: Expression): Compiled {
+    const head = object.kind === 'call' ? object.callee : object;
+    return this.compileChainPart(object, head.kind === 'dotShorthand' ? this.chainContext : undefined);
+  }
 
   protected compileNullChain<T>(compile: () => T): { result: T; skipped: Flow | undefined } {
     const outer = this.nullChain;
@@ -1294,7 +1310,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const target = this.staticTarget(object);
     if (target) return this.readStaticTarget(target, name, expression);
     if (object.kind === 'super') return this.readSuperMember(name, expression);
-    const receiver = this.compileChainPart(object, undefined);
+    const receiver = this.compileReceiver(object);
     return this.readMemberOf(receiver, name, expression, expression.nullAware);
   }
 
@@ -1580,7 +1596,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         false
       );
     }
-    const receiver = this.compileChainPart(expression.object, undefined);
+    const receiver = this.compileReceiver(expression.object);
     return this.compileMethodCall(
       receiver,
       '[]',

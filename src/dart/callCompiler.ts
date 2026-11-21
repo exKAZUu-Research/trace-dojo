@@ -315,7 +315,7 @@ export abstract class CallCompiler extends OperatorCompiler {
         false
       );
     }
-    const receiver = this.compileChainPart(callee.object, undefined);
+    const receiver = this.compileReceiver(callee.object);
     return this.compileMethodCall(receiver, callee.name, args, typeArguments, expression, context, callee.nullAware);
   }
 
