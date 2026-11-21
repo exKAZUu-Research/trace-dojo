@@ -51,6 +51,7 @@ export interface TypeParameterDecl {
   bounds: TypeRef[];
   variance: 'in' | 'out' | undefined;
   isReified: boolean;
+  onlyInputTypes: boolean;
 }
 
 export type Declaration = FunctionDecl | ClassDecl | PropertyDecl | DestructuringDecl;

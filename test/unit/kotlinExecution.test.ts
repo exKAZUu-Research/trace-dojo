@@ -139,6 +139,34 @@ fun main() {
     stdout: ' get()=1; set(x)\n',
   },
   {
+    name: 'floating ranges and mixed numeric progressions and membership',
+    source: `import kotlin.random.Random
+fun main() {
+    val value = 2.5
+    println(value in 0.0..3.0)
+    println(when (value) { in 2.0..<3.0 -> "middle"; else -> "outside" })
+    println(3.0 in 2.0..<3.0)
+    println((1.0..2.0).toString())
+    println((Float.NaN..3.0f).isEmpty())
+    println(5.0.coerceIn(1.0..3.0))
+    println(0.5f.coerceAtLeast(1.0f))
+    println(8L.coerceIn(1L..3L))
+    println((0 until 3L).toList())
+    println((3L downTo 1).toList())
+    val small = 1
+    val big = 5L
+    println(small in 1L..3L)
+    println(big in 1..10)
+    println(Long.MAX_VALUE in 1..10)
+    println(when (small) { in 1L..3L -> "mixed"; else -> "outside" })
+    val items: List<Any> = listOf("x", 1)
+    println(1 in items)
+    println((1L..20L).random(Random(4)))
+}`,
+    stdout:
+      'true\nmiddle\nfalse\n1.0..2.0\ntrue\n3.0\n1.0\n3\n[0, 1, 2]\n[3, 2, 1]\ntrue\ntrue\nfalse\nmixed\ntrue\n3\n',
+  },
+  {
     name: 'split limits and delimiter order with empty delimiters',
     source: `fun main() {
     println("abc".split("", limit = 2))
@@ -703,6 +731,7 @@ fun main() { println(C().f(1)) }`,
   ['an assignment to a val', false, 'fun main() {\n    val x = 1\n    x = 2\n    println(x)\n}'],
   ['a missing parenthesis', false, 'fun main() {\n    println("a"\n}'],
   ['a top-level math power call', false, 'fun main() { println(kotlin.math.pow(2.0, 3.0)) }'],
+  ['membership inferred from unrelated element types', false, 'fun main() { println(1 in listOf("x")) }'],
   ['an unknown name', false, 'fun main() {\n    println(y)\n}'],
   ['a missing return', false, 'fun f(x: Int): Int {\n    if (x > 0) return 1\n}\nfun main() {\n    println(f(1))\n}'],
   ['an uninitialized val', false, 'fun main() {\n    val x: Int\n    println(x)\n}'],

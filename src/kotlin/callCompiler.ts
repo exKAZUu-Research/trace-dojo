@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 503 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss 508 -- the compiler of one area of Kotlin, whose parts call each other closely.
 import { type ArgumentEvaluation, argumentEvaluator, expectedArgumentType, firstAttempts } from './argumentTypes';
 import type { Expression, LambdaExpression } from './ast';
 import {
@@ -22,6 +22,7 @@ import {
   determinedType,
   fixVariable,
   hasIntersectionSupertype,
+  isSameType,
   isSubtype,
   soleLowerBound,
 } from './typeRelations';
@@ -394,7 +395,7 @@ export abstract class CallCompiler extends CompilerCore {
         fixed: undefined,
       };
       fixVariable(copy);
-      if (!checkVariableBounds(copy)) return false;
+      if (!fitsInferenceBounds(copy)) return false;
     }
     return true;
   }
@@ -758,7 +759,7 @@ export abstract class CallCompiler extends CompilerCore {
    * kotlinc rejects as `arrayOf(1, "a")` makes `Comparable<*> & Serializable`.
    */
   private checkFixedVariable(name: string, variable: InferenceVariable, row: number): void {
-    if (!checkVariableBounds(variable))
+    if (!fitsInferenceBounds(variable))
       this.error(row, `${name} の型引数 ${variable.param.name} に合う型がありません。`);
     if (variable.param.isReified && hasIntersectionSupertype(variable.lower))
       this.error(
@@ -914,6 +915,16 @@ export abstract class CallCompiler extends CompilerCore {
   protected probeContext(context: FunctionContext): FunctionContext {
     return new FunctionContext(context, true, '<probe>', context.info.isLibrary, undefined);
   }
+}
+
+function fitsInferenceBounds(variable: InferenceVariable): boolean {
+  if (!checkVariableBounds(variable)) return false;
+  const { fixed } = variable;
+  return (
+    !variable.param.onlyInputTypes ||
+    !fixed ||
+    variable.lower.some((input) => isSameType(nonNull(fixed), nonNull(input)))
+  );
 }
 
 function isExactlyType(a: KType, b: KType): boolean {

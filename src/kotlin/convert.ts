@@ -162,6 +162,7 @@ export class Converter extends ExpressionConverter {
         bounds: bound ? [this.convertType(bound)] : [],
         variance: keywords.includes('in') ? 'in' : keywords.includes('out') ? 'out' : undefined,
         isReified: keywords.includes('reified'),
+        onlyInputTypes: keywords.includes('@OnlyInputTypes'),
       };
     });
   }

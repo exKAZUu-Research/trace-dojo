@@ -265,7 +265,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     assign?: (params: TypeParameterSymbol[]) => void
   ): TypeParameterSymbol[] {
     const params = decls.map((decl) => {
-      const param = new TypeParameterSymbol(decl.name, decl.variance ?? 'inv', decl.isReified);
+      const param = new TypeParameterSymbol(decl.name, decl.variance ?? 'inv', decl.isReified, decl.onlyInputTypes);
       scope.typeParameters.set(decl.name, param);
       return param;
     });

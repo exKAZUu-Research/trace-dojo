@@ -11,7 +11,8 @@ export class TypeParameterSymbol {
   constructor(
     readonly name: string,
     readonly variance: 'inv' | 'in' | 'out',
-    readonly isReified: boolean
+    readonly isReified: boolean,
+    readonly onlyInputTypes = false
   ) {}
 }
 

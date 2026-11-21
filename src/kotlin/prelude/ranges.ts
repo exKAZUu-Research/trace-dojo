@@ -14,6 +14,25 @@ interface ClosedRange<T : Comparable<T>> {
 interface OpenEndRange<T : Comparable<T>> {
     val start: T
     val endExclusive: T
+    operator fun contains(value: T): Boolean = value >= start && value < endExclusive
+    fun isEmpty(): Boolean = start >= endExclusive
+}
+
+interface ClosedFloatingPointRange<T : Comparable<T>> : ClosedRange<T> {
+    fun lessThanOrEquals(a: T, b: T): Boolean
+    override fun contains(value: T): Boolean = lessThanOrEquals(start, value) && lessThanOrEquals(value, endInclusive)
+    override fun isEmpty(): Boolean = !lessThanOrEquals(start, endInclusive)
+}
+
+${floatingRanges()}
+${mixedIntegralProgressions()}
+${mixedRangeMembership()}
+
+fun <T : Comparable<T>> T.coerceIn(range: ClosedFloatingPointRange<T>): T {
+    if (range.isEmpty()) throw IllegalArgumentException("Cannot coerce value to an empty range: $range.")
+    if (range.lessThanOrEquals(this, range.start) && !range.lessThanOrEquals(range.start, this)) return range.start
+    if (range.lessThanOrEquals(range.endInclusive, this) && !range.lessThanOrEquals(this, range.endInclusive)) return range.endInclusive
+    return this
 }
 
 private fun mod(a: Int, b: Int): Int {
@@ -265,9 +284,22 @@ fun Double.coerceIn(minimumValue: Double, maximumValue: Double): Double {
     if (this > maximumValue) return maximumValue
     return this
 }
-fun Int.coerceIn(range: IntRange): Int {
+fun Int.coerceIn(range: ClosedRange<Int>): Int {
     if (range.isEmpty()) throw IllegalArgumentException("Cannot coerce value to an empty range: $range.")
     return if (this < range.start) range.start else if (this > range.endInclusive) range.endInclusive else this
+}
+fun Long.coerceIn(range: ClosedRange<Long>): Long {
+    if (range.isEmpty()) throw IllegalArgumentException("Cannot coerce value to an empty range: $range.")
+    return if (this < range.start) range.start else if (this > range.endInclusive) range.endInclusive else this
+}
+
+fun Float.coerceAtLeast(minimumValue: Float): Float = if (this < minimumValue) minimumValue else this
+fun Float.coerceAtMost(maximumValue: Float): Float = if (this > maximumValue) maximumValue else this
+fun Float.coerceIn(minimumValue: Float, maximumValue: Float): Float {
+    if (minimumValue > maximumValue) throw IllegalArgumentException("Cannot coerce value to an empty range: maximum $maximumValue is less than minimum $minimumValue.")
+    if (this < minimumValue) return minimumValue
+    if (this > maximumValue) return maximumValue
+    return this
 }
 
 fun IntRange.random(): Int = random(kotlin.random.Random)
@@ -279,9 +311,82 @@ fun IntRange.random(random: kotlin.random.Random): Int {
         else -> random.nextInt()
     }
 }
+fun LongRange.random(): Long = random(kotlin.random.Random)
+fun LongRange.random(random: kotlin.random.Random): Long {
+    if (isEmpty()) throw NoSuchElementException("Cannot get random in empty range: $this")
+    return when {
+        last < Long.MAX_VALUE -> random.nextLong(first, last + 1L)
+        first > Long.MIN_VALUE -> random.nextLong(first - 1L, last) + 1L
+        else -> random.nextLong()
+    }
+}
 fun CharRange.random(): Char = random(kotlin.random.Random)
 fun CharRange.random(random: kotlin.random.Random): Char {
     if (isEmpty()) throw NoSuchElementException("Cannot get random in empty range: $this")
     return random.nextInt(first.code, last.code + 1).toChar()
 }
 `;
+
+function floatingRanges(): string {
+  return ['Double', 'Float'].flatMap((type) => [true, false].map((closed) => floatingRange(type, closed))).join('\n');
+}
+
+function floatingRange(type: string, closed: boolean): string {
+  const range = closed ? 'ClosedFloatingPointRange' : 'OpenEndRange';
+  const implementation = closed ? `Closed${type}Range` : `OpenEnd${type}Range`;
+  const end = closed ? 'endInclusive' : 'endExclusive';
+  const comparison = closed ? '<=' : '<';
+  const operator = closed ? 'rangeTo' : 'rangeUntil';
+  const display = closed ? '..' : '..<';
+  const ordering = closed ? `override fun lessThanOrEquals(a: ${type}, b: ${type}): Boolean = a <= b` : '';
+  return kotlin`
+private class ${implementation}(override val start: ${type}, override val ${end}: ${type}) : ${range}<${type}> {
+    ${ordering}
+    override fun contains(value: ${type}): Boolean = start <= value && value ${comparison} ${end}
+    override fun isEmpty(): Boolean = !(start ${comparison} ${end})
+    override fun equals(other: Any?): Boolean =
+        other is ${implementation} && (isEmpty() && other.isEmpty() || start == other.start && ${end} == other.${end})
+    override fun hashCode(): Int = if (isEmpty()) -1 else 31 * start.hashCode() + ${end}.hashCode()
+    override fun toString(): String = start.toString() + "${display}" + ${end}.toString()
+}
+
+operator fun ${type}.${operator}(that: ${type}): ${range}<${type}> = ${implementation}(this, that)
+`;
+}
+
+function mixedIntegralProgressions(): string {
+  const types = ['Byte', 'Short', 'Int', 'Long'];
+  return types
+    .flatMap((from) =>
+      types.flatMap((to) => {
+        const result = from === 'Long' || to === 'Long' ? 'Long' : 'Int';
+        if (from === result && to === result) return [];
+        const receiver = from === result ? 'this' : `to${result}()`;
+        const end = to === result ? 'to' : `to.to${result}()`;
+        return [
+          `infix fun ${from}.until(to: ${to}): ${result}Range = ${receiver}.until(${end})`,
+          `infix fun ${from}.downTo(to: ${to}): ${result}Progression = ${receiver}.downTo(${end})`,
+        ];
+      })
+    )
+    .join('\n');
+}
+
+function mixedRangeMembership(): string {
+  const integral = ['Byte', 'Short', 'Int', 'Long'];
+  const types = [...integral, 'Float', 'Double'];
+  return types
+    .flatMap((target, index) =>
+      types.flatMap((source, sourceIndex) => {
+        if (source === target) return [];
+        const fits =
+          index < integral.length && sourceIndex > index
+            ? `value >= ${target}.MIN_VALUE.to${source}() && value <= ${target}.MAX_VALUE.to${source}() && `
+            : '';
+        return [
+          `@JvmName("${target}RangeContains${source}") operator fun ClosedRange<${target}>.contains(value: ${source}): Boolean = ${fits}contains(value.to${target}())`,
+        ];
+      })
+    )
+    .join('\n');
+}

@@ -329,12 +329,12 @@ operator fun <T> List<T>.component3(): T = get(2)
 operator fun <T> List<T>.component4(): T = get(3)
 operator fun <T> List<T>.component5(): T = get(4)
 
-operator fun <T> Iterable<T>.contains(element: T): Boolean {
+operator fun <@OnlyInputTypes T> Iterable<T>.contains(element: T): Boolean {
     if (this is Collection) return contains(element)
     return indexOf(element) >= 0
 }
 
-fun <T> Iterable<T>.indexOf(element: T): Int {
+fun <@OnlyInputTypes T> Iterable<T>.indexOf(element: T): Int {
     if (this is List) return this.indexOf(element)
     var index = 0
     for (item in this) {
