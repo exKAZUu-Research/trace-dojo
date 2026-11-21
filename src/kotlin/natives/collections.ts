@@ -17,7 +17,7 @@ import {
   type Value,
 } from '../values';
 import { arrayIterator } from './core';
-import { mapCapacity, newStore, reserveForCopy } from './hashTables';
+import { jdkHashCapacity, mapCapacity, newStore, reserveForCopy } from './hashTables';
 import { defineNative, defineNativeProperty, libraryClass, throwError } from './registry';
 
 /**
@@ -689,7 +689,7 @@ function defineSets(): void {
     });
     defineNative(`${key}(Collection<E>)`, (frame, instance, [elements]) => {
       const values = elementsOf(frame, elements);
-      const store = newStore(order, Math.max(Math.trunc(values.length / 0.75) + 1, 16));
+      const store = newStore(order, jdkHashCapacity(Math.max(values.length, 12)));
       for (const value of values) putEntry(frame, store, value, undefined);
       return initializeSet(instance, store);
     });

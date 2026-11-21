@@ -15,6 +15,10 @@ export function mapCapacity(expectedSize: number): number {
   return 2_147_483_647;
 }
 
+export function jdkHashCapacity(expectedSize: number): number {
+  return Math.ceil(expectedSize / 0.75);
+}
+
 export function newStore(order: KStore['order'], capacity?: number): KStore {
   const store = new KStore();
   store.order = order;
@@ -30,6 +34,6 @@ export function reserveForCopy(store: KStore, count: number): void {
     while (count > store.capacity * 0.75) store.capacity *= 2;
     return;
   }
-  const needed = tableSizeFor(Math.trunc(Math.fround(Math.fround(count / 0.75) + 1)));
+  const needed = tableSizeFor(jdkHashCapacity(count));
   store.capacity = store.isSized ? Math.max(store.capacity, needed) : needed;
 }

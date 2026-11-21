@@ -26,6 +26,18 @@ test.each([
     stdout: '[, abc]\n[, a, , c, ]\n[, a, b, c, ]\n[, ]\n[abc]\n',
   },
   {
+    name: 'JDK hash collection sizing when copying entries',
+    source: `fun main() {
+    val source = linkedMapOf(4 to "a", 0 to "b", 8 to "c")
+    println(HashMap(source).keys)
+    val destination = HashMap<Int, String>()
+    destination.putAll(source)
+    println(destination.keys)
+    println(HashSet(listOf(0, 16, 1, 17, 2, 18, 3, 19, 4, 20, 5, 21)))
+}`,
+    stdout: '[4, 0, 8]\n[4, 0, 8]\n[0, 16, 1, 17, 2, 18, 3, 19, 4, 20, 5, 21]\n',
+  },
+  {
     name: 'library enum entries used directly before other library calls',
     source: `import kotlin.time.DurationUnit
 import kotlin.time.toDuration
