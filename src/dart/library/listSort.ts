@@ -8,19 +8,19 @@ export interface ListSortAccess {
 }
 
 /**
- * Dart's sort: insertion sort for up to 32 elements, which is stable, and otherwise the dual-pivot quicksort of
+ * Dart's sort uses stable insertion sort through 33 elements. Longer partitions use the dual-pivot quicksort from
  * dart:_internal, whose order of equal elements programs may see.
  */
 export function dartSort(values: ListSortAccess, compare: (a: Value, b: Value) => number): void {
   doSort(values, 0, values.length - 1, compare);
 }
 
-const INSERTION_SORT_THRESHOLD = 32;
+const MAX_INSERTION_SORT_LENGTH = 33;
 
 function doSort(a: ListSortAccess, left: number, right: number, compare: (a: Value, b: Value) => number): void {
   const mark = a.roots.length;
   try {
-    if (right - left <= INSERTION_SORT_THRESHOLD) insertionSort(a, left, right, compare);
+    if (right - left + 1 <= MAX_INSERTION_SORT_LENGTH) insertionSort(a, left, right, compare);
     else dualPivotQuicksort(a, left, right, compare);
   } finally {
     a.roots.length = mark;
