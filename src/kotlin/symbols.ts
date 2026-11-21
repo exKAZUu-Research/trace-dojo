@@ -120,6 +120,7 @@ export interface ParameterSymbol {
   name: string;
   type: KType;
   hasDefault: boolean;
+  defaultOwner?: FunctionSymbol;
   isVararg: boolean;
   /** Computes the default value in the callee's frame, where the earlier parameters are set. */
   defaultValue?: (frame: Frame) => Value;
@@ -171,7 +172,7 @@ export class FunctionSymbol implements MemberBase {
   packageName = '';
   /** Runs the function; set when its body is compiled or its native implementation is bound. */
   invoke: Invoker | undefined;
-  /** The frame layout in which a native's default values are computed, which may read the earlier parameters. */
+  /** The frame layout used to compute defaults from the receiver and earlier parameters. */
   defaultsInfo: FunctionInfo | undefined;
   /** For a constructor, runs it on an instance that a subclass's constructor or `invoke` allocated. */
   initialize: ((caller: Frame, instance: Value, args: Value[], callRow: number | undefined) => void) | undefined;

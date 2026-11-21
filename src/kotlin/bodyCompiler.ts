@@ -122,8 +122,8 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       for (const [index, evaluate] of defaults.entries()) {
         if (evaluate) symbol.params[index].defaultValue = evaluate;
       }
+      symbol.defaultsInfo = context.info;
       if (!decl.body) {
-        symbol.defaultsInfo = context.info;
         entry.state = 'done';
         return;
       }

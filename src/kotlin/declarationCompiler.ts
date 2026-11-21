@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 811 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss 829 -- the compiler of one area of Kotlin, whose parts call each other closely.
 import type {
   ClassDecl,
   ClassParameterDecl,
@@ -1007,6 +1007,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     member.root = overridden[0].root;
     // An override of an operator or infix function is one as well, as Kotlin inherits these modifiers.
     if (member.kind === 'function') {
+      this.inheritDefaults(member, overridden);
       for (const base of overridden) {
         if (base.kind !== 'function') continue;
         member.isOperator ||= base.isOperator;
@@ -1016,6 +1017,27 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     }
     for (const base of overridden) symbol.vtable.set(base.root, member);
     symbol.vtable.set(member.root, member);
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 17 -- Each inherited parameter must agree on the default owner.
+  private inheritDefaults(member: FunctionSymbol, overridden: MemberSymbol[]): void {
+    if (!member.isLibrary && member.params.some((parameter) => parameter.hasDefault)) {
+      this.error(member.row, `override する関数 ${member.name} では、引数の初期値を指定できません。`);
+    }
+    for (const base of overridden) {
+      if (base.kind !== 'function') continue;
+      for (const [index, inherited] of base.params.entries()) {
+        if (!inherited.hasDefault) continue;
+        const parameter = member.params[index];
+        const owner = inherited.defaultOwner ?? base;
+        if (parameter.defaultOwner && parameter.defaultOwner !== owner && !member.isLibrary) {
+          this.error(member.row, `${member.name} の引数 ${parameter.name} の初期値が複数あります。`);
+        }
+        if (parameter.hasDefault) continue;
+        parameter.hasDefault = true;
+        parameter.defaultOwner = owner;
+      }
+    }
   }
 
   private checkOverridable(member: MemberSymbol, base: MemberSymbol): void {

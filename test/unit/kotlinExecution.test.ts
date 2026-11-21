@@ -26,6 +26,22 @@ test.each([
     stdout: '[, abc]\n[, a, , c, ]\n[, a, b, c, ]\n[, ]\n[abc]\n',
   },
   {
+    name: 'inherited defaults through base and derived receiver types',
+    source: `open class Parent {
+    open fun greet(name: String = "world", message: String = "Hi " + name): String = message
+}
+class Child : Parent() {
+    override fun greet(name: String, message: String): String = message + "!"
+}
+fun main() {
+    println(Child().greet())
+    val parent: Parent = Child()
+    println(parent.greet("Kotlin"))
+    println(Child().greet(message = "Hello"))
+}`,
+    stdout: 'Hi world!\nHi Kotlin!\nHello!\n',
+  },
+  {
     name: 'growing a StringBuilder in a loop',
     source: `fun main() {
     val builder = StringBuilder()

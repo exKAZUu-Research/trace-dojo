@@ -1,5 +1,5 @@
 import { convertRepr, type Core, type Eval, type Repr, reprOf } from './compilerBase';
-import type { Frame } from './runtime';
+import { type Frame, MISSING } from './runtime';
 import type { ClassSymbol, FunctionSymbol, PropertySymbol } from './symbols';
 import { Boxed, KObject, NULL, UNIT, type Value } from './values';
 
@@ -127,10 +127,58 @@ export function callFunction(
   callRow: number | undefined
 ): Value {
   requireMemberReceiver(symbol, frame, receiver);
-  if (!isVirtual(symbol)) return invokeFunction(symbol, frame, receiver, args, callRow);
-  const target = runtimeClassOf(receiver).dispatch(symbol);
-  if (target === symbol) return invokeFunction(symbol, frame, receiver, args, callRow);
-  return bridge(symbol, target)(frame, receiver, args, callRow);
+  const target = isVirtual(symbol) ? runtimeClassOf(receiver).dispatch(symbol) : symbol;
+  const needsDefaults =
+    (target !== symbol || symbol.params.some((parameter) => parameter.defaultOwner)) && args.includes(MISSING);
+  if (!needsDefaults) return invokeTarget(symbol, target, frame, receiver, args, callRow);
+  const { temporaries } = frame;
+  const mark = temporaries.length;
+  try {
+    const filled = [...args];
+    for (const [index, value] of args.entries()) {
+      if (value !== MISSING) continue;
+      const resolved = evaluateDefault(symbol, frame, receiver, filled, index);
+      temporaries.push(resolved);
+      filled[index] = resolved;
+    }
+    return invokeTarget(symbol, target, frame, receiver, filled, callRow);
+  } finally {
+    temporaries.length = mark;
+  }
+}
+
+function invokeTarget(
+  symbol: FunctionSymbol,
+  target: FunctionSymbol,
+  frame: Frame,
+  receiver: Value,
+  args: Value[],
+  callRow: number | undefined
+): Value {
+  return target === symbol
+    ? invokeFunction(symbol, frame, receiver, args, callRow)
+    : bridge(symbol, target)(frame, receiver, args, callRow);
+}
+
+function evaluateDefault(symbol: FunctionSymbol, frame: Frame, receiver: Value, args: Value[], index: number): Value {
+  const owner = symbol.params[index].defaultOwner ?? symbol;
+  const evaluate = owner.params[index].defaultValue;
+  const info = owner.defaultsInfo;
+  if (!evaluate || !info) throw new Error(`Default value is unavailable for ${owner.name}`);
+  const from = parameterReprs(symbol);
+  const to = parameterReprs(owner);
+  const prior = args.slice(0, index).map((value, position) => convertValue(value, from[position], to[position]));
+  const target = convertValue(receiver, receiverRepr(symbol), receiverRepr(owner));
+  const resolved = frame.runtime.call(
+    { ...info, isLibrary: true, isAtomic: false },
+    frame,
+    [],
+    target,
+    prior,
+    undefined,
+    evaluate
+  );
+  return convertValue(resolved, to[index], from[index]);
 }
 
 export function getPropertyValue(symbol: PropertySymbol, frame: Frame, receiver: Value): Value {
