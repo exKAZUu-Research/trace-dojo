@@ -155,26 +155,32 @@ function useful(rows: Pat[][], vector: Pat[], types: Type[], budget: ExecutionBu
   }
   // A wildcard: useful if some constructor is missing from the rows' heads, or useful under one constructor.
   const heads = new Set(expanded.flatMap((row) => (row[0]?.kind === 'ctor' ? [row[0].ctor] : [])));
-  if (ctors && ctors.every((c) => heads.has(c.ctor))) {
-    for (const ctor of ctors) {
-      const arity = ctor.types.length;
-      const specialized = specialize(expanded, ctor.ctor, arity);
-      const witness = useful(
-        specialized,
-        [...ctor.types.map(() => ANY), ...rest],
-        [...ctor.types, ...restTypes],
-        budget,
-        depth + 1
-      );
-      if (witness) return [{ kind: 'ctor', ctor: ctor.ctor, args: witness.slice(0, arity) }, ...witness.slice(arity)];
-    }
-    return undefined;
-  }
+  if (ctors && ctors.every((c) => heads.has(c.ctor)))
+    return usefulUnderSome(expanded, ctors, rest, restTypes, budget, depth);
   const defaults = expanded.filter((row) => row[0]?.kind === 'any').map((row) => row.slice(1));
   const witness = useful(defaults, rest, restTypes, budget, depth + 1);
   if (!witness) return undefined;
   const missing = ctors?.find((c) => !heads.has(c.ctor));
   return [missing ? { kind: 'ctor', ctor: missing.ctor, args: missing.types.map(() => ANY) } : ANY, ...witness];
+}
+
+/** Whether a wildcard is useful under one of the constructors, all of which the rows' heads cover. */
+function usefulUnderSome(
+  rows: Pat[][],
+  ctors: NonNullable<ReturnType<typeof constructorsOf>>,
+  rest: Pat[],
+  restTypes: Type[],
+  budget: ExecutionBudget,
+  depth: number
+): Pat[] | undefined {
+  for (const ctor of ctors) {
+    const arity = ctor.types.length;
+    const specialized = specialize(rows, ctor.ctor, arity);
+    const vector = [...ctor.types.map(() => ANY), ...rest];
+    const witness = useful(specialized, vector, [...ctor.types, ...restTypes], budget, depth + 1);
+    if (witness) return [{ kind: 'ctor', ctor: ctor.ctor, args: witness.slice(0, arity) }, ...witness.slice(arity)];
+  }
+  return undefined;
 }
 
 function specialize(rows: Pat[][], ctor: string, arity: number): Pat[][] {
