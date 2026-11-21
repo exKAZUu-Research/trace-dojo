@@ -1,10 +1,11 @@
-// code-gauge-allow-file fileNcss 408 -- Shares member and element resolution across reads, writes, and optional chains.
+// code-gauge-allow-file fileNcss 417 -- Shares member and element resolution across reads, writes, and optional chains.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import {
   legacyRegExpStaticsFeature,
   unavailableRegExpStatics,
   unavailableWellKnownSymbols,
+  wellKnownSymbolFeature,
 } from '../../javascript/unavailableMembers';
 import { assertedExpression, assertionTypes, isErasedTypeSyntax } from '../erasedSyntax';
 import { unsupportedMessage } from '../unsupported';
@@ -245,7 +246,7 @@ export class MemberChecker {
       : this.c.propertyOf(objectType, name);
     this.c.conditions.recordPropertyDeclaration(node, property?.declaration);
     if (!property) {
-      if (isPrivate) return errorType;
+      if (isPrivate || this.reportUnavailableSymbol(propertyNode, objectType, name)) return errorType;
       const apparent = this.c.apparentType(objectType);
       if (isAnyLike(apparent)) return apparent;
       const index = this.indexSignatureType(objectType, name);
@@ -256,6 +257,13 @@ export class MemberChecker {
     return this.checkPropertyUse(node, objectNode, propertyNode, receiver, property, options.write)
       ? propertyAccessType(property)
       : errorType;
+  }
+
+  private reportUnavailableSymbol(node: TreeNode, receiver: Type, name: string): boolean {
+    if (!unavailableWellKnownSymbols.has(name) || this.isTypeOnlyUse(node)) return false;
+    if (this.c.apparentType(receiver) !== this.c.globalType('SymbolConstructor')) return false;
+    this.c.error(node, unsupportedMessage(wellKnownSymbolFeature(name)));
+    return true;
   }
 
   private unionPropertyAccess(
@@ -340,7 +348,7 @@ export class MemberChecker {
     const { name } = property;
     // The well-known symbols replace the protocols of the language, which this interpreter does not support yet.
     if (owner === 'SymbolConstructor' && unavailableWellKnownSymbols.has(name) && !this.isTypeOnlyUse(propertyNode))
-      return `Symbol.${name} などの well-known シンボル`;
+      return wellKnownSymbolFeature(name);
     // A stack trace names the files and lines of the host, which differ from the program's.
     if (owner === 'Error' && name === 'stack') return 'Error の stack';
     if (owner === 'ArrayConstructor' && name === 'fromAsync') return 'Array.fromAsync';
@@ -575,11 +583,13 @@ export class MemberChecker {
     objectType = this.c.reducedTypes.of(objectType);
     const property = this.c.propertyOf(objectType, name);
     // A unique symbol matches the symbol index signature only.
-    if (!property)
+    if (!property) {
+      if (this.reportUnavailableSymbol(access.indexNode, objectType, name)) return errorType;
       return typeof value === 'symbol'
         ? this.c.structureOf(objectType).symbolIndex?.type
         : (tupleElementBeyond(this.c, objectType, name, access.indexNode) ??
             applicableIndex(this.c, this.c.structureOf(objectType), literalType(value))?.type);
+    }
     if (!this.checkPropertyAvailability(access.indexNode, objectType, property)) return errorType;
     this.c.expressions.expandos.checkAssignedBefore(access.node, access.indexNode, property);
     // `o["secret"]` reads a private or protected member, which TypeScript leaves as a way around its access checks.

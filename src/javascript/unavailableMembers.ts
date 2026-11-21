@@ -9,18 +9,13 @@ import { JsFunction, JsObject, type Key, type Value } from './values';
 export type UnavailableMemberCheck = (value: Value, key: Key | undefined) => string | undefined;
 
 export const unavailableWellKnownSymbols = new Set([
-  'iterator',
-  'asyncIterator',
-  'hasInstance',
+  ...Object.keys(WELL_KNOWN_SYMBOLS),
   'isConcatSpreadable',
   'match',
   'matchAll',
   'replace',
   'search',
-  'species',
   'split',
-  'toPrimitive',
-  'toStringTag',
   'unscopables',
 ]);
 
@@ -47,11 +42,7 @@ export const unavailableRegExpStatics = new Set([
   '$9',
 ]);
 
-const unavailableSymbolNames = new Map(
-  Object.entries(WELL_KNOWN_SYMBOLS)
-    .filter(([name]) => unavailableWellKnownSymbols.has(name))
-    .map(([name, value]) => [value, name])
-);
+const unavailableSymbolNames = new Map(Object.entries(WELL_KNOWN_SYMBOLS).map(([name, value]) => [value, name]));
 
 const consoleTimers = new Set<Key | undefined>(['time', 'timeEnd', 'timeLog', 'timeStamp']);
 
@@ -71,6 +62,10 @@ function unavailableSymbolFeature(value: Value, key: Key | undefined, constructo
   const name = typeof value === 'symbol' ? unavailableSymbolNames.get(value) : key;
   if (typeof name !== 'string') return undefined;
   if (typeof value !== 'symbol' && (value !== constructor || !unavailableWellKnownSymbols.has(name))) return undefined;
+  return wellKnownSymbolFeature(name);
+}
+
+export function wellKnownSymbolFeature(name: string): string {
   return `Symbol.${name} などの well-known シンボル`;
 }
 
