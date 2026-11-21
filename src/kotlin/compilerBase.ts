@@ -134,7 +134,8 @@ export class FunctionContext {
     name: string,
     isLibrary: boolean,
     /** The function a `return` leaves: the function itself, or for a lambda of an inline call, the one around it. */
-    readonly returnTarget: FunctionContext | undefined
+    readonly returnTarget: FunctionContext | undefined,
+    readonly isProbe: boolean = parent?.isProbe ?? false
   ) {
     this.info = {
       name,

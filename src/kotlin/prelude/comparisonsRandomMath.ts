@@ -340,6 +340,7 @@ external fun Float.pow(n: Int): Float
 external fun Double.roundToInt(): Int
 external fun Double.roundToLong(): Long
 external fun Float.roundToInt(): Int
+fun Float.roundToLong(): Long = toDouble().roundToLong()
 
 val Double.absoluteValue: Double get() = abs(this)
 val Float.absoluteValue: Float get() = abs(this)
@@ -347,6 +348,7 @@ val Int.absoluteValue: Int get() = abs(this)
 val Long.absoluteValue: Long get() = abs(this)
 val Double.sign: Double get() = sign(this)
 val Float.sign: Float get() = sign(this)
+val Long.sign: Int get() = compareTo(0L)
 val Int.sign: Int get() = when {
     this < 0 -> -1
     this > 0 -> 1

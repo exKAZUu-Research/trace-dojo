@@ -6,6 +6,20 @@ export function kotlin(strings: TemplateStringsArray, ...declarations: string[])
   return strings.reduce((source, text, index) => source + (declarations[index - 1] ?? '') + text);
 }
 
+export function mixedIntegralOverloads(
+  render: (receiver: string, argument: string, promoted: 'Int' | 'Long') => string[]
+): string {
+  const types = ['Byte', 'Short', 'Int', 'Long'];
+  return types
+    .flatMap((receiver) =>
+      types.flatMap((argument) => {
+        const promoted = receiver === 'Long' || argument === 'Long' ? 'Long' : 'Int';
+        return receiver === promoted && argument === promoted ? [] : render(receiver, argument, promoted);
+      })
+    )
+    .join('\n');
+}
+
 export function forwardingSelectorExtrema(
   receiver: string,
   element: string,

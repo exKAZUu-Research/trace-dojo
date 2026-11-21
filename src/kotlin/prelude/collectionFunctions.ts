@@ -791,7 +791,24 @@ inline fun <T, R : Comparable<R>> MutableList<T>.sortByDescending(crossinline se
 
 external fun <T> MutableList<T>.sortWith(comparator: Comparator<in T>)
 
-external fun <T> MutableList<T>.reverse()
+fun <T> MutableList<T>.reverse() {
+    val length = size
+    // Collections.reverse uses indexed swaps for short lists and for RandomAccess lists.
+    if (length < 18 || this is RandomAccess) {
+        for (left in 0 until length / 2) {
+            val right = length - 1 - left
+            set(left, set(right, get(left)))
+        }
+    } else {
+        val forward = listIterator()
+        val backward = listIterator(length)
+        for (step in 0 until size / 2) {
+            val left = forward.next()
+            forward.set(backward.previous())
+            backward.set(left)
+        }
+    }
+}
 
 fun <T> MutableList<T>.shuffle() = shuffle(kotlin.random.Random)
 

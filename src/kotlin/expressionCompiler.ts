@@ -684,13 +684,14 @@ export abstract class ExpressionCompiler extends CallCompiler {
   protected compileMemberAccess(
     scope: Scope,
     context: FunctionContext,
-    expression: Extract<Expression, { kind: 'member' }>
+    expression: Extract<Expression, { kind: 'member' }>,
+    consume: (member: Compiled) => Compiled = (member) => member
   ): Compiled {
     const { name, row, isSafe } = expression;
     const qualified = this.compileQualifier(scope, expression.receiver);
-    if (qualified?.kind === 'class') return this.compileClassMember(scope, qualified.cls, name, row);
-    if (qualified) return this.compilePackageMember(context, qualified, name, row);
-    if (expression.receiver.kind === 'super') return this.compileSuperProperty(scope, context, name, row);
+    if (qualified?.kind === 'class') return consume(this.compileClassMember(scope, qualified.cls, name, row));
+    if (qualified) return consume(this.compilePackageMember(context, qualified, name, row));
+    if (expression.receiver.kind === 'super') return consume(this.compileSuperProperty(scope, context, name, row));
     const receiver = this.compileExpression(scope, context, expression.receiver);
     return this.withSafeReceiver(receiver, isSafe, row, (target) => {
       const property = this.findProperty(scope, target.type, name);
@@ -708,7 +709,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
       );
       if (expression.receiver.kind === 'this' && !expression.receiver.label)
         this.checkInitialized(context, property.symbol, name, row);
-      return this.readProperty(scope, property, target, row);
+      return consume(this.readProperty(scope, property, target, row));
     });
   }
 
@@ -1740,21 +1741,18 @@ export abstract class ExpressionCompiler extends CallCompiler {
     if (expression.value) {
       const value = this.compileExpression(scope, context, expression.value, returnType);
       if (returnType) {
-        if (isNonNullClass(returnType, this.core.unit) && !isSubtype(value.type, returnType)) {
-          this.error(expression.row, '戻り値の型が Unit の関数は、値を返せません。');
-        }
         evaluate = convertRepr(
           this.expectType(value, returnType, expression.value.row),
           reprOf(this.core, returnType),
           target.returnRepr ?? reprOf(this.core, returnType)
         );
       } else {
-        target.returnedTypes.push(value.type);
+        if (!context.isProbe || target.isProbe) target.returnedTypes.push(value.type);
         evaluate = value.eval;
       }
     } else if (returnType && !isNonNullClass(returnType, this.core.unit)) {
       this.error(expression.row, 'return に値が必要です。');
-    } else if (!returnType) {
+    } else if (!returnType && (!context.isProbe || target.isProbe)) {
       target.returnedTypes.push(this.unitType);
     }
     const frameOf = this.frameAccess(context, target);

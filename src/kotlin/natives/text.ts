@@ -31,6 +31,7 @@ import {
   titleJdkText,
   upperJdkChar,
 } from './jdkCase';
+import { isJdkDefined } from './jdkCharacter';
 import { defineNative, defineNativeProperty, libraryClass, throwError } from './registry';
 import { textSearch } from './textSearch';
 
@@ -463,7 +464,7 @@ const CHAR_NATIVES: Record<string, TextNative> = {
     const digit = digitInRadix(receiver as number, checkRadix(frame, radix as number));
     return digit === undefined ? undefined : new Boxed('Int', digit);
   },
-  'Char.isDefined()': () => true,
+  'Char.isDefined()': (_frame, receiver) => isJdkDefined(receiver as number),
   'Char.plus(String)': (frame, receiver, [other]) => result(frame, charToString(receiver as number) + text(other)),
   'Int.toString(Int)': (frame, receiver, [radix]) =>
     result(frame, (receiver as number).toString(checkRadix(frame, radix as number))),

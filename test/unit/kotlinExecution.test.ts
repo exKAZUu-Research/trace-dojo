@@ -747,6 +747,156 @@ fun main() {
     stdout: '7\n5\n',
   },
   {
+    name: 'compound assignment chooses applicable mutations, writes, and safe accesses',
+    source: `class Board(val numbers: MutableList<Int>)
+fun value(): Int { println("rhs"); return 3 }
+fun add(board: Board?) { board?.numbers += value() }
+fun main() {
+    var xs = mutableListOf(1)
+    xs += 2
+    xs += listOf(3, 4)
+    println(xs)
+    var readOnly: List<Int> = listOf(5)
+    readOnly += 6
+    println(readOnly)
+    val indexed = arrayOf(mutableListOf(7))
+    indexed[0] += 8
+    println(indexed[0])
+    add(null)
+    val board = Board(mutableListOf(1))
+    add(board)
+    println(board.numbers)
+}`,
+    stdout: '[1, 2, 3, 4]\n[5, 6]\n[7, 8]\nrhs\n[1, 3]\n',
+  },
+  {
+    name: 'signed numeric overloads preserve Kotlin promotions and return types',
+    source: `import kotlin.math.*
+fun main() {
+    println((-5L).sign)
+    println(0L.sign)
+    println(Long.MAX_VALUE.sign)
+    val intMod: Int = (-7L).mod(3)
+    val byteMod: Byte = 7L.mod((-3).toByte())
+    val shortMod: Short = 7.toByte().mod((-3).toShort())
+    val longMod: Long = 7.mod(-3L)
+    println(listOf(intMod, byteMod, shortMod, longMod))
+    println(listOf((-7).floorDiv(2L), 7L.floorDiv(-2), 7.toByte().floorDiv((-2).toShort()), Long.MIN_VALUE.floorDiv(-1)))
+    val single: Float = (-5.5f).mod(2f)
+    val mixed: Double = (-5.5f).mod(2.0)
+    println(listOf(single, mixed, 7.0.mod(-2f), (-0.0f).mod(3f)))
+    println(listOf(2.5f.roundToLong(), (-2.5f).roundToLong(), Float.POSITIVE_INFINITY.roundToLong()))
+    println(listOf(Byte.SIZE_BITS, Short.SIZE_BITS, Int.SIZE_BITS, Long.SIZE_BITS, Float.SIZE_BITS, Double.SIZE_BITS))
+}`,
+    stdout:
+      '-1\n0\n1\n[2, -2, -2, -2]\n[-4, -4, -4, -9223372036854775808]\n[0.5, 0.5, -1.0, -0.0]\n[3, -2, 9223372036854775807]\n[8, 16, 32, 64, 32, 64]\n',
+  },
+  {
+    name: 'package-qualified mutable variables support ordinary, compound, and increment assignments',
+    source: `package demo
+private var count = 1
+var scores = mutableListOf(2)
+fun main() {
+    demo.count++
+    demo.count += 3
+    demo.count = demo.count + 4
+    demo.scores += 3
+    println(count)
+    println(scores)
+}`,
+    stdout: '9\n[2, 3]\n',
+  },
+  {
+    name: 'delegated boxed property getters can coexist with primitive helper methods',
+    source: `class Wrapper(delegate: Lazy<Int>) : Lazy<Int> by delegate {
+    fun getValue(): Int = 7
+}
+fun main() {
+    val wrapper = Wrapper(lazy { 2 })
+    println(wrapper.value)
+    println(wrapper.getValue())
+}`,
+    stdout: '2\n7\n',
+  },
+  {
+    name: 'Char.isDefined follows JDK character assignments and preserves surrogates',
+    source: `fun main() {
+    for (code in listOf(0x0378, 0x088F, 0xFFFF, 0xD800, 0xE000, 0x0041)) {
+        println(Char(code).isDefined())
+    }
+}`,
+    stdout: 'false\nfalse\nfalse\ntrue\ntrue\ntrue\n',
+  },
+  {
+    name: 'interface delegation chooses the most specific inherited iterator',
+    source: `class Tracked(val data: MutableList<Int>) : MutableList<Int> by data
+class TrackedSet(val data: MutableSet<Int>) : MutableSet<Int> by data
+fun main() {
+    val list = Tracked(mutableListOf(1, 2, 3))
+    val iterator: MutableIterator<Int> = list.iterator()
+    println(iterator.next())
+    iterator.remove()
+    list.add(4)
+    println(list.size)
+    println(list.data)
+    val set = TrackedSet(mutableSetOf(4, 5))
+    val setIterator: MutableIterator<Int> = set.iterator()
+    println(setIterator.next())
+    setIterator.remove()
+    println(set.data)
+}`,
+    stdout: '1\n3\n[2, 3, 4]\n4\n[5]\n',
+  },
+  {
+    name: 'generic superclass constructors use their declared type arguments',
+    source: `class Tracked : ArrayList<Int>()
+class Sized : ArrayList<String>(4)
+fun main() {
+    val numbers = Tracked()
+    numbers.add(1)
+    println(numbers)
+    val words = Sized()
+    words.add("ready")
+    println(words)
+}`,
+    stdout: '[1]\n[ready]\n',
+  },
+  {
+    name: 'list reversal follows virtual index swaps or two list iterators',
+    source: `class Observed : ArrayList<Int>() {
+    override fun get(index: Int): Int {
+        println("read " + index)
+        return super.get(index)
+    }
+    override fun set(index: Int, element: Int): Int {
+        println("write " + index + " " + element + " " + this)
+        return super.set(index, element)
+    }
+}
+class Sequential(private val data: MutableList<Int>) : MutableList<Int> by data {
+    override fun listIterator(): MutableListIterator<Int> {
+        println("forward iterator")
+        return data.listIterator()
+    }
+    override fun listIterator(index: Int): MutableListIterator<Int> {
+        println("backward iterator " + index)
+        return data.listIterator(index)
+    }
+}
+fun main() {
+    val list = Observed()
+    list.addAll(listOf(1, 2, 3))
+    list.reverse()
+    println(list)
+    val backing = (1..20).toMutableList()
+    val linked = Sequential(backing)
+    linked.reverse()
+    println(backing)
+}`,
+    stdout:
+      'read 0\nwrite 2 1 [1, 2, 3]\nwrite 0 3 [1, 2, 1]\n[3, 2, 1]\nforward iterator\nbackward iterator 20\n[20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]\n',
+  },
+  {
     name: 'zip transforms combine arrays, iterables, and character sequences',
     source: `fun main() {
     println("abc".zip("xy") { a, b -> "$a$b" })
@@ -2566,6 +2716,17 @@ test.each([
     'a lambda with two parameters of the same name',
     false,
     'fun main() { val f = { x: Int, x: Int -> x }; println(f(1, 2)) }',
+  ],
+  ['a package-qualified val reassignment', false, 'package demo\nval score = 1\nfun main() { demo.score = 2 }'],
+  [
+    'a method that clashes with a specialized delegated getter',
+    false,
+    'class Wrapper(delegate: Lazy<Int>) : Lazy<Int> by delegate { fun getValue(): Int? = 7 }\nfun main() {}',
+  ],
+  [
+    'a generic superclass constructor with incompatible elements',
+    false,
+    'class Tracked : ArrayList<Int>(listOf("wrong"))\nfun main() {}',
   ],
   ['a type mismatch', false, 'fun main() {\n    val x: Int = "a"\n    println(x)\n}'],
   [

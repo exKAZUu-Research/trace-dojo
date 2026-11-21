@@ -1,4 +1,5 @@
-// code-gauge-allow-file fileNcss 958 -- One method per kind of Kotlin statement and control structure.
+// code-gauge-allow-file fileNcss 967 -- One method per kind of Kotlin statement and control structure.
+import { CompileError } from '../interpreter/diagnostics';
 import type {
   AssignmentStatement,
   Block,
@@ -18,7 +19,7 @@ import {
   type Eval,
   excludingCases,
   Flow,
-  type FunctionContext,
+  FunctionContext,
   Handoff,
   isBareCall,
   type LoopContext,
@@ -38,7 +39,7 @@ import { type Frame, KotlinThrow, LoopSignal, UNASSIGNED } from './runtime';
 import { type ClassSymbol, PropertySymbol, type TypeParameterSymbol, VariableSymbol } from './symbols';
 import { instanceTest } from './typeChecks';
 import { branchHint, commonSupertype, isSubtype } from './typeRelations';
-import { type ClassType, type KType, nonNull, resolved, substitute, typeToString } from './types';
+import { type ClassType, isNonNullClass, type KType, nonNull, resolved, substitute, typeToString } from './types';
 import { Boxed, type KObject, NULL, type PrimitiveKind, UNIT, type Value } from './values';
 import { WhenCoverage } from './whenCoverage';
 
@@ -382,36 +383,70 @@ export abstract class StatementCompiler extends OperatorCompiler {
     return this.withStep(row, this.compileCompoundAssignment(scope, context, statement), false);
   }
 
-  /** `x += y` and the like: `plusAssign` when the target's type has one, else `x = x + y`. */
   private compileCompoundAssignment(scope: Scope, context: FunctionContext, statement: AssignmentStatement): Exec {
-    const { operator, row, target } = statement;
-    const operation = operator.slice(0, -1) as '+' | '-' | '*' | '/' | '%';
+    const { operator, row } = statement;
+    const operation = operator.slice(0, -1) as keyof typeof ASSIGN_OPERATORS;
     const assignName = ASSIGN_OPERATORS[operation];
-    const targetValue = this.peekType(scope, context, target);
-    if (targetValue && !this.primitiveOf(targetValue)) {
-      const receiver = this.compileExpression(scope, context, target);
-      const members = this.memberCandidates(nonNull(receiver.type), assignName).filter(
-        (candidate) => candidate.symbol.isOperator
+    const mutating = (owner: FunctionContext): Exec =>
+      this.compileMutatingCompoundAssignment(scope, owner, statement, assignName);
+    const storing = (owner: FunctionContext): Exec =>
+      this.compileStoredCompoundAssignment(scope, owner, statement, operation);
+    if (!this.isApplicableAssignment(context, mutating)) return storing(context);
+    if (this.isApplicableAssignment(context, storing)) {
+      this.error(
+        row,
+        `${operator} が ${assignName} と ${NUMBER_OPERATOR_NAMES[operation]} のどちらのことか決められません。val にするか、x = x ${operation} y と書いてください。`
       );
-      const extensions = this.extensionCandidates(receiver.type, assignName).filter(
-        (candidate) => candidate.symbol.isOperator
-      );
-      if (members.length + extensions.length > 0) {
-        if (this.isAssignableVar(scope, target) && this.hasOperator(receiver.type, NUMBER_OPERATOR_NAMES[operation])) {
-          this.error(
-            row,
-            `${operator} が ${assignName} と ${NUMBER_OPERATOR_NAMES[operation]} のどちらのことか決められません。val にするか、x = x ${operation} y と書いてください。`
-          );
-        }
-        const args: ArgumentSyntax[] = [{ row: statement.value.row, name: undefined, value: statement.value }];
-        const call = this.compileOperatorCall(scope, context, receiver, assignName, args, row, operator);
-        const evaluate = call.eval;
-        return (frame) => {
-          evaluate(frame);
-        };
-      }
     }
-    return this.compileStoredCompoundAssignment(scope, context, statement, operation);
+    return mutating(context);
+  }
+
+  private compileMutatingCompoundAssignment(
+    scope: Scope,
+    context: FunctionContext,
+    statement: AssignmentStatement,
+    name: string
+  ): Exec {
+    const { operator, row, value } = statement;
+    let target = statement.target;
+    while (target.kind === 'parenthesized') target = target.expression;
+    const args: ArgumentSyntax[] = [{ row: value.row, name: undefined, value }];
+    const call = (receiver: Compiled): Compiled => {
+      const result = this.compileOperatorCall(scope, context, receiver, name, args, row, operator);
+      if (!isNonNullClass(result.type, this.core.unit)) this.error(row, `${name} の戻り値の型は Unit にしてください。`);
+      return result;
+    };
+    const { eval: evaluate } =
+      target.kind === 'member' && target.isSafe
+        ? this.compileMemberAccess(scope, context, target, call)
+        : call(this.compileExpression(scope, context, target));
+    return (frame) => {
+      evaluate(frame);
+    };
+  }
+
+  private isApplicableAssignment(context: FunctionContext, compile: (probe: FunctionContext) => Exec): boolean {
+    const saved = this.flow;
+    this.flow = saved.copy();
+    const probe = new FunctionContext(
+      context,
+      true,
+      '<assignment probe>',
+      context.info.isLibrary,
+      context.isLambda ? context.returnTarget : context,
+      true
+    );
+    probe.inlineLambda = true;
+    probe.loops = context.loops.map((loop) => ({ ...loop, breaks: [], continues: [], valWrites: new Map() }));
+    try {
+      compile(probe);
+      return true;
+    } catch (error) {
+      if (!(error instanceof CompileError)) throw error;
+      return false;
+    } finally {
+      this.flow = saved;
+    }
   }
 
   private compileStoredCompoundAssignment(
@@ -441,41 +476,6 @@ export abstract class StatementCompiler extends OperatorCompiler {
       const value = current.run(frame, bound, () => toPlace(frame));
       bound.set(value);
     };
-  }
-
-  private hasOperator(type: KType, name: string): boolean {
-    return (
-      this.memberCandidates(nonNull(type), name).some((candidate) => candidate.symbol.isOperator) ||
-      this.extensionCandidates(type, name).some((candidate) => candidate.symbol.isOperator)
-    );
-  }
-
-  private isAssignableVar(scope: Scope, target: Expression): boolean {
-    if (target.kind === 'name') {
-      const variable = this.findVariable(scope, target.name);
-      if (variable) return variable.isVar;
-      for (const receiver of this.receiversOf(scope)) {
-        const property = this.findProperty(scope, this.receiverTypeOf(receiver), target.name);
-        if (property) return property.symbol.isVar;
-      }
-      return this.topLevelProperties(target.name)[0]?.[0]?.isVar ?? false;
-    }
-    if (target.kind === 'member') {
-      return false;
-    }
-    return false;
-  }
-
-  /** The type of an assignment's target, without compiling it, for choosing between `plusAssign` and `plus`. */
-  private peekType(scope: Scope, context: FunctionContext, target: Expression): KType | undefined {
-    const saved = this.flow.copy();
-    try {
-      return this.compileExpression(scope, this.probeContext(context), target).type;
-    } catch {
-      return undefined;
-    } finally {
-      this.flow = saved;
-    }
   }
 
   /** After `x = value`, a stable `x` has the value's type, which may be narrower than its declared one. */
@@ -542,15 +542,11 @@ export abstract class StatementCompiler extends OperatorCompiler {
       return this.propertyPlace(companion.property, holder, row, scope);
     }
     const property = this.topLevelProperties(target.name)[0]?.find((candidate) => !candidate.extensionReceiver);
-    if (property) {
-      if (isCompound) this.checkGlobalInitialized(context, property, row);
-      return this.propertyPlace({ symbol: property, substitution: new Map() }, undefined, row, scope);
-    }
+    if (property) return this.topLevelPlace(scope, context, property, row, isCompound);
     return this.error(row, `${target.name} が見つかりません。`);
   }
 
   /** `a.b` as a place, where `a` may be an object or a class with a companion, and `a?.b` binds to nothing for a null `a`. */
-  // code-gauge-allow functionCognitiveComplexity 16 -- keeps receiver resolution and initialization checks in assignment order.
   private memberPlace(
     scope: Scope,
     context: FunctionContext,
@@ -559,16 +555,11 @@ export abstract class StatementCompiler extends OperatorCompiler {
     isCompound: boolean
   ): Place {
     const qualified = this.compileQualifier(scope, target.receiver);
-    if (qualified?.kind === 'class') {
-      const holder = qualified.cls.isObject ? qualified.cls : qualified.cls.companion;
-      const property = holder ? this.findProperty(scope, holder.type, target.name) : undefined;
-      if (!property || !holder) return this.error(row, `${qualified.cls.name}.${target.name} が見つかりません。`);
-      return this.propertyPlace(
-        property,
-        { type: holder.type, repr: 'ref', eval: this.objectInstance(holder) },
-        row,
-        scope
-      );
+    if (qualified?.kind === 'class') return this.classPropertyPlace(scope, qualified.cls, target.name, row);
+    if (qualified) {
+      const property = qualified.scope?.properties.get(target.name)?.find((candidate) => !candidate.extensionReceiver);
+      if (!property) this.error(row, `${qualified.path}.${target.name} が見つかりません。`);
+      return this.topLevelPlace(scope, context, property, row, isCompound);
     }
     const receiver = this.compileExpression(scope, context, target.receiver);
     if (!target.isSafe) this.requireNonNullReceiver(receiver, row, false);
@@ -579,6 +570,29 @@ export abstract class StatementCompiler extends OperatorCompiler {
     const isOwnReceiver = target.receiver.kind === 'this' && !target.receiver.label;
     if (isOwnReceiver && isCompound) this.checkInitialized(context, property.symbol, target.name, row);
     return this.propertyPlace(property, receiver, row, scope, isOwnReceiver && !isCompound ? context : undefined);
+  }
+
+  private classPropertyPlace(scope: Scope, cls: ClassSymbol, name: string, row: number): Place {
+    const holder = cls.isObject ? cls : cls.companion;
+    const property = holder && this.findProperty(scope, holder.type, name);
+    if (!property || !holder) this.error(row, `${cls.name}.${name} が見つかりません。`);
+    return this.propertyPlace(
+      property,
+      { type: holder.type, repr: 'ref', eval: this.objectInstance(holder) },
+      row,
+      scope
+    );
+  }
+
+  private topLevelPlace(
+    scope: Scope,
+    context: FunctionContext,
+    property: PropertySymbol,
+    row: number,
+    isCompound: boolean
+  ): Place {
+    if (isCompound) this.checkGlobalInitialized(context, property, row);
+    return this.propertyPlace({ symbol: property, substitution: new Map() }, undefined, row, scope);
   }
 
   // code-gauge-allow functionCognitiveComplexity 20 -- finds the closest variable and determines which assignments it permits.
@@ -626,12 +640,16 @@ export abstract class StatementCompiler extends OperatorCompiler {
   private recordLocalWrite(context: FunctionContext, variable: VariableSymbol, type: KType): void {
     for (
       let current = context;
-      current !== variable.owner && current.inlineLambda && current.parent;
+      current !== variable.owner && current.inlineLambda && current.parent && (!context.isProbe || current.isProbe);
       current = current.parent
     )
       current.inlineWrites.add(variable);
-    if (context.directExecutionContext() !== variable.owner?.directExecutionContext())
+    if (
+      (!context.isProbe || variable.owner?.isProbe) &&
+      context.directExecutionContext() !== variable.owner?.directExecutionContext()
+    ) {
       variable.capturedWriteTypes.add(type);
+    }
   }
 
   private localDelegatePlace(

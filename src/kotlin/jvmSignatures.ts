@@ -1,6 +1,6 @@
 import type { Core } from './compilerBase';
 import type { FunctionSymbol, MemberSymbol, ParameterSymbol, PropertySymbol } from './symbols';
-import { type ClassType, isNonNullClass, type KType, resolved } from './types';
+import { type ClassType, isNonNullClass, type KType, resolved, substitute, type Substitution } from './types';
 
 interface PropertyAccessors {
   constant: boolean;
@@ -52,7 +52,13 @@ const JVM_MEMBER_ALIASES: Readonly<Record<string, string>> = {
   'kotlin.collections.MutableMap.entries': 'entrySet',
 };
 
-export function jvmSignatures(core: Core, member: MemberSymbol, accessors?: PropertyAccessors): string[] {
+export function jvmSignatures(
+  core: Core,
+  declaration: MemberSymbol,
+  accessors?: PropertyAccessors,
+  substitution?: Substitution
+): string[] {
+  const member = substitution ? instantiateMember(declaration, substitution) : declaration;
   if (member.kind === 'function') {
     const alias = jvmMemberAlias(member);
     return alias
@@ -63,8 +69,21 @@ export function jvmSignatures(core: Core, member: MemberSymbol, accessors?: Prop
   return propertySignatures(core, member, accessors?.customSetter === true);
 }
 
-export function jvmParameterDescriptor(core: Core, parameter: ParameterSymbol): string {
-  const descriptor = typeDescriptor(core, parameter.type);
+function instantiateMember(member: MemberSymbol, substitution: Substitution): MemberSymbol {
+  const extensionReceiver = member.extensionReceiver && substitute(member.extensionReceiver, substitution);
+  if (member.kind === 'function') {
+    return {
+      ...member,
+      extensionReceiver,
+      params: member.params.map((param) => ({ ...param, type: substitute(param.type, substitution) })),
+      returnType: member.returnType && substitute(member.returnType, substitution),
+    };
+  }
+  return { ...member, extensionReceiver, type: member.type && substitute(member.type, substitution) };
+}
+
+export function jvmParameterDescriptor(core: Core, parameter: ParameterSymbol, boxed = false): string {
+  const descriptor = typeDescriptor(core, parameter.type, boxed);
   return parameter.isVararg ? `[${descriptor}` : descriptor;
 }
 
@@ -86,9 +105,10 @@ function functionSignature(core: Core, member: FunctionSymbol, name = member.nam
   ];
   const result = member.returnType && resolved(member.returnType);
   const descriptor = isNonNullClass(result, core.unit) ? 'V' : memberResultDescriptor(core, member, result);
+  const isComparator = [...overriddenMembers(member)].some((base) => base.owner?.kotlinName === 'kotlin.Comparator');
   const parameters = [
     ...(member.extensionReceiver ? [typeDescriptor(core, member.extensionReceiver)] : []),
-    ...member.params.map((param) => jvmParameterDescriptor(core, param)),
+    ...member.params.map((param) => jvmParameterDescriptor(core, param, isComparator)),
   ].join('');
   return `${jvmName(member, name, [...inputs, ...(result && member.owner ? [result] : [])])}(${parameters})${descriptor}`;
 }

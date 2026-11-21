@@ -1,5 +1,5 @@
 import { UNSIGNED_ARRAYS } from './arrays';
-import { kotlin } from './source';
+import { kotlin, mixedIntegralOverloads } from './source';
 
 /** The general functions and classes of `kotlin`: pairs, scope functions, preconditions, lazy values, and arrays. */
 export const STANDARD_SOURCE = kotlin`
@@ -120,6 +120,12 @@ fun Double.mod(other: Double): Double {
     val r = this % other
     return if (r != 0.0 && (r < 0.0) != (other < 0.0)) r + other else r
 }
+inline fun Double.mod(other: Float): Double = mod(other.toDouble())
+inline fun Float.mod(other: Double): Double = toDouble().mod(other)
+inline fun Float.mod(other: Float): Float {
+    val r = this % other
+    return if (r != 0.0f && (r < 0.0f) != (other < 0.0f)) r + other else r
+}
 fun Int.floorDiv(other: Int): Int {
     val q = this / other
     return if ((this xor other) < 0 && q * other != this) q - 1 else q
@@ -128,6 +134,7 @@ fun Long.floorDiv(other: Long): Long {
     val q = this / other
     return if ((this xor other) < 0L && q * other != this) q - 1L else q
 }
+${integralDivisionOverloads()}
 fun Double.isNaN(): Boolean = this != this
 fun Float.isNaN(): Boolean = this != this
 fun Double.isInfinite(): Boolean = this == Double.POSITIVE_INFINITY || this == Double.NEGATIVE_INFINITY
@@ -224,3 +231,15 @@ ${UNSIGNED_ARRAYS.map(
 }`
 ).join('\n\n')}
 `;
+
+function integralDivisionOverloads(): string {
+  return mixedIntegralOverloads((receiver, argument, wide) => {
+    const left = receiver === wide ? 'this' : `this.to${wide}()`;
+    const right = argument === wide ? 'other' : `other.to${wide}()`;
+    const remainder = argument === wide ? '' : `.to${argument}()`;
+    return [
+      `inline fun ${receiver}.floorDiv(other: ${argument}): ${wide} = ${left}.floorDiv(${right})`,
+      `inline fun ${receiver}.mod(other: ${argument}): ${argument} = ${left}.mod(${right})${remainder}`,
+    ];
+  });
+}

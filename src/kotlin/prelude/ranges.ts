@@ -1,4 +1,4 @@
-import { kotlin } from './source';
+import { kotlin, mixedIntegralOverloads } from './source';
 
 /** `kotlin.ranges`: ranges and progressions, written as the standard library writes them. */
 export const RANGES_SOURCE = kotlin`
@@ -355,21 +355,14 @@ operator fun ${type}.${operator}(that: ${type}): ${range}<${type}> = ${implement
 }
 
 function mixedIntegralProgressions(): string {
-  const types = ['Byte', 'Short', 'Int', 'Long'];
-  return types
-    .flatMap((from) =>
-      types.flatMap((to) => {
-        const result = from === 'Long' || to === 'Long' ? 'Long' : 'Int';
-        if (from === result && to === result) return [];
-        const receiver = from === result ? 'this' : `to${result}()`;
-        const end = to === result ? 'to' : `to.to${result}()`;
-        return [
-          `infix fun ${from}.until(to: ${to}): ${result}Range = ${receiver}.until(${end})`,
-          `infix fun ${from}.downTo(to: ${to}): ${result}Progression = ${receiver}.downTo(${end})`,
-        ];
-      })
-    )
-    .join('\n');
+  return mixedIntegralOverloads((from, to, result) => {
+    const receiver = from === result ? 'this' : `to${result}()`;
+    const end = to === result ? 'to' : `to.to${result}()`;
+    return [
+      `infix fun ${from}.until(to: ${to}): ${result}Range = ${receiver}.until(${end})`,
+      `infix fun ${from}.downTo(to: ${to}): ${result}Progression = ${receiver}.downTo(${end})`,
+    ];
+  });
 }
 
 function mixedRangeMembership(): string {

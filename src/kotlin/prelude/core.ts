@@ -91,6 +91,8 @@ ${unsignedConversions()}
     companion object {
         const val MIN_VALUE: Byte = -128
         const val MAX_VALUE: Byte = 127
+        const val SIZE_BYTES: Int = 1
+        const val SIZE_BITS: Int = 8
     }
 }
 
@@ -113,6 +115,8 @@ ${unsignedConversions()}
     companion object {
         const val MIN_VALUE: Short = -32768
         const val MAX_VALUE: Short = 32767
+        const val SIZE_BYTES: Int = 2
+        const val SIZE_BITS: Int = 16
     }
 }
 
@@ -180,6 +184,8 @@ ${unsignedConversions()}
     companion object {
         const val MIN_VALUE: Long = -9223372036854775807L - 1L
         const val MAX_VALUE: Long = 9223372036854775807L
+        const val SIZE_BYTES: Int = 8
+        const val SIZE_BITS: Int = 64
     }
 }
 
@@ -205,6 +211,8 @@ ${unsignedConversions(true)}
         const val POSITIVE_INFINITY: Float = 1.0f / 0.0f
         const val NEGATIVE_INFINITY: Float = -1.0f / 0.0f
         const val NaN: Float = 0.0f / 0.0f
+        const val SIZE_BYTES: Int = 4
+        const val SIZE_BITS: Int = 32
     }
 }
 
@@ -230,6 +238,8 @@ ${unsignedConversions(true)}
         const val POSITIVE_INFINITY: Double = 1.0 / 0.0
         const val NEGATIVE_INFINITY: Double = -1.0 / 0.0
         const val NaN: Double = 0.0 / 0.0
+        const val SIZE_BYTES: Int = 8
+        const val SIZE_BITS: Int = 64
     }
 }
 

@@ -83,11 +83,6 @@ function defineArrays(): void {
     sortValues(frame, array, comparator, values, 0, values.length);
     return UNIT;
   });
-  defineNative('kotlin.collections.MutableList<T>.reverse()', (frame, list) => {
-    const values = elementsOf(frame, list).toReversed();
-    if (values.length > 1) writeBack(frame, list as KObject, values);
-    return UNIT;
-  });
 }
 
 function sortList(frame: Frame, list: Value, [comparator]: Value[]): Value {

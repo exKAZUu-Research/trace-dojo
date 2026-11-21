@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 956 -- The declaration compiler shares symbol and class-linking logic.
+// code-gauge-allow-file fileNcss 975 -- The declaration compiler shares symbol and class-linking logic.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import { VISIBILITY_KEYWORDS } from './ast';
 import type {
@@ -16,7 +16,7 @@ import type {
   TypeParameterDecl,
 } from './ast';
 import { type Compiled, convertRepr, FunctionContext, type PackageScope, type Repr, Scope } from './compilerBase';
-import type { FileContext } from './compilerCore';
+import type { FileContext, MemberRef } from './compilerCore';
 import { unavailableMessage } from './convertSupport';
 import { callFunction, getPropertyValue, isVirtual, propertyRepr, setPropertyValue } from './dispatch';
 import { hashOf, stringHash, stringOf, valueEquals } from './format';
@@ -132,6 +132,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   protected readonly propertyEntries: PropertyEntry[] = [];
   protected readonly entryOfFunction = new Map<FunctionSymbol, FunctionEntry>();
   protected readonly entryOfProperty = new Map<PropertySymbol, PropertyEntry>();
+  private readonly delegatedTypes = new WeakMap<MemberSymbol, Substitution>();
   protected globalDefaults: Value[] = [];
   protected natives: ReadonlyMap<string, NativeFunction> = new Map();
   protected nativeProperties: ReadonlyMap<string, NativeProperty> = new Map();
@@ -1245,7 +1246,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       constant: property.modifiers.keywords.has('const'),
       customSetter: property.setter?.body !== undefined,
     };
-    return jvmSignatures(this.core, member, accessors);
+    return jvmSignatures(this.core, member, accessors, this.delegatedTypes.get(member));
   }
 
   private checkOverrideType(
@@ -1277,24 +1278,12 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- traversal retains the substitution and tracks override roots for each delegate.
   private linkDelegates(entry: ClassEntry): void {
     const { symbol } = entry;
     const delegateSlots = new Map<MemberSymbol, number>();
     for (const field of entry.delegateFields) {
-      const seen = new Set<MemberSymbol>();
-      const visit = (type: ClassType): void => {
-        const substitution = substitutionOf(type);
-        for (const members of type.cls.members.values()) {
-          for (const member of members) {
-            if (member.visibility === 'private' || seen.has(member.root)) continue;
-            seen.add(member.root);
-            this.linkDelegateMember(symbol, member, substitution, field, delegateSlots);
-          }
-        }
-        for (const supertype of type.cls.supertypes) visit(substitute(supertype, substitution) as ClassType);
-      };
-      visit(field.type);
+      for (const { symbol: member, substitution } of delegateMembers(field.type))
+        this.linkDelegateMember(symbol, member, substitution, field, delegateSlots);
     }
   }
 
@@ -1319,6 +1308,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     forward.isLibrary = symbol.isLibrary;
     forward.overridden = bases;
     forward.row = field.spec.row;
+    this.delegatedTypes.set(forward, substitution);
     for (const base of bases) {
       delegateSlots.set(base.root, field.slot);
       symbol.vtable.set(base.root, forward);
@@ -1385,6 +1375,37 @@ function declaredJvmMembers(symbol: ClassSymbol): Set<MemberSymbol> {
     if (implementation.owner === symbol) members.add(implementation);
   }
   return members;
+}
+
+function delegateMembers(type: ClassType): Iterable<MemberRef> {
+  const selected = new Map<MemberSymbol, MemberRef>();
+  const visited = new Set<ClassSymbol>();
+  const pending = [type];
+  for (const current of pending) {
+    if (visited.has(current.cls)) continue;
+    visited.add(current.cls);
+    const substitution = substitutionOf(current);
+    for (const symbol of [...current.cls.members.values()].flat()) {
+      if (symbol.visibility === 'private') continue;
+      const candidate = { symbol, substitution };
+      const previous = selected.get(symbol.root);
+      if (!previous || narrowerDelegate(candidate, previous)) selected.set(symbol.root, candidate);
+    }
+    pending.push(...current.cls.supertypes.map((parent) => substitute(parent, substitution) as ClassType));
+  }
+  return selected.values();
+}
+
+function narrowerDelegate(candidate: MemberRef, previous: MemberRef): boolean {
+  if (overriddenMembers(candidate.symbol).has(previous.symbol)) return true;
+  const result = resultType(candidate);
+  const earlier = resultType(previous);
+  return result !== undefined && earlier !== undefined && isSubtype(result, earlier) && !isSubtype(earlier, result);
+}
+
+function resultType({ symbol, substitution }: MemberRef): KType | undefined {
+  const declared = symbol.kind === 'function' ? symbol.returnType : symbol.type;
+  return declared && substitute(declared, substitution);
 }
 
 function sameSourceDeclaration(a: MemberSymbol, b: MemberSymbol): boolean {

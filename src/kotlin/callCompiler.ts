@@ -71,7 +71,7 @@ export interface DelegateContext {
 export interface Candidate {
   symbol: FunctionSymbol;
   kind: 'member' | 'extension' | 'function' | 'constructor';
-  /** The type arguments that the receiver's type gives the member's class. */
+  /** The type arguments supplied by a receiver or an explicitly declared superclass. */
   substitution: Substitution;
   /** The receiver's static type, for a member or an extension. */
   receiverType: KType | undefined;
@@ -438,7 +438,10 @@ export abstract class CallCompiler extends CompilerCore {
   private inferredTypeParameters(candidate: Candidate): TypeParameterSymbol[] {
     const { symbol } = candidate;
     if (candidate.kind === 'constructor' && symbol.owner)
-      return [...symbol.owner.typeParameters, ...symbol.typeParameters];
+      return [
+        ...symbol.owner.typeParameters.filter((parameter) => !candidate.substitution.has(parameter)),
+        ...symbol.typeParameters,
+      ];
     return symbol.typeParameters;
   }
 
@@ -1008,7 +1011,7 @@ export abstract class CallCompiler extends CompilerCore {
 
   /** A context for compiling a lambda only to learn its result type, whose code is thrown away. */
   protected probeContext(context: FunctionContext): FunctionContext {
-    return new FunctionContext(context, true, '<probe>', context.info.isLibrary, undefined);
+    return new FunctionContext(context, true, '<probe>', context.info.isLibrary, undefined, true);
   }
 }
 
