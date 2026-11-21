@@ -1347,20 +1347,29 @@ fun <T> MutableList<T>.fill(value: T) {
     for (index in 0 until size) this[index] = value
 }
 
-inline fun <T> buildList(builderAction: MutableList<T>.() -> Unit): List<T> {
-    val list = NativeLists.builder<T>()
+inline fun <T> buildList(@CallsExactlyOnce builderAction: MutableList<T>.() -> Unit): List<T> =
+    buildList<T>(10, builderAction)
+
+inline fun <T> buildList(capacity: Int, @CallsExactlyOnce builderAction: MutableList<T>.() -> Unit): List<T> {
+    val list = NativeLists.builder<T>(capacity)
     list.builderAction()
     return list.build()
 }
 
-inline fun <E> buildSet(builderAction: MutableSet<E>.() -> Unit): Set<E> {
-    val set = LinkedHashSet<E>()
+inline fun <E> buildSet(@CallsExactlyOnce builderAction: MutableSet<E>.() -> Unit): Set<E> =
+    buildSet<E>(10, builderAction)
+
+inline fun <E> buildSet(capacity: Int, @CallsExactlyOnce builderAction: MutableSet<E>.() -> Unit): Set<E> {
+    val set = LinkedHashSet<E>(NativeLists.builderCapacity(capacity))
     set.builderAction()
     return set.finishBuild()
 }
 
-inline fun <K, V> buildMap(builderAction: MutableMap<K, V>.() -> Unit): Map<K, V> {
-    val map = LinkedHashMap<K, V>()
+inline fun <K, V> buildMap(@CallsExactlyOnce builderAction: MutableMap<K, V>.() -> Unit): Map<K, V> =
+    buildMap<K, V>(10, builderAction)
+
+inline fun <K, V> buildMap(capacity: Int, @CallsExactlyOnce builderAction: MutableMap<K, V>.() -> Unit): Map<K, V> {
+    val map = LinkedHashMap<K, V>(NativeLists.builderCapacity(capacity))
     map.builderAction()
     return map.finishBuild()
 }
@@ -1411,7 +1420,8 @@ fun <T> List<T>.binarySearch(fromIndex: Int = 0, toIndex: Int = size, comparison
 
 object NativeLists {
     external fun <T> of(elements: Collection<T>): MutableList<T>
-    external fun <T> builder(): ListBuilder<T>
+    external fun <T> builder(capacity: Int): ListBuilder<T>
+    external fun builderCapacity(capacity: Int): Int
     external fun <T> toArray(elements: Iterable<T>): Array<T>
     external fun <T> removeIfArrayList(list: MutableCollection<T>, predicate: (T) -> Boolean): Boolean?
 }

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 957 -- the natives of the collections, which share the helpers of their items.
+// code-gauge-allow-file fileNcss 970 -- the natives of the collections, which share the helpers of their items.
 import { runtimeClassOf } from '../dispatch';
 import { hashOf, identityHash, stringOf, valueEquals } from '../format';
 import { toInt32 } from '../operators';
@@ -172,7 +172,6 @@ export function newList(
   const list = new KObject(libraryClass(`kotlin.collections.${className}`), 0);
   list.items = values;
   if (className === 'ArrayList') list.arrayList = { size: values.length, capacity: values.length };
-  if (className === 'ListBuilder') list.listBuilderCapacity = 10;
   list.modCount = 0;
   list.readOnlyCollection = className === 'EmptyList';
   return list;
@@ -427,6 +426,7 @@ function listStorageForSize(frame: Frame, list: KObject, required: number): Valu
   return grown;
 }
 
+// code-gauge-allow functionNcss 32 -- registers the native list classes and the helper operations they share.
 function defineLists(): void {
   const constructors: [string, (frame: Frame, instance: KObject, args: Value[]) => void][] = [
     ['()', () => {}],
@@ -448,7 +448,15 @@ function defineLists(): void {
     'kotlin.collections.NativeLists.removeIfArrayList(MutableCollection<T>, (T) -> Boolean)',
     (frame, _receiver, [list, predicate]) => removeIfArrayList(frame, list as KObject, predicate as KObject)
   );
-  defineNative('kotlin.collections.NativeLists.builder()', (frame) => newList(frame, 'ListBuilder', []));
+  defineNative('kotlin.collections.NativeLists.builder(Int)', (frame, _receiver, [capacity]) => {
+    const size = checkedBuilderCapacity(frame, capacity as number);
+    const list = newList(frame, 'ListBuilder', []);
+    list.listBuilderCapacity = size;
+    return list;
+  });
+  defineNative('kotlin.collections.NativeLists.builderCapacity(Int)', (frame, _receiver, [capacity]) =>
+    checkedBuilderCapacity(frame, capacity as number)
+  );
   defineNative('kotlin.collections.ListBuilder.build()', (_frame, list) => {
     (list as KObject).native = { isBuilt: true };
     return list;
@@ -492,6 +500,12 @@ function finishListAllocation(
   if (kind === 'ArrayList') list.arrayList = { size, capacity: defaultSize ? undefined : (initialCapacity ?? size) };
   const allocated = kind === 'ArrayDeque' ? (initialCapacity ?? size) : size;
   frame.runtime.allocate(frame, allocated + 1);
+}
+
+function checkedBuilderCapacity(frame: Frame, capacity: number): number {
+  if (capacity < 0) throwError(frame, 'java.lang.IllegalArgumentException', 'capacity must be non-negative.');
+  frame.runtime.allocate(frame, capacity);
+  return capacity;
 }
 
 function registerListNative(type: string, signature: string, native: ListNative): void {
@@ -747,11 +761,12 @@ function checkIteratorModification(frame: Frame, current: ItemIteratorState): vo
 const MAP = 'kotlin.collections.NativeMap';
 const SET = 'kotlin.collections.NativeSet';
 
-/** The hash of a set or map: the sum of its elements' hashes, wrapping as Java's int does. */
-function sumHashes(hashes: number[]): number {
-  let sum = 0;
-  for (const hash of hashes) sum = toInt32(sum + hash);
-  return sum;
+function hashCollection(frame: Frame, receiver: Value): number {
+  return withCollectionElements(frame, receiver, (elements) => {
+    let sum = 0;
+    for (const element of elements) sum = toInt32(sum + hashOf(frame, element));
+    return sum;
+  });
 }
 
 function storeOf(value: Value): KStore {
@@ -759,14 +774,17 @@ function storeOf(value: Value): KStore {
 }
 
 /** Finds the entry of a key, comparing with `equals` among the entries of its hash, or by order in a sorted store. */
-export function findEntry(frame: Frame, store: KStore, key: Value): HashEntry | undefined {
-  if (!store.isAllocated && store.entries.length === 0) return undefined;
+export function findEntry(frame: Frame, store: KStore, key: Value, removing = false): HashEntry | undefined {
+  if (!removing && !store.isAllocated && store.entries.length === 0) return undefined;
   if (store.isSingleton) return store.entries.find((entry) => valueEquals(frame, key, entry.key));
   if (store.order === 'sorted') {
     const { index, isFound } = store.positionOf(frame, key);
     return isFound ? store.entries[index] : undefined;
   }
-  return findHashedEntry(frame, store, key, hashOf(frame, key));
+  const tableCapacity = store.capacity;
+  const hash = hashOf(frame, key);
+  // HashMap lookups read their table before invoking hashCode, and resize clears the buckets of the old table.
+  return removing || store.capacity === tableCapacity ? findHashedEntry(frame, store, key, hash) : undefined;
 }
 
 function findHashedEntry(frame: Frame, store: KStore, key: Value, hash: number): HashEntry | undefined {
@@ -869,7 +887,7 @@ function defineMaps(): void {
     'remove(K)': (frame, map, [key]) => {
       requireMutableMap(frame, map);
       const store = storeOf(map);
-      const entry = findEntry(frame, store, key);
+      const entry = findEntry(frame, store, key, true);
       if (!entry) return;
       store.remove(entry);
       touch(map as KObject);
@@ -890,7 +908,7 @@ function defineMaps(): void {
     },
     'equals(Any?)': (frame, map, [other]) => mapEquals(frame, map as KObject, other),
     'hashCode()': (frame, map) =>
-      sumHashes(storeOf(map).entries.map((entry) => hashOf(frame, entry.key) ^ hashOf(frame, entry.value))),
+      hashCollection(frame, readCollectionProperty(frame, map, 'kotlin.collections.Map', 'entries')),
     'toString()': (frame, map) => mapToString(frame, map as KObject),
   };
   for (const [signature, native] of Object.entries(natives)) defineNative(`${MAP}.${signature}`, native);
@@ -978,7 +996,7 @@ function defineSets(): void {
     'remove(E)': (frame, set, [element]) => {
       if (isBuilt(set)) requireMutableMap(frame, set);
       const store = storeOf(set);
-      const entry = findEntry(frame, store, element);
+      const entry = findEntry(frame, store, element, true);
       if (!entry) return false;
       requireMutableMap(frame, set);
       store.remove(entry);
@@ -1004,7 +1022,7 @@ function defineSets(): void {
       return UNIT;
     },
     'equals(Any?)': (frame, set, [other]) => setEquals(frame, set, other),
-    'hashCode()': (frame, set) => sumHashes(storeOf(set).entries.map((entry) => hashOf(frame, entry.key))),
+    'hashCode()': hashCollection,
     'toString()': renderCollection,
   };
   for (const [signature, native] of Object.entries(natives)) defineNative(`${SET}.${signature}`, native);
@@ -1157,9 +1175,7 @@ function defineViewReading(owner: string): void {
   });
   defineNative(`${owner}.toString()`, renderCollection);
   defineNative(`${owner}.hashCode()`, (frame, view) =>
-    viewOf(view).view === 'values'
-      ? identityHash(view)
-      : sumHashes(viewElements(frame, view as KObject).map((element) => hashOf(frame, element)))
+    viewOf(view).view === 'values' ? identityHash(view) : hashCollection(frame, view)
   );
   defineNative(`${owner}.equals(Any?)`, (frame, view, [other]) => {
     if (viewOf(view).view === 'values') return view === other;
@@ -1170,7 +1186,7 @@ function defineViewReading(owner: string): void {
 function matchingViewEntry(frame: Frame, view: Value, element: Value, removing: boolean): HashEntry | undefined {
   const { view: kind, map } = viewOf(view);
   const store = storeOf(map);
-  if (kind === 'keys') return findEntry(frame, store, element);
+  if (kind === 'keys') return findEntry(frame, store, element, removing);
   if (kind === 'values') return findMapValue(frame, store, element);
   return matchingEntry(frame, store, element, removing);
 }
@@ -1189,7 +1205,7 @@ function matchingEntry(frame: Frame, store: KStore, element: Value, removing: bo
   const key = readCollectionProperty(frame, element, owner, 'key');
   if (removing) {
     const value = readCollectionProperty(frame, element, owner, 'value');
-    const found = findEntry(frame, store, key);
+    const found = findEntry(frame, store, key, true);
     return found && objectsEqual(frame, value, found.value) ? found : undefined;
   }
   const found = findEntry(frame, store, key);
@@ -1289,11 +1305,12 @@ function defineNativeEntry(): void {
   });
   defineNative(`${entry}.equals(Any?)`, (frame, receiver, [other]) => {
     const owner = 'kotlin.collections.Map.Entry';
+    if (receiver === other) return true;
     if (!(other instanceof KObject) || !other.cls.isSubclassOf(libraryClass(owner))) return false;
     const { key, value } = entryOf(receiver).entry;
     return (
-      valueEquals(frame, key, readCollectionProperty(frame, other, owner, 'key')) &&
-      valueEquals(frame, value, readCollectionProperty(frame, other, owner, 'value'))
+      objectsEqual(frame, key, readCollectionProperty(frame, other, owner, 'key')) &&
+      objectsEqual(frame, value, readCollectionProperty(frame, other, owner, 'value'))
     );
   });
 }

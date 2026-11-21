@@ -258,7 +258,7 @@ function displayNodeOf(value: Value, seen: Set<unknown>): DisplayNode | undefine
     return { kind: 'value', value: primitiveScalar(value.kind, value.value) as number | string };
   if (!(value instanceof KObject) || seen.has(value)) return undefined;
   if (value.turtle) return turtleNodeOf(value.turtle);
-  if (value.builder !== undefined) return { kind: 'value', value: value.builder };
+  if (value.builder !== undefined) return { kind: 'value', value: value.builder.text() };
   // An enum constant shows as its name, which is what learners write for it.
   const enumName = (value.native as { name?: unknown } | undefined)?.name;
   if (value.cls.kind === 'enum' && typeof enumName === 'string') return { kind: 'value', value: enumName };

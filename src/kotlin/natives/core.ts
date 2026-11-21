@@ -347,6 +347,20 @@ export function compareStrings(a: string, b: string): number {
 }
 
 /** The check of `StringBuilder`'s indexes in the JDK, worded as its `Preconditions.checkIndex` words it. */
+/** Reverses a string as `StringBuilder.reverse` does, which keeps each surrogate pair in order. */
+export function reverseKeepingPairs(value: string): string {
+  // oxlint-disable-next-line typescript/no-misused-spread -- Spreading splits at code points, which keeps surrogate pairs together as Java does.
+  return [...value].toReversed().join('');
+}
+
+export function stringRangeError(frame: Frame, start: number, end: number, length: number): never {
+  return throwError(
+    frame,
+    'java.lang.StringIndexOutOfBoundsException',
+    `Range [${start}, ${end}) out of bounds for length ${length}`
+  );
+}
+
 export function checkStringIndex(frame: Frame, position: number, length: number): void {
   if (position < 0 || position >= length) {
     throwError(

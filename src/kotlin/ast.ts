@@ -322,3 +322,8 @@ export interface CallExpression {
   /** A lambda written after the parentheses, which is the last argument. */
   trailingLambda: LambdaExpression | undefined;
 }
+
+export function isNullLiteral(expression: Expression): boolean {
+  while (expression.kind === 'parenthesized') expression = expression.expression;
+  return expression.kind === 'null';
+}

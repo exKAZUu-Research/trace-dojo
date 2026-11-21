@@ -1555,6 +1555,105 @@ fun main() {
       '[1, 2, 3, 0]\n[3, 2, 1, 0]\ndcba\ndabc\n[5, 8, 2, 1]\n[b, A, a, c]\n[b, A, a, c]\n[b, a, A, c]\njava.lang.ArrayIndexOutOfBoundsException: Array index out of range: 7\njava.lang.IndexOutOfBoundsException: fromIndex: 0, toIndex: 7, size: 4\njava.lang.IllegalArgumentException: fromIndex(7) > toIndex(-1)\nfixed\nfixed\n[ab, x]\n[a, b, x]\n',
   },
   {
+    name: 'StringBuilder sequence reads observe the JVM backing storage and validation order',
+    source: `class Observed(private val edit: () -> Unit) : CharSequence {
+    override val length: Int get() { println("length"); return 2 }
+    override fun get(index: Int): Char {
+        println("read $index")
+        if (index == 0) edit()
+        return "bc"[index]
+    }
+    override fun subSequence(startIndex: Int, endIndex: Int): CharSequence = "bc".substring(startIndex, endIndex)
+    override fun toString(): String = "label"
+}
+fun main() {
+    for (position in 0..3) {
+        val builder = StringBuilder("abc")
+        builder.insert(position, builder as CharSequence)
+        println(builder.toString())
+    }
+    val builder = StringBuilder("a")
+    builder.append(Observed({ builder.append("x") }))
+    println(builder.toString())
+    builder.setLength(1)
+    builder.append(Observed({ builder.setLength(0) }))
+    println(builder.toString())
+
+    val grown = StringBuilder(1).append("a")
+    grown.append(Observed({ grown.setCharAt(0, 'X') }))
+    println(grown.toString())
+    val retained = StringBuilder(8).append("a")
+    retained.append(Observed({ retained.setCharAt(0, 'X') }))
+    println(retained.toString())
+    for (offset in listOf(-1, 9)) {
+        try { builder.insert(offset, Observed({ println("unexpected") })) }
+        catch (e: IndexOutOfBoundsException) { println(e.message) }
+    }
+    println(Observed({}).padStart(4, '_').toString())
+    println(Observed({}).padEnd(4, '_').toString())
+}`,
+    stdout:
+      'abcabc\naaaabc\nababac\nabcabc\nlength\nlength\nread 0\nread 1\nabc\nlength\nlength\nread 0\nread 1\nabc\nlength\nlength\nread 0\nread 1\nabc\nlength\nlength\nread 0\nread 1\nXbc\nlength\nRange [-1, 3) out of bounds for length 3\nlength\nRange [9, 3) out of bounds for length 3\nlength\nlength\nlength\nlength\nread 0\nread 1\n__bc\nlength\nlength\nlength\nread 0\nread 1\nlength\nbc__\n',
+  },
+  {
+    name: 'collection callbacks respect reference identity, live hashing, and builder capacity',
+    source: `class Key(val value: Int, val callback: () -> Unit = {}) {
+    override fun hashCode(): Int { callback(); return value }
+    override fun equals(other: Any?): Boolean {
+        println("equals")
+        return other is Key && other.value == value
+    }
+}
+fun describe(value: Key?) {
+    when (value) {
+        (null) -> println("null")
+        else -> println("value")
+    }
+}
+fun main() {
+    val key = Key(1)
+    println(arrayOf(key).contentEquals(arrayOf(key)))
+    val a = hashMapOf(key to key).entries.first()
+    println(a == a)
+    println(a == hashMapOf(key to key).entries.first())
+    describe(key)
+    describe(null)
+    for (linked in listOf(false, true)) {
+        val map: MutableMap<Key, Int> = if (linked) LinkedHashMap<Key, Int>(4) else HashMap<Key, Int>(4)
+        map[Key(1)] = 10
+        map[Key(2)] = 20
+        map[Key(3)] = 30
+        println(map.getOrDefault(Key(1, { map[Key(4)] = 40 }), 7))
+        println(map.size)
+    }
+    val set = linkedSetOf<Key>()
+    var modify = false
+    set.add(Key(1, { if (modify) set.clear() }))
+    set.add(Key(2))
+    modify = true
+    try { println(set.hashCode()) }
+    catch (e: ConcurrentModificationException) { println("set modified") }
+    for (view in listOf(false, true)) {
+        val map = linkedMapOf<Int, Key>()
+        map[1] = Key(1, { map.clear() })
+        map[2] = Key(2)
+        try { println(if (view) map.entries.hashCode() else map.hashCode()) }
+        catch (e: ConcurrentModificationException) { println("map modified") }
+    }
+
+    val captured: Int
+    println(buildList(2) { captured = 4; add(1); add(2) })
+    println(captured)
+    println(buildSet(3) { add(2); add(1); add(2) })
+    println(buildMap(4) { put(2, 3); put(1, 4) })
+    try { buildList<Int>(-1) {} } catch (e: IllegalArgumentException) { println(e.message) }
+    try { buildSet<Int>(-1) {} } catch (e: IllegalArgumentException) { println(e.message) }
+    try { buildMap<Int, Int>(-1) {} } catch (e: IllegalArgumentException) { println(e.message) }
+}`,
+    stdout:
+      'true\ntrue\ntrue\nvalue\nnull\n7\n4\n7\n4\nset modified\nmap modified\nmap modified\n[1, 2]\n4\n[2, 1]\n{2=3, 1=4}\ncapacity must be non-negative.\ncapacity must be non-negative.\ncapacity must be non-negative.\n',
+  },
+  {
     name: 'exactly-once scope lambdas initialize deferred vals',
     source: `fun main() {
     val first: Int

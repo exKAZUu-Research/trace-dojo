@@ -1,4 +1,5 @@
 // code-gauge-allow-file fileNcss 432 -- the compiler of one area of Kotlin, whose parts call each other closely.
+import { isNullLiteral } from './ast';
 import type { CallExpression, Expression, TypeRef } from './ast';
 import { type ArgumentSyntax } from './callCompiler';
 import {
@@ -728,11 +729,6 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
         };
     return { type: resultType, repr, eval: convertRepr(cast, 'ref', repr) };
   }
-}
-
-function isNullLiteral(expression: Expression): boolean {
-  while (expression.kind === 'parenthesized') expression = expression.expression;
-  return expression.kind === 'null';
 }
 
 function typeAfterCast(operand: KType, target: KType): KType {

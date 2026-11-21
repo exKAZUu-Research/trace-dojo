@@ -1,6 +1,7 @@
 import { type HashEntry as SharedHashEntry, HashStore } from '../interpreter/hashStore';
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { Frame } from './runtime';
+import type { StringBuilderStorage } from './stringBuilderStorage';
 import type { ClassSymbol } from './symbols';
 
 /**
@@ -139,7 +140,7 @@ export class KObject {
   /** The entries of a map or a set. */
   store?: KStore;
   /** The text of a `StringBuilder`. */
-  builder?: string;
+  builder?: StringBuilderStorage;
   /** Counts the structural changes of a collection, which make its iterators fail fast. */
   modCount?: number;
   /** Whether Kotlin/JVM exposes the collection through its read-only runtime marker. */

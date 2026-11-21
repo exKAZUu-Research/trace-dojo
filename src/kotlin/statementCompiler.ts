@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 987 -- One method per kind of Kotlin statement and control structure.
+// code-gauge-allow-file fileNcss 991 -- One method per kind of Kotlin statement and control structure.
 import { CompileError } from '../interpreter/diagnostics';
 import type {
   AssignmentStatement,
@@ -12,6 +12,7 @@ import type {
   WhenCondition,
   WhileStatement,
 } from './ast';
+import { isNullLiteral } from './ast';
 import type { ArgumentSyntax } from './callCompiler';
 import {
   type Compiled,
@@ -1390,6 +1391,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
   }
 
   /** A `when` branch's value, which the subject equals for the branch to run. */
+  // code-gauge-allow functionCognitiveComplexity 16 -- the branch test and its resulting narrowing share resolved operands.
   private compileWhenValue(
     scope: Scope,
     context: FunctionContext,
@@ -1421,6 +1423,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
         `演算子 == は ${typeToString(resolved(subject.type))} と ${typeToString(resolved(value.type))} には使えません。`
       );
     }
+    const nullLiteral = isNullLiteral(expression);
     const valueCase = caseOf(value);
     const narrowing =
       subject.stableKey && valueCase ? excludingCases(subject.stableKey, [valueCase.id]) : new Map<string, KType>();
@@ -1429,6 +1432,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     return {
       test: (frame) => {
         const a = subjectEval(frame);
+        if (nullLiteral) return a === NULL;
         const b = valueEval(frame);
         if (a instanceof Boxed && b instanceof Boxed && subjectKind) return a.value === b.value;
         return valueEquals(frame, a, b);
@@ -1441,7 +1445,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
   /** Notes the constants a `when` branch covers: enum entries, objects, `true`, `false`, and `null`. */
   private recordCovered(value: Compiled, expression: Expression, covered: Set<string>): void {
     if (expression.kind === 'boolean') covered.add(String(expression.value));
-    if (expression.kind === 'null') covered.add('null');
+    if (isNullLiteral(expression)) covered.add('null');
     const found = caseOf(value);
     if (found) covered.add(found.id);
   }

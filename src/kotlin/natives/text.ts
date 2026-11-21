@@ -1,15 +1,12 @@
-// code-gauge-allow-file fileNcss 413 -- the text and character natives share string, casing, and parsing operations.
 import { formatJava, type FormatValues } from '../../interpreter/javaFormatter';
 import { parseHexFloat } from '../../java/hexFloat';
 import { callFunction, runtimeClassOf } from '../dispatch';
 import { float32FromText } from '../float32';
-import { charToString, formatPrimitive, hashOf, stringOf } from '../format';
+import { charToString, hashOf, stringOf } from '../format';
 import { toInt32 } from '../operators';
 import type { Frame } from '../runtime';
 import { Boxed, KObject, UNIT, type Value } from '../values';
 import {
-  copySequenceForBuilder,
-  copySequenceRangeForBuilder,
   sequenceAll,
   sequenceContentEquals,
   sequenceFindAnyString,
@@ -22,7 +19,7 @@ import {
   sequenceSplit,
 } from './charSequences';
 import { elementsOf, newList } from './collections';
-import { checkStringIndex, compareStrings, substring } from './core';
+import { compareStrings, reverseKeepingPairs, stringRangeError, substring } from './core';
 import {
   compareJdkCase,
   foldJdkCodePoint,
@@ -34,17 +31,12 @@ import {
   upperJdkChar,
 } from './jdkCase';
 import { isJdkDefined, isJdkDigit, isJdkLetter, isJdkLetterOrDigit } from './jdkCharacter';
-import { defineNative, defineNativeProperty, libraryClass, throwError } from './registry';
+import { defineNative, libraryClass, throwError } from './registry';
+import { defineStringBuilders } from './stringBuilders';
 import { textSearch } from './textSearch';
 
 const TEXT = 'kotlin.text';
 const LINE_ENDINGS = /\r\n|\n|\r/;
-
-/** Reverses a string as `StringBuilder.reverse` does, which keeps each surrogate pair in order. */
-function reverseKeepingPairs(value: string): string {
-  // oxlint-disable-next-line typescript/no-misused-spread -- Spreading splits at code points, which keeps surrogate pairs together as Java does.
-  return [...value].toReversed().join('');
-}
 
 /** Removes the characters up to U+0020 at both ends, as `Double.parseDouble` trims its input. */
 function trimControls(value: string): string {
@@ -595,9 +587,10 @@ function copyStringChars(
   from: number,
   to: number
 ): KObject {
-  if (from < 0 || from > to || to > value.length) rangeError(frame, from, to, value.length);
+  if (from < 0 || from > to || to > value.length) stringRangeError(frame, from, to, value.length);
   const chars = array.items as Value[];
-  if (offset < 0 || offset > chars.length - (to - from)) rangeError(frame, offset, offset + to - from, chars.length);
+  if (offset < 0 || offset > chars.length - (to - from))
+    stringRangeError(frame, offset, offset + to - from, chars.length);
   for (let index = from; index < to; index++) {
     // oxlint-disable-next-line unicorn/prefer-code-point -- a Char array holds UTF-16 code units.
     chars[offset + index - from] = value.charCodeAt(index);
@@ -720,215 +713,8 @@ export function formatText(frame: Frame, pattern: string, args: Value[], sink?: 
   return formatJava(pattern, args, values, sink);
 }
 
-// StringBuilder.
-
-const BUILDER = `${TEXT}.StringBuilder`;
-
-function builder(value: Value): KObject {
-  return value as KObject;
-}
-
-function setBuilder(frame: Frame, receiver: Value, value: string, work = value.length): Value {
-  frame.runtime.allocateString(frame, value.length, work);
-  builder(receiver).builder = value;
-  return receiver;
-}
-
-function appendText(frame: Frame, receiver: Value, added: string): Value {
-  return setBuilder(frame, receiver, (builder(receiver).builder as string) + added, added.length);
-}
-
-function insertBuilderText(frame: Frame, receiver: Value, position: number, added: string): Value {
-  const current = builder(receiver).builder as string;
-  if (position < 0 || position > current.length) rangeError(frame, position, current.length, current.length);
-  return setBuilder(
-    frame,
-    receiver,
-    current.slice(0, position) + added + current.slice(position),
-    current.length - position + added.length
-  );
-}
-
-function defineBuilder(): void {
-  defineBuilderReading();
-  defineBuilderAppending();
-  defineBuilderEditing();
-}
-
-/** StringBuilder's constructors and what reads it. */
-// code-gauge-allow functionNcss 38 -- registers the natives of one class together, in the order the prelude declares them.
-function defineBuilderReading(): void {
-  defineNative(`${BUILDER}.<init>()`, (_frame, instance) => {
-    builder(instance).builder = '';
-    return UNIT;
-  });
-  defineNative(`${BUILDER}.<init>(Int)`, (frame, instance, [capacity]) => {
-    if ((capacity as number) < 0) throwError(frame, 'java.lang.NegativeArraySizeException', String(capacity as number));
-    builder(instance).builder = '';
-    return UNIT;
-  });
-  defineNative(`${BUILDER}.<init>(String)`, (_frame, instance, [content]) => {
-    builder(instance).builder = text(content);
-    return UNIT;
-  });
-  defineNative(`${BUILDER}.<init>(CharSequence)`, (frame, instance, [content]) => {
-    builder(instance).builder = copySequenceForBuilder(frame, content, true);
-    return UNIT;
-  });
-  defineNativeProperty(`${BUILDER}.length`, (_frame, receiver) => (builder(receiver).builder as string).length);
-  defineNative(`${BUILDER}.get(Int)`, (frame, receiver, [index]) => {
-    const value = builder(receiver).builder as string;
-    const position = index as number;
-    checkStringIndex(frame, position, value.length);
-    // oxlint-disable-next-line unicorn/prefer-code-point -- Kotlin chars are UTF-16 code units.
-    return value.charCodeAt(position);
-  });
-  defineNative(`${BUILDER}.subSequence(Int, Int)`, (frame, receiver, [start, end]) =>
-    substring(frame, builder(receiver).builder as string, start as number, end as number)
-  );
-  defineNative(`${BUILDER}.indexOf(String)`, (_frame, receiver, [value]) =>
-    (builder(receiver).builder as string).indexOf(text(value))
-  );
-  defineNative(`${BUILDER}.lastIndexOf(String)`, (_frame, receiver, [value]) =>
-    (builder(receiver).builder as string).lastIndexOf(text(value))
-  );
-  defineNative(`${BUILDER}.substring(Int)`, (frame, receiver, [start]) => {
-    const current = builder(receiver).builder as string;
-    return substring(frame, current, start as number, current.length);
-  });
-  defineNative(`${BUILDER}.substring(Int, Int)`, (frame, receiver, [start, end]) =>
-    substring(frame, builder(receiver).builder as string, start as number, end as number)
-  );
-  defineNative(`${BUILDER}.replace(Int, Int, String)`, (frame, receiver, [start, end, value]) => {
-    const current = builder(receiver).builder as string;
-    const from = start as number;
-    const to = Math.min(end as number, current.length);
-    if (from < 0 || from > current.length || from > to) rangeError(frame, from, to, current.length);
-    const added = text(value);
-    return setBuilder(
-      frame,
-      receiver,
-      current.slice(0, from) + added + current.slice(to),
-      current.length - to + added.length
-    );
-  });
-  defineNative(`${BUILDER}.compareTo(StringBuilder)`, (_frame, receiver, [other]) =>
-    compareStrings(builder(receiver).builder as string, builder(other).builder as string)
-  );
-  defineNative(`${BUILDER}.toString()`, (frame, receiver) => result(frame, builder(receiver).builder as string));
-}
-
-function defineBuilderAppending(): void {
-  defineNative(`${BUILDER}.append(Any?)`, (frame, receiver, [value]) =>
-    appendText(frame, receiver, stringOf(frame, value))
-  );
-  defineNative(`${BUILDER}.append(String?)`, (frame, receiver, [value]) =>
-    appendText(frame, receiver, value === undefined ? 'null' : text(value))
-  );
-  defineNative(`${BUILDER}.append(CharSequence?)`, (frame, receiver, [value]) =>
-    appendText(frame, receiver, value === undefined ? 'null' : copySequenceForBuilder(frame, value))
-  );
-  defineNative(`${BUILDER}.append(CharSequence?, Int, Int)`, (frame, receiver, [value, from, to]) =>
-    appendText(frame, receiver, copySequenceRangeForBuilder(frame, value, from as number, to as number))
-  );
-  defineNative(`${BUILDER}.append(Char)`, (frame, receiver, [value]) =>
-    appendText(frame, receiver, charToString(value as number))
-  );
-  defineNative(`${BUILDER}.append(Int)`, (frame, receiver, [value]) =>
-    appendText(frame, receiver, String(value as number))
-  );
-  defineNative(`${BUILDER}.append(Long)`, (frame, receiver, [value]) =>
-    appendText(frame, receiver, String(value as bigint))
-  );
-  defineNative(`${BUILDER}.append(Double)`, (frame, receiver, [value]) =>
-    appendText(frame, receiver, formatPrimitive('Double', value as number))
-  );
-  defineNative(`${BUILDER}.append(Boolean)`, (frame, receiver, [value]) =>
-    appendText(frame, receiver, String(value as boolean))
-  );
-  defineNative(`${BUILDER}.append(CharArray)`, (frame, receiver, [value]) =>
-    appendText(frame, receiver, ((value as KObject).items as number[]).map(charToString).join(''))
-  );
-}
-
-/** What changes a StringBuilder in place. */
-// code-gauge-allow functionNcss 35 -- registers the natives of one class together, in the order the prelude declares them.
-function defineBuilderEditing(): void {
-  defineNative(`${BUILDER}.insert(Int, Any?)`, (frame, receiver, [index, value]) =>
-    insertBuilderText(frame, receiver, index as number, stringOf(frame, value))
-  );
-  defineNative(`${BUILDER}.insert(Int, String?)`, (frame, receiver, [index, value]) =>
-    insertBuilderText(frame, receiver, index as number, value === undefined ? 'null' : text(value))
-  );
-  defineNative(`${BUILDER}.insert(Int, CharArray)`, (frame, receiver, [index, value]) =>
-    insertBuilderText(
-      frame,
-      receiver,
-      index as number,
-      ((value as KObject).items as number[]).map(charToString).join('')
-    )
-  );
-  defineNative(`${BUILDER}.insert(Int, CharSequence?)`, (frame, receiver, [index, value]) =>
-    insertBuilderText(
-      frame,
-      receiver,
-      index as number,
-      value === undefined ? 'null' : copySequenceForBuilder(frame, value)
-    )
-  );
-  defineNative(`${BUILDER}.reverse()`, (frame, receiver) =>
-    setBuilder(frame, receiver, reverseKeepingPairs(builder(receiver).builder as string))
-  );
-  defineNative(`${BUILDER}.deleteCharAt(Int)`, (frame, receiver, [index]) => {
-    const current = builder(receiver).builder as string;
-    const position = index as number;
-    checkStringIndex(frame, position, current.length);
-    return setBuilder(
-      frame,
-      receiver,
-      current.slice(0, position) + current.slice(position + 1),
-      current.length - position - 1
-    );
-  });
-  defineNative(`${BUILDER}.delete(Int, Int)`, (frame, receiver, [start, end]) => {
-    const current = builder(receiver).builder as string;
-    const from = start as number;
-    const to = Math.min(end as number, current.length);
-    if (from < 0 || from > to) rangeError(frame, from, to, current.length);
-    return setBuilder(frame, receiver, current.slice(0, from) + current.slice(to), current.length - to);
-  });
-  defineNative(`${BUILDER}.setLength(Int)`, (frame, receiver, [length]) => {
-    const current = builder(receiver).builder as string;
-    const size = length as number;
-    if (size < 0) throwError(frame, 'java.lang.StringIndexOutOfBoundsException', `String index out of range: ${size}`);
-    frame.runtime.allocateString(frame, size, Math.max(0, size - current.length));
-    builder(receiver).builder = size <= current.length ? current.slice(0, size) : current.padEnd(size, '\0');
-    return UNIT;
-  });
-  defineNative(`${BUILDER}.setCharAt(Int, Char)`, (frame, receiver, [index, char]) => {
-    const current = builder(receiver).builder as string;
-    const position = index as number;
-    checkStringIndex(frame, position, current.length);
-    setBuilder(
-      frame,
-      receiver,
-      current.slice(0, position) + charToString(char as number) + current.slice(position + 1),
-      1
-    );
-    return UNIT;
-  });
-}
-
-function rangeError(frame: Frame, start: number, end: number, length: number): never {
-  return throwError(
-    frame,
-    'java.lang.StringIndexOutOfBoundsException',
-    `Range [${start}, ${end}) out of bounds for length ${length}`
-  );
-}
-
 defineStrings();
-defineBuilder();
+defineStringBuilders();
 
 defineNative(
   'java.lang.formatStream(Boolean, String, Array<out Any?>)',

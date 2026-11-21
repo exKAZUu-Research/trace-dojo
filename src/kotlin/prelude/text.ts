@@ -35,6 +35,7 @@ external class StringBuilder : CharSequence, Comparable<StringBuilder> {
     external fun insert(index: Int, value: String?): StringBuilder
     external fun insert(index: Int, value: CharArray): StringBuilder
     external fun insert(index: Int, value: CharSequence?): StringBuilder
+    external fun insert(index: Int, value: CharSequence?, startIndex: Int, endIndex: Int): StringBuilder
     external fun reverse(): StringBuilder
     external fun deleteCharAt(index: Int): StringBuilder
     external fun delete(startIndex: Int, endIndex: Int): StringBuilder
@@ -315,12 +316,16 @@ external fun String.toCharArray(destination: CharArray, destinationOffset: Int =
 fun CharSequence.padStart(length: Int, padChar: Char = ' '): CharSequence {
     if (length < 0) throw IllegalArgumentException("Desired length $length is less than zero.")
     if (length <= this.length) return subSequence(0, this.length)
-    return StringBuilder(toString().padStart(length, padChar))
+    val result = StringBuilder(length)
+    for (index in 1..(length - this.length)) result.append(padChar)
+    return result.append(this)
 }
 fun CharSequence.padEnd(length: Int, padChar: Char = ' '): CharSequence {
     if (length < 0) throw IllegalArgumentException("Desired length $length is less than zero.")
     if (length <= this.length) return subSequence(0, this.length)
-    return StringBuilder(toString().padEnd(length, padChar))
+    val result = StringBuilder(length).append(this)
+    for (index in 1..(length - this.length)) result.append(padChar)
+    return result
 }
 external fun String.padStart(length: Int, padChar: Char = ' '): String
 external fun String.padEnd(length: Int, padChar: Char = ' '): String

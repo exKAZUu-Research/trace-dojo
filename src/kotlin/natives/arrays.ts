@@ -14,13 +14,14 @@ import {
 } from '../../interpreter/fdlibm';
 import { fdlibmPow } from '../../interpreter/fdlibmPow';
 import { callFunction } from '../dispatch';
-import { hashOf, stringOf, valueEquals } from '../format';
+import { hashOf, stringOf } from '../format';
 import { compareDoubles, compareNumbers, toInt32 } from '../operators';
 import { arrayFactoryName, UNSIGNED_ARRAYS } from '../prelude/arrays';
 import type { Frame } from '../runtime';
 import type { FunctionSymbol } from '../symbols';
 import { box, indexedSize, KObject, listView, NULL, type PrimitiveKind, UNIT, type Value } from '../values';
 import { checkListView, elementsOf, joinRendered, newList, newPrimitiveArrayList, touch } from './collections';
+import { objectsEqual } from './collectionTraversal';
 import { arrayIterator, checkArrayIndex } from './core';
 import { defineNative, defineNativeProperty, libraryClass } from './registry';
 import { stableSort } from './timSort';
@@ -390,7 +391,7 @@ function defineArrayReading(receiver: string, kind: PrimitiveKind | 'Boolean' | 
     if (array === NULL || other === NULL) return false;
     const a = boxedItems(array, kind);
     const b = boxedItems(other, kind);
-    return a.length === b.length && a.every((value, index) => valueEquals(frame, value, b[index]));
+    return a.length === b.length && a.every((value, index) => objectsEqual(frame, value, b[index]));
   });
 }
 

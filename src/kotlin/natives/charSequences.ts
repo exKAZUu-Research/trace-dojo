@@ -7,40 +7,10 @@ import { foldJdkCodePoint } from './jdkCase';
 import { libraryClass, throwError } from './registry';
 import { textSearch } from './textSearch';
 
-interface Sequence {
+export interface Sequence {
   length: () => number;
   at: (index: number) => number;
   subSequenceText: (from: number, to: number) => string;
-}
-
-export function copySequenceForBuilder(frame: Frame, value: Value, constructing = false): string {
-  if (typeof value === 'string') return value;
-  if (value instanceof KObject && value.builder !== undefined) return value.builder;
-  const source = charSequence(frame, value);
-  if (constructing) {
-    const length = source.length();
-    if (length < 0) throwError(frame, 'java.lang.NegativeArraySizeException', `Negative length: ${length}`);
-    frame.runtime.allocateString(frame, length + 16, 0);
-  }
-  return copyBuilderRange(frame, source, 0, source.length());
-}
-
-export function copySequenceRangeForBuilder(frame: Frame, value: Value, from: number, to: number): string {
-  return copyBuilderRange(frame, charSequence(frame, value ?? 'null'), from, to);
-}
-
-function copyBuilderRange(frame: Frame, source: Sequence, from: number, to: number): string {
-  const available = source.length();
-  if (from < 0 || to < from || to > available)
-    throwError(
-      frame,
-      'java.lang.IndexOutOfBoundsException',
-      `Range [${from}, ${to}) out of bounds for length ${available}`
-    );
-  frame.runtime.allocateString(frame, to - from);
-  const characters: string[] = [];
-  for (let index = from; index < to; index++) characters.push(charToString(source.at(index)));
-  return characters.join('');
 }
 
 export function sequenceAll(frame: Frame, value: Value, predicate: (char: number) => boolean): boolean {
@@ -232,7 +202,7 @@ export function sequenceLines(frame: Frame, value: Value): string[] {
   }
 }
 
-function charSequence(frame: Frame, value: Value): Sequence {
+export function charSequence(frame: Frame, value: Value): Sequence {
   if (typeof value === 'string') {
     return {
       length: () => value.length,
@@ -241,17 +211,15 @@ function charSequence(frame: Frame, value: Value): Sequence {
       subSequenceText: (from, to) => value.slice(from, to),
     };
   }
-  if (value instanceof KObject && value.builder !== undefined) {
-    const content = (): string => value.builder as string;
+  if (value instanceof KObject && value.builder) {
+    const storage = value.builder;
     return {
-      length: () => content().length,
+      length: () => storage.length,
       at: (index) => {
-        const text = content();
-        checkStringIndex(frame, index, text.length);
-        // oxlint-disable-next-line unicorn/prefer-code-point -- CharSequence characters are UTF-16 code units.
-        return text.charCodeAt(index);
+        checkStringIndex(frame, index, storage.length);
+        return storage.codeAt(index);
       },
-      subSequenceText: (from, to) => substring(frame, content(), from, to),
+      subSequenceText: (from, to) => substring(frame, storage.text(), from, to),
     };
   }
   const owner = libraryClass('kotlin.CharSequence');
