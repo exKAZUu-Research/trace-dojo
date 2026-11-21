@@ -139,7 +139,7 @@ export function comparatorFunction(frame: Frame, comparator: Value): (a: Value, 
 
 const LN2 = fdlibmLog(2);
 
-// code-gauge-allow functionNcss 42 -- registers the natives of `kotlin.math` together, in the order the prelude declares them.
+// code-gauge-allow functionNcss 44 -- registers the natives of `kotlin.math` together, in the order the prelude declares them.
 // code-gauge-allow functionCognitiveComplexity 30 -- registers the natives of `kotlin.math` together, in the order the prelude declares them.
 function defineMath(): void {
   const unary: [string, (x: number) => number][] = [
@@ -192,6 +192,8 @@ function defineMath(): void {
     }
   }
   for (const type of ['Double', 'Float']) {
+    defineNative(`kotlin.math.${type}.withSign(${type})`, copySign);
+    defineNative(`kotlin.math.${type}.withSign(Int)`, copySign);
     defineNative(`kotlin.math.${type}.roundToInt()`, (frame, receiver) => {
       const value = receiver as number;
       if (Number.isNaN(value))
@@ -218,6 +220,14 @@ function defineMath(): void {
 }
 
 const bitsView = new DataView(new ArrayBuffer(8));
+
+function copySign(_frame: Frame, value: Value, [sign]: Value[]): number {
+  bitsView.setFloat64(0, sign as number);
+  const signBit = bitsView.getUint8(0) & 0x80;
+  bitsView.setFloat64(0, value as number);
+  bitsView.setUint8(0, (bitsView.getUint8(0) & 0x7f) | signBit);
+  return bitsView.getFloat64(0);
+}
 
 /** The adjacent double toward the sign's infinity, as `Math.nextUp` and `Math.nextDown` give it. */
 function nextAfter(value: number, direction: 1 | -1): number {

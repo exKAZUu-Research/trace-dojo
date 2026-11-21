@@ -3092,6 +3092,26 @@ fun main() {
       'size\n[]\nsize\nentries\n[]\nsize\nentries\nfixed\n[(1, 2)]\nsize\nentries\nsize\n[(1, 2), (3, 4), (5, 6)]\n',
   },
   {
+    name: 'floating sign copies handle Int, signed zero, infinity, and NaN',
+    source: `import kotlin.math.withSign
+
+fun signed(value: Double, sign: Double): Double = value.withSign(sign)
+fun floatSigned(value: Float, sign: Float): Float = value.withSign(sign)
+
+fun main() {
+    println(3.0.withSign(-1))
+    println(3.0f.withSign(-1))
+    println(floatSigned(3.0f, -1.0f))
+    println(signed(-3.0, 0.0))
+    println(signed(0.0, -0.0))
+    println(floatSigned(0.0f, -0.0f))
+    println(signed(Double.POSITIVE_INFINITY, -1.0))
+    println(signed(3.0, -Double.NaN))
+    println(floatSigned(3.0f, -Float.NaN))
+}`,
+    stdout: '-3.0\n-3.0\n-3.0\n3.0\n-0.0\n-0.0\n-Infinity\n-3.0\n-3.0\n',
+  },
+  {
     name: 'String replacements use JVM character and case matching',
     source: `fun main() {
     println("aAa".replace('A', 'x', ignoreCase = true))

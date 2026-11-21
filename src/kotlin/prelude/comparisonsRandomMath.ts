@@ -380,7 +380,10 @@ val Int.sign: Int get() = when {
     else -> 0
 }
 
-fun Double.withSign(sign: Double): Double = if ((this < 0.0 || 1.0 / this < 0.0) != (sign < 0.0 || 1.0 / sign < 0.0)) -this else this
+external fun Double.withSign(sign: Double): Double
+external fun Double.withSign(sign: Int): Double
+external fun Float.withSign(sign: Float): Float
+external fun Float.withSign(sign: Int): Float
 `;
 
 /** The overloads of `maxOf` and `minOf` that `kotlin.comparisons` declares for each number type: of two, three, and more. */
