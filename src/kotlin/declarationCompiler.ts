@@ -252,9 +252,8 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   ): void;
 
   private rejectImport(row: number, path: string): never {
-    const what = describeUnavailableImport(path);
-    if (what) this.error(row, unavailableMessage(what));
-    return this.error(row, `import ${path} が見つかりません。`);
+    this.rejectUnavailableJavaReference(path, row);
+    return this.error(row, unavailableMessage(describeUnavailableImport(path)));
   }
 
   // Phase 2: headers.
@@ -1216,19 +1215,12 @@ function usesField(body: unknown): boolean {
 }
 
 /** What an import names that this environment cannot run, by the feature it stands for. */
-export function describeUnavailableImport(path: string): string | undefined {
-  if (path === 'java.util.Scanner' || path.startsWith('kotlin.io.readLine')) return '標準入力';
-  if (path.startsWith('java.io') || path.startsWith('java.nio') || path.startsWith('kotlin.io.path'))
-    return 'ファイルの読み書き';
-  if (path.startsWith('java.net') || path.startsWith('io.ktor')) return 'ネットワーク';
-  if (
-    path.startsWith('kotlinx.coroutines') ||
-    path.startsWith('kotlin.concurrent') ||
-    path.startsWith('java.util.concurrent')
-  )
-    return 'コルーチン・スレッド';
-  if (path.startsWith('kotlin.reflect') || path.startsWith('java.lang.reflect')) return 'リフレクション';
-  if (path.startsWith('java.') || path.startsWith('javax.')) return `Java のクラスの直接の利用（${path}）`;
+function describeUnavailableImport(path: string): string {
+  if (path.startsWith('kotlin.io.readLine')) return '標準入力';
+  if (path.startsWith('kotlin.io.path')) return 'ファイルの読み書き';
+  if (path.startsWith('io.ktor')) return 'ネットワーク';
+  if (path.startsWith('kotlinx.coroutines') || path.startsWith('kotlin.concurrent')) return 'コルーチン・スレッド';
+  if (path.startsWith('kotlin.reflect')) return 'リフレクション';
   if (path.startsWith('kotlin.')) return `標準ライブラリの ${path} `;
   return `標準ライブラリ以外のライブラリ（${path}）`;
 }

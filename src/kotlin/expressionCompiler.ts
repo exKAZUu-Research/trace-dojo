@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 980 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss 988 -- the compiler of one area of Kotlin, whose parts call each other closely.
 import type { Block, Expression, LambdaExpression } from './ast';
 import {
   type ArgumentSyntax,
@@ -22,7 +22,7 @@ import {
   typeMismatchMessage,
 } from './compilerBase';
 import type { MemberRef } from './compilerCore';
-import { unavailableMessage } from './convertSupport';
+import { unavailableJavaFeature, unavailableMessage } from './convertSupport';
 import { getPropertyValue, propertyRepr, receiverRepr } from './dispatch';
 import { formatPrimitive, stringOf } from './format';
 import { literalFits } from './literals';
@@ -461,6 +461,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
       if (value) return value;
       this.error(row, `${name} はクラスなので、値としては使えません。`);
     }
+    this.rejectUnavailableJavaReference(name, row);
     return this.error(row, `${name} が見つかりません。`);
   }
 
@@ -667,7 +668,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const { name, row, isSafe } = expression;
     const qualified = this.compileQualifier(scope, expression.receiver);
     if (qualified?.kind === 'class') return this.compileClassMember(scope, qualified.cls, name, row);
-    if (qualified) return this.compilePackageMember(qualified.scope, name, row);
+    if (qualified) return this.compilePackageMember(qualified, name, row);
     if (expression.receiver.kind === 'super') return this.compileSuperProperty(scope, context, name, row);
     const receiver = this.compileExpression(scope, context, expression.receiver);
     return this.withSafeReceiver(receiver, isSafe, row, (target) => {
@@ -708,16 +709,19 @@ export abstract class ExpressionCompiler extends CallCompiler {
       );
     }
     if (cls.kind === 'enum' && name === 'entries') return this.compileEnumEntries(cls);
+    const unavailable = unavailableJavaFeature(`${cls.kotlinName}.${name}`);
+    if (unavailable) this.unavailable(row, unavailable);
     return this.error(row, `${cls.name}.${name} が見つかりません。`);
   }
 
   /** `p.name` for a package `p`: a top-level property or an object. */
-  private compilePackageMember(packageScope: PackageScope, name: string, row: number): Compiled {
-    const property = packageScope.properties.get(name)?.find((candidate) => !candidate.extensionReceiver);
+  private compilePackageMember({ scope, path }: PackageQualifier, name: string, row: number): Compiled {
+    const property = scope?.properties.get(name)?.find((candidate) => !candidate.extensionReceiver);
     if (property) return this.readTopLevelProperty(property, row);
-    const cls = packageScope.classes.get(name);
+    const cls = scope?.classes.get(name);
     const value = cls && this.classAsValue(cls, row);
     if (value) return value;
+    if (!cls) this.rejectUnavailableJavaReference(`${path}.${name}`, row);
     return this.error(row, `${name} が見つかりません。`);
   }
 
@@ -786,11 +790,13 @@ export abstract class ExpressionCompiler extends CallCompiler {
       if (nested) this.checkNestedAccessible(scope, nested, expression.row);
       return nested ? { kind: 'class', cls: nested } : undefined;
     }
-    const path = this.packagePathOf(expression);
-    const packageScope = path ? this.packages.get(path) : undefined;
-    if (packageScope) return { kind: 'package', scope: packageScope };
-    const cls = outer.scope.classes.get(expression.name);
-    return cls ? { kind: 'class', cls } : undefined;
+    const path = `${outer.path}.${expression.name}`;
+    const packageScope = this.packages.get(path);
+    if (packageScope) return { kind: 'package', path, scope: packageScope };
+    const cls = outer.scope?.classes.get(expression.name);
+    if (cls) return { kind: 'class', cls };
+    this.rejectUnavailableJavaReference(path, expression.row);
+    return undefined;
   }
 
   /** What a simple name names as a qualifier: a class or a package, unless a value of that name hides it. */
@@ -804,15 +810,8 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const cls = this.findClass(scope, name);
     if (cls) return { kind: 'class', cls };
     const packageScope = this.packages.get(name);
-    return packageScope ? { kind: 'package', scope: packageScope } : undefined;
-  }
-
-  private packagePathOf(expression: Expression): string | undefined {
-    if (expression.kind === 'name') return expression.name;
-    if (expression.kind === 'member') {
-      const outer = this.packagePathOf(expression.receiver);
-      return outer === undefined ? undefined : `${outer}.${expression.name}`;
-    }
+    if (packageScope || name === 'java' || name === 'javax')
+      return { kind: 'package', path: name, scope: packageScope };
     return undefined;
   }
 
@@ -1118,6 +1117,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const enumClass = this.enclosingEnum(scope);
     if (enumClass && (name === 'values' || name === 'valueOf'))
       return this.compileEnumFunction(scope, context, enumClass, name, args, row);
+    this.rejectUnavailableJavaReference(name, row);
     return this.reportUnknownFunction(name, row);
   }
 
@@ -1385,7 +1385,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
   }
 
   // code-gauge-allow functionParameterCount 9 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
-  // code-gauge-allow functionNcss 33 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionNcss 34 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   // code-gauge-allow functionCognitiveComplexity 21 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private compileQualifiedCall(
     scope: Scope,
@@ -1399,7 +1399,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     row: number
   ): Compiled {
     if (qualified.kind === 'package') {
-      const functions = qualified.scope.functions.get(name)?.filter((symbol) => !symbol.extensionReceiver) ?? [];
+      const functions = qualified.scope?.functions.get(name)?.filter((symbol) => !symbol.extensionReceiver) ?? [];
       const levels: { candidates: Candidate[]; receiver: Compiled | undefined }[] = [];
       if (functions.length > 0) {
         levels.push({
@@ -1412,12 +1412,15 @@ export abstract class ExpressionCompiler extends CallCompiler {
           receiver: undefined,
         });
       }
-      const cls = qualified.scope.classes.get(name);
+      const cls = qualified.scope?.classes.get(name);
       // `kotlin.random.Random(1)` calls the function, since the abstract class of the same name has no constructor to call.
       if (cls && !(cls.isAbstract && functions.length > 0)) {
         levels.push({ candidates: this.constructorCandidates(cls, row), receiver: undefined });
       }
-      if (levels.length === 0) this.error(row, `${name} が見つかりません。`);
+      if (levels.length === 0) {
+        this.rejectUnavailableJavaReference(`${qualified.path}.${name}`, row);
+        this.error(row, `${name} が見つかりません。`);
+      }
       return this.resolveInLevels(scope, context, levels, args, hasTrailingLambda, typeArgs, expected, row, name);
     }
     const { cls } = qualified;
@@ -1948,7 +1951,13 @@ function nullOrEmptyNarrowing(call: ResolvedCall, receiver: Compiled | undefined
 }
 
 /** A class or a package that a qualifier names. */
-type Qualifier = { kind: 'class'; cls: ClassSymbol } | { kind: 'package'; scope: PackageScope };
+interface PackageQualifier {
+  kind: 'package';
+  path: string;
+  scope: PackageScope | undefined;
+}
+
+type Qualifier = { kind: 'class'; cls: ClassSymbol } | PackageQualifier;
 
 /** The candidates of one level of a call, with the receiver they are called on. */
 interface CandidateLevel {

@@ -7,6 +7,16 @@ export function unavailableMessage(what: string): string {
   return `${what}は、この採点環境では使えません。`;
 }
 
+export function unavailableJavaFeature(path: string): string | undefined {
+  const within = (prefix: string): boolean => path === prefix || path.startsWith(prefix + '.');
+  if (within('java.util.Scanner') || path === 'java.lang.System.in') return '標準入力';
+  if (within('java.io') || within('java.nio')) return 'ファイルの読み書き';
+  if (within('java.net')) return 'ネットワーク';
+  if (within('java.util.concurrent')) return 'コルーチン・スレッド';
+  if (within('java.lang.reflect')) return 'リフレクション';
+  return undefined;
+}
+
 export function syntaxError(node: Node, message: string): CompileError {
   return new CompileError([{ row: node.startPosition.row, message }]);
 }

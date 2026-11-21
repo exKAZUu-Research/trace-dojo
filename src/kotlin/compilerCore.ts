@@ -12,7 +12,7 @@ import {
   ReceiverSymbol,
   Scope,
 } from './compilerBase';
-import { unavailableMessage } from './convertSupport';
+import { unavailableJavaFeature, unavailableMessage } from './convertSupport';
 import type { Frame } from './runtime';
 import type { ClassSymbol, FunctionSymbol, MemberSymbol, PropertySymbol, TypeParameterSymbol } from './symbols';
 import { VariableSymbol } from './symbols';
@@ -87,6 +87,15 @@ export abstract class CompilerCore {
     throw compileError(row, unavailableMessage(what));
   }
 
+  protected rejectUnavailableJavaReference(path: string, row: number): void {
+    const qualified = path === 'Scanner' && this.file.starPackages.includes('java.util') ? 'java.util.Scanner' : path;
+    const unavailable = unavailableJavaFeature(qualified);
+    if (unavailable) this.unavailable(row, unavailable);
+    if (qualified.startsWith('java.') || qualified.startsWith('javax.')) {
+      this.unavailable(row, `Java のクラスの直接の利用（${qualified}）`);
+    }
+  }
+
   protected packageScope(name: string): PackageScope {
     let scope = this.packages.get(name);
     if (!scope) {
@@ -105,6 +114,7 @@ export abstract class CompilerCore {
 
   /** @param allowsBareClass Whether a generic class may be written without arguments, as `is List` may. */
   // code-gauge-allow functionCognitiveComplexity 30 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionNcss 32 -- the type is resolved and checked in the order the written name and arguments determine it.
   resolveType(scope: Scope, ref: TypeRef, allowsBareClass = false): KType {
     if (ref.kind === 'function') {
       return {
@@ -127,9 +137,14 @@ export abstract class CompilerCore {
       }
     }
     const local = this.findClass(scope, first.name);
-    const qualified = local ? undefined : this.findQualifiedClass(ref.parts.map((part) => part.name));
+    const names = ref.parts.map((part) => part.name);
+    const qualified = local ? undefined : this.findQualifiedClass(names);
     let cls = local ?? qualified;
-    if (!cls) this.error(ref.row, `型 ${ref.parts.map((part) => part.name).join('.')} が見つかりません。`);
+    if (!cls) {
+      const path = names.join('.');
+      this.rejectUnavailableJavaReference(path, ref.row);
+      this.error(ref.row, `型 ${path} が見つかりません。`);
+    }
     // A fully qualified name such as `kotlin.reflect.KProperty<*>` carries its arguments on its last part.
     const consumed = qualified ? ref.parts.length : 1;
     const argumentsPart = qualified ? (ref.parts.at(-1) as typeof first) : first;

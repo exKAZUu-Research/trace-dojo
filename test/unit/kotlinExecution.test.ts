@@ -69,6 +69,18 @@ fun main() {
     stdout: '2\n4\n4\ntry\n5\n6\n',
   },
   {
+    name: 'local names take precedence over unavailable Java APIs',
+    source: `import java.util.*
+class Scanner {
+    val io = "local"
+}
+fun main() {
+    val java = Scanner()
+    println(java.io)
+}`,
+    stdout: 'local\n',
+  },
+  {
     name: 'string content that resembles property accessors',
     source: 'fun main() { println(" get()=1; set(x)") }',
     stdout: ' get()=1; set(x)\n',
@@ -721,6 +733,31 @@ test.each([
     'standard input',
     'fun main() {\n    val s = readln()\n    println(s)\n}',
     '標準入力（readln）は、この採点環境では使えません。',
+  ],
+  [
+    'standard input through a wildcard import',
+    'import java.util.*\nfun main() { println(Scanner(System.`in`).nextInt()) }',
+    '標準入力は、この採点環境では使えません。',
+  ],
+  [
+    'standard input through a qualified class name',
+    'fun main() { println(java.util.Scanner(System.`in`).nextInt()) }',
+    '標準入力は、この採点環境では使えません。',
+  ],
+  [
+    'a qualified file constructor',
+    'fun main() { println(java.io.File("a.txt").readText()) }',
+    'ファイルの読み書きは、この採点環境では使えません。',
+  ],
+  [
+    'a qualified file type',
+    'fun main() { val file: java.io.File? = null; println(file) }',
+    'ファイルの読み書きは、この採点環境では使えません。',
+  ],
+  [
+    'standard input through System',
+    'fun main() { println(System.`in`.read()) }',
+    '標準入力は、この採点環境では使えません。',
   ],
   [
     'files',
