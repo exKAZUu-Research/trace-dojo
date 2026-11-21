@@ -1389,11 +1389,15 @@ test('Dart field initializers see primary constructor parameters typed as the co
   const program = `class C(this.x) { final int x; final values = [x]; }
 class Box<T>({required this.value}) { final T value; final values = [value]; final int Function() f = () => 1; }
 class D(int n) { final int Function() read = () => n; }
+class P<T>({required this._x}) { final T _x; final values = [_x]; }
 void main() {
   List<int> values = C(4).values;
-  print([values, Box(value: 7).values.runtimeType, D(5).read()]);
+  print([values, Box(value: 7).values.runtimeType, D(5).read(), P(x: 4).values.runtimeType]);
 }`;
-  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[[4], List<int>, 5]\n' });
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[[4], List<int>, 5, List<int>]\n',
+  });
 });
 
 test.each([

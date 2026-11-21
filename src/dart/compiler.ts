@@ -882,7 +882,8 @@ export class Compiler extends MemberCompiler {
     const typed = [
       ...primary.parameters.positional.map((parameter, index) => [parameter, signature.positional[index]] as const),
       ...primary.parameters.named.map(
-        (parameter) => [parameter, signature.named.find((named) => named.name === parameter.name)?.type] as const
+        (parameter) =>
+          [parameter, signature.named.find((named) => named.name === parameter.argumentName)?.type] as const
       ),
     ];
     for (const [parameter, type] of typed) {
