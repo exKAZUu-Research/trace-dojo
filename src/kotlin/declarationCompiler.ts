@@ -20,7 +20,7 @@ import type { FileContext } from './compilerCore';
 import { unavailableMessage } from './convertSupport';
 import { callFunction, getPropertyValue, isVirtual, propertyRepr, setPropertyValue } from './dispatch';
 import { hashOf, stringHash, stringOf, valueEquals } from './format';
-import { jvmSignatures } from './jvmSignatures';
+import { jvmSignatures, overriddenMembers } from './jvmSignatures';
 import { isKnownLibraryPackage } from './libraryApi';
 import { arrayContentHash, arrayContentString, dataArrayKind } from './natives/arrays';
 import { type NativeFunction, type NativeProperty, typeRefText } from './nativeTypes';
@@ -1181,7 +1181,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
         if (bases.some((base) => !base.isLibrary && bases.some((other) => !compatibleJvmInheritance(base, other))))
           this.error(symbol.row, `JVM では継承した ${signature} が重複しています。`);
       }
-      this.checkJvmSignatures([...symbol.members.values()].flat(), inherited);
+      this.checkJvmSignatures([...declaredJvmMembers(symbol)], inherited);
     }
   }
 
@@ -1207,7 +1207,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     const visit = (parent: ClassSymbol): void => {
       if (seen.has(parent)) return;
       seen.add(parent);
-      for (const member of [...parent.members.values()].flat()) {
+      for (const member of declaredJvmMembers(parent)) {
         if (member.visibility === 'private') continue;
         for (const signature of this.jvmSignaturesOf(member)) {
           const declarations = signatures.get(signature) ?? [];
@@ -1307,6 +1307,9 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       this.error(field.spec.row, `委譲では ${final.owner?.name ?? ''}.${final.name} を上書きできません。`);
     }
     const forward = this.forwarder(member, field.slot, symbol);
+    forward.isLibrary = symbol.isLibrary;
+    forward.overridden = bases;
+    forward.row = field.spec.row;
     for (const base of bases) {
       delegateSlots.set(base.root, field.slot);
       symbol.vtable.set(base.root, forward);
@@ -1367,6 +1370,14 @@ function compatibleJvmInheritance(a: MemberSymbol, b: MemberSymbol): boolean {
   return a === b || overriddenMembers(a).has(b) || overriddenMembers(b).has(a) || sameSourceDeclaration(a, b);
 }
 
+function declaredJvmMembers(symbol: ClassSymbol): Set<MemberSymbol> {
+  const members = new Set([...symbol.members.values()].flat());
+  for (const implementation of symbol.vtable.values()) {
+    if (implementation.owner === symbol) members.add(implementation);
+  }
+  return members;
+}
+
 function sameSourceDeclaration(a: MemberSymbol, b: MemberSymbol): boolean {
   if (a.kind !== b.kind || a.name !== b.name) return false;
   const leftReceiver = a.extensionReceiver;
@@ -1381,17 +1392,6 @@ function sameSourceDeclaration(a: MemberSymbol, b: MemberSymbol): boolean {
   const first = a.kind === 'property' ? a.type : a.returnType;
   const second = b.kind === 'property' ? b.type : b.returnType;
   return !first || !second || isSubtype(first, second) || isSubtype(second, first);
-}
-
-function overriddenMembers(member: MemberSymbol): Set<MemberSymbol> {
-  const overridden = new Set<MemberSymbol>();
-  const visit = (base: MemberSymbol): void => {
-    if (overridden.has(base)) return;
-    overridden.add(base);
-    for (const parent of base.overridden) visit(parent);
-  };
-  for (const base of member.overridden) visit(base);
-  return overridden;
 }
 
 function nativeParameterText(param: ParameterDecl): string {

@@ -38,7 +38,7 @@ abstract external class NativeList<E> : MutableList<E> {
 
 abstract external class RandomAccessList<E> : NativeList<E>, RandomAccess
 
-external class ArrayList<E> : RandomAccessList<E> {
+open external class ArrayList<E> : RandomAccessList<E> {
     external constructor()
     external constructor(initialCapacity: Int)
     external constructor(elements: Collection<E>)

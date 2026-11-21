@@ -68,13 +68,24 @@ export function jvmParameterDescriptor(core: Core, parameter: ParameterSymbol): 
   return parameter.isVararg ? `[${descriptor}` : descriptor;
 }
 
+export function overriddenMembers(member: MemberSymbol): Set<MemberSymbol> {
+  const overridden = new Set<MemberSymbol>();
+  const bases = [...member.overridden];
+  for (let base = bases.pop(); base; base = bases.pop()) {
+    if (overridden.has(base)) continue;
+    overridden.add(base);
+    bases.push(...base.overridden);
+  }
+  return overridden;
+}
+
 function functionSignature(core: Core, member: FunctionSymbol, name = member.name): string {
   const inputs = [
     ...(member.extensionReceiver ? [member.extensionReceiver] : []),
     ...member.params.map((parameter) => parameter.type),
   ];
   const result = member.returnType && resolved(member.returnType);
-  const descriptor = isNonNullClass(result, core.unit) ? 'V' : typeDescriptor(core, result);
+  const descriptor = isNonNullClass(result, core.unit) ? 'V' : memberResultDescriptor(core, member, result);
   const parameters = [
     ...(member.extensionReceiver ? [typeDescriptor(core, member.extensionReceiver)] : []),
     ...member.params.map((param) => jvmParameterDescriptor(core, param)),
@@ -92,14 +103,25 @@ function propertySignatures(core: Core, member: PropertySymbol, customSetter: bo
   const signatures: string[] = [];
   if (member.visibility !== 'private' || member.hasCustomGetter) {
     const get = booleanName ? member.name : `get${baseName}`;
-    signatures.push(`${jvmName(member, get, [...receiver, type])}(${parameters})${descriptor}`);
     const alias = jvmMemberAlias(member);
-    if (alias) signatures.push(`${alias}(${parameters})${descriptor}`);
+    const name = alias ?? jvmName(member, get, [...receiver, type]);
+    signatures.push(`${name}(${parameters})${memberResultDescriptor(core, member, type)}`);
   }
   if (member.isVar && ((member.visibility !== 'private' && member.setterVisibility !== 'private') || customSetter)) {
     signatures.push(`${jvmName(member, `set${baseName}`, [...receiver, type])}(${parameters}${descriptor})V`);
   }
   return signatures;
+}
+
+function memberResultDescriptor(core: Core, member: MemberSymbol, type: KType | undefined): string {
+  const descriptor = typeDescriptor(core, type);
+  if (descriptor.length !== 1) return descriptor;
+  // A primitive override keeps a boxed return if any ancestor was declared with a reference return.
+  for (const base of overriddenMembers(member)) {
+    if (typeDescriptor(core, base.kind === 'function' ? base.returnType : base.type) !== descriptor)
+      return typeDescriptor(core, type, true);
+  }
+  return descriptor;
 }
 
 function jvmMemberAlias(member: MemberSymbol): string | undefined {

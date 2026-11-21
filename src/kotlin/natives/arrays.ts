@@ -94,7 +94,7 @@ function sortList(frame: Frame, list: Value, [comparator]: Value[]): Value {
   const object = list as KObject;
   const view = listView(object);
   const source = view?.source ?? object;
-  if (source.cls === libraryClass('kotlin.collections.ArrayList')) {
+  if (source.arrayList) {
     checkListView(frame, object);
     const from = view?.from ?? 0;
     const values = source.items as Value[];

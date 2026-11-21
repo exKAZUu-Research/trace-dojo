@@ -558,6 +558,92 @@ fun main() {
     stdout: 'null\nkotlin.Unit\nnull\nnull\nkotlin.Unit\nunit\n',
   },
   {
+    name: 'boxing an inherited primitive narrows the type without adding a default method',
+    source: `interface Base {
+    val token: Int?
+    fun test(): Boolean?
+}
+interface Narrowed : Base {
+    override val token: Int
+    override fun test(): Boolean
+    companion object { init { println("narrowed") } }
+}
+interface Child : Narrowed {
+    override val token: Int
+    override fun test(): Boolean
+    companion object { init { println("child") } }
+}
+class Item : Child {
+    override val token = 1
+    override fun test() = true
+}
+interface Generic { fun value(): Any }
+interface Specialized : Generic {
+    override fun value(): Int
+    companion object { init { println("specialized") } }
+}
+class NumberItem : Specialized { override fun value() = 2 }
+
+fun main() {
+    val item: Base = Item()
+    println(item.token)
+    println(item.test())
+    println(NumberItem().value())
+}`,
+    stdout: '1\ntrue\nspecialized\n2\n',
+  },
+  {
+    name: 'ArrayList subclasses inherit backed mutations, sorting, and list views',
+    source: `open class Scores(initial: Collection<Int>) : ArrayList<Int>(initial) {
+    override fun add(element: Int): Boolean = super.add(element * 2)
+    fun total() = sum()
+}
+class MoreScores : Scores(listOf(3, 1))
+fun main() {
+    val scores = MoreScores()
+    scores.add(2)
+    println(scores)
+    println(scores.total())
+    val iterator = scores.iterator()
+    scores.sortWith(compareBy { it })
+    try { println(iterator.next()) } catch (error: ConcurrentModificationException) { println("modified") }
+    val view = scores.subList(1, 3)
+    view.removeIf { it % 2 == 0 }
+    println(scores)
+    println(view)
+}`,
+    stdout: '[3, 1, 4]\n8\nmodified\n[1, 3]\n[3]\n',
+  },
+  {
+    name: 'enum methods can use JVM names absent from java.lang.Enum',
+    source: `enum class Color {
+    RED;
+    fun getName(): String = "custom"
+    fun getOrdinal(): Int = 7
+}
+fun main() {
+    println(Color.RED.name)
+    println(Color.RED.getName())
+    println(Color.RED.ordinal)
+    println(Color.RED.getOrdinal())
+}`,
+    stdout: 'RED\ncustom\n0\n7\n',
+  },
+  {
+    name: 'formatting validates non-argument conversions and combines reuse with other flags',
+    source: `import java.util.IllegalFormatException
+fun main() {
+    for (pattern in listOf(
+        "%.2n", "%+n", "%5n", "%05%", "%.2%", "%-5%%5%", "%d %,<d", "%1\\$d %2\\$<d %d", "%d %<<d", "%2\\$<s"
+    )) {
+        try { println(pattern.format(1234, 5678)) }
+        catch (error: IllegalFormatException) { println(error) }
+    }
+}`,
+    stdout:
+      "java.util.IllegalFormatPrecisionException: 2\njava.util.IllegalFormatFlagsException: Flags = '+'\njava.util.IllegalFormatWidthException: 5\njava.util.IllegalFormatFlagsException: Flags = '0'\njava.util.IllegalFormatPrecisionException: 2\n%        %\n1234 1,234\n1234 1234 1234\njava.util.DuplicateFormatFlagsException: Flags = '<'\njava.util.MissingFormatArgumentException: Format specifier '%<s'\n",
+  },
+  {
     name: 'zip transforms combine arrays, iterables, and character sequences',
     source: `fun main() {
     println("abc".zip("xy") { a, b -> "$a$b" })

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 849 -- the natives of the collections, which share the helpers of their items.
+// code-gauge-allow-file fileNcss 853 -- the natives of the collections, which share the helpers of their items.
 import { callFunction, getPropertyValue, runtimeClassOf } from '../dispatch';
 import { hashOf, identityHash, stringOf, valueEquals } from '../format';
 import { toInt32 } from '../operators';
@@ -41,17 +41,23 @@ function className(value: Value): string {
   return runtimeClassOf(value).name;
 }
 
+function listKind(list: Value): string | undefined {
+  const { arrayList, cls } = list as KObject;
+  if (arrayList) return 'ArrayList';
+  return cls.isLibrary ? cls.name : undefined;
+}
+
 /** Throws `UnsupportedOperationException` for a change a read-only or fixed-size list does not allow. */
 function requireResizable(frame: Frame, list: Value): void {
   const root = listView(list as KObject)?.source ?? list;
-  const name = className(root);
+  const name = listKind(root);
   const isResizable = name === 'ArrayList' || name === 'ArrayDeque' || (name === 'ListBuilder' && !isBuilt(root));
   if (!isResizable) throwError(frame, 'java.lang.UnsupportedOperationException');
 }
 
 function requireMutable(frame: Frame, list: Value): void {
   const root = listView(list as KObject)?.source ?? list;
-  const name = className(root);
+  const name = listKind(root);
   if (
     name === 'SingletonList' ||
     name === 'EmptyList' ||
@@ -73,7 +79,7 @@ function kotlinListIndex(index: number, size: number): string {
 
 function usesKotlinPositionBounds(list: Value): boolean {
   const source = listView(list as KObject)?.source ?? list;
-  const kind = className(source);
+  const kind = listKind(source);
   return kind === 'ListBuilder' || (list === source && kind === 'ArrayDeque');
 }
 
@@ -84,7 +90,7 @@ function checkIndex(frame: Frame, list: Value, index: number): void {
   if (usesKotlinPositionBounds(list))
     throwError(frame, 'java.lang.IndexOutOfBoundsException', kotlinListIndex(index, size));
   const isSublist = listView(list as KObject) !== undefined;
-  switch (isSublist ? 'SubList' : className(list)) {
+  switch (isSublist ? 'SubList' : listKind(list)) {
     case 'PrimitiveArrayList': {
       if (primitiveArrayView(list as KObject)?.range) {
         throwError(frame, 'java.lang.IndexOutOfBoundsException', kotlinListIndex(index, size));
@@ -245,7 +251,7 @@ const LIST_READING_NATIVES: Record<string, ListNative> = {
     const size = indexedSize(list as KObject);
     const position = index as number;
     if (position < 0 || position > size) {
-      const name = className(list);
+      const name = listKind(list);
       const message =
         name === 'EmptyList'
           ? `Index: ${position}`
@@ -320,7 +326,7 @@ const LIST_CHANGING_NATIVES: Record<string, ListNative> = {
   },
   'clear()': (frame, list) => {
     requireResizable(frame, list);
-    if (className(list) !== 'ArrayDeque' || indexedSize(list as KObject) > 0)
+    if (listKind(list) !== 'ArrayDeque' || indexedSize(list as KObject) > 0)
       replaceListItems(frame, list as KObject, 0, indexedSize(list as KObject), []);
     return UNIT;
   },
@@ -331,7 +337,7 @@ function insertListElements(frame: Frame, list: KObject, index: number | undefin
   if (!view) requireResizable(frame, list);
   const position = index === undefined ? indexedSize(list) : insertionIndex(frame, list, index);
   const added = elementsOf(frame, elements);
-  if (added.length === 0 && (view || className(list) === 'ArrayDeque')) return false;
+  if (added.length === 0 && (view || listKind(list) === 'ArrayDeque')) return false;
   if (view) {
     checkListView(frame, list);
     requireResizable(frame, list);
@@ -469,7 +475,7 @@ export function checkListView(frame: Frame, list: KObject): void {
 function removeIfArrayList(frame: Frame, list: KObject, predicate: KObject): boolean | undefined {
   const view = listView(list);
   const source = view?.source ?? list;
-  if (source.cls !== libraryClass('kotlin.collections.ArrayList')) return undefined;
+  if (!source.arrayList) return undefined;
   checkListView(frame, list);
   const modCount = source.modCount;
   const values = listStorage(source);
@@ -522,7 +528,7 @@ function subList(frame: Frame, list: KObject, from: number, to: number): KObject
   if (from < 0) throwError(frame, 'java.lang.IndexOutOfBoundsException', `fromIndex = ${from}`);
   if (to > size) throwError(frame, 'java.lang.IndexOutOfBoundsException', `toIndex = ${to}`);
   if (from > to) throwError(frame, 'java.lang.IllegalArgumentException', `fromIndex(${from}) > toIndex(${to})`);
-  if (className(list) === 'EmptyList') return list;
+  if (listKind(list) === 'EmptyList') return list;
   const arrayView = primitiveArrayView(list);
   if (arrayView) {
     return newPrimitiveArrayList(frame, {
@@ -533,7 +539,7 @@ function subList(frame: Frame, list: KObject, from: number, to: number): KObject
   const parent = listView(list);
   const source = parent?.source ?? list;
   frame.runtime.allocate(frame, 1);
-  const cls = className(source) === 'ArrayDeque' ? 'SequentialSubList' : 'SubList';
+  const cls = listKind(source) === 'ArrayDeque' ? 'SequentialSubList' : 'SubList';
   const view = new KObject(libraryClass(`kotlin.collections.${cls}`), 0);
   view.modCount = source.modCount;
   view.readOnlyCollection = source.readOnlyCollection;
@@ -607,7 +613,7 @@ function defineIterators(): void {
 
 function exhaustedIterator(frame: Frame, source: KObject, index: number): never {
   const message =
-    className(source) === 'ArrayDeque'
+    listKind(source) === 'ArrayDeque'
       ? `java.lang.IndexOutOfBoundsException: ${kotlinListIndex(index, indexedSize(source))}`
       : undefined;
   return throwError(frame, 'java.util.NoSuchElementException', message);

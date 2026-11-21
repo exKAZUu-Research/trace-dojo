@@ -138,6 +138,10 @@ export const EXCEPTIONS: [kotlinPackage: string, name: string, parent: string, j
   ['java.lang', 'NegativeArraySizeException', 'RuntimeException', 'java.lang.NegativeArraySizeException'],
   ['java.util', 'IllegalFormatException', 'IllegalArgumentException', 'java.util.IllegalFormatException'],
   ...[
+    'DuplicateFormatFlagsException',
+    'IllegalFormatArgumentIndexException',
+    'IllegalFormatFlagsException',
+    'IllegalFormatWidthException',
     'IllegalFormatConversionException',
     'MissingFormatArgumentException',
     'UnknownFormatConversionException',
@@ -153,7 +157,11 @@ export function exceptionSources(): string[] {
   const packages = Map.groupBy(EXCEPTIONS, ([packageName]) => packageName);
   return [...packages].map(([packageName, exceptions]) => {
     const classes = exceptions.map(
-      ([, name, parent]) => `open external class ${name} : ${parent} {
+      ([
+        ,
+        name,
+        parent,
+      ]) => `${name === 'IllegalFormatArgumentIndexException' ? 'internal ' : ''}open external class ${name} : ${parent} {
     external constructor()
     external constructor(message: String?)
     external constructor(message: String?, cause: Throwable?)

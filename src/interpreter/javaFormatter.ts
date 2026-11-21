@@ -18,7 +18,6 @@ export interface FormatValues<V> {
 interface Specifier {
   start: number;
   end: number;
-  source: string;
   index: string | undefined;
   flags: string;
   width: string | undefined;
@@ -37,14 +36,14 @@ export function formatJava<V>(pattern: string, args: V[], values: FormatValues<V
   for (const specifier of specifiers) {
     result.push(pattern.slice(end, specifier.start));
     end = specifier.end;
-    const { index, flags, width, precision, conversion, source } = specifier;
+    const { index, flags, width, precision, conversion } = specifier;
     if (conversion === 'n' || conversion === '%') {
       result.push(conversion === 'n' ? '\n' : pad('%', flags, width));
       continue;
     }
-    const position = index === '<' ? previous : index ? Number(index) - 1 : nextArg++;
+    const position = flags.includes('<') ? previous : index ? Number(index) - 1 : nextArg++;
     if (position === undefined || position >= args.length) {
-      return values.fail('MissingFormatArgumentException', `Format specifier '${source}'`);
+      return values.fail('MissingFormatArgumentException', `Format specifier '${specifierText(specifier)}'`);
     }
     previous = position;
     const formatted = formatArgument(
@@ -77,15 +76,12 @@ function readSpecifier(pattern: string, start: number): Specifier | undefined {
   let cursor = start + 1;
   const afterIndex = skipDigits(pattern, cursor);
   let index: string | undefined;
-  if (pattern[cursor] === '<') {
-    index = '<';
-    cursor++;
-  } else if (afterIndex > cursor && pattern[afterIndex] === '$') {
+  if (afterIndex > cursor && pattern[afterIndex] === '$') {
     index = pattern.slice(cursor, afterIndex);
     cursor = afterIndex + 1;
   }
   const flagStart = cursor;
-  while (cursor < pattern.length && '-#+ 0,('.includes(pattern[cursor])) cursor++;
+  while (cursor < pattern.length && FLAG_ORDER.includes(pattern[cursor])) cursor++;
   const flags = pattern.slice(flagStart, cursor);
   const afterWidth = skipDigits(pattern, cursor);
   const width = pattern.slice(cursor, afterWidth) || undefined;
@@ -100,7 +96,7 @@ function readSpecifier(pattern: string, start: number): Specifier | undefined {
   const conversion = pattern[cursor] ?? '';
   if (!/^[a-zA-Z%]$/.test(conversion)) return undefined;
   const end = cursor + 1;
-  return { start, end, source: pattern.slice(start, end), index, flags, width, precision, conversion };
+  return { start, end, index, flags, width, precision, conversion };
 }
 
 function skipDigits(pattern: string, start: number): number {
@@ -109,35 +105,91 @@ function skipDigits(pattern: string, start: number): number {
   return end;
 }
 
-function checkSpecifier<V>(values: FormatValues<V>, { source, flags, width, precision, conversion }: Specifier): void {
+const FLAG_ORDER = '-#+ 0,(<';
+const MAX_FORMAT_FIELD = 2_147_483_647;
+
+function checkSpecifier<V>(values: FormatValues<V>, specifier: Specifier): void {
+  const { width, precision, conversion } = specifier;
+  checkSpecifierFields(values, specifier);
   if (!'bBhHsScCdoxXfeEgG%n'.includes(conversion))
     values.fail('UnknownFormatConversionException', `Conversion = '${conversion}'`);
   const lower = conversion.toLowerCase();
-  if (lower === 'n') return;
+  if (lower === 'n' || lower === '%') checkTextConversion(values, specifier);
+  else checkArgumentConversion(values, specifier, lower);
   // A width or precision makes text of its length, which is charged before anything is built.
   values.scan(Number(width ?? 0) + Number(precision ?? 0));
-  if (precision && 'dxoc'.includes(lower)) {
-    values.fail('IllegalFormatPrecisionException', precision);
-  }
-  const isNumeric = 'dxoefg'.includes(lower);
-  if (!width && (flags.includes('-') || (isNumeric && flags.includes('0')))) {
-    values.fail('MissingFormatWidthException', source);
-  }
-  const bad = BAD_FLAGS[lower]?.find((flag) => flags.includes(flag));
-  if (bad) values.fail('FormatFlagsConversionMismatchException', `Conversion = ${lower}, Flags = ${bad}`);
 }
 
-const GENERAL_BAD_FLAGS = ['+', ' ', '0', ',', '('];
-// The first prohibited flag in this order is the one named by the JVM exception.
-const BAD_FLAGS: Record<string, string[]> = {
+function checkSpecifierFields<V>(values: FormatValues<V>, { index, flags, width, precision }: Specifier): void {
+  if (Number(index) === 0) values.fail('IllegalFormatArgumentIndexException', 'Illegal format argument index = 0');
+  if (Number(index) > MAX_FORMAT_FIELD) {
+    values.fail('IllegalFormatArgumentIndexException', 'Format argument index: (not representable as int)');
+  }
+  for (let i = 0; i < flags.length; i++) {
+    if (flags.indexOf(flags[i]) !== i) values.fail('DuplicateFormatFlagsException', `Flags = '${flags[i]}'`);
+  }
+  if (Number(width) > MAX_FORMAT_FIELD) values.fail('IllegalFormatWidthException', '-2147483648');
+  if (Number(precision) > MAX_FORMAT_FIELD) values.fail('IllegalFormatPrecisionException', '-2147483648');
+}
+
+function checkTextConversion<V>(values: FormatValues<V>, specifier: Specifier): void {
+  const { flags, width, precision, conversion } = specifier;
+  if (precision) values.fail('IllegalFormatPrecisionException', String(Number(precision)));
+  if (conversion === 'n' && width) values.fail('IllegalFormatWidthException', String(Number(width)));
+  if (flags && !(conversion === '%' && flags === '-')) {
+    values.fail('IllegalFormatFlagsException', `Flags = '${orderedFlags(flags)}'`);
+  }
+  if (flags === '-' && !width) values.fail('MissingFormatWidthException', specifierText(specifier));
+}
+
+function checkArgumentConversion<V>(values: FormatValues<V>, specifier: Specifier, lower: string): void {
+  const { flags, width, precision } = specifier;
+  if ('dxoefg'.includes(lower)) checkNumericFlags(values, specifier);
+  if (precision && 'dxoc'.includes(lower)) values.fail('IllegalFormatPrecisionException', String(Number(precision)));
+  if ('bh'.includes(lower) && flags.includes('#')) failFlags(values, lower, '#');
+  if (lower !== 'c' && !width && flags.includes('-'))
+    values.fail('MissingFormatWidthException', specifierText(specifier));
+  const bad = orderedFlags(flags, BAD_FLAGS[lower] ?? '');
+  if (bad) failFlags(values, lower, bad);
+  if (lower === 'c' && !width && flags.includes('-'))
+    values.fail('MissingFormatWidthException', specifierText(specifier));
+}
+
+function checkNumericFlags<V>(values: FormatValues<V>, specifier: Specifier): void {
+  const { flags, width } = specifier;
+  if (!width && (flags.includes('-') || flags.includes('0')))
+    values.fail('MissingFormatWidthException', specifierText(specifier));
+  if ((flags.includes('+') && flags.includes(' ')) || (flags.includes('-') && flags.includes('0'))) {
+    values.fail('IllegalFormatFlagsException', `Flags = '${orderedFlags(flags)}'`);
+  }
+}
+
+function specifierText({ index, flags, width, precision, conversion }: Specifier): string {
+  const argumentIndex = index && !flags.includes('<') && !'n%'.includes(conversion) ? `${Number(index)}$` : '';
+  return `%${orderedFlags(flags)}${argumentIndex}${width ?? ''}${precision ? `.${Number(precision)}` : ''}${conversion}`;
+}
+
+function orderedFlags(flags: string, allowed = FLAG_ORDER): string {
+  return FLAG_ORDER.split('')
+    .filter((flag) => allowed.includes(flag) && flags.includes(flag))
+    .join('');
+}
+
+function failFlags<V>(values: FormatValues<V>, conversion: string, flags: string): never {
+  return values.fail('FormatFlagsConversionMismatchException', `Conversion = ${conversion}, Flags = ${flags}`);
+}
+
+const GENERAL_BAD_FLAGS = '+ 0,(';
+const BAD_FLAGS: Record<string, string> = {
   s: GENERAL_BAD_FLAGS,
   b: GENERAL_BAD_FLAGS,
   h: GENERAL_BAD_FLAGS,
-  c: GENERAL_BAD_FLAGS,
-  o: [','],
-  x: [','],
-  e: [','],
-  g: ['#'],
+  c: `#${GENERAL_BAD_FLAGS}`,
+  d: '#',
+  o: ',',
+  x: ',',
+  e: ',',
+  g: '#',
 };
 
 /** The flags that octal and hexadecimal reject for the argument types this formatter takes, which are not BigInteger. */
@@ -167,9 +219,6 @@ const ACCEPTED_KINDS: Record<string, readonly string[]> = {
   g: ['double', 'float'],
 };
 
-/** The conversions that reject the `#` flag, which only the radix and decimal conversions take. */
-const REJECTS_ALTERNATE_FORM = new Set(['s', 'b', 'h', 'c', 'd']);
-
 const INTEGER_BITS: Record<string, number> = { byte: 8, short: 16, int: 32, long: 64 };
 
 function formatArgument<V>(
@@ -180,9 +229,7 @@ function formatArgument<V>(
   conversion: string
 ): string {
   const lower = conversion.toLowerCase();
-  if (flags.includes('#') && REJECTS_ALTERNATE_FORM.has(lower)) {
-    values.fail('FormatFlagsConversionMismatchException', `Conversion = ${lower}, Flags = #`);
-  }
+  if (lower === 's' && flags.includes('#')) failFlags(values, lower, '#');
   const formatted = formatLower(values, arg, flags, precision, lower, conversion);
   return conversion === lower ? formatted : formatted.toUpperCase();
 }
