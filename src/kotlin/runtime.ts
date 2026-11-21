@@ -162,7 +162,7 @@ export class Runtime implements TracedRuntime<Frame> {
     body: (frame: Frame) => Value
   ): Value {
     this.spend();
-    const frame = new Frame(this, info, captured, thisValue, callRow);
+    const frame = new Frame(this, info, captured, thisValue, info.isLibrary ? undefined : callRow);
     if (this.frames.length >= LIMITS.maxCallDepth) {
       this.throwError(caller ?? frame, 'java.lang.StackOverflowError');
     }

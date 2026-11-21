@@ -1586,7 +1586,6 @@ export abstract class ExpressionCompiler extends CallCompiler {
     });
     const evals = receiverEval ? [receiverEval, ...argumentEvals] : argumentEvals;
     const target = functionValue.eval;
-    const callRow = this.recordsSteps && !this.file.isLibrary ? row : undefined;
     return {
       type: type.returnType,
       repr: 'ref',
@@ -1601,7 +1600,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
             temporaries.push(value);
             return value;
           });
-          return invokeFunctionValue(frame, fn, values, callRow);
+          return invokeFunctionValue(frame, fn, values);
         } finally {
           temporaries.length = mark;
         }
@@ -1950,10 +1949,10 @@ const COLLECTION_FACTORIES = new Set(['arrayOf', 'listOf', 'mutableListOf', 'arr
 const PROBE_PARAM = new (class extends Object {})() as unknown as TypeParameterSymbol;
 
 /** Calls a function value with arguments held as references. */
-export function invokeFunctionValue(frame: Frame, fn: KObject, args: Value[], callRow: number | undefined): Value {
+function invokeFunctionValue(frame: Frame, fn: KObject, args: Value[]): Value {
   const { function: callable } = fn;
   if (!callable) throw new Error('A function value without its function');
-  return (callable.call as (caller: Frame, args: Value[], callRow?: number) => Value)(frame, args, callRow);
+  return callable.call(frame, args);
 }
 
 /** Function values receive their arguments boxed, while a parameter of a primitive type holds the bare value. */
@@ -2005,11 +2004,11 @@ function lambdaValue(lambda: {
     value.env = env;
     value.function = {
       arity,
-      call: (caller, args, callRow?: number) => {
+      call: (caller, args) => {
         const receiver = hasReceiver ? unboxedIf(receiverIsUnboxed, args[0]) : undefined;
         const values = hasReceiver ? args.slice(1) : args;
         const converted = values.map((arg, index) => unboxedIf(paramReprs[index] !== 'ref', arg));
-        return frame.runtime.call(info, caller, env, receiver, converted, callRow, resultEval);
+        return frame.runtime.call(info, caller, env, receiver, converted, undefined, resultEval);
       },
     };
     return value;

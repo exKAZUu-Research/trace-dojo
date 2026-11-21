@@ -304,5 +304,37 @@ test('records only the statements inside a value-returning lambda', () => {
     val grid = Array(2) { IntArray(3) }
 }`;
   const trace = traceProgram('kotlin', source, source);
-  expect(trace.traceItems.filter(({ callLines }) => callLines.length > 0).map(({ line }) => line)).toEqual([3, 3]);
+  expect(trace.traceItems.map(({ line }) => line)).toEqual([0, 3, 3, 2, 6]);
+  expect(trace.traceItems.every(({ callLines }) => callLines.length === 0)).toBe(true);
+});
+
+test('lambda steps keep the enclosing user call in the trace', () => {
+  const kotlin = `fun repeatTwice(action: () -> Unit) {
+    action()
+    action()
+}
+fun main() {
+    var n = 0
+    repeatTwice {
+        n++
+    }
+}`;
+  const java = `public class Main {
+    static void repeatTwice(Runnable action) {
+        action.run();
+        action.run();
+    }
+    public static void main(String[] args) {
+        int[] n = {0};
+        repeatTwice(() -> {
+            n[0]++;
+        });
+    }
+}`;
+  const kotlinSteps = traceProgram('kotlin', kotlin, kotlin).traceItems.filter(({ line }) => line === 8);
+  const javaSteps = traceProgram('java', java, java).traceItems.filter(({ line }) => line === 9);
+  expect(kotlinSteps.map(({ callLines }) => callLines)).toEqual([[7], [7]]);
+  expect(kotlinSteps.map(({ callLines }) => callLines.length)).toEqual(
+    javaSteps.map(({ callLines }) => callLines.length)
+  );
 });

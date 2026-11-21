@@ -161,7 +161,7 @@ export class Cell {
 
 export interface KFunction {
   arity: number;
-  call: (caller: Frame, args: Value[], callRow?: number) => Value;
+  call: (caller: Frame, args: Value[]) => Value;
 }
 
 export function isReference(value: Value): value is KObject {
