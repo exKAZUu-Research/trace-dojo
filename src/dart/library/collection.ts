@@ -291,9 +291,12 @@ abstract mixin class ListBase<E> implements List<E> {
   }
   void setRange(int start, int end, Iterable<E> iterable, [int skipCount = 0]) {
     RangeError.checkValidRange(start, end, this.length);
-    int length = end - start;
-    if (length == 0) return;
+    if (start == end) return;
     RangeError.checkNotNegative(skipCount, "skipCount");
+    _copyRange(start, end, iterable, skipCount);
+  }
+  void _copyRange(int start, int end, Iterable<E> iterable, int skipCount) {
+    int length = end - start;
     List<E> otherList;
     int otherStart;
     if (iterable is List<E>) {
@@ -540,6 +543,7 @@ class _Uint8List extends ListBase<int> {
   external int operator [](int index);
   external void operator []=(int index, int value);
   external _Uint8List sublist(int start, [int? end]);
+  Iterable<T> map<T>(T Function(int) transform) => MappedIterable<int, T>(this, transform);
   void add(int value) => throw UnsupportedError("Cannot add to a fixed-length list");
   void addAll(Iterable<int> values) => throw UnsupportedError("Cannot add to a fixed-length list");
   void insert(int index, int value) => throw UnsupportedError("Cannot insert into a fixed-length list");
@@ -554,6 +558,11 @@ class _Uint8List extends ListBase<int> {
   void clear() => throw _cannotRemove();
 
   void setAll(int index, Iterable<int> iterable) => setRange(index, iterable.length + index, iterable);
+  void setRange(int start, int end, Iterable<int> iterable, [int skipCount = 0]) {
+    RangeError.checkValidRange(start, end, length);
+    RangeError.checkNotNegative(skipCount, "skipCount");
+    _copyRange(start, end, iterable, skipCount);
+  }
   void fillRange(int start, int end, [int? fillValue]) {
     RangeError.checkValidRange(start, end, length);
     if (start == end) return;

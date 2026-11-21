@@ -6106,6 +6106,27 @@ void main() {
   });
 });
 
+test('codec byte lists preserve source evaluation order for mapping and bulk writes', () => {
+  const source = `import 'dart:convert';
+Iterable<int> values() sync* { yield 1; throw 'oops'; }
+void main() {
+  final bytes = utf8.encode('AB');
+  try { bytes.setAll(0, values()); } catch (error) { print(bytes); }
+  try { bytes.setRange(0, 0, <int>[], -1); } catch (error) { print(error.runtimeType); }
+  try { bytes.setRange(0, 0, values()); } catch (error) { print(error); }
+  bytes.fillRange(0, 0);
+  try { bytes.fillRange(0, 1); } catch (error) { print(error.runtimeType); }
+  try { bytes.fillRange(-1, 2); } catch (error) { print(error.runtimeType); }
+  print(bytes.map((value) { print(value); return value; }).skip(1).first);
+  try { bytes.map((value) { if (value == 65) throw 'skipped'; return value; }).skip(1).first; }
+  catch (error) { print(error); }
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '[65, 66]\nRangeError\noops\nArgumentError\nRangeError\n65\n66\n66\nskipped\n',
+  });
+});
+
 test('error representations escape isolated surrogates without splitting pairs', () => {
   const source = `void main() {
   var isolated = String.fromCharCodes([0xd800, 0xdc00, 0xdc00]);
