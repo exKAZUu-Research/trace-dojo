@@ -170,12 +170,22 @@ function readApplyNamedArguments(runtime: Runtime, args: Value): Map<string, Val
   frame?.temporaries.push(iterator);
   while (runtime.invoke(iterator, 'moveNext', { positional: [], named: undefined }, [], undefined) === true) {
     const entry = runtime.getProperty(iterator, 'current', undefined);
-    const symbol = runtime.getProperty(entry, 'key', undefined) as DartObject;
+    const key = runtime.getProperty(entry, 'key', undefined);
+    const name = readSymbolName(runtime, key);
     const value = runtime.getProperty(entry, 'value', undefined);
     frame?.temporaries.push(value);
-    named.set(symbol.fields[0] as string, value);
+    named.set(name, value);
   }
   return named;
+}
+
+function readSymbolName(runtime: Runtime, symbol: Value): string {
+  if (!(symbol instanceof DartObject) || symbol.cls !== runtime.links.classNamed('_Symbol')) {
+    runtime.throwTypeError(
+      `type '${vmTypeString(runtime.runtimeTypeOf(symbol))}' is not a subtype of type 'Symbol' in type cast`
+    );
+  }
+  return runtime.getProperty(symbol, scopedMemberName('_name', 'dart:core'), undefined) as string;
 }
 
 // Records
@@ -308,8 +318,7 @@ function safeValueText(runtime: Runtime, value: Value): string {
 
 define('NoSuchMethodError._describe', (runtime, _receiver, [receiver, invocation, found, isExternal]) => {
   const field = (name: string): Value => runtime.getProperty(invocation, name, undefined);
-  const symbolName = scopedMemberName('_name', 'dart:core');
-  const member = runtime.getProperty(field('memberName'), symbolName, undefined) as string;
+  const member = readSymbolName(runtime, field('memberName'));
   const kind = field('isGetter') === true ? 'getter' : field('isSetter') === true ? 'setter' : 'method';
   const call = describeInvocation(runtime, member, kind, field, isExternal === true);
   const output = new BoundedStringParts(runtime);
@@ -376,11 +385,10 @@ function appendInvocationArguments(runtime: Runtime, output: BoundedStringParts,
     separator = ', ';
   }
   const named = field('namedArguments') as DartObject;
-  const symbolName = scopedMemberName('_name', 'dart:core');
   const namedText = new BoundedStringParts(runtime);
   const parts: [string, string][] = [];
   for (const key of iterableValues(runtime, runtime.getProperty(named, 'keys', undefined))) {
-    const name = runtime.getProperty(key, symbolName, undefined) as string;
+    const name = readSymbolName(runtime, key);
     const value = runtime.invoke(named, '[]', { positional: [key], named: undefined }, [], undefined);
     const text = safeToStringOf(runtime, value);
     namedText.append(name);

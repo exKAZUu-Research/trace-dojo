@@ -2578,6 +2578,24 @@ void main() {
   });
 });
 
+test('Function.apply requires VM symbols for named argument keys', () => {
+  const source = `class NamedKey implements Symbol { final String name = 'x'; }
+class EmptyKey implements Symbol {}
+void f({int x = 0}) { print(x); }
+void main() {
+  Function.apply(f, [], {#x: 3});
+  for (final key in [NamedKey(), EmptyKey()]) {
+    try { Function.apply(f, [], {key: 1}); }
+    catch (e) { print(e.runtimeType); print(e); }
+  }
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      "3\n_TypeError\ntype 'NamedKey' is not a subtype of type 'Symbol' in type cast\n_TypeError\ntype 'EmptyKey' is not a subtype of type 'Symbol' in type cast\n",
+  });
+});
+
 test('Function.apply and regexp match groups read any Dart List', () => {
   const program = `import 'dart:collection';
 class View extends ListBase<int> {
