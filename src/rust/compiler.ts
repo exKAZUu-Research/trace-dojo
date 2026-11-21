@@ -441,12 +441,10 @@ export class Compiler {
     if (!isPlaceExpr(expr, this.annotations)) return read;
     if (this.isCopy(type)) return needsCopy(type) ? (frame) => copyValue(read(frame)) : read;
     // Moving a whole variable out leaves it without a value, which the trace no longer shows. A `&mut` is not `Copy`, so
-    // it moves too, except where rustc reborrows it instead, which the checker marks.
+    // it moves too (where rustc reborrows it instead, `adjustedValue` has returned before this).
     if (expr.kind === 'path') {
       const res = this.annotations.paths.get(expr);
-      const moves =
-        !isRefType(res?.kind === 'local' ? res.local.type : type) ||
-        (isMutableRef(type) && !this.annotations.reborrows.has(expr));
+      const moves = !isRefType(res?.kind === 'local' ? res.local.type : type) || isMutableRef(type);
       if (res?.kind === 'local' && res.local.mode === 'move' && moves) {
         const slot = res.local.slot;
         return (frame) => {
