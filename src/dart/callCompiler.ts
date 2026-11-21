@@ -843,10 +843,13 @@ export abstract class CallCompiler extends OperatorCompiler {
     if (count > type.positional.length) {
       this.error(span, `位置で渡す引数が多すぎます。${type.positional.length} 個までですが、${count} 個です。`);
     }
-    const seen = new Set(args.named.map((argument) => argument.name));
+    const seen = new Set<string>();
     for (const argument of args.named) {
-      if (!type.named.some((named) => named.name === argument.name)) {
-        this.error(argument, `名前付き引数 ${argument.name} はありません。`);
+      const { name } = argument;
+      if (seen.has(name)) this.error(argument, `名前付き引数 ${name} が重複しています。`);
+      seen.add(name);
+      if (!type.named.some((named) => named.name === name)) {
+        this.error(argument, `名前付き引数 ${name} はありません。`);
       }
     }
     for (const named of type.named) {

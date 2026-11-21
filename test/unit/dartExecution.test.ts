@@ -8355,3 +8355,26 @@ ${main}`;
     expect(executeProgram('dart', source(pattern))).toMatchObject({ kind: 'executed', stdout: '[2, 2, -1]\n' });
   }
 });
+
+test('named super formals and explicit super arguments share argument validation', () => {
+  for (const program of [
+    `class A { final int x; A({this.x = 0}); }
+class B extends A { B({super.x}) : super(x: 2); }
+void main() { print(B(x: 1).x); }`,
+    `class A { final int x; A.named({required this.x}); }
+class B extends A { B({required super.x}) : super.named(x: 3); }
+void main() { print(B(x: 1).x); }`,
+  ]) {
+    expect(executeProgram('dart', program)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [expect.objectContaining({ message: '名前付き引数 x が重複しています。' })],
+    });
+  }
+  const valid = `class A {
+  final int x, y;
+  const A.named({required this.x, required this.y});
+}
+class B extends A { const B({required super.x}) : super.named(y: 3); }
+void main() { final b = const B(x: 2); print([b.x, b.y]); }`;
+  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '[2, 3]\n' });
+});
