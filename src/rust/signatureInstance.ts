@@ -4,6 +4,7 @@ import {
   instantiate,
   invariantParams,
   isNone,
+  isReferenceObject,
   type Layout,
   layoutOf,
   NONE,
@@ -301,11 +302,6 @@ export function relateOpaqueCall(
  * The lifetimes a declared type names at its top level (a reference's, an ADT's) with the matching regions, and
  * whether the type is invariant in each.
  */
-function isReferenceObject(type: Type): boolean {
-  const target = shallow(type);
-  return target.kind === 'dyn' && target.objectLifetime === 'reference';
-}
-
 function ownRegions(t: Type, actual: Layout): [string | undefined, RVar, boolean][] {
   if (t.kind === 'ref' && actual.kind === 'ref') return [[t.lifetime, actual.region, false]];
   if (t.kind === 'dyn' && t.lifetime && actual.kind === 'opaque') return [[t.lifetime, actual.region, false]];

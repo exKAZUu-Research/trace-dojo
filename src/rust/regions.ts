@@ -70,10 +70,13 @@ export function layoutOf(type: Type | undefined, fresh: () => RVar, staticRegion
 }
 
 function referencedObject(type: Type, region: RVar): Layout | undefined {
+  return isReferenceObject(type) ? { kind: 'opaque', region, object: true, referenceObject: true } : undefined;
+}
+
+/** Whether a reference's target is a trait object whose lifetime is the reference's (`&'a dyn T` is `&'a (dyn T + 'a)`). */
+export function isReferenceObject(type: Type): boolean {
   const target = shallow(type);
-  return target.kind === 'dyn' && target.objectLifetime === 'reference'
-    ? { kind: 'opaque', region, object: true, referenceObject: true }
-    : undefined;
+  return target.kind === 'dyn' && target.objectLifetime === 'reference';
 }
 
 function lifetimeCount(type: Extract<Type, { kind: 'adt' }>): number {
