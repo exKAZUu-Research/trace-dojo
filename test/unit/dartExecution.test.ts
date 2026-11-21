@@ -1627,6 +1627,7 @@ test.each([
     'mixin M on A, C implements A, C {}',
     'enum E implements Object { a }',
     'mixin M {}\nclass B extends A with M implements A {}',
+    'mixin M {}\nmixin N {}\nclass B = A with M, N implements A;',
   ]) {
     expect(executeProgram('dart', `class A {}\nclass C {}\n${valid}\nvoid main() {}`)).toMatchObject({
       kind: 'executed',
