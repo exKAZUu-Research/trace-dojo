@@ -1,8 +1,9 @@
-import { type Annotations, type FnContext, type LocalVar } from './annotations';
+import { type Annotations, type FnContext, type LocalVar, type MethodRes } from './annotations';
 import type { Expr, MacroCall, Pattern, Span } from './ast';
 import { forEachDirect, patternBindingParts } from './astWalk';
 import type { Checker } from './checker';
 import { checkParamPatterns } from './checkerPatterns';
+import { normalize } from './infer';
 import { compileError } from './items';
 import { type CaptureMode, captureProjections, projectedBindings } from './loanCaptures';
 import { typeAfter } from './regions';
@@ -251,7 +252,9 @@ function mutatedPlace(expr: Expr, annotations: Annotations): Expr | undefined {
     }
     case 'methodCall': {
       const method = annotations.methods.get(expr);
-      const throughMut = method?.fn.selfMode === 'mutRef' && method.receiver.autoref === 'none';
+      const throughMut =
+        (method?.fn.selfMode === 'mutRef' && method.receiver.autoref === 'none') ||
+        (method !== undefined && reborrowsReceiver(method, expr.receiver.ty));
       return method?.receiver.autoref === 'mut' || throughMut ? expr.receiver : undefined;
     }
     case 'call': {
@@ -307,6 +310,7 @@ function consumedChildren(
       const byValue =
         method?.fn.selfMode === 'value' &&
         method.receiver.autoref === 'none' &&
+        !reborrowsReceiver(method, expr.receiver.ty) &&
         !isCopy(typeAfter(expr.receiver.ty, method.receiver.derefs) ?? UNIT);
       return (child) => child !== expr.receiver || byValue;
     }
@@ -351,4 +355,13 @@ function consumedMacroChildren(
       return () => false;
     }
   }
+}
+
+/** Whether rustc reborrows a `&mut` receiver for a method taking `self` by value, rather than moving it. */
+function reborrowsReceiver(method: MethodRes, receiverType: Type | undefined): boolean {
+  if (method.fn.selfMode !== 'value' || method.receiver.autoref !== 'none' || method.receiver.derefs.length > 0) {
+    return false;
+  }
+  const t = receiverType && normalize(shallow(receiverType));
+  return t?.kind === 'ref' && t.mutable;
 }

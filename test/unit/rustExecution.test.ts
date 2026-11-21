@@ -8719,3 +8719,14 @@ test('a mutable reference stays usable after a method that takes it by value', (
     println!("{:?}", a);`);
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '[2, 3, 3]\n' });
 });
+
+test('a closure reborrowing a captured mutable reference for a by-value method can be called again', () => {
+  const program = rustMain(`
+    let mut v = vec![1, 2];
+    let a = &mut v;
+    let mut f = || { for x in a.into_iter() { *x += 1; } };
+    f();
+    f();
+    println!("{:?}", v);`);
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '[3, 4]\n' });
+});
