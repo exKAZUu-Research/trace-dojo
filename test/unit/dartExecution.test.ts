@@ -4331,9 +4331,10 @@ test('list copies skip empty efficient iterators and verify reported nonempty le
   const program = `import 'dart:collection';
 class Input extends ListBase<int> {
   final int count;
-  Input(this.count);
+  final int items;
+  Input(this.count, [this.items = 1]);
   int get length { print('length'); return count; }
-  Iterator<int> get iterator { print('iterator'); return [1].iterator; }
+  Iterator<int> get iterator { print('iterator'); return List<int>.filled(items, 1).iterator; }
   set length(int value) {}
   int operator [](int index) => 1;
   void operator []=(int index, int value) {}
@@ -4354,11 +4355,13 @@ void main() {
   print(List<int>.from(Input(0), growable: false));
   print(List<int>.unmodifiable(Input(0)));
   try { print(List<int>.of(Input(2))); } catch (error) { print(error.runtimeType); }
+  try { print(List<int>.of(Input(1, 2))); } catch (error) { print(error); }
   print(switch (Slice()) { [...var a, 2] => 0, [...var b, 1] => 1, _ => 2 });
 }`;
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
-    stdout: 'length\n[]\nlength\n[]\nlength\n[]\nlength\niterator\nConcurrentModificationError\n1\n2\n3\n4\n1\n',
+    stdout:
+      'length\n[]\nlength\n[]\nlength\n[]\nlength\niterator\nConcurrentModificationError\nlength\niterator\nRangeError (index): Invalid value: Only valid value is 0: 1\n1\n2\n3\n4\n1\n',
   });
 });
 

@@ -157,7 +157,7 @@ function copyIterableToList(
       implicitCast(runtime, value, elementType);
       if (capacity === undefined) runtime.allocate(1);
       else if (result.elements.length >= capacity)
-        rangeError(runtime, result.elements.length, 0, capacity - 1, 'length');
+        rangeError(runtime, result.elements.length, 0, capacity - 1, 'index');
       result.elements.push(value);
     });
   });
