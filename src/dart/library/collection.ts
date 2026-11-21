@@ -1152,6 +1152,26 @@ class _HashMap<K, V> extends MapBase<K, V> implements HashMap<K, V> {
       }
     }
   }
+  void removeWhere(bool Function(K key, V value) test) {
+    final buckets = _buckets;
+    var stamp = _modificationCount;
+    for (int index = 0; index < buckets.length; index++) {
+      var entry = buckets[index];
+      _HashMapEntry<K, V>? previous;
+      while (entry != null) {
+        final remove = test(entry.key, entry.value);
+        if (stamp != _modificationCount) throw ConcurrentModificationError(this);
+        final next = entry.next;
+        if (remove) {
+          _removeEntry(entry, previous, index);
+          stamp = _modificationCount;
+        } else {
+          previous = entry;
+        }
+        entry = next;
+      }
+    }
+  }
   V? remove(Object? key) {
     if (_policy != null && !_policy!.accepts(key)) return null;
     final hashCode = _policy?.hash(key) ?? key.hashCode;
@@ -1163,8 +1183,6 @@ class _HashMap<K, V> extends MapBase<K, V> implements HashMap<K, V> {
       final next = entry.next;
       if (hashCode == entry.hashCode && _keysEqual(entry.key, key)) {
         _removeEntry(entry, previous, index);
-        _elementCount--;
-        _modificationCount = (_modificationCount + 1) & 0x3fffffff;
         return entry.value;
       }
       previous = entry;
@@ -1185,6 +1203,8 @@ class _HashMap<K, V> extends MapBase<K, V> implements HashMap<K, V> {
     } else {
       previousInBucket.next = entry.next;
     }
+    _elementCount--;
+    _modificationCount = (_modificationCount + 1) & 0x3fffffff;
   }
   void _addEntry(List<_HashMapEntry<K, V>?> buckets, int index, int length, K key, V value, int hashCode) {
     final entry = _HashMapEntry<K, V>(key, value, hashCode, buckets[index]);
@@ -1359,6 +1379,27 @@ class _HashSet<E> extends SetBase<E> implements HashSet<E> {
   void addAll(Iterable<E> objects) {
     for (E object in objects) add(object);
   }
+  void removeWhere(bool Function(E) test) => _filterWhere(test, true);
+  void retainWhere(bool Function(E) test) => _filterWhere(test, false);
+  void _filterWhere(bool Function(E) test, bool removeMatching) {
+    final length = _buckets.length;
+    for (int index = 0; index < length; index++) {
+      var entry = _buckets[index];
+      _HashSetEntry<E>? previous;
+      while (entry != null) {
+        final stamp = _modificationCount;
+        final remove = test(entry.key) == removeMatching;
+        if (stamp != _modificationCount) throw ConcurrentModificationError(this);
+        final next = entry.next;
+        if (remove) {
+          _removeEntry(entry, previous, index);
+        } else {
+          previous = entry;
+        }
+        entry = next;
+      }
+    }
+  }
   bool remove(Object? object) {
     if (_policy != null && !_policy!.accepts(object)) return false;
     final hashCode = _policy?.hash(object) ?? object.hashCode;
@@ -1367,19 +1408,24 @@ class _HashSet<E> extends SetBase<E> implements HashSet<E> {
     _HashSetEntry<E>? previous = null;
     while (entry != null) {
       if (_keysEqual(entry.key, object)) {
-        if (previous == null) {
-          _buckets[index] = entry.next;
-        } else {
-          previous.next = entry.next;
-        }
-        _elementCount--;
-        _modificationCount = (_modificationCount + 1) & 0x3fffffff;
+        _removeEntry(entry, previous, index);
         return true;
       }
       previous = entry;
       entry = entry.next;
     }
     return false;
+  }
+  void _removeEntry(_HashSetEntry<E> entry, _HashSetEntry<E>? previous, int index) {
+    final next = entry.next;
+    entry.next = null;
+    if (previous == null) {
+      _buckets[index] = next;
+    } else {
+      previous.next = next;
+    }
+    _elementCount--;
+    _modificationCount = (_modificationCount + 1) & 0x3fffffff;
   }
   void clear() {
     _buckets = List<_HashSetEntry<E>?>.filled(8, null);

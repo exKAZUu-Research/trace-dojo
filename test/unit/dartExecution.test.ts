@@ -8452,3 +8452,89 @@ void main() {
       'RangeError (count): Invalid value: Not greater than or equal to 0: -1\n',
   });
 });
+
+test('Dart hash predicates observe removals before the next bucket entry', () => {
+  const program = `import 'dart:collection';
+
+void setFilter() {
+  var reading = false;
+  final set = HashSet<int>(hashCode: (n) { if (reading) print('hash $n'); return 0; });
+  set.addAll([1, 2, 3, 4]);
+  final cursor = set.iterator;
+  cursor.moveNext();
+  reading = true;
+  try {
+    set.removeWhere((key) {
+      print(['set', key, set.length]);
+      if (key == 2) throw 'stop';
+      return key.isEven;
+    });
+  } catch (error) { print(error); }
+  print(set.toList());
+  try { cursor.moveNext(); } catch (error) { print(error.runtimeType); }
+  set.retainWhere((key) { print(['retain', key, set.length]); return key > 2; });
+  print(set.toList());
+  reading = false;
+  try {
+    set.removeWhere((key) { set.add(7); return true; });
+  } catch (error) { print(error.runtimeType); }
+  print(set.toList());
+}
+void mapFilter() {
+  var reading = false;
+  final map = HashMap<int,int>(hashCode: (n) { if (reading) print('hash $n'); return 0; });
+  map.addAll({1: 10, 2: 20, 3: 30, 4: 40});
+  reading = true;
+  try {
+    map.removeWhere((key, value) {
+      print(['map', key, value, map.length]);
+      if (key == 2) throw 'stop';
+      return key.isEven;
+    });
+  } catch (error) { print(error); }
+  print(map);
+  reading = false;
+  try {
+    map.removeWhere((key, value) {
+      if (key == 2) { map[7] = 70; }
+      return true;
+    });
+  } catch (error) { print(error.runtimeType); }
+  print(map);
+  final identity = HashMap<int, int>.identity()..addAll({1: 10, 2: 20, 3: 30});
+  identity.removeWhere((key, value) {
+    print(['identity', key, value, identity.length]);
+    identity[key] = -value;
+    return key.isOdd;
+  });
+  print(identity);
+}
+void main() { setFilter(); mapFilter(); }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[set, 4, 4]\n' +
+      '[set, 3, 3]\n' +
+      '[set, 2, 3]\n' +
+      'stop\n' +
+      '[3, 2, 1]\n' +
+      'ConcurrentModificationError\n' +
+      '[retain, 3, 3]\n' +
+      '[retain, 2, 3]\n' +
+      '[retain, 1, 2]\n' +
+      '[3]\n' +
+      'ConcurrentModificationError\n' +
+      '[7, 3]\n' +
+      '[map, 4, 40, 4]\n' +
+      '[map, 3, 30, 3]\n' +
+      '[map, 2, 20, 3]\n' +
+      'stop\n' +
+      '{3: 30, 2: 20, 1: 10}\n' +
+      'ConcurrentModificationError\n' +
+      '{7: 70, 2: 20, 1: 10}\n' +
+      '[identity, 1, 10, 3]\n' +
+      '[identity, 2, 20, 2]\n' +
+      '[identity, 3, 30, 2]\n' +
+      '{2: -20}\n',
+  });
+});
