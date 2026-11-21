@@ -1287,6 +1287,12 @@ test.each(['-big', '~big'])('Dart charges the digits of each %s result to the op
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
 });
 
+test('Dart enum methods may omit their return types', () => {
+  const program = `enum Color { red, blue; show() => name; toString() => 'C'; }
+void main() { print([Color.red.show(), Color.blue]); }`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[red, C]\n' });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}

@@ -337,14 +337,12 @@ export class Converter extends ExpressionConverter {
     const interfacesNode = named.find((child) => child.type === 'interfaces');
     const bodyNode = fieldOf(node, 'body');
     const primary = named.find((child) => child.type === 'primary_constructor');
-    const constants: EnumConstant[] = [];
-    const members: MemberDeclaration[] = [];
-    if (bodyNode) {
-      for (const child of namedOf(bodyNode)) {
-        if (child.type === 'enum_constant') constants.push(this.convertEnumConstant(child));
-        else if (child.type === 'class_member') members.push(...this.convertMember(child));
-      }
-    }
+    const constants = bodyNode
+      ? namedOf(bodyNode)
+          .filter((child) => child.type === 'enum_constant')
+          .map((child) => this.convertEnumConstant(child))
+      : [];
+    const members = bodyNode ? this.convertMembers(bodyNode) : [];
     return {
       kind: 'class',
       classKind: 'enum',
