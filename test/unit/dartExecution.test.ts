@@ -774,6 +774,25 @@ test('detached string copies share the execution budget', () => {
   });
 });
 
+test.each([
+  ['interpolation', "'$text$i'"],
+  ['concatenation', "text + 'x'"],
+  ['padding', 'text.padRight(text.length + 1)'],
+  ['a buffer snapshot', "(StringBuffer(text)..write('x')).toString()"],
+])('%s charges for the text it produces', (_operation, expression) => {
+  expect(
+    executeProgram(
+      'dart',
+      `void main() {
+  final text = 'x' * 500000;
+  var total = 0;
+  for (var i = 0; i < 34; i++) total += (${expression}).length;
+  print(total);
+}`
+    )
+  ).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
 test('nullable receivers still check covariant equality parameters', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}
@@ -1104,17 +1123,21 @@ void main() {
 });
 
 test('Base64 encoding and normalization apply the full output limit', () => {
-  const program = `import 'dart:convert';
+  const encoding = `import 'dart:convert';
 void main() {
   var bytes = List<int>.filled(750001, 0);
   try { print(base64Url.encode(bytes).length); } catch (error) { print(error); }
+}`;
+  const normalization = `import 'dart:convert';
+void main() {
   var text = 'AA' + 'x' * 999998;
   try { print(base64.normalize(text, 0, 2).length); } catch (error) { print(error); }
   print(base64.normalize(text.substring(0, text.length - 2), 0, 2).length);
 }`;
-  expect(executeProgram('dart', program)).toMatchObject({
+  expect(executeProgram('dart', encoding)).toMatchObject({ kind: 'executed', stdout: 'Out of Memory\n' });
+  expect(executeProgram('dart', normalization)).toMatchObject({
     kind: 'executed',
-    stdout: 'Out of Memory\nOut of Memory\n1000000\n',
+    stdout: 'Out of Memory\n1000000\n',
   });
 });
 

@@ -199,6 +199,10 @@ export class Runtime implements TracedRuntime<Frame> {
     this.budget.spend(cost);
   }
 
+  spendString(length: number): void {
+    this.spend(Math.ceil(length / 16));
+  }
+
   /** Counts slots an allocation takes against the limit. */
   allocate(slots: number): void {
     this.allocatedSlots += slots;

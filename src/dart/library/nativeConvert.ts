@@ -105,6 +105,7 @@ class JsonStringifier {
 
   private append(text: string): true {
     this.checkCapacity(text.length);
+    this.runtime.spendString(text.length);
     this.outputLength += text.length;
     this.output.append(text);
     return true;
@@ -118,7 +119,6 @@ class JsonStringifier {
     if (this.indent === undefined) return;
     const count = this.indent.length * depth;
     this.checkCapacity(count + 1);
-    this.runtime.spend(Math.ceil(count / 1024));
     this.append('\n');
     this.append(this.indent.repeat(depth));
   }
@@ -352,6 +352,7 @@ class JsonParser {
       ORDINARY_JSON_STRING.lastIndex = this.position;
       const run = ORDINARY_JSON_STRING.exec(this.text);
       if (run) {
+        this.runtime.spendString(run[0].length);
         result.append(run[0]);
         this.position = ORDINARY_JSON_STRING.lastIndex;
         continue;
@@ -692,7 +693,7 @@ define('_base64Encode', (runtime, _receiver, [bytes, urlSafe]) => {
     return Number(value & 0xffn);
   });
   if (hasInvalid) invalidBase64Byte(runtime, bytes, data.length);
-  checkCodecStringLength(runtime, Math.ceil(data.length / 3) * 4);
+  chargeCodecString(runtime, Math.ceil(data.length / 3) * 4);
   const text = Buffer.from(data).toString('base64');
   return urlSafe === true ? text.replaceAll('+', '-').replaceAll('/', '_') : text;
 });
@@ -754,8 +755,9 @@ function conversionRange(runtime: Runtime, length: bigint, start: Value, end: Va
   return [Number(from), Number(to)];
 }
 
-function checkCodecStringLength(runtime: Runtime, length: number): void {
+function chargeCodecString(runtime: Runtime, length: number): void {
   if (length > LIMITS.maxStringLength) runtime.throwError('OutOfMemoryError', '', []);
+  runtime.spendString(length);
 }
 
 // code-gauge-allow functionCognitiveComplexity 26 -- Preserve the SDK order of Base64 normalization and validation.
@@ -800,7 +802,7 @@ function normalizeBase64(runtime: Runtime, input: string, start: number, end: nu
     if (length % 4 === 1) fail('Invalid base64 encoding length ', end);
   }
   const addedPadding = firstPad < 0 ? (4 - (length % 4)) % 4 : 0;
-  checkCodecStringLength(runtime, input.length - (end - start) + length + addedPadding);
+  chargeCodecString(runtime, input.length - (end - start) + length + addedPadding);
   return input.slice(0, start) + normalized.text() + '='.repeat(addedPadding) + input.slice(end);
 }
 

@@ -221,6 +221,6 @@ function doubleBinary(runtime: Runtime, operator: string, a: bigint | number, b:
 export function concatenate(runtime: Runtime, a: string, b: string): string {
   const length = a.length + b.length;
   if (length > LIMITS.maxStringLength) runtime.throwError('OutOfMemoryError', '', []);
-  runtime.spend(Math.ceil(length / 1024));
+  runtime.spendString(length);
   return a + b;
 }

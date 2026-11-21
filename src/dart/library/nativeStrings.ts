@@ -32,7 +32,7 @@ import { trimDartEnd, trimDartStart, trimDartWhitespace } from './stringWhitespa
 
 function checkLength(runtime: Runtime, length: number): void {
   if (length > LIMITS.maxStringLength) runtime.throwError('OutOfMemoryError', '', []);
-  runtime.spend(Math.ceil(length / 1024));
+  runtime.spendString(length);
 }
 
 function rangeError(runtime: Runtime, value: bigint, min: number, max: number, name: string | undefined): never {
@@ -420,7 +420,7 @@ define('String.toLowerCase', (runtime, receiver) => mapCase(runtime, self(receiv
 define('String.toUpperCase', (runtime, receiver) => mapCase(runtime, self(receiver), true));
 
 function mapCase(runtime: Runtime, text: string, upper: boolean): string {
-  runtime.spend(Math.ceil(text.length / 64));
+  runtime.spendString(text.length);
   return dartStringCase(text, upper);
 }
 define('String.toString', (_runtime, receiver) => receiver);
@@ -521,7 +521,7 @@ defineConstructor('StringBuffer.new', (runtime, instance, args) => {
     snapshot: undefined,
     get text() {
       if (this.snapshot === undefined) {
-        runtime.spend(Math.ceil(this.parts.length / 1024));
+        runtime.spendString(this.parts.length);
         this.snapshot = this.parts.text();
       }
       return this.snapshot;

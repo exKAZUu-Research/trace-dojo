@@ -12,7 +12,7 @@ export function detachShorterString(runtime: Runtime, source: string, text: stri
 
 export function copyString(runtime: Runtime, text: string): string {
   if (text.length === 0) return text;
-  runtime.spend(Math.ceil(text.length / 16));
+  runtime.spendString(text.length);
   // V8 may retain a slice's backing string even when the slice is small.
   return Buffer.from(text, 'utf16le').toString('utf16le');
 }
@@ -31,7 +31,7 @@ export class BoundedStringParts {
     if (part.length === 0) return;
     const size = this.size + part.length;
     if (size > LIMITS.maxStringLength) this.runtime.throwError('OutOfMemoryError', '', []);
-    this.runtime.spend(Math.ceil(part.length / 1024));
+    this.runtime.spendString(part.length);
     this.parts.append(part);
     this.size = size;
   }
