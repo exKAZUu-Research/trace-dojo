@@ -1,12 +1,15 @@
-import { afterAll, beforeAll, expect, test } from 'vitest';
+import { afterAll, beforeAll, expect, test, vi } from 'vitest';
 
 import { LIMITS } from '../../src/interpreter/limits';
 import { executeProgram, traceProgram } from '../../src/interpreter/program';
 
-// The programs here stop at limits of their own or finish, which the real-time limit would preempt on a busy machine.
+// The programs here stop at limits of their own or finish, which the real-time limit, or a test timeout shorter than
+// it, would preempt on a busy machine.
 const { maxMilliseconds } = LIMITS;
+const RELAXED_MILLISECONDS = 60_000;
+vi.setConfig({ testTimeout: RELAXED_MILLISECONDS });
 beforeAll(() => {
-  LIMITS.maxMilliseconds = 60_000;
+  LIMITS.maxMilliseconds = RELAXED_MILLISECONDS;
 });
 afterAll(() => {
   LIMITS.maxMilliseconds = maxMilliseconds;
@@ -7007,7 +7010,7 @@ test('stops an exhaustiveness check whose or-patterns multiply past the compile 
     });
     expect(performance.now() - start).toBeLessThan(5 * maxMilliseconds);
   } finally {
-    LIMITS.maxMilliseconds = 60_000;
+    LIMITS.maxMilliseconds = RELAXED_MILLISECONDS;
   }
 });
 
