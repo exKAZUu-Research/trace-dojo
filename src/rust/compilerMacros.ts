@@ -232,9 +232,11 @@ function assertEqMacro(c: Compiler, macro: Macro<'assertEq'>, span: Span): Eval 
         const spec = debugSpec(false);
         // The panic's message is what was written of it before a formatting impl failed.
         const text = writtenText(() => {
-          const message = format ? `: ${format(frame)}` : '';
-          const head = `assertion \`left ${equal ? '==' : '!='} right\` failed${message}\n  left: `;
-          const l = withWritten(head, () => c.support.formatter.debug(a, leftType(frame), spec, undefined));
+          const failed = `assertion \`left ${equal ? '==' : '!='} right\` failed`;
+          const head = format ? withWritten(`${failed}: `, () => format(frame)) : failed;
+          const l = withWritten(`${head}\n  left: `, () =>
+            c.support.formatter.debug(a, leftType(frame), spec, undefined)
+          );
           return withWritten(`${l}\n right: `, () => c.support.formatter.debug(b, rightType(frame), spec, undefined));
         });
         throw new RustPanic(text, span);

@@ -7887,6 +7887,8 @@ test.each([
   ['panic!("{:?}", Bad);', 'src/main.rs:8:5:\npart\n'],
   ['assert!(false, "{:?}", Bad);', 'src/main.rs:8:5:\npart\n'],
   ['assert_eq!(Bad, Bad);', 'assertion `left == right` failed\n  left: part\n'],
+  ['assert_eq!(1, 2, "{:?}", Bad);', 'assertion `left == right` failed: part\n'],
+  ['assert_eq!(Bad, Bad, "m");', 'assertion `left == right` failed: m\n  left: part\n'],
   [
     'dbg!(Bad);',
     'core/src/io/write.rs:411:17:\na formatting trait implementation returned an error when the underlying stream did not\n',
