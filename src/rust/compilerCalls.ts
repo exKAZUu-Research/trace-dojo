@@ -3,10 +3,12 @@ import type { Expr } from './ast';
 import type { Compiler, Eval } from './compiler';
 import { construct, derefAll, evaluateValues, stripRefs } from './compilerCommon';
 import { placeThrough, valueThrough } from './compilerPlaces';
+import { normalize } from './infer';
 import { derefOnce } from './methods';
 import { copyValue, needsCopy } from './ops';
 import { MOVED } from './runtime';
 import { runtimeType } from './runtimeTypes';
+import { shallow, type Type } from './types';
 import { CellPlace, DynValue } from './values';
 
 type ExprOf<K extends Expr['kind']> = Extract<Expr, { kind: K }>;
@@ -80,7 +82,9 @@ function compileReceiver(c: Compiler, expr: ExprOf<'methodCall'>, method: Method
     return place;
   }
   const byValue = adjust.autoref === 'none' && method.fn.selfMode === 'value' && adjust.derefs.length === 0;
-  const read = byValue ? c.value(expr.receiver) : valueThrough(c, expr.receiver, adjust.derefs);
+  // rustc reborrows a `&mut` receiver rather than moving it out of its variable.
+  const reborrowed = byValue && isMutReference(expr.receiver.ty);
+  const read = byValue && !reborrowed ? c.value(expr.receiver) : valueThrough(c, expr.receiver, adjust.derefs);
   if (iterFrom) return (frame) => c.support.toIter(read(frame), iterFrom(frame));
   if (method.fn.selfMode === 'value' && adjust.autoref === 'none' && adjust.derefs.length > 0) {
     return derefedSelf(c, expr.receiver, adjust.derefs, read);
@@ -104,4 +108,9 @@ function derefedSelf(c: Compiler, receiver: Expr, derefs: ReceiverAdjust['derefs
     place.set(MOVED);
     return value;
   };
+}
+
+function isMutReference(type: Type | undefined): boolean {
+  const t = type && normalize(shallow(type));
+  return t?.kind === 'ref' && t.mutable;
 }

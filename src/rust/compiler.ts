@@ -307,27 +307,11 @@ export class Compiler {
     const read = this.value(expr);
     if (slot === undefined || !expr.ty) return read;
     const type = normalize(shallow(expr.ty));
-    if (type.kind !== 'ref') return read;
-    if (type.mutable) return this.movedMutableReference(expr, read);
+    if (type.kind !== 'ref' || type.mutable) return read;
     if (expr.kind === 'ref' && this.ownedPlace(expr.operand)) {
       return this.directBorrow(expr, expr.operand, slot);
     }
     return this.copiedBorrow(expr, slot, read);
-  }
-
-  /**
-   * A `&mut` that a binding takes from a variable moves out of it, which the trace no longer shows; where the binding's
-   * type is written, rustc reborrows it instead, and the checker marks that.
-   */
-  private movedMutableReference(expr: Expr, read: Eval): Eval {
-    const res = expr.kind === 'path' ? this.annotations.paths.get(expr) : undefined;
-    if (res?.kind !== 'local' || this.annotations.reborrows.has(expr)) return read;
-    const { slot } = res.local;
-    return (frame) => {
-      const value = read(frame);
-      frame.locals[slot] = MOVED;
-      return value;
-    };
   }
 
   /** A shared reference that a binding copies, which follows the referent of the variable it copies, if any. */
@@ -456,10 +440,14 @@ export class Compiler {
   private valueFromPlace(expr: Expr, read: Eval, type: Type): Eval {
     if (!isPlaceExpr(expr, this.annotations)) return read;
     if (this.isCopy(type)) return needsCopy(type) ? (frame) => copyValue(read(frame)) : read;
-    // Moving a whole variable out leaves it without a value, which the trace no longer shows.
+    // Moving a whole variable out leaves it without a value, which the trace no longer shows. A `&mut` is not `Copy`, so
+    // it moves too, except where rustc reborrows it instead, which the checker marks.
     if (expr.kind === 'path') {
       const res = this.annotations.paths.get(expr);
-      if (res?.kind === 'local' && res.local.mode === 'move' && !isRefType(res.local.type)) {
+      const moves =
+        !isRefType(res?.kind === 'local' ? res.local.type : type) ||
+        (isMutableRef(type) && !this.annotations.reborrows.has(expr));
+      if (res?.kind === 'local' && res.local.mode === 'move' && moves) {
         const slot = res.local.slot;
         return (frame) => {
           const value = read(frame);
