@@ -166,8 +166,8 @@ function functionsOf(kind: ArrayKind): string {
     `inline fun ${g('K, V')}${r}.associate(transform: (${e}) -> Pair<K, V>): Map<K, V> = asList().associate(transform)`,
     `inline fun ${g('K')}${r}.associateBy(keySelector: (${e}) -> K): Map<K, ${e}> = asList().associateBy(keySelector)`,
     `inline fun ${g()}${r}.partition(predicate: (${e}) -> Boolean): Pair<List<${e}>, List<${e}>> = asList().partition(predicate)`,
-    `infix fun ${g('R')}${r}.zip(other: Iterable<R>): List<Pair<${e}, R>> = asList().zip(other)`,
-    `inline fun ${g('R, V')}${r}.zip(other: Iterable<R>, transform: (a: ${e}, b: R) -> V): List<V> = asList().zip(other, transform)`,
+    `infix fun ${g('R')}${r}.zip(other: Iterable<R>): List<Pair<${e}, R>> = zipArrayWithIterable(size, other) { index, item -> get(index) to item }`,
+    `inline fun ${g('R, V')}${r}.zip(other: Iterable<R>, transform: (a: ${e}, b: R) -> V): List<V> = zipArrayWithIterable(size, other) { index, item -> transform(get(index), item) }`,
     `fun ${g()}${r}.joinToString(separator: CharSequence = ", ", prefix: CharSequence = "", postfix: CharSequence = "", limit: Int = -1, truncated: CharSequence = "...", transform: ((${e}) -> CharSequence)? = null): String = asList().joinToString(separator, prefix, postfix, limit, truncated, transform)`,
     `fun ${g()}${r}.random(): ${e} = random(kotlin.random.Random)`,
     `fun ${g()}${r}.random(random: kotlin.random.Random): ${e} {

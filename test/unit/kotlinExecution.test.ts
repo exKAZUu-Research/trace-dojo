@@ -3008,6 +3008,28 @@ fun main() {
       'size\n[]\nsize\nisEmpty\nsize\nget 3\n[3]\nsize\nlistIterator 2\n[2, 3]\nsize\nsize\nget 2\nget 3\n[2, 3]\n[2, 3]\n0\n',
   },
   {
+    name: 'zip sizes and traverses iterable and array operands in JVM order',
+    source: `class ZipIterator(private val id: Int, private val values: Iterator<Int>) : Iterator<Int> {
+    override fun hasNext(): Boolean = values.hasNext()
+    override fun next(): Int { println("next $id"); return values.next() }
+}
+class ZipSource(val id: Int) : Collection<Int> by listOf(1, 2) {
+    override val size: Int get() { println("size $id"); return 2 }
+    override fun iterator(): Iterator<Int> {
+        println("iterator $id")
+        return ZipIterator(id, listOf(1, 2).iterator())
+    }
+}
+fun main() {
+    println(ZipSource(1).zip(ZipSource(2)))
+    println(ZipSource(3).zip(ZipSource(4)) { a, b -> a + b })
+    println(ZipSource(5).zip(arrayOf("a")))
+    println(intArrayOf(10).zip(ZipSource(6)) { a, b -> a + b })
+}`,
+    stdout:
+      'iterator 1\niterator 2\nsize 1\nsize 2\nnext 1\nnext 2\nnext 1\nnext 2\n[(1, 1), (2, 2)]\niterator 3\niterator 4\nsize 3\nsize 4\nnext 3\nnext 4\nnext 3\nnext 4\n[2, 4]\nsize 5\niterator 5\nnext 5\nnext 5\n[(1, a)]\nsize 6\niterator 6\nnext 6\nnext 6\n[11]\n',
+  },
+  {
     name: 'character sequence conversions use Kotlin length-based paths',
     source: `class CharProbe(private val value: String) : CharSequence by value {
     override val length: Int get() { println("length"); return value.length }

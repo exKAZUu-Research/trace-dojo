@@ -1021,14 +1021,24 @@ private fun <T, R> windowRandomAccess(list: List<T>, size: Int, step: Int, parti
 }
 
 infix fun <T, R> Iterable<T>.zip(other: Iterable<R>): List<Pair<T, R>> = zip(other) { a, b -> a to b }
-infix fun <T, R> Iterable<T>.zip(other: Array<out R>): List<Pair<T, R>> = zip(other.asList())
+infix fun <T, R> Iterable<T>.zip(other: Array<out R>): List<Pair<T, R>> = zip(other) { a, b -> a to b }
 inline fun <T, R, V> Iterable<T>.zip(other: Array<out R>, transform: (a: T, b: R) -> V): List<V> =
-    zip(other.asList(), transform)
+    zipArrayWithIterable(other.size, this) { index, item -> transform(item, other[index]) }
+
+internal inline fun <T, R> zipArrayWithIterable(size: Int, values: Iterable<T>, transform: (Int, T) -> R): List<R> {
+    val result = ArrayList<R>(minOf(size, values.collectionSizeOrDefault(10)))
+    var index = 0
+    for (item in values) {
+        if (index == size) break
+        result.add(transform(index++, item))
+    }
+    return result
+}
 
 inline fun <T, R, V> Iterable<T>.zip(other: Iterable<R>, transform: (a: T, b: R) -> V): List<V> {
     val first = iterator()
     val second = other.iterator()
-    val list = ArrayList<V>()
+    val list = ArrayList<V>(minOf(collectionSizeOrDefault(10), other.collectionSizeOrDefault(10)))
     while (first.hasNext() && second.hasNext()) list.add(transform(first.next(), second.next()))
     return list
 }
