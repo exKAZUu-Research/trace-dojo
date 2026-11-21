@@ -653,7 +653,7 @@ export abstract class ExpressionConverter {
   }
 
   private convertElements(node: Node): CollectionElement[] {
-    const children = childrenOf(node).filter((child) => child.type !== 'type_arguments');
+    const children = operandsOf(node).filter((child) => child.type !== 'type_arguments');
     const elements: CollectionElement[] = [];
     for (const child of children) {
       if (child.type === 'cascade_section') {
@@ -662,7 +662,6 @@ export abstract class ExpressionConverter {
         elements.push(this.appendCascade(last, child));
         continue;
       }
-      if (!child.isNamed || child.type === 'comment') continue;
       elements.push(this.convertElement(child));
     }
     return elements;

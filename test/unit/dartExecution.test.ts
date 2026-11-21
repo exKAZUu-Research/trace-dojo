@@ -812,6 +812,23 @@ test('detached string copies share the execution budget', () => {
   });
 });
 
+test('bare this is a list and set element', () => {
+  const program = `class Node {
+  final String name;
+  Node(this.name);
+  List<Node> nodes(Node other) => <Node>[this, ...[other]];
+  Set<Node> unique() => {this};
+}
+extension Singleton on int { List<int> asList() => [this]; }
+void main() {
+  final root = Node('root');
+  print(root.nodes(Node('child')).map((node) => node.name).toList());
+  print(root.unique().single.name);
+  print(5.asList());
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[root, child]\nroot\n[5]\n' });
+});
+
 test('const constructor interpolations use the evaluated parameter values', () => {
   const program = `class C {
   final String text;
