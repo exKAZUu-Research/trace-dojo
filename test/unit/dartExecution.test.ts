@@ -774,6 +774,30 @@ test('detached string copies share the execution budget', () => {
   });
 });
 
+test('multiline strings handle opening whitespace and escaped line endings like Dart', () => {
+  const slash = '\\';
+  const program = `void main() {
+  print(('''  ${slash}\nhello''').codeUnits);
+  print(('''  ${slash} \nhello''').codeUnits);
+  print(('''A${slash}\nB''').codeUnits);
+  print(('''A${slash}\r\nB''').codeUnits);
+  print(('''A\r\nB''').codeUnits);
+  print((r'''A${slash}\r\nB''').codeUnits);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: [
+      '[104, 101, 108, 108, 111]',
+      '[104, 101, 108, 108, 111]',
+      '[65, 10, 66]',
+      '[65, 13, 10, 66]',
+      '[65, 10, 66]',
+      '[65, 92, 10, 66]',
+      '',
+    ].join('\n'),
+  });
+});
+
 test.each([
   ['interpolation', "'$text$i'"],
   ['concatenation', "text + 'x'"],

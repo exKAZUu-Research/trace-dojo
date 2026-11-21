@@ -1152,19 +1152,20 @@ export abstract class ExpressionConverter {
       const isRaw = literal.type.startsWith('raw_');
       const isMultiline = literal.type.endsWith('_multiple');
       const pieces = childrenOf(literal).filter((child) => child.type !== 'comment');
-      // The opening and closing quote tokens.
-      const inner = pieces.slice(1, -1);
-      for (const [index, piece] of inner.entries()) {
-        let text: string | undefined;
-        if (piece.type === 'escape_sequence') {
-          text = isRaw ? piece.text : unescape(piece);
-        } else if (piece.type === 'template_substitution') {
+      const afterQuote = pieces[0].endIndex;
+      const contentStart = isMultiline
+        ? afterQuote + firstNewlineLength(literal.text.slice(afterQuote - literal.startIndex))
+        : afterQuote;
+      const inner = pieces.slice(1, -1).filter((piece) => piece.endIndex > contentStart);
+      for (const piece of inner) {
+        if (piece.type === 'template_substitution') {
           parts.push(this.convertSubstitution(piece));
-          continue;
+        } else if (piece.type === 'escape_sequence' && !isRaw) {
+          pushText(unescape(piece));
         } else {
-          text = isMultiline && index === 0 ? stripFirstNewline(piece.text) : piece.text;
+          const text = piece.text.slice(Math.max(0, contentStart - piece.startIndex));
+          pushText(isMultiline ? text.replaceAll(/\r\n?/g, '\n') : text);
         }
-        pushText(text);
       }
       if (inner.length === 0) pushText('');
     }
@@ -1480,15 +1481,11 @@ function unescape(node: Node): string {
     return String.fromCodePoint(code);
   }
   if (body.startsWith('u')) return String.fromCodePoint(Number.parseInt(body.slice(1), 16));
-  if (body.startsWith('\r\n')) return '';
-  if (body === '\n' || body === '\r') return '';
   return body;
 }
 
-/** A multi-line string drops its first line when that holds only blanks (and an optional backslash). */
-function stripFirstNewline(text: string): string {
-  const match = /^[ \t]*\\?[ \t]*(\r\n|\n|\r)/.exec(text);
-  return match ? text.slice(match[0].length) : text;
+function firstNewlineLength(text: string): number {
+  return /^[ \t]*\\?[ \t]*(?:\r\n|\n|\r)/.exec(text)?.[0].length ?? 0;
 }
 
 export type { Span };
