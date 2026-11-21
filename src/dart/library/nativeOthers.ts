@@ -142,7 +142,7 @@ function randomOf(receiver: Value): RandomState {
 
 defineConstructor('Random.new', (runtime, _instance, args) => {
   const seed = args.positional[0];
-  const object = new DartObject(runtime.links.classNamed('Random'), [], []);
+  const object = new DartObject(runtime.links.classNamed('_Random'), [], []);
   // An unseeded Random differs on every run of the VM; any sequence matches as well as another.
   object.native = new RandomState(
     seed === undefined ? BigInt(Date.now()) + BigInt(unseeded++) : intArg(runtime, seed, 'seed')
@@ -152,16 +152,16 @@ defineConstructor('Random.new', (runtime, _instance, args) => {
 defineConstructor('Random.secure', (runtime) =>
   runtime.throwError('UnsupportedError', '', ['Random.secure は、この採点環境では使えません。'])
 );
-define('Random.nextInt', (runtime, receiver, [max]) =>
+define('_Random.nextInt', (runtime, receiver, [max]) =>
   randomOf(receiver).nextInt(runtime, intArg(runtime, max, 'max'))
 );
-define('Random.nextDouble', (runtime, receiver) => {
+define('_Random.nextDouble', (runtime, receiver) => {
   const random = randomOf(receiver);
   const high = random.nextInt(runtime, 1n << 26n);
   const low = random.nextInt(runtime, 1n << 27n);
   return (Number(high) * 2 ** 27 + Number(low)) / 2 ** 53;
 });
-define('Random.nextBool', (runtime, receiver) => randomOf(receiver).nextInt(runtime, 2n) === 0n);
+define('_Random.nextBool', (runtime, receiver) => randomOf(receiver).nextInt(runtime, 2n) === 0n);
 
 // dart:io
 

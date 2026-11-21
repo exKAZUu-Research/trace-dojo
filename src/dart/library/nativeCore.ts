@@ -1,11 +1,12 @@
 import { TURTLE_METHOD_NAMES, type TurtleState } from '../../interpreter/turtleWorld';
 import { scopedMemberName } from '../classes';
-import { encodableText, formatDouble, safeToString, stringOf } from '../format';
+import { encodableText, formatDouble, stringOf } from '../format';
 import { HashStore } from '../hashStore';
 import type { Runtime } from '../runtime';
 import { coreTypes, type DartType, DYNAMIC, sameType, vmTypeString } from '../types';
-import { DartClosure, DartList, DartObject, DartRecord, DartTypeValue, type Value } from '../values';
-import { BoundedStringParts } from './boundedStringParts';
+import { DartClosure, DartList, DartObject, DartPackedList, DartRecord, DartTypeValue, type Value } from '../values';
+import { appendJsonQuoted, BoundedStringParts } from './boundedStringParts';
+import { appendRegExpDescription, isRegExp } from './nativeRegExp';
 import {
   define,
   defineConstructor,
@@ -243,18 +244,70 @@ define('_StackTrace.toString', (runtime) =>
   runtime.throwError('UnsupportedError', '', ['スタックトレースの中身は、この採点環境では使えません。'])
 );
 
-/** `Error.safeToString`, which describes a list by its length and the VM's class, as messages of errors show. */
-export function safeToStringOf(runtime: Runtime, value: Value): string {
+function safeToStringOf(runtime: Runtime, root: Value): string {
+  const output = new BoundedStringParts(runtime);
+  const records: { record: DartRecord; field: number }[] = [];
+  let value = root;
+  for (;;) {
+    if (value instanceof DartRecord) {
+      output.append('Record (');
+      records.push({ record: value, field: 0 });
+    } else {
+      appendSafeValue(runtime, output, value, records.length > 0);
+    }
+    for (;;) {
+      const cursor = records.at(-1);
+      if (!cursor) return output.text();
+      const field = cursor.field++;
+      if (field >= cursor.record.positional.length + cursor.record.named.length) {
+        output.append(')');
+        records.pop();
+        continue;
+      }
+      value = recordFieldValue(output, cursor.record, field);
+      break;
+    }
+  }
+}
+
+function recordFieldValue(output: BoundedStringParts, { positional, named }: DartRecord, field: number): Value {
+  if (field > 0) output.append(', ');
+  if (field < positional.length) return positional[field];
+  const [name, value] = named[field - positional.length];
+  output.append(name);
+  output.append(': ');
+  return value;
+}
+
+function appendSafeValue(runtime: Runtime, output: BoundedStringParts, value: Value, recordField: boolean): void {
+  if (typeof value === 'string') {
+    if (recordField) {
+      const zero = value.indexOf('\0');
+      output.append(zero === -1 ? value : value.slice(0, zero));
+    } else {
+      appendJsonQuoted(value, (part) => output.append(part));
+    }
+    return;
+  }
+  if (value instanceof DartTypeValue && recordField) output.append('Type: ');
+  if (isRegExp(runtime, value)) appendRegExpDescription(output, value);
+  else output.append(safeValueText(runtime, value));
+}
+
+const COMPACT_COLLECTIONS = new Set(['_Map', '_Set', '_ConstMap', '_ConstSet']);
+
+function safeValueText(runtime: Runtime, value: Value): string {
+  if (!(value instanceof DartObject)) return stringOf(runtime, value);
   if (value instanceof DartList) {
-    const cls = value.unmodifiable ? '_ImmutableList' : value.growable ? '_GrowableList' : '_List';
-    return `Instance(length:${value.elements.length}) of '${cls}'`;
+    if (value.growable) return `Instance(length:${value.length}) of '_GrowableList'`;
+    const name = value.unmodifiable ? '_ImmutableList' : '_List';
+    return `${name} len:${value.length}`;
   }
-  // The VM describes its maps and sets by class and length.
-  if (value instanceof DartObject && value.native instanceof HashStore) {
-    return `${value.native.isMap ? '_Map' : '_Set'} len:${value.native.size}`;
-  }
-  if (value instanceof DartClosure || value instanceof DartTypeValue) return stringOf(runtime, value);
-  return safeToString(runtime, value);
+  if (value instanceof DartPackedList && typeof value.contents !== 'string') return '_Uint8List';
+  if (value.native instanceof HashStore && COMPACT_COLLECTIONS.has(value.cls.name))
+    return `${value.cls.name} len:${value.native.size}`;
+  if (value instanceof DartTypeValue) return vmTypeString(value.type);
+  return objectToString(runtime, value);
 }
 
 define('NoSuchMethodError._describe', (runtime, _receiver, [receiver, invocation, found, isExternal]) => {

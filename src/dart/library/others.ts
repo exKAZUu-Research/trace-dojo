@@ -27,6 +27,12 @@ external int _systemHash(int first, int second, [int? third, int? fourth]);
 abstract interface class Random {
   external factory Random([int? seed]);
   external factory Random.secure();
+  int nextInt(int max);
+  double nextDouble();
+  bool nextBool();
+}
+
+final class _Random implements Random {
   external int nextInt(int max);
   external double nextDouble();
   external bool nextBool();

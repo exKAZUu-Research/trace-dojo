@@ -1,7 +1,5 @@
-import { appendJsonQuoted, BoundedStringParts } from './library/boundedStringParts';
 import type { Runtime } from './runtime';
-import { vmTypeString } from './types';
-import { type DartObject, DartRecord, type Value } from './values';
+import type { DartObject, Value } from './values';
 
 /** `double.toString()`: the shortest digits that read back as the value, as the Dart VM prints them. */
 export function formatDouble(value: number): string {
@@ -41,32 +39,6 @@ function objectToString(runtime: Runtime, value: DartObject): string {
     runtime.throwError('ArgumentError', 'value', [result, undefined, 'toString() did not return a string']);
   }
   return result;
-}
-
-/** `Error.safeToString`: numbers, booleans, and null as themselves, strings quoted, and objects by their class. */
-export function safeToString(runtime: Runtime, value: Value): string {
-  if (value === undefined || typeof value === 'boolean' || typeof value === 'bigint' || typeof value === 'number') {
-    return stringOf(runtime, value);
-  }
-  if (typeof value === 'string') return quoteForError(runtime, value);
-  if (value instanceof DartRecord) {
-    const result = new BoundedStringParts(runtime);
-    result.append('Record ');
-    result.append(stringOf(runtime, value));
-    return result.text();
-  }
-  return `Instance of '${instanceName(runtime, value)}'`;
-}
-
-/** The name `Instance of '…'` shows: the runtime type, with its type arguments. */
-export function instanceName(runtime: Runtime, value: Value): string {
-  return vmTypeString(runtime.runtimeTypeOf(value));
-}
-
-function quoteForError(runtime: Runtime, text: string): string {
-  const result = new BoundedStringParts(runtime);
-  appendJsonQuoted(text, (part) => result.append(part));
-  return result.text();
 }
 
 /** Text as the VM writes it to stdout: encoded as UTF-8, where a lone surrogate becomes U+FFFD. */

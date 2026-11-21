@@ -6548,6 +6548,34 @@ void main() {
   }
 });
 
+test('safe diagnostics format record fields without invoking learner methods', () => {
+  const source = String.raw`import 'dart:collection';
+import 'dart:convert';
+import 'dart:math';
+class Foo {
+  String toString() => throw StateError('format failed');
+}
+void main() {
+  final regex = RegExp('a\x00b', caseSensitive: false, multiLine: true);
+  final bytes = utf8.encode('abc');
+  final random = Random(1);
+  print(Error.safeToString((a: 'x\x00y', b: (Foo(), bytes), c: const [1], d: String)));
+  print(ArgumentError.value((Foo(),), 'value'));
+  print(Error.safeToString(regex));
+  print(Error.safeToString(bytes));
+  print(Error.safeToString((const {1: 2}, HashSet<int>()..add(1))));
+  print([random.runtimeType, random.runtimeType == Random, random.nextInt(10), random]);
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      "Record (a: x, b: Record (Instance of 'Foo', _Uint8List), c: _ImmutableList len:1, d: Type: String)\n" +
+      "Invalid argument (value): Record (Instance of 'Foo')\n" +
+      "RegExp: pattern=a flags=im\n_Uint8List\nRecord (_ConstMap len:1, Instance of '_HashSet<int>')\n" +
+      "[_Random, false, 4, Instance of '_Random']\n",
+  });
+});
+
 test('error representations escape isolated surrogates without splitting pairs', () => {
   const source = `void main() {
   var isolated = String.fromCharCodes([0xd800, 0xdc00, 0xdc00]);

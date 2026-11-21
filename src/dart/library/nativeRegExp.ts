@@ -333,11 +333,19 @@ function quantifiesAssertion(source: string, offset: number): boolean {
   return false;
 }
 
-define(
-  'RegExp.toString',
-  (_runtime, receiver) =>
-    `RegExp: pattern=${stateOf(receiver).source} flags=${stateOf(receiver).caseSensitive ? '' : 'i'}${stateOf(receiver).multiLine ? 'm' : ''}${stateOf(receiver).dotAll ? 's' : ''}${stateOf(receiver).unicode ? 'u' : ''}`
-);
+define('RegExp.toString', (runtime, receiver) => {
+  const output = new BoundedStringParts(runtime);
+  appendRegExpDescription(output, receiver);
+  return output.text();
+});
+
+export function appendRegExpDescription(output: BoundedStringParts, receiver: Value): void {
+  const { source, caseSensitive, multiLine, dotAll, unicode } = stateOf(receiver);
+  const zero = source.indexOf('\0');
+  output.append('RegExp: pattern=');
+  output.append(zero === -1 ? source : source.slice(0, zero));
+  output.append(` flags=${caseSensitive ? '' : 'i'}${multiLine ? 'm' : ''}${dotAll ? 's' : ''}${unicode ? 'u' : ''}`);
+}
 
 function group(runtime: Runtime, receiver: Value, which: Value): Value {
   const state = matchState(receiver);
