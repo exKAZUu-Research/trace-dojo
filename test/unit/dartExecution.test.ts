@@ -1712,12 +1712,9 @@ test.each([
   'final g = (const int p) => p;',
 ])('Dart rejects parameter modifiers outside primary constructor fields: %s', (declaration) => {
   expect(executeProgram('dart', `${declaration}\nvoid main() {}`)).toMatchObject({ kind: 'compileError' });
-  expect(executeProgram('dart', 'class P(final int x, var int y) {}\nvoid main() { print(P(1, 2).x); }')).toMatchObject(
-    {
-      kind: 'executed',
-      stdout: '1\n',
-    }
-  );
+  const valid =
+    'class P(final int x, var int y) {}\nextension type E(final int x) {}\nvoid main() { print([P(1, 2).x, E(3).x]); }';
+  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '[1, 3]\n' });
 });
 
 test('Dart extension types redeclare inherited members with any signature', () => {
