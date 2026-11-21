@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 998 -- the natives of the collections, which share the helpers of their items.
+// code-gauge-allow-file fileNcss 1000 -- the natives of the collections, which share the helpers of their items.
 import { runtimeClassOf } from '../dispatch';
 import { hashOf, identityHash, stringOf, valueEquals } from '../format';
 import { toInt32 } from '../operators';
@@ -505,9 +505,11 @@ function finishListAllocation(
   initialCapacity: number | undefined
 ): void {
   const size = indexedSize(list);
-  if (kind === 'ArrayList') list.arrayList = { size, capacity: defaultSize ? undefined : (initialCapacity ?? size) };
-  const allocated = kind === 'ArrayDeque' ? (initialCapacity ?? size) : size;
-  frame.runtime.allocate(frame, allocated + 1);
+  const capacity = initialCapacity ?? size;
+  if (capacity >= 0x7f_ff_ff_fe)
+    throwError(frame, 'java.lang.OutOfMemoryError', 'Requested array size exceeds VM limit');
+  frame.runtime.allocate(frame, capacity + 1);
+  if (kind === 'ArrayList') list.arrayList = { size, capacity: defaultSize ? undefined : capacity };
 }
 
 function checkedBuilderCapacity(frame: Frame, capacity: number): number {

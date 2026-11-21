@@ -1908,6 +1908,16 @@ fun main() {
       '[30817, 25209, 99, 0, 0]\njava.lang.StringIndexOutOfBoundsException: Index 3 out of bounds for length 3\njava.lang.StringIndexOutOfBoundsException: Index 4 out of bounds for length 3\njava.lang.StringIndexOutOfBoundsException: Index 4 out of bounds for length 3\n[30817, 25209, 99, 0, 0]\n0\njava.lang.StringIndexOutOfBoundsException: Index 4 out of bounds for length 4\njava.lang.StringIndexOutOfBoundsException: Index 4 out of bounds for length 4\n[30817, 25209, 99, 0, 0]\n0\n0\n0\ntrue\ntrue\n[LEFT, RIGHT]\nfalse\n[LEFT, RIGHT]\ntrue\n',
   },
   {
+    name: 'explicit ArrayList capacities allocate storage and preserve JVM size errors',
+    source: `fun main() {
+    for (capacity in listOf(Int.MAX_VALUE, Int.MAX_VALUE - 1, Int.MAX_VALUE - 2, -1, 0, 12)) {
+        try { println(ArrayList<Int>(capacity).size) } catch (e: Exception) { println(e) } catch (e: Error) { println(e) }
+    }
+}`,
+    stdout:
+      'java.lang.OutOfMemoryError: Requested array size exceeds VM limit\njava.lang.OutOfMemoryError: Requested array size exceeds VM limit\njava.lang.OutOfMemoryError: Java heap space\njava.lang.IllegalArgumentException: Illegal Capacity: -1\n0\n0\n',
+  },
+  {
     name: 'fixed JVM lists test their source before rejecting insertion',
     source: `class Source : Collection<String> by listOf("new", "second") {
     override fun iterator(): Iterator<String> = ReadingIterator()
