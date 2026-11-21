@@ -8,7 +8,7 @@ import { sizeOf } from './layout';
 /**
  * Where each `VecDeque`'s first element sits in its ring buffer (its `head`), which its iterators show as two slices
  * (`Iter([0], [1])`) and `as_slices` gives. The deque's array holds its elements in order; the head moves as std's
- * does: when the buffer grows, and on `push_front`, `pop_front`, `insert`, `remove`, `rotate_*`, `make_contiguous`,
+ * does: when the buffer grows or shrinks, and on `push_front`, `pop_front`, `insert`, `remove`, `rotate_*`, `make_contiguous`,
  * `clear`, and `drain`.
  */
 const heads = new WeakMap<object, number>();
@@ -74,6 +74,20 @@ function grownHead(head: number, oldCapacity: number, newCapacity: number, len: 
   return newCapacity - headLen;
 }
 
+/** `shrink_to`: the elements that the smaller buffer no longer holds move into it, the head's part to its end. */
+function shrunkHead(head: number, oldCapacity: number, newCapacity: number, len: number): number {
+  if (len === 0) return 0;
+  const end = head + len;
+  const tailOutside = end > newCapacity && end <= oldCapacity;
+  if (tailOutside) return head >= newCapacity ? 0 : head;
+  return end > oldCapacity ? newCapacity - (oldCapacity - head) : head;
+}
+
+function resizedHead(head: number, oldCapacity: number, newCapacity: number, len: number): number {
+  if (newCapacity > oldCapacity) return grownHead(head, oldCapacity, newCapacity, len);
+  return newCapacity < oldCapacity ? shrunkHead(head, oldCapacity, newCapacity, len) : head;
+}
+
 /** Wraps the deque's natives so that its head moves as std's does; `capacity` reads its capacity. */
 export function withDequeHead<C>(
   natives: Record<string, (args: Value[], ctx: C) => Value>,
@@ -89,7 +103,7 @@ export function withDequeHead<C>(
       const oldCapacity = capacity(items, ctx);
       const result = native(args, ctx);
       const newCapacity = capacity(items, ctx);
-      let moved = newCapacity > oldCapacity ? grownHead(head, oldCapacity, newCapacity, len) : head;
+      let moved = resizedHead(head, oldCapacity, newCapacity, len);
       const move = HEAD_MOVES[name];
       if (move && newCapacity > 0) moved = move(moved, newCapacity, len, args);
       if (moved !== head) heads.set(items, moved);

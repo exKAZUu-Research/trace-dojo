@@ -170,10 +170,7 @@ export abstract class MacroConverter extends PatternConverter {
     const { comma, expression } = this.matchValue(tree, tokens, end, span);
     const value = this.expr(expression);
     const patternText = tree.text.slice(comma + 1, end);
-    // The pattern stays on its rows of the source, so errors inside it are reported there.
-    const patternRow = tree.startPosition.row + (tree.text.slice(0, comma).match(/\n/g)?.length ?? 0);
-    const wrapped = `${'\n'.repeat(patternRow)}fn f() { match x { ${patternText}\n => {} } }`;
-    const pattern = this.reparse(wrapped, (root) => {
+    const pattern = this.reparse(`${this.matchHeadBefore(tree, comma + 1)}${patternText}\n => {} } }`, (root) => {
       const arm = root.descendantsOfType('match_arm')[0];
       if (!arm) syntaxError(span, 'matches! の書き方に誤りがあります。');
       const matchPattern = this.field(arm, 'pattern');
@@ -181,7 +178,20 @@ export abstract class MacroConverter extends PatternConverter {
       const patternNode = matchPattern.namedChildren.find((child) => !isComment(child));
       return patternNode ? this.pattern(patternNode) : ({ kind: 'wild', span } as Pattern);
     }) as Pattern;
-    return { kind: 'matches', value, pattern: withSpan(pattern, span) };
+    return { kind: 'matches', value, pattern };
+  }
+
+  /**
+   * The start of a `match` to reparse a pattern in, which leaves the pattern where it is in the source so that errors
+   * in any part of it are reported there: on the line above it when there is one.
+   */
+  private matchHeadBefore(tree: Node, offset: number): string {
+    const before = tree.text.slice(0, offset);
+    const lineStart = before.lastIndexOf('\n') + 1;
+    const row = tree.startPosition.row + (before.match(/\n/g)?.length ?? 0);
+    const column = lineStart === 0 ? tree.startPosition.column + offset : offset - lineStart;
+    const head = 'fn f() { match x {';
+    return row === 0 ? `${head} ` : `${'\n'.repeat(row - 1)}${head}\n${' '.repeat(column)}`;
   }
 
   private matchValue(tree: Node, tokens: Node[], end: number, span: Span): { comma: number; expression: Node } {
@@ -264,22 +274,4 @@ function macroExpressionText(node: Node): string {
   };
   visit(node);
   return text;
-}
-
-function withSpan(pattern: Pattern, span: Span): Pattern {
-  const copy = { ...pattern, span } as Pattern;
-  switch (copy.kind) {
-    case 'tuple': {
-      return { ...copy, elems: copy.elems.map((elem) => withSpan(elem, span)) };
-    }
-    case 'tupleStruct': {
-      return { ...copy, elems: copy.elems.map((elem) => withSpan(elem, span)) };
-    }
-    case 'or': {
-      return { ...copy, alternatives: copy.alternatives.map((alt) => withSpan(alt, span)) };
-    }
-    default: {
-      return copy;
-    }
-  }
 }

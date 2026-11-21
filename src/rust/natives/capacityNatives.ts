@@ -11,11 +11,10 @@ import {
   stringCapacity,
   vecCapacity,
 } from '../capacity';
-import { iteratorCapability } from '../traits';
 import type { Type } from '../types';
 import { utf8Bytes } from '../utf8';
 import { type IterValue, sliceLength, textOf, UNIT_VALUE, type Value } from '../values';
-import { isTrustedLen, lengthOf } from './iterators';
+import { isTrustedLen, iteratorLowerBound } from './iterators';
 import { sizeOf } from './layout';
 import { deref, libraryPanic, type NativeContext, placeOf } from './support';
 
@@ -185,7 +184,7 @@ export function withCapacity(
 
 /**
  * How `extend` makes room: all at once for a `TrustedLen` iterator, and otherwise whenever full, by the size hint's
- * lower bound plus one, which is exact for an `ExactSizeIterator` and 0 for others.
+ * lower bound plus one.
  */
 export function extendRoom(ctx: NativeContext, items: Value[], iterator: IterValue, shape: Type): () => void {
   const size = sizeOf(elemType(ctx));
@@ -194,14 +193,11 @@ export function extendRoom(ctx: NativeContext, items: Value[], iterator: IterVal
     reserveVec(items, items.length, Number(additional), size);
   };
   if (isTrustedLen(shape)) {
-    reserve(lengthOf(iterator));
+    reserve(iteratorLowerBound(iterator, shape));
     return () => {};
   }
-  const exact = iteratorCapability(shape, 'exact') === 'yes';
   return () => {
-    if (vecCapacity(items, items.length, size) === items.length) {
-      reserve((exact ? lengthOf(iterator) : 0n) + 1n);
-    }
+    if (vecCapacity(items, items.length, size) === items.length) reserve(iteratorLowerBound(iterator, shape) + 1n);
   };
 }
 

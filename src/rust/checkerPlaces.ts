@@ -1,6 +1,7 @@
 import type { LocalVar } from './annotations';
 import type { Expr, Span } from './ast';
 import type { Checker } from './checker';
+import { collectionKeyTraits } from './collectionBounds';
 import { normalize } from './infer';
 import { compileError, visibleFrom } from './items';
 import { autoderefSteps, lookupMethod } from './methods';
@@ -160,7 +161,7 @@ export function checkIndex(c: Checker, expr: Extract<Expr, { kind: 'index' }>): 
     if (t.kind === 'var')
       compileError(expr.span, '型が決まらないので、[ ] で要素を取り出せません（変数の型を書いてください）。');
     if (t.kind === 'adt' && (t.def.builtin === 'HashMap' || t.def.builtin === 'BTreeMap')) {
-      return indexMap(c, expr, t.args, step);
+      return indexMap(c, expr, t.def.builtin, t.args, step);
     }
     const isDeque = t.kind === 'adt' && t.def.builtin === 'VecDeque';
     if (t.kind === 'slice' || t.kind === 'array' || t.kind === 'str' || isDeque) {
@@ -175,6 +176,7 @@ type DerefStep = ReturnType<typeof autoderefSteps>[number];
 function indexMap(
   c: Checker,
   expr: Extract<Expr, { kind: 'index' }>,
+  map: 'HashMap' | 'BTreeMap',
   [keyType, valueType]: Type[],
   step: DerefStep
 ): Type {
@@ -184,6 +186,11 @@ function indexMap(
   const it = normalize(shallow(indexType));
   if (it.kind !== 'ref') compileError(expr.index.span, `HashMap の [ ] には、キーの参照（&key）を書いてください。`);
   c.require(keyType, { trait: c.program.traitDef('Borrow'), args: [it.target] }, expr.index.span);
+  // `Index` asks of the map's key and of the key looked up what the map's own lookups do.
+  for (const bound of collectionKeyTraits(map)) {
+    c.requireTrait(keyType, bound, expr.span);
+    c.requireTrait(it.target, bound, expr.index.span);
+  }
   c.annotations.indexes.set(expr, {
     container: 'map',
     range: false,

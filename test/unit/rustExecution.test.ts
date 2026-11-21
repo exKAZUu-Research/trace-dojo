@@ -7357,3 +7357,66 @@ test.each([
     diagnostics: [expect.objectContaining({ message: expect.stringContaining(message) })],
   });
 });
+
+test('a deque shrinks around its ring, and extend reserves by the size hint', () => {
+  const program = `use std::collections::VecDeque;
+fn main() {
+    let mut wrapped: VecDeque<i32> = VecDeque::with_capacity(30);
+    wrapped.push_front(0);
+    wrapped.push_front(-1);
+    for value in 1..4 { wrapped.push_back(value); }
+    wrapped.shrink_to_fit();
+    println!("{:?} {:?} {}", wrapped.as_slices(), wrapped.iter(), wrapped.capacity());
+    let mut late: VecDeque<i32> = VecDeque::with_capacity(30);
+    for value in 0..20 { late.push_back(value); }
+    for _ in 0..18 { late.pop_front(); }
+    late.shrink_to_fit();
+    let mut split: VecDeque<i32> = VecDeque::with_capacity(30);
+    for value in 0..28 { split.push_back(value); }
+    for _ in 0..26 { split.pop_front(); }
+    for value in 28..31 { split.push_back(value); }
+    split.shrink_to_fit();
+    println!("{:?} {} {:?} {}", late.as_slices(), late.capacity(), split.as_slices(), split.capacity());
+    let mut chars = Vec::new();
+    chars.extend("abcdefghijklmnopqrst".chars());
+    let mut evens = vec![1];
+    evens.extend((0..10).filter(|n| n % 2 == 0));
+    let mut chained: Vec<u8> = Vec::new();
+    chained.extend([1u8, 2, 3].iter().copied().chain([4, 5]));
+    println!("{} {} {} {} {}", chars.len(), chars.capacity(), evens.capacity(), chained.len(), chained.capacity());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: `([-1, 0], [1, 2, 3]) Iter([-1, 0], [1, 2, 3]) 5
+([18, 19], []) 2 ([26, 27, 28, 29], [30]) 5
+20 24 8 5 8
+`,
+  });
+});
+
+test('indexing a map needs the bounds of its lookups, and matches! reports each part of a pattern on its row', () => {
+  const keyed = `use std::collections::{BTreeMap, HashMap};
+use std::hash::Hash;
+fn hashed<K: Eq + Hash>(m: &HashMap<K, i32>, q: &K) -> i32 { m[q] }
+fn ordered<K: Ord>(m: &BTreeMap<K, i32>, q: &K) -> i32 { m[q] }
+fn main() {
+    let names = HashMap::from([(String::from("a"), 2)]);
+    println!("{} {} {}", hashed(&HashMap::from([(1, 5)]), &1), names["a"], ordered(&BTreeMap::from([("k", 7)]), &"k"));
+}`;
+  expect(executeProgram('rust', keyed)).toMatchObject({ kind: 'executed', stdout: '5 2 7\n' });
+  for (const [map, message] of [
+    ['HashMap', 'Eq'],
+    ['BTreeMap', 'Ord'],
+  ]) {
+    const unbounded = `use std::collections::${map};\nfn get<K>(m: &${map}<K, i32>, q: &K) -> i32 { m[q] }\nfn main() {}`;
+    expect(executeProgram('rust', unbounded)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [expect.objectContaining({ row: 1, message: expect.stringContaining(message) })],
+    });
+  }
+  const mismatched = rustMain('    let n = Some(3);\n    let yes = matches!(\n        n,\n        Some("bad")\n    );');
+  expect(executeProgram('rust', mismatched)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ row: 4, message: expect.stringContaining('型が合いません') })],
+  });
+});
