@@ -80,7 +80,7 @@
     "@willbooster/tree-sitter-php": "22.0.0",
     "@willbooster/tree-sitter-python": "21.0.2",
     "@willbooster/tree-sitter-ruby": "20.0.2",
-    "@willbooster/tree-sitter-typescript": "33.0.1",
+    "@willbooster/tree-sitter-typescript": "34.0.1",
     "@willbooster/tree-sitter-zig": "14.0.2",
     "@willbooster/wb": "23.4.3",
     "@willbooster/web-tree-sitter": "23.0.1",
