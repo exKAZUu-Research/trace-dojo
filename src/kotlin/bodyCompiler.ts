@@ -42,6 +42,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     };
     for (const entry of this.classEntries) setDefaults(entry.symbol);
     for (const entry of this.functionEntries) this.ensureFunctionCompiled(entry);
+    this.validateOverrideTypes();
     for (const entry of this.classEntries) {
       this.file = entry.file;
       this.compileClassInitializer(entry);

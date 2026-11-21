@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 829 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss 837 -- the compiler of one area of Kotlin, whose parts call each other closely.
 import type {
   ClassDecl,
   ClassParameterDecl,
@@ -1088,6 +1088,17 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     return found;
   }
 
+  protected validateOverrideTypes(): void {
+    for (const { symbol } of this.classEntries) {
+      if (symbol.isLibrary) continue;
+      for (const members of symbol.members.values()) {
+        for (const member of members) {
+          if (member.overridden.length > 0) this.findOverridden(symbol, member);
+        }
+      }
+    }
+  }
+
   private checkOverrideType(
     cls: ClassSymbol,
     member: MemberSymbol,
@@ -1106,7 +1117,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     // A type that the member's body has yet to infer is checked against the inherited one where it is inferred.
     if (!own || !inherited) return;
     const expected = substitute(inherited, substitution);
-    const fits = member.kind === 'property' && member.isVar ? isSameType(own, expected) : isSubtype(own, expected);
+    const fits = base.kind === 'property' && base.isVar ? isSameType(own, expected) : isSubtype(own, expected);
     if (!fits) {
       this.error(
         member.row,

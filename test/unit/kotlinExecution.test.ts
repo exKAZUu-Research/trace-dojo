@@ -480,6 +480,21 @@ test.each([
   ],
   ['println of a Nothing value, which every overload accepts', false, 'fun main() {\n    println(TODO())\n}'],
   [
+    'an inferred override with an incompatible function result',
+    false,
+    'open class Base { open fun item(): Int = 1 }; class Child : Base() { override fun item() = "wrong" }; fun main() {}',
+  ],
+  [
+    'an inferred override with an incompatible property type',
+    false,
+    'open class Base { open val item: Int = 1 }; class Child : Base() { override val item = "wrong" }; fun main() {}',
+  ],
+  [
+    'an inferred mutable property overriding a read-only property covariantly',
+    true,
+    'open class Base { open val item: Any = 1 }; class Child : Base() { override var item = "right" }; fun main() {}',
+  ],
+  [
     'repeated writes to a class val in separate init blocks',
     false,
     'class A { val n: Int; init { n = 1 }; init { this.n = 2 } }\nfun main() { println(A().n) }',
