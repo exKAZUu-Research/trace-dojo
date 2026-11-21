@@ -3,7 +3,7 @@ import { valueEquals } from '../format';
 import { type Frame, KotlinThrow } from '../runtime';
 import type { FunctionSymbol } from '../symbols';
 import type { KObject, Value } from '../values';
-import { libraryClass } from './registry';
+import { libraryClass, throwError } from './registry';
 
 export const MAP = 'kotlin.collections.Map';
 export const MAP_ENTRY = 'kotlin.collections.Map.Entry';
@@ -15,6 +15,26 @@ export function iterateElements(frame: Frame, iterable: KObject): Value[] {
   const result: Value[] = [];
   frame.runtime.withNativeRoots([result], () => forEachIterable(frame, iterable, (element) => result.push(element)));
   return result;
+}
+
+export function copyCollectionToArray(frame: Frame, collection: KObject): Value[] {
+  let capacity = collectionSize(frame, collection);
+  if (capacity === 0) return [];
+  const iterator = collectionIterator(frame, collection);
+  const items: Value[] = [];
+  return frame.runtime.withNativeRoots([iterator.value, items], () => {
+    if (!iterator.hasNext()) return items;
+    if (capacity < 0) throwError(frame, 'java.lang.NegativeArraySizeException', String(capacity));
+    frame.runtime.allocate(frame, capacity);
+    do {
+      if (items.length === capacity) {
+        capacity = Math.floor((capacity * 3 + 1) / 2);
+        frame.runtime.allocate(frame, capacity);
+      }
+      items.push(iterator.next());
+    } while (iterator.hasNext());
+    return items;
+  });
 }
 
 export function forEachIterable(frame: Frame, iterable: Value, visit: (element: Value) => void): void {

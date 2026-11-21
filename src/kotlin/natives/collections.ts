@@ -25,6 +25,7 @@ import {
   collectionSize,
   compareCollections,
   containsAll,
+  copyCollectionToArray,
   filterCollection,
   forEachIterable,
   iterateElements,
@@ -204,6 +205,13 @@ export function elementsOf(frame: Frame, collection: Value): Value[] {
   return iterateElements(frame, object);
 }
 
+function copiedListElements(frame: Frame, collection: Value): Value[] {
+  const object = collection as KObject;
+  if (object.items || object.store || object.native?.view || primitiveArrayView(object) || listView(object))
+    return elementsOf(frame, collection);
+  return copyCollectionToArray(frame, object);
+}
+
 function storeElements(object: KObject): Value[] {
   const store = object.store as KStore;
   return store.ordered().map((entry) => entry.key);
@@ -373,7 +381,7 @@ function insertListElements(frame: Frame, list: KObject, index: number | undefin
   if (!view && !isFixed) requireResizable(frame, list);
   const position = index === undefined ? indexedSize(list) : insertionIndex(frame, list, index);
   if (isFixed) return rejectFixedListInsertion(frame, list, elements);
-  const added = elementsOf(frame, elements);
+  const added = kind === 'ArrayList' ? copiedListElements(frame, elements) : elementsOf(frame, elements);
   if (added.length === 0 && (view || kind === 'ArrayDeque')) return false;
   if (view) {
     checkListView(frame, list);
@@ -456,7 +464,7 @@ function defineLists(): void {
     [
       '(Collection<E>)',
       (frame, instance, [elements]) => {
-        instance.items = elementsOf(frame, elements);
+        instance.items = copiedListElements(frame, elements);
       },
     ],
   ];

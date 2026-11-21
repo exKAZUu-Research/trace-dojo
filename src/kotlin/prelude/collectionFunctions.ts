@@ -1165,8 +1165,14 @@ operator fun <T> Collection<T>.plus(element: T): List<T> {
 }
 
 operator fun <T> Collection<T>.plus(elements: Iterable<T>): List<T> {
+    if (elements is Collection<T>) {
+        val result = ArrayList<T>(size + elements.size)
+        result.addAll(this)
+        result.addAll(elements)
+        return result
+    }
     val result = ArrayList<T>(this)
-    result.addAll(elements.toList())
+    result.addAll(elements)
     return result
 }
 
@@ -1235,7 +1241,7 @@ operator fun <T> Set<T>.minus(elements: Array<out T>): Set<T> = minus(elements.a
 
 infix fun <T> Iterable<T>.union(other: Iterable<T>): Set<T> {
     val set = this.toMutableSet()
-    set.addAll(other.toList())
+    set.addAll(other)
     return set
 }
 
@@ -1252,6 +1258,7 @@ infix fun <T> Iterable<T>.subtract(other: Iterable<T>): Set<T> {
 }
 
 fun <T> MutableCollection<in T>.addAll(elements: Iterable<T>): Boolean {
+    if (elements is Collection<T>) return addAll(elements)
     var result = false
     for (item in elements) if (add(item)) result = true
     return result

@@ -77,6 +77,24 @@ test.each([
     stdout: '1=a\n2=b\n3=c\nmodified\n1=a\n2=b\n3=c\nmodified\n7=one\n',
   },
   {
+    name: 'collection bulk addition uses source sizes and iterators without indexed reads',
+    source: `class Probe(private val items: List<Int>) : List<Int> by items {
+    override val size: Int get() { println("size"); return items.size }
+    override fun get(index: Int): Int { println("get $index"); return items[index] }
+    override fun iterator(): Iterator<Int> { println("iterator"); return items.iterator() }
+}
+fun main() {
+    println(listOf(1).flatMap { Probe(listOf(2)) })
+    println(listOf(Probe(listOf(3))).flatten())
+    println(mapOf(1 to 2).flatMap { Probe(listOf(4)) })
+    println(listOf(1) + Probe(listOf(5)))
+    println(listOf(1) union Probe(listOf(6)))
+    println(listOf(1).flatMap { Probe(emptyList()) })
+}`,
+    stdout:
+      'size\niterator\n[2]\nsize\niterator\n[3]\nsize\niterator\n[4]\nsize\nsize\niterator\n[1, 5]\niterator\n[1, 6]\nsize\n[]\n',
+  },
+  {
     name: 'builder copies validate backing ranges independently of toString padding',
     source: `class Source(val destination: StringBuilder) : CharSequence by "xy" {
     override fun get(index: Int): Char {
