@@ -700,9 +700,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (typeArguments?.length === 1) kind = 'set';
     else if (typeArguments?.length === 2) kind = 'map';
     else if (typeArguments) this.error(expression, 'セットやマップのリテラルの型引数は、1 つか 2 つです。');
-    // Braces that nothing decides make a map when empty (or spreading only such braces); other elements that do not tell,
-    // such as dynamic spreads, need a type.
-    kind ??= this.setOrMapFromElements(syntax, context) ?? (defaultsToMap(syntax) ? 'map' : undefined);
+    // Empty braces that nothing decides make a map; other elements that do not tell, such as dynamic spreads, need a type.
+    kind ??= this.setOrMapFromElements(syntax, context) ?? (syntax.length === 0 ? 'map' : undefined);
     if (!kind) return this.error(syntax[0], 'セットかマップかを決められません。型引数か、変数の型を書いてください。');
     const types = typeArguments?.map((argument) => this.resolveType(argument));
     if (kind === 'set') {
@@ -804,7 +803,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (value.kind === 'list') return 'set';
     if (value.kind === 'setOrMap') {
       if (value.typeArguments) return value.typeArguments.length === 2 ? 'map' : 'set';
-      return this.setOrMapFromElements(value.elements, undefined);
+      // Reached only when the enclosing literal's context did not decide, so a nested literal decides as it would alone.
+      return this.setOrMapFromElements(value.elements, undefined) ?? (value.elements.length === 0 ? 'map' : undefined);
     }
     const type =
       (value.kind === 'identifier' ? this.declaredTypeOf(value.name) : undefined) ?? this.speculativeTypeOf(value);
@@ -1744,15 +1744,4 @@ function literalTypeArgument(context: DartType | undefined, elementTypes: DartTy
   if (context && !containsInferenceHole(context)) return context;
   if (context && !isInferenceHole(context) && elementTypes.length === 0) return closeInferenceHoles(context);
   return inferElementType(elementTypes);
-}
-
-/** Whether undecided braces are empty or only spread untyped braces that are, which Dart then takes as a map. */
-function defaultsToMap(elements: readonly CollectionElement[]): boolean {
-  return elements.every(
-    (element) =>
-      element.kind === 'spread' &&
-      element.value.kind === 'setOrMap' &&
-      !element.value.typeArguments &&
-      defaultsToMap(element.value.elements)
-  );
 }

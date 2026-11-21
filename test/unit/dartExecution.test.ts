@@ -1878,11 +1878,11 @@ test.each(['var y = {...x};', 'var y = {if (true) ...x};'])(
   Map<int, int> z = {...{...x}};
   Set<int> e = {...{}};
   Set<int> p = {...(true ? {} : {})};
-  print([y, z, e, p, {}.runtimeType, {...x, 3: 4}]);
+  print([y, z, e, p, {}.runtimeType, {...x, 3: 4}, {if (true) ...{}}.runtimeType, {...{}, ...x}]);
 }`;
     expect(executeProgram('dart', valid)).toMatchObject({
       kind: 'executed',
-      stdout: '[{1: 2}, {1: 2}, {}, {}, _Map<dynamic, dynamic>, {1: 2, 3: 4}]\n',
+      stdout: '[{1: 2}, {1: 2}, {}, {}, _Map<dynamic, dynamic>, {1: 2, 3: 4}, _Map<dynamic, dynamic>, {1: 2}]\n',
     });
   }
 );
