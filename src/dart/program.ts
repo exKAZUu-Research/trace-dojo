@@ -41,7 +41,7 @@ const LIBRARY_SOURCES: LibrarySource[] = [
   { uri: 'dart:core', source: CORE_SOURCE, imports: ['dart:math'] },
   { uri: 'dart:math', source: MATH_SOURCE, imports: [] },
   { uri: 'dart:collection', source: COLLECTION_SOURCE, imports: ['dart:math'] },
-  { uri: 'dart:convert', source: CONVERT_SOURCE, imports: [] },
+  { uri: 'dart:convert', source: CONVERT_SOURCE, imports: ['dart:collection'] },
   { uri: 'dart:io', source: IO_SOURCE, imports: [] },
 ];
 

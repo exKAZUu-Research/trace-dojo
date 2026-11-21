@@ -6127,6 +6127,24 @@ void main() {
   });
 });
 
+test('codec byte list search tear-offs enforce their reified element type', () => {
+  const source = `import 'dart:convert';
+void main() {
+  List<num> data = utf8.encode('ABA');
+  for (final find in [data.indexOf, data.lastIndexOf]) {
+    print(find(65));
+    try { print(find(65.0)); } catch (error) { print(error.runtimeType); }
+  }
+  dynamic bytes = data;
+  print(bytes.getRange(1).toList());
+  print(base64.decode('QUI=').getRange(1).toList());
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '0\n_TypeError\n2\n_TypeError\n[66, 65]\n[66]\n',
+  });
+});
+
 test('error representations escape isolated surrogates without splitting pairs', () => {
   const source = `void main() {
   var isolated = String.fromCharCodes([0xd800, 0xdc00, 0xdc00]);

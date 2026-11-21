@@ -543,7 +543,10 @@ class _Uint8List extends ListBase<int> {
   external int operator [](int index);
   external void operator []=(int index, int value);
   external _Uint8List sublist(int start, [int? end]);
+  Iterable<int> getRange(int start, [int? end]) => super.getRange(start, end ?? length);
   Iterable<T> map<T>(T Function(int) transform) => MappedIterable<int, T>(this, transform);
+  int indexOf(covariant int element, [int start = 0]) => super.indexOf(element, start);
+  int lastIndexOf(covariant int element, [int? start]) => super.lastIndexOf(element, start);
   void add(int value) => throw UnsupportedError("Cannot add to a fixed-length list");
   void addAll(Iterable<int> values) => throw UnsupportedError("Cannot add to a fixed-length list");
   void insert(int index, int value) => throw UnsupportedError("Cannot insert into a fixed-length list");
