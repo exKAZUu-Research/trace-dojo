@@ -975,7 +975,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     valueContext: DartType | undefined,
     types: ElementTypes[]
   ): (frame: Frame, add: AddElement) => void {
-    const { initRun, loopSlots } = this.compileForElementInit(element);
+    const { initExec, loopSlots } = this.compileForInit(element);
     this.enterLoop(element);
     const condition = element.condition ? this.compileCondition(element.condition) : undefined;
     const afterLoop = condition?.flow.whenFalse ?? this.flow.unreachable;
@@ -986,7 +986,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     const test = condition?.compiled.run;
     this.flow = afterLoop;
     return (frame, add) => {
-      initRun?.(frame);
+      initExec?.(frame);
       while (!test || test(frame)) {
         body.run(frame, add);
         // Each iteration has its own loop variables, which closures created in the body keep.
@@ -994,29 +994,6 @@ export abstract class AssignmentCompiler extends ControlCompiler {
         for (const update of updates) update(frame);
         frame.runtime.spend();
       }
-    };
-  }
-
-  private compileForElementInit(element: Extract<CollectionElement, { kind: 'forElement' }>): {
-    initRun: ((frame: Frame) => void) | undefined;
-    loopSlots: number[];
-  } {
-    const { init } = element;
-    const loopSlots: number[] = [];
-    if (init && !Array.isArray(init)) {
-      const before = new Set(this.fn.scopes.at(-1)?.names.values());
-      const exec = this.compileLocalDeclaration(init, false);
-      for (const variable of this.fn.scopes.at(-1)?.names.values() ?? [])
-        if (!before.has(variable)) loopSlots.push(variable.slot);
-      return { initRun: (frame) => void exec(frame), loopSlots };
-    }
-    if (!init) return { initRun: undefined, loopSlots };
-    const runs = init.map((expression) => this.compileExpression(expression).run);
-    return {
-      initRun: (frame) => {
-        for (const run of runs) run(frame);
-      },
-      loopSlots,
     };
   }
 

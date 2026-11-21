@@ -253,11 +253,20 @@ export interface Block extends Span {
   statements: Statement[];
 }
 
+export type PatternDeclaration = {
+  kind: 'patternDeclaration';
+  isFinal: boolean;
+  pattern: Pattern;
+  value: Expression;
+} & Span;
+
+export type ForInitializer = VariableDeclaration | PatternDeclaration | Expression[] | undefined;
+
 export type Statement =
   | Block
   | ({ kind: 'expression'; expression: Expression } & Span)
   | ({ kind: 'local'; declaration: VariableDeclaration } & Span)
-  | ({ kind: 'patternDeclaration'; isFinal: boolean; pattern: Pattern; value: Expression } & Span)
+  | PatternDeclaration
   | ({ kind: 'localFunction'; declaration: FunctionDeclaration } & Span)
   | ({
       kind: 'if';
@@ -271,7 +280,7 @@ export type Statement =
   | ({ kind: 'do'; condition: Expression; body: Statement } & Span)
   | ({
       kind: 'for';
-      init: VariableDeclaration | Expression[] | undefined;
+      init: ForInitializer;
       condition: Expression | undefined;
       updates: Expression[];
       body: Statement;
@@ -367,7 +376,7 @@ export type CollectionElement =
     } & Span)
   | ({
       kind: 'forElement';
-      init: VariableDeclaration | Expression[] | undefined;
+      init: ForInitializer;
       condition: Expression | undefined;
       updates: Expression[];
       body: CollectionElement;

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 561 -- Keep declaration syntax and parameter validation together.
+// code-gauge-allow-file fileNcss 562 -- Keep declaration syntax and parameter validation together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type {
@@ -21,6 +21,7 @@ import type {
   Library,
   MemberDeclaration,
   MethodDeclaration,
+  PatternDeclaration,
   PrimaryConstructor,
   Statement,
   SwitchCase,
@@ -976,9 +977,8 @@ export class Converter extends ExpressionConverter {
         return { kind: 'expression', expression: this.soleExpression(node, children), ...span };
       }
       case 'local_variable_declaration': {
-        const pattern = namedOf(node).find((child) => child.type === 'pattern_variable_declaration');
-        if (pattern) return this.convertPatternDeclaration(pattern);
-        return { kind: 'local', declaration: this.convertLocalDeclaration(node), ...span };
+        const declaration = this.convertLocalDeclaration(node);
+        return declaration.kind === 'patternDeclaration' ? declaration : { kind: 'local', declaration, ...span };
       }
       case 'local_function_declaration': {
         const signature = requireNode(
@@ -1079,7 +1079,9 @@ export class Converter extends ExpressionConverter {
     }
   }
 
-  convertLocalDeclaration(node: Node): VariableDeclaration {
+  convertLocalDeclaration(node: Node): VariableDeclaration | PatternDeclaration {
+    const pattern = namedOf(node).find((child) => child.type === 'pattern_variable_declaration');
+    if (pattern) return this.convertPatternDeclaration(pattern);
     const annotations = this.annotationsOf(node);
     const definition = requireNode(
       namedOf(node).find((child) => child.type === 'initialized_variable_definition'),
@@ -1117,7 +1119,7 @@ export class Converter extends ExpressionConverter {
     };
   }
 
-  private convertPatternDeclaration(node: Node): Statement {
+  private convertPatternDeclaration(node: Node): PatternDeclaration {
     const children = childrenOf(node);
     const equals = children.findIndex((child) => child.type === '=');
     const patternNodes = children.slice(0, equals).filter((child) => child.type !== 'var' && child.type !== 'final');

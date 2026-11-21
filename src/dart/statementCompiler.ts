@@ -3,9 +3,11 @@ import type {
   Block,
   Expression,
   ForInBinding,
+  ForInitializer,
   FormalParameter,
   FormalParameters,
   MethodDeclaration,
+  PatternDeclaration,
   Span,
   Statement,
   TypeSyntax,
@@ -590,7 +592,7 @@ export abstract class StatementCompiler extends PatternCompiler {
       this.flow = this.flow.promote(variable, promoted);
   }
 
-  private compilePatternDeclaration(statement: Extract<Statement, { kind: 'patternDeclaration' }>): Exec {
+  private compilePatternDeclaration(statement: PatternDeclaration, recordStep = true): Exec {
     const value = this.compileExpression(statement.value, this.patternContextType(statement.pattern));
     const pattern = this.compilePattern(statement.pattern, value.type, { mode: 'declare', isFinal: statement.isFinal });
     if (isRefutableSyntax(statement.pattern))
@@ -605,7 +607,7 @@ export abstract class StatementCompiler extends PatternCompiler {
       if (!pattern.match(frame, result)) this.throwPatternMismatch(frame);
       return;
     };
-    return this.withStep(statement, exec, false);
+    return recordStep ? this.withStep(statement, exec, false) : exec;
   }
 
   protected checkParameterAnnotations(parameters: FormalParameters): void {
@@ -858,11 +860,11 @@ export abstract class StatementCompiler extends PatternCompiler {
     }
   }
 
-  // code-gauge-allow duplicateLines 20 -- The counted loop shares its header operations with the generator form.
+  // code-gauge-allow duplicateLines 26 -- The counted loop shares its header operations with the generator form.
   private compileFor(statement: Extract<Statement, { kind: 'for' }>): Exec {
     const labels = this.takeLoopLabels();
     const { result, slots } = this.withScope(() => {
-      const { initExec, loopVariables, initRow } = this.compileForInit(statement);
+      const { initExec, loopSlots, initRow } = this.compileForInit(statement);
       this.enterLoop(statement);
       const { compiled: condition, flow } = statement.condition
         ? this.compileCondition(statement.condition)
@@ -881,7 +883,7 @@ export abstract class StatementCompiler extends PatternCompiler {
         test: condition?.run,
         body,
         labels,
-        loopSlots: loopVariables.map((variable) => variable.slot),
+        loopSlots,
         updates,
         updateRow,
       });
@@ -896,31 +898,32 @@ export abstract class StatementCompiler extends PatternCompiler {
     };
   }
 
-  /** The initializer of a for loop: its variables, which each iteration copies, and the row of its step. */
-  protected compileForInit(statement: Extract<Statement, { kind: 'for' }>): {
+  protected compileForInit(loop: { init: ForInitializer; row: number }): {
     initExec: Exec | undefined;
-    loopVariables: LocalVar[];
+    loopSlots: number[];
     initRow: number | undefined;
   } {
-    const { init } = statement;
-    let initExec: Exec | undefined;
-    const loopVariables: LocalVar[] = [];
-    if (init && !Array.isArray(init)) {
-      const before = new Set(this.fn.scopes.at(-1)?.names.values());
-      initExec = this.compileLocalDeclaration(init, false);
-      for (const variable of this.fn.scopes.at(-1)?.names.values() ?? [])
-        if (!before.has(variable)) loopVariables.push(variable);
-    } else if (init) {
+    const { init } = loop;
+    if (!init) return { initExec: undefined, loopSlots: [], initRow: undefined };
+    if (Array.isArray(init)) {
       const runs = init.map((expression) => this.compileExpression(expression).run);
-      initExec = (frame) => {
-        for (const run of runs) run(frame);
-        return;
+      return {
+        initExec: (frame) => {
+          for (const run of runs) run(frame);
+          return;
+        },
+        loopSlots: [],
+        initRow: runs.length > 0 ? this.stepRowOf(loop) : undefined,
       };
     }
-    const initRecords =
-      init !== undefined &&
-      (Array.isArray(init) ? init.length > 0 : init.variables.some((variable) => variable.initializer));
-    return { initExec, loopVariables, initRow: initRecords ? this.stepRowOf(statement) : undefined };
+    const slots = this.fn.scopes.at(-1)?.slots;
+    const start = slots?.length ?? 0;
+    const initExec =
+      init.kind === 'patternDeclaration'
+        ? this.compilePatternDeclaration(init, false)
+        : this.compileLocalDeclaration(init, false);
+    const recordsStep = init.kind === 'patternDeclaration' || init.variables.some((variable) => variable.initializer);
+    return { initExec, loopSlots: slots?.slice(start) ?? [], initRow: recordsStep ? this.stepRowOf(loop) : undefined };
   }
 
   private compileForIn(statement: Extract<Statement, { kind: 'forIn' }>): Exec {

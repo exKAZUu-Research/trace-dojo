@@ -614,11 +614,11 @@ export abstract class ControlCompiler extends StatementCompiler {
     return clearingSlots(result, slots);
   }
 
-  // code-gauge-allow duplicateLines 21 -- A generator shares the loop header and suspends around the body.
+  // code-gauge-allow duplicateLines 26 -- A generator shares the loop header and suspends around the body.
   private compileGenFor(statement: Extract<Statement, { kind: 'for' }>): GenExec {
     const labels = this.takeLoopLabels();
     const { result, slots } = this.withScope(() => {
-      const { initExec, initRow, loopVariables } = this.compileForInit(statement);
+      const { initExec, initRow, loopSlots } = this.compileForInit(statement);
       this.enterLoop(statement);
       const condition = statement.condition ? this.compileCondition(statement.condition) : undefined;
       const exit = condition?.flow.whenFalse ?? this.flow.unreachable;
@@ -635,7 +635,7 @@ export abstract class ControlCompiler extends StatementCompiler {
         body,
         updates,
         labels,
-        loopSlots: loopVariables.map((variable) => variable.slot),
+        loopSlots,
         updateRow: updates.length > 0 ? this.stepRowOf(statement) : undefined,
       });
     });

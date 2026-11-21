@@ -10,12 +10,14 @@ import type {
   CollectionElement,
   Expression,
   ForInBinding,
+  ForInitializer,
   FormalParameters,
   FunctionBody,
   ListPatternElement,
   NamedArgument,
   ParameterTypes,
   Pattern,
+  PatternDeclaration,
   RecordLiteralField,
   RecordPatternField,
   Span,
@@ -75,7 +77,7 @@ export abstract class ExpressionConverter {
   abstract convertFormalParameters(node: Node): FormalParameters;
   abstract convertFunctionBody(node: Node): FunctionBody;
   abstract convertTypeParameters(node: Node | undefined): TypeParameter[];
-  abstract convertLocalDeclaration(node: Node): VariableDeclaration;
+  abstract convertLocalDeclaration(node: Node): VariableDeclaration | PatternDeclaration;
 
   /**
    * The expressions among a node's children, each with the cascade sections that follow it, since the grammar places
@@ -1342,7 +1344,7 @@ export abstract class ExpressionConverter {
   protected convertForParts(node: Node):
     | {
         kind: 'for';
-        init: VariableDeclaration | Expression[] | undefined;
+        init: ForInitializer;
         condition: Expression | undefined;
         updates: Expression[];
       }
@@ -1360,7 +1362,7 @@ export abstract class ExpressionConverter {
       };
     }
     const initNodes = fieldsOf(node, 'init');
-    let init: VariableDeclaration | Expression[] | undefined;
+    let init: ForInitializer;
     if (initNodes.length === 1 && initNodes[0].type === 'local_variable_declaration') {
       init = this.convertLocalDeclaration(initNodes[0]);
     } else if (initNodes.length > 0) {

@@ -1195,6 +1195,23 @@ void main() {
   });
 });
 
+test('counted loops destructure initializers and capture bindings per iteration', () => {
+  const source = `Iterable<int> numbers() sync* {
+  for (var (i, end) = (0, 2); i < end; i++) yield i;
+}
+void main() {
+  final closures = <int Function()>[];
+  for (var (i, end) = (0, 3); i < end; i++) {
+    closures.add(() => i);
+  }
+  print(closures.map((f) => f()).toList());
+  final expressions = [for (var [i, end] = [0, 3]; i < end; i++) () => i];
+  print(expressions.map((f) => f()).toList());
+  print(numbers().toList());
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '[0, 1, 2]\n[0, 1, 2]\n[0, 1]\n' });
+});
+
 test('patterns, generics, and an uncaught error behave as the SDK does', () => {
   const program = `sealed class Shape {}
 
