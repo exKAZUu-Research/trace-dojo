@@ -290,8 +290,9 @@ external fun CharSequence.regionMatches(thisOffset: Int, other: CharSequence, ot
 external infix fun CharSequence?.contentEquals(other: CharSequence?): Boolean
 external fun CharSequence?.contentEquals(other: CharSequence?, ignoreCase: Boolean): Boolean
 external fun String.replace(oldValue: String, newValue: String, ignoreCase: Boolean = false): String
-external fun String.replace(oldChar: Char, newChar: Char): String
-external fun String.replaceFirst(oldValue: String, newValue: String): String
+external fun String.replace(oldChar: Char, newChar: Char, ignoreCase: Boolean = false): String
+external fun String.replaceFirst(oldValue: String, newValue: String, ignoreCase: Boolean = false): String
+external fun String.replaceFirst(oldChar: Char, newChar: Char, ignoreCase: Boolean = false): String
 external fun String.repeat(n: Int): String
 fun CharSequence.repeat(n: Int): String {
     if (n < 0) throw IllegalArgumentException("Count 'n' must be non-negative, but was $n.")

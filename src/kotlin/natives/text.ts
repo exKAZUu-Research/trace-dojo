@@ -250,17 +250,26 @@ const TEXT_SEARCH_NATIVES: Record<string, TextNative> = {
     sequenceContentEquals(frame, receiver, other, ignoreCase === true),
   'String.replace(String, String, Boolean)': (frame, receiver, [oldValue, newValue, ignoreCase]) =>
     replaceAll(frame, text(receiver), text(oldValue), text(newValue), ignoreCase === true),
-  'String.replace(Char, Char)': (frame, receiver, [oldChar, newChar]) =>
-    replaceAll(frame, text(receiver), charToString(oldChar as number), charToString(newChar as number), false),
-  'String.replaceFirst(String, String)': (frame, receiver, [oldValue, newValue]) => {
-    const value = text(receiver);
-    const old = text(oldValue);
-    const replacement = text(newValue);
-    const position = value.indexOf(old);
-    if (position === -1) return value;
-    frame.runtime.allocateString(frame, value.length - old.length + replacement.length, value.length);
-    return value.slice(0, position) + replacement + value.slice(position + old.length);
-  },
+  'String.replace(Char, Char, Boolean)': (frame, receiver, [oldChar, newChar, ignoreCase]) =>
+    replaceAll(
+      frame,
+      text(receiver),
+      charToString(oldChar as number),
+      charToString(newChar as number),
+      ignoreCase === true,
+      true
+    ),
+  'String.replaceFirst(String, String, Boolean)': (frame, receiver, [oldValue, newValue, ignoreCase]) =>
+    replaceFirst(frame, text(receiver), text(oldValue), text(newValue), ignoreCase === true),
+  'String.replaceFirst(Char, Char, Boolean)': (frame, receiver, [oldChar, newChar, ignoreCase]) =>
+    replaceFirst(
+      frame,
+      text(receiver),
+      charToString(oldChar as number),
+      charToString(newChar as number),
+      ignoreCase === true,
+      true
+    ),
   'String.repeat(Int)': (frame, receiver, [count]) => {
     const times = count as number;
     if (times < 0)
@@ -544,8 +553,15 @@ function digitInRadix(code: number, radix: number): number | undefined {
   return digit < radix ? digit : undefined;
 }
 
-function replaceAll(frame: Frame, value: string, oldValue: string, replacement: string, ignoreCase: boolean): string {
-  const { indexOf } = textSearch(frame, value, oldValue, ignoreCase);
+function replaceAll(
+  frame: Frame,
+  value: string,
+  oldValue: string,
+  replacement: string,
+  ignoreCase: boolean,
+  codeUnitsOnly = false
+): string {
+  const { indexOf } = textSearch(frame, value, oldValue, ignoreCase, codeUnitsOnly);
   frame.runtime.spend(1 + Math.floor((value.length + oldValue.length) / 64));
   let matchCount = 0;
   if (oldValue === '') matchCount = value.length + 1;
@@ -564,6 +580,21 @@ function replaceAll(frame: Frame, value: string, oldValue: string, replacement: 
   }
   parts.push(value.slice(offset));
   return parts.join('');
+}
+
+function replaceFirst(
+  frame: Frame,
+  value: string,
+  oldValue: string,
+  replacement: string,
+  ignoreCase: boolean,
+  codeUnitsOnly = false
+): string {
+  frame.runtime.spend(1 + Math.floor((value.length + oldValue.length) / 64));
+  const position = textSearch(frame, value, oldValue, ignoreCase, codeUnitsOnly).indexOf(0);
+  if (position === -1) return value;
+  frame.runtime.allocateString(frame, value.length - oldValue.length + replacement.length, value.length);
+  return value.slice(0, position) + replacement + value.slice(position + oldValue.length);
 }
 
 function delimiterPair(

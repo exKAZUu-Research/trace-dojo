@@ -3092,6 +3092,21 @@ fun main() {
       'size\n[]\nsize\nentries\n[]\nsize\nentries\nfixed\n[(1, 2)]\nsize\nentries\nsize\n[(1, 2), (3, 4), (5, 6)]\n',
   },
   {
+    name: 'String replacements use JVM character and case matching',
+    source: `fun main() {
+    println("aAa".replace('A', 'x', ignoreCase = true))
+    println("aAa".replace('A', 'x'))
+    println("aAa".replaceFirst("A", "x", ignoreCase = true))
+    println("aAa".replaceFirst('a', 'x'))
+    println("KkK".replaceFirst(oldChar = 'k', newChar = 'x', ignoreCase = true))
+    println("𐐀𐐨".replaceFirst("𐐨", "x", ignoreCase = true))
+    println("𐐀𐐨".replace("𐐨", "x", ignoreCase = true))
+    println("abc".replaceFirst("", "x"))
+    println("abc".replaceFirst("q", "x", ignoreCase = true))
+}`,
+    stdout: 'xxx\naxa\nxAa\nxAa\nxkK\nx𐐨\nxx\nxabc\nabc\n',
+  },
+  {
     name: 'character sequence conversions use Kotlin length-based paths',
     source: `class CharProbe(private val value: String) : CharSequence by value {
     override val length: Int get() { println("length"); return value.length }
