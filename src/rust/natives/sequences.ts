@@ -805,7 +805,15 @@ for (const [name, native] of Object.entries(dequeTracked)) natives[`VecDeque<_>:
 for (const [name, native] of Object.entries(withCapacity(heapNatives))) natives[`BinaryHeap<_>::${name}`] = native;
 natives['BinaryHeap<_>::append'] = ([self, other], ctx) => appendHeap(ctx, self, other);
 natives['[_]::into_iter'] = ([self], ctx) => ownedIter(sliceItems(deref(self)), elemType(ctx));
-natives['[_]::map'] = ([self, f], ctx) => callForEach(ctx, sliceItems(deref(self)), (item) => call(ctx, f, [item]));
+natives['[_]::map'] = ([self, f], ctx) => {
+  const items = sliceItems(deref(self));
+  // The callback owns each element it is given, so the consumed array no longer holds it.
+  const moves = !ctx.interp.checker.solver.isCopy(elemType(ctx));
+  return callForEach(ctx, items, (item, index) => {
+    if (moves) items[index] = MOVED;
+    return call(ctx, f, [item]);
+  });
+};
 natives['&[_]::into_iter'] = ([self]) => sliceIter(deref(self), false);
 natives['&mut [_]::into_iter'] = ([self]) => sliceIter(deref(self), true);
 natives['&Vec<_>::into_iter'] = ([self]) => sliceIter(deref(self), false);

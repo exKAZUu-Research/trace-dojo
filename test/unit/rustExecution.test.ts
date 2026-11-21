@@ -8337,6 +8337,7 @@ test.each([
   ['Option::map', 'let item = Some(Turtle::new(1, 1));', 'item.map', 'Some(true)'],
   ['Result::map', 'let item: Result<Turtle, ()> = Ok(Turtle::new(1, 1));', 'item.map', 'Ok(true)'],
   ['Result::map_err', 'let item: Result<(), Turtle> = Err(Turtle::new(1, 1));', 'item.map_err', 'Err(true)'],
+  ['array map', 'let item = [Turtle::new(1, 1)];', 'item.map', '[true]'],
 ])('a turtle that the callback of %s drops disappears from the board', (_name, setup, method, printed) => {
   const program = rustMain(`
     let observer = Turtle::new(1, 0);
