@@ -375,8 +375,10 @@ export class Compiler extends BodyCompiler {
         repr: 'ref',
         eval: (frame) => {
           instance(frame);
+          const values = frame.runtime.enumEntries.get(cls)?.values ?? [];
+          frame.runtime.allocate(frame, values.length + 1);
           const array = new KObject(arrayClass, 0);
-          array.items = [...(frame.runtime.enumEntries.get(cls)?.values ?? [])];
+          array.items = [...values];
           return array;
         },
       };

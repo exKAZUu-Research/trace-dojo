@@ -57,6 +57,21 @@ test.each(['contains', 'split'])('charges the execution budget during CharSequen
   expect(executeProgram('kotlin', source)).toEqual({ kind: 'limitExceeded', limit: 'operations' });
 });
 
+test.each(['Token.values()', 'enumValues<Token>()'])('charges repeated %s array copies to the Kotlin heap', (call) => {
+  const names = Array.from({ length: 200 }, (_, index) => `TOKEN${index}`).join(', ');
+  const source = `enum class Token { ${names} }
+fun main() {
+    val kept = mutableListOf<Any>()
+    repeat(6000) { kept.add(${call}) }
+    println(kept.size)
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '',
+    uncaughtException: 'java.lang.OutOfMemoryError: Java heap space',
+  });
+});
+
 /** Programs with the output of Kotlin 2.4.21 on the JVM (Java 25), which the interpreter must reproduce exactly. */
 test.each([
   {
