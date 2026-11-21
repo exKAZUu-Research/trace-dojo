@@ -28,7 +28,9 @@ import {
   typeMismatchMessage,
 } from './compilerBase';
 import { getPropertyValue, setPropertyValue } from './dispatch';
-import { type BoundPlace, caseOf, keyOf, type Place } from './expressionCompiler';
+import { type BoundPlace, type Place } from './expressionCompiler';
+import { caseOf, keyOf } from './flowKeys';
+import { assignedNames, remainingWrites, stableLocal } from './flowWrites';
 import { valueEquals } from './format';
 import { isExclusion, OperatorCompiler } from './operatorCompiler';
 import { NUMBER_OPERATOR_NAMES } from './operators';
@@ -105,14 +107,22 @@ export abstract class StatementCompiler extends OperatorCompiler {
     const firstSlot = context.info.slotCount;
     const execs: Exec[] = [];
     let last: Compiled | undefined;
-    for (const [index, statement] of statements.entries()) {
-      const isLast = index === statements.length - 1;
-      if (isLast && !asStatement && statement.kind === 'expressionStatement') {
-        this.recordExceptionEntry(scope, context, statement);
-        last = this.compileExpression(scope, context, statement.expression, expected);
-      } else {
-        execs.push(this.compileStatement(scope, context, statement));
+    const writes = scope.context?.info.isLibrary ? undefined : remainingWrites(statements);
+    const prior = scope.pendingWrites;
+    scope.pendingWrites = writes?.pending;
+    try {
+      for (const [index, statement] of statements.entries()) {
+        writes?.advance(index);
+        const isLast = index === statements.length - 1;
+        if (isLast && !asStatement && statement.kind === 'expressionStatement') {
+          this.recordExceptionEntry(scope, context, statement);
+          last = this.compileExpression(scope, context, statement.expression, expected);
+        } else {
+          execs.push(this.compileStatement(scope, context, statement));
+        }
       }
+    } finally {
+      scope.pendingWrites = prior;
     }
     const lastSlot = context.info.slotCount;
     const value = last ?? { type: this.unitType, repr: 'ref' as const, eval: () => UNIT };
@@ -397,10 +407,15 @@ export abstract class StatementCompiler extends OperatorCompiler {
     }
     const place = this.compilePlace(scope, context, target, row, true);
     const current = new Handoff<BoundPlace>();
-    const currentHolder: Compiled = { type: place.type, repr: place.repr, eval: () => current.get().get() };
+    const currentHolder: Compiled = {
+      type: place.readType ?? place.type,
+      repr: place.repr,
+      eval: () => current.get().get(),
+    };
     const combined = this.compileArithmeticWith(scope, context, operation, currentHolder, statement.value, row);
     const converted = this.expectType(combined, place.type, row);
     const toPlace = convertRepr(converted, reprOf(this.core, place.type), place.repr);
+    this.narrowAfterAssignment(scope, target, combined, place.type);
     return (frame) => {
       const bound = place.bind(frame);
       if (bound.isSkipped) return;
@@ -480,7 +495,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     isCompound: boolean
   ): Place {
     const variable = this.findVariable(scope, target.name);
-    if (variable) return this.variablePlace(context, variable, row, isCompound);
+    if (variable) return this.variablePlace(scope, context, variable, row, isCompound);
     for (const receiver of this.receiversOf(scope)) {
       const property = this.findProperty(scope, this.receiverTypeOf(receiver), target.name);
       if (property) {
@@ -545,7 +560,13 @@ export abstract class StatementCompiler extends OperatorCompiler {
   }
 
   // code-gauge-allow functionCognitiveComplexity 17 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
-  private variablePlace(context: FunctionContext, variable: VariableSymbol, row: number, isCompound: boolean): Place {
+  private variablePlace(
+    scope: Scope,
+    context: FunctionContext,
+    variable: VariableSymbol,
+    row: number,
+    isCompound: boolean
+  ): Place {
     const { delegateRead, delegateWrite } = variable;
     if (delegateRead) {
       if (!delegateWrite) return this.unavailable(row, '委譲したローカル変数への代入');
@@ -577,6 +598,8 @@ export abstract class StatementCompiler extends OperatorCompiler {
     const access = this.variableAccess(context, variable);
     return {
       type: variable.type,
+      readType:
+        isCompound && stableLocal(scope, context, variable) ? this.flow.narrowed.get(keyOf(variable)) : undefined,
       repr: reprOf(this.core, variable.type),
       recordAssignment: () => this.recordAssignment(context, variable, row),
       bind: (frame) => ({ get: () => access.read(frame), set: (value) => access.write(frame, value) }),
@@ -833,13 +856,13 @@ export abstract class StatementCompiler extends OperatorCompiler {
       bodyEval(frame);
     };
     return (frame) => {
-      try {
-        do {
+      while (true) {
+        try {
           frame.runtime.spend();
-          if (this.runLoopBody(loop, body, frame) === 'break') return;
-        } while (test(frame) as boolean);
-      } finally {
-        for (let slot = firstSlot; slot < lastSlot; slot++) frame.locals[slot] = UNASSIGNED;
+          if (this.runLoopBody(loop, body, frame) === 'break' || !(test(frame) as boolean)) return;
+        } finally {
+          for (let slot = firstSlot; slot < lastSlot; slot++) frame.locals[slot] = UNASSIGNED;
+        }
       }
     };
   }
@@ -1575,32 +1598,6 @@ const ASSIGN_OPERATORS = {
   '/': 'divAssign',
   '%': 'remAssign',
 } as const;
-
-/** The names that statements assign, which loops forget smart casts of. */
-// code-gauge-allow functionCognitiveComplexity 20 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
-function assignedNames(node: unknown): Set<string> {
-  const names = new Set<string>();
-  const visit = (value: unknown): void => {
-    if (Array.isArray(value)) {
-      for (const item of value) visit(item);
-      return;
-    }
-    if (typeof value !== 'object' || value === null) return;
-    const record = value as Record<string, unknown>;
-    if (record.kind === 'assignment' && (record.target as { kind?: string }).kind === 'name') {
-      names.add((record.target as { name: string }).name);
-    }
-    if (
-      (record.kind === 'prefix' || record.kind === 'postfix') &&
-      (record.operand as { kind?: string }).kind === 'name'
-    ) {
-      names.add((record.operand as { name: string }).name);
-    }
-    for (const child of Object.values(record)) if (typeof child === 'object') visit(child);
-  };
-  visit(node);
-  return names;
-}
 
 export type { ClassType };
 

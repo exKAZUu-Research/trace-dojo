@@ -69,23 +69,30 @@ fun String?.orEmpty(): String = this ?: ""
 inline fun <C : CharSequence, R> C.ifEmpty(defaultValue: () -> R): R where C : R = if (isEmpty()) defaultValue() else this
 inline fun <C : CharSequence, R> C.ifBlank(defaultValue: () -> R): R where C : R = if (isBlank()) defaultValue() else this
 
-inline fun String.trim(predicate: (Char) -> Boolean): String {
+inline fun CharSequence.trim(predicate: (Char) -> Boolean): CharSequence {
     var start = 0
-    var end = length
-    while (start < end && predicate(this[start])) start++
-    while (end > start && predicate(this[end - 1])) end--
-    return substring(start, end)
+    var end = length - 1
+    while (start <= end && predicate(this[start])) start++
+    while (end >= start && predicate(this[end])) end--
+    return subSequence(start, end + 1)
 }
-inline fun String.trimStart(predicate: (Char) -> Boolean): String {
-    var start = 0
-    while (start < length && predicate(this[start])) start++
-    return substring(start)
+inline fun CharSequence.trimStart(predicate: (Char) -> Boolean): CharSequence {
+    for (index in 0 until length) if (!predicate(this[index])) return subSequence(index, length)
+    return ""
 }
-inline fun String.trimEnd(predicate: (Char) -> Boolean): String {
-    var end = length
-    while (end > 0 && predicate(this[end - 1])) end--
-    return substring(0, end)
+inline fun CharSequence.trimEnd(predicate: (Char) -> Boolean): CharSequence {
+    for (index in lastIndex downTo 0) if (!predicate(this[index])) return subSequence(0, index + 1)
+    return ""
 }
+inline fun String.trim(predicate: (Char) -> Boolean): String = (this as CharSequence).trim(predicate).toString()
+inline fun String.trimStart(predicate: (Char) -> Boolean): String = (this as CharSequence).trimStart(predicate).toString()
+inline fun String.trimEnd(predicate: (Char) -> Boolean): String = (this as CharSequence).trimEnd(predicate).toString()
+fun CharSequence.trim(): CharSequence = trim { it.isWhitespace() }
+fun CharSequence.trimStart(): CharSequence = trimStart { it.isWhitespace() }
+fun CharSequence.trimEnd(): CharSequence = trimEnd { it.isWhitespace() }
+fun CharSequence.trim(vararg chars: Char): CharSequence = trim { it in chars }
+fun CharSequence.trimStart(vararg chars: Char): CharSequence = trimStart { it in chars }
+fun CharSequence.trimEnd(vararg chars: Char): CharSequence = trimEnd { it in chars }
 fun String.trim(vararg chars: Char): String = trim { it in chars }
 fun String.trimStart(vararg chars: Char): String = trimStart { it in chars }
 fun String.trimEnd(vararg chars: Char): String = trimEnd { it in chars }
@@ -133,7 +140,28 @@ private class CharSequenceIterable(private val source: CharSequence) : Iterable<
 }
 fun <R> CharSequence.chunked(size: Int, transform: (CharSequence) -> R): List<R> =
     windowed(size, size, partialWindows = true, transform = transform)
+fun CharSequence.slice(indices: IntRange): CharSequence =
+    if (indices.isEmpty()) "" else subSequence(indices.first, indices.last + 1)
+fun CharSequence.slice(indices: Iterable<Int>): CharSequence {
+    val part = StringBuilder()
+    for (index in indices) part.append(this[index])
+    return part
+}
+fun String.slice(indices: Iterable<Int>): String = (this as CharSequence).slice(indices).toString()
+fun CharSequence.subSequence(range: IntRange): CharSequence = subSequence(range.start, range.endInclusive + 1)
 fun String.slice(indices: IntRange): String = if (indices.isEmpty()) "" else substring(indices.first, indices.last + 1)
+fun CharSequence.replaceRange(startIndex: Int, endIndex: Int, replacement: CharSequence): CharSequence {
+    if (endIndex < startIndex) throw IndexOutOfBoundsException("End index ($endIndex) is less than start index ($startIndex).")
+    return StringBuilder().append(subSequence(0, startIndex)).append(replacement).append(subSequence(endIndex, length))
+}
+fun CharSequence.replaceRange(range: IntRange, replacement: CharSequence): CharSequence =
+    replaceRange(range.start, range.endInclusive + 1, replacement)
+fun String.replaceRange(range: IntRange, replacement: CharSequence): String =
+    replaceRange(range.start, range.endInclusive + 1, replacement)
+fun CharSequence.removeRange(startIndex: Int, endIndex: Int): CharSequence =
+    if (startIndex == endIndex) subSequence(0, length) else replaceRange(startIndex, endIndex, "")
+fun CharSequence.removeRange(range: IntRange): CharSequence = removeRange(range.start, range.endInclusive + 1)
+fun String.removeRange(range: IntRange): String = removeRange(range.start, range.endInclusive + 1)
 fun String.replaceRange(startIndex: Int, endIndex: Int, replacement: CharSequence): String {
     if (endIndex < startIndex) throw IndexOutOfBoundsException("End index ($endIndex) is less than start index ($startIndex).")
     return substring(0, startIndex) + replacement + substring(endIndex)
@@ -177,6 +205,19 @@ external fun String.substring(startIndex: Int): String
 external fun String.substring(startIndex: Int, endIndex: Int): String
 fun String.substring(range: IntRange): String = substring(range.start, range.endInclusive + 1)
 fun CharSequence.substring(startIndex: Int, endIndex: Int = length): String = subSequence(startIndex, endIndex).toString()
+fun CharSequence.startsWith(prefix: CharSequence, ignoreCase: Boolean = false): Boolean =
+    hasTextAt(prefix, 0, ignoreCase)
+fun CharSequence.startsWith(prefix: CharSequence, startIndex: Int, ignoreCase: Boolean = false): Boolean =
+    hasTextAt(prefix, startIndex, ignoreCase)
+fun CharSequence.endsWith(suffix: CharSequence, ignoreCase: Boolean = false): Boolean =
+    hasTextAt(suffix, length - suffix.length, ignoreCase)
+
+private fun CharSequence.hasTextAt(other: CharSequence, startIndex: Int, ignoreCase: Boolean): Boolean {
+    if (startIndex < 0 || startIndex > length - other.length) return false
+    for (index in 0 until other.length) if (!this[startIndex + index].equals(other[index], ignoreCase)) return false
+    return true
+}
+
 external fun String.startsWith(prefix: String, ignoreCase: Boolean = false): Boolean
 fun String.startsWith(prefix: String, startIndex: Int, ignoreCase: Boolean = false): Boolean =
     startIndex >= 0 && startIndex <= length - prefix.length && substring(startIndex, startIndex + prefix.length).equals(prefix, ignoreCase)
@@ -205,6 +246,16 @@ external fun CharSequence.lines(): List<String>
 external fun String.reversed(): String
 fun CharSequence.reversed(): CharSequence = toString().reversed()
 external fun String.toCharArray(): CharArray
+fun CharSequence.padStart(length: Int, padChar: Char = ' '): CharSequence {
+    if (length < 0) throw IllegalArgumentException("Desired length $length is less than zero.")
+    if (length <= this.length) return subSequence(0, this.length)
+    return StringBuilder(toString().padStart(length, padChar))
+}
+fun CharSequence.padEnd(length: Int, padChar: Char = ' '): CharSequence {
+    if (length < 0) throw IllegalArgumentException("Desired length $length is less than zero.")
+    if (length <= this.length) return subSequence(0, this.length)
+    return StringBuilder(toString().padEnd(length, padChar))
+}
 external fun String.padStart(length: Int, padChar: Char = ' '): String
 external fun String.padEnd(length: Int, padChar: Char = ' '): String
 external fun String?.equals(other: String?, ignoreCase: Boolean = false): Boolean
@@ -214,6 +265,16 @@ external fun String.format(vararg args: Any?): String
 // the locale and no argument, as kotlinc resolves it.
 external fun String.format(locale: Locale?, vararg args: Any?): String
 fun String.Companion.format(format: String, vararg args: Any?): String = format.format(*args)
+fun CharSequence.removePrefix(prefix: CharSequence): CharSequence =
+    subSequence(if (startsWith(prefix)) prefix.length else 0, length)
+fun CharSequence.removeSuffix(suffix: CharSequence): CharSequence =
+    subSequence(0, if (endsWith(suffix)) length - suffix.length else length)
+fun CharSequence.removeSurrounding(delimiter: CharSequence): CharSequence = removeSurrounding(delimiter, delimiter)
+fun CharSequence.removeSurrounding(prefix: CharSequence, suffix: CharSequence): CharSequence {
+    if (length >= prefix.length + suffix.length && startsWith(prefix) && endsWith(suffix))
+        return subSequence(prefix.length, length - suffix.length)
+    return subSequence(0, length)
+}
 external fun String.removePrefix(prefix: CharSequence): String
 external fun String.removeSuffix(suffix: CharSequence): String
 external fun String.removeSurrounding(delimiter: CharSequence): String
@@ -221,8 +282,10 @@ external fun String.substringBefore(delimiter: String, missingDelimiterValue: St
 external fun String.substringAfter(delimiter: String, missingDelimiterValue: String = this): String
 external fun String.substringBeforeLast(delimiter: String, missingDelimiterValue: String = this): String
 external fun String.substringAfterLast(delimiter: String, missingDelimiterValue: String = this): String
-fun String.substringBefore(delimiter: Char): String = substringBefore(delimiter.toString())
-fun String.substringAfter(delimiter: Char): String = substringAfter(delimiter.toString())
+fun String.substringBefore(delimiter: Char, missingDelimiterValue: String = this): String = substringBefore(delimiter.toString(), missingDelimiterValue)
+fun String.substringAfter(delimiter: Char, missingDelimiterValue: String = this): String = substringAfter(delimiter.toString(), missingDelimiterValue)
+fun String.substringBeforeLast(delimiter: Char, missingDelimiterValue: String = this): String = substringBeforeLast(delimiter.toString(), missingDelimiterValue)
+fun String.substringAfterLast(delimiter: Char, missingDelimiterValue: String = this): String = substringAfterLast(delimiter.toString(), missingDelimiterValue)
 external fun String.toInt(): Int
 external fun String.toInt(radix: Int): Int
 external fun String.toIntOrNull(): Int?
@@ -269,44 +332,66 @@ inline fun CharSequence.firstOrNull(predicate: (Char) -> Boolean): Char? {
     return null
 }
 inline fun CharSequence.find(predicate: (Char) -> Boolean): Char? = firstOrNull(predicate)
-fun String.take(n: Int): String {
+fun CharSequence.take(n: Int): CharSequence {
     if (n < 0) throw IllegalArgumentException("Requested character count $n is less than zero.")
-    return substring(0, n.coerceAtMost(length))
+    return subSequence(0, n.coerceAtMost(length))
 }
-fun String.drop(n: Int): String {
+fun CharSequence.drop(n: Int): CharSequence {
     if (n < 0) throw IllegalArgumentException("Requested character count $n is less than zero.")
-    return substring(n.coerceAtMost(length))
+    return subSequence(n.coerceAtMost(length), length)
 }
-fun String.takeLast(n: Int): String {
+fun CharSequence.takeLast(n: Int): CharSequence {
     if (n < 0) throw IllegalArgumentException("Requested character count $n is less than zero.")
-    val length = length
-    return substring(length - n.coerceAtMost(length))
+    return subSequence(length - n.coerceAtMost(length), length)
 }
-fun String.dropLast(n: Int): String {
+fun CharSequence.dropLast(n: Int): CharSequence {
     if (n < 0) throw IllegalArgumentException("Requested character count $n is less than zero.")
     return take((length - n).coerceAtLeast(0))
 }
-inline fun String.takeWhile(predicate: (Char) -> Boolean): String {
-    for (index in 0 until length) if (!predicate(get(index))) return substring(0, index)
-    return this
+fun String.take(n: Int): String = (this as CharSequence).take(n).toString()
+fun String.drop(n: Int): String = (this as CharSequence).drop(n).toString()
+fun String.takeLast(n: Int): String = (this as CharSequence).takeLast(n).toString()
+fun String.dropLast(n: Int): String = (this as CharSequence).dropLast(n).toString()
+inline fun CharSequence.takeWhile(predicate: (Char) -> Boolean): CharSequence {
+    for (index in 0 until length) if (!predicate(this[index])) return subSequence(0, index)
+    return subSequence(0, length)
 }
-inline fun String.dropWhile(predicate: (Char) -> Boolean): String {
-    for (index in this.indices) if (!predicate(this[index])) return substring(index)
+inline fun CharSequence.dropWhile(predicate: (Char) -> Boolean): CharSequence {
+    for (index in 0 until length) if (!predicate(this[index])) return subSequence(index, length)
     return ""
 }
-inline fun String.filter(predicate: (Char) -> Boolean): String {
+inline fun CharSequence.takeLastWhile(predicate: (Char) -> Boolean): CharSequence {
+    for (index in lastIndex downTo 0) if (!predicate(this[index])) return subSequence(index + 1, length)
+    return subSequence(0, length)
+}
+inline fun CharSequence.dropLastWhile(predicate: (Char) -> Boolean): CharSequence {
+    for (index in lastIndex downTo 0) if (!predicate(this[index])) return subSequence(0, index + 1)
+    return ""
+}
+inline fun String.takeWhile(predicate: (Char) -> Boolean): String = (this as CharSequence).takeWhile(predicate).toString()
+inline fun String.dropWhile(predicate: (Char) -> Boolean): String = (this as CharSequence).dropWhile(predicate).toString()
+inline fun String.takeLastWhile(predicate: (Char) -> Boolean): String = (this as CharSequence).takeLastWhile(predicate).toString()
+inline fun String.dropLastWhile(predicate: (Char) -> Boolean): String = (this as CharSequence).dropLastWhile(predicate).toString()
+inline fun CharSequence.filter(predicate: (Char) -> Boolean): CharSequence {
     val destination = StringBuilder()
     for (index in 0 until length) {
-        val element = get(index)
+        val element = this[index]
         if (predicate(element)) destination.append(element)
     }
-    return destination.toString()
+    return destination
 }
-inline fun String.filterNot(predicate: (Char) -> Boolean): String {
+inline fun CharSequence.filterNot(predicate: (Char) -> Boolean): CharSequence = filter { !predicate(it) }
+inline fun CharSequence.filterIndexed(predicate: (Int, Char) -> Boolean): CharSequence {
     val destination = StringBuilder()
-    for (element in this) if (!predicate(element)) destination.append(element)
-    return destination.toString()
+    for (index in 0 until length) {
+        val element = this[index]
+        if (predicate(index, element)) destination.append(element)
+    }
+    return destination
 }
+inline fun String.filter(predicate: (Char) -> Boolean): String = (this as CharSequence).filter(predicate).toString()
+inline fun String.filterNot(predicate: (Char) -> Boolean): String = (this as CharSequence).filterNot(predicate).toString()
+inline fun String.filterIndexed(predicate: (Int, Char) -> Boolean): String = (this as CharSequence).filterIndexed(predicate).toString()
 inline fun <R> CharSequence.map(transform: (Char) -> R): List<R> {
     val destination = ArrayList<R>(length)
     for (item in this) destination.add(transform(item))

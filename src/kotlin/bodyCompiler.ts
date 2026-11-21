@@ -1,5 +1,5 @@
 // code-gauge-allow-file fileNcss 537 -- the compiler of one area of Kotlin, whose parts call each other closely.
-import type { Expression, PropertyDecl } from './ast';
+import type { Expression, ParameterDecl, PropertyDecl } from './ast';
 import type { ArgumentSyntax, Candidate, ResolvedCall } from './callCompiler';
 import {
   type Compiled,
@@ -17,7 +17,7 @@ import { type FileContext } from './compilerCore';
 import { type ClassEntry, DeclarationCompiler, type FunctionEntry, type PropertyEntry } from './declarationCompiler';
 import { propertyRepr, returnRepr } from './dispatch';
 import { type Frame, MISSING } from './runtime';
-import type { ClassSymbol, FunctionSymbol, PropertySymbol } from './symbols';
+import type { ClassSymbol, FunctionSymbol, ParameterSymbol, PropertySymbol } from './symbols';
 import { VariableSymbol } from './symbols';
 import { anyType, isSubtype, substitutionOf } from './typeRelations';
 import { type ClassType, type KType, resolved } from './types';
@@ -111,21 +111,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
           decl.params[index].row
         )
       );
-      // A default value sees only the parameters before its own.
-      const defaults = symbol.params.map((param, index) => {
-        this.flow.assigned.add(variables[index]);
-        const value = decl.params[index].defaultValue;
-        if (!value) return;
-        const compiled = this.compileExpression(scope, context, value, param.type);
-        return convertRepr(
-          this.expectType(compiled, param.type, value.row),
-          reprOf(this.core, param.type),
-          reprOf(this.core, param.type)
-        );
-      });
-      for (const [index, evaluate] of defaults.entries()) {
-        if (evaluate) symbol.params[index].defaultValue = evaluate;
-      }
+      const defaults = this.compileParameterDefaults(decl.params, symbol.params, variables, scope, context);
       symbol.defaultsInfo = context.info;
       if (!decl.body) {
         entry.state = 'done';
@@ -526,18 +512,35 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     else if (entry.constructorSymbol) this.bindConstructor(symbol, entry.constructorSymbol, initialize);
   }
 
-  /** The default values of the primary constructor's parameters, which also become those the parameters declare. */
   private compileConstructorDefaults(entry: ClassEntry, scope: Scope, context: FunctionContext): (Eval | undefined)[] {
-    const ctor = entry.constructorSymbol;
-    const defaults = (ctor?.params ?? []).map((param, index) => {
-      const value = entry.decl.primaryConstructor?.params[index]?.defaultValue;
-      if (!value) return;
-      const compiled = this.compileExpression(scope, context, value, param.type);
-      return this.expectType(compiled, param.type, value.row);
+    const params = entry.constructorSymbol?.params ?? [];
+    const variables = params.map(({ name }) => scope.variables.get(name) as VariableSymbol);
+    return this.compileParameterDefaults(
+      entry.decl.primaryConstructor?.params ?? [],
+      params,
+      variables,
+      scope,
+      context
+    );
+  }
+
+  /** A default can read the earlier parameters. The body starts with every parameter assigned. */
+  private compileParameterDefaults(
+    declarations: ParameterDecl[],
+    params: ParameterSymbol[],
+    variables: VariableSymbol[],
+    scope: Scope,
+    context: FunctionContext
+  ): (Eval | undefined)[] {
+    for (const variable of variables) this.flow.assigned.delete(variable);
+    return params.map((param, index) => {
+      const value = declarations[index]?.defaultValue;
+      const evaluate =
+        value && this.expectType(this.compileExpression(scope, context, value, param.type), param.type, value.row);
+      if (evaluate) param.defaultValue = evaluate;
+      this.flow.assigned.add(variables[index]);
+      return evaluate;
     });
-    for (const [index, evaluate] of defaults.entries())
-      if (evaluate && ctor) ctor.params[index].defaultValue = evaluate;
-    return defaults;
   }
 
   /** Stores the delegates of `by` and the properties of the primary constructor's parameters into their fields. */

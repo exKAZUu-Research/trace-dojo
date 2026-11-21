@@ -142,6 +142,7 @@ fun interface Comparator<T> {
 }
 
 class IntArray private constructor() {
+    external fun clone(): IntArray
     external constructor(size: Int)
     external val size: Int
     external operator fun get(index: Int): Int
@@ -150,6 +151,7 @@ class IntArray private constructor() {
 }
 
 class LongArray private constructor() {
+    external fun clone(): LongArray
     external constructor(size: Int)
     external val size: Int
     external operator fun get(index: Int): Long
@@ -158,6 +160,7 @@ class LongArray private constructor() {
 }
 
 class DoubleArray private constructor() {
+    external fun clone(): DoubleArray
     external constructor(size: Int)
     external val size: Int
     external operator fun get(index: Int): Double
@@ -166,6 +169,7 @@ class DoubleArray private constructor() {
 }
 
 class FloatArray private constructor() {
+    external fun clone(): FloatArray
     external constructor(size: Int)
     external val size: Int
     external operator fun get(index: Int): Float
@@ -174,6 +178,7 @@ class FloatArray private constructor() {
 }
 
 class ShortArray private constructor() {
+    external fun clone(): ShortArray
     external constructor(size: Int)
     external val size: Int
     external operator fun get(index: Int): Short
@@ -182,6 +187,7 @@ class ShortArray private constructor() {
 }
 
 class ByteArray private constructor() {
+    external fun clone(): ByteArray
     external constructor(size: Int)
     external val size: Int
     external operator fun get(index: Int): Byte
@@ -190,6 +196,7 @@ class ByteArray private constructor() {
 }
 
 class CharArray private constructor() {
+    external fun clone(): CharArray
     external constructor(size: Int)
     external val size: Int
     external operator fun get(index: Int): Char
@@ -198,6 +205,7 @@ class CharArray private constructor() {
 }
 
 class BooleanArray private constructor() {
+    external fun clone(): BooleanArray
     external constructor(size: Int)
     external val size: Int
     external operator fun get(index: Int): Boolean

@@ -125,6 +125,7 @@ export class FunctionContext {
   returnRepr: Repr | undefined;
   readonly returnedTypes: KType[] = [];
   loops: LoopContext[] = [];
+  inlineLambda = false;
   /** The captured variables a lambda assigns. */
   readonly assignedCaptures = new Set<VariableSymbol>();
 
@@ -179,6 +180,7 @@ export class FunctionContext {
 /** A scope of names: of a file, a class, a function, or a block. */
 export class Scope {
   readonly variables = new Map<string, VariableSymbol>();
+  pendingWrites: ReadonlyMap<string, number> | undefined;
   readonly classes = new Map<string, ClassSymbol>();
   readonly typeParameters = new Map<string, TypeParameterSymbol>();
   receiver: ReceiverSymbol | undefined;

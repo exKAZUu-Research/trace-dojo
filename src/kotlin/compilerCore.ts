@@ -282,9 +282,7 @@ export abstract class CompilerCore {
       const substitution = substitutionOf(current);
       for (const member of current.cls.members.get(name) ?? []) {
         if (member.kind !== kind) continue;
-        if (found.some((existing) => existing.symbol.root === member.root || overrides(existing.symbol, member)))
-          continue;
-        found.push({ symbol: member as T, substitution });
+        this.addMemberReference(found, { symbol: member as T, substitution }, actual.cls);
       }
       for (const supertype of current.cls.supertypes) queue.push(substitute(supertype, substitution) as ClassType);
       if (current.cls.supertypes.length === 0 && current.cls !== this.core.any) {
@@ -292,6 +290,23 @@ export abstract class CompilerCore {
       }
     }
     return found;
+  }
+
+  private addMemberReference<T extends MemberSymbol>(
+    found: MemberRef<T>[],
+    member: MemberRef<T>,
+    receiver: ClassSymbol
+  ): void {
+    const implementation = receiver.dispatch(member.symbol);
+    const same = found.findIndex(
+      (existing) =>
+        existing.symbol.root === member.symbol.root ||
+        overrides(existing.symbol, member.symbol) ||
+        receiver.dispatch(existing.symbol) === implementation
+    );
+    if (same === -1) found.push(member);
+    else if (member.symbol.root === implementation.root && found[same].symbol.root !== implementation.root)
+      found[same] = member;
   }
 
   /** The type of a class's own `this`, with the class's type parameters as its arguments. */

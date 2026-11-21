@@ -105,45 +105,34 @@ interface Attempt {
   mapping: number[][];
 }
 
-/** The parameters each argument goes to, or `undefined` when the arguments do not fit the parameters. */
-// code-gauge-allow functionNcss 34 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
-// code-gauge-allow functionCognitiveComplexity 22 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+/** The indexes of the arguments assigned to each parameter. */
+// code-gauge-allow functionCognitiveComplexity 20 -- mapping keeps the positional cursor, named assignments, and trailing lambda in source order.
 function mapArguments(
   params: ParameterSymbol[],
   args: ArgumentSyntax[],
   hasTrailingLambda: boolean
 ): number[][] | undefined {
   const mapping: number[][] = params.map(() => []);
-  const assigned = new Set<number>();
   let position = 0;
-  let sawNamed = false;
   const positionalCount = hasTrailingLambda ? args.length - 1 : args.length;
   for (let index = 0; index < positionalCount; index++) {
-    const argument = args[index];
-    if (argument.name !== undefined) {
-      const target = params.findIndex((param) => param.name === argument.name);
-      if (target === -1 || assigned.has(target)) return undefined;
-      assigned.add(target);
-      mapping[target].push(index);
-      sawNamed = true;
-      continue;
-    }
-    if (sawNamed) return undefined;
-    if (position >= params.length) return undefined;
-    mapping[position].push(index);
-    assigned.add(position);
-    if (!params[position].isVararg) position++;
+    const { name } = args[index];
+    const target = name === undefined ? position : params.findIndex((param) => param.name === name);
+    if (target < 0 || target >= params.length) return undefined;
+    if (name !== undefined && mapping[target].length > 0) return undefined;
+    mapping[target].push(index);
+    if (target !== position) position = -1;
+    else if (name !== undefined || !params[target].isVararg) position++;
   }
   if (hasTrailingLambda) {
-    const last = params.length - 1;
-    if (last < 0 || assigned.has(last) || params[last].isVararg) return undefined;
-    mapping[last].push(args.length - 1);
-    assigned.add(last);
+    const last = params.at(-1);
+    const tail = mapping.at(-1);
+    if (!last || last.isVararg || !tail || tail.length > 0) return undefined;
+    tail.push(args.length - 1);
   }
-  for (const [index, param] of params.entries()) {
-    if (!assigned.has(index) && !param.hasDefault && !param.isVararg) return undefined;
-  }
-  return mapping;
+  return params.every((param, index) => mapping[index].length > 0 || param.hasDefault || param.isVararg)
+    ? mapping
+    : undefined;
 }
 
 function isLambdaArgument(expression: Expression): expression is LambdaExpression {
@@ -804,7 +793,7 @@ export abstract class CallCompiler extends CompilerCore {
       context,
       argument.value as LambdaExpression,
       lambdaType,
-      symbol.isInline && !sam
+      symbol.isInline && !param.blocksNonlocalControl && !sam
     );
     if (lambdaType) {
       const bodyType = (resolved(compiled.type) as FunctionType).returnType;

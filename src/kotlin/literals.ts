@@ -37,7 +37,6 @@ export function parseRealLiteral(
   const isFloat = match[2] !== undefined;
   const parsed = Number(match[1].replaceAll('_', ''));
   const value = isFloat ? Math.fround(parsed) : parsed;
-  if (!Number.isFinite(value)) throw fail('数が大きすぎます。');
   return { kind: 'real', text, value, isFloat };
 }
 

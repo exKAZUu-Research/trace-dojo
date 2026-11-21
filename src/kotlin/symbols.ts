@@ -124,6 +124,7 @@ export interface ParameterSymbol {
   hasDefault: boolean;
   defaultOwner?: FunctionSymbol;
   isVararg: boolean;
+  blocksNonlocalControl?: boolean;
   /** Computes the default value in the callee's frame, where the earlier parameters are set. */
   defaultValue?: (frame: Frame) => Value;
 }

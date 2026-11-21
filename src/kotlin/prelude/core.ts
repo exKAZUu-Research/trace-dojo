@@ -303,6 +303,7 @@ class String private constructor() : Comparable<String>, CharSequence {
 }
 
 class Array<T> private constructor() {
+    external fun clone(): Array<T>
     external val size: Int
     external operator fun get(index: Int): T
     external operator fun set(index: Int, value: T)

@@ -99,6 +99,7 @@ external class Turtle {
     external fun 前に進めるか(): Boolean
     external fun canMoveForward(): Boolean
     external fun 前のマスが塗られているか(): Boolean
+    external fun isFrontPainted(): Boolean
     external fun remove()
 }
 `;

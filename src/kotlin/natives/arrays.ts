@@ -45,8 +45,10 @@ function checkSize(frame: Frame, size: number): void {
 
 // code-gauge-allow functionNcss 43 -- registers the natives of one class together, in the order the prelude declares them.
 function defineArrays(): void {
+  defineNative('kotlin.Array.clone()', cloneArray);
   for (const [name, kind, zero] of PRIMITIVE_ARRAYS) {
     const prefix = `kotlin.${name}`;
+    if (!name.startsWith('U')) defineNative(`${prefix}.clone()`, cloneArray);
     defineNative(`${prefix}.<init>(Int)`, (frame, instance, [size]) => {
       checkSize(frame, size as number);
       (instance as KObject).items = Array.from({ length: size as number }, () => zero);
@@ -293,6 +295,11 @@ function arrayStorageValue(kind: PrimitiveKind, value: number | bigint): number 
 
 const SIGNED_STORAGE = { UByte: 'Byte', UShort: 'Short', UInt: 'Int', ULong: 'Long' } as const;
 
+function cloneArray(frame: Frame, array: Value): KObject {
+  const items = (array as KObject).items as Value[];
+  return copyArray(frame, array, items.length, () => [...items]);
+}
+
 function copyArray(frame: Frame, array: Value, size: number, makeItems: () => Value[]): KObject {
   checkSize(frame, size);
   const copy = new KObject((array as KObject).cls, 0);
@@ -350,10 +357,7 @@ function defineArrayReading(receiver: string, kind: PrimitiveKind | 'Boolean' | 
     return list;
   });
   defineNative(`${prefix}?.contentToString()`, (frame, array) => arrayContentString(frame, array, kind));
-  defineNative(`${prefix}.copyOf()`, (frame, array) => {
-    const items = (array as KObject).items as Value[];
-    return copyArray(frame, array, items.length, () => [...items]);
-  });
+  defineNative(`${prefix}.copyOf()`, cloneArray);
   defineNative(`${prefix}.copyOf(Int)`, (frame, array, [newSize]) => {
     const size = newSize as number;
     const items = (array as KObject).items as Value[];

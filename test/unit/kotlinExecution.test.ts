@@ -5,6 +5,167 @@ import { executeProgram } from '../../src/interpreter/program';
 /** Programs with the output of Kotlin 2.4.21 on the JVM (Java 25), which the interpreter must reproduce exactly. */
 test.each([
   {
+    name: 'delegate forwarders override inherited implementations through each interface',
+    source: `interface Speaker { fun speak(): String }
+open class Base : Speaker { override fun speak(): String = "base" }
+class Impl : Speaker { override fun speak(): String = "delegate" }
+class Both(d: Speaker) : Base(), Speaker by d
+class Own(d: Speaker) : Base(), Speaker by d { override fun speak() = "own" }
+interface A { fun f(): Any = 3 }
+interface B { fun f(): String }
+class BImpl : B { override fun f() = "jvm" }
+class C(b: B) : A, B by b
+fun main() {
+    println(Both(Impl()).speak())
+    println(Own(Impl()).speak())
+    val c = C(BImpl())
+    val a: A = c
+    val b: B = c
+    println(c.f().length)
+    println(a.f())
+    println(b.f())
+}`,
+    stdout: 'delegate\nown\n3\njvm\njvm\n',
+  },
+  {
+    name: 'array clone copies the outer storage and keeps shared references',
+    source: `fun main() {
+    val values = intArrayOf(1, 2, 3)
+    val copy = values.clone()
+    copy[0] = 9
+    println(values.contentToString())
+    println(copy.contentToString())
+    val rows = arrayOf(values)
+    val cloned: Array<IntArray> = rows.clone()
+    println(rows === cloned)
+    println(rows[0] === cloned[0])
+}`,
+    stdout: '[1, 2, 3]\n[9, 2, 3]\nfalse\ntrue\n',
+  },
+  {
+    name: 'captures remain stable when later writes target shadowed locals',
+    source: `fun main() {
+    var value: Any = "old"
+    value = "home"
+    val printLength = { if (value is String) value.length else 0 }
+    val setOther = { var value = 1; value++ }
+    setOther()
+    println(printLength())
+}`,
+    stdout: '4\n',
+  },
+
+  {
+    name: 'deep array formatting abbreviates cycles while expanding reused arrays',
+    source: `fun main() {
+    val root = arrayOfNulls<Any>(2)
+    val nested = arrayOfNulls<Any>(1)
+    root[0] = nested
+    root[1] = nested
+    nested[0] = root
+    println(root.contentDeepToString())
+    val shared = arrayOf(1, 2)
+    println(arrayOf(shared, shared).contentDeepToString())
+    val empty: Array<Int>? = null
+    println(empty.contentDeepToString())
+}`,
+    stdout: '[[[...]], [[...]]]\n[[1, 2], [1, 2]]\nnull\n',
+  },
+  {
+    name: 'function and constructor defaults can read earlier parameters',
+    source: `fun total(a: Int = 2, b: Int = a + 3) = a + b
+class Pairing(val text: String = "hi", val length: Int = text.length)
+fun main() {
+    println(total())
+    println(total(a = 5))
+    println(Pairing().length)
+    println(Pairing("hello").length)
+}`,
+    stdout: '7\n13\n2\n5\n',
+  },
+
+  {
+    name: 'in-order named arguments can precede positional arguments',
+    source: `fun point(x: Int, y: Int, z: Int = 7) { println("$x,$y,$z") }
+fun main() {
+    point(x = 1, 2)
+    point(1, y = 2, 3)
+    point(z = 3, x = 1, y = 2)
+    println(listOf(1, 2).joinToString(separator = ",", "[", "]"))
+}`,
+    stdout: '1,2,7\n1,2,3\n1,2,3\n[1,2]\n',
+  },
+  {
+    name: 'String and CharSequence overloads preserve return types and delimiters',
+    source: `fun main() {
+    val text: CharSequence = StringBuilder(" hello ")
+    println(text.startsWith(StringBuilder("he"), 1))
+    println(text.endsWith("LO ", ignoreCase = true))
+    println(text.trim().dropLast(1))
+    println(text.trim().takeLast(2))
+    println(text.removePrefix(" ").removeSuffix(" "))
+    println(text.trim().filter { it != 'l' } is StringBuilder)
+    println(text.trim().padEnd(8, '.') is StringBuilder)
+    println(text.replaceRange(1..2, "HE"))
+    println("report.2024.csv".substringAfterLast('.'))
+    println("report.2024.csv".substringBeforeLast('.'))
+    println("untitled".substringBefore(':', "none"))
+    println("untitled".substringAfterLast(':', "none"))
+    val narrowed: String = "hello".takeWhile { it != 'l' }
+    println(narrowed)
+}`,
+    stdout: 'true\ntrue\nhell\nlo\nhello\ntrue\ntrue\n HEllo \ncsv\nreport.2024\nnone\nnone\nhe\n',
+  },
+  {
+    name: 'Turtle painted-cell checks have English and Japanese names',
+    source: `fun main() {
+    val turtle = Turtle()
+    println(turtle.isFrontPainted())
+    println(turtle.前のマスが塗られているか())
+}`,
+    stdout: 'false\nfalse\n',
+  },
+  {
+    name: 'floating-point literal overflow rounds to infinity',
+    source: `fun main() { println(1e309); println(-1.0e400); println(1e39f) }`,
+    stdout: 'Infinity\n-Infinity\nInfinity\n',
+  },
+  {
+    name: 'each do-while iteration has its own captured cell',
+    source: `fun main() {
+    var i = 0
+    val reads = mutableListOf<() -> Int>()
+    do {
+        var x = i++
+        reads.add { x++ }
+        if (x == 1) continue
+    } while (x < 2)
+    println(reads.map { it() })
+    println(reads.map { it() })
+}`,
+    stdout: '[0, 1, 2]\n[1, 2, 3]\n',
+  },
+  {
+    name: 'smart casts narrow mutable local reads while assignments retain the declared type',
+    source: `fun main() {
+    var first: Int? = 3
+    if (first != null) println(first--)
+    if (first != null) println(++first)
+    var second: Int? = 5
+    if (second != null) { second += 2; println(second) }
+    var third: Int? = 7
+    third = third!!
+    third--
+    println(third)
+    var remaining: Int? = 2
+    while (remaining != null && remaining > 0) remaining--
+    println(remaining)
+    second = null
+    println(second)
+}`,
+    stdout: '3\n3\n7\n6\n0\nnull\n',
+  },
+  {
     name: 'primitive interface properties are boxed across delegated accessors',
     source: `class IntLazy(override val value: Int) : Lazy<Int> {
     override fun isInitialized(): Boolean = true
@@ -1503,6 +1664,46 @@ fun main() {
     }
     println(n)
 }`,
+  ],
+  [
+    'a positional argument after an out-of-order named argument',
+    false,
+    'fun point(x: Int, y: Int) {}\nfun main() { point(y = 2, 1) }',
+  ],
+  [
+    'a return from a crossinline comparator selector',
+    false,
+    'fun main() { listOf(3, 1).sortedBy { if (it == 3) return; it } }',
+  ],
+  [
+    'a break from a crossinline comparator selector',
+    false,
+    'fun main() { while (true) { listOf(3, 1).sortedBy { if (it == 3) break; it } } }',
+  ],
+  [
+    'a function default reading its own unassigned parameter',
+    false,
+    'fun invalid(x: Int = x + 1) = x\nfun main() { println(invalid()) }',
+  ],
+  [
+    'a constructor default reading its own unassigned parameter',
+    false,
+    'class Invalid(val text: String = text)\nfun main() { println(Invalid().text) }',
+  ],
+  [
+    'a constructor default reading a later unassigned parameter',
+    false,
+    'class Invalid(val a: Int = b, val b: Int = 1)\nfun main() { println(Invalid().a) }',
+  ],
+  [
+    'a smart cast in a closure before a later write to its captured variable',
+    false,
+    'fun main() { var value: Any = "a"; val read = { if (value is String) value.length else 0 }; value = 1; println(read()) }',
+  ],
+  [
+    'a smart cast in a closure before a sibling closure captures and writes the variable',
+    false,
+    'fun main() { var value: Any = "a"; val read = { if (value is String) value.length else 0 }; val set = { value = 1 }; println(read()) }',
   ],
   [
     'a private object member through its qualifier',

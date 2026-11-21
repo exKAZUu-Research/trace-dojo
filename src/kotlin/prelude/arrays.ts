@@ -280,9 +280,17 @@ fun Array<out Double>.average(): Double = asList().average()
 fun <T : Comparable<T>> Array<out T>.sortDescending() = sortWith(reverseOrder())
 fun <T : Comparable<T>> Array<T>.sortedArray(): Array<T> = copyOf().also { it.sort() }
 fun <T : Comparable<T>> Array<T>.sortedArrayDescending(): Array<T> = copyOf().also { it.sortDescending() }
-fun <T> Array<out T>.contentDeepToString(): String = joinToString(", ", "[", "]") { deepString(it) }
-private fun deepString(element: Any?): String = when (element) {
-    is Array<*> -> element.contentDeepToString()
+fun <T> Array<out T>?.contentDeepToString(): String = if (this == null) "null" else deepArrayString(this, HashSet<Any>())
+private fun deepArrayString(array: Array<*>, active: MutableSet<Any>): String {
+    if (!active.add(array)) return "[...]"
+    try {
+        return array.joinToString(", ", "[", "]") { deepString(it, active) }
+    } finally {
+        active.remove(array)
+    }
+}
+private fun deepString(element: Any?, active: MutableSet<Any>): String = when (element) {
+    is Array<*> -> deepArrayString(element, active)
     is IntArray -> element.contentToString()
     is LongArray -> element.contentToString()
     is DoubleArray -> element.contentToString()

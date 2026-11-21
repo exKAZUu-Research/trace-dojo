@@ -35,7 +35,7 @@ import {
   TypeParameterSymbol,
   type Visibility,
 } from './symbols';
-import { anyType, isSameType, isSubtype } from './typeRelations';
+import { anyType, isSameType, isSubtype, substitutionOf } from './typeRelations';
 import { type ClassType, type KType, NOTHING, resolved, substitute, type Substitution, typeToString } from './types';
 import { Boxed, KObject, type PrimitiveKind, type Value } from './values';
 
@@ -602,12 +602,13 @@ export abstract class DeclarationCompiler extends StatementCompiler {
 
   private declareParameter(scope: Scope, param: ParameterDecl): ParameterSymbol {
     if (!param.type) this.error(param.row, `引数 ${param.name} の型を書いてください。`);
-    const isVararg = param.modifiers.keywords.has('vararg');
+    const { keywords } = param.modifiers;
     return {
       name: param.name,
       type: this.resolveType(scope, param.type),
       hasDefault: param.defaultValue !== undefined,
-      isVararg,
+      isVararg: keywords.has('vararg'),
+      blocksNonlocalControl: keywords.has('crossinline') || keywords.has('noinline'),
     };
   }
 
@@ -1122,7 +1123,11 @@ export abstract class DeclarationCompiler extends StatementCompiler {
 
   /** The members of the supertypes that a member overrides: same name, and for functions the same parameter types. */
   // code-gauge-allow functionCognitiveComplexity 24 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
-  private findOverridden(cls: ClassSymbol, member: MemberSymbol): MemberSymbol[] {
+  private findOverridden(
+    cls: ClassSymbol,
+    member: MemberSymbol,
+    memberTypes: Substitution = new Map()
+  ): MemberSymbol[] {
     const found: MemberSymbol[] = [];
     for (const supertype of cls.supertypes) {
       const candidates = this.membersOf<MemberSymbol>(supertype, member.name, member.kind);
@@ -1131,12 +1136,12 @@ export abstract class DeclarationCompiler extends StatementCompiler {
         if (member.kind === 'function' && candidate.kind === 'function') {
           if (candidate.params.length !== member.params.length) continue;
           const matches = candidate.params.every((param, index) =>
-            isSameType(substitute(param.type, substitution), member.params[index].type)
+            isSameType(substitute(param.type, substitution), substitute(member.params[index].type, memberTypes))
           );
           if (!matches) continue;
         }
         if ((member.extensionReceiver === undefined) !== (candidate.extensionReceiver === undefined)) continue;
-        this.checkOverrideType(cls, member, candidate, substitution);
+        this.checkOverrideType(cls, member, candidate, substitution, memberTypes);
         if (!found.includes(candidate)) found.push(candidate);
       }
     }
@@ -1158,7 +1163,8 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     cls: ClassSymbol,
     member: MemberSymbol,
     base: MemberSymbol,
-    substitution: Substitution
+    substitution: Substitution,
+    memberTypes: Substitution
   ): void {
     if (cls.isLibrary) return;
     if (VISIBILITY_RANK[member.visibility] < VISIBILITY_RANK[base.visibility]) {
@@ -1172,7 +1178,8 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     // A type that the member's body has yet to infer is checked against the inherited one where it is inferred.
     if (!own || !inherited) return;
     const expected = substitute(inherited, substitution);
-    const fits = base.kind === 'property' && base.isVar ? isSameType(own, expected) : isSubtype(own, expected);
+    const actual = substitute(own, memberTypes);
+    const fits = base.kind === 'property' && base.isVar ? isSameType(actual, expected) : isSubtype(actual, expected);
     if (!fits) {
       this.error(
         member.row,
@@ -1181,31 +1188,39 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     }
   }
 
-  /** Forwards the members of an interface delegated with `by` that the class does not override to the delegate. */
-  // code-gauge-allow functionCognitiveComplexity 23 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private linkDelegates(entry: ClassEntry): void {
     const { symbol } = entry;
     for (const field of entry.delegateFields) {
+      const seen = new Set<MemberSymbol>();
       const visit = (type: ClassType): void => {
+        const substitution = substitutionOf(type);
         for (const members of type.cls.members.values()) {
           for (const member of members) {
-            const current = symbol.vtable.get(member.root);
-            if (current && current.owner === symbol) continue;
-            if (
-              current &&
-              !current.isAbstract &&
-              current.owner &&
-              !current.owner.isInterface &&
-              current.owner !== type.cls
-            )
-              continue;
-            symbol.vtable.set(member.root, this.forwarder(member, field.slot, symbol));
+            if (member.visibility === 'private' || seen.has(member.root)) continue;
+            seen.add(member.root);
+            this.linkDelegateMember(symbol, member, substitution, field);
           }
         }
-        for (const supertype of type.cls.supertypes) visit(supertype);
+        for (const supertype of type.cls.supertypes) visit(substitute(supertype, substitution) as ClassType);
       };
       visit(field.type);
     }
+  }
+
+  private linkDelegateMember(
+    symbol: ClassSymbol,
+    member: MemberSymbol,
+    substitution: Substitution,
+    field: ClassEntry['delegateFields'][number]
+  ): void {
+    if (symbol.vtable.get(member.root)?.owner === symbol) return;
+    const bases = this.findOverridden(symbol, member, substitution);
+    const final = bases.find((base) => !base.owner?.isInterface && !base.isOpen && !base.isAbstract);
+    if (final) {
+      this.error(field.spec.row, `委譲では ${final.owner?.name ?? ''}.${final.name} を上書きできません。`);
+    }
+    const forward = this.forwarder(member, field.slot, symbol);
+    for (const base of bases) symbol.vtable.set(base.root, forward);
   }
 
   /** A member that calls the delegate's implementation of `member`. */

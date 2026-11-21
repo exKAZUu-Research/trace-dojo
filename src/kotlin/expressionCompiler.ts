@@ -23,6 +23,8 @@ import {
 } from './compilerBase';
 import type { MemberRef } from './compilerCore';
 import { getPropertyValue, propertyRepr, receiverRepr } from './dispatch';
+import { keyOf } from './flowKeys';
+import { stableLocal } from './flowWrites';
 import { formatPrimitive, stringOf } from './format';
 import { unavailableLibraryMember, unavailableQualifiedLibraryMember } from './libraryApi';
 import { literalFits } from './literals';
@@ -52,19 +54,6 @@ import {
 } from './types';
 import { box, Boxed, KObject, NULL, type PrimitiveKind, UNIT, type Value } from './values';
 
-const identities = new WeakMap<object, number>();
-let nextKey = 1;
-
-/** A key that names a variable or property in the narrowed types of a flow. */
-export function keyOf(item: object): string {
-  let id = identities.get(item);
-  if (id === undefined) {
-    id = nextKey++;
-    identities.set(item, id);
-  }
-  return `#${id}`;
-}
-
 /** A place to store a value, with its receiver and indexes evaluated. */
 export interface BoundPlace {
   get(): Value;
@@ -77,6 +66,7 @@ const SKIPPED_PLACE: BoundPlace = { get: () => NULL, set: () => {}, isSkipped: t
 
 export interface Place {
   type: KType;
+  readType?: KType;
   repr: Repr;
   bind: (frame: Frame) => BoundPlace;
   recordAssignment?: () => void;
@@ -440,7 +430,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
 
   protected compileName(scope: Scope, context: FunctionContext, name: string, row: number): Compiled {
     const variable = this.findVariable(scope, name);
-    if (variable) return this.readVariable(context, variable, row);
+    if (variable) return this.readVariable(scope, context, variable, row);
     for (const receiver of this.receiversOf(scope)) {
       const property = this.findProperty(scope, this.receiverTypeOf(receiver), name);
       if (property) {
@@ -548,7 +538,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     };
   }
 
-  protected readVariable(context: FunctionContext, variable: VariableSymbol, row: number): Compiled {
+  protected readVariable(scope: Scope, context: FunctionContext, variable: VariableSymbol, row: number): Compiled {
     const { delegateRead } = variable;
     if (delegateRead) {
       if (variable.owner !== context && variable.slot >= 0)
@@ -559,13 +549,14 @@ export abstract class ExpressionCompiler extends CallCompiler {
       this.error(row, `変数 ${variable.name} に値が入っていません。`);
     }
     const key = keyOf(variable);
-    const narrowed = variable.isCapturedAndModified ? undefined : this.flow.narrowed.get(key);
+    const stable = stableLocal(scope, context, variable);
+    const narrowed = stable ? this.flow.narrowed.get(key) : undefined;
     const access = this.variableAccess(context, variable);
     return {
       type: narrowed ?? variable.type,
       repr: reprOf(this.core, variable.type),
       eval: access.read,
-      stableKey: variable.isCapturedAndModified ? undefined : key,
+      stableKey: stable ? key : undefined,
       unnarrowedType: narrowed && variable.type,
     };
   }
@@ -990,7 +981,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
       return this.compileInvoke(
         scope,
         context,
-        this.readVariable(context, variable, row),
+        this.readVariable(scope, context, variable, row),
         args,
         hasTrailingLambda,
         row
@@ -1301,7 +1292,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const variable = this.findVariable(scope, name);
     if (variable) {
       const type = resolved(variable.type);
-      return type.kind === 'function' && type.receiver ? this.readVariable(context, variable, row) : undefined;
+      return type.kind === 'function' && type.receiver ? this.readVariable(scope, context, variable, row) : undefined;
     }
     const property = this.topLevelProperties(name)[0]?.find((candidate) => !candidate.extensionReceiver);
     if (!property) return undefined;
@@ -1773,7 +1764,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
       context.info.isLibrary,
       isInline ? (context.returnTarget ?? (context.isLambda ? undefined : context)) : undefined
     );
-    lambdaContext.info.isAtomic = false;
+    lambdaContext.inlineLambda = isInline;
     if (isInline) lambdaContext.loops = [...context.loops];
     const lambdaScope = new Scope(scope, lambdaContext);
     const params = this.lambdaParameters(scope, lambda, expected?.params);
@@ -1912,21 +1903,6 @@ export abstract class ExpressionCompiler extends CallCompiler {
     expected: KType | undefined,
     asStatement: boolean
   ): Compiled;
-}
-
-/**
- * The case of an enum or sealed type that a value always is, an enum entry or an object, named as a `when` covers it,
- * with the other entries of its enum.
- */
-export function caseOf(value: Compiled): { id: string; others: string[] } | undefined {
-  const type = resolved(value.type);
-  if (type.kind !== 'class' || !value.stableKey) return undefined;
-  const { cls } = type;
-  if (cls.isObject && value.stableKey === keyOf(cls)) return { id: `class:${keyOf(cls)}`, others: [] };
-  if (cls.kind !== 'enum') return undefined;
-  const ids = cls.enumEntries.map((entry) => `entry:${keyOf(cls)}.${entry.name}`);
-  const id = `entry:${value.stableKey}`;
-  return ids.includes(id) ? { id, others: ids.filter((item) => item !== id) } : undefined;
 }
 
 function withNullabilityOf<T extends KType>(type: T, isNullable: boolean): T {

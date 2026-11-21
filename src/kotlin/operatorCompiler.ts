@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 416 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss 418 -- the compiler of one area of Kotlin, whose parts call each other closely.
 import type { CallExpression, Expression, TypeRef } from './ast';
 import { type ArgumentSyntax } from './callCompiler';
 import {
@@ -13,7 +13,8 @@ import {
   type Scope,
   typeMismatchMessage,
 } from './compilerBase';
-import { caseOf, ExpressionCompiler, keyOf, type Place } from './expressionCompiler';
+import { ExpressionCompiler, type Place } from './expressionCompiler';
+import { caseOf, keyOf } from './flowKeys';
 import { valueEquals } from './format';
 import {
   arithmeticOperation,
@@ -138,9 +139,9 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
   ): Compiled {
     if (target.kind === 'member' && target.isSafe) this.unavailable(row, '?. を使った ++・--');
     const place = this.compilePlace(scope, context, target, row, true);
-    const kind = this.primitiveOf(place.type);
-    if (!kind)
-      this.error(row, `${typeToString(resolved(place.type))} には ${delta === 1 ? '++' : '--'} を使えません。`);
+    const readType = place.readType ?? place.type;
+    const kind = this.primitiveOf(readType);
+    if (!kind) this.error(row, `${typeToString(resolved(readType))} には ${delta === 1 ? '++' : '--'} を使えません。`);
     const toPlace = (value: number | bigint): Value => (place.repr === 'ref' ? box(kind, value) : value);
     return {
       type: this.primitiveType(kind),
