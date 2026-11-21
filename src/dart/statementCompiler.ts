@@ -14,7 +14,7 @@ import type {
 import { assignmentTargets, localNamesIn } from './astWalk';
 import type { CompiledFunction, FunctionSpec } from './callCompiler';
 import type { ClassInfo } from './classes';
-import { type Compiled, type Eval, typeName } from './compilerBase';
+import { at, type Compiled, type Eval, typeName } from './compilerBase';
 import { type CompiledPattern, isRefutableSyntax, PatternCompiler } from './patternCompiler';
 import { type DartThrow, type Frame } from './runtime';
 import { Flow, FunctionContext, type JumpTarget, type LocalVar, type StoredFlow } from './scope';
@@ -23,6 +23,7 @@ import {
   type DartType,
   DYNAMIC,
   type FunctionType,
+  functionType,
   interfaceType,
   isNullable,
   isPotentiallyNullable,
@@ -508,13 +509,12 @@ export abstract class StatementCompiler extends PatternCompiler {
     if (declaration.isConst && !initializer)
       this.error(declarator, `const の変数 ${declarator.name} には、初期値が必要です。`);
     if (!initializer) return undefined;
+    if (declaration.isLate)
+      return this.compileLateInitializer(declarator.name, initializer, declaredType, declaration.isFinal);
     const savedFlow = this.flow;
     this.pendingCondition = undefined;
     const isCondition =
-      !declaration.isLate &&
-      !declaration.isConst &&
-      (!declaredType || isBoolType(declaredType)) &&
-      isConditionShaped(initializer);
+      !declaration.isConst && (!declaredType || isBoolType(declaredType)) && isConditionShaped(initializer);
     let compiled: Compiled;
     if (isCondition) {
       const result = this.compileConditionInner(initializer);
@@ -527,7 +527,6 @@ export abstract class StatementCompiler extends PatternCompiler {
     } else {
       compiled = this.withConstContext(declaration.isConst, () => this.compileExpression(initializer, declaredType));
     }
-    if (declaration.isLate) this.flow = savedFlow;
     if (declaration.isConst && !compiled.isConst)
       this.error(initializer, `const の変数 ${declarator.name} の初期値は、定数でなければなりません。`);
     if (declaredType) {
@@ -541,6 +540,39 @@ export abstract class StatementCompiler extends PatternCompiler {
     if (declaration.isConst) this.checkConstant(initializer, compiled);
     // `var x = f();` with a void `f` declares a void variable, which Dart rejects only where it is used.
     return compiled;
+  }
+
+  private compileLateInitializer(
+    name: string,
+    expression: Expression,
+    declaredType: DartType | undefined,
+    isFinal: boolean
+  ): Compiled {
+    const span = at(expression);
+    const compiled = this.compileFunction({
+      name,
+      span,
+      headerEndRow: span.row,
+      parameters: { ...span, positional: [], requiredCount: 0, named: [] },
+      positionalTypes: [],
+      namedTypes: new Map(),
+      returnType: undefined,
+      contextReturnType: declaredType,
+      body: { ...span, kind: 'expression', expression, modifier: 'sync' },
+      typeParams: [],
+      kind: { ...this.fn.kind, returnType: undefined, isGenerator: false, isConstructor: false },
+      showsThis: this.fn.info.showsThis,
+      isClosure: true,
+    });
+    if (declaredType && declaredType.kind !== 'void' && compiled.returnType.kind === 'void')
+      this.error(expression, 'void の値は、ここでは使えません。');
+    compiled.fn.info.isAtomic = false;
+    const create = this.closureCreator(compiled, functionType([], compiled.returnType));
+    return {
+      type: declaredType ?? compiled.returnType,
+      isConst: false,
+      run: (frame) => new LateInitializer(create(frame), isFinal) as unknown as Value,
+    };
   }
 
   /** An initialized local is assigned, and a nullable one initialized with a non-null value is promoted. */
@@ -1240,8 +1272,7 @@ function widenInferred(type: DartType): DartType {
 }
 
 function initialLocalValue(frame: Frame, run: Eval | undefined, isLate: boolean): Value {
-  if (isLate) return run ? (new LateInitializer(() => run(frame)) as unknown as Value) : UNINITIALIZED;
-  return run ? run(frame) : UNASSIGNED;
+  return run ? run(frame) : isLate ? UNINITIALIZED : UNASSIGNED;
 }
 
 function isSubtypeOfSame(a: DartType, b: DartType): boolean {

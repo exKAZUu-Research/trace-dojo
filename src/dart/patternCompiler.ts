@@ -1,8 +1,8 @@
-// code-gauge-allow-file fileNcss 550 -- Pattern kinds share their type, rooting, and binding helpers.
+// code-gauge-allow-file fileNcss 553 -- Pattern kinds share their type, rooting, and binding helpers.
 import type { Expression, ListPatternElement, Pattern, RecordPatternField, Span } from './ast';
 import { nullPatternComparison } from './astWalk';
 import { CallCompiler } from './callCompiler';
-import { type Compiled, type Eval, type ResolvedMember, typeName } from './compilerBase';
+import { type Compiled, type Eval, typeName } from './compilerBase';
 import { promotionTarget, SHORTED } from './expressionCompiler';
 import { listElement, listLength } from './library/nativeSupport';
 import { DartThrow, type Frame } from './runtime';
@@ -23,7 +23,7 @@ import {
   upperBound,
   vmTypeString,
 } from './types';
-import { type Arguments, type Callable, Cell, DartRecord, type Value } from './values';
+import { Cell, DartRecord, type Value } from './values';
 
 export type PatternMode = 'match' | 'declare' | 'assign';
 
@@ -42,6 +42,7 @@ export interface CompiledPattern extends Omit<PatternMatch, 'match'> {
 export class PatternCache {
   private readonly paths = new Map<unknown, PatternCache>();
   private extracted: { value: Value } | undefined;
+  private instantiations: { args: readonly DartType[]; path: PatternCache }[] | undefined;
 
   private constructor(private readonly roots: Value[]) {}
 
@@ -65,6 +66,18 @@ export class PatternCache {
     return child;
   }
 
+  instantiated(args: readonly DartType[]): PatternCache {
+    if (args.length === 0) return this;
+    const projections = (this.instantiations ??= []);
+    const existing = projections.find(
+      (entry) => entry.args.length === args.length && entry.args.every((type, index) => sameType(type, args[index]))
+    );
+    if (existing) return existing.path;
+    const path = new PatternCache(this.roots);
+    projections.push({ args, path });
+    return path;
+  }
+
   read(frame: Frame, extract: () => Value): Value {
     if (this.extracted) return this.extracted.value;
     const value = extract();
@@ -78,6 +91,7 @@ export class PatternCache {
 const MAP_VALUE = Symbol('map value');
 const MAP_CONTAINS_KEY = Symbol('map contains key');
 const LIST_LENGTH = Symbol('list length');
+const LIST_TAIL = Symbol('list tail');
 const SUBLIST = Symbol('sublist');
 
 interface PatternOptions {
@@ -721,7 +735,7 @@ export abstract class PatternCompiler extends CallCompiler {
     return names;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Resolve object properties and match their projected values.
+  // code-gauge-allow functionCognitiveComplexity 23 -- Resolve object properties and match their projected values.
   private objectPattern(
     pattern: Extract<Pattern, { kind: 'object' }>,
     matchedType: DartType,
@@ -741,16 +755,17 @@ export abstract class PatternCompiler extends CallCompiler {
           type.cls.typeParams.map(() => DYNAMIC)
         );
     }
+    const receiver: Compiled = { type, run: (frame) => frame.temporaries.at(-1), isConst: false };
     const fields = pattern.fields.map((field) => {
       if (field.name === undefined)
         return this.error(field, 'オブジェクトのパターンのフィールドには、名前を書いてください。');
       const member = this.lookupMember(type, field.name, false);
       if (!member) this.error(field, `${typeName(type)} 型には ${field.name} というメンバーがありません。`);
-      const fieldType = member.type;
       return {
-        name: field.name,
-        pattern: this.compilePatternInner(field.pattern, fieldType, options, variables),
-        member,
+        projection: member.extension ? member.member : field.name,
+        types: member.extension ? this.runtimeTypes(member.extension.typeArgs) : undefined,
+        run: this.readMember(receiver, member, field.name, undefined, false).run,
+        pattern: this.compilePatternInner(field.pattern, member.type, options, variables),
       };
     });
     const typeCheck = this.typeTest(type, matchedType, () => true, true, options.mode);
@@ -758,34 +773,15 @@ export abstract class PatternCompiler extends CallCompiler {
       match: (frame, value, cache) => {
         if (!typeCheck.match(frame, value, cache)) return false;
         for (const field of fields) {
-          const key = field.member.extension ? field.member.member : field.name;
-          const path = cache.child(key);
-          const fieldValue = path.read(frame, () => this.readPatternField(frame, value, field.name, field.member));
+          const projection = cache.child(field.projection);
+          const path = field.types ? projection.instantiated(field.types(frame)) : projection;
+          const fieldValue = path.read(frame, () => field.run(frame));
           if (!field.pattern.match(frame, fieldValue, path)) return false;
         }
         return true;
       },
       irrefutable: typeCheck.irrefutable && fields.every((field) => field.pattern.irrefutable),
     };
-  }
-
-  private readPatternField(frame: Frame, value: Value, name: string, resolved: ResolvedMember): Value {
-    if (resolved.extension) {
-      const impl = resolved.member.impl as unknown as Callable;
-      return impl(
-        frame.runtime,
-        value,
-        { positional: [], named: undefined } as Arguments,
-        resolved.extension.typeArgs,
-        undefined
-      );
-    }
-    if (value instanceof DartRecord) {
-      const position = /^\$([1-9]\d*)$/.exec(name);
-      if (position) return value.positional[Number(position[1]) - 1];
-      return value.named.find(([field]) => field === name)?.[1];
-    }
-    return frame.runtime.getProperty(value, this.runtimeMemberName(name), undefined);
   }
 
   /** Throws the error a refutable pattern in a declaration or an assignment raises when it fails to match. */
@@ -889,24 +885,22 @@ interface ListPatternParts {
 }
 
 /** Matches a list's length, the elements before and after the rest, and the rest as a new list. */
-// code-gauge-allow functionCognitiveComplexity 20 -- The pattern length and three subranges follow the specification.
+// code-gauge-allow functionCognitiveComplexity 21 -- The pattern length and three subranges follow the specification.
 function matchListParts(frame: Frame, value: Value, parts: ListPatternParts, cache: PatternCache): boolean {
   const { head, rest, tail, hasRest } = parts;
   const { runtime } = frame;
   const minimum = BigInt(head.length + tail.length);
   const count =
     hasRest && minimum === 0n ? 0n : (cache.child(LIST_LENGTH).read(frame, () => listLength(runtime, value)) as bigint);
-  const matchElement = (pattern: PatternMatch, index: bigint): boolean => {
-    const path = cache.child(index);
-    return pattern.match(
+  const matchElement = (pattern: PatternMatch, index: bigint, path: PatternCache): boolean =>
+    pattern.match(
       frame,
       path.read(frame, () => listElement(runtime, value, index)),
       path
     );
-  };
   if (hasRest ? count < minimum : count !== minimum && (minimum > 0n || count > 0n)) return false;
   for (const [index, element] of head.entries()) {
-    if (element && !matchElement(element, BigInt(index))) return false;
+    if (element && !matchElement(element, BigInt(index), cache.child(index))) return false;
   }
   if (rest) {
     const positional = [BigInt(head.length)];
@@ -918,7 +912,9 @@ function matchListParts(frame: Frame, value: Value, parts: ListPatternParts, cac
     if (!rest.match(frame, sublist, path)) return false;
   }
   for (const [index, element] of tail.entries()) {
-    if (element && !matchElement(element, count - BigInt(tail.length - index))) return false;
+    if (!element) continue;
+    const offset = tail.length - index;
+    if (!matchElement(element, count - BigInt(offset), cache.child(LIST_TAIL).child(offset))) return false;
   }
   return true;
 }

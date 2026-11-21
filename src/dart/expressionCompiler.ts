@@ -53,6 +53,7 @@ import {
   DartRecord,
   DartTypeValue,
   LateInitializer,
+  NO_ARGUMENTS,
   UNASSIGNED,
   UNINITIALIZED,
   type Value,
@@ -1145,14 +1146,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (value === UNINITIALIZED)
       frame.runtime.throwError('LateError', '', [`Local '${name}' has not been initialized.`]);
     if (value instanceof LateInitializer) {
-      target.v = UNINITIALIZED;
-      try {
-        target.v = value.run();
-      } catch (error) {
-        if (target.v === UNINITIALIZED) target.v = value;
-        throw error;
-      }
-      return target.v;
+      const { runtime } = frame;
+      const computed = runtime.callValue(value.closure, NO_ARGUMENTS, [], undefined);
+      if (value.isFinal && target.v !== value)
+        runtime.throwError('LateError', '', [`Local '${name}' has been assigned during initialization.`]);
+      target.v = computed;
+      return computed;
     }
     return value;
   }
@@ -1331,7 +1330,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     receiver: Compiled,
     resolved: ResolvedMember,
     name: string,
-    span: Span,
+    span: Span | undefined,
     nullAware: boolean
   ): Compiled {
     const receiverRun = receiver.run;
@@ -1361,7 +1360,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
             value,
             { positional: [], named: undefined },
             typeArgs,
-            span.row
+            span?.row
           );
         },
         isConst: false,
@@ -1374,7 +1373,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         run: (frame) => {
           const value = receiverRun(frame);
           if (value === SHORTED || (nullAware && value === undefined)) return SHORTED;
-          return impl(frame.runtime, value, { positional: [], named: undefined }, [], span.row);
+          return impl(frame.runtime, value, { positional: [], named: undefined }, [], span?.row);
         },
         isConst: false,
       };
@@ -1388,7 +1387,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         const value = receiverRun(frame);
         if (value === SHORTED || (nullAware && value === undefined)) return SHORTED;
         if (isStringLength && typeof value === 'string') return BigInt(value.length);
-        return frame.runtime.getProperty(value, memberName, span.row);
+        return frame.runtime.getProperty(value, memberName, span?.row);
       },
       isConst: isStringLength && receiver.isConst,
       constValue:

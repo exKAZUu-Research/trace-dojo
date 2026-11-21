@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 499 -- Keep runtime dispatch alongside its reified types, call frames, and roots.
+// code-gauge-allow-file fileNcss 500 -- Keep runtime dispatch alongside its reified types, call frames, and roots.
 import { ExecutionBudget, ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
@@ -41,6 +41,7 @@ import {
   DartObject,
   DartRecord,
   DartTypeValue,
+  LateInitializer,
   NO_ARGUMENTS,
   type Value,
 } from './values';
@@ -759,13 +760,14 @@ export class Runtime implements TracedRuntime<Frame> {
   }
 
   /** Removes the turtles that no variable, field, or value in flight still reaches. */
-  // code-gauge-allow functionCognitiveComplexity 28 -- One case per kind of value garbage collection reaches.
-  // code-gauge-allow functionNcss 37 -- One case per kind of value garbage collection reaches.
+  // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of value garbage collection reaches.
+  // code-gauge-allow functionNcss 38 -- One case per kind of value garbage collection reaches.
   collectGarbage(): void {
     if (!this.world.hasTurtles) return;
     const reached = new Set<unknown>();
     const pending: Value[] = [];
-    const mark = (value: Value): void => {
+    const mark = (root: Value): void => {
+      const value = root instanceof LateInitializer ? root.closure : root;
       if (value instanceof DartObject && !reached.has(value)) {
         reached.add(value);
         pending.push(value);

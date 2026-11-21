@@ -957,7 +957,7 @@ export abstract class CallCompiler extends OperatorCompiler {
   }
 
   /** Creates a closure at runtime, capturing the cells of the variables its body uses. */
-  protected closureCreator(compiled: CompiledFunction, type: FunctionType): Eval {
+  protected closureCreator(compiled: CompiledFunction, type: FunctionType): (frame: Frame) => DartClosure {
     const { fn } = compiled;
     const parent = this.fn;
     const sources = fn.captures.map((variable) => {

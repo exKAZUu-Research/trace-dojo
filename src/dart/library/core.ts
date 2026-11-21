@@ -617,7 +617,7 @@ class ArgumentError extends Error {
 class RangeError extends ArgumentError {
   final num? start;
   final num? end;
-  RangeError(var message) : start = null, end = null, super(message);
+  RangeError(dynamic message) : start = null, end = null, super(message);
   RangeError.value(num value, [String? name, String? message]) : start = null, end = null, super.value(value, name, message ?? "Value not in range");
   RangeError.range(num invalidValue, int? minValue, int? maxValue, [String? name, String? message])
       : start = minValue, end = maxValue, super.value(invalidValue, name, message ?? "Invalid value");
@@ -788,7 +788,7 @@ class _MessageError extends Error {
 }
 
 abstract interface class Exception {
-  factory Exception([var message]) => _Exception(message);
+  factory Exception([dynamic message]) => _Exception(message);
 }
 
 class _Exception implements Exception {

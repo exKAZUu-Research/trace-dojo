@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 552 -- Keep declaration syntax and parameter validation together.
+// code-gauge-allow-file fileNcss 558 -- Keep declaration syntax and parameter validation together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type {
@@ -46,6 +46,8 @@ import {
 import { ExpressionConverter, VAR_WITH_TYPE } from './convertExpression';
 
 /** Converts a tree-sitter tree of a Dart library into the AST, rejecting syntax the interpreter does not run. */
+type FormalContext = 'ordinary' | 'constructor' | 'primary';
+
 export class Converter extends ExpressionConverter {
   constructor(protected readonly isLibrary: boolean) {
     super();
@@ -373,7 +375,7 @@ export class Converter extends ExpressionConverter {
   private convertPrimaryConstructor(node: Node, isConst: boolean, allowInitializingFormals = true): PrimaryConstructor {
     const parameters = this.convertFormalParameters(
       requireNode(fieldOf(node, 'parameters'), node),
-      allowInitializingFormals
+      allowInitializingFormals ? 'primary' : 'ordinary'
     );
     const invalid = [...parameters.positional, ...parameters.named].find(
       (parameter) => parameter.isCovariant && (!parameter.isVar || !allowInitializingFormals)
@@ -511,7 +513,7 @@ export class Converter extends ExpressionConverter {
    * A method, accessor, operator, or constructor, from the nodes of its signature: modifier tokens, the signature,
    * and a constructor's initializers or redirection.
    */
-  // code-gauge-allow functionCognitiveComplexity 23 -- One case per kind of signature.
+  // code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of signature.
   private convertSignature(
     declaration: Node,
     parts: Node[],
@@ -550,7 +552,7 @@ export class Converter extends ExpressionConverter {
           isExternal,
           parameters: this.convertFormalParameters(
             requireNode(fieldOf(signature, 'parameters'), signature),
-            !isFactory && !isRedirectingFactory && !redirection
+            !isFactory && !isRedirectingFactory && !redirection ? 'constructor' : 'ordinary'
           ),
           initializers,
           body,
@@ -834,7 +836,7 @@ export class Converter extends ExpressionConverter {
     return { kind: 'expression', expression: this.soleExpression(node, rest), modifier, ...span };
   }
 
-  convertFormalParameters(node: Node, allowInitializingFormals = false): FormalParameters {
+  convertFormalParameters(node: Node, context: FormalContext = 'ordinary'): FormalParameters {
     const positional: FormalParameter[] = [];
     const named: FormalParameter[] = [];
     let requiredCount = 0;
@@ -847,7 +849,11 @@ export class Converter extends ExpressionConverter {
         (isNamed ? named : positional).push(...this.convertOptionalParameters(child, isNamed));
       }
     }
-    if (!allowInitializingFormals) requirePlainParameters(positional, named);
+    if (context === 'ordinary') requirePlainParameters(positional, named);
+    const invalidVar = [...positional, ...named].find(
+      (parameter) => parameter.isVar && (context !== 'primary' || parameter.binding !== 'plain')
+    );
+    if (invalidVar) syntaxError(invalidVar, 'var は主コンストラクタのフィールド引数にだけ書けます。');
     const requiredWithDefault = named.find((parameter) => parameter.isRequired && parameter.defaultValue);
     if (requiredWithDefault) syntaxError(requiredWithDefault, 'required の引数には既定値を書けません。');
     return { positional, requiredCount, named, ...spanOf(node) };
@@ -863,7 +869,8 @@ export class Converter extends ExpressionConverter {
       if (part.type !== 'formal_parameter') continue;
       const next = parts[index + 1];
       let defaultValue: Expression | undefined;
-      if (next && (next.type === '=' || next.type === ':')) {
+      if (next?.type === ':') syntaxError(next, '既定値の前には = を書いてください。');
+      if (next?.type === '=') {
         let end = index + 2;
         while (end < parts.length && ![',', ']', '}', 'formal_parameter'].includes(parts[end].type)) end++;
         defaultValue = this.soleExpression(node, parts.slice(index + 2, end));
@@ -901,6 +908,7 @@ export class Converter extends ExpressionConverter {
         name,
         type: typeNode ? this.convertType(typeNode) : undefined,
         binding: constructorParam.type === 'constructor_param' ? 'this' : 'super',
+        isVar: tokens.has('var') || ownTokens.has('var') || undefined,
         isFinal: tokens.has('final') || ownTokens.has('final'),
         isCovariant: tokens.has('covariant'),
         isRequired,

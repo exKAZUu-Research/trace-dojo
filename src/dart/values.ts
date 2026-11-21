@@ -137,5 +137,8 @@ export const UNASSIGNED = Symbol('unassigned') as unknown as Value;
 
 /** A `late` local's initializer, which runs the first time the local is read. */
 export class LateInitializer {
-  constructor(readonly run: () => Value) {}
+  constructor(
+    readonly closure: DartClosure,
+    readonly isFinal: boolean
+  ) {}
 }

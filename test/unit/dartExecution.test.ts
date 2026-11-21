@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 
-import { executeProgram } from '../../src/interpreter/program';
+import { executeProgram, traceProgram } from '../../src/interpreter/program';
 
 // Dart SDK 3.13.7 (`dart run`) prints the expected output: the VM's hash codes and the bucket order of HashMap and
 // HashSet, the default map's insertion order, Random's sequence for a seed, shuffle, and the order sort leaves equal
@@ -4021,4 +4021,98 @@ void main() {
     stdout:
       '[true, true, true, 1]\n[false, false, false, null]\n[true, false, true, 1]\n[false, false, false, null]\n[true, true, true, 1]\n[true, false, true, 1]\n[true, true, true, 1]\n[5, 6, 7, null]\n',
   });
+});
+
+test('late local initializers use deferred flow and preserve reentrant results', () => {
+  const program = `void main() {
+  late int input;
+  late int result = input;
+  input = 3;
+  print(result);
+  var count = 0;
+  int Function() read = () => 0;
+  late int mutable = read();
+  read = () { if (count++ == 0) return mutable + 1; return 7; };
+  print([mutable, count]);
+  count = 0;
+  late final int once = read();
+  read = () { if (count++ == 0) return once + 1; return 4; };
+  try { print(once); } catch (error) { print(error); }
+  print([once, count]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: "3\n[8, 2]\nLateInitializationError: Local 'once' has been assigned during initialization.\n[4, 2]\n",
+  });
+  for (const source of [
+    'void main() { int input; late int result = input; input = 3; print(result); }',
+    'void main() { late int input; late int result = input; print(result); }',
+    'void main() { int? input = 1; late int result = input + 1; input = null; print(result); }',
+  ]) {
+    expect(executeProgram('dart', source)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
+test('a late initializer keeps its captured turtle across an escaped scope', () => {
+  const program = `Turtle Function() make() {
+  {
+    final turtle = Turtle(1, 1);
+    late final Turtle deferred = turtle;
+    return () => deferred;
+  }
+}
+void main() {
+  final read = make();
+  Turtle(3, 3).canMoveForward();
+  read().forward();
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    finalTurtles: [{ x: 1, y: 2 }],
+  });
+  expect(traceProgram('dart', program, program).finalTurtles).toMatchObject([{ x: 1, y: 2 }]);
+});
+
+test('pattern extraction distinguishes list directions and reified extension getters', () => {
+  const program = `import 'dart:collection';
+class L extends ListBase<int> {
+  int calls = 0;
+  int get length => 1;
+  set length(int value) {}
+  int operator [](int index) { print('read'); return ++calls; }
+  void operator []=(int index, int value) {}
+}
+extension Kind<T> on List<T> {
+  Type get kind { print(T); return T; }
+}
+Type read<T>(List<T> list) {
+  if (list case List<T>(kind: var kind)) return kind;
+  return Object;
+}
+void main() {
+  print(switch (L()) { [2, ...] => 0, [..., 1] => 1, _ => 2 });
+  print(switch (L()) { [...var a, 2] => 0, [...var b, 1] => 1, _ => 2 });
+  Object list = <int>[1];
+  print(switch (list) { List<int>(kind: String) => 0, List<num>(kind: num) => 1, _ => 2 });
+  print(read<int>([1]));
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'read\nread\n2\nread\n1\nint\nnum\n1\nint\nint\n',
+  });
+});
+
+test('formal defaults use equals, and var formals require a primary constructor field', () => {
+  const sources = [
+    'void f({int value: 1}) {} void main() { f(); }',
+    'void f(var value) {} void main() { f(1); }',
+    'void f(var int value) {} void main() { f(1); }',
+    'void main() { var f = (var int value) => value; f(1); }',
+    'class C { C(var int value); } void main() { C(1); }',
+  ];
+  for (const source of sources) expect(executeProgram('dart', source)).toMatchObject({ kind: 'compileError' });
+  const program = `class C(var int value) {}
+int f({int value = 1}) => value;
+void main() { var c = C(f()); c.value += 2; print(c.value); }`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '3\n' });
 });
