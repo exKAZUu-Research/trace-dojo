@@ -6,7 +6,7 @@ import { TurtleWorld } from '../interpreter/turtleWorld';
 import type { Span } from './ast';
 import { canReachTurtle, turtleCaptureRoots } from './turtleTypes';
 import { shallow, type Type, type TypeParam } from './types';
-import { Utf8Reader } from './utf8';
+import { utf8Reader } from './utf8';
 import {
   CellPlace,
   DynValue,
@@ -139,13 +139,14 @@ export class Runtime implements TracedRuntime<Frame> {
   readonly nativeRoots: Value[][] = [];
   // A collection keeps the type of its storage even when an iterator takes ownership of the buffer.
   private readonly scalarStorage = new WeakSet<object>();
-  readonly utf8 = new Utf8Reader();
+  readonly utf8 = utf8Reader;
 
   constructor(
     input?: ProgramInput,
     private readonly budget = new ExecutionBudget()
   ) {
     this.io = new ProgramIO(budget, input);
+    this.utf8.clear();
   }
 
   spend(cost = 1): void {

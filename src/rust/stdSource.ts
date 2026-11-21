@@ -116,6 +116,7 @@ pub mod cmp {
     pub fn max<T: Ord>(v1: T, v2: T) -> T;
     pub fn min<T: Ord>(v1: T, v2: T) -> T;
     pub fn max_by<T, F: FnMut(&T, &T) -> Ordering>(v1: T, v2: T, compare: F) -> T;
+    pub fn min_by<T, F: FnMut(&T, &T) -> Ordering>(v1: T, v2: T, compare: F) -> T;
     pub fn max_by_key<T, F: FnMut(&T) -> K, K: Ord>(v1: T, v2: T, f: F) -> T;
     pub fn min_by_key<T, F: FnMut(&T) -> K, K: Ord>(v1: T, v2: T, f: F) -> T;
 }

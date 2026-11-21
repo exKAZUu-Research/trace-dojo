@@ -304,6 +304,7 @@ define({
   'std::cmp::max': (args, ctx) => callOrd(ctx, 'max', args),
   'std::cmp::min': (args, ctx) => callOrd(ctx, 'min', args),
   'std::cmp::max_by': ([a, b, f], ctx) => ((call(ctx, f, [a, b]) as EnumValue).variant === 2 ? a : b),
+  'std::cmp::min_by': ([a, b, f], ctx) => ((call(ctx, f, [a, b]) as EnumValue).variant === 2 ? b : a),
   'std::cmp::max_by_key': ([a, b, f], ctx) => (secondKeyIsLess(ctx, a, b, f) ? a : b),
   'std::cmp::min_by_key': ([a, b, f], ctx) => (secondKeyIsLess(ctx, a, b, f) ? b : a),
   'Box<[_]>::into_vec': ([self]) => exactCapacity(sliceItems(deref(self))),

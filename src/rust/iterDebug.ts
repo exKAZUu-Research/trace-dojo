@@ -170,8 +170,9 @@ export function debugOperands(item: Type, shape: Type): Type[] {
 function keptOperands(name: string, shape: Type & { kind: 'adt' }, item: Type): Type[] {
   if (name === 'ChainShape') return debugOperands(item, shape.args[1]);
   if (name === 'ScanShape') return [shape.args[1]];
-  // `Peekable` holds an item, and `FlatMap` and `Flatten` the iterators of their items.
-  return name === 'PeekableShape' || name === 'FlatMapShape' || name === 'FlattenShape' ? [item] : [];
+  // `FlatMap` and `Flatten` hold the iterators of what they adapt yields, which yield their own items.
+  if (name === 'FlatMapShape' || name === 'FlattenShape') return debugOperands(item, shape.args[1]);
+  return name === 'PeekableShape' ? [item] : [];
 }
 
 /** Whether std's searcher for a pattern of a type has `{:?}`, which a closure's does not. */

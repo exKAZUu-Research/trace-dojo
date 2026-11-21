@@ -1,6 +1,6 @@
 import type { TableMap } from '../capacity';
 import type { CollectionEntries, CollectionKey } from '../collectionEntries';
-import { cloneValue, testPartialOrder, valuesEqual } from '../ops';
+import { cloneValue, compareValues, testPartialOrder, valuesEqual } from '../ops';
 import type { Type } from '../types';
 import { DONE, ElementPlace, EntryValue, type IterValue, MapValue, SetValue, UNIT_VALUE, type Value } from '../values';
 import { checkTableCapacity } from './capacityNatives';
@@ -313,8 +313,8 @@ function setNatives(sorted: boolean): Record<string, (args: Value[], ctx: Native
     intersection: ([self, other], ctx) => setOp(ctx, sorted, 'intersection', self, other),
     difference: ([self, other], ctx) => setOp(ctx, sorted, 'difference', self, other),
     symmetric_difference: ([self, other], ctx) => setOp(ctx, sorted, 'symmetric_difference', self, other),
-    is_subset: ([self, other], ctx) => everySetMember(ctx, set(self), set(other), true),
-    is_superset: ([self, other], ctx) => everySetMember(ctx, set(other), set(self), true),
+    is_subset: ([self, other], ctx) => isSubset(ctx, set(self), set(other)),
+    is_superset: ([self, other], ctx) => isSubset(ctx, set(other), set(self)),
     is_disjoint: ([self, other], ctx) =>
       sorted
         ? btree(ctx, 'intersection', self, other).next() === DONE
@@ -364,6 +364,43 @@ function extendSet(ctx: NativeContext, target: SetValue, iterator: IterValue): V
       target.entries.set(hash, convert(item));
     });
   }
+}
+
+/**
+ * `is_subset`, comparing in the order std's algorithms do: the lengths first, and for a `BTreeSet` the ends of both
+ * sets before the rest, which is looked up when it is much shorter than the other set and walked beside it otherwise.
+ */
+function isSubset(ctx: NativeContext, a: SetValue, b: SetValue): boolean {
+  if (a.entries.size > b.entries.size) return false;
+  const type = keyType(ctx);
+  const members = [...a.entries.values()];
+  const isMember = (value: Value): boolean => {
+    ctx.runtime.spend();
+    return b.entries.has(b.entries.key(type, value));
+  };
+  if (!a.sorted) return members.every(isMember);
+  if (members.length === 0) return true;
+  const others = [...b.entries.values()];
+  const low = compareValues(type, members[0], others[0]) as number;
+  if (low < 0) return false;
+  const high = compareValues(type, members.at(-1) as Value, others.at(-1) as Value) as number;
+  if (high > 0) return false;
+  const rest = members.slice(low === 0 ? 1 : 0, high === 0 ? -1 : undefined);
+  if (rest.length <= Math.floor(others.length / 16)) return rest.every(isMember);
+  return isSubsequence(ctx, type, rest, others.slice(1, -1));
+}
+
+/** Whether each of some sorted values is among other sorted values, comparing as std walks the two side by side. */
+function isSubsequence(ctx: NativeContext, type: Type, values: Value[], others: Value[]): boolean {
+  let next = 0;
+  for (let index = 0; index < values.length;) {
+    ctx.runtime.spend();
+    // std compares each of the other values with the one looked for, in that order.
+    const order = next < others.length ? (compareValues(type, others[next++], values[index]) as number) : 1;
+    if (order > 0) return false;
+    if (order === 0) index++;
+  }
+  return true;
 }
 
 function everySetMember(ctx: NativeContext, a: SetValue, b: SetValue, present: boolean): boolean {

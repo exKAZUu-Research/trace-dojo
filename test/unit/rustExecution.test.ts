@@ -7601,3 +7601,102 @@ fn main() {
     stdout: 'true 100 ["z", "", "b ", "a"] Some(9)\n',
   });
 });
+
+test('set subset checks compare as std does, and library results match the reference at their edges', () => {
+  const program = `use std::cmp::Ordering;
+use std::collections::{BTreeSet, HashSet};
+#[derive(Eq, PartialEq)]
+struct Key(i32);
+impl PartialOrd for Key { fn partial_cmp(&self, other: &Self) -> Option<Ordering> { Some(self.cmp(other)) } }
+impl Ord for Key {
+    fn cmp(&self, other: &Self) -> Ordering { println!("cmp {} {}", self.0, other.0); self.0.cmp(&other.0) }
+}
+fn keys(values: &[i32]) -> BTreeSet<Key> {
+    let mut set = BTreeSet::new();
+    for value in values { set.insert(Key(*value)); }
+    set
+}
+fn main() {
+    let pair = keys(&[1, 2]);
+    let single = keys(&[1]);
+    let inner = keys(&[2, 3, 5]);
+    let outer = keys(&[1, 2, 3, 4, 5, 6]);
+    println!("begin");
+    println!("{} {}", pair.is_subset(&single), pair.is_subset(&pair));
+    println!("{}", inner.is_subset(&outer));
+    let few: HashSet<i32> = [1, 2].into();
+    let more: HashSet<i32> = [1, 2, 3].into();
+    println!("{} {} {}", few.is_subset(&more), more.is_subset(&few), more.is_superset(&few));
+    println!("{} {:?}", std::cmp::min_by(4, 2, |a, b| a.cmp(b)), std::cmp::min_by((1, "a"), (1, "b"), |a, b| a.0.cmp(&b.0)));
+    println!("{:?} {:?} {:?} {:?}", 0.0001f32, -0.0001f32, 0.00009f32, 1e16f32);
+    let boxed: Box<str> = Box::from("x");
+    let text = "é".repeat(20_000);
+    let mut total = 0;
+    for _ in 0..1000 { total += text.len(); }
+    println!("{} {} {:?}", boxed, total, (0..2).flat_map(|n| (0..n).map(|_| Key(0))));
+    let mut items = vec![1];
+    items.remove(usize::MAX);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: `cmp 2 1
+cmp 3 2
+cmp 5 2
+cmp 5 3
+cmp 2 1
+cmp 3 1
+cmp 3 2
+cmp 4 1
+cmp 4 2
+cmp 4 3
+cmp 5 1
+cmp 5 2
+cmp 5 3
+cmp 5 4
+cmp 6 1
+cmp 6 2
+cmp 6 3
+cmp 6 4
+cmp 6 5
+begin
+cmp 1 1
+cmp 2 2
+false true
+cmp 2 1
+cmp 5 6
+cmp 2 2
+cmp 3 3
+cmp 4 5
+cmp 5 5
+true
+true false true
+2 (1, "a")
+0.0001 -0.0001 9e-5 1e16
+x 40000000 FlatMap { inner: FlattenCompat { iter: Fuse { iter: Some(Map { iter: 0..2 }) }, frontiter: None, backiter: None } }
+`,
+    uncaughtException: expect.stringContaining('removal index (is 18446744073709551615) should be < len (is 1)'),
+  });
+});
+
+test.each([
+  [
+    'a boxed str from a reference to a String',
+    'let s = String::from("hi");\n    let b = Box::<str>::from(&s);',
+    'From',
+  ],
+  [
+    'a division by zero in the message of an assert_eq! that can fail',
+    'assert_eq!(false, true, "{}", 1 / 0);',
+    '必ず panic',
+  ],
+  [
+    '{:?} of a flat_map over an inner iterator without Debug',
+    'println!("{:?}", (0..2).flat_map(|_| vec![Hidden].into_iter().map(|_| 1)));',
+    '{:?} で表示できません',
+  ],
+])('rejects %s', (_name, body, message) => {
+  expect(executeProgram('rust', rustMain(`    ${body}`, 'struct Hidden;'))).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ message: expect.stringContaining(message) })],
+  });
+});

@@ -1,4 +1,4 @@
-import { utf8Length } from './utf8';
+import { utf8Length, utf8Reader } from './utf8';
 import { isPlace, type Place, StringValue, textOf, type Value } from './values';
 
 /**
@@ -94,7 +94,7 @@ function stringLayout(value: Value): StringValue {
   while (isPlace(stored)) stored = stored.get();
   if (stored instanceof StringValue) return stored;
   const text = textOf(stored);
-  const bytes = utf8Length(text);
+  const bytes = utf8Reader.length(text);
   return new StringValue(text, bytes, bytes);
 }
 

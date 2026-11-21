@@ -116,8 +116,9 @@ function subslice(ctx: NativeContext, slice: Value, range: Value, mutable = fals
   }
 }
 
-function checkIndex(ctx: NativeContext, index: number, length: number, what: string): void {
-  if (index >= length) panic(ctx, `${what} index (is ${index}) should be < len (is ${length})`);
+function checkIndex(ctx: NativeContext, index: Value, length: number, what: string): void {
+  if ((index as bigint) >= BigInt(length))
+    panic(ctx, `${what} index (is ${index as bigint}) should be < len (is ${length})`);
 }
 
 function binarySearch(slice: Value, compare: (item: Value) => number): { found: boolean; index: number } {
@@ -498,7 +499,9 @@ const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
   insert: ([self, index, element], ctx) => {
     const items = vec(self);
     const position = Number(index as bigint);
-    if (position > items.length) panic(ctx, `insertion index (is ${position}) should be <= len (is ${items.length})`);
+    if (position > items.length) {
+      panic(ctx, `insertion index (is ${index as bigint}) should be <= len (is ${items.length})`);
+    }
     ctx.runtime.allocate(1);
     items.splice(position, 0, element);
     return UNIT_VALUE;
@@ -506,7 +509,7 @@ const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
   remove: ([self, index], ctx) => {
     const items = vec(self);
     const position = Number(index as bigint);
-    checkIndex(ctx, position, items.length, 'removal');
+    checkIndex(ctx, index, items.length, 'removal');
     return items.splice(position, 1)[0];
   },
   swap_remove: ([self, index], ctx) => {
@@ -515,7 +518,7 @@ const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
     if (position >= items.length) {
       libraryPanic(
         ctx,
-        `swap_remove index (is ${position}) should be < len (is ${items.length})`,
+        `swap_remove index (is ${index as bigint}) should be < len (is ${items.length})`,
         'alloc/src/vec/mod.rs:2258:13'
       );
     }

@@ -113,11 +113,13 @@ function boxFrom(solver: TraitSolver, source: Type, inner: Type): boolean {
   return solver.unifier.tryUnify(inner, source);
 }
 
-/** `Box<str>` from `&str` and `String`; `Box<[T]>` from `&[T]`, `Vec<T>`, and `[T; N]`. */
+/** `Box<str>` from `&str`, `&mut str`, and `String`; `Box<[T]>` from `&[T]`, `Vec<T>`, and `[T; N]`. */
 function boxedUnsized(solver: TraitSolver, inner: Type & { kind: 'str' | 'slice' }, source: Type): boolean {
   const s = normalize(shallow(source));
   const target = s.kind === 'ref' ? normalize(shallow(s.target)) : s;
-  if (inner.kind === 'str') return target.kind === 'str' || (target.kind === 'adt' && target.def.builtin === 'String');
+  if (inner.kind === 'str') {
+    return s.kind === 'ref' ? target.kind === 'str' : target.kind === 'adt' && target.def.builtin === 'String';
+  }
   const elem =
     (target.kind === 'slice' || target.kind === 'array') && s.kind !== 'ref'
       ? target.elem

@@ -79,7 +79,9 @@ export function debugFloat(value: number, f32: boolean): string {
   if (!Number.isFinite(value)) return value > 0 ? 'inf' : '-inf';
   const sign = value < 0 || Object.is(value, -0) ? '-' : '';
   const abs = Math.abs(value);
-  if (abs !== 0 && (abs < 1e-4 || abs >= 1e16)) return sign + expFloat(abs, f32, undefined, 'e');
+  // std compares with `1e-4` and `1e16` in the float's own type, where they are other numbers than in `f64`.
+  const [small, large] = f32 ? [Math.fround(1e-4), Math.fround(1e16)] : [1e-4, 1e16];
+  if (abs !== 0 && (abs < small || abs >= large)) return sign + expFloat(abs, f32, undefined, 'e');
   const { digits, exponent } = shortestDigits(value, f32);
   return sign + plain(digits, exponent, 1);
 }

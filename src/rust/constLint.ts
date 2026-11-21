@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 641 -- Shares Rust constant propagation between diagnostics and pattern coverage.
+// code-gauge-allow-file fileNcss 647 -- Shares Rust constant propagation between diagnostics and pattern coverage.
 
 import type { ExecutionBudget } from '../interpreter/limits';
 import type { Annotations, LocalVar, PathRes } from './annotations';
@@ -444,6 +444,22 @@ export class ConstLint {
     return typeof index === 'bigint' ? knownField(operand, String(index)) : undefined;
   }
 
+  /** Checks the operands of a call other than an assertion's message; whether an `assert!`'s condition surely holds. */
+  private operandsHold(
+    expr: Extract<Expr, { kind: 'call' | 'methodCall' | 'macro' | 'try' }>,
+    message: Expr[]
+  ): boolean {
+    // Only the one condition of `assert!` tells by its value that the assertion holds.
+    const condition = expr.kind === 'macro' && expr.macro.kind === 'assert' ? expr.macro.cond : undefined;
+    let holds = false;
+    forEachDirect(expr, (child) => {
+      if (message.includes(child)) return;
+      const value = this.expr(child);
+      if (child === condition) holds = value === true;
+    });
+    return holds;
+  }
+
   private assertionFailure(message: Expr[]): void {
     if (message.length === 0) return;
     this.branch(() => {
@@ -460,13 +476,9 @@ export class ConstLint {
       return this.patternEvaluation || res.def.kind === 'enum' ? this.construct(res, fields) : aggregate(fields);
     }
     const message = expr.kind === 'macro' ? assertionMessage(expr.macro) : [];
-    let holds = false;
-    forEachDirect(expr, (child) => {
-      if (!message.includes(child)) holds = this.expr(child) === true;
-    });
     // An assertion formats its message only where it fails, so what the message does decides nothing after it, and
     // a condition known to hold never reaches it.
-    if (!holds) this.assertionFailure(message);
+    if (!this.operandsHold(expr, message)) this.assertionFailure(message);
     this.endBlock();
     // What follows a call that never returns (`panic!`, `std::process::exit`) is not reachable.
     if (checkedType(expr.ty)?.kind === 'never') this.diverged = true;
