@@ -7,7 +7,7 @@ import { described, tuplePart } from '../iterDebug';
 import { cloneValue } from '../ops';
 import { RustPanic } from '../runtime';
 import { REF_STR, shallow, type Type } from '../types';
-import { decodeUtf8, utf8Bytes, utf8Length as byteLength } from '../utf8';
+import { decodeUtf8, utf8Length as byteLength, utf8Reader } from '../utf8';
 import {
   FnValue,
   isPlace,
@@ -300,7 +300,7 @@ const strNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
   chars: ([s]) => charCursor(textOf(s)),
   bytes: ([s]) => byteCursor(textOf(s)),
   char_indices: ([s]) => charCursor(textOf(s), true),
-  as_bytes: ([s], ctx) => utf8Bytes(textOf(s), ctx.runtime),
+  as_bytes: ([s], ctx) => utf8Reader.bytesView(textOf(s), ctx.runtime),
   trim: ([s]) => trimWith(textOf(s), true, true, isWhitespace),
   trim_start: ([s]) => trimWith(textOf(s), true, false, isWhitespace),
   trim_end: ([s]) => trimWith(textOf(s), false, true, isWhitespace),

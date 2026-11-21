@@ -20,28 +20,16 @@ const KEPT_BYTES = 8 * LIMITS.maxStringLength;
 const KEPT_FROM_LENGTH = 256;
 
 /**
- * The UTF-8 bytes of the strings a run asks about, which callers only read: `str::len` and `is_char_boundary` are
- * constant-time in Rust, and programs call them again and again on the same strings. The strings asked about least
- * recently are dropped once the kept bytes exceed a bound.
+ * The UTF-8 bytes of the strings a run asks about, which callers only read: `str::len`, `is_char_boundary` and
+ * `as_bytes` are constant-time in Rust, and programs call them again and again on the same strings (often inside a
+ * loop over the bytes).
  */
 export class Utf8Reader {
-  private readonly kept = new Map<string, Uint8Array>();
-  private keptBytes = 0;
+  private readonly encoded = new KeptByText<Uint8Array>();
+  private readonly borrowed = new KeptByText<bigint[]>();
 
   of(text: string): Uint8Array {
-    let bytes = this.kept.get(text);
-    if (bytes) this.kept.delete(text);
-    else {
-      bytes = encoder.encode(text);
-      this.keptBytes += bytes.length;
-    }
-    this.kept.set(text, bytes);
-    for (const [oldest, dropped] of this.kept) {
-      if (this.keptBytes <= KEPT_BYTES || oldest === text) break;
-      this.kept.delete(oldest);
-      this.keptBytes -= dropped.length;
-    }
-    return bytes;
+    return this.encoded.get(text, () => encoder.encode(text));
   }
 
   /** The UTF-8 length of a string, kept for long strings. */
@@ -49,9 +37,41 @@ export class Utf8Reader {
     return text.length < KEPT_FROM_LENGTH ? utf8Length(text) : this.of(text).length;
   }
 
+  /** The bytes `str::as_bytes` borrows, charged only when they are built; callers must never write to them. */
+  bytesView(text: string, runtime: Runtime): bigint[] {
+    return this.borrowed.get(text, () => utf8Bytes(text, runtime));
+  }
+
+  clear(): void {
+    this.encoded.clear();
+    this.borrowed.clear();
+  }
+}
+
+/** Values computed from strings, the least recently asked about dropped once their total length exceeds a bound. */
+class KeptByText<T extends { length: number }> {
+  private readonly kept = new Map<string, T>();
+  private keptLength = 0;
+
+  get(text: string, build: () => T): T {
+    let value = this.kept.get(text);
+    if (value) this.kept.delete(text);
+    else {
+      value = build();
+      this.keptLength += value.length;
+    }
+    this.kept.set(text, value);
+    for (const [oldest, dropped] of this.kept) {
+      if (this.keptLength <= KEPT_BYTES || oldest === text) break;
+      this.kept.delete(oldest);
+      this.keptLength -= dropped.length;
+    }
+    return value;
+  }
+
   clear(): void {
     this.kept.clear();
-    this.keptBytes = 0;
+    this.keptLength = 0;
   }
 }
 

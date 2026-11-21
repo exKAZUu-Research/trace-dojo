@@ -2994,7 +2994,10 @@ test.each([
     'let _allocated = vec![0; 999_945]; let a: std::collections::HashSet<_> = (0..15).collect(); let b: std::collections::HashSet<_> = (15..30).collect(); let _union = &a | &b;',
   ],
   ['a trailing format literal', `let s = format!("{}{}", "a".repeat(999_000), "${'b'.repeat(1024)}");`],
-  ['materialized UTF-8 bytes', 'let s = "é".repeat(300_000); let _a = s.as_bytes(); let _b = s.as_bytes();'],
+  [
+    'materialized UTF-8 bytes',
+    'let s = "é".repeat(300_000); let t = "è".repeat(300_000); let _a = s.as_bytes(); let _b = t.as_bytes();',
+  ],
   ['a concatenated Vec', 'let mut v = vec![1u8]; for _ in 0..40 { v = [v.clone(), v.clone()].concat(); }'],
   ['clones of a Vec', 'let v = vec![0u8; 900_000]; let mut w = Vec::new(); for _ in 0..100 { w.push(v.clone()); }'],
 ])('%s stops at the memory limit', (_name, body) => {
@@ -8216,4 +8219,23 @@ test('collecting into Box<str> builds the text within the string limit', () => {
     kind: 'executed',
     uncaughtException: expect.stringContaining('memory allocation of 1200000 bytes failed'),
   });
+});
+
+test('borrowing a string as bytes inside a loop costs no allocation per borrow', () => {
+  const program = `fn distance(a: &str, b: &str) -> usize {
+    let (n, m) = (a.len(), b.len());
+    let mut d = vec![vec![0usize; m + 1]; n + 1];
+    for i in 0..=n { d[i][0] = i; }
+    for j in 0..=m { d[0][j] = j; }
+    for i in 1..=n {
+        for j in 1..=m {
+            let cost = if a.as_bytes()[i - 1] == b.as_bytes()[j - 1] { 0 } else { 1 };
+            d[i][j] = (d[i - 1][j] + 1).min(d[i][j - 1] + 1).min(d[i - 1][j - 1] + cost);
+        }
+    }
+    d[n][m]
+}
+fn main() { println!("{}", distance(&"kitten".repeat(17), &"sitting".repeat(15))); }
+`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '55\n' });
 });
