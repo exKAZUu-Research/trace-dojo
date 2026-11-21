@@ -4307,3 +4307,22 @@ void main() {
       '[true, true, true, false, true]\n[195624481, 67840445, 664597]\n{Symbol("e"), Symbol("d"), Symbol("a"), Symbol("c"), Symbol("b")}\n[Symbol("_foo"), true, false]\n',
   });
 });
+
+test('object and list patterns share the same length getter projection', () => {
+  const program = `import 'dart:collection';
+class Input extends ListBase<int> {
+  int calls = 0;
+  int get length { print('length'); return ++calls; }
+  set length(int value) {}
+  int operator [](int index) { print('read'); return 1; }
+  void operator []=(int index, int value) {}
+}
+void main() {
+  print(switch (Input()) { List(length: 2) => 0, [1] => 1, _ => 2 });
+  print(switch (Input()) { [2] => 0, List(length: 1) => 1, _ => 2 });
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'length\nread\n1\nlength\nread\n1\n',
+  });
+});

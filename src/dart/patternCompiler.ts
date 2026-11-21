@@ -90,7 +90,6 @@ export class PatternCache {
 
 const MAP_VALUE = Symbol('map value');
 const MAP_CONTAINS_KEY = Symbol('map contains key');
-const LIST_LENGTH = Symbol('list length');
 const LIST_TAIL = Symbol('list tail');
 const SUBLIST = Symbol('sublist');
 
@@ -890,7 +889,7 @@ function matchListParts(frame: Frame, value: Value, parts: ListPatternParts, cac
   const { runtime } = frame;
   const minimum = BigInt(head.length + tail.length);
   const count =
-    hasRest && minimum === 0n ? 0n : (cache.child(LIST_LENGTH).read(frame, () => listLength(runtime, value)) as bigint);
+    hasRest && minimum === 0n ? 0n : (cache.child('length').read(frame, () => listLength(runtime, value)) as bigint);
   const matchElement = (pattern: PatternMatch, index: bigint, path: PatternCache): boolean =>
     pattern.match(
       frame,
