@@ -2,7 +2,7 @@ import type { Span } from './ast';
 import type { Checker } from './checker';
 import { normalize } from './infer';
 import { compileError } from './items';
-import { shallow, type TraitRef, type Type, type TypeParam } from './types';
+import { allSupertraits, shallow, type Type, type TypeParam } from './types';
 
 /**
  * Requires the type a new trait object is made from to be sized, as rustc does: not a `str`, a slice, a struct that
@@ -18,15 +18,13 @@ export function requireSizedSource(c: Checker, type: Type, span: Span): void {
   }
 }
 
-/** Whether the trait or the function being checked says `Self: Sized`. */
+/** Whether the trait, one of its supertraits, or the function being checked says `Self: Sized`. */
 function selfIsSized(c: Checker, self: TypeParam): boolean {
   let context = c.body.fn;
   while (context.parent) context = context.parent;
   const fn = [...c.fnContexts].find(([, checked]) => checked === context)?.[0];
   const own = fn && 'extraBounds' in fn ? (fn.extraBounds ?? []) : [];
-  return self.bounds.some(isSized) || own.some(({ param, bound }) => param === self && isSized(bound));
-}
-
-function isSized(bound: TraitRef): boolean {
-  return bound.trait.builtin === 'Sized';
+  const declared = [...self.bounds, ...own.filter(({ param }) => param === self).map(({ bound }) => bound)];
+  // `Sized` may come through a supertrait of a supertrait.
+  return allSupertraits(declared, { kind: 'param', param: self }).some((bound) => bound.trait.builtin === 'Sized');
 }

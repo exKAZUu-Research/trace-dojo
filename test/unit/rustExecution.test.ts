@@ -8133,10 +8133,16 @@ test('a sized Self and generic values become trait objects', () => {
   const program = `use std::fmt::{Debug, Display};
 trait Show: Debug { fn erased(&self) -> &dyn Debug where Self: Sized { self } }
 trait Named: Debug + Sized { fn erased(&self) -> &dyn Debug { self } }
+trait Base: Sized {}
+trait Middle: Base {}
+trait Inherited: Middle + Debug { fn erased(&self) -> &dyn Debug { self } }
 #[derive(Debug)]
 struct S;
 impl Show for S {}
 impl Named for S {}
+impl Base for S {}
+impl Middle for S {}
+impl Inherited for S {}
 fn show<T: Display>(t: &T) -> &dyn Display { t }
 trait Count {
     fn count(&self) -> i32;
@@ -8147,8 +8153,9 @@ fn main() {
     let boxed: Box<dyn Debug> = Box::new(vec![1]);
     let again: &dyn Debug = &*boxed;
     println!("{:?} {:?} {} {:?} {}", Show::erased(&S), Named::erased(&S), show(&5), again, S.through_object());
+    println!("{:?}", Inherited::erased(&S));
 }`;
-  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'S S 5 [1] 1\n' });
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'S S 5 [1] 1\nS\n' });
 });
 
 test('turtles of a default aggregate stay owned while its later parts are made', () => {
