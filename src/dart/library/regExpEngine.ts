@@ -74,16 +74,21 @@ export function execRegExp(
   { charge, scratchSlots, reserveCaptures }: RegExpBudget
 ): RegExpMatchResult | undefined {
   const machine = new Machine(compiled, input, charge, scratchSlots);
-  const first = compiled.unicode && isSurrogatePairAt(input, start - 1) ? start - 1 : start;
-  for (let position = first; position <= input.length;) {
+  const result = (position: number, end: number): RegExpMatchResult => {
+    if (!reserveCaptures) return { start: position, end };
+    reserveCaptures(2 * compiled.groupCount);
+    return { start: position, end, captures: machine.registers.slice(2, 2 + 2 * compiled.groupCount) };
+  };
+  // As irregexp in Unicode mode: a start inside a surrogate pair first tries the pair's start, and the search visits
+  // every code unit, where only assertions match inside a pair because no character starts there.
+  if (compiled.unicode && isSurrogatePairAt(input, start - 1)) {
+    const end = machine.attempt(start - 1);
+    if (end >= 0) return result(start - 1, end);
+  }
+  for (let position = start; position <= input.length; position++) {
     const end = machine.attempt(position);
-    if (end >= 0) {
-      if (!reserveCaptures) return { start: position, end };
-      reserveCaptures(2 * compiled.groupCount);
-      return { start: position, end, captures: machine.registers.slice(2, 2 + 2 * compiled.groupCount) };
-    }
+    if (end >= 0) return result(position, end);
     if (sticky) return undefined;
-    position += compiled.unicode && isSurrogatePairAt(input, position) ? 2 : 1;
   }
   return undefined;
 }
@@ -356,6 +361,8 @@ function flagsOf(context: RegExpFlags): string {
 function hostTest(source: string, flags: RegExpFlags, backward: boolean): CharTest {
   const regex = new RegExp(source, `${flagsOf(flags)}y`);
   const forward = (input: string, position: number): number => {
+    // A sticky host RegExp in Unicode mode steps back to the pair's start, but no character starts inside a pair.
+    if (flags.unicode && isSurrogatePairAt(input, position - 1)) return -1;
     regex.lastIndex = position;
     return regex.test(input) ? regex.lastIndex : -1;
   };
