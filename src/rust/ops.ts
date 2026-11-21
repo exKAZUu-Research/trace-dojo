@@ -559,16 +559,13 @@ function compareSequences(elem: Type, xs: Value[], ys: Value[], partial: boolean
 
 /** Compares strings as Rust does, by their UTF-8 bytes, which is their code points' order. */
 export function compareStrings(a: string, b: string): number {
-  if (a === b) return 0;
-  const xs = [...a];
-  const ys = [...b];
-  const length = Math.min(xs.length, ys.length);
-  for (let index = 0; index < length; index++) {
-    const x = xs[index].codePointAt(0)!;
-    const y = ys[index].codePointAt(0)!;
-    if (x !== y) return x < y ? -1 : 1;
-  }
-  return Math.sign(xs.length - ys.length);
+  const length = Math.min(a.length, b.length);
+  let index = 0;
+  // Read at a code unit, a code point includes its low surrogate, so the scan stops where a code point starts.
+  while (index < length && a.codePointAt(index) === b.codePointAt(index)) index++;
+  spendCollectionWork(Math.ceil(index / 64));
+  if (index === length) return Math.sign(a.length - b.length);
+  return a.codePointAt(index)! < b.codePointAt(index)! ? -1 : 1;
 }
 
 /** A text that equal values of a type share and unequal ones do not, which keys maps and sets. */

@@ -8180,3 +8180,22 @@ fn main() {
   const made = executeProgram('rust', defaults);
   expect(made.kind === 'executed' && made.finalTurtles).toHaveLength(6);
 });
+
+test('sorting long strings stops at the operation limit, and strings order by code point', () => {
+  const sorting = rustMain(`
+    let base = "a".repeat(50000);
+    let mut v = Vec::new();
+    for i in 0..1000 { v.push(format!("{}{:04}", base, (i * 337) % 1009)); }
+    v.sort();
+    println!("{}", v.len());`);
+  expect(executeProgram('rust', sorting)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+
+  const ordering = rustMain(`
+    let mut v = vec!["\\u{10000}", "\\u{ffff}", "a\\u{1f601}", "a\\u{1f600}", "a", "", "\\u{e000}"];
+    v.sort();
+    println!("{:?}", v);`);
+  expect(executeProgram('rust', ordering)).toMatchObject({
+    kind: 'executed',
+    stdout: '["", "a", "a😀", "a😁", "\\u{e000}", "\\u{ffff}", "𐀀"]\n',
+  });
+});
