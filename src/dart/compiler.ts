@@ -232,8 +232,9 @@ export class Compiler extends MemberCompiler {
     for (const declaration of syntax.declarations) {
       if (declaration.kind === 'variables') initializers.push(...this.declareTopLevelVariables(declaration));
     }
+    const resolveFields = this.fieldInferences.map(({ cls, variable }) => this.prepareFieldInference(cls, variable));
     this.checkDeferredFunctionTypeAnnotations();
-    for (const infer of this.fieldInferences) infer();
+    for (const resolve of resolveFields) resolve();
     this.fieldInferences.length = 0;
     for (const work of classes) this.checkClass(work);
     if (!this.isLibraryCode) {
@@ -728,11 +729,8 @@ export class Compiler extends MemberCompiler {
       const { name } = variable;
       if (cls.members.has(name) || cls.staticMembers.has(name))
         this.error(variable, `${name} という名前は、このクラスで既に宣言されています。`);
-      const { initializer } = variable;
       if (!declaredType && !declaration.isStatic) {
-        // The initializer may use classes declared later, and the overridden field may itself be inferred, so the
-        // type is found once every member is declared, superclasses first.
-        this.fieldInferences.push(() => this.inferFieldType(cls, name, initializer));
+        this.fieldInferences.push({ cls, variable });
       }
       const type = declaredType ?? DYNAMIC;
       if (declaration.isStatic) {
@@ -792,37 +790,45 @@ export class Compiler extends MemberCompiler {
     return true;
   }
 
-  /** Infers the types of fields declared without one, once every class's members are declared. */
-  private readonly fieldInferences: (() => void)[] = [];
+  private readonly fieldInferences: { cls: ClassInfo; variable: FieldDeclaration['variables'][number] }[] = [];
 
-  private inferFieldType(cls: ClassInfo, name: string, initializer: Expression | undefined): void {
-    const inherited = this.inheritedFieldType(cls, name);
-    if (!inherited && !initializer) return;
-    const savedClass = this.currentClass;
-    this.currentClass = cls;
-    let type: DartType;
-    try {
-      type =
-        inherited ??
-        this.withTypeParams(cls.typeParams, () => this.inferInitializerType(initializer as Expression, false, cls));
-    } finally {
-      this.currentClass = savedClass;
-    }
-    this.setInferredFieldType(cls, name, type);
+  private prepareFieldInference(cls: ClassInfo, variable: FieldDeclaration['variables'][number]): () => void {
+    const { name, initializer } = variable;
+    const inferred: { name: string; type: DartType } = { name, type: DYNAMIC };
+    this.inferTypeOnFirstUse(inferred, variable, () => {
+      const inherited = this.inheritedFieldType(cls, name);
+      if (inherited || !initializer) return inherited ?? DYNAMIC;
+      return this.inDeclarationScope(cls, undefined, () =>
+        this.withIsolatedTypes(() =>
+          this.withTypeParams(cls.typeParams, () => this.inferInitializerType(initializer, false, cls))
+        )
+      );
+    });
+    const resolve = this.bindInferredFieldType(cls, name, () => inferred.type);
+    const resolveApplications: (() => void)[] = [];
     for (const { application, mixin } of this.pendingApplications) {
       if (mixin.cls !== cls) continue;
       const map = new Map(cls.typeParams.map((param, index) => [param, mixin.args[index] ?? DYNAMIC]));
-      this.setInferredFieldType(application, name, substitute(type, map));
+      resolveApplications.push(this.bindInferredFieldType(application, name, () => substitute(inferred.type, map)));
     }
+    return () => {
+      resolve();
+      for (const resolveApplication of resolveApplications) resolveApplication();
+    };
   }
 
-  private setInferredFieldType(cls: ClassInfo, name: string, type: DartType): void {
-    for (const table of [cls.members, cls.setters]) {
-      const member = table.get(name);
-      if (member && member.kind !== 'method') member.type = type;
+  private bindInferredFieldType(cls: ClassInfo, name: string, infer: () => DartType): () => void {
+    const members = [cls.members.get(name), cls.setters.get(name), cls.fields.find((field) => field.name === name)];
+    const targets = new Set(members.filter((member) => member !== undefined && member.kind !== 'method'));
+    for (const target of targets) {
+      Object.defineProperty(target, 'type', { get: infer });
     }
-    const field = cls.fields.find((candidate) => candidate.name === name);
-    if (field) field.type = type;
+    return () => {
+      const type = infer();
+      for (const target of targets) {
+        Object.defineProperty(target, 'type', { value: type, writable: true });
+      }
+    };
   }
 
   /** A field without a type takes the type of the member it overrides, as Dart infers. */
@@ -884,10 +890,12 @@ export class Compiler extends MemberCompiler {
     const { initializer } = variable;
     if (initializer) {
       if (!declaration.type) {
-        this.inferTypeOnFirstUse(global, initializer, () => {
-          field.type = this.inferInitializerType(initializer, true, cls);
-          return field.type;
-        });
+        this.inferTypeOnFirstUse(global, initializer, () =>
+          this.inGlobalTypeScope(global, () => {
+            field.type = this.inferInitializerType(initializer, true, cls);
+            return field.type;
+          })
+        );
       }
       this.deferredBodies.push(() => {
         this.inGlobalTypeScope(global, () =>
@@ -1601,8 +1609,11 @@ export class Compiler extends MemberCompiler {
       this.declareName(variable.name, { kind: 'variable', global }, variable);
       const { initializer } = variable;
       if (!initializer) continue;
-      if (!declaredType)
-        this.inferTypeOnFirstUse(global, initializer, () => this.inferInitializerType(initializer, true, undefined));
+      if (!declaredType) {
+        this.inferTypeOnFirstUse(global, initializer, () =>
+          this.inGlobalTypeScope(global, () => this.inferInitializerType(initializer, true, undefined))
+        );
+      }
       initializers.push(() => {
         void global.type;
         this.compileGlobalInitializer(global, initializer, declaration.isConst, undefined);
@@ -1611,22 +1622,26 @@ export class Compiler extends MemberCompiler {
     return initializers;
   }
 
-  private inferTypeOnFirstUse(global: GlobalVariable, initializer: Span, infer: () => DartType): void {
+  private inferTypeOnFirstUse(
+    target: { name: string; type: DartType },
+    initializer: Span,
+    infer: () => DartType
+  ): void {
     let state: 'pending' | 'inferring' | 'done' = 'pending';
     let inferred: DartType = DYNAMIC;
-    Object.defineProperty(global, 'type', {
+    Object.defineProperty(target, 'type', {
       configurable: true,
       enumerable: true,
       get: () => {
         if (state === 'inferring') {
           this.error(
             initializer,
-            `${global.name} の型は、自分の初期値に依存しているので推論できません。型を書いてください。`
+            `${target.name} の型は、自分の初期値に依存しているので推論できません。型を書いてください。`
           );
         }
         if (state === 'pending') {
           state = 'inferring';
-          inferred = this.inGlobalTypeScope(global, infer);
+          inferred = infer();
           state = 'done';
         }
         return inferred;

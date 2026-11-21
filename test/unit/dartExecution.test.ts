@@ -6653,6 +6653,33 @@ void main() {
   });
 });
 
+test('inferred fields resolve dependencies across later classes, mixins, and globals', () => {
+  const declarations = `class First {
+  var value = Later().value;
+  var items = Mixed().items;
+}
+class Later { late var value = initial; }
+class Mixed with Items<String> {}
+mixin Items<T> { var items = <T>[]; }
+var initial = 1;
+`;
+  expect(
+    executeProgram(
+      'dart',
+      `${declarations} void main() {
+  print([First().value].runtimeType);
+  print(First().items.runtimeType);
+}`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'List<int>\nList<String>\n' });
+  expect(
+    executeProgram('dart', `${declarations} void main() { print('before'); First().value = 'invalid'; }`)
+  ).toMatchObject({ kind: 'compileError' });
+  expect(
+    executeProgram('dart', 'class Owner { var value = initial; } var initial = Owner().value; void main() {}')
+  ).toMatchObject({ kind: 'compileError' });
+});
+
 test('raw object pattern aliases infer invariant generic function bounds', () => {
   const source = `typedef Direct<X> = void Function<T extends X>(T);
 typedef Nested<X> = void Function<T extends List<X>>(T);
