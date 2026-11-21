@@ -8787,3 +8787,15 @@ test('an operator trait used as a bound is reported as unavailable', () => {
     diagnostics: [{ message: '演算子のトレイト Add を使う境界は、この採点環境では使えません。' }],
   });
 });
+
+test('an empty match covers the uninhabited Infallible', () => {
+  const program = rustMain(
+    '    println!("{:?}", widen(5));',
+    `use std::convert::Infallible;
+#[derive(Debug)]
+enum Problem { Bad }
+impl From<Infallible> for Problem { fn from(e: Infallible) -> Problem { match e {} } }
+fn widen(x: u8) -> Result<i32, Problem> { let y: i32 = i32::try_from(x)?; Ok(y) }`
+  );
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'Ok(5)\n' });
+});

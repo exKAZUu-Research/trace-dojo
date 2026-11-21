@@ -97,7 +97,9 @@ function constructorsOf(type: Type): { ctor: string; types: Type[] }[] | undefin
       return constructorsOf(t.target);
     }
     case 'adt': {
-      if (t.def.builtin && !['Option', 'Result', 'Ordering', 'Reverse'].includes(t.def.builtin)) return undefined;
+      if (t.def.builtin && !['Option', 'Result', 'Ordering', 'Reverse', 'Infallible'].includes(t.def.builtin)) {
+        return undefined;
+      }
       const subst = new Map(t.def.params.map((param, index) => [param, t.args[index]]));
       return t.def.variants.map((variant) => ({
         ctor: `v${variant.index}`,
