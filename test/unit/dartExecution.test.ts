@@ -2157,13 +2157,22 @@ void main() { h(C()); f([C()]); g((C(), 1)); }`;
 });
 
 test('Dart comparison operators are not associative', () => {
-  for (const expression of ['1 == 1 == true', '1 != 2 != true', '1 < 2 < 3', '1 is int is bool']) {
+  for (const expression of [
+    '1 == 1 == true',
+    '1 != 2 != true',
+    '1 < 2 < 3',
+    '1 is int is bool',
+    '1 as num as int',
+    '1 as int is int',
+  ]) {
     expect(executeProgram('dart', `void main() { print(${expression}); }`)).toMatchObject({ kind: 'compileError' });
   }
-  expect(executeProgram('dart', 'void main() { print([1 < 2 == true, (1 == 1) == true]); }')).toMatchObject({
-    kind: 'executed',
-    stdout: '[true, true]\n',
-  });
+  expect(
+    executeProgram(
+      'dart',
+      'void main() { print([1 < 2 == true, (1 == 1) == true, (1 as num) as int, 1 < 2 is bool]); }'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '[true, true, 1, true]\n' });
 });
 
 test('equality checks covariant parameters before handling null', () => {

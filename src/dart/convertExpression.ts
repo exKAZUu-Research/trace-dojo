@@ -41,6 +41,8 @@ import {
 } from './convertBase';
 
 const COMPARISON_NODES = new Set(['equality_expression', 'relational_expression']);
+/** `is` and `as`, which, like comparisons, cannot take one another as an unparenthesized operand. */
+const TYPE_OPERATOR_NODES = new Set(['type_test_expression', 'type_cast_expression']);
 const BINARY_NODES = new Set([
   'additive_expression',
   'multiplicative_expression',
@@ -361,11 +363,7 @@ export abstract class ExpressionConverter {
       }
       case 'type_test_expression': {
         const [value, test] = operandsOf(node);
-        if (value.type === 'type_test_expression')
-          return syntaxError(
-            node,
-            '比較の式を、別の比較の式のオペランドにはできません。どちらかを括弧で囲んでください。'
-          );
+        if (TYPE_OPERATOR_NODES.has(value.type)) return this.chainedTypeOperator(node);
         const isOperator = namedOf(test).find((child) => child.type === 'is_operator');
         return {
           kind: 'is',
@@ -382,6 +380,7 @@ export abstract class ExpressionConverter {
       }
       case 'type_cast_expression': {
         const [value, cast] = operandsOf(node);
+        if (TYPE_OPERATOR_NODES.has(value.type)) return this.chainedTypeOperator(node);
         return {
           kind: 'as',
           value: this.convertExpression(value),
@@ -423,6 +422,13 @@ export abstract class ExpressionConverter {
     }
     if (object.type === 'this' || object.type === 'super') return { kind: object.type, ...spanOf(object) };
     return this.convertExpression(object);
+  }
+
+  private chainedTypeOperator(node: Node): never {
+    return syntaxError(
+      node,
+      'is や as の式を、別の is や as の式のオペランドにはできません。どちらかを括弧で囲んでください。'
+    );
   }
 
   private convertBinary(node: Node): Expression {
