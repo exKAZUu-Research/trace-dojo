@@ -811,6 +811,39 @@ test('main receives a checked second argument explicitly set to null', () => {
   });
 });
 
+test('Dart constructor declarations treat new as the unnamed constructor', () => {
+  const program = `class Base {
+  final int value;
+  const Base.new(this.value);
+  const Base.other(int value) : this.new(value);
+}
+class Child extends Base {
+  Child(int value) : super.new(value);
+}
+abstract class Value {
+  factory Value.new(int value) = NumberValue.new;
+  int get value;
+}
+class NumberValue implements Value {
+  final int value;
+  NumberValue.new(this.value);
+}
+extension type Gauge.new(int value) {}
+enum Status {
+  ready.new(1), idle(0);
+  const Status.new(this.value);
+  final int value;
+}
+void main() {
+  final create = Base.new;
+  print([const Base(1).value, const Base.new(2).value, Base.other(3).value,
+    Child(4).value, create(5).value, Value(6).value, Gauge(7).value, Status.ready.value]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[1, 2, 3, 4, 5, 6, 7, 1]\n' });
+  const duplicate = 'class C { C(); C.new(); } void main() {}';
+  expect(executeProgram('dart', duplicate)).toMatchObject({ kind: 'compileError' });
+});
+
 test('named Dart constructors share the static member namespace', () => {
   const program = `class Person {
   final String name;

@@ -373,7 +373,7 @@ export class Converter extends ExpressionConverter {
       annotations: this.annotationsOf(node),
       name: requireNode(fieldOf(node, 'name'), node).text,
       typeArguments: typeArguments ? this.convertTypeArguments(typeArguments) : undefined,
-      constructorName: dot !== -1 ? children[dot + 1]?.text : undefined,
+      constructorName: constructorName(dot !== -1 ? children[dot + 1]?.text : undefined),
       arguments: args ? this.convertArguments(args) : undefined,
       ...spanOf(node),
     };
@@ -428,7 +428,7 @@ export class Converter extends ExpressionConverter {
     );
     if (invalid) syntaxError(invalid, 'covariant は、var で宣言するインスタンスのフィールドに付けてください。');
     return {
-      name: fieldOf(node, 'name')?.text,
+      name: constructorName(fieldOf(node, 'name')?.text),
       isConst: isConst || hasToken(node, 'const'),
       parameters,
       ...spanOf(node),
@@ -583,7 +583,7 @@ export class Converter extends ExpressionConverter {
       case 'factory_constructor_signature':
       case 'redirecting_factory_constructor_signature': {
         const nameParts = fieldsOf(signature, 'name');
-        const name = nameParts.length >= 3 ? nameParts[2].text : undefined;
+        const name = constructorName(nameParts.length >= 3 ? nameParts[2].text : undefined);
         const initializers = initializersNode ? this.convertInitializers(initializersNode) : [];
         if (redirection) initializers.push(this.convertRedirection(redirection));
         const isRedirectingFactory = signature.type === 'redirecting_factory_constructor_signature';
@@ -603,7 +603,7 @@ export class Converter extends ExpressionConverter {
           initializers,
           body,
           redirectTarget: target
-            ? { type: this.convertType(target), name: fieldOf(signature, 'target_constructor')?.text }
+            ? { type: this.convertType(target), name: constructorName(fieldOf(signature, 'target_constructor')?.text) }
             : undefined,
           annotations,
           headerEndRow,
@@ -700,7 +700,7 @@ export class Converter extends ExpressionConverter {
           return { kind: 'assert', condition, message, ...span };
         }
         const isSuper = hasToken(entry, 'super');
-        const name = namedOf(entry).find((child) => child.type === 'identifier')?.text;
+        const name = constructorName(namedOf(entry).find((child) => child.type === 'identifier')?.text);
         const args = requireNode(
           namedOf(entry).find((child) => child.type === 'arguments'),
           entry
@@ -710,7 +710,7 @@ export class Converter extends ExpressionConverter {
   }
 
   private convertRedirection(node: Node): ConstructorInitializer {
-    const name = namedOf(node).find((child) => child.type === 'identifier')?.text;
+    const name = constructorName(namedOf(node).find((child) => child.type === 'identifier')?.text);
     const args = requireNode(
       namedOf(node).find((child) => child.type === 'arguments'),
       node
@@ -1280,6 +1280,10 @@ export class Converter extends ExpressionConverter {
       return syntaxError(node, 'try の後には on、catch、finally のいずれかを書いてください。');
     return { kind: 'try', body, catches, finally: finallyBlock, ...spanOf(node) };
   }
+}
+
+function constructorName(name: string | undefined): string | undefined {
+  return name === 'new' ? undefined : name;
 }
 
 function emptyParameters(span: ReturnType<typeof spanOf>): FormalParameters {
