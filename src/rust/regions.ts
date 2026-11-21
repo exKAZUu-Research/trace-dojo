@@ -387,3 +387,12 @@ export function typeAfter(type: Type | undefined, derefs: readonly ('ref' | 'mut
   }
   return t;
 }
+
+/** The variant and the field a projection names in a value of a struct or an enum. */
+export function fieldIndex(layout: Layout & { kind: 'adt' }, elem: string): [number, number] {
+  const [variantText, name] = elem.includes(':') ? elem.split(':') : ['0', elem];
+  const variant = Number(variantText);
+  const fields = layout.def.variants[variant]?.fields ?? [];
+  const byName = fields.findIndex((field) => field.name === name);
+  return [variant, byName !== -1 ? byName : Number(name)];
+}

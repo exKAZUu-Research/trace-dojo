@@ -18,6 +18,7 @@ import {
   derefSteps,
   dropSlots,
   elementLayout,
+  fieldIndex,
   fieldLayout,
   isNone,
   type Layout,
@@ -35,6 +36,7 @@ import { relateCallThroughBound, relateOpaqueCall, SignatureInstance } from './s
 import { markExtendedTemporaries, promotable } from './temporaryScopes';
 import { arrayTryFrom } from './traitConversions';
 import type { TraitSolver } from './traits';
+import { relateReturnedError } from './tryErrors';
 import { type ClosureType, type FnDef, resolve, shallow, substitute, type Type } from './types';
 
 /** The temporary that holds a value with borrows, or undefined for a value without any. */
@@ -105,6 +107,7 @@ export class LoanBuilder {
   /** For a closure's body, the captures it modifies, which the closure captures by `&mut`. */
   private readonly mutatedCaptures = new Set<LocalVar>();
   private returnVar: Var = -1;
+  private returnType: Type | undefined;
   private staticRegion: RVar | undefined;
 
   private constructor(
@@ -136,6 +139,7 @@ export class LoanBuilder {
   private build(params: { pattern: Pattern; type: Type | undefined }[], body: Expr, ret: Type, end: Span): Var[] {
     this.current = this.graph.newPoint();
     this.returnVar = this.newVar('{return}', ret);
+    this.returnType = ret;
     this.makeUniversal(this.returnVar);
     const receiver = this.context.locals.filter((local) => local.isSelf);
     const defs = receiver.map((local) => this.universalLocal(local));
@@ -822,6 +826,13 @@ export class LoanBuilder {
     const operand = this.value(expr.operand);
     // The error leaves the function.
     const at = this.point({ uses: operand === undefined ? [] : [operand] });
+    relateReturnedError(
+      this.outlives,
+      expr.operand.ty,
+      this.returnType,
+      this.layout(operand),
+      this.layout(this.returnVar)
+    );
     this.endScopes(0);
     if (this.current !== undefined) this.exits.push(this.current);
     this.current = at;
@@ -1419,15 +1430,6 @@ function project(place: Place, elem: string): Place {
 
 function tupleElem(layout: Layout, index: number): Layout {
   return layout.kind === 'tuple' ? (layout.elems[index] ?? NONE) : NONE;
-}
-
-/** The variant and the field a projection names in a value of a struct or an enum. */
-function fieldIndex(layout: Layout & { kind: 'adt' }, elem: string): [number, number] {
-  const [variantText, name] = elem.includes(':') ? elem.split(':') : ['0', elem];
-  const variant = Number(variantText);
-  const fields = layout.def.variants[variant]?.fields ?? [];
-  const byName = fields.findIndex((field) => field.name === name);
-  return [variant, byName !== -1 ? byName : Number(name)];
 }
 
 function refTarget(type: Type | undefined): Type | undefined {

@@ -8467,3 +8467,30 @@ test('a reference that extend adds to a collection keeps its owner borrowed whil
     diagnostics: [{ row: 5, message: 's は 5 行目で借りられていて、その参照がまだ使われるので、ムーブできません。' }],
   });
 });
+
+test('an error that ? returns as it is may not borrow a local', () => {
+  const dangling = rustMain(
+    '    println!("{:?}", fail());',
+    `fn fail() -> Result<(), &'static str> {
+    let text = String::from("bad");
+    Err(text.as_str())?;
+    Ok(())
+}`
+  );
+  expect(executeProgram('rust', dangling)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [
+      { message: 'text は 5 行目でスコープの外に出てなくなりますが、3 行目で借りた参照がその後も使われます。' },
+    ],
+  });
+
+  const converted = rustMain(
+    '    println!("{}", fail().unwrap_err());',
+    `fn fail() -> Result<(), Box<dyn std::error::Error>> {
+    let text = String::from("bad");
+    Err(text.as_str())?;
+    Ok(())
+}`
+  );
+  expect(executeProgram('rust', converted)).toMatchObject({ kind: 'executed', stdout: 'bad\n' });
+});
