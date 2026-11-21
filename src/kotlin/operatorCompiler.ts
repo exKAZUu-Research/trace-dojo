@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 422 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss 427 -- the compiler of one area of Kotlin, whose parts call each other closely.
 import type { CallExpression, Expression, TypeRef } from './ast';
 import { type ArgumentSyntax } from './callCompiler';
 import {
