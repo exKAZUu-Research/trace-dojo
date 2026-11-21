@@ -6971,6 +6971,30 @@ var initial = 1;
   ).toMatchObject({ kind: 'compileError' });
 });
 
+test('runtime function bounds erase extension types and retain dependent parameters', () => {
+  const program = `extension type Id(int value) {}
+T identity<T extends Id>(T value) => value;
+class Box {
+  U method<T extends Id, U extends T>(U value) => value;
+}
+typedef WithId = T Function<T extends Id>(T);
+typedef WithInt = T Function<T extends int>(T);
+void main() {
+  print(identity.runtimeType);
+  print(WithId == WithInt);
+  dynamic call = identity;
+  print(call<int>(1));
+  dynamic box = Box();
+  print(box.method<int, int>(2));
+  dynamic method = box.method;
+  print(method<int, int>(3));
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '<Y0 extends int>(Y0) => Y0\ntrue\n1\n2\n3\n',
+  });
+});
+
 test('generic bounds reject cycles through extension type representations', () => {
   for (const declaration of ['class C<T extends Id<T>> {}', 'void call<T extends Id<T>>() {}']) {
     const source = `extension type Id<X>(X value) {} ${declaration} void main() { print('valid'); }`;

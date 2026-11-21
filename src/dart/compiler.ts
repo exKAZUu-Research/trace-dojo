@@ -24,7 +24,7 @@ import {
   type MethodMember,
   sourceMemberName,
 } from './classes';
-import { at, type Compiled, eraseExtensionTypes, type Eval, typeName } from './compilerBase';
+import { at, type Compiled, type Eval, typeName } from './compilerBase';
 import { EMPTY_ENV } from './constructorCompiler';
 import {
   type Declaration,
@@ -34,6 +34,7 @@ import {
   type TopLevelFunction,
   type TypeAlias,
 } from './environment';
+import { eraseExtensionTypes, eraseFunctionType } from './eraseExtensionTypes';
 import { initializeField, lateFieldGetter, lateFieldSetter } from './lateFields';
 import { markCovariantParameters, MemberCompiler } from './memberCompiler';
 import { checkRepresentationCycles } from './representationCycles';
@@ -1655,7 +1656,7 @@ export class Compiler extends MemberCompiler {
       if (existing) return existing;
       const closure = new DartClosure(
         coreTypes.function,
-        fn.type,
+        eraseFunctionType(fn.type),
         (runtime, _receiver, args, typeArgs, callRow) =>
           (fn.impl as Callable)(runtime, undefined, args, typeArgs, callRow),
         undefined,

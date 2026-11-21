@@ -3,6 +3,7 @@ import { CompileError } from '../interpreter/diagnostics';
 import type { ClassDeclaration, Span, TypeAliasDeclaration, TypeParameter, TypeSyntax } from './ast';
 import { type ClassInfo, type Member, memberTypeIn, scopedMemberName } from './classes';
 import type { ExtensionInfo, GlobalVariable, LibraryEnv, TypeAlias } from './environment';
+import { eraseExtensionTypes } from './eraseExtensionTypes';
 import type { Frame, FunctionInfo, Runtime, TypeEnv } from './runtime';
 import { Flow, type FunctionContext, LocalScope, LocalVar } from './scope';
 import { inferExtensionReceiver, inferTearOffTypes } from './typeInference';
@@ -911,37 +912,6 @@ export function valueIs(runtime: Runtime, value: Value, type: DartType): boolean
   if (isTop(erased)) return true;
   if (value === undefined) return isNullable(erased);
   return isSubtype(runtime.runtimeTypeOf(value), erased);
-}
-
-/** A type with each extension type replaced by its representation type, as runtime type tests see it. */
-export function eraseExtensionTypes(type: DartType): DartType {
-  switch (type.kind) {
-    case 'interface': {
-      const args = type.args.map(eraseExtensionTypes);
-      if (type.cls.kind !== 'extensionType' || !type.cls.representationType) return { ...type, args };
-      const map = new Map(type.cls.typeParams.map((param, index) => [param, args[index] ?? DYNAMIC]));
-      const representation = eraseExtensionTypes(substitute(type.cls.representationType, map));
-      return type.nullable ? makeNullable(representation) : representation;
-    }
-    case 'function': {
-      return {
-        ...type,
-        positional: type.positional.map(eraseExtensionTypes),
-        named: type.named.map((named) => ({ ...named, type: eraseExtensionTypes(named.type) })),
-        returnType: eraseExtensionTypes(type.returnType),
-      };
-    }
-    case 'record': {
-      return {
-        ...type,
-        positional: type.positional.map(eraseExtensionTypes),
-        named: type.named.map((named) => ({ ...named, type: eraseExtensionTypes(named.type) })),
-      };
-    }
-    default: {
-      return type;
-    }
-  }
 }
 
 const callMembers = new WeakMap<FunctionType, Member>();

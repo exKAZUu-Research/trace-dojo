@@ -13,6 +13,7 @@ import {
   type MethodMember,
   sourceMemberName,
 } from './classes';
+import { eraseFunctionType } from './eraseExtensionTypes';
 import { RecordShapes } from './recordShapes';
 import {
   asInstanceOf,
@@ -571,7 +572,7 @@ export class Runtime implements TracedRuntime<Frame> {
     staticSignature?: FunctionType
   ): DartClosure {
     const impl = member.impl as NonNullable<typeof member.impl>;
-    const signature = staticSignature ?? this.memberTypeFor(receiver, member);
+    const signature = staticSignature ? eraseFunctionType(staticSignature) : this.memberTypeFor(receiver, member);
     const type = staticSignature || member.isStatic ? signature : covariantErased(member, signature);
     return new DartClosure(
       coreTypes.function,
@@ -594,7 +595,7 @@ export class Runtime implements TracedRuntime<Frame> {
 
   /** A member's function type with the receiver's type arguments in place of its class's type parameters. */
   memberTypeFor(receiver: Value, member: Member & { kind: 'method' }): FunctionType {
-    return this.reifyMemberType(receiver, member) as FunctionType;
+    return eraseFunctionType(this.reifyMemberType(receiver, member) as FunctionType);
   }
 
   private reifyMemberType(receiver: Value, member: Member): DartType {
