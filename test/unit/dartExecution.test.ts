@@ -275,6 +275,31 @@ test('repeatedly hashing a long string key completes within the execution budget
   });
 });
 
+test('String.fromCharCodes batches large conversions and preserves supplementary code points', () => {
+  expect(
+    executeProgram(
+      'dart',
+      `void main() {
+        final codes = List<int>.filled(900000, 65);
+        print(String.fromCharCodes(codes).length);
+        print(codes.length);
+      }`
+    )
+  ).toMatchObject({ kind: 'executed', uncaughtException: undefined, stdout: '900000\n900000\n' });
+  expect(
+    executeProgram(
+      'dart',
+      `Iterable<int> codes() sync* {
+        for (var i = 0; i < 65536; i++) yield i == 127 || i == 128 ? 0x1f600 : 65;
+      }
+      void main() {
+        final text = String.fromCharCodes(codes());
+        print([text.length, text.substring(126, 132)]);
+      }`
+    )
+  ).toMatchObject({ kind: 'executed', uncaughtException: undefined, stdout: '[65538, A😀😀A]\n' });
+});
+
 test('String.fromCharCodes stops at the end of the requested slice', () => {
   const program = `import 'dart:collection';
 Iterable<int> streamed() sync* { print('start'); yield 65; }
@@ -2313,6 +2338,28 @@ void main() {
     kind: 'executed',
     uncaughtException: undefined,
     stdout: '[1034, true, true]\n[999999, 999998]\n2001\n',
+  });
+});
+
+test('JSON decoding keeps long strings, keys, and error offsets across scan boundaries', () => {
+  const program = String.raw`import 'dart:convert';
+void main() {
+  print(jsonDecode('"' + 'x' * 900000 + '"').length);
+  final key = (jsonDecode('{"' + 'q' * 900000 + r'\n":1}') as Map).keys.single as String;
+  print([key.length, key.endsWith('\n')]);
+  final pair = jsonDecode('"' + 'x' * 1023 + '😀' + r'\uD800"') as String;
+  print([pair.length, pair.substring(1023, 1025), pair.codeUnitAt(1025)]);
+  for (final suffix in [r'\u12q4"', '\n"', r'\x"']) {
+    try { jsonDecode('"' + 'x' * 1024 + suffix); }
+    on FormatException catch (e) { print([e.message, e.offset]); }
+  }
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout:
+      '900000\n[900001, true]\n[1026, 😀, 55296]\n' +
+      '[Invalid unicode escape, 1026]\n[Control character in string, 1025]\n[Unrecognized string escape, 1027]\n',
   });
 });
 

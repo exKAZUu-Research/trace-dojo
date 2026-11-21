@@ -5,7 +5,7 @@ import { concatenate } from '../operators';
 import type { Runtime } from '../runtime';
 import { asInstanceOf, coreTypes, interfaceType } from '../types';
 import { DartList, DartObject, type Value } from '../values';
-import { BoundedStringParts } from './boundedStringParts';
+import { BoundedStringParts, StringParts } from './boundedStringParts';
 import {
   allMatchesOf,
   hasPrefixMatch,
@@ -466,7 +466,7 @@ function efficientCharacterCount(runtime: Runtime, codes: Value): bigint | undef
 
 // code-gauge-allow functionCognitiveComplexity 16 -- The VM distinguishes invalid codes in lists and iterators.
 function stringFromCharCodes(runtime: Runtime, codes: Value, from: bigint, to: bigint | undefined): string {
-  const parts: string[] = [];
+  const parts = new StringParts();
   let length = 0;
   let invalidCode: bigint | undefined;
   const add = (value: Value): void => {
@@ -478,7 +478,7 @@ function stringFromCharCodes(runtime: Runtime, codes: Value, from: bigint, to: b
     const text = String.fromCodePoint(Number(code));
     length += text.length;
     if (length > LIMITS.maxStringLength) runtime.throwError('OutOfMemoryError', '', []);
-    parts.push(text);
+    parts.append(text);
   };
   if (codes instanceof DartList) {
     const end = to === undefined ? codes.elements.length : Math.min(Number(to), codes.elements.length);
@@ -490,7 +490,7 @@ function stringFromCharCodes(runtime: Runtime, codes: Value, from: bigint, to: b
     forEachIteratorValue(runtime, codes, from, to, add);
   }
   if (invalidCode !== undefined) throwCharCodesError(runtime, codes, invalidCode);
-  return parts.join('');
+  return parts.text();
 }
 
 function throwCharCodesError(runtime: Runtime, codes: Value, invalidCode: bigint): never {

@@ -217,6 +217,19 @@ define('_jsonEncode', (runtime, _receiver, [value, toEncodable, indent]) =>
   encodeJson(runtime, value, toEncodable, indent === undefined ? undefined : stringArg(runtime, indent, 'indent'))
 );
 
+// oxlint-disable-next-line eslint/no-control-regex -- JSON requires control characters to be escaped.
+const ORDINARY_JSON_STRING = /[^"\\\u0000-\u001F]{1,1024}/y;
+const JSON_STRING_ESCAPES: Readonly<Record<string, string | undefined>> = {
+  '"': '"',
+  '\\': '\\',
+  '/': '/',
+  b: '\b',
+  f: '\f',
+  n: '\n',
+  r: '\r',
+  t: '\t',
+};
+
 /** A JSON parser that keeps Dart's distinction of ints and doubles and reports Dart's FormatException messages. */
 class JsonParser {
   position = 0;
@@ -333,43 +346,35 @@ class JsonParser {
     );
   }
 
-  // code-gauge-allow duplicateLines 30 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
-  // code-gauge-allow functionCognitiveComplexity 16 -- A transcription of the SDK's algorithm, case by case.
   string(): string {
     this.position++;
-    let result = '';
-    for (;;) {
-      if (this.position >= this.text.length) this.fail('Unterminated string', this.text.length);
-      const char = this.text[this.position++];
-      if (char === '"') return result;
-      // oxlint-disable-next-line unicorn/prefer-code-point -- JSON control characters are UTF-16 code units.
-      if (char.charCodeAt(0) < 0x20) this.fail('Control character in string', this.position - 1);
-      if (char !== '\\') {
-        result += char;
+    const result = new StringParts();
+    while (this.position < this.text.length) {
+      this.runtime.spend();
+      ORDINARY_JSON_STRING.lastIndex = this.position;
+      const run = ORDINARY_JSON_STRING.exec(this.text);
+      if (run) {
+        result.append(run[0]);
+        this.position = ORDINARY_JSON_STRING.lastIndex;
         continue;
       }
-      const escape = this.text[this.position++];
-      const simple: Record<string, string> = {
-        '"': '"',
-        '\\': '\\',
-        '/': '/',
-        b: '\b',
-        f: '\f',
-        n: '\n',
-        r: '\r',
-        t: '\t',
-      };
-      if (escape in simple) {
-        result += simple[escape];
-      } else if (escape === 'u') {
-        const hex = this.text.slice(this.position, this.position + 4);
-        if (!/^[\da-fA-F]{4}$/.test(hex)) this.fail('Invalid unicode escape', this.position - 1);
-        result += String.fromCodePoint(Number.parseInt(hex, 16));
-        this.position += 4;
-      } else {
-        this.fail('Unrecognized string escape', this.position);
-      }
+      const char = this.text[this.position++];
+      if (char === '"') return result.text();
+      if (char !== '\\') this.fail('Control character in string', this.position - 1);
+      result.append(this.stringEscape());
     }
+    return this.fail('Unterminated string', this.text.length);
+  }
+
+  private stringEscape(): string {
+    const escape = this.text[this.position++];
+    const simple = JSON_STRING_ESCAPES[escape];
+    if (simple !== undefined) return simple;
+    if (escape !== 'u') this.fail('Unrecognized string escape', this.position);
+    const hex = this.text.slice(this.position, this.position + 4);
+    if (!/^[\da-fA-F]{4}$/.test(hex)) this.fail('Invalid unicode escape', this.position - 1);
+    this.position += 4;
+    return String.fromCodePoint(Number.parseInt(hex, 16));
   }
 
   /** Numbers as the SDK's parser reads them, which reports a number cut short by the end of the text separately. */
