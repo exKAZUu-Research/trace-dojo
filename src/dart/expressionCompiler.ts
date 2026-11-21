@@ -752,26 +752,24 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   /**
-   * Whether braces without type arguments make a set or a map, from the elements and then the context; undefined when
-   * neither tells, so that a nested literal waits for the context it is compiled in.
+   * Whether braces without type arguments make a set or a map, as the Dart specification disambiguates them: by the
+   * context first, then by the elements; undefined when neither tells, so that a nested literal waits for the context
+   * it is compiled in.
    */
   private setOrMapFromElements(
     elements: CollectionElement[],
     context: DartType | undefined
   ): 'set' | 'map' | undefined {
+    const base = context && resolveBound(context);
+    if (base?.kind === 'interface') {
+      if (base.cls.isSubclassOf(coreTypes.map)) return 'map';
+      if (base.cls.isSubclassOf(coreTypes.set) || base.cls === coreTypes.iterable) return 'set';
+    }
     const kinds = new Set(elements.map((element) => this.elementKind(element)).filter((kind) => kind !== undefined));
     if (kinds.size === 2)
       this.error(elements[0], 'セットの要素とマップの要素を、1 つのリテラルに混ぜることはできません。');
     const [kind] = kinds;
-    if (kind) return kind;
-    if (context) {
-      const base = resolveBound(context);
-      if (base.kind === 'interface') {
-        if (base.cls.isSubclassOf(coreTypes.map)) return 'map';
-        if (base.cls.isSubclassOf(coreTypes.set) || base.cls === coreTypes.iterable) return 'set';
-      }
-    }
-    return undefined;
+    return kind;
   }
 
   private elementKind(element: CollectionElement): 'set' | 'map' | undefined {
