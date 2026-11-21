@@ -602,7 +602,6 @@ function iteratorWithCapability(goal: Goal, capability: 'back' | 'exact'): Answe
   return hasCapability === 'yes' && goal.ref.item ? iterator(goal) : hasCapability;
 }
 
-/** A collection of `T` extends from `T`s, and from `&T`s when `T` is `Copy`. */
 /** What a collection extends from: its items, or (as std's `Extend` of `Copy` items) a `&T`, or a map's `(&K, &V)`. */
 function extendInto({ solver, t, ref }: Goal, map: boolean): Answer {
   const [target] = ref.args;
