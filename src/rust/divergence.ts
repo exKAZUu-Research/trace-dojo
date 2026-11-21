@@ -51,7 +51,7 @@ function blockOperands(block: Block): Expr[] {
   return block.tail ? [...statements, block.tail] : statements;
 }
 
-// code-gauge-allow functionNcss 39 -- One case per kind of expression.
+// code-gauge-allow functionNcss 40 -- One case per kind of expression.
 function requiredOperands(expr: Expr): Expr[] {
   switch (expr.kind) {
     case 'unary':
@@ -83,6 +83,9 @@ function requiredOperands(expr: Expr): Expr[] {
     }
     case 'arrayRepeat': {
       return [expr.value, expr.count];
+    }
+    case 'range': {
+      return [expr.start, expr.end].filter((bound) => bound !== undefined);
     }
     case 'struct': {
       return [...expr.fields.map((field) => field.value), ...(expr.base ? [expr.base] : [])];

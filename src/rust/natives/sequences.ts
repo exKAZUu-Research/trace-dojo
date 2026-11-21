@@ -672,6 +672,7 @@ const dequeNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
     if (position > items.length) {
       libraryPanic(ctx, 'index out of bounds', 'alloc/src/collections/vec_deque/mod.rs:2564:9');
     }
+    ctx.runtime.allocate(1);
     items.splice(position, 0, value);
     return UNIT_VALUE;
   },

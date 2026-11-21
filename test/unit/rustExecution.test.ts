@@ -8010,3 +8010,36 @@ fn main() {
     });
   }
 });
+
+test('grouped patterns, checked char conversions, and range bounds that return behave as in Rust', () => {
+  const program = `fn by_bound() -> i32 { for _x in (0..{ return 21; 3 }) {}; }
+fn by_start() -> i32 { for _x in { return 22; 0 }..3 {}; }
+fn main() {
+    let (x) = 1;
+    for (y) in 0..2 { println!("{y}"); }
+    let add = |(z): i32| z + 1;
+    let (single,) = (5,);
+    let code: Result<u16, _> = 'A'.try_into();
+    println!("{} {} {} {:?} {:?} {:?}", x, add(2), single, code, u16::try_from('あ'), u16::try_from('😀'));
+    println!("{} {}", by_bound(), by_start());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '0\n1\n1 3 5 Ok(65) Ok(12354) Err(TryFromCharError(()))\n21 22\n',
+  });
+});
+
+test('a loop body must not have a value, and deque insertions count against the memory limit', () => {
+  const valued = rustMain('    let mut i = 0;\n    loop { i += 1; if i == 2 { break; } 7 }');
+  expect(executeProgram('rust', valued)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ row: 2, message: expect.stringContaining('() が必要') })],
+  });
+  const inserted = rustMain(`    let _held = vec![0; 999_999];
+    let mut d = std::collections::VecDeque::new();
+    for i in 0..10000 { d.insert(i, i); }`);
+  const execution = executeProgram('rust', inserted);
+  expect(execution.kind === 'executed' && execution.uncaughtException).toMatch(
+    /^memory allocation of \d+ bytes failed\n/
+  );
+});

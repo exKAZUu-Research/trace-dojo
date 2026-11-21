@@ -242,7 +242,7 @@ function arrayRepeatExpr(c: Checker, expr: Extract<Expr, { kind: 'arrayRepeat' }
 
 function loopExpr(c: Checker, expr: Extract<Expr, { kind: 'loop' }>): Type {
   const breakType = freshVar();
-  inLoop(c, expr.label, breakType, () => c.checkBlock(expr.body, UNIT));
+  inLoop(c, expr.label, breakType, () => blockUnit(c, expr.body));
   return loopBroke(c, expr) ? breakType : NEVER;
 }
 

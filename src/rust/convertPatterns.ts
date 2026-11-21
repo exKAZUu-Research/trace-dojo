@@ -15,6 +15,13 @@ const UNSUPPORTED_PATTERNS: Record<string, string> = {
 
 /** Converts patterns. */
 export abstract class PatternConverter extends SyntaxConverter {
+  /** `(a, b)` is a tuple of patterns, and `(x)` one grouped pattern: only a comma makes a tuple of one. */
+  private tupleOrGroup(node: Node, span: Span): Pattern {
+    const elems = this.subpatterns(node).map((child) => this.pattern(child));
+    const grouped = elems.length === 1 && !node.children.some((child) => child.type === ',');
+    return grouped ? elems[0] : { kind: 'tuple', elems, span };
+  }
+
   /** `mut name` in a pattern, which binds a variable that can be assigned to. */
   private mutableBinding(node: Node, span: Span): Pattern {
     const name = node.namedChildren.find((child) => child.type === 'identifier');
@@ -48,7 +55,7 @@ export abstract class PatternConverter extends SyntaxConverter {
         return this.negativeLiteralPattern(node, span);
       }
       case 'tuple_pattern': {
-        return { kind: 'tuple', elems: this.subpatterns(node).map((child) => this.pattern(child)), span };
+        return this.tupleOrGroup(node, span);
       }
       case 'tuple_struct_pattern': {
         const type = this.field(node, 'type');

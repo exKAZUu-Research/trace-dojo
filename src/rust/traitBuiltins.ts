@@ -656,6 +656,9 @@ function fromInto({ solver, t, ref }: Goal): Answer {
   return conversionExists(solver, source, t);
 }
 
+/** The integer types std converts a `char` to with a check; wider ones convert without one. */
+const CHECKED_FROM_CHAR = new Set(['u8', 'u16']);
+
 // code-gauge-allow functionCognitiveComplexity 16 -- Checked conversions have distinct applicability and element bounds.
 function tryFrom({ solver, t, ref, name }: Goal): Answer {
   const other = normalize(shallow(ref.args[0]));
@@ -671,7 +674,7 @@ function tryFrom({ solver, t, ref, name }: Goal): Answer {
   }
   if (source.kind === 'int' && (target.kind === 'int' || target.kind === 'bool')) return 'yes';
   if (target.kind === 'char' && source.kind === 'int' && source.name === 'u32') return 'yes';
-  if (source.kind === 'char' && target.kind === 'int' && target.name === 'u8') return 'yes';
+  if (source.kind === 'char' && target.kind === 'int' && CHECKED_FROM_CHAR.has(target.name)) return 'yes';
   return intoConversion(solver, source, target);
 }
 
