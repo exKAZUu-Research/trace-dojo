@@ -29,6 +29,11 @@ export function isInferenceHole(type: DartType): boolean {
   return type === INFERENCE_HOLE;
 }
 
+/** Whether a context has a hole anywhere, which leaves it a constraint rather than a finished type. */
+export function containsInferenceHole(type: DartType): boolean {
+  return closeInferenceHoles(type) !== type;
+}
+
 /**
  * A context's greatest closure over its holes, as a function literal's parameter types take it: Object? where a hole is
  * covariant and Never where it is contravariant.

@@ -1759,6 +1759,14 @@ void main() { print([E.b.v, F.a.v]); }`;
   }
 });
 
+test('Dart collection literal arguments infer their types from annotated closures', () => {
+  const program = `void f<T>(List<T Function(T)> a) { print(T); }
+void g<T>(Map<String, void Function(T)> a) { print(T); }
+void h<T>(Set<void Function(T)> a) { print(T); }
+void main() { f([(int x) => x]); g({'a': (int x) {}}); h({(int x) {}}); }`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'int\nint\nint\n' });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}

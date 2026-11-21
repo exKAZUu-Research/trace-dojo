@@ -21,7 +21,7 @@ import { formatDouble, stringOf } from './format';
 import { BoundedStringParts } from './library/boundedStringParts';
 import type { Frame } from './runtime';
 import { type ConditionFlow, Flow, LocalVar } from './scope';
-import { isInferenceHole } from './typeInference';
+import { containsInferenceHole } from './typeInference';
 import {
   closeTypeVariables,
   coreTypes,
@@ -666,7 +666,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (expression.isConst && !elements.isConst)
       this.error(expression, 'const のリストの要素は、定数でなければなりません。');
     elementType ??=
-      contextElement && !isInferenceHole(contextElement)
+      contextElement && !containsInferenceHole(contextElement)
         ? contextElement
         : inferElementType(elements.types.map((type) => type.key));
     const type = interfaceType(coreTypes.list, [elementType]);
@@ -711,7 +711,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         this.error(expression, 'const のセットの要素は、定数でなければなりません。');
       const elementType =
         types?.[0] ??
-        (contextElement && !isInferenceHole(contextElement)
+        (contextElement && !containsInferenceHole(contextElement)
           ? contextElement
           : inferElementType(compiled.types.map((type) => type.key)));
       return this.buildSet(
@@ -730,12 +730,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
       this.error(expression, 'const のマップの要素は、定数でなければなりません。');
     const keyType =
       types?.[0] ??
-      (keyContext && !isInferenceHole(keyContext)
+      (keyContext && !containsInferenceHole(keyContext)
         ? keyContext
         : inferElementType(compiled.types.map((type) => type.key)));
     const valueType =
       types?.[1] ??
-      (valueContext && !isInferenceHole(valueContext)
+      (valueContext && !containsInferenceHole(valueContext)
         ? valueContext
         : inferElementType(compiled.types.map((type) => type.value ?? DYNAMIC)));
     return this.buildMap(

@@ -13,6 +13,7 @@ import { PatternCache } from './patternCompiler';
 import type { Frame } from './runtime';
 import { Flow, type LocalVar } from './scope';
 import { isAnsweredType } from './statementCompiler';
+import { containsInferenceHole } from './typeInference';
 import {
   asInstanceOf,
   coreTypes,
@@ -665,7 +666,8 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     span: Span,
     kind: 'list' | 'set' | 'map'
   ): Compiled {
-    if (!target) return compiled;
+    // A context still waiting for a call's type arguments only guides the element, whose own type then constrains them.
+    if (!target || containsInferenceHole(target)) return compiled;
     const elementName = collectionName(kind);
     return this.coerce(
       compiled,
@@ -822,7 +824,12 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     const elementType = spreadsNull ? NEVER : iterableElementOf(base);
     if (!elementType)
       this.error(element, `${typeName(compiled.type)} 型の値は Iterable ではないので、展開できません。`);
-    if (elementContext && elementType.kind !== 'dynamic' && !isSubtype(elementType, elementContext)) {
+    if (
+      elementContext &&
+      !containsInferenceHole(elementContext) &&
+      elementType.kind !== 'dynamic' &&
+      !isSubtype(elementType, elementContext)
+    ) {
       this.error(element, `${typeName(elementType)} 型の要素は、${typeName(elementContext)} 型の要素にできません。`);
     }
     if (!spreadsNull) types.push({ key: elementType });
