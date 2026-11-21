@@ -1293,6 +1293,18 @@ void main() { print([Color.red.show(), Color.blue]); }`;
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[red, C]\n' });
 });
 
+test('Dart keeps the sign of a negated zero integer literal in a double context', () => {
+  const program = `void main() {
+  double x = -0;
+  const double z = -0x0;
+  print([x, z, 1 / x, <double>[-0][0]]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[-0.0, -0.0, -Infinity, -0.0]\n',
+  });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}

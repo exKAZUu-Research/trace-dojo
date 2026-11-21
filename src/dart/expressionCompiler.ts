@@ -598,7 +598,9 @@ export abstract class ExpressionCompiler extends CompilerBase {
   ): Compiled {
     const exact = negated ? -expression.value : expression.value;
     if (context && isDoubleContext(context)) {
-      const value = Number(exact);
+      // Negating the converted magnitude keeps `-0` negative, which a bigint cannot.
+      const magnitude = Number(expression.value);
+      const value = negated ? -magnitude : magnitude;
       if (!Number.isFinite(value) || BigInt(value) !== exact) {
         this.error(expression, `整数リテラル ${expression.text} は、double として正確に表せません。`);
       }
