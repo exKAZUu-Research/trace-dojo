@@ -639,6 +639,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   private compileString(parts: StringPart[]): Compiled {
     const pieces: (string | Eval)[] = [];
+    let isConst = true;
     for (const part of parts) {
       if (typeof part === 'string') {
         pieces.push(part);
@@ -646,18 +647,18 @@ export abstract class ExpressionCompiler extends CompilerBase {
       }
       const compiled = this.compileExpression(part);
       if (compiled.type.kind === 'void') this.error(part, 'void の値は文字列に埋め込めません。');
+      isConst &&= compiled.isConst;
       const constant = compiled.constValue?.value;
       if (compiled.isConst && compiled.constValue && isPrimitive(constant)) {
         pieces.push(primitiveText(constant));
       } else pieces.push(compiled.run);
     }
     const type = interfaceType(coreTypes.string);
-    const isConst = pieces.every((piece) => typeof piece === 'string');
-    const constText = isConst ? this.foldConstantString(pieces) : undefined;
+    const constText = pieces.every((piece) => typeof piece === 'string') ? this.foldConstantString(pieces) : undefined;
     if (constText !== undefined) {
       return { type, run: () => constText, isConst: true, constValue: { value: constText } };
     }
-    return { type, run: (frame) => interpolateString(frame, pieces), isConst };
+    return { type, run: (frame) => interpolateString(frame, pieces, isConst), isConst };
   }
 
   private constantStringBudget: ExecutionBudget | undefined;
@@ -1629,7 +1630,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
 // Helpers
 
-function interpolateString(frame: Frame, pieces: readonly (string | Eval)[]): string {
+function interpolateString(frame: Frame, pieces: readonly (string | Eval)[], isConst: boolean): string {
   const text = new BoundedStringParts(frame.runtime);
   for (const piece of pieces) {
     if (typeof piece === 'string') {
@@ -1637,6 +1638,9 @@ function interpolateString(frame: Frame, pieces: readonly (string | Eval)[]): st
       continue;
     }
     const value = piece(frame);
+    if (isConst && frame.runtime.checkingConstants && !isPrimitive(value)) {
+      frame.runtime.throwTypeError('定数の文字列には、数値、bool、String、null のみを埋め込めます。');
+    }
     frame.temporaries.push(value);
     try {
       text.append(stringOf(frame.runtime, value));

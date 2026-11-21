@@ -790,6 +790,27 @@ test('detached string copies share the execution budget', () => {
   });
 });
 
+test('const constructor interpolations use the evaluated parameter values', () => {
+  const program = `class C {
+  final String text;
+  const C(Object? value) : text = 'value: $value';
+  const C.checked(int value) : assert(value > 0, 'value: \${value + 1}'), text = 'ok';
+}
+void main() {
+  print(const C(42).text);
+  print(const C(null).text);
+  print(const C.checked(1).text);
+  print(C(Object()).text);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: "value: 42\nvalue: null\nok\nvalue: Instance of 'Object'\n",
+  });
+  expect(executeProgram('dart', program.replace('C(Object())', 'const C(Object())'))).toMatchObject({
+    kind: 'compileError',
+  });
+});
+
 test('multiline strings handle opening whitespace and escaped line endings like Dart', () => {
   const slash = '\\';
   const program = `void main() {
