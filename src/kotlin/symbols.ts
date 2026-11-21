@@ -1,5 +1,5 @@
 import type { VISIBILITY_KEYWORDS } from './ast';
-import type { FunctionContext } from './compilerBase';
+import type { FunctionContext, ReceiverSymbol } from './compilerBase';
 import type { Frame, FunctionInfo, Invoker } from './runtime';
 import type { ClassType, KType } from './types';
 import type { Value } from './values';
@@ -208,6 +208,7 @@ export class PropertySymbol implements MemberBase {
   packageName = '';
   /** The slot of the backing field in each instance, or in the program's globals for a top-level property. */
   slot: number | undefined;
+  backingFieldReferenced = false;
   /** Whether reading the property may return a different value each time, which rules out smart casts. */
   hasCustomGetter = false;
   get: ((frame: Frame, receiver: Value) => Value) | undefined;
@@ -231,8 +232,7 @@ export class VariableSymbol {
   owner: FunctionContext | undefined;
   /** For a name the compiler binds to a computed value, such as a delegated local's `getValue`, how to read it. */
   delegateRead: ((frame: Frame) => Value) | undefined;
-  /** For `field` in an accessor, how to store the backing field. */
-  delegateWrite: ((frame: Frame, value: Value) => void) | undefined;
+  backingField: { property: PropertySymbol; receiver: ReceiverSymbol | undefined } | undefined;
   localDelegate:
     | {
         holder: VariableSymbol;

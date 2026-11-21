@@ -5482,6 +5482,24 @@ fun main() {
     'val answer: Int = 1\n    get() = 2\nfun main() { println(answer) }',
   ],
   [
+    'a top-level initializer whose getter calls a function named field',
+    false,
+    `fun field(): Int = 3
+    val answer: Int = 0
+        get() = field()
+    fun main() { println(answer) }`,
+  ],
+  [
+    'a member initializer whose getter calls a function named field',
+    false,
+    `class Sample {
+        fun field(): Int = 4
+        val value: Int = 0
+            get() = field()
+    }
+    fun main() { println(Sample().value) }`,
+  ],
+  [
     'an initializer with computed getter and setter',
     false,
     `class Sample {
@@ -5569,6 +5587,31 @@ fun main() {
   ['Locale without its import', false, 'fun main() {\n    val l: Locale? = null\n}'],
 ])('decides whether %s compiles as kotlinc does', (_name, compiles, source) => {
   expect(executeProgram('kotlin', source).kind === 'compileError').toBe(!compiles);
+});
+
+test('resolves ordinary field calls and callable backing fields in accessors', () => {
+  const source = `fun field(): Int = 3
+val answer: Int
+    get() = field()
+
+class Sample {
+    fun field(): Int = 4
+    val value: Int
+        get() = field()
+    var callback: () -> Int = { 5 }
+        get() = { field() + 1 }
+        set(next) { field = next }
+}
+
+fun main() {
+    val sample = Sample()
+    println(answer)
+    println(sample.value)
+    println(sample.callback())
+    sample.callback = { 7 }
+    println(sample.callback())
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '3\n4\n6\n8\n' });
 });
 
 test.each([

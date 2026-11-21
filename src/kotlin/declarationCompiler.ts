@@ -1,6 +1,5 @@
 // code-gauge-allow-file fileNcss 1000 -- The declaration compiler shares symbol and class-linking logic.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
-import { accessesBackingField } from './accessorFieldUsage';
 import { VISIBILITY_KEYWORDS } from './ast';
 import type {
   ClassDecl,
@@ -825,12 +824,6 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     if (isInterface && !decl.getter?.body) symbol.isAbstract = true;
     if (symbol.isAbstract && decl.initializer)
       this.error(decl.row, `abstract なプロパティ ${decl.name} には初期値を書けません。`);
-    const backed = !decl.delegate && this.hasBackingField(decl, symbol);
-    if (decl.initializer && !backed && !decl.modifiers.keywords.has('external'))
-      this.error(decl.row, `バッキングフィールドを持たないプロパティ ${decl.name} には初期値を書けません。`);
-    if (!cls && !decl.initializer && backed) {
-      this.error(decl.row, `プロパティ ${decl.name} には初期値を書いてください。`);
-    }
     if (decl.modifiers.keywords.has('external')) this.bindNativeProperty(symbol, decl, cls?.symbol, file);
     const entry: PropertyEntry = {
       kind: 'property',
@@ -1015,16 +1008,14 @@ export abstract class DeclarationCompiler extends StatementCompiler {
 
   // Phase 3: layout, overrides, and dispatch.
 
-  /** Lays out fields and links overrides, superclasses before subclasses. */
   protected linkClasses(entries: ClassEntry[]): void {
     for (const entry of entries) {
       this.file = entry.file;
-      this.layOutFields(entry);
       this.linkOverrides(entry);
     }
   }
 
-  private layOutFields(entry: ClassEntry): void {
+  protected layOutFields(entry: ClassEntry): void {
     const { symbol } = entry;
     let count = symbol.superclass?.cls.fieldCount ?? 0;
     for (const field of entry.delegateFields) field.slot = count++;
@@ -1044,7 +1035,6 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       if (this.hasBackingField(member, property)) {
         property.slot = count++;
         symbol.ownFields.push(property);
-        // Custom accessors, compiled later, replace the default ones they declare.
         this.bindFieldAccessors(property);
       }
     }
@@ -1057,20 +1047,28 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       ?.find((member): member is PropertySymbol => member.kind === 'property') as PropertySymbol;
   }
 
-  /** Whether a property stores a value: unless it is abstract, external, or has accessors that never use `field`. */
   protected hasBackingField(decl: PropertyDecl, symbol: PropertySymbol): boolean {
-    if (symbol.isAbstract || decl.modifiers.keywords.has('external') || decl.receiver) return false;
-    // An accessor left to its default, or one that reads or writes `field`, keeps the value in a backing field.
-    const getterUses = !decl.getter?.body || accessesBackingField(decl.getter);
-    const setterUses = decl.isVar && (!decl.setter?.body || accessesBackingField(decl.setter));
-    return getterUses || setterUses;
+    return (
+      this.canHaveBackingField(decl, symbol) &&
+      (!decl.getter?.body || (decl.isVar && !decl.setter?.body) || symbol.backingFieldReferenced)
+    );
+  }
+
+  protected canHaveBackingField(decl: PropertyDecl, symbol: PropertySymbol): boolean {
+    return (
+      !symbol.isAbstract &&
+      !symbol.owner?.isInterface &&
+      !decl.modifiers.keywords.has('external') &&
+      !decl.receiver &&
+      !decl.delegate
+    );
   }
 
   /** Reads and writes a property's backing field directly, as its default accessors do. */
   protected bindFieldAccessors(property: PropertySymbol): void {
     const slot = property.slot as number;
     const isLateinit = property.isLateinit;
-    property.get = (frame, receiver) => {
+    property.get ??= (frame, receiver) => {
       const value = (receiver as KObject).fields[slot];
       if (isLateinit && value === undefined) {
         return frame.runtime.throwError(
@@ -1081,7 +1079,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       }
       return value;
     };
-    property.set = (_frame, receiver, value) => {
+    property.set ??= (_frame, receiver, value) => {
       (receiver as KObject).fields[slot] = value;
     };
   }
@@ -1340,10 +1338,10 @@ export abstract class DeclarationCompiler extends StatementCompiler {
 
   private linkDelegates(entry: ClassEntry): void {
     const { symbol } = entry;
-    const delegateSlots = new Map<MemberSymbol, number>();
+    const delegates = new Map<MemberSymbol, ClassEntry['delegateFields'][number]>();
     for (const field of entry.delegateFields) {
       for (const { symbol: member, substitution } of delegateMembers(field.type))
-        this.linkDelegateMember(symbol, member, substitution, field, delegateSlots);
+        this.linkDelegateMember(symbol, member, substitution, field, delegates);
     }
   }
 
@@ -1352,11 +1350,11 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     member: MemberSymbol,
     substitution: Substitution,
     field: ClassEntry['delegateFields'][number],
-    delegateSlots: Map<MemberSymbol, number>
+    delegates: Map<MemberSymbol, ClassEntry['delegateFields'][number]>
   ): void {
     if (symbol.vtable.get(member.root)?.owner === symbol) {
-      const prior = delegateSlots.get(member.root);
-      if (prior === undefined || prior === field.slot) return;
+      const prior = delegates.get(member.root);
+      if (prior === undefined || prior === field) return;
       this.error(field.spec.row, `${member.name} は複数の委譲先にあるため、override を書いてください。`);
     }
     const bases = aliasedOverrides(symbol, this.findOverridden(symbol, member, substitution));
@@ -1364,32 +1362,36 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     if (final) {
       this.error(field.spec.row, `委譲では ${final.owner?.name ?? ''}.${final.name} を上書きできません。`);
     }
-    const forward = this.forwarder(member, field.slot, symbol);
+    const forward = this.forwarder(member, field, symbol);
     forward.isLibrary = symbol.isLibrary;
     forward.overridden = bases;
     forward.row = field.spec.row;
     this.delegatedTypes.set(forward, substitution);
     for (const base of bases) {
-      delegateSlots.set(base.root, field.slot);
+      delegates.set(base.root, field);
       symbol.vtable.set(base.root, forward);
     }
   }
 
   /** A member that calls the delegate's implementation of `member`. */
-  private forwarder(member: MemberSymbol, slot: number, owner: ClassSymbol): MemberSymbol {
+  private forwarder(
+    member: MemberSymbol,
+    field: ClassEntry['delegateFields'][number],
+    owner: ClassSymbol
+  ): MemberSymbol {
+    const delegate = (receiver: Value): Value => (receiver as KObject).fields[field.slot];
     if (member.kind === 'function') {
       const forward = new FunctionSymbol(member.name);
       Object.assign(forward, member, { owner, isAbstract: false, root: member.root });
       forward.invoke = (frame, receiver, args, callRow) =>
-        callFunction(member, frame, (receiver as KObject).fields[slot], args, callRow);
+        callFunction(member, frame, delegate(receiver), args, callRow);
       return forward;
     }
     const forward = new PropertySymbol(member.name);
     Object.assign(forward, member, { owner, isAbstract: false, root: member.root });
-    forward.get = (frame, receiver) => getPropertyValue(member, frame, (receiver as KObject).fields[slot]);
+    forward.get = (frame, receiver) => getPropertyValue(member, frame, delegate(receiver));
     if (member.isVar) {
-      forward.set = (frame, receiver, value) =>
-        setPropertyValue(member, frame, (receiver as KObject).fields[slot], value);
+      forward.set = (frame, receiver, value) => setPropertyValue(member, frame, delegate(receiver), value);
     }
     return forward;
   }

@@ -573,8 +573,9 @@ export abstract class ExpressionCompiler extends CallCompiler {
   }
 
   protected readVariable(scope: Scope, context: FunctionContext, variable: VariableSymbol, row: number): Compiled {
-    const { delegateRead, localDelegate } = variable;
+    const { backingField, delegateRead, localDelegate } = variable;
     const repr = reprOf(this.core, variable.type);
+    if (backingField) return { type: variable.type, repr, eval: this.backingFieldAccess(context, backingField).read };
     if (localDelegate) {
       const { read } = this.variableAccess(context, localDelegate.holder);
       return { type: variable.type, repr, eval: (frame) => localDelegate.read(frame, read(frame)) };

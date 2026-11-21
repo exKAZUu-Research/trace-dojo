@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 559 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss 564 -- the compiler of one area of Kotlin, whose parts call each other closely.
 import type { Expression, ParameterDecl, PropertyDecl } from './ast';
 import type { ArgumentSyntax, Candidate, ResolvedCall } from './callCompiler';
 import {
@@ -32,9 +32,11 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     // The defaults need the types of the fields, which inferred properties have only now.
     const done = new Set<ClassSymbol>();
     const setDefaults = (cls: ClassSymbol): void => {
-      if (done.has(cls) || !this.entryOfClass.has(cls)) return;
+      const entry = this.entryOfClass.get(cls);
+      if (!entry || done.has(cls)) return;
       done.add(cls);
       if (cls.superclass) setDefaults(cls.superclass.cls);
+      this.layOutFields(entry);
       const defaults: Value[] = [...(cls.superclass?.cls.fieldDefaults ?? [])];
       defaults.length = cls.fieldCount;
       for (const property of cls.ownFields) defaults[property.slot as number] = this.defaultValueOf(property.type);
@@ -228,11 +230,9 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       else if (!symbol.type && decl.getter?.body) {
         symbol.type = this.compileAccessorType(entry);
       }
-      const isPlainTopLevel = !entry.cls && !decl.delegate;
-      // The global comes first, as the accessors' `field` is the global and the accessors replace its plain ones.
-      if (isPlainTopLevel && this.hasBackingField(decl, symbol)) this.bindGlobal(entry);
       if (decl.getter?.body) this.compileGetter(entry);
       if (decl.setter?.body) this.compileSetter(entry);
+      this.validatePropertyStorage(entry);
       entry.state = 'done';
     });
   }
@@ -316,13 +316,25 @@ export abstract class BodyCompiler extends DeclarationCompiler {
   /** The constructor parameters that class initializers see, which every initializer has assigned. */
   protected readonly initializerVariables = new Set<VariableSymbol>();
 
+  private validatePropertyStorage(entry: PropertyEntry): void {
+    const { decl, symbol } = entry;
+    if (!this.hasBackingField(decl, symbol)) {
+      if (decl.initializer && !decl.modifiers.keywords.has('external'))
+        this.error(decl.row, `バッキングフィールドを持たないプロパティ ${decl.name} には初期値を書けません。`);
+      return;
+    }
+    if (entry.cls) return;
+    if (!decl.initializer) this.error(decl.row, `プロパティ ${decl.name} には初期値を書いてください。`);
+    this.bindGlobal(entry);
+  }
+
   private bindGlobal(entry: PropertyEntry): void {
     const { symbol } = entry;
     const slot = this.globalDefaults.length;
     this.globalDefaults.push(this.defaultValueOf(symbol.type));
     symbol.slot = slot;
-    symbol.get = (frame) => frame.runtime.globals[slot];
-    symbol.set = (frame, _receiver, value) => {
+    symbol.get ??= (frame) => frame.runtime.globals[slot];
+    symbol.set ??= (frame, _receiver, value) => {
       frame.runtime.globals[slot] = value;
     };
   }
@@ -331,25 +343,29 @@ export abstract class BodyCompiler extends DeclarationCompiler {
   private compileAccessorType(entry: PropertyEntry): KType {
     const body = entry.decl.getter?.body;
     if (body?.kind !== 'expression') this.error(entry.decl.row, `プロパティ ${entry.decl.name} の型を書いてください。`);
-    const { context, scope } = this.accessorContext(entry, 'get');
+    const { context, scope } = this.accessorContext(entry, 'get', true);
     const compiled = this.compileExpression(scope, context, body.expression);
     return this.inferredResultType(compiled);
   }
 
-  private accessorContext(entry: PropertyEntry, kind: 'get' | 'set'): { context: FunctionContext; scope: Scope } {
+  private accessorContext(
+    entry: PropertyEntry,
+    kind: 'get' | 'set',
+    isProbe = false
+  ): { context: FunctionContext; scope: Scope } {
     const context = new FunctionContext(
       undefined,
       false,
       `${kind}-${entry.symbol.name}`,
       entry.file.isLibrary,
-      undefined
+      undefined,
+      isProbe
     );
     Object.defineProperty(context, 'returnTarget', { value: context });
     context.info.showsThis = entry.cls !== undefined && !entry.cls.symbol.isObject && !entry.file.isLibrary;
     const scope = new Scope(entry.scope, context);
     this.addReceivers(scope, context, entry.cls, entry.symbol.extensionReceiver);
-    const { slot } = entry.symbol;
-    if (slot !== undefined) {
+    if (this.canHaveBackingField(entry.decl, entry.symbol)) {
       const field = new VariableSymbol(
         'field',
         entry.symbol.type ?? anyType(true),
@@ -359,14 +375,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
         entry.decl.row
       );
       field.owner = context;
-      const storage = (frame: Frame): Value[] =>
-        entry.cls ? (frame.thisValue as KObject).fields : frame.runtime.globals;
-      field.delegateRead = (frame) => storage(frame)[slot];
-      if (entry.symbol.isVar) {
-        field.delegateWrite = (frame, value) => {
-          storage(frame)[slot] = value;
-        };
-      }
+      field.backingField = { property: entry.symbol, receiver: scope.receiver };
       scope.variables.set('field', field);
       this.flow.assigned.add(field);
     }
@@ -439,7 +448,6 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       this.compileDelegateExpression(scope, context, decl.delegate as Expression, symbol.type, decl.isVar)
     );
     entry.initializer = delegate;
-    const slot = entry.delegateSlot;
     const holderScope = new Scope(scope, context);
     const holder = new VariableSymbol('\0delegate', delegate.type, false, 0, -1, decl.row);
     holder.owner = context;
@@ -463,13 +471,15 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     else if (!isSubtype(getter.type, symbol.type)) this.error(decl.row, typeMismatchMessage(symbol.type, getter.type));
     const getEval = convertRepr(getter.eval, getter.repr, propertyRepr(symbol));
     // A top-level property's delegate lives in the globals, which the file's initializers fill when the run starts.
-    const globalSlot = slot === undefined ? this.globalDefaults.length : undefined;
+    const globalSlot = entry.cls ? undefined : this.globalDefaults.length;
     if (globalSlot !== undefined) {
       entry.delegateGlobal = globalSlot;
       this.globalDefaults.push(undefined);
     }
     const readDelegate = (frame: Frame, receiver: Value): Value =>
-      globalSlot === undefined ? (receiver as KObject).fields[slot as number] : frame.runtime.globals[globalSlot];
+      globalSlot === undefined
+        ? (receiver as KObject).fields[entry.delegateSlot as number]
+        : frame.runtime.globals[globalSlot];
     const { info } = context;
     const none: unknown[] = [];
     const runHeld = (frame: Frame, receiver: Value, run: Eval, value?: Value): Value =>

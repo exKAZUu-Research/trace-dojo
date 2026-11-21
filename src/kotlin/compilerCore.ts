@@ -36,7 +36,7 @@ import {
   type Substitution,
   type TypeArgument,
 } from './types';
-import { Cell, type Value } from './values';
+import { Cell, type KObject, type Value } from './values';
 
 /** The package of `Turtle`, which no program can name. */
 export const TURTLE_PACKAGE = 'tracedojo';
@@ -434,6 +434,24 @@ export abstract class CompilerCore {
       read: (frame) => readSlot(frame.captured[index]),
       write: (frame, value) => {
         (frame.captured[index] as Cell).value = value;
+      },
+    };
+  }
+
+  protected backingFieldAccess(
+    context: FunctionContext,
+    field: NonNullable<VariableSymbol['backingField']>
+  ): { read: Eval; write: (frame: Frame, value: Value) => void } {
+    const { property } = field;
+    if (!context.isProbe) property.backingFieldReferenced = true;
+    const receiver = field.receiver && this.receiverAccess(context, field.receiver);
+    const storage = receiver
+      ? (frame: Frame) => (receiver(frame) as KObject).fields
+      : (frame: Frame) => frame.runtime.globals;
+    return {
+      read: (frame) => storage(frame)[property.slot as number],
+      write: (frame, value) => {
+        storage(frame)[property.slot as number] = value;
       },
     };
   }

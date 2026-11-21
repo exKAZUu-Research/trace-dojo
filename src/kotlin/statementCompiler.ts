@@ -587,16 +587,10 @@ export abstract class StatementCompiler extends OperatorCompiler {
     row: number,
     isCompound: boolean
   ): Place {
-    const { delegateRead, delegateWrite, localDelegate } = variable;
+    const { backingField, delegateRead, localDelegate } = variable;
     if (localDelegate) return this.localDelegatePlace(context, variable, localDelegate, row);
-    if (delegateRead) {
-      if (!delegateWrite) return this.unavailable(row, '委譲したローカル変数への代入');
-      return {
-        type: variable.type,
-        repr: reprOf(this.core, variable.type),
-        bind: (frame) => ({ get: () => delegateRead(frame), set: (value) => delegateWrite(frame, value) }),
-      };
-    }
+    if (backingField) return this.backingFieldPlace(context, variable, backingField, row);
+    if (delegateRead) return this.unavailable(row, '委譲したローカル変数への代入');
     const isAssigned = this.flow.assigned.has(variable);
     if (isCompound && !isAssigned) this.error(row, `変数 ${variable.name} に値が入っていません。`);
     if (!variable.isVar) {
@@ -619,6 +613,21 @@ export abstract class StatementCompiler extends OperatorCompiler {
         this.recordAssignment(context, variable, row);
       },
       bind: (frame) => ({ get: () => access.read(frame), set: (value) => access.write(frame, value) }),
+    };
+  }
+
+  private backingFieldPlace(
+    context: FunctionContext,
+    variable: VariableSymbol,
+    field: NonNullable<VariableSymbol['backingField']>,
+    row: number
+  ): Place {
+    if (!variable.isVar) this.error(row, `val で宣言した ${variable.name} には、再び代入できません。`);
+    const { read, write } = this.backingFieldAccess(context, field);
+    return {
+      type: variable.type,
+      repr: reprOf(this.core, variable.type),
+      bind: (frame) => ({ get: () => read(frame), set: (value) => write(frame, value) }),
     };
   }
 
@@ -1493,7 +1502,8 @@ export abstract class StatementCompiler extends OperatorCompiler {
     if (statement.kind === 'expressionStatement' && this.isNonThrowingExpression(scope, statement.expression)) return;
     if (statement.kind === 'assignment' && statement.operator === '=' && statement.target.kind === 'name') {
       const local = this.findVariable(scope, statement.target.name);
-      if (local && !local.delegateRead && this.isNonThrowingExpression(scope, statement.value)) return;
+      if (local && !local.backingField && !local.delegateRead && this.isNonThrowingExpression(scope, statement.value))
+        return;
     }
     entries.push(this.flow.copy());
   }
@@ -1514,7 +1524,9 @@ export abstract class StatementCompiler extends OperatorCompiler {
       }
       case 'name': {
         const variable = this.findVariable(scope, expression.name);
-        return Boolean(variable && !variable.delegateRead && this.flow.assigned.has(variable));
+        return Boolean(
+          variable && !variable.backingField && !variable.delegateRead && this.flow.assigned.has(variable)
+        );
       }
       case 'parenthesized': {
         return this.isNonThrowingExpression(scope, expression.expression);
