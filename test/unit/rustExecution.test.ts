@@ -8545,3 +8545,21 @@ test('? turns an io::Error from writing to standard output into a boxed error', 
   ).replace('fn main() {', 'fn main() -> Result<(), Box<dyn std::error::Error>> {');
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'hello\n' });
 });
+
+test.each([
+  ['an iterator over', 'input.iter()'],
+  ['a borrow of', '&input'],
+])('a map extends from %s a short-lived map of references to a living String', (_name, source) => {
+  const program = rustMain(
+    `
+    let s = String::from("hello");
+    let mut result: BTreeMap<i32, &str> = BTreeMap::new();
+    {
+        let input = BTreeMap::from([(1, s.as_str())]);
+        result.extend(${source});
+    }
+    println!("{:?}", result);`,
+    'use std::collections::BTreeMap;'
+  );
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '{1: "hello"}\n' });
+});

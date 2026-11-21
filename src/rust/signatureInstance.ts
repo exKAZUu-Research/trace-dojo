@@ -117,8 +117,10 @@ export class SignatureInstance {
   private bindBorrowedIterator(t: Type, actual: Layout): boolean {
     if (actual.kind !== 'ref' || t.kind !== 'adt' || t.def.builtin !== 'Iter' || t.args.length === 0) return false;
     const item = instantiate(t.args[0], this.subst, this.fresh);
-    if (item.kind !== 'ref') return false;
-    relate(this.outlives, actual, item);
+    // A map's items are pairs of references into it.
+    const references = item.kind === 'tuple' ? item.elems : [item];
+    if (!references.every((part) => part.kind === 'ref')) return false;
+    for (const part of references) relate(this.outlives, actual, part);
     const iterator = instantiate(t, this.subst, this.fresh);
     if (iterator.kind === 'adt') for (const own of iterator.own) this.outlives(actual.region, own);
     return true;
@@ -202,9 +204,7 @@ export class SignatureInstance {
   private relateBoundArgs(bound: TraitRef, layout: Layout): void {
     if (bound.trait.builtin === 'ExtendInto') {
       const target = instantiate(bound.args[0], this.subst, this.fresh);
-      // Extending from `&T` copies the `T` out: only what the reference points to flows in, not the borrow itself.
-      const source = layout.kind === 'ref' && refDepth(layout) > refDepth(target) ? layout.target : layout;
-      relate(this.outlives, source, target);
+      relate(this.outlives, copiedOut(layout, target), target);
       return;
     }
     for (const arg of bound.args) {
@@ -325,6 +325,17 @@ export function relateOpaqueCall(
   for (const a of [...regionsOf(called), ...inputs]) {
     for (const b of regionsOf(result)) outlives(a, b);
   }
+}
+
+/**
+ * What flows into `target` when extending from `source`: extending from `&T` copies the `T` out, so only what the
+ * reference points to flows in, not the borrow itself, and a map's pair `(&K, &V)` copies each part.
+ */
+function copiedOut(source: Layout, target: Layout): Layout {
+  if (source.kind === 'tuple' && target.kind === 'tuple' && source.elems.length === target.elems.length) {
+    return { kind: 'tuple', elems: source.elems.map((elem, index) => copiedOut(elem, target.elems[index])) };
+  }
+  return source.kind === 'ref' && refDepth(source) > refDepth(target) ? source.target : source;
 }
 
 function refDepth(layout: Layout): number {
