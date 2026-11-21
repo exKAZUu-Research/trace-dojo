@@ -6,6 +6,7 @@ import { Annotations, type Coercion, type FnContext, type LocalVar, type PathRes
 import type { Block, Expr, FnItem, Pattern, Span, Stmt, TypeAst } from './ast';
 import { forEachResult } from './astWalk';
 import { BorrowChecker } from './borrowck';
+import { settleClosures } from './checkerClosures';
 import { exprInner } from './checkerExpr';
 import { settleBinaries } from './checkerOperators';
 import { checkPattern } from './checkerPatterns';
@@ -20,6 +21,7 @@ import { TraitSolver } from './traits';
 import {
   type AdtDef,
   childTypes,
+  type ClosureType,
   type ConstDef,
   defaultTraitArguments,
   type FloatName,
@@ -113,6 +115,8 @@ export class Checker {
   readonly varBounds = new Map<unknown, TraitRef[]>();
   body!: BodyContext;
   deferredChecks: (() => void)[] = [];
+  /** Closures whose capture analysis waits for a type, each with the analysis, which returns whether it is final. */
+  unsettledClosures: { closure: ClosureType; analyze: () => boolean }[] = [];
   readonly fallbackChecks: (() => void)[] = [];
   readonly coverageChecks = new Map<FnDef | ConstDef, CoverageCheck[]>();
   /** The number literals of the body, which rustc's `overflowing_literals` lint checks against their types. */
@@ -702,7 +706,7 @@ export class Checker {
     this.settleTryErrors(final);
     let progress = true;
     while (progress) {
-      progress = settleBinaries(this, false);
+      progress = this.settleInferred();
       const pending = this.obligations;
       this.obligations = [];
       for (const obligation of pending) {
@@ -719,6 +723,7 @@ export class Checker {
       resolve(type, true);
       resolveTraitRef(trait, true);
     }
+    settleClosures(this, true);
     const remaining = this.obligations;
     this.obligations = [];
     for (const obligation of remaining) {
@@ -730,6 +735,12 @@ export class Checker {
         compileError(obligation.span, `型が決まりません（${typeToString(obligation.type)} の型を書いてください）。`);
       }
     }
+  }
+
+  /** Settles what waited for a type that inference has supplied since, and returns whether anything was settled. */
+  private settleInferred(): boolean {
+    const settledClosures = settleClosures(this, false);
+    return settleBinaries(this, false) || settledClosures;
   }
 
   private settleTryErrors(final: boolean): void {

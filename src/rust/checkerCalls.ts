@@ -228,22 +228,36 @@ function callValue(
     kind = sig.trait.builtin === 'Fn' || sig.trait.builtin === 'FnMut' ? sig.trait.builtin : 'FnOnce';
   }
   if (kind === 'FnMut') requireCallableMut(c, expr, kind);
-  if (
-    kind === 'FnOnce' &&
-    autoderefSteps(c.program, calleeType)
-      .at(-1)
-      ?.derefs.some((step) => step !== 'own') &&
-    !c.solver.isCopy(t)
-  ) {
-    compileError(expr.callee.span, '参照の先の FnOnce クロージャは、値をムーブできないので呼び出せません。');
-  }
+  const recordKind = (): void => recordCallKind(c, expr, calleeType, t, kind);
+  recordKind();
+  if (t.kind === 'closure') t.closure.unsettled?.push(recordKind);
   if (expr.args.length !== params.length) {
     compileError(expr.span, `引数の数が合いません（${params.length} 個ですが、${expr.args.length} 個あります）。`);
   }
   if (expected) c.unifier.tryUnify(ret, expected);
   checkArgs(c, expr.args, params);
-  c.annotations.callKinds.set(expr, kind);
   return ret;
+}
+
+/** Records the closure trait a call goes through, which is the callee's own once a closure's captures are settled. */
+function recordCallKind(
+  c: Checker,
+  expr: Extract<Expr, { kind: 'call' }>,
+  calleeType: Type,
+  callee: Type,
+  declared: ClosureType['kind']
+): void {
+  const kind = callee.kind === 'closure' ? callee.closure.kind : declared;
+  if (
+    kind === 'FnOnce' &&
+    autoderefSteps(c.program, calleeType)
+      .at(-1)
+      ?.derefs.some((step) => step !== 'own') &&
+    !c.solver.isCopy(callee)
+  ) {
+    compileError(expr.callee.span, '参照の先の FnOnce クロージャは、値をムーブできないので呼び出せません。');
+  }
+  c.annotations.callKinds.set(expr, kind);
 }
 
 /** Calling an `FnMut` closure borrows it mutably, so its variable must be `mut`. */

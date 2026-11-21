@@ -13,6 +13,7 @@ import {
   freshVar,
   newClosureType,
   resolve,
+  settleClosure,
   shallow,
   type Type,
   UNIT,
@@ -61,12 +62,7 @@ export function checkClosure(c: Checker, expr: Extract<Expr, { kind: 'closure' }
   } finally {
     c.body = parentBody;
   }
-  const captureInfo = closureKindOf(fn, expr.body, c.annotations, c.solver);
-  fn.closureKind = captureInfo.kind;
-  Object.assign((closureType as Type & { kind: 'closure' }).closure, {
-    ...captureInfo,
-    span: expr.span,
-  });
+  analyzeCaptures(c, fn, expr, (closureType as Type & { kind: 'closure' }).closure);
   c.annotations.closures.set(expr, {
     context: fn,
     params: expr.params.flatMap((param) =>
@@ -74,6 +70,36 @@ export function checkClosure(c: Checker, expr: Extract<Expr, { kind: 'closure' }
     ),
   });
   return closureType;
+}
+
+/** Decides how a closure captures and which closure trait it implements, again later while a type it needs is unknown. */
+function analyzeCaptures(
+  c: Checker,
+  fn: FnContext,
+  expr: Extract<Expr, { kind: 'closure' }>,
+  closure: ClosureType
+): void {
+  closure.span = expr.span;
+  const analyze = (): boolean => {
+    const { isSettled, ...captureInfo } = closureKindOf(fn, expr.body, c.annotations, c.solver);
+    fn.closureKind = captureInfo.kind;
+    Object.assign(closure, captureInfo);
+    return isSettled;
+  };
+  if (analyze()) return;
+  closure.unsettled = [];
+  c.unsettledClosures.push({ closure, analyze });
+}
+
+/** Repeats the capture analysis of closures that waited for a type, and returns whether one became final. */
+export function settleClosures(c: Checker, final: boolean): boolean {
+  const waiting = c.unsettledClosures;
+  c.unsettledClosures = [];
+  for (const entry of waiting) {
+    if (entry.analyze() || final) settleClosure(entry.closure);
+    else c.unsettledClosures.push(entry);
+  }
+  return c.unsettledClosures.length < waiting.length;
 }
 
 export function closureSignature(c: Checker, type: Type): { params: Type[]; ret: Type } | undefined {
@@ -92,7 +118,7 @@ function closureKindOf(
   body: Expr,
   annotations: Annotations,
   solver: TraitSolver
-): Pick<ClosureType, 'kind' | 'movedAt' | 'captures'> {
+): Pick<ClosureType, 'kind' | 'movedAt' | 'captures'> & { isSettled: boolean } {
   const uses = new CaptureUses(new Set(fn.captures), annotations, solver);
   uses.visit(body, true);
   fn.movedCaptures = [...uses.moved];
@@ -105,7 +131,7 @@ function closureKindOf(
   );
   const captures = [...fn.projectedCaptures.values()].flat();
   const kind = uses.moved.size > 0 ? 'FnOnce' : uses.mutated.size > 0 ? 'FnMut' : 'Fn';
-  return { kind, movedAt: uses.firstMove, captures };
+  return { kind, movedAt: uses.firstMove, captures, isSettled: !uses.dependsOnInference };
 }
 
 /** How a closure's body uses the variables it captures: those it moves out and those it modifies. */
@@ -114,6 +140,8 @@ class CaptureUses {
   readonly mutated = new Set<LocalVar>();
   readonly modes = new Map<Expr, CaptureMode>();
   firstMove: { name: string; span: Span } | undefined;
+  /** Whether a type not inferred yet, or a closure whose own analysis waits for one, can still turn a use into a move. */
+  dependsOnInference = false;
 
   constructor(
     private readonly captured: ReadonlySet<LocalVar>,
@@ -137,8 +165,7 @@ class CaptureUses {
       consumed = false;
       if (reference) this.mutate(expr);
     }
-    // Calling a captured `FnOnce` closure moves it.
-    if (expr.kind === 'call' && this.annotations.callKinds.get(expr) === 'FnOnce') this.move(expr.callee, expr.span);
+    if (expr.kind === 'call') this.visitCall(expr);
     if (consumed && expr.kind !== 'index' && !this.isCopy(expr.ty ?? UNIT)) this.move(expr, expr.span);
     const consumes = consumedChildren(
       expr,
@@ -158,6 +185,13 @@ class CaptureUses {
         return true;
       }
     );
+  }
+
+  /** Calling a captured `FnOnce` closure moves it. */
+  private visitCall(expr: Extract<Expr, { kind: 'call' }>): void {
+    const callee = resolve(expr.callee.ty ?? UNIT);
+    if (callee.kind === 'closure' && callee.closure.unsettled) this.dependsOnInference = true;
+    if (this.annotations.callKinds.get(expr) === 'FnOnce') this.move(expr.callee, expr.span);
   }
 
   private mutate(place: Expr): void {
@@ -189,7 +223,9 @@ class CaptureUses {
   private readonly isCopy = (type: Type): boolean => {
     // Defaulting number literals' types here would fix them too early; the solver knows they are `Copy` anyway.
     const t = resolve(type);
-    return (t.kind === 'var' && !t.v.literal) || this.solver.isCopy(t);
+    if (t.kind !== 'var' || t.v.literal) return this.solver.isCopy(t);
+    this.dependsOnInference = true;
+    return true;
   };
 }
 

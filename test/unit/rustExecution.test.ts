@@ -6913,3 +6913,41 @@ test('recovers invalid and incomplete UTF-8 with owned lossy capacity growth', (
     stdout: '"a�" 8\n"�" 8\n"���������" 36\n',
   });
 });
+
+test('decides closure captures and traits after inference supplies the captured type', () => {
+  const consuming = rustMain(
+    `    let text = Default::default();
+    let give = || text;
+    println!("[{}]", take(give));
+    let number = Default::default();
+    let read = || number;
+    let total: i32 = read() + read();
+    println!("{}", total);
+    let items = Vec::new();
+    let inner = || items;
+    let outer = || inner();
+    let mut owned: Vec<i32> = outer();
+    owned.push(1);
+    println!("{:?}", owned);`,
+    'fn take<F: FnOnce() -> String>(f: F) -> String { f() }'
+  );
+  expect(executeProgram('rust', consuming)).toMatchObject({ kind: 'executed', stdout: '[]\n0\n[1]\n' });
+
+  const head = '    let text = Default::default();\n    let give = || text;\n';
+  expect(executeProgram('rust', rustMain(`${head}    let a: String = give();\n    let b = give();`))).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ row: 4, message: expect.stringContaining('ムーブされた') })],
+  });
+  expect(
+    executeProgram('rust', rustMain(`${head}    let copy = give;\n    let a: String = copy();\n    give();`))
+  ).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ row: 5, message: expect.stringContaining('ムーブされた') })],
+  });
+  expect(
+    executeProgram('rust', rustMain(`${head}    call(give);`, 'fn call<F: Fn() -> String>(f: F) -> String { f() }'))
+  ).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ row: 3, message: expect.stringContaining('Fn のクロージャ') })],
+  });
+});

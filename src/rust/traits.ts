@@ -3,6 +3,7 @@ import type { Module, Program } from './items';
 import { builtinImplements } from './traitBuiltins';
 import {
   allSupertraits,
+  type ClosureType,
   F32,
   F64,
   freshVar,
@@ -222,12 +223,13 @@ export class TraitSolver {
     const sig = ref.fnSig!;
     if (t.kind === 'closure') {
       const { closure } = t;
-      if (!closureKindAtLeast(closure.kind, ref.trait.name)) return 'no';
+      const kind = closureKindAnswer(closure, ref.trait.name);
+      if (kind === 'no') return 'no';
       if (closure.params.length !== sig.params.length) return 'no';
       const ok =
         this.unifier.tryUnify({ kind: 'tuple', elems: closure.params }, { kind: 'tuple', elems: sig.params }) &&
         this.unifier.tryUnify(closure.ret, sig.ret);
-      return ok ? 'yes' : 'no';
+      return ok ? kind : 'no';
     }
     if (t.kind === 'fn') {
       if (t.params.length !== sig.params.length) return 'no';
@@ -342,6 +344,12 @@ function matchesImplGoal(
 /** The std traits with a blanket impl for every type of another trait: `impl<T: Display> ToString for T`. */
 const BLANKET_IMPLS: Record<string, string> = { ToString: 'Display', ToOwned: 'Clone', IntoIterator: 'Iterator' };
 const PARAMETER_BLANKET_TRAITS = new Set(['Borrow', 'From', 'Into', 'TryFrom', 'TryInto', 'ExtendInto']);
+
+/** Whether a closure implements a closure trait; while its captures are unsettled, its trait can still rise to `FnOnce`. */
+function closureKindAnswer(closure: ClosureType, need: string): Answer {
+  if (!closureKindAtLeast(closure.kind, need)) return 'no';
+  return closure.unsettled && need !== 'FnOnce' ? 'unknown' : 'yes';
+}
 
 export function closureKindAtLeast(have: string, need: string): boolean {
   const order = ['Fn', 'FnMut', 'FnOnce'];

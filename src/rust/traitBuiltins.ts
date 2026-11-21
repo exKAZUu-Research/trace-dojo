@@ -747,7 +747,8 @@ function isPrimitive(t: Type): boolean {
 function closureCaptures(t: Type & { kind: 'closure' }, all: (types: Type[]) => Answer): Answer {
   const captures = t.closure.captures ?? [];
   if (captures.some((capture) => capture.mode === 'mut')) return 'no';
-  return all(captures.filter((capture) => capture.mode === 'value').map((capture) => capture.type));
+  const answer = all(captures.filter((capture) => capture.mode === 'value').map((capture) => capture.type));
+  return answer === 'yes' && t.closure.unsettled ? 'unknown' : answer;
 }
 
 /**

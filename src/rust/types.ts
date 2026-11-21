@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 456 -- Defines Rust types, their substitutions and their shared structural operations.
+// code-gauge-allow-file fileNcss 467 -- Defines Rust types, their substitutions and their shared structural operations.
 import type { ConstItem, FieldAst, FnItem, Span } from './ast';
 import type { Module } from './items';
 
@@ -61,6 +61,18 @@ export interface ClosureType {
   span?: Span;
   /** How the closure captures each variable, which decides whether it is `Copy` and `Clone`. */
   captures?: { type: Type; mode: 'ref' | 'mut' | 'value' }[];
+  /**
+   * Present while a captured variable's type is not inferred yet, which leaves open whether using it moves it: `kind`
+   * can still rise to `FnOnce` and a `ref` capture can still become `value`. Holds what to update once it is settled.
+   */
+  unsettled?: (() => void)[];
+}
+
+/** Marks the capture analysis of a closure final and updates what depends on it. */
+export function settleClosure(closure: ClosureType): void {
+  const dependents = closure.unsettled ?? [];
+  closure.unsettled = undefined;
+  for (const update of dependents) update();
 }
 
 /** A return type `impl Trait`, which callers see only through its bounds. */
@@ -461,15 +473,20 @@ export function substitute(type: Type, subst: Subst): Type {
   if (t.kind === 'param') return subst.get(t.param) ?? t;
   if (t.kind === 'closure') {
     const { closure } = t;
-    return {
-      kind: 'closure',
-      closure: {
-        ...closure,
-        params: closure.params.map((param) => substitute(param, subst)),
-        ret: substitute(closure.ret, subst),
-        captures: closure.captures?.map((capture) => ({ ...capture, type: substitute(capture.type, subst) })),
-      },
+    const captures = (): ClosureType['captures'] =>
+      closure.captures?.map((capture) => ({ ...capture, type: substitute(capture.type, subst) }));
+    const copy: ClosureType = {
+      ...closure,
+      params: closure.params.map((param) => substitute(param, subst)),
+      ret: substitute(closure.ret, subst),
+      captures: captures(),
+      unsettled: closure.unsettled && [],
     };
+    closure.unsettled?.push(() => {
+      Object.assign(copy, { kind: closure.kind, movedAt: closure.movedAt, captures: captures() });
+      settleClosure(copy);
+    });
+    return { kind: 'closure', closure: copy };
   }
   if (t.kind === 'opaque') {
     const opaque = t.opaque;
