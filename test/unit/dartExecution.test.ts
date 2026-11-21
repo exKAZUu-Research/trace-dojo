@@ -718,6 +718,38 @@ test('main receives a checked second argument explicitly set to null', () => {
   });
 });
 
+test('named Dart constructors share the static member namespace', () => {
+  const program = `class Person {
+  final String name;
+  final int age;
+  Person.name(this.name) : age = 0;
+}
+class WithGetter {
+  int get name => 1;
+  WithGetter.name();
+}
+class WithMethod {
+  int read() => 2;
+  WithMethod.read();
+}
+class WithFactory {
+  final int value = 3;
+  WithFactory();
+  factory WithFactory.value() => WithFactory();
+}
+void main() {
+  print([Person.name('Dart').name, WithGetter.name().name, WithMethod.read().read(), WithFactory.value().value]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[Dart, 1, 2, 3]\n',
+  });
+  for (const member of ['static int name = 1;', 'static set name(int value) {}']) {
+    const invalid = `class C { ${member} C.name(); } void main() {}`;
+    expect(executeProgram('dart', invalid)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
 test('Dart member names cannot reuse enclosing names or type parameters', () => {
   for (const declaration of [
     'class C { int C = 1; }',

@@ -69,7 +69,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     this.checkEnclosingMemberName(cls, name, declaration, true);
     if (cls.constructors.has(name))
       this.error(declaration, `コンストラクタ ${cls.name}${name ? `.${name}` : ''} は、既に宣言されています。`);
-    if (name && (cls.staticMembers.has(name) || cls.members.has(name)))
+    if (name && (cls.staticMembers.has(name) || cls.staticSetters.has(name)))
       this.error(declaration, `${name} という名前は、既に宣言されています。`);
     if (cls.kind === 'mixin') this.error(declaration, 'mixin にはコンストラクタを書けません。');
     if (cls.kind === 'mixinClass' && declaration.constructorKind === 'generative' && !isTrivialConstructor(declaration))
