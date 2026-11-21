@@ -11,13 +11,14 @@ import {
   readSlot,
   ReceiverSymbol,
   Scope,
+  typeMismatchMessage,
 } from './compilerBase';
 import { unavailableJavaFeature, unavailableMessage } from './convertSupport';
 import { isJavaTypeAlias, knownLibraryDeclaration } from './libraryApi';
 import type { Frame } from './runtime';
 import type { ClassSymbol, FunctionSymbol, MemberSymbol, PropertySymbol, TypeParameterSymbol } from './symbols';
 import { VariableSymbol } from './symbols';
-import { anyType, asSuper, substitutionOf } from './typeRelations';
+import { anyType, asSuper, isSubtype, substitutionOf } from './typeRelations';
 import {
   type ClassType,
   type KType,
@@ -75,6 +76,7 @@ export abstract class CompilerCore {
   protected readonly claimedAtomicRows = new Set<number>();
   /** Whether the program records the steps of its statements, which only traces do. */
   protected recordsSteps = false;
+  private pendingTypeBounds: { type: ClassType; row: number }[] | undefined;
 
   constructor(packages: Map<string, PackageScope>) {
     this.packages = packages;
@@ -177,10 +179,41 @@ export abstract class CompilerCore {
       if (refs.length === 0) this.error(row, `型 ${cls.name} には型引数が ${cls.typeParameters.length} 個要ります。`);
       this.error(row, `型 ${cls.name} の型引数の数が違います。`);
     }
-    return refs.map((projection): TypeArgument => {
+    const args = refs.map((projection): TypeArgument => {
       if (projection.star) return { variance: 'star' };
       return { variance: projection.variance ?? 'inv', type: this.resolveType(scope, projection.type) };
     });
+    if (!this.file.isLibrary && cls.typeParameters.some((param) => param.bounds.length > 0)) {
+      const type: ClassType = { kind: 'class', cls, args, nullable: false };
+      if (this.pendingTypeBounds) this.pendingTypeBounds.push({ type, row });
+      else this.checkTypeBounds(type, row);
+    }
+    return args;
+  }
+
+  protected checkTypeBoundsAfter<T>(resolve: () => T): T {
+    const previous = this.pendingTypeBounds;
+    const pending: NonNullable<CompilerCore['pendingTypeBounds']> = [];
+    this.pendingTypeBounds = pending;
+    try {
+      const result = resolve();
+      for (const { type, row } of pending) this.checkTypeBounds(type, row);
+      return result;
+    } finally {
+      this.pendingTypeBounds = previous;
+    }
+  }
+
+  private checkTypeBounds(type: ClassType, row: number): void {
+    const substitution = substitutionOf(type);
+    for (const [index, parameter] of type.cls.typeParameters.entries()) {
+      const argument = type.args[index];
+      if (argument.variance === 'star') continue;
+      for (const bound of parameter.bounds) {
+        const expected = substitute(bound, substitution);
+        if (!isSubtype(argument.type, expected)) this.error(row, typeMismatchMessage(expected, argument.type));
+      }
+    }
   }
 
   protected findTypeParameter(scope: Scope | undefined, name: string): TypeParameterSymbol | undefined {

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 886 -- the natives of the collections, which share the helpers of their items.
+// code-gauge-allow-file fileNcss 887 -- the natives of the collections, which share the helpers of their items.
 import { runtimeClassOf } from '../dispatch';
 import { hashOf, identityHash, stringOf, valueEquals } from '../format';
 import { toInt32 } from '../operators';
@@ -218,19 +218,14 @@ type ListNative = (frame: Frame, list: Value, args: Value[]) => Value;
 /** What reads a list of the library. */
 const LIST_READING_NATIVES: Record<string, ListNative> = {
   'isEmpty()': (_frame, list) => indexedSize(list as KObject) === 0,
-  'contains(E)': (frame, list, [element]) => indexOfValue(frame, readableItems(list), element) !== -1,
+  'contains(E)': (frame, list, [element]) => findListValue(frame, list as KObject, element) !== -1,
   'containsAll(Collection<E>)': (frame, list, [elements]) => containsAll(frame, list, elements),
   'get(Int)': (frame, list, [index]) => {
     checkIndex(frame, list, index as number);
     return indexedItem(list as KObject, index as number);
   },
-  'indexOf(E)': (frame, list, [element]) => indexOfValue(frame, readableItems(list), element),
-  'lastIndexOf(E)': (frame, list, [element]) => {
-    const values = readableItems(list);
-    for (let index = values.length - 1; index >= 0; index--)
-      if (valueEquals(frame, element, values[index])) return index;
-    return -1;
-  },
+  'indexOf(E)': (frame, list, [element]) => findListValue(frame, list as KObject, element),
+  'lastIndexOf(E)': (frame, list, [element]) => findListValue(frame, list as KObject, element, true),
   'iterator()': (frame, list) => arrayIterator(frame, list as KObject),
   'listIterator()': (frame, list) => arrayIterator(frame, list as KObject),
   'listIterator(Int)': (frame, list, [index]) => {
@@ -256,6 +251,22 @@ const LIST_READING_NATIVES: Record<string, ListNative> = {
   'toString()': (frame, list) => collectionToString(frame, list, readableItems(list)),
 };
 
+function findListValue(frame: Frame, list: KObject, element: Value, fromEnd = false): number {
+  const view = listView(list);
+  const values = (view?.source ?? list).items;
+  const from = view?.from ?? 0;
+  const size = indexedSize(list);
+  return frame.runtime.withNativeRoots([values], () => {
+    for (let offset = 0; offset < size; offset++) {
+      const index = fromEnd ? size - 1 - offset : offset;
+      const value = values ? values[from + index] : indexedItem(list, index);
+      frame.runtime.spend();
+      if (valueEquals(frame, element, value)) return index;
+    }
+    return -1;
+  });
+}
+
 /** What changes a list of the library, which only its resizable and mutable kinds allow. */
 const LIST_CHANGING_NATIVES: Record<string, ListNative> = {
   'add(E)': (frame, list, [element]) => {
@@ -273,8 +284,7 @@ const LIST_CHANGING_NATIVES: Record<string, ListNative> = {
   'addAll(Int, Collection<E>)': (frame, list, [index, elements]) =>
     insertListElements(frame, list as KObject, index as number, elements),
   'remove(E)': (frame, list, [element]) => {
-    const values = readableItems(list);
-    const index = indexOfValue(frame, values, element);
+    const index = findListValue(frame, list as KObject, element);
     if (index === -1) {
       requireMutable(frame, list);
       return false;
@@ -783,8 +793,7 @@ function defineMaps(): void {
   const natives: Record<string, (frame: Frame, map: Value, args: Value[]) => Value> = {
     'isEmpty()': (_frame, map) => storeOf(map).entries.length === 0,
     'containsKey(K)': (frame, map, [key]) => findEntry(frame, storeOf(map), key) !== undefined,
-    'containsValue(V)': (frame, map, [value]) =>
-      storeOf(map).entries.some((entry) => valueEquals(frame, value, entry.value)),
+    'containsValue(V)': (frame, map, [value]) => findMapValue(frame, storeOf(map), value) !== undefined,
     'get(K)': (frame, map, [key]) => {
       const store = storeOf(map);
       return findEntry(frame, store, key)?.value;
@@ -1100,8 +1109,15 @@ function matchingViewEntry(frame: Frame, view: Value, element: Value, removing: 
   const { view: kind, map } = viewOf(view);
   const store = storeOf(map);
   if (kind === 'keys') return findEntry(frame, store, element);
-  if (kind === 'values') return store.ordered().find((entry) => objectsEqual(frame, element, entry.value));
+  if (kind === 'values') return findMapValue(frame, store, element);
   return matchingEntry(frame, store, element, removing);
+}
+
+function findMapValue(frame: Frame, store: KStore, value: Value): HashEntry | undefined {
+  return store.ordered().find((entry) => {
+    frame.runtime.spend();
+    return objectsEqual(frame, value, entry.value);
+  });
 }
 
 function matchingEntry(frame: Frame, store: KStore, element: Value, removing: boolean): HashEntry | undefined {

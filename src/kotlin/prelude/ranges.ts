@@ -61,6 +61,11 @@ internal fun getProgressionLastElement(start: Long, end: Long, step: Long): Long
     else -> throw IllegalArgumentException("Step is zero.")
 }
 
+private fun checkIntProgressionStep(step: Int) {
+    if (step == 0) throw IllegalArgumentException("Step must be non-zero.")
+    if (step == Int.MIN_VALUE) throw IllegalArgumentException("Step must be greater than Int.MIN_VALUE to avoid overflow on negation.")
+}
+
 open class IntProgression internal constructor(val first: Int, val last: Int, val step: Int) : Iterable<Int> {
     override fun iterator(): Iterator<Int> = IntProgressionIterator(first, last, step)
     open fun isEmpty(): Boolean = if (step > 0) first > last else first < last
@@ -70,8 +75,7 @@ open class IntProgression internal constructor(val first: Int, val last: Int, va
     override fun toString(): String = if (step > 0) "$first..$last step $step" else "$first downTo $last step \${-step}"
     companion object {
         fun fromClosedRange(rangeStart: Int, rangeEnd: Int, step: Int): IntProgression {
-            if (step == 0) throw IllegalArgumentException("Step must be non-zero.")
-            if (step == Int.MIN_VALUE) throw IllegalArgumentException("Step must be greater than Int.MIN_VALUE to avoid overflow on negation.")
+            checkIntProgressionStep(step)
             return IntProgression(rangeStart, getProgressionLastElement(rangeStart, rangeEnd, step), step)
         }
     }
@@ -102,7 +106,7 @@ open class CharProgression internal constructor(val first: Char, val last: Char,
     override fun toString(): String = if (step > 0) "$first..$last step $step" else "$first downTo $last step \${-step}"
     companion object {
         fun fromClosedRange(rangeStart: Char, rangeEnd: Char, step: Int): CharProgression {
-            if (step == 0) throw IllegalArgumentException("Step must be non-zero.")
+            checkIntProgressionStep(step)
             return CharProgression(rangeStart, getProgressionLastElement(rangeStart.code, rangeEnd.code, step).toChar(), step)
         }
     }

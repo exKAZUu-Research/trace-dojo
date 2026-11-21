@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 975 -- The declaration compiler shares symbol and class-linking logic.
+// code-gauge-allow-file fileNcss 978 -- The declaration compiler shares symbol and class-linking logic.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import { VISIBILITY_KEYWORDS } from './ast';
 import type {
@@ -308,17 +308,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
 
   /** Resolves the supertypes and members' signatures of every class, and declares the top-level functions and properties. */
   protected declareHeaders(files: { file: KotlinFile; context: FileContext }[]): ClassEntry[] {
-    for (const entry of this.classEntries) {
-      this.file = entry.file;
-      this.declareTypeParameters(entry.scope, entry.decl.typeParameters, (params) => {
-        entry.symbol.typeParameters = params;
-      });
-    }
-    for (const entry of this.classEntries) {
-      this.file = entry.file;
-      this.declareSupertypes(entry);
-    }
-    const classOrder = this.classLinkOrder();
+    const classOrder = this.checkTypeBoundsAfter(() => this.resolveClassHierarchy());
     for (const entry of this.classEntries) {
       this.file = entry.file;
       this.declareMembers(entry);
@@ -330,6 +320,20 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       for (const declaration of file.declarations) this.declareTopLevel(declaration, fileScope, context, packageScope);
     }
     return classOrder;
+  }
+
+  private resolveClassHierarchy(): ClassEntry[] {
+    for (const entry of this.classEntries) {
+      this.file = entry.file;
+      this.declareTypeParameters(entry.scope, entry.decl.typeParameters, (params) => {
+        entry.symbol.typeParameters = params;
+      });
+    }
+    for (const entry of this.classEntries) {
+      this.file = entry.file;
+      this.declareSupertypes(entry);
+    }
+    return this.classLinkOrder();
   }
 
   private classLinkOrder(): ClassEntry[] {
@@ -839,7 +843,8 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     if (symbol.isObject || symbol.isValue) return;
     for (const [index, property] of properties.entries()) {
       const name = `component${index + 1}`;
-      if (declaresFunction(symbol, name, 0)) continue;
+      const declared = declaredFunction(symbol, name, 0);
+      if (declared) this.error(declared.row, `data class が作る関数 ${name} と同じ引数の関数は宣言できません。`);
       addGenerated(
         symbol,
         name,
@@ -854,7 +859,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
 
   private declareDataAnyMembers(symbol: ClassSymbol, properties: PropertySymbol[]): void {
     const arrayFields = properties.map((property) => dataArrayField(property.type));
-    if (!declaresFunction(symbol, 'toString', 0)) {
+    if (!declaredFunction(symbol, 'toString', 0)) {
       addGenerated(
         symbol,
         'toString',
@@ -864,7 +869,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
         true
       );
     }
-    if (!declaresFunction(symbol, 'hashCode', 0)) {
+    if (!declaredFunction(symbol, 'hashCode', 0)) {
       addGenerated(
         symbol,
         'hashCode',
@@ -1445,11 +1450,13 @@ function describeUnavailableImport(path: string): string {
   return `標準ライブラリ以外のライブラリ（${path}）`;
 }
 
-function declaresFunction(symbol: ClassSymbol, name: string, paramCount: number): boolean {
-  return (
-    symbol.members.get(name)?.some((member) => member.kind === 'function' && member.params.length === paramCount) ??
-    false
-  );
+function declaredFunction(symbol: ClassSymbol, name: string, paramCount: number): FunctionSymbol | undefined {
+  return symbol.members
+    .get(name)
+    ?.find(
+      (member): member is FunctionSymbol =>
+        member.kind === 'function' && !member.extensionReceiver && member.params.length === paramCount
+    );
 }
 
 /** Adds a member that Kotlin generates for a data class, such as `toString` or `component1`. */

@@ -1002,6 +1002,58 @@ fun main() {
     stdout: 'true\ntrue\ntrue\ntrue\n',
   },
   {
+    name: 'bounded types, generated data components, and signed Char progressions',
+    source: `enum class Direction { NORTH, SOUTH }
+data class Point(val row: Int, val column: Int) {
+    fun component1(scale: Int): Int = row * scale
+}
+fun ordinal(value: Enum<Direction>): Int = value.ordinal
+fun start(range: ClosedRange<Int>): Int = range.start
+fun main() {
+    println(ordinal(Direction.SOUTH))
+    println(start(3..5))
+    val point = Point(3, 4)
+    val (row, column) = point
+    println(listOf(row, column, point.component1(2)))
+    try { println(CharProgression.fromClosedRange('z', 'a', Int.MIN_VALUE)) }
+    catch (error: IllegalArgumentException) { println(error.message) }
+    println(CharProgression.fromClosedRange('z', 'v', -2).toList())
+}`,
+    stdout: '1\n3\n[3, 4, 6]\nStep must be greater than Int.MIN_VALUE to avoid overflow on negation.\n[z, x, v]\n',
+  },
+  {
+    name: 'collection value searches use JVM bucket order and live list slots',
+    source: `class Item(val id: Int) {
+    override fun equals(other: Any?): Boolean {
+        if (other is Item && other.id == 2) error("second bucket")
+        return other is Item && id == other.id
+    }
+    override fun hashCode(): Int = id
+}
+val values = mutableListOf<Cell>()
+class Cell(val id: Int) {
+    override fun equals(other: Any?): Boolean {
+        if (other is Cell && other.id == 1) values[1] = Cell(9)
+        return other is Cell && other.id == id
+    }
+    override fun hashCode(): Int = id
+}
+fun main() {
+    val hashed = hashMapOf(2 to Item(2), 1 to Item(1))
+    println(hashed.containsValue(Item(1)))
+    println(Item(1) in hashed.values)
+    val linked = linkedMapOf(2 to Item(2), 1 to Item(1))
+    try { println(linked.containsValue(Item(1))) } catch (error: IllegalStateException) { println(error.message) }
+    values.addAll(listOf(Cell(1), Cell(2), Cell(3)))
+    values.removeAt(2)
+    println(values.contains(Cell(9)))
+    values[1] = Cell(2)
+    val view = values.subList(0, 2)
+    println(view.indexOf(Cell(9)))
+}`,
+    stdout: 'true\ntrue\nsecond bucket\ntrue\n1\n',
+  },
+  {
     name: 'zip transforms combine arrays, iterables, and character sequences',
     source: `fun main() {
     println("abc".zip("xy") { a, b -> "$a$b" })
@@ -2837,6 +2889,21 @@ test.each([
     'a nullable Int method that clashes with delegated collection remove',
     false,
     'class Ints(private val values: MutableList<Int>) : MutableList<Int> by values {\n    fun remove(value: Int?): Boolean = value == null\n}\nfun main() {}',
+  ],
+  [
+    'an invalid nested range type argument',
+    false,
+    'fun main() { val invalid: List<ClosedRange<Any>>? = null; println(invalid) }',
+  ],
+  [
+    'an invalid recursive enum bound',
+    false,
+    'fun invalid(x: Enum<String>?) { println(x) }; fun main() { invalid(null) }',
+  ],
+  [
+    'a function that collides with a generated data component',
+    false,
+    'data class Point(val x: Int) { fun component1(): String = "x" }; fun main() {}',
   ],
   ['a type mismatch', false, 'fun main() {\n    val x: Int = "a"\n    println(x)\n}'],
   ['a delegated local redeclaring a local', false, 'fun main() { val x = 1; val x by lazy { 2 }; println(x) }'],
