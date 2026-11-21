@@ -475,3 +475,18 @@ test('stops tracing once the snapshots of every step together exceed the trace s
     LIMITS.maxTraceSize = previousLimit;
   }
 });
+
+test.each([
+  ['shows the updated text of', 's.push_str("b");', { s: 'ab', rs: 'ab', n: 0 }],
+  ['drops', 'drop(s);', { n: 0 }],
+])('a borrow coerced to &str %s its referent', (_name, operation, vars) => {
+  const program = `fn main() {
+    let mut s = String::from("a");
+    let rs: &str = &s;
+    println!("{}", rs);
+    ${operation}
+    let n = 0;
+}
+`;
+  expect(traceProgram('rust', program, program).traceItems.at(-1)?.vars).toEqual(vars);
+});

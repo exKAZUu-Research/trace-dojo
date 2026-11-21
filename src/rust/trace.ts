@@ -104,7 +104,9 @@ function variablesOf(frame: Frame): TraceVariables {
 /** What a variable shows: the current value of a shared reference's referent, else the slot's own value. */
 function storedValue(frame: Frame, slot: number): Value | typeof UNASSIGNED {
   const referent = frame.referents.get(slot);
-  return referent && !referent.coerced ? (referent.place.get() as Value | typeof UNASSIGNED) : frame.locals[slot];
+  if (!referent) return frame.locals[slot];
+  const value = referent.place.get() as Value | typeof UNASSIGNED;
+  return referent.view && value !== MOVED && value !== UNASSIGNED ? referent.view(value) : value;
 }
 
 type Scalar = TraceItemVariable[string];
