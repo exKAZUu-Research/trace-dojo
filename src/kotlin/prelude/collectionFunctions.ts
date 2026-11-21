@@ -209,30 +209,55 @@ fun <T> Iterable<T>.last(): T {
 }
 
 inline fun <T> List<T>.last(predicate: (T) -> Boolean): T {
-    var index = lastIndex
-    while (index >= 0) {
-        val element = this[index]
+    val iterator = listIterator(size)
+    while (iterator.hasPrevious()) {
+        val element = iterator.previous()
         if (predicate(element)) return element
-        index--
     }
     throw NoSuchElementException("List contains no element matching the predicate.")
 }
 
+inline fun <T> Iterable<T>.last(predicate: (T) -> Boolean): T {
+    var last: T? = null
+    var found = false
+    for (element in this) if (predicate(element)) {
+        last = element
+        found = true
+    }
+    if (!found) throw NoSuchElementException("Collection contains no element matching the predicate.")
+    return last as T
+}
+
 fun <T> List<T>.lastOrNull(): T? = if (isEmpty()) null else this[size - 1]
 
+fun <T> Iterable<T>.lastOrNull(): T? {
+    if (this is List) return if (isEmpty()) null else this[lastIndex]
+    val iterator = iterator()
+    if (!iterator.hasNext()) return null
+    var last = iterator.next()
+    while (iterator.hasNext()) last = iterator.next()
+    return last
+}
+
 inline fun <T> List<T>.lastOrNull(predicate: (T) -> Boolean): T? {
-    var index = lastIndex
-    while (index >= 0) {
-        val element = this[index]
+    val iterator = listIterator(size)
+    while (iterator.hasPrevious()) {
+        val element = iterator.previous()
         if (predicate(element)) return element
-        index--
     }
     return null
+}
+
+inline fun <T> Iterable<T>.lastOrNull(predicate: (T) -> Boolean): T? {
+    var last: T? = null
+    for (element in this) if (predicate(element)) last = element
+    return last
 }
 
 inline fun <T> Iterable<T>.find(predicate: (T) -> Boolean): T? = firstOrNull(predicate)
 
 inline fun <T> List<T>.findLast(predicate: (T) -> Boolean): T? = lastOrNull(predicate)
+inline fun <T> Iterable<T>.findLast(predicate: (T) -> Boolean): T? = lastOrNull(predicate)
 
 fun <T> List<T>.single(): T = when (size) {
     0 -> throw NoSuchElementException("List is empty.")
@@ -287,7 +312,7 @@ inline fun <T> Iterable<T>.singleOrNull(predicate: (T) -> Boolean): T? {
     return single
 }
 
-inline fun <T> List<T>.indexOfFirst(predicate: (T) -> Boolean): Int {
+inline fun <T> Iterable<T>.indexOfFirst(predicate: (T) -> Boolean): Int {
     var index = 0
     for (item in this) {
         if (predicate(item)) return index
@@ -297,12 +322,21 @@ inline fun <T> List<T>.indexOfFirst(predicate: (T) -> Boolean): Int {
 }
 
 inline fun <T> List<T>.indexOfLast(predicate: (T) -> Boolean): Int {
-    var index = lastIndex
-    while (index >= 0) {
-        if (predicate(this[index])) return index
-        index--
+    val iterator = listIterator(size)
+    while (iterator.hasPrevious()) {
+        if (predicate(iterator.previous())) return iterator.nextIndex()
     }
     return -1
+}
+
+inline fun <T> Iterable<T>.indexOfLast(predicate: (T) -> Boolean): Int {
+    var index = 0
+    var last = -1
+    for (element in this) {
+        if (predicate(element)) last = index
+        index++
+    }
+    return last
 }
 
 fun <T> List<T>.getOrNull(index: Int): T? = if (index >= 0 && index < size) get(index) else null
@@ -945,25 +979,44 @@ fun <T> List<T>.slice(indices: Iterable<Int>): List<T> {
 }
 
 fun <T> Iterable<T>.chunked(size: Int): List<List<T>> = windowed(size, size, partialWindows = true)
-fun <T, R> Iterable<T>.chunked(size: Int, transform: (List<T>) -> R): List<R> = chunked(size).map(transform)
-fun <T, R> Iterable<T>.windowed(size: Int, step: Int = 1, partialWindows: Boolean = false, transform: (List<T>) -> R): List<R> =
-    windowed(size, step, partialWindows).map(transform)
+fun <T, R> Iterable<T>.chunked(size: Int, transform: (List<T>) -> R): List<R> =
+    windowed(size, size, partialWindows = true, transform = transform)
 
-fun <T> Iterable<T>.windowed(size: Int, step: Int = 1, partialWindows: Boolean = false): List<List<T>> {
+fun <T> Iterable<T>.windowed(size: Int, step: Int = 1, partialWindows: Boolean = false): List<List<T>> =
+    windowed(size, step, partialWindows) { ArrayList(it) }
+
+fun <T, R> Iterable<T>.windowed(size: Int, step: Int = 1, partialWindows: Boolean = false, transform: (List<T>) -> R): List<R> {
     if (!(size > 0 && step > 0)) {
         throw IllegalArgumentException(if (size != step) "Both size $size and step $step must be greater than zero." else "size $size must be greater than zero.")
     }
-    val list = this.toList()
+    if (this is List && this is RandomAccess) return windowRandomAccess<T, R>(this as List<T>, size, step, partialWindows, transform)
+    val result = ArrayList<R>()
+    val source = iterator()
+    val window = ArrayList<T>(size.coerceAtMost(1024))
+    while (true) {
+        while (window.size < size && source.hasNext()) window.add(source.next())
+        if (window.isEmpty() || (!partialWindows && window.size < size)) return result
+        result.add(transform(window))
+        val consumed = step.coerceAtMost(window.size)
+        window.subList(0, consumed).clear()
+        var skip = step - consumed
+        while (skip > 0 && source.hasNext()) {
+            source.next()
+            skip--
+        }
+    }
+}
+
+private fun <T, R> windowRandomAccess(list: List<T>, size: Int, step: Int, partialWindows: Boolean, transform: (List<T>) -> R): List<R> {
     val thisSize = list.size
-    val resultCapacity = thisSize / step + if (thisSize % step == 0) 0 else 1
-    val result = ArrayList<List<T>>(resultCapacity)
+    val result = ArrayList<R>(thisSize / step + if (thisSize % step == 0) 0 else 1)
+    val window = MovingWindow(list)
     var index = 0
-    while (0 <= index && index < thisSize) {
-        val windowSize = size.coerceAtMost(thisSize - index)
-        if (windowSize < size && !partialWindows) break
-        val window = ArrayList<T>(windowSize)
-        for (i in 0 until windowSize) window.add(list[i + index])
-        result.add(window)
+    while (index in 0 until thisSize) {
+        val count = size.coerceAtMost(thisSize - index)
+        if (!partialWindows && count < size) break
+        window.move(index, index + count)
+        result.add(transform(window))
         index += step
     }
     return result
@@ -1284,14 +1337,17 @@ inline fun <T> buildList(builderAction: MutableList<T>.() -> Unit): List<T> {
 inline fun <E> buildSet(builderAction: MutableSet<E>.() -> Unit): Set<E> {
     val set = LinkedHashSet<E>()
     set.builderAction()
-    return set
+    return set.finishBuild()
 }
 
 inline fun <K, V> buildMap(builderAction: MutableMap<K, V>.() -> Unit): Map<K, V> {
     val map = LinkedHashMap<K, V>()
     map.builderAction()
-    return map
+    return map.finishBuild()
 }
+
+internal external fun <E> LinkedHashSet<E>.finishBuild(): Set<E>
+internal external fun <K, V> LinkedHashMap<K, V>.finishBuild(): Map<K, V>
 
 fun <T> Iterable<T>.toTypedArray(): Array<T> = NativeLists.toArray(this)
 
@@ -1309,7 +1365,16 @@ fun Collection<Double>.toDoubleArray(): DoubleArray {
     return result
 }
 
-fun <T : Comparable<T>> List<T?>.binarySearch(element: T?, fromIndex: Int = 0, toIndex: Int = size): Int {
+fun <T : Comparable<T>> List<T?>.binarySearch(element: T?, fromIndex: Int = 0, toIndex: Int = size): Int =
+    binarySearch(fromIndex, toIndex) { compareValues(it, element) }
+
+fun <T> List<T>.binarySearch(element: T, comparator: Comparator<in T>, fromIndex: Int = 0, toIndex: Int = size): Int =
+    binarySearch(fromIndex, toIndex) { comparator.compare(it, element) }
+
+inline fun <T, K : Comparable<K>> List<T>.binarySearchBy(key: K?, fromIndex: Int = 0, toIndex: Int = size, crossinline selector: (T) -> K?): Int =
+    binarySearch(fromIndex, toIndex) { compareValues(selector(it), key) }
+
+fun <T> List<T>.binarySearch(fromIndex: Int = 0, toIndex: Int = size, comparison: (T) -> Int): Int {
     when {
         fromIndex > toIndex -> throw IllegalArgumentException("fromIndex ($fromIndex) is greater than toIndex ($toIndex).")
         fromIndex < 0 -> throw IndexOutOfBoundsException("fromIndex ($fromIndex) is less than zero.")
@@ -1319,8 +1384,7 @@ fun <T : Comparable<T>> List<T?>.binarySearch(element: T?, fromIndex: Int = 0, t
     var high = toIndex - 1
     while (low <= high) {
         val mid = (low + high).ushr(1)
-        val midVal = get(mid)
-        val cmp = compareValues(midVal, element)
+        val cmp = comparison(get(mid))
         if (cmp < 0) low = mid + 1 else if (cmp > 0) high = mid - 1 else return mid
     }
     return -(low + 1)

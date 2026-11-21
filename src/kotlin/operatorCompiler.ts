@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 413 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss 416 -- the compiler of one area of Kotlin, whose parts call each other closely.
 import type { CallExpression, Expression, TypeRef } from './ast';
 import { type ArgumentSyntax } from './callCompiler';
 import {
@@ -574,8 +574,29 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
   ): Compiled {
     const containerCompiled = this.compileExpression(scope, context, container);
     const args: ArgumentSyntax[] = [{ row: element.row, name: undefined, value: element }];
-    const contains = this.compileOperatorCall(scope, context, containerCompiled, 'contains', args, row, 'in');
-    const evaluate = convertRepr(contains.eval, contains.repr, 'ref');
+    const { call, compiled: contains } = this.resolveOperator(
+      scope,
+      context,
+      containerCompiled,
+      'contains',
+      args,
+      row,
+      'in'
+    );
+    const { floatRangeBounds } = containerCompiled;
+    const compareDouble =
+      floatRangeBounds &&
+      call.symbol.isLibrary &&
+      call.symbol.packageName === 'kotlin.ranges' &&
+      this.primitiveOf(call.symbol.params[0].type) === 'Double';
+    const evaluate: Eval = compareDouble
+      ? (frame) => {
+          // Kotlin/JVM lowers membership in an immediate Float range to widening comparisons.
+          const [start, end] = floatRangeBounds(frame);
+          const value = call.evaluateArgs(frame)[0] as number;
+          return start <= value && value <= end;
+        }
+      : convertRepr(contains.eval, contains.repr, 'ref');
     return { type: this.booleanType, repr: 'ref', eval: negated ? (frame) => !(evaluate(frame) as boolean) : evaluate };
   }
 

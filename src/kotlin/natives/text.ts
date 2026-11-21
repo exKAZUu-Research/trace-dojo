@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 401 -- the text and character natives share string, casing, and parsing operations.
 import { formatJava, type FormatValues } from '../../interpreter/javaFormatter';
 import { runtimeClassOf } from '../dispatch';
 import { charToString, formatPrimitive, hashOf, stringOf } from '../format';
@@ -6,8 +7,9 @@ import type { Frame } from '../runtime';
 import { Boxed, KObject, UNIT, type Value } from '../values';
 import { newList } from './collections';
 import { compareStrings, substring } from './core';
-import { compareJdkCase, foldJdkCodePoint, foldJdkText } from './jdkCase';
+import { compareJdkCase, foldJdkCodePoint } from './jdkCase';
 import { defineNative, defineNativeProperty, libraryClass, throwError } from './registry';
+import { type TextSearch, textSearch } from './textSearch';
 
 const TEXT = 'kotlin.text';
 const LINE_ENDINGS = /\r\n|\n|\r/;
@@ -96,9 +98,8 @@ function parseInteger(frame: Frame, value: string, radix: number, bits: 8 | 16 |
     if ((index - first) % 64 === 0) frame.runtime.spend();
     // oxlint-disable-next-line unicorn/prefer-code-point -- JVM integer parsing reads UTF-16 code units.
     const char = value.charCodeAt(index);
-    const letter = (char | 0x20) - 0x61;
-    const digit = digitOf(char) ?? (letter >= 0 && letter < 26 ? letter + 10 : radix);
-    if (digit >= radix || parsed > beforeLast || (parsed === beforeLast && digit > lastDigit)) return undefined;
+    const digit = digitInRadix(char, radix);
+    if (digit === undefined || parsed > beforeLast || (parsed === beforeLast && digit > lastDigit)) return undefined;
     parsed = parsed * base + BigInt(digit);
   }
   return negative ? -parsed : parsed;
@@ -113,27 +114,14 @@ function parseNarrow(frame: Frame, value: string, bits: 8 | 16): number {
   return Number(parsed);
 }
 
-function foldedText(frame: Frame, value: string, supplementary: boolean): string {
-  frame.runtime.spend(1 + Math.floor(value.length / 64));
-  return foldJdkText(value, supplementary);
-}
-
-function search(
-  frame: Frame,
-  receiver: Value,
-  target: string,
-  ignoreCase: boolean,
-  codeUnitsOnly = false
-): { includes: () => boolean; indexOf: (start: number) => number; lastIndexOf: (start: number) => number } {
-  const value = sequenceText(frame, receiver);
-  const supplementary = typeof receiver === 'string' && !codeUnitsOnly;
-  const haystack = ignoreCase ? foldedText(frame, value, supplementary) : value;
-  const needle = ignoreCase ? foldedText(frame, target, supplementary) : target;
-  return {
-    includes: () => haystack.includes(needle),
-    indexOf: (start) => haystack.indexOf(needle, start),
-    lastIndexOf: (start) => (start < 0 ? -1 : haystack.lastIndexOf(needle, start)),
-  };
+function search(frame: Frame, receiver: Value, target: string, ignoreCase: boolean, codeUnitsOnly = false): TextSearch {
+  return textSearch(
+    frame,
+    sequenceText(frame, receiver),
+    target,
+    ignoreCase,
+    codeUnitsOnly || typeof receiver !== 'string'
+  );
 }
 
 function numberFormatError(frame: Frame, value: string, radix = 10): never {
@@ -190,13 +178,11 @@ const TEXT_CASE_AND_TRIM_NATIVES: Record<string, TextNative> = {
   'String.substring(Int, Int)': (frame, receiver, [start, end]) =>
     substring(frame, text(receiver), start as number, end as number),
   'String.startsWith(String, Boolean)': (frame, receiver, [prefix, ignoreCase]) =>
-    ignoreCase
-      ? foldedText(frame, text(receiver), true).startsWith(foldedText(frame, text(prefix), true))
-      : text(receiver).startsWith(text(prefix)),
+    textSearch(frame, text(receiver), text(prefix), ignoreCase === true).matchesAt(0),
   'String.endsWith(String, Boolean)': (frame, receiver, [suffix, ignoreCase]) =>
-    ignoreCase
-      ? foldedText(frame, text(receiver), true).endsWith(foldedText(frame, text(suffix), true))
-      : text(receiver).endsWith(text(suffix)),
+    textSearch(frame, text(receiver), text(suffix), ignoreCase === true).matchesAt(
+      text(receiver).length - text(suffix).length
+    ),
 };
 
 /** Searching, replacing, splitting, padding, and comparing. */
@@ -282,7 +268,7 @@ const TEXT_SEARCH_NATIVES: Record<string, TextNative> = {
     if (ignoreCase !== true) return receiver === other;
     const left = text(receiver);
     const right = text(other);
-    return left.length === right.length && foldedText(frame, left, true) === foldedText(frame, right, true);
+    return left.length === right.length && textSearch(frame, left, right, true).matchesAt(0);
   },
   'String.compareTo(String, Boolean)': (frame, receiver, [other, ignoreCase]) => {
     const left = text(receiver);
@@ -434,6 +420,17 @@ const CHAR_NATIVES: Record<string, TextNative> = {
     const digit = digitOf(receiver as number);
     return digit === undefined ? undefined : new Boxed('Int', digit);
   },
+  'Char.digitToInt(Int)': (frame, receiver, [radix]) =>
+    digitInRadix(receiver as number, checkRadix(frame, radix as number)) ??
+    throwError(
+      frame,
+      'java.lang.IllegalArgumentException',
+      `Char ${charToString(receiver as number)} is not a digit in the given radix=${radix as number}`
+    ),
+  'Char.digitToIntOrNull(Int)': (frame, receiver, [radix]) => {
+    const digit = digitInRadix(receiver as number, checkRadix(frame, radix as number));
+    return digit === undefined ? undefined : new Boxed('Int', digit);
+  },
   'Char.isDefined()': () => true,
   'Char.plus(String)': (frame, receiver, [other]) => result(frame, charToString(receiver as number) + text(other)),
   'Int.toString(Int)': (frame, receiver, [radix]) =>
@@ -477,6 +474,15 @@ function digitOf(code: number): number | undefined {
   return (code - start) % 10;
 }
 
+function digitInRadix(code: number, radix: number): number | undefined {
+  const lowercase = code | 0x20;
+  const asciiLetter = lowercase - 0x61;
+  const fullwidthLetter = code >= 0xff_41 ? code - 0xff_41 : code - 0xff_21;
+  const letter = asciiLetter >= 0 && asciiLetter < 26 ? asciiLetter : fullwidthLetter;
+  const digit = digitOf(code) ?? (letter >= 0 && letter < 26 ? letter + 10 : radix);
+  return digit < radix ? digit : undefined;
+}
+
 function isDecimalDigit(code: number): boolean {
   return /^\p{Nd}$/u.test(charToString(code));
 }
@@ -494,25 +500,22 @@ function lowerChar(code: number): number {
 }
 
 function replaceAll(frame: Frame, value: string, oldValue: string, replacement: string, ignoreCase: boolean): string {
-  const haystack = ignoreCase ? foldedText(frame, value, true) : value;
-  const needle = ignoreCase ? foldedText(frame, oldValue, true) : oldValue;
-  frame.runtime.spend(1 + Math.floor((haystack.length + needle.length) / 64));
+  const { indexOf } = textSearch(frame, value, oldValue, ignoreCase);
+  frame.runtime.spend(1 + Math.floor((value.length + oldValue.length) / 64));
   let matchCount = 0;
-  if (needle === '') matchCount = value.length + 1;
+  if (oldValue === '') matchCount = value.length + 1;
   else {
-    for (let index = haystack.indexOf(needle); index >= 0; index = haystack.indexOf(needle, index + needle.length)) {
-      matchCount++;
-    }
+    for (let index = indexOf(0); index >= 0; index = indexOf(index + oldValue.length)) matchCount++;
   }
   if (matchCount === 0) return value;
-  const length = value.length + matchCount * (replacement.length - needle.length);
+  const length = value.length + matchCount * (replacement.length - oldValue.length);
   frame.runtime.allocateString(frame, length);
-  if (needle === '' || !ignoreCase) return value.replaceAll(oldValue, () => replacement);
+  if (oldValue === '' || !ignoreCase) return value.replaceAll(oldValue, () => replacement);
   const parts: string[] = [];
   let offset = 0;
-  for (let index = haystack.indexOf(needle); index >= 0; index = haystack.indexOf(needle, offset)) {
+  for (let index = indexOf(0); index >= 0; index = indexOf(offset)) {
     parts.push(value.slice(offset, index), replacement);
-    offset = index + needle.length;
+    offset = index + oldValue.length;
   }
   parts.push(value.slice(offset));
   return parts.join('');
@@ -529,24 +532,20 @@ function splitText(
     throwError(frame, 'java.lang.IllegalArgumentException', `Limit must be non-negative, but was ${limit}`);
   if (delimiters.length === 1 && delimiters[0] !== '' && !ignoreCase && limit === 0)
     return newList(frame, 'ArrayList', value.split(delimiters[0]));
-  const [haystack, needles] = ignoreCase
-    ? [
-        foldedText(frame, value, supplementary),
-        delimiters.map((delimiter) => foldedText(frame, delimiter, supplementary)),
-      ]
-    : [value, delimiters];
+  const matchers = delimiters.map((delimiter) => textSearch(frame, value, delimiter, ignoreCase, !supplementary));
   const parts: string[] = [];
   let start = 0;
   let index = 0;
   while (index <= value.length && (limit === 0 || parts.length < limit - 1)) {
-    const delimiter = needles.find((candidate) => haystack.startsWith(candidate, index));
-    if (delimiter === undefined) {
+    const matching = matchers.findIndex((matcher) => matcher.matchesAt(index));
+    if (matching === -1) {
       index++;
       continue;
     }
     parts.push(value.slice(start, index));
-    start = index + delimiter.length;
-    index = start + (delimiter.length === 0 ? 1 : 0);
+    const { length } = delimiters[matching];
+    start = index + length;
+    index = start + (length === 0 ? 1 : 0);
   }
   parts.push(value.slice(start));
   return newList(frame, 'ArrayList', parts);

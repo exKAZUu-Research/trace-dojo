@@ -197,8 +197,8 @@ ${numberOperators('Float')}
     external override fun toFloat(): Float
     external override fun toLong(): Long
     external override fun toInt(): Int
-    external override fun toShort(): Short
-    external override fun toByte(): Byte
+    @DeprecatedError external override fun toShort(): Short
+    @DeprecatedError external override fun toByte(): Byte
     external override fun equals(other: Any?): Boolean
     external override fun hashCode(): Int
     external override fun toString(): String
@@ -221,8 +221,8 @@ ${numberOperators('Double')}
     external override fun toFloat(): Float
     external override fun toLong(): Long
     external override fun toInt(): Int
-    external override fun toShort(): Short
-    external override fun toByte(): Byte
+    @DeprecatedError external override fun toShort(): Short
+    @DeprecatedError external override fun toByte(): Byte
     external override fun equals(other: Any?): Boolean
     external override fun hashCode(): Int
     external override fun toString(): String

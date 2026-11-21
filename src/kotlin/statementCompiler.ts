@@ -129,7 +129,15 @@ export abstract class StatementCompiler extends OperatorCompiler {
               if (clears) for (let slot = firstSlot; slot < lastSlot; slot++) frame.locals[slot] = UNASSIGNED;
             }
           };
-    return { ...value, eval: run, isCall: false, isCreation: false, stableKey: undefined, constant: undefined };
+    return {
+      ...value,
+      eval: run,
+      isCall: false,
+      isCreation: false,
+      floatRangeBounds: undefined,
+      stableKey: undefined,
+      constant: undefined,
+    };
   }
 
   /** Whether an expression statement records a step: `if`, `when`, `try`, and jumps record none, as Java's do not. */
@@ -1268,6 +1276,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     // An Int literal does not become a Long here, as kotlinc rejects `6` among the branches of a Long subject.
     const isLongSubject = this.primitiveOf(nonNull(subject.type)) === 'Long';
     const value = this.compileExpression(scope, context, expression, isLongSubject ? undefined : nonNull(subject.type));
+    this.checkEqualityApplicable(subject, value, row, '==');
     this.recordCovered(value, expression, covered);
     const subjectEval = convertRepr(subject.eval, subject.repr, 'ref');
     const valueEval = convertRepr(

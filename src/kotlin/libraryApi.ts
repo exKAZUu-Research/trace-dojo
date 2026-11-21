@@ -1,3 +1,4 @@
+import { unavailableJavaFeature } from './convertSupport';
 import { libraryDeclarationNames, libraryMemberNames } from './libraryApiData';
 import type { ClassSymbol, TypeParameterSymbol } from './symbols';
 import { type KType, resolved, typeToString } from './types';
@@ -29,7 +30,18 @@ export function knownLibraryDeclaration(path: string, visiblePackages: readonly 
   }
 }
 
-export function knownLibraryMember(cls: ClassSymbol, name: string): boolean {
+export function unavailableQualifiedLibraryMember(
+  cls: ClassSymbol,
+  holder: ClassSymbol | undefined,
+  name: string
+): string | undefined {
+  return (
+    unavailableJavaFeature(`${cls.kotlinName}.${name}`) ??
+    (holder && knownLibraryMember(holder, name) ? `${cls.name}.${name}` : undefined)
+  );
+}
+
+function knownLibraryMember(cls: ClassSymbol, name: string): boolean {
   return cls.isLibrary && hasName(libraryMemberNames, cls.kotlinName, name);
 }
 

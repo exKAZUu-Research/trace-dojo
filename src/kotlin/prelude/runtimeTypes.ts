@@ -36,15 +36,19 @@ package java.lang
 import java.util.Locale
 
 class PrintStream internal constructor(private val isError: Boolean) {
-    fun println(message: Any?) {
-        writeStream(isError, message.toString() + "\\n")
+    fun println(message: CharArray?) { println(renderChars(message)) }
+    fun println(message: String?) { writeStream(isError, message.toString() + "\\n") }
+    fun println(message: Any?) { println(message.toString()) }
+    fun println() { writeStream(isError, "\\n") }
+    fun print(message: CharArray?) { print(renderChars(message)) }
+    fun print(message: String?) { writeStream(isError, message.toString()) }
+    fun print(message: Any?) { print(message.toString()) }
+
+    private fun renderChars(message: CharArray?): String {
+        if (message == null) throw NullPointerException("Cannot read the array length because \\"cbuf\\" is null")
+        return message.concatToString()
     }
-    fun println() {
-        writeStream(isError, "\\n")
-    }
-    fun print(message: Any?) {
-        writeStream(isError, message.toString())
-    }
+
     fun format(pattern: String, vararg args: Any?): PrintStream {
         print(pattern.format(*args))
         return this

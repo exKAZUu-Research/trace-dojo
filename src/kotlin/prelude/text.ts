@@ -388,7 +388,7 @@ fun CharSequence.toMutableList(): MutableList<Char> {
     return result
 }
 fun CharSequence.toSet(): Set<Char> = toList().toSet()
-fun CharSequence.withIndex(): Iterable<IndexedValue<Char>> = toList().withIndex()
+fun CharSequence.withIndex(): Iterable<IndexedValue<Char>> = asIterable().withIndex()
 fun CharSequence.chunked(size: Int): List<String> = windowed(size, size, partialWindows = true)
 fun CharSequence.windowed(size: Int, step: Int = 1, partialWindows: Boolean = false): List<String> {
     if (!(size > 0 && step > 0)) {
@@ -458,9 +458,11 @@ external fun Char.uppercase(): String
 external fun Char.lowercase(): String
 external fun Char.titlecase(): String
 external fun Char.digitToInt(): Int
+external fun Char.digitToInt(radix: Int): Int
 external fun Char.digitToIntOrNull(): Int?
-external fun Char.toUpperCase(): Char
-external fun Char.toLowerCase(): Char
+external fun Char.digitToIntOrNull(radix: Int): Int?
+@DeprecatedError external fun Char.toUpperCase(): Char
+@DeprecatedError external fun Char.toLowerCase(): Char
 external fun Char.isDefined(): Boolean
 external fun Char.equals(other: Char, ignoreCase: Boolean = false): Boolean
 external operator fun Char.plus(other: String): String

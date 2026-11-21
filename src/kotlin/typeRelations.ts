@@ -84,15 +84,7 @@ function classBoundsOf(type: KType): KType[] {
 export function isSubtype(subType: KType, superType: KType): boolean {
   const sub = resolved(subType);
   const sup = resolved(superType);
-  if (sup.kind === 'variable') {
-    // A variable may stand for a nullable type, so any type can be its lower bound.
-    addBound(sup.variable, 'lower', sup.nullable ? nonNull(sub) : sub);
-    return true;
-  }
-  if (sub.kind === 'variable') {
-    addBound(sub.variable, 'upper', sub.nullable ? sup : sup);
-    return !sub.nullable || isNullable(sup);
-  }
+  if (sub.kind === 'variable' || sup.kind === 'variable') return constrainSubtype(sub, sup);
   if (isNullable(sub) && !isNullable(sup)) return false;
   if (sub.kind === 'nothing') return true;
   if (sup.kind === 'nothing') return false;
@@ -112,6 +104,20 @@ export function isSubtype(subType: KType, superType: KType): boolean {
   return sup.args.every((argument, index) =>
     isArgumentSubtype(supertype.args[index], argument, sup.cls.typeParameters[index]?.variance ?? 'inv')
   );
+}
+
+function constrainSubtype(sub: KType, sup: KType): boolean {
+  if (sup.kind === 'variable') {
+    if (sub.kind === 'variable') {
+      if (sub.variable === sup.variable) return true;
+      addBound(sub.variable, 'upper', sup);
+    }
+    addBound(sup.variable, 'lower', sup.nullable ? nonNull(sub) : sub);
+    return true;
+  }
+  if (sub.kind !== 'variable') throw new Error('A subtype constraint needs an inference variable');
+  addBound(sub.variable, 'upper', sup);
+  return !sub.nullable || isNullable(sup);
 }
 
 function isFunctionSubtype(sub: FunctionType, sup: FunctionType): boolean {

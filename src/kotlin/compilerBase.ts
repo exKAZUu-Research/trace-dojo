@@ -26,6 +26,7 @@ export interface Compiled {
   /** Whether the expression only calls a function or creates an object, which the step rules read. */
   isCall?: boolean;
   isCreation?: boolean;
+  floatRangeBounds?: (frame: Frame) => readonly [number, number];
   /** The value of an integer literal, which may also stand for a `Long`, `Short`, `Byte`, or unsigned value. */
   integerLiteral?: IntegerLiteral;
   /** The value of an expression made only of literals, which never changes. */

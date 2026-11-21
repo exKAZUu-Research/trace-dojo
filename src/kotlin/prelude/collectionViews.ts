@@ -15,6 +15,62 @@ private class IndexingIterator<T>(private val backing: Iterator<T>) : Iterator<I
 
 fun <T> Iterable<T>.withIndex(): Iterable<IndexedValue<T>> = IndexingIterable(this)
 
+internal class MovingWindow<T>(private val backing: List<T>) : List<T>, RandomAccess {
+    private var start = 0
+    override var size = 0
+        private set
+
+    fun move(fromIndex: Int, toIndex: Int) {
+        if (fromIndex < 0 || toIndex > backing.size)
+            throw IndexOutOfBoundsException("fromIndex: $fromIndex, toIndex: $toIndex, size: \${backing.size}")
+        if (fromIndex > toIndex)
+            throw IllegalArgumentException("fromIndex: $fromIndex > toIndex: $toIndex")
+        start = fromIndex
+        size = toIndex - fromIndex
+    }
+
+    override fun isEmpty(): Boolean = size == 0
+    override fun get(index: Int): T {
+        if (index !in 0 until size) throw IndexOutOfBoundsException("index: $index, size: $size")
+        return backing[start + index]
+    }
+    override fun contains(element: T): Boolean = indexOf(element) >= 0
+    override fun containsAll(elements: Collection<T>): Boolean = elements.all { contains(it) }
+    override fun indexOf(element: T): Int = indexOfFirst { it == element }
+    override fun lastIndexOf(element: T): Int = indexOfLast { it == element }
+    override fun iterator(): Iterator<T> = listIterator()
+    override fun listIterator(): ListIterator<T> = listIterator(0)
+    override fun listIterator(index: Int): ListIterator<T> {
+        if (index < 0 || index > size) throw IndexOutOfBoundsException("index: $index, size: $size")
+        return MovingWindowIterator(this, index)
+    }
+    override fun subList(fromIndex: Int, toIndex: Int): List<T> {
+        if (fromIndex < 0 || toIndex > size)
+            throw IndexOutOfBoundsException("fromIndex: $fromIndex, toIndex: $toIndex, size: $size")
+        val window = MovingWindow(backing)
+        window.move(start + fromIndex, start + toIndex)
+        return window
+    }
+    override fun equals(other: Any?): Boolean = toList() == other
+    override fun hashCode(): Int = toList().hashCode()
+    override fun toString(): String = toList().toString()
+}
+
+private class MovingWindowIterator<T>(private val window: MovingWindow<T>, private var index: Int) : ListIterator<T> {
+    override fun hasNext(): Boolean = index < window.size
+    override fun hasPrevious(): Boolean = index > 0
+    override fun nextIndex(): Int = index
+    override fun previousIndex(): Int = index - 1
+    override fun next(): T {
+        if (!hasNext()) throw NoSuchElementException()
+        return window[index++]
+    }
+    override fun previous(): T {
+        if (!hasPrevious()) throw NoSuchElementException()
+        return window[--index]
+    }
+}
+
 private open class ReversedList<T>(private val backing: List<T>) : List<T> {
     override val size: Int get() = backing.size
     override fun isEmpty(): Boolean = backing.isEmpty()

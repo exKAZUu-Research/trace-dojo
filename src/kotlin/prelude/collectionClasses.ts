@@ -19,7 +19,7 @@ const listReaders = (iterator: string): string => kotlin`
 export const COLLECTION_CLASSES_SOURCE = kotlin`
 package kotlin.collections
 
-abstract external class NativeList<E> : MutableList<E>, RandomAccess {
+abstract external class NativeList<E> : MutableList<E> {
     ${listReaders('MutableListIterator')}
     external override fun iterator(): MutableIterator<E>
     external override fun subList(fromIndex: Int, toIndex: Int): MutableList<E>
@@ -36,10 +36,34 @@ abstract external class NativeList<E> : MutableList<E>, RandomAccess {
 
 }
 
-external class ArrayList<E> : NativeList<E> {
+abstract external class RandomAccessList<E> : NativeList<E>, RandomAccess
+
+external class ArrayList<E> : RandomAccessList<E> {
     external constructor()
     external constructor(initialCapacity: Int)
     external constructor(elements: Collection<E>)
+}
+
+external class ArrayDeque<E> : NativeList<E> {
+    external constructor()
+    external constructor(initialCapacity: Int)
+    external constructor(elements: Collection<E>)
+
+    fun addFirst(element: E) { add(0, element) }
+    fun addLast(element: E) { add(element) }
+    fun first(): E = get(dequeIndex(0))
+    fun last(): E = get(dequeIndex(size - 1))
+    fun firstOrNull(): E? = if (isEmpty()) null else first()
+    fun lastOrNull(): E? = if (isEmpty()) null else last()
+    fun removeFirst(): E = removeAt(dequeIndex(0))
+    fun removeLast(): E = removeAt(dequeIndex(size - 1))
+    fun removeFirstOrNull(): E? = if (isEmpty()) null else removeFirst()
+    fun removeLastOrNull(): E? = if (isEmpty()) null else removeLast()
+
+    private fun dequeIndex(index: Int): Int {
+        if (isEmpty()) throw NoSuchElementException("ArrayDeque is empty.")
+        return index
+    }
 }
 
 external class PrimitiveArrayList<E> : List<E>, RandomAccess {
@@ -48,14 +72,15 @@ external class PrimitiveArrayList<E> : List<E>, RandomAccess {
     external override fun subList(fromIndex: Int, toIndex: Int): List<E>
 }
 
-external class ArraysList<E> : NativeList<E>
-external class SingletonList<E> : NativeList<E>
-external class EmptyList<E> : NativeList<E>
-external class SubList<E> : NativeList<E>
-external class EnumEntriesList<E> : NativeList<E>
+external class ArraysList<E> : RandomAccessList<E>
+external class SingletonList<E> : RandomAccessList<E>
+external class EmptyList<E> : RandomAccessList<E>
+external class SubList<E> : RandomAccessList<E>
+external class SequentialSubList<E> : NativeList<E>
+external class EnumEntriesList<E> : RandomAccessList<E>
 
 /** What \`buildList\` builds, which becomes read-only once built, as kotlin.collections.builders.ListBuilder does. */
-external class ListBuilder<E> : NativeList<E> {
+external class ListBuilder<E> : RandomAccessList<E> {
     internal external fun build(): List<E>
 }
 

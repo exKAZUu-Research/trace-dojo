@@ -110,11 +110,15 @@ function functionsOf(kind: ArrayKind): string {
     `fun ${g()}${r}.getOrNull(index: Int): ${e}? = if (index >= 0 && index < size) get(index) else null`,
     `inline fun ${g()}${r}.getOrElse(index: Int, defaultValue: (Int) -> ${e}): ${e} = if (index >= 0 && index < size) get(index) else defaultValue(index)`,
     `fun ${g()}${r}.elementAt(index: Int): ${e} = get(index)`,
-    `fun ${onlyInput}${r}.indexOf(element: ${e}): Int = asList().indexOf(element)`,
-    `fun ${onlyInput}${r}.lastIndexOf(element: ${e}): Int = asList().lastIndexOf(element)`,
+    ...(e === 'Float' || e === 'Double'
+      ? []
+      : [
+          `fun ${onlyInput}${r}.indexOf(element: ${e}): Int = asList().indexOf(element)`,
+          `fun ${onlyInput}${r}.lastIndexOf(element: ${e}): Int = asList().lastIndexOf(element)`,
+          `operator fun ${onlyInput}${r}.contains(element: ${e}): Boolean = indexOf(element) >= 0`,
+        ]),
     `inline fun ${g()}${r}.indexOfFirst(predicate: (${e}) -> Boolean): Int = asList().indexOfFirst(predicate)`,
     `inline fun ${g()}${r}.indexOfLast(predicate: (${e}) -> Boolean): Int = asList().indexOfLast(predicate)`,
-    `operator fun ${onlyInput}${r}.contains(element: ${e}): Boolean = indexOf(element) >= 0`,
     `inline fun ${g('R')}${r}.fold(initial: R, operation: (acc: R, ${e}) -> R): R = asList().fold(initial, operation)`,
     `inline fun ${g('R')}${r}.foldIndexed(initial: R, operation: (index: Int, acc: R, ${e}) -> R): R = asList().foldIndexed(initial, operation)`,
     `inline fun ${g()}${r}.sumOf(selector: (${e}) -> Int): Int = asList().sumOf(selector)`,
@@ -170,7 +174,7 @@ function functionsOf(kind: ArrayKind): string {
       ? []
       : [`infix fun ${r}.zip(other: ${r}): List<Pair<${e}, ${e}>> = asList().zip(other.asList())`]),
     `fun ${g()}${r}.reversedArray(): ${r.replace('out ', '')} = copyOf().also { it.reverse() }`,
-    `fun ${g()}${r}.sliceArray(indices: IntRange): ${r.replace('out ', '')} = copyOfRange(indices.first, indices.last + 1)`,
+    `fun ${g()}${r}.sliceArray(indices: IntRange): ${r.replace('out ', '')} = if (indices.isEmpty()) copyOfRange(0, 0) else copyOfRange(indices.first, indices.last + 1)`,
     ...[1, 2, 3, 4, 5].map((n) => `operator fun ${g()}${r}.component${n}(): ${e} = get(${n - 1})`),
   ];
   if (kind.sum) {

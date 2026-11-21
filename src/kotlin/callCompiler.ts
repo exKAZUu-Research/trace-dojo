@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 508 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss 536 -- the compiler of one area of Kotlin, whose parts call each other closely.
 import { type ArgumentEvaluation, argumentEvaluator, expectedArgumentType, firstAttempts } from './argumentTypes';
 import type { Expression, LambdaExpression } from './ast';
 import {
@@ -221,6 +221,8 @@ export abstract class CallCompiler extends CompilerCore {
         name
       );
     this.checkAccessible(scope, chosen.candidate.symbol, row, chosen.candidate.receiverType);
+    if (!this.file.isLibrary && chosen.candidate.symbol.isDeprecatedError)
+      this.error(row, `${chosen.candidate.symbol.name} は Kotlin で非推奨になり、使用できません。`);
     return this.completeCall(scope, context, chosen, args, compiledArgs, expected, row);
   }
 
@@ -348,7 +350,7 @@ export abstract class CallCompiler extends CompilerCore {
       const projectedArgs = projection.args.map<TypeArgument>((_, index) =>
         index === projection.args.length - 1 ? { variance: 'inv', type } : { variance: 'star' }
       );
-      this.constrainReturnType(variables, result, { ...projection, args: projectedArgs });
+      this.constrainReturnType(result, { ...projection, args: projectedArgs });
       return;
     }
   }
@@ -611,16 +613,27 @@ export abstract class CallCompiler extends CompilerCore {
   private constrainByExpected(attempt: Attempt, expected: KType | undefined, row: number): void {
     const { candidate, substitution, variables } = attempt;
     const declaredReturn = this.declaredReturnOf(candidate, row);
-    if (expected) this.constrainReturnType(variables, substitute(declaredReturn, substitution), expected);
+    if (!expected) return;
+    const result = substitute(declaredReturn, substitution);
+    const expectedHint = soleLowerBound(resolved(expected));
+    if (expectedHint && variables.every((variable) => variable.lower.length === 0 && variable.upper.length === 0))
+      this.constrainReturnType(result, expectedHint);
+    this.constrainReturnType(result, expected);
   }
 
-  private constrainReturnType(variables: InferenceVariable[], result: KType, expected: KType): void {
+  private constrainReturnType(result: KType, expected: KType): void {
     if (!hasOpenVariables(result)) return;
-    const saved = variables.map((variable) => ({ lower: [...variable.lower], upper: [...variable.upper] }));
+    const saved = new Map<InferenceVariable, { lower: KType[]; upper: KType[] }>();
+    for (const type of [result, expected]) {
+      mentionsVariable(type, (variable) => {
+        if (!saved.has(variable)) saved.set(variable, { lower: [...variable.lower], upper: [...variable.upper] });
+        return false;
+      });
+    }
     if (isSubtype(result, expected)) return;
-    for (const [index, variable] of variables.entries()) {
-      variable.lower = saved[index].lower;
-      variable.upper = saved[index].upper;
+    for (const [variable, { lower, upper }] of saved) {
+      variable.lower = lower;
+      variable.upper = upper;
     }
   }
 
@@ -729,7 +742,9 @@ export abstract class CallCompiler extends CompilerCore {
     const { symbol } = candidate;
     let pending = variables;
     while (pending.length > 0) {
-      const waiting = pending.filter((variable) => !fixVariable(variable));
+      let waiting = pending.filter((variable) => !fixVariable(variable));
+      if (waiting.length === pending.length)
+        waiting = waiting.filter((variable) => !forwardTypeVariable(variable, variables));
       for (const variable of pending) {
         if (!variable.fixed) continue;
         this.checkFixedVariable(symbol.name, variable, row);
@@ -830,12 +845,13 @@ export abstract class CallCompiler extends CompilerCore {
     const actual = determinedType(resolved(type));
     if (actual?.kind !== 'function') return undefined;
     const inputs = actual.receiver ? [actual.receiver, ...actual.params] : actual.params;
-    for (const input of inputs) {
-      for (const variable of variables) {
-        if (variable.fixed || !mentionsVariable(input, (candidate) => candidate === variable)) continue;
+    for (const variable of variables) {
+      if (variable.fixed) continue;
+      const refersTo = (candidate: InferenceVariable): boolean => candidate === variable;
+      const isInput = inputs.some((input) => mentionsVariable(input, refersTo));
+      if (isInput || mentionsVariable(actual.returnType, refersTo))
         constrainThroughBounds(variable, variables, substitution);
-        fixVariable(variable);
-      }
+      if (isInput) fixVariable(variable);
     }
     return resolved(actual) as FunctionType;
   }
@@ -915,6 +931,16 @@ export abstract class CallCompiler extends CompilerCore {
   protected probeContext(context: FunctionContext): FunctionContext {
     return new FunctionContext(context, true, '<probe>', context.info.isLibrary, undefined);
   }
+}
+
+function forwardTypeVariable(variable: InferenceVariable, owned: readonly InferenceVariable[]): boolean {
+  if (variable.param.isReified) return false;
+  const upper = variable.upper.map(resolved);
+  const target = upper.find((type) => type.kind === 'variable' && !owned.includes(type.variable));
+  if (!target || target.kind !== 'variable') return false;
+  if (upper.some((type) => type.kind !== 'variable' || type.variable !== target.variable)) return false;
+  variable.fixed = target;
+  return true;
 }
 
 function fitsInferenceBounds(variable: InferenceVariable): boolean {

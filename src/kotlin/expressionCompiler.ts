@@ -22,11 +22,11 @@ import {
   typeMismatchMessage,
 } from './compilerBase';
 import type { MemberRef } from './compilerCore';
-import { unavailableJavaFeature } from './convertSupport';
 import { getPropertyValue, propertyRepr, receiverRepr } from './dispatch';
 import { formatPrimitive, stringOf } from './format';
-import { knownLibraryMember, unavailableLibraryMember } from './libraryApi';
+import { unavailableLibraryMember, unavailableQualifiedLibraryMember } from './libraryApi';
 import { literalFits } from './literals';
+import { floatRangeBounds } from './rangeBounds';
 import { type Frame, type FunctionInfo, KotlinThrow, LoopSignal, ReturnSignal } from './runtime';
 import {
   type ClassSymbol,
@@ -117,9 +117,10 @@ export abstract class ExpressionCompiler extends CallCompiler {
 
   protected checkInitialized(context: FunctionContext, property: PropertySymbol, name: string, row: number): void {
     const pending = this.uninitializedProperties;
+    if (pending?.context !== context) return;
     const awaitsAssignment =
       !property.isLateinit && this.mayInitializeVal(context, property) && !this.flow.assigned.has(property);
-    if (awaitsAssignment || (pending?.context === context && pending.properties.has(property)))
+    if (awaitsAssignment || pending.properties.has(property))
       this.error(row, `プロパティ ${name} には、まだ値が入っていません。`);
   }
 
@@ -1264,6 +1265,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
       repr: call.repr,
       eval: (frame) => invoke(frame, receiverEval(frame)),
       narrowing: nullOrEmptyNarrowing(call, receiver),
+      floatRangeBounds: floatRangeBounds(call, receiverEval),
       isCall: true,
       isCreation:
         call.candidate.kind === 'constructor' ||
@@ -1396,9 +1398,8 @@ export abstract class ExpressionCompiler extends CallCompiler {
     name: string,
     row: number
   ): never {
-    const label = unavailableJavaFeature(`${cls.kotlinName}.${name}`);
+    const label = unavailableQualifiedLibraryMember(cls, holder, name);
     if (label) this.unavailable(row, label);
-    if (holder && knownLibraryMember(holder, name)) this.unavailable(row, `${cls.name}.${name}`);
     return this.error(row, `${cls.name}.${name} が見つかりません。`);
   }
 
@@ -1792,7 +1793,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
       lambdaScope,
       lambdaContext,
       bodyBlock,
-      returnsUnit ? undefined : determinedType(expectedReturn),
+      returnsUnit ? undefined : (determinedType(expectedReturn) ?? expectedReturn),
       returnsUnit
     );
     this.markCapturedAssignments(lambdaContext, outerFlow);

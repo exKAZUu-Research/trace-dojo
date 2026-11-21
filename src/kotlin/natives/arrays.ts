@@ -20,7 +20,7 @@ import { arrayFactoryName, UNSIGNED_ARRAYS } from '../prelude/arrays';
 import type { Frame } from '../runtime';
 import type { FunctionSymbol } from '../symbols';
 import { box, KObject, NULL, type PrimitiveKind, UNIT, type Value } from '../values';
-import { elementsOf, newList, newPrimitiveArrayList } from './collections';
+import { elementsOf, joinRendered, newList, newPrimitiveArrayList, touch } from './collections';
 import { arrayIterator, checkArrayIndex } from './core';
 import { defineNative, defineNativeProperty, libraryClass } from './registry';
 
@@ -74,33 +74,35 @@ function defineArrays(): void {
     frame.runtime.allocate(frame, array.items.length + 1);
     return array;
   });
-  defineNative('kotlin.collections.MutableList<T>.sortWith(Comparator<in T>)', (frame, list, [comparator]) => {
-    const object = list as KObject;
-    const values = elementsOf(frame, list);
-    const compare = comparatorFunction(frame, comparator);
-    frame.runtime.nativeRoots.push(list, comparator);
-    try {
-      const sorted = stableSort(frame, values, compare);
-      writeBack(frame, object, sorted);
-    } finally {
-      frame.runtime.nativeRoots.length -= 2;
-    }
-    return UNIT;
-  });
+  defineNative('kotlin.collections.MutableList<T>.sortWith(Comparator<in T>)', sortList);
   defineNative('kotlin.collections.MutableList<T>.reverse()', (frame, list) => {
     const values = elementsOf(frame, list).toReversed();
-    writeBack(frame, list as KObject, values);
+    if (values.length > 1) writeBack(frame, list as KObject, values);
     return UNIT;
   });
 }
 
-/** Stores sorted or reversed elements into a list, as `set` would, without counting as a structural change. */
-function writeBack(frame: Frame, list: KObject, values: Value[]): void {
-  if (list.items) {
-    list.items.length = values.length;
-    for (const [index, value] of values.entries()) list.items[index] = value;
-    return;
+function sortList(frame: Frame, list: Value, [comparator]: Value[]): Value {
+  const object = list as KObject;
+  const values = elementsOf(frame, list);
+  if (values.length <= 1) return UNIT;
+  const compare = comparatorFunction(frame, comparator);
+  const isArrayList = object.cls === libraryClass('kotlin.collections.ArrayList');
+  const modCount = object.modCount;
+  frame.runtime.nativeRoots.push(list, comparator);
+  try {
+    const sorted = stableSort(frame, values, compare);
+    if (isArrayList && object.modCount !== modCount)
+      frame.runtime.throwError(frame, 'java.util.ConcurrentModificationException');
+    writeBack(frame, object, sorted);
+    if (isArrayList) touch(object);
+  } finally {
+    frame.runtime.nativeRoots.length -= 2;
   }
+  return UNIT;
+}
+
+function writeBack(frame: Frame, list: KObject, values: Value[]): void {
   const set = libraryClass('kotlin.collections.MutableList').members.get('set')?.[0] as FunctionSymbol;
   const { nativeRoots } = frame.runtime;
   const mark = nativeRoots.length;
@@ -374,10 +376,8 @@ const fromVararg =
 function defineUnsignedArrayStrings(): void {
   for (const [name, kind] of UNSIGNED_ARRAYS) {
     defineNative(`kotlin.${name}.toString()`, (frame, receiver) => {
-      const values = ((receiver as KObject).items as (number | bigint)[]).map((value) => formatPrimitive(kind, value));
-      const text = `${name}(storage=[${values.join(', ')}])`;
-      frame.runtime.allocateString(frame, text.length);
-      return text;
+      const values = (receiver as KObject).items as (number | bigint)[];
+      return joinRendered(frame, values, `${name}(storage=[`, '])', (value) => formatPrimitive(kind, value));
     });
   }
 }
@@ -412,13 +412,9 @@ function defineArrayReading(receiver: string, kind: PrimitiveKind | 'Boolean' | 
     list.items = source.items;
     return list;
   });
-  defineNative(`${prefix}.contentToString()`, (frame, array) => {
-    const text = `[${boxedItems(array, kind)
-      .map((value) => stringOf(frame, value))
-      .join(', ')}]`;
-    frame.runtime.allocateString(frame, text.length);
-    return text;
-  });
+  defineNative(`${prefix}.contentToString()`, (frame, array) =>
+    joinRendered(frame, boxedItems(array, kind), '[', ']', (value) => stringOf(frame, value))
+  );
   defineNative(`${prefix}.copyOf()`, (frame, array) => {
     const items = (array as KObject).items as Value[];
     return copyArray(frame, array, items.length, () => [...items]);

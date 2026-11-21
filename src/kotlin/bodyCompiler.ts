@@ -73,14 +73,17 @@ export abstract class BodyCompiler extends DeclarationCompiler {
   private withSavedState<T>(file: FileContext, compile: () => T): T {
     const savedFile = this.file;
     const savedFlow = this.flow;
+    const savedInitialization = this.uninitializedProperties;
     this.file = file;
     this.flow = new Flow();
+    this.uninitializedProperties = undefined;
     for (const variable of this.initializerVariables) this.flow.assigned.add(variable);
     try {
       return compile();
     } finally {
       this.file = savedFile;
       this.flow = savedFlow;
+      this.uninitializedProperties = savedInitialization;
     }
   }
 

@@ -5,6 +5,245 @@ import { executeProgram } from '../../src/interpreter/program';
 /** Programs with the output of Kotlin 2.4.21 on the JVM (Java 25), which the interpreter must reproduce exactly. */
 test.each([
   {
+    name: 'case-insensitive matches at surrogate boundaries',
+    source: `fun main() {
+    val s = "𐐀"
+    val lead = s.substring(0, 1)
+    val trail = s.substring(1)
+    println(s.indexOf(trail, ignoreCase = true))
+    println(s.lastIndexOf(trail, ignoreCase = true))
+    println(s.contains(trail, ignoreCase = true))
+    println(s.startsWith(lead, ignoreCase = true))
+    println(s.endsWith(trail, ignoreCase = true))
+    println(s.replace(trail, "X", ignoreCase = true)[1])
+    println(s.split(trail, ignoreCase = true).size)
+    println(s.contains("𐐨", ignoreCase = true))
+}`,
+    stdout: '1\n1\ntrue\ntrue\ntrue\nX\n2\ntrue\n',
+  },
+  {
+    name: 'direct floating range membership and explicit range contains use JVM rounding',
+    source: `fun main() {
+    val range = 0.1f..0.2f
+    val value = 0.1
+    println(value in (0.1f..0.2f))
+    println(value in 0.1f.rangeTo(0.2f))
+    println(value in range)
+    println(range.contains(value))
+    println(2.0000000001 !in (1.0f..2.0f))
+}`,
+    stdout: 'false\nfalse\ntrue\ntrue\ntrue\n',
+  },
+  {
+    name: 'empty collection calls carry the enclosing inference constraints',
+    source: `fun main() {
+    println(listOf("ab", "c").flatMap { if (it.length > 1) listOf(it) else emptyList() })
+    println(listOf("ab", "c").flatMap { if (it.length > 1) setOf(it) else emptySet() })
+    println(listOf(1, 2).filter { it > 0 }.ifEmpty { emptyList() })
+}`,
+    stdout: '[ab]\n[ab]\n[1, 2]\n',
+  },
+  {
+    name: 'collection renderers enforce the string length bound',
+    source: `fun main() {
+    val value = "a".repeat(400000)
+    try { listOf(value, value, value).toString() } catch (error: OutOfMemoryError) { println("list") }
+    try { mapOf(1 to value, 2 to value, 3 to value).toString() } catch (error: OutOfMemoryError) { println("map") }
+    try { arrayOf(value, value, value).contentToString() } catch (error: OutOfMemoryError) { println("array") }
+}`,
+    stdout: 'list\nmap\narray\n',
+  },
+  {
+    name: 'character digits respect their radix and unicode letter width',
+    source: `fun main() {
+    println('f'.digitToInt(16))
+    println('Ａ'.digitToInt(16))
+    println('٤'.digitToIntOrNull(16))
+    println("Ｆ".toInt(16))
+    println('g'.digitToIntOrNull(16))
+    try { println('x'.digitToInt(16)) } catch (error: IllegalArgumentException) { println(error.message) }
+    try { println('z'.digitToIntOrNull(37)) } catch (error: IllegalArgumentException) { println(error.message) }
+}`,
+    stdout: '15\n10\n4\n15\nnull\nChar x is not a digit in the given radix=16\nradix 37 was not in valid range 2..36\n',
+  },
+  {
+    name: 'binary search over comparable values, comparator values, and derived keys',
+    source: `fun main() {
+    val values = listOf("a", "ccc", "dddd")
+    println(values.binarySearch(0, 2) { it.compareTo("ccc") })
+    println(values.binarySearch("bb", compareBy<String> { it.length }))
+    println(values.binarySearchBy(4) { it.length })
+    println(listOf(1, 3, 5).binarySearch(3))
+}`,
+    stdout: '1\n-2\n2\n1\n',
+  },
+  {
+    name: 'iterable predicate search order and nullable matches',
+    source: `fun main() {
+    val values = setOf(1, 2, 3)
+    println(values.last { it < 3 })
+    println(values.lastOrNull { it > 3 })
+    println(values.findLast { it % 2 == 1 })
+    println(values.indexOfFirst { it % 2 == 0 })
+    println(values.indexOfLast { it < 3 })
+    println(setOf(1, null).last { it == null })
+    val seen = mutableListOf<Int>()
+    val list = listOf(1, 2, 3)
+    list.last { seen.add(it); it == 2 }
+    println(seen)
+    seen.clear()
+    val iterable: Iterable<Int> = list
+    iterable.last { seen.add(it); it == 2 }
+    println(seen)
+}`,
+    stdout: '2\nnull\n3\n1\n1\nnull\n[3, 2]\n[1, 2, 3]\n',
+  },
+  {
+    name: 'derived property types and values see assignments in preceding init blocks',
+    source: `class A(x: Int) {
+    val n: Int
+    init { n = x * 2 }
+    val k = n + 1
+    val values = listOf(n, k)
+}
+fun main() { println(A(3).values) }`,
+    stdout: '[6, 7]\n',
+  },
+  {
+    name: 'window transforms observe updates made before later windows',
+    source: `fun main() {
+    val values = mutableListOf(1, 2, 3, 4)
+    println(values.windowed(2) { if (it[0] == 1) values[2] = 9; it.sum() })
+    println(values.chunked(2) { if (it[0] == 1) values[2] = 8; it.sum() })
+    println(setOf(1, 2, 3, 4, 5).windowed(3, 2, true) { it.toList() })
+}`,
+    stdout: '[3, 11, 13]\n[3, 12]\n[[1, 2, 3], [3, 4, 5], [5]]\n',
+  },
+  {
+    name: 'collection builders freeze map entries, key views, and mutable aliases',
+    source: `fun main() {
+    val set = buildSet { add(1); add(2) } as MutableSet<Int>
+    val map = buildMap { put(1, "a"); put(2, "b") } as MutableMap<Int, String>
+    try { set.remove(4) } catch (error: UnsupportedOperationException) { println("set") }
+    try { map[3] = "c" } catch (error: UnsupportedOperationException) { println("map") }
+    try { map.keys.clear() } catch (error: UnsupportedOperationException) { println("keys") }
+    try { map.entries.iterator().next().setValue("d") } catch (error: UnsupportedOperationException) { println("entry") }
+    println(set)
+    println(map)
+}`,
+    stdout: 'set\nmap\nkeys\nentry\n[1, 2]\n{1=a, 2=b}\n',
+  },
+  {
+    name: 'empty array slice ranges bypass endpoint bounds',
+    source: `fun main() {
+    println(intArrayOf(1, 2, 3).sliceArray(2..0).contentToString())
+    println(arrayOf("a", "b").sliceArray(10..5).contentToString())
+}`,
+    stdout: '[]\n[]\n',
+  },
+  {
+    name: 'PrintStream character array overload and standard error',
+    source: `fun main() {
+    System.out.print(charArrayOf('o', 'k'))
+    System.out.println(charArrayOf('h', 'i'))
+    System.err.println(charArrayOf('n', 'o'))
+    val missing: CharArray? = null
+    try { System.out.println(missing) } catch (error: NullPointerException) { println(error.message) }
+}`,
+    stdout: 'okhi\nCannot read the array length because "cbuf" is null\n',
+  },
+  {
+    name: 'sorting and reversing respect finalized list mutability',
+    source: `fun main() {
+    val list = buildList { add(2); add(1) } as MutableList<Int>
+    try { list.reverse() } catch (error: UnsupportedOperationException) { println("reverse") }
+    try { list.sort() } catch (error: UnsupportedOperationException) { println("sort") }
+    println(list)
+}`,
+    stdout: 'reverse\nsort\n[2, 1]\n',
+  },
+  {
+    name: 'generic postfix syntax binds within operators',
+    source: `fun main() {
+    println(mapOf("a" to mutableListOf<Int>()))
+    println(3 !in listOf<Int>())
+    println(3 in listOf<Int>(3))
+    println(-maxOf<Int>(1, 2))
+    println(!listOf<Int>().isEmpty())
+    println(1 until emptyList<Int>().size)
+    println(1 to 2 to maxOf<Int>(1, 2))
+    println("a" to listOf<Int>(7)[0])
+    println((1 to 2).first)
+}`,
+    stdout: '{a=[]}\ntrue\ntrue\n-2\nfalse\n1..-1\n((1, 2), 2)\n(a, 7)\n1\n',
+  },
+  {
+    name: 'Kotlin ArrayDeque supports both queue ends and indexed list edits',
+    source: `fun main() {
+    val queue = ArrayDeque(listOf(2, 3))
+    queue.addFirst(1)
+    queue.addLast(4)
+    queue[1] = 9
+    println(queue.removeLast())
+    println(queue.removeFirst())
+    println(queue)
+    println(queue.first())
+    val view = queue.subList(0, 1)
+    view.add(8)
+    println(queue.joinToString())
+    val asAny: Any = queue
+    println(asAny is RandomAccess)
+    val empty = ArrayDeque<Int>(1)
+    println(empty.lastOrNull())
+    try {
+        empty.removeFirst()
+    } catch (error: NoSuchElementException) {
+        println(error.message)
+    }
+}`,
+    stdout: '4\n1\n[9, 3]\n9\n9, 8, 3\nfalse\nnull\nArrayDeque is empty.\n',
+  },
+  {
+    name: 'empty sublist insertions preserve the root iterator',
+    source: `fun main() {
+    val root = mutableListOf(1, 2, 3)
+    val view = root.subList(0, 2)
+    val iterator = root.iterator()
+    println(view.addAll(emptyList()))
+    println(view.addAll(0, emptyList()))
+    println(iterator.next())
+    root.add(4)
+    println(view.addAll(1, emptyList()))
+    try {
+        view.addAll(1, listOf(9))
+    } catch (error: ConcurrentModificationException) {
+        println("stale")
+    }
+}`,
+    stdout: 'false\nfalse\n1\nfalse\nstale\n',
+  },
+  {
+    name: 'sorting an ArrayList invalidates its iterator and backed sublist',
+    source: `fun main() {
+    val root = mutableListOf(3, 1, 2)
+    val view = root.subList(0, 2)
+    val iterator = root.iterator()
+    root.sort()
+    println(root)
+    try {
+        println(view.size)
+    } catch (error: ConcurrentModificationException) {
+        println("stale view")
+    }
+    try {
+        println(iterator.next())
+    } catch (error: ConcurrentModificationException) {
+        println("stale iterator")
+    }
+}`,
+    stdout: '[1, 2, 3]\nstale view\nstale iterator\n',
+  },
+  {
     name: 'negative source indices in array copies',
     source: `fun main() {
     try {
@@ -385,12 +624,14 @@ fun main() {
     source: `fun main() {
     val letters = StringBuilder()
     val iterable = letters.asIterable()
+    val indexed = letters.withIndex()
     val groups = letters.groupingBy { it }
     letters.append("aba")
     println(iterable.toList())
     println(groups.eachCount())
     letters[0] = 'c'
     println(groups.eachCount())
+    println(indexed.toList())
 
     val words = mutableListOf("a", "b")
     var calls = 0
@@ -405,7 +646,8 @@ fun main() {
     println(byLength.eachCount())
     println(calls)
 }`,
-    stdout: '[a, b, a]\n{a=2, b=1}\n{c=1, b=1, a=1}\n0\n{1=2, 2=1}\n{3=1, 1=1, 2=1}\n6\n',
+    stdout:
+      '[a, b, a]\n{a=2, b=1}\n{c=1, b=1, a=1}\n[IndexedValue(index=0, value=c), IndexedValue(index=1, value=b), IndexedValue(index=2, value=a)]\n0\n{1=2, 2=1}\n{3=1, 1=1, 2=1}\n6\n',
   },
   {
     name: 'bulk mutations through a reversed view',
@@ -959,6 +1201,21 @@ fun main() { println(C().f(1)) }`,
     'fun main() { val n = 1; println(arrayOf("x").lastIndexOf(n)) }',
   ],
   ['an integer tested against a floating-point range', false, 'fun main() { val n = 1; println(n in 0.0..2.0) }'],
+  ['a float array searched by equality', false, 'fun main() { println(floatArrayOf(1.0f).indexOf(1.0f)) }'],
+  ['an error-deprecated char conversion', false, "fun main() { println('a'.toUpperCase()) }"],
+  ['an error-deprecated Double conversion', false, 'fun main() { println(3.5.toShort()) }'],
+  ['an error-deprecated Float conversion', false, 'fun main() { println(3.5f.toByte()) }'],
+  ['a double array tested for element membership', false, 'fun main() { println(1.0 in doubleArrayOf(1.0)) }'],
+  [
+    'when comparing a string subject with a character',
+    false,
+    'fun main() { val grade = "A"; when (grade) { \'A\' -> println(1); else -> println(2) } }',
+  ],
+  [
+    'when comparing an enum subject with a string',
+    false,
+    'enum class E { A }; fun main() { when (E.A) { "A" -> println(1); else -> println(2) } }',
+  ],
   ['a floating-point value tested against an integer range', false, 'fun main() { val n = 1.5f; println(n in 0..2) }'],
   ['membership inferred from unrelated element types', false, 'fun main() { println(1 in listOf("x")) }'],
   ['a direct Grouping constructor call', false, 'fun main() { println(Grouping(listOf(1), listOf("a"))) }'],
@@ -1257,6 +1514,21 @@ test.each([
     'kotlin.collections.sortedMapOfは、この採点環境では使えません。',
   ],
   [
+    'a Java method mapped to a mutable Kotlin collection',
+    'fun main() { mutableMapOf("a" to 1).putIfAbsent("b", 2) }',
+    'MutableMap<String, Int> の putIfAbsentは、この採点環境では使えません。',
+  ],
+  [
+    'a Java method inherited by read-only Kotlin collections',
+    'fun main() { listOf(1).stream() }',
+    'List<Int> の streamは、この採点環境では使えません。',
+  ],
+  [
+    'an instance method of a Java-backed Kotlin type alias',
+    'fun main() { StringBuilder("abc").capacity() }',
+    'StringBuilder の capacityは、この採点環境では使えません。',
+  ],
+  [
     'a standard-list member outside the interpreter',
     'fun main() { println(listOf(1, 2).foldRightIndexed(0) { i, v, acc -> acc + i * v }) }',
     'List<Int> の foldRightIndexedは、この採点環境では使えません。',
@@ -1323,6 +1595,8 @@ test.each([
   ['fun main() { println(listOf(1).sizee) }', 'List<Int> には sizee がありません。'],
   ['fun main() { "abc".substrin(1) }', 'String には substrin がありません。'],
   ['fun main() { "abc".toSortedMap() }', 'String には toSortedMap がありません。'],
+  ['fun main() { "abc".getBytes() }', 'String には getBytes がありません。'],
+  ['fun main() { mapOf("a" to 1).putIfAbsent("b", 2) }', 'Map<String, Int> には putIfAbsent がありません。'],
 ])('reports a missing member for %s', (program, message) => {
   expect(executeProgram('kotlin', program)).toMatchObject({
     kind: 'compileError',

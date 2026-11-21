@@ -162,6 +162,7 @@ export class FunctionSymbol implements MemberBase {
   isOpen = false;
   isOverride = false;
   isInline = false;
+  isDeprecatedError = false;
   isInfix = false;
   isOperator = false;
   isConstructor = false;

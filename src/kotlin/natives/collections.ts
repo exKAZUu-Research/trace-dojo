@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 728 -- the natives of the collections, which share the helpers of their items.
+// code-gauge-allow-file fileNcss 757 -- the natives of the collections, which share the helpers of their items.
 import { runtimeClassOf } from '../dispatch';
 import { hashOf, stringOf, valueEquals } from '../format';
 import { toInt32 } from '../operators';
@@ -45,7 +45,7 @@ function className(value: Value): string {
 function requireResizable(frame: Frame, list: Value): void {
   const root = listView(list as KObject)?.source ?? list;
   const name = className(root);
-  const isResizable = name === 'ArrayList' || (name === 'ListBuilder' && !isBuilt(root));
+  const isResizable = name === 'ArrayList' || name === 'ArrayDeque' || (name === 'ListBuilder' && !isBuilt(root));
   if (!isResizable) throwError(frame, 'java.lang.UnsupportedOperationException');
 }
 
@@ -93,7 +93,8 @@ function checkIndex(frame: Frame, list: Value, index: number): void {
       throwError(frame, 'java.lang.IndexOutOfBoundsException', `Empty list doesn't contain element at index ${index}.`);
       break;
     }
-    case 'ListBuilder': {
+    case 'ListBuilder':
+    case 'ArrayDeque': {
       throwError(frame, 'java.lang.IndexOutOfBoundsException', `index: ${index}, size: ${size}`);
       break;
     }
@@ -118,10 +119,28 @@ export function indexOfValue(frame: Frame, values: Value[], element: Value): num
 
 /** `AbstractCollection.toString`: the elements in brackets, a collection inside itself shown as `(this Collection)`. */
 export function collectionToString(frame: Frame, collection: Value, elements: Value[]): string {
-  const parts = elements.map((element) => (element === collection ? '(this Collection)' : stringOf(frame, element)));
-  const text = `[${parts.join(', ')}]`;
-  frame.runtime.allocateString(frame, text.length);
-  return text;
+  return joinRendered(frame, elements, '[', ']', (element) =>
+    element === collection ? '(this Collection)' : stringOf(frame, element)
+  );
+}
+
+export function joinRendered<T>(
+  frame: Frame,
+  elements: readonly T[],
+  prefix: string,
+  suffix: string,
+  render: (value: T) => string
+): string {
+  let length = prefix.length + suffix.length;
+  const parts: string[] = [];
+  for (const element of elements) {
+    const part = render(element);
+    const added = part.length + (parts.length > 0 ? 2 : 0);
+    length += added;
+    frame.runtime.allocateString(frame, length, added);
+    parts.push(part);
+  }
+  return prefix + parts.join(', ') + suffix;
 }
 
 export function newList(
@@ -240,19 +259,9 @@ const LIST_CHANGING_NATIVES: Record<string, ListNative> = {
     replaceListItems(frame, list as KObject, position, 0, [element]);
     return UNIT;
   },
-  'addAll(Collection<E>)': (frame, list, [elements]) => {
-    requireResizable(frame, list);
-    const added = elementsOf(frame, elements);
-    replaceListItems(frame, list as KObject, indexedSize(list as KObject), 0, added);
-    return added.length > 0;
-  },
-  'addAll(Int, Collection<E>)': (frame, list, [index, elements]) => {
-    requireResizable(frame, list);
-    const position = insertionIndex(frame, list, index as number);
-    const added = elementsOf(frame, elements);
-    replaceListItems(frame, list as KObject, position, 0, added);
-    return added.length > 0;
-  },
+  'addAll(Collection<E>)': (frame, list, [elements]) => insertListElements(frame, list as KObject, undefined, elements),
+  'addAll(Int, Collection<E>)': (frame, list, [index, elements]) =>
+    insertListElements(frame, list as KObject, index as number, elements),
   'remove(E)': (frame, list, [element]) => {
     const values = readableItems(list);
     const index = indexOfValue(frame, values, element);
@@ -293,10 +302,25 @@ const LIST_CHANGING_NATIVES: Record<string, ListNative> = {
   },
   'clear()': (frame, list) => {
     requireResizable(frame, list);
-    replaceListItems(frame, list as KObject, 0, indexedSize(list as KObject), []);
+    if (className(list) !== 'ArrayDeque' || indexedSize(list as KObject) > 0)
+      replaceListItems(frame, list as KObject, 0, indexedSize(list as KObject), []);
     return UNIT;
   },
 };
+
+function insertListElements(frame: Frame, list: KObject, index: number | undefined, elements: Value): boolean {
+  const view = listView(list);
+  if (!view) requireResizable(frame, list);
+  const position = index === undefined ? indexedSize(list) : insertionIndex(frame, list, index);
+  const added = elementsOf(frame, elements);
+  if (added.length === 0 && (view || className(list) === 'ArrayDeque')) return false;
+  if (view) {
+    checkListView(frame, list);
+    requireResizable(frame, list);
+  }
+  replaceListItems(frame, list, position, 0, added);
+  return added.length > 0;
+}
 
 function insertionIndex(frame: Frame, list: Value, position: number): number {
   const size = indexedSize(list as KObject);
@@ -343,15 +367,18 @@ function defineLists(): void {
     (list as KObject).native = { isBuilt: true };
     return list;
   });
-  for (const [signature, initialize] of constructors) {
-    defineNative(`kotlin.collections.ArrayList.<init>${signature}`, (frame, instance, args) => {
-      const list = instance as KObject;
-      list.items = [];
-      list.modCount = 0;
-      initialize(frame, list, args);
-      frame.runtime.allocate(frame, list.items.length + 1);
-      return UNIT;
-    });
+  for (const cls of ['ArrayList', 'ArrayDeque']) {
+    for (const [signature, initialize] of constructors) {
+      defineNative(`kotlin.collections.${cls}.<init>${signature}`, (frame, instance, args) => {
+        const list = instance as KObject;
+        list.items = [];
+        list.modCount = 0;
+        initialize(frame, list, args);
+        const capacity = cls === 'ArrayDeque' && signature === '(Int)' ? (args[0] as number) : list.items.length;
+        frame.runtime.allocate(frame, capacity + 1);
+        return UNIT;
+      });
+    }
   }
   for (const type of [LIST, PRIMITIVE_ARRAY_LIST]) {
     defineNativeProperty(`${type}.size`, (frame, list) => {
@@ -364,6 +391,10 @@ function defineLists(): void {
 }
 
 function registerListNative(type: string, signature: string, native: ListNative): void {
+  if (signature.startsWith('addAll(')) {
+    defineNative(`${type}.${signature}`, native);
+    return;
+  }
   defineNative(`${type}.${signature}`, (frame, list, args) => {
     checkListView(frame, list as KObject);
     return native(frame, list, args);
@@ -414,7 +445,8 @@ function subList(frame: Frame, list: KObject, from: number, to: number): KObject
   const parent = listView(list);
   const source = parent?.source ?? list;
   frame.runtime.allocate(frame, 1);
-  const view = new KObject(libraryClass('kotlin.collections.SubList'), 0);
+  const cls = className(source) === 'ArrayDeque' ? 'SequentialSubList' : 'SubList';
+  const view = new KObject(libraryClass(`kotlin.collections.${cls}`), 0);
   view.modCount = source.modCount;
   view.native = { listView: { source, parent: list, from: from + (parent?.from ?? 0), size: to - from } };
   return view;
@@ -557,7 +589,13 @@ export function newMap(frame: Frame, className: string, store: KStore): KObject 
 
 function requireMutableMap(frame: Frame, map: Value): void {
   const name = className(map);
-  if (name === 'SingletonMap' || name === 'EmptyMap' || name === 'SingletonSet' || name === 'EmptySet') {
+  if (
+    isBuilt(map) ||
+    name === 'SingletonMap' ||
+    name === 'EmptyMap' ||
+    name === 'SingletonSet' ||
+    name === 'EmptySet'
+  ) {
     throwError(frame, 'java.lang.UnsupportedOperationException');
   }
 }
@@ -671,16 +709,12 @@ function mapEquals(frame: Frame, map: KObject, other: Value): boolean {
 }
 
 function mapToString(frame: Frame, map: KObject): string {
-  const parts = storeOf(map)
-    .ordered()
-    .map((entry) => {
-      const key = entry.key === map ? '(this Map)' : stringOf(frame, entry.key);
-      const value = entry.value === map ? '(this Map)' : stringOf(frame, entry.value);
-      return `${key}=${value}`;
-    });
-  const text = `{${parts.join(', ')}}`;
-  frame.runtime.allocateString(frame, text.length);
-  return text;
+  return joinRendered(frame, storeOf(map).ordered(), '{', '}', (entry) => {
+    const key = entry.key === map ? '(this Map)' : stringOf(frame, entry.key);
+    const value = entry.value === map ? '(this Map)' : stringOf(frame, entry.value);
+    frame.runtime.allocateString(frame, key.length + value.length + 1, 0);
+    return `${key}=${value}`;
+  });
 }
 
 function initializeSet(instance: Value, store: KStore): Value {
@@ -693,25 +727,7 @@ function initializeSet(instance: Value, store: KStore): Value {
 // code-gauge-allow functionNcss 54 -- registers the natives of one class together, in the order the prelude declares them.
 // code-gauge-allow functionCognitiveComplexity 19 -- registers the natives of one class together, in the order the prelude declares them.
 function defineSets(): void {
-  const setConstructors: [string, KStore['order']][] = [
-    ['HashSet', 'hash'],
-    ['LinkedHashSet', 'insertion'],
-  ];
-  for (const [name, order] of setConstructors) {
-    const key = `kotlin.collections.${name}.<init>`;
-    defineNative(`${key}()`, (_frame, instance) => initializeSet(instance, newStore(order)));
-    defineNative(`${key}(Int)`, (frame, instance, [capacity]) => {
-      if ((capacity as number) < 0)
-        throwError(frame, 'java.lang.IllegalArgumentException', `Illegal initial capacity: ${capacity as number}`);
-      return initializeSet(instance, newStore(order, capacity as number));
-    });
-    defineNative(`${key}(Collection<E>)`, (frame, instance, [elements]) => {
-      const values = elementsOf(frame, elements);
-      const store = newStore(order, jdkHashCapacity(Math.max(values.length, 12)));
-      for (const value of values) putEntry(frame, store, value, undefined);
-      return initializeSet(instance, store);
-    });
-  }
+  defineSetConstructors();
   defineNativeProperty(`${SET}.size`, (_frame, set) => storeOf(set).entries.length);
   const natives: Record<string, (frame: Frame, set: Value, args: Value[]) => Value> = {
     'isEmpty()': (_frame, set) => storeOf(set).entries.length === 0,
@@ -728,6 +744,7 @@ function defineSets(): void {
       return true;
     },
     'remove(E)': (frame, set, [element]) => {
+      if (isBuilt(set)) requireMutableMap(frame, set);
       const store = storeOf(set);
       const entry = findEntry(frame, store, element);
       if (!entry) return false;
@@ -748,11 +765,13 @@ function defineSets(): void {
       return changed;
     },
     'removeAll(Collection<E>)': (frame, set, [elements]) => {
+      if (isBuilt(set)) requireMutableMap(frame, set);
       requireMutableMap(frame, set);
       const removing = elementsOf(frame, elements);
       return removeEntries(frame, set as KObject, (entry) => indexOfValue(frame, removing, entry.key) !== -1);
     },
     'retainAll(Collection<E>)': (frame, set, [elements]) => {
+      if (isBuilt(set)) requireMutableMap(frame, set);
       requireMutableMap(frame, set);
       const keeping = elementsOf(frame, elements);
       return removeEntries(frame, set as KObject, (entry) => indexOfValue(frame, keeping, entry.key) === -1);
@@ -768,6 +787,28 @@ function defineSets(): void {
     'toString()': (frame, set) => collectionToString(frame, set, storeElements(set as KObject)),
   };
   for (const [signature, native] of Object.entries(natives)) defineNative(`${SET}.${signature}`, native);
+}
+
+function defineSetConstructors(): void {
+  const setConstructors: [string, KStore['order']][] = [
+    ['HashSet', 'hash'],
+    ['LinkedHashSet', 'insertion'],
+  ];
+  for (const [name, order] of setConstructors) {
+    const key = `kotlin.collections.${name}.<init>`;
+    defineNative(`${key}()`, (_frame, instance) => initializeSet(instance, newStore(order)));
+    defineNative(`${key}(Int)`, (frame, instance, [capacity]) => {
+      if ((capacity as number) < 0)
+        throwError(frame, 'java.lang.IllegalArgumentException', `Illegal initial capacity: ${capacity as number}`);
+      return initializeSet(instance, newStore(order, capacity as number));
+    });
+    defineNative(`${key}(Collection<E>)`, (frame, instance, [elements]) => {
+      const values = elementsOf(frame, elements);
+      const store = newStore(order, jdkHashCapacity(Math.max(values.length, 12)));
+      for (const value of values) putEntry(frame, store, value, undefined);
+      return initializeSet(instance, store);
+    });
+  }
 }
 
 function removeEntries(frame: Frame, collection: KObject, removes: (entry: HashEntry) => boolean): boolean {
@@ -992,6 +1033,12 @@ function defineNativeEntry(): void {
   });
 }
 
+function finishBuild(_frame: Frame, collection: Value): Value {
+  const object = collection as KObject;
+  object.native = { ...object.native, isBuilt: true };
+  return object;
+}
+
 function setInstance(frame: Frame, name: string, store: KStore): KObject {
   const set = newMap(frame, name, store);
   set.native = { isSet: true };
@@ -1079,4 +1126,6 @@ defineIterators();
 defineMapConstructors();
 defineMaps();
 defineSets();
+defineNative('kotlin.collections.LinkedHashSet<E>.finishBuild()', finishBuild);
+defineNative('kotlin.collections.LinkedHashMap<K, V>.finishBuild()', finishBuild);
 defineViews();

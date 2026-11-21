@@ -592,6 +592,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     }
   }
 
+  // code-gauge-allow functionNcss 31 -- builds the function symbol from the declaration and its modifiers.
   private declareFunction(
     decl: FunctionDecl,
     ownerScope: Scope,
@@ -608,6 +609,8 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     const { keywords } = decl.modifiers;
     this.applyMemberModifiers(symbol, decl.modifiers, cls?.symbol);
     symbol.isInline = keywords.has('inline');
+    symbol.isDeprecatedError =
+      file.isLibrary && decl.modifiers.annotations.some(({ name }) => name === 'DeprecatedError');
     symbol.isInfix = keywords.has('infix');
     symbol.isOperator = keywords.has('operator');
     symbol.isAtomic = !file.isLibrary && this.claimAtomicRange(decl.row, decl.headerEndRow);
