@@ -7,7 +7,7 @@ export function float32FromText(text: string): number {
   const mark = significand.indexOf('.');
   const fractional = mark === -1 ? 0 : significand.length - mark - 1;
   const digits = significand.replace('.', '').replace(/^0+/, '');
-  if (digits === '') return sign * 0;
+  if (digits === '') return sign < 0 ? -0 : 0;
   const magnitude = hexadecimal
     ? hexMagnitude(digits, Number(exponent) - fractional * 4)
     : decimalMagnitude(digits, Number(exponent) - fractional);

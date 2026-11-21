@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 936 -- One method per kind of Kotlin statement and control structure.
+// code-gauge-allow-file fileNcss 950 -- One method per kind of Kotlin statement and control structure.
 import type {
   AssignmentStatement,
   Block,
@@ -30,7 +30,7 @@ import {
 import { getPropertyValue, setPropertyValue } from './dispatch';
 import { type BoundPlace, type Place } from './expressionCompiler';
 import { caseOf, keyOf } from './flowKeys';
-import { assignedNames, remainingWrites, stableLocal } from './flowWrites';
+import { assignedNames, localRefinement, refineLocalType, remainingWrites } from './flowWrites';
 import { valueEquals } from './format';
 import { isExclusion, OperatorCompiler } from './operatorCompiler';
 import { NUMBER_OPERATOR_NAMES } from './operators';
@@ -262,30 +262,48 @@ export abstract class StatementCompiler extends OperatorCompiler {
     const holder = this.newVariable(scope, context, `\0${name}`, delegate.type, false, row, false);
     scope.variables.delete(`\0${name}`);
     this.flow.assigned.add(holder);
-    const delegateCompiled: Compiled = {
-      type: delegate.type,
-      repr: delegate.repr,
-      eval: this.variableAccess(context, holder).read,
-    };
-    const property = this.propertyReference(scope, name, row);
-    const getter = this.compileDelegateCall(
-      scope,
-      context,
-      delegateCompiled,
-      'getValue',
-      [this.nullArgument(row), property],
-      row
-    );
+    const held = new Handoff<{ delegate: Value; value?: Value }>();
+    const delegateCompiled: Compiled = { type: delegate.type, repr: delegate.repr, eval: () => held.get().delegate };
+    const args = [this.nullArgument(row), this.propertyReference(scope, name, row)];
+    const getter = this.compileDelegateCall(scope, context, delegateCompiled, 'getValue', args, row);
     const type = declared ?? getter.type;
     if (declared && !isSubtype(getter.type, declared)) this.error(row, typeMismatchMessage(declared, getter.type));
+    const evaluateGet = convertRepr(getter.eval, getter.repr, reprOf(this.core, type));
+    const setter = statement.isVar
+      ? this.compileLocalDelegateSetter(scope, context, delegateCompiled, args, type, row, held)
+      : undefined;
     const variable = new VariableSymbol(name, type, statement.isVar, 0, holder.slot, row);
     variable.owner = context;
-    variable.delegateRead = convertRepr(getter.eval, getter.repr, reprOf(this.core, type));
+    variable.localDelegate = {
+      holder,
+      read: (frame, instance) => held.run(frame, { delegate: instance }, () => evaluateGet(frame)),
+      write:
+        setter && ((frame, instance, value) => held.run(frame, { delegate: instance, value }, () => setter(frame))),
+    };
     scope.variables.set(name, variable);
     this.flow.assigned.add(variable);
     const write = this.variableAccess(context, holder).write;
     const evaluate = delegate.eval;
     return this.withStep(row, (frame) => write(frame, evaluate(frame)), delegate.isCreation === true);
+  }
+
+  // code-gauge-allow functionParameterCount 7 -- the declaration's scope, receiver, arguments and runtime value are distinct.
+  private compileLocalDelegateSetter(
+    scope: Scope,
+    context: FunctionContext,
+    delegate: Compiled,
+    args: ArgumentSyntax[],
+    type: KType,
+    row: number,
+    held: Handoff<{ delegate: Value; value?: Value }>
+  ): Eval {
+    const setterScope = new Scope(scope, context);
+    const value = new VariableSymbol('\0delegateValue', type, false, 0, -1, row);
+    value.owner = context;
+    value.delegateRead = () => held.get().value;
+    setterScope.variables.set(value.name, value);
+    const argument: ArgumentSyntax = { row, name: undefined, value: { kind: 'name', row, name: value.name } };
+    return this.compileDelegateCall(setterScope, context, delegate, 'setValue', [...args, argument], row).eval;
   }
 
   /** A `null` argument, as delegated local variables pass for the object that holds them. */
@@ -526,7 +544,10 @@ export abstract class StatementCompiler extends OperatorCompiler {
       return this.propertyPlace(companion.property, holder, row, scope);
     }
     const property = this.topLevelProperties(target.name)[0]?.find((candidate) => !candidate.extensionReceiver);
-    if (property) return this.propertyPlace({ symbol: property, substitution: new Map() }, undefined, row, scope);
+    if (property) {
+      if (isCompound) this.checkGlobalInitialized(context, property, row);
+      return this.propertyPlace({ symbol: property, substitution: new Map() }, undefined, row, scope);
+    }
     return this.error(row, `${target.name} が見つかりません。`);
   }
 
@@ -562,7 +583,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     return this.propertyPlace(property, receiver, row, scope, isOwnReceiver && !isCompound ? context : undefined);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- finds the closest variable and determines which assignments it permits.
+  // code-gauge-allow functionCognitiveComplexity 20 -- finds the closest variable and determines which assignments it permits.
   private variablePlace(
     scope: Scope,
     context: FunctionContext,
@@ -570,7 +591,8 @@ export abstract class StatementCompiler extends OperatorCompiler {
     row: number,
     isCompound: boolean
   ): Place {
-    const { delegateRead, delegateWrite } = variable;
+    const { delegateRead, delegateWrite, localDelegate } = variable;
+    if (localDelegate) return this.localDelegatePlace(context, variable, localDelegate, row);
     if (delegateRead) {
       if (!delegateWrite) return this.unavailable(row, '委譲したローカル変数への代入');
       return {
@@ -601,14 +623,41 @@ export abstract class StatementCompiler extends OperatorCompiler {
     const access = this.variableAccess(context, variable);
     return {
       type: variable.type,
-      readType:
-        isCompound && stableLocal(scope, context, variable) ? this.flow.narrowed.get(keyOf(variable)) : undefined,
+      readType: isCompound
+        ? refineLocalType(
+            localRefinement(scope, context, variable),
+            variable.type,
+            this.flow.narrowed.get(keyOf(variable))
+          )
+        : undefined,
       repr: reprOf(this.core, variable.type),
       recordAssignment: (type) => {
         if (variable.owner !== context) variable.capturedWriteTypes.add(type);
         this.recordAssignment(context, variable, row);
       },
       bind: (frame) => ({ get: () => access.read(frame), set: (value) => access.write(frame, value) }),
+    };
+  }
+
+  private localDelegatePlace(
+    context: FunctionContext,
+    variable: VariableSymbol,
+    delegate: NonNullable<VariableSymbol['localDelegate']>,
+    row: number
+  ): Place {
+    const { write } = delegate;
+    if (!write) this.error(row, `val で宣言した ${variable.name} には、再び代入できません。`);
+    const { read } = this.variableAccess(context, delegate.holder);
+    return {
+      type: variable.type,
+      repr: reprOf(this.core, variable.type),
+      bind: (frame) => {
+        const instance = read(frame);
+        return {
+          get: () => delegate.read(frame, instance),
+          set: (value) => write(frame, instance, value),
+        };
+      },
     };
   }
 

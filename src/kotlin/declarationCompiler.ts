@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 862 -- The declaration compiler shares symbol and class-linking logic.
+// code-gauge-allow-file fileNcss 887 -- The declaration compiler shares symbol and class-linking logic.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import type {
   ClassDecl,
@@ -19,6 +19,7 @@ import type { FileContext } from './compilerCore';
 import { unavailableMessage } from './convertSupport';
 import { callFunction, getPropertyValue, isVirtual, propertyRepr, setPropertyValue } from './dispatch';
 import { hashOf, stringHash, stringOf, valueEquals } from './format';
+import { jvmSignatures } from './jvmSignatures';
 import { isKnownLibraryPackage } from './libraryApi';
 import { arrayContentHash, arrayContentString, dataArrayKind } from './natives/arrays';
 import { type NativeFunction, type NativeProperty, typeRefText } from './nativeTypes';
@@ -102,6 +103,7 @@ export interface FunctionEntry {
 
 export interface PropertyEntry {
   kind: 'property';
+  declarationIndex: number;
   decl: PropertyDecl;
   symbol: PropertySymbol;
   file: FileContext;
@@ -131,7 +133,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   protected readonly propertyEntries: PropertyEntry[] = [];
   protected readonly entryOfFunction = new Map<FunctionSymbol, FunctionEntry>();
   protected readonly entryOfProperty = new Map<PropertySymbol, PropertyEntry>();
-  protected globalCount = 0;
+  protected globalDefaults: Value[] = [];
   protected natives: ReadonlyMap<string, NativeFunction> = new Map();
   protected nativeProperties: ReadonlyMap<string, NativeProperty> = new Map();
   /** The natives a library declaration names that have no implementation, which the library reports at once. */
@@ -268,12 +270,10 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     const owner = this.findQualifiedClass(path.slice(0, -1));
     const nested = owner?.nested.get(name);
     if (nested) {
-      this.checkNestedAccessible(undefined, nested, row);
       context.importedClasses.set(name, nested);
       return;
     }
     if (owner) {
-      this.checkNestedAccessible(undefined, owner, row);
       const members = owner.members.get(name) ?? [];
       if (members.length === 0 || !owner.isObject) this.rejectImport(row, path.join('.'));
       this.importObjectMembers(context, owner, name, members);
@@ -281,7 +281,6 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     }
     const cls = this.findQualifiedClass(path);
     if (!cls) this.rejectImport(row, path.join('.'));
-    this.checkNestedAccessible(undefined, cls, row);
     context.importedClasses.set(name, cls);
   }
 
@@ -597,7 +596,11 @@ export abstract class DeclarationCompiler extends StatementCompiler {
         (!other.extensionReceiver ||
           !symbol.extensionReceiver ||
           isSameType(other.extensionReceiver, symbol.extensionReceiver));
-      if (sameReceiver && other.params.every((param, index) => isSameType(param.type, symbol.params[index].type))) {
+      const sameParameters = other.params.every((param, index) => {
+        const parameter = symbol.params[index];
+        return param.isVararg === parameter.isVararg && isSameType(param.type, parameter.type);
+      });
+      if (sameReceiver && sameParameters) {
         this.error(row, `同じ引数の型の関数 ${symbol.name} が2回宣言されています。`);
       }
     }
@@ -783,6 +786,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     if (decl.modifiers.keywords.has('external')) this.bindNativeProperty(symbol, decl, cls?.symbol, file);
     const entry: PropertyEntry = {
       kind: 'property',
+      declarationIndex: this.propertyEntries.length,
       decl,
       symbol,
       file,
@@ -1158,6 +1162,31 @@ export abstract class DeclarationCompiler extends StatementCompiler {
         for (const member of members) {
           if (member.overridden.length > 0) this.findOverridden(symbol, member);
         }
+      }
+    }
+  }
+
+  protected validateJvmSignatures(): void {
+    const byFile = Map.groupBy(
+      [...this.functionEntries, ...this.propertyEntries].filter((entry) => !entry.cls),
+      (entry) => entry.file
+    );
+    for (const entries of byFile.values()) this.checkJvmSignatures(entries.map((entry) => entry.symbol));
+    for (const { symbol } of this.classEntries) this.checkJvmSignatures([...symbol.members.values()].flat());
+  }
+
+  private checkJvmSignatures(members: MemberSymbol[]): void {
+    const signatures = new Set<string>();
+    for (const member of members) {
+      if (member.isLibrary) continue;
+      const property = member.kind === 'property' ? this.entryOfProperty.get(member)?.decl : undefined;
+      const accessors = property && {
+        constant: property.modifiers.keywords.has('const'),
+        customSetter: property.setter?.body !== undefined,
+      };
+      for (const signature of jvmSignatures(this.core, member, accessors)) {
+        if (signatures.has(signature)) this.error(member.row, `JVM では ${signature} が重複しています。`);
+        signatures.add(signature);
       }
     }
   }

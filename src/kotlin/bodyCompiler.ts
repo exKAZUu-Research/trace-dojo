@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 537 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss 545 -- the compiler of one area of Kotlin, whose parts call each other closely.
 import type { Expression, ParameterDecl, PropertyDecl } from './ast';
 import type { ArgumentSyntax, Candidate, ResolvedCall } from './callCompiler';
 import {
@@ -43,6 +43,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     for (const entry of this.classEntries) setDefaults(entry.symbol);
     for (const entry of this.functionEntries) this.ensureFunctionCompiled(entry);
     this.validateOverrideTypes();
+    this.validateJvmSignatures();
     for (const entry of this.classEntries) {
       this.file = entry.file;
       this.compileClassInitializer(entry);
@@ -217,7 +218,9 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       if (decl.initializer && !symbol.type) {
         const context = this.initializerContext(entry);
         const scope = this.initializerScope(entry, context);
-        const compiled = this.compileExpression(scope, context, decl.initializer);
+        const compiled = this.inPropertyInitializer(entry, context, () =>
+          this.compileExpression(scope, context, decl.initializer as Expression)
+        );
         const type = resolved(compiled.type);
         symbol.type = compiled.integerLiteral ? this.primitiveType(this.primitiveOf(type) ?? 'Int') : type;
       }
@@ -235,6 +238,31 @@ export abstract class BodyCompiler extends DeclarationCompiler {
   }
 
   private initializerContexts = new Map<ClassEntry | FileContext, FunctionContext>();
+  private activeFileInitializers = new Map<FunctionContext, PropertyEntry>();
+
+  protected inPropertyInitializer<T>(entry: PropertyEntry, context: FunctionContext, compile: () => T): T {
+    if (entry.cls) return compile();
+    const enclosing = this.activeFileInitializers.get(context);
+    this.activeFileInitializers.set(context, entry);
+    try {
+      return compile();
+    } finally {
+      if (enclosing) this.activeFileInitializers.set(context, enclosing);
+      else this.activeFileInitializers.delete(context);
+    }
+  }
+
+  protected checkGlobalInitialized(context: FunctionContext, property: PropertySymbol, row: number): void {
+    let enclosing = context;
+    while (enclosing.inlineLambda && enclosing.parent) enclosing = enclosing.parent;
+    const initializer = this.activeFileInitializers.get(enclosing);
+    const entry = this.entryOfProperty.get(property);
+    if (!initializer || !entry || initializer.file !== entry.file) return;
+    const { decl } = entry;
+    if (decl.modifiers.keywords.has('const') || property.isLateinit || (!decl.delegate && !decl.initializer)) return;
+    if (initializer.declarationIndex <= entry.declarationIndex)
+      this.error(row, `プロパティ ${property.name} には、まだ値が入っていません。`);
+  }
 
   /** The context of a class's initializer, or of the file's for top-level properties. */
   protected initializerContext(entry: { cls: ClassEntry | undefined; file: FileContext }): FunctionContext {
@@ -292,7 +320,8 @@ export abstract class BodyCompiler extends DeclarationCompiler {
 
   private bindGlobal(entry: PropertyEntry): void {
     const { symbol } = entry;
-    const slot = this.globalCount++;
+    const slot = this.globalDefaults.length;
+    this.globalDefaults.push(this.defaultValueOf(symbol.type));
     symbol.slot = slot;
     symbol.get = (frame) => frame.runtime.globals[slot];
     symbol.set = (frame, _receiver, value) => {
@@ -401,17 +430,13 @@ export abstract class BodyCompiler extends DeclarationCompiler {
   }
 
   /** A property delegated with `by`, whose delegate's `getValue` and `setValue` read and write it. */
-  // code-gauge-allow functionNcss 41 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionNcss 42 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private compileMemberDelegate(entry: PropertyEntry): void {
     const { symbol, decl } = entry;
     const context = this.initializerContext(entry);
     const scope = this.initializerScope(entry, context);
-    const delegate = this.compileDelegateExpression(
-      scope,
-      context,
-      decl.delegate as Expression,
-      symbol.type,
-      decl.isVar
+    const delegate = this.inPropertyInitializer(entry, context, () =>
+      this.compileDelegateExpression(scope, context, decl.delegate as Expression, symbol.type, decl.isVar)
     );
     entry.initializer = delegate;
     const slot = entry.delegateSlot;
@@ -438,8 +463,11 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     else if (!isSubtype(getter.type, symbol.type)) this.error(decl.row, typeMismatchMessage(symbol.type, getter.type));
     const getEval = convertRepr(getter.eval, getter.repr, propertyRepr(symbol));
     // A top-level property's delegate lives in the globals, which the file's initializers fill when the run starts.
-    const globalSlot = slot === undefined ? this.globalCount++ : undefined;
-    if (globalSlot !== undefined) entry.delegateGlobal = globalSlot;
+    const globalSlot = slot === undefined ? this.globalDefaults.length : undefined;
+    if (globalSlot !== undefined) {
+      entry.delegateGlobal = globalSlot;
+      this.globalDefaults.push(undefined);
+    }
     const readDelegate = (frame: Frame, receiver: Value): Value =>
       globalSlot === undefined ? (receiver as KObject).fields[slot as number] : frame.runtime.globals[globalSlot];
     const { info } = context;
@@ -638,11 +666,10 @@ export abstract class BodyCompiler extends DeclarationCompiler {
   ): void {
     ctor.initialize = initialize;
     const fieldCount = (): number => symbol.fieldCount;
-    const companionInit = symbol.companion ? this.objectInstance(symbol.companion) : undefined;
     const isAbstract = symbol.isAbstract;
     ctor.invoke = (caller, _receiver, args, callRow) => {
       if (isAbstract) return caller.runtime.throwError(caller, 'java.lang.InstantiationError', symbol.qualifiedName);
-      companionInit?.(caller);
+      this.ensureClassInitialized(caller, symbol);
       const instance = new KObject(symbol, fieldCount());
       caller.runtime.allocate(caller, instance.fields.length + 1);
       initialize(caller, instance, args, callRow);
@@ -747,29 +774,28 @@ export abstract class BodyCompiler extends DeclarationCompiler {
   // Objects and enums.
 
   objectInstance(cls: ClassSymbol): (frame: Frame) => Value {
+    const owner = cls.kind === 'companion' ? (cls.outer ?? cls) : cls;
     return (frame) => {
-      const existing = frame.runtime.objects.get(cls);
-      if (existing) return existing;
-      return this.createObject(frame, cls);
+      this.ensureClassInitialized(frame, owner);
+      return frame.runtime.objects.get(cls);
     };
   }
 
-  /** Creates an object, a companion object, or an enum class's constants when the program first uses them. */
-  private createObject(frame: Frame, cls: ClassSymbol): Value {
-    const { runtime } = frame;
-    if (cls.kind === 'enum') {
-      const marker = new KObject(cls, 0);
-      runtime.objects.set(cls, marker);
+  protected ensureClassInitialized(frame: Frame, cls: ClassSymbol): void {
+    frame.runtime.initializeClass(frame, cls, () => {
+      if (cls.superclass) this.ensureClassInitialized(frame, cls.superclass.cls);
       cls.initializeEnumEntries?.(frame);
-      if (cls.companion) this.objectInstance(cls.companion)(frame);
-      return marker;
-    }
+      if (cls.isObject) this.createObject(frame, cls);
+      if (cls.companion) this.createObject(frame, cls.companion);
+    });
+  }
+
+  private createObject(frame: Frame, cls: ClassSymbol): void {
     const instance = new KObject(cls);
-    runtime.objects.set(cls, instance);
+    frame.runtime.objects.set(cls, instance);
     const initialize = this.objectInitializers.get(cls);
     if (initialize) initialize(frame, instance, [], undefined);
     else cls.initialize?.(frame, instance);
-    return instance;
   }
 
   private createEnumEntries(

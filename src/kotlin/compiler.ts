@@ -14,6 +14,7 @@ import {
 import { type FileContext, TURTLE_PACKAGE } from './compilerCore';
 import { unavailableMessage } from './convertSupport';
 import { callFunction, parameterReprs, receiverRepr } from './dispatch';
+import { jvmParameterDescriptor } from './jvmSignatures';
 import { libraryClass } from './natives/registry';
 import type { NativeFunction, NativeProperty } from './nativeTypes';
 import { Frame, type FunctionInfo, MISSING } from './runtime';
@@ -77,7 +78,7 @@ export interface CompiledProgram {
   mainTakesArgs: boolean;
   /** Initializes top-level properties, the library's first, in declaration order. */
   initializers: { row: number; isConstant: boolean; run: (frame: Frame) => void }[];
-  globalCount: number;
+  globalDefaults: readonly Value[];
   /** The top-level properties of the program, which traces show by their names. */
   globals: { name: string; slot: number; type: KType; isConstant: boolean }[];
   /** The objects and companion objects of the program, whose properties traces show as `Name.property`. */
@@ -178,14 +179,17 @@ export class Compiler extends BodyCompiler {
         });
         continue;
       }
-      if (entry.cls || !entry.decl.initializer || entry.symbol.slot === undefined) continue;
+      const { initializer } = entry.decl;
+      if (entry.cls || !initializer || entry.symbol.slot === undefined) continue;
       this.file = entry.file;
       const context = this.initializerContext(entry);
       const scope = this.initializerScope(entry, context);
       const type = entry.symbol.type as KType;
-      const compiled = this.compileExpression(scope, context, entry.decl.initializer, type);
+      const compiled = this.inPropertyInitializer(entry, context, () =>
+        this.compileExpression(scope, context, initializer, type)
+      );
       const evaluate = convertRepr(
-        this.expectType(compiled, type, entry.decl.initializer.row),
+        this.expectType(compiled, type, initializer.row),
         reprOf(this.core, type),
         reprOf(this.core, type)
       );
@@ -197,7 +201,7 @@ export class Compiler extends BodyCompiler {
       };
       initializers.push({
         row: entry.decl.row,
-        isConstant: compiled.constant !== undefined || entry.decl.initializer.kind === 'null',
+        isConstant: compiled.constant !== undefined || initializer.kind === 'null',
         run: this.initializerRun(context.info, entry.decl.row, store, isStepped, compiled.isCreation === true),
       });
     }
@@ -224,12 +228,12 @@ export class Compiler extends BodyCompiler {
     };
   }
 
-  get globals(): number {
-    return this.globalCount;
+  get globals(): readonly Value[] {
+    return this.globalDefaults;
   }
 
-  setGlobalStart(start: number): void {
-    this.globalCount = start;
+  setGlobalDefaults(defaults: readonly Value[]): void {
+    this.globalDefaults = [...defaults];
   }
 
   /** The top-level properties and objects a file declares, which traces show. */
@@ -250,16 +254,21 @@ export class Compiler extends BodyCompiler {
 
   findMain(context: FileContext): FunctionSymbol | undefined {
     const candidates = this.packages.get(context.packageName)?.functions.get('main') ?? [];
-    return candidates.find(
+    const entryPoints = candidates.filter(
       (symbol) =>
-        !symbol.isLibrary && !symbol.extensionReceiver && (symbol.params.length === 0 || this.isArgsParameter(symbol))
+        !symbol.isLibrary &&
+        !symbol.extensionReceiver &&
+        symbol.returnType !== undefined &&
+        this.isClass(symbol.returnType, this.core.unit)
+    );
+    return (
+      entryPoints.find((symbol) => symbol.visibility !== 'private' && this.isArgsParameter(symbol)) ??
+      entryPoints.find((symbol) => symbol.params.length === 0)
     );
   }
 
-  isArgsParameter(symbol: FunctionSymbol): boolean {
-    if (symbol.params.length !== 1) return false;
-    const type = resolved(symbol.params[0].type);
-    return type.kind === 'class' && type.cls === this.core.array && !type.nullable;
+  private isArgsParameter(symbol: FunctionSymbol): boolean {
+    return symbol.params.length === 1 && jvmParameterDescriptor(this.core, symbol.params[0]) === '[Ljava/lang/String;';
   }
 
   // Implementations of the hooks the compiler's layers declare.

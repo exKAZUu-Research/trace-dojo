@@ -3,6 +3,7 @@ import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import type { TracedFrame, TracedRuntime } from '../interpreter/traceRecorder';
 import { TurtleWorld } from '../interpreter/turtleWorld';
+import { libraryClass } from './natives/registry';
 import type { ClassSymbol, PropertySymbol } from './symbols';
 import type { KType } from './types';
 import { Boxed, Cell, KObject, type Value } from './values';
@@ -91,7 +92,7 @@ export class ProgramExit {
 
 /** What the runtime needs from the standard library to raise its exceptions. */
 export interface ExceptionFactory {
-  create(frame: Frame, qualifiedName: string, message: string | undefined): KObject;
+  create(frame: Frame, qualifiedName: string, message: string | undefined, cause?: KObject): KObject;
 }
 
 export class Runtime implements TracedRuntime<Frame> {
@@ -111,6 +112,43 @@ export class Runtime implements TracedRuntime<Frame> {
   /** Called when a frame returns or throws, with the frame still holding its locals. */
   onExit: ((frame: Frame) => void) | undefined;
   private allocated = 0;
+  private readonly classInitialization = new Map<ClassSymbol, 'started' | 'done' | { failure: string }>();
+
+  initializeClass(frame: Frame, cls: ClassSymbol, initialize: () => void): void {
+    const previous = this.classInitialization.get(cls);
+    if (previous === 'started' || previous === 'done') return;
+    if (previous !== undefined) {
+      const cause = this.exceptions.create(frame, 'java.lang.ExceptionInInitializerError', previous.failure);
+      throw new KotlinThrow(
+        this.exceptions.create(
+          frame,
+          'java.lang.NoClassDefFoundError',
+          `Could not initialize class ${cls.qualifiedName}`,
+          cause
+        )
+      );
+    }
+    this.classInitialization.set(cls, 'started');
+    try {
+      initialize();
+      this.classInitialization.set(cls, 'done');
+    } catch (error) {
+      this.objects.delete(cls);
+      if (cls.companion) this.objects.delete(cls.companion);
+      this.enumEntries.delete(cls);
+      if (!(error instanceof KotlinThrow)) {
+        this.classInitialization.delete(cls);
+        throw error;
+      }
+      const { value } = error;
+      const message = value.native?.message;
+      const description =
+        typeof message === 'string' ? `${value.cls.qualifiedName}: ${message}` : value.cls.qualifiedName;
+      this.classInitialization.set(cls, { failure: `Exception ${description} [in thread "main"]` });
+      if (value.cls.isSubclassOf(libraryClass('kotlin.Error'))) throw error;
+      throw new KotlinThrow(this.exceptions.create(frame, 'java.lang.ExceptionInInitializerError', undefined, value));
+    }
+  }
 
   constructor(
     readonly exceptions: ExceptionFactory,

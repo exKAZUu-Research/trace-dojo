@@ -874,6 +874,115 @@ fun main() { println(A(3).values) }`,
     stdout: '1.0000001\n1.0000001\n1.0000001\n1.0000001\n1.0000001\n3.4028235E38\nInfinity\n-0.0\n1.4E-45\n',
   },
   {
+    name: 'JVM entry selection and initialization order',
+    source: `val indirect = readInt() + 1
+val flag = readFlag()
+val deferred = { later }
+val later = 3
+val enabled = true
+fun readInt(): Int = later
+fun readFlag(): Boolean = enabled
+fun argument(): Int { println("argument"); return 4 }
+open class Parent { companion object { init { println("parent") } } }
+class Child(val n: Int) : Parent() { companion object { init { println("child") } } }
+fun checkCallback(value: String?, stop: () -> Nothing): Int {
+    if (value == null) stop()
+    return value.length
+}
+fun callCallback(stop: () -> Nothing): Int { stop() }
+fun main() { println("zero arguments") }
+fun main(args: Array<String>) {
+    println(args.size)
+    println(indirect)
+    println(flag)
+    println(deferred())
+    println(Child(argument()).n)
+    println(Child(argument()).n)
+    println(checkCallback("ok") { error("unused") })
+    try { callCallback { error("no return") } } catch (e: IllegalStateException) { println(e.message) }
+}`,
+    stdout: '0\n1\nfalse\n3\nparent\nchild\nargument\n4\nargument\n4\n2\nno return\n',
+  },
+  {
+    name: 'captured writes preserve only nullability on open receiver types',
+    source: `interface Animal { fun sound(): String }
+class Dog : Animal {
+    override fun sound() = "woof"
+    fun dogOnly() = "dog only"
+}
+class Cat : Animal { override fun sound() = "meow" }
+fun main() {
+    var animal: Animal? = Dog()
+    val swap = { animal = Cat() }
+    if (animal != null) {
+        println(animal.sound())
+    }
+    swap()
+    if (animal != null) {
+        println(animal.sound())
+    }
+}`,
+    stdout: 'woof\nmeow\n',
+  },
+  {
+    name: 'private and protected nested imports use the referencing scope',
+    source: `package demo
+import demo.Outer.Hidden
+import demo.Base.Visible
+class Outer {
+    private class Hidden(val n: Int)
+    fun show() = Hidden(3).n
+}
+open class Base {
+    protected class Visible(val n: Int)
+}
+class Derived : Base() {
+    fun show() = Visible(4).n
+}
+fun main() { println(Outer().show()); println(Derived().show()) }`,
+    stdout: '3\n4\n',
+  },
+  {
+    name: 'a delegated local var shares its delegate across lambda calls',
+    source: `import kotlin.properties.Delegates
+fun main() {
+    var score: Int by Delegates.notNull()
+    score = 5
+    val up = { score += 2; score }
+    println(up())
+    println(score)
+}`,
+    stdout: '7\n7\n',
+  },
+  {
+    name: 'failed JVM class initialization cannot expose an object or enum entry',
+    source: `object Broken { init { println("object"); error("object failure") }; val value = 7 }
+enum class BrokenEnum {
+    One;
+    init { println("enum"); error("enum failure") }
+    companion object { val value = 9 }
+}
+fun probe(action: () -> Unit) {
+    try { action() } catch (e: Throwable) {
+        println(e)
+        println(e.cause)
+    }
+}
+fun main() {
+    probe { println(Broken.value) }
+    probe { println(Broken.value) }
+    probe { println(BrokenEnum.value) }
+    probe { println(BrokenEnum.One) }
+}`,
+    stdout:
+      'object\njava.lang.ExceptionInInitializerError\njava.lang.IllegalStateException: object failure\n' +
+      'java.lang.NoClassDefFoundError: Could not initialize class Broken\n' +
+      'java.lang.ExceptionInInitializerError: Exception java.lang.IllegalStateException: object failure [in thread "main"]\n' +
+      'enum\njava.lang.ExceptionInInitializerError\njava.lang.IllegalStateException: enum failure\n' +
+      'java.lang.NoClassDefFoundError: Could not initialize class BrokenEnum\n' +
+      'java.lang.ExceptionInInitializerError: Exception java.lang.IllegalStateException: enum failure [in thread "main"]\n',
+  },
+  {
     name: 'the iteration order of hash maps and sets',
     source: `fun main() {
     val m = hashMapOf("banana" to 1, "apple" to 2, "cherry" to 3, "date" to 4, "elderberry" to 5)
@@ -1901,6 +2010,33 @@ fun main() {
     false,
     'fun main() { var value: Int? = 1; val reset = { value = null }; if (value != null) println(value + 1); reset() }',
   ],
+  [
+    'a forward read in a direct top-level initializer',
+    false,
+    'val a: Int = b + 1\nval b = 3\nfun main() { println(a) }',
+  ],
+  [
+    'a forward read in an inline top-level initializer',
+    false,
+    'val a = run { b }; val b = 3; fun main() { println(a) }',
+  ],
+  ['an invalid JVM main array element type', false, 'fun main(args: Array<Int>) { println(args.size) }'],
+  ['an invalid JVM main return type', false, 'fun main() = 1'],
+  [
+    'a writable local property using a read-only delegate',
+    false,
+    'fun main() { var number: Int by lazy { 1 }; println(number) }',
+  ],
+  [
+    'overloads with the same JVM signature after erasure',
+    false,
+    'fun total(values: List<Int>): Int = values.sum()\nfun total(values: List<String>): Int = values.size\nfun main() { println(total(listOf(1, 2))) }',
+  ],
+  [
+    'a method with the JVM signature of a generated getter',
+    false,
+    'class Score(val value: Int) { fun getValue(): Int = value + 1 }; fun main() { println(Score(3).getValue()) }',
+  ],
   ['a Nothing-returning function that falls through', false, 'fun bad(): Nothing { println("bad") }; fun main() {}'],
   ['a Nothing-returning function that always throws', true, 'fun abort(): Nothing { error("done") }; fun main() {}'],
   [
@@ -1919,9 +2055,9 @@ fun main() {
     'package demo\nclass Outer { private class Hidden }; fun main() { val value: demo.Outer.Hidden? = null }',
   ],
   [
-    'a private nested type named in an import',
+    'a private nested type used outside its owner after import',
     false,
-    'package demo\nimport demo.Outer.Hidden\nclass Outer { private class Hidden }; fun main() {}',
+    'package demo\nimport demo.Outer.Hidden\nclass Outer { private class Hidden }; fun main() { Hidden() }',
   ],
   [
     'a private superclass property read through super',

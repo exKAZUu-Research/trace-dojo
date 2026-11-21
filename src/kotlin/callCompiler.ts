@@ -746,6 +746,7 @@ export abstract class CallCompiler extends CompilerCore {
       const mark = temporaries.length;
       temporaries.push(receiver);
       try {
+        if (candidate.kind === 'constructor' && symbol.owner) this.ensureClassInitialized(frame, symbol.owner);
         const values = evaluateArgs(frame);
         for (const value of values) temporaries.push(value);
         return callFunction(symbol, frame, receiver, values, callRow);
@@ -773,6 +774,8 @@ export abstract class CallCompiler extends CompilerCore {
       typeArguments,
     };
   }
+
+  protected abstract ensureClassInitialized(frame: Frame, cls: ClassSymbol): void;
 
   /** A lambda argument, compiled now that the other arguments constrain the types of its parameters. */
   private compileLambdaArgument(

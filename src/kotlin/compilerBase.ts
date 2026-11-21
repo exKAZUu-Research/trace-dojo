@@ -163,7 +163,7 @@ export class FunctionContext {
     const index = this.captures.length;
     this.captures.push(source);
     this.captureIndexes.set(source, index);
-    if (source instanceof VariableSymbol && !this.info.isLibrary) {
+    if (source instanceof VariableSymbol && !source.name.startsWith('\0') && !this.info.isLibrary) {
       const info: LocalInfo = { name: source.name, slot: index, type: source.type };
       this.info.captures.push(info);
     }

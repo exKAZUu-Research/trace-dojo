@@ -9,7 +9,7 @@ import { nativeFunctions, nativeProperties, setLibraryClasses } from './natives/
 import { parseKotlin } from './parse';
 import { PRELUDE_SOURCES } from './prelude';
 import { EXCEPTIONS } from './prelude/runtimeTypes';
-import type { ExceptionFactory, Frame } from './runtime';
+import type { ExceptionFactory } from './runtime';
 import type { ClassSymbol, FunctionSymbol } from './symbols';
 import { setCoreClasses } from './typeRelations';
 import type { KObject, PrimitiveKind } from './values';
@@ -18,7 +18,7 @@ import type { KObject, PrimitiveKind } from './values';
 export interface Library {
   packages: Map<string, PackageScope>;
   core: Core;
-  globalCount: number;
+  globalDefaults: CompiledProgram['globalDefaults'];
   initializers: CompiledProgram['initializers'];
   exceptions: ExceptionFactory;
 }
@@ -133,23 +133,28 @@ function compileLibrary(
   );
   if (compiler.missingNatives.length > 0)
     throw new Error(`The prelude lacks natives: ${compiler.missingNatives.join(', ')}`);
-  const byJvmName = new Map<string, ClassSymbol>();
-  for (const cls of classes.values()) byJvmName.set(cls.qualifiedName, cls);
   return {
     packages,
     core: core as Core,
-    globalCount: compiler.globals,
+    globalDefaults: compiler.globals,
     initializers,
-    exceptions: {
-      create: (frame: Frame, qualifiedName: string, message: string | undefined): KObject => {
-        const cls = byJvmName.get(qualifiedName);
-        if (!cls) throw new Error(`The library has no exception ${qualifiedName}`);
-        const ctor = cls.constructors.find(
-          (candidate) => candidate.params.length === 1 && candidate.params[0].name === 'message'
-        );
-        if (!ctor?.invoke) throw new Error(`The exception ${qualifiedName} has no constructor of a message`);
-        return ctor.invoke(frame, undefined, [message], undefined) as KObject;
-      },
+    exceptions: exceptionFactory(classes),
+  };
+}
+
+function exceptionFactory(classes: ReadonlyMap<string, ClassSymbol>): ExceptionFactory {
+  const byJvmName = new Map<string, ClassSymbol>();
+  for (const cls of classes.values()) byJvmName.set(cls.qualifiedName, cls);
+  return {
+    create: (frame, qualifiedName, message, cause) => {
+      const cls = byJvmName.get(qualifiedName);
+      if (!cls) throw new Error(`The library has no exception ${qualifiedName}`);
+      const args = cause === undefined ? [message] : [message, cause];
+      const ctor = cls.constructors.find(
+        (candidate) => candidate.params.length === args.length && candidate.params[0].name === 'message'
+      );
+      if (!ctor?.invoke) throw new Error(`The exception ${qualifiedName} has no suitable constructor`);
+      return ctor.invoke(frame, undefined, args, undefined) as KObject;
     },
   };
 }
@@ -229,7 +234,7 @@ export function compileKotlin(file: KotlinFile, options: CompileOptions = {}): C
   }
   packages.set(packageName, own);
   const compiler = new Compiler(packages, library.core);
-  compiler.setGlobalStart(library.globalCount);
+  compiler.setGlobalDefaults(library.globalDefaults);
   const { contexts, initializers } = compiler.compileFiles(
     [{ file, isLibrary: false }],
     () => {},
@@ -243,7 +248,7 @@ export function compileKotlin(file: KotlinFile, options: CompileOptions = {}): C
     main,
     mainTakesArgs: main.params.length === 1,
     initializers: [...library.initializers, ...initializers],
-    globalCount: compiler.globals,
+    globalDefaults: compiler.globals,
     ...compiler.shownDeclarations(context),
   };
 }

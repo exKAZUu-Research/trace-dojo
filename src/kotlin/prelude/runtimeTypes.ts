@@ -132,6 +132,9 @@ export const EXCEPTIONS: [kotlinPackage: string, name: string, parent: string, j
   ['kotlin', 'StackOverflowError', 'Error', 'java.lang.StackOverflowError'],
   ['kotlin', 'OutOfMemoryError', 'Error', 'java.lang.OutOfMemoryError'],
   ['kotlin', 'InstantiationError', 'Error', 'java.lang.InstantiationError'],
+  ['java.lang', 'LinkageError', 'Error', 'java.lang.LinkageError'],
+  ['java.lang', 'ExceptionInInitializerError', 'LinkageError', 'java.lang.ExceptionInInitializerError'],
+  ['java.lang', 'NoClassDefFoundError', 'LinkageError', 'java.lang.NoClassDefFoundError'],
   ['java.lang', 'NegativeArraySizeException', 'RuntimeException', 'java.lang.NegativeArraySizeException'],
   ['java.util', 'IllegalFormatException', 'IllegalArgumentException', 'java.util.IllegalFormatException'],
   ...[

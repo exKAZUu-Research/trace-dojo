@@ -2,25 +2,40 @@ import type { Block, Expression, ForStatement, Statement } from './ast';
 import type { FunctionContext, Scope } from './compilerBase';
 import type { VariableSymbol } from './symbols';
 import { isSubtype } from './typeRelations';
-import { nonNull, resolved } from './types';
+import { isNullable, type KType, nonNull, resolved } from './types';
 
-export function stableLocal(scope: Scope, context: FunctionContext, variable: VariableSymbol): boolean {
-  if (!variable.isVar) return true;
-  if (variable.isCapturedAndModified && !context.assignedCaptures.has(variable) && !preservesNullCheck(variable))
-    return false;
-  if (!escapesOwner(context, variable.owner)) return true;
-  for (let current: Scope | undefined = scope; current; current = current.parent) {
-    if (current.pendingWrites?.has(variable.name)) return false;
-    if (current.variables.has(variable.name)) return true;
+type LocalRefinement = 'full' | 'nonNull';
+
+export function localRefinement(
+  scope: Scope,
+  context: FunctionContext,
+  variable: VariableSymbol
+): LocalRefinement | undefined {
+  if (!variable.isVar) return 'full';
+  const capturedWrite = variable.isCapturedAndModified && !context.assignedCaptures.has(variable);
+  if (capturedWrite && !preservesNullCheck(variable)) return undefined;
+  if (escapesOwner(context, variable.owner)) {
+    for (let current: Scope | undefined = scope; current; current = current.parent) {
+      if (current.pendingWrites?.has(variable.name)) return undefined;
+      if (current.variables.has(variable.name)) break;
+    }
   }
-  return true;
+  return capturedWrite ? 'nonNull' : 'full';
+}
+
+export function refineLocalType(
+  refinement: LocalRefinement | undefined,
+  declared: KType,
+  narrowed: KType | undefined
+): KType | undefined {
+  if (refinement === 'full') return narrowed;
+  if (refinement === 'nonNull' && narrowed && !isNullable(narrowed)) return nonNull(declared);
+  return undefined;
 }
 
 function preservesNullCheck(variable: VariableSymbol): boolean {
   const type = resolved(variable.type);
-  if (!type.nullable || type.kind !== 'class' || type.cls.isInheritable || variable.capturedWriteTypes.size === 0) {
-    return false;
-  }
+  if (!isNullable(type) || variable.capturedWriteTypes.size === 0) return false;
   const nonNullType = nonNull(type);
   return [...variable.capturedWriteTypes].every((written) => isSubtype(written, nonNullType));
 }

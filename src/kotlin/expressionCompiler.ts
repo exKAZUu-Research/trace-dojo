@@ -24,7 +24,7 @@ import {
 import type { MemberRef } from './compilerCore';
 import { getPropertyValue, propertyRepr, receiverRepr } from './dispatch';
 import { keyOf } from './flowKeys';
-import { stableLocal } from './flowWrites';
+import { localRefinement, refineLocalType } from './flowWrites';
 import { formatPrimitive, stringOf } from './format';
 import { unavailableLibraryMember, unavailableQualifiedLibraryMember } from './libraryApi';
 import { literalFits } from './literals';
@@ -113,6 +113,8 @@ export abstract class ExpressionCompiler extends CallCompiler {
     if (awaitsAssignment || pending.properties.has(property))
       this.error(row, `プロパティ ${name} には、まだ値が入っていません。`);
   }
+
+  protected abstract checkGlobalInitialized(context: FunctionContext, property: PropertySymbol, row: number): void;
 
   protected abstract mayInitializeVal(context: FunctionContext, symbol: PropertySymbol): boolean;
 
@@ -449,7 +451,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const levels = this.topLevelProperties(name);
     for (const level of levels) {
       const property = level.find((candidate) => !candidate.extensionReceiver);
-      if (property) return this.readTopLevelProperty(property, row);
+      if (property) return this.readTopLevelProperty(context, property, row);
     }
     const cls = this.findClass(scope, name);
     if (cls) this.checkNestedAccessible(scope, cls, row);
@@ -540,24 +542,25 @@ export abstract class ExpressionCompiler extends CallCompiler {
   }
 
   protected readVariable(scope: Scope, context: FunctionContext, variable: VariableSymbol, row: number): Compiled {
-    const { delegateRead } = variable;
-    if (delegateRead) {
-      if (variable.owner !== context && variable.slot >= 0)
-        this.unavailable(row, 'ラムダ式の中から、委譲したローカル変数を読むこと');
-      return { type: variable.type, repr: reprOf(this.core, variable.type), eval: delegateRead };
+    const { delegateRead, localDelegate } = variable;
+    const repr = reprOf(this.core, variable.type);
+    if (localDelegate) {
+      const { read } = this.variableAccess(context, localDelegate.holder);
+      return { type: variable.type, repr, eval: (frame) => localDelegate.read(frame, read(frame)) };
     }
+    if (delegateRead) return { type: variable.type, repr, eval: delegateRead };
     if (!this.flow.assigned.has(variable) && !this.flow.isDead) {
       this.error(row, `変数 ${variable.name} に値が入っていません。`);
     }
     const key = keyOf(variable);
-    const stable = stableLocal(scope, context, variable);
-    const narrowed = stable ? this.flow.narrowed.get(key) : undefined;
+    const refinement = localRefinement(scope, context, variable);
+    const narrowed = refineLocalType(refinement, variable.type, this.flow.narrowed.get(key));
     const access = this.variableAccess(context, variable);
     return {
       type: narrowed ?? variable.type,
-      repr: reprOf(this.core, variable.type),
+      repr,
       eval: access.read,
-      stableKey: stable ? key : undefined,
+      stableKey: refinement ? key : undefined,
       unnarrowedType: narrowed && variable.type,
     };
   }
@@ -645,7 +648,8 @@ export abstract class ExpressionCompiler extends CallCompiler {
     return !symbol.isVar && !symbol.hasCustomGetter && !symbol.isOpen && !symbol.isAbstract && !symbol.isLibrary;
   }
 
-  protected readTopLevelProperty(symbol: PropertySymbol, row: number): Compiled {
+  protected readTopLevelProperty(context: FunctionContext, symbol: PropertySymbol, row: number): Compiled {
+    this.checkGlobalInitialized(context, symbol, row);
     const type = this.ensurePropertyType(symbol, row);
     const key = keyOf(symbol);
     const narrowed = this.isStableProperty(symbol) ? this.flow.narrowed.get(key) : undefined;
@@ -667,7 +671,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const { name, row, isSafe } = expression;
     const qualified = this.compileQualifier(scope, expression.receiver);
     if (qualified?.kind === 'class') return this.compileClassMember(scope, qualified.cls, name, row);
-    if (qualified) return this.compilePackageMember(qualified, name, row);
+    if (qualified) return this.compilePackageMember(context, qualified, name, row);
     if (expression.receiver.kind === 'super') return this.compileSuperProperty(scope, context, name, row);
     const receiver = this.compileExpression(scope, context, expression.receiver);
     return this.withSafeReceiver(receiver, isSafe, row, (target) => {
@@ -713,9 +717,14 @@ export abstract class ExpressionCompiler extends CallCompiler {
   }
 
   /** `p.name` for a package `p`: a top-level property or an object. */
-  private compilePackageMember({ scope, path }: PackageQualifier, name: string, row: number): Compiled {
+  private compilePackageMember(
+    context: FunctionContext,
+    { scope, path }: PackageQualifier,
+    name: string,
+    row: number
+  ): Compiled {
     const property = scope?.properties.get(name)?.find((candidate) => !candidate.extensionReceiver);
-    if (property) return this.readTopLevelProperty(property, row);
+    if (property) return this.readTopLevelProperty(context, property, row);
     const cls = scope?.classes.get(name);
     const value = cls && this.classAsValue(cls, row);
     if (value) return value;
@@ -926,6 +935,19 @@ export abstract class ExpressionCompiler extends CallCompiler {
     expected: KType | undefined,
     delegate?: DelegateContext
   ): Compiled {
+    const compiled = this.compileCallTarget(scope, context, expression, expected, delegate);
+    const result = resolved(compiled.type);
+    if (result.kind === 'nothing' && !result.nullable) this.flow.isDead = true;
+    return compiled;
+  }
+
+  private compileCallTarget(
+    scope: Scope,
+    context: FunctionContext,
+    expression: Extract<Expression, { kind: 'call' }>,
+    expected: KType | undefined,
+    delegate: DelegateContext | undefined
+  ): Compiled {
     const { callee, row } = expression;
     const args: ArgumentSyntax[] = expression.args.map((argument) => ({
       row: argument.row,
@@ -1112,7 +1134,14 @@ export abstract class ExpressionCompiler extends CallCompiler {
   ): Compiled {
     const property = this.topLevelProperties(name)[0]?.[0];
     if (property && resolved(this.ensurePropertyType(property, row)).kind === 'function') {
-      return this.compileInvoke(scope, context, this.readTopLevelProperty(property, row), args, hasTrailingLambda, row);
+      return this.compileInvoke(
+        scope,
+        context,
+        this.readTopLevelProperty(context, property, row),
+        args,
+        hasTrailingLambda,
+        row
+      );
     }
     if (isVariable) this.error(row, `${name} は関数ではないので、呼び出せません。`);
     const enumClass = this.enclosingEnum(scope);
@@ -1254,8 +1283,6 @@ export abstract class ExpressionCompiler extends CallCompiler {
     }
     const receiverEval: Eval = receiver ? convertRepr(receiver.eval, receiver.repr, call.receiverRepr) : () => NULL;
     const invoke = call.call;
-    const returnsNothing = resolved(call.type).kind === 'nothing' && !resolved(call.type).nullable;
-    if (returnsNothing) this.flow.isDead = true;
     this.applyContracts(call);
     return {
       type: call.type,
@@ -1302,7 +1329,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const property = this.topLevelProperties(name)[0]?.find((candidate) => !candidate.extensionReceiver);
     if (!property) return undefined;
     const type = resolved(this.ensurePropertyType(property, row));
-    return type.kind === 'function' && type.receiver ? this.readTopLevelProperty(property, row) : undefined;
+    return type.kind === 'function' && type.receiver ? this.readTopLevelProperty(context, property, row) : undefined;
   }
 
   // code-gauge-allow functionParameterCount 9 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.

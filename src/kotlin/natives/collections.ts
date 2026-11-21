@@ -794,8 +794,8 @@ function mapEquals(frame: Frame, map: KObject, other: Value): boolean {
   } catch (error) {
     if (
       error instanceof KotlinThrow &&
-      (error.value.cls.qualifiedName === 'java.lang.ClassCastException' ||
-        error.value.cls.qualifiedName === 'java.lang.NullPointerException')
+      (error.value.cls.isSubclassOf(libraryClass('kotlin.ClassCastException')) ||
+        error.value.cls.isSubclassOf(libraryClass('kotlin.NullPointerException')))
     )
       return false;
     throw error;

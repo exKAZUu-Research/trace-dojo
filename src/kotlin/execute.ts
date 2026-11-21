@@ -50,7 +50,7 @@ export function runProgram(
   startRunIdentities();
   let finalTurtles: ProgramRun['finalTurtles'] = [];
   const root = new Frame(runtime, ROOT_INFO, [], undefined, undefined);
-  runtime.globals = Array.from({ length: program.globalCount });
+  runtime.globals = [...program.globalDefaults];
   runtime.onExit = (frame) => {
     if (runtime.frames.length !== 1 || frame.info.isLibrary) return;
     onMainExit?.(frame);
