@@ -415,7 +415,8 @@ export class Compiler {
         };
       }
     }
-    if ((expr.kind === 'field' || expr.kind === 'unary') && this.ownedPlace(expr)) {
+    // A closure moves out only what it captured by value, which its own storage holds.
+    if ((expr.kind === 'path' || expr.kind === 'field' || expr.kind === 'unary') && this.ownedPlace(expr)) {
       const place = this.place(expr);
       return (frame) => {
         const target = place(frame);
@@ -430,7 +431,8 @@ export class Compiler {
   private ownedPlace(expr: Expr): boolean {
     if (expr.kind === 'path') {
       const res = this.annotations.paths.get(expr);
-      return res?.kind === 'local' && res.local.mode === 'move' && !isRefType(res.local.type);
+      const owned = res?.kind === 'local' || res?.kind === 'capture';
+      return owned && res.local.mode === 'move' && !isRefType(res.local.type);
     }
     if (expr.kind === 'field') {
       const field = this.annotations.fields.get(expr);

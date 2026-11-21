@@ -8294,3 +8294,26 @@ const X: i32 = Point { x: 1, y: 2 }.y;`
   );
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '[1] 4 3 2\n' });
 });
+
+test.each([
+  ['a captured turtle', 'let t = Turtle::new(1, 1);', 'drop(t);', ''],
+  [
+    'a captured field',
+    'let p = Pair { a: Turtle::new(1, 1), b: 2 };',
+    'drop(p.a);',
+    'struct Pair { a: Turtle, b: i32 }',
+  ],
+])('%s that a closure moves out disappears from the board', (_name, setup, moved, items) => {
+  const program = rustMain(
+    `
+    let observer = Turtle::new(1, 0);
+    ${setup}
+    let f = move || {
+        ${moved}
+        println!("{}", observer.can_move_forward());
+    };
+    f();`,
+    items
+  );
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'true\n' });
+});
