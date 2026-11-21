@@ -123,6 +123,28 @@ test('main returning an Err reports it with Debug', () => {
   });
 });
 
+test('main keeps error-owned turtles alive until Debug finishes', () => {
+  const program = `use std::fmt;
+struct E { a: Turtle, blockers: Vec<Turtle> }
+impl fmt::Debug for E {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.a.can_move_forward())
+    }
+}
+fn main() -> Result<(), E> {
+    let a = Turtle::new(0, 0);
+    let b = Turtle::new(0, 1);
+    println!("{}", a.can_move_forward());
+    return Err(E { a, blockers: vec![b] });
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    finalTurtles: [],
+    stdout: 'false\n',
+    uncaughtException: 'Error: false',
+  });
+});
+
 test.each([
   'fn main() -> i32 { 0 }',
   'fn main() -> Result<i32, String> { Ok(0) }',
@@ -265,6 +287,118 @@ Err("invalid digit found in string") [
     },
 ]
 `,
+    uncaughtException: undefined,
+  });
+});
+
+test('Debug builders stream punctuation and indentation around learner callbacks', () => {
+  const program = `use std::fmt;
+struct V;
+impl fmt::Debug for V {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        print!("<side>");
+        f.write_str("V\\n")?;
+        print!("<next>");
+        f.write_str("end")
+    }
+}
+struct X;
+impl fmt::Debug for X {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("X").field("t", &(V,)).finish_non_exhaustive()
+    }
+}
+fn main() {
+    println!("before {:?} after", X);
+    println!("pretty {:#?} end", [X]);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: `before X { t: (<side>V
+<next>end,), .. } after
+pretty [
+    X {
+        t: (
+<side>            V
+<next>            end,
+        ),
+        ..
+    },
+] end
+`,
+    uncaughtException: undefined,
+  });
+});
+
+test('a Debug builder keeps the partial output and consumes remaining entries after a formatting error', () => {
+  const program = `use std::fmt;
+struct Fails;
+impl fmt::Debug for Fails {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("partial")?;
+        Err(fmt::Error)
+    }
+}
+struct Recovers;
+impl fmt::Debug for Recovers {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let values = (0..3).map(|x| { print!("<{}>", x); Fails });
+        let result = f.debug_list().entries(values).finish();
+        if result.is_err() { f.write_str(" recovered")?; }
+        Ok(())
+    }
+}
+fn main() {
+    println!("{:?}", Recovers);
+    println!("{:#?}", Recovers);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[<0>partial<1><2> recovered\n[<0>\n    partial<1><2> recovered\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('mutable Option helpers and Vec resizing preserve callback mutations and order', () => {
+  const program = rustMain(`    let mut head = Some(Box::new(1));
+    if let Some(node) = head.as_deref_mut() { *node += 1; }
+    let mut values = Some(vec![1, 2]);
+    if let Some(slice) = values.as_deref_mut() { slice[1] += 8; }
+    println!("{:?} {:?}", head, values);
+    let mut value = Some(3);
+    let kept = value.take_if(|x| { *x += 2; false });
+    println!("{:?} {:?}", kept, value);
+    let taken = value.take_if(|x| { *x *= 2; true });
+    println!("{:?} {:?}", taken, value);
+    let skipped = value.take_if(|_| panic!("empty"));
+    println!("{:?} {:?} {:?}", skipped, Some((1, "a")).unzip(), None::<(i32, char)>.unzip());
+    let mut seq = vec![1];
+    let mut count = 1;
+    seq.resize_with(4, || { count += 1; count });
+    seq.resize_with(2, || panic!("truncate"));
+    println!("{:?} {}", seq, count);`);
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: `Some(2) Some([1, 10])
+None Some(5)
+Some(10) None
+None (Some(1), Some("a")) (None, None)
+[1, 2] 4
+`,
+    uncaughtException: undefined,
+  });
+});
+
+test('trim_matches tests each character only once as its two searches meet', () => {
+  const program = rustMain(`    let mut examined = String::new();
+    let trimmed = "xxaあxx".trim_matches(|c| { examined.push(c); c == 'x' });
+    println!("{:?} {:?}", trimmed, examined);
+    let mut calls = 0;
+    let kept = "xxaxx".trim_matches(|c| { if c == 'a' { calls += 1; calls > 1 } else { true } });
+    println!("{:?} {}", kept, calls);`);
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '"aあ" "xxaxxあ"\n"a" 1\n',
     uncaughtException: undefined,
   });
 });

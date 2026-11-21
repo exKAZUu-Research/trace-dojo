@@ -207,7 +207,8 @@ function trimWith(text: string, start: boolean, end: boolean, test: (char: strin
   let from = 0;
   let to = chars.length;
   if (start) while (from < to && test(chars[from])) from++;
-  if (end) while (to > from && test(chars[to - 1])) to--;
+  const firstUntested = start && from < to ? from + 1 : from;
+  if (end) while (to > firstUntested && test(chars[to - 1])) to--;
   return chars.slice(from, to).join('');
 }
 

@@ -71,6 +71,11 @@ const optionNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
     place.set(none(ctx));
     return value;
   },
+  take_if: ([self, predicate], ctx) => {
+    const current = opt(self);
+    if (current.variant !== 1 || !deref(call(ctx, predicate, [new ElementPlace(current.fields, 0)]))) return none(ctx);
+    return optionNatives.take([self], ctx);
+  },
   replace: ([self, value], ctx) => {
     const place = placeOf(self);
     const old = place.get();
@@ -160,11 +165,16 @@ const resultNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
 
 const natives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {};
 for (const [name, native] of Object.entries(optionNatives)) natives[`Option<_>::${name}`] = native;
-// A `String`, a `Vec`, and a `Box` are the values they deref to, so `as_deref` borrows what the option holds.
-natives['Option<String>::as_deref'] = optionNatives.as_ref;
-natives['Option<String>::as_deref_mut'] = optionNatives.as_mut;
-natives['Option<Vec<_>>::as_deref'] = optionNatives.as_ref;
-natives['Option<Box<_>>::as_deref'] = optionNatives.as_ref;
+for (const target of ['String', 'Vec<_>', 'Box<_>']) {
+  natives[`Option<${target}>::as_deref`] = optionNatives.as_ref;
+  natives[`Option<${target}>::as_deref_mut`] = optionNatives.as_mut;
+}
+natives['Option<(_, _)>::unzip'] = ([self], ctx) => {
+  const value = opt(self);
+  if (value.variant === 0) return [none(ctx), none(ctx)];
+  const [first, second] = value.fields[0] as Value[];
+  return [some(ctx, first), some(ctx, second)];
+};
 for (const [name, native] of Object.entries(resultNatives)) natives[`Result<_, _>::${name}`] = native;
 for (const prefix of ['Option<&_>', 'Option<&mut _>']) {
   natives[`${prefix}::copied`] = ([self], ctx) =>

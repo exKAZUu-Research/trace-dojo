@@ -562,18 +562,9 @@ const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
       return valuesEqual(keyType, key, call(ctx, f, [kept]));
     });
   },
-  resize: ([self, newLen, value], ctx) => {
-    const items = vec(self);
-    const additional = (newLen as bigint) - BigInt(items.length);
-    if (additional < 0n) items.length = Number(newLen as bigint);
-    else if (additional > 0n) {
-      const type = elemType(ctx);
-      const length = items.length + allocVecElements(ctx, items.length, additional, sizeOf(type));
-      while (items.length < length - 1) items.push(cloneValue(type, value));
-      items.push(value);
-    }
-    return UNIT_VALUE;
-  },
+  resize: ([self, newLen, value], ctx) =>
+    resizeVec(ctx, vec(self), newLen as bigint, (last) => (last ? value : cloneValue(elemType(ctx), value))),
+  resize_with: ([self, newLen, f], ctx) => resizeVec(ctx, vec(self), newLen as bigint, () => call(ctx, f, [])),
   split_off: ([self, at], ctx) => {
     const items = vec(self);
     const position = Number(at as bigint);
@@ -594,6 +585,19 @@ const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
     return iter;
   },
 };
+
+function resizeVec(ctx: NativeContext, items: Value[], newLen: bigint, create: (last: boolean) => Value): Value {
+  const additional = newLen - BigInt(items.length);
+  if (additional < 0n) items.length = Number(newLen);
+  else if (additional > 0n) {
+    const length = items.length + allocVecElements(ctx, items.length, additional, sizeOf(elemType(ctx)));
+    while (items.length < length) {
+      ctx.runtime.spend();
+      items.push(create(items.length === length - 1));
+    }
+  }
+  return UNIT_VALUE;
+}
 
 const dequeNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
   new: () => [],

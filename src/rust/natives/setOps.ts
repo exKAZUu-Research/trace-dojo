@@ -91,7 +91,7 @@ function hashSetCursor(
     const entries = function* (): IterableIterator<DebugPart> {
       for (let item = copy.next(); item !== DONE; item = copy.next()) {
         const value = item;
-        yield (depth) => emit(show(value, itemType, depth), write);
+        yield (depth, sink) => emit(show(value, itemType, depth), sink);
       }
     };
     return list('[', ']', entries(), indent, write);

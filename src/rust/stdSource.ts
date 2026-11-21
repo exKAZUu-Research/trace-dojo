@@ -251,6 +251,7 @@ pub mod vec {
         pub fn dedup_by_key<K: PartialEq, F: FnMut(&mut T) -> K>(&mut self, key: F);
         pub fn dedup_by<F: FnMut(&mut T, &mut T) -> bool>(&mut self, same_bucket: F);
         pub fn resize(&mut self, new_len: usize, value: T) where T: Clone;
+        pub fn resize_with<F: FnMut() -> T>(&mut self, new_len: usize, f: F);
         pub fn split_off(&mut self, at: usize) -> Vec<T>;
         pub fn as_slice(&self) -> &[T];
         pub fn as_mut_slice(&mut self) -> &mut [T];
@@ -769,9 +770,14 @@ pub mod option {
     }
     impl<T> Option<Vec<T>> {
         pub fn as_deref(&self) -> Option<&[T]>;
+        pub fn as_deref_mut(&mut self) -> Option<&mut [T]>;
     }
     impl<T> Option<Box<T>> {
         pub fn as_deref(&self) -> Option<&T>;
+        pub fn as_deref_mut(&mut self) -> Option<&mut T>;
+    }
+    impl<T, U> Option<(T, U)> {
+        pub fn unzip(self) -> (Option<T>, Option<U>);
     }
     impl<T> Option<T> {
         pub const fn is_some(&self) -> bool;
@@ -796,6 +802,7 @@ pub mod option {
         pub fn ok_or<E>(self, err: E) -> Result<T, E>;
         pub fn ok_or_else<E, F: FnOnce() -> E>(self, err: F) -> Result<T, E>;
         pub fn take(&mut self) -> Option<T>;
+        pub fn take_if<P: FnOnce(&mut T) -> bool>(&mut self, predicate: P) -> Option<T>;
         pub fn replace(&mut self, value: T) -> Option<T>;
         pub fn insert(&mut self, value: T) -> &mut T;
         pub fn get_or_insert(&mut self, value: T) -> &mut T;

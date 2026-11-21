@@ -57,9 +57,9 @@ export function runProgram(
   let uncaughtException: string | undefined;
   try {
     const compiled = interp.compiler.compileFn(mainFn);
-    const result = interp.invoke(compiled, new Map(), [], undefined, [], (frame) => {
+    const result = interp.invoke(compiled, new Map(), [], undefined, [], (frame, returned) => {
       onEnd?.(frame);
-      runtime.collectGarbage();
+      runtime.withRoots([returned], () => runtime.collectGarbage());
     });
     uncaughtException = describeMainResult(interp, result, mainFn.ret);
   } catch (error) {
@@ -80,7 +80,15 @@ function describeMainResult(interp: Interpreter, result: Value, type: Type): str
   const ret = shallow(resolve(type, true));
   if (ret.kind !== 'adt' || ret.def.builtin !== 'Result' || !(result instanceof EnumValue)) return;
   if (result.variant === 0) return describeMainResult(interp, result.fields[0], ret.args[0]);
-  return `Error: ${interp.formatter.debug(result.fields[0], resolve(ret.args[1], true), DEFAULT_SPEC, undefined)}`;
+  const error = result.fields[0];
+  try {
+    return interp.runtime.withRoots([error], () => {
+      interp.runtime.collectGarbage();
+      return `Error: ${interp.formatter.debug(error, resolve(ret.args[1], true), DEFAULT_SPEC, undefined)}`;
+    });
+  } finally {
+    interp.runtime.collectGarbage();
+  }
 }
 
 function describeUncaught(error: unknown): string | undefined {

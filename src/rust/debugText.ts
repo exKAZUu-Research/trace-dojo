@@ -1,11 +1,22 @@
 import type { RangeValue, Value } from './values';
 
-export type DebugPart = (indent: number | undefined) => string;
+export type DebugPart = (indent: number | undefined, write?: WriteChunk) => string;
 export type WriteChunk = (text: string) => void;
 
 export function emit(text: string, write?: WriteChunk): string {
   write?.(text);
   return text;
+}
+
+export function indentDebug(write: WriteChunk, depth: number, lineStart = false): WriteChunk {
+  const padding = '    '.repeat(depth);
+  return (text) => {
+    for (const [line] of text.matchAll(/[^\n]*\n|[^\n]+/g)) {
+      if (lineStart) write(padding);
+      write(line);
+      lineStart = line.endsWith('\n');
+    }
+  };
 }
 
 export function rangeText(range: RangeValue, debug: (value: Value) => string, write?: WriteChunk): string {
@@ -25,14 +36,13 @@ export function list(
 ): string {
   let text = emit(open, write);
   let started = false;
-  const padding = indent === undefined ? '' : '    '.repeat(indent + 1);
   for (const item of items) {
     if (indent === undefined) {
       if (started) text += emit(', ', write);
-      text += item(undefined);
+      text += writePart(item, undefined, write);
     } else {
       if (!started) text += emit('\n', write);
-      text += emit(padding, write) + item(indent + 1) + emit(',\n', write);
+      text += prettyPart(item, indent, write);
     }
     started = true;
   }
@@ -52,15 +62,19 @@ export function structText(
   if (fields.length === 0) return nonExhaustive ? text + emit(' { .. }', write) : text;
   if (indent === undefined) {
     for (const [index, [field, part]] of fields.entries()) {
-      text += emit(index === 0 ? ' { ' : ', ', write) + emit(field, write) + emit(': ', write) + part(undefined);
+      text +=
+        emit(index === 0 ? ' { ' : ', ', write) +
+        emit(field, write) +
+        emit(': ', write) +
+        writePart(part, undefined, write);
     }
     if (nonExhaustive) text += emit(', ..', write);
     return text + emit(' }', write);
   }
   const items = fields.map(
     ([field, part]): DebugPart =>
-      (inner) =>
-        emit(field, write) + emit(': ', write) + part(inner)
+      (inner, sink) =>
+        emit(field, sink) + emit(': ', sink) + writePart(part, inner, sink)
   );
   if (nonExhaustive) {
     // Pretty-print's last placeholder has no comma.
@@ -76,8 +90,33 @@ export function structText(
 }
 
 function prettyFields(items: DebugPart[], indent: number, write?: WriteChunk): string {
-  const padding = '    '.repeat(indent + 1);
-  return items.map((item) => emit(padding, write) + item(indent + 1) + emit(',\n', write)).join('');
+  return items.map((item) => prettyPart(item, indent, write)).join('');
+}
+
+function prettyPart(part: DebugPart, indent: number, write?: WriteChunk): string {
+  let text = '';
+  const sink = indentDebug(
+    (chunk) => {
+      text += chunk;
+      write?.(chunk);
+    },
+    indent + 1,
+    true
+  );
+  writePart(part, 0, sink);
+  sink(',\n');
+  return text;
+}
+
+function writePart(part: DebugPart, indent: number | undefined, write?: WriteChunk): string {
+  if (!write) return part(indent);
+  let streamed = false;
+  const text = part(indent, (chunk) => {
+    streamed = true;
+    write(chunk);
+  });
+  if (!streamed) write(text);
+  return text;
 }
 
 export function tupleText(name: string, fields: DebugPart[], indent: number | undefined, write?: WriteChunk): string {

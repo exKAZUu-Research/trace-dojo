@@ -240,14 +240,15 @@ export class Formatter {
       case 'tuple': {
         if (t.elems.length === 0) return pad('()', spec, '<', write);
         const items = t.elems.map(
-          (elem, index) => (inner: number | undefined) => this.debug((v as Value[])[index], elem, spec, inner, write)
+          (elem, index) => (inner: number | undefined, sink?: WriteChunk) =>
+            this.debug((v as Value[])[index], elem, spec, inner, sink)
         );
         return list('(', ')', items, indent, write, t.elems.length === 1);
       }
       case 'array':
       case 'slice': {
         const items = sliceItems(v).map(
-          (item) => (inner: number | undefined) => this.debug(item, t.elem, spec, inner, write)
+          (item) => (inner: number | undefined, sink?: WriteChunk) => this.debug(item, t.elem, spec, inner, sink)
         );
         return list('[', ']', items, indent, write);
       }
@@ -272,15 +273,8 @@ export class Formatter {
     indent: number | undefined,
     write?: WriteChunk
   ): string {
-    const user = this.hooks.userFmt(
-      'Debug',
-      t,
-      v,
-      { ...spec, alternate: indent !== undefined },
-      indent ? undefined : write
-    );
-    // What an impl writes on several lines nests as the containers around it do (std's `PadAdapter`).
-    if (user !== undefined) return indent ? user.replaceAll('\n', `\n${'    '.repeat(indent)}`) : user;
+    const user = this.hooks.userFmt('Debug', t, v, { ...spec, alternate: indent !== undefined }, write);
+    if (user !== undefined) return user;
     const { def } = t;
     switch (def.builtin) {
       case 'String': {
@@ -290,7 +284,7 @@ export class Formatter {
       case 'VecDeque':
       case 'BinaryHeap': {
         const items = (v as Value[]).map(
-          (item) => (inner: number | undefined) => this.debug(item, t.args[0], spec, inner, write)
+          (item) => (inner: number | undefined, sink?: WriteChunk) => this.debug(item, t.args[0], spec, inner, sink)
         );
         return list('[', ']', items, indent, write);
       }
@@ -301,9 +295,9 @@ export class Formatter {
       case 'BTreeMap': {
         const map = v as MapValue;
         const entries = [...map.entries.values()];
-        const items = entries.map(([key, item]) => (inner: number | undefined) => {
-          const keyText = this.debug(key, t.args[0], spec, inner, write);
-          return keyText + emit(': ', write) + this.debug(item, t.args[1], spec, inner, write);
+        const items = entries.map(([key, item]) => (inner: number | undefined, sink?: WriteChunk) => {
+          const keyText = this.debug(key, t.args[0], spec, inner, sink);
+          return keyText + emit(': ', sink) + this.debug(item, t.args[1], spec, inner, sink);
         });
         return list('{', '}', items, indent, write);
       }
@@ -354,7 +348,9 @@ export class Formatter {
 
   private setText(set: SetValue, elem: Type, spec: Spec, indent: number | undefined, write?: WriteChunk): string {
     const values = [...set.entries.values()];
-    const items = values.map((item) => (inner: number | undefined) => this.debug(item, elem, spec, inner, write));
+    const items = values.map(
+      (item) => (inner: number | undefined, sink?: WriteChunk) => this.debug(item, elem, spec, inner, sink)
+    );
     return list('{', '}', items, indent, write);
   }
 
@@ -404,7 +400,8 @@ export class Formatter {
     const types = this.hooks.fieldTypes(def, t.args, variantIndex);
     if (variant.shape === 'unit' || (variant.shape === 'tuple' && types.length === 0)) return emit(variant.name, write);
     const parts = types.map(
-      (type, index) => (inner: number | undefined) => this.debug(fields[index], type, spec, inner, write)
+      (type, index) => (inner: number | undefined, sink?: WriteChunk) =>
+        this.debug(fields[index], type, spec, inner, sink)
     );
     if (variant.shape === 'tuple') return tupleText(variant.name, parts, indent, write);
     return structText(

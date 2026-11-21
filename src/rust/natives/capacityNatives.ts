@@ -94,11 +94,14 @@ const VEC_GROWING: Record<string, (args: Value[]) => number | bigint> = {
   push_front: () => 1,
   extend_from_slice: ([, other]) => sliceLength(deref(other)),
   append: ([, other]) => vec(other).length,
-  resize: ([self, newLen]) => {
-    const additional = (newLen as bigint) - BigInt(vec(self).length);
-    return additional > 0n ? additional : 0n;
-  },
+  resize: resizeAdditional,
+  resize_with: resizeAdditional,
 };
+
+function resizeAdditional([self, newLen]: Value[]): bigint {
+  const additional = (newLen as bigint) - BigInt(vec(self).length);
+  return additional > 0n ? additional : 0n;
+}
 
 /** The natives that may remove elements, after which the collection keeps its capacity. */
 const VEC_SHRINKING = new Set([
@@ -117,6 +120,7 @@ const VEC_SHRINKING = new Set([
   'dedup_by_key',
   'split_off',
   'resize',
+  'resize_with',
 ]);
 
 /** The natives of a `Vec`, a `VecDeque`, or a `BinaryHeap` that read and change its capacity. */

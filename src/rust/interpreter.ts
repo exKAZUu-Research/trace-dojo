@@ -233,25 +233,27 @@ export class Interpreter implements CallSupport {
     args: Value[],
     callRow: number | undefined,
     captures: Place[],
-    onEnd?: (frame: Frame) => void
+    onEnd?: (frame: Frame, result: Value | undefined) => void
   ): Value {
     const { runtime } = this;
     const frame = new Frame(runtime, compiled.info, callRow, typeArgs, captures);
     runtime.pushFrame(frame);
+    let result: Value | undefined;
     try {
       runtime.withRoots(args, () => compiled.bind(frame, args));
-      return compiled.body(frame);
+      result = compiled.body(frame);
     } catch (error) {
-      if (error instanceof ControlSignal && error.kind === 'return') return error.value;
-      throw error;
+      if (!(error instanceof ControlSignal) || error.kind !== 'return') throw error;
+      result = error.value;
     } finally {
       try {
-        onEnd?.(frame);
+        onEnd?.(frame, result);
       } finally {
         runtime.popFrame();
         if (compiled.info.isAtomic) runtime.steps.completeAtomicCall();
       }
     }
+    return result;
   }
 
   private callNative(def: FnDef, typeArgs: Type[], args: Value[], span: Span, frame: Frame): Value {
