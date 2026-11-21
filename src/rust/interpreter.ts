@@ -36,7 +36,7 @@ import {
   type Type,
   type TypeParam,
 } from './types';
-import { decodeUtf8 } from './utf8';
+import { decodeUtf8, utf8Reader } from './utf8';
 import {
   AccessorPlace,
   CellPlace,
@@ -547,7 +547,8 @@ export function strSliceBytes(
   span: Span,
   writtenEnd?: bigint
 ): string {
-  const bytes = new TextEncoder().encode(text);
+  // Repeated slices of one long string (a lexer's tokens) read its kept encoding instead of encoding it each time.
+  const bytes = utf8Reader.of(text);
   const from = start ?? 0;
   const to = end ?? bytes.length;
   if (from > bytes.length) {
