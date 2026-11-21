@@ -47,7 +47,6 @@ import {
 } from './convertBase';
 import { ExpressionConverter, VAR_WITH_TYPE } from './convertExpression';
 
-/** Converts a tree-sitter tree of a Dart library into the AST, rejecting syntax the interpreter does not run. */
 /** Where a parameter list appears; `representation` is an extension type's, whose one parameter may be final. */
 type FormalContext = 'ordinary' | 'constructor' | 'primary' | 'representation';
 
@@ -89,6 +88,7 @@ const RESERVED_WORDS = new Set([
   'with',
 ]);
 
+/** Converts a tree-sitter tree of a Dart library into the AST, rejecting syntax the interpreter does not run. */
 export class Converter extends ExpressionConverter {
   constructor(protected readonly isLibrary: boolean) {
     super();
