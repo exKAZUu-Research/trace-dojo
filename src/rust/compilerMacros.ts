@@ -271,29 +271,27 @@ function vecRepeatMacro(c: Compiler, macro: Macro<'vecRepeat'>, span: Span): Eva
 }
 
 function dbgMacro(c: Compiler, macro: Macro<'dbg'>, span: Span): Eval {
-  const args = macro.args.map((arg, index) => ({
-    value: c.value(arg),
-    type: runtimeType(arg.ty!),
-    text: macro.texts[index],
-  }));
-  return (frame) => {
-    const { runtime } = frame;
-    const label = `[src/main.rs:${span.row + 1}:${span.col}]`;
-    if (args.length === 0) {
-      runtime.write('stderr', `${label}\n`);
+  const label = `[src/main.rs:${span.row + 1}:${span.col}]`;
+  const args = macro.args.map((arg, index) => {
+    const value = c.value(arg);
+    const type = runtimeType(arg.ty!);
+    return (frame: Frame): Value => {
+      const item = value(frame);
+      const { runtime } = frame;
+      const shown = runtime.withRoots([item], () =>
+        runtime.withActiveBorrows([item], () => c.support.formatter.debug(item, type(frame), debugSpec(true), 0))
+      );
+      runtime.write('stderr', `${label} ${macro.texts[index]} = ${shown}\n`);
+      return item;
+    };
+  });
+  if (args.length === 0) {
+    return (frame) => {
+      frame.runtime.write('stderr', `${label}\n`);
       return UNIT_VALUE;
-    }
-    const values: Value[] = [];
-    return runtime.withRoots(values, () => {
-      for (const { value, type, text } of args) {
-        const item = value(frame);
-        values.push(item);
-        const shown = c.support.formatter.debug(item, type(frame), debugSpec(true), 0);
-        runtime.write('stderr', `${label} ${text} = ${shown}\n`);
-      }
-      return values.length === 1 ? values[0] : values;
-    });
-  };
+    };
+  }
+  return (frame) => withEvaluatedValues(frame, args, (values) => (values.length === 1 ? values[0] : values));
 }
 
 function debugSpec(alternate: boolean): Spec {
@@ -338,18 +336,16 @@ function plainPlaceholder(part: Exclude<FormatPiece, string>, arg: Expr): string
 function compileFormat(c: Compiler, format: FormatArgs, pieces = foldFormatPieces(format)): FormatEval {
   const args = format.args.map((arg) => c.read(arg));
   const types = format.args.map((arg) => runtimeType(arg.ty!));
-  return (frame, write) => {
-    const values = evaluateValues(frame, args);
-    frame.runtime.spend();
-    return frame.runtime.withRoots(values, () =>
-      c.support.formatter.format(
+  return (frame, write) =>
+    withEvaluatedValues(frame, args, (values) => {
+      frame.runtime.spend();
+      return c.support.formatter.format(
         pieces,
         values,
         types.map((type) => type(frame)),
         write
-      )
-    );
-  };
+      );
+    });
 }
 
 function formatOrPanic(

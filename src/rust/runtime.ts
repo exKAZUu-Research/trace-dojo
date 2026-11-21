@@ -155,23 +155,17 @@ export class Runtime implements TracedRuntime<Frame> {
     return roots.length === 0 ? use() : this.withRoots(roots, use);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Iterators can borrow transitively through their source or adapter state.
   borrowRoots(values: Value[]): Value[] {
+    if (!this.world.hasTurtles) return [];
     const roots: Value[] = [];
-    const seen = new Set<IterValue>();
-    const visit = (value: unknown): void => {
-      while (isPlace(value)) {
-        value = value.get();
-        roots.push(value as Value);
-      }
-      if (value instanceof SliceView) roots.push(value.base);
-      if (!(value instanceof IterValue) || seen.has(value)) return;
-      seen.add(value);
-      for (const borrow of value.borrowedRoots) roots.push(borrow);
-      for (const source of value.roots) visit(source);
-      if (value.stateRoots) for (const source of value.stateRoots()) visit(source);
-    };
-    for (const value of values) visit(value);
+    const pending: unknown[] = [...values];
+    const seen = new Set<object>();
+    while (pending.length > 0) {
+      const item = pending.pop();
+      if (typeof item !== 'object' || item === null || seen.has(item)) continue;
+      seen.add(item);
+      pushActiveBorrowChildren(item, pending, roots);
+    }
     return roots;
   }
 
@@ -253,6 +247,24 @@ export class OutOfMemory {
   constructor(readonly bytes: number | bigint) {}
 }
 
+function pushActiveBorrowChildren(item: object, pending: unknown[], roots: Value[]): void {
+  if (isPlace(item)) {
+    const target = item.get();
+    roots.push(target);
+    pending.push(target);
+    return;
+  }
+  if (item instanceof SliceView) {
+    roots.push(item.base);
+    pending.push(item.base);
+  } else if (item instanceof IterValue) {
+    pushAll(roots, item.borrowedRoots);
+    pushAll(pending, item.borrowedRoots);
+    if (item.peeked) pushAll(pending, item.peeked);
+  }
+  pushChildren(item, pending);
+}
+
 // code-gauge-allow functionNcss 39 -- One case per kind of value.
 // code-gauge-allow functionCognitiveComplexity 22 -- Each runtime value representation exposes its own reachable objects.
 function pushChildren(item: object, stack: unknown[]): void {
@@ -294,6 +306,6 @@ function pushOwned(stack: unknown[], value: unknown, type: Type): void {
 }
 
 /** Pushes many items, which spreading them as arguments would overflow the call stack with. */
-function pushAll(stack: unknown[], items: Iterable<unknown>): void {
+function pushAll<T>(stack: T[], items: Iterable<T>): void {
   for (const item of items) stack.push(item);
 }

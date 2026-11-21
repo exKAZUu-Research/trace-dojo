@@ -15,6 +15,7 @@ import { deepNormalize, isPseudo, normalize, Unifier } from './infer';
 import { compileError, ItemCollector, lowerType, Module, type Program, resolveImports, type TypeScope } from './items';
 import { dynIteratorTarget, intoIterItem, intoIterShape } from './iterTypes';
 import { autoderefSteps, derefOnce } from './methods';
+import { orderHint } from './orderingDiagnostics';
 import { TraitSolver } from './traits';
 import {
   type AdtDef,
@@ -1280,16 +1281,6 @@ export class Checker {
 }
 
 export { hasParams, deepNormalize, derefOnce };
-
-function orderHint(type: Type): string {
-  const t = normalize(shallow(type));
-  if (t.kind === 'ref') return orderHint(t.target);
-  if (t.kind === 'float') return '小数を並べ替えるには、sort_by で total_cmp を使えます。';
-  if (t.kind === 'adt' && !(t.def.module as Module | undefined)?.isStd) {
-    return 'すべてのフィールドが Ord なら、#[derive(PartialEq, Eq, PartialOrd, Ord)] を付けてください。';
-  }
-  return '';
-}
 
 function* adtArgumentBounds(def: AdtDef, args: Type[]): Iterable<[Type, TraitRef]> {
   const subst = new Map(def.params.map((param, index) => [param, args[index]]));

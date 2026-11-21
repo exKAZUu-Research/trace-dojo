@@ -978,6 +978,7 @@ pub mod iter {
         pub struct FuseShape<S>;
         pub struct InspectShape<S, F>;
         pub struct CycleShape<S>;
+        pub struct GenericShuntShape<S>;
         pub struct ScanShape<S, St, F>;
         pub struct ByRefShape<S>;
         pub struct CopiedShape<S>;

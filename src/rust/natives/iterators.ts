@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 963 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss 980 -- One native per method of the standard library.
 import { inPlaceCapacity, reserveVec, setVecCapacity, sizeTable, type TableMap, vecCapacity } from '../capacity';
 import type { DebugPart } from '../debugText';
 import { normalize } from '../infer';
@@ -241,6 +241,7 @@ export function lengthOf(iter: IterValue): bigint {
 }
 
 export function iteratorLowerBound(iter: IterValue, shape?: Type): bigint {
+  if (iter.sizeHintLower) return shorterLength(iter.sizeHintLower(), intMax('usize'));
   if (!shape || iteratorCapability(shape, 'exact') === 'yes') return lengthOf(iter);
   const t = normalize(shallow(shape));
   if (t.kind !== 'adt') return 0n;
@@ -328,6 +329,8 @@ interface AdapterParts {
   next: () => Next;
   nextBack?: () => Next;
   remaining?: () => number | bigint;
+  sizeHintLower?: () => bigint;
+  trustedSizeHint?: boolean;
 }
 
 class IteratorCallback {
@@ -352,8 +355,10 @@ function adapter<S extends object>(
   forkState: (state: S) => S = forkAdapterState,
   folds = false
 ): IterValue {
-  const { next, nextBack, remaining } = parts(source, state);
+  const { next, nextBack, remaining, sizeHintLower, trustedSizeHint } = parts(source, state);
   const iter = new IterValue(next, nextBack, remaining, [source, state]);
+  iter.sizeHintLower = sizeHintLower;
+  iter.trustedSizeHint = trustedSizeHint;
   iter.stateRoots = () =>
     Object.values(state).map((value: unknown) => (value instanceof IteratorCallback ? value.value : value));
   // An adapter whose `fold` folds its source (`Map`, `Filter`, ...) takes its source's elements as it folds.
@@ -454,33 +459,31 @@ function optionValue(value: Value): Next {
  * Flattens an iterator of iterables as `flat_map` and `flatten` do: an inner iterator for the front and one for the
  * back, which each end falls back on once the outer iterator runs out.
  */
-// code-gauge-allow functionCognitiveComplexity 23 -- Walks the inner iterators from either end, as `FlattenCompat` does.
 function flattened(
   ctx: NativeContext,
   source: IterValue,
   inner: (item: Value, callback: Value) => IterValue,
+  innerType: Type,
   callback?: IteratorCallback
 ): IterValue {
+  const outerShape = ctx.typeArgs[1];
+  const innerShape = intoIterShape(ctx.interp.program, innerType);
+  const type = normalize(shallow(innerType));
+  const array = type.kind === 'ref' ? normalize(shallow(type.target)) : type;
+  const fixed = array.kind === 'array' ? BigInt(array.len) : undefined;
+  const lower = (active: IterValue | undefined): bigint => (active ? iteratorLowerBound(active, innerShape) : 0n);
   return adapter<FlattenState>(
     source,
     { front: undefined, back: undefined, outerDone: false, callback },
-    (src, state) => {
-      const take = (end: End): Next => {
-        for (;;) {
-          ctx.runtime.spend();
-          const item = takeInner(state, end);
-          if (item !== DONE) return item;
-          // The outer iterator is fused: once it runs out, `flatten` no longer asks it.
-          const next = state.outerDone ? DONE : fromEnd(src, end);
-          if (next === DONE) {
-            state.outerDone = true;
-            return takeInner(state, end === 'front' ? 'back' : 'front');
-          }
-          state[end] = inner(next, state.callback?.value);
-        }
-      };
-      return { next: () => take('front'), nextBack: src.nextBack && (() => take('back')) };
-    },
+    (src, state) => ({
+      next: () => takeFlattened(ctx, src, state, 'front', inner),
+      nextBack: src.nextBack && (() => takeFlattened(ctx, src, state, 'back', inner)),
+      sizeHintLower: () =>
+        lower(state.front) +
+        lower(state.back) +
+        (state.outerDone || fixed === undefined ? 0n : fixed * iteratorLowerBound(src, outerShape)),
+      trustedSizeHint: fixed !== undefined && (source.trustedSizeHint || isTrustedLen(outerShape)),
+    }),
     (state) => ({
       front: state.front && cloneIterator(state.front),
       back: state.back && cloneIterator(state.back),
@@ -498,6 +501,26 @@ interface FlattenState {
   back: IterValue | undefined;
   outerDone: boolean;
   callback: IteratorCallback | undefined;
+}
+
+function takeFlattened(
+  ctx: NativeContext,
+  source: IterValue,
+  state: FlattenState,
+  end: End,
+  inner: (item: Value, callback: Value) => IterValue
+): Next {
+  for (;;) {
+    ctx.runtime.spend();
+    const item = takeInner(state, end);
+    if (item !== DONE) return item;
+    const next = state.outerDone ? DONE : fromEnd(source, end);
+    if (next === DONE) {
+      state.outerDone = true;
+      return takeInner(state, end === 'front' ? 'back' : 'front');
+    }
+    state[end] = inner(next, state.callback?.value);
+  }
 }
 
 function fromEnd(iter: IterValue, end: End): Next {
@@ -562,12 +585,13 @@ define({
       ctx,
       iterOf(self),
       (item, callback) => innerIter(ctx, call(ctx, callback, [item]), ctx.typeArgs[2]),
+      ctx.typeArgs[2],
       new IteratorCallback(f, ctx.typeArgs[3])
     );
     return flattenDebug(ctx, 'FlatMap', iter, ctx.typeArgs[2]);
   },
   'IterImpl<_, _>::flatten': ([self], ctx) => {
-    const iter = flattened(ctx, iterOf(self), (item) => innerIter(ctx, item, ctx.typeArgs[0]));
+    const iter = flattened(ctx, iterOf(self), (item) => innerIter(ctx, item, ctx.typeArgs[0]), ctx.typeArgs[0]);
     return flattenDebug(ctx, 'Flatten', iter, ctx.typeArgs[0]);
   },
   'IterImpl<_, _>::enumerate': ([self]) =>
@@ -755,6 +779,7 @@ define({
       iterOf(self),
       { original: cloneIterator(iterOf(self)), current: undefined as IterValue | undefined },
       (src, state) => ({
+        sizeHintLower: () => (iteratorLowerBound(state.original, ctx.typeArgs[1]) > 0n ? intMax('usize') : 0n),
         next: () => {
           ctx.runtime.spend();
           const item = nextOf(state.current ?? src);
@@ -1412,17 +1437,18 @@ function keepsBest(order: number, sign: 1 | -1): boolean {
  * which it takes no more elements.
  */
 function sumOfOutcomes(ctx: NativeContext, iter: IterValue, t: Type & { kind: 'adt' }, op: '+' | '*'): Value {
-  return consumeOutcomes(iter, t, (values) => sumOrProduct(ctx, values, t.args[0], op));
+  return consumeOutcomes(ctx, iter, t, (values) => sumOrProduct(ctx, values, t.args[0], op));
 }
 
 function consumeOutcomes(
+  ctx: NativeContext,
   iter: IterValue,
   target: Type & { kind: 'adt' },
   consume: (values: IterValue) => Value
 ): Value {
   const success = target.def.builtin === 'Result' ? 0 : 1;
   let failure: EnumValue | undefined;
-  const values = new IterValue(() => {
+  const next = (): Next => {
     if (failure) return DONE;
     const item = nextForFold(iter);
     if (item === DONE) return DONE;
@@ -1430,8 +1456,10 @@ function consumeOutcomes(
     if (outcome.variant === success) return outcome.fields[0];
     failure = outcome;
     return DONE;
-  });
-  const value = consume(values);
+  };
+  const values = new IterValue(next, undefined, undefined, [iter]);
+  values.stateRoots = () => [failure];
+  const value = ctx.runtime.withRoots([values], () => consume(values));
   return failure ?? new EnumValue(target.def, success, [value]);
 }
 
@@ -1478,7 +1506,7 @@ function intStep(ctx: NativeContext, type: Type, op: '+' | '*', total: bigint, v
 export function collectVec(ctx: NativeContext, iter: IterValue, shape: Type | undefined, elem: Type): Value[] {
   const source = shape && inPlaceSource(iter, shape);
   const inPlace = source && inPlaceCapacity(source, layoutOf(elem));
-  const trusted = shape && isTrustedLen(shape);
+  const trusted = iter.trustedSizeHint || (shape && isTrustedLen(shape));
   if (trusted || inPlace !== undefined) {
     const items = collectAll(ctx, iter, undefined, !!trusted);
     ctx.runtime.allocate(items.length);
@@ -1505,6 +1533,7 @@ export function collectVec(ctx: NativeContext, iter: IterValue, shape: Type | un
 
 /** The adapters through which `collect` reuses the buffer of a `Vec`'s `into_iter` (`InPlaceIterable`). */
 const IN_PLACE_ADAPTERS = new Set([
+  'GenericShuntShape',
   'MapShape',
   'FilterShape',
   'FilterMapShape',
@@ -1615,7 +1644,7 @@ function collectIterator(ctx: NativeContext, iter: IterValue, target: Type, item
     }
     case 'Option':
     case 'Result': {
-      return collectOutcome(ctx, iter, t, item);
+      return collectOutcome(ctx, iter, t, item, shape);
     }
     default: {
       return collectBulk(ctx, iter, t, item);
@@ -1623,9 +1652,18 @@ function collectIterator(ctx: NativeContext, iter: IterValue, target: Type, item
   }
 }
 
-function collectOutcome(ctx: NativeContext, iter: IterValue, target: Type & { kind: 'adt' }, item: Type): Value {
+function collectOutcome(
+  ctx: NativeContext,
+  iter: IterValue,
+  target: Type & { kind: 'adt' },
+  item: Type,
+  shape?: Type
+): Value {
   const input = normalize(shallow(item)) as Type & { kind: 'adt' };
-  return consumeOutcomes(iter, target, (values) => collectIterator(ctx, values, target.args[0], input.args[0]));
+  const shunt = shape && ctx.interp.program.shapeType('GenericShuntShape', [shape]);
+  return consumeOutcomes(ctx, iter, target, (values) =>
+    collectIterator(ctx, values, target.args[0], input.args[0], shunt)
+  );
 }
 
 function collectHashMap(ctx: NativeContext, iter: IterValue, types: Type[], shape?: Type): MapValue {

@@ -6160,3 +6160,87 @@ test('appends a larger heap while retaining the smaller heap buffer for reuse', 
     stdout: '[6, 5, 3, 0, 4, 1, 2] 8 3\nSome(9) 3\n',
   });
 });
+
+const debugTurtleItems = `use std::fmt;
+struct Holder(Turtle);
+impl fmt::Debug for Holder {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { write!(f, "H") }
+}
+fn path_clear() -> bool {
+    let observer = Turtle::new(0, 0);
+    observer.can_move_forward()
+}`;
+
+test('keeps temporary iterator sources alive inside formatted aggregates', () => {
+  const item = 'vec![Holder(Turtle::new(0, 1))].iter()';
+  for (const [operand, formatted] of [
+    [`(${item},)`, '(Iter([H]),)'],
+    [`Some(${item})`, 'Some(Iter([H]))'],
+    [`[${item}]`, '[Iter([H])]'],
+    [`Some(Box::new([${item}]))`, 'Some([Iter([H])])'],
+  ]) {
+    const program = rustMain(
+      `println!("{:?} {}", ${operand}, path_clear());
+        println!("{}", path_clear());`,
+      debugTurtleItems
+    );
+    const stdout = `${formatted} false\ntrue\n`;
+    expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout, finalTurtles: [] });
+    expect(traceProgram('rust', program, program)).toMatchObject({ stdout });
+  }
+});
+
+test('keeps temporary iterator sources across dbg operands without delaying their output', () => {
+  const program = rustMain(
+    `println!("{:?}", dbg!(vec![Holder(Turtle::new(0, 1))].iter(), path_clear()));
+    println!("{}", path_clear());`,
+    debugTurtleItems
+  );
+  const stdout = '(Iter([H]), false)\ntrue\n';
+  const result = executeProgram('rust', program);
+  expect(result).toMatchObject({ kind: 'executed', stdout, finalTurtles: [] });
+  expect(result.kind === 'executed' && result.stderr).toMatch(/vec!.* = Iter\([\s\S]*path_clear\(\) = false/);
+  expect(traceProgram('rust', program, program)).toMatchObject({ stdout });
+});
+
+test('retains in-place vector capacity through successful Option and Result collection', () => {
+  const program = rustMain(`let mut source = Vec::with_capacity(10);
+    source.push(Some(1));
+    source.push(Some(2));
+    let opt: Option<Vec<i32>> = source.into_iter().collect();
+    let res: Result<Vec<i64>, String> = vec![Ok(1), Ok(2), Ok(3)].into_iter().collect();
+    let mapped: Option<Vec<u32>> = vec![1u32, 2, 3, 4, 5].into_iter().map(Some).collect();
+    let failed: Result<Vec<_>, _> = vec![Ok(1), Err("stop"), Ok(2)].into_iter().collect();
+    println!("{} {} {} {:?}", opt.unwrap().capacity(), res.unwrap().capacity(), mapped.unwrap().capacity(), failed);`);
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '20 9 5 Err("stop")\n',
+  });
+});
+
+test('reserves for a bounded cycle even after its first pass is exhausted', () => {
+  const program = rustMain(
+    `let mut ints = (0..5).cycle();
+    assert_eq!(ints.nth(4), Some(4));
+    let set: HashSet<_> = ints.take(14).collect();
+    let vec: Vec<_> = (0..5).cycle().take(14).collect();
+    let text: String = "ab".chars().cycle().take(10).collect();
+    let empty: Vec<i32> = std::iter::empty::<i32>().cycle().take(15).collect();
+    println!("{} {} {} {} {}", set.len(), set.capacity(), vec.capacity(), text.capacity(), empty.capacity());`,
+    'use std::collections::HashSet;'
+  );
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '5 14 14 10 0\n',
+  });
+});
+
+test('uses live and fixed inner lengths when reserving for flattened vectors', () => {
+  const program = rustMain(`let nested = vec![vec![1, 2, 3], vec![4, 5, 6, 7, 8, 9, 10, 11, 12]];
+    let borrowed: Vec<_> = nested.iter().flatten().copied().collect();
+    let owned: Vec<_> = nested.into_iter().flatten().collect();
+    let fixed: Vec<_> = vec![1].into_iter().flat_map(|x| [x, x]).collect();
+    let variable: Vec<_> = (0..3).flat_map(|x| 0..x * 5).collect();
+    println!("{} {} {} {}", borrowed.capacity(), owned.capacity(), fixed.capacity(), variable.capacity());`);
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '12 12 2 15\n' });
+});

@@ -188,6 +188,8 @@ export class IterValue {
 
   readonly borrowedRoots: Value[] = [];
   remainingTextBytes?: () => number;
+  sizeHintLower?: () => bigint;
+  trustedSizeHint?: boolean;
   stateRoots?: () => Iterable<unknown>;
 
   /** Elements pushed back by `peekable`. */
