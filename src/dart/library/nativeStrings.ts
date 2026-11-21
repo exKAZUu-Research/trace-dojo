@@ -5,7 +5,7 @@ import { concatenate } from '../operators';
 import type { Runtime } from '../runtime';
 import { asInstanceOf, coreTypes, interfaceType } from '../types';
 import { DartList, DartObject, DartPackedList, type Value } from '../values';
-import { BoundedStringParts, StringParts } from './boundedStringParts';
+import { BoundedStringParts, copyString, detachShorterString, StringParts, stringSlice } from './boundedStringParts';
 import {
   allMatchesOf,
   hasPrefixMatch,
@@ -145,9 +145,9 @@ define('String.substring', (runtime, receiver, [start, end]) => {
   const to = end === undefined ? BigInt(text.length) : intArg(runtime, end, 'end');
   return substringBetween(runtime, text, from, to);
 });
-define('String.trim', (_runtime, receiver) => trimDartWhitespace(self(receiver)));
-define('String.trimLeft', (_runtime, receiver) => trimDartStart(self(receiver)));
-define('String.trimRight', (_runtime, receiver) => trimDartEnd(self(receiver)));
+define('String.trim', (_runtime, receiver) => detachShorterString(self(receiver), trimDartWhitespace(self(receiver))));
+define('String.trimLeft', (_runtime, receiver) => detachShorterString(self(receiver), trimDartStart(self(receiver))));
+define('String.trimRight', (_runtime, receiver) => detachShorterString(self(receiver), trimDartEnd(self(receiver))));
 define('String.*', (runtime, receiver, [times]) => {
   const count = intArg(runtime, times, 'times');
   if (count <= 0n) return '';
@@ -237,7 +237,7 @@ function replaceWith(
     last = boundary(runtime, match, 'end');
   }
   result.append(text.slice(index(last)));
-  return result.text();
+  return detachShorterString(text, result.text());
 }
 
 function mappedReplacement(runtime: Runtime, replace: Value): (match: StringMatch) => string {
@@ -298,7 +298,7 @@ function replaceRange(runtime: Runtime, text: string, from: bigint, to: bigint, 
   if (from < 0n || from > BigInt(text.length)) rangeError(runtime, from, 0, text.length, 'start');
   if (to < from || to > BigInt(text.length)) rangeError(runtime, to, Number(from), text.length, 'end');
   checkLength(runtime, text.length - Number(to - from) + inserted.length);
-  return text.slice(0, index(from)) + inserted + text.slice(index(to));
+  return detachShorterString(text, text.slice(0, index(from)) + inserted + text.slice(index(to)));
 }
 define('String.split', (runtime, receiver, [pattern]) => {
   const text = self(receiver);
@@ -346,10 +346,10 @@ function splitAtString(runtime: Runtime, text: string, separator: string): strin
     const end = text.indexOf(separator, start);
     runtime.allocate(1);
     if (end === -1) {
-      parts.push(copyString(text.slice(start)));
+      parts.push(stringSlice(text, start));
       return parts;
     }
-    parts.push(copyString(text.slice(start, end)));
+    parts.push(stringSlice(text, start, end));
     start = end + separator.length;
   }
 }
@@ -400,12 +400,7 @@ function* emptyPatternMatches(input: string, runtime: Runtime): IterableIterator
 function substringBetween(runtime: Runtime, text: string, start: bigint, end: bigint): string {
   if (start < 0n || start > BigInt(text.length)) rangeError(runtime, start, 0, text.length, 'start');
   if (end < start || end > BigInt(text.length)) rangeError(runtime, end, Number(start), text.length, 'end');
-  const slice = text.slice(index(start), index(end));
-  return slice === text ? text : copyString(slice);
-}
-
-function copyString(text: string): string {
-  return Buffer.from(text, 'utf16le').toString('utf16le');
+  return stringSlice(text, index(start), index(end));
 }
 
 registerPackedList('CodeUnits');

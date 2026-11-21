@@ -1,6 +1,19 @@
 import { LIMITS } from '../../interpreter/limits';
 import type { Runtime } from '../runtime';
 
+export function stringSlice(text: string, start: number, end = text.length): string {
+  return detachShorterString(text, text.slice(start, end));
+}
+
+export function detachShorterString(source: string, text: string): string {
+  return text.length < source.length ? copyString(text) : text;
+}
+
+export function copyString(text: string): string {
+  // V8 may retain a slice's backing string even when the slice is small.
+  return Buffer.from(text, 'utf16le').toString('utf16le');
+}
+
 export class BoundedStringParts {
   private readonly parts = new StringParts();
   private length = 0;

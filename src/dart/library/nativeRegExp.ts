@@ -4,18 +4,9 @@ import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import type { Runtime } from '../runtime';
 import { coreTypes, interfaceType, makeNullable } from '../types';
 import { DartList, DartObject, type Value } from '../values';
-import { BoundedStringParts } from './boundedStringParts';
-import {
-  define,
-  defineConstructor,
-  index,
-  intArg,
-  listElement,
-  listLength,
-  named,
-  newList,
-  stringArg,
-} from './nativeSupport';
+import { BoundedStringParts, stringSlice } from './boundedStringParts';
+import { newSet } from './nativeCollections';
+import { define, defineConstructor, index, intArg, listElement, listLength, named, stringArg } from './nativeSupport';
 import {
   type CompiledRegExp,
   compileRegExp,
@@ -184,7 +175,7 @@ export function matchText(runtime: Runtime, state: MatchState, group = 0): strin
   const end = group === 0 ? state.end : state.captures?.[capture + 1];
   if (start === undefined || end === undefined || start < 0 || end < 0) return undefined;
   runtime.spend(Math.ceil((end - start) / 1024));
-  return state.input.slice(start, end);
+  return stringSlice(state.input, start, end);
 }
 
 function matchState(value: Value): MatchState {
@@ -396,11 +387,16 @@ define('RegExpMatch.namedGroup', (runtime, receiver, [name]) => {
   }
   return;
 });
-define('RegExpMatch.groupNames', (runtime, receiver) =>
-  newList(
-    runtime,
-    interfaceType(coreTypes.string),
-    [...stateOf(matchState(receiver).pattern).compiled.names.keys()],
-    false
-  )
-);
+define('RegExpMatch.groupNames', (runtime, receiver) => {
+  const names = stateOf(matchState(receiver).pattern).compiled.names;
+  const stringType = interfaceType(coreTypes.string);
+  if (names.size === 0) {
+    return runtime.links.canonicalize(runtime, new DartList(coreTypes.list, stringType, [], false, true));
+  }
+  runtime.allocate(1);
+  const result = newSet(runtime, stringType);
+  for (const name of names.keys()) {
+    runtime.invoke(result, 'add', { positional: [name], named: undefined }, [], undefined);
+  }
+  return result;
+});

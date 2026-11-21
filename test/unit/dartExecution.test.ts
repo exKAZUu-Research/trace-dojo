@@ -6197,6 +6197,25 @@ void main() {
   });
 });
 
+test('regex group names use a fresh ordered set or the canonical empty list', () => {
+  const source = `void main() {
+  final match = RegExp(r'(?<first>a)(?<second>b)').firstMatch('ab')!;
+  print(match.groupNames);
+  final names = match.groupNames as Set<String>;
+  names.add('third');
+  print(names);
+  print(match.groupNames);
+  print([match[1], match.namedGroup('second')]);
+  final empty = RegExp('a').firstMatch('a')!.groupNames;
+  print(identical(empty, const <String>[]));
+  try { (empty as List<String>).add('invalid'); } catch (error) { print(error.runtimeType); }
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '{first, second}\n{first, second, third}\n{first, second}\n[a, b]\ntrue\nUnsupportedError\n',
+  });
+});
+
 test('error representations escape isolated surrogates without splitting pairs', () => {
   const source = `void main() {
   var isolated = String.fromCharCodes([0xd800, 0xdc00, 0xdc00]);
