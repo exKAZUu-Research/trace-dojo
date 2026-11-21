@@ -7821,3 +7821,18 @@ test.each([
     diagnostics: [expect.objectContaining({ message: expect.stringContaining(message) })],
   });
 });
+
+test.each([
+  ['let _ = "ab".split_at(usize::MAX);', 'end byte index 18446744073709551615 is out of bounds for string of length 2'],
+  [
+    'String::from("ab").remove(usize::MAX);',
+    'start byte index 18446744073709551615 is out of bounds for string of length 2',
+  ],
+  [
+    'String::from("ab").drain(..usize::MAX);',
+    'range end index 18446744073709551615 out of range for slice of length 2',
+  ],
+])('prints the whole byte offset when %s panics', (statement, message) => {
+  const execution = executeProgram('rust', rustMain(`    ${statement}`));
+  expect(execution.kind === 'executed' && execution.uncaughtException).toContain(`\n${message}\n`);
+});

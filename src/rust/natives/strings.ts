@@ -331,11 +331,10 @@ const strNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
   rsplit_once: ([s, p], ctx) => splitOnce(ctx, textOf(s), p, true),
   split_at: ([s, mid], ctx) => {
     const text = textOf(s);
-    const offset = Number(mid as bigint);
     // `str::split_at` reports its panics inside the library, unlike slicing with `&s[..mid]`.
     let head: string;
     try {
-      head = strSliceBytes(text, 0, offset, ctx.span);
+      head = strSliceBytes(text, 0, mid as bigint, ctx.span);
     } catch (error) {
       if (error instanceof RustPanic) libraryPanic(ctx, error.message, 'core/src/str/mod.rs:862:21');
       throw error;
@@ -503,8 +502,7 @@ const stringNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
   remove: ([self, idx], ctx) => {
     const place = placeOf(self);
     const text = textOf(place);
-    const offset = Number(idx as bigint);
-    const rest = strSliceBytes(text, offset, undefined, ctx.span);
+    const rest = strSliceBytes(text, idx as bigint, undefined, ctx.span);
     if (rest.length === 0) panic(ctx, 'cannot remove a char from the end of a string');
     const head = text.slice(0, text.length - rest.length);
     const char = String.fromCodePoint(rest.codePointAt(0)!);
