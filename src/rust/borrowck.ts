@@ -125,11 +125,20 @@ export class BorrowChecker {
     }
   }
 
+  /** A declaration without a value, which a loop may reach again: it makes new variables, which hold nothing yet. */
+  private declareEmpty(pattern: Pattern, state: State): State {
+    let declared = state;
+    for (const local of this.bindingsOf(pattern)) {
+      declared = setVar(declared, local, { init: 'no', movedAt: undefined, partial: new Set() });
+    }
+    return declared;
+  }
+
   private stmt(stmt: Stmt, state: State): State {
     this.budget.spend();
     switch (stmt.kind) {
       case 'let': {
-        if (!stmt.init) return state;
+        if (!stmt.init) return this.declareEmpty(stmt.pattern, state);
         const { pattern, init } = stmt;
         if (pattern.kind === 'binding' && !pattern.sub) {
           const known = this.constantValue(init, state);
@@ -439,7 +448,6 @@ export class BorrowChecker {
       .map((part) => part.path);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Applies the receiver adjustment before checking argument moves.
   private methodCall(expr: Extract<Expr, { kind: 'methodCall' }>, state: State): State {
     const method = this.annotations.methods.get(expr);
     let current = state;
@@ -541,32 +549,33 @@ export class BorrowChecker {
     checker.block(body, state);
   }
 
+  /** Checks the message of an assertion, which is formatted only where the assertion fails and panics. */
+  private failureMessage(format: FormatArgs | undefined, checked: State): State {
+    this.formatArgs(format, checked);
+    return checked;
+  }
+
   // code-gauge-allow functionNcss 32 -- Each macro has its own order of consuming and borrowing operands.
   private macro(expr: Extract<Expr, { kind: 'macro' }>, state: State): State {
     const { macro } = expr;
-    const format = (f: FormatArgs | undefined, s: State): State => this.formatArgs(f, s);
     switch (macro.kind) {
       case 'print':
       case 'format': {
-        return format(macro.format, state);
+        return this.formatArgs(macro.format, state);
       }
       case 'panic': {
-        format(macro.format, state);
+        this.formatArgs(macro.format, state);
         return BOTTOM;
       }
       case 'write': {
-        return format(macro.format, this.expr(macro.target, state, 'read'));
+        return this.formatArgs(macro.format, this.expr(macro.target, state, 'read'));
       }
-      // The message of an assertion is formatted only where it fails, which panics.
       case 'assert': {
-        const checked = this.expr(macro.cond, state, 'move');
-        format(macro.format, checked);
-        return checked;
+        return this.failureMessage(macro.format, this.expr(macro.cond, state, 'move'));
       }
       case 'assertEq': {
         const compared = this.expr(macro.right, this.expr(macro.left, state, 'read'), 'read');
-        format(macro.format, compared);
-        return compared;
+        return this.failureMessage(macro.format, compared);
       }
       case 'vec': {
         let current = state;

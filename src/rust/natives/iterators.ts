@@ -910,7 +910,7 @@ function zipped(
       if (trusted && (lengthOf(src) === 0n || lengthOf(state.second) === 0n)) return DONE;
       const a = nextOf(src);
       if (a === DONE) return DONE;
-      const b = nextOf(state.second);
+      const b = secondOfPair(ctx, a, () => nextOf(state.second));
       return b === DONE ? DONE : [a, b];
     },
     nextBack: () => {
@@ -919,13 +919,13 @@ function zipped(
       if (lengthA > lengthB) skipBack(ctx, src, lengthA - lengthB);
       else if (lengthB > lengthA) skipBack(ctx, state.second, lengthB - lengthA);
       const a = src.nextBack!();
-      const b = state.second.nextBack!();
+      const b = secondOfPair(ctx, a, state.second.nextBack!);
       return a === DONE || b === DONE ? DONE : [a, b];
     },
     remaining: () => shorterLength(lengthOf(src), lengthOf(state.second)),
   }));
   iter.fork = () => zipped(ctx, cloneIterator(first), cloneIterator(second), shapes, items);
-  if (isTrustedLen(...shapes)) iter.foldNext = zipFoldNext(first, second);
+  if (isTrustedLen(...shapes)) iter.foldNext = zipFoldNext(ctx, first, second);
   // `Zip` of two `TrustedRandomAccessNoCoerce` iterators shows nothing of them.
   const isCopy = (type: Type): boolean => ctx.interp.checker.solver.isCopy(type);
   const indexedFormat = trustedRandomAccess(shapes[0], first, isCopy) && trustedRandomAccess(shapes[1], second, isCopy);
@@ -950,13 +950,18 @@ function skipBack(ctx: NativeContext, iter: IterValue, count: bigint): void {
 }
 
 /** `Zip`'s `fold` of two `TrustedLen` iterators: as many pairs as its size hint, and no more from the longer. */
-function zipFoldNext(first: IterValue, second: IterValue): () => Next {
+function zipFoldNext(ctx: NativeContext, first: IterValue, second: IterValue): () => Next {
   return () => {
     if (lengthOf(first) === 0n || lengthOf(second) === 0n) return DONE;
     const a = nextOf(first);
-    const b = nextOf(second);
+    const b = secondOfPair(ctx, a, () => nextOf(second));
     return a === DONE || b === DONE ? DONE : [a, b];
   };
+}
+
+/** The second item of a `Zip`'s pair, whose first item only the unfinished pair holds while the program yields it. */
+function secondOfPair(ctx: NativeContext, first: Next, pull: () => Next): Next {
+  return first === DONE ? pull() : ctx.runtime.withRoots([first], pull);
 }
 
 /** The shapes of the iterators that are `TrustedRandomAccess` themselves. */

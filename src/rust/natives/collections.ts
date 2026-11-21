@@ -213,10 +213,13 @@ function extendMap(ctx: NativeContext, m: MapValue, iterator: IterValue): Value 
     const item = nextForFold(iterator);
     if (item === DONE) break;
     const [k, v] = item as Value[];
-    const key = entryKey(ctx, m.entries, k);
-    const existing = m.entries.get(key);
-    if (existing) existing[1] = v;
-    else storeNewEntry(ctx, m, key, k, v);
+    // Finding the key can run the program's `Eq` or `Ord`, during which only this loop holds the entry.
+    ctx.runtime.withRoots([item], () => {
+      const key = entryKey(ctx, m.entries, k);
+      const existing = m.entries.get(key);
+      if (existing) existing[1] = v;
+      else storeNewEntry(ctx, m, key, k, v);
+    });
   }
   return UNIT_VALUE;
 }

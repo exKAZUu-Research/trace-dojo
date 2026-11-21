@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 622 -- Shares Rust constant propagation between diagnostics and pattern coverage.
+// code-gauge-allow-file fileNcss 624 -- Shares Rust constant propagation between diagnostics and pattern coverage.
 
 import type { ExecutionBudget } from '../interpreter/limits';
 import type { Annotations, LocalVar, PathRes } from './annotations';
@@ -450,6 +450,8 @@ export class ConstLint {
       this.expr(child);
     });
     this.endBlock();
+    // What follows a call that never returns (`panic!`, `std::process::exit`) is not reachable.
+    if (checkedType(expr.ty)?.kind === 'never') this.diverged = true;
     return undefined;
   }
 

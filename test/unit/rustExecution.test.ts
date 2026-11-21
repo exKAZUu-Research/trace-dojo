@@ -7272,3 +7272,88 @@ test.each([
     diagnostics: [expect.objectContaining({ message: expect.stringContaining(message) })],
   });
 });
+
+test.each([
+  [
+    'the first item of a Zip pair',
+    `fn main() {
+    let kept: Vec<_> = (0..1).map(|_| Turtle::new(0, 1)).zip((0..1).map(|_| {
+        let observer = Turtle::new(0, 0);
+        observer.can_move_forward()
+    })).collect();
+    println!("{}", kept[0].1);
+}`,
+    'false\n',
+  ],
+  [
+    'an entry that extends a map',
+    `use std::collections::HashMap;
+#[derive(Hash, Eq)]
+struct Key(i32);
+impl PartialEq for Key {
+    fn eq(&self, other: &Self) -> bool {
+        let observer = Turtle::new(0, 0);
+        println!("{}", observer.can_move_forward());
+        self.0 == other.0
+    }
+}
+fn main() {
+    let mut m = HashMap::new();
+    m.insert(Key(1), Turtle::new(2, 1));
+    m.extend((0..1).map(|_| (Key(1), Turtle::new(0, 1))));
+    println!("{}", m.len());
+}`,
+    'false\n1\n',
+  ],
+])('keeps a turtle owned by %s while the program yields the rest', (_name, program, stdout) => {
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout,
+    finalTurtles: [expect.objectContaining({ x: 0, y: 1 })],
+  });
+});
+
+test('loop bodies declare variables anew, diverging calls end the linted path, and String += borrows first', () => {
+  const program = `fn main() {
+    for i in 0..2 {
+        let x: i32;
+        x = i;
+        println!("{x}");
+    }
+    let mut s = String::from("a");
+    let t = String::from("xy");
+    s += &t;
+    s += &s.clone();
+    let r = &mut s;
+    *r += "!";
+    println!("{s}");
+    std::process::exit(0);
+    let unreachable = 1 / 0;
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '0\n1\naxyaxy!\n' });
+});
+
+test.each([
+  ['a second assignment in one iteration', 'for i in 0..2 { let x: i32; x = i; x = i + 1; }', 'もう一度代入できません'],
+  [
+    'an assignment in a loop to a variable declared outside it',
+    'let x: i32; for i in 0..2 { x = i; }',
+    'もう一度代入できません',
+  ],
+  [
+    'a panic that a conditional panic! does not always precede',
+    'if cond() { panic!("a"); } let x = 1 / 0;',
+    '必ず panic',
+  ],
+  ['a String added to itself', 'let mut s = String::from("a"); s += &s;', '借りられていて'],
+  [
+    'a String changed while it is being added to',
+    'let mut s = String::from("a"); s += { s.push_str("b"); "c" };',
+    '借りられていて',
+  ],
+])('still rejects %s', (_name, body, message) => {
+  expect(executeProgram('rust', rustMain(`    ${body}`, 'fn cond() -> bool { true }'))).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ message: expect.stringContaining(message) })],
+  });
+});

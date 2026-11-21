@@ -883,6 +883,19 @@ export class LoanBuilder {
   }
 
   private compoundAssign(expr: Extract<Expr, { kind: 'compoundAssign' }>): void {
+    // An operator that a type implements (`String`'s `+=`) borrows its left operand before the right one is evaluated.
+    const overloaded = expr.target.ty && normalize(shallow(expr.target.ty)).kind === 'adt';
+    const receiver = overloaded ? this.place(expr.target, true) : undefined;
+    if (receiver) {
+      const { value: target, loan } = this.borrow(receiver, true, expr.target.span, expr.target.ty, true);
+      const operand = this.value(expr.value);
+      this.point({
+        uses: operand === undefined ? [target] : [target, operand],
+        accesses: [{ place: loan.place, kind: 'deep', span: expr.span, activates: loan }],
+      });
+      if (this.current !== undefined) loan.activation = this.current;
+      return;
+    }
     const value = this.value(expr.value);
     const values = value === undefined ? [] : [value];
     const place = this.place(expr.target, true);
