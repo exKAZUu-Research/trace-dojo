@@ -10,6 +10,7 @@ typedef IterableBase<E> = Iterable<E>;
 // Lists the program implements
 
 abstract mixin class ListBase<E> implements List<E> {
+  const ListBase();
   static String listToString(List list) => Iterable.iterableToFullString(list, '[', ']');
   int get length;
   set length(int newLength);
@@ -609,6 +610,7 @@ class UnmodifiableListView<E> extends _UnmodifiableListBase<E> {
 // Maps the program implements
 
 abstract mixin class MapBase<K, V> implements Map<K, V> {
+  const MapBase();
   static String mapToString(Map<Object?, Object?> m) => _mapToString(m);
   Iterable<K> get keys;
   V? operator [](Object? key);
@@ -742,6 +744,7 @@ class _ListIndicesIterable extends ListIterable<int> {
 // Sets the program implements
 
 abstract mixin class SetBase<E> implements Set<E> {
+  const SetBase();
   static String setToString(Set set) => Iterable.iterableToFullString(set, '{', '}');
   bool add(E value);
   bool contains(Object? element);

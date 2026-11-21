@@ -6027,6 +6027,23 @@ void main() { print(C().runtimeType); }`;
   expect(executeProgram('dart', sameLibrary)).toMatchObject({ kind: 'executed', stdout: 'C\n' });
 });
 
+test('const constructors delegate only to const constructors', () => {
+  for (const declaration of [
+    'class E extends Error { const E(); }',
+    "class E extends ArgumentError { const E() : super('message'); }",
+    'abstract class A { const factory A() = B; } class B implements A { B(); }',
+  ]) {
+    expect(executeProgram('dart', `${declaration} void main() {}`)).toMatchObject({ kind: 'compileError' });
+  }
+  const source = `import 'dart:collection';
+abstract class L extends ListBase<int> { const L(); }
+abstract class M extends MapBase<int, int> { const M(); }
+abstract class S extends SetBase<int> { const S(); }
+class D extends Duration { const D() : super(seconds: 1); }
+void main() { print(const D().inSeconds); }`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '1\n' });
+});
+
 test('generic result contexts combine covariant and contravariant positions', () => {
   const source = `Map<T, T> makeMap<T>() => {};
 (List<T>, Set<T>) makePair<T>() => (<T>[], <T>{});

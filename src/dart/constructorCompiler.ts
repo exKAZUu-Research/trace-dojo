@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 403 -- Constructor declarations, initializer ordering, and delegation share the same checks.
+// code-gauge-allow-file fileNcss 409 -- Constructor declarations, initializer ordering, and delegation share the same checks.
 import { AssignmentCompiler } from './assignmentCompiler';
 import type {
   Arguments as ArgumentsSyntax,
@@ -312,6 +312,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
       );
     if (targetConstructor.kind === 'generative' && type.cls.isAbstract)
       this.error(declaration, `抽象クラス ${type.cls.name} の生成コンストラクタにはリダイレクトできません。`);
+    if (constructor.isConst) this.requireConstConstructor(targetConstructor, declaration);
     if (
       !isSubtype(substitute(type, new Map()), cls.thisType) &&
       !(type.args.length === 0 && type.cls.isSubclassOf(cls))
@@ -751,13 +752,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
       const source = cls.constructors.get(declaration.name ?? '');
       if (source) this.constructorRedirects.set(source, { target, span });
     }
-    const callerIsConst = declaration.isConst || cls.kind === 'enum';
-    if (callerIsConst && !target.isConst && !this.isLibraryCode && !targetType.cls.isLibrary) {
-      this.error(
-        span,
-        `const のコンストラクタからは、const でないコンストラクタ ${targetType.cls.name}${name ? `.${name}` : ''} を呼び出せません。`
-      );
-    }
+    if (declaration.isConst || cls.kind === 'enum') this.requireConstConstructor(target, span);
     const map = new Map(targetType.cls.typeParams.map((param, index) => [param, targetType.args[index] ?? DYNAMIC]));
     const signature = substitute({ ...target.type, typeParams: [] }, map) as FunctionType;
     // `super.x` parameters pass their arguments on: positional ones before the written arguments, named ones by name.
@@ -804,6 +799,12 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
       const impl = target.impl as ConstructorImpl;
       impl(frame.runtime, frame.receiver as DartObject, bound.args(frame), typeArgs(frame), row);
     };
+  }
+
+  private requireConstConstructor(target: ConstructorInfo, span: Span): void {
+    if (target.isConst) return;
+    const name = target.name ? `${target.owner.name}.${target.name}` : target.owner.name;
+    this.error(span, `const のコンストラクタからは、const でないコンストラクタ ${name} を呼び出せません。`);
   }
 
   private checkFieldsInitialized(
