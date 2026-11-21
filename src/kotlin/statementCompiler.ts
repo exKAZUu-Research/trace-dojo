@@ -281,7 +281,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
       write:
         setter && ((frame, instance, value) => held.run(frame, { delegate: instance, value }, () => setter(frame))),
     };
-    scope.variables.set(name, variable);
+    this.bindLocalVariable(scope, variable);
     this.flow.assigned.add(variable);
     const write = this.variableAccess(context, holder).write;
     const evaluate = delegate.eval;

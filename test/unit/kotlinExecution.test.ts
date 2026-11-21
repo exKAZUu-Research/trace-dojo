@@ -897,6 +897,19 @@ fun main() {
       'read 0\nwrite 2 1 [1, 2, 3]\nwrite 0 3 [1, 2, 1]\n[3, 2, 1]\nforward iterator\nbackward iterator 20\n[20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]\n',
   },
   {
+    name: 'a delegated local can shadow a parameter and a local from an outer block',
+    source: `fun check(value: Int) {
+    val value by lazy { value + 1 }
+    println(value)
+    if (true) {
+        val value by lazy { value + 1 }
+        println(value)
+    }
+}
+fun main() { check(4) }`,
+    stdout: '5\n6\n',
+  },
+  {
     name: 'zip transforms combine arrays, iterables, and character sequences',
     source: `fun main() {
     println("abc".zip("xy") { a, b -> "$a$b" })
@@ -2729,6 +2742,8 @@ test.each([
     'class Tracked : ArrayList<Int>(listOf("wrong"))\nfun main() {}',
   ],
   ['a type mismatch', false, 'fun main() {\n    val x: Int = "a"\n    println(x)\n}'],
+  ['a delegated local redeclaring a local', false, 'fun main() { val x = 1; val x by lazy { 2 }; println(x) }'],
+  ['a delegated local redeclaring a delegated local', false, 'fun main() { val x by lazy { 1 }; val x by lazy { 2 } }'],
   [
     'a super call that omits an inherited default argument',
     false,

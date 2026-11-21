@@ -413,15 +413,21 @@ export abstract class CompilerCore {
     row: number,
     isShown = true
   ): VariableSymbol {
-    // A local may hide a parameter, as the body of a function or lambda shares the parameters' scope here.
-    if (isShown && name !== undefined && name !== '_' && scope.variables.get(name)?.isParameter === false)
-      this.error(row, `${name} は、すでに宣言されています。`);
     const localName = name ?? '_';
     const slot = context.allocate(localName, type, isShown && !context.info.isLibrary);
     const variable = new VariableSymbol(localName, type, isVar, 0, slot, row);
     variable.owner = context;
-    if (name !== undefined) scope.variables.set(name, variable);
+    if (name !== undefined) this.bindLocalVariable(scope, variable);
     return variable;
+  }
+
+  protected bindLocalVariable(scope: Scope, variable: VariableSymbol): void {
+    const { name, row } = variable;
+    // The body's scope includes parameters, which Kotlin allows locals to shadow.
+    if (!name.startsWith('\0') && scope.variables.get(name)?.isParameter === false) {
+      this.error(row, `${name} は、すでに宣言されています。`);
+    }
+    scope.variables.set(name, variable);
   }
 
   /** Declares a parameter, which a local of the body may hide. */
