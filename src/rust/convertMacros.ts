@@ -170,7 +170,10 @@ export abstract class MacroConverter extends PatternConverter {
     const { comma, expression } = this.matchValue(tree, tokens, end, span);
     const value = this.expr(expression);
     const patternText = tree.text.slice(comma + 1, end);
-    const pattern = this.reparse(`fn f() { match x { ${patternText}\n => {} } }`, (root) => {
+    // The pattern stays on its rows of the source, so errors inside it are reported there.
+    const patternRow = tree.startPosition.row + (tree.text.slice(0, comma).match(/\n/g)?.length ?? 0);
+    const wrapped = `${'\n'.repeat(patternRow)}fn f() { match x { ${patternText}\n => {} } }`;
+    const pattern = this.reparse(wrapped, (root) => {
       const arm = root.descendantsOfType('match_arm')[0];
       if (!arm) syntaxError(span, 'matches! の書き方に誤りがあります。');
       const matchPattern = this.field(arm, 'pattern');

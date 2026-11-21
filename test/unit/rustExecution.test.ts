@@ -7034,3 +7034,37 @@ test.each([
   expect(execution.kind === 'executed' && execution.finalTurtles).toHaveLength(turtles);
   expect(traceProgram('rust', program, program).finalTurtles).toHaveLength(turtles);
 });
+
+test('casts a char to char, and gives a Vec made through a boxed slice no spare capacity', () => {
+  const program = rustMain(
+    `    let r = &'z';
+    println!("{:?} {:?} {:?} {:?}", 'e' as char, same('a'), *r as char, 65u8 as char);
+    let mut v = Vec::with_capacity(10);
+    v.push(1);
+    let v = v.into_boxed_slice().into_vec();
+    let empty: Vec<i32> = Vec::with_capacity(10);
+    let mut wide = Vec::with_capacity(8);
+    wide.push(1u8);
+    let boxed: Box<[u8]> = wide.into();
+    println!("{} {} {} {}", v.len(), v.capacity(), empty.into_boxed_slice().into_vec().capacity(), boxed.into_vec().capacity());`,
+    'fn same(c: char) -> char { c as char }'
+  );
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: "'e' 'a' 'z' 'A'\n1 1 0 1\n" });
+});
+
+test.each([
+  ['an unsupported pattern', 'matches!(v, Some(ref x))', 3, 'ref パターン'],
+  ['a syntax error', 'matches!(v, Some(x y))', 3, '書き方に誤り'],
+  [
+    'a later row of the pattern',
+    'matches!(\n        v,\n        Some(1)\n            | Some(2..=5)\n    )',
+    6,
+    '範囲のパターン',
+  ],
+])('reports %s in a matches! pattern on its row', (_name, call, row, message) => {
+  const program = rustMain(`    let v: Option<i32> = Some(3);\n\n    let c = ${call};`);
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ row, message: expect.stringContaining(message) })],
+  });
+});

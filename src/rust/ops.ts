@@ -181,7 +181,7 @@ export function castValue(value: Value, to: Type): Value {
     if (cast !== undefined) return cast;
   }
   if (target.kind === 'float') return castToFloat(value, target.name === 'f32');
-  if (target.kind === 'char') return String.fromCodePoint(Number(value as bigint));
+  if (target.kind === 'char') return typeof value === 'bigint' ? String.fromCodePoint(Number(value)) : value;
   return value;
 }
 

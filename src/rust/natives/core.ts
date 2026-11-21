@@ -1,5 +1,5 @@
 import { TURTLE_METHOD_NAMES, type TurtleState } from '../../interpreter/turtleWorld';
-import { madeString, sizeTable, StringGrowth } from '../capacity';
+import { exactCapacity, madeString, sizeTable, StringGrowth } from '../capacity';
 import { DEFAULT_SPEC } from '../fmt';
 import { normalize } from '../infer';
 import {
@@ -306,7 +306,7 @@ define({
   'std::cmp::max_by': ([a, b, f], ctx) => ((call(ctx, f, [a, b]) as EnumValue).variant === 2 ? a : b),
   'std::cmp::max_by_key': ([a, b, f], ctx) => (secondKeyIsLess(ctx, a, b, f) ? a : b),
   'std::cmp::min_by_key': ([a, b, f], ctx) => (secondKeyIsLess(ctx, a, b, f) ? b : a),
-  'Box<[_]>::into_vec': ([self]) => deref(self),
+  'Box<[_]>::into_vec': ([self]) => exactCapacity(sliceItems(deref(self))),
   'Box<str>::into_string': ([self]) => textOf(self),
   'AsRef::as_ref': ([self], ctx) => {
     const value = deref(self);

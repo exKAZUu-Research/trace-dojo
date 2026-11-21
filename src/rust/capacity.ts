@@ -14,6 +14,12 @@ export function vecCapacity(items: object, len: number, elemSize: number): numbe
   return elemSize === 0 ? Number.MAX_SAFE_INTEGER : (vecCapacities.get(items) ?? len);
 }
 
+/** The buffer of a boxed slice, or of the `Vec` made from one: it has no spare capacity. */
+export function exactCapacity<T extends unknown[]>(items: T): T {
+  vecCapacities.set(items, items.length);
+  return items;
+}
+
 export function setVecCapacity(items: object, capacity: number): void {
   vecCapacities.set(items, capacity);
 }

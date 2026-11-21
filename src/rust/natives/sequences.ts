@@ -1,5 +1,12 @@
 // code-gauge-allow-file fileNcss 541 -- One native per method of the standard library.
-import { keepVecCapacity, reserveVec, setIntoIterBuffer, setVecCapacity, vecCapacity } from '../capacity';
+import {
+  exactCapacity,
+  keepVecCapacity,
+  reserveVec,
+  setIntoIterBuffer,
+  setVecCapacity,
+  vecCapacity,
+} from '../capacity';
 import { sliceRange } from '../compiler';
 import { normalize } from '../infer';
 import {
@@ -273,7 +280,7 @@ const sliceNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
   fill: ([self, value], ctx) => fillSlice(ctx, deref(self), value, elemType(ctx)),
   to_vec: ([self], ctx) => clonedItems(ctx, sliceItems(deref(self))),
   to_owned: ([self], ctx) => clonedItems(ctx, sliceItems(deref(self))),
-  into_vec: ([self]) => sliceItems(deref(self)),
+  into_vec: ([self]) => exactCapacity(sliceItems(deref(self))),
   rotate_left: ([self, mid], ctx) => {
     const slice = deref(self);
     if (Number(mid as bigint) > sliceLength(slice)) {
@@ -576,7 +583,7 @@ const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
   },
   as_slice: ([self]) => vec(self),
   as_mut_slice: ([self]) => self,
-  into_boxed_slice: ([self]) => vec(self),
+  into_boxed_slice: ([self]) => exactCapacity(vec(self)),
   is_empty: ([self]) => vec(self).length === 0,
   len: ([self]) => BigInt(vec(self).length),
   into_iter: ([self], ctx) => {
