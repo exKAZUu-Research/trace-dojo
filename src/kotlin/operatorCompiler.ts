@@ -560,11 +560,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
       return this.toLongConstant(this.compileInfix(scope, context, expression, undefined));
     const { name, row } = expression;
     const left = this.compileExpression(scope, context, expression.left);
-    const members = this.memberCandidates(nonNull(left.type), name).filter((candidate) => candidate.symbol.isInfix);
-    const extensions = this.extensionCandidates(left.type, name).filter((candidate) => candidate.symbol.isInfix);
-    const levels = [members, extensions].filter((level) => level.length > 0);
-    if (levels.length === 0) this.error(row, `${typeToString(resolved(left.type))} には ${name} を使えません。`);
-    if (extensions.length === 0) this.requireNonNullReceiver(left, row, false);
+    const levels = this.syntaxCandidateLevels(left, name, row, name, 'isInfix');
     const args: ArgumentSyntax[] = [{ row: expression.right.row, name: undefined, value: expression.right }];
     const call = this.resolveCall(scope, context, levels, args, false, [], expected, left, row, name);
     return { ...this.finishCall(call, left, row), isCall: false };

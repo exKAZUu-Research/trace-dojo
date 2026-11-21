@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 700 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss 716 -- the compiler of one area of Kotlin, whose parts call each other closely.
 import { CompileError } from '../interpreter/diagnostics';
 import {
   type ArgumentEvaluation,
@@ -20,6 +20,7 @@ import {
 } from './compilerBase';
 import { CompilerCore } from './compilerCore';
 import { callFunction, parameterReprs, receiverRepr, returnRepr } from './dispatch';
+import { mostSpecificReceivers, type ReceiverSpecificity } from './extensionResolution';
 import { literalFits } from './literals';
 import type { Frame } from './runtime';
 import type { ClassSymbol, FunctionSymbol, ParameterSymbol, PropertySymbol, TypeParameterSymbol } from './symbols';
@@ -83,7 +84,13 @@ interface DeclaredCallLevel {
   receiver: Compiled | undefined;
 }
 
-export type CallLevel = DeclaredCallLevel | { functionValue: (context: FunctionContext) => Compiled };
+export interface FunctionValueCandidate {
+  functionValue: (context: FunctionContext) => Compiled;
+  explicitReceiver?: Compiled;
+  specificity?: ReceiverSpecificity | undefined;
+}
+
+export type CallLevel = DeclaredCallLevel | { functionValues: FunctionValueCandidate[] };
 
 /** A call whose function and type arguments are decided. */
 export interface ResolvedCall {
@@ -194,7 +201,8 @@ export abstract class CallCompiler extends CompilerCore {
     functionValue: Compiled,
     args: ArgumentSyntax[],
     hasTrailingLambda: boolean,
-    row: number
+    row: number,
+    explicitReceiver?: Compiled
   ): Compiled;
 
   // code-gauge-allow functionParameterCount 10 -- the call and its local fallback diagnostic are supplied by the source form.
@@ -218,15 +226,18 @@ export abstract class CallCompiler extends CompilerCore {
         continue;
       }
       if (explicitTypeArgs.length > 0) continue;
-      const error = this.probeApplicability(context, (probe) => {
-        this.compileInvoke(scope, probe, level.functionValue(probe), args, hasTrailingLambda, row);
-      });
-      if (error) {
+      const values = level.functionValues.filter((candidate) => {
+        const error = this.probeApplicability(context, (probe) => {
+          this.invokeValueCandidate(scope, probe, candidate, call);
+        });
         fallbackError ??= error;
-        continue;
-      }
+        return error === undefined;
+      });
+      if (values.length === 0) continue;
       if (this.hasApplicableLevel(scope, context, declared, call, expected)) break;
-      return this.compileInvoke(scope, context, level.functionValue(context), args, hasTrailingLambda, row);
+      const best = mostSpecificReceivers(values, (candidate) => candidate.specificity);
+      if (best.length > 1) this.error(row, `${name} の呼び出しが、どの関数のことか決められません。`);
+      return this.invokeValueCandidate(scope, context, best[0], call);
     }
     if (declared.length === 0 && fallbackError) throw fallbackError;
     const receiverOf = this.levelReceivers(declared);
@@ -244,6 +255,27 @@ export abstract class CallCompiler extends CompilerCore {
       fallbackError
     );
     return this.finishCall(chosen, receiverOf(chosen.candidate), row);
+  }
+
+  private invokeValueCandidate(
+    scope: Scope,
+    context: FunctionContext,
+    candidate: FunctionValueCandidate,
+    call: CallSyntax
+  ): Compiled {
+    const value = candidate.functionValue(context);
+    const type = resolved(value.type);
+    if (candidate.explicitReceiver && (type.kind !== 'function' || !type.receiver))
+      this.error(call.row, 'この関数型にはレシーバーがありません。');
+    return this.compileInvoke(
+      scope,
+      context,
+      value,
+      call.args,
+      call.hasTrailingLambda,
+      call.row,
+      candidate.explicitReceiver
+    );
   }
 
   private hasApplicableLevel(

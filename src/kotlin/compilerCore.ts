@@ -119,7 +119,7 @@ export abstract class CompilerCore {
 
   /** The packages whose top-level declarations a file sees, nearest first, grouped by how near they are. */
   protected visiblePackageLevels(): string[][] {
-    return [[this.file.packageName], this.file.starPackages, DEFAULT_IMPORTS];
+    return [[this.file.packageName], [...new Set(this.file.starPackages)], DEFAULT_IMPORTS];
   }
 
   // Types.
@@ -275,7 +275,7 @@ export abstract class CompilerCore {
   protected topLevelFunctions(name: string, includeEmpty = false): FunctionSymbol[][] {
     const levels: FunctionSymbol[][] = [];
     const own = this.packages.get(this.file.packageName)?.functions.get(name) ?? [];
-    levels.push([...own, ...(this.file.importedFunctions.get(name) ?? [])]);
+    levels.push([...new Set([...own, ...(this.file.importedFunctions.get(name) ?? [])])]);
     for (const level of this.visiblePackageLevels().slice(1)) {
       levels.push(level.flatMap((packageName) => this.packages.get(packageName)?.functions.get(name) ?? []));
     }
@@ -285,7 +285,7 @@ export abstract class CompilerCore {
   protected topLevelProperties(name: string, includeEmpty = false): PropertySymbol[][] {
     const levels: PropertySymbol[][] = [];
     const own = this.packages.get(this.file.packageName)?.properties.get(name) ?? [];
-    levels.push([...own, ...(this.file.importedProperties.get(name) ?? [])]);
+    levels.push([...new Set([...own, ...(this.file.importedProperties.get(name) ?? [])])]);
     for (const level of this.visiblePackageLevels().slice(1)) {
       levels.push(level.flatMap((packageName) => this.packages.get(packageName)?.properties.get(name) ?? []));
     }

@@ -492,7 +492,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     const variable = this.findVariable(scope, target.name);
     if (variable) return this.variablePlace(scope, context, variable, row, isCompound);
     for (const receiver of this.receiversOf(scope)) {
-      const property = this.findProperty(scope, this.receiverTypeOf(receiver), target.name);
+      const property = this.findProperty(this.receiverTypeOf(receiver), target.name, row);
       if (property) {
         if (isCompound) this.checkInitialized(context, property.symbol, property.symbol.name, row);
         return this.propertyPlace(
@@ -508,7 +508,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
         );
       }
     }
-    const companion = this.findCompanionProperty(scope, target.name);
+    const companion = this.findCompanionProperty(scope, target.name, row);
     if (companion) {
       const holder: Compiled = {
         type: companion.holder.type,
@@ -543,7 +543,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
       return this.topLevelPlace(scope, context, property, row, isCompound);
     }
     const receiver = this.compileExpression(scope, context, target.receiver);
-    const property = this.findProperty(scope, target.isSafe ? nonNull(receiver.type) : receiver.type, target.name);
+    const property = this.findProperty(target.isSafe ? nonNull(receiver.type) : receiver.type, target.name, row);
     if (!target.isSafe) this.requirePropertyReceiver(receiver, property?.symbol, row);
     if (!property)
       return this.error(row, `${typeToString(resolved(receiver.type))} には ${target.name} がありません。`);
@@ -555,7 +555,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
 
   private classPropertyPlace(scope: Scope, cls: ClassSymbol, name: string, row: number): Place {
     const holder = cls.isObject ? cls : cls.companion;
-    const property = holder && this.findProperty(scope, holder.type, name);
+    const property = holder && this.findProperty(holder.type, name, row);
     if (!property || !holder) this.error(row, `${cls.name}.${name} が見つかりません。`);
     return this.propertyPlace(
       property,

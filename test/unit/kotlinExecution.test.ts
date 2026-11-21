@@ -33,6 +33,39 @@ test.each(['contains', 'split'])('charges the execution budget during CharSequen
 /** Programs with the output of Kotlin 2.4.21 on the JVM (Java 25), which the interpreter must reproduce exactly. */
 test.each([
   {
+    name: 'extension resolution checks property specificity, arguments, and local function values',
+    source: `val Any.label: String get() = "any"
+val String.label: String get() = "string"
+val Any.applyLocal: (Int) -> String get() = { "any $it" }
+val String.applyLocal: (String) -> String get() = { "string $it" }
+val arbitrary: String.(Int) -> String = { "top $it" }
+fun String.take(): String = this
+fun String.repeat(text: String): String = "$this$text"
+class Member { fun repeat(n: Int): String = "member $n" }
+fun main() {
+    println("hello".label)
+    println("hello".applyLocal(4))
+    println("hello".applyLocal("a"))
+    println("a".repeat(2))
+    println("abc".take(2))
+    println("a".repeat("b"))
+    println("hello".take())
+    println("a".arbitrary(3))
+    val take: String.(Int) -> String = { "local $it" }
+    val repeat: String.(Boolean) -> String = { "local $it" }
+    println("abc".take(2))
+    println("a".repeat(true))
+    println("a".repeat(2))
+    run {
+        val repeat: Member.(Int) -> String = { "callback $it" }
+        println(Member().repeat(5))
+    }
+    val arbitrary: Member.(Int) -> String = { "wrong receiver $it" }
+    println("a".arbitrary(3))
+}`,
+    stdout: 'string\nany 4\nstring a\naa\nab\nab\nhello\ntop 3\nlocal 2\nlocal true\naa\nmember 5\ntop 3\n',
+  },
+  {
     name: 'comparisons invoke user code for identical operands and reject empty selector lists',
     source: `class Score : Comparable<Score> {
     override fun compareTo(other: Score): Int {

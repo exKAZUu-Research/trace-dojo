@@ -7,6 +7,7 @@ import {
   type CallLevel,
   type Candidate,
   type DelegateContext,
+  type FunctionValueCandidate,
   type ResolvedCall,
 } from './callCompiler';
 import {
@@ -26,6 +27,7 @@ import {
 } from './compilerBase';
 import type { MemberRef } from './compilerCore';
 import { getPropertyValue, propertyRepr, receiverRepr } from './dispatch';
+import { extensionPropertySpecificity, matchExtensionReceiver, mostSpecificReceivers } from './extensionResolution';
 import { keyOf } from './flowKeys';
 import { localRefinement, refineLocalType } from './flowWrites';
 import { formatPrimitive, stringOf } from './format';
@@ -46,7 +48,6 @@ import {
   acceptsInferredUnit,
   anyType,
   approximatedReadType,
-  commonSupertype,
   fixVariable,
   isSubtype,
   lambdaResultHint,
@@ -463,7 +464,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const variable = this.findVariable(scope, name);
     if (variable) return this.readVariable(scope, context, variable, row);
     for (const receiver of this.receiversOf(scope)) {
-      const property = this.findProperty(scope, this.receiverTypeOf(receiver), name);
+      const property = this.findProperty(this.receiverTypeOf(receiver), name, row);
       if (property) {
         this.checkInitialized(context, property.symbol, name, row);
         const receiverCompiled: Compiled = {
@@ -496,12 +497,13 @@ export abstract class ExpressionCompiler extends CallCompiler {
   /** The companion object whose property a simple name in a class's body means, with the property. */
   protected findCompanionProperty(
     scope: Scope,
-    name: string
+    name: string,
+    row: number
   ): { holder: ClassSymbol; property: MemberRef<PropertySymbol> } | undefined {
     for (let current: Scope | undefined = scope; current; current = current.parent) {
       for (let cls = current.staticClass; cls; cls = cls.outer) {
         const { companion } = cls;
-        const property = companion ? this.findProperty(scope, companion.type, name) : undefined;
+        const property = companion ? this.findProperty(companion.type, name, row) : undefined;
         if (companion && property) return { holder: companion, property };
       }
     }
@@ -526,7 +528,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
         if (cls.kind === 'enum' && name === 'entries') return this.compileEnumEntries(cls);
         const { companion } = cls;
         if (!companion) continue;
-        const property = this.findProperty(scope, companion.type, name);
+        const property = this.findProperty(companion.type, name, row);
         if (property) {
           const instance = this.objectInstance(companion);
           return this.readProperty(
@@ -594,63 +596,25 @@ export abstract class ExpressionCompiler extends CallCompiler {
     };
   }
 
-  /** The property a name means on a receiver: a member, or an extension visible in the file. */
-  protected findProperty(scope: Scope, receiverType: KType, name: string): MemberRef<PropertySymbol> | undefined {
+  protected findProperty(receiverType: KType, name: string, row: number): MemberRef<PropertySymbol> | undefined {
     const member = this.membersOf<PropertySymbol>(receiverType, name, 'property')[0];
-    if (member) return member;
-    return this.findExtensionProperty(scope, receiverType, name);
-  }
-
-  protected findExtensionProperty(
-    scope: Scope,
-    receiverType: KType,
-    name: string
-  ): MemberRef<PropertySymbol> | undefined {
-    void scope;
+    if (member && !isNullable(resolved(receiverType))) return member;
     for (const level of this.topLevelProperties(name)) {
-      for (const property of level) {
-        if (!property.extensionReceiver) continue;
-        const substitution = this.matchExtensionReceiver(
-          property.typeParameters,
-          property.extensionReceiver,
-          receiverType
-        );
-        if (substitution) return { symbol: property, substitution };
-      }
+      const matches = this.extensionPropertyCandidates(level, receiverType);
+      if (matches.length === 0) continue;
+      const best = mostSpecificReceivers(matches, extensionPropertySpecificity);
+      if (best.length > 1) this.error(row, `${name} が、どの拡張プロパティか決められません。`);
+      return best[0];
     }
-    return undefined;
+    return member;
   }
 
-  /** Infers an extension's type parameters from its receiver, or returns `undefined` when the receiver does not fit. */
-  protected matchExtensionReceiver(
-    typeParameters: TypeParameterSymbol[],
-    declared: KType,
-    receiverType: KType
-  ): Map<TypeParameterSymbol, KType> | undefined {
-    const variables = typeParameters.map((param) => ({
-      param,
-      lower: [] as KType[],
-      upper: [] as KType[],
-      fixed: undefined as KType | undefined,
-    }));
-    const substitution = new Map<TypeParameterSymbol, KType>();
-    for (const variable of variables) substitution.set(variable.param, { kind: 'variable', variable, nullable: false });
-    if (!isSubtype(receiverType, substitute(declared, substitution))) return undefined;
-    for (const variable of variables) {
-      const lower = variable.lower.map(resolved);
-      variable.fixed = lower.length > 0 ? commonSupertype(lower) : (variable.upper[0] ?? anyType(true));
-      substitution.set(variable.param, variable.fixed);
-    }
-    // A receiver must meet the bounds of the type parameter it gives, as `C : Collection<*>` of a collection's ifEmpty.
-    for (const variable of variables) {
-      const fixed = variable.fixed as KType;
-      if (
-        variable.lower.length > 0 &&
-        variable.param.bounds.some((bound) => !isSubtype(fixed, substitute(bound, substitution)))
-      )
-        return undefined;
-    }
-    return substitution;
+  private extensionPropertyCandidates(properties: PropertySymbol[], receiverType: KType): MemberRef<PropertySymbol>[] {
+    return properties.flatMap((symbol) => {
+      if (!symbol.extensionReceiver) return [];
+      const substitution = matchExtensionReceiver(symbol.typeParameters, symbol.extensionReceiver, receiverType);
+      return substitution ? [{ symbol, substitution }] : [];
+    });
   }
 
   /** Reads a property on a compiled receiver, with smart casts for stable ones. */
@@ -708,7 +672,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     }
     const receiver = this.compileExpression(scope, context, expression.receiver);
     return this.withSafeReceiver(receiver, isSafe, row, (target) => {
-      const property = this.findProperty(scope, target.type, name);
+      const property = this.findProperty(target.type, name, row);
       if (!property) {
         if (this.membersOf(target.type, name, 'function').length > 0) {
           this.error(row, `${name} は関数なので、${name}() のように呼び出してください。`);
@@ -740,7 +704,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const nestedValue = nested && this.classAsValue(nested, row);
     if (nestedValue) return nestedValue;
     const holder = cls.isObject ? cls : cls.companion;
-    const property = holder && this.findProperty(scope, holder.type, name);
+    const property = holder && this.findProperty(holder.type, name, row);
     if (holder && property) {
       return this.readProperty(
         scope,
@@ -847,7 +811,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
   private nameQualifier(scope: Scope, name: string, row: number): Qualifier | undefined {
     if (this.findVariable(scope, name)) return undefined;
     for (const receiver of this.receiversOf(scope)) {
-      if (this.findProperty(scope, this.receiverTypeOf(receiver), name)) return undefined;
+      if (this.findProperty(this.receiverTypeOf(receiver), name, row)) return undefined;
     }
     if (this.findStaticMember(scope, name, row)) return undefined;
     if (this.topLevelProperties(name).length > 0) return undefined;
@@ -1157,7 +1121,9 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const levels: CallLevel[] = candidates.length > 0 ? [{ candidates, receiver: undefined }] : [];
     const property = properties.find((symbol) => !symbol.extensionReceiver);
     if (property && (!property.type || resolved(property.type).kind === 'function')) {
-      levels.push({ functionValue: (context) => this.readTopLevelProperty(context, property, row) });
+      levels.push({
+        functionValues: [{ functionValue: (context) => this.readTopLevelProperty(context, property, row) }],
+      });
     }
     return levels;
   }
@@ -1239,26 +1205,16 @@ export abstract class ExpressionCompiler extends CallCompiler {
     }));
   }
 
-  /** The extension functions of a name visible in the file whose receiver type the receiver fits. */
-  protected extensionCandidates(receiverType: KType, name: string): Candidate[] {
-    const candidates: Candidate[] = [];
-    for (const level of this.topLevelFunctions(name)) {
-      const fitting = level.filter((symbol) => symbol.extensionReceiver && this.receiverFits(symbol, receiverType));
-      if (fitting.length > 0) {
-        candidates.push(
-          ...fitting.map((symbol): Candidate => ({ symbol, kind: 'extension', substitution: new Map(), receiverType }))
-        );
-        break;
-      }
-    }
-    return candidates;
+  protected extensionCandidateLevels(receiverType: KType, name: string): Candidate[][] {
+    return this.topLevelFunctions(name).map((level) => this.extensionFunctionCandidates(level, receiverType));
   }
 
-  /** Whether a receiver fits an extension's receiver type, `null` included when the extension accepts it. */
-  private receiverFits(symbol: FunctionSymbol, receiverType: KType): boolean {
-    return (
-      this.matchExtensionReceiver(symbol.typeParameters, symbol.extensionReceiver as KType, receiverType) !== undefined
-    );
+  private extensionFunctionCandidates(functions: FunctionSymbol[], receiverType: KType): Candidate[] {
+    return functions.flatMap((symbol): Candidate[] => {
+      const declared = symbol.extensionReceiver;
+      if (!declared || !matchExtensionReceiver(symbol.typeParameters, declared, receiverType)) return [];
+      return [{ symbol, kind: 'extension', substitution: new Map(), receiverType }];
+    });
   }
 
   protected abstract constructorCandidates(cls: ClassSymbol, row: number): Candidate[];
@@ -1302,24 +1258,6 @@ export abstract class ExpressionCompiler extends CallCompiler {
     }
   }
 
-  /** A local or top-level value of a function type with a receiver, which `x.name()` calls as an extension. */
-  private extensionFunctionValue(
-    context: FunctionContext,
-    scope: Scope,
-    name: string,
-    row: number
-  ): Compiled | undefined {
-    const variable = this.findVariable(scope, name);
-    if (variable) {
-      const type = resolved(variable.type);
-      return type.kind === 'function' && type.receiver ? this.readVariable(scope, context, variable, row) : undefined;
-    }
-    const property = this.topLevelProperties(name)[0]?.find((candidate) => !candidate.extensionReceiver);
-    if (!property) return undefined;
-    const type = resolved(this.ensurePropertyType(property, row));
-    return type.kind === 'function' && type.receiver ? this.readTopLevelProperty(context, property, row) : undefined;
-  }
-
   // code-gauge-allow functionParameterCount 9 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
   private compileMethodCall(
     scope: Scope,
@@ -1332,41 +1270,87 @@ export abstract class ExpressionCompiler extends CallCompiler {
     expected: KType | undefined,
     row: number
   ): Compiled {
-    const levels = this.memberCallLevels(scope, receiver, name, row);
+    const levels = this.memberCallLevels(scope, receiver, name, row, true);
     if (levels.length === 0)
       return this.compileFunctionValueCall(scope, context, receiver, name, args, hasTrailingLambda, row);
     return this.resolveInLevels(scope, context, levels, args, hasTrailingLambda, typeArgs, expected, row, name);
   }
 
-  private memberCallLevels(scope: Scope, receiver: Compiled, name: string, row: number): CallLevel[] {
+  private memberCallLevels(scope: Scope, receiver: Compiled, name: string, row: number, explicit = false): CallLevel[] {
     const memberType = nonNull(receiver.type);
     const members = this.memberCandidates(memberType, name);
-    const extensions = this.extensionCandidates(receiver.type, name);
     const memberProperty = this.membersOf<PropertySymbol>(memberType, name, 'property')[0];
-    const extensionProperty = this.findExtensionProperty(scope, receiver.type, name);
     const memberLevels: CallLevel[] = members.length === 0 ? [] : [{ candidates: members, receiver }];
-    const extensionLevels: CallLevel[] = extensions.length === 0 ? [] : [{ candidates: extensions, receiver }];
-    const memberValue = this.propertyCallLevel(scope, memberProperty, receiver, row);
-    if (memberValue) memberLevels.push(memberValue);
-    const extensionValue = this.propertyCallLevel(scope, extensionProperty, receiver, row);
-    if (extensionValue) extensionLevels.push(extensionValue);
+    const memberValue = memberProperty && this.propertyCallCandidate(scope, memberProperty, receiver, row);
+    if (memberValue) memberLevels.push({ functionValues: [memberValue] });
+    const extensionLevels = this.extensionCallLevels(scope, receiver, name, row, explicit);
     return isNullable(resolved(receiver.type))
       ? [...extensionLevels, ...memberLevels]
       : [...memberLevels, ...extensionLevels];
   }
 
-  private propertyCallLevel(
+  private extensionCallLevels(
     scope: Scope,
-    property: MemberRef<PropertySymbol> | undefined,
+    receiver: Compiled,
+    name: string,
+    row: number,
+    explicit: boolean
+  ): CallLevel[] {
+    const levels: CallLevel[] = [];
+    const variable = explicit ? this.findVariable(scope, name) : undefined;
+    const variableType = variable && resolved(variable.type);
+    if (variable && variableType?.kind === 'function' && variableType.receiver) {
+      levels.push({
+        functionValues: [
+          {
+            functionValue: (context) => this.readVariable(scope, context, variable, row),
+            explicitReceiver: receiver,
+          },
+        ],
+      });
+    }
+    const properties = this.topLevelProperties(name, true);
+    for (const [index, functions] of this.topLevelFunctions(name, true).entries()) {
+      const candidates = this.extensionFunctionCandidates(functions, receiver.type);
+      if (candidates.length > 0) levels.push({ candidates, receiver });
+      const values = this.extensionPropertyCandidates(properties[index], receiver.type).flatMap((property) => {
+        const value = this.propertyCallCandidate(scope, property, receiver, row);
+        return value ? [value] : [];
+      });
+      if (values.length > 0) levels.push({ functionValues: values });
+      const topLevelValue = explicit && this.extensionValueCandidate(properties[index], receiver, row);
+      if (topLevelValue) levels.push({ functionValues: [topLevelValue] });
+    }
+    return levels;
+  }
+
+  private extensionValueCandidate(
+    properties: PropertySymbol[],
     receiver: Compiled,
     row: number
-  ): CallLevel | undefined {
+  ): FunctionValueCandidate | undefined {
+    const property = properties.find((symbol) => !symbol.extensionReceiver);
     if (!property) return undefined;
-    const type = property.symbol.type;
-    if (type && resolved(substitute(type, property.substitution)).kind !== 'function') return undefined;
+    const type = property.type && resolved(property.type);
+    if (type && (type.kind !== 'function' || !type.receiver)) return undefined;
     return {
+      functionValue: (context) => this.readTopLevelProperty(context, property, row),
+      explicitReceiver: receiver,
+    };
+  }
+
+  private propertyCallCandidate(
+    scope: Scope,
+    property: MemberRef<PropertySymbol>,
+    receiver: Compiled,
+    row: number
+  ): FunctionValueCandidate | undefined {
+    const { symbol } = property;
+    if (symbol.type && resolved(substitute(symbol.type, property.substitution)).kind !== 'function') return undefined;
+    return {
+      specificity: symbol.extensionReceiver ? extensionPropertySpecificity(property) : undefined,
       functionValue: () => {
-        if (!property.symbol.extensionReceiver) this.requireNonNullReceiver(receiver, row, false);
+        if (!symbol.extensionReceiver) this.requireNonNullReceiver(receiver, row, false);
         return this.readProperty(scope, property, receiver, row);
       },
     };
@@ -1390,10 +1374,10 @@ export abstract class ExpressionCompiler extends CallCompiler {
       this.requireNonNullReceiver(receiver, row, false);
       return this.compileInvoke(scope, context, receiver, args, hasTrailingLambda, row);
     }
-    const extensionValue = this.extensionFunctionValue(context, scope, name, row);
-    if (extensionValue)
-      return this.compileInvoke(scope, context, extensionValue, args, hasTrailingLambda, row, receiver);
-    if (isNullable(resolved(receiver.type)) && this.extensionCandidates(nonNull(receiver.type), name).length > 0) {
+    if (
+      isNullable(resolved(receiver.type)) &&
+      this.extensionCandidateLevels(nonNull(receiver.type), name).some((level) => level.length > 0)
+    ) {
       this.requireNonNullReceiver(receiver, row, false);
     }
     return this.reportMissingMember(receiver.type, name, row);
@@ -1637,20 +1621,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     row: number,
     shown: string
   ): Compiled {
-    const members = this.memberCandidates(nonNull(receiver.type), name).filter(
-      (candidate) => candidate.symbol.isOperator
-    );
-    const extensions = this.extensionCandidates(receiver.type, name).filter((candidate) => candidate.symbol.isOperator);
-    // On a nullable receiver, only extensions that take one apply, as String?.plus does to `s + "x"`.
-    const isNullableReceiver = isNullable(resolved(receiver.type));
-    const levels = [isNullableReceiver ? [] : members, extensions].filter((level) => level.length > 0);
-    if (isNullableReceiver && extensions.length === 0 && members.length > 0)
-      this.requireNonNullReceiver(receiver, row, false);
-    if (levels.length === 0) {
-      this.error(row, `${typeToString(resolved(receiver.type))} には ${shown} を使えません。`);
-    }
-    const call = this.resolveCall(scope, context, levels, args, false, [], undefined, receiver, row, shown);
-    return { ...this.finishCall(call, receiver, row), isCall: false };
+    return this.resolveOperator(scope, context, receiver, name, args, row, shown).compiled;
   }
 
   /** Resolves an operator call, giving both the resolved function and its compiled call. */
@@ -1664,15 +1635,29 @@ export abstract class ExpressionCompiler extends CallCompiler {
     row: number,
     shown: string
   ): { call: ResolvedCall; compiled: Compiled } {
-    const members = this.memberCandidates(nonNull(receiver.type), name).filter(
-      (candidate) => candidate.symbol.isOperator
-    );
-    const extensions = this.extensionCandidates(receiver.type, name).filter((candidate) => candidate.symbol.isOperator);
-    const levels = [members, extensions].filter((level) => level.length > 0);
-    if (levels.length === 0) this.error(row, `${typeToString(resolved(receiver.type))} には ${shown} を使えません。`);
-    if (extensions.length === 0 || members.length > 0) this.requireNonNullReceiver(receiver, row, false);
+    const levels = this.syntaxCandidateLevels(receiver, name, row, shown, 'isOperator');
     const call = this.resolveCall(scope, context, levels, args, false, [], undefined, receiver, row, shown);
     return { call, compiled: { ...this.finishCall(call, receiver, row), isCall: false } };
+  }
+
+  protected syntaxCandidateLevels(
+    receiver: Compiled,
+    name: string,
+    row: number,
+    shown: string,
+    modifier: 'isOperator' | 'isInfix'
+  ): Candidate[][] {
+    const members = this.memberCandidates(nonNull(receiver.type), name).filter(
+      (candidate) => candidate.symbol[modifier]
+    );
+    const extensions = this.extensionCandidateLevels(receiver.type, name).map((level) =>
+      level.filter((candidate) => candidate.symbol[modifier])
+    );
+    const isNullableReceiver = isNullable(resolved(receiver.type));
+    const levels = [isNullableReceiver ? [] : members, ...extensions].filter((level) => level.length > 0);
+    if (levels.length > 0) return levels;
+    if (isNullableReceiver && members.length > 0) this.requireNonNullReceiver(receiver, row, false);
+    return this.error(row, `${typeToString(resolved(receiver.type))} には ${shown} を使えません。`);
   }
 
   // Jumps.
