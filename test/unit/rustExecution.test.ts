@@ -7723,3 +7723,46 @@ fn main() {
     expect(executeProgram('rust', invalid).kind).toBe('compileError');
   }
 });
+
+test('code after a failing assertion is unreachable, and a Flatten prints by the iterators it holds', () => {
+  const program = `struct Hidden;
+fn one() -> i32 { 1 }
+fn stopped() { let ok = false; assert!(ok, "no"); let y: u8 = 200u8 + 100; }
+fn main() {
+    let pick = if false { one } else { || 7 };
+    println!("{} {:?}", pick(), vec![(0..2).map(|_| Hidden)].into_iter().flatten());
+    assert!(false);
+    let x = 1 / 0;
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '7 Flatten { inner: FlattenCompat { iter: Fuse { iter: Some(IntoIter([Map { iter: 0..2 }])) }, frontiter: None, backiter: None } }\n',
+    uncaughtException: expect.stringContaining('assertion failed: false'),
+  });
+});
+
+test.each([
+  [
+    'an overflow in a closure written after a panic',
+    'panic!("stop");\n    let f = || { let x: u8 = 200u8 + 100; x };',
+    '必ずあふれます',
+  ],
+  ['a division by zero in a closure written after a return', 'return;\n    let f = || 1 / 0;', '必ず panic'],
+  [
+    'a function and a capturing closure as the branches of an if',
+    'let x = 5;\n    let f = if false { one } else { || x };',
+    '型が合いません',
+  ],
+  ['a division by zero in the message of an assertion that fails', 'assert!(false, "{}", 1 / 0);', '必ず panic'],
+  [
+    '{:?} of a Flatten over Vecs of items without Debug',
+    'println!("{:?}", vec![vec![Hidden]].into_iter().flatten());',
+    '{:?} で表示できません',
+  ],
+])('rejects %s', (_name, body, message) => {
+  expect(executeProgram('rust', rustMain(`    ${body}`, 'struct Hidden;\nfn one() -> i32 { 1 }'))).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ message: expect.stringContaining(message) })],
+  });
+});

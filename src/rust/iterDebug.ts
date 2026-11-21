@@ -1,6 +1,6 @@
 import { type DebugPart, list, rangeText, structText, tupleText, type WriteChunk } from './debugText';
 import { normalize } from './infer';
-import { callableSignature, ref, shallow, type Type } from './types';
+import { type AdtDef, callableSignature, ref, shallow, type Type } from './types';
 import { DONE, type IterValue, type RangeValue, type Value } from './values';
 
 /** Writes `{:?}` of a value of a type at a nesting depth. */
@@ -150,28 +150,31 @@ export function supportsDebug(shape: Type): boolean {
  * The types whose `Debug` the `{:?}` of an iterator needs: those of the items that the iterators it writes hold. An
  * adapter writes the iterator it adapts, so its own items matter only where it keeps one (`Peekable`).
  */
-export function debugOperands(item: Type, shape: Type): Type[] {
+export function debugOperands(item: Type, shape: Type, iterator: AdtDef): Type[] {
   const t = normalize(shallow(shape));
   if (t.kind !== 'adt') return [item];
   const name = t.def.name;
   // These write no item: a closure has no `{:?}` to ask for.
   if (name === 'FromFnShape' || name === 'RepeatWithShape') return [];
-  if (name === 'ByRefShape') return debugOperands(item, t.args[0]);
+  if (name === 'ByRefShape') return debugOperands(item, t.args[0], iterator);
   if (name === 'ZipShape') {
     const pair = normalize(shallow(item));
     const [first, second] = pair.kind === 'tuple' ? pair.elems : [item, item];
-    return [...debugOperands(first, t.args[0]), ...debugOperands(second, t.args[1])];
+    return [...debugOperands(first, t.args[0], iterator), ...debugOperands(second, t.args[1], iterator)];
   }
   if (!ADAPTER_NAMES[name] && !DESCRIBED_ADAPTERS.has(name)) return [item];
-  return [...debugOperands(adaptedItem(name, t, item), t.args[0]), ...keptOperands(name, t, item)];
+  // `Flatten` adapts an iterator of the iterators it holds, which are of the items it yields and of its second shape.
+  const adapted: Type =
+    name === 'FlattenShape' ? { kind: 'adt', def: iterator, args: [item, t.args[1]] } : adaptedItem(name, t, item);
+  return [...debugOperands(adapted, t.args[0], iterator), ...keptOperands(name, t, item, iterator)];
 }
 
 /** What an adapter writes besides the iterator it adapts: a second iterator, items it holds, or its state. */
-function keptOperands(name: string, shape: Type & { kind: 'adt' }, item: Type): Type[] {
-  if (name === 'ChainShape') return debugOperands(item, shape.args[1]);
+function keptOperands(name: string, shape: Type & { kind: 'adt' }, item: Type, iterator: AdtDef): Type[] {
+  if (name === 'ChainShape') return debugOperands(item, shape.args[1], iterator);
   if (name === 'ScanShape') return [shape.args[1]];
   // `FlatMap` and `Flatten` hold the iterators of what they adapt yields, which yield their own items.
-  if (name === 'FlatMapShape' || name === 'FlattenShape') return debugOperands(item, shape.args[1]);
+  if (name === 'FlatMapShape' || name === 'FlattenShape') return debugOperands(item, shape.args[1], iterator);
   return name === 'PeekableShape' ? [item] : [];
 }
 

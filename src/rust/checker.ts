@@ -1044,9 +1044,11 @@ export class Checker {
         return;
       }
     }
+    // Only a closure that captures nothing is a function.
     if (
       a.kind === 'closure' &&
       t.kind === 'fn' &&
+      (a.closure.captures ?? []).length === 0 &&
       this.unifier.tryUnify({ kind: 'tuple', elems: a.closure.params }, { kind: 'tuple', elems: t.params }) &&
       this.unifier.tryUnify(a.closure.ret, t.ret)
     ) {

@@ -1,9 +1,9 @@
-// code-gauge-allow-file fileNcss 647 -- Shares Rust constant propagation between diagnostics and pattern coverage.
+// code-gauge-allow-file fileNcss 661 -- Shares Rust constant propagation between diagnostics and pattern coverage.
 
 import type { ExecutionBudget } from '../interpreter/limits';
 import type { Annotations, LocalVar, PathRes } from './annotations';
 import type { Block, Condition, Expr, MacroCall, MatchArm, Pattern, Stmt } from './ast';
-import { forEachDirect, patternBindings } from './astWalk';
+import { forEachDirect, patternBindings, walkBlock } from './astWalk';
 import { constInteger } from './constExpressions';
 import { type PropagationMode, propagationModes } from './constPropagation';
 import { FLOAT_LIMITS } from './floatLimits';
@@ -129,11 +129,20 @@ export class ConstLint {
   }
 
   private block(block: Block): Known | undefined {
-    for (const stmt of block.stmts) {
-      if (this.diverged) return undefined;
+    for (const [index, stmt] of block.stmts.entries()) {
+      if (this.diverged) {
+        walkBlock({ ...block, stmts: block.stmts.slice(index) }, (expr) => this.unreachable(expr));
+        return undefined;
+      }
       this.stmt(stmt);
     }
-    return block.tail && !this.diverged ? this.expr(block.tail) : undefined;
+    return block.tail ? this.expr(block.tail) : undefined;
+  }
+
+  /** Code that never runs is not linted, but a closure in it is a body of its own, which rustc lints all the same. */
+  private unreachable(expr: Expr): void {
+    if (expr.kind === 'closure') new ConstLint(this.annotations).checkExpr(expr.body);
+    else forEachDirect(expr, (child) => this.unreachable(child));
   }
 
   private stmt(stmt: Stmt): void {
@@ -194,7 +203,9 @@ export class ConstLint {
   /** Checks an expression's operations, returning its value when it is a constant. */
   private expr(expr: Expr): Known | undefined {
     // What follows an operand that never finishes (a later argument, the other side of an operator) is unreachable.
-    return this.diverged ? undefined : this.reachable(expr);
+    if (!this.diverged) return this.reachable(expr);
+    this.unreachable(expr);
+    return undefined;
   }
 
   // code-gauge-allow functionNcss 35 -- Constant propagation follows each expression kind using its checked type.
@@ -444,18 +455,20 @@ export class ConstLint {
     return typeof index === 'bigint' ? knownField(operand, String(index)) : undefined;
   }
 
-  /** Checks the operands of a call other than an assertion's message; whether an `assert!`'s condition surely holds. */
+  /**
+   * Checks the operands of a call other than an assertion's message; whether an `assert!`'s condition holds, when its
+   * value is known. Only that one condition tells: the operands of `assert_eq!` are not its condition.
+   */
   private operandsHold(
     expr: Extract<Expr, { kind: 'call' | 'methodCall' | 'macro' | 'try' }>,
     message: Expr[]
-  ): boolean {
-    // Only the one condition of `assert!` tells by its value that the assertion holds.
+  ): boolean | undefined {
     const condition = expr.kind === 'macro' && expr.macro.kind === 'assert' ? expr.macro.cond : undefined;
-    let holds = false;
+    let holds: boolean | undefined;
     forEachDirect(expr, (child) => {
       if (message.includes(child)) return;
       const value = this.expr(child);
-      if (child === condition) holds = value === true;
+      if (child === condition && typeof value === 'boolean') holds = value;
     });
     return holds;
   }
@@ -476,9 +489,14 @@ export class ConstLint {
       return this.patternEvaluation || res.def.kind === 'enum' ? this.construct(res, fields) : aggregate(fields);
     }
     const message = expr.kind === 'macro' ? assertionMessage(expr.macro) : [];
-    // An assertion formats its message only where it fails, so what the message does decides nothing after it, and
-    // a condition known to hold never reaches it.
-    if (!this.operandsHold(expr, message)) this.assertionFailure(message);
+    // An assertion formats its message only where it fails, so what the message does decides nothing after it: a
+    // condition known to hold never reaches it, and one known not to always does and then panics.
+    const holds = this.operandsHold(expr, message);
+    if (holds === undefined) this.assertionFailure(message);
+    if (holds === false) {
+      for (const arg of message) this.expr(arg);
+      this.diverged = true;
+    }
     this.endBlock();
     // What follows a call that never returns (`panic!`, `std::process::exit`) is not reachable.
     if (checkedType(expr.ty)?.kind === 'never') this.diverged = true;

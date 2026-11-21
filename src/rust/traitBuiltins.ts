@@ -313,7 +313,7 @@ function debug(goal: Goal): Answer {
   const d = derived(goal);
   if (d) return d;
   if (t.def.builtin === 'Iter') {
-    return supportsDebug(t.args[1]) ? all(debugOperands(t.args[0], t.args[1])) : 'no';
+    return supportsDebug(t.args[1]) ? all(debugOperands(t.args[0], t.args[1], t.def)) : 'no';
   }
   if (DEBUG_TYPES.has(t.def.builtin as string)) return all(t.args);
   return 'no';

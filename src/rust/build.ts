@@ -51,7 +51,21 @@ function typeCheck(source: string, atomicRows: ReadonlySet<number>, budget: Exec
   budget.spend(Math.ceil(source.length / 64));
   const program = new Program();
   const collector = new ItemCollector(program);
-  collector.collectItems(budget.excludingTime(stdDeclarations), program.std);
+  // Declaring the standard library is the same work for every program, so its time is not the program's.
+  budget.excludingTime(() => declareStd(program, collector));
+  const crate = parseRust(source, budget);
+  collector.collectCrate(crate, program.root);
+  collector.finish();
+  resolveImports(program.root);
+  const checker = new Checker(program, atomicRows, budget);
+  checker.checkProgram();
+  evaluateConstants(checker, budget);
+  budget.spend(0);
+  return { program, checker };
+}
+
+function declareStd(program: Program, collector: ItemCollector): void {
+  collector.collectItems(stdDeclarations(), program.std);
   collector.finish();
   setupPrelude(program);
   const conversionSolver = new TraitSolver(program, new Unifier());
@@ -62,15 +76,6 @@ function typeCheck(source: string, atomicRows: ReadonlySet<number>, budget: Exec
     intoShape: (type) => (isAbstract(type) ? undefined : intoIterShape(program, type)),
     tryFromError: (source, target) => tryFromErrorType(conversionSolver, source, target),
   });
-  const crate = parseRust(source, budget);
-  collector.collectCrate(crate, program.root);
-  collector.finish();
-  resolveImports(program.root);
-  const checker = new Checker(program, atomicRows, budget);
-  checker.checkProgram();
-  evaluateConstants(checker, budget);
-  budget.spend(0);
-  return { program, checker };
 }
 
 function setupPrelude(program: Program): void {
