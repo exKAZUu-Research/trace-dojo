@@ -125,10 +125,10 @@ export class Runtime implements TracedRuntime<Frame> {
 
   /** Counts slots that a program allocates, stopping it as the JVM stops when memory runs out. */
   allocate(frame: Frame, count: number): void {
-    this.allocated += count;
-    if (this.allocated > LIMITS.maxSlots || count > LIMITS.maxSlots) {
+    if (count > LIMITS.maxSlots - this.allocated) {
       throw new KotlinThrow(this.exceptions.create(frame, 'java.lang.OutOfMemoryError', 'Java heap space'));
     }
+    this.allocated += count;
   }
 
   /** Charges for a string the program builds, which may not grow beyond the limit. */

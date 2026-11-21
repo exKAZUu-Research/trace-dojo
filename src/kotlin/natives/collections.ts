@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 703 -- the natives of the collections, which share the helpers of their items.
+// code-gauge-allow-file fileNcss 712 -- the natives of the collections, which share the helpers of their items.
 import { runtimeClassOf } from '../dispatch';
 import { hashOf, stringOf, valueEquals } from '../format';
 import { toInt32 } from '../operators';
@@ -103,7 +103,7 @@ function checkIndex(frame: Frame, list: Value, index: number): void {
 /** Marks a structural change, which makes the iterators created before it fail. */
 export function touch(collection: KObject): void {
   collection.modCount = (collection.modCount ?? 0) + 1;
-  const parent = collection.native?.parent as KObject | undefined;
+  const parent = listParent(collection);
   if (parent) touch(parent);
 }
 
@@ -229,46 +229,26 @@ const LIST_READING_NATIVES: Record<string, ListNative> = {
 const LIST_CHANGING_NATIVES: Record<string, ListNative> = {
   'add(E)': (frame, list, [element]) => {
     requireResizable(frame, list);
-    items(list).push(element);
-    frame.runtime.allocate(frame, 1);
-    touch(list as KObject);
-    syncParent(list as KObject);
+    insertListItems(frame, list as KObject, items(list).length, [element]);
     return true;
   },
   'add(Int, E)': (frame, list, [index, element]) => {
     requireResizable(frame, list);
-    const values = items(list);
-    const position = index as number;
-    if (position < 0 || position > values.length) {
-      throwError(frame, 'java.lang.IndexOutOfBoundsException', `Index: ${position}, Size: ${values.length}`);
-    }
-    values.splice(position, 0, element);
-    frame.runtime.allocate(frame, 1);
-    frame.runtime.spend(values.length - position);
-    touch(list as KObject);
-    syncParent(list as KObject);
+    const position = insertionIndex(frame, list, index as number);
+    insertListItems(frame, list as KObject, position, [element]);
     return UNIT;
   },
   'addAll(Collection<E>)': (frame, list, [elements]) => {
     requireResizable(frame, list);
     const added = elementsOf(frame, elements);
-    items(list).push(...added);
-    frame.runtime.allocate(frame, added.length);
-    touch(list as KObject);
-    syncParent(list as KObject);
+    insertListItems(frame, list as KObject, items(list).length, added);
     return added.length > 0;
   },
   'addAll(Int, Collection<E>)': (frame, list, [index, elements]) => {
     requireResizable(frame, list);
-    const values = items(list);
-    const position = index as number;
-    if (position < 0 || position > values.length) {
-      throwError(frame, 'java.lang.IndexOutOfBoundsException', `Index: ${position}, Size: ${values.length}`);
-    }
+    const position = insertionIndex(frame, list, index as number);
     const added = elementsOf(frame, elements);
-    values.splice(position, 0, ...added);
-    touch(list as KObject);
-    syncParent(list as KObject);
+    insertListItems(frame, list as KObject, position, added);
     return added.length > 0;
   },
   'remove(E)': (frame, list, [element]) => {
@@ -320,6 +300,28 @@ const LIST_CHANGING_NATIVES: Record<string, ListNative> = {
   },
 };
 
+function insertionIndex(frame: Frame, list: Value, position: number): number {
+  const size = items(list).length;
+  if (position < 0 || position > size)
+    throwError(frame, 'java.lang.IndexOutOfBoundsException', `Index: ${position}, Size: ${size}`);
+  return position;
+}
+
+function insertListItems(frame: Frame, list: KObject, position: number, added: Value[]): void {
+  const values = items(list);
+  let copies = 1;
+  for (let parent = listParent(list); parent; parent = listParent(parent)) copies++;
+  frame.runtime.spend(values.length - position + added.length);
+  frame.runtime.allocate(frame, added.length * copies);
+  replaceListRange(values, position, 0, added);
+  touch(list);
+  syncParent(list);
+}
+
+function listParent(list: KObject): KObject | undefined {
+  return list.native?.parent as KObject | undefined;
+}
+
 function defineLists(): void {
   const constructors: [string, (frame: Frame, instance: KObject, args: Value[]) => void][] = [
     ['()', () => {}],
@@ -365,8 +367,7 @@ export function filterInPlace(frame: Frame, list: KObject, keeps: (value: Value)
   const values = list.items as Value[];
   const kept = values.filter((value) => keeps(value));
   if (kept.length === values.length) return false;
-  values.length = 0;
-  values.push(...kept);
+  replaceListRange(values, 0, values.length, kept);
   touch(list);
   syncParent(list);
   void frame;
@@ -420,9 +421,18 @@ function syncParent(list: KObject): void {
   const native = list.native as { parent?: KObject; from: number; length: number } | undefined;
   if (!native?.parent) return;
   const parentItems = native.parent.items as Value[];
-  parentItems.splice(native.from, native.length, ...(list.items as Value[]));
+  replaceListRange(parentItems, native.from, native.length, items(list));
   native.length = (list.items as Value[]).length;
   syncParent(native.parent);
+}
+
+function replaceListRange(values: Value[], from: number, removed: number, added: Value[]): void {
+  const oldLength = values.length;
+  const change = added.length - removed;
+  if (change > 0) values.length += change;
+  if (change !== 0) values.copyWithin(from + added.length, from + removed, oldLength);
+  if (change < 0) values.length += change;
+  for (const [offset, value] of added.entries()) values[from + offset] = value;
 }
 
 // code-gauge-allow functionNcss 46 -- registers the natives of one class together, in the order the prelude declares them.
