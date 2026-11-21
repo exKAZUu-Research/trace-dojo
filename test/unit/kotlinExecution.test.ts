@@ -819,13 +819,15 @@ fun main() {
     stdout: '2\n7\n',
   },
   {
-    name: 'Char.isDefined follows JDK character assignments and preserves surrogates',
+    name: 'character predicates follow JDK assignments and preserve surrogates',
     source: `fun main() {
-    for (code in listOf(0x0378, 0x088F, 0xFFFF, 0xD800, 0xE000, 0x0041)) {
-        println(Char(code).isDefined())
+    for (code in listOf(0x0378, 0x088F, 0xFFFF, 0xD800, 0xE000, 0x0041, 0x0661)) {
+        val c = Char(code)
+        println(listOf(c.isDefined(), c.isLetter(), c.isLetterOrDigit(), c.isDigit()))
     }
 }`,
-    stdout: 'false\nfalse\nfalse\ntrue\ntrue\ntrue\n',
+    stdout:
+      '[false, false, false, false]\n[false, false, false, false]\n[false, false, false, false]\n[true, false, false, false]\n[true, false, false, false]\n[true, true, true, false]\n[true, false, true, true]\n',
   },
   {
     name: 'interface delegation chooses the most specific inherited iterator',
@@ -908,6 +910,96 @@ fun main() {
 }
 fun main() { check(4) }`,
     stdout: '5\n6\n',
+  },
+  {
+    name: 'list equality uses each JVM list implementation’s access order',
+    source: `class ObservedIterator(private val data: ListIterator<Int>) : ListIterator<Int> by data {
+    override fun next(): Int {
+        val value = data.next()
+        println("next " + value)
+        return value
+    }
+}
+class Observed(private val data: List<Int>) : List<Int> by data {
+    override val size: Int get() { println("size"); return data.size }
+    override fun isEmpty(): Boolean { println("empty"); return data.isEmpty() }
+    override fun iterator(): Iterator<Int> {
+        println("iterator")
+        return ObservedIterator(data.listIterator())
+    }
+    override fun listIterator(): ListIterator<Int> {
+        println("listIterator")
+        return ObservedIterator(data.listIterator())
+    }
+    override fun get(index: Int): Int {
+        println("get " + index)
+        return data[index]
+    }
+}
+class Mutation(private val action: () -> Unit) {
+    override fun equals(other: Any?): Boolean { action(); return false }
+    override fun hashCode(): Int = 0
+}
+fun main() {
+    val other: List<Int> = Observed(listOf(9, 2, 3))
+    println(listOf(1, 2, 3) == other)
+    println(mutableListOf(1, 2, 3) == other)
+    println(mutableListOf(0, 1, 2, 3).subList(1, 4) == other)
+    println(buildList { addAll(listOf(1, 2, 3)) } == other)
+    println(intArrayOf(1, 2, 3).asList() == other)
+    println(emptyList<Int>() == other)
+    val left = mutableListOf<Mutation>()
+    left.add(Mutation { left.clear() })
+    val right = mutableListOf(Mutation {})
+    try { println(left == right) } catch (error: ConcurrentModificationException) { println("modified") }
+}`,
+    stdout:
+      'listIterator\nnext 9\nfalse\niterator\nnext 9\nfalse\niterator\nnext 9\nfalse\nsize\nget 0\nfalse\nsize\niterator\nnext 9\nfalse\nempty\nfalse\nmodified\n',
+  },
+  {
+    name: 'set insertion follows the source iterator and keeps partial changes',
+    source: `class SourceIterator(private val target: Set<Int>) : Iterator<Int> {
+    private var count = 0
+    override fun hasNext(): Boolean = count < 3
+    override fun next(): Int {
+        println(target)
+        if (count == 2) error("done")
+        count++
+        return count
+    }
+}
+class Source(private val target: Set<Int>) : Collection<Int> by listOf(1, 2, 3) {
+    override fun iterator(): Iterator<Int> = SourceIterator(target)
+}
+
+fun main() {
+    val target = mutableSetOf<Int>()
+    val earlier = target.iterator()
+    try { target.addAll(Source(target)) } catch (error: IllegalStateException) { println(error.message) }
+    println(target)
+    try { earlier.next() } catch (error: ConcurrentModificationException) { println("modified") }
+}`,
+    stdout: '[]\n[1]\n[1, 2]\ndone\n[1, 2]\nmodified\n',
+  },
+  {
+    name: 'delegated non-Int removes can coexist with nullable overloads',
+    source: `class Floating(private val values: MutableList<Double>) : MutableList<Double> by values {
+    fun remove(value: Double?): Boolean = value == null
+}
+class Wide(private val values: MutableSet<Long>) : MutableSet<Long> by values {
+    fun remove(value: Long?): Boolean = value == null
+}
+fun main() {
+    val doubles = Floating(mutableListOf(1.0))
+    println(doubles.remove(null))
+    val wide = Wide(mutableSetOf(1L))
+    println(wide.remove(null))
+    val doublesAsList: MutableList<Double> = doubles
+    val wideAsSet: MutableSet<Long> = wide
+    println(doublesAsList.remove(1.0))
+    println(wideAsSet.remove(1L))
+}`,
+    stdout: 'true\ntrue\ntrue\ntrue\n',
   },
   {
     name: 'zip transforms combine arrays, iterables, and character sequences',
@@ -2740,6 +2832,11 @@ test.each([
     'a generic superclass constructor with incompatible elements',
     false,
     'class Tracked : ArrayList<Int>(listOf("wrong"))\nfun main() {}',
+  ],
+  [
+    'a nullable Int method that clashes with delegated collection remove',
+    false,
+    'class Ints(private val values: MutableList<Int>) : MutableList<Int> by values {\n    fun remove(value: Int?): Boolean = value == null\n}\nfun main() {}',
   ],
   ['a type mismatch', false, 'fun main() {\n    val x: Int = "a"\n    println(x)\n}'],
   ['a delegated local redeclaring a local', false, 'fun main() { val x = 1; val x by lazy { 2 }; println(x) }'],

@@ -1,5 +1,7 @@
 import { callFunction, getPropertyValue } from '../dispatch';
+import { valueEquals } from '../format';
 import { type Frame, KotlinThrow } from '../runtime';
+import type { FunctionSymbol } from '../symbols';
 import type { KObject, Value } from '../values';
 import { libraryClass } from './registry';
 
@@ -9,11 +11,15 @@ const MUTABLE_COLLECTION = 'kotlin.collections.MutableCollection';
 /** Reads an iterable of the program through its iterator, as the library's functions do. */
 export function iterateElements(frame: Frame, iterable: KObject): Value[] {
   const result: Value[] = [];
+  forEachIterable(frame, iterable, (element) => result.push(element));
+  return result;
+}
+
+export function forEachIterable(frame: Frame, iterable: Value, visit: (element: Value) => void): void {
   everyIterableElement(frame, iterable, (element) => {
-    result.push(element);
+    visit(element);
     return true;
   });
-  return result;
 }
 
 function everyIterableElement(
@@ -21,17 +27,28 @@ function everyIterableElement(
   iterable: Value,
   accepts: (element: Value, iterator: Value) => boolean
 ): boolean {
-  const iteratorClass = 'kotlin.collections.Iterator';
-  const iterator = callCollectionMember(frame, iterable, 'kotlin.collections.Iterable', 'iterator');
-  frame.runtime.nativeRoots.push(iterator);
-  try {
-    while (callCollectionMember(frame, iterator, iteratorClass, 'hasNext') === true) {
-      if (!accepts(callCollectionMember(frame, iterator, iteratorClass, 'next'), iterator)) return false;
+  const iterator = collectionIterator(frame, iterable);
+  return frame.runtime.withNativeRoots([iterator.value], () => {
+    while (iterator.hasNext()) {
+      if (!accepts(iterator.next(), iterator.value)) return false;
     }
     return true;
-  } finally {
-    frame.runtime.nativeRoots.pop();
-  }
+  });
+}
+
+export function collectionIterator(
+  frame: Frame,
+  receiver: Value,
+  method: 'iterator' | 'listIterator' = 'iterator'
+): { value: Value; hasNext: () => boolean; next: () => Value } {
+  const owner = method === 'iterator' ? 'kotlin.collections.Iterable' : 'kotlin.collections.List';
+  const iterator = 'kotlin.collections.Iterator';
+  const value = callCollectionMember(frame, receiver, owner, method);
+  return {
+    value,
+    hasNext: () => callCollectionMember(frame, value, iterator, 'hasNext') === true,
+    next: () => callCollectionMember(frame, value, iterator, 'next'),
+  };
 }
 
 export function callCollectionMember(
@@ -43,7 +60,10 @@ export function callCollectionMember(
 ): Value {
   const member = libraryClass(owner)
     .members.get(name)
-    ?.find((candidate) => candidate.kind === 'function');
+    ?.find(
+      (candidate): candidate is FunctionSymbol =>
+        candidate.kind === 'function' && candidate.params.length === args.length
+    );
   if (!member) throw new Error(`No function ${owner}.${name}`);
   return callFunction(member, frame, receiver, args, undefined);
 }
@@ -105,4 +125,8 @@ export function compareCollections(compare: () => boolean): boolean {
       return false;
     throw error;
   }
+}
+
+export function objectsEqual(frame: Frame, left: Value, right: Value): boolean {
+  return left === right || valueEquals(frame, left, right);
 }

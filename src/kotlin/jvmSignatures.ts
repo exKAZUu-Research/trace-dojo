@@ -105,12 +105,24 @@ function functionSignature(core: Core, member: FunctionSymbol, name = member.nam
   ];
   const result = member.returnType && resolved(member.returnType);
   const descriptor = isNonNullClass(result, core.unit) ? 'V' : memberResultDescriptor(core, member, result);
-  const isComparator = [...overriddenMembers(member)].some((base) => base.owner?.kotlinName === 'kotlin.Comparator');
+  const boxed = boxesJvmParameters(core, member);
   const parameters = [
     ...(member.extensionReceiver ? [typeDescriptor(core, member.extensionReceiver)] : []),
-    ...member.params.map((param) => jvmParameterDescriptor(core, param, isComparator)),
+    ...member.params.map((param) => jvmParameterDescriptor(core, param, boxed)),
   ].join('');
   return `${jvmName(member, name, [...inputs, ...(result && member.owner ? [result] : [])])}(${parameters})${descriptor}`;
+}
+
+function boxesJvmParameters(core: Core, member: FunctionSymbol): boolean {
+  const bases = [...overriddenMembers(member)];
+  if (bases.some((base) => base.owner?.kotlinName === 'kotlin.Comparator')) return true;
+  // Kotlin boxes Int for Collection.remove(E) so it stays distinct from removal by index.
+  return (
+    member.name === 'remove' &&
+    member.params.length === 1 &&
+    isNonNullClass(member.params[0].type, core.primitiveClasses.Int) &&
+    bases.some((base) => base.owner?.kotlinName === 'kotlin.collections.MutableCollection')
+  );
 }
 
 function propertySignatures(core: Core, member: PropertySymbol, customSetter: boolean): string[] {

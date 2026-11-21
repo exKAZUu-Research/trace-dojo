@@ -31,7 +31,7 @@ import {
   titleJdkText,
   upperJdkChar,
 } from './jdkCase';
-import { isJdkDefined } from './jdkCharacter';
+import { isJdkDefined, isJdkDigit, isJdkLetter, isJdkLetterOrDigit } from './jdkCharacter';
 import { defineNative, defineNativeProperty, libraryClass, throwError } from './registry';
 import { textSearch } from './textSearch';
 
@@ -421,9 +421,9 @@ const TEXT_PARSING_NATIVES: Record<string, TextNative> = {
 const CHAR_NATIVES: Record<string, TextNative> = {
   'String.capitalize()': (_frame, receiver) => text(receiver).charAt(0).toUpperCase() + text(receiver).slice(1),
   'String.decapitalize()': (_frame, receiver) => text(receiver).charAt(0).toLowerCase() + text(receiver).slice(1),
-  'Char.isDigit()': (_frame, receiver) => /\p{Nd}/u.test(charToString(receiver as number)),
-  'Char.isLetter()': (_frame, receiver) => /\p{L}/u.test(charToString(receiver as number)),
-  'Char.isLetterOrDigit()': (_frame, receiver) => /[\p{L}\p{Nd}]/u.test(charToString(receiver as number)),
+  'Char.isDigit()': (_frame, receiver) => isJdkDigit(receiver as number),
+  'Char.isLetter()': (_frame, receiver) => isJdkLetter(receiver as number),
+  'Char.isLetterOrDigit()': (_frame, receiver) => isJdkLetterOrDigit(receiver as number),
   'Char.isWhitespace()': (_frame, receiver) => isKotlinWhitespace(receiver as number),
   'Char.isUpperCase()': (_frame, receiver) => isJdkUpperCase(receiver as number),
   'Char.isLowerCase()': (_frame, receiver) => isJdkLowerCase(receiver as number),
@@ -501,9 +501,9 @@ function checkRadix(frame: Frame, radix: number): number {
  * zero to nine in a row, so a digit's value is its distance from the start of its row, modulo ten for adjacent rows.
  */
 function digitOf(code: number): number | undefined {
-  if (!isDecimalDigit(code)) return undefined;
+  if (!isJdkDigit(code)) return undefined;
   let start = code;
-  while (start > 0 && isDecimalDigit(start - 1)) start--;
+  while (start > 0 && isJdkDigit(start - 1)) start--;
   return (code - start) % 10;
 }
 
@@ -514,10 +514,6 @@ function digitInRadix(code: number, radix: number): number | undefined {
   const letter = asciiLetter >= 0 && asciiLetter < 26 ? asciiLetter : fullwidthLetter;
   const digit = digitOf(code) ?? (letter >= 0 && letter < 26 ? letter + 10 : radix);
   return digit < radix ? digit : undefined;
-}
-
-function isDecimalDigit(code: number): boolean {
-  return /^\p{Nd}$/u.test(charToString(code));
 }
 
 function replaceAll(frame: Frame, value: string, oldValue: string, replacement: string, ignoreCase: boolean): string {

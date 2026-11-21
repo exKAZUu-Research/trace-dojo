@@ -25,11 +25,14 @@ import {
   compareCollections,
   containsAll,
   filterCollection,
+  forEachIterable,
   iterateElements,
+  objectsEqual,
   readCollectionProperty,
 } from './collectionTraversal';
 import { arrayIterator } from './core';
 import { jdkHashCapacity, mapCapacity, newStore, reserveForCopy } from './hashTables';
+import { listEquals } from './listEquality';
 import { defineNative, defineNativeProperty, libraryClass, throwError } from './registry';
 
 /**
@@ -548,15 +551,6 @@ function filterArrayList(
   });
 }
 
-export function listEquals(frame: Frame, list: KObject, other: Value): boolean {
-  if (list === other) return true;
-  if (!(other instanceof KObject) || !runtimeClassOf(other).isSubclassOf(libraryClass('kotlin.collections.List')))
-    return false;
-  const a = readableItems(list);
-  const b = elementsOf(frame, other);
-  return a.length === b.length && a.every((value, index) => valueEquals(frame, value, b[index]));
-}
-
 export function listHash(frame: Frame, values: Value[]): number {
   let hash = 1;
   for (const value of values) hash = toInt32(Math.imul(31, hash) + hashOf(frame, value));
@@ -852,10 +846,6 @@ function mapEntriesOf(frame: Frame, map: Value): [Value, Value][] {
   ]);
 }
 
-function sameValue(frame: Frame, left: Value, right: Value): boolean {
-  return left === right || valueEquals(frame, left, right);
-}
-
 function mapEquals(frame: Frame, map: KObject, other: Value): boolean {
   if (map === other) return true;
   const owner = 'kotlin.collections.Map';
@@ -902,10 +892,7 @@ function defineSets(): void {
     'iterator()': (frame, set) => storeIterator(frame, set as KObject, 'keys'),
     'add(E)': (frame, set, [element]) => {
       requireMutableMap(frame, set);
-      const store = storeOf(set);
-      const changed = addSetEntry(frame, store, element);
-      if (changed) touch(set as KObject);
-      return changed;
+      return addSetEntry(frame, set as KObject, element);
     },
     'remove(E)': (frame, set, [element]) => {
       if (isBuilt(set)) requireMutableMap(frame, set);
@@ -919,12 +906,7 @@ function defineSets(): void {
     },
     'addAll(Collection<E>)': (frame, set, [elements]) => {
       requireMutableMap(frame, set);
-      let changed = false;
-      for (const element of elementsOf(frame, elements)) {
-        if (addSetEntry(frame, storeOf(set), element)) changed = true;
-      }
-      if (changed) touch(set as KObject);
-      return changed;
+      return addSetElements(frame, set as KObject, elements);
     },
     'removeAll(Collection<E>)': (frame, set, [elements]) => {
       requireMutableMap(frame, set);
@@ -951,14 +933,25 @@ function setContains(frame: Frame, set: KObject, element: Value): boolean {
   const store = storeOf(set);
   if (set.cls === libraryClass('kotlin.collections.EmptySet')) return false;
   if (set.cls === libraryClass('kotlin.collections.SingletonSet'))
-    return sameValue(frame, element, store.entries[0].key);
+    return objectsEqual(frame, element, store.entries[0].key);
   return findEntry(frame, store, element) !== undefined;
 }
 
-function addSetEntry(frame: Frame, store: KStore, element: Value): boolean {
+function addSetElements(frame: Frame, set: KObject, elements: Value): boolean {
+  let changed = false;
+  forEachIterable(frame, elements, (element) => {
+    if (addSetEntry(frame, set, element)) changed = true;
+  });
+  return changed;
+}
+
+function addSetEntry(frame: Frame, set: KObject, element: Value): boolean {
+  const store = storeOf(set);
   const size = store.entries.length;
   putEntry(frame, store, element, undefined);
-  return size !== store.entries.length;
+  if (size === store.entries.length) return false;
+  touch(set);
+  return true;
 }
 
 function defineSetConstructors(): void {
@@ -975,10 +968,10 @@ function defineSetConstructors(): void {
       return initializeSet(instance, newStore(order, capacity as number));
     });
     defineNative(`${key}(Collection<E>)`, (frame, instance, [elements]) => {
-      const values = elementsOf(frame, elements);
-      const store = newStore(order, jdkHashCapacity(Math.max(values.length, 12)));
-      for (const value of values) putEntry(frame, store, value, undefined);
-      return initializeSet(instance, store);
+      const store = newStore(order, jdkHashCapacity(Math.max(collectionSize(frame, elements), 12)));
+      initializeSet(instance, store);
+      addSetElements(frame, instance as KObject, elements);
+      return UNIT;
     });
   }
 }
@@ -1107,7 +1100,7 @@ function matchingViewEntry(frame: Frame, view: Value, element: Value, removing: 
   const { view: kind, map } = viewOf(view);
   const store = storeOf(map);
   if (kind === 'keys') return findEntry(frame, store, element);
-  if (kind === 'values') return store.ordered().find((entry) => sameValue(frame, element, entry.value));
+  if (kind === 'values') return store.ordered().find((entry) => objectsEqual(frame, element, entry.value));
   return matchingEntry(frame, store, element, removing);
 }
 
@@ -1118,12 +1111,12 @@ function matchingEntry(frame: Frame, store: KStore, element: Value, removing: bo
   if (removing) {
     const value = readCollectionProperty(frame, element, owner, 'value');
     const found = findEntry(frame, store, key);
-    return found && sameValue(frame, value, found.value) ? found : undefined;
+    return found && objectsEqual(frame, value, found.value) ? found : undefined;
   }
   const found = findEntry(frame, store, key);
   if (!found || found === element.native?.entry) return found;
-  if (!sameValue(frame, found.key, readCollectionProperty(frame, element, owner, 'key'))) return undefined;
-  return sameValue(frame, found.value, readCollectionProperty(frame, element, owner, 'value')) ? found : undefined;
+  if (!objectsEqual(frame, found.key, readCollectionProperty(frame, element, owner, 'key'))) return undefined;
+  return objectsEqual(frame, found.value, readCollectionProperty(frame, element, owner, 'value')) ? found : undefined;
 }
 
 /** What changes a map through its keys, values, or entries, which remove from the map and never add to it. */
