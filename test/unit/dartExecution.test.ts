@@ -1569,6 +1569,18 @@ void main() {
   }
 });
 
+test('Dart extension type primary constructors run their initializer lists and bodies', () => {
+  expect(
+    executeProgram(
+      'dart',
+      "extension type E(int n) { this { print('body'); } }\nvoid main() { print([E(4), const F(3)]); }\nextension type const F(int n) {}"
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'body\n[4, 3]\n' });
+  expect(
+    executeProgram('dart', 'extension type const E(int n) { this: assert(n > 0); }\nvoid main() { print(const E(0)); }')
+  ).toMatchObject({ kind: 'compileError' });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}

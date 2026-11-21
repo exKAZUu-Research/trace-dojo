@@ -206,29 +206,16 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
 
   protected declarePrimaryConstructor(cls: ClassInfo, declaration: ClassDeclaration): void {
     const primary = declaration.primaryConstructor as NonNullable<ClassDeclaration['primaryConstructor']>;
-    const name = primary.name ?? '';
-    if (cls.kind === 'extensionType') {
-      const representation = cls.representationType as DartType;
-      cls.constructors.set(name, {
-        name,
-        owner: cls,
-        type: functionType([representation], cls.thisType),
-        kind: 'generative',
-        isConst: primary.isConst,
-        row: primary.row,
-        impl: (_runtime, instance, args) => {
-          (instance as DartObject).fields[0] = args.positional[0];
-        },
-      });
-      return;
-    }
+    // An extension type's primary parameter declares its representation, which the constructor initializes.
+    const declaresField = (parameter: FormalParameter): boolean =>
+      cls.kind === 'extensionType' ? parameter.binding === 'plain' : isFieldParameter(parameter);
     const parameters: FormalParameters = {
       ...primary.parameters,
       positional: primary.parameters.positional.map((parameter) =>
-        isFieldParameter(parameter) ? { ...parameter, binding: 'this' as const } : parameter
+        declaresField(parameter) ? { ...parameter, binding: 'this' as const } : parameter
       ),
       named: primary.parameters.named.map((parameter) =>
-        isFieldParameter(parameter) ? { ...parameter, binding: 'this' as const } : parameter
+        declaresField(parameter) ? { ...parameter, binding: 'this' as const } : parameter
       ),
     };
     const [bodyDeclaration, ...extraBodies] = declaration.members.filter(
