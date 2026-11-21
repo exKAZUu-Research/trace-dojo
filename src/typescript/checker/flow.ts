@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 447 -- Keeps flow state, joins, and reference narrowing together.
+// code-gauge-allow-file fileNcss 453 -- Keeps flow state, joins, and reference narrowing together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -45,6 +45,8 @@ import {
 
 export interface FlowEntry {
   type: Type;
+  /** The flow type when writing to a property with a separate setter type. */
+  writeType?: Type;
   /** Whether every path to here assigned the variable. */
   assigned: boolean;
   /** For `const a = []`, the array type it has evolved to by the pushes so far. */
@@ -93,7 +95,7 @@ export class Flow {
   /** While set, only the references it accepts narrow, and their keys are collected, as for an aliased condition. */
   narrowingScope?: { accepts: (node: TreeNode) => boolean; keys: Set<string>; reuseCallPredicates: boolean };
   constructor(private readonly c: Checker) {
-    this.exceptions = new ExceptionFlow(c, this, (types) => this.joinTypes(types));
+    this.exceptions = new ExceptionFlow(c, this);
   }
 
   merge(states: State[]): State {
@@ -116,15 +118,7 @@ export class Flow {
       const entries = reachable.map((state) => state.entries.get(key));
       // A path that does not narrow the reference leaves it with its declared type.
       if (entries.some((entry) => entry === undefined)) continue;
-      const defined = entries as FlowEntry[];
-      merged.entries.set(key, {
-        type: this.joinTypes(defined.map((entry) => entry.type)),
-        assigned: defined.every((entry) => entry.assigned),
-        evolving: defined.some((entry) => entry.evolving),
-        constraint: defined.every((entry) => entry.constraint)
-          ? this.joinTypes(defined.map((entry) => entry.constraint as Type))
-          : undefined,
-      });
+      merged.entries.set(key, this.joinEntries(entries as FlowEntry[]));
     }
     return merged;
   }
@@ -141,6 +135,21 @@ export class Flow {
     } else {
       this.current = merged;
     }
+  }
+
+  joinEntries(entries: FlowEntry[]): FlowEntry {
+    return {
+      type: this.joinTypes(entries.map((entry) => entry.type)),
+      writeType: this.joinOptionalTypes(entries.map((entry) => entry.writeType)),
+      assigned: entries.every((entry) => entry.assigned),
+      evolving: entries.some((entry) => entry.evolving),
+      constraint: this.joinOptionalTypes(entries.map((entry) => entry.constraint)),
+    };
+  }
+
+  private joinOptionalTypes(types: (Type | undefined)[]): Type | undefined {
+    const present = types.filter((type) => type !== undefined);
+    return present.length === types.length ? this.joinTypes(present) : undefined;
   }
 
   private joinTypes(types: Type[]): Type {
@@ -297,9 +306,11 @@ export class Flow {
     // A value of a type parameter or an indexed access constrained to a union also narrows the constraint, which
     // reading its members uses.
     const constraint = entry?.constraint ?? this.unionConstraint(current);
+    const write = entry?.writeType ?? this.c.assignments.accessorTypes(node)?.write;
     const assigned = entry ? entry.assigned : !this.c.expressions.readsNeverInitialized(node);
     this.current.entries.set(key, {
       type: narrow(current),
+      writeType: write && narrow(write),
       // A check that rules out `undefined` shows that the variable was assigned, as it narrows away tsc's `undefined`.
       assigned: assigned || !this.c.relations.isAssignable(undefinedType, narrow(unionOf([current, undefinedType]))),
       evolving: entry?.evolving,

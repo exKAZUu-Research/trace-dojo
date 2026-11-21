@@ -1,7 +1,8 @@
+// code-gauge-allow-file fileNcss 406 -- Assignment targets share write validation and updates to reference flow.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
-import type { State } from './flow';
+import type { FlowEntry, State } from './flow';
 import { applicableIndex } from './indexInfos';
 import { defaultedTarget, isEmptyPattern } from './patterns';
 import { printedPropertyName } from './print';
@@ -140,13 +141,14 @@ export class AssignmentChecker {
     const entry = this.c.flow.entry(key);
     const symbol = target.type === 'identifier' ? this.c.scopeOf(target).lookupValue(target.text) : undefined;
     const isAuto = symbol !== undefined && this.isAutoTyped(symbol);
-    const type = isAuto
-      ? this.c.widen(assigned)
-      : this.c.flow.assignmentReduced(this.accessorReadType(target) ?? declared, assigned);
-    this.c.flow.set(key, { type, assigned: true, evolving: entry?.evolving }, target);
+    const accessor = this.accessorTypes(target);
+    const type = isAuto ? this.c.widen(assigned) : this.c.flow.assignmentReduced(accessor?.read ?? declared, assigned);
+    const writeType = accessor && this.c.flow.assignmentReduced(accessor.write, assigned);
+    this.c.flow.set(key, { type, writeType, assigned: true, evolving: entry?.evolving }, target);
   }
 
-  private accessorReadType(target: TreeNode): Type | undefined {
+  accessorTypes(target: TreeNode): { read: Type; write: Type } | undefined {
+    target = skipParentheses(target);
     if (target.type !== 'member_expression' && target.type !== 'subscript_expression') return undefined;
     return this.c.flow.probe(() =>
       this.c.silently(() => {
@@ -158,7 +160,10 @@ export class AssignmentChecker {
           this.c.propertyOf(member, name)
         );
         if (!properties.some((property) => property?.writeType)) return;
-        return unionOf(properties.map((property) => (property ? propertyAccessType(property) : anyType)));
+        return {
+          read: unionOf(properties.map((property) => (property ? propertyAccessType(property) : anyType))),
+          write: this.namedWriteType(objectType, literalType(name)),
+        };
       })
     );
   }
@@ -358,22 +363,29 @@ export class AssignmentChecker {
       (operator === '+=' || this.c.operators.hasNumericOperands(left, right, targetType, valueType))
     )
       this.c.expressions.checkAssignable(reference, resultType, mapType(writeType, baseTypeOfLiteral));
-    this.recordCompoundWrite(reference);
+    this.recordCompoundWrite(reference, declared);
     return resultType;
   }
 
   private compoundWriteType(reference: TreeNode, declared: Type, read: Type): Type {
     if (reference.type !== 'member_expression' && reference.type !== 'subscript_expression') return read;
-    const narrowed = this.narrowedType(reference);
-    return narrowed ? intersectionOf([declared, narrowed], this.c) : declared;
+    const entry = this.referenceFlow(reference);
+    return entry ? intersectionOf([declared, entry.writeType ?? entry.type], this.c) : declared;
   }
 
-  private recordCompoundWrite(reference: TreeNode): void {
+  private recordCompoundWrite(reference: TreeNode, declared: Type): void {
     const key = this.c.flow.referenceKey(reference);
     if (!key) return;
     this.c.flow.invalidate(key);
+    if (declared === errorType) return;
     const entry = this.c.flow.entry(key);
-    if (entry) this.c.flow.set(key, { ...entry, type: mapType(entry.type, baseTypeOfLiteral) }, reference);
+    const accessor = this.accessorTypes(reference);
+    const read = entry?.type ?? accessor?.read ?? declared;
+    const write = entry?.writeType ?? accessor?.write;
+    const type = mapType(read, baseTypeOfLiteral);
+    const writeType = write && mapType(write, baseTypeOfLiteral);
+    if (entry || type !== read || writeType !== write)
+      this.c.flow.set(key, { ...entry, type, writeType, assigned: entry?.assigned ?? true }, reference);
   }
 
   private logicalAssignmentType(operator: string, targetType: Type, valueType: Type): Type {
@@ -400,6 +412,7 @@ export class AssignmentChecker {
 
   update(node: TreeNode): Type {
     const argument = node.childForFieldName('argument') as TreeNode;
+    const declared = this.declaredTargetType(argument);
     const type = this.targetType(argument, true);
     if (type === errorType) return numberType;
     // As TypeScript's `checkNonNullType`, then its arithmetic operand check, which rejects `void`.
@@ -410,7 +423,7 @@ export class AssignmentChecker {
       return numberType;
     }
     const result = this.c.operators.isBigintLike(operand) ? bigintType : numberType;
-    this.recordCompoundWrite(skipParentheses(argument));
+    this.recordCompoundWrite(skipParentheses(argument), declared);
     return result;
   }
 
@@ -519,7 +532,7 @@ export class AssignmentChecker {
       write: true,
     });
     if (type === errorType) return type;
-    if (compound) return this.narrowedType(expression) ?? type;
+    if (compound) return this.referenceFlow(expression)?.type ?? type;
     return this.namedWriteType(objectType, literalType(key));
   }
 
@@ -553,7 +566,8 @@ export class AssignmentChecker {
     if (writeType === errorType) return writeType;
     if (this.c.members.isReadonlyMappedWrite(objectType, indexType))
       return this.reportReadonlyIndex(expression, objectType);
-    return (compound ? this.narrowedType(expression) : undefined) ?? writeType;
+    const flow = compound ? this.referenceFlow(expression) : undefined;
+    return flow?.writeType ?? flow?.type ?? writeType;
   }
 
   /** Whether `expression`, an element access by a literal key, names a property that it cannot write. */
@@ -568,10 +582,9 @@ export class AssignmentChecker {
     });
   }
 
-  /** The type a compound assignment reads from a reference that the flow has narrowed. */
-  private narrowedType(reference: TreeNode): Type | undefined {
+  private referenceFlow(reference: TreeNode): FlowEntry | undefined {
     const key = this.c.flow.referenceKey(reference);
-    return key ? this.c.flow.entry(key)?.type : undefined;
+    return key === undefined ? undefined : this.c.flow.entry(key);
   }
 
   private namedWriteType(type: Type, key: LiteralType): Type {

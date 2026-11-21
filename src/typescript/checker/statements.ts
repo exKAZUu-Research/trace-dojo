@@ -475,8 +475,8 @@ export class StatementChecker {
 
   private stateKey(state: State): string {
     if (!state) return '-';
-    const entries = [...state.entries].map(([reference, { type, assigned, constraint, evolving }]) =>
-      JSON.stringify([reference, type.id, assigned, constraint?.id, evolving === true])
+    const entries = [...state.entries].map(([reference, { type, writeType, assigned, constraint, evolving }]) =>
+      JSON.stringify([reference, type.id, writeType?.id, assigned, constraint?.id, evolving === true])
     );
     return JSON.stringify([entries.toSorted(), [...state.assignedFields].toSorted(), state.superCalled, state.dead]);
   }

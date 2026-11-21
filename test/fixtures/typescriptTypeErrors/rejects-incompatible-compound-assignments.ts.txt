@@ -102,3 +102,47 @@ function resultType() {
   const impossible: 1 | 2 = numeric;
   return impossible;
 }
+class Different {
+  get value(): 1 | 2 { return 1; }
+  set value(value: number | string) { void value; }
+}
+function afterSetter(a: Different) {
+  a.value += 1;
+  const tooNarrow: 1 | 2 = a.value;
+  const asNumber: number = a.value;
+  a.value += 'x';
+  return asNumber;
+}
+function guardedAfterSetter(a: Different) {
+  a.value += 1;
+  if (typeof a.value === 'number') a.value += 'x';
+}
+function neutralAfterSetter(a: Different) {
+  a.value += 1;
+  if (a.value !== null) a.value += 'x';
+}
+function afterSetterBranch(a: Different, flag: boolean) {
+  if (flag) a.value += 1;
+  const tooNarrow: 1 | 2 = a.value;
+  a.value += 'x';
+}
+function afterParameterFresh(x: 1 | 2) {
+  x += 1;
+  const tooNarrow: 1 | 2 = x;
+}
+function afterUpdateParameter(x: 1 | 2) {
+  x++;
+  const tooNarrow: 1 | 2 = x;
+}
+function afterUpdateProperty(o: {value: 1 | 2}) {
+  o.value++;
+  const tooNarrow: 1 | 2 = o.value;
+}
+function afterBracket(o: {value: 'a' | 'b'}) {
+  o['value'] += 'c';
+  const tooNarrow: 'a' | 'b' = o['value'];
+}
+function afterBigIntParameter(x: 1n | 2n) {
+  x += 1n;
+  const tooNarrow: 1n | 2n = x;
+}

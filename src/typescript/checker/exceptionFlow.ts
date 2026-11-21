@@ -3,7 +3,6 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import type { Checker } from './checker';
 import type { Flow, FlowEntry, State } from './flow';
 import type { Scope } from './scopes';
-import type { Type } from './types';
 
 interface ExceptionAssignments {
   owner?: TreeNode;
@@ -16,8 +15,7 @@ export class ExceptionFlow {
 
   constructor(
     private readonly c: Checker,
-    private readonly flow: Flow,
-    private readonly joinTypes: (types: Type[]) => Type
+    private readonly flow: Flow
   ) {}
 
   isolate<T>(run: () => T): T {
@@ -58,14 +56,7 @@ export class ExceptionFlow {
     if (assignment && collector.scope !== this.c.scopeOf(assignment).functionScope) return;
     this.c.budget.spend();
     const previous = collector.state.entries.get(key);
-    if (previous)
-      collector.state.entries.set(key, {
-        type: this.joinTypes([previous.type, entry.type]),
-        assigned: previous.assigned && entry.assigned,
-        evolving: previous.evolving || entry.evolving,
-        constraint:
-          previous.constraint && entry.constraint ? this.joinTypes([previous.constraint, entry.constraint]) : undefined,
-      });
+    if (previous) collector.state.entries.set(key, this.flow.joinEntries([previous, entry]));
     for (const reference of collector.state.entries.keys()) {
       this.c.budget.spend();
       if (reference.startsWith(`${key}.`)) collector.state.entries.delete(reference);
