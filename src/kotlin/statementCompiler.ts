@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 913 -- One method per kind of Kotlin statement and control structure.
+// code-gauge-allow-file fileNcss 926 -- One method per kind of Kotlin statement and control structure.
 import type {
   AssignmentStatement,
   Block,
@@ -1346,11 +1346,30 @@ export abstract class StatementCompiler extends OperatorCompiler {
     const entries = this.exceptionEntries.get(context);
     if (!entries || this.flow.isDead) return;
     if (statement.kind === 'expressionStatement' && this.isNonThrowingExpression(scope, statement.expression)) return;
-    if (statement.kind === 'assignment' && statement.operator === '=' && statement.target.kind === 'name') {
-      const variable = this.findVariable(scope, statement.target.name);
-      if (variable && !variable.delegateRead && this.isNonThrowingExpression(scope, statement.value)) return;
-    }
+    if (
+      statement.kind === 'assignment' &&
+      statement.operator === '=' &&
+      this.isNonThrowingExpression(scope, statement.value) &&
+      this.isDirectAssignment(scope, context, statement.target)
+    )
+      return;
     entries.push(this.flow.copy());
+  }
+
+  private isDirectAssignment(scope: Scope, context: FunctionContext, target: Expression): boolean {
+    if (target.kind === 'name') {
+      const variable = this.findVariable(scope, target.name);
+      if (variable) return !variable.delegateRead;
+    } else if (target.kind !== 'member' || target.receiver.kind !== 'this' || target.receiver.label || target.isSafe) {
+      return false;
+    }
+    const receivers = this.receiversOf(scope);
+    const candidates = target.kind === 'name' ? receivers : receivers.slice(0, 1);
+    for (const receiver of candidates) {
+      const property = this.findProperty(scope, this.receiverTypeOf(receiver), target.name)?.symbol;
+      if (property) return !property.isVar && this.mayInitializeVal(context, property);
+    }
+    return false;
   }
 
   private isNonThrowingExpression(scope: Scope, expression: Expression): boolean {

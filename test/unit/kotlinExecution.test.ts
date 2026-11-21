@@ -31,6 +31,15 @@ class BreakPath {
         }
     }
 }
+class FinallyPath {
+    val n: Int
+    init {
+        while (true) {
+            try { this.n = 3 }
+            finally { break }
+        }
+    }
+}
 fun found(stops: Boolean) {
     val result: Int
     var remaining = 2
@@ -46,9 +55,10 @@ fun found(stops: Boolean) {
 fun main() {
     println(One().n)
     println(BreakPath().n)
+    println(FinallyPath().n)
     found(false)
 }`,
-    stdout: '1\n2\n0\n',
+    stdout: '1\n2\n3\n0\n',
   },
   {
     name: 'finally sees assignments before a pending jump',
