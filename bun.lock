@@ -27,7 +27,7 @@
         "@trpc/next": "11.28.1",
         "@trpc/react-query": "11.28.1",
         "@trpc/server": "11.28.1",
-        "@willbooster/shared-lib": "11.1.1",
+        "@willbooster/shared-lib": "11.2.0",
         "@willbooster/shared-lib-react": "6.3.0",
         "@willbooster/tree-sitter-c": "40.0.2",
         "@willbooster/tree-sitter-cpp": "34.0.1",
@@ -40,7 +40,7 @@
         "@willbooster/tree-sitter-python": "21.0.2",
         "@willbooster/tree-sitter-ruby": "20.0.2",
         "@willbooster/tree-sitter-zig": "14.0.2",
-        "@willbooster/wb": "23.4.0",
+        "@willbooster/wb": "23.4.1",
         "@willbooster/web-tree-sitter": "23.0.1",
         "at-decorators": "7.1.4",
         "codemirror": "6.0.2",
@@ -751,7 +751,7 @@
 
     "@willbooster/oxlint-config": ["@willbooster/oxlint-config@1.4.9", "", { "peerDependencies": { "oxlint": ">=1.60.0", "oxlint-tsgolint": ">=0.18.1" } }, "sha512-xqWuKdEzT4LqYc+WiK7g6sLGjvRj1iAb6CtYW1AA2qa6U1Sfa0rRFoSCJ7bBbrMxG+wS8IgKTJkz/FY/RrW1Iw=="],
 
-    "@willbooster/shared-lib": ["@willbooster/shared-lib@11.1.1", "", {}, "sha512-snBLyc2+d9svXGTdl/80MKeTH6zupxkFFPNIgtDeUWdJPbXoDUBayZ9K8M4arYAinEPXkCYtg73vwpq7vvtTkw=="],
+    "@willbooster/shared-lib": ["@willbooster/shared-lib@11.2.0", "", {}, "sha512-bBA3rCJ4qqcPVxbxmdI9mfpWplQE7v2OX5kGdaH7c/ObAGuQqC5brGdRx1emMLXCls2gub+YedF/Jm2C0WfJFQ=="],
 
     "@willbooster/shared-lib-react": ["@willbooster/shared-lib-react@6.3.0", "", { "peerDependencies": { "react": "~19.2.0", "react-dom": "~19.2.0" } }, "sha512-Y1n2KYTb1vLRY/cTX0KlWRtCJ9KVqCVOoXY7maPriU20eVvCbXV9cu2ROi6Ds4Om8ZS+l37EZQuEDIzxvsC0Nw=="],
 
@@ -777,7 +777,7 @@
 
     "@willbooster/tree-sitter-zig": ["@willbooster/tree-sitter-zig@14.0.2", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-hvuFS2YmgKl6dn03gIdPoOzJlId+gG83e/OEJX6YN1ZkZEoOee/uQuT2rUzvTQYhmBJgRsBvswN4jSo6P7FUpw=="],
 
-    "@willbooster/wb": ["@willbooster/wb@23.4.0", "", { "dependencies": { "@textlint-rule/textlint-rule-no-invalid-control-character": "3.0.0", "@textlint/kernel": "15.8.0", "@textlint/module-interop": "15.8.0", "@textlint/textlint-plugin-markdown": "15.8.0", "chalk": "6.0.1", "code-gauge": "10.4.3", "dotenv": "18.0.9", "dotenv-expand": "13.0.0", "fast-glob": "3.3.3", "fastest-levenshtein": "1.0.16", "globby": "16.2.4", "jsonc-parser": "3.3.1", "minimal-promise-pool": "6.0.4", "semver": "7.8.6", "smol-toml": "1.9.1", "textlint-filter-rule-node-types": "1.1.0", "textlint-rule-ja-space-between-half-and-full-width": "3.0.4", "textlint-rule-no-zero-width-spaces": "1.0.1", "yaml": "2.9.1", "yargs": "18.2.0", "zod": "4.6.7" }, "bin": { "wb": "bin/index.js" } }, "sha512-tBsXecLG12WIIQ4WEVszqkRFKuPfmfLQFxy/DYi+Yv2g8E9ykmx722O10a273/6AB3Wlf2HIxZYnXGHyzl/CpQ=="],
+    "@willbooster/wb": ["@willbooster/wb@23.4.1", "", { "dependencies": { "@textlint-rule/textlint-rule-no-invalid-control-character": "3.0.0", "@textlint/kernel": "15.8.0", "@textlint/module-interop": "15.8.0", "@textlint/textlint-plugin-markdown": "15.8.0", "chalk": "6.0.1", "code-gauge": "10.4.3", "dotenv": "18.0.9", "dotenv-expand": "13.0.0", "fast-glob": "3.3.3", "fastest-levenshtein": "1.0.16", "globby": "16.2.4", "jsonc-parser": "3.3.1", "minimal-promise-pool": "6.0.4", "semver": "7.8.6", "smol-toml": "1.9.1", "textlint-filter-rule-node-types": "1.1.0", "textlint-rule-ja-space-between-half-and-full-width": "3.0.4", "textlint-rule-no-zero-width-spaces": "1.0.1", "yaml": "2.9.1", "yargs": "18.2.0", "zod": "4.6.7" }, "bin": { "wb": "bin/index.js" } }, "sha512-VJTsi3/cZkw18SVTtmVxA7YLSsGJRgAALR8rxhJu/uTkRk/3kHC3LaiQ79H6qmn982fCUtVmYChkiifFqfA8oQ=="],
 
     "@willbooster/web-tree-sitter": ["@willbooster/web-tree-sitter@23.0.1", "", { "dependencies": { "@types/emscripten": "^1.41.5" } }, "sha512-NOmljTdyGRf3CT3bT9jGR91ynliDJ4qoSpP6uLioXyXgS+Y9bTFLpazTu3eWpjVUxyoIegKAij+nK1GM8zZc9g=="],
 
