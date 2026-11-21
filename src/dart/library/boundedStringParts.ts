@@ -1,4 +1,5 @@
 import { LIMITS } from '../../interpreter/limits';
+import { encodableText } from '../format';
 import type { Runtime } from '../runtime';
 
 export function stringSlice(text: string, start: number, end = text.length): string {
@@ -37,6 +38,17 @@ export class BoundedStringParts {
     for (let start = 0; start < text.length; start += 1024) {
       this.runtime.spend();
       this.append(text.slice(start, start + 1024).replaceAll(asciiCharacters, escape));
+    }
+  }
+
+  appendVmCString(text: string): void {
+    const zero = text.indexOf('\0');
+    const end = zero === -1 ? text.length : zero;
+    for (let start = 0; start < end;) {
+      let next = Math.min(start + 1024, end);
+      if (next < end && (text.codePointAt(next - 1) ?? 0) > 0xff_ff) next++;
+      this.append(encodableText(text.slice(start, next)));
+      start = next;
     }
   }
 

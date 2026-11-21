@@ -281,12 +281,8 @@ function recordFieldValue(output: BoundedStringParts, { positional, named }: Dar
 
 function appendSafeValue(runtime: Runtime, output: BoundedStringParts, value: Value, recordField: boolean): void {
   if (typeof value === 'string') {
-    if (recordField) {
-      const zero = value.indexOf('\0');
-      output.append(zero === -1 ? value : value.slice(0, zero));
-    } else {
-      appendJsonQuoted(value, (part) => output.append(part));
-    }
+    if (recordField) output.appendVmCString(value);
+    else appendJsonQuoted(value, (part) => output.append(part));
     return;
   }
   if (value instanceof DartTypeValue && recordField) output.append('Type: ');

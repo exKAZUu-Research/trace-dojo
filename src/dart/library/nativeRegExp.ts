@@ -341,9 +341,8 @@ define('RegExp.toString', (runtime, receiver) => {
 
 export function appendRegExpDescription(output: BoundedStringParts, receiver: Value): void {
   const { source, caseSensitive, multiLine, dotAll, unicode } = stateOf(receiver);
-  const zero = source.indexOf('\0');
   output.append('RegExp: pattern=');
-  output.append(zero === -1 ? source : source.slice(0, zero));
+  output.appendVmCString(source);
   output.append(` flags=${caseSensitive ? '' : 'i'}${multiLine ? 'm' : ''}${dotAll ? 's' : ''}${unicode ? 'u' : ''}`);
 }
 

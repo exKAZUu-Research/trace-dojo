@@ -467,12 +467,12 @@ class _Symbol implements Symbol {
 }
 
 abstract interface class StackTrace {
-  static const StackTrace empty = _EmptyStackTrace();
+  static const StackTrace empty = _StringStackTrace();
   external static StackTrace get current;
 }
 
-class _EmptyStackTrace implements StackTrace {
-  const _EmptyStackTrace();
+class _StringStackTrace implements StackTrace {
+  const _StringStackTrace();
   String toString() => '';
 }
 

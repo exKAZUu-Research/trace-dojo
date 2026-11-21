@@ -58,8 +58,8 @@ final class JsonCodec extends Codec<Object?, String> {
   JsonCodec.withReviver(dynamic Function(Object? key, Object? value) reviver) : this(reviver: reviver);
   dynamic decode(String source, {Object? Function(Object? key, Object? value)? reviver}) => _jsonDecode(source, reviver ?? _reviver);
   String encode(Object? value, {Object? Function(dynamic object)? toEncodable}) => _jsonEncode(value, toEncodable ?? _toEncodable, null);
-  JsonEncoder get encoder => JsonEncoder(_toEncodable);
-  JsonDecoder get decoder => JsonDecoder(_reviver);
+  JsonEncoder get encoder => _toEncodable == null ? const JsonEncoder() : JsonEncoder(_toEncodable);
+  JsonDecoder get decoder => _reviver == null ? const JsonDecoder() : JsonDecoder(_reviver);
 }
 
 final class JsonEncoder extends Converter<Object?, String> {
@@ -85,7 +85,7 @@ final class Utf8Codec extends Encoding {
   _Uint8List encode(String input) => _utf8Encode(input);
   String decode(List<int> codeUnits, {bool? allowMalformed}) => _utf8Decode(codeUnits, allowMalformed ?? _allowMalformed);
   Utf8Encoder get encoder => const Utf8Encoder();
-  Utf8Decoder get decoder => Utf8Decoder(allowMalformed: _allowMalformed);
+  Utf8Decoder get decoder => _allowMalformed ? const Utf8Decoder(allowMalformed: true) : const Utf8Decoder();
 }
 
 final class Utf8Encoder extends Converter<String, List<int>> {

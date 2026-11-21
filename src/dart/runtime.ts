@@ -26,6 +26,7 @@ import {
   interfaceType,
   isSubtype,
   objectType,
+  resolveBound,
   sameType,
   substitute,
   TypeParam,
@@ -864,7 +865,7 @@ function markRoot(root: Value | DartThrow, reached: Set<DartObject>, pending: Da
 
 function* childrenOf(object: DartObject): Iterable<Value> {
   yield* object.fields;
-  if (object instanceof DartList) yield* object.elements;
+  if (object instanceof DartList && listCanReachObjects(object)) yield* object.elements;
   if (object instanceof DartRecord) {
     yield* object.positional;
     for (const [, value] of object.named) yield value;
@@ -877,6 +878,22 @@ function* childrenOf(object: DartObject): Iterable<Value> {
     yield* object.native.values();
     if (object.native.roots) yield* object.native.roots();
   }
+}
+
+function listCanReachObjects(list: DartList): boolean {
+  const element = list.typeArgs[0];
+  if (!element) return true;
+  const type = resolveBound(element);
+  if (type.kind === 'null' || type.kind === 'never') return false;
+  if (type.kind !== 'interface') return true;
+  const { cls } = type;
+  return (
+    cls !== coreTypes.int &&
+    cls !== coreTypes.double &&
+    cls !== coreTypes.num &&
+    cls !== coreTypes.bool &&
+    cls !== coreTypes.string
+  );
 }
 
 export { Cell, type ConstructorInfo };

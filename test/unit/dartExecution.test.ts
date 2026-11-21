@@ -5885,6 +5885,7 @@ test('dynamic native calls and tear-offs validate named arguments before dispatc
 
 test('errors retain their first throw trace and catches receive the trace of the current throw', () => {
   const program = `void main() {
+    print([StackTrace.empty.runtimeType, StackTrace.empty.toString()]);
     final error = StateError('ordinary');
     print(error.stackTrace == null);
     late StackTrace first;
@@ -5908,7 +5909,7 @@ test('errors retain their first throw trace and catches receive the trace of the
   }`;
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
-    stdout: 'true\ntrue\ntrue\n[true, true]\n[true, true]\ntrue\n',
+    stdout: '[_StringStackTrace, ]\ntrue\ntrue\ntrue\n[true, true]\n[true, true]\ntrue\n',
   });
 });
 
@@ -6593,6 +6594,53 @@ void main() {
       "Invalid argument (value): Record (Instance of 'Foo')\n" +
       "RegExp: pattern=a flags=im\n_Uint8List\nRecord (_ConstMap len:1, Instance of '_HashSet<int>')\n" +
       "[_Random, false, 4, Instance of '_Random']\n",
+  });
+});
+
+test('VM descriptions normalize unpaired surrogates and preserve a pair at a chunk boundary', () => {
+  const source = `void main() {
+  final broken = String.fromCharCodes([0xd800, 0x61, 0xdc00]);
+  print(Error.safeToString((broken,)).codeUnits.sublist(8, 11));
+  print(RegExp(broken).toString().codeUnits.sublist(16, 19));
+  final paired = 'a' * 1023 + String.fromCharCode(0x10000);
+  print(Error.safeToString((paired,)).codeUnits.sublist(1031, 1033));
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '[65533, 97, 65533]\n[65533, 97, 65533]\n[55296, 56320]\n',
+  });
+});
+
+test('default codecs return canonical converters and callback-bearing codecs do not', () => {
+  const source = `import 'dart:convert';
+void main() {
+  final malformed = const Utf8Codec(allowMalformed: true);
+  final custom = JsonCodec(reviver: (_, value) => value, toEncodable: (_) => 7);
+  print([identical(json.encoder, const JsonEncoder()), identical(json.decoder, const JsonDecoder()),
+    identical(utf8.decoder, const Utf8Decoder()), identical(malformed.decoder, const Utf8Decoder(allowMalformed: true))]);
+  print([identical(custom.encoder, custom.encoder), identical(custom.decoder, custom.decoder)]);
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '[true, true, true, true]\n[false, false]\n',
+  });
+});
+
+test('turtle collection skips primitive lists while following reference lists', () => {
+  const source = `void main() {
+  final numbers = List<num?>.filled(100000, 1);
+  final references = List<Object?>.filled(1, Turtle(0, 1));
+  final turtle = Turtle(0, 0);
+  print(turtle.canMoveForward());
+  for (var i = 0; i < 1000; i++) { turtle.canMoveForward(); }
+  references[0] = null;
+  print(turtle.canMoveForward());
+  print(numbers.length);
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'false\ntrue\n100000\n',
+    finalTurtles: [{ x: 0, y: 0 }],
   });
 });
 
