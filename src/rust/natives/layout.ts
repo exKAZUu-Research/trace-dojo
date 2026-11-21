@@ -42,7 +42,6 @@ export function sizeOf(type: Type): number {
   return layoutOf(type).size;
 }
 
-// code-gauge-allow functionNcss 32 -- Each represented type has its own layout.
 export function layoutOf(type: Type): Layout {
   const t = normalize(shallow(type));
   switch (t.kind) {
@@ -76,15 +75,25 @@ export function layoutOf(type: Type): Layout {
       return structLayout(t.elems.map((elem) => layoutOf(elem)));
     }
     case 'adt': {
-      const collection = COLLECTION_LAYOUTS[t.def.builtin as string];
-      if (collection) return collection;
-      if (t.def.builtin === 'Box') return pointerTo(t.args[0]);
-      return adtLayout(t.def, t.args);
+      return builtinLayout(t.def.builtin, t.args) ?? adtLayout(t.def, t.args);
     }
     default: {
       return { size: 0, align: 1 };
     }
   }
+}
+
+/** The layout of a standard type whose declaration does not show its storage. */
+function builtinLayout(builtin: string | undefined, args: Type[]): Layout | undefined {
+  const collection = COLLECTION_LAYOUTS[builtin as string];
+  if (collection) return collection;
+  if (builtin === 'Box') return pointerTo(args[0]);
+  // std's holds `start`, `end`, and `exhausted: bool`.
+  if (builtin === 'RangeInclusive') {
+    const bound = layoutOf(args[0]);
+    return structLayout([bound, bound, layoutOf({ kind: 'bool' })]);
+  }
+  return undefined;
 }
 
 function intBytes(name: IntName): number {

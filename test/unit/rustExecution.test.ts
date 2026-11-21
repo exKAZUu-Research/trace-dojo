@@ -8413,3 +8413,34 @@ fn pick(v: &mut Vec<Box<dyn Shape>>) -> &mut dyn Shape { &mut *v[0] }`
   );
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '9\n' });
 });
+
+test.each([
+  [
+    'a trait derived twice in one attribute',
+    '#[derive(Debug, Debug)] struct P { x: i32 }',
+    'Debug を2回 derive しています。',
+  ],
+  [
+    'a trait derived in two attributes',
+    '#[derive(Clone)]\n#[derive(Clone)]\nenum E { A }',
+    'Clone を2回 derive しています。',
+  ],
+  [
+    'a negative pattern below the type minimum',
+    'fn f(x: i8) -> bool { match x { -129 => true, _ => false } }',
+    'リテラル -129 は i8 の範囲（-128〜127）を超えています。',
+  ],
+])('%s is rejected', (_name, items, message) => {
+  expect(executeProgram('rust', rustMain('', items))).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message }],
+  });
+});
+
+test('inclusive ranges have their real size, so a vector of them sorts', () => {
+  const program = rustMain(`
+    let mut ranges = vec![4..=5, 1..=2];
+    ranges.sort_by_key(|r| *r.start());
+    println!("{:?} {}", ranges, std::mem::size_of::<std::ops::RangeInclusive<i32>>());`);
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '[1..=2, 4..=5] 12\n' });
+});
