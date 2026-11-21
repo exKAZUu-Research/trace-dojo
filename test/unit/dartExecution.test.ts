@@ -1741,6 +1741,13 @@ test('Dart extension types must redeclare members inherited from several extensi
       `${declarations}\nextension type G(int item) implements E, F {}\nvoid main() { print(G(1).f()); }`
     )
   ).toMatchObject({ kind: 'compileError' });
+  const privates = 'extension type E(int value) { int _f() => 1; }\nextension type F(int data) { int _f() => 2; }';
+  expect(
+    executeProgram(
+      'dart',
+      `${privates}\nextension type G(int item) implements E, F {}\nvoid main() { print(G(1)._f()); }`
+    )
+  ).toMatchObject({ kind: 'compileError' });
   const valid = `${declarations}
 extension type G(int item) implements E, F { int f() => 3; }
 extension type H(int d) implements E {}

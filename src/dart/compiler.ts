@@ -22,6 +22,7 @@ import {
   type Member,
   memberTypeIn,
   type MethodMember,
+  scopedMemberName,
   sourceMemberName,
 } from './classes';
 import { at, type Compiled, type Eval, typeName } from './compilerBase';
@@ -1386,12 +1387,12 @@ export class Compiler extends MemberCompiler {
     const parents = cls.directSupertypes.map((type) => type.cls).filter((parent) => parent.kind === 'extensionType');
     if (parents.length < 2) return;
     for (const setter of [false, true]) {
-      const names = new Set<string>();
+      const names = new Map<string, string>();
       const visited = new Set<ClassInfo>();
       for (const parent of parents) extensionMemberNames(parent, setter, names, visited);
-      for (const name of names) {
+      for (const [key, name] of names) {
         if ((setter ? cls.setters : cls.members).get(name)?.owner === cls) continue;
-        const origins = new Set(parents.map((parent) => parent.interfaceMember(name, setter)).filter(Boolean));
+        const origins = new Set(parents.map((parent) => parent.interfaceMember(key, setter)).filter(Boolean));
         if (origins.size > 1)
           this.error(
             declaration,
@@ -1943,16 +1944,18 @@ function registerSealedSubclass(cls: ClassInfo): void {
     current.subclasses.push(cls);
 }
 
-/** The instance member names an extension type and its extension-type supertypes declare. */
+/** The instance member names an extension type and its extension-type supertypes declare, by their lookup keys. */
 function extensionMemberNames(
   cls: ClassInfo,
   setter: boolean,
-  names = new Set<string>(),
+  names = new Map<string, string>(),
   visited = new Set<ClassInfo>()
-): Set<string> {
+): Map<string, string> {
   if (visited.has(cls)) return names;
   visited.add(cls);
-  for (const member of (setter ? cls.setters : cls.members).values()) if (!member.isStatic) names.add(member.name);
+  for (const [name, member] of setter ? cls.setters : cls.members) {
+    if (!member.isStatic) names.set(scopedMemberName(name, cls.library), name);
+  }
   for (const type of cls.directSupertypes) {
     if (type.cls.kind === 'extensionType') extensionMemberNames(type.cls, setter, names, visited);
   }
