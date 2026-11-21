@@ -100,6 +100,43 @@ fun main() { println(Turtle(0, 1) ${operator} rhs()) }`;
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: 'false\nfalse\n' });
 });
 
+test('keeps Kotlin try completions reachable while finally runs', () => {
+  const source = `class Stop(val turtle: Turtle) : RuntimeException()
+
+fun checkNeighbor() {
+    val probe = Turtle(0, 0)
+    println(probe.canMoveForward())
+}
+
+fun returned(): Turtle {
+    try { return Turtle(0, 1) }
+    finally { checkNeighbor() }
+}
+
+fun caught(): Turtle = try { throw Stop(Turtle(0, 1)) }
+catch (e: Stop) { e.turtle }
+finally { checkNeighbor() }
+
+fun thrown() {
+    try {
+        try { throw Stop(Turtle(0, 1)) }
+        finally { checkNeighbor() }
+    } catch (e: Stop) {
+        println(e.turtle.canMoveForward())
+    }
+}
+
+fun main() {
+    returned().turnRight()
+    caught().turnRight()
+    thrown()
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'false\nfalse\nfalse\ntrue\n',
+  });
+});
+
 test.each(['Token.values()', 'enumValues<Token>()'])('charges repeated %s array copies to the Kotlin heap', (call) => {
   const names = Array.from({ length: 200 }, (_, index) => `TOKEN${index}`).join(', ');
   const source = `enum class Token { ${names} }

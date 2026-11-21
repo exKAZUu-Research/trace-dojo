@@ -1,6 +1,6 @@
 import type { Eval } from './compilerBase';
-import { type Frame, KotlinThrow, UNASSIGNED } from './runtime';
-import { type KObject, UNIT } from './values';
+import { type Frame, KotlinThrow, ReturnSignal, UNASSIGNED } from './runtime';
+import { type KObject, UNIT, type Value } from './values';
 
 interface CatchClause {
   test: (value: KObject) => boolean;
@@ -18,7 +18,7 @@ export function ifEval(test: Eval, thenEval: Eval, elseEval: Eval | undefined): 
 }
 
 export function tryEval(body: Eval, catches: CatchClause[], finallyEval: Eval | undefined): Eval {
-  return (frame) => {
+  const execute: Eval = (frame) => {
     try {
       return body(frame);
     } catch (error) {
@@ -32,8 +32,19 @@ export function tryEval(body: Eval, catches: CatchClause[], finallyEval: Eval | 
       } finally {
         frame.locals[clause.slot] = UNASSIGNED;
       }
+    }
+  };
+  if (!finallyEval) return execute;
+  return (frame) => {
+    let pending: Value;
+    try {
+      pending = execute(frame);
+      return pending;
+    } catch (error) {
+      if (error instanceof ReturnSignal || error instanceof KotlinThrow) pending = error.value;
+      throw error;
     } finally {
-      finallyEval?.(frame);
+      frame.runtime.withNativeRoots([pending], () => finallyEval(frame));
     }
   };
 }
