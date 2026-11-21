@@ -137,6 +137,7 @@ export class Compiler extends BodyCompiler {
     options: CompileOptions = {}
   ): { contexts: FileContext[]; initializers: CompiledProgram['initializers'] } {
     this.atomicRows = options.atomicRows ?? new Set();
+    this.claimedAtomicRows.clear();
     this.recordsSteps = options.recordsSteps ?? false;
     const prepared = files.map(({ file, isLibrary }) => ({
       file,
@@ -152,6 +153,7 @@ export class Compiler extends BodyCompiler {
       this.resolveImports(file, context);
     }
     this.declareHeaders(prepared);
+    this.checkAtomicRows();
     for (const { file, context } of prepared) {
       this.file = context;
       this.resolveImports(file, context);

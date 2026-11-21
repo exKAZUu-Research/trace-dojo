@@ -71,6 +71,7 @@ export abstract class CompilerCore {
   protected flow = new Flow();
   /** The rows of `// atomic` annotations, which mark the functions declared on or before them. */
   protected atomicRows: ReadonlySet<number> = new Set();
+  protected readonly claimedAtomicRows = new Set<number>();
   /** Whether the program records the steps of its statements, which only traces do. */
   protected recordsSteps = false;
 

@@ -1,6 +1,7 @@
 import { expect, test } from 'vitest';
 
 import { traceProgram } from '../../src/interpreter/program';
+import { misplacedAtomicMessage } from '../../src/interpreter/traceAnnotations';
 import type { TraceItem } from '../../src/problems/trace';
 
 /** The programs of the two languages place their statements on different lines, so their steps compare without them. */
@@ -238,4 +239,12 @@ test("records the step of a top-level property's initializer, as Java records a 
     { line: 2, vars: { top: 3 } },
     { line: 4, vars: { top: 3 } },
   ]);
+});
+
+test.each([
+  '// atomic\nfun helper() {}\nfun main() { helper() }',
+  'fun main() {\n    val x = 1 // atomic\n    println(x)\n}',
+  'fun main() {}\n// atomic',
+])('reports a misplaced Kotlin atomic annotation in %s', (program) => {
+  expect(() => traceProgram('kotlin', program, program)).toThrow(misplacedAtomicMessage);
 });

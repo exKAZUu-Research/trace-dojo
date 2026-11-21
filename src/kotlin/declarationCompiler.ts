@@ -1,4 +1,5 @@
-// code-gauge-allow-file fileNcss 810 -- The declaration compiler shares symbol and class-linking logic.
+// code-gauge-allow-file fileNcss 816 -- The declaration compiler shares symbol and class-linking logic.
+import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import type {
   ClassDecl,
   ClassParameterDecl,
@@ -609,7 +610,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     symbol.isInline = keywords.has('inline');
     symbol.isInfix = keywords.has('infix');
     symbol.isOperator = keywords.has('operator');
-    symbol.isAtomic = !file.isLibrary && this.isAtomicRange(decl.row, decl.headerEndRow);
+    symbol.isAtomic = !file.isLibrary && this.claimAtomicRange(decl.row, decl.headerEndRow);
     if (decl.receiver) symbol.extensionReceiver = this.resolveType(scope, decl.receiver);
     symbol.params = decl.params.map((param) => this.declareParameter(scope, param));
     this.rejectDuplicateNames(decl.params);
@@ -639,9 +640,20 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     }
   }
 
-  protected isAtomicRange(firstRow: number, lastRow: number): boolean {
-    for (const row of this.atomicRows) if (row >= firstRow && row <= lastRow) return true;
-    return false;
+  protected checkAtomicRows(): void {
+    for (const row of this.atomicRows) {
+      if (!this.claimedAtomicRows.has(row)) this.error(row, misplacedAtomicMessage);
+    }
+  }
+
+  private claimAtomicRange(firstRow: number, lastRow: number): boolean {
+    let claimed = false;
+    for (const row of this.atomicRows) {
+      if (row < firstRow || row > lastRow) continue;
+      this.claimedAtomicRows.add(row);
+      claimed = true;
+    }
+    return claimed;
   }
 
   /** The key that names the native implementation of a library declaration. */
