@@ -4,6 +4,9 @@ import { traceCProgram } from '../c/trace';
 import { executeCppProgram } from '../cpp/execute';
 import { findCppTraceAnnotations } from '../cpp/parse';
 import { traceCppProgram } from '../cpp/trace';
+import { executeDartProgram } from '../dart/execute';
+import { findDartTraceAnnotations } from '../dart/parse';
+import { traceDartProgram } from '../dart/trace';
 import { executeGoProgram } from '../go/execute';
 import { findGoTraceAnnotations } from '../go/parse';
 import { traceGoProgram } from '../go/trace';
@@ -100,6 +103,7 @@ const interpreters = {
   cpp: { findTraceAnnotations: findCppTraceAnnotations, record: traceCppProgram, execute: executeCppProgram },
   php: { findTraceAnnotations: findPhpTraceAnnotations, record: tracePhpProgram, execute: executePhpProgram },
   zig: { findTraceAnnotations: findZigTraceAnnotations, record: traceZigProgram, execute: executeZigProgram },
+  dart: { findTraceAnnotations: findDartTraceAnnotations, record: traceDartProgram, execute: executeDartProgram },
   haskell: {
     findTraceAnnotations: findHaskellTraceAnnotations,
     record: traceHaskellProgram,

@@ -1,0 +1,902 @@
+// code-gauge-allow-file fileNcss 658 -- Switch coverage shares type partitions and pattern coverage rules.
+import type { Expression, Pattern, Span } from './ast';
+import { nullPatternComparison } from './astWalk';
+import type { ClassInfo, FieldMember } from './classes';
+import type { PatternCompiler } from './patternCompiler';
+import { coverageDisjuncts, isCoverageListShape } from './patternCoverageUnion';
+import type { Frame } from './runtime';
+import {
+  asInstanceOf,
+  coreTypes,
+  type DartType,
+  DYNAMIC,
+  interfaceType,
+  isNullable,
+  isPotentiallyNullable,
+  isSubtype,
+  nonNullable,
+  NULL,
+  overapproximateType,
+  resolveBound,
+  substitute,
+  typeToString,
+} from './types';
+import { DartObject, type Value } from './values';
+
+/** One case of the values a switch must cover: a constant, null, or every value of a type. */
+interface ListSpace {
+  kind: 'list';
+  type: DartType;
+  elementType: DartType;
+  length: number;
+  hasLongerLengths: boolean;
+  elements?: readonly Space[];
+  rests?: ReadonlyMap<string, Space>;
+}
+
+type Space =
+  | ListSpace
+  | { kind: 'constant'; key: boolean | FieldMember; type: DartType; text: string; subject?: DartType }
+  | { kind: 'null' }
+  | { kind: 'type'; type: DartType; properties?: ReadonlyMap<string, Space> }
+  | RecordSpace;
+
+interface RecordSpace {
+  kind: 'record';
+  fields: Space[];
+  names: (string | undefined)[];
+  type: DartType;
+}
+
+type Coverage = boolean | ((frame: Frame) => boolean);
+
+const MAX_SPACES = 256;
+
+/**
+ * Whether the patterns (of cases without guards) cover every value of `type`. A switch expression, or a switch
+ * statement on a type Dart requires to be covered (bool, enums, sealed classes, and records and nullable types of
+ * them), is rejected when they do not.
+ */
+// code-gauge-allow functionCognitiveComplexity 17 -- Report uncovered partitions now or after constant evaluation.
+export function checkExhaustive(
+  compiler: PatternCompiler,
+  type: DartType,
+  patterns: Pattern[],
+  span: Span,
+  isStatement: boolean
+): boolean {
+  if (patterns.some((pattern) => coversAll(compiler, pattern, type))) return true;
+  const cutoff = Math.min(MAX_SPACES - 1, listLengthCutoff(compiler, patterns));
+  const depth = Math.max(0, ...patterns.map((pattern) => listNesting(compiler, pattern)));
+  const coverage = new ObjectSpaces(compiler, cutoff, depth);
+  const spaces = coverage.refineForCoverage(expand(type, cutoff, depth), patterns);
+  const pending: { space: Space; test: (frame: Frame) => boolean }[] = [];
+  const mustCover = !isStatement || isAlwaysExhaustive(type);
+  const reportMissing = (space: Space): never =>
+    compiler.error(
+      span,
+      `switch が ${typeToString(type)} 型のすべての値を扱っていません（${spaceText(space)} の場合がありません）。`
+    );
+  for (const space of spaces) {
+    const test = combineCoverage(patterns, (pattern) => covers(compiler, pattern, space), false);
+    if (test === false) {
+      if (mustCover) reportMissing(space);
+      return false;
+    }
+    if (typeof test === 'function') pending.push({ space, test });
+  }
+  if (pending.length === 0) return true;
+  if (!mustCover) return false;
+  compiler.constantChecks.push({
+    span,
+    run: (frame) => {
+      for (const { space, test } of pending) if (!test(frame)) reportMissing(space);
+      return;
+    },
+  });
+  return true;
+}
+
+function combineCoverage<T>(values: Iterable<T>, check: (value: T) => Coverage, every: boolean): Coverage {
+  const pending: ((frame: Frame) => boolean)[] = [];
+  for (const value of values) {
+    const result = check(value);
+    if (result === !every) return !every;
+    if (typeof result === 'function') pending.push(result);
+  }
+  if (pending.length === 0) return every;
+  return (frame) => {
+    for (const test of pending) if (test(frame) === !every) return !every;
+    return every;
+  };
+}
+
+class ObjectSpaces {
+  constructor(
+    private readonly compiler: PatternCompiler,
+    private readonly listCutoff: number,
+    private readonly listDepth: number
+  ) {}
+
+  refineForCoverage(spaces: Space[], patterns: Pattern[]): Space[] {
+    const refined = this.refine(spaces, patterns);
+    const uncovered: Space[] = [];
+    for (const space of refined) {
+      const parts = this.uncovered(space, patterns);
+      if (uncovered.length + parts.length > MAX_SPACES) return refined;
+      uncovered.push(...parts);
+    }
+    return uncovered;
+  }
+
+  // Subtract whole arms as we partition so one constrained field can leave the other fields symbolic.
+  private uncovered(root: Space, patterns: Pattern[]): Space[] {
+    let remaining = [root];
+    let expansionBudget = MAX_SPACES * 4;
+    for (const pattern of patterns) {
+      const candidates = remaining;
+      remaining = [];
+      for (let candidate = candidates.pop(); candidate; candidate = candidates.pop()) {
+        if (covers(this.compiler, pattern, candidate) === true) continue;
+        const partitions = this.split(candidate, pattern);
+        if (!partitions) {
+          remaining.push(candidate);
+          continue;
+        }
+        expansionBudget -= partitions.length;
+        if (expansionBudget < 0 || remaining.length + candidates.length + partitions.length > MAX_SPACES) return [root];
+        candidates.push(...partitions);
+      }
+      if (remaining.length === 0) break;
+    }
+    return remaining;
+  }
+
+  private split(space: Space, pattern: Pattern): Space[] | undefined {
+    if (covers(this.compiler, pattern, space) === true || this.excludesFixedField(pattern, space)) return undefined;
+    if (space.kind === 'type' && !space.properties) {
+      const options = expand(space.type, this.listCutoff, this.listDepth);
+      if (options.length !== 1 || options[0].kind !== 'type') return options;
+    }
+    for (const part of patternAlternatives(this.compiler, pattern)) {
+      if (part !== pattern && this.excludesFixedField(part, space)) continue;
+      const partitions = this.splitProduct(space, part);
+      if (partitions) return partitions;
+    }
+    return undefined;
+  }
+
+  private splitProduct(space: Space, pattern: Pattern): Space[] | undefined {
+    if (space.kind === 'record' && pattern.kind === 'record') return this.splitRecord(space, pattern);
+    if (space.kind === 'list' && pattern.kind === 'list') return this.splitList(space, pattern);
+    if (space.kind === 'type' && pattern.kind === 'object') return this.splitObject(space, pattern);
+    return undefined;
+  }
+
+  private splitRecord(space: RecordSpace, pattern: Extract<Pattern, { kind: 'record' }>): RecordSpace[] | undefined {
+    const fields = recordFieldPatterns(pattern, space);
+    if (!fields) return undefined;
+    for (const [index, child] of fields.entries()) {
+      const partitions = this.split(space.fields[index], child);
+      if (partitions) return partitions.map((value) => ({ ...space, fields: space.fields.with(index, value) }));
+    }
+    return undefined;
+  }
+
+  private splitList(space: ListSpace, pattern: Extract<Pattern, { kind: 'list' }>): ListSpace[] | undefined {
+    if (isCoverageListShape(pattern)) return undefined;
+    const bounds = listPatternBounds(this.compiler, pattern, space);
+    if (!bounds) return undefined;
+    const { rest, fixed } = bounds;
+    const fallback: Space = { kind: 'type', type: space.elementType };
+    const elements = space.elements ?? Array.from({ length: space.length }, () => fallback);
+    for (const [index, element] of pattern.elements.entries()) {
+      if (element.kind === 'rest') {
+        if (!element.pattern) continue;
+        const key = listRestKey(rest, fixed);
+        const partitions = this.split(listRest(space, key), element.pattern);
+        if (partitions)
+          return partitions.map((value) => ({
+            ...space,
+            rests: new Map([...(space.rests ?? []), [key, value]]),
+          }));
+      } else {
+        const position = listPatternPosition(pattern, space, rest, index);
+        const partitions = this.split(elements[position], element);
+        if (partitions) return partitions.map((value) => ({ ...space, elements: elements.with(position, value) }));
+      }
+    }
+    return undefined;
+  }
+
+  private splitObject(
+    space: Extract<Space, { kind: 'type' }>,
+    pattern: Extract<Pattern, { kind: 'object' }>
+  ): Space[] | undefined {
+    if (!spaceSubtype(space, objectPatternType(this.compiler, pattern))) return undefined;
+    for (const { name, pattern: child } of pattern.fields) {
+      if (!name) continue;
+      const member = this.compiler.lookupMember(space.type, name, false);
+      if (!member || member.extension) continue;
+      const field = space.properties?.get(name) ?? { kind: 'type', type: member.type };
+      const partitions = this.split(field, child);
+      if (partitions) {
+        return partitions.map((value) => ({
+          ...space,
+          properties: new Map([...(space.properties ?? []), [name, value]]),
+        }));
+      }
+    }
+    return undefined;
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 16 -- Check the known child spaces for each supported pattern shape.
+  private excludesFixedField(pattern: Pattern, field: Space): boolean {
+    if (field.kind === 'constant' || field.kind === 'null') return covers(this.compiler, pattern, field) === false;
+    const arms = coverageDisjuncts(this.compiler, pattern);
+    if (arms) return arms.every((arm) => this.excludesFixedField(arm, field));
+    switch (pattern.kind) {
+      case 'parenthesized':
+      case 'nullCheck':
+      case 'nullAssert': {
+        return this.excludesFixedField(pattern.pattern, field);
+      }
+      case 'and': {
+        return this.excludesFixedField(pattern.left, field) || this.excludesFixedField(pattern.right, field);
+      }
+      case 'record': {
+        if (field.kind !== 'record') return false;
+        const fields = recordFieldPatterns(pattern, field);
+        return !fields || fields.some((child, index) => this.excludesFixedField(child, field.fields[index]));
+      }
+      case 'list': {
+        return field.kind === 'list' && this.excludesList(pattern, field);
+      }
+      case 'object': {
+        if (field.kind !== 'type' || !field.properties) return false;
+        const properties = field.properties;
+        return pattern.fields.some(({ name, pattern: child }) => {
+          const known = name === undefined ? undefined : properties.get(name);
+          return known !== undefined && this.excludesFixedField(child, known);
+        });
+      }
+      default: {
+        return false;
+      }
+    }
+  }
+
+  private excludesList(pattern: Extract<Pattern, { kind: 'list' }>, space: ListSpace): boolean {
+    const bounds = listPatternBounds(this.compiler, pattern, space);
+    if (!bounds) return true;
+    if (isCoverageListShape(pattern)) return false;
+    const { rest, fixed } = bounds;
+    for (const [index, element] of pattern.elements.entries()) {
+      if (element.kind === 'rest') {
+        const known = space.rests?.get(listRestKey(rest, fixed));
+        if (element.pattern && known && this.excludesFixedField(element.pattern, known)) return true;
+      } else {
+        const known = space.elements?.[listPatternPosition(pattern, space, rest, index)];
+        if (known && this.excludesFixedField(element, known)) return true;
+      }
+    }
+    return false;
+  }
+
+  private refine(spaces: Space[], patterns: Pattern[]): Space[] {
+    if (patterns.length === 0) return spaces;
+    const parts = patterns.flatMap((pattern) => patternAlternatives(this.compiler, pattern));
+    const result: Space[] = [];
+    for (const space of spaces) {
+      const refined = this.refineSpace(space, parts);
+      if (result.length + refined.length > MAX_SPACES) return spaces;
+      result.push(...refined);
+    }
+    return result;
+  }
+
+  private refineSpace(space: Space, parts: Pattern[]): Space[] {
+    if (space.kind === 'record') {
+      const fields = this.refineFields(space.fields, (index) => recordSubpatterns(parts, space.names, index));
+      return fields?.map((value) => ({ ...space, fields: value })) ?? [space];
+    }
+    if (space.kind === 'list' && space.elements) {
+      const elements = this.refineFields(space.elements, (index) => listSubpatterns(parts, space.length, index));
+      return elements?.map((value) => ({ ...space, elements: value })) ?? [space];
+    }
+    if (space.kind !== 'type') return [space];
+    const properties = this.propertyPatterns(space.type, parts);
+    if (properties.size === 0) return [space];
+    let products: Map<string, Space>[] = [new Map()];
+    for (const [name, { type, patterns }] of properties) {
+      const options = this.refine(expand(type, this.listCutoff, this.listDepth), patterns);
+      if (products.length * options.length > MAX_SPACES) return [space];
+      products = products.flatMap((product) => options.map((option) => new Map([...product, [name, option]])));
+    }
+    return products.map((properties) => ({ ...space, properties }));
+  }
+
+  private refineFields(fields: readonly Space[], patternsAt: (index: number) => Pattern[]): Space[][] | undefined {
+    let products: Space[][] = [[]];
+    for (const [index, field] of fields.entries()) {
+      const options = this.fieldOptions(field, patternsAt(index));
+      if (products.length * options.length > MAX_SPACES) return undefined;
+      products = products.flatMap((product) => options.map((option) => [...product, option]));
+    }
+    return products;
+  }
+
+  private fieldOptions(field: Space, patterns: Pattern[]): Space[] {
+    const spaces =
+      field.kind === 'type' && patterns.some((pattern) => !coversAll(this.compiler, pattern, field.type))
+        ? expand(field.type, this.listCutoff, this.listDepth)
+        : [field];
+    return this.refine(spaces, patterns);
+  }
+
+  private propertyPatterns(type: DartType, parts: Pattern[]): Map<string, { type: DartType; patterns: Pattern[] }> {
+    const properties = new Map<string, { type: DartType; patterns: Pattern[] }>();
+    for (const part of parts) {
+      if (part.kind !== 'object') continue;
+      const target = objectPatternType(this.compiler, part);
+      if (!isSubtype(type, target)) continue;
+      for (const field of part.fields) {
+        if (!field.name) continue;
+        const member = this.compiler.lookupMember(type, field.name, false);
+        if (!member || member.extension) continue;
+        const entry = properties.get(field.name) ?? { type: member.type, patterns: [] };
+        entry.patterns.push(field.pattern);
+        properties.set(field.name, entry);
+      }
+    }
+    return properties;
+  }
+}
+
+function patternAlternatives(compiler: PatternCompiler, pattern: Pattern): Pattern[] {
+  const arms = coverageDisjuncts(compiler, pattern);
+  if (arms) return arms.flatMap((arm) => patternAlternatives(compiler, arm));
+  switch (pattern.kind) {
+    case 'parenthesized':
+    case 'cast':
+    case 'nullCheck':
+    case 'nullAssert': {
+      return patternAlternatives(compiler, pattern.pattern);
+    }
+    case 'and': {
+      return [...patternAlternatives(compiler, pattern.left), ...patternAlternatives(compiler, pattern.right)];
+    }
+    default: {
+      return [pattern];
+    }
+  }
+}
+
+function recordSubpatterns(parts: Pattern[], names: (string | undefined)[], index: number): Pattern[] {
+  const name = names[index];
+  return parts.flatMap((part) => {
+    if (part.kind !== 'record') return [];
+    const field = name
+      ? part.fields.find((field) => field.name === name)
+      : part.fields.filter((field) => !field.name)[index];
+    return field ? [field.pattern] : [];
+  });
+}
+
+function listSubpatterns(parts: Pattern[], length: number, index: number): Pattern[] {
+  return parts.flatMap((part) => {
+    if (part.kind !== 'list') return [];
+    const rest = part.elements.findIndex((element) => element.kind === 'rest');
+    if (rest === -1) return part.elements[index] ? [part.elements[index] as Pattern] : [];
+    const suffix = part.elements.length - rest - 1;
+    const position = index < rest ? index : index >= length - suffix ? part.elements.length - (length - index) : rest;
+    const element = part.elements[position];
+    return element && element.kind !== 'rest' ? [element] : [];
+  });
+}
+
+function spaceText(space: Space): string {
+  switch (space.kind) {
+    case 'constant': {
+      return space.text;
+    }
+    case 'null': {
+      return 'null';
+    }
+    case 'type': {
+      const fields = [...(space.properties ?? [])].map(([name, value]) => `${name}: ${spaceText(value)}`);
+      return `${typeToString(space.type)}(${fields.join(', ')})`;
+    }
+    case 'list': {
+      return `List(length ${space.hasLongerLengths ? '>=' : '='} ${space.length})`;
+    }
+    case 'record': {
+      const fields = space.fields.map((field, index) => {
+        const name = space.names[index];
+        return name ? `${name}: ${spaceText(field)}` : spaceText(field);
+      });
+      return `(${fields.join(', ')}${fields.length === 1 && !space.names[0] ? ',' : ''})`;
+    }
+  }
+}
+
+/** Whether Dart requires a switch statement on the type to be exhaustive. */
+function isAlwaysExhaustive(type: DartType): boolean {
+  const base = resolveBound(type);
+  if (base.kind === 'null') return true;
+  if (base.kind === 'record')
+    return base.positional.every(isAlwaysExhaustive) && base.named.every((field) => isAlwaysExhaustive(field.type));
+  if (base.kind !== 'interface') return false;
+  const { cls } = base;
+  return cls === coreTypes.bool || cls.kind === 'enum' || cls.modifiers.isSealed;
+}
+
+/** Splits a type into the spaces a switch must cover one by one. */
+function expand(type: DartType, listCutoff: number, listDepth: number): Space[] {
+  const base = resolveBound(type);
+  if (base.kind === 'null') return [{ kind: 'null' }];
+  if (base.kind === 'never' && !base.nullable) return [];
+  if (base.kind === 'dynamic') {
+    return [{ kind: 'type', type: interfaceType(coreTypes.object) }, { kind: 'null' }];
+  }
+  if (isNullable(base) && base.kind !== 'void') {
+    const nonNullSpaces = expand(nonNullable(base), listCutoff, listDepth);
+    return nonNullSpaces.length >= MAX_SPACES ? [{ kind: 'type', type }] : [...nonNullSpaces, { kind: 'null' }];
+  }
+  if (base.kind === 'record') return expandRecord(base, listCutoff, listDepth);
+  if (base.kind === 'interface') return expandInterface(base, listCutoff, listDepth);
+  return [{ kind: 'type', type }];
+}
+
+function expandRecord(type: DartType & { kind: 'record' }, listCutoff: number, listDepth: number): Space[] {
+  const fieldTypes = [...type.positional, ...type.named.map((field) => field.type)];
+  const names: (string | undefined)[] = [
+    ...type.positional.map((): string | undefined => undefined),
+    ...type.named.map((field) => field.name),
+  ];
+  const fields: Space[] = [];
+  for (const fieldType of fieldTypes) {
+    const options = expand(fieldType, listCutoff, listDepth);
+    if (options.length === 0) return [];
+    fields.push(options.length === 1 ? options[0] : { kind: 'type', type: fieldType });
+  }
+  return [{ kind: 'record', fields, names, type }];
+}
+
+function expandInterface(base: DartType & { kind: 'interface' }, listCutoff: number, listDepth: number): Space[] {
+  const { cls } = base;
+  if (cls === coreTypes.bool) {
+    return [
+      { kind: 'constant', key: true, type: base, text: 'true' },
+      { kind: 'constant', key: false, type: base, text: 'false' },
+    ];
+  }
+  if (cls.kind === 'enum') {
+    const upper = overapproximateType(base);
+    const constants = enumConstants(cls).filter((member) => isSubtype(member.type, upper));
+    if (constants.length > MAX_SPACES) return [{ kind: 'type', type: base }];
+    return constants.map((member) => ({
+      kind: 'constant',
+      key: member,
+      type: member.type,
+      text: `${cls.name}.${member.name}`,
+      subject: base,
+    }));
+  }
+  if (cls.modifiers.isSealed) return expandSealed(base, listCutoff, listDepth);
+  const list = listDepth > 0 ? asInstanceOf(base, coreTypes.list) : undefined;
+  if (list) return expandList(base, list.args[0] ?? DYNAMIC, listCutoff, listDepth);
+  return [{ kind: 'type', type: base }];
+}
+
+function expandSealed(base: DartType & { kind: 'interface' }, listCutoff: number, listDepth: number): Space[] {
+  const spaces: Space[] = [];
+  for (const subclass of base.cls.subclasses) {
+    const subtype = subclassType(base, subclass);
+    if (subclass.typeParams.length === 0 && !isSubtype(subtype, base)) continue;
+    const options = expand(subtype, listCutoff, listDepth);
+    if (spaces.length + options.length > MAX_SPACES) return [{ kind: 'type', type: base }];
+    spaces.push(...options);
+  }
+  return spaces;
+}
+
+function expandList(type: DartType, elementType: DartType, cutoff: number, depth: number): Space[] {
+  const options = expand(elementType, cutoff, depth - 1);
+  const spaces: ListSpace[] = [];
+  for (let length = 0; length <= cutoff; length++) {
+    const space: ListSpace = { kind: 'list', type, elementType, length, hasLongerLengths: length === cutoff };
+    if (options.length === 0 && length > 0) continue;
+    const hasPartitions = options.length > 1 || options[0]?.kind === 'record';
+    if (!hasPartitions || options.length ** length > MAX_SPACES - spaces.length - cutoff + length) {
+      spaces.push(space);
+      continue;
+    }
+    let products: Space[][] = [[]];
+    for (let index = 0; index < length; index++) {
+      products = products.flatMap((elements) => options.map((element) => [...elements, element]));
+    }
+    for (const elements of products) spaces.push({ ...space, elements });
+  }
+  return spaces;
+}
+
+function listLengthCutoff(compiler: PatternCompiler, patterns: Pattern[]): number {
+  let cutoff = 0;
+  let prefix = 0;
+  let suffix = 0;
+  const visit = (pattern: Pattern): void => {
+    if (pattern.kind !== 'list' || isCoverageListShape(pattern)) return;
+    for (const element of pattern.elements) {
+      if (element.kind !== 'rest') cutoff = Math.max(cutoff, listLengthCutoff(compiler, [element]));
+    }
+    const rest = pattern.elements.findIndex((element) => element.kind === 'rest');
+    if (rest === -1) {
+      prefix = Math.max(prefix, pattern.elements.length);
+      return;
+    }
+    const after = pattern.elements.length - rest - 1;
+    const part = pattern.elements[rest];
+    const nested = part.kind === 'rest' && part.pattern ? listLengthCutoff(compiler, [part.pattern]) : 0;
+    prefix = Math.max(prefix, rest + nested);
+    suffix = Math.max(suffix, after);
+  };
+  for (const pattern of patterns) visitNestedPatterns(compiler, pattern, visit);
+  return Math.max(prefix + suffix, cutoff);
+}
+
+function listNesting(compiler: PatternCompiler, pattern: Pattern): number {
+  let depth = 0;
+  visitNestedPatterns(compiler, pattern, (part) => {
+    if (part.kind !== 'list') return;
+    if (isCoverageListShape(part)) {
+      depth = Math.max(depth, 1);
+      return;
+    }
+    let nested = 0;
+    for (const element of part.elements) {
+      const child = element.kind === 'rest' ? element.pattern : element;
+      if (child) nested = Math.max(nested, listNesting(compiler, child));
+    }
+    depth = Math.max(depth, nested + 1);
+  });
+  return depth;
+}
+
+function visitNestedPatterns(compiler: PatternCompiler, pattern: Pattern, visit: (pattern: Pattern) => void): void {
+  visit(pattern);
+  const arms = coverageDisjuncts(compiler, pattern);
+  if (arms) {
+    for (const arm of arms) visitNestedPatterns(compiler, arm, visit);
+    return;
+  }
+  switch (pattern.kind) {
+    case 'and': {
+      visitNestedPatterns(compiler, pattern.left, visit);
+      visitNestedPatterns(compiler, pattern.right, visit);
+      break;
+    }
+    case 'cast':
+    case 'nullAssert':
+    case 'nullCheck':
+    case 'parenthesized': {
+      visitNestedPatterns(compiler, pattern.pattern, visit);
+      break;
+    }
+    case 'record':
+    case 'object': {
+      for (const field of pattern.fields) visitNestedPatterns(compiler, field.pattern, visit);
+      break;
+    }
+    default: {
+      break;
+    }
+  }
+}
+
+function enumConstants(cls: ClassInfo): FieldMember[] {
+  return [...cls.staticMembers.values()].filter(
+    (member): member is FieldMember => member.kind === 'field' && member.isEnumValue === true
+  );
+}
+
+/** A subclass's type as an instance of a sealed supertype, with type arguments matching where they can. */
+function subclassType(supertype: DartType & { kind: 'interface' }, subclass: ClassInfo): DartType {
+  if (subclass.typeParams.length === 0) return interfaceType(subclass);
+  const path = subclass.supertypePath(supertype.cls);
+  const map = new Map(subclass.typeParams.map((param) => [param, DYNAMIC as DartType]));
+  if (path) {
+    for (const [index, arg] of path.args.entries()) {
+      if (arg.kind === 'typeParam' && map.has(arg.param)) map.set(arg.param, supertype.args[index] ?? DYNAMIC);
+    }
+  }
+  return substitute(subclass.thisType, map);
+}
+
+/** Whether a pattern matches every value of a type. */
+// code-gauge-allow functionCognitiveComplexity 29 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
+// code-gauge-allow functionNcss 48 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
+export function coversAll(compiler: PatternCompiler, pattern: Pattern, type: DartType): boolean {
+  const comparison = nullPatternComparison(pattern);
+  if (comparison) return comparison === '==' ? isSubtype(type, NULL) : !isPotentiallyNullable(type);
+  const arms = coverageDisjuncts(compiler, pattern);
+  if (arms) return arms.some((arm) => coversAll(compiler, arm, type));
+  switch (pattern.kind) {
+    case 'wildcard':
+    case 'variable': {
+      if (pattern.kind === 'variable' && !pattern.type) return true;
+      if (!pattern.type) return true;
+      return isSubtype(type, compiler.resolveType(pattern.type));
+    }
+    case 'parenthesized': {
+      return coversAll(compiler, pattern.pattern, type);
+    }
+    case 'and': {
+      return coversAll(compiler, pattern.left, type) && coversAll(compiler, pattern.right, type);
+    }
+    case 'cast': {
+      return coversAll(compiler, pattern.pattern, compiler.resolveType(pattern.type));
+    }
+    case 'nullAssert': {
+      return coversAll(compiler, pattern.pattern, nonNullable(type));
+    }
+    case 'nullCheck': {
+      return !isPotentiallyNullable(type) && coversAll(compiler, pattern.pattern, type);
+    }
+    case 'object': {
+      const target = objectPatternType(compiler, pattern);
+      if (!isSubtype(type, target) || isPotentiallyNullable(type)) return false;
+      return pattern.fields.every((field) => {
+        const member = field.name ? compiler.lookupMember(type, field.name, false) : undefined;
+        return member ? coversAll(compiler, field.pattern, member.type) : false;
+      });
+    }
+    case 'record': {
+      const base = resolveBound(type);
+      if (base.kind !== 'record' || isPotentiallyNullable(type)) return false;
+      return recordFieldsCover(pattern, base, (fieldPattern, fieldType) =>
+        coversAll(compiler, fieldPattern, fieldType)
+      );
+    }
+    case 'list': {
+      const base = resolveBound(type);
+      if (base.kind !== 'interface' || isPotentiallyNullable(type)) return false;
+      const list = asInstanceOf(base, coreTypes.list);
+      return (
+        !!list &&
+        listCovers(compiler, pattern, {
+          kind: 'list',
+          type,
+          elementType: list.args[0] ?? DYNAMIC,
+          length: 0,
+          hasLongerLengths: true,
+        }) === true
+      );
+    }
+    case 'map': {
+      const base = resolveBound(type);
+      return (
+        base.kind === 'interface' &&
+        !isPotentiallyNullable(type) &&
+        asInstanceOf(base, coreTypes.map) !== undefined &&
+        pattern.entries.length === 0
+      );
+    }
+    default: {
+      return false;
+    }
+  }
+}
+
+function objectPatternType(compiler: PatternCompiler, pattern: Extract<Pattern, { kind: 'object' }>): DartType {
+  return compiler.objectPatternTypes.get(pattern) ?? compiler.resolveType(pattern.type);
+}
+
+function recordFieldsCover(
+  pattern: Extract<Pattern, { kind: 'record' }>,
+  type: DartType & { kind: 'record' },
+  check: (pattern: Pattern, type: DartType) => boolean
+): boolean {
+  const positional = pattern.fields.filter((field) => field.name === undefined);
+  const named = pattern.fields.filter((field) => field.name !== undefined);
+  if (positional.length !== type.positional.length || named.length !== type.named.length) return false;
+  return (
+    positional.every((field, index) => check(field.pattern, type.positional[index])) &&
+    named.every((field) => {
+      const fieldType = type.named.find((other) => other.name === field.name)?.type;
+      return fieldType !== undefined && check(field.pattern, fieldType);
+    })
+  );
+}
+
+// code-gauge-allow functionCognitiveComplexity 18 -- Match every supported kind of pattern against a value space.
+// code-gauge-allow functionNcss 40 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
+function covers(compiler: PatternCompiler, pattern: Pattern, space: Space): Coverage {
+  const comparison = nullPatternComparison(pattern);
+  if (comparison)
+    return comparison === '==' ? space.kind === 'null' : space.kind !== 'null' && !isPotentiallyNullable(space.type);
+  const arms = coverageDisjuncts(compiler, pattern);
+  if (arms) return combineCoverage(arms, (arm) => covers(compiler, arm, space), false);
+  switch (pattern.kind) {
+    case 'parenthesized': {
+      return covers(compiler, pattern.pattern, space);
+    }
+    case 'and': {
+      return combineCoverage([pattern.left, pattern.right], (part) => covers(compiler, part, space), true);
+    }
+    case 'cast': {
+      return (
+        coversAll(compiler, pattern.pattern, compiler.resolveType(pattern.type)) ||
+        covers(compiler, pattern.pattern, space)
+      );
+    }
+    case 'nullAssert': {
+      return space.kind === 'null' || covers(compiler, pattern.pattern, space);
+    }
+    case 'nullCheck': {
+      return space.kind !== 'null' && covers(compiler, pattern.pattern, space);
+    }
+    case 'wildcard':
+    case 'variable': {
+      if (!pattern.type) return true;
+      const tested = compiler.resolveType(pattern.type);
+      if (space.kind === 'null') return isSubtype(NULL, tested);
+      return spaceSubtype(space, tested);
+    }
+    case 'constant': {
+      return constantCovers(compiler, pattern.value, space);
+    }
+    case 'object': {
+      return objectCovers(compiler, pattern, space);
+    }
+    case 'record': {
+      return recordCovers(compiler, pattern, space);
+    }
+    case 'list': {
+      if (space.kind === 'list') return listCovers(compiler, pattern, space);
+      return space.kind === 'type' && coversAll(compiler, pattern, space.type);
+    }
+    case 'map': {
+      return space.kind === 'type' && coversAll(compiler, pattern, space.type);
+    }
+    default: {
+      return false;
+    }
+  }
+}
+
+// code-gauge-allow functionCognitiveComplexity 18 -- Keep the prefix, middle and suffix of each list length space together.
+function listCovers(
+  compiler: PatternCompiler,
+  pattern: Extract<Pattern, { kind: 'list' }>,
+  space: ListSpace
+): Coverage {
+  const bounds = listPatternBounds(compiler, pattern, space);
+  if (!bounds) return false;
+  if (isCoverageListShape(pattern)) return true;
+  const { rest, fixed } = bounds;
+  return combineCoverage(
+    pattern.elements.entries(),
+    ([index, element]) => {
+      if (element.kind === 'rest') {
+        if (!element.pattern) return true;
+        return covers(compiler, element.pattern, listRest(space, listRestKey(rest, fixed)));
+      }
+      const position = listPatternPosition(pattern, space, rest, index);
+      const elementSpace = space.elements?.[position];
+      return elementSpace ? covers(compiler, element, elementSpace) : coversAll(compiler, element, space.elementType);
+    },
+    true
+  );
+}
+
+function listPatternBounds(
+  compiler: PatternCompiler,
+  pattern: Extract<Pattern, { kind: 'list' }>,
+  space: ListSpace
+): { rest: number; fixed: number } | undefined {
+  if (
+    pattern.typeArguments?.length === 1 &&
+    !isSubtype(space.elementType, compiler.resolveType(pattern.typeArguments[0]))
+  )
+    return undefined;
+  const rest = pattern.elements.findIndex((element) => element.kind === 'rest');
+  const fixed = pattern.elements.length - (rest !== -1 ? 1 : 0);
+  if (rest !== -1 ? space.length < fixed : space.hasLongerLengths || space.length !== fixed) return undefined;
+  return { rest, fixed };
+}
+
+function listPatternPosition(
+  pattern: Extract<Pattern, { kind: 'list' }>,
+  space: ListSpace,
+  rest: number,
+  index: number
+): number {
+  return rest !== -1 && index > rest ? space.length + index - pattern.elements.length : index;
+}
+
+function listRestKey(rest: number, fixed: number): string {
+  return `${rest}:${fixed - rest}`;
+}
+
+function listRest(space: ListSpace, key: string): Space {
+  // The SDK's exhaustiveness checker treats each RestKey as a separate List<E> property, even for a fixed outer length.
+  return space.rests?.get(key) ?? { kind: 'type', type: interfaceType(coreTypes.list, [space.elementType]) };
+}
+function constantCovers(compiler: PatternCompiler, value: Expression, space: Space): Coverage {
+  if (space.kind !== 'constant' && space.kind !== 'null') return false;
+  const compiled = compiler.patternConstants.get(value);
+  if (!compiled) return false;
+  const type = space.kind === 'null' ? NULL : space.type;
+  if (!isSubtype(type, compiled.type) && !isSubtype(compiled.type, type)) return false;
+  const matches = (actual: Value): boolean => {
+    if (space.kind === 'null') return actual === undefined;
+    const { key } = space;
+    if (typeof key === 'boolean') return actual === key;
+    return actual instanceof DartObject && actual.cls === key.owner && actual.native?.name === key.name;
+  };
+  if (compiled.constValue) return matches(compiled.constValue.value);
+  return (frame) => matches(compiled.run(frame));
+}
+
+function objectCovers(
+  compiler: PatternCompiler,
+  pattern: Extract<Pattern, { kind: 'object' }>,
+  space: Space
+): Coverage {
+  if (space.kind === 'null') return false;
+  const target = objectPatternType(compiler, pattern);
+  if (!spaceSubtype(space, target)) return false;
+  if (space.kind === 'constant' && pattern.fields.length > 0) return false;
+  return combineCoverage(
+    pattern.fields,
+    (field) => {
+      if (!field.name) return false;
+      const property = space.kind === 'type' ? space.properties?.get(field.name) : undefined;
+      if (property) return covers(compiler, field.pattern, property);
+      const member = compiler.lookupMember(space.type, field.name, false);
+      return member ? coversAll(compiler, field.pattern, member.type) : false;
+    },
+    true
+  );
+}
+
+function spaceSubtype(space: Exclude<Space, { kind: 'null' }>, type: DartType): boolean {
+  return (
+    isSubtype(space.type, type) ||
+    (space.kind === 'constant' && space.subject !== undefined && isSubtype(space.subject, type))
+  );
+}
+
+function recordCovers(
+  compiler: PatternCompiler,
+  pattern: Extract<Pattern, { kind: 'record' }>,
+  space: Space
+): Coverage {
+  if (space.kind === 'record') {
+    const fields = recordFieldPatterns(pattern, space);
+    return fields
+      ? combineCoverage(fields.entries(), ([index, field]) => covers(compiler, field, space.fields[index]), true)
+      : false;
+  }
+  if (space.kind !== 'type') return false;
+  const base = resolveBound(space.type);
+  return (
+    base.kind === 'record' &&
+    recordFieldsCover(pattern, base, (fieldPattern, fieldType) => coversAll(compiler, fieldPattern, fieldType))
+  );
+}
+
+function recordFieldPatterns(pattern: Extract<Pattern, { kind: 'record' }>, space: RecordSpace): Pattern[] | undefined {
+  const positional = pattern.fields.filter((field) => field.name === undefined);
+  const named = pattern.fields.filter((field) => field.name !== undefined);
+  const positionalCount = space.names.filter((name) => name === undefined).length;
+  if (positional.length !== positionalCount || named.length !== space.names.length - positionalCount) return undefined;
+  const fields: Pattern[] = [];
+  for (const [index, name] of space.names.entries()) {
+    const field = name === undefined ? positional[index] : named.find((other) => other.name === name);
+    if (!field) return undefined;
+    fields.push(field.pattern);
+  }
+  return fields;
+}
