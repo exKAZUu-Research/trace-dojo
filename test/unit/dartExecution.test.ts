@@ -2009,6 +2009,11 @@ extension E on int { int operator -() => 50; int operator +(int o) => 7; }
 extension F on int { int operator +(int o) => 8; }
 void main() { print([S('a') + 'b', 'a' + 'b', -E(1), E(1) + 2, F(1) + 2, 1 + 2]); }`;
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[extension, ab, 50, 7, 8, 3]\n' });
+  const call = `extension G on int Function(int) { int call(int x) => 50; }
+extension H on dynamic { int call(int x) => 60; }
+int f(int x) => x;
+void main() { print([G(f)(1), H(f)(1), f(1)]); }`;
+  expect(executeProgram('dart', call)).toMatchObject({ kind: 'executed', stdout: '[50, 60, 1]\n' });
 });
 
 test('Dart unqualified extension members bind to the enclosing extension', () => {
@@ -2154,6 +2159,10 @@ void main() { h(C()); f([C()]); g((C(), 1)); }`;
     kind: 'executed',
     stdout: '[int, 2]\n[int, 2]\n[int, 2]\n',
   });
+  const map = `class C { int call(int x) => x + 1; }
+void h<T>(Map<String, T Function(int)> fs) => print(T);
+void main() { h({'a': C()}); }`;
+  expect(executeProgram('dart', map)).toMatchObject({ kind: 'compileError' });
 });
 
 test('Dart comparison operators are not associative', () => {

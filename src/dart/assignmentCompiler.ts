@@ -668,7 +668,11 @@ export abstract class AssignmentCompiler extends ControlCompiler {
   ): Compiled {
     if (!target) return compiled;
     // A context still waiting for a call's type arguments only guides the element, whose own type then constrains them.
-    if (containsInferenceHole(target)) return this.towardInferenceContext(compiled, target, span);
+    // Dart converts a callable object there for list and set elements but keeps its class type as a map key or value.
+    if (containsInferenceHole(target))
+      return kind === 'map'
+        ? (this.instantiateGeneric(compiled, target, true) ?? compiled)
+        : this.towardInferenceContext(compiled, target, span);
     const elementName = collectionName(kind);
     return this.coerce(
       compiled,

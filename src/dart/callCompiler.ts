@@ -372,6 +372,9 @@ export abstract class CallCompiler extends OperatorCompiler {
     span: Span,
     context: DartType | undefined
   ): Compiled {
+    // `E(f)(x)` calls the selected extension's `call`, never the function value itself.
+    if (target.extensionOverride)
+      return this.compileMethodCall(target, 'call', args, typeArguments, span, context, false);
     const base = resolveBound(target.type);
     if (base.kind === 'dynamic' || (base.kind === 'interface' && base.cls === coreTypes.function && !base.nullable)) {
       return this.dynamicCall(target, undefined, args, span, false, typeArguments ?? []);
