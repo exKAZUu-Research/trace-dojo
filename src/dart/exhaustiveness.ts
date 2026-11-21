@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 478 -- Switch coverage shares type partitions and pattern coverage rules.
+// code-gauge-allow-file fileNcss 544 -- Switch coverage shares type partitions and pattern coverage rules.
 import type { Expression, Pattern, Span } from './ast';
 import { nullPatternComparison } from './astWalk';
 import type { ClassInfo, FieldMember } from './classes';
@@ -151,6 +151,7 @@ class ObjectSpaces {
     return remaining;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 24 -- Choose a single viable field partition without expanding the other fields.
   private splitRecord(space: RecordSpace, parts: readonly Pattern[]): RecordSpace[] | undefined {
     for (const part of parts) {
       if (part.kind !== 'record') continue;

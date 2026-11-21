@@ -26,23 +26,22 @@ interface AssignmentTargets {
 }
 
 export function declaredMemberNames(declaration: ClassDeclaration | ExtensionDeclaration): ReadonlySet<string> {
-  const names = new Set<string>();
-  for (const member of declaration.members) {
-    if (member.kind === 'field') for (const variable of member.variables) names.add(variable.name);
-    if (member.kind === 'method') names.add(member.name);
-  }
-  if (declaration.kind === 'class') {
-    for (const value of declaration.enumConstants) names.add(value.name);
-    const primary = declaration.primaryConstructor?.parameters;
-    if (primary) {
-      for (const parameter of [...primary.positional, ...primary.named]) {
-        if (
-          declaration.classKind === 'extensionType' ||
-          (parameter.binding === 'plain' && (parameter.isVar || parameter.isFinal))
-        )
-          names.add(parameter.name);
-      }
-    }
+  const names = new Set(
+    declaration.members.flatMap((member) => {
+      if (member.kind === 'field') return member.variables.map(({ name }) => name);
+      return member.kind === 'method' ? [member.name] : [];
+    })
+  );
+  if (declaration.kind !== 'class') return names;
+  for (const value of declaration.enumConstants) names.add(value.name);
+  const primary = declaration.primaryConstructor?.parameters;
+  if (!primary) return names;
+  for (const parameter of [...primary.positional, ...primary.named]) {
+    if (
+      declaration.classKind === 'extensionType' ||
+      (parameter.binding === 'plain' && (parameter.isVar || parameter.isFinal))
+    )
+      names.add(parameter.name);
   }
   return names;
 }

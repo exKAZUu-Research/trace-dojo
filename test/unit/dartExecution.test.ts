@@ -735,6 +735,27 @@ test('Dart member names cannot reuse enclosing names or type parameters', () => 
   expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: 'C\n' });
 });
 
+test('wildcard Dart type parameters keep arity without binding a name', () => {
+  const program = `class Field<_, _> { int _ = 1; }
+class Constructor<_> { Constructor._(); }
+extension Getter<_> on String { int get _ => 2; }
+class _ { String get label => 'binding'; }
+class Typed<_> {
+  _? value;
+  String read() => value?.label ?? 'empty';
+}
+void main() {
+  print(Field<int, int>()._);
+  print(Constructor<int>._().runtimeType);
+  print('x'._);
+  print(Typed<String>().read());
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '1\nConstructor<int>\n2\nempty\n',
+  });
+});
+
 test('own Dart members shadow type names only in their declaration scope', () => {
   for (const declarations of [
     'class C { String? value; int String = 1; }',

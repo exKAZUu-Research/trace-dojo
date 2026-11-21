@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 565 -- Declaration scopes, types, and record shapes share the compiler environment.
+// code-gauge-allow-file fileNcss 574 -- Declaration scopes, types, and record shapes share the compiler environment.
 import { CompileError } from '../interpreter/diagnostics';
 import type {
   ClassDeclaration,
@@ -250,7 +250,7 @@ export abstract class CompilerBase {
 
   protected withTypeParams<T>(params: TypeParam[], run: () => T, staticOwner = false): T {
     this.typeScopes.push({
-      names: new Map(params.map((param) => [param.name, param])),
+      names: new Map(params.filter((param) => param.name !== '_').map((param) => [param.name, param])),
       staticOwner,
       enclosingFunction: this.fn,
     });
@@ -272,6 +272,7 @@ export abstract class CompilerBase {
     const params = syntax.map((parameter) => new TypeParam(parameter.name));
     const names = new Set<string>();
     for (const parameter of syntax) {
+      if (parameter.name === '_') continue;
       if (names.has(parameter.name)) this.error(parameter, `型引数 ${parameter.name} が重複しています。`);
       names.add(parameter.name);
     }

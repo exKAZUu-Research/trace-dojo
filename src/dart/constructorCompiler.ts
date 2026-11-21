@@ -110,7 +110,10 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     span: Span,
     isConstructor = false
   ): void {
-    if ((!isConstructor && name === owner.name) || owner.typeParams.some((param) => param.name === name))
+    if (
+      (!isConstructor && name === owner.name) ||
+      (name !== '_' && owner.typeParams.some((param) => param.name === name))
+    )
       this.error(span, `メンバー名 ${name} は、持ち主の名前または型引数と重複しています。`);
   }
 
