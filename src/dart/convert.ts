@@ -50,6 +50,8 @@ import { ExpressionConverter, VAR_WITH_TYPE } from './convertExpression';
 /** Converts a tree-sitter tree of a Dart library into the AST, rejecting syntax the interpreter does not run. */
 type FormalContext = 'ordinary' | 'constructor' | 'primary';
 
+const PARAMETER_MODIFIERS = ['final', 'const', 'late'] as const;
+
 const RESERVED_WORDS = new Set([
   'assert',
   'break',
@@ -908,6 +910,11 @@ export class Converter extends ExpressionConverter {
       (parameter) => parameter.isVar && (context !== 'primary' || parameter.binding !== 'plain')
     );
     if (invalidVar) syntaxError(invalidVar, 'var は主コンストラクタのフィールド引数にだけ書けます。');
+    // Dart 3.13 reserves final on parameters for a primary constructor's field parameters.
+    const invalidFinal = [...positional, ...named].find(
+      (parameter) => parameter.binding === 'plain' && parameter.isFinal && context !== 'primary'
+    );
+    if (invalidFinal) syntaxError(invalidFinal, 'final は、ここには書けません。');
     const requiredWithDefault = named.find((parameter) => parameter.isRequired && parameter.defaultValue);
     if (requiredWithDefault) syntaxError(requiredWithDefault, 'required の引数には既定値を書けません。');
     const names = new Set([...positional, ...named].map((parameter) => parameter.name));
@@ -980,6 +987,8 @@ export class Converter extends ExpressionConverter {
         return unsupported(node, '関数の型を古い形で書いた引数');
       }
       const ownTokens = new Set(parts.filter((child) => !child.isNamed).map((child) => child.type));
+      const modifier = PARAMETER_MODIFIERS.find((token) => tokens.has(token) || ownTokens.has(token));
+      if (modifier) syntaxError(node, `${modifier} は、ここには書けません。`);
       return {
         annotations: this.annotationsOf(node),
         name,
@@ -999,6 +1008,8 @@ export class Converter extends ExpressionConverter {
     }
     const typeNode = children.find((child) => child.type === 'type');
     const nameNode = fieldOf(node, 'name') ?? children.find((child) => child.type === 'identifier');
+    const modifier = PARAMETER_MODIFIERS.find((token) => token !== 'final' && tokens.has(token));
+    if (modifier) syntaxError(node, `${modifier} は、ここには書けません。`);
     return {
       annotations: this.annotationsOf(node),
       name: requireNode(nameNode, node).text,

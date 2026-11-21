@@ -1703,6 +1703,23 @@ void main() {
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '8\n10\n' });
 });
 
+test.each([
+  'void f(final int p) {}',
+  'class A { A(final int x); }',
+  'class A { final int x; A(final this.x); }',
+  'void f({required final int a}) {}',
+  'class A { void m(late int x) {} }',
+  'final g = (const int p) => p;',
+])('Dart rejects parameter modifiers outside primary constructor fields: %s', (declaration) => {
+  expect(executeProgram('dart', `${declaration}\nvoid main() {}`)).toMatchObject({ kind: 'compileError' });
+  expect(executeProgram('dart', 'class P(final int x, var int y) {}\nvoid main() { print(P(1, 2).x); }')).toMatchObject(
+    {
+      kind: 'executed',
+      stdout: '1\n',
+    }
+  );
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}
