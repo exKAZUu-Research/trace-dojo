@@ -1921,6 +1921,19 @@ void main() { s(Sq()); print(C.s(Sq())); }`;
   ).toMatchObject({ kind: 'compileError' });
 });
 
+test('Dart extension types must redeclare members inherited both as extension and class members', () => {
+  const header = 'class A { int f() => 1; }\nextension type E(A e) implements A { int f() => 2; }';
+  expect(executeProgram('dart', `${header}\nextension type G(A z) implements E, A {}\nvoid main() {}`)).toMatchObject({
+    kind: 'compileError',
+  });
+  const valid = `${header}
+extension type G(A z) implements E, A { int f() => 3; }
+extension type H(A e) implements A {}
+extension type I(A z) implements H, A {}
+void main() { print([G(A()).f(), I(A()).f()]); }`;
+  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '[3, 1]\n' });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}

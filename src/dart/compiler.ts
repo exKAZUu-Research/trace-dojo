@@ -1382,21 +1382,27 @@ export class Compiler extends MemberCompiler {
     }
   }
 
-  /** An extension type must redeclare a member that its extension-type supertypes declare differently. */
+  /**
+   * An extension type must redeclare a member it would inherit from several supertypes when an extension type declares
+   * one of them, even with identical signatures.
+   */
   private checkInheritedExtensionMembers(cls: ClassInfo, declaration: ClassDeclaration): void {
-    const parents = cls.directSupertypes.map((type) => type.cls).filter((parent) => parent.kind === 'extensionType');
-    if (parents.length < 2) return;
+    const parents = cls.directSupertypes.map((type) => type.cls);
+    const extensionParents = parents.filter((parent) => parent.kind === 'extensionType');
+    if (extensionParents.length === 0 || parents.length < 2) return;
     for (const setter of [false, true]) {
       const names = new Map<string, string>();
       const visited = new Set<ClassInfo>();
-      for (const parent of parents) extensionMemberNames(parent, setter, names, visited);
+      for (const parent of extensionParents) extensionMemberNames(parent, setter, names, visited);
       for (const [key, name] of names) {
         if ((setter ? cls.setters : cls.members).get(name)?.owner === cls) continue;
-        const origins = new Set(parents.map((parent) => parent.interfaceMember(key, setter)).filter(Boolean));
-        if (origins.size > 1)
+        const origins = new Set(
+          parents.map((parent) => parent.interfaceMember(key, setter)).filter((member) => !!member)
+        );
+        if (origins.size > 1 && [...origins].some((member) => member?.owner.kind === 'extensionType'))
           this.error(
             declaration,
-            `拡張型 ${cls.name} は、${name} を複数の拡張型から受け継ぐので、宣言し直してください。`
+            `拡張型 ${cls.name} は、${name} を複数の上位型から受け継ぐので、宣言し直してください。`
           );
       }
     }
