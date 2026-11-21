@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 669 -- Assignment targets share read and write dispatch.
+// code-gauge-allow-file fileNcss 674 -- Assignment targets share read and write dispatch.
 import type { CascadeSelector, CollectionElement, Expression, ForInBinding, Span, SwitchExpressionCase } from './ast';
 import type { ClassInfo, Member } from './classes';
 import { at, type Compiled, type Eval, type ResolvedMember, typeName } from './compilerBase';
@@ -523,8 +523,8 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Each branch is one of the cases Dart distinguishes for this construct.
-  // code-gauge-allow functionNcss 43 -- One case per form of the construct, which reads best together.
+  // code-gauge-allow functionCognitiveComplexity 21 -- Resolve static operators, then build the prepared read and write for any receiver.
+  // code-gauge-allow functionNcss 45 -- Resolve static operators, then build the prepared read and write for any receiver.
   private indexTarget(
     receiver: Compiled,
     indexSyntax: Expression,
@@ -552,6 +552,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       readType = getter?.member.kind === 'method' ? (getter.type as FunctionType).returnType : undefined;
     }
     let index = this.compileExpression(indexSyntax, indexContext);
+    if (index.type.kind === 'void') this.error(indexSyntax, 'void の値は、添字に使えません。');
     if (indexContext)
       index = this.coerce(
         index,
@@ -695,9 +696,8 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     span: Span,
     kind: 'list' | 'set' | 'map'
   ): Compiled {
-    if (!target || target.kind === 'dynamic') return compiled;
+    if (!target) return compiled;
     const elementName = collectionName(kind);
-    if (compiled.type.kind === 'void') this.error(span, `void の値は${elementName}に入れられません。`);
     return this.coerce(
       compiled,
       target,
@@ -715,18 +715,17 @@ export abstract class AssignmentCompiler extends ControlCompiler {
   ): { run: (frame: Frame, add: AddElement) => void; isConst: boolean } {
     if (kind !== 'map') this.error(element, `${collectionName(kind)}のリテラルには、キーと値の組は書けません。`);
     const { nullAwareKey, nullAwareValue } = element;
+    const keyContext = nullAwareKey ? nullableContext(elementContext) : elementContext;
+    const mapValueContext = nullAwareValue ? nullableContext(valueContext) : valueContext;
     const key = this.coerceElement(
-      this.compileExpression(element.key, nullAwareKey ? nullableContext(elementContext) : elementContext),
-      nullAwareKey ? nullableContext(elementContext) : elementContext,
+      this.compileExpression(element.key, keyContext),
+      keyContext ?? DYNAMIC,
       element.key,
       kind
     );
-    const value = this.coerceElement(
-      this.compileExpression(element.value, nullAwareValue ? nullableContext(valueContext) : valueContext),
-      nullAwareValue ? nullableContext(valueContext) : valueContext,
-      element.value,
-      kind
-    );
+    const compiledValue = this.compileExpression(element.value, mapValueContext);
+    const valueType = nullAwareValue && mapValueContext?.kind === 'void' ? DYNAMIC : (mapValueContext ?? DYNAMIC);
+    const value = this.coerceElement(compiledValue, valueType, element.value, kind);
     types.push({
       key: nullAwareKey ? nonNullable(key.type) : key.type,
       value: nullAwareValue ? nonNullable(value.type) : value.type,
@@ -879,17 +878,16 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     if (element.casePattern) {
       const subject = this.compileExpression(element.condition);
       const casePattern = element.casePattern;
-      const before = this.flow;
       const { result, slots } = this.withScope(() => {
         const { pattern, guard, whenFalse } = this.compileCasePattern(casePattern.pattern, subject, casePattern.guard);
         const body = this.compileCollectionElements([element.consequent], kind, elementContext, valueContext);
-        return { pattern, guard, whenFalse, body };
+        return { pattern, guard, whenFalse, afterThen: this.flow, body };
       });
       this.flow = result.whenFalse;
       const otherwise = element.alternative
         ? this.compileCollectionElements([element.alternative], kind, elementContext, valueContext)
         : undefined;
-      this.flow = before;
+      this.flow = Flow.join(result.afterThen, this.flow);
       types.push(...result.body.types, ...(otherwise?.types ?? []));
       const test = subject.run;
       return {
@@ -935,13 +933,11 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     valueContext: DartType | undefined,
     types: ElementTypes[]
   ): (frame: Frame, add: AddElement) => void {
-    const before = this.flow;
     const { result, slots } = this.withScope(() =>
       element.kind === 'forInElement'
         ? this.compileForInElement(element, kind, elementContext, valueContext, types)
         : this.compileCountedForElement(element, kind, elementContext, valueContext, types)
     );
-    this.flow = before;
     return (frame, add) => {
       try {
         result(frame, add);
@@ -961,12 +957,14 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     const iterable = this.compileExpression(element.iterable);
     const elementType = this.elementTypeOfIterable(iterable, element.iterable);
     this.enterLoop(element);
+    const afterSource = this.flow;
     const savedRecords = this.recordsSteps;
     this.recordsSteps = false;
     const bind = this.compileForInBinding(element.binding, elementType, element);
     this.recordsSteps = savedRecords;
     const body = this.compileCollectionElements([element.body], kind, elementContext, valueContext);
     types.push(...body.types);
+    this.flow = afterSource;
     const source = iterable.run;
     return (frame, add) => {
       const { runtime } = frame;
@@ -994,11 +992,13 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     const { initRun, loopSlots } = this.compileForElementInit(element);
     this.enterLoop(element);
     const condition = element.condition ? this.compileCondition(element.condition) : undefined;
+    const afterLoop = condition?.flow.whenFalse ?? this.flow.unreachable;
     if (condition) this.flow = condition.flow.whenTrue;
     const body = this.compileCollectionElements([element.body], kind, elementContext, valueContext);
     types.push(...body.types);
     const updates = element.updates.map((update) => this.compileExpression(update).run);
     const test = condition?.compiled.run;
+    this.flow = afterLoop;
     return (frame, add) => {
       initRun?.(frame);
       while (!test || test(frame)) {

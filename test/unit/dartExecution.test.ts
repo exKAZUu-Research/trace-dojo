@@ -3534,3 +3534,76 @@ void main() {
     expect(executeProgram('dart', `${declaration} void main() {}`)).toMatchObject({ kind: 'compileError' });
   }
 });
+
+test('JSON revivers see each value accepted before a parse error', () => {
+  const program = `import 'dart:convert';
+void main() {
+  dynamic revive(dynamic key, dynamic value) { print([key, value]); return value; }
+  print(jsonDecode('{"x":1,"x":2}', reviver: revive));
+  for (var input in ['[1,2,?]', '[1x]', '[[1],{"b":3}] trailing']) {
+    try { jsonDecode(input, reviver: revive); }
+    catch (error) { print(error.runtimeType); }
+  }
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[x, 1]\n[x, 2]\n[null, {x: 2}]\n{x: 2}\n[0, 1]\n[1, 2]\nFormatException\nFormatException\n[0, 1]\n[0, [1]]\n[b, 3]\n[1, {b: 3}]\nFormatException\n',
+  });
+});
+
+test('native lists expose their identity hash as hashCode', () => {
+  const program = `void main() {
+  for (final list in [<int>[], List<int>.filled(2, 0), List<int>.unmodifiable([1])]) {
+    print(list.hashCode == identityHashCode(list));
+  }
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'true\ntrue\ntrue\n' });
+});
+
+test('collection control flow retains guaranteed assignments', () => {
+  const program = `void main() {
+  int n;
+  bool b = true;
+  var choose = [if (b case true) n = 1 else n = 2];
+  int i;
+  var counted = [for (i = 0; i < 1; i++) i];
+  late List<int> source;
+  var values = [for (final item in (source = [3])) item];
+  print([choose, n, counted, i, values, source]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[[1], 1, [0], 1, [3], [3]]\n',
+  });
+  expect(
+    executeProgram('dart', 'void main() { int n; var a = [for (var i = 0; i < 0; i++) n = 1]; print(n); }')
+  ).toMatchObject({ kind: 'compileError' });
+});
+
+test('collection element contexts determine whether void values can be used', () => {
+  const program = `void log() {}
+void main() {
+  final List<void> contextual = [log()];
+  print([[log()], <void>[log()], contextual, {log()}, <void, int>{log(): 1}, <int, void>{1: log()}, [?log()]]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[[null], [null], [null], {null}, {null: 1}, {1: null}, []]\n',
+  });
+  for (const expression of ['<dynamic>[log()]', "{'a':log()}", '{log():1}', '<int,void>{1:?log()}']) {
+    expect(executeProgram('dart', `void log() {} void main() { var a = ${expression}; print(a); }`)).toMatchObject({
+      kind: 'compileError',
+    });
+  }
+});
+
+test('assignment indices must be usable values on dynamic and static receivers', () => {
+  for (const program of [
+    'void main() { dynamic a = {}; a[print(1)] = 2; }',
+    'void main() { dynamic a = {}; a[print(1)]++; }',
+    'class A { void operator []=(void k, int v) { print(v); } } void main() { A()[print(1)] = 2; }',
+  ]) {
+    expect(executeProgram('dart', program)).toMatchObject({ kind: 'compileError' });
+  }
+});

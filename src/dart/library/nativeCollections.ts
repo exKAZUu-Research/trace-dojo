@@ -343,7 +343,7 @@ export function iterableToFullString(
 }
 
 define('List.==', (_runtime, receiver, [other]) => receiver === other);
-define('List.hashCode', (_runtime, receiver) => BigInt((receiver as DartObject).identity));
+define('List.hashCode', identityHashCode);
 
 // Changes
 

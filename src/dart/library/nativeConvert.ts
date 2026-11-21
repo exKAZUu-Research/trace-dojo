@@ -240,7 +240,8 @@ class JsonParser {
 
   constructor(
     private readonly runtime: Runtime,
-    private readonly text: string
+    private readonly text: string,
+    private readonly reviver: Value
   ) {}
 
   fail(message: string, offset = this.position): never {
@@ -256,7 +257,7 @@ class JsonParser {
     const value = this.value();
     this.skipSpace();
     if (this.position < this.text.length) this.fail('Unexpected character');
-    return value;
+    return this.revive(undefined, value);
   }
 
   // code-gauge-allow duplicateLines 16 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
@@ -290,19 +291,11 @@ class JsonParser {
     return this.fail('Unexpected character', start);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- A transcription of the SDK's algorithm, case by case.
-  // code-gauge-allow functionNcss 31 -- A transcription of the SDK's algorithm, case by case.
   object(): Value {
     this.position++;
     const map = newMap(this.runtime, interfaceType(coreTypes.string), DYNAMIC);
-    const store = map.native as unknown as HashStore;
-    this.skipSpace();
-    if (this.text[this.position] === '}') {
-      this.position++;
-      return map;
-    }
-    for (;;) {
-      this.skipSpace();
+    const store = map.native as HashStore;
+    return this.readContainer(map, '}', () => {
       if (this.position >= this.text.length) this.fail('Unexpected end of input');
       if (this.text[this.position] !== '"') this.fail('Unexpected character');
       const key = this.string();
@@ -311,32 +304,50 @@ class JsonParser {
       if (this.text[this.position] !== ':') this.fail('Unexpected character');
       this.position++;
       this.skipSpace();
-      store.set(key, this.value());
-      this.skipSpace();
-      if (this.position >= this.text.length) this.fail('Unexpected end of input');
-      const next = this.text[this.position++];
-      if (next === '}') return map;
-      if (next !== ',') this.fail('Unexpected character', this.position - 1);
-    }
+      const value = this.value();
+      return () => store.set(key, this.revive(key, value));
+    });
   }
 
   array(): Value {
     this.position++;
-    const values: Value[] = [];
-    this.skipSpace();
-    if (this.text[this.position] === ']') {
-      this.position++;
-      return newList(this.runtime, DYNAMIC, values);
-    }
-    for (;;) {
+    const list = newList(this.runtime, DYNAMIC, []);
+    return this.readContainer(list, ']', () => {
+      const value = this.value();
+      return () => {
+        const element = this.revive(BigInt(list.elements.length), value);
+        this.runtime.allocate(1);
+        list.elements.push(element);
+      };
+    });
+  }
+
+  private readContainer(container: DartObject, close: string, read: () => () => void): Value {
+    return this.runtime.withCallRoots(container, { positional: [], named: undefined }, () => {
       this.skipSpace();
-      values.push(this.value());
-      this.skipSpace();
-      if (this.position >= this.text.length) this.fail('Unexpected end of input');
-      const next = this.text[this.position++];
-      if (next === ']') return newList(this.runtime, DYNAMIC, values);
-      if (next !== ',') this.fail('Unexpected character', this.position - 1);
-    }
+      if (this.text[this.position] === close) {
+        this.position++;
+        return container;
+      }
+      for (;;) {
+        this.skipSpace();
+        const commit = read();
+        this.skipSpace();
+        if (this.position >= this.text.length) this.fail('Unexpected end of input');
+        const delimiter = this.text[this.position++];
+        if (delimiter !== close && delimiter !== ',') this.fail('Unexpected character', this.position - 1);
+        commit();
+        if (delimiter === close) return container;
+      }
+    });
+  }
+
+  private revive(key: Value, value: Value): Value {
+    if (this.reviver === undefined) return value;
+    const args = { positional: [key, value], named: undefined };
+    return this.runtime.withCallRoots(this.reviver, args, () =>
+      this.runtime.callValue(this.reviver, args, [], this.runtime.userCallRow)
+    );
   }
 
   // code-gauge-allow duplicateLines 30 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
@@ -444,30 +455,9 @@ class JsonParser {
   }
 }
 
-function revive(runtime: Runtime, key: Value, value: Value, reviver: Value): Value {
-  if (value instanceof DartList) {
-    for (const [position, element] of value.elements.entries())
-      value.elements[position] = revive(runtime, BigInt(position), element, reviver);
-  } else if (isMap(value)) {
-    const store = value.native as unknown as HashStore;
-    const positions = [...store.positions()];
-    for (const position of positions)
-      store.entryValues[position] = revive(runtime, store.keyAt(position), store.entryValues[position], reviver);
-  }
-  return runtime.callValue(reviver, { positional: [key, value], named: undefined }, [], runtime.userCallRow);
-}
-
-define('_jsonDecode', (runtime, _receiver, [source, reviver]) => {
-  const result = new JsonParser(runtime, stringArg(runtime, source, 'source')).parse();
-  if (reviver === undefined) return result;
-  const frame = runtime.currentFrame;
-  frame?.temporaries.push(result);
-  try {
-    return revive(runtime, undefined, result, reviver);
-  } finally {
-    frame?.temporaries.pop();
-  }
-});
+define('_jsonDecode', (runtime, _receiver, [source, reviver]) =>
+  new JsonParser(runtime, stringArg(runtime, source, 'source'), reviver).parse()
+);
 
 // UTF-8 and Base64
 
