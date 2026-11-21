@@ -192,6 +192,7 @@ export const SDK_CLASS_IDS: ReadonlyMap<string, ReadonlyMap<string, number>> = n
       ['_SplayTreeSetNode', 492],
       ['_SplayTreeValueIterable', 499],
       ['_SplayTreeValueIterator', 502],
+      ['_TypedListIterator', 883],
       ['_Uint8List', 117],
     ]),
   ],

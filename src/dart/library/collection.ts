@@ -553,6 +553,7 @@ class _Uint8List extends ListBase<int> {
   external int operator [](int index);
   external void operator []=(int index, int value);
   external _Uint8List sublist(int start, [int? end]);
+  Iterator<int> get iterator => _TypedListIterator<int>(this);
   Iterable<int> getRange(int start, [int? end]) => super.getRange(start, end ?? length);
   Iterable<T> map<T>(T Function(int) transform) => MappedIterable<int, T>(this, transform);
   int indexOf(covariant int element, [int start = 0]) => super.indexOf(element, start);
@@ -583,6 +584,26 @@ class _Uint8List extends ListBase<int> {
     for (int index = start; index < end; index++) this[index] = fillValue;
   }
   UnsupportedError _cannotRemove() => UnsupportedError("Cannot remove from a fixed-length list");
+}
+
+class _TypedListIterator<E> implements Iterator<E> {
+  final List<E> _source;
+  final int _length;
+  int _index = 0;
+  E? _current;
+
+  _TypedListIterator(List<E> source) : _source = source, _length = source.length;
+
+  E get current => _current as E;
+
+  bool moveNext() {
+    if (_index >= _length) {
+      _current = null;
+      return false;
+    }
+    _current = _source[_index++];
+    return true;
+  }
 }
 
 abstract class _UnmodifiableListBase<E> extends ListBase<E> {

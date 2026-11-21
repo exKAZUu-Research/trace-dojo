@@ -8269,3 +8269,26 @@ int nested(List<bool>? x) => switch (x) { [] => 0, (([_, ...]!)? || [_, ...]?) =
 void main() { print([select([false]), nested([false])]); }`;
   expect(executeProgram('dart', nullable)).toMatchObject({ kind: 'executed', stdout: '[1, 1]\n' });
 });
+
+test('Dart codec byte iterators preserve SDK identity and read bytes on advancement', () => {
+  const program = `import 'dart:convert';
+void main() {
+  final bytes = utf8.encode('hi');
+  final type = bytes.iterator.runtimeType;
+  print([type, type.hashCode, base64.decode('aGk=').iterator.runtimeType == type,
+    const Utf8Encoder().convert('hi').iterator.runtimeType == type,
+    bytes.sublist(1).iterator.runtimeType == type, [1].iterator.runtimeType == type]);
+  final cursor = bytes.iterator;
+  try { print(cursor.current); } catch (error) { print(error.runtimeType); }
+  print(cursor.moveNext());
+  bytes[0] = 10;
+  bytes[1] = 20;
+  print([cursor.current, cursor.moveNext(), cursor.current, cursor.moveNext(), cursor.moveNext()]);
+  try { print(cursor.current); } catch (error) { print(error.runtimeType); }
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[_TypedListIterator<int>, 134930630, true, true, true, false]\n_TypeError\ntrue\n[104, true, 20, false, false]\n_TypeError\n',
+  });
+});
