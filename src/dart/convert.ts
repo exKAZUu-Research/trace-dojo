@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 562 -- Keep declaration syntax and parameter validation together.
+// code-gauge-allow-file fileNcss 577 -- Keep declaration syntax and parameter validation together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type {
@@ -21,6 +21,7 @@ import type {
   Library,
   MemberDeclaration,
   MethodDeclaration,
+  NamedFormalParameter,
   PatternDeclaration,
   PrimaryConstructor,
   Statement,
@@ -48,6 +49,42 @@ import { ExpressionConverter, VAR_WITH_TYPE } from './convertExpression';
 
 /** Converts a tree-sitter tree of a Dart library into the AST, rejecting syntax the interpreter does not run. */
 type FormalContext = 'ordinary' | 'constructor' | 'primary';
+
+const RESERVED_WORDS = new Set([
+  'assert',
+  'break',
+  'case',
+  'catch',
+  'class',
+  'const',
+  'continue',
+  'default',
+  'do',
+  'else',
+  'enum',
+  'extends',
+  'false',
+  'final',
+  'finally',
+  'for',
+  'if',
+  'in',
+  'is',
+  'new',
+  'null',
+  'rethrow',
+  'return',
+  'super',
+  'switch',
+  'this',
+  'throw',
+  'true',
+  'try',
+  'var',
+  'void',
+  'while',
+  'with',
+]);
 
 export class Converter extends ExpressionConverter {
   constructor(protected readonly isLibrary: boolean) {
@@ -867,7 +904,30 @@ export class Converter extends ExpressionConverter {
     if (invalidVar) syntaxError(invalidVar, 'var は主コンストラクタのフィールド引数にだけ書けます。');
     const requiredWithDefault = named.find((parameter) => parameter.isRequired && parameter.defaultValue);
     if (requiredWithDefault) syntaxError(requiredWithDefault, 'required の引数には既定値を書けません。');
-    return { positional, requiredCount, named, ...spanOf(node) };
+    const names = new Set([...positional, ...named].map((parameter) => parameter.name));
+    return {
+      positional,
+      requiredCount,
+      named: named.map((parameter) => this.nameNamedParameter(parameter, context, names)),
+      ...spanOf(node),
+    };
+  }
+
+  private nameNamedParameter(
+    parameter: FormalParameter,
+    context: FormalContext,
+    names: ReadonlySet<string>
+  ): NamedFormalParameter {
+    const { name, binding } = parameter;
+    if (!name.startsWith('_')) return { ...parameter, argumentName: name };
+    const isPrimaryField = context === 'primary' && binding === 'plain' && (parameter.isFinal || parameter.isVar);
+    if (binding !== 'this' && !isPrimaryField)
+      return syntaxError(parameter, 'フィールドを初期化しない名前付き引数は、_ で始められません。');
+    const argumentName = name.slice(1);
+    if (!/^[a-zA-Z$]/.test(argumentName) || RESERVED_WORDS.has(argumentName))
+      return syntaxError(parameter, `フィールド ${name} から有効な公開引数名を作れません。`);
+    if (names.has(argumentName)) return syntaxError(parameter, `引数 ${argumentName} は、既に宣言されています。`);
+    return { ...parameter, argumentName };
   }
 
   /** The parameters inside `[...]` or `{...}`, with their default values and `required`. */

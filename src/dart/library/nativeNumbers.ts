@@ -2,7 +2,7 @@ import { formatDouble } from '../format';
 import { doubleModulo, intModulo, intRemainder, numericBinary, shiftLeft, truncateToInt, wrap } from '../operators';
 import type { Runtime } from '../runtime';
 import type { Value } from '../values';
-import { define, defineAll, intArg, named, numArg, stringArg } from './nativeSupport';
+import { callFunction, define, defineAll, intArg, named, numArg, stringArg } from './nativeSupport';
 import { trimDartEnd, trimDartStart, trimDartWhitespace } from './stringWhitespace';
 
 const MAX_INT = 9_223_372_036_854_775_807n;
@@ -116,13 +116,15 @@ function parseInt(runtime: Runtime, text: string, radix: number | undefined): bi
   const trimmed = trimDartEnd(withoutLeading);
   const [digits, base, negative] = radixSource(trimmed, radix);
   const start = text.length - withoutLeading.length + trimmed.length - digits.length;
-  if (digits.length === 0) {
-    return { message: radix === undefined ? 'Invalid number' : `Invalid radix-${radix} number`, offset: start };
-  }
+  if (digits.length === 0) return invalidInt(radix, start);
   const unsignedHex = base === 16 && radix === undefined && !negative;
   const limit = unsignedHex ? 0xff_ff_ff_ff_ff_ff_ff_ffn : negative ? MAX_INT + 1n : MAX_INT;
   const result = parseIntBlocks(digits, start, base, limit, negative);
   return typeof result === 'bigint' ? (negative ? -result : wrap(result)) : result;
+}
+
+function invalidInt(radix: number | bigint | undefined, offset: number): IntParseError {
+  return { message: radix === undefined ? 'Invalid number' : `Invalid radix-${radix} number`, offset };
 }
 
 function parseIntBlocks(
@@ -179,9 +181,9 @@ function tryParseInt(runtime: Runtime, text: string, radix?: number): bigint | u
 
 function checkRadix(runtime: Runtime, radix: Value): number | undefined {
   if (radix === undefined) return undefined;
-  const value = Number(intArg(runtime, radix, 'radix'));
-  if (value < 2 || value > 36) runtime.throwError('RangeError', '', [`Radix ${value} not in range 2..36`]);
-  return value;
+  const value = intArg(runtime, radix, 'radix');
+  if (value < 2n || value > 36n) runtime.throwError('RangeError', '', [`Radix ${value} not in range 2..36`]);
+  return Number(value);
 }
 
 function gcd(a: bigint, b: bigint): bigint {
@@ -385,13 +387,13 @@ function throwFormat(runtime: Runtime, message: string, source: string, offset?:
 define('int.parse', (runtime, _self, [source], namedArgs) => {
   const text = stringArg(runtime, source, 'source');
   const requestedRadix = named(namedArgs, 'radix', undefined);
-  if (text === '') {
-    const message =
-      requestedRadix === undefined ? 'Invalid number' : `Invalid radix-${requestedRadix as bigint} number`;
-    throwFormat(runtime, message, text, 0n);
-  }
-  const result = parseInt(runtime, text, checkRadix(runtime, requestedRadix));
+  const result =
+    text === ''
+      ? invalidInt(requestedRadix === undefined ? undefined : intArg(runtime, requestedRadix, 'radix'), 0)
+      : parseInt(runtime, text, checkRadix(runtime, requestedRadix));
   if (typeof result === 'bigint') return result;
+  const onError = named(namedArgs, 'onError', undefined);
+  if (onError !== undefined) return callFunction(runtime, onError, text);
   throwFormat(runtime, result.message, text, result.offset === undefined ? undefined : BigInt(result.offset));
 });
 define('int.tryParse', (runtime, _self, [source], namedArgs) => {

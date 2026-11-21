@@ -1290,11 +1290,9 @@ export abstract class ExpressionConverter {
     for (const part of childrenOf(group)) {
       if (part.type === 'required') isRequired = true;
       if (part.type !== 'typed_identifier') continue;
-      named.push({
-        name: requireNode(fieldOf(part, 'name'), part).text,
-        type: this.convertType(requireNode(fieldOf(part, 'type'), part)),
-        isRequired,
-      });
+      const name = requireNode(fieldOf(part, 'name'), part);
+      if (name.text.startsWith('_')) syntaxError(name, 'フィールドを初期化しない名前付き引数は、_ で始められません。');
+      named.push({ name: name.text, type: this.convertType(requireNode(fieldOf(part, 'type'), part)), isRequired });
       isRequired = false;
     }
     return named;

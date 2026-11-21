@@ -922,9 +922,9 @@ export abstract class CallCompiler extends OperatorCompiler {
       });
       const namedTypes = new Map(
         parameters.named.map((parameter) => {
-          if (parameter.type) return [parameter.name, this.resolveType(parameter.type)];
-          const fromContext = contextFunction?.named.find((named) => named.name === parameter.name)?.type;
-          return [parameter.name, fromContext && !isInferenceHole(fromContext) ? fromContext : DYNAMIC];
+          if (parameter.type) return [parameter.argumentName, this.resolveType(parameter.type)];
+          const fromContext = contextFunction?.named.find((named) => named.name === parameter.argumentName)?.type;
+          return [parameter.argumentName, fromContext && !isInferenceHole(fromContext) ? fromContext : DYNAMIC];
         })
       );
       const contextReturn = contextFunction?.returnType;
@@ -954,8 +954,8 @@ export abstract class CallCompiler extends OperatorCompiler {
       const type = functionType(positionalTypes, compiled.returnType, {
         requiredCount: parameters.requiredCount,
         named: parameters.named.map((parameter) => ({
-          name: parameter.name,
-          type: namedTypes.get(parameter.name) ?? DYNAMIC,
+          name: parameter.argumentName,
+          type: namedTypes.get(parameter.argumentName) ?? DYNAMIC,
           isRequired: parameter.isRequired,
         })),
         typeParams,

@@ -233,9 +233,9 @@ export abstract class StatementCompiler extends PatternCompiler {
       );
     }
     for (const parameter of parameters.named) {
-      const type = spec.namedTypes.get(parameter.name) ?? DYNAMIC;
+      const type = spec.namedTypes.get(parameter.argumentName) ?? DYNAMIC;
       const { variable, defaultValue } = this.declareParameter(parameter, type, true, spec.defaults);
-      const { name } = parameter;
+      const { argumentName: name } = parameter;
       binders.push(
         parameterBinder(
           variable.slot,
@@ -317,10 +317,10 @@ export abstract class StatementCompiler extends PatternCompiler {
     const { parameters } = spec;
     const count = parameters.positional.length;
     const required = parameters.requiredCount;
-    const namedNames = new Set(parameters.named.map((parameter) => parameter.name));
+    const namedNames = new Set(parameters.named.map((parameter) => parameter.argumentName));
     const requiredNamed = parameters.named
       .filter((parameter) => parameter.isRequired)
-      .map((parameter) => parameter.name);
+      .map((parameter) => parameter.argumentName);
     return (frame, args) => {
       const positional = args.positional.length;
       const unknown = [...(args.named?.keys() ?? [])].some((name) => !namedNames.has(name));

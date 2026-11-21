@@ -85,25 +85,26 @@ export abstract class MemberCompiler extends MetadataCompiler {
     });
     const namedTypes = new Map(
       parameters.named.map((parameter) => {
-        if (parameter.type) return [parameter.name, this.resolveType(parameter.type)];
+        if (parameter.type) return [parameter.argumentName, this.resolveType(parameter.type)];
         const inherited =
           overridden?.kind === 'function'
-            ? overridden.named.find((named) => named.name === parameter.name)?.type
+            ? overridden.named.find((named) => named.name === parameter.argumentName)?.type
             : undefined;
-        return [parameter.name, inherited ?? DYNAMIC];
+        return [parameter.argumentName, inherited ?? DYNAMIC];
       })
     );
     const returnType = this.signatureReturnType(returnTypeSyntax, local, declaration, overridden);
     const type = functionType(positionalTypes, returnType, {
       requiredCount: parameters.requiredCount,
       named: parameters.named.map((parameter) => ({
-        name: parameter.name,
-        type: namedTypes.get(parameter.name) ?? DYNAMIC,
+        name: parameter.argumentName,
+        type: namedTypes.get(parameter.argumentName) ?? DYNAMIC,
         isRequired: parameter.isRequired,
       })),
       typeParams,
     });
-    if (!local && parameters.named.length > 1) type.namedOrder = parameters.named.map((parameter) => parameter.name);
+    if (!local && parameters.named.length > 1)
+      type.namedOrder = parameters.named.map((parameter) => parameter.argumentName);
     return { type, positionalTypes, namedTypes };
   }
 

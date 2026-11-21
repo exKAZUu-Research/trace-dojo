@@ -206,7 +206,7 @@ abstract final class int extends num {
   external double truncateToDouble();
   external String toString();
   external String toRadixString(int radix);
-  external static int parse(String source, {int? radix});
+  external static int parse(String source, {int? radix, int Function(String)? onError});
   external static int? tryParse(String source, {int? radix});
 }
 

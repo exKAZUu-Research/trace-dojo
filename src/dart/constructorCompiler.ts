@@ -77,8 +77,8 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     const type = functionType(positionalTypes, cls.thisType, {
       requiredCount: declaration.parameters.requiredCount,
       named: declaration.parameters.named.map((parameter) => ({
-        name: parameter.name,
-        type: namedTypes.get(parameter.name) ?? DYNAMIC,
+        name: parameter.argumentName,
+        type: namedTypes.get(parameter.argumentName) ?? DYNAMIC,
         isRequired: parameter.isRequired,
       })),
     });
@@ -105,7 +105,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     cls: ClassInfo,
     parameters: FormalParameters
   ): { positionalTypes: DartType[]; namedTypes: Map<string, DartType> } {
-    const typeOf = (parameter: FormalParameter, position: number | undefined): DartType => {
+    const typeOf = (parameter: FormalParameter, argument: number | string): DartType => {
       if (parameter.type) return this.resolveType(parameter.type);
       if (parameter.binding === 'this') {
         const field = cls.fields.find((candidate) => candidate.name === parameter.name);
@@ -116,15 +116,17 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
           );
         return field.type;
       }
-      if (parameter.binding === 'super') return this.superParameterType(cls, parameter, position);
+      if (parameter.binding === 'super') return this.superParameterType(cls, parameter, argument);
       return DYNAMIC;
     };
     const positionalTypes = parameters.positional.map((parameter, index) => typeOf(parameter, index));
-    const namedTypes = new Map(parameters.named.map((parameter) => [parameter.name, typeOf(parameter, undefined)]));
+    const namedTypes = new Map(
+      parameters.named.map((parameter) => [parameter.argumentName, typeOf(parameter, parameter.argumentName)])
+    );
     return { positionalTypes, namedTypes };
   }
 
-  private superParameterType(cls: ClassInfo, parameter: FormalParameter, position: number | undefined): DartType {
+  private superParameterType(cls: ClassInfo, parameter: FormalParameter, argument: number | string): DartType {
     const superclass = cls.superclass;
     const declaration = cls.declaration?.members.find(
       (member): member is ConstructorDeclaration =>
@@ -137,7 +139,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     if (!superclass || !target) return DYNAMIC;
     const map = new Map(superclass.cls.typeParams.map((param, index) => [param, superclass.args[index] ?? DYNAMIC]));
     const signature = substitute(target.type, map) as FunctionType;
-    if (position === undefined) return signature.named.find((named) => named.name === parameter.name)?.type ?? DYNAMIC;
+    if (typeof argument === 'string') return signature.named.find((named) => named.name === argument)?.type ?? DYNAMIC;
     const superPositional =
       declaration?.parameters.positional.filter((candidate) => candidate.binding === 'super') ?? [];
     const superIndex = superPositional.indexOf(parameter);
@@ -408,7 +410,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     });
     constructor.defaults = {
       positional: parameters.positional.map((parameter) => defaults.get(parameter)),
-      named: new Map(parameters.named.map((parameter) => [parameter.name, defaults.get(parameter)])),
+      named: new Map(parameters.named.map((parameter) => [parameter.argumentName, defaults.get(parameter)])),
     };
     this.checkFieldsInitialized(cls, declaration, initializedFields, redirect !== undefined);
     const params = cls.typeParams;
@@ -468,7 +470,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     }
     for (const parameter of declaration.parameters.named) {
       if (parameter.binding !== 'super' || parameter.isRequired) continue;
-      const inherited = parent.named.get(parameter.name);
+      const inherited = parent.named.get(parameter.argumentName);
       if (inherited) defaults.set(parameter, inherited);
     }
     return defaults;
@@ -777,7 +779,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
       named: [
         ...superNamed.map((parameter) => ({
           ...spanOnly(parameter),
-          name: parameter.name,
+          name: parameter.argumentName,
           value: { ...spanOnly(parameter), kind: 'identifier' as const, name: parameter.name },
         })),
         ...argsSyntax.named,

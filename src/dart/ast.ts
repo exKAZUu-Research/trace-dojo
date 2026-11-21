@@ -194,7 +194,7 @@ export interface FormalParameters extends Span {
   positional: FormalParameter[];
   /** How many positional parameters are required; the rest sit in `[...]`. */
   requiredCount: number;
-  named: FormalParameter[];
+  named: NamedFormalParameter[];
 }
 
 export interface FormalParameter extends Span {
@@ -210,6 +210,10 @@ export interface FormalParameter extends Span {
   defaultValue: Expression | undefined;
   /** An old-style function-typed parameter `int f(int x)`. */
   functionType: { returnType: TypeSyntax | undefined; parameters: FormalParameters } | undefined;
+}
+
+export interface NamedFormalParameter extends FormalParameter {
+  argumentName: string;
 }
 
 export type FunctionBody =

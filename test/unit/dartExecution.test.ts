@@ -3082,8 +3082,22 @@ test('numeric parsing applies the SDK whitespace and argument rules', () => {
     kind: 'executed',
     stdout: '1.5\n2.5\n42\n[null, null]\n[20, 20]\n[null, null]\n',
   });
-  expect(executeProgram('dart', 'void main() { print(int.parse("42", onError: (s) => 0)); }')).toMatchObject({
-    kind: 'compileError',
+});
+
+test('int.parse uses its VM error callback only for invalid numbers', () => {
+  const source = `void main() {
+  int fallback(String input) { print('fallback: <$input>'); return 42; }
+  print(int.parse('3', onError: fallback));
+  print(int.parse('bad', onError: fallback));
+  print(int.parse('', radix: 1, onError: fallback));
+  try { int.parse('bad', radix: 9223372036854775807, onError: fallback); } catch (e) { print(e); }
+  print(int.parse('9223372036854775808', onError: fallback));
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '3\nfallback: <bad>\n42\nfallback: <>\n42\nRangeError: Radix 9223372036854775807 not in range 2..36\n' +
+      'fallback: <9223372036854775808>\n42\n',
   });
 });
 
@@ -6415,6 +6429,32 @@ void main() {
       'RangeError (at): Invalid value: Not in inclusive range 0..2: -1\nfirst\nsecond\n' +
       'RangeError: Index out of range: index should be less than 2: 2\n[0, 7]\n',
   });
+});
+
+test('private named field formals use public labels for calls and forwarding', () => {
+  const source = `class Box {
+  final int _value;
+  final int after;
+  const Box({this._value = 5}) : after = _value + 1;
+}
+class Child extends Box {
+  const Child({super.value});
+}
+void main() {
+  print([const Box().after, const Box(value: 7)._value, Child()._value, Child(value: 9)._value]);
+  dynamic make = Box.new;
+  print(make(value: 4).after);
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '[6, 7, 5, 9]\n5\n' });
+  for (const invalid of [
+    source.replace('Child(value: 9)', 'Child(_value: 9)'),
+    'void show({required int _value}) {} void main() {}',
+    'typedef F = void Function({required int _value}); void main() {}',
+    'class Box { int __x; Box({required this.__x}); } void main() {}',
+    'class Box { int _x; Box(int x, {required this._x}); } void main() {}',
+  ]) {
+    expect(executeProgram('dart', invalid)).toMatchObject({ kind: 'compileError' });
+  }
 });
 
 test('bodyless top-level functions and accessors require the external modifier', () => {
