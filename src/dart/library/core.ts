@@ -2139,7 +2139,7 @@ abstract interface class Set<E> extends EfficientLengthIterable<E> {
   external Set<E> union(Set<E> other);
   external Set<E> difference(Set<Object?> other);
   external void clear();
-  Set<R> cast<R>() => Set.castFrom<E, R>(this, newSet: _emptyCastSet);
+  Set<R> cast<R>() => Set.castFrom<E, R>(this);
   static Set<R> _emptyCastSet<R>() => <R>{};
   external int get length;
   external bool get isEmpty;
@@ -2152,6 +2152,7 @@ abstract interface class Set<E> extends EfficientLengthIterable<E> {
 
 class _Set<E> extends Set<E> implements LinkedHashSet<E> {
   _Set._() : super._base();
+  Set<R> cast<R>() => Set.castFrom<E, R>(this, newSet: Set._emptyCastSet);
 }
 
 class CompactLinkedIdentityHashSet<E> extends _Set<E> {
@@ -2256,6 +2257,7 @@ class _ConstMap<K, V> extends Map<K, V> {
 
 class _ConstSet<E> extends Set<E> {
   _ConstSet._() : super._base();
+  Set<R> cast<R>() => Set.castFrom<E, R>(this, newSet: Set._emptyCastSet);
 }
 
 class UnmodifiableSetView<E> extends Set<E> {

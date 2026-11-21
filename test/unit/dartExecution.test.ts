@@ -8792,3 +8792,35 @@ void main() {
       '[true, [4]]\n',
   });
 });
+
+test('Dart unmodifiable set casts filter the source before casting results', () => {
+  const program = `void describe(Set<int> view) {
+  try { print(view.intersection({1})); } catch (error) { print(error.runtimeType); }
+  try { print(view.difference({'x'})); } catch (error) { print(error.runtimeType); }
+}
+void main() {
+  final view = Set<Object>.unmodifiable([1, 'x']).cast<int>();
+  describe(view);
+  describe(view.cast<num>().cast<int>());
+  describe(<Object>{1, 'x'}.cast<int>());
+  describe((const <Object>{1, 'x'}).cast<int>());
+  try { view.add(2); } catch (error) { print(error); }
+  try { view.toSet(); } catch (error) { print(error.runtimeType); }
+  print(Set<Object>.unmodifiable([1]).cast<num>().toSet().runtimeType);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '{1}\n' +
+      '{1}\n' +
+      '{1}\n' +
+      '{1}\n' +
+      '_TypeError\n' +
+      '_TypeError\n' +
+      '_TypeError\n' +
+      '_TypeError\n' +
+      'Unsupported operation: Cannot change an unmodifiable set\n' +
+      '_TypeError\n' +
+      '_Set<num>\n',
+  });
+});
