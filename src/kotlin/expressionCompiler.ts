@@ -4,6 +4,7 @@ import type { Block, Expression, LambdaExpression } from './ast';
 import {
   type ArgumentSyntax,
   CallCompiler,
+  type CallLevel,
   type Candidate,
   type DelegateContext,
   type ResolvedCall,
@@ -133,8 +134,6 @@ export abstract class ExpressionCompiler extends CallCompiler {
   protected abstract mayInitializeVal(context: FunctionContext, symbol: PropertySymbol): boolean;
 
   /** The instance of an object or companion object, created on first use. */
-  protected abstract objectInstance(cls: ClassSymbol): (frame: Frame) => Value;
-
   protected primitiveOf(type: KType): PrimitiveKind | undefined {
     const actual = resolved(type);
     if (actual.kind !== 'class' || actual.nullable) return undefined;
@@ -1033,10 +1032,11 @@ export abstract class ExpressionCompiler extends CallCompiler {
         ? this.tryLocalFunction(scope, context, variable, args, hasTrailingLambda, row)
         : undefined;
     if (local && !(local instanceof CompileError)) return local;
-    const receiverLevels = this.receiverLevels(scope, context, name, row);
-    if (!Array.isArray(receiverLevels))
-      return this.compileInvoke(scope, context, receiverLevels, args, hasTrailingLambda, row);
-    const levels = [...receiverLevels, ...this.companionLevels(scope, name), ...this.topLevelFunctionLevels(name)];
+    const levels = [
+      ...this.receiverLevels(scope, context, name, row),
+      ...this.companionLevels(scope, name, row),
+      ...this.topLevelFunctionLevels(name),
+    ];
     const cls = this.findClass(scope, name);
     if (cls) this.checkNestedAccessible(scope, cls, row);
     if (
@@ -1104,55 +1104,36 @@ export abstract class ExpressionCompiler extends CallCompiler {
     );
   }
 
-  /**
-   * The members and extensions of the implicit receivers that a call by name may call, the nearest first; or the value
-   * of a property of a function type to invoke, for a receiver with no function of the name.
-   */
-  private receiverLevels(
-    scope: Scope,
-    context: FunctionContext,
-    name: string,
-    row: number
-  ): CandidateLevel[] | Compiled {
-    const levels: CandidateLevel[] = [];
-    for (const receiver of this.receiversOf(scope)) {
-      const receiverCompiled: Compiled = {
-        type: this.receiverTypeOf(receiver),
-        repr: reprOf(this.core, receiver.type),
-        eval: this.receiverAccess(context, receiver),
-        stableKey: keyOf(receiver),
-      };
-      const members = this.memberCandidates(receiverCompiled.type, name);
-      if (members.length > 0) levels.push({ candidates: members, receiver: receiverCompiled });
-      const extensions = this.extensionCandidates(receiverCompiled.type, name);
-      if (extensions.length > 0) levels.push({ candidates: extensions, receiver: receiverCompiled });
-      const property = this.findProperty(scope, receiverCompiled.type, name);
-      const isFunctionValue = property && resolved(property.symbol.type ?? NOTHING).kind === 'function';
-      if (isFunctionValue && members.length === 0 && extensions.length === 0)
-        return this.readProperty(scope, property, receiverCompiled, row);
-    }
-    return levels;
+  private receiverLevels(scope: Scope, context: FunctionContext, name: string, row: number): CallLevel[] {
+    return this.receiversOf(scope).flatMap((receiver) =>
+      this.memberCallLevels(
+        scope,
+        {
+          type: this.receiverTypeOf(receiver),
+          repr: reprOf(this.core, receiver.type),
+          eval: this.receiverAccess(context, receiver),
+          stableKey: keyOf(receiver),
+        },
+        name,
+        row
+      )
+    );
   }
 
-  /** The functions of the companion objects of the classes around a call by name. */
-  private companionLevels(scope: Scope, name: string): CandidateLevel[] {
-    const levels: CandidateLevel[] = [];
+  private companionLevels(scope: Scope, name: string, row: number): CallLevel[] {
+    const levels: CallLevel[] = [];
     for (let current: Scope | undefined = scope; current; current = current.parent) {
       for (let cls = current.staticClass; cls; cls = cls.outer) {
         const { companion } = cls;
-        const members = companion ? this.memberCandidates(companion.type, name) : [];
-        if (companion && members.length > 0) {
-          levels.push({
-            candidates: members,
-            receiver: { type: companion.type, repr: 'ref', eval: this.objectInstance(companion) },
-          });
-        }
+        if (!companion) continue;
+        const receiver: Compiled = { type: companion.type, repr: 'ref', eval: this.objectInstance(companion) };
+        levels.push(...this.memberCallLevels(scope, receiver, name, row));
       }
     }
     return levels;
   }
 
-  private topLevelFunctionLevels(name: string): CandidateLevel[] {
+  private topLevelFunctionLevels(name: string): CallLevel[] {
     return this.topLevelFunctions(name).flatMap((level) => {
       const functions = level.filter((symbol) => !symbol.extensionReceiver);
       if (functions.length === 0) return [];
@@ -1245,49 +1226,6 @@ export abstract class ExpressionCompiler extends CallCompiler {
 
   /** Reports a call of a function that the program cannot use, naming the features that this environment lacks. */
   protected abstract reportUnknownFunction(name: string, row: number): never;
-
-  /** Resolves a call whose candidates come with different receivers, the nearest level first. */
-  // code-gauge-allow functionParameterCount 10 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
-  protected resolveInLevels(
-    scope: Scope,
-    context: FunctionContext,
-    levels: { candidates: Candidate[]; receiver: Compiled | undefined }[],
-    args: ArgumentSyntax[],
-    hasTrailingLambda: boolean,
-    typeArgs: KType[],
-    expected: KType | undefined,
-    row: number,
-    name: string,
-    fallbackError?: CompileError
-  ): Compiled {
-    // Each level resolves with its own receiver; the first level with an applicable candidate decides.
-    const receiverOf = new Map<Candidate, Compiled | undefined>();
-    for (const level of levels) {
-      for (const candidate of level.candidates) {
-        // A member of an object imported by name, as `observable` from `Delegates`, is called on the object.
-        const owner = candidate.symbol.owner;
-        const objectReceiver: Compiled | undefined =
-          !level.receiver && owner?.isObject && candidate.kind !== 'constructor'
-            ? { type: owner.type, repr: 'ref', eval: this.objectInstance(owner) }
-            : undefined;
-        receiverOf.set(candidate, level.receiver ?? objectReceiver);
-      }
-    }
-    const resolvedCall = this.resolveCall(
-      scope,
-      context,
-      levels.map((level) => level.candidates),
-      args,
-      hasTrailingLambda,
-      typeArgs,
-      expected,
-      (candidate) => receiverOf.get(candidate),
-      row,
-      name,
-      fallbackError
-    );
-    return this.finishCall(resolvedCall, receiverOf.get(resolvedCall.candidate), row);
-  }
 
   protected memberCandidates(receiverType: KType, name: string): Candidate[] {
     return this.membersOf<FunctionSymbol>(receiverType, name, 'function').map(({ symbol, substitution }) => ({
@@ -1391,36 +1329,37 @@ export abstract class ExpressionCompiler extends CallCompiler {
     expected: KType | undefined,
     row: number
   ): Compiled {
-    const members = this.memberCandidates(nonNull(receiver.type), name);
-    const extensions = this.extensionCandidates(receiver.type, name);
-    const levels: { candidates: Candidate[]; receiver: Compiled }[] = [];
-    // On a receiver that may be null, an extension that accepts null, such as `Any?.toString()`, comes before members.
-    const receiverMayBeNull = isNullable(resolved(receiver.type));
-    if (receiverMayBeNull && extensions.length > 0) levels.push({ candidates: extensions, receiver });
-    if (members.length > 0) levels.push({ candidates: members, receiver });
-    if (!receiverMayBeNull && extensions.length > 0) levels.push({ candidates: extensions, receiver });
+    const levels = this.memberCallLevels(scope, receiver, name, row);
     if (levels.length === 0)
       return this.compileFunctionValueCall(scope, context, receiver, name, args, hasTrailingLambda, row);
-    const memberOnly = members.length > 0 && extensions.length === 0;
-    if (memberOnly) this.requireNonNullReceiver(receiver, row, false);
-    const resolvedCall = this.resolveCall(
-      scope,
-      context,
-      levels.map((level) => level.candidates),
-      args,
-      hasTrailingLambda,
-      typeArgs,
-      expected,
-      receiver,
-      row,
-      name
-    );
-    return this.finishCall(resolvedCall, receiver, row);
+    return this.resolveInLevels(scope, context, levels, args, hasTrailingLambda, typeArgs, expected, row, name);
+  }
+
+  private memberCallLevels(scope: Scope, receiver: Compiled, name: string, row: number): CallLevel[] {
+    const nullableReceiver = isNullable(resolved(receiver.type));
+    const members = this.memberCandidates(nonNull(receiver.type), name);
+    const extensions = this.extensionCandidates(receiver.type, name);
+    const levels: CallLevel[] = [];
+    const extension = { candidates: extensions, receiver };
+    if (nullableReceiver && extensions.length > 0) levels.push(extension);
+    if (members.length > 0) levels.push({ candidates: members, receiver });
+    const property = this.findProperty(scope, nonNull(receiver.type), name);
+    const declaredType = property?.symbol.type;
+    if (property && (!declaredType || resolved(substitute(declaredType, property.substitution)).kind === 'function')) {
+      levels.push({
+        functionValue: () => {
+          this.requireNonNullReceiver(receiver, row, false);
+          return this.readProperty(scope, property, receiver, row);
+        },
+      });
+    }
+    if (!nullableReceiver && extensions.length > 0) levels.push(extension);
+    return levels;
   }
 
   /**
    * `x.name(...)` without a function `name` for `x`: `invoke` of a function value, a value of a function type with a
-   * receiver, or a property of a function type; anything else is an error.
+   * receiver.
    */
   // code-gauge-allow functionParameterCount 7 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
   private compileFunctionValueCall(
@@ -1439,18 +1378,6 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const extensionValue = this.extensionFunctionValue(context, scope, name, row);
     if (extensionValue)
       return this.compileInvoke(scope, context, extensionValue, args, hasTrailingLambda, row, receiver);
-    const property = this.findProperty(scope, receiver.type, name);
-    const propertyType = property && substitute(this.ensurePropertyType(property.symbol, row), property.substitution);
-    if (property && propertyType && resolved(propertyType).kind === 'function') {
-      return this.compileInvoke(
-        scope,
-        context,
-        this.readProperty(scope, property, receiver, row),
-        args,
-        hasTrailingLambda,
-        row
-      );
-    }
     if (isNullable(resolved(receiver.type)) && this.extensionCandidates(nonNull(receiver.type), name).length > 0) {
       this.requireNonNullReceiver(receiver, row, false);
     }
@@ -1490,7 +1417,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
   ): Compiled {
     if (qualified.kind === 'package') {
       const functions = qualified.scope?.functions.get(name)?.filter((symbol) => !symbol.extensionReceiver) ?? [];
-      const levels: { candidates: Candidate[]; receiver: Compiled | undefined }[] = [];
+      const levels: CallLevel[] = [];
       if (functions.length > 0) {
         levels.push({
           candidates: functions.map((symbol) => ({
@@ -1516,7 +1443,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const { cls } = qualified;
     const nested = cls.nested.get(name);
     if (nested) this.checkNestedAccessible(scope, nested, row);
-    const levels: { candidates: Candidate[]; receiver: Compiled | undefined }[] = [];
+    const levels: CallLevel[] = [];
     const holder = cls.isObject ? cls : cls.companion;
     if (holder) {
       const receiver: Compiled = {
@@ -1525,10 +1452,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
         eval: this.objectInstance(holder),
         stableKey: keyOf(holder),
       };
-      const members = this.memberCandidates(holder.type, name);
-      if (members.length > 0) levels.push({ candidates: members, receiver });
-      const extensions = this.extensionCandidates(holder.type, name);
-      if (extensions.length > 0) levels.push({ candidates: extensions, receiver });
+      levels.push(...this.memberCallLevels(scope, receiver, name, row));
     }
     if (nested) levels.push({ candidates: this.constructorCandidates(nested, row), receiver: undefined });
     if (cls.kind === 'enum' && (name === 'values' || name === 'valueOf')) {
@@ -2012,9 +1936,3 @@ interface PackageQualifier {
 }
 
 type Qualifier = { kind: 'class'; cls: ClassSymbol } | PackageQualifier;
-
-/** The candidates of one level of a call, with the receiver they are called on. */
-interface CandidateLevel {
-  candidates: Candidate[];
-  receiver: Compiled | undefined;
-}

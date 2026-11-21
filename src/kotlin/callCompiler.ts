@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 648 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss 700 -- the compiler of one area of Kotlin, whose parts call each other closely.
 import { CompileError } from '../interpreter/diagnostics';
 import {
   type ArgumentEvaluation,
@@ -77,6 +77,13 @@ export interface Candidate {
   /** The receiver's static type, for a member or an extension. */
   receiverType: KType | undefined;
 }
+
+interface DeclaredCallLevel {
+  candidates: Candidate[];
+  receiver: Compiled | undefined;
+}
+
+export type CallLevel = DeclaredCallLevel | { functionValue: () => Compiled };
 
 /** A call whose function and type arguments are decided. */
 export interface ResolvedCall {
@@ -177,6 +184,100 @@ export abstract class CallCompiler extends CompilerCore {
     return isSubtype(compiled.type, type);
   }
 
+  protected abstract objectInstance(cls: ClassSymbol): Eval;
+
+  protected abstract finishCall(call: ResolvedCall, receiver: Compiled | undefined, row: number): Compiled;
+
+  protected abstract compileInvoke(
+    scope: Scope,
+    context: FunctionContext,
+    functionValue: Compiled,
+    args: ArgumentSyntax[],
+    hasTrailingLambda: boolean,
+    row: number
+  ): Compiled;
+
+  // code-gauge-allow functionParameterCount 10 -- the call and its local fallback diagnostic are supplied by the source form.
+  protected resolveInLevels(
+    scope: Scope,
+    context: FunctionContext,
+    levels: CallLevel[],
+    args: ArgumentSyntax[],
+    hasTrailingLambda: boolean,
+    explicitTypeArgs: KType[],
+    expected: KType | undefined,
+    row: number,
+    name: string,
+    fallbackError?: CompileError
+  ): Compiled {
+    const call: CallSyntax = { args, hasTrailingLambda, explicitTypeArgs, row, name };
+    const declared: DeclaredCallLevel[] = [];
+    for (const level of levels) {
+      if ('candidates' in level) {
+        declared.push(level);
+        continue;
+      }
+      if (explicitTypeArgs.length > 0) continue;
+      const error = this.probeApplicability(context, (probe) => {
+        this.compileInvoke(scope, probe, level.functionValue(), args, hasTrailingLambda, row);
+      });
+      if (error) {
+        fallbackError ??= error;
+        continue;
+      }
+      if (this.hasApplicableLevel(scope, context, declared, call, expected)) break;
+      return this.compileInvoke(scope, context, level.functionValue(), args, hasTrailingLambda, row);
+    }
+    if (declared.length === 0 && fallbackError) throw fallbackError;
+    const receiverOf = this.levelReceivers(declared);
+    const chosen = this.resolveCall(
+      scope,
+      context,
+      declared.map((level) => level.candidates),
+      args,
+      hasTrailingLambda,
+      explicitTypeArgs,
+      expected,
+      receiverOf,
+      row,
+      name,
+      fallbackError
+    );
+    return this.finishCall(chosen, receiverOf(chosen.candidate), row);
+  }
+
+  private hasApplicableLevel(
+    scope: Scope,
+    context: FunctionContext,
+    levels: DeclaredCallLevel[],
+    syntax: CallSyntax,
+    expected: KType | undefined
+  ): boolean {
+    if (levels.length === 0) return false;
+    const receiverOf = this.levelReceivers(levels);
+    const call = { ...syntax, checkingApplicability: true };
+    let hasCandidate = false;
+    this.probeApplicability(context, (probe) => {
+      const candidates = levels.map((level) => level.candidates);
+      hasCandidate = this.selectCall(scope, probe, candidates, call, receiverOf, expected).chosen !== undefined;
+    });
+    return hasCandidate;
+  }
+
+  private levelReceivers(levels: DeclaredCallLevel[]): (candidate: Candidate) => Compiled | undefined {
+    const receivers = new Map<Candidate, Compiled | undefined>();
+    for (const level of levels)
+      for (const candidate of level.candidates) {
+        const owner = candidate.symbol.owner;
+        const receiver =
+          !level.receiver && owner?.isObject && candidate.kind !== 'constructor'
+            ? { type: owner.type, repr: 'ref' as const, eval: this.objectInstance(owner) }
+            : level.receiver;
+        receivers.set(candidate, receiver);
+      }
+    return (candidate) => receivers.get(candidate);
+  }
+
   /**
    * Resolves a call among candidate levels, the nearest first: the first level with an applicable candidate decides,
    * as Kotlin's resolution goes from inner scopes to outer ones.
@@ -197,20 +298,8 @@ export abstract class CallCompiler extends CompilerCore {
   ): ResolvedCall {
     const receiverOf = (candidate: Candidate): Compiled | undefined =>
       typeof receiver === 'function' ? receiver(candidate) : receiver;
-    const all = levels.flat();
-    if (all.length === 0) this.error(row, `${name} が見つかりません。`);
     const call: CallSyntax = { args, hasTrailingLambda, explicitTypeArgs, row, name };
-    // A lone candidate gives its parameter types to the arguments, which literals and nested generic calls need.
-    const lone = all.length === 1 ? all[0] : undefined;
-    const loneAttempt = lone ? this.startLoneAttempt(lone, call, receiverOf(lone), expected) : undefined;
-    // The candidates of the first level that take the arguments, or the lone one, give an argument the type they agree
-    // on, as members come before extensions.
-    const attempts = loneAttempt
-      ? [loneAttempt]
-      : firstAttempts(levels, (candidate) => this.startAttempt(candidate, args, hasTrailingLambda, explicitTypeArgs));
-    if (!loneAttempt) this.constrainInitialHints(attempts, receiverOf, expected, row);
-    const compiledArgs = this.compileArguments(scope, context, args, attempts, !lone);
-    const chosen = this.chooseAttempt(scope, context, levels, call, compiledArgs, loneAttempt, receiverOf);
+    const { all, compiledArgs, chosen } = this.selectCall(scope, context, levels, call, receiverOf, expected);
     if (!chosen) {
       if (fallbackError) throw fallbackError;
       return this.reportInapplicable(
@@ -228,6 +317,31 @@ export abstract class CallCompiler extends CompilerCore {
     if (!this.file.isLibrary && chosen.candidate.symbol.isDeprecatedError)
       this.error(row, `${chosen.candidate.symbol.name} は Kotlin で非推奨になり、使用できません。`);
     return this.completeCall(scope, context, chosen, args, compiledArgs, expected, row);
+  }
+
+  private selectCall(
+    scope: Scope,
+    context: FunctionContext,
+    levels: Candidate[][],
+    call: CallSyntax,
+    receiverOf: (candidate: Candidate) => Compiled | undefined,
+    expected: KType | undefined
+  ): { all: Candidate[]; compiledArgs: (Compiled | undefined)[]; chosen: Attempt | undefined } {
+    const all = levels.flat();
+    const { args, hasTrailingLambda, explicitTypeArgs, row, name } = call;
+    if (all.length === 0) this.error(row, `${name} が見つかりません。`);
+    // A lone candidate gives its parameter types to the arguments, which literals and nested generic calls need.
+    const lone = all.length === 1 ? all[0] : undefined;
+    const loneAttempt = lone ? this.startLoneAttempt(lone, call, receiverOf(lone), expected) : undefined;
+    // The candidates of the first level that take the arguments, or the lone one, give an argument the type they agree
+    // on, as members come before extensions.
+    const attempts = loneAttempt
+      ? [loneAttempt]
+      : firstAttempts(levels, (candidate) => this.startAttempt(candidate, args, hasTrailingLambda, explicitTypeArgs));
+    if (!loneAttempt) this.constrainInitialHints(attempts, receiverOf, expected, row);
+    const compiledArgs = this.compileArguments(scope, context, args, attempts, !lone);
+    const chosen = this.chooseAttempt(scope, context, levels, call, compiledArgs, loneAttempt, receiverOf);
+    return { all, compiledArgs, chosen };
   }
 
   private constrainInitialHints(
@@ -355,7 +469,7 @@ export abstract class CallCompiler extends CompilerCore {
     scope: Scope,
     context: FunctionContext,
     levels: Candidate[][],
-    { args, hasTrailingLambda, explicitTypeArgs, row, name }: CallSyntax,
+    { args, hasTrailingLambda, explicitTypeArgs, row, name, checkingApplicability }: CallSyntax,
     compiledArgs: (Compiled | undefined)[],
     loneAttempt: Attempt | undefined,
     receiverOf: (candidate: Candidate) => Compiled | undefined
@@ -370,7 +484,7 @@ export abstract class CallCompiler extends CompilerCore {
         return this.isApplicable(attempt, args, compiledArgs, receiverOf(candidate)) ? [attempt] : [];
       });
       if (applicable.length === 0) continue;
-      return applicable.length === 1
+      return checkingApplicability || applicable.length === 1
         ? applicable[0]
         : this.mostSpecific(applicable, compiledArgs, args, scope, context, row, name);
     }
@@ -1148,6 +1262,7 @@ interface CallSyntax {
   explicitTypeArgs: KType[];
   row: number;
   name: string;
+  checkingApplicability?: boolean;
 }
 
 /** The declared type of the parameter that takes an argument, or `undefined` for none. */

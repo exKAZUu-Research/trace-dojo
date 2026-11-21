@@ -1864,6 +1864,45 @@ fun main() {
     stdout: 'concurrent\n3\nconcurrent\n3\nconcurrent\n3\nconcurrent\n3\nfalse\nfalse\nimmutable\n',
   },
   {
+    name: 'function properties resolve by applicability among member and extension functions',
+    source: `class D {
+    val format: (String) -> String
+        get() {
+            print("get ")
+            return { "<$it>" }
+        }
+    fun format(a: Int, b: Int) = "$a$b"
+    fun run() = format("implicit")
+    val same: (String) -> String = { "property $it" }
+    fun same(s: String) = "method $s"
+}
+fun D.format(s: String) = "extension $s"
+fun D.format(s: Boolean) = "extension $s"
+class C {
+    val go: (Int) -> Int = { it * 10 }
+    fun go() = 1
+    fun go(a: Int, b: Int) = a + b
+    fun t() = go(2)
+}
+class Other {
+    val same = same("getter")
+    fun same(s: String) = "method $s"
+}
+fun main() {
+    val d = D()
+    println(d.format(1, 2))
+    println(d.format("explicit"))
+    println(d.format(true))
+    println(d.run())
+    println(d.same("priority"))
+    println(C().t())
+    println(Other().same)
+    val missing: D? = null
+    println(missing?.format("safe"))
+}`,
+    stdout: '12\nget <explicit>\nextension true\nget <implicit>\nmethod priority\n20\nmethod getter\nnull\n',
+  },
+  {
     name: 'local function calls fall through by applicability and unsigned values use JVM boxing',
     source: `fun add(x: Int): Int = 100 + x
 fun display(x: Int): String = "number $x"
