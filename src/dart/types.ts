@@ -524,7 +524,9 @@ function mutualSubtypes(a: DartType, b: DartType): boolean {
 
 /** The least upper bound of two types (Dart's UP), used for conditional expressions and collection literals. */
 export function upperBound(a: DartType, b: DartType): DartType {
-  return specialUpperBound(a, b) ?? structuralUpperBound(a, b);
+  const bound = specialUpperBound(a, b) ?? structuralUpperBound(a, b);
+  // Object bounds only what it is a supertype of, which excludes extension types that implement no Object.
+  return isObject(bound) && !(isSubtype(a, bound) && isSubtype(b, bound)) ? objectType(true) : bound;
 }
 
 /** The bound when either type is a top, bottom, null, nullable, Object, or type parameter type. */

@@ -1801,6 +1801,20 @@ void main() { print([F(1).f('ok'), F(1).g]); }`;
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[ok, g]\n' });
 });
 
+test('Dart upper bounds with extension types that implement no Object are Object?', () => {
+  const program = `extension type E(int v) {}
+extension type F(int v) {}
+extension type G(int v) implements Object {}
+void main() { print([[E(1), 2].runtimeType, [E(1), F(2)].runtimeType, [G(1), 2].runtimeType]); }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[List<Object?>, List<Object?>, List<Object>]\n',
+  });
+  expect(
+    executeProgram('dart', 'extension type E(int? v) {}\nvoid main() { var b = true; Object o = b ? E(null) : 1; }')
+  ).toMatchObject({ kind: 'compileError' });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}
