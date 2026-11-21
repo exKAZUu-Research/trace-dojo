@@ -441,6 +441,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   private compileIs(expression: Extract<Expression, { kind: 'is' }>): { compiled: Compiled; flow: ConditionFlow } {
     const value = this.compileExpression(expression.value);
+    if (value.type.kind === 'void') this.error(expression.value, 'void の値は、式の中では使えません。');
     const type = this.resolveType(expression.type);
     const resolve = this.runtimeType(type);
     const { run } = value;

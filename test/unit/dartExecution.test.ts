@@ -4975,6 +4975,13 @@ test('dynamic operators reject void operands before execution', () => {
   }
 });
 
+test('type tests reject void operands before execution', () => {
+  for (const comparison of ['is Object', 'is! Null']) {
+    const program = `void main() { if (print('operand') ${comparison}) print('matched'); }`;
+    expect(executeProgram('dart', program)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
 test('function upper bounds preserve compatible named parameter signatures', () => {
   const program = `void main() {
   var optional = [({int n = 0}) => n, ({num n = 0}) => n.toInt()];
