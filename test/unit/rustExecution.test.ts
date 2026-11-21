@@ -7420,3 +7420,45 @@ fn main() {
     diagnostics: [expect.objectContaining({ row: 4, message: expect.stringContaining('型が合いません') })],
   });
 });
+
+test('an iterator has {:?} when the iterators it writes do, and names of std::io are reported for what they are', () => {
+  const shown = `#[derive(Debug)]
+struct Shown(i32);
+struct Hidden;
+fn main() {
+    let items = [Shown(1)];
+    println!("{:?}", (0..3).map(|_| Hidden));
+    println!("{:?}", items.iter().enumerate().map(|(_, _)| Hidden).rev());
+    let numbers = vec![1, 2];
+    let mut peeked = numbers.iter().map(|n| n + 1).peekable();
+    peeked.peek();
+    println!("{:?} {:?}", peeked, numbers.iter().chain([3].iter()).skip(1));
+}`;
+  expect(executeProgram('rust', shown)).toMatchObject({
+    kind: 'executed',
+    stdout: `Map { iter: 0..3 }
+Rev { iter: Map { iter: Enumerate { iter: Iter([Shown(1)]), count: 0 } } }
+Peekable { iter: Map { iter: Iter([2]) }, peeked: Some(Some(2)) } Skip { iter: Chain { a: Some(Iter([1, 2])), b: Some(Iter([3])) }, n: 1 }
+`,
+  });
+  for (const hidden of [
+    '[Hidden].into_iter().map(|_| 1)',
+    '(0..2).map(|_| Hidden).peekable()',
+    '[Hidden].iter().chain([Hidden].iter()).map(|_| 1)',
+  ]) {
+    const program = rustMain(`    println!("{:?}", ${hidden});`, 'struct Hidden;');
+    expect(executeProgram('rust', program)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [expect.objectContaining({ message: expect.stringContaining('{:?} で表示できません') })],
+    });
+  }
+  for (const [use, message] of [
+    ['use std::io::BufWriter;', 'std::io::BufWriter は、この採点環境では使えません。'],
+    ['use std::io::BufRead;', '標準入力・ファイルの入出力は、この採点環境では使えません。'],
+  ]) {
+    expect(executeProgram('rust', `${use}\nfn main() {}`)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [{ row: 0, message }],
+    });
+  }
+});

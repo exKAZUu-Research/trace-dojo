@@ -146,6 +146,23 @@ export function supportsDebug(shape: Type): boolean {
   return ADAPTER_NAMES[name] !== undefined && supportsDebug(t.args[0]);
 }
 
+/**
+ * The types whose `Debug` the `{:?}` of an iterator needs: those of the items that the iterators it writes hold. An
+ * adapter writes the iterator it adapts, so its own items matter only where it keeps one (`Peekable`).
+ */
+export function debugOperands(item: Type, shape: Type): Type[] {
+  const t = normalize(shallow(shape));
+  if (t.kind !== 'adt') return [item];
+  const name = t.def.name;
+  // These write no item: a closure has no `{:?}` to ask for.
+  if (name === 'FromFnShape' || name === 'RepeatWithShape') return [];
+  if (name === 'ByRefShape') return debugOperands(item, t.args[0]);
+  if (!ADAPTER_NAMES[name]) return [item];
+  const adapted = debugOperands(adaptedItem(name, t, item), t.args[0]);
+  if (name === 'ChainShape') return [...adapted, ...debugOperands(item, t.args[1])];
+  return name === 'PeekableShape' ? [item, ...adapted] : adapted;
+}
+
 /** Whether std's searcher for a pattern of a type has `{:?}`, which a closure's does not. */
 function patternHasDebug(pattern: Type): boolean {
   const kind = normalize(shallow(pattern)).kind;

@@ -1,7 +1,7 @@
 // code-gauge-allow-file fileNcss 547 -- One rule per trait of the standard library.
 import { collectionKeyAnswer } from './collectionBounds';
 import { normalize } from './infer';
-import { supportsDebug } from './iterDebug';
+import { debugOperands, supportsDebug } from './iterDebug';
 import { dynIteratorTarget, intoIterItem } from './iterTypes';
 import { arrayTryFrom, conversionExists, inferNumericSource, intoConversion } from './traitConversions';
 import { doubleEndedSearcher, iteratorCapability } from './traitIterators';
@@ -302,7 +302,6 @@ function cloneAdt(goal: Goal, t: AdtType): Answer {
   return 'no';
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Debug bounds depend on the represented data.
 function debug(goal: Goal): Answer {
   const { t, all } = goal;
   if (isPrimitive(t) || t.kind === 'str' || t.kind === 'never') return 'yes';
@@ -314,9 +313,7 @@ function debug(goal: Goal): Answer {
   const d = derived(goal);
   if (d) return d;
   if (t.def.builtin === 'Iter') {
-    const shape = normalize(shallow(t.args[1]));
-    if (shape.kind === 'adt' && ['FromFnShape', 'RepeatWithShape'].includes(shape.def.name)) return 'yes';
-    return supportsDebug(shape) ? all([t.args[0]]) : 'no';
+    return supportsDebug(t.args[1]) ? all(debugOperands(t.args[0], t.args[1])) : 'no';
   }
   if (DEBUG_TYPES.has(t.def.builtin as string)) return all(t.args);
   return 'no';

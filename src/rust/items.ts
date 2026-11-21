@@ -1352,7 +1352,14 @@ function checkUnavailableStd(segments: string[], span: Span): void {
     hint: 'std::hint',
   };
   if (module === 'io' && name) {
-    compileError(span, '標準入力・ファイルの入出力は、この採点環境では使えません。');
+    // The other names of `std::io` (`BufWriter`, `Cursor`) neither read standard input nor touch files.
+    const reads = /^(?:stdin|Stdin|StdinLock|Read|BufRead|BufReader|Lines|Bytes|read_to_string)$/.test(name);
+    compileError(
+      span,
+      reads
+        ? '標準入力・ファイルの入出力は、この採点環境では使えません。'
+        : `std::io::${name} は、この採点環境では使えません。`
+    );
   }
   if (module && unavailable[module]) compileError(span, `${unavailable[module]}は、この採点環境では使えません。`);
   if (module === 'process' && name && name !== 'exit') {
