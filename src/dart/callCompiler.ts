@@ -45,7 +45,7 @@ import {
   numericClassOf,
   resolveBound,
   substitute,
-  type TypeParam,
+  TypeParam,
   typeParamType,
   upperBound,
   VOID,
@@ -761,11 +761,12 @@ export abstract class CallCompiler extends OperatorCompiler {
   // code-gauge-allow functionCognitiveComplexity 21 -- Gather ordinary arguments, contextually typed closures, and generic tear-offs.
   // code-gauge-allow functionNcss 34 -- Gather ordinary arguments, contextually typed closures, and generic tear-offs.
   private inferTypeArguments(
-    type: FunctionType,
+    signature: FunctionType,
     args: ArgumentsSyntax,
     context: DartType | undefined,
     compiled: Map<Expression, Compiled>
   ): DartType[] {
+    const type = withFreshTypeParams(signature);
     const params = new Set(type.typeParams);
     const fromContext = new Map<TypeParam, DartType>();
     // Any context but dynamic constrains the result, Object? included: `print(id(1))` makes T Object?.
@@ -1310,6 +1311,19 @@ function argumentContextFor(
   if (!closurePass) return INFERENCE_HOLE;
   if (contextual && param.bound && !mentionsTypeParams(param.bound, params)) return param.bound;
   return solution.get(param) ?? upper.get(param) ?? INFERENCE_HOLE;
+}
+
+/**
+ * The signature with its own type parameters renamed, so that inference tells them apart from the same parameters of an
+ * enclosing declaration: inside `class Stack<T>`, `Stack([])` infers its T from the context `Stack<T>`.
+ */
+function withFreshTypeParams(type: FunctionType): FunctionType {
+  if (type.typeParams.length === 0) return type;
+  const fresh = type.typeParams.map((param) => new TypeParam(param.name));
+  const map = new Map(type.typeParams.map((param, index) => [param, typeParamType(fresh[index]) as DartType]));
+  for (const [index, param] of type.typeParams.entries())
+    fresh[index].bound = param.bound && substitute(param.bound, map);
+  return { ...(substitute({ ...type, typeParams: [] }, map) as FunctionType), typeParams: fresh };
 }
 
 /** Whether a type argument satisfies its parameter's bound, with the parameter itself in place of F-bounded uses. */

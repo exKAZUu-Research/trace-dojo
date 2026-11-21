@@ -1837,6 +1837,21 @@ void main() { f(<Never>[]); g(<String, List<Never>>{}); h([(g) {}]); t(k); }`;
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'Never\nNever\nObject?\nNever\n' });
 });
 
+test('Dart generic classes infer their own constructors from contexts naming their type parameters', () => {
+  const program = `class Stack<T> {
+  final List<T> items;
+  Stack(this.items);
+  factory Stack.empty() => Stack([]);
+  Stack<T> cleared() => Stack([]);
+}
+class Cache<K, V> { final Map<K, V> m; Cache(this.m); factory Cache.empty() => Cache({}); }
+void main() { print([Stack<int>.empty().items.runtimeType, Stack<int>([1]).cleared().items.length, Cache<int, String>.empty().m.runtimeType]); }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[List<int>, 0, _Map<int, String>]\n',
+  });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}
