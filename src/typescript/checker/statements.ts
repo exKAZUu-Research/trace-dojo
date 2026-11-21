@@ -281,24 +281,21 @@ export class StatementChecker {
       return;
     }
     const key = `s${symbol.id}`;
-    const valueType = this.c.expressions.check(value, annotation);
-    if (annotation) {
-      this.c.expressions.checkAssignable(nameNode, valueType, annotation, value);
-      this.c.expressions.setVariableType(symbol, annotation);
-      this.c.flow.set(key, { type: this.c.flow.assignmentReduced(annotation, regularOf(valueType)), assigned: true });
-      return;
-    }
-    if (isDirectEmptyArray(value)) {
+    const valueType = this.c.expressions.checkAssignedValue(value, annotation);
+    if (annotation) this.c.expressions.checkAssignable(nameNode, valueType, annotation, value);
+    if (!annotation && isDirectEmptyArray(value)) {
       // `const a = []` evolves as elements are pushed.
       this.c.expressions.setVariableType(symbol, this.c.arrayType(anyType));
       this.c.flow.set(key, { type: this.c.arrayType(neverType), assigned: true, evolving: true });
       return;
     }
     const isConst = kind === 'const';
-    const declared = this.c.literals.widenDeclared(valueType, isConst);
-    const type = isConst ? this.c.expressions.expandos.constType(declarator, symbol, declared) : declared;
+    const declared = annotation ?? this.c.literals.widenDeclared(valueType, isConst);
+    const type =
+      !annotation && isConst ? this.c.expressions.expandos.constType(declarator, symbol, declared) : declared;
     this.c.expressions.setVariableType(symbol, this.c.assignments.isAutoTyped(symbol) ? anyType : type);
-    this.c.flow.set(key, { type, assigned: true });
+    const flowType = annotation || valueType.kind === 'literal' ? this.c.flow.assignmentReduced(type, valueType) : type;
+    this.c.flow.set(key, { type: flowType, assigned: true });
   }
 
   /** A variable declared again, which keeps the type its first declaration gives, as TypeScript's merged symbol does. */
@@ -344,12 +341,12 @@ export class StatementChecker {
     this.c.patterns.bindPattern(
       pattern,
       sourceType,
-      (identifier, type) => {
+      (identifier, type, assigned = type) => {
         const symbol = this.c.scopeOf(identifier).lookupValue(identifier.text);
         if (!symbol) return;
         const declared = this.c.literals.widenDeclared(type, isConst);
         this.c.expressions.setVariableType(symbol, declared);
-        this.c.flow.set(`s${symbol.id}`, { type: declared, assigned: true });
+        this.c.flow.set(`s${symbol.id}`, { type: this.c.flow.assignmentReduced(declared, assigned), assigned: true });
       },
       { annotated: annotation !== undefined, isConst }
     );

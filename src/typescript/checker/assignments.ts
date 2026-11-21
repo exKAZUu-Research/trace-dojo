@@ -57,7 +57,7 @@ export class AssignmentChecker {
       return valueType;
     }
     const targetType = this.targetType(left, false);
-    const valueType = this.c.expressions.check(right, targetType === errorType ? undefined : targetType);
+    const valueType = this.c.expressions.checkAssignedValue(right, targetType === errorType ? undefined : targetType);
     this.c.expressions.expandos.recordAssignment(node, valueType);
     if (targetType !== errorType) this.c.expressions.checkAssignable(leftExpression, valueType, targetType, right);
     this.assignReference(leftExpression, targetType, valueType);
@@ -142,7 +142,7 @@ export class AssignmentChecker {
     const entry = this.c.flow.entry(key);
     const symbol = target.type === 'identifier' ? this.c.scopeOf(target).lookupValue(target.text) : undefined;
     const isAuto = symbol !== undefined && this.isAutoTyped(symbol);
-    const type = isAuto ? this.c.widen(assigned) : this.c.flow.assignmentReduced(declared, regularOf(assigned));
+    const type = isAuto ? this.c.widen(assigned) : this.c.flow.assignmentReduced(declared, assigned);
     this.c.flow.set(key, { type, assigned: true, evolving: entry?.evolving }, target);
   }
 

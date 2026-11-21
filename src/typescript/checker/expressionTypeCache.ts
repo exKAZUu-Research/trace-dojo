@@ -9,16 +9,16 @@ export class ExpressionTypeCache {
 
   constructor(private readonly c: Checker) {}
 
-  check(node: TreeNode, contextual: Type | undefined, compute: () => Type): Type {
-    const key = this.key(node, contextual);
+  check(node: TreeNode, contextual: Type | undefined, retainFreshBoolean: boolean, compute: () => Type): Type {
+    const key = this.key(node, contextual, retainFreshBoolean);
     const cached = this.silentTypes.get(key);
     if (cached) return cached;
     const type = compute();
-    if (key === this.key(node, contextual)) this.silentTypes.set(key, type);
+    if (key === this.key(node, contextual, retainFreshBoolean)) this.silentTypes.set(key, type);
     return type;
   }
 
-  private key(node: TreeNode, contextual?: Type): string {
+  private key(node: TreeNode, contextual: Type | undefined, retainFreshBoolean: boolean): string {
     const flow = [...(this.c.flow.current?.entries ?? [])].map(([key, entry]) => [
       key,
       typeCacheKey(entry.type),
@@ -51,6 +51,6 @@ export class ExpressionTypeCache {
       environmentId = this.silentEnvironments.size;
       this.silentEnvironments.set(environment, environmentId);
     }
-    return `${this.c.expressions.deferredContexts.id}/${this.c.overloadContexts.cacheKey}/${node.id}/${typeCacheKey(contextual)}/${this.c.literals.isConstContext(node, contextual)}/${environmentId}`;
+    return `${this.c.expressions.deferredContexts.id}/${this.c.overloadContexts.cacheKey}/${node.id}/${typeCacheKey(contextual)}/${this.c.literals.isConstContext(node, contextual)}/${retainFreshBoolean}/${environmentId}`;
   }
 }

@@ -182,7 +182,7 @@ export class OperatorChecker {
     return !isAnyLike(regular) && !isIntrinsic(regular, 'never') && this.c.relations.isAssignable(regular, stringType);
   }
 
-  binary(node: TreeNode, contextual?: Type): Type {
+  binary(node: TreeNode, contextual?: Type, retainFreshBoolean = false): Type {
     const operator = node.childForFieldName('operator')?.text ?? '';
     const left = node.childForFieldName('left') as TreeNode;
     const right = node.childForFieldName('right') as TreeNode;
@@ -190,7 +190,7 @@ export class OperatorChecker {
       case '&&':
       case '||':
       case '??': {
-        return this.logical(operator, left, right, contextual);
+        return this.logical(operator, left, right, contextual, retainFreshBoolean);
       }
       default: {
         break;
@@ -398,7 +398,13 @@ export class OperatorChecker {
     );
   }
 
-  private logical(operator: string, left: TreeNode, right: TreeNode, contextual?: Type): Type {
+  private logical(
+    operator: string,
+    left: TreeNode,
+    right: TreeNode,
+    contextual?: Type,
+    retainFreshBoolean = false
+  ): Type {
     if (operator === '??') {
       const nullishness = syntacticNullishness(this.c, left);
       if (nullishness === 'never')
@@ -409,13 +415,13 @@ export class OperatorChecker {
       if (nullishness === 'always') this.c.error(left, 'この式は常に null か undefined です。');
       // A left optional chain that stops early is nullish, so the right operand runs there too.
       const { result: leftType, stops } = this.c.members.stoppingChain(skipParentheses(left), () =>
-        this.c.expressions.check(left, contextual)
+        this.c.expressions.check(left, contextual, retainFreshBoolean)
       );
       // The right operand runs only when the left one is nullish, so its effects join the path that skips it.
       const { whenTrue: skipped, whenFalse: nullish } = this.c.conditions.presence(left);
       let rightType: Type = neverType;
       const after = this.c.flow.from(this.c.flow.merge([nullish, ...stops]), () => {
-        rightType = this.c.expressions.check(right, contextual);
+        rightType = this.c.expressions.check(right, contextual, retainFreshBoolean);
       });
       this.c.conditions.checkLogicalOperands(left, leftType, right, rightType);
       this.c.flow.current = this.c.flow.merge([skipped, after]);
@@ -425,7 +431,7 @@ export class OperatorChecker {
     const rightState = operator === '&&' ? whenTrue : whenFalse;
     let rightType: Type = neverType;
     const after = this.c.flow.from(rightState, () => {
-      rightType = this.c.expressions.check(right, contextual ?? leftType);
+      rightType = this.c.expressions.check(right, contextual ?? leftType, retainFreshBoolean);
     });
     this.c.conditions.checkLogicalOperands(left, leftType, right, rightType);
     this.c.flow.current = this.c.flow.merge([operator === '&&' ? whenFalse : whenTrue, after]);
@@ -487,7 +493,7 @@ export class OperatorChecker {
     return this.c.relations.isAssignable(type, expected);
   }
 
-  ternary(node: TreeNode, contextual?: Type): Type {
+  ternary(node: TreeNode, contextual?: Type, retainFreshBoolean = false): Type {
     const condition = node.childForFieldName('condition') as TreeNode;
     const consequence = node.childForFieldName('consequence') as TreeNode;
     const alternative = node.childForFieldName('alternative') as TreeNode;
@@ -496,10 +502,10 @@ export class OperatorChecker {
     let trueType: Type = neverType;
     let falseType: Type = neverType;
     const afterTrue = this.c.flow.from(whenTrue, () => {
-      trueType = this.c.expressions.check(consequence, contextual);
+      trueType = this.c.expressions.check(consequence, contextual, retainFreshBoolean);
     });
     const afterFalse = this.c.flow.from(whenFalse, () => {
-      falseType = this.c.expressions.check(alternative, contextual);
+      falseType = this.c.expressions.check(alternative, contextual, retainFreshBoolean);
     });
     this.c.flow.current = this.c.flow.merge([afterTrue, afterFalse]);
     return this.c.literals.subtypeReduced([trueType, falseType]);

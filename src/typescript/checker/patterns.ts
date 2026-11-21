@@ -34,6 +34,8 @@ interface BindingOptions {
   literalSource?: TreeNode;
 }
 
+type Bind = (identifier: TreeNode, type: Type, assigned?: Type) => void;
+
 /** Gives the names a binding pattern declares the types of what it destructures. */
 export class BindingPatterns {
   readonly correlatedSources = new Map<number, Type>();
@@ -60,34 +62,16 @@ export class BindingPatterns {
    * Destructures a value of `type` with a binding pattern, calling `bind` with each name and its type. `annotated` tells
    * whether the declaration the pattern belongs to has a type annotation, which its defaults must then conform to.
    */
-  bindPattern(
-    pattern: TreeNode,
-    type: Type,
-    bind: (identifier: TreeNode, type: Type) => void,
-    options: BindingOptions = {}
-  ): void {
+  bindPattern(pattern: TreeNode, type: Type, bind: Bind, options: BindingOptions = {}, assigned?: Type): void {
     switch (pattern.type) {
       case 'identifier':
       case 'shorthand_property_identifier_pattern': {
-        bind(pattern, type);
+        bind(pattern, type, assigned);
         return;
       }
       case 'assignment_pattern':
       case 'object_assignment_pattern': {
-        const left = pattern.childForFieldName('left') as TreeNode;
-        const right = pattern.childForFieldName('right') as TreeNode;
-        const implied = this.impliedBindingType(left, options.isConst);
-        const defaultType = this.initializerType(right, implied ?? (options.annotated ? type : undefined));
-        this.checkInitializer(left, right, defaultType);
-        const withoutUndefined = this.c.relations.removeUndefined(type);
-        if (options.annotated && !isIntrinsic(withoutUndefined, 'never')) {
-          const declared = this.defaultMayBeUndefined(defaultType) ? type : withoutUndefined;
-          this.c.expressions.checkAssignable(right, defaultType, declared);
-          this.bindPattern(left, declared, bind, options);
-          return;
-        }
-        const combined = unionOf([withoutUndefined, defaultType], true);
-        this.bindPattern(left, options.isConst || implied ? combined : this.c.widen(combined), bind, options);
+        this.bindDefault(pattern, type, bind, options, assigned);
         return;
       }
       case 'object_pattern': {
@@ -107,6 +91,24 @@ export class BindingPatterns {
         return;
       }
     }
+  }
+
+  private bindDefault(pattern: TreeNode, type: Type, bind: Bind, options: BindingOptions, assigned?: Type): void {
+    const left = pattern.childForFieldName('left') as TreeNode;
+    const right = pattern.childForFieldName('right') as TreeNode;
+    const implied = this.impliedBindingType(left, options.isConst);
+    const defaultType = this.initializerType(right, implied ?? (options.annotated ? type : undefined));
+    this.checkInitializer(left, right, defaultType);
+    const withoutUndefined = this.c.relations.removeUndefined(type);
+    if (options.annotated && !isIntrinsic(withoutUndefined, 'never')) {
+      const declared = this.defaultMayBeUndefined(defaultType) ? type : withoutUndefined;
+      this.c.expressions.checkAssignable(right, defaultType, declared);
+      this.bindPattern(left, declared, bind, options);
+      return;
+    }
+    const combined = unionOf([withoutUndefined, defaultType], true);
+    const declared = options.isConst || implied ? combined : this.c.widen(combined);
+    this.bindPattern(left, declared, bind, options, assigned === errorType ? undefined : combined);
   }
 
   initializerType(value: TreeNode, contextual?: Type): Type {
@@ -252,12 +254,7 @@ export class BindingPatterns {
     );
   }
 
-  private bindObjectPattern(
-    pattern: TreeNode,
-    type: Type,
-    bind: (identifier: TreeNode, type: Type) => void,
-    options: BindingOptions
-  ): void {
+  private bindObjectPattern(pattern: TreeNode, type: Type, bind: Bind, options: BindingOptions): void {
     if (isEmptyPattern(pattern)) this.checkEmptyObjectSource(pattern, type);
     const used: Type[] = [];
     for (const element of named(pattern)) {
@@ -271,14 +268,26 @@ export class BindingPatterns {
           const left = element.childForFieldName('left') as TreeNode;
           used.push(literalType(left.text));
           const propertyType = this.destructuredProperty(left, type, left.text, true);
-          this.bindPattern(element, propertyType, bind, options);
+          this.bindPattern(
+            element,
+            propertyType,
+            bind,
+            options,
+            this.defaultPropertySource(type, propertyType, [left.text])
+          );
           break;
         }
         case 'pair_pattern': {
           const key = element.childForFieldName('key') as TreeNode;
           const value = element.childForFieldName('value') as TreeNode;
           const selected = this.destructuredKey(key, type, defaultedTarget(value) !== undefined);
-          this.bindPattern(value, selected.type, bind, options);
+          this.bindPattern(
+            value,
+            selected.type,
+            bind,
+            options,
+            this.defaultPropertySource(type, selected.type, selected.names)
+          );
           used.push(selected.keyType);
           break;
         }
@@ -292,6 +301,15 @@ export class BindingPatterns {
         }
       }
     }
+  }
+
+  private defaultPropertySource(object: Type, property: Type, names?: string[]): Type | undefined {
+    if (!isIntrinsic(property, 'undefined')) return undefined;
+    const name = names?.length === 1 ? names[0] : undefined;
+    if (name !== undefined && (this.c.propertyOf(object, name) || this.c.members.indexSignatureType(object, name)))
+      return undefined;
+    // TypeScript uses the declared binding type when the source lacks the property entirely.
+    return errorType;
   }
 
   destructuredKey(
@@ -461,12 +479,7 @@ export class BindingPatterns {
     return unionOf(types, true);
   }
 
-  private bindArrayPattern(
-    pattern: TreeNode,
-    type: Type,
-    bind: (identifier: TreeNode, type: Type) => void,
-    options: BindingOptions
-  ): void {
+  private bindArrayPattern(pattern: TreeNode, type: Type, bind: Bind, options: BindingOptions): void {
     if (isEmptyPattern(pattern)) this.iteratedType(pattern, type);
     for (const { element, index } of arrayPatternElements(pattern)) {
       if (element.type === 'rest_pattern') {

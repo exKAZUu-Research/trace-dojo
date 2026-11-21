@@ -74,7 +74,10 @@ export class ExpressionChecker {
   private readonly variableTypes = new Map<number, Type>();
 
   /** The type of each kind of expression; the others check their children and are `any`. */
-  private readonly checkers = new Map<string, (node: TreeNode, contextual?: Type) => Type>([
+  private readonly checkers = new Map<
+    string,
+    (node: TreeNode, contextual?: Type, retainFreshBoolean?: boolean) => Type
+  >([
     ['number', (node) => freshLiteralType(numberValue(node.text))],
     ['string', (node) => freshLiteralType(stringValue(node))],
     ['template_string', (node, contextual) => this.templateString(node, contextual)],
@@ -85,7 +88,11 @@ export class ExpressionChecker {
     ['undefined', () => undefinedType],
     ['identifier', (node, contextual) => this.identifier(node, contextual)],
     ['this', (node) => this.thisExpression(node)],
-    ['parenthesized_expression', (node, contextual) => this.checkWrapped(node, contextual)],
+    [
+      'parenthesized_expression',
+      (node, contextual, retainFreshBoolean) =>
+        this.checkWrapped(node, contextual, (operand, context) => this.check(operand, context, retainFreshBoolean)),
+    ],
     ['array', (node, contextual) => this.c.literals.arrayLiteral(node, contextual)],
     ['object', (node, contextual) => this.c.literals.objectLiteral(node, contextual)],
     ['function_expression', (node, contextual) => this.c.functions.functionExpression(node, contextual)],
@@ -103,8 +110,14 @@ export class ExpressionChecker {
     ['augmented_assignment_expression', (node) => this.c.assignments.compoundAssignment(node)],
     ['update_expression', (node) => this.c.assignments.update(node)],
     ['unary_expression', (node) => this.c.operators.unary(node)],
-    ['binary_expression', (node, contextual) => this.c.operators.binary(node, contextual)],
-    ['ternary_expression', (node, contextual) => this.c.operators.ternary(node, contextual)],
+    [
+      'binary_expression',
+      (node, contextual, retainFreshBoolean) => this.c.operators.binary(node, contextual, retainFreshBoolean),
+    ],
+    [
+      'ternary_expression',
+      (node, contextual, retainFreshBoolean) => this.c.operators.ternary(node, contextual, retainFreshBoolean),
+    ],
     ['as_expression', (node, contextual) => this.checkWrapped(node, contextual)],
     ['type_assertion', (node, contextual) => this.checkWrapped(node, contextual)],
     ['satisfies_expression', (node, contextual) => this.checkWrapped(node, contextual)],
@@ -125,11 +138,18 @@ export class ExpressionChecker {
 
   // Entry points -------------------------------------------------------------------------------------------------
 
-  check(node: TreeNode, contextual?: Type): Type {
+  checkAssignedValue(node: TreeNode, contextual?: Type): Type {
+    return this.check(node, contextual, true);
+  }
+
+  check(node: TreeNode, contextual?: Type, retainFreshBoolean = false): Type {
     this.c.budget.spend();
     return this.c.withTypeDemand(node, () => {
-      if (this.c.silent > 0) return this.silentTypes.check(node, contextual, () => this.compute(node, contextual));
-      const type = this.compute(node, contextual);
+      if (this.c.silent > 0)
+        return this.silentTypes.check(node, contextual, retainFreshBoolean, () =>
+          this.compute(node, contextual, retainFreshBoolean)
+        );
+      const type = this.compute(node, contextual, retainFreshBoolean);
       if (!this.c.flow.probing && this.observedTypes?.has(node.id)) this.observedTypes.set(node.id, type);
       return type;
     });
@@ -180,10 +200,11 @@ export class ExpressionChecker {
     }
   }
 
-  private compute(node: TreeNode, contextual?: Type): Type {
+  private compute(node: TreeNode, contextual: Type | undefined, retainFreshBoolean: boolean): Type {
     const checkKind = this.checkers.get(node.type);
     if (checkKind) {
-      const type = checkKind(node, contextual);
+      const type = checkKind(node, contextual, retainFreshBoolean);
+      if (retainFreshBoolean && type.kind === 'literal' && typeof type.value === 'boolean') return type;
       return contextual ? this.c.literals.preserveContextualLiterals(type, contextual) : type;
     }
     for (const child of named(node)) this.check(child);

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 443 -- Keeps flow state, joins, and reference narrowing together.
+// code-gauge-allow-file fileNcss 445 -- Keeps flow state, joins, and reference narrowing together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -144,6 +144,9 @@ export class Flow {
   }
 
   private joinTypes(types: Type[]): Type {
+    const first = types[0];
+    if (first?.kind === 'literal' && typeof first.value === 'boolean' && types.every((type) => type === first))
+      return first;
     const union = unionOf(types);
     if (union.kind !== 'union') return union;
     return unionOf(
@@ -682,14 +685,13 @@ export class Flow {
         if (narrowed !== constraint) return narrowed;
       }
     }
-    if (declared.kind !== 'union') {
-      return declared;
-    }
+    if (declared.kind !== 'union') return declared;
     // As TypeScript's getAssignmentReducedType: the members any part of the assigned type may be, when the whole of it
     // fits them.
-    const parts = assigned.kind === 'union' ? assigned.types : [assigned];
+    const regular = regularOf(assigned);
+    const parts = regular.kind === 'union' ? regular.types : [regular];
     const reduced = filterType(declared, (member) => parts.some((part) => this.c.relations.isAssignable(part, member)));
-    if (isIntrinsic(reduced, 'never') || !this.c.relations.isAssignable(assigned, reduced)) return declared;
+    if (isIntrinsic(reduced, 'never') || !this.c.relations.isAssignable(regular, reduced)) return declared;
     // A literal assigned to a union keeps its literal when the union lists literals, as `"a" | "b"` does.
     if (
       assigned.kind === 'literal' &&
@@ -698,7 +700,9 @@ export class Flow {
     ) {
       return filterType(reduced, (member) => member.kind !== 'literal' || member.value === assigned.value);
     }
-    return reduced;
+    return reduced === regular && assigned.kind === 'literal' && typeof assigned.value === 'boolean'
+      ? assigned
+      : reduced;
   }
 
   objectTypeOf(type: Type): ObjectType | undefined {
