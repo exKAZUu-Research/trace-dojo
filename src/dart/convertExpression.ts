@@ -40,6 +40,7 @@ import {
   unsupported,
 } from './convertBase';
 
+const COMPARISON_NODES = new Set(['equality_expression', 'relational_expression']);
 const BINARY_NODES = new Set([
   'additive_expression',
   'multiplicative_expression',
@@ -360,6 +361,11 @@ export abstract class ExpressionConverter {
       }
       case 'type_test_expression': {
         const [value, test] = operandsOf(node);
+        if (value.type === 'type_test_expression')
+          return syntaxError(
+            node,
+            '比較の式を、別の比較の式のオペランドにはできません。どちらかを括弧で囲んでください。'
+          );
         const isOperator = namedOf(test).find((child) => child.type === 'is_operator');
         return {
           kind: 'is',
@@ -442,6 +448,9 @@ export abstract class ExpressionConverter {
     }
     flush();
     if (operands.length !== operators.length + 1) return syntaxError(node, '書き方に誤りがあります。');
+    // Dart's equality and relational operators are not associative: `a == b == c` needs parentheses.
+    if (COMPARISON_NODES.has(node.type) && (operators.length > 1 || children.some((child) => child.type === node.type)))
+      return syntaxError(node, '比較の式を、別の比較の式のオペランドにはできません。どちらかを括弧で囲んでください。');
     let result = operands[0].expression;
     for (const [index, operator] of operators.entries()) {
       const right = operands[index + 1].expression;
