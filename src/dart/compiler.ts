@@ -283,12 +283,13 @@ export class Compiler extends MemberCompiler {
   }
 
   /**
-   * The direct superclass `implements` may not repeat: the written or implicit Object superclass of a class, a mixin's
-   * only `on` type (Object without one), and none for enums, extension types, or mixins with several `on` types, whose
-   * superclass Dart synthesizes.
+   * The direct superclass `implements` may not repeat: the written or implicit Object superclass of a class or named
+   * mixin application, a mixin's only `on` type (Object without one), and none for enums, extension types, classes with
+   * a `with` clause, or mixins with several `on` types, whose superclass Dart synthesizes.
    */
-  private effectiveSuperclasses(cls: ClassInfo): InterfaceType[] {
+  private effectiveSuperclasses(cls: ClassInfo, declaration: ClassDeclaration): InterfaceType[] {
     if (cls.kind === 'enum' || cls.kind === 'extensionType') return [];
+    if (declaration.mixins.length > 0 && !declaration.namedMixinApplication) return [];
     if (cls.kind === 'mixin') return cls.onTypes.length > 1 ? [] : [cls.onTypes[0] ?? objectType()];
     return cls.superclass ? [cls.superclass] : [];
   }
@@ -298,7 +299,7 @@ export class Compiler extends MemberCompiler {
     const { cls, declaration } = work;
     this.withTypeParams(cls.typeParams, () => {
       this.resolveSuperclass(work);
-      const extended = this.effectiveSuperclasses(cls);
+      const extended = this.effectiveSuperclasses(cls, declaration);
       this.resolveMixins(work);
       if (cls.kind === 'mixinClass' && cls.superclass?.cls !== coreTypes.object)
         this.error(

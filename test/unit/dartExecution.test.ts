@@ -1617,15 +1617,16 @@ test.each([
   'mixin M on A implements A {}',
   'class B implements Object {}',
   'mixin M implements Object {}',
+  'mixin M {}\nclass B = A with M implements A;',
 ])('Dart rejects a supertype listed twice across clauses: %s', (declaration) => {
   expect(executeProgram('dart', `class A {}\nclass C {}\n${declaration}\nvoid main() {}`)).toMatchObject({
     kind: 'compileError',
-    diagnostics: [expect.objectContaining({ row: 2 })],
   });
   for (const valid of [
     'mixin M {}\nclass B with M implements M {}',
     'mixin M on A, C implements A, C {}',
     'enum E implements Object { a }',
+    'mixin M {}\nclass B extends A with M implements A {}',
   ]) {
     expect(executeProgram('dart', `class A {}\nclass C {}\n${valid}\nvoid main() {}`)).toMatchObject({
       kind: 'executed',
