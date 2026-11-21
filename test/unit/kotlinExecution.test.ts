@@ -5588,6 +5588,16 @@ fun main() {
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '4\n4\n3\n5\n5\n' });
 });
 
+test('only object arrays support mapNotNull', () => {
+  const objectArray = 'fun main() { println(arrayOf(1, null, 2).mapNotNull { it }) }';
+  expect(executeProgram('kotlin', objectArray)).toMatchObject({ kind: 'executed', stdout: '[1, 2]\n' });
+  for (const array of ['intArrayOf(1, 2)', 'booleanArrayOf(true, false)', 'uintArrayOf(1u, 2u)']) {
+    expect(executeProgram('kotlin', `fun main() { println(${array}.mapNotNull { it }) }`)).toMatchObject({
+      kind: 'compileError',
+    });
+  }
+});
+
 test("prints the same identity hashes whatever ran before in the server's process", () => {
   const program = 'class A\nfun main() {\n    println(hashSetOf(A(), A(), A()).map { it.hashCode() })\n}';
   const first = executeProgram('kotlin', program);

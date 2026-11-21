@@ -90,7 +90,6 @@ function functionsOf(kind: ArrayKind): string {
     `inline fun ${g()}${r}.forEachIndexed(action: (index: Int, ${e}) -> Unit) { var index = 0; for (item in this) action(index++, item) }`,
     `inline fun ${g('R')}${r}.map(transform: (${e}) -> R): List<R> = asList().map(transform)`,
     `inline fun ${g('R')}${r}.mapIndexed(transform: (index: Int, ${e}) -> R): List<R> = asList().mapIndexed(transform)`,
-    `inline fun ${g('R : Any')}${r}.mapNotNull(transform: (${e}) -> R?): List<R> = asList().mapNotNull(transform)`,
     `inline fun ${g('R')}${r}.flatMap(transform: (${e}) -> Iterable<R>): List<R> = asList().flatMap(transform)`,
     `inline fun ${g()}${r}.filter(predicate: (${e}) -> Boolean): List<${e}> = asList().filter(predicate)`,
     `inline fun ${g()}${r}.filterNot(predicate: (${e}) -> Boolean): List<${e}> = asList().filterNot(predicate)`,
@@ -216,6 +215,11 @@ function functionsOf(kind: ArrayKind): string {
     ...[1, 2, 3, 4, 5].map((n) => `operator fun ${g()}${r}.component${n}(): ${e} = get(${n - 1})`),
   ];
   if (!kind.typeParameters) lines.push(`fun ${r}.toTypedArray(): Array<${e}> = asList().toTypedArray()`);
+  if (kind.typeParameters) {
+    lines.push(
+      `inline fun ${g('R : Any')}${r}.mapNotNull(transform: (${e}) -> R?): List<R> = asList().mapNotNull(transform)`
+    );
+  }
   if (kind.sum) lines.push(...numericAggregates(r, { ...kind, sum: kind.sum }, false));
   if (kind.isComparable) {
     const floating = e === 'Double' || e === 'Float';
