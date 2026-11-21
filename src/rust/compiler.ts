@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 614 -- Keeps the compilation that shares a function's context and step state together.
+// code-gauge-allow-file fileNcss 615 -- Keeps the compilation that shares a function's context and step state together.
 import type { Annotations, Coercion, FnContext, LocalVar, PathRes } from './annotations';
 import type { Block, Expr, Pattern, Span, Stmt } from './ast';
 import { patternBindings } from './astWalk';
@@ -308,10 +308,8 @@ export class Compiler {
     if (slot === undefined || !expr.ty) return read;
     const type = normalize(shallow(expr.ty));
     if (type.kind !== 'ref' || type.mutable) return read;
-    const coerced = this.annotations.coercions.has(expr);
-    // A coerced borrow reads its operand again for the coercion, which an index's expression must not run twice for.
-    if (expr.kind === 'ref' && this.ownedPlace(expr.operand) && !(coerced && indexes(expr.operand))) {
-      return this.directBorrow(expr.operand, slot, coerced ? read : undefined);
+    if (expr.kind === 'ref' && this.ownedPlace(expr.operand)) {
+      return this.directBorrow(expr, expr.operand, slot);
     }
     const res = expr.kind === 'path' ? this.annotations.paths.get(expr) : undefined;
     return (frame) => {
@@ -323,17 +321,25 @@ export class Compiler {
     };
   }
 
-  /** A shared borrow of an owned place, whose referent the variable in `slot` follows; `coerced` reads its coerced value. */
-  private directBorrow(operand: Expr, slot: number, coerced: Eval | undefined): Eval {
+  /**
+   * A shared borrow of an owned place, whose referent the variable in `slot` follows. A coercion (to a trait object, say)
+   * applies to the value read from that one evaluation of the place, so an index's expression runs once.
+   */
+  private directBorrow(expr: Expr, operand: Expr, slot: number): Eval {
     const place = this.place(operand);
     let root = operand;
     while (root.kind === 'field' || root.kind === 'index' || root.kind === 'unary') root = root.operand;
     const res = this.annotations.paths.get(root);
     const rootSlot = res?.kind === 'local' ? res.local.slot : -1;
+    const coercion = this.annotations.coercions.get(expr);
+    const borrowed: Value[] = [];
+    const coerced = coercion && this.coerce(() => borrowed.pop() as Value, coercion, expr);
     return (frame) => {
       const target = place(frame);
       frame.referents.set(slot, { place: target, root: rootSlot, coerced: coerced !== undefined });
-      return coerced ? coerced(frame) : target.get();
+      if (!coerced) return target.get();
+      borrowed.push(target.get());
+      return coerced(frame);
     };
   }
 
@@ -747,11 +753,6 @@ function captureFieldType(type: Type, index: number): Type {
   if (t.kind !== 'adt') throw new Error('Expected a struct or tuple capture');
   const subst = new Map(t.def.params.map((param, i) => [param, t.args[i]]));
   return substitute(t.def.variants[0].fields[index].type, subst);
-}
-
-function indexes(place: Expr): boolean {
-  if (place.kind === 'index') return true;
-  return (place.kind === 'field' || place.kind === 'unary') && indexes(place.operand);
 }
 
 function readInt(_c: Compiler, expr: ExprOf<'int'>): Eval {

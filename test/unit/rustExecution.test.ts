@@ -8376,18 +8376,24 @@ fn make() -> Box<dyn Shape> { Box::new(S(Turtle::new(1, 1))) }`
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'false\ntrue\n' });
 });
 
-test('a turtle whose owner a trait-object borrow outlived in scope disappears when the owner is dropped', () => {
-  const program = rustMain(
-    `
+test.each([
+  ['a local', 'S(Turtle::new(1, 1))', '&owner'],
+  ['a vector element', 'vec![S(Turtle::new(1, 1))]', '&owner[0]'],
+])(
+  'a turtle in %s that a trait-object borrow refers to disappears when its owner is dropped',
+  (_name, owner, borrow) => {
+    const program = rustMain(
+      `
     let observer = Turtle::new(1, 0);
-    let owner = S(Turtle::new(1, 1));
-    let shape: &dyn Shape = &owner;
+    let owner = ${owner};
+    let shape: &dyn Shape = ${borrow};
     println!("{} {}", observer.can_move_forward(), shape.check());
     drop(owner);
     println!("{}", observer.can_move_forward());`,
-    `trait Shape { fn check(&self) -> bool; }
+      `trait Shape { fn check(&self) -> bool; }
 struct S(Turtle);
 impl Shape for S { fn check(&self) -> bool { self.0.can_move_forward() } }`
-  );
-  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'false true\ntrue\n' });
-});
+    );
+    expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'false true\ntrue\n' });
+  }
+);
