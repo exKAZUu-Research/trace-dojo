@@ -21,6 +21,7 @@ import {
   isTemplateOrStringMapping,
   literalType,
   type MappedInfo,
+  neverType,
   newTypeId,
   nullType,
   type ObjectType,
@@ -444,9 +445,12 @@ export class TypeInference {
     const captures = aligned
       ? sourceParts.types
       : templateParts(sourceParts, target, (texts, types) => typeOperators.templateLiteral(texts, types));
-    if (!captures) return;
-    for (const [index, type] of target.types.entries())
-      recurse(this.templateCandidate(captures[index], type, aligned), type);
+    // Adjacent holes with too few source characters must not fall back to their broad string constraints.
+    if (!captures && target.texts.some(Boolean)) return;
+    for (const [index, type] of target.types.entries()) {
+      const capture = captures?.[index];
+      recurse(capture ? this.templateCandidate(capture, type, aligned) : neverType, type);
+    }
   }
 
   private templateCandidate(capture: Type, placeholder: Type, aligned: boolean): Type {

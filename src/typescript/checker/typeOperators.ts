@@ -816,10 +816,7 @@ export class TypeOperators {
     );
   }
 
-  /**
-   * The mapper that also gives the `infer` type parameters what the check type infers for them, or undefined when a
-   * literal fails to match a template literal, which takes the false branch.
-   */
+  /** The mapper for the `infer` type parameters, unless a constraint probe lacks template captures. */
   private inferredMapper(
     { mapper, inferTypeParameters, checkType, extendsType }: ConditionalInstantiation,
     forConstraint: boolean
@@ -829,7 +826,7 @@ export class TypeOperators {
     const inferences = this.c.inference.inferFromTypes(inferTypeParameters, checkType, extendsType, mapper);
     if (
       extendsType.kind === 'templateLiteral' &&
-      (forConstraint || checkType.kind === 'literal') &&
+      forConstraint &&
       inferTypeParameters.some((parameter) => !inferences.has(parameter.id))
     )
       return undefined;

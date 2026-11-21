@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 867 -- Keeps the relation modes and their recursive comparisons together.
+// code-gauge-allow-file fileNcss 875 -- Keeps the relation modes and their recursive comparisons together.
 import { minimumArguments } from './callArity';
 import type { Checker } from './checker';
 import { isUnit } from './flow';
@@ -236,10 +236,8 @@ export class Relations {
         this.typeParameterRelated(s, t, relation) ||
         (t.kind === 'conditional' && this.relatedToConditional(s, t, relation, state))
       );
-    if (s.kind === 'indexedAccess' || s.kind === 'keyof' || s.kind === 'conditional') {
-      if (this.genericSourceRelated(s, t, relation)) return true;
-      if (t.kind !== 'typeParameter' && t.kind !== 'conditional') return false;
-    }
+    if (s.kind === 'indexedAccess' || s.kind === 'keyof' || s.kind === 'conditional')
+      return this.relatedFromGeneric(s, t, relation, state);
     if (t.kind === 'typeParameter') return relation === 'comparable' && this.constraintAdmits(s, t);
     if (t.kind === 'indexedAccess') return this.relatedToIndexedAccess(s, t, relation);
     if (t.kind === 'conditional') return this.relatedToConditional(s, t, relation, state);
@@ -360,6 +358,14 @@ export class Relations {
       : this.c.propertyOf(object, name) !== undefined;
   }
 
+  private relatedFromGeneric(source: Type, target: Type, relation: Relation, state: number): boolean {
+    if (source.kind === 'conditional' && target.kind === 'typeParameter' && relation === 'comparable')
+      return this.conditionalComparableToParameter(source, target);
+    if (this.genericSourceRelated(source, target, relation)) return true;
+    if (target.kind === 'typeParameter') return relation === 'comparable' && this.constraintAdmits(source, target);
+    return target.kind === 'conditional' && this.relatedToConditional(source, target, relation, state);
+  }
+
   private genericSourceRelated(s: Type, t: Type, relation: Relation): boolean {
     if (t.kind === s.kind && this.sameGeneric(s, t)) return true;
     if (s.kind === 'indexedAccess' && t.kind === 'indexedAccess') return this.relatedToIndexedAccess(s, t, relation);
@@ -369,6 +375,16 @@ export class Relations {
       return true;
     const constraint = this.c.baseConstraint(s);
     return constraint !== s && this.isRelated(constraint, t, relation, 0, EXPANDING_SOURCE);
+  }
+
+  private conditionalComparableToParameter(source: ConditionalType, target: TypeParameter): boolean {
+    const branches = [this.c.conditionalTrueType(source), source.falseType];
+    const candidates = branches.flatMap((branch) => (branch.kind === 'union' ? branch.types : [branch]));
+    return candidates.some(
+      (candidate) =>
+        !isIntrinsic(candidate, 'never') &&
+        (isIntrinsic(this.c.baseConstraint(candidate), 'unknown') || this.isAssignable(candidate, target))
+    );
   }
 
   private relatedToKeyof(source: Type, object: Type, relation: Relation, state: number): boolean {

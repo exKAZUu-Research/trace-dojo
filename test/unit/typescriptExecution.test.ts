@@ -70,6 +70,54 @@ console.log(parse('x-OK'));`;
   });
 });
 
+test('uses infer constraints in string mapping holes without losing adjacent captures', () => {
+  const source = `type Upper<T> = T extends \`\${Uppercase<infer A>}\` ? A : never;
+type Lower<T> = T extends \`\${Lowercase<infer A>}\` ? A : never;
+type Capital<T> = T extends \`x-\${Capitalize<infer A>}\` ? A : never;
+type Pair<T> = T extends \`\${Uncapitalize<infer A>}-\${infer B}\` ? [A, B] : never;
+type First<T> = T extends \`\${infer A}\${infer B}\` ? A : 'fallback';
+const a: Upper<'A'> = 'other';
+const b: Lower<'ab'> = 'other';
+const c: Capital<'x-Ab'> = 'other';
+const d: Pair<'alpha-b'> = ['other', 'b'];
+const e: First<''> = 'fallback';
+console.log(a, b, c, d, e);`;
+  expect(executeProgram('typescript', source)).toMatchObject({
+    kind: 'executed',
+    stdout: "other other other [ 'other', 'b' ] fallback\n",
+    uncaughtException: undefined,
+  });
+  expect(diagnosticsOf(`${source}\nconst bad: Upper<'a'> = 'other';`)).toEqual([
+    expect.stringMatching(/^12: .*'never'/),
+  ]);
+});
+
+test('checks overlap with the type parameter in conditional assertions', () => {
+  const source = `function cast<T extends string>(value: T) {
+  return value as T extends \`x-\${infer R}\` ? R : never;
+}
+function numeric<T extends number>(value: T) {
+  return value as T extends 1 ? 2 : 3;
+}
+function constrained<T extends string[]>(value: T) {
+  return value as T extends Array<infer R extends string> ? R : never;
+}
+function unconstrained<T extends string[]>(value: T) {
+  return value as T extends Array<infer R> ? R : never;
+}
+function sliced<T extends string>(value: T) {
+  return value.slice(2) as T extends \`x-\${infer R}\` ? R : never;
+}
+function retain<T extends string>(value: T) {
+  return value as T extends 'a' ? T : string;
+}`;
+  expect(diagnosticsOf(source)).toEqual([
+    expect.stringMatching(/^2: .*十分に重ならない/),
+    expect.stringMatching(/^5: .*十分に重ならない/),
+    expect.stringMatching(/^8: .*十分に重ならない/),
+  ]);
+});
+
 test('infers mapped keys before choosing a conditional branch', () => {
   const source = `type KeysOf<T> = T extends Record<infer K, unknown> ? K : never;
 type EntriesOf<T> = T extends Record<infer K, infer V> ? [K, V] : never;
