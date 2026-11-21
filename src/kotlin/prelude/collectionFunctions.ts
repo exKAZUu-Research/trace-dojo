@@ -1240,7 +1240,7 @@ operator fun <T> MutableCollection<in T>.minusAssign(element: T) {
 }
 
 operator fun <T> MutableCollection<in T>.minusAssign(elements: Iterable<T>) {
-    for (element in elements) this.remove(element)
+    this.removeAll(if (elements is Collection<T>) elements else elements.toList())
 }
 
 fun <T> MutableIterable<T>.removeAll(predicate: (T) -> Boolean): Boolean = filterInPlace(predicate, true)

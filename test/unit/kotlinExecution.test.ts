@@ -26,6 +26,17 @@ test.each([
     stdout: '[, abc]\n[, a, , c, ]\n[, a, b, c, ]\n[, ]\n[abc]\n',
   },
   {
+    name: 'collection subtraction removes every matching occurrence',
+    source: `fun main() {
+    val values = mutableListOf(1, 1, 2, 3, 3, 4)
+    values -= listOf(1, 3)
+    println(values)
+    values -= values
+    println(values)
+}`,
+    stdout: '[2, 4]\n[]\n',
+  },
+  {
     name: 'formatted Java streams with chaining',
     source: `fun main() {
     System.out.printf("%s: %03d", "points", 7).println()
