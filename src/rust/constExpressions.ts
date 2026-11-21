@@ -281,7 +281,8 @@ function tupleFieldConstant(
 
 function structFieldType(operand: ConstLocation, path: PathAst, field: string): Type | undefined {
   const declared =
-    locationType(operand) ?? lowerType({ kind: 'path', path, span: path.span }, { ...operand.scope, allowInfer: true });
+    locationType(operand) ??
+    lowerType({ kind: 'path', path, span: path.span }, { ...operand.scope, allowInfer: true, inferOmittedArgs: true });
   const instance = withoutRefTypes(declared);
   if (instance.kind !== 'adt' || instance.def.kind !== 'struct') return;
   const { def, args } = instance;

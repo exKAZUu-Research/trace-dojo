@@ -20,14 +20,18 @@ export function sortSlice(
   const sort = stable ? stableSort : unstableSort;
   const layout = sortElement(ctx, elementType);
   // The sort keeps elements in buffers of its own while it overwrites the array, so a copy holds them all throughout.
-  const charged = (a: Value, b: Value): boolean => {
+  ctx.runtime.withRoots([...items], () => {
+    sort(items, charged(ctx, isLess), layout, () => ordViolation(ctx));
+    for (const [index, item] of items.entries()) sliceSet(slice, index, item);
+  });
+}
+
+/** A comparison that spends an operation each time, so a sort stops at the run's limits however it compares. */
+function charged(ctx: NativeContext, isLess: (a: Value, b: Value) => boolean): (a: Value, b: Value) => boolean {
+  return (a, b) => {
     ctx.runtime.spend();
     return isLess(a, b);
   };
-  ctx.runtime.withRoots([...items], () => {
-    sort(items, charged, layout, () => ordViolation(ctx));
-    for (const [index, item] of items.entries()) sliceSet(slice, index, item);
-  });
 }
 
 function sortElement(ctx: NativeContext, type: Type): SortElement {
@@ -118,7 +122,7 @@ export function sortByCachedKey(ctx: NativeContext, slice: Value, f: Value): voi
   // The sort keeps pairs in buffers of its own while it overwrites the array, so a copy holds every key throughout.
   ctx.runtime.nativeRoots.push([...pairs]);
   try {
-    unstableSort(pairs, isLess, sortElement(ctx, pairType(names[index])), () => ordViolation(ctx));
+    unstableSort(pairs, charged(ctx, isLess), sortElement(ctx, pairType(names[index])), () => ordViolation(ctx));
   } finally {
     ctx.runtime.nativeRoots.pop();
   }

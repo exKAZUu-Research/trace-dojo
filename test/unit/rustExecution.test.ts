@@ -8184,7 +8184,7 @@ fn main() {
   expect(made.kind === 'executed' && made.finalTurtles).toHaveLength(6);
 });
 
-test('sorting long strings stops at the operation limit, and strings order by code point', () => {
+test('sorting stops at the operation limit, and strings order by code point', () => {
   const sorting = rustMain(`
     let base = "a".repeat(50000);
     let mut v = Vec::new();
@@ -8192,6 +8192,12 @@ test('sorting long strings stops at the operation limit, and strings order by co
     v.sort();
     println!("{}", v.len());`);
   expect(executeProgram('rust', sorting)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+
+  const cachedKeys = rustMain(`
+    let mut v: Vec<i32> = (0..250000).map(|i| (i * 337) % 250007).collect();
+    v.sort_by_cached_key(|x| *x);
+    println!("{}", v.len());`);
+  expect(executeProgram('rust', cachedKeys)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
 
   const ordering = rustMain(`
     let mut v = vec!["\\u{10000}", "\\u{ffff}", "a\\u{1f601}", "a\\u{1f600}", "a", "", "\\u{e000}"];
@@ -8249,4 +8255,32 @@ test.each([
     kind: 'compileError',
     diagnostics: [{ message }],
   });
+});
+
+test.each([
+  ['a let annotation', 'let a: Vec = vec![1, 2];'],
+  ['empty angle brackets', 'let c: Vec<> = (0..3).collect();'],
+  ['a turbofish', 'let c = (0..3).collect::<Vec>();'],
+  ['a closure parameter', 'let f = |v: Vec| v.len();'],
+])('a generic type written without its type arguments in %s is rejected', (_name, body) => {
+  expect(executeProgram('rust', rustMain(body))).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message: 'Vec には型引数を 1 個書いてください（Vec<T>）。' }],
+  });
+});
+
+test('expression paths of generic types infer their type arguments', () => {
+  const program = rustMain(
+    `
+    let mut v = Vec::new();
+    v.push(1);
+    let p = Point { x: 1.5, y: 2.5 };
+    let w = Wrap(3);
+    let Wrap(inner) = w;
+    println!("{v:?} {} {inner} {}", p.x + p.y, X);`,
+    `struct Point<T> { x: T, y: T }
+struct Wrap<T>(T);
+const X: i32 = Point { x: 1, y: 2 }.y;`
+  );
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '[1] 4 3 2\n' });
 });

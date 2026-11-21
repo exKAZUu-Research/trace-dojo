@@ -223,6 +223,8 @@ export interface TypeScope {
   returnOf?: FnDef;
   /** Inside a function body, `_` is a type to infer. */
   allowInfer?: boolean;
+  /** For the path of an expression (`Point { x: 1 }`), whose omitted type arguments are inferred, unlike a written type's. */
+  inferOmittedArgs?: boolean;
   /**
    * In a function's signature, `I::Item` of a parameter bounded by `Iterator` or `IntoIterator` without its `Item` adds
    * a type parameter here that the bound sets as `Item`, as if written `I: Iterator<Item = J>`.
@@ -1620,7 +1622,7 @@ function renameAliasLifetimes(type: Type, names: ReadonlyMap<string, string | un
 function lowerAdtPath(path: PathAst, def: AdtDef, args: Type[], scope: TypeScope): Type {
   const last = path.segments.at(-1)!;
   if (args.length !== def.params.length) {
-    if (args.length === 0 && scope.allowInfer)
+    if (args.length === 0 && scope.inferOmittedArgs)
       return adt(
         def,
         def.params.map(() => freshVar())
