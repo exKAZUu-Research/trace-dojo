@@ -26,6 +26,25 @@ test.each([
     stdout: '[, abc]\n[, a, , c, ]\n[, a, b, c, ]\n[, ]\n[abc]\n',
   },
   {
+    name: 'indexed and reversed collection views stay backed by their source',
+    source: `fun main() {
+    val values = mutableListOf(1, 2, 3)
+    val indexed = values.withIndex()
+    val readonly: List<Int> = values
+    val reverse = readonly.asReversed()
+    val mutableReverse = values.asReversed()
+    values[0] = 9
+    println(indexed.map { it.index + it.value })
+    println(reverse)
+    mutableReverse[0] = 5
+    mutableReverse.add(1, 8)
+    println(values)
+    println(reverse)
+    println(indexed.map { it.value })
+}`,
+    stdout: '[9, 3, 5]\n[3, 2, 9]\n[9, 2, 8, 5]\n[5, 8, 2, 9]\n[9, 2, 8, 5]\n',
+  },
+  {
     name: 'rounding just below a half and at the double precision boundary',
     source: `import kotlin.math.roundToInt
 import kotlin.math.roundToLong

@@ -25,13 +25,6 @@ inline fun <C : Collection<*>, R> C.ifEmpty(defaultValue: () -> R): R where C : 
 
 operator fun <T> Iterator<T>.iterator(): Iterator<T> = this
 
-fun <T> Iterable<T>.withIndex(): Iterable<IndexedValue<T>> {
-    val result = ArrayList<IndexedValue<T>>()
-    var index = 0
-    for (item in this) result.add(IndexedValue(index++, item))
-    return result
-}
-
 inline fun <T> Iterable<T>.forEach(action: (T) -> Unit) {
     for (element in this) action(element)
 }
@@ -1281,8 +1274,6 @@ fun Collection<Double>.toDoubleArray(): DoubleArray {
     for (element in this) result[index++] = element
     return result
 }
-
-fun <T> List<T>.asReversed(): List<T> = reversed()
 
 fun <T : Comparable<T>> List<T?>.binarySearch(element: T?, fromIndex: Int = 0, toIndex: Int = size): Int {
     when {

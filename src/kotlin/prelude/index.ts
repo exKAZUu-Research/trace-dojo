@@ -2,6 +2,7 @@ import { arraysSource } from './arrays';
 import { COLLECTION_CLASSES_SOURCE } from './collectionClasses';
 import { COLLECTION_FUNCTIONS_SOURCE } from './collectionFunctions';
 import { COLLECTION_TYPES_SOURCE } from './collectionTypes';
+import { COLLECTION_VIEWS_SOURCE } from './collectionViews';
 import { COMPARISONS_SOURCE, MATH_SOURCE, RANDOM_SOURCE } from './comparisonsRandomMath';
 import { CORE_SOURCE } from './core';
 import { PROPERTIES_SOURCE } from './properties';
@@ -20,6 +21,7 @@ export const PRELUDE_SOURCES = [
   COLLECTION_TYPES_SOURCE,
   COLLECTION_CLASSES_SOURCE,
   COLLECTION_FUNCTIONS_SOURCE,
+  COLLECTION_VIEWS_SOURCE,
   arraysSource(),
   COMPARISONS_SOURCE,
   RANDOM_SOURCE,
