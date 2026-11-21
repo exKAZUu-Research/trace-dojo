@@ -77,14 +77,8 @@ private open class ReversedList<T>(private val backing: List<T>) : List<T> {
     override fun get(index: Int): T = backing[elementIndex(index)]
     override fun contains(element: T): Boolean = indexOf(element) >= 0
     override fun containsAll(elements: Collection<T>): Boolean = elements.all { contains(it) }
-    override fun indexOf(element: T): Int {
-        val index = backing.lastIndexOf(element)
-        return if (index < 0) -1 else size - 1 - index
-    }
-    override fun lastIndexOf(element: T): Int {
-        val index = backing.indexOf(element)
-        return if (index < 0) -1 else size - 1 - index
-    }
+    override fun indexOf(element: T): Int = indexOfFirst { it == element }
+    override fun lastIndexOf(element: T): Int = indexOfLast { it == element }
     override fun iterator(): Iterator<T> = listIterator()
     override fun listIterator(): ListIterator<T> = listIterator(0)
     override fun listIterator(index: Int): ListIterator<T> =
@@ -146,6 +140,17 @@ private class MutableReversedList<T>(private val backing: MutableList<T>) : Reve
         return !left.hasNext() && !right.hasNext()
     }
 
+    override fun contains(element: T): Boolean = any { element == it }
+    override fun indexOf(element: T): Int {
+        val cursor = listIterator()
+        while (cursor.hasNext()) if (element == cursor.next()) return cursor.previousIndex()
+        return -1
+    }
+    override fun lastIndexOf(element: T): Int {
+        val cursor = listIterator(size)
+        while (cursor.hasPrevious()) if (element == cursor.previous()) return cursor.nextIndex()
+        return -1
+    }
     override fun iterator(): MutableIterator<T> = listIterator()
     override fun listIterator(): MutableListIterator<T> = listIterator(0)
     override fun listIterator(index: Int): MutableListIterator<T> =
@@ -170,10 +175,14 @@ private class MutableReversedList<T>(private val backing: MutableList<T>) : Reve
         return next != index
     }
     override fun remove(element: T): Boolean {
-        val index = indexOf(element)
-        if (index < 0) return false
-        removeAt(index)
-        return true
+        val cursor = iterator()
+        while (cursor.hasNext()) {
+            if (element == cursor.next()) {
+                cursor.remove()
+                return true
+            }
+        }
+        return false
     }
     override fun removeAt(index: Int): T = backing.removeAt(elementIndex(index))
     override fun set(index: Int, element: T): T = backing.set(elementIndex(index), element)

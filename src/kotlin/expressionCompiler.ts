@@ -563,7 +563,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
       repr: 'ref',
       eval: (frame) => {
         companionLike(frame);
-        return (frame.runtime.enumEntries.get(cls) as Value[])[ordinal];
+        return frame.runtime.enumEntries.get(cls)?.values[ordinal];
       },
       stableKey: `${keyOf(cls)}.${name}`,
     };

@@ -1,90 +1,123 @@
-interface Buffer {
-  chars: string[];
-  capacity: number;
+interface BuilderPosition {
+  length: number;
   wide: boolean;
 }
 
 export class StringBuilderStorage {
-  private buffer: Buffer;
+  private bytes: Uint8Array;
+  private wide = false;
   length = 0;
 
   constructor(capacity: number) {
-    this.buffer = { chars: [], capacity, wide: false };
+    this.bytes = new Uint8Array(capacity);
   }
 
   text(): string {
-    return Array.from({ length: this.length }, (_, index) => this.character(index)).join('');
-  }
-
-  character(index: number): string {
-    return this.buffer.chars[index] ?? '\0';
+    return Array.from({ length: this.length }, (_, index) => String.fromCodePoint(this.codeAt(index))).join('');
   }
 
   codeAt(index: number): number {
-    return this.buffer.chars[index]?.codePointAt(0) ?? 0;
+    if (!this.wide) return this.bytes[index] ?? 0;
+    return (this.bytes[2 * index] ?? 0) | ((this.bytes[2 * index + 1] ?? 0) << 8);
   }
 
-  append(length: number, read: (index: number) => string): void {
-    const count = this.length;
-    const end = count + length;
-    this.buffer = this.copyCharacters(this.reserve(end), count, length, read);
-    this.length = end;
+  position(): BuilderPosition {
+    return { length: this.length, wide: this.wide };
   }
 
-  insert(position: number, length: number, read: (index: number) => string, count: number): void {
+  appendText(text: string): void {
+    this.append(text.length, (index) => codeUnit(text, index));
+  }
+
+  append(length: number, read: (index: number) => number): void {
+    const { length: count, wide } = this.position();
     const end = count + length;
-    const buffer = this.reserve(end);
-    this.shift(buffer, position + length, position, count);
-    this.buffer = this.copyCharacters(buffer, position, length, read, end);
-    this.length = end;
+    const bytes = this.reserve(end, wide);
+    this.commit(bytes, copyCharacters(bytes, wide, count, length, read), end);
+  }
+
+  insert(position: number, length: number, read: (index: number) => number, previous: BuilderPosition): void {
+    const { length: count, wide } = previous;
+    const end = count + length;
+    const bytes = this.reserve(end, wide);
+    shift(bytes, wide, position + length, position, count);
+    this.commit(bytes, copyCharacters(bytes, wide, position, length, read, end), end);
   }
 
   replace(from: number, to: number, inserted: string): void {
-    const end = this.length - (to - from) + inserted.length;
-    const buffer = this.reserve(end);
-    this.shift(buffer, from + inserted.length, to, this.length);
-    this.buffer = this.copyCharacters(buffer, from, inserted.length, (index) => inserted[index], end);
-    this.length = end;
+    const { length: count, wide } = this.position();
+    const end = count - (to - from) + inserted.length;
+    const bytes = this.reserve(end, wide);
+    shift(bytes, wide, from + inserted.length, to, count);
+    const result = copyCharacters(bytes, wide, from, inserted.length, (index) => codeUnit(inserted, index), end);
+    this.commit(bytes, result, end);
   }
 
   resize(length: number): void {
     if (length > this.length) {
-      const buffer = this.reserve(length);
-      buffer.chars.fill('\0', this.length, length);
-      this.buffer = buffer;
+      const width = this.wide ? 2 : 1;
+      this.bytes = this.reserve(length, this.wide);
+      this.bytes.fill(0, this.length * width, length * width);
     }
     this.length = length;
   }
 
-  private reserve(length: number): Buffer {
-    const { buffer } = this;
-    const reserved =
-      length <= buffer.capacity
-        ? buffer
-        : { ...buffer, capacity: Math.max(length, 2 * buffer.capacity + 2), chars: [...buffer.chars] };
-    if (length > reserved.chars.length) reserved.chars.length = length;
-    return reserved;
+  private reserve(length: number, wide: boolean): Uint8Array {
+    const width = wide ? 2 : 1;
+    if (length * width <= this.bytes.length) return this.bytes;
+    const capacity = Math.floor(this.bytes.length / width);
+    const grown = new Uint8Array(width * Math.max(length, 2 * capacity + 2));
+    grown.set(this.bytes);
+    return grown;
   }
 
-  private shift(buffer: Buffer, to: number, from: number, end: number): void {
-    if (to !== from) buffer.chars.copyWithin(to, from, end);
+  private commit(original: Uint8Array, edited: Uint8Array, length: number): void {
+    // A source callback can change the coder. Committing the earlier byte array does not reset that field.
+    if (original !== edited) this.wide = true;
+    this.bytes = edited;
+    this.length = length;
   }
+}
 
-  private copyCharacters(
-    buffer: Buffer,
-    start: number,
-    length: number,
-    read: (index: number) => string,
-    inflatedLength?: number
-  ): Buffer {
-    // A callback can grow or recode the builder. Continue writing to the buffer captured before it ran.
-    let target = buffer;
-    for (let index = 0; index < length; index++) {
-      const char = read(index);
-      if (!target.wide && (char.codePointAt(0) ?? 0) > 255)
-        target = { ...target, wide: true, chars: target.chars.slice(0, inflatedLength ?? start + index) };
-      target.chars[start + index] = char;
+function shift(bytes: Uint8Array, wide: boolean, to: number, from: number, end: number): void {
+  const width = wide ? 2 : 1;
+  bytes.copyWithin(to * width, from * width, end * width);
+}
+
+function copyCharacters(
+  bytes: Uint8Array,
+  wide: boolean,
+  start: number,
+  length: number,
+  read: (index: number) => number,
+  inflatedLength?: number
+): Uint8Array {
+  let target = bytes;
+  let isWide = wide;
+  for (let index = 0; index < length; index++) {
+    const code = read(index);
+    const position = start + index;
+    if (!isWide && code > 255) {
+      target = inflate(target, inflatedLength ?? position);
+      isWide = true;
     }
-    return target;
+    if (isWide) {
+      target[2 * position] = code & 255;
+      target[2 * position + 1] = code >>> 8;
+    } else {
+      target[position] = code;
+    }
   }
+  return target;
+}
+
+function inflate(bytes: Uint8Array, length: number): Uint8Array {
+  const widened = new Uint8Array(bytes.length * 2);
+  for (let index = 0; index < length; index++) widened[2 * index] = bytes[index];
+  return widened;
+}
+
+function codeUnit(text: string, index: number): number {
+  // oxlint-disable-next-line unicorn/prefer-code-point -- StringBuilder storage is indexed in UTF-16 code units.
+  return text.charCodeAt(index);
 }

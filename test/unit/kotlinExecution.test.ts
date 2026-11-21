@@ -1774,6 +1774,61 @@ fun main() {
       '127\n-128\nnull\n4\n-32768\nnull\njava.lang.NumberFormatException: Value out of range. Value:"80" Radix:16\njava.lang.NumberFormatException: For input string: "g" under radix 16\njava.lang.IllegalArgumentException: radix 1 was not in valid range 2..36\nǲabc\nǅabc\nǅabc\nSSabc\n𐐨abc\n-1\n-1\n1\n0\n511\n4294967295\n4294967294\n16777216\n4\n0\n18446744073709551615\n/ by zero\n',
   },
   {
+    name: 'reentrant builder recoding and enum list identity match Kotlin JVM',
+    source: `class EncodedInput(val destination: StringBuilder) : CharSequence by "xy" {
+    override fun get(index: Int): Char {
+        if (index == 0) destination.append('λ')
+        return "xy"[index]
+    }
+}
+enum class Direction { LEFT, RIGHT }
+enum class NoEntries {}
+fun main() {
+    for (capacity in listOf(3, 16)) {
+        val builder = StringBuilder(capacity).append("abc")
+        builder.insert(1, EncodedInput(builder))
+        println(builder.toString().map { it.code })
+    }
+    val list = Direction.entries
+    println(list === Direction.entries)
+    println(NoEntries.entries === NoEntries.entries)
+    println(list)
+    println(Direction.values() === Direction.values())
+    val values = Direction.values()
+    values[0] = Direction.RIGHT
+    println(Direction.entries)
+    println(Direction.valueOf("LEFT") === list[0])
+}`,
+    stdout:
+      '[30817, 25209, 99, 0, 0]\n[30817, 25209, 99, 0, 0]\ntrue\ntrue\n[LEFT, RIGHT]\nfalse\n[LEFT, RIGHT]\ntrue\n',
+  },
+  {
+    name: 'reversed searches and removals respect the iterator and singleton mutability',
+    source: `class Search(private val edit: () -> Unit = {}, private val matches: Boolean = false) {
+    override fun equals(other: Any?): Boolean { edit(); return matches }
+}
+fun main() {
+    for (operation in 0..3) {
+        val items = mutableListOf(Search(), Search())
+        val reverse = items.asReversed()
+        val query = Search({ items.add(Search()) }, operation == 3)
+        try {
+            when (operation) {
+                0 -> println(reverse.indexOf(query))
+                1 -> println(reverse.lastIndexOf(query))
+                else -> println(reverse.remove(query))
+            }
+        } catch (e: ConcurrentModificationException) { println("concurrent") }
+        println(items.size)
+    }
+    val singleton = listOf("only") as MutableList<String>
+    println(singleton.remove("absent"))
+    println(singleton.subList(0, 1).remove("absent"))
+    try { singleton.remove("only") } catch (e: UnsupportedOperationException) { println("immutable") }
+}`,
+    stdout: 'concurrent\n3\nconcurrent\n3\nconcurrent\n3\nconcurrent\n3\nfalse\nfalse\nimmutable\n',
+  },
+  {
     name: 'exactly-once scope lambdas initialize deferred vals',
     source: `fun main() {
     val first: Int
@@ -3775,6 +3830,16 @@ fun square(x: Int) = x * x`,
 ])('runs $name as Kotlin does', ({ source, stdout }) => {
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
 });
+
+test.each(['listOf(1).sumOf { error("stop") }', 'intArrayOf(1).sumOf { throw IllegalArgumentException("stop") }'])(
+  'rejects ambiguous selector overloads before running %s',
+  (call) => {
+    expect(executeProgram('kotlin', `fun main() { println("before"); ${call} }`)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [{ message: expect.stringContaining('sumOf') }],
+    });
+  }
+);
 
 test.each([
   {

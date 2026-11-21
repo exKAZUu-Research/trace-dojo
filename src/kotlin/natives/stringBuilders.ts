@@ -190,14 +190,14 @@ function appendSequenceRange(frame: Frame, receiver: Value, source: Sequence, fr
   const storage = builder(receiver);
   const length = to - from;
   frame.runtime.allocateString(frame, storage.length + length, length);
-  storage.append(length, (index) => charToString(source.at(from + index)));
+  storage.append(length, (index) => source.at(from + index));
   return receiver;
 }
 
 function appendText(frame: Frame, receiver: Value, value: string): Value {
   const storage = builder(receiver);
   frame.runtime.allocateString(frame, storage.length + value.length, value.length);
-  storage.append(value.length, (index) => value[index]);
+  storage.appendText(value);
   return receiver;
 }
 
@@ -210,12 +210,12 @@ function insertSequenceRange(
   to: number
 ): Value {
   const storage = builder(receiver);
-  const count = storage.length;
-  checkInsertPosition(frame, position, count);
+  const previous = storage.position();
+  checkInsertPosition(frame, position, previous.length);
   checkSequenceRange(frame, source, from, to);
   const length = to - from;
-  frame.runtime.allocateString(frame, count + length, count - position + length);
-  storage.insert(position, length, (index) => charToString(source.at(from + index)), count);
+  frame.runtime.allocateString(frame, previous.length + length, previous.length - position + length);
+  storage.insert(position, length, (index) => source.at(from + index), previous);
   return receiver;
 }
 

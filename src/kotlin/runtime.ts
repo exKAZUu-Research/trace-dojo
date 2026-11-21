@@ -105,8 +105,8 @@ export class Runtime implements TracedRuntime<Frame> {
   globals: Value[] = [];
   /** The instances of objects and companion objects, created when first used. */
   readonly objects = new Map<ClassSymbol, KObject>();
-  /** The constants of each enum class, created with its first use. */
-  readonly enumEntries = new Map<ClassSymbol, KObject[]>();
+  /** The constants and shared entries list of each enum class, created with its first use. */
+  readonly enumEntries = new Map<ClassSymbol, { values: KObject[]; entries?: KObject }>();
   /** Values that native code holds while it calls back into the program, such as a list being sorted. */
   readonly nativeRoots: (Value | readonly Value[])[] = [];
   /** Called when a frame returns or throws, with the frame still holding its locals. */

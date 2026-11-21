@@ -821,17 +821,19 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     frame: Frame,
     cls: ClassSymbol,
     ctor: FunctionSymbol,
-    evaluators: ((frame: Frame) => Value[])[]
+    evaluators: ((frame: Frame) => Value[])[],
+    createList: (entries: KObject[]) => KObject
   ): void {
-    const instances: KObject[] = [];
-    frame.runtime.enumEntries.set(cls, instances);
+    const state: { values: KObject[]; entries?: KObject } = { values: [] };
+    frame.runtime.enumEntries.set(cls, state);
     const initialize = ctor.initialize as NonNullable<FunctionSymbol['initialize']>;
     for (const [ordinal, enumEntry] of cls.enumEntries.entries()) {
       const instance = new KObject(cls);
       instance.native = { name: enumEntry.name, ordinal };
-      instances.push(instance);
+      state.values.push(instance);
       initialize(frame, instance, evaluators[ordinal](frame), undefined);
     }
+    state.entries = createList(state.values);
   }
 
   /** Compiles the arguments each enum constant passes to its class's constructor, as `RED(0xFF0000)` does. */
@@ -870,7 +872,9 @@ export abstract class BodyCompiler extends DeclarationCompiler {
           enumEntry.name
         ).evaluateArgs;
       });
-      entry.symbol.initializeEnumEntries = (frame) => this.createEnumEntries(frame, entry.symbol, ctor, evaluators);
+      const createList = this.enumEntriesValue();
+      entry.symbol.initializeEnumEntries = (frame) =>
+        this.createEnumEntries(frame, entry.symbol, ctor, evaluators, createList);
     } finally {
       this.recordsSteps = savedRecords;
     }
@@ -878,7 +882,6 @@ export abstract class BodyCompiler extends DeclarationCompiler {
 
   protected compileEnumEntries(cls: ClassSymbol): Compiled {
     const instance = this.objectInstance(cls);
-    const entries = this.enumEntriesValue(cls);
     return {
       type: {
         kind: 'class',
@@ -889,7 +892,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       repr: 'ref',
       eval: (frame) => {
         instance(frame);
-        return entries(frame, frame.runtime.enumEntries.get(cls) ?? []);
+        return frame.runtime.enumEntries.get(cls)?.entries;
       },
     };
   }
@@ -897,5 +900,5 @@ export abstract class BodyCompiler extends DeclarationCompiler {
   /** The class of `entries`, a read-only list of an enum class's constants. */
   protected abstract enumEntriesClass(): ClassSymbol;
 
-  protected abstract enumEntriesValue(cls: ClassSymbol): (frame: Frame, entries: KObject[]) => Value;
+  protected abstract enumEntriesValue(): (entries: KObject[]) => KObject;
 }

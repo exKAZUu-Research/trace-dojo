@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 625 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss 631 -- the compiler of one area of Kotlin, whose parts call each other closely.
 import { CompileError } from '../interpreter/diagnostics';
 import {
   type ArgumentEvaluation,
@@ -561,7 +561,11 @@ export abstract class CallCompiler extends CompilerCore {
     if (best.length === 1) return best[0];
     const byLambda = this.chooseByLambdaResult(best.length > 0 ? best : attempts, args, scope, context);
     if (byLambda) return byLambda;
-    if (best.length > 1 && best.every((attempt) => attempt.candidate.symbol.isLibrary)) return best[0];
+    if (
+      best.length > 1 &&
+      best.every(({ candidate }) => candidate.symbol.isLibrary && !candidate.symbol.resolvesByLambdaResult)
+    )
+      return best[0];
     return this.error(row, `${name} の呼び出しが、どの関数のことか決められません。`);
   }
 
@@ -607,6 +611,8 @@ export abstract class CallCompiler extends CompilerCore {
   }
 
   /** Overloads that differ only in a lambda's result, such as `sumOf`, are chosen by the type the lambda returns. */
+  // code-gauge-allow functionCognitiveComplexity 20 -- candidates use inferred results and expected results in resolution order.
+  // code-gauge-allow functionNcss 35 -- parameter compatibility and the resulting overload decision are one inference step.
   private chooseByLambdaResult(
     attempts: Attempt[],
     args: ArgumentSyntax[],
@@ -647,6 +653,13 @@ export abstract class CallCompiler extends CompilerCore {
             return result !== undefined && isSubtype(result, type.returnType);
           });
     if (fitting.length === 1) return fitting[0];
+    if (fitting.length === 0 && probe && !hasOpenVariables(probe) && resolved(probe).kind !== 'nothing') {
+      const inferred = attempts.filter((_, index) => {
+        const type = lambdaTypes[index];
+        return type.kind === 'function' && hasOpenVariables(type.returnType);
+      });
+      if (inferred.length === 1) return inferred[0];
+    }
     const unannotated = fitting.filter(({ candidate }) => !candidate.symbol.resolvesByLambdaResult);
     return unannotated.length === 1 ? unannotated[0] : undefined;
   }

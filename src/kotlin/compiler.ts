@@ -376,7 +376,7 @@ export class Compiler extends BodyCompiler {
         eval: (frame) => {
           instance(frame);
           const array = new KObject(arrayClass, 0);
-          array.items = [...(frame.runtime.enumEntries.get(cls) ?? [])];
+          array.items = [...(frame.runtime.enumEntries.get(cls)?.values ?? [])];
           return array;
         },
       };
@@ -392,7 +392,7 @@ export class Compiler extends BodyCompiler {
         const entryName = evaluate(frame) as string;
         const found = frame.runtime.enumEntries
           .get(cls)
-          ?.find((entry) => (entry.native as { name: string }).name === entryName);
+          ?.values.find((entry) => (entry.native as { name: string }).name === entryName);
         if (!found)
           return frame.runtime.throwError(
             frame,
@@ -409,12 +409,11 @@ export class Compiler extends BodyCompiler {
     return this.core.list;
   }
 
-  protected enumEntriesValue(cls: ClassSymbol): (frame: Frame, entries: KObject[]) => Value {
-    void cls;
+  protected enumEntriesValue(): (entries: KObject[]) => KObject {
     const listClass = this.packages.get('kotlin.collections')?.classes.get('EnumEntriesList') ?? this.core.list;
-    return (_frame, entries) => {
+    return (entries) => {
       const list = new KObject(listClass, 0);
-      list.items = [...entries];
+      list.items = entries;
       list.readOnlyCollection = true;
       return list;
     };

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 990 -- the natives of the collections, which share the helpers of their items.
+// code-gauge-allow-file fileNcss 991 -- the natives of the collections, which share the helpers of their items.
 import { runtimeClassOf } from '../dispatch';
 import { hashOf, identityHash, stringOf, valueEquals } from '../format';
 import { toInt32 } from '../operators';
@@ -330,7 +330,7 @@ const LIST_CHANGING_NATIVES: Record<string, ListNative> = {
   'remove(E)': (frame, list, [element]) => {
     const index = findListValue(frame, list as KObject, element);
     if (index === -1) {
-      requireMutable(frame, list);
+      if (listKind(listView(list as KObject)?.source ?? list) !== 'SingletonList') requireMutable(frame, list);
       return false;
     }
     requireResizable(frame, list);
