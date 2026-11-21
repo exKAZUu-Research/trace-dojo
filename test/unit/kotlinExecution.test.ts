@@ -149,6 +149,25 @@ fun main() {
     stdout: ' get()=1; set(x)\n',
   },
   {
+    name: 'case-insensitive matches keep JVM characters and UTF-16 indices',
+    source: `fun main() {
+    println("İabc".indexOf("ABC", ignoreCase = true))
+    println("İ".equals("i", ignoreCase = true))
+    println("İaİ".lastIndexOf("i", ignoreCase = true))
+    println("sſ".endsWith("SS", ignoreCase = true))
+    println("Σσς".replace("σ", "x", ignoreCase = true))
+    println("İ-a-i".split("i", ignoreCase = true))
+    println("𐐀".equals("𐐨", ignoreCase = true))
+    println(StringBuilder("𐐀").indexOf("𐐨", ignoreCase = true))
+    println("𐐀".compareTo("a", ignoreCase = true))
+    println("a".compareTo("𐐀", ignoreCase = true))
+    println("𐐀".compareTo("字", ignoreCase = true))
+    println("abc".replace("", "-", ignoreCase = true))
+    println('İ'.equals('i', ignoreCase = true))
+}`,
+    stdout: '1\ntrue\n2\ntrue\nxxx\n[, -a-, ]\ntrue\n-1\n55200\n-55200\n43217\n-a-b-c-\ntrue\n',
+  },
+  {
     name: 'integer parsing bounds with long input and leading zeroes',
     source: `fun main() {
     val zeroes = "0".repeat(50000)
@@ -740,6 +759,15 @@ test.each([
 }`,
     stdout: 'a\nb\n',
     uncaughtException: 'java.lang.StringIndexOutOfBoundsException: Index 2 out of bounds for length 2',
+  },
+  {
+    name: 'a replacement whose expanded text exceeds the interpreter limit',
+    source: `fun main() {
+    val original = "a".repeat(2000)
+    println(original.replace("A", "b".repeat(600), ignoreCase = true))
+}`,
+    stdout: '',
+    uncaughtException: 'java.lang.OutOfMemoryError: Java heap space',
   },
   {
     name: 'a division by zero',

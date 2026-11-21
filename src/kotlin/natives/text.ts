@@ -6,6 +6,7 @@ import type { Frame } from '../runtime';
 import { Boxed, KObject, UNIT, type Value } from '../values';
 import { newList } from './collections';
 import { compareStrings, substring } from './core';
+import { compareJdkCase, foldJdkCodePoint, foldJdkText } from './jdkCase';
 import { defineNative, defineNativeProperty, libraryClass, throwError } from './registry';
 
 const TEXT = 'kotlin.text';
@@ -111,13 +112,22 @@ function parseNarrow(frame: Frame, value: string, bits: 8 | 16): number {
   return Number(parsed);
 }
 
-/** Finds a string in a text, ignoring case as Kotlin's `ignoreCase` does when asked, by comparing lowercased copies. */
+function foldedText(frame: Frame, value: string, supplementary: boolean): string {
+  frame.runtime.spend(1 + Math.floor(value.length / 64));
+  return foldJdkText(value, supplementary);
+}
+
 function search(
-  value: string,
+  frame: Frame,
+  receiver: Value,
   target: string,
-  ignoreCase: boolean
+  ignoreCase: boolean,
+  charTarget = false
 ): { indexOf: (start: number) => number; lastIndexOf: (start: number) => number } {
-  const [haystack, needle] = ignoreCase ? [value.toLowerCase(), target.toLowerCase()] : [value, target];
+  const value = sequenceText(frame, receiver);
+  const supplementary = typeof receiver === 'string' && !charTarget;
+  const haystack = ignoreCase ? foldedText(frame, value, supplementary) : value;
+  const needle = ignoreCase ? foldedText(frame, target, supplementary) : target;
   return {
     indexOf: (start) => haystack.indexOf(needle, start),
     lastIndexOf: (start) => (start < 0 ? -1 : haystack.lastIndexOf(needle, start)),
@@ -177,13 +187,13 @@ const TEXT_CASE_AND_TRIM_NATIVES: Record<string, TextNative> = {
     substring(frame, text(receiver), start as number, text(receiver).length),
   'String.substring(Int, Int)': (frame, receiver, [start, end]) =>
     substring(frame, text(receiver), start as number, end as number),
-  'String.startsWith(String, Boolean)': (_frame, receiver, [prefix, ignoreCase]) =>
+  'String.startsWith(String, Boolean)': (frame, receiver, [prefix, ignoreCase]) =>
     ignoreCase
-      ? text(receiver).toLowerCase().startsWith(text(prefix).toLowerCase())
+      ? foldedText(frame, text(receiver), true).startsWith(foldedText(frame, text(prefix), true))
       : text(receiver).startsWith(text(prefix)),
-  'String.endsWith(String, Boolean)': (_frame, receiver, [suffix, ignoreCase]) =>
+  'String.endsWith(String, Boolean)': (frame, receiver, [suffix, ignoreCase]) =>
     ignoreCase
-      ? text(receiver).toLowerCase().endsWith(text(suffix).toLowerCase())
+      ? foldedText(frame, text(receiver), true).endsWith(foldedText(frame, text(suffix), true))
       : text(receiver).endsWith(text(suffix)),
 };
 
@@ -192,26 +202,28 @@ const TEXT_SEARCH_NATIVES: Record<string, TextNative> = {
   'CharSequence.contains(CharSequence)': (frame, receiver, [other]) =>
     sequenceText(frame, receiver).includes(sequenceText(frame, other)),
   'CharSequence.indexOf(String, Int, Boolean)': (frame, receiver, [other, start, ignoreCase]) =>
-    search(sequenceText(frame, receiver), text(other), ignoreCase === true).indexOf(Math.max(0, start as number)),
+    search(frame, receiver, text(other), ignoreCase === true).indexOf(Math.max(0, start as number)),
   'CharSequence.indexOf(Char, Int, Boolean)': (frame, receiver, [char, start, ignoreCase]) =>
-    search(sequenceText(frame, receiver), charToString(char as number), ignoreCase === true).indexOf(
+    search(frame, receiver, charToString(char as number), ignoreCase === true, true).indexOf(
       Math.max(0, start as number)
     ),
   'CharSequence.lastIndexOf(String, Int, Boolean)': (frame, receiver, [other, start, ignoreCase]) =>
-    search(sequenceText(frame, receiver), text(other), ignoreCase === true).lastIndexOf(start as number),
+    search(frame, receiver, text(other), ignoreCase === true).lastIndexOf(start as number),
   'CharSequence.lastIndexOf(Char, Int, Boolean)': (frame, receiver, [char, start, ignoreCase]) =>
-    search(sequenceText(frame, receiver), charToString(char as number), ignoreCase === true).lastIndexOf(
-      start as number
-    ),
+    search(frame, receiver, charToString(char as number), ignoreCase === true, true).lastIndexOf(start as number),
   'String.replace(String, String, Boolean)': (frame, receiver, [oldValue, newValue, ignoreCase]) =>
-    result(frame, replaceAll(text(receiver), text(oldValue), text(newValue), ignoreCase === true)),
+    replaceAll(frame, text(receiver), text(oldValue), text(newValue), ignoreCase === true),
   'String.replace(Char, Char)': (frame, receiver, [oldChar, newChar]) =>
-    result(frame, text(receiver).replaceAll(charToString(oldChar as number), charToString(newChar as number))),
-  'String.replaceFirst(String, String)': (frame, receiver, [oldValue, newValue]) =>
-    result(
-      frame,
-      text(receiver).replace(text(oldValue), () => text(newValue))
-    ),
+    replaceAll(frame, text(receiver), charToString(oldChar as number), charToString(newChar as number), false),
+  'String.replaceFirst(String, String)': (frame, receiver, [oldValue, newValue]) => {
+    const value = text(receiver);
+    const old = text(oldValue);
+    const replacement = text(newValue);
+    const position = value.indexOf(old);
+    if (position === -1) return value;
+    frame.runtime.allocateString(frame, value.length - old.length + replacement.length, value.length);
+    return value.slice(0, position) + replacement + value.slice(position + old.length);
+  },
   'String.repeat(Int)': (frame, receiver, [count]) => {
     const times = count as number;
     if (times < 0)
@@ -227,6 +239,7 @@ const TEXT_SEARCH_NATIVES: Record<string, TextNative> = {
   'CharSequence.split(vararg String, Boolean, Int)': (frame, receiver, [delimiters, ignoreCase, limit]) =>
     splitText(frame, sequenceText(frame, receiver), ((delimiters as KObject).items as Value[]).map(text), {
       ignoreCase: ignoreCase === true,
+      supplementary: typeof receiver === 'string',
       limit: limit as number,
     }),
   'CharSequence.split(vararg Char, Boolean, Int)': (frame, receiver, [delimiters, ignoreCase, limit]) =>
@@ -234,7 +247,7 @@ const TEXT_SEARCH_NATIVES: Record<string, TextNative> = {
       frame,
       sequenceText(frame, receiver),
       ((delimiters as KObject).items as Value[]).map((char) => charToString(char as number)),
-      { ignoreCase: ignoreCase === true, limit: limit as number }
+      { ignoreCase: ignoreCase === true, supplementary: false, limit: limit as number }
     ),
   'CharSequence.lines()': (frame, receiver) =>
     newList(frame, 'ArrayList', sequenceText(frame, receiver).split(/\r\n|\n|\r/)),
@@ -260,14 +273,20 @@ const TEXT_SEARCH_NATIVES: Record<string, TextNative> = {
     frame.runtime.allocateString(frame, length as number);
     return text(receiver).padEnd(length as number, charToString(char as number));
   },
-  'String.equals(String?, Boolean)': (_frame, receiver, [other, ignoreCase]) => {
+  'String.equals(String?, Boolean)': (frame, receiver, [other, ignoreCase]) => {
     if (other === undefined) return false;
-    return ignoreCase ? text(receiver).toLowerCase() === text(other).toLowerCase() : receiver === other;
+    if (ignoreCase !== true) return receiver === other;
+    const left = text(receiver);
+    const right = text(other);
+    return left.length === right.length && foldedText(frame, left, true) === foldedText(frame, right, true);
   },
-  'String.compareTo(String, Boolean)': (_frame, receiver, [other, ignoreCase]) =>
-    ignoreCase
-      ? compareStrings(text(receiver).toLowerCase(), text(other).toLowerCase())
-      : compareStrings(text(receiver), text(other)),
+  'String.compareTo(String, Boolean)': (frame, receiver, [other, ignoreCase]) => {
+    const left = text(receiver);
+    const right = text(other);
+    if (ignoreCase !== true) return compareStrings(left, right);
+    frame.runtime.spend(1 + Math.floor((left.length + right.length) / 64));
+    return compareJdkCase(left, right);
+  },
   'String.format(vararg Any?)': (frame, receiver, [args]) =>
     result(frame, formatText(frame, text(receiver), (args as KObject).items as Value[])),
   'String.format(Locale?, vararg Any?)': (frame, receiver, [, args]) =>
@@ -383,6 +402,9 @@ const CHAR_NATIVES: Record<string, TextNative> = {
   'Char.isWhitespace()': (_frame, receiver) => isKotlinWhitespace(receiver as number),
   'Char.isUpperCase()': (_frame, receiver) => /\p{Lu}/u.test(charToString(receiver as number)),
   'Char.isLowerCase()': (_frame, receiver) => /\p{Ll}/u.test(charToString(receiver as number)),
+  'Char.equals(Char, Boolean)': (_frame, receiver, [other, ignoreCase]) =>
+    receiver === other ||
+    (ignoreCase === true && foldJdkCodePoint(receiver as number) === foldJdkCodePoint(other as number)),
   'Char.uppercaseChar()': (_frame, receiver) => upperChar(receiver as number),
   'Char.lowercaseChar()': (_frame, receiver) => lowerChar(receiver as number),
   'Char.toUpperCase()': (_frame, receiver) => upperChar(receiver as number),
@@ -467,23 +489,29 @@ function lowerChar(code: number): number {
   return lower.length === 1 ? lower.charCodeAt(0) : code;
 }
 
-function replaceAll(value: string, oldValue: string, newValue: string, ignoreCase: boolean): string {
-  if (!ignoreCase) {
-    if (oldValue === '')
-      return `${newValue}${codeUnits(value).map(charToString).join(newValue)}${value === '' ? '' : newValue}`;
-    return value.split(oldValue).join(newValue);
+function replaceAll(frame: Frame, value: string, oldValue: string, replacement: string, ignoreCase: boolean): string {
+  const haystack = ignoreCase ? foldedText(frame, value, true) : value;
+  const needle = ignoreCase ? foldedText(frame, oldValue, true) : oldValue;
+  frame.runtime.spend(1 + Math.floor((haystack.length + needle.length) / 64));
+  let matchCount = 0;
+  if (needle === '') matchCount = value.length + 1;
+  else {
+    for (let index = haystack.indexOf(needle); index >= 0; index = haystack.indexOf(needle, index + needle.length)) {
+      matchCount++;
+    }
   }
-  const lower = value.toLowerCase();
-  const search = oldValue.toLowerCase();
-  let built = '';
-  let index = 0;
-  for (;;) {
-    const found = lower.indexOf(search, index);
-    if (found === -1 || search === '') break;
-    built += value.slice(index, found) + newValue;
-    index = found + search.length;
+  if (matchCount === 0) return value;
+  const length = value.length + matchCount * (replacement.length - needle.length);
+  frame.runtime.allocateString(frame, length);
+  if (needle === '' || !ignoreCase) return value.replaceAll(oldValue, () => replacement);
+  const parts: string[] = [];
+  let offset = 0;
+  for (let index = haystack.indexOf(needle); index >= 0; index = haystack.indexOf(needle, offset)) {
+    parts.push(value.slice(offset, index), replacement);
+    offset = index + needle.length;
   }
-  return built + value.slice(index);
+  parts.push(value.slice(offset));
+  return parts.join('');
 }
 
 /** `split`, which splits at the first delimiter that matches at each position, keeping empty parts. */
@@ -491,14 +519,17 @@ function splitText(
   frame: Frame,
   value: string,
   delimiters: string[],
-  { ignoreCase, limit }: { ignoreCase: boolean; limit: number }
+  { ignoreCase, supplementary, limit }: { ignoreCase: boolean; supplementary: boolean; limit: number }
 ): KObject {
   if (limit < 0)
     throwError(frame, 'java.lang.IllegalArgumentException', `Limit must be non-negative, but was ${limit}`);
   if (delimiters.length === 1 && delimiters[0] !== '' && !ignoreCase && limit === 0)
     return newList(frame, 'ArrayList', value.split(delimiters[0]));
   const [haystack, needles] = ignoreCase
-    ? [value.toLowerCase(), delimiters.map((delimiter) => delimiter.toLowerCase())]
+    ? [
+        foldedText(frame, value, supplementary),
+        delimiters.map((delimiter) => foldedText(frame, delimiter, supplementary)),
+      ]
     : [value, delimiters];
   const parts: string[] = [];
   let start = 0;

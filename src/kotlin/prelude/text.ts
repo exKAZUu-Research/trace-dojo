@@ -455,8 +455,7 @@ external fun Char.digitToIntOrNull(): Int?
 external fun Char.toUpperCase(): Char
 external fun Char.toLowerCase(): Char
 external fun Char.isDefined(): Boolean
-fun Char.equals(other: Char, ignoreCase: Boolean = false): Boolean =
-    if (this == other) true else if (!ignoreCase) false else this.uppercaseChar() == other.uppercaseChar() || this.lowercaseChar() == other.lowercaseChar()
+external fun Char.equals(other: Char, ignoreCase: Boolean = false): Boolean
 external operator fun Char.plus(other: String): String
 
 external fun Int.toString(radix: Int): String
