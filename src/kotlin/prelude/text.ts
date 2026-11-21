@@ -579,26 +579,20 @@ inline fun <V> CharSequence.zip(other: CharSequence, transform: (a: Char, b: Cha
     for (i in 0 until length) list.add(transform(this[i], other[i]))
     return list
 }
-fun CharSequence.max(): Char {
-    if (isEmpty()) throw NoSuchElementException()
-    var max = this[0]
-    for (i in 1..lastIndex) {
-        val e = this[i]
-        if (max < e) max = e
+fun CharSequence.max(): Char = maxOrNull() ?: throw NoSuchElementException()
+fun CharSequence.min(): Char = minOrNull() ?: throw NoSuchElementException()
+fun CharSequence.maxOrNull(): Char? = bestChar(true)
+fun CharSequence.minOrNull(): Char? = bestChar(false)
+
+private fun CharSequence.bestChar(largest: Boolean): Char? {
+    if (isEmpty()) return null
+    var best = this[0]
+    for (index in 1..lastIndex) {
+        val next = this[index]
+        if (if (largest) best < next else best > next) best = next
     }
-    return max
+    return best
 }
-fun CharSequence.min(): Char {
-    if (isEmpty()) throw NoSuchElementException()
-    var min = this[0]
-    for (i in 1..lastIndex) {
-        val e = this[i]
-        if (min > e) min = e
-    }
-    return min
-}
-fun CharSequence.maxOrNull(): Char? = if (isEmpty()) null else max()
-fun CharSequence.minOrNull(): Char? = if (isEmpty()) null else min()
 inline fun String.replaceFirstChar(transform: (Char) -> CharSequence): String =
     if (isNotEmpty()) transform(this[0]).toString() + substring(1) else this
 @JvmName("replaceFirstCharWithChar")

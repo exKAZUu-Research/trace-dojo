@@ -3127,6 +3127,28 @@ fun main() {
     stdout: 'xxx\naxa\nxAa\nxAa\nxkK\nx𐐨\nxx\nxabc\nabc\n',
   },
   {
+    name: 'character extrema check emptiness once and read the first character before the last index',
+    source: `class ExtremaSequence(private val value: String) : CharSequence by value {
+    override val length: Int get() { println("length"); return value.length }
+    override fun get(index: Int): Char {
+        println("get $index")
+        return value[index]
+    }
+}
+fun main() {
+    val empty = ExtremaSequence("")
+    println(empty.maxOrNull())
+    println(empty.minOrNull())
+    try { empty.max() } catch (error: NoSuchElementException) { println("empty max") }
+    val text = ExtremaSequence("bac")
+    println(text.maxOrNull())
+    println(text.minOrNull())
+    println(text.min())
+}`,
+    stdout:
+      'length\nnull\nlength\nnull\nlength\nempty max\nlength\nget 0\nlength\nget 1\nget 2\nc\nlength\nget 0\nlength\nget 1\nget 2\na\nlength\nget 0\nlength\nget 1\nget 2\na\n',
+  },
+  {
     name: 'character sequence conversions use Kotlin length-based paths',
     source: `class CharProbe(private val value: String) : CharSequence by value {
     override val length: Int get() { println("length"); return value.length }
