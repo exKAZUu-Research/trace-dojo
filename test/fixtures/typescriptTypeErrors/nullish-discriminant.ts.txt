@@ -13,3 +13,19 @@ function shared(value: { tag: 'same'; left: number } | { tag: 'same'; right: num
     const impossibleParent: never = value;
   }
 }
+
+function impossibleNumber(value: number) {
+  if (value === undefined) {
+    const invalid: string = undefined;
+  }
+}
+function impossibleBoolean(value: boolean) {
+  if (undefined == value) {
+    const invalid: typeof value = undefined;
+  }
+}
+function impossibleTypeof() {
+  if (typeof undefined === 'string') {
+    const invalid: string = undefined;
+  }
+}

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 445 -- Keeps flow state, joins, and reference narrowing together.
+// code-gauge-allow-file fileNcss 447 -- Keeps flow state, joins, and reference narrowing together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -239,8 +239,7 @@ export class Flow {
       case 'identifier':
       case 'shorthand_property_identifier':
       case 'shorthand_property_identifier_pattern': {
-        const symbol = this.c.scopeOf(expression).lookupValue(expression.text);
-        return symbol ? `s${symbol.id}` : undefined;
+        return this.variableReferenceKey(expression);
       }
       case 'this': {
         return `this${this.c.classes.thisOwnerId(expression)}`;
@@ -265,6 +264,11 @@ export class Flow {
         return undefined;
       }
     }
+  }
+
+  private variableReferenceKey(expression: TreeNode): string | undefined {
+    const symbol = this.c.scopeOf(expression).lookupValue(expression.text);
+    return symbol && !this.c.isGlobalUndefined(expression) ? `s${symbol.id}` : undefined;
   }
 
   /**
