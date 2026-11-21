@@ -6,6 +6,7 @@ import { type DartType, sameType } from './types';
 // Dart SDK 3.13.7 JIT's platform snapshot occupies class IDs through 1233.
 const FIRST_PROGRAM_CLASS_ID = 1234;
 
+// code-gauge-allow functionCognitiveComplexity 19 -- Class bodies and header references load in distinct orders.
 export function assignVmClassIds(declarations: Iterable<Declaration>): void {
   let nextId = FIRST_PROGRAM_CLASS_ID;
   const applications = new Map<string, ClassInfo[]>();
@@ -49,6 +50,7 @@ function sharedApplication(cls: ClassInfo, applications: Map<string, ClassInfo[]
   return undefined;
 }
 
+// code-gauge-allow functionCognitiveComplexity 16 -- Visit each serialized type shape in VM order.
 function reserveReferencedClasses(type: DartType, reserve: (cls: ClassInfo) => void): void {
   switch (type.kind) {
     case 'interface': {

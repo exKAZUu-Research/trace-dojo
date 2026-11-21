@@ -7447,6 +7447,41 @@ void main() {
   }
 });
 
+test('bounded Dart switch partitions follow correlated records into lists and object fields', () => {
+  for (const width of [8, 9, 10]) {
+    const fields = Array.from({ length: width }, (_, index) => index);
+    const arms = fields.map((firstFalse) => {
+      const pattern = fields.map((index) => (index < firstFalse ? 'true' : index === firstFalse ? 'false' : '_'));
+      return { pattern: `(${pattern.join(', ')})`, result: firstFalse };
+    });
+    const trueValues = `(${fields.map(() => 'true').join(', ')})`;
+    const falseValues = `(${fields.map(() => 'false').join(', ')})`;
+    const finished = [{ pattern: trueValues, result: width }, ...arms.toReversed()];
+    const program = (recordArms: typeof arms): string => `typedef Wide = (${fields.map(() => 'bool').join(', ')});
+sealed class Selection {}
+class Box extends Selection { final Wide value; Box(this.value); }
+int head(List<Wide> r) => switch (r) {
+  [] => -1,
+  ${recordArms.map(({ pattern, result }) => `[${pattern}, ...] => ${result}`).join(', ')},
+};
+int tail(List<Wide> r) => switch (r) {
+  [] => -1,
+  ${recordArms.map(({ pattern, result }) => `[..., ${pattern}] => ${result}`).join(', ')},
+};
+int field(Selection r) => switch (r) {
+  ${recordArms.map(({ pattern, result }) => `Box(value: ${pattern}) => ${result}`).join(', ')},
+};
+void main() {
+  print([head([]), head([${falseValues}, ${trueValues}]), tail([${falseValues}, ${trueValues}]), field(Box(${trueValues}))]);
+}`;
+    expect(executeProgram('dart', program(finished))).toMatchObject({
+      kind: 'executed',
+      stdout: `[-1, 0, ${width}, ${width}]\n`,
+    });
+    expect(executeProgram('dart', program(arms))).toMatchObject({ kind: 'compileError' });
+  }
+});
+
 test('constructor formals and tear-offs use inferred field types', () => {
   const declarations = `class Parent {
   var value = Later().value;

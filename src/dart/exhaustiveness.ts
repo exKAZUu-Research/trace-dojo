@@ -120,7 +120,7 @@ class ObjectSpaces {
     const refined = this.refine(spaces, patterns);
     const uncovered: Space[] = [];
     for (const space of refined) {
-      const parts = space.kind === 'record' ? this.uncoveredRecords(space, patterns) : [space];
+      const parts = this.uncovered(space, patterns);
       if (uncovered.length + parts.length > MAX_SPACES) return refined;
       uncovered.push(...parts);
     }
@@ -128,16 +128,15 @@ class ObjectSpaces {
   }
 
   // Subtract whole arms as we partition so one constrained field can leave the other fields symbolic.
-  private uncoveredRecords(root: RecordSpace, patterns: Pattern[]): RecordSpace[] {
+  private uncovered(root: Space, patterns: Pattern[]): Space[] {
     let remaining = [root];
     let expansionBudget = MAX_SPACES * 4;
     for (const pattern of patterns) {
       const candidates = remaining;
-      const parts = patternAlternatives(pattern);
       remaining = [];
       for (let candidate = candidates.pop(); candidate; candidate = candidates.pop()) {
         if (covers(this.compiler, pattern, candidate) === true) continue;
-        const partitions = this.splitRecord(candidate, parts);
+        const partitions = this.split(candidate, pattern);
         if (!partitions) {
           remaining.push(candidate);
           continue;
@@ -151,23 +150,78 @@ class ObjectSpaces {
     return remaining;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 24 -- Choose a single viable field partition without expanding the other fields.
-  private splitRecord(space: RecordSpace, parts: readonly Pattern[]): RecordSpace[] | undefined {
-    for (const part of parts) {
-      if (part.kind !== 'record') continue;
-      const fields = recordFieldPatterns(part, space);
-      if (!fields || fields.some((pattern, index) => this.excludesFixedField(pattern, space.fields[index]))) continue;
-      for (const [index, pattern] of fields.entries()) {
-        const field = space.fields[index];
-        if (covers(this.compiler, pattern, field) === true) continue;
-        if ((field.kind === 'type' && field.properties) || (field.kind === 'list' && field.elements)) continue;
-        const options =
-          field.kind === 'record'
-            ? this.splitRecord(field, patternAlternatives(pattern))
-            : this.fieldOptions(field, [pattern]);
-        if (options && options.length > 1) {
-          return options.map((value) => ({ ...space, fields: space.fields.with(index, value) }));
-        }
+  private split(space: Space, pattern: Pattern): Space[] | undefined {
+    if (covers(this.compiler, pattern, space) === true || this.excludesFixedField(pattern, space)) return undefined;
+    if (space.kind === 'type' && !space.properties) {
+      const options = expand(space.type, this.listCutoff, this.listDepth);
+      if (options.length !== 1 || options[0].kind !== 'type') return options;
+    }
+    for (const part of patternAlternatives(pattern)) {
+      const partitions = this.splitProduct(space, part);
+      if (partitions) return partitions;
+    }
+    return undefined;
+  }
+
+  private splitProduct(space: Space, pattern: Pattern): Space[] | undefined {
+    if (space.kind === 'record' && pattern.kind === 'record') return this.splitRecord(space, pattern);
+    if (space.kind === 'list' && pattern.kind === 'list') return this.splitList(space, pattern);
+    if (space.kind === 'type' && pattern.kind === 'object') return this.splitObject(space, pattern);
+    return undefined;
+  }
+
+  private splitRecord(space: RecordSpace, pattern: Extract<Pattern, { kind: 'record' }>): RecordSpace[] | undefined {
+    const fields = recordFieldPatterns(pattern, space);
+    if (!fields || fields.some((child, index) => this.excludesFixedField(child, space.fields[index]))) return undefined;
+    for (const [index, child] of fields.entries()) {
+      const partitions = this.split(space.fields[index], child);
+      if (partitions) return partitions.map((value) => ({ ...space, fields: space.fields.with(index, value) }));
+    }
+    return undefined;
+  }
+
+  private splitList(space: ListSpace, pattern: Extract<Pattern, { kind: 'list' }>): ListSpace[] | undefined {
+    const bounds = listPatternBounds(this.compiler, pattern, space);
+    if (!bounds) return undefined;
+    const { rest, fixed } = bounds;
+    const fallback: Space = { kind: 'type', type: space.elementType };
+    const elements = space.elements ?? Array.from({ length: space.length }, () => fallback);
+    const length = space.length - fixed;
+    for (const [index, element] of pattern.elements.entries()) {
+      if (element.kind === 'rest') {
+        if (!element.pattern) continue;
+        const middle = listMiddle(space, rest, length, elements);
+        const partitions = this.split(middle, element.pattern);
+        if (partitions?.every((part) => part.kind === 'list'))
+          return partitions.map((part) => ({
+            ...space,
+            elements: [...elements.slice(0, rest), ...(part.elements ?? []), ...elements.slice(rest + length)],
+          }));
+      } else {
+        const position = listPatternPosition(pattern, space, rest, index);
+        const partitions = this.split(elements[position], element);
+        if (partitions) return partitions.map((value) => ({ ...space, elements: elements.with(position, value) }));
+      }
+    }
+    return undefined;
+  }
+
+  private splitObject(
+    space: Extract<Space, { kind: 'type' }>,
+    pattern: Extract<Pattern, { kind: 'object' }>
+  ): Space[] | undefined {
+    if (!spaceSubtype(space, objectPatternType(this.compiler, pattern))) return undefined;
+    for (const { name, pattern: child } of pattern.fields) {
+      if (!name) continue;
+      const member = this.compiler.lookupMember(space.type, name, false);
+      if (!member || member.extension) continue;
+      const field = space.properties?.get(name) ?? { kind: 'type', type: member.type };
+      const partitions = this.split(field, child);
+      if (partitions) {
+        return partitions.map((value) => ({
+          ...space,
+          properties: new Map([...(space.properties ?? []), [name, value]]),
+        }));
       }
     }
     return undefined;
@@ -663,27 +717,17 @@ function listCovers(
   pattern: Extract<Pattern, { kind: 'list' }>,
   space: ListSpace
 ): Coverage {
-  if (pattern.typeArguments?.length === 1) {
-    const requiredElement = compiler.resolveType(pattern.typeArguments[0]);
-    if (!isSubtype(space.elementType, requiredElement)) return false;
-  }
-  const rest = pattern.elements.findIndex((element) => element.kind === 'rest');
-  const fixed = pattern.elements.length - (rest !== -1 ? 1 : 0);
-  if (rest !== -1 ? space.length < fixed : space.hasLongerLengths || space.length !== fixed) return false;
+  const bounds = listPatternBounds(compiler, pattern, space);
+  if (!bounds) return false;
+  const { rest, fixed } = bounds;
   return combineCoverage(
     pattern.elements.entries(),
     ([index, element]) => {
       if (element.kind === 'rest') {
         if (!element.pattern) return true;
-        const length = space.length - fixed;
-        return covers(compiler, element.pattern, {
-          ...space,
-          length,
-          type: interfaceType(coreTypes.list, [space.elementType]),
-          elements: space.elements?.slice(rest, rest + length),
-        });
+        return covers(compiler, element.pattern, listMiddle(space, rest, space.length - fixed, space.elements));
       }
-      const position = rest !== -1 && index > rest ? space.length + index - pattern.elements.length : index;
+      const position = listPatternPosition(pattern, space, rest, index);
       const elementSpace = space.elements?.[position];
       return elementSpace ? covers(compiler, element, elementSpace) : coversAll(compiler, element, space.elementType);
     },
@@ -691,6 +735,44 @@ function listCovers(
   );
 }
 
+function listPatternBounds(
+  compiler: PatternCompiler,
+  pattern: Extract<Pattern, { kind: 'list' }>,
+  space: ListSpace
+): { rest: number; fixed: number } | undefined {
+  if (
+    pattern.typeArguments?.length === 1 &&
+    !isSubtype(space.elementType, compiler.resolveType(pattern.typeArguments[0]))
+  )
+    return undefined;
+  const rest = pattern.elements.findIndex((element) => element.kind === 'rest');
+  const fixed = pattern.elements.length - (rest !== -1 ? 1 : 0);
+  if (rest !== -1 ? space.length < fixed : space.hasLongerLengths || space.length !== fixed) return undefined;
+  return { rest, fixed };
+}
+
+function listPatternPosition(
+  pattern: Extract<Pattern, { kind: 'list' }>,
+  space: ListSpace,
+  rest: number,
+  index: number
+): number {
+  return rest !== -1 && index > rest ? space.length + index - pattern.elements.length : index;
+}
+
+function listMiddle(
+  space: ListSpace,
+  start: number,
+  length: number,
+  elements: readonly Space[] | undefined
+): ListSpace {
+  return {
+    ...space,
+    length,
+    type: interfaceType(coreTypes.list, [space.elementType]),
+    elements: elements?.slice(start, start + length),
+  };
+}
 function constantCovers(compiler: PatternCompiler, value: Expression, space: Space): Coverage {
   if (space.kind !== 'constant' && space.kind !== 'null') return false;
   const compiled = compiler.patternConstants.get(value);
