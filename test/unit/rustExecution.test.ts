@@ -8136,10 +8136,12 @@ trait Named: Debug + Sized { fn erased(&self) -> &dyn Debug { self } }
 trait Base: Sized {}
 trait Middle: Base {}
 trait Inherited: Middle + Debug { fn erased(&self) -> &dyn Debug { self } }
-#[derive(Debug)]
+trait Copied: Debug + Clone + 'static { fn boxed(&self) -> Box<dyn Debug> { Box::new(self.clone()) } }
+#[derive(Debug, Clone)]
 struct S;
 impl Show for S {}
 impl Named for S {}
+impl Copied for S {}
 impl Base for S {}
 impl Middle for S {}
 impl Inherited for S {}
@@ -8153,9 +8155,9 @@ fn main() {
     let boxed: Box<dyn Debug> = Box::new(vec![1]);
     let again: &dyn Debug = &*boxed;
     println!("{:?} {:?} {} {:?} {}", Show::erased(&S), Named::erased(&S), show(&5), again, S.through_object());
-    println!("{:?}", Inherited::erased(&S));
+    println!("{:?} {:?}", Inherited::erased(&S), S.boxed());
 }`;
-  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'S S 5 [1] 1\nS\n' });
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'S S 5 [1] 1\nS S\n' });
 });
 
 test('turtles of a default aggregate stay owned while its later parts are made', () => {

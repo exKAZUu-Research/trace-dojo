@@ -24,7 +24,7 @@ pub mod marker {
     pub trait Sync {}
 }
 pub mod clone {
-    pub trait Clone {
+    pub trait Clone: Sized {
         fn clone(&self) -> Self;
         fn clone_from(&mut self, source: &Self);
     }
@@ -33,7 +33,7 @@ pub mod borrow {
     pub trait ToOwned { fn to_owned(&self) -> Self; }
 }
 pub mod default {
-    pub trait Default { fn default() -> Self; }
+    pub trait Default: Sized { fn default() -> Self; }
 }
 pub mod ops {
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -369,7 +369,7 @@ pub mod str {
     pub type SplitWhitespace<'a> = IterImpl<'a, &'a str, SplitWhitespaceShape>;
     pub type Lines<'a> = IterImpl<'a, &'a str, LinesShape>;
     pub type Split<'a, P> = IterImpl<'a, &'a str, SplitShape<P>>;
-    pub trait FromStr { fn from_str(s: &str) -> Result<Self, ParseError<Self>>; }
+    pub trait FromStr: Sized { fn from_str(s: &str) -> Result<Self, ParseError<Self>>; }
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct ParseBoolError;
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -899,10 +899,10 @@ pub mod boxed {
 pub mod convert {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum Infallible {}
-    pub trait From<T> { fn from(value: T) -> Self; }
-    pub trait Into<T> { fn into(self) -> T; }
-    pub trait TryFrom<T> { fn try_from(value: T) -> Result<Self, TryFromError<T, Self>>; }
-    pub trait TryInto<T> { fn try_into(self) -> Result<T, TryFromError<Self, T>>; }
+    pub trait From<T>: Sized { fn from(value: T) -> Self; }
+    pub trait Into<T>: Sized { fn into(self) -> T; }
+    pub trait TryFrom<T>: Sized { fn try_from(value: T) -> Result<Self, TryFromError<T, Self>>; }
+    pub trait TryInto<T>: Sized { fn try_into(self) -> Result<T, TryFromError<Self, T>>; }
     pub trait AsRef<T> { fn as_ref(&self) -> &T; }
     pub fn identity<T>(x: T) -> T;
 }
@@ -913,10 +913,10 @@ pub mod iter {
     pub struct IterImpl<'a, T, S>;
     pub trait Iterator {}
     pub trait IntoIterator {}
-    pub trait FromIterator<A> { fn from_iter<I: IntoIterator<Item = A>>(iter: I) -> Self; }
+    pub trait FromIterator<A>: Sized { fn from_iter<I: IntoIterator<Item = A>>(iter: I) -> Self; }
     pub trait Extend<A> {}
-    pub trait Sum<A> {}
-    pub trait Product<A> {}
+    pub trait Sum<A>: Sized {}
+    pub trait Product<A>: Sized {}
     pub trait DoubleEndedIterator: Iterator {}
     pub trait ExactSizeIterator: Iterator {}
     pub trait DoubleEndedSearcher {}
