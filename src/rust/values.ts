@@ -1,6 +1,6 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { CollectionEntries, type CollectionKey } from './collectionEntries';
-import type { DebugPart } from './debugText';
+import type { DebugPart, WriteChunk } from './debugText';
 import type { AdtDef, Type } from './types';
 
 /**
@@ -202,7 +202,11 @@ export class IterValue {
    * `show` writes a value of a type, and `item` is the type of the iterator's elements.
    */
   debug:
-    | ((show: (value: Value, type: Type, indent: number | undefined) => string, item: Type) => DebugPart)
+    | ((
+        show: (value: Value, type: Type, indent: number | undefined) => string,
+        item: Type,
+        write?: WriteChunk
+      ) => DebugPart)
     | undefined;
 
   /** The elements left, for iterators over an array (`Chars::as_str` reads them without taking them). */

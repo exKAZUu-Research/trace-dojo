@@ -331,7 +331,7 @@ export class Formatter {
         return 'Turtle';
       }
       case 'Iter': {
-        return this.iteratorText(v as IterValue, t, spec, indent);
+        return this.iteratorText(v as IterValue, t, spec, indent, write);
       }
       case 'Entry': {
         return this.entryText(v as EntryValue, t, spec, indent);
@@ -369,9 +369,15 @@ export class Formatter {
     return tupleText('Entry', [inner], indent);
   }
 
-  private iteratorText(iter: IterValue, t: Type & { kind: 'adt' }, spec: Spec, indent: number | undefined): string {
+  private iteratorText(
+    iter: IterValue,
+    t: Type & { kind: 'adt' },
+    spec: Spec,
+    indent: number | undefined,
+    write?: WriteChunk
+  ): string {
     const debug = (value: Value, type: Type, inner: number | undefined): string => this.debug(value, type, spec, inner);
-    return iteratorDebug(iter, t.args[0], t.args[1], debug, indent);
+    return iteratorDebug(iter, t.args[0], t.args[1], debug, indent, write);
   }
 
   private debugUserAdt(

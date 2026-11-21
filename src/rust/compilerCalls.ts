@@ -18,9 +18,6 @@ export function compileCall(c: Compiler, expr: ExprOf<'call'>): Eval {
   const res = callee.kind === 'path' ? c.annotations.paths.get(callee) : undefined;
   if (res?.kind === 'fn') {
     const { fn } = res;
-    if ((fn as { nativeKey?: string }).nativeKey === 'Turtle::new') {
-      return (frame) => c.support.turtleNew(evaluateValues(frame, args), span, frame);
-    }
     const typeArgs = res.typeArgs.map((arg) => runtimeType(arg));
     return (frame) => {
       const values = evaluateValues(frame, args);

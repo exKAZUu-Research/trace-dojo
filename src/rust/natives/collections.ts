@@ -1,6 +1,5 @@
 import type { TableMap } from '../capacity';
 import type { CollectionEntries, CollectionKey } from '../collectionEntries';
-import { described, listPart } from '../iterDebug';
 import { cloneValue, testPartialOrder } from '../ops';
 import type { Type } from '../types';
 import {
@@ -18,7 +17,7 @@ import { checkTableCapacity } from './capacityNatives';
 import { defaultValue } from './core';
 import { arrayIter, extendedValue, mapIter, nextForFold, ownedIter, setIter } from './iterators';
 import { sizeOf } from './layout';
-import { btreeSetOp, hashSetMembers, type SetOp } from './setOps';
+import { btreeSetOp, hashSetIter, type SetOp } from './setOps';
 import { call, define, deref, libraryPanic, type Native, type NativeContext, none, option, some } from './support';
 
 /** A new `HashMap` or `HashSet` with its entries' size, and with room for `capacity` elements. */
@@ -58,11 +57,6 @@ function resize(collection: MapValue | SetValue, change: (table: TableMap<unknow
   return UNIT_VALUE;
 }
 
-/** `HashSet`'s set operations, which `{:?}` writes as the list of the elements left. */
-function listed(iter: IterValue): IterValue {
-  return described(iter, (show, item, target) => listPart(target.rest?.() ?? [], item, show));
-}
-
 function map(self: Value): MapValue {
   return deref(self) as MapValue;
 }
@@ -72,12 +66,7 @@ function set(self: Value): SetValue {
 }
 
 function hashSetOp(ctx: NativeContext, op: SetOp, self: Value, other: Value): Value {
-  const result: Value[] = [];
-  for (const value of hashSetMembers(op, set(self), set(other), keyType(ctx))) {
-    ctx.runtime.allocate(1);
-    result.push(value);
-  }
-  return listed(arrayIter(result));
+  return hashSetIter(op, set(self), set(other), keyType(ctx));
 }
 
 /** `BTreeSet`'s set operations, which take std's steps. */

@@ -110,6 +110,7 @@ function projectedPattern(
   const base = fieldChain(annotations, source, local);
   if (!base) return;
   const parts = projectedBindings(pattern, annotations);
+  if (parts?.length === 0 && base.includes('[]')) return;
   return parts?.map(({ path, throughRef, local: binding }) => {
     if (throughRef) return { place: { proj: base, type: source.ty ?? local.type }, binding };
     const type = normalize(shallow(binding.type));

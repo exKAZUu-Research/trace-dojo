@@ -1,4 +1,4 @@
-import type { DebugPart } from '../debugText';
+import { type DebugPart, emit, list } from '../debugText';
 import { type DebugValue, described, fieldsPart, listPart, optionPart, tuplePart } from '../iterDebug';
 import { compareValues, spendCollectionWork } from '../ops';
 import type { Type } from '../types';
@@ -13,16 +13,76 @@ import { DONE, IterValue, type Next, type SetValue, type Value } from '../values
 export type SetOp = 'union' | 'intersection' | 'difference' | 'symmetric_difference';
 
 export function* hashSetMembers(op: SetOp, left: SetValue, right: SetValue, type: Type): IterableIterator<Value> {
-  const a = left.entries;
-  const b = right.entries;
-  spendCollectionWork(a.size);
-  for (const value of a.values()) {
-    if (op === 'union' || b.has(b.key(type, value)) === (op === 'intersection')) yield value;
+  const iter = hashSetIter(op, left, right, type);
+  for (let item = iter.next(); item !== DONE; item = iter.next()) yield item;
+}
+
+type Membership = 'all' | 'present' | 'absent';
+interface HashSetSource {
+  from: SetValue;
+  other: SetValue;
+  membership: Membership;
+}
+
+export function hashSetIter(op: SetOp, left: SetValue, right: SetValue, type: Type): IterValue {
+  let from = left;
+  let other = right;
+  if (
+    (op === 'intersection' && left.entries.size > right.entries.size) ||
+    (op === 'union' && left.entries.size < right.entries.size)
+  ) {
+    [from, other] = [other, from];
   }
-  if (op === 'union' || op === 'symmetric_difference') {
-    spendCollectionWork(b.size);
-    for (const value of b.values()) if (!a.has(a.key(type, value))) yield value;
-  }
+  const membership: Membership = op === 'intersection' ? 'present' : op === 'union' ? 'all' : 'absent';
+  const sources: HashSetSource[] = [{ from, other, membership }];
+  if (op === 'union' || op === 'symmetric_difference') sources.push({ from: other, other: from, membership: 'absent' });
+  return hashSetCursor(sources, type);
+}
+
+function hashSetCursor(sources: HashSetSource[], type: Type, sourceIndex = 0, offset = 0): IterValue {
+  let source = sources[sourceIndex];
+  let cursor = source?.from.entries.values();
+  spendCollectionWork(offset);
+  for (let index = 0; index < offset; index++) cursor?.next();
+  const next = (): Next => {
+    while (cursor) {
+      const entry = cursor.next();
+      if (entry.done) {
+        source = sources[++sourceIndex];
+        cursor = source?.from.entries.values();
+        offset = 0;
+        continue;
+      }
+      offset++;
+      spendCollectionWork(1);
+      const { membership, other } = source;
+      if (
+        membership === 'all' ||
+        other.entries.has(other.entries.key(type, entry.value)) === (membership === 'present')
+      ) {
+        return entry.value;
+      }
+    }
+    return DONE;
+  };
+  const iter = new IterValue(
+    next,
+    undefined,
+    undefined,
+    sources.flatMap(({ from, other }) => [from, other])
+  );
+  const fork = (): IterValue => hashSetCursor(sources, type, sourceIndex, offset);
+  iter.fork = fork;
+  return described(iter, (show, itemType, _target, write) => (indent) => {
+    const copy = fork();
+    const entries = function* (): IterableIterator<DebugPart> {
+      for (let item = copy.next(); item !== DONE; item = copy.next()) {
+        const value = item;
+        yield (depth) => emit(show(value, itemType, depth), write);
+      }
+    };
+    return list('[', ']', entries(), indent, write);
+  });
 }
 
 const ITER_PERFORMANCE_TIPPING_SIZE_DIFF = 16;

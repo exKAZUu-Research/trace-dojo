@@ -18,23 +18,26 @@ export function rangeText(range: RangeValue, debug: (value: Value) => string, wr
 export function list(
   open: string,
   close: string,
-  items: DebugPart[],
+  items: Iterable<DebugPart>,
   indent: number | undefined,
   write?: WriteChunk,
   singletonComma = false
 ): string {
   let text = emit(open, write);
-  if (indent === undefined) {
-    for (const [index, item] of items.entries()) {
-      if (index > 0) text += emit(', ', write);
+  let started = false;
+  const padding = indent === undefined ? '' : '    '.repeat(indent + 1);
+  for (const item of items) {
+    if (indent === undefined) {
+      if (started) text += emit(', ', write);
       text += item(undefined);
+    } else {
+      if (!started) text += emit('\n', write);
+      text += emit(padding, write) + item(indent + 1) + emit(',\n', write);
     }
-    if (singletonComma) text += emit(',', write);
-  } else if (items.length > 0) {
-    text += emit('\n', write);
-    text += prettyFields(items, indent, write);
-    text += emit('    '.repeat(indent), write);
+    started = true;
   }
+  if (indent === undefined && singletonComma) text += emit(',', write);
+  else if (indent !== undefined && started) text += emit('    '.repeat(indent), write);
   return text + emit(close, write);
 }
 

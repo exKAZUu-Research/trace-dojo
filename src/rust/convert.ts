@@ -24,7 +24,7 @@ import type {
   Visibility,
 } from './ast';
 import { ExpressionConverter } from './convertExpressions';
-import { checkNotReserved, isComment, syntaxError, unavailable, withoutDocAttributes } from './convertSyntax';
+import { isComment, syntaxError, unavailable, withoutDocAttributes } from './convertSyntax';
 
 export { type Reparse, syntaxError, unavailable } from './convertSyntax';
 
@@ -198,7 +198,6 @@ export class Converter extends ExpressionConverter {
   // code-gauge-allow functionNcss 41 -- One case per kind of syntax node.
   private fnItem(node: Node, allowMissingBody = false): FnItem {
     const span = this.span(node);
-    checkNotReserved(this.field(node, 'name').text, span);
     const modifiers = node.namedChildren.find((child) => child.type === 'function_modifiers');
     const isConst = this.isStd && modifiers?.text.trim() === 'const';
     if (modifiers && !isConst) {

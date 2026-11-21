@@ -57,7 +57,7 @@ function callFn(
   typeArgs: Type[],
   expected: Type | undefined
 ): Type {
-  if ((fn as { nativeKey?: string }).nativeKey === 'Turtle::new') return turtleNew(c, expr);
+  if (fn.nativeKey === 'Turtle::new') return turtleNew(c, expr);
   const sig = c.instantiate(fn, typeArgs, expr.span);
   const params = fn.selfMode ? [selfParamType(fn, sig.subst), ...sig.params] : sig.params;
   if (expr.args.length !== params.length) {

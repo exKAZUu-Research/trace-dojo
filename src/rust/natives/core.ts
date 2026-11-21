@@ -234,6 +234,7 @@ function callOrd(ctx: NativeContext, name: 'max' | 'min', args: Value[]): Value 
 }
 
 define({
+  'Turtle::new': (args, ctx) => ctx.interp.turtleNew(args, ctx.span, ctx.frame),
   'Clone::clone': ([self], ctx) => cloneValue(selfType(ctx), deref(self)),
   'Clone::clone_from': ([self, source], ctx) => {
     cloneFromDefault(ctx, selfType(ctx), placeOf(self), source);

@@ -443,15 +443,12 @@ export class ItemCollector {
         def.params.map((param) => ({ kind: 'param', param }))
       ),
     };
-    for (const [index, param] of generics.params.entries()) {
-      def.params[index].bounds = param.bounds.map((bound) =>
-        lowerBound(bound, scope, { kind: 'param', param: def.params[index] })
-      );
-    }
+    lowerTypeParamBounds(def.params, generics, scope);
     addWherePredicates(generics, scope);
     return scope;
   }
 
+  // code-gauge-allow functionNcss 33 -- Collects traits and lowers their generic and inherited bounds together.
   private traitItem(item: TraitItem, module: Module): void {
     const self = newTypeParam('Self', true);
     const def: TraitDef = {
@@ -485,7 +482,13 @@ export class ItemCollector {
       if (defaultType) this.traitDefaults.push(() => (def.params[index].defaultType = lowerType(defaultType, scope)));
     }
     this.lowering.unshift(() => {
+      lowerTypeParamBounds(def.params, item.generics, scope);
       def.supertraits = item.supertraits.map((bound) => lowerBound(bound, scope, selfType));
+      addWherePredicates(item.generics, scope, (param, bounds) => {
+        if (param !== self) return false;
+        def.supertraits.push(...bounds);
+        return true;
+      });
       self.bounds.push(...def.supertraits);
     });
   }
@@ -516,11 +519,7 @@ export class ItemCollector {
       const scope: TypeScope = { module, params, selfType: undefined };
       impl.selfType = lowerType(item.selfType, scope);
       scope.selfType = impl.selfType;
-      for (const [index, param] of item.generics.params.entries()) {
-        impl.params[index].bounds = param.bounds.map((bound) =>
-          lowerBound(bound, scope, { kind: 'param', param: impl.params[index] })
-        );
-      }
+      lowerTypeParamBounds(impl.params, item.generics, scope);
       addWherePredicates(item.generics, scope);
       if (item.trait) {
         const binding = resolveTypePath(
@@ -714,6 +713,13 @@ function describeImplType(type: Type): string {
   if (type.kind === 'adt') return type.def.name;
   if (type.kind === 'int' || type.kind === 'float') return type.name;
   return type.kind;
+}
+
+function lowerTypeParamBounds(params: TypeParam[], generics: Generics, scope: TypeScope): void {
+  for (const [index, param] of generics.params.entries()) {
+    const target = params[index];
+    target.bounds = param.bounds.map((bound) => lowerBound(bound, scope, { kind: 'param', param: target }));
+  }
 }
 
 /**

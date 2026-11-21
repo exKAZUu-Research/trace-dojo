@@ -1,4 +1,4 @@
-import { type DebugPart, list, rangeText, structText, tupleText } from './debugText';
+import { type DebugPart, list, rangeText, structText, tupleText, type WriteChunk } from './debugText';
 import { normalize } from './infer';
 import { ref, shallow, type Type } from './types';
 import { DONE, type IterValue, type RangeValue, type Value } from './values';
@@ -84,9 +84,9 @@ const DESCRIBED_ADAPTERS = new Set([
 /** Sets how `{:?}` writes an iterator, as std's `Debug` impl of its type does. */
 export function described(
   iter: IterValue,
-  describe: (show: DebugValue, item: Type, target: IterValue) => DebugPart
+  describe: (show: DebugValue, item: Type, target: IterValue, write?: WriteChunk) => DebugPart
 ): IterValue {
-  iter.debug = (show, item) => describe(show, item, iter);
+  iter.debug = (show, item, write) => describe(show, item, iter, write);
   const { fork } = iter;
   if (fork) {
     iter.fork = () => {
@@ -156,11 +156,12 @@ export function iteratorDebug(
   item: Type,
   shape: Type,
   debug: DebugValue,
-  indent: number | undefined
+  indent: number | undefined,
+  write?: WriteChunk
 ): string {
   const t = normalize(shallow(shape)) as Type & { kind: 'adt' };
   const name = t.def.name;
-  if (iter.debug) return iter.debug(debug, item)(indent);
+  if (iter.debug) return iter.debug(debug, item, write)(indent);
   if (name === 'ByRefShape') return iteratorDebug(iter, item, t.args[0], debug, indent);
   const rest: DebugPart = (inner) =>
     list(

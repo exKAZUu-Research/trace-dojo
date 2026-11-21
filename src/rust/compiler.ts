@@ -64,7 +64,6 @@ export interface CallSupport {
   constValue(def: ConstDef, frame: Frame, typeArgs: Type[]): Value;
   builtinConst(name: string): Value;
   formatter: Formatter;
-  turtleNew(args: Value[], span: Span, frame: Frame): Value;
   convertError(value: Value, from: Type, to: Type, frame: Frame): Value;
   strSlice(text: string, range: RangeValue | undefined, span: Span): string;
 }

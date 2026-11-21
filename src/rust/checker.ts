@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 807 -- The checker core owns body, entry point, and type obligations.
+// code-gauge-allow-file fileNcss 836 -- The checker core owns body, entry point, and type obligations.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ExecutionBudget } from '../interpreter/limits';
 import { Annotations, type Coercion, type FnContext, type LocalVar, type PathRes } from './annotations';
@@ -31,8 +31,10 @@ import {
   type IntName,
   isSigned,
   isUnit,
+  mapChildren,
   NEVER,
   newTypeParam,
+  type OpaqueType,
   ref,
   resolve,
   resolveTraitRef,
@@ -257,7 +259,7 @@ export class Checker {
   }
 
   /** Requires the methods of a trait impl to take `self`, their parameters, and return as the trait declares them. */
-  // code-gauge-allow functionCognitiveComplexity 16 -- Follows the type checking rules of rustc case by case.
+  // code-gauge-allow functionCognitiveComplexity 17 -- Follows the type checking rules of rustc case by case.
   private checkImplSignatures(impl: ImplDef): void {
     const traitRef = impl.trait;
     if (!traitRef || (impl.module as Module).isStd) return;
@@ -278,20 +280,51 @@ export class Checker {
       }
       const subst = implSubst(impl, traitRef, decl, fn);
       this.checkImplMethodGenerics(fn, decl, subst, span);
-      const pairs = [...decl.paramTypes.map((type, index) => [type, fn.paramTypes[index]]), [decl.ret, fn.ret]];
-      for (const [declared, written] of pairs) {
-        const expected = substitute(declared, subst);
-        if (hasOpaque(expected) || hasOpaque(written) || sameType(expected, written)) continue;
-        compileError(
-          span,
-          `メソッド ${fn.name} の型が、トレイト ${trait.name} の宣言と違います（${typeToString(expected)} が必要ですが、${typeToString(written)} です）。`
-        );
+      const expected = decl.paramTypes.map((type) => substitute(type, subst));
+      for (const [index, param] of expected.entries()) {
+        const written = fn.paramTypes[index];
+        if (!sameType(param, written)) this.implSignatureMismatch(fn, trait, param, written, span);
       }
+      const result = substitute(decl.ret, subst);
+      if (!this.compatibleImplResult(result, fn.ret)) this.implSignatureMismatch(fn, trait, result, fn.ret, span);
     }
+  }
+
+  private implSignatureMismatch(fn: FnDef, trait: TraitDef, expected: Type, written: Type, span: Span): never {
+    return compileError(
+      span,
+      `メソッド ${fn.name} の型が、トレイト ${trait.name} の宣言と違います（${typeToString(expected)} が必要ですが、${typeToString(written)} です）。`
+    );
+  }
+
+  private compatibleImplResult(declared: Type, actual: Type): boolean {
+    const expected = shallow(declared);
+    const written = shallow(actual);
+    if (expected.kind === 'opaque') {
+      return expected.opaque.bounds.every((bound) => this.solver.implements(written, bound) !== 'no');
+    }
+    if (!hasOpaque(expected)) return sameType(expected, written);
+    if (
+      !sameType(
+        mapChildren(expected, () => UNIT),
+        mapChildren(written, () => UNIT)
+      )
+    )
+      return false;
+    const children = childTypes(written);
+    return childTypes(expected).every((child, index) => this.compatibleImplResult(child, children[index]));
   }
 
   private checkImplRequirements(impl: ImplDef, trait: TraitRef): void {
     const self = shallow(impl.selfType);
+    const parameters = new Map<TypeParam, Type>([
+      [trait.trait.self, self],
+      ...trait.trait.params.map((param, index): [TypeParam, Type] => [param, trait.args[index]]),
+    ]);
+    for (const param of trait.trait.params) {
+      const arg = parameters.get(param) as Type;
+      for (const bound of param.bounds) this.require(arg, substituteTraitRef(bound, parameters), impl.span);
+    }
     for (const bound of supertraitsOf(trait, self)) {
       if (this.solver.implements(self, bound) === 'no') {
         compileError(
@@ -491,10 +524,12 @@ export class Checker {
     const module = def.module as Module;
     const typeParams = new Map(def.params.map((param) => [param.name, param]));
     const selfType: Type | undefined = def.trait ? { kind: 'param', param: def.trait.self } : def.impl?.selfType;
+    const resultTypes: [OpaqueType, Type][] = [];
+    const returnType = hasOpaque(def.ret) ? openOpaqueResults(def.ret, resultTypes) : def.ret;
     this.body = this.newBody({
       name: def.name,
       module,
-      retType: def.ret.kind === 'opaque' ? freshVar() : def.ret,
+      retType: returnType,
       isAtomic: this.isAtomic(item),
       typeParams,
       selfType,
@@ -518,10 +553,10 @@ export class Checker {
       this.markReborrows(body.tail, def.ret);
     }
     this.coerceTail(body, bodyType, this.body.retType, item);
-    if (def.ret.kind === 'opaque') {
-      def.ret.opaque.hidden = this.body.retType;
-      for (const bound of def.ret.opaque.bounds) {
-        this.obligations.push({ type: this.body.retType, ref: bound, span: item.span });
+    for (const [opaque, type] of resultTypes) {
+      opaque.hidden = type;
+      for (const bound of opaque.bounds) {
+        this.obligations.push({ type, ref: bound, span: item.span });
       }
     }
     this.finishBody(item.span);
@@ -1208,6 +1243,14 @@ function checkIntLiteral(literal: Extract<Expr, { kind: 'int' }>, name: IntName,
     literal.span,
     `リテラル ${negated ? '-' : ''}${literal.value} は ${name} の範囲（${intMin(name)}〜${intMax(name)}）を超えています。`
   );
+}
+
+function openOpaqueResults(type: Type, results: [OpaqueType, Type][]): Type {
+  const t = shallow(type);
+  if (t.kind !== 'opaque') return mapChildren(t, (child) => openOpaqueResults(child, results));
+  const hidden = freshVar();
+  results.push([t.opaque, hidden]);
+  return hidden;
 }
 
 function hasOpaque(type: Type): boolean {

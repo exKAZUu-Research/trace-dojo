@@ -2676,10 +2676,6 @@ test.each([
     'let _allocated = vec![0; 999_960]; let s: std::collections::HashSet<_> = (0..15).collect(); let a = s.iter(); let b = s.iter(); println!("{} {}", a.len(), b.len());',
   ],
   [
-    'materialized hash set operation iterators',
-    'let _allocated = vec![0; 999_945]; let a: std::collections::HashSet<_> = (0..15).collect(); let b: std::collections::HashSet<_> = (15..30).collect(); let _union = a.union(&b);',
-  ],
-  [
     'owned hash set operator results',
     'let _allocated = vec![0; 999_945]; let a: std::collections::HashSet<_> = (0..15).collect(); let b: std::collections::HashSet<_> = (15..30).collect(); let _union = &a | &b;',
   ],
@@ -5321,5 +5317,133 @@ fn main() {
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'compileError' });
   expect(executeProgram('rust', program.replace('struct NoClone;', '#[derive(Clone)] struct NoClone;'))).toMatchObject({
     kind: 'executed',
+  });
+});
+
+test('calls Turtle::new through a function value and a standard iterator factory', () => {
+  const program = rustMain(`let create = Turtle::new;
+    let mut first = create();
+    first.forward();
+    let mut batch = std::iter::repeat_with(Turtle::new).take(1).collect::<Vec<Turtle>>();
+    batch[0].turn_right();
+    batch[0].forward();`);
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    finalTurtles: [
+      { x: 0, y: 1 },
+      { x: 1, y: 0 },
+    ],
+  });
+});
+
+test('checks reserved words consistently across Rust identifier positions', () => {
+  for (const [items, body] of [
+    ['struct Stats { gen: i32 }', 'let stats = Stats { gen: 1 }; println!("{}", stats.gen);'],
+    ['mod gen {}', ''],
+    ['trait gen {}', ''],
+    ['struct gen;', ''],
+    ['struct Generic<gen>(gen);', ''],
+  ] as const) {
+    expect(executeProgram('rust', rustMain(body, items))).toMatchObject({
+      kind: 'compileError',
+      diagnostics: expect.arrayContaining([expect.objectContaining({ message: expect.stringContaining('予約語') })]),
+    });
+  }
+  const escaped = rustMain(
+    'let stats = r#gen::Stats { r#gen: 1 }; println!("{}", stats.r#gen);',
+    'mod r#gen { pub struct Stats { pub r#gen: i32 } }'
+  );
+  expect(executeProgram('rust', escaped)).toMatchObject({ kind: 'executed', stdout: '1\n' });
+});
+
+test('permits opaque refinement only where a trait result declares it', () => {
+  const program = `use std::fmt::{Display, Debug};
+trait Source { fn value(&self) -> Option<impl Display>; }
+struct S;
+impl Source for S { fn value(&self) -> Option<impl Display + Debug> { Some(4) } }
+fn read<T: Source>(s: &T) { println!("{}", s.value().unwrap()); }
+fn main() { read(&S); }`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '4\n' });
+  const concrete = program.replace('Option<impl Display>;', 'Option<i32>;');
+  const wrongShape = program.replace('-> Option<impl Display + Debug> { Some(4) }', '-> impl Display { 4 }');
+  const missingBound = program.replace('impl Display + Debug', 'impl Debug');
+  for (const source of [concrete, wrongShape, missingBound]) {
+    expect(executeProgram('rust', source)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
+test('checks inline and where bounds of generic traits in defaults and implementations', () => {
+  const program = `use std::fmt::Display;
+trait Print<T: Display> { fn show(&self, value: T) { println!("{}", value); } }
+trait Show<T> where T: Display { fn log(&self, value: T) { println!("{}", value); } }
+struct Printer;
+struct Missing;
+impl Print<i32> for Printer {}
+impl Show<&str> for Printer {}
+fn main() { Printer.show(3); Printer.log("text"); }`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '3\ntext\n' });
+  const invalid = program.replace('fn main()', 'impl Print<Missing> for Printer {} fn main()');
+  expect(executeProgram('rust', invalid)).toMatchObject({ kind: 'compileError' });
+});
+
+test('evaluates HashSet membership only as lazy set iterators are consumed or formatted', () => {
+  const program = `use std::collections::HashSet;
+#[derive(Clone, Debug, Eq, Hash)]
+struct K(i32);
+impl PartialEq for K {
+    fn eq(&self, other: &Self) -> bool {
+        print!("eq ");
+        self.0 == other.0
+    }
+}
+fn main() {
+    let a = HashSet::from([K(1)]);
+    let b = HashSet::from([K(1)]);
+    let unused = a.difference(&b);
+    println!("ready");
+    drop(unused);
+    let mut common = a.intersection(&b);
+    let copy = common.clone();
+    println!("{:?}", copy);
+    println!("{:?}", common.next());
+    println!("{:?}", common);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'ready\n[eq K(1)]\neq Some(K(1))\n[]\n',
+  });
+});
+
+test('roots iterator-owned accumulations while discarding inputs that count does not retain', () => {
+  const items = `let observer = Turtle::new(0, 0);
+    let iter = vec![Turtle::new(0, 1), Turtle::new(2, 1)].into_iter()
+        .map(|t| { println!("{}", observer.can_move_forward()); t });`;
+  for (const finish of [
+    'let kept: Vec<_> = iter.collect(); println!("{} {}", kept.len(), observer.can_move_forward());',
+    'let kept: Option<Vec<_>> = iter.map(Some).collect(); let kept = kept.unwrap(); println!("{} {}", kept.len(), observer.can_move_forward());',
+    'let (yes, no): (Vec<_>, Vec<_>) = iter.partition(|_| true); println!("{} {}", yes.len() + no.len(), observer.can_move_forward());',
+    'let kept = iter.fold(Vec::new(), |mut kept, t| { kept.push(t); kept }); println!("{} {}", kept.len(), observer.can_move_forward());',
+  ]) {
+    expect(executeProgram('rust', rustMain(`${items}\n${finish}`))).toMatchObject({
+      kind: 'executed',
+      stdout: 'false\nfalse\n2 false\n',
+    });
+  }
+  const count = rustMain(`${items}\nprintln!("{}", iter.count());`);
+  expect(executeProgram('rust', count)).toMatchObject({ kind: 'executed', stdout: 'false\ntrue\n2\n' });
+});
+
+test('evaluates indexed places even when destructuring ignores their fields', () => {
+  const program = rustMain(`let a = [(1, 2)];
+    let b = vec![(3, 4)];
+    let index = 0usize;
+    let f = move || { let (_, _) = a[index]; let (_, _) = b[index]; println!("ok"); };
+    f();`);
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'ok\n' });
+  const outOfRange = program.replace('0usize', '1usize');
+  expect(executeProgram('rust', outOfRange)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('the len is 1 but the index is 1'),
   });
 });

@@ -1,7 +1,7 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type { Pattern, Span } from './ast';
-import { checkNotReserved, isComment, SyntaxConverter, syntaxError, unavailable } from './convertSyntax';
+import { isComment, SyntaxConverter, syntaxError, unavailable } from './convertSyntax';
 
 const UNSUPPORTED_PATTERNS: Record<string, string> = {
   remaining_field_pattern: '残りの要素を省く ..',
@@ -22,7 +22,6 @@ export abstract class PatternConverter extends SyntaxConverter {
     switch (node.type) {
       case 'identifier': {
         if (node.text === '_') return { kind: 'wild', span };
-        checkNotReserved(node.text, span);
         return { kind: 'binding', name: this.identifier(node), mutable: false, sub: undefined, span };
       }
       case 'scoped_identifier': {

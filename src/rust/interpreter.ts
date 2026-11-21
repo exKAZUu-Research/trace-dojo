@@ -21,6 +21,7 @@ import {
 import { concreteType, matchConcrete, typeIdentity, typeKey } from './runtimeTypes';
 import {
   type AdtDef,
+  childTypes,
   type ConstDef,
   type FnDef,
   type ImplDef,
@@ -339,10 +340,11 @@ export class Interpreter implements CallSupport {
     if (revealing.has(id)) return current;
     const next = new Set([...revealing, id]);
     const implementation = method && this.resolveFunctionInstance(method, args, next);
-    if (implementation && implementation.fn !== method) {
+    if (method && implementation && implementation.fn !== method) {
       const { fn, typeArgs } = implementation;
       const bindings = new Map(fn.params.map((param, index) => [param, typeArgs[index]]));
-      return this.revealType(concreteType(fn.ret, bindings), next);
+      const result = opaqueProjection(method.ret, concreteType(fn.ret, bindings), id);
+      if (result) return this.revealType(result, next);
     }
     return hidden ? this.revealType(resolve(hidden, true), next) : current;
   }
@@ -479,6 +481,18 @@ export class Interpreter implements CallSupport {
     if (result.variant !== 0) throw new FmtFailure(formatter.text);
     return formatter.text;
   }
+}
+
+function opaqueProjection(declaration: Type, implementation: Type, id: number): Type | undefined {
+  const expected = shallow(declaration);
+  if (expected.kind === 'opaque') return expected.opaque.id === id ? implementation : undefined;
+  const types = childTypes(shallow(implementation));
+  for (const [index, child] of childTypes(expected).entries()) {
+    if (!types[index]) continue;
+    const projected = opaqueProjection(child, types[index], id);
+    if (projected) return projected;
+  }
+  return undefined;
 }
 
 /** The types of a variant's fields with a generic type's parameters replaced by its arguments. */

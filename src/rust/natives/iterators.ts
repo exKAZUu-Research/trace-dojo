@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 842 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss 869 -- One native per method of the standard library.
 import { collectedVecCapacity, inPlaceCapacity, setVecCapacity, sizeTable } from '../capacity';
 import type { DebugPart } from '../debugText';
 import { normalize } from '../infer';
@@ -249,14 +249,16 @@ function shorterLength(a: bigint, b: bigint): bigint {
 function collectAll(ctx: NativeContext, iter: IterValue, stop?: (item: Value) => boolean, fold = false): Value[] {
   const items: Value[] = [];
   const source = fold ? foldingView(iter) : iter;
-  for (;;) {
-    ctx.runtime.spend();
-    const item = nextOf(source);
-    if (item === DONE) return items;
-    items.push(item);
-    if (stop?.(item)) return items;
-    if (items.length > 1_000_000) ctx.runtime.allocate(items.length);
-  }
+  return ctx.runtime.withRoots(items, () => {
+    for (;;) {
+      ctx.runtime.spend();
+      const item = nextOf(source);
+      if (item === DONE) return items;
+      items.push(item);
+      if (stop?.(item)) return items;
+      if (items.length > 1_000_000) ctx.runtime.allocate(items.length);
+    }
+  });
 }
 
 /** The operations of an adapter over its source, which `fork` builds again over a copy of the source. */
@@ -983,9 +985,20 @@ function each<T>(
 }
 
 function foldItems(ctx: NativeContext, iter: IterValue, init: Value, fn: Value, direction: 'fold' | 'back'): Value {
-  let acc = init;
-  each(ctx, iter, (item) => void (acc = call(ctx, fn, [acc, item])), direction);
-  return acc;
+  const acc = new CellPlace(init);
+  return ctx.runtime.withRoots([acc], () => {
+    each(
+      ctx,
+      iter,
+      (item) => {
+        const previous = acc.value;
+        acc.value = undefined;
+        acc.value = call(ctx, fn, [previous, item]);
+      },
+      direction
+    );
+    return acc.value;
+  });
 }
 
 function tryFoldItems(ctx: NativeContext, iter: IterValue, accumulator: Value, callback: Value): Value {
@@ -1036,11 +1049,32 @@ define({
   },
   'IterImpl<_, _>::sum': ([self], ctx) => sumOrProduct(ctx, iterOf(self), ctx.typeArgs[2], '+'),
   'IterImpl<_, _>::product': ([self], ctx) => sumOrProduct(ctx, iterOf(self), ctx.typeArgs[2], '*'),
-  'IterImpl<_, _>::count': ([self], ctx) => BigInt(collectAll(ctx, iterOf(self), undefined, true).length),
+  'IterImpl<_, _>::count': ([self], ctx) => {
+    let count = 0n;
+    each(
+      ctx,
+      iterOf(self),
+      () => {
+        count++;
+      },
+      'fold'
+    );
+    return count;
+  },
   'IterImpl<_, _>::len': ([self]) => lengthOf(iterOf(self)),
   'IterImpl<_, _>::last': ([self], ctx) => {
-    const items = collectAll(ctx, iterOf(self), undefined, true);
-    return option(ctx, items.at(-1), items.length > 0);
+    const last = new CellPlace(none(ctx));
+    return ctx.runtime.withRoots([last], () => {
+      each(
+        ctx,
+        iterOf(self),
+        (item) => {
+          last.value = some(ctx, item);
+        },
+        'fold'
+      );
+      return last.value;
+    });
   },
   'IterImpl<_, _>::nth': ([self, n], ctx) => {
     const item = nth(ctx, iterOf(self), n as bigint);
@@ -1057,9 +1091,7 @@ define({
     const iter = iterOf(self);
     const first = nextOf(iter);
     if (first === DONE) return none(ctx);
-    let acc = first;
-    each(ctx, iter, (item) => void (acc = call(ctx, f, [acc, item])), 'fold');
-    return some(ctx, acc);
+    return some(ctx, foldItems(ctx, iter, first, f, 'fold'));
   },
   'IterImpl<_, _>::for_each': ([self, f], ctx) => {
     each(ctx, iterOf(self), (item) => void call(ctx, f, [item]), 'fold');
@@ -1107,9 +1139,11 @@ define({
   'IterImpl<_, _>::partition': ([self, f], ctx) => {
     const yes: Value[] = [];
     const no: Value[] = [];
-    each(ctx, iterOf(self), (item) => void (truthy(call(ctx, f, [item])) ? yes : no).push(item));
-    const type = ctx.typeArgs[2];
-    return [collectInto(ctx, yes, type, ctx.typeArgs[0]), collectInto(ctx, no, type, ctx.typeArgs[0])];
+    return ctx.runtime.withRoots([yes, no], () => {
+      each(ctx, iterOf(self), (item) => void (truthy(call(ctx, f, [item])) ? yes : no).push(item));
+      const type = ctx.typeArgs[2];
+      return [collectInto(ctx, yes, type, ctx.typeArgs[0]), collectInto(ctx, no, type, ctx.typeArgs[0])];
+    });
   },
   'IterImpl<_, _>::eq': ([self, other], ctx) => {
     // `eq` stops at the first difference.
@@ -1118,9 +1152,12 @@ define({
     for (;;) {
       ctx.runtime.spend();
       const x = nextOf(a);
-      const y = nextOf(b);
-      if (x === DONE || y === DONE) return x === y;
-      if (!valuesEqual(ctx.typeArgs[0], x, y)) return false;
+      if (x === DONE) return nextOf(b) === DONE;
+      const equal = ctx.runtime.withRoots([x], () => {
+        const y = nextOf(b);
+        return y !== DONE && ctx.runtime.withRoots([y], () => valuesEqual(ctx.typeArgs[0], x, y));
+      });
+      if (!equal) return false;
     }
   },
   'IterImpl<_, _>::cmp': ([self, other], ctx) =>
@@ -1136,14 +1173,19 @@ define({
   'IterImpl<_, _>::is_sorted': ([self], ctx) => {
     // `is_sorted` stops at the first pair out of order.
     const iter = iterOf(self);
-    let previous = nextOf(iter);
-    if (previous === DONE) return true;
-    return (
-      each(ctx, iter, (item) => {
-        const ordered = testPartialOrder('le', ctx.typeArgs[0], previous as Value, item);
-        previous = item;
-        return ordered ? undefined : false;
-      }) ?? true
+    const first = nextOf(iter);
+    if (first === DONE) return true;
+    const previous = new CellPlace(first);
+    return ctx.runtime.withRoots(
+      [previous],
+      () =>
+        each(ctx, iter, (item) => {
+          const ordered = ctx.runtime.withRoots([item], () =>
+            testPartialOrder('le', ctx.typeArgs[0], previous.value, item)
+          );
+          previous.value = item;
+          return ordered ? undefined : false;
+        }) ?? true
     );
   },
   'IterImpl<char, CharsShape>::as_str': ([self]) => {
@@ -1264,14 +1306,17 @@ function successors(ctx: NativeContext, start: EnumValue, callback: IteratorCall
 function extreme(ctx: NativeContext, iter: IterValue, compare: (a: Value, b: Value) => number, sign: 1 | -1): Value {
   const first = nextOf(iter);
   if (first === DONE) return none(ctx);
-  let best = first;
+  const best = new CellPlace(first);
   const rest = foldingView(iter);
-  for (;;) {
-    ctx.runtime.spend();
-    const item = nextOf(rest);
-    if (item === DONE) return some(ctx, best);
-    if (!keepsBest(compare(best, item), sign)) best = item;
-  }
+  return ctx.runtime.withRoots([best], () => {
+    for (;;) {
+      ctx.runtime.spend();
+      const item = nextOf(rest);
+      if (item === DONE) return some(ctx, best.value);
+      const keep = ctx.runtime.withRoots([item], () => keepsBest(compare(best.value, item), sign));
+      if (!keep) best.value = item;
+    }
+  });
 }
 
 /** `max_by_key` and `min_by_key`: each key once, in order, compared as `extreme` compares the elements. */
@@ -1279,18 +1324,29 @@ function extremeByKey(ctx: NativeContext, iter: IterValue, f: Value, keyType: Ty
   const first = nextOf(iter);
   if (first === DONE) return none(ctx);
   let best = first;
-  let bestKey = call(ctx, f, [first]);
+  let bestKey = ctx.runtime.withRoots([first], () => call(ctx, f, [first]));
   const rest = foldingView(iter);
-  for (;;) {
-    ctx.runtime.spend();
-    const item = nextOf(rest);
-    if (item === DONE) return some(ctx, best);
-    const key = call(ctx, f, [item]);
-    if (!keepsBest(compareValues(keyType, bestKey, key) ?? 0, sign)) {
-      best = item;
-      bestKey = key;
+  const retained = [best, bestKey];
+  return ctx.runtime.withRoots(retained, () => {
+    for (;;) {
+      ctx.runtime.spend();
+      const item = nextOf(rest);
+      if (item === DONE) return some(ctx, best);
+      const keep = ctx.runtime.withRoots([item], () => {
+        const key = call(ctx, f, [item]);
+        return ctx.runtime.withRoots([key], () => {
+          if (keepsBest(compareValues(keyType, bestKey, key) ?? 0, sign)) return true;
+          bestKey = key;
+          return false;
+        });
+      });
+      if (!keep) {
+        best = item;
+        retained[0] = best;
+        retained[1] = bestKey;
+      }
     }
-  }
+  });
 }
 
 function keepsBest(order: number, sign: 1 | -1): boolean {
@@ -1404,10 +1460,14 @@ function inPlaceSource(iter: IterValue, shape: Type): IterValue | undefined {
   return t.kind === 'adt' && t.def.name === 'VecIntoIterShape' ? source : undefined;
 }
 
+export function collectInto(ctx: NativeContext, items: Value[], target: Type, item: Type): Value {
+  return ctx.runtime.withRoots(items, () => collectFromItems(ctx, items, target, item));
+}
+
 /** Collects elements into a collection of the type `collect` was asked for. */
 // code-gauge-allow functionCognitiveComplexity 25 -- One native per method of the standard library.
 // code-gauge-allow functionNcss 56 -- One case per collection type.
-export function collectInto(ctx: NativeContext, items: Value[], target: Type, item: Type): Value {
+function collectFromItems(ctx: NativeContext, items: Value[], target: Type, item: Type): Value {
   const t = normalize(shallow(target));
   if (t.kind !== 'adt') throw new Error('collect into a non-collection');
   ctx.runtime.allocate(items.length);

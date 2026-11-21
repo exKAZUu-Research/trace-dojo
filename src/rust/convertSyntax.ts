@@ -54,7 +54,10 @@ export abstract class SyntaxConverter {
 
   protected identifier(node: Node): string {
     const { text } = node;
-    if (!text.startsWith('r#')) return text;
+    if (!text.startsWith('r#')) {
+      checkNotReserved(text, this.span(node));
+      return text;
+    }
     const name = text.slice(2);
     if (['self', 'Self', 'super', 'crate', '_'].includes(name)) {
       syntaxError(this.span(node), `${text} は名前に使えません。`);
@@ -129,7 +132,7 @@ const RESERVED_WORDS = new Set([
   'yield',
 ]);
 
-export function checkNotReserved(name: string, span: Span): void {
+function checkNotReserved(name: string, span: Span): void {
   if (RESERVED_WORDS.has(name))
     syntaxError(span, `${name} は予約語なので、名前に使えません（r#${name} と書くか、名前を変えてください）。`);
 }
