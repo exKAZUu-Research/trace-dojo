@@ -86,11 +86,11 @@ export class OutputChannel {
   /** @param written The length written to every channel of the run, which shares one limit. */
   constructor(private readonly written: { length: number }) {}
 
-  write(text: string): void {
+  write(text: string, transform?: (text: string) => string): void {
     if (this.isClosed) return;
     this.written.length += text.length;
     if (this.written.length > LIMITS.maxOutputLength) throw new ExecutionLimitError('output');
-    this.text += text;
+    this.text += transform ? transform(text) : text;
   }
 }
 

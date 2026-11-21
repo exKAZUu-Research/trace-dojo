@@ -15,6 +15,11 @@ export const LIMITS = {
   maxSlots: 1_000_000,
   /** The cumulative cost of C++ trace nodes and text. */
   maxCppTraceSize: 12_000_000,
+  /**
+   * The cumulative size budget for Dart trace entries and text, which lets a 500-element list change its value and
+   * reference views at each of {@link MAX_TRACE_ITEMS} steps.
+   */
+  maxDartTraceSize: 100_000_000,
   /** The length of one string built while running; building strings also costs operations, which bounds the rest. */
   maxStringLength: 1_000_000,
   /** The total length of what a run writes to standard output and standard error. */
