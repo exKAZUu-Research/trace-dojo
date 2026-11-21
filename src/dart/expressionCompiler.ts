@@ -171,6 +171,18 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   /** Compiles an expression whose value is used, ending a null-aware chain. */
   compileExpression(expression: Expression, context?: DartType): Compiled {
+    const compiled = this.compileOperatorReceiver(expression, context);
+    // `E(x)` only selects an extension for a member or operator on it, whose receivers are compiled without this check.
+    if (compiled.extensionOverride)
+      this.error(
+        expression,
+        `拡張 ${compiled.extensionOverride.ext.name ?? ''} の適用は、メンバーを使うときにしか書けません。`
+      );
+    return compiled;
+  }
+
+  /** An expression that may also be an explicit extension application, as the left operand of a binary operator. */
+  protected compileOperatorReceiver(expression: Expression, context?: DartType): Compiled {
     const { result: compiled, skipped } = this.compileNullChain(() => this.compileChainPart(expression, context));
     if (!skipped) return compiled;
     const { run } = compiled;

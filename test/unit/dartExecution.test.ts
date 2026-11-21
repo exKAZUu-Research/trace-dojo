@@ -1987,6 +1987,18 @@ test('Dart assignment expressions keep a dynamic value type', () => {
   });
 });
 
+test('Dart explicit extension applications are only member and operator receivers', () => {
+  const header =
+    'extension E on int { int get twice => this * 2; int operator -(int o) => this + o; void m() { print(this); } }';
+  expect(executeProgram('dart', `${header}\nvoid main() { print([E(1).twice, E(5) - 1]); E(2).m(); }`)).toMatchObject({
+    kind: 'executed',
+    stdout: '[2, 6]\n2\n',
+  });
+  for (const use of ['print(E(1));', 'var x = E(1);', 'print((E(1)).twice);']) {
+    expect(executeProgram('dart', `${header}\nvoid main() { ${use} }`)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}

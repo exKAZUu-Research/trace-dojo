@@ -111,7 +111,9 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     }
     if (operator === '??') return this.compileIfNull(expression, context);
     const left =
-      expression.left.kind === 'super' ? this.superReceiver(expression.left) : this.compileExpression(expression.left);
+      expression.left.kind === 'super'
+        ? this.superReceiver(expression.left)
+        : this.compileOperatorReceiver(expression.left);
     return this.compileBinaryWithLeft(left, operator, expression.right, expression, context);
   }
 
@@ -134,7 +136,8 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
   ): Compiled {
     const expression = { ...at(span), right: rightSyntax };
     if (left.type.kind === 'void') this.error(expression, 'void の値には演算子を使えません。');
-    const leftNumeric = numericClassOf(left.type);
+    // An explicit extension application calls the extension's operator, never the number's own.
+    const leftNumeric = left.extensionOverride ? undefined : numericClassOf(left.type);
     if (leftNumeric) {
       const parameterContext = leftNumeric === 'double' ? interfaceType(coreTypes.num) : undefined;
       const promotesRight =
