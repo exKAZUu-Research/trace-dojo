@@ -8138,12 +8138,17 @@ struct S;
 impl Show for S {}
 impl Named for S {}
 fn show<T: Display>(t: &T) -> &dyn Display { t }
+trait Count {
+    fn count(&self) -> i32;
+    fn through_object(&self) -> i32 where Self: Sized { let object: &dyn Count = self; object.count() }
+}
+impl Count for S { fn count(&self) -> i32 { 1 } }
 fn main() {
     let boxed: Box<dyn Debug> = Box::new(vec![1]);
     let again: &dyn Debug = &*boxed;
-    println!("{:?} {:?} {} {:?}", Show::erased(&S), Named::erased(&S), show(&5), again);
+    println!("{:?} {:?} {} {:?} {}", Show::erased(&S), Named::erased(&S), show(&5), again, S.through_object());
 }`;
-  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'S S 5 [1]\n' });
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'S S 5 [1] 1\n' });
 });
 
 test('turtles of a default aggregate stay owned while its later parts are made', () => {

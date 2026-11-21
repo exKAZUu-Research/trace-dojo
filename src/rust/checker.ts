@@ -120,6 +120,8 @@ export class Checker {
   readonly varBounds = new Map<unknown, TraitRef[]>();
   body!: BodyContext;
   deferredChecks: (() => void)[] = [];
+  /** The `where` bounds of the function whose body is being checked, which its parameters carry meanwhile. */
+  private readonly bodyBounds = new Set<TraitRef>();
   /** The argument being checked for an iterator parameter of a std function, which takes any `IntoIterator`. */
   iterableArgument: Expr | undefined;
   /** Closures whose capture analysis waits for a type, each with the analysis, which returns whether it is final. */
@@ -567,11 +569,17 @@ export class Checker {
     const item = def.ast;
     if (!item?.body) return;
     const bounds = def.extraBounds ?? [];
-    for (const { param, bound } of bounds) param.bounds.push(bound);
+    for (const { param, bound } of bounds) {
+      param.bounds.push(bound);
+      this.bodyBounds.add(bound);
+    }
     try {
       this.checkFnBody(def, item, item.body);
     } finally {
-      for (const { param } of bounds) param.bounds.pop();
+      for (const { param, bound } of bounds) {
+        param.bounds.pop();
+        this.bodyBounds.delete(bound);
+      }
     }
   }
 
@@ -1275,7 +1283,9 @@ export class Checker {
     const subst: Subst = new Map(fn.params.map((param, index) => [param, typeArgs[index] ?? freshVar()]));
     for (const param of fn.params) {
       const arg = subst.get(param) as Type;
-      const bounds = param.bounds.map((bound) => substituteTraitRef(bound, subst));
+      // A bound of the method being checked holds of its own parameter there, not of each use of the parameter.
+      const declared = param.bounds.filter((bound) => !this.bodyBounds.has(bound));
+      const bounds = declared.map((bound) => substituteTraitRef(bound, subst));
       this.recordTypeBounds(arg, bounds);
       if (span) {
         for (const bound of bounds) {

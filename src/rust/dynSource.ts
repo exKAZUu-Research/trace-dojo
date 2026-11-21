@@ -10,8 +10,10 @@ import { shallow, type TraitRef, type Type, type TypeParam } from './types';
  */
 export function requireSizedSource(c: Checker, type: Type, span: Span): void {
   const source = normalize(shallow(type));
-  if (source.kind !== 'dyn') c.requireTrait(source, 'Sized', span);
-  if (source.kind === 'param' && source.param.isSelf && !selfIsSized(c, source.param)) {
+  if (source.kind === 'dyn') return;
+  // What the trait and the method say of `Self` decides for it; the solver decides for every other type.
+  if (source.kind !== 'param' || !source.param.isSelf) c.requireTrait(source, 'Sized', span);
+  else if (!selfIsSized(c, source.param)) {
     compileError(span, 'Self の大きさが決まらないので、dyn にできません（where Self: Sized を付けてください）。');
   }
 }
