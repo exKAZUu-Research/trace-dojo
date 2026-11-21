@@ -1,5 +1,6 @@
-// code-gauge-allow-file fileNcss 988 -- The declaration compiler shares symbol and class-linking logic.
+// code-gauge-allow-file fileNcss 990 -- The declaration compiler shares symbol and class-linking logic.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
+import { accessesBackingField } from './accessorFieldUsage';
 import { VISIBILITY_KEYWORDS } from './ast';
 import type {
   ClassDecl,
@@ -774,7 +775,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   ): NonNullable<FunctionSymbol['invoke']>;
 
   // code-gauge-allow functionNcss 45 -- The parts of a property declaration and their checks.
-  // code-gauge-allow functionCognitiveComplexity 19 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionCognitiveComplexity 22 -- modifier, backing-field, and initialization rules share one declaration check.
   private declareProperty(
     decl: PropertyDecl,
     ownerScope: Scope,
@@ -813,7 +814,10 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     if (isInterface && !decl.getter?.body) symbol.isAbstract = true;
     if (symbol.isAbstract && decl.initializer)
       this.error(decl.row, `abstract なプロパティ ${decl.name} には初期値を書けません。`);
-    if (!cls && !decl.initializer && !decl.delegate && this.hasBackingField(decl, symbol)) {
+    const backed = !decl.delegate && this.hasBackingField(decl, symbol);
+    if (decl.initializer && !backed && !decl.modifiers.keywords.has('external'))
+      this.error(decl.row, `バッキングフィールドを持たないプロパティ ${decl.name} には初期値を書けません。`);
+    if (!cls && !decl.initializer && backed) {
       this.error(decl.row, `プロパティ ${decl.name} には初期値を書いてください。`);
     }
     if (decl.modifiers.keywords.has('external')) this.bindNativeProperty(symbol, decl, cls?.symbol, file);
@@ -1046,9 +1050,9 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   protected hasBackingField(decl: PropertyDecl, symbol: PropertySymbol): boolean {
     if (symbol.isAbstract || decl.modifiers.keywords.has('external') || decl.receiver) return false;
     // An accessor left to its default, or one that reads or writes `field`, keeps the value in a backing field.
-    const getterUses = !decl.getter?.body || usesField(decl.getter.body);
-    const setterUses = decl.isVar && (!decl.setter?.body || usesField(decl.setter.body));
-    return decl.initializer !== undefined || getterUses || setterUses;
+    const getterUses = !decl.getter?.body || accessesBackingField(decl.getter);
+    const setterUses = decl.isVar && (!decl.setter?.body || accessesBackingField(decl.setter));
+    return getterUses || setterUses;
   }
 
   /** Reads and writes a property's backing field directly, as its default accessors do. */
@@ -1467,11 +1471,6 @@ function sameSourceDeclaration(a: MemberSymbol, b: MemberSymbol): boolean {
 function nativeParameterText(param: ParameterDecl): string {
   const type = param.type ? typeRefText(param.type) : '';
   return param.modifiers.keywords.has('vararg') ? `vararg ${type}` : type;
-}
-
-/** Whether an accessor's body names `field`, which gives its property a backing field. */
-function usesField(body: unknown): boolean {
-  return JSON.stringify(body, (key, value) => (typeof value === 'bigint' ? 0 : value)).includes('"name":"field"');
 }
 
 /** What an import names that this environment cannot run, by the feature it stands for. */

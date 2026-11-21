@@ -14,6 +14,29 @@ test.each(['contains', 'split'])('charges the execution budget during CharSequen
 /** Programs with the output of Kotlin 2.4.21 on the JVM (Java 25), which the interpreter must reproduce exactly. */
 test.each([
   {
+    name: 'setter bodies can shadow their input parameters',
+    source: `class Box {
+    var first: Int = 0
+        set(value) {
+            val value = value.coerceAtLeast(0)
+            field = value
+        }
+    var second: Int = 0
+        set(newValue: Int) {
+            val newValue = newValue.coerceAtLeast(0)
+            field = newValue
+        }
+}
+fun main() {
+    val box = Box()
+    box.first = -2
+    box.second = 3
+    println(box.first)
+    println(box.second)
+}`,
+    stdout: '0\n3\n',
+  },
+  {
     name: 'when type tests cover sealed and nullable Boolean alternatives',
     source: `sealed interface Shape
 class Circle : Shape
@@ -4771,6 +4794,58 @@ fun main() {
     'the list builder that buildList uses',
     false,
     'class ListBuilderUser\nfun main() {\n    println(ListBuilder<Int>())\n}',
+  ],
+  [
+    'a top-level initializer with a computed getter',
+    false,
+    'val answer: Int = 1\n    get() = 2\nfun main() { println(answer) }',
+  ],
+  [
+    'an initializer with computed getter and setter',
+    false,
+    `class Sample {
+        var answer: Int = 0
+            get() = 2
+            set(value) { println(value) }
+    }
+    fun main() { println(Sample().answer) }`,
+  ],
+  [
+    'an initializer where field is another object’s member',
+    false,
+    `class Other(val field: Int)
+    class Sample(val other: Other) {
+        val answer: Int = 0
+            get() = other.field
+    }
+    fun main() { println(Sample(Other(2)).answer) }`,
+  ],
+  [
+    'an initializer where field is a local variable',
+    false,
+    `val answer: Int = 0
+        get() {
+            val field = 3
+            return field
+        }
+    fun main() { println(answer) }`,
+  ],
+  [
+    'an initializer where field is a lambda parameter',
+    false,
+    `val answer: Int = 0
+        get() = listOf(4).sumOf { field: Int -> field }
+    fun main() { println(answer) }`,
+  ],
+  [
+    'an explicit setter parameter that differs from the property type',
+    false,
+    'class Sample { var answer = 1\n    set(value: String) { println(value) } }\nfun main() { Sample() }',
+  ],
+  [
+    'an initializer with a field reference in a nested lambda',
+    true,
+    'val answer: Int = 2\n    get() = run { field + 3 }\nfun main() { println(answer) }',
   ],
   ['Locale without its import', false, 'fun main() {\n    val l: Locale? = null\n}'],
 ])('decides whether %s compiles as kotlinc does', (_name, compiles, source) => {

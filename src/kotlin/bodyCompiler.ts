@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 557 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss 559 -- the compiler of one area of Kotlin, whose parts call each other closely.
 import type { Expression, ParameterDecl, PropertyDecl } from './ast';
 import type { ArgumentSyntax, Candidate, ResolvedCall } from './callCompiler';
 import {
@@ -19,7 +19,7 @@ import { propertyRepr, returnRepr } from './dispatch';
 import { type Frame, MISSING } from './runtime';
 import type { ClassSymbol, FunctionSymbol, ParameterSymbol, PropertySymbol } from './symbols';
 import { VariableSymbol } from './symbols';
-import { anyType, isSubtype, substitutionOf } from './typeRelations';
+import { anyType, isSameType, isSubtype, substitutionOf } from './typeRelations';
 import { type ClassType, isNonNullClass, type KType, resolved } from './types';
 import { KObject, UNIT, type Value } from './values';
 
@@ -409,8 +409,10 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     if (!setter?.body) return;
     const { context, scope } = this.accessorContext(entry, 'set');
     const type = symbol.type as KType;
+    if (setter.type && !isSameType(type, this.resolveType(scope, setter.type)))
+      this.error(setter.row, `set の引数の型は、プロパティ ${symbol.name} の型と同じでなければなりません。`);
     context.returnType = this.core.unit.type;
-    const value = this.newVariable(scope, context, setter.parameterName ?? 'value', type, false, setter.row);
+    const value = this.newParameter(scope, context, setter.parameterName ?? 'value', type, setter.row);
     this.flow.assigned.add(value);
     const compiled =
       setter.body.kind === 'expression'
