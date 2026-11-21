@@ -1405,15 +1405,6 @@ export class Compiler extends MemberCompiler {
   }
 
   private checkEnumMembers(cls: ClassInfo, declaration: ClassDeclaration): void {
-    for (const member of declaration.members) {
-      if (
-        member.kind === 'constructor' &&
-        member.constructorKind === 'generative' &&
-        !member.isConst &&
-        member.name !== '\0primaryBody'
-      )
-        this.error(member, '列挙型のコンストラクタは const にしてください。');
-    }
     for (const name of ['index', 'hashCode', '==']) {
       const own = cls.members.get(name);
       if (!own) continue;

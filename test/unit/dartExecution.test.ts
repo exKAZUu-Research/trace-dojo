@@ -1749,6 +1749,16 @@ void main() { print([G(1).f(), I(1).f()]); }`;
   expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '[3, 1]\n' });
 });
 
+test('Dart enum generative constructors are constant without const', () => {
+  const program = `enum E { a(1), b(2); final int v; E(this.v); }
+enum F { a.named(3); final int v; F.named(int v) : v = v * 2; }
+void main() { print([E.b.v, F.a.v]); }`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[2, 6]\n' });
+  for (const invalid of ["enum E { a; E() { print('x'); } }", 'enum E { a(1); int v; E(this.v); }']) {
+    expect(executeProgram('dart', `${invalid}\nvoid main() {}`)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}
