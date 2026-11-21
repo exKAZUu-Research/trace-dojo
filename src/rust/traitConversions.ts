@@ -72,7 +72,8 @@ function stringFrom(source: Type): boolean {
   if (source.kind === 'char') return true;
   if (source.kind === 'ref') {
     const inner = shallow(source.target);
-    return inner.kind === 'str' || (inner.kind === 'adt' && inner.def.builtin === 'String');
+    // std converts `&str` and `&mut str`, but a `String` only from a shared reference.
+    return inner.kind === 'str' || (inner.kind === 'adt' && inner.def.builtin === 'String' && !source.mutable);
   }
   return source.kind === 'adt' && source.def.builtin === 'Box' && shallow(source.args[0]).kind === 'str';
 }

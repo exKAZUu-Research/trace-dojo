@@ -8622,3 +8622,14 @@ test('a String is not built from mutable references to characters', () => {
     diagnostics: [{ message: 'String にトレイト FromIterator<&mut char> が実装されていません。' }],
   });
 });
+
+test('String::from takes a String only by shared reference', () => {
+  const program = rustMain(`
+    let mut source = String::from("hi");
+    let copy = String::from(&mut source);
+    println!("{copy}");`);
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message: 'String にトレイト From<&mut String> が実装されていません。' }],
+  });
+});
