@@ -529,7 +529,8 @@ function unwrapDyn(receiver: Value, mutable: boolean): { type: Type; receiver: V
         type: inner.type,
         receiver: new AccessorPlace(
           () => (receiver.get() as DynValue).value,
-          (value) => receiver.set(new DynValue(inner.type, value))
+          (value) => receiver.set(new DynValue(inner.type, value)),
+          receiver
         ),
       };
     }

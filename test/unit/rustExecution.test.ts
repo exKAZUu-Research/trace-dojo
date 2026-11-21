@@ -8361,3 +8361,17 @@ impl Shape for S { fn check(&self) -> bool { self.0.can_move_forward() } }`
   );
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'false true\n' });
 });
+
+test('a turtle in a temporary boxed trait object stays on the board through its mutable method', () => {
+  const program = rustMain(
+    `
+    let observer = Turtle::new(1, 0);
+    println!("{}", make().check(&observer));
+    println!("{}", observer.can_move_forward());`,
+    `trait Shape { fn check(&mut self, o: &Turtle) -> bool; }
+struct S(Turtle);
+impl Shape for S { fn check(&mut self, o: &Turtle) -> bool { o.can_move_forward() } }
+fn make() -> Box<dyn Shape> { Box::new(S(Turtle::new(1, 1))) }`
+  );
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'false\ntrue\n' });
+});
