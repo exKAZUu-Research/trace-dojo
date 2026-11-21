@@ -7585,6 +7585,33 @@ void main() {
   }
 });
 
+test('Dart rest subpatterns exhaust their own list space', () => {
+  const width = 9;
+  const positions = Array.from({ length: width }, (_, index) => index);
+  const falseValues = `(${positions.map(() => 'false').join(', ')})`;
+  const allTrue = `(${positions.map(() => 'true').join(', ')})`;
+  const firstFalse = positions.map((first) => {
+    const values = positions.map((index) => (index < first ? 'true' : index === first ? 'false' : '_'));
+    return `(${values.join(', ')})`;
+  });
+  for (const prefix of [false, true]) {
+    const baseArms = prefix ? ['[] => -1', '[_] => -2'] : ['[] => -1'];
+    const correlated = [...firstFalse, allTrue].map((record, value) => {
+      const pattern = prefix ? `[_, ...[..., ${record}]]` : `[...[${record}, ...]]`;
+      return `${pattern} => ${value}`;
+    });
+    const program = (coversEmptyRest: boolean): string => {
+      const emptyRest = prefix ? '[_, ...[]] => -3' : '[...[]] => -3';
+      const cases = [...baseArms, ...(coversEmptyRest ? [emptyRest] : []), ...correlated];
+      return `typedef Wide = (${positions.map(() => 'bool').join(', ')});
+int select(List<Wide> list) => switch (list) { ${cases.join(', ')} };
+void main() { print(select([${prefix ? `${falseValues}, ` : ''}${falseValues}])); }`;
+    };
+    expect(executeProgram('dart', program(false))).toMatchObject({ kind: 'compileError' });
+    expect(executeProgram('dart', program(true))).toMatchObject({ kind: 'executed', stdout: '0\n' });
+  }
+});
+
 test('constructor formals and tear-offs use inferred field types', () => {
   const declarations = `class Parent {
   var value = Later().value;

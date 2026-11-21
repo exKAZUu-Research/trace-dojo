@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 598 -- Switch coverage shares type partitions and pattern coverage rules.
+// code-gauge-allow-file fileNcss 637 -- Switch coverage shares type partitions and pattern coverage rules.
 import type { Expression, Pattern, Span } from './ast';
 import { nullPatternComparison } from './astWalk';
 import type { ClassInfo, FieldMember } from './classes';
@@ -30,6 +30,7 @@ interface ListSpace {
   length: number;
   hasLongerLengths: boolean;
   elements?: readonly Space[];
+  rests?: ReadonlyMap<string, Space>;
 }
 
 type Space =
@@ -187,16 +188,15 @@ class ObjectSpaces {
     const { rest, fixed } = bounds;
     const fallback: Space = { kind: 'type', type: space.elementType };
     const elements = space.elements ?? Array.from({ length: space.length }, () => fallback);
-    const length = space.length - fixed;
     for (const [index, element] of pattern.elements.entries()) {
       if (element.kind === 'rest') {
         if (!element.pattern) continue;
-        const middle = listMiddle(space, rest, length, elements);
-        const partitions = this.split(middle, element.pattern);
-        if (partitions?.every((part) => part.kind === 'list'))
-          return partitions.map((part) => ({
+        const key = listRestKey(rest, fixed);
+        const partitions = this.split(listRest(space, key), element.pattern);
+        if (partitions)
+          return partitions.map((value) => ({
             ...space,
-            elements: [...elements.slice(0, rest), ...(part.elements ?? []), ...elements.slice(rest + length)],
+            rests: new Map([...(space.rests ?? []), [key, value]]),
           }));
       } else {
         const position = listPatternPosition(pattern, space, rest, index);
@@ -228,6 +228,7 @@ class ObjectSpaces {
     return undefined;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Check the known child spaces for each supported pattern shape.
   private excludesFixedField(pattern: Pattern, field: Space): boolean {
     if (field.kind === 'constant' || field.kind === 'null') return covers(this.compiler, pattern, field) === false;
     switch (pattern.kind) {
@@ -267,18 +268,15 @@ class ObjectSpaces {
   private excludesList(pattern: Extract<Pattern, { kind: 'list' }>, space: ListSpace): boolean {
     const bounds = listPatternBounds(this.compiler, pattern, space);
     if (!bounds) return true;
-    const { elements } = space;
-    if (!elements) return false;
     const { rest, fixed } = bounds;
     for (const [index, element] of pattern.elements.entries()) {
       if (element.kind === 'rest') {
-        if (
-          element.pattern &&
-          this.excludesFixedField(element.pattern, listMiddle(space, rest, space.length - fixed, elements))
-        )
-          return true;
-      } else if (this.excludesFixedField(element, elements[listPatternPosition(pattern, space, rest, index)]))
-        return true;
+        const known = space.rests?.get(listRestKey(rest, fixed));
+        if (element.pattern && known && this.excludesFixedField(element.pattern, known)) return true;
+      } else {
+        const known = space.elements?.[listPatternPosition(pattern, space, rest, index)];
+        if (known && this.excludesFixedField(element, known)) return true;
+      }
     }
     return false;
   }
@@ -774,7 +772,7 @@ function listCovers(
     ([index, element]) => {
       if (element.kind === 'rest') {
         if (!element.pattern) return true;
-        return covers(compiler, element.pattern, listMiddle(space, rest, space.length - fixed, space.elements));
+        return covers(compiler, element.pattern, listRest(space, listRestKey(rest, fixed)));
       }
       const position = listPatternPosition(pattern, space, rest, index);
       const elementSpace = space.elements?.[position];
@@ -809,18 +807,13 @@ function listPatternPosition(
   return rest !== -1 && index > rest ? space.length + index - pattern.elements.length : index;
 }
 
-function listMiddle(
-  space: ListSpace,
-  start: number,
-  length: number,
-  elements: readonly Space[] | undefined
-): ListSpace {
-  return {
-    ...space,
-    length,
-    type: interfaceType(coreTypes.list, [space.elementType]),
-    elements: elements?.slice(start, start + length),
-  };
+function listRestKey(rest: number, fixed: number): string {
+  return `${rest}:${fixed - rest}`;
+}
+
+function listRest(space: ListSpace, key: string): Space {
+  // The SDK's exhaustiveness checker treats each RestKey as a separate List<E> property, even for a fixed outer length.
+  return space.rests?.get(key) ?? { kind: 'type', type: interfaceType(coreTypes.list, [space.elementType]) };
 }
 function constantCovers(compiler: PatternCompiler, value: Expression, space: Space): Coverage {
   if (space.kind !== 'constant' && space.kind !== 'null') return false;
