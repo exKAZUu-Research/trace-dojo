@@ -406,19 +406,20 @@ abstract mixin class ListBase<E> implements List<E> {
 }
 
 /** The view Set.cast returns, as the SDK's CastSet (internal/cast.dart). */
-class CastSet<S, T> extends SetBase<T> {
+class CastSet<S, T> extends CastIterableBase<S, T> implements Set<T> {
   final Set<S> _source;
   final Set<R> Function<R>()? _emptySet;
-  CastSet(this._source, [this._emptySet]);
+  CastSet(Set<S> source, [this._emptySet]) : _source = source, super(source);
   Set<R> cast<R>() => CastSet<S, R>(_source, _emptySet);
   bool add(T value) => _source.add(value as S);
-  bool contains(Object? element) => _source.contains(element);
+  void addAll(Iterable<T> elements) => _source.addAll(CastIterable<T, S>(elements));
+  bool containsAll(Iterable<Object?> elements) => _source.containsAll(elements);
   T? lookup(Object? key) => _source.lookup(key) as T?;
   bool remove(Object? value) => _source.remove(value);
-  Iterator<T> get iterator => CastIterator<S, T>(_source.iterator);
-  int get length => _source.length;
-  bool get isEmpty => _source.isEmpty;
-  bool get isNotEmpty => _source.isNotEmpty;
+  void removeAll(Iterable<Object?> elements) => _source.removeAll(elements);
+  void retainAll(Iterable<Object?> elements) => _source.retainAll(elements);
+  void removeWhere(bool Function(T element) test) => _source.removeWhere((S element) => test(element as T));
+  void retainWhere(bool Function(T element) test) => _source.retainWhere((S element) => test(element as T));
   void clear() {
     _source.clear();
   }
@@ -455,6 +456,7 @@ class CastMap<SK, SV, K, V> extends MapBase<K, V> {
     _source[key as SK] = value as SV;
   }
   V putIfAbsent(K key, V Function() ifAbsent) => _source.putIfAbsent(key as SK, () => ifAbsent() as SV) as V;
+  void addAll(Map<K, V> other) => _source.addAll(CastMap<K, V, SK, SV>(other));
   V? remove(Object? key) => _source.remove(key) as V?;
   void clear() {
     _source.clear();
@@ -502,9 +504,7 @@ class CastList<S, T> extends ListBase<T> {
   void add(T value) {
     _source.add(value as S);
   }
-  void addAll(Iterable<T> values) {
-    for (var value in values) _source.add(value as S);
-  }
+  void addAll(Iterable<T> values) => _source.addAll(CastIterable<T, S>(values));
   void sort([int Function(T v1, T v2)? compare]) {
     _source.sort(compare == null ? null : (S v1, S v2) => compare(v1 as T, v2 as T));
   }
@@ -514,6 +514,8 @@ class CastList<S, T> extends ListBase<T> {
   void insert(int index, T element) {
     _source.insert(index, element as S);
   }
+  void insertAll(int index, Iterable<T> elements) => _source.insertAll(index, CastIterable<T, S>(elements));
+  void setAll(int index, Iterable<T> elements) => _source.setAll(index, CastIterable<T, S>(elements));
   bool remove(Object? value) => _source.remove(value);
   T removeAt(int index) => _source.removeAt(index) as T;
   T removeLast() => _source.removeLast() as T;
@@ -522,6 +524,13 @@ class CastList<S, T> extends ListBase<T> {
   }
   void retainWhere(bool Function(T element) test) {
     _source.retainWhere((S element) => test(element as T));
+  }
+  Iterable<T> getRange(int start, int end) => CastIterable<S, T>(_source.getRange(start, end));
+  void setRange(int start, int end, Iterable<T> elements, [int skipCount = 0]) {
+    _source.setRange(start, end, CastIterable<T, S>(elements), skipCount);
+  }
+  void replaceRange(int start, int end, Iterable<T> elements) {
+    _source.replaceRange(start, end, CastIterable<T, S>(elements));
   }
   void removeRange(int start, int end) {
     _source.removeRange(start, end);

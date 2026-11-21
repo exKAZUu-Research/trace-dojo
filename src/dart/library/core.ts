@@ -2191,6 +2191,10 @@ class _Map<K, V> extends Map<K, V> implements LinkedHashMap<K, V> {
 /** The VM's classes of constant maps and sets and unmodifiable sets, which only their runtimeType shows. */
 class _ConstMap<K, V> extends Map<K, V> {
   _ConstMap._() : super._base();
+  V update(K key, V Function(V value) update, {V Function()? ifAbsent}) => _immutable();
+  void updateAll(V Function(K key, V value) update) => _immutable();
+  void addEntries(Iterable<MapEntry<K, V>> newEntries) => _immutable();
+  Never _immutable() => throw UnsupportedError("Cannot modify unmodifiable map");
 }
 
 class _ConstSet<E> extends Set<E> {

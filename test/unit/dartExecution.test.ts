@@ -6336,6 +6336,32 @@ void main() {
   });
 });
 
+test('cast views preserve source reads and reject immutable writes before callbacks', () => {
+  const source = `void main() {
+  final view = <Object>{1, 'ok'}.cast<String>();
+  print([view.last, view.elementAt(1), view.toString(), view.contains(1)]);
+  try { print(view.first); } catch (e) { print(e.runtimeType); }
+  final set = const <int>{1}.cast<num>();
+  final list = const <int>[1].cast<num>();
+  final map = const <int,int>{1:2}.cast<num,num>();
+  for (final action in <void Function()>[
+    () => set.removeWhere((x) { print('called'); return false; }),
+    () => list.addAll(const []),
+    () => list.setRange(0, 0, const []),
+    () => map.addAll(const {}),
+    () => map.update(1, (x) { print('called'); return x; }),
+    () => const <int,int>{}.updateAll((k,v) => v),
+    () => const <int,int>{}.addEntries(const []),
+  ]) {
+    try { action(); print('completed'); } catch (e) { print(e.runtimeType); }
+  }
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '[ok, ok, {1, ok}, true]\n_TypeError\n' + 'UnsupportedError\n'.repeat(7),
+  });
+});
+
 test('queue casts remain live and enforce both directions of type checking', () => {
   const source = `import 'dart:collection';
 void main() {
