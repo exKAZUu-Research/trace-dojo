@@ -24,6 +24,7 @@ import {
 } from './typeInference';
 import {
   boundOf,
+  closeTypeVariables,
   coreTypes,
   type DartType,
   DYNAMIC,
@@ -42,7 +43,6 @@ import {
   nonNullable,
   NULL,
   numericClassOf,
-  objectType,
   resolveBound,
   substitute,
   type TypeParam,
@@ -776,16 +776,17 @@ export abstract class CallCompiler extends OperatorCompiler {
     const upper = new Map<TypeParam, DartType>();
     const tearOffs: { result: Compiled; parameterType: DartType }[] = [];
     const argumentContext = (parameterType: DartType, closurePass: boolean): DartType => {
-      const map = new Map(
-        type.typeParams.map((param) => [
-          param,
-          argumentContextFor(param, type, fromContext, solution, upper, closurePass),
-        ])
-      );
-      return substitute(parameterType, map);
+      const resolved = new Map<TypeParam, DartType>();
+      const unresolved = new Set<TypeParam>();
+      for (const param of type.typeParams) {
+        const argument = argumentContextFor(param, type, fromContext, solution, upper, closurePass);
+        if (closurePass && isInferenceHole(argument)) unresolved.add(param);
+        else resolved.set(param, argument);
+      }
+      const partial = substitute(parameterType, resolved);
+      return unresolved.size === 0 ? partial : closureContext(partial, unresolved);
     };
     visitCallArguments(args, type, ({ argument, parameterType = DYNAMIC }, closurePass) => {
-      if (closurePass) fixClosureInputs(argument, parameterType, type.typeParams, solution, upper, fromContext);
       const result = this.compileExpression(argument, argumentContext(parameterType, closurePass));
       compiled.set(argument, result);
       const formal = resolveBound(parameterType);
@@ -798,7 +799,8 @@ export abstract class CallCompiler extends OperatorCompiler {
       ) {
         tearOffs.push({ result, parameterType });
       } else {
-        inferFromSubtype(result.type, parameterType, params, solution, upperBound, upper);
+        // A function literal's own type constrains even by Never, as a closure that throws makes its result Never.
+        inferFromSubtype(result.type, parameterType, params, solution, upperBound, upper, closurePass);
       }
     });
     for (const { result, parameterType } of tearOffs) {
@@ -1303,34 +1305,20 @@ function argumentContextFor(
 }
 
 /**
- * Fixes each type parameter that a closure argument's unannotated parameters take their types from and that nothing has
- * constrained yet to its bound, as Dart does before typing the closure: `SplayTreeSet((a, b) => ...)` types `a` and the
- * set's element as Object?.
+ * A closure argument's context while type parameters are unresolved, as Dart types it: each of the closure's parameters
+ * takes the greatest closure of its type (Object?, or Never where contravariant), and the closure's own type then
+ * constrains the type parameters, so `f((a, K b) => 0)` for `f<T>(int Function(T, T) c)` infers K.
  */
-function fixClosureInputs(
-  argument: Expression,
-  parameterType: DartType,
-  typeParams: readonly TypeParam[],
-  solution: Map<TypeParam, DartType>,
-  upper: ReadonlyMap<TypeParam, DartType>,
-  fromContext: ReadonlyMap<TypeParam, DartType>
-): void {
+function closureContext(parameterType: DartType, unresolved: ReadonlySet<TypeParam>): DartType {
+  const holes = new Map([...unresolved].map((param) => [param, INFERENCE_HOLE] as const));
   const formal = resolveBound(parameterType);
-  while (argument.kind === 'parenthesized') argument = argument.expression;
-  if (formal.kind !== 'function' || argument.kind !== 'function') return;
-  const { positional, named } = argument.parameters;
-  const inputs = [
-    ...positional.flatMap((parameter, index) => (parameter.type ? [] : [formal.positional[index] ?? DYNAMIC])),
-    ...named.flatMap((parameter) =>
-      parameter.type ? [] : [formal.named.find((entry) => entry.name === parameter.argumentName)?.type ?? DYNAMIC]
-    ),
-  ];
-  const params = new Set(typeParams);
-  for (const param of typeParams) {
-    if (solution.has(param) || upper.has(param) || fromContext.has(param)) continue;
-    if (!inputs.some((input) => mentionsTypeParams(input, new Set([param])))) continue;
-    solution.set(param, param.bound && !mentionsTypeParams(param.bound, params) ? param.bound : objectType(true));
-  }
+  if (formal.kind !== 'function') return substitute(parameterType, holes);
+  return {
+    ...formal,
+    positional: formal.positional.map((input) => closeTypeVariables(input, unresolved, true)),
+    named: formal.named.map((named) => ({ ...named, type: closeTypeVariables(named.type, unresolved, true) })),
+    returnType: substitute(formal.returnType, holes),
+  };
 }
 
 /** Whether a type argument satisfies its parameter's bound, with the parameter itself in place of F-bounded uses. */

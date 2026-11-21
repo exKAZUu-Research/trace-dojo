@@ -1466,7 +1466,7 @@ void main() {
   });
 });
 
-test('Dart fixes type parameters a closure argument depends on to their bounds', () => {
+test('Dart types closure parameters with unresolved type parameters as Object?', () => {
   const program = `import 'dart:collection';
 void f<T>(Object o, [int Function(T, T)? c]) { print(T); }
 class W<T> { W.from(Object o, [int Function(T, T)? c]) { print(T); } }
@@ -1484,6 +1484,31 @@ void main() {
   });
   expect(
     executeProgram('dart', "import 'dart:collection';\nvoid main() { SplayTreeSet((a, b) => a.length - b.length); }")
+  ).toMatchObject({ kind: 'compileError' });
+});
+
+test('Dart closure arguments constrain the type parameters they leave unresolved', () => {
+  const program = `import 'dart:collection';
+class K { int v = 1; }
+void f<T>(int Function(T, T) c) { print(T); }
+void h<T>(void Function(void Function(T)) c) { print(T); }
+R g<R>(R Function() c) { print(R); return 0 as R; }
+void main() {
+  f((a, K b) => 0);
+  f((a, b) => 0);
+  print(SplayTreeSet((K a, b) => a.v - 1).runtimeType);
+  h((g) {});
+  try { g(() => throw 0); } catch (e) {}
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'K\nObject?\nSplayTreeSet<K>\nNever\nNever\n',
+  });
+  expect(
+    executeProgram(
+      'dart',
+      'class K { int v = 1; }\nvoid f<T extends K>(int Function(T) c) {}\nvoid main() { f((a) => a.v); }'
+    )
   ).toMatchObject({ kind: 'compileError' });
 });
 

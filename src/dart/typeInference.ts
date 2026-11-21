@@ -54,9 +54,10 @@ export function inferFromSubtype(
   params: ReadonlySet<TypeParam>,
   lower: Map<TypeParam, DartType>,
   join: (a: DartType, b: DartType) => DartType = (a) => a,
-  upper?: Map<TypeParam, DartType>
+  upper?: Map<TypeParam, DartType>,
+  retainBottom = false
 ): void {
-  new InferenceConstraints(params, lower, upper, join).infer(actual, formal);
+  new InferenceConstraints(params, lower, upper, join, retainBottom).infer(actual, formal);
 }
 
 export function inferObjectPatternType(
