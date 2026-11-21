@@ -8648,3 +8648,22 @@ void main() { identityViews(); policyViews(); readOnlyList(); }`;
       '_TypeError\n',
   });
 });
+
+test('Dart codec byte list map errors name the SDK callback parameter', () => {
+  const program = `import 'dart:convert';
+void main() {
+  for (dynamic bytes in [utf8.encode('a'), base64.decode('YQ==')]) {
+    for (final Object? bad in [1, null]) {
+      try { bytes.map(bad); } catch (error) { print(error); }
+    }
+  }
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      "type 'int' is not a subtype of type '(int) => dynamic' of 'f'\n" +
+      "type 'Null' is not a subtype of type '(int) => dynamic' of 'f'\n" +
+      "type 'int' is not a subtype of type '(int) => dynamic' of 'f'\n" +
+      "type 'Null' is not a subtype of type '(int) => dynamic' of 'f'\n",
+  });
+});
