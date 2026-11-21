@@ -740,6 +740,10 @@ test('num.compareTo orders precise integers, signed zeros, and NaN', () => {
   int a = -9223372036854775808;
   double b = -9223372036854775808.0;
   print([a == b, a.hashCode == b.hashCode, {a, b}.length, {a: 'yes'}[b]]);
+  var maxInt = 9223372036854775807;
+  var roundedMax = 9223372036854775808.0;
+  print([maxInt == roundedMax, maxInt.hashCode == roundedMax.hashCode,
+    {maxInt, roundedMax}.length, {maxInt: 'yes'}[roundedMax]]);
   print([7.oneBitCount, (-1).oneBitCount, 8.trailingZeroBitCount, 0.trailingZeroBitCount]);
   print([2.modPow(0, 1), 2.modPow(1, 1), a.gcd(0), 0.gcd(a), a.gcd(14)]);
 }
@@ -747,7 +751,7 @@ test('num.compareTo orders precise integers, signed zeros, and NaN', () => {
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
     stdout:
-      '1\n1\n-1\n1\n[1, Infinity]\n[true, true, 1, yes]\n[3, 64, 3, 64]\n[1, 0, -9223372036854775808, -9223372036854775808, 2]\n',
+      '1\n1\n-1\n1\n[1, Infinity]\n[true, true, 1, yes]\n[true, true, 1, yes]\n[3, 64, 3, 64]\n[1, 0, -9223372036854775808, -9223372036854775808, 2]\n',
   });
 });
 

@@ -28,6 +28,7 @@ export function compareNumbers(a: bigint | number, b: bigint | number): number {
  */
 export function numberHash(value: bigint | number): bigint {
   if (typeof value === 'number') {
+    if (value === 2 ** 63) return intHash(MAX_INT);
     if (Number.isInteger(value) && value >= -(2 ** 63) && value < 2 ** 63) return intHash(BigInt(value));
     // The VM folds the bits of a double that is not an int and keeps them in its small-integer range.
     const view = new DataView(new ArrayBuffer(8));
