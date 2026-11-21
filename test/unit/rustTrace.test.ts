@@ -1,6 +1,7 @@
 import { expect, test } from 'vitest';
 
-import { traceProgram } from '../../src/interpreter/program';
+import { LIMITS } from '../../src/interpreter/limits';
+import { executeProgram, traceProgram } from '../../src/interpreter/program';
 import type { TraceItem } from '../../src/problems/trace';
 
 const javaMain = (body: string, members = ''): string => `public class Main {
@@ -444,4 +445,27 @@ test.each([
   expect(() => traceProgram('rust', program, program)).toThrow(
     expect.objectContaining({ diagnostics: [{ row, message: expect.stringContaining('// atomic は') }] })
   );
+});
+
+test('stops tracing once the snapshots of every step together exceed the trace size limit', () => {
+  const program = `fn main() {
+    let values = [0; 200];
+    let mut i = 0;
+    while i < COUNT {
+        i += 1;
+    }
+    println!("{}", values.len());
+}
+`;
+  const previousLimit = LIMITS.maxTraceSize;
+  LIMITS.maxTraceSize = 60_000;
+  try {
+    const short = program.replace('COUNT', '1');
+    const long = program.replace('COUNT', '20');
+    expect(traceProgram('rust', short, short).traceItems.length).toBeGreaterThan(1);
+    expect(() => traceProgram('rust', long, long)).toThrow('Execution limit exceeded: trace');
+    expect(executeProgram('rust', long)).toMatchObject({ kind: 'executed', stdout: '200\n' });
+  } finally {
+    LIMITS.maxTraceSize = previousLimit;
+  }
 });
