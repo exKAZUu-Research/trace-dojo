@@ -204,6 +204,12 @@ function defineMath(): void {
     }
   }
   for (const type of ['Double', 'Float']) {
+    defineNative(`kotlin.math.${type}.nextDown()`, (_frame, receiver) =>
+      nextAfter(receiver as number, -1, type === 'Float')
+    );
+    defineNative(`kotlin.math.${type}.nextUp()`, (_frame, receiver) =>
+      nextAfter(receiver as number, 1, type === 'Float')
+    );
     defineNative(`kotlin.math.${type}.withSign(${type})`, copySign);
     defineNative(`kotlin.math.${type}.withSign(Int)`, copySign);
     defineNative(`kotlin.math.${type}.roundToInt()`, (frame, receiver) => {
@@ -225,8 +231,6 @@ function defineMath(): void {
     if (value <= -(2 ** 63)) return -(2n ** 63n);
     return BigInt(Math.round(value));
   });
-  defineNative('kotlin.Double.nextDown()', (_frame, receiver) => nextAfter(receiver as number, -1));
-  defineNative('kotlin.Double.nextUp()', (_frame, receiver) => nextAfter(receiver as number, 1));
   defineNative('kotlin.time.monotonicNanos()', () => BigInt(Math.round(performance.now() * 1_000_000)));
   defineNative('kotlin.random.platformSeed()', () => toInt32(Math.trunc(Math.random() * 2 ** 32)));
 }
@@ -241,13 +245,17 @@ function copySign(_frame: Frame, value: Value, [sign]: Value[]): number {
   return bitsView.getFloat64(0);
 }
 
-/** The adjacent double toward the sign's infinity, as `Math.nextUp` and `Math.nextDown` give it. */
-function nextAfter(value: number, direction: 1 | -1): number {
+function nextAfter(value: number, direction: 1 | -1, isFloat: boolean): number {
   if (Number.isNaN(value) || value === direction * Number.POSITIVE_INFINITY) return value;
-  if (value === 0) return direction * Number.MIN_VALUE;
+  if (value === 0) return direction * (isFloat ? 2 ** -149 : Number.MIN_VALUE);
+  const step = value > 0 === direction > 0 ? 1 : -1;
+  if (isFloat) {
+    bitsView.setFloat32(0, value);
+    bitsView.setInt32(0, bitsView.getInt32(0) + step);
+    return bitsView.getFloat32(0);
+  }
   bitsView.setFloat64(0, value);
-  const bits = bitsView.getBigInt64(0);
-  bitsView.setBigInt64(0, value > 0 === direction > 0 ? bits + 1n : bits - 1n);
+  bitsView.setBigInt64(0, bitsView.getBigInt64(0) + BigInt(step));
   return bitsView.getFloat64(0);
 }
 

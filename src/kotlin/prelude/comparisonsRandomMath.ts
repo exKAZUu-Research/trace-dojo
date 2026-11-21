@@ -99,6 +99,8 @@ ${numericExtremes()}
 export const RANDOM_SOURCE = kotlin`
 package kotlin.random
 
+import kotlin.math.*
+
 abstract class Random {
     abstract fun nextBits(bitCount: Int): Int
 
@@ -379,6 +381,11 @@ val Int.sign: Int get() = when {
     this > 0 -> 1
     else -> 0
 }
+
+external fun Double.nextDown(): Double
+external fun Double.nextUp(): Double
+external fun Float.nextDown(): Float
+external fun Float.nextUp(): Float
 
 external fun Double.withSign(sign: Double): Double
 external fun Double.withSign(sign: Int): Double

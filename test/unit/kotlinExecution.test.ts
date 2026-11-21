@@ -60,6 +60,39 @@ test.each(['contains', 'split'])('charges the execution budget during CharSequen
 /** Programs with the output of Kotlin 2.4.21 on the JVM (Java 25), which the interpreter must reproduce exactly. */
 test.each([
   {
+    name: 'floating point neighbors use the precision of each imported overload',
+    source: `import kotlin.math.nextUp
+import kotlin.math.nextDown
+
+fun main() {
+    println(1.0f.nextUp())
+    println(1.0f.nextDown())
+    println(1.0.nextUp())
+    println(1.0.nextDown())
+    println((-0.0f).nextUp())
+    println(0.0f.nextDown())
+    println((-Float.MIN_VALUE).nextUp())
+    println(Float.MIN_VALUE.nextDown())
+    println(Float.POSITIVE_INFINITY.nextDown())
+    println(Double.NEGATIVE_INFINITY.nextUp())
+    println(Float.POSITIVE_INFINITY.nextUp())
+    println(Double.NaN.nextDown())
+}`,
+    stdout: `1.0000001
+0.99999994
+1.0000000000000002
+0.9999999999999999
+1.4E-45
+-1.4E-45
+-0.0
+0.0
+3.4028235E38
+-1.7976931348623157E308
+Infinity
+NaN
+`,
+  },
+  {
     name: 'map and set builder growth rehashes in insertion order and invalidates old cursors',
     source: `class Key(val n: Int, val failAt: Int = 0) {
     var calls = 0
@@ -5660,6 +5693,7 @@ fun main() {
     true,
     'val answer: Int = 2\n    get() = run { field + 3 }\nfun main() { println(answer) }',
   ],
+  ['nextUp without its math import', false, 'fun main() { println(1.0.nextUp()) }'],
   ['Locale without its import', false, 'fun main() {\n    val l: Locale? = null\n}'],
 ])('decides whether %s compiles as kotlinc does', (_name, compiles, source) => {
   expect(executeProgram('kotlin', source).kind === 'compileError').toBe(!compiles);

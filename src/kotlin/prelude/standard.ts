@@ -141,8 +141,6 @@ fun Double.isInfinite(): Boolean = this == Double.POSITIVE_INFINITY || this == D
 fun Float.isInfinite(): Boolean = this == Float.POSITIVE_INFINITY || this == Float.NEGATIVE_INFINITY
 fun Double.isFinite(): Boolean = !isInfinite() && !isNaN()
 fun Float.isFinite(): Boolean = !isInfinite() && !isNaN()
-external fun Double.nextDown(): Double
-external fun Double.nextUp(): Double
 
 fun interface Comparator<T> {
     fun compare(a: T, b: T): Int
