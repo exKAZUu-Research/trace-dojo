@@ -1583,6 +1583,7 @@ inline fun <K, V> Map<out K, V>.filterValues(predicate: (V) -> Boolean): Map<K, 
 }
 
 inline fun <K, V> Map<out K, V>.count(predicate: (Map.Entry<K, V>) -> Boolean): Int {
+    if (isEmpty()) return 0
     var count = 0
     for (element in this) if (predicate(element)) count++
     return count
@@ -1591,15 +1592,18 @@ inline fun <K, V> Map<out K, V>.count(predicate: (Map.Entry<K, V>) -> Boolean): 
 fun <K, V> Map<out K, V>.count(): Int = size
 
 inline fun <K, V> Map<out K, V>.any(predicate: (Map.Entry<K, V>) -> Boolean): Boolean {
+    if (isEmpty()) return false
     for (element in this) if (predicate(element)) return true
     return false
 }
 
 inline fun <K, V> Map<out K, V>.all(predicate: (Map.Entry<K, V>) -> Boolean): Boolean {
+    if (isEmpty()) return true
     for (element in this) if (!predicate(element)) return false
     return true
 }
 
+fun <K, V> Map<out K, V>.any(): Boolean = !isEmpty()
 fun <K, V> Map<out K, V>.none(): Boolean = isEmpty()
 
 inline fun <M, R> M.ifEmpty(defaultValue: () -> R): R where M : Map<*, *>, M : R =
@@ -1622,6 +1626,7 @@ inline fun <K, V, R : Any> Map<out K, V>.firstNotNullOfOrNull(transform: (Map.En
 }
 
 inline fun <K, V> Map<out K, V>.none(predicate: (Map.Entry<K, V>) -> Boolean): Boolean {
+    if (isEmpty()) return true
     for (element in this) if (predicate(element)) return false
     return true
 }

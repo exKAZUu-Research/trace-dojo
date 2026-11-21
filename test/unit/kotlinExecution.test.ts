@@ -3030,6 +3030,26 @@ fun main() {
       'iterator 1\niterator 2\nsize 1\nsize 2\nnext 1\nnext 2\nnext 1\nnext 2\n[(1, 1), (2, 2)]\niterator 3\niterator 4\nsize 3\nsize 4\nnext 3\nnext 4\nnext 3\nnext 4\n[2, 4]\nsize 5\niterator 5\nnext 5\nnext 5\n[(1, a)]\nsize 6\niterator 6\nnext 6\nnext 6\n[11]\n',
   },
   {
+    name: 'map predicates check emptiness before accessing entries',
+    source: `class MapProbe(private val data: Map<Int, Int>) : Map<Int, Int> by data {
+    override fun isEmpty(): Boolean { println("empty"); return data.isEmpty() }
+    override val entries: Set<Map.Entry<Int, Int>>
+        get() { println("entries"); return data.entries }
+}
+fun main() {
+    for (map in listOf(MapProbe(emptyMap()), MapProbe(mapOf(1 to 2, 3 to 4)))) {
+        println(map.any())
+        println(map.none())
+        println(map.any { it.value == 2 })
+        println(map.all { it.value == 2 })
+        println(map.none { it.value == 2 })
+        println(map.count { it.value == 2 })
+    }
+}`,
+    stdout:
+      'empty\nfalse\nempty\ntrue\nempty\nfalse\nempty\ntrue\nempty\ntrue\nempty\n0\nempty\ntrue\nempty\nfalse\nempty\nentries\ntrue\nempty\nentries\nfalse\nempty\nentries\nfalse\nempty\nentries\n1\n',
+  },
+  {
     name: 'character sequence conversions use Kotlin length-based paths',
     source: `class CharProbe(private val value: String) : CharSequence by value {
     override val length: Int get() { println("length"); return value.length }
