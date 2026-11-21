@@ -1934,6 +1934,15 @@ void main() { print([G(A()).f(), I(A()).f()]); }`;
   expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '[3, 1]\n' });
 });
 
+test('Dart instantiates generic tear-offs nested in collection and record arguments', () => {
+  const program = `Never g<S>(S n) => throw 0;
+S id<S>(S n) => n;
+void f<T>(List<T Function(int)> cb) { print(T); }
+void h<T>((T Function(int), int) cb) { print(T); }
+void main() { f([g]); f([id]); h((g, 1)); (int Function(int), int) r = (id, 1); print(r.$1(5)); }`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'Never\nint\nNever\n5\n' });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}

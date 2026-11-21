@@ -868,7 +868,10 @@ export abstract class ExpressionCompiler extends CompilerBase {
           name === undefined
             ? positionalContext?.[position++]
             : recordContext?.named.find((other) => other.name === name)?.type;
-        const compiled = this.compileExpression(value, expected);
+        const written = this.compileExpression(value, expected);
+        // A generic function in a field takes the type arguments its context asks for, as a record cannot be instantiated.
+        const compiled =
+          (expected && this.instantiateGeneric(written, expected, containsInferenceHole(expected))) ?? written;
         if (compiled.type.kind === 'void') this.error(field, 'void の値はレコードに入れられません。');
         return { name, compiled };
       })

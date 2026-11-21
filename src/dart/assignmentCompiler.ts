@@ -666,8 +666,10 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     span: Span,
     kind: 'list' | 'set' | 'map'
   ): Compiled {
-    // A context still waiting for a call's type arguments only guides the element, whose own type then constrains them.
-    if (!target || containsInferenceHole(target)) return compiled;
+    if (!target) return compiled;
+    // A context still waiting for a call's type arguments only guides the element, instantiating a generic function to
+    // fit it, and the element's own type then constrains them.
+    if (containsInferenceHole(target)) return this.instantiateGeneric(compiled, target, true) ?? compiled;
     const elementName = collectionName(kind);
     return this.coerce(
       compiled,
