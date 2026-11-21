@@ -3822,6 +3822,31 @@ test('extension-type members use static owner arguments and separate method argu
   });
 });
 
+test('specialized tear-offs print declared named parameters in declaration order', () => {
+  const program = `T f<T>({int z = 0, required T a}) => a;
+class C<T> { T f({int z = 0, required T a}) => a; }
+void main() {
+  print(f);
+  print(f<int>);
+  print(f<int>.runtimeType);
+  print(C<int>().f.runtimeType);
+  final closure = <T>({int z = 0, required T a}) => a;
+  print(closure.runtimeType);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: [
+      "Closure: <Y0>({int z, required Y0 a}) => Y0 from Function 'f': static.",
+      "Closure: ({int z, required int a}) => int from Function 'f': static.",
+      '({int z, required int a}) => int',
+      '({int z, required Object? a}) => int',
+      '<Y0>({required Y0 a, int z}) => Y0',
+      '',
+    ].join('\n'),
+  });
+});
+
 test('explicit generic tear-offs validate and reify their written arguments', () => {
   const declarations = `T identity<T>(T value) => value;
   T numeric<T extends num>(T value) => value;

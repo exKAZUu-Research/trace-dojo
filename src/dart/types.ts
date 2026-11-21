@@ -319,13 +319,11 @@ export function substitute(type: DartType, map: ReadonlyMap<TypeParam, DartType>
         inner = extended;
       }
       return {
-        kind: 'function',
+        ...type,
         typeParams,
         positional: type.positional.map((parameter) => substitute(parameter, inner)),
-        requiredCount: type.requiredCount,
         named: type.named.map((parameter) => ({ ...parameter, type: substitute(parameter.type, inner) })),
         returnType: substitute(type.returnType, inner),
-        nullable: type.nullable,
       };
     }
     default: {
