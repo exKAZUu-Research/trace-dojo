@@ -843,8 +843,8 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       elementType.kind === 'dynamic' && elementContext && elementContext.kind !== 'dynamic'
         ? this.runtimeType(elementContext)
         : undefined;
-    const { run } = compiled;
     const { nullAware } = element;
+    const run = this.iterableSource(compiled, nullAware);
     return (frame, add) => {
       const iterable = run(frame);
       if (nullAware && iterable === undefined) return;
@@ -951,7 +951,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     const body = this.compileCollectionElements([element.body], kind, elementContext, valueContext);
     types.push(...body.types);
     this.flow = afterSource;
-    const source = iterable.run;
+    const source = this.iterableSource(iterable);
     return (frame, add) => {
       const { runtime } = frame;
       const iterator = runtime.getProperty(source(frame), 'iterator', undefined);

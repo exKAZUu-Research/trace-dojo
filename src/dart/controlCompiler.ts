@@ -657,7 +657,7 @@ export abstract class ControlCompiler extends StatementCompiler {
       const body = this.compileGenLoopBody(statement.body, labels);
       const breakFlow = this.fn.jumpTargets.pop()?.breakFlow;
       this.flow = breakFlow ? Flow.join(before, breakFlow) : before;
-      const source = iterable.run;
+      const source = this.iterableSource(iterable);
       return function* (frame: Frame): Generator<Value, Completion | undefined, undefined> {
         const { runtime } = frame;
         const values = source(frame);

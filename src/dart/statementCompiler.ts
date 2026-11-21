@@ -961,7 +961,7 @@ export abstract class StatementCompiler extends PatternCompiler {
       const body = this.compileLoopBody(statement.body, labels);
       const breakFlow = this.fn.jumpTargets.pop()?.breakFlow;
       this.flow = breakFlow ? Flow.join(before, breakFlow) : before;
-      return this.forInLoop(iterable.run, bind, body, labels);
+      return this.forInLoop(this.iterableSource(iterable), bind, body, labels);
     });
     if (slots.length === 0) return result;
     return (frame) => {
@@ -981,6 +981,12 @@ export abstract class StatementCompiler extends PatternCompiler {
     if (!element)
       return this.error(span, `${typeName(iterable.type)} 型の値は Iterable ではないので、for-in では使えません。`);
     return element;
+  }
+
+  protected iterableSource(iterable: Compiled, nullAware = false): Eval {
+    if (iterable.type.kind !== 'dynamic') return iterable.run;
+    const target = interfaceType(coreTypes.iterable, [DYNAMIC]);
+    return this.runtimeCast(iterable.run, nullAware ? makeNullable(target) : target, false);
   }
 
   /** Compiles a for-in loop's binding, which records a step for values learners write down. */

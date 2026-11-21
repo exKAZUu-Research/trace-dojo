@@ -718,6 +718,37 @@ test('main receives a checked second argument explicitly set to null', () => {
   });
 });
 
+test('dynamic iterable sources are cast before iterator lookup', () => {
+  const program = `Iterable<dynamic> copy(dynamic source) sync* {
+  for (final value in source) yield value;
+}
+void show(Object? Function() read) {
+  try { print(read()); } catch (e) { print(e); }
+}
+void main() {
+  dynamic source = 42;
+  show(() { for (final value in source) print(value); return null; });
+  show(() => copy(source).toList());
+  show(() => [for (final value in source) value]);
+  show(() => <int>[...source]);
+  show(() => <int>{...source});
+  show(() => <int>[...?source]);
+  source = null;
+  show(() => <int>[...?source]);
+  source = ['text'];
+  show(() => <int>[...source]);
+  source = [7];
+  show(() => <int>[...source]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      "type 'int' is not a subtype of type 'Iterable<dynamic>'\n".repeat(5) +
+      "type 'int' is not a subtype of type 'Iterable<dynamic>?'\n" +
+      "[]\ntype 'String' is not a subtype of type 'int'\n[7]\n",
+  });
+});
+
 test('dynamic writes and for-in assignments enforce the target type', () => {
   const program = `class Box {
   int field = 1;
