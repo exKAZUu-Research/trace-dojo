@@ -1625,6 +1625,19 @@ test.each([
   });
 });
 
+test('Dart extension types are Objects only through the supertypes they implement', () => {
+  for (const use of ['Object y = E(1);', 'f(E(1));', 'print(<Object>[E(1)]);', 'Object y = F(1);']) {
+    const program = `extension type E(int v) {}\nextension type F(int v) implements E {}\nvoid f(Object o) {}\nvoid main() { ${use} }`;
+    expect(executeProgram('dart', program)).toMatchObject({ kind: 'compileError' });
+  }
+  const valid = `extension type E(int v) implements Object {}
+extension type F(int v) implements E {}
+extension type G(int v) implements int {}
+extension type H(int v) {}
+void main() { Object a = F(1); Object b = G(2); Object? c = H(3); print([a, b, c]); }`;
+  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '[1, 2, 3]\n' });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}
