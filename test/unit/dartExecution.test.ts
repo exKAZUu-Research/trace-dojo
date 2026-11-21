@@ -2209,8 +2209,18 @@ void main() {
   double h = 7.remainder(2);
   Object o = 2.5.clamp(0, 1);
   print([ratio(2.5), e, h, o.runtimeType]);
+  nullAware(2.5, 9);
+}
+void nullAware(double? d, int? i) {
+  double? a = d?.clamp(0, 1);
+  int? b = i?.clamp(0, 5);
+  int? c = i?.remainder(2);
+  print([a, b, c]);
 }`;
-  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[1.0, 2.0, 1.0, int]\n' });
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[1.0, 2.0, 1.0, int]\n[1.0, 5, 1]\n',
+  });
   expect(executeProgram('dart', 'void main() { double d = 5.clamp(1, 3); }')).toMatchObject({ kind: 'compileError' });
 });
 

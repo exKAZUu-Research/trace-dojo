@@ -446,11 +446,11 @@ export abstract class CallCompiler extends OperatorCompiler {
       const value = this.readMember(receiver, resolved, name, span, nullAware);
       return this.compileValueCall(value, args, typeArguments, span, context);
     }
-    const signature = this.specialNumericSignature(resolved.type as FunctionType, receiverType, name, context);
+    const signature = this.specialNumericSignature(resolved.type as FunctionType, lookupType, name, context);
     const bound = this.bindArguments(signature, args, typeArguments, span, context);
     const receiverRun = receiver.run;
     const row = this.callRow(span);
-    const specialType = this.specialNumericReturn(receiverType, name, args);
+    const specialType = this.specialNumericReturn(lookupType, name, args);
     const returnType = specialType ?? bound.returnType;
     if (resolved.extension) {
       const run = extensionMethodCall(
