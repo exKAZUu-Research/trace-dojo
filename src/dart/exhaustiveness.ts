@@ -157,6 +157,7 @@ class ObjectSpaces {
       if (options.length !== 1 || options[0].kind !== 'type') return options;
     }
     for (const part of patternAlternatives(pattern)) {
+      if (part !== pattern && this.excludesFixedField(part, space)) continue;
       const partitions = this.splitProduct(space, part);
       if (partitions) return partitions;
     }
@@ -172,7 +173,7 @@ class ObjectSpaces {
 
   private splitRecord(space: RecordSpace, pattern: Extract<Pattern, { kind: 'record' }>): RecordSpace[] | undefined {
     const fields = recordFieldPatterns(pattern, space);
-    if (!fields || fields.some((child, index) => this.excludesFixedField(child, space.fields[index]))) return undefined;
+    if (!fields) return undefined;
     for (const [index, child] of fields.entries()) {
       const partitions = this.split(space.fields[index], child);
       if (partitions) return partitions.map((value) => ({ ...space, fields: space.fields.with(index, value) }));
@@ -229,9 +230,57 @@ class ObjectSpaces {
 
   private excludesFixedField(pattern: Pattern, field: Space): boolean {
     if (field.kind === 'constant' || field.kind === 'null') return covers(this.compiler, pattern, field) === false;
-    if (field.kind !== 'record' || pattern.kind !== 'record') return false;
-    const fields = recordFieldPatterns(pattern, field);
-    return !fields || fields.some((child, index) => this.excludesFixedField(child, field.fields[index]));
+    switch (pattern.kind) {
+      case 'parenthesized':
+      case 'nullCheck':
+      case 'nullAssert': {
+        return this.excludesFixedField(pattern.pattern, field);
+      }
+      case 'and': {
+        return this.excludesFixedField(pattern.left, field) || this.excludesFixedField(pattern.right, field);
+      }
+      case 'or': {
+        return this.excludesFixedField(pattern.left, field) && this.excludesFixedField(pattern.right, field);
+      }
+      case 'record': {
+        if (field.kind !== 'record') return false;
+        const fields = recordFieldPatterns(pattern, field);
+        return !fields || fields.some((child, index) => this.excludesFixedField(child, field.fields[index]));
+      }
+      case 'list': {
+        return field.kind === 'list' && this.excludesList(pattern, field);
+      }
+      case 'object': {
+        if (field.kind !== 'type' || !field.properties) return false;
+        const properties = field.properties;
+        return pattern.fields.some(({ name, pattern: child }) => {
+          const known = name === undefined ? undefined : properties.get(name);
+          return known !== undefined && this.excludesFixedField(child, known);
+        });
+      }
+      default: {
+        return false;
+      }
+    }
+  }
+
+  private excludesList(pattern: Extract<Pattern, { kind: 'list' }>, space: ListSpace): boolean {
+    const bounds = listPatternBounds(this.compiler, pattern, space);
+    if (!bounds) return true;
+    const { elements } = space;
+    if (!elements) return false;
+    const { rest, fixed } = bounds;
+    for (const [index, element] of pattern.elements.entries()) {
+      if (element.kind === 'rest') {
+        if (
+          element.pattern &&
+          this.excludesFixedField(element.pattern, listMiddle(space, rest, space.length - fixed, elements))
+        )
+          return true;
+      } else if (this.excludesFixedField(element, elements[listPatternPosition(pattern, space, rest, index)]))
+        return true;
+    }
+    return false;
   }
 
   private refine(spaces: Space[], patterns: Pattern[]): Space[] {

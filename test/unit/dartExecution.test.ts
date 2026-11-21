@@ -7548,6 +7548,43 @@ void main() {
   }
 });
 
+test('Dart list coverage skips arms contradicted by an earlier position', () => {
+  for (const width of [9, 10]) {
+    const positions = Array.from({ length: width }, (_, index) => index);
+    const shorter = positions.map(
+      (length) =>
+        `[${positions
+          .slice(0, length)
+          .map(() => '_')
+          .join(', ')}] => -1`
+    );
+    const longer = `[${positions.map(() => '_').join(', ')}, _, ...] => -2`;
+    const firstFalse = positions.map((first) => {
+      const pattern = positions.map((index) => (index < first ? 'true' : index === first ? 'false' : '_'));
+      return `[${pattern.join(', ')}] => ${first}`;
+    });
+    const trueValues = positions.map(() => 'true').join(', ');
+    const falseValues = positions.map(() => 'false').join(', ');
+    const allTrue = `[${trueValues}] => ${width}`;
+    const program = (exactLength: string[]): string => `int select(List<bool> values) => switch (values) {
+  ${[...shorter, longer, ...exactLength].join(',\n  ')}
+};
+void main() {
+  print([select([]), select([${falseValues}]), select([${trueValues}]), select([${trueValues}, false])]);
+}`;
+    for (const arms of [
+      [...firstFalse, allTrue],
+      [allTrue, ...firstFalse.toReversed()],
+    ]) {
+      expect(executeProgram('dart', program(arms))).toMatchObject({
+        kind: 'executed',
+        stdout: `[-1, 0, ${width}, -2]\n`,
+      });
+    }
+    expect(executeProgram('dart', program(firstFalse))).toMatchObject({ kind: 'compileError' });
+  }
+});
+
 test('constructor formals and tear-offs use inferred field types', () => {
   const declarations = `class Parent {
   var value = Later().value;
