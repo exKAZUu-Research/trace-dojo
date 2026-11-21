@@ -1,6 +1,7 @@
 // code-gauge-allow-file fileNcss 912 -- The checker core owns body, entry point, and type obligations.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ExecutionBudget } from '../interpreter/limits';
+import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import { AdtStorage } from './adtStorage';
 import { Annotations, type Coercion, type FnContext, type LocalVar, type PathRes } from './annotations';
 import type { Block, Expr, FnItem, Pattern, Span, Stmt, TypeAst } from './ast';
@@ -127,6 +128,9 @@ export class Checker {
   /** Moves out of a reference by `&` patterns, which rustc's borrow checker reports in order with its other errors. */
   patternMoves: { span: Span; message: string }[] = [];
 
+  /** The rows of the `// atomic` annotations that mark a function, which each of them must. */
+  private readonly claimedAtomicRows = new Set<number>();
+
   constructor(
     readonly program: Program,
     readonly atomicRows: ReadonlySet<number>,
@@ -146,6 +150,9 @@ export class Checker {
     while (this.nestedFns.length > 0) this.checkFn(this.nestedFns.shift()!);
     this.checkConsts(checkedConsts);
     this.checkMain();
+    for (const row of this.atomicRows) {
+      if (!this.claimedAtomicRows.has(row)) compileError({ row, col: 0 }, misplacedAtomicMessage);
+    }
   }
 
   // code-gauge-allow functionCognitiveComplexity 28 -- Checks each kind of declared item in its own type scope.
@@ -540,8 +547,11 @@ export class Checker {
   }
 
   private isAtomic(item: FnItem): boolean {
-    for (let row = item.span.row; row <= item.headerEndRow; row++) if (this.atomicRows.has(row)) return true;
-    return false;
+    const claimed = this.claimedAtomicRows.size;
+    for (let row = item.span.row; row <= item.headerEndRow; row++) {
+      if (this.atomicRows.has(row)) this.claimedAtomicRows.add(row);
+    }
+    return this.claimedAtomicRows.size > claimed;
   }
 
   checkFn(def: FnDef): void {

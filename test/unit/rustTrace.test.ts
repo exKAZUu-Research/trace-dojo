@@ -435,3 +435,13 @@ fn main() {
     expect(trace.finalVars).toMatchObject({ first: 2 });
   }
 });
+
+test.each([
+  ['a statement', 'fn main() {\n    let x = 1; // atomic\n    println!("{}", x);\n}', 1],
+  ['the line before a function', '// atomic\nfn helper() {}\nfn main() {\n    helper();\n}', 0],
+  ['a method without a body', 'trait Shape {\n    fn area(&self) -> i32; // atomic\n}\nfn main() {}', 1],
+])('rejects an atomic annotation on %s', (_name, program, row) => {
+  expect(() => traceProgram('rust', program, program)).toThrow(
+    expect.objectContaining({ diagnostics: [{ row, message: expect.stringContaining('// atomic は') }] })
+  );
+});
