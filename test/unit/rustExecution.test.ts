@@ -8745,3 +8745,20 @@ fn first_word(it: &mut std::str::Chars) -> String { it.take_while(|c| *c != ' ')
   );
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '3 [3, 4] ab "cd"\n' });
 });
+
+test('an adapter of a borrowed iterator holds its mutable reborrow', () => {
+  const reused = rustMain(`
+    let mut it = 1..4;
+    let a = &mut it;
+    let mut f = || a.take(1).sum::<i32>();
+    println!("{} {}", f(), f());
+    println!("{:?}", a.next());`);
+  expect(executeProgram('rust', reused)).toMatchObject({ kind: 'executed', stdout: '1 2\nSome(3)\n' });
+  const overlapping = rustMain(`
+    let mut it = 1..4;
+    let a = &mut it;
+    let mut b = a.take(2);
+    println!("{:?}", a.next());
+    println!("{:?}", b.next());`);
+  expect(executeProgram('rust', overlapping)).toMatchObject({ kind: 'compileError' });
+});

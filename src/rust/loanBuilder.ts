@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 999 -- Lowers each kind of expression to the points and regions rustc's MIR gives it.
+// code-gauge-allow-file fileNcss 1000 -- Lowers each kind of expression to the points and regions rustc's MIR gives it.
 import type { ExecutionBudget } from '../interpreter/limits';
 import type { Annotations, FnContext, LocalVar, MethodRes } from './annotations';
 import type { Block, Condition, Expr, FormatArgs, Pattern, Span, Stmt } from './ast';
@@ -14,6 +14,7 @@ import {
   type Point,
   type Var,
 } from './loanGraph';
+import { reborrowsIterator } from './receiverReborrow';
 import {
   derefSteps,
   dropSlots,
@@ -1139,6 +1140,10 @@ export class LoanBuilder {
       const twoPhase = autoref === 'mut' && !derefs.includes('own');
       const { value, loan } = this.borrow(target, autoref === 'mut', receiver.span, targetType, twoPhase);
       return { receiver: value, activation: twoPhase ? loan : undefined, target };
+    }
+    if (method.fn.selfMode === 'value' && reborrowsIterator(derefs, targetType)) {
+      // The adapter the method returns keeps the mutable reborrow of the iterator.
+      return { receiver: this.borrow(target, true, receiver.span, targetType, false).value, target };
     }
     if ((method.fn.selfMode === 'mutRef' || method.fn.selfMode === 'value') && isMutReference(targetType)) {
       const { value, loan } = this.borrow(project(target, '*'), true, receiver.span, refTarget(targetType), true);

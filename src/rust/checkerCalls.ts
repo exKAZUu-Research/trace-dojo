@@ -16,6 +16,7 @@ import { normalize } from './infer';
 import type { Module } from './items';
 import { compileError } from './items';
 import { autoderefSteps, boundsOf, failedInherentBound, lookupMethod } from './methods';
+import { reborrowsIterator } from './receiverReborrow';
 import { typeAfter } from './regions';
 import {
   adt,
@@ -425,9 +426,7 @@ function checkMoveOutOfRef(
 ): void {
   if (adjust.autoref !== 'none') return;
   if (adjust.asIter && !isBuiltin(shallow(selfType), 'Box')) return;
-  // std's `impl Iterator for &mut I`: such a method on a borrowed iterator consumes a reborrow, advancing the iterator.
-  const throughMutOnly = adjust.derefs.length > 0 && adjust.derefs.every((step) => step === 'mutRef');
-  if (throughMutOnly && isBuiltin(normalize(shallow(selfType)), 'Iter')) return;
+  if (reborrowsIterator(adjust.derefs, selfType)) return;
   c.requireTrait(selfType, 'Sized', expr.receiver.span);
   const throughRef = adjust.derefs.some((step) => step === 'ref' || step === 'mutRef');
   if (!throughRef) return;

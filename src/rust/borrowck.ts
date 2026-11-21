@@ -18,6 +18,7 @@ import { compileError } from './items';
 import { LoanBuilder } from './loanBuilder';
 import { captureStoragePlaces } from './loanCaptures';
 import type { LoanError } from './loanGraph';
+import { receiverReborrow } from './receiverReborrow';
 import { typeAfter } from './regions';
 import type { TraitSolver } from './traits';
 import { resolve, shallow, substitute as substituteType, type Type } from './types';
@@ -460,8 +461,8 @@ export class BorrowChecker {
   private receiverUse(receiver: Expr, method: MethodRes): 'mut' | 'move' | 'read' {
     const { derefs, autoref } = method.receiver;
     const { selfMode } = method.fn;
-    const reborrows = selfMode === 'mutRef' || (selfMode === 'value' && derefs.length === 0);
-    if (autoref === 'mut' || (reborrows && isMutReference(receiver.ty))) return 'mut';
+    if (autoref === 'mut' || (selfMode === 'mutRef' && isMutReference(receiver.ty))) return 'mut';
+    if (receiverReborrow(method, receiver.ty)) return 'mut';
     const throughRef = derefs.some((step) => step === 'ref' || step === 'mutRef');
     const moves =
       autoref === 'none' && selfMode === 'value' && !throughRef && !this.isCopy(typeAfter(receiver.ty, derefs));
