@@ -202,7 +202,7 @@ export class SignatureInstance {
    * `A: ExtendInto<T>` the other way round makes `T`s of `A`s (or of what `A`s point to).
    */
   private relateBoundArgs(bound: TraitRef, layout: Layout): void {
-    if (bound.trait.builtin === 'ExtendInto') {
+    if (bound.trait.builtin === 'ExtendInto' || bound.trait.builtin === 'MapExtendInto') {
       const target = instantiate(bound.args[0], this.subst, this.fresh);
       relate(this.outlives, copiedOut(layout, target), target);
       return;

@@ -160,7 +160,8 @@ const RULES: Record<string, Rule> = {
   DoubleEndedSearcher: ({ t }) => doubleEndedSearcher(t),
   Iterator: iterator,
   IntoIterator: iterator,
-  ExtendInto: extendInto,
+  ExtendInto: (goal) => extendInto(goal, false),
+  MapExtendInto: (goal) => extendInto(goal, true),
   PairOf: ({ solver, t, ref }) => (solver.unifier.tryUnify(t, { kind: 'tuple', elems: ref.args }) ? 'yes' : 'no'),
   TryFoldResult: ({ solver, t, ref }) => {
     if (t.kind !== 'adt') return 'no';
@@ -601,24 +602,24 @@ function iteratorWithCapability(goal: Goal, capability: 'back' | 'exact'): Answe
 }
 
 /** A collection of `T` extends from `T`s, and from `&T`s when `T` is `Copy`. */
-function extendInto({ solver, t, ref }: Goal): Answer {
+/** What a collection extends from: its items, or (as std's `Extend` of `Copy` items) a `&T`, or a map's `(&K, &V)`. */
+function extendInto({ solver, t, ref }: Goal, map: boolean): Answer {
   const [target] = ref.args;
   if (solver.unifier.tryUnify(t, target)) return 'yes';
   const snapshot = solver.unifier.snapshot();
-  if (copiesFrom(solver, t, target)) return 'yes';
+  if (map ? copiesPairFrom(solver, t, target) : copiesFrom(solver, t, target)) return 'yes';
   solver.unifier.rollback(snapshot);
   return 'no';
 }
 
-/** Whether a `&T`, or a map's pair `(&K, &V)`, copies out into its target, as std's `Extend` of `Copy` items does. */
 function copiesFrom(solver: TraitSolver, t: Type, target: Type): boolean {
-  if (t.kind === 'ref' && !t.mutable) return solver.unifier.unify(t.target, target) && solver.isCopy(t.target);
+  return t.kind === 'ref' && !t.mutable && solver.unifier.unify(t.target, target) && solver.isCopy(t.target);
+}
+
+function copiesPairFrom(solver: TraitSolver, t: Type, target: Type): boolean {
   const pair = shallow(target);
   if (t.kind !== 'tuple' || t.elems.length !== 2 || pair.kind !== 'tuple' || pair.elems.length !== 2) return false;
-  return t.elems.every((elem, index) => {
-    const part = shallow(elem);
-    return part.kind === 'ref' && copiesFrom(solver, part, pair.elems[index]);
-  });
+  return t.elems.every((elem, index) => copiesFrom(solver, shallow(elem), pair.elems[index]));
 }
 
 /** Collections of `Copy` elements also extend from references to them. */

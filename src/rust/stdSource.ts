@@ -7,7 +7,7 @@ import { collectionKeyTraits } from './collectionBounds';
  *
  * Pseudo-traits that rustc does not have stand for groups of types that the natives handle alike: `Integer`,
  * `SignedInteger`, `UnsignedInteger`, `Float`, `Pattern` (what `str::split` and its kin accept), `DoubleEndedPattern` (a `Pattern` but a string), `Borrow` (keys that
- * look up a map), `StringPart`, `RangeBounds`, `ExtendInto`, `SliceOf` (what borrows as a slice), `JoinSeparator`, and `SliceIndex` (what `<[T]>::get`
+ * look up a map), `StringPart`, `RangeBounds`, `ExtendInto` (what a collection of `T` extends from: `T`, or a `&T` it copies), `MapExtendInto` (what a map of `(K, V)` extends from: those, or `(&K, &V)` it copies), `SliceOf` (what borrows as a slice), `JoinSeparator`, and `SliceIndex` (what `<[T]>::get`
  * accepts: a `usize` or a range of them, giving `Indexed<I, T>`, an element or a slice).
  *
  * Every iterator is an `IterImpl<T, S>` of items `T`, whose shape `S` (`CharsShape`, `RevShape<S>`, `MapShape<S, F>`,
@@ -1178,7 +1178,7 @@ pub mod collections {
         pub fn remove<Q>(&mut self, k: &Q) -> Option<V> where K: Borrow<Q>, Q: Eq + Hash;
         pub fn remove_entry<Q>(&mut self, k: &Q) -> Option<(K, V)> where K: Borrow<Q>, Q: Eq + Hash;
         pub fn entry(&mut self, key: K) -> Entry<K, V> ;
-        pub fn extend<A: ExtendInto<(K, V)>, S>(&mut self, iter: IterImpl<A, S>);
+        pub fn extend<A: MapExtendInto<(K, V)>, S>(&mut self, iter: IterImpl<A, S>);
     }
     impl<K, V> &HashMap<K, V> {
         pub fn into_iter(self) -> IterImpl<(&K, &V), HashMapIterShape>;
@@ -1216,7 +1216,7 @@ pub mod collections {
         pub fn pop_first(&mut self) -> Option<(K, V)>;
         pub fn pop_last(&mut self) -> Option<(K, V)>;
         pub fn retain<F: FnMut(&K, &mut V) -> bool>(&mut self, f: F);
-        pub fn extend<A: ExtendInto<(K, V)>, S>(&mut self, iter: IterImpl<A, S>);
+        pub fn extend<A: MapExtendInto<(K, V)>, S>(&mut self, iter: IterImpl<A, S>);
     }
     impl<K, V> &BTreeMap<K, V> {
         pub fn into_iter(self) -> IterImpl<(&K, &V), BTreeMapIterShape>;
@@ -1569,6 +1569,7 @@ pub mod pseudo {
     pub trait StringPart {}
     pub trait RangeBounds<T> {}
     pub trait ExtendInto<T> {}
+    pub trait MapExtendInto<T> {}
     pub trait PairOf<A, B> {}
     pub trait TryFoldResult<T> {}
     pub trait SliceOf<T> {}

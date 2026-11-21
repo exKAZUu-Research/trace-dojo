@@ -101,7 +101,8 @@ export class TraitSolver {
     if (t.v.literal === 'int' && ref.trait.builtin === 'SliceIndex')
       return this.unifier.tryUnify(t, USIZE) ? 'yes' : 'no';
     if (!t.v.literal) return 'unknown';
-    if (ref.trait.builtin === 'ExtendInto') return builtinImplements(this, t, ref);
+    if (ref.trait.builtin === 'ExtendInto' || ref.trait.builtin === 'MapExtendInto')
+      return builtinImplements(this, t, ref);
     const rhs = ref.args[0];
     if (rhs && (ref.trait.builtin === 'PartialEq' || ref.trait.builtin === 'PartialOrd')) {
       return this.literalCompares(t, t.v.literal, ref, normalize(shallow(rhs)));
@@ -349,7 +350,15 @@ function matchesImplGoal(
 
 /** The std traits with a blanket impl for every type of another trait: `impl<T: Display> ToString for T`. */
 const BLANKET_IMPLS: Record<string, string> = { ToString: 'Display', ToOwned: 'Clone', IntoIterator: 'Iterator' };
-const PARAMETER_BLANKET_TRAITS = new Set(['Borrow', 'From', 'Into', 'TryFrom', 'TryInto', 'ExtendInto']);
+const PARAMETER_BLANKET_TRAITS = new Set([
+  'Borrow',
+  'From',
+  'Into',
+  'TryFrom',
+  'TryInto',
+  'ExtendInto',
+  'MapExtendInto',
+]);
 
 /** Whether a closure implements a closure trait; while its captures are unsettled, its trait can still rise to `FnOnce`. */
 function closureKindAnswer(closure: ClosureType, need: string): Answer {

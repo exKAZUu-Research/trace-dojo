@@ -8563,3 +8563,14 @@ test.each([
   );
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '{1: "hello"}\n' });
 });
+
+test('a vector of pairs does not extend from the borrowed pairs of a map', () => {
+  const program = rustMain(
+    `
+    let map = BTreeMap::from([(1, 10)]);
+    let mut pairs: Vec<(i32, i32)> = Vec::new();
+    pairs.extend(map.iter());`,
+    'use std::collections::BTreeMap;'
+  );
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'compileError' });
+});
