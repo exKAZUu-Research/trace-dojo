@@ -106,7 +106,8 @@ private open class ReversedList<T>(private val backing: List<T>) : List<T> {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other !is List<*> || size != other.size) return false
-        for (index in indices) if (this[index] != other[index]) return false
+        val iterator = other.iterator()
+        for (item in this) if (item != iterator.next()) return false
         return true
     }
     override fun hashCode(): Int {
@@ -128,6 +129,17 @@ private open class ReversedListIterator<T>(private val backing: ListIterator<T>,
 }
 
 private class MutableReversedList<T>(private val backing: MutableList<T>) : ReversedList<T>(backing), MutableList<T> {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is List<*>) return false
+        val left = listIterator()
+        val right = other.listIterator()
+        while (left.hasNext() && right.hasNext()) {
+            if (left.next() != right.next()) return false
+        }
+        return !left.hasNext() && !right.hasNext()
+    }
+
     override fun iterator(): MutableIterator<T> = listIterator()
     override fun listIterator(): MutableListIterator<T> = listIterator(0)
     override fun listIterator(index: Int): MutableListIterator<T> =

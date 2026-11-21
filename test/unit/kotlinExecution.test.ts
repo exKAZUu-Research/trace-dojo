@@ -948,13 +948,91 @@ fun main() {
     println(buildList { addAll(listOf(1, 2, 3)) } == other)
     println(intArrayOf(1, 2, 3).asList() == other)
     println(emptyList<Int>() == other)
+    println(listOf(3, 2, 1).asReversed() == other)
+    println(mutableListOf(3, 2, 1).asReversed() == other)
     val left = mutableListOf<Mutation>()
     left.add(Mutation { left.clear() })
     val right = mutableListOf(Mutation {})
     try { println(left == right) } catch (error: ConcurrentModificationException) { println("modified") }
 }`,
     stdout:
-      'listIterator\nnext 9\nfalse\niterator\nnext 9\nfalse\niterator\nnext 9\nfalse\nsize\nget 0\nfalse\nsize\niterator\nnext 9\nfalse\nempty\nfalse\nmodified\n',
+      'listIterator\nnext 9\nfalse\niterator\nnext 9\nfalse\niterator\nnext 9\nfalse\nsize\nget 0\nfalse\nsize\niterator\nnext 9\nfalse\nempty\nfalse\nsize\niterator\nnext 9\nfalse\nlistIterator\nnext 9\nfalse\nmodified\n',
+  },
+  {
+    name: 'map and collection operators use the array and iterable overloads',
+    source: `fun main() {
+    val map = mapOf("a" to 1, "b" to 2)
+    println(map + listOf("c" to 3, "a" to 4))
+    println(map + arrayOf("d" to 4))
+    println(map - listOf("a"))
+    println(map - arrayOf("b"))
+    println(map - arrayOf("a", "b"))
+    val mutable = mutableMapOf("a" to 1, "b" to 2)
+    mutable += listOf("c" to 3)
+    mutable += arrayOf("d" to 4)
+    mutable += mapOf("e" to 5)
+    mutable -= listOf("a", "b")
+    mutable -= arrayOf("d")
+    println(mutable)
+
+    println(listOf(1, 2, 1) - arrayOf(1))
+    println(setOf(1, 2) + arrayOf(3, 2))
+    println(setOf(1, 2) - arrayOf(2))
+    val list = mutableListOf(1, 2)
+    list += arrayOf(3, 4)
+    list -= arrayOf(2, 3)
+    println(list)
+    val set = mutableSetOf(1, 2)
+    set += arrayOf(3, 4)
+    set -= arrayOf(1, 4)
+    println(set)
+    println(list.removeAll(arrayOf(1)))
+    println(list.retainAll(arrayOf(4, 5)))
+    println(list)
+    println(set.removeAll(arrayOf(2)))
+    println(set.retainAll(arrayOf(7)))
+    println(set)
+    println(mutable.keys.removeAll(arrayOf("c")))
+    println(mutable.values.retainAll(arrayOf(5)))
+    println(mutable)
+}`,
+    stdout:
+      '{a=4, b=2, c=3}\n{a=1, b=2, d=4}\n{b=2}\n{a=1}\n{}\n{c=3, e=5}\n[2]\n[1, 2, 3]\n[1]\n[1, 4]\n[2, 3]\ntrue\nfalse\n[4]\ntrue\ntrue\n[]\ntrue\nfalse\n{e=5}\n',
+  },
+  {
+    name: 'hexadecimal floating parsing applies exponent scaling before rounding',
+    source: `fun main() {
+    for (text in listOf("0x2p-1075", "0x1.8p-1074", "-0x1p-1075", "0x1p-1074", "0x1.fffffffffffffp1023", "0x1.fffffffffffff8p1023")) {
+        println(text.toDoubleOrNull())
+    }
+    println("0x1.000001p0".toFloat())
+    println("0x1.0000010000001p0".toFloat())
+}`,
+    stdout: '4.9E-324\n9.9E-324\n-0.0\n4.9E-324\n1.7976931348623157E308\nInfinity\n1.0\n1.0000001\n',
+  },
+  {
+    name: 'ArrayList subclass rendering interleaves its iterator and element callbacks',
+    source: `class Item(private val label: String) {
+    override fun toString(): String { println("render " + label); return label }
+}
+class ItemsIterator : MutableIterator<Item> {
+    var index = 0
+    override fun hasNext(): Boolean = index < 2
+    override fun next(): Item {
+        index++
+        println("next " + index)
+        return Item(index.toString())
+    }
+    override fun remove() {}
+}
+class Items : ArrayList<Item>() {
+    override fun iterator(): MutableIterator<Item> {
+        println("iterator")
+        return ItemsIterator()
+    }
+}
+fun main() { println(Items()) }`,
+    stdout: 'iterator\nnext 1\nrender 1\nnext 2\nrender 2\n[1, 2]\n',
   },
   {
     name: 'set insertion follows the source iterator and keeps partial changes',

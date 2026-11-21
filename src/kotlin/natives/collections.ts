@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 887 -- the natives of the collections, which share the helpers of their items.
+// code-gauge-allow-file fileNcss 896 -- the natives of the collections, which share the helpers of their items.
 import { runtimeClassOf } from '../dispatch';
 import { hashOf, identityHash, stringOf, valueEquals } from '../format';
 import { toInt32 } from '../operators';
@@ -21,6 +21,7 @@ import {
   callCollectionMember,
   COLLECTION,
   collectionContains,
+  collectionIterator,
   collectionSize,
   compareCollections,
   containsAll,
@@ -144,7 +145,7 @@ export function indexOfValue(frame: Frame, values: Value[], element: Value): num
 }
 
 /** `AbstractCollection.toString`: the elements in brackets, a collection inside itself shown as `(this Collection)`. */
-export function collectionToString(frame: Frame, collection: Value, elements: Value[]): string {
+export function collectionToString(frame: Frame, collection: Value, elements: Iterable<Value>): string {
   return joinRendered(frame, elements, '[', ']', (element) =>
     element === collection ? '(this Collection)' : stringOf(frame, element)
   );
@@ -152,7 +153,7 @@ export function collectionToString(frame: Frame, collection: Value, elements: Va
 
 export function joinRendered<T>(
   frame: Frame,
-  elements: readonly T[],
+  elements: Iterable<T>,
   prefix: string,
   suffix: string,
   render: (value: T) => string
@@ -248,8 +249,19 @@ const LIST_READING_NATIVES: Record<string, ListNative> = {
   'subList(Int, Int)': (frame, list, [from, to]) => subList(frame, list as KObject, from as number, to as number),
   'equals(Any?)': (frame, list, [other]) => listEquals(frame, list as KObject, other),
   'hashCode()': (frame, list) => listHash(frame, readableItems(list)),
-  'toString()': (frame, list) => collectionToString(frame, list, readableItems(list)),
+  'toString()': renderList,
 };
+
+function renderList(frame: Frame, receiver: Value): string {
+  const list = receiver as KObject;
+  if (!list.arrayList || list.cls.isLibrary) return collectionToString(frame, list, readableItems(list));
+
+  const iterator = collectionIterator(frame, list);
+  function* elements(): Iterable<Value> {
+    while (iterator.hasNext()) yield iterator.next();
+  }
+  return frame.runtime.withNativeRoots([iterator.value], () => collectionToString(frame, list, elements()));
+}
 
 function findListValue(frame: Frame, list: KObject, element: Value, fromEnd = false): number {
   const view = listView(list);

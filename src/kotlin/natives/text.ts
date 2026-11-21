@@ -1,5 +1,6 @@
 // code-gauge-allow-file fileNcss 410 -- the text and character natives share string, casing, and parsing operations.
 import { formatJava, type FormatValues } from '../../interpreter/javaFormatter';
+import { parseHexFloat } from '../../java/hexFloat';
 import { callFunction, runtimeClassOf } from '../dispatch';
 import { float32FromText } from '../float32';
 import { charToString, formatPrimitive, hashOf, stringOf } from '../format';
@@ -140,14 +141,8 @@ function doubleFormatError(frame: Frame, value: string): never {
 function parseFloating(value: string, asFloat = false): number | undefined {
   const trimmed = trimControls(value);
   if (/^[+-]?(NaN|Infinity)$/.test(trimmed)) return Number(trimmed);
-  const hex = /^([+-]?)0[xX]([\dA-Fa-f]*)(?:\.([\dA-Fa-f]*))?[pP]([+-]?\d+)[fFdD]?$/.exec(trimmed);
-  if (hex && (hex[2] || hex[3])) {
-    if (asFloat) return float32FromText(trimmed);
-    const [, sign, whole, fraction, exponent] = hex;
-    const magnitude =
-      Number.parseInt(`${whole}${fraction ?? ''}` || '0', 16) * 2 ** (Number(exponent) - 4 * (fraction?.length ?? 0));
-    return sign === '-' ? -magnitude : magnitude;
-  }
+  const hex = parseHexFloat(trimmed, asFloat ? 'float' : 'double');
+  if (hex !== undefined) return hex;
   if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)([eE][+-]?\d+)?[fFdD]?$/.test(trimmed)) return undefined;
   return asFloat ? float32FromText(trimmed) : Number(trimmed.replace(/[fFdD]$/, ''));
 }

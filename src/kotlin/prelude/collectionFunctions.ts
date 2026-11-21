@@ -1182,6 +1182,8 @@ operator fun <T> Iterable<T>.minus(elements: Iterable<T>): List<T> {
     return this.filterNot { it in other }
 }
 
+operator fun <T> Iterable<T>.minus(elements: Array<out T>): List<T> = minus(elements.asList())
+
 fun <T> Collection<T>.plusElement(element: T): List<T> = plus(element)
 
 operator fun <T> Set<T>.plus(element: T): Set<T> {
@@ -1195,6 +1197,8 @@ operator fun <T> Set<T>.plus(elements: Iterable<T>): Set<T> {
     result.addAll(elements)
     return result
 }
+
+operator fun <T> Set<T>.plus(elements: Array<out T>): Set<T> = plus(elements.asList())
 
 operator fun <T> Set<T>.minus(element: T): Set<T> {
     val result = LinkedHashSet<T>()
@@ -1211,6 +1215,8 @@ operator fun <T> Set<T>.minus(elements: Iterable<T>): Set<T> {
     for (item in this) if (item !in other) result.add(item)
     return result
 }
+
+operator fun <T> Set<T>.minus(elements: Array<out T>): Set<T> = minus(elements.asList())
 
 infix fun <T> Iterable<T>.union(other: Iterable<T>): Set<T> {
     val set = this.toMutableSet()
@@ -1237,10 +1243,18 @@ fun <T> MutableCollection<in T>.addAll(elements: Iterable<T>): Boolean {
 }
 
 fun <T> MutableCollection<in T>.addAll(elements: Array<out T>): Boolean {
-    var result = false
-    for (item in elements) if (add(item)) result = true
-    return result
+    return addAll(elements.asList())
 }
+
+fun <T> MutableCollection<in T>.removeAll(elements: Iterable<T>): Boolean =
+    removeAll(if (elements is Collection<T>) elements else elements.toList())
+
+fun <T> MutableCollection<in T>.removeAll(elements: Array<out T>): Boolean = removeAll(elements.asList())
+
+fun <T> MutableCollection<in T>.retainAll(elements: Iterable<T>): Boolean =
+    retainAll(if (elements is Collection<T>) elements else elements.toList())
+
+fun <T> MutableCollection<in T>.retainAll(elements: Array<out T>): Boolean = retainAll(elements.asList())
 
 operator fun <T> MutableCollection<in T>.plusAssign(element: T) {
     this.add(element)
@@ -1250,12 +1264,20 @@ operator fun <T> MutableCollection<in T>.plusAssign(elements: Iterable<T>) {
     this.addAll(elements)
 }
 
+operator fun <T> MutableCollection<in T>.plusAssign(elements: Array<out T>) {
+    addAll(elements.asList())
+}
+
 operator fun <T> MutableCollection<in T>.minusAssign(element: T) {
     this.remove(element)
 }
 
 operator fun <T> MutableCollection<in T>.minusAssign(elements: Iterable<T>) {
-    this.removeAll(if (elements is Collection<T>) elements else elements.toList())
+    removeAll(elements)
+}
+
+operator fun <T> MutableCollection<in T>.minusAssign(elements: Array<out T>) {
+    removeAll(elements)
 }
 
 fun <T> MutableIterable<T>.removeAll(predicate: (T) -> Boolean): Boolean = filterInPlace(predicate, true)
@@ -1578,6 +1600,15 @@ operator fun <K, V> Map<out K, V>.plus(pair: Pair<K, V>): Map<K, V> {
     return result
 }
 
+operator fun <K, V> Map<out K, V>.plus(pairs: Iterable<Pair<K, V>>): Map<K, V> {
+    if (isEmpty()) return pairs.toMap()
+    val result = LinkedHashMap<K, V>(this)
+    result.putAll(pairs)
+    return result
+}
+
+operator fun <K, V> Map<out K, V>.plus(pairs: Array<out Pair<K, V>>): Map<K, V> = plus(pairs.asList())
+
 operator fun <K, V> Map<out K, V>.plus(map: Map<out K, V>): Map<K, V> {
     val result = LinkedHashMap<K, V>(this)
     result.putAll(map)
@@ -1587,15 +1618,53 @@ operator fun <K, V> Map<out K, V>.plus(map: Map<out K, V>): Map<K, V> {
 operator fun <K, V> Map<out K, V>.minus(key: K): Map<K, V> {
     val result = LinkedHashMap<K, V>(this)
     result.remove(key)
-    return result
+    return result.optimizeReadOnlyMap()
+}
+
+operator fun <K, V> Map<out K, V>.minus(keys: Iterable<K>): Map<K, V> {
+    val result = LinkedHashMap<K, V>(this)
+    result.minusAssign(keys)
+    return result.optimizeReadOnlyMap()
+}
+
+operator fun <K, V> Map<out K, V>.minus(keys: Array<out K>): Map<K, V> = minus(keys.asList())
+
+private fun <K, V> Map<K, V>.optimizeReadOnlyMap(): Map<K, V> = when (size) {
+    0 -> emptyMap()
+    1 -> mapOf(entries.iterator().next().toPair())
+    else -> this
 }
 
 operator fun <K, V> MutableMap<in K, in V>.plusAssign(pair: Pair<K, V>) {
     put(pair.first, pair.second)
 }
 
+operator fun <K, V> MutableMap<in K, in V>.plusAssign(pairs: Iterable<Pair<K, V>>) {
+    putAll(pairs)
+}
+
+operator fun <K, V> MutableMap<in K, in V>.plusAssign(pairs: Array<out Pair<K, V>>) {
+    putAll(pairs)
+}
+
+operator fun <K, V> MutableMap<in K, in V>.plusAssign(map: Map<K, V>) {
+    putAll(map)
+}
+
 operator fun <K, V> MutableMap<K, V>.minusAssign(key: K) {
     remove(key)
+}
+
+operator fun <K, V> MutableMap<K, V>.minusAssign(keys: Iterable<K>) {
+    this.keys.removeAll(keys)
+}
+
+operator fun <K, V> MutableMap<K, V>.minusAssign(keys: Array<out K>) {
+    this.keys.removeAll(keys)
+}
+
+fun <K, V> MutableMap<in K, in V>.putAll(pairs: Array<out Pair<K, V>>) {
+    for (pair in pairs) put(pair.first, pair.second)
 }
 
 fun <K, V> MutableMap<in K, in V>.putAll(pairs: Iterable<Pair<K, V>>) {
