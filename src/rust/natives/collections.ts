@@ -322,9 +322,7 @@ function setNatives(sorted: boolean): Record<string, (args: Value[], ctx: Native
     is_subset: ([self, other], ctx) => isSubset(ctx, set(self), set(other)),
     is_superset: ([self, other], ctx) => isSubset(ctx, set(other), set(self)),
     is_disjoint: ([self, other], ctx) =>
-      sorted
-        ? btree(ctx, 'intersection', self, other).next() === DONE
-        : everySetMember(ctx, set(self), set(other), false),
+      sorted ? btree(ctx, 'intersection', self, other).next() === DONE : disjointHashSets(ctx, set(self), set(other)),
     retain: ([self, f], ctx) => {
       const s = set(self);
       s.entries.retain((value) => deref(call(ctx, f, [value])) as boolean);
@@ -407,6 +405,11 @@ function isSubsequence(ctx: NativeContext, type: Type, values: Value[], others: 
     if (order === 0) index++;
   }
   return true;
+}
+
+/** `HashSet::is_disjoint`, which looks up the members of the smaller set in the other, as std does. */
+function disjointHashSets(ctx: NativeContext, a: SetValue, b: SetValue): boolean {
+  return a.entries.size <= b.entries.size ? everySetMember(ctx, a, b, false) : everySetMember(ctx, b, a, false);
 }
 
 function everySetMember(ctx: NativeContext, a: SetValue, b: SetValue, present: boolean): boolean {

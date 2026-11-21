@@ -8643,3 +8643,18 @@ test('a mutable string reference is not a search pattern', () => {
     diagnostics: [{ message: '&mut String にトレイト Pattern が実装されていません。' }],
   });
 });
+
+test('a large hash set checks its disjointness from an empty one cheaply', () => {
+  const program = rustMain(
+    `
+    let keys: HashSet<i32> = (0..1000).collect();
+    let empty: HashSet<i32> = HashSet::new();
+    let mut count = 0;
+    for _ in 0..1000 {
+        if keys.is_disjoint(&empty) { count += 1; }
+    }
+    println!("{count}");`,
+    'use std::collections::HashSet;'
+  );
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '1000\n' });
+});
