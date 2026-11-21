@@ -1334,8 +1334,14 @@ test('Dart promotes private late final fields but not private late fields', () =
   A(this._x);
   void show() { if (_x != null && _s != null) print([_x.isEven, _s.length]); }
 }
-void main() { A(4).show(); }`;
-  expect(executeProgram('dart', promoted)).toMatchObject({ kind: 'executed', stdout: '[true, 2]\n' });
+mixin M { late final int? _y = 2; }
+class B with M {}
+void main() {
+  A(4).show();
+  final b = B();
+  if (b._y != null) print(b._y.isEven);
+}`;
+  expect(executeProgram('dart', promoted)).toMatchObject({ kind: 'executed', stdout: '[true, 2]\ntrue\n' });
   const mutable =
     'class A { late int? _x = 4; void show() { if (_x != null) print(_x.isEven); } }\nvoid main() { A().show(); }';
   expect(executeProgram('dart', mutable)).toMatchObject({ kind: 'compileError' });

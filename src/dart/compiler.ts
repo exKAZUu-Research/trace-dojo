@@ -671,6 +671,7 @@ export class Compiler extends MemberCompiler {
     if (late) {
       const field = fieldsByOriginalSlot.get(late.field.slot) as FieldMember;
       (copy as MethodMember).impl = late.bind(field);
+      this.lateFieldAccessors.set(copy, { field, bind: late.bind });
       return copy;
     }
     // The copy runs the mixin's code, which may be compiled after the application is declared.
