@@ -198,12 +198,15 @@ define('List.length=', (runtime, receiver, [length]) => {
   const count = intArg(runtime, length, 'newLength');
   checkListLength(runtime, count, true);
   const elements = target.elements;
-  if (count > BigInt(elements.length)) {
+  const nextLength = index(count);
+  const changed = nextLength - elements.length;
+  if (changed > 0) {
     const elementType = elementTypeOf(target);
     castTo(runtime, undefined, elementType);
-    runtime.allocate(index(count) - elements.length);
+    runtime.allocate(changed);
   }
-  resizeListSlots(elements, index(count));
+  runtime.spend(Math.abs(changed));
+  resizeListSlots(elements, nextLength);
   return;
 });
 
@@ -430,7 +433,9 @@ define('List.insert', (runtime, receiver, [at, value]) => {
   if (position < 0n || position > BigInt(target.elements.length))
     rangeError(runtime, position, 0, target.elements.length, undefined);
   runtime.allocate(1);
-  target.elements.splice(index(position), 0, value);
+  const offset = index(position);
+  runtime.spend(target.elements.length - offset + 1);
+  target.elements.splice(offset, 0, value);
   return;
 });
 define('List.insertAll', (runtime, receiver, [at, iterable]) => {
@@ -454,8 +459,11 @@ define('List.insertAll', (runtime, receiver, [at, iterable]) => {
     runtime.allocate(size);
     const start = index(position);
     const oldLength = target.elements.length;
-    resizeListSlots(target.elements, oldLength + size);
-    target.elements.copyWithin(start + size, start, oldLength);
+    if (size > 0) {
+      runtime.spend(oldLength - start);
+      resizeListSlots(target.elements, oldLength + size);
+      target.elements.copyWithin(start + size, start, oldLength);
+    }
     return runtime.invoke(target, 'setAll', args, [], undefined);
   });
 });
@@ -511,6 +519,7 @@ define('List.removeAt', (runtime, receiver, [at]) => {
 
 function removeListAt(runtime: Runtime, target: DartList, at: Value): Value {
   const position = checkListIndex(runtime, target, at, 'length');
+  runtime.spend(target.elements.length - position);
   return target.elements.splice(position, 1)[0];
 }
 
@@ -645,6 +654,8 @@ define('List.removeRange', (runtime, receiver, [start, end]) => {
   const target = list(receiver);
   checkGrowable(runtime, target, 'remove');
   const [from, to] = checkRange(runtime, start, end, target.elements.length);
+  if (from === to) return;
+  runtime.spend(target.elements.length - from);
   target.elements.splice(from, to - from);
   return;
 });
@@ -655,7 +666,8 @@ define('List.fillRange', (runtime, receiver, [start, end, fill]) => {
   checkModifiable(runtime, target);
   castTo(runtime, fill, elementType);
   const [from, to] = checkRange(runtime, start, end, target.elements.length);
-  for (let position = from; position < to; position++) target.elements[position] = fill;
+  runtime.spend(to - from);
+  target.elements.fill(fill, from, to);
   return;
 });
 define('_checkListCanRemove', (runtime, _receiver, [target]) => {
@@ -1041,20 +1053,11 @@ define('Set.retainAll', (runtime, receiver, [elements]) => {
 /** The VM's `_Set._filter`: tests each element in place and marks the removed ones without hashing them. */
 function filterSet(runtime: Runtime, receiver: Value, test: Value, keep: boolean): Value {
   checkSetModifiable(runtime, receiver);
-  const source = store(receiver);
-  const used = source.keys.length;
-  let modifications = source.modifications;
-  for (let position = 0; position < used; position++) {
-    runtime.spend();
-    if (!source.isLive(position)) continue;
-    const result = callFunction(runtime, test, source.keyAt(position)) === true;
-    if (source.modifications !== modifications) runtime.throwError('ConcurrentModificationError', '', [receiver]);
-    if (result !== keep) {
-      source.deleteAt(position);
-      modifications = source.modifications;
-    }
-  }
-  return undefined;
+  return filterHashStore(
+    runtime,
+    receiver,
+    (source, position) => (callFunction(runtime, test, source.keyAt(position)) === true) !== keep
+  );
 }
 define('Set.removeWhere', (runtime, receiver, [test]) => filterSet(runtime, receiver, test, false));
 define('Set.retainWhere', (runtime, receiver, [test]) => filterSet(runtime, receiver, test, true));
@@ -1268,22 +1271,33 @@ define('Map.addEntries', (runtime, receiver, [entries]) => {
 });
 define('Map.removeWhere', (runtime, receiver, [test]) => {
   checkMapModifiable(runtime, receiver);
-  // As the VM's removeWhere: test each entry in place and mark the removed ones without hashing their keys.
+  return filterHashStore(
+    runtime,
+    receiver,
+    (source, position) => callFunction(runtime, test, source.keyAt(position), source.entryValues[position]) === true
+  );
+});
+
+function filterHashStore(
+  runtime: Runtime,
+  receiver: Value,
+  remove: (source: HashStore, position: number) => boolean
+): undefined {
   const source = store(receiver);
   const used = source.keys.length;
   let modifications = source.modifications;
   for (let position = 0; position < used; position++) {
     runtime.spend();
     if (!source.isLive(position)) continue;
-    const remove = callFunction(runtime, test, source.keyAt(position), source.entryValues[position]) === true;
+    const shouldRemove = remove(source, position);
     if (source.modifications !== modifications) runtime.throwError('ConcurrentModificationError', '', [receiver]);
-    if (remove) {
+    if (shouldRemove) {
       source.deleteAt(position);
       modifications = source.modifications;
     }
   }
   return;
-});
+}
 define('Map.addAll', (runtime, receiver, [other]) => {
   const map = receiver as DartObject;
   checkElement(runtime, other, interfaceType(coreTypes.map, map.typeArgs), 'other');
