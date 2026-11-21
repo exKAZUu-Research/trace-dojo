@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 431 -- Constructor types, initializer ordering, and delegation share the same declarations.
+// code-gauge-allow-file fileNcss 435 -- Constructor types, initializer ordering, and delegation share the same declarations.
 import { AssignmentCompiler } from './assignmentCompiler';
 import type {
   Arguments as ArgumentsSyntax,
@@ -21,7 +21,6 @@ import {
   DYNAMIC,
   type FunctionType,
   functionType,
-  type InterfaceType,
   isNullable,
   isSubtype,
   substitute,
@@ -142,6 +141,8 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     parameters: FormalParameters
   ): { positionalTypes: DartType[]; namedTypes: Map<string, DartType> } {
     const typeOf = (parameter: FormalParameter, argument: number | string): DartType => {
+      if (cls.kind === 'extensionType' && parameter.binding === 'super')
+        return this.error(parameter, '拡張型のコンストラクタには super の仮引数を書けません。');
       if (parameter.type) return this.resolveType(parameter.type);
       if (parameter.binding === 'this') {
         const field = cls.fields.find((candidate) => candidate.name === parameter.name);
@@ -757,7 +758,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
   /** The call of the superclass's constructor or of another constructor of the class, in an initializer list. */
   // code-gauge-allow functionParameterCount 7 -- The parameters are the parts a caller already holds; grouping them would only rename them.
   // code-gauge-allow functionCognitiveComplexity 27 -- Validate redirects and splice the forwarded parameters into the call order.
-  // code-gauge-allow functionNcss 32 -- Delegation checks share the resolved constructor and its signature.
+  // code-gauge-allow functionNcss 33 -- Delegation checks share the resolved constructor and its signature.
   private compileDelegation(
     cls: ClassInfo,
     declaration: ConstructorDeclaration,
@@ -767,7 +768,8 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     span: Span,
     isImplicit = false
   ): (frame: Frame) => void {
-    const targetType = kind === 'super' ? (cls.superclass as InterfaceType) : cls.thisType;
+    const targetType = kind === 'super' ? cls.superclass : cls.thisType;
+    if (!targetType) return this.error(span, 'このクラスにはスーパークラスがありません。');
     const target = targetType.cls.constructors.get(name ?? '');
     this.checkUnavailableStaticMember(target?.forwardedFrom ?? targetType.cls, name ?? '', span);
     if (!target) {

@@ -6787,6 +6787,18 @@ var initial = 1;
   ).toMatchObject({ kind: 'compileError' });
 });
 
+test('extension type constructors reject super initializers and formals', () => {
+  for (const constructor of [
+    'E.bad() : super();',
+    'E.bad() : x = 1, super();',
+    'E.bad(int super.value) : x = value;',
+  ]) {
+    expect(executeProgram('dart', `extension type E(int x) { ${constructor} } void main() {}`)).toMatchObject({
+      kind: 'compileError',
+    });
+  }
+});
+
 test('constructor formals and tear-offs use inferred field types', () => {
   const declarations = `class Parent {
   var value = Later().value;
