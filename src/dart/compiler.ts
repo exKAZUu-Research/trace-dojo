@@ -1386,7 +1386,9 @@ export class Compiler extends MemberCompiler {
     const parents = cls.directSupertypes.map((type) => type.cls).filter((parent) => parent.kind === 'extensionType');
     if (parents.length < 2) return;
     for (const setter of [false, true]) {
-      const names = new Set(parents.flatMap((parent) => extensionMemberNames(parent, setter)));
+      const names = new Set<string>();
+      const visited = new Set<ClassInfo>();
+      for (const parent of parents) extensionMemberNames(parent, setter, names, visited);
       for (const name of names) {
         if ((setter ? cls.setters : cls.members).get(name)?.owner === cls) continue;
         const origins = new Set(parents.map((parent) => parent.interfaceMember(name, setter)).filter(Boolean));
@@ -1942,12 +1944,17 @@ function registerSealedSubclass(cls: ClassInfo): void {
 }
 
 /** The instance member names an extension type and its extension-type supertypes declare. */
-function extensionMemberNames(cls: ClassInfo, setter: boolean): string[] {
-  const own = [...(setter ? cls.setters : cls.members).values()]
-    .filter((member) => !member.isStatic)
-    .map((m) => m.name);
-  const inherited = cls.directSupertypes
-    .filter((type) => type.cls.kind === 'extensionType')
-    .flatMap((type) => extensionMemberNames(type.cls, setter));
-  return [...own, ...inherited];
+function extensionMemberNames(
+  cls: ClassInfo,
+  setter: boolean,
+  names = new Set<string>(),
+  visited = new Set<ClassInfo>()
+): Set<string> {
+  if (visited.has(cls)) return names;
+  visited.add(cls);
+  for (const member of (setter ? cls.setters : cls.members).values()) if (!member.isStatic) names.add(member.name);
+  for (const type of cls.directSupertypes) {
+    if (type.cls.kind === 'extensionType') extensionMemberNames(type.cls, setter, names, visited);
+  }
+  return names;
 }
