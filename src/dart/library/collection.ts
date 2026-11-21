@@ -1271,32 +1271,43 @@ class _CustomHashMap<K, V> extends _HashMap<K, V> {
   _CustomHashMap(_HashKeyPolicy<K> policy) : super(policy);
 }
 
-class _HashMapKeyIterable<K, V> extends EfficientLengthIterable<K> {
+abstract class _HashMapIterable<K, V, E> extends EfficientLengthIterable<E> {
   final _HashMap<K, V> _map;
-  _HashMapKeyIterable(this._map);
+  _HashMapIterable(this._map);
   int get length => _map.length;
   bool get isEmpty => _map.isEmpty;
+  bool get isNotEmpty => _map.isNotEmpty;
+}
+
+class _HashMapKeyIterable<K, V> extends _HashMapIterable<K, V, K> {
+  _HashMapKeyIterable(_HashMap<K, V> map) : super(map);
+  Iterator<K> get iterator => _HashMapKeyIterator<K, V>(_map);
   bool contains(Object? key) => _map.containsKey(key);
+  void forEach(void Function(K key) action) {
+    _map.forEach((K key, _) {
+      action(key);
+    });
+  }
   Set<K> toSet() => _map._newKeySet()..addAll(this);
-  Iterator<K> get iterator => _HashMapIterator<K, V, K>(_map, 0);
 }
 
-class _HashMapValueIterable<K, V> extends EfficientLengthIterable<V> {
-  final _HashMap<K, V> _map;
-  _HashMapValueIterable(this._map);
-  int get length => _map.length;
-  bool get isEmpty => _map.isEmpty;
-  Iterator<V> get iterator => _HashMapIterator<K, V, V>(_map, 1);
+class _HashMapValueIterable<K, V> extends _HashMapIterable<K, V, V> {
+  _HashMapValueIterable(_HashMap<K, V> map) : super(map);
+  Iterator<V> get iterator => _HashMapValueIterator<K, V>(_map);
+  bool contains(Object? value) => _map.containsValue(value);
+  void forEach(void Function(V value) action) {
+    _map.forEach((_, V value) {
+      action(value);
+    });
+  }
 }
 
-class _HashMapIterator<K, V, E> implements Iterator<E> {
+abstract class _HashMapIterator<K, V, E> implements Iterator<E> {
   final _HashMap<K, V> _map;
-  final int _kind;
   final int _stamp;
   int _index = 0;
   _HashMapEntry<K, V>? _entry;
-  E? _current;
-  _HashMapIterator(this._map, this._kind) : _stamp = _map._modificationCount;
+  _HashMapIterator(this._map) : _stamp = _map._modificationCount;
   bool moveNext() {
     if (_stamp != _map._modificationCount) throw ConcurrentModificationError(_map);
     var entry = _entry;
@@ -1304,7 +1315,6 @@ class _HashMapIterator<K, V, E> implements Iterator<E> {
       final next = entry.next;
       if (next != null) {
         _entry = next;
-        _current = (_kind == 0 ? next.key : next.value) as E;
         return true;
       }
       _entry = null;
@@ -1316,15 +1326,22 @@ class _HashMapIterator<K, V, E> implements Iterator<E> {
       if (entry != null) {
         _index = i + 1;
         _entry = entry;
-        _current = (_kind == 0 ? entry.key : entry.value) as E;
         return true;
       }
     }
     _index = length;
-    _current = null;
     return false;
   }
-  E get current => _current as E;
+}
+
+class _HashMapKeyIterator<K, V> extends _HashMapIterator<K, V, K> {
+  _HashMapKeyIterator(_HashMap<K, V> map) : super(map);
+  K get current => _entry!.key;
+}
+
+class _HashMapValueIterator<K, V> extends _HashMapIterator<K, V, V> {
+  _HashMapValueIterator(_HashMap<K, V> map) : super(map);
+  V get current => _entry!.value;
 }
 
 abstract final class HashSet<E> implements Set<E> {

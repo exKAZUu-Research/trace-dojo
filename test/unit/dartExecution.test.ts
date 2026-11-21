@@ -1433,6 +1433,35 @@ void main() {
   });
 });
 
+test('Dart HashMap key and value views and iterators match the VM classes', () => {
+  const program = `import 'dart:collection';
+late HashMap<int, Object> m2;
+class V { bool operator ==(Object other) { m2[2] = 'x'; return false; } int get hashCode => 1; }
+void main() {
+  final m = HashMap<int, String>()..[1] = 'old';
+  final i = m.values.iterator;
+  print(i.moveNext()); m[1] = 'new'; print(i.current);
+  final k = m.keys.iterator;
+  try { print(k.current); } catch (e) { print(e.runtimeType); }
+  print([k.moveNext(), k.current, k.moveNext()]);
+  try { print(k.current); } catch (e) { print(e.runtimeType); }
+  final a = m.keys.iterator.runtimeType, b = m.values.iterator.runtimeType;
+  print([a, b, a == b, {a, b}.length, a.hashCode, b.hashCode, m.keys.runtimeType.hashCode, m.values.runtimeType.hashCode]);
+  final h = HashMap<String, double>.identity();
+  print([h.keys.iterator.runtimeType.hashCode, h.values.iterator.runtimeType.hashCode]);
+  m2 = HashMap<int, Object>()..[1] = V();
+  try { print(m2.values.contains(3)); } catch (e) { print(e.runtimeType); }
+  print(m2.length);
+  m.keys.forEach(print); m.values.forEach(print);
+  print([m.keys.isNotEmpty, m.values.isNotEmpty, m.keys.contains(1), m.values.contains('new')]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'true\nnew\n_TypeError\n[true, 1, false]\n_TypeError\n[_HashMapKeyIterator<int, String>, _HashMapValueIterator<int, String>, false, 2, 1068096129, 396333034, 540613826, 963203138]\n[829608544, 115932755]\nfalse\n2\n1\nnew\n[true, true, true, true]\n',
+  });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}
