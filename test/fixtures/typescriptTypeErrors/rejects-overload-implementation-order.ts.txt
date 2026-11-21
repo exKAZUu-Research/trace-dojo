@@ -3,3 +3,17 @@ console.log("hello");
 function separatedImplementation(value: number): number;
 console.log("separated");
 function separatedImplementation(value: number): number { return value; }
+
+function expectedImplementation(value: number): number;
+function expectedImplementation(value: string): string;
+function otherImplementation(value: number | string): number | string { return value; }
+console.log(expectedImplementation(1));
+
+function firstMissing(value: number): number;
+function expectedGenericImplementation(value: string): string;
+function otherGenericImplementation<T>(value: T): T { return value; }
+
+class MismatchedImplementation {
+  method(value: string): string;
+  differentMethod(value: string): string { return value; }
+}

@@ -497,8 +497,10 @@ export class FunctionChecker {
           this.c.error(nextName ?? next, 'オーバーロードの static 修飾子は一致しなければいけません。');
         return;
       }
-      if (node.type === 'method_signature' && next.type === 'method_definition') {
-        this.c.error(nextName ?? next, 'オーバーロードの名前は、実装の名前と一致しなければいけません。');
+      const implementation = node.type === 'function_signature' ? 'function_declaration' : 'method_definition';
+      if (next.type === implementation) {
+        const expected = node.childForFieldName('name')?.text;
+        this.c.error(nextName ?? next, `実装の名前は '${expected}' でなければいけません。`);
         return;
       }
     }
