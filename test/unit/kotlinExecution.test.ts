@@ -5413,6 +5413,27 @@ test.each([
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'compileError', diagnostics: [{ message }] });
 });
 
+test('resolves nested classes through the superclass and qualified interface names', () => {
+  const source = `class Element(val value: Int = 3)
+open class Parent { class Element(val value: Int = 4) }
+open class Middle : Parent()
+interface Contract {
+    class Element(val value: Int = 5)
+    fun readNested(): Int = Element().value
+}
+class Child : Parent() { fun read(): Int = Element().value }
+class Grandchild : Middle() { fun read(): Int = Element().value }
+class Implementation : Contract { fun read(): Int = Element().value }
+fun main() {
+    println(Child().read())
+    println(Grandchild().read())
+    println(Implementation().read())
+    println(Implementation().readNested())
+    println(Contract.Element().value)
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '4\n4\n3\n5\n5\n' });
+});
+
 test("prints the same identity hashes whatever ran before in the server's process", () => {
   const program = 'class A\nfun main() {\n    println(hashSetOf(A(), A(), A()).map { it.hashCode() })\n}';
   const first = executeProgram('kotlin', program);

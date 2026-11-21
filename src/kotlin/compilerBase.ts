@@ -356,13 +356,23 @@ export function findClassInScope(scope: Scope | undefined, name: string): ClassS
     const found = current.classes.get(name);
     if (found) return found;
     for (let cls = current.staticClass; cls; cls = cls.outer) {
-      const nested = cls.nested.get(name);
+      const nested = findNestedInClassHierarchy(cls, name);
       if (nested) return nested;
-      for (const supertype of cls.supertypes) {
-        const inherited = supertype.cls.nested.get(name);
-        if (inherited) return inherited;
-      }
     }
+  }
+  return undefined;
+}
+
+function findNestedInClassHierarchy(cls: ClassSymbol, name: string): ClassSymbol | undefined {
+  const visited = new Set<ClassSymbol>();
+  for (
+    let current: ClassSymbol | undefined = cls;
+    current && !visited.has(current);
+    current = current.superclass?.cls
+  ) {
+    const nested = current.nested.get(name);
+    if (nested) return nested;
+    visited.add(current);
   }
   return undefined;
 }
