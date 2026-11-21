@@ -159,6 +159,7 @@ export class HashStore implements NativeState {
     if (this.capacity > 0 || this.policy !== other.policy || this.policy?.valid) return false;
     if (other.keys.length === 0) return true;
     if (other.deletedKeys !== 0) return false;
+    this.runtime.allocate(other.keys.length * (this.isMap ? 2 : 1) + other.capacity);
     this.keys = [...other.keys];
     this.entryValues = [...other.entryValues];
     this.index = Uint32Array.from(other.index);
@@ -223,6 +224,7 @@ export class HashStore implements NativeState {
       newSize = INITIAL_INDEX_SIZE;
       hashMask = indexSizeToHashMask(newSize);
     }
+    this.runtime.allocate(newSize >> 1);
     this.index = new Uint32Array(newSize);
     this.hashMask = hashMask;
     this.capacity = newSize >> 1;

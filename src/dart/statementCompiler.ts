@@ -933,6 +933,7 @@ export abstract class StatementCompiler extends PatternCompiler {
     statement: { row: number }
   ): (frame: Frame, value: Value) => void {
     const row = this.stepRowOf(statement);
+    if (binding.kind !== 'identifier') this.checkAnnotations(binding.annotations);
     switch (binding.kind) {
       case 'declaration': {
         const type = binding.type ? this.resolveType(binding.type) : elementType;

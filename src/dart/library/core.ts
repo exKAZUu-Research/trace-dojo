@@ -1720,7 +1720,7 @@ abstract interface class List<E> extends EfficientLengthIterable<E> {
   external void addAll(Iterable<E> iterable);
   Iterable<E> get reversed => ReversedListIterable<E>(this);
   external void sort([int Function(E a, E b)? compare]);
-  external void shuffle([dynamic random]);
+  external void shuffle([Random? random]);
   external int indexOf(E element, [int start = 0]);
   external int indexWhere(bool Function(E element) test, [int start = 0]);
   external int lastIndexWhere(bool Function(E element) test, [int? start]);
@@ -1749,7 +1749,7 @@ abstract interface class List<E> extends EfficientLengthIterable<E> {
   }
   external Map<int, E> asMap();
   external bool contains(Object? element);
-  external void forEach(dynamic Function(E element) action);
+  external void forEach(void Function(E element) action);
   external String join([String separator = ""]);
   external E elementAt(int index);
   external List<R> cast<R>();

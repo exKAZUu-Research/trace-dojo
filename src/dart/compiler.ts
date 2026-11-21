@@ -34,7 +34,7 @@ import {
   type TopLevelFunction,
   type TypeAlias,
 } from './environment';
-import { lateFieldGetter, lateFieldSetter } from './lateFields';
+import { initializeField, lateFieldGetter, lateFieldSetter } from './lateFields';
 import { BoundedStringParts } from './library/boundedStringParts';
 import { markCovariantParameters, MemberCompiler } from './memberCompiler';
 import { type DartThrow, Frame, type FunctionInfo, type Runtime, type TypeEnv } from './runtime';
@@ -81,8 +81,6 @@ export interface CompiledProgram {
   programGlobals: GlobalVariable[];
   mainTakesArguments: boolean;
 }
-
-const INITIALIZING = Symbol('initializing') as unknown as Value;
 
 interface ClassWork {
   cls: ClassInfo;
@@ -1121,6 +1119,9 @@ export class Compiler extends MemberCompiler {
   // Enums
 
   private declareEnumValues(cls: ClassInfo, declaration: ClassDeclaration): void {
+    const valuesMember = cls.staticMembers.get('values') ?? cls.members.get('values') ?? cls.setters.get('values');
+    if (valuesMember)
+      this.error({ row: valuesMember.row ?? declaration.row }, '列挙型には values というメンバーを宣言できません。');
     const names = new Set<string>();
     const values: GlobalVariable[] = [];
     const enumType = interfaceType(cls, instantiateToBounds(cls.typeParams));
@@ -1270,7 +1271,7 @@ export class Compiler extends MemberCompiler {
       )
         this.error(member, '列挙型のコンストラクタは const にしてください。');
     }
-    for (const name of ['index', 'hashCode', '==', 'values']) {
+    for (const name of ['index', 'hashCode', '==']) {
       const own = cls.members.get(name);
       if (!own) continue;
       const isObjectMember = name === 'hashCode' || name === '==';
@@ -1786,22 +1787,19 @@ function isPrimitiveConstant(compiled: Compiled): boolean {
 /** Reads a global, initializing it on first use as Dart does for top-level variables and static fields. */
 export function readGlobalValue(runtime: Runtime, global: GlobalVariable): Value {
   const cell = runtime.globals[global.slot];
-  const value = cell.v;
-  // A read during the global's own initialization runs the initializer again, as the VM does, which recursion of
-  // the initializers turns into a StackOverflowError.
-  if (value !== UNINITIALIZED && value !== INITIALIZING) return value;
-  if (!global.initialize) {
-    runtime.throwError('LateError', '', [`Field '${global.name}' has not been initialized.`]);
-  }
-  cell.v = INITIALIZING;
-  try {
-    const initialized = global.initialize(runtime);
-    cell.v = initialized;
-    return initialized;
-  } catch (error) {
-    cell.v = UNINITIALIZED;
-    throw error;
-  }
+  if (cell.v !== UNINITIALIZED) return cell.v;
+  const { initialize, name } = global;
+  if (!initialize) runtime.throwError('LateError', '', [`Field '${name}' has not been initialized.`]);
+  return initializeField(
+    runtime,
+    name,
+    global.isFinal,
+    () => initialize(runtime),
+    () => cell.v,
+    (computed) => {
+      cell.v = computed;
+    }
+  );
 }
 
 /** Creates the cells of the globals for a run, with the values known before it starts. */

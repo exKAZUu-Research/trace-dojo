@@ -12,12 +12,32 @@ export function lateFieldGetter(field: FieldMember, initializer: () => LateIniti
     if (value !== UNINITIALIZED) return value;
     const initialize = initializer();
     if (!initialize) return runtime.throwError('LateError', '', [`Field '${name}' has not been initialized.`]);
-    const computed = initialize(runtime, object);
-    if (field.isFinal && object.fields[slot] !== UNINITIALIZED)
-      runtime.throwError('LateError', '', [`Field '${name}' has been assigned during initialization.`]);
-    object.fields[slot] = computed;
-    return computed;
+    return initializeField(
+      runtime,
+      name,
+      field.isFinal,
+      () => initialize(runtime, object),
+      () => object.fields[slot],
+      (computed) => {
+        object.fields[slot] = computed;
+      }
+    );
   };
+}
+
+export function initializeField(
+  runtime: Runtime,
+  name: string,
+  isFinal: boolean,
+  initialize: () => Value,
+  read: () => Value,
+  write: (value: Value) => void
+): Value {
+  const computed = initialize();
+  if (isFinal && read() !== UNINITIALIZED)
+    runtime.throwError('LateError', '', [`Field '${name}' has been assigned during initialization.`]);
+  write(computed);
+  return computed;
 }
 
 export function lateFieldSetter(field: FieldMember): Callable {

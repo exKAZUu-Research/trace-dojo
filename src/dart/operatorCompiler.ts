@@ -366,20 +366,17 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     const target = this.compileExpression(expression.target, context);
     const slot = this.fn.allocateSlot();
     this.fn.info.locals[slot] = { name: '\0', type: target.type };
-    const temporary = new Cell(undefined);
-    void temporary;
-    const variableType = target.type;
-    const sections = expression.sections.map((section) => {
-      const receiver: Compiled = {
-        // A null-aware cascade skips every section when the target is null, so each sees a value that is not.
-        type: expression.sections[0]?.nullAware ? nonNullable(variableType) : variableType,
-        run: (frame) => (frame.locals[slot] as Cell).v,
-        isConst: false,
-      };
-      return this.compileCascadeSection(receiver, section);
-    });
-    const targetRun = target.run;
     const nullAware = expression.sections[0]?.nullAware ?? false;
+    this.skipOnNull(target, nullAware);
+    const receiver: Compiled = {
+      type: nullAware ? nonNullable(target.type) : target.type,
+      run: (frame) => (frame.locals[slot] as Cell).v,
+      isConst: false,
+    };
+    const sections = expression.sections.map(
+      (section) => this.compileNullChain(() => this.compileCascadeSection(receiver, section)).result
+    );
+    const targetRun = target.run;
     return {
       type: target.type,
       run: (frame) => {

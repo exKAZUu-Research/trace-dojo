@@ -288,9 +288,15 @@ export type Statement =
 
 export type ForInBinding =
   /** `for (var x in …)`, `for (final int x in …)`, or `for (x in …)` with an existing variable. */
-  | ({ kind: 'declaration'; isFinal: boolean; type: TypeSyntax | undefined; name: string } & Span)
+  | ({
+      kind: 'declaration';
+      isFinal: boolean;
+      type: TypeSyntax | undefined;
+      name: string;
+      annotations?: Annotation[];
+    } & Span)
   | ({ kind: 'identifier'; name: string } & Span)
-  | ({ kind: 'pattern'; isFinal: boolean; pattern: Pattern } & Span);
+  | ({ kind: 'pattern'; isFinal: boolean; pattern: Pattern; annotations?: Annotation[] } & Span);
 
 export interface SwitchCase extends Span {
   /** Undefined for `default:`. */

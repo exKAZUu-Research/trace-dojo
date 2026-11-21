@@ -2,6 +2,7 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type {
+  Annotation,
   Arguments,
   Block,
   CascadeSection,
@@ -69,6 +70,7 @@ export abstract class ExpressionConverter {
   /** Whether the source is one of the interpreter's own libraries, which may use `external` and other internals. */
   protected abstract readonly isLibrary: boolean;
 
+  abstract convertAnnotation(node: Node): Annotation;
   abstract convertBlock(node: Node): Block;
   abstract convertFormalParameters(node: Node): FormalParameters;
   abstract convertFunctionBody(node: Node): FunctionBody;
@@ -1385,16 +1387,23 @@ export abstract class ExpressionConverter {
   }
 
   private convertForInBinding(node: Node, nodes: Node[]): ForInBinding {
-    const annotations = nodes.filter((child) => child.type === 'annotation');
+    const annotations = nodes
+      .filter((child) => child.type === 'annotation')
+      .map((child) => this.convertAnnotation(child));
     const parts = nodes.filter((child) => child.type !== 'annotation');
     const span = spanOf(parts[0] ?? node);
-    void annotations;
     const isFinal = parts.some((child) => child.type === 'final');
     const keyword = parts.some((child) => child.type === 'final' || child.type === 'var');
     const rest = parts.filter((child) => child.type !== 'final' && child.type !== 'var');
     const patternNode = rest.find((child) => PATTERN_NODES.has(child.type));
     if (patternNode) {
-      return { kind: 'pattern', isFinal, pattern: this.convertPattern(patternNode, 'declaration'), ...span };
+      return {
+        kind: 'pattern',
+        isFinal,
+        pattern: this.convertPattern(patternNode, 'declaration'),
+        annotations,
+        ...span,
+      };
     }
     const typeNode = rest.find((child) => child.type === 'type');
     if (typeNode && parts.some((child) => child.type === 'var')) {
@@ -1402,12 +1411,16 @@ export abstract class ExpressionConverter {
     }
     const nameNode = rest.find((child) => child.type === 'identifier');
     if (!nameNode) return syntaxError(node, '書き方に誤りがあります。');
-    if (!keyword && !typeNode) return { kind: 'identifier', name: nameNode.text, ...span };
+    if (!keyword && !typeNode) {
+      if (annotations.length > 0) return syntaxError(node, 'アノテーションには変数の宣言が必要です。');
+      return { kind: 'identifier', name: nameNode.text, ...span };
+    }
     return {
       kind: 'declaration',
       isFinal,
       type: typeNode ? this.convertType(typeNode) : undefined,
       name: nameNode.text,
+      annotations,
       ...span,
     };
   }

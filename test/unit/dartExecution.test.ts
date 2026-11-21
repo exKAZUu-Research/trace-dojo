@@ -3801,3 +3801,147 @@ void main() {
     expect(executeProgram('dart', source)).toMatchObject({ kind: 'compileError' });
   }
 });
+
+test('null-aware chains join flows only where their execution can be skipped', () => {
+  const declarations = `class C {
+  C get next => this;
+  int get value => 3;
+  void set value(int n) {}
+  void take(int n) { print(n); }
+}
+C? nullable() => null;
+`;
+  const positive = `${declarations}
+void main() {
+  C? c = nullable();
+  c?.take(c.value);
+  int a;
+  c?..take(a = 2)..take(a);
+  var skipped = (c?.next.value = 2);
+  print(skipped);
+  C definite = C();
+  int b;
+  definite?.take(b = 4);
+  print(b);
+}`;
+  expect(executeProgram('dart', positive)).toMatchObject({
+    kind: 'executed',
+    stdout: 'null\n4\n4\n',
+  });
+  for (const operation of ['c?.take(n = 1)', 'c?.next.value = (n = 1)', 'c?..take(n = 1)']) {
+    expect(
+      executeProgram('dart', `${declarations}void main() { C? c = nullable(); int n; ${operation}; print(n); }`)
+    ).toMatchObject({ kind: 'compileError' });
+  }
+  expect(executeProgram('dart', 'void main() { List<int>? a; int n; a?[n = 1] = 2; print(n); }')).toMatchObject({
+    kind: 'compileError',
+  });
+});
+
+test('for-in declarations validate their annotations in statements and collections', () => {
+  const program = `const note = 1;
+void main() {
+  for (@note var n in [3]) print(n);
+  print([for (@note final (a,b) in [(1,2)]) a+b]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '3\n[3]\n' });
+  for (const source of [
+    program.replace('@note var n', '@missing var n'),
+    program.replace('@note final (a,b)', '@missing final (a,b)'),
+    'void main() { int n = 0; for (@deprecated n in [1]) print(n); }',
+  ]) {
+    expect(executeProgram('dart', source)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
+test('reentrant global initializers preserve assigned values even when the outer call fails', () => {
+  const program = `int count = 0;
+late final int x = initialize();
+int initialize() {
+  if (count++ == 0) print(x);
+  return count;
+}
+class C {
+  static int count = 0;
+  static final int x = initialize();
+  static int initialize() {
+    if (count++ == 0) print(x);
+    return count;
+  }
+}
+int retries = 0;
+int y = initializeOther();
+int initializeOther() {
+  if (retries++ == 0) { print(y); throw 'outer'; }
+  return retries;
+}
+void main() {
+  try { print(x); } catch (error) { print(error); }
+  try { print(C.x); } catch (error) { print(error); }
+  try { print(y); } catch (error) { print(error); }
+  print([x, C.x, y]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      "2\nLateInitializationError: Field 'x' has been assigned during initialization.\n2\nLateInitializationError: Field 'x' has been assigned during initialization.\n2\nouter\n[2, 2, 2]\n",
+  });
+});
+
+test('enum values remain reserved when the generated getter is installed', () => {
+  for (const member of ['static int values = 1;', 'static int get values => 1;', 'void set values(int n) {}']) {
+    expect(executeProgram('dart', `enum E { a; ${member} } void main() { print(E.values); }`)).toMatchObject({
+      kind: 'compileError',
+    });
+  }
+  expect(
+    executeProgram('dart', 'enum E { a; static void set values(int n) {} } void main() { print(E.values); }')
+  ).toMatchObject({ kind: 'executed', stdout: '[E.a]\n' });
+});
+
+test('unrepresentable integer literals in double contexts produce compile errors', () => {
+  const digits = '1' + '0'.repeat(400);
+  for (const literal of [digits, '-' + digits]) {
+    expect(executeProgram('dart', `void main() { double value = ${literal}; print(value); }`)).toMatchObject({
+      kind: 'compileError',
+    });
+  }
+});
+
+test('native lists use the SDK callback and shuffle argument signatures', () => {
+  const program = `import 'dart:math';
+void main() {
+  [1].forEach((value) => print(value));
+  var list = [1, 2, 3, 4];
+  list.shuffle(Random(1));
+  print(list);
+  dynamic dynamicList = list;
+  try { dynamicList.shuffle(1); } catch (error) { print(error.runtimeType); }
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '1\n[3, 2, 4, 1]\n_TypeError\n',
+  });
+  for (const source of [
+    'void main() { [1].forEach((x) { return 2; }); }',
+    'class Duck { int nextInt(int n) => 0; } void main() { [1,2].shuffle(Duck()); }',
+  ]) {
+    expect(executeProgram('dart', source)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
+test('native set and map copies are charged against the allocation limit', () => {
+  for (const [source, copy] of [
+    ['Set<int>.of(List<int>.generate(10000, (i) => i))', '{...original}'],
+    ['Set<int>.of(List<int>.generate(10000, (i) => i))', 'Set<int>.of(original)'],
+    ['Map<int, int>.fromIterables(List<int>.generate(10000, (i) => i), List<int>.filled(10000, 1))', '{...original}'],
+  ]) {
+    const program = `void main() {
+  var original = ${source};
+  var copies = [];
+  for (var i = 0; i < 120; i++) copies.add(${copy});
+  print(copies.length);
+}`;
+    expect(executeProgram('dart', program)).toMatchObject({ kind: 'limitExceeded', limit: 'storage' });
+  }
+});

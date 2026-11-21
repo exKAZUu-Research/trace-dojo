@@ -1,5 +1,5 @@
 import { CompileError } from '../interpreter/diagnostics';
-// code-gauge-allow-file fileNcss 947 -- Expression kinds share the same scope and evaluation rules.
+// code-gauge-allow-file fileNcss 972 -- Expression kinds share the same scope and evaluation rules.
 import type {
   Annotation,
   Arguments as ArgumentsSyntax,
@@ -167,18 +167,45 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   /** Compiles an expression whose value is used, ending a null-aware chain. */
   compileExpression(expression: Expression, context?: DartType): Compiled {
-    const compiled = this.compileChainPart(expression, context);
-    if (!this.isShorting(expression)) return compiled;
+    const { result: compiled, skipped } = this.compileNullChain(() => this.compileChainPart(expression, context));
+    if (!skipped) return compiled;
     const { run } = compiled;
     return {
       ...compiled,
       type: makeNullable(compiled.type),
       variable: undefined,
+      completes: skipped.reachable ? undefined : compiled.completes,
       run: (frame) => {
         const value = run(frame);
         return value === SHORTED ? undefined : value;
       },
     };
+  }
+
+  private nullChain = { exit: undefined as Flow | undefined };
+
+  protected compileNullChain<T>(compile: () => T): { result: T; skipped: Flow | undefined } {
+    const outer = this.nullChain;
+    const chain: { exit: Flow | undefined } = { exit: undefined };
+    this.nullChain = chain;
+    try {
+      const result = compile();
+      const skipped = chain.exit;
+      if (skipped) this.flow = Flow.join(this.flow, skipped);
+      return { result, skipped };
+    } finally {
+      this.nullChain = outer;
+    }
+  }
+
+  protected skipOnNull(receiver: Compiled, nullAware: boolean): void {
+    if (!nullAware || !isPotentiallyNullable(receiver.type)) return;
+    const before = this.flow;
+    const { exit } = this.nullChain;
+    this.nullChain.exit = exit ? Flow.join(exit, before) : before;
+    const variable = receiver.variable;
+    const narrowed = promotionTarget(receiver.type, nonNullable(receiver.type));
+    if (variable && narrowed && this.isPromotable(variable)) this.flow = this.flow.promote(variable, narrowed);
   }
 
   /** Whether a null-aware access appears in the selector chain of an expression, so that it may give `SHORTED`. */
@@ -594,7 +621,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   // Literals
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Each branch is one of the cases Dart distinguishes for this construct.
+  // code-gauge-allow functionCognitiveComplexity 18 -- Apply the distinct literal ranges and exact double conversion.
   protected compileInt(
     expression: Extract<Expression, { kind: 'int' }>,
     context: DartType | undefined,
@@ -603,7 +630,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const exact = negated ? -expression.value : expression.value;
     if (context && isDoubleContext(context)) {
       const value = Number(exact);
-      if (BigInt(value) !== exact) {
+      if (!Number.isFinite(value) || BigInt(value) !== exact) {
         this.error(expression, `整数リテラル ${expression.text} は、double として正確に表せません。`);
       }
       return { type: interfaceType(coreTypes.double), run: () => value, isConst: true, constValue: { value } };
@@ -1264,6 +1291,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   protected readMemberOf(receiver: Compiled, name: string, span: Span, nullAware: boolean): Compiled {
     const receiverType = receiver.type;
     if (receiverType.kind === 'void') this.error(span, 'void の値のメンバーは使えません。');
+    this.skipOnNull(receiver, nullAware);
     if (receiverType.kind === 'dynamic' || (receiverType.kind === 'never' && !receiverType.nullable)) {
       const { run } = receiver;
       const memberName = this.runtimeMemberName(name);

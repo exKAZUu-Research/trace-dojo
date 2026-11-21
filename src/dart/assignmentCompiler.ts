@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 675 -- Assignment targets share read and write dispatch.
+// code-gauge-allow-file fileNcss 677 -- Assignment targets share read and write dispatch.
 import type { CascadeSelector, CollectionElement, Expression, ForInBinding, Span, SwitchExpressionCase } from './ast';
 import type { ClassInfo, Member } from './classes';
 import { at, type Compiled, type Eval, type ResolvedMember, typeName } from './compilerBase';
@@ -479,6 +479,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     shorting = false
   ): AssignableTarget {
     const receiverType = receiver.type;
+    this.skipOnNull(receiver, nullAware);
     const prepare = preparingReceiver(receiver.run, nullAware);
     const memberName = this.runtimeMemberName(name);
     if (receiverType.kind === 'dynamic') {
@@ -525,7 +526,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
   }
 
   // code-gauge-allow functionCognitiveComplexity 21 -- Resolve static operators, then build the prepared read and write for any receiver.
-  // code-gauge-allow functionNcss 45 -- Resolve static operators, then build the prepared read and write for any receiver.
+  // code-gauge-allow functionNcss 46 -- Resolve static operators, then build the prepared read and write for any receiver.
   private indexTarget(
     receiver: Compiled,
     indexSyntax: Expression,
@@ -534,6 +535,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     shorting = false
   ): AssignableTarget {
     const receiverType = receiver.type;
+    this.skipOnNull(receiver, nullAware);
     const lookupType = nullAware ? nonNullable(receiverType) : receiverType;
     let indexContext: DartType | undefined;
     let writeType: DartType = DYNAMIC;
