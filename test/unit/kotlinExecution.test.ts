@@ -21,6 +21,33 @@ fun main() {
   expect('finalTurtles' in result && result.finalTurtles).toHaveLength(40);
 });
 
+test.each(['ArrayList(source)', 'source.toTypedArray()'])(
+  'keeps prior turtles during native copying with %s',
+  (copy) => {
+    const source = `class SpawnIterator : Iterator<Turtle> {
+    var count = 0
+    override fun hasNext(): Boolean = count < 3
+    override fun next(): Turtle {
+        val turtle = Turtle(count++, 0)
+        turtle.canMoveForward()
+        return turtle
+    }
+}
+class Spawn : Collection<Turtle> by emptyList<Turtle>() {
+    override val size: Int get() = 3
+    override fun iterator(): Iterator<Turtle> = SpawnIterator()
+}
+fun main() {
+    val source = Spawn()
+    val turtles = ${copy}
+    println(turtles.size)
+}`;
+    const result = executeProgram('kotlin', source);
+    expect(result).toMatchObject({ kind: 'executed', stdout: '3\n' });
+    expect('finalTurtles' in result && result.finalTurtles.map(({ x }) => x)).toEqual([0, 1, 2]);
+  }
+);
+
 test.each(['contains', 'split'])('charges the execution budget during CharSequence %s', (operation) => {
   const source = `fun main() {
     val s: CharSequence = StringBuilder("a".repeat(100000))

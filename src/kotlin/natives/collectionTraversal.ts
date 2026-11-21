@@ -11,7 +11,7 @@ const MUTABLE_COLLECTION = 'kotlin.collections.MutableCollection';
 /** Reads an iterable of the program through its iterator, as the library's functions do. */
 export function iterateElements(frame: Frame, iterable: KObject): Value[] {
   const result: Value[] = [];
-  forEachIterable(frame, iterable, (element) => result.push(element));
+  frame.runtime.withNativeRoots([result], () => forEachIterable(frame, iterable, (element) => result.push(element)));
   return result;
 }
 
