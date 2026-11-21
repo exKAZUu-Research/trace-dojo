@@ -904,9 +904,14 @@ export abstract class CallCompiler extends OperatorCompiler {
   ): Compiled {
     this.checkTypeParameterAnnotations(expression.typeParameters);
     const contextType = context ? resolveBound(context) : undefined;
-    const contextFunction =
-      contextType?.kind === 'function' && expression.typeParameters.length === 0 ? contextType : undefined;
     const typeParams = this.declareTypeParams(expression.typeParameters);
+    const contextFunction =
+      contextType?.kind === 'function' && contextType.typeParams.length === typeParams.length
+        ? instantiateFunction(
+            contextType,
+            typeParams.map((parameter) => typeParamType(parameter))
+          )
+        : undefined;
     return this.withTypeParams(typeParams, () => {
       const { parameters } = expression;
       const positionalTypes = parameters.positional.map((parameter, index) => {

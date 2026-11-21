@@ -1355,6 +1355,16 @@ void main() {
   });
 });
 
+test('generic closures infer positional and named parameter types from their context', () => {
+  const program = `void main() {
+  T Function<T>(T) identity = <U>(x) => x;
+  T Function<T extends num>({required T value}) named = <U extends num>({required value}) => value;
+  print(identity<int>(1));
+  print(named<double>(value: 2.5));
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '1\n2.5\n' });
+});
+
 // The interpreter matches regular expressions with its own engine, which must keep ECMAScript's backtracking order,
 // the groups each iteration of a loop clears, lookbehind's backward matching, and Unicode and case-insensitive modes.
 test("regular expressions match as the VM's Irregexp does", () => {
