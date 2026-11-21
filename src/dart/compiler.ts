@@ -65,10 +65,6 @@ import { type Arguments, type Callable, Cell, DartClosure, DartObject, UNINITIAL
 /** The natives that `external` members of the interpreter's own libraries bind to, by `Class.member` or name. */
 export type NativeTable = ReadonlyMap<string, Callable | ConstructorImpl>;
 
-export interface CompileOptions {
-  atomicRows?: ReadonlySet<number>;
-}
-
 export interface CompiledProgram {
   main: TopLevelFunction;
   globals: GlobalVariable[];
