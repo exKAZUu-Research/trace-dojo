@@ -175,7 +175,7 @@ export function matchText(runtime: Runtime, state: MatchState, group = 0): strin
   const end = group === 0 ? state.end : state.captures?.[capture + 1];
   if (start === undefined || end === undefined || start < 0 || end < 0) return undefined;
   runtime.spend(Math.ceil((end - start) / 1024));
-  return stringSlice(state.input, start, end);
+  return stringSlice(runtime, state.input, start, end);
 }
 
 function matchState(value: Value): MatchState {

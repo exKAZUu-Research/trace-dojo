@@ -755,6 +755,25 @@ test('num.compareTo orders precise integers, signed zeros, and NaN', () => {
   });
 });
 
+test('detached string copies share the execution budget', () => {
+  const measure = `void measure(int count) {
+  final text = 'x' * 500000 + ' ';
+  var length = 0;
+  for (var index = 0; index < count; index++) {
+    length += text.substring(1).length + text.trimRight().length;
+  }
+  print(length);
+}`;
+  expect(executeProgram('dart', `${measure} void main() => measure(1);`)).toMatchObject({
+    kind: 'executed',
+    stdout: '1000000\n',
+  });
+  expect(executeProgram('dart', `${measure} void main() => measure(18);`)).toMatchObject({
+    kind: 'limitExceeded',
+    limit: 'operations',
+  });
+});
+
 test('nullable receivers still check covariant equality parameters', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}

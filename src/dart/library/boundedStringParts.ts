@@ -2,15 +2,17 @@ import { LIMITS } from '../../interpreter/limits';
 import { encodableText } from '../format';
 import type { Runtime } from '../runtime';
 
-export function stringSlice(text: string, start: number, end = text.length): string {
-  return detachShorterString(text, text.slice(start, end));
+export function stringSlice(runtime: Runtime, text: string, start: number, end = text.length): string {
+  return detachShorterString(runtime, text, text.slice(start, end));
 }
 
-export function detachShorterString(source: string, text: string): string {
-  return text.length < source.length ? copyString(text) : text;
+export function detachShorterString(runtime: Runtime, source: string, text: string): string {
+  return text.length < source.length ? copyString(runtime, text) : text;
 }
 
-export function copyString(text: string): string {
+export function copyString(runtime: Runtime, text: string): string {
+  if (text.length === 0) return text;
+  runtime.spend(Math.ceil(text.length / 16));
   // V8 may retain a slice's backing string even when the slice is small.
   return Buffer.from(text, 'utf16le').toString('utf16le');
 }
