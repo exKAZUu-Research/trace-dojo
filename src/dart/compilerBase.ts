@@ -611,6 +611,8 @@ export abstract class CompilerBase {
     }
     const direct = this.lookupDirect(base, name, setter);
     if (direct) return direct;
+    // An extension applies only when the receiver's type has no member of that name, getter or setter.
+    if (this.lookupDirect(base, name, !setter)) return undefined;
     return this.lookupExtension(receiverType, name, setter, span);
   }
 
