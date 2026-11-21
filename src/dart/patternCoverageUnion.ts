@@ -1,5 +1,5 @@
 import type { Pattern, Span } from './ast';
-import { nullPatternComparison } from './astWalk';
+import { isNullConstantPattern } from './astWalk';
 import { coversAll } from './exhaustiveness';
 import type { PatternCompiler } from './patternCompiler';
 import {
@@ -125,7 +125,7 @@ function union(compiler: PatternCompiler, arms: readonly Pattern[]): readonly Pa
     const list = listArm(arm);
     if (list) {
       if (list.properties.length > 0 || addListRestriction(compiler, restrictions, list)) spaces.push(arm);
-    } else if (nullPatternComparison(arm) === '==') {
+    } else if (isNullConstantPattern(arm)) {
       nullSpace ??= arm;
     } else {
       spaces.push(arm);
@@ -203,12 +203,12 @@ function intersectListPair(compiler: PatternCompiler, a: Pattern, b: Pattern): I
   }
   if (left) return intersectListType(compiler, left, b);
   if (right) return intersectListType(compiler, right, a);
-  if (nullPatternComparison(a) === '==' && nullPatternComparison(b) === '==') return a;
+  if (isNullConstantPattern(a) && isNullConstantPattern(b)) return a;
   return undefined;
 }
 
 function intersectListType(compiler: PatternCompiler, list: ListArm, other: Pattern): Intersection {
-  if (nullPatternComparison(other) === '==') return list.nullable ? other : UNKNOWN_INTERSECTION;
+  if (isNullConstantPattern(other)) return list.nullable ? other : UNKNOWN_INTERSECTION;
   const type = constraintType(compiler, other);
   if (!type) return undefined;
   const subject = restrictedListType(compiler, list);

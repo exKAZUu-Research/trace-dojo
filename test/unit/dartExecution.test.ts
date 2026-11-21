@@ -1341,6 +1341,21 @@ void main() { A(4).show(); }`;
   expect(executeProgram('dart', mutable)).toMatchObject({ kind: 'compileError' });
 });
 
+test.each([
+  ['int?', 'null => 0, != null => 1'],
+  ['int?', '== null => 0, int() => 1'],
+  ['int', '!= null => 1'],
+  ['Object?', '!= null => 1, null => 0'],
+  ['List<int>?', '== null => 0, [] => 1, [_, ...] => 2'],
+])('Dart relational null patterns do not make a switch on %s exhaustive: %s', (type, cases) => {
+  expect(
+    executeProgram('dart', `int f(${type} v) => switch (v) { ${cases} };\nvoid main() { print(f(null as dynamic)); }`)
+  ).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ message: expect.stringContaining('すべての値') })],
+  });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}
@@ -2365,7 +2380,7 @@ int afterSwitch(String? x) {
   switch (x) { case == null: return -1; }
   return x.length;
 }
-int relational(int? x) => switch (x) { != null => x + 1, null => 0 };
+int relational(int? x) => switch (x) { != null => x + 1, _ => 0 };
 int combined(int? x) {
   if (x case != null && > 0) return x + 1;
   switch (x) { case 0 || null: return 0; }

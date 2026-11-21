@@ -69,6 +69,12 @@ export function localNamesIn(statements: readonly Statement[]): Set<string> {
   return names;
 }
 
+/** Whether a pattern is the constant `null`, the only pattern exhaustiveness counts as covering null. */
+export function isNullConstantPattern(pattern: Pattern): boolean {
+  while (pattern.kind === 'parenthesized') pattern = pattern.pattern;
+  return pattern.kind === 'constant' && nullPatternComparison(pattern) === '==';
+}
+
 export function nullPatternComparison(pattern: Pattern): '==' | '!=' | undefined {
   while (pattern.kind === 'parenthesized') pattern = pattern.pattern;
   if (pattern.kind !== 'constant' && pattern.kind !== 'relational') return undefined;

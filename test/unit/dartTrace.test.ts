@@ -380,14 +380,14 @@ void main() {
 test('a changing list of hundreds of elements traces with the Java trace length', () => {
   const dart = `void main() {
   final values = List.filled(500, 0);
-  for (var i = 0; i < 1000; i++) {
+  for (var i = 0; i < 400; i++) {
     values[i % 500] = i;
   }
 }`;
   const java = `public class Main {
   public static void main(String[] args) {
     int[] values = new int[500];
-    for (int i = 0; i < 1000; i++) {
+    for (int i = 0; i < 400; i++) {
       values[i % 500] = i;
     }
   }

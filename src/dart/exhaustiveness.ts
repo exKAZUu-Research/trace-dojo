@@ -1,6 +1,6 @@
 // code-gauge-allow-file fileNcss 658 -- Switch coverage shares type partitions and pattern coverage rules.
 import type { Expression, Pattern, Span } from './ast';
-import { nullPatternComparison } from './astWalk';
+import { isNullConstantPattern } from './astWalk';
 import type { ClassInfo, FieldMember } from './classes';
 import type { PatternCompiler } from './patternCompiler';
 import { coverageDisjuncts, isCoverageListShape } from './patternCoverageUnion';
@@ -617,8 +617,8 @@ function subclassType(supertype: DartType & { kind: 'interface' }, subclass: Cla
 // code-gauge-allow functionCognitiveComplexity 29 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
 // code-gauge-allow functionNcss 48 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
 export function coversAll(compiler: PatternCompiler, pattern: Pattern, type: DartType): boolean {
-  const comparison = nullPatternComparison(pattern);
-  if (comparison) return comparison === '==' ? isSubtype(type, NULL) : !isPotentiallyNullable(type);
+  // Relational patterns, `== null` and `!= null` included, cover nothing, as in the SDK.
+  if (isNullConstantPattern(pattern)) return isSubtype(type, NULL);
   const arms = coverageDisjuncts(compiler, pattern);
   if (arms) return arms.some((arm) => coversAll(compiler, arm, type));
   switch (pattern.kind) {
@@ -712,9 +712,7 @@ function recordFieldsCover(
 // code-gauge-allow functionCognitiveComplexity 18 -- Match every supported kind of pattern against a value space.
 // code-gauge-allow functionNcss 40 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
 function covers(compiler: PatternCompiler, pattern: Pattern, space: Space): Coverage {
-  const comparison = nullPatternComparison(pattern);
-  if (comparison)
-    return comparison === '==' ? space.kind === 'null' : space.kind !== 'null' && !isPotentiallyNullable(space.type);
+  if (isNullConstantPattern(pattern)) return space.kind === 'null';
   const arms = coverageDisjuncts(compiler, pattern);
   if (arms) return combineCoverage(arms, (arm) => covers(compiler, arm, space), false);
   switch (pattern.kind) {
