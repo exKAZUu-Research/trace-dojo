@@ -11,12 +11,12 @@ export interface Sequence {
   length: () => number;
   at: (index: number) => number;
   subSequenceText: (from: number, to: number) => string;
+  charge: () => void;
 }
 
 export function sequenceAll(frame: Frame, value: Value, predicate: (char: number) => boolean): boolean {
   const source = charSequence(frame, value);
   for (let index = 0; index < source.length(); index++) {
-    if (index % 64 === 0) frame.runtime.spend();
     if (!predicate(source.at(index))) return false;
   }
   return true;
@@ -99,10 +99,14 @@ export function sequenceFindAnyString(
   }
   if (typeof value === 'string') {
     const matchers = strings.map((text) => textSearch(frame, value, text, ignoreCase));
+    const charge = sequenceWork(frame);
     let found = -1;
     const index = findIndex(
       (index) => {
-        found = matchers.findIndex((matcher) => matcher.matchesAt(index));
+        found = matchers.findIndex((matcher) => {
+          charge();
+          return matcher.matchesAt(index);
+        });
         return found !== -1;
       },
       backwards ? Math.min(start, value.length - 1) : Math.max(0, start),
@@ -203,6 +207,35 @@ export function sequenceLines(frame: Frame, value: Value): string[] {
 }
 
 export function charSequence(frame: Frame, value: Value): Sequence {
+  const access = sequenceAccess(frame, value);
+  const charge = sequenceWork(frame);
+  return {
+    charge,
+    length: () => {
+      charge();
+      return access.length();
+    },
+    at: (index) => {
+      charge();
+      return access.at(index);
+    },
+    subSequenceText: (from, to) => {
+      charge();
+      return access.subSequenceText(from, to);
+    },
+  };
+}
+
+function sequenceWork(frame: Frame): () => void {
+  let remaining = 1;
+  return () => {
+    if (--remaining > 0) return;
+    frame.runtime.spend();
+    remaining = 64;
+  };
+}
+
+function sequenceAccess(frame: Frame, value: Value): Omit<Sequence, 'charge'> {
   if (typeof value === 'string') {
     return {
       length: () => value.length,
@@ -219,7 +252,10 @@ export function charSequence(frame: Frame, value: Value): Sequence {
         checkStringIndex(frame, index, storage.readableLength);
         return storage.codeAt(index);
       },
-      subSequenceText: (from, to) => substring(frame, storage.text(), from, to),
+      subSequenceText: (from, to) => {
+        frame.runtime.spend(1 + Math.floor(storage.length / 64));
+        return substring(frame, storage.text(), from, to);
+      },
     };
   }
   const owner = libraryClass('kotlin.CharSequence');
@@ -266,7 +302,10 @@ function findAnyChar(
   return findIndex(
     (index) => {
       const char = source.at(index);
-      return chars.some((other) => charactersEqual(char, other, ignoreCase));
+      return chars.some((other) => {
+        source.charge();
+        return charactersEqual(char, other, ignoreCase);
+      });
     },
     backwards ? Math.min(start, last) : Math.max(0, start),
     backwards ? 0 : last,

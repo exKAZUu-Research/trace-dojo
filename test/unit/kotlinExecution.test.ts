@@ -2,6 +2,15 @@ import { expect, test } from 'vitest';
 
 import { executeProgram } from '../../src/interpreter/program';
 
+test.each(['contains', 'split'])('charges the execution budget during CharSequence %s', (operation) => {
+  const source = `fun main() {
+    val s: CharSequence = StringBuilder("a".repeat(100000))
+    val delimiter = "a".repeat(1024) + "b"
+    println(s.${operation}(delimiter))
+}`;
+  expect(executeProgram('kotlin', source)).toEqual({ kind: 'limitExceeded', limit: 'operations' });
+});
+
 /** Programs with the output of Kotlin 2.4.21 on the JVM (Java 25), which the interpreter must reproduce exactly. */
 test.each([
   {
