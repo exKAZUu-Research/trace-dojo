@@ -641,6 +641,8 @@ function sum(goal: Goal): Answer {
   if (t.kind === 'adt' && (t.def.builtin === 'Result' || t.def.builtin === 'Option')) return fallibleSum(goal, t);
   if (t.kind !== 'int' && t.kind !== 'float') return 'no';
   const element = shallow(item);
+  // std sums `T`s and `&T`s, but not `&mut T`s.
+  if (element.kind === 'ref' && element.mutable) return 'no';
   const inner = element.kind === 'ref' ? shallow(element.target) : element;
   if (inner.kind === 'var') return solver.unifier.tryUnify(inner, t) ? 'yes' : 'unknown';
   return solver.unifier.tryUnify(inner, t) ? 'yes' : 'no';

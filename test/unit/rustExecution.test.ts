@@ -8600,3 +8600,14 @@ test('a range with a parenthesized end is the body of a closure, return, and bre
     stdout: '[0, 1, 2, 3, 0, 1, 2, 0, 1, 0] 0..5 0..3\n',
   });
 });
+
+test('numbers do not sum mutable references to them', () => {
+  const program = rustMain(`
+    let mut numbers = vec![1, 2, 3];
+    let total: i32 = numbers.iter_mut().sum();
+    println!("{total}");`);
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message: 'i32 にトレイト Sum<&mut {integer}> が実装されていません。' }],
+  });
+});
