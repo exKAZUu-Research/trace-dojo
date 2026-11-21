@@ -2,6 +2,7 @@ import type { Arguments as ArgumentsSyntax, CascadeSection, Expression, Span } f
 import { at, type Compiled, type Eval, typeName } from './compilerBase';
 import { ExpressionCompiler, isDoubleContext, SHORTED, singleArgument } from './expressionCompiler';
 import {
+  BITWISE_OPERATORS,
   doubleModulo,
   doubleTruncatingDivide,
   dynamicBinary,
@@ -225,7 +226,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
   ): Compiled {
     const rightNumeric = numericClassOf(right.type);
     const isComparison = ['<', '<=', '>', '>='].includes(operator);
-    const isBitwise = BITWISE.has(operator);
+    const isBitwise = BITWISE_OPERATORS.has(operator);
     if (!['+', '-', '*', '/', '~/', '%', '<', '<=', '>', '>=', '&', '|', '^', '<<', '>>', '>>>'].includes(operator)) {
       return this.error(span, `${typeName(left.type)} 型には演算子 ${operator} がありません。`);
     }
@@ -455,7 +456,6 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
   }
 }
 
-const BITWISE = new Set(['&', '|', '^', '<<', '>>', '>>>']);
 const INTEGER_OPERAND_METHODS = new Map([
   ['+', '_addFromInteger'],
   ['-', '_subFromInteger'],
@@ -497,7 +497,7 @@ function numericEvaluation(
 ): Eval {
   const ints = leftClass === 'int' && rightClass === 'int' ? intOperation(operator) : undefined;
   const doubles = leftClass === 'double' && rightClass === 'double' ? doubleOperation(operator) : undefined;
-  const argumentType = rightClass === undefined ? (BITWISE.has(operator) ? 'int' : 'num') : undefined;
+  const argumentType = rightClass === undefined ? (BITWISE_OPERATORS.has(operator) ? 'int' : 'num') : undefined;
   return (frame) => {
     const a = left(frame);
     const b = right(frame);

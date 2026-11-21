@@ -819,6 +819,31 @@ void main() {
   }
 });
 
+test('dynamic bitwise operations dispatch on the receiver before checking the argument', () => {
+  const program = `void main() {
+  dynamic a = 1.5;
+  dynamic b = 1;
+  try { print(a & 1); } catch (error) { print(error); }
+  try { a <<= 'x'; } catch (error) { print(error); }
+  try { print(b ^ 1.5); } catch (error) { print(error); }
+  print(b | 2);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: [
+      "NoSuchMethodError: Class 'double' has no instance method '&'.",
+      'Receiver: 1.5',
+      'Tried calling: &(1)',
+      "NoSuchMethodError: Class 'double' has no instance method '<<'.",
+      'Receiver: 1.5',
+      'Tried calling: <<("x")',
+      "type 'double' is not a subtype of type 'int' of 'other'",
+      '3',
+      '',
+    ].join('\n'),
+  });
+});
+
 test('min and max use Dart mixed comparisons and preserve signed-zero results', () => {
   const program = `import 'dart:math';
 void main() {

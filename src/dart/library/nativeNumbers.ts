@@ -1,5 +1,14 @@
 import { formatDouble } from '../format';
-import { doubleModulo, intModulo, intRemainder, numericBinary, shiftLeft, truncateToInt, wrap } from '../operators';
+import {
+  BITWISE_OPERATORS,
+  doubleModulo,
+  intModulo,
+  intRemainder,
+  numericBinary,
+  shiftLeft,
+  truncateToInt,
+  wrap,
+} from '../operators';
 import type { Runtime } from '../runtime';
 import type { Value } from '../values';
 import { magnitudeBitLength, modInverse } from './bigIntArithmetic';
@@ -246,7 +255,7 @@ defineAll(['num.remainder', 'int.remainder', 'double.remainder'], (runtime, self
   if (typeof self === 'bigint' && typeof right === 'bigint') return intRemainder(runtime, self, right);
   return toDouble(self as bigint | number) % toDouble(right);
 });
-for (const operator of ['&', '|', '^', '<<', '>>', '>>>']) {
+for (const operator of BITWISE_OPERATORS) {
   define(`int.${operator}`, (runtime, self, [other]) =>
     numericBinary(runtime, operator, self as bigint, intArg(runtime, other, 'other'))
   );

@@ -3,6 +3,8 @@ import type { Runtime } from './runtime';
 import { vmTypeString } from './types';
 import type { Value } from './values';
 
+export const BITWISE_OPERATORS: ReadonlySet<string> = new Set(['&', '|', '^', '<<', '>>', '>>>']);
+
 /** Wraps an exact integer to the 64 bits of a Dart `int`. */
 export function wrap(value: bigint): bigint {
   return BigInt.asIntN(64, value);
@@ -84,7 +86,7 @@ export function dynamicBinary(
   b: Value,
   callRow: number | undefined
 ): Value {
-  if (typeof a === 'bigint' || typeof a === 'number') {
+  if ((typeof a === 'bigint' || typeof a === 'number') && !BITWISE_OPERATORS.has(operator)) {
     if (typeof b !== 'bigint' && typeof b !== 'number') {
       if (operator === '==' || operator === '!=')
         return runtime.invoke(a, operator, { positional: [b], named: undefined }, [], callRow);
@@ -110,7 +112,7 @@ export function numericBinary(runtime: Runtime, operator: string, a: bigint | nu
     const result = intBinary(runtime, operator, a, b);
     if (result !== NOT_INT_OPERATOR) return result;
   }
-  if (['&', '|', '^', '<<', '>>', '>>>'].includes(operator)) {
+  if (BITWISE_OPERATORS.has(operator)) {
     runtime.throwTypeError(`type 'double' is not a subtype of type 'int' of 'other'`);
   }
   return doubleBinary(runtime, operator, a, b);
