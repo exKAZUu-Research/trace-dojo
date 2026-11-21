@@ -35,7 +35,7 @@ import {
 import { arrayIterator } from './core';
 import { jdkHashCapacity, mapCapacity, newStore, reserveForCopy } from './hashTables';
 import { listEquals } from './listEquality';
-import { mapEquals } from './mapEquality';
+import { mapEntryEquals, mapEquals } from './mapEquality';
 import { defineNative, defineNativeProperty, libraryClass, throwError } from './registry';
 
 /**
@@ -1319,16 +1319,10 @@ function defineNativeEntry(): void {
     const { entry: stored } = entryOf(receiver);
     return hashOf(frame, stored.key) ^ hashOf(frame, stored.value);
   });
-  defineNative(`${entry}.equals(Any?)`, (frame, receiver, [other]) => {
-    const owner = 'kotlin.collections.Map.Entry';
-    if (receiver === other) return true;
-    if (!(other instanceof KObject) || !other.cls.isSubclassOf(libraryClass(owner))) return false;
-    const { key, value } = entryOf(receiver).entry;
-    return (
-      objectsEqual(frame, key, readCollectionProperty(frame, other, owner, 'key')) &&
-      objectsEqual(frame, value, readCollectionProperty(frame, other, owner, 'value'))
-    );
-  });
+  defineNative(
+    `${entry}.equals(Any?)`,
+    (frame, receiver, [other]) => receiver === other || mapEntryEquals(frame, entryOf(receiver).entry, other)
+  );
 }
 
 function finishBuild(_frame: Frame, collection: Value): Value {

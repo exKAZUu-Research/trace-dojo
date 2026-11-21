@@ -5,6 +5,8 @@ import type { FunctionSymbol } from '../symbols';
 import type { KObject, Value } from '../values';
 import { libraryClass } from './registry';
 
+export const MAP = 'kotlin.collections.Map';
+export const MAP_ENTRY = 'kotlin.collections.Map.Entry';
 export const COLLECTION = 'kotlin.collections.Collection';
 const MUTABLE_COLLECTION = 'kotlin.collections.MutableCollection';
 
@@ -34,6 +36,18 @@ export function everyIterableElement(
     }
     return true;
   });
+}
+
+export function everyMapEntry(frame: Frame, map: Value, visit: (key: Value, value: Value) => boolean): boolean {
+  const entries = readCollectionProperty(frame, map, MAP, 'entries');
+  return everyIterableElement(frame, entries, (entry) =>
+    frame.runtime.withNativeRoots([entry], () => {
+      const key = readCollectionProperty(frame, entry, MAP_ENTRY, 'key');
+      return frame.runtime.withNativeRoots([key], () =>
+        visit(key, readCollectionProperty(frame, entry, MAP_ENTRY, 'value'))
+      );
+    })
+  );
 }
 
 export function collectionIterator(

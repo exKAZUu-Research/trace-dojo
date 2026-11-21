@@ -60,6 +60,38 @@ test.each(['contains', 'split'])('charges the execution budget during CharSequen
 /** Programs with the output of Kotlin 2.4.21 on the JVM (Java 25), which the interpreter must reproduce exactly. */
 test.each([
   {
+    name: 'map entry equality reads the value after a custom key getter',
+    source: `class Candidate(private val change: () -> Unit) : Map.Entry<Int, Int> {
+    override val key: Int get() { change(); return 1 }
+    override val value: Int get() = 2
+}
+fun main() {
+    for (map in listOf(hashMapOf(1 to 1), linkedMapOf(1 to 1))) {
+        val entry = map.entries.first()
+        println(entry == Candidate { map[1] = 2 })
+        println(entry.value)
+    }
+}`,
+    stdout: 'true\n2\ntrue\n2\n',
+  },
+  {
+    name: 'inherited hash-map equality retains live entry advancement',
+    source: `class Scores : HashMap<Int, Int>()
+class OrderedScores : LinkedHashMap<Int, Int>()
+class Other(val target: MutableMap<Int, Int>) : Map<Int, Int> by mapOf(1 to 1, 2 to 2) {
+    override fun get(key: Int): Int? { if (key == 1) target.remove(2); return key }
+}
+fun main() {
+    for (map in listOf<MutableMap<Int, Int>>(Scores(), OrderedScores(), HashMap<Int, Int>())) {
+        map[1] = 1
+        map[2] = 2
+        try { println(map == Other(map)) } catch(e: Exception) { println(e.toString()) }
+    }
+}`,
+    stdout:
+      'java.util.ConcurrentModificationException\njava.util.ConcurrentModificationException\njava.util.ConcurrentModificationException\n',
+  },
+  {
     name: 'branch and argument result types infer from later or earlier siblings',
     source: `fun main() {
     val show = false
