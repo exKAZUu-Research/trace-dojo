@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 803 -- Keeps generic candidate collection, constraint fitting and inference completion together.
+// code-gauge-allow-file fileNcss 806 -- Keeps generic candidate collection, constraint fitting and inference completion together.
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import type { Checker, Mapper } from './checker';
 import { isUnit } from './flow';
@@ -429,28 +429,36 @@ export class TypeInference {
   }
 
   private inferTemplateLiteral(source: Type, target: TemplateLiteralType, recurse: Recurse): void {
+    const match = this.templateInferenceCaptures(source, target);
+    // An unmatched all-hole template must not collapse to the holes' broad string constraints.
+    if (!match && target.texts.some(Boolean)) return;
+    for (const [index, type] of target.types.entries()) {
+      const candidate = match ? this.templateCandidate(match.parts[index], type, match.aligned) : neverType;
+      recurse(candidate, type);
+    }
+  }
+
+  private templateInferenceCaptures(
+    source: Type,
+    target: TemplateLiteralType
+  ): { parts: Type[]; aligned: boolean } | undefined {
     const sourceParts =
       source.kind === 'literal' && typeof source.value === 'string'
         ? { texts: [source.value], types: [] }
         : source.kind === 'templateLiteral'
           ? source
           : undefined;
-    if (!sourceParts) return;
+    if (!sourceParts) return undefined;
     const { budget, typeOperators } = this.c;
     const textLength = sourceParts.texts.reduce((length, text) => length + text.length, 0);
     budget.spend((textLength + sourceParts.types.length) * target.types.length);
     const aligned =
       sourceParts.texts.length === target.texts.length &&
       sourceParts.texts.every((text, index) => text === target.texts[index]);
-    const captures = aligned
+    const parts = aligned
       ? sourceParts.types
       : templateParts(sourceParts, target, (texts, types) => typeOperators.templateLiteral(texts, types));
-    // Adjacent holes with too few source characters must not fall back to their broad string constraints.
-    if (!captures && target.texts.some(Boolean)) return;
-    for (const [index, type] of target.types.entries()) {
-      const capture = captures?.[index];
-      recurse(capture ? this.templateCandidate(capture, type, aligned) : neverType, type);
-    }
+    return parts && { parts, aligned };
   }
 
   private templateCandidate(capture: Type, placeholder: Type, aligned: boolean): Type {

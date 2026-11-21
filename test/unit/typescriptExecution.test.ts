@@ -92,6 +92,20 @@ console.log(a, b, c, d, e);`;
   ]);
 });
 
+test('terminates recursive template types when a constraint cannot fill their holes', () => {
+  const source = `type Twice<S extends string> = S extends \`\${infer H}\${infer R}\` ? \`\${H}\${H}\${Twice<R>}\` : '';
+type Pair<S> = S extends \`\${infer H}\${infer R}\` ? [H, R] : 'miss';
+const broad: Pair<string> = 'miss';
+const repeated: Twice<'abc'> = 'aabbcc';
+const empty: Twice<string> = '';
+console.log(broad, repeated, empty);`;
+  expect(executeProgram('typescript', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'miss aabbcc \n',
+    uncaughtException: undefined,
+  });
+});
+
 test('checks overlap with the type parameter in conditional assertions', () => {
   const source = `function cast<T extends string>(value: T) {
   return value as T extends \`x-\${infer R}\` ? R : never;
