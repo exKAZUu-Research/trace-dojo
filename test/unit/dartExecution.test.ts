@@ -2105,6 +2105,32 @@ void main() {
   }
 });
 
+test('Dart record literal fields take implicit casts from their context', () => {
+  const program = `void main() {
+  dynamic d = 1;
+  (int, int) r = (d, 2);
+  ({int x, int y}) s = (x: d, y: 2);
+  print([r, s]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[(1, 2), (x: 1, y: 2)]\n' });
+  expect(executeProgram('dart', 'void main() { dynamic d = 1; var t = (d, 2); (int, int) r = t; }')).toMatchObject({
+    kind: 'compileError',
+  });
+});
+
+test('Dart dot shorthand chains on the right of == take the left type', () => {
+  const program = `class P {
+  final int x;
+  const P(this.x);
+  static P make(int v) => P(v);
+  P get me => this;
+  bool operator ==(Object o) => o is P && o.x == x;
+  int get hashCode => x;
+}
+void main() { P p = P(0); print([p == .make(0), p != .new(1).me, 3 == .parse('3')]); }`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[true, true, true]\n' });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}

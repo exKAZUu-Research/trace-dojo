@@ -850,7 +850,7 @@ export abstract class CompilerBase {
     return this.error(span, describe(typeName(compiled.type), typeName(target)));
   }
 
-  private implicitCallTearOff(compiled: Compiled, target: DartType, span: Span): Compiled | undefined {
+  protected implicitCallTearOff(compiled: Compiled, target: DartType, span: Span): Compiled | undefined {
     if (!isFunctionLike(target)) return undefined;
     const source = resolveBound(compiled.type);
     if (source.kind !== 'interface' || source.nullable) return undefined;

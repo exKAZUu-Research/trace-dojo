@@ -226,8 +226,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   /** Compiles the receiver of a selector (`.m`, `.m()`, `[i]`, `!`) in the current chain. */
   protected compileReceiver(object: Expression): Compiled {
-    const head = object.kind === 'call' ? object.callee : object;
-    return this.compileChainPart(object, head.kind === 'dotShorthand' ? this.chainContext : undefined);
+    return this.compileChainPart(object, isDotShorthand(object) ? this.chainContext : undefined);
   }
 
   protected compileNullChain<T>(compile: () => T): { result: T; skipped: Flow | undefined } {
@@ -387,10 +386,10 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const left = this.compileExpression(expression.left);
     const outerWrites = this.flow.writes;
     if (left.variable) this.flow = this.flow.withWrites(new Set());
-    // The right operand of == takes the left's type as its context, which `c == .red` needs.
+    // The right operand of == takes the left's type as its context, which `c == .red` and `c == .red.next` need.
     const right = this.compileExpression(
       expression.right,
-      expression.right.kind === 'dotShorthand' ? nonNullable(left.type) : undefined
+      isDotShorthand(chainHead(expression.right)) ? nonNullable(left.type) : undefined
     );
     const leftVariable = left.variable && !this.flow.wrotePath(left.variable) ? left.variable : undefined;
     if (left.variable) this.flow = this.flow.restoreWrites(outerWrites);
@@ -945,9 +944,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
             ? positionalContext?.[position++]
             : recordContext?.named.find((other) => other.name === name)?.type;
         const written = this.compileExpression(value, expected);
-        // A generic function in a field takes the type arguments its context asks for, as a record cannot be instantiated.
-        const compiled =
-          (expected && this.instantiateGeneric(written, expected, containsInferenceHole(expected))) ?? written;
+        const compiled = expected ? this.convertRecordField(written, expected, field) : written;
         if (compiled.type.kind === 'void') this.error(field, 'void の値はレコードに入れられません。');
         return { name, compiled };
       })
@@ -972,6 +969,20 @@ export abstract class ExpressionCompiler extends CompilerBase {
       run: isConst ? this.canonicalized(build) : build,
       isConst: isConst || (allConstant && this.potentialConstInitializer),
     };
+  }
+
+  /**
+   * Applies a field's implicit conversions toward its context: a generic function takes the type arguments it asks for,
+   * a dynamic value is cast, and a callable object becomes its `call` method. Any other mismatch is left for the
+   * assignment of the whole record to report.
+   */
+  private convertRecordField(written: Compiled, expected: DartType, span: Span): Compiled {
+    const hole = containsInferenceHole(expected);
+    const instantiated = this.instantiateGeneric(written, expected, hole);
+    if (instantiated) return instantiated;
+    if (hole || isSubtype(written.type, expected)) return written;
+    if (written.type.kind === 'dynamic') return this.coerce(written, expected, span, () => '');
+    return this.implicitCallTearOff(written, expected, span) ?? written;
   }
 
   readonly constantChecks: { span: Span; run: Eval }[] = [];
@@ -1843,4 +1854,23 @@ function unresolvedCollectionType(kind: 'set' | 'map'): DartType {
   return kind === 'set'
     ? interfaceType(coreTypes.set, [INFERENCE_HOLE])
     : interfaceType(coreTypes.map, [INFERENCE_HOLE, INFERENCE_HOLE]);
+}
+
+/** The innermost receiver of a selector chain (`.m`, `.m()`, `[i]`, `!`), or the expression itself. */
+function chainHead(expression: Expression): Expression {
+  let head = expression;
+  for (;;) {
+    if (isDotShorthand(head)) return head;
+    if (head.kind === 'member' || head.kind === 'index') head = head.object;
+    else if (head.kind === 'call') head = head.callee;
+    else if (head.kind === 'nullAssert') head = head.operand;
+    else return head;
+  }
+}
+
+/** Whether the expression is a dot shorthand (`.red`), including one with arguments (`.parse('1')`). */
+function isDotShorthand(expression: Expression): boolean {
+  return (
+    expression.kind === 'dotShorthand' || (expression.kind === 'call' && expression.callee.kind === 'dotShorthand')
+  );
 }
