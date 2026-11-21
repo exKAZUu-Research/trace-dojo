@@ -435,7 +435,7 @@ function coerceArm(c: Checker, body: Expr, type: Type, result: Type): void {
 
 function checkExhaustive(c: Checker, expr: Extract<Expr, { kind: 'match' }>, scrutinee: Type): void {
   const patterns = expr.arms.map((arm) => lowerPattern(arm.pattern, c.annotations));
-  const missing = missingPattern(patterns, resolve(scrutinee, true));
+  const missing = missingPattern(patterns, resolve(scrutinee, true), c.budget);
   if (missing) {
     compileError(
       expr.span,

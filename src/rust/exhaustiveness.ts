@@ -1,3 +1,4 @@
+import type { ExecutionBudget } from '../interpreter/limits';
 import type { Annotations } from './annotations';
 import type { Pattern } from './ast';
 import type { Known } from './constLint';
@@ -129,15 +130,17 @@ function expandRow(row: Pat[]): Pat[][] {
 /** Whether a vector of patterns matches some value that no row matches (Maranget's usefulness). */
 // code-gauge-allow functionCognitiveComplexity 23 -- One case per kind of pattern or type.
 // code-gauge-allow functionNcss 36 -- One case per kind of pattern or type.
-function useful(rows: Pat[][], vector: Pat[], types: Type[], depth = 0): Pat[] | undefined {
+function useful(rows: Pat[][], vector: Pat[], types: Type[], budget: ExecutionBudget, depth = 0): Pat[] | undefined {
   if (depth > 64) return undefined;
+  // Or-patterns in several positions multiply the cases to try, so the search counts against the compile limits.
+  budget.spend();
   if (vector.length === 0) return rows.length === 0 ? [] : undefined;
   const expanded = rows.flatMap(expandRow);
   const [head, ...rest] = vector;
   const [type, ...restTypes] = types;
   if (head.kind === 'or') {
     for (const alt of head.alts) {
-      const witness = useful(expanded, [alt, ...rest], types, depth + 1);
+      const witness = useful(expanded, [alt, ...rest], types, budget, depth + 1);
       if (witness) return witness;
     }
     return undefined;
@@ -147,7 +150,7 @@ function useful(rows: Pat[][], vector: Pat[], types: Type[], depth = 0): Pat[] |
     const arity = head.args.length;
     const subTypes = ctors?.find((c) => c.ctor === head.ctor)?.types ?? head.args.map(() => type);
     const specialized = specialize(expanded, head.ctor, arity);
-    const witness = useful(specialized, [...head.args, ...rest], [...subTypes, ...restTypes], depth + 1);
+    const witness = useful(specialized, [...head.args, ...rest], [...subTypes, ...restTypes], budget, depth + 1);
     return witness && [{ kind: 'ctor', ctor: head.ctor, args: witness.slice(0, arity) }, ...witness.slice(arity)];
   }
   // A wildcard: useful if some constructor is missing from the rows' heads, or useful under one constructor.
@@ -160,6 +163,7 @@ function useful(rows: Pat[][], vector: Pat[], types: Type[], depth = 0): Pat[] |
         specialized,
         [...ctor.types.map(() => ANY), ...rest],
         [...ctor.types, ...restTypes],
+        budget,
         depth + 1
       );
       if (witness) return [{ kind: 'ctor', ctor: ctor.ctor, args: witness.slice(0, arity) }, ...witness.slice(arity)];
@@ -167,7 +171,7 @@ function useful(rows: Pat[][], vector: Pat[], types: Type[], depth = 0): Pat[] |
     return undefined;
   }
   const defaults = expanded.filter((row) => row[0]?.kind === 'any').map((row) => row.slice(1));
-  const witness = useful(defaults, rest, restTypes, depth + 1);
+  const witness = useful(defaults, rest, restTypes, budget, depth + 1);
   if (!witness) return undefined;
   const missing = ctors?.find((c) => !heads.has(c.ctor));
   return [missing ? { kind: 'ctor', ctor: missing.ctor, args: missing.types.map(() => ANY) } : ANY, ...witness];
@@ -184,19 +188,20 @@ function specialize(rows: Pat[][], ctor: string, arity: number): Pat[][] {
 }
 
 /** A pattern no arm matches, described for a message, or undefined when the arms cover every value. */
-export function missingPattern(patterns: Pat[], type: Type): string | undefined {
+export function missingPattern(patterns: Pat[], type: Type, budget: ExecutionBudget): string | undefined {
   const witness = useful(
     patterns.map((pattern) => [pattern]),
     [ANY],
-    [type]
+    [type],
+    budget
   );
   if (!witness) return undefined;
   return describe(witness[0], type);
 }
 
 /** Whether a pattern matches every value of its type, as `let` requires. */
-export function isIrrefutable(pattern: Pat, type: Type): boolean {
-  return missingPattern([pattern], type) === undefined;
+export function isIrrefutable(pattern: Pat, type: Type, budget: ExecutionBudget): boolean {
+  return missingPattern([pattern], type, budget) === undefined;
 }
 
 function describe(pattern: Pat, type: Type): string {

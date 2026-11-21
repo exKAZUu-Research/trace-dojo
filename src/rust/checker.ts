@@ -130,7 +130,7 @@ export class Checker {
   constructor(
     readonly program: Program,
     readonly atomicRows: ReadonlySet<number>,
-    private readonly budget: ExecutionBudget
+    readonly budget: ExecutionBudget
   ) {
     this.solver = new TraitSolver(program, this.unifier);
     this.adtStorage = new AdtStorage(budget);
@@ -1220,7 +1220,7 @@ export class Checker {
     if (pattern.kind === 'wild') return;
     this.deferCoverage(() => {
       const lowered = lowerPattern(pattern, this.annotations);
-      if (!isIrrefutable(lowered, resolve(type, true))) {
+      if (!isIrrefutable(lowered, resolve(type, true), this.budget)) {
         const name = where === 'let' ? 'let' : where === 'for' ? 'for' : '関数の引数';
         compileError(
           pattern.span,

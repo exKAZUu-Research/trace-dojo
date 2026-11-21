@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest';
 
+import { LIMITS } from '../../src/interpreter/limits';
 import { executeProgram, traceProgram } from '../../src/interpreter/program';
 
 const rustMain = (body: string, items = ''): string => `${items ? `${items}\n` : ''}fn main() {
@@ -6973,4 +6974,16 @@ fn put_ref<'a, 'b>(shared: Shared<'a, 'b>, value: &'b String) { shared.map.inser
     stdout: '{1: "a"}\n',
   });
   expect(executeProgram('rust', rustMain(`${body}    drop(s);`, items))).toMatchObject({ kind: 'executed' });
+});
+
+test('stops an exhaustiveness check whose or-patterns multiply past the compile limit', () => {
+  const size = 26;
+  const program = rustMain(`    let flags = (${Array.from({ length: size }, () => 'true').join(', ')});
+    match flags { (${Array.from({ length: size }, () => 'true | false').join(', ')}) => (), }`);
+  const start = performance.now();
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ message: expect.stringContaining('コンパイル処理の上限') })],
+  });
+  expect(performance.now() - start).toBeLessThan(5 * LIMITS.maxMilliseconds);
 });
