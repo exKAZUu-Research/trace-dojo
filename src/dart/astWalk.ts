@@ -1,5 +1,7 @@
 import type {
+  ClassDeclaration,
   Expression,
+  ExtensionDeclaration,
   FormalParameters,
   Pattern,
   Span,
@@ -21,6 +23,28 @@ interface AssignmentTargets {
   captured: Writes;
   free: Set<string>;
   freeCaptured: Set<string>;
+}
+
+export function declaredMemberNames(declaration: ClassDeclaration | ExtensionDeclaration): ReadonlySet<string> {
+  const names = new Set<string>();
+  for (const member of declaration.members) {
+    if (member.kind === 'field') for (const variable of member.variables) names.add(variable.name);
+    if (member.kind === 'method') names.add(member.name);
+  }
+  if (declaration.kind === 'class') {
+    for (const value of declaration.enumConstants) names.add(value.name);
+    const primary = declaration.primaryConstructor?.parameters;
+    if (primary) {
+      for (const parameter of [...primary.positional, ...primary.named]) {
+        if (
+          declaration.classKind === 'extensionType' ||
+          (parameter.binding === 'plain' && (parameter.isVar || parameter.isFinal))
+        )
+          names.add(parameter.name);
+      }
+    }
+  }
+  return names;
 }
 
 export function assignmentTargets(root: object, parameters?: FormalParameters): AssignmentTargets {

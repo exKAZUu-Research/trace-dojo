@@ -1,6 +1,14 @@
 // code-gauge-allow-file fileNcss 565 -- Declaration scopes, types, and record shapes share the compiler environment.
 import { CompileError } from '../interpreter/diagnostics';
-import type { ClassDeclaration, Span, TypeAliasDeclaration, TypeParameter, TypeSyntax } from './ast';
+import type {
+  ClassDeclaration,
+  ExtensionDeclaration,
+  Span,
+  TypeAliasDeclaration,
+  TypeParameter,
+  TypeSyntax,
+} from './ast';
+import { declaredMemberNames } from './astWalk';
 import { type ClassInfo, type Member, memberTypeIn, scopedMemberName } from './classes';
 import type { ExtensionInfo, GlobalVariable, LibraryEnv, TypeAlias } from './environment';
 import { eraseExtensionTypes } from './eraseExtensionTypes';
@@ -147,6 +155,7 @@ export abstract class CompilerBase {
   protected typeScopes: { names: Map<string, TypeParam>; staticOwner: boolean; enclosingFunction?: FunctionContext }[] =
     [];
   private typeLookupBoundary: FunctionContext | undefined;
+  private readonly memberBindings = new WeakMap<ClassDeclaration | ExtensionDeclaration, ReadonlySet<string>>();
   /** The class whose body is being compiled. */
   protected currentClass: ClassInfo | undefined;
   protected currentExtension: ExtensionInfo | undefined;
@@ -410,10 +419,21 @@ export abstract class CompilerBase {
   private checkTypeNameBinding(name: string, syntax: Extract<TypeSyntax, { kind: 'named' }>): void {
     const scope = this.typeScopeFor(name);
     const stopBefore = scope?.enclosingFunction ?? this.typeLookupBoundary;
-    const local = this.findLocal(name, syntax, stopBefore);
-    if (syntax.prefix !== undefined && (local || scope))
+    const binding = this.findLocal(name, syntax, stopBefore) ?? (!scope && this.hasMemberBinding(name));
+    if (syntax.prefix !== undefined && (binding || scope))
       this.error(syntax, `${name} は import の接頭辞ではありません。`);
-    if (local) this.error(syntax, `${name} は型ではありません。`);
+    if (binding) this.error(syntax, `${name} は型ではありません。`);
+  }
+
+  private hasMemberBinding(name: string): boolean {
+    const declaration = this.currentClass?.declaration ?? this.currentExtension?.declaration;
+    if (!declaration) return false;
+    let names = this.memberBindings.get(declaration);
+    if (!names) {
+      names = declaredMemberNames(declaration);
+      this.memberBindings.set(declaration, names);
+    }
+    return names.has(name);
   }
 
   private instantiateAlias(
@@ -433,11 +453,13 @@ export abstract class CompilerBase {
     const declaration = this.aliasWork.get(alias);
     if (!declaration) this.error(span, `型の別名 ${alias.name} が、自分自身を使って定義されています。`);
     this.aliasWork.delete(alias);
-    alias.aliased = this.withIsolatedTypes(() =>
-      this.withoutFunctionTypeAnnotations(() => {
-        alias.typeParams.push(...this.declareTypeParams(declaration.typeParameters));
-        return this.withTypeParams(alias.typeParams, () => this.resolveType(declaration.aliased));
-      })
+    alias.aliased = this.inDeclarationScope(undefined, undefined, () =>
+      this.withIsolatedTypes(() =>
+        this.withoutFunctionTypeAnnotations(() => {
+          alias.typeParams.push(...this.declareTypeParams(declaration.typeParameters));
+          return this.withTypeParams(alias.typeParams, () => this.resolveType(declaration.aliased));
+        })
+      )
     );
     return alias.aliased;
   }
@@ -446,8 +468,12 @@ export abstract class CompilerBase {
     const declaration = this.pendingClassBounds.get(cls);
     if (!declaration) return;
     this.pendingClassBounds.delete(cls);
-    this.withIsolatedTypes(() =>
-      this.withoutFunctionTypeAnnotations(() => this.resolveTypeParamBounds(cls.typeParams, declaration.typeParameters))
+    this.inDeclarationScope(undefined, undefined, () =>
+      this.withIsolatedTypes(() =>
+        this.withoutFunctionTypeAnnotations(() =>
+          this.resolveTypeParamBounds(cls.typeParams, declaration.typeParameters)
+        )
+      )
     );
   }
 

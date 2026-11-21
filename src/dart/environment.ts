@@ -1,3 +1,4 @@
+import type { ExtensionDeclaration } from './ast';
 import type { ClassInfo, Member } from './classes';
 import { isSdkExport } from './library/sdkExports';
 import type { Runtime } from './runtime';
@@ -37,6 +38,7 @@ export interface GlobalVariable {
 
 export interface ExtensionInfo {
   name: string | undefined;
+  declaration: ExtensionDeclaration;
   typeParams: TypeParam[];
   onType: DartType;
   members: Map<string, Member>;

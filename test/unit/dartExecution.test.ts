@@ -735,6 +735,34 @@ test('Dart member names cannot reuse enclosing names or type parameters', () => 
   expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: 'C\n' });
 });
 
+test('own Dart members shadow type names only in their declaration scope', () => {
+  for (const declarations of [
+    'class C { String? value; int String = 1; }',
+    'class C { void List() {} void f() { List<int> values = []; } }',
+    'class C { void set String(int value) {} String? value; }',
+    'class C { int String = 1; static String? value; }',
+    'class C { int String = 1; C.named(String value); }',
+    'extension E on String { String? read() => null; int get String => 1; }',
+    'extension type E(String String) {}',
+    "import 'dart:core'; import 'dart:core' as types; class C { int types = 1; types.String? value; }",
+  ]) {
+    expect(executeProgram('dart', `${declarations} void main() {}`)).toMatchObject({ kind: 'compileError' });
+  }
+  const valid = `class Parent { int String = 1; }
+class Child extends Parent { String? value; }
+class Header<T extends String> extends Parent { int Parent = 1; int String = 2; }
+class Generic {
+  int String = 1;
+  void write<String>(String value) { print(value); }
+}
+class Named { Named.String(); String? value; }
+void main() {
+  print([Child().value, Header().Parent, Named.String().value]);
+  Generic().write(8);
+}`;
+  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '[null, 1, null]\n8\n' });
+});
+
 test('local bindings shadow type names and library prefixes', () => {
   for (const program of [
     'void main() { var List = 1; List<int> values = []; }',

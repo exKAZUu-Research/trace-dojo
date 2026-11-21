@@ -138,6 +138,7 @@ export class Compiler extends MemberCompiler {
         case 'extension': {
           const ext: ExtensionInfo = {
             name: declaration.name,
+            declaration,
             typeParams: [],
             onType: DYNAMIC,
             members: new Map(),
@@ -313,7 +314,9 @@ export class Compiler extends MemberCompiler {
       if (declaration.classKind === 'extensionType') {
         const parameter = declaration.primaryConstructor?.parameters.positional[0];
         if (!parameter?.type) this.error(declaration, '拡張型には、表す値の型を書いてください。');
-        cls.representationType = this.resolveType(parameter.type as TypeSyntax);
+        cls.representationType = this.inDeclarationScope(cls, undefined, () =>
+          this.resolveType(parameter.type as TypeSyntax)
+        );
         cls.representationName = parameter.name;
       }
     });
@@ -1510,15 +1513,14 @@ export class Compiler extends MemberCompiler {
       holder.typeParams.push(...ext.typeParams);
       ext.staticMembers = holder.staticMembers;
       ext.staticSetters = holder.staticSetters;
-      for (const member of declaration.members) {
-        if (member.kind === 'constructor') this.error(member, '拡張にはコンストラクタを書けません。');
-        if (member.kind === 'field') {
-          if (!member.isStatic) this.error(member, '拡張には、インスタンスのフィールドを宣言できません。');
+      this.inDeclarationScope(undefined, ext, () => {
+        for (const member of declaration.members) {
+          if (member.kind === 'constructor') this.error(member, '拡張にはコンストラクタを書けません。');
+          if (member.kind === 'field' && !member.isStatic)
+            this.error(member, '拡張には、インスタンスのフィールドを宣言できません。');
           this.declareAccessibleMember(holder, member, ext);
-          continue;
         }
-        if (member.kind === 'method') this.declareAccessibleMember(holder, member, ext);
-      }
+      });
     });
   }
 
