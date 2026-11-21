@@ -694,6 +694,19 @@ void main() { final object = A(1); object.property = 2; print(object.value); }`;
   }
 });
 
+test('generic main uses type bounds and zero-argument VM dispatch', () => {
+  const bounded = 'void main<T extends num>() { print(T); }';
+  expect(executeProgram('dart', bounded)).toMatchObject({ kind: 'executed', stdout: 'num\n' });
+  const optional = "void main<T>([List<String> args = const ['default']]) { print([T, args]); }";
+  expect(traceProgram('dart', optional, optional).stdout).toBe('[dynamic, [default]]\n');
+  const required = 'void main<T>(List<String> args) { print(args); }';
+  expect(executeProgram('dart', required)).toMatchObject({
+    kind: 'executed',
+    stdout: '',
+    uncaughtException: expect.stringContaining('Tried calling: main()'),
+  });
+});
+
 test('main receives a checked second argument explicitly set to null', () => {
   const optional = 'void main(List<String> args, [dynamic value = 10]) { print([args, value]); }';
   expect(executeProgram('dart', optional)).toMatchObject({ kind: 'executed', stdout: '[[], null]\n' });

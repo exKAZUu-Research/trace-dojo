@@ -240,7 +240,7 @@ export function compileProgram(syntax: Library, options: { atomicRows?: Readonly
     globals,
     recordFieldNames: compiler.recordFieldNames,
     programGlobals: globals.slice(libraryGlobals.length),
-    mainTakesArguments: main.type.positional.length > 0,
+    mainTakesArguments: main.type.typeParams.length === 0 && main.type.positional.length > 0,
   };
 }
 
@@ -279,7 +279,6 @@ function validateConstants(compiler: Compiler, globals: GlobalVariable[]): void 
 function checkMain(main: TopLevelFunction): void {
   const { type } = main;
   const row = main.row ?? 0;
-  if (type.typeParams.length > 0) throw new CompileError([{ row, message: 'main 関数には型引数を付けられません。' }]);
   if (type.requiredCount > 2 || type.named.some((named) => named.isRequired)) {
     throw new CompileError([{ row, message: 'main 関数の引数は、なしか List<String> の 1 つにしてください。' }]);
   }

@@ -2,7 +2,7 @@ import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionLimitError } from '../interpreter/limits';
 import type { ProgramExecution, ProgramRun } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
-import { type CompiledProgram, initialGlobals } from './compiler';
+import { type CompiledProgram, initialGlobals, topLevelFunctionClosure } from './compiler';
 import { parseDart } from './parse';
 import { compileProgram, LINKS } from './program';
 import { DartThrow, type Frame, ProgramExit, Runtime } from './runtime';
@@ -48,16 +48,7 @@ export function runProgram(
   runtime.onMainExit = recordEnd;
   let uncaughtException: string | undefined;
   try {
-    const args: Value[] = [];
-    if (program.mainTakesArguments) args.push(new DartList(coreTypes.list, interfaceType(coreTypes.string), [], true));
-    if (program.main.type.positional.length > 1) args.push(undefined);
-    (program.main.impl as Callable)(
-      runtime,
-      undefined,
-      { positional: args, named: undefined, invocation: 'dynamic' },
-      [],
-      undefined
-    );
+    runMain(runtime, program);
   } catch (error) {
     uncaughtException = describeUncaught(runtime, error);
   }
@@ -66,6 +57,29 @@ export function runProgram(
     finalTurtles = runtime.world.turtleTraces();
   }
   return { finalBoard: runtime.world.boardText(), finalTurtles, uncaughtException, ...runtime.io.output() };
+}
+
+function runMain(runtime: Runtime, program: CompiledProgram): void {
+  const { main } = program;
+  if (main.type.typeParams.length > 0) {
+    runtime.callValue(
+      topLevelFunctionClosure(runtime, main),
+      { positional: [], named: undefined, invocation: 'dynamic' },
+      [],
+      undefined
+    );
+    return;
+  }
+  const args: Value[] = [];
+  if (program.mainTakesArguments) args.push(new DartList(coreTypes.list, interfaceType(coreTypes.string), [], true));
+  if (main.type.positional.length > 1) args.push(undefined);
+  (main.impl as Callable)(
+    runtime,
+    undefined,
+    { positional: args, named: undefined, invocation: 'dynamic' },
+    [],
+    undefined
+  );
 }
 
 function describeUncaught(runtime: Runtime, error: unknown): string | undefined {

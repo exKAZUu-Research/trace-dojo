@@ -1649,24 +1649,7 @@ export class Compiler extends MemberCompiler {
   }
 
   tearOffFunction(fn: TopLevelFunction): Eval {
-    return (frame) => {
-      // Tear-offs of a top-level function are canonical, so `identical(f, f)` holds.
-      const { tearOffs } = frame.runtime;
-      const existing = tearOffs.get(fn);
-      if (existing) return existing;
-      const closure = new DartClosure(
-        coreTypes.function,
-        eraseFunctionType(fn.type),
-        (runtime, _receiver, args, typeArgs, callRow) =>
-          (fn.impl as Callable)(runtime, undefined, args, typeArgs, callRow),
-        undefined,
-        [],
-        { name: fn.name, origin: `Function '${fn.name}': static.` },
-        fn
-      );
-      tearOffs.set(fn, closure);
-      return closure;
-    };
+    return (frame) => topLevelFunctionClosure(frame.runtime, fn);
   }
 
   constructSymbol(frame: Frame, name: string): Value {
@@ -1721,6 +1704,24 @@ export class Compiler extends MemberCompiler {
       throw new Error(`The interpreter has no native for ${key}`);
     };
   }
+}
+
+export function topLevelFunctionClosure(runtime: Runtime, fn: TopLevelFunction): DartClosure {
+  const { tearOffs } = runtime;
+  const existing = tearOffs.get(fn);
+  if (existing) return existing;
+  const closure = new DartClosure(
+    coreTypes.function,
+    eraseFunctionType(fn.type),
+    (callingRuntime, _receiver, args, typeArgs, callRow) =>
+      (fn.impl as Callable)(callingRuntime, undefined, args, typeArgs, callRow),
+    undefined,
+    [],
+    { name: fn.name, origin: `Function '${fn.name}': static.` },
+    fn
+  );
+  tearOffs.set(fn, closure);
+  return closure;
 }
 
 function declarationRow(declaration: Declaration): number | undefined {
