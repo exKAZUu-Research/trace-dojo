@@ -414,7 +414,13 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     const { symbol, decl } = entry;
     const context = this.initializerContext(entry);
     const scope = this.initializerScope(entry, context);
-    const delegate = this.compileExpression(scope, context, decl.delegate as Expression);
+    const delegate = this.compileDelegateExpression(
+      scope,
+      context,
+      decl.delegate as Expression,
+      symbol.type,
+      decl.isVar
+    );
     entry.initializer = delegate;
     const slot = entry.delegateSlot;
     const holderScope = new Scope(scope, context);

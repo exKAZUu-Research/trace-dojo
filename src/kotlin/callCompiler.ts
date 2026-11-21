@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 476 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss 502 -- the compiler of one area of Kotlin, whose parts call each other closely.
 import { type ArgumentEvaluation, argumentEvaluator, expectedArgumentType, firstAttempts } from './argumentTypes';
 import type { Expression, LambdaExpression } from './ast';
 import {
@@ -16,6 +16,7 @@ import { literalFits } from './literals';
 import type { Frame } from './runtime';
 import type { ClassSymbol, FunctionSymbol, ParameterSymbol, PropertySymbol, TypeParameterSymbol } from './symbols';
 import {
+  asSuper,
   checkVariableBounds,
   constrainThroughBounds,
   determinedType,
@@ -36,6 +37,7 @@ import {
   resolved,
   substitute,
   type Substitution,
+  type TypeArgument,
   typeToString,
 } from './types';
 import { KObject, type Value } from './values';
@@ -47,6 +49,11 @@ export interface ArgumentSyntax {
   value: Expression;
   /** Whether the argument is `*array`, which passes the array's elements to a `vararg` parameter. */
   isSpread?: boolean;
+}
+
+export interface DelegateContext {
+  type: KType;
+  isVar: boolean;
 }
 
 /** A function a call may mean, with the receiver it would be called on. */
@@ -134,6 +141,8 @@ function isLambdaArgument(expression: Expression): expression is LambdaExpressio
 
 /** Resolves calls: picks among overloads, infers type arguments, and evaluates arguments. */
 export abstract class CallCompiler extends CompilerCore {
+  protected readonly delegateCalls = new WeakMap<ArgumentSyntax[], DelegateContext>();
+
   abstract compileExpression(
     scope: Scope,
     context: FunctionContext,
@@ -312,7 +321,34 @@ export abstract class CallCompiler extends CompilerCore {
         }
       }
     }
-    return { candidate, variables, substitution, mapping };
+    const attempt = { candidate, variables, substitution, mapping };
+    this.constrainDelegateResult(attempt, args);
+    return attempt;
+  }
+
+  private constrainDelegateResult({ candidate, variables, substitution }: Attempt, args: ArgumentSyntax[]): void {
+    const delegate = this.delegateCalls.get(args);
+    if (!delegate || variables.length === 0) return;
+    const { type, isVar } = delegate;
+    const { symbol } = candidate;
+    const returnType = candidate.kind === 'constructor' ? symbol.owner?.selfType : symbol.returnType;
+    if (!returnType) return;
+    const result = substitute(returnType, substitution);
+    if (result.kind !== 'class') return;
+    const properties = this.packages.get('kotlin.properties')?.classes;
+    const contracts = [
+      properties?.get(isVar ? 'ReadWriteProperty' : 'ReadOnlyProperty'),
+      this.packages.get('kotlin')?.classes.get('Lazy'),
+    ];
+    for (const contract of contracts) {
+      const projection = contract && asSuper(result, contract);
+      if (!projection) continue;
+      const projectedArgs = projection.args.map<TypeArgument>((_, index) =>
+        index === projection.args.length - 1 ? { variance: 'inv', type } : { variance: 'star' }
+      );
+      this.constrainReturnType(variables, result, { ...projection, args: projectedArgs });
+      return;
+    }
   }
 
   /** The type parameters a call infers: the function's, and for a constructor its class's. */
@@ -573,9 +609,13 @@ export abstract class CallCompiler extends CompilerCore {
   private constrainByExpected(attempt: Attempt, expected: KType | undefined, row: number): void {
     const { candidate, substitution, variables } = attempt;
     const declaredReturn = this.declaredReturnOf(candidate, row);
-    if (!expected || !hasOpenVariables(substitute(declaredReturn, substitution))) return;
+    if (expected) this.constrainReturnType(variables, substitute(declaredReturn, substitution), expected);
+  }
+
+  private constrainReturnType(variables: InferenceVariable[], result: KType, expected: KType): void {
+    if (!hasOpenVariables(result)) return;
     const saved = variables.map((variable) => ({ lower: [...variable.lower], upper: [...variable.upper] }));
-    if (isSubtype(substitute(declaredReturn, substitution), expected)) return;
+    if (isSubtype(result, expected)) return;
     for (const [index, variable] of variables.entries()) {
       variable.lower = saved[index].lower;
       variable.upper = saved[index].upper;

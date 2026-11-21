@@ -231,7 +231,13 @@ export abstract class StatementCompiler extends OperatorCompiler {
     declared: KType | undefined
   ): Exec {
     const { row, name } = statement;
-    const delegate = this.compileExpression(scope, context, statement.delegate as Expression);
+    const delegate = this.compileDelegateExpression(
+      scope,
+      context,
+      statement.delegate as Expression,
+      declared,
+      statement.isVar
+    );
     const holder = this.newVariable(scope, context, `\0${name}`, delegate.type, false, row, false);
     scope.variables.delete(`\0${name}`);
     this.flow.assigned.add(holder);

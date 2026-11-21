@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 816 -- The declaration compiler shares symbol and class-linking logic.
+// code-gauge-allow-file fileNcss 818 -- The declaration compiler shares symbol and class-linking logic.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import type {
   ClassDecl,

@@ -45,6 +45,26 @@ test.each([
     stdout: '[9, 3, 5]\n[3, 2, 9]\n[9, 2, 8, 5]\n[5, 8, 2, 9]\n[9, 2, 8, 5]\n',
   },
   {
+    name: 'typed properties infer their generic delegates',
+    source: `import kotlin.properties.Delegates
+class Count {
+    var value: Int by Delegates.notNull()
+}
+var label: String? by Delegates.observable(null) { _, old, new ->
+    println(old?.length.toString() + " -> " + new?.length.toString())
+}
+fun main() {
+    val count = Count()
+    count.value = 42
+    println(count.value)
+    label = "item"
+    label = null
+    val items: List<Int> by lazy { emptyList() }
+    println(items)
+}`,
+    stdout: '42\nnull -> 4\n4 -> null\n[]\n',
+  },
+  {
     name: 'rounding just below a half and at the double precision boundary',
     source: `import kotlin.math.roundToInt
 import kotlin.math.roundToLong

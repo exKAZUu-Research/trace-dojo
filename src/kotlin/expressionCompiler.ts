@@ -1,6 +1,12 @@
-// code-gauge-allow-file fileNcss 970 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss 980 -- the compiler of one area of Kotlin, whose parts call each other closely.
 import type { Block, Expression, LambdaExpression } from './ast';
-import { type ArgumentSyntax, CallCompiler, type Candidate, type ResolvedCall } from './callCompiler';
+import {
+  type ArgumentSyntax,
+  CallCompiler,
+  type Candidate,
+  type DelegateContext,
+  type ResolvedCall,
+} from './callCompiler';
 import {
   type Compiled,
   convertRepr,
@@ -75,6 +81,20 @@ export interface Place {
 }
 
 export abstract class ExpressionCompiler extends CallCompiler {
+  protected compileDelegateExpression(
+    scope: Scope,
+    context: FunctionContext,
+    expression: Expression,
+    type: KType | undefined,
+    isVar: boolean
+  ): Compiled {
+    let delegate = expression;
+    while (delegate.kind === 'parenthesized') delegate = delegate.expression;
+    if (!type || delegate.kind !== 'call') return this.compileExpression(scope, context, expression);
+    const compiled = this.compileCall(scope, context, delegate, undefined, { type, isVar });
+    return delegate === expression ? compiled : { ...compiled, isCall: false, isCreation: false };
+  }
+
   /** Compiles a block, whose last expression gives its value, or `Unit` when it has none. */
   abstract compileBlockValue(
     scope: Scope,
@@ -904,7 +924,8 @@ export abstract class ExpressionCompiler extends CallCompiler {
     scope: Scope,
     context: FunctionContext,
     expression: Extract<Expression, { kind: 'call' }>,
-    expected: KType | undefined
+    expected: KType | undefined,
+    delegate?: DelegateContext
   ): Compiled {
     const { callee, row } = expression;
     const args: ArgumentSyntax[] = expression.args.map((argument) => ({
@@ -915,6 +936,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     }));
     if (expression.trailingLambda)
       args.push({ row: expression.trailingLambda.row, name: undefined, value: expression.trailingLambda });
+    if (delegate) this.delegateCalls.set(args, delegate);
     const hasTrailingLambda = expression.trailingLambda !== undefined;
     const typeArgs = expression.typeArgs.map((ref) => this.resolveType(scope, ref));
     if (callee.kind === 'name') {
