@@ -588,7 +588,8 @@ export class Converter extends ExpressionConverter {
       variable = { row: rowOf(variableNode), names: this.destructuredNames(variableNode) };
     } else {
       const declared = this.convertVariableDeclaration(variableNode);
-      variable = { row: declared.row, name: declared.name ?? '_', type: declared.type };
+      if (declared.name === undefined) throw unavailable(variableNode, 'for の名前のない変数');
+      variable = { row: declared.row, name: declared.name, type: declared.type };
     }
     return {
       kind: 'for',

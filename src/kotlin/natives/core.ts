@@ -346,6 +346,17 @@ export function compareStrings(a: string, b: string): number {
   return a.length - b.length;
 }
 
+/** The check of `StringBuilder`'s indexes in the JDK, worded as its `Preconditions.checkIndex` words it. */
+export function checkStringIndex(frame: Frame, position: number, length: number): void {
+  if (position < 0 || position >= length) {
+    throwError(
+      frame,
+      'java.lang.StringIndexOutOfBoundsException',
+      `Index ${position} out of bounds for length ${length}`
+    );
+  }
+}
+
 export function substring(frame: Frame, text: string, start: number, end: number): string {
   if (start < 0 || end > text.length || start > end) {
     return throwError(

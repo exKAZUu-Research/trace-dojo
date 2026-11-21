@@ -477,7 +477,7 @@ export abstract class ExpressionConverter {
     const name = identifierName(nameNode);
     return {
       row: rowOf(node),
-      name: name === '_' ? undefined : name,
+      name: nameNode.text === '_' ? undefined : name,
       type: typeNode ? this.convertType(typeNode) : undefined,
     };
   }

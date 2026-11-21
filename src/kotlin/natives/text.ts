@@ -1,13 +1,22 @@
 // code-gauge-allow-file fileNcss 410 -- the text and character natives share string, casing, and parsing operations.
 import { formatJava, type FormatValues } from '../../interpreter/javaFormatter';
-import { callFunction, getPropertyValue, runtimeClassOf } from '../dispatch';
+import { runtimeClassOf } from '../dispatch';
 import { float32FromText } from '../float32';
 import { charToString, formatPrimitive, hashOf, stringOf } from '../format';
 import { toInt32 } from '../operators';
 import type { Frame } from '../runtime';
 import { Boxed, KObject, UNIT, type Value } from '../values';
+import {
+  copySequenceForBuilder,
+  sequenceAll,
+  sequenceIndexOf,
+  sequenceIndexOfChar,
+  sequenceLines,
+  sequenceMatchesAt,
+  sequenceSplit,
+} from './charSequences';
 import { newList } from './collections';
-import { compareStrings, substring } from './core';
+import { checkStringIndex, compareStrings, substring } from './core';
 import {
   compareJdkCase,
   foldJdkCodePoint,
@@ -19,16 +28,10 @@ import {
   upperJdkChar,
 } from './jdkCase';
 import { defineNative, defineNativeProperty, libraryClass, throwError } from './registry';
-import { type TextSearch, textSearch } from './textSearch';
+import { textSearch } from './textSearch';
 
 const TEXT = 'kotlin.text';
 const LINE_ENDINGS = /\r\n|\n|\r/;
-
-/** The UTF-16 code units of a string, which Kotlin's chars are. */
-function codeUnits(value: string): number[] {
-  // oxlint-disable-next-line unicorn/prefer-code-point -- Kotlin chars are UTF-16 code units.
-  return Array.from({ length: value.length }, (_, index) => value.charCodeAt(index));
-}
 
 /** Reverses a string as `StringBuilder.reverse` does, which keeps each surrogate pair in order. */
 function reverseKeepingPairs(value: string): string {
@@ -49,22 +52,6 @@ function trimControls(value: string): string {
 
 function text(value: Value): string {
   return value as string;
-}
-
-export function sequenceText(frame: Frame, value: Value): string {
-  if (typeof value === 'string') return value;
-  if (value instanceof KObject && value.builder !== undefined) return value.builder;
-  const owner = libraryClass('kotlin.CharSequence');
-  const length = owner.members.get('length')?.find((member) => member.kind === 'property');
-  const get = owner.members.get('get')?.find((member) => member.kind === 'function');
-  if (!length || !get) throw new Error('Missing CharSequence members');
-  const size = getPropertyValue(length, frame, value) as number;
-  frame.runtime.allocateString(frame, size);
-  const characters: string[] = [];
-  for (let index = 0; index < size; index++) {
-    characters.push(charToString(callFunction(get, frame, value, [index], undefined) as number));
-  }
-  return characters.join('');
 }
 
 function result(frame: Frame, value: string): string {
@@ -131,16 +118,6 @@ function parseNarrow(frame: Frame, value: string, bits: 8 | 16): number {
   return Number(parsed);
 }
 
-function search(frame: Frame, receiver: Value, target: string, ignoreCase: boolean, codeUnitsOnly = false): TextSearch {
-  return textSearch(
-    frame,
-    sequenceText(frame, receiver),
-    target,
-    ignoreCase,
-    codeUnitsOnly || typeof receiver !== 'string'
-  );
-}
-
 function numberFormatError(frame: Frame, value: string, radix = 10): never {
   const suffix = radix === 10 ? '' : ` under radix ${radix}`;
   return throwError(frame, 'java.lang.NumberFormatException', `For input string: "${value}"${suffix}`);
@@ -175,7 +152,9 @@ type TextNative = (frame: Frame, receiver: Value, args: Value[]) => Value;
 
 /** Case conversion, trimming, and substrings. */
 const TEXT_CASE_AND_TRIM_NATIVES: Record<string, TextNative> = {
-  'CharSequence.isBlank()': (frame, receiver) => codeUnits(sequenceText(frame, receiver)).every(isKotlinWhitespace),
+  'CharSequence.isBlank()': (frame, receiver) => sequenceAll(frame, receiver, isKotlinWhitespace),
+  'CharSequence.hasTextAt(CharSequence, Int, Boolean)': (frame, receiver, [other, index, ignoreCase]) =>
+    sequenceMatchesAt(frame, receiver, other, index as number, ignoreCase === true),
   'String.uppercase()': (frame, receiver) => result(frame, text(receiver).toUpperCase()),
   'String.lowercase()': (frame, receiver) => result(frame, text(receiver).toLowerCase()),
   'String.trim()': (frame, receiver) => result(frame, trimWith(text(receiver), true, true)),
@@ -199,19 +178,17 @@ const TEXT_CASE_AND_TRIM_NATIVES: Record<string, TextNative> = {
 /** Searching, replacing, splitting, padding, and comparing. */
 const TEXT_SEARCH_NATIVES: Record<string, TextNative> = {
   'CharSequence.contains(CharSequence)': (frame, receiver, [other]) =>
-    sequenceText(frame, receiver).includes(sequenceText(frame, other)),
+    sequenceIndexOf(frame, receiver, other, 0, false) !== -1,
   'CharSequence.contains(CharSequence, Boolean)': (frame, receiver, [other, ignoreCase]) =>
-    search(frame, receiver, sequenceText(frame, other), ignoreCase === true, typeof other !== 'string').includes(),
+    sequenceIndexOf(frame, receiver, other, 0, ignoreCase === true) !== -1,
   'CharSequence.indexOf(String, Int, Boolean)': (frame, receiver, [other, start, ignoreCase]) =>
-    search(frame, receiver, text(other), ignoreCase === true).indexOf(Math.max(0, start as number)),
+    sequenceIndexOf(frame, receiver, other, start as number, ignoreCase === true),
   'CharSequence.indexOf(Char, Int, Boolean)': (frame, receiver, [char, start, ignoreCase]) =>
-    search(frame, receiver, charToString(char as number), ignoreCase === true, true).indexOf(
-      Math.max(0, start as number)
-    ),
+    sequenceIndexOfChar(frame, receiver, char as number, start as number, ignoreCase === true),
   'CharSequence.lastIndexOf(String, Int, Boolean)': (frame, receiver, [other, start, ignoreCase]) =>
-    search(frame, receiver, text(other), ignoreCase === true).lastIndexOf(start as number),
+    sequenceIndexOf(frame, receiver, other, start as number, ignoreCase === true, true),
   'CharSequence.lastIndexOf(Char, Int, Boolean)': (frame, receiver, [char, start, ignoreCase]) =>
-    search(frame, receiver, charToString(char as number), ignoreCase === true, true).lastIndexOf(start as number),
+    sequenceIndexOfChar(frame, receiver, char as number, start as number, ignoreCase === true, true),
   'String.replace(String, String, Boolean)': (frame, receiver, [oldValue, newValue, ignoreCase]) =>
     replaceAll(frame, text(receiver), text(oldValue), text(newValue), ignoreCase === true),
   'String.replace(Char, Char)': (frame, receiver, [oldChar, newChar]) =>
@@ -238,20 +215,24 @@ const TEXT_SEARCH_NATIVES: Record<string, TextNative> = {
     return text(receiver).repeat(times);
   },
   'CharSequence.split(vararg String, Boolean, Int)': (frame, receiver, [delimiters, ignoreCase, limit]) =>
-    splitText(frame, sequenceText(frame, receiver), ((delimiters as KObject).items as Value[]).map(text), {
+    splitSequence(frame, receiver, ((delimiters as KObject).items as Value[]).map(text), {
       ignoreCase: ignoreCase === true,
-      supplementary: typeof receiver === 'string',
+      byChar: false,
       limit: limit as number,
     }),
   'CharSequence.split(vararg Char, Boolean, Int)': (frame, receiver, [delimiters, ignoreCase, limit]) =>
-    splitText(
+    splitSequence(
       frame,
-      sequenceText(frame, receiver),
+      receiver,
       ((delimiters as KObject).items as Value[]).map((char) => charToString(char as number)),
-      { ignoreCase: ignoreCase === true, supplementary: false, limit: limit as number }
+      { ignoreCase: ignoreCase === true, byChar: true, limit: limit as number }
     ),
   'CharSequence.lines()': (frame, receiver) =>
-    newList(frame, 'ArrayList', sequenceText(frame, receiver).split(LINE_ENDINGS)),
+    newList(
+      frame,
+      'ArrayList',
+      typeof receiver === 'string' ? receiver.split(LINE_ENDINGS) : sequenceLines(frame, receiver)
+    ),
   'String.reversed()': (frame, receiver) => result(frame, reverseKeepingPairs(text(receiver))),
   'String.toCharArray()': (frame, receiver) => {
     const array = new KObject(libraryClass('kotlin.CharArray'), 0);
@@ -296,23 +277,6 @@ const TEXT_SEARCH_NATIVES: Record<string, TextNative> = {
 
 /** Removing and extracting the parts around a delimiter. */
 const TEXT_EXTRACTION_NATIVES: Record<string, TextNative> = {
-  'String.removePrefix(CharSequence)': (frame, receiver, [prefix]) => {
-    const value = text(receiver);
-    const start = sequenceText(frame, prefix);
-    return value.startsWith(start) ? value.slice(start.length) : value;
-  },
-  'String.removeSuffix(CharSequence)': (frame, receiver, [suffix]) => {
-    const value = text(receiver);
-    const end = sequenceText(frame, suffix);
-    return end.length > 0 && value.endsWith(end) ? value.slice(0, -end.length) : value;
-  },
-  'String.removeSurrounding(CharSequence)': (frame, receiver, [delimiter]) => {
-    const value = text(receiver);
-    const around = sequenceText(frame, delimiter);
-    return value.length >= 2 * around.length && value.startsWith(around) && value.endsWith(around)
-      ? value.slice(around.length, value.length - around.length)
-      : value;
-  },
   'String.substringBefore(String, String)': (_frame, receiver, [delimiter, missing]) => {
     const index = text(receiver).indexOf(text(delimiter));
     return index === -1 ? missing : text(receiver).slice(0, index);
@@ -520,6 +484,19 @@ function replaceAll(frame: Frame, value: string, oldValue: string, replacement: 
   return parts.join('');
 }
 
+function splitSequence(
+  frame: Frame,
+  value: Value,
+  delimiters: string[],
+  options: { ignoreCase: boolean; byChar: boolean; limit: number }
+): KObject {
+  if (typeof value === 'string') {
+    return splitText(frame, value, delimiters, { ...options, supplementary: !options.byChar });
+  }
+  const { singleton, parts } = sequenceSplit(frame, value, delimiters, options);
+  return newList(frame, singleton ? 'SingletonList' : 'ArrayList', parts);
+}
+
 /** `split`, which splits at the first delimiter that matches at each position, keeping empty parts. */
 function splitText(
   frame: Frame,
@@ -658,14 +635,14 @@ function defineBuilderReading(): void {
     return UNIT;
   });
   defineNative(`${BUILDER}.<init>(CharSequence)`, (frame, instance, [content]) => {
-    builder(instance).builder = sequenceText(frame, content);
+    builder(instance).builder = copySequenceForBuilder(frame, content, true);
     return UNIT;
   });
   defineNativeProperty(`${BUILDER}.length`, (_frame, receiver) => (builder(receiver).builder as string).length);
   defineNative(`${BUILDER}.get(Int)`, (frame, receiver, [index]) => {
     const value = builder(receiver).builder as string;
     const position = index as number;
-    checkIndex(frame, position, value.length);
+    checkStringIndex(frame, position, value.length);
     // oxlint-disable-next-line unicorn/prefer-code-point -- Kotlin chars are UTF-16 code units.
     return value.charCodeAt(position);
   });
@@ -712,7 +689,7 @@ function defineBuilderAppending(): void {
     appendText(frame, receiver, value === undefined ? 'null' : text(value))
   );
   defineNative(`${BUILDER}.append(CharSequence?)`, (frame, receiver, [value]) =>
-    appendText(frame, receiver, value === undefined ? 'null' : sequenceText(frame, value))
+    appendText(frame, receiver, value === undefined ? 'null' : copySequenceForBuilder(frame, value))
   );
   defineNative(`${BUILDER}.append(Char)`, (frame, receiver, [value]) =>
     appendText(frame, receiver, charToString(value as number))
@@ -755,7 +732,7 @@ function defineBuilderEditing(): void {
   defineNative(`${BUILDER}.deleteCharAt(Int)`, (frame, receiver, [index]) => {
     const current = builder(receiver).builder as string;
     const position = index as number;
-    checkIndex(frame, position, current.length);
+    checkStringIndex(frame, position, current.length);
     return setBuilder(
       frame,
       receiver,
@@ -781,7 +758,7 @@ function defineBuilderEditing(): void {
   defineNative(`${BUILDER}.setCharAt(Int, Char)`, (frame, receiver, [index, char]) => {
     const current = builder(receiver).builder as string;
     const position = index as number;
-    checkIndex(frame, position, current.length);
+    checkStringIndex(frame, position, current.length);
     setBuilder(
       frame,
       receiver,
@@ -790,17 +767,6 @@ function defineBuilderEditing(): void {
     );
     return UNIT;
   });
-}
-
-/** The check of `StringBuilder`'s indexes in the JDK, worded as its `Preconditions.checkIndex` words it. */
-function checkIndex(frame: Frame, position: number, length: number): void {
-  if (position < 0 || position >= length) {
-    throwError(
-      frame,
-      'java.lang.StringIndexOutOfBoundsException',
-      `Index ${position} out of bounds for length ${length}`
-    );
-  }
 }
 
 function rangeError(frame: Frame, start: number, end: number, length: number): never {

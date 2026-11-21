@@ -4,7 +4,7 @@ import type { VariableSymbol } from './symbols';
 import { isSubtype } from './typeRelations';
 import { isNullable, type KType, nonNull, resolved } from './types';
 
-type LocalRefinement = 'full' | 'nonNull';
+type LocalRefinement = 'full' | 'captured';
 
 export function localRefinement(
   scope: Scope,
@@ -13,31 +13,28 @@ export function localRefinement(
 ): LocalRefinement | undefined {
   if (!variable.isVar) return 'full';
   const capturedWrite = variable.isCapturedAndModified && !context.assignedCaptures.has(variable);
-  if (capturedWrite && !preservesNullCheck(variable)) return undefined;
+  if (capturedWrite && variable.capturedWriteTypes.size === 0) return undefined;
   if (escapesOwner(context, variable.owner)) {
     for (let current: Scope | undefined = scope; current; current = current.parent) {
       if (current.pendingWrites?.has(variable.name)) return undefined;
       if (current.variables.has(variable.name)) break;
     }
   }
-  return capturedWrite ? 'nonNull' : 'full';
+  return capturedWrite ? 'captured' : 'full';
 }
 
 export function refineLocalType(
   refinement: LocalRefinement | undefined,
-  declared: KType,
+  variable: VariableSymbol,
   narrowed: KType | undefined
 ): KType | undefined {
   if (refinement === 'full') return narrowed;
-  if (refinement === 'nonNull' && narrowed && !isNullable(narrowed)) return nonNull(declared);
-  return undefined;
-}
-
-function preservesNullCheck(variable: VariableSymbol): boolean {
-  const type = resolved(variable.type);
-  if (!isNullable(type) || variable.capturedWriteTypes.size === 0) return false;
-  const nonNullType = nonNull(type);
-  return [...variable.capturedWriteTypes].every((written) => isSubtype(written, nonNullType));
+  if (refinement !== 'captured' || !narrowed) return undefined;
+  const writes = [...variable.capturedWriteTypes];
+  if (writes.every((written) => isSubtype(written, narrowed))) return narrowed;
+  if (isNullable(resolved(narrowed))) return undefined;
+  const nonNullType = nonNull(variable.type);
+  return writes.every((written) => isSubtype(written, nonNullType)) ? nonNullType : undefined;
 }
 
 function escapesOwner(context: FunctionContext, owner: FunctionContext | undefined): boolean {

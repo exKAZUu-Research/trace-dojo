@@ -336,22 +336,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
       repr: initializer.repr,
       eval: this.variableAccess(context, holder).read,
     };
-    const parts = statement.names.map((part, index) => {
-      if (!part) return;
-      const component = this.compileOperatorCall(
-        scope,
-        context,
-        holderCompiled,
-        `component${index + 1}`,
-        [],
-        row,
-        `分解宣言の ${index + 1} 番目`
-      );
-      const declared = part.type ? this.resolveType(scope, part.type) : undefined;
-      const type = declared ?? component.type;
-      const value = this.expectType(component, type, row);
-      return { name: part.name, type, value, row: part.row };
-    });
+    const parts = this.compileComponents(scope, context, holderCompiled, statement.names, row);
     const writes = parts.map((part) => {
       if (!part) return;
       const variable = this.newVariable(scope, context, part.name, part.type, statement.isVar, part.row);
@@ -624,11 +609,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     return {
       type: variable.type,
       readType: isCompound
-        ? refineLocalType(
-            localRefinement(scope, context, variable),
-            variable.type,
-            this.flow.narrowed.get(keyOf(variable))
-          )
+        ? refineLocalType(localRefinement(scope, context, variable), variable, this.flow.narrowed.get(keyOf(variable)))
         : undefined,
       repr: reprOf(this.core, variable.type),
       recordAssignment: (type) => {
@@ -1067,10 +1048,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
       const declared = variable.type ? this.resolveType(scope, variable.type) : undefined;
       if (declared && !isSubtype(elementType, declared)) this.error(row, typeMismatchMessage(declared, elementType));
       const type = declared ?? elementType;
-      const symbol = this.newVariable(scope, context, variable.name, type, false, variable.row, variable.name !== '_');
-      if (variable.name === '_') scope.variables.delete('_');
-      this.flow.assigned.add(symbol);
-      const { write } = this.variableAccess(context, symbol);
+      const write = this.bindLoopLocal(scope, context, variable.name, type, variable.row);
       const element = new Handoff<Value>();
       const convert = convertRepr(() => element.get(), elementRepr, reprOf(this.core, type));
       const isAnswered = this.isAnswered(type);
@@ -1084,7 +1062,39 @@ export abstract class StatementCompiler extends OperatorCompiler {
     this.flow.assigned.add(holder);
     const holderAccess = this.variableAccess(context, holder);
     const holderCompiled: Compiled = { type: elementType, repr: elementRepr, eval: holderAccess.read };
-    const writes = variable.names.map((part, index) => {
+    const parts = this.compileComponents(scope, context, holderCompiled, variable.names, row);
+    const writes = parts.map((part) => {
+      if (!part) return;
+      const write = this.bindLoopLocal(scope, context, part.name, part.type, part.row);
+      return (frame: Frame) => write(frame, part.value(frame));
+    });
+    return (frame, value) => {
+      holderAccess.write(frame, value);
+      for (const write of writes) write?.(frame);
+      frame.runtime.steps.stepBinding(stepRow, true);
+    };
+  }
+
+  private bindLoopLocal(
+    scope: Scope,
+    context: FunctionContext,
+    name: string,
+    type: KType,
+    row: number
+  ): (frame: Frame, value: Value) => void {
+    const symbol = this.newVariable(scope, context, name, type, false, row);
+    this.flow.assigned.add(symbol);
+    return this.variableAccess(context, symbol).write;
+  }
+
+  private compileComponents(
+    scope: Scope,
+    context: FunctionContext,
+    holderCompiled: Compiled,
+    names: DestructuringDecl['names'],
+    row: number
+  ): ({ name: string; type: KType; value: Eval; row: number } | undefined)[] {
+    return names.map((part, index) => {
       if (!part) return;
       const component = this.compileOperatorCall(
         scope,
@@ -1098,16 +1108,8 @@ export abstract class StatementCompiler extends OperatorCompiler {
       const declared = part.type ? this.resolveType(scope, part.type) : undefined;
       const type = declared ?? component.type;
       const value = this.expectType(component, type, row);
-      const symbol = this.newVariable(scope, context, part.name, type, false, part.row);
-      this.flow.assigned.add(symbol);
-      const { write } = this.variableAccess(context, symbol);
-      return (frame: Frame) => write(frame, value(frame));
+      return { name: part.name, type, value, row: part.row };
     });
-    return (frame, value) => {
-      holderAccess.write(frame, value);
-      for (const write of writes) write?.(frame);
-      frame.runtime.steps.stepBinding(stepRow, true);
-    };
   }
 
   // Control structures as expressions.

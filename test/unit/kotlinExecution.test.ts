@@ -965,6 +965,47 @@ fun main() { println(Outer().show()); println(Derived().show()) }`,
     stdout: '3\n4\n',
   },
   {
+    name: 'custom CharSequence operations observe only the necessary reads',
+    source: String.raw`class Chars(private val backing: CharSequence) : CharSequence by backing {
+    override fun get(index: Int): Char {
+        print("get $index;")
+        return backing[index]
+    }
+    override fun subSequence(startIndex: Int, endIndex: Int): CharSequence {
+        print("sub $startIndex-$endIndex;")
+        return backing.subSequence(startIndex, endIndex)
+    }
+}
+fun main() {
+    val chars: CharSequence = Chars("abc")
+    println(chars.indexOf("a"))
+    println(chars.lastIndexOf('b'))
+    println(chars.isBlank())
+    println(chars.contains(Chars("bc")))
+    println("xyabc".removeSuffix(Chars("bc")))
+    println(chars.split("b"))
+}`,
+    stdout:
+      'get 0;0\nget 2;get 1;1\nget 0;false\nget 0;get 0;get 0;get 1;get 1;get 2;true\n' +
+      'get 0;get 1;xya\nget 0;get 1;sub 0-1;get 2;sub 2-3;[a, c]\n',
+  },
+  {
+    name: 'captured writes of a single subtype preserve matching smart casts',
+    source: `open class Shape
+class Circle : Shape() { val radius: Int = 1 }
+fun main() {
+    var shape: Shape? = Circle()
+    val replace = { shape = Circle() }
+    if (shape != null && shape is Circle) println(shape.radius)
+    replace()
+    when (shape) {
+        is Circle -> println(shape.radius)
+        else -> println("unknown")
+    }
+}`,
+    stdout: '1\n1\n',
+  },
+  {
     name: 'a delegated local var shares its delegate across lambda calls',
     source: `import kotlin.properties.Delegates
 fun main() {
@@ -2059,6 +2100,8 @@ fun main() {
     false,
     'class Score(val value: Int) { fun getValue(): Int = value + 1 }; fun main() { println(Score(3).getValue()) }',
   ],
+  ['an unnamed loop variable', false, 'fun main() { for (_ in 1..3) println("x") }'],
+  ['an escaped underscore loop variable', true, 'fun main() { for (`_` in 1..3) println(`_`) }'],
   ['a Nothing-returning function that falls through', false, 'fun bad(): Nothing { println("bad") }; fun main() {}'],
   ['a Nothing-returning function that always throws', true, 'fun abort(): Nothing { error("done") }; fun main() {}'],
   [

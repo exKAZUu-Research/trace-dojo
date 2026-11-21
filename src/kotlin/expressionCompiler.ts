@@ -554,7 +554,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     }
     const key = keyOf(variable);
     const refinement = localRefinement(scope, context, variable);
-    const narrowed = refineLocalType(refinement, variable.type, this.flow.narrowed.get(key));
+    const narrowed = refineLocalType(refinement, variable, this.flow.narrowed.get(key));
     const access = this.variableAccess(context, variable);
     return {
       type: narrowed ?? variable.type,

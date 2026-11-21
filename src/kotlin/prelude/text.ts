@@ -212,11 +212,7 @@ fun CharSequence.startsWith(prefix: CharSequence, startIndex: Int, ignoreCase: B
 fun CharSequence.endsWith(suffix: CharSequence, ignoreCase: Boolean = false): Boolean =
     hasTextAt(suffix, length - suffix.length, ignoreCase)
 
-private fun CharSequence.hasTextAt(other: CharSequence, startIndex: Int, ignoreCase: Boolean): Boolean {
-    if (startIndex < 0 || startIndex > length - other.length) return false
-    for (index in 0 until other.length) if (!this[startIndex + index].equals(other[index], ignoreCase)) return false
-    return true
-}
+private external fun CharSequence.hasTextAt(other: CharSequence, startIndex: Int, ignoreCase: Boolean): Boolean
 
 external fun String.startsWith(prefix: String, ignoreCase: Boolean = false): Boolean
 fun String.startsWith(prefix: String, startIndex: Int, ignoreCase: Boolean = false): Boolean =
@@ -275,9 +271,16 @@ fun CharSequence.removeSurrounding(prefix: CharSequence, suffix: CharSequence): 
         return subSequence(prefix.length, length - suffix.length)
     return subSequence(0, length)
 }
-external fun String.removePrefix(prefix: CharSequence): String
-external fun String.removeSuffix(suffix: CharSequence): String
-external fun String.removeSurrounding(delimiter: CharSequence): String
+fun String.removePrefix(prefix: CharSequence): String =
+    if (hasTextAt(prefix, 0, false)) substring(prefix.length) else this
+fun String.removeSuffix(suffix: CharSequence): String =
+    if (hasTextAt(suffix, length - suffix.length, false)) substring(0, length - suffix.length) else this
+fun String.removeSurrounding(delimiter: CharSequence): String {
+    if (length >= delimiter.length + delimiter.length &&
+        hasTextAt(delimiter, 0, false) && hasTextAt(delimiter, length - delimiter.length, false))
+        return substring(delimiter.length, length - delimiter.length)
+    return this
+}
 external fun String.substringBefore(delimiter: String, missingDelimiterValue: String = this): String
 external fun String.substringAfter(delimiter: String, missingDelimiterValue: String = this): String
 external fun String.substringBeforeLast(delimiter: String, missingDelimiterValue: String = this): String
