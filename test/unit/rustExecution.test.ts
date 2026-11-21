@@ -8695,3 +8695,17 @@ fn make() -> BTreeMap<i32, Turtle> {
     expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '1 false\n2 false\ntrue\n' });
   }
 );
+
+test('borrowing a string as bytes through AsRef costs no allocation per borrow', () => {
+  const program = rustMain(
+    `
+    let s = "a".repeat(1000);
+    let mut count = 0;
+    for _ in 0..1200 {
+        if first(&s) == 97 { count += 1; }
+    }
+    println!("{count}");`,
+    'fn first<T: AsRef<[u8]>>(x: &T) -> u8 { x.as_ref()[0] }'
+  );
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '1200\n' });
+});

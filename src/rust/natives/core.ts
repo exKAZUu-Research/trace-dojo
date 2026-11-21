@@ -13,7 +13,7 @@ import {
 } from '../ops';
 import { FmtFailure, ProcessExit, RustPanic } from '../runtime';
 import { intMax, type IntName, resolve, sameType, shallow, substitute as substituteType, type Type } from '../types';
-import { utf8Bytes } from '../utf8';
+import { utf8Bytes, utf8Reader } from '../utf8';
 import {
   DynValue,
   EnumValue,
@@ -312,11 +312,11 @@ define({
   'Box<str>::into_string': ([self]) => textOf(self),
   'AsRef::as_ref': ([self], ctx) => {
     const value = deref(self);
-    // A string as `[u8]` is its UTF-8 bytes.
+    // A string as `[u8]` borrows its UTF-8 bytes, as `str::as_bytes` does.
     const target = normalize(shallow(ctx.typeArgs[1]));
     if (target.kind === 'str') return textOf(value);
     const isBytes = target.kind === 'slice' && (typeof value === 'string' || value instanceof StringValue);
-    return isBytes ? utf8Bytes(textOf(value), ctx.runtime) : value;
+    return isBytes ? utf8Reader.bytesView(textOf(value), ctx.runtime) : value;
   },
   'std::mem::size_of': (_args, ctx) => BigInt(sizeOf(ctx.typeArgs[0])),
   'std::mem::swap': ([x, y]) => {
