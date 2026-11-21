@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 732 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss 734 -- the compiler of one area of Kotlin, whose parts call each other closely.
 import { CompileError } from '../interpreter/diagnostics';
 import {
   type ArgumentEvaluation,
@@ -910,9 +910,10 @@ export abstract class CallCompiler extends CompilerCore {
     const declaredReturn = this.declaredReturnOf(candidate, row);
     if (!expected) return;
     const result = substitute(declaredReturn, substitution);
-    const expectedHint = soleLowerBound(resolved(expected));
-    if (expectedHint && variables.every((variable) => variable.lower.length === 0 && variable.upper.length === 0)) {
-      this.constrainReturnType(result, commonGenericHint(result, expectedHint) ?? expectedHint);
+    if (variables.every((variable) => variable.lower.length === 0 && variable.upper.length === 0)) {
+      const lower = soleLowerBound(resolved(expected));
+      const hint = commonGenericHint(result, lower ?? resolved(expected)) ?? lower;
+      if (hint) this.constrainReturnType(result, hint);
     }
     this.constrainReturnType(result, expected);
   }

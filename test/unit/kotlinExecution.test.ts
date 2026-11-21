@@ -131,6 +131,27 @@ fun main() {
       'java.util.ConcurrentModificationException\njava.util.ConcurrentModificationException\njava.util.ConcurrentModificationException\n',
   },
   {
+    name: 'generic result inference projects mutable siblings and range supertypes',
+    source: `fun main() {
+    val ready = 3 > 2
+    val names = mutableListOf("a", "b")
+    val tags = mutableSetOf(1)
+    val scores = mutableMapOf("a" to 1)
+    val a = if (ready) emptyList() else names
+    val b = if (ready) names else emptyList()
+    val c = if (ready) emptySet() else tags
+    val d = if (ready) emptyMap() else scores
+    val e = when { ready -> emptyList(); else -> arrayListOf("x") }
+    val f = if (ready) emptyList() else setOf(1)
+    val g = try { emptyList() } catch (e: Exception) { names }
+    val h = if (ready) emptyList() else 1..3
+    println(a); println(b); println(c); println(d); println(e); println(f); println(g); println(h)
+    println(if (ready) emptyList() else names)
+    println(listOf(emptyList(), names))
+}`,
+    stdout: '[]\n[a, b]\n[]\n{}\n[]\n[]\n[]\n[]\n[]\n[[], [a, b]]\n',
+  },
+  {
     name: 'branch and argument result types infer from later or earlier siblings',
     source: `fun main() {
     val show = false
