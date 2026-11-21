@@ -63,9 +63,10 @@ export function everyMapEntry(frame: Frame, map: Value, visit: (key: Value, valu
   return everyIterableElement(frame, entries, (entry) =>
     frame.runtime.withNativeRoots([entry], () => {
       const key = readCollectionProperty(frame, entry, MAP_ENTRY, 'key');
-      return frame.runtime.withNativeRoots([key], () =>
-        visit(key, readCollectionProperty(frame, entry, MAP_ENTRY, 'value'))
-      );
+      return frame.runtime.withNativeRoots([key], () => {
+        const value = readCollectionProperty(frame, entry, MAP_ENTRY, 'value');
+        return frame.runtime.withNativeRoots([value], () => visit(key, value));
+      });
     })
   );
 }

@@ -26,9 +26,11 @@ import {
   compareCollections,
   containsAll,
   copyCollectionToArray,
+  everyMapEntry,
   filterCollection,
   forEachIterable,
   iterateElements,
+  MAP as MAP_INTERFACE,
   objectsEqual,
   readCollectionProperty,
   removeFirstIterable,
@@ -885,12 +887,10 @@ function defineMapConstructors(): void {
       return UNIT;
     });
     defineNative(`${key}(Map<out K, V>)`, (frame, instance, [source]) => {
-      const entries = mapEntriesOf(frame, source);
-      const store = newStore(order);
-      reserveForCopy(store, entries.length);
-      for (const [entryKey, value] of entries) putEntry(frame, store, entryKey, value);
-      (instance as KObject).store = store;
-      (instance as KObject).modCount = 0;
+      const map = instance as KObject;
+      map.store = newStore(order);
+      map.modCount = 0;
+      copyMapEntries(frame, map, source);
       return UNIT;
     });
   }
@@ -922,9 +922,7 @@ function defineMaps(): void {
     },
     'putAll(Map<out K, V>)': (frame, map, [source]) => {
       requireMutableMap(frame, map);
-      const entries = mapEntriesOf(frame, source);
-      reserveForCopy(storeOf(map), entries.length);
-      for (const [key, value] of entries) putMapEntry(frame, map as KObject, key, value);
+      copyMapEntries(frame, map as KObject, source);
       return UNIT;
     },
     'clear()': (frame, map) => {
@@ -952,16 +950,14 @@ function putMapEntry(frame: Frame, map: KObject, key: Value, value: Value): Valu
   return previous;
 }
 
-/** The entries of any map, as key–value pairs in its iteration order. */
-function mapEntriesOf(frame: Frame, map: Value): [Value, Value][] {
-  const object = map as KObject;
-  if (object.store) return object.store.ordered().map((entry) => [entry.key, entry.value]);
-  const entries = elementsOf(frame, readCollectionProperty(frame, map, 'kotlin.collections.Map', 'entries'));
-  const owner = 'kotlin.collections.Map.Entry';
-  return entries.map((entry) => [
-    readCollectionProperty(frame, entry, owner, 'key'),
-    readCollectionProperty(frame, entry, owner, 'value'),
-  ]);
+function copyMapEntries(frame: Frame, map: KObject, source: Value): void {
+  const count = readCollectionProperty(frame, source, MAP_INTERFACE, 'size') as number;
+  if (count <= 0) return;
+  reserveForCopy(storeOf(map), count);
+  everyMapEntry(frame, source, (key, value) => {
+    putMapEntry(frame, map, key, value);
+    return true;
+  });
 }
 
 function mapToString(frame: Frame, map: KObject): string {

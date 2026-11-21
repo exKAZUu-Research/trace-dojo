@@ -136,6 +136,30 @@ fun main() {
       'capacity 2\n[30817, 25209, 99, 0, 0]\njava.lang.StringIndexOutOfBoundsException: Range [0, 0 + 5) out of bounds for length 3\njava.lang.StringIndexOutOfBoundsException: Range [0, 0 + 5) out of bounds for length 3\njava.lang.ArrayIndexOutOfBoundsException: arraycopy: last source index 10 out of bounds for byte[6]\ncapacity 3\n[30817, 25209, 99, 0, 0]\njava.lang.StringIndexOutOfBoundsException: Range [0, 0 + 5) out of bounds for length 4\njava.lang.StringIndexOutOfBoundsException: Range [0, 0 + 5) out of bounds for length 4\njava.lang.ArrayIndexOutOfBoundsException: arraycopy: last source index 10 out of bounds for byte[8]\ncapacity 16\n[30817, 25209, 99, 0, 0]\n[30817, 25209, 99, 0, 0]\n[30817, 25209, 99, 0, 0]\n[30817, 25209, 99, 0, 0]\n',
   },
   {
+    name: 'map copies retain the entries inserted before a later getter fails',
+    source: `class SuppliedEntry(val number: Int, val mode: Int) : Map.Entry<Int, Int> {
+    override val key: Int get() {
+        if (number == 2 && mode == 0) error("key")
+        return number
+    }
+    override val value: Int get() {
+        if (number == 2 && mode == 1) error("value")
+        return number
+    }
+}
+class Source(val mode: Int) : Map<Int, Int> by mapOf(1 to 1, 2 to 2) {
+    override val entries: Set<Map.Entry<Int, Int>> get() = setOf(SuppliedEntry(1,mode),SuppliedEntry(2,mode))
+}
+fun main() {
+    for(mode in 0..1) {
+        val destination = linkedMapOf<Int, Int>()
+        try { destination.putAll(Source(mode)) } catch(e: IllegalStateException) { println(e.message) }
+        println(destination)
+    }
+}`,
+    stdout: 'key\n{1=1}\nvalue\n{1=1}\n',
+  },
+  {
     name: 'map entry equality reads the value after a custom key getter',
     source: `class Candidate(private val change: () -> Unit) : Map.Entry<Int, Int> {
     override val key: Int get() { change(); return 1 }
