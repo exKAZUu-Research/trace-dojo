@@ -986,9 +986,7 @@ fun <T> Iterable<T>.windowed(size: Int, step: Int = 1, partialWindows: Boolean =
     windowed(size, step, partialWindows) { ArrayList(it) }
 
 fun <T, R> Iterable<T>.windowed(size: Int, step: Int = 1, partialWindows: Boolean = false, transform: (List<T>) -> R): List<R> {
-    if (!(size > 0 && step > 0)) {
-        throw IllegalArgumentException(if (size != step) "Both size $size and step $step must be greater than zero." else "size $size must be greater than zero.")
-    }
+    checkWindowSizeStep(size, step)
     if (this is List && this is RandomAccess) return windowRandomAccess<T, R>(this as List<T>, size, step, partialWindows, transform)
     val result = ArrayList<R>()
     val source = iterator()
@@ -1007,6 +1005,12 @@ fun <T, R> Iterable<T>.windowed(size: Int, step: Int = 1, partialWindows: Boolea
     }
 }
 
+internal fun checkWindowSizeStep(size: Int, step: Int) {
+    if (!(size > 0 && step > 0)) {
+        throw IllegalArgumentException(if (size != step) "Both size $size and step $step must be greater than zero." else "size $size must be greater than zero.")
+    }
+}
+
 private fun <T, R> windowRandomAccess(list: List<T>, size: Int, step: Int, partialWindows: Boolean, transform: (List<T>) -> R): List<R> {
     val thisSize = list.size
     val result = ArrayList<R>(thisSize / step + if (thisSize % step == 0) 0 else 1)
@@ -1022,13 +1026,10 @@ private fun <T, R> windowRandomAccess(list: List<T>, size: Int, step: Int, parti
     return result
 }
 
-infix fun <T, R> Iterable<T>.zip(other: Iterable<R>): List<Pair<T, R>> {
-    val first = iterator()
-    val second = other.iterator()
-    val list = ArrayList<Pair<T, R>>()
-    while (first.hasNext() && second.hasNext()) list.add(first.next() to second.next())
-    return list
-}
+infix fun <T, R> Iterable<T>.zip(other: Iterable<R>): List<Pair<T, R>> = zip(other) { a, b -> a to b }
+infix fun <T, R> Iterable<T>.zip(other: Array<out R>): List<Pair<T, R>> = zip(other.asList())
+inline fun <T, R, V> Iterable<T>.zip(other: Array<out R>, transform: (a: T, b: R) -> V): List<V> =
+    zip(other.asList(), transform)
 
 inline fun <T, R, V> Iterable<T>.zip(other: Iterable<R>, transform: (a: T, b: R) -> V): List<V> {
     val first = iterator()

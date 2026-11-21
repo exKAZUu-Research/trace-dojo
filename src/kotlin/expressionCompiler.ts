@@ -35,7 +35,7 @@ import {
   type TypeParameterSymbol,
   VariableSymbol,
 } from './symbols';
-import { anyType, commonSupertype, determinedType, fixVariable, isSubtype } from './typeRelations';
+import { anyType, commonSupertype, fixVariable, isSubtype, lambdaResultHint } from './typeRelations';
 import {
   type ClassType,
   classType,
@@ -1793,7 +1793,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
       lambdaScope,
       lambdaContext,
       bodyBlock,
-      returnsUnit ? undefined : (determinedType(expectedReturn) ?? expectedReturn),
+      returnsUnit ? undefined : lambdaResultHint(expectedReturn),
       returnsUnit
     );
     this.markCapturedAssignments(lambdaContext, outerFlow);

@@ -2,8 +2,8 @@ import type { Expression } from './ast';
 import { type Compiled, type Eval, isBareCallExpression } from './compilerBase';
 import { type Frame, MISSING } from './runtime';
 import type { FunctionSymbol } from './symbols';
-import { branchHint, isSameType, withDeterminedVariables } from './typeRelations';
-import { hasOpenVariables, type KType, substitute, type Substitution } from './types';
+import { branchHint, determinedType, isSameType, soleLowerBound, withDeterminedVariables } from './typeRelations';
+import { hasOpenVariables, type KType, resolved, substitute, type Substitution } from './types';
 import type { KObject, Value } from './values';
 
 /** What the expected type of an argument needs of an attempt to call a candidate. */
@@ -35,7 +35,8 @@ export function expectedArgumentType(
   argument: Expression,
   isOverloaded: boolean
 ): KType | undefined {
-  const agreed = agreedParameterType(attempts, index, isOverloaded);
+  const hints = argument.kind === 'call' ? argumentTypeHints(attempts, index) : undefined;
+  const agreed = agreedParameterType(attempts, index, isOverloaded, hints);
   if (!isBareCallExpression(argument) || (agreed && !hasOpenVariables(agreed))) return agreed;
   const sibling = attempts
     .flatMap(
@@ -54,18 +55,46 @@ export function expectedArgumentType(
 function agreedParameterType(
   attempts: ArgumentAttempt[],
   argumentIndex: number,
-  isOverloaded: boolean
+  isOverloaded: boolean,
+  hints?: (KType | undefined)[]
 ): KType | undefined {
   let agreed: KType | undefined;
-  for (const attempt of attempts) {
+  for (const [index, attempt] of attempts.entries()) {
     const paramIndex = attempt.mapping.findIndex((indexes) => indexes.includes(argumentIndex));
     const param = attempt.candidate.symbol.params[paramIndex];
     if (!param) return undefined;
-    const type = withDeterminedVariables(substitute(param.type, attempt.substitution));
+    const type = hints?.[index] ?? withDeterminedVariables(substitute(param.type, attempt.substitution));
     if (isOverloaded && (hasOpenVariables(type) || (agreed && !isSameType(agreed, type)))) return undefined;
     agreed = type;
   }
   return agreed;
+}
+
+export function argumentTypeHints(attempts: ArgumentAttempt[], argumentIndex: number): (KType | undefined)[] {
+  return attempts.map((attempt) => {
+    const paramIndex = attempt.mapping.findIndex((indexes) => indexes.includes(argumentIndex));
+    const parameter = attempt.candidate.symbol.params[paramIndex];
+    if (!parameter) return;
+    const inferred = hintSubstitution(attempt.substitution);
+    return withDeterminedVariables(substitute(parameter.type, inferred));
+  });
+}
+
+function hintSubstitution(substitution: Substitution): Substitution {
+  const inferred = new Map(substitution);
+  for (const [param, type] of inferred) {
+    const actual = resolved(type);
+    const hint = actual.kind === 'variable' ? (determinedType(actual) ?? soleLowerBound(actual)) : actual;
+    if (hint) inferred.set(param, hint);
+  }
+  for (const [param, type] of inferred) {
+    if (type.kind !== 'variable') continue;
+    const bound = param.bounds
+      .map((item) => resolved(substitute(item, inferred)))
+      .find((item) => !hasOpenVariables(item));
+    if (bound) inferred.set(param, bound);
+  }
+  return inferred;
 }
 
 /** An argument's evaluation, by its index among the written arguments and the index of the parameter that takes it. */

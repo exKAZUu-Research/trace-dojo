@@ -8,6 +8,7 @@ export interface TextSearch {
   readonly lastIndexOf: (start: number) => number;
 }
 
+// code-gauge-allow functionCognitiveComplexity 18 -- forward and reverse searches apply different JVM bounds to the same matcher.
 export function textSearch(
   frame: Frame,
   value: string,
@@ -17,8 +18,10 @@ export function textSearch(
 ): TextSearch {
   const end = value.length - target.length;
   const regionMatches = ignoreCase ? caseInsensitiveRegion(frame, value, target, codeUnitsOnly) : undefined;
-  const indexOf = (start: number): number =>
-    regionMatches ? findRegion(regionMatches, Math.max(0, start), end, 1) : value.indexOf(target, start);
+  const indexOf = (start: number): number => {
+    if (codeUnitsOnly && start > value.length) return -1;
+    return regionMatches ? findRegion(regionMatches, Math.max(0, start), end, 1) : value.indexOf(target, start);
+  };
   return {
     matchesAt: (index: number): boolean => {
       if (index < 0 || index > end) return false;
@@ -29,8 +32,11 @@ export function textSearch(
     includes: () => indexOf(0) !== -1,
     indexOf,
     lastIndexOf: (start: number): number => {
-      if (start < 0) return -1;
-      return regionMatches ? findRegion(regionMatches, Math.min(start, end), 0, -1) : value.lastIndexOf(target, start);
+      const position = ignoreCase || codeUnitsOnly ? Math.min(start, value.length - 1) : start;
+      if (position < 0) return -1;
+      return regionMatches
+        ? findRegion(regionMatches, Math.min(position, end), 0, -1)
+        : value.lastIndexOf(target, position);
     },
   };
 }

@@ -412,8 +412,8 @@ function defineArrayReading(receiver: string, kind: PrimitiveKind | 'Boolean' | 
     list.items = source.items;
     return list;
   });
-  defineNative(`${prefix}.contentToString()`, (frame, array) =>
-    joinRendered(frame, boxedItems(array, kind), '[', ']', (value) => stringOf(frame, value))
+  defineNative(`${prefix}?.contentToString()`, (frame, array) =>
+    array === NULL ? 'null' : joinRendered(frame, boxedItems(array, kind), '[', ']', (value) => stringOf(frame, value))
   );
   defineNative(`${prefix}.copyOf()`, (frame, array) => {
     const items = (array as KObject).items as Value[];
@@ -429,8 +429,9 @@ function defineArrayReading(receiver: string, kind: PrimitiveKind | 'Boolean' | 
   defineNative(`${prefix}.copyOfRange(Int, Int)`, (frame, array, [from, to]) =>
     copyArrayRange(frame, kind, array, from as number, to as number)
   );
-  defineNative(`${prefix}.contentEquals(${receiver})`, (frame, array, [other]) => {
-    if (other === undefined) return false;
+  defineNative(`${prefix}?.contentEquals(${receiver}?)`, (frame, array, [other]) => {
+    if (array === other) return true;
+    if (array === NULL || other === NULL) return false;
     const a = boxedItems(array, kind);
     const b = boxedItems(other, kind);
     return a.length === b.length && a.every((value, index) => valueEquals(frame, value, b[index]));

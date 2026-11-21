@@ -5,6 +5,91 @@ import { executeProgram } from '../../src/interpreter/program';
 /** Programs with the output of Kotlin 2.4.21 on the JVM (Java 25), which the interpreter must reproduce exactly. */
 test.each([
   {
+    name: 'Duration conversion ties, infinite arithmetic, and large finite values',
+    source: `import kotlin.time.*
+import kotlin.time.Duration.Companion.seconds
+import kotlin.time.Duration.Companion.days
+import kotlin.time.Duration.Companion.nanoseconds
+fun main() {
+    println(0.5.toDuration(DurationUnit.NANOSECONDS))
+    println(2.5.toDuration(DurationUnit.NANOSECONDS))
+    println((-1.5).toDuration(DurationUnit.NANOSECONDS))
+    println(1.seconds / 0)
+    println((-1).seconds / 0)
+    println(Duration.INFINITE.inWholeNanoseconds)
+    println((-Duration.INFINITE).toLong(DurationUnit.DAYS))
+    println((Duration.INFINITE / -2).isNegative())
+    println((Duration.INFINITE + 1.seconds).isFinite())
+    println(365000L.days + 2.nanoseconds)
+    try { println(Duration.ZERO / 0) } catch (error: IllegalArgumentException) { println(error.message) }
+    try { println(Duration.INFINITE * 0) } catch (error: IllegalArgumentException) { println(error.message) }
+    try { println(Duration.INFINITE - Duration.INFINITE) } catch (error: IllegalArgumentException) { println(error.message) }
+}`,
+    stdout:
+      '1ns\n3ns\n-1ns\nInfinity\n-Infinity\n9223372036854775807\n-9223372036854775808\ntrue\nfalse\n365000d\nDividing zero duration by zero yields an undefined result.\nMultiplying infinite duration by zero yields an undefined result.\nSumming infinite durations of different signs yields an undefined result.\n',
+  },
+  {
+    name: 'zip transforms combine arrays, iterables, and character sequences',
+    source: `fun main() {
+    println("abc".zip("xy") { a, b -> "$a$b" })
+    println(intArrayOf(1, 2).zip(intArrayOf(3, 4)) { a, b -> a + b })
+    println(arrayOf(1, 2).zip(listOf(3, 4)) { a, b -> a + b })
+    println(listOf(1, 2).zip(arrayOf(3, 4)))
+    println(listOf(1, 2).zip(arrayOf(3, 4)) { a, b -> a + b })
+}`,
+    stdout: '[ax, by]\n[4, 6]\n[4, 6]\n[(1, 3), (2, 4)]\n[4, 6]\n',
+  },
+  {
+    name: 'nullable string conversions and array content operations',
+    source: `fun show(text: String?, values: IntArray?, other: Array<Int>?) {
+    println(text.equals(null))
+    println(text.equals("TRUE", ignoreCase = true))
+    println(text.toBoolean())
+    println(values.contentToString())
+    println(values.contentEquals(null))
+    println(other.contentToString())
+    println(other.contentEquals(null))
+}
+fun main() {
+    show(null, null, null)
+    show("True", intArrayOf(1), arrayOf(2))
+}`,
+    stdout: 'true\nfalse\nfalse\nnull\ntrue\nnull\ntrue\nfalse\ntrue\ntrue\n[1]\nfalse\n[2]\nfalse\n',
+  },
+  {
+    name: 'generic nested arguments use constraints from the receiver and earlier arguments',
+    source: `fun show(action: () -> Any?) { println(action()) }
+fun main() {
+    println(mapOf("a" to listOf(1)).getOrDefault("b", emptyList()))
+    println(listOf(1, 2) + listOf())
+    println(setOf(1).union(emptySet()))
+    println(mapOf(1 to 2) + emptyMap())
+    println(listOf(1, 2, 3).toCollection(ArrayList()))
+    println(listOf(1, 2, 3).toCollection(HashSet()))
+    println(listOf(1, 2, 3).toCollection(mutableListOf()))
+    println(maxOf(listOf(1), listOf(2), compareBy { it.size }))
+    println(mutableListOf(1).ifEmpty { emptyList() })
+    println(mutableSetOf(1).ifEmpty { emptySet() })
+    println(arrayListOf(1).ifEmpty { emptyList() })
+    show { listOf(1, 2).filter { it > 0 }.ifEmpty { emptyList() } }
+}`,
+    stdout: '[]\n[1, 2]\n[1]\n{1=2}\n[1, 2, 3]\n[1, 2, 3]\n[1, 2, 3]\n[1]\n[1]\n[1]\n[1]\n[1, 2]\n',
+  },
+  {
+    name: 'ArrayDeque and list builder positional errors match Kotlin/JVM wording',
+    source: `fun main() {
+    val deque = ArrayDeque(listOf(1, 2, 3))
+    try { deque.add(5, 0) } catch (error: IndexOutOfBoundsException) { println(error.message) }
+    try { deque.addAll(7, listOf(0)) } catch (error: IndexOutOfBoundsException) { println(error.message) }
+    val iterator = deque.listIterator(deque.size)
+    try { iterator.next() } catch (error: NoSuchElementException) { println(error.message) }
+    try { deque.listIterator().previous() } catch (error: NoSuchElementException) { println(error.message) }
+    try { buildList { add(1); add(5, 0) } } catch (error: IndexOutOfBoundsException) { println(error.message) }
+}`,
+    stdout:
+      'index: 5, size: 3\nindex: 7, size: 3\njava.lang.IndexOutOfBoundsException: index: 3, size: 3\njava.lang.IndexOutOfBoundsException: index: -1, size: 3\nindex: 5, size: 1\n',
+  },
+  {
     name: 'case-insensitive matches at surrogate boundaries',
     source: `fun main() {
     val s = "𐐀"
@@ -20,6 +105,19 @@ test.each([
     println(s.contains("𐐨", ignoreCase = true))
 }`,
     stdout: '1\n1\ntrue\ntrue\ntrue\nX\n2\ntrue\n',
+  },
+  {
+    name: 'empty lastIndexOf uses Kotlin String and CharSequence search bounds',
+    source: `fun main() {
+    println("abc".lastIndexOf("", 99, true))
+    println("abc".lastIndexOf("", 99, false))
+    println("".lastIndexOf("", 99, true))
+    val builder: CharSequence = StringBuilder("abc")
+    println(builder.lastIndexOf("", 99, true))
+    println(builder.lastIndexOf("", 99, false))
+    println(builder.indexOf("", 99, false))
+}`,
+    stdout: '2\n3\n-1\n2\n2\n-1\n',
   },
   {
     name: 'direct floating range membership and explicit range contains use JVM rounding',
@@ -116,8 +214,11 @@ fun main() { println(A(3).values) }`,
     println(values.windowed(2) { if (it[0] == 1) values[2] = 9; it.sum() })
     println(values.chunked(2) { if (it[0] == 1) values[2] = 8; it.sum() })
     println(setOf(1, 2, 3, 4, 5).windowed(3, 2, true) { it.toList() })
+    val text = StringBuilder("abcd")
+    println(text.chunked(2) { if (it[0] == 'a') text[2] = 'X'; it.toString() })
+    println(text.windowed(2) { it.toString() })
 }`,
-    stdout: '[3, 11, 13]\n[3, 12]\n[[1, 2, 3], [3, 4, 5], [5]]\n',
+    stdout: '[3, 11, 13]\n[3, 12]\n[[1, 2, 3], [3, 4, 5], [5]]\n[ab, Xd]\n[ab, bX, Xd]\n',
   },
   {
     name: 'collection builders freeze map entries, key views, and mutable aliases',
@@ -1552,6 +1653,16 @@ test.each([
     'standard input through a wildcard import',
     'import java.util.*\nfun main() { println(Scanner(System.`in`).nextInt()) }',
     '標準入力は、この採点環境では使えません。',
+  ],
+  [
+    'a Java class through a wildcard import',
+    'import java.util.*\nfun main() { println(LinkedList<Int>()) }',
+    'Java のクラスの直接の利用（java.util.LinkedList）は、この採点環境では使えません。',
+  ],
+  [
+    'a Java wildcard import before the implicit Kotlin class',
+    'import java.util.*\nfun main() { println(ArrayDeque<Int>()) }',
+    'Java のクラスの直接の利用（java.util.ArrayDeque）は、この採点環境では使えません。',
   ],
   [
     'standard input through a qualified class name',

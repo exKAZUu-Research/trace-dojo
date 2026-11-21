@@ -72,11 +72,11 @@ function functionsOf(kind: ArrayKind): string {
   const onlyInput = kind.typeParameters ? '<@OnlyInputTypes T> ' : '';
   const lines = [
     `external fun ${g()}${r}.asList(): List<${e}>`,
-    `external fun ${g()}${r}.contentToString(): String`,
+    `external fun ${g()}${r}?.contentToString(): String`,
     `external fun ${g()}${r}.copyOf(): ${r.replace('out ', '')}`,
     `external fun ${g()}${r}.copyOf(newSize: Int): ${r === 'Array<out T>' ? 'Array<T?>' : r}`,
     `external fun ${g()}${r}.copyOfRange(fromIndex: Int, toIndex: Int): ${r.replace('out ', '')}`,
-    `external infix fun ${g()}${r}.contentEquals(other: ${r}): Boolean`,
+    `external infix fun ${g()}${r}?.contentEquals(other: ${r}?): Boolean`,
     `val ${g()}${r}.indices: IntRange get() = 0..size - 1`,
     `val ${g()}${r}.lastIndex: Int get() = size - 1`,
     `fun ${g()}${r}.isEmpty(): Boolean = size == 0`,
@@ -154,6 +154,7 @@ function functionsOf(kind: ArrayKind): string {
     `inline fun ${g('K')}${r}.associateBy(keySelector: (${e}) -> K): Map<K, ${e}> = asList().associateBy(keySelector)`,
     `inline fun ${g()}${r}.partition(predicate: (${e}) -> Boolean): Pair<List<${e}>, List<${e}>> = asList().partition(predicate)`,
     `infix fun ${g('R')}${r}.zip(other: Iterable<R>): List<Pair<${e}, R>> = asList().zip(other)`,
+    `inline fun ${g('R, V')}${r}.zip(other: Iterable<R>, transform: (a: ${e}, b: R) -> V): List<V> = asList().zip(other, transform)`,
     `fun ${g()}${r}.joinToString(separator: CharSequence = ", ", prefix: CharSequence = "", postfix: CharSequence = "", limit: Int = -1, truncated: CharSequence = "...", transform: ((${e}) -> CharSequence)? = null): String = asList().joinToString(separator, prefix, postfix, limit, truncated, transform)`,
     `fun ${g()}${r}.random(): ${e} { if (isEmpty()) throw NoSuchElementException("Array is empty."); return get(kotlin.random.Random.nextInt(size)) }`,
     `external fun ${g()}${r}.fill(element: ${e}, fromIndex: Int = 0, toIndex: Int = size)`,
@@ -170,9 +171,13 @@ function functionsOf(kind: ArrayKind): string {
     `inline fun ${g('V')}${r}.associateWith(valueSelector: (${e}) -> V): Map<${e}, V> = asList().associateWith(valueSelector)`,
     `fun ${g()}${r}.elementAtOrNull(index: Int): ${e}? = getOrNull(index)`,
     `infix fun ${g('R')}${r}.zip(other: Array<out R>): List<Pair<${e}, R>> = asList().zip(other.asList())`,
+    `inline fun ${g('R, V')}${r}.zip(other: Array<out R>, transform: (a: ${e}, b: R) -> V): List<V> = asList().zip(other.asList(), transform)`,
     ...(kind.typeParameters
       ? []
-      : [`infix fun ${r}.zip(other: ${r}): List<Pair<${e}, ${e}>> = asList().zip(other.asList())`]),
+      : [
+          `infix fun ${r}.zip(other: ${r}): List<Pair<${e}, ${e}>> = asList().zip(other.asList())`,
+          `inline fun <V> ${r}.zip(other: ${r}, transform: (a: ${e}, b: ${e}) -> V): List<V> = asList().zip(other.asList(), transform)`,
+        ]),
     `fun ${g()}${r}.reversedArray(): ${r.replace('out ', '')} = copyOf().also { it.reverse() }`,
     `fun ${g()}${r}.sliceArray(indices: IntRange): ${r.replace('out ', '')} = if (indices.isEmpty()) copyOfRange(0, 0) else copyOfRange(indices.first, indices.last + 1)`,
     ...[1, 2, 3, 4, 5].map((n) => `operator fun ${g()}${r}.component${n}(): ${e} = get(${n - 1})`),

@@ -350,6 +350,11 @@ export function determinedType(type: KType | undefined): KType | undefined {
   return upper;
 }
 
+export function lambdaResultHint(type: KType | undefined): KType | undefined {
+  if (type?.kind === 'variable' && type.variable.lower.length > 0) return type;
+  return determinedType(type) ?? type;
+}
+
 /**
  * The expected type of a later branch of an `if`, `when`, or `?:` whose value is a call without arguments, such as
  * `emptyList()`: an earlier branch's generic type, which gives the call its type arguments, where it fits the expected

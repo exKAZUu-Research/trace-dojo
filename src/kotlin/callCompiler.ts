@@ -1,10 +1,18 @@
-// code-gauge-allow-file fileNcss 536 -- the compiler of one area of Kotlin, whose parts call each other closely.
-import { type ArgumentEvaluation, argumentEvaluator, expectedArgumentType, firstAttempts } from './argumentTypes';
+// code-gauge-allow-file fileNcss 585 -- the compiler of one area of Kotlin, whose parts call each other closely.
+import { CompileError } from '../interpreter/diagnostics';
+import {
+  type ArgumentEvaluation,
+  argumentEvaluator,
+  argumentTypeHints,
+  expectedArgumentType,
+  firstAttempts,
+} from './argumentTypes';
 import type { Expression, LambdaExpression } from './ast';
 import {
   type Compiled,
   type Eval,
   FunctionContext,
+  isBareCallExpression,
   nullableReceiverMessage,
   reprOf,
   type Scope,
@@ -206,7 +214,7 @@ export abstract class CallCompiler extends CompilerCore {
     const attempts = loneAttempt
       ? [loneAttempt]
       : firstAttempts(levels, (candidate) => this.startAttempt(candidate, args, hasTrailingLambda, explicitTypeArgs));
-    if (!loneAttempt) for (const attempt of attempts) this.constrainByKnownExpected(attempt, expected, row);
+    if (!loneAttempt) this.constrainInitialHints(attempts, receiverOf, expected, row);
     const compiledArgs = this.compileArguments(scope, context, args, attempts, !lone);
     const chosen = this.chooseAttempt(scope, context, levels, call, compiledArgs, loneAttempt, receiverOf);
     if (!chosen)
@@ -224,6 +232,22 @@ export abstract class CallCompiler extends CompilerCore {
     if (!this.file.isLibrary && chosen.candidate.symbol.isDeprecatedError)
       this.error(row, `${chosen.candidate.symbol.name} は Kotlin で非推奨になり、使用できません。`);
     return this.completeCall(scope, context, chosen, args, compiledArgs, expected, row);
+  }
+
+  private constrainInitialHints(
+    attempts: Attempt[],
+    receiverOf: (candidate: Candidate) => Compiled | undefined,
+    expected: KType | undefined,
+    row: number
+  ): void {
+    for (const attempt of attempts) {
+      this.constrainByKnownExpected(attempt, expected, row);
+      const { candidate, substitution } = attempt;
+      const receiver = receiverOf(candidate);
+      const extension = candidate.symbol.extensionReceiver;
+      if (receiver && extension && !hasOpenVariables(receiver.type))
+        isSubtype(receiver.type, substitute(extension, substitution));
+    }
   }
 
   /**
@@ -254,15 +278,57 @@ export abstract class CallCompiler extends CompilerCore {
     isOverloaded: boolean
   ): (Compiled | undefined)[] {
     const compiledArgs: (Compiled | undefined)[] = [];
+    let viable = attempts;
     for (const [index, argument] of args.entries()) {
       if (isLambdaArgument(argument.value)) {
         compiledArgs.push(undefined);
         continue;
       }
-      const expectedType = expectedArgumentType(attempts, compiledArgs, index, argument.value, isOverloaded);
-      compiledArgs.push(this.compileExpression(scope, context, argument.value, expectedType));
+      const expectedType =
+        expectedArgumentType(viable, compiledArgs, index, argument.value, isOverloaded && viable.length > 1) ??
+        (isBareCallExpression(argument.value)
+          ? this.checkBareArgumentHints(scope, context, argument.value, argumentTypeHints(viable, index))
+          : undefined);
+      const compiled = this.compileExpression(scope, context, argument.value, expectedType);
+      compiledArgs.push(compiled);
+      if (!argument.isSpread && !compiled.integerLiteral)
+        viable = viable.filter((attempt) => this.constrainArgumentHint(attempt, index, compiled));
     }
     return compiledArgs;
+  }
+
+  private constrainArgumentHint(attempt: Attempt, index: number, argument: Compiled): boolean {
+    const paramIndex = attempt.mapping.findIndex((indexes) => indexes.includes(index));
+    const param = attempt.candidate.symbol.params[paramIndex];
+    if (!param) return false;
+    const type = substitute(param.type, attempt.substitution);
+    if (!this.acceptsArgument(argument, param.isVararg ? this.varargElementType(type) : type)) return false;
+    return attempt.variables.every((variable) => nominalBoundsFit(variable, attempt.substitution));
+  }
+
+  private checkBareArgumentHints(
+    scope: Scope,
+    context: FunctionContext,
+    expression: Expression,
+    hints: (KType | undefined)[]
+  ): KType | undefined {
+    let applicable: KType | undefined;
+    const saved = this.flow;
+    for (const hint of hints) {
+      if (!hint || hasOpenVariables(hint) || (applicable && isSameType(applicable, hint))) continue;
+      this.flow = saved.copy();
+      try {
+        const probe = this.compileExpression(scope, this.probeContext(context), expression, hint);
+        if (!isSubtype(probe.type, hint)) continue;
+        if (applicable) return undefined;
+        applicable = hint;
+      } catch (error) {
+        if (!(error instanceof CompileError)) throw error;
+      } finally {
+        this.flow = saved;
+      }
+    }
+    return applicable;
   }
 
   /** The most specific applicable candidate of the nearest level that has one. */
@@ -616,8 +682,11 @@ export abstract class CallCompiler extends CompilerCore {
     if (!expected) return;
     const result = substitute(declaredReturn, substitution);
     const expectedHint = soleLowerBound(resolved(expected));
-    if (expectedHint && variables.every((variable) => variable.lower.length === 0 && variable.upper.length === 0))
-      this.constrainReturnType(result, expectedHint);
+    if (expectedHint && variables.every((variable) => variable.lower.length === 0 && variable.upper.length === 0)) {
+      const hint =
+        result.kind === 'class' && expectedHint.kind === 'class' ? asSuper(expectedHint, result.cls) : undefined;
+      this.constrainReturnType(result, hint ?? expectedHint);
+    }
     this.constrainReturnType(result, expected);
   }
 
@@ -941,6 +1010,15 @@ function forwardTypeVariable(variable: InferenceVariable, owned: readonly Infere
   if (upper.some((type) => type.kind !== 'variable' || type.variable !== target.variable)) return false;
   variable.fixed = target;
   return true;
+}
+
+function nominalBoundsFit(variable: InferenceVariable, substitution: Substitution): boolean {
+  const hint = variable.fixed ?? soleLowerBound({ kind: 'variable', nullable: false, variable });
+  if (!hint || hint.kind !== 'class') return true;
+  return variable.param.bounds.every((declared) => {
+    const bound = resolved(substitute(declared, substitution));
+    return bound.kind !== 'class' || asSuper(hint, bound.cls) !== undefined;
+  });
 }
 
 function fitsInferenceBounds(variable: InferenceVariable): boolean {

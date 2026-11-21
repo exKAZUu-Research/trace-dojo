@@ -263,9 +263,9 @@ const TEXT_SEARCH_NATIVES: Record<string, TextNative> = {
     frame.runtime.allocateString(frame, length as number);
     return text(receiver).padEnd(length as number, charToString(char as number));
   },
-  'String.equals(String?, Boolean)': (frame, receiver, [other, ignoreCase]) => {
-    if (other === undefined) return false;
-    if (ignoreCase !== true) return receiver === other;
+  'String?.equals(String?, Boolean)': (frame, receiver, [other, ignoreCase]) => {
+    if (receiver === other) return true;
+    if (receiver === undefined || other === undefined || ignoreCase !== true) return false;
     const left = text(receiver);
     const right = text(other);
     return left.length === right.length && textSearch(frame, left, right, true).matchesAt(0);
@@ -370,7 +370,7 @@ const TEXT_PARSING_NATIVES: Record<string, TextNative> = {
     const parsed = parseDouble(text(receiver));
     return parsed === undefined ? numberFormatError(frame, text(receiver)) : Math.fround(parsed);
   },
-  'String.toBoolean()': (_frame, receiver) => text(receiver).toLowerCase() === 'true',
+  'String?.toBoolean()': (_frame, receiver) => typeof receiver === 'string' && receiver.toLowerCase() === 'true',
   'String.toBooleanStrict()': (frame, receiver) => {
     if (receiver === 'true') return true;
     if (receiver === 'false') return false;

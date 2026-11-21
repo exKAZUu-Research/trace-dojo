@@ -131,7 +131,8 @@ fun CharSequence.asIterable(): Iterable<Char> =
 private class CharSequenceIterable(private val source: CharSequence) : Iterable<Char> {
     override fun iterator(): Iterator<Char> = source.iterator()
 }
-fun <R> CharSequence.chunked(size: Int, transform: (CharSequence) -> R): List<R> = chunked(size).map(transform)
+fun <R> CharSequence.chunked(size: Int, transform: (CharSequence) -> R): List<R> =
+    windowed(size, size, partialWindows = true, transform = transform)
 fun String.slice(indices: IntRange): String = if (indices.isEmpty()) "" else substring(indices.first, indices.last + 1)
 fun String.replaceRange(startIndex: Int, endIndex: Int, replacement: CharSequence): String {
     if (endIndex < startIndex) throw IndexOutOfBoundsException("End index ($endIndex) is less than start index ($startIndex).")
@@ -206,7 +207,7 @@ fun CharSequence.reversed(): CharSequence = toString().reversed()
 external fun String.toCharArray(): CharArray
 external fun String.padStart(length: Int, padChar: Char = ' '): String
 external fun String.padEnd(length: Int, padChar: Char = ' '): String
-external fun String.equals(other: String?, ignoreCase: Boolean): Boolean
+external fun String?.equals(other: String?, ignoreCase: Boolean = false): Boolean
 external fun String.compareTo(other: String, ignoreCase: Boolean): Int
 external fun String.format(vararg args: Any?): String
 // The overload taking a Locale, which only a null literal can reach, so that \`"%d".format(null)\` passes the null as
@@ -243,7 +244,7 @@ fun String.toUInt(): UInt = toUIntOrNull() ?: throw NumberFormatException("Inval
 external fun String.toDouble(): Double
 external fun String.toDoubleOrNull(): Double?
 external fun String.toFloat(): Float
-external fun String.toBoolean(): Boolean
+external fun String?.toBoolean(): Boolean
 external fun String.toBooleanStrict(): Boolean
 external fun String.capitalize(): String
 external fun String.decapitalize(): String
@@ -390,28 +391,29 @@ fun CharSequence.toMutableList(): MutableList<Char> {
 fun CharSequence.toSet(): Set<Char> = toList().toSet()
 fun CharSequence.withIndex(): Iterable<IndexedValue<Char>> = asIterable().withIndex()
 fun CharSequence.chunked(size: Int): List<String> = windowed(size, size, partialWindows = true)
-fun CharSequence.windowed(size: Int, step: Int = 1, partialWindows: Boolean = false): List<String> {
-    if (!(size > 0 && step > 0)) {
-        throw IllegalArgumentException(if (size != step) "Both size $size and step $step must be greater than zero." else "size $size must be greater than zero.")
-    }
-    val result = ArrayList<String>()
+fun CharSequence.windowed(size: Int, step: Int = 1, partialWindows: Boolean = false): List<String> =
+    windowed(size, step, partialWindows) { it.toString() }
+
+fun <R> CharSequence.windowed(size: Int, step: Int = 1, partialWindows: Boolean = false, transform: (CharSequence) -> R): List<R> {
+    checkWindowSizeStep(size, step)
+    val thisSize = length
+    val result = ArrayList<R>(thisSize / step + if (thisSize % step == 0) 0 else 1)
     var index = 0
-    while (index < length) {
-        val end = index + size
-        if (end > length) {
-            if (!partialWindows) break
-            result.add(substring(index, length))
-        } else {
-            result.add(substring(index, end))
-        }
+    while (index in 0 until thisSize) {
+        val count = size.coerceAtMost(thisSize - index)
+        if (!partialWindows && count < size) break
+        result.add(transform(subSequence(index, index + count)))
         index += step
     }
     return result
 }
-infix fun CharSequence.zip(other: CharSequence): List<Pair<Char, Char>> {
+infix fun CharSequence.zip(other: CharSequence): List<Pair<Char, Char>> =
+    zip(other) { a, b -> a to b }
+
+inline fun <V> CharSequence.zip(other: CharSequence, transform: (a: Char, b: Char) -> V): List<V> {
     val length = minOf(this.length, other.length)
-    val list = ArrayList<Pair<Char, Char>>(length)
-    for (i in 0 until length) list.add(this[i] to other[i])
+    val list = ArrayList<V>(length)
+    for (i in 0 until length) list.add(transform(this[i], other[i]))
     return list
 }
 fun CharSequence.max(): Char {

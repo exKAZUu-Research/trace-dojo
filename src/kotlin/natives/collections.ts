@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 757 -- the natives of the collections, which share the helpers of their items.
+// code-gauge-allow-file fileNcss 765 -- the natives of the collections, which share the helpers of their items.
 import { runtimeClassOf } from '../dispatch';
 import { hashOf, stringOf, valueEquals } from '../format';
 import { toInt32 } from '../operators';
@@ -67,16 +67,27 @@ function isBuilt(list: Value): boolean {
   return (list as KObject).native?.isBuilt === true;
 }
 
+function kotlinListIndex(index: number, size: number): string {
+  return `index: ${index}, size: ${size}`;
+}
+
+function usesKotlinPositionBounds(list: Value): boolean {
+  const source = listView(list as KObject)?.source ?? list;
+  const kind = className(source);
+  return kind === 'ListBuilder' || (list === source && kind === 'ArrayDeque');
+}
+
 /** Checks an index of `get`, `set`, and `removeAt`, with the message each list class gives. */
 function checkIndex(frame: Frame, list: Value, index: number): void {
   const size = indexedSize(list as KObject);
   if (index >= 0 && index < size) return;
-  // A sublist of any list is AbstractList's SubList on the JVM, which checks indexes with Objects.checkIndex.
+  if (usesKotlinPositionBounds(list))
+    throwError(frame, 'java.lang.IndexOutOfBoundsException', kotlinListIndex(index, size));
   const isSublist = listView(list as KObject) !== undefined;
   switch (isSublist ? 'SubList' : className(list)) {
     case 'PrimitiveArrayList': {
       if (primitiveArrayView(list as KObject)?.range) {
-        throwError(frame, 'java.lang.IndexOutOfBoundsException', `index: ${index}, size: ${size}`);
+        throwError(frame, 'java.lang.IndexOutOfBoundsException', kotlinListIndex(index, size));
       }
       throwError(frame, 'java.lang.ArrayIndexOutOfBoundsException', `Index ${index} out of bounds for length ${size}`);
       break;
@@ -91,11 +102,6 @@ function checkIndex(frame: Frame, list: Value, index: number): void {
     }
     case 'EmptyList': {
       throwError(frame, 'java.lang.IndexOutOfBoundsException', `Empty list doesn't contain element at index ${index}.`);
-      break;
-    }
-    case 'ListBuilder':
-    case 'ArrayDeque': {
-      throwError(frame, 'java.lang.IndexOutOfBoundsException', `index: ${index}, size: ${size}`);
       break;
     }
     default: {
@@ -324,8 +330,12 @@ function insertListElements(frame: Frame, list: KObject, index: number | undefin
 
 function insertionIndex(frame: Frame, list: Value, position: number): number {
   const size = indexedSize(list as KObject);
-  if (position < 0 || position > size)
-    throwError(frame, 'java.lang.IndexOutOfBoundsException', `Index: ${position}, Size: ${size}`);
+  if (position < 0 || position > size) {
+    const message = usesKotlinPositionBounds(list)
+      ? kotlinListIndex(position, size)
+      : `Index: ${position}, Size: ${size}`;
+    throwError(frame, 'java.lang.IndexOutOfBoundsException', message);
+  }
   return position;
 }
 
@@ -479,7 +489,7 @@ function defineIterators(): void {
   defineNative(`${iterator}.next()`, (frame, receiver) => {
     const current = itemIteratorState(receiver);
     checkIteratorModification(frame, current);
-    if (current.index >= indexedSize(current.source)) throwError(frame, 'java.util.NoSuchElementException');
+    if (current.index >= indexedSize(current.source)) exhaustedIterator(frame, current.source, current.index);
     current.last = current.index;
     return indexedItem(current.source, current.index++, current.kind);
   });
@@ -508,13 +518,21 @@ function defineIterators(): void {
   defineNative(`${iterator}.previous()`, (frame, receiver) => {
     const current = itemIteratorState(receiver);
     checkIteratorModification(frame, current);
-    if (current.index <= 0) throwError(frame, 'java.util.NoSuchElementException');
+    if (current.index <= 0) exhaustedIterator(frame, current.source, current.index - 1);
     current.index--;
     current.last = current.index;
     return indexedItem(current.source, current.index, current.kind);
   });
   defineNative(`${iterator}.nextIndex()`, (_frame, receiver) => itemIteratorState(receiver).index);
   defineNative(`${iterator}.previousIndex()`, (_frame, receiver) => itemIteratorState(receiver).index - 1);
+}
+
+function exhaustedIterator(frame: Frame, source: KObject, index: number): never {
+  const message =
+    className(source) === 'ArrayDeque'
+      ? `java.lang.IndexOutOfBoundsException: ${kotlinListIndex(index, indexedSize(source))}`
+      : undefined;
+  return throwError(frame, 'java.util.NoSuchElementException', message);
 }
 
 function finishIteratorMutation(state: ItemIteratorState, index: number): Value {
