@@ -2059,11 +2059,12 @@ void main() {
   Box<dynamic> b = Box<int>(1);
   List<Box<Object?>> l = [Box<double>(2.5)];
   Object o = b;
-  print([b.value, l.first.value, o is Box<void>]);
+  print([b.value, l.first.value, o is Box<void>, Box<dynamic>]);
 }`;
-  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[1, 2.5, true]\n' });
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[1, 2.5, true, Box<dynamic>]\n' });
   for (const rest of [
     'void main() { Box<dynamic>(); }',
+    'void main() { var f = Box<dynamic>.new; }',
     'class C extends Box<dynamic> {} void main() {}',
     'typedef B = Box<dynamic>; void main() {}',
     'void main() { Box<String>? b; }',

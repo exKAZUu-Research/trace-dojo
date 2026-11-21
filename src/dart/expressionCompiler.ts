@@ -1504,10 +1504,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return this.promotableField(compiled, resolved.member, this.thisReceiver(span));
   }
 
-  protected staticTarget(object: Expression): StaticTarget | undefined {
+  /** What a class, alias or prefix name refers to; `superBounded` when its type arguments only form a type literal. */
+  protected staticTarget(object: Expression, superBounded = false): StaticTarget | undefined {
     if (object.kind === 'instantiation') {
       const target = this.staticTarget(object.target);
-      return target?.kind === 'class' ? this.instantiateStaticTarget(target, object.typeArguments) : undefined;
+      return target?.kind === 'class'
+        ? this.instantiateStaticTarget(target, object.typeArguments, superBounded)
+        : undefined;
     }
     if (object.kind === 'member' && object.object.kind === 'identifier' && !object.nullAware) {
       const prefix = object.object.name;
@@ -1527,10 +1530,14 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return undefined;
   }
 
-  private instantiateStaticTarget(target: StaticClassTarget, args: TypeSyntax[]): StaticClassTarget {
+  private instantiateStaticTarget(
+    target: StaticClassTarget,
+    args: TypeSyntax[],
+    superBounded: boolean
+  ): StaticClassTarget {
     const syntax = { ...target.syntax, args };
     const params = target.alias?.typeParams ?? target.cls.typeParams;
-    const resolved = this.typeArgumentsFor(params, syntax, syntax.name);
+    const resolved = this.typeArgumentsFor(params, syntax, syntax.name, superBounded);
     const template = target.alias?.aliased;
     if (template?.kind !== 'interface') return { ...target, syntax, typeArgs: resolved };
     const mapping = new Map(params.map((param, index) => [param, resolved[index]]));

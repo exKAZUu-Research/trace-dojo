@@ -147,7 +147,7 @@ export abstract class CallCompiler extends OperatorCompiler {
   }
 
   protected compileInstantiation(expression: Extract<Expression, { kind: 'instantiation' }>): Compiled {
-    const target = this.staticTarget(expression);
+    const target = this.staticTarget(expression, true);
     if (target?.kind === 'class' && target.typeArgs) {
       const alias = target.alias?.aliased;
       return this.typeLiteralValue(
