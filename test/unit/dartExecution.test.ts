@@ -5821,7 +5821,7 @@ test('BigInt modPow meters wide multiplies and preserves small powers', () => {
     print(BigInt.zero.modPow(BigInt.zero, BigInt.two));
     print(BigInt.two.modPow(BigInt.zero, BigInt.one));
   }`;
-  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '74\n24\n1\n0\n' });
+  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '74\n24\n1\n1\n' });
   const wide = `void main() {
     final modulus = (BigInt.one << 1000000) - BigInt.from(3);
     final base = (BigInt.one << 999999) + BigInt.from(123);
@@ -6573,6 +6573,23 @@ void main() {
       "Invalid argument (value): Record (Instance of 'Foo')\n" +
       "RegExp: pattern=a flags=im\n_Uint8List\nRecord (_ConstMap len:1, Instance of '_HashSet<int>')\n" +
       "[_Random, false, 4, Instance of '_Random']\n",
+  });
+});
+
+test('learner externals do not link to library natives with the same name', () => {
+  const source = `import 'dart:math' as math;
+external double sqrt(num value);
+class Random {
+  external factory Random([int? seed]);
+}
+void main() {
+  try { print(sqrt(9)); } catch (e) { print(e.runtimeType); }
+  try { print(Random(1)); } catch (e) { print(e.runtimeType); }
+  print([math.sqrt(9), math.Random(1).nextInt(10)]);
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'NoSuchMethodError\nNoSuchMethodError\n[3.0, 4]\n',
   });
 });
 

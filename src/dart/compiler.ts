@@ -1713,9 +1713,9 @@ export class Compiler extends MemberCompiler {
   }
 
   protected native(key: string, kind: 'method' | 'getter' | 'setter' = 'method'): Callable | ConstructorImpl {
+    if (!this.isLibraryCode) return missingExternal(key, kind);
     const found = this.natives.get(key);
     if (found) return found;
-    if (!this.isLibraryCode) return missingExternal(key, kind);
     // A library member without a native fails only when a program calls it.
     return () => {
       throw new Error(`The interpreter has no native for ${key}`);

@@ -304,8 +304,8 @@ define('BigInt.modPow', (runtime, receiver, [exponent, modulus]) => {
 });
 
 function modularPower(runtime: Runtime, base: bigint, exponent: bigint, modulus: bigint): bigint {
-  if (modulus === 1n) return 0n;
   if (exponent === 0n) return 1n;
+  if (modulus === 1n) return 0n;
   const modulusWords = bigintWords(modulus);
   let factor = modularRemainder(runtime, base, modulus, modulusWords);
   if (factor < 0n) factor += modulus;
