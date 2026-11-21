@@ -111,7 +111,8 @@ export function sortByCachedKey(ctx: NativeContext, slice: Value, f: Value): voi
     const order = comparePartialValues(keyType, keyA, keyB);
     return order === 0 ? indexA < indexB : (order ?? 0) < 0;
   };
-  ctx.runtime.nativeRoots.push(pairs);
+  // The sort keeps pairs in buffers of its own while it overwrites the array, so a copy holds every key throughout.
+  ctx.runtime.nativeRoots.push([...pairs]);
   try {
     unstableSort(pairs, isLess, sortElement(ctx, pairType(names[index])), () => ordViolation(ctx));
   } finally {

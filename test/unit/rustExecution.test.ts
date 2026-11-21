@@ -8145,3 +8145,24 @@ fn main() {
 }`;
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'S S 5 [1]\n' });
 });
+
+test('turtles of a default aggregate stay owned while its later parts are made', () => {
+  const defaults = `struct Holder { t: Turtle }
+impl Default for Holder {
+    fn default() -> Self {
+        let t = Turtle::new(3, 3);
+        let _free = t.can_move_forward();
+        Holder { t }
+    }
+}
+#[derive(Default)]
+struct Pair { a: Holder, b: Holder }
+fn main() {
+    let tuple: (Holder, Holder) = Default::default();
+    let array: [Holder; 2] = Default::default();
+    let pair = Pair::default();
+    println!("done");
+}`;
+  const made = executeProgram('rust', defaults);
+  expect(made.kind === 'executed' && made.finalTurtles).toHaveLength(6);
+});

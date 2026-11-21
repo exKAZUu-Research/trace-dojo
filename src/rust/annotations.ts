@@ -1,7 +1,7 @@
 import type { Expr, Pattern, Span } from './ast';
 import type { Known } from './constLint';
 import type { ProjectedCapture } from './loanCaptures';
-import type { AdtDef, ClosureType, ConstDef, FnDef, TraitDef, TraitRef, Type } from './types';
+import type { AdtDef, ClosureType, ConstDef, FnDef, TraitRef, Type } from './types';
 
 /** A variable of a function or closure: a `let` binding, a parameter, or a binding of a pattern. */
 export interface LocalVar {
@@ -118,6 +118,4 @@ export class Annotations {
   readonly callKinds = new Map<Expr, ClosureType['kind']>();
   /** `for` loops: the element type and how the iterable becomes an iterator. */
   readonly loops = new Map<Expr, { item: Type; from: Type }>();
-  /** Trait objects whose methods a call dispatches on. */
-  readonly dynCalls = new Map<Expr, TraitDef>();
 }

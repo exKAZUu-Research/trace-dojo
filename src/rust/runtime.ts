@@ -121,11 +121,6 @@ export class ProcessExit {
   constructor(readonly code: number) {}
 }
 
-/** `main` returned an `Err`, which Rust reports as `Error: {:?}` and exit status 1. */
-export class MainError {
-  constructor(readonly description: string) {}
-}
-
 /** `break`, `continue`, and `return`, which unwind to the loop or function they leave. */
 export class ControlSignal {
   constructor(

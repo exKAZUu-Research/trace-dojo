@@ -271,9 +271,6 @@ export const INT_NAMES: IntName[] = [
 ];
 export const I32 = intType('i32');
 export const USIZE = intType('usize');
-export const U8 = intType('u8');
-export const U32 = intType('u32');
-export const I64 = intType('i64');
 export const F64: Type = { kind: 'float', name: 'f64' };
 export const F32: Type = { kind: 'float', name: 'f32' };
 export const BOOL: Type = { kind: 'bool' };

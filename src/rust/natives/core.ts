@@ -35,6 +35,7 @@ import { collectInto } from './iterators';
 import { sizeOf } from './layout';
 import {
   call,
+  callForEach,
   define,
   deref,
   libraryPanic,
@@ -164,11 +165,11 @@ function builtinDefaultValue(ctx: NativeContext, type: Type): Value {
     }
     case 'tuple': {
       ctx.runtime.allocate(t.elems.length);
-      return t.elems.map((elem) => defaultValue(ctx, elem));
+      return callForEach(ctx, t.elems, (elem) => defaultValue(ctx, elem));
     }
     case 'array': {
       ctx.runtime.allocate(t.len);
-      return Array.from({ length: t.len }, () => defaultValue(ctx, t.elem));
+      return callForEach(ctx, Array.from({ length: t.len }), () => defaultValue(ctx, t.elem));
     }
     case 'ref': {
       return normalize(shallow(t.target)).kind === 'slice' ? [] : '';
@@ -208,7 +209,7 @@ function builtinDefaultValue(ctx: NativeContext, type: Type): Value {
       const subst = new Map(t.def.params.map((param, index) => [param, t.args[index]]));
       const defFields = t.def.variants[0].fields;
       ctx.runtime.allocate(defFields.length);
-      const fields = defFields.map((field) => {
+      const fields = callForEach(ctx, defFields, (field) => {
         const fieldType = subst.size > 0 ? substituteType(field.type, subst) : field.type;
         return defaultValue(ctx, fieldType);
       });

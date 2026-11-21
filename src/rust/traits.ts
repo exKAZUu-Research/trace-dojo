@@ -361,7 +361,3 @@ export function closureKindAtLeast(have: string, need: string): boolean {
   const order = ['Fn', 'FnMut', 'FnOnce'];
   return order.includes(have) && order.indexOf(have) <= order.indexOf(need);
 }
-
-export function moduleOf(def: { module?: unknown }): Module | undefined {
-  return def.module as Module | undefined;
-}
