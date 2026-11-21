@@ -275,6 +275,22 @@ test('repeatedly hashing a long string key completes within the execution budget
   });
 });
 
+test('core type hashes preserve the Dart VM hash-set order', () => {
+  const program = `import 'dart:collection';
+typedef MaybeInt = int?;
+void main() {
+  final values = <Type>[int, num, String, bool, double, List<int>, MaybeInt, List<MaybeInt>, Map<String, int>];
+  print(values.map((type) => type.hashCode).toList());
+  print(HashSet<Type>.of(values.take(6)));
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[1054059335, 924199842, 1028333344, 424929926, 740950697, 77465998, 409100164, 818850322, 371945621]\n' +
+      '{String, double, num, List<int>, bool, int}\n',
+  });
+});
+
 test('String.fromCharCodes batches large conversions and preserves supplementary code points', () => {
   expect(
     executeProgram(
