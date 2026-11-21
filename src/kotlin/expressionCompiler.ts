@@ -1032,11 +1032,11 @@ export abstract class ExpressionCompiler extends CallCompiler {
         ? this.tryLocalFunction(scope, context, variable, args, hasTrailingLambda, row)
         : undefined;
     if (local && !(local instanceof CompileError)) return local;
-    const levels = [
+    const receiverLevels = [
       ...this.receiverLevels(scope, context, name, row),
       ...this.companionLevels(scope, name, row),
-      ...this.topLevelFunctionLevels(name),
     ];
+    const packageLevels = this.topLevelCallLevels(name, row);
     const cls = this.findClass(scope, name);
     if (cls) this.checkNestedAccessible(scope, cls, row);
     if (
@@ -1048,13 +1048,14 @@ export abstract class ExpressionCompiler extends CallCompiler {
       return this.compileSamConstructor(scope, context, cls, args[0].value, typeArgs, expected);
     }
     const instantiable = cls !== undefined && !cls.isInterface && !cls.isAbstract && cls.kind !== 'enum';
-    if (cls && (instantiable || levels.length === 0)) {
+    if (cls && (instantiable || receiverLevels.length + packageLevels.length === 0)) {
       const constructors = this.constructorCandidates(cls, row);
-      if (constructors.length > 0) levels.push({ candidates: constructors, receiver: undefined });
+      if (constructors.length > 0) packageLevels.push({ candidates: constructors, receiver: undefined });
     }
+    const levels = [...receiverLevels, ...packageLevels];
     if (levels.length === 0) {
       if (local) throw local;
-      return this.compileUnresolvedCall(scope, context, name, args, hasTrailingLambda, variable !== undefined, row);
+      return this.compileUnresolvedCall(scope, context, name, args, variable !== undefined, row);
     }
     return this.resolveInLevels(scope, context, levels, args, hasTrailingLambda, typeArgs, expected, row, name, local);
   }
@@ -1133,42 +1134,40 @@ export abstract class ExpressionCompiler extends CallCompiler {
     return levels;
   }
 
-  private topLevelFunctionLevels(name: string): CallLevel[] {
-    return this.topLevelFunctions(name).flatMap((level) => {
-      const functions = level.filter((symbol) => !symbol.extensionReceiver);
-      if (functions.length === 0) return [];
-      const candidates = functions.map((symbol): Candidate => ({
+  private topLevelCallLevels(name: string, row: number): CallLevel[] {
+    const properties = this.topLevelProperties(name, true);
+    return this.topLevelFunctions(name, true).flatMap((functions, index) =>
+      this.packageCallLevels(functions, properties[index], row)
+    );
+  }
+
+  private packageCallLevels(functions: FunctionSymbol[], properties: PropertySymbol[], row: number): CallLevel[] {
+    const candidates = functions
+      .filter((symbol) => !symbol.extensionReceiver)
+      .map((symbol): Candidate => ({
         symbol,
         kind: 'function',
         substitution: new Map(),
         receiverType: undefined,
       }));
-      return [{ candidates, receiver: undefined }];
-    });
+    const levels: CallLevel[] = candidates.length > 0 ? [{ candidates, receiver: undefined }] : [];
+    const property = properties.find((symbol) => !symbol.extensionReceiver);
+    if (property && (!property.type || resolved(property.type).kind === 'function')) {
+      levels.push({ functionValue: (context) => this.readTopLevelProperty(context, property, row) });
+    }
+    return levels;
   }
 
-  /** A call by a name that no function has: a top-level value of a function type, values() of an enum, or an error. */
+  /** Enum helpers and diagnostics for a name with no callable declaration. */
   // code-gauge-allow functionParameterCount 7 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
   private compileUnresolvedCall(
     scope: Scope,
     context: FunctionContext,
     name: string,
     args: ArgumentSyntax[],
-    hasTrailingLambda: boolean,
     isVariable: boolean,
     row: number
   ): Compiled {
-    const property = this.topLevelProperties(name)[0]?.[0];
-    if (property && resolved(this.ensurePropertyType(property, row)).kind === 'function') {
-      return this.compileInvoke(
-        scope,
-        context,
-        this.readTopLevelProperty(context, property, row),
-        args,
-        hasTrailingLambda,
-        row
-      );
-    }
     if (isVariable) this.error(row, `${name} は関数ではないので、呼び出せません。`);
     const enumClass = this.enclosingEnum(scope);
     if (enumClass && (name === 'values' || name === 'valueOf'))
@@ -1428,22 +1427,11 @@ export abstract class ExpressionCompiler extends CallCompiler {
     row: number
   ): Compiled {
     if (qualified.kind === 'package') {
-      const functions = qualified.scope?.functions.get(name)?.filter((symbol) => !symbol.extensionReceiver) ?? [];
-      const levels: CallLevel[] = [];
-      if (functions.length > 0) {
-        levels.push({
-          candidates: functions.map((symbol) => ({
-            symbol,
-            kind: 'function',
-            substitution: new Map(),
-            receiverType: undefined,
-          })),
-          receiver: undefined,
-        });
-      }
+      const functions = qualified.scope?.functions.get(name) ?? [];
+      const properties = qualified.scope?.properties.get(name) ?? [];
+      const levels = this.packageCallLevels(functions, properties, row);
       const cls = qualified.scope?.classes.get(name);
-      // `kotlin.random.Random(1)` calls the function, since the abstract class of the same name has no constructor to call.
-      if (cls && !(cls.isAbstract && functions.length > 0)) {
+      if (cls && !(cls.isAbstract && functions.some((symbol) => !symbol.extensionReceiver))) {
         levels.push({ candidates: this.constructorCandidates(cls, row), receiver: undefined });
       }
       if (levels.length === 0) {

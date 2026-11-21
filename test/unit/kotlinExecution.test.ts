@@ -1864,6 +1864,31 @@ fun main() {
     stdout: 'concurrent\n3\nconcurrent\n3\nconcurrent\n3\nconcurrent\n3\nfalse\nfalse\nimmutable\n',
   },
   {
+    name: 'top-level and qualified property calls fall through same-named function overloads',
+    source: `package calls
+val scale: (Int) -> Int = { it * 10 }
+fun scale(a: Int, b: Int) = a + b
+val twice: (Int) -> Int = { it * 2 }
+fun twice(s: String) = s + s
+val prefer: (Int) -> String = { "property $it" }
+fun prefer(i: Int) = "function $i"
+class K {
+    fun scale(s: String) = s
+    fun run() = scale(2)
+}
+fun main() {
+    println(scale(2))
+    println(scale(2, 5))
+    println(twice(4))
+    println(twice("a"))
+    println(prefer(5))
+    println(K().run())
+    println(calls.scale(3))
+    println(calls.scale(3, 4))
+}`,
+    stdout: '20\n7\n8\naa\nfunction 5\n20\n30\n7\n',
+  },
+  {
     name: 'function properties preserve member and extension levels on nullable and non-null receivers',
     source: `class Item {
     fun implicit() = format("inside")

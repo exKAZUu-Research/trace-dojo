@@ -83,7 +83,7 @@ interface DeclaredCallLevel {
   receiver: Compiled | undefined;
 }
 
-export type CallLevel = DeclaredCallLevel | { functionValue: () => Compiled };
+export type CallLevel = DeclaredCallLevel | { functionValue: (context: FunctionContext) => Compiled };
 
 /** A call whose function and type arguments are decided. */
 export interface ResolvedCall {
@@ -219,14 +219,14 @@ export abstract class CallCompiler extends CompilerCore {
       }
       if (explicitTypeArgs.length > 0) continue;
       const error = this.probeApplicability(context, (probe) => {
-        this.compileInvoke(scope, probe, level.functionValue(), args, hasTrailingLambda, row);
+        this.compileInvoke(scope, probe, level.functionValue(probe), args, hasTrailingLambda, row);
       });
       if (error) {
         fallbackError ??= error;
         continue;
       }
       if (this.hasApplicableLevel(scope, context, declared, call, expected)) break;
-      return this.compileInvoke(scope, context, level.functionValue(), args, hasTrailingLambda, row);
+      return this.compileInvoke(scope, context, level.functionValue(context), args, hasTrailingLambda, row);
     }
     if (declared.length === 0 && fallbackError) throw fallbackError;
     const receiverOf = this.levelReceivers(declared);
