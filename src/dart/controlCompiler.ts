@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 596 -- Switches and loops share flow analysis with their generator forms.
+// code-gauge-allow-file fileNcss 597 -- Switches and loops share flow analysis with their generator forms.
 import type { Block, CatchClause, Pattern, Span, Statement, SwitchCase } from './ast';
 import { localNamesIn } from './astWalk';
 import type { FunctionSpec } from './callCompiler';

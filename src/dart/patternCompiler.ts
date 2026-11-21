@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 566 -- Pattern kinds share their type, rooting, and binding helpers.
+// code-gauge-allow-file fileNcss 567 -- Pattern kinds share their type, rooting, and binding helpers.
 import type { Expression, ListPatternElement, Pattern, RecordPatternField, Span } from './ast';
 import { nullPatternComparison } from './astWalk';
 import { CallCompiler } from './callCompiler';
@@ -128,7 +128,10 @@ export abstract class PatternCompiler extends CallCompiler {
     for (const binding of pattern.variables.values()) this.flow = this.flow.assign(binding);
     let whenFalse = before;
     if (variable) {
-      const [matchedType, unmatchedType] = this.patternTypes(syntax, current);
+      const [matchedType, unmatchedType] = this.patternTypes(syntax, current, (type) => {
+        this.flow = this.flow.rememberTypeTest(variable, type);
+        whenFalse = whenFalse.rememberTypeTest(variable, type);
+      });
       const matched = promotionTarget(current, matchedType);
       const unmatched = promotionTarget(current, unmatchedType);
       if (matched) this.flow = this.flow.promote(variable, matched);
@@ -443,52 +446,58 @@ export abstract class PatternCompiler extends CallCompiler {
     return variable;
   }
 
-  private patternTypes(pattern: Pattern, input: DartType): readonly [matched: DartType, unmatched: DartType] {
-    if (pattern.kind === 'parenthesized') return this.patternTypes(pattern.pattern, input);
+  private patternTypes(
+    pattern: Pattern,
+    input: DartType,
+    onTypeTest?: (type: DartType) => void
+  ): readonly [matched: DartType, unmatched: DartType] {
+    if (pattern.kind === 'parenthesized') return this.patternTypes(pattern.pattern, input, onTypeTest);
     if (pattern.kind === 'and') {
-      const [leftMatch, leftFail] = this.patternTypes(pattern.left, input);
-      const [rightMatch, rightFail] = this.patternTypes(pattern.right, leftMatch);
+      const [leftMatch, leftFail] = this.patternTypes(pattern.left, input, onTypeTest);
+      const [rightMatch, rightFail] = this.patternTypes(pattern.right, leftMatch, onTypeTest);
       return [rightMatch, upperBound(leftFail, rightFail)];
     }
     if (pattern.kind === 'or') {
-      const [leftMatch, leftFail] = this.patternTypes(pattern.left, input);
-      const [rightMatch, rightFail] = this.patternTypes(pattern.right, leftFail);
+      const [leftMatch, leftFail] = this.patternTypes(pattern.left, input, onTypeTest);
+      const [rightMatch, rightFail] = this.patternTypes(pattern.right, leftFail, onTypeTest);
       return [upperBound(leftMatch, rightMatch), rightFail];
     }
     const comparison = nullPatternComparison(pattern);
     if (comparison === '==') return [input, nonNullable(input)];
     if (comparison === '!=') return [nonNullable(input), input];
-    return [this.patternMatchType(pattern, input), input];
+    return [this.patternMatchType(pattern, input, onTypeTest), input];
   }
 
-  private patternMatchType(pattern: Pattern, matchedType: DartType): DartType {
+  private patternMatchType(pattern: Pattern, matchedType: DartType, onTypeTest?: (type: DartType) => void): DartType {
+    const testedType = this.testedPatternType(pattern, matchedType);
+    if (testedType) {
+      onTypeTest?.(testedType);
+      return isSubtype(matchedType, testedType) ? matchedType : testedType;
+    }
+    if (pattern.kind === 'nullCheck' || pattern.kind === 'nullAssert')
+      return this.patternTypes(pattern.pattern, nonNullable(matchedType), onTypeTest)[0];
+    return matchedType;
+  }
+
+  private testedPatternType(pattern: Pattern, matchedType: DartType): DartType | undefined {
     switch (pattern.kind) {
       case 'variable':
       case 'wildcard':
       case 'object':
       case 'cast': {
-        if (!pattern.type) return matchedType;
-        const type = this.objectPatternTypes.get(pattern) ?? this.resolveType(pattern.type);
-        return isSubtype(matchedType, type) ? matchedType : type;
-      }
-      case 'nullCheck':
-      case 'nullAssert': {
-        return this.patternTypes(pattern.pattern, nonNullable(matchedType))[0];
+        return pattern.type ? (this.objectPatternTypes.get(pattern) ?? this.resolveType(pattern.type)) : undefined;
       }
       case 'list': {
-        const tested = interfaceType(coreTypes.list, [this.listPatternElementType(pattern, matchedType)]);
-        return isSubtype(matchedType, tested) ? matchedType : tested;
+        return interfaceType(coreTypes.list, [this.listPatternElementType(pattern, matchedType)]);
       }
       case 'map': {
-        const tested = interfaceType(coreTypes.map, this.mapPatternTypes(pattern, matchedType));
-        return isSubtype(matchedType, tested) ? matchedType : tested;
+        return interfaceType(coreTypes.map, this.mapPatternTypes(pattern, matchedType));
       }
       case 'record': {
-        const tested = this.patternContextType(pattern) ?? recordShape(pattern.fields);
-        return isSubtype(matchedType, tested) ? matchedType : tested;
+        return this.patternContextType(pattern) ?? recordShape(pattern.fields);
       }
       default: {
-        return matchedType;
+        return undefined;
       }
     }
   }
@@ -549,12 +558,16 @@ export abstract class PatternCompiler extends CallCompiler {
     }
     const slot = this.fn.allocateSlot();
     options.assignments?.set(variable, { slot, write });
-    this.flow = this.flow.assign(variable).demote(variable);
+    this.afterWrite(variable, matchedType.kind === 'dynamic' ? variable.type : matchedType);
     const save = (frame: Frame, value: Value): boolean => {
       frame.locals[slot] = new Cell(value);
       return true;
     };
     return this.typeTest(variable.type, matchedType, save, true, options.mode);
+  }
+
+  protected afterWrite(variable: LocalVar | undefined, type: DartType): void {
+    if (variable) this.flow = this.flow.write(variable, type, this.isPromotable(variable));
   }
 
   private constantPattern(value: Expression, matchedType: DartType): PatternMatch {

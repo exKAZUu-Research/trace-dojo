@@ -249,8 +249,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return flow;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of condition that tells flow analysis something.
-  // code-gauge-allow functionNcss 34 -- One case per kind of condition that tells flow analysis something.
+  // code-gauge-allow functionCognitiveComplexity 18 -- One case per kind of condition that tells flow analysis something.
+  // code-gauge-allow functionNcss 37 -- One case per kind of condition that tells flow analysis something.
   protected compileConditionInner(expression: Expression): { compiled: Compiled; flow: ConditionFlow } {
     switch (expression.kind) {
       case 'parenthesized': {
@@ -438,8 +438,9 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const type = this.resolveType(expression.type);
     const resolve = this.runtimeType(type);
     const { run } = value;
-    let promoted = this.flow;
     const { variable } = value;
+    if (variable) this.flow = this.flow.rememberTypeTest(variable, type);
+    let promoted = this.flow;
     if (variable && this.isPromotable(variable)) {
       const current = this.promotedType(variable);
       const narrowed = promotionTarget(current, type);

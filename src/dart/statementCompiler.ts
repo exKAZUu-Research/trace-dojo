@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 817 -- Keep statement cases together so their flow and compilation state are visible.
+// code-gauge-allow-file fileNcss 818 -- Keep statement cases together so their flow and compilation state are visible.
 import type {
   Block,
   Expression,
@@ -457,6 +457,7 @@ export abstract class StatementCompiler extends PatternCompiler {
 
   // code-gauge-allow functionCognitiveComplexity 24 -- Bind a declaration, retain its constant or promotion, and emit its step.
   // code-gauge-allow functionNcss 31 -- Keep declaration checks adjacent to flow and slot initialization.
+  // code-gauge-allow functionNcss 32 -- Keep declarator evaluation order, flow, and trace steps together.
   protected compileLocalDeclaration(declaration: VariableDeclaration, recordStep = true): Exec {
     this.checkAnnotations(declaration.annotations);
     const declaredType = declaration.type ? this.resolveType(declaration.type) : undefined;

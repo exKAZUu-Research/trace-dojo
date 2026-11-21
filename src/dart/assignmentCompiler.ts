@@ -21,7 +21,6 @@ import {
   type FunctionType,
   type InterfaceType,
   interfaceType,
-  isNullable,
   isPotentiallyNullable,
   isSubtype,
   iterableElementOf,
@@ -183,18 +182,6 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       }),
       isConst: false,
     };
-  }
-
-  /** Updates flow analysis after a local is assigned a value of `type`. */
-  private afterWrite(variable: LocalVar | undefined, type: DartType): void {
-    if (!variable) return;
-    this.flow = this.flow.assign(variable).demote(variable);
-    if (!this.isPromotable(variable)) return;
-    if (type.kind !== 'dynamic' && isSubtype(type, variable.type) && !sameType(type, variable.type)) {
-      // Assigning promotes a nullable variable to its non-nullable type, a type Dart always considers of interest.
-      const nonNull = nonNullable(variable.type);
-      if (isNullable(variable.type) && isSubtype(type, nonNull)) this.flow = this.flow.promote(variable, nonNull);
-    }
   }
 
   protected compileIncrement(operand: Expression, operator: '+' | '-', isPrefix: boolean, span: Span): Compiled {

@@ -325,6 +325,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     let { flow } = this;
     const { variable } = value;
     if (variable && this.isPromotable(variable)) {
+      flow = flow.rememberTypeTest(variable, type);
       const narrowed = promotionTarget(this.promotedType(variable), type);
       if (narrowed) flow = flow.promote(variable, narrowed);
     }

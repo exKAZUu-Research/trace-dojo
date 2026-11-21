@@ -2767,6 +2767,49 @@ void main() { sample('hello', 'Dart'); }`;
   }
 });
 
+test('writes preserve or recover Dart promotions supported by the value type', () => {
+  const valid = `void probe(num n, Object value) {
+  if (n is int) {
+    n = 2;
+    print(n.isEven);
+    n++;
+    print(n.isOdd);
+    n += 3;
+    print(n.isEven);
+    (n,) = (5,);
+    print(n.isOdd);
+    n = 2.5;
+    n = 4;
+    print(n.isEven);
+  }
+  if (value is String) print(value.length);
+  value = 'Dart';
+  print(value.length);
+}
+void pattern(Object value) {
+  if (value case String() || int()) print(value);
+  value = 'Dart';
+  print(value.length);
+}
+void cast(Object value) {
+  value as String;
+  value = 1;
+  value = 'Dart';
+  print(value.length);
+}
+void main() {
+  probe(9, 'SDK');
+  pattern(1);
+  cast('SDK');
+}`;
+  expect(executeProgram('dart', valid)).toMatchObject({
+    kind: 'executed',
+    stdout: 'true\ntrue\ntrue\ntrue\ntrue\n3\n4\n1\n4\n4\n',
+  });
+  const invalid = 'void f(num n) { if (n is int) { n = 2.5; print(n.isEven); } } void main() {}';
+  expect(executeProgram('dart', invalid)).toMatchObject({ kind: 'compileError' });
+});
+
 test('joined branches retain only promotions shared by both paths', () => {
   const shared = `void show(Object x) {
   if (x is num) {

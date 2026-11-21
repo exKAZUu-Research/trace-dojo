@@ -2,7 +2,15 @@ import type { Span } from './ast';
 import type { ClassInfo } from './classes';
 import type { Eval } from './compilerBase';
 import type { FunctionInfo, TypeEnv } from './runtime';
-import { type DartType, type FunctionType, type InterfaceType, isSubtype, sameType, type TypeParam } from './types';
+import {
+  type DartType,
+  type FunctionType,
+  type InterfaceType,
+  isSubtype,
+  nonNullable,
+  sameType,
+  type TypeParam,
+} from './types';
 import type { Value } from './values';
 
 let nextLocalId = 0;
@@ -124,9 +132,10 @@ const NO_LOCALS: ReadonlySet<LocalVar> = new Set();
 interface FlowFacts {
   writeCaptured: ReadonlySet<LocalVar>;
   conditions: ReadonlyMap<LocalVar, ReadonlySet<LocalVar>>;
+  testedTypes: ReadonlyMap<LocalVar, readonly DartType[]>;
 }
 
-const NO_FACTS: FlowFacts = { writeCaptured: NO_LOCALS, conditions: new Map() };
+const NO_FACTS: FlowFacts = { writeCaptured: NO_LOCALS, conditions: new Map(), testedTypes: new Map() };
 
 /** What flow analysis knows at a point of a function: reachability, promotions, and definite assignment. */
 export class Flow {
@@ -203,11 +212,39 @@ export class Flow {
     );
   }
 
-  demote(variable: LocalVar): Flow {
-    const promotions = new Map(this.promotions);
+  rememberTypeTest(variable: LocalVar, type: DartType): Flow {
+    const types = this.facts.testedTypes.get(variable) ?? [];
+    if (types.some((tested) => sameType(type, tested))) return this;
+    return this.withFacts({
+      ...this.facts,
+      testedTypes: new Map([...this.facts.testedTypes, [variable, [...types, type]]]),
+    });
+  }
+
+  write(variable: LocalVar, type: DartType, promotable: boolean): Flow {
+    const assigned = this.assign(variable);
+    const promotions = new Map(assigned.promotions);
     forgetPromotions(promotions, new Set([variable]));
-    if (promotions.size === this.promotions.size) return this;
-    return new Flow(this.reachable, promotions, this.assigned, this.maybeAssigned, this.writes, this.facts);
+    if (promotable && type.kind !== 'dynamic') {
+      const chain = this.promotions.get(variable)?.filter((prior) => isSubtype(type, prior)) ?? [];
+      const provisional = chain.at(-1) ?? variable.type;
+      const tested = this.facts.testedTypes.get(variable) ?? [];
+      const narrowed = assignmentPromotion(variable.type, provisional, type, tested);
+      if (narrowed) chain.push(narrowed);
+      if (chain.length > 0) promotions.set(variable, chain);
+    }
+    return new Flow(
+      assigned.reachable,
+      promotions,
+      assigned.assigned,
+      assigned.maybeAssigned,
+      assigned.writes,
+      assigned.facts
+    );
+  }
+
+  private withFacts(facts: FlowFacts): Flow {
+    return new Flow(this.reachable, this.promotions, this.assigned, this.maybeAssigned, this.writes, facts);
   }
 
   assign(variable: LocalVar): Flow {
@@ -240,6 +277,7 @@ export class Flow {
 
   private factsAfterWrites(writes: ReadonlySet<LocalVar>, captured: readonly LocalVar[] = []): FlowFacts {
     return {
+      ...this.facts,
       writeCaptured: captured.length > 0 ? new Set([...this.writeCaptured, ...captured]) : this.writeCaptured,
       conditions: filterConditions(this.facts.conditions, (local) => !affectedPath(local, (part) => writes.has(part))),
     };
@@ -249,7 +287,7 @@ export class Flow {
   static join(a: Flow, b: Flow): Flow {
     if (!a.reachable)
       return b.reachable
-        ? b
+        ? b.inheritTests(a)
         : new Flow(
             false,
             b.promotions,
@@ -258,7 +296,7 @@ export class Flow {
             combineWrites(a.writes, b.writes),
             joinFacts(a, b)
           );
-    if (!b.reachable) return a;
+    if (!b.reachable) return a.inheritTests(b);
     const promotions = new Map<LocalVar, readonly DartType[]>();
     for (const [variable, chain] of a.promotions) {
       const other = b.promotions.get(variable);
@@ -275,6 +313,25 @@ export class Flow {
       joinFacts(a, b)
     );
   }
+
+  private inheritTests(other: Flow): Flow {
+    const testedTypes = mergeTypeTests(this.facts.testedTypes, other.facts.testedTypes);
+    return testedTypes === this.facts.testedTypes ? this : this.withFacts({ ...this.facts, testedTypes });
+  }
+}
+
+function assignmentPromotion(
+  declared: DartType,
+  provisional: DartType,
+  written: DartType,
+  tested: readonly DartType[]
+): DartType | undefined {
+  if (sameType(written, provisional)) return undefined;
+  const interests = [nonNullable(declared), ...tested.flatMap((type) => [type, nonNullable(type)])];
+  const compatible = interests.filter(
+    (type) => !sameType(type, provisional) && isSubtype(written, type) && isSubtype(type, provisional)
+  );
+  return compatible.find((type) => compatible.every((other) => isSubtype(type, other)));
 }
 
 function joinFacts(a: Flow, b: Flow): FlowFacts {
@@ -283,9 +340,24 @@ function joinFacts(a: Flow, b: Flow): FlowFacts {
     const other = b.facts.conditions.get(local);
     if (other) conditions.set(local, intersect(dependencies, other));
   }
-  return { writeCaptured: union(a.writeCaptured, b.writeCaptured), conditions };
+  return {
+    writeCaptured: union(a.writeCaptured, b.writeCaptured),
+    conditions,
+    testedTypes: mergeTypeTests(a.facts.testedTypes, b.facts.testedTypes),
+  };
 }
 
+function mergeTypeTests(first: FlowFacts['testedTypes'], second: FlowFacts['testedTypes']): FlowFacts['testedTypes'] {
+  if (first.size === 0 || first === second) return second;
+  if (second.size === 0) return first;
+  const merged = new Map(first);
+  for (const [variable, types] of second) {
+    const previous = merged.get(variable) ?? [];
+    const extra = types.filter((type) => !previous.some((prior) => sameType(type, prior)));
+    if (extra.length > 0) merged.set(variable, [...previous, ...extra]);
+  }
+  return merged;
+}
 function combineWrites(
   left: ReadonlySet<LocalVar> | undefined,
   right: ReadonlySet<LocalVar> | undefined
