@@ -1630,25 +1630,25 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
 // Helpers
 
+/** As the VM does, evaluates every embedded expression before converting any of them to a string. */
 function interpolateString(frame: Frame, pieces: readonly (string | Eval)[], isConst: boolean): string {
-  const text = new BoundedStringParts(frame.runtime);
-  for (const piece of pieces) {
-    if (typeof piece === 'string') {
-      text.append(piece);
-      continue;
-    }
-    const value = piece(frame);
-    if (isConst && frame.runtime.checkingConstants && !isPrimitive(value)) {
-      frame.runtime.throwTypeError('定数の文字列には、数値、bool、String、null のみを埋め込めます。');
-    }
-    frame.temporaries.push(value);
-    try {
-      text.append(stringOf(frame.runtime, value));
-    } finally {
-      frame.temporaries.pop();
-    }
+  const mark = frame.temporaries.length;
+  try {
+    const values = pieces.map((piece) => {
+      if (typeof piece === 'string') return piece;
+      const value = piece(frame);
+      if (isConst && frame.runtime.checkingConstants && !isPrimitive(value)) {
+        frame.runtime.throwTypeError('定数の文字列には、数値、bool、String、null のみを埋め込めます。');
+      }
+      frame.temporaries.push(value);
+      return { value };
+    });
+    const text = new BoundedStringParts(frame.runtime);
+    for (const piece of values) text.append(typeof piece === 'string' ? piece : stringOf(frame.runtime, piece.value));
+    return text.text();
+  } finally {
+    frame.temporaries.length = mark;
   }
-  return text.text();
 }
 
 export function isPrimitive(value: Value): value is undefined | boolean | bigint | number | string {

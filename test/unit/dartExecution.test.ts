@@ -1949,6 +1949,20 @@ void main() { f([g]); f([id]); h((g, 1)); (int Function(int), int) r = (id, 1); 
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'Never\nint\nNever\n5\n' });
 });
 
+test('Dart string interpolation evaluates every operand before converting any', () => {
+  const program = `class T { String s; T(this.s); String toString() { print('toString \${s}'); return s; } }
+int g() { print('g'); return 1; }
+void main() {
+  var stack = [1, 2, 3];
+  print('stack: $stack, popped: \${stack.removeLast()}');
+  print('\${T('a')} \${g()}');
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'stack: [1, 2], popped: 3\ng\ntoString a\na 1\n',
+  });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}
