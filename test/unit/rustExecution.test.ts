@@ -7700,3 +7700,26 @@ test.each([
     diagnostics: [expect.objectContaining({ message: expect.stringContaining(message) })],
   });
 });
+
+test('only arguments of std functions become iterators implicitly', () => {
+  const program = `fn count(it: impl Iterator<Item = i32>) -> usize { it.count() }
+fn total<I: IntoIterator<Item = i32>>(it: I) -> i32 { it.into_iter().sum() }
+fn main() {
+    let mut v = vec![1];
+    v.extend(vec![2, 3]);
+    let pairs: Vec<(i32, char)> = v.iter().copied().zip(vec!['a', 'b']).collect();
+    let joined: Vec<i32> = v.iter().copied().chain(vec![9]).collect();
+    println!("{} {} {:?} {:?} {}", count(vec![1].into_iter()), total(vec![1, 2]), pairs, joined, String::from_iter(vec!['x', 'y']));
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: "1 3 [(1, 'a'), (2, 'b')] [1, 2, 3, 9] xy\n",
+  });
+  for (const invalid of [
+    'fn main() {\n    let mut it: std::vec::IntoIter<i32> = vec![1, 2];\n}',
+    'fn take(it: std::vec::IntoIter<i32>) -> usize { it.count() }\nfn main() {\n    take(vec![1]);\n}',
+    'fn take(it: impl Iterator<Item = i32>) -> usize { it.count() }\nfn main() {\n    take(vec![1]);\n}',
+  ]) {
+    expect(executeProgram('rust', invalid).kind).toBe('compileError');
+  }
+});

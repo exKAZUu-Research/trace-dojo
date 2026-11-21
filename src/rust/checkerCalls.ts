@@ -67,7 +67,7 @@ function callFn(
       `関数 ${fn.name} の引数の数が合いません（${params.length} 個ですが、${expr.args.length} 個あります）。`
     );
   }
-  checkArgs(c, expr.args, params, expectations(c, sig.ret, params, expected));
+  checkArgs(c, expr.args, params, expectations(c, sig.ret, params, expected), (fn.module as Module).isStd);
   if (fn.selfMode === 'value') c.requireTrait(params[0], 'Sized', expr.args[0].span);
   expr.callee.ty = { kind: 'fn', params, ret: sig.ret };
   return sig.ret;
@@ -139,15 +139,25 @@ function expectations(c: Checker, ret: Type, params: Type[], expected: Type | un
   return result;
 }
 
-function checkArgs(c: Checker, args: Expr[], params: Type[], expectations: (Type | undefined)[] = []): void {
+/** `iterable`: the callee is of the standard library, whose iterator parameters take whatever is `IntoIterator`. */
+function checkArgs(
+  c: Checker,
+  args: Expr[],
+  params: Type[],
+  expectations: (Type | undefined)[] = [],
+  iterable = false
+): void {
   // Closures are checked last, when the other arguments have told their parameters' types.
   const order = [...args.keys()].toSorted(
     (a, b) => Number(args[a].kind === 'closure') - Number(args[b].kind === 'closure')
   );
   const inputTypes = params.map((param) => shallow(param));
+  const enclosing = c.iterableArgument;
   for (const index of order) {
+    c.iterableArgument = iterable ? args[index] : undefined;
     checkArgument(c, args[index], params[index], inputTypes[index], expectations[index]);
   }
+  c.iterableArgument = enclosing;
 }
 
 function checkArgument(c: Checker, arg: Expr, param: Type, inputType: Type, expectation: Type | undefined): void {
@@ -319,7 +329,7 @@ export function checkMethodCall(
       `メソッド ${expr.method} の引数の数が合いません（${sig.params.length} 個ですが、${expr.args.length} 個あります）。`
     );
   }
-  checkArgs(c, expr.args, sig.params, expectations(c, sig.ret, sig.params, expected));
+  checkArgs(c, expr.args, sig.params, expectations(c, sig.ret, sig.params, expected), (fn.module as Module).isStd);
   c.annotations.methods.set(expr, { fn, typeArgs: found.typeArgs, receiver: found.adjust });
   const adjusted = typeAfter(receiverType, found.adjust.derefs) ?? found.selfType;
   if (fn.selfMode === 'value') checkMoveOutOfRef(c, expr, found.adjust, adjusted);

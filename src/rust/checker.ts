@@ -117,6 +117,8 @@ export class Checker {
   readonly varBounds = new Map<unknown, TraitRef[]>();
   body!: BodyContext;
   deferredChecks: (() => void)[] = [];
+  /** The argument being checked for an iterator parameter of a std function, which takes any `IntoIterator`. */
+  iterableArgument: Expr | undefined;
   /** Closures whose capture analysis waits for a type, each with the analysis, which returns whether it is final. */
   unsettledClosures: { closure: ClosureType; analyze: () => boolean }[] = [];
   readonly fallbackChecks: (() => void)[] = [];
@@ -1030,7 +1032,7 @@ export class Checker {
         return;
       }
     }
-    if (t.kind === 'adt' && t.def.builtin === 'Iter') {
+    if (expr === this.iterableArgument && t.kind === 'adt' && t.def.builtin === 'Iter') {
       const item = intoIterItem(a);
       const shape = intoIterShape(this.program, a);
       if (
