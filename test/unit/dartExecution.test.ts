@@ -5963,6 +5963,13 @@ void main() {
     expect(executeProgram('dart', checked)).toMatchObject({ kind: 'compileError' });
     expect(executeProgram('dart', coalesced)).toMatchObject({ kind: 'compileError' });
   }
+  const asserted = `Never direct<T extends Null>(T? value) => throw value!;
+Never dependent<T extends U, U extends Null>(T? value) { value!; throw value; }
+void main() {
+  try { direct(null); } catch (error) { print(error.runtimeType); }
+  try { dependent<Null, Null>(null); } catch (error) { print(error.runtimeType); }
+}`;
+  expect(executeProgram('dart', asserted)).toMatchObject({ kind: 'executed', stdout: '_TypeError\n_TypeError\n' });
 });
 
 test('super rejects null-aware property writes and accepts null-aware indexing', () => {

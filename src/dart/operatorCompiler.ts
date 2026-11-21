@@ -28,6 +28,7 @@ import {
   nonNullable,
   numericClassOf,
   promotionTarget,
+  resolveBound,
   sameType,
   upperBound,
   vmTypeString,
@@ -75,11 +76,11 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     // After `x!` completes, x is known not to be null.
     if (value.variable && this.isPromotable(value.variable)) {
       const current = this.promotedType(value.variable);
-      const nonNull = nonNullable(current);
+      const nonNull = assertedNonNullable(current);
       if (!sameType(nonNull, current)) this.flow = this.flow.promote(value.variable, nonNull);
     }
     return {
-      type: value.type.kind === 'dynamic' ? DYNAMIC : nonNullable(value.type),
+      type: assertedNonNullable(value.type),
       run: (frame) => {
         const result = run(frame);
         if (result === SHORTED) return SHORTED;
@@ -429,7 +430,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
         case 'nullAssert': {
           const { run } = current;
           current = {
-            type: nonNullable(current.type),
+            type: assertedNonNullable(current.type),
             run: (frame) => {
               const value = run(frame);
               if (value === undefined) frame.runtime.throwTypeError('Null check operator used on a null value');
@@ -465,6 +466,12 @@ const INTEGER_OPERAND_METHODS = new Map([
   ['>>', '_shrFromInteger'],
   ['>>>', '_ushrFromInteger'],
 ]);
+
+function assertedNonNullable(type: DartType): DartType {
+  return type.kind === 'typeParam' && resolveBound(type).kind === 'null'
+    ? { ...type, nullable: false, promoted: NEVER }
+    : nonNullable(type);
+}
 
 function stringAddition(left: Eval, right: Eval, dynamicArgument: boolean, row: number): Eval {
   return (frame) => {
