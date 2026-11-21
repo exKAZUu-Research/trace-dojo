@@ -119,8 +119,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       this.afterWrite(variable, value.type);
       const run = value.run;
       return {
-        // The assignment has its value's static type; a dynamic value's runtime check for the write does not change it.
-        type: written.type.kind === 'dynamic' ? written.type : value.type,
+        type: assignedType(written, value),
         run: withPrepared(target, (frame, prepared) => {
           const result = run(frame);
           write(frame, prepared, result);
@@ -147,7 +146,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       if (variable) this.afterWrite(variable, upperBound(nonNullable(readType), value.type));
       const run = value.run;
       return {
-        type: upperBound(nonNullable(readType), written.type.kind === 'dynamic' ? written.type : value.type),
+        type: upperBound(nonNullable(readType), assignedType(written, value)),
         run: withPrepared(target, (frame, prepared) => {
           const existing = read(frame, prepared);
           if (existing !== undefined) return existing;
@@ -170,7 +169,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     this.afterWrite(variable, coerced.type);
     const run = coerced.run;
     return {
-      type: coerced.type,
+      type: assignedType(combined, coerced),
       run: withPrepared(target, (frame, prepared) => {
         frame.temporaries.push(read(frame, prepared));
         let result: Value;
@@ -206,7 +205,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     const step =
       numeric === 'int' ? (value: Value): Value => wrap((value as bigint) + (operator === '+' ? 1n : -1n)) : undefined;
     return {
-      type: isPrefix ? coerced.type : readType,
+      type: isPrefix ? assignedType(combined, coerced) : readType,
       run: withPrepared(target, (frame, prepared) => {
         const before = read(frame, prepared);
         let after: Value;
@@ -1189,4 +1188,12 @@ function addIterableElements(frame: Frame, iterable: Value, elementType: DartTyp
  */
 function fitsContext(type: DartType, context: DartType): boolean {
   return containsInferenceHole(context) || type.kind === 'dynamic' || isSubtype(type, context);
+}
+
+/**
+ * The static type of an assignment expression: its value's type, which a dynamic value keeps although the write checks
+ * it against the target's type at run time.
+ */
+function assignedType(value: Compiled, coerced: Compiled): DartType {
+  return value.type.kind === 'dynamic' ? value.type : coerced.type;
 }
