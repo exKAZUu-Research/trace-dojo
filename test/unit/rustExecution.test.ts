@@ -8494,3 +8494,18 @@ test('an error that ? returns as it is may not borrow a local', () => {
   );
   expect(executeProgram('rust', converted)).toMatchObject({ kind: 'executed', stdout: 'bad\n' });
 });
+
+test.each([
+  ['an iterator over', 'items.iter()'],
+  ['a borrow of', '&items'],
+])('extend with %s a short-lived array copies its references out', (_name, source) => {
+  const program = rustMain(`
+    let s = String::from("hello");
+    let mut v: Vec<&str> = Vec::new();
+    {
+        let items = vec![s.as_str()];
+        v.extend(${source});
+    }
+    println!("{:?}", v);`);
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '["hello"]\n' });
+});

@@ -106,7 +106,22 @@ export class SignatureInstance {
       if (fixed) this.outlives(declaredRegion, region);
     }
     if (forEachPart(t, actual, invariant, (type, layout, inv) => this.bindInput(type, layout, inv))) return;
+    if (this.bindBorrowedIterator(t, actual)) return;
     for (const a of regionsOf(actual)) for (const b of this.declaredRegions(t)) edge(a, b);
+  }
+
+  /**
+   * A borrowed collection passed where an iterator of references is expected (`v.extend(&items)`): the items borrow
+   * from the collection, and what they point to holds the collection's own borrows.
+   */
+  private bindBorrowedIterator(t: Type, actual: Layout): boolean {
+    if (actual.kind !== 'ref' || t.kind !== 'adt' || t.def.builtin !== 'Iter' || t.args.length === 0) return false;
+    const item = instantiate(t.args[0], this.subst, this.fresh);
+    if (item.kind !== 'ref') return false;
+    relate(this.outlives, actual, item);
+    const iterator = instantiate(t, this.subst, this.fresh);
+    if (iterator.kind === 'adt') for (const own of iterator.own) this.outlives(actual.region, own);
+    return true;
   }
 
   /** The result's borrows come from the regions its type names. */
@@ -182,18 +197,18 @@ export class SignatureInstance {
 
   /**
    * Relates a bound's type arguments to the bounded parameter: `B: FromIterator<T>` builds a `B` of `T`s, and
-   * `A: ExtendInto<T>` the other way round makes `T`s of `A`s.
+   * `A: ExtendInto<T>` the other way round makes `T`s of `A`s (or of what `A`s point to).
    */
   private relateBoundArgs(bound: TraitRef, layout: Layout): void {
-    const flowsOut = bound.trait.builtin === 'ExtendInto';
+    if (bound.trait.builtin === 'ExtendInto') {
+      const target = instantiate(bound.args[0], this.subst, this.fresh);
+      // Extending from `&T` copies the `T` out: only what the reference points to flows in, not the borrow itself.
+      const source = layout.kind === 'ref' && refDepth(layout) > refDepth(target) ? layout.target : layout;
+      relate(this.outlives, source, target);
+      return;
+    }
     for (const arg of bound.args) {
-      const argRegions = this.declaredRegions(arg);
-      for (const region of regionsOf(layout)) {
-        for (const argRegion of argRegions) {
-          if (flowsOut) this.outlives(region, argRegion);
-          else this.outlives(argRegion, region);
-        }
-      }
+      for (const a of this.declaredRegions(arg)) for (const b of regionsOf(layout)) this.outlives(a, b);
     }
   }
 
@@ -310,6 +325,10 @@ export function relateOpaqueCall(
   for (const a of [...regionsOf(called), ...inputs]) {
     for (const b of regionsOf(result)) outlives(a, b);
   }
+}
+
+function refDepth(layout: Layout): number {
+  return layout.kind === 'ref' ? 1 + refDepth(layout.target) : 0;
 }
 
 /**
