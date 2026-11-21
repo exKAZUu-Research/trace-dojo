@@ -1240,6 +1240,18 @@ test.each([
   });
 });
 
+test.each([
+  ['records', `(${Array.from({ length: 60 }, () => 'i').join(', ')})`],
+  ['closures', `() => ${Array.from({ length: 60 }, (_, index) => `v${index}`).join(' + ')}`],
+])('retained %s count their fields against the storage limit', (_values, element) => {
+  const program = `void main() {
+  ${Array.from({ length: 60 }, (_, index) => `var v${index} = ${index};`).join('\n  ')}
+  final values = List.generate(17000, (i) => ${element});
+  print(values.length);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'limitExceeded', limit: 'storage' });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}

@@ -994,6 +994,7 @@ export abstract class CallCompiler extends OperatorCompiler {
     const ownParams = type.typeParams;
     const { qualifiedName } = fn;
     return (frame) => {
+      frame.runtime.allocate(sources.length + 1);
       const captured: Cell[] = sources.map(({ local, captured: index }) =>
         local >= 0 ? (frame.locals[local] as Cell) : frame.captured[index]
       );

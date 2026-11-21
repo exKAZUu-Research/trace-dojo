@@ -1688,6 +1688,7 @@ function recordLiteralBuilder(
     } finally {
       frame.temporaries.length = mark;
     }
+    frame.runtime.allocate(fields.length + 1);
     return new DartRecord(
       coreTypes.record,
       positional,
