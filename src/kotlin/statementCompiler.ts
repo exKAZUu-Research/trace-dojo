@@ -29,7 +29,7 @@ import {
   Scope,
   typeMismatchMessage,
 } from './compilerBase';
-import { getPropertyValue, setPropertyValue } from './dispatch';
+import { getPropertyValue, receiverRepr, setPropertyValue } from './dispatch';
 import { type BoundPlace, type Place } from './expressionCompiler';
 import { caseOf, keyOf } from './flowKeys';
 import { assignedNames, localRefinement, refineLocalType, remainingWrites } from './flowWrites';
@@ -675,7 +675,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     if (symbol.isVar && symbol.setterVisibility === 'private' && !this.isInsideClass(scope, symbol.owner)) {
       this.error(row, `${symbol.name} の set は private なので、クラスの外からは代入できません。`);
     }
-    const receiverEval: Eval = receiver ? convertRepr(receiver.eval, receiver.repr, 'ref') : () => NULL;
+    const receiverEval: Eval = receiver ? convertRepr(receiver.eval, receiver.repr, receiverRepr(symbol)) : () => NULL;
     const repr = this.propertyReprOf(symbol);
     return {
       type,

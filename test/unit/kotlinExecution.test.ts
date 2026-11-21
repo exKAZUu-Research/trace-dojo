@@ -33,6 +33,25 @@ test.each(['contains', 'split'])('charges the execution budget during CharSequen
 /** Programs with the output of Kotlin 2.4.21 on the JVM (Java 25), which the interpreter must reproduce exactly. */
 test.each([
   {
+    name: 'primitive extension property writes share the receiver representation of reads',
+    source: `var Int.score: Int
+    get() { println("int get $this"); return this }
+    set(value) { println("int set \${this + value}") }
+var Long.score: Long
+    get() { println("long get $this"); return this }
+    set(value) { println("long set \${this + value}") }
+fun main() {
+    2.score = 3
+    2.score += 3
+    println(2.score++)
+    2L.score = 3L
+    2L.score += 3L
+    println(2L.score++)
+}`,
+    stdout:
+      'int set 5\nint get 2\nint set 7\nint get 2\nint set 5\n2\nlong set 5\nlong get 2\nlong set 7\nlong get 2\nlong set 5\n2\n',
+  },
+  {
     name: 'setter bodies can shadow their input parameters',
     source: `class Box {
     var first: Int = 0
