@@ -258,7 +258,7 @@ function formatLower<V>(
   if (values.isNull(arg)) return general('null');
   const number = values.numberOf(arg);
   if (!number || !accepted.includes(number.kind)) {
-    return values.fail('IllegalFormatConversionException', `${conversion} != ${values.typeName(arg)}`);
+    return values.fail('IllegalFormatConversionException', `${lower} != ${values.typeName(arg)}`);
   }
   const { kind, value: boxed } = number;
   if (lower === 'c') checkCodePoint(values, boxed as number);

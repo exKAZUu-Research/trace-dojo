@@ -75,6 +75,20 @@ fun main() {
 /** Programs with the output of Kotlin 2.4.21 on the JVM (Java 25), which the interpreter must reproduce exactly. */
 test.each([
   {
+    name: 'uppercase format conversions use lowercase error letters and uppercase output',
+    source: `fun main() {
+    try { println(String.format("%X", 1.5)) } catch (e: Exception) { println(e.message) }
+    try { println("%E".format(5)) } catch (e: Exception) { println(e.message) }
+    try { println("%C".format("text")) } catch (e: Exception) { println(e.message) }
+    println("%X".format(255))
+}`,
+    stdout: `x != java.lang.Double
+e != java.lang.Integer
+c != java.lang.String
+FF
+`,
+  },
+  {
     name: 'empty built lists reuse a singleton and close the original builder',
     source: `fun main() {
     val first = buildList<Int> {}
