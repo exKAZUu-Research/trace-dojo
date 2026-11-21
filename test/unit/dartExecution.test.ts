@@ -1581,6 +1581,17 @@ test('Dart extension type primary constructors run their initializer lists and b
   ).toMatchObject({ kind: 'compileError' });
 });
 
+test('Dart brace spreads of fields and getters infer sets and maps from their types', () => {
+  const program = `class A {
+  final items = [1, 2, 1];
+  Map<String, int> get m => {'a': 1};
+  void show() { print([{...items}, {...m}]); }
+}
+List<int> get items => [3, 3];
+void main() { A().show(); print({...items}); }`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[{1, 2}, {a: 1}]\n{3}\n' });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}

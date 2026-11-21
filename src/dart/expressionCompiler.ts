@@ -796,7 +796,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
       if (value.typeArguments) return value.typeArguments.length === 2 ? 'map' : 'set';
       return this.setOrMapFromElements(value.elements, undefined);
     }
-    const type = value.kind === 'identifier' ? this.declaredTypeOf(value.name) : this.speculativeTypeOf(value);
+    const type =
+      (value.kind === 'identifier' ? this.declaredTypeOf(value.name) : undefined) ?? this.speculativeTypeOf(value);
     if (!type) return undefined;
     const base = resolveBound(nonNullable(type));
     if (base.kind !== 'interface') return undefined;
