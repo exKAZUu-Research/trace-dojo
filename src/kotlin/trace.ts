@@ -47,7 +47,7 @@ class Snapshotter {
    * The variables a frame shows: its locals and what a lambda captured, then with `withContext` the properties of
    * `this` as `this.x`, the program's top-level properties, and the properties of its objects as `Name.x`.
    */
-  // code-gauge-allow functionCognitiveComplexity 21 -- builds one snapshot of a frame, whose kinds of variables are listed side by side as Java's trace does.
+  // code-gauge-allow functionCognitiveComplexity 25 -- builds one snapshot of a frame, whose kinds of variables are listed side by side as Java's trace does.
   variablesOf(frame: Frame, withContext: boolean): TraceVariables {
     const variables: TraceVariables = { vars: {}, referenceVars: {} };
     const shown = new Set<string>();

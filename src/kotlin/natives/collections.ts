@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 935 -- the natives of the collections, which share the helpers of their items.
+// code-gauge-allow-file fileNcss 957 -- the natives of the collections, which share the helpers of their items.
 import { runtimeClassOf } from '../dispatch';
 import { hashOf, identityHash, stringOf, valueEquals } from '../format';
 import { toInt32 } from '../operators';
@@ -213,14 +213,14 @@ type ListNative = (frame: Frame, list: Value, args: Value[]) => Value;
 /** What reads a list of the library. */
 const LIST_READING_NATIVES: Record<string, ListNative> = {
   'isEmpty()': (_frame, list) => indexedSize(list as KObject) === 0,
-  'contains(E)': (frame, list, [element]) => findListValue(frame, list as KObject, element) !== -1,
+  'contains(E)': (frame, list, [element]) => searchListValue(frame, list as KObject, element) !== -1,
   'containsAll(Collection<E>)': (frame, list, [elements]) => containsAll(frame, list, elements),
   'get(Int)': (frame, list, [index]) => {
     checkIndex(frame, list, index as number);
     return indexedItem(list as KObject, index as number);
   },
-  'indexOf(E)': (frame, list, [element]) => findListValue(frame, list as KObject, element),
-  'lastIndexOf(E)': (frame, list, [element]) => findListValue(frame, list as KObject, element, true),
+  'indexOf(E)': (frame, list, [element]) => searchListValue(frame, list as KObject, element),
+  'lastIndexOf(E)': (frame, list, [element]) => searchListValue(frame, list as KObject, element, true),
   'iterator()': (frame, list) => arrayIterator(frame, list as KObject),
   'listIterator()': (frame, list) => arrayIterator(frame, list as KObject),
   'listIterator(Int)': (frame, list, [index]) => {
@@ -242,7 +242,7 @@ const LIST_READING_NATIVES: Record<string, ListNative> = {
   },
   'subList(Int, Int)': (frame, list, [from, to]) => subList(frame, list as KObject, from as number, to as number),
   'equals(Any?)': (frame, list, [other]) => listEquals(frame, list as KObject, other),
-  'hashCode()': (frame, list) => listHash(frame, readableItems(list)),
+  'hashCode()': (frame, list) => hashList(frame, list as KObject),
   'toString()': renderList,
 };
 
@@ -253,33 +253,47 @@ function renderList(frame: Frame, receiver: Value): string {
   const view = listView(list);
   const items = (view?.source ?? list).items;
   return items
-    ? renderIndexedList(frame, list, items, view?.from ?? 0)
+    ? withIndexedListElements(frame, list, items, view?.from ?? 0, (elements) =>
+        collectionToString(frame, list, elements)
+      )
     : collectionToString(frame, list, readableItems(list));
 }
 
 function renderCollection(frame: Frame, receiver: Value): string {
-  return renderIterator(frame, receiver, (elements) => collectionToString(frame, receiver, elements));
+  return withCollectionElements(frame, receiver, (elements) => collectionToString(frame, receiver, elements));
 }
 
-function renderIterator(frame: Frame, receiver: Value, render: (elements: Iterable<Value>) => string): string {
+function withCollectionElements<T>(frame: Frame, receiver: Value, use: (elements: Iterable<Value>) => T): T {
   const iterator = collectionIterator(frame, receiver);
   function* elements(): Iterable<Value> {
     while (iterator.hasNext()) yield iterator.next();
   }
-  return frame.runtime.withNativeRoots([iterator.value], () => render(elements()));
+  return frame.runtime.withNativeRoots([iterator.value], () => use(elements()));
 }
 
-function renderIndexedList(frame: Frame, list: KObject, items: Value[], from: number): string {
+function withIndexedListElements<T>(
+  frame: Frame,
+  list: KObject,
+  items: Value[],
+  from: number,
+  use: (elements: Iterable<Value>) => T
+): T {
   const end = from + indexedSize(list);
   function* elements(): Iterable<Value> {
     for (let index = from; index < end; index++) yield items[index];
   }
-  return frame.runtime.withNativeRoots([items], () => collectionToString(frame, list, elements()));
+  return frame.runtime.withNativeRoots([items], () => use(elements()));
 }
 
 function usesJvmListIterator(list: KObject): boolean {
   const kind = listKind(listView(list)?.source ?? list);
   return kind === 'ArrayList' || kind === 'ArrayDeque';
+}
+
+function searchListValue(frame: Frame, list: KObject, element: Value, fromEnd = false): number {
+  const index = findListValue(frame, list, element, fromEnd);
+  if (listView(list)?.source.arrayList) checkListView(frame, list);
+  return index;
 }
 
 function findListValue(frame: Frame, list: KObject, element: Value, fromEnd = false): number {
@@ -593,7 +607,22 @@ function filterArrayList(
   });
 }
 
-export function listHash(frame: Frame, values: Value[]): number {
+function hashList(frame: Frame, list: KObject): number {
+  const view = listView(list);
+  const source = view?.source ?? list;
+  const hash = (elements: Iterable<Value>): number => orderedListHash(frame, elements);
+  if (listKind(source) === 'ArrayDeque') return withCollectionElements(frame, list, hash);
+  if (!source.items) return hash(readableItems(list));
+  const version = source.modCount;
+  const result = withIndexedListElements(frame, list, source.items, view?.from ?? 0, hash);
+  if (source.arrayList) {
+    if (view) checkListView(frame, list);
+    else if (source.modCount !== version) throwError(frame, 'java.util.ConcurrentModificationException');
+  }
+  return result;
+}
+
+function orderedListHash(frame: Frame, values: Iterable<Value>): number {
   let hash = 1;
   for (const value of values) hash = toInt32(Math.imul(31, hash) + hashOf(frame, value));
   return hash;
@@ -911,7 +940,7 @@ function mapEquals(frame: Frame, map: KObject, other: Value): boolean {
 function mapToString(frame: Frame, map: KObject): string {
   const entries = readCollectionProperty(frame, map, 'kotlin.collections.Map', 'entries');
   const owner = 'kotlin.collections.Map.Entry';
-  return renderIterator(frame, entries, (elements) =>
+  return withCollectionElements(frame, entries, (elements) =>
     joinRendered(frame, elements, '{', '}', (entry) => {
       const entryKey = readCollectionProperty(frame, entry, owner, 'key');
       const entryValue = readCollectionProperty(frame, entry, owner, 'value');

@@ -172,7 +172,8 @@ function functionsOf(kind: ArrayKind): string {
     `fun ${g()}${r}.randomOrNull(random: kotlin.random.Random): ${e}? =
         if (isEmpty()) null else get(random.nextInt(size))`,
     `external fun ${g()}${r}.fill(element: ${e}, fromIndex: Int = 0, toIndex: Int = size)`,
-    `external fun ${g()}${r}.reverse()`,
+    `fun ${g()}${r}.reverse() = reverse(0, size)`,
+    `external fun ${g()}${r}.reverse(fromIndex: Int, toIndex: Int)`,
     `inline fun ${g()}${r}.single(predicate: (${e}) -> Boolean): ${e} = asList().single(predicate)`,
     `inline fun ${g()}${r}.singleOrNull(predicate: (${e}) -> Boolean): ${e}? = asList().singleOrNull(predicate)`,
     `fun ${g()}${r}.singleOrNull(): ${e}? = if (size == 1) this[0] else null`,
@@ -206,8 +207,10 @@ function functionsOf(kind: ArrayKind): string {
       `fun ${r}.min(): ${e} { if (isEmpty()) throw NoSuchElementException(); var min = this[0]; for (i in 1..lastIndex) { val e = this[i]; ${keepMin} }; return min }`,
       `fun ${r}.maxOrNull(): ${e}? = if (isEmpty()) null else max()`,
       `fun ${r}.minOrNull(): ${e}? = if (isEmpty()) null else min()`,
-      `external fun ${r}.sort()`,
-      `fun ${r}.sortDescending() { if (size > 1) { sort(); reverse() } }`,
+      `fun ${r}.sort() = sort(0, size)`,
+      `external fun ${r}.sort(fromIndex: Int = 0, toIndex: Int = size)`,
+      `fun ${r}.sortDescending() = sortDescending(0, size)`,
+      `fun ${r}.sortDescending(fromIndex: Int, toIndex: Int) { sort(fromIndex, toIndex); reverse(fromIndex, toIndex) }`,
       `fun ${r}.sortedArray(): ${r} = copyOf().also { it.sort() }`,
       `fun ${r}.sortedArrayDescending(): ${r} = copyOf().also { it.sortDescending() }`,
       `fun ${r}.sorted(): List<${e}> = asList().sorted()`,
@@ -274,11 +277,16 @@ fun <T : Comparable<T>> Array<out T>.maxOrNull(): T? = asList().maxOrNull()
 fun <T : Comparable<T>> Array<out T>.minOrNull(): T? = asList().minOrNull()
 fun <T : Comparable<T>> Array<out T>.sorted(): List<T> = asList().sorted()
 fun <T : Comparable<T>> Array<out T>.sortedDescending(): List<T> = asList().sortedDescending()
-fun <T : Comparable<T>> Array<out T>.sort() = sortWith(naturalOrder())
-external fun <T> Array<out T>.sortWith(comparator: Comparator<in T>)
+fun <T : Comparable<T>> Array<out T>.sort() = sortWith<T>(naturalOrder<T>(), 0, size)
+fun <T> Array<out T>.sort(fromIndex: Int = 0, toIndex: Int = size) =
+    sortWith<T>(NaturalOrderComparator as Comparator<T>, fromIndex, toIndex)
+fun <T> Array<out T>.sortWith(comparator: Comparator<in T>) = sortWith<T>(comparator, 0, size)
+external fun <T> Array<out T>.sortWith(comparator: Comparator<in T>, fromIndex: Int = 0, toIndex: Int = size)
 inline fun <T, R : Comparable<R>> Array<out T>.sortBy(crossinline selector: (T) -> R?) = sortWith(compareBy(selector))
 ${NUMERIC_AGGREGATE_TYPES.flatMap((kind) => numericAggregates(`Array<out ${kind.element}>`, kind, true)).join('\n')}
-fun <T : Comparable<T>> Array<out T>.sortDescending() = sortWith(reverseOrder())
+fun <T : Comparable<T>> Array<out T>.sortDescending() = sortDescending(0, size)
+fun <T : Comparable<T>> Array<out T>.sortDescending(fromIndex: Int, toIndex: Int) =
+    sortWith<T>(reverseOrder<T>(), fromIndex, toIndex)
 fun <T : Comparable<T>> Array<T>.sortedArray(): Array<T> = copyOf().also { it.sort() }
 fun <T : Comparable<T>> Array<T>.sortedArrayDescending(): Array<T> = copyOf().also { it.sortDescending() }
 fun <T> Array<out T>?.contentDeepToString(): String = if (this == null) "null" else deepArrayString(this, HashSet<Any>())

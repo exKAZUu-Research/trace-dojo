@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 410 -- the text and character natives share string, casing, and parsing operations.
+// code-gauge-allow-file fileNcss 413 -- the text and character natives share string, casing, and parsing operations.
 import { formatJava, type FormatValues } from '../../interpreter/javaFormatter';
 import { parseHexFloat } from '../../java/hexFloat';
 import { callFunction, runtimeClassOf } from '../dispatch';
@@ -619,6 +619,7 @@ function splitSequence(
 }
 
 /** `split`, which splits at the first delimiter that matches at each position, keeping empty parts. */
+// code-gauge-allow functionCognitiveComplexity 17 -- split result type depends on the delimiter family and the traversal result.
 function splitText(
   frame: Frame,
   value: string,
@@ -627,8 +628,12 @@ function splitText(
 ): KObject {
   if (limit < 0)
     throwError(frame, 'java.lang.IllegalArgumentException', `Limit must be non-negative, but was ${limit}`);
-  if (delimiters.length === 1 && delimiters[0] !== '' && !ignoreCase && limit === 0)
-    return newList(frame, 'ArrayList', value.split(delimiters[0]));
+  const singleDelimiter = delimiters.length === 1 && delimiters[0] !== '';
+  if (singleDelimiter && limit === 1) return newList(frame, 'SingletonList', [value]);
+  if (singleDelimiter && !ignoreCase && limit === 0) {
+    const parts = value.split(delimiters[0]);
+    return newList(frame, parts.length === 1 ? 'SingletonList' : 'ArrayList', parts);
+  }
   const matchers = delimiters.map((delimiter) => textSearch(frame, value, delimiter, ignoreCase, !supplementary));
   const parts: string[] = [];
   let start = 0;
@@ -645,7 +650,7 @@ function splitText(
     index = start + (length === 0 ? 1 : 0);
   }
   parts.push(value.slice(start));
-  return newList(frame, 'ArrayList', parts);
+  return newList(frame, singleDelimiter && parts.length === 1 ? 'SingletonList' : 'ArrayList', parts);
 }
 
 function trimIndent(value: string): string {

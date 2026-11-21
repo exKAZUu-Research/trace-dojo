@@ -78,11 +78,15 @@ function defineArrays(): void {
     return array;
   });
   defineNative('kotlin.collections.MutableList<T>.sortWith(Comparator<in T>)', sortList);
-  defineNative('kotlin.collections.Array<out T>.sortWith(Comparator<in T>)', (frame, array, [comparator]) => {
-    const values = (array as KObject).items as Value[];
-    sortValues(frame, array, comparator, values, 0, values.length);
-    return UNIT;
-  });
+  defineNative(
+    'kotlin.collections.Array<out T>.sortWith(Comparator<in T>, Int, Int)',
+    (frame, array, [comparator, from, to]) => {
+      const values = (array as KObject).items as Value[];
+      checkArrayRange(frame, values.length, from as number, to as number);
+      sortValues(frame, array, comparator, values, from as number, to as number);
+      return UNIT;
+    }
+  );
 }
 
 function sortList(frame: Frame, list: Value, [comparator]: Value[]): Value {
@@ -423,33 +427,67 @@ function defineArrayChanging(receiver: string, kind: PrimitiveKind | 'Boolean' |
     const items = (array as KObject).items as Value[];
     const start = from as number;
     const end = to as number;
-    if (start < 0 || end > items.length)
-      frame.runtime.throwError(
-        frame,
-        'java.lang.ArrayIndexOutOfBoundsException',
-        `Array index out of range: ${start < 0 ? start : end}`
-      );
-    if (start > end)
-      frame.runtime.throwError(frame, 'java.lang.IllegalArgumentException', `fromIndex(${start}) > toIndex(${end})`);
+    checkArrayRange(frame, items.length, start, end);
     items.fill(value, start, end);
     return UNIT;
   });
-  defineNative(`${prefix}.reverse()`, (_frame, array) => {
-    ((array as KObject).items as Value[]).reverse();
-    return UNIT;
-  });
+  defineNative(`${prefix}.reverse(Int, Int)`, reverseArrayRange);
   if (kind !== undefined && kind !== 'Boolean') {
-    defineNative(`${prefix}.sort()`, (_frame, array) => {
-      const items = (array as KObject).items as Value[];
-      const isFloating = kind === 'Double' || kind === 'Float';
-      items.sort((a, b) =>
-        isFloating
-          ? compareDoubles(a as number, b as number)
-          : compareNumbers(a as number | bigint, b as number | bigint)
-      );
-      return UNIT;
-    });
+    defineNative(`${prefix}.sort(Int, Int)`, (frame, array, [from, to]) =>
+      sortPrimitiveArrayRange(frame, array, kind, from as number, to as number)
+    );
   }
+}
+
+function checkArrayRange(frame: Frame, size: number, from: number, to: number): void {
+  if (from > to)
+    frame.runtime.throwError(frame, 'java.lang.IllegalArgumentException', `fromIndex(${from}) > toIndex(${to})`);
+  if (from < 0 || to > size)
+    frame.runtime.throwError(
+      frame,
+      'java.lang.ArrayIndexOutOfBoundsException',
+      `Array index out of range: ${from < 0 ? from : to}`
+    );
+}
+
+function checkKotlinArrayRange(frame: Frame, size: number, from: number, to: number): void {
+  if (from < 0 || to > size)
+    frame.runtime.throwError(
+      frame,
+      'java.lang.IndexOutOfBoundsException',
+      `fromIndex: ${from}, toIndex: ${to}, size: ${size}`
+    );
+  if (from > to)
+    frame.runtime.throwError(frame, 'java.lang.IllegalArgumentException', `fromIndex: ${from} > toIndex: ${to}`);
+}
+
+function reverseArrayRange(frame: Frame, array: Value, [from, to]: Value[]): Value {
+  const items = (array as KObject).items as Value[];
+  const start = from as number;
+  const end = to as number;
+  checkKotlinArrayRange(frame, items.length, start, end);
+  frame.runtime.spend(Math.ceil((end - start) / 64));
+  for (let left = start, right = end - 1; left < right; left++, right--) {
+    const value = items[left];
+    items[left] = items[right];
+    items[right] = value;
+  }
+  return UNIT;
+}
+
+function sortPrimitiveArrayRange(frame: Frame, array: Value, kind: PrimitiveKind, from: number, to: number): Value {
+  const items = (array as KObject).items as Value[];
+  if (kind.startsWith('U')) checkKotlinArrayRange(frame, items.length, from, to);
+  else checkArrayRange(frame, items.length, from, to);
+  if (to - from <= 1) return UNIT;
+  frame.runtime.spend(1 + Math.floor((to - from) / 64));
+  const isFloating = kind === 'Double' || kind === 'Float';
+  const range = from === 0 && to === items.length ? items : items.slice(from, to);
+  range.sort((a, b) =>
+    isFloating ? compareDoubles(a as number, b as number) : compareNumbers(a as number | bigint, b as number | bigint)
+  );
+  if (range !== items) for (const [index, value] of range.entries()) items[from + index] = value;
+  return UNIT;
 }
 
 function copyArrayInto(frame: Frame, kind: PrimitiveKind | 'Boolean' | undefined, source: Value, args: Value[]): Value {

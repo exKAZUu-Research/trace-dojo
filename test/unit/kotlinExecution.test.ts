@@ -1476,6 +1476,85 @@ fun main() {
       '5\nkotlin.Unit\nmatched\nkotlin.Unit\n2\n[kotlin.Unit, kotlin.Unit]\n4\nkotlin.Unit\nkotlin.Unit\nkotlin.Unit\nfinally\nkotlin.Unit\n1\n',
   },
   {
+    name: 'list hashing and searches follow the backing list modification checks',
+    source: `class Key(private val change: () -> Unit, private val number: Int = 1) {
+    override fun hashCode(): Int { change(); return number }
+    override fun equals(other: Any?): Boolean { change(); return true }
+}
+fun main() {
+    for (kind in 0..2) {
+        val root: MutableList<Key> = if (kind == 2) ArrayDeque<Key>() else ArrayList<Key>()
+        root.add(Key({ root.clear() }))
+        root.add(Key({}))
+        val view = if (kind == 1) root.subList(0, 1) else root
+        try { println(view.hashCode()) }
+        catch (e: ConcurrentModificationException) { println("hash detected") }
+    }
+    for (kind in 0..3) {
+        val root = arrayListOf(Key({}), Key({}))
+        val view = if (kind == 3) root else root.subList(0, 2)
+        val key = Key({ root.clear() })
+        try {
+            when (kind) {
+                0 -> println(view.indexOf(key))
+                1 -> println(view.lastIndexOf(key))
+                else -> println(view.contains(key))
+            }
+        } catch (e: ConcurrentModificationException) { println("search detected") }
+    }
+    var list: MutableList<Key>? = null
+    val built = buildList {
+        list = this
+        add(Key({ list!![1] = Key({}, 9) }))
+        add(Key({}, 2))
+        println(hashCode())
+    }
+    println(built.size)
+}`,
+    stdout:
+      'hash detected\nhash detected\nhash detected\nsearch detected\nsearch detected\nsearch detected\ntrue\n1001\n2\n',
+  },
+  {
+    name: 'array ranges use JVM sorting and bounds, and unsplit results preserve list mutability',
+    source: `@OptIn(ExperimentalUnsignedTypes::class)
+fun main() {
+    val numbers = intArrayOf(3, 1, 2, 0)
+    numbers.sort(toIndex = 3)
+    println(numbers.toList())
+    numbers.sortDescending(0, 3)
+    println(numbers.toList())
+    val letters = charArrayOf('d', 'a', 'b', 'c')
+    letters.reverse(1, 4)
+    println(letters.concatToString())
+    letters.sort(1, 4)
+    println(letters.concatToString())
+    val unsigned = uintArrayOf(5u, 8u, 2u, 1u)
+    unsigned.sortDescending(1, 4)
+    println(unsigned.toList())
+    val words = arrayOf("b", "A", "a", "c")
+    words.sortWith(Comparator { a, b -> b.compareTo(a, ignoreCase = true) }, 0, 3)
+    println(words.toList())
+    words.sort(1, 4)
+    println(words.toList())
+    words.sortDescending(0, 3)
+    println(words.toList())
+    try { numbers.sort(0, 7) }
+    catch (e: Exception) { println(e) }
+    try { numbers.reverse(0, 7) }
+    catch (e: Exception) { println(e) }
+    try { numbers.sort(7, -1) }
+    catch (e: Exception) { println(e) }
+    for (parts in listOf("hello".split(','), "a,b".split(",", limit = 1), "ab".split(',', '.'), "a,b".split(','))) {
+        try {
+            (parts as MutableList<String>).add("x")
+            println(parts)
+        } catch (e: UnsupportedOperationException) { println("fixed") }
+    }
+}`,
+    stdout:
+      '[1, 2, 3, 0]\n[3, 2, 1, 0]\ndcba\ndabc\n[5, 8, 2, 1]\n[b, A, a, c]\n[b, A, a, c]\n[b, a, A, c]\njava.lang.ArrayIndexOutOfBoundsException: Array index out of range: 7\njava.lang.IndexOutOfBoundsException: fromIndex: 0, toIndex: 7, size: 4\njava.lang.IllegalArgumentException: fromIndex(7) > toIndex(-1)\nfixed\nfixed\n[ab, x]\n[a, b, x]\n',
+  },
+  {
     name: 'exactly-once scope lambdas initialize deferred vals',
     source: `fun main() {
     val first: Int
