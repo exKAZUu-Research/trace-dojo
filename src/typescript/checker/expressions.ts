@@ -442,17 +442,14 @@ export class ExpressionChecker {
     contextual: Type | undefined,
     typeQuery: boolean
   ): Type {
-    const unassignedAuto =
-      !entry.assigned && this.c.assignments.isAutoTyped(symbol) && isIntrinsic(entry.type, 'undefined');
     if (
       !typeQuery &&
       !entry.assigned &&
-      (unassignedAuto || this.needsDefiniteAssignment(symbol, declared)) &&
+      this.needsDefiniteAssignment(symbol, declared) &&
       assignmentKind(node) !== 'definite' &&
       node.parent?.type !== 'non_null_expression'
     ) {
       this.c.error(node, `変数 ${symbol.name} は値を代入する前に使われています。`);
-      if (unassignedAuto) return errorType;
     }
     // As TypeScript's `getNarrowableTypeForReference`, the narrowed constraint stands for the value where only its
     // constraint matters: where its members are read, or where a type without type parameters is expected.

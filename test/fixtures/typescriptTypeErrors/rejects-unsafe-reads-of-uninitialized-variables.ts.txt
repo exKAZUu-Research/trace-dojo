@@ -1,0 +1,37 @@
+let scriptValue;
+console.log(scriptValue);
+const wrong: number = scriptValue;
+function direct() {
+  let item;
+  console.log(item);
+  item.toFixed();
+}
+function viaCallback() {
+  let total;
+  [1, 2, 3].forEach((value) => { total = value; });
+  console.log(total);
+  const forced: number = total;
+  return forced;
+}
+function localBranch(on: boolean) {
+  let item;
+  if (on) item = 1;
+  return item.toFixed();
+}
+function fromInitializer() {
+  let item = undefined;
+  console.log(item);
+  const forced: number = item;
+  return forced;
+}
+function declared() {
+  let item: number;
+  console.log(item);
+}
+function uncalled() {
+  let item;
+  function change() { item = 3; }
+  console.log(item);
+  const forced: number = item;
+  return forced;
+}
