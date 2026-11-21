@@ -1144,6 +1144,9 @@ export class Checker {
   }
 
   private requireDyn(type: Type, target: Extract<Type, { kind: 'dyn' }>, span: Span): void {
+    // A trait object is made from a value of a sized type, not from a `str` or a slice.
+    const source = normalize(shallow(type));
+    if (source.kind === 'str' || source.kind === 'slice') this.requireTrait(source, 'Sized', span);
     for (const trait of target.autoTraits ?? []) this.require(type, { trait, args: [] }, span);
     this.require(type, target.trait, span);
   }

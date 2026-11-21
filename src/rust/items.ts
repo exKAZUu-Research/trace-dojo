@@ -54,6 +54,22 @@ import {
   type VariantDef,
 } from './types';
 
+/**
+ * The type parameters a generics list declares. A name may be declared once, in the list and in the item around it
+ * (E0403): a later one would hide the earlier one from the lookup by name.
+ */
+function declareTypeParams(generics: Generics, enclosing: readonly TypeParam[] = []): TypeParam[] {
+  const names = new Set<string>();
+  for (const param of generics.params) {
+    if (enclosing.some((outer) => outer.name === param.name)) {
+      compileError(param.span, `型引数 ${param.name} は、impl の型引数と同じ名前です。`);
+    }
+    if (names.has(param.name)) compileError(param.span, `型引数 ${param.name} が2回宣言されています。`);
+    names.add(param.name);
+  }
+  return generics.params.map((param) => newTypeParam(param.name));
+}
+
 export function compileError(span: Span, message: string): never {
   throw new CompileError([{ row: span.row, message }]);
 }
@@ -292,7 +308,7 @@ export class ItemCollector {
         }
         case 'typeAlias': {
           let resolved: Type | undefined;
-          const params = item.generics.params.map((param) => newTypeParam(param.name));
+          const params = declareTypeParams(item.generics);
           const scope: TypeScope = {
             module,
             params: new Map(params.map((param) => [param.name, param])),
@@ -333,7 +349,7 @@ export class ItemCollector {
       name: item.name,
       path: module.isStd ? item.name : `${module.path}::${item.name}`,
       kind: 'struct',
-      params: item.generics.params.map((param) => newTypeParam(param.name)),
+      params: declareTypeParams(item.generics),
       variants: [],
       writtenFields: item.fields,
       derives: new Set(item.attrs.derives.map((derive) => derive.name)),
@@ -377,7 +393,7 @@ export class ItemCollector {
       name: item.name,
       path: module.isStd ? item.name : `${module.path}::${item.name}`,
       kind: 'enum',
-      params: item.generics.params.map((param) => newTypeParam(param.name)),
+      params: declareTypeParams(item.generics),
       variants: [],
       derives: new Set(item.attrs.derives.map((derive) => derive.name)),
       span: item.span,
@@ -462,7 +478,7 @@ export class ItemCollector {
       name: item.name,
       path: module.isStd && module.path !== 'std::io' ? item.name : `${module.path}::${item.name}`,
       span: item.span,
-      params: item.generics.params.map((param) => newTypeParam(param.name)),
+      params: declareTypeParams(item.generics),
       self,
       methods: new Map(),
       supertraits: [],
@@ -505,7 +521,7 @@ export class ItemCollector {
   // code-gauge-allow functionNcss 33 -- Follows Rust's name resolution case by case.
   private implItem(item: ImplItem, module: Module): void {
     const impl: ImplDef = {
-      params: item.generics.params.map((param) => newTypeParam(param.name)),
+      params: declareTypeParams(item.generics),
       trait: undefined,
       selfType: UNIT,
       methods: new Map(),
@@ -625,7 +641,7 @@ export class ItemCollector {
 
   fnDef(item: FnItem, module: Module, impl: ImplDef | undefined, trait: TraitDef | undefined): FnDef {
     const parentParams = impl?.params ?? (trait ? [...trait.params] : []);
-    const own = item.generics.params.map((param) => newTypeParam(param.name));
+    const own = declareTypeParams(item.generics, parentParams);
     const def: FnDef = {
       name: item.name,
       params: [...parentParams, ...own],
@@ -657,10 +673,6 @@ export class ItemCollector {
     const assocParams: TypeParam[] = [];
     const scope: TypeScope = { module, params, selfType, assocParams };
     for (const [index, param] of item.generics.params.entries()) {
-      // A method's type parameter may not shadow its impl's.
-      if (params.get(param.name) !== own[index] && impl?.params.some((p) => p.name === param.name)) {
-        compileError(param.span, `型引数 ${param.name} は、impl の型引数と同じ名前です。`);
-      }
       own[index].bounds = param.bounds.map((bound) => lowerBound(bound, scope, { kind: 'param', param: own[index] }));
     }
     addWherePredicates(item.generics, scope, (param, bounds) => {

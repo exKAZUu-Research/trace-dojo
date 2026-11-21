@@ -8043,3 +8043,44 @@ test('a loop body must not have a value, and deque insertions count against the 
     /^memory allocation of \d+ bytes failed\n/
   );
 });
+
+test('iterators of numbers compare with eq and ne, and generic items keep their own parameter names', () => {
+  const program = `struct Wrap<T>(T);
+impl<T> Wrap<T> { fn pass<U>(&self, x: U) -> U { x } }
+fn main() {
+    let a = vec![1, 2];
+    let b = vec![1, 2];
+    let f = vec![1.5];
+    println!("{} {} {}", a.iter().eq(b.iter()), a.iter().ne(b.iter()), f.iter().eq(f.iter()));
+    println!("{} {} {}", a.clone().into_iter().eq(b.clone()), Some(1).iter().eq(Some(2).iter()), Wrap(1).pass("x"));
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'true false true\ntrue false x\n',
+  });
+});
+
+test.each([
+  ['a type parameter declared twice', 'fn twice<T, T>() {}', '型引数 T が2回'],
+  [
+    "a method parameter named like its impl's",
+    'struct W<T>(T);\nimpl<T> W<T> { fn f<T>(&self, _x: T) {} }',
+    'impl の型引数と同じ名前',
+  ],
+  [
+    'a trait object made from a slice',
+    'fn show() { let s: &[i32] = &[1, 2]; let x: &dyn std::fmt::Debug = s; }',
+    '[i32]',
+  ],
+  ['a trait object made from a str', 'fn show() { let s: &str = "hi"; let x: &dyn std::fmt::Display = s; }', 'str'],
+  [
+    'iterators of a type without PartialEq compared',
+    'struct X;\nfn same() { let a = vec![X]; a.iter().eq(a.iter()); }',
+    '比べられません',
+  ],
+])('rejects %s', (_name, items, message) => {
+  expect(executeProgram('rust', rustMain('', items))).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ message: expect.stringContaining(message) })],
+  });
+});

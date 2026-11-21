@@ -154,7 +154,6 @@ export function toIterator(value: Value, from: Type): Value {
 }
 
 /** The iterator of a standard collection, of its elements (`value`) or of references to them (`ref`, `mut`). */
-// code-gauge-allow functionCognitiveComplexity 18 -- Each collection determines its yielded values and borrow mode.
 function collectionIter(type: Type & { kind: 'adt' }, value: Value, mode: 'value' | 'ref' | 'mut'): Value | undefined {
   switch (type.def.builtin) {
     case 'Vec':
@@ -1121,6 +1120,24 @@ function tryFoldItems(ctx: NativeContext, iter: IterValue, accumulator: Value, c
   }
 }
 
+/** `Iterator::eq`, which stops at the first difference. */
+function iteratorsEqual(ctx: NativeContext, self: Value, other: Value): boolean {
+  const a = iterOf(self);
+  const otherType = ctx.typeArgs[2];
+  const b = iterOf(toIterator(other, otherType));
+  const item = intoIterItem(otherType)!;
+  for (;;) {
+    ctx.runtime.spend();
+    const x = nextOf(a);
+    if (x === DONE) return nextOf(b) === DONE;
+    const equal = ctx.runtime.withRoots([x], () => {
+      const y = nextOf(b);
+      return y !== DONE && ctx.runtime.withRoots([y], () => valuesEqual(ctx.typeArgs[0], x, y, item));
+    });
+    if (!equal) return false;
+  }
+}
+
 // code-gauge-allow functionCognitiveComplexity 16 -- Exhaustion and unordered pairs terminate lexicographic comparison.
 function iteratorOrder(ctx: NativeContext, first: IterValue, second: IterValue, total = false): number | undefined {
   const item = ctx.typeArgs[0];
@@ -1248,23 +1265,8 @@ define({
       return [collectInto(ctx, yes, type, ctx.typeArgs[0]), collectInto(ctx, no, type, ctx.typeArgs[0])];
     });
   },
-  'IterImpl<_, _>::eq': ([self, other], ctx) => {
-    // `eq` stops at the first difference.
-    const a = iterOf(self);
-    const otherType = ctx.typeArgs[2];
-    const b = iterOf(toIterator(other, otherType));
-    const item = intoIterItem(otherType)!;
-    for (;;) {
-      ctx.runtime.spend();
-      const x = nextOf(a);
-      if (x === DONE) return nextOf(b) === DONE;
-      const equal = ctx.runtime.withRoots([x], () => {
-        const y = nextOf(b);
-        return y !== DONE && ctx.runtime.withRoots([y], () => valuesEqual(ctx.typeArgs[0], x, y, item));
-      });
-      if (!equal) return false;
-    }
-  },
+  'IterImpl<_, _>::eq': ([self, other], ctx) => iteratorsEqual(ctx, self, other),
+  'IterImpl<_, _>::ne': ([self, other], ctx) => !iteratorsEqual(ctx, self, other),
   'IterImpl<_, _>::cmp': ([self, other], ctx) =>
     ordering(ctx, iteratorOrder(ctx, iterOf(self), iterOf(other), true) ?? 0),
   'IterImpl<_, _>::partial_cmp': ([self, other], ctx) => {

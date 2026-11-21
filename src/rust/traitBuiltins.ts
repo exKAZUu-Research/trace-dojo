@@ -1,6 +1,6 @@
 // code-gauge-allow-file fileNcss 547 -- One rule per trait of the standard library.
 import { collectionKeyAnswer } from './collectionBounds';
-import { normalize } from './infer';
+import { isPseudo, normalize } from './infer';
 import { debugOperands, supportsDebug } from './iterDebug';
 import { dynIteratorTarget, intoIterItem } from './iterTypes';
 import { arrayTryFrom, conversionExists, inferNumericSource, intoConversion } from './traitConversions';
@@ -352,6 +352,8 @@ function comparison(goal: Goal): Answer {
 
 function comparisonWithRhs({ solver, t, ref, name }: Goal, expected: Type): Answer {
   const rhs = normalize(shallow(expected));
+  // The item of an iterator not known yet (`IntoItem<_>`) is decided once that iterator's type is.
+  if (rhs.kind === 'adt' && isPseudo(rhs.def)) return 'unknown';
   if (t.kind === 'ref' && rhs.kind === 'ref') {
     if (name === 'PartialOrd' && t.mutable && !rhs.mutable) return 'no';
     return solver.implements(t.target, { trait: ref.trait, args: [rhs.target] });

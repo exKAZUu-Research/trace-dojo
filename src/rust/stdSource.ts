@@ -1086,6 +1086,7 @@ pub mod iter {
         pub fn partition<B: Extend<T>, F: FnMut(&T) -> bool>(self, f: F) -> (B, B);
         pub fn unzip<A, B, FromA: Default + Extend<A>, FromB: Default + Extend<B>>(self) -> (FromA, FromB) where T: PairOf<A, B>;
         pub fn eq<I: IntoIterator>(self, other: I) -> bool where T: PartialEq<IntoItem<I>>;
+        pub fn ne<I: IntoIterator>(self, other: I) -> bool where T: PartialEq<IntoItem<I>>;
         pub fn cmp<S2>(self, other: IterImpl<T, S2>) -> Ordering where T: Ord;
         pub fn partial_cmp<U, S2>(self, other: IterImpl<U, S2>) -> Option<Ordering> where T: PartialOrd<U>;
         pub fn lt<U, S2>(self, other: IterImpl<U, S2>) -> bool where T: PartialOrd<U>;
