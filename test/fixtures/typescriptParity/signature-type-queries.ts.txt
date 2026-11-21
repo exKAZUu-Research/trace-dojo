@@ -42,9 +42,9 @@ console.log(declaration(1), numberResult(), arrow(2), expression(3), object.meth
   new Fields().method(5), new Overloads().method(6), afterAssignment('text'));
 callback(7);
 local();
-let stable: string | number = 'module';
-var moduleVar: string | number = 'module';
-const arrowCapture = (argument: typeof stable, vari: typeof moduleVar) => [argument, vari];
+const stable: string | number = 'module';
+var scriptVar: string | number = 'module';
+const arrowCapture = (argument: typeof stable, vari: typeof scriptVar) => [argument, vari];
 const withDefault = function(argument: typeof stable = 'default') { return argument; };
 const nestedMethod = {nested: {method(argument: typeof stable) { return argument; }}};
 const ClassExpression = class {method(argument: typeof stable) { return argument; }};
@@ -68,3 +68,15 @@ if (typeof record.member === 'string') {
   record.member = 10;
   console.log(method.call('captured'));
 }
+let scriptValue: string | number = 'text';
+const scriptArrow = (argument: typeof scriptValue) => argument;
+const scriptExpression = function(argument: typeof scriptValue) { return argument; };
+const scriptObject = {method(argument: typeof scriptValue) { return argument; }};
+const ScriptClass = class {method(argument: typeof scriptValue) { return argument; }};
+const scriptResult = (): typeof scriptValue => 10;
+const indirect = () => {
+  const inner = (argument: typeof scriptValue) => argument;
+  return inner(11);
+};
+console.log(scriptArrow(1), scriptExpression(2), scriptObject.method(3),
+  new ScriptClass().method(4), scriptResult(), indirect());

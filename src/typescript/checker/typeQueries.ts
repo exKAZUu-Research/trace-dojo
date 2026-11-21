@@ -19,7 +19,9 @@ export function checkTypeQuery(c: Checker, node: TreeNode, identifier: QueryTarg
 export function queryVariableEntry(c: Checker, node: TreeNode, symbol: Sym, key: string): FlowEntry | undefined {
   const capture =
     symbol.valueKind === 'const' ||
-    (['let', 'parameter', 'catch'].includes(symbol.valueKind ?? '') && symbol.lastAssignment < node.startIndex);
+    (symbol.scope !== c.binder.moduleScope &&
+      ['let', 'parameter', 'catch'].includes(symbol.valueKind ?? '') &&
+      symbol.lastAssignment < node.startIndex);
   return queryEntry(c, key, capture);
 }
 
