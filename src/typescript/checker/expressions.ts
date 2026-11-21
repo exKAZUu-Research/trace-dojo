@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 559 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
+// code-gauge-allow-file fileNcss 560 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { assertedExpression } from '../erasedSyntax';
@@ -21,6 +21,7 @@ import {
   isImmediatelyInvoked,
   named,
   numberValue,
+  skipParentheses,
   stringValue,
   templateFragmentText,
 } from './syntax';
@@ -310,7 +311,12 @@ export class ExpressionChecker {
 
   /** The type of a reference without reporting errors, for narrowing it. */
   checkReferenceSilently(node: TreeNode): Type {
-    return this.c.silently(() => this.check(node));
+    const expression = skipParentheses(node);
+    return this.c.silently(() =>
+      expression.type === 'shorthand_property_identifier_pattern' || expression.type === 'shorthand_property_identifier'
+        ? this.identifier(expression)
+        : this.check(node)
+    );
   }
 
   /** The type of a parameter's default value, widened, in the context of the function. */
