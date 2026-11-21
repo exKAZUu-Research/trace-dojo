@@ -319,5 +319,3 @@ export interface CallExpression {
   /** A lambda written after the parentheses, which is the last argument. */
   trailingLambda: LambdaExpression | undefined;
 }
-
-export type ExpressionKind = Expression['kind'];

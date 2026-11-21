@@ -1,7 +1,15 @@
 // code-gauge-allow-file fileNcss 476 -- the compiler of one area of Kotlin, whose parts call each other closely.
 import { type ArgumentEvaluation, argumentEvaluator, expectedArgumentType, firstAttempts } from './argumentTypes';
 import type { Expression, LambdaExpression } from './ast';
-import { type Compiled, type Eval, FunctionContext, reprOf, type Scope, typeMismatchMessage } from './compilerBase';
+import {
+  type Compiled,
+  type Eval,
+  FunctionContext,
+  nullableReceiverMessage,
+  reprOf,
+  type Scope,
+  typeMismatchMessage,
+} from './compilerBase';
 import { CompilerCore } from './compilerCore';
 import { callFunction, parameterReprs, receiverRepr, returnRepr } from './dispatch';
 import { literalFits } from './literals';
@@ -838,10 +846,7 @@ export abstract class CallCompiler extends CompilerCore {
         const receiverType = substitute(symbol.extensionReceiver, attempt.substitution);
         if (!isSubtype(receiver.type, receiverType)) {
           if (isNullable(resolved(receiver.type)) && isSubtype(receiver.type, nullable(receiverType))) {
-            this.error(
-              row,
-              `null かもしれない ${typeToString(resolved(receiver.type))} の値には、?. か !! を使ってください。`
-            );
+            this.error(row, nullableReceiverMessage(receiver.type));
           }
           this.error(row, `${typeToString(resolved(receiver.type))} には ${name} がありません。`);
         }

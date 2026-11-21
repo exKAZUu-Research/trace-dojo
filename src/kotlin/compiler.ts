@@ -70,14 +70,6 @@ function samImplementation(core: Core, cls: ClassSymbol, method: FunctionSymbol)
   return implementation;
 }
 
-/** What the standard library's prelude provides to every program. */
-export interface LibraryPackages {
-  packages: Map<string, PackageScope>;
-  core: Core;
-  globalCount: number;
-  initializers: { row: number; run: (frame: Frame) => void }[];
-}
-
 /** A program ready to run. */
 export interface CompiledProgram {
   main: FunctionSymbol;

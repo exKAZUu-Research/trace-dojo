@@ -2,7 +2,6 @@ import { CompileError } from '../interpreter/diagnostics';
 import type { Block, Expression, TypeRef } from './ast';
 import type { IntegerLiteral } from './literals';
 import type { Frame, FunctionInfo, LocalInfo } from './runtime';
-import { UNASSIGNED } from './runtime';
 import {
   ClassSymbol,
   type FunctionSymbol,
@@ -11,16 +10,7 @@ import {
   VariableSymbol,
 } from './symbols';
 import { anyType, isSubtype } from './typeRelations';
-import {
-  type ClassType,
-  isNullable,
-  type KType,
-  nonNull,
-  NOTHING,
-  resolved,
-  type TypeArgument,
-  typeToString,
-} from './types';
+import { type ClassType, type KType, NOTHING, resolved, type TypeArgument, typeToString } from './types';
 import { box, Boxed, Cell, type PrimitiveKind, type Value } from './values';
 
 export type Eval = (frame: Frame) => Value;
@@ -331,28 +321,11 @@ export function readSlot(slot: unknown): Value {
   return slot instanceof Cell ? slot.value : (slot as Value);
 }
 
-export function isUnassigned(slot: unknown): boolean {
-  return slot === UNASSIGNED;
-}
-
 /** The type of the elements a class type's argument at `index` holds, with a star read as `Any?`. */
 export function typeArgument(type: ClassType, index: number): KType {
   const argument: TypeArgument | undefined = type.args[index];
   if (!argument || argument.variance === 'star') return anyType(true);
   return argument.type;
-}
-
-export function isNothingType(type: KType): boolean {
-  const actual = resolved(type);
-  return actual.kind === 'nothing' && !actual.nullable;
-}
-
-export function nonNullType(type: KType): KType {
-  return nonNull(resolved(type));
-}
-
-export function mayBeNull(type: KType): boolean {
-  return isNullable(resolved(type));
 }
 
 export { NOTHING };

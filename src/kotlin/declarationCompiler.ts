@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 837 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss 810 -- The declaration compiler shares symbol and class-linking logic.
 import type {
   ClassDecl,
   ClassParameterDecl,
@@ -13,14 +13,14 @@ import type {
   SuperSpec,
   TypeParameterDecl,
 } from './ast';
-import { type Compiled, convertRepr, FunctionContext, PackageScope, type Repr, Scope } from './compilerBase';
-import { DEFAULT_IMPORTS, type FileContext } from './compilerCore';
+import { type Compiled, convertRepr, FunctionContext, type PackageScope, type Repr, Scope } from './compilerBase';
+import type { FileContext } from './compilerCore';
 import { unavailableMessage } from './convertSupport';
-import { callFunction, isVirtual, parameterReprs, propertyRepr, receiverRepr } from './dispatch';
-import { defaultToString, hashOf, identityHash, stringHash, stringOf, valueEquals } from './format';
+import { callFunction, isVirtual, propertyRepr } from './dispatch';
+import { hashOf, stringHash, stringOf, valueEquals } from './format';
 import { type NativeFunction, type NativeProperty, typeRefText } from './nativeTypes';
 import { toInt32 } from './operators';
-import { type Frame, MISSING, UNASSIGNED } from './runtime';
+import { type Frame, MISSING } from './runtime';
 import { StatementCompiler } from './statementCompiler';
 import {
   ClassSymbol,
@@ -32,17 +32,8 @@ import {
   TypeParameterSymbol,
   type Visibility,
 } from './symbols';
-import { anyType, asSuper, isSameType, isSubtype } from './typeRelations';
-import {
-  type ClassType,
-  type KType,
-  NOTHING,
-  nullable,
-  resolved,
-  substitute,
-  type Substitution,
-  typeToString,
-} from './types';
+import { anyType, isSameType, isSubtype } from './typeRelations';
+import { type ClassType, type KType, NOTHING, resolved, substitute, type Substitution, typeToString } from './types';
 import { Boxed, KObject, type Value } from './values';
 
 export interface ClassEntry {
@@ -83,13 +74,6 @@ export interface PropertyEntry {
   delegateSlot: number | undefined;
   /** For a top-level property, the global that holds its delegate. */
   delegateGlobal?: number;
-}
-
-/** What a batch of files compiled into, for the runtime to start from. */
-export interface CompiledFiles {
-  /** Initializes the top-level properties of the files, in order, when a run starts. */
-  initializers: { row: number; isConstant: boolean; run: (frame: Frame) => void }[];
-  globalCount: number;
 }
 
 const ACCESS_KEYWORDS: Visibility[] = ['private', 'protected', 'internal', 'public'];
@@ -1179,14 +1163,6 @@ export abstract class DeclarationCompiler extends StatementCompiler {
 
   // Helpers for subclasses.
 
-  protected declaredFunctionEntry(symbol: FunctionSymbol): FunctionEntry | undefined {
-    return this.entryOfFunction.get(symbol);
-  }
-
-  protected classEntryOf(symbol: ClassSymbol): ClassEntry | undefined {
-    return this.entryOfClass.get(symbol);
-  }
-
   protected propertyReprOf(symbol: PropertySymbol): Repr {
     return propertyRepr(symbol);
   }
@@ -1202,56 +1178,16 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     };
   }
 
-  protected receiverReprOf(symbol: FunctionSymbol): Repr {
-    return receiverRepr(symbol);
-  }
-
-  protected parameterReprsOf(symbol: FunctionSymbol): Repr[] {
-    return parameterReprs(symbol);
-  }
-
-  protected defaultToStringOf(value: Value): string {
-    return defaultToString(value);
-  }
-
-  protected identityHashOf(value: Value): number {
-    return identityHash(value);
-  }
-
   protected unboxed(value: Value): Value {
     return value instanceof Boxed ? value.value : value;
-  }
-
-  protected nullableOf(type: KType): KType {
-    return nullable(type);
   }
 
   protected nothing(): KType {
     return NOTHING;
   }
 
-  protected asSuperType(type: ClassType, cls: ClassSymbol): ClassType | undefined {
-    return asSuper(type, cls);
-  }
-
   protected describe(type: KType): string {
     return typeToString(type);
-  }
-
-  protected defaultImports(): string[] {
-    return DEFAULT_IMPORTS;
-  }
-
-  protected newPackageScope(): PackageScope {
-    return new PackageScope();
-  }
-
-  protected unassigned(): unknown {
-    return UNASSIGNED;
-  }
-
-  protected declarationKinds(declaration: Declaration): string {
-    return declaration.kind;
   }
 }
 

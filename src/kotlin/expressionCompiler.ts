@@ -7,6 +7,7 @@ import {
   type Eval,
   type Flow,
   FunctionContext,
+  nullableReceiverMessage,
   type PackageScope,
   ReceiverSymbol,
   type Repr,
@@ -865,10 +866,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
   /** Rejects a member access on a value that may be `null`, unless the member accepts `null`. */
   protected requireNonNullReceiver(receiver: Compiled, row: number, acceptsNull: boolean): void {
     if (!acceptsNull && isNullable(resolved(receiver.type))) {
-      this.error(
-        row,
-        `null かもしれない ${typeToString(resolved(receiver.type))} の値には、?. か !! を使ってください。`
-      );
+      this.error(row, nullableReceiverMessage(receiver.type));
     }
   }
 

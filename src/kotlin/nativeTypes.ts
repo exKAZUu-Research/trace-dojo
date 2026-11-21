@@ -1,7 +1,6 @@
 import type { TypeRef } from './ast';
 import type { Frame } from './runtime';
 import type { ClassSymbol, FunctionSymbol, PropertySymbol } from './symbols';
-import type { KType } from './types';
 import type { Value } from './values';
 
 /**
@@ -40,5 +39,3 @@ export function typeRefText(ref: TypeRef): string {
   });
   return `${parts.join('.')}${ref.nullable ? '?' : ''}`;
 }
-
-export type ReifiedTypes = KType[];

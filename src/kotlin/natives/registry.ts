@@ -12,10 +12,6 @@ export function defineNative(key: string, native: NativeFunction): void {
   nativeFunctions.set(key, native);
 }
 
-export function defineNatives(natives: Record<string, NativeFunction>): void {
-  for (const [key, native] of Object.entries(natives)) defineNative(key, native);
-}
-
 export function defineNativeProperty(key: string, get: NativeProperty['get'], set?: NativeProperty['set']): void {
   nativeProperties.set(key, { get, set });
 }
