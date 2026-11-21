@@ -8444,3 +8444,12 @@ test('inclusive ranges have their real size, so a vector of them sorts', () => {
     println!("{:?} {}", ranges, std::mem::size_of::<std::ops::RangeInclusive<i32>>());`);
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '[1..=2, 4..=5] 12\n' });
 });
+
+test('a tree of calls whose bodies are only calls stops at the run limits', () => {
+  const levels = Array.from(
+    { length: 20 },
+    (_, index) => `fn f${index + 1}(t: i32) -> i32 { f${index}(f${index}(t)) }`
+  );
+  const program = rustMain('    println!("{}", f20(1));', ['fn f0(t: i32) -> i32 { t }', ...levels].join('\n'));
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'limitExceeded' });
+});

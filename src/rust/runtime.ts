@@ -238,6 +238,8 @@ export class Runtime implements TracedRuntime<Frame> {
 
   pushFrame(frame: Frame): void {
     if (this.frames.length >= LIMITS.maxCallDepth) throw new StackOverflow();
+    // A body of calls alone charges nothing else, so each call spends.
+    this.spend();
     this.frames.push(frame);
   }
 
