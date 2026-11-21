@@ -508,10 +508,16 @@ const stringNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
   push: pushString,
   pop: ([self], ctx) => {
     const place = placeOf(self);
-    const chars = [...textOf(place)];
-    const last = chars.pop();
-    place.set(chars.join(''));
-    return option(ctx, last, last !== undefined);
+    const value = place.get();
+    const text = textOf(value);
+    const end = text.length;
+    if (end === 0) return none(ctx);
+    const previous = text.codePointAt(end - 2) ?? 0;
+    const start = end - (previous > 0xff_ff ? 2 : 1);
+    const last = text.slice(start);
+    const remaining = stringByteLength(value) - byteLength(last);
+    place.set(madeString(text.slice(0, start), stringCapacity(value), remaining));
+    return some(ctx, last);
   },
   insert: ([self, idx, c], ctx) => {
     const place = placeOf(self);

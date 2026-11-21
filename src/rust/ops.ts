@@ -1,5 +1,5 @@
 import type { Span } from './ast';
-// code-gauge-allow-file fileNcss 516 -- Keeps type-directed arithmetic, comparison, and copying with their shared runtime hooks.
+// code-gauge-allow-file fileNcss 529 -- Keeps type-directed arithmetic, comparison, and copying with their shared runtime hooks.
 import { bigintToF32 } from './floatFormat';
 import { normalize } from './infer';
 import { RustPanic } from './runtime';
@@ -244,7 +244,7 @@ export function valuesEqual(type: Type, a: Value, b: Value, rhs: Type = type): b
     }
     case 'array':
     case 'slice': {
-      return equalSequence(t.elem, x, y, right);
+      return compareSequence(t.elem, x, y, right);
     }
     case 'adt': {
       return adtEqual(t, x, y, right);
@@ -270,6 +270,15 @@ export function valuesUnequal(type: Type, a: Value, b: Value, rhs: Type = type):
       return valuesUnequal(t.args[0], leftValue, rightValue, right.args[0]);
     }
   }
+  if (t.kind === 'array' || t.kind === 'slice') return compareSequence(t.elem, leftValue, rightValue, right, 'ne');
+  if (t.kind === 'adt' && (t.def.builtin === 'Vec' || t.def.builtin === 'VecDeque')) {
+    return compareSequence(t.args[0], leftValue, rightValue, right, 'ne');
+  }
+  if (t.kind === 'tuple' && right.kind === 'tuple') {
+    return t.elems.some((elem, index) =>
+      valuesUnequal(elem, (leftValue as Value[])[index], (rightValue as Value[])[index], right.elems[index])
+    );
+  }
   return !valuesEqual(t, leftValue, rightValue, right);
 }
 
@@ -290,7 +299,7 @@ function adtEqual(t: Type & { kind: 'adt' }, x: Value, y: Value, rhs: Type): boo
     }
     case 'Vec':
     case 'VecDeque': {
-      return equalSequence(t.args[0], x, y, rhs);
+      return compareSequence(t.args[0], x, y, rhs);
     }
     case 'Box':
     case 'Reverse': {
@@ -339,11 +348,17 @@ function adtEqual(t: Type & { kind: 'adt' }, x: Value, y: Value, rhs: Type): boo
   }
 }
 
-function equalSequence(elem: Type, left: Value, right: Value, rhs: Type): boolean {
+function compareSequence(elem: Type, left: Value, right: Value, rhs: Type, method: 'eq' | 'ne' = 'eq'): boolean {
   const xs = sliceItems(left);
   const ys = sliceItems(right);
+  const unequal = method === 'ne';
+  if (xs.length !== ys.length) return unequal;
   const other = rhs.kind === 'array' || rhs.kind === 'slice' ? rhs.elem : rhs.kind === 'adt' ? rhs.args[0] : elem;
-  return xs.length === ys.length && xs.every((item, index) => valuesEqual(elem, item, ys[index], other));
+  const compare = unequal ? valuesUnequal : valuesEqual;
+  for (const [index, item] of xs.entries()) {
+    if (compare(elem, item, ys[index], other) === unequal) return unequal;
+  }
+  return !unequal;
 }
 
 function mapsEqual([keyType, valueType]: Type[], left: MapValue, right: MapValue): boolean {

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 617 -- Shares Rust constant propagation between diagnostics and pattern coverage.
+// code-gauge-allow-file fileNcss 619 -- Shares Rust constant propagation between diagnostics and pattern coverage.
 
 import type { ExecutionBudget } from '../interpreter/limits';
 import type { Annotations, LocalVar, PathRes } from './annotations';
@@ -352,6 +352,7 @@ export class ConstLint {
     res: Extract<PathRes, { kind: 'ctor' }>,
     fields: Iterable<readonly [string, Known | undefined]>
   ): Aggregate {
+    if (!this.patternEvaluation && res.def.kind === 'enum') return aggregate([], `v${res.variant}`);
     const map = new Map(fields);
     const variant = res.def.variants[res.variant];
     return aggregate(

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 836 -- The checker core owns body, entry point, and type obligations.
+// code-gauge-allow-file fileNcss 847 -- The checker core owns body, entry point, and type obligations.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ExecutionBudget } from '../interpreter/limits';
 import { Annotations, type Coercion, type FnContext, type LocalVar, type PathRes } from './annotations';
@@ -145,6 +145,7 @@ export class Checker {
       if ((def.module as Module | undefined)?.isStd) continue;
       for (const variant of def.variants) {
         for (const [index, field] of variant.fields.entries()) {
+          checkFieldLifetimes(field.type, field.span, def.lifetimeParams ?? []);
           const sized = def.kind === 'enum' || index + 1 < variant.fields.length;
           if (sized) this.checkSizedWrittenType(field.type, field.span);
           else this.checkWrittenType(field.type, field.span);
@@ -1229,6 +1230,20 @@ function* adtArgumentBounds(def: AdtDef, args: Type[]): Iterable<[Type, TraitRef
   for (const [index, param] of def.params.entries()) {
     for (const bound of param.bounds) yield [args[index], substituteTraitRef(bound, subst)];
   }
+}
+
+function checkFieldLifetimes(type: Type, span: Span, declared: string[]): void {
+  const t = shallow(type);
+  if (t.kind === 'ref') {
+    if (!t.lifetime || t.lifetime === "'_") {
+      compileError(span, 'フィールドの参照型には、ライフタイムを書いてください。');
+    }
+    if (t.lifetime !== "'static" && !declared.includes(t.lifetime)) {
+      compileError(span, `ライフタイム ${t.lifetime} が宣言されていません。`);
+    }
+  }
+  const stored = t.kind === 'dyn' ? t.trait.args : childTypes(t);
+  for (const child of stored) checkFieldLifetimes(child, span, declared);
 }
 
 function checkFloatLiteral(literal: Extract<Expr, { kind: 'float' }>, name: FloatName): void {

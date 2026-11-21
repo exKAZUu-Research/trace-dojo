@@ -1,6 +1,6 @@
 import { type DebugPart, list, rangeText, structText, tupleText, type WriteChunk } from './debugText';
 import { normalize } from './infer';
-import { ref, shallow, type Type } from './types';
+import { callableSignature, ref, shallow, type Type } from './types';
 import { DONE, type IterValue, type RangeValue, type Value } from './values';
 
 /** Writes `{:?}` of a value of a type at a nesting depth. */
@@ -234,8 +234,7 @@ function number(value: unknown): DebugPart {
 function adaptedItem(name: string, shape: Type & { kind: 'adt' }, item: Type): Type {
   const t = normalize(shallow(item));
   if (name === 'MapShape') {
-    const f = normalize(shallow(shape.args[1]));
-    return f.kind === 'closure' ? f.closure.params[0] : item;
+    return callableSignature(shape.args[1])?.params[0] ?? item;
   }
   if (name === 'EnumerateShape' && t.kind === 'tuple') return t.elems[1];
   if (name === 'CopiedShape' || name === 'ClonedShape') return ref(item);

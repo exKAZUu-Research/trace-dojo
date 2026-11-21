@@ -5447,3 +5447,104 @@ test('evaluates indexed places even when destructuring ignores their fields', ()
     uncaughtException: expect.stringContaining('the len is 1 but the index is 1'),
   });
 });
+
+test('requires a declared or static lifetime for each stored reference field', () => {
+  for (const declaration of [
+    'struct S { f: &str }',
+    'struct S((&str, u8));',
+    'enum E { A([&str; 2]) }',
+    "struct S { f: &'_ str }",
+    "struct S<'a> { f: &'other str }",
+  ]) {
+    expect(executeProgram('rust', rustMain('', declaration))).toMatchObject({ kind: 'compileError' });
+  }
+  const valid = rustMain(
+    'println!("{}", S { f: "accepted" }.f);',
+    "struct S<'a> { f: &'a str } enum E { A(&'static str) }"
+  );
+  expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: 'accepted\n' });
+});
+
+test('uses known enum discriminants without propagating payloads into the panic lint', () => {
+  const possiblyReached = rustMain('let o = Some(1); if let Some(2) = o { let a = [1, 2]; let _x = a[3]; }');
+  expect(executeProgram('rust', possiblyReached)).toMatchObject({ kind: 'compileError' });
+  const runtimePanic = rustMain('println!("run"); let o = Some(3u8); if let Some(x) = o { let _x = 255u8 + x; }');
+  expect(executeProgram('rust', runtimePanic)).toMatchObject({
+    kind: 'executed',
+    stdout: 'run\n',
+    uncaughtException: expect.stringContaining('attempt to add with overflow'),
+  });
+  const unreachable = rustMain('let o: Option<i32> = None; if let Some(_) = o { let a = [1, 2]; let _x = a[3]; }');
+  expect(executeProgram('rust', unreachable)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});
+
+test('pops the last Unicode scalar and preserves byte length and capacity', () => {
+  const program = rustMain(`let mut s = String::with_capacity(20);
+    s.push_str("aé🙂");
+    println!("{:?} {} {}", s.pop(), s.len(), s.capacity());
+    println!("{:?} {} {}", s.pop(), s.len(), s.capacity());
+    println!("{:?} {:?} {}", s.pop(), s.pop(), s.capacity());`);
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: "Some('🙂') 3 20\nSome('é') 1 20\nSome('a') None 20\n",
+  });
+});
+
+test('sizes arrays using typed constant fields and indexed values', () => {
+  const program = `const GRID: [[i32; 2]; 3] = [[1, 2], [3, 4], [5, 6]];
+const WORDS: [&str; 2] = ["a", "bc"];
+const SLICES: [&[i32]; 2] = [&[1], &[2, 3]];
+const COUNTS: [usize; 2] = [2, 3];
+const PAIR: (usize, u8) = (2, 1);
+const WIDTH: usize = GRID[0].len();
+fn main() {
+    let row: [i32; GRID[0].len()] = [0; WIDTH];
+    let a = [0; WORDS[1].len()];
+    let b = [0; SLICES[1].len()];
+    let c: [i32; COUNTS[1]] = [0; 3];
+    let d = [0; PAIR.0];
+    println!("{} {} {} {} {}", row.len(), a.len(), b.len(), c.len(), d.len());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '2 2 2 3 2\n' });
+  const outOfRange = program.replace('COUNTS[1]]', 'COUNTS[2]]');
+  const wrongWidth = program.replace('PAIR.0]', 'PAIR.1]');
+  expect(executeProgram('rust', outOfRange)).toMatchObject({ kind: 'compileError' });
+  expect(executeProgram('rust', wrongWidth)).toMatchObject({ kind: 'compileError' });
+});
+
+test('formats the input items of Map when its callable returns a different type', () => {
+  const program = `fn stringify(x: i32) -> String { x.to_string() }
+fn letter(_: i32) -> char { 'a' }
+fn show<F: Fn(i32) -> char>(f: F) {
+    println!("{:?}", [3, 4].into_iter().map(f));
+}
+fn main() {
+    println!("{:?}", [1, 2].into_iter().map(stringify));
+    show(letter);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'Map { iter: IntoIter([1, 2]) }\nMap { iter: IntoIter([3, 4]) }\n',
+  });
+});
+
+test('calls element inequality for standard sequences and tuples', () => {
+  const program = `use std::collections::VecDeque;
+struct K(i32);
+impl PartialEq for K {
+    fn eq(&self, other: &Self) -> bool { print!("eq "); self.0 == other.0 }
+    fn ne(&self, other: &Self) -> bool { print!("ne "); self.0 != other.0 }
+}
+fn main() {
+    println!("vec {}", vec![K(1)] != vec![K(1)]);
+    println!("array {}", [K(1)] != [K(1)]);
+    println!("slice {}", [K(1)][..] != [K(1)][..]);
+    println!("tuple {}", (1, K(1)) != (1, K(1)));
+    println!("deque {}", VecDeque::from([K(1)]) != VecDeque::from([K(1)]));
+    println!("option {}", Some(K(1)) != Some(K(1)));
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'ne vec false\nne array false\nne slice false\nne tuple false\nne deque false\neq option false\n',
+  });
+});

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 414 -- Defines Rust types, their substitutions and their shared structural operations.
+// code-gauge-allow-file fileNcss 432 -- Defines Rust types, their substitutions and their shared structural operations.
 import type { ConstItem, FnItem, Span } from './ast';
 import type { Module } from './items';
 
@@ -278,6 +278,36 @@ export function newTypeParam(name: string, isSelf = false): TypeParam {
 let nextClosureId = 0;
 export function newClosureType(params: Type[], ret: Type): Type {
   return { kind: 'closure', closure: { id: nextClosureId++, params, ret, kind: 'Fn' } };
+}
+
+export function callableSignature(type: Type): { params: Type[]; ret: Type } | undefined {
+  const t = shallow(type);
+  switch (t.kind) {
+    case 'fn': {
+      return { params: t.params, ret: t.ret };
+    }
+    case 'closure': {
+      return { params: t.closure.params, ret: t.closure.ret };
+    }
+    case 'dyn': {
+      return t.trait.fnSig;
+    }
+    case 'param': {
+      return t.param.bounds.find((bound) => bound.fnSig)?.fnSig;
+    }
+    case 'opaque': {
+      return t.opaque.bounds.find((bound) => bound.fnSig)?.fnSig;
+    }
+    case 'ref': {
+      return callableSignature(t.target);
+    }
+    case 'adt': {
+      return t.def.builtin === 'Box' ? callableSignature(t.args[0]) : undefined;
+    }
+    default: {
+      return undefined;
+    }
+  }
 }
 
 let nextOpaqueId = 0;

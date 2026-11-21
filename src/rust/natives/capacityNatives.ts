@@ -206,7 +206,6 @@ const STRING_RESIZING = new Set([
   'insert',
   'insert_str',
   'replace_range',
-  'pop',
   'remove',
   'truncate',
   'clear',

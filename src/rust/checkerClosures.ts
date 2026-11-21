@@ -7,7 +7,16 @@ import { compileError } from './items';
 import { type CaptureMode, captureProjections, projectedBindings } from './loanCaptures';
 import { typeAfter } from './regions';
 import type { TraitSolver } from './traits';
-import { type ClosureType, freshVar, newClosureType, resolve, shallow, type Type, UNIT } from './types';
+import {
+  callableSignature,
+  type ClosureType,
+  freshVar,
+  newClosureType,
+  resolve,
+  shallow,
+  type Type,
+  UNIT,
+} from './types';
 
 export function checkClosure(c: Checker, expr: Extract<Expr, { kind: 'closure' }>, expected: Type | undefined): Type {
   const expectedSig = expected && closureSignature(c, expected);
@@ -69,28 +78,8 @@ export function checkClosure(c: Checker, expr: Extract<Expr, { kind: 'closure' }
 
 export function closureSignature(c: Checker, type: Type): { params: Type[]; ret: Type } | undefined {
   const t = shallow(type);
-  switch (t.kind) {
-    case 'fn': {
-      return { params: t.params, ret: t.ret };
-    }
-    case 'dyn': {
-      return t.trait.fnSig;
-    }
-    case 'param':
-    case 'var': {
-      const bounds = t.kind === 'param' ? t.param.bounds : (c.varBounds.get(t.v) ?? []);
-      return bounds.find((bound) => bound.fnSig)?.fnSig;
-    }
-    case 'ref': {
-      return closureSignature(c, t.target);
-    }
-    case 'adt': {
-      return t.def.builtin === 'Box' ? closureSignature(c, t.args[0]) : undefined;
-    }
-    default: {
-      return undefined;
-    }
-  }
+  if (t.kind === 'var') return c.varBounds.get(t.v)?.find((bound) => bound.fnSig)?.fnSig;
+  return callableSignature(t);
 }
 
 /**

@@ -31,7 +31,7 @@ export function constInteger(expr: Expr, scope: TypeScope, expected = USIZE): bi
     const scalar = constScalar(
       expr,
       scope,
-      { visiting: new Set(), values: new Map(), hints: new WeakMap(), unifier: new Unifier() },
+      { visiting: new Set(), values: new Map(), hints: new WeakMap(), unifier: new Unifier(), projections: new Set() },
       expected
     );
     return scalar && sameType(scalar.type, expected) && typeof scalar.value === 'bigint' ? scalar.value : undefined;
@@ -51,9 +51,11 @@ interface ConstEvaluation {
   values: Map<ConstDef, ConstScalar | undefined>;
   hints: WeakMap<Expr, Type | undefined>;
   unifier: Unifier;
+  projections: Set<Expr>;
 }
 
 // code-gauge-allow functionCognitiveComplexity 17 -- Each scalar expression has its own constant evaluation rule.
+// code-gauge-allow functionNcss 32 -- Keep the scalar expression dispatch in one switch.
 function constScalar(
   expr: Expr,
   scope: TypeScope,
@@ -91,6 +93,10 @@ function constScalar(
     case 'binary': {
       return constScalarBinary(expr, scope, state, expected, evaluate);
     }
+    case 'field':
+    case 'index': {
+      return projectedScalar(expr, scope, state, expected, evaluate);
+    }
     case 'methodCall': {
       if (expr.method !== 'len' || expr.args.length > 0 || expr.turbofish) return;
       const length = constLength(expr.receiver, scope, state);
@@ -100,6 +106,20 @@ function constScalar(
       return undefined;
     }
   }
+}
+
+function projectedScalar(
+  expr: Expr,
+  scope: TypeScope,
+  state: ConstEvaluation,
+  expected: Type | undefined,
+  evaluate: boolean
+): ConstScalar | undefined {
+  return evaluateProjection(expr, scope, state, (source) => {
+    const declared = source.type ? lowerType(source.type, source.scope) : expr.ty;
+    const scalar = constScalar(source.expr, source.scope, state, declared ?? expected, evaluate);
+    return scalar && (!declared || sameType(declared, scalar.type)) ? scalar : undefined;
+  });
 }
 
 function constLength(expr: Expr, scope: TypeScope, state: ConstEvaluation): bigint | undefined {
@@ -120,9 +140,105 @@ function constLength(expr: Expr, scope: TypeScope, state: ConstEvaluation): bigi
     case 'path': {
       return constPathLength(expr.path, scope, state);
     }
+    case 'field':
+    case 'index': {
+      return evaluateProjection(expr, scope, state, (value) => {
+        const declared = value.type && withoutRefs(value.type);
+        if (declared?.kind === 'array') return lengthValue(declared.len, value.scope, state);
+        return constLength(value.expr, value.scope, state);
+      });
+    }
     default: {
       return undefined;
     }
+  }
+}
+
+interface ConstLocation {
+  expr: Expr;
+  scope: TypeScope;
+  type?: TypeAst;
+}
+
+function evaluateProjection<T>(
+  expr: Expr,
+  scope: TypeScope,
+  state: ConstEvaluation,
+  use: (location: ConstLocation) => T | undefined
+): T | undefined {
+  if (state.projections.has(expr) || state.projections.size >= 64) return;
+  state.projections.add(expr);
+  try {
+    const location = constantLocation(expr, scope, state);
+    return location && use(location);
+  } finally {
+    state.projections.delete(expr);
+  }
+}
+
+function constantLocation(
+  expr: Expr,
+  scope: TypeScope,
+  state: ConstEvaluation,
+  type?: TypeAst
+): ConstLocation | undefined {
+  switch (expr.kind) {
+    case 'path': {
+      const found = lookupScalarConstant(expr.path, scope);
+      const initializer = found?.def.ast.value;
+      if (!found || !initializer || state.visiting.has(found.def) || state.visiting.size >= 64) return;
+      const { def, selfType } = found;
+      state.visiting.add(def);
+      try {
+        return constantLocation(initializer, constantScope(def, selfType), state, def.ast.type);
+      } finally {
+        state.visiting.delete(def);
+      }
+    }
+    case 'ref': {
+      return expr.mutable
+        ? undefined
+        : constantLocation(expr.operand, scope, state, type?.kind === 'ref' ? type.target : type);
+    }
+    case 'index': {
+      const operand = constantLocation(expr.operand, scope, state);
+      const index = lengthValue(expr.index, scope, state);
+      return operand && index !== undefined ? indexConstant(operand, index, state) : undefined;
+    }
+    case 'field': {
+      const operand = constantLocation(expr.operand, scope, state);
+      return operand && fieldConstant(operand, expr.name);
+    }
+    default: {
+      return { expr, scope, type };
+    }
+  }
+}
+
+function indexConstant(operand: ConstLocation, index: bigint, state: ConstEvaluation): ConstLocation | undefined {
+  const { expr, scope, type } = operand;
+  const declared = type && withoutRefs(type);
+  const element = declared?.kind === 'array' || declared?.kind === 'slice' ? declared.elem : undefined;
+  if (expr.kind === 'array') {
+    return index < BigInt(expr.elems.length) ? { expr: expr.elems[Number(index)], scope, type: element } : undefined;
+  }
+  if (expr.kind === 'arrayRepeat') {
+    const length = lengthValue(expr.count, scope, state);
+    return length !== undefined && index < length ? { expr: expr.value, scope, type: element } : undefined;
+  }
+}
+
+function fieldConstant(operand: ConstLocation, field: string): ConstLocation | undefined {
+  const { expr, scope, type } = operand;
+  if (expr.kind === 'tuple') {
+    const index = Number(field);
+    const declared = type && withoutRefs(type);
+    const child = expr.elems[index];
+    return child && { expr: child, scope, type: declared?.kind === 'tuple' ? declared.elems[index] : undefined };
+  }
+  if (expr.kind === 'struct') {
+    const child = expr.fields.find(({ name }) => name === field)?.value;
+    return child && { expr: child, scope };
   }
 }
 
@@ -201,11 +317,7 @@ function constPathLength(path: PathAst, scope: TypeScope, state: ConstEvaluation
   const { def, selfType } = found;
   const initializer = def.ast.value;
   if (!initializer) return;
-  const context = {
-    module: def.module,
-    params: new Map(def.impl?.params.map((param) => [param.name, param])),
-    selfType,
-  };
+  const context = constantScope(def, selfType);
   state.visiting.add(def);
   try {
     const declared = withoutRefs(def.ast.type);
@@ -451,14 +563,13 @@ function evaluateNamedScalar(
   }
   state.visiting.add(def);
   try {
-    const result = constScalar(
-      value,
-      { module: def.module, params: new Map(def.impl?.params.map((param) => [param.name, param])), selfType },
-      state,
-      expected
-    );
+    const result = constScalar(value, constantScope(def, selfType), state, expected);
     return result && (!expected || sameType(result.type, expected)) ? result : undefined;
   } finally {
     state.visiting.delete(def);
   }
+}
+
+function constantScope(def: ConstDef, selfType: Type | undefined): TypeScope {
+  return { module: def.module, params: new Map(def.impl?.params.map((param) => [param.name, param])), selfType };
 }
