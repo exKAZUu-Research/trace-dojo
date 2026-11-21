@@ -763,7 +763,6 @@ const STD_TRAITS_LEARNERS_IMPLEMENT = new Set([
   'Default',
   'From',
   'Error',
-  'Hash',
 ]);
 
 const REQUIRED_STD_METHODS: Record<string, string[]> = {

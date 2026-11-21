@@ -7490,3 +7490,62 @@ test.each(['assert_eq!(s, "y", "{}", { s.push_str("a"); 1 });', 'assert_ne!(s, "
     });
   }
 );
+
+test.each([
+  [
+    'an impl Trait that yields references',
+    'fn words(text: &str, sep: &str) -> impl Iterator<Item = &str> { text.split(sep) }',
+    'ライフタイムを書いてください',
+  ],
+  [
+    'a boxed trait object that yields references',
+    "fn words(a: &str, b: &str) -> Box<dyn Iterator<Item = &str>> { Box::new(a.split(' ')) }",
+    'ライフタイムを書いてください',
+  ],
+  [
+    'a manual impl of Hash',
+    'use std::hash::{Hash, Hasher};\nstruct Key(i32);\nimpl Hash for Key { fn hash<H: Hasher>(&self, state: &mut H) { self.0.hash(state); } }',
+    'トレイト Hash の実装は、この採点環境では使えません',
+  ],
+  [
+    'a panic after an assertion whose message diverges',
+    'fn check() { assert!(true, "{}", { panic!("unexpected"); 0 }); let x = 1 / 0; }',
+    '必ず panic',
+  ],
+  [
+    'an overflow after an assert_eq! whose message exits',
+    'fn check() { assert_eq!(1, 1, "{}", { std::process::exit(0); 0 }); let y: u8 = 200u8 + 100; }',
+    '必ずあふれます',
+  ],
+  [
+    '{:?} of a filter_map over items without Debug',
+    'struct Hidden;\nfn show() { println!("{:?}", [Hidden].into_iter().filter_map(|_| Some(1))); }',
+    '{:?} で表示できません',
+  ],
+  [
+    '{:?} of a scan whose state has no Debug',
+    'struct Hidden;\nfn show() { println!("{:?}", (0..3).scan(Hidden, |_, x| Some(x))); }',
+    '{:?} で表示できません',
+  ],
+])('rejects %s', (_name, items, message) => {
+  expect(executeProgram('rust', rustMain('', items))).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ message: expect.stringContaining(message) })],
+  });
+});
+
+test('adapters that keep no item of their own print without Debug of what they yield', () => {
+  const program = `struct Hidden;
+fn single(text: &str) -> impl Iterator<Item = &str> { text.split(' ') }
+fn main() {
+    println!("{:?} {:?}", (0..3).filter_map(|_| Some(Hidden)), (0..3).map_while(|_| Some(Hidden)));
+    println!("{:?}", (0..3).scan(0, |sum, x| { *sum += x; Some(Hidden) }));
+    println!("{}", single("a b").count());
+    let n = 1;
+    assert!(n == 1, "{}", 1 / 0);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'FilterMap { iter: 0..3 } MapWhile { iter: 0..3 }\nScan { iter: 0..3, state: 0 }\n2\n',
+  });
+});

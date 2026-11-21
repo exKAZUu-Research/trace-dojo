@@ -1,8 +1,8 @@
-// code-gauge-allow-file fileNcss 624 -- Shares Rust constant propagation between diagnostics and pattern coverage.
+// code-gauge-allow-file fileNcss 632 -- Shares Rust constant propagation between diagnostics and pattern coverage.
 
 import type { ExecutionBudget } from '../interpreter/limits';
 import type { Annotations, LocalVar, PathRes } from './annotations';
-import type { Block, Condition, Expr, MatchArm, Pattern, Stmt } from './ast';
+import type { Block, Condition, Expr, MacroCall, MatchArm, Pattern, Stmt } from './ast';
 import { forEachDirect, patternBindings } from './astWalk';
 import { constInteger } from './constExpressions';
 import { type PropagationMode, propagationModes } from './constPropagation';
@@ -446,9 +446,18 @@ export class ConstLint {
       const fields = expr.args.map((arg, index) => [String(index), this.expr(arg)] as const);
       return this.patternEvaluation || res.def.kind === 'enum' ? this.construct(res, fields) : aggregate(fields);
     }
+    const message = expr.kind === 'macro' ? assertionMessage(expr.macro) : [];
+    let holds = false;
     forEachDirect(expr, (child) => {
-      this.expr(child);
+      if (!message.includes(child)) holds = this.expr(child) === true;
     });
+    // An assertion formats its message only where it fails, so what the message does decides nothing after it, and
+    // a condition known to hold never reaches it.
+    if (message.length > 0 && !holds) {
+      this.branch(() => {
+        for (const arg of message) this.expr(arg);
+      });
+    }
     this.endBlock();
     // What follows a call that never returns (`panic!`, `std::process::exit`) is not reachable.
     if (checkedType(expr.ty)?.kind === 'never') this.diverged = true;
@@ -779,6 +788,11 @@ function ordinal(value: Known | undefined): number | bigint | undefined {
 function intTypeOf(type: Type | undefined): IntName | undefined {
   const checked = checkedType(type);
   return checked?.kind === 'int' ? checked.name : undefined;
+}
+
+/** The arguments of an assertion's message. */
+function assertionMessage(macro: MacroCall): Expr[] {
+  return (macro.kind === 'assert' || macro.kind === 'assertEq' ? macro.format?.args : undefined) ?? [];
 }
 
 function checkedType(type: Type | undefined): Type | undefined {

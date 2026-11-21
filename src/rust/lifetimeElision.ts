@@ -21,8 +21,11 @@ export function checkElidedReturnLifetime(fn: FnDef, ast: FnItem): void {
 /** Counts the places for a lifetime in a type: all of them, or only those left out. */
 function lifetimePlaces(type: Type, onlyElided: boolean): number {
   const t = shallow(type);
-  // A trait object and a function pointer elide lifetimes by rules of their own.
-  if (t.kind === 'dyn' || t.kind === 'fn') return 0;
+  // A function pointer elides lifetimes by rules of its own, as the `Fn(..) -> ..` form of a bound does.
+  if (t.kind === 'fn') return 0;
+  if (t.kind === 'dyn' || t.kind === 'opaque') {
+    return boundTypes(t).reduce((places, part) => places + lifetimePlaces(part, onlyElided), 0);
+  }
   const written =
     t.kind === 'ref'
       ? [t.lifetime]
@@ -33,6 +36,12 @@ function lifetimePlaces(type: Type, onlyElided: boolean): number {
   const parts = t.kind === 'ref' ? [t.target] : t.kind === 'adt' ? t.args : childTypesOf(t);
   for (const part of parts) places += lifetimePlaces(part, onlyElided);
   return places;
+}
+
+/** The types that the bounds of a trait object or an `impl Trait` name: their arguments and the `Item` they set. */
+function boundTypes(t: Extract<Type, { kind: 'dyn' | 'opaque' }>): Type[] {
+  const bounds = t.kind === 'dyn' ? [t.trait] : t.opaque.bounds;
+  return bounds.flatMap((bound) => (bound.item ? [...bound.args, bound.item] : bound.args));
 }
 
 function childTypesOf(t: Type): Type[] {

@@ -157,10 +157,21 @@ export function debugOperands(item: Type, shape: Type): Type[] {
   // These write no item: a closure has no `{:?}` to ask for.
   if (name === 'FromFnShape' || name === 'RepeatWithShape') return [];
   if (name === 'ByRefShape') return debugOperands(item, t.args[0]);
-  if (!ADAPTER_NAMES[name]) return [item];
-  const adapted = debugOperands(adaptedItem(name, t, item), t.args[0]);
-  if (name === 'ChainShape') return [...adapted, ...debugOperands(item, t.args[1])];
-  return name === 'PeekableShape' ? [item, ...adapted] : adapted;
+  if (name === 'ZipShape') {
+    const pair = normalize(shallow(item));
+    const [first, second] = pair.kind === 'tuple' ? pair.elems : [item, item];
+    return [...debugOperands(first, t.args[0]), ...debugOperands(second, t.args[1])];
+  }
+  if (!ADAPTER_NAMES[name] && !DESCRIBED_ADAPTERS.has(name)) return [item];
+  return [...debugOperands(adaptedItem(name, t, item), t.args[0]), ...keptOperands(name, t, item)];
+}
+
+/** What an adapter writes besides the iterator it adapts: a second iterator, items it holds, or its state. */
+function keptOperands(name: string, shape: Type & { kind: 'adt' }, item: Type): Type[] {
+  if (name === 'ChainShape') return debugOperands(item, shape.args[1]);
+  if (name === 'ScanShape') return [shape.args[1]];
+  // `Peekable` holds an item, and `FlatMap` and `Flatten` the iterators of their items.
+  return name === 'PeekableShape' || name === 'FlatMapShape' || name === 'FlattenShape' ? [item] : [];
 }
 
 /** Whether std's searcher for a pattern of a type has `{:?}`, which a closure's does not. */
@@ -244,12 +255,20 @@ function number(value: unknown): DebugPart {
   return () => String(value);
 }
 
+/** Where the items of the iterator an adapter adapts are found: a parameter of the closure the adapter calls. */
+const CALLBACK_INPUTS: Record<string, { shapeArg: number; param: number }> = {
+  MapShape: { shapeArg: 1, param: 0 },
+  FilterMapShape: { shapeArg: 1, param: 0 },
+  MapWhileShape: { shapeArg: 1, param: 0 },
+  FlatMapShape: { shapeArg: 2, param: 0 },
+  ScanShape: { shapeArg: 2, param: 1 },
+};
+
 /** The items of the iterator an adapter adapts. */
 function adaptedItem(name: string, shape: Type & { kind: 'adt' }, item: Type): Type {
   const t = normalize(shallow(item));
-  if (name === 'MapShape') {
-    return callableSignature(shape.args[1])?.params[0] ?? item;
-  }
+  const callback = CALLBACK_INPUTS[name];
+  if (callback) return callableSignature(shape.args[callback.shapeArg])?.params[callback.param] ?? item;
   if (name === 'EnumerateShape' && t.kind === 'tuple') return t.elems[1];
   if (name === 'CopiedShape' || name === 'ClonedShape') return ref(item);
   return item;
