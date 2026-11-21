@@ -38,7 +38,7 @@ export function findKotlinTraceAnnotations(source: string): TraceAnnotation[] {
   try {
     const comments = tree.rootNode
       .descendantsOfType('line_comment')
-      .flatMap((node) => (node ? [{ index: node.startIndex, text: node.text }] : []));
+      .flatMap((node) => (node ? [{ index: node.startIndex, text: node.text.replace(/\r$/, '') }] : []));
     return traceAnnotationsIn(comments);
   } finally {
     tree.delete();

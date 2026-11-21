@@ -245,8 +245,26 @@ test.each([
   '// atomic\nfun helper() {}\nfun main() { helper() }',
   'fun main() {\n    val x = 1 // atomic\n    println(x)\n}',
   'fun main() {}\n// atomic',
+  'fun main() {\r\n    val x = 1 // atomic\r\n    println(x)\r\n}',
 ])('reports a misplaced Kotlin atomic annotation in %s', (program) => {
   expect(() => traceProgram('kotlin', program, program)).toThrow(misplacedAtomicMessage);
+});
+
+test('keeps Kotlin atomic steps with CRLF line endings', () => {
+  const source = [
+    'fun main() {',
+    '    val result = double(2)',
+    '    println(result)',
+    '}',
+    'fun double(value: Int): Int { // atomic',
+    '    val doubled = value * 2',
+    '    return doubled',
+    '}',
+  ].join('\n');
+  const crlf = source.replaceAll('\n', '\r\n');
+  const trace = traceProgram('kotlin', source, source);
+  expect(trace.traceItems.every(({ callLines }) => callLines.length === 0)).toBe(true);
+  expect(traceProgram('kotlin', crlf, crlf).traceItems).toEqual(trace.traceItems);
 });
 
 test('records only the statements inside a value-returning lambda', () => {
