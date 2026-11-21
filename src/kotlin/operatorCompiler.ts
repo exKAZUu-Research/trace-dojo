@@ -149,19 +149,18 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     return {
       type,
       repr: kind,
-      eval: (frame) => {
-        const bound = place.bind(frame);
-        const old = unboxNumber(bound.get());
-        const next = step(kind, old, delta);
-        bound.set(toPlace(next));
-        return isPrefix ? next : old;
-      },
+      eval: (frame) =>
+        place.withBound(frame, (bound) => {
+          const old = unboxNumber(bound.get());
+          const next = step(kind, old, delta);
+          bound.set(toPlace(next));
+          return isPrefix ? next : old;
+        }),
     };
   }
 
   /**
-   * An assignable place: a variable, a property, or an indexed element. `bind` evaluates the receiver and indexes once,
-   * so that reading and writing the place evaluate them once, as compound assignments do.
+   * Evaluates an assignable place's receiver and indexes once and roots them through its reads and writes.
    */
   abstract compilePlace(
     scope: Scope,

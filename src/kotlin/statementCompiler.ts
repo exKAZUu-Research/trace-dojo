@@ -372,10 +372,10 @@ export abstract class StatementCompiler extends OperatorCompiler {
       if (skipped) this.flow = Flow.merge([skipped, this.flow]);
       return this.withStep(
         row,
-        (frame) => {
-          const bound = place.bind(frame);
-          if (!bound.isSkipped) bound.set(toPlace(frame));
-        },
+        (frame) =>
+          place.withBound(frame, (bound) => {
+            if (!bound.isSkipped) bound.set(toPlace(frame));
+          }),
         value.isCreation === true
       );
     }
@@ -449,12 +449,12 @@ export abstract class StatementCompiler extends OperatorCompiler {
     place.recordAssignment?.(combined.type);
     this.narrowAfterAssignment(scope, target, combined, place.type);
     if (skipped) this.flow = Flow.merge([skipped, this.flow]);
-    return (frame) => {
-      const bound = place.bind(frame);
-      if (bound.isSkipped) return;
-      const value = current.run(frame, bound, () => toPlace(frame));
-      bound.set(value);
-    };
+    return (frame) =>
+      place.withBound(frame, (bound) => {
+        if (bound.isSkipped) return;
+        const value = current.run(frame, bound, () => toPlace(frame));
+        bound.set(value);
+      });
   }
 
   /** After `x = value`, a stable `x` has the value's type, which may be narrower than its declared one. */
@@ -612,7 +612,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
         this.recordLocalWrite(context, variable, type);
         this.recordAssignment(context, variable, row);
       },
-      bind: (frame) => ({ get: () => access.read(frame), set: (value) => access.write(frame, value) }),
+      withBound: (frame, use) => use({ get: () => access.read(frame), set: (value) => access.write(frame, value) }),
     };
   }
 
@@ -627,7 +627,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     return {
       type: variable.type,
       repr: reprOf(this.core, variable.type),
-      bind: (frame) => ({ get: () => read(frame), set: (value) => write(frame, value) }),
+      withBound: (frame, use) => use({ get: () => read(frame), set: (value) => write(frame, value) }),
     };
   }
 
@@ -658,12 +658,11 @@ export abstract class StatementCompiler extends OperatorCompiler {
     return {
       type: variable.type,
       repr: reprOf(this.core, variable.type),
-      bind: (frame) => {
+      withBound: (frame, use) => {
         const instance = read(frame);
-        return {
-          get: () => delegate.read(frame, instance),
-          set: (value) => write(frame, instance, value),
-        };
+        return frame.runtime.withNativeRoots([instance], () =>
+          use({ get: () => delegate.read(frame, instance), set: (value) => write(frame, instance, value) })
+        );
       },
     };
   }
@@ -693,12 +692,14 @@ export abstract class StatementCompiler extends OperatorCompiler {
       type,
       repr,
       recordAssignment: initializes ? () => this.recordAssignment(initializer, symbol, row) : undefined,
-      bind: (frame) => {
+      withBound: (frame, use) => {
         const target = receiverEval(frame);
-        return {
-          get: () => getPropertyValue(symbol, frame, target, !member.isSuper),
-          set: (value) => setPropertyValue(symbol, frame, target, value, !member.isSuper),
-        };
+        return frame.runtime.withNativeRoots([target], () =>
+          use({
+            get: () => getPropertyValue(symbol, frame, target, !member.isSuper),
+            set: (value) => setPropertyValue(symbol, frame, target, value, !member.isSuper),
+          })
+        );
       },
     };
   }
@@ -713,7 +714,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
 
   /**
    * `a[i]` as a place: `set` stores into it, and for a compound assignment `get` reads it. The receiver and indexes
-   * are evaluated once and held, where the compiled `get` and `set` calls read them.
+   * are evaluated once and stay rooted while assignment operands and accessors run.
    */
   // code-gauge-allow functionNcss 40 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private indexPlace(
@@ -768,17 +769,18 @@ export abstract class StatementCompiler extends OperatorCompiler {
     return {
       type,
       repr,
-      bind: (frame) => {
+      withBound: (frame, use) => {
         const state: HeldIndex = { receiver: receiverEval(frame), indexes: [], value: undefined };
-        for (const evaluate of indexEvals) state.indexes.push(evaluate(frame));
-        const run = (evaluate: Eval): Value => handoff.run(frame, state, () => evaluate(frame));
-        return {
-          get: () => run(getEval as Eval),
-          set: (value) => {
-            state.value = value;
-            run(setEval);
-          },
-        };
+        return handoff.run(frame, state, () => {
+          for (const evaluate of indexEvals) state.indexes.push(evaluate(frame));
+          return use({
+            get: () => (getEval as Eval)(frame),
+            set: (value) => {
+              state.value = value;
+              setEval(frame);
+            },
+          });
+        });
       },
     };
   }

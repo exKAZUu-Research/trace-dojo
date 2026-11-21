@@ -17,6 +17,7 @@ import {
   type ExpressionUse,
   Flow,
   FunctionContext,
+  Handoff,
   nullableReceiverMessage,
   type PackageScope,
   ReceiverSymbol,
@@ -84,7 +85,7 @@ export interface Place {
   readType?: KType;
   canSkip?: true;
   repr: Repr;
-  bind: (frame: Frame) => BoundPlace;
+  withBound: <T>(frame: Frame, use: (place: BoundPlace) => T) => T;
   recordAssignment?: (type: KType) => void;
 }
 
@@ -825,21 +826,19 @@ export abstract class ExpressionCompiler extends CallCompiler {
     return undefined;
   }
 
-  /** Evaluates a receiver once and, for `?.`, gives `null` without evaluating the rest when it is `null`. */
   /** The place of `a?.b`, which binds to nothing when `a` is null. */
   protected safePlace(receiver: Compiled, place: (holder: Compiled) => Place): Place {
-    let held: Value;
-    const holder: Compiled = { type: nonNull(receiver.type), repr: 'ref', eval: () => held };
+    const held = new Handoff<Value>();
+    const holder: Compiled = { type: nonNull(receiver.type), repr: 'ref', eval: () => held.get() };
     const inner = place(holder);
     const receiverEval = convertRepr(receiver.eval, receiver.repr, 'ref');
     return {
       ...inner,
       canSkip: true,
-      bind: (frame) => {
+      withBound: (frame, use) => {
         const value = receiverEval(frame);
-        if (value === NULL) return SKIPPED_PLACE;
-        held = value;
-        return inner.bind(frame);
+        if (value === NULL) return use(SKIPPED_PLACE);
+        return held.run(frame, value, () => inner.withBound(frame, use));
       },
     };
   }

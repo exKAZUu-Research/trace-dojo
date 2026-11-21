@@ -57,6 +57,39 @@ test.each(['contains', 'split'])('charges the execution budget during CharSequen
   expect(executeProgram('kotlin', source)).toEqual({ kind: 'limitExceeded', limit: 'operations' });
 });
 
+test('keeps temporary Kotlin assignment receivers on the board during operand evaluation', () => {
+  const source = `class Holder {
+    val turtle = Turtle(1, 0)
+    var number = 0
+        set(value) {
+            field = value
+            atNeighbor()
+        }
+}
+
+fun atNeighbor(): Int {
+    val t = Turtle(0, 0, "R")
+    t.turnRight()
+    println(t.canMoveForward())
+    return 0
+}
+
+fun replacement(): Turtle {
+    atNeighbor()
+    return Turtle(2, 0)
+}
+
+fun main() {
+    arrayOf(Turtle(1, 0))[atNeighbor()] = Turtle(2, 0)
+    arrayOf(Turtle(1, 0))[0] = replacement()
+    Holder().number += atNeighbor()
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'false\nfalse\nfalse\nfalse\n',
+  });
+});
+
 test.each(['Token.values()', 'enumValues<Token>()'])('charges repeated %s array copies to the Kotlin heap', (call) => {
   const names = Array.from({ length: 200 }, (_, index) => `TOKEN${index}`).join(', ');
   const source = `enum class Token { ${names} }
