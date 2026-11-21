@@ -1,3 +1,5 @@
+import { normalize } from './infer';
+import { boundsOf } from './methods';
 import {
   instantiate,
   invariantParams,
@@ -162,9 +164,7 @@ export class SignatureInstance {
         if (bound.fnSig) {
           const args = bound.fnSig.params.map((type) => instantiate(type, this.subst, this.fresh));
           const { ret } = bound.fnSig;
-          const higherRanked = bound.fnSig.params.map(
-            (type) => type.kind === 'ref' && type.lifetime === undefined && !namesLifetime(ret)
-          );
+          const higherRanked = higherRankedInputs(bound.fnSig);
           applyClosure(layout, args, instantiate(ret, this.subst, this.fresh), higherRanked);
           continue;
         }
@@ -173,6 +173,41 @@ export class SignatureInstance {
         }
       }
     }
+  }
+}
+
+/**
+ * Which parameters of a closure bound (`Fn(&T) -> U`) are references taken for every lifetime: those without a
+ * written lifetime, unless the result has a place for a lifetime, which elision then ties to them.
+ */
+function higherRankedInputs(sig: { params: Type[]; ret: Type }): boolean[] {
+  return sig.params.map((type) => type.kind === 'ref' && type.lifetime === undefined && !namesLifetime(sig.ret));
+}
+
+/** The higher-ranked reference parameters of a callee that is called through a closure bound or a trait object. */
+export function higherRankedInputsOf(type: Type | undefined): boolean[] {
+  let t = type && normalize(shallow(type));
+  while (t && (t.kind === 'ref' || (t.kind === 'adt' && t.def.builtin === 'Box'))) {
+    t = normalize(shallow(t.kind === 'ref' ? t.target : t.args[0]));
+  }
+  const sig = t && boundsOf(t)?.find((bound) => bound.fnSig)?.fnSig;
+  return sig ? higherRankedInputs(sig) : [];
+}
+
+/**
+ * Relates a call of a callee whose body is not known here: what it captures and its arguments may flow into the
+ * result, except the lifetime of a reference it takes for every lifetime, which the result cannot name.
+ */
+export function relateOpaqueCall(
+  outlives: Outlives,
+  callee: Layout,
+  args: Layout[],
+  result: Layout,
+  higherRanked: boolean[]
+): void {
+  const inputs = args.flatMap((arg, index) => regionsOf(arg).slice(higherRanked[index] ? 1 : 0));
+  for (const a of [...regionsOf(callee), ...inputs]) {
+    for (const b of regionsOf(result)) outlives(a, b);
   }
 }
 

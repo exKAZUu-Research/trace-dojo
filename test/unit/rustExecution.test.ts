@@ -7183,3 +7183,92 @@ test.each([
     diagnostics: [expect.objectContaining({ message: expect.stringContaining(message) })],
   });
 });
+
+test.each([
+  [
+    'a match whose arms all return',
+    'fn pick(x: bool) -> i32 { match x { true => return 1, false => return 2 }; }\nfn main() { println!("{}", pick(true)); }',
+    '1\n',
+  ],
+  [
+    'shifts and set operators in closures typed by their calls',
+    `use std::collections::{BTreeSet, HashSet};
+fn main() {
+    let left = |x| x << 1;
+    let right = |x, y| x >> y;
+    let a = HashSet::from([1, 2]);
+    let b = HashSet::from([2, 3]);
+    let union = |x, y| x | y;
+    let p = BTreeSet::from([1, 2]);
+    let q = BTreeSet::from([2, 3]);
+    let common = |x, y| x & y;
+    println!("{} {} {} {:?}", left(2u32), right(8i64, 1u8), union(&a, &b).len(), common(&p, &q));
+}`,
+    '4 4 3 {2}\n',
+  ],
+  [
+    'a struct update that copies a borrowed field',
+    'struct S { n: i32, s: String }\nfn main() {\n    let s = S { n: 1, s: String::new() };\n    let r = &s.n;\n    let t = S { s: String::new(), ..s };\n    println!("{} {}", r, t.n);\n}',
+    '1 1\n',
+  ],
+  [
+    'results of callees bounded by Fn(&T) -> U',
+    `fn apply_all<T>(xs: &mut [T], f: impl Fn(&T) -> T) { for x in xs.iter_mut() { *x = f(x); } }
+fn apply<T>(x: &mut T, f: &dyn Fn(&T) -> T) { let y = f(x); *x = y; }
+fn take<T, U, F: Fn(&T) -> U>(v: &mut Vec<T>, f: F) -> U { let y = f(&v[0]); v.clear(); y }
+fn main() {
+    let mut a = [1, 2];
+    apply_all(&mut a, |x| x * 10);
+    let mut n = 1;
+    apply(&mut n, &|x| x + 1);
+    let mut v = vec![1];
+    println!("{:?} {} {}", a, n, take(&mut v, |x| x * 10));
+}`,
+    '[10, 20] 2 10\n',
+  ],
+  [
+    'values assigned on only some paths',
+    'fn yes() -> bool { true }\nfn main() {\n    let x;\n    if yes() { x = 1; } else { x = 0; }\n    let y: u8;\n    if yes() { y = 1; } else { y = 200; }\n    println!("{} {}", 10 / x, y + 100);\n}',
+    '10 101\n',
+  ],
+])('accepts %s', (_name, program, stdout) => {
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout });
+});
+
+test.each([
+  [
+    'a match with an arm that completes',
+    'fn pick(x: bool) -> i32 { match x { true => return 1, false => {} }; }\nfn main() {}',
+    '値を返していません',
+  ],
+  [
+    'a shift of a float found by a later call',
+    'fn main() {\n    let f = |x| x << 1;\n    println!("{}", f(2.0));\n}',
+    '<< で計算できません',
+  ],
+  [
+    'a struct update that moves a borrowed field',
+    'struct S { n: i32, s: String }\nfn main() {\n    let s = S { n: 1, s: String::new() };\n    let r = &s.s;\n    let t = S { n: 2, ..s };\n    println!("{} {}", r, t.n);\n}',
+    '借りられていて',
+  ],
+  [
+    'a result that elision ties to a borrowed argument',
+    'fn first<T, F: Fn(&Vec<T>) -> &T>(v: &mut Vec<T>, f: F) { let y = f(v); v.clear(); let _z = y; }\nfn main() {}',
+    '借りられていて',
+  ],
+  [
+    'a panic after a return that && may skip',
+    'fn cond() -> bool { false }\nfn main() {\n    let _ = cond() && { return; true };\n    let x = 1 / 0;\n}',
+    '必ず panic',
+  ],
+  [
+    'an overflow after a return that || may skip',
+    'fn cond() -> bool { true }\nfn main() {\n    let _ = cond() || { return; false };\n    let x: u8 = 200 + 100;\n}',
+    '必ずあふれます',
+  ],
+])('still rejects %s', (_name, program, message) => {
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ message: expect.stringContaining(message) })],
+  });
+});

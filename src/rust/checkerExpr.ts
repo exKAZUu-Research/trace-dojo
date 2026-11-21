@@ -402,17 +402,19 @@ function joinBranches(
 function matchExpr(c: Checker, expr: Extract<Expr, { kind: 'match' }>, expected: Type | undefined): Type {
   const scrutinee = c.expr(expr.scrutinee, undefined);
   const arms: [Expr, Type][] = [];
+  let completes = false;
   for (const arm of expr.arms) {
     c.withScope(() => {
       checkPattern(c, arm.pattern, scrutinee, 'move');
       const type = c.expr(arm.body, expected);
       if (shallow(type).kind === 'never') return;
+      completes = true;
       if (expected) coerceArm(c, arm.body, type, expected);
       else arms.push([arm.body, type]);
     });
   }
   c.deferCoverage(() => checkExhaustive(c, expr, scrutinee));
-  if (expected) return expr.arms.length === 0 ? NEVER : expected;
+  if (expected) return completes ? expected : NEVER;
   const merged = c.mergeTypes(arms, (body, result, type) => {
     const span = body.kind === 'block' ? (body.tail?.span ?? body.span) : body.span;
     return compileError(

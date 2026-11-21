@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 619 -- Shares Rust constant propagation between diagnostics and pattern coverage.
+// code-gauge-allow-file fileNcss 622 -- Shares Rust constant propagation between diagnostics and pattern coverage.
 
 import type { ExecutionBudget } from '../interpreter/limits';
 import type { Annotations, LocalVar, PathRes } from './annotations';
@@ -178,9 +178,13 @@ export class ConstLint {
     }
   }
 
-  /** Checks code that may not run, which leaves what follows reachable. */
+  /**
+   * Checks code that may not run, which leaves what follows reachable. Its end ends a basic block, so the values it
+   * gave to variables that other code assigns too do not reach what follows.
+   */
   private branch(check: () => void): boolean {
     check();
+    this.endBlock();
     const diverged = this.diverged;
     this.diverged = false;
     return diverged;
@@ -602,7 +606,11 @@ export class ConstLint {
   private logical(expr: Extract<Expr, { kind: 'binary' }>, left: Known | undefined): Known | undefined {
     const decided = expr.op === '||';
     if (left === decided) return decided;
-    const right = this.expr(expr.right);
+    let right: Known | undefined;
+    const evaluate = (): void => void (right = this.expr(expr.right));
+    // A left operand that is not known may skip the right one.
+    if (left === undefined) this.branch(evaluate);
+    else evaluate();
     if (left === !decided) return typeof right === 'boolean' ? right : undefined;
     return right === decided ? decided : undefined;
   }

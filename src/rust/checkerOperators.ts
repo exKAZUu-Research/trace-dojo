@@ -43,18 +43,23 @@ function settleBinary(
     c.requireKnownTypes();
     compileError(expr.opSpan, `型が決まりません（${typeToString(resolve(leftType))} の型を書いてください）。`);
   }
-  let output: Type;
-  const bitwise = expr.op === '&' || expr.op === '|' || expr.op === '^';
-  if (expr.op === '+' && l.kind === 'adt' && l.def.builtin === 'String' && isStrLike(r)) output = l;
-  else if (bitwise && l.kind === 'bool' && c.unifier.tryUnify(l, r)) output = l;
-  else if (isArithmeticOperand(l) && !(bitwise && l.kind === 'float') && c.unifier.tryUnify(l, r)) output = l;
-  else badOperands(expr, leftType, rightType);
+  const output = setOperation(c, expr, left, right) ?? settledOutput(c, expr, l, r);
+  if (!output) badOperands(expr, leftType, rightType);
   if (!c.unifier.tryUnify(result, output)) {
     compileError(
       expr.opSpan,
       `${typeToString(resolve(left))} ${expr.op} ${typeToString(resolve(right))} の結果は ${typeToString(resolve(output))} ですが、${typeToString(resolve(result))} が必要です。`
     );
   }
+}
+
+/** The result type of an operator on numbers, booleans, or strings whose types are known, if std implements it. */
+function settledOutput(c: Checker, expr: Extract<Expr, { kind: 'binary' }>, l: Type, r: Type): Type | undefined {
+  const bitwise = expr.op === '&' || expr.op === '|' || expr.op === '^';
+  if (expr.op === '<<' || expr.op === '>>') return isIntegral(l) && isIntegral(r) ? l : undefined;
+  if (expr.op === '+' && l.kind === 'adt' && l.def.builtin === 'String' && isStrLike(r)) return l;
+  if (bitwise && l.kind === 'bool' && c.unifier.tryUnify(l, r)) return l;
+  return isArithmeticOperand(l) && !(bitwise && l.kind === 'float') && c.unifier.tryUnify(l, r) ? l : undefined;
 }
 
 // code-gauge-allow functionCognitiveComplexity 21 -- Follows the type checking rules of rustc case by case.
@@ -109,7 +114,7 @@ export function checkBinary(c: Checker, expr: Extract<Expr, { kind: 'binary' }>,
   const left = numericOperand(leftType);
   // rustc picks the impl of an operator on a type not known yet (a closure's parameter) once it is known, and the
   // result's type with it, as the projection `<L as Add<R>>::Output` does.
-  if (left.kind === 'var' && !left.v.literal && op !== '<<' && op !== '>>') {
+  if (left.kind === 'var' && !left.v.literal) {
     const result = freshVar();
     c.pendingBinaries.push({ expr, leftType, rightType: c.expr(expr.right, undefined), result });
     return result;

@@ -31,11 +31,11 @@ import {
   type RVar,
   typeAfter,
 } from './regions';
-import { SignatureInstance } from './signatureInstance';
+import { higherRankedInputsOf, relateOpaqueCall, SignatureInstance } from './signatureInstance';
 import { markExtendedTemporaries, promotable } from './temporaryScopes';
 import { arrayTryFrom } from './traitConversions';
 import type { TraitSolver } from './traits';
-import { type ClosureType, type FnDef, resolve, shallow, type Type } from './types';
+import { type ClosureType, type FnDef, resolve, shallow, substitute, type Type } from './types';
 
 /** The temporary that holds a value with borrows, or undefined for a value without any. */
 type Value = Var | undefined;
@@ -922,7 +922,13 @@ export class LoanBuilder {
     const given = new Set(expr.fields.map((field) => field.name));
     const rest = fields.flatMap((field, index) => (given.has(field.name) ? [] : [index]));
     const span = expr.base.span;
-    const accesses = rest.map((index): Access => ({ place: project(base, fields[index].name), kind: 'move', span }));
+    const type = expr.ty && normalize(shallow(expr.ty));
+    const subst = new Map(type?.kind === 'adt' ? type.def.params.map((param, index) => [param, type.args[index]]) : []);
+    // A field that the update takes from the base is copied when its type is `Copy`, and moved otherwise.
+    const accesses = rest.map((index): Access => {
+      const kind = this.readKind(substitute(fields[index].type, subst));
+      return { place: project(base, fields[index].name), kind, span };
+    });
     this.point({ uses: [base.root], accesses });
     for (const index of rest) {
       relate(this.outlives, this.placeLayout(project(base, fields[index].name)), fieldOf(this.layout(temp), index));
@@ -1049,7 +1055,7 @@ export class LoanBuilder {
           fieldLayout(results, res.variant, index, () => this.static())
         );
       }
-    } else this.applyClosure(this.layout(callee), inputs, results);
+    } else this.applyClosure(this.layout(callee), inputs, results, higherRankedInputsOf(expr.callee.ty));
     if (fn && normalize(shallow(fn.ret)).kind === 'never') this.current = undefined;
     return result;
   }
@@ -1143,14 +1149,11 @@ export class LoanBuilder {
    * Relates the arguments and the result of a call of a closure (or of what a type parameter or a trait object for one
    * stands for): as its summary says for a closure of this function, conservatively otherwise.
    */
-  // code-gauge-allow functionCognitiveComplexity 20 -- Applies a closure's summary, or relates every region without one.
   private applyClosure(callee: Layout, args: Layout[], result: Layout, higherRanked: boolean[] = []): void {
     const closure = callee.kind === 'opaque' ? callee.closure : undefined;
     const summary = closure && this.shared.summaries.get(closure);
     if (!closure || !summary || callee.kind !== 'opaque') {
-      for (const a of [...regionsOf(callee), ...args.flatMap(regionsOf)]) {
-        for (const b of regionsOf(result)) this.outlives(a, b);
-      }
+      relateOpaqueCall(this.outlives, callee, args, result, higherRanked);
       return;
     }
     const params = closure.params.map((type) => layoutOf(type, this.fresh, () => this.static()));
