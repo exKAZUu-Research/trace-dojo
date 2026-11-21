@@ -291,6 +291,28 @@ void main() {
   });
 });
 
+test('record and function types retain their VM hashes inside generic types', () => {
+  const program = `typedef F = void Function();
+typedef G = T Function<T extends num>(T);
+typedef Plain = T Function<T>(T);
+typedef Recursive = T Function<T extends Comparable<T>>(T);
+typedef Named = String Function({required int value, bool? other});
+typedef R = (int, String);
+typedef NamedRecord = (int, {bool ok, G callback});
+typedef Nested = T Function<T>(T Function<U>(U));
+void main() {
+  final types = <Type>[F, List<F>, G, List<G>, Plain, Recursive, Named, R, List<R>,
+    NamedRecord, List<NamedRecord>, Nested];
+  print(types.map((t) => t.hashCode).toList());
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[826101587, 351417490, 803463964, 790716176, 825237186, 1041639999, 372663102, ' +
+      '948253231, 843832041, 1037485068, 498479561, 832321584]\n',
+  });
+});
+
 test('String.fromCharCodes batches large conversions and preserves supplementary code points', () => {
   expect(
     executeProgram(

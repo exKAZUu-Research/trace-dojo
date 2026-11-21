@@ -177,7 +177,7 @@ define('Record.toString', (runtime, receiver) => recordToString(runtime, receive
 
 // Types
 
-define('Type.hashCode', (_runtime, receiver) => BigInt(vmTypeHash((receiver as DartTypeValue).type)));
+define('Type.hashCode', (runtime, receiver) => BigInt(vmTypeHash(runtime, (receiver as DartTypeValue).type)));
 define('Type.==', (_runtime, receiver, [other]) => {
   if (!(other instanceof DartTypeValue)) return false;
   return sameType((receiver as DartTypeValue).type, other.type);
@@ -369,7 +369,7 @@ define('identical', (_runtime, _receiver, [a, b]) => identical(a, b));
 define('identityHashCode', (runtime, _receiver, [value]) => identityHashCode(runtime, value));
 
 export function identityHashCode(runtime: Runtime, value: Value): bigint {
-  if (value instanceof DartTypeValue) return BigInt(vmTypeHash(value.type));
+  if (value instanceof DartTypeValue) return BigInt(vmTypeHash(runtime, value.type));
   return value instanceof DartObject
     ? BigInt(identityOf(value))
     : (runtime.getProperty(value, 'hashCode', undefined) as bigint);
