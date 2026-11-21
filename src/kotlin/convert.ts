@@ -332,7 +332,7 @@ export class Converter extends ExpressionConverter {
     return {
       kind: 'class',
       row: rowOf(node),
-      headerEndRow: rowOf(bodyNode ?? node),
+      headerEndRow: bodyNode?.startPosition.row ?? node.endPosition.row,
       endRow: node.endPosition.row,
       classKind,
       name: identifierName(required(node.childForFieldName('name'))),

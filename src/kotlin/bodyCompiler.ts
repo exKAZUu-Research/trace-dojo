@@ -498,7 +498,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     const steps = [...this.compileFieldSteps(entry, scope, context), ...this.compileMemberSteps(entry, scope, context)];
     this.checkValsInitialized(entry);
     if (symbol.kind === 'enum') this.compileEnumArguments(entry);
-    const { info } = context;
+    const info = { ...context.info, isAtomic: entry.constructorSymbol?.isAtomic ?? false };
     const run = (frame: Frame): Value => {
       for (const [index, evaluate] of defaults.entries()) {
         if (evaluate && frame.locals[index] === MISSING) frame.locals[index] = evaluate(frame);

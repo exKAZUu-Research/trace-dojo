@@ -11,6 +11,34 @@ const withoutLines = (items: TraceItem[]): unknown[] =>
 /** Curriculum-style programs that behave alike in both languages, so Kotlin must reproduce the Java interpreter's trace. */
 test.each([
   {
+    name: 'atomic constructors',
+    java: `public class Main {
+  public static void main(String[] args) {
+    Counter counter = new Counter(1);
+    int result = counter.n;
+  }
+}
+class Counter {
+  int n;
+  Counter(int initial) { // atomic
+    n = initial;
+    n++;
+    n++;
+  }
+}`,
+    kotlin: `fun main() {
+    val counter = Counter(1)
+    val result = counter.n
+}
+class Counter(initial: Int) { // atomic
+    var n = initial
+    init {
+        n++
+        n++
+    }
+}`,
+  },
+  {
     name: 'value-producing branches count as part of their enclosing statement',
     java: `public class Main {
   public static void main(String[] args) {

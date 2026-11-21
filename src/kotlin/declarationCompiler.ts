@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 818 -- The declaration compiler shares symbol and class-linking logic.
+// code-gauge-allow-file fileNcss 819 -- The declaration compiler shares symbol and class-linking logic.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import type {
   ClassDecl,
@@ -421,6 +421,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     constructorSymbol.owner = symbol;
     constructorSymbol.row = primary?.row ?? decl.row;
     constructorSymbol.isLibrary = entry.file.isLibrary;
+    constructorSymbol.isAtomic = !entry.file.isLibrary && this.claimAtomicRange(decl.row, decl.headerEndRow);
     constructorSymbol.returnType = this.unitTypeOrUndefined();
     constructorSymbol.visibility =
       symbol.kind === 'enum'
