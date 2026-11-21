@@ -718,6 +718,26 @@ test('main receives a checked second argument explicitly set to null', () => {
   });
 });
 
+test('dynamic collection contexts constrain generic constructor inference', () => {
+  const program = `void main() {
+  List<dynamic> cells = List.filled(3, null);
+  cells[0] = 1;
+  List raw = List.filled(2, null);
+  raw[0] = 'raw';
+  List<dynamic> generated = List.generate(2, (_) => null);
+  generated[0] = true;
+  Map<String, dynamic> mapped = Map.from({'key': null});
+  mapped['key'] = 1;
+  List<List<dynamic>> nested = List.filled(1, List.filled(2, null));
+  nested[0][0] = 2;
+  print([cells, raw, generated, mapped, nested]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[[1, null, null], [raw, null], [true, null], {key: 1}, [[2, null]]]\n',
+  });
+});
+
 test('dynamic iterable sources are cast before iterator lookup', () => {
   const program = `Iterable<dynamic> copy(dynamic source) sync* {
   for (final value in source) yield value;

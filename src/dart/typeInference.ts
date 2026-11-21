@@ -21,6 +21,13 @@ import {
   upperBound,
 } from './types';
 
+/** A type parameter of a context that inference has not solved yet, which literals infer for themselves. */
+export const INFERENCE_HOLE: DartType = { kind: 'dynamic' };
+
+export function isInferenceHole(type: DartType): boolean {
+  return type === INFERENCE_HOLE;
+}
+
 /**
  * Collects the constraints a context puts on a function's result type: where the result is a subclass of the context's
  * class (`R<int> r = E()`), its type arguments are matched through the subclass's supertype.
@@ -147,7 +154,7 @@ class InferenceConstraints {
 
   private addBound(given: DartType, pattern: DartType & { kind: 'typeParam' }, reversed: boolean): void {
     const bounds = reversed ? this.upper : this.lower;
-    if (!bounds || (reversed && given.kind === 'dynamic')) return;
+    if (!bounds || (reversed && isInferenceHole(given))) return;
     let target = pattern.nullable ? nonNullOf(given) : given;
     if (this.scopedParameters.size > 0 && mentionsTypeParams(target, this.scopedParameters)) {
       target = closeTypeVariables(target, this.scopedParameters, !reversed);

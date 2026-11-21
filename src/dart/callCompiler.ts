@@ -11,11 +11,17 @@ import type {
 import type { ClassInfo, ConstructorInfo, Member, MethodMember, SetterMember } from './classes';
 import { at, type Compiled, type Eval, typeName } from './compilerBase';
 import type { ExtensionInfo, TopLevelFunction, TypeAlias } from './environment';
-import { INFERENCE_HOLE, isInferenceHole, SHORTED } from './expressionCompiler';
+import { SHORTED } from './expressionCompiler';
 import { OperatorCompiler } from './operatorCompiler';
 import type { Frame, Runtime, TypeEnv } from './runtime';
 import type { FunctionContext } from './scope';
-import { inferExtensionReceiver, inferFromContext, inferFromSubtype } from './typeInference';
+import {
+  INFERENCE_HOLE,
+  inferExtensionReceiver,
+  inferFromContext,
+  inferFromSubtype,
+  isInferenceHole,
+} from './typeInference';
 import {
   boundOf,
   coreTypes,

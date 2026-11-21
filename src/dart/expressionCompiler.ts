@@ -21,6 +21,7 @@ import { formatDouble, stringOf } from './format';
 import { BoundedStringParts } from './library/boundedStringParts';
 import type { Frame } from './runtime';
 import { type ConditionFlow, Flow, LocalVar, type StoredFlow } from './scope';
+import { isInferenceHole } from './typeInference';
 import {
   closeTypeVariables,
   coreTypes,
@@ -1671,13 +1672,6 @@ export function primitiveText(value: undefined | boolean | bigint | number | str
 export function isDoubleContext(context: DartType): boolean {
   const base = context.kind === 'interface' ? context : undefined;
   return base?.cls === coreTypes.double;
-}
-
-/** A type parameter of a context that inference has not solved yet, which literals infer for themselves. */
-export const INFERENCE_HOLE: DartType = { kind: 'dynamic' };
-
-export function isInferenceHole(type: DartType): boolean {
-  return type === INFERENCE_HOLE;
 }
 
 /** The element type a context gives a collection literal, as `List<int>` gives `int` to `[...]`. */
