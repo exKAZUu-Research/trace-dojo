@@ -771,12 +771,15 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
         if (!variable.initializer) continue;
         const field = cls.fields.find((candidate) => candidate.name === variable.name) as FieldMember;
         initializedFields.add(field.name);
+        // Each field's initializer is analyzed on its own, so its promotions do not reach the next one.
+        const flow = this.flow;
         const compiled = this.coerce(
           this.compileInitializerValue(variable.initializer, field.type),
           field.type,
           variable.initializer,
           (from, to) => `${from} 型の値は、${to} 型のフィールド ${field.name} に代入できません。`
         );
+        this.flow = flow;
         initialized.push(compiled);
         runs.push({ slot: field.slot, run: compiled.run });
       }

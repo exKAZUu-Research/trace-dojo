@@ -1487,6 +1487,21 @@ void main() {
   ).toMatchObject({ kind: 'compileError' });
 });
 
+test.each(['final int a = n!; final int b = n;', 'final int a = n!, b = n;'])(
+  'Dart field initializers do not share primary parameter promotions: %s',
+  (fields) => {
+    expect(executeProgram('dart', `class C(int? n) { ${fields} }\nvoid main() { print(C(4).b); }`)).toMatchObject({
+      kind: 'compileError',
+    });
+    expect(
+      executeProgram('dart', 'class C(int? n) { final int a = n! + n; }\nvoid main() { print(C(4).a); }')
+    ).toMatchObject({
+      kind: 'executed',
+      stdout: '8\n',
+    });
+  }
+);
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}
