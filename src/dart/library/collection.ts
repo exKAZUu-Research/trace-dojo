@@ -1135,6 +1135,28 @@ class _HashMap<K, V> extends MapBase<K, V> implements HashMap<K, V> {
     }
     return value;
   }
+  // The VM's _HashMap.update, which _CustomHashMap inherits: it hashes with key.hashCode and compares with ==.
+  V update(K key, V Function(V value) update, {V Function()? ifAbsent}) {
+    final identity = _policy?.identity ?? false;
+    final hashCode = identity ? identityHashCode(key) : key.hashCode;
+    final buckets = _buckets;
+    final length = buckets.length;
+    final index = hashCode & (length - 1);
+    var entry = buckets[index];
+    while (entry != null) {
+      if (hashCode == entry.hashCode && (identity ? identical(entry.key, key) : entry.key == key)) {
+        return entry.value = update(entry.value);
+      }
+      entry = entry.next;
+    }
+    if (ifAbsent != null) {
+      V newValue = ifAbsent();
+      _addEntry(buckets, index, length, key, newValue, hashCode);
+      return newValue;
+    } else {
+      throw ArgumentError.value(key, "key", "Key not in map.");
+    }
+  }
   void addAll(Map<K, V> other) {
     other.forEach((K key, V value) {
       this[key] = value;

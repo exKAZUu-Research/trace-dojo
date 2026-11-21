@@ -1407,6 +1407,32 @@ test.each([
   });
 });
 
+test('Dart HashMap.update hashes and compares keys as the VM does', () => {
+  const program = `import 'dart:collection';
+class K {
+  final int v;
+  K(this.v);
+  int get hashCode { print('hash$v'); return v; }
+  bool operator ==(Object o) { print('eq$v'); return o is K && o.v == v; }
+}
+void main() {
+  for (final m in [HashMap<K, int>(), HashMap<K, int>(equals: (a, b) { print('E\${a.v}'); return a.v == b.v; }, hashCode: (k) { print('H\${k.v}'); return k.v; }), HashMap<K, int>.identity()]) {
+    final k = K(7);
+    print(m.update(k, (x) => x + 1, ifAbsent: () => 0));
+    print(m.update(k, (x) => x + 1, ifAbsent: () => 0));
+    print(m.update(K(7), (x) => x + 1, ifAbsent: () => 10));
+    try { m.update(K(8), (x) => x + 1); } catch (e) { print(e); }
+    print(m.length);
+    print('==');
+  }
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      "hash7\n0\nhash7\neq7\n1\nhash7\neq7\n2\nhash8\nInvalid argument (key): Key not in map.: Instance of 'K'\n1\n==\nhash7\n0\nhash7\neq7\n1\nhash7\neq7\n2\nhash8\nInvalid argument (key): Key not in map.: Instance of 'K'\n1\n==\n0\n1\n10\nInvalid argument (key): Key not in map.: Instance of 'K'\n2\n==\n",
+  });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}
