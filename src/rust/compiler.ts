@@ -428,7 +428,7 @@ export class Compiler {
     return read;
   }
 
-  private ownedPlace(expr: Expr): boolean {
+  ownedPlace(expr: Expr): boolean {
     if (expr.kind === 'path') {
       const res = this.annotations.paths.get(expr);
       const owned = res?.kind === 'local' || res?.kind === 'capture';

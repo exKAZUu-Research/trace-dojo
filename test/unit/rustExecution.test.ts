@@ -8317,3 +8317,18 @@ test.each([
   );
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'true\n' });
 });
+
+test.each([
+  ['a consuming method', 'let x = Box::new(Owner(Turtle::new(1, 1)));', 'x.consume();'],
+  ['unwrap', 'let x = Box::new(Some(Turtle::new(1, 1)));', 'drop(x.unwrap());'],
+])('a boxed turtle that %s takes by value disappears from the board', (_name, setup, call) => {
+  const program = rustMain(
+    `
+    let observer = Turtle::new(1, 0);
+    ${setup}
+    ${call}
+    println!("{}", observer.can_move_forward());`,
+    'struct Owner(Turtle);\nimpl Owner { fn consume(self) { drop(self); } }'
+  );
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'true\n' });
+});

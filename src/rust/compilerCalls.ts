@@ -5,6 +5,7 @@ import { construct, derefAll, evaluateValues, stripRefs } from './compilerCommon
 import { placeThrough, valueThrough } from './compilerPlaces';
 import { derefOnce } from './methods';
 import { copyValue, needsCopy } from './ops';
+import { MOVED } from './runtime';
 import { runtimeType } from './runtimeTypes';
 import { CellPlace, DynValue } from './values';
 
@@ -82,14 +83,25 @@ function compileReceiver(c: Compiler, expr: ExprOf<'methodCall'>, method: Method
   const read = byValue ? c.value(expr.receiver) : valueThrough(c, expr.receiver, adjust.derefs);
   if (iterFrom) return (frame) => c.support.toIter(read(frame), iterFrom(frame));
   if (method.fn.selfMode === 'value' && adjust.autoref === 'none' && adjust.derefs.length > 0) {
-    let type = expr.receiver.ty!;
-    for (let index = 0; index < adjust.derefs.length; index++) type = derefOnce(c.program, type)?.type ?? type;
-    const adjusted = runtimeType(type);
-    return (frame) => {
-      const value = read(frame);
-      const self = adjusted(frame);
-      return needsCopy(self) && c.isCopy(self) ? copyValue(value) : value;
-    };
+    return derefedSelf(c, expr.receiver, adjust.derefs, read);
   }
   return read;
+}
+
+/** A receiver taken by value after derefs: a `Copy` value is copied, and through owners only (a `Box`), one that is not `Copy` moves out of the place that owns it. */
+function derefedSelf(c: Compiler, receiver: Expr, derefs: ReceiverAdjust['derefs'], read: Eval): Eval {
+  let type = receiver.ty!;
+  for (let index = 0; index < derefs.length; index++) type = derefOnce(c.program, type)?.type ?? type;
+  const adjusted = runtimeType(type);
+  const owner =
+    derefs.every((step) => step === 'own') && c.ownedPlace(receiver) ? placeThrough(c, receiver, derefs) : undefined;
+  return (frame) => {
+    const self = adjusted(frame);
+    if (c.isCopy(self)) return needsCopy(self) ? copyValue(read(frame)) : read(frame);
+    if (!owner) return read(frame);
+    const place = owner(frame);
+    const value = place.get();
+    place.set(MOVED);
+    return value;
+  };
 }
