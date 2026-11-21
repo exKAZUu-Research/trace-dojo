@@ -510,3 +510,25 @@ fn main() {
     shape: object,
   });
 });
+
+test('a mutable reference moved to another binding leaves the trace, while a reborrow keeps it', () => {
+  const moved = `fn main() {
+    let mut value = 1;
+    let a = &mut value;
+    let b = a;
+    *b = 2;
+    println!("{}", b);
+}
+`;
+  expect(traceProgram('rust', moved, moved).finalVars).toEqual({ value: 2, b: 2 });
+  const reborrowed = `fn main() {
+    let mut value = 1;
+    let a = &mut value;
+    let b: &mut i32 = a;
+    *b = 2;
+    *a += 1;
+    println!("{}", value);
+}
+`;
+  expect(traceProgram('rust', reborrowed, reborrowed).finalVars).toEqual({ value: 3, a: 3, b: 3 });
+});

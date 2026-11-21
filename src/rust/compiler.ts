@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 631 -- Keeps the compilation that shares a function's context and step state together.
+// code-gauge-allow-file fileNcss 642 -- Keeps the compilation that shares a function's context and step state together.
 import type { Annotations, Coercion, FnContext, LocalVar, PathRes } from './annotations';
 import type { Block, Expr, Pattern, Span, Stmt } from './ast';
 import { patternBindings } from './astWalk';
@@ -307,11 +307,27 @@ export class Compiler {
     const read = this.value(expr);
     if (slot === undefined || !expr.ty) return read;
     const type = normalize(shallow(expr.ty));
-    if (type.kind !== 'ref' || type.mutable) return read;
+    if (type.kind !== 'ref') return read;
+    if (type.mutable) return this.movedMutableReference(expr, read);
     if (expr.kind === 'ref' && this.ownedPlace(expr.operand)) {
       return this.directBorrow(expr, expr.operand, slot);
     }
     return this.copiedBorrow(expr, slot, read);
+  }
+
+  /**
+   * A `&mut` that a binding takes from a variable moves out of it, which the trace no longer shows; where the binding's
+   * type is written, rustc reborrows it instead, and the checker marks that.
+   */
+  private movedMutableReference(expr: Expr, read: Eval): Eval {
+    const res = expr.kind === 'path' ? this.annotations.paths.get(expr) : undefined;
+    if (res?.kind !== 'local' || this.annotations.reborrows.has(expr)) return read;
+    const { slot } = res.local;
+    return (frame) => {
+      const value = read(frame);
+      frame.locals[slot] = MOVED;
+      return value;
+    };
   }
 
   /** A shared reference that a binding copies, which follows the referent of the variable it copies, if any. */
