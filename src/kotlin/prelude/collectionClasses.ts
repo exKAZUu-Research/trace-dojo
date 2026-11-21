@@ -1,6 +1,6 @@
 import { kotlin } from './source';
 
-const LIST_READERS = kotlin`
+const listReaders = (iterator: string): string => kotlin`
     external override val size: Int
     external override fun isEmpty(): Boolean
     external override fun contains(element: E): Boolean
@@ -8,8 +8,8 @@ const LIST_READERS = kotlin`
     external override fun get(index: Int): E
     external override fun indexOf(element: E): Int
     external override fun lastIndexOf(element: E): Int
-    external override fun listIterator(): ListIterator<E>
-    external override fun listIterator(index: Int): ListIterator<E>
+    external override fun listIterator(): ${iterator}<E>
+    external override fun listIterator(index: Int): ${iterator}<E>
     external override fun equals(other: Any?): Boolean
     external override fun hashCode(): Int
     external override fun toString(): String
@@ -20,7 +20,7 @@ export const COLLECTION_CLASSES_SOURCE = kotlin`
 package kotlin.collections
 
 abstract external class NativeList<E> : MutableList<E>, RandomAccess {
-    ${LIST_READERS}
+    ${listReaders('MutableListIterator')}
     external override fun iterator(): MutableIterator<E>
     external override fun subList(fromIndex: Int, toIndex: Int): MutableList<E>
     external override fun add(element: E): Boolean
@@ -43,7 +43,7 @@ external class ArrayList<E> : NativeList<E> {
 }
 
 external class PrimitiveArrayList<E> : List<E>, RandomAccess {
-    ${LIST_READERS}
+    ${listReaders('ListIterator')}
     external override fun iterator(): Iterator<E>
     external override fun subList(fromIndex: Int, toIndex: Int): List<E>
 }
@@ -59,10 +59,12 @@ external class ListBuilder<E> : NativeList<E> {
     internal external fun build(): List<E>
 }
 
-external class ItemIterator<T> : MutableIterator<T>, ListIterator<T> {
+external class ItemIterator<T> : MutableListIterator<T> {
     external override fun hasNext(): Boolean
     external override fun next(): T
     external override fun remove()
+    external override fun add(element: T)
+    external override fun set(element: T)
     external override fun hasPrevious(): Boolean
     external override fun previous(): T
     external override fun nextIndex(): Int

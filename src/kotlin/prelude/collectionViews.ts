@@ -32,7 +32,7 @@ private open class ReversedList<T>(private val backing: List<T>) : List<T> {
     override fun iterator(): Iterator<T> = listIterator()
     override fun listIterator(): ListIterator<T> = listIterator(0)
     override fun listIterator(index: Int): ListIterator<T> =
-        ReversedListIterator(backing.listIterator(positionIndex(index)), size)
+        ReversedListIterator(backing.listIterator(positionIndex(index)), backing)
     override fun subList(fromIndex: Int, toIndex: Int): List<T> =
         ReversedList(backing.subList(positionIndex(toIndex), positionIndex(fromIndex)))
 
@@ -62,17 +62,20 @@ private open class ReversedList<T>(private val backing: List<T>) : List<T> {
         joinToString(prefix = "[", postfix = "]") { if (it === this) "(this Collection)" else it.toString() }
 }
 
-private class ReversedListIterator<T>(private val backing: ListIterator<T>, private val size: Int) : ListIterator<T> {
+private open class ReversedListIterator<T>(private val backing: ListIterator<T>, private val source: List<T>) : ListIterator<T> {
     override fun hasNext(): Boolean = backing.hasPrevious()
     override fun next(): T = backing.previous()
     override fun hasPrevious(): Boolean = backing.hasNext()
     override fun previous(): T = backing.next()
-    override fun nextIndex(): Int = size - backing.nextIndex()
+    override fun nextIndex(): Int = source.size - backing.nextIndex()
     override fun previousIndex(): Int = nextIndex() - 1
 }
 
 private class MutableReversedList<T>(private val backing: MutableList<T>) : ReversedList<T>(backing), MutableList<T> {
-    override fun iterator(): MutableIterator<T> = MutableReversedIterator(backing.listIterator(size))
+    override fun iterator(): MutableIterator<T> = listIterator()
+    override fun listIterator(): MutableListIterator<T> = listIterator(0)
+    override fun listIterator(index: Int): MutableListIterator<T> =
+        MutableReversedListIterator(backing.listIterator(positionIndex(index)), backing)
     override fun add(element: T): Boolean {
         backing.add(0, element)
         return true
@@ -96,10 +99,34 @@ private class MutableReversedList<T>(private val backing: MutableList<T>) : Reve
         MutableReversedList(backing.subList(positionIndex(toIndex), positionIndex(fromIndex)))
 }
 
-private class MutableReversedIterator<T>(private val backing: ListIterator<T>) : MutableIterator<T> {
-    override fun hasNext(): Boolean = backing.hasPrevious()
-    override fun next(): T = backing.previous()
-    override fun remove() = (backing as MutableIterator<T>).remove()
+private class MutableReversedListIterator<T>(private val backing: MutableListIterator<T>, source: List<T>) :
+    ReversedListIterator<T>(backing, source), MutableListIterator<T> {
+    private var canModify = false
+
+    override fun next(): T {
+        val value = super.next()
+        canModify = true
+        return value
+    }
+    override fun previous(): T {
+        val value = super.previous()
+        canModify = true
+        return value
+    }
+    override fun remove() {
+        if (!canModify) throw IllegalStateException()
+        backing.remove()
+        canModify = false
+    }
+    override fun set(element: T) {
+        if (!canModify) throw IllegalStateException()
+        backing.set(element)
+    }
+    override fun add(element: T) {
+        backing.add(element)
+        backing.previous()
+        canModify = false
+    }
 }
 
 fun <T> List<T>.asReversed(): List<T> = ReversedList(this)

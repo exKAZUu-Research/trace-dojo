@@ -97,6 +97,28 @@ fun main() {
     stdout: '[, abc]\n[, a, , c, ]\n[, a, b, c, ]\n[, ]\n[abc]\n',
   },
   {
+    name: 'mutable list iterators through nested reversed views',
+    source: `fun main() {
+    val source = mutableListOf(1, 2, 3)
+    val view = source.asReversed().asReversed()
+    val iterator: MutableListIterator<Int> = view.listIterator(1)
+    println(iterator.next())
+    iterator.set(9)
+    iterator.add(8)
+    println(iterator.previous())
+    iterator.remove()
+    println(source)
+    val forward = view.iterator()
+    println(forward.next())
+    forward.remove()
+    println(source)
+    view.addFirst(0)
+    view.addLast(7)
+    println(source)
+}`,
+    stdout: '2\n8\n[1, 9, 3]\n1\n[9, 3]\n[0, 9, 3, 7]\n',
+  },
+  {
     name: 'bulk mutations through a reversed view',
     source: `fun main() {
     val source = mutableListOf(1, 3, 2)

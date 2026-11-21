@@ -1225,6 +1225,9 @@ private fun <T> MutableIterable<T>.filterInPlace(predicate: (T) -> Boolean, pred
 }
 
 // These are the JDK's List.removeFirst and removeLast, which Kotlin calls on the JVM since JDK 21 and which throw no message.
+fun <T> MutableList<T>.addFirst(element: T) = add(0, element)
+fun <T> MutableList<T>.addLast(element: T) { add(element) }
+
 fun <T> MutableList<T>.removeFirst(): T = if (isEmpty()) throw NoSuchElementException() else removeAt(0)
 fun <T> MutableList<T>.removeLast(): T = if (isEmpty()) throw NoSuchElementException() else removeAt(lastIndex)
 fun <T> MutableList<T>.removeFirstOrNull(): T? = if (isEmpty()) null else removeAt(0)

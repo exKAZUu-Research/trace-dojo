@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 712 -- the natives of the collections, which share the helpers of their items.
+// code-gauge-allow-file fileNcss 728 -- the natives of the collections, which share the helpers of their items.
 import { runtimeClassOf } from '../dispatch';
 import { hashOf, stringOf, valueEquals } from '../format';
 import { toInt32 } from '../operators';
@@ -435,56 +435,78 @@ function replaceListRange(values: Value[], from: number, removed: number, added:
   for (const [offset, value] of added.entries()) values[from + offset] = value;
 }
 
-// code-gauge-allow functionNcss 46 -- registers the natives of one class together, in the order the prelude declares them.
+interface ItemIteratorState {
+  source: KObject;
+  kind?: PrimitiveKind | 'Boolean';
+  index: number;
+  expectedModCount: number | undefined;
+  last?: number;
+}
+
+// code-gauge-allow functionNcss 55 -- registers the natives of one class together, in the order the prelude declares them.
 function defineIterators(): void {
   const iterator = 'kotlin.collections.ItemIterator';
-  interface State {
-    source: KObject;
-    kind?: PrimitiveKind | 'Boolean';
-    index: number;
-    expectedModCount: number | undefined;
-    last?: number;
-  }
-  const state = (value: Value): State => (value as KObject).native as unknown as State;
-  const checkModification = (frame: Frame, current: State): void => {
-    if (current.source.modCount !== current.expectedModCount)
-      throwError(frame, 'java.util.ConcurrentModificationException');
-  };
   defineNative(`${iterator}.hasNext()`, (_frame, receiver) => {
-    const current = state(receiver);
+    const current = itemIteratorState(receiver);
     return current.index < indexedSize(current.source);
   });
   defineNative(`${iterator}.next()`, (frame, receiver) => {
-    const current = state(receiver);
-    checkModification(frame, current);
+    const current = itemIteratorState(receiver);
+    checkIteratorModification(frame, current);
     if (current.index >= indexedSize(current.source)) throwError(frame, 'java.util.NoSuchElementException');
     current.last = current.index;
     return indexedItem(current.source, current.index++, current.kind);
   });
   defineNative(`${iterator}.remove()`, (frame, receiver) => {
-    const current = state(receiver);
+    const current = itemIteratorState(receiver);
     if (current.last === undefined) throwError(frame, 'java.lang.IllegalStateException');
-    checkModification(frame, current);
+    checkIteratorModification(frame, current);
     requireResizable(frame, current.source);
     (current.source.items as Value[]).splice(current.last, 1);
-    current.index = current.last;
-    current.last = undefined;
     touch(current.source);
     syncParent(current.source);
-    current.expectedModCount = current.source.modCount;
+    return finishIteratorMutation(current, current.last);
+  });
+  defineNative(`${iterator}.set(T)`, (frame, receiver, [element]) => {
+    const current = itemIteratorState(receiver);
+    if (current.last === undefined) throwError(frame, 'java.lang.IllegalStateException');
+    checkIteratorModification(frame, current);
+    LIST_CHANGING_NATIVES['set(Int, E)'](frame, current.source, [current.last, element]);
     return UNIT;
   });
-  defineNative(`${iterator}.hasPrevious()`, (_frame, receiver) => state(receiver).index > 0);
+  defineNative(`${iterator}.add(T)`, (frame, receiver, [element]) => {
+    const current = itemIteratorState(receiver);
+    checkIteratorModification(frame, current);
+    LIST_CHANGING_NATIVES['add(Int, E)'](frame, current.source, [current.index, element]);
+    return finishIteratorMutation(current, current.index + 1);
+  });
+  defineNative(`${iterator}.hasPrevious()`, (_frame, receiver) => itemIteratorState(receiver).index > 0);
   defineNative(`${iterator}.previous()`, (frame, receiver) => {
-    const current = state(receiver);
-    checkModification(frame, current);
+    const current = itemIteratorState(receiver);
+    checkIteratorModification(frame, current);
     if (current.index <= 0) throwError(frame, 'java.util.NoSuchElementException');
     current.index--;
     current.last = current.index;
     return indexedItem(current.source, current.index, current.kind);
   });
-  defineNative(`${iterator}.nextIndex()`, (_frame, receiver) => state(receiver).index);
-  defineNative(`${iterator}.previousIndex()`, (_frame, receiver) => state(receiver).index - 1);
+  defineNative(`${iterator}.nextIndex()`, (_frame, receiver) => itemIteratorState(receiver).index);
+  defineNative(`${iterator}.previousIndex()`, (_frame, receiver) => itemIteratorState(receiver).index - 1);
+}
+
+function finishIteratorMutation(state: ItemIteratorState, index: number): Value {
+  state.index = index;
+  state.last = undefined;
+  state.expectedModCount = state.source.modCount;
+  return UNIT;
+}
+
+function itemIteratorState(value: Value): ItemIteratorState {
+  return (value as KObject).native as unknown as ItemIteratorState;
+}
+
+function checkIteratorModification(frame: Frame, current: ItemIteratorState): void {
+  if (current.source.modCount !== current.expectedModCount)
+    throwError(frame, 'java.util.ConcurrentModificationException');
 }
 
 // Maps and sets.

@@ -20,6 +20,11 @@ interface ListIterator<out T> : Iterator<T> {
     fun previousIndex(): Int
 }
 
+interface MutableListIterator<T> : ListIterator<T>, MutableIterator<T> {
+    fun add(element: T)
+    fun set(element: T)
+}
+
 interface Iterable<out T> {
     operator fun iterator(): Iterator<T>
 }
@@ -59,6 +64,8 @@ interface MutableList<E> : List<E>, MutableCollection<E> {
     fun removeAt(index: Int): E
     operator fun set(index: Int, element: E): E
     fun addAll(index: Int, elements: Collection<E>): Boolean
+    override fun listIterator(): MutableListIterator<E>
+    override fun listIterator(index: Int): MutableListIterator<E>
     override fun subList(fromIndex: Int, toIndex: Int): MutableList<E>
 }
 
