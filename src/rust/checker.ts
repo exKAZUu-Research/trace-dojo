@@ -12,8 +12,10 @@ import { exprInner } from './checkerExpr';
 import { settleBinaries } from './checkerOperators';
 import { checkParamPatterns, checkPattern } from './checkerPatterns';
 import { checkConstOperations, ConstLint } from './constLint';
+import { neverCompletes } from './divergence';
 import { isIrrefutable, lowerPattern } from './exhaustiveness';
 import { deepNormalize, isPseudo, normalize, Unifier } from './infer';
+import { checkInherentItems } from './inherentItems';
 import { compileError, ItemCollector, lowerType, Module, type Program, resolveImports, type TypeScope } from './items';
 import { dynIteratorTarget, intoIterItem, intoIterShape } from './iterTypes';
 import { checkElidedReturnLifetime, checkFieldLifetimes } from './lifetimeElision';
@@ -230,6 +232,7 @@ export class Checker {
    * the program does not declare (E0117, the orphan rule).
    */
   private checkImplCoherence(): void {
+    checkInherentItems(this.program, this.unifier);
     const impls = new Map<TraitDef, ImplDef[]>();
     for (const impl of this.program.impls) {
       const traitRef = impl.trait;
@@ -1195,7 +1198,7 @@ export class Checker {
           );
         }
         if (stmt.semi && t.kind === 'var' && !t.v.literal) this.deferredUnitStatement(stmt.expr, type);
-        return t.kind === 'never';
+        return neverCompletes(stmt.expr);
       }
       case 'empty': {
         return false;

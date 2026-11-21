@@ -521,7 +521,7 @@ export class ItemCollector {
       if (prefix) fn.nativeKey = `${prefix}::${method.name}`;
       impl.methods.set(method.name, fn);
     }
-    for (const constant of item.consts) impl.consts.set(constant.name, this.constDef(constant, module, impl));
+    for (const constant of item.consts) this.implConst(constant, module, impl);
     this.implLowering.push(() => {
       const params = new Map(impl.params.map((param) => [param.name, param]));
       const scope: TypeScope = { module, params, selfType: undefined };
@@ -600,6 +600,13 @@ export class ItemCollector {
         compileError(item.span, `標準ライブラリのトレイト ${trait.name} の実装は、この採点環境では使えません。`);
       }
     }
+  }
+
+  private implConst(constant: ConstItem, module: Module, impl: ImplDef): void {
+    if (impl.consts.has(constant.name) || impl.methods.has(constant.name)) {
+      compileError(constant.span, `${constant.name} が2回宣言されています。`);
+    }
+    impl.consts.set(constant.name, this.constDef(constant, module, impl));
   }
 
   private constDef(item: ConstItem, module: Module, impl: ImplDef | undefined): ConstDef {

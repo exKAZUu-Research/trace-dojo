@@ -7921,3 +7921,44 @@ fn main() {
     });
   }
 });
+
+test('a statement whose operand never finishes ends its function, and disjoint impls may share names', () => {
+  const program = `struct Wrap<T>(T);
+impl Wrap<i32> { fn get(&self) -> i32 { 1 } }
+impl Wrap<String> { fn get(&self) -> i32 { 2 } }
+struct A;
+impl A { fn f() -> i32 { 1 } const K: i32 = 3; }
+impl A { fn g() -> i32 { 5 } }
+fn id(n: i32) -> i32 { n }
+fn assigned() -> i32 { let mut n = 0; n = panic!("stop"); }
+fn printed() -> i32 { println!("{}", panic!("stop")); }
+fn passed() -> i32 { id(todo!()); }
+fn main() {
+    println!("{} {} {}", Wrap(1).get(), Wrap(String::new()).get(), A::f() + A::g() + A::K);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '1 2 9\n' });
+});
+
+test.each([
+  ['a constant declared twice in an impl', 'struct S;\nimpl S { const X: i32 = 1; const X: i32 = 2; }', '2回'],
+  [
+    'a method defined in two impls of one type',
+    'struct S;\nimpl S { fn f() -> i32 { 1 } }\nimpl S { fn f() -> i32 { 2 } }',
+    '2回定義',
+  ],
+  [
+    'a method of a generic impl repeated for one of its types',
+    'struct W<T>(T);\nimpl<T> W<T> { fn get(&self) -> i32 { 1 } }\nimpl W<i32> { fn get(&self) -> i32 { 2 } }',
+    '2回定義',
+  ],
+  [
+    'a function that only may panic before its end',
+    'fn cond() -> bool { false }\nfn stop() -> i32 { let _ = cond() && panic!("x"); }',
+    '値を返していません',
+  ],
+])('rejects %s', (_name, items, message) => {
+  expect(executeProgram('rust', rustMain('', items))).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ message: expect.stringContaining(message) })],
+  });
+});
