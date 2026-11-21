@@ -8264,6 +8264,20 @@ void main() { print([select([false]), select([true]), select(null)]); }`;
     });
     expect(executeProgram('dart', program(', _ => 3'))).toMatchObject({ kind: 'executed', stdout: '[2, 2, -1]\n' });
   }
+  for (const pattern of [
+    '([true, ...] || [false, ...]!)',
+    '(([true, ...]?)! || [false, ...]?)',
+    '(([true, ...]!)? || [false, ...]?)',
+    '(([true, ...] || [false, ...])! || [true, ...])',
+    '([true, ...]? || [false, ...]? || [_, ...]!)',
+    '((null || [true, ...]) || [false, ...])',
+  ]) {
+    const program = `int select(List<bool>? x) => switch (x) {
+  null => -1, [] => 0, ${pattern} => 2,
+};
+void main() { print([select([false]), select([true]), select(null)]); }`;
+    expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[2, 2, -1]\n' });
+  }
   const nullable = `int select(List<bool>? x) => switch (x) { [] => 0, ([_, ...]? || [_, ...]!) => 1 };
 int nested(List<bool>? x) => switch (x) { [] => 0, (([_, ...]!)? || [_, ...]?) => 1 };
 void main() { print([select([false]), nested([false])]); }`;

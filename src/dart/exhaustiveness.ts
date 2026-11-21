@@ -3,7 +3,7 @@ import type { Expression, Pattern, Span } from './ast';
 import { nullPatternComparison } from './astWalk';
 import type { ClassInfo, FieldMember } from './classes';
 import type { PatternCompiler } from './patternCompiler';
-import { coverageDisjuncts } from './patternCoverageUnion';
+import { coverageDisjuncts, isCoverageListShape } from './patternCoverageUnion';
 import type { Frame } from './runtime';
 import {
   asInstanceOf,
@@ -184,6 +184,7 @@ class ObjectSpaces {
   }
 
   private splitList(space: ListSpace, pattern: Extract<Pattern, { kind: 'list' }>): ListSpace[] | undefined {
+    if (isCoverageListShape(pattern)) return undefined;
     const bounds = listPatternBounds(this.compiler, pattern, space);
     if (!bounds) return undefined;
     const { rest, fixed } = bounds;
@@ -232,6 +233,8 @@ class ObjectSpaces {
   // code-gauge-allow functionCognitiveComplexity 16 -- Check the known child spaces for each supported pattern shape.
   private excludesFixedField(pattern: Pattern, field: Space): boolean {
     if (field.kind === 'constant' || field.kind === 'null') return covers(this.compiler, pattern, field) === false;
+    const arms = coverageDisjuncts(this.compiler, pattern);
+    if (arms) return arms.every((arm) => this.excludesFixedField(arm, field));
     switch (pattern.kind) {
       case 'parenthesized':
       case 'nullCheck':
@@ -240,9 +243,6 @@ class ObjectSpaces {
       }
       case 'and': {
         return this.excludesFixedField(pattern.left, field) || this.excludesFixedField(pattern.right, field);
-      }
-      case 'or': {
-        return coverageDisjuncts(this.compiler, pattern).every((arm) => this.excludesFixedField(arm, field));
       }
       case 'record': {
         if (field.kind !== 'record') return false;
@@ -269,6 +269,7 @@ class ObjectSpaces {
   private excludesList(pattern: Extract<Pattern, { kind: 'list' }>, space: ListSpace): boolean {
     const bounds = listPatternBounds(this.compiler, pattern, space);
     if (!bounds) return true;
+    if (isCoverageListShape(pattern)) return false;
     const { rest, fixed } = bounds;
     for (const [index, element] of pattern.elements.entries()) {
       if (element.kind === 'rest') {
@@ -353,15 +354,14 @@ class ObjectSpaces {
 }
 
 function patternAlternatives(compiler: PatternCompiler, pattern: Pattern): Pattern[] {
+  const arms = coverageDisjuncts(compiler, pattern);
+  if (arms) return arms.flatMap((arm) => patternAlternatives(compiler, arm));
   switch (pattern.kind) {
     case 'parenthesized':
     case 'cast':
     case 'nullCheck':
     case 'nullAssert': {
       return patternAlternatives(compiler, pattern.pattern);
-    }
-    case 'or': {
-      return coverageDisjuncts(compiler, pattern).flatMap((arm) => patternAlternatives(compiler, arm));
     }
     case 'and': {
       return [...patternAlternatives(compiler, pattern.left), ...patternAlternatives(compiler, pattern.right)];
@@ -484,7 +484,7 @@ function expandInterface(base: DartType & { kind: 'interface' }, listCutoff: num
     }));
   }
   if (cls.modifiers.isSealed) return expandSealed(base, listCutoff, listDepth);
-  const list = listCutoff > 0 && listDepth > 0 ? asInstanceOf(base, coreTypes.list) : undefined;
+  const list = listDepth > 0 ? asInstanceOf(base, coreTypes.list) : undefined;
   if (list) return expandList(base, list.args[0] ?? DYNAMIC, listCutoff, listDepth);
   return [{ kind: 'type', type: base }];
 }
@@ -526,13 +526,13 @@ function listLengthCutoff(compiler: PatternCompiler, patterns: Pattern[]): numbe
   let prefix = 0;
   let suffix = 0;
   const visit = (pattern: Pattern): void => {
-    if (pattern.kind !== 'list') return;
+    if (pattern.kind !== 'list' || isCoverageListShape(pattern)) return;
     for (const element of pattern.elements) {
       if (element.kind !== 'rest') cutoff = Math.max(cutoff, listLengthCutoff(compiler, [element]));
     }
     const rest = pattern.elements.findIndex((element) => element.kind === 'rest');
     if (rest === -1) {
-      cutoff = Math.max(cutoff, pattern.elements.length + 1);
+      prefix = Math.max(prefix, pattern.elements.length);
       return;
     }
     const after = pattern.elements.length - rest - 1;
@@ -549,6 +549,10 @@ function listNesting(compiler: PatternCompiler, pattern: Pattern): number {
   let depth = 0;
   visitNestedPatterns(compiler, pattern, (part) => {
     if (part.kind !== 'list') return;
+    if (isCoverageListShape(part)) {
+      depth = Math.max(depth, 1);
+      return;
+    }
     let nested = 0;
     for (const element of part.elements) {
       const child = element.kind === 'rest' ? element.pattern : element;
@@ -561,11 +565,12 @@ function listNesting(compiler: PatternCompiler, pattern: Pattern): number {
 
 function visitNestedPatterns(compiler: PatternCompiler, pattern: Pattern, visit: (pattern: Pattern) => void): void {
   visit(pattern);
+  const arms = coverageDisjuncts(compiler, pattern);
+  if (arms) {
+    for (const arm of arms) visitNestedPatterns(compiler, arm, visit);
+    return;
+  }
   switch (pattern.kind) {
-    case 'or': {
-      for (const arm of coverageDisjuncts(compiler, pattern)) visitNestedPatterns(compiler, arm, visit);
-      break;
-    }
     case 'and': {
       visitNestedPatterns(compiler, pattern.left, visit);
       visitNestedPatterns(compiler, pattern.right, visit);
@@ -614,6 +619,8 @@ function subclassType(supertype: DartType & { kind: 'interface' }, subclass: Cla
 function coversAll(compiler: PatternCompiler, pattern: Pattern, type: DartType): boolean {
   const comparison = nullPatternComparison(pattern);
   if (comparison) return comparison === '==' ? isSubtype(type, NULL) : !isPotentiallyNullable(type);
+  const arms = coverageDisjuncts(compiler, pattern);
+  if (arms) return arms.some((arm) => coversAll(compiler, arm, type));
   switch (pattern.kind) {
     case 'wildcard':
     case 'variable': {
@@ -623,9 +630,6 @@ function coversAll(compiler: PatternCompiler, pattern: Pattern, type: DartType):
     }
     case 'parenthesized': {
       return coversAll(compiler, pattern.pattern, type);
-    }
-    case 'or': {
-      return coverageDisjuncts(compiler, pattern).some((arm) => coversAll(compiler, arm, type));
     }
     case 'and': {
       return coversAll(compiler, pattern.left, type) && coversAll(compiler, pattern.right, type);
@@ -711,12 +715,11 @@ function covers(compiler: PatternCompiler, pattern: Pattern, space: Space): Cove
   const comparison = nullPatternComparison(pattern);
   if (comparison)
     return comparison === '==' ? space.kind === 'null' : space.kind !== 'null' && !isPotentiallyNullable(space.type);
+  const arms = coverageDisjuncts(compiler, pattern);
+  if (arms) return combineCoverage(arms, (arm) => covers(compiler, arm, space), false);
   switch (pattern.kind) {
     case 'parenthesized': {
       return covers(compiler, pattern.pattern, space);
-    }
-    case 'or': {
-      return combineCoverage(coverageDisjuncts(compiler, pattern), (arm) => covers(compiler, arm, space), false);
     }
     case 'and': {
       return combineCoverage([pattern.left, pattern.right], (part) => covers(compiler, part, space), true);
@@ -770,6 +773,7 @@ function listCovers(
 ): Coverage {
   const bounds = listPatternBounds(compiler, pattern, space);
   if (!bounds) return false;
+  if (isCoverageListShape(pattern)) return true;
   const { rest, fixed } = bounds;
   return combineCoverage(
     pattern.elements.entries(),
