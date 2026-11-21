@@ -2596,6 +2596,38 @@ void main() {
   });
 });
 
+test('Function.apply snapshots map length and uses the map forEach override', () => {
+  const source = `import 'dart:collection';
+class Arguments extends MapBase<Symbol, dynamic> {
+  final data = <Symbol, dynamic>{#x: 7};
+  bool stopped = false;
+  int get length { print('length'); return data.length; }
+  Iterable<Symbol> get keys => data.keys;
+  dynamic operator [](Object? key) => data[key];
+  void operator []=(Symbol key, dynamic value) { data[key] = value; }
+  void clear() => data.clear();
+  dynamic remove(Object? key) => data.remove(key);
+  void forEach(void Function(Symbol, dynamic) callback) {
+    print('forEach');
+    if (stopped) throw 'stop';
+    callback(#x, 9);
+  }
+}
+void f({int x = 0}) { print(x); }
+void main() {
+  var args = Arguments();
+  Function.apply(f, [], args);
+  args.stopped = true;
+  try { Function.apply(f, [], args); } catch (e) { print(e); }
+  args.clear();
+  Function.apply(f, [], args);
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'length\nforEach\n9\nlength\nforEach\nstop\nlength\n0\n',
+  });
+});
+
 test('Function.apply and regexp match groups read any Dart List', () => {
   const program = `import 'dart:collection';
 class View extends ListBase<int> {

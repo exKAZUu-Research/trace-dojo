@@ -427,7 +427,24 @@ class StringBuffer implements StringSink {
 }
 
 abstract final class Function {
-  external static dynamic apply(Function fn, List<dynamic>? positionalArguments, [Map<Symbol, dynamic>? namedArguments]);
+  static dynamic apply(Function function, List<dynamic>? positionalArguments, [Map<Symbol, dynamic>? namedArguments]) {
+    final int numPositionalArguments = 1 + (positionalArguments?.length ?? 0);
+    final int numNamedArguments = namedArguments?.length ?? 0;
+    final arguments = List<dynamic>.filled(numPositionalArguments + numNamedArguments, null);
+    arguments[0] = function;
+    if (positionalArguments != null) arguments.setRange(1, numPositionalArguments, positionalArguments);
+    final names = List<String?>.filled(numNamedArguments, null);
+    int argumentIndex = numPositionalArguments;
+    int nameIndex = 0;
+    if (numNamedArguments > 0) {
+      namedArguments?.forEach((name, value) {
+        arguments[argumentIndex++] = value;
+        names[nameIndex++] = (name as _Symbol)._name;
+      });
+    }
+    return _apply(arguments, names);
+  }
+  external static dynamic _apply(List<dynamic> arguments, List<String?> names);
   external int get hashCode;
   external bool operator ==(Object other);
 }

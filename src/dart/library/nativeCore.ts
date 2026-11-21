@@ -3,20 +3,11 @@ import { scopedMemberName } from '../classes';
 import { encodableText, formatDouble, stringOf } from '../format';
 import { HashStore } from '../hashStore';
 import type { Runtime } from '../runtime';
-import { coreTypes, type DartType, DYNAMIC, sameType, vmTypeString } from '../types';
+import { coreTypes, type DartType, sameType, vmTypeString } from '../types';
 import { DartClosure, DartList, DartObject, DartPackedList, DartRecord, DartTypeValue, type Value } from '../values';
 import { appendJsonQuoted, BoundedStringParts } from './boundedStringParts';
 import { appendRegExpDescription, isRegExp } from './nativeRegExp';
-import {
-  define,
-  defineConstructor,
-  forEachValue,
-  intArg,
-  iterableValues,
-  listElement,
-  listLength,
-  stringArg,
-} from './nativeSupport';
+import { define, defineConstructor, forEachValue, intArg, iterableValues, stringArg } from './nativeSupport';
 
 // Object
 
@@ -132,52 +123,23 @@ define('Function.==', (_runtime, receiver, [other]) => {
     identical(receiver.receiver, other.receiver)
   );
 });
-define('Function.apply', (runtime, _receiver, [fn, positional, namedArguments]) => {
-  const args: Value[] = [];
-  const frame = runtime.currentFrame;
-  const mark = frame?.temporaries.length ?? 0;
-  frame?.temporaries.push(fn, positional, namedArguments, new DartList(coreTypes.list, DYNAMIC, args, true));
-  try {
-    if (positional !== undefined) readApplyArguments(runtime, positional, args);
-    return runtime.callValue(
-      fn,
-      { positional: args, named: readApplyNamedArguments(runtime, namedArguments), invocation: 'apply' },
-      [],
-      runtime.userCallRow
-    );
-  } finally {
-    if (frame) frame.temporaries.length = mark;
-  }
-});
-
-function readApplyArguments(runtime: Runtime, list: Value, result: Value[]): void {
-  const length = listLength(runtime, list);
-  if (length < 0n) runtime.throwError('RangeError', 'value', [length, 'length']);
-  runtime.allocate(Number(length));
-  for (let index = length - 1n; index >= 0n; index--) {
+define('Function._apply', (runtime, _receiver, [argumentsList, namesList]) => {
+  const args = (argumentsList as DartList).elements;
+  const names = (namesList as DartList).elements;
+  const end = args.length - names.length;
+  const named = names.length === 0 ? undefined : new Map<string, Value>();
+  runtime.allocate(args.length - 1);
+  for (const [index, name] of names.entries()) {
     runtime.spend();
-    result[Number(index)] = listElement(runtime, list, index);
+    named?.set(stringArg(runtime, name, 'name'), args[end + index]);
   }
-}
-
-function readApplyNamedArguments(runtime: Runtime, args: Value): Map<string, Value> | undefined {
-  if (!(args instanceof DartObject)) return undefined;
-  const named = new Map<string, Value>();
-  const frame = runtime.currentFrame;
-  const entries = runtime.getProperty(args, 'entries', undefined);
-  frame?.temporaries.push(entries);
-  const iterator = runtime.getProperty(entries, 'iterator', undefined);
-  frame?.temporaries.push(iterator);
-  while (runtime.invoke(iterator, 'moveNext', { positional: [], named: undefined }, [], undefined) === true) {
-    const entry = runtime.getProperty(iterator, 'current', undefined);
-    const key = runtime.getProperty(entry, 'key', undefined);
-    const name = readSymbolName(runtime, key);
-    const value = runtime.getProperty(entry, 'value', undefined);
-    frame?.temporaries.push(value);
-    named.set(name, value);
-  }
-  return named;
-}
+  return runtime.callValue(
+    args[0],
+    { positional: args.slice(1, end), named, invocation: 'apply' },
+    [],
+    runtime.userCallRow
+  );
+});
 
 function readSymbolName(runtime: Runtime, symbol: Value): string {
   if (!(symbol instanceof DartObject) || symbol.cls !== runtime.links.classNamed('_Symbol')) {
