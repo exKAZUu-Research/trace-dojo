@@ -13,7 +13,6 @@ import {
   type MethodMember,
   sourceMemberName,
 } from './classes';
-import { BoundedStringParts } from './library/boundedStringParts';
 import { RecordShapes } from './recordShapes';
 import {
   asInstanceOf,
@@ -658,23 +657,25 @@ export class Runtime implements TracedRuntime<Frame> {
 
   private throwClosureMismatch(closure: DartClosure, args: Arguments, typeArgs: readonly DartType[]): never {
     const name = closure.description.qualifiedName ?? closure.description.name ?? '<anonymous closure>';
-    const output = new BoundedStringParts(this);
-    output.append(`NoSuchMethodError: Closure call with mismatched arguments: function '${name}'\nReceiver: `);
-    output.append(this.links.stringify(this, closure));
-    output.append(`\nTried calling: ${name}`);
-    if (typeArgs.length > 0) {
-      output.append('<');
-      for (const [index, type] of typeArgs.entries()) {
-        if (index > 0) output.append(', ');
-        output.append(vmTypeString(type));
-      }
-      output.append('>');
-    }
-    output.append('(');
-    appendCallArguments(this, output, args);
-    output.append(`)\nFound: ${name}`);
-    output.append(vmTypeString(closure.type));
-    return this.throwError('NoSuchMethodError', '_withMessage', [output.text()]);
+    const invocation = this.newInvocation(name, 'method', args, typeArgs);
+    return this.throwError('NoSuchMethodError', '_withFound', [
+      closure,
+      invocation,
+      `${name}${vmTypeString(closure.type)}`,
+    ]);
+  }
+
+  throwMissingExternal(
+    owner: string | undefined,
+    name: string,
+    kind: 'method' | 'getter' | 'setter',
+    args: Arguments,
+    typeArgs: readonly DartType[]
+  ): never {
+    return this.throwError('NoSuchMethodError', '_withExternal', [
+      owner,
+      this.newInvocation(name, kind, args, typeArgs),
+    ]);
   }
 
   /**
@@ -716,6 +717,7 @@ export class Runtime implements TracedRuntime<Frame> {
     args: Arguments,
     typeArgs: readonly DartType[]
   ): DartObject {
+    this.allocate(2 + args.positional.length + typeArgs.length);
     const named = this.links.newMap(this, interfaceType(this.links.classNamed('Symbol')), objectType(true), false);
     for (const [key, value] of args.named ?? []) {
       this.invoke(named, '[]=', { positional: [this.symbol(key), value], named: undefined }, [], undefined);
@@ -895,24 +897,6 @@ function vmSignature(memberName: string, member: Member & { kind: 'method' }): s
   const params = member.owner.typeParams;
   const map = new Map(params.map((param, index) => [param, typeParamType(new TypeParam(`X${index}`))]));
   return `${memberName}${vmTypeString(substitute(member.type, map))}`;
-}
-
-/** Arguments as `Tried calling:` lists them: positional ones in order, then named ones by name. */
-function appendCallArguments(runtime: Runtime, output: BoundedStringParts, args: Arguments): void {
-  let separator = '';
-  for (const value of args.positional) {
-    output.append(separator);
-    output.append(runtime.links.stringify(runtime, value));
-    separator = ', ';
-  }
-  const named = [...(args.named ?? [])].toSorted(([a], [b]) => (a < b ? -1 : 1));
-  for (const [key, value] of named) {
-    output.append(separator);
-    output.append(key);
-    output.append(': ');
-    output.append(runtime.links.stringify(runtime, value));
-    separator = ', ';
-  }
 }
 
 /**

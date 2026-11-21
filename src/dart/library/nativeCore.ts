@@ -253,26 +253,36 @@ export function safeToStringOf(runtime: Runtime, value: Value): string {
   if (value instanceof DartObject && value.native instanceof HashStore) {
     return `${value.native.isMap ? '_Map' : '_Set'} len:${value.native.size}`;
   }
+  if (value instanceof DartClosure || value instanceof DartTypeValue) return stringOf(runtime, value);
   return safeToString(runtime, value);
 }
 
-define('NoSuchMethodError._describe', (runtime, _receiver, [receiver, invocation, found]) => {
+define('NoSuchMethodError._describe', (runtime, _receiver, [receiver, invocation, found, isExternal]) => {
   const field = (name: string): Value => runtime.getProperty(invocation, name, undefined);
   const symbolName = scopedMemberName('_name', 'dart:core');
   const member = runtime.getProperty(field('memberName'), symbolName, undefined) as string;
   const kind = field('isGetter') === true ? 'getter' : field('isSetter') === true ? 'setter' : 'method';
   const call = describeInvocation(runtime, member, kind, field);
   const output = new BoundedStringParts(runtime);
-  if (receiver === undefined) {
+  if (isExternal === true) {
+    output.append(
+      receiver === undefined
+        ? `NoSuchMethodError: No top-level ${kind} '${member}' declared.`
+        : `NoSuchMethodError: No static ${kind} '${member}' declared in class '${receiver as string}'.`
+    );
+  } else if (receiver === undefined) {
     output.append(`NoSuchMethodError: The ${kind} '${member}' was called on null.`);
+  } else if (receiver instanceof DartClosure) {
+    output.append(`NoSuchMethodError: Closure call with mismatched arguments: function '${member}'`);
   } else {
-    const typeName = vmTypeString(runtime.runtimeTypeOf(receiver));
-    const className = typeof found === 'string' ? typeName : typeName.replace(/<.*$/, '');
+    const className = stringOf(runtime, runtime.getProperty(receiver, 'runtimeType', undefined));
     output.append(`NoSuchMethodError: Class '${className}' has no instance ${kind} '${member}'`);
     output.append(typeof found === 'string' ? ' with matching arguments.' : '.');
   }
   output.append('\nReceiver: ');
-  output.append(safeToStringOf(runtime, receiver));
+  output.append(
+    isExternal === true ? ((receiver as string | undefined) ?? 'top-level') : safeToStringOf(runtime, receiver)
+  );
   output.append('\nTried calling: ');
   output.append(call);
   if (receiver !== undefined && typeof found === 'string') {

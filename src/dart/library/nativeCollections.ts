@@ -1123,13 +1123,7 @@ define('Set.toString', (runtime, receiver) =>
 defineConstructor('Map.new', (runtime, _instance, _args, typeArgs) =>
   newMap(runtime, typeArgs[0] ?? DYNAMIC, typeArgs[1] ?? DYNAMIC)
 );
-function mapFrom(
-  runtime: Runtime,
-  other: Value,
-  typeArgs: readonly DartType[],
-  check: boolean,
-  isConst = false
-): DartObject {
+function mapFrom(runtime: Runtime, other: Value, typeArgs: readonly DartType[], check: boolean): DartObject {
   const map = newMap(runtime, typeArgs[0] ?? DYNAMIC, typeArgs[1] ?? DYNAMIC);
   return populateHashObject(runtime, map, () => {
     // Map.from sets each entry as forEach gives it; Map.of is addAll, which may copy another map's table outright.
@@ -1142,7 +1136,6 @@ function mapFrom(
         store(map).set(key, value);
       });
     }
-    (map as DartObject & { unmodifiable?: boolean }).unmodifiable = isConst;
   });
 }
 defineConstructor('Map.from', (runtime, _instance, args, typeArgs) =>
@@ -1152,9 +1145,8 @@ defineConstructor('Map.of', (runtime, _instance, args, typeArgs) =>
   mapFrom(runtime, args.positional[0], typeArgs, false)
 );
 defineConstructor('Map.unmodifiable', (runtime, _instance, args, typeArgs) => {
-  const map = mapFrom(runtime, args.positional[0], typeArgs, true, true);
-  map.cls = runtime.links.classNamed('UnmodifiableMapView');
-  return map;
+  const map = mapFrom(runtime, args.positional[0], typeArgs, true);
+  return runtime.links.construct(runtime, 'UnmodifiableMapView', '', [map], undefined, typeArgs);
 });
 defineConstructor('Map.fromIterable', (runtime, _instance, args, typeArgs) => {
   const map = newMap(runtime, typeArgs[0] ?? DYNAMIC, typeArgs[1] ?? DYNAMIC);

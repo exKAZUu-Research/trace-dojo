@@ -644,10 +644,19 @@ abstract class _UnmodifiableMapBase<K, V> extends MapBase<K, V> {
 class UnmodifiableMapView<K, V> extends _UnmodifiableMapBase<K, V> {
   final Map<K, V> _map;
   UnmodifiableMapView(Map<K, V> map) : _map = map;
+  Map<RK, RV> cast<RK, RV>() => UnmodifiableMapView<RK, RV>(_map.cast<RK, RV>());
   V? operator [](Object? key) => _map[key];
   Iterable<K> get keys => _map.keys;
+  Iterable<V> get values => _map.values;
+  Iterable<MapEntry<K, V>> get entries => _map.entries;
+  bool get isEmpty => _map.isEmpty;
+  bool get isNotEmpty => _map.isNotEmpty;
   int get length => _map.length;
   bool containsKey(Object? key) => _map.containsKey(key);
+  bool containsValue(Object? value) => _map.containsValue(value);
+  void forEach(void Function(K, V) action) => _map.forEach(action);
+  Map<KK, VV> map<KK, VV>(MapEntry<KK, VV> Function(K, V) transform) => _map.map<KK, VV>(transform);
+  String toString() => _map.toString();
 }
 
 /** The map List.asMap returns: a view of the list, as the VM ListMapView. */

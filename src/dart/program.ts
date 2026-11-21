@@ -151,7 +151,6 @@ function arrangeVisibility(envs: ReadonlyMap<string, LibraryEnv>): void {
     'EfficientLengthTakeIterable',
     'EfficientLengthSkipIterable',
     'EfficientLengthFollowedByIterable',
-    'UnmodifiableMapView',
     'UnmodifiableSetView',
   ]) {
     core.hiddenNames.add(name);

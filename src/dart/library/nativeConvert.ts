@@ -367,6 +367,7 @@ class JsonParser {
   }
 
   private stringEscape(): string {
+    if (this.position >= this.text.length) this.fail('Unterminated string', this.text.length);
     const escape = this.text[this.position++];
     const simple = JSON_STRING_ESCAPES[escape];
     if (simple !== undefined) return simple;

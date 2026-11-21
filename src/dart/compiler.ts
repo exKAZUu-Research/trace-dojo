@@ -35,7 +35,6 @@ import {
   type TypeAlias,
 } from './environment';
 import { initializeField, lateFieldGetter, lateFieldSetter } from './lateFields';
-import { BoundedStringParts } from './library/boundedStringParts';
 import { markCovariantParameters, MemberCompiler } from './memberCompiler';
 import { Frame, type FunctionInfo, type Runtime, type TypeEnv } from './runtime';
 import type { FunctionContext } from './scope';
@@ -251,6 +250,7 @@ export class Compiler extends MemberCompiler {
     }
     for (const body of this.deferredBodies) body();
     this.deferredBodies.length = 0;
+    this.checkConstructorRedirects();
     if (this.atomicRows && !this.isLibraryCode) {
       for (const row of this.atomicRows) if (!this.usedAtomicRows.has(row)) this.error({ row }, misplacedAtomicMessage);
     }
@@ -1738,24 +1738,7 @@ function missingExternal(key: string, kind: 'method' | 'getter' | 'setter'): Cal
   const dot = key.indexOf('.');
   const owner = dot === -1 ? undefined : key.slice(0, dot);
   const name = key.slice(dot + 1);
-  return (runtime, _receiver, args) => {
-    const output = new BoundedStringParts(runtime);
-    output.append(
-      owner
-        ? `NoSuchMethodError: No static ${kind} '${name}' declared in class '${owner}'.\nReceiver: ${owner}`
-        : `NoSuchMethodError: No top-level ${kind} '${name}' declared.\nReceiver: top-level`
-    );
-    output.append(`\nTried calling: ${name}`);
-    if (kind === 'method') {
-      output.append('(');
-      for (const [index, value] of args.positional.entries()) {
-        if (index > 0) output.append(', ');
-        output.append(runtime.links.stringify(runtime, value));
-      }
-      output.append(')');
-    }
-    return runtime.throwError('NoSuchMethodError', '_withMessage', [output.text()]);
-  };
+  return (runtime, _receiver, args, typeArgs) => runtime.throwMissingExternal(owner, name, kind, args, typeArgs);
 }
 
 /**

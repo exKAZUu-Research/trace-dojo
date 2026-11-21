@@ -732,12 +732,14 @@ final class StackOverflowError implements Error {
 }
 
 class NoSuchMethodError extends Error {
-  final String _message;
-  NoSuchMethodError._withInvocation(Object? receiver, Invocation invocation) : _message = _describe(receiver, invocation, null);
-  NoSuchMethodError._withFound(Object? receiver, Invocation invocation, String found) : _message = _describe(receiver, invocation, found);
-  NoSuchMethodError._withMessage(this._message);
-  NoSuchMethodError.withInvocation(Object? receiver, Invocation invocation)
-      : _message = invocation is _InvocationMirror ? _describe(receiver, invocation, null) : _toStringPlain(receiver, invocation);
+  final Object? _receiver;
+  final Invocation _invocation;
+  final String? _found;
+  final bool _isExternal;
+  NoSuchMethodError._withInvocation(this._receiver, this._invocation) : _found = null, _isExternal = false;
+  NoSuchMethodError._withFound(this._receiver, this._invocation, this._found) : _isExternal = false;
+  NoSuchMethodError._withExternal(this._receiver, this._invocation) : _found = null, _isExternal = true;
+  NoSuchMethodError.withInvocation(this._receiver, this._invocation) : _found = null, _isExternal = false;
   static String _toStringPlain(Object? receiver, Invocation invocation) {
     var name = invocation.memberName._name;
     var receiverType = receiver.runtimeType.toString();
@@ -773,8 +775,10 @@ class NoSuchMethodError extends Error {
     buffer.write(")");
     return buffer.toString();
   }
-  external static String _describe(Object? receiver, Invocation invocation, String? found);
-  String toString() => _message;
+  external static String _describe(Object? receiver, Invocation invocation, String? found, bool isExternal);
+  String toString() => _invocation is _InvocationMirror
+      ? _describe(_receiver, _invocation, _found, _isExternal)
+      : _toStringPlain(_receiver, _invocation);
 }
 
 abstract interface class LateInitializationError implements Error {}
@@ -2144,13 +2148,9 @@ class _Map<K, V> extends Map<K, V> implements LinkedHashMap<K, V> {
   _Map._() : super._base();
 }
 
-/** The VM's classes of constant and unmodifiable maps and sets, which only their runtimeType shows. */
+/** The VM's classes of constant maps and sets and unmodifiable sets, which only their runtimeType shows. */
 class _ConstMap<K, V> extends Map<K, V> {
   _ConstMap._() : super._base();
-}
-
-class UnmodifiableMapView<K, V> extends Map<K, V> {
-  UnmodifiableMapView._() : super._base();
 }
 
 class _ConstSet<E> extends Set<E> {

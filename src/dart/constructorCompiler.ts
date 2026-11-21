@@ -31,6 +31,8 @@ export const EMPTY_ENV: TypeEnv = new Map();
 
 /** Constructors: their parameters, initializer lists, delegation, and the checks that every field is initialized. */
 export abstract class ConstructorCompiler extends AssignmentCompiler {
+  private readonly constructorRedirects = new Map<ConstructorInfo, { target: ConstructorInfo; span: Span }>();
+
   /** The bodies compiled once every declaration of the library is declared. */
   protected readonly deferredBodies: (() => void)[] = [];
 
@@ -38,6 +40,23 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
 
   /** Runs once, before the first statements of the next function body compile, to compile a constructor's initializers. */
   protected compileStatementsHook: (() => void) | undefined;
+
+  protected checkConstructorRedirects(): void {
+    const checked = new Set<ConstructorInfo>();
+    for (const root of this.constructorRedirects.keys()) {
+      const path = new Set<ConstructorInfo>();
+      let constructor: ConstructorInfo | undefined = root;
+      while (constructor && !checked.has(constructor)) {
+        const edge = this.constructorRedirects.get(constructor);
+        if (!edge) break;
+        if (path.has(constructor)) this.error(edge.span, 'コンストラクタのリダイレクトが循環しています。');
+        path.add(constructor);
+        constructor = edge.target;
+      }
+      for (const visited of path) checked.add(visited);
+    }
+    this.constructorRedirects.clear();
+  }
 
   protected declareConstructor(cls: ClassInfo, declaration: ConstructorDeclaration): void {
     if (declaration.name === '\0primaryBody') return;
@@ -290,6 +309,8 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
         declaration,
         `${type.cls.name} に${target.name ? ` ${target.name} という` : '名前のない'}コンストラクタがありません。`
       );
+    if (targetConstructor.kind === 'generative' && type.cls.isAbstract)
+      this.error(declaration, `抽象クラス ${type.cls.name} の生成コンストラクタにはリダイレクトできません。`);
     if (
       !isSubtype(substitute(type, new Map()), cls.thisType) &&
       !(type.args.length === 0 && type.cls.isSubclassOf(cls))
@@ -306,6 +327,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
         `リダイレクト先の型 ${typeName(signature)} は factory の型 ${typeName(constructor.type)} に合いません。`
       );
     }
+    this.constructorRedirects.set(constructor, { target: targetConstructor, span: declaration });
     const targetArgs = type.args;
     const params = cls.typeParams;
     constructor.impl = (runtime, _instance, args, typeArgs, callRow) => {
@@ -690,7 +712,8 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
 
   /** The call of the superclass's constructor or of another constructor of the class, in an initializer list. */
   // code-gauge-allow functionParameterCount 7 -- The parameters are the parts a caller already holds; grouping them would only rename them.
-  // code-gauge-allow functionCognitiveComplexity 24 -- Validate delegation and splice the forwarded parameters into the call order.
+  // code-gauge-allow functionCognitiveComplexity 27 -- Validate redirects and splice the forwarded parameters into the call order.
+  // code-gauge-allow functionNcss 31 -- Delegation checks share the resolved constructor and its signature.
   private compileDelegation(
     cls: ClassInfo,
     declaration: ConstructorDeclaration,
@@ -719,6 +742,10 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
         span,
         `${targetType.cls.name}${name ? `.${name}` : ''} はファクトリコンストラクタなので、${kind}(...) では呼び出せません。`
       );
+    if (kind === 'this') {
+      const source = cls.constructors.get(declaration.name ?? '');
+      if (source) this.constructorRedirects.set(source, { target, span });
+    }
     const callerIsConst = declaration.isConst || cls.kind === 'enum';
     if (callerIsConst && !target.isConst && !this.isLibraryCode && !targetType.cls.isLibrary) {
       this.error(

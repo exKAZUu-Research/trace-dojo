@@ -1750,6 +1750,38 @@ void main() {
   });
 });
 
+test('Map.unmodifiable returns the exported view over an independent snapshot', () => {
+  const program = `import 'dart:collection';
+int hashes = 0;
+class Key {
+  final int id;
+  Key(this.id);
+  int get hashCode { hashes++; return id; }
+}
+void main() {
+  final key = Key(1);
+  final original = {key: 1};
+  final snapshot = Map<Key, int>.unmodifiable(original);
+  final view = UnmodifiableMapView<Key, int>(original);
+  print([snapshot.runtimeType, snapshot is UnmodifiableMapView<Key, int>]);
+  original[key] = 2;
+  print([(snapshot as UnmodifiableMapView<Key, int>)[key], view[key]]);
+  hashes = 0;
+  snapshot.forEach((k, v) { print([k.id, v]); });
+  print([snapshot.values.toList(), snapshot.entries.single.value, snapshot.containsValue(1), hashes]);
+  final cast = snapshot.cast<Object, num>();
+  print([cast is UnmodifiableMapView<Object, num>, cast[key]]);
+  try { cast[key] = 6; } catch (e) { print(e); }
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout:
+      '[UnmodifiableMapView<Key, int>, true]\n[1, 2]\n[1, 1]\n[[1], 1, true, 0]\n[true, 1]\n' +
+      'Unsupported operation: Cannot modify unmodifiable map\n',
+  });
+});
+
 test('set spreads detect list length changes from hashing and equality callbacks', () => {
   const program = `var source = <Key>[];
 class Key {
@@ -2440,7 +2472,7 @@ void main() {
   print([key.length, key.endsWith('\n')]);
   final pair = jsonDecode('"' + 'x' * 1023 + '😀' + r'\uD800"') as String;
   print([pair.length, pair.substring(1023, 1025), pair.codeUnitAt(1025)]);
-  for (final suffix in [r'\u12q4"', '\n"', r'\x"']) {
+  for (final suffix in [r'\u12q4"', '\n"', r'\x"', String.fromCharCode(92)]) {
     try { jsonDecode('"' + 'x' * 1024 + suffix); }
     on FormatException catch (e) { print([e.message, e.offset]); }
   }
@@ -2450,7 +2482,8 @@ void main() {
     uncaughtException: undefined,
     stdout:
       '900000\n[900001, true]\n[1026, 😀, 55296]\n' +
-      '[Invalid unicode escape, 1026]\n[Control character in string, 1025]\n[Unrecognized string escape, 1027]\n',
+      '[Invalid unicode escape, 1026]\n[Control character in string, 1025]\n[Unrecognized string escape, 1027]\n' +
+      '[Unterminated string, 1026]\n',
   });
 });
 
@@ -3288,22 +3321,79 @@ test('escaped error text and regular expressions respect the string limit', () =
   });
 });
 
+test('missing-method errors format their invocation only when printed', () => {
+  const program = `class Receiver {
+  Type get runtimeType { print('type'); return String; }
+}
+class Counted extends Invocation {
+  Symbol get memberName { print('member'); return #missing; }
+  List<Type> get typeArguments => [];
+  List<dynamic> get positionalArguments => [];
+  Map<Symbol, dynamic> get namedArguments => {};
+  bool get isMethod => true;
+  bool get isGetter => false;
+  bool get isSetter => false;
+  bool get isAccessor => false;
+}
+class Generic<T> {}
+class Argument {
+  String toString() { print('argument'); return 'changed'; }
+}
+void main() {
+  final error = NoSuchMethodError.withInvocation(Receiver(), Counted());
+  print('made'); print(error); print(error);
+  try { dynamic receiver = Receiver(); receiver.missing(); }
+  catch (e) { print('caught'); print(e); print(e); }
+  try { dynamic value = Generic<int>(); value.missing(); }
+  catch (e) { print(e); }
+  dynamic f = (int x) => x;
+  try { f(Argument(), 2); }
+  catch (e) { print('closure'); print(e); print(e); }
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout:
+      'made\n' +
+      'member\ntype\nNoSuchMethodError: String has no missing method accepting arguments ()\n'.repeat(2) +
+      'caught\n' +
+      (
+        "type\nNoSuchMethodError: Class 'String' has no instance method 'missing'.\n" +
+        "Receiver: Instance of 'Receiver'\nTried calling: missing()\n"
+      ).repeat(2) +
+      "NoSuchMethodError: Class 'Generic<int>' has no instance method 'missing'.\n" +
+      "Receiver: Instance of 'Generic<int>'\nTried calling: missing()\nclosure\n" +
+      (
+        "NoSuchMethodError: Closure call with mismatched arguments: function 'main.<anonymous closure>'\n" +
+        "Receiver: Closure: (int) => int\nTried calling: main.<anonymous closure>(Instance of 'Argument', 2)\n" +
+        'Found: main.<anonymous closure>(int) => int\n'
+      ).repeat(2),
+  });
+});
+
 test('failed calls bound the complete description of their arguments', () => {
   const program = `external void missing(String left, String right);
+void bounded(void Function() call) {
+  try { call(); } catch (error) {
+    print(error.runtimeType);
+    try { print(error.toString().length); } catch (formatting) { print(formatting.runtimeType); }
+  }
+}
 void main() {
   final text = 'x' * 600000;
   dynamic object = Object();
   try { object.missing(1, z: 3, a: 2); } catch (error) { print(error); }
-  try { object.missing(text, text); } catch (error) { print(error.runtimeType); }
-  try { object.missing(z: text, a: text); } catch (error) { print(error.runtimeType); }
+  bounded(() { object.missing(text, text); });
+  bounded(() { object.missing(z: text, a: text); });
   dynamic f = () {};
-  try { f(text, text); } catch (error) { print(error.runtimeType); }
-  try { missing(text, text); } catch (error) { print(error.runtimeType); }
+  bounded(() { f(text, text); });
+  bounded(() { missing(text, text); });
 }`;
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
     stdout:
-      "NoSuchMethodError: Class 'Object' has no instance method 'missing'.\nReceiver: Instance of 'Object'\nTried calling: missing(1, a: 2, z: 3)\nOutOfMemoryError\nOutOfMemoryError\nOutOfMemoryError\nOutOfMemoryError\n",
+      "NoSuchMethodError: Class 'Object' has no instance method 'missing'.\nReceiver: Instance of 'Object'\nTried calling: missing(1, a: 2, z: 3)\n" +
+      'NoSuchMethodError\nOutOfMemoryError\n'.repeat(4),
   });
 });
 
@@ -4253,6 +4343,34 @@ void main() {
     kind: 'executed',
     uncaughtException: undefined,
     stdout: '[1, 2.5, 5]\n6\n',
+  });
+});
+
+test('unused constructor redirects reject cycles and abstract generative targets', () => {
+  for (const declarations of [
+    'class A { factory A() = B; } abstract class B implements A { B(); }',
+    'class A { factory A() = A.named; factory A.named() = A; }',
+    'class A { A() : this.named(); A.named() : this(); }',
+    'class A { A() : this(); }',
+  ]) {
+    expect(executeProgram('dart', `${declarations} void main() { print('ready'); }`)).toMatchObject({
+      kind: 'compileError',
+    });
+  }
+  const valid = `class A { factory A() = B; }
+abstract class B implements A { factory B() = C; }
+class C implements B { C(); }
+class D {
+  int value;
+  D() : this.other();
+  D.other() : this.last(3);
+  D.last(this.value);
+}
+void main() { print([A().runtimeType, D().value]); }`;
+  expect(executeProgram('dart', valid)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '[C, 3]\n',
   });
 });
 
