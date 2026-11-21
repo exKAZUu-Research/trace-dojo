@@ -6761,6 +6761,27 @@ test('negative growable list lengths report the rejected backing capacity', () =
   });
 });
 
+test('Dart iterable skip and take report their SDK validation labels', () => {
+  const program = `void main() {
+  for (final values in <Iterable<int>>[
+    {1, 2}, {1: 2}.keys, [1, 2].where((i) => i > 0),
+    [1, 2].expand((i) => [i]), 'dart'.runes, [1, 2], [1, 2].skip(1),
+  ]) {
+    try { values.skip(-1); } catch (e) { print(e); }
+  }
+  try { ({1, 2}).take(-1); } catch (e) { print(e); }
+  print({1, 2, 3}.skip(1).toList());
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'RangeError (count): Invalid value: Not greater than or equal to 0: -1\n'.repeat(5) +
+      'RangeError (start): Invalid value: Not greater than or equal to 0: -1\n' +
+      'RangeError (count): Invalid value: Not greater than or equal to 0: -1\n' +
+      'RangeError (takeCount): Invalid value: Not greater than or equal to 0: -1\n[2, 3]\n',
+  });
+});
+
 test('growable list bulk writes check the live source length before reading elements', () => {
   const program = `import 'dart:collection';
 class Input extends ListBase<int> {

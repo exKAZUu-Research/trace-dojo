@@ -1055,7 +1055,7 @@ abstract mixin class Iterable<E> {
   }
   Iterable<E> takeWhile(bool Function(E value) test) => TakeWhileIterable<E>(this, test);
   Iterable<E> skip(int count) {
-    RangeError.checkNotNegative(count, "skipCount");
+    RangeError.checkNotNegative(count, "count");
     if (_hasEfficientLength(this)) return EfficientLengthSkipIterable<E>(this, count);
     return SkipIterable<E>(this, count);
   }
