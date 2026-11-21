@@ -65,6 +65,15 @@ fun main() {
     stdout: '42\nnull -> 4\n4 -> null\n[]\n',
   },
   {
+    name: 'typed power extensions',
+    source: `import kotlin.math.pow
+fun main() {
+    println(2.0.pow(3.0))
+    println(2.0f.pow(3))
+}`,
+    stdout: '8.0\n8.0\n',
+  },
+  {
     name: 'rounding just below a half and at the double precision boundary',
     source: `import kotlin.math.roundToInt
 import kotlin.math.roundToLong
@@ -479,6 +488,7 @@ test.each([
   ['a safe call on a nullable value', true, 'fun main() {\n    val s: String? = null\n    println(s?.length)\n}'],
   ['an assignment to a val', false, 'fun main() {\n    val x = 1\n    x = 2\n    println(x)\n}'],
   ['a missing parenthesis', false, 'fun main() {\n    println("a"\n}'],
+  ['a top-level math power call', false, 'fun main() { println(kotlin.math.pow(2.0, 3.0)) }'],
   ['an unknown name', false, 'fun main() {\n    println(y)\n}'],
   ['a missing return', false, 'fun f(x: Int): Int {\n    if (x > 0) return 1\n}\nfun main() {\n    println(f(1))\n}'],
   ['an uninitialized val', false, 'fun main() {\n    val x: Int\n    println(x)\n}'],

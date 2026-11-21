@@ -249,7 +249,6 @@ function defineMath(): void {
     defineNative(`kotlin.math.${name}(Double)`, (_frame, _receiver, [x]) => operation(x as number));
   defineNative('kotlin.math.sqrt(Float)', (_frame, _receiver, [x]) => Math.fround(Math.sqrt(x as number)));
   defineNative('kotlin.math.abs(Float)', (_frame, _receiver, [x]) => Math.abs(x as number));
-  defineNative('kotlin.math.pow(Double, Double)', (_frame, _receiver, [x, y]) => fdlibmPow(x as number, y as number));
   defineNative('kotlin.math.atan2(Double, Double)', (_frame, _receiver, [y, x]) =>
     fdlibmAtan2(y as number, x as number)
   );
@@ -264,11 +263,16 @@ function defineMath(): void {
     defineNative(`kotlin.math.max(${type}, ${type})`, (_frame, _receiver, [a, b]) => javaMax(a as number, b as number));
     defineNative(`kotlin.math.min(${type}, ${type})`, (_frame, _receiver, [a, b]) => javaMin(a as number, b as number));
   }
-  defineNative('kotlin.math.Double.pow(Double)', (_frame, receiver, [x]) => fdlibmPow(receiver as number, x as number));
-  defineNative('kotlin.math.Double.pow(Int)', (_frame, receiver, [n]) => fdlibmPow(receiver as number, n as number));
-  defineNative('kotlin.math.Float.pow(Float)', (_frame, receiver, [x]) =>
-    Math.fround(fdlibmPow(receiver as number, x as number))
-  );
+  for (const [type, round] of [
+    ['Double', Number],
+    ['Float', Math.fround],
+  ] as const) {
+    for (const exponent of [type, 'Int']) {
+      defineNative(`kotlin.math.${type}.pow(${exponent})`, (_frame, receiver, [power]) =>
+        round(fdlibmPow(receiver as number, power as number))
+      );
+    }
+  }
   for (const type of ['Double', 'Float']) {
     defineNative(`kotlin.math.${type}.roundToInt()`, (frame, receiver) => {
       const value = receiver as number;

@@ -259,7 +259,6 @@ class XorWowRandom internal constructor(
 }
 `;
 
-/** `kotlin.math`, whose functions call the JVM's `Math`, which JavaScript's `Math` matches for these functions. */
 export const MATH_SOURCE = kotlin`
 package kotlin.math
 
@@ -268,7 +267,6 @@ const val E: Double = 2.718281828459045
 
 external fun sqrt(x: Double): Double
 external fun cbrt(x: Double): Double
-external fun pow(x: Double, y: Double): Double
 external fun sin(x: Double): Double
 external fun cos(x: Double): Double
 external fun tan(x: Double): Double
@@ -305,6 +303,7 @@ fun min(a: Long, b: Long): Long = if (a <= b) a else b
 external fun Double.pow(x: Double): Double
 external fun Double.pow(n: Int): Double
 external fun Float.pow(x: Float): Float
+external fun Float.pow(n: Int): Float
 external fun Double.roundToInt(): Int
 external fun Double.roundToLong(): Long
 external fun Float.roundToInt(): Int
