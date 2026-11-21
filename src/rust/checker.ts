@@ -1215,8 +1215,9 @@ export class Checker {
     if (stmt.init) {
       if (declared) this.coerceAtReferenceSite(stmt.init, declared);
       else type = this.expr(stmt.init, undefined);
-      diverges = shallow(type).kind === 'never' && !declared;
-      if (diverges) type = freshDivergingVar();
+      // An initializer that never finishes makes what follows unreachable, whatever type the binding declares.
+      diverges = shallow(stmt.init.ty ?? type).kind === 'never';
+      if (diverges && !declared) type = freshDivergingVar();
     }
     if (stmt.else) {
       if (!stmt.init) compileError(stmt.span, 'let ... else には、初期値が要ります。');

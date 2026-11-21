@@ -67,7 +67,8 @@ function callFn(
       `関数 ${fn.name} の引数の数が合いません（${params.length} 個ですが、${expr.args.length} 個あります）。`
     );
   }
-  checkArgs(c, expr.args, params, expectations(c, sig.ret, params, expected), (fn.module as Module).isStd);
+  const iterable = fn.selfMode ? [false, ...iterableParams(fn)] : iterableParams(fn);
+  checkArgs(c, expr.args, params, expectations(c, sig.ret, params, expected), iterable);
   if (fn.selfMode === 'value') c.requireTrait(params[0], 'Sized', expr.args[0].span);
   expr.callee.ty = { kind: 'fn', params, ret: sig.ret };
   return sig.ret;
@@ -139,13 +140,25 @@ function expectations(c: Checker, ret: Type, params: Type[], expected: Type | un
   return result;
 }
 
-/** `iterable`: the callee is of the standard library, whose iterator parameters take whatever is `IntoIterator`. */
+/**
+ * The parameters of a function of the standard library that are declared as iterators, which stand for
+ * `IntoIterator` parameters and so take whatever iterates; one that only becomes an iterator type by its type
+ * arguments (`Vec<IntoIter<i32>>::push`) takes that type alone.
+ */
+function iterableParams(fn: FnDef): boolean[] {
+  if (!(fn.module as Module).isStd) return [];
+  return fn.paramTypes.map((type) => {
+    const t = shallow(type);
+    return t.kind === 'adt' && t.def.builtin === 'Iter';
+  });
+}
+
 function checkArgs(
   c: Checker,
   args: Expr[],
   params: Type[],
   expectations: (Type | undefined)[] = [],
-  iterable = false
+  iterable: boolean[] = []
 ): void {
   // Closures are checked last, when the other arguments have told their parameters' types.
   const order = [...args.keys()].toSorted(
@@ -154,7 +167,7 @@ function checkArgs(
   const inputTypes = params.map((param) => shallow(param));
   const enclosing = c.iterableArgument;
   for (const index of order) {
-    c.iterableArgument = iterable ? args[index] : undefined;
+    c.iterableArgument = iterable[index] ? args[index] : undefined;
     checkArgument(c, args[index], params[index], inputTypes[index], expectations[index]);
   }
   c.iterableArgument = enclosing;
@@ -329,7 +342,7 @@ export function checkMethodCall(
       `メソッド ${expr.method} の引数の数が合いません（${sig.params.length} 個ですが、${expr.args.length} 個あります）。`
     );
   }
-  checkArgs(c, expr.args, sig.params, expectations(c, sig.ret, sig.params, expected), (fn.module as Module).isStd);
+  checkArgs(c, expr.args, sig.params, expectations(c, sig.ret, sig.params, expected), iterableParams(fn));
   c.annotations.methods.set(expr, { fn, typeArgs: found.typeArgs, receiver: found.adjust });
   const adjusted = typeAfter(receiverType, found.adjust.derefs) ?? found.selfType;
   if (fn.selfMode === 'value') checkMoveOutOfRef(c, expr, found.adjust, adjusted);

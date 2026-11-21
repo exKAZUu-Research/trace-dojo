@@ -102,14 +102,10 @@ export abstract class PatternConverter extends SyntaxConverter {
     const name = this.identifier(this.field(node, 'name'));
     const sub = node.childForFieldName('pattern');
     const span = this.span(node);
-    if (node.namedChildren.some((c) => c.type === 'mutable_specifier') || /^\s*ref\b/.test(node.text)) {
-      unavailable(span, 'フィールドのパターンの mut・ref');
-    }
-    return {
-      name,
-      pattern: sub ? this.pattern(sub) : { kind: 'binding', name, mutable: false, sub: undefined, span },
-      span,
-    };
+    if (/^\s*ref\b/.test(node.text)) unavailable(span, 'フィールドのパターンの ref');
+    // `P { mut x }` binds the field to a mutable variable of its name.
+    const mutable = node.namedChildren.some((child) => child.type === 'mutable_specifier');
+    return { name, pattern: sub ? this.pattern(sub) : { kind: 'binding', name, mutable, sub: undefined, span }, span };
   }
 
   private referencePattern(node: Node, span: Span): Pattern {

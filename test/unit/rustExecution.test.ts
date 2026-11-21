@@ -7836,3 +7836,42 @@ test.each([
   const execution = executeProgram('rust', rustMain(`    ${statement}`));
   expect(execution.kind === 'executed' && execution.uncaughtException).toContain(`\n${message}\n`);
 });
+
+test('shorthand field patterns bind mutable variables, and a typed let keeps its initializer diverging', () => {
+  const program = `struct Point { x: i32, y: i32 }
+enum Shape { Dot, Line { n: i32 } }
+fn stop() -> i32 { let x: i32 = { return 7; }; }
+fn area(w: i32) -> i32 { let h: i32 = todo!(); w * h }
+fn main() {
+    let Point { mut x, y } = Point { x: 1, y: 2 };
+    x += y;
+    match (Shape::Line { n: 1 }) { Shape::Line { mut n } => { n += 1; println!("{n}"); } Shape::Dot => {} }
+    let mut iterators: Vec<std::vec::IntoIter<i32>> = Vec::new();
+    iterators.push(vec![1].into_iter());
+    println!("{x} {} {}", stop(), iterators.len());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '2\n3 7 1\n' });
+});
+
+test.each([
+  [
+    'an assignment to a field binding without mut',
+    'let Point { x, mut y } = Point { x: 1, y: 2 };\n    x = 5;',
+    'もう一度代入できません',
+  ],
+  [
+    'a Vec pushed where its iterator is the element type',
+    'let mut v: Vec<std::vec::IntoIter<i32>> = Vec::new();\n    v.push(vec![1]);',
+    '型が合いません',
+  ],
+  [
+    'a function whose typed let finishes without a value',
+    'fn done() -> i32 { let x: i32 = 1; }\n    done();',
+    '値を返していません',
+  ],
+])('rejects %s', (_name, body, message) => {
+  expect(executeProgram('rust', rustMain(`    ${body}`, 'struct Point { x: i32, y: i32 }'))).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ message: expect.stringContaining(message) })],
+  });
+});
