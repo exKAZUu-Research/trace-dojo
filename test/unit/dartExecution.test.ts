@@ -1466,6 +1466,26 @@ void main() {
   });
 });
 
+test('Dart fixes type parameters a closure argument depends on to their bounds', () => {
+  const program = `import 'dart:collection';
+void f<T>(Object o, [int Function(T, T)? c]) { print(T); }
+class W<T> { W.from(Object o, [int Function(T, T)? c]) { print(T); } }
+T g<T extends num>(T Function(T) c) => c(1 as T);
+void main() {
+  f(<int>[], (a, b) => 0);
+  f(<int>[]);
+  W.from(1, (a, b) => 0);
+  print([SplayTreeSet((a, b) => 0).runtimeType, g((a) => a)]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'Object?\ndynamic\nObject?\n[SplayTreeSet<Object?>, 1]\n',
+  });
+  expect(
+    executeProgram('dart', "import 'dart:collection';\nvoid main() { SplayTreeSet((a, b) => a.length - b.length); }")
+  ).toMatchObject({ kind: 'compileError' });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}

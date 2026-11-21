@@ -42,6 +42,7 @@ import {
   nonNullable,
   NULL,
   numericClassOf,
+  objectType,
   resolveBound,
   substitute,
   type TypeParam,
@@ -784,6 +785,7 @@ export abstract class CallCompiler extends OperatorCompiler {
       return substitute(parameterType, map);
     };
     visitCallArguments(args, type, ({ argument, parameterType = DYNAMIC }, closurePass) => {
+      if (closurePass) fixClosureInputs(argument, parameterType, type.typeParams, solution, upper, fromContext);
       const result = this.compileExpression(argument, argumentContext(parameterType, closurePass));
       compiled.set(argument, result);
       const formal = resolveBound(parameterType);
@@ -1298,6 +1300,37 @@ function argumentContextFor(
   if (!closurePass) return INFERENCE_HOLE;
   if (contextual && param.bound && !mentionsTypeParams(param.bound, params)) return param.bound;
   return solution.get(param) ?? upper.get(param) ?? INFERENCE_HOLE;
+}
+
+/**
+ * Fixes each type parameter that a closure argument's unannotated parameters take their types from and that nothing has
+ * constrained yet to its bound, as Dart does before typing the closure: `SplayTreeSet((a, b) => ...)` types `a` and the
+ * set's element as Object?.
+ */
+function fixClosureInputs(
+  argument: Expression,
+  parameterType: DartType,
+  typeParams: readonly TypeParam[],
+  solution: Map<TypeParam, DartType>,
+  upper: ReadonlyMap<TypeParam, DartType>,
+  fromContext: ReadonlyMap<TypeParam, DartType>
+): void {
+  const formal = resolveBound(parameterType);
+  while (argument.kind === 'parenthesized') argument = argument.expression;
+  if (formal.kind !== 'function' || argument.kind !== 'function') return;
+  const { positional, named } = argument.parameters;
+  const inputs = [
+    ...positional.flatMap((parameter, index) => (parameter.type ? [] : [formal.positional[index] ?? DYNAMIC])),
+    ...named.flatMap((parameter) =>
+      parameter.type ? [] : [formal.named.find((entry) => entry.name === parameter.argumentName)?.type ?? DYNAMIC]
+    ),
+  ];
+  const params = new Set(typeParams);
+  for (const param of typeParams) {
+    if (solution.has(param) || upper.has(param) || fromContext.has(param)) continue;
+    if (!inputs.some((input) => mentionsTypeParams(input, new Set([param])))) continue;
+    solution.set(param, param.bound && !mentionsTypeParams(param.bound, params) ? param.bound : objectType(true));
+  }
 }
 
 /** Whether a type argument satisfies its parameter's bound, with the parameter itself in place of F-bounded uses. */
