@@ -395,6 +395,18 @@ test('a changing list of hundreds of elements traces with the Java trace length'
   expect(traceProgram('dart', dart, dart).traceItems).toHaveLength(traceProgram('java', java, java).traceItems.length);
 });
 
+test('null variables trace as references, as in Java', () => {
+  const java =
+    'public class Main { public static void main(String[] args) { String name = null; int[] arr = null; int n = 1; String[] xs = {null, "a"}; } }';
+  const dart = "void main() { String? name = null; List<int>? arr = null; int n = 1; List<String?> xs = [null, 'a']; }";
+  const expected = traceProgram('java', java, java);
+  const actual = traceProgram('dart', dart, dart);
+  expect(actual.finalVars).toEqual(expected.finalVars);
+  expect(Object.keys(actual.traceItems.at(-1)?.referenceVars ?? {})).toEqual(
+    Object.keys(expected.traceItems.at(-1)?.referenceVars ?? {})
+  );
+});
+
 test('nested grid updates complete with the Java trace length', () => {
   const dart = `void main() {
   var grid = List.generate(30, (_) => List.filled(30, 0));

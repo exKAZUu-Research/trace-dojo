@@ -207,7 +207,8 @@ function addVariable(
   scalars: SnapshotBudget,
   references: SnapshotBudget | undefined
 ): void {
-  const scalar = mode === 'reference' ? NOT_SCALAR : scalarOf(value, type, scalars);
+  // A null variable is a reference that refers to nothing, as Java shows a null String or array.
+  const scalar = mode === 'reference' || value === undefined ? NOT_SCALAR : scalarOf(value, type, scalars);
   if (scalar !== NOT_SCALAR) variables.vars[name] = scalar;
   if (!references || mode === 'scalar' || (scalar !== NOT_SCALAR && !isTraceList(value))) return;
   const node = displayNodeOf(value, references);
