@@ -82,20 +82,24 @@ function trimWith(value: string, start: boolean, end: boolean): string {
 /** `String.toInt()`, whose errors are `NumberFormatException`s worded as Java's `Integer.parseInt` words them. */
 function parseInteger(frame: Frame, value: string, radix: number, bits: 8 | 16 | 32 | 64): bigint | undefined {
   checkRadix(frame, radix);
-  const digits = /^[+-]?[\p{Nd}A-Za-z]+$/u.test(value) ? value : undefined;
-  if (!digits) return undefined;
-  const negative = digits.startsWith('-');
-  const body = digits.replace(/^[+-]/, '');
+  const negative = value.startsWith('-');
+  const first = negative || value.startsWith('+') ? 1 : 0;
+  if (first === value.length) return undefined;
+  const base = BigInt(radix);
+  const limit = (1n << BigInt(bits - 1)) - (negative ? 0n : 1n);
+  const beforeLast = limit / base;
+  const lastDigit = Number(limit % base);
   let parsed = 0n;
-  for (const char of codeUnits(body)) {
-    const digit = digitOf(char) ?? Number.parseInt(charToString(char), 36);
-    if (Number.isNaN(digit) || digit >= radix) return undefined;
-    parsed = parsed * BigInt(radix) + BigInt(digit);
+  for (let index = first; index < value.length; index++) {
+    if ((index - first) % 64 === 0) frame.runtime.spend();
+    // oxlint-disable-next-line unicorn/prefer-code-point -- JVM integer parsing reads UTF-16 code units.
+    const char = value.charCodeAt(index);
+    const letter = (char | 0x20) - 0x61;
+    const digit = digitOf(char) ?? (letter >= 0 && letter < 26 ? letter + 10 : radix);
+    if (digit >= radix || parsed > beforeLast || (parsed === beforeLast && digit > lastDigit)) return undefined;
+    parsed = parsed * base + BigInt(digit);
   }
-  const signed = negative ? -parsed : parsed;
-  const limit = 2n ** BigInt(bits - 1);
-  if (signed < -limit || signed >= limit) return undefined;
-  return signed;
+  return negative ? -parsed : parsed;
 }
 
 /** `Short.parseShort` and `Byte.parseByte`, which name a number out of their range differently from a malformed one. */

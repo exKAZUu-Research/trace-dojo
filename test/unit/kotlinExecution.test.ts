@@ -149,6 +149,18 @@ fun main() {
     stdout: ' get()=1; set(x)\n',
   },
   {
+    name: 'integer parsing bounds with long input and leading zeroes',
+    source: `fun main() {
+    val zeroes = "0".repeat(50000)
+    println((zeroes + "9223372036854775807").toLongOrNull())
+    println("-9223372036854775808".toLongOrNull())
+    println("9223372036854775808".toLongOrNull())
+    println("9".repeat(500000).toIntOrNull())
+    println("ff".toIntOrNull(16))
+}`,
+    stdout: '9223372036854775807\n-9223372036854775808\nnull\nnull\n255\n',
+  },
+  {
     name: 'array copying, searching, shuffling, and map operations',
     source: `import kotlin.random.Random
 fun main() {
