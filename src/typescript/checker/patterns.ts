@@ -392,24 +392,21 @@ export class BindingPatterns {
     if (object.kind === 'union') return unionOf(object.types.map((member) => this.restObject(member, omitted)));
     if (this.c.relations.isGeneric(object) || omitted.some((key) => this.c.relations.isGeneric(key)))
       return this.genericRestObject(object, omitted);
-    return anonymousObject(
-      () => {
-        const structure = emptyStructure();
-        const source = this.c.structureOf(object);
-        structure.stringIndex = source.stringIndex;
-        structure.numberIndex = source.numberIndex;
-        structure.symbolIndex = source.symbolIndex;
-        structure.patternIndexes = source.patternIndexes;
-        for (const [name, property] of source.properties) {
-          const selected = omitted.some((key) =>
-            this.c.relations.isAssignable(this.c.typeOperators.propertyKeyType(property), key)
-          );
-          if (!selected && isSpreadableProperty(property)) structure.properties.set(name, spreadCopy(property, false));
-        }
-        return structure;
-      },
-      { isLiteral: true }
-    );
+    return anonymousObject(() => {
+      const structure = emptyStructure();
+      const source = this.c.structureOf(object);
+      structure.stringIndex = source.stringIndex;
+      structure.numberIndex = source.numberIndex;
+      structure.symbolIndex = source.symbolIndex;
+      structure.patternIndexes = source.patternIndexes;
+      for (const [name, property] of source.properties) {
+        const selected = omitted.some((key) =>
+          this.c.relations.isAssignable(this.c.typeOperators.propertyKeyType(property), key)
+        );
+        if (!selected && isSpreadableProperty(property)) structure.properties.set(name, spreadCopy(property, false));
+      }
+      return structure;
+    });
   }
 
   private genericRestObject(source: Type, omitted: Type[]): Type {
