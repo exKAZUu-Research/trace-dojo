@@ -131,6 +131,13 @@ function bindingPattern(
     return;
   }
   if (!inherited) checkVariantBinding(pattern, matched, mode);
+  // Edition 2024 does not let `mut` bind by value where the pattern borrows what it matches without saying so.
+  if (inherited && pattern.mutable) {
+    compileError(
+      pattern.span,
+      `参照を分解するパターンの中では、mut ${pattern.name} と書けません（パターンに & を書くか、値を分解してください）。`
+    );
+  }
   const localType = mode === 'move' ? type : ref(t, mode === 'refMut');
   const existing = c.orBindings?.get(pattern.name);
   if (existing) {

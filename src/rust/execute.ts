@@ -6,7 +6,16 @@ import { buildProgram, type BuiltProgram } from './build';
 import { DEFAULT_SPEC } from './fmt';
 import { Interpreter } from './interpreter';
 import { type Module } from './items';
-import { ControlSignal, type Frame, OutOfMemory, ProcessExit, Runtime, RustPanic, StackOverflow } from './runtime';
+import {
+  ControlSignal,
+  FmtFailure,
+  type Frame,
+  OutOfMemory,
+  ProcessExit,
+  Runtime,
+  RustPanic,
+  StackOverflow,
+} from './runtime';
 import { resolve, shallow, type Type } from './types';
 import { EnumValue, type Value } from './values';
 
@@ -41,7 +50,6 @@ export function describePanic(panic: RustPanic): string {
  *
  * @param onEnd Receives `main`'s frame on exit while the frame still holds its variables.
  */
-// code-gauge-allow duplicateLines 17 -- Each language reports how its program ended alike.
 export function runProgram(
   runtime: Runtime,
   built: BuiltProgram,
@@ -99,6 +107,16 @@ function describeUncaught(error: unknown): string | undefined {
   }
   if (error instanceof OutOfMemory) {
     return `memory allocation of ${error.bytes} bytes failed\nnote: run with \`RUST_BACKTRACE=1\` environment variable to display a backtrace`;
+  }
+  // An impl's formatting error that nothing above turned into its own panic ends the program as a writer's does.
+  if (error instanceof FmtFailure) {
+    return describePanic(
+      new RustPanic(
+        'a formatting trait implementation returned an error when the underlying stream did not',
+        { row: 0, col: 0 },
+        'core/src/io/write.rs:411:17'
+      )
+    );
   }
   if (error instanceof ControlSignal) throw new TypeError(`Unexpected ${error.kind} outside its loop or function`);
   throw error;

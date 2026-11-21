@@ -7875,3 +7875,49 @@ test.each([
     diagnostics: [expect.objectContaining({ message: expect.stringContaining(message) })],
   });
 });
+
+const FAILING_DEBUG = `use std::fmt;
+struct Bad;
+impl fmt::Debug for Bad {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { write!(f, "part")?; Err(fmt::Error) }
+}
+impl PartialEq for Bad { fn eq(&self, _: &Self) -> bool { false } }`;
+
+test.each([
+  ['panic!("{:?}", Bad);', 'src/main.rs:8:5:\npart\n'],
+  ['assert!(false, "{:?}", Bad);', 'src/main.rs:8:5:\npart\n'],
+  ['assert_eq!(Bad, Bad);', 'assertion `left == right` failed\n  left: part\n'],
+  [
+    'dbg!(Bad);',
+    'core/src/io/write.rs:411:17:\na formatting trait implementation returned an error when the underlying stream did not\n',
+  ],
+  ['let v: Result<i32, Bad> = Err(Bad);\n    v.expect("why");', '\nwhy: part\n'],
+])('a Debug impl that fails inside %s ends the program with a panic', (statement, panic) => {
+  const execution = executeProgram('rust', rustMain(`    ${statement}`, FAILING_DEBUG));
+  expect(execution.kind === 'executed' && execution.uncaughtException).toContain(panic);
+});
+
+test('a diverging condition ends the linted path, and slice iterators print the widths they were given', () => {
+  const program = `fn early() { if { return; false } {} let x = 1 / 0; }
+fn matched() { match { return; 1 } { 1 => {}, _ => {} } let y: u8 = 200u8 + 100; }
+fn main() {
+    early();
+    matched();
+    let a = [1, 2];
+    println!("{:?} {:?}", a.chunks(usize::MAX), a.windows(usize::MAX));
+    let &(mut first,) = &(1,);
+    first += 1;
+    println!("{first}");
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'Chunks { v: [1, 2], chunk_size: 18446744073709551615 } Windows { v: [1, 2], size: 18446744073709551615 }\n2\n',
+  });
+  for (const borrowed of ['let (mut x,) = &(1,);', 'for (mut a, b) in vec![(1, 2)].iter() {}']) {
+    expect(executeProgram('rust', rustMain(`    ${borrowed}`))).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [expect.objectContaining({ row: 1, message: expect.stringContaining('mut') })],
+    });
+  }
+});

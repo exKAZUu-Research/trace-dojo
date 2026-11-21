@@ -17,13 +17,15 @@ import {
 import { arrayIter } from './iterators';
 import { call, deref, type NativeContext, panic } from './support';
 
-export function windows(ctx: NativeContext, slice: Value, width: number): IterValue {
+export function windows(ctx: NativeContext, slice: Value, size: bigint): IterValue {
+  // The width is shown as it was given, and used as a number, which rounds above 2^53 where no window fits anyway.
+  const width = Number(size);
   if (width === 0) panic(ctx, 'window size must be non-zero');
   const { base, start } = sliceBase(slice);
-  return windowsCursor(base, start, start + sliceLength(slice), width);
+  return windowsCursor(base, start, start + sliceLength(slice), width, size);
 }
 
-function windowsCursor(base: Value[], front: number, back: number, width: number): IterValue {
+function windowsCursor(base: Value[], front: number, back: number, width: number, size: bigint): IterValue {
   const remaining = (): number => Math.max(0, back - front - width + 1);
   const view = (start: number): SliceView => new SliceView(base, start, start + width);
   const take = (n: bigint, reverse: boolean): ReturnType<IterValue['next']> => {
@@ -48,11 +50,11 @@ function windowsCursor(base: Value[], front: number, back: number, width: number
   iter.nth = (n) => take(n, false);
   iter.nthBack = (n) => take(n, true);
   iter.rest = () => Array.from({ length: remaining() }, (_, index) => view(front + index));
-  iter.fork = () => windowsCursor(base, front, back, width);
+  iter.fork = () => windowsCursor(base, front, back, width, size);
   return described(iter, (show, item) =>
     fieldsPart('Windows', [
       ['v', listPart(base.slice(front, back), sliceElem(item), show)],
-      ['size', numberPart(width)],
+      ['size', numberPart(size)],
     ])
   );
 }
@@ -110,7 +112,7 @@ export function chunksNative(
     if (mutable) return iter;
     const name = `${reverse ? 'RChunks' : 'Chunks'}${exact ? 'Exact' : ''}`;
     const done = (): SliceView => new SliceView(base, start, start);
-    const chunkSize: [string, DebugPart] = ['chunk_size', numberPart(width)];
+    const chunkSize: [string, DebugPart] = ['chunk_size', numberPart(size as bigint)];
     if (!exact) return chunkDebug(iter, name, done, () => [chunkSize]);
     const remainder = length % width;
     const offset = reverse ? start : start + length - remainder;

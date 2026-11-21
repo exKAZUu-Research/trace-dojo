@@ -1,6 +1,7 @@
 import { DEFAULT_SPEC } from '../fmt';
 import { described, fieldsPart, optionPart } from '../iterDebug';
 import { cloneValue, copyValue } from '../ops';
+import { writtenText } from '../runtime';
 import type { Type } from '../types';
 import { ElementPlace, type EnumValue, type IterValue, textOf, type Value } from '../values';
 import { defaultValue } from './core';
@@ -28,7 +29,7 @@ function inspectVariant(variant: number): (args: Value[], ctx: NativeContext) =>
 }
 
 function debugText(ctx: NativeContext, value: Value, type: Type): string {
-  return ctx.interp.formatter.debug(value, type, DEFAULT_SPEC, undefined);
+  return writtenText(() => ctx.interp.formatter.debug(value, type, DEFAULT_SPEC, undefined));
 }
 
 const optionNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {

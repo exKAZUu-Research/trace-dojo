@@ -106,6 +106,16 @@ export class FmtFailure {
   constructor(readonly written: string) {}
 }
 
+/** The text a formatting wrote, up to where an impl failed: a panic's message keeps that much. */
+export function writtenText(format: () => string): string {
+  try {
+    return format();
+  } catch (error) {
+    if (error instanceof FmtFailure) return error.written;
+    throw error;
+  }
+}
+
 /** `std::process::exit`, which ends the program at once. */
 export class ProcessExit {
   constructor(readonly code: number) {}

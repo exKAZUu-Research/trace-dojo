@@ -503,6 +503,8 @@ export class ConstLint {
   /** Checks the branches of an `if` that its condition may take; it diverges when every branch it takes does. */
   private ifExpr(expr: Extract<Expr, { kind: 'if' }>): void {
     const cond = this.condition(expr.cond);
+    // A condition that never finishes reaches neither branch nor what follows.
+    if (this.diverged) return;
     this.endBlock();
     const then = cond === false ? undefined : this.branch(() => this.block(expr.consequent));
     const otherwise = cond === true || !expr.else ? undefined : this.branch(() => this.expr(expr.else!));
@@ -553,6 +555,8 @@ export class ConstLint {
 
   /** Checks the arms a known scrutinee may reach: those before and at the first arm whose pattern surely matches. */
   private match(scrutinee: Known | undefined, arms: MatchArm[]): void {
+    // A scrutinee that never finishes reaches no arm.
+    if (this.diverged) return;
     this.endBlock();
     let allDiverge = true;
     for (const arm of arms) {

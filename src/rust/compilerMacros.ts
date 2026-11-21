@@ -10,7 +10,7 @@ import type { Program } from './items';
 import { allocVecElements } from './natives/capacityNatives';
 import { sizeOf } from './natives/layout';
 import { cloneValue, valuesEqual } from './ops';
-import { FmtFailure, type Frame, RustPanic } from './runtime';
+import { FmtFailure, type Frame, RustPanic, writtenText } from './runtime';
 import { runtimeType } from './runtimeTypes';
 import { outputStream, resolve, shallow } from './types';
 import { utf8Length } from './utf8';
@@ -189,7 +189,7 @@ function panicMacro(c: Compiler, macro: Macro<'panic'>, span: Span): Eval {
   const format = macro.format ? compileFormat(c, macro.format) : undefined;
   const name = macro.name;
   return (frame) => {
-    throw new RustPanic(panicMessage(name, format?.(frame)), span);
+    throw new RustPanic(panicMessage(name, format && writtenText(() => format(frame))), span);
   };
 }
 
@@ -210,7 +210,7 @@ function assertMacro(c: Compiler, macro: Macro<'assert'>, span: Span): Eval {
   const source = macro.text;
   return (frame) => {
     if (!(cond(frame) as boolean)) {
-      throw new RustPanic(format ? format(frame) : `assertion failed: ${source}`, span);
+      throw new RustPanic(format ? writtenText(() => format(frame)) : `assertion failed: ${source}`, span);
     }
     return UNIT_VALUE;
   };
@@ -229,14 +229,15 @@ function assertEqMacro(c: Compiler, macro: Macro<'assertEq'>, span: Span): Eval 
   return (frame) =>
     withEvaluatedValues(frame, operands, ([a, b]) => {
       if (valuesEqual(eqType(frame), a, b, rightType(frame)) !== equal) {
-        const message = format ? `: ${format(frame)}` : '';
         const spec = debugSpec(false);
-        const l = c.support.formatter.debug(a, leftType(frame), spec, undefined);
-        const r = c.support.formatter.debug(b, rightType(frame), spec, undefined);
-        throw new RustPanic(
-          `assertion \`left ${equal ? '==' : '!='} right\` failed${message}\n  left: ${l}\n right: ${r}`,
-          span
-        );
+        // The panic's message is what was written of it before a formatting impl failed.
+        const text = writtenText(() => {
+          const message = format ? `: ${format(frame)}` : '';
+          const head = `assertion \`left ${equal ? '==' : '!='} right\` failed${message}\n  left: `;
+          const l = withWritten(head, () => c.support.formatter.debug(a, leftType(frame), spec, undefined));
+          return withWritten(`${l}\n right: `, () => c.support.formatter.debug(b, rightType(frame), spec, undefined));
+        });
+        throw new RustPanic(text, span);
       }
       return UNIT_VALUE;
     });
@@ -278,10 +279,18 @@ function dbgMacro(c: Compiler, macro: Macro<'dbg'>, span: Span): Eval {
     return (frame: Frame): Value => {
       const item = value(frame);
       const { runtime } = frame;
-      const shown = runtime.withRoots([item], () =>
-        runtime.withActiveBorrows([item], () => c.support.formatter.debug(item, type(frame), debugSpec(true), 0))
-      );
-      runtime.write('stderr', `${label} ${macro.texts[index]} = ${shown}\n`);
+      const prefix = `${label} ${macro.texts[index]} = `;
+      try {
+        const shown = runtime.withRoots([item], () =>
+          runtime.withActiveBorrows([item], () => c.support.formatter.debug(item, type(frame), debugSpec(true), 0))
+        );
+        runtime.write('stderr', `${prefix}${shown}\n`);
+      } catch (error) {
+        if (!(error instanceof FmtFailure)) throw error;
+        // `dbg!` writes to standard error, whose writer panics for an impl's error as `println!`'s does.
+        runtime.write('stderr', prefix + error.written);
+        throw new RustPanic(IO_WRITE_FAILURE.message, { row: 0, col: 0 }, IO_WRITE_FAILURE.location);
+      }
       return item;
     };
   });
@@ -346,6 +355,15 @@ function compileFormat(c: Compiler, format: FormatArgs, pieces = foldFormatPiece
         write
       );
     });
+}
+
+function withWritten(before: string, format: () => string): string {
+  try {
+    return before + format();
+  } catch (error) {
+    if (error instanceof FmtFailure) throw new FmtFailure(before + error.written);
+    throw error;
+  }
 }
 
 function formatOrPanic(
