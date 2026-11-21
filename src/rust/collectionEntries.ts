@@ -2,7 +2,7 @@ import { BTree, type TreeKey } from './btree';
 import { TableMap } from './capacity';
 import { allocateCollectionSnapshot, hashKey, valuesEqual } from './ops';
 import type { Type } from './types';
-import type { Value } from './values';
+import type { RangeEndpoint, Value } from './values';
 
 interface HashTableKey {
   readonly hash: string;
@@ -92,8 +92,8 @@ export class CollectionEntries<V> {
     this.tree!.appendOrdered(value);
   }
 
-  range(type: Type, start: Value, end: Value, inclusive: boolean): V[] {
-    return this.tree!.range(type, start, end, inclusive);
+  range(type: Type, start: RangeEndpoint | undefined, end: RangeEndpoint | undefined): V[] {
+    return this.tree!.range(type, start, end);
   }
 
   retain(keep: (value: V) => boolean): void {

@@ -38,6 +38,7 @@ export class TraitSolver {
 
   /** Whether `type` implements the trait, binding variables of closure signatures as a side effect. */
   // code-gauge-allow functionCognitiveComplexity 23 -- One rule per trait or conversion of the standard library.
+  // code-gauge-allow functionNcss 31 -- Routes Rust trait obligations by receiver type.
   implements(type: Type, ref: TraitRef): Answer {
     const t = normalize(shallow(type));
     const { trait } = ref;
@@ -54,7 +55,11 @@ export class TraitSolver {
     }
     if (t.kind === 'adt' && isPseudo(t.def)) return this.pseudoImplements(t, ref);
     if (t.kind === 'opaque' || t.kind === 'dyn') {
-      const answer = this.boundAnswer(t.kind === 'opaque' ? t.opaque.bounds : [t.trait], ref, t);
+      const bounds =
+        t.kind === 'opaque'
+          ? t.opaque.bounds
+          : [t.trait, ...(t.autoTraits ?? []).map((trait): TraitRef => ({ trait, args: [] }))];
+      const answer = this.boundAnswer(bounds, ref, t);
       return answer === 'no' ? this.builtinOnly(t, ref) : answer;
     }
     if (ref.fnSig) return this.closureImplements(t, ref);

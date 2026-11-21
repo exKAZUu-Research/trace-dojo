@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 421 -- Follows std::fmt's formatting rules case by case.
+// code-gauge-allow-file fileNcss 424 -- Follows std::fmt's formatting rules case by case.
 import type { FormatPiece, FormatSpec } from './ast';
 import { type DebugPart, emit, list, rangeText, structText, tupleText, type WriteChunk } from './debugText';
 import { debugFloat, displayFloat, expFloat, fixedFloat } from './floatFormat';
@@ -54,6 +54,7 @@ export interface FormatHooks {
   concrete(type: Type): Type;
   /** Checks the length of a string the formatting builds, and charges for the `written` characters. */
   allocateString(length: number, written?: number): void;
+  withActiveBorrows<T>(values: Value[], use: () => T): T;
 }
 
 export class Formatter {
@@ -61,6 +62,10 @@ export class Formatter {
 
   /** Formats a format string's pieces with the values and types of its arguments. */
   format(pieces: FormatPiece[], values: Value[], types: Type[], write?: WriteChunk): string {
+    return this.hooks.withActiveBorrows(values, () => this.formatArguments(pieces, values, types, write));
+  }
+
+  private formatArguments(pieces: FormatPiece[], values: Value[], types: Type[], write?: WriteChunk): string {
     let text = '';
     for (const piece of pieces) {
       if (typeof piece === 'string') {
@@ -377,7 +382,7 @@ export class Formatter {
     write?: WriteChunk
   ): string {
     const debug = (value: Value, type: Type, inner: number | undefined): string => this.debug(value, type, spec, inner);
-    return iteratorDebug(iter, t.args[0], t.args[1], debug, indent, write);
+    return this.hooks.withActiveBorrows([iter], () => iteratorDebug(iter, t.args[0], t.args[1], debug, indent, write));
   }
 
   private debugUserAdt(

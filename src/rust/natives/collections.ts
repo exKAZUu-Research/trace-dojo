@@ -1,22 +1,13 @@
 import type { TableMap } from '../capacity';
 import type { CollectionEntries, CollectionKey } from '../collectionEntries';
-import { cloneValue, testPartialOrder } from '../ops';
+import { cloneValue, testPartialOrder, valuesEqual } from '../ops';
 import type { Type } from '../types';
-import {
-  DONE,
-  ElementPlace,
-  EntryValue,
-  type IterValue,
-  MapValue,
-  type RangeValue,
-  SetValue,
-  UNIT_VALUE,
-  type Value,
-} from '../values';
+import { DONE, ElementPlace, EntryValue, type IterValue, MapValue, SetValue, UNIT_VALUE, type Value } from '../values';
 import { checkTableCapacity } from './capacityNatives';
 import { defaultValue } from './core';
-import { arrayIter, extendedValue, mapIter, nextForFold, ownedIter, setIter } from './iterators';
+import { arrayIter, extendedValue, mapIter, nextForFold, ownedIter, reserveHashInput, setIter } from './iterators';
 import { sizeOf } from './layout';
+import { boundsOf } from './ranges';
 import { btreeSetOp, hashSetIter, type SetOp } from './setOps';
 import { call, define, deref, libraryPanic, type Native, type NativeContext, none, option, some } from './support';
 
@@ -201,6 +192,7 @@ function mapProjection(map: MapValue, project: (entry: [Value, Value]) => Value,
 }
 
 function extendMap(ctx: NativeContext, m: MapValue, iterator: IterValue): Value {
+  if (m.entries.table) reserveHashInput(ctx, m.entries.table, iterator, ctx.typeArgs[2]);
   for (;;) {
     ctx.runtime.spend();
     const item = nextForFold(iterator);
@@ -302,21 +294,7 @@ function setNatives(sorted: boolean): Record<string, (args: Value[], ctx: Native
       s.entries.retain((value) => deref(call(ctx, f, [value])) as boolean);
       return UNIT_VALUE;
     },
-    extend: ([self, iter], ctx) => {
-      const s = set(self);
-      const iterator = deref(iter) as IterValue;
-      const convert = extendedValue(ctx.typeArgs[0], ctx.typeArgs[1]);
-      for (;;) {
-        ctx.runtime.spend();
-        const item = nextForFold(iterator);
-        if (item === DONE) break;
-        const hash = entryKey(ctx, s.entries, item);
-        if (s.entries.has(hash)) continue;
-        ctx.runtime.allocate(1);
-        s.entries.set(hash, convert(item));
-      }
-      return UNIT_VALUE;
-    },
+    extend: ([self, iter], ctx) => extendSet(ctx, set(self), deref(iter) as IterValue),
     drain: ([self], ctx) => {
       const values = set(self).entries.snapshot();
       set(self).entries.clear();
@@ -340,6 +318,22 @@ function setNatives(sorted: boolean): Record<string, (args: Value[], ctx: Native
       return option(ctx, value, value !== undefined);
     },
   };
+}
+
+function extendSet(ctx: NativeContext, target: SetValue, iterator: IterValue): Value {
+  if (target.entries.table) reserveHashInput(ctx, target.entries.table, iterator, ctx.typeArgs[2]);
+  const convert = extendedValue(ctx.typeArgs[0], ctx.typeArgs[1]);
+  for (;;) {
+    ctx.runtime.spend();
+    const item = nextForFold(iterator);
+    if (item === DONE) return UNIT_VALUE;
+    ctx.runtime.withRoots([item], () => {
+      const hash = entryKey(ctx, target.entries, item);
+      if (target.entries.has(hash)) return;
+      ctx.runtime.allocate(1);
+      target.entries.set(hash, convert(item));
+    });
+  }
 }
 
 function everySetMember(ctx: NativeContext, a: SetValue, b: SetValue, present: boolean): boolean {
@@ -398,18 +392,25 @@ function treeRange<V extends Value>(
   name: 'BTreeMap' | 'BTreeSet'
 ): IterValue {
   if (!collection.hasTreeRoot) return arrayIter([]);
-  const bounds = deref(range) as RangeValue | undefined;
+  const { start, end } = boundsOf(range);
   const type = keyType(ctx);
-  const start = bounds?.start;
-  const end = bounds?.end;
-  if (start !== undefined && end !== undefined && testPartialOrder('gt', type, start, end)) {
-    libraryPanic(
-      ctx,
-      `range start is greater than range end in ${name}`,
-      `alloc/src/collections/btree/search.rs:${name === 'BTreeMap' ? 121 : 119}:21`
-    );
+  if (start && end) {
+    if (!start.included && !end.included && valuesEqual(type, start.key, end.key)) {
+      libraryPanic(
+        ctx,
+        `range start and end are equal and excluded in ${name}`,
+        `alloc/src/collections/btree/search.rs:${name === 'BTreeMap' ? 112 : 110}:21`
+      );
+    }
+    if (testPartialOrder('gt', type, start.key, end.key)) {
+      libraryPanic(
+        ctx,
+        `range start is greater than range end in ${name}`,
+        `alloc/src/collections/btree/search.rs:${name === 'BTreeMap' ? 121 : 119}:21`
+      );
+    }
   }
-  return arrayIter(collection.range(type, start, end, !!bounds?.inclusive && !bounds.exhausted));
+  return arrayIter(collection.range(type, start, end));
 }
 
 natives['BTreeMap<_, _>::range'] = ([self, range], ctx) => treeRange(ctx, map(self).entries, range, 'BTreeMap');

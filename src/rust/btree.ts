@@ -1,6 +1,6 @@
 import { allocateCollectionSnapshot, compareValues, spendCollectionWork } from './ops';
 import type { Type } from './types';
-import type { Value } from './values';
+import type { RangeEndpoint, Value } from './values';
 
 const MIN_KEYS = 5;
 const MAX_KEYS = 2 * MIN_KEYS + 1;
@@ -30,7 +30,7 @@ export interface TreeKey<V> {
 
 const ALL = Symbol('all');
 const NONE = Symbol('none');
-type Bound = typeof ALL | typeof NONE | { key: Value; included: boolean };
+type Bound = typeof ALL | typeof NONE | RangeEndpoint;
 interface Edge<V> {
   node: Node<V>;
   index: number;
@@ -148,11 +148,11 @@ export class BTree<V> {
     updateToRoot(parent);
   }
 
-  range(type: Type, start: Value, end: Value, inclusive: boolean): V[] {
+  range(type: Type, start: RangeEndpoint | undefined, end: RangeEndpoint | undefined): V[] {
     this.finishBulk();
     if (!this.root) return [];
-    const firstBound: Bound = start === undefined ? ALL : { key: start, included: true };
-    const lastBound: Bound = end === undefined ? ALL : { key: end, included: inclusive };
+    const firstBound = start ?? ALL;
+    const lastBound = end ?? ALL;
     let first = this.boundEdge(this.root, type, firstBound, false, 0);
     let last = this.boundEdge(this.root, type, lastBound, true, first.index);
     while (first.node.children.length > 0) {

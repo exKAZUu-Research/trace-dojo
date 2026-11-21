@@ -5887,3 +5887,169 @@ fn main() {
     stdout: "Some((0, 'x')) Some('x') Some(2)\n",
   });
 });
+
+test('constructs supported Rust collections through the shared FromIterator trait', () => {
+  const program = `use std::collections::{BinaryHeap, BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+fn main() {
+    let a: HashSet<_> = HashSet::from_iter([1, 2, 1]);
+    let b: HashMap<_, _> = HashMap::from_iter([(1, 0), (1, 2)]);
+    let q = VecDeque::from_iter([1, 2]);
+    let s = BTreeSet::from_iter([2, 1]);
+    let m = BTreeMap::from_iter([(2, 2), (1, 1)]);
+    let h: BinaryHeap<_> = FromIterator::from_iter([2, 1]);
+    let z = Box::<[i32]>::from_iter([3, 4]);
+    println!("{} {:?} {:?} {:?} {:?} {:?} {:?}", a.len(), b.get(&1), q, s, m, h.into_vec(), z);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '2 Some(2) [1, 2] {1, 2} {1: 1, 2: 2} [2, 1] [3, 4]\n',
+  });
+});
+
+test('supports reverse terminator splitting and explicit collection range bounds', () => {
+  const program = `use std::collections::{BTreeMap, VecDeque};
+use std::ops::Bound::{Excluded, Included};
+fn main() {
+    println!("{:?}", "a,b,".rsplit_terminator(',').collect::<Vec<_>>());
+    let mut deque = VecDeque::with_capacity(5);
+    deque.extend([1, 2, 3, 4]);
+    deque.pop_front();
+    deque.pop_front();
+    deque.push_back(5);
+    deque.push_back(6);
+    deque.push_back(7);
+    let tail = deque.split_off(2);
+    let range = (Excluded(0), Included(2));
+    println!("{:?} {:?} {} {}", deque, tail, deque.capacity(), tail.capacity());
+    let map = BTreeMap::from([(1, 10), (2, 20), (3, 30)]);
+    println!("{:?} {:?} {:?}", range, tail.range(range).collect::<Vec<_>>(), map.range(range).collect::<Vec<_>>());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '["b", "a"]\n[3, 4] [5, 6, 7] 5 3\n(Excluded(0), Included(2)) [6, 7] [(1, 10), (2, 20)]\n',
+  });
+});
+
+test('runs Result inspect_err only on the error variant', () => {
+  const program = `fn main() {
+    let error: Result<i32, String> = Err(String::from("bad"));
+    let value: Result<i32, String> = Ok(4);
+    let error = error.inspect_err(|e| print!("{} ", e));
+    let value = value.inspect_err(|_| print!("unexpected "));
+    println!("{:?} {:?}", error, value);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'bad Err("bad") Ok(4)\n' });
+});
+
+test('promotes Rust integer bounds in constant borrows', () => {
+  const program = `fn main() {
+    let quotient;
+    { quotient = &(100 / i32::MAX); }
+    let indexed;
+    { indexed = &([10, 20][usize::MIN]); }
+    let bits;
+    { bits = &(128u32 / i32::BITS); }
+    println!("{} {} {}", quotient, indexed, bits);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '0 10 4\n' });
+});
+
+test('dispatches Rust trait objects with auto traits and generic parameters', () => {
+  const program = `use std::error::Error;
+trait Tr<T: Clone> {}
+struct S;
+impl Tr<i32> for S {}
+fn inspect<T>(_: &dyn Tr<T>) { println!("seen"); }
+fn parsing(s: &str) -> Result<i32, Box<dyn Error + Send + Sync>> {
+    if s.is_empty() { return Err("empty".into()); }
+    Ok(s.parse::<i32>()?)
+}
+fn main() {
+    inspect(&S as &dyn Tr<i32>);
+    println!("{} {}", parsing("").unwrap_err(), parsing("2").unwrap());
+    let f: Box<dyn Fn() -> i32 + Send> = Box::new(|| 1);
+    let g: Box<dyn Fn() -> i32> = f;
+    println!("{}", g());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'seen\nempty 2\n1\n' });
+  const invalid = program.replace('let g: Box<dyn Fn() -> i32> = f;', 'let g: Box<dyn Fn() -> i32 + Sync> = f;');
+  expect(executeProgram('rust', invalid)).toMatchObject({ kind: 'compileError' });
+});
+
+test('sizes Rust hash collections and fallible Vec collections from their iterator bounds', () => {
+  const program = `use std::collections::{HashMap, HashSet};
+fn main() {
+    let chain: HashSet<i32> = (0..3).chain(0..3).collect();
+    let text: HashSet<char> = "aaaaaaaaaaaaaaaa".chars().collect();
+    let repeat: HashSet<i32> = (0..).take(5).map(|x| x % 2).collect();
+    let mut map: HashMap<char, usize> = HashMap::new();
+    map.extend("abab".chars().chain("ab".chars()).map(|c| (c, 1)));
+    println!("{} {} {} {}", chain.capacity(), text.capacity(), repeat.capacity(), map.capacity());
+    let a: Result<Vec<i32>, ()> = vec![Ok(1), Ok(2)].into_iter().collect();
+    let b: Option<Vec<i32>> = (0..3).map(Some).collect();
+    println!("{} {}", a.unwrap().capacity(), b.unwrap().capacity());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '7 7 7 3\n4 4\n' });
+});
+
+test('keeps borrowed Rust iterator sources alive throughout Debug callbacks', () => {
+  const program = `use std::fmt;
+struct Holder(Turtle);
+impl fmt::Debug for Holder {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let observer = Turtle::new(0, 0);
+        print!("blocked:{} ", !observer.can_move_forward());
+        write!(f, "H")
+    }
+}
+fn main() {
+    println!("{:?}", vec![Holder(Turtle::new(2, 1)), Holder(Turtle::new(0, 1))].iter());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'blocked:true blocked:true Iter([H, H])\n',
+  });
+  expect(executeProgram('rust', program.replace('.iter()', '.iter().take(2)'))).toMatchObject({
+    kind: 'executed',
+    stdout: 'blocked:true blocked:true Take { iter: Iter([H, H]), n: 2 }\n',
+  });
+});
+
+test('promotes named Rust constants according to the value they store', () => {
+  const program = `const BASE: &[&str] = &["alpha", "beta"];
+const INDEX: usize = BASE.len() - 1;
+const SECONDS: u32 = 60 * 60;
+const EMPTY: Option<String> = None;
+fn seconds() -> &'static u32 { &SECONDS }
+fn main() {
+    let choices = (0..2).map(|_| &INDEX).collect::<Vec<_>>();
+    let empty;
+    { empty = &EMPTY; }
+    println!("{} {:?} {:?}", seconds(), choices, empty);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '3600 [1, 1] None\n' });
+  const owns = program.replace(
+    'const EMPTY: Option<String> = None;',
+    'const EMPTY: Option<String> = Some(String::new());'
+  );
+  expect(executeProgram('rust', owns)).toMatchObject({ kind: 'compileError' });
+});
+
+test('moves Rust ranges and generic iterators into consuming methods', () => {
+  const source = `fn main() {
+    let sequence = 0..4;
+    let sum: i32 = sequence.sum();
+    println!("{}", sum);
+    for x in sequence { println!("{}", x); }
+}`;
+  expect(executeProgram('rust', source)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message: expect.stringContaining('ムーブ') }],
+  });
+  const generic = `fn twice<I: Iterator<Item = i32>>(iter: I) -> usize {
+    let sum: i32 = iter.sum();
+    iter.count() + sum as usize
+}
+fn main() { println!("{}", twice(0..3)); }`;
+  expect(executeProgram('rust', generic)).toMatchObject({ kind: 'compileError' });
+});

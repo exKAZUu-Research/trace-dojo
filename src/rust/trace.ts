@@ -293,6 +293,7 @@ const keyFormatter = new Formatter({
   fieldTypes,
   concrete: (type) => type,
   allocateString: () => {},
+  withActiveBorrows: (_values, use) => use(),
 });
 
 function keyLabel(key: Value, type: Type): string {

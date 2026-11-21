@@ -354,7 +354,11 @@ export class LoanBuilder {
 
   private trackTemporary(place: Place, expr: Expr, mutable: boolean): void {
     const type = expr.ty && normalize(shallow(expr.ty));
-    if ((!mutable || (type?.kind === 'array' && type.len === 0)) && promotable(expr, this.annotations)) return;
+    if (
+      (!mutable || (type?.kind === 'array' && type.len === 0)) &&
+      promotable(expr, this.annotations, this.shared.budget)
+    )
+      return;
     const scope = this.extendedTemporaries.get(expr) ?? this.scopes.at(-1);
     scope?.temporaries.push(place.root);
   }

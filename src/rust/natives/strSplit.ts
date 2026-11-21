@@ -524,9 +524,9 @@ class SplitInternal {
   }
 }
 
-export type SplitKind = 'Split' | 'RSplit' | 'SplitTerminator' | 'SplitInclusive';
+export type SplitKind = 'Split' | 'RSplit' | 'SplitTerminator' | 'RSplitTerminator' | 'SplitInclusive';
 
-/** `split`, `rsplit`, `split_terminator`, and `split_inclusive` of a text by a pattern. */
+/** A string's forward, reverse, terminator, and inclusive split iterators. */
 export function splitIter(text: string, pattern: PatternKind, kind: SplitKind): IterValue {
   return splitFrom(new SplitInternal(searcherOf(text, pattern), kind === 'Split' || kind === 'RSplit'), kind);
 }
@@ -536,7 +536,7 @@ function splitFrom(inner: SplitInternal, kind: SplitKind): IterValue {
   const forward = (): Next => inner.next(inclusive) ?? DONE;
   const backward = (): Next => inner.nextBack(inclusive) ?? DONE;
   const iter =
-    kind === 'RSplit'
+    kind === 'RSplit' || kind === 'RSplitTerminator'
       ? new IterValue(backward, forward, undefined, inner.roots)
       : new IterValue(forward, backward, undefined, inner.roots);
   iter.fork = () => splitFrom(inner.fork(), kind);

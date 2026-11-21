@@ -4,7 +4,7 @@ import type { Eval } from './compiler';
 import { normalize } from './infer';
 import { type Frame, UNASSIGNED } from './runtime';
 import { type AdtDef, shallow, type Type } from './types';
-import { EnumValue, isPlace, type Place, StructValue, type Value } from './values';
+import { EnumValue, isPlace, IterValue, type Place, StructValue, type Value } from './values';
 
 export function evaluateValues(frame: Frame, reads: Eval[]): Value[] {
   return withEvaluatedValues(frame, reads, (values) => values);
@@ -12,8 +12,15 @@ export function evaluateValues(frame: Frame, reads: Eval[]): Value[] {
 
 export function withEvaluatedValues<T>(frame: Frame, reads: Eval[], use: (values: Value[]) => T): T {
   const values: Value[] = [];
-  return frame.runtime.withRoots(values, () => {
-    for (const read of reads) values.push(read(frame));
+  const borrows: Value[] = [];
+  return frame.runtime.withRoots([values, borrows], () => {
+    for (const read of reads) {
+      const value = read(frame);
+      values.push(value);
+      if (value instanceof IterValue) {
+        for (const root of frame.runtime.borrowRoots([value])) borrows.push(root);
+      }
+    }
     return use(values);
   });
 }

@@ -14,6 +14,7 @@ import {
   F64,
   freshVar,
   INT_NAMES,
+  integerConst,
   intMax,
   intMin,
   type IntName,
@@ -578,9 +579,9 @@ function builtinScalar(path: PathAst, scope: TypeScope): ConstScalar | undefined
   const { segments } = path;
   if (segments.length === 2 && (INT_NAMES as string[]).includes(segments[0].name)) {
     const name = segments[0].name as IntName;
-    const type = intType(name);
-    if (segments[1].name === 'MAX') return { type, value: intMax(name) };
-    if (segments[1].name === 'MIN') return { type, value: intMin(name) };
+    const constant = segments[1].name;
+    const value = integerConst(`${name}::${constant}`);
+    if (value !== undefined) return { type: intType(constant === 'BITS' ? 'u32' : name), value };
   }
   if (segments.length === 2) {
     const primitive = lookupType(scope.module, segments[0].name, path.span);

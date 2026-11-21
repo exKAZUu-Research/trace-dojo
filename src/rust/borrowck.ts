@@ -451,9 +451,7 @@ export class BorrowChecker {
         current = this.expr(expr.receiver, current, 'mut');
       } else {
         const adjusted = typeAfter(expr.receiver.ty, receiver.derefs);
-        const ownsIterator = adjusted?.kind === 'adt' && adjusted.def.builtin === 'Box';
-        const moves =
-          method.fn.selfMode === 'value' && !throughRef && (!receiver.asIter || ownsIterator) && !this.isCopy(adjusted);
+        const moves = method.fn.selfMode === 'value' && !throughRef && !this.isCopy(adjusted);
         current = this.expr(expr.receiver, current, moves ? 'move' : 'read');
       }
     } else {

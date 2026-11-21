@@ -1,8 +1,10 @@
+import type { ExecutionBudget } from '../interpreter/limits';
 import type { Annotations } from './annotations';
 import type { Expr } from './ast';
 import { constInteger } from './constExpressions';
+import { constantNeedsDrop } from './constLint';
 import { normalize } from './infer';
-import { type ConstDef, intMax, intMin, shallow } from './types';
+import { integerConst, intMin, shallow } from './types';
 
 // code-gauge-allow functionCognitiveComplexity 18 -- Traverses the expression forms that extend temporary scopes.
 // code-gauge-allow functionNcss 37 -- Traverses the expression forms that extend temporary scopes.
@@ -62,8 +64,9 @@ function extendOperand(expr: Expr, mark: (operand: Expr) => void): void {
 
 // code-gauge-allow functionCognitiveComplexity 20 -- Each kind has its own constant-promotion condition.
 // code-gauge-allow functionNcss 46 -- Each kind has its own constant-promotion condition.
-export function promotable(expr: Expr, annotations: Annotations, constants: Set<ConstDef> = new Set()): boolean {
-  const child = (value: Expr): boolean => promotable(value, annotations, constants);
+export function promotable(expr: Expr, annotations: Annotations, budget: ExecutionBudget): boolean {
+  budget.spend();
+  const child = (value: Expr): boolean => promotable(value, annotations, budget);
   switch (expr.kind) {
     case 'int':
     case 'float':
@@ -113,12 +116,7 @@ export function promotable(expr: Expr, annotations: Annotations, constants: Set<
     case 'path': {
       const resolved = annotations.paths.get(expr);
       if (resolved?.kind === 'ctor' || resolved?.kind === 'builtinConst') return true;
-      const def = resolved?.kind === 'const' ? resolved.def : undefined;
-      if (!def?.ast.value || constants.has(def) || constants.size >= 64) return false;
-      constants.add(def);
-      const result = child(def.ast.value);
-      constants.delete(def);
-      return result;
+      return resolved?.kind === 'const' && !constantNeedsDrop(resolved.def, annotations, budget);
     }
     default: {
       return false;
@@ -142,10 +140,7 @@ function promotionInteger(expr: Expr, annotations: Annotations): bigint | undefi
   if (expr.kind === 'int') return expr.value;
   if (expr.kind === 'unary' && expr.op === '-' && expr.operand.kind === 'int') return -expr.operand.value;
   const constant = annotations.paths.get(expr);
-  if (constant?.kind === 'builtinConst' && constant.type.kind === 'int') {
-    if (constant.name === 'MIN') return intMin(constant.type.name);
-    if (constant.name === 'MAX') return intMax(constant.type.name);
-  }
+  if (constant?.kind === 'builtinConst') return integerConst(constant.name);
   if (constant?.kind !== 'const' || constant.type.kind !== 'int') return;
   const { def, type } = constant;
   const initializer = def.ast.value;

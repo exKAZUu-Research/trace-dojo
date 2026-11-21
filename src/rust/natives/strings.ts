@@ -12,7 +12,6 @@ import {
   FnValue,
   isPlace,
   type IterValue,
-  type RangeValue,
   sliceItems,
   SliceView,
   StringValue,
@@ -24,7 +23,7 @@ import {
 import { checkVecCapacity, intoStringBytes, repeatedLength, withStringCapacity } from './capacityNatives';
 import { arrayIter } from './iterators';
 import { parseFloatText, parseInteger } from './numbers';
-import { checkedRangeBounds } from './ranges';
+import { checkedRangeBounds, numericBounds } from './ranges';
 import { appendText, collectString, extendString } from './stringBuilder';
 import { byteCursor, charCursor, finalScalarStart } from './stringCursors';
 import {
@@ -290,8 +289,8 @@ function parse(ctx: NativeContext, text: string): Value {
 }
 
 function rangeBounds(range: Value, length: number): { start: number; end: number } {
-  const bounds = deref(range) as RangeValue | undefined;
-  return { start: Number(bounds?.sliceStart() ?? 0), end: Number(bounds?.sliceEnd() ?? length) };
+  const [start, end] = numericBounds(range, BigInt(length));
+  return { start: Number(start), end: Number(end) };
 }
 
 const strNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
@@ -324,6 +323,7 @@ const strNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
   rsplit: ([s, p], ctx) => splitIter(textOf(s), patternOf(ctx, p), 'RSplit'),
   split_inclusive: ([s, p], ctx) => splitIter(textOf(s), patternOf(ctx, p), 'SplitInclusive'),
   split_terminator: ([s, p], ctx) => splitIter(textOf(s), patternOf(ctx, p), 'SplitTerminator'),
+  rsplit_terminator: ([s, p], ctx) => splitIter(textOf(s), patternOf(ctx, p), 'RSplitTerminator'),
   splitn: ([s, n, p], ctx) => splitNIter(textOf(s), patternOf(ctx, p), n as bigint, false),
   rsplitn: ([s, n, p], ctx) => splitNIter(textOf(s), patternOf(ctx, p), n as bigint, true),
   split_once: ([s, p], ctx) => splitOnce(ctx, textOf(s), p, false),

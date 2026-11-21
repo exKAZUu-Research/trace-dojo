@@ -36,6 +36,8 @@ pub mod default {
     pub trait Default { fn default() -> Self; }
 }
 pub mod ops {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub enum Bound<T> { Included(T), Excluded(T), Unbounded }
     pub trait Add<Rhs = Self> {}
     pub trait Sub<Rhs = Self> {}
     pub trait Mul<Rhs = Self> {}
@@ -367,6 +369,7 @@ pub mod str {
         pub fn split<P: Pattern>(&self, pat: P) -> IterImpl<&str, SplitShape<P>>;
         pub fn rsplit<P: Pattern>(&self, pat: P) -> IterImpl<&str, SplitShape<P>>;
         pub fn split_terminator<P: Pattern>(&self, pat: P) -> IterImpl<&str, SplitShape<P>>;
+        pub fn rsplit_terminator<P: Pattern>(&self, pat: P) -> IterImpl<&str, SplitShape<P>>;
         pub fn split_inclusive<P: Pattern>(&self, pat: P) -> IterImpl<&str, SplitShape<P>>;
         pub fn splitn<P: Pattern>(&self, n: usize, pat: P) -> IterImpl<&str, SplitNShape<P>>;
         pub fn rsplitn<P: Pattern>(&self, n: usize, pat: P) -> IterImpl<&str, SplitNShape<P>>;
@@ -806,6 +809,7 @@ pub mod result {
         pub fn map_or_else<U, D: FnOnce(E) -> U, F: FnOnce(T) -> U>(self, default: D, f: F) -> U;
         pub fn map_err<F2, O: FnOnce(E) -> F2>(self, op: O) -> Result<T, F2>;
         pub fn inspect<F: FnOnce(&T)>(self, f: F) -> Result<T, E>;
+        pub fn inspect_err<F: FnOnce(&E)>(self, f: F) -> Result<T, E>;
         pub fn and_then<U, F: FnOnce(T) -> Result<U, E>>(self, op: F) -> Result<U, E>;
         pub fn and<U>(self, res: Result<U, E>) -> Result<U, E>;
         pub fn or<F2>(self, res: Result<T, F2>) -> Result<T, F2>;
@@ -857,7 +861,7 @@ pub mod iter {
     pub struct IterImpl<'a, T, S>;
     pub trait Iterator {}
     pub trait IntoIterator {}
-    pub trait FromIterator<A> {}
+    pub trait FromIterator<A> { fn from_iter<I: IntoIterator<Item = A>>(iter: I) -> Self; }
     pub trait Extend<A> {}
     pub trait Sum<A> {}
     pub trait Product<A> {}
@@ -1261,6 +1265,7 @@ pub mod collections {
         pub fn rotate_left(&mut self, n: usize);
         pub fn rotate_right(&mut self, n: usize);
         pub fn make_contiguous(&mut self) -> &mut [T];
+        pub fn split_off(&mut self, at: usize) -> VecDeque<T>;
         pub fn drain<R: RangeBounds<usize>>(&mut self, range: R) -> IterImpl<T, VecDequeDrainShape>;
         pub fn into_iter(self) -> IterImpl<T, VecDequeIntoIterShape<T>>;
     }

@@ -81,6 +81,7 @@ export class Interpreter implements CallSupport {
       fieldTypes: (def, args, variant) => fieldTypes(def, args, variant),
       concrete: (type) => this.revealType(type),
       allocateString: (length, written) => this.runtime.allocateString(length, written),
+      withActiveBorrows: (values, use) => this.runtime.withActiveBorrows(values, use),
     });
     this.restoreOperations = setUserImpls({
       allocate: (count) => this.runtime.allocate(count),

@@ -1,5 +1,5 @@
-// code-gauge-allow-file fileNcss 880 -- One native per method of the standard library.
-import { collectedVecCapacity, inPlaceCapacity, setVecCapacity, sizeTable, type TableMap } from '../capacity';
+// code-gauge-allow-file fileNcss 929 -- One native per method of the standard library.
+import { inPlaceCapacity, reserveVec, setVecCapacity, sizeTable, type TableMap, vecCapacity } from '../capacity';
 import type { DebugPart } from '../debugText';
 import { normalize } from '../infer';
 import { type DebugValue, described, fieldsPart, iteratorDebug, numberPart, optionPart } from '../iterDebug';
@@ -19,7 +19,7 @@ import {
 } from '../ops';
 import { MOVED } from '../runtime';
 import { iteratorCapability } from '../traits';
-import { sameType, shallow, type Type } from '../types';
+import { intMax, sameType, shallow, type Type } from '../types';
 import {
   CellPlace,
   DONE,
@@ -39,6 +39,7 @@ import {
   textOf,
   type Value,
 } from '../values';
+import { checkTableCapacity, checkVecCapacity } from './capacityNatives';
 import { layoutOf, sizeOf } from './layout';
 import { rangeIterator } from './rangeIterator';
 import { lessByPartialOrd, sortSlice } from './sorting';
@@ -235,6 +236,65 @@ function nthItem(ctx: NativeContext, n: bigint, next: () => Next): Next {
 /** The number of elements left, counting those `peek` looked at. */
 export function lengthOf(iter: IterValue): bigint {
   return BigInt(iter.remaining?.() ?? 0) + BigInt(iter.peeked?.filter((item) => item !== DONE).length ?? 0);
+}
+
+export function iteratorLowerBound(iter: IterValue, shape?: Type): bigint {
+  if (!shape || iteratorCapability(shape, 'exact') === 'yes') return lengthOf(iter);
+  const t = normalize(shallow(shape));
+  if (t.kind !== 'adt') return 0n;
+  return shorterLength(lowerBoundOfShape(iter, t), intMax('usize'));
+}
+
+function lowerBoundOfShape(iter: IterValue, shape: Extract<Type, { kind: 'adt' }>): bigint {
+  const { name } = shape.def;
+  if (name === 'RangeShape' || name === 'RangeInclusiveShape') return lengthOf(iter);
+  if (name === 'RangeFromShape' || name === 'RepeatShape' || name === 'RepeatWithShape') return intMax('usize');
+  if (name === 'CharsShape' || name === 'CharIndicesShape') {
+    const bytes = iter.remainingTextBytes?.() ?? 0;
+    return BigInt(Math.ceil(bytes / 4)) + BigInt(iter.peeked?.filter((item) => item !== DONE).length ?? 0);
+  }
+  const source = iter.roots[0];
+  if (!(source instanceof IterValue) || (!PRESERVES_LOWER_BOUND.has(name) && !SIZED_ADAPTERS.has(name))) return 0n;
+  const first = iteratorLowerBound(source, shape.args[0]);
+  return adapterLowerBound(iter, name, first, shape.args[1]);
+}
+
+const PRESERVES_LOWER_BOUND = new Set([
+  'MapShape',
+  'InspectShape',
+  'RevShape',
+  'EnumerateShape',
+  'CopiedShape',
+  'ClonedShape',
+  'ByRefShape',
+  'PeekableShape',
+]);
+
+const SIZED_ADAPTERS = new Set(['FuseShape', 'TakeShape', 'SkipShape', 'StepByShape', 'ChainShape', 'ZipShape']);
+
+// code-gauge-allow functionCognitiveComplexity 20 -- The adapters make size-hint adjustments from their current state.
+function adapterLowerBound(iter: IterValue, name: string, first: bigint, otherShape?: Type): bigint {
+  if (PRESERVES_LOWER_BOUND.has(name)) return first;
+  const state = iter.roots[1] as
+    | {
+        second?: IterValue;
+        firstDone?: boolean;
+        left?: bigint;
+        toSkip?: bigint;
+        done?: boolean;
+        step?: bigint;
+        first?: boolean;
+      }
+    | undefined;
+  if (name === 'FuseShape') return state?.done ? 0n : first;
+  if (name === 'TakeShape' && state?.left !== undefined) return shorterLength(first, state.left);
+  if (name === 'SkipShape' && state?.toSkip !== undefined) return positiveLength(first - state.toSkip);
+  if (name === 'StepByShape' && state?.step) return (first + (state.first ? state.step - 1n : 0n)) / state.step;
+  if ((name === 'ChainShape' || name === 'ZipShape') && state?.second) {
+    const second = iteratorLowerBound(state.second, otherShape);
+    return name === 'ChainShape' ? (state.firstDone ? 0n : first) + second : shorterLength(first, second);
+  }
+  return 0n;
 }
 
 function positiveLength(length: bigint): bigint {
@@ -1036,6 +1096,13 @@ function iteratorOrder(ctx: NativeContext, first: IterValue, second: IterValue, 
 }
 
 define({
+  'FromIterator::from_iter': ([source], ctx) => {
+    const [target, item, from] = ctx.typeArgs;
+    const iter = toIterator(source, from) as IterValue;
+    return ctx.runtime.withRoots([iter], () =>
+      collectIterator(ctx, iter, target, item, intoIterShape(ctx.interp.program, from))
+    );
+  },
   'IterImpl<_, _>::collect': ([self], ctx) =>
     collectIterator(ctx, iterOf(self), ctx.typeArgs[2], ctx.typeArgs[0], ctx.typeArgs[1]),
   'IterImpl<_, _>::sum': ([self], ctx) => sumOrProduct(ctx, iterOf(self), ctx.typeArgs[2], '+'),
@@ -1412,19 +1479,32 @@ function intStep(ctx: NativeContext, type: Type, op: '+' | '*', total: bigint, v
  * `Vec::from_iter`: the elements, with the exact capacity a `TrustedLen` iterator's size hint gives, and otherwise
  * what growth by the size hint's lower bound gives, which is exact for an `ExactSizeIterator` and 0 for others.
  */
-export function collectVec(ctx: NativeContext, iter: IterValue, shape: Type, elem: Type): Value[] {
-  const exact = iteratorCapability(shape, 'exact') === 'yes' ? lengthOf(iter) : undefined;
-  const source = inPlaceSource(iter, shape);
-  // `Vec::from_iter` folds a `TrustedLen` iterator and calls `next` on others.
-  const items = collectAll(ctx, iter, undefined, isTrustedLen(shape));
-  ctx.runtime.allocate(items.length);
+export function collectVec(ctx: NativeContext, iter: IterValue, shape: Type | undefined, elem: Type): Value[] {
+  const source = shape && inPlaceSource(iter, shape);
   const inPlace = source && inPlaceCapacity(source, layoutOf(elem));
-  if (inPlace !== undefined) setVecCapacity(items, inPlace);
-  else if (!isTrustedLen(shape)) {
-    const lowerAfter = (taken: number): number => (exact === undefined ? 0 : Number(exact - BigInt(taken)));
-    setVecCapacity(items, collectedVecCapacity(items.length, sizeOf(elem), lowerAfter));
+  const trusted = shape && isTrustedLen(shape);
+  if (trusted || inPlace !== undefined) {
+    const items = collectAll(ctx, iter, undefined, !!trusted);
+    ctx.runtime.allocate(items.length);
+    if (inPlace !== undefined) setVecCapacity(items, inPlace);
+    return items;
   }
-  return items;
+  const items: Value[] = [];
+  const size = sizeOf(elem);
+  let capacity = vecCapacity(items, 0, size);
+  return ctx.runtime.withRoots(items, () => {
+    each(ctx, iter, (item) => {
+      if (items.length === capacity) {
+        const additional = iteratorLowerBound(iter, shape) + 1n;
+        checkVecCapacity(ctx, items.length, additional, size);
+        reserveVec(items, items.length, Number(additional), size);
+        capacity = vecCapacity(items, items.length, size);
+      }
+      ctx.runtime.allocate(1);
+      items.push(item);
+    });
+    return items;
+  });
 }
 
 /** The adapters through which `collect` reuses the buffer of a `Vec`'s `into_iter` (`InPlaceIterable`). */
@@ -1465,8 +1545,7 @@ function collectIterator(ctx: NativeContext, iter: IterValue, target: Type, item
   if (t.kind !== 'adt') throw new Error('collect into a non-collection');
   switch (t.def.builtin) {
     case 'Vec': {
-      if (shape) return collectVec(ctx, iter, shape, item);
-      return collectBulk(ctx, iter, t, item);
+      return collectVec(ctx, iter, shape, item);
     }
     case 'String': {
       return collectString(ctx, iter, item, shape);
@@ -1495,7 +1574,7 @@ function collectOutcome(ctx: NativeContext, iter: IterValue, target: Type & { ki
 function collectHashMap(ctx: NativeContext, iter: IterValue, types: Type[], shape?: Type): MapValue {
   const map = new MapValue(false);
   sizeTable(map.entries.table, sizeOf({ kind: 'tuple', elems: types }));
-  reserveHashInput(map.entries.table!, iter, shape);
+  reserveHashInput(ctx, map.entries.table!, iter, shape);
   return collectHash(ctx, iter, map, (item) => {
     const [key, value] = item as Value[];
     const lookup = map.entries.key(types[0], key);
@@ -1511,7 +1590,7 @@ function collectHashMap(ctx: NativeContext, iter: IterValue, types: Type[], shap
 function collectHashSet(ctx: NativeContext, iter: IterValue, itemType: Type, shape?: Type): SetValue {
   const set = new SetValue(false);
   sizeTable(set.entries.table, sizeOf(itemType));
-  reserveHashInput(set.entries.table!, iter, shape);
+  reserveHashInput(ctx, set.entries.table!, iter, shape);
   return collectHash(ctx, iter, set, (item) => {
     const lookup = set.entries.key(itemType, item);
     if (set.entries.has(lookup)) return;
@@ -1532,10 +1611,16 @@ function collectHash<T extends MapValue | SetValue>(
   });
 }
 
-function reserveHashInput(table: TableMap<unknown, unknown>, iter: IterValue, shape?: Type): void {
-  if (shape && iteratorCapability(shape, 'exact') !== 'yes') return;
-  const count = lengthOf(iter);
-  if (count <= BigInt(Number.MAX_SAFE_INTEGER)) table.reserve(Number(count));
+export function reserveHashInput(
+  ctx: NativeContext,
+  table: TableMap<unknown, unknown>,
+  iter: IterValue,
+  shape?: Type
+): void {
+  const bound = iteratorLowerBound(iter, shape);
+  const additional = table.size === 0 ? bound : (bound + 1n) / 2n;
+  checkTableCapacity(ctx, table.size, additional, table.entrySize);
+  table.reserve(Number(additional));
 }
 
 function collectBulk(ctx: NativeContext, iter: IterValue, target: Type & { kind: 'adt' }, item: Type): Value {
@@ -1543,7 +1628,6 @@ function collectBulk(ctx: NativeContext, iter: IterValue, target: Type & { kind:
   ctx.runtime.allocate(items.length);
   return ctx.runtime.withRoots(items, () => {
     switch (target.def.builtin) {
-      case 'Vec':
       case 'VecDeque': {
         return items;
       }

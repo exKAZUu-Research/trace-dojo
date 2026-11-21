@@ -12,7 +12,7 @@ import { compileError } from './items';
 import { castValue, floatArith, wrap } from './ops';
 import {
   type ConstDef,
-  INT_NAMES,
+  integerConst,
   intMax,
   intMin,
   type IntName,
@@ -709,6 +709,13 @@ const RUNTIME_DROP_TYPES = new Set([
   'BTreeSet',
 ]);
 
+export function constantNeedsDrop(def: ConstDef, annotations: Annotations, budget: ExecutionBudget): boolean {
+  const moved = new Set<string>();
+  if (!needsConstDrop(def.type, undefined, moved, '', 0, budget)) return false;
+  const value = def.ast.value && ConstLint.valueOf(def.ast.value, annotations, []);
+  return needsConstDrop(def.type, value, moved, '', 0, budget);
+}
+
 export function checkConstDrop(
   type: Type | undefined,
   value: Known | undefined,
@@ -780,14 +787,6 @@ function bits(name: IntName): number {
 function floatLimit(name: string): number | undefined {
   const [ty, key] = name.split('::');
   return ty === 'f32' || ty === 'f64' ? FLOAT_LIMITS[key]?.[ty] : undefined;
-}
-
-function integerConst(name: string): bigint | undefined {
-  const [type, constant] = name.split('::') as [IntName, string];
-  if (!INT_NAMES.includes(type)) return undefined;
-  if (constant === 'MAX') return intMax(type);
-  if (constant === 'MIN') return intMin(type);
-  return undefined;
 }
 
 function aggregate(fields: Iterable<readonly [string, Known | undefined]>, ctor?: string): Aggregate {

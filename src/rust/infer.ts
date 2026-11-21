@@ -1,4 +1,13 @@
-import { type AdtDef, childTypes, intType, mapChildren, shallow, type Type, type TypeVar } from './types';
+import {
+  type AdtDef,
+  childTypes,
+  intType,
+  mapChildren,
+  sameAutoTraits,
+  shallow,
+  type Type,
+  type TypeVar,
+} from './types';
 
 /** Binds type variables so that types become equal, recording the bindings so that a failed attempt can undo them. */
 export class Unifier {
@@ -90,10 +99,7 @@ export class Unifier {
         return x.closure.id === (y as typeof x).closure.id;
       }
       case 'dyn': {
-        const other = y as typeof x;
-        if (x.trait.trait !== other.trait.trait) return false;
-        if (x.trait.fnSig && other.trait.fnSig) return this.unifySignatures(x.trait.fnSig, other.trait.fnSig);
-        return x.trait.args.every((arg, i) => this.unify(arg, other.trait.args[i]));
+        return this.unifyDyn(x, y as typeof x);
       }
       case 'opaque': {
         const other = (y as typeof x).opaque;
@@ -103,6 +109,18 @@ export class Unifier {
         return true;
       }
     }
+  }
+
+  private unifyDyn(a: Extract<Type, { kind: 'dyn' }>, b: Extract<Type, { kind: 'dyn' }>): boolean {
+    if (a.trait.trait !== b.trait.trait || !sameAutoTraits(a, b)) return false;
+    const callable = a.trait.fnSig;
+    const otherCallable = b.trait.fnSig;
+    if (callable || otherCallable)
+      return !!callable && !!otherCallable && this.unifySignatures(callable, otherCallable);
+    const item = a.trait.item;
+    const otherItem = b.trait.item;
+    if ((item || otherItem) && (!item || !otherItem || !this.unify(item, otherItem))) return false;
+    return a.trait.args.every((arg, i) => this.unify(arg, b.trait.args[i]));
   }
 
   private unifySignatures(p: { params: Type[]; ret: Type }, q: { params: Type[]; ret: Type }): boolean {

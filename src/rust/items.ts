@@ -859,6 +859,7 @@ const BUILTIN_STRUCTS: Record<string, BuiltinAdt> = {
 };
 
 const BUILTIN_ENUMS: Record<string, BuiltinAdt> = {
+  Bound: 'Bound',
   Option: 'Option',
   ControlFlow: 'ControlFlow',
   Result: 'Result',
@@ -1423,16 +1424,7 @@ export function lowerType(ast: TypeAst, scope: TypeScope): Type {
       return NEVER;
     }
     case 'dyn': {
-      const [bound] = ast.bounds;
-      if (ast.bounds.length !== 1) {
-        compileError(ast.span, 'dyn には、1 個のトレイトを書いてください。');
-      }
-      return {
-        kind: 'dyn',
-        trait: lowerBound(bound, scope, undefined),
-        objectLifetime: ast.lifetime === "'static" || (!ast.lifetime && !scope.allowInfer) ? 'static' : undefined,
-        lifetime: ast.lifetime,
-      };
+      return lowerDynType(ast, scope);
     }
     case 'impl': {
       if (scope.implParams) {
@@ -1461,6 +1453,25 @@ export function lowerType(ast: TypeAst, scope: TypeScope): Type {
       return compileError(ast.span, 'Fn(i32) -> i32 は、impl Fn(i32) -> i32 か型引数の境界に書いてください。');
     }
   }
+}
+
+function lowerDynType(ast: Extract<TypeAst, { kind: 'dyn' }>, scope: TypeScope): Type {
+  const bounds = ast.bounds.map((bound) => lowerBound(bound, scope, undefined));
+  const auto = new Set(
+    bounds.filter(({ trait }) => trait.builtin === 'Send' || trait.builtin === 'Sync').map(({ trait }) => trait)
+  );
+  const principal = bounds.filter(({ trait }) => !auto.has(trait));
+  if (principal.length > 1) compileError(ast.span, 'dyn の主トレイトは 1 個だけ書いてください。');
+  const trait = principal[0] ?? bounds.find(({ trait }) => trait.builtin === 'Send') ?? bounds[0];
+  if (!trait) return compileError(ast.span, 'dyn にはトレイトを書いてください。');
+  auto.delete(trait.trait);
+  return {
+    kind: 'dyn',
+    trait,
+    autoTraits: [...auto],
+    objectLifetime: ast.lifetime === "'static" || (!ast.lifetime && !scope.allowInfer) ? 'static' : undefined,
+    lifetime: ast.lifetime,
+  };
 }
 
 /** `I::Item` of a type parameter bounded by `Iterator` or `IntoIterator`. */

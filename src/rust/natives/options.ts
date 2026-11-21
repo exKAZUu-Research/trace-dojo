@@ -19,6 +19,14 @@ function isOk(value: Value): boolean {
   return opt(value).variant === 0;
 }
 
+function inspectVariant(variant: number): (args: Value[], ctx: NativeContext) => Value {
+  return ([self, f], ctx) => {
+    const value = opt(self);
+    if (value.variant === variant) call(ctx, f, [value.fields[0]]);
+    return self;
+  };
+}
+
 function debugText(ctx: NativeContext, value: Value, type: Type): string {
   return ctx.interp.formatter.debug(value, type, DEFAULT_SPEC, undefined);
 }
@@ -43,10 +51,7 @@ const optionNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
   map_or: ([self, fallback, f], ctx) => (isSome(self) ? call(ctx, f, [opt(self).fields[0]]) : fallback),
   map_or_else: ([self, fallback, f], ctx) =>
     isSome(self) ? call(ctx, f, [opt(self).fields[0]]) : call(ctx, fallback, []),
-  inspect: ([self, f], ctx) => {
-    if (isSome(self)) call(ctx, f, [opt(self).fields[0]]);
-    return self;
-  },
+  inspect: inspectVariant(1),
   and_then: ([self, f], ctx) => (isSome(self) ? call(ctx, f, [opt(self).fields[0]]) : none(ctx)),
   and: ([self, other], ctx) => (isSome(self) ? other : none(ctx)),
   or: ([self, other]) => (isSome(self) ? self : other),
@@ -135,10 +140,8 @@ const resultNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
   map_or: ([self, fallback, f], ctx) => (isOk(self) ? call(ctx, f, [opt(self).fields[0]]) : fallback),
   map_or_else: ([self, fallback, f], ctx) => call(ctx, isOk(self) ? f : fallback, [opt(self).fields[0]]),
   map_err: ([self, f], ctx) => (isOk(self) ? self : err(ctx, call(ctx, f, [opt(self).fields[0]]))),
-  inspect: ([self, f], ctx) => {
-    if (isOk(self)) call(ctx, f, [opt(self).fields[0]]);
-    return self;
-  },
+  inspect: inspectVariant(0),
+  inspect_err: inspectVariant(1),
   and_then: ([self, f], ctx) => (isOk(self) ? call(ctx, f, [opt(self).fields[0]]) : self),
   and: ([self, other]) => (isOk(self) ? other : self),
   or: ([self, other]) => (isOk(self) ? self : other),

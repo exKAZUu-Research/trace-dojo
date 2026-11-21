@@ -258,6 +258,11 @@ export class RangeValue {
   }
 }
 
+export interface RangeEndpoint {
+  key: Value;
+  included: boolean;
+}
+
 /** A trait object: a value with the type that decides which implementation its methods run. */
 export class DynValue {
   constructor(

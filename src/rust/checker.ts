@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 896 -- The checker core owns body, entry point, and type obligations.
+// code-gauge-allow-file fileNcss 902 -- The checker core owns body, entry point, and type obligations.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ExecutionBudget } from '../interpreter/limits';
 import { AdtStorage } from './adtStorage';
@@ -136,9 +136,10 @@ export class Checker {
     this.checkDerivedTraits();
     this.checkImplCoherence();
     for (const impl of this.program.impls) this.checkImplSignatures(impl);
+    const checkedConsts = this.checkConsts(0);
     for (const fn of this.program.pendingFns.splice(0)) this.checkFn(fn);
     while (this.nestedFns.length > 0) this.checkFn(this.nestedFns.shift()!);
-    this.checkConsts();
+    this.checkConsts(checkedConsts);
     this.checkMain();
   }
 
@@ -451,8 +452,9 @@ export class Checker {
     }
   }
 
-  private checkConsts(): void {
-    for (const def of this.program.consts) {
+  private checkConsts(first: number): number {
+    for (let index = first; index < this.program.consts.length; index++) {
+      const def = this.program.consts[index];
       const { ast, module, impl } = def;
       if (!ast.value) continue;
       this.body = this.newBody({
@@ -473,6 +475,7 @@ export class Checker {
       // rustc evaluates constants before running, so one whose value overflows or divides by zero is an error.
       new ConstLint(this.annotations).checkExpr(ast.value);
     }
+    return this.program.consts.length;
   }
 
   private checkMain(): void {
@@ -995,8 +998,9 @@ export class Checker {
       const array = normalize(shallow(a.args[0]));
       if (target.kind === 'slice' && array.kind === 'array' && this.unifier.tryUnify(array.elem, target.elem)) return;
       if (target.kind === 'dyn') {
-        this.requireDyn(a.args[0], target.trait, expr.span);
-        this.setCoercion(expr, { kind: 'dyn', type: a.args[0], mutable: false, trait: target.trait });
+        this.requireDyn(a.args[0], target, expr.span);
+        if (array.kind !== 'dyn')
+          this.setCoercion(expr, { kind: 'dyn', type: a.args[0], mutable: false, trait: target.trait });
         return;
       }
     }
@@ -1041,8 +1045,12 @@ export class Checker {
       return true;
     }
     if (target.kind !== 'dyn') return false;
-    this.requireDyn(a.target, target.trait, expr.span);
-    this.setCoercion(expr, { kind: 'dyn', type: a.target, mutable: a.mutable, trait: target.trait });
+    this.requireDyn(a.target, target, expr.span);
+    if (shallow(a.target).kind !== 'dyn') {
+      this.setCoercion(expr, { kind: 'dyn', type: a.target, mutable: t.mutable, trait: target.trait });
+    } else if (a.mutable && !t.mutable) {
+      this.setCoercion(expr, { kind: 'deref', derefs: [], fromMut: true, toStr: false });
+    }
     return true;
   }
 
@@ -1072,7 +1080,6 @@ export class Checker {
     const t = shallow(type);
     if (t.kind === 'dyn') {
       checkDynCompatible(t.trait.trait, span);
-      this.checkTraitApplication(t, t.trait, span);
       if (dynIteratorTarget(t) && !intoIterItem(t)) compileError(span, 'dyn Iterator には Item の型を書いてください。');
     }
     if (t.kind === 'opaque') {
@@ -1102,10 +1109,9 @@ export class Checker {
     }
   }
 
-  private requireDyn(type: Type, trait: TraitRef, span: Span): void {
-    const t = shallow(type);
-    if (t.kind === 'dyn' && t.trait.trait === trait.trait) return;
-    this.require(type, trait, span);
+  private requireDyn(type: Type, target: Extract<Type, { kind: 'dyn' }>, span: Span): void {
+    for (const trait of target.autoTraits ?? []) this.require(type, { trait, args: [] }, span);
+    this.require(type, target.trait, span);
   }
 
   // -------------------------------------------------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 434 -- Defines Rust types, their substitutions and their shared structural operations.
+// code-gauge-allow-file fileNcss 449 -- Defines Rust types, their substitutions and their shared structural operations.
 import type { ConstItem, FieldAst, FnItem, Span } from './ast';
 import type { Module } from './items';
 
@@ -23,7 +23,13 @@ export type Type =
   | { kind: 'var'; v: TypeVar }
   | { kind: 'fn'; params: Type[]; ret: Type; item?: FnDef | VariantDef }
   | { kind: 'closure'; closure: ClosureType }
-  | { kind: 'dyn'; trait: TraitRef; objectLifetime?: 'static' | 'reference'; lifetime?: string }
+  | {
+      kind: 'dyn';
+      trait: TraitRef;
+      autoTraits?: TraitDef[];
+      objectLifetime?: 'static' | 'reference';
+      lifetime?: string;
+    }
   | { kind: 'opaque'; opaque: OpaqueType };
 
 export interface TypeVar {
@@ -81,6 +87,7 @@ export interface VariantDef {
 }
 
 export type BuiltinAdt =
+  | 'Bound'
   | 'String'
   | 'Vec'
   | 'HashMap'
@@ -537,7 +544,7 @@ export function hasParams(type: Type): boolean {
 }
 
 /** Whether two resolved types are the same type. */
-// code-gauge-allow functionNcss 41 -- One case per kind of type.
+// code-gauge-allow functionNcss 42 -- One case per kind of type.
 export function sameType(a: Type, b: Type): boolean {
   const x = shallow(a);
   const y = shallow(b);
@@ -585,7 +592,8 @@ export function sameType(a: Type, b: Type): boolean {
       return x.closure.id === (y as typeof x).closure.id;
     }
     case 'dyn': {
-      return sameTraitRef(x.trait, (y as typeof x).trait);
+      const other = y as typeof x;
+      return sameTraitRef(x.trait, other.trait) && sameAutoTraits(x, other);
     }
     case 'opaque': {
       const other = (y as typeof x).opaque;
@@ -595,6 +603,12 @@ export function sameType(a: Type, b: Type): boolean {
       return true;
     }
   }
+}
+
+export function sameAutoTraits(a: Extract<Type, { kind: 'dyn' }>, b: Extract<Type, { kind: 'dyn' }>): boolean {
+  const left = a.autoTraits ?? [];
+  const right = b.autoTraits ?? [];
+  return left.length === right.length && left.every((trait) => right.includes(trait));
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -654,7 +668,7 @@ export function typeToString(type: Type): string {
       return 'クロージャ';
     }
     case 'dyn': {
-      return `dyn ${traitRefToString(t.trait)}`;
+      return `dyn ${[traitRefToString(t.trait), ...(t.autoTraits ?? []).map((trait) => trait.name)].join(' + ')}`;
     }
     case 'opaque': {
       return `impl ${t.opaque.bounds.map(traitRefToString).join(' + ')}`;
@@ -716,6 +730,14 @@ export function intMin(name: IntName): bigint {
 export function intMax(name: IntName): bigint {
   const bits = BigInt(intBits(name));
   return isSigned(name) ? (1n << (bits - 1n)) - 1n : (1n << bits) - 1n;
+}
+
+export function integerConst(path: string): bigint | undefined {
+  const [type, constant] = path.split('::') as [IntName, string];
+  if (!INT_NAMES.includes(type)) return;
+  if (constant === 'MAX') return intMax(type);
+  if (constant === 'MIN') return intMin(type);
+  if (constant === 'BITS') return BigInt(intBits(type));
 }
 
 /** Strips references, as `{:?}` and method calls look through them. */

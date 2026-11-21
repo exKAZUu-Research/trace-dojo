@@ -1,5 +1,5 @@
-// code-gauge-allow-file fileNcss 530 -- One native per method of the standard library.
-import { keepVecCapacity, setIntoIterBuffer, vecCapacity } from '../capacity';
+// code-gauge-allow-file fileNcss 541 -- One native per method of the standard library.
+import { keepVecCapacity, setIntoIterBuffer, setVecCapacity, vecCapacity } from '../capacity';
 import { sliceRange } from '../compiler';
 import { type DebugPart } from '../debugText';
 import { normalize } from '../infer';
@@ -710,6 +710,18 @@ const dequeNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
   pop_front: ([self], ctx) => {
     const items = vec(self);
     return items.length === 0 ? none(ctx) : some(ctx, items.shift());
+  },
+  split_off: ([self, at], ctx) => {
+    const items = vec(self);
+    const index = at as bigint;
+    if (index > BigInt(items.length)) {
+      libraryPanic(ctx, '`at` out of bounds', 'alloc/src/collections/vec_deque/mod.rs:2672:9');
+    }
+    const count = items.length - Number(index);
+    ctx.runtime.allocate(count, BigInt(count) * BigInt(sizeOf(elemType(ctx))));
+    const tail = items.splice(Number(index));
+    setVecCapacity(tail, count);
+    return tail;
   },
   front: ([self], ctx) => option(ctx, vec(self)[0], vec(self).length > 0),
   back: ([self], ctx) => option(ctx, vec(self).at(-1), vec(self).length > 0),

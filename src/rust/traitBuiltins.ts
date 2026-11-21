@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 516 -- One rule per trait of the standard library.
+// code-gauge-allow-file fileNcss 534 -- One rule per trait of the standard library.
 import { collectionKeyAnswer } from './collectionBounds';
 import { normalize } from './infer';
 import { supportsDebug } from './iterDebug';
@@ -119,8 +119,8 @@ export const RANGE_TYPES = new Set([
 const RULES: Record<string, Rule> = {
   Sized: sized,
   Static: () => 'yes',
-  Send: () => 'yes',
-  Sync: () => 'yes',
+  Send: autoTrait,
+  Sync: autoTrait,
   Copy: copy,
   Clone: clone,
   Debug: debug,
@@ -203,6 +203,19 @@ function sized({ solver, t, all }: Goal): Answer {
     return solver.sizedTail(t, substitute(tail, subst), all);
   }
   return t.kind === 'str' || t.kind === 'slice' || t.kind === 'dyn' ? 'no' : 'yes';
+}
+
+function autoTrait({ solver, t, name, all }: Goal): Answer {
+  if (t.kind === 'dyn') return 'no';
+  if (t.kind === 'ref') {
+    const bound = name === 'Send' && t.mutable ? 'Send' : 'Sync';
+    return solver.implements(t.target, { trait: solver.program.traitDef(bound), args: [] });
+  }
+  if (t.kind === 'tuple') return all(t.elems);
+  if (t.kind === 'array' || t.kind === 'slice') return all([t.elem]);
+  if (t.kind === 'closure') return all(t.closure.captures?.map(({ type }) => type) ?? []);
+  if (t.kind === 'adt') return all(t.args);
+  return 'yes';
 }
 
 function copy(goal: Goal): Answer {
@@ -528,6 +541,10 @@ function joinSeparator({ solver, t, ref }: Goal): Answer {
 }
 
 function rangeBounds({ solver, t, ref }: Goal): Answer {
+  if (t.kind === 'tuple' && t.elems.length === 2) {
+    const bound = solver.program.builtinType('Bound', [ref.args[0]]);
+    return solver.unifier.tryUnify(t, { kind: 'tuple', elems: [bound, bound] }) ? 'yes' : 'no';
+  }
   if (t.kind !== 'adt') return 'no';
   if (!RANGE_TYPES.has(t.def.builtin as string)) return 'no';
   if (t.def.builtin === 'RangeFull') return 'yes';

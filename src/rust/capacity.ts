@@ -47,21 +47,6 @@ export function shrinkVec(items: object, len: number, min: number): void {
   vecCapacities.set(items, Math.min(capacity, Math.max(len, min)));
 }
 
-/**
- * The capacity `Vec::from_iter` gives `count` elements from an iterator that is not `TrustedLen`: room for the first
- * and the size hint's lower bound, then growth whenever full by the bound at that point plus one. `lowerAfter(i)` is
- * the bound after `i` elements are taken.
- */
-export function collectedVecCapacity(count: number, elemSize: number, lowerAfter: (taken: number) => number): number {
-  if (count === 0) return 0;
-  const min = minNonZeroCapacity(elemSize);
-  let capacity = Math.max(min, lowerAfter(1) + 1);
-  for (let len = 1; len < count; len++) {
-    if (len === capacity) capacity = Math.max(min, capacity * 2, len + lowerAfter(len + 1) + 1);
-  }
-  return capacity;
-}
-
 /** The buffer of each `Vec`'s `into_iter`, which `collect` may reuse in place. */
 const intoIterBuffers = new WeakMap<object, { capacity: number; elem: Layout }>();
 

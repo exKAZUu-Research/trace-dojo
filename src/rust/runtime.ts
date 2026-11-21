@@ -147,6 +147,11 @@ export class Runtime implements TracedRuntime<Frame> {
   }
 
   withActiveBorrows<T>(values: Value[], use: () => T): T {
+    const roots = this.borrowRoots(values);
+    return roots.length === 0 ? use() : this.withRoots(roots, use);
+  }
+
+  borrowRoots(values: Value[]): Value[] {
     const roots: Value[] = [];
     const seen = new Set<IterValue>();
     const visit = (value: unknown): void => {
@@ -158,9 +163,10 @@ export class Runtime implements TracedRuntime<Frame> {
       seen.add(value);
       for (const borrow of value.borrowedRoots) roots.push(borrow);
       for (const source of value.roots) visit(source);
+      if (value.stateRoots) for (const source of value.stateRoots()) visit(source);
     };
     for (const value of values) visit(value);
-    return roots.length === 0 ? use() : this.withRoots(roots, use);
+    return roots;
   }
 
   /** Counts allocated elements against {@link LIMITS.maxSlots}. */
