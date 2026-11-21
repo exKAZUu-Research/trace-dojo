@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 961 -- Follows Rust's name resolution case by case.
+// code-gauge-allow-file fileNcss 966 -- Follows Rust's name resolution case by case.
 import { CompileError } from '../interpreter/diagnostics';
 import type {
   BoundAst,
@@ -53,6 +53,16 @@ import {
   UNIT,
   type VariantDef,
 } from './types';
+
+/** The traits a type derives, rejecting one derived twice as rustc does (E0119). */
+function derivedTraits(derives: readonly { name: string; span: Span }[]): Set<string> {
+  const names = new Set<string>();
+  for (const { name, span } of derives) {
+    if (names.has(name)) compileError(span, `${name} を2回 derive しています。`);
+    names.add(name);
+  }
+  return names;
+}
 
 /**
  * The type parameters a generics list declares. A name may be declared once, in the list and in the item around it
@@ -354,7 +364,7 @@ export class ItemCollector {
       params: declareTypeParams(item.generics),
       variants: [],
       writtenFields: item.fields,
-      derives: new Set(item.attrs.derives.map((derive) => derive.name)),
+      derives: derivedTraits(item.attrs.derives),
       span: item.span,
       lifetimeParams: item.generics.lifetimes,
       module,
@@ -397,7 +407,7 @@ export class ItemCollector {
       kind: 'enum',
       params: declareTypeParams(item.generics),
       variants: [],
-      derives: new Set(item.attrs.derives.map((derive) => derive.name)),
+      derives: derivedTraits(item.attrs.derives),
       span: item.span,
       lifetimeParams: item.generics.lifetimes,
       module,
