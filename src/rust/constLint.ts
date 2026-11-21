@@ -601,6 +601,7 @@ export class ConstLint {
   }
 
   // code-gauge-allow functionNcss 39 -- One case per integer operator.
+  // code-gauge-allow duplicateLines 19 -- Each language evaluates its own operators on its constants.
   private integerBinary(
     expr: IntegerOperation,
     name: IntName,
