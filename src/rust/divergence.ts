@@ -90,9 +90,9 @@ function requiredOperands(expr: Expr): Expr[] {
     case 'macro': {
       return macroOperands(expr.macro);
     }
-    // Control flow always evaluates what decides it, though not the branches or the body it then picks.
-    case 'if':
-    case 'while': {
+    // Control flow always evaluates what decides it, though not the branches or the body it then picks. rustc does
+    // not take a `while` to diverge by its condition, which it checks inside the loop it turns the `while` into.
+    case 'if': {
       return [expr.cond.kind === 'expr' ? expr.cond.expr : expr.cond.value];
     }
     case 'match': {

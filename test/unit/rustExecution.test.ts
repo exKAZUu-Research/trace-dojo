@@ -7997,13 +7997,16 @@ test('a condition or scrutinee that never finishes ends a function that returns 
   const program = `fn by_condition() -> i32 { if { return 7; false } {}; }
 fn by_scrutinee() -> i32 { match { return 3; 1 } { _ => {} }; }
 fn by_block() -> i32 { let _x = { return 5; }; }
+fn by_iterable() -> i32 { for _ in { return 4; 0..1 } {}; }
 fn main() {
-    println!("{} {} {}", by_condition(), by_scrutinee(), by_block());
+    println!("{} {} {} {}", by_condition(), by_scrutinee(), by_block(), by_iterable());
 }`;
-  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '7 3 5\n' });
-  const optional = 'fn cond() -> bool { true }\nfn stop() -> i32 { if cond() { return 1; }; }\nfn main() {}';
-  expect(executeProgram('rust', optional)).toMatchObject({
-    kind: 'compileError',
-    diagnostics: [expect.objectContaining({ message: expect.stringContaining('値を返していません') })],
-  });
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '7 3 5 4\n' });
+  for (const body of ['if cond() { return 1; };', 'while { return 9; false } {};']) {
+    const program = `fn cond() -> bool { true }\nfn stop() -> i32 { ${body} }\nfn main() {}`;
+    expect(executeProgram('rust', program)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [expect.objectContaining({ message: expect.stringContaining('値を返していません') })],
+    });
+  }
 });
