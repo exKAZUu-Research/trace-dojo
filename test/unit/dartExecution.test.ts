@@ -8538,3 +8538,43 @@ void main() { setFilter(); mapFilter(); }`;
       '{2: -20}\n',
   });
 });
+
+test('Dart custom HashSet containsAll validates before delegating each lookup', () => {
+  const program = `import 'dart:collection';
+void main() {
+  var count = 0;
+  var denySecond = false;
+  final set = HashSet<int>(
+    isValidKey: (key) { count++; print(['validate', key, count]); return key is int && (!denySecond || count.isOdd); },
+    hashCode: (key) { print(['hash', key]); return key; },
+  );
+  set.add(1);
+  print(set.containsAll([1, 1]));
+  print(set.containsAll(['bad', 1]));
+  print(set.containsAll([2, 1]));
+  count = 0;
+  denySecond = true;
+  print(set.containsAll([1]));
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[hash, 1]\n' +
+      '[validate, 1, 1]\n' +
+      '[validate, 1, 2]\n' +
+      '[hash, 1]\n' +
+      '[validate, 1, 3]\n' +
+      '[validate, 1, 4]\n' +
+      '[hash, 1]\n' +
+      'true\n' +
+      '[validate, bad, 5]\n' +
+      'false\n' +
+      '[validate, 2, 6]\n' +
+      '[validate, 2, 7]\n' +
+      '[hash, 2]\n' +
+      'false\n' +
+      '[validate, 1, 1]\n' +
+      '[validate, 1, 2]\n' +
+      'false\n',
+  });
+});

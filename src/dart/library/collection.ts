@@ -1483,6 +1483,13 @@ class _IdentityHashSet<E> extends _HashSet<E> {
 
 class _CustomHashSet<E> extends _HashSet<E> {
   _CustomHashSet(_HashKeyPolicy<E> policy) : super(policy);
+  bool containsAll(Iterable<Object?> elements) {
+    final policy = _policy!;
+    for (final element in elements) {
+      if (!policy.accepts(element) || !contains(element)) return false;
+    }
+    return true;
+  }
 }
 
 class _HashSetIterator<E> implements Iterator<E> {
