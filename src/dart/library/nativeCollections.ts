@@ -120,27 +120,52 @@ function listFrom(
   growable: boolean,
   unmodifiable: boolean
 ): DartList {
-  runtime.allocate(1);
-  const result = new DartList(coreTypes.list, elementType, [], growable, unmodifiable);
-  const frame = runtime.currentFrame;
-  frame?.temporaries.push(result);
-  try {
-    forEachValue(runtime, source, (value) => {
-      implicitCast(runtime, value, elementType);
-      runtime.allocate(1);
-      result.elements.push(value);
-    });
-    return result;
-  } finally {
-    frame?.temporaries.pop();
-  }
+  const compatible = runtime.links.isValueOf(runtime, source, interfaceType(coreTypes.iterable, [elementType]));
+  return copyIterableToList(runtime, source, elementType, { growable, unmodifiable, compatible });
 }
 
-defineConstructor('List.of', (runtime, _instance, args, typeArgs) => {
-  const values = iterableValues(runtime, args.positional[0]);
-  runtime.allocate(values.length + 1);
-  return new DartList(coreTypes.list, typeArgs[0] ?? DYNAMIC, values, named(args.named, 'growable', true) !== false);
-});
+defineConstructor('List.of', (runtime, _instance, args, typeArgs) =>
+  copyIterableToList(runtime, args.positional[0], typeArgs[0] ?? DYNAMIC, {
+    growable: named(args.named, 'growable', true) !== false,
+    unmodifiable: false,
+    compatible: true,
+  })
+);
+
+// code-gauge-allow functionCognitiveComplexity 19 -- Apply the SDK copy paths and check both early and late length changes.
+function copyIterableToList(
+  runtime: Runtime,
+  source: Value,
+  elementType: DartType,
+  options: { growable: boolean; unmodifiable: boolean; compatible: boolean }
+): DartList {
+  const { growable, unmodifiable, compatible } = options;
+  if (compatible && source instanceof DartList) {
+    runtime.allocate(source.elements.length + 1);
+    return new DartList(coreTypes.list, elementType, [...source.elements], growable, unmodifiable);
+  }
+  const efficientType = interfaceType(runtime.links.classNamed('EfficientLengthIterable'), [DYNAMIC]);
+  const length =
+    compatible && runtime.links.isValueOf(runtime, source, efficientType) ? listLength(runtime, source) : undefined;
+  if (length !== undefined && length < 0n && !growable) rangeError(runtime, length, 0, MAX_LIST_LENGTH, 'length');
+  const capacity = length === undefined ? undefined : length <= 0n ? 0 : Number(growable ? length | 1n : length);
+  runtime.allocate(1 + (capacity ?? 0));
+  const result = new DartList(coreTypes.list, elementType, [], growable, unmodifiable);
+  if (capacity === 0) return result;
+  runtime.withCallRoots(result, { positional: [], named: undefined }, () => {
+    forEachValue(runtime, source, (value) => {
+      implicitCast(runtime, value, elementType);
+      if (capacity === undefined) runtime.allocate(1);
+      else if (result.elements.length >= capacity)
+        rangeError(runtime, result.elements.length, 0, capacity - 1, 'length');
+      result.elements.push(value);
+    });
+  });
+  if (length !== undefined && BigInt(result.elements.length) !== length)
+    runtime.throwError('ConcurrentModificationError', '', [source]);
+  return result;
+}
+
 defineConstructor('List.generate', (runtime, _instance, args, typeArgs) => {
   const length = intArg(runtime, args.positional[0], 'length');
   if (length < 0n || length > MAX_LIST_LENGTH) rangeError(runtime, length, 0, MAX_LIST_LENGTH, 'length');
@@ -422,13 +447,16 @@ define('List.setAll', (runtime, receiver, [at, iterable]) => {
     rangeError(runtime, position, 0, length, 'index');
   if (runtime.links.isValueOf(runtime, iterable, interfaceType(coreTypes.list, [elementType]))) {
     const end = position + listLength(runtime, iterable);
-    if (target.growable) {
-      const [from, to] = checkRange(runtime, position, end, length);
-      copyListRange(runtime, iterable, 0n, from, to, write);
-    } else {
-      if (end > BigInt(length)) rangeError(runtime, end, 0, length, undefined);
-      copyListRange(runtime, iterable, 0n, Number(position), Number(end), write);
-    }
+    if (target.growable)
+      return runtime.invoke(
+        target,
+        'setRange',
+        { positional: [position, end, iterable], named: undefined },
+        [],
+        undefined
+      );
+    if (end > BigInt(length)) rangeError(runtime, end, 0, length, undefined);
+    copyListRange(runtime, iterable, 0n, Number(position), Number(end), write);
   } else {
     forEachValue(runtime, iterable, (value) => write(Number(position++), value));
   }

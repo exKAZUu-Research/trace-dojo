@@ -4326,3 +4326,60 @@ void main() {
     stdout: 'length\nread\n1\nlength\nread\n1\n',
   });
 });
+
+test('list copies skip empty efficient iterators and verify reported nonempty lengths', () => {
+  const program = `import 'dart:collection';
+class Input extends ListBase<int> {
+  final int count;
+  Input(this.count);
+  int get length { print('length'); return count; }
+  Iterator<int> get iterator { print('iterator'); return [1].iterator; }
+  set length(int value) {}
+  int operator [](int index) => 1;
+  void operator []=(int index, int value) {}
+}
+class Slice extends ListBase<int> {
+  int calls = 0;
+  int get length {
+    print(++calls);
+    if (calls == 5) throw 'extra';
+    return 1;
+  }
+  set length(int value) {}
+  int operator [](int index) => 1;
+  void operator []=(int index, int value) {}
+}
+void main() {
+  print(List<int>.of(Input(0)));
+  print(List<int>.from(Input(0), growable: false));
+  print(List<int>.unmodifiable(Input(0)));
+  try { print(List<int>.of(Input(2))); } catch (error) { print(error.runtimeType); }
+  print(switch (Slice()) { [...var a, 2] => 0, [...var b, 1] => 1, _ => 2 });
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'length\n[]\nlength\n[]\nlength\n[]\nlength\niterator\nConcurrentModificationError\n1\n2\n3\n4\n1\n',
+  });
+});
+
+test('growable list bulk writes check the live source length before reading elements', () => {
+  const program = `import 'dart:collection';
+class Input extends ListBase<int> {
+  int remainingReads;
+  Input(this.remainingReads);
+  int get length => remainingReads-- > 0 ? 2 : 1;
+  set length(int value) {}
+  int operator [](int index) { print('read'); return 9; }
+  void operator []=(int index, int value) {}
+}
+void main() {
+  var inserted = <int?>[1, 2, 3], overwritten = <int?>[1, 2, 3];
+  try { inserted.insertAll(1, Input(2)); } catch (error) { print(error.runtimeType); }
+  try { overwritten.setAll(1, Input(1)); } catch (error) { print(error.runtimeType); }
+  print([inserted, overwritten]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'StateError\nStateError\n[[1, 2, 3, 2, 3], [1, 2, 3]]\n',
+  });
+});
