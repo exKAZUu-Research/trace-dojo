@@ -7964,3 +7964,31 @@ test.each([
     diagnostics: [expect.objectContaining({ message: expect.stringContaining(message) })],
   });
 });
+
+test('operands that never finish end a function from any required position, and bounds keep impls apart', () => {
+  const program = `trait Mark {}
+struct Marked;
+impl Mark for Marked {}
+struct Wrap<T>(T);
+impl<T: Mark> Wrap<T> { const K: i32 = 1; fn make() -> i32 { 1 } fn get(&self) -> i32 { 1 } }
+impl Wrap<i32> { const K: i32 = 2; fn make() -> i32 { 2 } fn get(&self) -> i32 { 2 } }
+struct Point { x: i32 }
+fn initialized() -> i32 { let x: () = println!("{}", panic!("stop")); }
+fn built() -> i32 { Point { x: panic!("stop") }; }
+fn listed() -> i32 { vec![panic!("stop")]; }
+fn main() {
+    println!("{} {} {} {}", Wrap::<i32>::K, Wrap::<Marked>::K, Wrap::<i32>::make(), Wrap::<Marked>::make());
+    println!("{} {}", Wrap(1i32).get(), Wrap(Marked).get());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '2 1 2 1\n2 1\n' });
+  const overlapping = `trait Mark {}
+impl Mark for i32 {}
+struct Wrap<T>(T);
+impl<T: Mark> Wrap<T> { fn get(&self) -> i32 { 1 } }
+impl Wrap<i32> { fn get(&self) -> i32 { 2 } }
+fn main() {}`;
+  expect(executeProgram('rust', overlapping)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ row: 4, message: expect.stringContaining('2回定義') })],
+  });
+});

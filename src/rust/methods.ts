@@ -190,14 +190,18 @@ function probe(
   inScope: (trait: TraitDef) => boolean = () => true
 ): Omit<MethodMatch, 'adjust'> | undefined {
   const receiverType = autoref === 'none' ? stepType : ref(stepType, autoref === 'mut');
-  // Inherent methods first.
+  // Inherent methods first: of the impl whose bounds the type can meet, or else of one it only matches by type, which
+  // reports the bound it fails.
+  let unmet: Omit<MethodMatch, 'adjust'> | undefined;
   for (const impl of program.impls) {
     if (impl.trait) continue;
     const fn = impl.methods.get(name);
     if (!fn?.selfMode) continue;
     const found = matchSelf(solver, impl, fn, receiverType);
-    if (found) return found;
+    if (found && !boundsFail(solver, impl, found.typeArgs)) return found;
+    unmet ??= found;
   }
+  if (unmet) return unmet;
   // Methods of the bounds of type parameters, trait objects, and opaque types.
   const t = shallow(receiverType);
   const target = t.kind === 'ref' ? shallow(t.target) : t;
@@ -458,14 +462,26 @@ export function lookupAssociated(
 }
 
 function inherentAssociated(program: Program, solver: TraitSolver, t: Type, name: string): Associated | undefined {
+  let unmet: Associated | undefined;
   for (const impl of program.impls) {
     if (impl.trait) continue;
     const fn = impl.methods.get(name);
     if (!fn) continue;
     const subst = solver.matchImpl(impl, t);
-    if (subst) return { fn, typeArgs: [...impl.params.map((param) => subst.get(param) as Type), ...ownParams(fn)] };
+    if (!subst) continue;
+    const found = { fn, typeArgs: [...impl.params.map((param) => subst.get(param) as Type), ...ownParams(fn)] };
+    if (!boundsFail(solver, impl, found.typeArgs)) return found;
+    unmet ??= found;
   }
-  return undefined;
+  return unmet;
+}
+
+/** Whether a type argument of an impl surely lacks a trait the impl requires of it, so the impl is not for the type. */
+function boundsFail(solver: TraitSolver, impl: ImplDef, typeArgs: Type[]): boolean {
+  const subst = new Map(impl.params.map((param, index) => [param, typeArgs[index]]));
+  return impl.params.some((param, index) =>
+    param.bounds.some((bound) => solver.implements(typeArgs[index], substituteTraitRef(bound, subst)) === 'no')
+  );
 }
 
 function boundAssociated(t: Type, name: string): Associated | undefined {

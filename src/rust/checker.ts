@@ -232,7 +232,7 @@ export class Checker {
    * the program does not declare (E0117, the orphan rule).
    */
   private checkImplCoherence(): void {
-    checkInherentItems(this.program, this.unifier);
+    checkInherentItems(this.program, (a, b) => this.implsOverlap(a, b));
     const impls = new Map<TraitDef, ImplDef[]>();
     for (const impl of this.program.impls) {
       const traitRef = impl.trait;
@@ -288,13 +288,14 @@ export class Checker {
     this.budget.spend();
     const aSubst: Subst = new Map(a.params.map((param) => [param, freshVar()]));
     const bSubst: Subst = new Map(b.params.map((param) => [param, freshVar()]));
-    const aHead = substituteTraitRef(a.trait!, aSubst);
-    const bHead = substituteTraitRef(b.trait!, bSubst);
+    // Inherent impls have no trait, whose arguments would have to agree too.
+    const aArgs = a.trait ? substituteTraitRef(a.trait, aSubst).args : [];
+    const bArgs = b.trait ? substituteTraitRef(b.trait, bSubst).args : [];
     const snapshot = this.unifier.snapshot();
     try {
       return (
         this.unifier.unify(substitute(a.selfType, aSubst), substitute(b.selfType, bSubst)) &&
-        aHead.args.every((arg, index) => this.unifier.unify(arg, bHead.args[index])) &&
+        aArgs.every((arg, index) => this.unifier.unify(arg, bArgs[index])) &&
         this.implBoundsCanHold(aSubst) &&
         this.implBoundsCanHold(bSubst)
       );
@@ -1219,7 +1220,7 @@ export class Checker {
       if (declared) this.coerceAtReferenceSite(stmt.init, declared);
       else type = this.expr(stmt.init, undefined);
       // An initializer that never finishes makes what follows unreachable, whatever type the binding declares.
-      diverges = shallow(stmt.init.ty ?? type).kind === 'never';
+      diverges = neverCompletes(stmt.init);
       if (diverges && !declared) type = freshDivergingVar();
     }
     if (stmt.else) {

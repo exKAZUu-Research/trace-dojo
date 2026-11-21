@@ -1,4 +1,4 @@
-import type { Expr } from './ast';
+import type { Expr, MacroCall } from './ast';
 import { shallow } from './types';
 
 /**
@@ -9,6 +9,38 @@ import { shallow } from './types';
 export function neverCompletes(expr: Expr): boolean {
   if (expr.ty && shallow(expr.ty).kind === 'never') return true;
   return requiredOperands(expr).some(neverCompletes);
+}
+
+/** The operands a macro always evaluates: not the message of an assertion, which only its failure formats. */
+function macroOperands(macro: MacroCall): Expr[] {
+  switch (macro.kind) {
+    case 'print':
+    case 'format':
+    case 'panic': {
+      return macro.format?.args ?? [];
+    }
+    case 'write': {
+      return [macro.target, ...(macro.format?.args ?? [])];
+    }
+    case 'assert': {
+      return [macro.cond];
+    }
+    case 'assertEq': {
+      return [macro.left, macro.right];
+    }
+    case 'vec': {
+      return macro.elems;
+    }
+    case 'vecRepeat': {
+      return [macro.value, macro.count];
+    }
+    case 'matches': {
+      return [macro.value];
+    }
+    case 'dbg': {
+      return macro.args;
+    }
+  }
 }
 
 function requiredOperands(expr: Expr): Expr[] {
@@ -40,9 +72,14 @@ function requiredOperands(expr: Expr): Expr[] {
     case 'array': {
       return expr.elems;
     }
+    case 'arrayRepeat': {
+      return [expr.value, expr.count];
+    }
+    case 'struct': {
+      return [...expr.fields.map((field) => field.value), ...(expr.base ? [expr.base] : [])];
+    }
     case 'macro': {
-      const { macro } = expr;
-      return macro.kind === 'print' || macro.kind === 'format' ? (macro.format?.args ?? []) : [];
+      return macroOperands(expr.macro);
     }
     default: {
       return [];
