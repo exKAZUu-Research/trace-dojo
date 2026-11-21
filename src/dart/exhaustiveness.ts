@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 644 -- Switch coverage shares type partitions and pattern coverage rules.
+// code-gauge-allow-file fileNcss 658 -- Switch coverage shares type partitions and pattern coverage rules.
 import type { Expression, Pattern, Span } from './ast';
 import { nullPatternComparison } from './astWalk';
 import type { ClassInfo, FieldMember } from './classes';
@@ -615,7 +615,7 @@ function subclassType(supertype: DartType & { kind: 'interface' }, subclass: Cla
 
 /** Whether a pattern matches every value of a type. */
 // code-gauge-allow functionCognitiveComplexity 29 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
-// code-gauge-allow functionNcss 47 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
+// code-gauge-allow functionNcss 48 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
 function coversAll(compiler: PatternCompiler, pattern: Pattern, type: DartType): boolean {
   const comparison = nullPatternComparison(pattern);
   if (comparison) return comparison === '==' ? isSubtype(type, NULL) : !isPotentiallyNullable(type);
@@ -710,7 +710,7 @@ function recordFieldsCover(
 }
 
 // code-gauge-allow functionCognitiveComplexity 18 -- Match every supported kind of pattern against a value space.
-// code-gauge-allow functionNcss 39 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
+// code-gauge-allow functionNcss 40 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
 function covers(compiler: PatternCompiler, pattern: Pattern, space: Space): Coverage {
   const comparison = nullPatternComparison(pattern);
   if (comparison)

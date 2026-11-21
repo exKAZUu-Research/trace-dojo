@@ -8306,3 +8306,35 @@ void main() {
       '[_TypedListIterator<int>, 134930630, true, true, true, false]\n_TypeError\ntrue\n[104, true, 20, false, false]\n_TypeError\n',
   });
 });
+
+test('Dart list intersections preserve ordinary properties and share list restriction identity', () => {
+  const main = 'void main() { print([select([false]), select([true]), select(null)]); }';
+  const source = (pattern: string, fallback = ''): string => `int select(List<bool>? x) => switch (x) {
+  null => -1, [] => 0, ${pattern} => 2${fallback},
+};
+${main}`;
+  for (const pattern of [
+    '(([true, ...] && List<bool>()) || [false, ...])',
+    '([true, ...] || ([false, ...] && List<bool>()))',
+    '(([true, ...] && List<bool>())? || [false, ...]?)',
+    '([true, ...]? || ([false, ...] && List<bool>())?)',
+    '((Object() && [true, ...]) || [false, ...])',
+    '(([true, ...] && [_, ...]) || [false, ...])',
+    '((([true, ...] || [false, ...]) && List<bool>()) || [true, ...])',
+  ]) {
+    expect(executeProgram('dart', source(pattern))).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [expect.objectContaining({ message: expect.stringContaining('すべての値') })],
+    });
+    expect(executeProgram('dart', source(pattern, ', _ => 3'))).toMatchObject({
+      kind: 'executed',
+      stdout: '[2, 2, -1]\n',
+    });
+  }
+  for (const pattern of [
+    '(([true, ...] && List<bool>(length: _)) || [false, ...])',
+    '(([true, ...] && List<bool>(length: _))? || [false, ...]?)',
+  ]) {
+    expect(executeProgram('dart', source(pattern))).toMatchObject({ kind: 'executed', stdout: '[2, 2, -1]\n' });
+  }
+});
