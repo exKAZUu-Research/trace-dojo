@@ -1,0 +1,24 @@
+let value: number | string = 1;
+const result = (value ??= 'fallback');
+value += 'x';
+console.log(value, result);
+let explicit: number | string | undefined = 1;
+if (explicit !== undefined) explicit ??= 'a';
+explicit += 'b';
+console.log(explicit);
+let changing: number | string = 1;
+changing ??= 'a';
+changing ??= 'b';
+changing += 'c';
+console.log(changing);
+class CoalescingAccessor {
+  private stored = 1;
+  get value(): number { return this.stored; }
+  set value(value: number | string) { this.stored = typeof value === 'number' ? value : value.length; }
+}
+function useAccessor(obj: CoalescingAccessor) {
+  obj.value ??= 'a';
+  obj.value += 'b';
+  return obj.value;
+}
+console.log(useAccessor(new CoalescingAccessor()));

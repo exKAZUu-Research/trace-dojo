@@ -1,0 +1,10 @@
+let numeric: number | string = 1;
+numeric ??= 'x';
+numeric += 1;
+let read: number | string = 1;
+read ??= 'a';
+const declarationNarrower: number = read;
+const literalNarrower: number | 'a' = read;
+let evaluated: number | string = 1;
+const result = (evaluated ??= 'fallback');
+const expressionNarrower: number = result;

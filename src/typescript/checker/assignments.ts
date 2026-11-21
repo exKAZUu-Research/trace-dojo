@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 406 -- Assignment targets share write validation and updates to reference flow.
+// code-gauge-allow-file fileNcss 407 -- Assignment targets share write validation and updates to reference flow.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -332,21 +332,9 @@ export class AssignmentChecker {
     const operator = node.childForFieldName('operator')?.text ?? '+=';
     const declared = this.declaredTargetType(left);
     const targetType = this.targetType(left, true);
-    if (operator === '&&=' || operator === '||=' || operator === '??=') {
-      // The right operand runs only on some paths, so its effects join the path that skips it.
-      const { skipped, evaluating } = this.logicalAssignmentPaths(left, operator);
-      let valueType: Type = neverType;
-      const evaluated = this.c.flow.from(evaluating, () => {
-        valueType = this.c.expressions.check(right, targetType);
-      });
-      this.c.flow.current = this.c.flow.merge([skipped, evaluated]);
-      if (targetType !== errorType) this.c.expressions.checkAssignable(skipParentheses(left), valueType, declared);
-      const result = this.logicalAssignmentType(operator, targetType, valueType);
-      // The target holds what it kept or what was assigned, as `s ||= "x"` leaves a truthy `s` or `"x"`.
-      if (targetType !== errorType) this.assignReference(skipParentheses(left), declared, result, operator !== '&&=');
-      return result;
-    }
     const reference = skipParentheses(left);
+    if (operator === '&&=' || operator === '||=' || operator === '??=')
+      return this.logicalAssignment(reference, right, operator, declared, targetType);
     const writeType = this.compoundWriteType(reference, declared, targetType);
     const valueType = this.c.expressions.check(right);
     const resultType = this.c.operators.binaryOperatorType(
@@ -365,6 +353,19 @@ export class AssignmentChecker {
       this.c.expressions.checkAssignable(reference, resultType, mapType(writeType, baseTypeOfLiteral));
     this.recordCompoundWrite(reference, declared);
     return resultType;
+  }
+
+  private logicalAssignment(reference: TreeNode, right: TreeNode, operator: string, declared: Type, read: Type): Type {
+    const { skipped, evaluating } = this.logicalAssignmentPaths(reference, operator);
+    let valueType: Type = neverType;
+    const evaluated = this.c.flow.from(evaluating, () => {
+      valueType = this.c.expressions.check(right, declared);
+      if (read === errorType) return;
+      this.c.expressions.checkAssignable(reference, valueType, declared);
+      this.assignReference(reference, declared, valueType, operator !== '&&=');
+    });
+    this.c.flow.current = this.c.flow.merge([skipped, evaluated]);
+    return this.logicalAssignmentType(operator, declared, valueType);
   }
 
   private compoundWriteType(reference: TreeNode, declared: Type, read: Type): Type {
