@@ -1963,6 +1963,15 @@ void main() {
   });
 });
 
+test('Dart braces with only scoped spreads take the kind their spreads compile as', () => {
+  const program = `void main() {
+  Object x = [1, 2];
+  Object y = {1: 2};
+  print([{for (var xs in [[1, 2]]) ...xs}, {if (x is List<int>) ...x}, {if (y is Map<int, int>) ...y}]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[{1, 2}, {1, 2}, {1: 2}]\n' });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}

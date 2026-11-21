@@ -21,7 +21,7 @@ import { formatDouble, stringOf } from './format';
 import { BoundedStringParts } from './library/boundedStringParts';
 import type { Frame } from './runtime';
 import { type ConditionFlow, Flow, LocalVar } from './scope';
-import { closeInferenceHoles, containsInferenceHole, isInferenceHole } from './typeInference';
+import { closeInferenceHoles, containsInferenceHole, INFERENCE_HOLE, isInferenceHole } from './typeInference';
 import {
   closeTypeVariables,
   coreTypes,
@@ -702,7 +702,14 @@ export abstract class ExpressionCompiler extends CompilerBase {
     else if (typeArguments) this.error(expression, 'セットやマップのリテラルの型引数は、1 つか 2 つです。');
     // Empty braces that nothing decides make a map; other elements that do not tell, such as dynamic spreads, need a type.
     kind ??= this.setOrMapFromElements(syntax, context) ?? (syntax.length === 0 ? 'map' : undefined);
-    if (!kind) return this.error(syntax[0], 'セットかマップかを決められません。型引数か、変数の型を書いてください。');
+    if (!kind) {
+      // Spreads whose types depend on loop bindings or promotions decide only once compiled in their scopes, so the
+      // literal is the one kind it compiles as.
+      const fits = (['set', 'map'] as const).filter((candidate) => this.compilesAs(expression, candidate));
+      if (fits.length !== 1)
+        return this.error(syntax[0], 'セットかマップかを決められません。型引数か、変数の型を書いてください。');
+      return this.compileSetOrMapLiteral(expression, unresolvedCollectionType(fits[0]));
+    }
     const types = typeArguments?.map((argument) => this.resolveType(argument));
     if (kind === 'set') {
       const contextElement = types?.[0] ?? elementTypeOfContext(context, coreTypes.set);
@@ -799,6 +806,20 @@ export abstract class ExpressionCompiler extends CompilerBase {
       default: {
         return 'set';
       }
+    }
+  }
+
+  /** Whether braces compile as the kind, compiling them without keeping their code, flow, or errors. */
+  private compilesAs(expression: Extract<Expression, { kind: 'setOrMap' }>, kind: 'set' | 'map'): boolean {
+    const savedFlow = this.flow;
+    try {
+      this.compileSetOrMapLiteral(expression, unresolvedCollectionType(kind));
+      return true;
+    } catch (error) {
+      if (!(error instanceof CompileError)) throw error;
+      return false;
+    } finally {
+      this.flow = savedFlow;
     }
   }
 
@@ -1751,4 +1772,11 @@ function literalTypeArgument(context: DartType | undefined, elementTypes: DartTy
   if (context && !containsInferenceHole(context)) return context;
   if (context && !isInferenceHole(context) && elementTypes.length === 0) return closeInferenceHoles(context);
   return inferElementType(elementTypes);
+}
+
+/** A set or map type whose type arguments are left to the elements. */
+function unresolvedCollectionType(kind: 'set' | 'map'): DartType {
+  return kind === 'set'
+    ? interfaceType(coreTypes.set, [INFERENCE_HOLE])
+    : interfaceType(coreTypes.map, [INFERENCE_HOLE, INFERENCE_HOLE]);
 }
