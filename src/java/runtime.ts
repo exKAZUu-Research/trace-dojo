@@ -1,5 +1,5 @@
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
-import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
+import { encodeJvmText as encodable, type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import { type TurtleState, TurtleWorld } from '../interpreter/turtleWorld';
 import type { Builtins } from './builtins';
@@ -44,10 +44,7 @@ export function throwBuiltin(frame: Frame, className: string, message?: string, 
   throw new JavaThrow(exception);
 }
 
-/** The text that Java writes in UTF-8, which encodes an unpaired surrogate as `?`. */
-export function encodable(text: string): string {
-  return text.replaceAll(/\p{Cs}/gu, '?');
-}
+export { encodable };
 
 /** Ends the program as `System.exit` does, skipping finally blocks and catch clauses. */
 export class ProgramExit {}

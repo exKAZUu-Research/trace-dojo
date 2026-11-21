@@ -35,6 +35,7 @@
         "@willbooster/tree-sitter-haskell": "26.0.2",
         "@willbooster/tree-sitter-java": "35.0.2",
         "@willbooster/tree-sitter-javascript": "27.0.1",
+        "@willbooster/tree-sitter-kotlin": "22.0.4",
         "@willbooster/tree-sitter-php": "22.0.0",
         "@willbooster/tree-sitter-python": "21.0.2",
         "@willbooster/tree-sitter-ruby": "20.0.2",
@@ -766,6 +767,8 @@
     "@willbooster/tree-sitter-java": ["@willbooster/tree-sitter-java@35.0.2", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-l8Fq5kiD+vWrEZ4JUfwxW2LtFJzM9VhmcfyDlmv2ZZ/z8CApZWEo23+Xd45uSgcfXoXmC6cJFfQunZ91w4GW+A=="],
 
     "@willbooster/tree-sitter-javascript": ["@willbooster/tree-sitter-javascript@27.0.1", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-64Ovz23HEkA0l7Cxoh4aEqSTBaJUvQyNcsv51Jc2pWoEGuaXOlQx+R+NBdU8q/TqWJbE6NIreu/cM2NOA5ebzA=="],
+
+    "@willbooster/tree-sitter-kotlin": ["@willbooster/tree-sitter-kotlin@22.0.4", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-YngpLezDx6is2vM/LR97792jrSnydQdHyrii7JGCeT94uqgOEXk1dUlblRTMZJvrJoNiU6NiQO8TcZJSCV3rfw=="],
 
     "@willbooster/tree-sitter-php": ["@willbooster/tree-sitter-php@22.0.0", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-owx7gyljMAhJznBdpboWdTEeWz557ETdFdN3i5mOqROHcsPjAtIg8dQ5CDbDo05NdkdPibuu0xk8M6CfbbmTNw=="],
 

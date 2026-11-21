@@ -15,6 +15,9 @@ import { traceJavaProgram } from '../java/trace';
 import { findJavaScriptTraceAnnotations } from '../javascript/parse';
 import { executeJavaScriptProgram } from '../javascript/run';
 import { traceJavaScriptProgram } from '../javascript/trace';
+import { executeKotlinProgram } from '../kotlin/execute';
+import { findKotlinTraceAnnotations } from '../kotlin/parse';
+import { traceKotlinProgram } from '../kotlin/trace';
 import { findPhpTraceAnnotations } from '../php/parse';
 import { executePhpProgram } from '../php/run';
 import { tracePhpProgram } from '../php/trace';
@@ -92,6 +95,11 @@ const interpreters = {
     execute: executeRubyProgram,
   },
   c: { findTraceAnnotations: findCTraceAnnotations, record: traceCProgram, execute: executeCProgram },
+  kotlin: {
+    findTraceAnnotations: findKotlinTraceAnnotations,
+    record: traceKotlinProgram,
+    execute: executeKotlinProgram,
+  },
   typescript: {
     findTraceAnnotations: findTypeScriptTraceAnnotations,
     record: traceTypeScriptProgram,
