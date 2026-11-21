@@ -115,6 +115,8 @@ interface PatternWrite {
 export abstract class PatternCompiler extends CallCompiler {
   readonly objectPatternTypes = new WeakMap<Pattern, DartType>();
   readonly patternConstants = new WeakMap<Expression, Compiled>();
+  readonly listPatternElementTypes = new WeakMap<Pattern, DartType>();
+  readonly coverageUnions = new WeakMap<Pattern, readonly Pattern[]>();
 
   protected compileCasePattern(
     syntax: Pattern,
@@ -607,6 +609,7 @@ export abstract class PatternCompiler extends CallCompiler {
     variables: Map<string, LocalVar>
   ): PatternMatch {
     const elementType = this.listPatternElementType(pattern, matchedType);
+    this.listPatternElementTypes.set(pattern, elementType);
     const listType = interfaceType(coreTypes.list, [elementType]);
     const restIndex = pattern.elements.findIndex((element) => element.kind === 'rest');
     if (pattern.elements.filter((element) => element.kind === 'rest').length > 1) {

@@ -202,8 +202,8 @@ export function nonNullable(type: DartType): DartType {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- One case per kind of type, in the order of Dart's rules.
-// code-gauge-allow functionNcss 32 -- Each kind compares its own structure.
+// code-gauge-allow functionCognitiveComplexity 21 -- One case per kind of type, in the order of Dart's rules.
+// code-gauge-allow functionNcss 33 -- Each kind compares its own structure.
 export function sameType(
   a: DartType,
   b: DartType,

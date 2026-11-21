@@ -3,6 +3,7 @@ import type { Expression, Pattern, Span } from './ast';
 import { nullPatternComparison } from './astWalk';
 import type { ClassInfo, FieldMember } from './classes';
 import type { PatternCompiler } from './patternCompiler';
+import { coverageDisjuncts } from './patternCoverageUnion';
 import type { Frame } from './runtime';
 import {
   asInstanceOf,
@@ -65,8 +66,8 @@ export function checkExhaustive(
   isStatement: boolean
 ): boolean {
   if (patterns.some((pattern) => coversAll(compiler, pattern, type))) return true;
-  const cutoff = Math.min(MAX_SPACES - 1, listLengthCutoff(patterns));
-  const depth = Math.max(0, ...patterns.map(listNesting));
+  const cutoff = Math.min(MAX_SPACES - 1, listLengthCutoff(compiler, patterns));
+  const depth = Math.max(0, ...patterns.map((pattern) => listNesting(compiler, pattern)));
   const coverage = new ObjectSpaces(compiler, cutoff, depth);
   const spaces = coverage.refineForCoverage(expand(type, cutoff, depth), patterns);
   const pending: { space: Space; test: (frame: Frame) => boolean }[] = [];
@@ -157,7 +158,7 @@ class ObjectSpaces {
       const options = expand(space.type, this.listCutoff, this.listDepth);
       if (options.length !== 1 || options[0].kind !== 'type') return options;
     }
-    for (const part of patternAlternatives(pattern)) {
+    for (const part of patternAlternatives(this.compiler, pattern)) {
       if (part !== pattern && this.excludesFixedField(part, space)) continue;
       const partitions = this.splitProduct(space, part);
       if (partitions) return partitions;
@@ -241,7 +242,7 @@ class ObjectSpaces {
         return this.excludesFixedField(pattern.left, field) || this.excludesFixedField(pattern.right, field);
       }
       case 'or': {
-        return this.excludesFixedField(pattern.left, field) && this.excludesFixedField(pattern.right, field);
+        return coverageDisjuncts(this.compiler, pattern).every((arm) => this.excludesFixedField(arm, field));
       }
       case 'record': {
         if (field.kind !== 'record') return false;
@@ -283,7 +284,7 @@ class ObjectSpaces {
 
   private refine(spaces: Space[], patterns: Pattern[]): Space[] {
     if (patterns.length === 0) return spaces;
-    const parts = patterns.flatMap(patternAlternatives);
+    const parts = patterns.flatMap((pattern) => patternAlternatives(this.compiler, pattern));
     const result: Space[] = [];
     for (const space of spaces) {
       const refined = this.refineSpace(space, parts);
@@ -351,17 +352,19 @@ class ObjectSpaces {
   }
 }
 
-function patternAlternatives(pattern: Pattern): Pattern[] {
+function patternAlternatives(compiler: PatternCompiler, pattern: Pattern): Pattern[] {
   switch (pattern.kind) {
     case 'parenthesized':
     case 'cast':
     case 'nullCheck':
     case 'nullAssert': {
-      return patternAlternatives(pattern.pattern);
+      return patternAlternatives(compiler, pattern.pattern);
     }
-    case 'or':
+    case 'or': {
+      return coverageDisjuncts(compiler, pattern).flatMap((arm) => patternAlternatives(compiler, arm));
+    }
     case 'and': {
-      return [...patternAlternatives(pattern.left), ...patternAlternatives(pattern.right)];
+      return [...patternAlternatives(compiler, pattern.left), ...patternAlternatives(compiler, pattern.right)];
     }
     default: {
       return [pattern];
@@ -518,14 +521,14 @@ function expandList(type: DartType, elementType: DartType, cutoff: number, depth
   return spaces;
 }
 
-function listLengthCutoff(patterns: Pattern[]): number {
+function listLengthCutoff(compiler: PatternCompiler, patterns: Pattern[]): number {
   let cutoff = 0;
   let prefix = 0;
   let suffix = 0;
   const visit = (pattern: Pattern): void => {
     if (pattern.kind !== 'list') return;
     for (const element of pattern.elements) {
-      if (element.kind !== 'rest') cutoff = Math.max(cutoff, listLengthCutoff([element]));
+      if (element.kind !== 'rest') cutoff = Math.max(cutoff, listLengthCutoff(compiler, [element]));
     }
     const rest = pattern.elements.findIndex((element) => element.kind === 'rest');
     if (rest === -1) {
@@ -534,47 +537,50 @@ function listLengthCutoff(patterns: Pattern[]): number {
     }
     const after = pattern.elements.length - rest - 1;
     const part = pattern.elements[rest];
-    const nested = part.kind === 'rest' && part.pattern ? listLengthCutoff([part.pattern]) : 0;
+    const nested = part.kind === 'rest' && part.pattern ? listLengthCutoff(compiler, [part.pattern]) : 0;
     prefix = Math.max(prefix, rest + nested);
     suffix = Math.max(suffix, after);
   };
-  for (const pattern of patterns) visitNestedPatterns(pattern, visit);
+  for (const pattern of patterns) visitNestedPatterns(compiler, pattern, visit);
   return Math.max(prefix + suffix, cutoff);
 }
 
-function listNesting(pattern: Pattern): number {
+function listNesting(compiler: PatternCompiler, pattern: Pattern): number {
   let depth = 0;
-  visitNestedPatterns(pattern, (part) => {
+  visitNestedPatterns(compiler, pattern, (part) => {
     if (part.kind !== 'list') return;
     let nested = 0;
     for (const element of part.elements) {
       const child = element.kind === 'rest' ? element.pattern : element;
-      if (child) nested = Math.max(nested, listNesting(child));
+      if (child) nested = Math.max(nested, listNesting(compiler, child));
     }
     depth = Math.max(depth, nested + 1);
   });
   return depth;
 }
 
-function visitNestedPatterns(pattern: Pattern, visit: (pattern: Pattern) => void): void {
+function visitNestedPatterns(compiler: PatternCompiler, pattern: Pattern, visit: (pattern: Pattern) => void): void {
   visit(pattern);
   switch (pattern.kind) {
-    case 'and':
     case 'or': {
-      visitNestedPatterns(pattern.left, visit);
-      visitNestedPatterns(pattern.right, visit);
+      for (const arm of coverageDisjuncts(compiler, pattern)) visitNestedPatterns(compiler, arm, visit);
+      break;
+    }
+    case 'and': {
+      visitNestedPatterns(compiler, pattern.left, visit);
+      visitNestedPatterns(compiler, pattern.right, visit);
       break;
     }
     case 'cast':
     case 'nullAssert':
     case 'nullCheck':
     case 'parenthesized': {
-      visitNestedPatterns(pattern.pattern, visit);
+      visitNestedPatterns(compiler, pattern.pattern, visit);
       break;
     }
     case 'record':
     case 'object': {
-      for (const field of pattern.fields) visitNestedPatterns(field.pattern, visit);
+      for (const field of pattern.fields) visitNestedPatterns(compiler, field.pattern, visit);
       break;
     }
     default: {
@@ -619,7 +625,7 @@ function coversAll(compiler: PatternCompiler, pattern: Pattern, type: DartType):
       return coversAll(compiler, pattern.pattern, type);
     }
     case 'or': {
-      return coversAll(compiler, pattern.left, type) || coversAll(compiler, pattern.right, type);
+      return coverageDisjuncts(compiler, pattern).some((arm) => coversAll(compiler, arm, type));
     }
     case 'and': {
       return coversAll(compiler, pattern.left, type) && coversAll(compiler, pattern.right, type);
@@ -709,13 +715,11 @@ function covers(compiler: PatternCompiler, pattern: Pattern, space: Space): Cove
     case 'parenthesized': {
       return covers(compiler, pattern.pattern, space);
     }
-    case 'or':
+    case 'or': {
+      return combineCoverage(coverageDisjuncts(compiler, pattern), (arm) => covers(compiler, arm, space), false);
+    }
     case 'and': {
-      return combineCoverage(
-        [pattern.left, pattern.right],
-        (part) => covers(compiler, part, space),
-        pattern.kind === 'and'
-      );
+      return combineCoverage([pattern.left, pattern.right], (part) => covers(compiler, part, space), true);
     }
     case 'cast': {
       return (

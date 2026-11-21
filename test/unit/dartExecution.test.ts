@@ -7704,6 +7704,28 @@ void main() { print(select([${prefix ? `${falseValues}, ` : ''}${falseValues}]))
   }
 });
 
+test('Dart logical-or coverage keeps the first equivalent list restriction', () => {
+  for (const cases of [
+    '[] => 0, ([true, ...] || [false, ...]) => 2',
+    '[] => 0, ([true, ...] || <bool>[false, ...]) => 2',
+    '[] => 0, [...[]] => 1, ([...[true, ...]] || [...[false, ...]]) => 2',
+    '[] => 0, [...[]] => 1, ([...[false, ...]] || [...[true, ...]]) => 2',
+    '[] => 0, [...[]] => 1, [...([true, ...] || [false, ...])] => 2',
+  ]) {
+    const program = `int select(List<bool> values) => switch (values) { ${cases} };
+void main() { print(select([false])); }`;
+    expect(executeProgram('dart', program)).toMatchObject({ kind: 'compileError' });
+  }
+  const valid = `int separate(List<bool> x) => switch (x) {
+  [] => 0, [...[]] => 1, [...[true, ...]] => 2, [...[false, ...]] => 3,
+};
+int lengths(List<bool> x) => switch (x) { ([] || [_]) => 0, [_, _, ...] => 2 };
+int elements(List<num> x) => switch (x) { [] => 0, (<int>[_, ...] || <num>[_, ...]) => 2 };
+int record((List<bool>,) x) => switch (x) { ([],) => 0, (([true, ...],) || ([false, ...],)) => 2 };
+void main() { print([separate([false]), lengths([false]), elements([0.5]), record(([false],))]); }`;
+  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: '[3, 0, 2, 2]\n' });
+});
+
 test('constructor formals and tear-offs use inferred field types', () => {
   const declarations = `class Parent {
   var value = Later().value;
