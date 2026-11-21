@@ -579,12 +579,15 @@ inline fun String.replaceFirstChar(transform: (Char) -> CharSequence): String =
 @JvmName("replaceFirstCharWithChar")
 inline fun String.replaceFirstChar(transform: (Char) -> Char): String =
     if (isNotEmpty()) transform(this[0]).toString() + substring(1) else this
-fun CharArray.concatToString(): String {
-    val builder = StringBuilder()
-    for (c in this) builder.append(c)
-    return builder.toString()
+fun CharArray.concatToString(): String = String(this, 0, size)
+fun CharArray.concatToString(startIndex: Int, endIndex: Int): String {
+    if (startIndex < 0 || endIndex > size)
+        throw IndexOutOfBoundsException("startIndex: $startIndex, endIndex: $endIndex, size: $size")
+    if (startIndex > endIndex) throw IllegalArgumentException("startIndex: $startIndex > endIndex: $endIndex")
+    return String(this, startIndex, endIndex - startIndex)
 }
 fun String(chars: CharArray): String = chars.concatToString()
+external fun String(chars: CharArray, offset: Int, length: Int): String
 
 external fun Char.isDigit(): Boolean
 external fun Char.isLetter(): Boolean
@@ -608,6 +611,16 @@ external fun Char.isDefined(): Boolean
 external fun Char.equals(other: Char, ignoreCase: Boolean = false): Boolean
 external operator fun Char.plus(other: String): String
 
+fun Int.digitToChar(): Char {
+    if (this < 0 || this > 9) throw IllegalArgumentException("Int $this is not a decimal digit")
+    return ('0'.code + this).toChar()
+}
+fun Int.digitToChar(radix: Int): Char {
+    if (radix < 2 || radix > 36) throw IllegalArgumentException("Invalid radix: $radix. Valid radix values are in range 2..36")
+    if (this < 0 || this >= radix) throw IllegalArgumentException("Digit $this does not represent a valid digit in radix $radix")
+    val first = if (this < 10) '0'.code else 'A'.code - 10
+    return (first + this).toChar()
+}
 external fun Int.toString(radix: Int): String
 external fun Long.toString(radix: Int): String
 external fun Char(code: Int): Char

@@ -5,7 +5,7 @@ const FORMATS = { double: { precision: 53, minExponent: -1022 }, float: { precis
 
 /**
  * The value a hexadecimal floating-point literal such as `0x1.8p1` denotes, rounded once to the nearest `double`
- * (or `float`, which `Math.fround` then holds exactly), or `undefined` for other text, as Java reads it in source and
+ * or `float`, or `undefined` for other text, as Java reads it in source and
  * in `Double.parseDouble` and `Float.parseFloat`.
  */
 export function parseHexFloat(text: string, format: keyof typeof FORMATS = 'double'): number | undefined {
@@ -14,7 +14,8 @@ export function parseHexFloat(text: string, format: keyof typeof FORMATS = 'doub
   const [, sign, integer = '', fraction = '', exponent = '0'] = match;
   if (integer === '' && fraction === '') return undefined;
   const value = roundBinary(BigInt(`0x${integer}${fraction}`), Number(exponent) - 4 * fraction.length, format);
-  return sign === '-' ? -value : value;
+  const rounded = format === 'float' ? Math.fround(value) : value;
+  return sign === '-' ? -rounded : rounded;
 }
 
 /** `significand` × 2^`exponent`, rounded half to even to the format's precision, subnormals and overflow included. */

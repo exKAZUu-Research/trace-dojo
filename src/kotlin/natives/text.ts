@@ -289,6 +289,8 @@ const TEXT_SEARCH_NATIVES: Record<string, TextNative> = {
       typeof receiver === 'string' ? receiver.split(LINE_ENDINGS) : sequenceLines(frame, receiver)
     ),
   'String.reversed()': (frame, receiver) => result(frame, reverseKeepingPairs(text(receiver))),
+  'String(CharArray, Int, Int)': (frame, _receiver, [chars, offset, length]) =>
+    stringFromChars(frame, (chars as KObject).items as number[], offset as number, length as number),
   'String.toCharArray()': (frame, receiver) => stringCharArray(frame, text(receiver), 0, text(receiver).length),
   'String.toCharArray(Int, Int)': (frame, receiver, [start, end]) =>
     stringCharArray(frame, text(receiver), start as number, end as number),
@@ -552,6 +554,21 @@ function delimiterPair(
   if (!match) return undefined;
   const constructor = libraryClass('kotlin.Pair').constructors[0];
   return callFunction(constructor, frame, undefined, [new Boxed('Int', match.index), match.delimiter], undefined);
+}
+
+function stringFromChars(frame: Frame, chars: number[], offset: number, length: number): string {
+  if (offset < 0 || length < 0 || offset + length > chars.length) {
+    throwError(
+      frame,
+      'java.lang.StringIndexOutOfBoundsException',
+      `Range [${offset}, ${offset} + ${length}) out of bounds for length ${chars.length}`
+    );
+  }
+  frame.runtime.allocateString(frame, length);
+  return chars
+    .slice(offset, offset + length)
+    .map(charToString)
+    .join('');
 }
 
 function stringCharArray(frame: Frame, value: string, from: number, to: number): KObject {

@@ -1007,8 +1007,14 @@ fun main() {
     }
     println("0x1.000001p0".toFloat())
     println("0x1.0000010000001p0".toFloat())
+    for (text in listOf("0x1p128", "0x1.ffffffp127", "-0x1p128", "0x1.fffffep127", "0x1p-150")) {
+        val value = text.toFloat()
+        println(value.isInfinite())
+        println(value.toDouble())
+    }
 }`,
-    stdout: '4.9E-324\n9.9E-324\n-0.0\n4.9E-324\n1.7976931348623157E308\nInfinity\n1.0\n1.0000001\n',
+    stdout:
+      '4.9E-324\n9.9E-324\n-0.0\n4.9E-324\n1.7976931348623157E308\nInfinity\n1.0\n1.0000001\ntrue\nInfinity\ntrue\nInfinity\ntrue\n-Infinity\nfalse\n3.4028234663852886E38\nfalse\n0.0\n',
   },
   {
     name: 'ArrayList subclass rendering interleaves its iterator and element callbacks',
@@ -1033,6 +1039,120 @@ class Items : ArrayList<Item>() {
 }
 fun main() { println(Items()) }`,
     stdout: 'iterator\nnext 1\nrender 1\nnext 2\nrender 2\n[1, 2]\n',
+  },
+  {
+    name: 'ArrayLists and sublists use fail-fast iterators while rendering elements',
+    source: `class Item(private val mutate: () -> Unit) {
+    override fun toString(): String {
+        mutate()
+        return "item"
+    }
+}
+fun main() {
+    val list = mutableListOf<Any>()
+    list.add(Item { list.add("new") })
+    list.add("last")
+    try { println(list) } catch (e: ConcurrentModificationException) { println("modified") }
+    println(list.size)
+
+    val cleared = mutableListOf<Any>()
+    cleared.add(Item { cleared.clear() })
+    cleared.add("last")
+    try { println(cleared) } catch (e: ConcurrentModificationException) { println("cleared") }
+    println(cleared.size)
+
+    val backing = mutableListOf<Any>()
+    backing.add(Item { backing.add("new") })
+    backing.add("last")
+    val view = backing.subList(0, 2)
+    try { println(view) } catch (e: ConcurrentModificationException) { println("view modified") }
+    println(backing.size)
+
+    val self = mutableListOf<Any>()
+    self.add(self)
+    println(self)
+}`,
+    stdout: 'modified\n3\ncleared\n0\nview modified\n3\n[(this Collection)]\n',
+  },
+  {
+    name: 'map value lookup follows live HashMap buckets and LinkedHashMap insertion order',
+    source: `class EntryValue(val id: Int, private val visit: (Int) -> Unit = {}) {
+    override fun equals(other: Any?): Boolean {
+        if (other !is EntryValue) return false
+        visit(other.id)
+        return false
+    }
+    override fun hashCode(): Int = id
+}
+fun check(map: MutableMap<Int, EntryValue>, keyStep: Int) {
+    map[keyStep] = EntryValue(1)
+    map[2 * keyStep] = EntryValue(2)
+    map[4 * keyStep] = EntryValue(4)
+    val target = EntryValue(9) { id ->
+        println(id)
+        if (id == 1) {
+            map.remove(2 * keyStep)
+            map[3 * keyStep] = EntryValue(3)
+        }
+        if (id == 2) error("visited removed value")
+    }
+    println(map.values.contains(target))
+}
+fun removingCurrent(map: MutableMap<Int, EntryValue>, keyStep: Int) {
+    map[keyStep] = EntryValue(1)
+    map[2 * keyStep] = EntryValue(2)
+    println(map.containsValue(EntryValue(9) { id ->
+        println(id)
+        if (id == 1) map.remove(keyStep)
+    }))
+}
+fun main() {
+    check(HashMap(32), 1)
+    check(HashMap(32), 32)
+    check(LinkedHashMap(), 1)
+    removingCurrent(HashMap(32), 32)
+    removingCurrent(LinkedHashMap(), 1)
+    val view = linkedMapOf(1 to EntryValue(1), 2 to EntryValue(2))
+    try {
+        view.values.remove(EntryValue(9) { view.remove(2) })
+    } catch (e: ConcurrentModificationException) { println("modified") }
+}`,
+    stdout: '1\n3\n4\nfalse\n1\n4\n3\nfalse\n1\n4\n3\nfalse\n1\n2\nfalse\n1\nfalse\nmodified\n',
+  },
+  {
+    name: 'digits and character array ranges use Kotlin JVM values and bounds',
+    source: `fun main() {
+    println(0.digitToChar())
+    println(9.digitToChar())
+    println(10.digitToChar(11))
+    println(35.digitToChar(36))
+    for (digit in listOf(-1, 10)) {
+        try { println(digit.digitToChar()) } catch (e: IllegalArgumentException) { println(e.message) }
+    }
+    for ((digit, radix) in listOf(0 to 1, -1 to 16, 16 to 16, 8 to 37)) {
+        try { println(digit.digitToChar(radix)) } catch (e: IllegalArgumentException) { println(e.message) }
+    }
+    val chars = charArrayOf('a', 'b', 'c')
+    println(String(chars, 1, 2))
+    println(String(chars, 3, 0))
+    for ((offset, length) in listOf(-1 to 0, 0 to -1, 2 to 2, Int.MAX_VALUE to 1)) {
+        try { println(String(chars, offset, length)) } catch (e: Exception) { println(e) }
+    }
+}`,
+    stdout:
+      '0\n9\nA\nZ\nInt -1 is not a decimal digit\nInt 10 is not a decimal digit\nInvalid radix: 1. Valid radix values are in range 2..36\nDigit -1 does not represent a valid digit in radix 16\nDigit 16 does not represent a valid digit in radix 16\nInvalid radix: 37. Valid radix values are in range 2..36\nbc\n\njava.lang.StringIndexOutOfBoundsException: Range [-1, -1 + 0) out of bounds for length 3\njava.lang.StringIndexOutOfBoundsException: Range [0, 0 + -1) out of bounds for length 3\njava.lang.StringIndexOutOfBoundsException: Range [2, 2 + 2) out of bounds for length 3\njava.lang.StringIndexOutOfBoundsException: Range [2147483647, 2147483647 + 1) out of bounds for length 3\n',
+  },
+  {
+    name: 'character array concatenation distinguishes an inverted range from an out-of-bounds range',
+    source: `fun main() {
+    val chars = charArrayOf('a', 'b', 'c')
+    println(chars.concatToString(1, 3))
+    for ((start, end) in listOf(-1 to 0, 0 to -1, 2 to 4, 2 to 1, 4 to 4)) {
+        try { println(chars.concatToString(start, end)) } catch (e: Exception) { println(e) }
+    }
+}`,
+    stdout:
+      'bc\njava.lang.IndexOutOfBoundsException: startIndex: -1, endIndex: 0, size: 3\njava.lang.IllegalArgumentException: startIndex: 0 > endIndex: -1\njava.lang.IndexOutOfBoundsException: startIndex: 2, endIndex: 4, size: 3\njava.lang.IllegalArgumentException: startIndex: 2 > endIndex: 1\njava.lang.IndexOutOfBoundsException: startIndex: 4, endIndex: 4, size: 3\n',
   },
   {
     name: 'set insertion follows the source iterator and keeps partial changes',

@@ -30,6 +30,7 @@ import {
   iterateElements,
   objectsEqual,
   readCollectionProperty,
+  removeFirstIterable,
 } from './collectionTraversal';
 import { arrayIterator } from './core';
 import { jdkHashCapacity, mapCapacity, newStore, reserveForCopy } from './hashTables';
@@ -134,14 +135,6 @@ function checkIndex(frame: Frame, list: Value, index: number): void {
 /** Marks a structural change, which makes the iterators created before it fail. */
 export function touch(collection: KObject): void {
   collection.modCount = (collection.modCount ?? 0) + 1;
-}
-
-export function indexOfValue(frame: Frame, values: Value[], element: Value): number {
-  for (const [index, value] of values.entries()) {
-    frame.runtime.spend();
-    if (valueEquals(frame, element, value)) return index;
-  }
-  return -1;
 }
 
 /** `AbstractCollection.toString`: the elements in brackets, a collection inside itself shown as `(this Collection)`. */
@@ -254,13 +247,19 @@ const LIST_READING_NATIVES: Record<string, ListNative> = {
 
 function renderList(frame: Frame, receiver: Value): string {
   const list = receiver as KObject;
-  if (!list.arrayList || list.cls.isLibrary) return collectionToString(frame, list, readableItems(list));
+  if (!usesArrayListIterator(list)) return collectionToString(frame, list, readableItems(list));
+
+  checkListView(frame, list);
 
   const iterator = collectionIterator(frame, list);
   function* elements(): Iterable<Value> {
     while (iterator.hasNext()) yield iterator.next();
   }
   return frame.runtime.withNativeRoots([iterator.value], () => collectionToString(frame, list, elements()));
+}
+
+function usesArrayListIterator(list: KObject): boolean {
+  return (listView(list)?.source ?? list).arrayList !== undefined;
 }
 
 function findListValue(frame: Frame, list: KObject, element: Value, fromEnd = false): number {
@@ -624,7 +623,8 @@ function defineIterators(): void {
   const iterator = 'kotlin.collections.ItemIterator';
   defineNative(`${iterator}.hasNext()`, (_frame, receiver) => {
     const current = itemIteratorState(receiver);
-    return current.index < indexedSize(current.source);
+    const size = indexedSize(current.source);
+    return usesArrayListIterator(current.source) ? current.index !== size : current.index < size;
   });
   defineNative(`${iterator}.next()`, (frame, receiver) => {
     const current = itemIteratorState(receiver);
@@ -1126,9 +1126,9 @@ function matchingViewEntry(frame: Frame, view: Value, element: Value, removing: 
 }
 
 function findMapValue(frame: Frame, store: KStore, value: Value): HashEntry | undefined {
-  return store.ordered().find((entry) => {
+  return store.findOrdered((entry) => {
     frame.runtime.spend();
-    return objectsEqual(frame, value, entry.value);
+    return frame.runtime.withNativeRoots([entry.key, entry.value], () => objectsEqual(frame, value, entry.value));
   });
 }
 
@@ -1150,8 +1150,9 @@ function matchingEntry(frame: Frame, store: KStore, element: Value, removing: bo
 /** What changes a map through its keys, values, or entries, which remove from the map and never add to it. */
 function defineViewChanging(owner: string): void {
   defineNative(`${owner}.remove(E)`, (frame, view, [element]) => {
-    const { map } = viewOf(view);
+    const { map, view: kind } = viewOf(view);
     requireMutableMap(frame, map);
+    if (kind === 'values') return removeFirstIterable(frame, view, (value) => objectsEqual(frame, element, value));
     const store = map.store as KStore;
     const entry = matchingViewEntry(frame, view, element, true);
     if (!entry) return false;

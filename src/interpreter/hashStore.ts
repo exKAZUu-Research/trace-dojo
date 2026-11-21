@@ -1,3 +1,5 @@
+import { HashTraversal } from './hashTraversal';
+
 export interface HashEntry<V> {
   key: V;
   value: V;
@@ -22,7 +24,19 @@ export class HashStore<V, F> {
   private lastOrder = 0;
   /** The entries by hash, which finds a key among the entries of its hash only; built when first needed. */
   private byHash: Map<number, HashEntry<V>[]> | undefined;
-  capacity = 16;
+  private liveTraversal: HashTraversal<V> | undefined;
+  private tableCapacity = 16;
+
+  get capacity(): number {
+    return this.tableCapacity;
+  }
+
+  set capacity(capacity: number) {
+    if (capacity === this.tableCapacity) return;
+    this.tableCapacity = capacity;
+    this.liveTraversal?.resize(this.ordered());
+  }
+
   /** Whether an entry was ever added, after which a Java `HashMap` has allocated its table. */
   get isAllocated(): boolean {
     return this.lastOrder > 0 || this.firstOrder < 0;
@@ -77,6 +91,33 @@ export class HashStore<V, F> {
     return this.list.toSorted((a, b) => this.bucketOf(a) - this.bucketOf(b) || (a.order ?? 0) - (b.order ?? 0));
   }
 
+  findOrdered(accepts: (entry: HashEntry<V>) => boolean): HashEntry<V> | undefined {
+    if (this.order === 'insertion') return this.findInInsertionOrder(accepts);
+    if (this.order === 'sorted') return this.ordered().find(accepts);
+    if (this.liveTraversal) return this.liveTraversal.find(accepts);
+    if (this.list.length === 0) return undefined;
+    const traversal = new HashTraversal((entry) => this.bucketOf(entry), this.ordered());
+    this.liveTraversal = traversal;
+    try {
+      return traversal.find(accepts);
+    } finally {
+      this.liveTraversal = undefined;
+    }
+  }
+
+  private findInInsertionOrder(accepts: (entry: HashEntry<V>) => boolean): HashEntry<V> | undefined {
+    const entries = this.list;
+    for (let index = 0; index < entries.length; index++) {
+      const entry = entries[index] as HashEntry<V>;
+      if (accepts(entry)) return entry;
+      if (entries[index] !== entry) {
+        index = entries.indexOf(entry);
+        if (index < 0) return undefined;
+      }
+    }
+    return undefined;
+  }
+
   get entries(): HashEntry<V>[] {
     return this.list;
   }
@@ -84,6 +125,7 @@ export class HashStore<V, F> {
   set entries(entries: HashEntry<V>[]) {
     this.list = entries;
     this.byHash = undefined;
+    this.liveTraversal?.replace(this.ordered());
   }
 
   /** The entries whose keys have `hash`, among which a key equal to one with that hash is. */
@@ -116,7 +158,9 @@ export class HashStore<V, F> {
   /** Removes an entry, keeping the order of the others. */
   remove(entry: HashEntry<V>): void {
     const index = this.list.indexOf(entry);
-    if (index !== -1) this.list.splice(index, 1);
+    if (index === -1) return;
+    this.list.splice(index, 1);
+    this.liveTraversal?.remove(entry);
     const sameHash = this.byHash?.get(entry.hash);
     if (sameHash) sameHash.splice(sameHash.indexOf(entry), 1);
   }
@@ -133,6 +177,7 @@ export class HashStore<V, F> {
     entry.order = this.lastOrder++;
     this.list.push(entry);
     this.indexEntry(entry);
+    this.liveTraversal?.add(entry, false);
     if (crowded) this.growCrowded();
     while (this.entries.length > this.capacity * 0.75) this.capacity *= 2;
   }
@@ -156,6 +201,7 @@ export class HashStore<V, F> {
     entry.order = this.order === 'hash' ? --this.firstOrder : this.lastOrder++;
     this.list.push(entry);
     this.indexEntry(entry);
+    this.liveTraversal?.add(entry, true);
     if (crowded) this.growCrowded();
   }
 

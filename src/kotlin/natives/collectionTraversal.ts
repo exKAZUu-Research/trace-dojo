@@ -76,6 +76,14 @@ export function containsAll(frame: Frame, receiver: Value, elements: Value): boo
   return everyIterableElement(frame, elements, (element) => collectionContains(frame, receiver, element));
 }
 
+export function removeFirstIterable(frame: Frame, iterable: Value, matches: (element: Value) => boolean): boolean {
+  return !everyIterableElement(frame, iterable, (element, iterator) => {
+    if (!matches(element)) return true;
+    callCollectionMember(frame, iterator, 'kotlin.collections.MutableIterator', 'remove');
+    return false;
+  });
+}
+
 export function filterCollection(
   frame: Frame,
   receiver: Value,
