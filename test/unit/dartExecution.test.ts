@@ -1369,6 +1369,16 @@ test.each(['int _', 'var _', 'final _'])(
   }
 );
 
+test('Dart for-in loops in sync* generators charge each advance', () => {
+  const program = `Iterable<int> scan(List<int> values) sync* { for (var value in values) { if (value < 0) yield value; } }
+void main() {
+  final values = List<int>.filled(100000, 0);
+  for (var i = 0; i < 11; i++) { scan(values).isEmpty; }
+  print('finished');
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}

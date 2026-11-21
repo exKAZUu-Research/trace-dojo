@@ -664,6 +664,7 @@ export abstract class ControlCompiler extends StatementCompiler {
         frame.temporaries.push(iterator);
         try {
           for (;;) {
+            runtime.spend();
             if (runtime.invoke(iterator, 'moveNext', { positional: [], named: undefined }, [], undefined) !== true)
               return undefined;
             bind(frame, runtime.getProperty(iterator, 'current', undefined));
