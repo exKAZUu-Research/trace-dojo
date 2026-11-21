@@ -18,22 +18,7 @@ export function ifEval(test: Eval, thenEval: Eval, elseEval: Eval | undefined): 
 }
 
 export function tryEval(body: Eval, catches: CatchClause[], finallyEval: Eval | undefined): Eval {
-  const execute: Eval = (frame) => {
-    try {
-      return body(frame);
-    } catch (error) {
-      const thrown = throwableOf(frame, error);
-      if (!thrown) throw error;
-      const clause = catches.find((candidate) => candidate.test(thrown));
-      if (!clause) throw error instanceof KotlinThrow ? error : new KotlinThrow(thrown);
-      clause.write(frame, thrown);
-      try {
-        return clause.value(frame);
-      } finally {
-        frame.locals[clause.slot] = UNASSIGNED;
-      }
-    }
-  };
+  const execute: Eval = (frame) => evaluateTryBody(frame, body, catches);
   if (!finallyEval) return execute;
   return (frame) => {
     let pending: Value;
@@ -47,6 +32,23 @@ export function tryEval(body: Eval, catches: CatchClause[], finallyEval: Eval | 
       frame.runtime.withNativeRoots([pending], () => finallyEval(frame));
     }
   };
+}
+
+function evaluateTryBody(frame: Frame, body: Eval, catches: CatchClause[]): Value {
+  try {
+    return body(frame);
+  } catch (error) {
+    const thrown = throwableOf(frame, error);
+    if (!thrown) throw error;
+    const clause = catches.find((candidate) => candidate.test(thrown));
+    if (!clause) throw error instanceof KotlinThrow ? error : new KotlinThrow(thrown);
+    clause.write(frame, thrown);
+    try {
+      return clause.value(frame);
+    } finally {
+      frame.locals[clause.slot] = UNASSIGNED;
+    }
+  }
 }
 
 /** The exception a `catch` sees: a Kotlin exception, or the host's stack overflow as `StackOverflowError`. */
