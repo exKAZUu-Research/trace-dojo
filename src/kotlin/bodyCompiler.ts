@@ -573,8 +573,8 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     for (const member of decl.members) {
       if (member.kind === 'property') {
         const property = this.findOwnProperty(symbol, member.name);
-        uninitialized.delete(property);
         const step = this.compilePropertyStep(entry, member, property, scope, context);
+        uninitialized.delete(property);
         if (step) steps.push(step);
       } else if (member.kind === 'init') {
         const evaluate = this.compileBlockValue(scope, context, member.block, undefined, true).eval;

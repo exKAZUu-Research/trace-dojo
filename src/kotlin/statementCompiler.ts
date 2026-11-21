@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 926 -- One method per kind of Kotlin statement and control structure.
+// code-gauge-allow-file fileNcss 936 -- One method per kind of Kotlin statement and control structure.
 import type {
   AssignmentStatement,
   Block,
@@ -344,6 +344,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
       const value = this.compileExpression(scope, context, statement.value, place.type);
       const converted = this.expectType(value, place.type, statement.value.row);
       const toPlace = convertRepr(converted, reprOf(this.core, place.type), place.repr);
+      place.recordAssignment?.();
       this.narrowAfterAssignment(scope, target, value, place.type);
       return this.withStep(
         row,
@@ -474,7 +475,8 @@ export abstract class StatementCompiler extends OperatorCompiler {
     if (variable) return this.variablePlace(context, variable, row, isCompound);
     for (const receiver of this.receiversOf(scope)) {
       const property = this.findProperty(scope, this.receiverTypeOf(receiver), target.name);
-      if (property)
+      if (property) {
+        if (isCompound) this.checkInitialized(context, property.symbol, property.symbol.name, row);
         return this.propertyPlace(
           property,
           {
@@ -486,6 +488,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
           scope,
           !isCompound && receiver.context === context ? context : undefined
         );
+      }
     }
     const companion = this.findCompanionProperty(scope, target.name);
     if (companion) {
@@ -502,6 +505,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
   }
 
   /** `a.b` as a place, where `a` may be an object or a class with a companion, and `a?.b` binds to nothing for a null `a`. */
+  // code-gauge-allow functionCognitiveComplexity 16 -- keeps receiver resolution and initialization checks in assignment order.
   private memberPlace(
     scope: Scope,
     context: FunctionContext,
@@ -527,9 +531,9 @@ export abstract class StatementCompiler extends OperatorCompiler {
     if (!property)
       return this.error(row, `${typeToString(resolved(receiver.type))} には ${target.name} がありません。`);
     if (target.isSafe) return this.safePlace(receiver, (holder) => this.propertyPlace(property, holder, row, scope));
-    const ownInitializer =
-      target.receiver.kind === 'this' && !target.receiver.label && !isCompound ? context : undefined;
-    return this.propertyPlace(property, receiver, row, scope, ownInitializer);
+    const isOwnReceiver = target.receiver.kind === 'this' && !target.receiver.label;
+    if (isOwnReceiver && isCompound) this.checkInitialized(context, property.symbol, target.name, row);
+    return this.propertyPlace(property, receiver, row, scope, isOwnReceiver && !isCompound ? context : undefined);
   }
 
   // code-gauge-allow functionCognitiveComplexity 17 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
@@ -551,7 +555,6 @@ export abstract class StatementCompiler extends OperatorCompiler {
         this.error(row, `val で宣言した ${variable.name} には、再び代入できません。`);
       if (variable.owner !== context)
         this.error(row, `val で宣言した ${variable.name} には、ラムダ式の中で代入できません。`);
-      this.recordLoopValWrite(context, variable, row);
     }
     if (variable.owner !== context) {
       for (
@@ -563,12 +566,15 @@ export abstract class StatementCompiler extends OperatorCompiler {
       }
       variable.isCapturedAndModified = true;
     }
-    this.flow.assigned.add(variable);
-    this.flow.maybeAssigned.add(variable);
     const access = this.variableAccess(context, variable);
     return {
       type: variable.type,
       repr: reprOf(this.core, variable.type),
+      recordAssignment: () => {
+        if (!variable.isVar) this.recordLoopValWrite(context, variable, row);
+        this.flow.assigned.add(variable);
+        this.flow.maybeAssigned.add(variable);
+      },
       bind: (frame) => ({ get: () => access.read(frame), set: (value) => access.write(frame, value) }),
     };
   }
@@ -586,13 +592,8 @@ export abstract class StatementCompiler extends OperatorCompiler {
     const { symbol } = member;
     const type = resolved(substitute(this.ensurePropertyType(symbol, row), member.substitution));
     const initializes = initializer !== undefined && this.mayInitializeVal(initializer, symbol);
-    if (!symbol.isVar) {
-      if (!initializes || this.flow.maybeAssigned.has(symbol))
-        this.error(row, `val で宣言した ${symbol.name} には、再び代入できません。`);
-      this.flow.maybeAssigned.add(symbol);
-      this.recordLoopValWrite(initializer, symbol, row);
-    }
-    if (initializes) this.flow.assigned.add(symbol);
+    if (!symbol.isVar && (!initializes || this.flow.maybeAssigned.has(symbol)))
+      this.error(row, `val で宣言した ${symbol.name} には、再び代入できません。`);
     this.checkAccessible(scope, symbol, row, receiver?.type);
     if (symbol.isVar && symbol.setterVisibility === 'private' && !this.isInsideClass(scope, symbol.owner)) {
       this.error(row, `${symbol.name} の set は private なので、クラスの外からは代入できません。`);
@@ -602,6 +603,13 @@ export abstract class StatementCompiler extends OperatorCompiler {
     return {
       type,
       repr,
+      recordAssignment: initializes
+        ? () => {
+            if (!symbol.isVar) this.recordLoopValWrite(initializer, symbol, row);
+            this.flow.assigned.add(symbol);
+            this.flow.maybeAssigned.add(symbol);
+          }
+        : undefined,
       bind: (frame) => {
         const target = receiverEval(frame);
         return {
@@ -615,9 +623,6 @@ export abstract class StatementCompiler extends OperatorCompiler {
   protected abstract propertyReprOf(symbol: PropertySymbol): Repr;
 
   protected abstract nothing(): KType;
-
-  /** Whether a `val` property may be assigned here: in its class's `init` block, once, before it is read. */
-  protected abstract mayInitializeVal(context: FunctionContext, symbol: PropertySymbol): boolean;
 
   protected isInsideClass(scope: Scope, cls: ClassSymbol | undefined): boolean {
     return this.receiversOf(scope).some((receiver) => receiver.cls !== undefined && receiver.cls === cls);
@@ -1346,30 +1351,47 @@ export abstract class StatementCompiler extends OperatorCompiler {
     const entries = this.exceptionEntries.get(context);
     if (!entries || this.flow.isDead) return;
     if (statement.kind === 'expressionStatement' && this.isNonThrowingExpression(scope, statement.expression)) return;
-    if (
-      statement.kind === 'assignment' &&
-      statement.operator === '=' &&
-      this.isNonThrowingExpression(scope, statement.value) &&
-      this.isDirectAssignment(scope, context, statement.target)
-    )
-      return;
-    entries.push(this.flow.copy());
+    const entry =
+      statement.kind === 'assignment' && statement.operator === '='
+        ? this.assignmentExceptionEntry(scope, context, statement)
+        : this.flow.copy();
+    if (entry) entries.push(entry);
   }
 
-  private isDirectAssignment(scope: Scope, context: FunctionContext, target: Expression): boolean {
-    if (target.kind === 'name') {
-      const variable = this.findVariable(scope, target.name);
-      if (variable) return !variable.delegateRead;
-    } else if (target.kind !== 'member' || target.receiver.kind !== 'this' || target.receiver.label || target.isSafe) {
-      return false;
+  private assignmentExceptionEntry(
+    scope: Scope,
+    context: FunctionContext,
+    statement: AssignmentStatement
+  ): Flow | undefined {
+    const { target, value } = statement;
+    const local = target.kind === 'name' ? this.findVariable(scope, target.name) : undefined;
+    const property = local ? undefined : this.deferredValTarget(scope, context, target);
+    if ((property || (local && !local.delegateRead)) && this.isNonThrowingExpression(scope, value)) return undefined;
+    const entry = this.flow.copy();
+    if (property) {
+      // Kotlin's initializer flow counts a field assignment on entry to finally even when the RHS throws.
+      entry.assigned.add(property);
+      entry.maybeAssigned.add(property);
     }
+    return entry;
+  }
+
+  private deferredValTarget(scope: Scope, context: FunctionContext, target: Expression): PropertySymbol | undefined {
+    if (
+      target.kind !== 'name' &&
+      (target.kind !== 'member' || target.receiver.kind !== 'this' || target.receiver.label || target.isSafe)
+    )
+      return undefined;
     const receivers = this.receiversOf(scope);
     const candidates = target.kind === 'name' ? receivers : receivers.slice(0, 1);
     for (const receiver of candidates) {
       const property = this.findProperty(scope, this.receiverTypeOf(receiver), target.name)?.symbol;
-      if (property) return !property.isVar && this.mayInitializeVal(context, property);
+      if (property)
+        return receiver.context === context && !property.isVar && this.mayInitializeVal(context, property)
+          ? property
+          : undefined;
     }
-    return false;
+    return undefined;
   }
 
   private isNonThrowingExpression(scope: Scope, expression: Expression): boolean {

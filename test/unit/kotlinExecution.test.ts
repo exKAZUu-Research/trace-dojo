@@ -76,14 +76,24 @@ class BreakPath {
         }
     }
 }
-class FinallyPath {
+class FinallyPath(seed: Int) {
     val n: Int
     init {
         while (true) {
-            try { this.n = 3 }
+            try { this.n = seed + 1 }
             finally { break }
         }
     }
+}
+class SuppressedException {
+    val n: Int
+    init {
+        while (true) {
+            try { n = fail() }
+            finally { break }
+        }
+    }
+    private fun fail(): Int = throw IllegalStateException()
 }
 fun found(stops: Boolean) {
     val result: Int
@@ -100,10 +110,11 @@ fun found(stops: Boolean) {
 fun main() {
     println(One().n)
     println(BreakPath().n)
-    println(FinallyPath().n)
+    println(FinallyPath(2).n)
+    println(SuppressedException().n)
     found(false)
 }`,
-    stdout: '1\n2\n3\n0\n',
+    stdout: '1\n2\n3\n0\n0\n',
   },
   {
     name: 'finally sees assignments before a pending jump',
@@ -945,6 +956,26 @@ fun main() { println(C().f(1)) }`,
   ['an unknown name', false, 'fun main() {\n    println(y)\n}'],
   ['a missing return', false, 'fun f(x: Int): Int {\n    if (x > 0) return 1\n}\nfun main() {\n    println(f(1))\n}'],
   ['an uninitialized val', false, 'fun main() {\n    val x: Int\n    println(x)\n}'],
+  ['a local var read before its first assignment', false, 'fun main() { var n: Int; n = n + 1; println(n) }'],
+  ['a local val read before its first assignment', false, 'fun main() { val n: Int; n = n + 1; println(n) }'],
+  [
+    'a field read before its first assignment',
+    false,
+    'class A { val n: Int; init { n = this.n + 1 } }; fun main() { println(A().n) }',
+  ],
+  [
+    'a local assignment whose RHS can throw before a finally break',
+    false,
+    `fun fail(): Int = throw IllegalStateException()
+fun main() {
+    var n: Int
+    while (true) {
+        try { n = fail() }
+        finally { break }
+    }
+    println(n)
+}`,
+  ],
   ['a private member from outside', false, 'class A {\n    private val x = 1\n}\nfun main() {\n    println(A().x)\n}'],
   [
     'a protected member from outside',

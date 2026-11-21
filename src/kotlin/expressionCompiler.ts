@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 996 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss 999 -- expression compilation shares name resolution, call dispatch, and type inference.
 import type { Block, Expression, LambdaExpression } from './ast';
 import {
   type ArgumentSyntax,
@@ -78,6 +78,7 @@ export interface Place {
   type: KType;
   repr: Repr;
   bind: (frame: Frame) => BoundPlace;
+  recordAssignment?: () => void;
 }
 
 export abstract class ExpressionCompiler extends CallCompiler {
@@ -113,12 +114,15 @@ export abstract class ExpressionCompiler extends CallCompiler {
    */
   protected uninitializedProperties: { context: FunctionContext; properties: Set<PropertySymbol> } | undefined;
 
-  /** Rejects reading a property in its class's initializer before its own initializer has run, as kotlinc does. */
-  private checkInitialized(context: FunctionContext, property: PropertySymbol, name: string, row: number): void {
+  protected checkInitialized(context: FunctionContext, property: PropertySymbol, name: string, row: number): void {
     const pending = this.uninitializedProperties;
-    if (pending?.context === context && pending.properties.has(property))
+    const awaitsAssignment =
+      !property.isLateinit && this.mayInitializeVal(context, property) && !this.flow.assigned.has(property);
+    if (awaitsAssignment || (pending?.context === context && pending.properties.has(property)))
       this.error(row, `プロパティ ${name} には、まだ値が入っていません。`);
   }
+
+  protected abstract mayInitializeVal(context: FunctionContext, symbol: PropertySymbol): boolean;
 
   /** The instance of an object or companion object, created on first use. */
   protected abstract objectInstance(cls: ClassSymbol): (frame: Frame) => Value;
