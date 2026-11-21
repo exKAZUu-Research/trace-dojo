@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 990 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss 996 -- the compiler of one area of Kotlin, whose parts call each other closely.
 import type { Block, Expression, LambdaExpression } from './ast';
 import {
   type ArgumentSyntax,
@@ -677,7 +677,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
         if (this.membersOf(target.type, name, 'function').length > 0) {
           this.error(row, `${name} は関数なので、${name}() のように呼び出してください。`);
         }
-        this.error(row, `${typeToString(resolved(target.type))} には ${name} がありません。`);
+        this.reportMissingMember(target.type, name, row);
       }
       const { extensionReceiver } = property.symbol;
       this.requireNonNullReceiver(
@@ -1381,7 +1381,20 @@ export abstract class ExpressionCompiler extends CallCompiler {
     }
     if (Object.hasOwn(UNAVAILABLE_MEMBER_FUNCTIONS, name))
       this.error(row, unavailableMessage(UNAVAILABLE_MEMBER_FUNCTIONS[name]));
-    return this.error(row, `${typeToString(resolved(receiver.type))} には ${name} がありません。`);
+    return this.reportMissingMember(receiver.type, name, row);
+  }
+
+  private reportMissingMember(type: KType, name: string, row: number): never {
+    const actual = resolved(type);
+    const shown = typeToString(actual);
+    if (
+      actual.kind === 'class' &&
+      actual.cls.isLibrary &&
+      (actual.cls.kotlinName.startsWith('kotlin.') || actual.cls.kotlinName.startsWith('java.'))
+    ) {
+      this.unavailable(row, `${shown} の ${name}`);
+    }
+    return this.error(row, `${shown} には ${name} がありません。`);
   }
 
   // code-gauge-allow functionParameterCount 9 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.

@@ -1013,6 +1013,16 @@ test.each([
     'Java のクラスの直接の利用（java.lang.Math）は、この採点環境では使えません。',
   ],
   [
+    'a standard-list member outside the interpreter',
+    'fun main() { println(listOf(1, 2).foldRightIndexed(0) { i, v, acc -> acc + i * v }) }',
+    'List<Int> の foldRightIndexedは、この採点環境では使えません。',
+  ],
+  [
+    'a standard-map member outside the interpreter',
+    'fun main() { println(mapOf(1 to "a").maxWithOrNull(compareBy { it.key })) }',
+    'Map<Int, String> の maxWithOrNullは、この採点環境では使えません。',
+  ],
+  [
     'filterIsInstance',
     'fun main() { println(listOf(1, "a").filterIsInstance<Int>()) }',
     '型で要素を絞り込む filterIsInstanceは、この採点環境では使えません。',
@@ -1061,4 +1071,12 @@ test("prints the same identity hashes whatever ran before in the server's proces
   const first = executeProgram('kotlin', program);
   executeProgram('kotlin', 'class B\nfun main() {\n    repeat(100) { println(B()) }\n}');
   expect(executeProgram('kotlin', program)).toEqual(first);
+});
+
+test('reports a missing member on a class declared by the program', () => {
+  const program = 'class Counter\nfun main() { Counter().missing() }';
+  expect(executeProgram('kotlin', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message: 'Counter には missing がありません。' }],
+  });
 });
