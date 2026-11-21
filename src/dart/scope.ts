@@ -56,12 +56,18 @@ export interface JumpTarget {
   continueFlow?: Flow;
 }
 
+export class LocalScope {
+  readonly names = new Map<string, LocalVar>();
+  readonly slots: number[] = [];
+  pending: ReadonlySet<string> | undefined;
+}
+
 /** A function being compiled: its slots, the variables it captures, and what `return` and `this` mean in it. */
 export class FunctionContext {
   slotCount = 0;
   /** The outer variables the function captures, in the order of its captured cells. */
   readonly captures: LocalVar[] = [];
-  readonly scopes: Map<string, LocalVar>[] = [new Map()];
+  readonly scopes = [new LocalScope()];
   /** The labels in scope, innermost last, with whether each names a loop or switch that `continue` may target. */
   readonly labels: { name: string; isLoop: boolean; isSwitchCase: boolean }[] = [];
   readonly jumpTargets: JumpTarget[] = [];

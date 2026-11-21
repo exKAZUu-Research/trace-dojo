@@ -906,9 +906,9 @@ export abstract class StatementCompiler extends PatternCompiler {
     let initExec: Exec | undefined;
     const loopVariables: LocalVar[] = [];
     if (init && !Array.isArray(init)) {
-      const before = new Set(this.fn.scopes.at(-1)?.values());
+      const before = new Set(this.fn.scopes.at(-1)?.names.values());
       initExec = this.compileLocalDeclaration(init, false);
-      for (const variable of this.fn.scopes.at(-1)?.values() ?? [])
+      for (const variable of this.fn.scopes.at(-1)?.names.values() ?? [])
         if (!before.has(variable)) loopVariables.push(variable);
     } else if (init) {
       const runs = init.map((expression) => this.compileExpression(expression).run);

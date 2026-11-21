@@ -1004,9 +1004,9 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     const { init } = element;
     const loopSlots: number[] = [];
     if (init && !Array.isArray(init)) {
-      const before = new Set(this.fn.scopes.at(-1)?.values());
+      const before = new Set(this.fn.scopes.at(-1)?.names.values());
       const exec = this.compileLocalDeclaration(init, false);
-      for (const variable of this.fn.scopes.at(-1)?.values() ?? [])
+      for (const variable of this.fn.scopes.at(-1)?.names.values() ?? [])
         if (!before.has(variable)) loopSlots.push(variable.slot);
       return { initRun: (frame) => void exec(frame), loopSlots };
     }

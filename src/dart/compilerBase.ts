@@ -4,7 +4,7 @@ import type { ClassDeclaration, Span, TypeAliasDeclaration, TypeParameter, TypeS
 import { type ClassInfo, type Member, memberTypeIn, scopedMemberName } from './classes';
 import type { ExtensionInfo, GlobalVariable, LibraryEnv, TypeAlias } from './environment';
 import type { Frame, FunctionInfo, Runtime, TypeEnv } from './runtime';
-import { Flow, type FunctionContext, LocalVar } from './scope';
+import { Flow, type FunctionContext, LocalScope, LocalVar } from './scope';
 import { inferExtensionReceiver, inferTearOffTypes } from './typeInference';
 import {
   asInstanceOf,
@@ -655,11 +655,9 @@ export abstract class CompilerBase {
 
   // Locals
 
-  private readonly pendingLocals = new WeakMap<Map<string, LocalVar>, ReadonlySet<string>>();
-
   protected reserveLocals(names: ReadonlySet<string>): void {
     const scope = this.fn.scopes.at(-1);
-    if (scope && names.size > 0) this.pendingLocals.set(scope, names);
+    if (scope && names.size > 0) scope.pending = names;
   }
 
   protected declareLocal(
@@ -668,14 +666,15 @@ export abstract class CompilerBase {
     type: DartType,
     options: { isFinal: boolean; isLate: boolean; isConst: boolean; isParameter: boolean; hasInitializer: boolean }
   ): LocalVar {
-    const scope = this.fn.scopes.at(-1) as Map<string, LocalVar>;
-    if (name !== '_' && scope.has(name)) this.error(span, `変数 ${name} は、同じスコープで既に宣言されています。`);
+    const scope = this.fn.scopes.at(-1) as LocalScope;
+    if (name !== '_' && scope.names.has(name))
+      this.error(span, `変数 ${name} は、同じスコープで既に宣言されています。`);
     const variable = new LocalVar(span, name, type, this.fn.allocateSlot(), this.fn, options);
     variable.hasAssignment = this.fn.assignments.get(span)?.has(name) ?? false;
     variable.isWriteCaptured = this.fn.capturedAssignments.get(span)?.has(name) ?? false;
-    if (name !== '_') scope.set(name, variable);
-    this.fn.info.locals[variable.slot] = { name, type };
-    if (name === '_' || name.startsWith('\0')) this.fn.info.locals[variable.slot] = { name: '\0', type };
+    if (name !== '_') scope.names.set(name, variable);
+    scope.slots.push(variable.slot);
+    this.fn.info.locals[variable.slot] = { name: name === '_' || name.startsWith('\0') ? '\0' : name, type };
     return variable;
   }
 
@@ -684,9 +683,9 @@ export abstract class CompilerBase {
     for (let context: FunctionContext | undefined = this.fn; context; context = context.parent) {
       for (let index = context.scopes.length - 1; index >= 0; index--) {
         const scope = context.scopes[index];
-        const found = scope.get(name);
+        const found = scope.names.get(name);
         if (found) return found;
-        if (this.pendingLocals.get(scope)?.has(name)) {
+        if (scope.pending?.has(name)) {
           if (span) this.error(span, `変数 ${name} は、宣言より前には使えません。`);
           return undefined;
         }
@@ -710,12 +709,10 @@ export abstract class CompilerBase {
   }
 
   protected withScope<T>(run: () => T, clear = true): { result: T; slots: number[] } {
-    this.fn.scopes.push(new Map());
+    const scope = new LocalScope();
+    this.fn.scopes.push(scope);
     try {
-      const result = run();
-      const scope = this.fn.scopes.at(-1) as Map<string, LocalVar>;
-      const slots = clear ? [...scope.values()].map((variable) => variable.slot) : [];
-      return { result, slots };
+      return { result: run(), slots: clear ? scope.slots : [] };
     } finally {
       this.fn.scopes.pop();
     }

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 409 -- Constructor declarations, initializer ordering, and delegation share the same checks.
+// code-gauge-allow-file fileNcss 410 -- Constructor declarations, initializer ordering, and delegation share the same checks.
 import { AssignmentCompiler } from './assignmentCompiler';
 import type {
   Arguments as ArgumentsSyntax,
@@ -14,6 +14,7 @@ import type { CompiledFunction, FunctionSpec } from './callCompiler';
 import { type ClassInfo, type ConstructorImpl, type ConstructorInfo, type FieldMember } from './classes';
 import { at, type Compiled, type Eval, typeName } from './compilerBase';
 import { Frame, type TypeEnv } from './runtime';
+import { LocalScope } from './scope';
 import type { Exec } from './statementCompiler';
 import {
   type DartType,
@@ -431,7 +432,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
   }
 
   private endInitializerScope(parameters: FormalParameters): number[] {
-    const scope = this.fn.scopes[0];
+    const scope = this.fn.scopes[0].names;
     const slots: number[] = [];
     for (const parameter of [...parameters.positional, ...parameters.named]) {
       if (parameter.binding === 'plain') continue;
@@ -667,7 +668,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     initializedFields: Set<string>
   ): ((frame: Frame) => void)[] {
     const scope = this.fn.scopes[0];
-    this.fn.scopes[0] = new Map();
+    this.fn.scopes[0] = new LocalScope();
     try {
       return this.compileFieldInitializers(cls, initializedFields);
     } finally {

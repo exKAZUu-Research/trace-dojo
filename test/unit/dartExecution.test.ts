@@ -1172,6 +1172,29 @@ void main() {
   expect(executeProgram('dart', iterables)).toMatchObject({ kind: 'executed', finalTurtles: [{ x: 1, y: 2 }] });
 });
 
+test('wildcard locals and loop bindings stop retaining turtles after their scopes exit', () => {
+  const source = `Iterable<Turtle> turtles() sync* {
+  yield Turtle(1, 1);
+}
+Iterable<int> exercise() sync* {
+  { var _ = Turtle(2, 2); }
+  for (final _ in turtles()) { break; }
+  yield 1;
+}
+void main() {
+  { var _ = Turtle(4, 4); var _ = Turtle(5, 5); }
+  for (final _ in turtles()) {}
+  for (final _ in exercise()) {}
+  var other = Turtle(3, 3);
+  print(other.canMoveForward());
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'true\n',
+    finalTurtles: [{ x: 3, y: 3 }],
+  });
+});
+
 test('patterns, generics, and an uncaught error behave as the SDK does', () => {
   const program = `sealed class Shape {}
 
