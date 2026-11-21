@@ -1,6 +1,6 @@
 import { valueEquals } from '../format';
-import type { Frame } from '../runtime';
-import { KObject, UNIT, type Value } from '../values';
+import { type Frame, KotlinThrow } from '../runtime';
+import { type HashEntry, KObject, UNIT, type Value } from '../values';
 import { BuilderStore } from './builderStore';
 import {
   callCollectionMember,
@@ -11,7 +11,7 @@ import {
   MAP_ENTRY,
   readCollectionProperty,
 } from './collectionTraversal';
-import { defineNative, throwError } from './registry';
+import { defineNative, libraryClass, throwError } from './registry';
 
 export function defineCollectionBuilders(touch: (object: KObject) => void): void {
   for (const name of ['SetBuilder', 'MapBuilder'] as const) {
@@ -67,5 +67,33 @@ export function copyBuilderEntries(frame: Frame, store: BuilderStore, source: Va
         return true;
       })
     );
+  });
+}
+
+export function builderMapEquals(frame: Frame, store: BuilderStore, other: KObject): boolean {
+  if (store.entries.length !== readCollectionProperty(frame, other, MAP, 'size')) return false;
+  const entries = readCollectionProperty(frame, other, MAP, 'entries');
+  return everyIterableElement(frame, entries, (element) => {
+    try {
+      return matchingBuilderEntry(frame, store, element) !== undefined;
+    } catch (error) {
+      if (error instanceof KotlinThrow && error.value.cls.isSubclassOf(libraryClass('kotlin.ClassCastException')))
+        return false;
+      throw error;
+    }
+  });
+}
+
+export function matchingBuilderEntry(frame: Frame, store: BuilderStore, element: Value): HashEntry | undefined {
+  if (!(element instanceof KObject) || !element.cls.isSubclassOf(libraryClass(MAP_ENTRY))) return undefined;
+  return frame.runtime.withNativeRoots([element], () => {
+    const key = readCollectionProperty(frame, element, MAP_ENTRY, 'key');
+    const entry = frame.runtime.withNativeRoots([key], () => store.lookup(frame, key));
+    if (!entry) return;
+    const stored = entry.value;
+    return frame.runtime.withNativeRoots([stored], () => {
+      const value = readCollectionProperty(frame, element, MAP_ENTRY, 'value');
+      return valueEquals(frame, stored, value) ? entry : undefined;
+    });
   });
 }

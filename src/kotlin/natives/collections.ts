@@ -18,7 +18,12 @@ import {
   type Value,
 } from '../values';
 import { BuilderStore } from './builderStore';
-import { checkedBuilderCapacity, copyBuilderEntries, defineCollectionBuilders } from './collectionBuilders';
+import {
+  checkedBuilderCapacity,
+  copyBuilderEntries,
+  defineCollectionBuilders,
+  matchingBuilderEntry,
+} from './collectionBuilders';
 import {
   callCollectionMember,
   COLLECTION,
@@ -1220,6 +1225,7 @@ function findMapValue(frame: Frame, store: KStore, value: Value): HashEntry | un
 }
 
 function matchingEntry(frame: Frame, store: KStore, element: Value, removing: boolean): HashEntry | undefined {
+  if (store instanceof BuilderStore) return matchingBuilderEntry(frame, store, element);
   const owner = 'kotlin.collections.Map.Entry';
   if (!(element instanceof KObject) || !element.cls.isSubclassOf(libraryClass(owner))) return undefined;
   const key = readCollectionProperty(frame, element, owner, 'key');

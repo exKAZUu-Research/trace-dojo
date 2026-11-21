@@ -60,6 +60,26 @@ test.each(['contains', 'split'])('charges the execution budget during CharSequen
 /** Programs with the output of Kotlin 2.4.21 on the JVM (Java 25), which the interpreter must reproduce exactly. */
 test.each([
   {
+    name: 'map builder equality reads the other map’s entries without calling get',
+    source: `class ObservedMap : Map<Int, String> by mapOf(1 to "one", 2 to "two") {
+    override fun get(key: Int): String? {
+        error("get should not be called for key $key")
+    }
+    override val entries: Set<Map.Entry<Int, String>>
+        get() { println("entries"); return mapOf(1 to "one", 2 to "two").entries }
+}
+fun main() {
+    val built = buildMap<Int, String> { put(1, "one"); put(2, "two") }
+    println(built == ObservedMap())
+    println(buildMap<Int, String> { put(1, "one"); put(2, "two") } == ObservedMap())
+}`,
+    stdout: `entries
+true
+entries
+true
+`,
+  },
+  {
     name: 'map builders remove the last matching value using the stored value’s equality',
     source: `class Match(val id: Int) {
     override fun equals(other: Any?): Boolean {

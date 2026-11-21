@@ -1,6 +1,8 @@
 import { valueEquals } from '../format';
 import type { Frame } from '../runtime';
 import { type HashEntry, KObject, type KStore, type Value } from '../values';
+import { BuilderStore } from './builderStore';
+import { builderMapEquals } from './collectionBuilders';
 import {
   callCollectionMember,
   compareCollections,
@@ -19,6 +21,7 @@ export function mapEquals(frame: Frame, map: KObject, other: Value): boolean {
     return callCollectionMember(frame, other, MAP, 'isEmpty') === true;
   }
   const store = map.store as KStore;
+  if (store instanceof BuilderStore) return builderMapEquals(frame, store, other);
   if (readCollectionProperty(frame, other, MAP, 'size') !== readCollectionProperty(frame, map, MAP, 'size'))
     return false;
   const matches = (key: Value, value: Value): boolean =>
