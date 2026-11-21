@@ -1,5 +1,5 @@
 import type { Span } from './ast';
-// code-gauge-allow-file fileNcss 547 -- Keeps type-directed arithmetic, comparison, and copying with their shared runtime hooks.
+// code-gauge-allow-file fileNcss 549 -- Keeps type-directed arithmetic, comparison, and copying with their shared runtime hooks.
 import { floatNumber } from './floatBits';
 import { bigintToF32 } from './floatFormat';
 import { normalize } from './infer';
@@ -26,6 +26,7 @@ export interface UserImpls {
   /** Counts the elements a clone makes against the run's limit. */
   allocate(count: number): void;
   spend(count: number): void;
+  copyScalarStorage(source: object, copy: object): void;
   withRoots<T>(values: Value[], use: () => T): T;
   eq?(method: 'eq' | 'ne', type: Type, a: Value, b: Value, rhs: Type): boolean | undefined;
   order?(method: OrderMethod, type: Type, a: Value, b: Value, rhs: Type): boolean | undefined;
@@ -647,8 +648,7 @@ export function cloneValue(type: Type, value: Value): Value {
     case 'array':
     case 'slice': {
       const items = sliceItems(value);
-      hooks?.allocate(items.length);
-      return items.map((item) => cloneValue(t.elem, item));
+      return cloneItems(items, (item) => cloneValue(t.elem, item));
     }
     case 'adt': {
       const { def } = t;
@@ -659,8 +659,7 @@ export function cloneValue(type: Type, value: Value): Value {
         case 'Vec':
         case 'VecDeque':
         case 'BinaryHeap': {
-          hooks?.allocate((value as Value[]).length);
-          return (value as Value[]).map((item) => cloneValue(t.args[0], item));
+          return cloneItems(value as Value[], (item) => cloneValue(t.args[0], item));
         }
         case 'Box': {
           return cloneValue(t.args[0], value);
@@ -738,12 +737,14 @@ export function needsCopy(type: Type): boolean {
 
 /** A copy of a value of a `Copy` type, which shares nothing mutable with the original. */
 export function copyValue(value: Value): Value {
-  if (Array.isArray(value)) return value.length === 0 ? value : copyFields(value);
+  if (Array.isArray(value)) return value.length === 0 ? value : cloneItems(value, copyValue);
   if (value instanceof FnValue) return value.duplicate?.(copyValue) ?? value;
   if (value instanceof RangeValue) return copyRange(value, copyValue);
-  if (value instanceof StructValue) return new StructValue(value.def, copyFields(value.fields));
+  if (value instanceof StructValue) return new StructValue(value.def, cloneItems(value.fields, copyValue));
   if (value instanceof EnumValue) {
-    return value.fields.length === 0 ? value : new EnumValue(value.def, value.variant, copyFields(value.fields));
+    return value.fields.length === 0
+      ? value
+      : new EnumValue(value.def, value.variant, cloneItems(value.fields, copyValue));
   }
   return value;
 }
@@ -756,9 +757,11 @@ function copyRange(range: RangeValue, copy: (item: Value) => Value): RangeValue 
   return hooks ? hooks.withRoots([start], finish) : finish();
 }
 
-function copyFields(fields: Value[]): Value[] {
-  hooks?.allocate(fields.length);
-  return fields.map(copyValue);
+function cloneItems(items: Value[], clone: (value: Value) => Value): Value[] {
+  hooks?.allocate(items.length);
+  const copy = items.map(clone);
+  hooks?.copyScalarStorage(items, copy);
+  return copy;
 }
 
 /** A clone of a map or a set, with its table's size, of keys (and values) of the types `args`. */
@@ -767,10 +770,12 @@ function cloneCollection(args: Type[], source: MapValue | SetValue): MapValue | 
     hooks?.allocate(source.entries.size * 2);
     const copy = new MapValue(source.sorted);
     copy.entries.copyFrom(source.entries, ([key, item]) => [cloneValue(args[0], key), cloneValue(args[1], item)]);
+    hooks?.copyScalarStorage(source, copy);
     return copy;
   }
   hooks?.allocate(source.entries.size);
   const copy = new SetValue(source.sorted);
   copy.entries.copyFrom(source.entries, (item) => cloneValue(args[0], item));
+  hooks?.copyScalarStorage(source, copy);
   return copy;
 }

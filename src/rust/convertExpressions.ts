@@ -117,7 +117,7 @@ export abstract class ExpressionConverter extends MacroConverter {
         return { kind: 'path', path: this.exprPath(node), span };
       }
       case 'parenthesized_expression': {
-        return this.expr(this.onlyChild(node));
+        return { ...this.expr(this.onlyChild(node)), span };
       }
       case 'call_expression': {
         return this.call(node);

@@ -338,7 +338,7 @@ export class Formatter {
       }
       case 'Entry':
       case 'OccupiedEntry': {
-        return this.entryText(v as EntryValue, t, spec, indent);
+        return this.entryText(v as EntryValue, t, spec, indent, write);
       }
       default: {
         return this.debugUserAdt(v, t, spec, indent, write);
@@ -355,12 +355,18 @@ export class Formatter {
   }
 
   /** A map's entry, as `Entry`, `OccupiedEntry`, and `VacantEntry` debug: the key and any value it holds. */
-  private entryText(entry: EntryValue, t: Type & { kind: 'adt' }, spec: Spec, indent: number | undefined): string {
+  private entryText(
+    entry: EntryValue,
+    t: Type & { kind: 'adt' },
+    spec: Spec,
+    indent: number | undefined,
+    write?: WriteChunk
+  ): string {
     const held = entry.map.entries.get(entry.lookup);
-    const key: DebugPart = (inner) => this.debug(held ? held[0] : entry.key, t.args[0], spec, inner);
+    const key: DebugPart = (inner, sink) => this.debug(held ? held[0] : entry.key, t.args[0], spec, inner, sink);
     const inner: DebugPart = held
-      ? (depth) => {
-          const value: DebugPart = (nested) => this.debug(held[1], t.args[1], spec, nested);
+      ? (depth, sink) => {
+          const value: DebugPart = (nested, stream) => this.debug(held[1], t.args[1], spec, nested, stream);
           return structText(
             'OccupiedEntry',
             [
@@ -368,11 +374,12 @@ export class Formatter {
               ['value', value],
             ],
             depth,
-            !entry.map.sorted
+            !entry.map.sorted,
+            sink
           );
         }
-      : (depth) => tupleText('VacantEntry', [key], depth);
-    return t.def.builtin === 'OccupiedEntry' ? inner(indent) : tupleText('Entry', [inner], indent);
+      : (depth, sink) => tupleText('VacantEntry', [key], depth, sink);
+    return t.def.builtin === 'OccupiedEntry' ? inner(indent, write) : tupleText('Entry', [inner], indent, write);
   }
 
   private iteratorText(
@@ -382,7 +389,8 @@ export class Formatter {
     indent: number | undefined,
     write?: WriteChunk
   ): string {
-    const debug = (value: Value, type: Type, inner: number | undefined): string => this.debug(value, type, spec, inner);
+    const debug = (value: Value, type: Type, inner: number | undefined, sink?: WriteChunk): string =>
+      this.debug(value, type, spec, inner, sink);
     return this.hooks.withActiveBorrows([iter], () => iteratorDebug(iter, t.args[0], t.args[1], debug, indent, write));
   }
 

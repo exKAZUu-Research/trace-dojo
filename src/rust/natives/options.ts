@@ -100,9 +100,9 @@ const optionNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
   },
   as_ref: ([self], ctx) => (isSome(self) ? some(ctx, opt(self).fields[0]) : none(ctx)),
   as_mut: ([self], ctx) => (isSome(self) ? some(ctx, new ElementPlace(opt(self).fields, 0)) : none(ctx)),
-  iter: ([self]) => outcomeIter(self, isSome(self), 'Iter', true),
-  iter_mut: ([self]) => outcomeIter(self, isSome(self), 'IterMut', true, true),
-  into_iter: ([self], ctx) => outcomeIter(self, isSome(self), 'IntoIter', true, false, ctx.typeArgs[0]),
+  iter: ([self]) => outcomeIter(opt(self), 'ref'),
+  iter_mut: ([self]) => outcomeIter(opt(self), 'mut'),
+  into_iter: ([self], ctx) => outcomeIter(opt(self), 'value', ctx.typeArgs[0]),
   zip: ([self, other], ctx) =>
     isSome(self) && isSome(other) ? some(ctx, [opt(self).fields[0], opt(other).fields[0]]) : none(ctx),
 };
@@ -158,9 +158,9 @@ const resultNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
     const place = new ElementPlace(opt(self).fields, 0);
     return isOk(self) ? ok(ctx, place) : err(ctx, place);
   },
-  iter: ([self]) => outcomeIter(self, isOk(self), 'Iter', false),
-  iter_mut: ([self]) => outcomeIter(self, isOk(self), 'IterMut', false, true),
-  into_iter: ([self], ctx) => outcomeIter(self, isOk(self), 'IntoIter', false, false, ctx.typeArgs[0]),
+  iter: ([self]) => outcomeIter(opt(self), 'ref'),
+  iter_mut: ([self]) => outcomeIter(opt(self), 'mut'),
+  into_iter: ([self], ctx) => outcomeIter(opt(self), 'value', ctx.typeArgs[0]),
 };
 
 const natives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {};
@@ -176,6 +176,13 @@ natives['Option<(_, _)>::unzip'] = ([self], ctx) => {
   return [some(ctx, first), some(ctx, second)];
 };
 for (const [name, native] of Object.entries(resultNatives)) natives[`Result<_, _>::${name}`] = native;
+for (const [container, methods] of [
+  ['Option<_>', optionNatives],
+  ['Result<_, _>', resultNatives],
+] as const) {
+  natives[`&${container}::into_iter`] = methods.iter;
+  natives[`&mut ${container}::into_iter`] = methods.iter_mut;
+}
 for (const prefix of ['Option<&_>', 'Option<&mut _>']) {
   natives[`${prefix}::copied`] = ([self], ctx) =>
     isSome(self) ? some(ctx, copyValue(deref(opt(self).fields[0]))) : none(ctx);
@@ -199,24 +206,15 @@ natives['Result<Option<_>, _>::transpose'] = ([self], ctx) => {
 };
 define(natives);
 
-/**
- * The iterator of the value in `Some` or `Ok`, if there is one, which `{:?}` writes as std's `option::Iter` (an
- * `Item { opt }` inside) or `result::Iter` does.
- */
-function outcomeIter(
-  self: Value,
-  present: boolean,
-  name: string,
-  isOption: boolean,
-  mutable = false,
-  owned?: Type
-): IterValue {
-  const fields = opt(self).fields;
-  const items = present ? [mutable ? new ElementPlace(fields, 0) : fields[0]] : [];
-  const iter = owned ? ownedIter(items, owned) : arrayIter(items);
+export function outcomeIter(value: EnumValue, mode: 'value' | 'ref' | 'mut', owned?: Type): IterValue {
+  const isOption = value.def.builtin === 'Option';
+  const present = value.variant === (isOption ? 1 : 0);
+  const items = present ? [mode === 'mut' ? new ElementPlace(value.fields, 0) : value.fields[0]] : [];
+  const iter = owned && mode === 'value' ? ownedIter(items, owned) : arrayIter(items);
+  const name = { value: 'IntoIter', ref: 'Iter', mut: 'IterMut' }[mode];
   return described(iter, (show, item, target) => {
     const [value] = target.rest?.() ?? [];
-    const inner = optionPart(value === undefined ? undefined : (indent) => show(value, item, indent));
+    const inner = optionPart(value === undefined ? undefined : (indent, sink) => show(value, item, indent, sink));
     return fieldsPart(name, [['inner', isOption ? fieldsPart('Item', [['opt', inner]]) : inner]]);
   });
 }

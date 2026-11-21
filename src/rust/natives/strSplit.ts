@@ -111,10 +111,10 @@ class CharSearcher implements Searcher {
   debug(show: DebugValue): DebugPart {
     const encoded = [...this.encoded, 0, 0, 0, 0].slice(0, 4);
     return fieldsPart('CharSearcher', [
-      ['haystack', (indent) => show(this.text, REF_STR, indent)],
+      ['haystack', (indent, sink) => show(this.text, REF_STR, indent, sink)],
       ['finger', numberPart(this.finger)],
       ['finger_back', numberPart(this.fingerBack)],
-      ['needle', (indent) => show(this.needle, CHAR, indent)],
+      ['needle', (indent, sink) => show(this.needle, CHAR, indent, sink)],
       ['utf8_size', numberPart(this.encoded.length)],
       ['utf8_encoded', () => `[${encoded.join(', ')}]`],
     ]);
@@ -180,7 +180,7 @@ class MultiCharEqSearcher implements Searcher {
       ['front_offset', numberPart(this.frontOffset)],
       ['iter', tuplePart('Chars', [listPart(left, CHAR, show)])],
     ]);
-    const haystack: DebugPart = (indent) => show(this.text, REF_STR, indent);
+    const haystack: DebugPart = (indent, sink) => show(this.text, REF_STR, indent, sink);
     if (!this.charEq) {
       return fieldsPart(this.name, [
         ['haystack', haystack],
@@ -265,8 +265,8 @@ class EmptyNeedleSearcher implements Searcher {
 
 function strSearcherPart(text: string, needle: string, searcher: DebugPart, show: DebugValue): DebugPart {
   return fieldsPart('StrSearcher', [
-    ['haystack', (indent) => show(text, REF_STR, indent)],
-    ['needle', (indent) => show(needle, REF_STR, indent)],
+    ['haystack', (indent, sink) => show(text, REF_STR, indent, sink)],
+    ['needle', (indent, sink) => show(needle, REF_STR, indent, sink)],
     ['searcher', searcher],
   ]);
 }

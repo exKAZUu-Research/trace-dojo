@@ -111,6 +111,30 @@ test.each([
   );
 });
 
+test('panics in grouped arithmetic point to the outer parenthesis', () => {
+  const program = rustMain(
+    `    let n = identity(i32::MAX);
+    let _ = ((n + 1));`,
+    'fn identity(n: i32) -> i32 { n }'
+  );
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('src/main.rs:4:13:\nattempt to add with overflow'),
+  });
+});
+
+test.each([
+  ['panic!("example")', 'example'],
+  ['if true { todo!() } else { unreachable!() }', 'not yet implemented'],
+  ['std::process::exit(0)', undefined],
+  ['return', undefined],
+])('an unused binding initialized by %s keeps the diverging behavior', (initializer, message) => {
+  expect(executeProgram('rust', rustMain(`    let unused = ${initializer};`))).toMatchObject({
+    kind: 'executed',
+    uncaughtException: message === undefined ? undefined : expect.stringContaining(`\n${message}\n`),
+  });
+});
+
 test('main returning an Err reports it with Debug', () => {
   const program = `fn main() -> Result<(), String> {
     println!("start");
@@ -399,6 +423,137 @@ test('trim_matches tests each character only once as its two searches meet', () 
   expect(executeProgram('rust', program)).toMatchObject({
     kind: 'executed',
     stdout: '"aあ" "xxaxxあ"\n"a" 1\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('borrowed Option and Result iteration preserves and can update their owners', () => {
+  const program = rustMain(`    let mut option = Some(String::from("a"));
+    let mut borrowed = (&option).into_iter();
+    println!("{:?} {:?}", borrowed.next(), borrowed);
+    (&mut option).into_iter().next().unwrap().push('b');
+    let mut result: Result<String, ()> = Ok(String::from("c"));
+    println!("{:?}", (&result).into_iter().next());
+    (&mut result).into_iter().next().unwrap().push('d');
+    println!("{:?} {:?}", option, result);`);
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'Some("a") Iter { inner: Item { opt: None } }\nSome("c")\nSome("ab") Ok("cd")\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('VecDeque iterator conversions keep both ring slices and support mutable yields', () => {
+  const program = rustMain(
+    `    let mut deque = VecDeque::with_capacity(4);
+    deque.extend([1, 2, 3, 4]);
+    deque.pop_front();
+    deque.push_back(5);
+    let mut iter = (&deque).into_iter();
+    println!("{:?} {:?}", iter.next_back(), iter);
+    let mut iter = (&mut deque).into_iter();
+    *iter.next().unwrap() = 20;
+    println!("{:?}", iter);
+    let mut owned = deque.into_iter();
+    println!("{:?}", owned);
+    println!("{:?} {:?}", owned.next(), owned);`,
+    'use std::collections::VecDeque;'
+  );
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: `Some(5) Iter([2, 3, 4], [])
+IterMut([3, 4], [5])
+IntoIter([20, 3, 4, 5])
+Some(20) IntoIter([3, 4, 5])
+`,
+    uncaughtException: undefined,
+  });
+});
+
+test('iterator Debug streams wrapper syntax before an element prints', () => {
+  const program = `use std::{collections::VecDeque, fmt};
+struct X;
+impl fmt::Debug for X {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        print!("<side>");
+        f.write_str("X")
+    }
+}
+fn main() {
+    let a = [X];
+    let d = VecDeque::from([X]);
+    println!("before {:?} after", a.iter().enumerate());
+    println!("before {:?} after", (&d).into_iter());
+    println!("before {:#?} after", a.iter().peekable());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: `before Enumerate { iter: Iter([<side>X]), count: 0 } after
+before Iter([<side>X], []) after
+before Peekable {
+    iter: Iter(
+        [
+<side>            X,
+        ],
+    ),
+    peeked: None,
+} after
+`,
+    uncaughtException: undefined,
+  });
+});
+
+test('Turtle callbacks can read scalar storage from a mixed aggregate', () => {
+  const program = rustMain(
+    `    let array = [1; 30000];
+    let state = State { observer: Turtle::new(0, 0), values: vec![2; 30000], array };
+    let blocker = Turtle::new(0, 1);
+    let mut iter = (0..30000).map(|i| {
+        if state.observer.can_move_forward() { 0 } else { state.values[i] + state.array[i] }
+    });
+    let mut total = 0;
+    while let Some(n) = iter.next() { total += n; }
+    println!("{}", total);
+    drop(blocker);`,
+    'struct State { observer: Turtle, values: Vec<i32>, array: [i32; 30000] }'
+  );
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '90000\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('collection callbacks see turtle owners until the collection drops them', () => {
+  const program = rustMain(
+    `    let observer = Turtle::new(0, 0);
+    let mut keys = vec![1, 2];
+    keys.dedup_by_key(|n| {
+        if *n == 1 { println!("{}", observer.can_move_forward()); }
+        Key(if *n == 2 { Turtle::new(0, 1) } else { Turtle::new(3, 3) })
+    });
+    let mut vec = vec![Turtle::new(2, 2), Turtle::new(0, 1), Turtle::new(3, 3)];
+    let mut index = 0;
+    vec.dedup_by(|_, _| {
+        index += 1;
+        if index == 2 { println!("{}", observer.can_move_forward()); }
+        index == 1
+    });
+    let mut deque = VecDeque::from([Turtle::new(2, 2), Turtle::new(0, 1), Turtle::new(3, 3)]);
+    let mut index = 0;
+    deque.retain_mut(|_| {
+        index += 1;
+        if index == 3 { println!("{}", observer.can_move_forward()); }
+        index != 2
+    });
+    println!("{}", observer.can_move_forward());`,
+    `use std::collections::VecDeque;
+struct Key(Turtle);
+impl PartialEq for Key { fn eq(&self, _: &Self) -> bool { false } }`
+  );
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'false\ntrue\nfalse\ntrue\n',
     uncaughtException: undefined,
   });
 });
@@ -3183,11 +3338,10 @@ fn main() {
   }
 });
 
-test('drops Rust collection elements rejected by retain before the next predicate', () => {
+test('drops Vec elements rejected by retain before the next predicate', () => {
   for (const [constructor, method] of [
     ['vec![Turtle::new(1, 6), Turtle::new(1, 5)]', 'retain'],
     ['vec![Turtle::new(1, 6), Turtle::new(1, 5)]', 'retain_mut'],
-    ['std::collections::VecDeque::from([Turtle::new(1, 6), Turtle::new(1, 5)])', 'retain'],
   ]) {
     const program = rustMain(`let mut turtles = ${constructor};
     turtles.${method}(|turtle| turtle.canMoveForward());
@@ -6144,11 +6298,11 @@ fn main() {
 }`;
   expect(executeProgram('rust', program)).toMatchObject({
     kind: 'executed',
-    stdout: 'blocked:true blocked:true Iter([H, H])\n',
+    stdout: 'Iter([blocked:true H, blocked:true H])\n',
   });
   expect(executeProgram('rust', program.replace('.iter()', '.iter().take(2)'))).toMatchObject({
     kind: 'executed',
-    stdout: 'blocked:true blocked:true Take { iter: Iter([H, H]), n: 2 }\n',
+    stdout: 'Take { iter: Iter([blocked:true H, blocked:true H]), n: 2 }\n',
   });
 });
 

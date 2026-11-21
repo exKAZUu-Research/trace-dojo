@@ -43,7 +43,9 @@ import {
 } from '../values';
 import { checkTableCapacity, checkVecCapacity } from './capacityNatives';
 import { defaultValue } from './core';
+import { dequeIterator } from './dequeHead';
 import { layoutOf, sizeOf } from './layout';
+import { outcomeIter } from './options';
 import { rangeIterator } from './rangeIterator';
 import { lessByPartialOrd, sortSlice } from './sorting';
 import { collectString } from './stringBuilder';
@@ -155,9 +157,11 @@ export function toIterator(value: Value, from: Type): Value {
 function collectionIter(type: Type & { kind: 'adt' }, value: Value, mode: 'value' | 'ref' | 'mut'): Value | undefined {
   switch (type.def.builtin) {
     case 'Vec':
-    case 'VecDeque':
     case 'BinaryHeap': {
       return mode === 'value' ? ownedIter(value as Value[], type.args[0]) : sliceIter(value, mode === 'mut');
+    }
+    case 'VecDeque': {
+      return dequeIterator(value as Value[], type.args[0], mode);
     }
     case 'HashMap':
     case 'BTreeMap': {
@@ -174,11 +178,7 @@ function collectionIter(type: Type & { kind: 'adt' }, value: Value, mode: 'value
     }
     case 'Option':
     case 'Result': {
-      // `Some` and `Ok` hold the one element.
-      const option = value as EnumValue;
-      if (option.variant !== (type.def.builtin === 'Option' ? 1 : 0)) return arrayIter([]);
-      const items = [mode === 'mut' ? new ElementPlace(option.fields, 0) : option.fields[0]];
-      return mode === 'value' ? ownedIter(items, type.args[0]) : arrayIter(items);
+      return outcomeIter(value as EnumValue, mode, type.args[0]);
     }
     case 'Iter': {
       return mode === 'value' ? undefined : value;
@@ -812,8 +812,8 @@ define({
       const current = state.current ?? (target.roots[0] as IterValue);
       const part =
         (from: IterValue): DebugPart =>
-        (indent) =>
-          iteratorDebug(from, item, shape, show, indent);
+        (indent, sink) =>
+          iteratorDebug(from, item, shape, show, indent, sink);
       return fieldsPart('Cycle', [
         ['orig', part(state.original)],
         ['iter', part(current)],
@@ -837,7 +837,7 @@ define({
       })
     );
     return adapterDebug(ctx, 'Scan', iter, (show, target) => [
-      ['state', (indent) => show((target.roots[1] as typeof state).place.value, ctx.typeArgs[2], indent)],
+      ['state', (indent, sink) => show((target.roots[1] as typeof state).place.value, ctx.typeArgs[2], indent, sink)],
     ]);
   },
 });
@@ -856,7 +856,7 @@ function adapterDebug(
   return described(iter, (show, _item, target) => {
     const source = target.roots[0] as IterValue;
     return fieldsPart(name, [
-      ['iter', (indent) => iteratorDebug(source, item, shape, show, indent)],
+      ['iter', (indent, sink) => iteratorDebug(source, item, shape, show, indent, sink)],
       ...fields(show, target),
     ]);
   });
@@ -872,10 +872,10 @@ function flattenDebug(ctx: NativeContext, name: string, iter: IterValue, inner: 
   return described(iter, (show, item, target) => {
     const source = target.roots[0] as IterValue;
     const state = target.roots[1] as FlattenState;
-    const outer: DebugPart = (indent) => iteratorDebug(source, outerItem, outerShape, show, indent);
+    const outer: DebugPart = (indent, sink) => iteratorDebug(source, outerItem, outerShape, show, indent, sink);
     const fused = name === 'FlatMap' ? fieldsPart('Map', [['iter', outer]]) : outer;
     const innerPart = (from: IterValue | undefined): DebugPart =>
-      optionPart(from && ((indent) => iteratorDebug(from, item, innerShape, show, indent)));
+      optionPart(from && ((indent, sink) => iteratorDebug(from, item, innerShape, show, indent, sink)));
     const compat = fieldsPart('FlattenCompat', [
       ['iter', fieldsPart('Fuse', [['iter', optionPart(state.outerDone ? undefined : fused)]])],
       ['frontiter', innerPart(state.front)],
@@ -932,8 +932,8 @@ function zipped(
     if (indexedFormat) return () => 'Zip';
     const part =
       (from: IterValue, index: 0 | 1): DebugPart =>
-      (indent) =>
-        iteratorDebug(from, items[index], shapes[index], show, indent);
+      (indent, sink) =>
+        iteratorDebug(from, items[index], shapes[index], show, indent, sink);
     return fieldsPart('Zip', [
       ['a', part(first, 0)],
       ['b', part(second, 1)],
@@ -1305,7 +1305,7 @@ define({
     const iter = ownedIter([value], ctx.typeArgs[0]);
     return described(iter, (show, item, target) => {
       const [left] = target.rest?.() ?? [];
-      const opt = optionPart(left === undefined ? undefined : (indent) => show(left, item, indent));
+      const opt = optionPart(left === undefined ? undefined : (indent, sink) => show(left, item, indent, sink));
       const intoIter = fieldsPart('IntoIter', [['inner', fieldsPart('Item', [['opt', opt]])]]);
       return fieldsPart('Once', [['inner', intoIter]]);
     });
@@ -1321,7 +1321,9 @@ function repeated(ctx: NativeContext, value: Value): IterValue {
   const take = (): Next => cloneValue(type, value);
   const iter = new IterValue(take, take, undefined, [value]);
   iter.fork = () => repeated(ctx, cloneValue(type, value));
-  return described(iter, (show, item) => fieldsPart('Repeat', [['element', (indent) => show(value, item, indent)]]));
+  return described(iter, (show, item) =>
+    fieldsPart('Repeat', [['element', (indent, sink) => show(value, item, indent, sink)]])
+  );
 }
 
 function repeatN(ctx: NativeContext, value: Value, count: bigint): IterValue {
@@ -1339,7 +1341,7 @@ function repeatN(ctx: NativeContext, value: Value, count: bigint): IterValue {
   iter.stateRoots = () => [original];
   iter.fork = () => repeatN(ctx, left > 0n ? cloneValue(type, original) : undefined, left);
   return described(iter, (show, item) => {
-    const element: DebugPart = (indent) => show(original, item, indent);
+    const element: DebugPart = (indent, sink) => show(original, item, indent, sink);
     return fieldsPart('RepeatN', [
       ['count', numberPart(left)],
       ['element', optionPart(left > 0n ? element : undefined)],
@@ -1387,7 +1389,7 @@ function successors(ctx: NativeContext, start: EnumValue, callback: IteratorCall
     const current = next.value as EnumValue;
     const value = current.variant === 0 ? undefined : current.fields[0];
     return fieldsPart('Successors', [
-      ['next', optionPart(value === undefined ? undefined : (indent) => show(value, item, indent))],
+      ['next', optionPart(value === undefined ? undefined : (indent, sink) => show(value, item, indent, sink))],
     ]);
   });
 }

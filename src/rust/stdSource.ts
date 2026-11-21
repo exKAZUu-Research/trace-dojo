@@ -814,6 +814,12 @@ pub mod option {
         pub fn zip<U>(self, other: Option<U>) -> Option<(T, U)>;
         pub fn into_iter(self) -> IterImpl<T, OptionIterShape<T>>;
     }
+    impl<'a, T> &'a Option<T> {
+        pub fn into_iter(self) -> IterImpl<&'a T, OptionIterShape<&'a T>>;
+    }
+    impl<'a, T> &'a mut Option<T> {
+        pub fn into_iter(self) -> IterImpl<&'a mut T, OptionIterShape<&'a mut T>>;
+    }
     impl<T> Option<&T> {
         pub fn copied(self) -> Option<T> where T: Copy;
         pub fn cloned(self) -> Option<T> where T: Clone;
@@ -861,6 +867,12 @@ pub mod result {
         pub fn iter(&self) -> IterImpl<&T, OptionIterShape<&T>>;
         pub fn iter_mut(&mut self) -> IterImpl<&mut T, OptionIterShape<&mut T>>;
         pub fn into_iter(self) -> IterImpl<T, OptionIterShape<T>>;
+    }
+    impl<'a, T, E> &'a Result<T, E> {
+        pub fn into_iter(self) -> IterImpl<&'a T, OptionIterShape<&'a T>>;
+    }
+    impl<'a, T, E> &'a mut Result<T, E> {
+        pub fn into_iter(self) -> IterImpl<&'a mut T, OptionIterShape<&'a mut T>>;
     }
     impl<T, E> Result<&T, E> {
         pub fn copied(self) -> Result<T, E> where T: Copy;
@@ -1321,6 +1333,7 @@ pub mod collections {
         pub fn remove(&mut self, index: usize) -> Option<T>;
         pub fn extend<A: ExtendInto<T>, S>(&mut self, iter: IterImpl<A, S>);
         pub fn retain<F: FnMut(&T) -> bool>(&mut self, f: F);
+        pub fn retain_mut<F: FnMut(&mut T) -> bool>(&mut self, f: F);
         pub fn truncate(&mut self, len: usize);
         pub fn swap(&mut self, i: usize, j: usize);
         pub fn rotate_left(&mut self, n: usize);

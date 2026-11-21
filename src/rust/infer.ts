@@ -57,7 +57,7 @@ export class Unifier {
     if (x.kind === 'var' && y.kind === 'var') {
       if (x.v === y.v) return true;
       if (x.v.literal && y.v.literal && x.v.literal !== y.v.literal) return false;
-      if (x.v.literal) this.bind(y.v, x);
+      if (x.v.literal || (x.v.fallback && !y.v.literal)) this.bind(y.v, x);
       else this.bind(x.v, y);
       return true;
     }

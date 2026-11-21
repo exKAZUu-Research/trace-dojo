@@ -159,6 +159,15 @@ export class Runtime implements TracedRuntime<Frame> {
     }
   }
 
+  rememberScalarStorage(value: Value): void {
+    const storage = collectionStorage(value);
+    if (storage) this.scalarStorage.add(storage);
+  }
+
+  copyScalarStorage(source: object, copy: object): void {
+    if (this.scalarStorage.has(source)) this.scalarStorage.add(copy);
+  }
+
   borrowCandidate(value: Value, type?: Type, bindings?: ReadonlyMap<TypeParam, Type>): boolean {
     const storage = collectionStorage(value);
     if (storage && this.scalarStorage.has(storage)) return false;

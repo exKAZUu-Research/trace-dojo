@@ -88,6 +88,7 @@ export class Interpreter implements CallSupport {
     this.restoreOperations = setUserImpls({
       allocate: (count) => this.runtime.allocate(count),
       spend: (count) => this.runtime.spend(count),
+      copyScalarStorage: (source, copy) => this.runtime.copyScalarStorage(source, copy),
       withRoots: (values, use) => this.runtime.withRoots(values, use),
       eq: (method, type, a, b, rhs) => {
         const found = this.userTraitMethod('PartialEq', type, method, rhs);

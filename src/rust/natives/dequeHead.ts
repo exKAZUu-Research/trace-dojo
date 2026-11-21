@@ -1,7 +1,9 @@
+import { vecCapacity } from '../capacity';
 import { described, listPart, numberPart, tuplePart } from '../iterDebug';
 import type { Type } from '../types';
 import { DONE, ElementPlace, IterValue, type Next, SliceView, type Value } from '../values';
 import { ownedIter } from './iterators';
+import { sizeOf } from './layout';
 
 /**
  * Where each `VecDeque`'s first element sits in its ring buffer (its `head`), which its iterators show as two slices
@@ -97,11 +99,20 @@ export function withDequeHead<C>(
   return tracked;
 }
 
+export function dequeIterator(items: Value[], type: Type, mode: 'value' | 'ref' | 'mut'): IterValue {
+  if (mode === 'value') {
+    return described(ownedIter(items, type), (show, item, target) =>
+      tuplePart('IntoIter', [listPart(target.rest?.() ?? [], item, show)])
+    );
+  }
+  return dequeIter(items, vecCapacity(items, items.length, sizeOf(type)), mode === 'mut');
+}
+
 /**
  * `VecDeque::iter` and `iter_mut`: two slice iterators, of the elements up to the buffer's end and of those that wrap
  * to its start, swapped once the first runs out, as std's are.
  */
-export function dequeIter(items: Value[], capacity: number, mutable: boolean): IterValue {
+function dequeIter(items: Value[], capacity: number, mutable: boolean): IterValue {
   const first = firstSliceLength(items, capacity);
   return dequeIterFrom(items, mutable, { front: 0, back: first }, { front: first, back: items.length });
 }

@@ -1,6 +1,7 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { CollectionEntries, type CollectionKey } from './collectionEntries';
-import type { DebugPart, WriteChunk } from './debugText';
+import type { DebugPart } from './debugText';
+import type { DebugValue } from './iterDebug';
 import type { AdtDef, Type } from './types';
 
 /**
@@ -215,13 +216,7 @@ export class IterValue {
    * `{:?}` of the iterator as std writes it, for iterators whose own state shows (`Windows { v: .., size: 2 }`):
    * `show` writes a value of a type, and `item` is the type of the iterator's elements.
    */
-  debug:
-    | ((
-        show: (value: Value, type: Type, indent: number | undefined) => string,
-        item: Type,
-        write?: WriteChunk
-      ) => DebugPart)
-    | undefined;
+  debug: ((show: DebugValue, item: Type) => DebugPart) | undefined;
 
   /** The elements left, for iterators over an array (`Chars::as_str` reads them without taking them). */
   rest: (() => Value[]) | undefined;

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 605 -- Keeps the compilation that shares a function's context and step state together.
+// code-gauge-allow-file fileNcss 607 -- Keeps the compilation that shares a function's context and step state together.
 import type { Annotations, Coercion, FnContext, LocalVar, PathRes } from './annotations';
 import type { Block, Expr, Pattern, Span, Stmt } from './ast';
 import { patternBindings } from './astWalk';
@@ -17,6 +17,7 @@ import { type CaptureMode, captureStoragePlaces } from './loanCaptures';
 import { castValue, copyValue, needsCopy } from './ops';
 import { ControlSignal, type Frame, type FunctionInfo, MOVED, UNASSIGNED } from './runtime';
 import { runtimeType } from './runtimeTypes';
+import { trackCollectionStorage } from './turtleTypes';
 import { type ConstDef, type FnDef, isUnit, resolve, shallow, substitute, type Type } from './types';
 import {
   AccessorPlace,
@@ -471,7 +472,9 @@ export class Compiler {
 
   /** An expression's value as it is: a place's value without copying it, as borrows and reads see it. */
   read(expr: Expr, asStatement = false): Eval {
-    const evaluate = (READERS[expr.kind] as Reader<Expr['kind']>)(this, expr, asStatement);
+    const read = (READERS[expr.kind] as Reader<Expr['kind']>)(this, expr, asStatement);
+    const type = expr.ty;
+    const evaluate = type && !isPlaceExpr(expr, this.annotations) ? trackCollectionStorage(read, type) : read;
     evaluate.valueType = expr.ty;
     return evaluate;
   }

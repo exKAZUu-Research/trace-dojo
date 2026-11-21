@@ -1,4 +1,4 @@
-import { type DebugPart, emit, list } from '../debugText';
+import { type DebugPart, list } from '../debugText';
 import { type DebugValue, described, fieldsPart, listPart, optionPart, tuplePart } from '../iterDebug';
 import { compareValues, spendCollectionWork } from '../ops';
 import type { Type } from '../types';
@@ -86,12 +86,12 @@ function hashSetCursor(
   iter.borrowedRoots.push(...sources.flatMap(({ from, other }) => [from, other]));
   const fork = (): IterValue => hashSetCursor(sources, type, sourceIndex, cursor);
   iter.fork = fork;
-  return described(iter, (show, itemType, _target, write) => (indent) => {
+  return described(iter, (show, itemType) => (indent, write) => {
     const copy = fork();
     const entries = function* (): IterableIterator<DebugPart> {
       for (let item = copy.next(); item !== DONE; item = copy.next()) {
         const value = item;
-        yield (depth, sink) => emit(show(value, itemType, depth), sink);
+        yield (depth, sink) => show(value, itemType, depth, sink);
       }
     };
     return list('[', ']', entries(), indent, write);
@@ -209,7 +209,9 @@ function merged(
     }
   };
   const debug = (show: DebugValue, item: Type): DebugPart => {
-    const peekedPart = optionPart(peeked && tuplePart(peeked.side, [(indent) => show(peeked!.value, item, indent)]));
+    const peekedPart = optionPart(
+      peeked && tuplePart(peeked.side, [(indent, sink) => show(peeked!.value, item, indent, sink)])
+    );
     return tuplePart('MergeIterInner', [iterPart(a, show, item), iterPart(b, show, item), peekedPart]);
   };
   return { next, debug, fork: () => merged(op, a.fork(), b.fork(), cmp, peeked) };
@@ -291,7 +293,7 @@ function search(
     debug: (show, item) =>
       fieldsPart('Search', [
         [iterName, iterPart(small, show, item)],
-        [setName, (indent) => show(large, setType, indent)],
+        [setName, (indent, sink) => show(large, setType, indent, sink)],
       ]),
     fork: () => search(small.fork(), large, wanted, context, [iterName, setName]),
   };
@@ -346,7 +348,7 @@ function stitchDifference(self: SortedIter, other: SortedIter, cmp: Context['cmp
       const peekedPart = optionPart(
         peeked === undefined
           ? undefined
-          : optionPart(peeked === DONE ? undefined : (indent) => show(peeked as Value, item, indent))
+          : optionPart(peeked === DONE ? undefined : (indent, sink) => show(peeked as Value, item, indent, sink))
       );
       return fieldsPart('Stitch', [
         ['self_iter', iterPart(self, show, item)],
@@ -366,7 +368,7 @@ function stitchDifference(self: SortedIter, other: SortedIter, cmp: Context['cmp
 /** A value of a type, if there is one. */
 function valuePart(value: Value | undefined, item: Type, show: DebugValue): DebugPart | undefined {
   if (value === undefined) return undefined;
-  return (indent) => show(value, item, indent);
+  return (indent, sink) => show(value, item, indent, sink);
 }
 
 /** The order of two elements of a type, by its `Ord`. */

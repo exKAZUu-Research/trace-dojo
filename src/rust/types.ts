@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 449 -- Defines Rust types, their substitutions and their shared structural operations.
+// code-gauge-allow-file fileNcss 456 -- Defines Rust types, their substitutions and their shared structural operations.
 import type { ConstItem, FieldAst, FnItem, Span } from './ast';
 import type { Module } from './items';
 
@@ -37,6 +37,7 @@ export interface TypeVar {
   binding: Type | undefined;
   /** An integer or float literal's variable, which only a type of that kind may bind and which has a default. */
   literal: 'int' | 'float' | undefined;
+  fallback?: Type;
 }
 
 export interface TypeParam {
@@ -283,6 +284,10 @@ export function freshVar(literal?: 'int' | 'float'): Type {
   return { kind: 'var', v: { id: nextVarId++, binding: undefined, literal } };
 }
 
+export function freshDivergingVar(): Type {
+  return { kind: 'var', v: { id: nextVarId++, binding: undefined, literal: undefined, fallback: NEVER } };
+}
+
 let nextParamId = 0;
 export function newTypeParam(name: string, isSelf = false): TypeParam {
   return { name, id: nextParamId++, bounds: [], isSelf };
@@ -411,15 +416,12 @@ export function childTypes(t: Type): Type[] {
   }
 }
 
-/** Replaces every bound type variable in a type, and unbound literal variables with their defaults when asked. */
+/** Replaces bound variables in a type and applies fallback types when requested. */
 export function resolve(type: Type, defaults = false): Type {
   const t = shallow(type);
   if (t.kind === 'var') {
-    if (defaults && t.v.literal) {
-      t.v.binding = t.v.literal === 'int' ? I32 : F64;
-      return t.v.binding;
-    }
-    return t;
+    if (defaults) t.v.binding = t.v.fallback ?? literalDefault(t.v.literal);
+    return t.v.binding ?? t;
   }
   if (t.kind === 'closure') {
     const { closure } = t;
@@ -432,6 +434,11 @@ export function resolve(type: Type, defaults = false): Type {
     return t;
   }
   return mapChildren(t, (child) => resolve(child, defaults));
+}
+
+function literalDefault(literal: TypeVar['literal']): Type | undefined {
+  if (literal === 'int') return I32;
+  if (literal === 'float') return F64;
 }
 
 export function resolveTraitRef(ref: TraitRef, defaults = false): TraitRef {

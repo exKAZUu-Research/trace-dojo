@@ -22,7 +22,7 @@ import {
 } from '../values';
 import { allocVecElements, checkVecCapacity, extendRoom, repeatedLength, withCapacity } from './capacityNatives';
 import { cloneInto } from './cloning';
-import { dequeDrain, dequeIter, dequeRange, dequeSlices, withDequeHead } from './dequeHead';
+import { dequeDrain, dequeIterator, dequeRange, dequeSlices, withDequeHead } from './dequeHead';
 import {
   collectVec,
   extendedValue,
@@ -39,7 +39,7 @@ import {
 import { layoutOf, sizeOf } from './layout';
 import { checkedRangeBounds } from './ranges';
 import { chunksNative, groupedSlice, mutableSlice, splitSlice, windows } from './sliceIterators';
-import { dedupBy, lessByKey, lessByPartialOrd, sortByCachedKey, sortSlice } from './sorting';
+import { compareByKey, dedupBy, lessByKey, lessByPartialOrd, sortByCachedKey, sortSlice } from './sorting';
 import {
   call,
   define,
@@ -554,14 +554,7 @@ const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
   retain_mut: ([self, f], ctx) => retainElements(vec(self), (item) => deref(call(ctx, f, [item])) as boolean),
   dedup: ([self], ctx) => dedupBy(vec(self), (current, kept) => valuesEqual(elemType(ctx), current.get(), kept.get())),
   dedup_by: ([self, f], ctx) => dedupBy(vec(self), (current, kept) => call(ctx, f, [current, kept]) as boolean),
-  dedup_by_key: ([self, f], ctx) => {
-    // `dedup_by(|a, b| key(a) == key(b))`: both keys at each comparison.
-    const keyType = ctx.typeArgs[1];
-    return dedupBy(vec(self), (current, kept) => {
-      const key = call(ctx, f, [current]);
-      return valuesEqual(keyType, key, call(ctx, f, [kept]));
-    });
-  },
+  dedup_by_key: ([self, f], ctx) => dedupBy(vec(self), compareByKey(ctx, f, valuesEqual)),
   resize: ([self, newLen, value], ctx) =>
     resizeVec(ctx, vec(self), newLen as bigint, (last) => (last ? value : cloneValue(elemType(ctx), value))),
   resize_with: ([self, newLen, f], ctx) => resizeVec(ctx, vec(self), newLen as bigint, () => call(ctx, f, [])),
@@ -645,13 +638,13 @@ const dequeNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
     return UNIT_VALUE;
   },
   contains: ([self, x], ctx) => sliceNatives.contains([self, x], ctx),
-  iter: ([self], ctx) => dequeIter(vec(self), dequeCapacity(vec(self), ctx), false),
+  iter: ([self], ctx) => dequeIterator(vec(self), elemType(ctx), 'ref'),
   range: ([self, range], ctx) => {
     const items = vec(self);
     const [start, end] = checkedRangeBounds(ctx, range, items.length);
     return dequeRange(items, dequeCapacity(items, ctx), start, end);
   },
-  iter_mut: ([self], ctx) => dequeIter(vec(self), dequeCapacity(vec(self), ctx), true),
+  iter_mut: ([self], ctx) => dequeIterator(vec(self), elemType(ctx), 'mut'),
   as_slices: ([self], ctx) => dequeSlices(vec(self), dequeCapacity(vec(self), ctx)),
   insert: ([self, index, value], ctx) => {
     const items = vec(self);
@@ -669,7 +662,8 @@ const dequeNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
     return some(ctx, items.splice(position, 1)[0]);
   },
   extend: ([self, iter], ctx) => vecNatives.extend([self, iter], ctx),
-  retain: ([self, f], ctx) => vecNatives.retain([self, f], ctx),
+  retain: ([self, f], ctx) => retainDeque(vec(self), (item) => deref(call(ctx, f, [item.get()])) as boolean),
+  retain_mut: ([self, f], ctx) => retainDeque(vec(self), (item) => deref(call(ctx, f, [item])) as boolean),
   truncate: ([self, len], ctx) => vecNatives.truncate([self, len], ctx),
   swap: ([self, a, b], ctx) => {
     const items = vec(self);
@@ -689,8 +683,17 @@ const dequeNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
     const [start, end] = checkedRangeBounds(ctx, range, items.length);
     return dequeDrain(items, start, end, dequeCapacity(items, ctx), elemType(ctx));
   },
-  into_iter: ([self], ctx) => ownedIter(vec(self), elemType(ctx)),
+  into_iter: ([self], ctx) => dequeIterator(vec(self), elemType(ctx), 'value'),
 };
+
+function retainDeque(items: Value[], keep: (item: ElementPlace) => boolean): Value {
+  let retained = 0;
+  for (let read = 0; read < items.length; read++) {
+    if (keep(new ElementPlace(items, read))) swapOwnedElements(items, retained++, read);
+  }
+  items.length = retained;
+  return UNIT_VALUE;
+}
 
 function rotateDeque(ctx: NativeContext, items: Value[], amount: bigint, right: boolean): Value {
   if (amount > BigInt(items.length)) {
@@ -786,8 +789,8 @@ natives['&[_]::into_iter'] = ([self]) => sliceIter(deref(self), false);
 natives['&mut [_]::into_iter'] = ([self]) => sliceIter(deref(self), true);
 natives['&Vec<_>::into_iter'] = ([self]) => sliceIter(deref(self), false);
 natives['&mut Vec<_>::into_iter'] = ([self]) => sliceIter(deref(self), true);
-natives['&VecDeque<_>::into_iter'] = ([self]) => sliceIter(deref(self), false);
-natives['&mut VecDeque<_>::into_iter'] = ([self]) => sliceIter(deref(self), true);
+natives['&VecDeque<_>::into_iter'] = ([self], ctx) => dequeIterator(vec(self), elemType(ctx), 'ref');
+natives['&mut VecDeque<_>::into_iter'] = ([self], ctx) => dequeIterator(vec(self), elemType(ctx), 'mut');
 natives['&BinaryHeap<_>::into_iter'] = ([self]) => sliceIter(deref(self), false);
 natives['[String]::join'] = ([self, sep], ctx) => joinStrings(ctx, self, sep);
 natives['[String]::concat'] = ([self], ctx) => joinStrings(ctx, self, '');

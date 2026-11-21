@@ -189,7 +189,7 @@ function splitCursor(
   iter.borrowedRoots.push(base);
   iter.fork = () => splitCursor(ctx, base, { ...state }, cloneValue(ctx.typeArgs[1], predicate), reverse);
   return described(iter, (show, item) =>
-    splitDebug(state, reverse, (indent) => show(new SliceView(base, state.front, state.back), item, indent))
+    splitDebug(state, reverse, (indent, sink) => show(new SliceView(base, state.front, state.back), item, indent, sink))
   );
 }
 
@@ -256,6 +256,6 @@ function groupedCursor(ctx: NativeContext, base: Value[], front: number, back: n
   iter.borrowedRoots.push(base);
   iter.fork = () => groupedCursor(ctx, base, front, back, cloneValue(ctx.typeArgs[1], predicate));
   return described(iter, (show, item) =>
-    fieldsPart('ChunkBy', [['slice', (indent) => show(new SliceView(base, front, back), item, indent)]])
+    fieldsPart('ChunkBy', [['slice', (indent, sink) => show(new SliceView(base, front, back), item, indent, sink)]])
   );
 }

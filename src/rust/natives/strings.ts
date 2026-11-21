@@ -540,7 +540,7 @@ const stringNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
     const removed = decodeUtf8(bytes.subarray(start, end));
     place.set(decodeUtf8(bytes.subarray(0, start)) + decodeUtf8(bytes.subarray(end)));
     return described(charCursor(removed), (show, _item, target) =>
-      tuplePart('Drain', [(indent) => show((target.rest?.() ?? []).join(''), REF_STR, indent)])
+      tuplePart('Drain', [(indent, sink) => show((target.rest?.() ?? []).join(''), REF_STR, indent, sink)])
     );
   },
   split_off: ([self, at], ctx) => {

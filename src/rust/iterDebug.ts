@@ -4,7 +4,7 @@ import { callableSignature, ref, shallow, type Type } from './types';
 import { DONE, type IterValue, type RangeValue, type Value } from './values';
 
 /** Writes `{:?}` of a value of a type at a nesting depth. */
-export type DebugValue = (value: Value, type: Type, indent: number | undefined) => string;
+export type DebugValue = (value: Value, type: Type, indent: number | undefined, write?: WriteChunk) => string;
 
 /** The iterators whose remaining elements std writes in a tuple struct of that name (`Iter([1, 2])`). */
 const LEAF_NAMES: Record<string, string> = {
@@ -87,9 +87,9 @@ const DESCRIBED_ADAPTERS = new Set([
 /** Sets how `{:?}` writes an iterator, as std's `Debug` impl of its type does. */
 export function described(
   iter: IterValue,
-  describe: (show: DebugValue, item: Type, target: IterValue, write?: WriteChunk) => DebugPart
+  describe: (show: DebugValue, item: Type, target: IterValue) => DebugPart
 ): IterValue {
-  iter.debug = (show, item, write) => describe(show, item, iter, write);
+  iter.debug = (show, item) => describe(show, item, iter);
   const { fork } = iter;
   if (fork) {
     iter.fork = () => {
@@ -102,28 +102,29 @@ export function described(
 
 /** A struct of an iterator's fields (`Windows { v: [1, 2], size: 2 }`). */
 export function fieldsPart(name: string, fields: [string, DebugPart][]): DebugPart {
-  return (indent) => structText(name, fields, indent);
+  return (indent, write) => structText(name, fields, indent, false, write);
 }
 
 /** A tuple struct of parts (`Drain([1, 2])`). */
 export function tuplePart(name: string, parts: DebugPart[]): DebugPart {
-  return (indent) => tupleText(name, parts, indent);
+  return (indent, write) => tupleText(name, parts, indent, write);
 }
 
 /** A list of values of a type (`[1, 2]`). */
 export function listPart(values: Value[], type: Type, show: DebugValue): DebugPart {
-  return (indent) =>
+  return (indent, write) =>
     list(
       '[',
       ']',
-      values.map((value) => (depth) => show(value, type, depth)),
-      indent
+      values.map((value) => (depth, sink) => show(value, type, depth, sink)),
+      indent,
+      write
     );
 }
 
 /** `Some(..)` of a part, or `None`. */
 export function optionPart(part: DebugPart | undefined): DebugPart {
-  return part ? (indent) => tupleText('Some', [part], indent) : () => 'None';
+  return part ? tuplePart('Some', [part]) : () => 'None';
 }
 
 /** A number, as a field (`size: 2`). */
@@ -164,38 +165,31 @@ export function iteratorDebug(
 ): string {
   const t = normalize(shallow(shape)) as Type & { kind: 'adt' };
   const name = t.def.name;
-  if (iter.debug) return iter.debug(debug, item, write)(indent);
-  if (name === 'ByRefShape') return iteratorDebug(iter, item, t.args[0], debug, indent);
-  const rest: DebugPart = (inner) =>
-    list(
-      '[',
-      ']',
-      (iter.rest?.() ?? []).map((value) => (depth) => debug(value, item, depth)),
-      inner
-    );
-  if (LEAF_NAMES[name]) return tupleText(LEAF_NAMES[name], [rest], indent);
-  if (COLLECTION.test(name)) return rest(indent);
+  if (iter.debug) return iter.debug(debug, item)(indent, write);
+  if (name === 'ByRefShape') return iteratorDebug(iter, item, t.args[0], debug, indent, write);
+  const rest: DebugPart = (inner, sink) => listPart(iter.rest?.() ?? [], item, debug)(inner, sink);
+  if (LEAF_NAMES[name]) return tupleText(LEAF_NAMES[name], [rest], indent, write);
+  if (COLLECTION.test(name)) return rest(indent, write);
   // A `BTreeSet` is a `BTreeMap` of its elements to a zero-sized value, which its `Range` shows.
   if (name === 'BTreeSetRangeShape') {
-    const entries = (iter.rest?.() ?? []).map(
-      (value) => (depth: number | undefined) => tupleText('', [(d) => debug(value, item, d), () => 'SetValZST'], depth)
+    const entries = (iter.rest?.() ?? []).map((value) =>
+      tuplePart('', [(depth, sink) => debug(value, item, depth, sink), () => 'SetValZST'])
     );
-    return structText('Range', [['iter', (inner) => list('[', ']', entries, inner)]], indent);
+    return structText('Range', [['iter', (inner, sink) => list('[', ']', entries, inner, sink)]], indent, false, write);
   }
   if (name === 'BinaryHeapDrainShape')
-    return structText('Drain', [['iter', (inner) => tupleText('Drain', [rest], inner)]], indent);
+    return structText('Drain', [['iter', tuplePart('Drain', [rest])]], indent, false, write);
   if (name === 'BytesShape') {
-    const copied: DebugPart = (inner) =>
-      structText('Copied', [['it', (depth) => tupleText('Iter', [rest], depth)]], inner);
-    return tupleText('Bytes', [copied], indent);
+    const copied = fieldsPart('Copied', [['it', tuplePart('Iter', [rest])]]);
+    return tupleText('Bytes', [copied], indent, write);
   }
   if (name === 'RangeShape' || name === 'RangeInclusiveShape' || name === 'RangeFromShape') {
-    return rangeText(iter.roots[0] as RangeValue, (value) => debug(value, item, indent));
+    return rangeText(iter.roots[0] as RangeValue, (value) => debug(value, item, indent, write), write);
   }
   const source = iter.roots[0] as IterValue;
   const state = iter.roots[1] as Record<string, unknown>;
   const innerItem = adaptedItem(name, t, item);
-  const inner: DebugPart = (depth) => iteratorDebug(source, innerItem, t.args[0], debug, depth);
+  const inner: DebugPart = (depth, sink) => iteratorDebug(source, innerItem, t.args[0], debug, depth, sink);
   const fields: [string, DebugPart][] = [];
   switch (name) {
     case 'CopiedShape':
@@ -205,14 +199,14 @@ export function iteratorDebug(
     }
     case 'FuseShape': {
       // std's iterators are fused, so `Fuse` keeps the iterator after it ends.
-      fields.push(['iter', (depth) => tupleText('Some', [inner], depth)]);
+      fields.push(['iter', tuplePart('Some', [inner])]);
       break;
     }
     case 'ChainShape': {
       const second = state.second as IterValue;
-      const b: DebugPart = (depth) => iteratorDebug(second, item, t.args[1], debug, depth);
-      fields.push(['a', state.firstDone ? () => 'None' : (depth) => tupleText('Some', [inner], depth)]);
-      fields.push(['b', (depth) => tupleText('Some', [b], depth)]);
+      const b: DebugPart = (depth, sink) => iteratorDebug(second, item, t.args[1], debug, depth, sink);
+      fields.push(['a', state.firstDone ? () => 'None' : tuplePart('Some', [inner])]);
+      fields.push(['b', tuplePart('Some', [b])]);
       break;
     }
     default: {
@@ -226,7 +220,7 @@ export function iteratorDebug(
     fields.push(['step_minus_one', number((state.step as bigint) - 1n)], ['first_take', number(state.first)]);
   }
   if (name === 'PeekableShape') fields.push(['peeked', peekedPart(source, item, debug)]);
-  return structText(ADAPTER_NAMES[name], fields, indent);
+  return structText(ADAPTER_NAMES[name], fields, indent, false, write);
 }
 
 function number(value: unknown): DebugPart {
@@ -248,6 +242,6 @@ function adaptedItem(name: string, shape: Type & { kind: 'adt' }, item: Type): T
 function peekedPart(source: IterValue, item: Type, debug: DebugValue): DebugPart {
   const [peeked] = source.peeked ?? [];
   if (source.peeked === undefined || source.peeked.length === 0) return () => 'None';
-  if (peeked === DONE) return (depth) => tupleText('Some', [() => 'None'], depth);
-  return (depth) => tupleText('Some', [(inner) => tupleText('Some', [(d) => debug(peeked, item, d)], inner)], depth);
+  if (peeked === DONE) return tuplePart('Some', [() => 'None']);
+  return tuplePart('Some', [tuplePart('Some', [(depth, sink) => debug(peeked, item, depth, sink)])]);
 }

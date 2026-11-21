@@ -24,6 +24,7 @@ import {
   defaultTraitArguments,
   type FloatName,
   type FnDef,
+  freshDivergingVar,
   freshVar,
   hasParams,
   hasVars,
@@ -1186,7 +1187,7 @@ export class Checker {
       if (declared) this.coerceAtReferenceSite(stmt.init, declared);
       else type = this.expr(stmt.init, undefined);
       diverges = shallow(type).kind === 'never' && !declared;
-      if (shallow(type).kind === 'never') type = declared ?? freshVar();
+      if (diverges) type = freshDivergingVar();
     }
     if (stmt.else) {
       if (!stmt.init) compileError(stmt.span, 'let ... else には、初期値が要ります。');

@@ -1,4 +1,5 @@
 import { comparePartialValues, testPartialOrder } from '../ops';
+import { MOVED } from '../runtime';
 import { type IntName, intType, type Type } from '../types';
 import { ElementPlace, sliceItems, sliceSet, UNIT_VALUE, type Value } from '../values';
 import { sizeOf } from './layout';
@@ -43,10 +44,18 @@ export function lessByPartialOrd(type: Type): (a: Value, b: Value) => boolean {
 
 /** `f(a) < f(b)`, as `sort_by_key` compares, computing both keys at each comparison. */
 export function lessByKey(ctx: NativeContext, f: Value): (a: Value, b: Value) => boolean {
+  return compareByKey(ctx, f, (type, a, b) => testPartialOrder('lt', type, a, b));
+}
+
+export function compareByKey(
+  ctx: NativeContext,
+  f: Value,
+  compare: (type: Type, a: Value, b: Value) => boolean
+): (a: Value, b: Value) => boolean {
   const keyType = ctx.typeArgs[1];
   return (a, b) => {
-    const keyA = call(ctx, f, [a]);
-    return ctx.runtime.withRoots([keyA], () => testPartialOrder('lt', keyType, keyA, call(ctx, f, [b])));
+    const first = call(ctx, f, [a]);
+    return ctx.runtime.withRoots([first], () => compare(keyType, first, call(ctx, f, [b])));
   };
 }
 
@@ -55,14 +64,25 @@ export function lessByKey(ctx: NativeContext, f: Value): (a: Value, b: Value) =>
  * both reach the elements by `&mut`.
  */
 export function dedupBy(items: Value[], sameBucket: (current: ElementPlace, kept: ElementPlace) => boolean): Value {
-  const kept: Value[] = [];
-  for (let index = 0; index < items.length; index++) {
-    const repeats =
-      kept.length > 0 && sameBucket(new ElementPlace(items, index), new ElementPlace(kept, kept.length - 1));
-    if (!repeats) kept.push(items[index]);
+  if (items.length < 2) return UNIT_VALUE;
+  let read = 1;
+  let write = 1;
+  try {
+    for (; read < items.length; read++) {
+      if (sameBucket(new ElementPlace(items, read), new ElementPlace(items, write - 1))) {
+        items[read] = MOVED;
+      } else {
+        if (write < read) {
+          items[write] = items[read];
+          items[read] = MOVED;
+        }
+        write++;
+      }
+    }
+  } finally {
+    items.copyWithin(write, read);
+    items.length -= read - write;
   }
-  items.length = 0;
-  for (const item of kept) items.push(item);
   return UNIT_VALUE;
 }
 
