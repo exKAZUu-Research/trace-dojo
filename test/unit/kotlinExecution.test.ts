@@ -15,6 +15,42 @@ test.each([
     stdout: '{banana=1, date=4, apple=2, cherry=3, elderberry=5}\n[zeta, mu, 100, beta, alpha]\n[3, 1, 2, 10, -1]\n',
   },
   {
+    name: 'val initialization on a single write through loop exits',
+    source: `class One {
+    val n: Int
+    init {
+        do { n = 1 } while (false)
+    }
+}
+class BreakPath {
+    val n: Int
+    init {
+        while (true) {
+            n = 2
+            break
+        }
+    }
+}
+fun found(stops: Boolean) {
+    val result: Int
+    var remaining = 2
+    while (true) {
+        if (stops || remaining == 0) {
+            result = remaining
+            break
+        }
+        remaining--
+    }
+    println(result)
+}
+fun main() {
+    println(One().n)
+    println(BreakPath().n)
+    found(false)
+}`,
+    stdout: '1\n2\n0\n',
+  },
+  {
     name: 'finally assignments on normal, break, and continue paths',
     source: `fun breakExit() {
     var value: Int
@@ -765,6 +801,34 @@ fun main() { println(C().f(1)) }`,
     'distinct branches initializing a class val once',
     true,
     'class A(flag: Boolean) { val n: Int; init { if (flag) n = 1 else this.n = 2 } }\nfun main() { println(A(true).n) }',
+  ],
+  [
+    'a class val write that can repeat after continue',
+    false,
+    `class A {
+    val n: Int
+    init {
+        var count = 0
+        while (true) {
+            n = count++
+            if (count < 2) continue
+            break
+        }
+    }
+}
+fun main() { println(A().n) }`,
+  ],
+  [
+    'a class val reassigned after finally writes it',
+    false,
+    `class A {
+    val n: Int
+    init {
+        try { println("try") } finally { n = 1 }
+        n = 2
+    }
+}
+fun main() { println(A().n) }`,
   ],
   [
     'a read after a finally that only conditionally assigns',

@@ -549,8 +549,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
         this.error(row, `val で宣言した ${variable.name} には、再び代入できません。`);
       if (variable.owner !== context)
         this.error(row, `val で宣言した ${variable.name} には、ラムダ式の中で代入できません。`);
-      if (context.loops.some((loop) => loop.outerVals.has(variable)))
-        this.error(row, `val で宣言した ${variable.name} には、ループの中で代入できません。`);
+      this.recordLoopValWrite(context, variable, row);
     }
     if (variable.owner !== context) {
       for (
@@ -584,11 +583,14 @@ export abstract class StatementCompiler extends OperatorCompiler {
   ): Place {
     const { symbol } = member;
     const type = resolved(substitute(this.ensurePropertyType(symbol, row), member.substitution));
+    const initializes = initializer !== undefined && this.mayInitializeVal(initializer, symbol);
     if (!symbol.isVar) {
-      if (!initializer || !this.mayInitializeVal(initializer, symbol) || this.flow.maybeAssigned.has(symbol))
+      if (!initializes || this.flow.maybeAssigned.has(symbol))
         this.error(row, `val で宣言した ${symbol.name} には、再び代入できません。`);
       this.flow.maybeAssigned.add(symbol);
+      this.recordLoopValWrite(initializer, symbol, row);
     }
+    if (initializes) this.flow.assigned.add(symbol);
     this.checkAccessible(scope, symbol, row, receiver?.type);
     if (symbol.isVar && symbol.setterVisibility === 'private' && !this.isInsideClass(scope, symbol.owner)) {
       this.error(row, `${symbol.name} の set は private なので、クラスの外からは代入できません。`);
@@ -693,12 +695,27 @@ export abstract class StatementCompiler extends OperatorCompiler {
 
   // Loops.
 
-  private newLoop(context: FunctionContext, scope: Scope): LoopContext {
+  private newLoop(scope: Scope): LoopContext {
     const outerVals = new Set<VariableSymbol>();
     for (let current: Scope | undefined = scope; current; current = current.parent) {
       for (const variable of current.variables.values()) if (!variable.isVar) outerVals.add(variable);
     }
-    return { identity: {}, outerVals, breaks: [] };
+    return { identity: {}, outerVals, breaks: [], continues: [], valWrites: new Map() };
+  }
+
+  private recordLoopValWrite(context: FunctionContext, target: VariableSymbol | PropertySymbol, row: number): void {
+    if (this.flow.isDead) return;
+    for (const loop of context.loops) {
+      if (!(target instanceof VariableSymbol) || loop.outerVals.has(target)) loop.valWrites.set(target, row);
+    }
+  }
+
+  private checkLoopBackEdge(loop: LoopContext, backEdge: Flow): void {
+    if (backEdge.isDead) return;
+    for (const [target, row] of loop.valWrites) {
+      if (backEdge.maybeAssigned.has(target))
+        this.error(row, `val で宣言した ${target.name} には、再び代入できません。`);
+    }
   }
 
   /** Forgets the smart casts of the variables a loop assigns, since another iteration may have changed them. */
@@ -748,17 +765,15 @@ export abstract class StatementCompiler extends OperatorCompiler {
   private compileWhile(scope: Scope, context: FunctionContext, statement: WhileStatement): Exec {
     this.forgetAssignedIn(scope, [...statement.body.statements]);
     this.forgetAssignedIn(scope, statement.condition);
-    const before = this.flow.copy();
     const condition = this.compileCondition(scope, context, statement.condition);
-    const afterCondition = this.flow.copy();
+    const normalExit = this.withNarrowing(this.flow, condition.whenFalse);
+    normalExit.isDead ||= condition.compiled.constant === true;
     this.applyNarrowing(condition.whenTrue);
-    const loop = this.newLoop(context, scope);
+    this.flow.isDead ||= condition.compiled.constant === false;
+    const loop = this.newLoop(scope);
     const body = this.compileLoopBody(scope, context, loop, statement.body);
-    const isInfinite = condition.compiled.constant === true;
-    this.flow = this.withNarrowing(afterCondition, condition.whenFalse);
-    this.flow.isDead = isInfinite && loop.breaks.length === 0;
-    this.flow.assigned.clear();
-    for (const variable of before.assigned) this.flow.assigned.add(variable);
+    this.checkLoopBackEdge(loop, Flow.merge([this.flow, ...loop.continues]));
+    this.flow = Flow.merge([normalExit, ...loop.breaks]);
     const test = condition.compiled.eval;
     return (frame) => {
       while (test(frame) as boolean) {
@@ -768,12 +783,11 @@ export abstract class StatementCompiler extends OperatorCompiler {
     };
   }
 
+  // code-gauge-allow functionNcss 31 -- the loop shares its locals and condition between analysis and execution.
   private compileDoWhile(scope: Scope, context: FunctionContext, statement: DoWhileStatement): Exec {
     this.forgetAssignedIn(scope, [...statement.body.statements]);
     this.forgetAssignedIn(scope, statement.condition);
-    const loop = this.newLoop(context, scope);
-    const continues: Flow[] = [];
-    loop.continues = continues;
+    const loop = this.newLoop(scope);
     // The condition sees the body's variables, as Kotlin's scoping of do-while does.
     const bodyScope = new Scope(scope, context);
     context.loops.push(loop);
@@ -791,8 +805,11 @@ export abstract class StatementCompiler extends OperatorCompiler {
     } finally {
       context.loops.pop();
     }
-    this.flow = Flow.merge([this.flow, ...continues]);
+    this.flow = Flow.merge([this.flow, ...loop.continues]);
     const condition = this.compileCondition(bodyScope, context, statement.condition);
+    const backEdge = this.withNarrowing(this.flow, condition.whenTrue);
+    backEdge.isDead ||= condition.compiled.constant === false;
+    this.checkLoopBackEdge(loop, backEdge);
     const test = condition.compiled.eval;
     const lastSlot = context.info.slotCount;
     const conditionExit = this.withNarrowing(this.flow, condition.whenFalse);
@@ -813,11 +830,12 @@ export abstract class StatementCompiler extends OperatorCompiler {
     };
   }
 
+  // code-gauge-allow functionNcss 31 -- the loop shares its locals and condition between analysis and execution.
   private compileFor(scope: Scope, context: FunctionContext, statement: ForStatement): Exec {
     this.forgetAssignedIn(scope, [...statement.body.statements]);
     const iterable = this.compileExpression(scope, context, statement.iterable);
     const loopScope = new Scope(scope, context);
-    const loop = this.newLoop(context, scope);
+    const loop = this.newLoop(scope);
     const firstSlot = context.info.slotCount;
     const progression = this.progressionOf(iterable.type);
     const { elementType, elementRepr, start, next } = progression
@@ -833,8 +851,9 @@ export abstract class StatementCompiler extends OperatorCompiler {
     );
     const beforeBody = this.flow.copy();
     const body = this.compileLoopBody(loopScope, context, loop, statement.body);
-    // The body may run no times, so what it assigns or smart-casts holds after the loop only if it held before.
-    this.flow = Flow.merge([beforeBody, this.flow]);
+    const nextIteration = Flow.merge([this.flow, ...loop.continues]);
+    this.checkLoopBackEdge(loop, nextIteration);
+    this.flow = Flow.merge([beforeBody, nextIteration, ...loop.breaks]);
     const lastSlot = context.info.slotCount;
     const iterableEval = iterable.eval;
     return (frame) => {
@@ -1328,9 +1347,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     expected: KType | undefined,
     asStatement: boolean
   ): Compiled {
-    const loopExits = expression.finally
-      ? context.loops.flatMap(({ breaks, continues }) => (continues ? [breaks, continues] : [breaks]))
-      : [];
+    const loopExits = expression.finally ? context.loops.flatMap(({ breaks, continues }) => [breaks, continues]) : [];
     const exitStarts = loopExits.map((exits) => exits.length);
     const before = this.flow.copy();
     const body = this.compileBlockValue(scope, context, expression.body, expected, asStatement);

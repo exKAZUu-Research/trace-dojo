@@ -1,5 +1,5 @@
 // code-gauge-allow-file fileNcss 537 -- the compiler of one area of Kotlin, whose parts call each other closely.
-import type { ClassDecl, Expression, PropertyDecl, Statement } from './ast';
+import type { Expression, PropertyDecl } from './ast';
 import type { ArgumentSyntax, Candidate, ResolvedCall } from './callCompiler';
 import {
   type Compiled,
@@ -663,31 +663,14 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       if (member.kind !== 'property' || member.initializer || member.delegate) continue;
       const property = this.findOwnProperty(entry.symbol, member.name);
       if (property.isAbstract || property.slot === undefined || property.isLateinit) continue;
-      if (!this.assignedInInit(entry.decl, member.name)) {
+      if (!this.flow.assigned.has(property)) {
         this.error(member.row, `プロパティ ${member.name} には初期値を書くか、init で値を入れてください。`);
       }
     }
   }
 
-  /** Whether an `init` block assigns a property, as `name = ...` or `this.name = ...`. */
-  private assignedInInit(decl: ClassDecl, name: string): boolean {
-    const isTarget = (target: Expression): boolean =>
-      (target.kind === 'name' && target.name === name) ||
-      (target.kind === 'member' && target.name === name && target.receiver.kind === 'this');
-    const visit = (statements: Statement[]): boolean =>
-      statements.some((statement) => {
-        if (statement.kind === 'assignment') return isTarget(statement.target);
-        if (statement.kind === 'expressionStatement' && statement.expression.kind === 'if') {
-          const { thenBranch, elseBranch } = statement.expression;
-          return elseBranch !== undefined && visit(thenBranch.statements) && visit(elseBranch.statements);
-        }
-        return false;
-      });
-    return decl.members.some((member) => member.kind === 'init' && visit(member.block.statements));
-  }
-
   protected mayInitializeVal(context: FunctionContext, symbol: PropertySymbol): boolean {
-    if (!symbol.owner || symbol.slot === undefined || context.loops.length > 0) return false;
+    if (!symbol.owner || symbol.slot === undefined) return false;
     const entry = this.entryOfProperty.get(symbol);
     if (!entry || entry.decl.initializer || entry.decl.delegate) return false;
     return this.initializerContexts.get(this.entryOfClass.get(symbol.owner) as ClassEntry) === context;

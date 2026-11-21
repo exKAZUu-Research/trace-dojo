@@ -105,7 +105,8 @@ export class ReceiverSymbol {
 export interface LoopContext {
   identity: object;
   breaks: Flow[];
-  continues?: Flow[];
+  continues: Flow[];
+  valWrites: Map<VariableSymbol | PropertySymbol, number>;
   /** The variables declared before the loop, which an assignment in it may assign more than once. */
   outerVals: Set<VariableSymbol>;
 }
@@ -203,7 +204,7 @@ export function excludingCases(key: string, caseIds: readonly string[]): Map<str
 export class Flow {
   constructor(
     readonly narrowed = new Map<string, KType>(),
-    readonly assigned = new Set<VariableSymbol>(),
+    readonly assigned = new Set<VariableSymbol | PropertySymbol>(),
     /** The `val`s that may be assigned at this point, which cannot be assigned again. */
     readonly maybeAssigned = new Set<VariableSymbol | PropertySymbol>(),
     /** Whether the point cannot be reached, after a `return`, `throw`, `break`, or `continue`. */
@@ -248,7 +249,7 @@ export class Flow {
     const assigned = new Set(
       [...first.assigned].filter((variable) => rest.every((flow) => flow.assigned.has(variable)))
     );
-    const maybeAssigned = new Set(flows.flatMap((flow) => [...flow.maybeAssigned]));
+    const maybeAssigned = new Set(live.flatMap((flow) => [...flow.maybeAssigned]));
     return new Flow(narrowed, assigned, maybeAssigned, false);
   }
 }
