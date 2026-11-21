@@ -10,6 +10,26 @@ const withoutLines = (items: TraceItem[]): unknown[] =>
 /** Curriculum-style programs that behave alike in both languages, so Kotlin must reproduce the Java interpreter's trace. */
 test.each([
   {
+    name: 'value-producing branches count as part of their enclosing statement',
+    java: `public class Main {
+  public static void main(String[] args) {
+    int n = 7;
+    String size = n > 5 ? "big" : "small";
+    int next = n == 7 ? 8 : 0;
+    int total = n + next;
+  }
+}`,
+    kotlin: `fun main() {
+    val n = 7
+    val size = if (n > 5) "big" else "small"
+    val next = when (n) {
+        7 -> 8
+        else -> 0
+    }
+    val total = try { n + next } catch (e: Exception) { 0 }
+}`,
+  },
+  {
     name: 'moves, turns, loops, and conditions',
     java: `public class Main {
   public static void main(String[] args) {

@@ -80,7 +80,8 @@ export abstract class ExpressionCompiler extends CallCompiler {
     context: FunctionContext,
     block: Block,
     expected: KType | undefined,
-    asStatement: boolean
+    asStatement: boolean,
+    recordsResult?: boolean
   ): Compiled;
 
   /** Makes sure a property without a declared type has its type inferred from its initializer. */
@@ -1755,7 +1756,8 @@ export abstract class ExpressionCompiler extends CallCompiler {
       lambdaContext,
       bodyBlock,
       returnsUnit ? undefined : determinedType(expectedReturn),
-      returnsUnit
+      returnsUnit,
+      true
     );
     this.markCapturedAssignments(lambdaContext, outerFlow);
     this.flow = outerFlow;

@@ -146,7 +146,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
           context,
           decl.body.block.statements,
           undefined,
-          true,
+          'statement',
           false
         );
         const isUnit = this.isClass(returnType, this.core.unit);
@@ -368,7 +368,14 @@ export abstract class BodyCompiler extends DeclarationCompiler {
         propertyRepr(symbol)
       );
     } else {
-      const compiled = this.compileStatementsValue(scope, context, body.block.statements, undefined, true, false);
+      const compiled = this.compileStatementsValue(
+        scope,
+        context,
+        body.block.statements,
+        undefined,
+        'statement',
+        false
+      );
       if (!this.flow.isDead) this.error(body.block.endRow, `get の最後に return を書いてください。`);
       const evaluate = compiled.eval;
       run = (frame) => {
@@ -393,7 +400,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     const compiled =
       setter.body.kind === 'expression'
         ? this.compileForEffect(scope, context, setter.body.expression)
-        : this.compileStatementsValue(scope, context, setter.body.block.statements, undefined, true, false);
+        : this.compileStatementsValue(scope, context, setter.body.block.statements, undefined, 'statement', false);
     const evaluate = compiled.eval;
     const { info } = context;
     const none: unknown[] = [];

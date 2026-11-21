@@ -76,14 +76,15 @@ export abstract class StatementCompiler extends OperatorCompiler {
     context: FunctionContext,
     block: Block,
     expected: KType | undefined,
-    asStatement: boolean
+    asStatement: boolean,
+    recordsResult = false
   ): Compiled {
     return this.compileStatementsValue(
       new Scope(scope, context),
       context,
       block.statements,
       expected,
-      asStatement,
+      asStatement ? 'statement' : recordsResult ? 'lambda' : 'value',
       true
     );
   }
@@ -99,7 +100,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     context: FunctionContext,
     statements: Statement[],
     expected: KType | undefined,
-    asStatement: boolean,
+    mode: 'statement' | 'value' | 'lambda',
     clearsLocals: boolean
   ): Compiled {
     const firstSlot = context.info.slotCount;
@@ -107,8 +108,8 @@ export abstract class StatementCompiler extends OperatorCompiler {
     let last: Compiled | undefined;
     for (const [index, statement] of statements.entries()) {
       const isLast = index === statements.length - 1;
-      if (isLast && !asStatement && statement.kind === 'expressionStatement') {
-        last = this.compileValueStatement(scope, context, statement, expected);
+      if (isLast && mode !== 'statement' && statement.kind === 'expressionStatement') {
+        last = this.compileValueStatement(scope, context, statement, expected, mode === 'lambda');
       } else {
         execs.push(this.compileStatement(scope, context, statement));
       }
@@ -131,15 +132,16 @@ export abstract class StatementCompiler extends OperatorCompiler {
     return { ...value, eval: run, isCall: false, isCreation: false, stableKey: undefined, constant: undefined };
   }
 
-  /** Compiles the last statement of a block whose value is used, recording its step as an expression statement. */
+  /** Compiles the expression that supplies a lambda result, recording the same step as an expression statement. */
   private compileValueStatement(
     scope: Scope,
     context: FunctionContext,
     statement: Extract<Statement, { kind: 'expressionStatement' }>,
-    expected: KType | undefined
+    expected: KType | undefined,
+    recordsResult: boolean
   ): Compiled {
     const compiled = this.compileExpression(scope, context, statement.expression, expected);
-    if (!this.recordsStepOf(statement.expression)) return compiled;
+    if (!recordsResult || !this.recordsStepOf(statement.expression)) return compiled;
     const { eval: evaluate } = compiled;
     const onlyCalls = compiled.isCall === true || compiled.isCreation === true;
     const { row } = statement;
@@ -743,7 +745,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
         context,
         body.statements,
         undefined,
-        true,
+        'statement',
         true
       );
       const evaluate = compiled.eval;
@@ -795,7 +797,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
         context,
         statement.body.statements,
         undefined,
-        true,
+        'statement',
         false
       ).eval;
     } finally {
