@@ -4,7 +4,6 @@ import type {
   Argument,
   BinaryOperator,
   Block,
-  CallExpression,
   Expression,
   LambdaExpression,
   LambdaParameter,
@@ -123,12 +122,12 @@ export abstract class ExpressionConverter {
     switch (node.type) {
       case 'index_expression': {
         const [receiver, ...indices] = named(node);
-        return {
+        return intoRightOperand(this.convertExpression(receiver), (operand) => ({
           kind: 'index',
           row,
-          receiver: this.convertExpression(receiver),
+          receiver: operand,
           indices: indices.map((index) => this.convertExpression(index)),
-        };
+        }));
       }
       case 'unary_expression': {
         return this.convertUnary(node);
@@ -304,7 +303,7 @@ export abstract class ExpressionConverter {
     }));
   }
 
-  private convertCall(node: Node): CallExpression {
+  private convertCall(node: Node): Expression {
     const parts = named(node);
     const callee = this.convertExpression(parts[0]);
     let typeArgs: TypeRef[] = [];
@@ -343,7 +342,7 @@ export abstract class ExpressionConverter {
       typeArgs,
       args,
       trailingLambda,
-    })) as CallExpression;
+    }));
   }
 
   protected convertArgument(node: Node): Argument {
@@ -367,7 +366,12 @@ export abstract class ExpressionConverter {
     const operator = operatorNode.type;
     const isPostfix = operatorNode.startIndex > required(node.childForFieldName('argument')).startIndex;
     if (isPostfix) {
-      return { kind: 'postfix', row: rowOf(node), operator: operator as '++' | '--' | '!!', operand };
+      return intoRightOperand(operand, (target) => ({
+        kind: 'postfix',
+        row: rowOf(node),
+        operator: operator as '++' | '--' | '!!',
+        operand: target,
+      }));
     }
     return { kind: 'prefix', row: rowOf(node), operator: operator as '-' | '+' | '!' | '++' | '--', operand };
   }
@@ -592,13 +596,23 @@ function decodeContent(node: Node, next: Node | undefined): { text: string; cons
 }
 
 /**
- * Applies a call or member access to the right operand of a binary expression in its place. The grammar reads
- * `1 + listOf<Int>()` as a call of `1 + listOf`, which only this misreading puts there, since a binary expression
- * written as a callee or receiver is in parentheses.
+ * The grammar can parse `2 to listOf<Int>()` as a call of `2 to listOf`. Postfix syntax binds to the rightmost
+ * operand in these cases, and parentheses stop the descent.
  */
 function intoRightOperand(target: Expression, apply: (operand: Expression) => Expression): Expression {
-  if (target.kind !== 'binary') return apply(target);
-  return { ...target, right: intoRightOperand(target.right, apply) };
+  switch (target.kind) {
+    case 'binary':
+    case 'infix':
+    case 'in': {
+      return { ...target, right: intoRightOperand(target.right, apply) };
+    }
+    case 'prefix': {
+      return { ...target, operand: intoRightOperand(target.operand, apply) };
+    }
+    default: {
+      return apply(target);
+    }
+  }
 }
 
 /** The expressions of syntax this environment does not run, by tree-sitter's node type, with what the error names. */
