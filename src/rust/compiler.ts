@@ -846,10 +846,8 @@ function readRange(c: Compiler, expr: ExprOf<'range'>): Eval {
 function readTuple(c: Compiler, expr: ExprOf<'tuple'>): Eval {
   if (expr.elems.length === 0) return () => UNIT_VALUE;
   const elems = expr.elems.map((elem) => c.value(elem));
-  return (frame) => {
-    frame.runtime.allocate(elems.length);
-    return evaluateValues(frame, elems);
-  };
+  // A tuple lives in place, often for one loop iteration, so it is not charged to the run's cumulative slot budget.
+  return (frame) => evaluateValues(frame, elems);
 }
 
 function readArray(c: Compiler, expr: ExprOf<'array'>): Eval {
