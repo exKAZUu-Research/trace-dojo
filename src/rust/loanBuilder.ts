@@ -1294,13 +1294,13 @@ export class LoanBuilder {
       }
       case 'assert': {
         const value = this.value(macro.cond);
-        const args = this.formatArgs(macro.format);
-        this.point({ uses: value === undefined ? args : [value, ...args] });
+        this.point({ uses: value === undefined ? [] : [value] });
+        this.failureMessage(macro.format);
         return undefined;
       }
       case 'assertEq': {
-        const operands = this.formatArgs({ pieces: [], args: [macro.left, macro.right], span: expr.span });
-        this.point({ uses: [...operands, ...this.formatArgs(macro.format)] });
+        this.point({ uses: this.formatArgs({ pieces: [], args: [macro.left, macro.right], span: expr.span }) });
+        this.failureMessage(macro.format);
         return undefined;
       }
       case 'vec': {
@@ -1326,6 +1326,14 @@ export class LoanBuilder {
         return this.aggregate(values, expr.ty, tupleElem);
       }
     }
+  }
+
+  /** The message of an assertion, which is formatted only where the assertion fails and panics. */
+  private failureMessage(format: FormatArgs | undefined): void {
+    if (!format) return;
+    const passed = this.current;
+    this.point({ uses: this.formatArgs(format) });
+    this.current = passed;
   }
 
   /** `write!(f, ..)` calls `f.write_fmt(..)`, which borrows `f` (or what it refers to) in two phases. */

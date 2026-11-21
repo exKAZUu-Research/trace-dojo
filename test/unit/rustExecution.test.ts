@@ -7068,3 +7068,23 @@ test.each([
     diagnostics: [expect.objectContaining({ row, message: expect.stringContaining(message) })],
   });
 });
+
+test('checks the message of an assertion only on its failing path', () => {
+  const program = rustMain(`    let s = String::from("hello");
+    assert!(true, "{}", { drop(s); 1 });
+    assert_eq!(1, 1, "{}", { drop(s); 1 });
+    let mut v = vec![1];
+    let r = &v;
+    assert!(true, "{}", { v.push(2); 1 });
+    println!("{} {:?}", s, r);`);
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'hello [1]\n' });
+
+  const moved = rustMain(
+    '    let s = String::from("hello");\n    assert!(!is_empty(s), "x");\n    println!("{}", s);',
+    'fn is_empty(s: String) -> bool { s.is_empty() }'
+  );
+  expect(executeProgram('rust', moved)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ row: 4, message: expect.stringContaining('ムーブされた') })],
+  });
+});

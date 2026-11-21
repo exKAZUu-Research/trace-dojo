@@ -557,11 +557,16 @@ export class BorrowChecker {
       case 'write': {
         return format(macro.format, this.expr(macro.target, state, 'read'));
       }
+      // The message of an assertion is formatted only where it fails, which panics.
       case 'assert': {
-        return format(macro.format, this.expr(macro.cond, state, 'move'));
+        const checked = this.expr(macro.cond, state, 'move');
+        format(macro.format, checked);
+        return checked;
       }
       case 'assertEq': {
-        return format(macro.format, this.expr(macro.right, this.expr(macro.left, state, 'read'), 'read'));
+        const compared = this.expr(macro.right, this.expr(macro.left, state, 'read'), 'read');
+        format(macro.format, compared);
+        return compared;
       }
       case 'vec': {
         let current = state;
