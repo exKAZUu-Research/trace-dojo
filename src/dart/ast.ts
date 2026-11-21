@@ -49,6 +49,7 @@ export interface ClassDeclaration extends Span {
   typeParameters: TypeParameter[];
   modifiers: ClassModifiers;
   superclass: TypeSyntax | undefined;
+  namedMixinApplication?: true;
   mixins: TypeSyntax[];
   interfaces: TypeSyntax[];
   /** The types a mixin requires of the classes it is applied to (`mixin M on A`). */

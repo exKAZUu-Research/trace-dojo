@@ -146,6 +146,7 @@ export class ClassInfo {
   vmName: string | undefined;
   /** The application of a mixin to a superclass, as `A with M` creates, whose members are copies of the mixin's. */
   mixinOf: ClassInfo | undefined;
+  mixinMembersApplied = false;
   /** The type an extension type represents. */
   representationType: DartType | undefined;
   representationName: string | undefined;

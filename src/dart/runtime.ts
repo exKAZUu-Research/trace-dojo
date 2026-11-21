@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 535 -- Keep runtime dispatch alongside reified types, call frames, and roots.
+// code-gauge-allow-file fileNcss 537 -- Keep runtime dispatch alongside reified types, call frames, and roots.
 import { ExecutionBudget, ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
@@ -315,10 +315,9 @@ export class Runtime implements TracedRuntime<Frame> {
       if (args.isDynamic && !argumentsFit(member.type, args, typeArgs)) {
         return this.noSuchMethod(receiver, name, 'method', args, typeArgs, vmSignature(name, member));
       }
-      const supplied = args.isDynamic
-        ? this.dynamicTypeArguments(this.memberTypeFor(receiver, member), typeArgs)
-        : typeArgs;
-      if (args.isDynamic && member.nativeParameterNames) this.checkNativeArguments(receiver, member, args, supplied);
+      const signature = args.isDynamic ? this.memberTypeFor(receiver, member) : undefined;
+      const supplied = signature ? this.dynamicTypeArguments(signature, typeArgs) : typeArgs;
+      if (signature && member.nativeParameterNames) this.checkNativeArguments(member, args, supplied, signature);
       return (member.impl as NonNullable<typeof member.impl>)(this, receiver, args, supplied, callRow);
     }
     if (member) return this.callGetterValue(receiver, member, args, typeArgs, callRow);
@@ -498,13 +497,13 @@ export class Runtime implements TracedRuntime<Frame> {
   }
 
   /** A method's tear-off, which is equal to another tear-off of the same method from the same receiver. */
-  tearOff(receiver: Value, member: Member & { kind: 'method' }): DartClosure {
+  tearOff(receiver: Value, member: Member & { kind: 'method' }, staticSignature?: FunctionType): DartClosure {
     // A static method's tear-off is canonical, as a top-level function's is.
     if (member.isStatic) {
       const existing = this.tearOffs.get(member);
       if (existing) return existing;
     }
-    const closure = this.newTearOff(receiver, member);
+    const closure = this.newTearOff(receiver, member, staticSignature);
     if (member.isStatic) this.tearOffs.set(member, closure);
     return closure;
   }
@@ -558,15 +557,20 @@ export class Runtime implements TracedRuntime<Frame> {
     return closure;
   }
 
-  private newTearOff(receiver: Value, member: Member & { kind: 'method' }): DartClosure {
+  private newTearOff(
+    receiver: Value,
+    member: Member & { kind: 'method' },
+    staticSignature?: FunctionType
+  ): DartClosure {
     const impl = member.impl as NonNullable<typeof member.impl>;
-    const type = member.isStatic ? member.type : covariantErased(member, this.memberTypeFor(receiver, member));
+    const signature = staticSignature ?? this.memberTypeFor(receiver, member);
+    const type = staticSignature || member.isStatic ? signature : covariantErased(member, signature);
     return new DartClosure(
       coreTypes.function,
       type,
       (runtime, _receiver, args, typeArgs, callRow) => {
         if (args.isDynamic && member.nativeParameterNames)
-          runtime.checkNativeArguments(receiver, member, args, typeArgs);
+          runtime.checkNativeArguments(member, args, typeArgs, signature);
         return impl(runtime, receiver, args, typeArgs, callRow);
       },
       receiver,
@@ -621,12 +625,12 @@ export class Runtime implements TracedRuntime<Frame> {
   }
 
   private checkNativeArguments(
-    receiver: Value,
     member: Member & { kind: 'method' },
     args: Arguments,
-    typeArgs: readonly DartType[]
+    typeArgs: readonly DartType[],
+    signature: FunctionType
   ): void {
-    const type = instantiateFunction(this.memberTypeFor(receiver, member), typeArgs);
+    const type = instantiateFunction(signature, typeArgs);
     for (const [index, value] of args.positional.entries())
       this.checkNativeArgument(value, type.positional[index], member.nativeParameterNames?.[index] ?? '');
     for (const { name, type: expected } of type.named) {

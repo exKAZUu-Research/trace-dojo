@@ -86,11 +86,15 @@ export class DartRecord extends DartObject {
   }
 
   field(name: string): [string, Value] | undefined {
-    const position = /^\$([1-9]\d*)$/.exec(name);
-    if (!position) return this.named.find(([field]) => field === name);
-    const index = Number(position[1]) - 1;
-    return index < this.positional.length ? [name, this.positional[index]] : undefined;
+    const index = recordPositionalIndex(name);
+    if (index !== undefined && index < this.positional.length) return [name, this.positional[index]];
+    return this.named.find(([field]) => field === name);
   }
+}
+
+export function recordPositionalIndex(name: string): number | undefined {
+  const position = /^\$([1-9]\d*)$/.exec(name);
+  return position ? Number(position[1]) - 1 : undefined;
 }
 
 export class DartClosure extends DartObject {

@@ -200,10 +200,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   protected skipOnNull(receiver: Compiled, nullAware: boolean): void {
-    if (!nullAware || !isPotentiallyNullable(receiver.type)) return;
+    if (!nullAware) return;
     const before = this.flow;
     const { exit } = this.nullChain;
-    this.nullChain.exit = exit ? Flow.join(exit, before) : before;
+    const maySkip = isPotentiallyNullable(receiver.type);
+    const skipped = maySkip ? before : before.unreachable;
+    this.nullChain.exit = exit ? Flow.join(exit, skipped) : skipped;
+    if (!maySkip) return;
     const variable = receiver.variable;
     const narrowed = promotionTarget(receiver.type, nonNullable(receiver.type));
     if (variable && narrowed && this.isPromotable(variable)) this.flow = this.flow.promote(variable, narrowed);
@@ -862,7 +865,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const fields = this.withConstContext(expression.isConst, () =>
       expression.fields.map((field) => {
         const { name, value } = field;
-        if (name !== undefined) this.checkRecordFieldName(name, field, names);
+        if (name !== undefined) this.checkRecordFieldName(name, field, names, positionalCount);
         const expected =
           name === undefined
             ? positionalContext?.[position++]
@@ -891,20 +894,6 @@ export abstract class ExpressionCompiler extends CompilerBase {
       run: isConst ? this.canonicalized(build) : build,
       isConst: isConst || (allConstant && this.potentialConstInitializer),
     };
-  }
-
-  private checkRecordFieldName(name: string, field: Span, names: Set<string>): void {
-    if (names.has(name)) this.error(field, `レコードのフィールド ${name} が重複しています。`);
-    if (
-      /^\$\d+$/.test(name) ||
-      name === 'hashCode' ||
-      name === 'runtimeType' ||
-      name === 'toString' ||
-      name === 'noSuchMethod'
-    ) {
-      this.error(field, `レコードのフィールドに ${name} という名前は付けられません。`);
-    }
-    names.add(name);
   }
 
   readonly constantChecks: { span: Span; run: Eval }[] = [];
@@ -1316,7 +1305,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   /** Reads a member found statically: a field or getter through dynamic dispatch, a method as a tear-off. */
   // code-gauge-allow functionCognitiveComplexity 27 -- Each branch is one of the cases Dart distinguishes for this construct.
-  // code-gauge-allow functionNcss 32 -- Member reads distinguish extensions, record fields and ordinary members.
+  // code-gauge-allow functionNcss 33 -- Member reads distinguish extensions, record fields and ordinary members.
   protected readMember(
     receiver: Compiled,
     resolved: ResolvedMember,
@@ -1339,12 +1328,17 @@ export abstract class ExpressionCompiler extends CompilerBase {
           const typeArgs = resolveTypes(frame);
           if (member.kind === 'method') {
             const impl = member.impl as NonNullable<typeof member.impl>;
-            return frame.runtime.tearOff(value, {
-              ...member,
-              type: signature(frame) as FunctionType,
-              impl: (runtime, _receiver, args, methodTypeArgs, callRow) =>
-                impl(runtime, value, args, [...typeArgs, ...methodTypeArgs], callRow),
-            });
+            const reified = signature(frame) as FunctionType;
+            return frame.runtime.tearOff(
+              value,
+              {
+                ...member,
+                type: reified,
+                impl: (runtime, _receiver, args, methodTypeArgs, callRow) =>
+                  impl(runtime, value, args, [...typeArgs, ...methodTypeArgs], callRow),
+              },
+              reified
+            );
           }
           return (member.impl as unknown as Callable)(
             frame.runtime,
@@ -1587,18 +1581,9 @@ export abstract class ExpressionCompiler extends CompilerBase {
     span: Span
   ): Compiled;
 
-  private compileInstantiation(expression: Extract<Expression, { kind: 'instantiation' }>): Compiled {
-    const target = this.staticTarget(expression);
-    if (target?.kind === 'class' && target.typeArgs) {
-      const alias = target.alias?.aliased;
-      return this.typeLiteralValue(
-        interfaceType(target.cls, target.typeArgs, alias?.kind === 'interface' && alias.nullable)
-      );
-    }
-    return this.unsupported(expression, '型引数を指定した関数の取り出し（f<int> の形）');
-  }
+  protected abstract compileInstantiation(expression: Extract<Expression, { kind: 'instantiation' }>): Compiled;
 
-  private typeLiteralValue(type: DartType): Compiled {
+  protected typeLiteralValue(type: DartType): Compiled {
     const resolve = this.runtimeType(type);
     return {
       type: interfaceType(coreTypes.type),

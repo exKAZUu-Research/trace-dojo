@@ -154,7 +154,7 @@ class Snapshotter {
 }
 
 function snapshot(roots: Iterable<SnapshotRoot>, includeReferences: boolean, lists: ListSnapshots): TraceVariables {
-  const variables: TraceVariables = { vars: {}, referenceVars: {} };
+  const variables: TraceVariables = { vars: traceEntries(), referenceVars: traceEntries() };
   const visible = [...roots].filter(({ value }) => !(value instanceof DartObject && value.cls === coreTypes.function));
   let objectRoots = visible.filter(({ value }) => value instanceof DartObject).length;
   let scalarNodes = MAX_SNAPSHOT_NODES;
@@ -335,7 +335,7 @@ function displayNodeOf(value: Value, budget: SnapshotBudget, previous?: DisplayN
     if (object instanceof DartRecord) return entriesNode('object', recordFields(object), budget);
     const store = object.native as unknown as HashStore | undefined;
     if (store && typeof store.positions === 'function') return storeNodeOf(store, budget);
-    const entries: Record<string, DisplayNode> = {};
+    const entries = traceEntries<DisplayNode>();
     for (const field of allFields(object.cls)) {
       const node = displayNodeOf(object.fields[field.slot], budget);
       if (node) entries[field.name] = node;
@@ -349,7 +349,7 @@ function displayNodeOf(value: Value, budget: SnapshotBudget, previous?: DisplayN
 
 function listDisplayNode(list: DartList, budget: SnapshotBudget): DisplayNode {
   const previous = budget.lists.display.get(list);
-  const entries: Record<string, DisplayNode> = {};
+  const entries = traceEntries<DisplayNode>();
   let unchanged = previous !== undefined;
   let count = 0;
   for (const [position, item] of list.elements.entries()) {
@@ -371,7 +371,7 @@ function entriesNode(
   fields: Iterable<readonly [string | number, Value]>,
   budget: SnapshotBudget
 ): DisplayNode {
-  const entries: Record<string, DisplayNode> = {};
+  const entries = traceEntries<DisplayNode>();
   for (const [name, item] of fields) {
     const node = displayNodeOf(item, budget) ?? NULL_NODE;
     entries[name] = node;
@@ -388,7 +388,7 @@ function* recordFields(record: DartRecord): Iterable<readonly [string, Value]> {
 /** Sets show as arrays of their elements, and maps as objects keyed by their keys' text. */
 function storeNodeOf(store: HashStore, budget: SnapshotBudget): DisplayNode {
   if (!store.isMap) {
-    const entries: Record<string, DisplayNode> = {};
+    const entries = traceEntries<DisplayNode>();
     let position = 0;
     for (const key of store.values()) {
       const node = displayNodeOf(key, budget) ?? NULL_NODE;
@@ -397,7 +397,7 @@ function storeNodeOf(store: HashStore, budget: SnapshotBudget): DisplayNode {
     }
     return { kind: 'array', entries };
   }
-  const entries = Object.create(null) as Record<string, DisplayNode>;
+  const entries = traceEntries<DisplayNode>();
   for (const position of store.positions()) {
     if (budget.remaining === 0) {
       entries[TRUNCATED] = TRUNCATED_NODE;
@@ -413,6 +413,10 @@ function storeNodeOf(store: HashStore, budget: SnapshotBudget): DisplayNode {
     entries[unique] = displayNodeOf(store.entryValues[position], budget) ?? NULL_NODE;
   }
   return { kind: 'object', entries };
+}
+
+function traceEntries<T>(): Record<string, T> {
+  return Object.create(null) as Record<string, T>;
 }
 
 export type { DartType };

@@ -3584,6 +3584,109 @@ test('extension-type members use static owner arguments and separate method argu
   });
 });
 
+test('explicit generic tear-offs validate and reify their written arguments', () => {
+  const declarations = `T identity<T>(T value) => value;
+  T numeric<T extends num>(T value) => value;
+  typedef Callback<T> = T Function(T);
+  class Methods {
+    T instance<T>(T value) => value;
+    static T method<T>(T value) => value;
+  }`;
+  const program = `${declarations}
+  const canonical = identity<int>;
+  void main() {
+    T local<T>(T value) => value;
+    final T Function<T>(T) variable = identity;
+    final object = Methods();
+    final concrete = object.instance<String>;
+    print([canonical(1), (local<int>)(2), (variable<int>)(3), concrete('hello'), (Methods.method<int>)(4)]);
+    print([identical(canonical, identity<int>), concrete == object.instance<String>, concrete is String Function(String)]);
+    print(Callback<int>);
+  }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[1, 2, 3, hello, 4]\n[true, true, true]\n(int) => int\n',
+  });
+  for (const expression of [
+    'numeric<String>',
+    'identity<int, int>',
+    '((int n) => n)<int>',
+    'maybe<int>',
+    'dynamicFunction<int>',
+    'Methods()?.instance<int>',
+  ]) {
+    const invalid = `${declarations} void main() {
+      T Function<T>(T)? maybe;
+      dynamic dynamicFunction = identity;
+      print(${expression});
+    }`;
+    expect(executeProgram('dart', invalid)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
+test('extension-type method tear-offs keep the static signature on erased receivers', () => {
+  const program = `extension type Box<T>(T value) { T echo(T value) => value; }
+  extension type Pair<A, B>((A, B) value) {
+    R describe<R>(R value) { print([A, B, R]); return value; }
+    bool accepts(Object? value) => value is A;
+  }
+  extension type Swapped<A, B>(Pair<B, A> pair) implements Pair<B, A> {}
+  extension type Reader<T>(T Function() read) { T value() => read(); }
+  void main() {
+    final primitive = Box<int>(1).echo;
+    final record = Pair<int, int>((1, 2)).accepts;
+    final inherited = Swapped<int, String>(Pair<String, int>(('x', 1))).describe<bool>;
+    final function = Reader<int>(() => 3).value;
+    print(primitive.runtimeType);
+    print([record(1), record('x')]);
+    print(inherited(true));
+    print(function());
+  }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '(int) => int\n[true, false]\n[String, int, bool]\ntrue\n3\n',
+  });
+});
+
+test('null-aware selectors keep a nullable result on a non-null receiver', () => {
+  const program = `class Methods { int use(int value) => value; int get count => 2; }
+  void main() {
+    final object = Methods();
+    int assigned;
+    int? result = object?.use(assigned = 1);
+    print([result, assigned]);
+  }`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[1, 1]\n' });
+  const invalid = program.replace('int? result', 'int result');
+  expect(executeProgram('dart', invalid)).toMatchObject({ kind: 'compileError' });
+});
+
+test('record fields use active positional getters and reject private or reserved names', () => {
+  const program = `void main() {
+    final record = (1, $0: 2, $01: 3, $2: 4);
+    dynamic dynamicRecord = record;
+    print([record.$1, record.$0, record.$01, record.$2, dynamicRecord.$2]);
+    if (record case (var one, $0: var zero, $01: var zeroOne, $2: var two)) print([one, zero, zeroOne, two]);
+    final (int, {String $2}) typed = (1, $2: 'a');
+    print(typed.$2);
+  }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[1, 2, 3, 4, 4]\n[1, 2, 3, 4]\na\n',
+  });
+  for (const [source, name] of [
+    ['print((_private: 1));', '_private'],
+    ['({int _private}) value;', '_private'],
+    ['print((1, $1: 2));', '$1'],
+    ['(int, {int $1}) value;', '$1'],
+    ['({int hashCode}) value;', 'hashCode'],
+  ]) {
+    const actual = executeProgram('dart', `void main() { ${source} }`);
+    expect(actual.kind).toBe('compileError');
+    if (actual.kind === 'compileError') expect(actual.diagnostics[0]?.message).toContain(name);
+  }
+});
+
 test('mixin applications substitute inferred types for writable and late fields', () => {
   const program = `mixin Items<T> {
     final fixed = <T>[];
@@ -3609,6 +3712,49 @@ test('mixin applications substitute inferred types for writable and late fields'
       kind: 'compileError',
     }
   );
+});
+
+test('named mixin applications forward generative constructors and keep declared class identity', () => {
+  const program = `class Child extends Abstract<int> {
+    Child({super.value}) : super.named(7);
+  }
+  abstract class Abstract<T extends num> = Base<T> with Empty<T>;
+  class Concrete<T extends num> = Base<T> with Empty<T>, Fields<T> implements HasName;
+  abstract class HasName { String get name; }
+  mixin Empty<T extends num> {
+    Type get item => T;
+  }
+  mixin Fields<T extends num> {
+    final name = 'mixed';
+    final items = <T>[];
+  }
+  class Base<T extends num> {
+    final int number;
+    final int value;
+    const Base.named(this.number, {this.value = 11});
+    factory Base.onlyFactory() => Base.named(1);
+  }
+  class Constant = Base<int> with Empty<int>;
+  void main() {
+    final direct = Concrete<double>.named(5);
+    final child = Child();
+    print([direct.runtimeType, direct.item, direct.name, direct.items.runtimeType, direct.value]);
+    print([child.number, child.value, child.item]);
+    print(identical(const Constant.named(1), const Constant.named(1)));
+    final make = Concrete<int>.named;
+    print(make(3, value: 13).value);
+  }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[Concrete<double>, double, mixed, List<double>, 11]\n[7, 11, int]\ntrue\n13\n',
+  });
+  for (const expression of ['Abstract<int>.named(1)', 'Concrete<int>.onlyFactory()', 'const Concrete<int>.named(1)']) {
+    const invalid = program.replace(
+      'final direct = Concrete<double>.named(5);',
+      `print(${expression});\n    final direct = Concrete<double>.named(5);`
+    );
+    expect(executeProgram('dart', invalid)).toMatchObject({ kind: 'compileError' });
+  }
 });
 
 test('initializing and super formals are final during constructor initialization', () => {
@@ -4948,6 +5094,22 @@ test('BigInt modPow meters wide multiplies and preserves small powers', () => {
     print(base.modPow(exponent, modulus));
   }`;
   expect(executeProgram('dart', wide)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test('BigInt parsing checks literal syntax before validating the radix', () => {
+  const program = `void main() {
+    for (final text in ['', ' ', '+', 'a?', '- 2']) {
+      print(BigInt.tryParse(text, radix: 1));
+      try { BigInt.parse(text, radix: 37); } catch (error) { print(error.runtimeType); }
+    }
+    try { BigInt.tryParse('a', radix: 1); } catch (error) { print(error.runtimeType); }
+    try { BigInt.parse('0x', radix: 37); } catch (error) { print(error.runtimeType); }
+    print([BigInt.parse(' +101 ', radix: 2), BigInt.parse('z', radix: 36), BigInt.tryParse('2', radix: 2)]);
+  }`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'null\nFormatException\n'.repeat(5) + 'RangeError\nRangeError\n[5, 35, null]\n',
+  });
 });
 
 test('dynamic native calls and tear-offs validate named arguments before dispatch', () => {

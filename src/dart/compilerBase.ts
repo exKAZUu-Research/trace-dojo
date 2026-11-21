@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 518 -- Type and diagnostic resolution share the compiler environment.
+// code-gauge-allow-file fileNcss 530 -- Type and diagnostic resolution share the compiler environment.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ClassDeclaration, Span, TypeAliasDeclaration, TypeParameter, TypeSyntax } from './ast';
 import { type ClassInfo, type Member, memberTypeIn, scopedMemberName } from './classes';
@@ -35,7 +35,7 @@ import {
   vmTypeString,
   VOID,
 } from './types';
-import { type Cell, DartClosure, type DartRecord, type Value } from './values';
+import { type Cell, DartClosure, type DartRecord, recordPositionalIndex, type Value } from './values';
 
 export type Eval = (frame: Frame) => Value;
 
@@ -296,10 +296,8 @@ export abstract class CompilerBase {
       }
       case 'record': {
         const names = new Set<string>();
-        for (const field of syntax.named) {
-          if (names.has(field.name)) this.error(syntax, `レコードのフィールド ${field.name} が重複しています。`);
-          names.add(field.name);
-        }
+        for (const field of syntax.named)
+          this.checkRecordFieldName(field.name, field.type, names, syntax.positional.length);
         const type: DartType = {
           kind: 'record',
           positional: syntax.positional.map((field) => this.resolveType(field)),
@@ -315,6 +313,18 @@ export abstract class CompilerBase {
         return syntax.nullable ? makeNullable(type) : type;
       }
     }
+  }
+
+  protected checkRecordFieldName(name: string, span: Span, names: Set<string>, positionalCount: number): void {
+    if (names.has(name)) this.error(span, `レコードのフィールド ${name} が重複しています。`);
+    const position = recordPositionalIndex(name);
+    if (
+      name.startsWith('_') ||
+      (position !== undefined && position < positionalCount) ||
+      ['hashCode', 'runtimeType', 'toString', 'noSuchMethod'].includes(name)
+    )
+      this.error(span, `レコードのフィールドに ${name} という名前は付けられません。`);
+    names.add(name);
   }
 
   private resolveFunctionType(syntax: Extract<TypeSyntax, { kind: 'function' }>): DartType {
@@ -437,6 +447,14 @@ export abstract class CompilerBase {
     return args;
   }
 
+  protected explicitTypeArguments(params: readonly TypeParam[], typeArguments: TypeSyntax[], span: Span): DartType[] {
+    if (typeArguments.length !== params.length)
+      this.error(span, `型引数は ${params.length} 個ですが、${typeArguments.length} 個書かれています。`);
+    const typeArgs = typeArguments.map((argument) => this.resolveType(argument));
+    this.checkBounds(params, typeArgs, span);
+    return typeArgs;
+  }
+
   protected checkBounds(params: readonly TypeParam[], args: readonly DartType[], span: Span): void {
     // A bound may refer to a subclass whose supertypes are declared later.
     if (this.pendingBoundChecks) {
@@ -488,9 +506,9 @@ export abstract class CompilerBase {
       return { member: callMember(base), type: { ...base, nullable: false } };
     }
     if (base.kind === 'record' && !setter) {
-      const index = /^\$([1-9]\d*)$/.exec(name);
-      if (index && Number(index[1]) <= base.positional.length) {
-        return { member: recordFieldMember(name), type: base.positional[Number(index[1]) - 1] };
+      const index = recordPositionalIndex(name);
+      if (index !== undefined && index < base.positional.length) {
+        return { member: recordFieldMember(name), type: base.positional[index] };
       }
       const named = base.named.find((field) => field.name === name);
       if (named) return { member: recordFieldMember(name), type: named.type };
@@ -742,19 +760,21 @@ export abstract class CompilerBase {
     if (!typeArgs) return undefined;
     const type = instantiateFunction(source, typeArgs);
     if (!forInference && !isSubtype(type, target)) return undefined;
+    return this.instantiateFunctionValue(compiled, type, typeArgs);
+  }
+
+  protected instantiateFunctionValue(compiled: Compiled, type: FunctionType, typeArgs: readonly DartType[]): Compiled {
     const { run } = compiled;
-    const resolveArgs = typeArgs.map((arg) => this.runtimeType(arg));
+    const resolveArgs = this.runtimeTypes(typeArgs);
     return {
       ...compiled,
       type,
-      isConst: compiled.isConst,
+      isConst: compiled.isConst && !typeArgs.some((argument) => mentionsTypeParams(argument)),
+      variable: undefined,
       run: (frame) => {
         const original = run(frame);
         return original instanceof DartClosure
-          ? frame.runtime.instantiateTearOff(
-              original,
-              resolveArgs.map((resolve) => resolve(frame))
-            )
+          ? frame.runtime.instantiateTearOff(original, resolveArgs(frame))
           : original;
       },
     };

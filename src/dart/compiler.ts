@@ -265,17 +265,16 @@ export class Compiler extends MemberCompiler {
     const visit = (work: ClassWork): void => {
       if (seen.has(work.cls)) return;
       seen.add(work.cls);
-      for (const supertype of work.cls.directSupertypes) {
-        const dependency = byClass.get(supertype.cls.mixinOf ?? supertype.cls) ?? byClass.get(supertype.cls);
-        if (dependency) visit(dependency);
-        let current: ClassInfo | undefined = supertype.cls;
-        while (current?.mixinOf) {
-          const mixin = byClass.get(current.mixinOf);
-          if (mixin) visit(mixin);
-          current = current.superclass?.cls;
-        }
-      }
+      for (const supertype of work.cls.directSupertypes) visitType(supertype.cls);
       ordered.push(work);
+    };
+    const visitType = (cls: ClassInfo): void => {
+      const declared = byClass.get(cls);
+      if (declared) visit(declared);
+      else if (cls.mixinOf) {
+        visitType(cls.mixinOf);
+        if (cls.superclass) visitType(cls.superclass.cls);
+      }
     };
     for (const work of this.classWork) visit(work);
     return ordered;
@@ -286,25 +285,16 @@ export class Compiler extends MemberCompiler {
     const { cls, declaration } = work;
     this.withTypeParams(cls.typeParams, () => {
       this.resolveSuperclass(work);
-      if (declaration.mixins.length > 0) {
-        let base = cls.superclass ?? objectType();
-        for (const mixinSyntax of declaration.mixins) {
-          const mixin = this.resolveSupertype(cls, mixinSyntax, 'mixin');
-          if (mixin.cls.kind !== 'mixin' && mixin.cls.kind !== 'mixinClass' && !this.isLibraryCode) {
-            this.error(mixinSyntax, `${mixin.cls.name} は mixin ではないので、with には書けません。`);
-          }
-          base = this.mixinApplication(base, mixin, cls, mixinSyntax);
-        }
-        cls.superclass = base;
-      }
-      cls.interfaces = declaration.interfaces.map((type) =>
+      this.resolveMixins(work);
+      const interfaces = declaration.interfaces.map((type) =>
         this.resolveSupertype(cls, type, '実装するインターフェース')
       );
-      for (const [index, type] of cls.interfaces.entries()) {
-        if (cls.interfaces.slice(0, index).some((other) => other.cls === type.cls)) {
+      for (const [index, type] of interfaces.entries()) {
+        if (interfaces.slice(0, index).some((other) => other.cls === type.cls)) {
           this.error(declaration.interfaces[index], `${type.cls.name} は、1 回しか implements に書けません。`);
         }
       }
+      cls.interfaces.push(...interfaces);
       if (declaration.classKind === 'extensionType') {
         const parameter = declaration.primaryConstructor?.parameters.positional[0];
         if (!parameter?.type) this.error(declaration, '拡張型には、表す値の型を書いてください。');
@@ -313,6 +303,19 @@ export class Compiler extends MemberCompiler {
       }
     });
     if (cls.kind !== 'extensionType') registerSealedSubclass(cls);
+  }
+
+  private resolveMixins({ cls, declaration }: ClassWork): void {
+    if (declaration.mixins.length === 0) return;
+    let base = cls.superclass ?? objectType();
+    for (const [index, syntax] of declaration.mixins.entries()) {
+      const mixin = this.resolveSupertype(cls, syntax, 'mixin');
+      if (mixin.cls.kind !== 'mixin' && mixin.cls.kind !== 'mixinClass' && !this.isLibraryCode)
+        this.error(syntax, `${mixin.cls.name} は mixin ではないので、with には書けません。`);
+      const named = declaration.namedMixinApplication === true && index === declaration.mixins.length - 1;
+      base = this.mixinApplication(base, mixin, cls, syntax, named);
+    }
+    if (!declaration.namedMixinApplication) cls.superclass = base;
   }
 
   private resolveSuperclass({ cls, declaration }: ClassWork): void {
@@ -394,14 +397,19 @@ export class Compiler extends MemberCompiler {
     superclass: InterfaceType,
     mixin: InterfaceType,
     owner: ClassInfo,
-    span: Span
+    span: Span,
+    named: boolean
   ): InterfaceType {
-    const application = new ClassInfo(`${superclass.cls.name} with ${mixin.cls.name}`, 'class', owner.library);
-    application.typeParams.push(...owner.typeParams);
+    const application = named
+      ? owner
+      : new ClassInfo(`${superclass.cls.name} with ${mixin.cls.name}`, 'class', owner.library);
+    if (!named) {
+      application.typeParams.push(...owner.typeParams);
+      application.modifiers = { isAbstract: true, isSealed: false, isBase: false, isFinal: false, isInterface: false };
+    }
     application.superclass = superclass;
     application.interfaces = [mixin];
     application.mixinOf = mixin.cls;
-    application.modifiers = { isAbstract: true, isSealed: false, isBase: false, isFinal: false, isInterface: false };
     (application as ClassInfo & { mixinArgs?: readonly DartType[] }).mixinArgs = mixin.args;
     this.pendingApplications.push({ application, mixin, span });
     return interfaceType(
@@ -444,13 +452,13 @@ export class Compiler extends MemberCompiler {
     for (const { cls, declaration } of this.classWork) visit(cls, declaration);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 23 -- Each kind of member declares itself differently.
+  // code-gauge-allow functionCognitiveComplexity 24 -- Each kind of member declares itself differently.
   private declareMembers({ cls, declaration }: ClassWork): void {
     this.currentClass = cls;
     try {
       this.withTypeParams(cls.typeParams, () => {
         this.applyPendingMixins(cls);
-        cls.fieldCount = cls.superclass?.cls.fieldCount ?? 0;
+        if (!declaration.namedMixinApplication) cls.fieldCount = cls.superclass?.cls.fieldCount ?? 0;
         if (declaration.classKind === 'extensionType') this.declareRepresentation(cls, declaration);
         if (declaration.primaryConstructor && declaration.classKind !== 'extensionType') {
           this.declarePrimaryConstructorFields(cls, declaration);
@@ -465,7 +473,8 @@ export class Compiler extends MemberCompiler {
         if (
           cls.constructors.size === 0 &&
           declaration.classKind !== 'mixin' &&
-          declaration.classKind !== 'extensionType'
+          declaration.classKind !== 'extensionType' &&
+          !declaration.namedMixinApplication
         ) {
           this.declareDefaultConstructor(cls, declaration);
         }
@@ -493,14 +502,15 @@ export class Compiler extends MemberCompiler {
 
   /** Copies a mixin's members into the applications that use it, once the mixin's own members are declared. */
   private applyPendingMixins(cls: ClassInfo): void {
-    let current = cls.superclass?.cls;
+    let current = cls.mixinOf ? cls : cls.superclass?.cls;
     const applications: ClassInfo[] = [];
     while (current?.mixinOf) {
       applications.unshift(current);
       current = current.superclass?.cls;
     }
     for (const application of applications) {
-      if (application.members.size > 0 || application.fieldCount > 0) continue;
+      if (application.mixinMembersApplied) continue;
+      application.mixinMembersApplied = true;
       const mixin = application.mixinOf as ClassInfo;
       application.fieldCount = application.superclass?.cls.fieldCount ?? 0;
       const mixinArgs = (application as ClassInfo & { mixinArgs?: readonly DartType[] }).mixinArgs ?? [];
@@ -529,8 +539,8 @@ export class Compiler extends MemberCompiler {
    * A mixin application has a constructor for each generative constructor of its superclass, which initializes the
    * mixin's fields and passes its arguments on, as Dart's forwarding constructors do.
    */
-  // code-gauge-allow functionCognitiveComplexity 29 -- Each branch is one of the cases Dart distinguishes for this construct.
-  // code-gauge-allow functionNcss 40 -- One case per form of the construct, which reads best together.
+  // code-gauge-allow functionCognitiveComplexity 30 -- Constructor forwarding and mixin field initialization share the slot mapping.
+  // code-gauge-allow functionNcss 42 -- Constructor forwarding and mixin field initialization share the slot mapping.
   private declareForwardingConstructors(
     application: ClassInfo,
     mixin: ClassInfo,
@@ -599,8 +609,11 @@ export class Compiler extends MemberCompiler {
         owner: application,
         type: { ...signature, returnType: application.thisType },
         kind: 'generative',
-        isConst: constructor.isConst,
+        isConst: constructor.isConst && mixin.fields.length === 0,
         row: undefined,
+        get defaults() {
+          return constructor.defaults;
+        },
         impl: (runtime, instance, args, typeArgs, callRow) => {
           initializeFields?.(runtime, instance as DartObject);
           const env = new Map(params.map((param, index) => [param, typeArgs[index] ?? DYNAMIC]));
@@ -1835,9 +1848,8 @@ function registerSealedSubclass(cls: ClassInfo): void {
     if (supercls.modifiers.isSealed && supercls.library === cls.library) supercls.subclasses.push(cls);
   }
   if (!cls.superclass?.cls.mixinOf) return;
-  // Sealed classes count the class written in the source, not its mixin applications.
   let current: ClassInfo | undefined = cls.superclass.cls;
-  while (current?.mixinOf) current = current.superclass?.cls;
+  while (current?.mixinOf && !current.declaration) current = current.superclass?.cls;
   if (current?.modifiers.isSealed && current.library === cls.library && !current.subclasses.includes(cls))
     current.subclasses.push(cls);
 }

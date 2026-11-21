@@ -15,6 +15,52 @@ ${members}
 const withoutLines = (items: TraceItem[]): unknown[] =>
   items.map(({ line, callLines, referenceVars, ...item }) => ({ ...item, callDepth: callLines.length }));
 
+test('trace snapshots retain Dart identifiers that are JavaScript prototype properties', () => {
+  const program = `class Box {
+    int __proto__ = 2;
+    int constructor = 3;
+  }
+  void check(Box __proto__) { print(__proto__.__proto__); }
+  void main() {
+    final __proto__ = 42;
+    final constructor = 9;
+    final object = Box();
+    final record = (hasOwnProperty: 4, constructor: 5);
+    check(object);
+    print([__proto__, constructor, object.__proto__, record.hasOwnProperty]);
+  }`;
+  const trace = traceProgram('dart', program, program);
+  expect(trace.stdout).toBe('2\n[42, 9, 2, 4]\n');
+  expect(trace.traceItems.some(({ referenceVars }) => Object.hasOwn(referenceVars, '__proto__'))).toBe(true);
+  expect(Object.entries(trace.finalVars)).toEqual([
+    ['__proto__', 42],
+    ['constructor', 9],
+  ]);
+  const item = trace.traceItems.findLast(({ referenceVars }) => Object.hasOwn(referenceVars, 'record'));
+  for (const [name, pairs] of [
+    [
+      'object',
+      [
+        ['__proto__', 2],
+        ['constructor', 3],
+      ],
+    ],
+    [
+      'record',
+      [
+        ['constructor', 5],
+        ['hasOwnProperty', 4],
+      ],
+    ],
+  ] as const) {
+    const node = item?.referenceVars[name];
+    expect(node?.kind).toBe('object');
+    if (node?.kind === 'object') {
+      expect(Object.entries(node.entries)).toEqual(pairs.map(([key, value]) => [key, { kind: 'value', value }]));
+    }
+  }
+});
+
 /** Programs that behave alike in both languages, so Dart must reproduce the Java interpreter's trace. */
 test.each([
   {

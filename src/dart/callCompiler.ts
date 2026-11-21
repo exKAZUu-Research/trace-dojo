@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 653 -- Type inference, argument binding, and call dispatch share this compiler phase.
+// code-gauge-allow-file fileNcss 674 -- Type inference, argument binding, and call dispatch share this compiler phase.
 import type {
   Arguments as ArgumentsSyntax,
   Expression,
@@ -28,6 +28,7 @@ import {
   type InterfaceType,
   interfaceType,
   isNullable,
+  isPotentiallyNullable,
   isSubtype,
   isTop,
   mentionsTypeParams,
@@ -134,6 +135,52 @@ export abstract class CallCompiler extends OperatorCompiler {
     if (callee.kind === 'member') return this.compileMemberCall(expression, callee, context);
     const target = this.compileChainPart(callee, undefined);
     return this.compileValueCall(target, args, typeArguments, expression, context);
+  }
+
+  protected compileInstantiation(expression: Extract<Expression, { kind: 'instantiation' }>): Compiled {
+    const target = this.staticTarget(expression);
+    if (target?.kind === 'class' && target.typeArgs) {
+      const alias = target.alias?.aliased;
+      return this.typeLiteralValue(
+        interfaceType(target.cls, target.typeArgs, alias?.kind === 'interface' && alias.nullable)
+      );
+    }
+    const alias = this.instantiatedAliasLiteral(expression);
+    if (alias) return this.typeLiteralValue(alias);
+    const value = this.compileExpression(expression.target);
+    const signature = resolveBound(value.type);
+    if (signature.kind !== 'function' || signature.typeParams.length === 0 || isPotentiallyNullable(value.type))
+      return this.error(expression, `${typeName(value.type)} 型の値には型引数を付けられません。`);
+    const args = this.explicitTypeArguments(signature.typeParams, expression.typeArguments, expression);
+    return this.instantiateFunctionValue(value, instantiateFunction(signature, args), args);
+  }
+
+  private instantiatedAliasLiteral(expression: Extract<Expression, { kind: 'instantiation' }>): DartType | undefined {
+    const { target, typeArguments } = expression;
+    if (target.kind === 'identifier') {
+      const resolution = this.resolveName(target.name, target);
+      if (resolution?.kind !== 'declaration' || resolution.declaration.kind !== 'alias') return;
+      return this.resolveType({
+        ...at(expression),
+        kind: 'named',
+        name: target.name,
+        prefix: undefined,
+        args: typeArguments,
+        nullable: false,
+      });
+    }
+    if (target.kind !== 'member' || target.nullAware) return;
+    const receiver = this.staticTarget(target.object);
+    if (receiver?.kind !== 'prefix' || this.library.lookupPrefixed(receiver.prefix, target.name)?.kind !== 'alias')
+      return;
+    return this.resolveType({
+      ...at(expression),
+      kind: 'named',
+      name: target.name,
+      prefix: receiver.prefix,
+      args: typeArguments,
+      nullable: false,
+    });
   }
 
   /** A call of a name: a method of this, a static member, a function, a constructor, or an extension override. */
@@ -692,15 +739,6 @@ export abstract class CallCompiler extends OperatorCompiler {
       typeArgs: this.runtimeTypes(staticTypeArgs),
       staticTypeArgs,
     };
-  }
-
-  private explicitTypeArguments(params: readonly TypeParam[], typeArguments: TypeSyntax[], span: Span): DartType[] {
-    if (typeArguments.length !== params.length) {
-      this.error(span, `型引数は ${params.length} 個ですが、${typeArguments.length} 個書かれています。`);
-    }
-    const typeArgs = typeArguments.map((argument) => this.resolveType(argument));
-    this.checkBounds(params, typeArgs, span);
-    return typeArgs;
   }
 
   /**

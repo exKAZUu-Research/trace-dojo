@@ -36,9 +36,11 @@ function reserve(runtime: Runtime, minimumBits: number, operations: number): voi
   runtime.spend(1 + operations);
 }
 
-function parseBigInt(runtime: Runtime, text: string, radix: number | undefined): bigint | undefined {
+function parseBigInt(runtime: Runtime, text: string, writtenRadix: Value): bigint | undefined {
   runtime.spend(1 + text.length / 64);
-  const [rest, base, negative] = radixSource(text.trim(), radix);
+  const input = text.trim();
+  if (!/^[+-]?[0-9A-Za-z]+$/.test(input)) return undefined;
+  const [rest, base, negative] = radixSource(input, radixOf(runtime, writtenRadix));
   if (rest.length === 0) return undefined;
   let start = 0;
   while (rest[start] === '0') start++;
@@ -111,16 +113,12 @@ define('BigInt.one', (runtime) => constant(runtime, 1n));
 define('BigInt.two', (runtime) => constant(runtime, 2n));
 define('BigInt.parse', (runtime, _receiver, [source], namedArgs) => {
   const text = stringArg(runtime, source, 'source');
-  const value = parseBigInt(runtime, text, radixOf(runtime, named(namedArgs, 'radix', undefined)));
+  const value = parseBigInt(runtime, text, named(namedArgs, 'radix', undefined));
   if (value === undefined) return runtime.throwError('FormatException', '', ['Could not parse BigInt', text]);
   return newBigInt(runtime, value);
 });
 define('BigInt.tryParse', (runtime, _receiver, [source], namedArgs) => {
-  const value = parseBigInt(
-    runtime,
-    stringArg(runtime, source, 'source'),
-    radixOf(runtime, named(namedArgs, 'radix', undefined))
-  );
+  const value = parseBigInt(runtime, stringArg(runtime, source, 'source'), named(namedArgs, 'radix', undefined));
   return value === undefined ? undefined : newBigInt(runtime, value);
 });
 defineConstructor('BigInt.from', (runtime, _instance, args) => {

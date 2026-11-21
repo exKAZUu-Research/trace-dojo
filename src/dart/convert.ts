@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 558 -- Keep declaration syntax and parameter validation together.
+// code-gauge-allow-file fileNcss 559 -- Keep declaration syntax and parameter validation together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type {
@@ -212,20 +212,25 @@ export class Converter extends ExpressionConverter {
         .filter((child) => !child.isNamed)
         .map((child) => child.type)
     );
-    if (namedOf(node).some((child) => child.type === 'mixin_application_class')) {
-      return unsupported(node, 'class C = A with M; の形のクラス宣言（mixin application）');
-    }
-    const superclassNode = fieldOf(node, 'superclass');
-    const superType = superclassNode ? fieldOf(superclassNode, 'type') : undefined;
-    const mixinsNode = superclassNode ? namedOf(superclassNode).find((child) => child.type === 'mixins') : undefined;
+    const alias = namedOf(node).find((child) => child.type === 'mixin_application_class');
+    const aliasParts = alias ? namedOf(alias) : [];
+    const superclassNode =
+      aliasParts.find((child) => child.type === 'mixin_application') ?? fieldOf(node, 'superclass');
+    const superclassParts = superclassNode ? namedOf(superclassNode) : [];
+    const superType = alias
+      ? superclassParts.find((child) => child.type === 'type')
+      : superclassNode && fieldOf(superclassNode, 'type');
+    const mixinsNode = superclassParts.find((child) => child.type === 'mixins');
     const classKind: ClassKind = tokens.has('mixin') ? 'mixinClass' : 'class';
     const bodyNode = fieldOf(node, 'body');
     const primary = namedOf(node).find((child) => child.type === 'primary_constructor');
     return {
       kind: 'class',
       classKind,
-      name: requireNode(fieldOf(node, 'name'), node).text,
-      typeParameters: this.convertTypeParameters(fieldOf(node, 'type_parameters')),
+      name: requireNode(aliasParts.find((child) => child.type === 'identifier') ?? fieldOf(node, 'name'), node).text,
+      typeParameters: this.convertTypeParameters(
+        aliasParts.find((child) => child.type === 'type_parameters') ?? fieldOf(node, 'type_parameters')
+      ),
       modifiers: {
         isAbstract: tokens.has('abstract'),
         isSealed: tokens.has('sealed'),
@@ -234,8 +239,11 @@ export class Converter extends ExpressionConverter {
         isInterface: tokens.has('interface'),
       },
       superclass: superType ? this.convertType(superType) : undefined,
+      namedMixinApplication: alias ? true : undefined,
       mixins: mixinsNode ? this.typesOf(mixinsNode) : [],
-      interfaces: this.interfacesOf(fieldOf(node, 'interfaces')),
+      interfaces: this.interfacesOf(
+        (alias && superclassParts.find((child) => child.type === 'interfaces')) ?? fieldOf(node, 'interfaces')
+      ),
       onTypes: [],
       members: bodyNode ? this.convertMembers(bodyNode) : [],
       enumConstants: [],
