@@ -3503,6 +3503,24 @@ fun main() {
     stdout: '9223372036854775807\n-9223372036854775808\nnull\nnull\n255\n',
   },
   {
+    name: 'array single predicates preserve array-specific failures and the matched value',
+    source: `fun report(action: () -> Unit) {
+    try { action() } catch (e: Exception) { println(e) }
+}
+fun main() {
+    report { arrayOf("a", "b").single { it == "z" } }
+    report { intArrayOf(1, 2, 3).single { println(it); it > 0 } }
+    println(arrayOf<String?>(null, "present").single { it == null })
+    val elements = arrayOf("first", "second")
+    println(elements.single {
+        if (it == "second") elements[0] = "new"
+        it == "first"
+    })
+}`,
+    stdout:
+      'java.util.NoSuchElementException: Array contains no element matching the predicate.\n1\n2\njava.lang.IllegalArgumentException: Array contains more than one matching element.\nnull\nfirst\n',
+  },
+  {
     name: 'array copying, searching, shuffling, and map operations',
     source: `import kotlin.random.Random
 fun main() {

@@ -179,7 +179,19 @@ function functionsOf(kind: ArrayKind): string {
     `external fun ${g()}${r}.fill(element: ${e}, fromIndex: Int = 0, toIndex: Int = size)`,
     `fun ${g()}${r}.reverse() = reverse(0, size)`,
     `external fun ${g()}${r}.reverse(fromIndex: Int, toIndex: Int)`,
-    `inline fun ${g()}${r}.single(predicate: (${e}) -> Boolean): ${e} = asList().single(predicate)`,
+    `inline fun ${g()}${r}.single(predicate: (${e}) -> Boolean): ${e} {
+    var single: ${e}? = null
+    var found = false
+    for (element in this) {
+        if (predicate(element)) {
+            if (found) throw IllegalArgumentException("Array contains more than one matching element.")
+            single = element
+            found = true
+        }
+    }
+    if (!found) throw NoSuchElementException("Array contains no element matching the predicate.")
+    return single as ${e}
+}`,
     `inline fun ${g()}${r}.singleOrNull(predicate: (${e}) -> Boolean): ${e}? = asList().singleOrNull(predicate)`,
     `fun ${g()}${r}.singleOrNull(): ${e}? = if (size == 1) this[0] else null`,
     `inline fun ${g()}${r}.reduce(operation: (acc: ${e}, ${e}) -> ${e}): ${e} { if (isEmpty()) throw UnsupportedOperationException("Empty array can't be reduced."); var accumulator = this[0]; for (index in 1..lastIndex) accumulator = operation(accumulator, this[index]); return accumulator }`,
