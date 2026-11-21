@@ -233,6 +233,10 @@ class InferenceConstraints {
       this.inferFunctionBody(given, pattern, reversed);
       return;
     }
+    // Like the SDK, derive nothing from generic function types whose bounds refer to their own type parameters.
+    const own = new Set([...given.typeParams, ...pattern.typeParams]);
+    if ([...given.typeParams, ...pattern.typeParams].some(({ bound }) => bound && mentionsTypeParams(bound, own)))
+      return;
     const enclosingParameters = this.scopedParameters;
     this.scopedParameters = new Set([...enclosingParameters, ...given.typeParams]);
     try {

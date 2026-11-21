@@ -1852,6 +1852,20 @@ void main() { print([Stack<int>.empty().items.runtimeType, Stack<int>([1]).clear
   });
 });
 
+test('Dart infers nothing from generic callbacks whose bounds refer to their own type parameters', () => {
+  expect(
+    executeProgram(
+      'dart',
+      'int g<S extends Comparable<S>>(int x) => x;\nvoid f<T>(T Function<S extends Comparable<S>>(T) cb) { print(T); }\nvoid main() { f(g); }'
+    )
+  ).toMatchObject({ kind: 'compileError' });
+  const valid = `int g<S extends List<int>>(int x) => x;
+void f<T>(T Function<S extends List<int>>(T) cb) { print(T); }
+void h<T>(void Function(void Function<S extends Comparable<S>>(T)) cb) { print(T); }
+void main() { f(g); h((g) {}); }`;
+  expect(executeProgram('dart', valid)).toMatchObject({ kind: 'executed', stdout: 'int\ndynamic\n' });
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}
