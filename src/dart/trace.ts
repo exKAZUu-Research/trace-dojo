@@ -118,7 +118,7 @@ class Snapshotter {
       return;
     }
     for (const [name, child] of Object.entries(node.entries)) {
-      this.charge(16 + name.length);
+      this.charge(node.kind === 'array' ? 8 : 16 + name.length);
       this.chargeReference(child);
     }
   }
