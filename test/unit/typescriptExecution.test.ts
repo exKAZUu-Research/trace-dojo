@@ -140,6 +140,21 @@ function assign<T extends string>(value: T extends string ? Inner<T> : never) {
   ]);
 });
 
+test('uses the inferred branch constraint for nested conditional casts and assignments', () => {
+  const source = `type Inner<T> = T extends \`x\${infer R}\` ? (R extends \`y\${infer S}\` ? S : never) : never;
+type Nested<T> = T extends string ? Inner<T> : never;
+type Deeper<T> = T extends string ? (T extends \`x\${infer R}\` ? (R extends \`y\${infer S}\` ? (S extends \`z\${infer U}\` ? U : never) : never) : never) : never;
+function cast<T extends string>(value: T) { return value as Nested<T>; }
+function assign<T extends string>(value: Nested<T>) { const result: T = value; return result; }
+function peel<T extends string>(value: T) { return value as Deeper<T>; }
+console.log(cast('xy-one'), assign<'xy-two'>('-two'), peel('xyz-three'));`;
+  expect(executeProgram('typescript', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'xy-one -two xyz-three\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('infers mapped keys before choosing a conditional branch', () => {
   const source = `type KeysOf<T> = T extends Record<infer K, unknown> ? K : never;
 type EntriesOf<T> = T extends Record<infer K, infer V> ? [K, V] : never;

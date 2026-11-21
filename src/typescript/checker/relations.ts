@@ -379,13 +379,15 @@ export class Relations {
   }
 
   private conditionalComparableToParameter(source: ConditionalType, target: TypeParameter): boolean {
-    const branches = [this.c.conditionalTrueType(source), source.falseType];
-    return branches.flatMap(typeMembers).some((candidate) => {
-      if (candidate.kind === 'conditional') return this.isRelated(candidate, target, 'comparable');
-      if (isIntrinsic(candidate, 'never')) return false;
-      const bound = candidate.kind === 'typeParameter' ? this.c.baseConstraint(candidate) : candidate;
-      return isIntrinsic(bound, 'unknown') || this.isAssignable(candidate, target);
-    });
+    const branches = [this.c.conditionalInferredTrueType(source), source.falseType];
+    return (
+      branches.flatMap(typeMembers).some((candidate) => {
+        if (candidate.kind === 'conditional') return this.isRelated(candidate, target, 'comparable');
+        if (isIntrinsic(candidate, 'never')) return false;
+        const bound = candidate.kind === 'typeParameter' ? this.c.baseConstraint(candidate) : candidate;
+        return isIntrinsic(bound, 'unknown') || this.isAssignable(candidate, target);
+      }) || branches.every((branch) => isIntrinsic(branch, 'never'))
+    );
   }
 
   private relatedToKeyof(source: Type, object: Type, relation: Relation, state: number): boolean {

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 746 -- Holds type construction, bounded instantiation, structure lookup, and diagnostics shared by checker components.
+// code-gauge-allow-file fileNcss 748 -- Holds type construction, bounded instantiation, structure lookup, and diagnostics shared by checker components.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { type SourceDiagnostic, sourceDiagnostic } from '../../interpreter/diagnostics';
@@ -501,6 +501,14 @@ export class Checker {
     return checkType.kind === 'typeParameter'
       ? this.instantiate(trueType, new Map([[checkType.id, this.substitutionOf(checkType, extendsType)]]))
       : trueType;
+  }
+
+  /** The default relation constraint binds local `infer` variables even while the check type stays deferred. */
+  conditionalInferredTrueType(type: ConditionalType): Type {
+    const branch = this.conditionalTrueType(type);
+    if (type.inferTypeParameters.length === 0) return branch;
+    const inferred = this.inference.completeInference(type.inferTypeParameters, new Map(), type.mapper);
+    return this.instantiate(branch, inferred);
   }
 
   private instantiateUnion(type: UnionType, mapper: Mapper): Type {
@@ -1033,7 +1041,7 @@ export class Checker {
       const yes =
         trueType === type.checkType
           ? intersectionOf([this.baseConstraint(type.checkType), type.extendsType], this)
-          : this.baseConstraint(this.conditionalTrueType(type));
+          : this.baseConstraint(this.conditionalInferredTrueType(type));
       const no = this.baseConstraint(type.falseType);
       if (isAnyLike(yes)) return no;
       if (isAnyLike(no)) return yes;
