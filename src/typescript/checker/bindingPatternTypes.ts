@@ -44,11 +44,17 @@ export function impliedPatternType(
   );
 }
 
-export function inferredPatternParameterType(c: Checker, pattern: TreeNode): Type {
+export function inferredPatternParameterType(
+  c: Checker,
+  pattern: TreeNode,
+  recordDefault?: (initializer: TreeNode) => void
+): Type {
   const type = patternShape(
     c,
     pattern,
-    (element) => bindingElementDefaultType(c, element) ?? inferredPatternParameterType(c, element),
+    (element) =>
+      bindingElementDefaultType(c, element, parameterContext, recordDefault) ??
+      inferredPatternParameterType(c, element, recordDefault),
     'inferred'
   );
   if (type) return type;
@@ -56,20 +62,31 @@ export function inferredPatternParameterType(c: Checker, pattern: TreeNode): Typ
   return anyType;
 }
 
-export function padParameterInitializer(c: Checker, pattern: TreeNode, value: Type): Type {
+export function padParameterInitializer(
+  c: Checker,
+  pattern: TreeNode,
+  value: Type,
+  recordDefault?: (initializer: TreeNode) => void
+): Type {
   if (value.kind !== 'object') return value;
-  if (pattern.type === 'array_pattern' && value.tuple) return padTupleInitializer(c, pattern, value.tuple, value);
-  if (pattern.type === 'object_pattern' && value.fresh) return padObjectInitializer(c, pattern, value);
+  if (pattern.type === 'array_pattern' && value.tuple)
+    return padTupleInitializer(c, pattern, value.tuple, value, recordDefault);
+  if (pattern.type === 'object_pattern' && value.fresh) return padObjectInitializer(c, pattern, value, recordDefault);
   return value;
 }
 
-function padObjectInitializer(c: Checker, pattern: TreeNode, value: ObjectType): Type {
+function padObjectInitializer(
+  c: Checker,
+  pattern: TreeNode,
+  value: ObjectType,
+  recordDefault?: (initializer: TreeNode) => void
+): Type {
   const structure = c.structureOf(value);
   const missing = new Map<string, Property>();
   for (const element of named(pattern)) {
     const { name, value: binding } = objectBindingEntry(c, element, true);
     if (name === undefined || structure.properties.has(name)) continue;
-    const type = bindingElementDefaultType(c, binding);
+    const type = bindingElementDefaultType(c, binding, parameterContext, recordDefault);
     if (type) missing.set(name, simpleProperty(name, type, { optional: true }));
   }
   if (missing.size === 0) return value;
@@ -82,7 +99,13 @@ function padObjectInitializer(c: Checker, pattern: TreeNode, value: ObjectType):
   );
 }
 
-function padTupleInitializer(c: Checker, pattern: TreeNode, tuple: TupleInfo, value: Type): Type {
+function padTupleInitializer(
+  c: Checker,
+  pattern: TreeNode,
+  tuple: TupleInfo,
+  value: Type,
+  recordDefault?: (initializer: TreeNode) => void
+): Type {
   const { elements: source, readonly } = tuple;
   const length = arrayLiteralLength(pattern);
   if (source.length >= length || source.some((element) => element.rest)) return value;
@@ -91,7 +114,7 @@ function padTupleInitializer(c: Checker, pattern: TreeNode, tuple: TupleInfo, va
   for (let index = elements.length; index < length; index++) {
     const element = bindings.get(index);
     if (element && isRest(element)) break;
-    const type = element && bindingElementDefaultType(c, element);
+    const type = element && bindingElementDefaultType(c, element, parameterContext, recordDefault);
     if (element && !type) c.patterns.reportImplicitAny(element);
     elements.push({ type: type ?? anyType, optional: true, rest: false });
   }
@@ -101,18 +124,20 @@ function padTupleInitializer(c: Checker, pattern: TreeNode, tuple: TupleInfo, va
 function bindingElementDefaultType(
   c: Checker,
   element: TreeNode,
-  { isConst, parameter }: BindingContext = parameterContext
+  { isConst, parameter }: BindingContext,
+  recordDefault?: (initializer: TreeNode) => void
 ): Type | undefined {
   const target = defaultedTarget(element);
   if (!target) return undefined;
   const value = element.childForFieldName('right');
   if (!value) return undefined;
+  recordDefault?.(value);
   const contextual = c.patterns.impliedBindingType(target, isConst, parameter);
   return c.flow.probe(() =>
     c.silently(() => {
       const initial = c.patterns.initializerType(value, contextual);
       return c.literals.widenDeclared(
-        parameter ? padParameterInitializer(c, target, initial) : initial,
+        parameter ? padParameterInitializer(c, target, initial, recordDefault) : initial,
         isConst,
         parameter
       );

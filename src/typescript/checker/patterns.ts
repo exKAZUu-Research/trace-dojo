@@ -52,7 +52,7 @@ export class BindingPatterns {
   readonly correlatedSources = new Map<number, Type>();
   readonly initializerContexts = new WeakSet<Type>();
   private readonly selectedKeys = new Map<number, string[] | undefined>();
-  private readonly inferredParameters = new Set<number>();
+  private readonly inferredDefaults = new Map<number, TreeNode>();
   constructor(private readonly c: Checker) {}
 
   /** The type a binding pattern gives the name `name` when it destructures a value of `type`. */
@@ -112,7 +112,7 @@ export class BindingPatterns {
     const right = pattern.childForFieldName('right') as TreeNode;
     const contextual = options.annotated ? type : this.impliedBindingType(left, options.isConst, options.parameter);
     const initialDefault = this.initializerType(right, contextual, true);
-    const defaultType = options.parameter ? padParameterInitializer(this.c, left, initialDefault) : initialDefault;
+    const defaultType = options.parameter ? this.parameterInitializerType(left, initialDefault) : initialDefault;
     const withoutUndefined = this.c.relations.removeUndefined(type);
     const initial =
       assigned === errorType
@@ -184,9 +184,8 @@ export class BindingPatterns {
     return impliedPatternType(this.c, pattern, leafType);
   }
 
-  inferredParameterType(parameter: TreeNode, pattern: TreeNode): Type {
-    if (this.c.silent === 0) this.inferredParameters.add(parameter.id);
-    return inferredPatternParameterType(this.c, pattern);
+  inferredParameterType(pattern: TreeNode): Type {
+    return inferredPatternParameterType(this.c, pattern, this.recordInferredDefaults(pattern));
   }
 
   reportImplicitAny(element: TreeNode): void {
@@ -195,21 +194,24 @@ export class BindingPatterns {
 
   checkParameterDefaultRead(reference: TreeNode, symbol: Sym): void {
     const parameter = symbol.valueDeclaration;
-    if (!parameter || !this.inferredParameters.has(parameter.id) || reference.startIndex >= parameter.endIndex) return;
+    if (
+      !parameter ||
+      symbol.valueKind !== 'parameter' ||
+      reference.startIndex < parameter.startIndex ||
+      reference.startIndex >= parameter.endIndex
+    )
+      return;
+    const declaration = symbol.valueEntries[0]?.name;
+    if (!declaration) return;
     let child = reference;
     for (let parent = reference.parent; parent && parent.id !== parameter.id; child = parent, parent = parent.parent) {
-      if (
-        parent.startIndex < parameter.startIndex ||
-        (functionLikeTypes.has(parent.type) && !isImmediatelyInvoked(parent))
-      )
-        return;
-      if (!defaultedTarget(parent) || parent.childForFieldName('right')?.id !== child.id) continue;
-      const declaration = symbol.valueEntries[0]?.name;
-      if (declaration)
-        this.c.error(
-          declaration,
-          `変数 ${symbol.name} は型注釈がなく、初期値で参照されるため、型が暗黙に any になります。`
-        );
+      if (functionLikeTypes.has(parent.type) && !isImmediatelyInvoked(parent)) return;
+      const pattern = this.inferredDefaults.get(child.id);
+      if (!pattern || declaration.startIndex < pattern.startIndex || declaration.endIndex > pattern.endIndex) continue;
+      this.c.error(
+        declaration,
+        `変数 ${symbol.name} は型注釈がなく、初期値で参照されるため、型が暗黙に any になります。`
+      );
       return;
     }
   }
@@ -218,8 +220,21 @@ export class BindingPatterns {
     return impliedPatternType(this.c, pattern, () => anyType, { isConst, parameter });
   }
 
-  parameterInitializerType(pattern: TreeNode, value: Type): Type {
-    return padParameterInitializer(this.c, pattern, value);
+  parameterInitializerType(pattern: TreeNode, value: Type, inferBindings = true): Type {
+    return padParameterInitializer(
+      this.c,
+      pattern,
+      value,
+      inferBindings ? this.recordInferredDefaults(pattern) : undefined
+    );
+  }
+
+  private recordInferredDefaults(pattern: TreeNode): ((initializer: TreeNode) => void) | undefined {
+    if (this.c.silent > 0) return undefined;
+    return (initializer) => {
+      const previous = this.inferredDefaults.get(initializer.id);
+      if (!previous || previous.startIndex > pattern.startIndex) this.inferredDefaults.set(initializer.id, pattern);
+    };
   }
 
   private bindObjectPattern(pattern: TreeNode, type: Type, bind: Bind, options: BindingOptions, assigned?: Type): void {

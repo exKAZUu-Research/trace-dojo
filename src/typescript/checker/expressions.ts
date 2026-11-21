@@ -330,7 +330,7 @@ export class ExpressionChecker {
       this.c.error(parameter, `残余引数 ${name} の型が暗黙に any[] になります。型を書いてください。`);
       return this.c.arrayType(anyType);
     }
-    return this.c.patterns.inferredParameterType(parameter, binding);
+    return this.c.patterns.inferredParameterType(binding);
   }
 
   typeOfQuery(node: TreeNode): Type {

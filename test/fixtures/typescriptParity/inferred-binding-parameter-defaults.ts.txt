@@ -63,3 +63,18 @@ function directTupleDefault({x:[n=1,m=2]=[3]}) { console.log(n, m); }
 directTupleDefault({});
 directTupleDefault({x:[4]});
 directTupleDefault({x:[4,5]});
+
+function suppliedSiblingDefault({left = 1, right = left + 1} = {right: 3}) {
+  return left + right;
+}
+function nestedSuppliedSiblingDefault({outer: {left = 1, right = left + 1} = {left: 2, right: 3}} = {}) {
+  return left + right;
+}
+function contextTypesSiblings(callback: (options?: {left?: number; right?: number}) => number) {
+  return callback();
+}
+const fromContext = contextTypesSiblings(({left = 1, right = left + 1} = {}) => left + right);
+function siblingReadInClosure({left = 1, read = () => left} = {}) {
+  return read();
+}
+console.log(suppliedSiblingDefault(), nestedSuppliedSiblingDefault(), fromContext, siblingReadInClosure());

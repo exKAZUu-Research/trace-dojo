@@ -41,3 +41,19 @@ function directTupleDefault({x:[n=1,m=2]=[3]}) { console.log(n, m); }
 directTupleDefault({x:[]});
 function optionalProperty({x:{value:[n=1]=[]}={value:[]}}) { console.log(n); }
 optionalProperty({x:{value:[2]}});
+
+function inferredObjectCycle({left = 1, right = left + 1} = {}) {
+  return left + right;
+}
+function inferredTupleCycle([left = 1, right = left + 1] = []) {
+  return left + right;
+}
+function providedFirstValueCycle({left = 1, right = left + 1} = {left: 2}) {
+  return left + right;
+}
+function inferredNestedCycle({outer: {left = 1, right = left + 1} = {}} = {}) {
+  return left + right;
+}
+function annotatedNestedCycle({outer: {left = 1, right = left + 1} = {}}: {outer?: {left?: number; right?: number}} = {}) {
+  return left + right;
+}

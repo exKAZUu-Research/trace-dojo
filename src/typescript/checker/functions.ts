@@ -622,7 +622,9 @@ export class FunctionChecker {
     const pattern = parameter.childForFieldName('pattern') ?? parameter;
     const implied = expected ? undefined : this.c.patterns.impliedBindingType(pattern, false, true);
     const valueType = this.c.patterns.initializerType(value, expected ?? implied);
-    const initial = annotation ? valueType : this.c.patterns.parameterInitializerType(pattern, valueType);
+    const initial = annotation
+      ? valueType
+      : this.c.patterns.parameterInitializerType(pattern, valueType, expected === undefined);
     if (expected) this.c.expressions.checkAssignable(pattern, initial, expected, value);
     return initial;
   }
