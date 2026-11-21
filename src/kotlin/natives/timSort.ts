@@ -161,6 +161,11 @@ class RunMerge {
   }
 
   run(compare: Compare, threshold: number): number {
+    const buffer = (this.forward ? this.left : this.right).values;
+    return this.frame.runtime.withNativeRoots([buffer], () => this.merge(compare, threshold));
+  }
+
+  private merge(compare: Compare, threshold: number): number {
     const last = this.forward ? this.left : this.right;
     const first = this.forward ? this.right : this.left;
     this.move(first, 1);
@@ -226,7 +231,7 @@ class RunMerge {
 }
 
 class MergeCursor {
-  private readonly values: Value[];
+  readonly values: Value[];
   private low: number;
   private high: number;
 

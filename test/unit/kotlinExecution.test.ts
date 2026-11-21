@@ -2,6 +2,25 @@ import { expect, test } from 'vitest';
 
 import { executeProgram } from '../../src/interpreter/program';
 
+test.each([
+  ['list', 'val items = mutableListOf<Ranked>()\n    for (i in 0 until 40) items.add(ranked(i))'],
+  ['array', 'val items = Array(40) { ranked(it) }'],
+])('keeps turtles in the sort buffer of a Kotlin %s', (_kind, initialization) => {
+  const source = `class Ranked(val rank: Int, val turtle: Turtle)
+fun ranked(i: Int): Ranked = Ranked((i * 17) % 40, Turtle(i % 7, i / 7))
+fun main() {
+    ${initialization}
+    items.sortWith(Comparator { a, b ->
+        a.turtle.canMoveForward()
+        a.rank.compareTo(b.rank)
+    })
+    println(items.size)
+}`;
+  const result = executeProgram('kotlin', source);
+  expect(result).toMatchObject({ kind: 'executed', stdout: '40\n' });
+  expect('finalTurtles' in result && result.finalTurtles).toHaveLength(40);
+});
+
 test.each(['contains', 'split'])('charges the execution budget during CharSequence %s', (operation) => {
   const source = `fun main() {
     val s: CharSequence = StringBuilder("a".repeat(100000))
