@@ -40,3 +40,18 @@ function spreadObject({outer: {value = 2}} = {outer: {...{value: 1}}}) { return 
 spreadObject({outer: {}});
 function defaultedOuter({outer: {value = 2} = {}} = {outer: {value: 1}}) { return value; }
 defaultedOuter({outer: {}});
+
+function maybeValue({outer: {value} = {value: 1}} = {outer: {}}) {
+  const definitelyNumber: number = value;
+  return definitelyNumber;
+}
+function absentEverywhere({outer: {value, absent} = {value: 1}} = {outer: {}}) {
+  return [value, absent];
+}
+const storedEmptyForBinding = {};
+function storedDefault({outer: {value} = {value: 1}} = {outer: storedEmptyForBinding}) {
+  return value;
+}
+function spreadDefault({outer: {value} = {value: 1}} = {outer: {...{}}}) {
+  return value;
+}

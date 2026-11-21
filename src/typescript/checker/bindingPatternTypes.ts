@@ -71,6 +71,8 @@ function padObjectInitializer(c: Checker, pattern: TreeNode, value: ObjectType):
   return freshObjectLiteral(
     anonymousObject(() => ({ ...structure, properties: new Map([...structure.properties, ...missing]) }), {
       isLiteral: true,
+      hasSpread: value.hasSpread,
+      isUnionSpread: value.isUnionSpread,
     })
   );
 }

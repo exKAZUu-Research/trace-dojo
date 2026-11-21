@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 487 -- Keeps type data, cache keys, and canonical type constructors together.
+// code-gauge-allow-file fileNcss 488 -- Keeps type data, cache keys, and canonical type constructors together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { ExecutionBudget } from '../../interpreter/limits';
@@ -191,6 +191,7 @@ export interface ObjectType {
   isLiteral?: boolean;
   /** For an object literal typed by one alternative of a union it spreads, which TypeScript leaves unnormalized. */
   isUnionSpread?: boolean;
+  hasSpread?: boolean;
   /** The alias the type was written with, for printing. */
   aliasName?: string;
   aliasArguments?: Type[];

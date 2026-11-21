@@ -34,6 +34,7 @@ const forwardedMembers: {
   mappedKeys: true,
   isLiteral: true,
   isUnionSpread: true,
+  hasSpread: true,
   isFunction: true,
   thisType: true,
   origin: true,

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 787 -- Types literals and their spreads, members, and widening in the same literal context.
+// code-gauge-allow-file fileNcss 788 -- Types literals and their spreads, members, and widening in the same literal context.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExpressionListFlow, tupleArgumentContexts } from './callArity';
@@ -407,13 +407,14 @@ export class LiteralChecker {
             ...literal.spreadIndexes?.[index],
             properties: new Map([...alternative, ...properties]),
           }),
-          { isLiteral: true, isUnionSpread: true }
+          { isLiteral: true, isUnionSpread: true, hasSpread: true }
         );
         this.objectLiteralNodes.set(variant.id, node);
         return freshObjectLiteral(variant);
       });
       return unionOf(variants, true);
     }
+    object.hasSpread = literal.spreadIndexes !== undefined;
     this.objectLiteralNodes.set(object.id, node);
     return freshObjectLiteral(object);
   }
@@ -1239,7 +1240,7 @@ export class LiteralChecker {
         }
         return { ...structure, properties };
       },
-      { isLiteral: true, isUnionSpread: type.isUnionSpread }
+      { isLiteral: true, isUnionSpread: type.isUnionSpread, hasSpread: type.hasSpread }
     );
     return keepFresh && type.fresh ? freshObjectLiteral(widened) : widened;
   }

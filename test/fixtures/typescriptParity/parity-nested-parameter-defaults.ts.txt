@@ -45,3 +45,15 @@ function computedOuter({ outer: { [configKey]: count = 5 } } = { outer: { count:
   return count;
 }
 console.log(requiredOuter({outer: {}}), requiredOuter(), fromArray([{}]), fromArray(), computedOuter({outer: {}}), computedOuter());
+
+function nestedOwnDefault({outer: {value} = {value: 7}} = {outer: {}}): number | undefined {
+  return value;
+}
+function nestedOwnDefaultArray([[value] = [8]] = [[]]): number | undefined {
+  return value;
+}
+function partialBranch({outer: {flag, text} = {flag: false, text: 'inner'}} = {outer: {flag: true}}) {
+  return [flag, text];
+}
+console.log(nestedOwnDefault(), nestedOwnDefault({}), nestedOwnDefault({outer: {value: 4}}));
+console.log(nestedOwnDefaultArray(), partialBranch(), partialBranch({}));

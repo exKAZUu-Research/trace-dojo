@@ -458,12 +458,14 @@ export class BindingPatterns {
     name: string,
     allowMissing: boolean
   ): Type | undefined {
-    const types = type.types.map((member) =>
-      this.c.silently(() => this.destructuredProperty(node, member, name, allowMissing))
-    );
+    const properties = type.types.map((member) => this.c.propertyOf(member, name));
+    const hasProperty = properties.some(Boolean);
+    const types = type.types.map((member) => {
+      const mayOmit = hasProperty && member.kind === 'object' && !member.hasSpread;
+      return this.c.silently(() => this.destructuredProperty(node, member, name, allowMissing || mayOmit));
+    });
     if (types.includes(errorType)) return undefined;
-    for (const member of type.types) {
-      const property = this.c.propertyOf(member, name);
+    for (const property of properties) {
       if (property) this.c.members.checkPropertyUse(node, node, node, type, property);
     }
     return unionOf(types, true);
