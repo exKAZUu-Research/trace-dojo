@@ -26,6 +26,18 @@ test.each([
     stdout: '[, abc]\n[, a, , c, ]\n[, a, b, c, ]\n[, ]\n[abc]\n',
   },
   {
+    name: 'explicit calls to Char and Boolean operators',
+    source: `fun main() {
+    println('a'.plus(2))
+    println('c'.minus(1))
+    println('a'.minus('c'))
+    println(Char.MAX_VALUE.inc().code)
+    println(Char.MIN_VALUE.dec().code)
+    println(true.not())
+}`,
+    stdout: 'c\nb\n-2\n0\n65535\nfalse\n',
+  },
+  {
     name: 'smart casts under Boolean negation',
     source: `fun show(text: String?, value: Any) {
     if (!(text == null)) println(text.length)

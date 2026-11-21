@@ -42,6 +42,7 @@ class Boolean private constructor() : Comparable<Boolean> {
     external infix fun and(other: Boolean): Boolean
     external infix fun or(other: Boolean): Boolean
     external infix fun xor(other: Boolean): Boolean
+    external operator fun not(): Boolean
     external override fun compareTo(other: Boolean): Int
     external override fun equals(other: Any?): Boolean
     external override fun hashCode(): Int
@@ -55,6 +56,11 @@ class Char private constructor() : Comparable<Char> {
     external fun toInt(): Int
     external fun toLong(): Long
     external fun toDouble(): Double
+    external operator fun plus(other: Int): Char
+    external operator fun minus(other: Int): Char
+    external operator fun minus(other: Char): Int
+    external operator fun inc(): Char
+    external operator fun dec(): Char
     external operator fun rangeTo(other: Char): CharRange
     external operator fun rangeUntil(other: Char): CharRange
     external override fun equals(other: Any?): Boolean

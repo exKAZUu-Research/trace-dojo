@@ -198,9 +198,24 @@ function definePrimitives(): void {
     });
   }
   defineNativeProperty('kotlin.Char.code', (_frame, receiver) => receiver as number);
+  defineCharOperators();
   for (const kind of ['Int', 'Long', 'UInt'] as const) defineBits(kind);
   defineRanges();
   defineBooleans();
+}
+
+function defineCharOperators(): void {
+  const plus = arithmeticOperation('Char', '+');
+  const minus = arithmeticOperation('Char', '-');
+  defineNative('kotlin.Char.plus(Int)', (frame, receiver, [offset]) =>
+    plus(frame, receiver as number, offset as number)
+  );
+  defineNative('kotlin.Char.minus(Int)', (frame, receiver, [offset]) =>
+    minus(frame, receiver as number, offset as number)
+  );
+  defineNative('kotlin.Char.minus(Char)', (_frame, receiver, [other]) => (receiver as number) - (other as number));
+  defineNative('kotlin.Char.inc()', (_frame, receiver) => step('Char', receiver as number, 1));
+  defineNative('kotlin.Char.dec()', (_frame, receiver) => step('Char', receiver as number, -1));
 }
 
 /** The bit operations of Int, Long, and UInt, which wrap their results to the type's width. */
@@ -258,6 +273,7 @@ function defineRanges(): void {
 }
 
 function defineBooleans(): void {
+  defineNative('kotlin.Boolean.not()', (_frame, receiver) => receiver === false);
   defineNative('kotlin.Boolean.and(Boolean)', (_frame, a, [b]) => (a as boolean) && (b as boolean));
   defineNative('kotlin.Boolean.or(Boolean)', (_frame, a, [b]) => (a as boolean) || (b as boolean));
   defineNative('kotlin.Boolean.xor(Boolean)', (_frame, a, [b]) => a !== b);
