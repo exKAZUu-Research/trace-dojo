@@ -32,3 +32,14 @@ withComputed({});
 withComputed({[computed]: 10});
 const contextual: (p: {a?: number; b?: number}) => number = ({a = 11, b = a}) => b;
 console.log(contextual({}));
+
+function first({x:{a=1}={}}){const y:number=a; console.log(y);}
+first({}); first({x:{}}); first({x:{a:2}});
+function second({x:{a=1}={a:2}}){const y:number=a; console.log(y);}
+second({}); second({x:{}}); second({x:{a:2}});
+function deep({x:{child:{a=1}}={child:{}}}){const y:number=a; console.log(y);}
+deep({}); deep({x:{child:{}}}); deep({x:{child:{a:2}}});
+function arrays({x:[a=1]=[]}){const y:number=a; console.log(y);}
+arrays({}); arrays({x:[]}); arrays({x:[2]});
+function reversed([{a=1} = {}]){const y:number=a; console.log(y);}
+reversed([]); reversed([{}]); reversed([{a:2}]);

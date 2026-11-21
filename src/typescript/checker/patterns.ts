@@ -3,7 +3,12 @@ import assert from 'node:assert/strict';
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { functionLikeTypes } from './binder';
-import { defaultedTarget, impliedPatternType, inferredPatternParameterType } from './bindingPatternTypes';
+import {
+  applyParameterPattern,
+  defaultedTarget,
+  impliedPatternType,
+  inferredPatternParameterType,
+} from './bindingPatternTypes';
 import type { Checker } from './checker';
 import { isDefinitelyFalsy, isSpreadableProperty, spreadCopy } from './literals';
 import type { Sym } from './scopes';
@@ -14,7 +19,6 @@ import {
   anyType,
   emptyStructure,
   errorType,
-  freshObjectLiteral,
   isAnyLike,
   isIntrinsic,
   isPropertyKeyLiteral,
@@ -38,6 +42,7 @@ interface BindingOptions {
   annotated?: boolean;
   isConst?: boolean;
   literalSource?: TreeNode;
+  inferredParameter?: boolean;
 }
 
 type Bind = (identifier: TreeNode, type: Type, assigned?: Type) => void;
@@ -105,13 +110,16 @@ export class BindingPatterns {
     const left = pattern.childForFieldName('left') as TreeNode;
     const right = pattern.childForFieldName('right') as TreeNode;
     const implied = this.impliedBindingType(left, options.isConst);
-    const defaultType = this.initializerType(right, implied ?? (options.annotated ? type : undefined), true);
-    this.checkInitializer(left, right, defaultType);
+    const initialDefault = this.initializerType(right, implied ?? (options.annotated ? type : undefined), true);
+    const defaultType = options.inferredParameter
+      ? applyParameterPattern(this.c, left, initialDefault, implied)
+      : initialDefault;
+    this.checkInitializer(left, right, initialDefault);
     const withoutUndefined = this.c.relations.removeUndefined(type);
     const initial =
       assigned === errorType
         ? errorType
-        : unionOf([this.c.relations.removeUndefined(assigned ?? type), defaultType], true);
+        : unionOf([this.c.relations.removeUndefined(assigned ?? type), initialDefault], true);
     if (options.annotated && !isIntrinsic(withoutUndefined, 'never')) {
       const declared = this.defaultMayBeUndefined(defaultType) ? type : withoutUndefined;
       this.c.expressions.checkAssignable(right, defaultType, declared);
@@ -189,6 +197,10 @@ export class BindingPatterns {
     return inferredPatternParameterType(this.c, pattern, implicitAny);
   }
 
+  hasInferredParameterType(parameter: TreeNode): boolean {
+    return this.inferredParameters.has(parameter.id);
+  }
+
   checkParameterDefaultRead(reference: TreeNode, symbol: Sym): void {
     const parameter = symbol.valueDeclaration;
     if (!parameter || !this.inferredParameters.has(parameter.id) || reference.startIndex >= parameter.endIndex) return;
@@ -215,27 +227,7 @@ export class BindingPatterns {
   }
 
   parameterInitializerType(pattern: TreeNode, value: Type, implied: Type | undefined): Type {
-    if (!implied) return value;
-    if (isTuple(value) && isTuple(implied)) return this.padParameterTuple(value, implied);
-    if (pattern.type !== 'object_pattern' || value.kind !== 'object' || !value.fresh) return value;
-    const structure = this.c.structureOf(value);
-    const properties = new Map(structure.properties);
-    for (const [name, property] of this.c.structureOf(implied).properties) {
-      if (property.optional) properties.set(name, { ...(properties.get(name) ?? property), optional: true });
-    }
-    return freshObjectLiteral(anonymousObject(() => ({ ...structure, properties }), { isLiteral: true }));
-  }
-
-  private padParameterTuple(value: ObjectType, implied: ObjectType): Type {
-    const tuple = value.tuple;
-    if (!tuple || tuple.elements.some((element) => element.rest)) return value;
-    const extra = (implied.tuple?.elements ?? []).slice(tuple.elements.length).filter((element) => !element.rest);
-    return extra.length > 0
-      ? this.c.tupleType(
-          [...tuple.elements, ...extra.map((element) => ({ ...element, optional: true }))],
-          tuple.readonly
-        )
-      : value;
+    return applyParameterPattern(this.c, pattern, value, implied, false);
   }
 
   private bindingLeafType(element: TreeNode, isConst = false): Type {

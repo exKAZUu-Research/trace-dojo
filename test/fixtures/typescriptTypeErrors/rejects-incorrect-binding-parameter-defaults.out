@@ -11,3 +11,7 @@
 (23,3): error TS7022: 'a' implicitly has type 'any' because it does not have a type annotation and is referenced directly or indirectly in its own initializer.
 (26,23): error TS7022: 'x' implicitly has type 'any' because it does not have a type annotation and is referenced directly or indirectly in its own initializer.
 (26,27): error TS2372: Parameter 'x' cannot reference itself.
+(28,26): error TS2353: Object literal may only specify known properties, and 'extra' does not exist in type '{ a?: number | undefined; }'.
+(29,46): error TS2322: Type 'string | number' is not assignable to type 'number'.
+(30,28): error TS2339: Property 'a' does not exist on type '{}'.
+(31,27): error TS7031: Binding element 'a' implicitly has an 'any' type.

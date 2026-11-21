@@ -24,3 +24,8 @@ function siblingCycle({
   b = a
 }) { console.log(a, b); }
 function directCycle({x = x}) { console.log(x); }
+
+function exact({x:{a=1}={extra:2}}) {console.log(a);}
+function typed({x:{a=1}={a:'wrong'}}) {const invalid:number=a;}
+function missingObject({x:{a}={}}) {console.log(a);}
+function missingTuple({x:[a]=[]}) {console.log(a);}

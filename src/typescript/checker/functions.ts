@@ -247,7 +247,10 @@ export class FunctionChecker {
               const symbol = scope.values.get(identifier.text);
               if (symbol) this.parameterTypes.set(symbol.id, identifierType);
             },
-            { annotated: parameterNode.childForFieldName('type') !== null }
+            {
+              annotated: parameterNode.childForFieldName('type') !== null,
+              inferredParameter: this.c.patterns.hasInferredParameterType(parameterNode),
+            }
           )
         );
       }
@@ -598,7 +601,10 @@ export class FunctionChecker {
         const symbol = this.c.scopeOf(identifier).lookupValue(identifier.text);
         if (symbol) this.c.flow.current?.entries.set(`s${symbol.id}`, { type: bound, assigned: true });
       },
-      { annotated: parameter.childForFieldName('type') !== null }
+      {
+        annotated: parameter.childForFieldName('type') !== null,
+        inferredParameter: this.c.patterns.hasInferredParameterType(parameter),
+      }
     );
   }
 
