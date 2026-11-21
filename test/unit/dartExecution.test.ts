@@ -1356,6 +1356,19 @@ test.each([
   });
 });
 
+test.each(['int _', 'var _', 'final _'])(
+  'Dart rejects the wildcard declaration %s in a pattern assignment',
+  (wildcard) => {
+    expect(executeProgram('dart', `void main() { int a = 0; (${wildcard}, a) = (1, 2); print(a); }`)).toMatchObject({
+      kind: 'compileError',
+    });
+    expect(executeProgram('dart', 'void main() { int a = 0; (_, a) = (1, 2); print(a); }')).toMatchObject({
+      kind: 'executed',
+      stdout: '2\n',
+    });
+  }
+);
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}

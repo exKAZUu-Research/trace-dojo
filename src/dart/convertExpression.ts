@@ -871,10 +871,10 @@ export abstract class ExpressionConverter {
         const typeNode = namedOf(node).find((child) => child.type === 'type');
         const type = typeNode ? this.convertType(typeNode) : undefined;
         const keyword = hasToken(node, 'var') || hasToken(node, 'final') || type !== undefined;
-        if (name === '_') return { kind: 'wildcard', type, ...span };
         if (context === 'assignment' && keyword) {
           return syntaxError(node, 'パターンによる代入では、新しい変数を宣言できません。');
         }
+        if (name === '_') return { kind: 'wildcard', type, ...span };
         if (context === 'assignment') return { kind: 'assignedVariable', name, ...span };
         return { kind: 'variable', name, type, isFinal: hasToken(node, 'final'), keyword, ...span };
       }
