@@ -84,7 +84,11 @@ export class ConditionChecker {
         // The binder folds Boolean literal condition nodes, without folding a literal inside unary negation.
         const inner = this.conditionOf(argument);
         this.checkTruthiness(argument, inner.type);
-        return { whenTrue: inner.whenFalse, whenFalse: inner.whenTrue, type: booleanType };
+        return {
+          whenTrue: inner.whenFalse,
+          whenFalse: inner.whenTrue,
+          type: this.c.operators.negationType(inner.type),
+        };
       }
       case 'binary_expression': {
         const result = this.binaryCondition(expression);

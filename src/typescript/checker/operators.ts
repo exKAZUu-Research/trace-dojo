@@ -49,12 +49,7 @@ export class OperatorChecker {
     const argument = node.childForFieldName('argument') as TreeNode;
     switch (operator) {
       case '!': {
-        // An operand that is always truthy gives `false`, and one always falsy gives `true`.
-        const { type } = this.c.conditions.condition(argument);
-        if (isAnyLike(type)) return booleanType;
-        if (isIntrinsic(this.c.flow.narrowByTruthiness(type, false), 'never')) return freshLiteralType(false);
-        if (isIntrinsic(this.c.flow.narrowByTruthiness(type, true), 'never')) return freshLiteralType(true);
-        return booleanType;
+        return this.negationType(this.c.conditions.condition(argument).type);
       }
       case 'typeof': {
         this.c.expressions.check(argument);
@@ -78,6 +73,13 @@ export class OperatorChecker {
         return anyType;
       }
     }
+  }
+
+  negationType(operand: Type): Type {
+    if (isAnyLike(operand) || isIntrinsic(operand, 'never')) return booleanType;
+    if (isIntrinsic(this.c.flow.narrowByTruthiness(operand, false), 'never')) return freshLiteralType(false);
+    if (isIntrinsic(this.c.flow.narrowByTruthiness(operand, true), 'never')) return freshLiteralType(true);
+    return booleanType;
   }
 
   /** `-x`, `+x`, or `~x`, which convert their operand to a number, or keep a bigint for `-` and `~`. */
