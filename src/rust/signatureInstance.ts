@@ -14,7 +14,7 @@ import {
   type RVar,
   type Subst,
 } from './regions';
-import { childTypes, type FnDef, shallow, type Type, type TypeParam } from './types';
+import { childTypes, type FnDef, shallow, type TraitRef, type Type, type TypeParam } from './types';
 
 /** How a relation makes regions and relates them. */
 interface Regions {
@@ -180,6 +180,23 @@ export class SignatureInstance {
     return true;
   }
 
+  /**
+   * Relates a bound's type arguments to the bounded parameter: `B: FromIterator<T>` builds a `B` of `T`s, and
+   * `A: ExtendInto<T>` the other way round makes `T`s of `A`s.
+   */
+  private relateBoundArgs(bound: TraitRef, layout: Layout): void {
+    const flowsOut = bound.trait.builtin === 'ExtendInto';
+    for (const arg of bound.args) {
+      const argRegions = this.declaredRegions(arg);
+      for (const region of regionsOf(layout)) {
+        for (const argRegion of argRegions) {
+          if (flowsOut) this.outlives(region, argRegion);
+          else this.outlives(argRegion, region);
+        }
+      }
+    }
+  }
+
   /** Relates what a closure parameter is called with and returns: as its own bound says when it has one. */
   private relateClosureBound(
     sig: { params: Type[]; ret: Type },
@@ -198,7 +215,6 @@ export class SignatureInstance {
    * Relates the type parameters as their bounds say: `B: FromIterator<T>` builds a `B` of `T`s, and a closure
    * parameter `F: FnMut(T) -> B` makes `B`s of `T`s as its summary says.
    */
-  // code-gauge-allow functionCognitiveComplexity 26 -- One case per kind of bound.
   relateBounds(applyClosure: (callee: Layout, args: Layout[], result: Layout, higherRanked: boolean[]) => void): void {
     const { fn } = this;
     for (const param of fn.params) {
@@ -213,9 +229,7 @@ export class SignatureInstance {
           this.relateClosureBound(bound.fnSig, this.typeArgs[fn.params.indexOf(param)], layout, applyClosure);
           continue;
         }
-        for (const arg of bound.args) {
-          for (const a of this.declaredRegions(arg)) for (const b of regionsOf(layout)) this.outlives(a, b);
-        }
+        this.relateBoundArgs(bound, layout);
       }
     }
   }

@@ -8454,3 +8454,16 @@ test('a tree of calls whose bodies are only calls stops at the run limits', () =
   const program = rustMain('    println!("{}", f20(1));', ['fn f0(t: i32) -> i32 { t }', ...levels].join('\n'));
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'limitExceeded' });
 });
+
+test('a reference that extend adds to a collection keeps its owner borrowed while the collection is used', () => {
+  const program = rustMain(`
+    let s = String::from("hello");
+    let mut v: Vec<&String> = Vec::new();
+    v.extend([&s]);
+    drop(s);
+    println!("{:?}", v);`);
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 5, message: 's は 5 行目で借りられていて、その参照がまだ使われるので、ムーブできません。' }],
+  });
+});
