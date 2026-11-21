@@ -294,8 +294,7 @@ export class ExpressionChecker {
   }
 
   /** Checks the expression of a computed property name, whose type must be a string, number, symbol, or `any`. */
-  checkComputedPropertyName(name: TreeNode): Type {
-    const type = this.check(named(name)[0] ?? name);
+  checkComputedPropertyName(name: TreeNode, type = this.check(named(name)[0] ?? name)): Type {
     if (!isAnyLike(type) && !this.c.relations.isAssignable(type, unionOf([stringType, numberType, symbolType])))
       this.c.error(
         name,
@@ -706,7 +705,7 @@ export class ExpressionChecker {
         const parameter = declaration.childForFieldName('parameter');
         const type = annotation ?? unknownType;
         if (parameter && parameter.type !== 'identifier')
-          return this.c.silently(() => this.c.patterns.patternType(parameter, type, symbol.name));
+          return this.c.silently(() => this.c.patterns.patternType(parameter, type, symbol));
         return type;
       }
       case 'parameter': {
@@ -714,9 +713,7 @@ export class ExpressionChecker {
         const annotation = this.c.typeNodes.annotationType(declaration.childForFieldName('type'));
         if (annotation) {
           if (pattern.type === 'identifier' || pattern.type === 'rest_pattern') return annotation;
-          return this.c.silently(() =>
-            this.c.patterns.patternType(pattern, annotation, symbol.name, { annotated: true })
-          );
+          return this.c.silently(() => this.c.patterns.patternType(pattern, annotation, symbol, { annotated: true }));
         }
         const value = declaration.childForFieldName('value');
         if (value) return this.widenedTypeOfInitializer(value);

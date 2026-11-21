@@ -375,7 +375,7 @@ export class StatementChecker {
     const source =
       annotation ??
       (value ? this.c.expressions.check(value, this.c.patterns.impliedBindingType(nameNode, isConst)) : anyType);
-    const type = this.c.patterns.patternType(nameNode, source, symbol.name, { isConst, annotated: !!annotation });
+    const type = this.c.patterns.patternType(nameNode, source, symbol, { isConst, annotated: !!annotation });
     return this.c.literals.widenDeclared(type, isConst);
   }
 
@@ -388,7 +388,7 @@ export class StatementChecker {
     const rightType = this.c.expressions.check(right);
     const elementType = isOf ? this.iteratedLoopType(right, rightType, false) : stringType;
     if (left.type === 'identifier') return elementType;
-    return this.c.patterns.patternType(left, elementType, symbol.name, {
+    return this.c.patterns.patternType(left, elementType, symbol, {
       isConst,
       literalSource: isOf ? right : undefined,
     });

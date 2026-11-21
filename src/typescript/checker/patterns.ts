@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 407 -- Binding declarations and assignments share property and rest type resolution.
 import assert from 'node:assert/strict';
 
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
@@ -10,9 +11,10 @@ import {
   padParameterInitializer,
 } from './bindingPatternTypes';
 import type { Checker } from './checker';
+import { isGenericObjectOrIndexType } from './genericTypes';
 import { isDefinitelyFalsy, isSpreadableProperty, spreadCopy } from './literals';
 import type { Sym } from './scopes';
-import { arrayPatternElements, isImmediatelyInvoked, named, numberValue, propertyNameText } from './syntax';
+import { arrayPatternElements, isImmediatelyInvoked, isWithin, named, numberValue, propertyNameText } from './syntax';
 import { tupleElementReadType, tupleSliceReadType } from './tupleIndexes';
 import {
   anonymousObject,
@@ -40,6 +42,7 @@ export { defaultedTarget } from './bindingPatternTypes';
 
 interface BindingOptions {
   annotated?: boolean;
+  binding?: TreeNode;
   isConst?: boolean;
   literalSource?: TreeNode;
   parameter?: boolean;
@@ -55,17 +58,18 @@ export class BindingPatterns {
   private readonly inferredDefaults = new Map<number, TreeNode>();
   constructor(private readonly c: Checker) {}
 
-  /** The type a binding pattern gives the name `name` when it destructures a value of `type`. */
-  patternType(pattern: TreeNode, type: Type, name: string, options: BindingOptions = {}): Type {
+  patternType(pattern: TreeNode, type: Type, symbol: Sym, options: BindingOptions = {}): Type {
+    const binding = symbol.valueEntries[0]?.name;
+    if (!binding || !isWithin(binding, pattern)) return anyType;
     return this.c.flow.probe(() => {
       let result: Type = anyType;
       this.bindPattern(
         pattern,
         type,
-        (identifier, identifierType) => {
-          if (identifier.text === name) result = identifierType;
+        (_identifier, identifierType) => {
+          result = identifierType;
         },
-        options
+        { ...options, binding }
       );
       return result;
     });
@@ -239,8 +243,44 @@ export class BindingPatterns {
 
   private bindObjectPattern(pattern: TreeNode, type: Type, bind: Bind, options: BindingOptions, assigned?: Type): void {
     if (isEmptyPattern(pattern)) this.checkEmptyObjectSource(pattern, type);
+    const elements = named(pattern);
+    const { binding } = options;
+    if (!binding) return this.bindObjectElements(elements, type, bind, options, assigned);
+    const index = elements.findIndex((element) => containsBinding(element, binding));
+    const element = elements[index];
+    if (!element) return;
+    if (element.type !== 'rest_pattern') return this.bindObjectElements([element], type, bind, options, assigned);
+    const omitted = elements
+      .slice(0, index)
+      .map((part) => this.omittedObjectKey(part))
+      .filter((key) => key !== undefined);
+    bind(binding, this.declaredRestObject(binding, type, omitted));
+  }
+
+  private omittedObjectKey(element: TreeNode): Type | undefined {
+    switch (element.type) {
+      case 'shorthand_property_identifier_pattern':
+      case 'object_assignment_pattern': {
+        return literalType((element.childForFieldName('left') ?? element).text);
+      }
+      case 'pair_pattern': {
+        return this.patternKey(element.childForFieldName('key') as TreeNode).type;
+      }
+      default: {
+        return undefined;
+      }
+    }
+  }
+
+  private bindObjectElements(
+    elements: TreeNode[],
+    type: Type,
+    bind: Bind,
+    options: BindingOptions,
+    assigned?: Type
+  ): void {
     const used: Type[] = [];
-    for (const element of named(pattern)) {
+    for (const element of elements) {
       switch (element.type) {
         case 'shorthand_property_identifier_pattern': {
           used.push(literalType(element.text));
@@ -261,15 +301,15 @@ export class BindingPatterns {
         case 'pair_pattern': {
           const key = element.childForFieldName('key') as TreeNode;
           const value = element.childForFieldName('value') as TreeNode;
-          const selected = this.destructuredKey(key, type, defaultedTarget(value) !== undefined);
+          const property = this.destructuredKey(key, type, defaultedTarget(value) !== undefined);
           this.bindPattern(
             value,
-            selected.type,
+            property.type,
             bind,
             options,
-            this.selectedFlowProperty(assigned, type, selected.keyType, defaultedTarget(value) !== undefined)
+            this.selectedFlowProperty(assigned, type, property.keyType, defaultedTarget(value) !== undefined)
           );
-          used.push(selected.keyType);
+          used.push(property.keyType);
           break;
         }
         case 'rest_pattern': {
@@ -310,11 +350,17 @@ export class BindingPatterns {
   ): { type: Type; keyType: Type; names?: string[] } {
     const selection = this.patternKey(key, computedType);
     this.selectedKeys.set(key.id, selection.names);
-    const namedTypes = selection.names?.map((name) => this.destructuredProperty(key, objectType, name, allowMissing));
-    const type =
-      namedTypes && !this.c.relations.isGeneric(selection.type)
-        ? unionOf(namedTypes, true)
-        : this.c.members.indexedType(key, key, selection.node, objectType, selection.type);
+    let type: Type;
+    if (isGenericObjectOrIndexType(selection.type)) {
+      type = this.c.typeOperators.indexedAccess(objectType, selection.type);
+    } else if (selection.names) {
+      type = unionOf(
+        selection.names.map((name) => this.destructuredProperty(key, objectType, name, allowMissing)),
+        true
+      );
+    } else {
+      type = this.c.members.indexedType(key, key, selection.node, objectType, selection.type);
+    }
     return { type, keyType: selection.type, names: selection.names };
   }
 
@@ -323,8 +369,7 @@ export class BindingPatterns {
   }
 
   capturePropertyNames(key: TreeNode): string[] | undefined {
-    const selection = this.capturePropertyKey(key);
-    return selection.names;
+    return this.capturePropertyKey(key).names;
   }
 
   capturePropertyKey(key: TreeNode): { type: Type; names?: string[] } {
@@ -343,7 +388,7 @@ export class BindingPatterns {
       };
     }
     const node = named(key)[0];
-    const type = computedType ?? this.c.expressions.check(node);
+    const type = this.c.expressions.checkComputedPropertyName(key, computedType);
     const constraint = this.c.baseConstraint(type);
     const members = constraint.kind === 'union' ? constraint.types : [constraint];
     const names: string[] = [];
@@ -479,6 +524,7 @@ export class BindingPatterns {
   private bindArrayPattern(pattern: TreeNode, type: Type, bind: Bind, options: BindingOptions, assigned?: Type): void {
     if (isEmptyPattern(pattern)) this.iteratedType(pattern, type);
     for (const { element, index } of arrayPatternElements(pattern)) {
+      if (!containsBinding(element, options.binding)) continue;
       if (element.type === 'rest_pattern') {
         const target = named(element)[0];
         if (target) this.bindPattern(target, this.restOfIterable(pattern, type, index, true), bind, options);
@@ -590,6 +636,10 @@ export class BindingPatterns {
     const bound = this.c.apparentType(type);
     return bound.kind === 'union' || (bound.kind === 'object' && this.c.isArrayOrTuple(bound)) ? bound : undefined;
   }
+}
+
+function containsBinding(pattern: TreeNode, binding: TreeNode | undefined): boolean {
+  return !binding || (pattern.startIndex <= binding.startIndex && binding.endIndex <= pattern.endIndex);
 }
 
 function isTuple(type: Type): type is ObjectType {
