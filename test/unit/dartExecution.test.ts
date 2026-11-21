@@ -1767,6 +1767,25 @@ void main() { f([(int x) => x]); g({'a': (int x) {}}); h({(int x) {}}); }`;
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'int\nint\nint\n' });
 });
 
+test('Dart spread maps keep their turtles while the target hashes keys', () => {
+  const program = `final scout = Turtle(1, 0);
+class Key {
+  final int n;
+  Key(this.n);
+  int get hashCode { scout.canMoveForward(); return n; }
+  bool operator ==(Object other) => other is Key && n == other.n;
+}
+Map<Key, Turtle> make() => {Key(1): Turtle(2, 1), Key(2): Turtle(1, 1)};
+void main() {
+  var m = <Key, Turtle>{Key(0): Turtle(3, 0), ...make()};
+  print(m.length);
+  print(scout.canMoveForward());
+}`;
+  const result = executeProgram('dart', program);
+  expect(result).toMatchObject({ kind: 'executed', stdout: '3\nfalse\n' });
+  expect(result.kind === 'executed' && result.finalTurtles).toHaveLength(4);
+});
+
 test('equality checks covariant parameters before handling null', () => {
   const declaration = 'class C { bool operator ==(covariant C other) => true; }';
   const program = `${declaration}

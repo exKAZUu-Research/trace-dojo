@@ -807,8 +807,10 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     return (frame, add) => {
       const map = run(frame);
       if (nullAware && map === undefined) return;
-      // The VM adds a spread map by the literal's `addAll`.
-      frame.runtime.links.addAllToMap(frame.runtime, add.target as DartObject, map);
+      // The VM adds a spread map by the literal's `addAll`, whose hashing may run learner code while the map is unnamed.
+      frame.runtime.withCallRoots(map, NO_ARGUMENTS, () =>
+        frame.runtime.links.addAllToMap(frame.runtime, add.target as DartObject, map)
+      );
     };
   }
 
